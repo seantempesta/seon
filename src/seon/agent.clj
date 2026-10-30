@@ -872,16 +872,20 @@
   a pidfd on Linux), the fact the fork server reaps by, so a process the child forked that holds
   the write end cannot keep the run waiting. Parks in alts! over the exit and r's readiness (a
   fiber's park). After the exit, what is left in the pipe is read: a read that found nothing there
-  (its wait called) with the pipe still open means it is held, and a read that ended on part of a
-  line goes on. Each whole line is given to seen as it is read (the tests as they start,
-  run-tests-forked). Answers {:line :held?}."
-  {:malli/schema [:function [:=> [:cat :seon.lib/fd pos-int?] [:map [:line [:maybe :string]] [:held? :boolean]]]
-                  [:=> [:cat :seon.lib/fd pos-int? :seon.host/fn] [:map [:line [:maybe :string]] [:held? :boolean]]]]}
+  (its wait called) reaps the child first (the exit event can come before the kernel has closed the
+  dying child's fds: scale read 1-4 of 100 agents' pipes as held), and a read after the reap that
+  still finds the pipe open means another process holds it; a read that ended on part of a line goes
+  on. Each whole line is given to seen as it is read (the tests as they start, run-tests-forked). The
+  child is reaped once, here. Answers {:line :held? :status}, :status its exit status (seon.lib/wait-status)."
+  {:malli/schema [:function [:=> [:cat :seon.lib/fd pos-int?] [:map [:line [:maybe :string]] [:held? :boolean] [:status :seon.lib/exit-status]]]
+                  [:=> [:cat :seon.lib/fd pos-int? :seon.host/fn] [:map [:line [:maybe :string]] [:held? :boolean] [:status :seon.lib/exit-status]]]]}
   ([r pid] (read-to-exit r pid (fn [_] nil)))
   ([r pid seen]
   (let [exit (poller/exit-chan pid)
         ready (volatile! nil)
         exited (volatile! false) waited (volatile! false)
+        status (volatile! nil)
+        reap! (fn [] (or @status (vreset! status (lib/wait-status pid))))
         ;; the readiness wait stays pending until r is read, so a wait the exit ended leaves none behind
         wait (fn [] (vreset! waited true)
                (when-not @exited
@@ -892,12 +896,14 @@
     (loop [line nil]
       (vreset! waited false)
       (let [ls (rd)]
-        (cond (= ls :eof) {:line line :held? false}
+        (cond (= ls :eof) {:line line :held? false :status (reap!)}
               (seq ls) (do (run! seen ls) (recur (peek ls)))
               ;; nothing there yet, or part of a line: read again
               (or (not @exited) (not @waited)) (recur line)
-              ;; exited, and a read found nothing there: the pipe is still open, held
-              :else {:line line :held? true}))))))
+              ;; exited, and a read found nothing there: reaped, every fd the child held is closed, so read again
+              (nil? @status) (do (reap!) (recur line))
+              ;; and still nothing there after the reap: another process holds the pipe
+              :else {:line line :held? true :status @status}))))))
 
 (defn run-selection
   "What a test-plan p runs when a request names namespaces (names; none: every test it selects), as
@@ -963,7 +969,7 @@
                 (lib/c-close w) (swap! fds disj w)
                 (forked pid)
                 (let [read (read-to-exit r pid #(when-let [t (:start (swap! lines take-line %))] (say {:op :testing :test t})))
-                      st (lib/wait-status pid)]
+                      st (:status read)]
                   (lib/c-close r) (swap! fds disj r)
                   (fx/remove-tree! (fx/run-dir pid))
                   (if (contract/error? read)
@@ -1308,6 +1314,8 @@
   (when (or (not= commit (d/commit-id branch)) (not= t (:max-tx image)))
     {:commit commit :t t :branch-commit (d/commit-id branch) :image-t (:max-tx image)}))
 
+(declare begin-run-tx!)
+
 (defn begin-run!
   "Run run of task recorded as this process's session's on its branch, as root records it on main:
   the conversation finds the messages its runs took by it (seon.context/records), and @ctx holds
@@ -1320,10 +1328,22 @@
   declares it first (seon.task/create-tx). A run the branch holds for another agent (one killed
   before main recorded the run, so a restarted root starts the same run again) is this agent's:
   its record names this agent, or the run is no session's and its turns draw no status (the
-  resume check capped at 40 turns so)."
+  resume check capped at 40 turns so). The agent's first run on its branch (its entity there with no task yet) is
+  where the agent is made: it is written with what every agent cites (seon.task/agent-cites-tx), on its branch, so
+  its record holds them and its own cite! and uncite! change them, and a merge of main never brings one back."
   {:malli/schema [:=> [:cat :seon.task/id :seon.run/id] :any]}
   [task run]
   (when-not (= (:key @state) (some-> (d/entity (db) [:seon.run/id run]) :seon.run/agent :seon.agent/key))
+    (let [k (:key @state) made? (nil? (some->> (pdb/eid (db) :seon.agent/key k) (d/entity (db)) :seon.agent/task))]
+      (begin-run-tx! task run)
+      (when made? (transact! (task/agent-cites-tx (db) [:seon.agent/key k] k))))))
+
+(defn- begin-run-tx!
+  "Run run of task written on this agent's branch (begin-run!'s write): the task as main declares it when the
+  branch lacks it, the task running, the run with the plan it began with, naming this agent and its task."
+  {:malli/schema [:=> [:cat :seon.task/id :seon.run/id] :any]}
+  [task run]
+  (do
     (when-not (d/entity (db) [:seon.task/id task])
       (let [t (task/task (heard-main) task)]
         (transact! (task/create-tx (db) [(-> (select-keys t [:seon.task/ns :seon.task/name :seon.task/plan :seon.task/instructions :seon.task/proofs

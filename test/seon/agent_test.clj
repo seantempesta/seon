@@ -421,9 +421,7 @@
                                                          :child (fn [] (let [rd (sock/line-reader gr)] (loop [] (when-not (= :eof (rd)) (recur)))))})
                                              (sock/write-line! w result))})]
                 (lib/c-close w) (lib/c-close gr)
-                (try (let [res (agent/read-to-exit r pid)
-                           st (lib/wait-status pid)]
-                       (assoc res :status st))
+                (try (agent/read-to-exit r pid)
                      (finally (lib/c-close r) (lib/c-close gw)))))]
     (let [held (run false)]
       (is (= {:line result :held? true} (dissoc held :status)) "the child's exit ends the read though a process it forked holds the pipe")
@@ -454,7 +452,7 @@
                        sent (promise)
                        res (agent/read-to-exit r pid #(when (= "1" %)
                                                         (clojure.core.async/go (deliver sent (sock/write-line! gw "go")))))]
-                   (lib/c-exit (if (and (= {:line "2" :held? false} res) (= true @sent) (= {:exit 0} (lib/wait-status pid))) 0 3))))
+                   (lib/c-exit (if (and (= {:line "2" :held? false} (dissoc res :status)) (= true @sent) (= {:exit 0} (:status res))) 0 3))))
         pid (lib/fork! {:refused (fn [n] {:refused n}) :parent identity
                         :child (fn [] (jolt.host/main-carrier-run! reader))})]
     (is (= {:exit 0} (lib/wait-status pid))
@@ -1766,6 +1764,18 @@
                     [(enc {:seon.test/started "#'app.t/a"}) (enc {:seon.test/ended "#'app.t/a" :reports [] :heap 1200})
                      (enc {:seon.test/started "#'app.t/b"}) (enc {:seon.test/ended "#'app.t/b" :reports [] :heap 900000})])]
     (is (= {'app.t/a 1200 'app.t/b 900000} (:heap acc)))))
+
+;; docs/references.md#an-entity-cites: an agent is made citing what every agent cites (its own cite entities, written when
+;; root makes it), and changes its own at its REPL; its page draws each as a task's cite is drawn
+(deftest an-agent-cites-what-it-reads-beside-its-task
+  (let [[before added gone] (in-agent ["(mapv :cites (my.agent/uncite! \"docs/none.md\"))"
+                                       "(mapv (juxt :cites :depth) (my.agent/cite! \"docs/agent.md?summary#the-agent\"))"
+                                       "(mapv :cites (my.agent/uncite! \"docs/testing.md\"))"])]
+    (is (= ["docs/testing.md#testing" "docs/references.md#an-entity-cites"] (:value before))
+        (str "made with every agent's, a page whole as its top section: " (pr-str before)))
+    (is (= [["docs/testing.md#testing" :doc] ["docs/references.md#an-entity-cites" :doc] ["docs/agent.md#the-agent" :summary]] (:value added)) (pr-str added))
+    (is (= ["docs/references.md#an-entity-cites" "docs/agent.md#the-agent"] (:value gone))
+        (str "a default it uncites is gone from its own: " (pr-str gone)))))
 
 ;; See docs/merging.md#main-moved-is-said-at-every-eval
 (deftest main-moved-is-said-at-every-eval

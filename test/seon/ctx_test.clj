@@ -76,11 +76,8 @@
   ([n pattern]
   (let [db (:db-after (d/with (ts/test-db) (into [(cond-> {:seon.agent/key k :seon.agent/id :a1 :seon.agent/task {:seon.task/id "lab/ctx"}}
                                                      pattern (assoc :seon.ctx/pattern pattern))
-                                                   {:seon.task/id "lab/ctx" :seon.task/ns 'app.x :seon.task/name "ctx" :seon.task/plan "Make app.x/f0 pass."
+                                                   {:db/id "lab/ctx" :seon.task/id "lab/ctx" :seon.task/ns 'app.x :seon.task/name "ctx" :seon.task/plan "Make app.x/f0 pass."
                                                     :seon.task/kind :work :seon.task/proofs #{'app.x-test/t0}
-                                                    :seon.task/references #{'app.x/f0 'app.x/f1} :seon.task/sections #{"docs/x.md#the-x"}
-                                                    ;; the citations its plan's write derives (seon.task/references-of): the page draws one part each
-                                                    :seon.task/citations (vec (seon.ref/cited (:seon.ref/citations (seon.ref/parse nil "Make `app.x/f0` pass, then `app.x/f1`; see [the x](docs/x.md#the-x)."))))
                                                     :seon.task/execution :running :seon.task/branch :main/lab-ctx}
                                                    ;; app.x is the program's (a file under src/), so the references its plan's text
                                                    ;; derives are the ones written here (seon.program/program-names)
@@ -88,9 +85,12 @@
                                                    {:db/id "f0" :form/id "app.x/f0-1" :form/src "(defn f0 [x] x)"} {:var/name 'app.x/f0 :var/form "f0"}
                                                    {:form/id "app.x/c-1" :form/src "(defn c [] (f0 1))" :form/refs #{'app.x/f0}}
                                                    {:seon.section/address "docs/x.md#the-x" :seon.section/heading "The x" :seon.section/lead "What x does." :seon.section/text "What x does."}
-                                                   {:db/id "t0" :form/id "app.x-test/t0-1" :form/src "(deftest t0 (is (= 1 (f0 1))))" :form/refs #{'app.x/f0 'clojure.test/is}}
-                                                   {:var/name 'app.x-test/t0 :var/kind :test :var/form "t0"}]
-                                                  (run-tx "lab/ctx#1" 0))))]
+                                                   {:db/id "t0" :form/id "app.x-test/t0-1" :form/src "(deftest t0 (is (= 1 (f0 1))))" :form/refs #{'app.x/f0 'clojure.test/is} :form/defines ["t0v"]}
+                                                   {:db/id "t0v" :var/name 'app.x-test/t0 :var/kind :test :var/form "t0"}]
+                                                  (concat
+                                                   ;; what its plan cites, as the task writer writes it (seon.task/cites-tx): the page draws one part each
+                                                   (task/cites-tx (ts/test-db) "lab/ctx" "lab/ctx" (seon.ref/cited (:seon.ref/citations (seon.ref/parse nil "Make `app.x/f0` pass, then `app.x/f1`; see [the x](docs/x.md#the-x)."))))
+                                                   (run-tx "lab/ctx#1" 0)))))]
     (reduce (fn [db part]
               (:db-after (d/with db (vec (mapcat (fn [i] (cond-> (eval-tx i)
                                                             (zero? (mod i 3)) (conj {:seon.turn/id (str "lab/ctx#1/" i) :seon.turn/run [:seon.run/id "lab/ctx#1"] :seon.turn/agent [:seon.agent/key k] :seon.turn/n i})
@@ -143,11 +143,15 @@
       17 (if (d/entity db [:var/name 'app.x/f1])
            [[:db/retractEntity [:var/name 'app.x/f1]]]
            [{:db/id "f" :form/id (str "app.x/f1-" i) :form/src "(defn f1 [])"} {:var/name 'app.x/f1 :var/form "f"}])
-      18 [[(if (.nextBoolean r) :db/add :db/retract) [:seon.task/id "lab/ctx"] :seon.task/references (symbol "app.x" (str "f" (.nextInt r 3)))]]
+      18 (let [n (symbol "app.x" (str "f" (.nextInt r 3))) cid (str "lab/ctx " n)]
+           (if (d/entity db [:seon.cite/id cid])
+             [[:db/retractEntity [:seon.cite/id cid]]]
+             [{:seon.cite/id cid :seon.cite/of [:seon.task/id "lab/ctx"] :seon.cite/name n :seon.cite/depth :doc :seon.cite/order (+ 10 i)}]))
       ;; a cited section's text edited, or the section another task cites written
       22 (if (.nextBoolean r)
            [[:db/add [:seon.section/address "docs/x.md#the-x"] :seon.section/text (str "What x does, " i ".")]]
-           [{:seon.section/address (str "docs/y.md#y" i) :seon.section/text "Y."} [:db/add [:seon.task/id "lab/ctx"] :seon.task/sections (str "docs/y.md#y" i)]])
+           [{:seon.section/address (str "docs/y.md#y" i) :seon.section/heading "Y" :seon.section/text "Y."}
+            {:seon.cite/id (str "lab/ctx docs/y.md#y" i) :seon.cite/of [:seon.task/id "lab/ctx"] :seon.cite/address (str "docs/y.md#y" i) :seon.cite/depth :doc :seon.cite/order (+ 10 i)}])
       ;; the agent edits its pattern: a narrower window of its evals, or its schema's again
       19 [[:db/add [:seon.agent/key k] :seon.ctx/pattern
            (if (.nextBoolean r)
@@ -547,7 +551,7 @@
   ;; 113 KB, a plan edit 10 and 86 KB), and each names the one path it changed
   (let [changed (fn [[c db tx b]] [db (set (map second (ctx/changes c (ctx/patch c db tx b))))])
         task #(vector :runs (id % [:seon.run/id "lab/ctx#1"]) :task)
-        f0 #(into (task %) [:cited (id % [:var/name 'app.x/f0])])]
+        f0 #(into (task %) [:cites (id % [:seon.cite/id "lab/ctx app.x/f0"]) :var])]
     (let [[db ps] (changed (cited-redefined 10))] (is (= #{(conj (f0 db) :form)} ps) "a redefinition: the cited var's form"))
     (let [[db ps] (changed (new-caller 10))] (is (= #{(conj (f0 db) :callers (id db [:form/id "app.x/c-2"]))} ps) "a new caller: that caller"))
     (let [[db ps] (changed (plan-edited 10))] (is (= #{(conj (task db) :seon.task/plan)} ps) "a plan edit: the plan")))
@@ -559,8 +563,8 @@
   (cost/proof
     {:of 'seon.ctx/patch :input 'seon.ctx-test/new-caller
      :n "evals in the session's record"
-     :work "the form's :form/refs datom touches the var's :callers watch: its callers read and ordered by when each was written (a form's id is its content's, not in time order), the newest five kept, a new one pulled whole, the path copied up"
-     :growth :constant :fixed {:calls 24 :bytes 135000} :sizes [20 60 180]})
+     :work "the form's :form/refs datom touches the var's :callers watch: its callers read and ordered by when each was written (a form's id is its content's, not in time order), the newest five kept, a new one pulled whole with the vars it defines (the :defines join: the callers' tests and defines are joined by the pull, where the cited part's draw used to query them; 24 calls before it, 31 since), the path copied up"
+     :growth :constant :fixed {:calls 31 :bytes 135000} :sizes [20 60 180]})
   (cost/proof
     {:of 'seon.ctx/patch :input 'seon.ctx-test/plan-edited
      :n "evals in the session's record"
@@ -576,10 +580,10 @@
   (cost/proof
     {:of 'seon.ctx/patch :input 'seon.ctx-test/callers-of
      :n "forms naming the cited var"
-     :work "the new form's :form/refs datom touches the var's :callers watch: every form naming the var read from :avet and sorted by its ref's transaction, the newest five kept, the new one pulled whole, the path copied up"
+     :work "the new form's :form/refs datom touches the var's :callers watch: every form naming the var read from :avet and sorted by its ref's transaction, the newest five kept, the new one pulled whole with the vars it defines (the :defines join: the callers' tests and defines are joined by the pull, where the cited part's draw used to query them; 27 calls before it, 35 since), the path copied up"
      :growth :linear
      :per-n {:bytes 8800 :ticks 2600}
-     :fixed {:calls 27 :bytes 500000 :ticks 100000}
+     :fixed {:calls 35 :bytes 500000 :ticks 100000}
      :sizes [100 300 1000 3000]}))
 
 (defn one-eval-diff
@@ -620,15 +624,15 @@
   ;; each cited section's text (D1-D3), and the page drew neither: the cited part showed the callers
   ;; alphabetically with no result, and a section only as an address. Each is drawn from ctx
   (let [db (d/db-with (seeded 3 nil) [;; a second test, and a caller that is no test
-                                  {:db/id "t1" :form/id "app.x-test/t1-1" :form/src "(deftest t1 (is (= 2 (f0 2))))" :form/refs #{'app.x/f0}}
-                                  {:var/name 'app.x-test/t1 :var/kind :test :var/form "t1"}
-                                  {:db/id "g" :form/id "app.x/g-1" :form/src "(defn g [] (f0 2))" :form/refs #{'app.x/f0}}
-                                  {:var/name 'app.x/g :var/form "g"}])
+                                  {:db/id "t1" :form/id "app.x-test/t1-1" :form/src "(deftest t1 (is (= 2 (f0 2))))" :form/refs #{'app.x/f0} :form/defines ["t1v"]}
+                                  {:db/id "t1v" :var/name 'app.x-test/t1 :var/kind :test :var/form "t1"}
+                                  {:db/id "g" :form/id "app.x/g-1" :form/src "(defn g [] (f0 2))" :form/refs #{'app.x/f0} :form/defines ["gv"]}
+                                  {:db/id "gv" :var/name 'app.x/g :var/kind :fn :var/form "g"}])
         page (try (reset! seon.agent/state {:db db :key k :branch :b}) (seon.repl/render-ctx-hiccup) (finally (end-agent!)))
         part (fn [suffix] (some (fn [[id h]] (when (str/ends-with? id suffix) h)) page))
         cited (part "app.x_2Ff0")
-        ;; the section is a part of its own, keyed by its page (a cited part per thing the plan cites)
-        section (pr-str (part "docs_2Fx.md"))]
+        ;; the section is a part of its own, keyed by its address (a part per thing the plan cites)
+        section (pr-str (part "docs_2Fx.md_23the-x"))]
     (is (some #(and (= '[app.x-test/t0 app.x-test/t1] (:tests %)) (= ['app.x/g] (:callers %))) (tree-seq coll? seq cited))
         (str "the cited var's tests, then its other callers: " (pr-str cited)))
     (is (str/includes? section "What x does.") "the cited section's lead, not only its address")
@@ -640,18 +644,18 @@
   ;; reaching it, one call of the printer (a cut names the cited call that makes the part whole again).
   ;; A form that is also another cited var's caller (f1's is f0's) shows its source in its own part, and
   ;; is among f0's callers, never blank (ctx holds an entity whole at its first path, {:db/id e} at the others)
-  (let [db (d/db-with (seeded 3 nil) [{:db/id "f1" :form/id "app.x/f1-1" :form/src "(defn f1 [] (f0 1))" :form/refs #{'app.x/f0}}
-                                  {:var/name 'app.x/f1 :var/form "f1"}])
+  (let [db (d/db-with (seeded 3 nil) [{:db/id "f1" :form/id "app.x/f1-1" :form/src "(defn f1 [] (f0 1))" :form/refs #{'app.x/f0} :form/defines ["f1v"]}
+                                  {:db/id "f1v" :var/name 'app.x/f1 :var/kind :fn :var/form "f1"}])
         page (try (reset! seon.agent/state {:db db :key k :branch :b}) (seon.repl/render-ctx-hiccup) (finally (end-agent!)))
         part (fn [id] (some (fn [[i h]] (when (str/ends-with? i id) h)) page))
-        ;; a cited part is one call of the printer: [#'seon.render/html opts value]
-        value (fn [h] (when (= #'seon.render/html (first h)) (nth h 2)))]
+        ;; a cite's part is what the model reads of it (seon.render.ui/cite-model): its value
+        value identity]
     (is (= "(defn f1 [] (f0 1))" (:seon.print/code (:source (value (part "app.x_2Ff1")))))
         (str "the source of a form ctx holds at another path (f1's form is f0's caller): " (pr-str (part "app.x_2Ff1"))))
     (is (= "(defn f0 [x] x)" (:seon.print/code (:source (value (part "app.x_2Ff0"))))) "the source, in the one call")
     (is (= '[app.x-test/t0] (:tests (value (part "app.x_2Ff0")))) "and the tests beside it")
     (is (some #{'app.x/f1} (:callers (value (part "app.x_2Ff0")))) "and its callers, f1 among them")
-    (is (= "app.x/f0" (last (:handle (second (part "app.x_2Ff0"))))) "the cut reads the rest through the cited part's form")
+    (is (= "(clojure.repl/source app.x/f0)" (:seon.print/code (:read (part "app.x_2Ff0")))) "and the form that reads it whole, which a cut of the rest still names")
     (is (not-any? #(= "ctx-keys" (first %)) page) "no part for keys the agent never added")))
 
 (deftest a-component-is-styled-by-its-renders-name
@@ -673,31 +677,25 @@
     (is (str/includes? (:html (some #(when (= task-id (:id %)) %) units)) (str "class=\"task-data " (first (str/split style #" "))))
         "the page's html has the name, then its var's classes")))
 
-(deftest a-cited-vars-tests-are-shown-past-its-callers-window
-  ;; build 3's self-review (D2): ctx holds a cited var's newest :seon.config.ctx/callers callers of any
-  ;; kind, so its tests went off the page once newer callers outnumbered the window. The tests are
-  ;; the cited render's own query (root's ruling (C)): three tests, then sixty newer callers
-  (let [db (reduce d/db-with (seeded 3 nil)
-                   [(vec (mapcat (fn [i] [{:db/id (str "t" i) :form/id (str "app.x-test/w" i "-1") :form/src (str "(deftest w" i " (is (f0 1)))") :form/refs #{'app.x/f0}}
-                                          {:var/name (symbol "app.x-test" (str "w" i)) :var/kind :test :var/form (str "t" i)}])
-                                 (range 3)))
-                    (vec (mapcat (fn [i] [{:db/id (str "c" i) :form/id (str "app.y/c" i "-1") :form/src (str "(defn c" i " [] (f0 1))") :form/refs #{'app.x/f0}}
-                                          {:var/name (symbol "app.y" (str "c" i)) :var/kind :fn :var/form (str "c" i)}])
-                                 (range 60)))])
-        c (ctx/build db (aid db) :b)
-        n (seon.config/value :seon.config.ctx/callers)
-        drawn (seon.render.ui/cited-of db (:tree c) 'app.x/f0)
-        tests (:tests drawn)]
-    (is (< n 61) "more newer callers than the window holds")
-    (is (every? (set tests) '[app.x-test/w0 app.x-test/w1 app.x-test/w2]) (str "every test, past the window: " (pr-str tests)))
-    (is (= n (count (:callers drawn))) "the other callers: ctx's window, the newest it holds")
-    (testing "more tests than the window: the newest, the rest left to (my.agent/callers)"
-      (let [db (d/db-with db (vec (mapcat (fn [i] [{:db/id (str "u" i) :form/id (str "app.x-test/u" i "-1") :form/src (str "(deftest u" i " (is (f0 1)))") :form/refs #{'app.x/f0}}
-                                                    {:var/name (symbol "app.x-test" (str "u" i)) :var/kind :test :var/form (str "u" i)}])
-                                          (range n))))
-            tests (:tests (seon.render.ui/cited-of db (:tree (ctx/build db (aid db) :b)) 'app.x/f0))]
-        (is (= n (count tests)))
-        (is (not-any? '#{app.x-test/w0 app.x-test/w1 app.x-test/w2} tests) "the older three past the window")))))
+(deftest a-cited-vars-tests-are-its-pulled-callers
+  ;; build 3's self-review (D2) and docs/references.md#an-entity-cites: a cited var's tests are the tests among the
+  ;; newest :seon.config.ctx/callers callers its cite pulled; past that window the part names the form that reads
+  ;; every test reaching it (newer callers of other kinds can push a test out: a cite's part reads no db)
+  (let [n (seon.config/value :seon.config.ctx/callers)
+        db (reduce d/db-with (seeded 3 nil)
+                   [(vec (mapcat (fn [i] [{:db/id (str "t" i) :form/id (str "app.x-test/w" i "-1") :form/src (str "(deftest w" i " (is (f0 1)))") :form/refs #{'app.x/f0} :form/defines [(str "tv" i)]}
+                                          {:db/id (str "tv" i) :var/name (symbol "app.x-test" (str "w" i)) :var/kind :test :var/form (str "t" i)}])
+                                 (range 3)))])
+        part #(let [page (try (reset! seon.agent/state {:db % :key k :branch :b}) (seon.repl/render-ctx-hiccup) (finally (end-agent!)))]
+                (some (fn [[i h]] (when (str/ends-with? i "app.x_2Ff0") h)) page))]
+    (is (every? (set (:tests (part db))) '[app.x-test/w0 app.x-test/w1 app.x-test/w2]) "each test among its callers")
+    (let [db (d/db-with db (vec (mapcat (fn [i] [{:db/id (str "c" i) :form/id (str "app.y/c" i "-1") :form/src (str "(defn c" i " [] (f0 1))") :form/refs #{'app.x/f0} :form/defines [(str "cv" i)]}
+                                                 {:db/id (str "cv" i) :var/name (symbol "app.y" (str "c" i)) :var/kind :fn :var/form (str "c" i)}])
+                                        (range (inc n)))))
+          p (part db)]
+      (is (= n (count (:callers p))) "the other callers: the window, the newest it holds")
+      (is (not-any? '#{app.x-test/w0 app.x-test/w1 app.x-test/w2} (:tests p)) "the older tests past the window")
+      (is (= '(my.agent/tests-reaching (quote app.x/f0)) (:reaching p)) "and the form that reads every test reaching it"))))
 
 (deftest an-agent-adds-a-datum-and-its-render
   ;; what an agent evaluates to add to its record and draw it (the owner, 2026-10-25: "they can
@@ -795,14 +793,14 @@
   ;; what each proof calls, by name (D5: its form's :form/refs)
   (let [db (seeded 10)
         t (get-in (:tree (ctx/build db (aid db) :b)) [:runs (id db [:seon.run/id "lab/ctx#1"]) :task])
-        f0 (get-in t [:cited (id db [:var/name 'app.x/f0])])]
-    (is (= ["What x does."] (names (:sections t) :seon.section/text)) "D3: the cited section's text, by its address")
+        f0 (get-in t [:cites (id db [:seon.cite/id "lab/ctx app.x/f0"]) :var])]
+    (is (= "What x does." (get-in t [:cites (id db [:seon.cite/id "lab/ctx docs/x.md#the-x"]) :section :seon.section/text])) "D3: the cited section's text, by its address")
     (is (= "(defn f0 [x] x)" (get-in f0 [:form :form/src])) "D2: the cited var's source")
     (is (= #{(id db [:form/id "app.x/c-1"]) (id db [:form/id "app.x-test/t0-1"])} (set (keys (:callers f0)))) "D1: its callers, the test among them")
-    (let [t0 (get-in f0 [:callers (id db [:form/id "app.x-test/t0-1"])])]
-      (is (= "(deftest t0 (is (= 1 (f0 1))))" (:form/src t0)) "D1: the test's source, held whole at its first path (a caller)")
-      (is (= {:db/id (:db/id t0)} (get-in t [:proved (id db [:var/name 'app.x-test/t0]) :form]))
-          "and {:db/id} under :proved, which reaches it later with the same pattern, so nothing is lost")
+    (let [t0 (get-in t [:proved (id db [:var/name 'app.x-test/t0]) :form])]
+      (is (= "(deftest t0 (is (= 1 (f0 1))))" (:form/src t0)) "D1: the test's source, held whole at its first path (the task's proofs)")
+      (is (= {:db/id (:db/id t0)} (get-in f0 [:callers (id db [:form/id "app.x-test/t0-1"])]))
+          "and {:db/id} among the var's callers, which reach it later (the page fills it from its first path)")
       (is (= #{'app.x/f0 'clojure.test/is} (:form/refs t0)) "D5: what the proof calls, each var by its name"))))
 
 (deftest an-agents-record-holds-its-proofs-status
@@ -827,27 +825,30 @@
   (let [db (seeded 10)
         t #(get-in (:tree %) [:runs (id db [:seon.run/id "lab/ctx#1"]) :task])
         c (ctx/build db (aid db) :b)]
-    (is (= #{'app.x/f0 'app.x/f1} (:seon.task/references (t c))) "the references, the author's symbols")
-    (is (= ['app.x/f0] (names (:cited (t c)) :var/name)) "app.x/f0 joined by name; app.x/f1, written by nobody yet, not")
-    (is (= "(defn f0 [x] x)" (get-in (t c) [:cited (id db [:var/name 'app.x/f0]) :form :form/src])) "the var whole, its form joined")
-    (is (some #{"app.x/c-1"} (names (get-in (t c) [:cited (id db [:var/name 'app.x/f0]) :callers]) :form/id)) "its caller: the form naming it, by the same name reversed")
-    (let [rep (d/with db [{:db/id "f" :form/id "app.x/f1-1" :form/src "(defn f1 [])"} {:var/name 'app.x/f1 :var/form "f"}])
-          c' (ctx/patch c (:db-after rep) (:tx-data rep) :b)]
-      (is (= ['app.x/f0 'app.x/f1] (sort-by str (names (:cited (t c')) :var/name))) "written, the var joins by its name")
-      (is (= c' (ctx/build (:db-after rep) (aid (:db-after rep)) :b)) "as a build holds it"))
+    (let [cite #(get-in (t %1) [:cites (id db [:seon.cite/id (str "lab/ctx " %2)])])]
+      (is (= ['app.x/f0 'app.x/f1] (sort-by str (keep :seon.cite/name (vals (:cites (t c)))))) "the cites' names, the author's symbols")
+      (is (= 'app.x/f0 (get-in (cite c 'app.x/f0) [:var :var/name])) "app.x/f0 joined by name")
+      (is (nil? (:var (cite c 'app.x/f1))) "app.x/f1, written by nobody yet, not")
+      (is (= "(defn f0 [x] x)" (get-in (cite c 'app.x/f0) [:var :form :form/src])) "the var whole, its form joined")
+      (is (some #{"app.x/c-1"} (names (get-in (cite c 'app.x/f0) [:var :callers]) :form/id)) "its caller: the form naming it, by the same name reversed")
+      (let [rep (d/with db [{:db/id "f" :form/id "app.x/f1-1" :form/src "(defn f1 [])"} {:var/name 'app.x/f1 :var/form "f"}])
+            c' (ctx/patch c (:db-after rep) (:tx-data rep) :b)]
+        (is (= 'app.x/f1 (get-in (cite c' 'app.x/f1) [:var :var/name])) "written, the var joins by its name")
+        (is (= c' (ctx/build (:db-after rep) (aid (:db-after rep)) :b)) "as a build holds it")))
     (let [db (reduce (fn [db i] (:db-after (d/with db [{:form/id (str "app.x/c" i) :form/src (str "(defn c" i " [] (f0 " i "))") :form/refs #{'app.x/f0}}])))
                      db (range 2 9))]
       (is (= #{"app.x/c8" "app.x/c7" "app.x/c6"}
              (set (names (get-in (:tree (ctx/build (:db-after (d/with db [[:db/add [:seon.agent/key k] :seon.ctx/pattern
                                                                              [(symbol "*") {[:seon.run/_agent :as :runs :limit 5 :reverse true]
                                                                                             [(symbol "*") {[:seon.run/task :as :task]
-                                                                                                           [(symbol "*") {[:seon.task/references :by :var/name :as :cited]
-                                                                                                                          [(symbol "*") {[:form/_refs :by :var/name :as :callers :limit 3 :reverse true] [(symbol "*")]}]}]}]}]]]))
+                                                                                                           [(symbol "*") {[:seon.cite/_of :as :cites]
+                                                                                                                          [(symbol "*") {[:seon.cite/name :by :var/name :as :var]
+                                                                                                                                         [(symbol "*") {[:form/_refs :by :var/name :as :callers :limit 3 :reverse true] [(symbol "*")]}]}]}]}]}]]]))
                                                    (aid db) :b))
-                                 [:runs (id db [:seon.run/id "lab/ctx#1"]) :task :cited (id db [:var/name 'app.x/f0]) :callers]) :form/id)))
+                                 [:runs (id db [:seon.run/id "lab/ctx#1"]) :task :cites (id db [:seon.cite/id "lab/ctx app.x/f0"]) :var :callers]) :form/id)))
           "a callers' window of three: the newest three by when each was written (a form's id is its content's)"))
     (let [refused (fn [p] (:seon.error/type (try (render/pattern p) (catch clojure.lang.ExceptionInfo e (ex-data e)))))]
-      (is (= :seon.ctx/invalid-pattern (refused '[* {[:seon.task/references :via :var/name] [*]}])) "an option neither pull's nor :by: refused, naming it")
+      (is (= :seon.ctx/invalid-pattern (refused '[* {[:seon.cite/name :via :var/name] [*]}])) "an option neither pull's nor :by: refused, naming it")
       (is (= :seon.ctx/invalid-pattern (refused '[* (:seon.agent/key :limit 3)])) "a clause that is no '*, attribute or join")
       (is (= :seon.ctx/invalid-pattern (refused '[:seon.eval/_agent])) "a reverse attribute outside a join")
       (is (= :seon.ctx/invalid-pattern (refused '[{[:seon.eval/_agent :limit 3] [*]}])) "a window with no :reverse (the oldest n)"))))
@@ -880,15 +881,14 @@
       (let [[_ db'] (step db #(swap! ctx/ctx update :evals dissoc (id db [:seon.eval/id "e3"])))]
         (is (nil? (d/entity db' [:seon.eval/id "e3"])))
         (is (some? (d/entity db' [:seon.eval/id "e4"])))))
-    (testing "a plan's references follow its text: what it cites written with it, by the one parser (seon.task/rederive-tx)"
+    (testing "a plan's cites follow its text: what it cites written with it, by the one parser (seon.task/rederive-tx)"
       (let [r1 (id db [:seon.run/id "lab/ctx#1"])
             plan "Make `app.x/f0` pass; see [the y](docs/x.md#the-y)."
             [[_ same] db'] (step db #(swap! ctx/ctx assoc-in [:runs r1 :task :seon.task/plan] plan))
             t (d/entity db' [:seon.task/id "lab/ctx"])]
         (is (= plan (:seon.task/plan t)))
-        (is (= #{"docs/x.md#the-y"} (set (:seon.task/sections t))) "the section it links now, and not the one before")
-        (is (= #{'app.x/f0} (set (:seon.task/references t))) "app.x/f0 and not app.x/f1, which it no longer cites")
-        (is (= (vec (seon.ref/cited (:seon.ref/citations (seon.ref/parse nil plan)))) (:seon.task/citations t)) "its citations, the new text's")
+        (is (= ['app.x/f0 "docs/x.md#the-y"] (mapv #(or (:seon.cite/name %) (:seon.cite/address %)) (task/cites-of db' (:db/id t))))
+            "its cites, the new text's: the section it links now and not the one before, app.x/f0 and not app.x/f1, which it no longer cites")
         (is same "the record after the swap! is the db's, the derived facts in it")))
     (testing "a member's attribute, and a new member, written under its parent by the unit's ref"
       (let [r1 (id db [:seon.run/id "lab/ctx#1"])
@@ -922,15 +922,15 @@
           (is same "the record is the db's")
           (is (= (:max-tx db) (:max-tx db')) "the branch is unchanged"))))
     (testing "a cited var's source is refused, naming its definition as the way to change it"
-      (let [r1 (id db [:seon.run/id "lab/ctx#1"]) f0 (id db [:var/name 'app.x/f0])
-            [[r same] db'] (step db #(swap! ctx/ctx assoc-in [:runs r1 :task :cited f0 :form :form/src] "(defn f0 [x] (inc x))"))]
+      (let [r1 (id db [:seon.run/id "lab/ctx#1"]) f0 (id db [:seon.cite/id "lab/ctx app.x/f0"])
+            [[r same] db'] (step db #(swap! ctx/ctx assoc-in [:runs r1 :task :cites f0 :var :form :form/src] "(defn f0 [x] (inc x))"))]
         (is (= :seon.ctx/invalid (:seon.error/type r)))
         (is (str/includes? (:why (first (:invalid r))) "(in-ns 'app.x) (defn f0 ...)") (pr-str r))
         (is same)
         (is (= (:max-tx db) (:max-tx db'))))
-      (let [r1 (id db [:seon.run/id "lab/ctx#1"]) f0 (id db [:var/name 'app.x/f0])
-            [[r] _] (step db #(swap! ctx/ctx update-in [:runs r1 :task :cited] dissoc f0))]
-        (is (= "a lookup's members follow :seon.task/references: change it" (:why (first (:invalid r))))
+      (let [r1 (id db [:seon.run/id "lab/ctx#1"]) f0 (id db [:seon.cite/id "lab/ctx app.x/f0"])
+            [[r] _] (step db #(swap! ctx/ctx update-in [:runs r1 :task :cites f0] dissoc :var))]
+        (is (= "a lookup's members follow :seon.cite/name: change it" (:why (first (:invalid r))))
             "no var changed in it (one gone): what the members follow, no definition named")))
     (testing "a swap! that changes nothing writes nothing, and the record stays the db's"
       (let [[[r same] db'] (step db #(swap! ctx/ctx update :runs dissoc "nope"))]
@@ -1000,9 +1000,11 @@
                 "identical?), one d/with, the datom applied to the agent's db, the patch of it (the task "
                 "rebuilt where it is held), the record installed, and one-swap itself; and, the plan being text, what it cites "
                 "derived in the same transaction (seon.agent/with-citations: a d/with and the one parser over the sentence, "
-                "61 calls, which my.task/update! paid before every writer did); measured 101 calls at 100, 300 and 1,000 evals")
+                "61 calls, which my.task/update! paid before every writer did); measured 101 calls at 100, 300 and 1,000 evals, "
+                "110 since what it cites is cite entities (seon.task/cites-tx: each cite upserted, a name asked whether it names a task, "
+                "and the task's cites read to retract the gone)")
      :growth :constant
-     :fixed {:calls 101}
+     :fixed {:calls 110}
      :sizes [100 300 1000 3000]})
   ;; no record left behind: an empty state builds none (as-agent!'s callers leave theirs too)
   (reset! seon.agent/state nil))

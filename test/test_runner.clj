@@ -483,7 +483,7 @@
   too). A task file that does not read throws its error: no tasks is no answer."
   [db dir]
   ;; the program store is keyed by the program's attributes alone (seon.test-store/program-schema-digest),
-  ;; so a kept tree's db may lack an attribute a task or a page holds (:seon.task/citations): the ones it
+  ;; so a kept tree's db may lack an attribute a task or a page holds (the cite entities, :seon.cite/id): the ones it
   ;; lacks are added to this value first, as seon.db/install-missing! adds them to a store a root opens
   (let [db (d/db-with db (vec (remove #(contains? (:schema db) (:db/ident %)) pdb/schema)))
         tx (task/load-tx db (my.root/task-files (str dir "/" (tasks-dir))))

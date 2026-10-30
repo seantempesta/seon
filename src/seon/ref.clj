@@ -340,12 +340,23 @@
       (when (and (parse-long from) (or (nil? to) (parse-long to)))
         (subs span 0 colon)))))
 
+(def ^:private depth-words
+  "The depth an address's query names (path?full#anchor), each word what it shows: the depths are
+  :summary, :doc and :code until their rename to :summary, :lead and :full. See
+  docs/references.md#an-entity-cites."
+  {"summary" :summary "lead" :doc "full" :code})
+
 (defn- based
-  "A path with an optional #anchor as a candidate."
-  {:malli/schema [:=> [:cat :string] [:map [:seon.ref/path :string] [:seon.ref/anchor {:optional true} :string]]]}
+  "A path with an optional ?depth and #anchor (path?depth#anchor, the URL's order) as a candidate: the query, one
+  of depth-words, the depth it asks, whatever its delimiter."
+  {:malli/schema [:=> [:cat :string] [:map [:seon.ref/path :string] [:seon.ref/anchor {:optional true} :string] [:seon.ref/depth {:optional true} :seon.ref/depth]]]}
   [s]
-  (let [h (str/index-of s "#")]
-    (cond-> {:seon.ref/path (if h (subs s 0 h) s)}
+  (let [h (str/index-of s "#")
+        before (if h (subs s 0 h) s)
+        q (str/index-of before "?")
+        depth (when q (depth-words (subs before (inc q))))]
+    (cond-> {:seon.ref/path (if q (subs before 0 q) before)}
+      depth (assoc :seon.ref/depth depth)
       (and h (< (inc h) (count s))) (assoc :seon.ref/anchor (subs s (inc h))))))
 
 (defn- namespace-name?
@@ -394,7 +405,7 @@
   only when it names a namespace, v1's rule), or nil: prose or code."
   {:malli/schema [:=> [:cat :string] [:maybe :map]]}
   [span]
-  (let [cut (reduce (fn [m s] (if-let [i (str/index-of span s)] (min m i) m)) (count span) ["/" "#" ":"])]
+  (let [cut (reduce (fn [m s] (if-let [i (str/index-of span s)] (min m i) m)) (count span) ["/" "#" ":" "?"])]
     (if (contains? @roots (subs span 0 cut))
       (when-not (or (str/index-of span " ") (str/index-of span "\t"))
         (if-let [cited (line-citation span)]
@@ -422,7 +433,7 @@
         (cond-> {:seon.ref/path doc-path} (< 1 (count dest)) (assoc :seon.ref/anchor (subs dest 1)))
         (cond-> {:seon.ref/problem-kind :anchor-missing} (< 1 (count dest)) (assoc :seon.ref/anchor (subs dest 1))))
       :else
-      (let [{p :seon.ref/path :as c} (based (subs dest 0 (or (str/index-of dest "?") (count dest))))
+      (let [{p :seon.ref/path :as c} (based dest)
             dir (when doc-path (some->> (str/last-index-of doc-path "/") (subs doc-path 0)))
             joined (if (and dir (not (str/starts-with? p "/"))) (str dir "/" p) p)
             parts (reduce (fn [acc s] (case s ("" ".") acc ".." (if (seq acc) (pop acc) acc) (conj acc s)))
@@ -452,9 +463,19 @@
                         word [(some-> (trim-word word) span-candidate (assoc :seon.ref/resolve-only true)) :summary]
                         (= 1 width) [(span-candidate code) :doc]
                         (<= 3 width) [(span-candidate code) :code])]
-    (some-> c (assoc :seon.ref/depth depth :seon.ref/line line))))
+    ;; an address's own ?depth wins over its delimiter's
+    (some-> c (assoc :seon.ref/depth (or (:seon.ref/depth c) depth) :seon.ref/line line))))
 
-(def ^:private strength {:summary 0 :doc 1 :code 2})
+(defn address-citation
+  "Address string s as a citation on no line: a path with an optional ?depth and #anchor (docs/testing.md?lead,
+  docs/flow.md?full#idioms), or a name, at the depth its query asks, else :doc (a link's). What
+  my.agent/cite! and :seon.config.agent/cites are written from. See docs/references.md#an-entity-cites."
+  {:malli/schema [:=> [:cat :string] [:maybe [:map [:seon.ref/name {:optional true} :seon.ref/name] [:seon.ref/path {:optional true} :seon.ref/path]
+                                               [:seon.ref/anchor {:optional true} :seon.ref/anchor] [:seon.ref/depth :seon.ref/depth]]]]}
+  [s]
+  (some-> (span-candidate s) (update :seon.ref/depth #(or % :doc)) (dissoc :seon.ref/resolve-only)))
+
+(def strength "Each depth's rank: a target cited at several is shown at the strongest." {:summary 0 :doc 1 :code 2})
 
 (defn cited
   "Citations once each, in first-mention order, each at the strongest depth any mention asks
@@ -636,6 +657,16 @@
 (def problem-messages
   "What each problem kind means and what the agent does about it (v1's seon.ref)."
   {:unresolved "This resolves to nothing on your branch; its operations read what does exist. What the task intends for it is its plan's to say. To mention a name that does not exist, as text and not a reference, wrap it in two backticks: ``ns/name`` or ``:ns/key``."})
+
+(defn page-top
+  "The entity of the page at path's own section (the one with no parent), or nil: what a citation of
+  the page whole is written as (seon.task/cites-tx). See docs/references.md#an-entity-cites."
+  {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe pos-int?]]}
+  [db path]
+  ;; the page's sections, one seek of :seon.section/address from its prefix (its addresses sort together)
+  (let [pre (str path "#")]
+    (some #(when (empty? (d/datoms db :eavt (:e %) :seon.section/parent)) (:e %))
+          (take-while #(and (= :seon.section/address (:a %)) (str/starts-with? (:v %) pre)) (d/seek-datoms db :avet :seon.section/address pre)))))
 
 (defn task?
   "Does sym name a task on db: is its ns/name a :seon.task/id (seon.task/task-id), and no

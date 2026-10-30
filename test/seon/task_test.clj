@@ -14,48 +14,74 @@
 
 (defn- decl [plan] {:seon.task/ns 'demo :seon.task/name "t" :seon.task/plan plan})
 
-(deftest the-writer-derives-a-tasks-references
-  (let [plan "Make `demo/f` pass; ``demo/later`` is only mentioned; `(demo/f 1)` is code."
-        [written] (task/create-tx (db-with-program) [(decl plan)])]
-    (is (= #{'demo/f} (set (:seon.task/references written))) "a cited name, not a literal or a form")
-    (is (not (contains? (first (task/create-tx (db-with-program) [(decl "No names here.")])) :seon.task/references))
-        "no names, no key")))
+(defn- cited-in
+  "What transaction tx makes its entities cite: each cite entity it writes, {target depth}."
+  [tx] (into {} (for [m tx :when (and (map? m) (:seon.cite/id m))] [(or (:seon.cite/address m) (:seon.cite/name m)) (:seon.cite/depth m)])))
 
-(deftest the-writer-derives-a-tasks-sections
-  ;; the sections a plan cites, by address, beside the names it cites: the same producer, the same
-  ;; text, the one parser (seon.ref/addresses); a page cited with no section is no section
-  (let [[written] (task/create-tx (db-with-program) [(decl "Read [vectors](docs/vector.md#the-pyramid), docs/ctx.md#the-pattern and docs/plan.md; make `demo/f` pass.")])]
-    (is (= #{"docs/vector.md#the-pyramid" "docs/ctx.md#the-pattern"} (:seon.task/sections written)))
-    (is (= #{'demo/f} (set (:seon.task/references written))) "its names beside them")
-    (is (not (contains? (first (task/create-tx (db-with-program) [(decl "Make `demo/f` pass.")])) :seon.task/sections))
-        "no section, no key")))
+;; docs/references.md#task-references: a task's text is parsed once at its write, and each target it cites is a cite entity
+(deftest the-writer-writes-a-tasks-cites
+  (let [plan "Make `demo/f` pass; ``demo/later`` is only mentioned; `(demo/f 1)` is code. Read [vectors](docs/vector.md#the-pyramid), then ```demo/f``` whole."
+        tx (task/create-tx (db-with-program) [(decl plan)])
+        cites (filterv :seon.cite/id tx)]
+    (is (= {'demo/f :code "docs/vector.md#the-pyramid" :doc} (cited-in tx)) "one per target, at the strongest depth its text asks: no literal, no form")
+    (is (= [0 1] (mapv :seon.cite/order cites)) "in the order of first mention")
+    (is (= #{"demo/t demo/f" "demo/t docs/vector.md#the-pyramid"} (set (map :seon.cite/id cites))) "each named by its task and its target")
+    (is (every? #(= "demo/t" (:seon.cite/of %)) cites) "each of the task the same write makes (its tempid)")
+    (is (= {} (cited-in (task/create-tx (db-with-program) [(decl "No names here.")]))) "no names, no cites")))
 
-(deftest the-writer-cites-the-programs-names-not-the-reproductions
-  ;; audit item 2a: a reproduction's test helper (seon.test-store/test-db), library call
-  ;; (datahike.api/db-with) and handle (result/e1) are its entry and data, not its subject: the
-  ;; task cites only the program's names, a name of a program namespace not yet defined among them
+(deftest a-page-cited-whole-is-its-top-section
+  ;; docs/references.md#an-entity-cites: a path with no anchor cites the page's top section, whose sections join below it
+  (let [db (d/db-with (db-with-program) [{:db/id "top" :seon.section/address "docs/x.md#x" :seon.section/heading "X"}
+                                         {:seon.section/address "docs/x.md#y" :seon.section/heading "Y" :seon.section/parent "top"}])]
+    (is (= {"docs/x.md#x" :doc} (cited-in (task/create-tx db [(decl "Read [x](docs/x.md).")]))) "the page the db holds: its top section")
+    (is (= {"docs/nowhere.md" :doc} (cited-in (task/create-tx db [(decl "Read [n](docs/nowhere.md).")]))) "a page it does not: the address as written, which joins nothing")))
+
+(deftest a-rewritten-text-leaves-exactly-its-cites
+  ;; the write of a task's text (seon.agent/transact!'s with-citations calls rederive-tx): its cites become the new
+  ;; text's, one per target at its strongest depth, upserted by their content id, and the ones it no longer cites retracted
+  (let [db (d/db-with (db-with-program) (task/create-tx (db-with-program) [(decl "Make `demo/f` pass; see [v](docs/vector.md#the-pyramid).")]))
+        db (d/db-with db [[:db/add [:seon.task/id "demo/t"] :seon.task/plan "Make ```demo/f``` pass, and `demo/g`."]])
+        db (d/db-with db (task/rederive-tx db (task/task db "demo/t")))
+        cites (task/cites-of db (pdb/eid db :seon.task/id "demo/t"))]
+    (is (= [['demo/f :code 0] ['demo/g :doc 1]] (mapv (juxt :seon.cite/name :seon.cite/depth :seon.cite/order) cites)) "the new text's cites, demo/f deepened in place")
+    (is (empty? (d/datoms db :avet :seon.cite/id "demo/t docs/vector.md#the-pyramid")) "the section it no longer cites, retracted whole")
+    (is (not-any? #(some-> (:a %) keyword? (and (= "seon.cite" (namespace (:a %))))) (:tx-data (d/with db (task/rederive-tx db (task/task db "demo/t")))))
+        "written again: no cite datom changes")))
+
+(deftest an-agent-is-made-citing-what-every-agent-cites
+  ;; :seon.config.agent/cites written on a new agent's record (seon.task/agent-cites-tx, at its first run: seon.agent/begin-run!), never
+  ;; read as a default at draw time: a page whole is its top section, a section its address, each at its ?depth
+  (let [db (d/db-with (db-with-program) [{:db/id "top" :seon.section/address "docs/testing.md#testing" :seon.section/heading "Testing"}
+                                         {:seon.section/address "docs/references.md#an-entity-cites" :seon.section/heading "An entity cites"}])
+        tx (into (task/run-start-tx "demo/t#1" "demo/t" "b1" :a1 {:branch :b :model nil :max-turns 4} 0 "p") (task/agent-cites-tx db "b1/a1" "b1/a1"))
+        db (d/db-with (d/db-with db (task/create-tx db [(decl "Do.")])) tx)]
+    (is (= (count (seon.config/value :seon.config.agent/cites)) (count (filter :seon.cite/id tx))) "one per address the config names")
+    (is (= [["docs/testing.md#testing" :doc] ["docs/references.md#an-entity-cites" :doc]]
+           (mapv (juxt :seon.cite/address :seon.cite/depth) (task/cites-of db (pdb/eid db :seon.agent/key "b1/a1"))))
+        "on the agent's record, in the config's order")))
+
+(deftest the-writer-cites-what-names-something
+  ;; audit item 2a: a reproduction's prose names a test helper (demo-test/fixture) and a handle (result/e1) that name
+  ;; nothing: a prose word is cited only when it names something (seon.ref/kept); the program's names among the cites
+  ;; are what the judge reads (seon.judge/subject)
   (let [db (d/db-with (db-with-program) [{:ns/name 'demo-test :ns/file "test/demo_test.clj"}])
-        plan (str "Make demo/f exact and add demo/g. Reproduce: (let [db (demo-test/fixture) db (datahike.api/db-with db [])] "
-                  "(demo/f db)) answers result/e1, as (clojure.string/split-lines s) shows.")
-        [written] (task/create-tx db [(decl plan)])]
-    (is (= #{'demo/f 'demo/g} (:seon.task/references written)) "the program's names: one defined, one to make")
-    (is (= #{'demo/f 'demo/g 'demo-test/fixture 'datahike.api/db-with 'result/e1 'clojure.string/split-lines} (set (ref/names plan)))
-        "while the text names them all")
-    (testing "a test the plan names on purpose reaches the page as its proof, not as a cited var"
-      (let [[written] (task/create-tx db [(assoc (decl "Make `demo-test/f-test` pass.") :seon.task/proofs #{'demo-test/f-test})])]
-        (is (not (contains? (:seon.task/references written) 'demo-test/f-test)))
-        (is (= #{'demo-test/f-test} (:seon.task/proofs written)))))))
+        plan (str "Make demo/f exact and add `demo/g`. Reproduce: (let [db (demo-test/fixture)] (demo/f db)) answers result/e1.")
+        names (set (keep :seon.cite/name (task/create-tx db [(decl plan)])))]
+    (is (every? names '[demo/f demo/g]) "the defined name and the one to make (cited by its backticks)")
+    (is (not-any? names '[demo-test/fixture result/e1]) "and no prose word that names nothing")
+    (testing "a test the plan names is cited as any name; the page shows it as the task's proof"
+      (let [tx (task/create-tx db [(assoc (decl "Make `demo-test/f-test` pass.") :seon.task/proofs #{'demo-test/f-test})])]
+        (is (= #{'demo-test/f-test} (:seon.task/proofs (first tx))))))))
 
 (deftest a-templates-instructions-are-cited-as-a-plan-is
-  ;; owner, 2026-10-22: instructions are cited text; a var a kind's instructions cite reaches
-  ;; the task's references, and so its context, exactly as a plan's does (the navigation functions
-  ;; every kind shares are the help page's, docs/agent.md)
+  ;; owner, 2026-10-22: instructions are cited text; a var a kind's instructions cite is one of the task's cites,
+  ;; and so its context, exactly as a plan's is
   (doseq [kind [:design :implement :test :merge]
-          :let [names (ref/names (template/instructions kind))
-                ;; the program's namespaces they name, as the store records them (seon.program/program-name?)
-                db (d/db-with (db-with-program) (vec (for [n (distinct (map namespace names))] {:ns/name (symbol n) :ns/file (str "src/" (str/replace n "." "/") ".clj")})))
-                [written] (task/create-tx db [(assoc (decl "") :seon.task/instructions (template/instructions kind))])]]
-    (is (= (set (ref/names (template/instructions kind))) (set (:seon.task/references written))) (str kind ": every name, derived"))))
+          :let [db (db-with-program)
+                ins (template/instructions kind)
+                kept (keep :seon.ref/name (ref/kept db (ref/cited (:seon.ref/citations (ref/parse nil ins)))))
+                tx (task/create-tx db [(assoc (decl "") :seon.task/instructions ins)])]]
+    (is (= (set kept) (set (keep :seon.cite/name tx))) (str kind ": every name it cites"))))
 
 (deftest unresolved-citations-are-answered-not-refused
   (let [db (db-with-program)
@@ -68,7 +94,7 @@
   ;; attribute is written in one place; references were stored and never read back
   (let [db (d/db-with (db-with-program) (task/create-tx (db-with-program) [(decl "Make `demo/f` pass.")]))
         t (task/task db "demo/t")]
-    (is (= #{'demo/f} (:seon.task/references t)))
+    (is (= ['demo/f] (mapv :seon.cite/name (task/cites-of db (pdb/eid db :seon.task/id "demo/t")))) "its cites, entities of their own")
     (is (not-any? #{:db/id :seon.task/declared} (keys t)) "the stored declaration is load-tx's, not the reader's")
     (is (= t (get (task/tasks db) "demo/t")))))
 

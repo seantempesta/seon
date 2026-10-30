@@ -210,14 +210,6 @@
         (and edges? (seq references)) (assoc :seon.ref/references (edges references))
         (and edges? (seq cited-by)) (assoc :seon.ref/cited-by (edges cited-by)))))))
 
-(defn page-top
-  "The entity of the page at path's own section (the one with no parent), or nil."
-  {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe pos-int?]]}
-  [db path]
-  (d/q '[:find ?e . :in $ ?pre :where [?e :seon.section/address ?a] [(clojure.string/starts-with? ?a ?pre)]
-         (not [?e :seon.section/parent _])]
-       db (str path "#")))
-
 (defn page-t
   "The last transaction that changed the page at path on db: the newest datom, asserted or
   retracted (db's history), of any section whose address is the page's; nil when db holds none.
@@ -238,7 +230,7 @@
   ([db path] (page db path :code))
   ([db path depth] (page db path depth true))
   ([db path depth edges?]
-   (when-let [top (page-top db path)]
+   (when-let [top (ref/page-top db path)]
      (letfn [(walk [e level]
                (into [(assoc (view db (:seon.section/address (d/pull db [:seon.section/address] e)) depth edges?) :seon.ref/level level)]
                      (mapcat #(walk % (inc level))) (children db e)))]
@@ -621,85 +613,6 @@
       :else {:symbol sym :source (print/code src)
              :change (print/code (str "(seon.repl/edit! '" sym " \"old text, exactly once\" \"new text\")"))})))
 
-(defn- reached
-  "What citation c asks to see, at its depth, and what that is: a wiki section from main's
-  sections (:section), else a file of the checkout read now, never stored (:file), else a task by
-  its ns/name (:task), else a namespace (:namespace); a citation that reaches nothing says so, as
-  an unresolved name does (:unresolved). Answers [kind view]."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.ref/citation] [:tuple :seon.render/kind :map]]}
-  [db {:seon.ref/keys [name path anchor depth]}]
-  (let [a (or (some-> name str) (str path (when anchor (str "#" anchor))))
-        [kind v] (cond (qualified-symbol? name) [:task (ref/task-view db name depth)]
-                       name [:namespace (ref/namespace-view db name depth)]
-                       :else (if-let [sv (when anchor (view db a depth))]
-                               [:section sv]
-                               [:file (ref/file-view db (cfg/checkout) path anchor depth)]))]
-    (if v
-      [kind (assoc v :seon.ref/depth depth)]
-      [:unresolved {:seon.ref/address a :unresolved true :problem (:unresolved ref/problem-messages)}])))
-
-(defn cited-view
-  "What citation c asks to see, at its depth (reached's view): a section, a file, a task, a
-  namespace, or that it reaches nothing."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.ref/citation] :map]}
-  [db c] (second (reached db c)))
-
-(defn citation-kind
-  "What citation c reaches on db: :var, a qualified name that is no task (resolve-ref); :schema, a
-  qualified keyword the db holds a schema entry of (schema-view); :view, a namespace, a task, or a
-  path with no problem (cited-view); nil, nothing pulled (any other keyword, a path:N line reference)."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.ref/citation] [:maybe [:enum :var :schema :view]]]}
-  [db {:seon.ref/keys [name path problem-kind]}]
-  (cond (and (qualified-symbol? name) (not (ref/task? db name))) :var
-        (and (qualified-keyword? name) (pdb/eid db :schema/key name)) :schema
-        (or (symbol? name) (and path (not problem-kind))) :view))
-
-(defn schema-view
-  "Schema key k as its citation's depth shows it (docs/references.md#resolving-and-showing),
-  read from the db's schema entry (:schema/form), so it changes as the db does: :summary the form
-  that reads it; :doc and :code its form as written (code), the form of each other key it names
-  (one level: the agent of the md-scan bench read them one a turn), and how it changes
-  at the REPL (my.schema/register!). Never the resource file it merges into: an agent's working
-  directory holds no checkout, and the file sent three runs to slurp it."
-  {:malli/schema [:=> [:cat :seon.host/db :qualified-keyword :seon.ref/depth] :map]}
-  [db k depth]
-  (let [form (:schema/form (d/entity db (pdb/eid db :schema/key k)))
-        named (when form
-                (->> (tree-seq coll? seq (sedn/decode form))
-                     (filter qualified-keyword?) distinct
-                     (keep #(when-let [f (and (not= k %) (:schema/form (d/entity db (pdb/eid db :schema/key %))))] [% (print/code f)]))
-                     (into (sorted-map))))]
-    (if (or (= :summary depth) (nil? form))
-      {:schema k :read (list 'my.schema/forms k)}
-      (cond-> {:schema k :form (print/code form) :change (print/code (str "(my.schema/register! " k " '[...its new form])"))}
-        (seq named) (assoc :keys-it-names named)))))
-
-(defn cited
-  "Citation c pulled at its depth, as citation-kind reaches it, and what it reached: [:var view]
-  by resolve-ref ([:unresolved view] when it resolves to nothing), [:schema view] by schema-view,
-  anything else by reached; nil when it reaches nothing pulled (a keyword the db holds no schema of,
-  a path:N line reference)."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.ref/citation] [:maybe [:tuple :seon.render/kind :map]]]}
-  [db c]
-  (case (citation-kind db c)
-    :var (let [v (resolve-ref db (:seon.ref/name c) (:seon.ref/depth c))] [(if (:unresolved v) :unresolved :var) v])
-    :schema [:schema (schema-view db (:seon.ref/name c) (:seon.ref/depth c))]
-    :view (reached db c)
-    nil))
-
-(defn- names-lines
-  "Words (a namespace's public names, a docstring's words) as comment lines of at most
-  :seon.config.render/width characters: `;; a b c`."
-  {:malli/schema [:=> [:cat [:sequential :string]] :string]}
-  [names]
-  (let [width (cfg/value :seon.config.render/width)]
-    (str/join "\n" (map #(str ";; " (str/join " " %))
-                        (reduce (fn [lines n] (let [l (peek lines)]
-                                                (if (and l (<= (+ 4 (count (str/join " " l)) (count n)) width))
-                                                  (conj (pop lines) (conj l n))
-                                                  (conj lines [n]))))
-                                [] names)))))
-
 (defn definition-lines
   "Namespace view nv's definitions as comment lines, one each in file order: its name and its doc's
   first sentence (seon.ref/namespace-view's headings), or nil when it lists none. What a namespace's
@@ -717,46 +630,3 @@
   [db sym]
   (when-let [head (d/q '[:find ?src . :in $ ?s :where [?n :ns/name ?s] [?f :form/defines ?n] [?f :form/src ?src]] db sym)]
     (str head (some->> (definition-lines (ref/namespace-view db sym :doc)) (str "\n")))))
-
-(defn cited-code
-  "What the page shows of citation c on db, as Clojure is written in a file (DECISIONS,
-  code is shown as code): a var as its definition's head (seon.reader/definition-head: name, docstring as
-  written, attribute map, arglist; its body marked `…)` with the form that reads it whole), a
-  namespace as its ns form as recorded (`namespace-source`), then its definitions; each as code
-  (seon.print/code), printed verbatim; a var whose source db does not record, as a `declare` with
-  its arglists and doc as comments; a task, a section, a file or a citation that reaches nothing as
-  its address and lead in comment lines, then the form that reads it whole (never its view's map). nil when it reaches nothing pulled."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.ref/citation] :any]}
-  [db c]
-  (let [[kind v :as hit] (cited db c)
-        nm (:seon.ref/name c)]
-    (cond
-      (and (= :var kind) (qualified-symbol? nm))
-      (let [src (source-of db nm)
-            head (some-> src (reader/definition-head (symbol (namespace nm))))]
-        (cond head (print/code (str head "  ; the body: (source " nm ")"))
-              src (print/code src)
-              ;; no source recorded: what the var's facts say, as Clojure (its arglists and doc as comments)
-              :else (print/code (str "(declare " (name nm) ")  ; no source recorded: (doc " nm ")"
-                                     (when-let [as (seq (:arglists v))] (str "\n;; " (str/join " " (map str as))))
-                                     (when-let [d (:seon.print/prose (:doc v))] (str "\n" (names-lines (str/split d #"\s+"))))))))
-      (and (= :namespace kind) (symbol? nm))
-      ;; its ns form as recorded; a namespace only this process has loaded, its name, doc and public names
-      (print/code (or (namespace-source db nm)
-                      (let [nv (ref/namespace-view db nm :doc)]
-                        (str "(ns " nm (when-let [d (:seon.ref/lead nv)] (str "\n  " (emit/string-literal d))) ")"
-                             (some->> (definition-lines nv) (str "\n"))))))
-      ;; a task, a section, a file, or what reaches nothing: its address and lead as prose (comment
-      ;; lines), then the form that reads it whole; never its view's map
-      hit
-      (let [a (or (:seon.ref/address v) (some-> nm str) (:seon.ref/path c))
-            say (if (= :unresolved kind)
-                  (str (or (:problem v) "reaches nothing"))
-                  (or (some-> (:seon.ref/lead v) ref/lead-sentence) (:seon.ref/summary v)
-                      (some->> (:seon.ref/lines v) (str "a file of ") (#(str % " lines"))) (:seon.ref/heading v)))
-            read (case kind
-                   :task (str "(:seon.task/plan (seon.task/task (seon.agent/db) " (emit/string-literal a) "))")
-                   :section (str "(my.agent/help " (emit/string-literal a) ")")
-                   :file (str "(slurp " (emit/string-literal (str (cfg/checkout) "/" (:seon.ref/path c))) ")")
-                   nil)]
-        (print/code (str (names-lines (str/split (str a ": " say) #"\s+")) (when read (str "\n" read))))))))

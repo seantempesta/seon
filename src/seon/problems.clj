@@ -697,8 +697,8 @@
 
 (defn uncited-tasks
   "Each ready :implement task, which holds its design step's plan along :needs (seon.task/accumulate),
-  whose accumulated plan cites nothing (no :seon.task/references: the context pulls no var, attribute
-  or section for it), that names no proof, or one of whose proofs is still the placeholder
+  whose accumulated plan cites no program var (no cite of one along its needs, seon.task/cites-of: the
+  context pulls no var for it), that names no proof, or one of whose proofs is still the placeholder
   seon.context writes, as an :uncited-task row with its reason (:no-references, :no-proofs,
   :placeholder-proof). A design step's plan is prose, its input: design writes the cited plan,
   so only the implement step is judged. Closed when the design step's plan cites a name, the
@@ -711,6 +711,10 @@
                 (if (seen e) seen
                     (reduce chain (conj seen e) (map :v (d/datoms db :eavt e :seon.task/needs)))))
         vals-of (fn [es a] (into #{} (mapcat #(map :v (d/datoms db :eavt % a))) es))
+        ;; the program's vars among every task's cites, asked of the program once, when a ready implement step asks
+        ;; (seon.program/program-names)
+        cited (fn [e] (into [] (comp (map #(:seon.cite/name (d/entity db (:e %)))) (filter qualified-symbol?)) (d/datoms db :avet :seon.cite/of e)))
+        program (delay (set (program/program-names db (vec (distinct (mapcat #(cited (:e %)) (d/datoms db :aevt :seon.task/id)))))))
         placeholder? (fn [sym] (some-> (pdb/eid db :var/name sym) (->> (d/entity db)) :var/form :form/src
                                       (str/includes? task/placeholder-assertion)))]
     (vec (for [{:keys [e v]} (sort-by :v (d/datoms db :aevt :seon.task/id))
@@ -718,7 +722,8 @@
                :let [es (chain #{} e)
                      proofs (vals-of es :seon.task/proofs)
                      reasons (cond-> []
-                               (empty? (vals-of es :seon.task/references)) (conj :no-references)
+                               (not-any? @program (mapcat cited es))
+                               (conj :no-references)
                                (empty? proofs) (conj :no-proofs)
                                (some placeholder? proofs) (conj :placeholder-proof))]
                reason reasons
