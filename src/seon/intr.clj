@@ -22,7 +22,7 @@
   Conditions (T1's): the process descends from Chez's main thread on every fork
   (else the signal is lost); every wait loop retries EINTR."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn- defchecked]] [jolt.scheme :as scm] [seon.lib :as lib] [jolt.io-poller :as poller]))
+  (:require [seon.contract :as contract :refer [defn defn- defchecked]] [jolt.scheme :as scm] [seon.lib :as lib] [seon.profile :as profile] [jolt.io-poller :as poller]))
 
 ;; The live bounded evals of this process, innermost first. The signal handlers run
 ;; on this (the only) thread at a Chez safe point and must find them; this is the
@@ -75,7 +75,7 @@
   {:malli/schema [:=> [:cat] :boolean]}
   []
   (quiet-timer*)
-  (install-kick* lib/SIGUSR1 on-usr1)
+  (install-kick* lib/SIGUSR1 #(profile/aside on-usr1))
   ;; on a main carrier the loop beneath may be waiting with nothing else to wake it: the signal does
   (when (jolt.host/main-carrier?) (poller/wake-on-signals! [lib/SIGUSR1]))
   true)
@@ -88,7 +88,7 @@
   seon.agent/an-agent-ends-with-its-root)."
   {:malli/schema [:=> [:cat :seon.host/fn] :boolean]}
   [gone?]
-  (install-kick* lib/SIGIO (fn [] (when (gone?) (lib/c-exit 0)) false))
+  (install-kick* lib/SIGIO (fn [] (profile/aside (fn [] (when (gone?) (lib/c-exit 0)) false))))
   (when (jolt.host/main-carrier?) (poller/wake-on-signals! [lib/SIGIO]))
   true)
 
