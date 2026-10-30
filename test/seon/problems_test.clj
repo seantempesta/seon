@@ -919,7 +919,8 @@
                :per-n {}
                ;; measured 2026-10-29: ~0.45M ticks / 1.8 MB / 48 calls at 10, 100 and 1000 given the diff (the old-word table
                ;; read on each side is most of it); before, 0.69M / 2.8 MB / 37 at 10 and linear (docs/cost.md#a-diff-per-attribute-costs-a-descent-each)
-               :fixed {:ticks 160000 :bytes 1500000 :calls 60}
+               ;; 2026-10-30: 67 calls at 10: :long-form (seon.problems/long-forms) is a class the changed vars are asked, with its bound read once (seon.config/value)
+               :fixed {:ticks 460000 :bytes 1800000 :calls 68}
                :sizes [10 30 100]}))
 
 ;; ---- the wiki kept true: stale sections, orphan pages, issues with no page ----------------------
@@ -1169,7 +1170,8 @@
                :per-n {:ns 0 :bytes 0 :calls 0}
                ;; 47: the :stalled class (seon.problems/stalled-agents) is one more class to look up;
                ;; 49: :flaky (seon.proofs/flaky) one more
-               :fixed {:ns 3000000 :bytes 4000000 :calls 51}
+               ;; 52: :long-form one more class to look up
+               :fixed {:ns 3000000 :bytes 4000000 :calls 52}
                :sizes [10 30 100]}))
 
 (deftest attention-survives-a-store-write
@@ -1299,6 +1301,43 @@
                :growth :linear
                ;; measured 2026-10-27: 130k ticks / 406 KB / 22 calls at 10, 3.87M / 11.9 MB / 602 at 300;
                ;; 2026-10-29, the form's head read by seon.source/first-head (one contracted call per var): 32 calls at 10
+               :per-n {:ticks 13000 :bytes 39500 :calls 3}
+               :fixed {:ticks 10000 :bytes 30000 :calls 5}
+               :sizes [10 30 100]}))
+
+
+(defn long-form-input
+  "The cost proof's input at n: n changed vars whose form is under the bound, named for the check."
+  [n] [(var-forms (world) n (fn [_] {:src "(defn f [])" :doc "Does a thing."}))  {}
+       (into #{} (map #(symbol (cite-ns (world)) (str "v" %))) (range 1 (inc n)))])
+
+;; See docs/health.md#a-form-too-long
+(deftest a-form-over-the-bound-is-a-long-form-until-it-is-split
+  (let [bound (seon.config/value :seon.config.shrink/form-chars)
+        pad #(str "(defn f [] \"" (apply str (repeat % \x)) "\")")
+        long-src (pad bound) short-src (pad 10)
+        db (var-forms (world) 3 (fn [i] (case (int i) 1 {:src long-src} 2 {:src short-src} 3 {:src long-src :kind :test})))
+        v #(symbol (cite-ns db) (str "v" %))
+        rows #(mapv :evidence (problems/long-forms % {} (into #{} (map (partial symbol (cite-ns %))) ["v1" "v2" "v3"])))]
+    (is (= [{:kind :long-form :var (v 1) :chars (count long-src) :bound bound} {:kind :long-form :var (v 3) :chars (count long-src) :bound bound}]
+           (rows db))
+        "a form over the bound has its row with its chars, in a test as in source; one under it has none")
+    (is (= [] (rows (var-forms (world) 3 (fn [_] {:src short-src})))) "split under the bound, no row")
+    (is (= [] (problems/long-forms db {} #{})) "no changed var, nothing read")
+    (testing "a branch that adds a long form is refused, and one the base already had is not its problem"
+      (let [base (var-forms (world) 1 (fn [_] {:src long-src}))
+            head (var-forms (world) 2 (fn [_] {:src long-src}))
+            split (problems/caused-split base head)]
+        (is (some #(re-find #"/v2 is \d+ chars" %) (map str (:caused split))))
+        (is (not-any? #(re-find #"/v1 is \d+ chars" %) (map str (:caused split))))))
+    (is (contains? (:seon.problems/derived (contract/properties :seon.problems/class)) :long-form))))
+
+;; See docs/health.md#a-form-too-long
+(deftest long-forms-follow-the-vars-asked-for
+  (cost/proof {:of 'seon.problems/long-forms :input 'seon.problems-test/long-form-input
+               :n "changed vars, each with a form under the bound"
+               :work "per named var: one AVET seek, its entity and its form's text length"
+               :growth :linear
                :per-n {:ticks 13000 :bytes 39500 :calls 3}
                :fixed {:ticks 10000 :bytes 30000 :calls 5}
                :sizes [10 30 100]}))
