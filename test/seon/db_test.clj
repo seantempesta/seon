@@ -354,18 +354,18 @@
     (ts/test-branch!
      (fn [_ conn]
        (let [v '[["b/x" 0.5] ["a/y" 0.9] ["b/x" 0.5] ["c/z" 0.1] ["b/x" 0.5]]
-             e (get (:tempids (d/transact conn [{:db/id "p" :seon.agent/key "db-test/order" :seon.agent/included v}])) "p")]
-         (is (= v (:seon.agent/included (d/pull @conn [:seon.agent/included] e))))))))
+             e (get (:tempids (d/transact conn [{:db/id "p" :seon.agent/key "db-test/order" :seon.ctx/pattern v}])) "p")]
+         (is (= v (:seon.ctx/pattern (d/pull @conn [:seon.ctx/pattern] e))))))))
   (testing "a stored vector of any length retracts, by value and by attribute (our Datahike fork, jolt/a-data-vector-retracts)"
     (ts/test-branch!
      (fn [_ conn]
        (let [v '[["b/x" 0.5] ["a/y" 0.9] ["c/z" 0.1]]
-             e (get (:tempids (d/transact conn [{:db/id "p" :seon.agent/key "db-test/retract" :seon.agent/included v}])) "p")]
-         (d/transact conn [[:db/retract e :seon.agent/included v]])
-         (is (nil? (:seon.agent/included (d/pull @conn [:seon.agent/included] e))))
-         (d/transact conn [[:db/add e :seon.agent/included v]])
-         (d/transact conn [[:db.fn/retractAttribute e :seon.agent/included]])
-         (is (nil? (:seon.agent/included (d/pull @conn [:seon.agent/included] e)))))))))
+             e (get (:tempids (d/transact conn [{:db/id "p" :seon.agent/key "db-test/retract" :seon.ctx/pattern v}])) "p")]
+         (d/transact conn [[:db/retract e :seon.ctx/pattern v]])
+         (is (nil? (:seon.ctx/pattern (d/pull @conn [:seon.ctx/pattern] e))))
+         (d/transact conn [[:db/add e :seon.ctx/pattern v]])
+         (d/transact conn [[:db.fn/retractAttribute e :seon.ctx/pattern]])
+         (is (nil? (:seon.ctx/pattern (d/pull @conn [:seon.ctx/pattern] e)))))))))
 
 ;; ---- history (task seon.db/history-is-kept: v1's ruling 23, Datahike's default) --------------
 

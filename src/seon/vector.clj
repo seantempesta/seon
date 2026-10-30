@@ -99,7 +99,7 @@
   "The cosine of vector q with the vector of each entity of es on db, in es's order (the fine level,
   c-fine, over their first fd dims, each prefix renormalized: all of q's unless given), nil for an
   entity with no vector: `near`'s ranking of its shortlist, and seon.context/relevance's of a pool.
-  Cost: two seeks an entity (its vector entity by :seon.vector/of, inlined: `vector-e` is a contracted call an entity, 100 more in a related part; then the vector)."
+  Cost: two seeks an entity (its vector entity by :seon.vector/of, inlined: `vector-e` is a contracted call an entity, then the vector)."
   {:malli/schema [:function [:=> [:cat :seon.host/db [:vector {:min 1} number?] [:sequential :int]] [:vector [:maybe number?]]]
                   [:=> [:cat :seon.host/db [:vector {:min 1} number?] [:sequential :int] pos-int?] [:vector [:maybe number?]]]]}
   ([db q es] (scores db q es (count q)))
@@ -167,8 +167,7 @@
 (defmacro fused
   "{item score} of rankings fused by reciprocal rank, as an expression in the caller: a macro, not a
   function (a def'd fn escapes the contracts every function carries, a contracted one is a second
-  call), so rrf (called per line of the page's related part) costs the one contracted call it did
-  (seon.context-cost-test/related-ranks-each-kind-by-one-search)."
+  call), so rrf costs the one contracted call it did."
   [rankings]
   `(let [k# (cfg/value :seon.config.vector/rrf-k)]
      (apply merge-with + {} (for [r# ~rankings]
@@ -182,8 +181,7 @@
 
 (defn rrf
   "The items of rankings fused by reciprocal rank (rrf-scores), best first, the name breaking a tie.
-  Measured fusing the call graph with embeddings (docs/vector.md#fused-with-the-call-graph); the
-  page's related part fuses their reference graph with meaning by it (seon.context/related), and
+  Measured fusing the call graph with embeddings (docs/vector.md#fused-with-the-call-graph);
   my.agent/search fuses exact text, meaning and references."
   {:malli/schema [:=> [:cat [:sequential [:sequential :any]]] [:vector :any]]}
   [rankings]
@@ -210,12 +208,12 @@
   (`title`'s, nil when it has none) and its text."
   {:form/src (fn [title src] (document title src))
    :seon.section/text (fn [title text] (document title text))
-   ;; a schema's form, so the related part's schema keys are found by meaning too
-   ;; (docs/vector.md#what-the-work-is-likely-to-need-as-an-eval)
+   ;; a schema's form, so a search finds schema keys by meaning too
+   ;; (docs/vector.md#relevance)
    :schema/form (fn [title form] (document title form))
    :seon.task/plan (fn [_ plan] (str query-prompt plan))
    ;; an eval: what the agent asked and what it got, as a search asks, so the agent's recent work is a
-   ;; direction a page can follow (seon.context/selected; docs/vector.md#relevance)
+   ;; direction a search can follow (docs/vector.md#relevance)
    :seon.eval/record (fn [_ record] (str query-prompt (:code record) "\n" (:line record)))})
 
 (defn- titles

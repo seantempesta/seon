@@ -1,7 +1,7 @@
 (ns seon.context
   "The agent's context, a render of its record (docs/render.md#a-part-answers-data): the system
   prompt, then its record (its evals, messages and replies, `records`) and the parts of its page
-  the model reads (the task, each var the plan cites, what is related, how its work stands:
+  the model reads (the task, each var the plan cites, how its work stands:
   `status`), each part's data sent by its model render and printed through the one value printer
   (seon.print). Nothing is stored: a turn records its basis (the commit it read and what it took
   that no fact holds), and `render` makes the text from it, for the model and again for anyone who
@@ -158,7 +158,7 @@
 
 (defn- program-vars
   "Of citations, those of the program's vars (seon.program/program-names), in their order: what a
-  task's page cites as vars, and what its related search starts from."
+  task's page cites as vars."
   {:malli/schema [:=> [:cat :seon.host/db [:vector :seon.ref/citation]] [:vector :seon.ref/citation]]}
   [db cites]
   (let [vars (filterv #(= :var (docs/citation-kind db %)) cites)
@@ -186,7 +186,7 @@
   (let [;; through the one resolver: a task's own setting (its flattened :seon.task/config), else its model's, else the config's
         t (when te (d/pull db [:seon.config.render/similar :seon.task/model] te))
         k (cfg/value :seon.config.render/similar {:task t :model (:seon.task/model t)})
-        ;; a program function, as related's: no test helper or fixture of test/
+        ;; a program function: no test helper or fixture of test/
         program (program/program-nss db)
         function? #(let [n (symbol (namespace %))]
                      (and (= :fn (:var/kind (d/entity db [:var/name %])))
@@ -203,14 +203,6 @@
                                      (map (fn [s] (str s (some->> (:var/doc (d/entity db [:var/name s])) ref/lead-sentence (str ": "))))))
                             (vector/near db te all {:of :form/id :shortlist all :fine-dims all}))
              :more "(my.agent/search 'ns/f) or (my.agent/search \"text\"): more, by meaning, exact words and references"})))
-
-(defn- related-count
-  "How many of each kind task entity te's related part shows: :seon.config.render/related through the
-  one resolver (its task, its model, the config), as `similar` reads its count."
-  {:malli/schema [:=> [:cat :seon.host/db :int] nat-int?]}
-  [db te]
-  (let [t (d/pull db [:seon.task/model] te)]
-    (cfg/value :seon.config.render/related {:task t :model (:seon.task/model t)})))
 
 ;; ---- relevance: one calibrated score for a context and an item (docs/vector.md#relevance) ----
 
@@ -393,82 +385,6 @@
                                    pool zc zb zt)
                               sort (mapv (fn [[p _ e]] [e (- p)])))))]))))
 
-(defn related
-  "What the work on task entity te's plan is likely to need beyond what the plan cites, each with its
-  relevance (`relevance`: the chance the work needs it), so a page shows it at the depth that earns:
-  the wiki sections, program functions and schema keys nearest the plan by meaning, words and
-  references, the context being the plan, its vector, the vars and sections it cites and the
-  schema keys it names (the seeds), and the program vars touched (the branch changed them; their
-  forms are the touched items). A plan citing no defined var (a user's request in prose) seeds the
-  graph with the first program functions among the :seon.config.render/related-seeds-near forms
-  nearest it (task seon.context/a-prose-request-finds-its-functions). Of each kind, at most
-  :seon.config.render/related shown, those at :seon.config.render/relevance-summary or more
-  (each through the one resolver: the task, its model, the config), the rest counted. Answers
-  {:sections [address] :functions [sym] :schemas [key] :relevance {name p} :doc #{name}
-  :hidden {kind n}}, :doc those at :seon.config.render/relevance-doc or more, what the plan cites left out (the task's
-  data shows it); nil when the count is 0 (none shown) or the plan has no vector yet. opts: :touched
-  the vars the branch changed, :cut a cut in place of the configured one, which then lists every
-  item at or above it, uncounted (0: every item scored), :focus a vector to rank by in place of the
-  plan's and :words the text to match in place of the plan's (`selected`'s trajectory).
-  Unlike before relevance, nothing below the cut fills the count: the owner's \"expose more of it but
-  not if it's not related\" (docs/vector.md#relevance)."
-  {:malli/schema [:function [:=> [:cat :seon.host/db :int] [:maybe [:map [:sections [:vector :string]] [:functions [:vector :qualified-symbol]] [:schemas [:vector :qualified-keyword]]
-                                  [:relevance [:map-of :any number?]] [:doc [:set :any]] [:hidden [:map-of :keyword pos-int?]]]]]
-                  [:=> [:cat :seon.host/db :int [:map [:touched {:optional true} [:set :qualified-symbol]] [:cut {:optional true} number?]
-                                                   [:focus {:optional true} [:vector number?]] [:words {:optional true} :string]]] [:maybe [:map [:sections [:vector :string]] [:functions [:vector :qualified-symbol]] [:schemas [:vector :qualified-keyword]]
-                                  [:relevance [:map-of :any number?]] [:doc [:set :any]] [:hidden [:map-of :keyword pos-int?]]]]]]}
-  ([db te] (related db te {}))
-  ([db te {:keys [touched cut focus words] :or {touched #{}}}]
-   (let [k (related-count db te)
-         qv (or focus (vector/vector-of db te))]
-     (when (and (pos? k) qv)
-       (let [t (d/pull db [:seon.task/id :seon.task/model :seon.config.render/relevance-summary :seon.config.render/relevance-doc] te)
-             depth {:summary (or cut (cfg/value :seon.config.render/relevance-summary {:task t :model (:seon.task/model t)}))
-                    :doc (cfg/value :seon.config.render/relevance-doc {:task t :model (:seon.task/model t)})}
-             ;; what the plan cites, as its write derived it (seon.task/references-of): no draw parses it
-             tk (task/task db (:seon.task/id t))
-             {:keys [plan]} (:seon.task/accumulated tk)
-             cites (plan-citations db tk)
-             fns (into #{} (keep :seon.ref/name) (program-vars db cites))
-             ;; a wiki page's section only: a cited file is read whole by its view
-             secs (into #{} (comp (filter #(and (some-> (:seon.ref/path %) (str/ends-with? ".md")) (= :view (docs/citation-kind db %))))
-                                  (keep #(:seon.ref/address (docs/cited-view db %))))
-                        cites)
-             ;; a program function: no test, no macro, nothing outside the program's dirs (test/'s
-             ;; fixtures and helpers); a namespace with no file yet (one the agent made at its REPL) is its new work
-             program (program/program-nss db)
-             function? #(let [n (symbol (namespace %))]
-                          (and (not (#{:test :macro} (:var/kind (d/entity db [:var/name %]))))
-                               (or (contains? program n) (nil? (:ns/file (d/entity db [:ns/name n]))))))
-             form-of #(some-> (d/entity db [:var/name %]) :var/form :db/id)
-             functions-of (fn [e] (into [] (comp (map :var/name) (filter function?)) (:var/_form (d/entity db e))))
-             defined (filterv #(d/entity db [:var/name %]) fns)
-             seeded (when (empty? defined)
-                      (into [] (comp (mapcat (comp functions-of first)) (distinct) (take k))
-                            (vector/near db te (cfg/value :seon.config.render/related-seeds-near) {:of :form/id})))
-             named-keys (filterv #(pdb/eid db :schema/key %) (filter keyword? (keep :seon.ref/name cites)))
-             touched-forms (into #{} (keep form-of) touched)
-             seeds (into touched-forms (remove nil?) (concat (map form-of (concat defined seeded))
-                                                             (map #(pdb/eid db :seon.section/address %) secs)
-                                                             (map #(pdb/eid db :schema/key %) named-keys)))
-             scored (relevance db {:qv qv :text (or words plan) :seeds seeds :touched touched-forms} (set (keys relevance-kinds))
-                               (fn [kind e] (or (not= :function kind) (seq (functions-of e)))))
-             name-of {:function functions-of
-                      :section #(vector (:seon.section/address (d/entity db %)))
-                      :schema #(vector (:schema/key (d/entity db %)))}
-             cited {:function fns :section secs :schema #{}}
-             ranked (into {} (for [[kind es] scored]
-                               [kind (into [] (comp (mapcat (fn [[e p]] (map #(vector % p) ((name-of kind) e))))
-                                                    (remove (comp (cited kind) first)) (distinct))
-                                           es)]))
-             ;; a cut asked for lists all it keeps: (my.task/related 0) is every item scored
-             shown (into {} (for [[kind xs] ranked] [kind (into [] (comp (filter #(>= (second %) (:summary depth))) (if cut identity (take k))) xs)]))]
-         {:sections (mapv first (shown :section)) :functions (mapv first (shown :function)) :schemas (mapv first (shown :schema))
-          :relevance (into {} (mapcat val) shown)
-          :doc (into #{} (comp (mapcat val) (filter #(>= (second %) (:doc depth))) (map first)) shown)
-          :hidden (into {} (for [[kind xs] ranked :let [n (- (count xs) (count (shown kind)))] :when (pos? n)]
-                             [({:function :functions :section :sections :schema :schemas} kind) n]))})))))
-
 (def search-kinds
   "What my.agent/search finds: a function (:var), a :test, a wiki :section, a :task, a :schema key."
   #{:var :test :section :task :schema})
@@ -608,130 +524,6 @@
                   shown)
       (seq left) (conj {:kind :more :left (count left) :counts (frequencies (map (comp first key) left))
                         :more (str "(my.agent/search " (pr-str q) " " (pr-str (assoc opts :k (+ k (count left)) :min 0.0)) ") returns them; a narrower :kinds or :ns finds fewer")}))))
-
-(declare records related-view)
-
-(defn- unit
-  "v as a unit vector, or nil when it has no length."
-  {:malli/schema [:=> [:cat [:sequential number?]] [:maybe [:vector number?]]]}
-  [v] (let [n (Math/sqrt (reduce + 0.0 (map #(* % %) v)))] (when (pos? n) (mapv #(/ % n) v))))
-
-(defn focus
-  "Where agent a's work on task entity te points now, on db: the decayed sum of its trajectory, the
-  plan's vector first and then each of the agent's evals' vectors in order, each item's weight
-  halving every :seon.config.render/relevance-half-life items after it, so the plan is a prior the
-  agent's own work takes over from (the owner: \"the plan will often be fairly empty
-  ... we need to adapt to whatever they are doing\"); and the words of its last :seon.config.render/relevance-words evals, the
-  plan's before any. {:vector :words}, nil when neither the plan nor any eval has a vector yet.
-  Measured on 44 recorded turns of 10 runs (the relevance replay, docs/vector.md): R@10 0.441 and
-  0.55 within 800 tokens of what the agent read next, against 0.402 and 0.48 by the plan alone and
-  0.411 and 0.49 with the plan held at full weight beside the evals."
-  {:malli/schema [:=> [:cat :seon.host/db :int :int] [:maybe [:map [:vector [:vector number?]] [:words :string]]]]}
-  [db te a]
-  (let [h (cfg/value :seon.config.render/relevance-half-life)
-        evs (into [] (keep (fn [[_ v]] (when-let [e (some->> (:seon.eval/id v) (pdb/eid db :seon.eval/id))]
-                                        [(some-> (vector/vector-of db e) unit) (get-in v [:seon.eval/record :code])])))
-                  (records db a))
-        items (into (if-let [pv (some-> (vector/vector-of db te) unit)] [pv] []) (keep first evs))
-        n (count items)]
-    (when (pos? n)
-      {:vector (unit (reduce (fn [acc [i v]] (mapv + acc (map #(* % (Math/pow 0.5 (/ (- n 1 i) h))) v)))
-                             (vec (repeat (count (first items)) 0.0)) (map-indexed vector items)))
-       :words (if (seq evs)
-                (str/join " " (map second (take-last (cfg/value :seon.config.render/relevance-words) evs)))
-                (or (:seon.task/plan (d/entity db te)) ""))})))
-
-(defn selected
-  "What agent a's context includes beside its work on task entity te now, given prior (what its last
-  turn included, :seon.agent/included): units [name chance], each a section's address, a function's
-  or a schema key's name that `related` scores against the work's `focus`. One held before stays while
-  its chance is :seon.config.render/relevance-summary or more; a new one enters at
-  :seon.config.render/relevance-doc or more, best first, after every one before it, while the lines fit
-  :seon.config.render/relevance-budget tokens (the owner: 60% to enter, 40% to leave, items
-  in entry order, so a turn's page moves by what crossed a cut and every earlier byte holds for the
-  prompt cache). The turn calls it once and records its answer (seon.turn), so no frame waits on
-  relevance and a replay draws the same units; nil when the work has no vector yet (nothing to decide,
-  the record stands)."
-  {:malli/schema [:=> [:cat :seon.host/db :int :int [:sequential [:tuple :any number?]]] [:maybe [:vector [:tuple :any number?]]]]}
-  [db te a prior]
-  (when-let [{fv :vector words :words} (focus db te a)]
-    (let [t (d/pull db [:seon.task/model :seon.config.render/relevance-doc :seon.config.render/relevance-summary] te)
-          at #(cfg/value % {:task t :model (:seon.task/model t)})
-          enter (at :seon.config.render/relevance-doc)
-          leave (at :seon.config.render/relevance-summary)]
-      ;; nothing enters below the doc cut: no unit the work is not likely to need, however empty the
-      ;; page (the owner, 2026-10-27: "if there's nothing at the threshold then show nothing until we
-      ;; have more context")
-      (when-let [r (related db te {:cut (min enter leave) :focus fv :words words})]
-        (let [ch (:relevance r)
-              held (into [] (keep (fn [[x]] (when-let [p (ch x)] (when (>= p leave) [x p])))) prior)
-              in? (set (map first held))
-              kind-of (fn [x] (cond (string? x) :sections (keyword? x) :schemas :else :functions))
-              ;; a line's tokens as it is drawn, whole (chars/4)
-              cost (fn [x] (quot (count (str (first (vals (dissoc (related-view db {(kind-of x) [x] :relevance {x 1.0} :doc #{x}}) :read :more))))) 4))
-              fresh (sort-by (comp - second) (filter (fn [[x p]] (and (>= p enter) (not (in? x)))) ch))]
-          (first (reduce (fn [[us used] [x p]] (let [c (cost x)] (if (<= (+ used c) (cfg/value :seon.config.render/relevance-budget)) [(conj us [x p]) (+ used c)] [us used])))
-                         [held (reduce + 0 (map (comp cost first) held))] fresh)))))))
-
-(defn included
-  "What agent key k's context includes beside task id now on db: `selected` over the work's focus, its
-  prior the agent's :seon.agent/included, never a section of the system prompt (`system-page`, the
-  request's first message); nil when the work has no vector yet."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id :string] [:maybe [:vector [:tuple :any number?]]]]}
-  [db task k]
-  (let [te (pdb/eid db :seon.task/id task) a (pdb/eid db :seon.agent/key k)]
-    ;; the system prompt's own sections are the request's first message already: never again as related
-    (when (and te a) (into [] (remove (fn [[u]] (and (string? u) (str/starts-with? u (str system-page "#")))))
-                           (selected db te a (or (:seon.agent/included (d/entity db a)) []))))))
-
-(defn shown
-  "Units [name chance] (`selected`'s) as `related`'s map, every one whole, for related-view."
-  {:malli/schema [:=> [:cat [:sequential [:tuple :any number?]]]
-                  [:map [:sections [:vector :string]] [:functions [:vector :qualified-symbol]] [:schemas [:vector :qualified-keyword]]
-                   [:relevance [:map-of :any number?]] [:doc [:set :any]] [:hidden [:map-of :keyword nat-int?]]]]}
-  [units]
-  {:sections (vec (for [[x] units :when (string? x)] x))
-   :functions (vec (for [[x] units :when (symbol? x)] x))
-   :schemas (vec (for [[x] units :when (keyword? x)] x))
-   :relevance (into {} units) :doc (set (map first units)) :hidden {}})
-
-(defn related-view
-  "What `related` answers, each a line: a section its address and its lead's first sentence
-  (seon.docs/view; its heading when it has no lead), a function its name and its doc's first
-  sentence, beside the registry keys it operates on when it names any ([line keys], its
-  :form/keywords), a schema key itself. With relevance (`related`'s :relevance), each line names its
-  chance, and one at doc depth (its :doc) shows a section's whole lead and a function's whole doc;
-  what the cut hid is counted (:hidden) with the form that lists it. With the forms that read one
-  whole (naming the text's key: a step-6 run's model read the view with (:text ...) eight times
-  over) and search further: what my.task/related and my.agent/related answer. nil when there is
-  nothing."
-  {:malli/schema [:=> [:cat :seon.host/db [:map [:sections {:optional true} [:vector :string]] [:functions {:optional true} [:vector :qualified-symbol]]
-                                           [:schemas {:optional true} [:vector :qualified-keyword]] [:relevance {:optional true} [:map-of :any number?]]
-                                           [:doc {:optional true} [:set :any]] [:hidden {:optional true} [:map-of :keyword pos-int?]]]]
-                  [:maybe [:map [:sections {:optional true} [:vector :string]]
-                           [:functions {:optional true} [:vector [:or :string [:tuple :string [:vector :qualified-keyword]]]]]
-                           [:schemas {:optional true} [:vector [:or :qualified-keyword [:tuple :qualified-keyword :string]]]]
-                           [:hidden {:optional true} [:map [:counts [:map-of :keyword pos-int?]] [:all :string]]] [:read :string] [:more :string]]]]}
-  [db {:keys [sections functions schemas relevance doc hidden]}]
-  (when (or (seq sections) (seq functions) (seq schemas) (seq hidden))
-   (let [pct (fn [x] (if-let [p (get relevance x)] (str " " (Math/round (* 100.0 (double p))) "%") ""))
-         doc? (fn [x] (contains? (or doc #{}) x))]
-    (cond-> {}
-     (seq sections) (assoc :sections (mapv #(let [x (d/entity db [:seon.section/address %]) v (docs/view db % :summary)]
-                                               (str % (pct %) ": " (or (when (doc? %) (:seon.section/lead x)) (:seon.ref/summary v) (:seon.ref/heading v))))
-                                            sections))
-     ;; with each function the registry keys its code and contract name (its :form/keywords): the
-     ;; data it operates on, which earned their tokens (docs/vector.md#what-the-work-is-likely-to-need-as-an-eval)
-     (seq functions) (assoc :functions (mapv #(let [v (d/entity db [:var/name %])
-                                                    ks (sort-by str (filter (fn [k] (pdb/eid db :schema/key k)) (:form/keywords (:var/form v))))]
-                                                ;; its keys a vector beside its line, so the one printer cuts a long one
-                                                (cond-> (str % (pct %) (some->> (:var/doc v) ((if (doc? %) identity ref/lead-sentence)) (str ": ")))
-                                                  (seq ks) (vector (vec ks))))
-                                             functions))
-     (seq schemas) (assoc :schemas (mapv #(if (get relevance %) [% (str/trim (pct %))] %) schemas))
-     (seq hidden) (assoc :hidden {:counts hidden :all "(my.task/related 0): every item scored, with its chance"})
-     true (assoc :read "(:seon.ref/text (my.agent/help \"docs/page.md#anchor\")): one section's text whole; (source ns/f) a function; (my.schema/forms :ns/key) a schema's form"
-                 :more "(my.agent/search \"your words\" {:kinds #{:section}}): sections by any text; (my.agent/search \"your words\"): functions and tasks too; (my.agent/callers 'ns/f) or (my.agent/callers :ns/key): who calls it, who operates on it")))))
 
 (declare cited)
 

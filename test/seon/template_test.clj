@@ -48,8 +48,10 @@
 (deftest the-measured-requests-are-a-users-with-their-reproduction
   ;; the capped runs of 2026-10-26: four of ten requests were already done on main and nothing on
   ;; the page said so; each request now carries the one form that reproduces it, run on main first
-  (is (= 10 (count fx/requests)))
-  (is (apply distinct? (map :seon.task/name fx/requests)) "ten different requests")
+  ;; (nine: the-related-list-says-what-each-lead-left went with the related part, task
+  ;; seon.context/the-page-is-the-render-of-what-ctx-pulls)
+  (is (= 9 (count fx/requests)))
+  (is (apply distinct? (map :seon.task/name fx/requests)) "nine different requests")
   (doseq [d fx/requests]
     (is (not (contains? d :seon.task/proofs)) "no proof given: the agent writes its own")
     (is (re-find #"Reproduce: [\(\[].*[\)\]] answers [\[\"0-9a-z].*; it should" (:seon.task/plan d)) (str "a reproduction, what it answers and what it should: " (:seon.task/name d)))
