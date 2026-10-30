@@ -29,7 +29,7 @@
     (is (= [[2 "b proofs"] [4 "d proofs"]]
            (->> (str/split-lines "a\nb proofs\nc\nd proofs") (keep-indexed (fn [i l] (when (str/includes? l "proofs") [(inc i) l])))))
         "matching lines, numbered from 1")
-    (is (= [:a :b] (->> {:a "xxxxxx" :b "x" :c 1} (update-vals (comp count pr-str)) (sort-by val >) (take 2) (map key)))
+    (is (= [:a :b] (->> (update-vals {:a "xxxxxx" :b "x" :c 1} (comp count pr-str)) (sort-by val >) (take 2) (map key)))
         "a map's keys by the size of their values")))
 
 (deftest the-first-few-by-index-cost-the-few-not-the-index
