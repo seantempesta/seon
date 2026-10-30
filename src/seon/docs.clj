@@ -399,6 +399,14 @@
   schema entry's form a :schema."
   {:var :form/src :test :form/src :section :seon.section/text :task :seon.task/plan :schema :schema/form})
 
+(defn line-of
+  "The 1-based number of the line of text that index i falls on (the count of line breaks before i, plus one).
+  The one line-number computation of context's repairs, repl's edit! and a search hit
+  (docs/references.md#resolving-and-showing)."
+  {:malli/schema [:=> [:cat :string :int] pos-int?]}
+  [text i]
+  (loop [n 1 k 0] (let [j (str/index-of text "\n" k)] (if (and j (< j i)) (recur (inc n) (inc j)) n))))
+
 (defn- line-at
   "The whole line of text v that the match at index i begins in (the match may itself hold a line break)."
   {:malli/schema [:=> [:cat :string :int] :string]}
@@ -568,7 +576,7 @@
                                  i (some->> ws (keep #(str/index-of low %)) seq (apply min))]]
                        (cond-> (assoc h :z z :bm25 (:score d))
                          (and i (= (count low) (count v)))
-                         (assoc :line (line-at v i) :at (inc (count (re-seq #"\n" (subs v 0 i)))))))]
+                         (assoc :line (line-at v i) :at (line-of v i))))]
             (->> hits (sort-by (juxt (comp - :z) (comp str :name)))
                  (reduce (fn [[seen out :as acc] h] (let [k ((juxt :kind :name) h)] (if (seen k) acc [(conj seen k) (conj out (dissoc h :rank))])))
                          [#{} []])
