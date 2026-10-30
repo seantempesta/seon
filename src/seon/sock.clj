@@ -39,6 +39,7 @@
 (def ^:private SO-RCVBUF 0x1002)
 (def ^:private SO-NOSIGPIPE 0x1022)
 (def ^:private F-GETFD 1)
+(def ^:private FD-CLOEXEC 1)
 (def ^:private F-SETFD 2)
 (def ^:private FD-CLOFORK 2)
 (def ^:private MSG-DONTWAIT 0x80)
@@ -58,14 +59,19 @@
   (with-mem [b 4] (ffi/write b :int v) (c-setsockopt fd SOL-SOCKET opt b 4)))
 
 (defn socketpair
-  "[a b]: a connected AF_UNIX stream pair with BUF buffers and SO_NOSIGPIPE (a write to a
-  dead peer answers EPIPE, not a signal)."
+  "[a b]: a connected AF_UNIX stream pair with BUF buffers, SO_NOSIGPIPE (a write to a
+  dead peer answers EPIPE, not a signal) and FD_CLOEXEC on both ends: a command this process
+  spawns (an exec) never holds them, so a forked child's write end closing is its peer's end of
+  file (a test child's pipe read as held while a command spawned beside it kept its write end:
+  task seon.agent/a-test-child-that-dies-says-why). A fork without exec keeps them, as its own
+  fds decide (clofork!, run-tests-forked's fds)."
   {:malli/schema [:=> [:cat] :seon.lib/pipe]}
   []
   (with-mem [sv 8]
     (when-not (zero? (c-socketpair AF-UNIX SOCK-STREAM 0 sv)) (throw (ex-info "socketpair failed" {:errno (ffi/errno)})))
     (let [a (ffi/read sv :int 0) b (ffi/read sv :int 4)]
-      (doseq [fd [a b]] (set-int-opt! fd SO-NOSIGPIPE 1) (set-int-opt! fd SO-SNDBUF BUF) (set-int-opt! fd SO-RCVBUF BUF))
+      (doseq [fd [a b]] (set-int-opt! fd SO-NOSIGPIPE 1) (set-int-opt! fd SO-SNDBUF BUF) (set-int-opt! fd SO-RCVBUF BUF)
+        (c-fcntl fd F-SETFD (bit-or FD-CLOEXEC (c-fcntl fd F-GETFD 0))))
       [a b])))
 
 (defn clofork!

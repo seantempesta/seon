@@ -76,3 +76,15 @@
     (lib/c-close b)
     (is (= :epipe (sock/send! a {:op :hello})))
     (lib/c-close a)))
+
+(deftest a-spawned-command-holds-no-socketpair-end
+  ;; task seon.agent/a-test-child-that-dies-says-why: a test child's pipe was read as held (:seon.test/pipe-held)
+  ;; because a process other than the child kept its write end; both ends are close-on-exec (FD_CLOEXEC,
+  ;; fcntl F_GETFD bit 1), so a command the process spawns while a pair is open holds neither, and a
+  ;; child's exit is its peer's end of file
+  (let [[a b] (sock/socketpair)
+        cloexec? (fn [fd] (= 1 (bit-and 1 (#'seon.sock/c-fcntl fd 1 0))))]
+    (try
+      (is (cloexec? a) "the first end closes at exec")
+      (is (cloexec? b) "and the second")
+      (finally (sock/close! a) (sock/close! b)))))
