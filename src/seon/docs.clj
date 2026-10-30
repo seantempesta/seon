@@ -36,6 +36,11 @@
 
 ;; ---- resolving a section's citations ----------------------------------------------------
 
+(defn- page-of
+  "The page path of section address (what comes before its #). See docs/references.md#the-wiki-in-the-store."
+  {:malli/schema [:=> [:cat :string] :string]}
+  [address] (first (str/split address #"#" 2)))
+
 (defn- under?
   "Is address a section of a page under dir (or any of dirs)? \".\" is the checkout's top level: a page with no directory."
   {:malli/schema [:=> [:cat [:or :string [:vector :string]] :string] :boolean]}
@@ -116,11 +121,12 @@
         (ref/kept db (filterv (comp qualified-symbol? :seon.ref/name) (:seon.ref/citations s)))))
 
 (defn load-tx
-  "The transaction making db hold exactly the sections of pages (path -> text), the wiki
-  under dir: every section of those pages, each stating what its own text says now, and no
-  section under dir that no page holds. A section that already states it writes nothing, so
-  an unchanged wiki answers []. A link (or cited path#anchor) that reaches no section is kept
-  on its section as :seon.section/dead-links, and the rest of the wiki loads as it is."
+  "The transaction making db hold exactly the sections of pages (path -> text), pages of the
+  wiki under dir: every section of those pages, each stating what its own text says now, and no
+  other section of those pages; a page not given is left as it is (a page gone from the checkout
+  is load-dir-tx's to retract). A section that already states it writes nothing, so an unchanged
+  page answers []. A link (or cited path#anchor) that reaches no section is kept on its section
+  as :seon.section/dead-links, and the rest of the wiki loads as it is."
   {:malli/schema [:function [:=> [:cat :seon.host/db [:or :string [:vector :string]] [:map-of :string :string]] [:vector :any]]
                   [:=> [:cat :seon.host/db [:or :string [:vector :string]] [:map-of :string :string] :map] [:vector :any]]]}
   ([db dir pages] (load-tx db dir pages {}))
@@ -156,7 +162,7 @@
                          (task/entity-tx db e section-attrs want)
                          [(assoc want :db/id a :seon.section/address a)])))
                    parsed)
-           (for [[a e] stored :when (and (under? dir a) (not (loaded a)))]
+           (for [[a e] stored :when (and (contains? pages (page-of a)) (not (loaded a)))]
              [:db/retractEntity e]))))))
 
 ;; ---- reading ----------------------------------------------------------------------------
@@ -264,12 +270,17 @@
 (defn load-dir-tx
   "The one load of the wiki under dir of the checkout (or under each of dirs, in one parse and one
   transaction) onto db: load-tx over its pages (an unchanged wiki answers [], a link to no section
-  kept on its section as a dead link). Root's boot and my.root/load-docs! both write it."
+  kept on its section as a dead link), and every section under dir of a page the checkout no
+  longer holds retracted. Root's boot and my.root/load-docs! both write it."
   {:malli/schema [:function [:=> [:cat :seon.host/db :string [:or :string [:vector :string]]] [:vector :any]]
                   [:=> [:cat :seon.host/db :string [:or :string [:vector :string]] :map] [:vector :any]]]}
   ([db checkout dir] (load-dir-tx db checkout dir {}))
   ([db checkout dir baseline]
-   (load-tx db dir (into (sorted-map) (mapcat #(pages checkout %)) (if (string? dir) [dir] dir)) baseline)))
+   (let [ps (into (sorted-map) (mapcat #(pages checkout %)) (if (string? dir) [dir] dir))]
+     (into (load-tx db dir ps baseline)
+           (for [d (d/datoms db :avet :seon.section/address)
+                 :when (and (under? dir (:v d)) (not (contains? ps (page-of (:v d)))))]
+             [:db/retractEntity (:e d)])))))
 
 ;; ---- the baseline: what a section was written against, from git ---------------------------
 
