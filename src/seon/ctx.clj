@@ -693,25 +693,41 @@
   {:malli/schema [:=> [:cat :seon.host/db :map] :map]}
   [db st] (build db (some->> (:key st) (pdb/eid db :seon.agent/key)) (:branch st)))
 
+(defonce ^:private moved-since
+  ;; the datoms ctx's patches moved the db by since the agent's page walk last took them (take-moved!),
+  ;; or :all when ctx was built whole since; the agent is one thread
+  (volatile! []))
+
+(defn take-moved!
+  "The datoms the agent's db moved by since the last take, each move's as ctx patched it (`moved`,
+  once a move), or :all when ctx was built whole since (a new agent, key or branch): what the agent's
+  page walk is given when it draws, so a db render sees every write of a commit, not only its last.
+  See docs/render.md#reactive-renders."
+  {:malli/schema [:=> [:cat] [:or [:= :all] [:vector :any]]]}
+  [] (let [m @moved-since] (vreset! moved-since []) m))
+
 (defn- on-state
   "The watch on the agent's state: a new agent, key or branch builds ctx, as does a db moved while
-  the record lacks its agent's entity; a db moved patches it;
+  the record lacks its agent's entity; a db moved patches it, its datoms kept for the page walk (take-moved!);
   a commit of what was applied (one t, one branch) moves only its :commit. What the agent heard of
   main and its merge base is no part of it: its turn writes them as facts (:seon.agent/main-commit,
   :seon.agent/base-commit), so a cold build and a replay hold what the live record holds."
   {:malli/schema [:=> [:cat :any :any :any :any] :any]}
   [_ _ o n]
   (let [a (:db o) b (:db n)
-        in install!]
+        in install!
+        whole! #(do (vreset! moved-since :all) (in (agent-record b n)))]
     (cond
       (nil? b) nil
-      (or (nil? @held) (nil? a) (not= (:key o) (:key n)) (not= (:branch o) (:branch n))) (in (agent-record b n))
+      (or (nil? @held) (nil? a) (not= (:key o) (:key n)) (not= (:branch o) (:branch n))) (whole!)
       (identical? a b) nil
       ;; the agent's entity reaches its branch after the process starts (a merge of main): until
       ;; it is there the record is its environment alone, and each move looks it up (one seek)
-      (nil? (get-in @held [:tree :db/id])) (in (agent-record b n))
+      (nil? (get-in @held [:tree :db/id])) (whole!)
       (= (:max-tx a) (:max-tx b)) (in (update @held :tree with-environment b (:branch n)))
-      :else (let [c (patch @held b (moved a b (:tx n)) (:branch n))]
+      :else (let [ds (moved a b (:tx n))
+                  _ (vswap! moved-since #(if (= :all %) % (into % ds)))
+                  c (patch @held b ds (:branch n))]
               ;; a swap!'s own transaction: installed when the swap! ends (the atom is mid-swap)
               (if *writing* (do (vreset! held c) (vreset! pending c)) (install! c))))))
 

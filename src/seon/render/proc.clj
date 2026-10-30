@@ -324,7 +324,7 @@
   "St with root's walk current as of main db: root's ctx (seon.ctx/build of root's entity on main)
   held in a reactive atom its walk draws by root's layout (:seon.render/root-ctx), built at main's
   first read, then advanced by what each move of main changed (seon.ctx/advance, its datoms
-  framed): the walk draws the components their change reached, nothing else. Every page whose
+  flushed): the walk draws the components their change reached, nothing else. Every page whose
   agents list it shows (root's, each agent's) is dirty when one of its units moved."
   {:malli/schema [:=> [:cat :map :seon.host/db [:maybe :seon.host/db]] :map]}
   [st db held]
@@ -336,7 +336,7 @@
       (nil? rw)
       (let [c (ctx/build db root :main) a (ratom/atom (:tree c)) at (volatile! db)
             w (render/walker {:ref a :changes ctx/changes} (fn [] @at) [(render/declared-var :seon.render/root-ctx) {}])]
-        (render/frame! w nil)
+        (render/flush! w nil)
         (-> (assoc st :root-walk {:w w :a a :c c :at at})
             (update :dirty (fnil into #{}) (keys (:views st)))))
       (nil? held) st
@@ -347,7 +347,7 @@
         (vreset! at db)
         ;; root's process (process!) is root's own data beside the pull: kept across a move of main
         (reset! a (cond-> (:tree c') (:process @a) (assoc :process (:process @a)) (:health @a) (assoc :health (:health @a))))
-        (render/frame! w (ctx/moved held db nil))
+        (render/flush! w (ctx/moved held db nil))
         (cond-> (assoc-in st [:root-walk :c] c')
           true (update :dirty (fnil conj #{}) :root)
           (not= before (side w)) (update :dirty (fnil into #{}) (keys (:views st))))))))
@@ -356,14 +356,14 @@
   "St with root's process value p (root's ruling on root's process values, option a: the writer's, the fork
   server's and the store's numbers, each proc's defects and the event stream are root's own data,
   part of root's ctx beside its db pull, never written) in root's walk: when it differs from what
-  the walk holds, assoc'd into root's ctx and framed, so the one component that reads it runs again."
+  the walk holds, assoc'd into root's ctx and flushed, so the one component that reads it runs again."
   {:malli/schema [:=> [:cat :map :map] :map]}
   [st p]
   (if-let [{:keys [w a]} (:root-walk st)]
     (if (= p (:process @a))
       st
       (do (reset! a (assoc @a :process p))
-          (render/frame! w nil)
+          (render/flush! w nil)
           (update st :dirty (fnil conj #{}) :root)))
     st))
 
@@ -375,7 +375,7 @@
   index); it is changed by the datoms that moved between that main (made again with
   `seon.db/at-commit`) and this one (`seon.problems/health-moved`, which reads the runs and sections
   they touched and not the closed history, however many commits the gap holds), or read whole when
-  none is held or the held one was read from a db ahead of its commit. When no class changed, the held report stays and nothing is framed.
+  none is held or the held one was read from a db ahead of its commit. When no class changed, the held report stays and nothing is flushed.
   See docs/render.md#health-is-what-flows."
   {:malli/schema [:=> [:cat :map] :map]}
   [st]
@@ -392,7 +392,7 @@
           (if (= (:classes h) (:classes prev))
             st
             (do (reset! a (assoc @a :health h))
-                (render/frame! w nil)
+                (render/flush! w nil)
                 (update st :dirty (fnil conj #{}) :root))))))
     st))
 

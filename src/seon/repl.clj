@@ -801,29 +801,13 @@
         (swap! agent/state assoc :walk w)
         w)))
 
-(defn- walked-db
-  "The db the walk last framed at, from its reference {:branch :commit :t}: this branch's current
-  db when that is the commit, else made from the store (seon.db/at-commit, which reads the commit
-  and lets it go with its caller). The state keeps the reference, never the db value, which would
-  pin its whole version of the index (AGENTS 4, a kept db value is a reference)."
-  {:malli/schema [:=> [:cat [:maybe :map]] [:maybe :seon.host/db]]}
-  [{:keys [commit]}]
-  (when commit
-    (let [db (agent/db)]
-      (if (= commit (d/commit-id db)) db (pdb/at-commit (:store-conn @agent/state) commit)))))
-
-(defn- framed
-  "This agent's walk drawn as of now (seon.render/frame!), under its branch's schemas: what changed
-  since the last frame re-run (the reactions ctx's patch reached, the db components the datoms
-  touched since the db last framed)."
+(defn- page-walk
+  "This agent's page walk drawn up to now (seon.render/flush!), under its branch's schemas: the
+  components ctx's patches reached, and the db renders whose reads the datoms its db moved by since
+  the last draw touched (seon.ctx/take-moved!)."
   {:malli/schema [:=> [:cat] :map]}
   []
-  (with-branch-schemas
-    #(let [w (the-walk) db (agent/db) held (:walk-db @agent/state)
-           ref (when db {:branch (:branch @agent/state) :commit (d/commit-id db) :t (:max-tx db)})]
-       (render/frame! w (when (and held db (not= held ref)) (ctx/moved (walked-db held) db nil)))
-       (swap! agent/state assoc :walk-db ref)
-       w)))
+  (with-branch-schemas #(let [w (the-walk)] (render/flush! w (ctx/take-moved!)) w)))
 
 (defn render-ctx
   "This agent's render of ctx as its components' html (root's render proc asks, its {:op :render}:
@@ -832,7 +816,7 @@
   nothing (the :render op takes the facts main holds of its own entities first)."
   {:malli/schema [:=> [:cat] [:map [:t :int] [:units [:vector :map]]]]}
   []
-  {:t (or (:t @ctx/ctx) 0) :units (render/placed-units (framed))})
+  {:t (or (:t @ctx/ctx) 0) :units (render/placed-units (page-walk))})
 
 (defn render-ctx-hiccup
   "This agent's render of ctx as the user sees it: every component of its three lists (its task's,
@@ -840,24 +824,24 @@
   as its render returned it, by its element id, in order: the hiccup render-ctx's html is written
   from, nothing left out."
   {:malli/schema [:=> [:cat] :map]}
-  [] (let [w (framed)] (apply array-map (mapcat identity (render/placed-hiccup w ["#p-task" "#c-rows" "#p-tiles"])))))
+  [] (let [w (page-walk)] (apply array-map (mapcat identity (render/placed-hiccup w ["#p-task" "#c-rows" "#p-tiles"])))))
 
 (defn page-hiccup
   "This agent's parts as its model reads them now, from its live walk (seon.context/page-lists): each
   component run again only where what it read changed, so a turn's parts cost what changed (a cold
-  draw, seon.context/drawn-parts, costs every component). [db parts]: the db it framed at, which the request is
+  draw, seon.context/drawn-parts, costs every component). [db parts]: the db it is drawn to, which the request is
   made on, and {element-id hiccup}, in order (seon.context/request sends what changed of them)."
   {:malli/schema [:=> [:cat] [:tuple :seon.host/db :map]]}
-  [] (let [w (framed)] [(walked-db (:walk-db @agent/state)) (apply array-map (mapcat identity (render/placed-hiccup w context/page-lists)))]))
+  [] (let [w (page-walk)] [(agent/db) (apply array-map (mapcat identity (render/placed-hiccup w context/page-lists)))]))
 
 (defn page-parts
-  "This agent's parts now, from its live walk framed once (`page-hiccup`'s): [db parts data], the db it
-  framed at, what the model reads of each part ({element-id content}) and the data of each part that
+  "This agent's parts now, from its live walk drawn once (`page-hiccup`'s): [db parts data], the db it
+  is drawn to, what the model reads of each part ({element-id content}) and the data of each part that
   answered data ({schema-key data}, seon.render/placed-data): the turn decides from the status and
-  draws its request from the same frame (docs/render.md#a-part-answers-data)."
+  draws its request from the same draw (docs/render.md#a-part-answers-data)."
   {:malli/schema [:=> [:cat] [:tuple :seon.host/db :map :map]]}
-  [] (let [w (framed)]
-       [(walked-db (:walk-db @agent/state)) (apply array-map (mapcat identity (render/placed-hiccup w context/page-lists)))
+  [] (let [w (page-walk)]
+       [(agent/db) (apply array-map (mapcat identity (render/placed-hiccup w context/page-lists)))
         (render/placed-data w context/page-lists)]))
 
 ;; ---- the process: a Flow graph of three procs on the agent's one thread ----------------

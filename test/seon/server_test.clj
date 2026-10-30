@@ -324,7 +324,7 @@
   ;; contracted calls, two pages drawn a read (the one before's again, to diff against). Each read after
   ;; the first draws the one page it tells and costs what the read before did: ticks and bytes are the
   ;; process's exact counts (seon.profile/measure!); its page is the agent's live walk's (seon.repl/page-hiccup),
-  ;; so seon.context/drawn-parts, the cold draw, is never called, and it equals the cold draw at the commit it framed at
+  ;; so seon.context/drawn-parts, the cold draw, is never called, and it equals the cold draw on the db it is drawn to
   (let [[reads]
         (at/in-agent (fn [{:keys []}]
                        [(str "(let [t (:task @seon.agent/state) r (:run @seon.agent/state)"
@@ -339,7 +339,7 @@
                              "                (or (= page cold) (vec (for [k (distinct (concat (keys page) (keys cold))) :when (not= (get page k) (get cold k))] k))))})")]))
         later (rest (:reads (:value reads)))]
     (is (= 9 (count (:reads (:value reads)))))
-    (is (true? (:live=cold (:value reads))) (str "the live walk's page is the cold draw's at the commit it framed at; differing: " (pr-str (:live=cold (:value reads)))))
+    (is (true? (:live=cold (:value reads))) (str "the live walk's page is the cold draw's on the db it is drawn to; differing: " (pr-str (:live=cold (:value reads)))))
     (is (every? #(nil? (:pages %)) later) (str "each later read draws no page cold, its page the live walk's: " (pr-str (map :pages later))))
     ;; a read costs what changed (the render's views, docs/render.md): main's commit moving between two reads
     ;; (an earlier test's task merging in this root) redraws the branch views, which the task's render

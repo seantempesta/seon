@@ -4,7 +4,7 @@
   each key by its own schema's render. Run: bin/test seon.ctx-test"
   (:refer-clojure :exclude [defn defn-])
   (:require [clojure.test :refer [deftest is testing]] [seon.contract :refer [defn defn-]] [seon.cost :as cost]
-            [seon.test-store :as ts] [datahike.api :as d] [seon.ctx :as ctx] [seon.db :as pdb] [seon.context :as context] [seon.task :as task] [seon.vector :as vector] [seon.render :as render] [seon.render.ui] [seon.repl] [seon.agent] [seon.web.html] [seon.root] [my.schema] [clojure.test.check :as tc] [clojure.test.check.generators :as gen] [clojure.test.check.properties :as prop] [seon.proofs :as proofs] [clojure.string :as str] [clojure.walk :as walk]))
+            [seon.test-store :as ts] [datahike.api :as d] [seon.ctx :as ctx] [seon.db :as pdb] [seon.context :as context] [seon.task :as task] [seon.vector :as vector] [seon.render :as render] [seon.render.ui] [seon.repl] [seon.agent] [seon.web.html] [seon.root] [my.schema] [clojure.test.check :as tc] [clojure.test.check.generators :as gen] [clojure.test.check.properties :as prop] [seon.proofs :as proofs] [clojure.string :as str] [clojure.walk :as walk] [clojure.set]))
 
 (def ^:private k "The test agent's key." "test-boot/a1")
 
@@ -82,6 +82,9 @@
                                                     ;; the citations its plan's write derives (seon.task/references-of): the page draws one part each
                                                     :seon.task/citations (vec (seon.ref/cited (:seon.ref/citations (seon.ref/parse nil "Make `app.x/f0` pass, then `app.x/f1`; see [the x](docs/x.md#the-x)."))))
                                                     :seon.task/execution :running :seon.task/branch :main/lab-ctx}
+                                                   ;; app.x is the program's (a file under src/), so the references its plan's text
+                                                   ;; derives are the ones written here (seon.program/program-names)
+                                                   {:ns/name 'app.x :ns/file "src/app/x.clj"}
                                                    {:db/id "f0" :form/id "app.x/f0-1" :form/src "(defn f0 [x] x)"} {:var/name 'app.x/f0 :var/form "f0"}
                                                    {:form/id "app.x/c-1" :form/src "(defn c [] (f0 1))" :form/refs #{'app.x/f0}}
                                                    {:seon.section/address "docs/x.md#the-x" :seon.section/heading "The x" :seon.section/lead "What x does." :seon.section/text "What x does."}
@@ -767,6 +770,25 @@
        [(#'seon.repl/with-branch-schemas f) (:db @seon.agent/state)]
        (finally (end-agent!))))
 
+(deftest the-page-reads-every-write-since-it-was-drawn
+  ;; docs/render.md#reactive-renders: the agent's page walk is given every datom its db moved by since
+  ;; it last drew (ctx's own diff of each move, seon.ctx/take-moved!), so a db component sees a write
+  ;; however many others came after it in the same commit (the walk read the db as of its last commit
+  ;; and saw only the last transaction's datoms: a plan's new citation drew nothing until a commit)
+  (let [db (d/db-with (seeded 20 nil) [{:seon.section/address "docs/x.md#the-z" :seon.section/heading "The z"
+                                         :seon.section/lead "What z does." :seon.section/text "What z does."}])
+        page #(pr-str (second (seon.repl/page-hiccup)))
+        [[before after] db'] (as-agent! db #(let [before (page)]
+                                               (swap! ctx/ctx assoc-in [:task :seon.task/plan] "Make `app.x/f0` pass; see [the z](docs/x.md#the-z).")
+                                               (seon.agent/transact! [{:seon.agent/key k :seon.agent/description "another write after it"}])
+                                               [before (page)]))
+        cold (pr-str (context/drawn-parts db' (ctx/build db' (pdb/eid db' :seon.agent/key k) :b)))]
+    (is (str/includes? before "What x does.") "the section the plan cited before")
+    (is (not (str/includes? before "What z does.")))
+    (is (str/includes? after "What z does.") "the section the plan cites now, drawn in the same commit")
+    (is (not (str/includes? after "What x does.")) "and not the one it no longer cites")
+    (is (= cold after) "the live page is the cold draw of the db it is drawn to")))
+
 (deftest a-tasks-record-holds-what-its-work-needs
   ;; the 20-turn context (shared note context-for-20-turns): the cited sections' text (D3), the
   ;; cited vars whole with their forms (D2) and their callers, the tests among them (D1), and
@@ -858,6 +880,16 @@
       (let [[_ db'] (step db #(swap! ctx/ctx update :evals dissoc (id db [:seon.eval/id "e3"])))]
         (is (nil? (d/entity db' [:seon.eval/id "e3"])))
         (is (some? (d/entity db' [:seon.eval/id "e4"])))))
+    (testing "a plan's references follow its text: what it cites written with it, by the one parser (seon.task/rederive-tx)"
+      (let [r1 (id db [:seon.run/id "lab/ctx#1"])
+            plan "Make `app.x/f0` pass; see [the y](docs/x.md#the-y)."
+            [[_ same] db'] (step db #(swap! ctx/ctx assoc-in [:runs r1 :task :seon.task/plan] plan))
+            t (d/entity db' [:seon.task/id "lab/ctx"])]
+        (is (= plan (:seon.task/plan t)))
+        (is (= #{"docs/x.md#the-y"} (set (:seon.task/sections t))) "the section it links now, and not the one before")
+        (is (= #{'app.x/f0} (set (:seon.task/references t))) "app.x/f0 and not app.x/f1, which it no longer cites")
+        (is (= (vec (seon.ref/cited (:seon.ref/citations (seon.ref/parse nil plan)))) (:seon.task/citations t)) "its citations, the new text's")
+        (is same "the record after the swap! is the db's, the derived facts in it")))
     (testing "a member's attribute, and a new member, written under its parent by the unit's ref"
       (let [r1 (id db [:seon.run/id "lab/ctx#1"])
             [[_ same] db'] (step db #(swap! ctx/ctx (fn [c] (-> c (assoc-in [:runs r1 :seon.run/status] :done)
@@ -966,10 +998,11 @@
      :n "evals in the session's record"
      :work (str "the task's plan changed: edits finds the one attribute (the evals unit skipped by one "
                 "identical?), one d/with, the datom applied to the agent's db, the patch of it (the task "
-                "rebuilt where it is held), the record installed, and one-swap itself; measured 39 calls, 117k-122k ticks and "
-                "400-409 KB at 100, 300, 1,000 and 3,000 evals")
+                "rebuilt where it is held), the record installed, and one-swap itself; and, the plan being text, what it cites "
+                "derived in the same transaction (seon.agent/with-citations: a d/with and the one parser over the sentence, "
+                "61 calls, which my.task/update! paid before every writer did); measured 101 calls at 100, 300 and 1,000 evals")
      :growth :constant
-     :fixed {:calls 40}
+     :fixed {:calls 101}
      :sizes [100 300 1000 3000]})
   ;; no record left behind: an empty state builds none (as-agent!'s callers leave theirs too)
   (reset! seon.agent/state nil))

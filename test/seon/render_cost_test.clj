@@ -297,7 +297,7 @@
   "The input of size n: an agent's page walked live (seon.render/walker over a reactive atom holding
   its ctx: n evals, each a record of a short form and its value, by eid newest first, as
   seon.ctx/build holds them) and drawn once, then one eval's value changed (the atom reset! as the
-  patch does, the eval's component queued by its reaction): what frame! draws."
+  patch does, the eval's component queued by its reaction): what flush! draws."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map :seon.host/deref]]}
   [n]
   (let [evals (#'seon.ctx/members-map
@@ -306,7 +306,7 @@
                                  :seon.eval/record {:code (str "(inc " i ")") :response {:handle (symbol "result" id) :value (inc i)}}}]))
         a (seon.ratom/atom {:db/id 1 :seon.agent/key "b/a1" :seon.agent/id :a1 :evals evals})
         w (seon.render/walker {:ref a :changes seon.ctx/changes} (constantly (ts/test-db)) [(requiring-resolve (seon.render/declared :seon.render/render-ctx)) {}])]
-    (seon.render/frame! w nil)
+    (seon.render/flush! w nil)
     [w a]))
 
 (defn redraw!
@@ -315,7 +315,7 @@
   {:malli/schema [:=> [:cat :map :seon.host/deref] [:map-of [:vector :any] [:enum :miss :same]]]}
   [w a]
   (swap! a update-in [:evals 10 :seon.eval/opened] not)
-  (seon.render/frame! w nil))
+  (seon.render/flush! w nil))
 
 (deftest a-change-costs-its-components
   ;; task seon.render/a-page-is-its-components: a change draws the components whose read paths it

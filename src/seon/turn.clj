@@ -85,7 +85,7 @@
     {:test-run test-run :tests-ms tests-ms :task (task/task (agent/db) id)}))
 
 (defn- status-now
-  "How the work stands now, from the agent's walk framed once (seon.repl/page-parts): the status
+  "How the work stands now, from the agent's walk drawn once (seon.repl/page-parts): the status
   part's data (seon.context/status), which the page and the model read too, so a turn computes it
   once. A walk that drew no status (its render threw, or the layout placed none) is the typed
   :seon.turn/no-status, never an empty status: no reason is not done (AGENTS 9, unknown is not {})."
@@ -271,7 +271,7 @@
         _ (agent/commit!)
         ;; what the run's earlier requests printed, reused by each record's id (seon.context/printed-run)
         ;; its parts are the live walk's (what changed since the frame before), never drawn cold, and the
-        ;; request is made on the db the walk framed at: one commit for both
+        ;; request is made on the db the walk is drawn to: one db for both
         [db parts] (repl/page-hiccup)
         {:keys [messages sent printed]} (context/render db basis {:printed (get-in @agent/state [:printed run]) :parts parts})
         _ (swap! agent/state assoc :printed {run printed})

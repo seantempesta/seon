@@ -252,12 +252,27 @@
   one diff, seon.ctx/changes), the db its db renders read (db-fn, called when one runs) and its
   root call. Holds, in this process, the one cache: each component's reaction, args, output and
   db reads ({key entry}), its render queue (the keys a change reached), mount counter and ledger
-  (calls, hits, misses and allocation by render var). A cold walk (root drawing a branch) is a
+  (calls, hits, misses and allocation by render var), and the keys of each render var it drew, whose
+  var it watches (a redefinition queues them: `watch-render!`). A cold walk (root drawing a branch) is a
   walker drawn once."
   {:malli/schema [:=> [:cat :map :seon.host/fn [:vector :any]] :map]}
   [src db-fn root]
   {:src src :db db-fn :root root :cache (volatile! {}) :queue (volatile! #{}) :mounts (volatile! 0)
-   :ledger (volatile! {}) :out (volatile! nil) :db-keys (volatile! #{})})
+   :ledger (volatile! {}) :out (volatile! nil) :db-keys (volatile! #{}) :by-var (volatile! {})})
+
+(defn- watch-render!
+  "Component k of render var f mounted in walk w (on? true) or gone (false): the keys w holds of f, and a
+  watch on f while it holds any, whose firing (f redefined: a defn at the REPL, Clojure's watch on a
+  var's root) queues them for the next flush!, as a change of what they read does. The watch's key is
+  the walk's own index, so walks never share one."
+  {:malli/schema [:=> [:cat :map :any [:vector :any] :boolean] :nil]}
+  [w f k on?]
+  (when (var? f)
+    (let [ix (:by-var w) had (get @ix f)]
+      (vswap! ix (fn [m] (let [ks ((if on? (fnil conj #{}) disj) (get m f) k)] (if (seq ks) (assoc m f ks) (dissoc m f)))))
+      (cond (and on? (empty? had)) (add-watch f ix (fn [_ _ _ _] (vswap! (:queue w) into (get @ix f))))
+            (and (not on?) (seq had) (empty? (get @ix f))) (remove-watch f ix))))
+  nil)
 
 (defn- led!
   "Count k (:hit, :miss, :same) for render var f in w's ledger, with the ticks and bytes a run took."
@@ -302,7 +317,7 @@
             o (cond-> opts
                 (contains? ks :seon.ctx/ctx) (assoc :seon.ctx/ctx (ratom/fresh (ratom/ref-view (:ref (:src w)) (:changes (:src w)))))
                 db? (assoc :seon.db/db ((:db w))))
-            order (or (:order prev) (vswap! (:mounts w) inc))
+            order (or (:order prev) (do (watch-render! w f k true) (vswap! (:mounts w) inc)))
             kids (volatile! [])
             id (key-id k)
             reads (volatile! nil)
@@ -348,6 +363,7 @@
   [w k]
   (when-let [c (get @(:cache w) k)]
     (some-> (:rx c) ratom/dispose!)
+    (watch-render! w (:f c) k false)
     (vswap! (:cache w) dissoc k)
     (vswap! (:queue w) disj k)
     (vswap! (:db-keys w) disj k)
@@ -400,20 +416,23 @@
      (clojure.walk/postwalk (fn [x] (if (and (vector? x) (= ::child (first x))) (resolved w (second x) html?) x))
                             (cond-> (:out c) html? (styled (:f c)))))))
 
-(defn frame!
-  "Walk w drawn as of now: its root on the first frame, then each component a change queued (a
-  reaction's, after seon.ratom/flush!: Reagent's batching, one frame a commit) or whose db reads
-  datoms touch, in mount order, parents first. Answers what it ran, {key :miss} for an output new
+(defn flush!
+  "Walk w drawn as of now, Reagent's batching flush (reagent.core/flush: the queued components rendered
+  at once): its root on the first, then each component a change queued (a reaction's, after
+  seon.ratom/flush!; a render var redefined) or whose db reads
+  datoms touch (:all: every db render), in mount order, parents first. Answers what it ran, {key :miss} for an output new
   and {key :same} for one = to the last, the components it skipped left out ({} when nothing a
   render read changed). See docs/render.md#reactive-renders."
-  {:malli/schema [:=> [:cat :map [:maybe [:sequential :any]]] [:map-of [:vector :any] [:enum :miss :same]]]}
+  {:malli/schema [:=> [:cat :map [:or [:= :all] [:maybe [:sequential :any]]]] [:map-of [:vector :any] [:enum :miss :same]]]}
   [w datoms]
-  (let [env {:children (volatile! []) :datoms datoms :only (:only w) :ran (volatile! {})}]
+  (let [env {:children (volatile! []) :datoms (when-not (= :all datoms) datoms) :only (:only w) :ran (volatile! {})}]
     (if-let [root @(:out w)]
       (do (ratom/flush!)
-          (when (seq datoms)
-            (doseq [k @(:db-keys w) :let [c (get @(:cache w) k)] :when (d/reads-touched? (:reads c) datoms)]
-              (vswap! (:queue w) conj k)))
+          (if (= :all datoms)
+            (vswap! (:queue w) into @(:db-keys w))
+            (when (seq datoms)
+              (doseq [k @(:db-keys w) :let [c (get @(:cache w) k)] :when (d/reads-touched? (:reads c) datoms)]
+                (vswap! (:queue w) conj k))))
           (loop []
             (when-let [k (first (sort-by #(:order (get @(:cache w) %)) (filter #(contains? @(:cache w) %) @(:queue w))))]
               (let [{:keys [f opts args]} (get @(:cache w) k)] (render! w f opts args (assoc env :children (volatile! []))))
@@ -452,7 +471,7 @@
   [w]
   (vec (for [[sel k] (placed w) :let [c (get @(:cache w) k)]]
          (let [r (tree-rev w k)
-               ;; its html written once a revision (a render of 15 units re-written each frame cost
+               ;; its html written once a revision (a render of 15 units re-written each flush cost
                ;; 2.2M ticks for a change that drew nothing): kept on its cache entry, by its revision
                html (if (= r (:unit-rev c)) (:unit-html c)
                         (let [h (h/html (resolved w k true))] (vswap! (:cache w) update k assoc :unit-rev r :unit-html h) h))]
@@ -499,7 +518,7 @@
 
 (defn draw
   "Tree t (a ctx value: seon.ctx/build's :tree) drawn once by the layout var root-var over db, its
-  diff changes: a walker over a reactive atom holding t, framed. Its caller reads it
+  diff changes: a walker over a reactive atom holding t, flushed once. Its caller reads it
   (placed-units, placed-hiccup) and disposes it (dispose-walk!): root drawing an agent's branch, the
   model's page at a commit. With sels, the element ids of the lists its caller reads ([\"#p-task\"]),
   only those lists are drawn: the layout's outer element is, and of the elements inside it the ones with an
@@ -510,7 +529,7 @@
   ([t changes db root-var] (draw t changes db root-var nil))
   ([t changes db root-var sels]
    (let [w (cond-> (walker {:ref (ratom/atom t) :changes changes} (constantly db) [root-var {}]) (seq sels) (assoc :only (set sels)))]
-     (frame! w nil)
+     (flush! w nil)
      w)))
 
 (defn ledger
