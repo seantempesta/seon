@@ -136,7 +136,8 @@
   (let [bound (seon.config/value :seon.config.shrink/form-tokens)
         db (t/with (t/world)
                    (t/code 'app.long (str "(ns app.long)\n(defn big [] \"" (apply str (repeat (* 4 bound) \x)) "\")\n(defn small [] 1)\n"))
-                   (t/code 'app.long-test "(ns app.long-test (:require [clojure.test :refer [deftest is]] [app.long :as l]))\n(deftest big-is-text (is (string? (l/big))))\n"))
+                   (t/code 'app.long-test (str "(ns app.long-test (:require [clojure.test :refer [deftest is]] [app.long :as l]))\n(deftest big-is-text (is (string? (l/big))))\n"
+                                              "(deftest long-test (is (= \"" (apply str (repeat (* 4 bound) \y)) "\" (str \"\"))))\n")))
         g (program/reach-indexed (program/reach-graph db nil) (second (seon.agent/test-inputs db)))
         tx (my.root/findings-tx db g)
         tk (first (filter #(= "app.long/shrink-big" (:seon.task/id %)) tx))]
@@ -146,4 +147,6 @@
     (is (re-find #"my.agent/cost 'app.long/big" (:seon.task/plan tk)) "and how to measure its cost before it starts")
     (is (= :held (:seon.task/execution tk)) "held until released")
     (is (not-any? #(re-find #"shrink-small" (str (:seon.task/id %))) tx) "a function under the bound is no task")
+    (is (= #{'app.long-test/long-test} (set (:seon.task/proofs (first (filter #(= "app.long-test/shrink-long-test" (:seon.task/id %)) tx)))))
+        "a long test is its own proof (no test reaches a test)")
     (is (= [] (filterv :seon.task/id (my.root/findings-tx (datahike.core/db-with db tx) g))) "filed once")))

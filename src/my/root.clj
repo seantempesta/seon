@@ -569,12 +569,14 @@
 (defn findings-tx
   "The held tasks the :long-form findings over db's program ask for (seon.problems/long-forms over every
   var, src and test alike), each from its template (seon.template/finding) with the tests reaching its var
-  in reach graph g (seon.program/reach-indexed) as its proofs, and none for a var whose task db holds:
+  in reach graph g (seon.program/reach-indexed) as its proofs (a test, itself), and none for a var whose task db holds:
   tx-data, [] when there is nothing to file. See docs/health.md#a-form-too-long."
   {:malli/schema [:=> [:cat :seon.host/db :map] [:sequential :any]]}
   [db g]
   (let [decls (vec (for [r (problems/long-forms db {} (into #{} (map :v) (d/datoms db :aevt :var/name)))
-                         :let [decl (tpl/finding r (set (program/tests-reaching g (:var r))))]
+                         :let [v (:var r)
+                               ;; a long test is its own proof: no test reaches a test
+                               decl (tpl/finding r (if (contains? (:tests g) v) #{v} (set (program/tests-reaching g v))))]
                          :when (not (pdb/eid db :seon.task/id (task/task-id (:seon.task/ns decl) (:seon.task/name decl))))]
                      decl))]
     (if (seq decls) (task/create-tx db decls) [])))
