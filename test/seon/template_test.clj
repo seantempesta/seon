@@ -4,7 +4,7 @@
   one branch are the experiments' choice), and the reconciler forks its first agent only from a
   main that holds all of it (task seon.template/a-request-is-one-linked-transaction).
   Run: bin/test seon.template-test"
-  (:require [seon.test-store :as ts] [clojure.test :refer [deftest is]] [clojure.edn]
+  (:require [seon.test-store :as ts] [clojure.test :refer [deftest is]] [clojure.edn] [my.test :as t] [my.root] [seon.program :as program] [seon.agent]
             [datahike.api :as d]
             [seon.db :as pdb] [seon.task :as task] [seon.reconcile :as r] [seon.template :as tpl] [seon.fixtures :as fx] [clojure.string :as str]))
 
@@ -128,3 +128,22 @@
                                               (task/session-key db "demo/workouts-implement")))]
       (is (= "boot-1/a1" (:seon.agent/key (:seon.run/agent (d/entity db [:seon.run/id "demo/workouts-implement#1"]))))
           "a process of a later boot, on the session's agent"))))
+
+(deftest a-long-form-becomes-a-task-that-names-its-size-tests-and-ticks
+  ;; task seon.template/a-finding-is-a-task (docs/health.md#a-form-too-long): a function over the bound is a
+  ;; held task from its template, its proofs the tests reaching it, its plan naming its size and how to
+  ;; measure its cost; one under the bound is none, and a var whose task main holds is filed once
+  (let [bound (seon.config/value :seon.config.shrink/form-tokens)
+        db (t/with (t/world)
+                   (t/code 'app.long (str "(ns app.long)\n(defn big [] \"" (apply str (repeat (* 4 bound) \x)) "\")\n(defn small [] 1)\n"))
+                   (t/code 'app.long-test "(ns app.long-test (:require [clojure.test :refer [deftest is]] [app.long :as l]))\n(deftest big-is-text (is (string? (l/big))))\n"))
+        g (program/reach-indexed (program/reach-graph db nil) (second (seon.agent/test-inputs db)))
+        tx (my.root/findings-tx db g)
+        tk (first (filter #(= "app.long/shrink-big" (:seon.task/id %)) tx))]
+    (is (some? tk) "the long function's task")
+    (is (= #{'app.long-test/big-is-text} (set (:seon.task/proofs tk))) "its proofs: the tests reaching it")
+    (is (re-find #"`app.long/big` is \d+ tokens, over the bound of" (:seon.task/plan tk)) "its plan names its size and the bound")
+    (is (re-find #"my.agent/cost 'app.long/big" (:seon.task/plan tk)) "and how to measure its cost before it starts")
+    (is (= :held (:seon.task/execution tk)) "held until released")
+    (is (not-any? #(re-find #"shrink-small" (str (:seon.task/id %))) tx) "a function under the bound is no task")
+    (is (= [] (filterv :seon.task/id (my.root/findings-tx (datahike.core/db-with db tx) g))) "filed once")))

@@ -93,7 +93,9 @@
 (def ^:private still-worked
   "Task entries whose branch merged and whose work goes on under the same entry, each with its reason."
   {"seon.reconcile/one-observe-descends-once" "merged as the stored-shape measurement only; the one multi-prefix datoms-diff walk its plan asks for is still a per-attribute loop (low priority in its plan)"
-   "seon.template/a-finding-is-a-task" "step 1 merged (3fac2a4f04: the :long-form class); the template and root's writing of the tasks still to do"
+   "seon.program/a-test-reading-mains-history-takes-its-head" "filed by batch 49's merge, which names it as found, not done"
+   "seon.agent/a-test-child-that-dies-says-why" "batch 49 made the error visible (seon.proofs/answer); its cause is still to find"
+   "seon.template/a-finding-is-a-task" "its first kind merged (the :long-form class, its template, my.root/file-findings!); the later kinds (long sections, leads, large answers, flaky tests) still to do"
    "my.test/a-test-runs-in-the-world" "the world and two shrink groups merged (15b53fa3ae names it); the rest of the heavy tests, the world as the test store's seed and the ceiling at 2e8 still to do"
    "seon.render/walk" "render work still moving: later branches finish it"
    "seon.render/page" "render work still moving: later branches finish it"
