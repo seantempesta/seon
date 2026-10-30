@@ -163,6 +163,13 @@
       (when-not (= (d/commit-id base) (d/commit-id main))
         (main-line base (db) main)))))
 
+(defn main-moved?
+  "Has main (main, as last heard) moved past this branch's merge base (base)? The one comparison main-line's
+  report starts from, by commit. See docs/merging.md#main-moved-is-said-at-every-eval."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db]] :boolean]}
+  [base main]
+  (boolean (and base main (not= (d/commit-id base) (d/commit-id main)))))
+
 (defn untaken-entries
   "The entries main holds to the runs of this agent's session (the runs on its branch, as main
   names them) that its branch does not hold yet, in main's order (by transaction, then id): each {:id :kind :from :to :body}.

@@ -12,7 +12,7 @@
             [seon.program :as program] [seon.docs]
             [seon.edn :as sedn] [seon.contract :as contract] [malli.core :as m] [malli.generator :as mg]
             [my.schema :as schema]
-            [seon.source :as source]
+            [seon.source :as source] [seon.writer]
             [clojure.string :as str] [clojure.edn :as edn]))
 
 (defn- empty-db [] (ts/test-db))
@@ -97,6 +97,37 @@
         t (with (base) (var-tx "n" "(* 2 x)"))]
     (is (= (d/q '[:find ?e . :where [?e :var/name app/n]] o) (d/q '[:find ?e . :where [?e :var/name app/n]] t)))
     (is (= {:apply [] :conflicts []} (select-keys (tw o t) [:apply :conflicts])))))
+
+;; docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program: md-scan 29's branch held batch 42's code and
+;; the morning's wiki, so a catch main's wiki named read as one the branch unnamed, and held its done
+(deftest a-branch-takes-mains-wiki
+  (let [page (fn [t] (str "# P\n\nIt says " t ".\n\n## Kept\n\nIt stays.\n"))
+        load (fn [db pages] (d/db-with db (seon.docs/load-tx db "demo" pages)))
+        b (load (base) {"demo/p.md" (page "one") "demo/gone.md" "# Gone\n\nIt goes.\n" "demo/both.md" "# Both\n\nBase.\n"})
+        theirs (-> b
+                   (load {"demo/p.md" (page "two") "demo/new.md" "# New\n\nIt is new.\n" "demo/both.md" "# Both\n\nMain's.\n"})
+                   (#(d/db-with % (for [x (d/datoms % :avet :seon.section/address "demo/gone.md#gone")] [:db/retractEntity (:e x)]))))
+        ours (-> b (with (var-tx "n" "1")) (load {"demo/both.md" "# Both\n\nThe branch's.\n"}))
+        r (pm/delta-three-way b ours theirs #{})
+        merged (d/db-with ours (pm/merge-tx ours b theirs (:apply r) #{}))
+        addrs #(set (map :v (d/datoms % :avet :seon.section/address)))]
+    (is (= "It says two." (:seon.section/text (d/entity merged [:seon.section/address "demo/p.md#p"]))) "main's edit overwrites the branch's copy")
+    (is (= (addrs theirs) (addrs merged)) "main's new page reaches the branch, and its removed one leaves it")
+    (is (= [[:section "demo/both.md#both"]] (mapv :key (:conflicts r))) "a section both changed is a conflict, as a var is")
+    (is (= "The branch's." (:seon.section/text (d/entity merged [:seon.section/address "demo/both.md#both"]))) "and the branch keeps its own until it resolves it")
+    (is (some? (d/entity merged [:var/name 'app/n])) "the branch's own work stays")
+    (is (empty? (:apply (pm/delta-three-way theirs theirs theirs #{}))) "a branch holding main's wiki takes nothing")))
+
+;; docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program: a branch's own wiki edit would merge into main's db
+;; and be lost at the next load of docs/, so the writer refuses it, naming the sections, until pages are written back
+(deftest a-branch-wiki-edit-is-refused-until-pages-are-written-back
+  (let [load (fn [db pages] (d/db-with db (seon.docs/load-tx db "demo" pages)))
+        b (load (base) {"demo/p.md" "# P\n\nOne.\n"})
+        edited (load b {"demo/p.md" "# P\n\nTwo.\n"})
+        coded (with b (var-tx "n" "1"))
+        refused #(#'seon.writer/merge-refused b % (pm/delta-three-way b % b #{}))]
+    (is (= [:seon.merge/unwritten ["demo/p.md#p"]] ((juxt :seon.error/type :sections) (refused edited))))
+    (is (not= :seon.merge/unwritten (:seon.error/type (refused coded))) "a branch that changed no section is not refused for it")))
 
 (deftest unmap-merges-as-delete
   (let [ours (with (base) (unmap "g"))

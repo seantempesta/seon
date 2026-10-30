@@ -89,7 +89,7 @@
   (:seon.merge/unmerged); its program calls intern, alter-var-root, eval or load-string,
   or defines inside a function body (:seon.merge/mutation, seon.merge/mutations); it
   carries an uncontracted function (:seon.merge/uncontracted: contracts decide what is
-  admitted)."
+  admitted); it changed wiki sections, which no write-back writes to docs/ yet (:seon.merge/unwritten)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.merge/result] [:maybe :map]]}
   [main head r]
   (let [unmerged (pm/unmerged head)
@@ -111,6 +111,11 @@
                                                                                     (if (:call m) (str " calls " (:call m)) (str " defines " (:inline-def m) " inside a function body"))))))
                         {:tx (:max-tx main) :mutations ms
                          :seon.error/fix "Every definition happens once, where it is defined: vary behaviour through arguments or the environment, and define at the top level, not inside a function."}))
+      (some #(= :section (first %)) (keys (:ours r)))
+      (contract/error :seon.merge/unwritten #'seon.writer/merge-refused
+                      "the branch changed wiki sections, and no write-back writes a page to docs/ yet: the merge would lose them at the next load"
+                      {:tx (:max-tx main) :sections (vec (sort (keep (fn [[k a]] (when (= :section k) a)) (keys (:ours r)))))
+                       :seon.error/fix "Edit the page in docs/ in a worktree session, or wait for the wiki's write-back (task seon.merge/what-merges-is-what-a-file-states)."})
       (seq uncontracted)
       (contract/error :seon.merge/uncontracted #'seon.writer/merge-refused
                       (str "the branch carries " (count uncontracted) " function(s) without a contract")
