@@ -101,10 +101,10 @@ The program as your branch records it answers where things are, so read before y
 
 ## Testing
 
-A test runs on the world: `my.test`'s small db shaped like production, plus what the test adds, under a ceiling of work every test is held to. How, with examples: [testing in the world](testing.md#testing-in-the-world).
+A test runs on the world: `my.test`'s small db shaped like production, plus what the test adds, under a ceiling of work every test is held to. How, with examples: `docs/testing.md#testing-in-the-world`.
 
 - The default: ``(my.test/with (my.test/world) (my.test/code 'app.x "(ns app.x)\n(defn f [x] (inc x))\n"))``, a db value; add a page (``my.test/page``), a task (``my.test/task``), take a var out (``my.test/without``), or pass any tx-data or ``(fn [db] tx-data)``.
-- A claim about how work grows is a cost proof (``seon.cost/proof``, small sizes), never a ratio of two readings; ``(my.test/cost #(...))`` shows one call's ticks and bytes at the REPL.
+- A claim about how work grows is a cost proof (``seon.cost/proof``, small sizes), never a ratio of two readings; ``(my.test/cost #(+ 1 2))`` shows one call's ticks and bytes at the REPL.
 - ``(my.agent/prove)`` runs the tests your change reaches and answers each verdict and its cost.
 
 ## Done
