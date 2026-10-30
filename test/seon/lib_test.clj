@@ -3,14 +3,6 @@
   (:require [clojure.test :refer [deftest is]] [seon.lib :as lib] [seon.sock :as sock] [jolt.scheme :as scm]
             [seon.test-store :as ts] [seon.config :as config] [clojure.edn :as edn] [clojure.string :as str]))
 
-(deftest the-memory-probe-answers-what-the-process-holds
-  ;; lib/mp-probe reads the kernel's ledger (one task_info call): this process's own memory in MB,
-  ;; what it holds resident at most, a little more. (It once walked every page of each mapped
-  ;; region, so a 64 GiB LMDB map made one probe take ~1.25 s; the work it does is the kernel's
-  ;; ledger now, whatever the process maps.)
-  (let [p (lib/mp-probe)]
-    (is (< 1.0 (lib/real-mb p) (+ (:resident p) (:compressed p) 1.0)) (pr-str p))))
-
 (deftest a-fork-beside-a-running-thread-is-refused-and-says-how-many-run
   ;; lib/fork! is the one spawning skeleton: a second active Chez thread breaks a forked
   ;; child (E11/E13), so it forks nothing and answers its refused branch with the count

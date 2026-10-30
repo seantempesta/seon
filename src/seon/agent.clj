@@ -18,7 +18,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.step :as step] [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.error :as err] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.merge :as pm] [seon.config :as cfg] [seon.reconcile :as r] [seon.vector :as vector] [seon.lib :as lib] [seon.print :as print] [seon.sock :as sock] [jolt.scheme :as scm] [clojure.test :as t]
             [clojure.string :as str] [seon.program :as program] [seon.proofs :as proofs] [seon.fx :as fx] [seon.task :as task] [seon.intr :as intr] [clojure.repl]
-            [malli.registry :as mr] [clojure.core.async :as a]))
+            [malli.registry :as mr] [clojure.core.async :as a] [jolt.io-poller :as poller]))
 
 ;; One state map per agent process (this process is the agent). Fields:
 ;; :id :branch :task :run (the task and run root forked it for, or nil) :fd :conn :db :base (main at the branch's merge base: as forked, then each merge-main!) :main (main's head as last read: as forked, then heard-main) :results :n :waits (seon.agent/await-reply's promises, by key) :busy (the :repl proc runs a request) :tx-seq :mode :ns :home :mismatch
@@ -254,7 +254,7 @@
          (finally (swap! state update :waits dissoc k)))))
 
 (defn mem-mb
-  "This process's memory as macOS charges it, read now (lib/real-mb: one task_info call): on the
+  "This process's memory as the platform charges it, read now (lib/real-mb: one call): on the
   events that report the agent's state (its hello, each commit, a :tests reply, :stats),
   never per evaluation and never kept for a time."
   {:malli/schema [:=> [:cat] :seon.lib/mb]}
@@ -843,38 +843,36 @@
 
 (defn read-to-exit
   "The last line test child pid writes on fd r, read to the pipe's end of file or the child's
-  exit, whichever comes first: the exit is kqueue's NOTE_EXIT, the fact the fork server reaps
-  by, so a process the child forked that holds the write end cannot keep the run waiting.
-  Parks on seon.lib/wait-fd-or-exit (r's input or the exit). After the exit, what is left in
-  the pipe is read: a read that found nothing there (its wait called) with the pipe still open
-  means it is held, and a read that ended on part of a line goes on. Each whole line is given to
-  seen as it is read (the tests as they start, run-tests-forked). Answers {:line :held?}, or
-  :seon.lib/unwatched."
-  {:malli/schema [:function [:=> [:cat :seon.lib/fd pos-int?] [:or [:map [:line [:maybe :string]] [:held? :boolean]] :seon.lib/unwatched]]
-                  [:=> [:cat :seon.lib/fd pos-int? :seon.host/fn] [:or [:map [:line [:maybe :string]] [:held? :boolean]] :seon.lib/unwatched]]]}
+  exit, whichever comes first: the exit is a value on jolt.io-poller/exit-chan (kqueue's NOTE_EXIT,
+  a pidfd on Linux), the fact the fork server reaps by, so a process the child forked that holds
+  the write end cannot keep the run waiting. Parks in alts! over the exit and r's readiness (a
+  fiber's park). After the exit, what is left in the pipe is read: a read that found nothing there
+  (its wait called) with the pipe still open means it is held, and a read that ended on part of a
+  line goes on. Each whole line is given to seen as it is read (the tests as they start,
+  run-tests-forked). Answers {:line :held?}."
+  {:malli/schema [:function [:=> [:cat :seon.lib/fd pos-int?] [:map [:line [:maybe :string]] [:held? :boolean]]]
+                  [:=> [:cat :seon.lib/fd pos-int? :seon.host/fn] [:map [:line [:maybe :string]] [:held? :boolean]]]]}
   ([r pid] (read-to-exit r pid (fn [_] nil)))
   ([r pid seen]
-  (let [w (lib/wait-fd-or-exit r pid)]
-    (if (contract/error? w)
-      w
-      (let [{:keys [wait close]} w
-            exited (volatile! false) failed (volatile! nil) waited (volatile! false)
-            rd (sock/line-reader r #(let [x (wait)]
-                                      (vreset! waited true)
-                                      (cond (= :exited x) (vreset! exited true)
-                                            (contract/error? x) (vreset! failed x))))]
-        (try
-          (loop [line nil]
-            (vreset! waited false)
-            (let [ls (rd)]
-              (cond (= ls :eof) {:line line :held? false}
-                    @failed @failed
-                    (seq ls) (do (run! seen ls) (recur (peek ls)))
-                    ;; nothing there yet, or part of a line: read again
-                    (or (not @exited) (not @waited)) (recur line)
-                    ;; exited, and a read found nothing there: the pipe is still open, held
-                    :else {:line line :held? true})))
-          (finally (close))))))))
+  (let [exit (poller/exit-chan pid)
+        ready (volatile! nil)
+        exited (volatile! false) waited (volatile! false)
+        ;; the readiness wait stays pending until r is read, so a wait the exit ended leaves none behind
+        wait (fn [] (vreset! waited true)
+               (when-not @exited
+                 (let [c (or @ready (vreset! ready (poller/ready-chan r :read)))
+                       [_ port] (a/alts!! [exit c])]
+                   (if (= port c) (vreset! ready nil) (vreset! exited true)))))
+        rd (sock/line-reader r wait)]
+    (loop [line nil]
+      (vreset! waited false)
+      (let [ls (rd)]
+        (cond (= ls :eof) {:line line :held? false}
+              (seq ls) (do (run! seen ls) (recur (peek ls)))
+              ;; nothing there yet, or part of a line: read again
+              (or (not @exited) (not @waited)) (recur line)
+              ;; exited, and a read found nothing there: the pipe is still open, held
+              :else {:line line :held? true}))))))
 
 (defn run-selection
   "What a test-plan p runs when a request names namespaces (names; none: every test it selects), as
