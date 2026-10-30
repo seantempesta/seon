@@ -90,7 +90,7 @@
 
 (deftest a-definitions-head-is-its-text-up-to-its-body
   ;; owner, 2026-10-25: a cited var is its definition's head as the file writes it, its body
-  ;; left out and marked (seon.docs/cited-code)
+  ;; left out and marked
   (is (= "(defn f\n  \"Doubles, \\\"exactly\\\".\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [x]\n  …)"
          (reader/definition-head "(defn f\n  \"Doubles, \\\"exactly\\\".\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [x]\n  ;; twice\n  (* 2 x))" 'user)))
   (is (= "(defn g\n  \"Adds.\"\n  ([a] …)\n  ([a b] …))"
