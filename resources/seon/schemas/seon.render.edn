@@ -3,11 +3,11 @@
 ;; render in its own properties ({:seon.render/html sym}); selection is
 ;; the value's own override key, else the declared render (the schema, then its parents),
 ;; else the one value printer (seon.print). The values below are what root's web renders.
-{;; a value shown by a summary: its schema declares {:seon.render/summary sym}, a function of the
- ;; value answering the value to show in its place (seon.render/summarized), which the one printer
+{;; a value shown by its model render: its schema declares {:seon.render/model sym}, a function of opts and
+ ;; the value answering the value to show in its place (seon.render/model-printed), which the one printer
  ;; prints. The agent's process state: a Datahike db, the reach graph and host handles are shown by
  ;; name and size, each with the form that reads it (seon.agent/state-summary)
- :seon.agent/state [:map {:seon.render/summary seon.agent/state-summary}]
+ :seon.agent/state [:map {:seon.render/model seon.agent/state-summary}]
  ;; the task an agent works (seon.context/task-data, with its proofs' sources and verdicts), a part of its page:
  ;; the page draws it (task-html), the model is sent the value
  :seon.context/task [:map {:seon.render/html seon.render.ui/task-html :seon.render/model seon.render.ui/task-model}]
@@ -15,9 +15,6 @@
  :seon.context/cited [:map {:seon.render/html seon.render.ui/cited-html :seon.render/model seon.render.ui/cited-model}]
  ;; the agent's run (its turn of its cap, the tokens it sent, a cut reply), a part of the page
  :seon.context/run [:map {:seon.render/html seon.render.ui/run-html}]
- ;; what an agent's work is likely to need beyond what its plan cites (seon.context/related-view), a part of its
- ;; page: the page draws it folded, the model is sent the value, the forms that read more among it
- :seon.context/related [:map {:seon.render/html seon.render.ui/related-html}]
  ;; the namespaces the work touches (seon.context/namespaces-of): each its aliases, definitions and deftests
  :seon.context/namespaces [:map-of {:seon.render/html seon.render.ui/namespaces-html} :symbol :map]
  ;; how an agent's work on its task stands (seon.context/status), a part of its page: the page draws it by
@@ -25,7 +22,7 @@
  :seon.context/status [:map {:seon.render/html seon.render.ui/status-html :seon.render/model seon.context/status-model}]
  ;; a prove's run (my.agent/prove): its verdict, each proof's status, the reds with their first
  ;; failing assertion and the deaths, and counts (my.agent/prove-summary); the lists are the value
- :seon.test/proved [:map {:seon.render/summary my.agent/prove-summary :seon.render/html seon.render.ui/proved}]
+ :seon.test/proved [:map {:seon.render/model my.agent/prove-summary :seon.render/html seon.render.ui/proved}]
  ;; how a value is shown: in one line, as a full panel, a tile, a row of a list
  :seon.render/as [:enum :inline :block :tile :row]
  ;; a render's props (its second argument), every one optional: like React's, a render that

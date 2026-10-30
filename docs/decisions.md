@@ -192,7 +192,7 @@ Worktrees run plain `bin/prove` and report ready; the merge session merges a bat
 "I want the eval system to stay rock solid and for it to be focused on executing code and instrumenting it … Info that is derived and made for the agent or the user should go into the hiccup", and of seon.turn/observe: "you shouldn't be marking if something has been observed you just record the data". The turn's derived reads are views over facts, an eval's tests never block its loop, and observe goes. Stated: docs/render.md, docs/turn.md as each merges.
 
 ### A relevance % means "worth reading" (owner, 2026-10-27)
-"I really need a ranking ideally with relevancy % that we can do cutoffs for … showing everything isn't working"; "I want accuracy more than speed." seon.context/relevance is calibrated on judged useful/noise labels; the render's related part and search cut on it. Stated: docs/vector.md.
+"I really need a ranking ideally with relevancy % that we can do cutoffs for … showing everything isn't working"; "I want accuracy more than speed." seon.context/relevance is calibrated on judged useful/noise labels; search cuts on it. Stated: docs/vector.md.
 
 ### What a Claude session sees through MCP is what a model is sent (owner, 2026-10-27)
 "making the results match the agents context we are generating. I want them to see all the errors and problems and for us to fix them at their source not patch things." One producer for the model's turn messages and the seon MCP answers. Stated: docs/agent.md once it merges.

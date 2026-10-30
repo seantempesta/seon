@@ -1713,29 +1713,6 @@
     (is (= 2 (get @reads 'seon.lib/real-mb)) "two calls, two readings: none kept between them")
     (is (and (pos? a) (pos? b)) "a reading in MB")))
 
-(deftest related-is-an-eval-of-the-plan-and-of-any-text
-  ;; my.task/related (the screen form) and my.agent/related (the agent's own words), in a test-mode
-  ;; agent over seon.context-test's five sections; a process test because my.agent reaches a fork
-  (let [[db te dir] (#'seon.context-test/sections-near "Make the page say one thing (docs/vector.md#what-is-embedded).")
-        ;; the agent working the task, as a session holds it: its entity and its running run
-        db (d/db-with db [{:seon.agent/key "demo/a1"} {:seon.run/id "demo/r#1" :seon.run/task te :seon.run/status :running :seon.run/agent [:seon.agent/key "demo/a1"]}
-                          ;; the toy's chances sit far below the page's entry cut, so every item scored enters
-                          [:db/add te :seon.config.render/relevance-doc 0.0]])
-        old @agent/state]
-    (reset! agent/state {:n 0 :mode :test :db db :task "demo/r" :key "demo/a1" :branch :b :turn {:run "demo/r#1"}})
-    (try
-      ;; the sections the plan does not cite, each a line "<address> <chance>%: <lead>", best first by relevance
-      ;; (seon.context/relevance: the toy's chances are all near 0, so its order is relevance's, not the cosine's)
-      (is (= #{"docs/vector.md#what-the-work-is-likely-to-need-as-an-eval" "docs/vector.md#the-model" "docs/vector.md#the-pyramid" "docs/vector.md#fused-with-the-call-graph"}
-             (set (map #(first (str/split % #" ")) (:sections (my.task/related)))))
-          "the screen form: the sections nearest the plan, the cited one (what-is-embedded) left out")
-      (binding [agent/*fx-stub* (fn [_ _] {:value {:model "m" :vectors [(dir 1.0 0.5)] :tokens [3]}})]
-        (let [v (my.agent/related "the last one" 2)]
-          (is (every? #(re-find #"^docs/vector\.md#[a-z-]+: Section \d says one thing\." %) (:sections v))
-              "the agent's own words refine it: sections of the toy wiki, a line each, best first by relevance")
-          (is (= 2 (count (:sections v))) "k of them")))
-      (finally (reset! agent/state old)))))
-
 (deftest a-parked-agent-draws-its-parts-and-a-gone-one-answers-at-once
   ;; the agent draws its own page (one derivation, slice 2): the render proc's {:op :render} ask is
   ;; answered by an agent parked between requests with its parts' HTML, a key its branch renders

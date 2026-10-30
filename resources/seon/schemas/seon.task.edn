@@ -22,9 +22,8 @@
                     [:seon.config.merge/max-merge-turns {:optional true} nat-int?]
                     ;; the functions near its plan its task data lists (seon.context/similar: off by default, on to measure it)
                     [:seon.config.render/similar {:optional true} :seon.config.render/similar]
-                    ;; the relevance at which its related part shows an item (seon.context/related)
-                    [:seon.config.render/relevance-summary {:optional true} :seon.config.render/relevance-summary]
-                    [:seon.config.render/relevance-doc {:optional true} :seon.config.render/relevance-doc]]
+                    ;; the relevance at which a search shows an item (seon.context/search)
+                    [:seon.config.render/relevance-summary {:optional true} :seon.config.render/relevance-summary]]
  :seon.task/need-ids [:set {:gen/max 4} :seon.task/id]
  :seon.task/declaration [:map {:closed true}
                          [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name]

@@ -75,8 +75,8 @@
   "Eval response r as every reader reads it (the model's tool message, the page, an outside
   agent): printed by the one printer under its handle, so a cut names the form that reads its
   rest, `(get-in result/e43 [:value ..])`. Made when r is
-  sent or shown, never stored (seon.repl/record-details keeps the value). render (seon.render/summarized):
-  a value whose schema declares a summary prints as that summary, the printer's own values."
+  sent or shown, never stored (seon.repl/record-details keeps the value). render (seon.render/model-printed):
+  a value whose schema declares a model render prints as that render's value, the printer's own values."
   {:malli/schema [:function [:=> [:cat :map] :string] [:=> [:cat :map [:maybe :seon.host/fn]] :string]]}
   ([r] (response-text r nil))
   ([r render]

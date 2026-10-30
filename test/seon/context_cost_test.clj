@@ -64,43 +64,6 @@
                :fixed {:bytes 300000 :calls 1}
                :sizes [10 30 100]}))
 
-(defn related-of-changed
-  "seon.context/related's arguments at n wiki sections, each with a vector, and the plan's: its
-  answer made anew, as when its vector changed."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :int]]}
-  [n]
-  (let [unit (fn [seed] (let [v (mapv (fn [i] (Math/sin (* (inc seed) (inc i) 0.37))) (range 768)) m (Math/sqrt (reduce + (map #(* % %) v)))] (mapv #(/ % m) v)))
-        db (ts/test-db)
-        db (d/db-with db (vec (for [i (range n)] {:seon.section/address (str "docs/p.md#s" i) :seon.section/heading (str "S" i)
-                                                  :seon.section/lead (str "Section " i " says it.")})))
-        db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "r" :seon.task/plan "Say it."}]))
-        te (pdb/eid db :seon.task/id "demo/r")
-        es (into [te] (for [i (range n)] (pdb/eid db :seon.section/address (str "docs/p.md#s" i))))]
-    [(d/db-with db (vector/tx-data es (repeat (count es) 1) (mapv unit (range (count es))) (repeat (count es) 10) "m")) te]))
-
-(deftest related-ranks-each-kind-by-one-search
-  (cost/proof {:of 'seon.context/related :input 'seon.context-cost-test/related-of-changed
-               :n "wiki sections with vectors"
-               :work (str "the plan's citations parsed once; seon.context/relevance for each kind: one seon.vector/near "
-                          "(every coarse row read, its shortlist of 400 reranked: one seek a row), its pool (the "
-                          ":seon.config.render/relevance-pool nearest and the seeds' neighbourhood, none here) "
-                          "scored: each pool item's vector one seek, its text tokenized once, the sections' names "
-                          "read once: linear in the vectors, flat in them past the pool")
-               :growth :linear
-               ;; measured 2026-10-27: 695 calls and 11.05 MB at n=250, 845 and 13.08 MB at 500, where
-               ;; near's shortlist reaches its 400 rows (one seek a row reranked) and stays. Over the rank
-               ;; fusion before it (447 calls, 7.81 MB): the pool's scoring, a few contracted calls an
-               ;; item (its text, tokens, scores) for at most 100 items a kind. A row is still near's
-               ;; coarse datom read and its kind's membership (~1.48 KB, seon.vector/one-scan-ranks-every-kind).
-               ;; 848 calls at n=450 on 2026-10-28: bm25 shares its per-text scoring with seon.docs/tokens (one more contracted call a bm25)
-               ;; 2026-10-29 (a-vector-is-its-own-entity, docs/vector.md#a-vector-is-its-own-entity): each near reads one
-               ;; datom more a row (the scan of :seon.vector/of it merge-joins with the coarse rows; related makes
-               ;; three searches: ~0.65 KB a row more than main's 1.5, measured 2.1 KB a row from 450 to 1,000) and a pool item's vector is a seek more: 13.07 MB at 450, 13.62 MB at 700, 14.22 MB at
-               ;; 1,000, 857 calls (from 12.0, 12.4, 12.8 MB and 848)
-               :per-n {:bytes 2300.0 :calls 0.0}
-               :fixed {:bytes 12200000.0 :calls 894.0}
-               :sizes [450 700 1000 2000]}))
-
 (defn ring-of
   "seon.context/pushed's arguments at n forms in a ring, each calling the next: every node two
   neighbours, so the push's reach is bounded by its threshold, not by n. Seeded at the first."
@@ -144,11 +107,24 @@
                :fixed {:calls 10 :bytes 1000000}
                :sizes [200 500 1000]}))
 
+(defn sections-of
+  "A db of n wiki sections, each with a vector, and the task demo/r with its own: the sections a task's data is drawn over."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :int]]}
+  [n]
+  (let [unit (fn [seed] (let [v (mapv (fn [i] (Math/sin (* (inc seed) (inc i) 0.37))) (range 768)) m (Math/sqrt (reduce + (map #(* % %) v)))] (mapv #(/ % m) v)))
+        db (ts/test-db)
+        db (d/db-with db (vec (for [i (range n)] {:seon.section/address (str "docs/p.md#s" i) :seon.section/heading (str "S" i)
+                                                  :seon.section/lead (str "Section " i " says it.")})))
+        db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "r" :seon.task/plan "Say it."}]))
+        te (pdb/eid db :seon.task/id "demo/r")
+        es (into [te] (for [i (range n)] (pdb/eid db :seon.section/address (str "docs/p.md#s" i))))]
+    [(d/db-with db (vector/tx-data es (repeat (count es) 1) (mapv unit (range (count es))) (repeat (count es) 10) "m")) te]))
+
 (defn task-data-of
   "seon.context/task-data's arguments at n wiki sections with vectors: the task demo/r as of the db,
   without its write set, as the task part draws it."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :map :boolean]]}
-  [n] (let [[db _] (related-of-changed n)] [db (seon.task/task db "demo/r") false]))
+  [n] (let [[db _] (sections-of n)] [db (seon.task/task db "demo/r") false]))
 
 (defn namespace-of
   "seon.context/namespace-data's arguments at n definitions: a branch whose namespace app.pc defines

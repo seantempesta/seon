@@ -223,15 +223,13 @@
     (calls "Done reading." "(my.turn/wait)")]})
 
 (def requests
-  "The ten requests a live run measures, as a user would ask for them: a short problem
+  "The nine requests a live run measures, as a user would ask for them: a short problem
   description and the one form that reproduces it, with what it answers and what it should, no
   proof and no write set (its agent writes its own proof, red, and names what to change). Each is
   a request for seon.template/request (design-build, then merge: my.root/request! writes it).
   Each reproduction was run on main before the set was used: a request whose reproduction
   answers right is done, and is replaced, never measured."
-  [{:seon.task/ns 'seon.context :seon.task/name "the-related-list-says-what-each-lead-left"
-    :seon.task/plan "The related sections that (my.task/related) lists show the first sentence of each section's lead, and nothing says how much was left out or how to read the rest. Reproduce: (let [db (seon.test-store/test-db) db (datahike.api/db-with db (seon.docs/load-tx db \"docs\" {\"docs/flow.md\" \"# Flow\\n\\n## Step\\n\\nA step returns its state and outputs. It never blocks.\\n\"}))] (get-in (seon.context/related-view db {:sections [\"docs/flow.md#step\"]}) [:sections 0])) answers \"docs/flow.md#step: A step returns its state and outputs.\"; it should also say how much of the lead it left and the citation that reads the rest."}
-   {:seon.task/ns 'seon.context :seon.task/name "a-message-and-an-eval-of-one-id-both-print"
+  [{:seon.task/ns 'seon.context :seon.task/name "a-message-and-an-eval-of-one-id-both-print"
     :seon.task/plan "When a run holds a message and an eval with the same id, the conversation keeps only one of them, because the printed parts are looked up by the bare id. Each record should be kept under its own kind, so both are printed. Reproduce: (let [ev [[:eval \"x\"] {:seon.eval/id \"x\" :seon.eval/by \"a1\" :seon.eval/record {:code \"(+ 1 1)\" :call-id \"c1\" :call 0 :response {:handle 'result/x :value 2 :ms 1}}} :seon.db/eval-fact 1] msg [[:message \"x\"] {:seon.message/id \"x\" :seon.message/from \"root\" :seon.message/body \"hello\"} :seon.message/fact 2] c (#'seon.context/printed-run [ev msg] nil)] [(count (:ids c)) (count (:parts c))]) answers [1 1]; it should answer [2 2]."}
    {:seon.task/ns 'my.agent :seon.task/name "the-help-docstring-says-what-it-does-now"
     :seon.task/plan "The docstring of my.agent/help tells, in its middle, what an anchor answered before this change, which is history, not what the function does. Make it say only what the function answers now. Reproduce: (re-find #\"Before this\" (:doc (meta #'my.agent/help))) answers \"Before this\"; it should answer nil."}
