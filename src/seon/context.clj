@@ -9,7 +9,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [datahike.api :as d] [seon.render :as render]
             [seon.task :as task] [seon.db :as pdb] [seon.merge :as pm]
-            [seon.print :as print] [seon.print.select :as select] [seon.ref :as ref] [seon.docs :as docs] [seon.config :as cfg] [seon.vector :as vector] [seon.ctx :as ctx] [seon.agent :as agent] [seon.program :as program] [seon.proofs :as proofs] [seon.problems :as problems] [seon.reconcile :as r] [seon.edn :as sedn] [seon.learn :as learn] [clojure.edn] [hasch.core :as hasch]))
+            [seon.print :as print] [seon.print.select :as select] [seon.ref :as ref] [seon.docs :as docs] [seon.config :as cfg] [seon.vector :as vector] [seon.ctx :as ctx] [seon.ratom :as ratom] [seon.agent :as agent] [seon.program :as program] [seon.proofs :as proofs] [seon.problems :as problems] [seon.reconcile :as r] [seon.edn :as sedn] [clojure.edn] [hasch.core :as hasch]))
 
 (def help-page
   "The help page, docs/agent.md: what my.agent/help answers, each section on demand. Main holds
@@ -155,9 +155,10 @@
   [db cites]
   (vec (program/program-names db (into [] (comp (keep :seon.cite/name) (filter qualified-symbol?) (remove #(ref/task? db %))) cites))))
 
-(defn- not-written
+(defn not-written
   "What unwritten proof p should assert, by the plan's own words: the plan's sentences that name
-  it, or that it is not written yet when none does (the plan is on the page already)."
+  it, or that it is not written yet when none does (the plan is on the page already): the task part's
+  to-prove (seon.render.ui/task-model, docs/render.md#a-part-answers-data)."
   {:malli/schema [:=> [:cat :qualified-symbol :string] :string]}
   [p plan]
   (let [ss (filter #(str/includes? % (name p)) (str/split plan #"(?<=[.!?])\s+"))]
@@ -518,60 +519,35 @@
 (declare cited)
 
 (defn current-ns
-  "The namespace agent a's REPL is in on db: the one its newest eval left it in (its response's :ns,
-  as nREPL's carries it), or nil before it has evaluated anything there. Where its next eval runs (docs/render.md#a-part-answers-data)."
-  {:malli/schema [:=> [:cat :seon.host/db :int] [:maybe :symbol]]}
-  [db a]
-  ;; newest eval first: eval ids are the store's counter, so the index read backward from a's last datom is
-  ;; time order (seon.ctx's rseek), and it stops at the first record that carries the ns (every response does)
-  (some (fn [dt] (get-in (d/pull db [:seon.eval/record] (:e dt)) [:seon.eval/record :response :ns]))
-        (take-while #(and (= :seon.eval/agent (:a %)) (= a (:v %))) (d/rseek-datoms db :avet :seon.eval/agent a))))
-
-(defn namespace-data
-  "Namespace nsym as db records it, the facts an agent asks its REPL for before it changes code
-  there (the md-scan bench: ~15 evals of ns-aliases, ns-publics and find-ns): its
-  aliases (from its recorded ns form, seon.learn/aliases), its definitions by name in file order,
-  and its deftests, how many are green and which are red: its datoms, never its forms read (a
-  definition's arglists are (doc f)'s, asked of the one at hand). nil when db records no such
-  namespace. See docs/render.md#a-part-answers-data."
-  {:malli/schema [:=> [:cat :seon.host/db :symbol] [:maybe :map]]}
-  [db nsym]
-  (when-let [e (pdb/eid db :ns/name nsym)]
-    (let [src (d/q '[:find ?src . :in $ ?n :where [?f :form/defines ?n] [?f :form/src ?src]] db e)
-          ;; its vars in one pass over the index of :var/ns, each read for the attributes it shows: its
-          ;; definitions, and its deftests
-          vars (for [dt (d/datoms db :avet :var/ns e) :let [x (d/entity db (:e dt))]]
-                 {:var/name (:var/name x) :var/kind (:var/kind x) :seon.test/status (:seon.test/status x)
-                  :var/form {:form/order (:form/order (:var/form x))}})
-          {tests true defs false} (group-by #(= :test (:var/kind %)) vars)
-          defs (->> defs
-                    (sort-by (fn [{v :var/name {o :form/order} :var/form}] [(or o Long/MAX_VALUE) (str v)]))
-                    (mapv #(symbol (name (:var/name %)))))
-          tests (for [{v :var/name st :seon.test/status} tests] [v (or st :none)])
-          by (group-by second tests)]
-      (cond-> {:ns nsym}
-        src (assoc :aliases (into (sorted-map) (learn/aliases [src])))
-        (seq defs) (assoc :defines defs)
-        (seq tests) (assoc :tests (cond-> {:deftests (count tests) :green (count (by :green))}
-                                    (seq (by :red)) (assoc :red (vec (sort (map first (by :red)))))))))))
+  "The namespace the REPL of agent record c (its ctx) is in: the one its newest eval left it in (its response's
+  :ns, as nREPL's carries it), read from its :evals (newest first, docs/ctx.md#the-pattern), stopping at the
+  first that carries one; nil before it has evaluated anything there. Where its next eval runs
+  (docs/render.md#a-part-answers-data)."
+  {:malli/schema [:=> [:cat :map] [:maybe :symbol]]}
+  [c] (some (fn [[_ e]] (ratom/realize (get-in e [:seon.eval/record :response :ns]))) (:evals c)))
 
 (defn namespaces-of
-  "The namespaces agent a's work on task t touches, {name its namespace-data}: the one its REPL is in
-  (`current-ns`) first, marked :here, then those of what the plan
-  cites (its cites, a var's namespace or a namespace itself) and of the task's proofs, once each, those db records. What
-  the page's namespaces part shows the model (docs/render.md#a-part-answers-data)."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.task/task [:sequential :map] :int] [:map-of :symbol :map]]}
-  [db t cites a]
-  (let [{:keys [proofs]} (:seon.task/accumulated t)
-        cited (for [{n :seon.cite/name} cites
-                    :when (symbol? n)] (if (namespace n) (symbol (namespace n)) n))]
-    (let [here (current-ns db a)]
-      ;; the one the REPL is in first; a map by name, in
-      ;; that order (a part answers a map: a vector is hiccup)
-      (->> (concat (some-> (some->> here (namespace-data db)) (assoc :here true) vector)
-                   (keep #(namespace-data db %) (remove #{here} (distinct (concat cited (map (comp symbol namespace) proofs))))))
-           (mapcat (fn [d] [(:ns d) (dissoc d :ns)]))
-           (apply array-map)))))
+  "The namespaces agent record c's work touches, as the namespaces part shows them, from ctx alone: those of
+  what its task and its needs cite (a var's namespace, or a namespace cited itself) and of their proofs,
+  once each, each {:names [...] :more form}: its names the task cites or its proofs call (their forms'
+  :form/refs, as :proved holds them), and the form that lists the rest of it (my.agent/help). It costs what it
+  shows, never the namespace's size. See docs/render.md#a-part-answers-data."
+  {:malli/schema [:=> [:cat :map] [:map-of :symbol :map]]}
+  [c]
+  (let [t (:task c)
+        needs (vals (:needs t))
+        named (for [cs (cons (:cites t) (for [n needs :when (not= :merge (ratom/realize (:seon.task/kind n)))] (:cites n)))
+                    x (vals cs) :let [n (ratom/realize (:seon.cite/name x))] :when (symbol? n)] n)
+        proved (for [ps (cons (:proved t) (map :proved needs)) v (vals ps) :when (:var/name v)] v)
+        proofs (map #(ratom/realize (:var/name %)) proved)
+        calls (for [v proved r (ratom/realize (get-in v [:form :form/refs])) :when (qualified-symbol? r)] r)
+        ns-of #(if (namespace %) (symbol (namespace %)) %)
+        names (group-by ns-of (filter namespace (concat named proofs calls)))]
+    ;; a map by name, in the order first named (a part answers a map: a vector is hiccup)
+    (apply array-map (mapcat (fn [n] [n (cond-> {}
+                                           (seq (names n)) (assoc :names (vec (sort (distinct (map (comp symbol name) (names n))))))
+                                           true (assoc :more (list 'my.agent/help (list 'quote n))))])
+                             (distinct (map ns-of (concat named proofs)))))))
 
 (defn task-data
   "The task's data: task t's run sections as data, the same each turn of a run: the task (its
@@ -581,11 +557,10 @@
   is not and what it should assert in the plan's words (whether it fails, and why, is the
   proofs part's: it changes each turn); the wiki sections and the tasks cites name (a task by its plan, seon.ref/task-view); the functions nearest its plan
   by meaning that it does not name (`similar`). cites: what the task cites, its cite entities and its needs'
-  (the page's from ctx, seon.task/task-cites on demand). With write-set? false (the page's task part, whose
-  cites are parts of their own, seon.render.ui/cited), no write set is made."
-  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.task/task [:sequential :map]] :map] [:=> [:cat :seon.host/db :seon.task/task [:sequential :map] :boolean] :map]]}
-  ([db t cites] (task-data db t cites true))
-  ([db t cites write-set?]
+  (seon.task/task-cites). What `my.task/data` answers at the agent's REPL, on demand; the page's task part is
+  the pulled task's own renders (seon.render.ui/task-data, docs/render.md#a-part-answers-data)."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.task/task [:sequential :map]] :map]}
+  [db t cites]
   (let [{:keys [plan proofs]} (:seon.task/accumulated t)
         refs (program-vars db cites)
         sections (into [] (keep (fn [{a :seon.cite/address n :seon.cite/name tk :seon.cite/task d :seon.cite/depth}]
@@ -595,11 +570,10 @@
                           :seon.task/plan plan)
              ;; a proof is shown with the proofs, not again in the write set; the names that
              ;; resolve to nothing are one entry, their problem said once
-             :write-set (when write-set?
-                          (let [rs (into [] (comp (remove (set proofs)) (map #(cited db %))) refs)
+             :write-set (let [rs (into [] (comp (remove (set proofs)) (map #(cited db %))) refs)
                               {gone true there false} (group-by (comp boolean :unresolved) rs)]
                           (cond-> (vec there)
-                            gone (conj {:unresolved (mapv :unresolved gone) :problem (:unresolved ref/problem-messages)}))))
+                            gone (conj {:unresolved (mapv :unresolved gone) :problem (:unresolved ref/problem-messages)})))
              ;; (the turn sections' :proofs are each turn's statuses; these are how to run them)
              :to-prove (into (sorted-map-by #(compare (str %1) (str %2)))
                              (for [p proofs]
@@ -607,8 +581,7 @@
                                     (list 'my.agent/prove #{p})
                                     (not-written p plan))]))}
       (seq sections) (assoc :sections sections)
-      near (assoc :similar near)
-      (not write-set?) (dissoc :write-set)))))
+      near (assoc :similar near))))
 
 (defn cited
   "Var v as the task's page shows it: its source and its callers (docs/callers), or that it
@@ -630,8 +603,33 @@
              [(:var/name v) (cond-> {:status (case st :green :pass :deferred :deferred :fail)}
                               (seq (:seon.test/failures v)) (assoc :failures (:seon.test/failures v)))])))
 
+(defn run-of
+  "The eid of the run agent record c (its ctx, or a map seon.ctx/build answers) works: the run its newest turn
+  names (its :turns, newest first, each turn's :seon.turn/run ref: docs/ctx.md#the-pattern), never the highest
+  run id (a run's id derives from its content); nil before its first turn. The record holds no run (the agent
+  is the unit, not the run); every reader of the agent's run names it here (its turn line, the chat's start
+  and end, the status) and reads it on its db by this id."
+  {:malli/schema [:=> [:cat :map] [:maybe :int]]}
+  [c] (some-> (:turns c) vals first :seon.turn/run :db/id ratom/realize))
+
+(defn task-of
+  "The task agent record c holds (its :task, as ctx pulls it, docs/ctx.md#the-pattern), read for what its
+  accumulated plan and proofs take (seon.task/pulled-accumulated): its id, kind, plan and proofs and its
+  needs', and each proof's var as :proved holds it ({name var}: its verdict, failures and form), the
+  task's and its needs'. Each read by its path, so a reader of it reads nothing else of the task."
+  {:malli/schema [:=> [:cat :map] [:maybe [:map [:task :map] [:proved [:map-of :qualified-symbol :map]]]]]}
+  [c]
+  (when-let [t (:task c)]
+    (let [own (fn [x] (into {} (for [k [:seon.task/id :seon.task/kind :seon.task/plan :seon.task/proofs] :let [v (get x k)] :when (some? v)] [k (ratom/realize v)])))
+          needs (vals (:needs t))]
+      {:task (assoc (own t) :needs (into {} (map-indexed (fn [i n] [i (own n)])) needs))
+       :proved (into {} (for [ps (cons (:proved t) (map :proved needs)) v (vals ps) :let [n (:var/name v)] :when n]
+                          ;; its verdict and failures, and its source (whether it is defined): its form's text
+                          [n (cond-> (into {} (for [k [:var/name :seon.test/status :seon.test/failures] :let [x (get v k)] :when (some? x)] [k (ratom/realize x)]))
+                               (get-in v [:form :form/src]) (assoc :form {:form/src (ratom/realize (get-in v [:form :form/src]))}))]))})))
+
 (defn status
-  "How agent a's work on its task stands on its branch db, as data (task
+  "How the agent of record rec (its ctx: its :db/id, its task, its run by `run-of`) works on its task stands on its branch db, as data (task
   seon.context/the-context-is-the-agents-evals-and-seons, R2b-1): each proof by the verdict its var
   entity holds (`verdicts`; none: :unknown, or :undefined while the branch defines no such test),
   a red or unknown one with its source and the program functions it calls (`callees`), a red one
@@ -644,17 +642,19 @@
   about the work only, never the conversation (its turns, evals and messages), so a turn's record
   draws it again only when it changed the work; turns left and a cut reply are the run's
   (seon.render.ui/run-head). Nothing is held: each is a fact of db. :reasons is the done rule's
-  own answer, the turn's check (seon.turn/work!), which the model and the page read as :refused. opts :index, a function answering the reconciler's index of db (seon.reconcile/index; else
+  own answer, the turn's check (seon.turn/work!), which the model and the page read as :refused. A design task's plan before its run (:no-design) is its run's, the run its newest turn names, so it waits for the first turn. opts :index, a function answering the reconciler's index of db (seon.reconcile/index; else
   one built cold), called only when a test outside the task's proofs is red (whether it is a
   regression or a stray red is main's claims: measured cold on a demo branch, 14.8M ticks and
   70 MB), :main, main's commit (the merge view), and :deferred, the task's proofs a run leaves to root's gate (process
   tests: none while every proof has a verdict). See docs/render.md#how-the-work-stands."
-  {:malli/schema [:=> [:cat :seon.host/db :int :map] :map]}
-  [db a {:keys [index deferred main]}]
-  (let [ag (d/entity db a)
-        tid (some-> ag :seon.agent/task :seon.task/id)
-        t (when tid (task/task db tid))
-        {:keys [proofs plan]} (:seon.task/accumulated t)
+  {:malli/schema [:=> [:cat :seon.host/db :map :map] :map]}
+  [db rec {:keys [index deferred main]}]
+  (let [a (:db/id rec)
+        ag (d/entity db a)
+        ;; the task and its proofs as the record pulls them (task-of): the accumulated plan and proofs over its needs
+        {t :task proved :proved} (task-of rec)
+        tid (:seon.task/id t)
+        {:keys [proofs plan]} (when tid (task/pulled-accumulated t))
         kind (:seon.task/kind t :work)
         ;; a test run that failed as a whole: present on its process only while it is so (the
         ;; process's other facts, written on every eval, are not read)
@@ -673,8 +673,8 @@
         split (when base (problems/caused-split base db ch (problems/caused-datoms base db)))
         gaps (vec (sort-by str (pm/uncontracted ch)))
         unmerged (pm/unmerged db)
-        ;; its run by the agent, never through its turns: a turn's record moves nothing this reads
-        run (some->> (d/q '[:find [?r ...] :in $ ?a :where [?r :seon.run/agent ?a]] db a) seq (apply max) (d/entity db))
+        ;; its run, the one its newest turn names (run-of): a design task's plan-before waits for its first turn
+        run (some->> (run-of rec) (d/entity db))
         proof? (set proofs)
         ;; main's claims only when a test outside the proofs is red: the agent's index, else one built cold
         claims (when (some (fn [[t st]] (and (= :fail st) (not (proof? t)))) results)
@@ -693,10 +693,15 @@
         reds (vec (for [[p {:keys [failures]}] vs f failures] (assoc f :test p)))
         defined? #(some? (docs/source-of db %))]
     (cond-> {:reasons reasons
+             ;; each proof as :proved holds its var: its verdict (green :pass, red and flaky :fail, as `verdicts`), its source
              :proofs (vec (for [p (sort-by str proofs)
-                                :let [src (docs/source-of db p)
-                                      st (get results p (cond (deferred p) :deferred (nil? src) :undefined (some? test-error) :not-run :else :unknown))
-                                      fs (get-in vs [p :failures])
+                                :let [v (get proved p)
+                                      src (get-in v [:form :form/src])
+                                      verdict (when-not test-error (case (:seon.test/status v) nil nil :green :pass :deferred :deferred :fail))
+                                      st (cond (and verdict (not= :deferred verdict)) verdict
+                                               (or (deferred p) (= :deferred verdict)) :deferred
+                                               (nil? src) :undefined (some? test-error) :not-run :else :unknown)
+                                      fs (when-not test-error (:seon.test/failures v))
                                       calls (when (and src (not= :pass st)) (callees db p))]]
                             (cond-> {:test p :status st}
                               (and src (not= :pass st)) (assoc :source (print/code src))
