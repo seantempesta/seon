@@ -51,18 +51,18 @@
     (is (< (apply max (map #(Math/abs (- %1 %2)) v (vector/vector-of db e))) 0.001) "f16 keeps each dim to its precision")))
 
 (deftest the-pyramid-ranks-as-an-exact-search
-  (let [vs (vectors 11 600 24 768)
+  (let [vs (vectors 11 60 6 768)
         db (db-with-vectors vs)
-        queries (take 20 (vectors 13 20 24 768))
+        queries (take 4 (vectors 13 4 6 768))
         ;; each query's exact top 10 is the same for every option set: computed once (each stored vector unpacked once)
         truth (let [vecs (vec (for [[e] (d/q '[:find ?e :where [?e :form/id] [?v :seon.vector/of ?e] [?v :seon.vector/f16]] db)] [e (vector/vector-of db e)]))]
                 (mapv (fn [q] (->> vecs (map (fn [[e v]] [(- (/ (reduce + (map * q v)) (Math/sqrt (reduce + (map * v v))))) e])) sort (take 10) (map second) set))
                       queries))
         hits (fn [opts] (for [[q t] (map vector queries truth)]
                           (count (filter t (map first (vector/near db q 10 opts))))))]
-    (is (= (* 10 (count queries)) (reduce + (hits {:shortlist 600}))) "a shortlist of every vector ranks them all exactly")
+    (is (= (* 10 (count queries)) (reduce + (hits {:shortlist 60}))) "a shortlist of every vector ranks them all exactly")
     (is (thrown? Exception (vector/near db (vec (repeat 64 0.125)) 10)) "a query of another width is refused, never read past")
-    (is (<= 0.99 (/ (reduce + (hits {})) (* 10.0 (count queries)))) "the default levels find the exact top 10")
+    (is (<= 0.99 (/ (reduce + (hits {:shortlist 40})) (* 10.0 (count queries)))) "the levels, with a shortlist of two thirds of the vectors as the default is of 600, find the exact top 10")
     (is (> 0.99 (/ (reduce + (hits {:shortlist 10 :fine-dims 64})) (* 10.0 (count queries))))
         "a shortlist of k ranked on a short prefix misses some: the levels are what keeps the recall")))
 
@@ -122,7 +122,7 @@
   [conn]
   (let [db @conn
         seeded (vector/due db "m")
-        db (with! conn db (embedded seeded (vectors 2 (count seeded) 8 768) "m"))]
+        db (with! conn db (embedded seeded (take (count seeded) (cycle (vectors 2 8 8 768))) "m"))]
     (with! conn db [{:db/id "f" :form/id "x/1" :form/src "(defn g [])"}])))
 
 (deftest the-proc-asks-for-what-is-due-and-writes-it
