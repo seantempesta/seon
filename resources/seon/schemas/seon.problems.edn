@@ -239,5 +239,5 @@
                      [:producer [:maybe :qualified-symbol]] [:owner-ns [:maybe :symbol]]
                      [:evidence :map] [:proofs [:vector :qualified-symbol]] [:answered-by [:vector :string]]
                      [:at-ms [:maybe :int]]]
- :seon.problems/report [:map {:seon.render/html seon.render.ui/problems} [:t :int]
+ :seon.problems/report [:map {:seon.render/html seon.render.ui/problems :seon.render/model seon.render.ui/problems-model} [:t :int]
                         [:classes [:map-of :seon.problems/class [:map [:n nat-int?] [:rows [:vector :seon.problems/row]]]]]]}

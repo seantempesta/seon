@@ -613,6 +613,26 @@
           [:summary {:class "cursor-pointer"} (str (kname c) " " n)]
           (when shown? (for [r (sort-by #(if (false? (:open? %)) 1 0) rows)] (render/html {:schema :seon.problems/row} (assoc r :class c))))]))]))
 
+(defn problems-model
+  "The problems report as the model is sent it (the declared model render of :seon.problems/report):
+  each class with its count and its rows newest first, a row its count, type, its message's first line
+  and, for a recorded error, the form that reads it whole ((my.agent/problem signature): its example and
+  evidence), never the rows printed whole. So many errors are a few lines that say how many there are
+  and where to read each. See docs/render.md#a-part-answers-data."
+  {:malli/schema [:=> [:cat :map :seon.problems/report] :map]}
+  [_opts {:keys [t classes]}]
+  {:t t
+   :classes (into (sorted-map)
+                  (for [[c {:keys [n rows]}] classes]
+                    [c {:n n
+                        :rows (vec (for [r (sort-by #(- (or (:at-ms %) 0)) rows)
+                                         :let [line (some-> (or (:message r) (:reason r)) str str/split-lines first)]]
+                                     (cond-> {:count (:count r 1)}
+                                       (:type r) (assoc :type (:type r))
+                                       line (assoc :message line)
+                                       (false? (:open? r)) (assoc :open? false)
+                                       (:signature r) (assoc :read (list 'my.agent/problem (:signature r))))))}]))})
+
 (defn runs
   "Main's runs (the declared html render of :seon.render/runs): how many by status, and each
   running one by its own view (`run`, a line)."
