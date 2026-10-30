@@ -579,7 +579,7 @@
   name with its source and its callers (docs/callers), the names that resolve to nothing said
   once; each proof to the form that runs it at the REPL, or, when it is not written, that it
   is not and what it should assert in the plan's words (whether it fails, and why, is the
-  proofs part's: it changes each turn); the wiki sections cites name; the functions nearest its plan
+  proofs part's: it changes each turn); the wiki sections and the tasks cites name (a task by its plan, seon.ref/task-view); the functions nearest its plan
   by meaning that it does not name (`similar`). cites: what the task cites, its cite entities and its needs'
   (the page's from ctx, seon.task/task-cites on demand). With write-set? false (the page's task part, whose
   cites are parts of their own, seon.render.ui/cited), no write set is made."
@@ -588,7 +588,8 @@
   ([db t cites write-set?]
   (let [{:keys [plan proofs]} (:seon.task/accumulated t)
         refs (program-vars db cites)
-        sections (into [] (keep (fn [{a :seon.cite/address d :seon.cite/depth}] (when a (docs/view db a d)))) cites)
+        sections (into [] (keep (fn [{a :seon.cite/address n :seon.cite/name tk :seon.cite/task d :seon.cite/depth}]
+                                  (cond a (docs/view db a d) tk (ref/task-view db n d)))) cites)
         near (similar db (some->> (:seon.task/id t) (pdb/eid db :seon.task/id)) (into (set proofs) refs))]
     (cond-> {:task (assoc (select-keys t [:seon.task/id :seon.task/kind :seon.task/instructions])
                           :seon.task/plan plan)

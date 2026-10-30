@@ -205,11 +205,14 @@
  :seon.cite/address :string
  ;; a var or test (a qualified symbol), a schema key (a qualified keyword) or a namespace (a symbol)
  :seon.cite/name :seon.ref/name
+ ;; a name that names a task, its id (a task's :seon.task/id is a string, a cite's name a symbol): what the
+ ;; pattern joins the task by
+ :seon.cite/task :string
  :seon.cite/depth :seon.ref/depth
  ;; its first mention's place in the citing text (an agent's: the order its cites were written)
  :seon.cite/order :int
  ;; the cite as ctx holds it: what it names joined (a section with its sections below; a var with its
- ;; form and newest callers, each caller with the vars it defines; a schema key's entry; a
+ ;; form and newest callers, each caller with the vars it defines; a task; a schema key's entry; a
  ;; namespace), drawn by its two renders (docs/render.md#a-part-answers-data)
  :seon.cite/cite-fact [:map {:seon.db/attributes true
                              :seon.ctx/pattern [* {[:seon.cite/address :by :seon.section/address :as :section]
@@ -219,11 +222,12 @@
                                                  [* {[:var/form :as :form] [*]}
                                                   {[:form/_refs :by :var/name :as :callers :limit :seon.config.ctx/callers :reverse true]
                                                    [* {[:form/defines :as :defines] [:var/name :var/kind]}]}]}
+                                                {[:seon.cite/task :by :seon.task/id :as :task] [:seon.task/id :seon.task/plan :seon.task/kind]}
                                                 {[:seon.cite/name :by :schema/key :as :schema] [*]}
                                                 {[:seon.cite/name :by :ns/name :as :ns] [:ns/name :ns/doc]}]
                              :seon.render/html seon.render.ui/cite :seon.render/model seon.render.ui/cite-model}
                        [:seon.cite/id :seon.cite/id] [:seon.cite/of :seon.cite/of] [:seon.cite/depth :seon.cite/depth] [:seon.cite/order :seon.cite/order]
-                       [:seon.cite/address {:optional true} :seon.cite/address] [:seon.cite/name {:optional true} :seon.cite/name]]
+                       [:seon.cite/address {:optional true} :seon.cite/address] [:seon.cite/name {:optional true} :seon.cite/name] [:seon.cite/task {:optional true} :seon.cite/task]]
  ;; ---- tasks, runs, proof results, root's boot, turns and ends (session D1's proto.agents.facts.edn) ----
 ;; ---- the task ----
  :seon.task/id [:and {:seon.db/identity true} :string]

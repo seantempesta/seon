@@ -63,10 +63,12 @@
 (defn- cite-target
   "Citation c's target as its cite entity holds it on db, {:seon.cite/address a} or {:seon.cite/name n}: a
   section's path#anchor; a page cited whole its top section's address (seon.ref/page-top: its sections
-  are joined below it), a page or file db holds no section of, its path as written; a name as itself."
+  are joined below it), a page or file db holds no section of, its path as written; a name as itself, and a
+  name of a task (seon.ref/task?) its id beside it (:seon.cite/task, which the pattern joins the task by)."
   {:malli/schema [:=> [:cat :seon.host/db :map] :map]}
   [db {:seon.ref/keys [name path anchor]}]
-  (cond name {:seon.cite/name name}
+  (cond (and (qualified-symbol? name) (ref/task? db name)) {:seon.cite/name name :seon.cite/task (str name)}
+        name {:seon.cite/name name}
         anchor {:seon.cite/address (str path "#" anchor)}
         :else {:seon.cite/address (or (some->> (ref/page-top db path) (d/pull db [:seon.section/address]) :seon.section/address) path)}))
 
@@ -184,7 +186,7 @@
         graph (zipmap ids (map #(set (:seon.task/needs %)) decls))]
     (if-let [p (needs-problem graph #(or (graph %) (pdb/eid db :seon.task/id %)))]
       (invalid #'seon.task/create-tx p)
-      (into (mapv (fn [id {:seon.task/keys [config needs evidence] :as decl}]
+      (let [tasks (mapv (fn [id {:seon.task/keys [config needs evidence] :as decl}]
                     (cond-> (-> decl (dissoc :seon.task/config :seon.task/needs :seon.task/evidence)
                                 (assoc :db/id id :seon.task/id id :seon.task/execution :held)
                                 (update :seon.task/branch #(or % (default-branch id))))
@@ -192,8 +194,10 @@
                       evidence (assoc :seon.task/evidence evidence)
                       (seq config) (merge config)))
                   ids decls)
-            ;; what each text cites, its cite entities naming the task by its tempid
-            (mapcat (fn [id decl] (cites-tx db id id (text-citations db decl))) ids decls)))))
+            ;; what each text cites, read on the db the tasks make (a task this write declares is a task it may
+            ;; cite), its cite entities naming the task by its tempid
+            db' (:db-after (d/with db tasks))]
+        (into tasks (mapcat (fn [id decl] (cites-tx db' id id (text-citations db' decl))) ids decls))))))
 
 (defn execution-tx
   "Set the desired execution of tasks ids (:running is root's release, run!)."

@@ -876,16 +876,20 @@
 
 (defn cite-model
   "A cite as the model reads it (the declared model render of :seon.cite/cite-fact), a regular function of the
-  pulled cite and what it joined, at its depth: a section as Markdown (section-text), a var as `var-view`, a
-  schema key its form and how it changes, a namespace its doc and the form that lists it, and a name or
+  pulled cite and what it joined, at its depth: a section as Markdown (section-text), a task by its plan, a var
+  as `var-view`, a schema key its form and how it changes, a namespace its doc and the form that lists it, and a name or
   address that joined nothing as {:cites x :unresolved true :problem ...}. See
   docs/references.md#an-entity-cites."
   {:malli/schema [:=> [:cat :map :map] :map]}
-  [_opts {:seon.cite/keys [address name depth] sec :section v :var sch :schema n :ns}]
+  [_opts {:seon.cite/keys [address name depth] sec :section v :var tk :task sch :schema n :ns}]
   (let [x (or address name) head {:cites x :depth depth}]
     (cond
       ;; what reads it whole first, as code the printer shows verbatim, so a cut of the rest still names it
       (:seon.section/address sec) (assoc head :read (print/code (str "(my.agent/help " (emit/string-literal address) ")")) :text {:seon.print/prose (section-text sec depth)})
+      ;; a task by its plan, as seon.ref/task-view shows one: its first sentence at summary, else whole
+      (:seon.task/id tk) (assoc head :read (print/code (str "(:seon.task/plan (seon.task/task (seon.agent/db) " (emit/string-literal (:seon.task/id tk)) "))"))
+                                :text {:seon.print/prose (cond-> (str "## " (:seon.task/id tk))
+                                                           (:seon.task/plan tk) (str "\n\n" (if (= :summary depth) (ref/lead-sentence (:seon.task/plan tk)) (:seon.task/plan tk))))})
       (qualified-symbol? name) (let [view (var-view name (when (:var/name v) v) depth)]
                                  (if (:unresolved view)
                                    (merge head (dissoc view :symbol))
@@ -915,7 +919,7 @@
   is held once in ctx, {:db/id e} at any other path: docs/ctx.md#the-pattern): each join path below a cite,
   the ones that hold an entity by the cite's own pattern first."
   [[[:section] :seon.section/address] [[:var] :var/name] [[:var :form] :form/id] [[:schema] :schema/key] [[:ns] :ns/name]
-   [[:section :below :*] :seon.section/address] [[:var :callers :*] :form/id] [[:var :callers :* :defines :*] :var/name]])
+   [[:task] :seon.task/id] [[:section :below :*] :seon.section/address] [[:var :callers :*] :form/id] [[:var :callers :* :defines :*] :var/name]])
 
 (defn- fill
   "Node x with each {:db/id e} held whole at another path of ctx c (held: e to that path) replaced by the node
@@ -942,8 +946,8 @@
     (with-meta (fill c held (ratom/realize x)) {:seon.render/schema :seon.cite/cite-fact})))
 
 (defn- held-whole
-  "Where ctx c holds whole each entity the cites at paths ps joined, {e path}: the task's proofs (held first, by
-  the task's pattern), a cite's own joins, then a section's below and a var's callers (cite-joins), the first
+  "Where ctx c holds whole each entity the cites at paths ps joined, {e path}: the agent's task and its needs, the
+  task's proofs (each held first, by the agent's and the task's patterns), a cite's own joins, then a section's below and a var's callers (cite-joins), the first
   path at which its identity attribute is present (an entity is held once: docs/ctx.md#the-pattern)."
   {:malli/schema [:=> [:cat :map [:sequential [:vector :any]]] [:map-of :int [:vector :any]]]}
   [c ps]
@@ -952,7 +956,8 @@
         join-paths (fn [p [steps a]]
                      (let [paths (reduce (fn [qs step] (if (= :* step) (for [q qs k (keys (get-in c q))] (conj q k)) (map #(conj % step) qs))) [p] steps)]
                        (for [q paths :let [id (get-in c (conj q :db/id))] :when id] [q (some? (get-in c (conj q a))) id])))
-        found (concat (join-paths [] [[:task :proved :*] :var/name]) (join-paths [] [[:task :proved :* :form] :form/id])
+        found (concat (join-paths [] [[:task] :seon.task/id]) (join-paths [] [[:task :needs :*] :seon.task/id])
+                      (join-paths [] [[:task :proved :*] :var/name]) (join-paths [] [[:task :proved :* :form] :form/id])
                       (for [p ps j cite-joins q (join-paths p j)] q))]
     (reduce (fn [m [q whole? id]] (if (and whole? (not (contains? m id))) (assoc m id q) m)) {} found)))
 

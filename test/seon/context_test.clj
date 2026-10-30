@@ -524,8 +524,9 @@
   (let [r (first (:refused (status-at (db-f (db-with-program)) "demo/f" {})))]
     (is (= {:reason :proof-unknown :test 'demo-test/f-test :written true :do '(my.agent/prove)} r) "a written proof is run, never written again")))
 
-(deftest a-cited-task-is-no-var-of-the-write-set
-  ;; wiki audit 2026-10-23 R4: a plan citing another task by its ns/name is not citing a var
+(deftest a-cited-task-shows-its-plan-at-that-depth
+  ;; wiki audit 2026-10-23 R4: a plan citing another task by its ns/name sees that task's
+  ;; plan as a section at the citation's depth, not an unresolved name
   (let [db (db-with-program)
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo.other :seon.task/name "g"
                                                :seon.task/plan "G is defined first. Then f calls it."
@@ -533,10 +534,16 @@
                                               {:seon.task/ns 'demo :seon.task/name "f"
                                                :seon.task/plan "Read `demo.other/g` before you start."
                                                :seon.task/proofs #{'demo-test/f-test}}]))
-        block (data-of db "demo/f")]
-    ;; its plan is no longer shown: a task's id is a string, a cite's name a symbol, and the pattern joins no task
-    ;; (step (b)'s report; the fix is a task join of its own)
-    (is (= [] (:write-set block)) "not a var of the write set, nor an unresolved name")))
+        block (data-of db "demo/f")
+        shown (into {} (map (juxt :seon.ref/address identity)) (:sections block))
+        ;; the page's part: the cite joins the task by its id (:seon.cite/task), drawn by its plan
+        cite (some #(when (= 'demo.other/g (:seon.cite/name %)) %) (vals (:cites (:tree (ctx/build db (pdb/eid db :seon.task/id "demo/f") :b)))))
+        part (seon.render.ui/cite-model {} cite)]
+    (is (= "G is defined first. Then f calls it." (:seon.ref/lead (shown "demo.other/g"))) "doc depth: the task's plan")
+    (is (= [] (:write-set block)) "and not a var of the write set, nor an unresolved name")
+    (is (= "demo.other/g" (get-in cite [:task :seon.task/id])) "the cite joins the task by its id")
+    (is (str/includes? (:seon.print/prose (:text part)) "G is defined first. Then f calls it.") "and its part shows the plan")
+    (is (not (:unresolved part)) "not an unresolved name")))
 
 
 (defn- read-back

@@ -563,8 +563,8 @@
   (cost/proof
     {:of 'seon.ctx/patch :input 'seon.ctx-test/new-caller
      :n "evals in the session's record"
-     :work "the form's :form/refs datom touches the var's :callers watch: its callers read and ordered by when each was written (a form's id is its content's, not in time order), the newest five kept, a new one pulled whole, the path copied up"
-     :growth :constant :fixed {:calls 24 :bytes 135000} :sizes [20 60 180]})
+     :work "the form's :form/refs datom touches the var's :callers watch: its callers read and ordered by when each was written (a form's id is its content's, not in time order), the newest five kept, a new one pulled whole with the vars it defines (the :defines join: the callers' tests and defines are joined by the pull, where the cited part's draw used to query them; 24 calls before it, 31 since), the path copied up"
+     :growth :constant :fixed {:calls 31 :bytes 135000} :sizes [20 60 180]})
   (cost/proof
     {:of 'seon.ctx/patch :input 'seon.ctx-test/plan-edited
      :n "evals in the session's record"
@@ -580,10 +580,10 @@
   (cost/proof
     {:of 'seon.ctx/patch :input 'seon.ctx-test/callers-of
      :n "forms naming the cited var"
-     :work "the new form's :form/refs datom touches the var's :callers watch: every form naming the var read from :avet and sorted by its ref's transaction, the newest five kept, the new one pulled whole, the path copied up"
+     :work "the new form's :form/refs datom touches the var's :callers watch: every form naming the var read from :avet and sorted by its ref's transaction, the newest five kept, the new one pulled whole with the vars it defines (the :defines join: the callers' tests and defines are joined by the pull, where the cited part's draw used to query them; 27 calls before it, 35 since), the path copied up"
      :growth :linear
      :per-n {:bytes 8800 :ticks 2600}
-     :fixed {:calls 27 :bytes 500000 :ticks 100000}
+     :fixed {:calls 35 :bytes 500000 :ticks 100000}
      :sizes [100 300 1000 3000]}))
 
 (defn one-eval-diff
@@ -1000,9 +1000,11 @@
                 "identical?), one d/with, the datom applied to the agent's db, the patch of it (the task "
                 "rebuilt where it is held), the record installed, and one-swap itself; and, the plan being text, what it cites "
                 "derived in the same transaction (seon.agent/with-citations: a d/with and the one parser over the sentence, "
-                "61 calls, which my.task/update! paid before every writer did); measured 101 calls at 100, 300 and 1,000 evals")
+                "61 calls, which my.task/update! paid before every writer did); measured 101 calls at 100, 300 and 1,000 evals, "
+                "110 since what it cites is cite entities (seon.task/cites-tx: each cite upserted, a name asked whether it names a task, "
+                "and the task's cites read to retract the gone)")
      :growth :constant
-     :fixed {:calls 101}
+     :fixed {:calls 110}
      :sizes [100 300 1000 3000]})
   ;; no record left behind: an empty state builds none (as-agent!'s callers leave theirs too)
   (reset! seon.agent/state nil))

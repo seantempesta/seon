@@ -1223,10 +1223,10 @@
 (deftest uncited-tasks-follow-the-ready-implement-steps
   (cost/proof {:of 'seon.problems/uncited-tasks :input 'seon.problems-test/uncited-input
                :n "ready implement steps, each citing"
-               :work "the kind and task datoms once, then each implement step's needs walked once"
+               :work "the kind and task datoms once, then each implement step's needs walked once; the program's vars among the cites asked of the program once (seon.program/program-names, read from the cites at read time where :seon.task/references stored it at write: 43 calls before, 45 since)"
                :growth :linear
                :per-n {:ns 100000 :bytes 130000 :calls 4}
-               :fixed {:ns 500000 :bytes 500000 :calls 3}
+               :fixed {:ns 500000 :bytes 500000 :calls 5}
                :sizes [10 30 100]}))
 
 (deftest a-ready-implement-task-that-cites-nothing-is-a-problem
