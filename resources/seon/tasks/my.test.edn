@@ -8,5 +8,6 @@ Deletes: seon.db/seed-tx's example program (replaced by the world), seon.test-st
   :seon.task/proofs #{my.test-test/the-world-is-built-once-per-process
                       my.test-test/a-fixture-adds-to-the-world-and-leaves-it-as-it-was
                       my.test-test/a-world-test-runs-far-under-the-ceiling
-                      my.test-test/the-pages-example-runs}
+                      my.test-test/the-pages-example-runs
+                      seon.config-test/the-test-ceiling-is-a-second-of-work}
   :seon.task/kind :work}]
