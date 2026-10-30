@@ -919,7 +919,7 @@
                :per-n {}
                ;; measured 2026-10-29: ~0.45M ticks / 1.8 MB / 48 calls at 10, 100 and 1000 given the diff (the old-word table
                ;; read on each side is most of it); before, 0.69M / 2.8 MB / 37 at 10 and linear (docs/cost.md#a-diff-per-attribute-costs-a-descent-each)
-               ;; 67 calls at 10: :long-form (seon.problems/long-forms) is a class the changed vars are asked, with its bound read once (seon.config/value);
+               ;; 68 calls at 10: :long-form (seon.problems/long-forms) is a class the changed vars are asked, with its bound read once (seon.config/value) each form's chars set against the bound's (seon.print.emit/chars-per-token), a long one's tokens estimated;
                ;; the 7 more contracted calls, each instrumented (its output checked), are the ticks and bytes the fixed part grew by (measured: the
                ;; seek and text of a var cost ~8k ticks of it)
                :fixed {:ticks 460000 :bytes 1800000 :calls 68}
@@ -1315,13 +1315,13 @@
 
 ;; See docs/health.md#a-form-too-long
 (deftest a-form-over-the-bound-is-a-long-form-until-it-is-split
-  (let [bound (seon.config/value :seon.config.shrink/form-chars)
+  (let [bound (seon.config/value :seon.config.shrink/form-tokens)
         pad #(str "(defn f [] \"" (apply str (repeat % \x)) "\")")
-        long-src (pad bound) short-src (pad 10)
+        long-src (pad (* 4 bound)) short-src (pad 10)
         db (var-forms (world) 3 (fn [i] (case (int i) 1 {:src long-src} 2 {:src short-src} 3 {:src long-src :kind :test})))
         v #(symbol (cite-ns db) (str "v" %))
         rows #(mapv :evidence (problems/long-forms % {} (into #{} (map (partial symbol (cite-ns %))) ["v1" "v2" "v3"])))]
-    (is (= [{:kind :long-form :var (v 1) :chars (count long-src) :bound bound} {:kind :long-form :var (v 3) :chars (count long-src) :bound bound}]
+    (is (= [{:kind :long-form :var (v 1) :tokens (seon.print.emit/chars-tokens (count long-src)) :bound bound} {:kind :long-form :var (v 3) :tokens (seon.print.emit/chars-tokens (count long-src)) :bound bound}]
            (rows db))
         "a form over the bound has its row with its chars, in a test as in source; one under it has none")
     (is (= [] (rows (var-forms (world) 3 (fn [_] {:src short-src})))) "split under the bound, no row")
@@ -1331,9 +1331,9 @@
             head (var-forms (world) 2 (fn [_] {:src long-src}))
             split (problems/caused-split base head)]
         ;; attention, never a reason to refuse done (AGENTS: get out of an agent's way): its task shrinks it
-        (is (some #(re-find #"/v2 is \d+ chars" %) (map str (:attention split))))
-        (is (not-any? #(re-find #"/v2 is \d+ chars" %) (map str (:caused split))) "never refused")
-        (is (not-any? #(re-find #"/v1 is \d+ chars" %) (map str (:attention split))))))
+        (is (some #(re-find #"/v2 is \d+ tokens" %) (map str (:attention split))))
+        (is (not-any? #(re-find #"/v2 is \d+ tokens" %) (map str (:caused split))) "never refused")
+        (is (not-any? #(re-find #"/v1 is \d+ tokens" %) (map str (:attention split))))))
     (is (contains? (:seon.problems/derived (contract/properties :seon.problems/class)) :long-form))))
 
 ;; See docs/health.md#a-form-too-long

@@ -77,13 +77,18 @@ setup() {
   # what a checkout held before it was shared (bin/env)
   if [[ -d $MAIN/target ]]; then
     mkdir -p "$WT/target/home/.jolt"
-    for e in "$MAIN"/target/*(N); do
-      if [[ ${e:t} == prove ]]; then
-        # prove's runs are logs of the main tree's runs, not this worktree's: none is cloned
-        :
-      else
-        [[ ${e:t} == (runs|check|tmp|cache|home) ]] || cp -cR "$e" "$WT/target/"
-      fi
+    # only the build's products, named by their stamps (bin/build writes NAME.stamp beside NAME, NAME.build
+    # and NAME.tree) and the native outputs no stamp names: never the verdicts (target/results, shared
+    # through SEON_RESULTS_DIR), the runs, logs, or a test's scratch, which a prove's other shards make
+    # and delete while this copies (a directory deleted under cp failed the copy: seon.source-test's
+    # bin/worktree --at went red in full proves, never alone)
+    for e in "$MAIN"/target/*.stamp(N); do
+      for p in $e ${e%.stamp} ${e%.stamp}.build ${e%.stamp}.tree; do
+        if [[ -e $p ]]; then cp -cR "$p" "$WT/target/"; fi
+      done
+    done
+    for n in lib watch lmdb-kill lmdb-sem tailwind src; do
+      if [[ -e $MAIN/target/$n ]]; then cp -cR "$MAIN/target/$n" "$WT/target/"; fi
     done
     for e in "$MAIN"/target/home/*(ND); do
       [[ ${e:t} == .jolt ]] || cp -cR "$e" "$WT/target/home/"
