@@ -265,3 +265,12 @@
         (is (= 50 (count (proofs/results a))))
         (is (every? #(= 3 (count (get (proofs/failures a) (symbol "a.r-test" (str "t" %))))) (range 50)))
         (is (not (contains? a :reds-left)))))))
+
+;; See docs/merging.md#verdicts-are-a-cache
+(deftest a-tests-answer-keeps-an-error-that-names-no-test
+  ;; scale, 2026-10-30: {:pass 1 :error 1 :reports []}: the answer kept the counts and dropped the
+  ;; run's own error (it names no test, so no test was red), and no one could read why
+  (let [e {:type :error :seon.error/type :seon.test/unreadable-line :message "a line the test process sent does not read"}
+        a (proofs/answer {:pass 1 :fail 0 :error 1 :reports [{:type :pass :var "#'a.g-test/t0"} e]} #{})]
+    (is (= [e] (:reports a)))
+    (is (= [(:message e)] (proofs/test-run-errors a)))))
