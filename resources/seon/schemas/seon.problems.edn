@@ -218,7 +218,7 @@
  ;; declared once here and read through seon.contract/properties (as a status set is)
  :seon.problems/class [:enum {:seon.problems/derived #{:stalled :dead-citation :unnamed-site :stale-pin :stale-section :orphan-page :leadless-section :uncited-task :uncited-var :problem-unlinked :old-word :long-form}
                              ;; shown, never a reason to refuse done (root's ruling, 2026-10-23: every var edit stales the sections that cite it)
-                             :seon.problems/attention #{:stale-section :uncited-var}
+                             :seon.problems/attention #{:stale-section :uncited-var :long-form}
                              :seon.problems/areas [[:docs #{:dead-citation :stale-pin :stale-section :orphan-page :leadless-section :uncited-var}] [:tests #{:red :cost}]
                                                     [:laws #{:unnamed-site :old-word :long-form}] [:merges #{:merge :task-conflict :unrun}] [:tasks #{:failed :uncited-task}]
                                                     [:agents #{:stalled :dead :error :waste}] [:errors #{:platform :eval :agent :effect}] [:health #{:problem-unlinked}]]

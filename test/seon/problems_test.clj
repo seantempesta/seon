@@ -1326,12 +1326,14 @@
         "a form over the bound has its row with its chars, in a test as in source; one under it has none")
     (is (= [] (rows (var-forms (world) 3 (fn [_] {:src short-src})))) "split under the bound, no row")
     (is (= [] (problems/long-forms db {} #{})) "no changed var, nothing read")
-    (testing "a branch that adds a long form is refused, and one the base already had is not its problem"
+    (testing "a branch that adds a long form is shown it, never refused; one the base already had is not its problem"
       (let [base (var-forms (world) 1 (fn [_] {:src long-src}))
             head (var-forms (world) 2 (fn [_] {:src long-src}))
             split (problems/caused-split base head)]
-        (is (some #(re-find #"/v2 is \d+ chars" %) (map str (:caused split))))
-        (is (not-any? #(re-find #"/v1 is \d+ chars" %) (map str (:caused split))))))
+        ;; attention, never a reason to refuse done (AGENTS: get out of an agent's way): its task shrinks it
+        (is (some #(re-find #"/v2 is \d+ chars" %) (map str (:attention split))))
+        (is (not-any? #(re-find #"/v2 is \d+ chars" %) (map str (:caused split))) "never refused")
+        (is (not-any? #(re-find #"/v1 is \d+ chars" %) (map str (:attention split))))))
     (is (contains? (:seon.problems/derived (contract/properties :seon.problems/class)) :long-form))))
 
 ;; See docs/health.md#a-form-too-long
