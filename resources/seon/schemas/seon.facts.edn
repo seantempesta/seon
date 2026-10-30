@@ -171,7 +171,7 @@
  ;; :max-turns bounds the loop)
  :seon.agent/task :seon.db/ref
  :seon.agent/max-turns :int
- :seon.agent/description [:string {:seon.render/prose true}]
+ :seon.agent/description [:string]
  :seon.ctx/pattern [:vector :any]
  ;; the ids of its evals a reader of its page opened (seon.root/opened!), on main; its turn writes each
  ;; on its branch as the eval's :seon.eval/opened (seon.agent/untaken-facts)
@@ -185,7 +185,7 @@
                      [:seon.eval/record :seon.eval/record] [:seon.eval/opened {:optional true} :seon.eval/opened]]
  ;; an entity's record (seon.ctx, :seon.ctx/pattern: Datahike's pull syntax as data, docs/ctx.md#the-pattern;
  ;; its joins are the page walk's units, seon.render/units), each member rendered by its own schema's render
- :seon.db/agent-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.agent/id :seon.agent/status :seon.agent/branch :seon.agent/description] :seon.ctx/pattern [* {[:seon.agent/task :as :task] :seon.task/task-fact} {[:seon.turn/_agent :as :turns] [*]} {[:seon.eval/_agent :as :evals] [*]} {[:seon.message/_agent :as :messages :reverse true] [*]}] :seon.render/parts [:seon.turn/_agent] :seon.render/html seon.render.ui/agent}
+ :seon.db/agent-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.agent/id :seon.agent/status :seon.agent/branch :seon.agent/description] :seon.ctx/pattern [* {[:seon.agent/task :as :task] :seon.task/task-fact} {[:seon.turn/_agent :as :turns] [*]} {[:seon.eval/_agent :as :evals] [*]} {[:seon.message/_agent :as :messages :reverse true] [*]}] :seon.render/html seon.render.ui/agent}
                        [:seon.agent/key :seon.agent/key] [:seon.agent/id {:optional true} :seon.agent/id]
                        [:seon.agent/root {:optional true} :seon.agent/root] [:seon.agent/branch {:optional true} :seon.agent/branch]
                        [:seon.agent/status {:optional true} :seon.agent/status]
@@ -198,8 +198,8 @@
  :seon.task/id [:and {:seon.db/identity true} :string]
  :seon.task/ns :symbol
  :seon.task/name :string
- :seon.task/plan [:string {:seon.render/prose true}]
- :seon.task/instructions [:string {:seon.render/prose true}]
+ :seon.task/plan [:string]
+ :seon.task/instructions [:string]
  :seon.task/proofs [:set :qualified-symbol]
  :seon.task/needs [:set :seon.db/ref]
  :seon.task/references [:set :qualified-symbol]
@@ -280,7 +280,7 @@
  ;; how a run ended: the agent's own end, judged, or root's (:dead, :lost, :killed, :refused). Every
  ;; way a run leaves :running writes one, so a run with none is running (its page tile reads it so)
  :seon.run/outcome [:enum {:seon.db/taken true} :green :red :waiting :cap :failed :merge-failed :error :no-end :dead :lost :killed :refused]
- :seon.run/reason [:string {:seon.render/prose true :seon.db/taken true}]
+ :seon.run/reason [:string {:seon.db/taken true}]
  :seon.run/turns :int
  ;; the messages to its session's runs its branch had taken when the run was judged (seon.reconcile/judge-tx): main holding more wakes a parked one
  :seon.run/taken :int
@@ -452,7 +452,7 @@
  :seon.message/branch [:and {:seon.db/index true} :seon.db/branch]
  ;; the agent that took it (written by the turn that takes it, seon.agent/entries-tx)
  :seon.message/agent [:and {:seon.db/index true} :seon.db/ref]
- :seon.message/body [:string {:seon.render/prose true}]
+ :seon.message/body [:string]
  ;; what an entry is (design one-derivation 4.1 section 5): a person's words (:message), root's at a
  ;; stage boundary (:stage), the judge's verdict with its reasons (:verdict); each wakes its session
  :seon.message/kind [:and {:seon.db/index true} [:enum :message :stage :verdict]]
@@ -481,7 +481,7 @@
  ;; the agent whose turn it is (its record holds every turn; the run stays for the reconciler)
  :seon.turn/agent [:and {:seon.db/index true} :seon.db/ref]
  :seon.turn/n :int
- :seon.turn/reply [:string {:seon.render/prose true}]
+ :seon.turn/reply [:string]
  ;; the model's reply stopped at max-tokens: its text was cut
  :seon.turn/truncated :boolean
  ;; who read the context: the agent's model, or an outside agent through the server (a read is a turn)
@@ -512,7 +512,7 @@
                                                     [:eval {:optional true} :string]]]
  ;; the provider's finish_reason and the model's reasoning text (the model that answered is its model call's)
  :seon.turn/finish :string
- :seon.turn/reasoning [:string {:seon.render/prose true}]
+ :seon.turn/reasoning [:string]
  :seon.end/run [:and {:seon.db/identity true} :string]
  :seon.end/outcome :keyword
  :seon.end/reason :string

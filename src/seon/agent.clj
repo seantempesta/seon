@@ -1167,13 +1167,13 @@
     nsx))
 
 (defn state-summary
-  "The agent's process state m as the printer shows it (seon.render/summarized, the schema
+  "The agent's process state m as the printer shows it (seon.render/model-printed, the model render of the schema
   :seon.agent/state): each key with its value when that is a scalar, else what it holds, a count
   for a collection and its type for a host object (a database, a connection, a descriptor),
   with the form that reads it whole. A bare (swap! seon.agent/state ...) answers the state: it
   costs what the state names, not what it holds."
-  {:malli/schema [:=> [:cat :map] :map]}
-  [m]
+  {:malli/schema [:=> [:cat :seon.render/opts :map] :map]}
+  [_ m]
   (into (array-map)
         (for [[k v] m
               :let [read (list 'get (list 'deref 'seon.agent/state) k)]]

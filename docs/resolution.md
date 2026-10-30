@@ -24,7 +24,7 @@ The sites that resolve a name held in data to a var by design, each with its rea
 - `seon.render/model-of`: a schema's declared model render (`:seon.render/model`) is a symbol in data, resolved when a request sends the part, as `render-of` is for its html render ([a part answers data](render.md#a-part-answers-data)).
 - `seon.contract/function-var?`: a type's positional factory (`->T`) is known by its type `T` beside it in its namespace, looked up by name.
 - `seon.render/declared-var`: the same, as its var: a layout drawn by the walk is a component, whose var's contract says what it reads.
-- `seon.render/summarized`: a schema's `:seon.render/summary` is a symbol in data, resolved when the value is printed, as `render-of` is for a render.
+- `seon.render/model-printed`: a schema's `:seon.render/model` is a symbol in data, resolved when the value is printed, as `render-of` is for a render.
 - `seon.cost/run`: a cost estimate names its function and its input as symbols in data.
 - `seon.cost/bound`, `seon.cost/cases`: a generated estimate names its function (whose contract carries its bound) and its generator as symbols in data.
 - `seon.proofs/mg-run`: a generative check's key names its function as a symbol in data ("mg/seon.merge/f"), resolved to its Var to run.

@@ -1472,7 +1472,7 @@
                        {:type :error :var "#'app.okt/gone-test" :exit 137 :message "child died"}]
              :proofs {'app.okt/ok-test :pass 'app.okt/bad-test :fail}}
         html (h/html (ui/proved {} run))]
-    (is (= "red: ran 3, deferred 0 (to the judge), reused 1, died 1" (my.agent/prove-summary run)))
+    (is (= "red: ran 3, deferred 0 (to the judge), reused 1, died 1" (my.agent/prove-summary {} run)))
     (is (= #{'app.okt/gone-test} (seon.proofs/died run)))
     (is (str/includes? html "app.okt/bad-test") "the red test is named")
     (is (str/includes? html "the sum") "with its first failing assertion")

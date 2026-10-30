@@ -240,14 +240,14 @@
            {:seon.render/schema :seon.test/proved}))))))
 
 (defn prove-summary
-  "A prove's run r as the eval answers it (seon.render/summarized, the schema :seon.test/proved): one
+  "A prove's run r as the eval answers it (seon.render/model-printed, the schema :seon.test/proved): one
   line, its verdict and what ran, was left to the judge (process tests), was reused and died (a death
   is no verdict: not counted). What it found (each proof's status, the reds with their first failing
   assertion, the deaths) is drawn on the eval, from its value (seon.render.ui/proved, the schema's
   html render); the run whole is the value under the eval's handle. A part of the run (a select-keys
   of it keeps its metadata) is that part, as data. See docs/agent.md#done."
-  {:malli/schema [:=> [:cat :map] :any]}
-  [r]
+  {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
+  [_ r]
   (if-not (:reports r)
     (with-meta r nil)
     (let [died (count (proofs/died r))

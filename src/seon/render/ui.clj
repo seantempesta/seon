@@ -1131,7 +1131,7 @@
 
 (defn proved
   "A prove's run as its eval's tile draws it (the declared html render of :seon.test/proved, from
-  the eval's value): its one line (the schema's summary, my.agent/prove-summary), then each proof's
+  the eval's value): its one line (the schema's model render, my.agent/prove-summary), then each proof's
   status, each red test's first failing assertion by the one printer, and each test whose child died."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
   [_ r]
@@ -1140,7 +1140,7 @@
         failures (some-> run proofs/failures)
         died (into (sorted-set-by #(compare (str %1) (str %2))) (some-> run proofs/died))]
     [:section [:h2 "prove"]
-     [:p (str (:value (render/summarized (with-meta r {:seon.render/schema :seon.test/proved}))))]
+     [:p (str (:value (render/model-printed (with-meta r {:seon.render/schema :seon.test/proved}))))]
      (when (seq (:proofs r))
        [:ul (for [[p s] (sort-by (comp str key) (:proofs r))] [:li [:code (str p)] " " (name s)])])
      (for [[t fs] (sort-by (comp str key) failures) :when (not (died t))]
