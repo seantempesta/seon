@@ -370,8 +370,9 @@
 (defn answer
   "Test run r as its asker is answered (docs/merging.md#verdicts-are-a-cache): its counts, :deferred
   and :key as they are, and of its :reports only what the done rule reads: one :pass report for each
-  of proofs that passed, every report of a died test, and the failing reports of every
-  red test, every failing assertion of each. The verdict cache holds the run whole under its
+  of proofs that passed, every report of a died test, the failing reports of every
+  red test, every failing assertion of each, and every :error report that names no test (the
+  run's own, test-run-errors: a line the child sent that did not read), which no test's verdict holds. The verdict cache holds the run whole under its
   digests (an agent reads one by seon.agent/stored-results). So the answer costs its reds, never the tests run (an agent's whole run
   was about 3 MB in one frame): docs/merging.md#verdicts-are-a-cache. results, failures, costs and
   died read it as they read the whole run."
@@ -389,6 +390,7 @@
                         {} reports)]
     (assoc r :reports (vec (concat (for [t (sort-by str proofs) :when (= :pass (st t))] {:type :pass :var (str "#'" t)})
                                            (filter #(dead (test-symbol (:var %))) reports)
+                                           (filter #(and (= :error (:type %)) (nil? (test-symbol (:var %)))) reports)
                                            (mapcat val (sort-by (comp str key) failing)))))))
 
 ;; ---- what the results answer ------------------------------------------------------------
