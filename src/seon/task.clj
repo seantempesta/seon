@@ -519,7 +519,7 @@
   "Pulled task t's accumulated plan and proofs (`accumulate`), over the needs its record joins (:needs,
   one level: a pattern does not reach itself, docs/ctx.md#the-pattern): what the task part and the status
   read from ctx, never the db. {:plan text :proofs set}."
-  {:malli/schema [:=> [:cat :map] [:map [:plan :string] [:proofs :seon.task/proofs]]]}
+  {:malli/schema [:=> [:cat [:map [:seon.task/id :seon.task/id]]] [:map [:plan :string] [:proofs :seon.task/proofs]]]}
   [t]
   (let [own-of (fn [x] (-> (select-keys x [:seon.task/id :seon.task/plan :seon.task/kind :seon.task/proofs])
                            (update :seon.task/proofs set) (update :seon.task/kind #(or % :work))))
