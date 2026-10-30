@@ -14,6 +14,9 @@
   [] (agent/db))
 (defn q "d/q against (db)." {:malli/schema [:=> [:cat :any [:* :any]] :any]}
   [query & inputs] (apply d/q query (agent/db) inputs))
+(defn datoms "d/datoms against (db): the index's datoms, lazily, read only as far as taken. See docs/agent.md#small-answers."
+  {:malli/schema [:=> [:cat :keyword [:* :any]] [:sequential :any]]}
+  [index & components] (apply d/datoms (agent/db) index components))
 (defn pull "d/pull against (db)." {:malli/schema [:=> [:cat :any :any] [:maybe :map]]}
   [pattern eid] (d/pull (agent/db) pattern eid))
 (defn transact! "Write tx-data to this agent's branch; answers {:t :datoms}." {:malli/schema [:=> [:cat :seon.db/tx-data] :seon.agent/tx-result]}
