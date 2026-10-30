@@ -779,12 +779,13 @@
  ;; and the ones that explain it. Provenance: root's coverage gap 7 (2026-10-27): wiki sections reached the
  ;; agent only through the task's own citations. At the bound: 0 shows none.
  :seon.config.ctx/cited-by 3
- ;; Unit: chars of a form's :form/src (src and test alike). A live form longer than this is an open
- ;; :long-form problem row (seon.problems/long-forms), refused on a branch that adds one, closed by
- ;; splitting it; its task is seon.template/a-finding-is-a-task. Provenance: measured 2026-10-30 over
- ;; this program: 2,080 src forms, 56 over 4,096 and 11 over 8,192 (seon.ref/scan 19,219); 2,040 test
- ;; forms, 35 over 4,096.
- :seon.config.shrink/form-chars 4096
+ ;; Unit: tokens of a form's :form/src as the model reads it (seon.print.emit/chars-tokens, the printer's
+ ;; one estimate), src and test alike: about a printed page. A live form longer than this is an open
+ ;; :long-form problem row (seon.problems/long-forms), shown to a branch that adds one (attention, never
+ ;; refused) and closed by splitting it; its task is seon.template/a-finding-is-a-task. Provenance:
+ ;; measured over this program (commit 3fac2a4f04): 2,082 src forms, 83 over 1,000 tokens and 20 over
+ ;; 2,000 (seon.ref/scan 6,005); 2,052 test forms, 76 over 1,000.
+ :seon.config.shrink/form-tokens 1000
  ;; Unit: functions. The program functions nearest the task's plan by meaning (seon.vector/near,
  ;; exact) that its write set and proofs do not name, each a line in its task data (:similar);
  ;; 0 shows none. Provenance: the owner's ruling (2026-10-24, DECISIONS "Embeddings join the

@@ -118,7 +118,7 @@
         (seq? form) (str "(" (str/join " " (map form-text form)) ")")
         :else (literal form)))
 
-(def ^:private chars-per-token
+(def chars-per-token
   "The characters a token is taken to hold, the config's prior (docs/render.md#cut-where-a-value-is-made)."
   (config/value :seon.config.ai/chars-per-token-prior))
 
