@@ -337,3 +337,41 @@
   (let [v (conj (or v []) x)] (if (> (count v) n) (subvec v (- (count v) n)) v)))
 (defn p50 "The median of xs, rounded." {:malli/schema [:=> [:cat [:maybe [:sequential number?]]] [:maybe :double]]}
   [xs] (some-> (percentile xs 0.5) r2))
+
+(defn kill!
+  "Send signal sig to the process pid (kill(2); pid 0 is the caller's process group, sig 0 only
+  asks whether pid is there). Answers whether the signal was delivered: false when the process is
+  gone or not ours (ESRCH, EPERM), never a throw. The one call sites use to end or interrupt a
+  process (docs/failure-points.md#failure-points-met-without-a-catch-the-edge-answers-data)."
+  {:malli/schema [:=> [:cat :int :int] :boolean]}
+  [pid sig] (zero? (c-kill pid sig)))
+
+(defn tail-bytes
+  "The last n bytes of src as a UTF-8 string, or nil when there is nothing to show: src is the path
+  of a file (missing or empty gives nil) or an InputStream read to its end (a child's stderr).
+  A cut says how many earlier bytes it left out. The one reader of a process's stderr for a death
+  record, an error's evidence and a stall's fiber dump (docs/failure-points.md#failure-points-met-without-a-catch-the-edge-answers-data)."
+  {:malli/schema [:=> [:cat [:maybe [:or :string [:fn #(instance? java.io.InputStream %)]]] pos-int?] [:maybe :string]]}
+  [src n]
+  (let [f (when (string? src) (java.io.File. ^String src))
+        len (cond f (if (.exists f) (.length f) 0) :else 0)
+        ;; a file is read from its tail (a stderr file may be large), a stream whole
+        [^bytes b total] (cond
+                           (and f (pos? len)) (with-open [r (java.io.RandomAccessFile. f "r")]
+                                                (let [k (min len n) a (byte-array k)]
+                                                  (.seek r (- len k)) (.readFully r a) [a len]))
+                           (nil? f) (when src (let [a (.readAllBytes ^java.io.InputStream src)] [a (alength a)])))]
+    (when (and b (pos? total))
+      (let [k (alength b)
+            body (if (and (nil? f) (> k n)) (String. b (- k n) n "UTF-8") (String. b "UTF-8"))
+            shown (min k n)]
+        (if (> total shown) (str "[" (- total shown) " earlier bytes left out] " body) body)))))
+
+(defn digest
+  "The first 16 hex digits of the SHA-256 of s: a content identity (docs/source.md#a-result-is-a-function-of-its-digest). The one hash of a string; hasch is for store ids."
+  {:malli/schema [:=> [:cat :string] [:string {:min 16 :max 16}]]}
+  [s]
+  ;; the first 8 bytes as one long in hex, left-padded: the same digits as each byte's two, with no per-byte format
+  (let [b (.digest (java.security.MessageDigest/getInstance "SHA-256") (.getBytes ^String s))
+        h (Long/toHexString (.getLong (java.nio.ByteBuffer/wrap b)))]
+    (str (subs "0000000000000000" (count h)) h)))

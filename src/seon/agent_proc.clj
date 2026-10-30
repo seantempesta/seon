@@ -96,13 +96,13 @@
                                                    (str "agent " (name (:id st)) " sent nothing for " quiet " ms with a request in flight")
                                                    {:agent (:id st) :quiet-ms quiet :last-op (:last-op st)})}]}]
                 [st nil]))
-    :forked (do (when (and (:kill? st) (not (:dead? st))) (lib/c-kill (:pid m) 9))
+    :forked (do (when (and (:kill? st) (not (:dead? st))) (lib/kill! (:pid m) 9))
                 [(assoc st :pid (:pid m)) nil])
     ;; a process that never existed reads as dead: hang up root's end, the reader sees EOF
     :failed (do (hang-up! st) [st {:to-api [(status st {:error (:error m)})]}])
     :drain (let [st (if (:pid st) (to-proc! st {:op :stop}) (do (hang-up! st) st))]
              [(assoc st :draining (:rid m) :stop-sent true) nil])
-    :kill (do (if (:pid st) (lib/c-kill (:pid st) 9) (hang-up! st))
+    :kill (do (if (:pid st) (lib/kill! (:pid st) 9) (hang-up! st))
               [(assoc st :kill? true) nil])
     [st nil]))
 
@@ -122,7 +122,7 @@
       :testing (assoc st :last-op {:kind :tests :form (:test m)})
       :hello (do (when (:cloned-from m)
                    ;; a clone: its pid arrives here (the fork server never saw it)
-                   (when (:kill? st) (lib/c-kill (:pid m) 9))
+                   (when (:kill? st) (lib/kill! (:pid m) 9))
                    (step/out! o :events (step/event {:type :spawned :agent id :pid (:pid m) :cloned-from (:cloned-from m)})))
                  (step/out! o :to-api (status st (cond-> {:forked-ms (lib/r2 (:start-ms m)) :mem-mb (:mem-mb m) :t (:t m) :ready true :phases (:phases m)}
                                               (:cloned-from m) (assoc :pid (:pid m))
@@ -259,7 +259,7 @@
                        (when-not (:stop-sent st)
                          (if (:pid st) (to-proc! st {:op :stop}) (hang-up! st)))
                        (when-not (await-dead (:in (:end st)) stop-bound-ms)
-                         (some-> (:pid st) (lib/c-kill 9))
+                         (some-> (:pid st) (lib/kill! 9))
                          (hang-up! st)
                          (await-dead (:in (:end st)) 5000)))
                      (assoc st :dead? true))

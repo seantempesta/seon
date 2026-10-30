@@ -10,5 +10,5 @@
  :seon.config.vector/texts [:int {:min 0 :seon.config/unit "texts" :description "The texts one :embed request of main's vectors carries; 0 embeds none, so the model never loads."}]
  :seon.config.vector/batch [:int {:min 1 :seon.config/unit "requests" :description "The :embed requests one worker step takes from the queue."}]
  :seon.config.vector/rrf-k [:int {:min 1 :seon.config/unit "ranks" :description "Reciprocal rank fusion's k: an item scores the sum of 1/(k + rank) over the rankings it is in."}]
- :seon.config.vector/stderr-chars [:int {:min 1 :seon.config/unit "characters" :description "The last characters of the embedding helper's stderr a :seon.vector/helper-died error keeps (docs/vector.md#the-model)."}]
+ :seon.config.vector/stderr-bytes [:int {:min 1 :seon.config/unit "bytes" :description "The last bytes of the embedding helper's stderr a :seon.vector/helper-died error keeps (docs/vector.md#the-model)."}]
  :seon.config.vector/threads [:int {:min 1 :seon.config/unit "threads" :description "ggml's CPU thread pool in the :embed helper (Metal does the encode)."}]}

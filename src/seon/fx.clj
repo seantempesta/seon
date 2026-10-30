@@ -14,7 +14,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.lib :as lib] [seon.step :as step] [seon.config :as cfg] [seon.model :as model]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [clojure.java.shell :as sh] [clojure.string :as str] [jolt.ffi :as ffi] [jolt.deps :as deps]
-            [seon.edn :as sedn] [seon.error :as err] [clojure.edn :as edn] [seon.proofs :as proofs]))
+            [seon.edn :as sedn] [clojure.edn :as edn] [seon.proofs :as proofs]))
 
 (defn- error
   "An effect's declared failure, as the one error map (its variant registered in
@@ -420,11 +420,11 @@
                       (if (and pn (str/includes? pn "+")) (str l " " pn) l)]))
          by-class (group-by first entries)]
      {:tree tree
-      :env (err/digest (str/join "\n" (concat (map second (get by-class nil)) [(str "test-ticks " (:seon.config.agent/test-ticks cfg) " " (:seon.config.agent/test-ticks-floor cfg) " " (:seon.config.agent/test-ticks-factor cfg))])))
+      :env (lib/digest (str/join "\n" (concat (map second (get by-class nil)) [(str "test-ticks " (:seon.config.agent/test-ticks cfg) " " (:seon.config.agent/test-ticks-floor cfg) " " (:seon.config.agent/test-ticks-factor cfg))])))
       ;; the config in force, and each class of files a test may read (env-class): named inputs
       ;; a test's digest takes by what its reach reads
       :config (into (config-input cfg checkout)
-                    (for [[c es] by-class :when c] [c (err/digest (str/join "\n" (map second es)))]))
+                    (for [[c es] by-class :when c] [c (lib/digest (str/join "\n" (map second es)))]))
       :data-refs (declared-refs (str root "/resources/seon/system.edn"))})))
 
 (defn git-commit
@@ -1161,9 +1161,9 @@
                     "kill -INFO $p 2>/dev/null\n"
                     "sample $p 5 -file sample.txt > /dev/null 2>&1\n"
                     "lsof -p $p > lsof.txt 2>&1\n"
-                    "g=$(ps -o pgid= -p $p | tr -d ' '); [[ -n $g ]] && ps -o pid,ppid,pgid,stat,etime,%cpu,rss,command -g $g > ps.txt 2>&1\n"
-                    "[[ -r \"$3\" ]] && tail -c 262144 \"$3\" > fibers.txt\n")
-        _ (sh/sh "zsh" "-c" script "evidence" dir (str pid) (or stderr ""))
+                    "g=$(ps -o pgid= -p $p | tr -d ' '); [[ -n $g ]] && ps -o pid,ppid,pgid,stat,etime,%cpu,rss,command -g $g > ps.txt 2>&1\n")
+        _ (sh/sh "zsh" "-c" script "evidence" dir (str pid))
+        _ (some->> (lib/tail-bytes stderr (cfg/value :seon.config.agent/stall-fibers-bytes)) (spit (str dir "/fibers.txt")))
         files (into {} (for [[k f] {:sample "sample.txt" :lsof "lsof.txt" :ps "ps.txt" :fibers "fibers.txt"}
                              :let [path (str dir "/" f) file (java.io.File. path)]
                              :when (pos? (.length file))]

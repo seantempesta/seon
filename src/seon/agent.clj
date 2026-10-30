@@ -622,7 +622,7 @@
   []
   (let [got (volatile! false)]
     (lib/on-signal! lib/SIGUSR1 (fn [] (vreset! got true)))
-    (lib/c-kill (lib/c-getpid) lib/SIGUSR1)
+    (lib/kill! (lib/c-getpid) lib/SIGUSR1)
     (loop [k 0] (when (and (not @got) (< k 100000)) (eval 1) (recur (inc k))))
     @got))
 
