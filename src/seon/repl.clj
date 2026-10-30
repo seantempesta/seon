@@ -922,6 +922,10 @@
   ;; which Linux lacks, so there the agent runs on its thread as before
   ((if (lib/macos?) jolt.host/main-carrier-run! #(%))
     (fn []
+      ;; code the agent evals is compiled with Jolt's tail-frame history, as `jolt` from source does
+      ;; (a built binary's own code has it baked in): a fn called in tail position leaves no frame,
+      ;; and the history is what names it in an error's position (`located`, docs/errors.md#an-eval-errors-diagnostics)
+      (jolt.host/enable-trace!)
       (agent/init! fd m db0 serve!)
       (agent/hello! t-req-ns (cond-> {:interrupt-ok (:interrupt-ok @agent/state)}
                                 (seq (:load-errors @agent/state)) (assoc :load-errors (:load-errors @agent/state))
