@@ -404,6 +404,10 @@
             (doseq [l (.listFiles (java.io.File. (str dir "/runs/merge-tests")))
                     :when (str/ends-with? (.getName l) ".log")]
               (sh/sh "cp" (.getPath l) kept))
+            ;; and each generation's build log (bin/worktree --at, bin/build), which the generation's error names
+            (doseq [l (.listFiles (java.io.File. (str dir "/runs/generations")))
+                    :when (str/ends-with? (.getName l) ".build.log")]
+              (sh/sh "cp" (.getPath l) kept))
             (println "the restart test's boot logs kept in" kept)))
         (doseq [g (.listFiles (java.io.File. (str dir "/runs/generations")))]
           (sh/sh (str here "/bin/worktree") "--remove-at" (.getPath g)))

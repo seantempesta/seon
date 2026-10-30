@@ -572,7 +572,8 @@
         step (fn [what args]
                (let [r (apply sh/sh "zsh" "-c" "\"$@\" >> \"$0\" 2>&1" log (concat clean args))]
                  (when-not (zero? (:exit r))
-                   (error #'seon.fx/build :seon.fx/io-error (str what " exited " (:exit r) "; its log: " log) {:path dir}))))]
+                   ;; the log's text travels with the error: a test that removes its scratch keeps the cause
+                   (error #'seon.fx/build :seon.fx/io-error (str what " exited " (:exit r) "; its log: " log) {:path dir :log (slurp log)}))))]
     (.mkdirs (java.io.File. (str (cfg/value :seon.config.source/generations-dir))))
     (or (when-not (.exists (java.io.File. dir))
           (step "bin/worktree --at" [(str from "/bin/worktree") "--at" dir commit repo]))
