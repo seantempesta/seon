@@ -8,7 +8,7 @@
   run-tests-forked answer): one status per test var, read the same way by the agent's turn
   loop and root's judge."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.config :as cfg] [seon.program :as program] [seon.edn :as sedn] [seon.error :as error] [seon.profile :as profile] [seon.print :as print]
+  (:require [seon.contract :as contract :refer [defn defn-]] [seon.lib :as lib] [seon.config :as cfg] [seon.program :as program] [seon.edn :as sedn] [seon.error :as error] [seon.profile :as profile] [seon.print :as print]
             [clojure.edn :as edn] [clojure.string :as str] [clojure.test :as t] [malli.core :as m] [malli.generator :as mg]))
 
 (defn test-symbol
@@ -167,7 +167,7 @@
   "The digest of the schema registry of reach graph g (its schema entries: key and text, in key order) under env. See docs/checks.md#the-generative-check-is-per-function."
   {:malli/schema [:=> [:cat [:map [:schemas :map]] :string] :string]}
   [g env]
-  (error/digest (str mg-registry "\n" env "\n"
+  (lib/digest (str mg-registry "\n" env "\n"
                      (str/join "\n" (for [[k text] (sort-by (comp str key) (:schemas g))] (str k " " text))))))
 
 (defn- fn-without-gen
@@ -247,9 +247,9 @@
   (let [fns (into {} (filter (comp vector? val)) check-steps)
         pins (str/join "\n" (for [[c d] (sort-by (comp str key) config) :when (= "seon.pin" (namespace c))] (str c " " d)))
         ds (merge (digests-of fns)
-                  (into {} (for [[k v] check-steps :when (= :tree v)] [k (error/digest (str k "\n" tree))]))
-                  (into {} (for [[k v] check-steps :when (= :pins v)] [k (error/digest (str k "\n" env "\n" pins))]))
-                  (when base (into {} (for [[k v] check-steps :when (= :caused v)] [k (error/digest (str k "\n" tree "\n" base))]))))]
+                  (into {} (for [[k v] check-steps :when (= :tree v)] [k (lib/digest (str k "\n" tree))]))
+                  (into {} (for [[k v] check-steps :when (= :pins v)] [k (lib/digest (str k "\n" env "\n" pins))]))
+                  (when base (into {} (for [[k v] check-steps :when (= :caused v)] [k (lib/digest (str k "\n" tree "\n" base))]))))]
     {:digests ds :missing (vec (sort (remove #(or (ds %) (= :mg (check-steps %))) (keys check-steps))))}))
 
 (defn green? "Is result r green: no failing or erroring assertion?" {:malli/schema [:=> [:cat [:maybe :map]] :boolean]}
@@ -491,7 +491,7 @@
   re-rolls every seed at once (it is config, so it moves every digest too)."
   {:malli/schema [:=> [:cat [:* :any]] :int]}
   [& parts]
-  (Long/parseLong (subs (error/digest (sedn/encode (cons (cfg/value :seon.config.proofs/seed-salt) parts))) 0 15) 16))
+  (Long/parseLong (subs (lib/digest (sedn/encode (cons (cfg/value :seon.config.proofs/seed-salt) parts))) 0 15) 16))
 
 (defn test-seed
   "The seed of the clojure.test test running now: (seed test digest), its digest the one

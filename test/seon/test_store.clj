@@ -44,7 +44,7 @@
          keyed (str stem "-" digest)
          old (re-pattern (str "\\Q" stem "\\E(-[0-9a-f]{8})?"))]
      (doseq [n (some-> dir .list seq) :when (and (re-matches old n) (not= n keyed))]
-       (sh/sh "rm" "-rf" (str dir "/" n)))
+       (fx/remove-tree! (str dir "/" n)))
      (str dir "/" keyed))))
 
 (def ^:private program-store-path
@@ -52,7 +52,7 @@
   under target/tmp: a test process's own, so shards running at once never share one; removed
   when the process ends (a shutdown hook)."
   (delay (let [path (str (seon.config/checkout) "/target/tmp/program-store-" (random-uuid))]
-           (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable (fn [] (sh/sh "rm" "-rf" path))))
+           (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable (fn [] (fx/remove-tree! path))))
            path)))
 
 (defn kept-program-store
@@ -343,7 +343,7 @@
         root (start-root! {:store store :main main :runs (str checkout "/target/runs/" main "-runs") :args args})]
     (.addShutdownHook (Runtime/getRuntime)
                       (Thread. ^Runnable (fn [] (let [s (stop-root! root)] (when-not (:exit s) (binding [*out* *err*] (println "shared root" main "not stopped:" (pr-str s)))))
-                                               (drop-main! store main) (sh/sh "rm" "-rf" (:runs root)))))
+                                               (drop-main! store main) (fx/remove-tree! (:runs root)))))
     root))
 
 (defn shared-root!

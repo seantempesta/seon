@@ -132,7 +132,7 @@
   (let [at (min at (count text))
         start (if (pos? at) (inc (or (str/last-index-of text "\n" (dec at)) -1)) 0)
         end (or (str/index-of text "\n" at) (count text))]
-    {:line (inc (count (filter #(= \newline %) (subs text 0 start)))) :column (inc (- at start))
+    {:line (:at (docs/line-at text start)) :column (inc (- at start))
      :text (subs text start end)}))
 
 (defn repaired

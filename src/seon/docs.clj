@@ -399,11 +399,14 @@
   schema entry's form a :schema."
   {:var :form/src :test :form/src :section :seon.section/text :task :seon.task/plan :schema :schema/form})
 
-(defn- line-at
-  "The whole line of text v that the match at index i begins in (the match may itself hold a line break)."
-  {:malli/schema [:=> [:cat :string :int] :string]}
+(defn line-at
+  "Where index i of text v falls: {:at the 1-based number of its line, :line the whole line it begins in, trimmed
+  (a match may itself hold a line break)}. The one line-at-an-offset computation of a search hit, context's repairs and
+  repl's edit! (docs/references.md#resolving-and-showing)."
+  {:malli/schema [:=> [:cat :string :int] [:map [:at pos-int?] [:line :string]]]}
   [v i]
-  (str/trim (subs v (inc (or (str/last-index-of v "\n" (max 0 (dec i))) -1)) (or (str/index-of v "\n" i) (count v)))))
+  {:at (inc (count (re-seq #"\n" (subs v 0 i))))
+   :line (str/trim (subs v (inc (or (str/last-index-of v "\n" (max 0 (dec i))) -1)) (or (str/index-of v "\n" i) (count v))))})
 
 (defn- named-hits
   "The hits of text v of entity e under attribute a, naming it as its kind does: [{:kind :name :rank}]
@@ -568,7 +571,7 @@
                                  i (some->> ws (keep #(str/index-of low %)) seq (apply min))]]
                        (cond-> (assoc h :z z :bm25 (:score d))
                          (and i (= (count low) (count v)))
-                         (assoc :line (line-at v i) :at (inc (count (re-seq #"\n" (subs v 0 i)))))))]
+                         (merge (line-at v i))))]
             (->> hits (sort-by (juxt (comp - :z) (comp str :name)))
                  (reduce (fn [[seen out :as acc] h] (let [k ((juxt :kind :name) h)] (if (seen k) acc [(conj seen k) (conj out (dissoc h :rank))])))
                          [#{} []])

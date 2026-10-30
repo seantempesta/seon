@@ -11,7 +11,7 @@
   per git tree in a store of its own (program-db)."
   (:require [seon.profile :as profile] [konserve.jolt.fasl-store :as fasl] [clojure.java.io :as io] [clojure.java.shell :as sh] [clojure.string :as str] [clojure.edn :as edn]
             [datahike.api :as d] [seon.config :as config] [seon.db :as pdb] [seon.test-store :as ts]
-            [seon.edn :as sedn] [seon.error :as error] [seon.contract :as contract] [seon.fx :as fx] [seon.program :as program] [seon.proofs :as proofs] [seon.print :as print] [seon.source :as source] [seon.system :as system]
+            [seon.edn :as sedn] [seon.error :as error] [seon.lib :as lib] [seon.contract :as contract] [seon.fx :as fx] [seon.program :as program] [seon.proofs :as proofs] [seon.print :as print] [seon.source :as source] [seon.system :as system]
             [seon.docs :as docs] [seon.task :as task] [seon.problems :as problems] [my.root]))
 
 (defn- test-namespaces
@@ -41,7 +41,7 @@
 (defn- tree-prefix
   "The prefix of the branches keeping a tree's program as :seon.config.source/dirs import it:
   a store's branches made under other dirs (another import) are none of this one's."
-  [] (str "tree-" (error/digest (pr-str (config/value :seon.config.source/dirs))) "-"))
+  [] (str "tree-" (lib/digest (pr-str (config/value :seon.config.source/dirs))) "-"))
 
 (defn tree-branch "The branch keeping the program of git tree id tree." [tree] (keyword (str (tree-prefix) tree)))
 
@@ -78,7 +78,7 @@
     (let [files (if paths
                   (into {} (for [p paths :let [f (io/file dir p)]] [p (when (.isFile f) (slurp f))]))
                   (into {} (filter #(program-file? (key %))) (:value (fx/read-source {:req {:root dir :dirs (config/value :seon.config.source/dirs)}}))))]
-      (sh/sh "rm" "-rf" dir tar)
+      (run! fx/remove-tree! [dir tar])
       files)))
 
 (defn keep-tree!
@@ -128,7 +128,7 @@
   ([root store] (program-db root store (fx/tree-id root)))
   ([root store tree]
   (when (> (.length (io/file store "data.mdb")) (config/value :seon.config.proofs/program-store-max-bytes))
-    (sh/sh "rm" "-rf" store))
+    (fx/remove-tree! store))
   (let [b (tree-branch tree)
         {:keys [conn cfg]} (pdb/open! :lmdb store 0 :db)
         branches (d/branches conn)]
@@ -142,7 +142,7 @@
   seon.program (an index range of the var names, one entity read each), so a change to any of them
   and the config keys its rows and flags read (pin-namespaces, process-vars, binary-vars), makes a stored graph (reach-graph-of) another builder's."
   [db]
-  (error/digest (str (str/join " " (sort (for [dt (d/index-range db {:attrid :var/name :start (symbol "seon.program" "") :end (symbol "seon.program" "\uffff")})
+  (lib/digest (str (str/join " " (sort (for [dt (d/index-range db {:attrid :var/name :start (symbol "seon.program" "") :end (symbol "seon.program" "\uffff")})
                                                :let [f (:var/form (d/entity db (:e dt)))] :when f]
                                            (:form/id f))))
                      ;; and the config the graph's rows and flags are read under
@@ -505,7 +505,7 @@
             dir (str root "/target/tmp/health-base-" base "-" (random-uuid))
             based (try (with-wiki (program-db root store (fx/tree-of root base))
                                   (fx/checkout-at root base ["docs" (tasks-dir)] dir))
-                       (finally (sh/sh "rm" "-rf" dir)))
+                       (finally (fx/remove-tree! dir)))
             {:keys [caused attention checks]} (branch-health based head classes)
             h (problems/health head)
             open (reduce + 0 (for [c (or (seq classes) (sort problems/caused-classes))] (get-in h [:classes c :n] 0)))]

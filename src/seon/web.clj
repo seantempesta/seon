@@ -277,7 +277,7 @@
     :call (let [c (:call m)
                 reqs (requests c (:index st {}))]
             (when (= 'seon.root/interrupt! (:var c))
-              (some-> (get-in st [:index (:agent c) :pid]) (lib/c-kill lib/SIGUSR1)))
+              (some-> (get-in st [:index (:agent c) :pid]) (lib/kill! lib/SIGUSR1)))
             ;; answered to the render proc, which shows each in the stream by its tag; root's
             ;; function is root's evaluation, its form in the tag: the render proc records it on
             ;; main (origin :ui) with what root answered, as root's REPL records one; an eval opened

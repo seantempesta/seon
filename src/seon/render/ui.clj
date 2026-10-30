@@ -22,13 +22,6 @@
 (defn- part "Tokens of a value shown inside another." {:malli/schema [:=> [:cat] pos-int?]} [] (config/value :seon.config.render/part-budget))
 (defn- form-budget "Tokens of a form echoed back." {:malli/schema [:=> [:cat] pos-int?]} [] (config/value :seon.config.render/form-budget))
 
-(defn dom-id
-  "A DOM-safe id for an id keyword or string: :a12 -> \"a12\", :fx/model -> \"fx_model\"."
-  {:malli/schema [:=> [:cat :any] :string]}
-  [id]
-  (let [s (if (keyword? id) (subs (str id) 1) (str id))]
-    (apply str (map #(if (or (Character/isLetterOrDigit ^char %) (= \_ %) (= \- %)) % \_) s))))
-
 (defn view-param
   "A view as its feed's ?view= and its path name it (seon.web/view-of reads it back). See docs/render.md#the-page."
   {:malli/schema [:=> [:cat :any] :string]}
@@ -1599,31 +1592,6 @@
     :eval (str "eval " x)
     :turn (str "the reply of turn " x)
     :message (str "message " x)))
-
-(defn- sent-parts-html
-  "Parts [[ref messages]] of a sent request, each beside the record that made it, each message
-  whole: the system prompt folded, an assistant message's prose, reasoning (folded) and eval
-  calls, a tool message under the call it answers."
-  {:malli/schema [:=> [:cat [:sequential :any]] :any]}
-  [parts]
-  (let [text (fn [s] [:pre {:class "whitespace-pre-wrap break-words text-text-100"} s])
-        fold (fn [label s] [:details [:summary {:class "text-2xs text-text-500"} (str label ", " (print/tokens-text (select/chars-tokens (count s))))] (text s)])
-        msg (fn [{:keys [role content reasoning tool-calls tool-call-id]}]
-              [:div {:class (str "flex flex-col gap-1 rounded border-l-2 pl-2 py-1 "
-                                 (case role "assistant" "border-signal" "tool" "border-base-600" "user" "border-text-400" "border-base-700"))}
-               [:div {:class "text-2xs uppercase text-text-500"} role (when tool-call-id (str " · answers " tool-call-id))]
-               ;; the provider's format sends it back unless :seon.config.ai/replay-reasoning is false
-               (when reasoning (fold "reasoning, as returned (sent back unless replay-reasoning is off)" reasoning))
-               (when-not (str/blank? content) (if (= "system" role) (fold "the help page" content) (text content)))
-               (for [{:keys [id code prose]} tool-calls]
-                 [:div {:class "flex flex-col gap-1"}
-                  [:div {:class "text-2xs text-text-500"} (str "eval call " id)]
-                  (when prose [:p {:class "whitespace-pre-wrap italic text-text-300"} prose])
-                  [:pre {:class "whitespace-pre-wrap break-words text-text-100"} [:code code]]])])]
-    (for [[ref ms] parts]
-      [:div {:class "grid gap-2 sm:grid-cols-[12rem_minmax(0,1fr)]"}
-       [:div {:class "text-2xs text-text-500 break-words"} (source ref)]
-       (into [:div {:class "flex flex-col gap-1 min-w-0"}] (map msg ms))])))
 
 (defn- request-messages
   "A sent request's messages in order, from its parts [[ref messages]], each [ref message tokens new?]:
