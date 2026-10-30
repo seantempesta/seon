@@ -634,7 +634,9 @@
         m (#'root/flow-error {:clojure.core.async.flow/pid :reconciler :clojure.core.async.flow/ex ex
                               :clojure.core.async.flow/msg {:tag 7 :r nil}})
         p (promise)
-        _ (step #'root/api-proc (api-state) :back (assoc m :msg {:op :state :p p}))]
+        [_ outs] (step #'root/api-proc (api-state) :back (assoc m :msg {:op :state :p p}))]
+    (is (= [{:type :proc-defect :pid :reconciler :message (ex-message ex)}] (map #(dissoc % :at-ms) (:events outs)))
+        "an event, so a wait on root's events for what the proc owed ends (bin/check robust waited for good)")
     (is (= "seon.procs-test" (some-> (:in m) namespace)) (str "the fn it threw in: " (pr-str (:in m))))
     (is (= (:in m) (:seon.error/in (answer p))) "on the defect")
     (is (= :state (:took (answer p))) "with what its step took")))

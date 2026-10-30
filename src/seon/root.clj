@@ -586,6 +586,9 @@
                                          (:in m) (assoc :seon.error/in (:in m))
                                          (map? (:msg m)) (assoc :took (or (:op (:msg m)) (vec (sort (keys (:msg m)))))))))
                    taken (distinct (cond-> (if (= :api (:pid m)) (::lost st) []) (:msg m) (conj (:msg m))))]
+               ;; the defect is an event too, so whoever waits on root's events for what that proc
+               ;; owed (a check awaiting :fork-server-up) hears that it never will, not silence
+               (step/out! o :events (step/event {:type :proc-defect :pid (:pid m) :message (:seon.error/message e)}))
                ;; the view keeps the newest :seon.config.root/view-window and counts them all (renders say how many it left)
                (-> (reduce (fn [st x] (answer-taken st o (:pid m) x e)) (cond-> st (= :api (:pid m)) (dissoc ::lost)) taken)
                    (view! update :root-errors #(lib/push-window %1 %2 (cfg/value :seon.config.root/view-window)) (merge {:pid (:pid m) :message (:message m)} (:data m)))

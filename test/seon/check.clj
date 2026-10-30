@@ -41,9 +41,14 @@
 (defn- await-event
   "The first event on ev (a tap of root's events, seon.root/events, taken before what causes
   it) for which (pred e) holds: root's events are the dependency, never a poll or a
-  deadline. An error when the events end (root stopped) first."
+  deadline. An error when the events end (root stopped) first, or when a root proc threw
+  (:proc-defect): what the step owed may never come."
   [ev pred]
-  (loop [] (let [e (a/<!! ev)] (cond (nil? e) (throw (ex-info "root's events ended" {})) (pred e) e :else (recur)))))
+  (loop [] (let [e (a/<!! ev)]
+             (cond (nil? e) (throw (ex-info "root's events ended" {}))
+                   (pred e) e
+                   (= :proc-defect (:type e)) (throw (ex-info (str "root's " (name (:pid e)) " proc threw: " (:message e)) e))
+                   :else (recur)))))
 
 (defn- await-each
   "The first event on ev (await-event) for each of preds, in preds' order, whatever order
