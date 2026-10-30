@@ -1293,10 +1293,13 @@
   (its release, written on main after the branch was cut, read :held here: my.task/current and the
   page's task said held); a task's execution is no content a merge carries (seon.merge/carried-platform-attrs).
   A task the branch lacks (a fork's: its branch is cut from another task's) is written as main
-  declares it first (seon.task/create-tx)."
+  declares it first (seon.task/create-tx). A run the branch holds for another agent (one killed
+  before main recorded the run, so a restarted root starts the same run again) is this agent's:
+  its record names this agent, or the run is no session's and its turns draw no status (the
+  resume check capped at 40 turns so)."
   {:malli/schema [:=> [:cat :seon.task/id :seon.run/id] :any]}
   [task run]
-  (when-not (some-> (d/entity (db) [:seon.run/id run]) :seon.run/agent)
+  (when-not (= (:key @state) (some-> (d/entity (db) [:seon.run/id run]) :seon.run/agent :seon.agent/key))
     (when-not (d/entity (db) [:seon.task/id task])
       (let [t (task/task (heard-main) task)]
         (transact! (task/create-tx (db) [(-> (select-keys t [:seon.task/ns :seon.task/name :seon.task/plan :seon.task/instructions :seon.task/proofs
