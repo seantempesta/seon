@@ -484,28 +484,30 @@
                                  (do (test-error! (agent/prove! :judge))
                                      (let [db (agent/db)] (context/status db (pdb/eid db :seon.agent/key (:key @agent/state)) {})))
                                  s)
+                             no-status? (contract/error? s)
                              reasons (:reasons s)
                              stop (get-in @agent/state [:turn :stop])
                              hairy (when (and merge? (not (contract/error? s))) (r/hairy (merge merge-cfg {:conflicts (vec (:unmerged s)) :task (:task obs) :merge-turns (:merge-turns st)})))]
                          (cond
-                           ;; the walk drew no status (the agent's program broke the layout): the agent reads why, this turn
-                           ;; past its cap it ends there, as every turn does (md-scan #27: the agent's change broke
-                           ;; the status, each turn took this branch, and its run made 156 model calls past a cap of 40)
-                           (contract/error? s) (if (>= (:turn st) max-turns)
-                                                 (ended st :cap (str "no status at the cap: " (:seon.error/message s)) s)
-                                                 (next-of (act! (turn-error! st s) obs s model)))
                            ;; git's CI after the merge: green on the combined program; merge main again until
                            ;; it brings nothing new
-                           (and (empty? reasons) merge?)
+                           (and (not no-status?) (empty? reasons) merge?)
                            (let [m (branch/merge-main!)]
                              (if (and (empty? (:applied m)) (empty? (:conflicts m))) (ended st :green nil nil) [::next st]))
-                           (empty? reasons) (ended st :green nil nil)
+                           (and (not no-status?) (empty? reasons)) (ended st :green nil nil)
                            ;; the agent's own fail! is its verdict, at the cap too; a wait on the last turn is
                            ;; the budget spent, so the run is :cap, never :waiting (its session parks either way)
                            (= :failed (:outcome stop)) (ended st :failed (:reason stop) nil)
                            hairy (ended st :merge-failed (:reason hairy) nil)
-                           (>= (:turn st) max-turns) (ended st :cap (r/explain-text reasons) nil)
+                           ;; the one check of the cap, before any model call: every turn reaches it, one with no
+                           ;; status and one after a turn that threw included (md-scan #27: the agent's change broke
+                           ;; the status and its run made 156 model calls past a cap of 40)
+                           (>= (:turn st) max-turns) (if no-status?
+                                                       (ended st :cap (str "no status at the cap: " (:seon.error/message s)) s)
+                                                       (ended st :cap (r/explain-text reasons) nil))
                            stop (ended st (:outcome stop) (:reason stop) nil)
+                           ;; the walk drew no status (the agent's program broke the layout): the agent reads why, this turn
+                           no-status? (next-of (act! (turn-error! st s) obs s model))
                            :else (next-of (act! st obs s model))))
                        (catch Throwable e
                          (if (:interrupted (ex-data e))
@@ -515,12 +517,10 @@
                            (let [called? (not (identical? asked (get-in @agent/state [:requests run])))
                                  st' (cond-> (update (turn-error! st (agent/error-map e 'seon.turn/work!)) :turn inc)
                                        called? (assoc :threw 1))]
-                             (cond (< 1 (:threw st'))
-                                   (ended st' :error (str "two turns in a row threw: " (:seon.error/message (:error st'))) (:error st'))
-                                   ;; a turn that threw counts against the cap too
-                                   (>= (:turn st') max-turns)
-                                   (ended st' :cap (str "threw at the cap: " (:seon.error/message (:error st'))) (:error st'))
-                                   :else [::next st'])))))))]
+                             ;; a turn that threw counts against the cap, which the next turn checks
+                             (if (< 1 (:threw st'))
+                               (ended st' :error (str "two turns in a row threw: " (:seon.error/message (:error st'))) (:error st'))
+                               [::next st'])))))))]
         (case (first step)
           ::next (recur (second step))
           ::end (let [[_ st outcome reason err] step] (end! st outcome reason err)))))))

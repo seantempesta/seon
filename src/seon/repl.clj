@@ -2,7 +2,8 @@
   "An agent's REPL speaking nREPL's message model on its one thread (session F2, after session
   R2's r2.repl; the owner chose nREPL's model for agents).
 
-  The agent's process runs `agent-step` (the step-fn contract) under seon.step/run-loop.
+  The agent's process is a Flow graph of three :io procs on its one thread (`serve!`):
+  `transport-step` reads root's frames, `agent-step` runs its REPL, `tests-step` its test runs.
   A REPL request (nREPL's `eval`, the one op any client sends) is handled on this thread by
   `handler`: eval-code with middleware composed over it, each `(fn [handler] (fn [request]
   ...))`, as in nREPL. A request carries :reply, a fn of one response map. Eval reads the
@@ -29,7 +30,7 @@
   messages, writes) are {:op k} values, handled by `agent-step`."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn- defchecked]] [seon.error :as err] [jolt.nrepl :as nrepl] [seon.intr :as intr] [seon.reader :as reader] [seon.ref :as ref] [seon.docs :as docs] [seon.agent :as agent] [seon.contract :as contract] [my.db] [my.agent] [my.schema] [malli.registry :as mr]
-            [seon.program :as program] [jolt.analyzer] [seon.lib :as lib] [seon.print :as print] [seon.print.select :as select] [seon.render :as render] [seon.context :as context] [seon.ctx :as ctx] [seon.web.html :as h] [seon.profile :as profile] [seon.sock :as sock] [seon.step :as step]
+            [seon.program :as program] [jolt.analyzer] [seon.lib :as lib] [seon.print :as print] [seon.print.select :as select] [seon.render :as render] [seon.context :as context] [seon.ctx :as ctx] [seon.web.html :as h] [seon.profile :as profile] [seon.sock :as sock] [seon.step :as step] [clojure.core.async :as a] [clojure.core.async.flow :as flow]
             [jolt.ffi :as ffi] [seon.config :as cfg] [clojure.test] [datahike.api :as d] [seon.db :as pdb] [seon.edn :as sedn]))
 
 (defchecked ^:private outer-frames [:=> [:cat] :any] @#'jolt.nrepl/outer-frames)
@@ -859,56 +860,153 @@
        [(walked-db (:walk-db @agent/state)) (apply array-map (mapcat identity (render/placed-hiccup w context/page-lists)))
         (render/placed-data w context/page-lists)]))
 
-;; ---- the process: agent-step under run-loop ----------------------------------------
+;; ---- the process: a Flow graph of three procs on the agent's one thread ----------------
 
 (defn agent-step
-  "The agent as a step-fn, run on its one thread by seon.step/run-loop: requests in on
-  :sock (an eval as {:op :eval :id :forms}, its page's parts to draw as {:op :render :id},
-  Seon's ops as {:op k ...}), replies out on
-  :sock; :pause, :resume, :stop and :ping are taken by the loop. Its REPL state is the
-  process's one state map (seon.agent/state), which the code it evaluates reads, so the
-  step's own state is empty."
+  "The agent's :repl proc: the requests the :transport proc hands it, one at a time in arrival
+  order: an eval ({:op :eval :id :forms}), its page's parts to draw ({:op :render :id}), Seon's
+  ops that write its branch ({:op k ...}: :judge, :merge-main, :clone) and root's :stop, after
+  which the process ends. It sends its replies to root itself (seon.agent/send!, one whole frame)
+  and commits what a request applied. Its REPL state is the process's one state map
+  (seon.agent/state), which the code it evaluates reads, so the step's own state is empty. See
+  docs/processes.md#the-agent-process."
   {:malli/schema :seon.step/step-fn}
-  ([] {:ins {:sock "root's requests"} :outs {:sock "replies"} :workload :io
-       :ping-map-fn (fn [_] {:evals (:n @agent/state) :pending (count (:pending @agent/state))})})
+  ([] {:ins {:in "the requests that run at the REPL or write the branch"} :outs {} :workload :io
+       :ping-map-fn (fn [_] {:evals (:n @agent/state)})})
   ([_] {})
   ([st _] st)
   ([st _ m]
-   (cond
-     ;; root's render proc asks for this agent's page: its parts, drawn here under its branch's
-     ;; schemas by the renders it defines, answered as HTML, and nothing recorded
-     (= :render (:op m))
-     ;; the facts main holds of its own entities taken first (an eval a reader opened): what it draws is them
-     [st {:sock [{:op :reply :id (:id m) :response (do (when-let [tx (seq (agent/untaken-facts))] (agent/transact! (vec tx)) (agent/commit!))
-                                                       (render-ctx))}]}]
-     (= :eval (:op m))
-     (do
-       ;; an interrupt left from before this request is not its; then root hears that it began
-       ;; (its proc's :started event), what an interrupt or a kill meant for a running eval
-       ;; waits on, never a sleep: one arriving from here on stops it
-       (intr/clear-pending!)
-       (agent/send! {:op :started :id (:id m)})
-       ;; its value goes with the reply only when it is plain data (seon.db/plain?: what the socket and the wire carry);
-       ;; root keeps none of it (its view keeps the head: seon.root/eval-head), and the asker reads the value as data,
-       ;; never the printed text back, which is no EDN once the eval printed (its :out verbatim)
-       [st {:sock [{:op :reply :id (:id m) :response (let [r (eval-string (:forms m) (select-keys m [:ticks :origin]))]
-                                                        (cond-> (dissoc r :value) (and (contains? r :value) (pdb/plain? (:value r))) (assoc :value (:value r))))
-                    :t (:max-tx (agent/db))}]}])
-     :else [st (when-let [ms (agent/handle! m)] {:sock ms})])))
+   (swap! agent/state assoc :busy true)
+   (let [rs (cond
+              ;; root's stop: the process ends after the requests before it, what they applied committed
+              (= :stop (:op m)) (do (when (:dirty? @agent/state) (agent/commit!)) (lib/c-exit 0))
+              ;; root's render proc asks for this agent's page: its parts, drawn here under its branch's
+              ;; schemas by the renders it defines, answered as HTML, and nothing recorded
+              ;; the facts main holds of its own entities taken first (an eval a reader opened): what it draws is them
+              (= :render (:op m))
+              [{:op :reply :id (:id m) :response (do (when-let [tx (seq (agent/untaken-facts))] (agent/transact! (vec tx)) (agent/commit!))
+                                                     (render-ctx))}]
+              (= :eval (:op m))
+              (do
+                ;; an interrupt left from before this request is not its; then root hears that it began
+                ;; (its proc's :started event), what an interrupt or a kill meant for a running eval
+                ;; waits on, never a sleep: one arriving from here on stops it
+                (intr/clear-pending!)
+                (agent/send! {:op :started :id (:id m)})
+                ;; its value goes with the reply only when it is plain data (seon.db/plain?: what the socket and the wire carry);
+                ;; root keeps none of it (its view keeps the head: seon.root/eval-head), and the asker reads the value as data,
+                ;; never the printed text back, which is no EDN once the eval printed (its :out verbatim)
+                [{:op :reply :id (:id m) :response (let [r (eval-string (:forms m) (select-keys m [:ticks :origin]))]
+                                                     (cond-> (dissoc r :value) (and (contains? r :value) (pdb/plain? (:value r))) (assoc :value (:value r))))
+                  :t (:max-tx (agent/db))}])
+              :else (agent/handle! m))]
+     (doseq [r rs] (agent/send! r))
+     ;; a branch is committed whenever a request is done (its writes ran ahead in memory)
+     (when (:dirty? @agent/state) (agent/commit!))
+     (swap! agent/state assoc :busy false)
+     [st nil])))
+
+(defn tests-step
+  "The agent's :tests proc: root's :tests requests, one at a time, each run on this proc's fiber
+  (seon.agent/handle!'s :tests: the plan, the forked children read to their end, the results
+  recorded on the branch) and answered, whatever the :repl proc is running: a prove! waits for
+  root's answer while this proc serves root's request for the run (md-scan #21), and the run's
+  work is this fiber's, never charged to the eval that waits (md-scan #26). See
+  docs/processes.md#the-agent-process."
+  {:malli/schema :seon.step/step-fn}
+  ([] {:ins {:in "root's :tests requests"} :outs {} :workload :io :ping-map-fn (fn [_] {})})
+  ([_] {})
+  ([st _] st)
+  ([st _ m]
+   (doseq [r (agent/handle! m)] (agent/send! r))
+   ;; its results committed when the REPL is idle; a request it runs commits them with its own at its end,
+   ;; never half of it from here
+   (when (and (:dirty? @agent/state) (not (:busy @agent/state))) (agent/commit!))
+   [st nil]))
+
+(def ^:private answers
+  "The ops of root's answers to the agent's own requests, each carrying the request's :k
+  (seon.agent/await-reply). See docs/processes.md#the-agent-process."
+  #{:reply :fx-reply :fd :branched})
+
+(def ^:private at-once
+  "The ops the :transport proc handles itself, whatever the :repl proc runs: they write nothing
+  of the branch but the inbox (seon.agent/handle!): a delivery, a stats read, an effect's outcome
+  nobody awaits (fx-send!'s, or one whose wait an interrupt stopped), an answer nobody awaits.
+  See docs/processes.md#the-agent-process."
+  #{:message :stats :fx-reply :reply :fd :branched})
+
+(defn transport-step
+  "The agent's :transport proc, the one reader of root's socket: root's frames arrive on its
+  in-port (seon.agent/intake), and each goes where it is owed. An answer to the agent's own
+  request goes to the promise its wait holds under its :k (seon.agent/await-reply); root's :tests
+  to the :tests proc; a delivery, a stats read and an outcome nobody awaits are handled here at
+  once; root's :pause and :resume pause and resume the :repl proc (Flow's own); every other
+  request, :stop among them, goes to the :repl proc, in arrival order. The end of root's frames
+  ends the process. See docs/processes.md#the-socket-and-the-agent-proc."
+  {:malli/schema :seon.step/step-fn}
+  ([] {:ins {} :outs {:repl "requests that run at the REPL or write the branch" :tests "root's test runs"} :workload :io
+       :ping-map-fn (fn [_] {:waits (count (:waits @agent/state))})})
+  ([_] {::flow/in-ports {:from (agent/intake)}})
+  ([st _] st)
+  ([st _ m]
+   (let [op (:op m)
+         p (when (answers op) (get-in @agent/state [:waits (:k m)]))]
+     (cond
+       ;; root's end: the process ends with it (EOF, or root's end frame)
+       (nil? m) (lib/c-exit 0)
+       p (do (deliver p m) [st nil])
+       (= :tests op) [st {:tests [m]}]
+       (at-once op) (do (doseq [r (agent/handle! m)] (agent/send! r)) [st nil])
+       (= :pause op) (do (flow/pause-proc (:flow @agent/state) :repl) [st nil])
+       ;; a paused proc reads only its control channel: a stop resumes the REPL first, so it ends the
+       ;; process after the requests before it, paused or not
+       (= :stop op) (do (flow/resume-proc (:flow @agent/state) :repl) [st {:repl [m]}])
+       (= :resume op) (do (flow/resume-proc (:flow @agent/state) :repl) [st nil])
+       :else [st {:repl [m]}]))))
+
+(defn defect-answer
+  "The answer root is owed for request m, whose step threw e (a defect no request's own boundary
+  caught: the agent may redefine a function its procs call): the reply of m's op carrying the one
+  error map (seon.agent/error-map), so its asker gets the error as a value and the agent goes on;
+  nil for a message nobody waits on. See docs/processes.md#the-agent-process."
+  {:malli/schema [:=> [:cat :map :seon.host/throwable] [:maybe :seon.wire/seon-msg]]}
+  [m e]
+  (let [em (agent/error-map e 'seon.repl/serve!)]
+    (case (:op m)
+      (:eval :render) {:op :reply :id (:id m) :response {:ex em}}
+      (:tests :judge) {:op :tests :id (:id m) :result em}
+      :stats {:op :stats :id (:id m) :result em}
+      :merge-main {:op :merged-main :id (:id m) :result em}
+      :clone {:op :clone-failed :k (:k m) :error em}
+      nil)))
 
 (defn serve!
-  "The agent's loop: one request at a time, in arrival order. Never returns. The agent
-  process's entrant boundary: a defect no request's own boundary caught (the agent may
-  redefine a function its loop calls) ends the process; its cause is the run's end on
-  the branch (seon.agent/died!), and the exit status 70 (EX_SOFTWARE) names the death."
+  "The agent's loop: a Flow graph of three :io procs on its one thread (docs/flow.md): the
+  :transport proc, the one reader of root's socket, hands the :repl proc root's requests in
+  arrival order and the :tests proc root's test runs. A step that throws (Flow's error channel)
+  has its request answered with the error (defect-answer), what the request applied committed,
+  and the agent goes on. Never returns: the process ends at root's end (the transport's) or at
+  root's :stop."
   {:malli/schema [:=> [:cat] :any]}
   []
-  (try (step/run-loop #'agent-step {}
-                      (fn [] (let [m (agent/next-msg!)] (when-not (= m :dead) [:sock m])))
-                      (fn [_ m] (agent/send! m)))
-       (lib/c-exit 0)
-       (catch Throwable e
-         (try (agent/died! e) (finally (lib/c-exit 70))))))
+  ;; the :repl and :tests in-ports each hold what root may have queued for the agent, as root's end of the
+  ;; socket does: at the bound the transport waits to hand on the next (docs/flow.md#flow-inside-an-agent)
+  (let [in {:in {:buf-or-n (cfg/value :seon.config.agent/inbox-size)}}
+        g (flow/create-flow {:procs {:transport {:proc (flow/process #'transport-step)}
+                                     :repl {:proc (flow/process #'agent-step) :chan-opts in}
+                                     :tests {:proc (flow/process #'tests-step) :chan-opts in}}
+                             :conns [[[:transport :repl] [:repl :in]] [[:transport :tests] [:tests :in]]]})
+        {:keys [error-chan]} (flow/start g)]
+    (swap! agent/state assoc :flow g)
+    (flow/resume g)
+    (loop []
+      (let [e (a/<!! error-chan) m (::flow/msg e)]
+        (sock/write-line! 2 (print/text (agent/error-map (::flow/ex e) 'seon.repl/serve!) (:part print/budgets)))
+        (when-let [r (when (map? m) (defect-answer m (::flow/ex e)))] (agent/send! r))
+        (when (= :repl (::flow/pid e)) (swap! agent/state assoc :busy false))
+        (when (:dirty? @agent/state) (agent/commit!))
+        (recur)))))
 
 (defn run!
   "The agent's body, in the child of the fork server; fd is its socket to root. Never
@@ -917,10 +1015,8 @@
   [fd m db0 t-req-ns]
   ;; the agent's whole body is one fiber on its one thread (jolt.host/main-carrier-run!): its
   ;; waits park, its go blocks, flows and remote channels run beneath it, and it starts no
-  ;; thread, so it still forks its test children safely (design agent-loop section 8a). macOS
-  ;; only: the loop wakes on root's signals through kqueue (jolt.io-poller/wake-on-signals!),
-  ;; which Linux lacks, so there the agent runs on its thread as before
-  ((if (lib/macos?) jolt.host/main-carrier-run! #(%))
+  ;; thread, so it still forks its test children safely (design agent-loop section 8a)
+  (jolt.host/main-carrier-run!
     (fn []
       ;; code the agent evals is compiled with Jolt's tail-frame history, as `jolt` from source does
       ;; (a built binary's own code has it baked in): a fn called in tail position leaves no frame,

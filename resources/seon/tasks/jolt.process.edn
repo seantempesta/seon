@@ -8,4 +8,12 @@
  {:seon.task/name "a-fiber-dump-follows-the-redirected-stderr"
   :seon.task/plan "A forked Seon agent redirects its stderr to a file of its own (```seon.agent/stderr-to-file!```: creat, then dup2 onto fd 2), so a crash or a stall dump can be read from <agents-dir>/<id>.err (```seon.fx/stall-evidence``` sends SIGINFO, then reads that file into fibers.txt). The fiber dump a Jolt process writes on SIGINFO did not follow: in the source-test hang of 2026-10-27 the stuck agents' dumps (fiber 0 parked in seon.sock/recv! under seon.agent/prove!) were found in the root's own runs/root.log, and the agent's .err stayed 0 bytes, fibers.txt empty. Jolt writes the dump to the stderr port it opened at start (the inherited descriptor's buffer or a dup of it), not to fd 2 by number. Make the dump write fd 2 at the time it is written (or reopen its port after a dup2), with a test that dup2s a file over fd 2 in a child, sends SIGINFO and reads the file. Evidence: the shared notes folder, hang-source-test-nextgen-2026-10-27/diagnosis.md (root.log.full lines 1-92 against runs/store-agents/*/a2.err)."
   :seon.task/kind :whole
-  :seon.task/proofs #{}}]
+  :seon.task/proofs #{}}
+ {:seon.task/name "a-childs-exit-is-a-channel-value"
+  :seon.task/plan "Seon waits for a socket's input or a child's exit with C of its own (seon.lib/kq-wait, native e13_wait, kqueue's NOTE_EXIT: macOS only), in the fork server's loop (seon.fork-server) and seon.agent/read-to-exit. The owner, 2026-10-30: one common interface on every platform, the platform's difference in Jolt. Correct: Jolt answers a child's exit as a value on a channel (kqueue's NOTE_EXIT on macOS, a pidfd in epoll on Linux), beside jolt.io-poller's readiness, so a caller waits with alts! over the exit and its input; Seon's e13_wait and kq-wait are deleted. Its gates on macOS and in an arm64 Linux container (Docker)."
+  :seon.task/kind :work
+  :seon.task/proofs #{jolt.process-test/a-childs-exit-arrives-on-a-channel}}
+ {:seon.task/name "the-hosts-memory-and-signals-are-jolts"
+  :seon.task/plan "Seon reads its own memory through macOS's task_info (seon.lib/real-mb, phys_footprint) and writes the host's signal numbers itself (seon.lib/SIGUSR1, seon.lib/SIGIO: 30 and 23 on macOS, 10 and 29 on Linux). The owner, 2026-10-30: no platform checks outside Jolt. Correct: jolt.host answers this process's memory as the platform charges it (phys_footprint on macOS, the proportional set from /proc/self/smaps_rollup on Linux, each docstring naming what it measures) and the signal numbers by name; Seon's copies are deleted."
+  :seon.task/kind :work
+  :seon.task/proofs #{jolt.process-test/a-process-reads-its-own-footprint}}]

@@ -12,7 +12,7 @@
                           reconciler and the dashboard plug into)
   and one proc per agent (`agent-proc`, added and removed with flow/update!):
   it owns root's end of the agent's socket and its process, and passes Flow's pause, resume and stop on to the
-  agent's own loop (seon.step/run-loop), which runs the same step-fn contract.
+  agent's own Flow graph (seon.repl/serve!), whose procs run the same step-fn contract.
 
   Ordering is dataflow: every proc starts and parks on its inputs. Shutdown flows too:
   the api closes, agents drain and exit, the writer's in-port closes, the writer
