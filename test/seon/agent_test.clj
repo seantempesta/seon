@@ -1118,25 +1118,24 @@
     (is (= :cap (:outcome end)) (pr-str end))
     (is (<= (:model-calls end) 3) (str "no model call past the cap: " (pr-str end)))))
 
-(deftest an-agent-that-throws-ends-with-its-cause
-  ;; task seon.agent/a-death-names-its-cause: a defect that no request's own boundary
-  ;; catches (here the agent redefines, at its REPL as an agent changes the platform, a
-  ;; function its own loop calls after each request: seon.agent/db)
-  ;; ends the process at its entrant boundary: the cause is the run's end on its branch,
-  ;; written before the process exits, and root answers the request it died in with the
-  ;; exit status the fork server reaped
-  (let [[_ died end] (in-agent (fn [{:keys [agent task]}]
-                                 [{:op :context :agent agent}
-                                  "(in-ns 'seon.agent) (clojure.core/defn db [] (throw (ex-info \"boom: the loop's own function\" {:x 1})))"
-                                  {:op :eval :agent "root"
-                                   :code (str "(let [a (first (filter #(= :" agent " (:seon.run/agent %)) (vals (seon.task/runs @(:conn sys)))))]"
-                                              " (seon.reconcile/pull-end (:db @(seon.root/branch-db sys (seon.task/default-branch " (pr-str task) "))) (:seon.run/id a)))")}]))
-        end (:value end)]
-    (is (= :seon.agent/died (:seon.error/type died)) "the request it died in is answered with its death, the one error map")
-    (is (= {:exit 70} (:exit died)) "named by the exit status root observed")
-    (is (= :error (:outcome end)) "the run's end is on its branch")
-    (is (= "boom: the loop's own function" (get-in end [:error :seon.error/message])) "with its cause, the one error map")
-    (is (= 'seon.repl/serve! (get-in end [:error :seon.error/operation])))))
+(deftest a-step-that-throws-answers-its-error-and-the-agent-goes-on
+  ;; task seon.agent/a-death-names-its-cause, as the owner ruled 2026-10-30 (task
+  ;; seon.agent/the-agent-is-a-flow-graph, step 4): a defect no request's own boundary catches (here
+  ;; the agent redefines, at its REPL as an agent changes the platform, a function its REPL proc calls
+  ;; after each eval: seon.db/plain?, which the reply reads) answers that request with the one error
+  ;; map, and the agent goes on: it repairs the function at its REPL and works on, the same process
+  (let [[_ pid broken repaired after pid'] (in-agent (fn [_]
+                                               ["(def p0 (seon.lib/c-getpid))"
+                                                "p0"
+                                                "(in-ns 'seon.db) (clojure.core/defn plain? [_] (throw (ex-info \"boom: the loop's own function\" {:x 1})))"
+                                                "(in-ns 'seon.db) (clojure.core/defn plain? [_] true)"
+                                                "(+ 20 22)"
+                                                "(seon.lib/c-getpid)"]))]
+    (is (= "boom: the loop's own function" (get-in broken [:ex :seon.error/message])) (str "the request is answered with its error: " (pr-str broken)))
+    (is (= 'seon.repl/serve! (get-in broken [:ex :seon.error/operation])) "named by the boundary it reached")
+    (is (some? repaired) (str "the repair is answered: " (pr-str repaired)))
+    (is (= 42 (:value after)) (str "and the agent works on: " (pr-str after)))
+    (is (= (:value pid) (:value pid')) "in the same process")))
 
 (defn- started "The line the child writes as test var v starts." {:malli/schema [:=> [:cat :string] :string]}
   [v] (pr-str {:seon.test/started v}))

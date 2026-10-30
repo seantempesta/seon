@@ -965,13 +965,29 @@
        (= :resume op) (do (flow/resume-proc (:flow @agent/state) :repl) [st nil])
        :else [st {:repl [m]}]))))
 
+(defn defect-answer
+  "The answer root is owed for request m, whose step threw e (a defect no request's own boundary
+  caught: the agent may redefine a function its procs call): the reply of m's op carrying the one
+  error map (seon.agent/error-map), so its asker gets the error as a value and the agent goes on;
+  nil for a message nobody waits on. See docs/processes.md#the-agent-process."
+  {:malli/schema [:=> [:cat :map :seon.host/throwable] [:maybe :seon.wire/seon-msg]]}
+  [m e]
+  (let [em (agent/error-map e 'seon.repl/serve!)]
+    (case (:op m)
+      (:eval :render) {:op :reply :id (:id m) :response {:ex em}}
+      (:tests :judge) {:op :tests :id (:id m) :result em}
+      :stats {:op :stats :id (:id m) :result em}
+      :merge-main {:op :merged-main :id (:id m) :result em}
+      :clone {:op :clone-failed :k (:k m) :error em}
+      nil)))
+
 (defn serve!
   "The agent's loop: a Flow graph of three :io procs on its one thread (docs/flow.md): the
   :transport proc, the one reader of root's socket, hands the :repl proc root's requests in
-  arrival order and the :tests proc root's test runs. Never returns: the process ends at root's
-  end (the transport's), at root's :stop, or at a defect no request's own boundary caught (the
-  agent may redefine a function its procs call), which ends it with exit status 70 (EX_SOFTWARE)
-  and its cause written as the run's end (seon.agent/died!)."
+  arrival order and the :tests proc root's test runs. A step that throws (Flow's error channel)
+  has its request answered with the error (defect-answer), what the request applied committed,
+  and the agent goes on. Never returns: the process ends at root's end (the transport's) or at
+  root's :stop."
   {:malli/schema [:=> [:cat] :any]}
   []
   ;; the :repl and :tests in-ports each hold what root may have queued for the agent, as root's end of the
@@ -984,8 +1000,13 @@
         {:keys [error-chan]} (flow/start g)]
     (swap! agent/state assoc :flow g)
     (flow/resume g)
-    (let [e (a/<!! error-chan)]
-      (try (agent/died! (::flow/ex e)) (finally (lib/c-exit 70))))))
+    (loop []
+      (let [e (a/<!! error-chan) m (::flow/msg e)]
+        (sock/write-line! 2 (print/text (agent/error-map (::flow/ex e) 'seon.repl/serve!) (:part print/budgets)))
+        (when-let [r (when (map? m) (defect-answer m (::flow/ex e)))] (agent/send! r))
+        (when (= :repl (::flow/pid e)) (swap! agent/state assoc :busy false))
+        (when (:dirty? @agent/state) (agent/commit!))
+        (recur)))))
 
 (defn run!
   "The agent's body, in the child of the fork server; fd is its socket to root. Never
