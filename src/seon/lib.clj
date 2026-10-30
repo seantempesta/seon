@@ -5,7 +5,7 @@
   proto.lib (itself e13.lib, trimmed)."
   (:refer-clojure :exclude [defn defn-])
   (:require [jolt.ffi :as ffi] [jolt.scheme :as scm]
-            [seon.contract :refer [defn defn- defchecked] :as contract] [seon.config :as config] [jolt.io-poller :as poller]
+            [seon.contract :refer [defn defn- defchecked] :as contract] [seon.config :as config]
             [seon.edn :as sedn]))
 
 (def ^:private c-schemas
@@ -56,12 +56,6 @@
     (c-setrlimit 8 b)
     (c-getrlimit 8 b)
     (ffi/read b :uint64 0)))
-(defc kq-new "e13_kq_new" [] :long)
-(defc kq-watch "e13_kq_watch" [:int :int] :long)
-(defc kq-watch-fd "e13_kq_watch_fd" [:int :int] :long)
-
-(defc kq-wait "e13_wait" [:int :int] :long {:blocking true})
-(defc kq-poll "e13_poll" [:int :int] :long)
 (defc c-getppid "getppid" [] :int)
 (defc end-with* "e13_end_with" [:int :int] :long)
 (defc end-again* "e13_end_with_again" [] :long)
@@ -87,64 +81,20 @@
   ([pid parent?] (armed (end-with* pid (if parent? 1 0)) pid))
   ([] (armed (end-again*) nil)))
 
-(defn wait-fd-or-exit
-  "A wait on fd's input and child pid's exit, whichever comes first, with no clock: one kqueue
-  watching both (EVFILT_READ, and NOTE_EXIT, the fact the fork server reaps by), parked on as a
-  fiber parks on any descriptor (jolt.io-poller: on a main carrier the process's other fibers run).
-  Answers {:wait (a fn that parks until either comes and answers :input or :exited; once the child
-  has exited, :exited at once) :close (frees the kqueue)}. A child gone before it was watched has
-  exited already. A kernel that will not watch either, or a wait it fails, is :seon.lib/unwatched,
-  answered as data (the watch's, or :wait's)."
-  {:malli/schema [:=> [:cat :seon.lib/fd pos-int?] [:or [:map [:wait :seon.host/fn] [:close :seon.host/fn]] :seon.lib/unwatched]]}
-  [fd pid]
-  (let [kq (kq-new)
-        fd-watch (kq-watch-fd kq fd)
-        ;; -1: the child is gone already; -2: the kernel refused
-        pid-watch (kq-watch kq pid)
-        unwatched #(contract/error :seon.lib/unwatched #'seon.lib/wait-fd-or-exit
-                                   (str "fd " fd " and process " pid " could not be watched (kqueue): " %) {:fd fd :pid pid})]
-    (if (or (neg? fd-watch) (= -2 pid-watch))
-      (do (c-close kq) (unwatched "the kernel refused the watch"))
-      (let [exited (volatile! (= -1 pid-watch))]
-        {:wait (fn [] (if @exited
-                        :exited
-                        (loop []
-                          (poller/wait-ready kq :read)
-                          ;; e13_poll never waits: 0 for fd's input, the pid at its exit, -3 when kq's
-                          ;; readiness held no event yet (park again)
-                          (let [r (kq-poll kq fd)]
-                            (cond (pos? r) (do (vreset! exited true) :exited)
-                                  (zero? r) :input
-                                  (= -3 r) (recur)
-                                  :else (unwatched "the wait failed"))))))
-         :close (fn [] (poller/forget! kq) (c-close kq))}))))
-(defc mp-probe* "mp_probe" [:pointer :long] :long)
 (defc nthreads "e13_nthreads" [] :long)
 (defc sysmem* "e13_sysmem" [:pointer] :long)
 
 (defn ignore-sigpipe! {:malli/schema [:=> [:cat] :seon.ffi/address]}
   [] (c-signal 13 1))
 
-(defn mp-probe
-  "This process's memory as macOS's ledger holds it (native/probe.c, task_info TASK_VM_INFO):
-  {:phys-fp :internal :compressed :resident} in MB."
-  {:malli/schema [:=> [:cat] :seon.lib/probe]}
-  []
-  (let [b (ffi/alloc 256) n (mp-probe* b 256)]
-    (if (neg? n)
-      (throw (ex-info "task_info refused this process's memory"
-                      {:seon.error/type :seon.lib/probe-refused :seon.error/message "task_info refused this process's memory"
-                       :kern-return (- n)}))
-      (read-string (ffi/read-bytes b n)))))
-
 (defn real-mb
-  "This process's memory as macOS charges it, in MB: its phys_footprint (what Activity Monitor and
-  jetsam charge: private dirty pages, compressed ones included). A forked child is charged every
-  inherited page it touches, read or written, and the parent keeps its own charge: the gauge of
-  one process, never summed over forked ones (docs/cost.md#how-we-measure)."
-  {:malli/schema [:function [:=> [:cat] :seon.lib/mb] [:=> [:cat :seon.lib/probe] :seon.lib/mb]]}
-  ([] (real-mb (mp-probe)))
-  ([p] (double (:phys-fp p))))
+  "This process's memory in MB as the platform charges it: jolt.host/process-footprint-bytes (Jolt
+  owns the platform's difference: macOS phys_footprint, Linux the proportional set size), in
+  megabytes. A forked child is charged every inherited page it touches, and the parent keeps its own:
+  the gauge of one process, never summed over forked ones (docs/cost.md#how-we-measure). Throws
+  when the platform refuses (nil bytes)."
+  {:malli/schema [:=> [:cat] :seon.lib/mb]}
+  [] (double (/ (jolt.host/process-footprint-bytes) 1048576.0)))
 
 (defn sysmem
   "The machine's memory in MB as host_statistics64 counts it (native/probe.c e13_sysmem): :free-mb,
@@ -270,11 +220,8 @@
   {:malli/schema [:=> [:cat :int :seon.host/fn] :any]}
   [sig f] (install-signal-handler* sig f))
 
-(def ^:private linux? (.startsWith (str (System/getProperty "os.name")) "Linux"))
-(defn macos? "Is this macOS (kqueue, Mach)?" {:malli/schema [:=> [:cat] :boolean]}
-  [] (.startsWith (str (System/getProperty "os.name")) "Mac"))
-(def SIGUSR1 "Root's interrupt: 30 on macOS, 10 on Linux." (if linux? 10 30))
-(def SIGIO "Input on a socket that asked for it (O_ASYNC): 23 on macOS, 29 on Linux." (if linux? 29 23))
+(def SIGUSR1 "Root's interrupt, as this platform numbers it (jolt.host/signal-number)." (jolt.host/signal-number "USR1"))
+(def SIGIO "Input on a socket that asked for it (O_ASYNC), as this platform numbers it." (jolt.host/signal-number "IO"))
 
 (defchecked active-threads [:=> [:cat] :int] (scm/proc "proto-active-threads"))
 (defchecked bytes-in-heap [:=> [:cat] :int] (scm/proc "proto-bytes-in-heap"))

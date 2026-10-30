@@ -1677,15 +1677,14 @@
 
 (deftest memory-is-read-when-asked
   ;; task seon.agent/memory-is-read-when-asked: mem-mb is a reading made at the call, never a
-  ;; value kept for a time, so each call reads the process's ledger again (lib/real-mb, one
-  ;; task_info probe). The megabytes it answers move with the machine (a collection between two
-  ;; calls lowers them), so the test counts the readings, exactly (seon.profile's counted calls):
-  ;; a reading kept answers the second call without a probe
+  ;; value kept for a time, so each call reads the process's footprint again (jolt.host/
+  ;; process-footprint-bytes, one call). The megabytes it answers move with the machine (a collection
+  ;; between two calls lowers them), so the test counts the calls, exactly (seon.profile's counted
+  ;; calls)
   (let [reads (volatile! nil)
         [a b] (profile/measure! #(vector (agent/mem-mb) (agent/mem-mb))
                                 (fn [_] (vreset! reads (into {} (map (juxt :var :calls)) (profile/touched)))))]
     (is (= 2 (get @reads 'seon.lib/real-mb)) "two calls, two readings: none kept between them")
-    (is (= 2 (get @reads 'seon.lib/mp-probe)) "each the process's own task_info probe")
     (is (and (pos? a) (pos? b)) "a reading in MB")))
 
 (deftest related-is-an-eval-of-the-plan-and-of-any-text

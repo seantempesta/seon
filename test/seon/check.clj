@@ -1221,10 +1221,9 @@
                           :refused (fn [n] {:refused n}) :parent identity})
           rd (sock/line-reader r)
           child (parse-long (first (loop [] (let [ls (rd)] (if (seq ls) ls (recur))))))
-          {:keys [wait close]} (lib/wait-fd-or-exit hold child)]
+          exit (jolt.io-poller/exit-chan child)]
       (lib/c-kill mid 9)
-      (let [st (lib/wait-status mid) ended (wait)]
-        (close)
+      (let [st (lib/wait-status mid) ended (do (clojure.core.async/<!! exit) :exited)]
         {:mid st :child ended}))
    "ends-with-a-gone-pid"
    ;; a pid already gone when it is watched ends the process at once (its watch's ESRCH)
@@ -1247,10 +1246,9 @@
                              :refused (fn [n] {:refused n}) :parent identity})
           rd (sock/line-reader r)
           member (parse-long (first (loop [] (let [ls (rd)] (if (seq ls) ls (recur))))))
-          {:keys [wait close]} (lib/wait-fd-or-exit hold member)]
+          exit (jolt.io-poller/exit-chan member)]
       (lib/c-kill anchor 9)
-      (let [st [(lib/wait-status anchor) (lib/wait-status leader)] ended (wait)]
-        (close)
+      (let [st [(lib/wait-status anchor) (lib/wait-status leader)] ended (do (clojure.core.async/<!! exit) :exited)]
         {:anchor (first st) :leader (second st) :member ended}))
    "forks-beside-the-watch"
    ;; 200 forks from a process whose watcher thread runs: each child runs and exits 0

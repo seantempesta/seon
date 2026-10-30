@@ -13,11 +13,11 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.lib :as lib] [seon.repl :as repl] [seon.program :as program] [seon.db :as pdb]
             [seon.step :as step] [seon.sock :as sock] [seon.config :as cfg] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [jolt.ffi :as ffi]
-            [jolt.deps] [clojure.edn :as edn] [seon.fx :as fx] [seon.reconcile :as r] [seon.agent :as agent]))
+            [jolt.deps] [clojure.edn :as edn] [seon.fx :as fx] [seon.reconcile :as r] [seon.agent :as agent] [jolt.io-poller :as poller]))
 
 (defn- reaped
-  "Child pid, which exited (kqueue's NOTE_EXIT, seon.lib/kq-wait) or was already gone when it was
-  watched: waited for exactly, so the wait is the reap, and its :exit event. Answers [st events]."
+  "Child pid, whose exit arrived (jolt.io-poller/exit-chan): waited for exactly, so the wait is the
+  reap, and its :exit event. Answers [st events]."
   {:malli/schema [:=> [:cat :map :seon.lib/pid] [:tuple :map [:vector :seon.fork-server/event]]]}
   [st pid]
   (when-not (= pid (lib/c-waitpid pid (:status-buf st) 0))
@@ -26,15 +26,13 @@
    [{:ev :exit :pid pid :status (lib/decode-status (ffi/read (:status-buf st) :int))}]])
 
 (defn- adopt
-  "Child pid, now this server's to reap: watched for its exit, so its :exit is a command when it
-  comes. One already gone cannot be watched and is reaped now. Answers [st events]."
+  "Child pid, now this server's to reap: its exit is put on the server's :exits channel when it comes
+  (jolt.io-poller/exit-chan: at once for one already gone), where the loop takes it as a command.
+  Answers [st events]."
   {:malli/schema [:=> [:cat :map :seon.lib/pid] [:tuple :map [:vector :seon.fork-server/event]]]}
   [st pid]
-  (let [st (update st :children conj pid) r (lib/kq-watch (:kq st) pid)]
-    (case (int r)
-      0 [st []]
-      -1 (reaped st pid)
-      (throw (ex-info "the fork server cannot watch a child" {:pid pid})))))
+  (poller/exit-chan pid (:exits st))
+  [(update st :children conj pid) []])
 
 (declare main)
 
@@ -198,8 +196,8 @@
   ;; observed forward the same way (index-at-fork) and handed to every agent forked (seon.agent/reconcile-index starts from it)
   ;; the reach graph is built here when the server starts (a standby inherits its server's), so no
   ;; spawn waits for it (the first fork built it: 0.8-3.8 s measured)
-  ([{:keys [db cfg store conn graph index kq]}]
-   {:db db :cfg cfg :store store :mismatch 0 :conn conn :kq kq :status-buf (ffi/alloc 4) :children #{}
+  ([{:keys [db cfg store conn graph index exits]}]
+   {:db db :cfg cfg :store store :mismatch 0 :conn conn :exits exits :status-buf (ffi/alloc 4) :children #{}
     ;; the first fork freezes the heap: nothing is static yet (seon.fork-server/static-due?)
     :static-due true
     :graph (or graph (program/reach-indexed (program/reach-graph db (fx/declared-refs (cfg/value :seon.config.root/system-path)))
@@ -271,17 +269,20 @@
         _ (when boot?
             (when-let [errs (seq (:errors (program/load-all! db0)))]
               (sock/send! fd {:ev :load-errors :t (:max-tx db0) :errors (vec errs)})))
-        ;; one wait on its two dependencies, root's socket and a child's exit (no timeout)
-        kq (lib/kq-new)
+        ;; one wait on its two dependencies, root's socket and a child's exit (no timeout): alts! over
+        ;; the exits channel and the socket's readiness, which stays pending until the socket is read
+        exits (a/chan 64)
+        ready (volatile! nil)
         recv! (fn [] (loop []
                        (let [m (sock/next-frame! conn)]
                          (if (= :none m)
-                           (let [r (lib/kq-wait kq fd)]
-                             (cond (neg? r) (throw (ex-info "the fork server's wait failed" {:fd fd}))
-                                   (pos? r) [:cmd {:op :exit :pid r}]
-                                   :else (recur)))
+                           (let [c (or @ready (vreset! ready (poller/ready-chan fd :read)))
+                                 [v port] (a/alts!! [exits c])]
+                             (if (= port c)
+                               (do (vreset! ready nil) (recur))
+                               [:cmd {:op :exit :pid v}]))
                            (case m :eof nil [:cmd m])))))]
-    (step/run-loop #'server-step {:db db0 :cfg cfg :store store :conn conn :kq kq :graph graph :index index}
+    (step/run-loop #'server-step {:db db0 :cfg cfg :store store :conn conn :exits exits :graph graph :index index}
                    recv! (fn [_ m] (sock/send! fd m)))
     (lib/kill! 0 9)
     (lib/c-exit 0))))

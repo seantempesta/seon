@@ -41,9 +41,8 @@
   (scm/eval-string
     "(define seon-profile-epoch 0)
      (define seon-profile-touched '())
-     ;; CLOCK_UPTIME_RAW is 8 on macOS
-     (define seon-profile-now
-       (let ([clock (foreign-procedure \"clock_gettime_nsec_np\" (int) unsigned-64)]) (lambda () (clock 8))))
+     ;; jolt.host/monotonic-ns: the platform's monotonic clock, Jolt's to name
+     (define seon-profile-now (lambda () (jolt-monotonic-ns)))
      ;; the calling thread's own allocation, never another thread's or the collector's copying
      ;; (Chez jolt/thread-bytes: S_thread_bytes_allocated)
      (define seon-profile-alloc (foreign-procedure \"(cs)thread_bytes_allocated\" () uptr))
@@ -93,9 +92,8 @@
          (if (null? cs) acc
              (let ([c (car cs)])
                (loop (cdr cs) (f acc (vector-ref c 6) (vector-ref c 0) (vector-ref c 2) (vector-ref c 3) (vector-ref c 4) (vector-ref c 5)))))))
-     ;; CLOCK_THREAD_CPUTIME_ID is 16 on macOS: the calling thread's CPU time
-     (define seon-profile-cpu
-       (let ([clock (foreign-procedure \"clock_gettime_nsec_np\" (int) unsigned-64)]) (lambda () (clock 16))))
+     ;; jolt.host/thread-cpu-ns: the calling thread's CPU time
+     (define seon-profile-cpu (lambda () (jolt-thread-cpu-ns)))
      (define (seon-profile-calls)
        (let loop ([cs seon-profile-touched] [n 0])
          (if (null? cs) n (loop (cdr cs) (+ n (vector-ref (car cs) 0))))))"))
