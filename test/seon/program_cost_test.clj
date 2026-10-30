@@ -46,7 +46,7 @@
      ;; 10.2 MB (the :form/src scan)
      :per-n {:ticks 1150.0 :bytes 1400.0}
      :fixed {:ticks 41000.0 :bytes 200000.0}
-     :sizes [100 300 1000 10000]}))
+     :sizes [30 100 300]}))
 
 (deftest recording-a-form-is-flat-in-the-program
   (cost/proof
@@ -61,7 +61,7 @@
      ;; contracted calls: record-tx, account-tx, eid x2, form-of, the tempid makers x6, method/impl
      ;; keys none here: 12, whatever n
      :fixed {:ns 18000 :bytes 8000 :calls 12}
-     :sizes [100 300 1000 10000]
+     :sizes [30 100 300]
      ;; measured 2026-10-21 (source mode, load 5): 105 -> 114 us and 121 -> 138 KB from 100 to
      ;; 10k forms, on the whole process's count. Re-measured 2026-10-23 on the proof's own thread
      ;; (18b0774: per-thread bytes, thread CPU time; release runtime, Chez 80e4b9f, load 17, as
@@ -88,9 +88,9 @@
      :ops {:map/assoc 3 :map/get 4 :sort/compare 1 :vec/conj 2 :set/conj! 2}
      ;; itself, and the depth-first sort once for the namespaces and once per namespace (one here)
      :fixed {:calls 3}
-     :sizes [100 300 1000 10000]}))
+     :sizes [30 100 300]}))
 
-(def ^:private divergence-sizes "The sizes divergence's proof measures." [100 300 1000 10000])
+(def ^:private divergence-sizes "The sizes divergence's proof measures." [10 30 100])
 
 (def ^:private process-token
   "This test process's own: two shards' proofs (divergence's here, diff-plan's in
@@ -271,7 +271,7 @@
      ;; (3,540 forms) 160M ticks / 969 MB -> 136M / 837 MB
      :per-n {:ticks 11500 :bytes 93000}
      :fixed {:ticks 3600000 :bytes 28000000}
-     :sizes [100 300 1000 10000]}))
+     :sizes [10 30 100]}))
 
 (defn changed-top
   "reach-update's arguments: the reach graph of a branch holding n forms (app.pc/f0..fn-1,
@@ -302,7 +302,7 @@
      ;; 18: reach-rows' two contracted calls the config and pin rules added (pin-rules once, config-reads
      ;; per added form), 2026-10-27; 19: computed-config-reader? once per added form (audit cuts 6 and 11)
      :fixed {:ticks 350000 :bytes 4000000 :calls 50}
-     :sizes [100 300 1000 10000]}))
+     :sizes [30 100 300]}))
 
 (defn indexed-top
   "reach-indexed's and reach-update's arguments: the graph of a branch holding n forms (app.pc/f0..fn-1, each
@@ -338,7 +338,7 @@
      :per-n {:ticks 850 :bytes 5000 :calls 0}
      ;; measured: 414k ticks / 2.30 MB at 100, 1.11M / 6.72 MB at 1,000 (the same as with no index held: its part is nothing)
      :fixed {:ticks 350000 :bytes 2000000 :calls 55}
-     :sizes [100 300 1000 10000]}))
+     :sizes [10 30 100]}))
 
 (deftest an-index-is-recomputed-for-what-moved-only
   (cost/proof
@@ -351,7 +351,7 @@
      :per-n {}
      ;; measured: 2.3k ticks / 15.7 KB at 100, 2.4k / 16.3 KB at 1,000
      :fixed {:ticks 3000 :bytes 20000 :calls 3}
-     :sizes [100 300 1000 10000]}))
+     :sizes [30 100 300]}))
 
 (defn- calls-form
   "A defn of m whose body is n steps, each (assoc m :k<i> (str \"s<i>\" (:name m))): a
@@ -474,7 +474,7 @@
      ;; (~1.24 MB and ~172k ticks a literal)
      :per-n {:ticks 55000.0 :bytes 480000.0}
      :fixed {:ticks 100000.0 :bytes 100000.0}
-     :sizes [10 100 1000]}))
+     :sizes [10 30 100]}))
 
 (defn digested-of
   "program-digest's argument: a branch db holding n forms (branch-of's)."
@@ -492,7 +492,7 @@
      ;; the test db's schema entries); 0.79M / 5.0 MB on the standing root's main (2699 forms, 660 entries)
      :per-n {:ticks 235.0 :bytes 1160.0}
      :fixed {:ticks 93000.0 :bytes 465000.0}
-     :sizes [100 300 1000 10000]}))
+     :sizes [30 100 300]}))
 
 (defn meaning-input
   "The cost proof's input at n: a db of n vars each with a docstring, and tx-data redefining each with another."
@@ -536,4 +536,4 @@
      ;; program (3,540 forms) a stored graph decodes in 23M ticks against 146M to build it.
      :per-n {:ticks 1900 :bytes 11500 :calls 0}
      :fixed {:ticks 580000 :bytes 3200000 :calls 50}
-     :sizes [100 300 1000]}))
+     :sizes [10 30 100]}))
