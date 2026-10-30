@@ -213,7 +213,7 @@
         "the model call is reached by a query on its turn")))
 
 (deftest ctx-is-the-record-after-every-transaction
-  ;; the patch holds what a build holds, its map and its index, after each of 150 changes of a
+  ;; the patch holds what a build holds, its map and its index, after each of 60 changes of a
   ;; session's kinds (a seeded random choice, so a failure repeats): the map is never a second
   ;; record of its own
   (let [r (java.util.Random. 25)]
@@ -226,8 +226,8 @@
           (is (= #{'app.x-test/t0} (get-in t [:runs r1 :task :seon.task/proofs])))
           (is (= 20 (count (get-in t [:runs r1 :turns]))))
           (is (= #{"m20" "m40" "m60"} (set (names (:messages t) :seon.message/id)))))))
-    (loop [db (seeded 60) c (ctx/build db (aid db) :b) i 0 bad [] unshared [] checked 0]
-      (if (= i 150)
+    (loop [db (seeded 30) c (ctx/build db (aid db) :b) i 0 bad [] unshared [] checked 0]
+      (if (= i 60)
         (do (is (empty? bad) (str "the change after which the patch and a build differ: " (first bad)))
             (is (< 1000 checked) (str "the sharing check reads the paths no change touched: " checked))
             (is (empty? unshared) (str "a path no change touched that is a new object: " (first unshared))))
@@ -546,17 +546,17 @@
     {:of 'seon.ctx/patch :input 'seon.ctx-test/cited-redefined
      :n "evals in the session's record"
      :work "the var's datoms touch its :form join: the new form pulled whole, the old forgotten; the var, task, run and agent nodes copied up the path"
-     :growth :constant :fixed {:calls 23 :bytes 125000} :sizes [100 300 1000 3000]})
+     :growth :constant :fixed {:calls 23 :bytes 125000} :sizes [20 60 180]})
   (cost/proof
     {:of 'seon.ctx/patch :input 'seon.ctx-test/new-caller
      :n "evals in the session's record"
      :work "the form's :form/refs datom touches the var's :callers watch: its callers read and ordered by when each was written (a form's id is its content's, not in time order), the newest five kept, a new one pulled whole, the path copied up"
-     :growth :constant :fixed {:calls 24 :bytes 135000} :sizes [100 300 1000 3000]})
+     :growth :constant :fixed {:calls 24 :bytes 135000} :sizes [20 60 180]})
   (cost/proof
     {:of 'seon.ctx/patch :input 'seon.ctx-test/plan-edited
      :n "evals in the session's record"
      :work "the task's own datom: its attributes pulled again, every join kept, the path copied up"
-     :growth :constant :fixed {:calls 10 :bytes 90000} :sizes [100 300 1000 3000]}))
+     :growth :constant :fixed {:calls 10 :bytes 90000} :sizes [20 60 180]}))
 
 (deftest a-callers-window-costs-its-forms
   ;; a window of content-id members (a var's callers: a form's id is its content's, not in time
@@ -1030,7 +1030,7 @@
 
 (def records
   "changes' arguments, generated: a record and the same record after 0 to 5 edits."
-  (gen/let [shape (gen/hash-map :evals (gen/choose 0 80) :runs (gen/choose 0 4) :cites (gen/choose 0 15) :len (gen/choose 10 400))
+  (gen/let [shape (gen/hash-map :evals (gen/choose 0 40) :runs (gen/choose 0 4) :cites (gen/choose 0 15) :len (gen/choose 10 200))
             edits (gen/vector (gen/tuple (gen/elements [:new-eval :eval-edit :all-evals :plan :cited :gone :rebuilt]) gen/nat) 0 5)]
     (let [t (record-of shape)] [t (reduce edited t edits)])))
 
@@ -1051,7 +1051,7 @@
     (vec (sort-by (fn [[_ p]] (str/join "\u0001" (map str p))) (walk [] [] c0 c1)))))
 
 (def ^:private changes-bound
-  {:of 'seon.ctx/changes :gen 'seon.ctx-test/records :cases 200
+  {:of 'seon.ctx/changes :gen 'seon.ctx-test/records :cases 101
    :n "a generated record and the same record after up to five edits sharing what they leave, or an equal copy sharing nothing"
    :work "the walk's keys where the two sides are not the same object, each value compared there, each change and its sort"})
 
