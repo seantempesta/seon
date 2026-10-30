@@ -84,7 +84,7 @@
     (test-error! test-run)
     {:test-run test-run :tests-ms tests-ms :task (task/task (agent/db) id)}))
 
-(defn status-now
+(defn- status-now
   "How the work stands now, from the agent's walk drawn once (seon.repl/page-parts): the status
   part's data (seon.context/status), which the page and the model read too, so a turn computes it
   once. A walk that drew no status (its render threw, or the layout placed none) is the typed

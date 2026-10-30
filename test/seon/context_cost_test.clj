@@ -191,12 +191,12 @@
         (binding [*conn* conn]
           (cost/proof {:of 'seon.context/parts-of :input 'seon.context-cost-test/turns-of
                        :n "parts refs of the request (one turn's parts each, each drawn at its own commit)"
-                       :work "one page drawn a ref (the walk of the agent's record at that commit), every commit once; 488 calls a ref since the layout places the cites from ctx (seon.render.ui/page-cites, its stubs filled from where ctx holds them: the cites' joins are the pull's, where the draw used to query them), 480 before; 562 since the agent's record joins its run (seon.context/run-of, read where four readers queried it)"
+                       :work "one page drawn a ref (the walk of the agent's record at that commit), every commit once; 488 calls a ref since the layout places the cites from ctx (seon.render.ui/page-cites, its stubs filled from where ctx holds them: the cites' joins are the pull's, where the draw used to query them), 480 before; 516 since the task part and the status read the pulled task (seon.render.ui/task-model, seon.context/task-of: the accumulated plan over the joined needs), 1.36 MB -> 1.23 MB a ref"
                        :growth :linear
                        ;; measured 2026-10-28 (a plan and a run a page): 2.68 MB / 433 calls at 1, 9.51 MB / 881 at 2,
                        ;; 23.2 MB / 1,777 at 4, 50.7 MB / 3,569 at 8; before the pages map (every page drawn twice):
                        ;; 11.0 MB / 1,195 at 2, 27.7 MB / 2,719 at 4, 61.2 MB / 5,767 at 8 (762 calls a page, not 448)
-                       :per-n {:bytes 6800000 :calls 562}
+                       :per-n {:bytes 6800000 :calls 516}
                        :fixed {:bytes 500000 :calls 50}
                        :sizes [1 2 4 8]}))))))
 

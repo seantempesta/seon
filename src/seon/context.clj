@@ -157,7 +157,8 @@
 
 (defn not-written
   "What unwritten proof p should assert, by the plan's own words: the plan's sentences that name
-  it, or that it is not written yet when none does (the plan is on the page already)."
+  it, or that it is not written yet when none does (the plan is on the page already): the task part's
+  to-prove (seon.render.ui/task-model, docs/render.md#a-part-answers-data)."
   {:malli/schema [:=> [:cat :qualified-symbol :string] :string]}
   [p plan]
   (let [ss (filter #(str/includes? % (name p)) (str/split plan #"(?<=[.!?])\s+"))]
@@ -603,12 +604,13 @@
                               (seq (:seon.test/failures v)) (assoc :failures (:seon.test/failures v)))])))
 
 (defn run-of
-  "The run agent record c (its ctx, or a map seon.ctx/build answers) holds as its run: its :runs join, the
-  newest run naming it by the transaction that wrote that (docs/ctx.md#the-pattern), with its :end joined;
-  nil before it began one. Every reader of the agent's run reads it here (its turn line, the chat's start and
-  end, the status)."
-  {:malli/schema [:=> [:cat :map] :any]}
-  [c] (some-> (:runs c) vals first))
+  "The eid of the run agent record c (its ctx, or a map seon.ctx/build answers) works: the run its newest turn
+  names (its :turns, newest first, each turn's :seon.turn/run ref: docs/ctx.md#the-pattern), never the highest
+  run id (a run's id derives from its content); nil before its first turn. The record holds no run (the agent
+  is the unit, not the run); every reader of the agent's run names it here (its turn line, the chat's start
+  and end, the status) and reads it on its db by this id."
+  {:malli/schema [:=> [:cat :map] [:maybe :int]]}
+  [c] (some-> (:turns c) vals first :seon.turn/run :db/id ratom/realize))
 
 (defn task-of
   "The task agent record c holds (its :task, as ctx pulls it, docs/ctx.md#the-pattern), read for what its
@@ -627,7 +629,7 @@
                                (get-in v [:form :form/src]) (assoc :form {:form/src (ratom/realize (get-in v [:form :form/src]))}))]))})))
 
 (defn status
-  "How the agent of record rec (its ctx: its :db/id, its run, `run-of`) works on its task stands on its branch db, as data (task
+  "How the agent of record rec (its ctx: its :db/id, its task, its run by `run-of`) works on its task stands on its branch db, as data (task
   seon.context/the-context-is-the-agents-evals-and-seons, R2b-1): each proof by the verdict its var
   entity holds (`verdicts`; none: :unknown, or :undefined while the branch defines no such test),
   a red or unknown one with its source and the program functions it calls (`callees`), a red one
@@ -640,7 +642,7 @@
   about the work only, never the conversation (its turns, evals and messages), so a turn's record
   draws it again only when it changed the work; turns left and a cut reply are the run's
   (seon.render.ui/run-head). Nothing is held: each is a fact of db. :reasons is the done rule's
-  own answer, the turn's check (seon.turn/work!), which the model and the page read as :refused. opts :index, a function answering the reconciler's index of db (seon.reconcile/index; else
+  own answer, the turn's check (seon.turn/work!), which the model and the page read as :refused. A design task's plan before its run (:no-design) is its run's, the run its newest turn names, so it waits for the first turn. opts :index, a function answering the reconciler's index of db (seon.reconcile/index; else
   one built cold), called only when a test outside the task's proofs is red (whether it is a
   regression or a stray red is main's claims: measured cold on a demo branch, 14.8M ticks and
   70 MB), :main, main's commit (the merge view), and :deferred, the task's proofs a run leaves to root's gate (process
@@ -671,8 +673,8 @@
         split (when base (problems/caused-split base db ch (problems/caused-datoms base db)))
         gaps (vec (sort-by str (pm/uncontracted ch)))
         unmerged (pm/unmerged db)
-        ;; its run as its record holds it (never the highest run id: a run's id is derived from its content)
-        run (ratom/realize (run-of rec))
+        ;; its run, the one its newest turn names (run-of): a design task's plan-before waits for its first turn
+        run (some->> (run-of rec) (d/entity db))
         proof? (set proofs)
         ;; main's claims only when a test outside the proofs is red: the agent's index, else one built cold
         claims (when (some (fn [[t st]] (and (= :fail st) (not (proof? t)))) results)

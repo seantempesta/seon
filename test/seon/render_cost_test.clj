@@ -432,11 +432,9 @@
                        ;; (seon.context/current-ns reads the newest eval's, not every record: 11 KB an eval before)
                        ;; 555 calls at 10 since the layout places the cites from ctx (seon.render.ui/page-cites: where ctx holds each
                        ;; joined entity whole, a cited task among them, and the order of what each builds on; the cites' joins are the
-                       ;; pull's, where the draw used to query them), 548 before; 574 since the agent's record joins its run
-                       ;; (seon.context/run-of: the turn line, the chat's start and end and the status read it there, where each queried the db);
-                       ;; 604 since the status reads its proofs from the record (seon.context/task-of, seon.task/pulled-accumulated) and
-                       ;; the needs join their proofs; 608 since the task part is the pulled task's renders (task-model's
-                       ;; pulled-accumulated, where task-data queried the db: 2.50 MB -> 2.16 MB at 10)
+                       ;; pull's, where the draw used to query them), 548 before; 583 since the task part, the status's proofs and the
+                       ;; namespaces part read the pulled task (seon.render.ui/task-model, seon.context/task-of, namespaces-of), where
+                       ;; they queried the db: 1.77 MB at 10 (2.78 MB with the run join this branch tried and reverted)
                        :per-n {:calls 4 :bytes 35000}
-                       :fixed {:calls 568 :bytes 3200000}
+                       :fixed {:calls 543 :bytes 3200000}
                        :sizes [10 40 80]}))))))

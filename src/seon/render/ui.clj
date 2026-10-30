@@ -1095,8 +1095,8 @@
   work's is seon.render.ui/status)."
   {:seon.render/style tile-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int] :any]}
   [{c :seon.ctx/ctx db :seon.db/db} aid]
-  (let [;; its cap: the agent's own (raised to extend it), else its run's (the record's :runs), as the turn loop reads it
-        cap (or (ratom/realize (:seon.agent/max-turns c)) (ratom/realize (:seon.run/max-turns (context/run-of c))))
+  (let [;; its cap: the agent's own (raised to extend it), else its run's (the run its newest turn names, seon.context/run-of), as the turn loop reads it
+        cap (or (ratom/realize (:seon.agent/max-turns c)) (some->> (context/run-of c) (d/entity db) :seon.run/max-turns))
         n (count (:turns c))
         ;; the tokens its requests sent so far, the provider's counts summed (each request the whole context then)
         sent (d/q '[:find (sum ?k) . :with ?m :in $ ?a :where [?t :seon.turn/agent ?a] [?m :seon.model-call/turn ?t] [?m :seon.model-call/tokens ?k]] db aid)
@@ -1307,21 +1307,23 @@
      (markdown (str body))]))
 
 (defn chat-start
-  "Where the work began, the chat's line after what was asked (a component over ctx): its run's
-  turn budget (the agent's, :seon.agent/max-turns, else its run's: `seon.context/run-of`). The agent's loop eval (seon.turn/work!) is not drawn: this line and `chat-end` say what
+  "Where the work began, the chat's line after what was asked (a component over ctx and the db): its
+  turn budget, the agent's own (:seon.agent/max-turns), else its run's, the run its newest turn names
+  (`seon.context/run-of`); before its first turn and with no budget of its own, nothing. The agent's loop eval (seon.turn/work!) is not drawn: this line and `chat-end` say what
   it did. See docs/render.md#the-page."
-  {:seon.render/style "self-center text-xs text-text-500" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int] :any]}
-  [{c :seon.ctx/ctx} _aid]
-  (when-let [run (context/run-of c)]
-    [:p (str "started working" (when-let [m (or (ratom/realize (:seon.agent/max-turns c)) (ratom/realize (:seon.run/max-turns run)))] (str " · a budget of " m " turns")))]))
+  {:seon.render/style "self-center text-xs text-text-500" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int] :any]}
+  [{c :seon.ctx/ctx db :seon.db/db} _aid]
+  (let [run (some->> (context/run-of c) (d/entity db))]
+    (when-let [m (or (ratom/realize (:seon.agent/max-turns c)) (:seon.run/max-turns run))]
+      [:p (str "started working · a budget of " m " turns")])))
 
 (defn chat-end
-  "How the work ended, the chat's last card (a component over ctx): its run's end (`seon.context/run-of`'s
-  :end joined, :seon.end/*: its outcome, its turns, the tokens it spent), done or why not; while it runs, how the
-  agent is. See docs/render.md#the-page."
-  {:seon.render/style "self-center rounded-xl border border-base-800 px-4 py-2 text-sm" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int] :any]}
-  [{c :seon.ctx/ctx} _aid]
-  (let [end (some-> (context/run-of c) :end vals first ratom/realize)
+  "How the work ended, the chat's last card (a component over ctx and the db): the end of its run, the run
+  its newest turn names (`seon.context/run-of`; :seon.end/*: its outcome, its turns, the tokens it spent), done
+  or why not; while it runs, how the agent is. See docs/render.md#the-page."
+  {:seon.render/style "self-center rounded-xl border border-base-800 px-4 py-2 text-sm" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int] :any]}
+  [{c :seon.ctx/ctx db :seon.db/db} _aid]
+  (let [end (some->> (context/run-of c) (d/entity db) :seon.run/id (vector :seon.end/run) (d/entity db))
         status (ratom/realize (:seon.agent/status c))]
     (cond
       end (let [{:seon.end/keys [outcome turns tokens reason]} end]
