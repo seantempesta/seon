@@ -279,24 +279,40 @@
       (when errs (swap! state dissoc :errors))
       (send! (cond-> {:op :committed :t (:max-tx (:db c)) :txs (:tx-count c) :mem-mb (mem-mb)} errs (assoc :errors (vec (vals errs))))))))
 
+(defn- with-citations
+  "tx-data, which writes a task's plan or instructions, with what that text cites derived in it
+  (seon.task/rederive-tx over the db it makes), so no db holds the new text with the old citations,
+  whoever wrote it (a swap! of ctx, my.task/update!, a transact! of the agent's own).
+  See docs/references.md#task-references."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.db/tx-data] :seon.db/tx-data]}
+  [db tx-data]
+  (let [r (d/with db tx-data) db' (:db-after r)
+        ids (into [] (comp (filter #(#{:seon.task/plan :seon.task/instructions} (:a %))) (keep #(:seon.task/id (d/entity db' (:e %)))) (distinct)) (:tx-data r))]
+    (into (vec tx-data) (mapcat #(task/rederive-tx db' (task/task db' %))) ids)))
+
 (defn transact!
   "Write tx-data to this agent's branch: applied at once to the value ahead of the
   committed one (its answer does not wait for a commit), committed when the agent is idle
   or at a turn's end, never because time passed (owner: the agent-owned run-ahead
-  writer). Answers {:t :datoms :tempids}. Inside a test (a fork of the agent) it applies to
+  writer). A write of a task's plan or instructions carries what the text cites (`with-citations`).
+  Answers {:t :datoms :tempids}. Inside a test (a fork of the agent) it applies to
   the fork's db only. A refused transaction throws its message into the caller's eval."
   {:malli/schema [:=> [:cat :seon.db/tx-data] :seon.agent/tx-result]}
   [tx-data]
-  (if (= :test (:mode @state))
-    (let [r (d/with (db) tx-data)]
-      (swap! state assoc :db (:db-after r) :tx (select-keys r [:db-after :tx-data]))
-      {:t (:max-tx (:db-after r)) :datoms (count (:tx-data r)) :local true})
-    (let [r (dw/apply! (:store-conn @state) {:tx-data tx-data :tx-meta (pdb/tx-meta (:branch @state) (cond-> {} (:eval @state) (assoc :seon.tx/eval (:eval @state))))})]
-      (when-not (map? r) (throw (ex-info (str "transact refused: " (ex-message r)) {:writer-error (ex-message r)})))
-      ;; :tx, the transaction that moved :db: what seon.ctx patches @ctx from
-      (swap! state assoc :db (:db-after r) :tx (select-keys r [:db-after :tx-data]) :dirty? true)
-      (cond-> {:t (:max-tx (:db-after r)) :datoms (count (:tx-data r))}
-        (seq (:tempids r)) (assoc :tempids (into {} (filter (comp string? key)) (:tempids r)))))))
+  (let [text? #{:seon.task/plan :seon.task/instructions}
+        tx-data (if (some #(if (map? %) (some text? (keys %)) (and (vector? %) (text? (nth % 2 nil)))) tx-data)
+                  (with-citations (db) tx-data)
+                  tx-data)]
+    (if (= :test (:mode @state))
+      (let [r (d/with (db) tx-data)]
+        (swap! state assoc :db (:db-after r) :tx (select-keys r [:db-after :tx-data]))
+        {:t (:max-tx (:db-after r)) :datoms (count (:tx-data r)) :local true})
+      (let [r (dw/apply! (:store-conn @state) {:tx-data tx-data :tx-meta (pdb/tx-meta (:branch @state) (cond-> {} (:eval @state) (assoc :seon.tx/eval (:eval @state))))})]
+        (when-not (map? r) (throw (ex-info (str "transact refused: " (ex-message r)) {:writer-error (ex-message r)})))
+        ;; :tx, the transaction that moved :db: what seon.ctx patches @ctx from
+        (swap! state assoc :db (:db-after r) :tx (select-keys r [:db-after :tx-data]) :dirty? true)
+        (cond-> {:t (:max-tx (:db-after r)) :datoms (count (:tx-data r))}
+          (seq (:tempids r)) (assoc :tempids (into {} (filter (comp string? key)) (:tempids r))))))))
 
 ;; ---- effects (seon.fx, worktree session FX1): root's owner procs, through the agent's proc ---
 

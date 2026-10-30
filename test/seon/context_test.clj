@@ -1112,18 +1112,18 @@
 (defn- walked
   "Agent demo/a1's page on db (sections-near's, with a run of demo/r), walked live over a reactive
   atom holding its ctx, as its process holds it: [walk atom db-cell rid]. A change is (step! walk
-  atom db-cell tx-data): the transaction applied, ctx patched by its datoms, the walk framed."
+  atom db-cell tx-data): the transaction applied, ctx patched by its datoms, the walk flushed."
   [db]
   (let [db (d/db-with db [{:seon.agent/key "demo/a1" :seon.agent/task {:seon.task/id "demo/r"}} {:seon.run/id "demo/r#1" :seon.run/task [:seon.task/id "demo/r"] :seon.run/agent [:seon.agent/key "demo/a1"]}])
         cell (volatile! db)
         c (volatile! (ctx/build db (pdb/eid db :seon.agent/key "demo/a1") :b))
         a (seon.ratom/atom (:tree @c))
         w (render/walker {:ref a :changes ctx/changes} #(deref cell) [(requiring-resolve (render/declared :seon.render/render-ctx)) {}])]
-    (render/frame! w nil)
+    (render/flush! w nil)
     [w a cell c (pdb/eid db :seon.agent/key "demo/a1")]))
 
 (defn- step!
-  "Transaction tx-data on walked's db: ctx patched by its datoms, the walk framed. Answers the units
+  "Transaction tx-data on walked's db: ctx patched by its datoms, the walk flushed. Answers the units
   whose html changed, by id."
   [[w a cell c] tx-data]
   (let [u0 (into {} (map (juxt :id :html)) (render/placed-units w))
@@ -1131,7 +1131,7 @@
     (vreset! cell (:db-after r))
     (vswap! c ctx/patch (:db-after r) (:tx-data r) :b)
     (reset! a (:tree @c))
-    (render/frame! w (:tx-data r))
+    (render/flush! w (:tx-data r))
     (let [u1 (into {} (map (juxt :id :html)) (render/placed-units w))]
       (vec (sort (for [[id h] u1 :when (not= h (get u0 id))] id))))))
 

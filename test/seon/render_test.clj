@@ -1151,28 +1151,90 @@
   (let [[_ branch _] (paged-dbs)
         a (seon.ratom/atom (:tree (seon.ctx/build branch (seon.db/eid branch :seon.agent/key (seon.task/agent-key "b1" :a3)) :task-demo-f)))
         w (r/walker {:ref a :changes seon.ctx/changes} (constantly branch) [(requiring-resolve (r/declared :seon.render/render-ctx)) {}])]
-    (r/frame! w nil)
+    (r/flush! w nil)
     [w a branch]))
 
 (deftest a-component-re-runs-on-what-it-read
   ;; Reagent's rule with the cursor inferred: a change re-runs only the components whose read paths
   ;; it reaches; every other is not visited, and a re-run whose output is = sends nothing
   (let [[w a branch] (live-walk)
-        e1 (seon.db/eid branch :seon.eval/id "e1")
-        ran #(into {} (for [[f c] (r/ledger w) :when (or (:miss c) (:same c))] [(name f) (+ (:miss c 0) (:same c 0))]))]
-    (vreset! (:ledger w) {})
+        e1 (seon.db/eid branch :seon.eval/id "e1")]
     (swap! a assoc-in [:evals e1 :seon.eval/opened] true)
-    (r/frame! w nil)
-    (is (= {"eval-item" 1} (ran)) "an eval opened: that eval's component alone runs, its list's layout does not")
-    (vreset! (:ledger w) {})
+    (is (= {[`ui/eval-item e1] :miss} (r/flush! w nil)) "an eval opened: that eval's component alone runs, its list's layout does not")
     (swap! a assoc :t 99)
-    (r/frame! w nil)
-    (is (= {} (ran)) "a change no component read: nothing runs")
-    (vreset! (:ledger w) {})
+    (is (= {} (r/flush! w nil)) "a change no component read: nothing runs")
     (swap! a assoc-in [:evals e1 :seon.eval/opened] true)
-    (r/frame! w nil)
-    (is (= {} (ran)) "the same value again: nothing runs")
+    (is (= {} (r/flush! w nil)) "the same value again: nothing runs")
     (r/dispose-walk! w)))
+
+(defn lab-row
+  "An eval's code: a component over ctx (docs/render.md#reactive-renders)."
+  {:malli/schema [:=> [:cat [:map [:seon.ctx/ctx :map]] :int] :any]}
+  [{c :seon.ctx/ctx} id] [:li (get-in c [:evals id :seon.eval/record :code])])
+
+(defn lab-length
+  "An eval's code by its length."
+  {:malli/schema [:=> [:cat [:map [:seon.ctx/ctx :map]] :int] :any]}
+  [{c :seon.ctx/ctx} id] [:li (count (get-in c [:evals id :seon.eval/record :code]))])
+
+(defn lab-page
+  "The task's plan, then a row for each eval, each its own component."
+  {:malli/schema [:=> [:cat [:map [:seon.ctx/ctx :map]]] :any]}
+  [{c :seon.ctx/ctx}]
+  [:div [:p (get-in c [:task :seon.task/plan])]
+   (into [:ol] (for [id (keys (:evals c))] [#'lab-row {} id]))
+   (into [:ol] (for [id (keys (:evals c))] [#'lab-length {} id]))])
+
+(defn lab-inline
+  "The task's plan and every eval's code, read in this one render."
+  {:malli/schema [:=> [:cat [:map [:seon.ctx/ctx :map]]] :any]}
+  [{c :seon.ctx/ctx}]
+  [:div [:p (get-in c [:task :seon.task/plan])] (into [:ol] (for [[_ e] (:evals c)] [:li (:code (:seon.eval/record e))]))])
+
+(deftest a-flush-answers-what-it-redrew
+  ;; docs/render.md#reactive-renders: each frame answers the components it ran, by key, new or the
+  ;; same output, and what each kind of read costs: a member in its own component, or read inline
+  (let [rec (seon.ratom/atom {:db/id 1 :t 5 :task {:db/id 2 :seon.task/plan "write the test"}
+                              :evals (#'seon.ctx/members-map [[12 {:db/id 12 :seon.eval/record {:code "(+ 1 2)"}}]
+                                                             [11 {:db/id 11 :seon.eval/record {:code "(inc 1)"}}]])})
+        walk #(doto (r/walker {:ref rec :changes seon.ctx/changes} (constantly nil) [% {}]) (r/flush! nil))
+        w (walk #'lab-page)
+        inline (walk #'lab-inline)
+        both #(vector (r/flush! w nil) (r/flush! inline nil))]
+    (swap! rec assoc-in [:evals 12 :seon.eval/record :code] "(+ 1 5)")
+    (is (= [{[`lab-row 12] :miss [`lab-length 12] :same} {[`lab-inline] :miss}] (both))
+        "a member's change: its own rows, the length row the same; the inline render whole")
+    (swap! rec assoc-in [:task :seon.task/plan] "ship it")
+    (is (= [{[`lab-page] :miss} {[`lab-inline] :miss}] (both)) "the plan: the page, its rows skipped")
+    (swap! rec assoc-in [:evals 13] {:db/id 13 :seon.eval/record {:code "(dec 1)"}})
+    (is (= [{[`lab-page] :miss [`lab-row 13] :miss [`lab-length 13] :miss} {[`lab-inline] :miss}] (both))
+        "a member added: the page, and the new member's rows")
+    (swap! rec assoc :t 6)
+    (is (= [{} {}] (both)) "a key no render read: nothing")
+    (r/dispose-walk! w) (r/dispose-walk! inline)))
+
+(defn lab-said
+  "A line of text, a render redefined by the test below."
+  {:malli/schema [:=> [:cat [:map [:seon.ctx/ctx :map]]] :any]}
+  [{c :seon.ctx/ctx}] [:p (str "plan: " (get-in c [:task :seon.task/plan]))])
+
+(deftest a-redefined-render-redraws
+  ;; docs/render.md#reactive-renders: a walk watches each render it drew, so redefining one (a defn
+  ;; at the REPL) runs its components at the next frame with the new definition; nothing else runs,
+  ;; and a walk disposed watches nothing
+  (let [rec (seon.ratom/atom {:db/id 1 :task {:db/id 2 :seon.task/plan "p"}})
+        w (doto (r/walker {:ref rec :changes seon.ctx/changes} (constantly nil) [#'lab-said {}]) (r/flush! nil))
+        was @#'lab-said
+        out #(:out (get @(:cache w) [`lab-said]))]
+    (try
+      (is (= {} (r/flush! w nil)) "nothing changed: nothing runs")
+      (alter-var-root #'lab-said (fn [f] (fn [o] (assoc (f o) 0 :h2))))
+      (is (= {[`lab-said] :miss} (r/flush! w nil)) "redefined: its component runs")
+      (is (= :h2 (first (out))) "with the new definition")
+      (is (= {} (r/flush! w nil)) "and once")
+      (r/dispose-walk! w)
+      (is (empty? (.getWatches #'lab-said)) "a disposed walk watches nothing")
+      (finally (alter-var-root #'lab-said (constantly was))))))
 
 (deftest a-change-below-a-unit-moves-its-revision
   ;; a component placed in a list is a unit; one nested in it (a key the agent added, under ctx-keys)
@@ -1180,10 +1242,10 @@
   (let [[w a _] (live-walk)
         unit #(some (fn [u] (when (= "ctx-keys" (:id u)) u)) (r/placed-units w))]
     (swap! a assoc :lab.x/k "one")
-    (r/frame! w nil)
+    (r/flush! w nil)
     (let [u0 (unit)]
       (swap! a assoc :lab.x/k "two")
-      (r/frame! w nil)
+      (r/flush! w nil)
       (let [u1 (unit)]
         (is (str/includes? (:html u1) "two") "the new value drawn")
         (is (not= (:rev u0) (:rev u1)) "and the unit's revision moved, its own output unchanged")))
@@ -1303,14 +1365,14 @@
   (let [base (ts/test-db)
         cell (volatile! base)
         w (r/walker {:ref (seon.ratom/atom {}) :changes seon.ctx/changes} #(deref cell) [#'diff-view {} base])
-        frame! (fn [tx-data] (let [res (d/with @cell tx-data)] (vreset! cell (:db-after res)) (r/frame! w (:tx-data res))))
+        flush! (fn [tx-data] (let [res (d/with @cell tx-data)] (vreset! cell (:db-after res)) (r/flush! w (:tx-data res))))
         runs #(:miss (get (r/ledger w) `diff-view))
         html #(pr-str (map :out (vals @(:cache w))))]
-    (r/frame! w nil)
+    (r/flush! w nil)
     (is (str/includes? (html) "0 vars added"))
-    (frame! [{:seon.task/id "unrelated/task"}])
+    (flush! [{:seon.task/id "unrelated/task"}])
     (is (= 1 (runs)) "a datom outside the diffed attribute leaves it as it was")
-    (frame! [{:var/name 'app.m0/added-on-the-branch}])
+    (flush! [{:var/name 'app.m0/added-on-the-branch}])
     (is (str/includes? (html) "1 vars added") "the next frame shows the var the branch added")
     (is (= 2 (runs)) "the component ran again")
     (r/dispose-walk! w)))
@@ -1386,15 +1448,15 @@
             views '#{seon.render.ui/status}
             ran (fn [] (into {} (for [[f v] (r/ledger w) :when (views f)] [f (+ (:miss v 0) (:same v 0))])))]
         (try
-          (r/frame! w nil)
+          (r/flush! w nil)
           (is (= views (set (keys (ran)))) "the views drawn once, as one component of the task's list")
           (let [r0 (ran)]
             (swap! a assoc :seon.agent/description "an unrelated change")
-            (r/frame! w nil)
+            (r/flush! w nil)
             (is (= r0 (ran)) "an unrelated change redraws none of them")
             (d/transact conn [{:seon.task/id "demo/g" :seon.task/ns 'demo :seon.task/name "g" :seon.task/plan "Make demo/g." :seon.task/kind :work :seon.task/proofs #{}}])
             (swap! a assoc :seon.agent/main-commit (d/commit-id @conn))
-            (r/frame! w nil)
+            (r/flush! w nil)
             (let [r1 (ran)]
               (is (= views (set (for [[f n] r1 :when (not= n (r0 f))] f)))
                   "main moving redraws the views (a whole task merges itself: its merge section reads main)")))
@@ -1580,7 +1642,7 @@
   ;; errors just make sure it's visible to the agent": the error is the part's data, and the model
   ;; reads that map, the thrown error's own data in it; every other part draws
   (let [w (r/walker {:ref (seon.ratom/atom {}) :changes seon.ctx/changes} (constantly (ts/test-db)) [#'two-part-layout {}])]
-    (try (r/frame! w nil)
+    (try (r/flush! w nil)
          (let [placed (r/placed-hiccup w ["#parts"])
                [[_ broken] [_ fine]] placed]
            (is (= :seon.render/component-defect (:seon.error/type broken)) (str "the model reads the error as data: " (pr-str placed)))

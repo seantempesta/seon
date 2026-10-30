@@ -31,12 +31,8 @@
   (let [tx (task/member-tx (current) member f (vec args))]
     (if (contract/error? tx)
       tx
-      (do ;; its plan or instructions rewritten: what they cite is derived again from the new text, as at
-          ;; creation, in the same transaction, so no db holds the new text with the old citations
-          (agent/transact! (if (#{:seon.task/plan :seon.task/instructions} member)
-                             (let [db' (d/db-with (agent/db) tx)]
-                               (into (vec tx) (task/rederive-tx db' (task/task db' (turn/current-task)))))
-                             tx))
+      (do ;; its plan or instructions rewritten: the write carries what the new text cites (seon.agent/transact!)
+          (agent/transact! tx)
           (get (current) member)))))
 
 (defn fail!
