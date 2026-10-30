@@ -73,7 +73,7 @@ A stall is not pushed to the owner: it becomes a task for root to deal with. Its
 
 Root and an agent speak length-prefixed frames over one Unix socket, read and written on the agent's side by its one thread with no pumps: `seon.sock`.
 
-A frame is a length word and a jfasl body; a descriptor can travel with a frame. The socket's buffer is the bounded channel: a full buffer makes the sender wait. Root's end is a `jolt.async.remote` end on fiber pumps, whose `:in` is the in-port of the agent's proc in root, ```seon.agent-proc/agent-proc```: one proc per agent, added and removed by the api with `flow/update!` ([root](root.md#the-root-graph)). It passes Flow's pause, resume and stop on to the agent's own loop; on stop the agent exits after the requests before it, and past `seon.agent-proc/stop-bound-ms` it is SIGKILLed.
+A frame is a length word and a jfasl body; a descriptor can travel with a frame. The socket's buffer is the bounded channel: a full buffer makes the sender wait. Root's end is a `jolt.async.remote` end on fiber pumps, whose `:in` is the in-port of the agent's proc in root, ```seon.agent-proc/agent-proc```: one proc per agent, added and removed by the api with `flow/update!` ([root](root.md#the-root-graph)). It passes Flow's pause, resume and stop on to the agent's own loop; on stop the agent exits after the requests before it, and past `:seon.config.agent/stop-ms` it is SIGKILLed.
 
 ## Interrupts
 

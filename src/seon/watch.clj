@@ -7,7 +7,7 @@
   what the stream holds when a read returns, to its caller (my.root/watch!). No clock
   decides and nothing polls: a batch is what arrived."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.config :as cfg]))
+  (:require [seon.contract :as contract :refer [defn defn-]] [seon.config :as cfg] [seon.lib :as lib]))
 
 (defn record
   "Record bytes (a kind letter then the path, NUL already taken off) as [kind path]: kind :path
@@ -58,7 +58,7 @@
                (contract/error :seon.watch/died #'seon.watch/start! why
                                {:bin bin :roots (vec roots)
                                 :exit (when p (.waitFor p))
-                                :stderr (when p (slurp (.getErrorStream p)))}))
+                                :stderr (when p (lib/tail-bytes (.getErrorStream p) (cfg/value :seon.config.root/death-stderr-bytes)))}))
         p (try (.start (ProcessBuilder. ^java.util.List (into [bin] roots)))
                (catch java.io.IOException e (died nil (str bin " did not start: " (.getMessage e)))))]
     (if (contract/error? p)

@@ -25,7 +25,7 @@
     platform's own source has the same facts (seon.source)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.step :as step] [seon.contract :refer [defn defn-] :as contract] [datahike.api :as d] [jolt.ir :as ir] [jolt.analyzer]
-            [seon.schema.datahike :as sd] [seon.edn :as sedn] [malli.registry :as mr] [seon.error :as error] [seon.db :as pdb] [seon.config :as cfg] [clojure.string :as str] [hasch.core :as hasch] [seon.reader :as reader]))
+            [seon.schema.datahike :as sd] [seon.edn :as sedn] [malli.registry :as mr] [seon.error :as error] [seon.lib :as lib] [seon.db :as pdb] [seon.config :as cfg] [clojure.string :as str] [hasch.core :as hasch] [seon.reader :as reader]))
 
 (defn scratch-ns?
   "Is namespace nsx scratch (never program): `user`, or declared ^:scratch."
@@ -1467,7 +1467,7 @@
                                           kids (distinct (for [id c w (adj id) :when (not (ms w))] (get comp-of w)))
                                           any (fn [k fs] (boolean (or (some fs c) (some #(get-in fl [% k]) kids))))]
                                       [(reduce #(assoc! %1 %2 n) comp-of c)
-                                       (assoc! cd n (error/digest (str (str/join " " (sort (map own c))) "|" (str/join " " (sort (map cd kids))))))
+                                       (assoc! cd n (lib/digest (str (str/join " " (sort (map own c))) "|" (str/join " " (sort (map cd kids))))))
                                        (assoc! fl n {:reads (any :reads reads) :scans (any :scans scans) :proc (any :proc proc) :bin (any :bin bin)
                                                     ;; the config keys it and what it reaches read, its largest
                                                     ;; kid's set grown by the rest
@@ -1493,7 +1493,7 @@
   whether or not the entry exists (reach-step's edges keep those rows holds), so one added later is an edge."
   {:malli/schema [:=> [:cat :any :string] :map]}
   [k text]
-  {:id (str "schema " k) :own (error/digest (str k "\n" text)) :ns k :refs #{} :defines #{}
+  {:id (str "schema " k) :own (lib/digest (str k "\n" text)) :ns k :refs #{} :defines #{}
    :schema (mapv #(str "schema " %) (names (sedn/decode text)))})
 
 (defn reach-graph
@@ -1596,7 +1596,7 @@
             ;; files (:seon.env/*); a pin it takes by its reach, as any test does: Jolt's runtime
             ;; core and Chez, which every process runs on, are the forks' suites' and the daily full run's
             ks (if (some #(let [f (flags %)] (or (:reads f) (:proc f) (:bin f))) cs) (into ks env-keys) ks)]
-        {:digest (error/digest (apply str k "\n" env "\n" (when (some #(let [f (flags %)] (or (:scans f) (and roots? (:reads f)))) cs) tree)
+        {:digest (lib/digest (apply str k "\n" env "\n" (when (some #(let [f (flags %)] (or (:scans f) (and roots? (:reads f)))) cs) tree)
                                       (concat (sort (map cd cs)) (map line (sort ks)))))
          :process? (boolean (some #(:proc (flags %)) cs)) :binary? (boolean (some #(:bin (flags %)) cs))}))))
 
@@ -1661,7 +1661,7 @@
   (let [b (StringBuilder.)]
     (doseq [dt (d/datoms db :aevt :form/id)] (.append b (:e dt)) (.append b "\n"))
     (doseq [a [:schema/form :ns/tail] dt (d/datoms db :aevt a)] (.append b (:e dt)) (.append b " ") (.append b (:v dt)) (.append b "\n"))
-    (error/digest (.toString b))))
+    (lib/digest (.toString b))))
 
 (defn process-path
   "Why test t of graph g (reach-graph's) is a process test: the shortest chain of calls from its

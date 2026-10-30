@@ -180,7 +180,7 @@
                     st (-> st graph-at-fork index-at-fork)]
                (fork-carrying! st fd open #(main (:db st) (:cfg st) % false (select-keys st [:graph :index]))
                               (fn [n] [st {:ev [{:ev :standby-failed :gen (:gen m) :active-threads n}]}])
-                              (fn [pid] (when-let [old (:standby-pid st)] (lib/c-kill old 9))
+                              (fn [pid] (when-let [old (:standby-pid st)] (lib/kill! old 9))
                                 (let [[st evs] (adopt (assoc st :standby-pid pid) pid)]
                                   [st {:ev (into [{:ev :standby :gen (:gen m) :pid pid :t (:max-tx (:db st))}] evs)}]))))
      [st nil]))
@@ -213,7 +213,7 @@
   ;; docs/processes.md#a-stop-reaps-every-child)
   ([st tr]
    (when (= tr ::flow/stop)
-     (doseq [pid (:children st)] (lib/c-kill pid 9) (lib/c-waitpid pid (:status-buf st) 0)))
+     (doseq [pid (:children st)] (lib/kill! pid 9) (lib/c-waitpid pid (:status-buf st) 0)))
    st)
   ([st _ m]
    ;; a step that throws changes nothing (st as it was) and answers what it took with the error: the asker's
@@ -283,7 +283,7 @@
                            (case m :eof nil [:cmd m])))))]
     (step/run-loop #'server-step {:db db0 :cfg cfg :store store :conn conn :kq kq :graph graph :index index}
                    recv! (fn [_ m] (sock/send! fd m)))
-    (lib/c-kill 0 9)
+    (lib/kill! 0 9)
     (lib/c-exit 0))))
 
 ;; ---- root's side: the :fork-server proc (proto/flow f2-final proto.control) ----------
@@ -332,7 +332,7 @@
 (defn- drop-standby {:malli/schema [:=> [:cat [:maybe :map]] :any]}
   [sb]
   (when sb
-    (some-> (:pid sb) (lib/c-kill 9))
+    (some-> (:pid sb) (lib/kill! 9))
     (some-> (:sent sb) sock/close!)
     (sock/close! (:fd sb))))
 
@@ -366,7 +366,7 @@
   {:malli/schema [:=> [:cat :map] [:tuple :map :seon.step/outputs]]}
   [st]
   (let [sb (:standby st)
-        alive? (and sb (zero? (lib/c-kill (:pid sb) 0)))
+        alive? (and sb (zero? (lib/kill! (:pid sb) 0)))
         st (do (run! sock/close! (vals (:in-flight st))) (dissoc st :in-flight))]
     (sock/close! (:fd st))
     (some-> (:standby-pending st) drop-standby)

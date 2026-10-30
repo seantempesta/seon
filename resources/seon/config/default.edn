@@ -33,6 +33,16 @@
  ;; file. Provenance: the value seon.root held as a literal (shrink). At the bound: earlier
  ;; output is not recorded; the file itself is kept.
  :seon.config.root/death-stderr-bytes 2048
+ ;; Unit: ms. Slack added to :seon.config.agent/stop-ms in seon.root/stop!'s wait for the api's shutdown
+ ;; answer, before agents still alive are killed. Provenance: the literal 1000 it replaces. At the
+ ;; bound: root sends :kill-all.
+ :seon.config.root/stop-slack-ms 1000
+ ;; Unit: ms. How long seon.root/stop! waits for the api's drain answer after that. Provenance: the
+ ;; literal 15000 it replaces. At the bound: stop! goes on, :drained :timeout.
+ :seon.config.root/drain-ms 15000
+ ;; Unit: ms. Flow's :stop-timeout-ms for root's graph (seon.root/start!). Provenance: the literal
+ ;; 10000 it replaces. At the bound: flow/stop answers the pids still running.
+ :seon.config.root/flow-stop-ms 10000
  ;; Unit: entries. The newest entries root's view keeps of a list it grows: an agent's
  ;; evaluations and root's own defects; the view counts them all, and a render says how many it
  ;; left. Provenance: the value seon.root held as a literal twice (shrink). At the bound: the
@@ -312,6 +322,20 @@
  ;; guessed tolerance the agent proc held as a var (30 s; a model call answers or streams within
  ;; it). Past it nothing is ended. 0: no check.
  :seon.config.agent/stall-ms 30000
+ ;; Unit: ms. How long an agent may take to exit after :stop before it is SIGKILLed
+ ;; (seon.agent-proc's ::flow/stop), and the base of the wait for root's shutdown answer
+ ;; (seon.root/stop!). Provenance: the literal seon.agent-proc/stop-bound-ms (2 s) it replaces. At the
+ ;; bound: the agent is killed and its end closed; named in docs/clocks.md, owed
+ ;; seon.root/shutdown-and-death-are-dataflow.
+ :seon.config.agent/stop-ms 2000
+ ;; Unit: ms. How long a killed agent's end may take to close after SIGKILL and hang-up
+ ;; (seon.agent-proc/await-dead). Provenance: the literal 5000 beside stop-ms. At the bound: the proc stops
+ ;; waiting; the agent is recorded dead by the socket's EOF when it comes.
+ :seon.config.agent/kill-wait-ms 5000
+ ;; Unit: bytes. How much of a stalled agent's stderr file its stall evidence keeps as the fiber dump
+ ;; (seon.fx/stall-evidence; seon.lib/tail-bytes says how many earlier bytes were left out). Provenance:
+ ;; the literal 262144 (256 KiB) the evidence script's `tail -c` held; a dump of a few hundred fibers fits.
+ :seon.config.agent/stall-fibers-bytes 262144
 
  ;; ==== merges =================================================================================
 
@@ -690,24 +714,16 @@
   {:seon.ai.model/provider "deepseek"
    ;; DeepSeek-V4.1-Flash-1017; the legacy names deepseek-v4-flash(-vision-exp) route here
    :seon.ai.model/version "DeepSeek-V4.1-Flash-1017"
-   :seon.ai.model/context-window-tokens 1048576
-   :seon.ai.model/max-output-tokens 393216
    :seon.ai.model/input-usd-per-mtok 0.15
    :seon.ai.model/cached-input-usd-per-mtok 0.003
    :seon.ai.model/output-usd-per-mtok 0.6
-   :seon.ai.model/thinking-modes #{:enabled :disabled}
-   :seon.ai.model/provider-max-in-flight 2500
    :seon.ai.model/source "api-docs.deepseek.com/quick_start/pricing and /rate_limit, read 2026-10-21"}
   "deepseek-v4-pro"
   {:seon.ai.model/provider "deepseek"
    :seon.ai.model/version "DeepSeek-V4-Pro-0813"
-   :seon.ai.model/context-window-tokens 1048576
-   :seon.ai.model/max-output-tokens 393216
    :seon.ai.model/input-usd-per-mtok 0.66
    :seon.ai.model/cached-input-usd-per-mtok 0.022
    :seon.ai.model/output-usd-per-mtok 1.98
-   :seon.ai.model/thinking-modes #{:enabled :disabled}
-   :seon.ai.model/provider-max-in-flight 500
    :seon.ai.model/source "api-docs.deepseek.com/quick_start/pricing and /rate_limit, read 2026-10-21"}}
  ;; Unit: tokens per second the provider admits, cluster-wide: the :model owner's token bucket
  ;; (session R3; AIMD on a 429). 0: no bucket.
@@ -940,9 +956,9 @@
  ;; threads of its own (Metal's), and loading it runs ~32 that end when it has loaded; all in the
  ;; helper's process, none in root's.
  :seon.config.vector/threads 1
- ;; Unit: characters. How much of the embedding helper's stderr a :seon.vector/helper-died error keeps (its last
- ;; characters; the error says how many earlier ones were left out). Provenance: a screenful of llama.cpp's log.
- :seon.config.vector/stderr-chars 4096
+ ;; Unit: bytes. How much of the embedding helper's stderr a :seon.vector/helper-died error keeps (its last
+ ;; bytes; seon.lib/tail-bytes says how many earlier ones were left out). Provenance: a screenful of llama.cpp's log.
+ :seon.config.vector/stderr-bytes 4096
  ;; Unit: tokens. A text past it keeps its first max-tokens (the count cut is recorded). Provenance:
  ;; v1's 2,048 (forms p99 1,766 tokens); at 512, 148 of Seon's 1,393 forms were cut.
  :seon.config.vector/max-tokens 2048

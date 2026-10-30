@@ -14,7 +14,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.lib :as lib] [seon.step :as step] [seon.config :as cfg] [seon.model :as model]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [clojure.java.shell :as sh] [clojure.string :as str] [jolt.ffi :as ffi] [jolt.deps :as deps]
-            [seon.edn :as sedn] [seon.error :as err] [clojure.edn :as edn] [seon.proofs :as proofs]))
+            [seon.edn :as sedn] [clojure.edn :as edn] [seon.proofs :as proofs]))
 
 (defn- error
   "An effect's declared failure, as the one error map (its variant registered in
@@ -176,6 +176,14 @@
   made by the child (made-run-dir!). See docs/failure-points.md, a directory walk."
   {:malli/schema [:=> [:cat :int] :string]}
   [pid] (str (cfg/value :seon.config.agent/cwd) "/tests/" pid))
+
+(def ^:private child-env-scrub
+  "The `env -u` argv that gives a child process the tree's own environment (docs/source.md#the-next-generation):
+  bin/env and bin/root export names for this root's checkout, runs and home, and a child inheriting
+  SEON_SOURCE_ROOT listed its test namespaces from that checkout, not the tree it ran in (a full run's plan
+  named a test of the root's working tree that main does not hold, and its shard died at once). Used by build and run-tests."
+  ["env" "-u" "SEON_CHECKOUT" "-u" "JOLT_LMDB_LIB" "-u" "JOLT_PWD" "-u" "HOME"
+   "-u" "SEON_SOURCE_ROOT" "-u" "SEON_RUNS"])
 
 (defn remove-tree!
   "Remove the directory dir and all it holds (`rm -rf`: a symbolic link is removed, never entered).
@@ -411,11 +419,11 @@
                       (if (and pn (str/includes? pn "+")) (str l " " pn) l)]))
          by-class (group-by first entries)]
      {:tree tree
-      :env (err/digest (str/join "\n" (concat (map second (get by-class nil)) [(str "test-ticks " (:seon.config.agent/test-ticks cfg) " " (:seon.config.agent/test-ticks-floor cfg) " " (:seon.config.agent/test-ticks-factor cfg))])))
+      :env (lib/digest (str/join "\n" (concat (map second (get by-class nil)) [(str "test-ticks " (:seon.config.agent/test-ticks cfg) " " (:seon.config.agent/test-ticks-floor cfg) " " (:seon.config.agent/test-ticks-factor cfg))])))
       ;; the config in force, and each class of files a test may read (env-class): named inputs
       ;; a test's digest takes by what its reach reads
       :config (into (config-input cfg checkout)
-                    (for [[c es] by-class :when c] [c (err/digest (str/join "\n" (map second es)))]))
+                    (for [[c es] by-class :when c] [c (lib/digest (str/join "\n" (map second es)))]))
       :data-refs (declared-refs (str root "/resources/seon/system.edn"))})))
 
 (defn git-commit
@@ -560,8 +568,7 @@
         from (cfg/checkout)
         dir (str (cfg/value :seon.config.source/generations-dir) "/" commit)
         log (str dir ".build.log")
-        ;; a process of the tree's own: bin/env derives these from the tree it is in
-        clean ["env" "-u" "SEON_CHECKOUT" "-u" "JOLT_LMDB_LIB" "-u" "JOLT_PWD" "-u" "HOME"]
+        clean child-env-scrub
         step (fn [what args]
                (let [r (apply sh/sh "zsh" "-c" "\"$@\" >> \"$0\" 2>&1" log (concat clean args))]
                  (when-not (zero? (:exit r))
@@ -836,12 +843,7 @@
                  (catch Throwable e (error #'seon.fx/run-tests :seon.fx/io-error (step/error-msg e) {:path repo})))
         dir (str (cfg/value :seon.config.source/tests-dir) "/" sha "-" (random-uuid))
         log (str dir ".tests.log")
-        ;; the tree's own environment: what bin/env and bin/root export name this root's checkout,
-        ;; and a runner inheriting SEON_SOURCE_ROOT listed its test namespaces from that checkout, not
-        ;; the tree it ran in (measured 2026-10-27: the first full run's plan named seon.cron-test,
-        ;; a test of the root's working tree that main does not hold, and its shard died at once)
-        clean ["env" "-u" "SEON_CHECKOUT" "-u" "JOLT_LMDB_LIB" "-u" "JOLT_PWD" "-u" "HOME"
-               "-u" "SEON_SOURCE_ROOT" "-u" "SEON_RUNS"]
+        clean child-env-scrub
         at (when-not (contract/error? sha) (sh/sh (str (cfg/checkout) "/bin/worktree") "--at" dir sha repo))]
     (cond
       (contract/error? sha) sha
@@ -1158,9 +1160,9 @@
                     "kill -INFO $p 2>/dev/null\n"
                     "sample $p 5 -file sample.txt > /dev/null 2>&1\n"
                     "lsof -p $p > lsof.txt 2>&1\n"
-                    "g=$(ps -o pgid= -p $p | tr -d ' '); [[ -n $g ]] && ps -o pid,ppid,pgid,stat,etime,%cpu,rss,command -g $g > ps.txt 2>&1\n"
-                    "[[ -r \"$3\" ]] && tail -c 262144 \"$3\" > fibers.txt\n")
-        _ (sh/sh "zsh" "-c" script "evidence" dir (str pid) (or stderr ""))
+                    "g=$(ps -o pgid= -p $p | tr -d ' '); [[ -n $g ]] && ps -o pid,ppid,pgid,stat,etime,%cpu,rss,command -g $g > ps.txt 2>&1\n")
+        _ (sh/sh "zsh" "-c" script "evidence" dir (str pid))
+        _ (some->> (lib/tail-bytes stderr (cfg/value :seon.config.agent/stall-fibers-bytes)) (spit (str dir "/fibers.txt")))
         files (into {} (for [[k f] {:sample "sample.txt" :lsof "lsof.txt" :ps "ps.txt" :fibers "fibers.txt"}
                              :let [path (str dir "/" f) file (java.io.File. path)]
                              :when (pos? (.length file))]

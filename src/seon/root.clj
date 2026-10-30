@@ -63,19 +63,6 @@
   {:malli/schema [:=> [:cat :qualified-symbol :string :map] :seon.root/refused]}
   [op why members] (contract/error :seon.root/refused op why members))
 
-(defn stderr-tail
-  "The last :seon.config.root/death-stderr-bytes of the stderr file at path (seon.agent/stderr-path), or nil: no path
-  (an in-memory store), the file gone, or nothing written."
-  {:malli/schema [:=> [:cat [:maybe :string]] [:maybe :string]]}
-  [path]
-  (let [f (some-> path (java.io.File.))]
-    (when (and f (.exists f) (pos? (.length f)))
-      (with-open [r (java.io.RandomAccessFile. f "r")]
-        (let [n (.length r) k (min n (cfg/value :seon.config.root/death-stderr-bytes)) b (byte-array k)]
-          (.seek r (- n k))
-          (.readFully r b)
-          (String. b "UTF-8"))))))
-
 (defn- problem
   "Fold occurrence o into the api's recorded-error fold (seon.error/fold): one hash; the
   write follows once per window (flush-problems)."
@@ -342,7 +329,7 @@
         died (when-not (or rid stop)
                (contract/error :seon.agent/died #'seon.root/end-agent (str "agent " (name agent) " died" (exit-text (:exit v)))
                                {:agent agent :pid (or pid (:pid v)) :exit (:exit v)
-                                :stderr (stderr-tail (agent/stderr-path (get-in st [:view :store :agents-dir]) agent))
+                                :stderr (some-> (agent/stderr-path (get-in st [:view :store :agents-dir]) agent) (lib/tail-bytes (cfg/value :seon.config.root/death-stderr-bytes)))
                                 :last-op (some-> (:running v) (select-keys [:form :since-ms]) (assoc :kind :eval))}))
         e (or died (ended agent (str "agent " (name agent) " ended")))]
     (step/out! o :events (step/event {:type (or stop :dead) :agent agent}))
@@ -515,7 +502,7 @@
     (:ev m)
     (case (:ev m)
       :forked (do (step/out! o :events (step/event {:type :spawned :agent (:agent m) :pid (:pid m) :fork-ms (:fork-ms m)}))
-                  (when (stopped-statuses (get-in st [:view :agents (:agent m) :status])) (lib/c-kill (:pid m) 9))
+                  (when (stopped-statuses (get-in st [:view :agents (:agent m) :status])) (lib/kill! (:pid m) 9))
                   (-> st (set-agent o (:agent m) {:pid (:pid m)})
                       (view! update-in [:fork-server :agents-forked] (fnil inc 0))
                       (view! update-in [:stats :fork-ms] lib/push-window (:fork-ms m) 500)
@@ -774,7 +761,7 @@
   same whether the tree was read whole or by its changes, so a result keyed by the inputs stays shared."
   {:malli/schema [:=> [:cat :map] :string]}
   [r]
-  (err/digest (sedn/encode [(or (:tree r) (:value r)) (:pins r)])))
+  (lib/digest (sedn/encode [(or (:tree r) (:value r)) (:pins r)])))
 
 (defn import-source!
   "Main's program follows Seon's own source (seon.source): root's dirs read through the
@@ -890,7 +877,7 @@
   its read ids come from) and its task ids (a prose word may name a task). docs/root.md#boot."
   {:malli/schema [:=> [:cat :seon.host/db :string] :string]}
   [db checkout]
-  (err/digest (str (program/program-digest db) "\n" (str/join " " (map :v (d/datoms db :avet :seon.task/id))) "\n"
+  (lib/digest (str (program/program-digest db) "\n" (str/join " " (map :v (d/datoms db :avet :seon.task/id))) "\n"
                    (str/join "\n" (for [dir (cfg/value :seon.config.root/wiki-dirs) [p t] (docs/pages checkout dir)] (str p "\n" t))))))
 
 (defn wiki-boot-tx
@@ -1084,7 +1071,7 @@
         built (system/build decl bindings nil)
         root-procs (:procs built) root-conns (:conns built)
         _ (deliver root-procs-p built)
-        g (flow/create-flow {:procs root-procs :conns root-conns :stop-timeout-ms 10000})
+        g (flow/create-flow {:procs root-procs :conns root-conns :stop-timeout-ms (cfg/value :seon.config.root/flow-stop-ms)})
         _ (deliver graph-p g)
         {root-errors :error-chan} (flow/start g)
         ;; Flow's error channel (every proc's, agents included) piped into :back, each defect
@@ -1414,7 +1401,7 @@
   reaches a running native loop). nil."
   {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id] :nil]}
   [sys agent-id]
-  (some-> (:pid (agent-entry sys agent-id)) (lib/c-kill lib/SIGUSR1))
+  (some-> (:pid (agent-entry sys agent-id)) (lib/kill! lib/SIGUSR1))
   nil)
 
 (defn kill! "SIGKILL the agent's process (through its agent proc). nil." {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id] :nil]}
@@ -1423,7 +1410,7 @@
 (defn stop!
   "Stop root by letting the flow drain: the api closes (later calls answer \"root
   stopped\"); every agent is sent :stop and exits after the requests before it (SIGKILL
-  past seon.agent-proc/stop-bound-ms); the writer's in-port closes, it commits and flushes what it
+  past :seon.config.agent/stop-ms); the writer's in-port closes, it commits and flushes what it
   took; the fork server is killed and reaped; then flow/stop (every proc exited) and the
   reader. Nothing accepted is lost.
   First the end is a fact on main, durable (:seon.root/stopped {:boot :cause :at-ms}; cause
@@ -1442,10 +1429,10 @@
     ;; a wait on main asked after this answers stopped at once (ask-edge's closed case)
     (a/close! (:judge sys))
     ;; agents not stopped by the api's drain, late or never asked (its api closed), are killed
-    (let [answer (deref p (+ ap/stop-bound-ms 1000) ::late)]
+    (let [answer (deref p (+ (cfg/value :seon.config.agent/stop-ms) (cfg/value :seon.config.root/stop-slack-ms)) ::late)]
       (when (or (= ::late answer) (contract/error? answer))
         (a/>!! (:back sys) {:op :kill-all})))
-    (let [drained (deref p 15000 :timeout)
+    (let [drained (deref p (cfg/value :seon.config.root/drain-ms) :timeout)
           graph (flow/stop (:graph sys))]
       ;; a wait put on :judge that the stopped reconciler never took is answered here
       (loop [] (when-let [m (a/poll! (:judge sys))] (some-> (:p m) (deliver {:stopped true})) (recur)))

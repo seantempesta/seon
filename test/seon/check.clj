@@ -1551,7 +1551,7 @@
         q (d/q '[:find [?q ...] :where [?e :seon.fx/kind :echo] [?e :seon.fx/queue-us ?q]] bdb)
         us (d/q '[:find [?q ...] :where [?e :seon.fx/kind :echo] [?e :seon.fx/us ?q]] bdb)
         echo-ping (ping sys :fx/echo)]
-      (clojure.java.shell/sh "rm" "-rf" dir)
+      (seon.fx/remove-tree! dir)
       {:report (assoc r :recorded (into {} recs) :echo-queue-us (lib/summ (vec q)) :echo-perform-us (lib/summ (vec us))
                       :owner-ping echo-ping :load (clojure.string/trim (:out (clojure.java.shell/sh "uptime"))))
        ;; the effect answered, its unknown kind is a typed error, and inside the test fork a
@@ -1620,7 +1620,7 @@
         got (:got (await-event ev #(and (= :probe (:type %)) (= "one" (:tag %)) (= 3 (:got %)))))
         r3 @(c/apply! sys (write! "remove" (assoc-in decl [:procs :probe] (probe "one"))))
         after (pids)]
-      (clojure.java.shell/sh "rm" "-rf" dir)
+      (seon.fx/remove-tree! dir)
       {:report {:no-answer (vec (remove booted expect)) :extra (vec (remove expect booted))
                 :add (dissoc r1 :kept) :add2 (dissoc r2 :kept) :queued-kept got :remove (dissoc r3 :kept)}
        :checks {:boot-set (= expect booted)
@@ -1923,7 +1923,7 @@
             gone (vec (mapcat #(seon.db/delete-main! conn (keyword %)) mains))]
         (seon.db/sync! cfg)
         (d/release conn)
-        (doseq [m mains] (clojure.java.shell/sh "rm" "-rf" (seon.db/agents-dir (assoc cfg :branch (keyword m)))))
+        (doseq [m mains] (seon.fx/remove-tree! (seon.db/agents-dir (assoc cfg :branch (keyword m)))))
         ;; the store's agents directory goes when the last main's has (rmdir leaves a non-empty one)
         (clojure.java.shell/sh "rmdir" (str path "-agents"))
         (out! "deleted " (count gone) " branches of " (count mains) " mains"))

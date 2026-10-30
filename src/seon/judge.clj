@@ -6,8 +6,8 @@
   unchanged context is never asked twice. my.root/first-moves! runs a pass; the reply is
   analyzed in a disposable agent (first-move), since analysis runs a reply's ns form."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.context :as context] [seon.source :as source]
-            [seon.reader :as reader] [seon.docs :as docs] [seon.step :as step] [seon.ref :as ref] [seon.edn :as sedn] [seon.error :as err] [seon.config :as config]
+  (:require [seon.contract :as contract :refer [defn defn-]] [seon.lib :as lib] [seon.context :as context] [seon.source :as source]
+            [seon.reader :as reader] [seon.docs :as docs] [seon.step :as step] [seon.ref :as ref] [seon.edn :as sedn] [seon.config :as config]
             [datahike.api :as d]))
 
 (defn request
@@ -29,7 +29,7 @@
 (defn digest
   "The request's digest: the record's key, so the same context, model and mode are scored once."
   {:malli/schema [:=> [:cat :map] :string]}
-  [req] (err/digest (sedn/encode req)))
+  [req] (lib/digest (sedn/encode req)))
 
 (defn subject
   "What task t's first move is judged against, from its text on db: the vars its plan and
@@ -59,7 +59,9 @@
     (try
       (vec (for [{:keys [form ns]} (:forms (binding [*read-eval* false] (source/read-forms nsym (:text (reader/forgive code)))))]
              (try (let [{:keys [units]} (source/analyze-form (if (and (seq? form) (= 'ns (first form))) nsym (or ns nsym)) form)]
-                    {:defs (into #{} (comp (mapcat :defs) (map :var)) units) :refs (into #{} (mapcat :refs) units)})
+                    ;; its refs with its quoted data's (the analyzer's :quoted): an agent's source quotes the name it
+                    ;; reads ((source f) expands to a let of 'f), a plain REPL's names it bare, and both read f
+                    {:defs (into #{} (comp (mapcat :defs) (map :var)) units) :refs (into #{} (mapcat #(concat (:refs %) (:quoted %))) units)})
                   (catch Exception e (uncompiled e)))))
       (catch Exception e [(uncompiled e)]))))
 
@@ -106,7 +108,7 @@
   covers these definitions, not what they call (seon.source's reader and analysis), and the
   program as main records it, which is what the scoring agent forked from main runs."
   {:malli/schema [:=> [:cat :seon.host/db] :string]}
-  [db] (err/digest (sedn/encode (mapv #(docs/source-of db %) '[seon.judge/subject seon.judge/form-facts seon.judge/reads seon.judge/score seon.judge/first-move]))))
+  [db] (lib/digest (sedn/encode (mapv #(docs/source-of db %) '[seon.judge/subject seon.judge/form-facts seon.judge/reads seon.judge/score seon.judge/first-move]))))
 
 (defn fact
   "The :seon.judge fact of task id's first move: its request's digest, the version that

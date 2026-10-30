@@ -448,17 +448,9 @@
 ;; of main reads each commit from the store (seon.fork-server, d/commit-as-db); these name
 ;; a commit's datoms for the program's loader and main's readers.
 
-(defn report->tx-meta
-  "The transaction entity's own facts in the writer's tx-report ({attribute value}: its
-  :db/txInstant and any tx-meta; empty without history): a commit's own facts, as main's
-  readers receive them beside its datoms."
-  {:malli/schema [:=> [:cat :seon.db/tx-report] :map]}
-  [rep]
-  (into {} (for [dt (:tx-data rep) :when (and (= (:e dt) (:tx dt)) (:added dt))] [(:a dt) (:v dt)])))
-
 (defn report->tx
   "The writer's tx-report as explicit-id tx-data (the transaction entity's own datoms left
-  out: report->tx-meta carries them)."
+  out)."
   {:malli/schema [:=> [:cat :seon.db/tx-report] :seon.db/resolved-tx]}
   [rep]
   (vec (for [dt (:tx-data rep) :when (not= (:e dt) (:tx dt))]

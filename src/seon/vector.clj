@@ -421,18 +421,6 @@
         (comp (filter (comp #{"--config" "--set"} first)) cat)
         (partition 2 (rest (cfg/argv)))))
 
-(defn- stderr-tail
-  "The helper's stderr, kept in the file err (a pipe would block it at 64 KB with no reader): its last
-  :seon.config.vector/stderr-chars characters, saying how many earlier ones are left out; the file is
-  removed."
-  {:malli/schema [:=> [:cat :string] :string]}
-  [err]
-  (let [f (java.io.File. err)
-        s (if (.exists f) (slurp f) "")
-        n (count s) k (cfg/value :seon.config.vector/stderr-chars)]
-    (.delete f)
-    (if (> n k) (str "[" (- n k) " earlier characters left out] " (subs s (- n k))) s)))
-
 (defn- finished
   "The helper h ended, however it did: its exit status and stderr, recorded in the handle's facts
   (nothing is held any more). Its pipes closed, a helper that has not exited is killed first when
@@ -441,7 +429,8 @@
   [handle h kill?]
   (let [p (:process h)
         _ (when kill? (.destroyForcibly p))
-        f {:pid (:pid h) :exit (.waitFor p) :stderr (stderr-tail (:err handle))}]
+        f {:pid (:pid h) :exit (.waitFor p) :stderr (or (lib/tail-bytes (:err handle) (cfg/value :seon.config.vector/stderr-bytes)) "")}
+        _ (.delete (java.io.File. ^String (:err handle)))]
     (vreset! (:helper handle) nil)
     (vswap! (:facts handle) assoc :exit (:exit f) :exited-ms (System/currentTimeMillis))
     f))
