@@ -136,7 +136,7 @@
                                     {:op :eval :agent "root"
                                      :code (str "(let [b (:db @(seon.root/branch-db sys (:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))))"
                                                 " a (datahike.api/q '[:find ?a . :where [_ :seon.eval/agent ?a] [?a :seon.agent/key _]] b)]"
-                                                " (seon.context/current-ns b a))")}]))]
+                                                " (seon.context/current-ns (:tree (seon.ctx/build b a :b))))")}]))]
     (is (str/ends-with? (str (:value where)) ".here") (pr-str where))))
 
 (deftest a-move-into-a-namespace-that-hides-a-helper-says-so

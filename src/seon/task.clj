@@ -515,6 +515,19 @@
                                                                (remove #(and (not= % id) (= :merge (:seon.task/kind (own %)))) chain)))))
      :proofs (into #{} (mapcat #(:seon.task/proofs (own %))) chain)}))
 
+(defn pulled-accumulated
+  "Pulled task t's accumulated plan and proofs (`accumulate`), over the needs its record joins (:needs,
+  one level: a pattern does not reach itself, docs/ctx.md#the-pattern): what the task part and the status
+  read from ctx, never the db. {:plan text :proofs set}."
+  {:malli/schema [:=> [:cat [:map [:seon.task/id :seon.task/id]]] [:map [:plan :string] [:proofs :seon.task/proofs]]]}
+  [t]
+  (let [own-of (fn [x] (-> (select-keys x [:seon.task/id :seon.task/plan :seon.task/kind :seon.task/proofs])
+                           (update :seon.task/proofs set) (update :seon.task/kind #(or % :work))))
+        needs (filter :seon.task/id (vals (:needs t)))
+        own (into {(:seon.task/id t) (assoc (own-of t) :seon.task/needs (set (map :seon.task/id needs)))}
+                  (for [n needs] [(:seon.task/id n) (assoc (own-of n) :seon.task/needs #{})]))]
+    (accumulate own (:seon.task/id t))))
+
 (defn tasks
   "Every task on db, by id, each with its :seon.task/accumulated plan and proofs."
   {:malli/schema [:=> [:cat :seon.host/db] [:map-of :seon.task/id :seon.task/task]]}

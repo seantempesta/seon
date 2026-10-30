@@ -5,7 +5,7 @@
   id). Run: bin/test seon.context-cost-test"
   (:refer-clojure :exclude [defn defn-])
   (:require [clojure.test :refer [deftest]] [seon.contract :refer [defn defn-]] [seon.cost :as cost] [seon.context] [seon.ctx]
-            [datahike.api :as d] [seon.test-store :as ts] [my.test :as t] [seon.db :as pdb] [seon.task :as task] [seon.vector :as vector] [seon.program-cost-test :as pc]))
+            [datahike.api :as d] [seon.test-store :as ts] [my.test :as t] [seon.db :as pdb] [seon.task :as task] [seon.vector :as vector]))
 
 (defn- item
   "Eval record i of a run as the conversation reads it ([ref v k tx]): a model's call whose value
@@ -122,32 +122,38 @@
 
 (defn task-data-of
   "seon.context/task-data's arguments at n wiki sections with vectors: the task demo/r as of the db and
-  its cites, without its write set, as the task part draws it."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :map [:vector :map] :boolean]]}
-  [n] (let [[db _] (sections-of n)] [db (seon.task/task db "demo/r") (seon.task/task-cites db "demo/r") false]))
+  its cites, as my.task/data answers it at the REPL."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :map [:vector :map]]]}
+  [n] (let [[db _] (sections-of n)] [db (seon.task/task db "demo/r") (seon.task/task-cites db "demo/r")]))
 
-(defn namespace-of
-  "seon.context/namespace-data's arguments at n definitions: a branch whose namespace app.pc defines
-  n functions (seon.program-cost-test/branch-of), and that namespace."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :symbol]]}
-  [n] [(first (pc/branch-of n)) 'app.pc])
+(defn namespaces-at
+  "seon.context/namespaces-of's argument at n definitions: the record of an agent whose task cites one var of a
+  namespace that defines n, its proof calling two of them."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :map]]}
+  [n]
+  (let [db (d/db-with (ts/test-db)
+                      (into [{:db/id "n" :ns/name 'app.w} {:db/id "tf" :form/id "app.w-test/t" :form/src "(deftest t (is (f0)))" :form/refs #{'app.w/f0 'app.w/f1}}
+                             {:var/name 'app.w-test/t :var/kind :test :var/form "tf"}]
+                            (for [i (range n)] {:var/name (symbol "app.w" (str "f" i)) :var/ns "n" :var/kind :fn})))
+        db (d/db-with db (seon.task/create-tx db [{:seon.task/ns 'app :seon.task/name "w" :seon.task/proofs #{'app.w-test/t} :seon.task/plan "Make `app.w/f0` right."}]))
+        db (d/db-with db [{:seon.agent/key "b/w1" :seon.agent/task [:seon.task/id "app/w"]}])]
+    [(:tree (seon.ctx/build db (pdb/eid db :seon.agent/key "b/w1") :b))]))
 
-(deftest the-namespaces-part-costs-the-names-it-shows
-  ;; what the namespaces part draws of one namespace (docs/render.md#a-part-answers-data): its
-  ;; definitions' datoms, a name each, never their forms read again (agents work in namespaces of hundreds)
-  (cost/proof {:of 'seon.context/namespace-data :input 'seon.context-cost-test/namespace-of
-               :n "definitions in the namespace"
-               :work "the namespace's entity and its ns form's source for its aliases, then one pass over its :var/ns datoms, each var read for its name, kind, test status and its form's order (five seeks, ~7 KB each on Datahike's index): a name per definition, linear in them, no form read"
-               :growth :linear
-               ;; measured on Jolt 546c3d1f: 410 KB at 10, 3.49 MB at 100 (34 KB a definition); the two queries it
-               ;; replaced (get-else per tuple) 1.36 MB and 5.87 MB, a pull each 837 KB and 7.76 MB
-               :per-n {:bytes 35000}
-               :fixed {:calls 2 :bytes 80000}
-               :sizes [10 30 100]}))
+(deftest the-namespaces-part-costs-what-it-shows
+  ;; the namespaces part (docs/render.md#a-part-answers-data) is what the record holds of the task's names: the
+  ;; namespace's size never reaches it (a bench run's part listed ~170 names the task never needed, 1,256 tokens)
+  (cost/proof {:of 'seon.context/namespaces-of :input 'seon.context-cost-test/namespaces-at
+               :n "definitions in the cited namespace"
+               :work "the task's cites, its needs' and its proofs' vars as the record holds them, each name grouped by its namespace: what it shows, flat in the namespace's definitions"
+               :growth :constant
+               ;; measured: 7 contracted calls, 26.9 KB at 10 definitions; namespace-data, which it replaces, read every
+               ;; definition of each namespace (34 KB a definition: 3.49 MB at 100)
+               :fixed {:calls 7 :bytes 30000}
+               :sizes [10 100 1000]}))
 
 (deftest task-data-costs-what-the-plan-names
-  ;; the task's data (task-data over the task as of t), as the task's component draws it when a
-  ;; transaction touches what it read (seon.render/render!): what the plan cites read and resolved, flat in the wiki's size
+  ;; the task's data (task-data over the task as of t), as my.task/data answers it at the REPL: what the plan
+  ;; cites read and resolved, its write set among it, flat in the wiki's size
   (cost/proof {:of 'seon.context/task-data :input 'seon.context-cost-test/task-data-of
                :n "wiki sections with vectors"
                :work "the task read with its accumulated plan, its references parsed and each resolved, its proofs' forms, the cited sections viewed, similar off: eighteen contracted calls, flat in the wiki"
@@ -185,12 +191,12 @@
         (binding [*conn* conn]
           (cost/proof {:of 'seon.context/parts-of :input 'seon.context-cost-test/turns-of
                        :n "parts refs of the request (one turn's parts each, each drawn at its own commit)"
-                       :work "one page drawn a ref (the walk of the agent's record at that commit), every commit once; 488 calls a ref since the layout places the cites from ctx (seon.render.ui/page-cites, its stubs filled from where ctx holds them: the cites' joins are the pull's, where the draw used to query them), 480 before"
+                       :work "one page drawn a ref (the walk of the agent's record at that commit), every commit once; 488 calls a ref since the layout places the cites from ctx (seon.render.ui/page-cites, its stubs filled from where ctx holds them: the cites' joins are the pull's, where the draw used to query them), 480 before; 516 since the task part and the status read the pulled task (seon.render.ui/task-model, seon.context/task-of: the accumulated plan over the joined needs), 1.36 MB -> 1.23 MB a ref"
                        :growth :linear
                        ;; measured 2026-10-28 (a plan and a run a page): 2.68 MB / 433 calls at 1, 9.51 MB / 881 at 2,
                        ;; 23.2 MB / 1,777 at 4, 50.7 MB / 3,569 at 8; before the pages map (every page drawn twice):
                        ;; 11.0 MB / 1,195 at 2, 27.7 MB / 2,719 at 4, 61.2 MB / 5,767 at 8 (762 calls a page, not 448)
-                       :per-n {:bytes 6800000 :calls 488}
+                       :per-n {:bytes 6800000 :calls 516}
                        :fixed {:bytes 500000 :calls 50}
                        :sizes [1 2 4 8]}))))))
 
