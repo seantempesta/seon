@@ -911,3 +911,15 @@
     (is (zero? (seon.lib/c-kill pid 0)) "the child is running")
     (server/server-step {:children #{pid} :status-buf (jolt.ffi/alloc 4)} ::flow/stop)
     (is (= -1 (seon.lib/c-kill pid 0)) "and gone when the stop answers: killed and reaped")))
+
+(deftest an-agents-memory-alone-moves-no-main
+  ;; root wrote :seon.process/mem-mb on every change, so main moved five times under three reads of a
+  ;; working agent (seon.server-test/a-later-read-draws-no-page-cold-and-costs-what-the-one-before-did)
+  (let [st {:boot "b1" :agents {} :pending {} :rid 0 :view {:agents {:a1 {:status :busy :pid 7 :mem-mb 151.66}}}}
+        o (volatile! {})
+        writes #(:to-writer @o)
+        rec (fn [st before] (vreset! o {}) (#'root/record-agents st o before) (writes))]
+    (is (empty? (rec (assoc-in st [:view :agents :a1 :mem-mb] 152.42) (get-in st [:view :agents])))
+        "memory alone writes nothing")
+    (let [[w] (rec (update-in st [:view :agents :a1] assoc :status :idle :mem-mb 152.42) (get-in st [:view :agents]))]
+      (is (some #(= 152.42 (:seon.process/mem-mb %)) (:tx-data w)) "it goes with the agent's next other change"))))
