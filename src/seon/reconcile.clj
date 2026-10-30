@@ -1031,7 +1031,7 @@
       ;; the gate's candidate is the writer's: the files the octopus merge would write (seon.writer's :merge-candidate),
       ;; forms', tests' and schema resources' alike (md-scan 29: a :seon.ref/block change left out met its new
       ;; seon.ref/scan in the checkout, and the seed threw on scan's contract). A refused candidate is the gate's
-      ;; answer, each deferred test :error with the refusal: no files would test main as it is and vouch for nothing
+      ;; answer, each deferred test :error with why it was refused: no files would test main as it is and vouch for nothing
       :gate-read (if (contract/error? r)
                    (one (write st aid :done (err/asked-tx (:db st) r :seon.run/deferred-results
                                                           [{:seon.run/id aid
