@@ -392,11 +392,18 @@
   "The tx-data merging src's changes since base for program keys ks onto db onto: the
   Datahike declarations of the attributes its datoms use that onto lacks (attribute-declarations),
   then the datoms src wrote, as they are (carried-tx), and the declarations a merged schema
-  entry's population needs on onto (as a registration installs them)."
+  entry's population needs on onto (as a registration installs them). An entity whose identity
+  src retracted is retracted whole on onto, so no fact onto wrote of it (a test's results) stays
+  on a nameless entity (docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db [:sequential :seon.merge/program-key] :seon.merge/data-attrs] :seon.db/tx-data]}
   [onto base src ks data-attrs]
   (let [carried (own-namespaces onto src (carried-tx base src ks data-attrs))
-        tx (into (attribute-declarations onto carried) carried)]
+        unique? #(= :db.unique/identity (get-in (d/schema src) [% :db/unique]))
+        named (into #{} (keep #(when (and (:added %) (unique? (:a %))) (:e %))) carried)
+        gone (into [] (comp (keep #(when (and (not (:added %)) (unique? (:a %)) (not (named (:e %)))) (:e %))) (distinct)
+                            (map #(vector :db/retractEntity %)))
+                   carried)
+        tx (-> (attribute-declarations onto carried) (into carried) (into gone))]
     (if (some #(= :schema (first %)) ks)
       (into tx (program/schema-declarations onto (program/schema-registry (program/schema-changes (d/db-with onto tx)))))
       tx)))

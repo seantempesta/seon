@@ -107,6 +107,18 @@
     (is (not (program/live? main' (pdb/eid main' :form/id (fid "g" "x")))) "the form is dead on main, as on the branch")
     (is (= [:deleted-by-us] (map :kind (filter #(= :var (first (:key %))) (:conflicts (tw ours (with (base) (var-tx "g" "(dec x)"))))))))))
 
+;; docs/merging.md#a-branch-merges-main-in: md-scan 29's branch held the results of a test main deleted,
+;; on an entity with no :var/name, and its next test run threw on the nil test key
+(deftest a-var-main-deletes-leaves-no-facts-on-the-branch
+  (let [e #(:db/id (d/entity % [:var/name 'app/g]))
+        ours (with (base) (fn [db] [{:db/id (e db) :seon.test/digest "d1" :seon.test/status :green :seon.test/runs 1}]))
+        theirs (with (base) (fn [db] [[:db/retractEntity (e db)]]))
+        r (tw (base) theirs)
+        merged (d/db-with ours (pm/merge-tx ours (base) theirs (:apply r) #{}))]
+    (is (nil? (d/entity merged [:var/name 'app/g])) "the var is gone, as on main")
+    (is (empty? (d/q '[:find ?t :where [?t :seon.test/digest] (not [?t :var/name])] merged))
+        "no test facts stay on an entity whose name main retracted")))
+
 (deftest latest-redefinition-wins
   (let [ours (with (base) (var-tx "f" "1") (var-tx "f" "2") (var-tx "f" "3"))]
     (is (= (fid "f" "3") (:form (second (get (:ours (tw ours (base))) (vk "f"))))))

@@ -1,5 +1,1 @@
-[{:seon.task/name "vectors-clean-is-a-commit"
-  :seon.task/plan "What exists: `seon.vector/round` keeps :clean, the db at which everything due was asked, so the next round embeds only `seon.vector/written` between it and main (a datoms-diff); under churn it pins a stale version, and the :embedded ask carries a db too. Correct: :clean and the :embedded ask keep {:t :commit}, and round makes the base with d/commit-as-db before `written` (the diff reads the same nodes). Replaces the db values in the proc's state with references (AGENTS section 4). Cost: one more call per round; `seon.vector-cost-test/a-commit-is-embedded-for-what-it-changed` moves by the measured delta."
-  :seon.task/kind :work
-  :seon.task/needs #{"seon.writer/main-notices-carry-a-commit-not-a-db"}
-  :seon.task/proofs #{seon.vector-cost-test/a-commit-is-embedded-for-what-it-changed seon.vector-test/a-caught-up-round-diffs-from-its-clean-commit}}]
+[]
