@@ -8,7 +8,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.lib :as lib] [seon.context :as context] [seon.source :as source]
             [seon.reader :as reader] [seon.docs :as docs] [seon.step :as step] [seon.ref :as ref] [seon.edn :as sedn] [seon.config :as config]
-            [datahike.api :as d]))
+            [seon.task :as task] [seon.program :as program] [seon.db :as pdb] [datahike.api :as d]))
 
 (defn request
   "Task t's first-turn model request on db, as seon.turn/act! sends it at turn 0: the
@@ -32,15 +32,16 @@
   [req] (lib/digest (sedn/encode req)))
 
 (defn subject
-  "What task t's first move is judged against, from its text on db: the vars its plan and
-  instructions cite (:cited), those whose source the context shows (:shown, cited at code
-  depth), its proofs, and the namespace a reply is read in (its first proof's)."
+  "What task t's first move is judged against, from its text on db: the program's vars among its cites
+  (:cited, seon.task/cites-of and seon.program/program-names), those whose source the context shows (:shown,
+  cited at code depth), its proofs, and the namespace a reply is read in (its first proof's)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/task]
                   [:map [:cited [:set :qualified-symbol]] [:shown [:set :qualified-symbol]] [:proofs [:set :qualified-symbol]] [:ns :symbol]]]}
   [db t]
   (let [cs (ref/references db (str (:seon.task/plan t) "\n" (:seon.task/instructions t)))
         proofs (set (:seon.task/proofs t))]
-    {:cited (set (:seon.task/references t))
+    {:cited (set (program/program-names db (into [] (comp (keep :seon.cite/name) (filter qualified-symbol?))
+                                                  (task/cites-of db (pdb/eid db :seon.task/id (:seon.task/id t))))))
      :shown (into #{} (comp (filter #(= :code (:seon.ref/depth %))) (map :seon.ref/name) (filter qualified-symbol?)) cs)
      :proofs proofs
      :ns (if-let [p (first (sort proofs))] (symbol (namespace p)) (:seon.task/ns t))}))

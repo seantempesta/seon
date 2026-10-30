@@ -464,7 +464,9 @@
            (cond
              (identical? om nm) acc
              ;; a lookup's members follow the attribute it reads; a var's, its definition, evaluated as at any REPL
-             by (let [vs (keep (fn [[k m]] (when-not (or (identical? m (get om k)) (stub? m)) (:var/name m))) nm)]
+             ;; (a one-valued join holds its one member as the node itself)
+             by (let [[nm om] (if (many? db j) [nm om] [{0 nm} {0 om}])
+                      vs (keep (fn [[k m]] (when-not (or (identical? m (get om k)) (stub? m)) (:var/name m))) nm)]
                   (refuse acc path (if (seq vs)
                                      (str "a var changes by its definition, not by swap!: evaluate "
                                           (str/join ", " (for [v vs] (str "(in-ns '" (namespace v) ") (defn " (name v) " ...)")))

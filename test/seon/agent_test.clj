@@ -1767,6 +1767,18 @@
                      (enc {:seon.test/started "#'app.t/b"}) (enc {:seon.test/ended "#'app.t/b" :reports [] :heap 900000})])]
     (is (= {'app.t/a 1200 'app.t/b 900000} (:heap acc)))))
 
+;; docs/references.md#an-entity-cites: an agent is made citing what every agent cites (its own cite entities, written when
+;; root makes it), and changes its own at its REPL; its page draws each as a task's cite is drawn
+(deftest an-agent-cites-what-it-reads-beside-its-task
+  (let [[before added gone] (in-agent ["(mapv :cites (my.agent/uncite! \"docs/none.md\"))"
+                                       "(mapv (juxt :cites :depth) (my.agent/cite! \"docs/agent.md?summary#the-agent\"))"
+                                       "(mapv :cites (my.agent/uncite! \"docs/testing.md\"))"])]
+    (is (= ["docs/testing.md#testing" "docs/references.md#an-entity-cites"] (:value before))
+        (str "made with every agent's, a page whole as its top section: " (pr-str before)))
+    (is (= [["docs/testing.md#testing" :doc] ["docs/references.md#an-entity-cites" :doc] ["docs/agent.md#the-agent" :summary]] (:value added)) (pr-str added))
+    (is (= ["docs/references.md#an-entity-cites" "docs/agent.md#the-agent"] (:value gone))
+        (str "a default it uncites is gone from its own: " (pr-str gone)))))
+
 ;; See docs/merging.md#main-moved-is-said-at-every-eval
 (deftest main-moved-is-said-at-every-eval
   ;; the owner (root, 2026-10-28): "we are supposed to be telling the agent always at every eval reply
