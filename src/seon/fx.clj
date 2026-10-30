@@ -177,6 +177,15 @@
   {:malli/schema [:=> [:cat :int] :string]}
   [pid] (str (cfg/value :seon.config.agent/cwd) "/tests/" pid))
 
+(def ^:private child-env-scrub
+  "The `env -u` argv that gives a child process the tree's own environment (docs/source.md#the-next-generation):
+  bin/env and bin/root export names for this root's checkout, runs and home, and a child inheriting
+  SEON_SOURCE_ROOT listed its test namespaces from that checkout, not the tree it ran in (measured
+  2026-10-27: the first full run's plan named seon.cron-test, a test of the root's working tree that
+  main does not hold, and its shard died at once). Used by build and run-tests."
+  ["env" "-u" "SEON_CHECKOUT" "-u" "JOLT_LMDB_LIB" "-u" "JOLT_PWD" "-u" "HOME"
+   "-u" "SEON_SOURCE_ROOT" "-u" "SEON_RUNS"])
+
 (defn remove-tree!
   "Remove the directory dir and all it holds (`rm -rf`: a symbolic link is removed, never entered).
   Answers nil; a directory that is not there is already removed."
@@ -560,8 +569,7 @@
         from (cfg/checkout)
         dir (str (cfg/value :seon.config.source/generations-dir) "/" commit)
         log (str dir ".build.log")
-        ;; a process of the tree's own: bin/env derives these from the tree it is in
-        clean ["env" "-u" "SEON_CHECKOUT" "-u" "JOLT_LMDB_LIB" "-u" "JOLT_PWD" "-u" "HOME"]
+        clean child-env-scrub
         step (fn [what args]
                (let [r (apply sh/sh "zsh" "-c" "\"$@\" >> \"$0\" 2>&1" log (concat clean args))]
                  (when-not (zero? (:exit r))
@@ -836,12 +844,7 @@
                  (catch Throwable e (error #'seon.fx/run-tests :seon.fx/io-error (step/error-msg e) {:path repo})))
         dir (str (cfg/value :seon.config.source/tests-dir) "/" sha "-" (random-uuid))
         log (str dir ".tests.log")
-        ;; the tree's own environment: what bin/env and bin/root export name this root's checkout,
-        ;; and a runner inheriting SEON_SOURCE_ROOT listed its test namespaces from that checkout, not
-        ;; the tree it ran in (measured 2026-10-27: the first full run's plan named seon.cron-test,
-        ;; a test of the root's working tree that main does not hold, and its shard died at once)
-        clean ["env" "-u" "SEON_CHECKOUT" "-u" "JOLT_LMDB_LIB" "-u" "JOLT_PWD" "-u" "HOME"
-               "-u" "SEON_SOURCE_ROOT" "-u" "SEON_RUNS"]
+        clean child-env-scrub
         at (when-not (contract/error? sha) (sh/sh (str (cfg/checkout) "/bin/worktree") "--at" dir sha repo))]
     (cond
       (contract/error? sha) sha
