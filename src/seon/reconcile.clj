@@ -8,7 +8,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.sock :as sock] [seon.step :as step]
             [seon.task :as task] [seon.proofs :as proofs] [seon.merge :as pm] [seon.program :as program] [seon.source :as source]
-            [datahike.api :as d] [seon.db :as pdb] [clojure.string :as str] [clojure.core.async.flow :as flow] [seon.ref :as ref]
+            [datahike.api :as d] [seon.db :as pdb] [clojure.string :as str] [clojure.core.async.flow :as flow]
             [seon.config :as cfg] [seon.error :as err]))
 
 
@@ -79,17 +79,17 @@
 
 (defn hairy
   "Is a merge too hairy to keep resolving, from measured facts: more conflicts than the
-  config key; main deleted a var the task's plan or proofs reference; more model turns without
-  green than the config key. Answers {:rule :reason} or nil. The merge agent stops early on it;
-  the reconciler decides from the run's facts alone."
+  config key; main deleted a var the task references (refs: its proofs and the names its plan's
+  cites hold, facts its write derived, seon.task/task-cites); more model turns without green than
+  the config key. Answers {:rule :reason} or nil. The merge agent stops early on it; the
+  reconciler decides from the run's facts alone, never re-reading the plan's text with a parser
+  the agent may have changed (docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map)."
   {:malli/schema [:=> [:cat [:map [:conflicts [:sequential [:map [:key :any] [:kind :keyword]]]]
-                             [:task [:map [:seon.task/accumulated [:map [:plan :string] [:proofs :seon.task/proofs]]]]]
+                             [:refs [:set :qualified-symbol]]
                              [:merge-turns :int] [:max-conflicts :int] [:max-merge-turns :int]]]
                   [:maybe [:map [:rule [:enum :too-many-conflicts :deleted-by-them-referenced :merge-turns]] [:reason :string]]]]}
-  [{:keys [conflicts task merge-turns max-conflicts max-merge-turns]}]
-  (let [{:keys [plan proofs]} (:seon.task/accumulated task)
-        refs (into (set proofs) (ref/names plan))
-        deleted (for [{:keys [key kind]} conflicts
+  [{:keys [conflicts refs merge-turns max-conflicts max-merge-turns]}]
+  (let [deleted (for [{:keys [key kind]} conflicts
                       :when (and (= kind :deleted-by-them) (= :var (first key)) (refs (second key)))]
                   (second key))]
     (cond
