@@ -545,6 +545,19 @@
     (is (= {proof :pass reached :pass also :pass} (:value run))
         "the proof and the tests reaching the change ran, green; nothing else ran")))
 
+(deftest a-plan-with-no-base-costs-what-a-plan-with-one-does
+  ;; a plan that selects with no base (mode :main: the test service's run of main, and the tests that run as it
+  ;; does) builds its reach graph from the agent's base as any plan does: built from nothing it allocated 853 MB
+  ;; against an update's 290 (2026-10-30), and a-death-costs-the-test-it-interrupted-and-no-other and
+  ;; a-handful-of-tests-runs-in-one-child went past their eval's 1 GiB byte budget in the full run. Each plan is
+  ;; measured with the branch's held graph let go first, by the bytes this thread allocated
+  (let [[r] (in-agent [(str "(let [bytes (fn [base] (swap! seon.agent/state dissoc :branch-graph)"
+                            "              (let [a (seon.profile/alloc-bytes)] (seon.agent/test-plan (seon.agent/db) base #{}) (- (seon.profile/alloc-bytes) a)))"
+                            "      with (bytes (:base @seon.agent/state)) without (bytes nil)]"
+                            "  {:with with :without without :ratio (double (/ without with))})")])
+        v (:value r)]
+    (is (and (map? v) (< (:ratio v) 1.5)) (str "no base costs about what a base does: " (pr-str v)))))
+
 (deftest a-death-costs-the-test-it-interrupted-and-no-other
   ;; task seon.agent/a-test-run-streams-its-reports: the test child wrote the run's one result
   ;; line at its end, so a death anywhere lost every report before it (the test service's run of

@@ -678,7 +678,10 @@
   ([db base proofs main]
   (let [[_ in] (test-inputs db)
         b (when base (base-graph base in))
-        g (branch-graph db base in)
+        ;; the reach graph is always the agent's base's updated to db, whether or not the selection has a base:
+        ;; built from nothing it cost 853 MB of a 1 GiB eval budget where an update costs 290 (a plan of main's
+        ;; run, mode :main, selects with no base; measured 2026-10-30, 1,169 tests)
+        g (branch-graph db (or base (:base @state)) in)
         g (program/reach-indexed g in)
         idx (into {} (filter (comp judges? key)) (program/index-of g))
         cd (update-vals idx :digest)
