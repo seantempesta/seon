@@ -351,7 +351,7 @@
   of a file (missing or empty gives nil) or an InputStream read to its end (a child's stderr).
   A cut says how many earlier bytes it left out. The one reader of a process's stderr for a death
   record, an error's evidence and a stall's fiber dump (docs/failure-points.md#failure-points-met-without-a-catch-the-edge-answers-data)."
-  {:malli/schema [:=> [:cat [:maybe [:or :string [:fn #(instance? java.io.InputStream %)]]] pos-int?] [:maybe :string]]}
+  {:malli/schema [:=> [:cat [:maybe :any] pos-int?] [:maybe :string]]}
   [src n]
   (let [f (when (string? src) (java.io.File. ^String src))
         len (cond f (if (.exists f) (.length f) 0) :else 0)
