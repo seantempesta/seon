@@ -71,7 +71,37 @@ It is re-frame's model, which is Reagent's, which is React's memo, proven in pro
 
 ## Reactive renders
 
-A render reads ctx as Reagent's components read a ratom: ```seon.ratom``` is reagent.ratom ported (`RAtom`, `Reaction`, `run-in-reaction`, `flush!`, `dispose!`; Reagent's own tests, `seon.ratom-test`), with the cursor inferred (owner, 2026-10-26: "I'd rather infer the cursor than require it"). A render declaring `:seon.ctx/ctx` gets a tracking view of ctx: a map that delegates to the real value and records each path it looks up, a map's presence (shallow), a value read whole (deep), or a node iterated (its key set and direct values), as Vue 3's reactive proxy and MobX's observable map do. The printer and the page's writer take the real value (```seon.ratom/unwrap```, ```seon.ratom/realize```), each such read whole. A source read through views has one watch: its reset! (ctx's patch) runs its diff once (```seon.ctx/changes```) and reaches only the reactions whose read paths a changed path reaches, by index (```seon.ratom/source-changed```). Reagent's scheduler (requestAnimationFrame) is the commit on the server: the queued reactions run at a non-reactive deref and once a frame. `seon.ratom-test/inferred-paths`, `a-view-is-a-map`.
+Your page and your model's context are renders of `@ctx`, and a render runs again only when a path it read changes: read the narrowest path you need, and give each member of a list its own component, so a change redraws what it reached and nothing else. Try a render over your record with `my.agent/draw`, then ask `seon.render/frame!` what a change redrew.
+
+**Writing one.** A render is a function `[opts & args]` answering hiccup; it is a component when its opts contract names `:seon.ctx/ctx` (it reads ctx) or `:seon.db/db` (it queries the branch's db), and the walk fills those keys in. A call `[#'f {} arg]` in a render's hiccup draws f there as a component of its own, keyed by f and its args (its root element's id is that key, `seon.render/key-id`, whatever id you gave it):
+
+```clojure
+(defn row "An eval's code." {:malli/schema [:=> [:cat [:map [:seon.ctx/ctx :map]] :int] :any]}
+  [{c :seon.ctx/ctx} id] [:li (get-in c [:evals id :seon.eval/record :code])])
+(defn page "The plan, then a row for each eval." {:malli/schema [:=> [:cat [:map [:seon.ctx/ctx :map]]] :any]}
+  [{c :seon.ctx/ctx}] [:div [:p (get-in c [:task :seon.task/plan])] (into [:ol] (for [id (keys (:evals c))] [#'row {} id]))])
+(def w (draw #'page))              ; drawn over your record, live
+(seon.render/resolved w)           ; its hiccup, every component in place
+;; next eval:
+(seon.render/frame! w nil)         ; => {[agent.a1/row 7053] :miss, [agent.a1/page] :miss}: the last eval's row, and the page, whose list grew
+(def rec (seon.ratom/atom @ctx))   ; a copy of your record: change it freely, nothing is written
+(def c (draw rec #'page))
+(do (swap! rec assoc-in [:task :seon.task/plan] "ship it") (seon.render/frame! c nil))   ; => {[agent.a1/page] :miss}: its rows skipped
+(seon.render/dispose-walk! w) (seon.render/dispose-walk! c)
+```
+
+Over `ctx` the draw is live: your next eval, or a `swap! ctx`, redraws what it reached; a `swap!` answers the whole record, so take the frame in the same form. A path that names nothing reads `nil` and draws it, with no error: check a render's hiccup once. A frame answers each component it ran, `:miss` when its output is new and `:same` when it ran and answered what it did before (which passes nothing on: its parent and the page are untouched); a component it skipped is not named. A render that throws draws its error in its place, a `:seon.render/component-defect` naming the render and the message, and every other component draws. To change your own page, register your render as the layout or one of its parts ([ctx](ctx.md#the-record-is-the-agents-work), [adding a datum and its render](ctx.md#adding-a-datum-and-its-render)). `seon.render-test/a-frame-answers-what-it-redrew`.
+
+**What a read costs**, measured in that test and in `seon.ratom-test/inferred-paths`: a render runs again when a change reaches what it read.
+- `(get-in c [:task :seon.task/plan])`, `(:k m)`: that value changed, or something above it was replaced.
+- `(contains? m :k)`, `(get m :k nf)`: the same as reading the value; a key's presence is not cheaper.
+- `(count m)`, `(keys m)`, `(seq m)` of a collection: a member added, removed or replaced, never a change inside a member.
+- `(for [[id e] evals] (:code (:seon.eval/record e)))`: any member's record; the same list with `[#'row {} id]` runs only the row whose eval changed.
+- `seon.ratom/unwrap`, `seon.ratom/realize`, printing a value: anything below it.
+
+ctx's diff (`seon.ctx/changes`) is by entity: a map holding `:db/id` is diffed key by key, and any other map is one value, replaced whole, so everything that read inside it runs again. `@ctx` is entities throughout; an atom you build by hand needs `:db/id` on its maps to be read as one. A db render (`:seon.db/db`) is run under `d/with-reads` and runs again when a transaction's datoms touch the ranges it read: pass those datoms to `frame!` (`seon.context-test/a-db-component-runs-again-on-what-it-read`).
+
+**How it works.** ```seon.ratom``` is reagent.ratom ported (`RAtom`, `Reaction`, `run-in-reaction`, `flush!`, `dispose!`; Reagent's own tests, `seon.ratom-test`), with the cursor inferred (owner, 2026-10-26: "I'd rather infer the cursor than require it"). A render declaring `:seon.ctx/ctx` gets a tracking view of ctx: a map that delegates to the real value and records each path it looks up, a map's presence (shallow, reached by a change at or above its path), a value read whole (deep, reached by a change at, above or below it), or a node iterated (its key set and direct values), as Vue 3's reactive proxy and MobX's observable map do. The printer and the page's writer take the real value (`seon.ratom/unwrap`, `seon.ratom/realize`), each such read whole. A source read through views has one watch: its reset! (ctx's patch) runs its diff once (`seon.ctx/changes`) and reaches only the reactions whose read paths a changed path reaches, by index (`seon.ratom/source-changed`). Reagent's scheduler (requestAnimationFrame) is the commit on the server: the queued reactions run at a non-reactive deref and once a frame (`seon.render/frame!`). `seon.ratom-test/inferred-paths`, `a-view-is-a-map`.
 
 The frame is the one part with no value behind it: the document (`seon.web/page-doc`), its head and scripts (`seon.render.ui/shell`). It is fixed hiccup, the same on every page, served once with the page.
 

@@ -1158,21 +1158,65 @@
   ;; Reagent's rule with the cursor inferred: a change re-runs only the components whose read paths
   ;; it reaches; every other is not visited, and a re-run whose output is = sends nothing
   (let [[w a branch] (live-walk)
-        e1 (seon.db/eid branch :seon.eval/id "e1")
-        ran #(into {} (for [[f c] (r/ledger w) :when (or (:miss c) (:same c))] [(name f) (+ (:miss c 0) (:same c 0))]))]
-    (vreset! (:ledger w) {})
+        e1 (seon.db/eid branch :seon.eval/id "e1")]
     (swap! a assoc-in [:evals e1 :seon.eval/opened] true)
-    (r/frame! w nil)
-    (is (= {"eval-item" 1} (ran)) "an eval opened: that eval's component alone runs, its list's layout does not")
-    (vreset! (:ledger w) {})
+    (is (= {[`ui/eval-item e1] :miss} (r/frame! w nil)) "an eval opened: that eval's component alone runs, its list's layout does not")
     (swap! a assoc :t 99)
-    (r/frame! w nil)
-    (is (= {} (ran)) "a change no component read: nothing runs")
-    (vreset! (:ledger w) {})
+    (is (= {} (r/frame! w nil)) "a change no component read: nothing runs")
     (swap! a assoc-in [:evals e1 :seon.eval/opened] true)
-    (r/frame! w nil)
-    (is (= {} (ran)) "the same value again: nothing runs")
+    (is (= {} (r/frame! w nil)) "the same value again: nothing runs")
     (r/dispose-walk! w)))
+
+(defn lab-row
+  "An eval's code: a component over ctx (docs/render.md#reactive-renders)."
+  {:malli/schema [:=> [:cat [:map [:seon.ctx/ctx :map]] :int] :any]}
+  [{c :seon.ctx/ctx} id] [:li (get-in c [:evals id :seon.eval/record :code])])
+
+(defn lab-length
+  "An eval's code by its length."
+  {:malli/schema [:=> [:cat [:map [:seon.ctx/ctx :map]] :int] :any]}
+  [{c :seon.ctx/ctx} id] [:li (count (get-in c [:evals id :seon.eval/record :code]))])
+
+(defn lab-page
+  "The task's plan, then a row for each eval, each its own component."
+  {:malli/schema [:=> [:cat [:map [:seon.ctx/ctx :map]]] :any]}
+  [{c :seon.ctx/ctx}]
+  [:div [:p (get-in c [:task :seon.task/plan])]
+   (into [:ol] (for [id (keys (:evals c))] [#'lab-row {} id]))
+   (into [:ol] (for [id (keys (:evals c))] [#'lab-length {} id]))])
+
+(defn lab-inline
+  "The task's plan and every eval's code, read in this one render."
+  {:malli/schema [:=> [:cat [:map [:seon.ctx/ctx :map]]] :any]}
+  [{c :seon.ctx/ctx}]
+  [:div [:p (get-in c [:task :seon.task/plan])] (into [:ol] (for [[_ e] (:evals c)] [:li (:code (:seon.eval/record e))]))])
+
+(deftest a-frame-answers-what-it-redrew
+  ;; docs/render.md#reactive-renders, the agent's view: a render drawn over a reference the caller holds
+  ;; (a copy of a record, changed freely), each frame answering the components it ran, by key, new
+  ;; or the same output; the page whole its hiccup
+  (let [rec (seon.ratom/atom {:db/id 1 :t 5 :task {:db/id 2 :seon.task/plan "write the test"}
+                              :evals (#'seon.ctx/members-map [[12 {:db/id 12 :seon.eval/record {:code "(+ 1 2)"}}]
+                                                             [11 {:db/id 11 :seon.eval/record {:code "(inc 1)"}}]])})
+        w (my.agent/draw rec #'lab-page)
+        inline (r/draw rec seon.ctx/changes (ts/test-db) #'lab-inline)
+        both #(vector (r/frame! w nil) (r/frame! inline nil))]
+    (is (= [:div {:id "lab-page" :class "lab-page"} [:p "write the test"]
+            [:ol [:li {:id "lab-row-12" :class "lab-row"} "(+ 1 2)"] [:li {:id "lab-row-11" :class "lab-row"} "(inc 1)"]]
+            [:ol [:li {:id "lab-length-12" :class "lab-length"} 7] [:li {:id "lab-length-11" :class "lab-length"} 7]]]
+           (r/resolved w))
+        "the page whole, each component's root its key")
+    (swap! rec assoc-in [:evals 12 :seon.eval/record :code] "(+ 1 5)")
+    (is (= [{[`lab-row 12] :miss [`lab-length 12] :same} {[`lab-inline] :miss}] (both))
+        "a member's change: its own rows, the length row the same; the inline render whole")
+    (swap! rec assoc-in [:task :seon.task/plan] "ship it")
+    (is (= [{[`lab-page] :miss} {[`lab-inline] :miss}] (both)) "the plan: the page, its rows skipped")
+    (swap! rec assoc-in [:evals 13] {:db/id 13 :seon.eval/record {:code "(dec 1)"}})
+    (is (= [{[`lab-page] :miss [`lab-row 13] :miss [`lab-length 13] :miss} {[`lab-inline] :miss}] (both))
+        "a member added: the page, and the new member's rows")
+    (swap! rec assoc :t 6)
+    (is (= [{} {}] (both)) "a key no render read: nothing")
+    (r/dispose-walk! w) (r/dispose-walk! inline)))
 
 (deftest a-change-below-a-unit-moves-its-revision
   ;; a component placed in a list is a unit; one nested in it (a key the agent added, under ctx-keys)

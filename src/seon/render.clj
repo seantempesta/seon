@@ -333,6 +333,7 @@
         (vswap! (:queue w) disj k)
         (doseq [c (:children prev) :when (not (some #{c} children))] (unmount! w c))
         (led! w f (if same? :same :miss) nil bytes)
+        (some-> (:ran env) (vswap! assoc k (if same? :same :miss)))
         ;; merged: its written html (placed-units) stays while its revision does
         (vswap! (:cache w) update k merge {:f f :opts opts :args args :rx rx :out (if same? (:out prev) out) :children children
                                     :order order :id id :rev (if same? (:rev prev) (inc (:rev prev 0))) :data @data
@@ -391,8 +392,10 @@
 
 (defn resolved
   "Component k's output in walk w with every child's marker replaced by that child's output: the
-  page's hiccup below k. With html? true each component as the page writes it (styled)."
-  {:malli/schema [:function [:=> [:cat :map [:vector :any]] :any] [:=> [:cat :map [:vector :any] :boolean] :any]]}
+  page's hiccup below k, and with no k the page whole. With html? true each component as the page
+  writes it (styled)."
+  {:malli/schema [:function [:=> [:cat :map] :any] [:=> [:cat :map [:vector :any]] :any] [:=> [:cat :map [:vector :any] :boolean] :any]]}
+  ([w] (resolved w @(:out w) false))
   ([w k] (resolved w k false))
   ([w k html?]
    (let [c (get @(:cache w) k)]
@@ -402,10 +405,12 @@
 (defn frame!
   "Walk w drawn as of now: its root on the first frame, then each component a change queued (a
   reaction's, after seon.ratom/flush!: Reagent's batching, one frame a commit) or whose db reads
-  datoms touch, in mount order, parents first. Answers the root's key."
-  {:malli/schema [:=> [:cat :map [:maybe [:sequential :any]]] [:vector :any]]}
+  datoms touch, in mount order, parents first. Answers what it ran, {key :miss} for an output new
+  and {key :same} for one = to the last, the components it skipped left out ({} when nothing a
+  render read changed). See docs/render.md#reactive-renders."
+  {:malli/schema [:=> [:cat :map [:maybe [:sequential :any]]] [:map-of [:vector :any] [:enum :miss :same]]]}
   [w datoms]
-  (let [env {:children (volatile! []) :datoms datoms :only (:only w)}]
+  (let [env {:children (volatile! []) :datoms datoms :only (:only w) :ran (volatile! {})}]
     (if-let [root @(:out w)]
       (do (ratom/flush!)
           (when (seq datoms)
@@ -415,10 +420,10 @@
             (when-let [k (first (sort-by #(:order (get @(:cache w) %)) (filter #(contains? @(:cache w) %) @(:queue w))))]
               (let [{:keys [f opts args]} (get @(:cache w) k)] (render! w f opts args (assoc env :children (volatile! []))))
               (recur)))
-          root)
+          @(:ran env))
       (let [[f opts & children] (:root w) [_ k] (render! w f (or opts {}) (vec children) env)]
         (vreset! (:out w) k)
-        k))))
+        @(:ran env)))))
 
 (defn- tree-rev
   "Component k's revision with its children's, below it: what moves when anything it shows changed
@@ -495,18 +500,20 @@
                [(:seon.render/schema (meta d)) d]))))
 
 (defn draw
-  "Tree t (a ctx value: seon.ctx/build's :tree) drawn once by the layout var root-var over db, its
-  diff changes: a walker over a reactive atom holding t, framed. Its caller reads it
+  "Tree t (a ctx value: seon.ctx/build's :tree), or a reference holding one (a seon.ratom/atom the
+  caller changes, each change drawn at its next frame!), drawn once by the layout var root-var
+  over db, its diff changes: a walker over that reference, framed. Its caller reads it
   (placed-units, placed-hiccup) and disposes it (dispose-walk!): root drawing an agent's branch, the
   model's page at a commit. With sels, the element ids of the lists its caller reads ([\"#p-task\"]),
   only those lists are drawn: the layout's outer element is, and of the elements inside it the ones with an
   id that is none of sels are neither rendered nor placed (the layout's lists are its outer element's
   children), so a read of one list costs that list, not the page (docs/render.md#the-page-is-sent-as-what-changed)."
-  {:malli/schema [:function [:=> [:cat :map :seon.host/fn :seon.host/db :any] :map]
-                  [:=> [:cat :map :seon.host/fn :seon.host/db :any [:sequential :string]] :map]]}
+  {:malli/schema [:function [:=> [:cat [:or :map :seon.host/deref] :seon.host/fn :seon.host/db :any] :map]
+                  [:=> [:cat [:or :map :seon.host/deref] :seon.host/fn :seon.host/db :any [:sequential :string]] :map]]}
   ([t changes db root-var] (draw t changes db root-var nil))
   ([t changes db root-var sels]
-   (let [w (cond-> (walker {:ref (ratom/atom t) :changes changes} (constantly db) [root-var {}]) (seq sels) (assoc :only (set sels)))]
+   (let [ref (if (map? t) (ratom/atom t) t)
+         w (cond-> (walker {:ref ref :changes changes} (constantly db) [root-var {}]) (seq sels) (assoc :only (set sels)))]
      (frame! w nil)
      w)))
 
