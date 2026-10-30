@@ -826,7 +826,8 @@
   detached worktree of repo at branch's head (bin/worktree --at, as a generation's), files
   ({relative path text}, the candidate's changed files) written over it, then the runner
   (test-command) over exactly the tests named there, niced, in that tree's own environment;
-  the worktree removed after. Answers {:value {:results {test status} :ms :log}}, or
+  the worktree removed after (its run's logs kept beside its log when it is not all green). The tree's
+  binary is built first (bin/build seon), so its process tests run this candidate. Answers {:value {:results {test status} :ms :log}}, or
   :seon.fx/io-error naming the step and its log. With :all? (the daily full run, seon.prove's
   :full mode) the runner is full-run-command, tests are every test the plan names, and the answer
   also holds :digests {test digest} and :failures {test [failure ...]} of its reds (the
@@ -856,11 +857,12 @@
       :else
       (try
         (doseq [[p text] files] (let [f (java.io.File. dir p)] (.mkdirs (.getParentFile f)) (spit f text)))
-        ;; the full run runs every process test, so the binary is built from this tree first: the
-        ;; worktree's target/ is a clone of another tree's, and its binary that tree's (measured
-        ;; 2026-10-27: the first daily run's process tests ran on a stale one, red for that alone)
-        (let [b (when all? (apply sh/sh (concat clean ["nice" "-n" "15" "bin/build" "seon"] [:dir dir])))]
-          (if (and b (not (zero? (:exit b))))
+        ;; process tests run this tree's binary, so it is built from this tree first, the gate's
+        ;; as the full run's: the worktree's target/ is a clone of another tree's, and its binary
+        ;; that tree's (measured 2026-10-27: the first daily run's process tests ran on a stale one,
+        ;; red for that alone); bin/build skips it when the tree matches, else ~20 s
+        (let [b (apply sh/sh (concat clean ["nice" "-n" "15" "bin/build" "seon"] [:dir dir]))]
+          (if (not (zero? (:exit b)))
             (do (spit log (str (:out b) (:err b)))
                 (error #'seon.fx/run-tests :seon.fx/io-error (str "bin/build seon exited " (:exit b) "; its log: " log) {:path dir}))
             ;; the tree's shards cache their verdicts in this checkout's verdict cache, named to them,
