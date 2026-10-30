@@ -520,7 +520,7 @@
         touched (fn [db tx-data] (#'p/touched st (:tx-data (d/with db tx-data))))
         ;; an entity of main the page did not read, a form of the example program (ids from separate
         ;; speculative d/with calls can repeat in a test; on a store they are issued once); not a
-        ;; namespace: related reads every namespace's file (seon.program/program-nss)
+        ;; namespace: a page part reads every namespace's file (seon.program/program-nss)
         unread (first (remove #(contains? (get-in st [:views [:chat :a3] :reads]) [:e %]) (d/q '[:find [?e ...] :where [?e :form/id]] main)))]
     (is (some? unread) "a form the page did not read")
     (is (seq (get-in st [:views [:chat :a3] :reads])) "the page holds what it read")
@@ -1050,8 +1050,8 @@
     ;; a cited var is a component of its own when the db holds it (ctx joins the task's references by
     ;; :var/name: seon.context-test/a-cited-var-redefined-shows-in-the-next-view); this db holds none
     (is (= [(str "task-data-" rid) (str "cited-" rid "-seon.render_2Fhtml") (str "cited-" rid "-seon.print") (str "cited-" rid "-docs_2Frender.md")
-            (str "namespaces-" rid) (str "related-" rid) (str "status-" rid) (str "run-head-" rid) (str "own-problems-" rid)] (mapv :id task))
-        "the task, each thing its plan cites (a part each), the namespaces it touches, what is related, how the work stands, the agent's turn, its open problems (the proof it fails; none open draws nothing) (and the keys the agent added, when it added one): each keyed by what it shows")
+            (str "namespaces-" rid) (str "status-" rid) (str "run-head-" rid) (str "own-problems-" rid)] (mapv :id task))
+        "the task, each thing its plan cites (a part each), the namespaces it touches, how the work stands, the agent's turn, its open problems (the proof it fails; none open draws nothing) (and the keys the agent added, when it added one): each keyed by what it shows")
     (let [h (:html (unit-of task "status-"))]
       (is (str/includes? h "demo/f-test") "each proof as its var entity holds its verdict, (my.task/status)'s")
       (is (str/includes? h "text-error") "the failing proof's verdict is the status's mark")
@@ -1059,7 +1059,6 @@
     (let [h (:html (unit-of task "task-data-"))]
       (is (str/includes? h "demo/f") "drawn by task-data")
       (is (str/includes? h "to-prove") "as the task's data, drawn from the db when it is drawn"))
-    (is (str/includes? (:html (unit-of task "related-")) "nothing related yet") "related, drawn from the db: none yet here")
     (is (= [(str "chat-ask-" rid) (str "chat-start-" rid)
             (str "chat-message-" rid "-" (eid :seon.message/id "m-1")) (str "eval-item-" (eid :seon.eval/id "e1")) (str "eval-item-" (eid :seon.eval/id "e2"))
             (str "chat-turn-" rid "-" (eid :seon.turn/id "demo/f#1/0")) (str "eval-item-" (eid :seon.eval/id "e3")) (str "chat-turn-" rid "-" (eid :seon.turn/id "demo/f#1/1"))
