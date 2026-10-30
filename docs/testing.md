@@ -21,7 +21,8 @@ store, where the world costs about a millisecond and nothing (the owner, 2026-10
 1. **`(t/world)`**: the base world, a db value. It already holds a program (`app.calc`: `add`,
    `inc2`, `total`, the macro `twice`; `app.report/line`, which calls `app.calc/total`), its tests
    (`app.calc-test`), a wiki page (`docs/calc.md`, citing them) and a task
-   (`app.calc/total-is-exact`). Use these before adding your own.
+   (`app.calc/total-is-exact`). Use these before adding your own. `(t/world {:history? true})` is
+   the same world on a db that keeps history, for a test that reads `d/history` or `d/as-of`.
 2. **`(t/with db fixture ...)`**: db with each fixture added, in order. A value: nothing is written,
    and the world is left as it was. Most tests need only this.
 3. **The fixtures** (each answers a fixture you pass to `with`):

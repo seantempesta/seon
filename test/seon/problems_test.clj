@@ -9,22 +9,10 @@
             [seon.reconcile :as rec] [seon.sock :as sock]
             [seon.render :as render] [konserve.jolt.fasl] [clojure.set] [clojure.string :as str] [seon.source] [seon.fx :as fx] [seon.model :as model] [clojure.data.json] [seon.problems :as problems] [seon.task] [seon.template] [seon.cost :as cost] [seon.docs]))
 
-(def ^:private the-world
-  (delay (t/with (datahike.core/empty-db (into {} (map (juxt :db/ident #(dissoc % :db/ident))) pdb/schema)
-                                         {:keep-history? true :schema-flexibility :write})
-                 (t/code 'app.calc (str "(ns app.calc \"Arithmetic the examples use.\")\n\n"
-                                        "(defn add \"x plus y.\" {:malli/schema [:=> [:cat :int :int] :int]} [x y] (+ x y))\n\n"
-                                        "(defn inc2 \"x plus two.\" [x] (add x 2))\n\n"
-                                        "(defn total \"The sum of xs.\" [xs] (reduce add 0 xs))\n"))
-                 (t/code 'app.report (str "(ns app.report \"Reports over app.calc.\" (:require [app.calc :as calc]))\n\n"
-                                          "(defn line \"One line naming n and its total.\" [n xs] (str n \": \" (calc/total xs)))\n")))))
-
 (defn- world
-  "A small program (two namespaces, four vars, no page, no test, no task) on a db that keeps history, the world of
-  these tests (docs/testing.md#testing-in-the-world). It is my.test's world less its page, tests and task, which
-  a test here cites or counts, and with history: stale sections are read from d/history (seon.problems/stale-sections),
-  which a db without temporal indexes refuses."
-  [] @the-world)
+  "The world these tests run on: my.test's, keeping history, since stale sections are read from d/history
+  (seon.problems/stale-sections), which a db without temporal indexes refuses (docs/testing.md#testing-in-the-world)."
+  [] (t/world {:history? true}))
 
 (defn- invalid [op v]
   (contract/error :seon.instrument/contract-error op (str op " invalid-input: its arguments do not satisfy its contract")

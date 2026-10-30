@@ -19,6 +19,10 @@
     {[:seon.message/_agent :as :messages :reverse true] [*]}
     {[:seon.catch-up/_agent :as :catch-ups :limit :seon.config.ctx/window :reverse true] [*]}])
 
+(def ^:private small-window-pattern
+  "run-pattern with a window of 10, not :seon.config.ctx/window's 100, so a short session moves its windows."
+  (walk/postwalk-replace {:seon.config.ctx/window 10} run-pattern))
+
 (defn- end-agent!
   "The agent state ended as a test leaves it: the walk of its render (seon.repl/render-ctx holds one
   in the state, reactions on @ctx that run at every write of it) disposed, then the state reset. A
@@ -214,8 +218,8 @@
 
 (deftest ctx-is-the-record-after-every-transaction
   ;; the patch holds what a build holds, its map and its index, after each of 60 changes of a
-  ;; session's kinds (a seeded random choice, so a failure repeats): the map is never a second
-  ;; record of its own
+  ;; session's kinds (a seeded random choice, so a failure repeats), on windows of 10 so a session of 30
+  ;; moves them: the map is never a second record of its own
   (let [r (java.util.Random. 25)]
     (testing "the record holds the session: its evals keyed by id, its runs with their task, turns and messages"
       (let [db (seeded 60) t (:tree (ctx/build db (aid db) :b))]
@@ -226,7 +230,9 @@
           (is (= #{'app.x-test/t0} (get-in t [:runs r1 :task :seon.task/proofs])))
           (is (= 20 (count (get-in t [:runs r1 :turns]))))
           (is (= #{"m20" "m40" "m60"} (set (names (:messages t) :seon.message/id)))))))
-    (loop [db (seeded 30) c (ctx/build db (aid db) :b) i 0 bad [] unshared [] checked 0]
+    (let [db (seeded 30 small-window-pattern)]
+      (is (= 10 (count (:evals (:tree (ctx/build db (aid db) :b))))) "the window holds 10 of 30 evals"))
+    (loop [db (seeded 30 small-window-pattern) c (ctx/build db (aid db) :b) i 0 bad [] unshared [] checked 0]
       (if (= i 60)
         (do (is (empty? bad) (str "the change after which the patch and a build differ: " (first bad)))
             (is (< 1000 checked) (str "the sharing check reads the paths no change touched: " checked))
