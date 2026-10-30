@@ -380,7 +380,8 @@
                      ;; at 1, 80.9 MB / 1,309 at 10, 124.7 MB / 3,729 at 30 (21.8M, 28.7M, 44.3M ticks)
                      :per-n {:bytes 1100000 :calls 70}
                      ;; +3 calls 2026-10-30: seon.merge/content-attr, one contracted call a merge-diff read, was uncontracted
-                     :fixed {:bytes 27000000 :calls 126}
+;; +10 calls: caused asks the :long-form class (seon.problems/long-forms) of the changed vars, its bound read once
+                     :fixed {:bytes 27000000 :calls 136}
                      :sizes [1 10 30]})))))
 
 (def ^:dynamic *conn*
