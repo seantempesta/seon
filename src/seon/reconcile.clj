@@ -784,8 +784,15 @@
                                                                                (= :running (:seon.run/status a)) (assoc :seon.run/end-ms (System/currentTimeMillis) :seon.run/outcome :killed))))]
               [st [o1 o2]])
       ;; refused, dead or its merge refused: the task is held for root, with the evidence
-      :verdict (let [prev (last-verdict (:db st) run)]
-                 (if (= prev (:reasons act))
+      :verdict (let [prev (last-verdict (:db st) run)
+                     ;; behind alone is main moving under the run, not the agent's news: the same count twice is
+                     ;; two different mains (swarm: s9 behind s0's 3 keys, then s1's), so it runs again, merging main
+                     ;; first, until :seon.config.merge/max-behind of the task's runs were judged behind
+                     behind-again? (and (every? #(= :behind (:reason %)) (:reasons act))
+                                        (< (count (d/q '[:find [?r ...] :in $ ?t :where [?r :seon.run/task ?t] [?r :seon.run/behind _]]
+                                                       (:db st) (:db/id (d/entity (:db st) [:seon.task/id (:task act)]))))
+                                           (cfg/value :seon.config.merge/max-behind)))]
+                 (if (and (= prev (:reasons act)) (not behind-again?))
                    ;; told the same again would be no news: root decides
                    (cond-> (one (write st run :done (hold-tx a (str "the same verdict again: " (explain-text (:reasons act))))))
                      (kept? st a) (stop-kept run agent))

@@ -487,11 +487,11 @@
                              hairy (when (and merge? (not (contract/error? s))) (r/hairy (merge merge-cfg {:conflicts (vec (:unmerged s)) :task (:task obs) :merge-turns (:merge-turns st)})))]
                          (cond
                            ;; git's CI after the merge: green on the combined program; merge main again until
-                           ;; it brings nothing new
-                           (and (not no-status?) (empty? reasons) merge?)
+                           ;; it brings nothing new, a work task's run as a merge's, so it ends on main as main is
+                           ;; (a green run that ended behind main's newer merges was judged behind: swarm's s9)
+                           (and (not no-status?) (empty? reasons))
                            (let [m (branch/merge-main!)]
                              (if (and (empty? (:applied m)) (empty? (:conflicts m))) (ended st :green nil nil) [::next st]))
-                           (and (not no-status?) (empty? reasons)) (ended st :green nil nil)
                            ;; the agent's own fail! is its verdict, at the cap too; a wait on the last turn is
                            ;; the budget spent, so the run is :cap, never :waiting (its session parks either way)
                            (= :failed (:outcome stop)) (ended st :failed (:reason stop) nil)

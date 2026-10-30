@@ -1034,6 +1034,7 @@
       ;; and so does a test calling a file reader from its own namespace (slurp, seon.docs/load-dir-tx): each was reused over an edit to the files it judges (web-ui, 2026-10-28)
       (is (contains? moved 'seon.render-test/one-printer-and-no-cut-before-it) "a test slurping a doc takes the tree")
       (is (contains? moved 'seon.docs-test/every-section-of-the-wiki-has-a-lead) "a test loading the wiki takes the tree")
+      (is (contains? moved 'seon.repl-test/the-help-page-runs) "a test reading the wiki through seon.docs/pages takes the tree (it was reused over edits to the help page)")
       (is (< (* 4 (count moved)) (count a)) (str (count moved) " of " (count a) " tests read the checkout's files from their own namespace: a few, not the 286 whose reach reads one"))
       (is (not-any? #(= "seon.root-test" (namespace %)) moved) "a test running the binary takes no tree"))
     (is (not= (step "t1") (step "t2")) "a step reaching a tree reader still takes the tree")))
