@@ -367,7 +367,7 @@
   {:malli/schema [:=> [:cat :map] [:tuple :map :seon.step/outputs]]}
   [st]
   (let [sb (:standby st)
-        alive? (and sb (zero? (lib/kill! (:pid sb) 0)))
+        alive? (and sb (lib/kill! (:pid sb) 0))
         st (do (run! sock/close! (vals (:in-flight st))) (dissoc st :in-flight))]
     (sock/close! (:fd st))
     (some-> (:standby-pending st) drop-standby)
