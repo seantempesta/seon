@@ -1323,12 +1323,12 @@
   ;; the Sonnet review of gate-schema (2026-10-30): :gate-read took the candidate's :text with no check, so a
   ;; writer that refused the candidate sent the gate no files, and it would have tested main as it is
   (let [aid "demo/a-merge#1"
-        refusal (contract/error :seon.root/refused #'seon.reconcile-test/a-refused-merge-candidate-is-the-gates-error "no branch demo/x")
+        refused (contract/error :seon.root/refused #'seon.reconcile-test/a-refused-merge-candidate-is-the-gates-error "no branch demo/x")
         st {:db (ts/test-db) :boot "b1" :rid 0 :pending {} :flights {aid {:act {:op :gate :run aid :tests ['seon.root-test/boots]}}}}
-        [_ outs] (#'r/advance st aid :gate-read refusal)
+        [_ outs] (#'r/advance st aid :gate-read refused)
         reqs (map :req outs)]
     (is (not-any? #(= :tests (:kind %)) reqs) "no tests run on a checkout with no candidate")
     (let [tx (some #(get-in % [:req :tx-data]) reqs)]
       (is (some #(= [{:seon.proof/test 'seon.root-test/boots :seon.proof/status :error}] (:seon.run/deferred-results %)) tx)
           (str "each deferred test :error: " (pr-str tx)))
-      (is (some #(= refusal (:seon.run/error %)) tx) "with the refusal as the run's error"))))
+      (is (some #(= refused (:seon.run/error %)) tx) "with why it was refused as the run's error"))))
