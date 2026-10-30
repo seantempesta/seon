@@ -102,7 +102,8 @@
     (is (:ok r) (pr-str r))
     (is (some #{"resources/seon/schemas/app.m0.edn"} (:files r)) (str "the changed schema entry's resource: " (pr-str (:files r))))
     (is (re-find #":app.m0/thing" (str (get (:text r) "resources/seon/schemas/app.m0.edn"))) "with its text as the merge holds it")
-    (is (or (some #(re-find #"m0" %) (:files r)) (contains? (:unfiled r) 'app.m0)) "the changed namespace's file, or it named as unfiled")
+    (is (or (some #(re-find #"\.clj$" %) (:files r)) (contains? (:unfiled r) 'app.m0))
+        (str "the changed namespace's own source file, or it named as unfiled (the schema resource alone is not it): " (pr-str (select-keys r [:files :unfiled]))))
     (is (= t0 (:max-tx @conn)) "and main is unchanged: a candidate is never committed")))))
 
 (deftest the-fork-servers-replica-is-main-at-each-commit

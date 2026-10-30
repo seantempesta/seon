@@ -61,6 +61,8 @@ The flow-lab's wake hazards, each a proof:
 
 A replay that resumes a session must not trust a form whose effect is visible only through a helper, a form that reads a world that has moved on (the time, files, main), or a handle to a resource that died with the process.
 
+Root records what it observes of each agent on main (```seon.root/record-agents```, ```seon.task/agent-tx```: its status, pid, branch, the form running) when one of those changes. Its memory alone is no change: it moves with every allocation, and main moved five times in three reads of one working agent, each move merged into every branch and redrawn; it is written with the agent's next other change.
+
 ## A stalled agent
 
 An agent with a request in flight that sends root nothing past the stall bound is observed stalled, once per quiet spell: a recorded fact on the agent, never an end (`seon.agent-proc`'s stall check; the bound is `:seon.config.agent/stall-ms`, a clock named in [clocks](clocks.md)).

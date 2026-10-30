@@ -1028,18 +1028,23 @@
                                               :else (conj (hold-tx (task/run (:db st) run) problem)
                                                           {:seon.run/id run :seon.run/error r}))))
                                         (:members act) (:results r))))))
-      ;; the gate's candidate: the files of the namespaces the branch changed, as it holds them
       ;; the gate's candidate is the writer's: the files the octopus merge would write (seon.writer's :merge-candidate),
       ;; forms', tests' and schema resources' alike (md-scan 29: a :seon.ref/block change left out met its new
-      ;; seon.ref/scan in the checkout, and the seed threw on scan's contract)
-      :gate-read (let [files (:text r)
+      ;; seon.ref/scan in the checkout, and the seed threw on scan's contract). A refused candidate is the gate's
+      ;; answer, each deferred test :error with the refusal: no files would test main as it is and vouch for nothing
+      :gate-read (if (contract/error? r)
+                   (one (write st aid :done (err/asked-tx (:db st) r :seon.run/deferred-results
+                                                          [{:seon.run/id aid
+                                                            :seon.run/deferred-results (vec (for [t (:tests act)] {:seon.proof/test t :seon.proof/status :error}))}
+                                                           {:seon.run/id aid :seon.run/error r}])))
+                 (let [files (:text r)
                        ;; a changed namespace with no file on the branch (made at the REPL, never
                        ;; written) cannot be put over the checkout: named, never dropped
                        unread (vec (for [n (sort (keys (:unfiled r)))]
                                      {:ns n :reason "no :ns/file on the branch: its forms were never written to a file"}))]
                    (one (request (assoc-in st [:flights aid :gate-unread] unread) aid :gated
                                  {:op :fx :kind :tests :req {:repo (get-in st [:idx :root :gate-checkout]) :branch (:branch (:source st))
-                                                             :files files :tests (:tests act)}})))
+                                                             :files files :tests (:tests act)}}))))
       ;; each deferred test's status on the run; the next judgment merges it or holds it. A
       ;; run over a tree missing a changed namespace (gate-unread) vouches for none: each :error
       :gated (let [unread (:gate-unread f)

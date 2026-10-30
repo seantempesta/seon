@@ -614,9 +614,10 @@
                      t3 (profile/now-ns)]
                  (cond-> {:id id :ok (and (map? r) (not (:ex r)) (= 1 (:pass tr)) (zero? (+ (:fail tr) (:error tr))))
                           :eval-ms (/ (- t2 t1) 1e6) :tests-ms (/ (- t3 t2) 1e6)}
-                   ;; a failed agent names itself: its eval's answer and its test run's counts
+                   ;; a failed agent names itself: its eval's answer and its test run's counts and
+                   ;; reports, the error itself (a run with :error 1 and no reason was unreadable)
                    (not (and (map? r) (not (:ex r)) (= 1 (:pass tr)) (zero? (+ (:fail tr) (:error tr)))))
-                   (assoc :eval r :tests (select-keys tr [:pass :fail :error :ex])))))
+                   (assoc :eval r :tests (select-keys tr [:pass :fail :error :ex :reports])))))
         results (vec (pmap work ids))
         t-done (profile/ms-since t0)
         _ (doseq [r results :when (not (:ok r))] (out! "NOT OK: " (pr-str r)))
