@@ -61,8 +61,11 @@ WHAT=both
 # answers at once, before any process starts; a green run below writes its marker (the verdict cache's
 # dir, which every checkout shares: bin/env)
 . "$ROOT/bin/env"
-TREE=$("$ROOT/bin/tree" "$ROOT") || TREE=
-KEY=${TREE:+$WHAT-$MERGE-$(print -r -- "$*" | shasum | cut -c1-12)-$TREE}
+# a run that names its tests or steps asks for them to run, so only a bare run answers from the marker
+# (seon.prove-test/two-runs-on-one-checkout-each-end-with-their-own-result named its tests, was answered
+# from a marker an earlier green run of them left, said no run directory, and went red in full proves)
+TREE=$( (( $# )) || "$ROOT/bin/tree" "$ROOT") || TREE=
+KEY=${TREE:+$WHAT-$MERGE-$TREE}
 MARK=$SEON_RESULTS_DIR/proved/$KEY
 if [[ -n $KEY && -f $MARK ]]; then
   echo "prove: tree $TREE proved green already ($(cat "$MARK")): nothing to run"

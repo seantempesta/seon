@@ -4,7 +4,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.contract :as contract :refer [defn defn-]] [seon.root :as root] [seon.task :as task] [seon.docs :as docs] [seon.problems :as problems] [clojure.java.io :as io] [clojure.string :as str] [seon.config :as config]
             [seon.reconcile :as reconcile] [seon.db :as pdb] [seon.template :as tpl] [seon.watch :as watch] [datahike.api :as d]
-            [seon.judge :as judge] [seon.model :as model] [seon.turn :as turn] [clojure.edn :as edn] [seon.lib :as lib] [seon.fx :as fx] [seon.error :as err] [seon.source :as source]))
+            [seon.judge :as judge] [seon.model :as model] [seon.turn :as turn] [clojure.edn :as edn] [seon.lib :as lib] [seon.fx :as fx] [seon.error :as err] [seon.source :as source] [seon.program :as program] [seon.agent]))
 
 (defn- write-declared!
   "Declared state's tx written on main: the error that built it as it is; an empty tx
@@ -565,3 +565,29 @@
                       {:rows (conj rows (row f false)) :usd spent
                        :error (contract/error :seon.judge/cost-unknown #'my.root/first-moves!
                                               (str "the reply's usage cannot be priced (model " (:model req) "): the pass stops") {:task id :usage usage})}))))))))))
+
+(defn findings-tx
+  "The held tasks the :long-form findings over db's program ask for (seon.problems/long-forms over every
+  var, src and test alike), each from its template (seon.template/finding) with the tests reaching its var
+  in reach graph g (seon.program/reach-indexed) as its proofs, and none for a var whose task db holds:
+  tx-data, [] when there is nothing to file. See docs/health.md#a-form-too-long."
+  {:malli/schema [:=> [:cat :seon.host/db :map] [:sequential :any]]}
+  [db g]
+  (let [decls (vec (for [r (problems/long-forms db {} (into #{} (map :v) (d/datoms db :aevt :var/name)))
+                         :let [decl (tpl/finding r (set (program/tests-reaching g (:var r))))]
+                         :when (not (pdb/eid db :seon.task/id (task/task-id (:seon.task/ns decl) (:seon.task/name decl))))]
+                     decl))]
+    (if (seq decls) (task/create-tx db decls) [])))
+
+(defn file-findings!
+  "Write main's :long-form findings as held tasks (findings-tx over main and its reach graph), for root or
+  the owner to release (my.root/run!): the system's long parts become its work (task
+  seon.template/a-finding-is-a-task). Answers the task ids filed, [] when every finding has its task."
+  {:malli/schema [:=> [:cat :seon.root/sys] [:vector :string]]}
+  [sys]
+  (let [db @(:conn sys)
+        g (program/reach-indexed (program/reach-graph db (fx/declared-refs (config/value :seon.config.root/system-path)))
+                                 (second (seon.agent/test-inputs db)))
+        tx (findings-tx db g)]
+    (when (seq tx) @(root/transact-main! sys tx))
+    (vec (keep :seon.task/id tx))))
