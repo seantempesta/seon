@@ -180,9 +180,8 @@
 (def ^:private child-env-scrub
   "The `env -u` argv that gives a child process the tree's own environment (docs/source.md#the-next-generation):
   bin/env and bin/root export names for this root's checkout, runs and home, and a child inheriting
-  SEON_SOURCE_ROOT listed its test namespaces from that checkout, not the tree it ran in (measured
-  2026-10-27: the first full run's plan named seon.cron-test, a test of the root's working tree that
-  main does not hold, and its shard died at once). Used by build and run-tests."
+  SEON_SOURCE_ROOT listed its test namespaces from that checkout, not the tree it ran in (a full run's plan
+  named a test of the root's working tree that main does not hold, and its shard died at once). Used by build and run-tests."
   ["env" "-u" "SEON_CHECKOUT" "-u" "JOLT_LMDB_LIB" "-u" "JOLT_PWD" "-u" "HOME"
    "-u" "SEON_SOURCE_ROOT" "-u" "SEON_RUNS"])
 

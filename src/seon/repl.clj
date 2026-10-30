@@ -737,7 +737,7 @@
   (let [src (my.agent/source-fn sym)
         refuse (fn [why msg lines] (contract/error :seon.repl/edit-refused #'edit! (str sym ": " msg)
                                                    (cond-> {:seon.repl/var sym :seon.repl/refused-because why} (seq lines) (assoc :seon.repl/lines lines))))
-        line-of (fn [i] (docs/line-of src i))
+        line-of (fn [i] (:at (docs/line-at src i)))
         at (when src (offsets src old))]
     (cond
       ;; a name that is no var: the nearest names, as source and callers answer (my.agent/no-var)
