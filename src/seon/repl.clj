@@ -133,7 +133,8 @@
   error or an interrupt stops the request (one pending since its asker cleared it included:
   agent-step, the turn loop), as load-string stops; then done. A top-level (do ...) is its
   forms, each read and evaluated as a top-level form, as Clojure's compiler unrolls it, so a
-  definition inside it is program (docs/prompt.md)."
+  definition inside it is program (docs/prompt.md); so is a top-level (load-file \"path\") of an
+  existing file, as its file's forms (docs/agent.md#the-repl)."
   {:malli/schema [:=> [:cat :seon.wire/msg] :any]}
   [{:keys [reply] :as req}]
   (let [eval-fn (:repl/eval-fn req eval)
@@ -148,11 +149,24 @@
         ;; one top-level form from ns: [ns' :ok], or [ns' how] when it ended the request (:err); a form
         ;; written as (do ...) is its inner forms, each one as a top-level form (do-parts), the comments
         ;; before the do leading the first of them
+        forms-ref (volatile! nil)
         exec! (fn exec! [form src lead ns top]
-                (if-let [parts (do-parts form src ns)]
-                  (loop [ns ns forms (next form) [[t l] & more] parts lead lead]
+                (cond
+                  ;; a top-level (load-file "path") of a file that exists is the file's forms, each a top-level
+                  ;; form of this request (recorded, its text its var's :source); else clojure.core's, which
+                  ;; answers the missing file as its own error
+                  (and (seq? form) (= 'load-file (first form)) (= 2 (count form)) (string? (second form))
+                       (.isFile (java.io.File. ^String (second form))))
+                  ;; the file's end is this form's: the request's next form runs after it
+                  (let [[ns' how] (@forms-ref (slurp (second form)) ns top)] [ns' (if (= :eof how) :ok how)])
+
+                  (do-parts form src ns)
+                  (let [parts (do-parts form src ns)]
+                   (loop [ns ns forms (next form) [[t l] & more] parts lead lead]
                     (let [[ns' how] (exec! (first forms) t (not-empty (apply str (interpose "\n" (keep identity [lead l])))) ns top)]
-                      (if (and (= :ok how) more) (recur ns' (next forms) more nil) [ns' how])))
+                      (if (and (= :ok how) more) (recur ns' (next forms) more nil) [ns' how]))))
+
+                  :else
                  (let [n (dec (:n (swap! agent/state update :n (fnil inc 0))))
                        out (java.io.StringWriter.)
                        err (java.io.StringWriter.)
@@ -202,6 +216,7 @@
                          :else
                          (let [[ns' how] (exec! form src lead ns (or top k))]
                            (if (= :ok how) (recur ns' end (inc k)) [ns' how])))))))
+        _ (vreset! forms-ref forms!)
         [ns how] (forms! (get req "code") (or (some-> (get req "ns") symbol find-ns) (:ns @agent/state)) nil)]
     ;; a read error leaves the agent's namespace as it was
     (when-not (= :read how) (swap! agent/state assoc :ns ns))
