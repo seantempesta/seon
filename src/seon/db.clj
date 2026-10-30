@@ -203,6 +203,14 @@
 ;; sharing a store never share a branch. A branch is one pointer write (~1 ms measured)
 ;; where a fresh seeded store was ~200 ms and ~2 MB.
 
+(defn off-main
+  "Branch b as the root whose main is `main` names it in its facts (a run's :seon.run/branch, a message's
+  :seon.message/branch): on-main undone, b with main's qualifier taken off (:smoke-x/agent-1 is :agent-1 on
+  main :smoke-x); b itself on :db or when it carries no qualifier of main's. See docs/storage.md#a-roots-main-and-its-branch-names."
+  {:malli/schema [:=> [:cat :seon.db/branch :seon.db/branch] :seon.db/branch]}
+  [main b]
+  (if (and (not= :db main) (= (name main) (namespace b))) (keyword (name b)) b))
+
 (defn on-main
   "Branch b of the root whose main is `main`, as the store names it: :db names main itself;
   on :db (production) b is b; on any other main b is qualified by main's name (:smoke-x/agent-1).
@@ -220,7 +228,7 @@
   [main branches]
   (vec (sort (for [b branches
                    :when (if (= :db main) (and (nil? (namespace b)) (not= :db b)) (= (name main) (namespace b)))]
-               (if (= :db main) b (keyword (name b)))))))
+               (off-main main b)))))
 
 (defn branch?
   "Does the store hold branch b? Its head key exists exactly when the branch does

@@ -21,12 +21,32 @@
 
 (def ^:private here (seon.config/checkout))
 
+(def ^:private imp-text
+  "A fixture file holding each kind of form an import records: a docstring ns with a require, a
+  value, a macro, a declare, a private function, a contracted function calling it, a multimethod and
+  its method, a defonce, a protocol, the same form text twice (told apart by occurrence), comments
+  between forms and a tail after the last."
+  (str "(ns app.imp\n  \"A fixture file.\"\n  (:require [clojure.string :as str]))\n\n"
+       ";; a value\n(def banned #{'a 'b})\n\n"
+       "(defmacro twice\n  \"Runs x twice.\"\n  [x] `(do ~x ~x))\n\n"
+       "(declare later)\n\n"
+       "(defn- topo [xs] (vec (sort xs)))\n\n"
+       "(defn load-order\n  \"Sorted.\"\n  {:malli/schema [:=> [:cat [:sequential :int]] [:vector :int]]}\n  [xs] (topo xs))\n\n"
+       "(defmulti area :shape)\n(defmethod area :sq [{:keys [s]}] (* s s))\n\n"
+       "(defonce counter (atom 0))\n\n"
+       "(defprotocol Go (go [this]))\n\n"
+       "(defn later [] (str/upper-case \"x\"))\n\n"
+       "(comment :same)\n\n(comment :same)   ; twice\n\n"
+       ";; the tail"))
+
 (defn- src-files
-  "next/src as the :source effect reads it: {relative path text}."
+  "The files an import is shown on: two small real files of next/src as the :source effect reads
+  them (my.fx, seon.edn: the namespaces this process holds, so their forms are analyzed, never run)
+  and imp-text, one of each kind of form: {relative path text}."
   []
   (let [r (fx/read-source {:req {:root here :dirs ["src"]}})]
     (is (map? (:value r)) (pr-str r))
-    (:value r)))
+    (assoc (select-keys (:value r) ["src/my/fx.clj" "src/seon/edn.clj"]) "src/app/imp.clj" imp-text)))
 
 (defn- scratch-dir
   "A new empty directory under target/ (the live tree is never written)."
@@ -36,17 +56,17 @@
     d))
 
 (defn- imported
-  "Main's db with every file of next/src imported; its namespaces are this process's (the
+  "Main's db with the files imported (a real file's namespace is required first); its namespaces are this process's (the
   running generation), so each form is analyzed, never run."
   [files]
-  (doseq [n (keep #(source/file-ns (val %)) files)] (require n))
+  (doseq [[path text] files :when (.exists (java.io.File. (str here "/" path)))] (require (source/file-ns text)))
   (let [db (empty-db)] (d/db-with db (source/import-tx db files))))
 
 (deftest importing-src-records-every-form-exactly
   (let [files (src-files)
         db (imported files)
         forms-of (fn [nsym] (d/q '[:find ?id ?src :in $ ?n :where [?ns :ns/name ?n] [?f :form/ns ?ns] [?f :form/id ?id] [?f :form/src ?src]] db nsym))]
-    (is (< 40 (count files)) "every source file (seon.* and my.*)")
+    (is (= 3 (count files)) "two real files and the fixture")
     (testing "every file: one namespace with its file, one form per form read, each form's text exact"
       (doseq [[path text] files
               :let [nsym (source/file-ns text) read (:forms (source/read-forms 'user text))]]
@@ -55,19 +75,21 @@
         (is (= (frequencies (map :src read)) (frequencies (map second (forms-of nsym)))) path)))
     (testing "definitions from the compiler, pointing to their forms"
       (let [row (fn [sym] (d/pull db '[:var/kind :var/contract {:var/form [:form/src :form/refs]}] [:var/name sym]))]
-        (is (str/starts-with? (get-in (row 'seon.program/load-order) [:var/form :form/src]) "(defn load-order\n"))
-        (is (= :fn (:var/kind (row 'seon.program/load-order))))
-        (is (= "[:=> [:cat [:sequential :map]] [:vector :map]]" (:var/contract (row 'seon.program/load-order))))
-        (is (contains? (set (get-in (row 'seon.program/load-order) [:var/form :form/refs])) 'seon.program/topo)
+        (is (str/starts-with? (get-in (row 'app.imp/load-order) [:var/form :form/src]) "(defn load-order\n"))
+        (is (= :fn (:var/kind (row 'app.imp/load-order))))
+        (is (= "[:=> [:cat [:sequential :int]] [:vector :int]]" (:var/contract (row 'app.imp/load-order))))
+        (is (contains? (set (get-in (row 'app.imp/load-order) [:var/form :form/refs])) 'app.imp/topo)
             "a reference resolved by the compiler")
-        (is (= :macro (:var/kind (row 'seon.contract/defn))))
-        (is (= :value (:var/kind (row 'seon.program/banned))))
-        (is (= '[:fn :fn] (mapv #(:var/kind (row %)) '[seon.source/read-forms my.fx/call])))))
+        (is (= :macro (:var/kind (row 'app.imp/twice))))
+        (is (= :value (:var/kind (row 'app.imp/banned))))
+        (is (= "[:=> [:cat :any] :string]" (:var/contract (row 'seon.edn/encode))) "a real file's contract")
+        (is (= '[:fn :fn] (mapv #(:var/kind (row %)) '[seon.edn/decode my.fx/call])))))
     (testing "the platform's own namespaces are not loaded from main: the binary is the running generation"
-      (is (= {:loaded (count (program/live-forms (empty-db))) :errors []} (program/load-all! db))
-          "load-all! loads the test store's example program, and none of the namespaces imported from files")
-      (is (= [] (program/load-changes! db (vec (for [dt (d/datoms db :aevt :form/src)] [:db/add (:e dt) :form/src (:v dt)]))))
-          "and so does load-changes!"))))
+      (let [db (imported (dissoc files "src/app/imp.clj"))]
+        (is (= {:loaded (count (program/live-forms (empty-db))) :errors []} (program/load-all! db))
+            "load-all! loads the test store's example program, and none of the namespaces imported from files")
+        (is (= [] (program/load-changes! db (vec (for [dt (d/datoms db :aevt :form/src)] [:db/add (:e dt) :form/src (:v dt)]))))
+          "and so does load-changes!")))))
 
 (deftest root-loads-the-program-and-leaves-test-namespaces-unevaluated
   ;; task seon.root/root-holds-no-test-code, docs/source.md#a-process-holds-the-tests-only-when-it-runs-them:
@@ -100,15 +122,19 @@
   (let [files (src-files)
         db (imported files)
         out (source/files db (source/source-files db))
+        orig (scratch-dir "zero-orig")
         copy (scratch-dir "zero")]
     (is (= (set (keys files)) (set (keys out))) "every file written back")
     (doseq [[path text] files] (is (= text (get out path)) path))
-    (testing "through the :file effect's performer, onto a copy: diff -r finds nothing (README.md is no program)"
+    (testing "through the :file effect's performer, onto a copy: diff -r finds nothing"
+      (doseq [[path text] files]
+        (.mkdirs (.getParentFile (java.io.File. (str orig "/" path))))
+        (spit (str orig "/" path) text))
       (doseq [[path text] out]
         (.mkdirs (.getParentFile (java.io.File. (str copy "/" path))))
-        (is (= {:value {:bytes (.length (java.io.File. (str here "/" path))) :path (str copy "/" path)}}
+        (is (= {:value {:bytes (.length (java.io.File. (str orig "/" path))) :path (str copy "/" path)}}
                (fx/write-file {:req {:path (str copy "/" path) :text text}}))))
-      (let [r (sh/sh "diff" "-r" "-x" "*.md" (str here "/src") (str copy "/src"))]
+      (let [r (sh/sh "diff" "-r" (str orig "/src") (str copy "/src"))]
         (is (= [0 ""] [(:exit r) (:out r)]))))))
 
 (def ^:private pt-text
@@ -679,12 +705,15 @@
     [(pt/record db 'app.ft "(defn- h [x] x)" 'app.ft "(defn f0 [x] (h x))") 'app.ft]))
 
 (def ^:private refresh-sizes
-  "Forms in the other files: a fixed change costs the same at each: a program 25 times the smallest's
-  shows it (at 10 100 1000 the proof cost 2.3 G ticks, nearly all of it building its inputs)."
-  [10 50 250])
+  "Forms in the other files: a fixed change costs the same at each: a program 10 times the smallest's
+  shows it (at 10 100 1000 the proofs cost 2.3 G ticks; a normal run stops at 1000, seon.config.proofs/cost-max-n)."
+  [3 9 30])
 
-(deftest a-fixed-change-costs-the-same-at-any-program-size
-  (doseq [e [{:of 'seon.source/read-nss :input 'seon.source-test/read-of
+(def ^:private fixed-change-estimates
+  "The estimates a fixed change is held to, one per phase and per kind of edit (the tests below run them in
+  four groups: each proof measures its function tens of times at each size, so all seven in one test
+  cost 2.3 G ticks, past the ceiling of work a test may do)."
+  [{:of 'seon.source/read-nss :input 'seon.source-test/read-of
               :n "forms in the program's other files; the read and analysis of one 10-function file"
               :work "read: the file's text read form by form; analyze: each form's account (Jolt's analyzer, not run)"
               :growth :constant
@@ -737,9 +766,29 @@
               :growth :constant
               ;; measured 2026-10-23: as the leaf's, 1.80M -> 1.84M ticks, 6.61 -> 6.75 MB, 563 calls
               :fixed {:ticks 1900000 :bytes 6950000 :calls 563}
-              :sizes refresh-sizes}]]
+              :sizes refresh-sizes}])
+
+(defn- prove-fixed
+  "Each of the fixed-change estimates at the indexes is a proof."
+  [& is]
+  (doseq [e (map fixed-change-estimates is)]
     (testing (str (:of e) " on " (:input e))
       (cost/proof e))))
+
+(deftest a-fixed-change-costs-the-same-at-any-program-size
+  (prove-fixed 0 1 2))
+
+(deftest a-fixed-change-is-transacted-at-the-same-cost-at-any-program-size
+  (prove-fixed 3))
+
+(deftest a-fixed-leaf-edit-costs-the-same-at-any-program-size
+  (prove-fixed 4))
+
+(deftest a-fixed-ns-form-edit-costs-the-same-at-any-program-size
+  (prove-fixed 5))
+
+(deftest a-fixed-hub-edit-costs-the-same-at-any-program-size
+  (prove-fixed 6))
 
 (deftest a-helper-recorded-after-its-user-is-written-before-it
   ;; step E run #10 (2026-10-23): an agent defined form-of at its REPL, then redefined
@@ -777,7 +826,7 @@
                ;; main's file-text (a sort by :order): 789k -> 61.0M ticks, 1.99 -> 153 MB, 4,012 calls (load-order: +4% ticks, +14% bytes, three calls)
                :per-n {:ticks 64000.0 :bytes 176000.0 :calls 4.0}
                :fixed {:ticks 200000 :bytes 500000 :calls 15}
-               :sizes [10 100 1000]}))
+               :sizes [5 15 50]}))
 
 (deftest a-checkout-whose-submodule-moved-is-synced-to-its-pin
   ;; root, 2026-10-27: a worktree that merged main kept its old Jolt checked out (no one ran

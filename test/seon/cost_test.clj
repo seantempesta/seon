@@ -374,16 +374,16 @@
     {:ticks (/ (- (:ticks m) (:ticks b 0.0)) units) :ns (/ (- (:ns m) (:ns b 0.0)) units) :bytes (/ (- (:bytes m) (:bytes b 0.0)) units)}))
 
 (deftest the-unit-table-is-current
-  ;; every row of the table measured again at 10k units (the table's own n: a unit's bytes at 1k
-  ;; differ, 630 against 825 B for :map/assoc): its bytes within 1.25x (counted, the same at any
-  ;; load); its ticks too, the work done; a drifted row means the estimates
+  ;; every row of the table measured again, at the n where its row is steady: 2k units, but 10k for
+  ;; the rows whose unit differs below it (:vec/conj!, :pr-str/char: 34 against 43 B, 56 against 43 ticks
+  ;; per char at 2k; :map/assoc and :sorted/assoc: 2k), 1k for the rest, and 30 for the two pull rows, whose
+  ;; ticks and bytes are the same at 30, 300 and 1k (5.4k ticks a pull): its bytes within 1.25x
+  ;; (counted, the same at any load); its ticks too, the work done; a drifted row means the estimates
   ;; priced by it are stale. Its ns (CPU time) no verdict decides on (seon.cost/exact): measured,
   ;; not asserted (pure-tests 2026-10-23: within 3x of a table measured under another day's load
-  ;; was no function of the digest)
-  ;; the two pull rows at 1k: a pull's bytes and ticks are the same at 1k and 10k (10,377 B and 2,847 ticks a
-  ;; further attribute at both, cost.clj's table), and each pull is 5-8k ticks, so they were 4 G of the test's 5 G
+  ;; was no function of the digest). Measured at 10k (pulls 1k) the test cost 5.3 G ticks, at these n 0.15 G.
   (doseq [[k {:keys [ticks bytes]}] cost/units
-          :let [m (measure-unit k (if (#{:db/pull :db/pull-attr} k) 1000 10000)) row (assoc m :what (:what (unit-benches k)))]]
+          :let [m (measure-unit k (cond (#{:db/pull :db/pull-attr} k) 30 (#{:vec/conj! :pr-str/char} k) 10000 (#{:map/assoc :sorted/assoc} k) 2000 :else 1000)) row (assoc m :what (:what (unit-benches k)))]]
     (is (<= (/ ticks 1.25) (:ticks m) (* ticks 1.25)) (str k " ticks: table " ticks ", measured " (:ticks m) "; the row now: " row))
     (is (<= (- (/ bytes 1.25) 1.0) (:bytes m) (+ (* bytes 1.25) 1.0)) (str k " bytes: table " bytes ", measured " (:bytes m) "; the row now: " row))))
 
@@ -391,7 +391,7 @@
   ;; :db/pull-attr read 11.6 KB on one run and 8.9 KB on the next two (a warm or cold Datahike
   ;; cache at its start); each measurement here builds its own db, and the counted dimensions
   ;; agree to 1%, so the row does not depend on the cache's state when it began
-  (let [ms (vec (repeatedly 3 #(measure-unit :db/pull-attr 1000)))
+  (let [ms (vec (repeatedly 3 #(measure-unit :db/pull-attr 30)))
         near (fn [d] (let [vs (map d ms)] (<= (apply max vs) (* 1.01 (apply min vs)))))]
     (is (near :bytes) (str "bytes differ across runs: " (mapv :bytes ms)))
     (is (near :ticks) (str "ticks differ across runs: " (mapv :ticks ms)))))
