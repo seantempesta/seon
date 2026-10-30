@@ -328,7 +328,7 @@
  ;; the keys main changed since the branch's merge base when the run was judged (the writer's :theirs): a branch
  ;; behind main is judged before it has merged main, and the done rule says so first (seon.reconcile/done-explain :behind)
  :seon.run/behind pos-int?
- :seon.run/run-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.run/id :seon.run/status :seon.run/outcome :seon.run/reason :seon.run/model :seon.run/turns :seon.run/max-turns :seon.run/branch] :seon.ctx/pattern [* {[:seon.run/task :as :task] :seon.task/task-fact} {[:seon.turn/_run :as :turns :limit :seon.config.ctx/window :reverse true] [*]} {[:seon.message/_to :as :messages :limit :seon.config.ctx/window :reverse true] [*]}] :seon.render/html seon.render.ui/run}
+ :seon.run/run-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.run/id :seon.run/status :seon.run/outcome :seon.run/reason :seon.run/model :seon.run/turns :seon.run/max-turns :seon.run/branch] :seon.ctx/pattern [* {[:seon.run/task :as :task] :seon.task/task-fact} {[:seon.turn/_run :as :turns :limit :seon.config.ctx/window :reverse true] [*]}] :seon.render/html seon.render.ui/run}
                              [:seon.run/id :seon.run/id] [:seon.run/task :seon.run/task]
                              [:seon.run/status :seon.run/status] [:seon.run/boot :seon.run/boot]
                              [:seon.run/agent {:optional true} :seon.run/agent] [:seon.run/start-ms :seon.run/start-ms]

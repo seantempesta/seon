@@ -792,7 +792,7 @@
                    ;; synced before the spawn that follows reads it (AGENTS section 5, durability)
                    (cond-> (one (request st run :done {:op :write :req {:op :tx :branch :db :flush? true
                                                                        :tx-data (into (cas-tx run :ended :parked {})
-                                                                                      (task/message-tx (str "v-" run) :verdict "root" (:seon.run/branch (task/run (:db st) run))
+                                                                                      (task/message-tx (str "v-" run) :verdict "root" (get-in (task/run (:db st) run) [:seon.run/env :branch])
                                                                                                        (verdict-body (task/run (:db st) run) (:reasons act))))}}))
                      (kept? st a) (stop-kept run agent))))
       :hold (cond-> (one (write st run :done (hold-tx a (:problem act))))

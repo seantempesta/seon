@@ -1520,7 +1520,7 @@
                   "                  [id (when-let [e (datahike.api/entity @(:conn sys) [:seon.run/id id])] {:status (:seon.run/status e) :outcome (:seon.run/outcome e) :reason (:seon.run/reason e)})]))"
                   " b (:db @(seon.root/call! sys {:op :write :req {:op :branch-db :branch (seon.task/default-branch \"" % "/st\")}}))"
                   " sent (fn [run] (mapv second (sort (datahike.api/q '[:find ?n ?s :in $ ?id :where [?r :seon.run/id ?id] [?u :seon.turn/run ?r] [?u :seon.turn/n ?n] [?u :seon.turn/origin :model] [?m :seon.model-call/turn ?u] [?m :seon.model-call/sent ?s]] b run))))"
-                  " boundary (datahike.api/q '[:find ?mid . :where [?r :seon.run/id \"" % "/st-implement#1\"] [?r :seon.run/branch ?br] [?m :seon.message/branch ?br] [?m :seon.message/from \"root\"] [?m :seon.message/id ?mid]] b)]"
+                  " boundary (datahike.api/q '[:find ?mid . :in $ ?br :where [?m :seon.message/branch ?br] [?m :seon.message/kind :stage] [?m :seon.message/from \"root\"] [?m :seon.message/id ?mid]] b (seon.task/default-branch \"" % "/st\"))]"
                   " {:ended ended :design (sent \"" % "/st#1\") :implement (sent \"" % "/st-implement#1\") :boundary boundary})")
         names (volatile! nil)
         [_ r] (in-agent #(do (vreset! names %) [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")} {:op :eval :agent "root" :code (code (:ns %))}])

@@ -428,7 +428,7 @@
                  :else
                  (let [[st rid] (pend st p :tx nil)]
                    (step/out! o :to-writer {:op :tx :branch :db :flush? true
-                                            :tx-data (task/message-tx (str "m-" (random-uuid)) (:kind m :message) (name (:from m)) (get-in st [:agents id :branch]) (:body m))
+                                            :tx-data (task/message-tx (str "m-" (random-uuid)) (:kind m :message) (name (:from m)) (pdb/off-main (pdb/conn-main (:conn st)) (get-in st [:agents id :branch])) (:body m))
                                             :dest {:rid rid}})
                    (update st :writes (fnil conj #{}) rid)))
       ;; requests for the writer: answered by rid; a collection only while no agent is live,
