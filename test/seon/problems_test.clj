@@ -535,13 +535,18 @@
         [(problems/health base) base head (diff base head)]))
 
 (defn own-input
-  "The proof's input at k: a db with k finished tasks beside the run of one: [db run-entity]."
-  [k] (let [[_ base] (history-input k)] [base (pdb/eid base :seon.run/id "t/h0#1")]))
+  "The proof's input at k: a db with k finished tasks beside the agent of one: [db agent-entity]."
+  [k] (let [[_ base] (history-input k)
+            ;; one agent of its own with its one run, as production has (the others' shared agent holds k runs)
+            db (d/db-with base [{:seon.run/id "t/h0#own" :seon.run/task [:seon.task/id "t/h0"] :seon.run/boot "b" :seon.run/start-ms 1 :seon.run/branch :b
+                                 :seon.run/max-turns 2 :seon.run/status :running
+                                 :seon.run/agent {:seon.agent/key "b/own" :seon.agent/id :own :seon.agent/task [:seon.task/id "t/h0"]}}])]
+        [db (pdb/eid db :seon.agent/key "b/own")]))
 
 (deftest an-agents-own-problems-cost-nothing-for-the-history
   (cost/proof {:of 'seon.problems/own :input 'seon.problems-test/own-input
-               :n "finished tasks, each with a merged run, beside the run asked for"
-               :work "the run's pull, its task's, and the error signatures' last-task datoms: none per finished task"
+               :n "finished tasks, each with a merged run, beside the agent asked for"
+               :work "the newest run's pull, its task's, and the error signatures' last-task datoms: none per finished task"
                :growth :constant
                :ops {:db/pull 0 :db/pull-attr 0 :edn/read-char 0}
                :fixed {:ticks 85000 :bytes 320000 :calls 4}

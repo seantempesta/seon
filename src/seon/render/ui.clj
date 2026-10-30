@@ -1072,15 +1072,14 @@
    (when your-last-reply [:p {:class "err"} (str "your last reply was " your-last-reply)])])
 
 (defn own-problems
-  "The open problems of the agent's newest run (a component over its branch db, seon.problems/own: its run's,
+  "The open problems of the agent (a component over its branch db, seon.problems/own: its newest run's,
   its task's failure and the errors raised in its task), by the report's render, the one root's tile
-  draws; nothing when none is open or the branch holds no run of the agent yet."
+  draws; nothing when none is open."
   {:seon.render/style tile-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :int] :any]}
   [{db :seon.db/db} aid]
-  (when-let [run-e (d/q '[:find (max ?r) . :in $ ?a :where [?r :seon.run/agent ?a]] db aid)]
-    (let [r (problems/own db run-e)]
-      ;; a part: the report's own render draws it, the model is sent the report
-      (when (seq (:classes r)) (with-meta r {:seon.render/schema :seon.problems/report})))))
+  (let [r (problems/own db aid)]
+    ;; a part: the report's own render draws it, the model is sent the report
+    (when (seq (:classes r)) (with-meta r {:seon.render/schema :seon.problems/report}))))
 
 (defn ctx-key
   "A key the agent added to its ctx (a component over ctx), named by that key, which is its schema:
@@ -1265,12 +1264,12 @@
 
 (defn chat-start
   "Where the work began, the chat's line after what was asked (a component over the db): its run's
-  turn budget. The agent's loop eval (seon.turn/work!) is not drawn: this line and `chat-end` say what
+  turn budget (the agent's, :seon.agent/max-turns). The agent's loop eval (seon.turn/work!) is not drawn: this line and `chat-end` say what
   it did. See docs/render.md#the-page."
   {:seon.render/style "self-center text-xs text-text-500" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :int] :any]}
   [{db :seon.db/db} aid]
   (when-let [run (newest-run db aid)]
-    [:p (str "started working" (when-let [m (:seon.run/max-turns run)] (str " · a budget of " m " turns")))]))
+    [:p (str "started working" (when-let [m (or (:seon.agent/max-turns (d/entity db aid)) (:seon.run/max-turns run))] (str " · a budget of " m " turns")))]))
 
 (defn chat-end
   "How the work ended, the chat's last card (a component over ctx and the db): its run's end

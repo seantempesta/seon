@@ -42,16 +42,15 @@
 (defn messages "The words to this agent not yet taken, taken: entries to its session's runs ({:id :kind :from :to :body}), then other agents' sends ({:from :body})." {:malli/schema [:=> [:cat] [:vector :map]]}
   [] (agent/messages))
 (defn problem
-  "One open problem of this agent's newest run, whole: its row of seon.problems/own's report (a recorded
+  "One open problem of this agent, whole: its row of seon.problems/own's report (a recorded
   error's example and evidence, its count and when it was first and last raised), by the signature its
   context's problems part names; nil when no open problem has it. See docs/health.md#two-kinds-of-problem."
   {:malli/schema [:=> [:cat :string] [:maybe :map]]}
   [signature]
   (let [db (agent/db)
-        aid (pdb/eid db :seon.agent/key (:key @agent/state))
-        run-e (when aid (d/q '[:find (max ?r) . :in $ ?a :where [?r :seon.run/agent ?a]] db aid))]
-    (when run-e
-      (some #(when (= signature (:signature %)) %) (mapcat :rows (vals (:classes (problems/own db run-e))))))))
+        aid (pdb/eid db :seon.agent/key (:key @agent/state))]
+    (when aid
+      (some #(when (= signature (:signature %)) %) (mapcat :rows (vals (:classes (problems/own db aid))))))))
 
 (defn send-message "Send body to the agents tos (ids); root delivers it by id. nil." {:malli/schema [:=> [:cat [:sequential :seon.agent/id] :any] :nil]}
   [tos body] (agent/send-message tos body))

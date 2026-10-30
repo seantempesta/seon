@@ -772,11 +772,12 @@
  ;; Unit: tokens for the context block the model reads (the task, its proofs, what it cites),
  ;; breadth first so every section shows before any one deepens (session P1).
  :seon.config.render/context-budget 16000
- ;; Unit: members. The newest members of each collection a record holds (an agent's evals, runs,
- ;; turns and messages; root's agents), read newest first and stopping there, so a record costs its
- ;; window, not its history. 100: a session's evals measured on live agents run 20-80 a task
- ;; (render-workload-a1: 63 evals over 4 runs), so a working session's conversation fits whole.
- ;; Older members stay on the branch, read by a query or a wider pattern (swap! :seon.ctx/pattern).
+ ;; Unit: members. The newest members of each collection root's own record holds (its agents, and
+ ;; their runs and evals), read newest first and stopping there, so root's long-lived copy of other
+ ;; processes' data costs its window, not their history (and the run records, which go: task
+ ;; seon.agent/the-agent-is-the-unit-not-the-run). An agent's own record holds every eval, turn and
+ ;; message it has, never windowed (the owner, 2026-10-30: "deliver all messages and
+ ;; errors"; 2026-10-29: no cuts on an agent's context). Older members stay on main, read by a query.
  :seon.config.ctx/window 100
  ;; Unit: forms. The newest forms naming a cited var (its callers) a task's record holds, and the
  ;; newest of its tests the cited render reads by its own query (seon.render.ui/cited-of: newer
