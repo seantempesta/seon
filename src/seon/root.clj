@@ -422,15 +422,13 @@
       ;; takes it, a wake) finds it in the store; the agent's turn reads it from main and writes
       ;; the same fact on its branch (seon.turn/take!, seon.agent/untaken-entries). No frame
       ;; carries it: delivery is the fact
+      ;; it is to the agent by its branch, so a parked agent's message is the fact that wakes it
       :message (cond
                  (nil? (get-in st [:agents id])) (reply! st o p (gone id (str "no live agent " id)))
-                 ;; an entry is to a run: an agent working none has no session to take it
-                 (nil? (get-in st [:view :agents id :run]))
-                 (reply! st o p (refused 'seon.root/message! (str "agent " id " works no run: an entry is to a run") {:agent id}))
                  :else
                  (let [[st rid] (pend st p :tx nil)]
                    (step/out! o :to-writer {:op :tx :branch :db :flush? true
-                                            :tx-data (task/message-tx (str "m-" (random-uuid)) (:kind m :message) (name (:from m)) (get-in st [:view :agents id :run]) (:body m))
+                                            :tx-data (task/message-tx (str "m-" (random-uuid)) (:kind m :message) (name (:from m)) (get-in st [:agents id :branch]) (:body m))
                                             :dest {:rid rid}})
                    (update st :writes (fnil conj #{}) rid)))
       ;; requests for the writer: answered by rid; a collection only while no agent is live,
