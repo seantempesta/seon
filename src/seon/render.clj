@@ -392,10 +392,8 @@
 
 (defn resolved
   "Component k's output in walk w with every child's marker replaced by that child's output: the
-  page's hiccup below k, and with no k the page whole. With html? true each component as the page
-  writes it (styled)."
-  {:malli/schema [:function [:=> [:cat :map] :any] [:=> [:cat :map [:vector :any]] :any] [:=> [:cat :map [:vector :any] :boolean] :any]]}
-  ([w] (resolved w @(:out w) false))
+  page's hiccup below k. With html? true each component as the page writes it (styled)."
+  {:malli/schema [:function [:=> [:cat :map [:vector :any]] :any] [:=> [:cat :map [:vector :any] :boolean] :any]]}
   ([w k] (resolved w k false))
   ([w k html?]
    (let [c (get @(:cache w) k)]
@@ -500,20 +498,18 @@
                [(:seon.render/schema (meta d)) d]))))
 
 (defn draw
-  "Tree t (a ctx value: seon.ctx/build's :tree), or a reference holding one (a seon.ratom/atom the
-  caller changes, each change drawn at its next frame!), drawn once by the layout var root-var
-  over db, its diff changes: a walker over that reference, framed. Its caller reads it
+  "Tree t (a ctx value: seon.ctx/build's :tree) drawn once by the layout var root-var over db, its
+  diff changes: a walker over a reactive atom holding t, framed. Its caller reads it
   (placed-units, placed-hiccup) and disposes it (dispose-walk!): root drawing an agent's branch, the
   model's page at a commit. With sels, the element ids of the lists its caller reads ([\"#p-task\"]),
   only those lists are drawn: the layout's outer element is, and of the elements inside it the ones with an
   id that is none of sels are neither rendered nor placed (the layout's lists are its outer element's
   children), so a read of one list costs that list, not the page (docs/render.md#the-page-is-sent-as-what-changed)."
-  {:malli/schema [:function [:=> [:cat [:or :map :seon.host/deref] :seon.host/fn :seon.host/db :any] :map]
-                  [:=> [:cat [:or :map :seon.host/deref] :seon.host/fn :seon.host/db :any [:sequential :string]] :map]]}
+  {:malli/schema [:function [:=> [:cat :map :seon.host/fn :seon.host/db :any] :map]
+                  [:=> [:cat :map :seon.host/fn :seon.host/db :any [:sequential :string]] :map]]}
   ([t changes db root-var] (draw t changes db root-var nil))
   ([t changes db root-var sels]
-   (let [ref (if (map? t) (ratom/atom t) t)
-         w (cond-> (walker {:ref ref :changes changes} (constantly db) [root-var {}]) (seq sels) (assoc :only (set sels)))]
+   (let [w (cond-> (walker {:ref (ratom/atom t) :changes changes} (constantly db) [root-var {}]) (seq sels) (assoc :only (set sels)))]
      (frame! w nil)
      w)))
 

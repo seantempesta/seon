@@ -71,7 +71,7 @@ It is re-frame's model, which is Reagent's, which is React's memo, proven in pro
 
 ## Reactive renders
 
-Your page and your model's context are renders of `@ctx`, and a render runs again only when a path it read changes: read the narrowest path you need, and give each member of a list its own component, so a change redraws what it reached and nothing else. Try a render over your record with `my.agent/draw`, then ask `seon.render/frame!` what a change redrew.
+Your page and your model's context are renders of `@ctx`, and a render runs again only when a path it read changes: read the narrowest path you need, and give each member of a list its own component, so a change redraws what it reached and nothing else. Your page is one walk of your record; each turn's page message is what that walk redrew ([the page is sent as what changed](#the-page-is-sent-as-what-changed)).
 
 **Writing one.** A render is a function `[opts & args]` answering hiccup; it is a component when its opts contract names `:seon.ctx/ctx` (it reads ctx) or `:seon.db/db` (it queries the branch's db), and the walk fills those keys in. A call `[#'f {} arg]` in a render's hiccup draws f there as a component of its own, keyed by f and its args (its root element's id is that key, `seon.render/key-id`, whatever id you gave it):
 
@@ -80,17 +80,9 @@ Your page and your model's context are renders of `@ctx`, and a render runs agai
   [{c :seon.ctx/ctx} id] [:li (get-in c [:evals id :seon.eval/record :code])])
 (defn page "The plan, then a row for each eval." {:malli/schema [:=> [:cat [:map [:seon.ctx/ctx :map]]] :any]}
   [{c :seon.ctx/ctx}] [:div [:p (get-in c [:task :seon.task/plan])] (into [:ol] (for [id (keys (:evals c))] [#'row {} id]))])
-(def w (draw #'page))              ; drawn over your record, live
-(seon.render/resolved w)           ; its hiccup, every component in place
-;; next eval:
-(seon.render/frame! w nil)         ; => {[agent.a1/row 7053] :miss, [agent.a1/page] :miss}: the last eval's row, and the page, whose list grew
-(def rec (seon.ratom/atom @ctx))   ; a copy of your record: change it freely, nothing is written
-(def c (draw rec #'page))
-(do (swap! rec assoc-in [:task :seon.task/plan] "ship it") (seon.render/frame! c nil))   ; => {[agent.a1/page] :miss}: its rows skipped
-(seon.render/dispose-walk! w) (seon.render/dispose-walk! c)
 ```
 
-Over `ctx` the draw is live: your next eval, or a `swap! ctx`, redraws what it reached; a `swap!` answers the whole record, so take the frame in the same form. A path that names nothing reads `nil` and draws it, with no error: check a render's hiccup once. A frame answers each component it ran, `:miss` when its output is new and `:same` when it ran and answered what it did before (which passes nothing on: its parent and the page are untouched); a component it skipped is not named. A render that throws draws its error in its place, a `:seon.render/component-defect` naming the render and the message, and every other component draws. To change your own page, register your render as the layout or one of its parts ([ctx](ctx.md#the-record-is-the-agents-work), [adding a datum and its render](ctx.md#adding-a-datum-and-its-render)). `seon.render-test/a-frame-answers-what-it-redrew`.
+A frame (`seon.render/frame!`) answers each component it ran, `:miss` when its output is new and `:same` when it ran and answered what it did before (which passes nothing on: its parent and the page are untouched); a component it skipped is not named. A path that names nothing reads `nil` and draws it, with no error: check a render's output once. A render that throws draws its error in its place, a `:seon.render/component-defect` naming the render and the message, and every other component draws. To change your own page, register your render as the layout or one of its parts ([ctx](ctx.md#the-record-is-the-agents-work), [adding a datum and its render](ctx.md#adding-a-datum-and-its-render)). `seon.render-test/a-frame-answers-what-it-redrew`.
 
 **What a read costs**, measured in that test and in `seon.ratom-test/inferred-paths`: a render runs again when a change reaches what it read.
 - `(get-in c [:task :seon.task/plan])`, `(:k m)`: that value changed, or something above it was replaced.

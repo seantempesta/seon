@@ -25,9 +25,6 @@
                               from any namespace)
     (swap! ctx assoc-in p v)  a change to it, as to any atom (assoc-in, update-in, dissoc): one checked
                               transaction on the branch, or refused with why; the next turn tells it
-    (draw #'f)                a render f of ctx drawn over your record, live; (seon.render/frame! w nil)
-                              answers what each change redrew, (seon.render/resolved w) its hiccup
-    (draw (seon.ratom/atom @ctx) #'f)  the same over a copy you change freely: nothing is written
     (help 'ns.name)           a namespace: every definition, privates included, a line each in file order
     (help)                    the help page's sections (docs/agent.md); (help "done") one whole;
                               (help "docs/vector.md#the-model") any section, (help "docs/vector.md") a page
@@ -36,7 +33,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.lib :as lib] [seon.context :as context] [seon.ref :as ref] [seon.docs :as docs]
             [seon.config :as cfg] [seon.proofs :as proofs] [seon.fx :as fx] [seon.program :as program] [seon.task :as task] [seon.vector :as vector] [seon.contract :as contract] [seon.ctx]
-            [seon.db :as pdb] [seon.problems :as problems] [seon.render :as render] [my.schema :as schema] [jolt.analyzer] [clojure.java.io :as io] [clojure.string :as str] [clojure.main] [datahike.api :as d]))
+            [seon.db :as pdb] [seon.problems :as problems] [my.schema :as schema] [jolt.analyzer] [clojure.java.io :as io] [clojure.string :as str] [clojure.main] [datahike.api :as d]))
 
 (defn $ "An earlier eval's response (its live value under :value), by handle (:e3)." {:malli/schema [:=> [:cat :keyword] :any]}
   [h] (get-in @agent/state [:results h]))
@@ -373,16 +370,6 @@
     (vec (distinct (concat (filter holds? pages) (filter holds? addresses)
                            (keep #(when (= :section (:kind %)) (:name %)) (search address {:kinds #{:section} :k 3}))
                            ranked)))))
-
-(defn draw
-  "Render var f (its opts declaring :seon.ctx/ctx, :seon.db/db or both) drawn as a page over ref, the
-  agent's record (ctx, live) unless given, and the branch's db, its diff ctx's own (seon.ctx/changes):
-  the walk, framed once. (seon.render/frame! w nil) after a change answers what it redrew,
-  {key :miss|:same}; (seon.render/resolved w) is its hiccup; (seon.render/dispose-walk! w) ends it.
-  See docs/render.md#reactive-renders."
-  {:malli/schema [:function [:=> [:cat :seon.host/var] :map] [:=> [:cat :seon.host/deref :seon.host/var] :map]]}
-  ([f] (draw seon.ctx/ctx f))
-  ([ref f] (let [w (render/walker {:ref ref :changes seon.ctx/changes} agent/db [f {}])] (render/frame! w nil) w)))
 
 (defn help
   "The wiki through the one view (seon.docs/view), as this branch holds it. No argument: the help

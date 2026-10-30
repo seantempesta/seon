@@ -1192,20 +1192,15 @@
   [:div [:p (get-in c [:task :seon.task/plan])] (into [:ol] (for [[_ e] (:evals c)] [:li (:code (:seon.eval/record e))]))])
 
 (deftest a-frame-answers-what-it-redrew
-  ;; docs/render.md#reactive-renders, the agent's view: a render drawn over a reference the caller holds
-  ;; (a copy of a record, changed freely), each frame answering the components it ran, by key, new
-  ;; or the same output; the page whole its hiccup
+  ;; docs/render.md#reactive-renders: each frame answers the components it ran, by key, new or the
+  ;; same output, and what each kind of read costs: a member in its own component, or read inline
   (let [rec (seon.ratom/atom {:db/id 1 :t 5 :task {:db/id 2 :seon.task/plan "write the test"}
                               :evals (#'seon.ctx/members-map [[12 {:db/id 12 :seon.eval/record {:code "(+ 1 2)"}}]
                                                              [11 {:db/id 11 :seon.eval/record {:code "(inc 1)"}}]])})
-        w (my.agent/draw rec #'lab-page)
-        inline (r/draw rec seon.ctx/changes (ts/test-db) #'lab-inline)
+        walk #(doto (r/walker {:ref rec :changes seon.ctx/changes} (constantly nil) [% {}]) (r/frame! nil))
+        w (walk #'lab-page)
+        inline (walk #'lab-inline)
         both #(vector (r/frame! w nil) (r/frame! inline nil))]
-    (is (= [:div {:id "lab-page" :class "lab-page"} [:p "write the test"]
-            [:ol [:li {:id "lab-row-12" :class "lab-row"} "(+ 1 2)"] [:li {:id "lab-row-11" :class "lab-row"} "(inc 1)"]]
-            [:ol [:li {:id "lab-length-12" :class "lab-length"} 7] [:li {:id "lab-length-11" :class "lab-length"} 7]]]
-           (r/resolved w))
-        "the page whole, each component's root its key")
     (swap! rec assoc-in [:evals 12 :seon.eval/record :code] "(+ 1 5)")
     (is (= [{[`lab-row 12] :miss [`lab-length 12] :same} {[`lab-inline] :miss}] (both))
         "a member's change: its own rows, the length row the same; the inline render whole")
