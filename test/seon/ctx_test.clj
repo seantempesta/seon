@@ -10,12 +10,13 @@
 
 ;; The pattern these tests of seon.ctx's machinery (patch = build, windows, sharing) run on: the run-shaped
 ;; record the agent's pull had until seon.agent/the-agent-is-the-unit-not-the-run, kept as the machinery's
-;; input (runs with their task, turns and messages; windowed evals). The agent's own pattern is proved by
+;; input (runs with their task and turns; the agent's messages and windowed evals: a message is to the agent). The agent's own pattern is proved by
 ;; an-agents-record-holds-its-task-and-every-turn-and-eval.
 (def ^:private run-pattern
   "The run-shaped agent pattern the machinery tests build their records by."
   '[* {[:seon.run/_agent :as :runs :limit :seon.config.ctx/window :reverse true] :seon.run/run-fact}
     {[:seon.eval/_agent :as :evals :limit :seon.config.ctx/window :reverse true] [*]}
+    {[:seon.message/_agent :as :messages :reverse true] [*]}
     {[:seon.catch-up/_agent :as :catch-ups :limit :seon.config.ctx/window :reverse true] [*]}])
 
 (defn- end-agent!
@@ -87,7 +88,7 @@
               (:db-after (d/with db (vec (mapcat (fn [i] (cond-> (eval-tx i)
                                                             (zero? (mod i 3)) (conj {:seon.turn/id (str "lab/ctx#1/" i) :seon.turn/run [:seon.run/id "lab/ctx#1"] :seon.turn/agent [:seon.agent/key k] :seon.turn/n i})
                                                             (zero? (mod i 20)) (conj {:seon.message/id (str "m" i) :seon.message/from "user"
-                                                                                      :seon.message/to [:seon.run/id "lab/ctx#1"] :seon.message/agent [:seon.agent/key k] :seon.message/body "How is it going?"})))
+                                                                                      :seon.message/branch :lab-ctx :seon.message/agent [:seon.agent/key k] :seon.message/body "How is it going?"})))
                                                  part)))))
             db (partition-all 100 (range 1 (inc n)))))))
 
@@ -114,7 +115,7 @@
       0 (eval-tx (+ 10000 i))
       1 (run-tx (str "lab/ctx#" (+ 2 i)) 2)
       2 [{:seon.turn/id (str run "/x" i) :seon.turn/run [:seon.run/id run] :seon.turn/n i}]
-      3 [{:seon.message/id (str "mx" i) :seon.message/from "user" :seon.message/to [:seon.run/id run] :seon.message/body (str "note " i)}]
+      3 [{:seon.message/id (str "mx" i) :seon.message/from "user" :seon.message/branch :lab-ctx :seon.message/agent [:seon.agent/key k] :seon.message/body (str "note " i)}]
       4 [[:db/add [:seon.run/id run] :seon.run/status (nth [:running :done :closed] (.nextInt r 3))]]
       5 [[:db/add [:seon.task/id "lab/ctx"] :seon.task/plan (str "plan " i)]]
       6 [[(if (.nextBoolean r) :db/add :db/retract) [:seon.task/id "lab/ctx"] :seon.task/proofs (symbol "app.x-test" (str "t" (.nextInt r 3)))]]
@@ -153,7 +154,7 @@
            (let [e (nth evals (.nextInt r (count evals)))]
              [[:db/retract [:seon.eval/id e] :seon.eval/agent [:seon.agent/key k]] [:db/add [:seon.eval/id e] :seon.eval/agent [:seon.agent/key k]]])
            (eval-tx (+ 80000 i)))
-      11 (or (not-empty (vec (for [m (d/q '[:find [?m ...] :in $ ?r :where [?re :seon.run/id ?r] [?m :seon.message/to ?re]] db run)] [:db/retractEntity m])))
+      11 (or (not-empty (vec (for [m (d/q '[:find [?m ...] :where [?m :seon.message/branch :lab-ctx]] db)] [:db/retractEntity m])))
              (eval-tx (+ 50000 i))))))
 
 (deftest an-agents-record-holds-its-task-and-every-turn-and-eval
@@ -224,7 +225,7 @@
           (is (= "lab/ctx" (get-in t [:runs r1 :task :seon.task/id])))
           (is (= #{'app.x-test/t0} (get-in t [:runs r1 :task :seon.task/proofs])))
           (is (= 20 (count (get-in t [:runs r1 :turns]))))
-          (is (= #{"m20" "m40" "m60"} (set (names (get-in t [:runs r1 :messages]) :seon.message/id)))))))
+          (is (= #{"m20" "m40" "m60"} (set (names (:messages t) :seon.message/id)))))))
     (loop [db (seeded 60) c (ctx/build db (aid db) :b) i 0 bad [] unshared [] checked 0]
       (if (= i 150)
         (do (is (empty? bad) (str "the change after which the patch and a build differ: " (first bad)))
@@ -244,7 +245,7 @@
     (testing "a build and its rebuild are the same data, and the same order: every collection newest first"
       (let [db (seeded 60) t (:tree (ctx/build db (aid db) :b))]
         (is (= (map #(str "e" %) (range 60 0 -1)) (names (:evals t) :seon.eval/id)) "evals, newest first: their ids, issued in time order")
-        (let [ms (get-in t [:runs (id db [:seon.run/id "lab/ctx#1"]) :messages])]
+        (let [ms (:messages t)]
           (is (= (sort > (keys ms)) (keys ms)) "messages by id, as every collection (their ids are their content's)"))))))
 
 (deftest any-entitys-record-follows-mains-commits
@@ -255,7 +256,7 @@
         te (:db/id (d/entity db0 [:seon.task/id "lab/ctx"]))
         re (:db/id (d/entity db0 [:seon.run/id "lab/ctx#1"]))]
     (is (= "lab/ctx" (:seon.task/id (:tree (ctx/build db0 te :main)))) "a task's record")
-    (is (some #{"m20"} (names (:messages (:tree (ctx/build db0 re :main))) :seon.message/id)) "a run's, with its joins")
+    (is (seq (:turns (:tree (ctx/build db0 re :main)))) "a run's, with its joins")
     (loop [db db0 cs {te (ctx/build db0 te :main) re (ctx/build db0 re :main)} i 0 bad []]
       (if (= i 60)
         (is (empty? bad) (str "the commit after which a followed record and a build differ: " (first bad)))
@@ -464,7 +465,8 @@
   {:malli/schema [:=> [:cat :map :map] :map]}
   [t d]
   (reduce (fn [t [p [_ n]]] (cond (empty? p) n
-                                  (nil? n) (update-in t (pop p) dissoc (peek p))
+                                  ;; a top-level key gone (an agent's messages all retracted): update-in on [] would assoc nil
+                                  (nil? n) (if (= 1 (count p)) (dissoc t (peek p)) (update-in t (pop p) dissoc (peek p)))
                                   :else (assoc-in t p n)))
           t (sort-by (comp count key) d)))
 
@@ -853,12 +855,12 @@
     (testing "a member's attribute, and a new member, written under its parent by the unit's ref"
       (let [r1 (id db [:seon.run/id "lab/ctx#1"])
             [[_ same] db'] (step db #(swap! ctx/ctx (fn [c] (-> c (assoc-in [:runs r1 :seon.run/status] :done)
-                                                                (assoc-in [:runs r1 :messages "m-new"]
+                                                                (assoc-in [:messages "m-new"]
                                                                           {:seon.message/id "m-new" :seon.message/from "agent" :seon.message/body "a note to myself"})))))]
         (is (= :done (:seon.run/status (d/entity db' [:seon.run/id "lab/ctx#1"]))))
-        (is (= "lab/ctx#1" (:seon.run/id (:seon.message/to (d/entity db' [:seon.message/id "m-new"])))))
+        (is (= (aid db) (:db/id (:seon.message/agent (d/entity db' [:seon.message/id "m-new"])))) "the new message is the agent's")
         (is same)
-        (is (= "a note to myself" (get-in @ctx/ctx [:runs r1 :messages (id db' [:seon.message/id "m-new"]) :seon.message/body])) "the swap!'s map gave way to the db's: the new member under its id")))
+        (is (= "a note to myself" (get-in @ctx/ctx [:messages (id db' [:seon.message/id "m-new"]) :seon.message/body])) "the swap!'s map gave way to the db's: the new member under its id")))
     (testing "a cardinality-many attribute of a forward unit, member by member"
       (let [[[_ same] db'] (step db #(swap! ctx/ctx update-in [:runs (id db [:seon.run/id "lab/ctx#1"]) :task :seon.task/proofs] conj 'app.x-test/t9))]
         (is (= #{'app.x-test/t0 'app.x-test/t9} (:seon.task/proofs (d/entity db' [:seon.task/id "lab/ctx"]))))

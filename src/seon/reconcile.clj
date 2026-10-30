@@ -125,11 +125,11 @@
   #{:waiting :cap})
 
 (defn- branch-messages
-  "How many messages main holds to the runs on branch br: what a parked session on br is woken
-  by when it has taken fewer (:seon.run/taken). O(the messages to br's runs)."
+  "How many messages main holds to the agent on branch br: what a parked agent on br is woken
+  by when it has taken fewer (:seon.run/taken). O(the messages to br)."
   {:malli/schema [:=> [:cat :seon.host/db :keyword] :int]}
   [db br]
-  (or (d/q '[:find (count ?m) . :in $ ?b :where [?r :seon.run/branch ?b] [?m :seon.message/to ?r]] db br) 0))
+  (or (d/q '[:find (count ?m) . :in $ ?b :where [?m :seon.message/branch ?b]] db br) 0))
 
 (def empty-index
   "The index of a db with no tasks."
@@ -315,18 +315,16 @@
   {:malli/schema [:=> [:cat :seon.reconcile/index :seon.host/db [:sequential :any]] :seon.reconcile/index]}
   [idx db ops]
   (let [es (into #{} (keep (fn [[_ e a]] (when (and (keyword? a) (watched-ns (namespace a))) e))) ops)
-        ;; a message to a run: its branch's count moves by one (a commit's op names the run it
-        ;; went to; a diff's op names only the message, so its branch is counted again), and the
-        ;; tasks that can be that session's newest are re-derived: the run's task and the tasks
-        ;; downstream of it on its branch (a session is a task and the same-branch tasks it needs)
-        msgs (keep (fn [[op e a v]] (when (= :seon.message/to a)
-                                      (let [r (d/entity db (or v (:db/id (:seon.message/to (d/entity db e)))))]
-                                        {:br (:seon.run/branch r) :task (:seon.task/id (:seon.run/task r)) :d (when v (if (= :db/retract op) -1 1))})))
+        ;; a message to a branch's agent: its count moves by one (a commit's op names the branch;
+        ;; a diff's op may name only the message, so its branch is counted again), and the tasks
+        ;; on that branch are re-derived (the session its agent works)
+        msgs (keep (fn [[op e a v]] (when (= :seon.message/branch a)
+                                      {:br (or v (:seon.message/branch (d/entity db e))) :d (when v (if (= :db/retract op) -1 1))}))
                    ops)
         idx (reduce (fn [idx {:keys [br d]}] (if d (update-in idx [:msgs br] (fnil + 0) d) (assoc-in idx [:msgs br] (branch-messages db br))))
                     idx (filter :br msgs))
-        es (into es (for [{:keys [br task]} msgs :when (and br task), id (downstream idx #{task})
-                          :when (= br (get-in idx [:tasks id :seon.task/branch]))
+        es (into es (for [br (into #{} (keep :br) msgs), [id t] (:tasks idx)
+                          :when (= br (:seon.task/branch t))
                           :let [e (:db/id (d/entity db [:seon.task/id id]))] :when e]
                       e))]
     (if (empty? es)
@@ -364,7 +362,7 @@
                   [:=> [:cat :seon.reconcile/index :seon.host/db :seon.host/db] :map]
                   [:=> [:cat :seon.reconcile/index :seon.host/db :seon.host/db [:sequential :seon.host/datom]] :map]]}
   ([db] (observe empty-index db (concat (for [e (task/entity-ids db)] [:db/add e :seon.task/id nil])
-                                        (for [dt (d/datoms db :aevt :seon.message/to)] [:db/add (:e dt) :seon.message/to (:v dt)]))))
+                                        (for [dt (d/datoms db :aevt :seon.message/branch)] [:db/add (:e dt) :seon.message/branch (:v dt)]))))
   ([idx from db]
    (index idx from db (for [a (sort (into #{} (filter #(and (keyword? %) (watched-ns (namespace %)))) (concat (keys (:schema from)) (keys (:schema db)))))
                             dt (apply concat (d/datoms-diff from db :aevt [a]))]
@@ -632,13 +630,15 @@
             (:seon.run/basis-t a) (assoc :main-t (:seon.run/basis-t a)))))
 
 (defn- last-verdict
-  "The reasons of the newest :verdict entry to run aid's session on its task (the task's runs on
-  its branch, as main names them; a session's earlier stage is another task), or nil."
+  "The reasons of the newest :verdict entry to run aid's agent on its task (to its branch, of a run of its task:
+  a verdict's id is v-<run>, and a session's earlier stage is another task), or nil."
   {:malli/schema [:=> [:cat :seon.host/db :seon.run/id] [:maybe [:vector :any]]]}
   [db aid]
-  (some->> (d/q '[:find ?tx ?body :in $ ?a :where [?x :seon.run/id ?a] [?x :seon.run/branch ?b] [?x :seon.run/task ?t]
-                  [?r :seon.run/branch ?b] [?r :seon.run/task ?t] [?m :seon.message/to ?r ?tx] [?m :seon.message/kind :verdict] [?m :seon.message/body ?body]] db aid)
-           (sort-by first) last second sedn/decode :reasons))
+  (let [x (d/entity db [:seon.run/id aid])
+        pfx (str "v-" (:seon.task/id (:seon.run/task x)) "#")]
+    (some->> (d/q '[:find ?tx ?body :in $ ?b ?pfx :where [?m :seon.message/branch ?b ?tx] [?m :seon.message/kind :verdict]
+                    [?m :seon.message/id ?id] [(clojure.string/starts-with? ?id ?pfx)] [?m :seon.message/body ?body]] db (:seon.run/branch x) pfx)
+             (sort-by first) last second sedn/decode :reasons)))
 
 (defn hold-tx
   "Run a failed (the done rule refused it, its agent died, or its merge was refused):
@@ -792,7 +792,7 @@
                    ;; synced before the spawn that follows reads it (AGENTS section 5, durability)
                    (cond-> (one (request st run :done {:op :write :req {:op :tx :branch :db :flush? true
                                                                        :tx-data (into (cas-tx run :ended :parked {})
-                                                                                      (task/message-tx (str "v-" run) :verdict "root" run
+                                                                                      (task/message-tx (str "v-" run) :verdict "root" (get-in (task/run (:db st) run) [:seon.run/env :branch])
                                                                                                        (verdict-body (task/run (:db st) run) (:reasons act))))}}))
                      (kept? st a) (stop-kept run agent))))
       :hold (cond-> (one (write st run :done (hold-tx a (:problem act))))
@@ -843,15 +843,13 @@
              "\n\nIts whole task as data (what it cites, its write set): (my.task/data)")))))
 
 (defn- taken-messages
-  "How many messages to the runs on run aid's branch (as main names them) branch db holds:
-  those its session's turns took (each written on the branch by the turn that took it). The
-  other side of branch-messages' count. One read of :seon.run/branch on main (its runs; the
-  attribute is not indexed), then one seek per run's id on db and one per its messages: once a
-  judged run."
+  "How many messages to the agent on run aid's branch (as main names it) branch db holds: those
+  its turns took (each written on the branch by the turn that took it). The other side of
+  branch-messages' count: one seek for the run's branch on main, one for the branch's messages."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.run/id] :int]}
   [main db aid]
-  (let [ids (d/q '[:find [?id ...] :in $ ?a :where [?x :seon.run/id ?a] [?x :seon.run/branch ?b] [?r :seon.run/branch ?b] [?r :seon.run/id ?id]] main aid)]
-    (or (d/q '[:find (count ?m) . :in $ [?id ...] :where [?r :seon.run/id ?id] [?m :seon.message/to ?r]] db ids) 0)))
+  (let [br (:seon.run/branch (d/entity main [:seon.run/id aid]))]
+    (or (when br (d/q '[:find (count ?m) . :in $ ?b :where [?m :seon.message/branch ?b]] db br)) 0)))
 
 (defn- judge-tx
   "Run aid's end on main from MEASURED facts: the end its agent wrote on the branch,

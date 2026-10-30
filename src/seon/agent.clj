@@ -171,26 +171,25 @@
   (boolean (and base main (not= (d/commit-id base) (d/commit-id main)))))
 
 (defn untaken-entries
-  "The entries main holds to the runs of this agent's session (the runs on its branch, as main
-  names them) that its branch does not hold yet, in main's order (by transaction, then id): each {:id :kind :from :to :body}.
+  "The entries main holds to this agent (to its branch) that its branch does not hold yet, in main's order
+  (by transaction, then id): each {:id :kind :from :branch :body}.
   Delivery is the fact, read here, not the frame root pushes to a live process: a session whose
   process is gone (parked in an earlier boot, a lost wake, a red verdict on a run whose process
   ended) is spawned again, and its run takes them from main (design one-derivation 4.1 section 5;
   the frame alone left such a run with nothing, parked short of main's count, and spawned again).
   O(the entries to the session's runs)."
-  {:malli/schema [:=> [:cat] [:vector [:map [:id :string] [:kind :seon.message/kind] [:from :string] [:to :seon.run/id] [:body :string]]]]}
+  {:malli/schema [:=> [:cat] [:vector [:map [:id :string] [:kind :seon.message/kind] [:from :string] [:branch :seon.db/branch] [:body :string]]]]}
   []
   (let [main (heard-main)
         b (db)
         br (session-branch main)]
-    (->> (when br (d/q '[:find ?tx ?id ?kind ?from ?rid ?body :in $ ?br
-                          :where [?r :seon.run/branch ?br] [?r :seon.run/id ?rid]
-                          [?m :seon.message/to ?r ?tx] [?m :seon.message/id ?id] [?m :seon.message/from ?from] [?m :seon.message/body ?body]
+    (->> (when br (d/q '[:find ?tx ?id ?kind ?from ?br ?body :in $ ?br
+                          :where [?m :seon.message/branch ?br ?tx] [?m :seon.message/id ?id] [?m :seon.message/from ?from] [?m :seon.message/body ?body]
                           [(get-else $ ?m :seon.message/kind :message) ?kind]]
                         main br))
          (remove (fn [[_ id]] (d/entity b [:seon.message/id id])))
          (sort-by (juxt first second))
-         (mapv (fn [[_ id kind from rid body]] {:id id :kind kind :from from :to rid :body body})))))
+         (mapv (fn [[_ id kind from br body]] {:id id :kind kind :from from :branch br :body body})))))
 
 (def taken-attributes
   "The attributes of the runs of an agent's session that root writes on main and its turn copies
@@ -230,9 +229,9 @@
   "The transaction that writes entries (untaken-entries) on this branch: the same facts root
   wrote on main, which their reader takes by writing them."
   {:malli/schema [:=> [:cat [:sequential :map]] :seon.db/tx-data]}
-  [entries] (into [] (mapcat (fn [{:keys [id kind from to body]}]
-                               ;; the agent that takes it, beside its run (:seon.message/agent: its record's messages)
-                               (update (task/message-tx id kind from to body) 0 assoc :seon.message/agent {:seon.agent/key (:key @state)})))
+  [entries] (into [] (mapcat (fn [{:keys [id kind from branch body]}]
+                               ;; the agent that takes it (:seon.message/agent: its record's messages)
+                               (update (task/message-tx id kind from branch body) 0 assoc :seon.message/agent {:seon.agent/key (:key @state)})))
                   entries))
 
 (defn taken!

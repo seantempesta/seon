@@ -179,7 +179,7 @@
 (deftest every-identity-attribute-is-named-by-one-entity-schema
   ;; the schema of an entity is the one its identity attribute names (seon.render/entity-schema)
   (let [attrs #{:seon.agent/key :seon.run/id :seon.task/id :seon.root/id :seon.turn/id :seon.message/id
-                :seon.run/agent :seon.turn/run :seon.message/to :seon.agent/root :seon.eval/agent :seon.run/task}
+                :seon.run/agent :seon.turn/run :seon.message/branch :seon.agent/root :seon.eval/agent :seon.run/task}
         named (frequencies (for [[k form] seon.contract/forms :when (:seon.db/attributes (seon.contract/properties k))
                                  [a] (filter vector? (rest form)) :when (attrs a)]
                              a))]
@@ -311,7 +311,7 @@
                          :seon.task/citations (vec (seon.ref/cited (:seon.ref/citations (seon.ref/parse nil walked-plan))))}]
                        (seon.task/agent-tx "b1" :a3 {:status :idle :pid 77 :branch :task-demo-f})
                        (seon.task/run-start-tx "demo/f#1" "demo/f" "b1" :a3 {:branch :task-demo-f :model "m" :max-turns 8} 0 "p")
-                       (update (seon.task/message-tx "m-1" :message "owner" "demo/f#1" "check g") 0 assoc :seon.message/agent {:seon.agent/key k})
+                       (update (seon.task/message-tx "m-1" :message "owner" :task-demo-f "check g") 0 assoc :seon.message/agent {:seon.agent/key k})
                        ;; the agent's task, which its record pulls (seon.agent/the-agent-is-the-unit-not-the-run)
                        [{:seon.agent/key k :seon.agent/task {:seon.task/id "demo/f"}}]
                        ;; root's own evaluation, from its REPL

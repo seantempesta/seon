@@ -136,10 +136,10 @@
        (let [bc (d/connect (assoc cfg :branch b))]
          (try
            (d/transact conn (task/run-start-tx "demo/f#1" "demo/f" "b1" :a3 {:branch b :model "m" :max-turns 8} 0 "p"))
-           (d/transact conn (task/message-tx "m-1" :message "owner" "demo/f#1" "check g"))
+           (d/transact conn (task/message-tx "m-1" :message "owner" b "check g"))
            ;; on the branch, which forked before main held the run or the message
            (d/transact bc [{:db/id "run" :seon.run/id "demo/f#1"} {:seon.turn/id "demo/f#1/0" :seon.turn/run "run" :seon.turn/n 0 :seon.turn/origin :model}])
-           (d/transact bc (task/message-tx "m-1" :message "owner" "demo/f#1" "check g"))
+           (d/transact bc (task/message-tx "m-1" :message "owner" b "check g"))
            (d/transact bc (repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e1" "a3" {:code "(f 2)" :response {:handle 'result/e1 :value 4}}))
            (testing "from root on main: its agents, each agent's run"
              (is (= [{:seon.agent/id :a3 :seon.agent/status :idle :seon.process/_agent [{:seon.process/pid 77 :seon.process/running "(f 2)"}]
@@ -148,12 +148,12 @@
                                                                            {:seon.process/_agent [:seon.process/pid :seon.process/running]}
                                                                            {:seon.run/_agent [:seon.run/id]}]}]
                                                [:seon.root/id :root])))))
-           (testing "the message is to the run, on main"
-             (is (= [{:seon.message/body "check g"}] (:seon.message/_to (d/pull @conn '[{:seon.message/_to [:seon.message/body]}] [:seon.run/id "demo/f#1"])))))
+           (testing "the message is to the agent by its branch, on main"
+             (is (= ["check g"] (d/q (quote [:find [?b ...] :in $ ?br :where [?m :seon.message/branch ?br] [?m :seon.message/body ?b]]) @conn b))))
            (testing "on the branch: the run's turns and the message it took, the agent's evaluations"
-             (let [run (d/pull @bc '[{:seon.turn/_run [:seon.turn/id]} {:seon.message/_to [:seon.message/id]}] [:seon.run/id "demo/f#1"])]
+             (let [run (d/pull @bc '[{:seon.turn/_run [:seon.turn/id]} ] [:seon.run/id "demo/f#1"])]
                (is (= [{:seon.turn/id "demo/f#1/0"}] (:seon.turn/_run run)))
-               (is (= [{:seon.message/id "m-1"}] (:seon.message/_to run))))
+               (is (= ["m-1"] (d/q (quote [:find [?id ...] :in $ ?br :where [?m :seon.message/branch ?br] [?m :seon.message/id ?id]]) @bc b))))
              (is (= ["e1"] (mapv :seon.eval/id (:seon.eval/_agent (d/pull @bc '[{:seon.eval/_agent [:seon.eval/id]}] [:seon.agent/key k]))))))
            (testing "the run, the message and the agent are one entity on the branch and on main (content ids)"
              (doseq [ref [[:seon.run/id "demo/f#1"] [:seon.message/id "m-1"] [:seon.agent/key k]]]
