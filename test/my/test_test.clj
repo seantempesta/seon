@@ -9,6 +9,15 @@
          (set (d/q '[:find [?n ...] :where [_ :var/name ?n]] (t/world))))
       "it holds what its docstring names"))
 
+(deftest the-history-world-keeps-what-a-fixture-replaced
+  ;; docs/testing.md#testing-in-the-world: {:history? true} is the same world, keeping history
+  (let [hw (t/world {:history? true})
+        db (t/with hw (t/code 'app.calc "(ns app.calc)\n(defn add [x y] (- x y))\n"))
+        srcs (fn [d] (set (d/q '[:find [?s ...] :where [?v :var/name app.calc/add] [?v :var/form ?f] [?f :form/src ?s]] d)))]
+    (is (identical? hw (t/world {:history? true})) "built once a process")
+    (is (= (srcs (t/world)) (srcs hw)) "the same world")
+    (is (< 1 (count (srcs (d/history db)))) "the replaced form is in its history")))
+
 (deftest a-fixture-adds-to-the-world-and-leaves-it-as-it-was
   (let [db (t/with (t/world) (t/code 'app.x "(ns app.x)\n(defn f [x] (app.calc/add x 1))\n") (t/page "docs/x.md" "# X\n\nSee app.x/f.\n"))]
     (is (some? (d/entity db [:var/name 'app.x/f])) "the fixture's var")
