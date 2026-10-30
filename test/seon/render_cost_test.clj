@@ -311,8 +311,8 @@
 
 (defn redraw!
   "One change drawn: eval 10 opened or closed in the atom (each call a change, as a patch reset!s ctx:
-  each component watching it asked whether one of its read paths moved), then the walk's frame."
-  {:malli/schema [:=> [:cat :map :seon.host/deref] [:vector :any]]}
+  each component watching it asked whether one of its read paths moved), then the walk's frame: what it redrew."
+  {:malli/schema [:=> [:cat :map :seon.host/deref] [:map-of [:vector :any] [:enum :miss :same]]]}
   [w a]
   (swap! a update-in [:evals 10 :seon.eval/opened] not)
   (seon.render/frame! w nil))
