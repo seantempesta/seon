@@ -378,7 +378,8 @@
                      ;; measured 2026-10-28: 28.1 MB / 175 calls at 1, 37.4 MB / 742 at 10, 57.9 MB / 2,002 at 30
                      ;; (9.7M, 12.9M, 19.9M ticks); before, the four views each reading the diff: 61.5 MB / 220 calls
                      ;; at 1, 80.9 MB / 1,309 at 10, 124.7 MB / 3,729 at 30 (21.8M, 28.7M, 44.3M ticks)
-                     :per-n {:bytes 1100000 :calls 70}
+;; +2 calls a function: caused asks each changed var of the :long-form class (its seek and its form's text)
+                     :per-n {:bytes 1100000 :calls 72}
                      ;; +3 calls 2026-10-30: seon.merge/content-attr, one contracted call a merge-diff read, was uncontracted
 ;; +10 calls: caused asks the :long-form class (seon.problems/long-forms) of the changed vars, its bound read once
                      :fixed {:bytes 27000000 :calls 136}
