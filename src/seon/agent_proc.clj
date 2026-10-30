@@ -3,7 +3,7 @@
   the api with flow/update!. It owns root's end of the agent's socket, a jolt.async.remote
   end (session RC1): the agent's frames arrive as values on the end's :in, which IS this
   proc's :from in-port, and what it sends the agent is put on the end's :out. It owns the
-  agent's process and passes Flow's pause, resume and stop on to the agent's own loop.
+  agent's process and passes Flow's pause, resume and stop on to the agent's own graph (seon.repl/transport-step).
   From proto/flow f2-final proto.control (session F2)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.contract :as contract :refer [defn defn-]] [seon.lib :as lib] [seon.config :as cfg] [seon.sock :as sock] [seon.step :as step]

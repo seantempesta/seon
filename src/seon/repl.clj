@@ -876,6 +876,7 @@
   ([_] {})
   ([st _] st)
   ([st _ m]
+   (swap! agent/state assoc :busy true)
    (let [rs (cond
               ;; root's stop: the process ends after the requests before it, what they applied committed
               (= :stop (:op m)) (do (when (:dirty? @agent/state) (agent/commit!)) (lib/c-exit 0))
@@ -902,6 +903,7 @@
      (doseq [r rs] (agent/send! r))
      ;; a branch is committed whenever a request is done (its writes ran ahead in memory)
      (when (:dirty? @agent/state) (agent/commit!))
+     (swap! agent/state assoc :busy false)
      [st nil])))
 
 (defn tests-step
@@ -917,18 +919,21 @@
   ([st _] st)
   ([st _ m]
    (doseq [r (agent/handle! m)] (agent/send! r))
-   (when (:dirty? @agent/state) (agent/commit!))
+   ;; its results committed when the REPL is idle; a request it runs commits them with its own at its end,
+   ;; never half of it from here
+   (when (and (:dirty? @agent/state) (not (:busy @agent/state))) (agent/commit!))
    [st nil]))
 
 (def ^:private answers
   "The ops of root's answers to the agent's own requests, each carrying the request's :k
-  (seon.agent/await-reply)."
+  (seon.agent/await-reply). See docs/processes.md#the-agent-process."
   #{:reply :fx-reply :fd :branched})
 
 (def ^:private at-once
   "The ops the :transport proc handles itself, whatever the :repl proc runs: they write nothing
   of the branch but the inbox (seon.agent/handle!): a delivery, a stats read, an effect's outcome
-  nobody awaits (fx-send!'s, or one whose wait an interrupt stopped), an answer nobody awaits."
+  nobody awaits (fx-send!'s, or one whose wait an interrupt stopped), an answer nobody awaits.
+  See docs/processes.md#the-agent-process."
   #{:message :stats :fx-reply :reply :fd :branched})
 
 (defn transport-step
@@ -954,6 +959,9 @@
        (= :tests op) [st {:tests [m]}]
        (at-once op) (do (doseq [r (agent/handle! m)] (agent/send! r)) [st nil])
        (= :pause op) (do (flow/pause-proc (:flow @agent/state) :repl) [st nil])
+       ;; a paused proc reads only its control channel: a stop resumes the REPL first, so it ends the
+       ;; process after the requests before it, paused or not
+       (= :stop op) (do (flow/resume-proc (:flow @agent/state) :repl) [st {:repl [m]}])
        (= :resume op) (do (flow/resume-proc (:flow @agent/state) :repl) [st nil])
        :else [st {:repl [m]}]))))
 
@@ -966,9 +974,12 @@
   and its cause written as the run's end (seon.agent/died!)."
   {:malli/schema [:=> [:cat] :any]}
   []
-  (let [g (flow/create-flow {:procs {:transport {:proc (flow/process #'transport-step)}
-                                     :repl {:proc (flow/process #'agent-step)}
-                                     :tests {:proc (flow/process #'tests-step)}}
+  ;; the :repl and :tests in-ports each hold what root may have queued for the agent, as root's end of the
+  ;; socket does: at the bound the transport waits to hand on the next (docs/flow.md#flow-inside-an-agent)
+  (let [in {:in {:buf-or-n (cfg/value :seon.config.agent/inbox-size)}}
+        g (flow/create-flow {:procs {:transport {:proc (flow/process #'transport-step)}
+                                     :repl {:proc (flow/process #'agent-step) :chan-opts in}
+                                     :tests {:proc (flow/process #'tests-step) :chan-opts in}}
                              :conns [[[:transport :repl] [:repl :in]] [[:transport :tests] [:tests :in]]]})
         {:keys [error-chan]} (flow/start g)]
     (swap! agent/state assoc :flow g)
