@@ -1053,8 +1053,8 @@
   (:form/source, the namespace's :ns/file) and that this process holds none of, each loaded whole
   by require, in load order: through Jolt's AOT cache (JOLT_CACHE_DIR, bin/env) a namespace's
   compile is paid once, by the first process, and every later one loads it compiled (main's 78
-  test namespaces: 12.2 s evaluated form by form, 0.70 s loaded warm, 16.1 s cold, 2026-10-30), its
-  contracted vars armed. A namespace whose require throws is left to load-forms!, which names the
+  test namespaces: 12.2 s evaluated form by form, 0.70 s loaded warm, 16.1 s cold: the commit that
+  made this), its contracted vars armed. A namespace whose require throws is left to load-forms!, which names the
   form that fails. Answers [the namespaces loaded, the errors]. See docs/source.md#a-process-holds-the-tests-only-when-it-runs-them."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :map]] [:tuple [:set :symbol] [:vector :seon.program/error]]]}
   [db forms]

@@ -176,7 +176,7 @@
     (is (= 3 (count (:turns t))) "every turn")
     (is (= 5 (count (:evals t))) "every eval")
     (is (= ["m1"] (names (:messages t) :seon.message/id)) "the messages it took")
-    (is (= [:seon.message/_agent] (for [[j _] joins :when (some #{:limit} j)] (first j))) "no window on the turns and evals: the messages alone are windowed")
+    (is (= [] (for [[j _] joins :when (some #{:limit} j)] (first j))) "no window on its own record: every turn, eval and message (the owner: deliver all messages and errors)")
     (is (and (not (contains? t :runs)) (not (contains? t :catch-ups))) "no runs, no catch-ups")))
 
 (deftest an-agents-record-holds-only-its-work

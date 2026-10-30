@@ -85,6 +85,7 @@ Clock reads whose value is recorded or shown and never compared to decide anythi
 - `my.root/watch!`, `seon.root/import-source!` (besides its duration, below): the time a file watcher's death, or the store having refused root's source fact, was seen, stamped on its `:platform` error ([health](health.md#every-writer-root-loads-what-changed)).
 - `seon.root/seed-program!`: the seed's duration (`ms-since` its start), recorded in the `:seon.root/source` fact and in its answer, shown; nothing waits or decides by it ([machine](machine.md#a-root-boots-from-a-seeded-store)).
 - `seon.root/state`: the writer's transactions per second over the last second, shown.
+- `seon.root/stop!`: the stop fact's `:at-ms` and the stop's own duration (`:ms`, on ROOT STOPPED), recorded; it waits on answers, none on a clock.
 - `seon.render.proc/pass`: a render pass's duration and the events' age, shown on the dashboard.
 - `seon.agent/handle!`, `seon.root/ext-op`, `seon.reconcile/advance`, `seon.reconcile/reconciler-proc`: stamps and durations.
 - `seon.agent/init!`, `seon.agent/hello!`: a spawn's phases (`seon.agent/spawn-phases`: the fork server's marks, then the child's, each with the bytes it allocated), sent with the agent's hello and shown on root's `:ready` event; nothing decides by them.
