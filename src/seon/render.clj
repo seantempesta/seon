@@ -252,27 +252,14 @@
   one diff, seon.ctx/changes), the db its db renders read (db-fn, called when one runs) and its
   root call. Holds, in this process, the one cache: each component's reaction, args, output and
   db reads ({key entry}), its render queue (the keys a change reached), mount counter and ledger
-  (calls, hits, misses and allocation by render var), and the keys of each render var it drew, whose
-  var it watches (a redefinition queues them: `watch-render!`). A cold walk (root drawing a branch) is a
+  (calls, hits, misses and allocation by render var), and the render vars it watches: each it drew, once,
+  whose redefinition (a defn at the REPL: Clojure's watch on a var's root) queues that var's components
+  for the next flush!, found in the cache when it fires. A cold walk (root drawing a branch) is a
   walker drawn once."
   {:malli/schema [:=> [:cat :map :seon.host/fn [:vector :any]] :map]}
   [src db-fn root]
   {:src src :db db-fn :root root :cache (volatile! {}) :queue (volatile! #{}) :mounts (volatile! 0)
-   :ledger (volatile! {}) :out (volatile! nil) :db-keys (volatile! #{}) :by-var (volatile! {})})
-
-(defn- watch-render!
-  "Component k of render var f mounted in walk w (on? true) or gone (false): the keys w holds of f, and a
-  watch on f while it holds any, whose firing (f redefined: a defn at the REPL, Clojure's watch on a
-  var's root) queues them for the next flush!, as a change of what they read does. The watch's key is
-  the walk's own index, so walks never share one."
-  {:malli/schema [:=> [:cat :map :any [:vector :any] :boolean] :nil]}
-  [w f k on?]
-  (when (var? f)
-    (let [ix (:by-var w) had (get @ix f)]
-      (vswap! ix (fn [m] (let [ks ((if on? (fnil conj #{}) disj) (get m f) k)] (if (seq ks) (assoc m f ks) (dissoc m f)))))
-      (cond (and on? (empty? had)) (add-watch f ix (fn [_ _ _ _] (vswap! (:queue w) into (get @ix f))))
-            (and (not on?) (seq had) (empty? (get @ix f))) (remove-watch f ix))))
-  nil)
+   :ledger (volatile! {}) :out (volatile! nil) :db-keys (volatile! #{}) :watched (volatile! #{})})
 
 (defn- led!
   "Count k (:hit, :miss, :same) for render var f in w's ledger, with the ticks and bytes a run took."
@@ -317,7 +304,11 @@
             o (cond-> opts
                 (contains? ks :seon.ctx/ctx) (assoc :seon.ctx/ctx (ratom/fresh (ratom/ref-view (:ref (:src w)) (:changes (:src w)))))
                 db? (assoc :seon.db/db ((:db w))))
-            order (or (:order prev) (do (watch-render! w f k true) (vswap! (:mounts w) inc)))
+            ;; a render drawn for the first time in this walk: watched, so its redefinition draws it again
+            _ (when (and (var? f) (not (contains? @(:watched w) f)))
+                (vswap! (:watched w) conj f)
+                (add-watch f (:watched w) (fn [_ _ _ _] (vswap! (:queue w) into (keep (fn [[ck c]] (when (= f (:f c)) ck))) @(:cache w)))))
+            order (or (:order prev) (vswap! (:mounts w) inc))
             kids (volatile! [])
             id (key-id k)
             reads (volatile! nil)
@@ -363,7 +354,6 @@
   [w k]
   (when-let [c (get @(:cache w) k)]
     (some-> (:rx c) ratom/dispose!)
-    (watch-render! w (:f c) k false)
     (vswap! (:cache w) dissoc k)
     (vswap! (:queue w) disj k)
     (vswap! (:db-keys w) disj k)
@@ -539,9 +529,13 @@
   [w] @(:ledger w))
 
 (defn dispose-walk!
-  "Every component of walk w disposed: a cold walk's end."
+  "Every component of walk w disposed, and the render vars it watched let go: a cold walk's end."
   {:malli/schema [:=> [:cat :map] :nil]}
-  [w] (when-let [k @(:out w)] (unmount! w k)) nil)
+  [w]
+  (when-let [k @(:out w)] (unmount! w k))
+  (doseq [f @(:watched w)] (remove-watch f (:watched w)))
+  (vreset! (:watched w) #{})
+  nil)
 
 ;; ---- entity schemas and patterns (docs/ctx.md#the-pattern) ----
 
