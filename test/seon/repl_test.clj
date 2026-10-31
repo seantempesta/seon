@@ -3,7 +3,7 @@
   (:require [clojure.test :refer [deftest is testing]] [clojure.string :as str] [seon.agent-test :as at]
             [seon.intr :as intr] [seon.agent :as agent] [seon.contract :as contract]
             [seon.ref :as ref] [seon.template :as template] [seon.repl :as repl] [seon.context :as context] [seon.docs :as docs]
-            [seon.config :as cfg] [my.agent] [seon.render :as render] [seon.render.ui :as ui] [seon.web.html :as h] [seon.test-store :as ts] [datahike.api :as d]))
+            [seon.config :as cfg] [my.agent] [seon.render :as render] [seon.render.ui :as ui] [seon.web.html :as h] [seon.test-store :as ts] [my.test] [datahike.api :as d]))
 
 (deftest an-eval-answers-its-value-as-clojure-does
   ;; owner, 2026-10-28 and 2026-10-29: match Clojure for the eval's output: top-level forms run in
@@ -427,7 +427,9 @@
   ;; task seon.context/help-is-a-checked-docs-page (v1's help was tested data, its most-proven
   ;; turn saver): every form the help page tells an agent to run works in a real agent, in
   ;; order, the ending functions last, and every name it cites resolves in the program
-  (let [forms (runnable (docs/page-text (let [db0 (ts/test-db)] (d/db-with db0 (docs/load-tx db0 "docs" (docs/pages (cfg/checkout) "docs"))))
+  (let [forms (runnable (docs/page-text (my.test/with (my.test/world)
+                                                    ;; the help page alone: the forms it tells an agent to run (the agent under test reads the rest)
+                                                    (my.test/page context/help-page (slurp (str (cfg/checkout) "/" context/help-page))))
                                        context/help-page))
         end? #(or (= "(my.turn/wait)" %) (str/starts-with? % "(my.task/fail!"))
         forms (concat (remove end? forms) (sort-by #(= "(my.turn/wait)" %) (filter end? forms)))
@@ -547,15 +549,15 @@
   (try {:value (intr/run ticks thunk)} (catch Throwable e {:error e})))
 
 (deftest an-endless-form-trips-its-ticks-and-is-named
-  (let [{e :error} (outcome 100000000 #(loop [] (recur)))
+  (let [{e :error} (outcome 20000000 #(loop [] (recur)))
         m (agent/error-map e)]
     (is (= :seon.repl/ticks-spent (:seon.error/type m)) "a loop that allocates nothing stops, as the typed error")
-    (is (<= 100000000 (:ticks m) 100100000) "it ran its budget, and at most one poll past it")
-    (is (= 100000000 (:budget m)))
+    (is (<= 20000000 (:ticks m) 20100000) "it ran its budget, and at most one poll past it")
+    (is (= 20000000 (:budget m)))
     (is (contract/valid? :seon.repl/ticks-spent m) "the error is the declared variant, data for the agent"))
-  (let [{e :error} (outcome 100000000 #(try (loop [] (recur)) (catch Throwable _ :swallowed)))]
+  (let [{e :error} (outcome 20000000 #(try (loop [] (recur)) (catch Throwable _ :swallowed)))]
     (is (= :seon.repl/ticks-spent (:seon.error/type (agent/error-map e))) "the form's own catch cannot swallow it"))
-  (is (= {:value 5050} (outcome 100000000 #(reduce + (range 101)))) "a form under its budget answers its value")
+  (is (= {:value 5050} (outcome 20000000 #(reduce + (range 101)))) "a form under its budget answers its value")
   (is (= {:value 3000000} (outcome nil #(loop [i 0] (if (= i 3000000) i (recur (inc i)))))) "no budget: unbounded"))
 
 (deftest an-interrupt-stops-only-the-request-it-arrives-in
