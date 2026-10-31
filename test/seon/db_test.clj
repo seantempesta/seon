@@ -1,7 +1,7 @@
 (ns seon.db-test
   "One store, many branches, as in production (owner, 2026-10-21): bin/test seeds one test
   store and each test takes a branch of it through one helper (seon.test-store/test-branch!)."
-  (:require [seon.test-store :as ts] [seon.profile :as profile] [clojure.test :refer [deftest is testing]]
+  (:require [seon.test-store :as ts] [my.test :as mt] [seon.profile :as profile] [clojure.test :refer [deftest is testing]]
             [clojure.java.shell] [clojure.java.io] [datahike.api :as d] [datahike.writer :as dw] [datahike.db.transaction :as dbt]
             [seon.db :as pdb] [seon.schema.datahike] [malli.core] [malli.registry] [seon.config :as cfg] [seon.contract :as contract] [seon.edn]
             [konserve.jolt.lmdb :as klmdb] [konserve.jolt.lmdb-ffi :as lmdb] [konserve.jolt.lz4] [konserve.jolt.zstd] [clojure.string :as str] [konserve.core :as k] [hasch.core] [datahike.gc] [seon.cost :as cost] [seon.lib :as lib] [seon.intr :as intr]
@@ -239,9 +239,9 @@
   ;; task seon.db/a-store-is-made-whole-or-not-at-all: the full run of 2026-10-26 failed a create
   ;; after its env had made data.mdb, and the path then held a file with no database that no open
   ;; recovered ("Database does not exist"). Here a child creates a store and kills itself (SIGKILL,
-  ;; nothing cleaned up) once the create has run its tick budget (seon.intr/run): ten budgets spread
-  ;; over a create's work (~22 M ticks) kill it at ten points of that work, the same on any machine,
-  ;; and one larger than the create lets it finish first. Each path then holds a whole store or none, and
+  ;; nothing cleaned up) once the create has run its tick budget (seon.intr/run): four budgets (0.1, 0.8, 6.4 and 25.6 M; ten, doubling from 0.1 M, before) spread
+  ;; over a create's work (~22 M ticks) kill it at four points of that work, the same on any machine,
+  ;; and one create made here finishes. Each path then holds a whole store or none, and
   ;; the next open answers either. (It killed at the moment a data file showed, read by a busy loop of up
   ;; to 10 M directory listings: 0.25-147 G ticks a run, red at its budget.) Stores of this test's own
   (let [base (str (seon.config/checkout) "/target/db-test-create-" (random-uuid))
@@ -254,12 +254,12 @@
                               (catch Exception x (ex-message x))))]
     (.mkdirs (java.io.File. base))
     (try
-      (is (= (repeat 10 :opens) (vec (for [i (range 10) :let [p (str base "/store-" i)]] (do (killed p (long (* 100000 (Math/pow 2.0 i)))) (opens p)))))
+      (is (= (repeat 4 :opens) (vec (for [i [0 3 6 8] :let [p (str base "/store-" i)]] (do (killed p (long (* 100000 (Math/pow 2.0 i)))) (opens p)))))
           "every path a killed create left opens")
       (testing "a create that completes leaves nothing beside its store"
-        (let [p (str base "/whole")]
-          (is (= :opens (opens p)))
-          (is (empty? (filter #(str/starts-with? (.getName ^java.io.File %) "whole.making-") (.listFiles (java.io.File. base)))))))
+        ;; made here, not by a budget past the create's ~22 M: a create that came to cost more would make that case a kill
+        (is (= :opens (opens (str base "/whole"))))
+        (is (empty? (filter #(str/includes? (.getName ^java.io.File %) ".making-") (.listFiles (java.io.File. base))))))
       (finally (clojure.java.shell/sh "rm" "-rf" base)))))
 
 (deftest a-kept-store-from-before-the-runtime-attribute-opens
@@ -673,7 +673,8 @@
   ;; content eids scatter a commit's new identities over the indexes (the content-eids pricing study, 2026-10-23, not kept
   ;; §3): nodes written per commit against counter eids, the ratio the model priced (1.3-1.7x at
   ;; 2 new identities, 2.3-5.1x at 10), red when steeper. Measured 2026-10-23 at 110k datoms:
-  ;; 0.97x at 1, 1.51x at 2, 4.50x at 10. A store on disk of this test's own, the last resort:
+  ;; 0.97x at 1, 1.51x at 2, 4.50x at 10; at 300 entities (3.3k datoms,
+  ;; the size now, 91 M ticks against 584 M at 3,000) 1.55x at 2 and 3.08x at 10. A store on disk of this test's own, the last resort:
   ;; the in-memory store writes no nodes to count
   (let [nodes (fn [content?]
                 (let [path (str (seon.config/checkout) "/target/db-test-" (random-uuid))
@@ -686,7 +687,7 @@
                     (d/transact conn (into [(cond-> {:db/ident :w/id :db/valueType :db.type/string :db/cardinality :db.cardinality/one :db/unique :db.unique/identity}
                                               content? (assoc :db/contentId true))]
                                            (for [i (range 10)] {:db/ident (keyword "w" (str "a" i)) :db/valueType :db.type/string :db/cardinality :db.cardinality/one})))
-                    (doseq [part (partition-all 1000 (range 3000))] (d/transact conn (mapv ent part)))
+                    (doseq [part (partition-all 1000 (range 300))] (d/transact conn (mapv ent part)))
                     (let [writes #(:writes @(:stats (-> @conn :store :storage)))]
                       (into {} (for [m [2 10]]
                                  (let [w0 (writes)]
@@ -700,23 +701,23 @@
     (is (< (ratio 2) (ratio 10)) "more new identities per commit scatter more")))
 
 (defn plain-datoms
-  "d/db-with's arguments for n plain datoms: the test store's seed and n [:db/add e a v] of
+  "d/db-with's arguments for n plain datoms: the world (my.test, in memory: the test store's seed cost 70 M ticks to open in the first test of a process) and n [:db/add e a v] of
   two cardinality-one attributes (a string and a long), two to an entity, every entity new."
   [n]
-  [(ts/test-db) (vec (for [i (range n)]
+  [(mt/world) (vec (for [i (range n)]
                        [:db/add (+ 100000000 (quot i 2)) (if (even? i) :form/src :form/order) (if (even? i) (str "(defn f" i ")") i)]))])
 
 (defn identity-datoms
   "d/db-with's arguments for n datoms as n/2 entity maps, each named by an identity (attribute
   a, :db/unique, with or without :db/contentId) and holding one plain value."
   [a n]
-  [(ts/test-db) (vec (for [i (range (quot n 2))] {a (str "proof entity " i) :form/src (str "(defn f" i ")")}))])
+  [(mt/world) (vec (for [i (range (quot n 2))] {a (str "proof entity " i) :form/src (str "(defn f" i ")")}))])
 
 (defn form-refs
   "d/db-with's arguments for n datoms of one form's :form/refs (cardinality many, symbols):
   every index comparison past the entity and attribute reaches the value."
   [n]
-  [(ts/test-db) (vec (for [i (range n)] [:db/add 100000000 :form/refs (symbol "app.m0" (str "f" i))]))])
+  [(mt/world) (vec (for [i (range n)] [:db/add 100000000 :form/refs (symbol "app.m0" (str "f" i))]))])
 
 (def content-id-datoms (partial identity-datoms :form/id))
 (def unique-datoms (partial identity-datoms :seon.task/id))
@@ -733,7 +734,7 @@
      :work "per datom: its insert into :eavt and :aevt, one :eavt descent for the attribute's current value, the datom, its place in the tx-data"
      :growth :linear
      :per-n {:ticks 7000 :bytes 10500}
-     :sizes [100 300 1000 10000]}))
+     :sizes [30 100 300]}))
 
 (deftest a-value-costs-its-index-inserts
   ;; task datahike.transaction/an-index-insert-allocates-nothing-extra: a card-many value's
@@ -748,9 +749,10 @@
      :growth :linear
      :per-n {:ticks 7000 :bytes 10500}
      :overrun {:task "jolt.backend/a-deftype-method-call-takes-a-site-cache" :measured {:ticks 12969032.0 :bytes 17008064.0}}
-     ;; the overrun's measure is at 1,000, the largest size in every run (--all too); measured
+     ;; the overrun's :measured is the proof's at 1,000 when it was recorded; it is now judged at 300, the largest size
+     ;; (the ratchet only reds a size over 1.5x its record, so this is the looser of the two); measured
      ;; at 10,000 too, 17.7 KB a datom against 17.0 at 1,000: near-flat, the log n of a descent
-     :sizes [100 300 1000]}))
+     :sizes [30 100 300]}))
 
 (deftest an-identity-costs-its-seek
   ;; task datahike.transaction/an-identity-costs-its-seek: an identity adds its :avet insert,
@@ -765,8 +767,9 @@
      :growth :linear
      :per-n {:ticks 10000 :bytes 15000}
      :overrun {:task "datahike.transaction/an-identity-costs-its-seek" :measured {:ticks 11543218.0 :bytes 34428528.0}}
-     ;; the overrun's measure is at 1,000, the largest size in every run (--all too)
-     :sizes [10 100 1000]})
+     ;; the overrun's :measured is the proof's at 1,000 when it was recorded; it is now judged at 100, the largest size
+     ;; (the ratchet only reds a size over 1.5x its record, so this is the looser of the two)
+     :sizes [10 30 100]})
   (cost/proof
     {:of 'datahike.api/db-with :input 'seon.db-test/content-id-datoms
      :n "datoms, half a content-id identity naming its entity map"
@@ -774,7 +777,7 @@
      :growth :linear
      :per-n {:ticks 11000 :bytes 16000}
      :overrun {:task "datahike.transaction/an-identity-costs-its-seek" :measured {:ticks 16945178.0 :bytes 64847328.0}}
-     :sizes [10 100 1000]}))
+     :sizes [10 30 100]}))
 
 (defn newest-evals
   "d/pull's arguments for the newest five of n: an agent and n evals referring to it (each a

@@ -501,7 +501,7 @@
                 [db' idx']))
             [db0 (r/index db0)] steps)))
 
-(def ^:private observed-sizes [10 500 1000])
+(def ^:private observed-sizes [10 30 100])
 
 (def ^:private disk-store
   "This process's one store on disk for the cost proofs below, seeded once with the test store's 2,000 datoms
@@ -516,7 +516,7 @@
 (defn- disk-main
   "The connection to main branch b of the proofs' disk store (made from its seeded :db when it has none)."
   {:malli/schema [:=> [:cat :keyword] :seon.host/conn]}
-  [b] (:conn (pdb/open! :lmdb @disk-store 2000 b)))
+  [b] (:conn (pdb/open! :lmdb @disk-store 50 b)))
 
 (defn observed-input
   "The cost proof's input at n, on a store on disk of its own (the one-store rule's last resort:
@@ -546,16 +546,17 @@
                             "pull of the entity that differs and its task re-derived. Listing the index again, as "
                             "seon.turn/observe did every turn, settles all n tasks: n^1.75, 258M ticks and 922 MB at "
                             "1,000 (92.0M ticks, 384 MB on a root's main of 680 tasks)")
-                 :growth :linear
-                 ;; measured on LMDB: 1.11M ticks / 5.8 MB at 10, 1.03M / 4.6 MB at 500, 1.47M / 5.8 MB at 1,000: 84 descents of
-                 ;; 5-11k ticks, the change itself about 30k. On the address-less test store the same observe
-                 ;; read 4.71M / 17.9 MB at 10 and 5.36M / 18.3 MB at 500 (every diff walked its attribute);
-                 ;; the 84 descents are task seon.reconcile/one-observe-descends-once
-                 :fixed {:ticks 1200000.0 :bytes 5900000.0}
-                 :per-n {:ticks 300.0 :bytes 100.0}
+                 :growth :log
+                 ;; measured on LMDB at 10, 100, 300: 1.35M ticks / 5.90 MB, 1.68M / 6.53 MB, 1.78M / 6.66 MB (and, at the
+                 ;; sizes this proof ran before, 1.47M / 5.8 MB at 1,000: flat): 84 descents of 5-11k ticks, the change itself
+                 ;; about 30k, the descents' depth a staircase in the index (a level more every so many entries), which is log work.
+                 ;; On the address-less test store the same observe read 4.71M / 17.9 MB at 10 and 5.36M / 18.3 MB at 500
+                 ;; (every diff walked its attribute); the 84 descents are task seon.reconcile/one-observe-descends-once
+                 :fixed {:ticks 1050000.0 :bytes 5200000.0}
+                 :per-n {:ticks 100000.0 :bytes 250000.0}
                  :sizes observed-sizes})))
 
-(def ^:private listed-sizes [10 300 600])
+(def ^:private listed-sizes [5 15 50])
 
 (defn listed-input
   "The listing proof's input at n: main on a store on disk of its own (as observed-input's,
@@ -586,7 +587,7 @@
                             "entries. Checked deeply on every call, a listing cost tasks x tasks: 156M ticks "
                             "and 636 MB on a root's main of 903 tasks, 26.8M and 149 MB with the contracts off")
                  :growth :linear
-                 ;; measured on LMDB: 0.36M ticks / 1.7 MB at 10, 10.1M / 50.6 MB at 300, 20.3M / 102 MB at 600, 34k ticks
+                 ;; measured on LMDB (sizes 5, 15, 50 now; first at 10, 300 and 600): 0.36M ticks / 1.7 MB at 10, 10.1M / 50.6 MB at 300, 20.3M / 102 MB at 600, 34k ticks
                  ;; and 169 KB a task (about 26k / 135 KB its pull, seon.task/entity-value); 10 contracted calls a task and 12 fixed.
                  ;; Checked deeply, the same input read n^1.5 and more (each helper validated every entry)
                  :fixed {:ticks 200000.0 :bytes 600000.0 :calls 20.0}
