@@ -115,7 +115,8 @@
            (is (str/includes? (:seon.error/message r) "a ( left open at its line 2, \"z (inc\"") (str "an appended ( named at its own line: " (:seon.error/message r))))
          (let [r (repl/edit! 'x.repl-edit/g "(+ 1 1)" "(+ 1 1))")]
            (is (= :unbalanced (:seon.repl/refused-because r)) "a closer more")
-           (is (str/includes? (:seon.error/message r) "closes 1 more )") (:seon.error/message r)))
+           (is (str/includes? (:seon.error/message r) "closes 1 more )") (:seon.error/message r))
+           (is (str/includes? (:seon.error/message r) "the old text ends \")\" (1), the new text \"))\" (2)") (str "the closing runs side by side: " (:seon.error/message r))))
          (let [r (repl/edit! 'x.repl-edit/g "(+ 1 1)" "(str \\) \")\" ;)\n 1)")]
            (is (nil? (:seon.repl/refused-because r)) (str "a closer in a character literal, a string or a comment is none: " (pr-str r)))
            (is (= "))1" ((resolve 'x.repl-edit/g)))))
