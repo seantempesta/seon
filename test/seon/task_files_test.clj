@@ -90,51 +90,23 @@
     (is (= [] (vec (for [[ns-sym ds] files :when (:seon.error/type ds)] ns-sym))) "every file reads")
     (is (not (:seon.error/type (task/load-tx (empty-db) files))) "and loads")))
 
-(def ^:private still-worked
-  "Task entries whose branch merged and whose work goes on under the same entry, each with its reason."
-  {"seon.reconcile/one-observe-descends-once" "merged as the stored-shape measurement only; the one multi-prefix datoms-diff walk its plan asks for is still a per-attribute loop (low priority in its plan)"
-   "seon.program/a-test-reading-mains-history-takes-its-head" "filed by batch 49's merge, which names it as found, not done"
-   "seon.agent/a-test-child-that-dies-says-why" "batch 49 made the error visible (seon.proofs/answer); its cause is still to find"
-   "seon.template/a-finding-is-a-task" "its first kind merged (the :long-form class, its template, my.root/file-findings!); the later kinds (long sections, leads, large answers, flaky tests) still to do"
-   "my.test/a-test-runs-in-the-world" "the world and two shrink groups merged (15b53fa3ae names it); the rest of the heavy tests, the world as the test store's seed and the ceiling at 2e8 still to do"
-   "seon.render/walk" "render work still moving: later branches finish it"
-   "seon.render/page" "render work still moving: later branches finish it"
-   "seon.context/the-context-is-the-agents-evals-and-seons" "R1 merged (7602f8a398); R2 (root's after-turn work as facts) and R3 (the request from its basis) still to do"
-   "seon.agent/the-agent-is-the-unit-not-the-run" "cut 1 merged (d0daf498c6); cut 2 (the reconciler schedules agents) and cut 3 (the run schema deleted) still to do"
-   "seon.agent/an-agents-first-request-allocates-the-same-in-any-shard" "filed, and named by batch 64's merge as the flake it merged past: not done"
-   "seon.root/an-eval-never-moves-main" "filed by batch 20's merge, which names it as found, not done: its fix waits on the owner's go (docs/plan.md#waiting-on-the-owner)"
-   "seon.context/an-agent-follows-its-instructions-to-green" "items 1-6 merged (jolt/eval-path in batch 56, jolt/follow); the bench measure, five runs a side, still to do"
-   "seon.db/opening-a-store-costs-what-it-opens" "merged its install-missing! and set-ids! halves (jolt/test-audit, datahike 148ea9a9); install-missing!'s one digest compare is still to do"})
-
 (deftest no-shipped-task-is-merged-work
-  ;; task seon.task/merged-work-leaves-the-task-files: the merge that merges a task's work removes its
-  ;; entry in the same commit (git keeps the plan, test/ keeps the proofs); a task Seon agents work keeps
-  ;; its derived state. An entry is merged work left in the files when main's first-parent history holds
-  ;; a "Merge jolt/<name>" or "Land jolt/<name>" commit for its name (a worktree session's branch is named
-  ;; for its task), or a Merge/Land commit whose subject or body names its qualified name <ns>/<name>
-  ;; (a branch named otherwise, e.g. jolt/fileref for seon.ref/files-namespaces-and-symbols-are-plain-markdown)
-  ;; when the entry was already in the files before that merge: a merge that files a task names it too
-  ;; (3eface7bab filed seon.db/a-roots-heap-costs-what-it-reads).
+  ;; task seon.task/merged-work-leaves-the-task-files, docs/merging.md#a-merge-says-what-it-completes: the merge
+  ;; that completes a task's work says so in its message, a `Completes: ns/name` line, and removes its entry in
+  ;; the same commit (git keeps the plan, test/ keeps the proofs). Each such line on main's first-parent history
+  ;; names no entry left in the files. Nothing is guessed from the message's prose: a merge that names a task it
+  ;; filed, or one it moved without finishing, completes nothing (twice on 2026-10-31 a merge naming a filed task
+  ;; read as merged work left behind, and a list of exceptions had grown to thirteen).
   ;; It reads main as this repository holds it: the next branch's run names an entry a merge left behind
-  ;; (the merge's own run precedes its commit)
   (let [root (config/checkout)
-        commits (for [rec (str/split (:out (sh/sh "git" "-C" root "log" "--first-parent" "--format=%H%x1f%s%x1f%b%x1e" "main")) #"\x1e")
-                      :let [[sha subject body] (str/split (str/trim rec) #"\x1f" 3)
-                            subject (str/trim (str subject))]
-                      :when (re-find #"^(?:Merge|Land) " subject)]
-                  {:sha sha :subject subject :text (str subject "\n" body)})
-        merged (set (for [{:keys [subject]} commits :let [m (re-find #"^(?:Merge|Land) jolt/([^\s:]+)" subject)] :when m] (second m)))
-        held-before? (fn [{:keys [sha]} ns-sym tname]
-                       (str/includes? (:out (sh/sh "git" "-C" root "show" (str sha "^1:resources/seon/tasks/" ns-sym ".edn")))
-                                      (pr-str tname)))
+        bodies (str/split (:out (sh/sh "git" "-C" root "log" "--first-parent" "--merges" "--format=%B%x1e" "main")) #"\x1e")
+        completes (set (for [b bodies m (re-seq #"(?m)^Completes: (\S+)\s*$" b)] (second m)))
         left (for [[ns-sym ds] (root/task-files) :when (vector? ds) d ds
                    :let [k (str ns-sym "/" (:seon.task/name d))]
-                   :when (and (or (merged (:seon.task/name d))
-                                  (some #(and (str/includes? (:text %) k) (held-before? % ns-sym (:seon.task/name d))) commits))
-                              (not (still-worked k)) (not= :merge (:seon.task/kind d)))]
+                   :when (completes k)]
                k)]
-    (is (seq merged) "main's merges are read")
-    (is (= [] (vec left)) "each is merged work: remove its entry from resources/seon/tasks/ (still-worked names the exceptions)")))
+    (is (seq bodies) "main's merges are read")
+    (is (= [] (vec left)) "each is completed work: remove its entry from resources/seon/tasks/ in the merge that says Completes: it")))
 
 (deftest a-file-task-merges-itself
   ;; task seon.reconcile/a-work-task-merges-itself-through-the-one-gate: a task loaded from a
