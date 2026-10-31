@@ -379,7 +379,10 @@
         to (loop [i (long (:shown node)) width 0]
              (if (< i limit)
                (let [c (.charAt text i)
-                     width (+ width (cond (:code? node) (if (= \newline c) (inc (max 1 (:indent node))) 1)
+                     ;; as code-width counts: code each character once (printed as written), prose a
+                     ;; newline its indentation more
+                     width (+ width (cond (= :seon.print/code (:code? node)) 1
+                                          (:code? node) (if (= \newline c) (inc (max 1 (:indent node))) 1)
                                           :else (if-let [e (when-not (= \newline c) (char-escape-string c))] (count e) 1)))]
                  (if (<= width room) (recur (inc i) width) i))
                i))
