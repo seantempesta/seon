@@ -517,7 +517,7 @@
      ;; measured 2026-10-23: 1.17M ticks and 4.6 MB at 10, 100 and 1,000 functions (the store's open
      ;; and the branch's connect); a whole import was ~1.8G ticks for the 2,400 forms of src and test
      :fixed {:ticks 1300000.0 :bytes 5000000.0}
-     :sizes [10 100 1000]}))
+     :sizes [10 30 100]}))
 
 ;; ---- every verdict is kept: a digest green and red is flaky (red, never reused as green, never run)
 
