@@ -160,8 +160,7 @@
 
 (deftest no-name-uses-an-old-word
   (let [root (config/checkout)
-        ;; "fence" is CommonMark's code fence, a library's word (seon.problems/old-word-spellings reads it nowhere)
-        words (disj (old-words (slurp (str root "/AGENTS.md"))) "fence")
+        words (old-words (slurp (str root "/AGENTS.md")))
         files (fn [dir] (for [f (file-seq (java.io.File. (str root "/" dir))) :when (.isFile ^java.io.File f)]
                           (subs (.getPath ^java.io.File f) (inc (count root)))))
         _ (doseq [f (files "src") :when (str/ends-with? f ".clj")]

@@ -443,12 +443,10 @@
 
 (defn old-word-spellings
   "The table's old words as the text spells them, [word [spelling ...]] (\"merge train\" either way); \"admit\"
-  and \"land\" are also plain English and Seon's admission, and \"fence\" is CommonMark's code fence (a library's
-  word, which section 7a keeps: md-scan bench-b14's agent spent nine turns on its own Markdown code flagged), so
-  none of them is read."
+  and \"land\" are also plain English and Seon's admission, so only names are read for them."
   {:malli/schema [:=> [:cat :string] [:sequential [:tuple :string [:vector :string]]]]}
   [agents]
-  (vec (for [w (sort (old-words agents)) :when (not (#{"admit" "land" "fence"} w))]
+  (vec (for [w (sort (old-words agents)) :when (not (#{"admit" "land"} w))]
          [w (if (= w "merge-train") ["merge train" "merge-train"] [w])])))
 
 (defn old-word-hits
