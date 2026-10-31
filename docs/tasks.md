@@ -71,6 +71,6 @@ Reads: ```seon.task/tasks``` and ```seon.task/task``` answer a task with its acc
 
 ## Where a task's state lives
 
-A task's state is derived from its runs on main (```seon.reconcile/task-state```: `:cancelled`, `:merged`, `:done`, `:running`, `:blocked`, `:failed`, `:held`, `:open`), never stated. Work a worktree session merges has no run, so its task file entry reads the same before and after the merge; how that work is recorded is open (task `seon.task/merged-work-leaves-the-task-files`). A run's own lifecycle (its outcomes, judging, root causes) is [root's](root.md#runs-and-judging); its turns are [turn](turn.md)'s.
+A task's state is derived from its runs on main (```seon.reconcile/task-state```: `:cancelled`, `:merged`, `:done`, `:running`, `:blocked`, `:failed`, `:held`, `:open`), never stated. Work a worktree session merges has no run, so the merge that completes it says so, a `Completes: ns/name` line, and removes its task file entry in the same commit ([a merge says what it completes](merging.md#a-merge-says-what-it-completes)). A run's own lifecycle (its outcomes, judging, root causes) is [root's](root.md#runs-and-judging); its turns are [turn](turn.md)'s.
 
 Related: [turn](turn.md) for a run's loop, [merging](merging.md) for how a merge task's branch reaches main, [references](references.md) for how a plan's citations become the task's references, [parity](parity.md) for v1's chain and templates.

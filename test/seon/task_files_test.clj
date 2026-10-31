@@ -91,7 +91,7 @@
     (is (not (:seon.error/type (task/load-tx (empty-db) files))) "and loads")))
 
 (deftest no-shipped-task-is-merged-work
-  ;; task seon.task/merged-work-leaves-the-task-files, docs/merging.md#a-merge-says-what-it-completes: the merge
+  ;; docs/merging.md#a-merge-says-what-it-completes: the merge
   ;; that completes a task's work says so in its message, a `Completes: ns/name` line, and removes its entry in
   ;; the same commit (git keeps the plan, test/ keeps the proofs). Each such line on main's first-parent history
   ;; names no entry left in the files. Nothing is guessed from the message's prose: a merge that names a task it

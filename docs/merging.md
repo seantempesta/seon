@@ -79,7 +79,7 @@ Root reads every merge's `src` diff stat before merging, against the goal of abo
 
 ## A merge says what it completes
 
-A merge that completes a task's work says so in its message, one line a task, `Completes: ns/name`, and removes that task's entry from `resources/seon/tasks/` in the same commit (git keeps the plan, test/ keeps the proofs; task seon.task/merged-work-leaves-the-task-files). `seon.task-files-test/no-shipped-task-is-merged-work` reads those lines on main's first-parent merges and is red on any that names an entry still in the files. Nothing else in a message counts: a merge that files a task, names one it merged past, or moves one without finishing it completes nothing and needs no exception (on 2026-10-31 two merges that named a filed task read as merged work left behind, under the rule this replaces: a message naming a task, kept open by a list of thirteen exceptions).
+A merge that completes a task's work says so in its message, one line a task, `Completes: ns/name`, and removes that task's entry from `resources/seon/tasks/` in the same commit (git keeps the plan, test/ keeps the proofs). `seon.task-files-test/no-shipped-task-is-merged-work` reads those lines on main's first-parent merges and is red on any that names an entry still in the files. Nothing else in a message counts: a merge that files a task, names one it merged past, or moves one without finishing it completes nothing and needs no exception (on 2026-10-31 two merges that named a filed task read as merged work left behind, under the rule this replaces: a message naming a task, kept open by a list of thirteen exceptions).
 
 ## Conflicts and pins
 
