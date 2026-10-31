@@ -197,11 +197,18 @@
            :plan (str "Make `app.sw/v" j "` add " j "; its proof is `app.proofs/s" k "-test`.")})))
 
 (defn- swarm-reply
+  "Work task sK's scripted reply: a conflict main brought onto its branch (a work agent merges main
+  every turn it moved, seon.turn/work!) is resolved keeping its own side, as a work agent does
+  before it can be done, then its definition is written. Whether a conflict meets a task's work
+  agent or its merge agent is the order main's merges came in (swarm red once, 2026-10-31: sw/s5's
+  second run met s0's v0 and, never resolving it, ran to its cap); both resolve it."
   {:malli/schema [:=> [:cat :string] [:maybe :seon.model/script-reply]]}
   [nm]
   (when-let [k (and (str/starts-with? nm "s") (parse-long (subs nm 1)))]
     (let [j (mod k 5)]
-      (calls "Rewrite in my own words." "(in-ns 'app.sw)" (defn1 (str "v" j) (str "(+ x " j (str/join (repeat (quot k 5) " 0")) ")"))))))
+      (calls "Keep my side of a conflict main brought, then rewrite in my own words."
+             "(doseq [e (my.branch/unmerged)] (my.branch/resolve! (second (:key e)) :ours))"
+             "(in-ns 'app.sw)" (defn1 (str "v" j) (str "(+ x " j (str/join (repeat (quot k 5) " 0")) ")"))))))
 
 (def ^:private generic
   "The scripted model's reply by task kind (from the name): a merge agent takes main's side of

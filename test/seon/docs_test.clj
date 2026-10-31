@@ -149,10 +149,7 @@
   {'seon.fx/admit "admission by workload (a token bucket and free workers: AGENTS.md section 4), not a contract"
    'seon.fx-admit-test "the same admission (the namespace and its vars)"
    'seon.fx-test/owner-admits-by-workers-and-priority "the same admission"
-   'seon.reader-test/prose-without-a-fence-is-a-comment "a Markdown code fence"
-   'seon.ref-test/a-fence-gives-its-content-between-its-lines "a Markdown code fence"
-   "test/seon/fx_admit_test.clj" "the same admission"
-   'seon.reader/fence "a Markdown code fence, CommonMark's word"})
+   "test/seon/fx_admit_test.clj" "the same admission"})
 
 (def ^:private old-words seon.problems/old-words)
 
