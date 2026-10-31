@@ -1276,6 +1276,27 @@
         (is (str/includes? (:content (peek (:messages r3))) "moved"))
         (is (= [] (sent-ids r4)) "and once: the next request finds it as sent")))))
 
+(deftest a-changed-part-is-sent-as-what-changed
+  ;; owner, 2026-10-30 (approved in docs/decisions.md): a changed part that answers data sends what changed of it;
+  ;; md-scan #28's status, 3-5k tokens, was sent whole eleven times. A map part's top-level keys: the new or changed
+  ;; values under :changed, the keys that left under :gone, the keys that kept their value not sent again
+  (ts/test-branch!
+    (fn [_ conn]
+      (let [[ask! _ _] (parts-session conn)
+            p0 {"status-1" {:proofs [:red] :turn "1 of 40" :caused 2}}
+            p1 {"status-1" {:proofs [:green] :turn "1 of 40" :ns 'demo}}
+            r0 (ask! 0 {:parts (constantly p0)})
+            r1 (ask! 1 {:parts (constantly p1) :printed (:printed r0)})
+            sent (:content (peek (:messages r1)))]
+        (is (str/includes? sent ":changed") (str "what changed of the part: " sent))
+        (is (str/includes? sent ":green") "its new value")
+        (is (str/includes? sent "demo") "a key it gained")
+        (is (str/includes? sent ":gone [:caused]") "a key it lost")
+        (is (not (str/includes? sent "1 of 40")) (str "a key that kept its value is not sent again: " sent))
+        (let [hiccup {"status-1" [:p "moved"]}
+              r2 (ask! 2 {:parts (constantly hiccup) :printed (:printed r1)})]
+          (is (str/includes? (:content (peek (:messages r2))) "moved") "a part that is no map is sent whole"))))))
+
 (deftest a-trimmed-conversation-draws-the-request-whole
   (ts/test-branch!
     (fn [_ conn]
