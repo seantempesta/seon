@@ -81,6 +81,8 @@
                       [:handle :qualified-symbol] [:value {:optional true} :any]
                       ;; the namespace the REPL is in after it, as every nREPL response carries: where the next eval runs
                       [:ns {:optional true} :symbol]
+                      ;; an earlier eval of the same code answered the same (seon.repl/again): which, and that nothing changed
+                      [:again {:optional true} :string]
                       ;; code of several top-level forms: how many ran, its :value each one's in order (seon.repl/response)
                       [:forms {:optional true} [:int {:min 2}]]
                       ;; what the forgiving reader changed of the call's code before it ran (seon.context/repaired)
