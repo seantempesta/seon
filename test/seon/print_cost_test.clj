@@ -136,18 +136,24 @@
          :sizes [250 500 1000 10000 100000]})
       (finally (when armed? (contract/instrument! '[seon.print seon.print.select seon.print.emit]))))))
 
+(def ^:private rows-budget
+  "The budget the rows print under: 1,024 tokens, which shows the first dozen or so rows whole (a
+  reply's 6,144 shows 73, each of the same walks six times as dear, and the growth with the rows is
+  as visible)."
+  1024)
+
 (defn rows
   "The input of size n: n problem rows (7 keys each, as my.root/problems' :stale-section rows),
-  printed with a handle under shown-budget, which shows the first 73 whole and cuts the rest."
+  printed with a handle under rows-budget, which shows the first dozen or so whole and cuts the rest."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map :map]]}
   [n] [{:rows (vec (for [i (range n)] (array-map :section (keyword "render" (str "s" i)) :page "docs/render.md"
                                                   :class :stale-section :since 1761360000000 :cited 'seon.print/print-value
                                                   :lead "A section whose lead cites a var that moved." :n i)))}
-       {:handle 'result/h1 :budget shown-budget}])
+       {:handle 'result/h1 :budget rows-budget}])
 
 (deftest printing-rows-costs-what-it-shows
   ;; a printed value costs what it shows, not what it hides: the budget fixes the rows shown whole
-  ;; (73 of 7 keys, then one cut), and no row past the cut is read (seon.print.select/fill-rows).
+  ;; (73 of 7 keys under a reply's 6,144, then one cut), and no row past the cut is read (seon.print.select/fill-rows).
   ;; Measured 2026-10-25, unarmed: 13.2 MB and 3.39M ticks at 100, 1,000 and 10,000 rows; main's
   ;; breadth path on the same input cost 16.0 MB and 4.28M ticks at 100 rows, growing with them,
   ;; for 493 cuts and no row shown. The fixed part is the selection trying each level whole
@@ -157,12 +163,14 @@
     (try
       (cost/proof
         {:of 'seon.print/print-value :input 'seon.print-cost-test/rows
-         :n "problem rows under 6,144 tokens, unarmed"
+         :n "problem rows under 1,024 tokens, unarmed"
          :work (str "nothing per row past what the budget could show (alike? reads member kinds only when no row fits whole): the rows the budget shows whole are fixed by it, about four whole walks of "
                     "them (one a level: the root, its :rows entry, the vector, each row), and the first row "
                     "that does not fit is sized until its charge passes the room; no row past the cut is read")
          :growth :constant
-         :fixed {:ticks 3.4e6 :ns 7.8e6 :bytes 13.2e6}
+         ;; 2026-10-31 (shrink-tests-4): under rows-budget (1,024) the same walks cost 0.70M ticks, 2.1 ms and 2.48 MB at
+         ;; 100, 300 and 1,000 rows, flat (6,144 read the 3.4M / 7.8 ms / 13.2 MB above)
+         :fixed {:ticks 7.1e5 :ns 2.1e6 :bytes 2.5e6}
          :sizes [100 300 1000 10000]})
       (finally (when armed? (contract/instrument! '[seon.print seon.print.select seon.print.emit]))))))
 
