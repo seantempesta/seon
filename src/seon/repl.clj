@@ -651,7 +651,8 @@
 
 (defn- again
   "Response r of code, with :again when an earlier eval of this agent ran the same code and answered the same
-  (its value, error, output and forms): which eval, and that nothing it reads has changed since. The md-scan
+  (its value, error, output and forms): which eval, and that it answered the same (equal answers do not show
+  what it reads is unchanged, so it says no more). The md-scan
   and fence benches' agents ran one read again and again (bench-fence-1: two evals, 25 turns each), each answer
   reading as new. Kept in the agent's state as a hash of the code to the eval and a hash of its answer, so it
   costs one lookup an eval. An agent's own evals only (root's and an inner eval's are not counted)."
@@ -664,8 +665,8 @@
       (swap! agent/state assoc-in [:seen k] {:eval (name (:handle r)) :answer answer})
       (cond-> r
         (= answer (:answer seen))
-        (assoc :again (str (:eval seen) " ran this code and answered the same: nothing it reads changed since. "
-                           "Run something else, or change what it reads first."))))
+        (assoc :again (str (:eval seen) " ran this code and answered the same: "
+                           "run something else, or change what it reads first."))))
     r))
 
 (defn eval-string
