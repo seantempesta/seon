@@ -46,8 +46,8 @@
        "namespace (``(my.agent/tests-reaching 'ns/f)``; ``(in-ns 'ns.x-test)``, no file), its input built as theirs, never "
        "the live db; register it (``(my.task/update! :seon.task/proofs conj 'ns.x-test/a-proof)``) and run it red "
        "(``(my.agent/prove)``). Then make it pass by redefining what it needs in its own namespace, keeping contracts, with "
-       "a cost proof (``seon.cost/proof``) where input grows: a definition of up to 20 lines, evaluate it whole; a longer "
-       "one, replace the part that changes (``(seon.repl/edit! 'ns/f \"old text\" \"new text\")``). Check each change "
+       "a cost proof (``seon.cost/proof``) where input grows: a short definition, evaluate it whole; a long one, "
+       "replace the part that changes (``(seon.repl/edit! 'ns/f \"old text\" \"new text\")``). Check each change "
        "with the proof's own expression, the failing assertion your status shows, before proving again. Never loosen a "
        "contract or a proof."))
 

@@ -698,7 +698,7 @@
                 (seq (:caused split)) (assoc :caused (set (:caused split))))
         reasons (r/done-explain input)
         reds (vec (for [[p {:keys [failures]}] vs f failures] (assoc f :test p)))
-        refused (refused reasons reds #(docs/source-of db %) #(callees db %))]
+        blockers (refused reasons reds #(docs/source-of db %) #(callees db %))]
     (cond-> {:reasons reasons
              ;; each proof as :proved holds its var: its verdict (green :pass, red and flaky :fail, as `verdicts`), its source
              :proofs (vec (for [p (sort-by str proofs)
@@ -714,7 +714,7 @@
                               (and src (not= :pass st)) (assoc :source (print/code src))
                               (seq fs) (assoc :failures (failures fs))
                               (seq calls) (assoc :calls calls))))}
-      (seq refused) (assoc :refused refused)
+      (seq blockers) (assoc :refused blockers)
       test-error (assoc :test-run {:failed [(:seon.error/message test-error)]})
       (seq unmerged) (assoc :unmerged (mapv #(select-keys % [:key :kind :base :ours :theirs]) unmerged))
       (seq gaps) (assoc :without-a-contract gaps)

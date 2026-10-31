@@ -1139,11 +1139,13 @@
         ;; the tokens its requests sent so far, the provider's counts summed (each request the whole context then)
         sent (d/q '[:find (sum ?k) . :with ?m :in $ ?a :where [?t :seon.turn/agent ?a] [?m :seon.model-call/turn ?t] [?m :seon.model-call/tokens ?k]] db aid)
         ;; the namespace the REPL is in: the one its newest eval left it in
-        in-ns (context/current-ns c)]
+        in-ns (context/current-ns c)
+        ;; what its evals changed of the branch's program
+        ch (changed c)]
     ;; a part: the page draws it by run-html, the model is sent the value (docs/render.md#a-part-answers-data); this
     ;; turn's number (its record is written before its page is drawn), of the cap, and a cut reply
     (with-meta (cond-> {:turn (if cap (str n " of " cap) n)}
-                 (seq (changed c)) (assoc :changed (changed c))
+                 (seq ch) (assoc :changed ch)
                  in-ns (assoc :ns in-ns)
                  sent (assoc :tokens-sent sent)
                  (some-> (:turns c) vals first ratom/realize :seon.turn/truncated)
