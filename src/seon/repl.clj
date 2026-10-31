@@ -31,7 +31,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn- defchecked]] [seon.error :as err] [jolt.nrepl :as nrepl] [seon.intr :as intr] [seon.reader :as reader] [seon.docs :as docs] [seon.agent :as agent] [seon.contract :as contract] [my.db] [my.agent] [my.schema] [malli.registry :as mr]
             [seon.program :as program] [jolt.analyzer] [seon.lib :as lib] [seon.print :as print] [seon.print.select :as select] [seon.render :as render] [seon.context :as context] [seon.ctx :as ctx] [seon.web.html :as h] [seon.profile :as profile] [seon.sock :as sock] [seon.step :as step] [clojure.core.async :as a] [clojure.core.async.flow :as flow]
-            [jolt.ffi :as ffi] [seon.config :as cfg] [clojure.test] [datahike.api :as d] [seon.db :as pdb] [seon.edn :as sedn]))
+            [jolt.ffi :as ffi] [seon.config :as cfg] [clojure.test] [clojure.walk] [datahike.api :as d] [seon.db :as pdb] [seon.edn :as sedn]))
 
 (defchecked ^:private outer-frames [:=> [:cat] :any] @#'jolt.nrepl/outer-frames)
 
@@ -661,12 +661,17 @@
   what it reads is unchanged, so it says no more). The md-scan
   and fence benches' agents ran one read again and again (bench-fence-1: two evals, 25 turns each), each answer
   reading as new. Kept in the agent's state as a hash of the code to the eval and a hash of its answer, so it
-  costs one lookup an eval. An agent's own evals only (root's and an inner eval's are not counted)."
+  costs one lookup an eval and a walk of its answer. An agent's own evals only (root's and an inner eval's are not
+  counted)."
   {:malli/schema [:=> [:cat :string :map] :map]}
   [code r]
   (if (and (= :agent (:mode @agent/state)) (:handle r))
     (let [k (hash (clojure.string/trim code))
-          answer (hash (select-keys r [:value :ex :out :err :forms]))
+          ;; its answer without what differs every eval (an inner eval's handle and cost: an edit!'s value holds its
+          ;; own eval's response), at any depth: bench-b21's agent swapped one line of scan back and forth 23 times,
+          ;; each edit's answer differing only by its inner handle
+          answer (hash (clojure.walk/postwalk #(if (map? %) (dissoc % :handle :ms :ticks :bytes :fns :record) %)
+                                              (select-keys r [:value :ex :out :err :forms])))
           seen (get-in @agent/state [:seen k])]
       (swap! agent/state assoc-in [:seen k] {:eval (name (:handle r)) :answer answer})
       (cond-> r
