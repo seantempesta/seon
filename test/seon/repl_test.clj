@@ -3,7 +3,7 @@
   (:require [clojure.test :refer [deftest is testing]] [clojure.string :as str] [seon.agent-test :as at]
             [seon.intr :as intr] [seon.agent :as agent] [seon.contract :as contract]
             [seon.ref :as ref] [seon.template :as template] [seon.repl :as repl] [seon.context :as context] [seon.docs :as docs]
-            [seon.config :as cfg] [my.agent] [seon.render :as render] [seon.render.ui :as ui] [seon.web.html :as h] [seon.test-store :as ts] [my.test] [datahike.api :as d]))
+            [seon.config :as cfg] [my.agent] [seon.render :as render] [seon.print :as print] [seon.render.ui :as ui] [seon.web.html :as h] [seon.test-store :as ts] [my.test] [datahike.api :as d]))
 
 (deftest an-eval-answers-its-value-as-clojure-does
   ;; owner, 2026-10-28 and 2026-10-29: match Clojure for the eval's output: top-level forms run in
@@ -52,6 +52,22 @@
     (let [e (ev "(+ 1 1) (+ 2 2) (oops")]
       (is (contains? e :ex) "a read error stops it")
       (is (= {:forms 2 :value [2 4]} (select-keys e [:forms :value])) "and is no form that ran: the two before it are"))))
+
+(deftest an-edit-copied-from-the-shown-source-applies
+  ;; docs/render.md#cut-where-a-value-is-made: the source a part shows (a cite's :source, printed by the one
+  ;; printer nested in the part) is the recorded text, so a multi-line slice copied from it is an edit!'s
+  ;; old text as it stands: md-scan bench-b13..b15 never applied one, the shown text being re-indented
+  (let [old @agent/state]
+    (try (reset! agent/state {:n 0 :ns (the-ns 'user)})
+         (repl/eval-string "(ns x.repl-shown) (defn f\n  \"Adds one.\n\n  Then two.\"\n  [a]\n  (let [b 1\n        c 2]\n    (+ a b c)))\n(in-ns 'user)" {})
+         (let [shown (:text (print/print-value {:part {:cites [{:symbol 'x.repl-shown/f :source (print/code (my.agent/source-fn 'x.repl-shown/f))}]}} {:handle 'result/e1}))
+               at (str/index-of shown "\"Adds one.")
+               slice (subs shown at (+ (str/index-of shown "c 2]" at) 4))
+               r (repl/edit! 'x.repl-shown/f slice (str/replace slice "c 2" "c 20"))]
+           (is (str/includes? slice "\n") "the slice spans lines: a docstring's and the let's")
+           (is (= 'x.repl-shown/f (get-in r [:edited :var])) (pr-str r))
+           (is (= 22 ((resolve 'x.repl-shown/f) 1)) "the edited definition is the one called"))
+         (finally (reset! agent/state old)))))
 
 (deftest an-edit-replaces-exact-text-once-and-evaluates-the-definition
   ;; docs/agent.md#changing-a-definition: the md-scan bench's agent string-edited a copy of a
