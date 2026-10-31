@@ -1015,9 +1015,11 @@
         db (d/db-with db (seon.task/create-tx db (seon.template/request {:seon.task/ns 'demo :seon.task/name "w" :seon.task/plan "Make w true."})))
         ;; the task as its record pulls it, drawn by its html render
         h (h/html (ui/task {} (:tree (seon.ctx/build db (seon.db/eid db :seon.task/id "demo/w") nil))))]
-    (is (str/includes? h "first reproduce it in one eval") "the whole instructions are on the page")
+    ;; how a task is worked is the help page's section they cite whole, drawn as its own part (docs/agent.md#working-a-task)
+    (is (str/includes? h "How a task is worked, step by step") "the whole instructions are on the page")
+    (is (str/includes? h "docs/agent.md#working-a-task") "citing how a task is worked")
     (is (str/includes? h "your run ends and root merges your branch") "whole: their last sentence too, nothing cut")
-    (is (< (str/index-of h "first reproduce it in one eval") (str/index-of h "Make w true.")) "above the plan")))
+    (is (< (str/index-of h "How a task is worked, step by step") (str/index-of h "Make w true.")) "above the plan")))
 
 (defn- unit-of
   "The unit of units whose element id starts with prefix."
@@ -1673,6 +1675,25 @@
                                                    :seon.task/plan "Make `demo/g` pass `demo-test/g-test`; see [the x](docs/x.md#the-x)."}]))
         db (d/db-with db (into [{:db/id k :seon.agent/key k :seon.agent/id :a1 :seon.agent/task [:seon.task/id "demo/c"]}] (seon.task/agent-cites-tx db k k)))]
     [db (seon.db/eid db :seon.agent/key k)]))
+
+;; the instructions cite how a task is worked (docs/agent.md#working-a-task) at full depth: the agent is sent the
+;; section's text, as the wiki holds it, not its address alone (a cite resolved at summary would show its heading)
+(deftest a-work-task-is-sent-how-a-task-is-worked
+  (let [k "b1/a1"
+        db (ts/test-db)
+        db (d/db-with db (seon.docs/load-tx db "docs" {"docs/agent.md" (slurp (str (seon.config/checkout) "/docs/agent.md"))}))
+        db (d/db-with db (seon.task/create-tx db (seon.template/request {:seon.task/ns 'demo :seon.task/name "w" :seon.task/plan "Make w true."})))
+        db (d/db-with db [{:db/id k :seon.agent/key k :seon.agent/id :a1 :seon.agent/task [:seon.task/id "demo/w"]}])
+        aid (seon.db/eid db :seon.agent/key k)
+        tree (:tree (seon.ctx/build db aid :b))
+        part (first (for [[p k held] (#'ui/page-cites tree) :when (= k "docs/agent.md#working-a-task")]
+                      (let [w (r/walker {:ref (seon.ratom/atom tree) :changes seon.ctx/changes} (fn [] (throw (ex-info "read the db" {})))
+                                        [#'ui/cited {:at p :held held} aid k])]
+                        (try (r/flush! w nil) (:data (get @(:cache w) @(:out w))) (finally (r/dispose-walk! w))))))
+        text (str (:text (ui/cite-model {} part)))]
+    (is (some? part) "the section is a part of the agent's context")
+    (is (str/includes? text "their failures are the reproduction") (str "its text, whole: " (subs text 0 (min 300 (count text)))))
+    (is (str/includes? text "Never loosen a contract or a proof") "to its last step")))
 
 ;; docs/render.md#a-part-answers-data: a cite's part is drawn from what @ctx holds; its renders read no db
 (deftest a-cited-part-reads-only-what-ctx-holds

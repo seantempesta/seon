@@ -470,7 +470,12 @@
   ;; agent moves around the system is the help page's: the-help-page-runs). One agent,
   ;; reading its context first (as a model's turn does, which makes the my.* functions act on
   ;; its task), runs every kind's forms in order; the ending functions come last
-  (let [forms (into [] (comp (mapcat (comp runnable val)) (distinct)) (sort-by key template/instructions))
+  (let [;; what an agent is sent: the instructions and the help page's sections they cite whole (```docs/agent.md#a```)
+        page (slurp (str (cfg/checkout) "/" context/help-page))
+        section (fn [anchor] (some (fn [[_ h body]] (when (= anchor (-> h str/lower-case (str/replace #"[^a-z0-9 -]" "") (str/replace " " "-"))) body))
+                                   (re-seq #"(?m)^## (.+)\n([\s\S]*?)(?=^## |\z)" page)))
+        sent (fn [text] (apply str text (for [[_ a] (re-seq #"```docs/agent\.md#([a-z0-9-]+)```" text)] (str "\n" (section a)))))
+        forms (into [] (comp (mapcat (comp runnable sent val)) (distinct)) (sort-by key template/instructions))
         ends #{"(my.turn/wait)"}
         forms (concat (remove #(or (ends %) (str/starts-with? % "(my.task/fail!")) forms)
                       (filter #(str/starts-with? % "(my.task/fail!") forms)
@@ -478,7 +483,7 @@
         cited "(seon.task/citation-problems (my.db/db) (vec (for [[k v] seon.template/instructions] {:seon.task/ns 'demo :seon.task/name (name k) :seon.task/plan \"\" :seon.task/instructions v})))"
         [problems & items] (rest (at/in-agent (fn [{:keys [agent]}] (into [{:op :context :agent agent} cited] forms))))]
     (is (= [] (:value problems)) (str "every name the instructions cite resolves in the program: " (pr-str problems)))
-    (is (some #{"(my.branch/unmerged)"} forms) "merge's own: the entries it resolves")
+    (is (some #{"(my.branch/unmerged)"} forms) "merge's own: the entries it resolves, in the section its instructions cite")
     (doseq [[form item] (map vector forms items)]
       (is (not (:ex item)) (str form " -> " (pr-str item))))
     (is (= (count forms) (count items)) "every form answered")))
