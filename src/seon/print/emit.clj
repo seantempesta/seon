@@ -63,10 +63,9 @@
                     (= j sc) (recur (inc j) :comment nl q sc bs)
                     :else (recur (if (and (< (inc j) n) (not= (inc j) nl)) (+ j 2) (inc j)) mode nl q sc bs)))))))))
 
-(defn code-text
-  "Code text `s` at its place: verbatim, every line after the first indented `indent` columns;
-  a newline inside a string literal is printed escaped (backslash-n), never indented.
-  See docs/render.md#cut-where-a-value-is-made."
+(defn- prose-text
+  "Prose `s` at its place: verbatim, every line after the first indented `indent` columns; a newline
+  inside a string literal is printed escaped (backslash-n), never indented."
   {:malli/schema [:=> [:cat :string nat-int?] :string]}
   [^String s indent]
   (let [pad (apply str "\n" (repeat indent \space))
@@ -75,6 +74,16 @@
         put (fn [i r] (.append sb s (int @at) (int i)) (.append sb ^String r) (vreset! at (inc i)))]
     (scan-code s (fn [i] (put i pad)) (fn [i] (put i "\\n")))
     (str (.append sb s (int @at) (.length s)))))
+
+(defn code-text
+  "Marked text `s` (code or prose, seon.print/code) at its place: code exactly as written, every
+  line where it stands in its file, so its reader can copy any slice of it (an edit!'s old text) and
+  it reads back as written; prose verbatim, every line after the first indented `indent` columns,
+  a newline inside a string literal printed escaped (backslash-n), never indented.
+  See docs/render.md#cut-where-a-value-is-made."
+  {:malli/schema [:=> [:cat [:enum :seon.print/code :seon.print/prose] :string nat-int?] :string]}
+  [kind ^String s indent]
+  (if (= :seon.print/code kind) s (prose-text s indent)))
 
 (defn path-form
   "The plain clojure.core form that reads `path` from `source`: runs of keys and indices as one
@@ -153,7 +162,7 @@
   (let [form (:seon.print/continuation node)]
     (case (:seon.print/elision-unit node)
       :characters (str (if (:seon.print/code? node)
-                         (str (code-text (or (:seon.print/prefix node) "") (:seon.print/indent node 0)) " ")
+                         (str (code-text (:seon.print/code? node) (or (:seon.print/prefix node) "") (:seon.print/indent node 0)) " ")
                          (string-literal (or (:seon.print/prefix node) "")))
                        (cut-words (:seon.print/omitted node) (:seon.print/lines node) form))
       (cond-> (if (= :pending (:seon.print/elision-unit node)) "…?" (str "…" (:seon.print/omitted node "?")))
@@ -255,7 +264,7 @@
                                   [:span {:class (css-class :seon.print/string)} (or (:seon.print/text node) value)])
       ;; code (seon.print/code) verbatim at its place, as in its file
       ;; on the page code is highlighted (highlight.js, as each patch inserts it) and prose is a paragraph
-      :seon.print/code (text-op :seon.print/code (code-text value (:seon.print/indent node 0)) (marked-hiccup (:seon.print/code? node) value))
+      :seon.print/code (text-op :seon.print/code (code-text (:seon.print/code? node) value (:seon.print/indent node 0)) (marked-hiccup (:seon.print/code? node) value))
       (:seon.print/inst :seon.print/uuid) (text-op :seon.print/tag (or (:seon.print/text node) (literal value)))
       :seon.print/var (text-op :seon.print/symbol (str "#'" (:seon.print/name node)))
       :seon.print/class (text-op :seon.print/symbol (:seon.print/name node))

@@ -326,18 +326,29 @@
         (is (= (:n cut) (max 1 (emit/chars-tokens (count rest)))) "the form reads the characters whose tokens it says it left")))))
 
 
-(deftest code-prints-a-multi-line-string-as-pr-does
-  ;; docs/render.md: a newline inside a string literal in code is `\\n`, never layout-indented
-  (let [src "(= \"a\nb\n  c\" x)"
-        v {:a 1 :src (seon/code src)}
-        {:keys [text elisions]} (seon/print-value v {:handle 'result/e1})]
+(deftest code-prints-exactly-as-recorded
+  ;; docs/render.md#cut-where-a-value-is-made: code (seon.print/code) prints as written wherever it
+  ;; stands, so any slice of it is the recorded text (an edit!'s old text, md-scan bench-b13..b15: the shown
+  ;; source of scan was re-indented 6 columns and its docstring's newlines escaped, so no two lines of it
+  ;; matched and every multi-line edit read the source again); a string's newlines stay newlines and no
+  ;; indentation enters it, so it reads back the same (batch 18: an expected string read with spaces)
+  (let [src "(defn scan\n  \"Reads text once.\n\n  Its blocks, in order.\"\n  [s]\n  (let [n (count s)]\n    (= \"a\nb\n  c\" s)))"
+        v {:context {:cites [{:symbol 'demo/scan :source (seon/code src)}]}}
+        {:keys [text elisions]} (seon/print-value v {:handle 'result/e1})
+        lines (str/split-lines src)]
     (is (zero? elisions) text)
-    (is (str/includes? text "\"a\\nb\\n  c\"") "the string reads as pr prints it, no indent entered")
-    (is (= '(= "a\nb\n  c" x) (:src (edn/read-string text))) "and it reads back to the same string")
+    (is (str/includes? text src) "the recorded text is one slice of the shown text, nested three deep")
+    (is (every? #(str/includes? text (str (first %) "\n" (second %))) (partition 2 1 lines)) "every pair of lines as written")
+    (is (not (str/includes? text "\\n")) "no newline escaped, in the docstring or a string")
+    (is (= (edn/read-string src) (get-in (edn/read-string text) [:context :cites 0 :source])) "and it reads back as the form")
+    (testing "prose still lines up at its place"
+      (let [{:keys [text]} (seon/print-value {:a {:doc {:seon.print/prose "One.\nTwo."}}} {:handle 'result/e1})]
+        (is (re-find #"\n +Two\." text) text)))
     (testing "a cut keeps the width estimate honest"
       (let [big (seon/code (str/join "\n" (repeat 30 src)))
             {:keys [text]} (seon/print-value {:a 1 :src big} {:handle 'result/e1 :budget 150})]
-        (is (<= (select/estimate text) 150) text)))))
+        (is (<= (select/estimate text) 150) text)
+        (is (str/includes? text (first lines)) "its shown part as written")))))
 
 (deftest a-map-shows-its-first-entry-whenever-its-least-form-fits
   ;; a vector of the same size shows its first member at this budget (`[0 …29 (drop 1 result/h1)]`)
