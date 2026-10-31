@@ -50,17 +50,21 @@
     db))
 
 (defn near-of
-  "seon.vector/near's arguments: n forms with vectors, a query vector, k 10."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db [:vector number?] :int]]}
-  [n] [(store-of n) (unit-vector 100003) 10])
+  "seon.vector/near's arguments: n forms with vectors, a query vector, k 10, and a shortlist of 10 (the
+  rerank's size, which the claim holds for at any value: a small one puts every size past it)."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db [:vector number?] :int [:map [:shortlist pos-int?]]]]}
+  [n] [(store-of n) (unit-vector 100003) 10 {:shortlist 10}])
 
 (deftest a-search-reads-each-row-once
+  ;; the claim: a search reads each coarse row once (linear in the store) and reranks a shortlist of constant size.
+  ;; The shortlist is 10 here (:shortlist, not config's 400), so sizes of 30 to 300 are all past it. Red if a row is
+  ;; read twice or the rerank grows with the store (the per-row bytes and ticks rise over :per-n).
   (cost/proof
     {:of 'seon.vector/near :input 'seon.vector-cost-test/near-of
-     :n "vectors in the store, past the shortlist (below it every vector is the shortlist)"
+     :n "vectors in the store, past the shortlist of 10 (below it every vector is the shortlist)"
      :work (str "every coarse row read from its datom and copied once into the kernel's buffer and one C scan "
-                "of them (linear in n), then the shortlist's whole vectors read and ranked: at most "
-                ":seon.config.vector/shortlist (400) of them, a constant")
+                "of them (linear in n), then the shortlist's whole vectors read and ranked: the opts' :shortlist (10) "
+                "of them, a constant")
      :growth :linear
      ;; measured 2026-10-23 in the full run: 1.24M ticks / 5.92 MB at 500, 1.32M / 6.18 MB at 1,000,
      ;; 1.50M / 6.85 MB at 2,000: ~173 ticks and 620 B a coarse row; below the shortlist (all rows
@@ -69,11 +73,12 @@
      ;; cost reads as steeper growth)
      ;; 2026-10-29 (a-vector-is-its-own-entity): the join of each coarse row to the entity it embeds is a merge
      ;; join with the scan of :seon.vector/of, one datom read more a row: 5.22 MB at 1,000 (from 5.16), inside these
-     ;; 2026-10-31 (shrink-tests-4): sizes [420 600 800] on the world, the least past the shortlist (a size below it
-     ;; reranks every row, a different work): 1.31M ticks / 4.83 MB at 420, 1.39M / 4.98 MB at 640, inside these
-     :per-n {:ticks 200.0 :bytes 700.0}
-     :fixed {:ticks 1050000.0 :bytes 5200000.0}
-     :sizes [420 600 800]}))
+     ;; 2026-10-31 (shrink-tests-4): shortlist 10, sizes [30 100 300] on the world: 74k ticks / 275 KB at 30, 105k / 332 KB at 100,
+     ;; 189k / 466 KB at 300: ~430 ticks and ~700 B a coarse row, the fixed part (the 10 reranked rows, the kernel's setup)
+     ;; ~62k / 250 KB. With config's shortlist of 400 the reranked rows were 1M of the fixed part and sizes had to pass 400
+     :per-n {:ticks 440.0 :bytes 750.0}
+     :fixed {:ticks 62000.0 :bytes 250000.0}
+     :sizes [30 100 300]}))
 
 (defn due-of
   "seon.vector/due's arguments: n forms, every one with its vector, of another model than asked,
