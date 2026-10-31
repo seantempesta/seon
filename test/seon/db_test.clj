@@ -241,7 +241,7 @@
   ;; recovered ("Database does not exist"). Here a child creates a store and kills itself (SIGKILL,
   ;; nothing cleaned up) once the create has run its tick budget (seon.intr/run): four budgets (0.1, 0.8, 6.4 and 25.6 M; ten, doubling from 0.1 M, before) spread
   ;; over a create's work (~22 M ticks) kill it at four points of that work, the same on any machine,
-  ;; and one larger than the create lets it finish first. Each path then holds a whole store or none, and
+  ;; and one create made here finishes. Each path then holds a whole store or none, and
   ;; the next open answers either. (It killed at the moment a data file showed, read by a busy loop of up
   ;; to 10 M directory listings: 0.25-147 G ticks a run, red at its budget.) Stores of this test's own
   (let [base (str (seon.config/checkout) "/target/db-test-create-" (random-uuid))
@@ -256,8 +256,9 @@
     (try
       (is (= (repeat 4 :opens) (vec (for [i [0 3 6 8] :let [p (str base "/store-" i)]] (do (killed p (long (* 100000 (Math/pow 2.0 i)))) (opens p)))))
           "every path a killed create left opens")
-      (testing "a create that completes (the last budget, 25.6 M, is past its ~22 M) leaves nothing beside its store"
-        (is (= :opens (opens (str base "/store-8"))))
+      (testing "a create that completes leaves nothing beside its store"
+        ;; made here, not by a budget past the create's ~22 M: a create that came to cost more would make that case a kill
+        (is (= :opens (opens (str base "/whole"))))
         (is (empty? (filter #(str/includes? (.getName ^java.io.File %) ".making-") (.listFiles (java.io.File. base))))))
       (finally (clojure.java.shell/sh "rm" "-rf" base)))))
 
