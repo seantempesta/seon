@@ -83,6 +83,17 @@
                 tx (task/create-tx db [(assoc (decl "") :seon.task/instructions ins)])]]
     (is (= (set kept) (set (keep :seon.cite/name tx))) (str kind ": every name it cites"))))
 
+(deftest a-plan-and-its-instructions-are-cited-apart
+  ;; md-scan bench-b17: the plan quotes a fenced block's ``` marks, and parsed as one text with the instructions that
+  ;; run opened a code span, so the instructions' ```docs/agent.md#working-a-task``` was cited at summary (its heading
+  ;; alone) and the agent was never sent how a task is worked
+  (let [db (db-with-program)
+        tx (task/create-tx db [(assoc (decl "Drop a fenced block's ``` marks from `demo/f`.")
+                                      :seon.task/instructions "How: ```docs/agent.md#working-a-task```.")])
+        cite (first (filter #(= "docs/agent.md#working-a-task" (:seon.cite/address %)) tx))]
+    (is (= :code (:seon.cite/depth cite)) (str "the instructions' citation at the depth its own delimiter asks: " (pr-str cite)))
+    (is (some #(= 'demo/f (:seon.cite/name %)) tx) "and the plan's own")))
+
 (deftest unresolved-citations-are-answered-not-refused
   (let [db (db-with-program)
         ds [(decl "Make `demo/f` and `demo/a` pass.")]]
