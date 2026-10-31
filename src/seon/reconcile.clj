@@ -430,7 +430,13 @@
                                                                      (:seon.run/unmerged a []) (:seon.run/basis-t a) (:seon.run/plan a)
                                                                      (set (:seon.run/deferred a)))
                                                           :caused (:seon.run/caused a #{}))
-                                            (:seon.run/behind a) (assoc :behind (:seon.run/behind a))))]
+                                            ;; behind is the run's own to fix only when no merge task follows it: a merge task
+                                            ;; merges main into the branch and the gate tests what it writes (seon.template's
+                                            ;; merge-decl), so a green work run judged behind a busy main is done, never told again
+                                            ;; until :seon.config.merge/max-behind holds it (swarm held sw/s8 and sw/s9 so, 2026-10-31)
+                                            (and (:seon.run/behind a)
+                                                 (not-any? #(= :merge (get-in idx [:tasks % :seon.task/kind])) (get-in idx [:needed-by id])))
+                                            (assoc :behind (:seon.run/behind a))))]
                      (cond
                        ;; the process tests the branch's change reaches run before its merge, on a
                        ;; checkout (:gate, seon.fx/run-tests), nobody asking (owner's ruling,
