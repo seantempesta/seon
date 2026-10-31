@@ -957,12 +957,16 @@
         ids (into (vec (for [k (keys live) :when (or whole? (not= (get old k) (get hs k)))] k))
                   (when old (sort (remove #(contains? live %) (keys old)))))
         ;; the parts as the request before drew them, to send what changed of each: this process's, kept with its print
-        ;; of that request; else drawn at the commit it recorded, so a request is the same bytes whatever the process
-        ;; printed before (seon.context-test/a-run-printed-once-sends-what-a-cold-read-sends). Drawn only when a part
-        ;; both requests sent moved, and once a process: the request it makes keeps its parts (:live) for the next
+        ;; of that request; else, for a model turn, drawn at the commit it recorded, so a turn's request is the same
+        ;; bytes whatever the process printed before (seon.context-test/a-run-printed-once-sends-what-a-cold-read-sends),
+        ;; drawn only when a part both requests sent moved, and once a process (the turn keeps its parts, :live, for the
+        ;; next). A read that is no model turn (an observer's, which keeps no print) is never drawn again to diff: it
+        ;; sends a moved part whole, and its record replays as sent (seon.server-test/a-later-read-draws-no-page-cold-
+        ;; and-costs-what-the-one-before-did)
         prev-ref (when-not whole? (last (filter #(= :parts (first %)) prev)))
         was (when (and prev-ref (some #(and (contains? live %) (contains? old %)) ids))
-              (if (= prev-ref (:live-ref printed)) (:live printed) (drawn-at db e (nth prev-ref 2))))
+              (cond (= prev-ref (:live-ref printed)) (:live printed)
+                    model? (drawn-at db e (nth prev-ref 2))))
         ref (cond-> [:parts e (d/commit-id db) whole? ids id] was (conj (nth prev-ref 2)))
         current [[:parts id] (delay {:ref ref :whole (parts-message live ids was)}) nil (if whole? 0 now)]
         ;; what the previous request sent, its refs in order: this process's print of them, else read back from the records
