@@ -132,12 +132,12 @@
   ;; task seon.cost/a-cost-proof-is-the-same-under-load: a collection tripped inside a measured
   ;; call charged the call the collector's bookkeeping (17,344 B for an explicit collect, 67,264 B
   ;; a call of seon.vector/near beside an allocating thread), so a proof's sizes read different
-  ;; offsets under load and its growth fit went red. A call of ~5 MB beside a thread allocating
-  ;; takes a collection in every sample; its bytes are the same as alone. (into, not vec: Jolt's
+  ;; offsets under load and its growth fit went red. A call beside a thread allocating
+  ;; takes a collection in the samples (asserted: gcs is positive; the call is 100,000 elements, 318 M -> 43 M ticks, the error class needing a collection in the window, not a large call); its bytes are the same as alone. (into, not vec: Jolt's
   ;; vec of a seq applies jolt-vector to n arguments, and the stack that grows is kept until a
   ;; collection, so vec's own bytes depend on whether one ran since the last call: task
   ;; jolt.core/vec-builds-by-reduction.)
-  (let [f (fn [] (count (into [] (range 600000))))
+  (let [f (fn [] (count (into [] (range 100000))))
         alone (seon.cost/measure f [])
         busy (allocating-thread)
         g0 (:count (seon.lib/gc-stats))
