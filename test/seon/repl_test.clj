@@ -100,9 +100,18 @@
          (let [r (repl/edit! 'x.repl-edit/l [["[i 0 acc 0]" "[i 0 acc 0 k 10]"] ["(recur (inc i) (+ acc i))" "(recur (inc i) (+ acc i) k)"] ["acc)))" "(+ acc k))))"]])]
            (is (get-in r [:edited :var]) (str "several changes, applied together and compiled once: " (pr-str r)))
            (is (= 16 ((resolve 'x.repl-edit/l) 4)) "the bindings, the recur and the result changed at once")
-           (is (str/includes? (my.agent/source-fn 'x.repl-edit/l) "k 10]") "its source is the new text"))
-         (let [r (repl/edit! 'x.repl-edit/l [["(inc i)" "(+ i 1)"] ["i (inc i)" "i (+ 1 i)"]])]
-           (is (contains? #{:overlap :not-found :ambiguous} (:seon.repl/refused-because r)) (pr-str r)))
+           (is (str/includes? (my.agent/source-fn 'x.repl-edit/l) "k 10]") "its source is the new text")
+           (is (= 1 (ffirst (get-in r [:edited :lines]))) "the lines around the changes"))
+         ;; each change's lines numbered in the new text: the second change's line moved down by the line the first added
+         (repl/eval-string "(in-ns 'x.repl-edit) (defn m [x]\n  (let [a 1]\n    (+ x\n       a)))\n(in-ns 'user)" {})
+         (let [r (repl/edit! 'x.repl-edit/m [["(let [a 1]" "(let [a 1\n        b 2]"] ["       a)))" "       a b)))"]])]
+           (is (= 4 ((resolve 'x.repl-edit/m) 1)) (pr-str r))
+           (is (some #{[5 "       a b)))"]} (get-in r [:edited :lines])) (str "the second change at its line in the new text: " (pr-str (get-in r [:edited :lines]))))
+           (is (apply < (map first (get-in r [:edited :lines]))) "each line once, in order"))
+         (let [r (repl/edit! 'x.repl-edit/l [["(recur (inc i)" "(recur (+ i 1)"] ["(inc i) (+ acc" "(+ 1 i) (+ acc"]])]
+           (is (= :overlap (:seon.repl/refused-because r)) (str "two changes whose texts overlap, neither the other: " (pr-str r))))
+         (let [r (repl/edit! 'x.repl-edit/l "" "x")]
+           (is (= :empty (:seon.repl/refused-because r)) (str "an empty old text is refused, never matched everywhere: " (pr-str r))))
          (let [r (repl/edit! 'x.repl-edit/l [["(loop [i 0" "(loop [i 1"] ["(+ acc i)" "(+ acc i"]])]
            (is (= :unbalanced (:seon.repl/refused-because r)) "each change is checked as one alone is")
            (is (str/includes? (:seon.error/message r) "change 2 of 2") (str "naming which: " (:seon.error/message r)))

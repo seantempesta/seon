@@ -739,12 +739,13 @@
   written, never repaired: a repair of a whole definition is made far from the edit and reads as
   another error there (md-scan #17). Answers that eval's response with :edited, the var and the lines
   around each change; throws the evaluation's error when the new definition does not compile or load,
-  its message saying nothing changed, so the eval answers it as its own (bench-b13's agent read an
-  edit's error nested in its value, cut from sight, as a change that held); or
+  its message saying nothing changed, so the eval it is called in answers it as its own :ex (bench-b13's
+  agent read an edit's error nested in its value, cut from sight, as a change that held; a caller
+  outside an eval catches it, its ex-data the error map); or
   :seon.repl/edit-refused, nothing changed: no recorded source, an old not in it (with the lines that
   hold its first line, ignoring indentation), an old there more than once (each candidate's line), a
   new opening or closing delimiters its old does not (seon.reader/balance: :unbalanced, by how many of
-  each), or two olds that overlap (:overlap). Exact text and one occurrence, as file editors converged
+  each), two olds that overlap (:overlap), or an empty old (:empty). Exact text and one occurrence, as file editors converged
   on (docs/agent.md#changing-a-definition)."
   {:malli/schema [:function
                   [:=> [:cat :qualified-symbol :string :string] [:or :seon.repl/edit-refused :my.agent/no-var :seon.eval/response]]
@@ -761,8 +762,9 @@
          lines-at (fn [at] (mapv (fn [i] (let [l (line-of i)] [l (nth (clojure.string/split-lines src) (dec l))])) at))
          ;; each change checked against the recorded source: its one offset, or why it is refused
          check (fn [k [old new]]
-                 (let [at (offsets src old)]
+                 (let [at (when (seq old) (offsets src old))]
                    (cond
+                     (empty? old) {:refused (refuse :empty (str (which k) "the old text is empty: give the exact text to replace") nil)}
                      (empty? at) (let [first-line (clojure.string/trim (first (clojure.string/split-lines (str old " "))))
                                        cands (vec (for [[i l] (numbered src 1 Long/MAX_VALUE) :when (and (seq first-line) (clojure.string/includes? (clojure.string/trim l) first-line))] [i l]))
                                        ;; at each line that holds its first line, the one line where old stops matching, and how
