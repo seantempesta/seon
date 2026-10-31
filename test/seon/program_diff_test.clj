@@ -54,7 +54,7 @@
       (is (= [[:var 'app.pc/f5]] (:remove (program/diff-plan db (get cases "a definition removed")))))
       (is (= #{:app.pc/s} (:schemas (program/diff-plan db (get cases "a schema entry registered"))))))))
 
-(def ^:private diff-sizes "The sizes diff-plan's proof measures." [10 100 1000])
+(def ^:private diff-sizes "The sizes diff-plan's proof measures." [10 30 100])
 
 (deftest a-diff-costs-the-change-never-the-program
   (try

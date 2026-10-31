@@ -5,7 +5,7 @@
   it leaves dead, the latest redefinition winning, scratch data and observations never
   merging, unmerged entries derived from the branch, and behind meaning main's program
   moved."
-  (:require [seon.test-store :as ts] [seon.proofs :as proofs] [clojure.test :refer [deftest is are testing]]
+  (:require [seon.test-store :as ts] [my.test :as mt] [seon.proofs :as proofs] [clojure.test :refer [deftest is are testing]]
             [datahike.api :as d]
             [seon.db :as pdb]
             [seon.merge :as pm]
@@ -33,7 +33,9 @@
 
 ;; a function, not a def: a test namespace loads without effects (it is loaded where main's
 ;; program runs, the fork server included, which opens no store)
-(defn- base [] (with (empty-db) (var-tx "f" "x") (var-tx "g" "x") (var-tx "h" "x")))
+;; the world, on a db that keeps history (docs/testing.md#testing-in-the-world): cases need f, g, h beside a small program;
+;; the store-shaped test db cost 441 M ticks for three-way-cases, the world 77 M
+(defn- base [] (with (mt/world {:history? true}) (var-tx "f" "x") (var-tx "g" "x") (var-tx "h" "x")))
 
 (defn- unmap [nm]
   (fn [db] (let [e (:db/id (d/entity db [:var/name (symbol "app" nm)]))]
@@ -306,7 +308,7 @@
 (deftest the-delta-three-way-reads-data-and-schema-entries-as-the-program-does
   ;; declared data (card one and many) and schema entries, besides forms and definitions:
   ;; delta-three-way, read only where the dbs differ, answers what three-way does
-  (let [b (base)
+  (let [b (with (empty-db) (var-tx "f" "x") (var-tx "g" "x") (var-tx "h" "x")) ; the test db holds the task :app.m0/tidy and its refs
         task (d/q '[:find ?e . :where [?e :task/name :app.m0/tidy]] b)
         ref (:db/id (first (:task/refs (d/entity b task))))
         o (with b [{:note/text "ours"} [:db/add task :task/status :done]]

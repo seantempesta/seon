@@ -3,8 +3,8 @@
   method removed from its multimethod stop pointing to their forms; every other definition
   stays."
   (:require [clojure.test :refer [deftest is testing]] [datahike.api :as d]
-            [seon.test-store :as ts] [seon.program-test :as pt] [seon.stage :as stage] [seon.db :as pdb]
-            [seon.cost] [seon.program-cost-test]))
+            [seon.test-store :as ts] [my.test :as mt] [seon.program :as program] [seon.program-test :as pt] [seon.stage :as stage] [seon.db :as pdb]
+            [seon.cost]))
 
 (deftest staging-retracts-exactly-what-the-runtime-dropped
   (let [db (pt/record (ts/test-db)
@@ -33,10 +33,18 @@
         (is (some #(= :method/form (nth % 2)) tx))
         (is (not-any? #(= (pdb/eid db :var/name 'app.st-stage/kept) (second %)) tx))))))
 
+(defn- account-of
+  "The account of form i, `(defn fi [x] x)` in app.stage-cost, as the compiler gives it."
+  {:malli/schema [:=> [:cat :int] :map]}
+  [i]
+  {:id (str "app.stage-cost/f" i) :src (str "(defn f" i " [x] x)") :ns 'app.stage-cost :ns-form? false
+   :defs [{:var (symbol "app.stage-cost" (str "f" i)) :kind :fn}] :declares #{} :methods [] :impls [] :refs #{} :requires #{} :banned #{} :inline-defs #{}})
+
 (defn vars-of
-  "stage-tx's argument: a branch db holding n recorded forms (seon.program-cost-test/branch-of)."
+  "stage-tx's argument: the world holding n more recorded forms (app.stage-cost/f0..fn-1; a db in memory:
+  stage-tx reads only the recorded vars)."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db]]}
-  [n] [(first (seon.program-cost-test/branch-of n))])
+  [n] [(let [db (mt/world)] (d/db-with db (vec (mapcat #(program/account-tx db (account-of %) %) (range n)))))])
 
 (deftest staging-is-one-pass-over-the-recorded-vars
   (seon.cost/proof
@@ -47,6 +55,8 @@
                 "measured 2026-10-23 on Seon's program (2,128 forms): 5.2 ms, where one ns-interns per "
                 "var took 40.8 ms")
      :growth :linear
-     :per-n {:ns 3000 :bytes 3000}
-     :fixed {:ns 1000000 :bytes 2000000}
-     :sizes [100 300 1000 10000]}))
+     ;; measured 2026-10-31 on the world: 129.8 KB and 70.5k ns at 30 forms, 336.3 KB and 142.5k ns at 100
+     ;; (2.95 KB and 1.0k ns a form, 41 KB and 40k ns fixed), the 2026-10-23 per-form figures held; the fixed was 2 MB and 1 ms on the test db
+     :per-n {:ns 1100 :bytes 3000}
+     :fixed {:ns 45000 :bytes 45000}
+     :sizes [30 100 300]}))
