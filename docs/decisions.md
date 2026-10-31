@@ -2,6 +2,15 @@
 
 This file holds the owner's standing rulings, one entry each: the rule, the owner's words and date, and where the rule is stated now; current truth and mechanism live in `AGENTS.md` and the wiki (`docs/`), and superseded or done rulings are kept verbatim in git history.
 
+## 2026-10-31 rulings
+The owner's rulings of 2026-10-31; they stand over earlier entries where they differ.
+
+### A test shows its claim, not a smaller copy of its old input (owner, 2026-10-31)
+"question what is being tested rather than how fast can we make it. Algoirthmic improvements often can be found by rethinking the problem." Before shrinking a test, state what it claims and find the smallest input that shows exactly that claim (a parameter of the function, such as a shortlist, set small; a constant claim where the cost does not grow; an exact count where the dimension is exact). Stated in docs/plan.md (the shrink item) and the shrink briefs; batches 57 and 59 apply it.
+
+### A flaky check step is merged past and filed, not rerun into a verdict (owner, 2026-10-31)
+On batch 58 (swarm red once, green alone at the same tree, the change unable to reach it): "merge and file". The race is task seon.reconcile/a-behind-run-that-parked-green-is-merged-not-rerun-to-its-cap, its evidence kept until it is fixed.
+
 ## 2026-10-30 rulings
 The owner's rulings of 2026-10-30 morning, after the overnight md-scan runs; they stand over earlier entries where they differ.
 
