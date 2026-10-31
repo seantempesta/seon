@@ -794,7 +794,9 @@
                                            {:seon.run/id "demo/a#1" :seon.run/outcome :green :seon.run/behind 4}])))
         verdict-of (fn [db] (first (filter #(= :verdict (:op %)) (actions-for db))))]
     (is (nil? (verdict-of (ended [(decl "a") merge-decl]))) "followed by its merge task: no verdict, the run is done")
-    (is (= {:reason :behind :behind 4} (first (:reasons (verdict-of (ended [(decl "a")]))))) "no merge task: told it is behind")))
+    (is (= {:reason :behind :behind 4} (first (:reasons (verdict-of (ended [(decl "a")]))))) "no merge task: told it is behind")
+    (is (= {:reason :behind :behind 4} (first (:reasons (verdict-of (ended [(decl "a") (decl "b" :needs ["a"])])))))
+        "a follower that is no merge task brings no main in: told it is behind")))
 
 (deftest design-may-leave-its-proofs-red
   ;; a design step's work is the plan: done only when the plan differs from the one it began with

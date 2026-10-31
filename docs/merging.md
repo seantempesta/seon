@@ -77,6 +77,8 @@ Owner, 2026-10-27: "Why are we reverifying on main? Don't do unnecessary work if
 
 Root reads every merge's `src` diff stat before merging, against the goal of about 10k lines of our own code. Every function a merge adds names the existing system it extends, or why none could carry it; a new namespace or mechanism where an existing one could be extended is sent back, not merged; the merge's commit message states its net `src` lines (`bin/laws growth` prints them and the definitions the branch adds), and a merge that grows `src` says what it deletes or plans to delete.
 
+A work task's run is judged on its branch and never told it is behind main: its merge task merges main into the branch and the gate tests what that writes, so main moving under a green work run is the merge task's, not the work agent's ([turn](turn.md#what-a-turn-takes-from-main), `seon.reconcile-test/a-green-work-run-judged-behind-is-done-and-its-merge-runs`).
+
 ## A merge says what it completes
 
 A merge that completes a task's work says so in its message, one line a task, `Completes: ns/name`, and removes that task's entry from `resources/seon/tasks/` in the same commit (git keeps the plan, test/ keeps the proofs). `seon.task-files-test/no-shipped-task-is-merged-work` reads those lines on main's first-parent merges and is red on any that names an entry still in the files. Nothing else in a message counts: a merge that files a task, names one it merged past, or moves one without finishing it completes nothing and needs no exception (on 2026-10-31 two merges that named a filed task read as merged work left behind, under the rule this replaces: a message naming a task, kept open by a list of thirteen exceptions).

@@ -432,8 +432,9 @@
                                                           :caused (:seon.run/caused a #{}))
                                             ;; behind is the run's own to fix only when no merge task follows it: a merge task
                                             ;; merges main into the branch and the gate tests what it writes (seon.template's
-                                            ;; merge-decl), so a green work run judged behind a busy main is done, never told again
-                                            ;; until :seon.config.merge/max-behind holds it (swarm held sw/s8 and sw/s9 so, 2026-10-31)
+                                            ;; merge-decl), so a green work run is never judged behind; a merge that main moves under is the merge
+                                            ;; task's, held at :seon.config.merge/max-behind (the :octopus-merged step). Told again, a green run behind a
+                                            ;; busy main was held at that bound (swarm held sw/s8 and sw/s9 so, 2026-10-31)
                                             (and (:seon.run/behind a)
                                                  (not-any? #(= :merge (get-in idx [:tasks % :seon.task/kind])) (get-in idx [:needed-by id])))
                                             (assoc :behind (:seon.run/behind a))))]
