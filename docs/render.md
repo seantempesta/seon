@@ -231,6 +231,7 @@ Uses of take, subs and the like in display code that choose what to find or read
 - `my.agent/file-source`, `seon.repl/form-src`: a form's own text out of its file or its reply (`subs` at a reader's offsets).
 - `seon.repl/do-parts`: a top-level form written `(do ...)` (its text opens with `(` and the token `do`, so a reader macro that expands to do is not one) as its inner forms, each the form the reader already returned, with its exact text and leading comments from the reader's own positions in the do's text (no pattern, no cut by text), each then evaluated as a top-level form as Clojure's compiler takes them: code read, not output.
 - `seon.repl/edit!`: the offsets of the old text in a definition's recorded source (`subs` rebuilds the source around the change, `line-of` counts the lines before an offset): text rearranged, nothing left out; a refused edit names every line that could be meant.
+- `seon.repl/unpaired-by-line`: a refused edit's unpaired delimiters, each with the line of the new text it is on, quoted whole (`pr-str` of one source line, `subs` for the text before an offset to count its lines): code text for the agent to find, nothing left out.
 - `my.root/task-files`: a task file's owning namespace from its file name (`subs` off the `.edn`).
 - `seon.render.ui/utc-offset-ms`: parsing `:seon.config.web/utc-offset`.
 - `seon.web/handler`, `seon.web/view-of`, `seon.server/mcp-reply`: parsing a request's path and a tool's name.

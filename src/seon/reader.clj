@@ -301,23 +301,23 @@
                             (recur (inc i) false stack (conj stray [c i]) crossed))
             :else (recur (inc i) false stack stray crossed)))))))
 
+(defn delimiter-counts
+  "Unpaired delimiters d (as `delimiters` answers them) as a count each: how many more ( [ { were opened
+  than ) ] } closed, {\\( n \\[ n \\{ n}. See docs/agent.md#changing-a-definition."
+  {:malli/schema [:=> [:cat [:map [:open :any] [:stray :any] [:crossed :any]]] [:map-of char? :int]]}
+  [{:keys [open stray crossed]}]
+  (let [by-closer (into {} (map (fn [[o c]] [c o])) openers)]
+    (as-> {\( 0 \[ 0 \{ 0} acc
+      (reduce (fn [m [c]] (update m c inc)) acc open)
+      (reduce (fn [m [c]] (update m (by-closer c) dec)) acc stray)
+      ;; a closer of another kind closes its opener and stands for its own kind's
+      (reduce (fn [m [c _ o]] (-> m (update o inc) (update (by-closer c) dec))) acc crossed))))
+
 (defn balance
   "Code text s's delimiters as a count each: how many more ( [ { it opens than ) ] } it closes,
   {\\( n \\[ n \\{ n}, outside strings, character literals (a backslash takes the next character,
-  so `\\)` is no closer) and ; comments, as `scan` reads them. What an exact edit's old and new
-  text are compared by (seon.repl/edit!, docs/agent.md#changing-a-definition)."
+  so `\\)` is no closer) and ; comments: `delimiters`, the one scan, counted (`delimiter-counts`). See
+  docs/agent.md#changing-a-definition."
   {:malli/schema [:=> [:cat :string] [:map-of char? :int]]}
   [^String s]
-  (let [n (count s) by-closer (into {} (map (fn [[o c]] [c o])) openers)]
-    (loop [i 0 in-str false acc {\( 0 \[ 0 \{ 0}]
-      (if (>= i n)
-        acc
-        (let [c (.charAt s (int i))]
-          (cond
-            in-str (cond (= c \\) (recur (+ i 2) true acc) (= c \") (recur (inc i) false acc) :else (recur (inc i) true acc))
-            (= c \") (recur (inc i) true acc)
-            (= c \\) (recur (+ i 2) false acc)
-            (= c \;) (recur (or (some-> (str/index-of s "\n" i) inc) n) false acc)
-            (openers c) (recur (inc i) false (update acc c inc))
-            (by-closer c) (recur (inc i) false (update acc (by-closer c) dec))
-            :else (recur (inc i) false acc)))))))
+  (delimiter-counts (delimiters s)))

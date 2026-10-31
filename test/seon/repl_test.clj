@@ -86,7 +86,17 @@
            (is (= 2 ((resolve 'x.repl-edit/g))) "nothing changed"))
          (let [r (repl/edit! 'x.repl-edit/g "(+ 1 1)" "(+ 1 [1)]")]
            (is (= :unbalanced (:seon.repl/refused-because r)) (str "a ( met by ], as many of each: refused, never read as \"Unmatched delimiter\": " (pr-str r)))
-           (is (str/includes? (:seon.error/message r) "the ) at its line 1") (:seon.error/message r)))
+           (is (str/includes? (:seon.error/message r) "the ) at its line 1") (:seon.error/message r))
+           (is (str/includes? (:seon.error/message r) "pairs a delimiter with another kind") (:seon.error/message r)))
+         ;; an old text that is itself unbalanced keeps its own unpaired delimiters: only what the edit made is named,
+         ;; at its line (the review: an extra ( added before old's own was named at old's line)
+         (repl/eval-string "(in-ns 'x.repl-edit) (defn u [x]\n  (let [a (inc x)\n        b 2]\n    (+ a b)))\n(in-ns 'user)" {})
+         (let [r (repl/edit! 'x.repl-edit/u "(let [a (inc x)" "(do\n  (let [a (inc x)")]
+           (is (= :unbalanced (:seon.repl/refused-because r)) (pr-str r))
+           (is (str/includes? (:seon.error/message r) "a ( left open at its line 1, \"(do\"") (str "the wrapping ( named, not old's own: " (:seon.error/message r)))
+           (is (not (str/includes? (:seon.error/message r) "line 2")) (:seon.error/message r)))
+         (let [r (repl/edit! 'x.repl-edit/u "(let [a (inc x)" "(let [a (inc x)\n        z (inc")]
+           (is (str/includes? (:seon.error/message r) "a ( left open at its line 2, \"z (inc\"") (str "an appended ( named at its own line: " (:seon.error/message r))))
          (let [r (repl/edit! 'x.repl-edit/g "(+ 1 1)" "(+ 1 1))")]
            (is (= :unbalanced (:seon.repl/refused-because r)) "a closer more")
            (is (str/includes? (:seon.error/message r) "closes 1 more )") (:seon.error/message r)))
