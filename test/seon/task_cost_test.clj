@@ -1,7 +1,7 @@
 (ns seon.task-cost-test
   "Cost proofs of the task reader's hot lookups."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.test-store :as ts] [clojure.test :refer [deftest is]] [seon.contract :refer [defn defn-]]
+  (:require [my.test :as mt] [clojure.test :refer [deftest is]] [seon.contract :refer [defn defn-]]
             [datahike.api :as d] [seon.db :as pdb] [seon.task :as task] [seon.cost :as cost]
             [seon.render.ui :as ui]))
 
@@ -9,7 +9,7 @@
   "The input of size n: a main db holding n tasks, and the id of one of them."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :keyword :string]]}
   [n]
-  (let [db (ts/test-db)
+  (let [db (mt/world)
         decls (vec (for [i (range n)] {:seon.task/ns 'demo :seon.task/name (str "t" i) :seon.task/plan "p"}))]
     [(d/db-with db (task/create-tx db decls)) :seon.task/id (str "demo/t" (quot n 2))]))
 
@@ -47,7 +47,7 @@
   the turns' waste)."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db]]}
   [n]
-  (let [db (ts/test-db)
+  (let [db (mt/world)
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "t" :seon.task/plan "p"}]))
         report {:rows [{:n 100 :measured {:ns 1200.0 :bytes 900.0} :expected {:ns 1000.0 :bytes 800.0}}] :verdict {:ok? false :over [{:dim :ns :n 100 :ratio 1.2}] :steeper [] :under [] :unmerged []}}]
     [(d/db-with db (vec (for [i (range n) :let [aid (str "demo/t#" i)]
@@ -81,16 +81,18 @@
                 "and 15.8 MB (149 us, 158 KB each); the explicit 23-attribute pull it replaced read the same "
                 "input in 32.6 ms and 30.1 MB (one lookup per named attribute, absent ones included)")
      :growth :linear
-     :per-n {:ns 200000 :bytes 200000 :calls 1}
+     ;; 2026-10-31 (shrink-tests-4): on the world, sizes [10 30 100]: 1.40M ns / 1.45 MB at 10, 3.87M / 4.18 MB at 30,
+     ;; 12.4M / 13.6 MB at 100 runs: ~124 us and 135 KB a run (the larger sizes read the same per run)
+     :per-n {:ns 130000 :bytes 140000 :calls 1}
      :fixed {:ns 100000 :bytes 100000 :calls 1}
-     :sizes [10 100 300]}))
+     :sizes [10 30 100]}))
 
 (defn carried-of
   "The input of size n: carry-tx's three dbs (base, branch, main) over n tasks, each with a plan and
   two proofs, the branch having improved one task's plan."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :seon.host/db :seon.host/db]]}
   [n]
-  (let [db (ts/test-db)
+  (let [db (mt/world)
         decls (vec (for [i (range n)] {:seon.task/ns 'demo :seon.task/name (str "t" i) :seon.task/plan (str "Make t" i " true.")
                                        :seon.task/proofs #{(symbol "demo-test" (str "t" i "-test")) 'demo-test/other}}))
         base (d/db-with db (task/create-tx db decls))]
@@ -106,16 +108,17 @@
      :growth :linear
      ;; measured: 0.46 / 3.09 / 28.8 MB at 10 / 100 / 1,000 tasks, 2 calls; it was 774 MB at 100 when each datom's
      ;; cardinality read (d/schema main), which rebuilds the whole schema map
-     :per-n {:bytes 31000}
-     :fixed {:calls 2 :bytes 300000}
-     :sizes [10 100 1000]}))
+     ;; 2026-10-31 (shrink-tests-4): on the world, sizes [10 30 100]: 323 KB at 10, 809 KB at 30, 2.57 MB at 100: ~25 KB a task
+     :per-n {:bytes 26000}
+     :fixed {:calls 2 :bytes 100000}
+     :sizes [10 30 100]}))
 
 (defn loaded-of
   "The input of size n: a main db holding n tasks loaded from their file (each with its declaration stored), and the
   same file read again."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db [:map-of :symbol :any]]]}
   [n]
-  (let [db (ts/test-db)
+  (let [db (mt/world)
         files {'demo (vec (for [i (range n)] {:seon.task/name (str "t" i) :seon.task/ns 'demo :seon.task/plan "p"
                                               :seon.task/needs (if (zero? (mod i 5)) #{} #{(str "demo/t" (dec i))})}))}]
     [(d/db-with db (task/load-tx db files)) files]))

@@ -2,15 +2,20 @@
   "Cost proof of loading the wiki: an unchanged reload costs one parse and a few seeks per
   section, and writes nothing."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.test-store :as ts] [clojure.test :refer [deftest is]] [seon.contract :refer [defn defn-]]
+  (:require [seon.test-store :as ts] [my.test :as mt] [clojure.test :refer [deftest is]] [seon.contract :refer [defn defn-]]
             [datahike.api :as d] [seon.db :as pdb] [seon.docs :as docs] [seon.cost :as cost] [seon.docs-test]))
+
+(defn- base
+  "The world, and the namespace app.m0 the pages cite (f0 to f10)."
+  []
+  (mt/with (mt/world) (mt/code 'app.m0 (str "(ns app.m0)\n" (apply str (for [i (range 11)] (str "(defn f" i " [] " i ")\n")))))))
 
 (defn wiki
   "The input of size n: a main db already holding a wiki of n sections (pages of ten, each
   section one sentence citing a var and linking its page's first section), and those pages."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :string [:map-of :string :string]]]}
   [n]
-  (let [db (ts/test-db)
+  (let [db (base)
         pages (into {} (for [p (range (max 1 (quot n 10)))]
                          [(str "demo/p" p ".md")
                           (apply str (str "# Page " p "\n\nPage " p " holds ten sections.\n")
@@ -19,19 +24,31 @@
         tx (docs/load-tx db "demo" pages)]
     [(d/db-with db tx) "demo" pages]))
 
+(def ^:private reload-estimate
+  "The estimate of an unchanged reload: see the test."
+  {:of 'seon.docs/load-tx :input 'seon.docs-cost-test/wiki
+   :n "sections in the wiki"
+   :work (str "per section of ~90 bytes: its parse (seon.ref's estimate, ~270 ns and ~360 B per byte, the read of "
+              "its one name included: ~25 us, ~32 KB); on db, one AVET seek for its var and one EAVT seek per "
+              "stated attribute, five (seon.task/entity-tx) (~5 seeks at ~17 us and ~33 KB each, seon.db/avet-seek-allocates: ~85 us, "
+              "~165 KB); ~19 contracted calls (own-text, cited, two citation-targets, kept and its alias check of the one name (seon.ref/kept: the names it keeps), wanted, entity-tx and one eid; the parse's ~3 per inline for its two inlines and the read's 3; the stored-section scan and page split amortized). Its second inline, a section of a file named by its address, costs a candidate and its target and reads no file (seon.docs/section-names keeps the names only: it used to parse the file for each, 1.2 MB a section). Since the wiki records what each section was written against, a stored section is also pulled once (its text, :seon.section/read, :seon.section/baseline-unread: one more seek each, ~+40 KB, ~+100 us) to keep that record while its text is unchanged. The stored sections are read once, one datom each, so a section's "
+              "parent and link targets are map lookups. Nothing is written: the answer is []")
+   :growth :linear
+   ;; 2026-10-31 (shrink-tests-4): sizes [10 20 30] on the world (a size is a multiple of ten: pages of ten sections):
+   ;; 1.69 / 3.56 MB, 231 / 459 / 687 calls: exactly 3 + 22.8 a section (228 a page), the old sizes up to 250 read the same
+   ;; ~177 KB a section. Calls are counted exactly, so the test asserts them (below) and the growth needs no wide span
+   :per-n {:ns 170000 :bytes 190000 :calls 22.8}
+   :fixed {:ns 50000 :bytes 50000 :calls 3}
+   :sizes [10 20 30]})
+
 (deftest an-unchanged-reload-costs-a-parse-and-a-pull-per-section
-  (cost/proof
-    {:of 'seon.docs/load-tx :input 'seon.docs-cost-test/wiki
-     :n "sections in the wiki"
-     :work (str "per section of ~90 bytes: its parse (seon.ref's estimate, ~270 ns and ~360 B per byte, the read of "
-                "its one name included: ~25 us, ~32 KB); on db, one AVET seek for its var and one EAVT seek per "
-                "stated attribute, five (seon.task/entity-tx) (~5 seeks at ~17 us and ~33 KB each, seon.db/avet-seek-allocates: ~85 us, "
-                "~165 KB); ~19 contracted calls (own-text, cited, two citation-targets, kept and its alias check of the one name (seon.ref/kept: the names it keeps), wanted, entity-tx and one eid; the parse's ~3 per inline for its two inlines and the read's 3; the stored-section scan and page split amortized). Its second inline, a section of a file named by its address, costs a candidate and its target and reads no file (seon.docs/section-names keeps the names only: it used to parse the file for each, 1.2 MB a section). Since the wiki records what each section was written against, a stored section is also pulled once (its text, :seon.section/read, :seon.section/baseline-unread: one more seek each, ~+40 KB, ~+100 us) to keep that record while its text is unchanged. The stored sections are read once, one datom each, so a section's "
-                "parent and link targets are map lookups. Nothing is written: the answer is []")
-     :growth :linear
-     :per-n {:ns 170000 :bytes 190000 :calls 23}
-     :fixed {:ns 50000 :bytes 50000 :calls 10}
-     :sizes [10 60 250]}))
+  ;; the claim: per section, a parse and a pull and a fixed number of contracted calls, nothing written. Calls are exact, so
+  ;; the growth is asserted by count: at evenly spaced sizes the calls are 3 + 228 for each page of ten sections (equal
+  ;; increments are linear), and the proof judges the bytes and ns against the estimate. Red if a section costs another call
+  ;; (the count moves), a pass over the whole wiki appears (the increments stop being equal), or bytes pass the estimate.
+  (let [{:keys [rows verdict]} (cost/run reload-estimate)]
+    (is (= (map #(+ 3 (* 228 (quot % 10))) [10 20 30]) (map #(long (get-in % [:measured :calls])) rows)) "exactly 228 calls a page of ten sections")
+    (is (:ok? verdict) (cost/explain reload-estimate rows verdict))))
 
 (defn view-of
   "The input of size n: the wiki of n sections (wiki) and the first page's own section, which its nine
@@ -53,7 +70,7 @@
      :growth :constant
      ;; measured 2026-10-25 at 10 sections: 33 contracted calls, 1.05 MB (the section's, its nine children's and its nine edges' pulls)
      :fixed {:calls 33 :bytes 1050000}
-     :sizes [10 100 1000]}))
+     :sizes [10 30 100]}))
 
 (defn search-input
   "The cost proof's input at n texts: n forms, n/2 wiki sections, n/4 task plans and n/8 schema entries
@@ -72,22 +89,38 @@
     [db "fused" {:by #{:text :refs} :k 10} nil]))
 
 (defn tokens-input
-  "tokens' arguments at size n: search-input's db (its index built), the word, every kind, z 2."
+  "tokens' arguments at size n: the world with n/2 wiki sections and n/2 task plans (the texts of the kinds asked),
+  ten of them (five of each) holding the word `fused` and the rest one text between them, so the vocabulary of the
+  texts holding no word is the same few terms at any n and the word is rare by construction; the index built."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :string [:set :keyword] :double]]}
   [n]
-  (let [[db] (search-input n)] [db "fused" #{:var :section :task :schema} 2.0]))
+  (let [h (quot n 2)
+        db (mt/with (mt/world)
+                    (vec (concat (for [i (range h)] {:seon.section/address (str "p.md#s" i) :seon.section/heading "S"
+                                                     :seon.section/text (if (< i 5) "Prose of a section, fused.\nMore prose." "Prose of a section.\nMore prose.")})
+                                 (for [i (range h)] {:seon.task/id (str "app/t" i)
+                                                     :seon.task/plan (if (< i 5) "Plan of a task fused." "Plan of a task.")}))))]
+    ;; the postings are derived data, built once for a value of the store (docs/vector.md#search): the query is what is measured
+    (run! #(docs/text-index db %) (vals docs/text-attrs))
+    [db "fused" #{:section :task} 0.5]))
 
 ;; See docs/vector.md#search
 (deftest tokens-cost-the-texts-holding-the-word
+  ;; the claim: a text that holds no word of the query costs nothing; the work is the scan of the vocabulary and the postings
+  ;; of the texts holding it. The input (tokens-input) has ten texts holding the word and all the others one vocabulary that
+  ;; lacks it, so the vocabulary does not grow with n and the cost is flat. Red if tokens reads each text (a scan of the
+  ;; texts: bytes and calls grow with n) or its hits are not the ten (the first assertion).
+  (let [[db w kinds z] (tokens-input 40)]
+    (is (= 10 (count (docs/tokens db w kinds z))) "the ten texts holding the word are the hits"))
   (cost/proof {:of 'seon.docs/tokens :input 'seon.docs-cost-test/tokens-input
-               :n "texts the branch holds (search-input's mix), ten of each kind holding the word"
+               :n "texts of the kinds asked (sections and task plans), ten of them holding the word, the rest one vocabulary without it"
                :work "a scan of the index's vocabulary (the db unchanged since the index was checked: its :hash and :max-tx say so, no text is read), then the postings of the word: each text holding it scored, each hit read and named"
-               :growth :linear
-               ;; measured 2026-10-28: 1.66 MB / 132 calls at 100 and 300, 1.83 MB / 132 at 1,000 (the vocabulary's scan, about 190 bytes a
-               ;; text); before the postings: 866 KB at 100 with a tenth of the texts holding the word, 16 KB a text of the corpus
-               :per-n {:bytes 300 :calls 0}
-               :fixed {:bytes 1570000 :calls 100}
-               :sizes [300 600 1000]}))
+               :growth :constant
+               ;; 2026-10-31 (shrink-tests-4): measured on this input; before it (search-input's mix, a vocabulary that grew
+               ;; with the texts' names): 1.66 MB / 132 calls at 100 and 300, 1.83 MB / 132 at 1,000. Here 323 KB / 32 calls at 20 and 60,
+               ;; 340 KB at 200 (z-min 0.5, so the ten holding the word are the hits at every size; at 2 a small store's z leaves fewer)
+               :fixed {:bytes 335000 :calls 32}
+               :sizes [20 60 200]}))
 
 (defn index-input
   "text-index's arguments at size n: search-input's db and the attribute of a form's source."
@@ -119,9 +152,12 @@
                :work "one pass over the attribute's texts, each split into terms once and its terms added to the postings"
                :growth :linear
                ;; measured 2026-10-28: 3.30 MB / 461 calls at 100, 4.20 MB / 661 at 300
-               :per-n {:bytes 5000 :calls 1.05}
-               :fixed {:bytes 2850000 :calls 360}
-               :sizes [100 300 1000 4000]}))
+               ;; 2026-10-31 (shrink-tests-4): on the world (no seed texts), sizes [60 180 600]: 316 KB / 71 calls at 60, 828 KB /
+               ;; 191 at 180, 2.72 MB / 611 at 600: ~4.5 KB and 1 call a text, the fixed part ~20 KB / 10 calls (the 2.85 MB / 360
+               ;; calls were the seed's texts)
+               :per-n {:bytes 4600 :calls 1.05}
+               :fixed {:bytes 60000 :calls 15}
+               :sizes [60 180 600]}))
 
 (deftest search-costs-its-texts
   (cost/proof {:of 'seon.context/search :input 'seon.docs-cost-test/search-input
@@ -133,15 +169,17 @@
                ;; 19.17 MB / 2,314 at 1,000, 67.68 MB / 7,714 at 4,000 (before the one bm25: 62.71 MB at 4,000)
                ;; measured 2026-10-28 with the postings (ten texts of each kind holding the word): 2.70 MB / 204 calls at 100, 2.75 MB / 204 at 300,
                ;; 2.88 MB / 204 at 1,000; before them, a tenth holding it: 3.78 MB at 100, 19.17 MB at 1,000, 67.68 MB / 7,714 calls at 4,000
-               :per-n {:bytes 800 :calls 0}
-               :fixed {:bytes 2700000 :calls 204}
-               :sizes [100 300 1000 4000]}))
+               ;; 2026-10-31 (shrink-tests-4): on the world, sizes [100 300 1000]: 2.64 / 2.69 / 2.83 MB, 204 calls: ~210 B a text,
+               ;; the fixed part 2.62 MB (the 800 B a text was the seed's)
+               :per-n {:bytes 220 :calls 0}
+               :fixed {:bytes 2620000 :calls 204}
+               :sizes [100 300 1000]}))
 
 (defn citing-input
   "citing-sections' arguments at size n: a wiki of n sections all citing app.m0/f1 (pages of ten), and that var."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :symbol]]}
   [n]
-  (let [db (ts/test-db)
+  (let [db (base)
         pages (into {} (for [p (range (max 1 (quot n 10)))]
                          [(str "demo/p" p ".md")
                           (apply str (str "# Page " p "\n\nPage " p " holds ten sections.\n")
@@ -155,8 +193,9 @@
      :n "wiki sections citing the var (all of them)"
      :work "one pass over the sections' cited names (:seon.section/names has no index), each match's address; the cut is the first :seon.config.ctx/cited-by of the sorted addresses"
      :growth :linear
+     ;; 2026-10-31 (shrink-tests-4): sizes [30 100 300], on the world
      ;; measured 2026-10-27: 332k ticks / 1.42 MB at 100, 1.04M / 4.65 MB at 300, 3.86M / 18.1 MB at 1,000
      :per-n {:ticks 4000 :bytes 19000 :calls 0}
      :fixed {:ticks 20000 :bytes 300000 :calls 4}
-     :sizes [100 300 1000]}))
+     :sizes [30 100 300]}))
 

@@ -83,7 +83,9 @@
     (is (lawful? {:a {:b (str/join "\n" (repeat 30 "a line of text")) :c [1 2 {:d "x\ny" :e {:f (vec (range 40))}}]}
                   :g (str/join "\n" (repeat 5 "zz")) :h {:i {:j {:k "deep"}}}}
                  budget)))
-  (let [r (tc/quick-check 150 (prop/for-all [raw value-gen budget (gen/elements [60 200 800 1500])] (lawful? raw budget))
+  ;; 2026-10-31 (shrink-tests-4): 20 drawn values (from 150: a drawn value's checking evals each cut's form, 1.5M ticks
+  ;; for a big one); the three pinned values above and each cut test keep the cases that broke it
+  (let [r (tc/quick-check 20 (prop/for-all [raw value-gen budget (gen/elements [60 200 800 1500])] (lawful? raw budget))
                           :seed (proofs/test-seed) :max-size 40)]
     (is (:pass? r) (str "a printed value broke its budget or a cut's continuation: "
                         (pr-str (select-keys r [:seed]) (get-in r [:shrunk :smallest]))))))
@@ -279,13 +281,15 @@
   ;; between 2,000 and 9,000 tokens it printed 347, :stale-section's 177 rows one placeholder.
   ;; fill-rows reserved a cut without its form's path, overran its room, and the map's growth
   ;; then kept the rows at their least. A value with room left prints most of its budget.
+  ;; 2026-10-31 (shrink-tests-4): 100 rows and 18 budgets from 800 to 3,500 tokens (the value is ~3,500 tokens, as the
+  ;; 177 rows were ~6,000): the fewest rows and budgets that still show a printed text starved of its room
   (let [why #(str "docs/health.md#a-stale-section describes seon.problems/stale-sections as it was (form seon.problems/"
                   (format "%08d" %) "), and it has changed")
         v {:handle 'result/e1
            :value (array-map :problems-on-main-at-t 536872831
                              :classes (sorted-map :dead-citation {:n 2 :rows [{:why (why 1)} {:why (why 2)}]}
-                                                  :stale-section {:n 177 :rows (vec (for [i (range 177)] {:why (why i)}))}))}
-        starved (for [b (range 1000 6200 37)
+                                                  :stale-section {:n 100 :rows (vec (for [i (range 100)] {:why (why i)}))}))}
+        starved (for [b (range 800 3500 150)
                       :let [{:keys [tokens]} (seon/print-value v {:handle 'result/e1 :budget b})]
                       :when (< tokens (* 0.8 b))]
                   [b tokens])]
