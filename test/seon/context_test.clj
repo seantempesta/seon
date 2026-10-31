@@ -1297,6 +1297,30 @@
               r2 (ask! 2 {:parts (constantly hiccup) :printed (:printed r1)})]
           (is (str/includes? (:content (peek (:messages r2))) "moved") "a part that is no map is sent whole"))))))
 
+(deftest a-part-sent-as-what-changed-replays-as-sent
+  ;; ts/test-branch!: a request reads its turns, model calls and parts from a branch's commits, as root's turns
+  ;; write them (parts-session), and replay draws each commit's parts from them: a my.test world holds no branch
+  (ts/test-branch!
+    (fn [_ conn]
+      (let [[ask! _ _] (parts-session conn)
+            r0 (ask! 0 {})
+            ;; a proof's verdict recorded since turn 0: the status, a map, moved
+            _ (d/transact conn [{:var/name 'demo-test/f-test :seon.test/status :red}])
+            r1 (ask! 1 {:printed (:printed r0)})
+            ref1 (last (filter #(= :parts (first %)) (:sent r1)))
+            _ (d/transact conn [{:var/name 'demo-test/f-test :seon.test/status :green}])
+            ;; a process restarted on the branch holds no parts of the request before: it draws them at the commit
+            ;; that request recorded, so it sends the same bytes a process that printed the run would
+            r2 (ask! 2 {:printed nil})
+            r2' (ask! 2 {:printed (:printed r1)})
+            ref2 (last (filter #(= :parts (first %)) (:sent r2)))]
+        (is (= 7 (count ref1)) (str "sent as what changed, its ref naming the commit it changed from: " (pr-str ref1)))
+        (is (str/includes? (:content (peek (:messages r1))) ":changed") (:content (peek (:messages r1))))
+        (is (= (peek (:messages r1)) (first (second (first (filter #(= ref1 (first %)) (context/parts-of @conn (:sent r1)))))))
+            "read back from the record, the same bytes")
+        (is (= 7 (count ref2)) (str "after a restart, still what changed: " (pr-str ref2)))
+        (is (= (peek (:messages r2)) (peek (:messages r2'))) "the same bytes as a process that printed the run")))))
+
 (deftest a-trimmed-conversation-draws-the-request-whole
   (ts/test-branch!
     (fn [_ conn]

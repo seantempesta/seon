@@ -846,8 +846,11 @@
   "What changed of a part between two requests, by the data the model reads of it (its model render's value,
   seon.render/model-printed, else the part itself): when both are maps, {:changed {k new-value} :gone [k]} of
   their top-level keys, the keys that kept their value left out; else nil, and the part is sent whole. The
-  owner's ruling, 2026-10-30: a changed part that answers data sends what changed of it, never itself again
-  (md-scan #28: the status, 3-5k tokens, sent whole eleven times). See docs/render.md#the-page-is-sent-as-what-changed."
+  owner's ruling (docs/decisions.md): a changed part that answers data sends what changed of it, never itself
+  again (md-scan #28: the status, 3-5k tokens, sent whole eleven times). Top-level keys, each value whole, by
+  intent: clojure.data/diff answers a vector by position, padded with nils a model reads as values (one
+  proof's verdict would come as [nil nil {...}]); a changed key's value whole reads as the part does. See
+  docs/render.md#the-page-is-sent-as-what-changed."
   {:malli/schema [:=> [:cat :any :any] [:maybe :map]]}
   [was now]
   (let [data #(if-let [m (render/model-printed %)] (:value m) %)
@@ -953,10 +956,12 @@
         hs (into {} (map (fn [[k v]] [k (hasch/uuid (pr-str v))])) live)
         ids (into (vec (for [k (keys live) :when (or whole? (not= (get old k) (get hs k)))] k))
                   (when old (sort (remove #(contains? live %) (keys old)))))
-        ;; the parts as the request before drew them, to send what changed of each: this process's, kept with its print,
-        ;; else drawn cold at the commit that request recorded (as a replay draws them)
+        ;; the parts as the request before drew them, to send what changed of each: this process's, kept with its print
+        ;; of that request; else drawn at the commit it recorded, so a request is the same bytes whatever the process
+        ;; printed before (seon.context-test/a-run-printed-once-sends-what-a-cold-read-sends). Drawn only when a part
+        ;; both requests sent moved, and once a process: the request it makes keeps its parts (:live) for the next
         prev-ref (when-not whole? (last (filter #(= :parts (first %)) prev)))
-        was (when (and prev-ref (seq ids))
+        was (when (and prev-ref (some #(and (contains? live %) (contains? old %)) ids))
               (if (= prev-ref (:live-ref printed)) (:live printed) (drawn-at db e (nth prev-ref 2))))
         ref (cond-> [:parts e (d/commit-id db) whole? ids id] was (conj (nth prev-ref 2)))
         current [[:parts id] (delay {:ref ref :whole (parts-message live ids was)}) nil (if whole? 0 now)]
@@ -983,13 +988,15 @@
   the branch at commit c, the ids' hiccup: what the request sent, the same bytes), without the hashes (a request's, for the next to compare: no part of it). No request is built again: the same records, rendered. See docs/render.md#the-page-is-sent-as-what-changed."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :any]] [:vector [:tuple :any [:vector :seon.model/message]]]]}
   [db refs]
-  (let [ev #(d/pull db [:seon.eval/id :seon.eval/by :seon.eval/record] [:seon.eval/id %])]
+  (let [ev #(d/pull db [:seon.eval/id :seon.eval/by :seon.eval/record] [:seon.eval/id %])
+        ;; each commit's parts drawn once: a ref sent as what changed reads the commit before it, the turn before's own
+        drawn (let [m (volatile! {})] (fn [a c] (or (get @m [a c]) (let [p (drawn-at db a c)] (vswap! m assoc [a c] p) p))))]
     (mapv (fn [[kind x t :as ref]]
             [ref (case kind
                    :section [{:role "system" :content (system-text (d/as-of db t))}]
                    :eval (eval-messages (ev x) {})
                    :turn (turn-messages (d/pull db [:seon.turn/id :seon.turn/reply :seon.turn/reasoning] [:seon.turn/id x]) {})
-                   :parts (if (empty? (nth ref 4)) [] (parts-message (drawn-at db x t) (nth ref 4) (when (< 6 (count ref)) (drawn-at db x (nth ref 6)))))
+                   :parts (if (empty? (nth ref 4)) [] (parts-message (drawn x t) (nth ref 4) (when (< 6 (count ref)) (drawn x (nth ref 6)))))
                    :message (message-messages (d/pull db [:seon.message/id :seon.message/from :seon.message/body] [:seon.message/id x]) {}))])
           (remove #(= :hashes (first %)) refs))))
 

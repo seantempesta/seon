@@ -169,8 +169,9 @@
 (defn turns-of
   "The input at n: the db of a branch where agent b/p<n> took n turns on a task (its plan changing
   each turn, one commit a turn: *conn*), and the refs a request sent, [:parts a c whole? ids call], each
-  turn's parts as seon.context/request records them, drawn at that turn's commit. Every turn
-  sends the same parts (a plan and a run), so the cost is per ref."
+  turn's parts as seon.context/request records them, drawn at that turn's commit, every one after the first
+  sent as what changed since the turn before ([... was-commit]: its commit is the turn before's, drawn once).
+  Every turn sends the same parts (a plan and a run), so the cost is per ref."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db [:vector :any]]]}
   [n]
   (let [conn *conn* k (str "b/p" n) tid (str "demo/p" n)]
@@ -182,7 +183,8 @@
                              (d/commit-id @conn))))
           a (:db/id (d/entity @conn [:seon.agent/key k]))]
       (let [ids (vec (keys (seon.context/drawn-parts @conn (seon.ctx/build @conn a (:seon.agent/branch (d/entity @conn a))))))]
-        [@conn (vec (for [[i c] (map-indexed vector commits)] [:parts a c (zero? i) ids (str tid "#1/" i)]))]))))
+        [@conn (vec (for [[i c] (map-indexed vector commits)]
+                      (cond-> [:parts a c (zero? i) ids (str tid "#1/" i)] (pos? i) (conj (commits (dec i))))))]))))
 
 ;; See docs/render.md#the-branchs-views
 (deftest reading-a-request-back-draws-each-turns-parts-once
@@ -236,6 +238,7 @@
                :n "evals of the session before the turn"
                :work "the previous call and its refs read once, the parts that moved printed in one message, the new record printed; nothing earlier is printed or drawn again"
                :growth :constant
-               :fixed {:calls 327}
+               ;; +5 with what changed of a moved part: seon.context/part-change and its two model reads (2026-10-31)
+               :fixed {:calls 332}
                ;; measured 2026-10-29: 9 contracted calls at 10, 100 and 1,000 evals before the turn (the moved part printed once, the new record once)
                :sizes [10 30 100]}))
