@@ -428,26 +428,41 @@
   "The spans of a line that keep an old word: an owner's quoted sentence, Jolt's message and a past image name."
   #"(?i)owner,? [^\"]{0,40}?\"[^\"]*\"|Attempting to call unbound fn|zoom-a8-attempt|\(was attempt\)|collection landing")
 
-(defn old-words
-  "The old house words of AGENTS.md section 7a's table (text agents), hyphenated (\"merge train\" ->
-  \"merge-train\"), leaving out a row still stored under its old name (\"stored as\")."
-  {:malli/schema [:=> [:cat :string] [:set :string]]}
+(defn- old-word-rows
+  "AGENTS.md section 7a's table (text agents) as [old-word say-instead] pairs, each old word hyphenated
+  (\"merge train\" -> \"merge-train\"), leaving out a row still stored under its old name (\"stored as\")."
+  {:malli/schema [:=> [:cat :string] [:vector [:tuple :string :string]]]}
   [agents]
   (let [table (->> (str/split-lines agents)
                    (drop-while #(not (str/starts-with? % "| Old house word")))
                    (drop 2)
                    (take-while #(str/starts-with? % "|")))]
-    (set (for [row table :when (not (str/includes? row "stored as"))
-               w (str/split (second (str/split row #"\|")) #",")]
-           (str/replace (str/trim w) " " "-")))))
+    (vec (for [row table :when (not (str/includes? row "stored as"))
+               :let [[_ olds instead] (str/split row #"\|")]
+               w (str/split olds #",")]
+           [(str/replace (str/trim w) " " "-") (str/trim (str instead))]))))
+
+(defn old-words
+  "The old house words of AGENTS.md section 7a's table (text agents), hyphenated (\"merge train\" ->
+  \"merge-train\"), leaving out a row still stored under its old name (\"stored as\")."
+  {:malli/schema [:=> [:cat :string] [:set :string]]}
+  [agents]
+  (set (map first (old-word-rows agents))))
+
+(defn- spellings-of
+  "The old words of the table's rows (`old-word-rows`) as the text spells them, [word [spelling ...]]
+  (\"merge train\" either way); \"admit\" and \"land\" are also plain English and Seon's admission, so only names
+  are read for them."
+  {:malli/schema [:=> [:cat [:vector [:tuple :string :string]]] [:sequential [:tuple :string [:vector :string]]]]}
+  [rows]
+  (vec (for [w (sort (set (map first rows))) :when (not (#{"admit" "land"} w))]
+         [w (if (= w "merge-train") ["merge train" "merge-train"] [w])])))
 
 (defn old-word-spellings
-  "The table's old words as the text spells them, [word [spelling ...]] (\"merge train\" either way); \"admit\"
-  and \"land\" are also plain English and Seon's admission, so only names are read for them."
+  "The table's old words of AGENTS.md text agents as the text spells them, [word [spelling ...]] (`spellings-of`)."
   {:malli/schema [:=> [:cat :string] [:sequential [:tuple :string [:vector :string]]]]}
   [agents]
-  (vec (for [w (sort (old-words agents)) :when (not (#{"admit" "land"} w))]
-         [w (if (= w "merge-train") ["merge train" "merge-train"] [w])])))
+  (spellings-of (old-word-rows agents)))
 
 (defn old-word-hits
   "The old words (of words, `old-word-spellings`) each text uses: [[key word] ...], key being the text's
@@ -485,7 +500,10 @@
   [db ans {:keys [vars sections tasks]}]
   (if (and (empty? vars) (empty? sections) (empty? tasks))
     []
-  (let [words (old-word-spellings (slurp (str (config/checkout) "/AGENTS.md")))
+  (let [rows (old-word-rows (slurp (str (config/checkout) "/AGENTS.md")))
+        words (spellings-of rows)
+        ;; what to say instead, so the row says it (bench-delims-1's agent spent three turns finding section 7a)
+        instead (into {} rows)
         texts (vec (concat
                      (for [v (sort vars)
                            :let [e (:e (first (d/datoms db :avet :var/name v))) form (some-> e (as-> e (:var/form (d/entity db e))))
@@ -504,7 +522,7 @@
                        [[:task t path] (:seon.task/plan tk)])))]
     (vec (for [[[kind id path] w] (old-word-hits (filterv (comp some? second) texts) words)
                :let [s (str "old-word " path " " (name kind) " " id " " w)]]
-           (derived-row ans s nil (str id " (" path ") uses the old word \"" w "\": AGENTS.md section 7a says what to say instead")
+           (derived-row ans s nil (str id " (" path ") uses the old word \"" w "\": say instead " (get instead w "what AGENTS.md section 7a's table says") " (AGENTS.md section 7a)")
                         {:kind :old-word :path path :word w :place kind :id id} {:path path :word w :place kind :id id}))))))
 
 (defn uncited-vars

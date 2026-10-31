@@ -961,7 +961,8 @@
     (testing "a section that says lane"
       (let [head (with base "A lane of work.")]
         (is (= #{["demo/p.md#part" "lane"]} (row head)) "the section and the word")
-        (is (= [{:class :old-word :message "demo/p.md#part (demo/p.md) uses the old word \"lane\": AGENTS.md section 7a says what to say instead"}]
+        ;; what to say instead is in the row (bench-delims-1's agent spent three turns finding section 7a)
+        (is (= [{:class :old-word :message "demo/p.md#part (demo/p.md) uses the old word \"lane\": say instead worktree session (a session in its own git worktree, on its own branch) (AGENTS.md section 7a)"}]
                (:rows (problems/caused-split base head))) "the branch that added it caused it")
         (is (seq (:caused (problems/caused-split base head))) "the done rule refuses")
         (is (empty? (row (with head "A worktree session."))) "editing it closes the row")))
