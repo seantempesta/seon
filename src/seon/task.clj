@@ -46,10 +46,18 @@
 
 ;; ---- the writer ------------------------------------------------------------------
 
-(defn- cited-text
-  "The text a declaration cites from: its plan and its instructions."
-  {:malli/schema [:=> [:cat [:map [:seon.task/plan {:optional true} [:maybe :string]] [:seon.task/instructions {:optional true} [:maybe :string]]]] :string]}
-  [decl] (str (:seon.task/plan decl) "\n" (:seon.task/instructions decl)))
+(defn- cited-texts
+  "The texts a declaration cites from, each its own Markdown text: its plan and its instructions. Never one text:
+  a plan that quotes a backtick run (md-scan's \"a fenced block's ``` marks\") opened a code span that took the
+  instructions' delimiters, so their ```docs/agent.md#working-a-task``` was cited at summary depth, its heading alone
+  (md-scan bench-b17)."
+  {:malli/schema [:=> [:cat [:map [:seon.task/plan {:optional true} [:maybe :string]] [:seon.task/instructions {:optional true} [:maybe :string]]]] [:vector :string]]}
+  [decl] (into [] (keep decl) [:seon.task/plan :seon.task/instructions]))
+
+(defn- texts-citations
+  "The citations of texts, each parsed on its own (seon.ref/parse), one vector."
+  {:malli/schema [:=> [:cat [:vector :string]] [:vector :seon.ref/citation]]}
+  [texts] (into [] (mapcat #(:seon.ref/citations (ref/parse nil %))) texts))
 
 (defn- text-citations
   "What a declaration's text cites, read on db: its plan and instructions parsed once (seon.ref/parse),
@@ -58,7 +66,7 @@
   left out (they name nothing to pull)."
   {:malli/schema [:=> [:cat :seon.host/db [:map [:seon.task/plan {:optional true} [:maybe :string]] [:seon.task/instructions {:optional true} [:maybe :string]]]] [:vector :seon.ref/citation]]}
   [db decl]
-  (into [] (remove :seon.ref/problem-kind) (ref/kept db (ref/cited (:seon.ref/citations (ref/parse nil (cited-text decl)))))))
+  (into [] (remove :seon.ref/problem-kind) (ref/kept db (ref/cited (texts-citations (cited-texts decl))))))
 
 (defn- cite-target
   "Citation c's target as its cite entity holds it on db, {:seon.cite/address a} or {:seon.cite/name n}: a
@@ -146,7 +154,7 @@
   {:malli/schema [:=> [:cat :seon.host/db [:vector :seon.task/declaration]] [:vector :map]]}
   [db decls]
   (vec (for [decl decls
-             c (ref/references db (cited-text decl))
+             c (ref/kept db (ref/cited (texts-citations (cited-texts decl))))
              :when (not (ref/names-something? db c))]
          {:task (task-id (:seon.task/ns decl) (:seon.task/name decl))
           :name (or (:seon.ref/name c) (:seon.ref/path c)) :problem :unresolved})))
