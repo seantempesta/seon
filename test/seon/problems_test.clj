@@ -943,6 +943,13 @@
   (let [ve (pdb/eid db :var/name v)]
     (d/db-with (change-var db v) [[:db/add ve (or attr :var/doc) (str "changed " (random-uuid))]])))
 
+(deftest a-markdown-code-fence-is-no-old-word
+  ;; md-scan bench-b14: the agent's own namespace for Markdown code fences was flagged as using the old word
+  ;; "fence" (AGENTS.md section 7a: a guard), and it spent nine turns on it; CommonMark's word is a library's
+  (let [words (problems/old-word-spellings (slurp (str (seon.config/checkout) "/AGENTS.md")))]
+    (is (empty? (problems/old-word-hits [[:k "A fenced code block: the content between its fence lines."]] words)) "a Markdown fence is no old word")
+    (is (seq (problems/old-word-hits [[:k "A census of every contract."]] words)) "an old word still is")))
+
 (deftest an-old-word-is-a-problem
   ;; task seon.problems/an-old-word-is-a-problem: a place that uses a word of AGENTS.md section 7a's table is a row
   ;; naming it and the word, found for the places a branch changed and failing its health step; a kept file is not read

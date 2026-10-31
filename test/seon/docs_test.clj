@@ -149,10 +149,7 @@
   {'seon.fx/admit "admission by workload (a token bucket and free workers: AGENTS.md section 4), not a contract"
    'seon.fx-admit-test "the same admission (the namespace and its vars)"
    'seon.fx-test/owner-admits-by-workers-and-priority "the same admission"
-   'seon.reader-test/prose-without-a-fence-is-a-comment "a Markdown code fence"
-   'seon.ref-test/a-fence-gives-its-content-between-its-lines "a Markdown code fence"
-   "test/seon/fx_admit_test.clj" "the same admission"
-   'seon.reader/fence "a Markdown code fence, CommonMark's word"})
+   "test/seon/fx_admit_test.clj" "the same admission"})
 
 (def ^:private old-words seon.problems/old-words)
 
@@ -163,7 +160,8 @@
 
 (deftest no-name-uses-an-old-word
   (let [root (config/checkout)
-        words (old-words (slurp (str root "/AGENTS.md")))
+        ;; "fence" is CommonMark's code fence, a library's word (seon.problems/old-word-spellings reads it nowhere)
+        words (disj (old-words (slurp (str root "/AGENTS.md"))) "fence")
         files (fn [dir] (for [f (file-seq (java.io.File. (str root "/" dir))) :when (.isFile ^java.io.File f)]
                           (subs (.getPath ^java.io.File f) (inc (count root)))))
         _ (doseq [f (files "src") :when (str/ends-with? f ".clj")]

@@ -1332,7 +1332,7 @@
                                               :seon.task/plan "Make `x.nsd/c` call `x.nsd/b`."}]))
         db (d/db-with db [{:seon.agent/key "b/a1" :seon.agent/task [:seon.task/id "x/nsd"]}])
         tree (:tree (ctx/build db (pdb/eid db :seon.agent/key "b/a1") :b))]
-    (is (= '{x.nsd {:names [b c] :more (my.agent/help 'x.nsd)} x.nsd-test {:names [t1] :more (my.agent/help 'x.nsd-test)}}
+    (is (= '{x.nsd {:names [b c] :source (clojure.repl/source x.nsd)} x.nsd-test {:names [t1] :source (clojure.repl/source x.nsd-test)}}
            (context/namespaces-of tree))
         "the cited names and the proof's callee, never the namespace's twenty others; a form for the rest")
     (is (= '[x.nsd x.nsd-test] (keys (context/namespaces-of tree))) "the cited first, then the proofs'")))

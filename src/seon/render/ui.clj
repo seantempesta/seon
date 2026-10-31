@@ -1091,7 +1091,7 @@
 (defn namespaces-html
   "The namespaces the work touches as the page shows them (the declared html render of
   :seon.context/namespaces; the model is sent the value): folded to their names, opened to each one's
-  names the task cites or its proofs call and the form that lists the rest, by the one printer. See docs/render.md#a-part-answers-data."
+  names the task cites or its proofs call and the form that reads its ns form and definitions, by the one printer. See docs/render.md#a-part-answers-data."
   {:malli/schema [:=> [:cat :seon.render/opts [:map-of :symbol :map]] :any]}
   [_opts v]
   [:details
@@ -1101,8 +1101,8 @@
 
 (defn namespaces
   "The namespaces the agent's work touches (a component over ctx alone): those of what its task and needs cite
-  and of their proofs, each the names the task cites or its proofs call and the form that lists the rest
-  (seon.context/namespaces-of), a part (its data, :seon.context/namespaces:
+  and of their proofs, each the names the task cites or its proofs call and the form that reads its ns form
+  and definitions (seon.context/namespaces-of), a part (its data, :seon.context/namespaces:
   docs/render.md#a-part-answers-data). It reads no db."
   {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int] :any]}
   [{c :seon.ctx/ctx} _aid]

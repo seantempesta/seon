@@ -420,15 +420,6 @@
    "test/seon/docs_test.clj" "this test names the old words"
    "src/seon/problems.clj" "this class names the old words"
    "test/seon/problems_test.clj" "this class's tests name the old words"
-   "src/seon/reader.clj" "a Markdown code fence, CommonMark's word"
-   "src/seon/ref.clj" "a Markdown code fence, CommonMark's word"
-   "src/seon/render/ui.clj" "draws the scan's :fence block kind, CommonMark's word"
-   "resources/seon/schemas/seon.ref.edn" "the :fence block kind is CommonMark's"
-   "test/seon/reader_test.clj" "a Markdown code fence"
-   "test/seon/ref_test.clj" "a Markdown code fence"
-   "test/seon/agent_test.clj" "the named reader test is about a Markdown code fence"
-   "test/seon/program_test.clj" "the named reader test is about a Markdown code fence"
-   "test/seon/fixtures.clj" "a reply in a Markdown code fence"
    "src/seon/server.clj" "cites v1's namespace proto.agents.entrance"
    "BAGGAGE.md" "cites a decision by its title, \"No locks, no lane cap, no waiting\""
    "resources/seon/tasks/seon.context.edn" "t5.refusal/* is the name of a past agent's test namespace"})
@@ -452,10 +443,12 @@
 
 (defn old-word-spellings
   "The table's old words as the text spells them, [word [spelling ...]] (\"merge train\" either way); \"admit\"
-  and \"land\" are also plain English and Seon's admission, so only names are read for them."
+  and \"land\" are also plain English and Seon's admission, and \"fence\" is CommonMark's code fence (a library's
+  word, which section 7a keeps: md-scan bench-b14's agent spent nine turns on its own Markdown code flagged), so
+  none of them is read."
   {:malli/schema [:=> [:cat :string] [:sequential [:tuple :string [:vector :string]]]]}
   [agents]
-  (vec (for [w (sort (old-words agents)) :when (not (#{"admit" "land"} w))]
+  (vec (for [w (sort (old-words agents)) :when (not (#{"admit" "land" "fence"} w))]
          [w (if (= w "merge-train") ["merge train" "merge-train"] [w])])))
 
 (defn old-word-hits

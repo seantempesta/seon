@@ -237,7 +237,7 @@ Each kind of information has one home, and a fact found anywhere else is moved t
 | dragon | failure point (and its edge function) | plain English |
 | census | `mg/check` (the generative check of every contract) | Malli |
 | pillar | principle | plain English |
-| fence | guard | plain English |
+| fence | guard | plain English (CommonMark's code fence is a library's word: the check reads "fence" nowhere) |
 | merge train | octopus merge (branches merged into main in one commit) | git |
 | harvest | stage (onto the branch) | git |
 | stand-in | proc | core.async Flow |
