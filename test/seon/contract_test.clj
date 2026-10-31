@@ -23,6 +23,14 @@
   {:malli/schema [:=> [:cat pos-int?] [:tuple [:vector :int]]]}
   [n] [(vec (range n))])
 
+(deftest a-char-is-a-schema
+  ;; bench-delims-1: an agent's [:=> [:cat :string] [:map-of :char :int]] was :malli.core/invalid-schema; malli names
+  ;; a character only as the predicate char?, so :char is one of the registry's type keys, as :int is malli's
+  (is (m/validate [:map-of :char :int] {\( 1} {:registry contract/registry}) "a character")
+  (is (not (m/validate :char "(" {:registry contract/registry})) "a string is no character")
+  (is (m/validate [:=> [:cat :string] [:map-of :char :int]] (fn [_] {}) {:registry contract/registry}) "in a function schema")
+  (is (char? ((requiring-resolve 'malli.generator/generate) :char {:registry contract/registry})) "and it generates, as every contract must"))
+
 (deftest an-armed-call-costs-its-checks-not-a-try
   (cost/proof
     {:of 'seon.contract-test/armed-calls :input 'seon.contract-test/ints-of

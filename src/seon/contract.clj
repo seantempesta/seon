@@ -63,7 +63,10 @@
             (pred :seon.host/schema m/schema?)
             (pred :seon.host/registry #(satisfies? mr/Registry %))
             ;; what a C function declared :void answers (Chez's void object, not nil)
-            (pred :seon.host/void (constantly true))]))
+            (pred :seon.host/void (constantly true))
+            ;; a character, as malli's type keys name a value's type (:int, :string): malli names it only as the
+            ;; predicate char?, and agents write :char (bench-delims-1's [:cat :char] was an invalid schema)
+            [:char (m/-simple-schema {:type :char :pred char?})]]))
 
 ;; ---- the registry ------------------------------------------------------------------
 
