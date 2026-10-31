@@ -49,15 +49,10 @@
                 "(``seon.cost/proof``) for a function whose input grows. Do not try the fix: the implement step makes it, from "
                 "your red proof. Then end your turn with prose.")
    :implement (str "Your task: make the change the plan describes. You are done when every proof passes, the cost proofs "
-                   "included. You do it by redefining the functions the plan cites, in their own namespaces, keeping their "
-                   "contracts, and running the proofs (`(my.task/status)` shows how) until they are green. Never loosen a "
-                   "contract or a proof to make it pass: if the plan is wrong, fail the task with the evidence "
-                   "(``(my.task/fail! \"why\" evidence)``). Then end your turn with prose.")
+                   "included. How a task is worked, step by step: ```docs/agent.md#working-a-task```. Then end your turn with prose.")
    :merge (str "Your task: bring main's work into this branch and keep the proofs green. Main has been merged in "
-               "(`my.branch/merge-main!`); `(my.branch/unmerged)` lists what both sides changed. You are done when nothing is "
-               "unmerged and every proof passes on the combined program. You do it by redefining each unmerged var with what "
-               "both sides need, or keeping one side (``(my.branch/resolve! 'ns/var :theirs)``), and running the proofs. Then end "
-               "your turn with prose.")
+               "(`my.branch/merge-main!`). You are done when nothing is unmerged and every proof passes on the combined program. "
+               "How: ```docs/agent.md#merging```. Then end your turn with prose.")
    :work (str "Your task: do what the plan below asks: design it and build it. You are done when its proofs pass on your "
               "branch. How a task is worked, step by step: ```docs/agent.md#working-a-task```; main's work reaches your "
               "branch as main moves, and you resolve what conflicts: ```docs/agent.md#merging```.")

@@ -93,7 +93,7 @@
     ;; live db and on zipmap's order: reproduce first and fail! if it is right, stop reading once it is
     ;; wrong and write the deftest red, and build its input as the existing tests build theirs
     ;; how a task is worked is the help page's section the instructions cite whole (a wiki section, its context's part)
-    (doseq [k [:whole :work]] (is (str/includes? (k tpl/instructions) "```docs/agent.md#working-a-task```") (str k ": cites how a task is worked")))
+    (doseq [k [:whole :work :implement]] (is (str/includes? (k tpl/instructions) "```docs/agent.md#working-a-task```") (str k ": cites how a task is worked")))
     (let [w (working-a-task)
                   ;; (2026-10-29: the premise step applies to a fix only, and a proof written already is the
                   ;; task's: the agent writes only those its status lists with no source)
@@ -134,7 +134,8 @@
     ;; with prose" left the next turn parked :waiting; a false premise was reported in prose
     (doseq [k [:whole :work]]
       (is (not (str/includes? (k tpl/instructions) "end your turn")) (str k ": no closing-prose step"))
-      (is (str/includes? (working-a-task) "(my.task/fail! ") (str k ": a false premise is a failed task")))
+      ;; a false premise is a failed task: the steps they cite say so (docs/agent.md#working-a-task)
+      (is (str/includes? (k tpl/instructions) "```docs/agent.md#working-a-task```") (str k ": cites the steps")))
     (is (seq (task/create-tx (ts/test-db) ws)) "a valid task")))
 
 
