@@ -728,7 +728,7 @@
   ;; (:seon.config.source/process-entry)
   (let [here (seon.config/checkout)
         in (fx/inputs here)
-        g (program/reach-graph (runner/program-db here (ts/kept-program-store)) (:data-refs in))
+        g (kept-graph here) ;; the graph as bin/test keeps it, brought to date: 62 M ticks where building it costs 235 M
         idx (program/graph-index g in nil)
         process (set (keep (fn [[t v]] (when (:process? v) t)) idx))
         reaching (set (filter (set (keys idx)) (program/tests-reaching g 'seon.turn/observe)))]
