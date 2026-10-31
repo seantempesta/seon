@@ -82,9 +82,10 @@
                           "one unit of mass, so at most 1/(alpha eps) pushes, each node's neighbours read once: "
                           "flat in the store's size")
                :growth :constant
+               ;; on the world, sizes 30 100 300 (2026-10-31): 4.45 MB and 44 calls at 30, 4.89 MB and 45 at 100
                ;; measured 2026-10-27: 46 calls and 5.23 MB at 50, 48 and 5.45 MB at 200: the ring's first pushes, each node's
                ;; degree counted once (bounded, `degree`) and its neighbours read once
-               :fixed {:calls 48 :bytes 5600000}
+               :fixed {:calls 46 :bytes 4900000}
                :sizes [30 100 300]}))
 
 (defn hub-of

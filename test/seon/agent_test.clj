@@ -742,10 +742,9 @@
   (let [here (seon.config/checkout)
         p1 'seon.reader-test/prose-without-a-fence-is-a-comment
         p2 'seon.reader-test/a-fenced-reply-reads-only-its-code
-        ;; the digests of the kept reach graph, brought to date (as bin/test's plan reads them): the same digests as a
-        ;; rebuilt graph's at a third of the work (263 M -> 90 M ticks)
+        ;; the digests of the kept reach graph, brought to date, as bin/test's plan reads them
         inputs (fx/inputs here)
-        digests (update-vals (seon.program/graph-index (runner/reach-graph-of (runner/program-db here (ts/kept-program-store)) (:data-refs inputs) (ts/kept-program-store)) inputs nil) :digest)
+        digests (update-vals (seon.program/graph-index (seon.program-test/kept-graph here) inputs nil) :digest)
         dir (cache-dir)
         ;; the checkout's green for p1, as bin/test caches one
         recorded (fx/write-verdicts! dir {:id "agent-test"} {p1 {:test p1 :digest (digests p1) :pass 1 :fail 0 :error 0}} {})

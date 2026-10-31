@@ -391,7 +391,7 @@
     (.mkdirs (java.io.File. d))
     d))
 
-(defn- kept-graph
+(defn kept-graph
   "The reach graph of the checkout's own program, as bin/test's plan keeps it (test-runner/reach-graph-of over the kept
   program store): decoded and brought to date, a sixth of what building it costs (docs/source.md#tests-run-by-reach)."
   [here]
@@ -728,7 +728,7 @@
   ;; (:seon.config.source/process-entry)
   (let [here (seon.config/checkout)
         in (fx/inputs here)
-        g (kept-graph here) ;; the graph as bin/test keeps it, brought to date: 62 M ticks where building it costs 235 M
+        g (kept-graph here) ;; the graph as bin/test keeps it, brought to date
         idx (program/graph-index g in nil)
         process (set (keep (fn [[t v]] (when (:process? v) t)) idx))
         reaching (set (filter (set (keys idx)) (program/tests-reaching g 'seon.turn/observe)))]
