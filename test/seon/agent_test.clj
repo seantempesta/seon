@@ -1833,7 +1833,7 @@
   ;; calls on every eval, 13.0 M with main the base) is O(1) while main is the base, pays main's diff once
   ;; per (base, main) pair, and a later eval at the same main pays only the branch's diff and one query.
   ;; Work done (ticks, bytes, calls), never time
-  (let [base (seon.program-test/record (ts/test-db) 'user "(ns app.md)" 'app.md "(defn f [x] x)" 'app.md "(defn g [x] (f x))" 'app.md "(defn h [x] x)")
+  (let [base (seon.program-test/record (my.test/world) 'user "(ns app.md)" 'app.md "(defn f [x] x)" 'app.md "(defn g [x] (f x))" 'app.md "(defn h [x] x)")
         branch (seon.program-test/record base 'app.md "(defn g [x] (inc (f x)))")
         main (seon.program-test/record base 'app.md "(defn f [x] (* 2 x))" 'app.md "(defn h [x] (dec x))")
         fresh! #(swap! agent/state dissoc :main-changes :branch-changes)
