@@ -101,6 +101,7 @@
    "seon.render/page" "render work still moving: later branches finish it"
    "seon.context/the-context-is-the-agents-evals-and-seons" "R1 merged (7602f8a398); R2 (root's after-turn work as facts) and R3 (the request from its basis) still to do"
    "seon.agent/the-agent-is-the-unit-not-the-run" "cut 1 merged (d0daf498c6); cut 2 (the reconciler schedules agents) and cut 3 (the run schema deleted) still to do"
+   "seon.agent/an-agents-first-request-allocates-the-same-in-any-shard" "filed, and named by batch 64's merge as the flake it merged past: not done"
    "seon.root/an-eval-never-moves-main" "filed by batch 20's merge, which names it as found, not done: its fix waits on the owner's go (docs/plan.md#waiting-on-the-owner)"
    "seon.context/an-agent-follows-its-instructions-to-green" "items 1-6 merged (jolt/eval-path in batch 56, jolt/follow); the bench measure, five runs a side, still to do"
    "seon.db/opening-a-store-costs-what-it-opens" "merged its install-missing! and set-ids! halves (jolt/test-audit, datahike 148ea9a9); install-missing!'s one digest compare is still to do"})
