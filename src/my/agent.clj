@@ -125,8 +125,13 @@
                         :else (near (str sym) (concat (nss) (keys (ns-map *ns*)))))
           k (when nsym (keyword (namespace sym) (name sym)))
           key? (and k (or (contains? (d/schema db) k) (pdb/eid db :schema/key k)))
-          ;; the plan as it stands (a design rewrites it with update!), read by the one parser
-          cited? (contains? (set (some->> (:task @agent/state) (task/task db) :seon.task/plan ref/names)) sym)]
+          ;; the plan as it stands (a design rewrites it with update!), read by the one parser: its stored cites
+          ;; leave out a new namespace's function (seon.ref/kept reads it as an alias form). A parser the agent
+          ;; broke while it inspects its change answers those stored cites (seon.task/task-cites), never its error
+          id (:task @agent/state)
+          cited? (boolean (when id
+                            (try (contains? (set (some->> (task/task db id) :seon.task/plan ref/names)) sym)
+                                 (catch Throwable _ (some #(= sym (:seon.cite/name %)) (task/task-cites db id))))))]
       (contract/error :my.agent/no-var (symbol #'no-var)
                       (str sym (cond view " names no var on this branch"
                                          nsym (str " names no namespace on this branch (" nsym ")")

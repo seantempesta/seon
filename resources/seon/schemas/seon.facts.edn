@@ -151,7 +151,7 @@
  ;; (:printed) and the value's type (:type); never a text made for a reader (seon.print/record-text
  ;; prints it when it is sent or shown). The model's prose beside the call and the provider's call
  ;; id, its 10 costliest contracted functions ([{:var :calls :ms}], seon.profile), the vars it
- ;; recorded, and what its prose cites (:cites, seon.ref/references parsed once as it is recorded)
+ ;; recorded; its prose kept as written, never parsed as it is recorded (seon.repl/record-details)
  :seon.eval/record [:map {:seon.render/html seon.render.ui/evaluation} [:code :string] [:response :map]
                     [:printed {:optional true} :string] [:type {:optional true} :string]
                     ;; a value that names its basis (@ctx, seon.ctx): its schema and the basis it is
