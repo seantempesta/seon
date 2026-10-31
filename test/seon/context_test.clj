@@ -95,6 +95,20 @@
     (is (re-find #"at the model's token limit" (head {:seon.turn/n 0 :seon.turn/truncated true})) (head {:seon.turn/n 0 :seon.turn/truncated true}))
     (is (not (re-find #"token limit" (head {:seon.turn/n 0}))))))
 
+;; task seon.context/an-agent-follows-its-instructions-to-green, item 2: three of five md-scan bench runs changed
+;; nothing in 40 turns, their run head the turn alone; beside it, what the evals changed of the branch's program
+(deftest the-run-head-shows-what-the-branch-changed
+  (let [head (fn [evals] (seon.render.ui/run-head {:seon.ctx/ctx {:seon.agent/max-turns 4 :turns {"t1" {:seon.turn/n 0}} :evals evals} :seon.db/db (ts/test-db)} 1))
+        ;; newest first, as ctx holds :evals: a read, the definition redefined, the definition
+        evals (array-map "e3" {:seon.eval/record {:code "(f 2)" :response {:value 4}}}
+                         "e2" {:seon.eval/record {:code "(defn f [x] (* 2 x))" :recorded '[demo/f] :response {}}}
+                         "e1" {:seon.eval/record {:code "(defn f [x] x)" :recorded '[demo/f] :response {}}})
+        m (head evals)]
+    (is (nil? (:changed (head (array-map "e3" (get evals "e3"))))) "a read changes nothing")
+    (is (= '[demo/f] (:changed m)) "one recorded definition, once however often redefined")
+    (is (= [:turn :changed] (take 2 (keys m))) "beside the turn")
+    (is (str/includes? (seon.web.html/html (seon.render.ui/run-html {} m)) "turn 1 of 4 · 1 change") "the page reads 1 change")))
+
 (deftest a-records-text-is-the-same-whatever-came-before
   ;; task seon.context/the-context-is-the-agents-evals-and-seons: a record's printed text is a
   ;; function of that record alone (docs/render.md). Records with equal values, and one whose code
@@ -133,8 +147,10 @@
         ;; failing assertion of the red test
         st (status-at db "demo/f" {'demo-test/f-test [:red] 'demo-test/g-test [:red [failure]] 'user/scratch-test [:red]} {:index index})]
     (testing "every reason but the task's own red proof (shown with the proofs), each with what explains it"
-      (is (= [{:reason :regression :test 'demo-test/g-test :failures [{:assert (print/code "(= 1 (g))") :got (print/code "(= 1 0)")}]}
-              {:reason :stray-red :test 'user/scratch-test :do '(my.task/update! :seon.task/proofs conj (quote user/scratch-test))}]
+      (is (= [{:reason :regression :test 'demo-test/g-test :failures [{:assert (print/code "(= 1 (g))") :got (print/code "(= 1 0)")}]
+               :source (print/code "(deftest g-test (is (= 1 (g))))")}
+              {:reason :stray-red :test 'user/scratch-test :source (print/code "(deftest scratch-test (is (= 1 2)))")
+               :do '(my.task/update! :seon.task/proofs conj (quote user/scratch-test))}]
              (:refused st)))
       (is (= [:proof-red :regression :stray-red] (mapv :reason (:reasons st))) "the done rule's own answer, beside it")
       (is (not (contains? (context/status-model {} st) :reasons)) "and the model is told each as what to do, not twice"))
@@ -214,7 +230,8 @@
                                       {:var/kind :fn :var/contract "[:=> [:cat :int] :int]"}]
                                      [ctx-calc-test/square-test "(deftest square-test (is (= 9 (square 3))))" [clojure.test/is ctx-calc/square ctx-ghost/half]
                                       {:var/kind :test}]
-                                     [ctx-calc-test/empty-test "(deftest empty-test (square 3))" [ctx-calc/square] {:var/kind :test}]])))
+                                     [ctx-calc-test/empty-test "(deftest empty-test (square 3))" [ctx-calc/square] {:var/kind :test}]
+                                     [ctx-calc-test/stray-test "(deftest stray-test (is (= 2 (square 1))))" [clojure.test/is ctx-calc/square] {:var/kind :test}]])))
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'ctx :seon.task/name "sq" :seon.task/plan "p"
                                                :seon.task/proofs #{'ctx-calc-test/square-test 'ctx-calc-test/cube-test 'ctx-calc-test/empty-test}}]))
         ;; the test child's report of the failing assertion, as clojure.test makes it
@@ -223,10 +240,20 @@
         by (into {} (map (juxt :test identity)) (:proofs block))]
     (is (= [{:assert (print/code "(= 9 (square 3))") :got (print/code "(= 9 6)")}] (:failures (by 'ctx-calc-test/square-test)))
         "the assertion once, and what it evaluated to")
-    (is (= [{:var 'ctx-calc/square :contract [:=> [:cat :int] :int] :doc {:seon.print/prose "Squares x."}}
-            {:var 'ctx-ghost/half :contract [:=> [:cat :int] :int]}]
+    ;; task seon.context/an-agent-follows-its-instructions-to-green, item 4: a callee's docstring was about 2.4k
+    ;; of the md-scan bench's first request's 6.6k tokens; it is named, its doc a `doc` away
+    (is (= [{:var 'ctx-calc/square} {:var 'ctx-ghost/half}]
            (:calls (by 'ctx-calc-test/square-test)))
-        "the program functions the red proof calls, at summary level from their facts: one in a namespace never loaded too")
+        "the program functions the red proof calls, each by its name: one in a namespace never loaded too")
+    ;; item 5: bench-b11 got its four proofs green and ended on 11 stray reds it could not trace; a red test
+    ;; that is no proof shows the source and calls a proof does, by the same producer
+    (let [stray (status-at db "ctx/sq" {'ctx-calc-test/square-test [:green] 'ctx-calc-test/cube-test [:green] 'ctx-calc-test/empty-test [:green]
+                                        'ctx-calc-test/stray-test [:red]}
+                           {:index (fn [] (index-of {"ctx/sq" #{'ctx-calc-test/square-test}} {} {}))})
+          r (first (filter #(= 'ctx-calc-test/stray-test (:test %)) (:refused stray)))]
+      (is (= :stray-red (:reason r)) (pr-str (:refused stray)))
+      (is (= (print/code "(deftest stray-test (is (= 2 (square 1))))") (:source r)) "its source, as a proof's")
+      (is (= [{:var 'ctx-calc/square}] (:calls r)) "and what it calls, as a proof's"))
     (is (= {:test 'ctx-calc-test/cube-test :status :undefined} (by 'ctx-calc-test/cube-test))
         "a proof not written yet says so")
     (is (= :unknown (:status (by 'ctx-calc-test/empty-test))) "a proof no report named never ran: the judge's :proof-unknown")

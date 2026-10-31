@@ -61,30 +61,33 @@
 
 (defn callees
   "The program functions proof p calls directly (one level: its recorded form's :form/refs,
-  the compiler's resolved references), each at summary level from its own facts on db: its
-  contract and doc, and for a helper of p's own namespace its source too (what the proof means:
-  the md-scan bench's agent read its proofs' block-of first); a var is program when db
-  holds it (a branch's callee this process never loaded included). See docs/agent.md#what-you-read."
+  the compiler's resolved references), each by its name, and for a helper of p's own namespace
+  its source too (what the proof means: the md-scan bench's agent read its proofs' block-of
+  first); a var is program when db holds it (a branch's callee this process never loaded
+  included). A callee's doc and contract are its source's or `doc`'s to show: a docstring
+  each was about 2.4k of the first request's 6.6k tokens on the md-scan bench (task
+  seon.context/an-agent-follows-its-instructions-to-green). See docs/agent.md#what-you-read."
   {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:vector :map]]}
   [db p]
   (vec (for [q (sort (disj (set (d/q '[:find [?r ...] :in $ ?s :where [?e :var/name ?s] [?e :var/form ?f] [?f :form/refs ?r]] db p)) p))
              :let [v (d/entity db [:var/name q])]
              :when (and v (not= :test (:var/kind v)))]
          (cond-> {:var q}
-           (:var/contract v) (assoc :contract (clojure.edn/read-string (:var/contract v)))
-           (:var/doc v) (assoc :doc {:seon.print/prose (:var/doc v)})
            (= (namespace p) (namespace q)) (merge (some->> (docs/source-of db q) print/code (hash-map :source)))))))
 
 (defn- refused
   "The done rule's reasons as the agent reads them, beyond its own red proofs (shown with
-  the proofs): a red test names its failures (a stray one the form that makes it a proof), a contract gap its var, a design step that
+  the proofs): a red test names its failures and, as a red proof does, its source and the program
+  functions it calls (calls-of, `callees`: bench-b11 ended on 11 stray reds it could not trace
+  from their failures alone), a stray one the form that makes it a proof, a contract gap its var, a design step that
   has not improved its plan the call that does, an open problem its work made true what it
-  is (seon.problems/caused). defined? says whether the branch defines a test: a stray red it
-  does not is one of main's tests the branch removed, which judges all the same (seon.agent/
+  is (seon.problems/caused). src-of answers the source the branch defines for a test, or nil: a stray red it
+  does not define is one of main's tests the branch removed, which judges all the same (seon.agent/
   test-plan's :removed), so it is marked :removed and offered no form that makes it a proof."
-  {:malli/schema [:=> [:cat [:vector :seon.reconcile/not-done] [:vector :map] ifn?] [:vector :map]]}
-  [reasons reds defined?]
+  {:malli/schema [:=> [:cat [:vector :seon.reconcile/not-done] [:vector :map] ifn? ifn?] [:vector :map]]}
+  [reasons reds src-of calls-of]
   (let [rs (remove #(= :proof-red (:reason %)) reasons)
+        defined? (comp some? src-of)
         gaps (vec (keep #(when (= :contract-gap (:reason %)) (:symbol %)) rs))
         unmerged (vec (keep #(when (= :unmerged (:reason %)) (:key %)) rs))
         opened (vec (keep #(when (= :open-problem (:reason %)) (:key %)) rs))]
@@ -93,15 +96,19 @@
     (vec (concat
            (for [{:keys [reason symbol behind]} rs :when (not (#{:contract-gap :unmerged :open-problem} reason))]
              (case reason
-               (:regression :stray-red) (cond-> {:reason reason :test symbol}
-                                          (seq (filter #(= symbol (:test %)) reds))
-                                          (assoc :failures (failures (filter #(= symbol (:test %)) reds)))
-                                          ;; a red test the agent wrote is a proof it has not registered, or one to delete
-                                          (and (= :stray-red reason) (defined? symbol))
-                                          (assoc :do (list 'my.task/update! :seon.task/proofs 'conj (list 'quote symbol)))
-                                          ;; main's test the branch removed: it still judges, from main's definition
-                                          (and (= :stray-red reason) (not (defined? symbol)))
-                                          (assoc :removed true))
+               (:regression :stray-red) (let [src (src-of symbol) calls (when src (calls-of symbol))]
+                                          (cond-> {:reason reason :test symbol}
+                                            (seq (filter #(= symbol (:test %)) reds))
+                                            (assoc :failures (failures (filter #(= symbol (:test %)) reds)))
+                                            ;; its source and what it calls, as a red proof shows them
+                                            src (assoc :source (print/code src))
+                                            (seq calls) (assoc :calls calls)
+                                            ;; a red test the agent wrote is a proof it has not registered, or one to delete
+                                            (and (= :stray-red reason) src)
+                                            (assoc :do (list 'my.task/update! :seon.task/proofs 'conj (list 'quote symbol)))
+                                            ;; main's test the branch removed: it still judges, from main's definition
+                                            (and (= :stray-red reason) (not src))
+                                            (assoc :removed true)))
                ;; a design made from a request carries none: it registers each it writes
                ;; judged before it merged main: merge it in, rerun the proofs, and done again
                :behind {:reason reason :behind behind :do '(my.branch/merge-main!)}
@@ -691,7 +698,7 @@
                 (seq (:caused split)) (assoc :caused (set (:caused split))))
         reasons (r/done-explain input)
         reds (vec (for [[p {:keys [failures]}] vs f failures] (assoc f :test p)))
-        defined? #(some? (docs/source-of db %))]
+        refused (refused reasons reds #(docs/source-of db %) #(callees db %))]
     (cond-> {:reasons reasons
              ;; each proof as :proved holds its var: its verdict (green :pass, red and flaky :fail, as `verdicts`), its source
              :proofs (vec (for [p (sort-by str proofs)
@@ -707,7 +714,7 @@
                               (and src (not= :pass st)) (assoc :source (print/code src))
                               (seq fs) (assoc :failures (failures fs))
                               (seq calls) (assoc :calls calls))))}
-      (seq (refused reasons reds defined?)) (assoc :refused (refused reasons reds defined?))
+      (seq refused) (assoc :refused refused)
       test-error (assoc :test-run {:failed [(:seon.error/message test-error)]})
       (seq unmerged) (assoc :unmerged (mapv #(select-keys % [:key :kind :base :ours :theirs]) unmerged))
       (seq gaps) (assoc :without-a-contract gaps)
