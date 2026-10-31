@@ -374,7 +374,7 @@
 (defn- with-checkout
   "(f dir) where dir is a checkout of a few pages, as the files the wiki loads are read (docs/ and the top level, the
   :seon.config.root/wiki-dirs): AGENTS.md, BAGGAGE.md and README.md citing a var and linking docs/agent.md, which
-  cites one too. The directory is made under target/ and removed when f returns."
+  cites one too. These tests judge the loading mechanism; the real pages' links are judged by health (seon.problems). The directory is made under target/ and removed when f returns."
   [f]
   (let [dir (str (seon.config/checkout) "/target/wiki-fixture-" (random-uuid))
         put (fn [path text] (let [file (java.io.File. (str dir "/" path))] (.mkdirs (.getParentFile file)) (spit file text)))]

@@ -81,11 +81,11 @@
                 "and 15.8 MB (149 us, 158 KB each); the explicit 23-attribute pull it replaced read the same "
                 "input in 32.6 ms and 30.1 MB (one lookup per named attribute, absent ones included)")
      :growth :linear
-     ;; 2026-10-31 (shrink-tests-4): on the world, sizes [10 30 60] (measured to 100): 1.40M ns / 1.45 MB at 10, 3.87M / 4.18 MB at 30,
+     ;; 2026-10-31 (shrink-tests-4): on the world, sizes [10 30 100]: 1.40M ns / 1.45 MB at 10, 3.87M / 4.18 MB at 30,
      ;; 12.4M / 13.6 MB at 100 runs: ~124 us and 135 KB a run (the larger sizes read the same per run)
      :per-n {:ns 130000 :bytes 140000 :calls 1}
      :fixed {:ns 100000 :bytes 100000 :calls 1}
-     :sizes [10 30 60]}))
+     :sizes [10 30 100]}))
 
 (defn carried-of
   "The input of size n: carry-tx's three dbs (base, branch, main) over n tasks, each with a plan and

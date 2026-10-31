@@ -8,7 +8,7 @@
 (defn- base
   "The world, and the namespace app.m0 the pages cite (f0 to f10)."
   []
-  (mt/with (mt/world) (mt/code 'app.m0 (str "(ns app.m0)\n" (apply str (for [i (range 11)] (str "(defn f" i " [] " i ")\n"))))))) 
+  (mt/with (mt/world) (mt/code 'app.m0 (str "(ns app.m0)\n" (apply str (for [i (range 11)] (str "(defn f" i " [] " i ")\n")))))))
 
 (defn wiki
   "The input of size n: a main db already holding a wiki of n sections (pages of ten, each
@@ -34,11 +34,11 @@
                 "~165 KB); ~19 contracted calls (own-text, cited, two citation-targets, kept and its alias check of the one name (seon.ref/kept: the names it keeps), wanted, entity-tx and one eid; the parse's ~3 per inline for its two inlines and the read's 3; the stored-section scan and page split amortized). Its second inline, a section of a file named by its address, costs a candidate and its target and reads no file (seon.docs/section-names keeps the names only: it used to parse the file for each, 1.2 MB a section). Since the wiki records what each section was written against, a stored section is also pulled once (its text, :seon.section/read, :seon.section/baseline-unread: one more seek each, ~+40 KB, ~+100 us) to keep that record while its text is unchanged. The stored sections are read once, one datom each, so a section's "
                 "parent and link targets are map lookups. Nothing is written: the answer is []")
      :growth :linear
-     ;; 2026-10-31 (shrink-tests-4): sizes [10 20 40] on the world (a size is a multiple of ten: pages of ten sections):
+     ;; 2026-10-31 (shrink-tests-4): sizes [10 40 100] on the world (a size is a multiple of ten: pages of ten sections):
      ;; 1.69 / 3.56 / 7.08 MB, 231 / 459 / 915 calls; the old sizes up to 250 read the same ~177 KB and 23 calls a section
      :per-n {:ns 170000 :bytes 190000 :calls 23}
      :fixed {:ns 50000 :bytes 50000 :calls 10}
-     :sizes [10 20 40]}))
+     :sizes [10 40 100]}))
 
 (defn view-of
   "The input of size n: the wiki of n sections (wiki) and the first page's own section, which its nine
@@ -92,12 +92,12 @@
                :growth :linear
                ;; measured 2026-10-28: 1.66 MB / 132 calls at 100 and 300, 1.83 MB / 132 at 1,000 (the vocabulary's scan, about 190 bytes a
                ;; text); before the postings: 866 KB at 100 with a tenth of the texts holding the word, 16 KB a text of the corpus
-               ;; 2026-10-31 (shrink-tests-4): on the world, sizes [200 400 600]: 1.67 / 1.70 / 1.71 MB, 96 calls. Below ~150 texts
+               ;; 2026-10-31 (shrink-tests-4): on the world, sizes [200 500 1000]: 1.67 / 1.70 / 1.71 MB, 96 calls. Below ~150 texts
                ;; the schema entries (n/8) are fewer than the ten holding the word, so the word is no outlier (z 2) and a
                ;; different, cheaper work is measured: 756 KB / 56 calls at 100
                :per-n {:bytes 300 :calls 0}
                :fixed {:bytes 1570000 :calls 100}
-               :sizes [200 400 600]}))
+               :sizes [200 500 1000]}))
 
 (defn index-input
   "text-index's arguments at size n: search-input's db and the attribute of a form's source."
@@ -146,9 +146,11 @@
                ;; 19.17 MB / 2,314 at 1,000, 67.68 MB / 7,714 at 4,000 (before the one bm25: 62.71 MB at 4,000)
                ;; measured 2026-10-28 with the postings (ten texts of each kind holding the word): 2.70 MB / 204 calls at 100, 2.75 MB / 204 at 300,
                ;; 2.88 MB / 204 at 1,000; before them, a tenth holding it: 3.78 MB at 100, 19.17 MB at 1,000, 67.68 MB / 7,714 calls at 4,000
-               :per-n {:bytes 800 :calls 0}
-               :fixed {:bytes 2700000 :calls 204}
-               :sizes [100 300 600]}))
+               ;; 2026-10-31 (shrink-tests-4): on the world, sizes [100 300 1000]: 2.64 / 2.69 / 2.83 MB, 204 calls: ~210 B a text,
+               ;; the fixed part 2.62 MB (the 800 B a text was the seed's)
+               :per-n {:bytes 220 :calls 0}
+               :fixed {:bytes 2620000 :calls 204}
+               :sizes [100 300 1000]}))
 
 (defn citing-input
   "citing-sections' arguments at size n: a wiki of n sections all citing app.m0/f1 (pages of ten), and that var."

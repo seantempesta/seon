@@ -69,11 +69,11 @@
      ;; cost reads as steeper growth)
      ;; 2026-10-29 (a-vector-is-its-own-entity): the join of each coarse row to the entity it embeds is a merge
      ;; join with the scan of :seon.vector/of, one datom read more a row: 5.22 MB at 1,000 (from 5.16), inside these
-     ;; 2026-10-31 (shrink-tests-4): sizes [420 520 640] on the world, the least past the shortlist (a size below it
+     ;; 2026-10-31 (shrink-tests-4): sizes [420 700 1000] on the world, the least past the shortlist (a size below it
      ;; reranks every row, a different work): 1.31M ticks / 4.83 MB at 420, 1.39M / 4.98 MB at 640, inside these
      :per-n {:ticks 200.0 :bytes 700.0}
      :fixed {:ticks 1050000.0 :bytes 5200000.0}
-     :sizes [420 520 640]}))
+     :sizes [420 700 1000]}))
 
 (defn due-of
   "seon.vector/due's arguments: n forms, every one with its vector, of another model than asked,
