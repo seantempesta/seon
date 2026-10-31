@@ -90,6 +90,25 @@
            (is (nil? (:seon.repl/refused-because r)) (str "a closer in a character literal, a string or a comment is none: " (pr-str r)))
            (is (= "))1" ((resolve 'x.repl-edit/g)))))
          (is (= :no-source (:seon.repl/refused-because (repl/edit! 'clojure.core/nope "a" "b"))) "no recorded source (outside an agent: no branch to name the nearest from)")
+         ;; md-scan bench-b13: a loop's new binding and its recur, edited one by one, each failed to compile; the
+         ;; error sat nested in the edit's value, cut from sight, and the agent read 33 turns of edits as held
+         (repl/eval-string "(in-ns 'x.repl-edit) (defn l [n] (loop [i 0 acc 0] (if (< i n) (recur (inc i) (+ acc i)) acc))) (in-ns 'user)" {})
+         (let [r (repl/eval-string "(seon.repl/edit! 'x.repl-edit/l \"[i 0 acc 0]\" \"[i 0 acc 0 k 1]\")" {})]
+           (is (str/includes? (str (get-in r [:ex :seon.error/message])) "nothing changed") (str "a partial edit that does not compile is the eval's own error: " (pr-str r)))
+           (is (str/includes? (str (get-in r [:ex :seon.error/message])) "recur") "with the compiler's message")
+           (is (= 6 ((resolve 'x.repl-edit/l) 4)) "and nothing changed"))
+         (let [r (repl/edit! 'x.repl-edit/l [["[i 0 acc 0]" "[i 0 acc 0 k 10]"] ["(recur (inc i) (+ acc i))" "(recur (inc i) (+ acc i) k)"] ["acc)))" "(+ acc k))))"]])]
+           (is (get-in r [:edited :var]) (str "several changes, applied together and compiled once: " (pr-str r)))
+           (is (= 16 ((resolve 'x.repl-edit/l) 4)) "the bindings, the recur and the result changed at once")
+           (is (str/includes? (my.agent/source-fn 'x.repl-edit/l) "k 10]") "its source is the new text"))
+         (let [r (repl/edit! 'x.repl-edit/l [["(inc i)" "(+ i 1)"] ["i (inc i)" "i (+ 1 i)"]])]
+           (is (contains? #{:overlap :not-found :ambiguous} (:seon.repl/refused-because r)) (pr-str r)))
+         (let [r (repl/edit! 'x.repl-edit/l [["(loop [i 0" "(loop [i 1"] ["(+ acc i)" "(+ acc i"]])]
+           (is (= :unbalanced (:seon.repl/refused-because r)) "each change is checked as one alone is")
+           (is (str/includes? (:seon.error/message r) "change 2 of 2") (str "naming which: " (:seon.error/message r)))
+           (is (= 16 ((resolve 'x.repl-edit/l) 4)) "and nothing changed"))
+         (let [r (repl/edit! 'x.repl-edit/l [["(loop [i 0" "(loop [i 0"] ["0 acc" "0 acc"]])]
+           (is (= :overlap (:seon.repl/refused-because r)) (str "two changes over one text: " (pr-str r))))
          (finally (reset! agent/state old) (remove-ns 'x.repl-edit)))))
 
 (deftest an-edit-in-an-agent-is-program-on-its-branch
