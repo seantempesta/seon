@@ -1015,9 +1015,11 @@
         db (d/db-with db (seon.task/create-tx db (seon.template/request {:seon.task/ns 'demo :seon.task/name "w" :seon.task/plan "Make w true."})))
         ;; the task as its record pulls it, drawn by its html render
         h (h/html (ui/task {} (:tree (seon.ctx/build db (seon.db/eid db :seon.task/id "demo/w") nil))))]
-    (is (str/includes? h "first reproduce it in one eval") "the whole instructions are on the page")
+    ;; how a task is worked is the help page's section they cite whole, drawn as its own part (docs/agent.md#working-a-task)
+    (is (str/includes? h "How a task is worked, step by step") "the whole instructions are on the page")
+    (is (str/includes? h "docs/agent.md#working-a-task") "citing how a task is worked")
     (is (str/includes? h "your run ends and root merges your branch") "whole: their last sentence too, nothing cut")
-    (is (< (str/index-of h "first reproduce it in one eval") (str/index-of h "Make w true.")) "above the plan")))
+    (is (< (str/index-of h "How a task is worked, step by step") (str/index-of h "Make w true.")) "above the plan")))
 
 (defn- unit-of
   "The unit of units whose element id starts with prefix."

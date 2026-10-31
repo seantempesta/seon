@@ -32,29 +32,10 @@
   (str "Merge the work of task " work-id " (on this branch) into main: merge main into the branch, resolve every conflict "
        "at the REPL, and make the proofs pass on the combined program."))
 
-(def ^:private work-steps
-  "How a :work or :whole task is worked, the text both kinds' instructions share (docs/agent.md#what-you-read):
-  red proofs shown with their source are the reproduction, so the first step is a change; only a plan that says
-  something is wrong with no failing proof to show it is reproduced first; a definition longer than a screen is
-  changed by seon.repl/edit!, a short one whole; each change is checked with the proof's own failing expression
-  (the md-scan bench, task seon.context/an-agent-follows-its-instructions-to-green: B1, the green run, did)."
-  (str "When your status shows red proofs with their source, their failures are the reproduction: make the first "
-       "change. Only when the plan says something is wrong and your status shows no failing proof, first reproduce it in "
-       "one eval: if the output is already right, fail the task with it (``(my.task/fail! \"why\" evidence)``); once the "
-       "output is wrong, stop reading. For something new, make its namespace first (``(ns …)``). A proof shown with its "
-       "source is written already. Write each one listed with no source as a deftest beside the function's tests, in their "
-       "namespace (``(my.agent/tests-reaching 'ns/f)``; ``(in-ns 'ns.x-test)``, no file), its input built as theirs, never "
-       "the live db; register it (``(my.task/update! :seon.task/proofs conj 'ns.x-test/a-proof)``) and run it red "
-       "(``(my.agent/prove)``). Then make it pass by redefining what it needs in its own namespace, keeping contracts, with "
-       "a cost proof (``seon.cost/proof``) where input grows: a short definition, evaluate it whole; a long one, "
-       "replace the part that changes (``(seon.repl/edit! 'ns/f \"old text\" \"new text\")``; places that change together, one edit: ``[[old new] ...]``). Check each change "
-       "with the proof's own expression, the failing assertion your status shows, before proving again. Never loosen a "
-       "contract or a proof."))
-
 (def instructions
   "What each step's agent does, by task kind (its own work: instructions never flow): its goal,
   when it is done and by what means, short, the standard format's stage descriptions (seon.judge's). How every agent works at the REPL is the system prompt every agent reads first
-  (seon.context/system-page), and the help page it reads on demand (seon.context/help-page). A work or whole task's steps are `work-steps`'s (red proofs with their source are the reproduction; a fix with none reproduces first; edit! for a long definition; the proof's expression checks each change): docs/agent.md#what-you-read."
+  (seon.context/system-page), and the help page it reads on demand (seon.context/help-page). How a work or whole task is worked is a section of the help page its instructions cite whole (docs/agent.md#working-a-task), so it is a part of the agent's context drawn from the wiki and changes as the wiki does: the instructions say only the goal."
   {:design (str "Your task: turn the plan below into a plan the implement "
                 "step can follow without exploring. You are done when the plan names each function to change, cited with three "
                 "backticks, and the proofs that will show the change are written, registered "
@@ -78,12 +59,12 @@
                "both sides need, or keeping one side (``(my.branch/resolve! 'ns/var :theirs)``), and running the proofs. Then end "
                "your turn with prose.")
    :work (str "Your task: do what the plan below asks: design it and build it. You are done when its proofs pass on your "
-              "branch. " work-steps " Main's work is merged into your branch as main moves: when it conflicts with yours, your "
-              "status's :unmerged names each entry; resolve it at the REPL, redefining the var for both sides or keeping one "
-              "(``(my.branch/resolve! 'ns/var :theirs)``).")
+              "branch. How a task is worked, step by step: ```docs/agent.md#working-a-task```; main's work reaches your "
+              "branch as main moves, and you resolve what conflicts: ```docs/agent.md#merging```.")
    :whole (str "Your task: do what the plan below asks, whole. You are done when its proofs pass on your branch with main's "
-               "work merged in. " work-steps " Your status's :merge says what main changed under you and what merging would "
-               "conflict on: redefine each such var for both sides. Once :merge says :ready, your run ends and root merges your branch.")
+               "work merged in. How a task is worked, step by step: ```docs/agent.md#working-a-task```. Your status's :merge says "
+               "what main changed under you and what merging would conflict on: redefine each such var for both sides "
+               "(```docs/agent.md#merging```). Once :merge says :ready, your run ends and root merges your branch.")
    :test (str "Your task: test what the plan changed. You are done when the proofs and the tests of what changed pass, and "
               "each behaviour that broke has a deftest of its own. You do it by running them (`(my.agent/prove)`), writing a "
               "deftest in the proofs' namespace for each break, and fixing the code until all pass. Then end your turn with prose.")})

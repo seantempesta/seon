@@ -6,7 +6,14 @@
   Run: bin/test seon.template-test"
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is]] [clojure.edn] [my.test :as t] [my.root] [seon.program :as program] [seon.agent]
             [datahike.api :as d]
-            [seon.db :as pdb] [seon.task :as task] [seon.reconcile :as r] [seon.template :as tpl] [seon.fixtures :as fx] [clojure.string :as str]))
+            [seon.db :as pdb] [seon.task :as task] [seon.reconcile :as r] [seon.template :as tpl] [seon.fixtures :as fx] [clojure.string :as str] [seon.config]))
+
+(defn- working-a-task
+  "The help page's section on how a task is worked, as the checkout holds it: what :work and :whole instructions cite whole."
+  []
+  (let [t (slurp (str (seon.config/checkout) "/docs/agent.md"))
+        a (str/index-of t "## Working a task")]
+    (subs t a (str/index-of t "\n## " (inc a)))))
 
 (def req {:seon.task/ns 'demo :seon.task/name "workouts" :seon.task/plan "store my workouts"
           :seon.task/proofs #{'demo-test/workouts-test}})
@@ -80,20 +87,21 @@
     (is (not (str/includes? (:work tpl/instructions) "merge-main!")) "nor is it told to")
     ;; a work agent merges main every turn main moved (2026-10-30), so a conflict meets it: swarm's scripted work agent
     ;; never resolved one (4 of 10 swarm runs red at 20 tasks); the old sentence left it to the merge task
-    (is (str/includes? (:work tpl/instructions) ":unmerged names each entry; resolve it at the REPL") "it resolves main's conflicts itself")
+    (is (str/includes? (:work tpl/instructions) "you resolve what conflicts: ```docs/agent.md#merging```") "it resolves main's conflicts itself, as the help page's merging section says")
     ;; the capped runs of 2026-10-26 (notes: context-for-20-turns): three agents hunted a bug main had
     ;; already fixed, five had what they needed by turns 1-18 and read on, and proofs were built on the
     ;; live db and on zipmap's order: reproduce first and fail! if it is right, stop reading once it is
     ;; wrong and write the deftest red, and build its input as the existing tests build theirs
-    (doseq [k [:whole :work]
-            :let [w (k tpl/instructions)
+    ;; how a task is worked is the help page's section the instructions cite whole (a wiki section, its context's part)
+    (doseq [k [:whole :work]] (is (str/includes? (k tpl/instructions) "```docs/agent.md#working-a-task```") (str k ": cites how a task is worked")))
+    (let [w (working-a-task)
                   ;; (2026-10-29: the premise step applies to a fix only, and a proof written already is the
                   ;; task's: the agent writes only those its status lists with no source)
-                  steps ["their failures are the reproduction" "first reproduce it in one eval" "if the output is already right" "(my.task/fail! "
-                         "once the output is wrong, stop reading" "with its source is written already" "with no source as a deftest beside the"
-                         "(my.agent/tests-reaching 'ns/f)" "never the live db" "register it" "run it red" "(my.agent/prove)" "make it pass"]]]
-      (is (every? #(str/includes? w %) steps) (str k ": each step is in the instructions"))
-      (is (= steps (sort-by #(or (str/index-of w %) -1) steps)) (str k ": in that order: reproduce, fail! or stop reading, the deftest, red, green")))
+                  steps ["their failures are the reproduction" "first reproduce it in one eval" "the output is already right" "(my.task/fail! "
+                         "the output is wrong, stop reading" "with its source is written already" "with no source as a deftest beside the"
+                         "(my.agent/tests-reaching 'ns/f)" "never the live db" "egister it" "run it red" "(my.agent/prove)" "make it pass"]]
+      (is (every? #(str/includes? w %) steps) "each step is in the section")
+      (is (= steps (sort-by #(or (str/index-of w %) -1) steps)) "in that order: reproduce, fail! or stop reading, the deftest, red, green"))
     (is (= [:design :implement :merge] (mapv :seon.task/kind (tpl/stages d))) "the staged choice still makes its tasks")
     (is (seq (task/create-tx (ts/test-db) ds)) "a valid task set")))
 
@@ -101,13 +109,13 @@
 ;; "reproduce first, fail at once" beside red proofs shown with their source, and redefined a 250-line scan
 ;; whole; B1, the green run, changed first, by edit!, and checked each change with the proof's expression
 (deftest red-proofs-with-their-source-are-the-reproduction
-  (doseq [k [:whole :work]
-          :let [w (k tpl/instructions)
-                at #(or (str/index-of w %) -1)]]
+  (let [w (working-a-task)
+        at #(or (str/index-of w %) -1)
+        k "docs/agent.md#working-a-task"]
     (is (str/includes? w "When your status shows red proofs with their source, their failures are the reproduction") (str k ": red proofs are the reproduction"))
     (is (< (at "make the first change") (at "first reproduce it in one eval")) (str k ": the change before any reproduction"))
     (is (str/includes? w "Only when the plan says something is wrong and your status shows no failing proof, first reproduce it") (str k ": a reproduction only with no failing proof"))
-    (is (str/includes? w "a short definition, evaluate it whole; a long one, replace the part that changes (``(seon.repl/edit! ") (str k ": edit! by the definition's size"))
+    (is (str/includes? w "evaluate it whole; a long one, replace the part that changes, ``(seon.repl/edit! ") (str k ": edit! by the definition's size"))
     (is (str/includes? w "Check each change with the proof's own expression") (str k ": each change checked by the proof's expression"))))
 
 (deftest a-request-is-one-whole-task-one-agent-works-through
@@ -126,7 +134,7 @@
     ;; with prose" left the next turn parked :waiting; a false premise was reported in prose
     (doseq [k [:whole :work]]
       (is (not (str/includes? (k tpl/instructions) "end your turn")) (str k ": no closing-prose step"))
-      (is (str/includes? (k tpl/instructions) "(my.task/fail! ") (str k ": a false premise is a failed task")))
+      (is (str/includes? (working-a-task) "(my.task/fail! ") (str k ": a false premise is a failed task")))
     (is (seq (task/create-tx (ts/test-db) ws)) "a valid task")))
 
 

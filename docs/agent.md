@@ -15,6 +15,20 @@ You have one tool, eval: call it with Clojure forms, and you see what the REPL a
 - Code whose delimiters do not balance, where the reader knows the fix, is completed, and a line of prose in it becomes a comment (``seon.reader/forgive``); the call's own result says each change and where, under `:repaired` (``seon.context/repaired``). A reply cut at the model's token limit is shown to you next turn under `:your-last-reply`.
 - Every cut in what you read names the form that reads its rest. Your last turn's responses, live: `(my.turn/evals)`.
 
+## Working a task
+
+How a work or whole task is worked, step by step (its instructions cite this section whole, so it is a part of your context; the md-scan bench, task seon.context/an-agent-follows-its-instructions-to-green).
+
+- When your status shows red proofs with their source, their failures are the reproduction: make the first change.
+- Only when the plan says something is wrong and your status shows no failing proof, first reproduce it in one eval. If the output is already right, the premise is false: fail the task with it, ``(my.task/fail! "why" evidence)``. Once the output is wrong, stop reading.
+- For something new, make its namespace first (``(ns …)``), so its proof can refer to it.
+- A proof shown with its source is written already. Write each one listed with no source as a deftest beside the function's tests, in their namespace (``(my.agent/tests-reaching 'ns/f)`` lists them; ``(in-ns 'ns.x-test)``, then the deftest: no file), its input built as theirs (their helpers and fixtures, never the live db). Register it, ``(my.task/update! :seon.task/proofs conj 'ns.x-test/a-proof)``, and run it red, ``(my.agent/prove)``.
+- Then make it pass by redefining what it needs in its own namespace, keeping contracts, with a cost proof (``seon.cost/proof``) where input grows.
+- A new helper is a ``defn-`` of its own, evaluated and tried at your REPL before anything calls it: its slips are found in its few lines.
+- A short definition, evaluate it whole; a long one, replace the part that changes, ``(seon.repl/edit! 'ns/f "old text" "new text")``, and places that change together in one edit, ``[[old new] ...]`` (`changing-a-definition`, below).
+- Check each change with the proof's own expression, the failing assertion your status shows, at your REPL, before you prove again.
+- Never loosen a contract or a proof to make it pass.
+
 ## From outside
 
 A Claude session attached through the MCP server works the same task as a Seon agent does, with the server's tools in place of the one eval tool (`docs/server.md`; the tool list says each one's arguments). Where this page says "a reply" or "your turn", read the tool that does it:
@@ -33,7 +47,7 @@ Your context is the parts of your page and your conversation: the task's part, s
 
 Your task's part:
 - `:task`: its id, kind and instructions, and its plan as it accumulated along its needs, prerequisites first.
-- `:to-prove` (only while one is not written): each proof not written yet and what the plan says it should assert. A written proof is the status's, with its verdict and source; write only those listed here (the task's instructions, ```seon.template/work-steps```: red proofs shown with their source are the reproduction, so the first step is a change).
+- `:to-prove` (only while one is not written): each proof not written yet and what the plan says it should assert. A written proof is the status's, with its verdict and source; write only those listed here (the steps: `working-a-task`, above).
 - `:similar` (when the task turns it on): a few program functions nearest the plan in meaning that it does not name, a line each.
 
 Each thing the plan cites is a part of its own, at the depth its delimiter asks (a function's doc, or its source with the form that changes part of it, and its source at doc depth too when it is of the namespaces your task works in: its own, its proofs' and what they call; a schema's form with the forms of the keys it names; a section's lead), and the namespaces your work touches are one part: in each, the names your task cites or its proofs call, and `:source`, the form that reads its ns form (its requires and aliases) and a line per definition (``(clojure.repl/source ns)``). ``(my.task/data)`` answers the task's whole data, with its write set (each cited var's source and callers) and the sections it cites.
@@ -141,7 +155,7 @@ An agent's run records no `:ms` (```seon.proofs/answer-ran``` carries none), so 
 
 ## Merging
 
-A merge task's branch has main merged in, and each of its unmerged entries shows `:base`, `:ours` and `:theirs`.
+Main's work is merged into your branch as main moves (a work agent's too), and a merge task's branch has main merged in: each entry both changed is unmerged, shown under your status's `:unmerged` with its `:base`, `:ours` and `:theirs`, and resolved by you at the REPL.
 
 - `(my.branch/unmerged)` lists them. Resolve one by redefining the var with the content both sides need, or keep one side: ``(my.branch/resolve! 'ns/var :theirs)``, or ``(my.branch/resolve! 'ns/var)`` to keep yours.
 - Your branch sees only its own changes until then.
