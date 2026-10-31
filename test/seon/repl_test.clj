@@ -711,6 +711,14 @@
     (is (= 'seon.repl-test.where/g (:seon.error/in run-err)) (pr-str run-err))
     (is (= {:line 3} (:seon.error/at run-err)))))
 
+(deftest an-error-in-a-fn-a-core-fn-calls-is-in-the-fn-around-it
+  ;; docs/errors.md#an-eval-errors-diagnostics: a throw inside an anonymous fn that a core fn calls (map-indexed
+  ;; under into, in a contracted defn- as seon.ref's are) is framed ns/var$fn with no line; it is in that var, at the line its own frame has (md-scan
+  ;; bench-b18 spent 13 turns on such a cast in its own list-items: the error named no fn)
+  (let [r (:ex (eval-in "(ns seon.repl-test.hof (:refer-clojure :exclude [defn defn-]) (:require [seon.contract :refer [defn defn-]]))\n(defn- k\n  \"Sums.\"\n  {:malli/schema [:=> [:cat :any] :any]}\n  [xs]\n  (into []\n        (map-indexed (fn [i [a b]] (+ i b)))\n        xs))\n(k [[1 [2]]])" 'seon.repl-test.hof))]
+    (is (= 'seon.repl-test.hof/k (:seon.error/in r)) (pr-str r))
+    (is (pos-int? (get-in r [:seon.error/at :line])) (pr-str r))))
+
 (deftest an-error-in-an-anonymous-fn-is-in-the-fn-around-it
   ;; what Jolt names for a frame inside an anonymous fn: the var that holds it when the call is
   ;; inside that var, nothing when the fn runs from the top of a request (never a core var)
