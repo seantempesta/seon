@@ -234,7 +234,10 @@
         [_ ab ba ab2] (at/in-agent ["(ns x.swap) (defn f [] 1)" (ed "[] 1" "[] 2") (ed "[] 2" "[] 1") (ed "[] 1" "[] 2")])]
     (is (not (str/includes? (:text ab) ":again")) (pr-str ab))
     (is (not (str/includes? (:text ba) ":again")) "the swap back is other code")
-    (is (str/includes? (:text ab2) "ran this code and answered the same") (str "the same edit again, answered the same but for its handle: " (:text ab2)))))
+    (is (str/includes? (:text ab2) "ran this code and answered the same") (str "the same edit again, answered the same but for its handle: " (:text ab2))))
+  ;; the agent's own data keeps its keys: a timing of its own that changed is a different answer
+  (let [[_ m5 m7] (at/in-agent ["(def t (atom 4))" "{:ms (swap! t inc)}" "{:ms (swap! t inc)}"])]
+    (is (not (str/includes? (:text m7) ":again")) (str "{:ms 5} then {:ms 6} is no same answer: " (:text m7)))))
 
 (deftest a-broken-parser-leaves-the-repl-answering
   ;; docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map: a DeepSeek run of md-scan gave

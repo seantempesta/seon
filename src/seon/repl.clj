@@ -667,10 +667,11 @@
   [code r]
   (if (and (= :agent (:mode @agent/state)) (:handle r))
     (let [k (hash (clojure.string/trim code))
-          ;; its answer without what differs every eval (an inner eval's handle and cost: an edit!'s value holds its
-          ;; own eval's response), at any depth: bench-b21's agent swapped one line of scan back and forth 23 times,
-          ;; each edit's answer differing only by its inner handle
-          answer (hash (clojure.walk/postwalk #(if (map? %) (dissoc % :handle :ms :ticks :bytes :fns :record) %)
+          ;; its answer without what differs every eval: an eval response's handle and cost (an edit!'s value holds
+          ;; its own eval's response), only in a map that is a response (one with :handle), never the agent's own
+          ;; data (a timing of its own answering {:ms 7} after {:ms 5} changed): bench-b21's agent swapped one line of
+          ;; scan back and forth 23 times, each edit's answer differing only by its inner handle
+          answer (hash (clojure.walk/postwalk #(if (and (map? %) (contains? % :handle)) (dissoc % :handle :ms :ticks :bytes :fns :record) %)
                                               (select-keys r [:value :ex :out :err :forms])))
           seen (get-in @agent/state [:seen k])]
       (swap! agent/state assoc-in [:seen k] {:eval (name (:handle r)) :answer answer})
