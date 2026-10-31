@@ -2,7 +2,7 @@
   "The wiki as data in the store (task seon.docs/docs-are-data-in-the-store): a section entity
   per heading, written only where a section changed; its references are what its own text
   cites, so its backlinks are who cites it."
-  (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]]
+  (:require [seon.test-store :as ts] [my.test :as mt] [clojure.java.shell] [clojure.test :refer [deftest is testing]]
             [clojure.string :as str]
             [datahike.api :as d]
             [seon.db :as pdb]
@@ -331,7 +331,7 @@
 (defn grep-db
   "A test db holding forms [name doc src]: each a var app/<name> defined by its form."
   [forms]
-  (let [db0 (ts/test-db)]
+  (let [db0 (mt/world)]
     (d/db-with db0 (vec (mapcat (fn [[n doc src]]
                                   [(cond-> {:db/id (str "v" n) :var/name (symbol "app" n)} doc (assoc :var/doc doc))
                                    {:db/id (str "f" n) :form/id (str "app/" n " " src) :form/src src :form/defines [(str "v" n)]}])
@@ -371,20 +371,35 @@
     (testing "the first line holding a word, and its number"
       (is (= {:line "(fusing 1))" :at 2} (select-keys (first (filter #(= 'app/g (:name %)) (seon.docs/tokens db "fusing" all 2.0))) [:line :at]))))))
 
+(defn- with-checkout
+  "(f dir) where dir is a checkout of a few pages, as the files the wiki loads are read (docs/ and the top level, the
+  :seon.config.root/wiki-dirs): AGENTS.md, BAGGAGE.md and README.md citing a var and linking docs/agent.md, which
+  cites one too. The directory is made under target/ and removed when f returns."
+  [f]
+  (let [dir (str (seon.config/checkout) "/target/wiki-fixture-" (random-uuid))
+        put (fn [path text] (let [file (java.io.File. (str dir "/" path))] (.mkdirs (.getParentFile file)) (spit file text)))]
+    (put "docs/agent.md" "# Agent\n\nAn agent calls app.calc/add.\n\n## Turns\n\nA turn totals with app.calc/total.\n")
+    (put "AGENTS.md" "# AGENTS\n\nHow we build, see [agent](docs/agent.md#agent) and app.calc/add.\n")
+    (put "BAGGAGE.md" "# BAGGAGE\n\nWhat was left out, see [turns](docs/agent.md#turns).\n")
+    (put "README.md" "# README\n\nStart with [AGENTS](AGENTS.md#agents).\n")
+    (try (f dir) (finally (clojure.java.shell/sh "rm" "-rf" dir)))))
+
 (deftest the-wiki-holds-the-top-level-pages-beside-docs
   ;; one-index step 6: AGENTS.md, BAGGAGE.md and README.md are sections beside docs/'s, so one search and
-  ;; one view reach them (:seon.config.root/wiki-dirs)
-  (let [co (seon.config/checkout)
-        db0 (ts/test-db)
-        tx (seon.root/wiki-tx db0 co)
-        db (d/db-with db0 tx)
-        paths (set (seon.docs/page-paths db))]
-    (is (every? paths ["AGENTS.md" "BAGGAGE.md" "docs/agent.md"]) "the top-level pages and docs/'s")
-    (is (seq (seon.docs/page db "AGENTS.md" :summary)) "a top-level page reads through the one view")
-    (is (= [] (seon.root/wiki-tx db co)) "an unchanged wiki writes nothing")
-    (is (= [] (mapv (juxt :section :message) (filter #(re-find #"^[^/#]+#" (:section %)) (problems/dead-citations db {})))) "the top-level pages add no dead citation")
-    (is (= "docs" (first (seon.config/value :seon.config.root/wiki-dirs))))
-    (is (= {"AGENTS.md" true} (select-keys (into {} (map (fn [p] [p true])) (keys (seon.docs/pages co "."))) ["AGENTS.md"])) "pages of \".\" are named without a directory")))
+  ;; one view reach them (:seon.config.root/wiki-dirs). A checkout of a few pages (with-checkout) on the world: the
+  ;; load reads a checkout's dirs, never this one's whole wiki (2026-10-31, shrink-tests-4)
+  (with-checkout
+    (fn [co]
+      (let [db0 (mt/world)
+            tx (seon.root/wiki-tx db0 co)
+            db (d/db-with db0 tx)
+            paths (set (seon.docs/page-paths db))]
+        (is (every? paths ["AGENTS.md" "BAGGAGE.md" "README.md" "docs/agent.md"]) "the top-level pages and docs/'s")
+        (is (seq (seon.docs/page db "AGENTS.md" :summary)) "a top-level page reads through the one view")
+        (is (= [] (seon.root/wiki-tx db co)) "an unchanged wiki writes nothing")
+        (is (= [] (mapv (juxt :section :message) (filter #(re-find #"^[^/#]+#" (:section %)) (problems/dead-citations db {})))) "the top-level pages add no dead citation")
+        (is (= "docs" (first (seon.config/value :seon.config.root/wiki-dirs))))
+        (is (= {"AGENTS.md" true} (select-keys (into {} (map (fn [p] [p true])) (keys (seon.docs/pages co "."))) ["AGENTS.md"])) "pages of \".\" are named without a directory")))))
 
 (deftest the-wiki-of-two-dirs-loads-in-one-pass
   ;; docs/references.md#the-wiki-in-the-store: a link from one dir's page to another's resolves in the one load
@@ -401,12 +416,14 @@
 
 (deftest a-boot-whose-wiki-digest-is-recorded-loads-nothing
   ;; docs/root.md#boot: the digest of what the load reads (the pages, the program, the task ids) rides on root's
-  ;; fact; a boot that computes the same writes no wiki and reads none, and a change of any input loads again
-  (let [co (seon.config/checkout)
-        db0 (ts/test-db)
-        tx (seon.root/wiki-boot-tx db0 co (constantly {}))
-        db (d/db-with db0 tx)]
-    (is (seq tx) "a first boot loads the wiki")
-    (is (= (seon.root/wiki-digest db0 co) (:seon.root/wiki (d/pull db [:seon.root/wiki] [:seon.root/id :root]))) "and records its digest")
-    (is (= [] (seon.root/wiki-boot-tx db co (constantly {}))) "the same inputs load nothing")
-    (is (seq (seon.root/wiki-boot-tx (d/db-with db [{:seon.task/id "demo/new-task"}]) co (constantly {}))) "a new task id loads again")))
+  ;; fact; a boot that computes the same writes no wiki and reads none, and a change of any input loads again.
+  ;; A checkout of a few pages on the world (2026-10-31, shrink-tests-4)
+  (with-checkout
+    (fn [co]
+      (let [db0 (mt/world)
+            tx (seon.root/wiki-boot-tx db0 co (constantly {}))
+            db (d/db-with db0 tx)]
+        (is (seq tx) "a first boot loads the wiki")
+        (is (= (seon.root/wiki-digest db0 co) (:seon.root/wiki (d/pull db [:seon.root/wiki] [:seon.root/id :root]))) "and records its digest")
+        (is (= [] (seon.root/wiki-boot-tx db co (constantly {}))) "the same inputs load nothing")
+        (is (seq (seon.root/wiki-boot-tx (d/db-with db [{:seon.task/id "demo/new-task"}]) co (constantly {}))) "a new task id loads again")))))
