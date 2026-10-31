@@ -17,7 +17,18 @@ What Seon is for, where it stands, the one step being worked now, and the steps 
 
 **Measured as** turns to green and tasks merged. **Held to:** nothing crashes or hangs (every failure is data to the agent); everything shown is derived from the db at t; one mechanism per job; every change earns its place; a v1 capability is present or dropped on purpose ([parity](parity.md)).
 
-## Where it stands (2026-10-30, afternoon)
+## Where it stands (2026-10-31, night)
+
+**The two sessions, tonight** (the owner: context fixes first, optimization alongside; batches 55-65 merged, main 8792628ed9). The md-scan bench went from no change held to scan's change held and 1 of 4 proofs green (bench-b16), each run's lost turns fixed at their cause:
+- an eval answers its own value though the agent broke its parser (batch 56);
+- edit! takes several changes compiled once, a refused edit names the line and the closing runs (56, 59, 61, 63);
+- shown code is the recorded text, so a slice of it is an edit's old text (61);
+- the how-to steps are a cited wiki section, docs/agent.md#working-a-task, cited apart from the plan so a backtick in it hides nothing (64, 65);
+- a changed data part is sent as what changed (64).
+
+The bench runs in one command, `bench-tools/run.sh N [TASK]` in .worktrees/bench-b, with two new tasks of other shapes beside md-scan: fence (a fix across AGENTS.md's word table and seon.problems) and delims (a new scan and its use in edit!). Tests: 120 over 2e8 ticks on 2026-10-30, six now, each tested by its claim (the owner: "question what is being tested"). A merge says what it completes (docs/merging.md#a-merge-says-what-it-completes). Open, biggest first: an agent's start-up allocation grows with its root's history (task seon.agent/an-agents-first-request-allocates-the-same-in-any-shard: red in most proves, merged past); a green work run judged behind a busy main is held (task seon.reconcile/a-green-work-run-behind-a-busy-main-is-never-held); a fresh store's seed costs ~22 M ticks in install-missing! (task seon.db/opening-a-store-costs-what-it-opens); waiting on the owner, the Jolt alias miss (task jolt.analyzer/a-missing-var-through-an-alias-says-no-such-var-in-any-namespace).
+
+### 2026-10-30, afternoon
 
 **md-scan, the bench** (task seon.ref/markdown-reads-the-scan, deepseek-flash; each bench run a main of its own on one kept store, SEON_MAIN=bench-<n>): #29 is **the first task merged by Seon** (2026-10-30, Seon's commit c7c3f64e14 on the bench's merges branch; all 151 deferred tests green at the gate). It took six releases and three hand repairs, each now fixed at its cause: a merge left a deleted test's results on a nameless entity (seon.merge/merge-tx retracts it), a one-page wiki load swept the rest (seon.docs/load-tx), a forked test child deadlocked on a collector sweeper (bin/test's shards start none). Behind the wiki loss: main's wiki never reached a living branch, so its done was held on a catch main's wiki named; a section is now a merge key ([:section address], docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program), and a turn merges main in whenever main moved (seon.agent/main-moved?). A review kept main's own version of the task: Seon's was correct but overbuilt (state threaded through the loop, start-kind's logic copied), the bench reverting main's version on purpose. Its 38 turns to green: ~16 lost to its own change breaking the page it reads (seon.ref/scan draws the page), ~10 to text edits of a 13-parameter loop, 4 to reading.
 
@@ -90,7 +101,7 @@ How to work them: merge batches through a temporary worktree when a helper holds
 
 ## Now: one step
 
-**Step 1: one real task, end to end, through Seon.** Done when an agent attached to a real task file entry finishes it: green, merged by Seon into main, written back, and the owner can watch the whole run on its chat page. Nothing else is built until this works. The known problems in its way, in order (each is a task with its proof). Where it stands (2026-10-30, afternoon): md-scan #29 went green on its proofs and the merge gate held it on a candidate missing its schema resource, now fixed; its agent is to be released on main with batch 41, the first task merged by Seon ([above](#where-it-stands-2026-10-30-afternoon)).
+**Step 1: one real task, end to end, through Seon.** Done when an agent attached to a real task file entry finishes it: green, merged by Seon into main, written back, and the owner can watch the whole run on its chat page. Nothing else is built until this works. The known problems in its way, in order (each is a task with its proof). Where it stands (2026-10-30, afternoon): md-scan #29 went green on its proofs and the merge gate held it on a candidate missing its schema resource, now fixed; its agent is to be released on main with batch 41, the first task merged by Seon ([above](#2026-10-30-afternoon)).
 
 | # | Problem | Done when |
 |---|---|---|
