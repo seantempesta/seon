@@ -78,7 +78,9 @@
                "both sides need, or keeping one side (``(my.branch/resolve! 'ns/var :theirs)``), and running the proofs. Then end "
                "your turn with prose.")
    :work (str "Your task: do what the plan below asks: design it and build it. You are done when its proofs pass on your "
-              "branch. " work-steps " Its merge task brings main's work in after you.")
+              "branch. " work-steps " Main's work is merged into your branch as main moves: when it conflicts with yours, your "
+              "status's :unmerged names each entry; resolve it at the REPL, redefining the var for both sides or keeping one "
+              "(``(my.branch/resolve! 'ns/var :theirs)``).")
    :whole (str "Your task: do what the plan below asks, whole. You are done when its proofs pass on your branch with main's "
                "work merged in. " work-steps " Your status's :merge says what main changed under you and what merging would "
                "conflict on: redefine each such var for both sides. Once :merge says :ready, your run ends and root merges your branch.")

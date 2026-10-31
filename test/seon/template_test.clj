@@ -78,6 +78,9 @@
     (is (= [(:work tpl/instructions) (:merge tpl/instructions)] (mapv :seon.task/instructions ds)))
     (is (not (task/merges? (:seon.task/kind w))) "the work task does not merge itself")
     (is (not (str/includes? (:work tpl/instructions) "merge-main!")) "nor is it told to")
+    ;; a work agent merges main every turn main moved (2026-10-30), so a conflict meets it: swarm's scripted work agent
+    ;; never resolved one (4 of 10 swarm runs red at 20 tasks); the old sentence left it to the merge task
+    (is (str/includes? (:work tpl/instructions) ":unmerged names each entry; resolve it at the REPL") "it resolves main's conflicts itself")
     ;; the capped runs of 2026-10-26 (notes: context-for-20-turns): three agents hunted a bug main had
     ;; already fixed, five had what they needed by turns 1-18 and read on, and proofs were built on the
     ;; live db and on zipmap's order: reproduce first and fail! if it is right, stop reading once it is
