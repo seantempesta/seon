@@ -497,6 +497,22 @@
     (is (not (str/includes? (msg guessed) "write it")) (str "a guessed name the task does not cite is not one to write: " (msg guessed)))
     (is (str/includes? (msg cited) "your task cites it, so write it: (in-ns 'seon.reconcile) (defn to-write ...)") (msg cited))))
 
+(deftest a-broken-parser-is-named-in-a-missing-names-answer
+  ;; the eval-path review (AGENTS.md §9: no swallowed error): my.agent/no-var reads the plan with the one parser;
+  ;; an agent that broke seon.ref/scan is answered from the task's stored cites, and the answer names the throw,
+  ;; so it learns its parser is broken (docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map)
+  ;; the names as quoted symbols, so the test's reach holds them (a name inside code text is no reference)
+  (let [scan 'seon.ref/scan no-var 'my.agent/no-var
+        [_ broken] (at/in-agent ["(my.task/update! :seon.task/plan str \" Add ```seon.reconcile/to-write```.\")"
+                                 (str "(let [was " scan "]"
+                                      " (alter-var-root #'" scan " (constantly (fn [& _] (throw (ex-info \"scan is broken\" {})))))"
+                                      " (try (" no-var " (seon.agent/db) 'seon.reconcile/to-write)"
+                                      " (finally (alter-var-root #'" scan " (constantly was)))))")])
+        msg (str (:seon.error/message (:value broken)))]
+    (is (= :my.agent/no-var (:seon.error/type (:value broken))) (pr-str broken))
+    (is (str/includes? msg "your plan's parse threw (scan is broken)") (str "the answer names the parser's throw: " msg))
+    (is (str/includes? msg "your task cites it, so write it") (str "and still says what the stored cites say: " msg))))
+
 (deftest help-answers-a-section
   ;; the help page is read from the wiki's sections main holds (root's boot loads them), at
   ;; the commit a turn read, through seon.docs's one reader

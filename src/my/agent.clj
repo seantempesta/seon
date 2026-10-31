@@ -104,6 +104,19 @@
   {:malli/schema [:=> [:cat :qualified-symbol] :qualified-symbol]}
   [sym] (let [v (ns-resolve *ns* sym)] (if (var? v) (named v) sym)))
 
+(defn- plan-cites
+  "Does task id's plan cite sym, as it stands (a design rewrites it with update!), read on db by the one
+  parser (its stored cites leave out a new namespace's function: seon.ref/kept reads it as an alias form)?
+  A parser the agent broke while it inspects its change answers from the stored cites (seon.task/task-cites)
+  and :threw its message, so the answer names it, never a quietly weaker one. No task cites nothing."
+  {:malli/schema [:=> [:cat :seon.host/db [:maybe :string] :symbol] [:map [:cited? :boolean] [:threw [:maybe :string]]]]}
+  [db id sym]
+  (if-not id
+    {:cited? false :threw nil}
+    (try {:cited? (contains? (set (some->> (task/task db id) :seon.task/plan ref/names)) sym) :threw nil}
+         (catch Throwable e
+           {:cited? (boolean (some #(= sym (:seon.cite/name %)) (task/task-cites db id))) :threw (or (ex-message e) (str (class e)))}))))
+
 (defn no-var
   "The one answer for a name sym that is no var on db nor in this process (a library's var is
   one), else nil: what callers, callees and source say of it, never [] or silence. It names the
@@ -125,13 +138,7 @@
                         :else (near (str sym) (concat (nss) (keys (ns-map *ns*)))))
           k (when nsym (keyword (namespace sym) (name sym)))
           key? (and k (or (contains? (d/schema db) k) (pdb/eid db :schema/key k)))
-          ;; the plan as it stands (a design rewrites it with update!), read by the one parser: its stored cites
-          ;; leave out a new namespace's function (seon.ref/kept reads it as an alias form). A parser the agent
-          ;; broke while it inspects its change answers those stored cites (seon.task/task-cites), never its error
-          id (:task @agent/state)
-          cited? (boolean (when id
-                            (try (contains? (set (some->> (task/task db id) :seon.task/plan ref/names)) sym)
-                                 (catch Throwable _ (some #(= sym (:seon.cite/name %)) (task/task-cites db id))))))]
+          {:keys [cited? threw]} (plan-cites db (:task @agent/state) sym)]
       (contract/error :my.agent/no-var (symbol #'no-var)
                       (str sym (cond view " names no var on this branch"
                                          nsym (str " names no namespace on this branch (" nsym ")")
@@ -139,7 +146,8 @@
                            (when (seq nearest) (str "; nearest: " (str/join ", " nearest)))
                            (when view (str "; every definition of " nsym ", a line each: (source " nsym ")"))
                            (when key? (str "; " k " is a registry key: (my.agent/callers " k ")"))
-                           (when cited? (str "; your task cites it, so write it: (in-ns '" nsym ") (defn " (name sym) " ...)")))
+                           (when cited? (str "; your task cites it, so write it: (in-ns '" nsym ") (defn " (name sym) " ...)"))
+                           (when threw (str "; your plan's parse threw (" threw "): its cites read from the stored ones (seon.task/task-cites)")))
                       (cond-> {:name sym :nearest nearest} key? (assoc :ask (str "(my.agent/callers " k ")")))))))
 
 (defn callers
