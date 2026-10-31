@@ -244,10 +244,16 @@
   {:malli/schema [:=> [:cat :seon.host/throwable :map]
                   [:map [:seon.error/at {:optional true} :seon.error/at] [:seon.error/in {:optional true} :qualified-symbol]]]}
   [e m]
-  (let [d (merge (clojure.main/ex-triage (assoc (Throwable->map e) :clojure.error/phase :execution)) (ex-data e))
+  (let [tm (Throwable->map e)
+        d (merge (clojure.main/ex-triage (assoc tm :clojure.error/phase :execution)) (ex-data e))
         compile? (:jolt.error/line d)
-        line (or (:jolt.error/line d) (:clojure.error/line d))
-        sym (when-not compile? (:clojure.error/symbol d))
+        ;; a frame inside an anonymous fn is named ns/var$fn: the error is in that var (md-scan bench-b18: a cast
+        ;; in list-items' map-indexed fn named no fn, its frame ns/list-items$fn and its line -1)
+        sym (when-not compile? (some-> (:clojure.error/symbol d) (#(symbol (namespace %) (first (clojure.string/split (name %) #"\$"))))))
+        ;; its line: the error's own, else the var's own frame's in the trace (the anonymous fn's frame has none)
+        frame-line (fn [] (let [prefix (str (munge (namespace sym)) "$" (munge (name sym)) "$")]
+                            (some (fn [[cls _ _ l]] (when (and (clojure.string/starts-with? (str cls) prefix) (pos-int? l)) l)) (:trace tm))))
+        line (let [l (or (:jolt.error/line d) (:clojure.error/line d))] (if (and l (pos? l)) l (when sym (frame-line))))
         {start :line col0 :column} (meta (if compile? (:repl/form m) (some-> sym var-of)))]
     (if (and line start (<= start line))
       (let [n (inc (- line start))
