@@ -332,10 +332,7 @@
                        (seon.repl/record-tx {:seon.root/id :root} "root-1" "outside" {:code "(my.root/problems sys)" :response {:handle 'result/e1 :value {}}})])
         branch (reduce d/db-with main0
                        [(seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e1" "a3"
-                                             ;; its prose's citations as the record holds them (seon.repl/record-details):
-                                             ;; what the page shows is read from here, never parsed from the prose again
                                              {:code "(f 2)" :prose "f doubles?"
-                                              :cites (seon.ref/references main0 "`seon.docs/source-of`")
                                               :response {:handle 'result/e1 :value 4 :ms 1.5 :bytes 2048 :ticks 120}})
                         (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e2" "a3"
                                              {:code "(f 3)" :response {:handle 'result/e2 :value 6 :ms 0.4 :bytes 512 :ticks 40}})
