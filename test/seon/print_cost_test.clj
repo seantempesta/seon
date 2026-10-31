@@ -187,7 +187,7 @@
   ;; is the pass that finds its line breaks, as a text's (a-cut-text-reads-its-lines-once), once
   ;; for each time the selection makes the map's child (three);
   ;; what shows is fixed by the budget, each shown character sized about three times (fill-end,
-  ;; code-width's line count) and re-indented once (emit/code-text)
+  ;; code-width) and copied once as written (emit/code-text)
   (let [armed? (contract/armed? #'seon.print/print-value)
         shown (select/estimate-chars shown-budget)]
     (require 'seon.print.emit 'seon.print.select 'seon.print :reload)

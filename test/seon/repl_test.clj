@@ -3,7 +3,7 @@
   (:require [clojure.test :refer [deftest is testing]] [clojure.string :as str] [seon.agent-test :as at]
             [seon.intr :as intr] [seon.agent :as agent] [seon.contract :as contract]
             [seon.ref :as ref] [seon.template :as template] [seon.repl :as repl] [seon.context :as context] [seon.docs :as docs]
-            [seon.config :as cfg] [my.agent] [seon.render :as render] [seon.render.ui :as ui] [seon.web.html :as h] [seon.test-store :as ts] [my.test] [datahike.api :as d]))
+            [seon.config :as cfg] [my.agent] [seon.render :as render] [seon.print :as print] [seon.render.ui :as ui] [seon.web.html :as h] [seon.test-store :as ts] [my.test] [datahike.api :as d]))
 
 (deftest an-eval-answers-its-value-as-clojure-does
   ;; owner, 2026-10-28 and 2026-10-29: match Clojure for the eval's output: top-level forms run in
@@ -53,6 +53,22 @@
       (is (contains? e :ex) "a read error stops it")
       (is (= {:forms 2 :value [2 4]} (select-keys e [:forms :value])) "and is no form that ran: the two before it are"))))
 
+(deftest an-edit-copied-from-the-shown-source-applies
+  ;; docs/render.md#cut-where-a-value-is-made: the source a part shows (a cite's :source, printed by the one
+  ;; printer nested in the part) is the recorded text, so a multi-line slice copied from it is an edit!'s
+  ;; old text as it stands: md-scan bench-b13..b15 never applied one, the shown text being re-indented
+  (let [old @agent/state]
+    (try (reset! agent/state {:n 0 :ns (the-ns 'user)})
+         (repl/eval-string "(ns x.repl-shown) (defn f\n  \"Adds one.\n\n  Then two.\"\n  [a]\n  (let [b 1\n        c 2]\n    (+ a b c)))\n(in-ns 'user)" {})
+         (let [shown (:text (print/print-value {:part {:cites [{:symbol 'x.repl-shown/f :source (print/code (my.agent/source-fn 'x.repl-shown/f))}]}} {:handle 'result/e1}))
+               at (str/index-of shown "\"Adds one.")
+               slice (subs shown at (+ (str/index-of shown "c 2]" at) 4))
+               r (repl/edit! 'x.repl-shown/f slice (str/replace slice "c 2" "c 20"))]
+           (is (str/includes? slice "\n") "the slice spans lines: a docstring's and the let's")
+           (is (= 'x.repl-shown/f (get-in r [:edited :var])) (pr-str r))
+           (is (= 22 ((resolve 'x.repl-shown/f) 1)) "the edited definition is the one called"))
+         (finally (reset! agent/state old)))))
+
 (deftest an-edit-replaces-exact-text-once-and-evaluates-the-definition
   ;; docs/agent.md#changing-a-definition: the md-scan bench's agent string-edited a copy of a
   ;; 250-line scan for 30 turns; edit! replaces one exact piece of the recorded source and evaluates it whole
@@ -82,7 +98,21 @@
          (let [r (repl/edit! 'x.repl-edit/g "(+ 1 1)" "(+ 1 (inc 1)")]
            (is (= :unbalanced (:seon.repl/refused-because r)) "a delimiter the new text leaves open: refused, never repaired")
            (is (str/includes? (:seon.error/message r) "opens 1 more (") (:seon.error/message r))
+           (is (str/includes? (:seon.error/message r) "a ( left open at its line 1, \"(+ 1 (inc 1)\"") (str "and where (md-scan bench-b15): " (:seon.error/message r)))
            (is (= 2 ((resolve 'x.repl-edit/g))) "nothing changed"))
+         (let [r (repl/edit! 'x.repl-edit/g "(+ 1 1)" "(+ 1 [1)]")]
+           (is (= :unbalanced (:seon.repl/refused-because r)) (str "a ( met by ], as many of each: refused, never read as \"Unmatched delimiter\": " (pr-str r)))
+           (is (str/includes? (:seon.error/message r) "the ) at its line 1") (:seon.error/message r))
+           (is (str/includes? (:seon.error/message r) "pairs a delimiter with another kind") (:seon.error/message r)))
+         ;; an old text that is itself unbalanced keeps its own unpaired delimiters: only what the edit made is named,
+         ;; at its line (the review: an extra ( added before old's own was named at old's line)
+         (repl/eval-string "(in-ns 'x.repl-edit) (defn u [x]\n  (let [a (inc x)\n        b 2]\n    (+ a b)))\n(in-ns 'user)" {})
+         (let [r (repl/edit! 'x.repl-edit/u "(let [a (inc x)" "(do\n  (let [a (inc x)")]
+           (is (= :unbalanced (:seon.repl/refused-because r)) (pr-str r))
+           (is (str/includes? (:seon.error/message r) "a ( left open at its line 1, \"(do\"") (str "the wrapping ( named, not old's own: " (:seon.error/message r)))
+           (is (not (str/includes? (:seon.error/message r) "line 2")) (:seon.error/message r)))
+         (let [r (repl/edit! 'x.repl-edit/u "(let [a (inc x)" "(let [a (inc x)\n        z (inc")]
+           (is (str/includes? (:seon.error/message r) "a ( left open at its line 2, \"z (inc\"") (str "an appended ( named at its own line: " (:seon.error/message r))))
          (let [r (repl/edit! 'x.repl-edit/g "(+ 1 1)" "(+ 1 1))")]
            (is (= :unbalanced (:seon.repl/refused-because r)) "a closer more")
            (is (str/includes? (:seon.error/message r) "closes 1 more )") (:seon.error/message r)))
@@ -96,6 +126,7 @@
          (let [r (repl/eval-string "(seon.repl/edit! 'x.repl-edit/l \"[i 0 acc 0]\" \"[i 0 acc 0 k 1]\")" {})]
            (is (str/includes? (str (get-in r [:ex :seon.error/message])) "nothing changed") (str "a partial edit that does not compile is the eval's own error: " (pr-str r)))
            (is (str/includes? (str (get-in r [:ex :seon.error/message])) "recur") "with the compiler's message")
+           (is (str/includes? (str (get-in r [:ex :seon.error/message])) "at line 1") (str "and the line it names: " (get-in r [:ex :seon.error/message])))
            (is (= 6 ((resolve 'x.repl-edit/l) 4)) "and nothing changed"))
          (let [r (repl/edit! 'x.repl-edit/l [["[i 0 acc 0]" "[i 0 acc 0 k 10]"] ["(recur (inc i) (+ acc i))" "(recur (inc i) (+ acc i) k)"] ["acc)))" "(+ acc k))))"]])]
            (is (get-in r [:edited :var]) (str "several changes, applied together and compiled once: " (pr-str r)))
