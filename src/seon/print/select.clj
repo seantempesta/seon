@@ -379,7 +379,10 @@
         to (loop [i (long (:shown node)) width 0]
              (if (< i limit)
                (let [c (.charAt text i)
-                     width (+ width (cond (:code? node) (if (= \newline c) (inc (max 1 (:indent node))) 1)
+                     ;; as code-width counts: code each character once (printed as written), prose a
+                     ;; newline its indentation more
+                     width (+ width (cond (= :seon.print/code (:code? node)) 1
+                                          (:code? node) (if (= \newline c) (inc (max 1 (:indent node))) 1)
                                           :else (if-let [e (when-not (= \newline c) (char-escape-string c))] (count e) 1)))]
                  (if (<= width room) (recur (inc i) width) i))
                i))
@@ -458,13 +461,15 @@
       lo)))
 
 (defn- code-width
-  "Characters code `node`'s first `to` characters spend, at most: each itself, and each line break
-  its indentation more (every later line starts at the node's place), or one more where that is
-  less: a newline inside a string literal prints as two characters (`emit/code-text`), and this
-  does not read the text to tell which."
+  "Characters marked text `node`'s first `to` characters spend: code each itself, as written
+  (emit/code-text); prose each itself and each line break its indentation more (every later line
+  starts at the node's place), or one more where that is less (a newline inside a string literal
+  prints as two characters), which this does not read the text to tell."
   {:malli/schema [:=> [:cat :seon.print/alloc :int] :int]}
   [node to]
-  (+ to (* (max 1 (:indent node)) (breaks-before (:breaks node) to))))
+  (if (= :seon.print/code (:code? node))
+    to
+    (+ to (* (max 1 (:indent node)) (breaks-before (:breaks node) to)))))
 
 (defn- shown-to
   "String or name `node` showing its first `to` characters."

@@ -350,16 +350,17 @@
 
 (defn whole-stray
   "The scripted model of a whole task whose proof passes while its change breaks a test of main's
-  (seon.agent-test): it writes a green proof and redefines seon.reader/balance, its contract kept, to
-  count nothing, which turns seon.repl-test's edit test red; then it only replies."
+  (seon.agent-test): it writes a green proof and redefines seon.reader/delimiter-counts (what edit! counts an
+  edit's delimiters with), its contract kept, to count nothing, which turns seon.repl-test's edit test red;
+  then it only replies."
   {:malli/schema [:=> [:cat :seon.model/request] :seon.model/script-reply]}
   [{:keys [turn]}]
   (if (zero? turn)
-    (calls "Write the proof, register it, and change balance."
+    (calls "Write the proof, register it, and change delimiter-counts."
            "(in-ns 'app.stray-test)"
            "(clojure.test/deftest t (clojure.test/is (= 1 1)))"
            "(my.task/update! :seon.task/proofs conj 'app.stray-test/t)"
-           "(in-ns 'seon.reader) (seon.contract/defn balance \"Counts nothing.\" {:malli/schema [:=> [:cat :string] [:map-of char? :int]]} [_] {\\( 0 \\[ 0 \\{ 0})")
+           "(in-ns 'seon.reader) (seon.contract/defn delimiter-counts \"Counts nothing.\" {:malli/schema [:=> [:cat [:map [:open :any] [:stray :any] [:crossed :any]]] [:map-of char? :int]]} [_] {\\( 0 \\[ 0 \\{ 0})")
     (says "The proof passes.")))
 
 (defn whole-red

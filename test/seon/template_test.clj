@@ -107,7 +107,9 @@
     (is (str/includes? w "When your status shows red proofs with their source, their failures are the reproduction") (str k ": red proofs are the reproduction"))
     (is (< (at "make the first change") (at "first reproduce it in one eval")) (str k ": the change before any reproduction"))
     (is (str/includes? w "Only when the plan says something is wrong and your status shows no failing proof, first reproduce it") (str k ": a reproduction only with no failing proof"))
-    (is (str/includes? w "a short definition, evaluate it whole; a long one, replace the part that changes (``(seon.repl/edit! ") (str k ": edit! by the definition's size"))
+    (is (str/includes? w "short definition, evaluate it whole; a long one, replace the part that changes (``(seon.repl/edit! ") (str k ": edit! by the definition's size"))
+    ;; md-scan bench-b15: a 30-line helper written inside scan's letfn cost 30 turns of paren counting
+    (is (str/includes? w "A new helper is a ``defn-`` of its own, evaluated and tried at your REPL before anything calls it") (str k ": a helper is its own definition"))
     (is (str/includes? w "Check each change with the proof's own expression") (str k ": each change checked by the proof's expression"))))
 
 (deftest a-request-is-one-whole-task-one-agent-works-through

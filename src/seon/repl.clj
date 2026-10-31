@@ -728,6 +728,32 @@
                   (assoc :indent [(lead o) (lead s)])))))
           (range n))))
 
+(defn- unpaired-by-line
+  "The delimiters new text leaves unpaired that its old text does not, each said by its line in new and that
+  line's text (md-scan bench-b15: a refused edit said how many, never where), as one string. d-old and d-new
+  are their `seon.reader/delimiters`. A delimiter of new is old's when it stands where old has the same one:
+  before their common prefix ends, or after their common suffix starts (an edit's fragment is often
+  unbalanced itself: an old (foo [a keeps its open ( and [). See docs/agent.md#changing-a-definition."
+  {:malli/schema [:=> [:cat :string :string :map :map] :string]}
+  [old new d-old d-new]
+  (let [n (min (count old) (count new))
+        ;; how much the two share from the front and from the back, each within what the other left
+        front (fn [limit] (loop [i 0] (if (and (< i limit) (= (.charAt ^String old i) (.charAt ^String new i))) (recur (inc i)) i)))
+        back (fn [limit] (loop [i 0] (if (and (< i limit) (= (.charAt ^String old (- (count old) 1 i)) (.charAt ^String new (- (count new) 1 i)))) (recur (inc i)) i)))
+        ;; the alignment that shares more, the back first on a tie: a wrapped form ((do (let ...)) shares its back
+        [p q] (let [p1 (front n) q1 (back (- n p1)) q2 (back n) p2 (front (- n q2))]
+                (if (> (+ p1 q1) (+ p2 q2)) [p1 q1] [p2 q2]))
+        ;; new's offset i at old's place, when it is in the shared prefix or suffix
+        old-at (fn [i] (cond (< i p) i (>= i (- (count new) q)) (- i (- (count new) (count old)))))
+        old-has (fn [k] (set (map (juxt first second) (k d-old))))
+        new-only (fn [k] (remove (fn [[c i]] (some-> (old-at i) (#(contains? (old-has k) [c %])))) (k d-new)))
+        where (fn [i] (let [l (inc (count (filter #{\newline} (subs new 0 i))))]
+                        (str "its line " l ", " (pr-str (clojure.string/trim (nth (clojure.string/split-lines new) (dec l) ""))))))]
+    (clojure.string/join "; "
+      (concat (for [[c i oc oi] (new-only :crossed)] (str "the " c " at " (where i) " closes the " oc " at " (where oi)))
+              (for [[c i] (new-only :open)] (str "a " c " left open at " (where i)))
+              (for [[c i] (new-only :stray)] (str "a " c " with nothing to close at " (where i)))))))
+
 (defn edit!
   "Change the definition var sym names by replacing old, exact text that occurs once in its
   recorded source (`(source sym)`), with new, then evaluating the whole new definition in its
@@ -762,7 +788,9 @@
          lines-at (fn [at] (mapv (fn [i] (let [l (line-of i)] [l (nth (clojure.string/split-lines src) (dec l))])) at))
          ;; each change checked against the recorded source: its one offset, or why it is refused
          check (fn [k [old new]]
-                 (let [at (when (seq old) (offsets src old))]
+                 (let [at (when (seq old) (offsets src old))
+                       ;; each text's delimiters, scanned once (seon.reader/delimiters)
+                       dn (reader/delimiters new) do (reader/delimiters old)]
                    (cond
                      (empty? old) {:refused (refuse :empty (str (which k) "the old text is empty: give the exact text to replace") nil)}
                      (empty? at) (let [first-line (clojure.string/trim (first (clojure.string/split-lines (str old " "))))
@@ -778,13 +806,17 @@
                                                (seq diffs) (assoc :seon.repl/differs diffs))})
                      (next at) {:refused (refuse :ambiguous (str (which k) "the old text occurs " (count at) " times: give more of it, so it is one") (lines-at at))}
                      ;; new must leave the definition as balanced as old did: each delimiter it opens or closes more than old
-                     (not= (reader/balance old) (reader/balance new))
-                     (let [d (merge-with - (reader/balance new) (reader/balance old))
-                           closer {\( \) \[ \] \{ \}}]
+                     (or (not= (reader/delimiter-counts dn) (reader/delimiter-counts do))
+                         (< (count (:crossed do)) (count (:crossed dn))))
+                     (let [d (merge-with - (reader/delimiter-counts dn) (reader/delimiter-counts do))
+                           closer {\( \) \[ \] \{ \}}
+                           there (unpaired-by-line old new do dn)]
                        {:refused (refuse :unbalanced (str (which k) "the new text does not balance as the old text did: it "
-                                                          (clojure.string/join ", " (for [[o c] (sort-by key d) :when (not (zero? c))]
-                                                                                      (if (pos? c) (str "opens " c " more " o) (str "closes " (- c) " more " (closer o)))))
-                                                          " than the old text (strings, character literals and comments aside); nothing changed")
+                                                          (or (not-empty (clojure.string/join ", " (for [[o c] (sort-by key d) :when (not (zero? c))]
+                                                                                                     (if (pos? c) (str "opens " c " more " o) (str "closes " (- c) " more " (closer o))))))
+                                                              "pairs a delimiter with another kind")
+                                                          " than the old text (strings, character literals and comments aside)"
+                                                          (when (seq there) (str "; in the new text: " there)) "; nothing changed")
                                          (lines-at at))})
                      :else {:at (first at) :old old :new new})))]
      (if (nil? src)
@@ -809,7 +841,12 @@
                                         [0 []] ordered))]
              (if-let [ex (:ex r)]
                (throw (ex-info (str (:seon.error/message ex))
-                               (update ex :seon.error/message #(str sym ": the edited definition does not compile or load, so nothing changed: " %))))
+                               (update ex :seon.error/message
+                                       #(str sym ": the edited definition does not compile or load, so nothing changed: " %
+                                             ;; the line it names, in the definition as the edit made it (bench-b15's agent bisected instead)
+                                             (when-let [l (:clojure.error/line ex)]
+                                               (str "; at line " l (some->> (:clojure.error/column ex) (str ", column ")) " of the new definition: "
+                                                    (pr-str (clojure.string/trim (nth (clojure.string/split-lines text) (dec l) "")))))))))
                ;; the response as data: its printed text and costliest functions are the outer eval's to print
                (assoc (dissoc r :text :fns :record)
                       :edited {:var sym :lines (into [] (comp (mapcat (fn [[from new]] (numbered text (- from k) (+ from (count (filter #{\newline} new)) k)))) (distinct)) starts)})))))))))
