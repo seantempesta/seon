@@ -21,7 +21,7 @@
     (is (= {:value 3} (select-keys (ev "(+ 1 2)") [:value :forms])) "one form: its value, no :forms")
     (is (contains? r :ms) "the evaluation's facts: its cost")
     (is (= {:value 4} (select-keys (ev "(do (+ 1 1) (+ 2 2))") [:value :forms])) "a do is one form: its last form's value")
-    (let [rec (repl/record-details nil "(atom 1)" {:handle 'result/e9 :value (atom 1)} {} nil)]
+    (let [rec (repl/record-details "(atom 1)" {:handle 'result/e9 :value (atom 1)} {} nil)]
       (is (:printed rec) "a value that is no plain data: the response as it printed"))
     (let [e (ev "(+ 1 2) (throw (ex-info \"no\" {})) 4")]
       (is (contains? e :ex) "the error stops it")
@@ -152,10 +152,31 @@
            (is (str/includes? (:seon.repl/fix w) "clojure.repl/source") "and the qualified helper to call")
            (is (not-any? #(= :helper-shadowed (:seon.repl/finding %)) (:warnings (repl/eval-string "(+ 1 1)" {})))
                "once, as it moves: an eval that stays says nothing"))
-         ;; root's evals (no agent db) read no citations: a prose of root's is answered, not refused
+         ;; an eval with prose outside an agent (root's) is answered as any is
          (reset! agent/state {:n 0 :ns (the-ns 'user)})
          (is (= 2 (:value (repl/eval-string "(+ 1 1)" {:prose "Adds, see seon.ref/scan."}))) "an eval with prose outside an agent")
          (finally (reset! agent/state old) (remove-ns 'x.repl-shadow)))))
+
+(deftest a-broken-parser-leaves-the-repl-answering
+  ;; docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map: a DeepSeek run of md-scan gave
+  ;; seon.ref/scan's emit step a new arity, and every eval it made after threw "Wrong number of args (6)", a pure
+  ;; (count s) included, since seon.repl/eval-string parsed each call's prose for its citations (seon.ref/references
+  ;; -> parse -> scan) with the parser the agent had broken: it could not inspect or undo its change. The eval path
+  ;; runs no code the agent may redefine for its own bookkeeping: the record keeps the prose, and a reader parses it
+  (let [prose "Counting, as `seon.ref/scan` reads docs/references.md#resolving-and-showing."
+        call (fn [code] (str "(let [r (seon.repl/eval-string " (pr-str code) " {:prose " (pr-str prose) "})]"
+                            " {:value (when (number? (:value r)) (:value r)) :ex (some-> (:ex r) :seon.error/message str) :record (:record r)})"))
+        [_ counted undone works]
+        (at/in-agent [(str "(in-ns 'seon.ref) (def scan-was scan)"
+                           " (clojure.core/defn scan [& _] (throw (ex-info \"Wrong number of args (6) passed to: fn\" {})))")
+                      (call "(count \"abc\")")
+                      (call "(in-ns 'seon.ref) (def scan scan-was)")
+                      "(map? (seon.ref/scan \"# h\\n\"))"])]
+    (is (= 3 (get-in counted [:value :value]))
+        (str "a broken seon.ref/scan never reaches the answer of an eval that does not call it (seon.repl/eval-string ran it on the prose): " (pr-str counted)))
+    (is (string? (get-in counted [:value :record])) (str "and the eval is recorded: " (pr-str counted)))
+    (is (and (map? (:value undone)) (nil? (get-in undone [:value :ex]))) (str "an eval that redefines scan back works: " (pr-str undone)))
+    (is (true? (:value works)) (str "and scan is whole again: " (pr-str works)))))
 
 (deftest a-def-beside-calls-stays-a-recorded-eval
   ;; root's ruling, 2026-10-27: a branch's program held the eval (let [r (my.agent/prove)] (def
@@ -475,6 +496,22 @@
     (is (str/includes? (msg new-ns) "write it: (in-ns 'seon.fresh-ns) (defn made ...)") (str "a cited function of a new namespace is one to write: " (msg new-ns)))
     (is (not (str/includes? (msg guessed) "write it")) (str "a guessed name the task does not cite is not one to write: " (msg guessed)))
     (is (str/includes? (msg cited) "your task cites it, so write it: (in-ns 'seon.reconcile) (defn to-write ...)") (msg cited))))
+
+(deftest a-broken-parser-is-named-in-a-missing-names-answer
+  ;; the eval-path review (AGENTS.md §9: no swallowed error): my.agent/no-var reads the plan with the one parser;
+  ;; an agent that broke seon.ref/scan is answered from the task's stored cites, and the answer names the throw,
+  ;; so it learns its parser is broken (docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map)
+  ;; the names as quoted symbols, so the test's reach holds them (a name inside code text is no reference)
+  (let [scan 'seon.ref/scan no-var 'my.agent/no-var
+        [_ broken] (at/in-agent ["(my.task/update! :seon.task/plan str \" Add ```seon.reconcile/to-write```.\")"
+                                 (str "(let [was " scan "]"
+                                      " (alter-var-root #'" scan " (constantly (fn [& _] (throw (ex-info \"scan is broken\" {})))))"
+                                      " (try (" no-var " (seon.agent/db) 'seon.reconcile/to-write)"
+                                      " (finally (alter-var-root #'" scan " (constantly was)))))")])
+        msg (str (:seon.error/message (:value broken)))]
+    (is (= :my.agent/no-var (:seon.error/type (:value broken))) (pr-str broken))
+    (is (str/includes? msg "your plan's parse threw (scan is broken)") (str "the answer names the parser's throw: " msg))
+    (is (str/includes? msg "your task cites it, so write it") (str "and still says what the stored cites say: " msg))))
 
 (deftest help-answers-a-section
   ;; the help page is read from the wiki's sections main holds (root's boot loads them), at

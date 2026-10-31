@@ -821,33 +821,33 @@
   ;; response's value as data, and is the same whatever was evaluated before it
   (let [db (db-with-program)
         r {:handle 'result/e5 :value (vec (for [i (range 300)] {:i i :name (str "row-" i)})) :ms 1.0}
-        rec (repl/record-details db "(rows)" r {} nil)
+        rec (repl/record-details "(rows)" r {} nil)
         stored (d/db-with db [{:seon.eval/id "e5" :seon.eval/by "a1" :seon.eval/record rec}])]
     (is (= (:value r) (get-in rec [:response :value])) "the whole value, not a printout of it")
     (is (not (contains? rec :text)) "no text made for a reader")
     (is (= rec (:seon.eval/record (d/pull stored [:seon.eval/record] [:seon.eval/id "e5"]))) "it round-trips through the store")
     (is (str/includes? (print/record-text rec) "row-0") "printed when it is shown")
-    (is (= rec (repl/record-details db "(rows)" r {} nil)) "the same whatever came before it")
+    (is (= rec (repl/record-details "(rows)" r {} nil)) "the same whatever came before it")
     (testing "a value that is not plain data keeps the response as it printed then, and its type"
       (doseq [v [(atom 1) (map inc (range 3)) #'clojure.core/inc]]
-        (let [rec (repl/record-details db "(x)" {:handle 'result/e6 :value v} {} nil)]
+        (let [rec (repl/record-details "(x)" {:handle 'result/e6 :value v} {} nil)]
           (is (not (contains? (:response rec) :value)) (str (type v)))
           (is (= (str (type v)) (:type rec)))
           (is (string? (:printed rec)))
           (is (= (:printed rec) (print/record-text rec)) "and reads so"))))))
 
-(deftest prose-references-are-parsed-once
-  ;; task seon.render/a-page-is-its-entitys-view (4e): an eval's prose is parsed once, as it is
-  ;; recorded, by the one reference parser; its record holds what it cites
-  (let [db (db-with-program)
-        rec (repl/record-details db "(f 1)" {:text "2"} {:prose "Reading `demo/f` before I change it."} "demo/s#1")]
-    (is (= ['demo/f] (mapv :seon.ref/name (:cites rec))) "the citation, kept in the record")
-    (is (= (seon.ref/references db "Reading `demo/f` before I change it.") (:cites rec)) "as the one parser reads it")
+(deftest an-evals-record-keeps-its-prose-as-written
+  ;; docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map: an eval's record keeps its
+  ;; prose and parses none of it (the parser is program the agent may break: md-scan's broken seon.ref/scan
+  ;; made every eval throw while the record parsed the prose's citations); a reader parses the kept prose
+  (let [prose "Reading `demo/f` before I change it."
+        rec (repl/record-details "(f 1)" {:text "2"} {:prose prose} "demo/s#1")]
+    (is (= prose (:prose rec)) "the prose, kept as written")
+    (is (not (contains? rec :cites)) "and nothing parsed from it")
     (is (= "demo/s#1" (:run rec)))
-    (is (= "{:a 1}" (:line (repl/record-details db "{:a 1}" {:text "x" :value {:a 1}} {} nil))) "its value in one line, for the collapsed eval")
-    (is (= "nil" (:line (repl/record-details db "(source f)" {:text "(defn f [x] x)\nnil" :value nil} {} nil)))
-        "a value of nil after printing is nil, not nothing (step 6: such evals' collapsed rows showed nothing)")
-    (is (not (contains? (repl/record-details db "(f 1)" {:text "2"} {:prose "No names here."} nil) :cites)) "prose citing nothing records none")))
+    (is (= "{:a 1}" (:line (repl/record-details "{:a 1}" {:text "x" :value {:a 1}} {} nil))) "its value in one line, for the collapsed eval")
+    (is (= "nil" (:line (repl/record-details "(source f)" {:text "(defn f [x] x)\nnil" :value nil} {} nil)))
+        "a value of nil after printing is nil, not nothing (step 6: such evals' collapsed rows showed nothing)")))
 
 (deftest the-task-data-names-the-functions-nearest-its-plan
   ;; the owner's ruling (2026-10-24, DECISIONS "Embeddings join the context"): the task's data's
