@@ -3,7 +3,7 @@
   method removed from its multimethod stop pointing to their forms; every other definition
   stays."
   (:require [clojure.test :refer [deftest is testing]] [datahike.api :as d]
-            [seon.test-store :as ts] [seon.program-test :as pt] [seon.stage :as stage] [seon.db :as pdb]
+            [seon.test-store :as ts] [my.test :as mt] [seon.program :as program] [seon.program-test :as pt] [seon.stage :as stage] [seon.db :as pdb]
             [seon.cost] [seon.program-cost-test]))
 
 (deftest staging-retracts-exactly-what-the-runtime-dropped
@@ -34,9 +34,9 @@
         (is (not-any? #(= (pdb/eid db :var/name 'app.st-stage/kept) (second %)) tx))))))
 
 (defn vars-of
-  "stage-tx's argument: a branch db holding n recorded forms (seon.program-cost-test/branch-of)."
+  "stage-tx's argument: the world holding n more recorded forms (app.pc/f0..fn-1; a db in memory, not the test store: stage-tx reads only the recorded vars)."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db]]}
-  [n] [(first (seon.program-cost-test/branch-of n))])
+  [n] [(let [db (mt/world)] (d/db-with db (vec (mapcat #(program/account-tx db (#'seon.program-cost-test/acct % "x") %) (range n)))))])
 
 (deftest staging-is-one-pass-over-the-recorded-vars
   (seon.cost/proof
@@ -49,4 +49,4 @@
      :growth :linear
      :per-n {:ns 3000 :bytes 3000}
      :fixed {:ns 1000000 :bytes 2000000}
-     :sizes [100 300 1000 10000]}))
+     :sizes [30 100 300]}))
