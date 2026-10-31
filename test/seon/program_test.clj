@@ -8,7 +8,7 @@
   order of their real references; a test reaches what it calls; banned calls and inline
   definitions are recorded for the merge to judge; a file analyzed without running gives
   the REPL's facts."
-  (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]]
+  (:require [seon.test-store :as ts] [my.test :as mt] [clojure.test :refer [deftest is testing]]
             [datahike.api :as d] [clojure.java.shell]
             [seon.db :as pdb]
             [seon.program :as program] [seon.docs] [seon.server]
@@ -600,40 +600,49 @@
   ;; root, 2026-10-27: :env moved in 8 of 12 batches, and with it every digest. bin/, web/, system.edn,
   ;; deps.edn and the schema resources are classes (seon.fx/inputs' :seon.env/* entries of
   ;; :config); a test takes a class when its reach reads it (seon.program/env-class-readers), and
-  ;; every file class when it reads files or runs a process (a pin it takes by reach alone)
-  (let [here (seon.config/checkout)
-        named '#{seon.main-test/no-docstring-carries-a-date seon.reader-test/prose-without-a-fence-is-a-comment
-                 seon.test-store-test/n-roots-open-the-process-store-at-once seon.render-cost-test/main-info-reads-what-the-page-shows}
-        ;; the kept graph with every fifth test and the tests asserted on below: each class's digests are
-        ;; computed over that sample (a fifth of the work of seven indexes), the same claim over fewer tests
-        g (let [g (kept-graph here)] (assoc g :tests (vec (keep-indexed (fn [i t] (when (or (named t) (zero? (mod i 5))) t)) (sort (:tests g))))))
-        in (fx/inputs here)
+  ;; every file class when it reads files or runs a process (a pin it takes by reach alone).
+  ;; A fixture of one test for each reader (recorded by the facts the compiler gives, their refs) and a
+  ;; pure one, on the world: the classes are the readers' (seon.program/env-class-readers), not the
+  ;; program's size (this took the checkout's whole kept graph, 321 M ticks)
+  (let [form (fn [nsym nm kind refs]
+               (fn [db] (program/record-tx db {:id (str nsym "/" nm) :src (str "(defn " nm ")") :ns nsym :ns-form? false
+                                               :defs [{:var (symbol (str nsym) nm) :kind kind}]
+                                               :declares #{} :methods [] :impls [] :refs refs :requires #{} :banned #{} :inline-defs #{}})))
+        db (mt/with (mt/world)
+             (form 'app.fc-test "pure" :test #{})
+             (form 'app.fc-test "reads-program" :test '#{seon.test-store/kept-program-store})
+             (form 'app.fc-test "starts-a-process" :test '#{seon.lib/fork!})
+             (form 'app.fc-test "reads-schemas" :test '#{seon.reconcile/index})
+             (form 'app.fc-test "runs-a-script" :test '#{clojure.java.shell/sh})
+             (form 'app.fc-test "serves" :test '#{seon.web/handler})
+             (form 'app.fc-test "reads-system" :test '#{seon.system/read-decl})
+             (form 'app.fc-test "reads-deps" :test '#{seon.fork-server/dev-classpath!})
+             (form 'app.fc "contracts-step" :fn '#{seon.contract/uncontracted}))
+        g (program/reach-graph db nil)
+        in {:env "e" :tree "t" :config {}}
         a (update-vals (program/graph-index g in nil) :digest)
         moved (fn [c] (let [b (update-vals (program/graph-index g (assoc-in in [:config c] "other") nil) :digest)]
-                        (set (for [[t d] a :when (not= d (b t))] t))))
-        all-tests (set (keys a))
+                        (set (for [[t d] a :when (not= d (b t))] (symbol (name t))))))
         bin (moved :seon.env/bin) web (moved :seon.env/web) system (moved :seon.env/system) deps (moved :seon.env/deps)
         schemas (moved :seon.env/schemas) src (moved :seon.env/src)]
-    ;; no-docstring-carries-a-date shared one digest across a red and a green: it reads every src docstring
-    ;; through the kept program db, which no digest held (docs/source.md#tests-run-by-reach)
-    (is (src 'seon.main-test/no-docstring-carries-a-date) "a test reading the checkout's whole program takes the src class")
-    (is (not (src 'seon.reader-test/prose-without-a-fence-is-a-comment)) "a pure test takes no src class")
-    (is (not (src 'seon.test-store-test/n-roots-open-the-process-store-at-once)) "nor does a test that only starts processes")
+    (is (src 'reads-program) "a test reading the checkout's whole program takes the src class")
+    (is (not (src 'pure)) "a pure test takes no src class")
+    (is (not (src 'starts-a-process)) "nor does a test that only starts processes")
     ;; bin/check contracts judges every var of src (seon.contract/uncontracted): batch 18 added one uncontracted with
     ;; the step green at its digest, which only its own code made (2026-10-30)
-    (let [step (fn [in] (:digest (get (program/graph-index g in {"contracts" '[seon.check/contracts]}) "contracts")))]
+    (let [step (fn [in] (:digest (get (program/graph-index g in {"contracts" '[app.fc/contracts-step]}) "contracts")))]
       (is (not= (step in) (step (assoc-in in [:config :seon.env/src] "other"))) "the contracts step takes the src class"))
     ;; a-move-of-main-costs-what-moved went red when 14 attributes joined the schema, its digest unmoved:
     ;; seon.reconcile/index filters every attribute the schema declares by namespace (docs/source.md#tests-run-by-reach)
-    (is (schemas 'seon.render-cost-test/main-info-reads-what-the-page-shows) "a test reaching seon.reconcile/index takes the schema class")
-    (is (not (schemas 'seon.reader-test/prose-without-a-fence-is-a-comment)) "a pure test takes no schema class")
+    (is (schemas 'reads-schemas) "a test reaching seon.reconcile/index takes the schema class")
+    (is (not (schemas 'pure)) "a pure test takes no schema class")
     (doseq [[c m] [[:bin bin] [:web web] [:system system] [:deps deps]]]
-      ;; and a test that reads files or runs a process takes every class
-      (is (every? m ['seon.test-store-test/n-roots-open-the-process-store-at-once]) (str "a test starting processes takes the " c " class")))
-    (doseq [[c m] [[:bin bin] [:web web] [:system system] [:deps deps]]]
-      (is (< 0 (count m) (count all-tests)) (str (count m) " of " (count all-tests) " tests take the " c " class: some, not every test"))
-      (is (not (m 'seon.reader-test/prose-without-a-fence-is-a-comment)) (str "a pure test takes no " c " class")))
-    (is (< (count web) (count bin)) "fewer tests read the web handler than may run a script")))
+      (is (m 'starts-a-process) (str "a test starting processes takes the " c " class"))
+      (is (not (m 'pure)) (str "a pure test takes no " c " class")))
+    ;; each reader takes its own class and no other of the four: some tests, not every test
+    (doseq [[reader c m] [['runs-a-script :bin bin] ['serves :web web] ['reads-system :system system] ['reads-deps :deps deps]]]
+      (is (m reader) (str reader " takes the " c " class"))
+      (is (= #{reader 'starts-a-process} m) (str "and only it and the process test take " c ": " (pr-str m))))))
 
 (deftest a-schema-key-a-test-names-is-an-edge-to-its-entry
   ;; root, 2026-10-27: 896 tests took the schema resources on every schema edit. A schema key a form
