@@ -783,6 +783,21 @@
   (is (= 3 (:seon.run/behind (task/end-members {:outcome :green :results {} :uncontracted #{} :behind 3} 5 5))) "the end records it")
   (is (not (contains? (task/end-members {:outcome :green :results {} :uncontracted #{} :behind 0} 5 5) :seon.run/behind)) "none behind records nothing"))
 
+(deftest a-green-work-run-judged-behind-is-done-and-its-merge-runs
+  ;; docs/merging.md#a-merge-runs-what-the-change-reaches: a green run of a work task judged behind main's newer
+  ;; merges is done, and its merge task (which merges main into the branch and is gated) runs next; told again it
+  ;; was held for root once :seon.config.merge/max-behind of its runs were behind a busy main (bin/check swarm held
+  ;; sw/s8 and sw/s9 so, 2026-10-31). A task no merge task follows still merges main itself and is told so
+  (let [merge-decl {:seon.task/ns 'demo :seon.task/name "a-merge" :seon.task/kind :merge :seon.task/plan "Merge a." :seon.task/needs #{"demo/a"}}
+        ended (fn [decls] (let [db (db-of decls :extra (run "a" 1 :running :results {(symbol "demo-test" "a-test") :pass}))]
+                            (d/db-with db [[:db/cas [:seon.run/id "demo/a#1"] :seon.run/status :running :ended]
+                                           {:seon.run/id "demo/a#1" :seon.run/outcome :green :seon.run/behind 4}])))
+        verdict-of (fn [db] (first (filter #(= :verdict (:op %)) (actions-for db))))]
+    (is (nil? (verdict-of (ended [(decl "a") merge-decl]))) "followed by its merge task: no verdict, the run is done")
+    (is (= {:reason :behind :behind 4} (first (:reasons (verdict-of (ended [(decl "a")]))))) "no merge task: told it is behind")
+    (is (= {:reason :behind :behind 4} (first (:reasons (verdict-of (ended [(decl "a") (decl "b" :needs ["a"])])))))
+        "a follower that is no merge task brings no main in: told it is behind")))
+
 (deftest design-may-leave-its-proofs-red
   ;; a design step's work is the plan: done only when the plan differs from the one it began with
   (are [in expected] (= expected (mapv :reason (r/done-explain in)))

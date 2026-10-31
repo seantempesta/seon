@@ -1004,7 +1004,8 @@
                 "110 since what it cites is cite entities (seon.task/cites-tx: each cite upserted, a name asked whether it names a task, "
                 "and the task's cites read to retract the gone)")
      :growth :constant
-     :fixed {:calls 110}
+     ;; +1: a task's plan and instructions are parsed apart, each its own text (seon.task/cited-texts, md-scan bench-b17)
+     :fixed {:calls 111}
      :sizes [100 300 1000 3000]})
   ;; no record left behind: an empty state builds none (as-agent!'s callers leave theirs too)
   (reset! seon.agent/state nil))
