@@ -816,7 +816,15 @@
                                                                                                      (if (pos? c) (str "opens " c " more " o) (str "closes " (- c) " more " (closer o))))))
                                                               "pairs a delimiter with another kind")
                                                           " than the old text (strings, character literals and comments aside)"
-                                                          (when (seq there) (str "; in the new text: " there)) "; nothing changed")
+                                                          (when (seq there) (str "; in the new text: " there))
+                                                          ;; the closers each text ends with, side by side: a run of ) is miscounted
+                                                          ;; where it is read (md-scan bench-b16 wrote seven for six, three times)
+                                                          (let [run (fn [t] (re-find #"[\)\]\}]+$" (clojure.string/trimr t)))
+                                                                [ro rn] [(run old) (run new)]]
+                                                            (when (and (or ro rn) (not= ro rn))
+                                                              (str "; the old text ends " (pr-str (or ro "")) " (" (count ro) "), the new text "
+                                                                   (pr-str (or rn "")) " (" (count rn) ")")))
+                                                          "; nothing changed")
                                          (lines-at at))})
                      :else {:at (first at) :old old :new new})))]
      (if (nil? src)
