@@ -536,8 +536,10 @@
 (defn namespaces-of
   "The namespaces agent record c's work touches, as the namespaces part shows them, from ctx alone: those of
   what its task and its needs cite (a var's namespace, or a namespace cited itself) and of their proofs,
-  once each, each {:names [...] :more form}: its names the task cites or its proofs call (their forms'
-  :form/refs, as :proved holds them), and the form that lists the rest of it (my.agent/help). It costs what it
+  once each, each {:names [...] :source form}: its names the task cites or its proofs call (their forms'
+  :form/refs, as :proved holds them), and the form that reads its ns form (its requires and aliases) and a line
+  per definition, ``(clojure.repl/source ns)`` (md-scan bench-b14's agent spent six turns finding seon.ref's
+  requires: the form it had, my.agent/help, did not say it holds them). It costs what it
   shows, never the namespace's size. See docs/render.md#a-part-answers-data."
   {:malli/schema [:=> [:cat :map] [:map-of :symbol :map]]}
   [c]
@@ -553,7 +555,7 @@
     ;; a map by name, in the order first named (a part answers a map: a vector is hiccup)
     (apply array-map (mapcat (fn [n] [n (cond-> {}
                                            (seq (names n)) (assoc :names (vec (sort (distinct (map (comp symbol name) (names n))))))
-                                           true (assoc :more (list 'my.agent/help (list 'quote n))))])
+                                           true (assoc :source (list 'clojure.repl/source n)))])
                              (distinct (map ns-of (concat named proofs)))))))
 
 (defn task-data

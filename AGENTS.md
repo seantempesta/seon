@@ -237,7 +237,6 @@ Each kind of information has one home, and a fact found anywhere else is moved t
 | dragon | failure point (and its edge function) | plain English |
 | census | `mg/check` (the generative check of every contract) | Malli |
 | pillar | principle | plain English |
-| fence | guard | plain English |
 | merge train | octopus merge (branches merged into main in one commit) | git |
 | harvest | stage (onto the branch) | git |
 | stand-in | proc | core.async Flow |
@@ -247,7 +246,7 @@ Each kind of information has one home, and a fact found anywhere else is moved t
 | attempt | run (one agent's try at a task); a clojure.test run is a "test run", a whole root's is "root's run" | owner, 2026-10-23: "I don't like the attempt name. Call it agentic loop or run" |
 | story, run-state, task story | the task's render (a render is a function and the data it renders): task-page over the task's data; the layout is render-ctx | owner, 2026-10-26: "A render is just a function and the data being rendered. No story" |
 
-Library words stay: proc, step-fn, transact, branch, merge, schema, registry, contract (a Malli function schema), flusher, group commit, fork server, lease, generation. **Waste** stays our word for the turns and tokens a run spent past what its work needed (`:seon.run/waste`; owner, 2026-10-23). A stored keyword is renamed by erasing the store, never by a migration (DECISIONS).
+Library words stay: fence (CommonMark's code fence; for a guard, say guard), proc, step-fn, transact, branch, merge, schema, registry, contract (a Malli function schema), flusher, group commit, fork server, lease, generation. **Waste** stays our word for the turns and tokens a run spent past what its work needed (`:seon.run/waste`; owner, 2026-10-23). A stored keyword is renamed by erasing the store, never by a migration (DECISIONS).
 
 ## 8. The machine
 
