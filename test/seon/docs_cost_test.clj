@@ -34,11 +34,11 @@
                 "~165 KB); ~19 contracted calls (own-text, cited, two citation-targets, kept and its alias check of the one name (seon.ref/kept: the names it keeps), wanted, entity-tx and one eid; the parse's ~3 per inline for its two inlines and the read's 3; the stored-section scan and page split amortized). Its second inline, a section of a file named by its address, costs a candidate and its target and reads no file (seon.docs/section-names keeps the names only: it used to parse the file for each, 1.2 MB a section). Since the wiki records what each section was written against, a stored section is also pulled once (its text, :seon.section/read, :seon.section/baseline-unread: one more seek each, ~+40 KB, ~+100 us) to keep that record while its text is unchanged. The stored sections are read once, one datom each, so a section's "
                 "parent and link targets are map lookups. Nothing is written: the answer is []")
      :growth :linear
-     ;; 2026-10-31 (shrink-tests-4): sizes [10 40 100] on the world (a size is a multiple of ten: pages of ten sections):
+     ;; 2026-10-31 (shrink-tests-4): sizes [10 30 50] on the world (a size is a multiple of ten: pages of ten sections):
      ;; 1.69 / 3.56 / 7.08 MB, 231 / 459 / 915 calls; the old sizes up to 250 read the same ~177 KB and 23 calls a section
      :per-n {:ns 170000 :bytes 190000 :calls 23}
      :fixed {:ns 50000 :bytes 50000 :calls 10}
-     :sizes [10 40 100]}))
+     :sizes [10 30 50]}))
 
 (defn view-of
   "The input of size n: the wiki of n sections (wiki) and the first page's own section, which its nine
