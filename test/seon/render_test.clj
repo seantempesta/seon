@@ -1055,7 +1055,10 @@
       (is (str/includes? h "(= 4 5)") "and what its assertion got"))
     (let [h (:html (unit-of task "task-data-"))]
       (is (str/includes? h "demo/f") "drawn by the task's html render")
-      (is (str/includes? h "to-prove") "with how to run each proof, from what the record pulled"))
+      ;; how a proof runs is the status's (its verdict, its source, the form that runs it), not repeated in the task's
+      ;; part; this fixture's proof has no source, so the part says what to write (seon.context/not-written)
+      (is (not (str/includes? h "my.agent/prove")) "no proof's run form, which the status shows")
+      (is (str/includes? h "not written yet") "an unwritten proof: what to write"))
     (is (= [(str "chat-ask-" rid) (str "chat-start-" rid)
             (str "chat-message-" rid "-" (eid :seon.message/id "m-1")) (str "eval-item-" (eid :seon.eval/id "e1")) (str "eval-item-" (eid :seon.eval/id "e2"))
             (str "chat-turn-" rid "-" (eid :seon.turn/id "demo/f#1/0")) (str "eval-item-" (eid :seon.eval/id "e3")) (str "chat-turn-" rid "-" (eid :seon.turn/id "demo/f#1/1"))
@@ -1514,11 +1517,13 @@
   ;; still splitting and replacing by regex). What the definition calls, as the compiler's facts say
   ;; (seon.source/accounts: its :refs), never a pattern over its text
   (let [src (my.agent/source-fn 'seon.render.ui/markdown)
-        refs (into #{} (mapcat :refs) (:accounts (seon.source/accounts 'seon.render.ui src)))]
+        refs (into #{} (mapcat :refs) (:accounts (seon.source/accounts 'seon.render.ui src)))
+        regex '[clojure.core/re-find clojure.core/re-seq clojure.core/re-matches clojure.core/re-pattern
+                clojure.core/re-matcher clojure.string/split clojure.string/replace clojure.string/replace-first]]
     (is (some? src) "its source, as the process runs it")
-    (is (empty? (filter refs '[clojure.core/re-find clojure.core/re-seq clojure.core/re-matches clojure.core/re-pattern
-                               clojure.core/re-matcher clojure.string/split clojure.string/replace clojure.string/replace-first]))
-        (str "a regex function in markdown: " (pr-str (filter #(#{"clojure.core" "clojure.string"} (namespace %)) refs))))))
+    ;; its message names the regex functions markdown calls, never every symbol the compiler expanded it to (the
+    ;; md-scan bench's agents read about 60 clojure.core names: task seon.context/an-agent-follows-its-instructions-to-green)
+    (is (empty? (filter refs regex)) (str "a regex function in markdown: " (pr-str (filter refs regex))))))
 
 (deftest a-task-title-is-its-name-in-words
   ;; docs/render.md#the-page: a task's or a run's id as its title
@@ -1688,7 +1693,13 @@
     (is (str/includes? (:seon.print/prose (:text (model "docs/x.md#the-x"))) "What x does. And more.") "a section at doc depth: its lead")
     (is (str/includes? (:seon.print/prose (:text (model "docs/testing.md#testing"))) "Testing in the world (docs/testing.md#testing-in-the-world)")
         "a page cited whole: its top section, the headings below it joined")
-    (is (= {:seon.print/prose "Gets it."} (:doc (model "demo/g"))) "a var at doc depth: its doc, from the pulled var")
+    ;; task seon.context/an-agent-follows-its-instructions-to-green, item 3: the md-scan bench's every run spent turn 0
+    ;; reading the vars it changes; one of the task's own namespaces (demo, its task's and its proof's) shows its source
+    (is (= :doc (:depth (model "demo/g"))) "cited at doc depth")
+    (is (= (seon.print/code "(defn g \"Gets it.\" [x] x)") (:source (model "demo/g"))) "a var of the task's own namespace: its source, from the pulled form")
+    (let [elsewhere (update (:data (drawn "demo/g")) :seon.cite/of assoc :seon.task/id "other/c" :seon.task/ns 'other :seon.task/proofs #{} :proved {})]
+      (is (= {:seon.print/prose "Gets it."} (:doc (ui/cite-model {} elsewhere))) "a var of another namespace at doc depth: its doc")
+      (is (nil? (:source (ui/cite-model {} elsewhere))) "and no source"))
     (is (= '[demo-test/g-test] (:tests (model "demo/g"))) "its test, among its pulled callers")
     (is (= '[demo/h] (:callers (model "demo/g"))) "and its other caller")
     (is (str/includes? (:html (drawn "docs/x.md#the-x")) "What x does.") "and the page's html, by the cite's html render")))
@@ -1748,7 +1759,8 @@
         m (ui/task-model {} data)]
     (is (= :seon.task/task-fact (:seon.render/schema (meta data))) (str "the part draws with the db unread: " (pr-str data)))
     (is (= "First the need.\n\nThen make `demo/g` pass." (get-in m [:task :seon.task/plan])) "its plan accumulated over its need, the need's first")
-    (is (= '(my.agent/prove #{demo-test/g-test}) (get-in m [:to-prove 'demo-test/g-test])) "a written proof: the form that runs it")
+    ;; task seon.context/an-agent-follows-its-instructions-to-green, item 4: :to-prove repeated the status's proofs
+    (is (not (contains? (:to-prove m) 'demo-test/g-test)) "a written proof is the status's, not repeated here")
     (is (str/starts-with? (str (get-in m [:to-prove 'demo-test/n-test])) "not written yet") "its need's unwritten proof: what to write")
     (is (not (contains? data :cites)) "the cites are parts of their own")
     (is (nil? (meta (:task m))) "its model value names no schema: the printer does not draw it by this render again")

@@ -796,17 +796,19 @@
 (defn task-model
   "A task as the model reads it (the declared model render of :seon.task/task-fact), a regular function of the
   pulled task: its id, kind and instructions and its plan accumulated over its joined needs
-  (seon.task/pulled-accumulated), then each proof, its own and its needs', to the form that runs it at the
-  REPL when :proved holds its form, else what the plan says it should assert (seon.context/not-written).
-  See docs/render.md#a-part-answers-data."
+  (seon.task/pulled-accumulated), then each proof, its own and its needs', not written yet (no form :proved
+  holds) with what the plan says it should assert (seon.context/not-written); a written one is the status's
+  to show, with its verdict and how it runs (`:to-prove` repeated them: task
+  seon.context/an-agent-follows-its-instructions-to-green). See docs/render.md#a-part-answers-data."
   {:malli/schema [:=> [:cat :map :map] :map]}
   [_opts t]
   (let [{:keys [plan proofs]} (task/pulled-accumulated t)
-        defined (into #{} (for [ps (cons (:proved t) (map :proved (vals (:needs t)))) v (vals ps) :when (get-in v [:form :form/src])] (:var/name v)))]
+        defined (into #{} (for [ps (cons (:proved t) (map :proved (vals (:needs t)))) v (vals ps) :when (get-in v [:form :form/src])] (:var/name v)))
+        unwritten (remove defined proofs)]
     ;; a plain map, never t's metadata (select-keys keeps it): named :seon.task/task-fact, the printer drew it by this render again, without end
-    {:task (into {} (assoc (select-keys t [:seon.task/id :seon.task/instructions]) :seon.task/kind (:seon.task/kind t :work) :seon.task/plan plan))
-     :to-prove (into (sorted-map-by #(compare (str %1) (str %2)))
-                     (for [p proofs] [p (if (defined p) (list 'my.agent/prove #{p}) (context/not-written p plan))]))}))
+    (cond-> {:task (into {} (assoc (select-keys t [:seon.task/id :seon.task/instructions]) :seon.task/kind (:seon.task/kind t :work) :seon.task/plan plan))}
+      (seq unwritten) (assoc :to-prove (into (sorted-map-by #(compare (str %1) (str %2)))
+                                             (for [p unwritten] [p (context/not-written p plan)]))))))
 
 (defn- section-text
   "Pulled section sec (its :below joined) as Markdown at depth: :summary its heading and its lead's first
@@ -824,11 +826,12 @@
 (defn- var-view
   "Pulled var v (its :form and :callers joined, each caller with the vars it defines) as its citation's
   depth shows it, as seon.docs/resolve-ref shows a var: :summary its arglists and its doc's first sentence,
-  :doc its arglists, doc and contract (its source when it has no doc), :code its source; past :summary its
+  :doc its arglists, doc and contract (its source when it has no doc, or when own?, a var of the task's own
+  namespaces, the one it changes: `own-namespaces`), :code its source; past :summary its
   direct tests and its other callers among the newest callers ctx holds, and the form that reads every test
   reaching it. A name v leaves nil is a library var, from the process's var meta."
-  {:malli/schema [:=> [:cat :qualified-symbol [:maybe :map] :seon.ref/depth] :map]}
-  [sym v depth]
+  {:malli/schema [:=> [:cat :qualified-symbol [:maybe :map] :seon.ref/depth :boolean] :map]}
+  [sym v depth own?]
   (let [src (get-in v [:form :form/src])
         m (if v
             (cond-> {}
@@ -849,19 +852,38 @@
     (cond
       (and (nil? v) (nil? m)) {:symbol sym :unresolved true :problem (:unresolved ref/problem-messages)}
       (= :summary depth) (cond-> (select-keys doc [:symbol :arglists]) (:doc m) (assoc :summary (ref/lead-sentence (:doc m))))
-      (or (nil? src) (and (= :doc depth) (:doc m))) (merge doc around)
+      (or (nil? src) (and (= :doc depth) (:doc m) (not own?))) (merge doc around)
       :else (merge {:symbol sym :source (print/code src)
                     :change (print/code (str "(seon.repl/edit! '" sym " \"old text, exactly once\" \"new text\")"))}
                    around))))
 
+(defn- own-namespaces
+  "The namespaces task t (a cite's :seon.cite/of as ctx holds it, filled) works in: its own, each proof's and the
+  namespace each proof tests (its name less -test), and those its proofs' forms call into (:form/refs, as
+  :proved holds them); none for what is no task (the agent's own cites). A cited var of these shows its source
+  (the md-scan bench's every run spent turn 0 reading scan and markdown: task
+  seon.context/an-agent-follows-its-instructions-to-green). See docs/references.md#an-entity-cites."
+  {:malli/schema [:=> [:cat :any] [:set :symbol]]}
+  [t]
+  (if-let [id (when (map? t) (:seon.task/id t))]
+    (let [ns-of (fn [s] (some-> (namespace s) symbol))
+          proofs (filter qualified-symbol? (:seon.task/proofs t))
+          refs (for [[_ v] (:proved t) r (get-in v [:form :form/refs]) :when (qualified-symbol? r)] r)]
+      (into #{} (remove nil?)
+            (concat [(or (:seon.task/ns t) (ns-of (symbol id)))]
+                    (map ns-of proofs)
+                    (keep #(some->> (re-matches #"(.+)-test" (name (ns-of %))) second symbol) proofs)
+                    (map ns-of refs))))
+    #{}))
+
 (defn cite-model
   "A cite as the model reads it (the declared model render of :seon.cite/cite-fact), a regular function of the
   pulled cite and what it joined, at its depth: a section as Markdown (section-text), a task by its plan, a var
-  as `var-view`, a schema key its form and how it changes, a namespace its doc and the form that lists it, and a name or
+  as `var-view` (at :doc its source too when the var is of its task's own namespaces, `own-namespaces`), a schema key its form and how it changes, a namespace its doc and the form that lists it, and a name or
   address that joined nothing as {:cites x :unresolved true :problem ...}. See
   docs/references.md#an-entity-cites."
   {:malli/schema [:=> [:cat :map :map] :map]}
-  [_opts {:seon.cite/keys [address name depth] sec :section v :var tk :task sch :schema n :ns}]
+  [_opts {:seon.cite/keys [address name depth of] sec :section v :var tk :task sch :schema n :ns}]
   (let [x (or address name) head {:cites x :depth depth}]
     (cond
       ;; what reads it whole first, as code the printer shows verbatim, so a cut of the rest still names it
@@ -870,7 +892,7 @@
       (:seon.task/id tk) (assoc head :read (print/code (str "(:seon.task/plan (seon.task/task (seon.agent/db) " (emit/string-literal (:seon.task/id tk)) "))"))
                                 :text {:seon.print/prose (cond-> (str "## " (:seon.task/id tk))
                                                            (:seon.task/plan tk) (str "\n\n" (if (= :summary depth) (ref/lead-sentence (:seon.task/plan tk)) (:seon.task/plan tk))))})
-      (qualified-symbol? name) (let [view (var-view name (when (:var/name v) v) depth)]
+      (qualified-symbol? name) (let [view (var-view name (when (:var/name v) v) depth (contains? (own-namespaces of) (symbol (namespace name))))]
                                  (if (:unresolved view)
                                    (merge head (dissoc view :symbol))
                                    (merge (assoc head :read (print/code (str "(clojure.repl/source " name ")"))) view)))
@@ -1087,12 +1109,28 @@
   (when (:task c)
     (with-meta (context/namespaces-of c) {:seon.render/schema :seon.context/namespaces})))
 
+(defn- changed
+  "What agent record c's evals changed of its branch's program, each name once, oldest first: what each
+  recorded (a var, an ns form's namespace), edited (seon.repl/edit!) or unmapped, read from its :evals as ctx
+  holds them (docs/ctx.md#the-pattern); evals removed from the record are not counted. See
+  docs/render.md#a-part-answers-data."
+  {:malli/schema [:=> [:cat :map] [:vector :symbol]]}
+  [c]
+  (into [] (distinct)
+        (for [[_ e] (reverse (seq (:evals c)))
+              :let [rec (:seon.eval/record e)]
+              s (concat (ratom/realize (:recorded rec)) (some-> (ratom/realize (get-in rec [:response :edited :var])) vector)
+                        (ratom/realize (get-in rec [:response :unmapped])))
+              :when (symbol? s)]
+          s)))
+
 (defn run-head
   "The agent's run (a component over ctx): its relevant attributes and the turns it took, by the
   run schema's render, from the agent's record (its status, branch and turn cap, its turns; the cap
-  its run's, `seon.context/run-of`, when the agent raised none), and
-  that its last reply was cut, when it was: the conversation's part of where the agent stands (the
-  work's is seon.render.ui/status)."
+  its run's, `seon.context/run-of`, when the agent raised none), beside the turn what its evals changed
+  of the branch's program (`changed`: three of five md-scan bench runs changed nothing in 40 turns and
+  could not see it), and that its last reply was cut, when it was: the conversation's part of where the
+  agent stands (the work's is seon.render.ui/status)."
   {:seon.render/style tile-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int] :any]}
   [{c :seon.ctx/ctx db :seon.db/db} aid]
   (let [;; its cap: the agent's own (raised to extend it), else its run's (the run its newest turn names, seon.context/run-of), as the turn loop reads it
@@ -1101,10 +1139,13 @@
         ;; the tokens its requests sent so far, the provider's counts summed (each request the whole context then)
         sent (d/q '[:find (sum ?k) . :with ?m :in $ ?a :where [?t :seon.turn/agent ?a] [?m :seon.model-call/turn ?t] [?m :seon.model-call/tokens ?k]] db aid)
         ;; the namespace the REPL is in: the one its newest eval left it in
-        in-ns (context/current-ns c)]
+        in-ns (context/current-ns c)
+        ;; what its evals changed of the branch's program
+        ch (changed c)]
     ;; a part: the page draws it by run-html, the model is sent the value (docs/render.md#a-part-answers-data); this
     ;; turn's number (its record is written before its page is drawn), of the cap, and a cut reply
     (with-meta (cond-> {:turn (if cap (str n " of " cap) n)}
+                 (seq ch) (assoc :changed ch)
                  in-ns (assoc :ns in-ns)
                  sent (assoc :tokens-sent sent)
                  (some-> (:turns c) vals first ratom/realize :seon.turn/truncated)
@@ -1115,9 +1156,10 @@
   "The run as the page shows it (the declared html render of :seon.context/run; the model is sent the
   value): its turn of its cap, the namespace its REPL is in, the tokens it sent in all, a cut reply. See docs/render.md#a-part-answers-data."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
-  [_opts {:keys [turn ns tokens-sent your-last-reply]}]
+  [_opts {:keys [turn changed ns tokens-sent your-last-reply]}]
   [:section
-   [:p (str "turn " turn (when ns (str " · in " ns)) (when tokens-sent (str " · " (print/tokens-text tokens-sent) " sent in all")))]
+   [:p (str "turn " turn (when (seq changed) (str " · " (count changed) (if (next changed) " changes" " change")))
+            (when ns (str " · in " ns)) (when tokens-sent (str " · " (print/tokens-text tokens-sent) " sent in all")))]
    (when your-last-reply [:p {:class "err"} (str "your last reply was " your-last-reply)])])
 
 (defn own-problems

@@ -86,13 +86,26 @@
             :let [w (k tpl/instructions)
                   ;; (2026-10-29: the premise step applies to a fix only, and a proof written already is the
                   ;; task's: the agent writes only those its status lists with no source)
-                  steps ["first reproduce it in one eval" "if the output is already right" "(my.task/fail! "
+                  steps ["their failures are the reproduction" "first reproduce it in one eval" "if the output is already right" "(my.task/fail! "
                          "once the output is wrong, stop reading" "with its source is written already" "with no source as a deftest beside the"
                          "(my.agent/tests-reaching 'ns/f)" "never the live db" "register it" "run it red" "(my.agent/prove)" "make it pass"]]]
       (is (every? #(str/includes? w %) steps) (str k ": each step is in the instructions"))
       (is (= steps (sort-by #(or (str/index-of w %) -1) steps)) (str k ": in that order: reproduce, fail! or stop reading, the deftest, red, green")))
     (is (= [:design :implement :merge] (mapv :seon.task/kind (tpl/stages d))) "the staged choice still makes its tasks")
     (is (seq (task/create-tx (ts/test-db) ds)) "a valid task set")))
+
+;; task seon.context/an-agent-follows-its-instructions-to-green, item 1: the md-scan bench's agents read
+;; "reproduce first, fail at once" beside red proofs shown with their source, and redefined a 250-line scan
+;; whole; B1, the green run, changed first, by edit!, and checked each change with the proof's expression
+(deftest red-proofs-with-their-source-are-the-reproduction
+  (doseq [k [:whole :work]
+          :let [w (k tpl/instructions)
+                at #(or (str/index-of w %) -1)]]
+    (is (str/includes? w "When your status shows red proofs with their source, their failures are the reproduction") (str k ": red proofs are the reproduction"))
+    (is (< (at "make the first change") (at "first reproduce it in one eval")) (str k ": the change before any reproduction"))
+    (is (str/includes? w "Only when the plan says something is wrong and your status shows no failing proof, first reproduce it") (str k ": a reproduction only with no failing proof"))
+    (is (str/includes? w "a short definition, evaluate it whole; a long one, replace the part that changes (``(seon.repl/edit! ") (str k ": edit! by the definition's size"))
+    (is (str/includes? w "Check each change with the proof's own expression") (str k ": each change checked by the proof's expression"))))
 
 (deftest a-request-is-one-whole-task-one-agent-works-through
   ;; owner, 2026-10-26: "build a do everything in one go task", then the default: a request is one
