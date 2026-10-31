@@ -661,12 +661,19 @@
   what it reads is unchanged, so it says no more). The md-scan
   and fence benches' agents ran one read again and again (bench-fence-1: two evals, 25 turns each), each answer
   reading as new. Kept in the agent's state as a hash of the code to the eval and a hash of its answer, so it
-  costs one lookup an eval. An agent's own evals only (root's and an inner eval's are not counted)."
+  costs one lookup an eval. An agent's own evals only (root's and an inner eval's are not
+  counted)."
   {:malli/schema [:=> [:cat :string :map] :map]}
   [code r]
   (if (and (= :agent (:mode @agent/state)) (:handle r))
     (let [k (hash (clojure.string/trim code))
-          answer (hash (select-keys r [:value :ex :out :err :forms]))
+          ;; its answer without what differs every eval, at the one place it nests: an edit!'s value is its inner eval's
+          ;; response, whose handle and cost differ each time (bench-b21's agent swapped one line of scan back and forth
+          ;; 23 times). Nothing else is walked: the agent's own data keeps its keys, and a value holding a db or a host
+          ;; object is hashed as it is, never rebuilt
+          v (:value r)
+          v (if (and (map? v) (not (record? v)) (contains? v :handle)) (dissoc v :handle :ms :ticks :bytes :fns :record) v)
+          answer (hash [v (:ex r) (:out r) (:err r) (:forms r)])
           seen (get-in @agent/state [:seen k])]
       (swap! agent/state assoc-in [:seen k] {:eval (name (:handle r)) :answer answer})
       (cond-> r

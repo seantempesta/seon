@@ -227,6 +227,21 @@
     (is (not (str/includes? (:text c) ":again")) "other code")
     (is (not (str/includes? (:text d) ":again")) "first of its code")))
 
+(deftest an-edit-swapped-back-and-forth-says-so
+  ;; bench-b21: an agent swapped one line of scan back and forth 23 times; each edit!'s answer differed only by its
+  ;; inner eval's handle and cost, so none read as answered the same
+  (let [ed (fn [a b] (str "(seon.repl/edit! 'x.swap/f " (pr-str a) " " (pr-str b) ")"))
+        [_ ab ba ab2] (at/in-agent ["(ns x.swap) (defn f [] 1)" (ed "[] 1" "[] 2") (ed "[] 2" "[] 1") (ed "[] 1" "[] 2")])]
+    (is (not (str/includes? (:text ab) ":again")) (pr-str ab))
+    (is (not (str/includes? (:text ba) ":again")) "the swap back is other code")
+    (is (str/includes? (:text ab2) "ran this code and answered the same") (str "the same edit again, answered the same but for its handle: " (:text ab2))))
+  ;; the agent's own data keeps its keys: a timing of its own that changed is a different answer
+  (let [[_ m5 m7] (at/in-agent ["(def t (atom 4))" "{:ms (swap! t inc)}" "{:ms (swap! t inc)}"])]
+    (is (not (str/includes? (:text m7) ":again")) (str "{:ms 5} then {:ms 6} is no same answer: " (:text m7))))
+  ;; an answer holding a db is printed as it was, its host object named by the form that reads it
+  (let [[_ s2] (at/in-agent ["(select-keys @seon.agent/state [:db])" "(select-keys @seon.agent/state [:db])"])]
+    (is (str/includes? (:text s2) "(get (deref seon.agent/state) :db)") (str "the db named by its form: " (:text s2)))))
+
 (deftest a-broken-parser-leaves-the-repl-answering
   ;; docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map: a DeepSeek run of md-scan gave
   ;; seon.ref/scan's emit step a new arity, and every eval it made after threw "Wrong number of args (6)", a pure
