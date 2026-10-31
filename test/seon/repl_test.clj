@@ -82,7 +82,11 @@
          (let [r (repl/edit! 'x.repl-edit/g "(+ 1 1)" "(+ 1 (inc 1)")]
            (is (= :unbalanced (:seon.repl/refused-because r)) "a delimiter the new text leaves open: refused, never repaired")
            (is (str/includes? (:seon.error/message r) "opens 1 more (") (:seon.error/message r))
+           (is (str/includes? (:seon.error/message r) "a ( left open at its line 1, \"(+ 1 (inc 1)\"") (str "and where (md-scan bench-b15): " (:seon.error/message r)))
            (is (= 2 ((resolve 'x.repl-edit/g))) "nothing changed"))
+         (let [r (repl/edit! 'x.repl-edit/g "(+ 1 1)" "(+ 1 [1)]")]
+           (is (= :unbalanced (:seon.repl/refused-because r)) (str "a ( met by ], as many of each: refused, never read as \"Unmatched delimiter\": " (pr-str r)))
+           (is (str/includes? (:seon.error/message r) "the ) at its line 1") (:seon.error/message r)))
          (let [r (repl/edit! 'x.repl-edit/g "(+ 1 1)" "(+ 1 1))")]
            (is (= :unbalanced (:seon.repl/refused-because r)) "a closer more")
            (is (str/includes? (:seon.error/message r) "closes 1 more )") (:seon.error/message r)))
@@ -96,6 +100,7 @@
          (let [r (repl/eval-string "(seon.repl/edit! 'x.repl-edit/l \"[i 0 acc 0]\" \"[i 0 acc 0 k 1]\")" {})]
            (is (str/includes? (str (get-in r [:ex :seon.error/message])) "nothing changed") (str "a partial edit that does not compile is the eval's own error: " (pr-str r)))
            (is (str/includes? (str (get-in r [:ex :seon.error/message])) "recur") "with the compiler's message")
+           (is (str/includes? (str (get-in r [:ex :seon.error/message])) "at line 1") (str "and the line it names: " (get-in r [:ex :seon.error/message])))
            (is (= 6 ((resolve 'x.repl-edit/l) 4)) "and nothing changed"))
          (let [r (repl/edit! 'x.repl-edit/l [["[i 0 acc 0]" "[i 0 acc 0 k 10]"] ["(recur (inc i) (+ acc i))" "(recur (inc i) (+ acc i) k)"] ["acc)))" "(+ acc k))))"]])]
            (is (get-in r [:edited :var]) (str "several changes, applied together and compiled once: " (pr-str r)))
