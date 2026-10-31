@@ -275,23 +275,49 @@
         r (if (pos? (:delimiters r)) (scan reply true) r)]
     (select-keys r [:text :repairs])))
 
+(defn delimiters
+  "Code text s's delimiters left unpaired, read as `balance` reads them (strings, character literals and ;
+  comments aside): :open, each opener no closer closed, [char offset], outermost first; :stray, each closer
+  with no opener open, [char offset]; :crossed, each closer of another kind than the opener it meets,
+  [closer offset opener opener-offset]. What a refused or failed edit names by line, so a slip is found where it
+  is (md-scan bench-b15's agent counted parens for 30 turns: a refused edit said how many, never where).
+  See docs/agent.md#changing-a-definition."
+  {:malli/schema [:=> [:cat :string] [:map [:open [:vector [:tuple char? nat-int?]]] [:stray [:vector [:tuple char? nat-int?]]]
+                                       [:crossed [:vector [:tuple char? nat-int? char? nat-int?]]]]]}
+  [^String s]
+  (let [n (count s) by-closer (into {} (map (fn [[o c]] [c o])) openers)]
+    (loop [i 0 in-str false stack [] stray [] crossed []]
+      (if (>= i n)
+        {:open stack :stray stray :crossed crossed}
+        (let [c (.charAt s (int i))]
+          (cond
+            in-str (cond (= c \\) (recur (+ i 2) true stack stray crossed) (= c \") (recur (inc i) false stack stray crossed) :else (recur (inc i) true stack stray crossed))
+            (= c \") (recur (inc i) true stack stray crossed)
+            (= c \\) (recur (+ i 2) false stack stray crossed)
+            (= c \;) (recur (or (some-> (str/index-of s "\n" i) inc) n) false stack stray crossed)
+            (openers c) (recur (inc i) false (conj stack [c i]) stray crossed)
+            (by-closer c) (if-let [[o oi] (peek stack)]
+                            (recur (inc i) false (pop stack) stray (if (= o (by-closer c)) crossed (conj crossed [c i o oi])))
+                            (recur (inc i) false stack (conj stray [c i]) crossed))
+            :else (recur (inc i) false stack stray crossed)))))))
+
+(defn delimiter-counts
+  "Unpaired delimiters d (as `delimiters` answers them) as a count each: how many more ( [ { were opened
+  than ) ] } closed, {\\( n \\[ n \\{ n}. See docs/agent.md#changing-a-definition."
+  {:malli/schema [:=> [:cat [:map [:open :any] [:stray :any] [:crossed :any]]] [:map-of char? :int]]}
+  [{:keys [open stray crossed]}]
+  (let [by-closer (into {} (map (fn [[o c]] [c o])) openers)]
+    (as-> {\( 0 \[ 0 \{ 0} acc
+      (reduce (fn [m [c]] (update m c inc)) acc open)
+      (reduce (fn [m [c]] (update m (by-closer c) dec)) acc stray)
+      ;; a closer of another kind closes its opener and stands for its own kind's
+      (reduce (fn [m [c _ o]] (-> m (update o inc) (update (by-closer c) dec))) acc crossed))))
+
 (defn balance
   "Code text s's delimiters as a count each: how many more ( [ { it opens than ) ] } it closes,
   {\\( n \\[ n \\{ n}, outside strings, character literals (a backslash takes the next character,
-  so `\\)` is no closer) and ; comments, as `scan` reads them. What an exact edit's old and new
-  text are compared by (seon.repl/edit!, docs/agent.md#changing-a-definition)."
+  so `\\)` is no closer) and ; comments: `delimiters`, the one scan, counted (`delimiter-counts`). See
+  docs/agent.md#changing-a-definition."
   {:malli/schema [:=> [:cat :string] [:map-of char? :int]]}
   [^String s]
-  (let [n (count s) by-closer (into {} (map (fn [[o c]] [c o])) openers)]
-    (loop [i 0 in-str false acc {\( 0 \[ 0 \{ 0}]
-      (if (>= i n)
-        acc
-        (let [c (.charAt s (int i))]
-          (cond
-            in-str (cond (= c \\) (recur (+ i 2) true acc) (= c \") (recur (inc i) false acc) :else (recur (inc i) true acc))
-            (= c \") (recur (inc i) true acc)
-            (= c \\) (recur (+ i 2) false acc)
-            (= c \;) (recur (or (some-> (str/index-of s "\n" i) inc) n) false acc)
-            (openers c) (recur (inc i) false (update acc c inc))
-            (by-closer c) (recur (inc i) false (update acc (by-closer c) dec))
-            :else (recur (inc i) false acc)))))))
+  (delimiter-counts (delimiters s)))
