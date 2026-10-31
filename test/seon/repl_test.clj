@@ -217,6 +217,16 @@
          (is (= 2 (:value (repl/eval-string "(+ 1 1)" {:prose "Adds, see seon.ref/scan."}))) "an eval with prose outside an agent")
          (finally (reset! agent/state old) (remove-ns 'x.repl-shadow)))))
 
+(deftest the-same-eval-answered-the-same-says-so
+  ;; bench-fence-1: an agent ran two reads 25 times each, every answer reading as new; the second of the same code
+  ;; answered the same names the first, and code that answers otherwise does not
+  (let [[a b c d] (at/in-agent ["(+ 1 2)" "(+ 1 2)" "(+ 2 2)" "(def n (inc (or (resolve 'n) 0))) n"])]
+    ;; what the model reads: the response's text (at/in-agent answers {:value :text})
+    (is (not (str/includes? (:text a) ":again")) (pr-str a))
+    (is (str/includes? (:text b) "e1 ran this code and answered the same") (str "the same code, the same answer: " (pr-str b)))
+    (is (not (str/includes? (:text c) ":again")) "other code")
+    (is (not (str/includes? (:text d) ":again")) "first of its code")))
+
 (deftest a-broken-parser-leaves-the-repl-answering
   ;; docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map: a DeepSeek run of md-scan gave
   ;; seon.ref/scan's emit step a new arity, and every eval it made after threw "Wrong number of args (6)", a pure

@@ -649,6 +649,25 @@
           (assoc r :record id))
       r)))
 
+(defn- again
+  "Response r of code, with :again when an earlier eval of this agent ran the same code and answered the same
+  (its value, error, output and forms): which eval, and that nothing it reads has changed since. The md-scan
+  and fence benches' agents ran one read again and again (bench-fence-1: two evals, 25 turns each), each answer
+  reading as new. Kept in the agent's state as a hash of the code to the eval and a hash of its answer, so it
+  costs one lookup an eval. An agent's own evals only (root's and an inner eval's are not counted)."
+  {:malli/schema [:=> [:cat :string :map] :map]}
+  [code r]
+  (if (and (= :agent (:mode @agent/state)) (:handle r))
+    (let [k (hash (clojure.string/trim code))
+          answer (hash (select-keys r [:value :ex :out :err :forms]))
+          seen (get-in @agent/state [:seen k])]
+      (swap! agent/state assoc-in [:seen k] {:eval (name (:handle r)) :answer answer})
+      (cond-> r
+        (= answer (:answer seen))
+        (assoc :again (str (:eval seen) " ran this code and answered the same: nothing it reads changed since. "
+                           "Run something else, or change what it reads first."))))
+    r))
+
 (defn eval-string
   "Evaluate code through the one REPL path (the handler and its middleware) and answer its one
   response (`response`) with the text its caller reads (:text, seon.print/response-text) and what its forms
@@ -670,8 +689,8 @@
          outer (:eval @agent/state)]
      (swap! agent/state assoc :eval (name handle))
      (try (let [;; with the namespace the REPL is in after it (:ns, as every nREPL response carries): the prompt
-                answered (fn [] (let [r (cond-> (repaired (response @answers handle) req)
-                                          (:ns @agent/state) (assoc :ns (ns-name (:ns @agent/state))))]
+                answered (fn [] (let [r (again code (cond-> (repaired (response @answers handle) req)
+                                                      (:ns @agent/state) (assoc :ns (ns-name (:ns @agent/state)))))]
                                   [r (print/response-text r render/model-printed)]))
                 ;; printing is inside the boundary: a value that throws as it is realized is the error
                 [r text] (try (@the-handler (assoc req "code" code :reply #(vswap! answers conj %)))
