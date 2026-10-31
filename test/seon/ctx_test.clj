@@ -713,7 +713,7 @@
           tree (:tree (ctx/build db (aid db) :b))
           c (with-meta tree {:seon.render/schema :seon.ctx/ctx :seon.render/basis {:t (:t tree) :branch :b}})
           as-agent (fn [f] (try (reset! seon.agent/state {:db db}) (f) (finally (end-agent!))))
-          rec (as-agent #(seon.repl/record-details db "@ctx" {:handle 'result/e9 :value c} {} nil))
+          rec (as-agent #(seon.repl/record-details "@ctx" {:handle 'result/e9 :value c} {} nil))
           drawn (try (reset! seon.agent/state {:db db :key k :branch :b}) (seon.repl/render-ctx) (finally (end-agent!)))
           ;; the keys it added, one component (ctx-keys) holding each key's own
           steps (some #(when (= "ctx-keys" (:id %)) %) (:units drawn))]
