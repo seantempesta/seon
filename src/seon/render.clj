@@ -261,13 +261,16 @@
 (defn- with-id
   "Hiccup hc with its root element's attributes merged with attrs: a component's key as its id and
   its render's name as its one class, in place of any class the render gave its root (its style is
-  its var's :seon.render/style: `styled`)."
+  its var's :seon.render/style: `styled`). A render that drew nothing (nil) stays nothing: no element
+  to hold it, so no part is placed for it (docs/render.md#a-part-answers-data)."
   {:malli/schema [:=> [:cat :any :map] :any]}
   [hc attrs]
-  (if (and (vector? hc) (keyword? (first hc)))
+  (cond
+    (nil? hc) nil
+    (and (vector? hc) (keyword? (first hc)))
     (let [[tag & more] hc]
       (if (map? (first more)) (into [tag (merge (first more) attrs)] (rest more)) (into [tag attrs] more)))
-    [:div attrs hc]))
+    :else [:div attrs hc]))
 
 (defn render!
   "Component [f opts & children] drawn in walk w: its marker [::child key], its output kept in w's
@@ -428,13 +431,13 @@
 
 (defn- placed
   "Walk w's components placed directly in a container of the root's output (an element with an id:
-  its list), in order, [[sel k]]: its container's selector and its key. The one prewalk of the
-  root that placed-units and placed-hiccup read."
+  its list), in order, [[sel k]]: its container's selector and its key; a component that drew nothing
+  (with-id) is placed nowhere. The one prewalk of the root that placed-units and placed-hiccup read."
   {:malli/schema [:=> [:cat :map] [:vector [:tuple :string [:vector :any]]]]}
   [w]
   (let [found (volatile! [])]
     (clojure.walk/prewalk (fn [x] (when (and (vector? x) (keyword? (first x)) (map? (second x)) (:id (second x)))
-                                    (doseq [m (tree-seq seq? seq (drop 2 x)) :when (and (vector? m) (= ::child (first m)))]
+                                    (doseq [m (tree-seq seq? seq (drop 2 x)) :when (and (vector? m) (= ::child (first m)) (some? (:out (get @(:cache w) (second m)))))]
                                       (vswap! found conj [(str "#" (:id (second x))) (second m)])))
                             x)
                           (:out (get @(:cache w) @(:out w))))
