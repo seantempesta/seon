@@ -14,7 +14,7 @@
   invents one."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.learn :as learn] [seon.doc :as doc] [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn] [seon.config :as config]
-            [seon.render :as render] [datahike.api :as d] [seon.context :as context] [seon.program :as program] [seon.print :as print] [seon.print.emit :as emit] [seon.print.select :as select] [seon.web.html :as h] [seon.reader :as reader] [seon.cost :as cost] [seon.task :as task] [seon.ctx] [seon.problems :as problems] [seon.edn :as sedn] [datahike.index.interface] [seon.ratom :as ratom] [seon.proofs :as proofs] [seon.merge :as pm] [seon.ref :as ref] [clojure.set]))
+            [seon.render :as render] [datahike.api :as d] [seon.context :as context] [seon.program :as program] [seon.print :as print] [seon.print.emit :as emit] [seon.print.select :as select] [seon.web.html :as h] [seon.reader :as reader] [seon.cost :as cost] [seon.task :as task] [seon.ctx] [seon.problems :as problems] [seon.edn :as sedn] [datahike.index.interface] [seon.ratom :as ratom] [seon.vector :as vector] [seon.db :as pdb] [seon.proofs :as proofs] [seon.merge :as pm] [seon.ref :as ref] [clojure.set]))
 
 ;;; --- small formatting helpers -------------------------------------------------
 
@@ -950,6 +950,31 @@
   (when-let [x (get-in c at)]
     (with-meta (fill c held (ratom/realize x)) {:seon.render/schema :seon.cite/cite-fact})))
 
+(defn searched
+  "One search the agent's context holds (a component over ctx and the db), drawn as one compact hiccup that the
+  page shows and the model is sent as it is: the search fact at ctx path :at, its query searched on the branch's
+  db by seon.context/search (exact words, meaning once its query has a vector, and the names it holds;
+  functions, wiki sections and schema keys, no relevance cut), its first :seon.search/k hits, each a line: its
+  name, then a function's doc's first sentence or a section's heading. A change of its query (a swap! on ctx)
+  redraws this part alone, and the model is sent what changed of it
+  (docs/render.md#the-page-is-sent-as-what-changed). claude_scratch/context-lab/FINDINGS.md: a request's search
+  ranked a changed item first in 41% of 49 tasks from Seon's history."
+  {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db] [:at [:vector :any]]]] :int :string] :any]}
+  [{c :seon.ctx/ctx db :seon.db/db at :at} _aid _k]
+  (when-let [s (some-> (get-in c at) ratom/realize)]
+    (let [q (:seon.search/query s)
+          ;; the search fact's own vector, once the pipeline has embedded its query (seon.vector's due texts)
+          e (pdb/eid db :seon.search/id (:seon.search/id s))
+          ;; k is the search's own count: the hits it asks for, no cut of what it found
+          hits (context/search db q {:kinds #{:var :section :schema} :k (or (:seon.search/k s) 10) :min 0.0}
+                               (when (and e (vector/vector-of db e)) e))]
+      [:section [:h3 (str "search: " q)]
+       (into [:ol] (for [{:keys [kind name e]} hits :when name]
+                     [:li [:code (str name)]
+                      (some->> (case kind :var (some-> (:var/doc (d/entity db [:var/name name])) ref/lead-sentence)
+                                          :section (:seon.doc/heading (d/entity db e)) nil)
+                               (str " "))]))])))
+
 (defn- held-whole
   "Where ctx c holds whole each entity the cites at paths ps joined, {e path}: the agent's task and its needs, the
   task's proofs (each held first, by the agent's and the task's patterns), a cite's own joins, then a section's below and a var's callers (cite-joins), the first
@@ -1414,6 +1439,10 @@
       (when task (list [#'task-data {} aid]
                        ;; each thing its task, its needs and the agent cite, a part each, at the depth its cite asks
                        (for [[p k held] (page-cites c)] [#'cited {:at p :held held} aid k])
+                       ;; each search its task and the agent hold, a part each, drawn on the branch's db
+                       (for [[p k] (concat (for [e (keys (get-in c [:task :searches]))] [[:task :searches e] (str "task-" e)])
+                                           (for [e (keys (get c :searches))] [[:searches e] (str "agent-" e)]))]
+                         [#'searched {:at p} aid k])
                        ;; where the code lives: each namespace the work touches, the names the task cites or its proofs call
                        [#'namespaces {} aid]
                        ;; how the work stands: the proofs, the done rule's reasons, what the branch did (one diff)
