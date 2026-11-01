@@ -6,7 +6,7 @@
   it needs with them. See docs/testing.md#testing-in-the-world."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [datahike.core] [datahike.api :as d] [seon.db :as pdb]
-            [seon.source :as source] [seon.doc :as docs] [seon.task :as task] [seon.profile :as profile]))
+            [seon.source :as source] [seon.doc :as doc] [seon.task :as task] [seon.profile :as profile]))
 
 (defn- empty-db
   "An empty db value with Seon's schema (seon.db/schema), in memory, keeping history when history?. See docs/testing.md#testing-in-the-world."
@@ -37,7 +37,7 @@
   citations (seon.doc/load-tx). Example: (my.test/page \"docs/x.md\" \"# X\\n\\nSee app.calc/add.\") See docs/testing.md#testing-in-the-world."
   {:malli/schema [:=> [:cat :string :string] :seon.host/fn]}
   [path text]
-  (fn [db] (docs/load-tx db "docs" {path text})))
+  (fn [db] (doc/load-tx db "docs" {path text})))
 
 (defn task
   "A fixture: a held task named nsym/tname with its plan and proofs, and the tasks it needs, by id

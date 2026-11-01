@@ -34,7 +34,7 @@
   derived classes, which read the program's names once (a set): their cost follows the
   citations (seon.problems-test/dead-citations-follow-the-citations)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.print.emit :as emit] [datahike.api :as d] [clojure.string :as str] [clojure.set :as set] [seon.merge :as pm] [seon.source :as source] [seon.ref :as ref] [seon.program :as program] [seon.db :as pdb] [seon.doc :as docs] [seon.task :as task] [seon.config :as config]))
+  (:require [seon.contract :as contract :refer [defn defn-]] [seon.print.emit :as emit] [datahike.api :as d] [clojure.string :as str] [clojure.set :as set] [seon.merge :as pm] [seon.source :as source] [seon.ref :as ref] [seon.program :as program] [seon.db :as pdb] [seon.doc :as doc] [seon.task :as task] [seon.config :as config]))
 
 (def counted-classes [:platform :eval :agent :effect])
 (def ^:private death-statuses task/failed)
@@ -290,7 +290,7 @@
                     (into {} (map (juxt :e :tx)) (d/datoms db :aevt :seon.doc/reviewed)))
          ;; a contract or docstring changes only with its form's text, so only a recorded name whose
          ;; form moved has its history read
-         now-form (if only (docs/read-map db (into #{} (mapcat (comp keys :v)) reads)) (current-forms db))
+         now-form (if only (doc/read-map db (into #{} (mapcat (comp keys :v)) reads)) (current-forms db))
          hist (d/history db)]
      (vec (concat
             (for [{:keys [e v tx]} reads

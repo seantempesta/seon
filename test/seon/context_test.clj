@@ -4,7 +4,7 @@
   proof is not shown again, a merge task's plan stays its own."
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]] [datahike.api :as d]
             [seon.db :as pdb] [seon.vector :as vector] [seon.task :as task] [seon.context :as context] [seon.print :as print]
-            [seon.doc-test] [seon.reader :as reader] [seon.proofs :as proofs] [seon.agent :as agent] [seon.doc :as docs] [seon.judge] [seon.ctx :as ctx] [seon.render :as render] [seon.render.ui] [seon.web.html]
+            [seon.doc-test] [seon.reader :as reader] [seon.proofs :as proofs] [seon.agent :as agent] [seon.doc :as doc] [seon.judge] [seon.ctx :as ctx] [seon.render :as render] [seon.render.ui] [seon.web.html]
             [seon.print.select :as select] [clojure.string :as str] [seon.edn] [seon.print-test :as print-test] [seon.repl :as repl] [seon.model]))
 
 (defn- ns-fact
@@ -54,7 +54,7 @@
 (defn- wiki!
   "The checkout's wiki into conn, as root's boot loads it (seon.root/start!): the help page
   every render reads is a page of it."
-  [conn] (d/transact conn (docs/load-tx @conn "docs" (docs/pages (seon.config/checkout) "docs"))))
+  [conn] (d/transact conn (doc/load-tx @conn "docs" (doc/pages (seon.config/checkout) "docs"))))
 
 (deftest each-thing-is-said-once
   (let [db (db-with-program)
@@ -279,7 +279,7 @@
   ;; task seon.doc/a-task-cites-what-it-needs: a section the plan cites reaches the
   ;; context at the depth its delimiter asks for, read from the sections main holds
   (let [db (db-with-program)
-        db (d/db-with db (docs/load-tx db "docs" {"docs/flow.md" wiki-page}))
+        db (d/db-with db (doc/load-tx db "docs" {"docs/flow.md" wiki-page}))
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "f"
                                                :seon.task/plan "Read `docs/flow.md#step`, and ```docs/flow.md#stop``` whole."
                                                :seon.task/proofs #{'demo-test/f-test}}]))
@@ -446,7 +446,7 @@
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "d"
                                                :seon.task/plan "Build on ctx-depth/sq, `ctx-depth/cube` and ```ctx-depth/tri```."
                                                :seon.task/proofs #{'demo-test/f-test}}]))
-        ;; the rule lives in docs/resolve-ref (the task's data shows its write set's vars whole: their source)
+        ;; the rule lives in doc/resolve-ref (the task's data shows its write set's vars whole: their source)
         by (into {} (for [r (seon.ref/references db (:seon.task/plan (task/task db "demo/d")))]
                       [(:seon.ref/name r) (seon.doc/resolve-ref db (:seon.ref/name r) (:seon.ref/depth r))]))]
     (is (= {:symbol 'ctx-depth/sq :arglists '([x]) :summary "Squares x."} (by 'ctx-depth/sq)) "bare: arglists and the first sentence")
@@ -686,7 +686,7 @@
   (ts/test-branch!
     (fn [_ conn]
       ;; only the system prompt every request opens with (seon.context/system-page), not the checkout's wiki
-      (d/transact conn (docs/load-tx @conn "docs" {context/system-page (slurp (str (seon.config/checkout) "/" context/system-page))}))
+      (d/transact conn (doc/load-tx @conn "docs" {context/system-page (slurp (str (seon.config/checkout) "/" context/system-page))}))
       (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "g" :seon.task/plan "Make g."
                                                :seon.task/proofs #{'demo-test/g-test}}]))
       (d/transact conn [{:seon.run/id "demo/g#1" :seon.run/task [:seon.task/id "demo/g"] :seon.run/agent {:seon.agent/key "b/a1" :seon.agent/task {:seon.task/id "demo/g"}}}])
@@ -1092,7 +1092,7 @@
   (is (= '([& body]) (seon.reader/arglists "(defmacro m [& body] `(do ~@body))" 'demo)) "a macro's")
   (is (nil? (seon.reader/arglists "(def x 1)" 'demo)) "no arglists: no function")
   (let [db (d/db-with (db-with-program) (program-facts '[[demo-only/h "(defn h \"Holds what the db says.\" [a b] a)" []]]))]
-    (is (= {:symbol 'demo-only/h :arglists '([a b]) :summary "Holds what the db says."} (docs/resolve-ref db 'demo-only/h :summary))
+    (is (= {:symbol 'demo-only/h :arglists '([a b]) :summary "Holds what the db says."} (doc/resolve-ref db 'demo-only/h :summary))
         "a var only the db holds: its summary from its facts")))
 
 (deftest a-pages-cited-vars-are-the-programs
@@ -1402,7 +1402,7 @@
   (ts/test-branch!
     (fn [_ conn]
       ;; the wiki, which holds the system prompt every request opens with
-      (d/transact conn (docs/load-tx @conn "docs" (docs/pages (seon.config/checkout) "docs")))
+      (d/transact conn (doc/load-tx @conn "docs" (doc/pages (seon.config/checkout) "docs")))
       (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "g" :seon.task/plan "Make g." :seon.task/proofs #{'demo-test/g-test}}]))
       (d/transact conn [{:seon.run/id "demo/g#1" :seon.run/task [:seon.task/id "demo/g"] :seon.run/agent {:seon.agent/key "b/a1" :seon.agent/task {:seon.task/id "demo/g"}}}])
       (let [basis (fn [i] {:commit (d/commit-id @conn) :task "demo/g" :run "demo/g#1" :turn i :max-turns 9 :origin :model :agent "b/a1"})

@@ -29,7 +29,7 @@
   arrives in and nothing after it. Seon's platform ops (tests, stats, clone,
   messages, writes) are {:op k} values, handled by `agent-step`."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn- defchecked]] [seon.error :as err] [jolt.nrepl :as nrepl] [seon.intr :as intr] [seon.reader :as reader] [seon.doc :as docs] [seon.agent :as agent] [seon.contract :as contract] [my.db] [my.agent] [my.schema] [malli.registry :as mr]
+  (:require [seon.contract :refer [defn defn- defchecked]] [seon.error :as err] [jolt.nrepl :as nrepl] [seon.intr :as intr] [seon.reader :as reader] [seon.doc :as doc] [seon.agent :as agent] [seon.contract :as contract] [my.db] [my.agent] [my.schema] [malli.registry :as mr]
             [seon.program :as program] [jolt.analyzer] [seon.lib :as lib] [seon.print :as print] [seon.print.select :as select] [seon.render :as render] [seon.context :as context] [seon.ctx :as ctx] [seon.web.html :as h] [seon.profile :as profile] [seon.sock :as sock] [seon.step :as step] [clojure.core.async :as a] [clojure.core.async.flow :as flow]
             [jolt.ffi :as ffi] [seon.config :as cfg] [clojure.test] [datahike.api :as d] [seon.db :as pdb] [seon.edn :as sedn]))
 
@@ -815,13 +815,13 @@
   ([sym old new] (edit! sym [[old new]]))
   ([sym changes]
    (let [doc? (string? sym)
-         src (if doc? (docs/doc-source (agent/db) sym) (my.agent/source-fn sym))
+         src (if doc? (doc/doc-source (agent/db) sym) (my.agent/source-fn sym))
          n (count changes)
          ;; which change a refused edit names, when there are several
          which (fn [k] (if (< 1 n) (str "change " (inc k) " of " n ": ") ""))
          refuse (fn [why msg lines] (contract/error :seon.repl/edit-refused #'edit! (str sym ": " msg)
                                                     (cond-> {:seon.repl/var sym :seon.repl/refused-because why} (seq lines) (assoc :seon.repl/lines lines))))
-         line-of (fn [i] (:at (docs/line-at src i)))
+         line-of (fn [i] (:at (doc/line-at src i)))
          lines-at (fn [at] (mapv (fn [i] (let [l (line-of i)] [l (nth (clojure.string/split-lines src) (dec l))])) at))
          ;; each change checked against the recorded source: its one offset, or why it is refused
          check (fn [k [old new]]
@@ -883,7 +883,7 @@
                  text (reduce (fn [t {:keys [at old new]}] (str (subs t 0 at) new (subs t (+ at (count old))))) src (reverse ordered))
                  ;; a doc's page is loaded again with the new text in its place; a definition is evaluated
                  r (if doc?
-                     (do (agent/transact! (docs/edit-tx (agent/db) sym text)) {})
+                     (do (agent/transact! (doc/edit-tx (agent/db) sym text)) {})
                      (eval-string text {"ns" (namespace sym) :origin :model :within (:eval @agent/state)}))
                  k (cfg/value :seon.config.agent/edit-context-lines)
                  ;; each change's first line in the new text: the lines before it in the source, moved by the earlier changes

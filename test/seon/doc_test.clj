@@ -6,7 +6,7 @@
             [clojure.string :as str]
             [datahike.api :as d]
             [seon.db :as pdb]
-            [seon.doc :as docs] [seon.root] [seon.config] [seon.source] [seon.fx] [seon.ref] [seon.problems :as problems]
+            [seon.doc :as doc] [seon.root] [seon.config] [seon.source] [seon.fx] [seon.ref] [seon.problems :as problems]
             [seon.config :as config]))
 
 (defn- empty-db [] (ts/test-db))
@@ -22,35 +22,35 @@
 (defn- load-pages
   "db after loading pages (path -> text) as the demo wiki."
   [db pages]
-  (let [tx (docs/load-tx db "demo" pages)]
+  (let [tx (doc/load-tx db "demo" pages)]
     (is (vector? tx))
     (d/db-with db tx)))
 
 (deftest an-unchanged-page-writes-nothing
   (let [db (load-pages (empty-db) pages)]
-    (is (= "Count messages, with `app.m0/f1`." (:seon.ref/text (docs/view db "demo/flow.md#quiet" :code)))
+    (is (= "Count messages, with `app.m0/f1`." (:seon.ref/text (doc/view db "demo/flow.md#quiet" :code)))
         "the first load wrote each section")
-    (is (some #{"demo/flow.md#idioms"} (map :seon.ref/address (:seon.ref/below (docs/view db "demo/flow.md#flow" :doc)))) "a section is below its parent")
-    (is (= [] (docs/load-tx db "demo" pages)) "loading the same pages again writes nothing")))
+    (is (some #{"demo/flow.md#idioms"} (map :seon.ref/address (:seon.ref/below (doc/view db "demo/flow.md#flow" :doc)))) "a section is below its parent")
+    (is (= [] (doc/load-tx db "demo" pages)) "loading the same pages again writes nothing")))
 
 (deftest a-changed-section-rewrites-only-itself
   (let [db (load-pages (empty-db) pages)
         quiet (:db/id (d/pull db [:db/id] [:seon.doc/address "demo/flow.md#quiet"]))
         edited (assoc pages "demo/flow.md" (str/replace flow "Count messages" "Count every message"))
-        tx (docs/load-tx db "demo" edited)]
+        tx (doc/load-tx db "demo" edited)]
     (is (seq tx) "the changed section is written")
     (is (= #{quiet} (into #{} (map #(if (map? %) (:db/id %) (second %))) tx))
         "the load states only the changed section")
     (is (= "Count every message, with `app.m0/f1`."
-           (:seon.ref/text (docs/view (d/db-with db tx) "demo/flow.md#quiet" :code))))))
+           (:seon.ref/text (doc/view (d/db-with db tx) "demo/flow.md#quiet" :code))))))
 
 ;; docs/references.md#the-wiki-in-the-store: md-scan 29's agent added a row to one page with load-tx and its branch lost
 ;; the other 33 pages (556 sections), so the system prompt read nil and two turns threw
 (deftest a-load-of-one-page-leaves-the-others
   (let [db (load-pages (empty-db) pages)
         edited {"demo/flow.md" (str/replace flow "Count messages" "Count every message")}
-        db' (d/db-with db (docs/load-tx db "demo" edited))]
-    (is (= "Count every message, with `app.m0/f1`." (:seon.ref/text (docs/view db' "demo/flow.md#quiet" :code))) "the page given is loaded")
+        db' (d/db-with db (doc/load-tx db "demo" edited))]
+    (is (= "Count every message, with `app.m0/f1`." (:seon.ref/text (doc/view db' "demo/flow.md#quiet" :code))) "the page given is loaded")
     (is (= #{"demo/async.md#async" "demo/async.md#waiting"}
            (set (filter #(str/starts-with? % "demo/async.md") (map :v (d/datoms db' :avet :seon.doc/address)))))
         "a page not given keeps every section")))
@@ -65,8 +65,8 @@
         "the link is kept on the section that makes it")
     (is (= [["demo/async.md#waiting" "demo/flow.md#nowhere" "demo/async.md#waiting links to demo/flow.md#nowhere, which is no section"]]
            (mapv (juxt :section :target :message) (dead db))) "and is exactly one dead citation, naming page, section and target")
-    (is (empty? (docs/load-tx db "demo" broken)) "an unchanged wiki writes nothing")
-    (let [fixed (d/db-with db (docs/load-tx db "demo" (assoc broken "demo/flow.md" (str flow "\n## Nowhere\n\nNow it exists.\n"))))]
+    (is (empty? (doc/load-tx db "demo" broken)) "an unchanged wiki writes nothing")
+    (let [fixed (d/db-with db (doc/load-tx db "demo" (assoc broken "demo/flow.md" (str flow "\n## Nowhere\n\nNow it exists.\n"))))]
       (is (empty? (dead fixed)) "the target section is added: the dead citation closes, and nothing was written to close it"))))
 
 (defn- backlinks
@@ -94,8 +94,8 @@
   ;; a section by its address and lead's first sentence, a var by its name
   (let [quiet "# Quiet\n\nQuiet is the absence of messages.\n\n## Counting\n\nCount as the [idiom](flow.md#idioms) does, by `app.m0/f0`.\n"
         db (load-pages (empty-db) (assoc pages "demo/quiet.md" quiet))
-        idioms (docs/view db "demo/flow.md#idioms" :summary)
-        counting (docs/view db "demo/quiet.md#counting" :summary)]
+        idioms (doc/view db "demo/flow.md#idioms" :summary)
+        counting (doc/view db "demo/quiet.md#counting" :summary)]
     (is (= ["demo/async.md#waiting" "demo/quiet.md#counting"] (mapv :seon.ref/address (:seon.ref/cited-by idioms)))
         "who cites it, from the stored edges")
     (is (= "Count as the [idiom](flow.md#idioms) does, by `app.m0/f0`."
@@ -104,26 +104,26 @@
         "what it cites, a section and a var")
     (is (= "Park on a channel, as ```app.m0/f0``` does."
            (:seon.ref/summary (second (:seon.ref/references counting)))))
-    (is (not (contains? (docs/view db "demo/flow.md#quiet" :summary) :seon.ref/cited-by)) "an edge-less section lists none")
-    (is (= (:seon.ref/references counting) (:seon.ref/references (docs/view db "demo/quiet.md#counting" :code))) "at every depth")))
+    (is (not (contains? (doc/view db "demo/flow.md#quiet" :summary) :seon.ref/cited-by)) "an edge-less section lists none")
+    (is (= (:seon.ref/references counting) (:seon.ref/references (doc/view db "demo/quiet.md#counting" :code))) "at every depth")))
 
 (deftest a-page-reads-at-a-depth
   (let [db (load-pages (empty-db) pages)
-        summary (docs/page db "demo/flow.md" :summary)
-        code (docs/page db "demo/flow.md" :code)]
+        summary (doc/page db "demo/flow.md" :summary)
+        code (doc/page db "demo/flow.md" :code)]
     (is (= ["demo/flow.md#flow" "demo/flow.md#idioms" "demo/flow.md#quiet"] (mapv :seon.ref/address summary)))
     (is (= [1 2 2] (mapv :seon.ref/level summary)))
-    (is (= (mapv #(docs/view db (:seon.ref/address %) :summary) summary) (mapv #(dissoc % :seon.ref/level) summary))
+    (is (= (mapv #(doc/view db (:seon.ref/address %) :summary) summary) (mapv #(dissoc % :seon.ref/level) summary))
         "each section is its view at that depth")
     (is (= "Park on a channel, as ```app.m0/f0``` does." (:seon.ref/text (second code))))
     (is (not-any? :seon.ref/text summary))
-    (is (nil? (docs/page db "demo/none.md" :summary)))))
+    (is (nil? (doc/page db "demo/none.md" :summary)))))
 
 (deftest every-section-of-the-wiki-has-a-lead
   ;; docs/README.md: every section leads with one sentence that stands alone; the list is read from the
   ;; real wiki as main holds it (the archived paper dogfood/docs-audit.md (git history) found 54 of 364 without)
   (let [db0 (empty-db)
-        db (d/db-with db0 (docs/load-dir-tx db0 (config/checkout) "docs"))]
+        db (d/db-with db0 (doc/load-dir-tx db0 (config/checkout) "docs"))]
     (is (< 300 (count (d/datoms db :aevt :seon.doc/address))) "the real wiki is read")
     (is (= [] (mapv :section (get-in (problems/health db) [:classes :leadless-section :rows]))) "no section lacks a lead")))
 
@@ -134,15 +134,15 @@
   (let [db0 (empty-db)
         co (config/checkout)
         dirs (config/value :seon.config.root/wiki-dirs)
-        db (d/db-with db0 (docs/load-dir-tx db0 co dirs))
-        files (into {} (for [dir dirs [p t] (docs/pages co dir)] [p t]))]
+        db (d/db-with db0 (doc/load-dir-tx db0 co dirs))
+        files (into {} (for [dir dirs [p t] (doc/pages co dir)] [p t]))]
     (is (< 30 (count files)) "the real wiki is read")
     ;; a page that does not draw back names where it first differs: the file's text there and the drawn
-    (is (= {} (into {} (for [[p t] (sort files) :let [m (docs/markdown db p)] :when (not= t m)
+    (is (= {} (into {} (for [[p t] (sort files) :let [m (doc/markdown db p)] :when (not= t m)
                              :let [i (or (first (keep-indexed (fn [i [a b]] (when (not= a b) i)) (map vector t m))) (min (count t) (count m)))]]
                          [p {:at i :file (subs t (max 0 (- i 60)) (min (count t) (+ i 60))) :drawn (subs m (max 0 (- i 60)) (min (count m) (+ i 60)))}])))
         "every page draws back as its file")
-    (is (nil? (docs/markdown db "docs/none.md")) "a page the store holds no doc of is none")))
+    (is (nil? (doc/markdown db "docs/none.md")) "a page the store holds no doc of is none")))
 
 (deftest one-address-shows-one-text-through-ref-and-docs
   ;; research row 15: a section's text at code depth is its own text, the lines after its
@@ -155,8 +155,8 @@
              "demo/flow.md#quiet" "Count messages, with `app.m0/f1`."}]
     (doseq [[a text] own]
       (is (= text (:seon.ref/text (seon.ref/view doc a :code))) (str "ref: " a))
-      (is (= text (:seon.ref/text (docs/view db a :code))) (str "docs: " a)))
-    (is (= ["demo/flow.md#idioms" "demo/flow.md#quiet"] (mapv :seon.ref/address (:seon.ref/below (docs/view db "demo/flow.md#flow" :code))))
+      (is (= text (:seon.ref/text (doc/view db a :code))) (str "docs: " a)))
+    (is (= ["demo/flow.md#idioms" "demo/flow.md#quiet"] (mapv :seon.ref/address (:seon.ref/below (doc/view db "demo/flow.md#flow" :code))))
         "the sections below by address, not inline")))
 
 ;; ---- names are Clojure's words (task seon.doc/names-are-clojures-words) ----------------
@@ -420,13 +420,13 @@
   ;; of the dirs (the boot used to load each dir twice for it), and a reload of the same pages writes nothing
   (let [db (ts/test-db)
         pages {"demo/a.md" "# A\n\nSee [b](../other/b.md#b).\n" "other/b.md" "# B\n\nIt is the target.\n"}
-        tx (docs/load-tx db ["demo" "other"] pages)
+        tx (doc/load-tx db ["demo" "other"] pages)
         db' (d/db-with db tx)]
     (is (not-any? #(and (map? %) (:seon.doc/dead-links %)) tx) "the link reaches the section of the other dir")
     (is (= 1 (count (:seon.doc/references (d/pull db' [{:seon.doc/references [:seon.doc/address]}] [:seon.doc/address "demo/a.md#a"]))))
         "and is stored as a reference")
-    (is (= [] (docs/load-tx db' ["demo" "other"] pages)) "an unchanged wiki writes nothing")
-    (is (seq (docs/load-tx db' ["demo" "other"] (dissoc pages "other/b.md"))) "a page gone retracts its sections under the other dir")))
+    (is (= [] (doc/load-tx db' ["demo" "other"] pages)) "an unchanged wiki writes nothing")
+    (is (seq (doc/load-tx db' ["demo" "other"] (dissoc pages "other/b.md"))) "a page gone retracts its sections under the other dir")))
 
 (deftest a-boot-whose-wiki-digest-is-recorded-loads-nothing
   ;; docs/root.md#boot: the digest of what the load reads (the pages, the program, the task ids) rides on root's

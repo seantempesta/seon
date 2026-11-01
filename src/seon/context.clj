@@ -9,7 +9,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [datahike.api :as d] [seon.render :as render]
             [seon.task :as task] [seon.db :as pdb] [seon.merge :as pm]
-            [seon.print :as print] [seon.print.select :as select] [seon.ref :as ref] [seon.doc :as docs] [seon.config :as cfg] [seon.vector :as vector] [seon.ctx :as ctx] [seon.ratom :as ratom] [seon.agent :as agent] [seon.program :as program] [seon.proofs :as proofs] [seon.problems :as problems] [seon.reconcile :as r] [seon.edn :as sedn] [clojure.edn] [hasch.core :as hasch]))
+            [seon.print :as print] [seon.print.select :as select] [seon.ref :as ref] [seon.doc :as doc] [seon.config :as cfg] [seon.vector :as vector] [seon.ctx :as ctx] [seon.ratom :as ratom] [seon.agent :as agent] [seon.program :as program] [seon.proofs :as proofs] [seon.problems :as problems] [seon.reconcile :as r] [seon.edn :as sedn] [clojure.edn] [hasch.core :as hasch]))
 
 (def help-page
   "The help page, docs/agent.md: what my.agent/help answers, each section on demand. Main holds
@@ -20,7 +20,7 @@
   "The help page as db holds it (seon.doc/page-text). A db without it (no root booted on it) is
   refused by this contract, never answered empty."
   {:malli/schema [:=> [:cat :seon.host/db] :string]}
-  [db] (docs/page-text db help-page))
+  [db] (doc/page-text db help-page))
 
 (def system-page
   "The system prompt, docs/prompt.md: what every agent reads first (its system message, the same
@@ -33,7 +33,7 @@
   "The system prompt as db holds it (seon.doc/page-text): a turn's, at the commit it read. A db
   without it is refused by this contract, never answered empty."
   {:malli/schema [:=> [:cat :seon.host/db] :string]}
-  [db] (docs/page-text db system-page))
+  [db] (doc/page-text db system-page))
 
 (defn failure
   "A failing assertion as the agent reads it (the test AI render): the assertion as written
@@ -73,7 +73,7 @@
              :let [v (d/entity db [:var/name q])]
              :when (and v (not= :test (:var/kind v)))]
          (cond-> {:var q}
-           (= (namespace p) (namespace q)) (merge (some->> (docs/source-of db q) print/code (hash-map :source)))))))
+           (= (namespace p) (namespace q)) (merge (some->> (doc/source-of db q) print/code (hash-map :source)))))))
 
 (defn- refused
   "The done rule's reasons as the agent reads them, beyond its own red proofs (shown with
@@ -139,7 +139,7 @@
   (let [at (min at (count text))
         start (if (pos? at) (inc (or (str/last-index-of text "\n" (dec at)) -1)) 0)
         end (or (str/index-of text "\n" at) (count text))]
-    {:line (:at (docs/line-at text start)) :column (inc (- at start))
+    {:line (:at (doc/line-at text start)) :column (inc (- at start))
      :text (subs text start end)}))
 
 (defn repaired
@@ -357,7 +357,7 @@
         rare (fn [e] (/ (inc rarity-cap) (inc (min rarity-cap (or (counted e) (degree db names e rarity-cap))))))
         weights (cfg/value :seon.config.render/relevance-weights)
         knots (cfg/value :seon.config.render/relevance-calibration)
-        qs (set (docs/terms text))
+        qs (set (doc/terms text))
         centroid (when (seq touched)
                    (let [vs (keep #(vector/vector-of db %) touched)]
                      (when (seq vs)
@@ -373,7 +373,7 @@
                        []
                        (let [w (weights kind)
                              zc (z (if qv (vector/scores db qv pool) (repeat (count pool) nil)))
-                             zb (z (let [fs (mapv #(frequencies (docs/terms (item-text db %))) pool)] (docs/bm25 qs fs (mapv #(reduce + 0 (vals %)) fs))))
+                             zb (z (let [fs (mapv #(frequencies (doc/terms (item-text db %))) pool)] (doc/bm25 qs fs (mapv #(reduce + 0 (vals %)) fs))))
                              zt (z (if centroid (vector/scores db centroid pool) (repeat (count pool) nil)))]
                          (->> (map (fn [e c b t]
                                      (let [l (+ (:intercept w) (* (:zc w) c) (* (:zb w) b) (* (:zt w) t)
@@ -461,7 +461,7 @@
         minimum (or minimum (cfg/value :seon.config.render/relevance-summary))
         text (str q)
         in-ns? (fn [[kind n]] (or (not (#{:var :test} kind)) (nil? prefix) (str/starts-with? (str n) prefix)))
-        toks (if (by :text) (filterv #(in-ns? [(:kind %) (:name %)]) (docs/tokens db text kinds (cfg/value :seon.config.render/search-token-z))) [])
+        toks (if (by :text) (filterv #(in-ns? [(:kind %) (:name %)]) (doc/tokens db text kinds (cfg/value :seon.config.render/search-token-z))) [])
         known (into {} (map (fn [h] [[(:kind h) (:name h)] (select-keys h [:line :at :z])])) toks)
         n (* k (cfg/value :seon.config.render/related-near))
         ;; one ranking by meaning: each kind's nearest (near takes one attribute), merged by cosine, which
@@ -473,12 +473,12 @@
         seeds (names-in db q)
         refs (if (by :refs)
                (into [] (comp (filter in-ns?) (filter (comp kinds first)) (distinct))
-                     (concat (for [s seeds :when (symbol? s) c (docs/callers db s) :let [kd (kind-of db c)] :when (kinds kd)] [kd c])
+                     (concat (for [s seeds :when (symbol? s) c (doc/callers db s) :let [kd (kind-of db c)] :when (kinds kd)] [kd c])
                              (for [s seeds :when (symbol? s) c (map :var (callees db s)) :let [kd (kind-of db c)] :when (kinds kd)] [kd c])
                              (for [s seeds :when (symbol? s) e (d/q '[:find [?e ...] :in $ ?n :where [?e :seon.doc/names ?n]] db s) :when (kinds :section)]
                                [:section (:seon.doc/address (d/entity db e))])
                              ;; a schema key: the functions whose code or contract name it
-                             (for [s seeds :when (keyword? s) c (docs/callers db s) :let [kd (kind-of db c)] :when (kinds kd)] [kd c])))
+                             (for [s seeds :when (keyword? s) c (doc/callers db s) :let [kd (kind-of db c)] :when (kinds kd)] [kd c])))
                [])
         rankings (select-keys {:text (mapv (juxt :kind :name) toks) :meaning meaning :refs refs} (seq by))
         scores (vector/rrf-scores (vec (vals rankings)))
@@ -562,7 +562,7 @@
 (defn task-data
   "The task's data: task t's run sections as data, the same each turn of a run: the task (its
   plan as it accumulated along :needs, prerequisites first); its write set, each program var cites
-  name with its source and its callers (docs/callers), the names that resolve to nothing said
+  name with its source and its callers (doc/callers), the names that resolve to nothing said
   once; each proof to the form that runs it at the REPL, or, when it is not written, that it
   is not and what it should assert in the plan's words (whether it fails, and why, is the
   proofs part's: it changes each turn); the wiki sections and the tasks cites name (a task by its plan, seon.ref/task-view); the functions nearest its plan
@@ -574,7 +574,7 @@
   (let [{:keys [plan proofs]} (:seon.task/accumulated t)
         refs (program-vars db cites)
         sections (into [] (keep (fn [{a :seon.cite/address n :seon.cite/name tk :seon.cite/task d :seon.cite/depth}]
-                                  (cond a (docs/view db a d) tk (ref/task-view db n d)))) cites)
+                                  (cond a (doc/view db a d) tk (ref/task-view db n d)))) cites)
         near (similar db (some->> (:seon.task/id t) (pdb/eid db :seon.task/id)) (into (set proofs) refs))]
     (cond-> {:task (assoc (select-keys t [:seon.task/id :seon.task/kind :seon.task/instructions])
                           :seon.task/plan plan)
@@ -587,20 +587,20 @@
              ;; (the turn sections' :proofs are each turn's statuses; these are how to run them)
              :to-prove (into (sorted-map-by #(compare (str %1) (str %2)))
                              (for [p proofs]
-                               [p (if (docs/source-of db p)
+                               [p (if (doc/source-of db p)
                                     (list 'my.agent/prove #{p})
                                     (not-written p plan))]))}
       (seq sections) (assoc :sections sections)
       near (assoc :similar near))))
 
 (defn cited
-  "Var v as the task's page shows it: its source and its callers (docs/callers), or that it
+  "Var v as the task's page shows it: its source and its callers (doc/callers), or that it
   resolves to nothing."
   {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] :map]}
   [db v]
-  (let [r (docs/resolve-ref db v :code)]
-    (if (:unresolved r) {:unresolved v :problem (:unresolved ref/problem-messages)} (let [secs (docs/citing-sections db v)]
-                                                (cond-> (assoc r :callers (docs/callers db v)) (seq secs) (assoc :sections secs))))))
+  (let [r (doc/resolve-ref db v :code)]
+    (if (:unresolved r) {:unresolved v :problem (:unresolved ref/problem-messages)} (let [secs (doc/citing-sections db v)]
+                                                (cond-> (assoc r :callers (doc/callers db v)) (seq secs) (assoc :sections secs))))))
 
 (defn- verdicts
   "Every test the branch db holds a verdict of (seon.proofs/result-tx: the verdict at its reach digest
@@ -701,7 +701,7 @@
                 (seq (:caused split)) (assoc :caused (set (:caused split))))
         reasons (r/done-explain input)
         reds (vec (for [[p {:keys [failures]}] vs f failures] (assoc f :test p)))
-        blockers (refused reasons reds #(docs/source-of db %) #(callees db %))]
+        blockers (refused reasons reds #(doc/source-of db %) #(callees db %))]
     (cond-> {:reasons reasons
              ;; each proof as :proved holds its var: its verdict (green :pass, red and flaky :fail, as `verdicts`), its source
              :proofs (vec (for [p (sort-by str proofs)
@@ -1041,5 +1041,5 @@
   ([db {:keys [agent] :as basis} {:keys [printed parts]}]
   (let [a (d/pull db [:db/id :seon.agent/key] [:seon.agent/key agent])
         r (request a {:db db :basis basis :help (system-text db) :printed printed :parts parts
-                      :help-ref [:section (ref/page-top db system-page) (docs/page-t db system-page)]})]
+                      :help-ref [:section (ref/page-top db system-page) (doc/page-t db system-page)]})]
     (select-keys r [:messages :sent :printed]))))

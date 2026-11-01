@@ -24,7 +24,7 @@
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.query.execute] [clojure.main] [clojure.string :as str] [seon.db :as pdb] [seon.lib :as lib]
             [seon.sock :as sock] [jolt.async.remote :as remote] [konserve.jolt.fasl :as codec] [seon.fx :as fx] [seon.fork-server :as fs] [seon.agent-proc :as ap]
             [seon.writer :as writer] [seon.prove] [seon.cron] [seon.vector :as vector] [seon.source :as source] [seon.reconcile :as reconcile] [seon.system :as system] [seon.program :as program] [seon.step :as step]
-            [seon.config :as cfg] [seon.contract :as contract] [seon.print :as print] [seon.task :as task] [seon.template :as tpl] [seon.doc :as docs] [seon.error :as err] [seon.agent :as agent] [konserve.jolt.lmdb :as klmdb] [clojure.java.shell]
+            [seon.config :as cfg] [seon.contract :as contract] [seon.print :as print] [seon.task :as task] [seon.template :as tpl] [seon.doc :as doc] [seon.error :as err] [seon.agent :as agent] [konserve.jolt.lmdb :as klmdb] [clojure.java.shell]
             [clojure.core.async :as a]
             ;; the agent side, loaded here so the fork server and every agent inherit it compiled
             [seon.turn] [my.fx] [my.task] [my.turn] [my.branch] [my.doc] [clojure.core.async.flow :as flow] [clojure.test]
@@ -847,13 +847,13 @@
   answer (seon.fx/wiki-history), as root asks it through its api and a seed asks it directly."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/fn :string :string] :map]}
   [db ask checkout dir]
-  (let [plan (docs/baseline-plan db (docs/pages checkout dir))]
+  (let [plan (doc/baseline-plan db (doc/pages checkout dir))]
     (if (or (empty? plan) (not (cfg/value :seon.config.root/wiki-baseline)))
       {}
       (let [r (ask {:root checkout :sections plan})]
         (if (contract/error? r)
-          (docs/baseline-failed db plan (:seon.error/message r))
-          (docs/baseline-reads db plan (:value r)))))))
+          (doc/baseline-failed db plan (:seon.error/message r))
+          (doc/baseline-reads db plan (:value r)))))))
 
 (defn wiki-baseline
   "What each wiki section lacking a :seon.doc/read was last written against, from git (the
@@ -875,19 +875,19 @@
                   [:=> [:cat :seon.host/db :string :map] [:vector :any]]]}
   ([db checkout] (wiki-tx db checkout {}))
   ([db checkout baseline]
-   (docs/load-dir-tx db checkout (cfg/value :seon.config.root/wiki-dirs) baseline)))
+   (doc/load-dir-tx db checkout (cfg/value :seon.config.root/wiki-dirs) baseline)))
 
 (defn wiki-digest
   "The digest of what the boot's wiki load reads: the pages of the checkout's wiki dirs, the program db
   holds (seon.program/program-digest: the vars a section's names and references resolve to, and the forms
   its read ids come from), its task ids (a prose word may name a task) and the form of the doc fact the
-  load writes (:seon.doc/fact: a store written under other attributes, :seon.section/* before 2026-11-01,
+  load writes (:seon.doc/fact: a store written under other attributes, as a rename of them leaves it,
   loads again). docs/root.md#boot."
   {:malli/schema [:=> [:cat :seon.host/db :string] :string]}
   [db checkout]
   (lib/digest (str (program/program-digest db) "\n" (str/join " " (map :v (d/datoms db :avet :seon.task/id))) "\n"
-                   (pr-str (get contract/forms :seon.doc/fact)) "\n"
-                   (str/join "\n" (for [dir (cfg/value :seon.config.root/wiki-dirs) [p t] (docs/pages checkout dir)] (str p "\n" t))))))
+                   (lib/digest (sedn/encode (get contract/forms :seon.doc/fact))) "\n"
+                   (str/join "\n" (for [dir (cfg/value :seon.config.root/wiki-dirs) [p t] (doc/pages checkout dir)] (str p "\n" t))))))
 
 (defn wiki-boot-tx
   "The wiki's part of the boot fact's commit: wiki-tx, with the digest of what it read (wiki-digest) on root's

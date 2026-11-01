@@ -3,7 +3,7 @@
   section, and writes nothing."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.test-store :as ts] [my.test :as mt] [clojure.test :refer [deftest is]] [seon.contract :refer [defn defn-]]
-            [datahike.api :as d] [seon.db :as pdb] [seon.doc :as docs] [seon.cost :as cost] [seon.doc-test]))
+            [datahike.api :as d] [seon.db :as pdb] [seon.doc :as doc] [seon.cost :as cost] [seon.doc-test]))
 
 (defn- base
   "The world, and the namespace app.m0 the pages cite (f0 to f10)."
@@ -21,7 +21,7 @@
                           (apply str (str "# Page " p "\n\nPage " p " holds ten sections.\n")
                                  (for [s (range 1 (min 10 n))]
                                    (str "\n## Section " s "\n\nSection " s " parks as `app.m0/f" s "` does, see [the page](#page-" p ") and the cost in docs/references.md#cost.\n")))]))
-        tx (docs/load-tx db "demo" pages)]
+        tx (doc/load-tx db "demo" pages)]
     [(d/db-with db tx) "demo" pages]))
 
 (def ^:private reload-estimate
@@ -59,7 +59,7 @@
 
 (deftest a-view-costs-its-section-and-its-edges
   (let [[db address depth] (view-of 10)
-        v (docs/view db address depth)]
+        v (doc/view db address depth)]
     (is (= 9 (count (:seon.ref/cited-by v))) "the page's nine sections cite it: the edges the proof prices are there"))
   (cost/proof
     {:of 'seon.doc/view :input 'seon.doc-cost-test/view-of
@@ -85,7 +85,7 @@
                                    (for [i (range (quot n 4))] {:seon.task/id (str "app/t" i) :seon.task/plan (str "Plan " i (when (hit? i) " fused") ".")})
                                    (for [i (range (quot n 8))] {:schema/key (keyword "app" (str "k" i)) :schema/form (str "[:map " (when (hit? i) "fused ") i "]")}))))]
     ;; the postings are derived data, built once for a value of the store (docs/vector.md#search): the query is what is measured
-    (run! #(docs/text-index db %) (vals docs/text-attrs))
+    (run! #(doc/text-index db %) (vals doc/text-attrs))
     [db "fused" {:by #{:text :refs} :k 10} nil]))
 
 (defn tokens-input
@@ -101,7 +101,7 @@
                                  (for [i (range h)] {:seon.task/id (str "app/t" i)
                                                      :seon.task/plan (if (< i 5) "Plan of a task fused." "Plan of a task.")}))))]
     ;; the postings are derived data, built once for a value of the store (docs/vector.md#search): the query is what is measured
-    (run! #(docs/text-index db %) (vals docs/text-attrs))
+    (run! #(doc/text-index db %) (vals doc/text-attrs))
     [db "fused" #{:section :task} 0.5]))
 
 ;; See docs/vector.md#search
@@ -111,7 +111,7 @@
   ;; lacks it, so the vocabulary does not grow with n and the cost is flat. Red if tokens reads each text (a scan of the
   ;; texts: bytes and calls grow with n) or its hits are not the ten (the first assertion).
   (let [[db w kinds z] (tokens-input 40)]
-    (is (= 10 (count (docs/tokens db w kinds z))) "the ten texts holding the word are the hits"))
+    (is (= 10 (count (doc/tokens db w kinds z))) "the ten texts holding the word are the hits"))
   (cost/proof {:of 'seon.doc/tokens :input 'seon.doc-cost-test/tokens-input
                :n "texts of the kinds asked (sections and task plans), ten of them holding the word, the rest one vocabulary without it"
                :work "a scan of the index's vocabulary (the db unchanged since the index was checked: its :hash and :max-tx say so, no text is read), then the postings of the word: each text holding it scored, each hit read and named"
@@ -134,16 +134,16 @@
 (deftest a-text-index-is-built-once-for-the-value-it-reads
   (let [[db] (search-input 10)
         a :form/src]
-    (is (identical? (docs/text-index db a) (docs/text-index db a)) "a second read of the same value is the first's index")
+    (is (identical? (doc/text-index db a) (doc/text-index db a)) "a second read of the same value is the first's index")
     (let [db2 (d/db-with db [{:db/id "v" :var/name 'app/new} {:form/id "app/new (defn new [] 1)" :form/src "(defn new [] 1)" :form/defines ["v"]}])
-          ix (docs/text-index db2 a)]
-      (is (= (inc (:n (docs/text-index db a))) (:n ix)) "a changed attribute is read again: the new text is in it")
+          ix (doc/text-index db2 a)]
+      (is (= (inc (:n (doc/text-index db a))) (:n ix)) "a changed attribute is read again: the new text is in it")
       (is (some? (get-in ix [:post "new"])) "its terms are postings"))
     ;; the path search reads: a connection's value, read again with nothing written between
-    (is (identical? (docs/text-index db a) (docs/text-index (d/db-with db [{:schema/key :app/other :schema/form "[:map]"}]) a))
+    (is (identical? (doc/text-index db a) (doc/text-index (d/db-with db [{:schema/key :app/other :schema/form "[:map]"}]) a))
         "a write to another attribute moves the db, and the texts' fingerprint keeps the index")
     (ts/test-branch! (fn [_ conn]
-                       (is (identical? (docs/text-index @conn a) (docs/text-index @conn a)) "two reads of a branch's value share one index")))))
+                       (is (identical? (doc/text-index @conn a) (doc/text-index @conn a)) "two reads of a branch's value share one index")))))
 
 ;; See docs/vector.md#search
 (deftest a-text-index-costs-its-texts
@@ -184,7 +184,7 @@
                          [(str "demo/p" p ".md")
                           (apply str (str "# Page " p "\n\nPage " p " holds ten sections.\n")
                                  (for [s (range 1 11)] (str "\n## Section " s "\n\nSection " s " parks as `app.m0/f1` does.\n")))]))]
-    [(d/db-with db (docs/load-tx db "demo" pages)) 'app.m0/f1]))
+    [(d/db-with db (doc/load-tx db "demo" pages)) 'app.m0/f1]))
 
 ;; See docs/references.md#the-wiki-in-the-store
 (deftest a-cited-var-finds-its-sections-by-the-names-sections-hold

@@ -2,7 +2,7 @@
   "The wiki's functions for an agent (a section it has read again): record that you read a section
   as it is, though the code it describes changed, so it is no longer stale."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.doc :as docs] [seon.config :as cfg]))
+  (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.doc :as doc] [seon.config :as cfg]))
 
 (defn reviewed!
   "Record that who read section address (docs/x.md#heading) as it is, with the code it cites as it
@@ -15,10 +15,10 @@
   (the sha) or :commit-owed, or nil when there is no such section."
   {:malli/schema [:=> [:cat :string :string] [:maybe :map]]}
   [address who]
-  (when-let [tx (docs/reviewed-tx (agent/db) address who)]
+  (when-let [tx (doc/reviewed-tx (agent/db) address who)]
     (let [w (agent/transact! tx)
           c (agent/fx! :git {:dir (cfg/checkout) :branch (cfg/value :seon.config.source/branch) :files {} :allow-empty? true
-                             :message (docs/review-message address who)} {})]
+                             :message (doc/review-message address who)} {})]
       (if-let [sha (get-in c [:value :sha])]
         (assoc w :commit sha)
         (assoc w :commit-owed address)))))

@@ -2,7 +2,7 @@
   "Root's functions on tasks (from proto.agents.root): write desired state on main;
   the reconciler proc does the rest. Each takes root's system (seon.root/start!)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.edn :as sedn] [seon.contract :as contract :refer [defn defn-]] [seon.root :as root] [seon.task :as task] [seon.doc :as docs] [seon.problems :as problems] [clojure.java.io :as io] [clojure.string :as str] [seon.config :as config]
+  (:require [seon.edn :as sedn] [seon.contract :as contract :refer [defn defn-]] [seon.root :as root] [seon.task :as task] [seon.doc :as doc] [seon.problems :as problems] [clojure.java.io :as io] [clojure.string :as str] [seon.config :as config]
             [seon.reconcile :as reconcile] [seon.db :as pdb] [seon.template :as tpl] [seon.watch :as watch] [datahike.api :as d]
             [seon.judge :as judge] [seon.model :as model] [seon.turn :as turn] [clojure.edn :as edn] [seon.lib :as lib] [seon.fx :as fx] [seon.error :as err] [seon.source :as source] [seon.program :as program] [seon.agent]))
 
@@ -262,8 +262,8 @@
      ;; the boot's digest of the wiki no longer says what main holds: dropped, so the next boot loads
      (let [db @(:conn sys)]
        (write-declared! sys (into (when-let [e (pdb/eid db :seon.root/id :root)] [[:db.fn/retractAttribute e :seon.root/wiki]])
-                                  (docs/load-dir-tx db (config/checkout) dir (root/wiki-baseline sys (config/checkout) dir)))
-                        {:pages (count (docs/pages (config/checkout) dir))} nil)))))
+                                  (doc/load-dir-tx db (config/checkout) dir (root/wiki-baseline sys (config/checkout) dir)))
+                        {:pages (count (doc/pages (config/checkout) dir))} nil)))))
 
 (defn problems
   "Every open problem on main, by class (seon.problems/health): recorded errors counted
