@@ -13,7 +13,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.lib :as lib] [seon.repl :as repl] [seon.program :as program] [seon.db :as pdb]
             [seon.step :as step] [seon.sock :as sock] [seon.config :as cfg] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [jolt.ffi :as ffi]
-            [jolt.deps] [clojure.edn :as edn] [seon.fx :as fx] [seon.reconcile :as r] [seon.agent :as agent] [jolt.io-poller :as poller] [seon.task :as task] [seon.ctx :as ctx] [datahike.db.interface :as dbi]))
+            [jolt.deps] [clojure.edn :as edn] [seon.fx :as fx] [seon.reconcile :as r] [seon.agent :as agent] [jolt.io-poller :as poller] [seon.task :as task] [seon.ctx :as ctx] [seon.doc :as doc] [datahike.db.interface :as dbi]))
 
 (defn- reaped
   "Child pid, whose exit arrived (jolt.io-poller/exit-chan): waited for exactly, so the wait is the
@@ -77,7 +77,8 @@
 (defn evals-max-after
   "Main's highest eval number (seon.repl/evals-max) after a commit's ops (resolved [op e a v]), from
   n, its highest before: what each agent forked from here counts its evals on from, kept at the
-  cost of the commit, never by reading main's evals."
+  cost of the commit, never by reading main's evals; a commit the writer's notice does not match
+  reads them again (the :tx step). See docs/machine.md#an-agents-first-write."
   {:malli/schema [:=> [:cat nat-int? [:sequential :any]] nat-int?]}
   [n ops] (reduce (fn [n [_ _ a v]] (if (= :seon.eval/id a) (max n (or (repl/eval-number v) 0)) n)) n ops))
 
@@ -101,9 +102,13 @@
         (ctx/build db2 (pdb/eid db2 :seon.agent/key key) branch)))
     (if (= t (:warm-t st))
       st
+      ;; main's search text indexes (seon.doc/text-index), built here once and carried by each commit
+      ;; that writes no text (the :tx step), so every agent forked inherits them and its first search
+      ;; reads none of them cold (a forked agent's first grep built them: 514 MB, ~1 s)
+      (do (doseq [a (distinct (vals doc/text-attrs))] (doc/text-index db a))
       ;; main's schema registry, which each agent forked holds until it writes a schema entry
       (let [k (program/schema-changes db)]
-        (assoc st :warm-t t :schema-registry {:key k :registry (program/schema-registry k)})))))
+        (assoc st :warm-t t :schema-registry {:key k :registry (program/schema-registry k)}))))))
 
 (defn index-for-agent
   "What a forked agent is handed of st's index: {:db :index}, the db it is of being main's current
@@ -146,7 +151,15 @@
                  ;; persistent indexes), never its datoms replayed here: replaying a 42,942-datom
                  ;; import took 3.5 s, and the first fork waited behind it
                  db' (d/commit-as-db (:store st) (:commit m))
-                 st (cond-> (assoc st :db db' :evals-max (evals-max-after (:evals-max st) (:tx-data m))) (not= (:max-tx db') (:t m)) (update :mismatch inc)
+                 ;; the search's text indexes held for main carried to it when the commit wrote no text: only
+                 ;; from its parent (a commit between them, unseen here, could have written one; the next read
+                 ;; then checks the texts' fingerprint)
+                 _ (when (contains? (set (get-in db' [:meta :datahike/parents])) (d/commit-id (:db st)))
+                     (doc/carry-index! (:db st) db' (into #{} (map #(nth % 2 nil)) (:tx-data m))))
+                 st (cond-> (assoc st :db db' :evals-max (evals-max-after (:evals-max st) (:tx-data m)))
+                      ;; a commit not the one the writer said: main is read again, its eval count included, so
+                      ;; no agent forked after counts from a number a commit it never saw raised
+                      (not= (:max-tx db') (:t m)) (-> (update :mismatch inc) (assoc :evals-max (repl/evals-max db')))
                       ;; the program moved: the reach graph is brought to it at the next fork
                       (program/moves-program? (:tx-data m)) (assoc :graph-moved true :static-due true))
                  ;; main's program changed: load it here, so agents forked from now on inherit it compiled; while

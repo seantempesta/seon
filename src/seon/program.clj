@@ -1717,7 +1717,7 @@
   "The digest of what a test run of db reads (seon.prove/run-key): its program (program-digest) and
   every task's proofs and needs, which the run selects its proofs from (seon.task/accumulate), so
   registering a proof is a new run; bench-scope-5's design registered three and its prove answered
-  the run from before them, \"green: ran 0\". Cost: program-digest's, and one read of the two
+  the run from before them, \"green: ran 0\" (docs/merging.md#the-test-service). Cost: program-digest's, and one read of the two
   attributes' datoms."
   {:malli/schema [:=> [:cat :seon.host/db] :string]}
   [db]

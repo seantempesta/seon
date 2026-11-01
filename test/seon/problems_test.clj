@@ -1359,3 +1359,17 @@
                :sizes [10 30 100]}))
 
 
+
+(deftest old-word-hits-finds-each-word-a-text-uses-once
+  ;; docs/health.md#an-old-word: each text's old words, whole words (a plural too), each [key word] once, in the
+  ;; texts' order then the lines'; a text whose lowered form changes length (U+0130) is read line by line
+  (let [words [["lane" ["lane"]] ["dragon" ["dragon"]]]
+        texts [[:none "nothing here\nplanet, plane, lanemark"]
+               [:mid "first line\na Lane here\r\nand a DRAGON\r\nlane again"]
+               [:edge "lane"]
+               [:plural "two lanes, one dragons"]
+               [:empty ""]
+               [:dotted "İ a lane"]
+               [:last "x\n\ny dragon"]]]
+    (is (= [[:mid "lane"] [:mid "dragon"] [:edge "lane"] [:plural "lane"] [:plural "dragon"] [:dotted "lane"] [:last "dragon"]]
+           (seon.problems/old-word-hits texts words)))))

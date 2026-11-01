@@ -469,9 +469,8 @@
   own, line by line without the spans `old-word-span` keeps. One contracted call however many texts: a
   whole-word match is what (?<!\\w)s s?(?!\\w) matches, found by indexOf (a regex costs ~140 us a line here).
   Each text is lowered once and searched whole; only a line a spelling occurs in is cut and checked, so
-  the cost is the texts' length and the lines that hit, not a copy of every line (450 MB a whole
-  program's texts when each line was split and lowered: the commit that made it says). A text whose
-  lowered form differs in length is read line by line, by the same check. See docs/health.md#cost."
+  the cost is the texts' length and the lines that hit, not a copy of every line. A text whose lowered
+  form differs in length is read line by line, by the same check. See docs/health.md#cost."
   {:malli/schema [:=> [:cat [:sequential [:tuple :any :string]] [:sequential [:tuple :string [:vector :string]]]] [:vector [:tuple :any :string]]]}
   [texts words]
   (let [word-char? (fn [c] (let [c (int c)] (or (<= 97 c 122) (<= 48 c 57) (= c 95))))
@@ -506,24 +505,14 @@
                                                    acc)))))
                                     [] spellings)]
                   (if (seq found) (into (sorted-set) found) found)))]
-    ;; the texts searched as one: each lowered, those whose lowered form keeps its length joined by
-    ;; newlines (a line never crosses two) and each spelling found by one indexOf pass over the join
-    ;; (a call allocates ~2 KB, so one a spelling a text was ~100 MB over a program's forms), a hit's
-    ;; text found by its offset; a text whose length changes is read line by line, in its place
-    (let [texts (vec texts)
-          lows (mapv #(str/lower-case (second %)) texts)
-          same (filterv #(= (.length ^String (lows %)) (.length ^String (second (texts %)))) (range (count texts)))
-          ^String joined (str/join "\n" (map #(second (texts %)) same))
-          ^String low (str/join "\n" (map lows same))
-          starts (vec (reductions (fn [at i] (+ at (.length ^String (second (texts i))) 1)) 0 same))
-          text-at (fn [p] (loop [lo 0 hi (dec (count same))]
-                            (if (>= lo hi) lo
-                                (let [mid (quot (+ lo hi 1) 2)] (if (<= (starts mid) p) (recur mid hi) (recur lo (dec mid)))))))
-          joined-hits (for [[st e] (spans low) :let [i (same (text-at st))] hit (hits (first (texts i)) (subs joined st e) (subs low st e))] [i hit])
-          other-hits (for [i (remove (set same) (range (count texts))) :let [[k text] (texts i)]
-                           line (str/split-lines text) hit (hits k line (str/lower-case line))]
-                       [i hit])]
-      (vec (distinct (map second (sort-by first (concat joined-hits other-hits))))))))
+    ;; each text lowered once and searched whole, a line cut only where a spelling occurs; a text whose
+    ;; lowered form changes length (its offsets would not be the text's) read line by line
+    (vec (distinct (for [[k ^String text] texts
+                         :let [^String low (str/lower-case text)]
+                         hit (if (= (.length low) (.length text))
+                               (mapcat (fn [[st e]] (hits k (subs text st e) (subs low st e))) (spans low))
+                               (mapcat #(hits k % (str/lower-case %)) (str/split-lines text)))]
+                     hit)))))
 
 (defn- place-texts
   "The texts of the places named, [[kind id path] text] in old-words-in's order (vars, sections, tasks,

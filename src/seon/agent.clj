@@ -16,12 +16,12 @@
   breaks its forks; docs/failure-points.md, "Physics". Agent code calls the functions of my.db and my.agent,
   referred into its namespace. From proto/flow f2-final proto.agent (session F2)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.step :as step] [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.error :as err] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.merge :as pm] [seon.config :as cfg] [seon.reconcile :as r] [seon.vector :as vector] [seon.lib :as lib] [seon.print :as print] [seon.sock :as sock] [jolt.scheme :as scm] [clojure.test :as t]
+  (:require [seon.step :as step] [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.error :as err] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.doc :as doc] [seon.merge :as pm] [seon.config :as cfg] [seon.reconcile :as r] [seon.vector :as vector] [seon.lib :as lib] [seon.print :as print] [seon.sock :as sock] [jolt.scheme :as scm] [clojure.test :as t]
             [clojure.string :as str] [seon.program :as program] [seon.proofs :as proofs] [seon.fx :as fx] [seon.task :as task] [seon.intr :as intr] [clojure.repl]
             [malli.registry :as mr] [clojure.core.async :as a] [jolt.io-poller :as poller]))
 
 ;; One state map per agent process (this process is the agent). Fields:
-;; :id :branch :task :run (the task and run root forked it for, or nil) :fd :conn :db :base (main at the branch's merge base: as forked, then each merge-main!) :main (main's head as last read: as forked, then heard-main) :results :n :waits (seon.agent/await-reply's promises, by key) :busy (the :repl proc runs a request) :tx-seq :mode :ns :home :mismatch
+;; :id :branch :task :run (the task and run root forked it for, or nil) :db :base (main at the branch's merge base: as forked, then each merge-main!) :main (main's head as last read: as forked, then heard-main) :results :n :waits (seon.agent/await-reply's promises, by key) :busy (the :repl proc runs a request) :tx-seq :mode :ns :home :mismatch
 ;; :embedded-from (the db embed-written! last read the branch's writes up to)
 ;; :unembeddable (the entities whose text llama.cpp could not encode, as vectors-proc keeps them)
 ;; :base-graph (test-plan's reach graph of its base, keyed by the base's point (seon.db/point: commit and t, never the db), from the fork server's :graph of main: base-graph)
@@ -33,6 +33,12 @@
 ;; :tx (the last transaction transact! applied, {:db-after :tx-data}: seon.ctx patches @ctx from it: the db :db is, dropped by commit! when it moves :db)
 ;; :eval (the id of the eval running, "e5", while seon.repl/eval-string runs it: what transact! names in its tx-meta)
 (defonce state (atom nil))
+
+(defonce ^{:doc "This process's socket to root, {:fd :conn :ch}, its one reader's channel among it (intake): the
+  process's own, apart from state, so forms that replace state (a test's helper resetting it at the REPL)
+  leave the process able to answer root and reading with one reader (bench-scope-3's implement agent ran
+  seon.ctx-test's cost measure, and died on its next reply). See docs/processes.md#the-socket-and-the-agent-proc."}
+  link (atom nil))
 
 
 ;; ---- the socket to root: values in frames (root's end is a jolt.async.remote end) ------
@@ -46,7 +52,7 @@
   process, as reading its EOF does, so no caller drops it; a write the kernel refused throws
   (seon.sock/send!, docs/failure-points.md#failure-points-met-without-a-catch-the-edge-answers-data)."
   {:malli/schema [:=> [:cat :seon.wire/seon-msg] [:= true]]}
-  [m] (if (= :epipe (sock/send! (:fd @state) m)) (lib/c-exit 0) true))
+  [m] (if (= :epipe (sock/send! (:fd @link) m)) (lib/c-exit 0) true))
 
 (defn intake
   "This process's one intake: a channel of root's messages ({:op k ...}), closed at EOF or root's
@@ -57,16 +63,15 @@
   See docs/processes.md#the-socket-and-the-agent-proc."
   {:malli/schema [:=> [:cat] :seon.host/chan]}
   []
-  (let [c (:conn @state) in (:intake @state)]
-    (if (and in (identical? c (:conn in)))
-      (:ch in)
-      ;; unbuffered: the reader parks with each message until the transport takes it, so root's
-      ;; further frames wait in the socket's own buffer
-      (let [ch (a/chan)]
-        (a/io-thread (loop [] (let [m (sock/recv! c)]
-                                (if (= :eof m) (a/close! ch) (when (a/>!! ch m) (recur))))))
-        (swap! state assoc :intake {:conn c :ch ch})
-        ch))))
+  (let [{c :conn ch :ch} @link]
+    (or ch
+        ;; unbuffered: the reader parks with each message until the transport takes it, so root's
+        ;; further frames wait in the socket's own buffer
+        (let [ch (a/chan)]
+          (a/io-thread (loop [] (let [m (sock/recv! c)]
+                                  (if (= :eof m) (a/close! ch) (when (a/>!! ch m) (recur))))))
+          (swap! link assoc :ch ch)
+          ch))))
 
 (declare commit!)
 
@@ -293,7 +298,7 @@
 (defn schema-moved
   "State st without the schema registry it holds (seon.repl/branch-registry) when attrs, the attributes a
   write to :db wrote, hold a schema entry's (:schema/*): the registry is read again at the next eval."
-  {:malli/schema [:=> [:cat :map [:sequential :any]] :map]}
+  {:malli/schema [:=> [:cat :map [:set :any]] :map]}
   [st attrs] (cond-> st (some #(and (keyword? %) (= "schema" (namespace %))) attrs) (dissoc :schema-registry)))
 
 (defn transact!
@@ -310,13 +315,18 @@
                   (with-citations (db) tx-data)
                   tx-data)]
     (if (= :test (:mode @state))
-      (let [r (d/with (db) tx-data)]
-        (swap! state #(-> % (assoc :db (:db-after r) :tx (select-keys r [:db-after :tx-data])) (schema-moved (map :a (:tx-data r)))))
+      (let [r (d/with (db) tx-data) attrs (into #{} (map :a) (:tx-data r))]
+        (doc/carry-index! (:db-before r) (:db-after r) attrs)
+        (swap! state #(-> % (assoc :db (:db-after r) :tx (select-keys r [:db-after :tx-data])) (schema-moved attrs)))
         {:t (:max-tx (:db-after r)) :datoms (count (:tx-data r)) :local true})
       (let [r (dw/apply! (:store-conn @state) {:tx-data tx-data :tx-meta (pdb/tx-meta (:branch @state) (cond-> {} (:eval @state) (assoc :seon.tx/eval (:eval @state))))})]
         (when-not (map? r) (throw (ex-info (str "transact refused: " (ex-message r)) {:writer-error (ex-message r)})))
-        ;; :tx, the transaction that moved :db: what seon.ctx patches @ctx from
-        (swap! state #(-> % (assoc :db (:db-after r) :tx (select-keys r [:db-after :tx-data]) :dirty? true) (schema-moved (map :a (:tx-data r)))))
+        ;; :tx, the transaction that moved :db: what seon.ctx patches @ctx from; the search's text
+        ;; indexes and the schema registry carried past it when it wrote none of their attributes
+        (let [attrs (into #{} (map :a) (:tx-data r))]
+          ;; from the db the writer applied it to (its report's), whatever the state held
+          (doc/carry-index! (:db-before r) (:db-after r) attrs)
+          (swap! state #(-> % (assoc :db (:db-after r) :tx (select-keys r [:db-after :tx-data]) :dirty? true) (schema-moved attrs))))
         (cond-> {:t (:max-tx (:db-after r)) :datoms (count (:tx-data r))}
           (seq (:tempids r)) (assoc :tempids (into {} (filter (comp string? key)) (:tempids r))))))))
 
@@ -477,7 +487,9 @@
             ops (pdb/report->tx rep)
             errs (program/load-changes! (:db-after rep) ops)]
         ;; the merge base is now main's head: what main changed is not this branch's change
-        (swap! state #(-> % (assoc :db @conn :base (pdb/branch-base conn main-b (:branch @state))) (schema-moved (map (fn [op] (nth op 2 nil)) ops))))
+        (let [attrs (into #{} (map (fn [op] (nth op 2 nil))) ops)]
+          (doc/carry-index! head @conn attrs)
+          (swap! state #(-> % (assoc :db @conn :base (pdb/branch-base conn main-b (:branch @state))) (schema-moved attrs))))
         (send! {:op :committed :t (:max-tx @conn) :txs 1})
         (cond-> {:ok true :applied (:apply r) :conflicts (:conflicts r) :t (:max-tx @conn) :datoms (count ops)}
           (seq (:conflicts carried)) (assoc :task-conflicts (:conflicts carried))
@@ -759,7 +771,7 @@
   this agent's to run, root's :tests request arrives while it waits and the :tests proc serves
   it (seon.repl/tests-step). mode :turn (a
   turn's observation, the default) or :judge (root's judge at the run's end: its :judge request);
-  names, the tests of those namespaces only (none: all it selects)."
+  names, those tests and the tests of those namespaces only (none: all it selects)."
   {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat [:enum :turn :judge]] :map]
                   [:=> [:cat [:enum :turn :judge] [:set :symbol]] :map]]}
   ([] (prove! :turn))
@@ -912,21 +924,27 @@
               :else {:line line :held? true :status @status}))))))
 
 (defn named-tests
-  "The test vars of namespaces names on db (each var a deftest defines, :var/kind :test): what a request
-  naming them runs, beside the task's proofs, whether or not the branch changed what they reach
-  (bench-scope-1's design agent named three tests of seon.render-test on a branch that had changed nothing,
-  and four proves answered ran 0, reused 0, each test :none). See docs/agent.md#testing.
-  Cost: a seek per namespace, then its forms' definitions."
+  "The test vars names names on db (each a deftest's var, :var/kind :test): a qualified name, that test; a
+  namespace's, its tests. What a request naming them runs, beside the task's proofs, whether or not the
+  branch changed what they reach (bench-scope-1's design agent named three tests of seon.render-test on a
+  branch that had changed nothing, and four proves answered ran 0, reused 0, each test :none); a named test
+  runs alone (bench-scope-5's design named three and ran the namespace's 85, two of them red for no reason of
+  its, which held its done). See docs/agent.md#testing.
+  Cost: a seek per name, and a namespace's forms' definitions."
   {:malli/schema [:=> [:cat :seon.host/db [:set :symbol]] [:set :qualified-symbol]]}
   [db names]
-  (into #{} (for [n names :let [ne (:db/id (d/entity db [:ns/name n]))] :when ne
-                  dt (d/datoms db :avet :form/ns ne)
-                  v (:form/defines (d/entity db (:e dt)))
-                  :when (and (= :test (:var/kind v)) (= (str n) (namespace (:var/name v))))]
+  (into #{} (for [n names
+                  v (if (qualified-symbol? n)
+                      (some-> (d/entity db [:var/name n]) vector)
+                      (when-let [ne (:db/id (d/entity db [:ns/name n]))]
+                        (for [dt (d/datoms db :avet :form/ns ne) v (:form/defines (d/entity db (:e dt)))
+                              :when (and (= :test (:var/kind v)) (= (str n) (some-> (:var/name v) namespace)))]
+                          v)))
+                  :when (= :test (:var/kind v))]
               (:var/name v))))
 
 (defn run-selection
-  "What a test-plan p runs when a request names namespaces (names; none: every test it selects), as
+  "What a test-plan p runs when a request names tests or namespaces (names; none: every test it selects), as
   p with :selected and :run restricted to them. A test that reaches a process of its own (p's
   :process: a root, an agent, a fork, the binary) never runs here, named or a proof: a child forked
   from an agent has no process store to start one in (bin/test makes it), so it errored. It is left
@@ -936,7 +954,7 @@
   (seon.proofs/left-out)."
   {:malli/schema [:=> [:cat :map [:maybe [:set :symbol]] [:set :qualified-symbol]] :map]}
   [p names proofs]
-  (let [in? #(contains? names (symbol (namespace %)))
+  (let [in? #(or (contains? names %) (contains? names (symbol (namespace %))))
         p (if (seq names) (-> p (update :selected #(filterv in? %)) (update :run #(filterv in? %))) p)
         skip? (proofs/left-out (:selected p) (:process p) false #{})]
     (-> p (assoc :skipped (vec (sort-by str (filter skip? (:selected p)))))
@@ -1301,7 +1319,7 @@
         ;; idle (SCM_RIGHTS beside another writer's frames would not be atomic): this agent
         ;; says it waits, root holds its other messages until the descriptor is sent
         _ (await-reply k {:op :fd-ready :k k})
-        fd (sock/take-fd! (:conn @state))]
+        fd (sock/take-fd! (:conn @link))]
     ;; the new branch starts at this branch's committed head: what was applied commits first
     (commit!)
     (let [r (await-reply k {:op :branch-me :k k})]
@@ -1320,7 +1338,8 @@
                       (stderr-to-file! (stderr-path (pdb/agents-dir (:cfg r)) (:agent m)))
                       (let [store-conn (d/connect (assoc (:cfg r) :branch (:branch m)))]
                         ;; the task it was cloned for (a fork's sibling task, seon.server's), else its parent's
-                        (swap! state assoc :task (or (:task m) (:task @state)) :id (:agent m) :key (key-of (pdb/head store-conn (pdb/main-branch (:cfg r))) (:agent m)) :branch (:branch m) :fd fd :conn (sock/conn fd) :mode :agent :tx-seq 0
+                        (reset! link {:fd fd :conn (sock/conn fd)})
+                        (swap! state assoc :task (or (:task m) (:task @state)) :id (:agent m) :key (key-of (pdb/head store-conn (pdb/main-branch (:cfg r))) (:agent m)) :branch (:branch m) :mode :agent :tx-seq 0
                                :fx-pending {} :waits {}
                                :store-conn store-conn :db @store-conn))
                       (let [unwatched (sock/signal-at-input! fd)]
@@ -1421,7 +1440,7 @@
         _ (mark! :connected)]
     (intr/install!)
     ;; root gone, this process ends, busy or not (the fork server's group kill may be gone too)
-    (intr/exit-at-eof! #(sock/peer-gone? (:fd @state)))
+    (intr/exit-at-eof! #(sock/peer-gone? (:fd @link)))
     (mark! :handlers)
     ;; :base is the branch's merge base with main: a new branch's is the image (main as it
     ;; forked); a resumed one's is older than main, and comparing against main's head would
@@ -1444,7 +1463,8 @@
      ;; go to root with its hello (recorded problems), never dropped (T5b: a stub ran silently)
      ;; its key as root named it in its boot (seon.root's :spawn), never pulled from main here: that
      ;; pull cost what the inherited node cache lacked, 24-183 KB a spawn
-     (reset! state (cond-> {:id id :key session :branch branch :task task :run run :fd fd :conn c :db @store-conn
+     (reset! link {:fd fd :conn c})
+     (reset! state (cond-> {:id id :key session :branch branch :task task :run run :db @store-conn
                    :base base :main db0 :store-conn store-conn :cfg cfg :results {} :n 0
                    :load-errors (vec load-errors) :misaligned misaligned :unwatched (sock/signal-at-input! fd)
                    :waits {} :inbox [] :tx-seq 0 :mode :agent

@@ -584,6 +584,19 @@
         (vswap! indexes assoc a [at now ix])
         ix))))
 
+(defn carry-index!
+  "Each text index held for db before (`text-index`, of an attribute attrs holds none of) as the index of db after:
+  a move of a db that wrote none of an attribute's datoms leaves its texts as they were, so the index stands with
+  no fingerprint read, which costs a read of every text (114 MB over a program's forms in a forked agent, where
+  every first search read them cold). Its callers know what a move wrote: an agent's transaction and its merge
+  of main (seon.agent), the fork server's commit of main (seon.fork-server). nil. See docs/vector.md#search."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:set :any]] :nil]}
+  [before after attrs]
+  (let [at0 [(:hash before) (:max-tx before)] at1 [(:hash after) (:max-tx after)]]
+    (when (not= at0 at1)
+      (vswap! indexes (fn [m] (reduce-kv (fn [m a [was fp ix]] (if (and (= was at0) (not (contains? attrs a))) (assoc m a [at1 fp ix]) m)) m m))))
+    nil))
+
 (defn- counts-in
   "The texts of postings ix holding a query word: {e {word count}}, a word counted in every term that contains it
   (a scan of the vocabulary, not of the texts)."

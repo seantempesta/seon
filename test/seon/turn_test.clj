@@ -19,3 +19,12 @@
         "every turn's call that reported, and no other run's; a turn with no call record is no call")
     (is (= {:model-calls 0} (turn/run-usage (t/with (t/world) [{:seon.run/id "x/y#1"}] (turn-of "x/y#1" 0 nil)) "x/y#1"))
         "no call reported: its tokens unknown, never 0")))
+
+(deftest a-turn-that-only-repeats-is-named
+  ;; bench-scope-1 and -2: the design agent sent the same evals 34 turns running, each told :again, to the turn cap;
+  ;; a turn whose every eval ran repeats code with its old answer is one the agent is told of
+  (let [again {:again "e1 ran this code and answered the same"}]
+    (is (= ["c1" "c2"] (turn/repeated [{:id "c1" :response again} {:id "c2" :response again}])) "every eval it ran repeated")
+    (is (nil? (turn/repeated [{:id "c1" :response again} {:id "c2" :response {:value 1}}])) "one new answer is progress")
+    (is (= ["c1"] (turn/repeated [{:id "c1" :response again} {:id "c2" :not-run true :response {:ex {}}}])) "a call never run is not counted")
+    (is (nil? (turn/repeated [])) "a reply with no call is no repeat")))
