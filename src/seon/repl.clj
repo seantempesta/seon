@@ -435,7 +435,7 @@
   held (root, a scratch session). The one held (:schema-registry) answers until a write moves a
   schema entry (seon.agent/transact!, the merge of main: seon.agent/schema-moved), which drops it;
   a new agent holds main's from its fork (seon.fork-server/warm-start). Reading the changes is two
-  passes over every schema entry (1.08 MB a call measured 2026-11-01), so no eval reads them while
+  passes over every schema entry (1.08 MB a call: the commit that made it says), so no eval reads them while
   none moved. See docs/machine.md#an-agents-first-write."
   {:malli/schema [:=> [:cat] :any]}
   []
