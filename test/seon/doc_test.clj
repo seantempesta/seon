@@ -324,7 +324,9 @@
   so a file the repository ignores (config/local.edn, which bin/ports writes with the worktree's own name)
   is no text of the repository; a tracked file deleted on disk is no file. text? and skip? pick by path."
   [root dirs text? skip?]
-  (->> (:out (apply clojure.java.shell/sh "git" "-C" root "ls-files" "-co" "--exclude-standard" "--" dirs))
+  (->> (let [r (apply clojure.java.shell/sh "git" "-C" root "ls-files" "-co" "--exclude-standard" "--" dirs)]
+         (assert (zero? (:exit r)) (str "git ls-files failed: " (:err r)))
+         (:out r))
        str/split-lines sort
        (filter #(and (text? %) (not (skip? %)) (.isFile (java.io.File. (str root "/" %)))))))
 
@@ -361,6 +363,7 @@
                    :let [lines (vec (str/split-lines (slurp (str root "/" p))))]
                    [i w] (seon.problems/old-word-hits (for [[i l] (map-indexed vector lines) :when (or (not (comment-only? p)) (str/starts-with? (str/triml l) ";"))] [i l]) words)]
                [p (inc i) w])]
+    (is (contains? (set paths) "src/seon/problems.clj") "git listed the checkout's files: a listing that came back empty reads nothing")
     (is (contains? (set (map first words)) "attempt") "the table is read, the run row included")
     (is (empty? hits) "no text outside the store uses an old word outside old-word-kept: each is [file line word]")))
 
