@@ -281,11 +281,12 @@
   :judge, so the run is recorded on main and is one run with any other asker's of this head):
   the task's proofs and every in-process test reaching what the branch changed since the main it
   forked from, each test with a result at its reach digest reused (a red as recorded), not run;
-  given proofs, the tests of their namespaces. The process tests it reaches, a proof among them, run
+  given proofs, those tests (a namespace's name, its tests). The process tests it reaches, a proof among them, run
   at the judge, before a merge (:deferred, and :why each: the process it reaches through which
   calls). Answers that test run ({:pass :fail :error :reports :ran :reused :ms ...}) with
   :results {test :pass|:fail|:error} and :proofs (each proof's status: the task's and the given ones,
-  :deferred or :none when it has no result), printed as its verdict (prove-summary: the schema
+  :deferred or :none when it has no result), and :unmatched, the given names that name no test (a var that
+  is none, a namespace with none: bench-scope-5's silent ran 0), printed as its verdict (prove-summary: the schema
   :seon.test/proved): one line; the whole run is the value under the eval's handle, and what it found
   is the run's part of the page. Its results are kept at each test's reach digest (the test service
   records them), so (my.task/status) and the judge read a proof's status at its digest whichever call
@@ -293,16 +294,19 @@
   {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat [:set :qualified-symbol]] :map]]}
   ([] (prove #{}))
   ([proofs]
-   (let [test-run (agent/prove! :judge (into #{} (map (comp symbol namespace)) proofs))]
+   (let [test-run (agent/prove! :judge proofs)]
      (if (contract/error? test-run)
        test-run
        (let [results (proofs/results test-run)
              task-proofs (some->> (:task @agent/state) (task/task (agent/db)) :seon.task/accumulated :proofs)
-             deferred (set (:deferred test-run))]
-         (with-meta (assoc test-run :results results
+             deferred (set (:deferred test-run))
+             unmatched (vec (sort-by str (filter #(empty? (agent/named-tests (agent/db) #{%})) proofs)))]
+         (with-meta (cond-> (assoc test-run :results results
                            :proofs (into {}
                                          (for [p (into (set proofs) task-proofs)]
                                            [p (or (results p) (when (deferred p) :deferred) :none)])))
+                      ;; a name that is no test and no namespace of tests runs nothing: said, never a silent ran 0
+                      (seq unmatched) (assoc :unmatched unmatched))
            {:seon.render/schema :seon.test/proved}))))))
 
 (defn prove-summary
@@ -319,7 +323,8 @@
     (let [died (count (proofs/died r))
           red (pos? (+ (:fail r 0) (:error r 0)))]
       (str (cond red "red" (pos? died) "died" :else "green")
-           ": ran " (:ran r 0) ", deferred " (count (:deferred r)) " (to the judge), reused " (:reused r 0) ", died " died))))
+           ": ran " (:ran r 0) ", deferred " (count (:deferred r)) " (to the judge), reused " (:reused r 0) ", died " died
+           (when-let [u (seq (:unmatched r))] (str "; no test is named " (str/join ", " u)))))))
 
 (defn process-test?
   "Whether test t reaches a process of its own on this branch (an agent, a root, a fork, the binary:

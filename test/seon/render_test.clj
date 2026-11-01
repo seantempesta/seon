@@ -1474,6 +1474,9 @@
              :proofs {'app.okt/ok-test :pass 'app.okt/bad-test :fail}}
         html (h/html (ui/proved {} run))]
     (is (= "red: ran 3, deferred 0 (to the judge), reused 1, died 1" (my.agent/prove-summary {} run)))
+    (is (= "green: ran 0, deferred 0 (to the judge), reused 0, died 0; no test is named app.okt/typo-test"
+           (my.agent/prove-summary {} {:pass 0 :fail 0 :error 0 :ran 0 :reused 0 :deferred [] :reports [] :unmatched ['app.okt/typo-test]}))
+        "a name that is no test is said, never a silent ran 0 (bench-scope-5)")
     (is (= #{'app.okt/gone-test} (seon.proofs/died run)))
     (is (str/includes? html "app.okt/bad-test") "the red test is named")
     (is (str/includes? html "the sum") "with its first failing assertion")

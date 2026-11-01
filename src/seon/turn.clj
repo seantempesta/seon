@@ -256,6 +256,16 @@
         moved (into {} (remove (fn [[a v]] (= v (get e a)))) now)]
     (if (seq moved) [(assoc moved :seon.agent/key k)] [])))
 
+(defn repeated
+  "The ids of a turn's evals when every one it ran repeated code it had run before with the same answer (each
+  response's :again, seon.repl/again), else nil: a turn that can tell the agent nothing new (bench-scope-1 and -2's
+  design agents sent the same evals 34 turns running, each told :again, to the turn cap). See docs/agent.md#small-answers."
+  {:malli/schema [:=> [:cat [:sequential :map]] [:maybe [:vector :string]]]}
+  [calls]
+  (let [ran (remove :not-run calls)]
+    (when (and (seq ran) (every? #(get-in % [:response :again]) ran))
+      (mapv :id ran))))
+
 (defn- act!
   "One model turn: the agent's context (its record and its parts, the status s among them) to the model, the reply's eval calls
   through the one REPL path, each answered as its own result, the turn's facts on the branch. Answers the loop state after it, or the
@@ -342,6 +352,13 @@
         ;; waits for the user (the design's tool_choice auto)
         ;; (a blank or cut reply is no message: the next turn reads the same state)
         (when (and (empty? calls) (not (str/blank? (:text c))) (not (:truncated? c))) (request-stop! :waiting (:text c)))
+        ;; a turn that only repeated: the agent is told so, as any message reaches it (its next request carries it)
+        (when-let [again (repeated calls)]
+          (agent/transact! (update (task/message-tx (str id "/repeated") :message "seon" nil
+                                                    (str "Turn " turn " only ran code you had run before, each answered as it was then ("
+                                                         (str/join ", " again) "): running it again tells you nothing new. Write what you know: "
+                                                         "the plan, a proof or a definition, or end your turn with prose."))
+                                   0 assoc :seon.message/agent {:seon.agent/key (:key @agent/state)})))
         (swap! agent/state assoc-in [:turn :last] (cond-> {:seon.turn/calls (mapv #(select-keys % [:id :code]) calls)
                                                            :prose (str/join "\n\n" (keep :prose calls))}
                                                     (:truncated? c) (assoc :seon.turn/truncated true)))
@@ -366,7 +383,7 @@
                            :seon.model-call/split (cond-> {:context-ms context-ms :model-ms model-ms :eval-ms eval-ms
                                                            :record-ms (long (profile/ms-since t3))}
                                                     tests-ms (assoc :tests-ms tests-ms))}])
-        (cond-> (-> (assoc st :turn (inc turn) )
+        (cond-> (-> (assoc st :turn (inc turn))
                     ;; what this turn's parts showed, by producer, and what it evaluated (waste)
                     (update :log (fnil conj []) {:n turn
                                                  :shown {'seon.render.ui/cite-model (set (keep :seon.cite/name (task/task-cites db (:seon.task/id t))))
