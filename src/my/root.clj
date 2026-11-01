@@ -271,9 +271,11 @@
   merges, deaths, errors and waste, each row with its producer, owning namespace, evidence
   as data, reproducing proofs and the tasks already answering it; and what the program's
   facts make true now (:dead-citation). Reads main and the api's fold (the true counts of
-  repeats not yet on main)."
+  repeats not yet on main). The render proc's health, kept by what each move of main changed
+  (seon.render.proc/health!), brought to main as this call reads it: a read costs what main changed
+  since the last, never the whole program (seon.problems/health). See docs/health.md#cost."
   {:malli/schema [:=> [:cat :seon.root/sys] :seon.problems/report]}
-  [sys] (problems/health @(:conn sys) (root/errors sys)))
+  [sys] @(root/call! sys {:op :health :db @(:conn sys)}))
 
 (defn- load-kinds!
   "Each of ks loaded into main once by its own loader: the wiki (load-docs!), the task files

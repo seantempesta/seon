@@ -23,7 +23,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.query.execute] [clojure.main] [clojure.string :as str] [seon.db :as pdb] [seon.lib :as lib]
             [seon.sock :as sock] [jolt.async.remote :as remote] [konserve.jolt.fasl :as codec] [seon.fx :as fx] [seon.fork-server :as fs] [seon.agent-proc :as ap]
-            [seon.writer :as writer] [seon.prove] [seon.cron] [seon.vector :as vector] [seon.source :as source] [seon.reconcile :as reconcile] [seon.system :as system] [seon.program :as program] [seon.step :as step]
+            [seon.writer :as writer] [seon.problems :as problems] [seon.prove] [seon.cron] [seon.vector :as vector] [seon.source :as source] [seon.reconcile :as reconcile] [seon.system :as system] [seon.program :as program] [seon.step :as step]
             [seon.config :as cfg] [seon.contract :as contract] [seon.print :as print] [seon.task :as task] [seon.template :as tpl] [seon.doc :as doc] [seon.error :as err] [seon.agent :as agent] [konserve.jolt.lmdb :as klmdb] [clojure.java.shell]
             [clojure.core.async :as a]
             ;; the agent side, loaded here so the fork server and every agent inherit it compiled
@@ -463,6 +463,11 @@
             st)
       :state (reply! st o p (:view st))
       :errors (reply! st o p (::errors st))
+      ;; main's health (my.root/problems): the render proc's, kept by what each move of main changed
+      ;; (seon.render.proc/health!), brought to (:db m) there and answered by rid at the fold's counts
+      :health (let [[st rid] (pend st p :health nil)]
+                (step/out! o [:render :from-web] {:op :health :rid rid :db (:db m)})
+                st)
       :shutdown (assoc st :shutdown-p p)
       (cond-> st p (reply! o p (refused 'seon.root/request (str op " is not one of root's requests") {}))))))
 
@@ -552,6 +557,8 @@
     (case (:op m)
       ;; the test service answered a waiter (seon.prove)
       :prove-answer (deliver-rid st o (:rid m) (:r m))
+      ;; the render proc's health of main (:health), at the counts this api's fold holds
+      :health-answer (deliver-rid st o (:rid m) (if (contract/error? (:r m)) (:r m) (problems/with-fold (:r m) (:db m) (::errors st))))
       ;; what the test service holds, kept as it changes: a stall's evidence names it (stall-task)
       :prove-state (assoc st ::prove (:r m))
       :status (set-agent st o (:agent m) (:set m))
