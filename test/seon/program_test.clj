@@ -207,6 +207,19 @@
     (is (not= dg (program/program-digest (d/db-with db [{:schema/key :app.pt-pd/s :schema/form ":int"}]))) "a schema entry moves it")
     (is (not= dg (program/program-digest (d/db-with db [{:ns/name 'app.pt-pd :ns/tail "(def tail 1)"}]))) "a namespace's tail moves it")))
 
+(deftest a-runs-digest-moves-with-a-tasks-proofs
+  ;; bench-scope-5: a design registered three proofs and its prove answered the run from before
+  ;; them, "green: ran 0"; a run selects the task's proofs, so its key moves with them
+  (let [db (d/db-with (record (empty-db) 'app.pt-rd "(defn f [x] x)\n(defn g [x] x)") [{:seon.task/id "app.pt-rd/t"}])
+        dg (program/run-digest db)]
+    (is (= dg (program/run-digest (d/db-with db [{:seon.message/id "m1" :seon.message/from "root" :seon.message/body "hello"}])))
+        "a write of other data leaves it")
+    (is (not= dg (program/run-digest (record db 'app.pt-rd "(defn f [x] (inc x))"))) "the program moves it")
+    (let [proved (d/db-with db [{:seon.task/id "app.pt-rd/t" :seon.task/proofs ['app.pt-rd/f]}])]
+      (is (not= dg (program/run-digest proved)) "a registered proof moves it")
+      (is (not= (program/run-digest proved) (program/run-digest (d/db-with proved [{:seon.task/id "app.pt-rd/t" :seon.task/proofs ['app.pt-rd/g]}])))
+          "and another"))))
+
 (deftest load-order-follows-the-real-references
   (testing "a helper defined after its caller loads first (T5b's sibling: g replaced the stub in place, h3 came after)"
     (let [db (record (empty-db) 'app.pt-s "(defn g [x] 0)" 'app.pt-s "(defn other [x] x)"

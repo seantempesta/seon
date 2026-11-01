@@ -754,7 +754,7 @@
 (defn prove!
   "Ask the test service (seon.prove) to prove this branch at its head, and wait for its answer:
   the run's (run-tests-forked's answer, with :key). The service runs one run per key whoever
-  asks, the key the digest of what the run reads (seon.program/program-digest of this branch's
+  asks, the key the digest of what the run reads (seon.program/run-digest of this branch's
   head, as seon.root/prove! takes it): a session's request and this ask are one run; when it is
   this agent's to run, root's :tests request arrives while it waits and the :tests proc serves
   it (seon.repl/tests-step). mode :turn (a
@@ -770,7 +770,7 @@
   ;; inherits it and the turn's other readers find it held (branch-changes)
   (branch-changes (:base @state) (db))
   (let [k (:tx-seq (swap! state update :tx-seq inc))]
-    (:result (await-reply k (cond-> {:op :prove :k k :t (:max-tx (db)) :digest (program/program-digest (db)) :mode mode}
+    (:result (await-reply k (cond-> {:op :prove :k k :t (:max-tx (db)) :digest (program/run-digest (db)) :mode mode}
                               (seq names) (assoc :names names)))))))
 
 (defn- load-removed!
