@@ -105,8 +105,31 @@
                             (recur (next rs) (assoc! counts a (inc (get counts a 0)))))
                           (persistent! counts)))
                       (finally (c-finalize st)))]
+      ;; the same rows again under the trigram tokenizer, which answers a substring of any text (fts-substring)
+      (exec! h :create "CREATE VIRTUAL TABLE g USING fts5(body, e UNINDEXED, a UNINDEXED, tokenize='trigram')")
+      (exec! h :trigrams "INSERT INTO g(body, e, a) SELECT body, e, a FROM t")
       (exec! h :commit "COMMIT")
       {:h h :arena arena :n (reduce + 0 (vals counts)) :counts counts})))
+
+(defn- select
+  "The rows of sql on connection h with query bound to ?1, each read by row-fn from the statement."
+  {:malli/schema [:=> [:cat :seon.ffi/address :keyword :string :string ifn?] [:vector :any]]}
+  [h op sql query row-fn]
+  (let [st (prepare h op sql)]
+    (try
+      (c-bind-text st 1 query -1 SQLITE_TRANSIENT)
+      (loop [out (transient [])]
+        (let [rc (c-step st)]
+          (cond (= SQLITE_ROW rc) (recur (conj! out (row-fn st)))
+                (= SQLITE_DONE rc) (persistent! out)
+                :else (refused h op rc))))
+      (finally (c-finalize st)))))
+
+(defn- in-attrs
+  "The SQL restricting a query to attributes attrs (small integers), empty for all."
+  {:malli/schema [:=> [:cat [:set :int]] :string]}
+  [attrs]
+  (if (seq attrs) (str " AND a IN (" (str/join "," (sort attrs)) ")") ""))
 
 (defn fts-match
   "The rows of index ix holding a word of query (FTS5 syntax: words quoted and joined by OR), of the attributes
@@ -114,13 +137,15 @@
   negated bm25 of the text against every text of the index (higher is better). See docs/vector.md#search."
   {:malli/schema [:=> [:cat [:map [:h :seon.ffi/address]] :string [:set :int]] [:vector [:tuple :int :int :double]]]}
   [{h :h} query attrs]
-  (let [st (prepare h :match (str "SELECT e, a, bm25(t) FROM t WHERE t MATCH ?1"
-                                  (when (seq attrs) (str " AND a IN (" (str/join "," (sort attrs)) ")"))))]
-    (try
-      (c-bind-text st 1 query -1 SQLITE_TRANSIENT)
-      (loop [out (transient [])]
-        (let [rc (c-step st)]
-          (cond (= SQLITE_ROW rc) (recur (conj! out [(c-column-int st 0) (c-column-int st 1) (- (c-column-double st 2))]))
-                (= SQLITE_DONE rc) (persistent! out)
-                :else (refused h :match rc))))
-      (finally (c-finalize st)))))
+  (select h :match (str "SELECT e, a, bm25(t) FROM t WHERE t MATCH ?1" (in-attrs attrs)) query
+          (fn [st] [(c-column-int st 0) (c-column-int st 1) (- (c-column-double st 2))])))
+
+(defn fts-substring
+  "The rows [[e a]] of index ix whose text holds string text of three characters or more anywhere (inside a term,
+  across a separator), of the attributes attrs, unordered: the trigram table answers it, ignoring case (a superset
+  of a case-sensitive match). See docs/vector.md#search."
+  {:malli/schema [:=> [:cat [:map [:h :seon.ffi/address]] [:string {:min 3}] [:set :int]] [:vector [:tuple :int :int]]]}
+  [{h :h} text attrs]
+  (select h :substring (str "SELECT e, a FROM g WHERE g MATCH ?1" (in-attrs attrs))
+          (str "\"" (str/replace text "\"" "\"\"") "\"")
+          (fn [st] [(c-column-int st 0) (c-column-int st 1)])))

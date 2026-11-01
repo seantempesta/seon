@@ -118,8 +118,8 @@
                ;; 2026-10-31 (shrink-tests-4): measured on this input; before it (search-input's mix, a vocabulary that grew
                ;; with the texts' names): 1.66 MB / 132 calls at 100 and 300, 1.83 MB / 132 at 1,000. Here 323 KB / 32 calls at 20 and 60,
                ;; 340 KB at 200 (z-min 0.5, so the ten holding the word are the hits at every size; at 2 a small store's z leaves fewer)
-               ;; with the FTS5 index (task seon.doc/the-text-index-is-fts5; no vocabulary to scan): 282 KB / 28 calls at 20 and 60, 300 KB at 200
-               :fixed {:bytes 305000 :calls 28}
+               ;; with the FTS5 index (task seon.doc/the-text-index-is-fts5; no vocabulary to scan): 282 KB / 30 calls at 20 and 60, 300 KB at 200
+               :fixed {:bytes 305000 :calls 30}
                :sizes [20 60 200]}))
 
 (defn index-input
@@ -153,9 +153,9 @@
                ;; 191 at 180, 2.72 MB / 611 at 600: ~4.5 KB and 1 call a text, the fixed part ~20 KB / 10 calls (the 2.85 MB / 360
                ;; calls were the seed's texts)
                ;; the FTS5 index of every text attribute (task seon.doc/the-text-index-is-fts5): 238 KB at 60, 599 KB at 180,
-               ;; 1.87 MB at 600, 8 calls at every size: ~3.0 KB a text (the text, its C string and its row), the fixed part ~56 KB
+               ;; 1.87 MB at 600, 10 calls at every size (the trigram table's create and fill are two more): ~3.0 KB a text (the text, its C string and its row), the fixed part ~56 KB
                :per-n {:bytes 3100 :calls 0}
-               :fixed {:bytes 62000 :calls 8}
+               :fixed {:bytes 62000 :calls 10}
                :sizes [60 180 600]}))
 
 (deftest search-costs-its-texts
@@ -170,10 +170,10 @@
                ;; 2.88 MB / 204 at 1,000; before them, a tenth holding it: 3.78 MB at 100, 19.17 MB at 1,000, 67.68 MB / 7,714 calls at 4,000
                ;; 2026-10-31 (shrink-tests-4): on the world, sizes [100 300 1000]: 2.64 / 2.69 / 2.83 MB, 204 calls: ~210 B a text,
                ;; the fixed part 2.62 MB (the 800 B a text was the seed's)
-               ;; with the FTS5 index (task seon.doc/the-text-index-is-fts5): 2.52 / 2.54 / 2.57 MB, 200 calls: ~50 B a text, the
+               ;; with the FTS5 index (task seon.doc/the-text-index-is-fts5): 2.52 / 2.54 / 2.57 MB, 202 calls (select and in-attrs are two contracted calls): ~50 B a text, the
                ;; fixed part 2.52 MB
                :per-n {:bytes 55 :calls 0}
-               :fixed {:bytes 2530000 :calls 200}
+               :fixed {:bytes 2530000 :calls 202}
                :sizes [100 300 1000]}))
 
 (defn citing-input

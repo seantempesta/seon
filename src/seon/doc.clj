@@ -603,23 +603,20 @@
   id, a schema key) and the number of the line holding the match within its text (the number lines reads it
   at), :text that line, trimmed; in prose (a section's, a task's), where a paragraph is one line, :text is each
   sentence of that line that matches, its :at the paragraph's line, so (lines x n n) reads the paragraph whole. pattern is a string,
-  matched as it is written, or a regex. A string's longest word narrows the texts read: an FTS5 query of the
-  terms of `text-index` that begin with it (a literal holds each of its words, so the longest is the rarest
-  necessary one; a match inside a term, or across a camelCase boundary, is not a candidate); a regex has no
-  terms to ask for, so it reads every text of kinds. ns, when given, keeps
+  matched as it is written, or a regex. A string of three characters or more narrows the texts
+  read to those the index's trigram table holds it in (anywhere, inside a term or across a separator); a
+  string under three characters, or a regex, has no trigram to ask for, so it reads every text of kinds. ns, when given, keeps
   the names starting with it. Rows in the order of their texts' names, then lines. See docs/vector.md#search."
   {:malli/schema [:=> [:cat :seon.host/db [:or :string :seon.host/regex] [:set :keyword] [:maybe :string]] [:vector :map]]}
   [db pattern kinds ns]
   (let [re (if (string? pattern) (re-pattern (str/replace pattern #"[\\^$.|?*+()\[\]{}]" "\\\\$0")) pattern)
-        ws (when (string? pattern) (words pattern))
-        numbers (attr-numbers kinds)
-        ;; the candidate texts of each attribute: those holding the longest word's terms, or all
-        candidates (if (seq ws)
-                     (group-by second (map (fn [[e a]] [e (index-attrs a)])
-                                           (sqlite/fts-match (text-index db) (match-query [(first (sort-by (comp - count) ws))] true) numbers)))
-                     {})]
+        ;; the candidate texts of each attribute: those holding a string pattern of 3 characters or more
+        ;; (the trigram table), else all
+        indexed? (and (string? pattern) (>= (count pattern) 3))
+        candidates (when indexed?
+                     (group-by second (map (fn [[e a]] [e (index-attrs a)]) (sqlite/fts-substring (text-index db) pattern (attr-numbers kinds)))))]
     (->> (for [a (distinct (keep text-attrs kinds))
-               e (if (seq ws) (distinct (map first (get candidates a))) (map :e (d/datoms db :aevt a)))
+               e (if indexed? (distinct (map first (get candidates a))) (map :e (d/datoms db :aevt a)))
                :let [v (:v (first (d/datoms db :eavt e a)))]
                :when (and v (re-find re v))
                h (named-hits db e a kinds (constantly true))

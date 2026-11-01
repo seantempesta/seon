@@ -509,6 +509,17 @@
     (is (contains? (names "keep it") 'app.sw/keep-it) "a whole term")
     (is (not (contains? (names "it") 'app.sw/edit)) "a short word is no part of a longer term")))
 
+(deftest grep-finds-a-string-inside-a-term-as-grep-does
+  ;; docs/vector.md#search: grep's candidates come from the index's trigram table, so a string inside a longer
+  ;; identifier, or across a separator inside one, is found; a string of two characters scans every text
+  (let [db (mt/with (mt/world)
+                    (mt/code 'app.gi "(ns app.gi)\n(defn eval-n! [x] (destructure x))\n(defn other [] 1)"))
+        at (fn [p] (set (keep #(when (re-find #"^app\.gi" (:at %)) (:at %)) (doc/grep db p #{:var} nil))))]
+    (is (= #{"app.gi/eval-n!:1"} (at "val-n")) "inside a term and across its separator")
+    (is (= #{"app.gi/eval-n!:1"} (at "stru")) "inside a term")
+    (is (= #{"app.gi/eval-n!:1"} (at "n! [x")) "across a space and brackets")
+    (is (= #{"app.gi/eval-n!:1"} (at "x)")) "two characters: every text is read")))
+
 (deftest grep-answers-each-matching-line-as-a-row
   ;; the owner, 2026-11-01: tools like the terminal's, with the same meaning, answering vectors of maps the agent
   ;; narrows itself. grep is every line holding the pattern, over code, tests, sections and tasks, a row each,
