@@ -11,7 +11,7 @@
   (:require [seon.test-store :as ts] [my.test :as mt] [clojure.test :refer [deftest is testing]]
             [datahike.api :as d] [clojure.java.shell]
             [seon.db :as pdb]
-            [seon.program :as program] [seon.docs] [seon.server]
+            [seon.program :as program] [seon.doc] [seon.server]
             [seon.proofs :as proofs]
             [seon.fx :as fx]
             [seon.merge :as pm]
@@ -117,7 +117,7 @@
         "its code's (a constant, a keyword called, quoted data) and its contract's qualified keywords, the unqualified left out")
     (is (= #{:app.kw/thing :app.kw/count :app.kw/listed} (set (d/q '[:find [?k ...] :where [?v :var/name app.pt-kw/kw-user] [?v :var/form ?f] [?f :form/keywords ?k]] db)))
         "as facts of its form")
-    (is (= ['app.pt-kw/kw-user] (seon.docs/callers db :app.kw/thing)) "a key's functions, one AVET seek")
+    (is (= ['app.pt-kw/kw-user] (seon.doc/callers db :app.kw/thing)) "a key's functions, one AVET seek")
     ;; two keys, the first an attribute: as a vector Datahike read them as a lookup ref
     ;; (datahike.query-test's (= :query/nested-call (:error r)) failed the program db)
     (is (= #{:ns/name :app.kw/err} (set (d/q '[:find [?k ...] :where [?v :var/name app.pt-kw/two] [?v :var/form ?f] [?f :form/keywords ?k]]
@@ -915,7 +915,7 @@
     (is (not (contains? (refs-of db 'app.pt-q/f) 'app.pt-q/g)) "a syntax-quoted and a quoted name, in a map too: data, no reference")
     (is (contains? (refs-of db 'app.pt-q/c) 'app.pt-q/g) "a call is")
     (is (contains? (refs-of db 'app.pt-q/t) 'app.pt-q/g) "and a name a macro's template quotes, which its expansion calls")
-    (is (= '[app.pt-q/c app.pt-q/f app.pt-q/t] (seon.docs/callers db 'app.pt-q/g)) "who calls or names g: f names it as data")))
+    (is (= '[app.pt-q/c app.pt-q/f app.pt-q/t] (seon.doc/callers db 'app.pt-q/g)) "who calls or names g: f names it as data")))
 
 (deftest a-macro-use-is-a-ref
   (let [db (record (empty-db) 'user "(ns app.pt-qm)" 'app.pt-qm "(defmacro m [x] x)"
@@ -1080,11 +1080,11 @@
     ;; themselves, so it takes the tree; no-text-uses-an-old-word judged a red tree and a green one by
     ;; one digest and was marked flaky (the-old-word-check-reads, 2026-10-27)
     (let [moved (set (for [[t d] a :when (not= d (b t))] t))]
-      (is (contains? moved 'seon.docs-test/no-text-uses-an-old-word) "a scan of the checkout takes the tree")
-      ;; and so does a test calling a file reader from its own namespace (slurp, seon.docs/load-dir-tx): each was reused over an edit to the files it judges (web-ui, 2026-10-28)
+      (is (contains? moved 'seon.doc-test/no-text-uses-an-old-word) "a scan of the checkout takes the tree")
+      ;; and so does a test calling a file reader from its own namespace (slurp, seon.doc/load-dir-tx): each was reused over an edit to the files it judges (web-ui, 2026-10-28)
       (is (contains? moved 'seon.render-test/one-printer-and-no-cut-before-it) "a test slurping a doc takes the tree")
-      (is (contains? moved 'seon.docs-test/every-section-of-the-wiki-has-a-lead) "a test loading the wiki takes the tree")
-      (is (contains? moved 'seon.repl-test/the-help-page-runs) "a test reading the wiki through seon.docs/pages takes the tree (it was reused over edits to the help page)")
+      (is (contains? moved 'seon.doc-test/every-section-of-the-wiki-has-a-lead) "a test loading the wiki takes the tree")
+      (is (contains? moved 'seon.repl-test/the-help-page-runs) "a test reading the wiki through seon.doc/pages takes the tree (it was reused over edits to the help page)")
       (is (contains? moved 'seon.task-files-test/no-shipped-task-is-merged-work) "and one reading the task files through my.root/task-files")
       (is (< (* 4 (count moved)) (count a)) (str (count moved) " of " (count a) " tests read the checkout's files from their own namespace: a few, not the 286 whose reach reads one"))
       (is (not-any? #(= "seon.root-test" (namespace %)) moved) "a test running the binary takes no tree"))
@@ -1150,7 +1150,7 @@
   (let [db0 (ts/test-db)
         db (d/db-with db0 [{:db/id "f" :var/name 'app/f :var/doc "Old words." :var/contract "[:=> [:cat] :int]"}
                            {:db/id "g" :var/name 'app/g :var/doc "Kept."}])
-        db (d/db-with db (seon.docs/load-tx db "docs" {"docs/a.md" "# A\n\nIt reads `app/f`.\n"}))
+        db (d/db-with db (seon.doc/load-tx db "docs" {"docs/a.md" "# A\n\nIt reads `app/f`.\n"}))
         fe (pdb/eid db :var/name 'app/f)]
     (is (= [{:var 'app/f :was {:var/doc "Old words."} :now {:var/doc "New words."}
              :cited-by [{:section "docs/a.md#a" :read '(my.agent/help "docs/a.md#a")}]}]

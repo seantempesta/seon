@@ -25,7 +25,7 @@
  ;; one AVET seek
  :form/refs [:set {:seon.db/index true} :qualified-symbol]
  ;; the qualified names its quoted data holds (seon.program/quoted-names): names, not references,
- ;; so the reach never follows them; a caller listing reads them (seon.docs/callers: who names a
+ ;; so the reach never follows them; a caller listing reads them (seon.doc/callers: who names a
  ;; render, a proc, a form sent to an agent)
  :form/quoted [:set {:seon.db/index true} :qualified-symbol]
  ;; the ops of the requests it builds ({:op :done ...}: a map's constant keyword under :op), recorded
@@ -215,9 +215,9 @@
  ;; form and newest callers, each caller with the vars it defines; a task; a schema key's entry; a
  ;; namespace), drawn by its two renders (docs/render.md#a-part-answers-data)
  :seon.cite/cite-fact [:map {:seon.db/attributes true
-                             :seon.ctx/pattern [* {[:seon.cite/address :by :seon.section/address :as :section]
-                                                   [:seon.section/address :seon.section/heading :seon.section/lead :seon.section/text :seon.section/references
-                                                    {[:seon.section/_parent :as :below] [:seon.section/address :seon.section/heading]}]}
+                             :seon.ctx/pattern [* {[:seon.cite/address :by :seon.doc/address :as :section]
+                                                   [:seon.doc/address :seon.doc/heading :seon.doc/lead :seon.doc/text :seon.doc/references
+                                                    {[:seon.doc/_parent :as :below] [:seon.doc/address :seon.doc/heading]}]}
                                                 {[:seon.cite/name :by :var/name :as :var]
                                                  [* {[:var/form :as :form] [*]}
                                                   {[:form/_refs :by :var/name :as :callers :limit :seon.config.ctx/callers :reverse true]

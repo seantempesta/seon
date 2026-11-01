@@ -31,6 +31,17 @@ How a work or whole task is worked, step by step (its instructions cite this sec
 - Check each change with the proof's own expression, the failing assertion your status shows, at your REPL, before you prove again.
 - Never loosen a contract or a proof to make it pass.
 
+## Designing a task
+
+A design task turns a request, often a line or two, into the task the next agent implements: its plan, what the plan cites and its red proofs are that agent's whole starting context, so you build it for that agent (its instructions cite this section whole; the implement step reads your plan accumulated over its needs, and every citation in it is a part of its page).
+
+- Find what the change touches. Start from the request's own words: ``(my.agent/help "a word of it")`` names the docs and functions it finds; read the functions with ``(clojure.repl/source ns/f)``, a namespace's every definition with ``(clojure.repl/source ns)``, and who calls one with ``(my.agent/callers 'ns/f)``. Reproduce what the request says is wrong in one eval; when the output is already right, the premise is false: fail the task with it, ``(my.task/fail! "why" evidence)``.
+- Cite what you find into the plan as you find it, at the depth the implement agent needs: three backticks for each function it changes and each it must call as it is (its source is shown), one backtick for a doc that explains the area, a bare name for one it only needs to know of. ``(my.task/update! :seon.task/plan str "\n\nWhat changes: ...")``, each function's name between three backticks. Each citation is a part of your own page too, so you read it as the implement agent will.
+- Write the proofs that will show the change, first: each a deftest in its function's test namespace, its input built as its neighbours' (``(in-ns 'ns.x-test)``, then the deftest: no file), registered, ``(my.task/update! :seon.task/proofs conj 'ns.x-test/a-proof)``, and run red for the reason the plan gives, ``(my.agent/prove)``.
+- Then say in the plan what the implement step changes: each function and what it does then; a new function's defn with its contract and a stub body; each new schema registered; a cost proof (``seon.cost/proof``) for a function whose input grows.
+- Confirm the plan is enough: read your page as the implement agent will see it, the plan and each part it cites. Whatever it would still have to search for, cite; whatever it cites that the change does not need, take out. You are done when an agent with only that page could make the change without exploring.
+- Do not make the fix: the implement step makes it from your red proofs. Then end your turn with prose.
+
 ## From outside
 
 A Claude session attached through the MCP server works the same task as a Seon agent does, with the server's tools in place of the one eval tool (`docs/server.md`; the tool list says each one's arguments). Where this page says "a reply" or "your turn", read the tool that does it:
@@ -104,6 +115,10 @@ A definition changes by evaluating its new text: whole, as any `defn`, or, for a
 A change that must reach several places at once is one edit: ``(seon.repl/edit! 'seon.ref/scan [["old 1" "new 1"] ["old 2" "new 2"]])`` checks each pair as one alone is checked (exactly once, balanced; two whose old texts overlap are refused, `:overlap`), applies them together and evaluates the definition once. A loop that gains a binding needs its binding vector and each of its `recur`s changed together: edited one by one, each leaves a `recur` of the wrong arity and does not compile (the md-scan bench's bench-b13 lost 33 turns so). An edit whose new definition does not compile or load is that eval's error, its message saying nothing changed, never a value that reads as done. Each says where: a refused edit names the delimiters its new text leaves open, closes with nothing open or pairs with another kind, by their line in the new text, and a failed one quotes the line of the new definition its error names (```seon.reader/delimiters```; bench-b15's agent counted parens for 30 turns on how many alone). A new helper is a `defn-` of its own, evaluated and tried at the REPL before the long definition calls it, so its slips are found in its few lines, not in the long one's.
 
 Why exact text, once: the file editors this follows converged on it, a unique `old` string or a refused edit naming the candidates (v1's `seon.agent.fs/replace!`, clojure-mcp's `file_edit`, whose structural editors are on a path to deprecation because frontier models edit text reliably); a silent first match (clojure-mcp's `clojure_edit_replace_sexp`) changes the wrong place. The md-scan bench's agent, 2026-10-29, spent 30 turns string-editing a copy of a 250-line `scan` in a file and fighting its delimiters.
+
+## Changing a doc
+
+A doc (a heading of a page and its text, named by its address: the page's path, `#` and the heading's anchor) changes as a definition does: ``(seon.repl/edit! "docs/agent.md#ending" "old text" "new text")`` replaces the exact old text, found once in the doc's block (its heading line, a blank line, its text, as `(seon.doc/doc-source (seon.agent/db) "docs/agent.md#ending")` shows it), and loads its page again on your branch, so its lead, the names it cites and what is stale follow the new text; several changes are one edit as for a definition, and its parentheses are prose, never counted. A cited doc's part names the form that changes it (`:change`). The change is on your branch's store, never a file; the page is drawn back from the store byte for byte (```seon.doc/markdown```). It merges as your code does, and its page is written back to its file with the merge.
 
 ## ctx
 

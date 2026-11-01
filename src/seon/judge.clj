@@ -7,7 +7,7 @@
   analyzed in a disposable agent (first-move), since analysis runs a reply's ns form."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.lib :as lib] [seon.context :as context] [seon.source :as source]
-            [seon.reader :as reader] [seon.docs :as docs] [seon.step :as step] [seon.ref :as ref] [seon.edn :as sedn] [seon.config :as config]
+            [seon.reader :as reader] [seon.doc :as doc] [seon.step :as step] [seon.ref :as ref] [seon.edn :as sedn] [seon.config :as config]
             [seon.task :as task] [seon.program :as program] [seon.db :as pdb] [datahike.api :as d]))
 
 (defn request
@@ -109,7 +109,7 @@
   covers these definitions, not what they call (seon.source's reader and analysis), and the
   program as main records it, which is what the scoring agent forked from main runs."
   {:malli/schema [:=> [:cat :seon.host/db] :string]}
-  [db] (lib/digest (sedn/encode (mapv #(docs/source-of db %) '[seon.judge/subject seon.judge/form-facts seon.judge/reads seon.judge/score seon.judge/first-move]))))
+  [db] (lib/digest (sedn/encode (mapv #(doc/source-of db %) '[seon.judge/subject seon.judge/form-facts seon.judge/reads seon.judge/score seon.judge/first-move]))))
 
 (defn fact
   "The :seon.judge fact of task id's first move: its request's digest, the version that

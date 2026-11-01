@@ -13,7 +13,7 @@
   Every number shown is measured by the system and carried in the value; nothing here
   invents one."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.learn :as learn] [seon.docs :as docs] [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn] [seon.config :as config]
+  (:require [seon.learn :as learn] [seon.doc :as doc] [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn] [seon.config :as config]
             [seon.render :as render] [datahike.api :as d] [seon.context :as context] [seon.program :as program] [seon.print :as print] [seon.print.emit :as emit] [seon.print.select :as select] [seon.web.html :as h] [seon.reader :as reader] [seon.cost :as cost] [seon.task :as task] [seon.ctx] [seon.problems :as problems] [seon.edn :as sedn] [datahike.index.interface] [seon.ratom :as ratom] [seon.proofs :as proofs] [seon.merge :as pm] [seon.ref :as ref] [clojure.set]))
 
 ;;; --- small formatting helpers -------------------------------------------------
@@ -814,18 +814,18 @@
   "Pulled section sec (its :below joined) as Markdown at depth: :summary its heading and its lead's first
   sentence, :doc its heading, its lead and the headings below it, :code its heading and its own text whole."
   {:malli/schema [:=> [:cat :map :seon.ref/depth] :string]}
-  [{:seon.section/keys [address heading lead text] below :below} depth]
+  [{:seon.doc/keys [address heading lead text] below :below} depth]
   (let [head (str "## " heading " (" address ")")]
     (case depth
       :summary (cond-> head lead (str "\n\n" (ref/lead-sentence lead)))
       :doc (cond-> head lead (str "\n\n" lead)
-             (seq below) (str "\n\n" (str/join "\n" (for [b (sort-by :seon.section/address (vals below))]
-                                                       (str "- " (:seon.section/heading b) " (" (:seon.section/address b) ")")))))
+             (seq below) (str "\n\n" (str/join "\n" (for [b (sort-by :seon.doc/address (vals below))]
+                                                       (str "- " (:seon.doc/heading b) " (" (:seon.doc/address b) ")")))))
       (cond-> head text (str "\n\n" text)))))
 
 (defn- var-view
   "Pulled var v (its :form and :callers joined, each caller with the vars it defines) as its citation's
-  depth shows it, as seon.docs/resolve-ref shows a var: :summary its arglists and its doc's first sentence,
+  depth shows it, as seon.doc/resolve-ref shows a var: :summary its arglists and its doc's first sentence,
   :doc its arglists, doc and contract (its source when it has no doc, or when own?, a var of the task's own
   namespaces, the one it changes: `own-namespaces`), :code its source; past :summary its
   direct tests and its other callers among the newest callers ctx holds, and the form that reads every test
@@ -887,7 +887,10 @@
   (let [x (or address name) head {:cites x :depth depth}]
     (cond
       ;; what reads it whole first, as code the printer shows verbatim, so a cut of the rest still names it
-      (:seon.section/address sec) (assoc head :read (print/code (str "(my.agent/help " (emit/string-literal address) ")")) :text {:seon.print/prose (section-text sec depth)})
+      ;; and how it changes, as a definition does (docs/agent.md#changing-a-doc)
+      (:seon.doc/address sec) (assoc head :read (print/code (str "(my.agent/help " (emit/string-literal address) ")"))
+                                     :change (print/code (str "(seon.repl/edit! " (emit/string-literal (:seon.doc/address sec)) " \"old text\" \"new text\")"))
+                                     :text {:seon.print/prose (section-text sec depth)})
       ;; a task by its plan, as seon.ref/task-view shows one: its first sentence at summary, else whole
       (:seon.task/id tk) (assoc head :read (print/code (str "(:seon.task/plan (seon.task/task (seon.agent/db) " (emit/string-literal (:seon.task/id tk)) "))"))
                                 :text {:seon.print/prose (cond-> (str "## " (:seon.task/id tk))
@@ -920,8 +923,8 @@
   "Where a cite's joins hold an entity, and the identity attribute that marks it held whole there (an entity
   is held once in ctx, {:db/id e} at any other path: docs/ctx.md#the-pattern): each join path below a cite,
   the ones that hold an entity by the cite's own pattern first."
-  [[[:section] :seon.section/address] [[:var] :var/name] [[:var :form] :form/id] [[:schema] :schema/key] [[:ns] :ns/name]
-   [[:task] :seon.task/id] [[:section :below :*] :seon.section/address] [[:var :callers :*] :form/id] [[:var :callers :* :defines :*] :var/name]])
+  [[[:section] :seon.doc/address] [[:var] :var/name] [[:var :form] :form/id] [[:schema] :schema/key] [[:ns] :ns/name]
+   [[:task] :seon.task/id] [[:section :below :*] :seon.doc/address] [[:var :callers :*] :form/id] [[:var :callers :* :defines :*] :var/name]])
 
 (defn- fill
   "Node x with each {:db/id e} held whole at another path of ctx c (held: e to that path) replaced by the node
@@ -981,7 +984,7 @@
   "The cites agent record c's page draws, read from ctx alone: its task's (:cites), then each need's (one
   level, a merge task's left out), then the agent's own, each target once at the strongest depth any asks,
   the task's proofs left out (the status shows them), in the order of what each builds on (a section after
-  the sections its own links reach, :seon.section/references; where they loop, the earlier first). Each
+  the sections its own links reach, :seon.doc/references; where they loop, the earlier first). Each
   [path target held]: the cite's path, its target as text and where ctx holds each entity it joined whole
   (an entity is held once: docs/ctx.md#the-pattern)."
   {:malli/schema [:=> [:cat :map] [:vector [:tuple [:vector :any] :string [:map-of :int [:vector :any]]]]]}
@@ -1003,7 +1006,7 @@
         ;; what each builds on: its section's own links, among the sections the others joined
         sec (fn [p] (let [id (get-in c (conj p :section :db/id))] (when id (or (held id) (conj p :section)))))
         secs (mapv (fn [{p :path}] (if-let [sp (sec p)] (into #{(get-in c (conj sp :db/id))} (keys (get-in c (conj sp :below)))) #{})) chosen)
-        links (mapv (fn [{p :path}] (if-let [sp (sec p)] (into #{} (map :db/id) (ratom/realize (get-in c (conj sp :seon.section/references)))) #{})) chosen)]
+        links (mapv (fn [{p :path}] (if-let [sp (sec p)] (into #{} (map :db/id) (ratom/realize (get-in c (conj sp :seon.doc/references)))) #{})) chosen)]
     (vec (for [i (builds-on secs links) :let [{:keys [path target]} (chosen i)]] [path target held]))))
 
 (def ^:private reason-words

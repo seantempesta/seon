@@ -2,7 +2,7 @@
   "An agent's REPL answers: asked of an agent in a root of its own (seon.agent-test/in-agent), and a form bounded by the work it does, never by a clock (seon.intr/run under a tick budget)."
   (:require [clojure.test :refer [deftest is testing]] [clojure.string :as str] [seon.agent-test :as at]
             [seon.intr :as intr] [seon.agent :as agent] [seon.contract :as contract]
-            [seon.ref :as ref] [seon.template :as template] [seon.repl :as repl] [seon.context :as context] [seon.docs :as docs]
+            [seon.ref :as ref] [seon.template :as template] [seon.repl :as repl] [seon.context :as context] [seon.doc :as doc]
             [seon.config :as cfg] [my.agent] [seon.render :as render] [seon.print :as print] [seon.render.ui :as ui] [seon.web.html :as h] [seon.test-store :as ts] [my.test] [datahike.api :as d]))
 
 (deftest an-eval-answers-its-value-as-clojure-does
@@ -165,6 +165,24 @@
     (is (get-in edit [:value :edited]) (pr-str edit))
     (is (clojure.string/includes? (str (first (:value branch))) "[] 2") "the branch's program holds the new source")
     (is (= 0 (second (:value branch))) "its inner eval records no eval of its own: the edit's call is the one kept")))
+
+(deftest a-doc-is-edited-as-a-definition-is
+  ;; docs as code (task seon.doc/any-markdown-file-is-docs-it-writes-back): edit! of a doc's address replaces exact
+  ;; text once in its block, as of a definition, and loads its page again on the agent's branch, so what its text
+  ;; derives follows it (here its lead) and main keeps its own; prose counts no delimiter
+  (let [a "docs/agent.md#ending"
+        lead (fn [db] (str "(:seon.doc/lead (datahike.api/entity " db " [:seon.doc/address " (pr-str a) "]))"))
+        [edit missing branch main]
+        (at/in-agent (fn [{:keys [task]}]
+                       [(str "(seon.repl/edit! " (pr-str a) " \"then stop.\" \"then stop (as the turn ends.\")")
+                        (str "(seon.repl/edit! " (pr-str a) " \"no such text\" \"x\")")
+                        {:op :eval :agent "root"
+                         :code (lead (str "(:db @(seon.root/branch-db sys (:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))))"))}
+                        {:op :eval :agent "root" :code (lead "@(:conn sys)")}]))]
+    (is (= a (get-in edit [:value :edited :doc])) (pr-str edit))
+    (is (= :not-found (get-in missing [:value :seon.repl/refused-because])) (pr-str missing))
+    (is (str/ends-with? (str (:value branch)) "then stop (as the turn ends.") (str "the branch's doc derives its new lead: " (pr-str branch)))
+    (is (str/ends-with? (str (:value main)) "then stop.") (str "main's is its own: " (pr-str main)))))
 
 (deftest an-unmapped-definition-is-no-longer-the-branchs-program
   ;; docs/source.md#an-agent-changes-code-at-its-repl: md-scan #19 unmapped a scratch helper and its branch kept it,
@@ -517,7 +535,7 @@
   ;; task seon.context/help-is-a-checked-docs-page (v1's help was tested data, its most-proven
   ;; turn saver): every form the help page tells an agent to run works in a real agent, in
   ;; order, the ending functions last, and every name it cites resolves in the program
-  (let [forms (runnable (docs/page-text (my.test/with (my.test/world)
+  (let [forms (runnable (doc/page-text (my.test/with (my.test/world)
                                                     ;; the help page alone: the forms it tells an agent to run (the agent under test reads the rest)
                                                     (my.test/page context/help-page (slurp (str (cfg/checkout) "/" context/help-page))))
                                        context/help-page))
@@ -607,17 +625,17 @@
 
 (deftest help-answers-a-section
   ;; the help page is read from the wiki's sections main holds (root's boot loads them), at
-  ;; the commit a turn read, through seon.docs's one reader
+  ;; the commit a turn read, through seon.doc's one reader
   (let [db0 (ts/test-db)
-        db (d/db-with db0 (docs/load-tx db0 "docs" (docs/pages (cfg/checkout) "docs")))
-        toc (docs/page db context/help-page)]
+        db (d/db-with db0 (doc/load-tx db0 "docs" (doc/pages (cfg/checkout) "docs")))
+        toc (doc/page db context/help-page)]
     (is (= ["docs/agent.md#the-agent" 1] ((juxt :seon.ref/address :seon.ref/level) (first toc))) "the page's sections, the first its title")
     (is (every? :seon.ref/lead toc) "each section leads with a sentence that stands alone")
     (is (some #(= "docs/agent.md#done" (:seon.ref/address %)) toc))
-    (is (str/includes? (:seon.ref/text (docs/view db "docs/agent.md#done" :code)) "The judge counts exactly") "one section, whole")
-    (is (nil? (docs/view db "docs/agent.md#nowhere" :code)) "no such section")
+    (is (str/includes? (:seon.ref/text (doc/view db "docs/agent.md#done" :code)) "The judge counts exactly") "one section, whole")
+    (is (nil? (doc/view db "docs/agent.md#nowhere" :code)) "no such section")
     (is (str/starts-with? (context/help-text db) "# The agent\n\nYou are a Seon agent") "the page, made from its sections")
-    (is (nil? (docs/page db0 context/help-page)) "a db without the wiki holds no help page")))
+    (is (nil? (doc/page db0 context/help-page)) "a db without the wiki holds no help page")))
 
 (deftest help-reads-any-address-and-lists-on-a-miss
   ;; dogfood 2026-10-25: (my.agent/help "references") answered nil, three evals lost. Help is the

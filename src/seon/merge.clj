@@ -40,7 +40,7 @@
   "The attributes a page's text states of a section: its address, heading, own text and parent. The rest of a
   section (lead, references, names, dead links, what it read) the load derives from these, so a change shows
   in these four and a merge reads only them (docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program)."
-  #{:seon.section/address :seon.section/heading :seon.section/text :seon.section/parent})
+  #{:seon.doc/address :seon.doc/heading :seon.doc/text :seon.doc/parent})
 
 (defn- platform-record? {:malli/schema [:=> [:cat :keyword] :boolean]} [k]
   (let [n (namespace k)]
@@ -113,7 +113,7 @@
                  [[:datum (:e dt) a] (:v dt)]))
         schemas (for [dt (d/datoms db :aevt :schema/file) :let [x (d/entity db (:e dt))]]
                   [[:schema (:schema/key x)] {:form (:schema/form x) :file (:v dt)}])
-        sections (for [dt (d/datoms db :aevt :seon.section/address)] [[:section (:v dt)] (section-content db (:e dt))])]
+        sections (for [dt (d/datoms db :aevt :seon.doc/address)] [[:section (:v dt)] (section-content db (:e dt))])]
     (into {} (concat (for [f forms] [[:form (:id f)] (dissoc f :e :id)]) defs schemas sections data))))
 
 (defn- same?
@@ -187,7 +187,7 @@
           (concat (when-let [k (form-key x)] (cons k def-key))
                   (when own-def (remove nil? [own-def (pointed (program/pointer (first own-def)))]))
                   (when-let [k (:schema/key x)] [[:schema k]])
-                  (when-let [a (:seon.section/address x)] [[:section a]])
+                  (when-let [a (:seon.doc/address x)] [[:section a]])
                   (for [dt (when-not (= #{} data-attrs) ds) :when (data-attrs (:a dt))]
                     (if (many (:a dt))
                       [:datum e (:a dt) (:v dt)]
@@ -209,7 +209,7 @@
           (when (and (program/live? db f) (contains? (:defines row) k)) (def-content db k e row)))))
     :schema (when-let [e (pdb/eid db :schema/key a)]
               (let [x (d/entity db e)] (when (:schema/file x) {:form (:schema/form x) :file (:schema/file x)})))
-    :section (some->> (pdb/eid db :seon.section/address a) (section-content db))
+    :section (some->> (pdb/eid db :seon.doc/address a) (section-content db))
     :datum (when (data-attrs b)
              (if (= 4 (count k))
                (when (seq (d/datoms db :eavt a b c)) true)
@@ -348,7 +348,7 @@
     :form (pdb/eid db :form/id a)
     (:var :method :impl :ns) (program/def-eid db k)
     :schema (pdb/eid db :schema/key a)
-    :section (pdb/eid db :seon.section/address a)
+    :section (pdb/eid db :seon.doc/address a)
     :datum a))
 
 (defn carried-tx
@@ -367,7 +367,7 @@
         ;; without an (ns) form is no key of its own), or the form reads :ns nil where it lands
         es (into es (for [e es :let [n (:db/id (:form/ns (d/entity src e)))] :when n] n))
         das (data-attr? src data-attrs)
-        carry? (fn [d] (and (es (:e d)) (let [a (:a d)] (or (das a) (program/attr-namespaces (namespace a)) (= "seon.section" (namespace a))))))
+        carry? (fn [d] (and (es (:e d)) (let [a (:a d)] (or (das a) (program/attr-namespaces (namespace a)) (= "seon.doc" (namespace a))))))
         [gone added] (d/datoms-diff base src :eavt [])
         added (filterv carry? added)
         retracted (vec (for [d gone :when (carry? d)

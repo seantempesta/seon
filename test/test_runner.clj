@@ -12,7 +12,7 @@
   (:require [seon.profile :as profile] [konserve.jolt.fasl-store :as fasl] [clojure.java.io :as io] [clojure.java.shell :as sh] [clojure.string :as str] [clojure.edn :as edn]
             [datahike.api :as d] [seon.config :as config] [seon.db :as pdb] [seon.test-store :as ts]
             [seon.edn :as sedn] [seon.error :as error] [seon.lib :as lib] [seon.contract :as contract] [seon.fx :as fx] [seon.program :as program] [seon.proofs :as proofs] [seon.print :as print] [seon.source :as source] [seon.system :as system]
-            [seon.docs :as docs] [seon.task :as task] [seon.problems :as problems] [my.root]))
+            [seon.doc :as doc] [seon.task :as task] [seon.problems :as problems] [my.root]))
 
 (defn- test-namespaces
   "Namespace symbols of <tree>/test/**/*_test.clj(c): tree the checkout planned (source-tree, or
@@ -479,7 +479,7 @@
 
 (defn- with-wiki
   "Program db db with the tasks and the wiki of the checkout at dir, by root's own loaders
-  (seon.task/load-tx, then seon.docs/load-dir-tx: a prose word is a citation when it names a task
+  (seon.task/load-tx, then seon.doc/load-dir-tx: a prose word is a citation when it names a task
   too). A task file that does not read throws its error: no tasks is no answer."
   [db dir]
   ;; the program store is keyed by the program's attributes alone (seon.test-store/program-schema-digest),
@@ -489,7 +489,7 @@
         tx (task/load-tx db (my.root/task-files (str dir "/" (tasks-dir))))
         _ (when (contract/error? tx) (throw (ex-info (:seon.error/message tx) tx)))
         db (d/db-with db tx)]
-    (d/db-with db (docs/load-dir-tx db dir "docs" {}))))
+    (d/db-with db (doc/load-dir-tx db dir "docs" {}))))
 
 (defn- health!
   "The health step (docs/health.md#checks-are-callers-of-seon): what this checkout caused since its
