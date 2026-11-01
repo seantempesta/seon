@@ -4,7 +4,11 @@
 ;; it. Stored shapes; the Datahike attributes are derived from :seon.doc/fact.
 {;; the section's address, path#anchor as seon.ref/parse writes it (docs/flow.md#idioms)
  :seon.doc/address [:and {:seon.db/identity true} :string]
+ ;; the heading as its line writes it, Markdown (a code span keeps its backticks), and its level (# is 1)
  :seon.doc/heading :string
+ :seon.doc/level [:int {:min 1 :max 6}]
+ ;; its place among its parent's docs as the page holds them (0 first): what draws the page back in its order
+ :seon.doc/position :int
  ;; the heading's next block when it is a paragraph: what summary depth shows
  :seon.doc/lead :string
  ;; the section's own text: the lines after its heading, up to the next heading of any level
@@ -38,6 +42,8 @@
  :seon.doc/fact [:map {:seon.db/attributes true}
                      [:seon.doc/address :seon.doc/address]
                      [:seon.doc/heading :seon.doc/heading]
+                     [:seon.doc/level {:optional true} :seon.doc/level]
+                     [:seon.doc/position {:optional true} :seon.doc/position]
                      [:seon.doc/lead {:optional true} :seon.doc/lead]
                      [:seon.doc/text {:optional true} :seon.doc/text]
                      [:seon.doc/parent {:optional true} :seon.doc/parent]
@@ -52,6 +58,8 @@
  :seon.doc/parsed [:map {:closed true}
                        [:seon.doc/address :seon.doc/address]
                        [:seon.doc/heading :seon.doc/heading]
+                       [:seon.doc/level :seon.doc/level]
+                       [:seon.doc/position :seon.doc/position]
                        [:seon.doc/lead {:optional true} :seon.doc/lead]
                        [:seon.doc/text {:optional true} :seon.doc/text]
                        [:seon.ref/parent {:optional true} :seon.ref/address]

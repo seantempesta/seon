@@ -542,7 +542,7 @@
 
 (defn parse
   "Markdown text at path (nil for a plan or a docstring) read once: its sections, each with
-  its own text (the lines after its heading up to the next heading, absent when blank), and
+  its heading as written (:seon.ref/written), its own text (the lines after its heading up to the next heading, absent when blank), and
   every citation its text makes, each mention with its depth and line, in order. This is the
   value the docs store keeps; `cited` gives each name once."
   {:malli/schema [:=> [:cat [:maybe :string] :string] :seon.ref/document]}
@@ -551,8 +551,10 @@
         secs (sections path blocks)
         lines (vec (str/split-lines text))
         ends (conj (mapv #(dec (:seon.ref/line %)) (rest secs)) (count lines))]
-    {:seon.ref/sections (mapv (fn [s end] (let [t (str/trim (str/join "\n" (subvec lines (min (:seon.ref/line s) end) end)))]
-                                            (cond-> s (not (str/blank? t)) (assoc :seon.ref/text t))))
+    {:seon.ref/sections (mapv (fn [s end] (let [t (str/trim (str/join "\n" (subvec lines (min (:seon.ref/line s) end) end)))
+                                                ;; the heading as its line writes it: past its #s, before a closing run of them
+                                                w (str/trim (str/replace (str/replace (nth lines (dec (:seon.ref/line s))) #"^\s*#+\s*" "") #"\s+#+\s*$" ""))]
+                                            (cond-> (assoc s :seon.ref/written w) (not (str/blank? t)) (assoc :seon.ref/text t))))
                               secs ends)
      :seon.ref/citations (into [] (keep #(candidate path %)) spans)}))
 

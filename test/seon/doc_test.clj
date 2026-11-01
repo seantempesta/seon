@@ -127,6 +127,23 @@
     (is (< 300 (count (d/datoms db :aevt :seon.doc/address))) "the real wiki is read")
     (is (= [] (mapv :section (get-in (problems/health db) [:classes :leadless-section :rows]))) "no section lacks a lead")))
 
+(deftest a-loaded-page-draws-back-as-its-file
+  ;; docs as code (task seon.doc/any-markdown-file-is-docs-it-writes-back): the store holds each page, so the file is
+  ;; drawn from it as src is from the program (seon.source-test/import-then-write-back-is-a-zero-diff); the real wiki,
+  ;; both dirs, every page
+  (let [db0 (empty-db)
+        co (config/checkout)
+        dirs (config/value :seon.config.root/wiki-dirs)
+        db (d/db-with db0 (docs/load-dir-tx db0 co dirs))
+        files (into {} (for [dir dirs [p t] (docs/pages co dir)] [p t]))]
+    (is (< 30 (count files)) "the real wiki is read")
+    ;; a page that does not draw back names where it first differs: the file's text there and the drawn
+    (is (= {} (into {} (for [[p t] (sort files) :let [m (docs/markdown db p)] :when (not= t m)
+                             :let [i (or (first (keep-indexed (fn [i [a b]] (when (not= a b) i)) (map vector t m))) (min (count t) (count m)))]]
+                         [p {:at i :file (subs t (max 0 (- i 60)) (min (count t) (+ i 60))) :drawn (subs m (max 0 (- i 60)) (min (count m) (+ i 60)))}])))
+        "every page draws back as its file")
+    (is (nil? (docs/markdown db "docs/none.md")) "a page the store holds no doc of is none")))
+
 (deftest one-address-shows-one-text-through-ref-and-docs
   ;; research row 15: a section's text at code depth is its own text, the lines after its
   ;; heading up to the next heading of any level, whichever reader shows it: the expected

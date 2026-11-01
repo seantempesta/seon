@@ -102,6 +102,7 @@ How Seon meets each need (a dependency, a backlog, a delayed retry, quiet) on Fl
 - **Failure:** send typed errors as answers, not throws ([errors](errors.md#errors)); a throw is a defect, and its message is answered as above.
 - **Quiet:** Flow can't see it, because channels are opaque and ping misses procs inside a step. Count messages: +1 when promised (outputs, injects, answers owed by an edge, a step in progress), −1 when taken. Zero is quiet. A stall is named from each queue's fill, its capacity, its writer, and its reader's read set.
 - **Never** let a step block on another proc (hazard 1). Make every slow wait a message and a park.
+
 ## Flow inside an agent
 
 An agent is a Flow graph of three `:io` procs on its main carrier, so it stays one OS thread and forks its test children and clones as before (```seon.repl/serve!```, [processes](processes.md#the-agent-process)).
@@ -125,4 +126,3 @@ The performers are Vars of `seon.fx`, each answering `{:value ...}` or a declare
 - ```seon.fx/stall-evidence```: a stalled agent's fiber dump, `sample`, `lsof` and `ps` of its process group, each a file in the given dir, captured while it is stuck ([processes](processes.md#a-stalled-agent)).
 - ```seon.fx/test-results```: the status of each test of a merge candidate's run, read from its verdict at its digest in the results directory (`:pass` for a stored green, `:fail` for a red, `:error` when the run never reached it: no verdict is not a pass), for `seon.fx/run-tests`.
 - ```seon.fx/tree-of```: git's id of a commit's tree, one of the reads of the repository the loaders and checks share ([health](health.md#checks-are-callers-of-seon)).
-

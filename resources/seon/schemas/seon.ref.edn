@@ -60,12 +60,14 @@
                  [:seon.ref/line-count nat-int?]]
  ;; a section: its address (path#anchor), heading, level, line, enclosing section, its lead (the
  ;; heading's next block when that is a paragraph) or else its opening block, and its own text
- ;; (the lines after its heading up to the next heading)
+ ;; (the lines after its heading up to the next heading); :seon.ref/written is the heading as its line writes it,
+ ;; Markdown and all (a code span's backticks), which a page is drawn back with
  :seon.ref/address :string
  :seon.ref/section [:map {:closed true}
                     [:seon.ref/address :seon.ref/address]
                     [:seon.ref/anchor :seon.ref/anchor]
                     [:seon.ref/heading :string]
+                    [:seon.ref/written {:optional true} :string]
                     [:seon.ref/heading-level [:int {:min 1 :max 6}]]
                     [:seon.ref/line :seon.ref/line]
                     [:seon.ref/parent {:optional true} :seon.ref/address]

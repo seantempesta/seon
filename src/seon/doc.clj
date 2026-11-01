@@ -15,7 +15,7 @@
 
 (defn page-sections
   "The sections of the page at path, read once (seon.ref/parse): each its address, heading,
-  lead, own text, its parent's address and the citations its own text makes, each once at its
+  lead, own text, its position among its parent's docs, its parent's address and the citations its own text makes, each once at its
   strongest depth (seon.ref/cited)."
   {:malli/schema [:=> [:cat :string :string] [:vector :seon.doc/parsed]]}
   [path text]
@@ -26,9 +26,15 @@
                         (if (< lo hi)
                           (let [mid (quot (+ lo hi) 2)] (if (<= (nth starts mid) l) (recur (inc mid) hi) (recur lo mid)))
                           (when (pos? lo) (dec lo)))))
-        by-section (group-by #(owner (:seon.ref/line %)) citations)]
-    (vec (for [[i {:seon.ref/keys [address heading lead parent text]}] (map-indexed vector sections)]
-           (cond-> {:seon.doc/address address :seon.doc/heading heading
+        by-section (group-by #(owner (:seon.ref/line %)) citations)
+        ;; each section's place among its parent's, in one pass: how many of its parent's came before it
+        positions (first (reduce (fn [[ps seen] {p :seon.ref/parent}] [(conj ps (get seen p 0)) (update seen p (fnil inc 0))])
+                                 [[] {}] sections))]
+    (vec (for [[i {:seon.ref/keys [address written heading-level lead parent text]}] (map-indexed vector sections)]
+           (cond-> {:seon.doc/address address :seon.doc/heading written :seon.doc/level heading-level
+                    ;; its place among its parent's docs, as the page holds them: the store's ids are no order (a doc added
+                    ;; later has a later id wherever it stands)
+                    :seon.doc/position (nth positions i)
                     :seon.ref/citations (ref/cited (vec (get by-section i [])))}
              lead (assoc :seon.doc/lead lead)
              text (assoc :seon.doc/text text)
@@ -69,7 +75,7 @@
   {:malli/schema [:=> [:cat [:map-of :string :int] :seon.doc/parsed [:vector :any] [:set :qualified-symbol]] :map]}
   [stored s targets names]
   (let [ref (fn [a] (get stored a a))]
-    (cond-> (select-keys s [:seon.doc/heading :seon.doc/lead :seon.doc/text])
+    (cond-> (select-keys s [:seon.doc/heading :seon.doc/level :seon.doc/position :seon.doc/lead :seon.doc/text])
       (seq names) (assoc :seon.doc/names names)
       (:seon.ref/parent s) (assoc :seon.doc/parent (ref (:seon.ref/parent s)))
       (seq (remove (comp #{:missing} first) targets))
@@ -80,7 +86,7 @@
 (def ^:private section-attrs
   "A stored section's stated attributes (seon.task/entity-tx makes them exactly what its text says).
   :seon.doc/read is stated too, but by the load: it keeps the stored value while the text is unchanged."
-  [:seon.doc/heading :seon.doc/lead :seon.doc/text :seon.doc/parent :seon.doc/references :seon.doc/names :seon.doc/dead-links :seon.doc/read :seon.doc/baseline-unread])
+  [:seon.doc/heading :seon.doc/level :seon.doc/position :seon.doc/lead :seon.doc/text :seon.doc/parent :seon.doc/references :seon.doc/names :seon.doc/dead-links :seon.doc/read :seon.doc/baseline-unread])
 
 (defn read-map
   "The form id of each of names that is a var of db with a form, {name form-id}: the code as it
@@ -168,9 +174,9 @@
 ;; ---- reading ----------------------------------------------------------------------------
 
 (defn- children
-  "The sections whose parent is section entity e on db, in the order the wiki was written."
+  "The docs whose parent is doc entity e on db, in the page's order (:seon.doc/position)."
   {:malli/schema [:=> [:cat :seon.host/db :int] [:vector :int]]}
-  [db e] (vec (sort (d/q '[:find [?c ...] :in $ ?p :where [?c :seon.doc/parent ?p]] db e))))
+  [db e] (mapv second (sort (d/q '[:find ?n ?c :in $ ?p :where [?c :seon.doc/parent ?p] [?c :seon.doc/position ?n]] db e))))
 
 (declare resolve-ref)
 
@@ -251,6 +257,23 @@
   [db]
   (vec (sort (d/q '[:find [?p ...] :where [?e :seon.doc/address ?a] (not [?e :seon.doc/parent _])
                     [(clojure.string/index-of ?a "#") ?i] [(subs ?a 0 ?i) ?p]] db))))
+
+(defn markdown
+  "The text of the page at path as db holds it, nil when db holds no doc of it: each doc in the page's
+  order, its heading as written at its level, a blank line, its own text and a blank line,
+  the page ending in one newline. A page in that layout is its file byte for byte, so the store holds
+  the page and the file is drawn from it (seon.doc-test/a-loaded-page-draws-back-as-its-file)."
+  {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe :string]]}
+  [db path]
+  (when-let [top (ref/page-top db path)]
+    (let [sb (StringBuilder.)]
+      (letfn [(walk [e]
+                (let [{:seon.doc/keys [heading level text]} (d/pull db [:seon.doc/heading :seon.doc/level :seon.doc/text] e)]
+                  (.append sb (str (apply str (repeat level "#")) " " heading "\n\n"))
+                  (when text (.append sb (str text "\n\n")))
+                  (run! walk (children db e))))]
+        (walk top))
+      (str (str/trimr (str sb)) "\n"))))
 
 (defn pages
   "The wiki pages under dir of the checkout (docs by default), read: {path text}, each path
