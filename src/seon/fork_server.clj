@@ -150,8 +150,11 @@
                  ;; persistent indexes), never its datoms replayed here: replaying a 42,942-datom
                  ;; import took 3.5 s, and the first fork waited behind it
                  db' (d/commit-as-db (:store st) (:commit m))
-                 ;; the search's text indexes held for main carried to it when the commit wrote no text
-                 _ (doc/carry-index! (:db st) db' (into #{} (map #(nth % 2 nil)) (:tx-data m)))
+                 ;; the search's text indexes held for main carried to it when the commit wrote no text: only
+                 ;; from its parent (a commit between them, unseen here, could have written one; the next read
+                 ;; then checks the texts' fingerprint)
+                 _ (when (contains? (set (get-in db' [:meta :datahike/parents])) (d/commit-id (:db st)))
+                     (doc/carry-index! (:db st) db' (into #{} (map #(nth % 2 nil)) (:tx-data m))))
                  st (cond-> (assoc st :db db' :evals-max (evals-max-after (:evals-max st) (:tx-data m))) (not= (:max-tx db') (:t m)) (update :mismatch inc)
                       ;; the program moved: the reach graph is brought to it at the next fork
                       (program/moves-program? (:tx-data m)) (assoc :graph-moved true :static-due true))
