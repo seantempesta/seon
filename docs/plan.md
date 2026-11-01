@@ -17,6 +17,14 @@ What Seon is for, where it stands, the one step being worked now, and the steps 
 
 **Measured as** turns to green and tasks merged. **Held to:** nothing crashes or hangs (every failure is data to the agent); everything shown is derived from the db at t; one mechanism per job; every change earns its place; a v1 capability is present or dropped on purpose ([parity](parity.md)).
 
+## Where it stands (2026-11-01, afternoon)
+
+**Waste out of the agent loop** (the owner: "if we are doing wasteful shit for no reason we should address it"; main ae3bd0f901):
+- an agent's start costs the same however long its root has run: the fork server reads what the agent it forks will read (seon.fork-server/warm-start) and hands main's highest eval number; 5.86-6.04 MB from 10 to 1,000 runs of history, where it grew 9.7 -> 12.7 MB (batch 72, [machine](machine.md#an-agents-first-write));
+- an eval reads no schema entry while none moved (seon.repl/branch-registry, up to three 1.08 MB reads an eval before; batch 72);
+- a whole health read reads each text once for its old words: my.root/problems on the standing root 560-645 MB -> 222-274 MB a call ([health](health.md#cost)).
+Next, by size: each eval's commit writes ~2.7 MB for a record of a few datoms (every index's path, current and history: Datahike's write amplification, a fork change); my.root/problems reads health whole where the render proc keeps it current by what changed (seon.render.proc/health!; using it needs the recorded part, with root's error fold, apart from the derived part: an owner's plan); then unnamed-sites (62 MB a whole read) and the first run's record build (~1.6 MB).
+
 ## Where it stands (2026-10-31, night)
 
 **The two sessions, tonight** (the owner: context fixes first, optimization alongside; batches 55-71 merged, main 10283fccca). The md-scan bench went from no change held to scan's change held and 1 of 4 proofs green (bench-b16), each run's lost turns fixed at their cause:
