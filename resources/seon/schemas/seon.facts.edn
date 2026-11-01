@@ -221,8 +221,8 @@
  :seon.search/of :seon.db/ref
  ;; the words searched: matched as words, by meaning and by the names they hold (seon.context/search)
  :seon.search/query :string
- ;; how many hits are shown
- :seon.search/k [:int {:min 1 :max 50}]
+ ;; how many hits are shown, when the search asks other than :seon.config.render/search
+ :seon.search/k pos-int?
  :seon.search/search-fact [:map {:seon.db/attributes true :seon.ctx/pattern [*]}
                            [:seon.search/id :seon.search/id] [:seon.search/of :seon.search/of] [:seon.search/query :seon.search/query]
                            [:seon.search/k {:optional true} :seon.search/k]]

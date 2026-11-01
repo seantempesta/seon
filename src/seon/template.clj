@@ -131,7 +131,9 @@
   released: the reconciler sees the whole set at once and forks its first agent only once it
   is committed. A task that starts from a request (:design, :whole) holds a search of its request's
   words (:seon.search/search-fact), which its page draws on the branch's db
-  (seon.render.ui/searched): the place to start, before any citation. An error (seon.task/create-tx's)
+  (seon.render.ui/searched): the place to start, before any citation. The query is the plan as the
+  request wrote it, copied once: the agent owns it after, and changes it with a swap! on ctx (an edit of
+  the plan later leaves it as the agent last set it). An error (seon.task/create-tx's)
   answers as it is."
   {:malli/schema [:=> [:cat :seon.host/db [:vector :seon.task/declaration]]
                   [:or [:vector :any] [:map [:seon.error/type [:= :seon.task/refused]] [:seon.error/message :string]]]]}
@@ -145,7 +147,7 @@
                       :let [id (task/task-id (:seon.task/ns d) (:seon.task/name d))]]
                   ;; of the task by its tempid, its id, as create-tx's cites name it
                   {:seon.search/id (str id "/request") :seon.search/of id
-                   :seon.search/query (:seon.task/plan d) :seon.search/k 10}))))))
+                   :seon.search/query (:seon.task/plan d)}))))))
 
 (def stall-proofs
   "A stall task's boundary conditions, its proofs (seon.stall-proofs, read from its
