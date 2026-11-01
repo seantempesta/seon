@@ -17,6 +17,19 @@ What Seon is for, where it stands, the one step being worked now, and the steps 
 
 **Measured as** turns to green and tasks merged. **Held to:** nothing crashes or hangs (every failure is data to the agent); everything shown is derived from the db at t; one mechanism per job; every change earns its place; a v1 capability is present or dropped on purpose ([parity](parity.md)).
 
+## Where it stands (2026-11-01, evening)
+
+**Our benchmarks were contaminated, so context is now decided by an evaluation built to resist it** (the owner: "We found a lot of fraud and all of our benchmarking is now contaminated"; plan agreed by the context and optimization sessions, `claude_scratch/context-lab/PLAN.md`). What was wrong: bench tasks reverted src but kept main's tests, requests named the functions, and agent-facing docs held the bench's own solution.
+- **The task pool:** Seon's own merged commits changing 1-5 definitions with tests, built at the parent commit: 60 dev tasks over 33 areas (`data/dev.jsonl`), 78 held out by time and not run until the harness is frozen. Requests are symptom-only, written by fresh agents from the diff alone. Truth: T1, what the commit changed; T2, what the commit's own solver session read at least halfway since its previous commit. Leak guards: the commit's own tasks dropped from the parent's pool; agent-facing text checked for the answer; the parent's db from its own tree, never today's store, whose history holds the fix; a read outside the parent tree fails a run (L2).
+- **Levels, cheapest first:** L0, does the assembled context contain T1/T2, and at what token cost (no model); L1, one model call on that context; L1.5, a replay of a recorded run's prefix for what acts from turn 2 (masking, bounded reads); L2, a full run against hidden tests. L1 is trusted only once it predicts L2.
+- **L0's first numbers** (51 tasks without errors; the runner is today's own assembler, `seon.context/render`, over the parent's db: `test/seon/zz_l0_test.clj`, scratch):
+  - today's context for a symptom-only request shows nothing changed or read: T1 and T2 area 0.000, about 2,300 tokens;
+  - with the commit subject instead, 0.067, only because subjects name the functions;
+  - `seon.context/search`'s top 10 by text and references: a T1 item among them in 63% of tasks, T1 area 0.139 [0.100, 0.180], T2 0.019;
+  - with meaning fused (43 tasks so far): a T1 item at rank 1 in 18 against 4 (McNemar p = 0.0005), in the top 10 in 74%; it ranks the change first rather than finding more functions.
+- **About 16% of tasks error** building the parent's db: an old tree's code names what today's image lacks or holds private (the cleaner cause is open in `seon.source/another-trees-ns-form-analyzes-beside-the-image`).
+- **Next:** the graph distance from the meaning seeds and from T1 to each T1 and T2 item (`test/seon/zz_dist_test.clj`, scratch), which decides which edge classes an expansion arm follows; the expansion arms; L1 on the winners. The owner's open calls: masking old eval results (against the 2026-10-28 no-history-budget ruling) as an L1.5 experiment.
+
 ## Where it stands (2026-11-01, afternoon)
 
 **Waste out of the agent loop** (the owner: "if we are doing wasteful shit for no reason we should address it"; main 18995441d3):

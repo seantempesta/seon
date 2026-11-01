@@ -10,6 +10,14 @@ The owner's rulings of 2026-11-01, after the audit of what agents read; they sta
 
 "We don't mimic repl output with comments it breaks the models. Do not lead the models just to score a win. All benefits should be general." Nothing an agent reads (the help page, its instructions, a cited section, a task's plan) tells a run's story or hints at the change it is asked for. A benchmark is work whose answer is not in the tree: a reverted change whose tests stay behind measures nothing. A red cost proof is never cleared by the changing agent raising its own bound; an overrun is accepted only as [cost](cost.md#an-accepted-overrun-and-its-ratchet) says, filed by a person (AGENTS §3, every change earns its place).
 
+### An agent's evals on a task are a session; past ones are shown as curated sessions (owner, 2026-11-01)
+
+"Yeah sessions is fine"; "In the instructions I don't think we say the dead ends part. Curated sessions." A session is an agent's evals on a task in order (nREPL's word; still stored as `:seon.run/*`, renamed only by a store erase). A past session shown to an agent as a worked example is a curated session: the session as stored, with the evals that led nowhere marked out, reaching the model as the same tool-call turns its own evals do (`seon.context/eval-messages`), never as a text blob and never repeating the system message. No parallel store or renderer; it is evaluated as a measured arm before it is built in (plan.md, where it stands).
+
+### Context is data a render draws from the db (owner, 2026-11-01)
+
+"Do not create parallel systems to the context generation and rendering." What an agent is shown is data in the db (a task's citations, a search as a citation) drawn by the one render (`seon.context/render`); an evaluation arm differs from another by its data, never by code that builds a second context.
+
 ## 2026-10-31 rulings
 
 The owner's rulings of 2026-10-31; they stand over earlier entries where they differ.

@@ -14,7 +14,7 @@
   the base its write-back edits, entry by entry, with rewrite-clj (v1's `schema-file-text`):
   every other byte as it was."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.step :as step] [seon.program :as program] [seon.db :as pdb] [seon.reader :as reader] [seon.config :as config] [datahike.api :as d] [clojure.string :as str] [clojure.set :as set]
+  (:require [seon.contract :as contract :refer [defn defn-]] [seon.step :as step] [seon.program :as program] [seon.db :as pdb] [seon.reader :as reader] [seon.config :as config] [jolt.scheme] [clojure.java.io] [datahike.api :as d] [clojure.string :as str] [clojure.set :as set]
             [rewrite-clj.zip :as z] [rewrite-clj.node :as node] [rewrite-clj.parser :as parser] [jolt.analyzer] [jolt.host] [seon.edn :as sedn]))
 
 (defn read-forms
@@ -78,6 +78,14 @@
         hv (head-var form nsx)
         ns-form? (= #'clojure.core/ns hv)
         macro? (= #'clojure.core/defmacro hv)]
+    ;; an alias the ns form points at another namespace (another tree's form, across a rename) is cleared first,
+    ;; since Jolt refuses it while the old alias stands; every other alias is left as the live namespace has it
+    (when ns-form?
+      (let [wanted (into {} (for [spec (mapcat rest (filter #(and (seq? %) (= :require (first %))) (rest form)))
+                                  :when (vector? spec) :let [[target & opts] spec as (:as (apply hash-map (rest spec)))] :when as]
+                              [as target]))]
+        (doseq [[a target] (ns-aliases nsx) :when (and (contains? wanted a) (not= (wanted a) (ns-name target)))]
+          (ns-unalias nsx a))))
     (when (or ns-form?
               (and macro? (not (some-> (ns-resolve nsx (second form)) bound?))))
       (binding [*ns* nsx] (eval form)))
@@ -254,12 +262,32 @@
   "The attributes that name a program entity (seon.facts.edn)."
   [:form/id :var/name :ns/name :method/key :impl/key :schema/key :schema.file/path])
 
+(def ^:private mark-loaded!
+  "Jolt's loader's mark (ldr-mark-loaded!, by namespace name): a require of the namespace answers it loaded."
+  (delay (jolt.scheme/proc "ldr-mark-loaded!")))
+
+(defn- in-checkout?
+  "Whether the file of namespace nsym, at relative path p (as its db or its tree records it), exists in the
+  checkout: a namespace whose file the checkout lacks (another tree's, e.g. one since renamed) no require
+  of this process can load from disk."
+  {:malli/schema [:=> [:cat :symbol [:maybe :string]] :boolean]}
+  [nsym p]
+  (boolean (and p (.exists (java.io.File. (str (config/checkout) "/" p))))))
+
 (defn- read-nss
   "Each namespace of files ({relative path text}) read and analyzed in load order: {nsym
-  {:accounts :tail :file}} (accounts, with its file's relative path)."
+  {:accounts :tail :file}} (accounts, with its file's relative path). A namespace the files define
+  whose file the checkout lacks (another tree's, e.g. one since renamed: in-checkout?) is marked loaded
+  once analyzed, so a later file's require of it answers from the analysis, never a load from disk that
+  cannot find it; one whose file the checkout has is never marked (a real require must still load it). See
+  docs/source.md#main-s-program-follows-the-tree."
   {:malli/schema [:=> [:cat [:map-of :string :string]] [:map-of :symbol :map]]}
   [files]
-  (into {} (for [[nsym path text] (load-order files)] [nsym (assoc (accounts nsym text) :file path)])))
+  (reduce (fn [m [nsym path text]]
+            (let [a (assoc (accounts nsym text) :file path)]
+              (when-not (in-checkout? nsym path) (@mark-loaded! (str nsym)))
+              (assoc m nsym a)))
+          {} (load-order files)))
 
 (defn- ns-tx
   "The facts that make namespace nsym's program on db its file's (read, as read-nss answers
@@ -425,7 +453,8 @@
   form is written only where it differs from db (program-tx). The same program as replace-tx
   of the whole tree, at the cost of what changed: a body edit reads one file and writes its
   changed forms, whatever the program's size or the file's dependents (task
-  seon.source/an-import-reads-only-changed-files)."
+  seon.source/an-import-reads-only-changed-files). A dependent whose file the change removes is never
+  read again."
   {:malli/schema [:=> [:cat :seon.host/db [:map-of :string [:maybe :string]]] :seon.db/tx-data]}
   [db changed]
   (let [ns-of-path (fn [p] (some #(when (= p (:v %)) (:ns/name (d/entity db (:e %)))) (d/datoms db :aevt :ns/file)))
@@ -439,8 +468,10 @@
                        ;; what the namespace had that it no longer has: a name removed or of another kind, a
                        ;; macro, protocol, type or inline function changed (what was added breaks no form)
                        lost (into {} (for [n (concat (keys now) check) :let [l (set/difference (db-interface db n) (read-interface (read n)))] :when (seq l)] [n l]))]
+                   ;; a dependent whose file the change removes is gone, never read again from db's text
+                   ;; (the old text of a removed file requires what the change removed with it)
                    (recur (into {} (for [[n l] lost d (dependents db n l) :when (not= d n)
-                                         :let [p (:ns/file (d/entity db [:ns/name d]))] :when p]
+                                         :let [p (:ns/file (d/entity db [:ns/name d]))] :when (and p (not (and (contains? changed p) (nil? (changed p)))))]
                                      [p (or (texts p) (file-text db d))]))
                           [] read))))]
     (program-tx db read changed (set (filter schema-resource? (keys changed))))))
