@@ -1049,3 +1049,11 @@
     (is (= ["src/app/priv.clj"] (:files e)))
     (is (vector? (source/tx-of db {"src/app/ok.clj" "(ns app.ok)\n\n(defn f [] 1)\n"} true)) "a file that analyzes is its facts")
     (is (vector? (source/tx-of db {"src/app/ok.clj" "(ns app.ok)\n\n(defn f [] 1)\n"} false)) "whole tree too")))
+
+(deftest a-forms-head-reads-without-its-namespace-loaded
+  ;; docs/health.md#a-function-that-cites-no-section: seon.source/first-head read a recorded form with
+  ;; read-string in its namespace, found by find-ns; in a process that never loaded it (bin/check health),
+  ;; a form holding `::flow/in-ports` did not read, and the check failed on any change to such a var
+  (is (= "defn" (seon.source/first-head 'never.loaded.ns "(defn f [] {::flow/in-ports {:in 1} ::own 2})")))
+  (is (= "defmacro" (seon.source/first-head 'never.loaded.ns "(defmacro m [x] `(do ~x ::a/b))")))
+  (is (nil? (seon.source/first-head 'never.loaded.ns "[::a/b 1]"))))
