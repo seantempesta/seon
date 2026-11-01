@@ -49,24 +49,40 @@
     (is (= #{} (set (for [[n r] reqs :when (and (in? "src/" n) (in? "test/" r))] [n r])))
         "no src namespace requires a test/ one")))
 
+(defn- src-docstrings
+  "Every docstring of src as [name doc], read from the compiler's facts: a var's :var/doc, and a namespace's
+  from its ns form (the facts hold no :ns/doc), read as data."
+  []
+  (let [db (runner/program-db (seon.config/checkout) (ts/kept-program-store))]
+    (concat (d/q '[:find ?n ?doc :where [?v :var/name ?n] [?v :var/doc ?doc] [?v :var/form ?f] [?f :form/ns ?ns] [?ns :ns/file ?file]
+                   [(clojure.string/starts-with? ?file "src/")]] db)
+            (for [[n src] (d/q '[:find ?n ?src :where [?ns :ns/name ?n] [?ns :ns/form ?f] [?f :form/src ?src] [?ns :ns/file ?file]
+                                 [(clojure.string/starts-with? ?file "src/")]] db)
+                  :let [form (binding [*read-eval* false] (read-string {:read-cond :allow :features #{:clj}} src))
+                        doc (when (seq? form) (some #(when (string? %) %) (take 2 (drop 2 form))))]
+                  :when doc]
+              [n doc]))))
+
 (deftest no-docstring-carries-a-date
   ;; task seon.main/docstrings-carry-no-dates-and-no-old-words: a docstring says what a var or
   ;; namespace is now; when a ruling was made and what a measurement read that day are git's and
   ;; DECISIONS'. Read from the compiler's facts of src (:var/doc, :ns/doc), so a new one is red
-  (let [db (runner/program-db (seon.config/checkout) (ts/kept-program-store))
-        dated (fn [s] (re-find #"\b20\d\d-\d\d-\d\d\b" (or s "")))
-        rows (concat (d/q '[:find ?n ?doc :where [?v :var/name ?n] [?v :var/doc ?doc] [?v :var/form ?f] [?f :form/ns ?ns] [?ns :ns/file ?file]
-                            [(clojure.string/starts-with? ?file "src/")]] db)
-                     ;; a namespace's docstring is in its ns form (the facts hold no :ns/doc), read as data
-                     (for [[n src] (d/q '[:find ?n ?src :where [?ns :ns/name ?n] [?ns :ns/form ?f] [?f :form/src ?src] [?ns :ns/file ?file]
-                                          [(clojure.string/starts-with? ?file "src/")]] db)
-                           :let [form (binding [*read-eval* false] (read-string {:read-cond :allow :features #{:clj}} src))
-                                 doc (when (seq? form) (some #(when (string? %) %) (take 2 (drop 2 form))))]
-                           :when doc]
-                       [n doc]))]
+  (let [dated (fn [s] (re-find #"\b20\d\d-\d\d-\d\d\b" (or s "")))
+        rows (src-docstrings)]
     (is (pos? (count rows)) "the facts hold src's docstrings")
     (is (= [] (sort (for [[n doc] rows :when (dated doc)] [n (dated doc)])))
         "no src docstring holds an ISO date")))
+
+(deftest no-docstring-names-a-bench-run
+  ;; docs/README.md#how-the-wiki-is-kept: what an agent reads (docstrings come through `doc` and `source`) states a
+  ;; rule as current truth, never which bench run showed it (it must not recount a run or hint at a task's
+  ;; answer); the run is git's and decisions.md's. The pattern of seon.doc-test/no-section-names-a-bench-run, and the
+  ;; md-scan bench, read from the compiler's facts of src; comments are not facts, so a scan of src is not done here
+  (let [id #"(?:^|[^A-Za-z0-9_-])(md-scan\b|bench-[a-z0-9]+(?:-[a-z0-9]+)*|[a-z][a-z0-9]*(?:-[a-z0-9]+)+ (?:#[0-9]+|bench\b))"
+        rows (src-docstrings)]
+    (is (pos? (count rows)) "the facts hold src's docstrings")
+    (is (= [] (sort (for [[n doc] rows :let [ids (distinct (map second (re-seq id doc)))] :when (seq ids)] [n (vec ids)])))
+        "no src docstring names a bench or a numbered run: each is [name ids]")))
 
 (deftest only-measure-reads-the-tick-counter
   ;; task seon.profile/a-call-is-measured-one-way: a call is measured one way, so no src form but

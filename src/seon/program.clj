@@ -1023,8 +1023,8 @@
   naming one, on and on: schema-dependents' closure), compiled against db's schemas: one arm!
   armed again over its raw root (seon.contract/rearm!), one the defn macro armed at its definition by
   evaluating that definition again (its source as the REPL kept it, else as db records it): what a registration in a running agent owes the code it holds, whose
-  contracts were compiled before it (my.schema/register!; md-scan #7, #8 and #11 met their own
-  registered :seon.ref/block in Seon's seon.ref/sections, still checking the old one). A load of
+  contracts were compiled before it (my.schema/register!: Seon's own code, seon.ref/sections for one,
+  would still check a registered :seon.ref/block against the old form). A load of
   db's program re-arms the same by evaluating the forms again (load!). Answers the errors. See docs/source.md#schemas-at-the-repl."
   {:malli/schema [:=> [:cat :seon.host/db [:set :qualified-keyword]] [:vector :map]]}
   [db keys]
@@ -1716,8 +1716,7 @@
 (defn run-digest
   "The digest of what a test run of db reads (seon.prove/run-key): its program (program-digest) and
   every task's proofs and needs, which the run selects its proofs from (seon.task/accumulate), so
-  registering a proof is a new run; bench-scope-5's design registered three and its prove answered
-  the run from before them, \"green: ran 0\" (docs/merging.md#the-test-service). Cost: program-digest's, and one read of the two
+  registering a proof is a new run, never answered from the run before it as \"green: ran 0\" (docs/merging.md#the-test-service). Cost: program-digest's, and one read of the two
   attributes' datoms."
   {:malli/schema [:=> [:cat :seon.host/db] :string]}
   [db]

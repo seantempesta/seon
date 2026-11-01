@@ -36,8 +36,7 @@
 
 (defonce ^{:doc "This process's socket to root, {:fd :conn :ch}, its one reader's channel among it (intake): the
   process's own, apart from state, so forms that replace state (a test's helper resetting it at the REPL)
-  leave the process able to answer root and reading with one reader (bench-scope-3's implement agent ran
-  seon.ctx-test's cost measure, and died on its next reply). See docs/processes.md#the-socket-and-the-agent-proc."}
+  leave the process able to answer root and reading with one reader (a test that runs a measure in the agent must not leave it dead on its next reply). See docs/processes.md#the-socket-and-the-agent-proc."}
   link (atom nil))
 
 
@@ -926,10 +925,9 @@
 (defn named-tests
   "The test vars names names on db (each a deftest's var, :var/kind :test): a qualified name, that test; a
   namespace's, its tests. What a request naming them runs, beside the task's proofs, whether or not the
-  branch changed what they reach (bench-scope-1's design agent named three tests of seon.render-test on a
-  branch that had changed nothing, and four proves answered ran 0, reused 0, each test :none); a named test
-  runs alone (bench-scope-5's design named three and ran the namespace's 85, two of them red for no reason of
-  its, which held its done). See docs/agent.md#testing.
+  branch changed what they reach (a prove naming tests on a branch that changed nothing
+  would otherwise answer ran 0, reused 0, each test :none); a named test
+  runs alone (not the namespace's other tests, whose reds are not its own). See docs/agent.md#testing.
   Cost: a seek per name, and a namespace's forms' definitions."
   {:malli/schema [:=> [:cat :seon.host/db [:set :symbol]] [:set :qualified-symbol]]}
   [db names]

@@ -561,7 +561,7 @@
     []
   (let [rows (old-word-rows (slurp (str (config/checkout) "/AGENTS.md")))
         words (spellings-of rows)
-        ;; what to say instead, so the row says it (bench-delims-1's agent spent three turns finding section 7a)
+        ;; what to say instead, so the row says it
         instead (into {} rows)
         texts (place-texts db places)]
     (vec (for [[[kind id path] w] (old-word-hits (filterv (comp some? second) texts) words)
