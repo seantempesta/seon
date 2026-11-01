@@ -57,6 +57,8 @@ Deletes: build-index's postings, counts-in, the use of bm25-scores and idf-of in
                       seon.doc-test/grep-answers-each-matching-line-as-a-row
                       seon.doc-test/grep-finds-a-string-inside-a-term-as-grep-does
                       seon.doc-test/a-superseded-index-is-closed-once-nothing-uses-it
+                      seon.doc-test/a-written-plan-is-brought-into-the-index-without-a-rebuild
+                      seon.agent-test/an-agents-start-costs-the-same-however-long-its-root-has-run
                       seon.doc-cost-test/search-costs-its-texts
                       seon.doc-cost-test/a-text-index-costs-its-texts
                       seon.agent-test/an-agents-first-search-reads-the-index-it-inherited}}]
