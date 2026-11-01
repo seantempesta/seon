@@ -471,7 +471,7 @@
   Each text is lowered once and searched whole; only a line a spelling occurs in is cut and checked, so
   the cost is the texts' length and the lines that hit, not a copy of every line (450 MB a whole
   program's texts when each line was split and lowered: the commit that made it says). A text whose
-  lowered form differs in length is read line by line, by the same check."
+  lowered form differs in length is read line by line, by the same check. See docs/health.md#cost."
   {:malli/schema [:=> [:cat [:sequential [:tuple :any :string]] [:sequential [:tuple :string [:vector :string]]]] [:vector [:tuple :any :string]]]}
   [texts words]
   (let [word-char? (fn [c] (let [c (int c)] (or (<= 97 c 122) (<= 48 c 57) (= c 95))))
@@ -530,7 +530,7 @@
   each sorted), `old-word-kept` files left out: a var's form source in its namespace's file, a section's
   text in its page, a task's plan in its file. all? (every place on db, health's read): each attribute
   scanned once and joined by entity (29 MB over a program's 4,017 vars, against 164 MB seeking each var's
-  name, form and namespace in turn); else each named place sought (a move's few)."
+  name, form and namespace in turn); else each named place sought (a move's few). See docs/health.md#cost."
   {:malli/schema [:=> [:cat :seon.host/db [:map [:vars [:set :symbol]] [:sections [:set :string]] [:tasks [:set :string]] [:all? {:optional true} :boolean]]] [:vector [:tuple :any [:maybe :string]]]]}
   [db {:keys [vars sections tasks all?]}]
   (let [;; {e v}, an attribute's first value an entity holds, and {v e}, the first entity holding a value
