@@ -405,7 +405,9 @@
                         :when (and (not (and (:declare? d) (not multi?))) (set? d))]
                     (cond-> {:var (:var d) :kind (def-kind v d multi? types?)}
                       (contract-text v d) (assoc :contract (contract-text v d))
-                      (string? (or (some-> v meta :doc) (get (:meta d) :doc))) (assoc :doc (or (some-> v meta :doc) (get (:meta d) :doc))))))
+                      ;; the form's own docstring first: a file read without running (another tree's) holds its
+                      ;; text's, whatever the image's var says (seon.program-test/a-file-analyzed-keeps-its-own-docstring)
+                      (string? (or (get (:meta d) :doc) (some-> v meta :doc))) (assoc :doc (or (get (:meta d) :doc) (some-> v meta :doc))))))
         declares (into #{} (comp (filter :declare?) (map :var) (remove (set (map :var defs)))
                                  (remove #(contains? (:multis a) %))) (:defs a))
         methods (when (or ran? (nil? before))

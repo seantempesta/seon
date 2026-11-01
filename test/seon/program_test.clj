@@ -346,6 +346,15 @@
              (select-keys (by-src "(defn twice [x] (* 2 x))") [:id :defs :refs]))
           "the REPL's facts for the same text"))))
 
+(deftest a-file-analyzed-keeps-its-own-docstring
+  ;; docs/source.md#another-trees-program-analyzed-beside-this-image: a file read without running (another
+  ;; tree's, an old commit's) records the docstring its text holds, not the one the running image's var has
+  (eval-account 'app.pt-doc "(defn told \"the image's doc, written later\" [x] x)")
+  (let [{:keys [accounts]} (source/accounts 'app.pt-doc "(defn told \"the file's own doc\" [x] x)\n")]
+    (is (= "the image's doc, written later" (:doc (meta (find-var 'app.pt-doc/told)))) "the image holds the later definition")
+    (is (= [{:var 'app.pt-doc/told :kind :fn :doc "the file's own doc"}] (:defs (first accounts)))
+        "the account of the file's form holds the file's docstring")))
+
 (deftest defmethod-extend-and-defrecord-merge-and-load-on-main
   (let [base (empty-db)
         branch (record base
