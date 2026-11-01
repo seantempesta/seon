@@ -207,7 +207,7 @@
   "Each embedded kind: the attribute holding its text, and the text the model reads, of its title
   (`title`'s, nil when it has none) and its text."
   {:form/src (fn [title src] (document title src))
-   :seon.section/text (fn [title text] (document title text))
+   :seon.doc/text (fn [title text] (document title text))
    ;; a schema's form, so a search finds schema keys by meaning too
    ;; (docs/vector.md#relevance)
    :schema/form (fn [title form] (document title form))
@@ -224,7 +224,7 @@
   (let [names (into {} (map (juxt :e :v)) (d/datoms db :aevt :var/name))]
     (merge (into {} (map (fn [[f ds]] [f (str (first (sort (keep (comp names :e) ds))))]))
                  (group-by :v (d/datoms db :aevt :var/form)))
-           (into {} (map (juxt :e :v)) (d/datoms db :aevt :seon.section/heading))
+           (into {} (map (juxt :e :v)) (d/datoms db :aevt :seon.doc/heading))
            (into {} (map (fn [d] [(:e d) (str (:v d))])) (d/datoms db :aevt :schema/key)))))
 
 (defn- title
@@ -232,7 +232,7 @@
   {:malli/schema [:=> [:cat :seon.host/db :int] [:maybe :string]]}
   [db e]
   (or (some->> (d/datoms db :avet :var/form e) (keep #(stored db (:e %) :var/name)) sort first str)
-      (stored db e :seon.section/heading)
+      (stored db e :seon.doc/heading)
       (some-> (stored db e :schema/key) str)))
 
 (defn- due-among

@@ -101,7 +101,7 @@ The words for tasks and their prerequisites, and the namespace that owns each.
 | **failure point** (was dragon) | a place where the outside world can fail us, met by one named edge function | `docs/failure-points.md` |
 | **problem** | an open fact that something needs fixing: a failed or blocked task, a task conflict, a recorded error; health is their absence ([errors](errors.md#problems)) | `seon.problems/report`, `my.root/problems` |
 | **error fact** | an error recorded as data where it happened, folded per key until its cause is fixed ([errors](errors.md#errors)) | `seon.error/fold` |
-| **section** | one heading of a wiki page as an entity on main: address `path#anchor`, heading, lead, own text, parent, and references (what its own text cites); its backlinks are who cites it | `seon.docs/load-tx` |
+| **section** | one heading of a wiki page as an entity on main: address `path#anchor`, heading, lead, own text, parent, and references (what its own text cites); its backlinks are who cites it | `seon.doc/load-tx` |
 
 ## Agent-facing functions (`my.*`)
 
@@ -117,4 +117,3 @@ The functions an agent has in its own namespaces, by namespace.
 | `my.fx` | `call`, `send` (effects through their owner) |
 | `my.branch` | `merge-main!`, `unmerged`, `resolve!` |
 | `my.root` (root's functions) | `create!`, `request!`, `run!`, `hold!`, `cancel!`, `task-files`, `load-tasks!`, `load-docs!`, `problems`, `generation`, `resume-args`, `build!`, `next-generation` |
-

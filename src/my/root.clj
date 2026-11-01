@@ -2,7 +2,7 @@
   "Root's functions on tasks (from proto.agents.root): write desired state on main;
   the reconciler proc does the rest. Each takes root's system (seon.root/start!)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.edn :as sedn] [seon.contract :as contract :refer [defn defn-]] [seon.root :as root] [seon.task :as task] [seon.docs :as docs] [seon.problems :as problems] [clojure.java.io :as io] [clojure.string :as str] [seon.config :as config]
+  (:require [seon.edn :as sedn] [seon.contract :as contract :refer [defn defn-]] [seon.root :as root] [seon.task :as task] [seon.doc :as doc] [seon.problems :as problems] [clojure.java.io :as io] [clojure.string :as str] [seon.config :as config]
             [seon.reconcile :as reconcile] [seon.db :as pdb] [seon.template :as tpl] [seon.watch :as watch] [datahike.api :as d]
             [seon.judge :as judge] [seon.model :as model] [seon.turn :as turn] [clojure.edn :as edn] [seon.lib :as lib] [seon.fx :as fx] [seon.error :as err] [seon.source :as source] [seon.program :as program] [seon.agent]))
 
@@ -136,7 +136,7 @@
                                         (str "run " id (if (runs id) " has no write-back to repeat" " does not exist")) {:run id})))
         paths (vec (sort (distinct (mapcat #(:seon.git/files (reconcile/lost-write-back (runs %))) lost))))
         root (config/value :seon.config.source/root)
-        files (when (and (seq lost) root) (source/files db paths))
+        files (when (and (seq lost) root) (doc/files db paths))
         members (vec (for [id lost] {:task (:seon.run/task (runs id)) :run id}))
         r (cond (empty? lost) {:written []}
                 (nil? root) (contract/error :seon.root/no-source-root #'my.root/write-back!
@@ -253,7 +253,7 @@
 
 (defn load-docs!
   "Load the wiki (the pages under dir of the checkout, docs by default) into main as section
-  entities (seon.docs/load-tx): a changed section rewritten, a removed one retracted, an
+  entities (seon.doc/load-tx): a changed section rewritten, a removed one retracted, an
   unchanged wiki writing nothing. Answers the writer's answer with the counts."
   {:malli/schema [:function [:=> [:cat :seon.root/sys] :map] [:=> [:cat :seon.root/sys :string] :map]]}
   ([sys] (load-docs! sys "docs"))
@@ -262,8 +262,8 @@
      ;; the boot's digest of the wiki no longer says what main holds: dropped, so the next boot loads
      (let [db @(:conn sys)]
        (write-declared! sys (into (when-let [e (pdb/eid db :seon.root/id :root)] [[:db.fn/retractAttribute e :seon.root/wiki]])
-                                  (docs/load-dir-tx db (config/checkout) dir (root/wiki-baseline sys (config/checkout) dir)))
-                        {:pages (count (docs/pages (config/checkout) dir))} nil)))))
+                                  (doc/load-dir-tx db (config/checkout) dir (root/wiki-baseline sys (config/checkout) dir)))
+                        {:pages (count (doc/pages (config/checkout) dir))} nil)))))
 
 (defn problems
   "Every open problem on main, by class (seon.problems/health): recorded errors counted

@@ -138,7 +138,7 @@
   ;; audit item 2c: a reproduction's string literals are its data, as quoted output is: a path or a
   ;; name inside "..." is no citation, while the call around it is; a code span inside quotes is
   ;; still the code span it is (the wiki's own citations)
-  (is (= '[seon.docs/load-tx] (ref/names "Reproduce: (seon.docs/load-tx db \"docs\" {\"docs/flow.md\" \"# Flow\"}).")))
+  (is (= '[seon.doc/load-tx] (ref/names "Reproduce: (seon.doc/load-tx db \"docs\" {\"docs/flow.md\" \"# Flow\"}).")))
   (is (= [] (kinds nil "It answers \"docs/flow.md\" and \"seon.ref/parse\".")) "a quoted path or name, as data")
   (is (= '[seon.ref/names] (ref/names "Reproduce: (seon.ref/names \"Callers of seon.print.emit/foo are listed.\") answers [].")) "nor any word of a quoted sentence")
   (is (= '[seon.ref/parse] (ref/names "The owner: \"use `seon.ref/parse` for it\".")) "a code span between quotes is a citation still")

@@ -31,7 +31,7 @@
     clojure.repl as at any Clojure REPL (source, doc, dir, apropos, find-doc, pst), with *1 *2 *3 *e:
     source reads this branch's own definitions first, then a library's file"
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.lib :as lib] [seon.context :as context] [seon.ref :as ref] [seon.docs :as docs]
+  (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.lib :as lib] [seon.context :as context] [seon.ref :as ref] [seon.doc :as doc]
             [seon.config :as cfg] [seon.proofs :as proofs] [seon.fx :as fx] [seon.program :as program] [seon.task :as task] [seon.vector :as vector] [seon.contract :as contract] [seon.ctx]
             [seon.db :as pdb] [seon.problems :as problems] [seon.render.ui :as ui] [my.schema :as schema] [jolt.analyzer] [clojure.java.io :as io] [clojure.string :as str] [clojure.main] [datahike.api :as d]))
 
@@ -152,7 +152,7 @@
 
 (defn callers
   "The program vars whose recorded definition names x on this branch, sorted, x itself left out
-  (seon.docs/callers): a var's callers (x a qualified symbol, or the var: named), or the functions
+  (seon.doc/callers): a var's callers (x a qualified symbol, or the var: named), or the functions
   operating on a qualified keyword, an attribute, config key or schema entry (its :form/keywords).
   A symbol through an alias reads as the var it resolves to; one that names no var answers so
   (:my.agent/no-var), never []. A keyword that is a schema, an attribute or a key the program
@@ -166,7 +166,7 @@
     (or (when (symbol? x) (no-var db x))
         (when (and (keyword? x) (not (or (contains? fs x) (contains? (d/schema db) x) (seq (d/datoms db :avet :form/keywords x)))))
           (schema/unknown-key fs x))
-        (docs/callers db x))))
+        (doc/callers db x))))
 
 (defn tests-reaching
   "The tests whose reach includes var x on this branch, nearest first, each {:test}: the tests a change to
@@ -342,7 +342,7 @@
   in this process kept (seon.repl), else what this branch records for it, else the form at its
   :file and :line (a library's, or any in a process with no branch). A namespace's name answers its ns form as this branch records
   it (its requires and aliases), then each definition, privates included, a line each in file
-  order (seon.docs/namespace-source), which clojure.repl's does not (pipeline 1's F4: a design
+  order (seon.doc/namespace-source), which clojure.repl's does not (pipeline 1's F4: a design
   that asked (source ns) saw the ns form alone, took it for all that was recorded, and spent five
   turns finding the namespace's private functions). sym is a symbol or the var (named)."
   {:malli/schema [:=> [:cat [:or :symbol :seon.host/var]] [:maybe :string]]}
@@ -351,11 +351,11 @@
   (if-let [v (let [r (if (var? sym) sym (resolve sym))] (when (var? r) r))]
     (or (:source (meta v))
         ;; the branch's record, where there is a branch (a process with no agent's db, a test run's, reads the file)
-        (some-> (:db @agent/state) (docs/source-of (named v)))
+        (some-> (:db @agent/state) (doc/source-of (named v)))
         (file-source v))
     (when-not (namespace sym)
       ;; the branch's record is the answer: a namespace it does not record has no ns form or privates to list
-      (some-> (:db @agent/state) (docs/namespace-source sym)))))
+      (some-> (:db @agent/state) (doc/namespace-source sym)))))
 
 (defn deferred
   "The process tests this branch's change reaches, a proof among them: an agent's turn and
@@ -397,9 +397,9 @@
   addresses, never the page ((my.agent/help) lists it). See docs/references.md#a-section-read-at-a-depth-with-its-edges."
   {:malli/schema [:=> [:cat :seon.host/db :string] [:vector :string]]}
   [db address]
-  (let [sections (docs/page db context/help-page :summary)
+  (let [sections (doc/page db context/help-page :summary)
         addresses (mapv :seon.ref/address sections)
-        pages (docs/page-paths db)
+        pages (doc/page-paths db)
         words (re-seq #"[a-z0-9]{4,}" (str/lower-case address))
         holds? (fn [s] (some #(str/includes? (str/lower-case s) %) words))
         ranked (jolt.analyzer/suggestions-for address (concat addresses pages))]
@@ -419,7 +419,7 @@
     (ui/cite-model {} (:tree (seon.ctx/build db' (pdb/eid db' :seon.cite/id (str "help " n)) nil)))))
 
 (defn help
-  "The wiki through the one view (seon.docs/view), as this branch holds it. No argument: the help
+  "The wiki through the one view (seon.doc/view), as this branch holds it. No argument: the help
   page (seon.context/help-page) at summary, each section its address, heading and lead's first
   sentence, with the sections it cites and those citing it. With an address (``docs/vector.md#the-model``) or
   an anchor of the help page (\"done\"), that section whole; with a page's path (\"docs/vector.md\"), that page
@@ -433,13 +433,13 @@
   plan, proofs and needs."
   {:malli/schema [:function [:=> [:cat] [:vector :seon.ref/view]]
                   [:=> [:cat [:or :string :symbol :qualified-keyword [:map [:kind :keyword]]]] :any]]}
-  ([] (vec (docs/page (agent/db) context/help-page :summary)))
+  ([] (vec (doc/page (agent/db) context/help-page :summary)))
   ([address]
    (cond
      (map? address) (let [db (agent/db) {:keys [kind name]} address]
                       (case kind
                         :task (select-keys (task/task db name) [:seon.task/id :seon.task/plan :seon.task/proofs :seon.task/needs])
-                        :section (docs/view db name :code)
+                        :section (doc/view db name :code)
                         :more address
                         (cited db name)))
      (or (symbol? address) (keyword? address))
@@ -447,8 +447,8 @@
      :else
    (let [db (agent/db)
          a (if (str/includes? address "#") address (str context/help-page "#" address))]
-     (or (docs/view db a :code)
-         (docs/page db address :summary)
+     (or (doc/view db a :code)
+         (doc/page db address :summary)
          {:no-section address
           :nearest (help-nearest db address)
           :read-one "(my.agent/help) lists the help page's sections; (my.agent/help \"docs/<page>.md\") a page's sections; (my.agent/help \"docs/<page>.md#<section>\") reads one; (my.agent/help 'ns.name) a namespace, every definition a line"})))))

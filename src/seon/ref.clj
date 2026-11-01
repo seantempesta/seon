@@ -542,7 +542,7 @@
 
 (defn parse
   "Markdown text at path (nil for a plan or a docstring) read once: its sections, each with
-  its own text (the lines after its heading up to the next heading, absent when blank), and
+  its heading as written (:seon.ref/written), its own text (the lines after its heading up to the next heading, absent when blank), and
   every citation its text makes, each mention with its depth and line, in order. This is the
   value the docs store keeps; `cited` gives each name once."
   {:malli/schema [:=> [:cat [:maybe :string] :string] :seon.ref/document]}
@@ -551,8 +551,10 @@
         secs (sections path blocks)
         lines (vec (str/split-lines text))
         ends (conj (mapv #(dec (:seon.ref/line %)) (rest secs)) (count lines))]
-    {:seon.ref/sections (mapv (fn [s end] (let [t (str/trim (str/join "\n" (subvec lines (min (:seon.ref/line s) end) end)))]
-                                            (cond-> s (not (str/blank? t)) (assoc :seon.ref/text t))))
+    {:seon.ref/sections (mapv (fn [s end] (let [t (str/trim (str/join "\n" (subvec lines (min (:seon.ref/line s) end) end)))
+                                                ;; the heading as its line writes it: past its #s, before a closing run of them
+                                                w (str/trim (str/replace (str/replace (nth lines (dec (:seon.ref/line s))) #"^\s*#+\s*" "") #"\s+#+\s*$" ""))]
+                                            (cond-> (assoc s :seon.ref/written w) (not (str/blank? t)) (assoc :seon.ref/text t))))
                               secs ends)
      :seon.ref/citations (into [] (keep #(candidate path %)) spans)}))
 
@@ -663,10 +665,10 @@
   the page whole is written as (seon.task/cites-tx). See docs/references.md#an-entity-cites."
   {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe pos-int?]]}
   [db path]
-  ;; the page's sections, one seek of :seon.section/address from its prefix (its addresses sort together)
+  ;; the page's sections, one seek of :seon.doc/address from its prefix (its addresses sort together)
   (let [pre (str path "#")]
-    (some #(when (empty? (d/datoms db :eavt (:e %) :seon.section/parent)) (:e %))
-          (take-while #(and (= :seon.section/address (:a %)) (str/starts-with? (:v %) pre)) (d/seek-datoms db :avet :seon.section/address pre)))))
+    (some #(when (empty? (d/datoms db :eavt (:e %) :seon.doc/parent)) (:e %))
+          (take-while #(and (= :seon.doc/address (:a %)) (str/starts-with? (:v %) pre)) (d/seek-datoms db :avet :seon.doc/address pre)))))
 
 (defn task?
   "Does sym name a task on db: is its ns/name a :seon.task/id (seon.task/task-id), and no

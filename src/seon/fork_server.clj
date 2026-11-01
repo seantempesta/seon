@@ -13,7 +13,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.lib :as lib] [seon.repl :as repl] [seon.program :as program] [seon.db :as pdb]
             [seon.step :as step] [seon.sock :as sock] [seon.config :as cfg] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [jolt.ffi :as ffi]
-            [jolt.deps] [clojure.edn :as edn] [seon.fx :as fx] [seon.reconcile :as r] [seon.agent :as agent] [jolt.io-poller :as poller]))
+            [jolt.deps] [clojure.edn :as edn] [seon.fx :as fx] [seon.reconcile :as r] [seon.agent :as agent] [jolt.io-poller :as poller] [seon.task :as task] [seon.ctx :as ctx] [datahike.db.interface :as dbi]))
 
 (defn- reaped
   "Child pid, whose exit arrived (jolt.io-poller/exit-chan): waited for exactly, so the wait is the
@@ -74,24 +74,36 @@
     (cond-> st (not= from (d/commit-id (:db st)))
             (assoc :index {:commit (d/commit-id (:db st)) :index (r/index idx (d/commit-as-db (:store st) from) (:db st))}))))
 
-(defn warm-first-write
-  "Server state st with the index nodes an agent's first write reaches read into this process's node
-  cache (:warm-t: the t of main it was done for), once per move of main: a write of the shape
-  seon.agent/begin-run! makes (a task's execution, a run and its agent) applied with d/with to :db and
-  dropped, so each agent forked from here inherits those nodes decoded and its first write reads none
-  (a cold agent read 10-13 of them, 2 MB allocated, against 0.2 MB warm; a root's main resumed from its
-  store holds no node its in-memory import wrote). Nothing is written. See docs/machine.md#an-agents-first-write."
-  {:malli/schema [:=> [:cat :map] :map]}
-  [st]
+(defn evals-max-after
+  "Main's highest eval number (seon.repl/evals-max) after a commit's ops (resolved [op e a v]), from
+  n, its highest before: what each agent forked from here counts its evals on from, kept at the
+  cost of the commit, never by reading main's evals."
+  {:malli/schema [:=> [:cat nat-int? [:sequential :any]] nat-int?]}
+  [n ops] (reduce (fn [n [_ _ a v]] (if (= :seon.eval/id a) (max n (or (repl/eval-number v) 0)) n)) n ops))
+
+(defn warm-start
+  "Server state st with the index nodes the start of the agent m forks reads read into this process's
+  node cache: its first write (seon.agent/begin-run-tx on its own task, run and key, then the cites
+  every agent is made with) applied with d/with to :db and dropped, and its record built on it
+  (seon.ctx/build: its task, run and the sections it cites); and, once per move of main (:warm-t), main's
+  schema registry (seon.program/schema-changes), which each agent forked holds as its branch's until it writes a schema entry (:schema-registry). An agent's reads stay
+  in its own process, so without these each agent decoded them cold, and more of them as main's commits
+  rewrote leaves and its cache evicted the rest; read here, each agent inherits them decoded, and this
+  process's reads keep them in its cache. Only what this agent reads is read, so what the server holds
+  grows by that, not by what main writes (its static: seon.fork-server/static-due?). Nothing is written.
+  See docs/machine.md#an-agents-first-write."
+  {:malli/schema [:=> [:cat :map :map] :map]}
+  [st {:keys [task run key agent branch]}]
   (let [db (:db st) t (:max-tx db)]
+    (when (and task run key (d/entity db [:seon.task/id task]))
+      (let [db1 (:db-after (d/with db (agent/begin-run-tx db task run key agent)))
+            db2 (:db-after (d/with db1 (task/agent-cites-tx db1 [:seon.agent/key key] key)))]
+        (ctx/build db2 (pdb/eid db2 :seon.agent/key key) branch)))
     (if (= t (:warm-t st))
       st
-      (let [task (:v (first (d/datoms db :avet :seon.task/id)))]
-        (when task
-          (d/with db [{:seon.task/id task :seon.task/execution :running}
-                      {:seon.run/id "warm#0" :seon.run/task [:seon.task/id task]
-                       :seon.run/agent {:seon.agent/key "warm" :seon.agent/id :warm :seon.agent/task {:seon.task/id task}}}]))
-        (assoc st :warm-t t)))))
+      ;; main's schema registry, which each agent forked holds until it writes a schema entry
+      (let [k (program/schema-changes db)]
+        (assoc st :warm-t t :schema-registry {:key k :registry (program/schema-registry k)})))))
 
 (defn index-for-agent
   "What a forked agent is handed of st's index: {:db :index}, the db it is of being main's current
@@ -134,7 +146,7 @@
                  ;; persistent indexes), never its datoms replayed here: replaying a 42,942-datom
                  ;; import took 3.5 s, and the first fork waited behind it
                  db' (d/commit-as-db (:store st) (:commit m))
-                 st (cond-> (assoc st :db db') (not= (:max-tx db') (:t m)) (update :mismatch inc)
+                 st (cond-> (assoc st :db db' :evals-max (evals-max-after (:evals-max st) (:tx-data m))) (not= (:max-tx db') (:t m)) (update :mismatch inc)
                       ;; the program moved: the reach graph is brought to it at the next fork
                       (program/moves-program? (:tx-data m)) (assoc :graph-moved true :static-due true))
                  ;; main's program changed: load it here, so agents forked from now on inherit it compiled; while
@@ -152,7 +164,7 @@
                  st (dissoc st :tests-due)
                  st (graph-at-fork st)
                  tg (profile/now-ns)
-                 st (-> st index-at-fork warm-first-write)
+                 st (-> st index-at-fork (warm-start m))
                  ;; the heap made static when it is due (static-due?), so the agent's collections never
                  ;; trace (and un-share) much of what it inherits (design agent-loop section 2: 163 MB
                  ;; of this heap sat in generations 3-4 at fork; static, an agent's work left 106 MB
@@ -165,7 +177,7 @@
                  static-ms (profile/ms-since t1)
                  ;; the spawn's phases here, on the one clock (seon.agent/spawn-phases)
                  marks [[:fork-server-in t0 nil] [:reach-graph tg nil] [:index t1 nil] [:static (profile/now-ns) nil]]]
-             (fork-carrying! st fd open #(repl/run! % (assoc m :graph (:graph st) :index (index-for-agent st) :marks marks) (:db st) (:ns m))
+             (fork-carrying! st fd open #(repl/run! % (assoc m :graph (:graph st) :index (index-for-agent st) :evals-max (:evals-max st) :schema-registry (:schema-registry st) :marks marks) (:db st) (:ns m))
                              (fn [n] [st {:ev (cond-> [{:ev :fork-failed :agent (:agent m) :active-threads n}]
                                             load-errs (conj {:ev :load-errors :t (:max-tx (:db st)) :errors (vec load-errs)}))}])
                              (fn [pid] (let [[st evs] (adopt st pid)]
@@ -184,7 +196,7 @@
      ;; its graph and index brought to :db first, so a standby never holds one a commit has passed
      :standby (let [fd (sock/take-fd! (:conn st)) _ (vreset! open fd)
                     st (-> st graph-at-fork index-at-fork)]
-               (fork-carrying! st fd open #(main (:db st) (:cfg st) % false (select-keys st [:graph :index :tests-due]))
+               (fork-carrying! st fd open #(main (:db st) (:cfg st) % false (select-keys st [:graph :index :evals-max :tests-due]))
                               (fn [n] [st {:ev [{:ev :standby-failed :gen (:gen m) :active-threads n}]}])
                               (fn [pid] (when-let [old (:standby-pid st)] (lib/kill! old 9))
                                 (let [[st evs] (adopt (assoc st :standby-pid pid) pid)]
@@ -204,14 +216,16 @@
   ;; observed forward the same way (index-at-fork) and handed to every agent forked (seon.agent/reconcile-index starts from it)
   ;; the reach graph is built here when the server starts (a standby inherits its server's), so no
   ;; spawn waits for it (the first fork built it: 0.8-3.8 s measured)
-  ([{:keys [db cfg store conn graph index exits tests-due]}]
+  ([{:keys [db cfg store conn graph index evals-max exits tests-due]}]
    {:db db :cfg cfg :store store :mismatch 0 :conn conn :exits exits :status-buf (ffi/alloc 4) :children #{} :tests-due (boolean tests-due)
     ;; the first fork freezes the heap: nothing is static yet (seon.fork-server/static-due?)
     :static-due true
     :graph (or graph (program/reach-indexed (program/reach-graph db (fx/declared-refs (cfg/value :seon.config.root/system-path)))
                                             (second (agent/test-inputs db))))
     ;; listed here when the server boots; a standby inherits its server's
-    :index (or index {:commit (d/commit-id db) :index (r/index db)})})
+    :index (or index {:commit (d/commit-id db) :index (r/index db)})
+    ;; main's highest eval number, read once here and kept from each commit (evals-max-after)
+    :evals-max (or evals-max (repl/evals-max db))})
   ;; stop (root closed its end, or died): every child (agents, the standby) killed and reaped
   ;; before this process exits, so root's waitpid of this server is the end of every one of
   ;; them. An agent that had closed its socket but not yet exited was handed to launchd when
@@ -251,7 +265,7 @@
   returns."
   {:malli/schema [:function [:=> [:cat :seon.host/db :seon.db/cfg :seon.lib/fd :boolean] :any] [:=> [:cat :seon.host/db :seon.db/cfg :seon.lib/fd :boolean [:maybe :map]] :any]]}
   ([db0 cfg fd boot?] (main db0 cfg fd boot? nil))
-  ([db0 cfg fd boot? {:keys [graph index tests-due]}]
+  ([db0 cfg fd boot? {:keys [graph index evals-max tests-due]}]
   ;; every agent forked from here works in the scratch dir, with no repository above it: an
   ;; agent changes code through its REPL and git finds nothing (DECISIONS, Agents work at
   ;; the REPL through tool calls: no git, no source-file editing)
@@ -286,7 +300,7 @@
     ;; root evaluates no test namespace (program/load-all! {:tests? false}); the boot server does, once, at
     ;; its first fork (:tests-due), so a root that forks no agent never loads them, and its socket is read
     ;; from boot: a stop that came while 2,020 forms were evaluated one by one waited 12-21 s for them
-    (step/run-loop #'server-step {:db db0 :cfg cfg :store store :conn conn :exits exits :graph graph :index index :tests-due (or boot? tests-due)}
+    (step/run-loop #'server-step {:db db0 :cfg cfg :store store :conn conn :exits exits :graph graph :index index :evals-max evals-max :tests-due (or boot? tests-due)}
                    recv! (fn [_ m] (sock/send! fd m)))
     (lib/kill! 0 9)
     (lib/c-exit 0))))

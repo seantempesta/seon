@@ -114,11 +114,11 @@
   [n]
   (let [unit (fn [seed] (let [v (mapv (fn [i] (Math/sin (* (inc seed) (inc i) 0.37))) (range 768)) m (Math/sqrt (reduce + (map #(* % %) v)))] (mapv #(/ % m) v)))
         db (ts/test-db)
-        db (d/db-with db (vec (for [i (range n)] {:seon.section/address (str "docs/p.md#s" i) :seon.section/heading (str "S" i)
-                                                  :seon.section/lead (str "Section " i " says it.")})))
+        db (d/db-with db (vec (for [i (range n)] {:seon.doc/address (str "docs/p.md#s" i) :seon.doc/heading (str "S" i)
+                                                  :seon.doc/lead (str "Section " i " says it.")})))
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "r" :seon.task/plan "Say it."}]))
         te (pdb/eid db :seon.task/id "demo/r")
-        es (into [te] (for [i (range n)] (pdb/eid db :seon.section/address (str "docs/p.md#s" i))))]
+        es (into [te] (for [i (range n)] (pdb/eid db :seon.doc/address (str "docs/p.md#s" i))))]
     [(d/db-with db (vector/tx-data es (repeat (count es) 1) (mapv unit (range (count es))) (repeat (count es) 10) "m")) te]))
 
 (defn task-data-of

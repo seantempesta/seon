@@ -140,7 +140,7 @@
 (defn mentions?
   "Whether a form of text (the file of namespace nsym) holds the symbol sym, unqualified, as a symbol
   anywhere in it: found by the reader, so a name in a string, a comment or inside a longer symbol is
-  not a mention. What seon.docs/baseline-reads asks of an old file's forms."
+  not a mention. What seon.doc/baseline-reads asks of an old file's forms."
   {:malli/schema [:=> [:cat :symbol :string :symbol] :boolean]}
   [nsym text sym]
   (boolean (some #(and (symbol? %) (nil? (namespace %)) (= sym %))
@@ -152,7 +152,7 @@
   form, so a def of a string value has none) and its :malli/schema as read, each only when present
   (the contract carries the arity, so no arglists); found by the form's head and name, as
   defining-ids finds them, read without loading. The same reading of an old file at a commit and of a
-  var's form today, so the two compare (seon.docs/baseline-reads; DECISIONS Dogfood
+  var's form today, so the two compare (seon.doc/baseline-reads; DECISIONS Dogfood
   rulings: a section is stale when a cited var's contract or docstring changed)."
   {:malli/schema [:=> [:cat :symbol :string] [:map-of :qualified-symbol :map]]}
   [nsym text]
@@ -579,14 +579,16 @@
 
 (defn changed-files
   "The files a merge's changes (seon.merge/three-way's :ours) touch, as db (after them) holds
-  them: the file of each namespace whose forms they add, change or remove, and the resource of
-  each schema entry they change; sorted relative paths."
+  them: the file of each namespace whose forms they add, change or remove, the resource of
+  each schema entry they change, and the page of each doc they change (its address's path,
+  drawn by seon.doc/files); sorted relative paths."
   {:malli/schema [:=> [:cat :seon.host/db :seon.merge/changes] [:vector :string]]}
   [db changes]
-  (vec (sort (distinct (for [[[k] [a b]] changes
+  (vec (sort (distinct (for [[[k x] [a b]] changes
                              :let [p (case k
                                        :form (ns-file db (:ns (or b a)))
                                        :schema (:file (or b a))
+                                       :section (first (str/split x #"#" 2))
                                        nil)]
                              :when p]
                          p)))))

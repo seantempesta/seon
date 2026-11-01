@@ -290,6 +290,12 @@
         ids (into [] (comp (filter #(#{:seon.task/plan :seon.task/instructions} (:a %))) (keep #(:seon.task/id (d/entity db' (:e %)))) (distinct)) (:tx-data r))]
     (into (vec tx-data) (mapcat #(task/rederive-tx db' (task/task db' %))) ids)))
 
+(defn schema-moved
+  "State st without the schema registry it holds (seon.repl/branch-registry) when attrs, the attributes a
+  write to :db wrote, hold a schema entry's (:schema/*): the registry is read again at the next eval."
+  {:malli/schema [:=> [:cat :map [:sequential :any]] :map]}
+  [st attrs] (cond-> st (some #(and (keyword? %) (= "schema" (namespace %))) attrs) (dissoc :schema-registry)))
+
 (defn transact!
   "Write tx-data to this agent's branch: applied at once to the value ahead of the
   committed one (its answer does not wait for a commit), committed when the agent is idle
@@ -305,12 +311,12 @@
                   tx-data)]
     (if (= :test (:mode @state))
       (let [r (d/with (db) tx-data)]
-        (swap! state assoc :db (:db-after r) :tx (select-keys r [:db-after :tx-data]))
+        (swap! state #(-> % (assoc :db (:db-after r) :tx (select-keys r [:db-after :tx-data])) (schema-moved (map :a (:tx-data r)))))
         {:t (:max-tx (:db-after r)) :datoms (count (:tx-data r)) :local true})
       (let [r (dw/apply! (:store-conn @state) {:tx-data tx-data :tx-meta (pdb/tx-meta (:branch @state) (cond-> {} (:eval @state) (assoc :seon.tx/eval (:eval @state))))})]
         (when-not (map? r) (throw (ex-info (str "transact refused: " (ex-message r)) {:writer-error (ex-message r)})))
         ;; :tx, the transaction that moved :db: what seon.ctx patches @ctx from
-        (swap! state assoc :db (:db-after r) :tx (select-keys r [:db-after :tx-data]) :dirty? true)
+        (swap! state #(-> % (assoc :db (:db-after r) :tx (select-keys r [:db-after :tx-data]) :dirty? true) (schema-moved (map :a (:tx-data r)))))
         (cond-> {:t (:max-tx (:db-after r)) :datoms (count (:tx-data r))}
           (seq (:tempids r)) (assoc :tempids (into {} (filter (comp string? key)) (:tempids r))))))))
 
@@ -471,7 +477,7 @@
             ops (pdb/report->tx rep)
             errs (program/load-changes! (:db-after rep) ops)]
         ;; the merge base is now main's head: what main changed is not this branch's change
-        (swap! state assoc :db @conn :base (pdb/branch-base conn main-b (:branch @state)))
+        (swap! state #(-> % (assoc :db @conn :base (pdb/branch-base conn main-b (:branch @state))) (schema-moved (map (fn [op] (nth op 2 nil)) ops))))
         (send! {:op :committed :t (:max-tx @conn) :txs 1})
         (cond-> {:ok true :applied (:apply r) :conflicts (:conflicts r) :t (:max-tx @conn) :datoms (count ops)}
           (seq (:conflicts carried)) (assoc :task-conflicts (:conflicts carried))
@@ -1314,7 +1320,7 @@
   (when (or (not= commit (d/commit-id branch)) (not= t (:max-tx image)))
     {:commit commit :t t :branch-commit (d/commit-id branch) :image-t (:max-tx image)}))
 
-(declare begin-run-tx!)
+(declare begin-run-tx! begin-run-tx)
 
 (defn begin-run!
   "Run run of task recorded as this process's session's on its branch, as root records it on main:
@@ -1338,33 +1344,40 @@
       (begin-run-tx! task run)
       (when made? (transact! (task/agent-cites-tx (db) [:seon.agent/key k] k))))))
 
+(defn begin-run-tx
+  "The write that makes run of task this agent's on db, its branch (begin-run-tx!'s second, and what
+  the fork server applies to warm what an agent's start reads: seon.fork-server/warm-start): the task
+  running, the run with the plan it began with, naming the agent (key k, id) and its task."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id :seon.run/id :string :any] :seon.db/tx-data]}
+  [db task run k id]
+  [{:seon.task/id task :seon.task/execution :running}
+   ;; the plan the run began with, as main records it at a run's start (seon.task/run-start-tx), when
+   ;; the branch was cut before it: what a design step's done rule compares (:no-design)
+   (cond-> {:seon.run/id run}
+     (not (:seon.run/plan (d/entity db [:seon.run/id run])))
+     (assoc :seon.run/plan (:plan (:seon.task/accumulated (task/task db task)))))
+   {:seon.run/id run :seon.run/task [:seon.task/id task] :seon.run/agent {:seon.agent/key k :seon.agent/id id
+                                                            ;; the agent's task, which its record pulls (the agent is the unit, docs/ctx.md#the-pattern);
+                                                            ;; nested: a top-level agent map takes a content id, one the key's upsert conflicts with
+                                                            :seon.agent/task {:seon.task/id task}}}])
+
 (defn- begin-run-tx!
   "Run run of task written on this agent's branch (begin-run!'s write): the task as main declares it when the
-  branch lacks it, the task running, the run with the plan it began with, naming this agent and its task."
+  branch lacks it, then begin-run-tx."
   {:malli/schema [:=> [:cat :seon.task/id :seon.run/id] :any]}
   [task run]
-  (do
-    (when-not (d/entity (db) [:seon.task/id task])
-      (let [t (task/task (heard-main) task)]
-        (transact! (task/create-tx (db) [(-> (select-keys t [:seon.task/ns :seon.task/name :seon.task/plan :seon.task/instructions :seon.task/proofs
-                                                             :seon.task/needs :seon.task/branch :seon.task/model :seon.task/kind])
-                                             (update :seon.task/ns symbol))]))))
-    (transact! [{:seon.task/id task :seon.task/execution :running}
-                ;; the plan the run began with, as main records it at a run's start (seon.task/run-start-tx), when
-                ;; the branch was cut before it: what a design step's done rule compares (:no-design)
-                (cond-> {:seon.run/id run}
-                  (not (:seon.run/plan (d/entity (db) [:seon.run/id run])))
-                  (assoc :seon.run/plan (:plan (:seon.task/accumulated (task/task (db) task)))))
-                {:seon.run/id run :seon.run/task [:seon.task/id task] :seon.run/agent {:seon.agent/key (:key @state) :seon.agent/id (:id @state)
-                                                         ;; the agent's task, which its record pulls (the agent is the unit, docs/ctx.md#the-pattern);
-                                                         ;; nested: a top-level agent map takes a content id, one the key's upsert conflicts with
-                                                         :seon.agent/task {:seon.task/id task}}}])))
+  (when-not (d/entity (db) [:seon.task/id task])
+    (let [t (task/task (heard-main) task)]
+      (transact! (task/create-tx (db) [(-> (select-keys t [:seon.task/ns :seon.task/name :seon.task/plan :seon.task/instructions :seon.task/proofs
+                                                           :seon.task/needs :seon.task/branch :seon.task/model :seon.task/kind])
+                                           (update :seon.task/ns symbol))]))))
+  (transact! (begin-run-tx (db) task run (:key @state) (:id @state))))
 
 (defn init!
   "Make this process the agent: its socket (fd), its namespace, its state map, its
   interrupt handlers. serve is the loop a clone runs (seon.repl/serve!)."
   {:malli/schema [:=> [:cat :seon.lib/fd :map :seon.host/db :seon.host/fn] :any]}
-  [fd {id :agent branch :branch task :task run :run cfg :cfg resumed :resumed commit :commit t :t graph :graph index :index session :key
+  [fd {id :agent branch :branch task :task run :run cfg :cfg resumed :resumed commit :commit t :t graph :graph index :index evals-max :evals-max schema-registry :schema-registry session :key
        marks0 :marks} db0 serve]
   ;; the spawn's phases on the one clock, each with what this thread allocated in it: the fork
   ;; server's marks (marks0), then this process's, sent with its hello (spawn-phases)
@@ -1425,7 +1438,13 @@
                    graph (assoc :base-graph {:point (pdb/point db0) :graph graph})
                    ;; main's reconciler index as the fork server keeps it, for db0: the first turn
                    ;; observes the branch from it (seon.agent/reconcile-index), never lists it here
-                   index (assoc :index index)))
+                   index (assoc :index index)
+                   ;; main's highest eval number as the fork server keeps it: a new branch is main
+                   ;; at its fork, so its evals count on from it (seon.repl/eval-n!), never read here
+                   (and evals-max (not resumed)) (assoc :eval-n evals-max)
+                   ;; main's schema registry as the fork server read it: the branch's until a write moves a
+                   ;; schema entry (schema-moved), so no eval reads the schema entries before then
+                   (and schema-registry (not resumed)) (assoc :schema-registry schema-registry)))
      (swap! state vary-meta assoc :seon.render/schema :seon.agent/state)
      (mark! :state)
      (swap! state assoc :marks @marks)

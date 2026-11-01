@@ -56,7 +56,7 @@
  ;; buffer the size of the live agents never fills from agents. At the bound senders park.
  :seon.config.root/writer-buf #ref [:seon.config.root/max-agents]
  ;; Unit: on/off. Whether a load of the wiki takes, for a section with no record of the code it was written
- ;; against (:seon.section/read), that record from git: the form ids of the vars it cites as of the commit
+ ;; against (:seon.doc/read), that record from git: the form ids of the vars it cites as of the commit
  ;; that last changed it, so a section already stale shows as such (docs/health.md#a-stale-section). On
  ;; Seon's wiki that is one git blame per page and one git show per (commit, file), 4 s measured
  ;; 2026-10-23 (303 sections, 139 citing code), once per store. Off (bin/test and bin/check set
@@ -780,7 +780,7 @@
  ;; tasks citing vars: 97 of the cited vars' 1,430 tests fall past 50 (12 hot helpers, seon.test-store/test-db
  ;; the most), 801 past 5.
  :seon.config.ctx/callers 50
- ;; Unit: sections. The wiki sections that cite a var a task cites, shown with it (its :sections, seon.docs/
+ ;; Unit: sections. The wiki sections that cite a var a task cites, shown with it (its :sections, seon.doc/
  ;; citing-sections: the addresses, to read with (my.agent/help address)): the sections it owes an edit to
  ;; and the ones that explain it. Provenance: root's coverage gap 7 (2026-10-27): wiki sections reached the
  ;; agent only through the task's own citations. At the bound: 0 shows none.
@@ -800,7 +800,7 @@
  ;; well leave them out"), on step 6's measurement (2026-10-25, the scratch paper measure/step6 (git history): the 5 fit tasks,
  ;; 3 runs each, deepseek-flash, thinking off): green 8/15 with 5 listed, 7/15 with none; the runs
  ;; that listed them named the same functions as a run listing none (my.agent/prove,
- ;; seon.model/provider-error, seon.docs/view, seon.print/print-value): no measured gain.
+ ;; seon.model/provider-error, seon.doc/view, seon.print/print-value): no measured gain.
  :seon.config.render/similar 0
  ;; Relevance (seon.context/relevance, docs/vector.md#relevance): a logistic over five features of
  ;; an item near a context, one weight set a kind: zc its cosine with the query's vector, zb its BM25

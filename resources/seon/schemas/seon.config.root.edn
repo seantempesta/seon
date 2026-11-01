@@ -9,7 +9,7 @@
  :seon.config.root/api-batch [:int {:min 1 :seon.config/unit "messages" :description "Most messages one api step takes before applying its graph change."}]
  :seon.config.root/writer-batch [:int {:min 1 :seon.config/unit "requests" :description "Most requests one writer step drains and commits together (group commit)."}]
  :seon.config.root/writer-buf [:int {:min 1 :seon.config/unit "requests" :description "The writer's in-port; beyond it senders park."}]
- :seon.config.root/wiki-baseline [:boolean {:seon.config/unit "on/off" :description "Whether a load of the wiki takes, for each section with no record of the code it was written against, that record from git (the commit that last changed the section; seon.docs/baseline-reads). Off: such a section is recorded as of today."}]
+ :seon.config.root/wiki-baseline [:boolean {:seon.config/unit "on/off" :description "Whether a load of the wiki takes, for each section with no record of the code it was written against, that record from git (the commit that last changed the section; seon.doc/baseline-reads). Off: such a section is recorded as of today."}]
  :seon.config.root/reconciler-buf [:int {:min 1 :seon.config/unit "commits" :description "Main's commits queued for the reconciler; a full buffer parks the writer."}]
  :seon.config.root/standby-every [:int {:min 1 :seon.config/unit "commits" :description "Main commits after which the fork server forks a fresh standby."}]
  :seon.config.root/runs-dir [:string {:seon.config/place true :min 1 :seon.config/unit "path" :description "Where kept runs live (never deleted)."}]

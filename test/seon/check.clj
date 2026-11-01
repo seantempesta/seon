@@ -10,7 +10,7 @@
   root and ends on the one verdict line, NAME OK or NAME FAILED, and its exit status. Waits
   are root's events (await-agents, on a tap taken before what causes them) or a watch on a
   reference (await-ref, seon.root/await-db), never a poll or a deadline."
-  (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.root :as c] [seon.lib :as lib] [datahike.api :as d] [seon.print :as print] [clojure.java.shell] [clojure.string] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [seon.db] [seon.reconcile] [seon.contract :as contract] [malli.core :as m] [malli.generator :as mg] [seon.e2e] [seon.await] [seon.system] [seon.web] [seon.render.proc] [seon.fixtures] [my.root] [seon.task] [seon.config] [clojure.edn] [seon.server] [jolt.scheme] [clojure.core.async.flow.spi] [clojure.data.json] [seon.cost] [seon.problems] [seon.proofs] [seon.vector] [seon.main :refer [out! shown]] [seon.fx] [seon.source] [seon.docs] [seon.test-store :as ts] [seon.sock :as sock]))
+  (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.root :as c] [seon.lib :as lib] [datahike.api :as d] [seon.print :as print] [clojure.java.shell] [clojure.string] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [seon.db] [seon.reconcile] [seon.contract :as contract] [malli.core :as m] [malli.generator :as mg] [seon.e2e] [seon.await] [seon.system] [seon.web] [seon.render.proc] [seon.fixtures] [my.root] [seon.task] [seon.config] [clojure.edn] [seon.server] [jolt.scheme] [clojure.core.async.flow.spi] [clojure.data.json] [seon.cost] [seon.problems] [seon.proofs] [seon.vector] [seon.main :refer [out! shown]] [seon.fx] [seon.source] [seon.doc] [seon.test-store :as ts] [seon.sock :as sock]))
 
 
 ;; ---- the harness: one frame, one verdict, one way to wait ------------------------------
@@ -1787,7 +1787,7 @@
            {:report {:vectors (count es) :queries (count qs) :recall10 recall :embed-ms embed-ms
                      ;; what each shortlist would give: the default's evidence, measured here every run
                      :by-shortlist (into (sorted-map) (for [k [50 100 200 400]] [k (recall-of {:shortlist k})]))
-                     :forms (count (d/datoms db :aevt :form/id)) :sections (count (d/datoms db :aevt :seon.section/address))}
+                     :forms (count (d/datoms db :aevt :form/id)) :sections (count (d/datoms db :aevt :seon.doc/address))}
             :checks {:model-present true :every-text-embedded (empty? (seon.vector/due db model))
                      :pyramid-recall-at-least-0.99 (>= recall 0.99)}}))))))
 

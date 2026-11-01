@@ -535,7 +535,7 @@
   "What tx-data (an eval's definitions, def-tx's, before they are transacted on db) changes of
   each existing var's `meaning`: [{:var :was :now :cited-by}], :was and :now its changed
   attributes' values (a removed one absent from :now), :cited-by the wiki sections citing the var
-  (their :seon.section/references), each with the form that reads it. A new var changes nothing a
+  (their :seon.doc/references), each with the form that reads it. A new var changes nothing a
   section relied on; nil when nothing changed. Cost: the tx-data walked once, then per var it
   names one entity read and one index seek of its citations."
   {:malli/schema [:=> [:cat :seon.host/db :seon.db/tx-data] [:maybe [:vector :seon.program/meaning-change]]]}
@@ -553,8 +553,8 @@
                             changed (filter #(not= (get was %) (get now %)) meaning)]
                       :when (seq changed)]
                   {:var n :was (select-keys was changed) :now (select-keys now changed)
-                   :cited-by (vec (sort-by :section (for [dt (d/datoms db :avet :seon.section/references (:db/id e))
-                                                          :let [a (:seon.section/address (d/entity db (:e dt)))]]
+                   :cited-by (vec (sort-by :section (for [dt (d/datoms db :avet :seon.doc/references (:db/id e))
+                                                          :let [a (:seon.doc/address (d/entity db (:e dt)))]]
                                                       ;; the form that reads it, as data (no reference: unit-account)
                                                       {:section a :read (list 'my.agent/help a)})))})]
     (not-empty (vec changes))))
@@ -1194,9 +1194,9 @@
   "The vars a test calls to read the checkout's files: the tree-readers but binary-sh (which runs
   the binary: its tests are digested by what they reach), and src's readers of a checkout
   directory (the wiki, read or loaded, and the source dirs: seon.repl-test/the-help-page-runs read
-  the help page through seon.docs/pages and was reused over its edits; seon.task-files-test reads the
+  the help page through seon.doc/pages and was reused over its edits; seon.task-files-test reads the
   task files through my.root/task-files and was marked flaky over an edit to one). See docs/source.md#tests-run-by-reach."
-  (-> tree-readers (disj 'seon.test-store/binary-sh) (conj 'seon.docs/load-dir-tx 'seon.docs/pages 'my.root/task-files 'seon.fx/read-source)))
+  (-> tree-readers (disj 'seon.test-store/binary-sh) (conj 'seon.doc/load-dir-tx 'seon.doc/pages 'my.root/task-files 'seon.fx/read-source)))
 
 (def env-class-readers
   "The vars that read one class of the checkout's files that have no program facts

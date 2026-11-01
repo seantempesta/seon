@@ -1,6 +1,6 @@
 ;; A text's embedding (seon.vector, docs/vector.md#a-vector-is-its-own-entity), on its own entity
 ;; pointing at the entity whose text it embeds (:seon.vector/of): a form (its :form/src,
-;; content-addressed, so it is embedded once), a wiki section (its :seon.section/text), a task's
+;; content-addressed, so it is embedded once), a wiki section (its :seon.doc/text), a task's
 ;; plan or an eval's record, so what is embedded never appears in that entity's own pull. One
 ;; stored vector serves every level of the pyramid: a Matryoshka vector's prefix is itself an
 ;; embedding.

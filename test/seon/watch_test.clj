@@ -4,7 +4,7 @@
   watcher that dies is a :platform error on main. Run: bin/test seon.watch-test"
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]] [clojure.java.io :as io]
             [seon.watch :as watch] [my.root :as mr] [seon.root :as root] [seon.problems :as problems] [seon.contract :as contract]
-            [datahike.api :as d] [seon.task] [seon.docs] [clojure.java.shell] [seon.config] [clojure.string :as str] [seon.fx]))
+            [datahike.api :as d] [seon.task] [seon.doc] [clojure.java.shell] [seon.config] [clojure.string :as str] [seon.fx]))
 
 (deftest a-record-is-its-kind-then-its-path
   (is (= [:path "/a/b\nc.md"] (watch/record (.getBytes "p/a/b\nc.md" "UTF-8"))) "a newline is part of the path: NUL ends a record")
@@ -266,14 +266,14 @@
         _ (spit page "# A\n\nIt reads.\n")
         _ (spit (io/file docs "b.md") "# B\n\nIt stays.\n")
         db0 (ts/test-db)
-        db (d/db-with db0 (seon.docs/load-dir-tx db0 co "docs" {}))
-        _ (is (some? (d/entity db [:seon.section/address "docs/a.md#a"])) "the page was loaded")
+        db (d/db-with db0 (seon.doc/load-dir-tx db0 co "docs" {}))
+        _ (is (some? (d/entity db [:seon.doc/address "docs/a.md#a"])) "the page was loaded")
         _ (.delete page)
         _ (java.nio.file.Files/createSymbolicLink (.toPath page) (.toPath (io/file docs "gone.md")) (make-array java.nio.file.attribute.FileAttribute 0))
         ;; whichever comes first: the batch's read, or the watcher's death (on the old read, the throw)
         outcome (promise)
         w (watch/start! [(.getCanonicalPath docs)]
-                        (fn [_] (deliver outcome [:read (seon.docs/load-dir-tx db co "docs" {})]))
+                        (fn [_] (deliver outcome [:read (seon.doc/load-dir-tx db co "docs" {})]))
                         #(deliver outcome [:died %]) #(deliver outcome [:died %]))]
     (is (not (contract/error? w)) (pr-str w))
     ;; a watcher that never started answers as a death, so the wait below always ends
@@ -286,8 +286,8 @@
         (is (vector? tx) (pr-str tx)))
       (testing "the page gone when read is recorded as gone: its section retracted, the other page's change loaded"
         (let [db' (d/db-with db tx)]
-          (is (nil? (d/entity db' [:seon.section/address "docs/a.md#a"])))
-          (is (= "It changed." (:seon.section/lead (d/pull db' [:seon.section/lead] [:seon.section/address "docs/b.md#b"])))))))
+          (is (nil? (d/entity db' [:seon.doc/address "docs/a.md#a"])))
+          (is (= "It changed." (:seon.doc/lead (d/pull db' [:seon.doc/lead] [:seon.doc/address "docs/b.md#b"])))))))
     (finally
       (when-not (contract/error? w) (watch/stop! w))
       (clojure.java.shell/sh "rm" "-rf" co)))))

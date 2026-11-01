@@ -241,7 +241,7 @@
   "n rows shaped as main's :stale-section problem rows (my.root/problems, 2026-10-25: 177 of them)."
   [n]
   (vec (for [i (range n)]
-         (array-map :seon.docs/section (keyword "render" (str "section-" i)) :seon.docs/page "docs/render.md"
+         (array-map :seon.doc/section (keyword "render" (str "section-" i)) :seon.doc/page "docs/render.md"
                     :seon.problem/class :stale-section :seon.problem/since 1761360000000 :cited 'seon.print/print-value
                     :lead "A section whose lead cites a var that moved." :n i))))
 
@@ -255,7 +255,7 @@
         v {:value {:classes {:stale-section {:n 600 :rows (problem-rows 600)}}}}
         {:keys [text elisions]} (seon/print-value v {:handle h})
         [cut :as cuts] (cuts-of text)
-        shown (count (re-seq #":seon.docs/section" text))]
+        shown (count (re-seq #":seon.doc/section" text))]
     (is (= 1 elisions (count cuts)) text)
     (is (not (re-find #"\{…" text)) "no row shows as a placeholder")
     (is (< 40 shown 600) "the reply budget shows dozens of rows, each whole")
