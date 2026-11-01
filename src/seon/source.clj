@@ -449,7 +449,13 @@
   {:malli/schema [:=> [:cat :seon.host/db [:map-of :string [:maybe :string]]] :seon.db/tx-data]}
   [db changed]
   (let [ns-of-path (fn [p] (some #(when (= p (:v %)) (:ns/name (d/entity db (:e %)))) (d/datoms db :aevt :ns/file)))
-        texts (into {} (filter val) changed)
+        ;; the namespaces db holds that no source root has (another tree's, e.g. one since renamed) are read
+        ;; again with the change, from db's text, so a changed file requiring one finds it analyzed here
+        ;; (read-nss marks it loaded), never a load from disk that cannot find it; none for this tree's own
+        off-roots (into {} (for [dt (d/datoms db :aevt :ns/name) :let [n (:v dt)] :when (not (on-roots? n))
+                                 :let [p (:ns/file (d/entity db (:e dt)))] :when (and p (not (contains? changed p)))]
+                             [p (file-text db n)]))
+        texts (merge off-roots (into {} (filter val) changed))
         gone (into {} (for [[p t] changed :when (and (nil? t) (str/ends-with? p ".clj")) :let [n (ns-of-path p)] :when n] [n nil]))
         read (loop [round texts check (keys gone) read gone]
                (if (and (empty? round) (empty? check))

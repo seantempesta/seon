@@ -1076,3 +1076,4 @@
     (is (nil? (seon.db/eid forward :var/name 'ra.old-lib/f)) "the removed one is gone, its text never read again")
     (is (some? (seon.db/eid back :var/name 'ra.old-lib/f)) "and back: a namespace on no root answers its requirer")
     (is (nil? (seon.db/eid back :var/name 'ra.new-lib/f)))))
+
