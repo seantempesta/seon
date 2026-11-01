@@ -185,7 +185,7 @@
                      [:seon.eval/record :seon.eval/record] [:seon.eval/opened {:optional true} :seon.eval/opened]]
  ;; an entity's record (seon.ctx, :seon.ctx/pattern: Datahike's pull syntax as data, docs/ctx.md#the-pattern;
  ;; its joins are the page walk's units, seon.render/units), each member rendered by its own schema's render
- :seon.db/agent-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.agent/id :seon.agent/status :seon.agent/branch :seon.agent/description] :seon.ctx/pattern [* {[:seon.agent/task :as :task] :seon.task/task-fact} {[:seon.turn/_agent :as :turns] [*]} {[:seon.eval/_agent :as :evals] [*]} {[:seon.message/_agent :as :messages :reverse true] [*]} {[:seon.cite/_of :as :cites] :seon.cite/cite-fact}] :seon.render/html seon.render.ui/agent}
+ :seon.db/agent-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.agent/id :seon.agent/status :seon.agent/branch :seon.agent/description] :seon.ctx/pattern [* {[:seon.agent/task :as :task] :seon.task/task-fact} {[:seon.turn/_agent :as :turns] [*]} {[:seon.eval/_agent :as :evals] [*]} {[:seon.message/_agent :as :messages :reverse true] [*]} {[:seon.cite/_of :as :cites] :seon.cite/cite-fact} {[:seon.search/_of :as :searches] :seon.search/search-fact}] :seon.render/html seon.render.ui/agent}
                        [:seon.agent/key :seon.agent/key] [:seon.agent/id {:optional true} :seon.agent/id]
                        [:seon.agent/root {:optional true} :seon.agent/root] [:seon.agent/branch {:optional true} :seon.agent/branch]
                        [:seon.agent/status {:optional true} :seon.agent/status]
@@ -214,6 +214,18 @@
  ;; the cite as ctx holds it: what it names joined (a section with its sections below; a var with its
  ;; form and newest callers, each caller with the vars it defines; a task; a schema key's entry; a
  ;; namespace), drawn by its two renders (docs/render.md#a-part-answers-data)
+ ;; a search an agent's context holds: what it asks, drawn at each page draw by seon.context/search on the
+ ;; branch's db (seon.render.ui/searched), so a change of its query (a swap! on ctx) redraws that part alone
+ :seon.search/id [:and {:seon.db/identity true :seon.db/content-id true} :string]
+ ;; the entity whose context holds it: a task (its request's, written with the task) or an agent
+ :seon.search/of :seon.db/ref
+ ;; the words searched: matched as words, by meaning and by the names they hold (seon.context/search)
+ :seon.search/query :string
+ ;; how many hits are shown
+ :seon.search/k [:int {:min 1 :max 50}]
+ :seon.search/search-fact [:map {:seon.db/attributes true :seon.ctx/pattern [*]}
+                           [:seon.search/id :seon.search/id] [:seon.search/of :seon.search/of] [:seon.search/query :seon.search/query]
+                           [:seon.search/k {:optional true} :seon.search/k]]
  :seon.cite/cite-fact [:map {:seon.db/attributes true
                              :seon.ctx/pattern [* {[:seon.cite/address :by :seon.doc/address :as :section]
                                                    [:seon.doc/address :seon.doc/heading :seon.doc/lead :seon.doc/text :seon.doc/references
@@ -269,7 +281,7 @@
  ;; the declaration a task file last stated for this task (seon.task/load-tx), as EDN
  :seon.task/declared :string
  ;; config keys are attributes of the task, by their own names (schemas: seon.config.agent.edn, seon.config.merge.edn)
- :seon.task/task-fact [:map {:seon.db/attributes true :seon.ctx/pattern [* {[:seon.task/proofs :by :var/name :as :proved] :seon.db/var-fact} {[:seon.task/needs :as :needs] [* {[:seon.task/proofs :by :var/name :as :proved] :seon.db/var-fact} {[:seon.cite/_of :as :cites] :seon.cite/cite-fact}]} {[:seon.cite/_of :as :cites] :seon.cite/cite-fact}] :seon.render/html seon.render.ui/task :seon.render/model seon.render.ui/task-model}
+ :seon.task/task-fact [:map {:seon.db/attributes true :seon.ctx/pattern [* {[:seon.task/proofs :by :var/name :as :proved] :seon.db/var-fact} {[:seon.task/needs :as :needs] [* {[:seon.task/proofs :by :var/name :as :proved] :seon.db/var-fact} {[:seon.cite/_of :as :cites] :seon.cite/cite-fact}]} {[:seon.cite/_of :as :cites] :seon.cite/cite-fact} {[:seon.search/_of :as :searches] :seon.search/search-fact}] :seon.render/html seon.render.ui/task :seon.render/model seon.render.ui/task-model}
                           [:seon.task/id :seon.task/id] [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name]
                           [:seon.task/plan :seon.task/plan] [:seon.task/execution :seon.task/execution]
                           [:seon.task/branch :seon.task/branch] [:seon.task/kind :seon.task/kind]

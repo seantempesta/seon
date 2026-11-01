@@ -461,3 +461,24 @@
     (is (identical? ix0 (nth slot 2)) "and keeps the same index")
     (is (identical? ix0 ix1) "a move that wrote no form text keeps the index")
     (is (= (+ 2 (:n ix0)) (:n ix2)) "a move that wrote two form texts is read into a new index")))
+
+(deftest grep-answers-each-matching-line-as-a-row
+  ;; the owner, 2026-11-01: tools like the terminal's, with the same meaning, answering vectors of maps the agent
+  ;; narrows itself. grep is every line holding the pattern, over code, tests, sections and tasks, a row each,
+  ;; numbered within its text as lines numbers it
+  (let [db (mt/with (mt/world)
+                    (mt/code 'app.gr "(ns app.gr)\n(defn total\n  \"Sums the needle.\"\n  [xs] (reduce + xs))\n(defn other [] 1)")
+                    (mt/code 'app.gr-test "(ns app.gr-test (:require [clojure.test :refer [deftest is]]))\n(deftest needle-test (is true))")
+                    (mt/page "docs/gr.md" "# Gr\n\nA lead.\n\n## Where the needle is\n\nThe needle lives here.\nAnd not here."))
+        all #{:var :test :section :task :schema}
+        rows (doc/grep db "needle" all nil)]
+    ;; the world may hold texts of its own: this test's are app.gr's and docs/gr.md's
+    (is (= #{"app.gr/total:2" "app.gr-test/needle-test:1" "docs/gr.md#where-the-needle-is:1"}
+           (set (keep #(when (re-find #"^(app\.gr|docs/gr\.md)" (:at %)) (:at %)) rows)))
+        (str "each line holding it, at its thing and line: " (pr-str rows)))
+    (is (every? #(and (:at %) (:kind %) (string? (:text %))) rows) "rows are plain maps: :at :kind :text")
+    (is (= [:var] (distinct (map :kind (doc/grep db "needle" #{:var} nil)))) ":in keeps the kinds asked")
+    (is (= ["app.gr/total:3"] (map :at (doc/grep db #"reduce \+" #{:var} "app.gr"))) "a regex, and a name prefix")
+    (is (= [] (doc/grep db "nowhere-at-all" all nil)) "no match is the empty vector")
+    (is (= ["docs/gr.md#gr" "docs/gr.md#where-the-needle-is"] (map :at (doc/outline db "docs/gr.md"))) "outline: the page's sections in order")
+    (is (nil? (doc/outline db "docs/none.md")) "a page db holds none of is nil")))

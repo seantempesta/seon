@@ -14,7 +14,11 @@
     (search "text")           the best matches for text over code, docs, tasks and schemas, fusing its exact
                               text, its meaning and its references: [{:kind :name :score :by :line} ...]
     (search "text" {:kinds #{:section}}) only those kinds; :by #{:text :meaning :refs}, :ns "seon.merge", :k 20
-    (grep "text")             the program vars whose recorded definition's text holds it (the search's text half)
+    (grep "text")             like grep: every line holding it, over functions, tests, docs, tasks and schemas,
+                              as rows [{:at "ns/f:3" :kind :text}]; {:in #{:var :test} :ns "seon.ref"} narrows it
+    (ls 'a.ns) (ls "docs/x.md") like ls: a namespace's definitions or a page's sections, a row each
+    (lines 'ns/f 10 40)        like sed -n: x's lines (a var, a section "docs/x.md#a", a page, a task), a row each
+    (wc x)                    like wc, in tokens: what x costs printed; rows are data: take, filter, count them
     (similar 'ns/f)           what is nearest ns/f's definition by meaning: vars, wiki sections, tasks
     (similar "text")          what is nearest the text by meaning (seon.vector/near)
     (prove)                   run what judges this branch: the task's proofs and the tests reaching
@@ -35,7 +39,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.lib :as lib] [seon.context :as context] [seon.ref :as ref] [seon.doc :as doc] [seon.source :as source]
             [seon.config :as cfg] [seon.proofs :as proofs] [seon.fx :as fx] [seon.program :as program] [seon.task :as task] [seon.vector :as vector] [seon.contract :as contract] [seon.ctx]
-            [seon.db :as pdb] [seon.problems :as problems] [seon.render.ui :as ui] [my.schema :as schema] [jolt.analyzer] [clojure.java.io :as io] [clojure.string :as str] [clojure.main] [datahike.api :as d]))
+            [seon.db :as pdb] [seon.print :as print] [seon.print.select :as select] [seon.problems :as problems] [seon.render.ui :as ui] [my.schema :as schema] [jolt.analyzer] [clojure.java.io :as io] [clojure.string :as str] [clojure.main] [datahike.api :as d]))
 
 (defn $ "An earlier eval's response (its live value under :value), by handle (:e3)." {:malli/schema [:=> [:cat :keyword] :any]}
   [h] (get-in @agent/state [:results h]))
@@ -337,13 +341,70 @@
     (when (contains? (:process plan) t)
       (program/process-path (:graph plan) t))))
 
+(def ^:private every-kind
+  "What grep reads when :in names nothing: the kinds of text the program records (seon.doc/text-attrs)."
+  #{:var :test :section :task :schema})
+
 (defn grep
-  "The program vars and tests whose recorded definition holds the words of s, best first: the text half of
-  (search s {:by #{:text} :kinds #{:var :test} :min 0.0}), one hit each ({:kind :name :e :score :by :line :at}).
-  Every text hit is shown up to :k, whatever its relevance (a grep finds the words; the page's cut is the
-  page's, and a text-only query has no meaning for relevance to weigh)."
-  {:malli/schema [:=> [:cat :string] [:or [:vector :map] :map]]}
-  [s] (search s {:by #{:text} :kinds #{:var :test} :min 0.0}))
+  "Like grep, over this branch's program: every line matching pattern in the functions, tests, wiki sections,
+  task plans and schema entries, one row each, [{:at \"seon.task/accumulate:3\" :kind :var :text \"...\"}] (seon.doc/grep).
+  pattern is a string, matched as written, or a regex (#\"plan|proof\"). opts: :in, a set of kinds (:var :test
+  :section :task :schema), :ns, a name prefix (\"seon.ref\"). The answer is data, and whole: narrow it as you
+  would a list, (take 10 (grep \"x\")), (filter #(= :test (:kind %)) ...), (count ...), and read a hit's lines
+  with (lines \"seon.task/accumulate\" 1 20). (search s) ranks by meaning, words and references; grep finds text."
+  {:malli/schema [:function [:=> [:cat [:or :string :seon.host/regex]] [:vector :map]]
+                  [:=> [:cat [:or :string :seon.host/regex] :map] [:vector :map]]]}
+  ([pattern] (grep pattern {}))
+  ([pattern {:keys [in ns]}] (doc/grep (agent/db) pattern (or in every-kind) ns)))
+
+(defn ls
+  "Like ls: what x holds, one row each. A namespace ('seon.task): each definition, privates included, in file
+  order, {:at \"seon.task/accumulate\" :text \"its doc's first sentence\"} (seon.ref/namespace-view). A wiki page
+  (\"docs/merging.md\"): each section in order, {:at address :level :text heading} (seon.doc/outline). A name that
+  is neither answers what it found nearest (my.agent/no-var)."
+  {:malli/schema [:=> [:cat [:or :symbol :string]] [:or [:vector :map] :my.agent/no-var]]}
+  [x]
+  (let [db (agent/db)]
+    (if (string? x)
+      (or (doc/outline db x) (no-var db (symbol x)))
+      (if-let [view (ref/namespace-view db x :doc)]
+        (mapv (fn [b] {:at (:seon.ref/address b) :text (second (str/split (:seon.ref/heading b) #": " 2))}) (:seon.ref/below view))
+        (no-var db x)))))
+
+(declare source-fn)
+
+(defn- text-of
+  "The text x names on this branch, as lines reads it: a var's or a namespace's source (source-fn), a section
+  (\"docs/x.md#a\": its text, numbered as grep numbers it) or a page whole (seon.doc/markdown), a task's plan
+  (its id). nil when it names none of them."
+  {:malli/schema [:=> [:cat [:or :symbol :string]] [:maybe :string]]}
+  [x]
+  (let [db (agent/db)]
+    (cond (symbol? x) (source-fn x)
+          ;; a section's own text, as grep reads and numbers it (its heading is the address's)
+          (str/includes? x "#") (some->> (pdb/eid db :seon.doc/address x) (d/entity db) :seon.doc/text)
+          (str/ends-with? x ".md") (doc/markdown db x)
+          :else (:seon.task/plan (task/task db x)))))
+
+(defn lines
+  "Like sed -n: the lines of x, whole or from line a to line b (1-based, inclusive), one row each
+  {:at \"seon.task/accumulate:3\" :text \"...\"}, numbered as grep numbers them. x is a var or a namespace
+  ('seon.task/accumulate), a section (\"docs/x.md#anchor\"), a page (\"docs/x.md\") or a task's id. Its text
+  untrimmed, so an edit's old text can be copied from it. A name that holds no text answers my.agent/no-var."
+  {:malli/schema [:function [:=> [:cat [:or :symbol :string]] [:or [:vector :map] :my.agent/no-var]]
+                  [:=> [:cat [:or :symbol :string] pos-int? pos-int?] [:or [:vector :map] :my.agent/no-var]]]}
+  ([x] (lines x 1 Integer/MAX_VALUE))
+  ([x a b]
+   (if-let [t (text-of x)]
+     (into [] (comp (map-indexed (fn [i l] {:at (str x ":" (inc i)) :text l})) (drop (dec a)) (take (inc (- b a))))
+           (str/split-lines t))
+     (no-var (agent/db) (symbol (str x))))))
+
+(defn wc
+  "Like wc, in tokens: what x costs printed, as the model is sent it (the one printer's text, whole, by its sizer):
+  (wc (grep \"plan\")) before reading it whole."
+  {:malli/schema [:=> [:cat :any] nat-int?]}
+  [x] (select/chars-tokens (count (if (string? x) x (:text (print/print-value x {:budget Integer/MAX_VALUE}))))))
 
 (defn- file-source
   "The text of the form at var v's :file and :line on the classpath (Clojure's clojure.repl/source-fn

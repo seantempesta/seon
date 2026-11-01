@@ -610,6 +610,44 @@
                        m ws))
              {} (:post ix)))
 
+(defn grep
+  "Every line of the texts of kinds on db that pattern matches, as grep answers them, one row each
+  {:at \"name:line\" :kind :text}: :at the thing holding it (a var or test, a section's address, a task's
+  id, a schema key) and the line's number within its text, :text the line, trimmed (in prose, a section's or a
+  task's, where a paragraph is one line: each sentence of it that matches). pattern is a string,
+  matched as it is written, or a regex. A string's words narrow the texts read through `text-index` (its
+  postings, built once a change of the store); a regex reads every text of kinds. ns, when given, keeps
+  the names starting with it. Rows in the order of their texts' names, then lines. See docs/vector.md#search."
+  {:malli/schema [:=> [:cat :seon.host/db [:or :string :seon.host/regex] [:set :keyword] [:maybe :string]] [:vector :map]]}
+  [db pattern kinds ns]
+  (let [re (if (string? pattern) (re-pattern (str/replace pattern #"[\\^$.|?*+()\[\]{}]" "\\\\$0")) pattern)
+        ws (when (string? pattern) (words pattern))]
+    (->> (for [a (distinct (keep text-attrs kinds))
+               e (if (seq ws) (keys (counts-in (text-index db a) ws)) (map :e (d/datoms db :aevt a)))
+               :let [v (:v (first (d/datoms db :eavt e a)))]
+               :when (and v (re-find re v))
+               h (named-hits db e a kinds (constantly true))
+               :when (or (nil? ns) (str/starts-with? (str (:name h)) ns))
+               [i line] (map-indexed vector (str/split-lines v))
+               :when (re-find re line)
+               ;; prose (a section's, a plan's) holds a paragraph on one line: its row is each sentence that
+               ;; matches, as grep -o selects the match, so a hit costs its sentence and not its paragraph
+               part (if (#{:seon.doc/text :seon.task/plan} a) (filter #(re-find re %) (str/split line #"(?<=[.!?])\s+")) [line])]
+           [(str (:name h)) i {:at (str (:name h) ":" (inc i)) :kind (:kind h) :text (str/trim part)}])
+         (sort-by (juxt first second))
+         (mapv peek))))
+
+(defn outline
+  "The sections of the page at path on db, in order, one row each {:at address :level :text heading}: what
+  ls answers for a page. nil when db holds no such page."
+  {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe [:vector :map]]]}
+  [db path]
+  (when-let [top (ref/page-top db path)]
+    (letfn [(walk [e] (cons e (mapcat walk (children db e))))]
+      (mapv (fn [e] (let [{:seon.doc/keys [address level heading]} (d/pull db [:seon.doc/address :seon.doc/level :seon.doc/heading] e)]
+                      {:at address :level level :text heading}))
+            (walk top)))))
+
 (defn tokens
   "The texts on db that hold the words of query s, of kinds, best first, each {:kind :name :z :line :at}: `bm25`'s
   term over each text's count of each word of `words` (its length in characters), scored against every text of

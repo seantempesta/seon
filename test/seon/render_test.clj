@@ -7,7 +7,7 @@
             [clojure.string :as str] [clojure.core.async :as a]
             [seon.render :as r] [seon.render.ui :as ui] [seon.render.proc :as p]
             [seon.web.html :as h] [clojure.walk] [clojure.set] [seon.print.select] [seon.config] [seon.doc] [seon.print] [seon.db] [seon.reconcile] [seon.task] [seon.edn] [seon.context] [seon.contract] [seon.repl] [datahike.api :as d]
-            [seon.fx] [seon.source] [seon.program] [seon.web] [seon.template] [seon.context-test] [seon.render-cost-test] [seon.turn] [seon.model] [seon.problems] [my.agent]))
+            [seon.fx] [seon.source] [seon.program] [seon.web] [seon.template] [seon.context-test] [seon.render-cost-test] [seon.turn] [seon.model] [seon.problems] [my.agent] [my.test] [seon.ctx]))
 
 (def ^:private task
   {:seon.task/id "calc/add" :seon.task/ns 'calc :seon.task/name "add" :seon.task/plan "Make `app.calc/add` pass"
@@ -1790,3 +1790,27 @@
     (is (nil? (meta (:task m))) "its model value names no schema: the printer does not draw it by this render again")
     (is (str/includes? (seon.print/response-text {:value data} r/model-printed) "First the need.") "the part printed as an eval's value is, by its model render: it ends")
     (is (str/includes? html "First the need.") "the page's html, by the task's html render")))
+
+(deftest a-request-draws-its-search-and-a-swap-redraws-it
+  ;; the owner, 2026-11-01: context is data the agent's ctx holds, drawn by the walk's renders (hiccup for the page,
+  ;; data for the model); a search is such data, so the agent changes it with a swap! and only its part redraws.
+  ;; claude_scratch/context-lab/FINDINGS.md: a request's search ranked a changed item first in 41% of 49 tasks
+  (ts/test-branch!
+    (fn [_ conn]
+      (d/transact conn ((my.test/code 'app.srch (str "(ns app.srch)\n"
+                                                     "(defn untaken-entries\n  \"The messages addressed to this session that it has not taken.\"\n  [db] db)\n"
+                                                     "(defn render-tile\n  \"A tile of the dashboard.\"\n  [x] x)\n")) @conn))
+      (d/transact conn (seon.template/request-tx @conn [{:seon.task/ns 'demo :seon.task/name "find" :seon.task/kind :whole
+                                                          :seon.task/plan "Messages addressed to the session go untaken."}]))
+      (d/transact conn [{:seon.run/id "demo/find#1" :seon.run/task [:seon.task/id "demo/find"]
+                         :seon.run/agent {:seon.agent/key "b/find" :seon.agent/task [:seon.task/id "demo/find"]}}])
+      (let [a (:db/id (d/entity @conn [:seon.agent/key "b/find"]))
+            draw #(seon.context/drawn-parts @conn (seon.ctx/build @conn a (:seon.agent/branch (d/entity @conn a))))
+            search-part (fn [parts] (some (fn [[id v]] (when (str/includes? (str id) "searched") v)) parts))
+            before (search-part (draw))]
+        (is (some? before) "the request's search is a part of the page")
+        (is (str/includes? (pr-str before) "app.srch/untaken-entries") (str "it finds what the request's words name: " (pr-str before)))
+        (is (= :section (first before)) "one compact hiccup, the page's and the model's alike")
+        (let [s (:db/id (d/entity @conn [:seon.search/id "demo/find/request"]))]
+          (d/transact conn [{:db/id s :seon.search/query "a tile of the dashboard"}])
+          (is (str/includes? (pr-str (search-part (draw))) "app.srch/render-tile") "a new query: the part draws its hits"))))))
