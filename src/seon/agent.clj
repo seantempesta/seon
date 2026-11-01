@@ -16,7 +16,7 @@
   breaks its forks; docs/failure-points.md, "Physics". Agent code calls the functions of my.db and my.agent,
   referred into its namespace. From proto/flow f2-final proto.agent (session F2)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.step :as step] [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.error :as err] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.merge :as pm] [seon.config :as cfg] [seon.reconcile :as r] [seon.vector :as vector] [seon.lib :as lib] [seon.print :as print] [seon.sock :as sock] [jolt.scheme :as scm] [clojure.test :as t]
+  (:require [seon.step :as step] [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.error :as err] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.doc :as doc] [seon.merge :as pm] [seon.config :as cfg] [seon.reconcile :as r] [seon.vector :as vector] [seon.lib :as lib] [seon.print :as print] [seon.sock :as sock] [jolt.scheme :as scm] [clojure.test :as t]
             [clojure.string :as str] [seon.program :as program] [seon.proofs :as proofs] [seon.fx :as fx] [seon.task :as task] [seon.intr :as intr] [clojure.repl]
             [malli.registry :as mr] [clojure.core.async :as a] [jolt.io-poller :as poller]))
 
@@ -293,7 +293,7 @@
 (defn schema-moved
   "State st without the schema registry it holds (seon.repl/branch-registry) when attrs, the attributes a
   write to :db wrote, hold a schema entry's (:schema/*): the registry is read again at the next eval."
-  {:malli/schema [:=> [:cat :map [:sequential :any]] :map]}
+  {:malli/schema [:=> [:cat :map [:set :any]] :map]}
   [st attrs] (cond-> st (some #(and (keyword? %) (= "schema" (namespace %))) attrs) (dissoc :schema-registry)))
 
 (defn transact!
@@ -310,13 +310,18 @@
                   (with-citations (db) tx-data)
                   tx-data)]
     (if (= :test (:mode @state))
-      (let [r (d/with (db) tx-data)]
-        (swap! state #(-> % (assoc :db (:db-after r) :tx (select-keys r [:db-after :tx-data])) (schema-moved (map :a (:tx-data r)))))
+      (let [before (db) r (d/with before tx-data) attrs (into #{} (map :a) (:tx-data r))]
+        (doc/carry-index! before (:db-after r) attrs)
+        (swap! state #(-> % (assoc :db (:db-after r) :tx (select-keys r [:db-after :tx-data])) (schema-moved attrs)))
         {:t (:max-tx (:db-after r)) :datoms (count (:tx-data r)) :local true})
-      (let [r (dw/apply! (:store-conn @state) {:tx-data tx-data :tx-meta (pdb/tx-meta (:branch @state) (cond-> {} (:eval @state) (assoc :seon.tx/eval (:eval @state))))})]
+      (let [before (db)
+            r (dw/apply! (:store-conn @state) {:tx-data tx-data :tx-meta (pdb/tx-meta (:branch @state) (cond-> {} (:eval @state) (assoc :seon.tx/eval (:eval @state))))})]
         (when-not (map? r) (throw (ex-info (str "transact refused: " (ex-message r)) {:writer-error (ex-message r)})))
-        ;; :tx, the transaction that moved :db: what seon.ctx patches @ctx from
-        (swap! state #(-> % (assoc :db (:db-after r) :tx (select-keys r [:db-after :tx-data]) :dirty? true) (schema-moved (map :a (:tx-data r)))))
+        ;; :tx, the transaction that moved :db: what seon.ctx patches @ctx from; the search's text
+        ;; indexes and the schema registry carried past it when it wrote none of their attributes
+        (let [attrs (into #{} (map :a) (:tx-data r))]
+          (doc/carry-index! before (:db-after r) attrs)
+          (swap! state #(-> % (assoc :db (:db-after r) :tx (select-keys r [:db-after :tx-data]) :dirty? true) (schema-moved attrs))))
         (cond-> {:t (:max-tx (:db-after r)) :datoms (count (:tx-data r))}
           (seq (:tempids r)) (assoc :tempids (into {} (filter (comp string? key)) (:tempids r))))))))
 
@@ -477,7 +482,9 @@
             ops (pdb/report->tx rep)
             errs (program/load-changes! (:db-after rep) ops)]
         ;; the merge base is now main's head: what main changed is not this branch's change
-        (swap! state #(-> % (assoc :db @conn :base (pdb/branch-base conn main-b (:branch @state))) (schema-moved (map (fn [op] (nth op 2 nil)) ops))))
+        (let [attrs (into #{} (map (fn [op] (nth op 2 nil))) ops)]
+          (doc/carry-index! head @conn attrs)
+          (swap! state #(-> % (assoc :db @conn :base (pdb/branch-base conn main-b (:branch @state))) (schema-moved attrs))))
         (send! {:op :committed :t (:max-tx @conn) :txs 1})
         (cond-> {:ok true :applied (:apply r) :conflicts (:conflicts r) :t (:max-tx @conn) :datoms (count ops)}
           (seq (:conflicts carried)) (assoc :task-conflicts (:conflicts carried))
