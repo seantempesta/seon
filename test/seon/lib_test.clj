@@ -6,8 +6,11 @@
 (deftest a-fork-beside-a-running-thread-is-refused-and-says-how-many-run
   ;; lib/fork! is the one spawning skeleton: a second active Chez thread breaks a forked
   ;; child (E11/E13), so it forks nothing and answers its refused branch with the count
-  (let [stop (promise)
-        spin (doto (Thread. #(loop [] (when-not (realized? stop) (recur)))) (.start))
+  ;; the fork waits for the spinning thread to be running: under load a thread just started may not be
+  ;; active yet, and the fork beside it was a fork beside no thread (green alone, red in a busy shard)
+  (let [stop (promise) running (promise)
+        spin (doto (Thread. #(do (deliver running true) (loop [] (when-not (realized? stop) (recur))))) (.start))
+        _ @running
         r (lib/fork! {:child #(lib/c-exit 3) :parent (fn [pid] [:forked pid]) :refused (fn [n] [:refused n])})]
     (deliver stop true)
     (.join spin)

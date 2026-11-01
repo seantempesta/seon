@@ -131,10 +131,12 @@
 
 (defn- literal-line?
   "Is trimmed line t exactly one literal (number, string, keyword, character, true, false,
-  nil) or one qualified symbol?"
+  nil) or one qualified symbol? Read without syntax-quote (a literal holds none, and edamame
+  expands nested ones exponentially: a run of backticks in a reply read as a loop).
+  See docs/failure-points.md."
   {:malli/schema [:=> [:cat :string] :boolean]}
   [t]
-  (let [fs (read-text t 'user) x (first fs)]
+  (let [fs (read-text t 'user {:syntax-quote false}) x (first fs)]
     (boolean (and (= 1 (count fs))
                   (or (number? x) (string? x) (keyword? x) (char? x) (boolean? x) (nil? x) (qualified-symbol? x))))))
 
