@@ -102,10 +102,10 @@
         (ctx/build db2 (pdb/eid db2 :seon.agent/key key) branch)))
     (if (= t (:warm-t st))
       st
-      ;; main's search text indexes (seon.doc/text-index), built here once and carried by each commit
-      ;; that writes no text (the :tx step), so every agent forked inherits them and its first search
-      ;; reads none of them cold (a forked agent's first grep built them: 514 MB, ~1 s)
-      (do (doseq [a (distinct (vals doc/text-attrs))] (doc/text-index db a))
+      ;; main's search text index (seon.doc/text-index), built here once and carried by each commit
+      ;; that writes no text (the :tx step), so every agent forked inherits it and its first search
+      ;; builds nothing (an in-memory FTS5 table survives fork() as plain memory)
+      (do (doc/text-index db)
       ;; main's schema registry, which each agent forked holds until it writes a schema entry
       (let [k (program/schema-changes db)]
         (assoc st :warm-t t :schema-registry {:key k :registry (program/schema-registry k)}))))))

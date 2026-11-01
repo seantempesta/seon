@@ -9,7 +9,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.step :as step] [seon.contract :refer [defn defn-]] [seon.ref :as ref] [seon.source :as source] [seon.task :as task] [seon.db :as pdb]
             [datahike.api :as d] [clojure.string :as str] [clojure.java.io :as io]
-            [seon.config :as cfg] [seon.lib :as lib] [seon.reader :as reader] [seon.edn :as sedn] [seon.print :as print] [seon.print.emit :as emit]))
+            [seon.config :as cfg] [seon.sqlite :as sqlite] [seon.lib :as lib] [seon.reader :as reader] [seon.edn :as sedn] [seon.print :as print] [seon.print.emit :as emit]))
 
 ;; ---- one page, parsed into sections ----------------------------------------------------
 
@@ -532,8 +532,8 @@
   "Each text's BM25 score (Robertson and Zaragoza 2009; k1 and b :seon.config.render/relevance-features's
   :bm25-k1 and :bm25-b) for query words qs, fs each text's word counts and lens its length (in whatever
   unit, the same for every text); its idf counted over fs, so the texts scored are their own corpus and no
-  index is read. In fs's order. The one text ranking: relevance's (seon.context/relevance) pool, and the
-  term `tokens` scores the store's texts by from their index (`text-index`)."
+  index is read. In fs's order. Relevance's (seon.context/relevance) pool scorer, whose weights are fitted to it;
+  the store's own texts are ranked by FTS5 (`tokens`, `text-index`). See docs/vector.md#search."
   {:malli/schema [:=> [:cat [:set :string] [:sequential [:map-of :string :int]] [:sequential number?]] [:vector number?]]}
   [qs fs lens]
   (let [feat (cfg/value :seon.config.render/relevance-features)
@@ -542,73 +542,60 @@
     (bm25-scores feat avg idf fs lens)))
 
 (defonce ^:private indexes
-  ;; attribute -> [the db's [:hash :max-tx] it was checked at, the fingerprint of its texts, their text-index]; one slot an attribute, replaced by the next change to its texts
-  (volatile! {}))
+  ;; [the db's [:hash :max-tx] it was built at, its text-index]; one slot, replaced by the next build
+  (volatile! nil))
 
-(defn- fingerprint
-  "What the texts of attribute a on db are, as a number: how many, and the sum of the hashes of their entities and
-  values (a string caches its hash), so it moves when a text is added, removed or changed and not when another
-  attribute is written. One read of the attribute's datoms."
-  {:malli/schema [:=> [:cat :seon.host/db :qualified-keyword] [:tuple :int :int]]}
-  [db a]
-  (reduce (fn [[n h] d] [(inc n) (+ h (* 31 (hash (:e d))) (hash (:v d)))]) [0 0] (d/datoms db :aevt a)))
+(def ^:private index-attrs
+  "The text attributes in the order the index numbers them (its rows' attribute column)."
+  (vec (sort (distinct (vals text-attrs)))))
 
 (defn- build-index
-  "The postings of attribute a's texts on db: {:n texts :total characters :lens {e length} :post {term {e count}}}."
-  {:malli/schema [:=> [:cat :seon.host/db :qualified-keyword] :map]}
-  [db a]
-  (let [post (volatile! (transient {})) lens (volatile! (transient {}))
-        total (volatile! 0)]
-    (doseq [{:keys [e v]} (d/datoms db :aevt a)]
-      (vswap! lens assoc! e (+ (count v) (get @lens e 0)))
-      (vswap! total + (count v))
-      (doseq [[w c] (frequencies (terms v))]
-        (vswap! post assoc! w (assoc (get @post w {}) e c))))
-    (let [lens (persistent! @lens)]
-      {:n (count lens) :total @total :lens lens :post (persistent! @post)})))
+  "The FTS5 index (seon.sqlite/fts-open) of every text attribute's texts on db: one row a text, its entity and
+  its attribute's number in `index-attrs`, one corpus whose bm25 `tokens` ranks. {:h :arena :n :counts}."
+  {:malli/schema [:=> [:cat :seon.host/db] :map]}
+  [db]
+  (sqlite/fts-open (for [[i a] (map-indexed vector index-attrs) {:keys [e v]} (d/datoms db :aevt a)] [e i (str v)])))
 
 (defn text-index
-  "The postings of attribute a's texts on db, {:n :total :lens :post}: for each `terms` term, the texts holding it
-  and how many times. Derived data (AGENTS section 5): built once for the texts as they are (the db's :hash and :max-tx say it is the same value; when it moved, their `fingerprint`: a db value
-  is read again at every deref, so its identity says nothing) and reused until one of them changes,
-  regenerated from db whenever it is gone, never relied on. A race of two readers only builds one twice.
-  See docs/vector.md#search."
-  {:malli/schema [:=> [:cat :seon.host/db :qualified-keyword] :map]}
-  [db a]
-  (let [at [(:hash db) (:max-tx db)] [was fp ix] (get @indexes a)]
+  "The FTS5 index of every text attribute's texts on db (`text-attrs`), {:h :arena :n :counts}: tokens by Porter's
+  stems, so \"watching\" finds `watch!` and \"it\" is no part of \"edit\". Derived data (AGENTS section 5):
+  built once for a db value (its :hash and :max-tx say it is the same value: a db value is read again at every deref, so
+  its identity says nothing), reused until a move writes a text, regenerated from db whenever it is gone
+  (a build is 40 ms, 8 MB), never relied on. A race of two readers only builds one twice; an index is closed
+  when no reader holds it. See docs/vector.md#search."
+  {:malli/schema [:=> [:cat :seon.host/db] :map]}
+  [db]
+  (let [at [(:hash db) (:max-tx db)] [was ix] @indexes]
     (if (= at was)
       ix
-      ;; the db moved (a write to any attribute): its texts are read once for their fingerprint; the index stands when they are the same
-      (let [now (fingerprint db a)
-            ix (if (= now fp) ix (build-index db a))]
-        (vswap! indexes assoc a [at now ix])
+      (let [ix (build-index db)]
+        (vreset! indexes [at ix])
         ix))))
 
 (defn carry-index!
-  "Each text index held for db before (`text-index`, of an attribute attrs holds none of) as the index of db after:
-  a move of a db that wrote none of an attribute's datoms leaves its texts as they were, so the index stands with
-  no fingerprint read, which costs a read of every text (114 MB over a program's forms in a forked agent, where
-  every first search read them cold). Its callers know what a move wrote: an agent's transaction and its merge
-  of main (seon.agent), the fork server's commit of main (seon.fork-server). nil. See docs/vector.md#search."
+  "The text index held for db before (`text-index`) as the index of db after, when the move wrote none of the
+  text attributes (attrs, the attributes of its datoms): the texts are as they were, so the index stands and no build
+  reads them. Its callers know what a move wrote: an agent's transaction and its merge of main (seon.agent),
+  the fork server's commit of main (seon.fork-server). nil. See docs/vector.md#search."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:set :any]] :nil]}
   [before after attrs]
   (let [at0 [(:hash before) (:max-tx before)] at1 [(:hash after) (:max-tx after)]]
-    (when (not= at0 at1)
-      (vswap! indexes (fn [m] (reduce-kv (fn [m a [was fp ix]] (if (and (= was at0) (not (contains? attrs a))) (assoc m a [at1 fp ix]) m)) m m))))
+    (when (and (not= at0 at1) (not-any? attrs index-attrs))
+      (vswap! indexes (fn [[was ix :as slot]] (if (= was at0) [at1 ix] slot))))
     nil))
 
-(defn- counts-in
-  "The texts of postings ix holding a query word: {e {word count}}, a word counted in every term that contains it
-  (a scan of the vocabulary, not of the texts)."
-  {:malli/schema [:=> [:cat :map [:sequential :string]] [:map-of :any [:map-of :string :int]]]}
-  [ix ws]
-  (reduce-kv (fn [m term es]
-               (reduce (fn [m w]
-                         (if (str/includes? term w)
-                           (reduce-kv (fn [m e c] (assoc m e (assoc (get m e {}) w (+ c (get-in m [e w] 0))))) m es)
-                           m))
-                       m ws))
-             {} (:post ix)))
+(defn- match-query
+  "The FTS5 query of words ws: each quoted (a prefix when prefix?) and joined by OR."
+  {:malli/schema [:=> [:cat [:sequential :string] :boolean] :string]}
+  [ws prefix?]
+  (str/join " OR " (map #(str "\"" % "\"" (when prefix? "*")) ws)))
+
+(defn- attr-numbers
+  "The index's numbers of the attributes holding kinds' texts."
+  {:malli/schema [:=> [:cat [:set :keyword]] [:set :int]]}
+  [kinds]
+  (let [number (zipmap index-attrs (range))]
+    (into #{} (keep (fn [k] (some-> (text-attrs k) number))) kinds)))
 
 (defn grep
   "Every line of the texts of kinds on db that pattern matches, as grep answers them, one row each
@@ -616,15 +603,23 @@
   id, a schema key) and the number of the line holding the match within its text (the number lines reads it
   at), :text that line, trimmed; in prose (a section's, a task's), where a paragraph is one line, :text is each
   sentence of that line that matches, its :at the paragraph's line, so (lines x n n) reads the paragraph whole. pattern is a string,
-  matched as it is written, or a regex. A string's words narrow the texts read through `text-index` (its
-  postings, built once a change of the store); a regex reads every text of kinds. ns, when given, keeps
+  matched as it is written, or a regex. A string's longest word narrows the texts read: an FTS5 query of the
+  terms of `text-index` that begin with it (a literal holds each of its words, so the longest is the rarest
+  necessary one; a match inside a term, or across a camelCase boundary, is not a candidate); a regex has no
+  terms to ask for, so it reads every text of kinds. ns, when given, keeps
   the names starting with it. Rows in the order of their texts' names, then lines. See docs/vector.md#search."
   {:malli/schema [:=> [:cat :seon.host/db [:or :string :seon.host/regex] [:set :keyword] [:maybe :string]] [:vector :map]]}
   [db pattern kinds ns]
   (let [re (if (string? pattern) (re-pattern (str/replace pattern #"[\\^$.|?*+()\[\]{}]" "\\\\$0")) pattern)
-        ws (when (string? pattern) (words pattern))]
+        ws (when (string? pattern) (words pattern))
+        numbers (attr-numbers kinds)
+        ;; the candidate texts of each attribute: those holding the longest word's terms, or all
+        candidates (if (seq ws)
+                     (group-by second (map (fn [[e a]] [e (index-attrs a)])
+                                           (sqlite/fts-match (text-index db) (match-query [(first (sort-by (comp - count) ws))] true) numbers)))
+                     {})]
     (->> (for [a (distinct (keep text-attrs kinds))
-               e (if (seq ws) (keys (counts-in (text-index db a) ws)) (map :e (d/datoms db :aevt a)))
+               e (if (seq ws) (distinct (map first (get candidates a))) (map :e (d/datoms db :aevt a)))
                :let [v (:v (first (d/datoms db :eavt e a)))]
                :when (and v (re-find re v))
                h (named-hits db e a kinds (constantly true))
@@ -650,26 +645,22 @@
             (walk top)))))
 
 (defn tokens
-  "The texts on db that hold the words of query s, of kinds, best first, each {:kind :name :z :line :at}: `bm25`'s
-  term over each text's count of each word of `words` (its length in characters), scored against every text of
-  those kinds, z its score in standard deviations above their mean (every text, those holding no word scoring 0). A word is
-  counted in every `terms` term that contains it. Only the texts with z >= z-min are answered. The line is the
-  first holding a word. Cost: a scan of the vocabulary of `text-index` (built once a change of the store, not a
-  query) and the postings of the words, and per hit its text and names; the one text ranking of my.agent/search.
-  See docs/vector.md#search."
+  "The texts on db that hold the words of query s, of kinds, best first, each {:kind :name :z :line :at}: FTS5's
+  bm25 (`text-index`: Porter stems over unicode61 terms, one corpus of every text attribute) of each text against
+  the OR of `words`, z its score in standard deviations above the mean of every text of those kinds (those holding no
+  word scoring 0). Only the texts with z >= z-min are answered. The line is the first holding a word as it is
+  written (a text that holds only a stem of it, \"watch\" for \"watching\", has none). Cost: the index (built once
+  a change of the store, not a query), one FTS5 query, and per hit its text and names; the one text ranking of
+  my.agent/search (relevance's pool is `bm25`). See docs/vector.md#search."
   {:malli/schema [:=> [:cat :seon.host/db :string [:set :keyword] :double] [:vector :map]]}
   [db s kinds z-min]
   (let [ws (words s)
-        attrs (distinct (keep text-attrs kinds))
-        ixs (map #(vector % (text-index db %)) attrs)
-        n (reduce + (map (comp :n second) ixs))]
+        numbers (attr-numbers kinds)
+        ix (when (seq numbers) (text-index db))
+        n (reduce + (map #(get (:counts ix) % 0) numbers))]
     (if (or (empty? ws) (zero? n))
       []
-      (let [docs (for [[a ix] ixs [e tf] (counts-in ix ws)] {:a a :e e :tf tf :len (get (:lens ix) e)})
-            avg (max 1.0 (/ (reduce + 0.0 (map (comp :total second) ixs)) n))
-            idf (into {} (for [w ws] [w (idf-of n (count (filter #(pos? (get (:tf %) w 0)) docs)))]))
-            feat (cfg/value :seon.config.render/relevance-features)
-            scored (map #(assoc %1 :score %2) docs (bm25-scores feat avg idf (map :tf docs) (map :len docs)))
+      (let [scored (for [[e a score] (sqlite/fts-match ix (match-query ws false) numbers)] {:e e :a (index-attrs a) :score score})
             sum (reduce + (map :score scored))
             sumsq (reduce + (map #(* (:score %) (:score %)) scored))
             mean (/ sum n)

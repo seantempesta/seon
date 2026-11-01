@@ -987,4 +987,10 @@
 
  ;; native/probe.c's library (bin/build native): Mach memory probes and qfork. T5 points it at
  ;; next's build from a snapshot that has none.
- :seon.config.native/probe-lib #seon/checkout "target/lib/libprobe.dylib"}
+ :seon.config.native/probe-lib #seon/checkout "target/lib/libprobe.dylib"
+
+ ;; The SQLite seon.sqlite binds for the text index's FTS5 table (docs/vector.md#search): macOS's own, which
+ ;; the system holds in its shared cache (the path has no file, dlopen finds it) and builds with FTS5 and
+ ;; Porter's tokenizer. Unit: path. Missing, or without FTS5: the first text index throws
+ ;; :seon.sqlite/unloaded or :seon.sqlite/refused. Provenance: the task seon.doc/the-text-index-is-fts5.
+ :seon.config.native/sqlite-lib "/usr/lib/libsqlite3.dylib"}

@@ -480,24 +480,34 @@
         (is (seq (seon.root/wiki-boot-tx (d/db-with db [{:seon.task/id "demo/new-task"}]) co (constantly {}))) "a new task id loads again")))))
 
 (deftest a-text-index-is-carried-past-a-move-that-writes-no-text
-  ;; docs/vector.md#search: seon.doc/carry-index! keeps the index a move left as it was (no fingerprint, no build),
-  ;; and a move that writes the attribute's texts leaves it to be built again, holding the new text
+  ;; docs/vector.md#search: seon.doc/carry-index! keeps the index a move left as it was (no build),
+  ;; and a move that writes a text attribute leaves it to be built again, holding the new text
   (let [db0 (mt/world)
-        ix0 (seon.doc/text-index db0 :form/src)
+        ix0 (seon.doc/text-index db0)
         attrs #(into #{} (map :a) (:tx-data %))
         r1 (d/with db0 [{:seon.root/id :root :seon.root/boot "a-boot"}])
         _ (seon.doc/carry-index! db0 (:db-after r1) (attrs r1))
         db1 (:db-after r1)
-        ;; the slot is keyed to db1 by the carry itself, before any read could fingerprint it
-        slot (get @@#'seon.doc/indexes :form/src)
-        ix1 (seon.doc/text-index db1 :form/src)
+        ;; the slot is keyed to db1 by the carry itself, before any read could build
+        slot @@#'seon.doc/indexes
+        ix1 (seon.doc/text-index db1)
         r2 (d/with db1 ((mt/code 'app.qq "(ns app.qq)\n\n(defn qqzz [] 1)\n") db1))
         _ (seon.doc/carry-index! db1 (:db-after r2) (attrs r2))
-        ix2 (seon.doc/text-index (:db-after r2) :form/src)]
+        ix2 (seon.doc/text-index (:db-after r2))]
     (is (= [(:hash db1) (:max-tx db1)] (first slot)) "the carry keys the held index to the move's db")
-    (is (identical? ix0 (nth slot 2)) "and keeps the same index")
-    (is (identical? ix0 ix1) "a move that wrote no form text keeps the index")
-    (is (= (+ 2 (:n ix0)) (:n ix2)) "a move that wrote two form texts is read into a new index")))
+    (is (identical? ix0 (second slot)) "and keeps the same index")
+    (is (identical? ix0 ix1) "a move that wrote no text keeps the index")
+    (is (= (+ 2 (:n ix0)) (:n ix2)) "a move that wrote two form texts is built into a new index")))
+
+(deftest tokens-match-stems-and-whole-terms
+  ;; docs/vector.md#search: the text ranking is FTS5's over Porter stems. The substring match it replaces found
+  ;; "it" in every term holding it ("edit"), and a request's "watching" never found `watch!`
+  (let [db (mt/with (mt/world)
+                    (mt/code 'app.sw "(ns app.sw)\n\n(defn watch! \"Observes a path.\" [] 1)\n(defn edit [] 2)\n(defn keep-it [] 3)\n"))
+        names (fn [q] (set (map :name (seon.doc/tokens db q #{:var} 1.0))))]
+    (is (contains? (names "a watcher, watching") 'app.sw/watch!) "a stemmed word: watching is watch")
+    (is (contains? (names "keep it") 'app.sw/keep-it) "a whole term")
+    (is (not (contains? (names "it") 'app.sw/edit)) "a short word is no part of a longer term")))
 
 (deftest grep-answers-each-matching-line-as-a-row
   ;; the owner, 2026-11-01: tools like the terminal's, with the same meaning, answering vectors of maps the agent

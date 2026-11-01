@@ -16,6 +16,8 @@
                                                 [:seon.db/attributes [:map-of :qualified-keyword [:map [:stored :keyword] [:declared :keyword]]]]]]
  :seon.db/ids-unopened [:and :seon.error/base [:map [:seon.error/type [:= :seon.db/ids-unopened]] [:path :string] [:errno :int]]]
  :seon.db/store-unplaced [:and :seon.error/base [:map [:seon.error/type [:= :seon.db/store-unplaced]] [:path :string] [:errno :int]]]
+ :seon.sqlite/unloaded [:and :seon.error/base [:map [:seon.error/type [:= :seon.sqlite/unloaded]] [:path :string]]]
+ :seon.sqlite/refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.sqlite/refused]] [:op :keyword] [:rc :int]]]
  :seon.vector/model-unopened [:and :seon.error/base [:map [:seon.error/type [:= :seon.vector/model-unopened]] [:path :string]]]
  :seon.vector/helper-died [:and :seon.error/base [:map [:seon.error/type [:= :seon.vector/helper-died]] [:exit :int] [:stderr :string]]]
  :seon.vector/encode-failed [:and :seon.error/base [:map [:seon.error/type [:= :seon.vector/encode-failed]] [:code :int]]]
