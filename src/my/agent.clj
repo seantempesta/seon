@@ -281,7 +281,7 @@
   :judge, so the run is recorded on main and is one run with any other asker's of this head):
   the task's proofs and every in-process test reaching what the branch changed since the main it
   forked from, each test with a result at its reach digest reused (a red as recorded), not run;
-  given proofs, the tests of their namespaces. The process tests it reaches, a proof among them, run
+  given proofs, those tests (a namespace's name, its tests). The process tests it reaches, a proof among them, run
   at the judge, before a merge (:deferred, and :why each: the process it reaches through which
   calls). Answers that test run ({:pass :fail :error :reports :ran :reused :ms ...}) with
   :results {test :pass|:fail|:error} and :proofs (each proof's status: the task's and the given ones,
@@ -293,7 +293,7 @@
   {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat [:set :qualified-symbol]] :map]]}
   ([] (prove #{}))
   ([proofs]
-   (let [test-run (agent/prove! :judge (into #{} (map (comp symbol namespace)) proofs))]
+   (let [test-run (agent/prove! :judge proofs)]
      (if (contract/error? test-run)
        test-run
        (let [results (proofs/results test-run)

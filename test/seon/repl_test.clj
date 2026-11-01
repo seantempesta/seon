@@ -850,3 +850,15 @@
           f (first (:warnings r5))]
       (is (= :invalid-contract (:seon.repl/finding f)) (pr-str r5))
       (is (= 'seon.repl-test.warned/bad-n (:var f)) "naming the definition whose contract could not be armed"))))
+
+(deftest an-eval-that-replaces-the-agents-state-keeps-its-socket
+  ;; bench-scope-3: the implement agent ran seon.ctx-test's cost measure at its REPL, whose helpers reset
+  ;; seon.agent/state; its next reply had no socket and the process died (exit 1). The socket is the
+  ;; process's own (seon.agent/link), apart from the state forms may replace
+  (let [old @agent/state old-link @agent/link]
+    (try (reset! agent/link {:fd 7})
+         (reset! agent/state {:n 0 :ns (the-ns 'user)})
+         (repl/eval-string "(reset! seon.agent/state {:db nil})" {})
+         (is (= 7 (:fd @agent/link)) "the process keeps its socket")
+         (is (= {:db nil} (select-keys @agent/state [:db :fd :conn])) "and the state is what the forms made it")
+         (finally (reset! agent/state old) (reset! agent/link old-link)))))

@@ -1274,9 +1274,9 @@
                                [:db/add v :var/form "f1'"]])
            store-conn (d/connect (assoc cfg :branch ab))
            [a b] (sock/socketpair)
-           old @agent/state]
+           old @agent/state old-link @agent/link]
        (try
-         (reset! agent/state {:fd a :store-conn store-conn :cfg cfg :branch ab :key "test/a1" :db @store-conn :base forked})
+         (reset! agent/link {:fd a}) (reset! agent/state {:store-conn store-conn :cfg cfg :branch ab :key "test/a1" :db @store-conn :base forked})
          (is (empty? (pm/changed-vars (agent/branch-changes (:base @agent/state) (agent/db)))) "the agent has changed nothing")
          (let [r (agent/merge-main! #{})]
            (is (some #{[:var 'app.m0/f1]} (:applied r)) "main's change merges in")
@@ -1295,7 +1295,7 @@
              "and is main's, not the agent's: its base is the merge base")
          (is (= {} (pm/divergence (agent/branch-changes (:base @agent/state) (agent/db))))
              "so the agent's divergence carries none of main's changes")
-         (finally (reset! agent/state old) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
+         (finally (reset! agent/state old) (reset! agent/link old-link) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
 
 (deftest an-agent-keeps-no-db-older-than-its-branchs-current
   ;; docs/machine.md#roots-heap, a kept db value is a reference: after a run of its own commits, a
@@ -1312,11 +1312,11 @@
            forked @conn
            store-conn (d/connect (assoc cfg :branch ab))
            [a b] (sock/socketpair)
-           old @agent/state
+           old @agent/state old-link @agent/link
            note (fn [i] (agent/transact! [{:note/text (str "n" i)}]))
            stale #(for [[path t] (ts/stale-dbs (apply dissoc @agent/state %) (:max-tx (agent/db)))] [path t])]
        (try
-         (reset! agent/state {:fd a :store-conn store-conn :cfg cfg :branch ab :key "test/a1" :db @store-conn :base forked :main forked})
+         (reset! agent/link {:fd a}) (reset! agent/state {:store-conn store-conn :cfg cfg :branch ab :key "test/a1" :db @store-conn :base forked :main forked})
          (let [[_ in] (agent/test-inputs (agent/db))]
            (doseq [i (range 4)]
              (note i)
@@ -1335,7 +1335,7 @@
            (agent/branch-changes (:base @agent/state) (agent/db))
            (agent/branch-graph (agent/db) (:base @agent/state) in)
            (is (= [] (stale [:base :main])) "and after more of its own"))
-         (finally (reset! agent/state old) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
+         (finally (reset! agent/state old) (reset! agent/link old-link) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
 
 (deftest merge-main-brings-the-task-content-main-carried
   ;; live finding F3 (pipeline 1): a session's merge-main! moved its base to main's head but
@@ -1358,16 +1358,16 @@
                                [:db/add v :var/form "f1'"]])
            store-conn (d/connect (assoc cfg :branch ab))
            [a b] (sock/socketpair)
-           old @agent/state]
+           old @agent/state old-link @agent/link]
        (try
-         (reset! agent/state {:fd a :store-conn store-conn :cfg cfg :branch ab :key "test/a1" :db @store-conn :base forked})
+         (reset! agent/link {:fd a}) (reset! agent/state {:store-conn store-conn :cfg cfg :branch ab :key "test/a1" :db @store-conn :base forked})
          (agent/merge-main! #{})
          (let [x (task/task (agent/db) "demo/x")]
            (is (= #{'demo-test/x-design-wrote-test} (set (:seon.task/proofs x))) "main's carried proof is on the branch")
            (is (= "Make x. The design: f1 adds 100." (:seon.task/plan x)) "and its plan"))
          (is (= [] (:tx (task/carry-tx (:base @agent/state) (agent/db) @conn)))
              "so the run's end carries nothing of it back onto main")
-         (finally (reset! agent/state old) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
+         (finally (reset! agent/state old) (reset! agent/link old-link) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
 
 (deftest a-run-takes-its-sessions-entries-from-main
   ;; design one-derivation 4.1 section 5: delivery is the fact. A session whose process is gone
@@ -1390,16 +1390,16 @@
            _ (d/transact conn (task/message-tx "m-x" :message "user" (get-in (task/run @conn "demo/x#1") [:seon.run/env :branch]) "not yours"))
            store-conn (d/connect (assoc cfg :branch ab))
            [a b] (sock/socketpair)
-           old @agent/state]
+           old @agent/state old-link @agent/link]
        (try
-         (reset! agent/state {:fd a :store-conn store-conn :cfg cfg :branch ab :run "demo/w#2" :db @store-conn})
+         (reset! agent/link {:fd a}) (reset! agent/state {:store-conn store-conn :cfg cfg :branch ab :run "demo/w#2" :db @store-conn})
          (is (= [{:id "m-v" :kind :verdict :from "root" :branch br :body "red: demo-test/w is red"}]
                 (agent/untaken-entries))
              "the session takes what main holds to its earlier run, and nothing of another session's")
          (agent/transact! (task/message-tx "m-v" :verdict "root" br "red: demo-test/w is red"))
          (agent/commit!)
          (is (= [] (agent/untaken-entries)) "once its branch holds it, it is taken")
-         (finally (reset! agent/state old) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
+         (finally (reset! agent/state old) (reset! agent/link old-link) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
 
 (deftest a-runs-outcome-on-main-reaches-the-agents-ctx-at-its-next-take
   ;; owner, 2026-10-26: take! is the one way outside facts reach the agent's branch, and so its
@@ -1423,11 +1423,11 @@
            _ (d/transact conn [{:seon.run/id "demo/w#1" :seon.run/status :parked :seon.run/outcome :waiting :seon.run/reason "waiting for a message"}
                                {:seon.agent/key k :seon.agent/opened #{"e1" "e9"}}])
            [a b] (sock/socketpair)
-           old @agent/state
+           old @agent/state old-link @agent/link
            ;; a collection's member in the agent's ctx, found by its id
            member (fn [coll attr id] (some #(when (= id (attr %)) %) (vals (get @seon.ctx/ctx coll))))]
        (try
-         (reset! agent/state {:fd a :store-conn store-conn :cfg cfg :branch ab :run "demo/w#1" :key k :db @store-conn})
+         (reset! agent/link {:fd a}) (reset! agent/state {:store-conn store-conn :cfg cfg :branch ab :run "demo/w#1" :key k :db @store-conn})
          (is (nil? (:seon.run/outcome (d/entity (agent/db) [:seon.run/id "demo/w#1"]))) "before the take, nothing of main's")
          (is (= [{:seon.run/id "demo/w#1" :seon.run/outcome :waiting :seon.run/reason "waiting for a message"}
                  {:seon.eval/id "e1" :seon.eval/opened true}]
@@ -1441,7 +1441,7 @@
          (is (= [] (task/running (agent/db))) "so the branch holds no whole run: its reference is no running run")
          (is (true? (:seon.eval/opened (member :evals :seon.eval/id "e1"))) "and the opened eval")
          (is (= [] (agent/untaken-facts)) "taken: nothing more to copy")
-         (finally (reset! agent/state old) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
+         (finally (reset! agent/state old) (reset! agent/link old-link) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
 
 (deftest a-stall-task-closes-when-its-conditions-hold
   ;; owner, 2026-10-26: root's stall task (seon.template/stall) is done when its boundary
@@ -1459,19 +1459,19 @@
            _ (d/branch! conn (:branch cfg) ab)
            store-conn (d/connect (assoc cfg :branch ab))
            [a b] (sock/socketpair)
-           old @agent/state
+           old @agent/state old-link @agent/link
            proofs (fn [] (let [reps (atom [])]
                            (binding [clojure.test/report (fn [m] (swap! reps conj (:type m)))]
                              (doseq [v (sort tpl/stall-proofs)] ((:test (meta (resolve v))))))
                            (frequencies @reps)))]
        (try
-         (reset! agent/state {:fd a :store-conn store-conn :cfg cfg :branch ab :task "root/stall-a1-demo-t-1" :db @store-conn})
+         (reset! agent/link {:fd a}) (reset! agent/state {:store-conn store-conn :cfg cfg :branch ab :task "root/stall-a1-demo-t-1" :db @store-conn})
          (is (pos? (:fail (proofs) 0)) "red: the agent is stalled, no cause is recorded")
          (d/transact conn [[:db.fn/retractAttribute [:seon.process/id (str k "/77")] :seon.process/stall]])
          (my.task/update! :seon.task/cause merge {:what "a test child parked on a pipe nobody wrote" :evidence {:sample "..." :lsof "..."} :bug? false})
          (agent/commit!)
          (is (= {:pass 5} (proofs)) "green: the stall ended, the cause recorded with its evidence, and it is no bug")
-         (finally (reset! agent/state old) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
+         (finally (reset! agent/state old) (reset! agent/link old-link) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
 
 (deftest an-agents-transactions-name-their-runtime
   ;; task seon.db/each-commit-names-its-runtime: what an agent writes on its branch
@@ -1482,9 +1482,9 @@
            _ (d/branch! conn (:branch cfg) ab)
            store-conn (d/connect (assoc cfg :branch ab))
            [a b] (sock/socketpair)
-           old @agent/state]
+           old @agent/state old-link @agent/link]
        (try
-         (reset! agent/state {:fd a :store-conn store-conn :cfg cfg :branch ab :db @store-conn})
+         (reset! agent/link {:fd a}) (reset! agent/state {:store-conn store-conn :cfg cfg :branch ab :db @store-conn})
          (let [{:keys [t]} (agent/transact! [{:note/text "the agent's"}])]
            (agent/commit!)
            (is (= (jolt.host/runtime-fingerprint) (:seon.tx/runtime (d/entity @store-conn t))))
@@ -1507,7 +1507,7 @@
            (is (= (name (:handle r)) (:record r)) "recorded")
            (is (= (name (:handle r)) (:seon.tx/eval (d/entity @store-conn (:tx (first (d/datoms @store-conn :avet :seon.eval/id (:record r)))))))
                "its record's transaction names it"))
-         (finally (reset! agent/state old) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
+         (finally (reset! agent/state old) (reset! agent/link old-link) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
 
 
 (deftest a-root-with-no-provider-ends-the-run-on-its-typed-error
@@ -1945,4 +1945,6 @@
                          (my.test/code 'app.nt-test "(ns app.nt-test (:require [clojure.test :refer [deftest is]] [app.nt]))\n(deftest a-test (is (= 1 (app.nt/f 1))))\n(deftest b-test (is true))\n(defn helper [] 1)")
                          (my.test/code 'app.other-test "(ns app.other-test (:require [clojure.test :refer [deftest is]]))\n(deftest c-test (is true))"))]
     (is (= '#{app.nt-test/a-test app.nt-test/b-test} (agent/named-tests db '#{app.nt-test})) "its deftests, not its other vars, and no other namespace's")
-    (is (= #{} (agent/named-tests db '#{app.none-test})) "a namespace with no tests names none")))
+    (is (= #{} (agent/named-tests db '#{app.none-test})) "a namespace with no tests names none")
+    (is (= '#{app.nt-test/b-test} (agent/named-tests db '#{app.nt-test/b-test})) "a named test is itself, not its namespace")
+    (is (= #{} (agent/named-tests db '#{app.nt-test/helper})) "a var that is no test names none")))
