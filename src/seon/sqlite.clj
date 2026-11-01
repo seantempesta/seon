@@ -107,41 +107,79 @@
     (when (and (:closed? new) (not (:closed? old))) (c-close h))
     old))
 
+(defn- insert-rows!
+  "Rows [[e a text] ...] inserted into both tables of connection h, inside a transaction the caller holds: the rows
+  per attribute, {a rows}."
+  {:malli/schema [:=> [:cat :seon.ffi/address [:sequential [:tuple :int :int :string]]] [:map-of :int :int]]}
+  [h rows]
+  (with-row-calls
+    (let [ins-t (prepare h :insert "INSERT INTO t(body, e, a) VALUES (?1, ?2, ?3)")
+          ins-g (prepare h :insert "INSERT INTO g(body, e, a) VALUES (?1, ?2, ?3)")]
+      (try (loop [rs (seq rows) counts (transient {})]
+             (if rs
+               (let [[e a text] (first rs)]
+                 (doseq [stm [ins-t ins-g]]
+                   (ok! h :bind (c-bind-text stm 1 text -1 SQLITE_TRANSIENT))
+                   (ok! h :bind (c-bind-int stm 2 e))
+                   (ok! h :bind (c-bind-int stm 3 a))
+                   (let [rc (c-step stm)] (when-not (= SQLITE_DONE rc) (refused h :insert rc)))
+                   (ok! h :reset (c-reset stm)))
+                 (recur (next rs) (assoc! counts a (inc (get counts a 0)))))
+               (persistent! counts)))
+           (finally (c-finalize ins-t) (c-finalize ins-g))))))
+
 (defn fts-open
   "An index over rows [[e a text] ...] (an entity, a small integer naming the attribute it came from, its
-  text): {:h the connection :n rows :counts {a rows} :state an atom}. Two FTS5 tables hold every row, built in
-  the one transaction: t, `porter unicode61`, whose terms are stems (\"it\" is not a part of \"edit\"), ranks by bm25;
-  g, `trigram`, answers a substring. In memory, so it survives fork() as plain memory. Used through `using`
-  and closed by `retire!` once no reader holds it, or by the collector when the map is garbage: the native
-  memory is invisible to the collector's accounting, which is why a superseded index is retired and not left.
-  See docs/vector.md#search."
-  {:malli/schema [:=> [:cat [:sequential [:tuple :int :int :string]]] [:map [:n :int]]]}
+  text): {:h the connection :state an atom}, the atom holding the readers, whether it is retired and closed,
+  and :counts {a rows} (`counts`). Two FTS5 tables hold every row, built in the one transaction: t, `porter
+  unicode61`, whose terms are stems (\"it\" is not a part of \"edit\"), ranks by bm25; g, `trigram`, answers a
+  substring. In memory, so it survives fork() as plain memory. Used through `using` and closed by `retire!` once
+  no reader holds it, or by the collector when the map is garbage: the native memory is invisible to the
+  collector's accounting, which is why a superseded index is retired and not left. See docs/vector.md#search."
+  {:malli/schema [:=> [:cat [:sequential [:tuple :int :int :string]]] [:map [:h :seon.ffi/address]]]}
   [rows]
   (loaded!)
   (let [h (open!)
-        st (atom {:uses 0 :retired? false :closed? false})
+        st (atom {:uses 0 :retired? false :closed? false :counts {}})
         arena (ffi/auto-arena)]
     (ffi/reinterpret h 1 arena (fn [p] (settle! st p #(assoc % :retired? true))))
     (exec! h :create "CREATE VIRTUAL TABLE t USING fts5(body, e UNINDEXED, a UNINDEXED, tokenize='porter unicode61')")
     (exec! h :create "CREATE VIRTUAL TABLE g USING fts5(body, e UNINDEXED, a UNINDEXED, tokenize='trigram')")
     (exec! h :begin "BEGIN")
-    (with-row-calls
-    (let [ins-t (prepare h :insert "INSERT INTO t(body, e, a) VALUES (?1, ?2, ?3)")
-          ins-g (prepare h :insert "INSERT INTO g(body, e, a) VALUES (?1, ?2, ?3)")
-          counts (try (loop [rs (seq rows) counts (transient {})]
-                        (if rs
-                          (let [[e a text] (first rs)]
-                            (doseq [stm [ins-t ins-g]]
-                              (ok! h :bind (c-bind-text stm 1 text -1 SQLITE_TRANSIENT))
-                              (ok! h :bind (c-bind-int stm 2 e))
-                              (ok! h :bind (c-bind-int stm 3 a))
-                              (let [rc (c-step stm)] (when-not (= SQLITE_DONE rc) (refused h :insert rc)))
-                              (ok! h :reset (c-reset stm)))
-                            (recur (next rs) (assoc! counts a (inc (get counts a 0)))))
-                          (persistent! counts)))
-                      (finally (c-finalize ins-t) (c-finalize ins-g)))]
-      (exec! h :commit "COMMIT")
-      {:h h :state st :arena arena :n (reduce + 0 (vals counts)) :counts counts}))))
+    (swap! st assoc :counts (insert-rows! h rows))
+    (exec! h :commit "COMMIT")
+    {:h h :state st :arena arena}))
+
+(defn replace-attrs!
+  "Index ix with the rows of the attributes in rows-by-attr {a [[e text] ...]} replaced: every row of each such
+  attribute deleted from both tables and its new rows inserted, in one transaction. The rest of the index is
+  untouched, so a write to one attribute reads only that attribute's texts. Call it inside `using`.
+  nil. See docs/vector.md#search."
+  {:malli/schema [:=> [:cat [:map [:h :seon.ffi/address]] [:map-of :int [:sequential [:tuple :int :string]]]] :nil]}
+  [{:keys [h state]} rows-by-attr]
+  (exec! h :begin "BEGIN")
+  (let [done (volatile! false)]
+    (try (doseq [a (keys rows-by-attr)]
+           (exec! h :delete (str "DELETE FROM t WHERE a = " a))
+           (exec! h :delete (str "DELETE FROM g WHERE a = " a)))
+         (let [added (insert-rows! h (for [[a rows] rows-by-attr [e text] rows] [e a text]))]
+           (swap! state update :counts (fn [m] (merge (apply dissoc m (keys rows-by-attr)) added))))
+         (exec! h :commit "COMMIT")
+         (vreset! done true)
+         (finally (when-not @done (c-exec h "ROLLBACK" ffi/null ffi/null ffi/null)))))
+  nil)
+
+(defn counts
+  "The rows of each attribute of index ix, {a rows}, as the last build or replacement left them."
+  {:malli/schema [:=> [:cat [:map [:state :any]]] [:map-of :int :int]]}
+  [{:keys [state]}]
+  (:counts @state))
+
+(defn size
+  "The rows of index ix."
+  {:malli/schema [:=> [:cat [:map [:state :any]]] :int]}
+  [ix]
+  (reduce + 0 (vals (counts ix))))
 
 (defn retire!
   "Marks index ix superseded: it is closed now when no reader is using it, else by the last reader's release.

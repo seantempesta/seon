@@ -484,6 +484,7 @@
   ;; and a move that writes a text attribute leaves it to be built again, holding the new text
   (let [db0 (mt/world)
         ix0 (seon.doc/text-index db0)
+        n0 (sqlite/size ix0)
         attrs #(into #{} (map :a) (:tx-data %))
         r1 (d/with db0 [{:seon.root/id :root :seon.root/boot "a-boot"}])
         _ (seon.doc/carry-index! db0 (:db-after r1) (attrs r1))
@@ -497,7 +498,22 @@
     (is (= [(:hash db1) (:max-tx db1)] (first slot)) "the carry keys the held index to the move's db")
     (is (identical? ix0 (second slot)) "and keeps the same index")
     (is (identical? ix0 ix1) "a move that wrote no text keeps the index")
-    (is (= (+ 2 (:n ix0)) (:n ix2)) "a move that wrote two form texts is built into a new index")))
+    (is (identical? ix0 ix2) "a move that wrote form texts has those rows replaced in it")
+    (is (= (+ 2 n0) (sqlite/size ix2)) "and the two texts are in it")
+    (is (= 1 (count (:value (sqlite/using ix2 #(sqlite/fts-match % "\"qqzz\"" #{}))))) "found by its word")
+    (is (= [(:hash (:db-after r2)) (:max-tx (:db-after r2))] (first @@#'seon.doc/indexes)) "keyed to the db it was carried to")))
+
+(deftest a-written-plan-is-brought-into-the-index-without-a-rebuild
+  ;; docs/vector.md#search: a move that writes a text attribute has that attribute's rows replaced in the held index
+  ;; (seon.doc/carry-index!), reading its texts alone: a task's plan written on main must not read every form again
+  (let [db0 (mt/world)
+        ix0 (seon.doc/text-index db0)
+        r (d/with db0 [{:seon.task/id "app/zorb" :seon.task/plan "Zorblax the thing."}])
+        _ (seon.doc/carry-index! db0 (:db-after r) (into #{} (map :a) (:tx-data r)))
+        ix1 (seon.doc/text-index (:db-after r))
+        found #(count (:value (sqlite/using ix1 (fn [ix] (sqlite/fts-match ix "\"zorblax\"" #{})))))]
+    (is (identical? ix0 ix1) "the index stands")
+    (is (= 1 (found)) "and holds the plan")))
 
 (deftest tokens-match-stems-and-whole-terms
   ;; docs/vector.md#search: the text ranking is FTS5's over Porter stems. The substring match it replaces found

@@ -552,13 +552,13 @@
 
 (defn- build-index
   "The FTS5 index (seon.sqlite/fts-open) of every text attribute's texts on db: one row a text, its entity and
-  its attribute's number in `index-attrs`, one corpus whose bm25 `tokens` ranks. {:h :arena :n :counts}."
+  its attribute's number in `index-attrs`, one corpus whose bm25 `tokens` ranks."
   {:malli/schema [:=> [:cat :seon.host/db] :map]}
   [db]
   (sqlite/fts-open (for [[i a] (map-indexed vector index-attrs) {:keys [e v]} (d/datoms db :aevt a)] [e i (str v)])))
 
 (defn text-index
-  "The index (seon.sqlite/fts-open) of every text attribute's texts on db (`text-attrs`), {:h :n :counts :state}: a
+  "The index (seon.sqlite/fts-open) of every text attribute's texts on db (`text-attrs`), {:h :state}: a
   Porter-stemmed table for bm25 and a trigram table for substrings, so \"watching\" finds `watch!` and \"it\" is no
   part of \"edit\". Derived data (AGENTS section 5): built once for a db value (its :hash and :max-tx say it is
   the same value: a db value is read again at every deref, so its identity says nothing), reused until a move
@@ -582,15 +582,21 @@
   (loop [] (if-let [r (sqlite/using (text-index db) f)] (:value r) (recur))))
 
 (defn carry-index!
-  "The text index held for db before (`text-index`) as the index of db after, when the move wrote none of the
-  text attributes (attrs, the attributes of its datoms): the texts are as they were, so the index stands and no build
-  reads them. Its callers know what a move wrote: an agent's transaction and its merge of main (seon.agent),
-  the fork server's commit of main (seon.fork-server). nil. See docs/vector.md#search."
+  "The text index held for db before (`text-index`) as the index of db after: the move's writes brought into it. A move
+  that wrote none of the text attributes (attrs, the attributes of its datoms) leaves the index as it was; one that
+  wrote some has those attributes' rows replaced from db after (seon.sqlite/replace-attrs!), reading those attributes'
+  texts alone, so a task's plan written on main does not read every form's text again (which evicted the node cache
+  the next agent's start was warmed in). Its callers know what a move wrote: an agent's transaction and its merge
+  of main (seon.agent), the fork server's commit of main (seon.fork-server). nil. See docs/vector.md#search."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:set :any]] :nil]}
   [before after attrs]
-  (let [at0 [(:hash before) (:max-tx before)] at1 [(:hash after) (:max-tx after)]]
-    (when (and (not= at0 at1) (not-any? attrs index-attrs))
-      (vswap! indexes (fn [[was ix :as slot]] (if (= was at0) [at1 ix] slot))))
+  (let [at0 [(:hash before) (:max-tx before)] at1 [(:hash after) (:max-tx after)] [was ix] @indexes]
+    (when (and (not= at0 at1) (= at0 was))
+      (let [number (zipmap index-attrs (range))
+            written (filter attrs index-attrs)]
+        (when (seq written)
+          (sqlite/using ix #(sqlite/replace-attrs! % (into {} (for [a written] [(number a) (for [{:keys [e v]} (d/datoms after :aevt a)] [e (str v)])])))))
+        (vreset! indexes [at1 ix])))
     nil))
 
 (defn- match-query
@@ -665,7 +671,7 @@
   (let [ws (words s)
         numbers (attr-numbers kinds)
         [n rows] (when (and (seq ws) (seq numbers))
-                   (with-index db (fn [ix] [(reduce + (map #(get (:counts ix) % 0) numbers))
+                   (with-index db (fn [ix] [(reduce + (map #(get (sqlite/counts ix) % 0) numbers))
                                             (sqlite/fts-match ix (match-query ws) numbers)])))]
     (if (or (empty? ws) (zero? (or n 0)))
       []
