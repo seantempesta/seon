@@ -825,15 +825,58 @@
         freezes (count (filter #(> % 65536) (map - (rest statics) statics)))]
     (is (<= freezes 2) (str freezes " freezes in 20 forks; the server's static at each: " (pr-str statics)))))
 
-(deftest an-agent-allocates-little-from-ready-to-its-first-request
-  ;; docs/machine.md#what-a-process-owns-in-memory: a cost proof in bytes. An agent's first commit
-  ;; (it commits the run it began when it first waits) hashed Seon's whole schema, because
-  ;; datahike.writing's cell for the last schema hashed was empty in every fresh process: 31.5 MB
-  ;; allocated, 9.8 MB of pages written (seon.db/prime-commit!, which the fork server calls so its
-  ;; agents inherit the key). The bytes this thread allocated between its :state mark (init done)
-  ;; and its first request's form, measured 2026-10-29: 38.5 MB before, 6.5 MB after.
-  (let [[r] (in-agent ["(- (seon.profile/alloc-bytes) (nth (last (:marks @seon.agent/state)) 2))"])]
-    (is (< (:value r) 12000000) (str "an agent allocated " (:value r) " bytes from its state mark to its first request: " (pr-str r)))))
+(defn- history-tx
+  "What n runs leave on main, shaped as production's (a run of task, its agent, and an eval record
+  each), numbered from i: the history an-agents-start-costs-the-same-however-long-its-root-has-run
+  grows main by between its agents."
+  {:malli/schema [:=> [:cat :string nat-int? pos-int?] :seon.db/tx-data]}
+  [task i n]
+  (vec (mapcat (fn [k] [{:seon.run/id (str "hist#" k) :seon.run/task [:seon.task/id task]
+                         :seon.run/agent {:seon.agent/key (str "hist-" k) :seon.agent/id (keyword (str "hist" k)) :seon.agent/task {:seon.task/id task}}}
+                        {:seon.eval/id (str "e" (+ 1000000 k)) :seon.eval/by "root" :seon.eval/agent {:seon.root/id :root} :seon.eval/record {:code "(+ 1 1)"}}])
+               (range i (+ i n)))))
+
+(deftest an-agents-start-costs-the-same-however-long-its-root-has-run
+  ;; docs/machine.md#an-agents-first-write: a cost proof in bytes, judged by seon.cost/judge on what
+  ;; each agent measured. An agent's bytes from its :state mark (init done) to its first request
+  ;; grew with its root's history: 5.1 MB at a shared root's first agent, 13.2 MB at its 40th, so this
+  ;; test's bound of 12 MB was red in long shards (2026-10-31). Three causes, each a read of main an
+  ;; agent repeated cold: the leaves main's commits wrote and the fork server never read (each agent
+  ;; decoded them, ~300 KB a leaf), the leaves of what every agent reads (its cited sections, the
+  ;; schema entries) evicted from the fork server's full node cache because an agent's reads never
+  ;; reach it, and seon.repl/eval-n! reading every eval main records. The baseline is :fixed; a
+  ;; change that lowers it lowers :fixed (an under past seon.cost/loose is a finding). The node
+  ;; cache is small here, so a full cache is reached at this history.
+  (let [sizes [10 100 1000]
+        e {:of 'seon.agent/begin-run! :input 'seon.agent-test/history-tx :n "runs on main before the agent's fork"
+           :work "the agent's own start: no read of main's history" :growth :constant :sizes sizes
+           :fixed {:bytes 6.0e6}}
+        measure "(- (seon.profile/alloc-bytes) (nth (last (:marks @seon.agent/state)) 2))"
+        opts {:sets [":seon.config.store/node-cache-bytes=8388608"]}
+        grow (fn [{:keys [task]} from n] {:op :eval :agent "root" :code (str "@(seon.root/transact-main! sys (seon.agent-test/history-tx " (pr-str task) " " from " " n "))")})
+        ;; each agent measures, then grows main to the next size; the next agent forks after it
+        steps (map vector (cons 0 sizes) (concat sizes [nil]))
+        measured (vec (for [[have want] steps]
+                        (let [[r] (in-agent (fn [names] (cond-> [measure] want (conj (grow names have (- want have))))) opts)]
+                          (:value r))))
+        rows (vec (for [[n b] (map vector sizes (rest measured))] {:n n :measured {:bytes (double b)} :expected (cost/expected e cost/units n)}))
+        v (cost/judge e rows)]
+    (is (:ok? v) (str (cost/explain e rows v) "\nat the root's start: " (first measured) " bytes"))))
+
+(deftest an-eval-reads-the-schema-entries-only-after-one-moved
+  ;; docs/machine.md#an-agents-first-write: seon.repl/branch-registry, which each eval calls (wrap-registry,
+  ;; instrument, the page walk), read every schema entry (two passes, seon.program/schema-changes: 748
+  ;; entries, 1.08 MB) to learn nothing had changed. With the registry held (the fork hands main's) a call
+  ;; costs under a tenth of one read; after a registration the next eval binds the registered schema.
+  (let [m "(fn [f] (let [b (seon.profile/alloc-bytes)] (f) (- (seon.profile/alloc-bytes) b)))"
+        [_ costs reg valid]
+        (in-agent [(str "(def meas " m ")")
+                   "[(meas #'seon.repl/branch-registry) (meas #(seon.program/schema-changes (:db @seon.agent/state)))]"
+                   "(my.schema/register! :lab.gap/n [:int {:min 3}])"
+                   "[(malli.core/validate :lab.gap/n 5 {:registry malli.registry/*registry*}) (malli.core/validate :lab.gap/n 1 {:registry malli.registry/*registry*})]"])
+        [held read] (:value costs)]
+    (is (< (* 10 held) read) (str "a call of branch-registry with the registry held allocated " held " bytes; one read of the schema changes " read))
+    (is (= [true false] (:value valid)) (str "after a registration the next eval binds it: " (pr-str reg) " " (pr-str valid)))))
 
 (deftest an-agent-with-no-task-resumes-a-kept-branch
   ;; found by session global-ids, 2026-10-23: an agent spawned with no task onto a branch the
