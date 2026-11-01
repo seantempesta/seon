@@ -992,9 +992,7 @@
 
 (deftest a-swap-costs-what-it-changed
   ;; the owner, 2026-10-27: easy ops on the atom; a swap! of the plan costs the change, flat in
-  ;; the session, as the patch and edits it is made of are. The claim is the growth: its fixed part
-  ;; is measured at the smallest session, so a render the plan's text is drawn through (seon.render.ui/markdown,
-  ;; rewritten in bench-scope-6: 112 calls to 127) moves it, and a swap that grows with the session is red
+  ;; the session, as the patch and edits it is made of are
   (cost/proof
     {:of 'seon.ctx-test/one-swap :input 'seon.ctx-test/swap-input
      :n "evals in the session's record"
@@ -1006,8 +1004,9 @@
                 "110 since what it cites is cite entities (seon.task/cites-tx: each cite upserted, a name asked whether it names a task, "
                 "and the task's cites read to retract the gone)")
      :growth :constant
-     ;; measured at the smallest session (112 calls when the hand count was last made, 2026-11-01)
-     :fixed {:calls (:calls (cost/measure one-swap (swap-input 100)))}
+     ;; +1: a task's plan and instructions are parsed apart, each its own text (seon.task/cited-texts, md-scan bench-b17);
+     ;; +1: the changed plan's text read for its old words (seon.problems/place-texts)
+     :fixed {:calls 112}
      :sizes [100 300 1000 3000]})
   ;; no record left behind: an empty state builds none (as-agent!'s callers leave theirs too)
   (reset! seon.agent/state nil))
