@@ -103,8 +103,15 @@
 (defn- asked
   "The name sym is asked by: the var it resolves to in the agent's namespace (an alias, 'str/join,
   read as clojure.string/join, the name its callers' facts record), else sym as written."
-  {:malli/schema [:=> [:cat :qualified-symbol] :qualified-symbol]}
+  {:malli/schema [:=> [:cat :symbol] :symbol]}
   [sym] (let [v (ns-resolve *ns* sym)] (if (var? v) (named v) sym)))
+
+(defn- ns-named?
+  "Does sym name a namespace on db or in this process, and no var here ('map is clojure.core/map, so
+  callers and callees read it as the var; 'seon.task, a namespace, answers namespaces)?"
+  {:malli/schema [:=> [:cat :seon.host/db :any] :boolean]}
+  [db sym]
+  (boolean (and (simple-symbol? sym) (not (var? (ns-resolve *ns* sym))) (or (find-ns sym) (pdb/eid db :ns/name sym)))))
 
 (defn- plan-cites
   "Does task id's plan cite sym, as it stands (a design rewrites it with update!), read on db by the one
@@ -165,10 +172,10 @@
   a require cycle, resolved an alias as a var four times)."
   {:malli/schema [:=> [:cat [:or :symbol :seon.host/var :qualified-keyword]] [:or [:vector :symbol] :my.agent/no-var :seon.schema/unknown-key]]}
   [x]
-  (let [db (agent/db) x (cond (keyword? x) x (var? x) (named x) (simple-symbol? x) x :else (asked x))
+  (let [db (agent/db) x (cond (keyword? x) x (var? x) (named x) (ns-named? db x) x :else (asked x))
         fs (when (keyword? x) (schema/forms))]
     (or (when (symbol? x) (no-var db x))
-        (when (simple-symbol? x) (vec (sort (source/required-by db x))))
+        (when (ns-named? db x) (vec (sort (source/required-by db x))))
         (when (and (keyword? x) (not (or (contains? fs x) (contains? (d/schema db) x) (seq (d/datoms db :avet :form/keywords x)))))
           (schema/unknown-key fs x))
         (doc/callers db x))))
@@ -217,9 +224,9 @@
   namespace's name answers the namespaces it requires (seon.source/requires)."
   {:malli/schema [:=> [:cat [:or :symbol :seon.host/var]] [:or [:vector :symbol] :my.agent/no-var]]}
   [sym]
-  (let [db (agent/db) sym (cond (var? sym) (named sym) (simple-symbol? sym) sym :else (asked sym))]
+  (let [db (agent/db) sym (cond (var? sym) (named sym) (ns-named? db sym) sym :else (asked sym))]
     (or (no-var db sym)
-        (when (simple-symbol? sym) (vec (sort (source/requires db sym))))
+        (when (ns-named? db sym) (vec (sort (source/requires db sym))))
         (vec (sort (disj (set (d/q '[:find [?r ...] :in $ ?s :where [?e :var/name ?s] [?e :var/form ?f] [?f :form/refs ?r]] db sym))
                          sym))))))
 

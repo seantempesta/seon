@@ -915,12 +915,15 @@
   "The test vars of namespaces names on db (each var a deftest defines, :var/kind :test): what a request
   naming them runs, beside the task's proofs, whether or not the branch changed what they reach
   (bench-scope-1's design agent named three tests of seon.render-test on a branch that had changed nothing,
-  and four proves answered ran 0, reused 0, each test :none). See docs/agent.md#testing."
+  and four proves answered ran 0, reused 0, each test :none). See docs/agent.md#testing.
+  Cost: a seek per namespace, then its forms' definitions."
   {:malli/schema [:=> [:cat :seon.host/db [:set :symbol]] [:set :qualified-symbol]]}
   [db names]
-  (let [in (set (map str names))]
-    (into #{} (comp (map :v) (filter #(in (namespace %))) (filter #(= :test (:var/kind (d/entity db [:var/name %])))))
-          (d/datoms db :avet :var/name))))
+  (into #{} (for [n names :let [ne (:db/id (d/entity db [:ns/name n]))] :when ne
+                  dt (d/datoms db :avet :form/ns ne)
+                  v (:form/defines (d/entity db (:e dt)))
+                  :when (and (= :test (:var/kind v)) (= (str n) (namespace (:var/name v))))]
+              (:var/name v))))
 
 (defn run-selection
   "What a test-plan p runs when a request names namespaces (names; none: every test it selects), as
