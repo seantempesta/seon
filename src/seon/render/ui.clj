@@ -954,27 +954,31 @@
   "One search the agent's context holds (a component over ctx and the db), drawn as one compact hiccup that the
   page shows and the model is sent as it is: the search fact at ctx path :at, its query searched on the branch's
   db by seon.context/search (exact words, meaning once its query has a vector, and the names it holds;
-  functions, wiki sections and schema keys, no relevance cut), its first :seon.search/k hits, each a line: its
-  name, then a function's doc's first sentence or a section's heading. A change of its query (a swap! on ctx)
+  functions, wiki sections and schema keys, no relevance cut), its :seon.search/k hits (else
+  :seon.config.render/search's), each a line: its name, then a function's doc's first sentence or a section's
+  heading; the hits left out are one last line, how many and the call that answers them. A change of its query (a swap! on ctx)
   redraws this part alone, and the model is sent what changed of it
-  (docs/render.md#the-page-is-sent-as-what-changed). claude_scratch/context-lab/FINDINGS.md: a request's search
-  ranked a changed item first in 41% of 49 tasks from Seon's history."
+  (docs/render.md#the-page-is-sent-as-what-changed). Measured (2026-11-01, 49 symptom-only requests from Seon's history,
+  each on its commit's parent): a request's search ranked a changed item first in 41% of them."
   {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db] [:at [:vector :any]]]] :int :string] :any]}
   [{c :seon.ctx/ctx db :seon.db/db at :at} _aid _k]
   (when-let [s (some-> (get-in c at) ratom/realize)]
     (let [q (:seon.search/query s)
           ;; the search fact's own vector, once the pipeline has embedded its query (seon.vector's due texts)
           e (pdb/eid db :seon.search/id (:seon.search/id s))
-          ;; k is the search's own count: the hits it asks for, no cut of what it found
-          hits (context/search db q {:kinds #{:var :section :schema} :k (or (:seon.search/k s) 10) :min 0.0}
+          ;; its own count when it names one, else :seon.config.render/search's; the hits it leaves out are
+          ;; said by search's last entry ({:kind :more :left n :more \"the call that answers them\"}), drawn as such
+          hits (context/search db q (cond-> {:kinds #{:var :section :schema} :min 0.0} (:seon.search/k s) (assoc :k (:seon.search/k s)))
                                (when (and e (vector/vector-of db e)) e))]
       ;; the task's own request is on the page already: the heading names it rather than repeating it
       [:section [:h3 (if (= q (get-in c [:task :seon.task/plan])) "search: this task's request" (str "search: " q))]
-       (into [:ol] (for [{:keys [kind name e]} hits :when name]
-                     [:li [:code (str name)]
-                      (some->> (case kind :var (some-> (:var/doc (d/entity db [:var/name name])) ref/lead-sentence)
-                                          :section (:seon.doc/heading (d/entity db e)) nil)
-                               (str " "))]))])))
+       (into [:ol] (for [{:keys [kind name e left more]} hits]
+                     (if (= :more kind)
+                       [:li (str left " more: ") [:code more]]
+                       [:li [:code (str name)]
+                        (some->> (case kind :var (some-> (:var/doc (d/entity db [:var/name name])) ref/lead-sentence)
+                                            :section (:seon.doc/heading (d/entity db e)) nil)
+                                 (str " "))])))])))
 
 (defn- held-whole
   "Where ctx c holds whole each entity the cites at paths ps joined, {e path}: the agent's task and its needs, the

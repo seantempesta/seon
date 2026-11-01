@@ -613,8 +613,9 @@
 (defn grep
   "Every line of the texts of kinds on db that pattern matches, as grep answers them, one row each
   {:at \"name:line\" :kind :text}: :at the thing holding it (a var or test, a section's address, a task's
-  id, a schema key) and the line's number within its text, :text the line, trimmed (in prose, a section's or a
-  task's, where a paragraph is one line: each sentence of it that matches). pattern is a string,
+  id, a schema key) and the number of the line holding the match within its text (the number lines reads it
+  at), :text that line, trimmed; in prose (a section's, a task's), where a paragraph is one line, :text is each
+  sentence of that line that matches, its :at the paragraph's line, so (lines x n n) reads the paragraph whole. pattern is a string,
   matched as it is written, or a regex. A string's words narrow the texts read through `text-index` (its
   postings, built once a change of the store); a regex reads every text of kinds. ns, when given, keeps
   the names starting with it. Rows in the order of their texts' names, then lines. See docs/vector.md#search."

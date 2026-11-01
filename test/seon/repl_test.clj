@@ -559,7 +559,7 @@
       (is (str/includes? (printed "(my.agent/lines 'seon.task/accumulate 3 6)") "seon.task/accumulate:3") (str "lines: the range, numbered as grep numbers it: " (subs (printed "(my.agent/lines 'seon.task/accumulate 3 6)") 0 (min 600 (count (printed "(my.agent/lines 'seon.task/accumulate 3 6)"))))))
       (is (str/includes? (printed "(my.agent/ls 'seon.task)") "seon.task/accumulate") (str "ls: a namespace's definitions: " (subs (printed "(my.agent/ls 'seon.task)") 0 (min 600 (count (printed "(my.agent/ls 'seon.task)"))))))
       (is (not (:ex (by "(swap! ctx assoc-in [:searches \"a1/where-entries-are-read\"] {:seon.search/id \"a1/where-entries-are-read\" :seon.search/query \"entries an agent has not taken\" :seon.search/k 5})")))
-          "a search added through swap! on ctx: a new member, written under the agent")
+          "the help page's form runs in a real agent (that it is written, drawn and redrawn: seon.ctx-test/a-search-is-a-member-a-swap-adds-and-changes)")
       (is (str/includes? (printed "(get (my.schema/forms) :seon.task/task)") ":seon.task/own") "a schema's form")
       (is (str/includes? (printed "(my.schema/register! :app.workout/set [:map [:reps :int] [:kg :double]])") ":app.workout/set") "a new schema registers")
       (is (str/includes? (printed "(my.agent/help)") "docs/agent.md#done") "help lists the page's sections, from the branch's db")

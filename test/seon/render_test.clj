@@ -1791,10 +1791,10 @@
     (is (str/includes? (seon.print/response-text {:value data} r/model-printed) "First the need.") "the part printed as an eval's value is, by its model render: it ends")
     (is (str/includes? html "First the need.") "the page's html, by the task's html render")))
 
-(deftest a-request-draws-its-search-and-a-swap-redraws-it
+(deftest a-request-draws-its-search-and-a-new-query-redraws-it
   ;; the owner, 2026-11-01: context is data the agent's ctx holds, drawn by the walk's renders (hiccup for the page,
-  ;; data for the model); a search is such data, so the agent changes it with a swap! and only its part redraws.
-  ;; claude_scratch/context-lab/FINDINGS.md: a request's search ranked a changed item first in 41% of 49 tasks
+  ;; data for the model); a search is such data (its swap! on ctx: seon.ctx-test/a-search-is-a-member-a-swap-adds-and-changes).
+  ;; measured 2026-11-01: a request's search ranked a changed item first in 41% of 49 tasks from Seon's history
   (ts/test-branch!
     (fn [_ conn]
       (d/transact conn ((my.test/code 'app.srch (str "(ns app.srch)\n"

@@ -389,8 +389,8 @@
 (defn lines
   "Like sed -n: the lines of x, whole or from line a to line b (1-based, inclusive), one row each
   {:at \"seon.task/accumulate:3\" :text \"...\"}, numbered as grep numbers them. x is a var or a namespace
-  ('seon.task/accumulate), a section (\"docs/x.md#anchor\"), a page (\"docs/x.md\") or a task's id. Its text
-  untrimmed, so an edit's old text can be copied from it. A name that holds no text answers my.agent/no-var."
+  ('seon.task/accumulate), a section (\"docs/x.md#anchor\"), a page (\"docs/x.md\") or a task's id. Each line
+  as it is written, untrimmed (grep's rows are trimmed), so an edit's old text is copied from lines, not grep. A name that holds no text answers my.agent/no-var."
   {:malli/schema [:function [:=> [:cat [:or :symbol :string]] [:or [:vector :map] :my.agent/no-var]]
                   [:=> [:cat [:or :symbol :string] pos-int? pos-int?] [:or [:vector :map] :my.agent/no-var]]]}
   ([x] (lines x 1 Integer/MAX_VALUE))
