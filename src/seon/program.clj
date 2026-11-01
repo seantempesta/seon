@@ -1712,6 +1712,18 @@
     (doseq [a [:schema/form :ns/tail] dt (d/datoms db :aevt a)] (.append b (:e dt)) (.append b " ") (.append b (:v dt)) (.append b "\n"))
     (lib/digest (.toString b))))
 
+
+(defn run-digest
+  "The digest of what a test run of db reads (seon.prove/run-key): its program (program-digest) and
+  every task's proofs and needs, which the run selects its proofs from (seon.task/accumulate), so
+  registering a proof is a new run; bench-scope-5's design registered three and its prove answered
+  the run from before them, \"green: ran 0\". Cost: program-digest's, and one read of the two
+  attributes' datoms."
+  {:malli/schema [:=> [:cat :seon.host/db] :string]}
+  [db]
+  (let [b (StringBuilder. ^String (program-digest db))]
+    (doseq [a [:seon.task/proofs :seon.task/needs] dt (d/datoms db :aevt a)] (.append b "\n") (.append b (:e dt)) (.append b " ") (.append b (:v dt)))
+    (lib/digest (.toString b))))
 (defn process-path
   "Why test t of graph g (reach-graph's) is a process test: the shortest chain of calls from its
   form to a form that uses a process var (:seon.config.source/process-vars), as the vars each

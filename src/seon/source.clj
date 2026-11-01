@@ -389,11 +389,17 @@
   (interface (for [a (:accounts r)]
                {:src (:src a) :inline? (seq (:inline-defs a)) :defs (for [d (:defs a)] [(:var d) (:kind d)])})))
 
-(defn- required-by
+(defn required-by
   "The namespaces whose forms require nsym on db (their :form/requires)."
   {:malli/schema [:=> [:cat :seon.host/db :symbol] [:set :symbol]]}
   [db nsym]
   (into #{} (keep #(when (= nsym (:v %)) (some-> (d/entity db (:e %)) :form/ns :ns/name))) (d/datoms db :aevt :form/requires)))
+
+(defn requires
+  "The namespaces namespace nsym's forms require on db (their :form/requires), nsym left out."
+  {:malli/schema [:=> [:cat :seon.host/db :symbol] [:set :symbol]]}
+  [db nsym]
+  (disj (set (d/q '[:find [?r ...] :in $ ?n :where [?ns :ns/name ?n] [?f :form/ns ?ns] [?f :form/requires ?r]] db nsym)) nsym))
 
 (defn- dependents
   "The namespaces that need reading again because namespace nsym lost lost (interface entries): those

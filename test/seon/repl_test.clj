@@ -553,6 +553,8 @@
       ;; the navigation functions answer from the program facts the branch records
       (is (str/includes? (printed "(my.agent/callers 'seon.task/accumulate)") "seon.task/tasks") "callers, from :form/refs")
       (is (str/includes? (printed "(my.agent/callees 'seon.task/accumulate)") "clojure.core/reduce") "callees, from its form's :form/refs")
+      (is (str/includes? (printed "(my.agent/callers 'seon.task)") "seon.task-test") "a namespace's callers, the namespaces requiring it")
+      (is (str/includes? (printed "(my.agent/callees 'seon.task)") "seon.ref") "and its callees, the namespaces it requires")
       (is (str/includes? (printed "(my.agent/grep \"accumulated\")") "seon.task/accumulate") "grep, over :form/src")
       (is (str/includes? (printed "(get (my.schema/forms) :seon.task/task)") ":seon.task/own") "a schema's form")
       (is (str/includes? (printed "(my.schema/register! :app.workout/set [:map [:reps :int] [:kg :double]])") ":app.workout/set") "a new schema registers")
@@ -563,7 +565,7 @@
   ;; the live rounds (the archived paper live-2026-10-25.md (git history)): (my.agent/callers 'seon.proof/status) answered [],
   ;; read as "no callers", and the run asked again until it ended :no-progress. A symbol that names
   ;; no var says so, with the form for the registry key of that name when there is one
-  (let [[_ nothing key-name real callees library _ fresh aliased] (at/in-agent #(vector {:op :context :agent (:agent %)}
+  (let [[_ nothing key-name real callees library _ fresh aliased referred ns-typo] (at/in-agent #(vector {:op :context :agent (:agent %)}
                                                          "(my.agent/callers 'seon.task/no-such-thing)"
                                                          "(my.agent/callers 'seon.task/plan)"
                                                          "(my.agent/callers 'seon.task/accumulate)"
@@ -571,7 +573,9 @@
                                                          "(my.agent/callers 'clojure.core/map)"
                                                          "(defn zz-fresh [] 1)"
                                                          "(my.agent/callers (symbol (str *ns*) \"zz-fresh\"))"
-                                                         "(do (require '[clojure.string :as s-alias]) (my.agent/callers 's-alias/join))"))]
+                                                         "(do (require '[clojure.string :as s-alias]) (my.agent/callers 's-alias/join))"
+                                                         "(my.agent/callers 'map)"
+                                                         "(my.agent/callers 'seon.tsk)"))]
     (is (= :my.agent/no-var (:seon.error/type (:value nothing))) (pr-str nothing))
     (is (= 'seon.task/no-such-thing (:name (:value nothing))) "it names what was asked")
     (is (nil? (:ask (:value nothing))) "and no key of that name: nothing to ask instead")
@@ -580,7 +584,9 @@
     (is (= :my.agent/no-var (:seon.error/type (:value callees))) "callees says the same")
     (is (vector? (:value library)) "a library's var is a var")
     (is (vector? (:value fresh)) (str "a var just defined at the REPL is a var: " (pr-str fresh)))
-    (is (seq (:value aliased)) (str "an alias reads as the var it resolves to, whose callers are recorded by its full name: " (pr-str aliased)))))
+    (is (seq (:value aliased)) (str "an alias reads as the var it resolves to, whose callers are recorded by its full name: " (pr-str aliased)))
+    (is (seq (:value referred)) (str "a referred name is the var, not a namespace: " (pr-str referred)))
+    (is (= :my.agent/no-var (:seon.error/type (:value ns-typo))) (str "a bare name that is no namespace says so, nearest namespaces named: " (pr-str ns-typo)))))
 
 (deftest a-missing-name-says-the-nearest
   ;; the live rounds' repeats (the archived paper live-2026-10-25.md (git history); jolt/repeat-causes): agents re-sent a guessed

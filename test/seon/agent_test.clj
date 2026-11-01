@@ -1936,3 +1936,13 @@
     (is (nil? (:ex r)) (pr-str r))
     (is (= {:pass 1} (select-keys (:value r) [:pass])) (pr-str r))
     (is (some #(str/includes? % "transact refused: no") (:unrecorded (:value r))) "named, not thrown")))
+
+(deftest a-named-namespace-selects-its-tests
+  ;; bench-scope-1: a prove naming three tests of a namespace on a branch that had changed nothing ran none
+  ;; (ran 0, reused 0, each :none); named, a namespace's tests run whatever the branch changed
+  (let [db (my.test/with (my.test/world)
+                         (my.test/code 'app.nt "(ns app.nt)\n(defn f [x] x)")
+                         (my.test/code 'app.nt-test "(ns app.nt-test (:require [clojure.test :refer [deftest is]] [app.nt]))\n(deftest a-test (is (= 1 (app.nt/f 1))))\n(deftest b-test (is true))\n(defn helper [] 1)")
+                         (my.test/code 'app.other-test "(ns app.other-test (:require [clojure.test :refer [deftest is]]))\n(deftest c-test (is true))"))]
+    (is (= '#{app.nt-test/a-test app.nt-test/b-test} (agent/named-tests db '#{app.nt-test})) "its deftests, not its other vars, and no other namespace's")
+    (is (= #{} (agent/named-tests db '#{app.none-test})) "a namespace with no tests names none")))
