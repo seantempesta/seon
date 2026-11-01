@@ -887,7 +887,10 @@
   (let [x (or address name) head {:cites x :depth depth}]
     (cond
       ;; what reads it whole first, as code the printer shows verbatim, so a cut of the rest still names it
-      (:seon.doc/address sec) (assoc head :read (print/code (str "(my.agent/help " (emit/string-literal address) ")")) :text {:seon.print/prose (section-text sec depth)})
+      ;; and how it changes, as a definition does (docs/agent.md#changing-a-doc)
+      (:seon.doc/address sec) (assoc head :read (print/code (str "(my.agent/help " (emit/string-literal address) ")"))
+                                     :change (print/code (str "(seon.repl/edit! " (emit/string-literal (:seon.doc/address sec)) " \"old text\" \"new text\")"))
+                                     :text {:seon.print/prose (section-text sec depth)})
       ;; a task by its plan, as seon.ref/task-view shows one: its first sentence at summary, else whole
       (:seon.task/id tk) (assoc head :read (print/code (str "(:seon.task/plan (seon.task/task (seon.agent/db) " (emit/string-literal (:seon.task/id tk)) "))"))
                                 :text {:seon.print/prose (cond-> (str "## " (:seon.task/id tk))

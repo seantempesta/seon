@@ -166,6 +166,24 @@
     (is (clojure.string/includes? (str (first (:value branch))) "[] 2") "the branch's program holds the new source")
     (is (= 0 (second (:value branch))) "its inner eval records no eval of its own: the edit's call is the one kept")))
 
+(deftest a-doc-is-edited-as-a-definition-is
+  ;; docs as code (task seon.doc/any-markdown-file-is-docs-it-writes-back): edit! of a doc's address replaces exact
+  ;; text once in its block, as of a definition, and loads its page again on the agent's branch, so what its text
+  ;; derives follows it (here its lead) and main keeps its own; prose counts no delimiter
+  (let [a "docs/agent.md#ending"
+        lead (fn [db] (str "(:seon.doc/lead (datahike.api/entity " db " [:seon.doc/address " (pr-str a) "]))"))
+        [edit missing branch main]
+        (at/in-agent (fn [{:keys [task]}]
+                       [(str "(seon.repl/edit! " (pr-str a) " \"then stop.\" \"then stop (as the turn ends.\")")
+                        (str "(seon.repl/edit! " (pr-str a) " \"no such text\" \"x\")")
+                        {:op :eval :agent "root"
+                         :code (lead (str "(:db @(seon.root/branch-db sys (:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))))"))}
+                        {:op :eval :agent "root" :code (lead "@(:conn sys)")}]))]
+    (is (= a (get-in edit [:value :edited :doc])) (pr-str edit))
+    (is (= :not-found (get-in missing [:value :seon.repl/refused-because])) (pr-str missing))
+    (is (str/ends-with? (str (:value branch)) "then stop (as the turn ends.") (str "the branch's doc derives its new lead: " (pr-str branch)))
+    (is (str/ends-with? (str (:value main)) "then stop.") (str "main's is its own: " (pr-str main)))))
+
 (deftest an-unmapped-definition-is-no-longer-the-branchs-program
   ;; docs/source.md#an-agent-changes-code-at-its-repl: md-scan #19 unmapped a scratch helper and its branch kept it,
   ;; uncontracted, so the done rule refused the work at the cap; Clojure's ns-unmap, observed, retracts it

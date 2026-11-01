@@ -258,22 +258,46 @@
   (vec (sort (d/q '[:find [?p ...] :where [?e :seon.doc/address ?a] (not [?e :seon.doc/parent _])
                     [(clojure.string/index-of ?a "#") ?i] [(subs ?a 0 ?i) ?p]] db))))
 
+(defn- block
+  "Doc entity e's own part of its page as Markdown: its heading as written at its level, a blank line,
+  then its own text, the docs below it not included."
+  {:malli/schema [:=> [:cat :seon.host/db :int] :string]}
+  [db e]
+  (let [{:seon.doc/keys [heading level text]} (d/pull db [:seon.doc/heading :seon.doc/level :seon.doc/text] e)]
+    (cond-> (str (apply str (repeat level "#")) " " heading) text (str "\n\n" text))))
+
 (defn markdown
-  "The text of the page at path as db holds it, nil when db holds no doc of it: each doc in the page's
-  order, its heading as written at its level, a blank line, its own text and a blank line,
-  the page ending in one newline. A page in that layout is its file byte for byte, so the store holds
-  the page and the file is drawn from it (seon.doc-test/a-loaded-page-draws-back-as-its-file)."
+  "The text of the page at path as db holds it, nil when db holds no doc of it: each doc's block in the
+  page's order (its heading as written at its level, a blank line, its own text), a blank line between
+  them, the page ending in one newline. A page in that layout is its file byte for byte, so the store
+  holds the page and the file is drawn from it (seon.doc-test/a-loaded-page-draws-back-as-its-file).
+  Given blocks, {doc entity Markdown}, each such doc's block is that text instead (an edit's page)."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :string] [:maybe :string]]
+                  [:=> [:cat :seon.host/db :string [:map-of :int :string]] [:maybe :string]]]}
+  ([db path] (markdown db path {}))
+  ([db path blocks]
+   (when-let [top (ref/page-top db path)]
+     (letfn [(walk [e] (cons (or (get blocks e) (block db e)) (mapcat walk (children db e))))]
+       (str (str/join "\n\n" (walk top)) "\n")))))
+
+(defn doc-source
+  "The doc at address as an edit reads it, nil when db holds none: its own block (block), its heading
+  line first, so its heading and its text are changed the way a definition's source is
+  (seon.repl/edit!)."
   {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe :string]]}
-  [db path]
-  (when-let [top (ref/page-top db path)]
-    (let [sb (StringBuilder.)]
-      (letfn [(walk [e]
-                (let [{:seon.doc/keys [heading level text]} (d/pull db [:seon.doc/heading :seon.doc/level :seon.doc/text] e)]
-                  (.append sb (str (apply str (repeat level "#")) " " heading "\n\n"))
-                  (when text (.append sb (str text "\n\n")))
-                  (run! walk (children db e))))]
-        (walk top))
-      (str (str/trimr (str sb)) "\n"))))
+  [db address]
+  (some->> (pdb/eid db :seon.doc/address address) (block db)))
+
+(defn edit-tx
+  "The transaction making the doc at address read as text (its block, as doc-source shows it): its page
+  drawn with that block in its place and loaded again (load-tx over the wiki's dirs), so what the
+  text derives (lead, references, names, read) follows it and the page's other docs write nothing.
+  A heading changed to another anchor is another doc: the old one retracted, the new one added."
+  {:malli/schema [:=> [:cat :seon.host/db :string :string] [:vector :any]]}
+  [db address text]
+  (let [path (page-of address)]
+    (load-tx db (cfg/value :seon.config.root/wiki-dirs)
+             {path (markdown db path {(pdb/eid db :seon.doc/address address) (str/trim text)})})))
 
 (defn pages
   "The wiki pages under dir of the checkout (docs by default), read: {path text}, each path

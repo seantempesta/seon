@@ -805,13 +805,17 @@
   hold its first line, ignoring indentation), an old there more than once (each candidate's line), a
   new opening or closing delimiters its old does not (seon.reader/balance: :unbalanced, by how many of
   each), two olds that overlap (:overlap), or an empty old (:empty). Exact text and one occurrence, as file editors converged
-  on (docs/agent.md#changing-a-definition)."
+  on (docs/agent.md#changing-a-definition). Given a doc's address (docs/x.md#heading) for sym, the same
+  edit of the doc's own block (seon.doc/doc-source: its heading line and its text), its page loaded again
+  on this branch with the new text in its place (seon.doc/edit-tx), so a doc changes as a definition does;
+  no delimiter is counted in prose. Answers {:edited {:doc address :lines ...}} (docs/agent.md#changing-a-doc)."
   {:malli/schema [:function
-                  [:=> [:cat :qualified-symbol :string :string] [:or :seon.repl/edit-refused :my.agent/no-var :seon.eval/response]]
-                  [:=> [:cat :qualified-symbol [:vector {:min 1} [:tuple :string :string]]] [:or :seon.repl/edit-refused :my.agent/no-var :seon.eval/response]]]}
+                  [:=> [:cat [:or :qualified-symbol :string] :string :string] [:or :seon.repl/edit-refused :my.agent/no-var :seon.eval/response :seon.repl/doc-edited]]
+                  [:=> [:cat [:or :qualified-symbol :string] [:vector {:min 1} [:tuple :string :string]]] [:or :seon.repl/edit-refused :my.agent/no-var :seon.eval/response :seon.repl/doc-edited]]]}
   ([sym old new] (edit! sym [[old new]]))
   ([sym changes]
-   (let [src (my.agent/source-fn sym)
+   (let [doc? (string? sym)
+         src (if doc? (docs/doc-source (agent/db) sym) (my.agent/source-fn sym))
          n (count changes)
          ;; which change a refused edit names, when there are several
          which (fn [k] (if (< 1 n) (str "change " (inc k) " of " n ": ") ""))
@@ -839,8 +843,10 @@
                                                (seq diffs) (assoc :seon.repl/differs diffs))})
                      (next at) {:refused (refuse :ambiguous (str (which k) "the old text occurs " (count at) " times: give more of it, so it is one") (lines-at at))}
                      ;; new must leave the definition as balanced as old did: each delimiter it opens or closes more than old
-                     (or (not= (reader/delimiter-counts dn) (reader/delimiter-counts do))
-                         (< (count (:crossed do)) (count (:crossed dn))))
+                     ;; (a doc is prose: its parentheses pair as its sentences do)
+                     (and (not doc?)
+                          (or (not= (reader/delimiter-counts dn) (reader/delimiter-counts do))
+                              (< (count (:crossed do)) (count (:crossed dn)))))
                      (let [d (merge-with - (reader/delimiter-counts dn) (reader/delimiter-counts do))
                            closer {\( \) \[ \] \{ \}}
                            there (unpaired-by-line old new do dn)]
@@ -862,7 +868,9 @@
                      :else {:at (first at) :old old :new new})))]
      (if (nil? src)
        ;; a name that is no var: the nearest names, as source and callers answer (my.agent/no-var)
-       (or (some-> (:db @agent/state) (my.agent/no-var sym)) (refuse :no-source "no recorded source: define it whole first" nil))
+       (if doc?
+         (refuse :no-source "no doc at this address: (my.agent/help address) names the nearest" nil)
+         (or (some-> (:db @agent/state) (my.agent/no-var sym)) (refuse :no-source "no recorded source: define it whole first" nil)))
        (let [cs (map-indexed check changes)
              ;; the changes in source order, and two whose old texts overlap
              ordered (sort-by :at (remove :refused cs))
@@ -873,7 +881,10 @@
            :else
            (let [;; applied from the last, so each earlier offset still holds
                  text (reduce (fn [t {:keys [at old new]}] (str (subs t 0 at) new (subs t (+ at (count old))))) src (reverse ordered))
-                 r (eval-string text {"ns" (namespace sym) :origin :model :within (:eval @agent/state)})
+                 ;; a doc's page is loaded again with the new text in its place; a definition is evaluated
+                 r (if doc?
+                     (do (agent/transact! (docs/edit-tx (agent/db) sym text)) {})
+                     (eval-string text {"ns" (namespace sym) :origin :model :within (:eval @agent/state)}))
                  k (cfg/value :seon.config.agent/edit-context-lines)
                  ;; each change's first line in the new text: the lines before it in the source, moved by the earlier changes
                  starts (second (reduce (fn [[shift acc] {:keys [at old new]}]
@@ -890,7 +901,7 @@
                                                     (pr-str (clojure.string/trim (nth (clojure.string/split-lines text) (dec l) "")))))))))
                ;; the response as data: its printed text and costliest functions are the outer eval's to print
                (assoc (dissoc r :text :fns :record)
-                      :edited {:var sym :lines (into [] (comp (mapcat (fn [[from new]] (numbered text (- from k) (+ from (count (filter #{\newline} new)) k)))) (distinct)) starts)})))))))))
+                      :edited {(if doc? :doc :var) sym :lines (into [] (comp (mapcat (fn [[from new]] (numbered text (- from k) (+ from (count (filter #{\newline} new)) k)))) (distinct)) starts)})))))))))
 
 (defn unrun
   "A model's eval call that never ran, recorded as an eval whose response is error e, why

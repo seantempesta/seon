@@ -72,11 +72,13 @@
  ;; seon.repl/edit! refused, nothing changed: the var has no recorded source, the old text is not in
  ;; it, or it is there more than once; each line the error names [line text] (the near or the candidates)
  :seon.repl/edit-refused [:and :seon.error/base
-                          [:map [:seon.error/type [:enum :seon.repl/edit-refused]] [:seon.repl/var :symbol]
+                          [:map [:seon.error/type [:enum :seon.repl/edit-refused]] [:seon.repl/var [:or :symbol :string]]
                            [:seon.repl/refused-because [:enum :no-source :not-found :ambiguous :unbalanced :overlap :empty]]
                            [:seon.repl/lines {:optional true} [:vector [:tuple pos-int? :string]]]
                            ;; :not-found: at each candidate, the line where old stops matching (seon.repl/differs)
                            [:seon.repl/differs {:optional true} [:vector :map]]]]
+ ;; seon.repl/edit! of a doc's address, written: the doc and the lines around each change in its new block
+ :seon.repl/doc-edited [:map [:edited [:map [:doc :string] [:lines [:vector :any]]]]]
  :seon.eval/response [:map {:seon.render/html seon.render.ui/evaluation}
                       [:handle :qualified-symbol] [:value {:optional true} :any]
                       ;; the namespace the REPL is in after it, as every nREPL response carries: where the next eval runs
