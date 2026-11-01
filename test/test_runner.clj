@@ -98,6 +98,15 @@
                            first)
         ;; the parent's db, a value (the store's own connection's for :db)
         parent (if from (let [p (d/connect (assoc cfg :branch from))] (try @p (finally (d/release p)))) @conn)
+        ;; a namespace the kept tree holds whose file the checkout lacks (another tree's, e.g. one since
+        ;; renamed) is read again from this tree with the change, so a changed file requiring it finds it
+        ;; analyzed in this process (seon.source's read-nss marks it loaded), never a load from disk that cannot
+        paths (if from
+                (into (set paths) (for [dt (d/datoms parent :aevt :ns/file) :let [p (:v dt)]
+                                        :when (not (.exists (io/file root p)))
+                                        :when (zero? (:exit (sh/sh "git" "-C" root "cat-file" "-e" (str tree ":" p))))]
+                                    p))
+                paths)
         tx (if from
              (source/refresh-tx parent (tree-files root tree paths))
              (source/import-tx parent (tree-files root tree nil)))

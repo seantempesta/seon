@@ -127,6 +127,18 @@
     (is (< 300 (count (d/datoms db :aevt :seon.doc/address))) "the real wiki is read")
     (is (= [] (mapv :section (get-in (problems/health db) [:classes :leadless-section :rows]))) "no section lacks a lead")))
 
+(deftest no-section-names-a-bench-run
+  ;; docs/README.md#how-the-wiki-is-kept: a section states its rule as current truth, never which bench run showed it
+  ;; (what an agent reads must not hint at a task's answer); decisions.md and plan.md name the runs they were made on
+  (let [id #"(?:^|[^A-Za-z0-9_-])(bench-[a-z0-9]+(?:-[a-z0-9]+)*|[a-z][a-z0-9]*(?:-[a-z0-9]+)+ (?:#[0-9]+|bench\b))"
+        dir (java.io.File. (str (config/checkout) "/docs"))
+        hits (for [f (sort-by #(.getName ^java.io.File %) (.listFiles dir))
+                   :when (and (str/ends-with? (.getName ^java.io.File f) ".md") (not (#{"decisions.md" "plan.md"} (.getName ^java.io.File f))))
+                   :let [ids (distinct (map second (re-seq id (slurp f))))]
+                   :when (seq ids)]
+               [(.getName ^java.io.File f) (vec ids)])]
+    (is (empty? hits) "no page outside decisions.md and plan.md names a bench or a numbered run: each is [page ids]")))
+
 (deftest a-loaded-page-draws-back-as-its-file
   ;; docs as code (task seon.doc/any-markdown-file-is-docs-it-writes-back): the store holds each page, so the file is
   ;; drawn from it as src is from the program (seon.source-test/import-then-write-back-is-a-zero-diff); the real wiki,
@@ -318,6 +330,33 @@
 
 ;; ---- text uses Clojure's words too (task seon.doc/names-are-clojures-words) ---------------
 
+(defn- texts-outside-store
+  "The checkout files (under root) no-text-uses-an-old-word reads: what git lists under dirs, tracked or
+  untracked and not ignored (`git ls-files -co --exclude-standard`, as the program's sample tree takes them),
+  so a file the repository ignores (config/local.edn, which bin/ports writes with the worktree's own name)
+  is no text of the repository; a tracked file deleted on disk is no file. text? and skip? pick by path."
+  [root dirs text? skip?]
+  (->> (let [r (apply clojure.java.shell/sh "git" "-C" root "ls-files" "-co" "--exclude-standard" "--" dirs)]
+         (assert (zero? (:exit r)) (str "git ls-files failed: " (:err r)))
+         (:out r))
+       str/split-lines sort
+       (filter #(and (text? %) (not (skip? %)) (.isFile (java.io.File. (str root "/" %)))))))
+
+(deftest an-ignored-file-is-no-text-and-a-tracked-one-is
+  ;; the red of 2026-11-01: the worktree terminal-verbs failed no-text-uses-an-old-word with
+  ;; ["config/local.edn" 3 "verb"], a file git ignores that holds the worktree's name
+  (let [{:keys [dir]} (git-fixture)
+        put (fn [p t] (.mkdirs (.getParentFile (java.io.File. (str dir "/" p)))) (spit (str dir "/" p) t))
+        _ (do (put ".gitignore" "/config/local.edn\n")
+              (put "config/local.edn" "{:worktree \"terminal-verbs\"}\n")
+              (put "config/default.edn" "{:a-verb 1}\n")
+              (clojure.java.shell/sh "git" "-C" dir "add" ".gitignore" "config/default.edn"))
+        paths (texts-outside-store dir ["config"] #(str/ends-with? % ".edn") (constantly false))
+        words (seon.problems/old-word-spellings (slurp (str (config/checkout) "/AGENTS.md")))
+        hits (for [p paths [i w] (seon.problems/old-word-hits (map-indexed vector (str/split-lines (slurp (str dir "/" p)))) words)] [p (inc i) w])]
+    (is (= ["config/default.edn"] paths) "the ignored file is not read, the tracked one is")
+    (is (= [["config/default.edn" 1 "verb"]] hits) "and the tracked file's old word is still found")))
+
 (deftest no-text-uses-an-old-word
   ;; what the store holds is judged as a derived class (`seon.problems/old-words-in`, seon.problems-test/an-old-word-is-a-problem,
   ;; and by the health step on every branch); this reads what it does not hold: bin/, the root pages, the
@@ -331,14 +370,12 @@
         text? (fn [^String p] (or (str/starts-with? p "bin/") (re-find #"\.(clj|edn|md|html|js|css|c|h)$" p)))
         in-store? (fn [^String p] (or (str/starts-with? p "docs/") (str/starts-with? p "resources/seon/tasks/")))
         comment-only? (fn [^String p] (and (str/ends-with? p ".clj") (not (str/starts-with? p "bin/"))))
-        paths (for [dir ["bin" "resources" "src" "test" "web" "config" "native"]
-                    f (file-seq (java.io.File. (str root "/" dir))) :when (.isFile ^java.io.File f)
-                    :let [p (subs (.getPath ^java.io.File f) (inc (count root)))] :when (and (text? p) (not (in-store? p)))]
-                p)
+        paths (texts-outside-store root ["bin" "resources" "src" "test" "web" "config" "native"] text? in-store?)
         hits (for [p (concat ["AGENTS.md" "BAGGAGE.md" "README.md"] paths) :when (not (seon.problems/old-word-kept p))
                    :let [lines (vec (str/split-lines (slurp (str root "/" p))))]
                    [i w] (seon.problems/old-word-hits (for [[i l] (map-indexed vector lines) :when (or (not (comment-only? p)) (str/starts-with? (str/triml l) ";"))] [i l]) words)]
                [p (inc i) w])]
+    (is (contains? (set paths) "src/seon/problems.clj") "git listed the checkout's files: a listing that came back empty reads nothing")
     (is (contains? (set (map first words)) "attempt") "the table is read, the run row included")
     (is (empty? hits) "no text outside the store uses an old word outside old-word-kept: each is [file line word]")))
 
@@ -461,3 +498,24 @@
     (is (identical? ix0 (nth slot 2)) "and keeps the same index")
     (is (identical? ix0 ix1) "a move that wrote no form text keeps the index")
     (is (= (+ 2 (:n ix0)) (:n ix2)) "a move that wrote two form texts is read into a new index")))
+
+(deftest grep-answers-each-matching-line-as-a-row
+  ;; the owner, 2026-11-01: tools like the terminal's, with the same meaning, answering vectors of maps the agent
+  ;; narrows itself. grep is every line holding the pattern, over code, tests, sections and tasks, a row each,
+  ;; numbered within its text as lines numbers it
+  (let [db (mt/with (mt/world)
+                    (mt/code 'app.gr "(ns app.gr)\n(defn total\n  \"Sums the needle.\"\n  [xs] (reduce + xs))\n(defn other [] 1)")
+                    (mt/code 'app.gr-test "(ns app.gr-test (:require [clojure.test :refer [deftest is]]))\n(deftest needle-test (is true))")
+                    (mt/page "docs/gr.md" "# Gr\n\nA lead.\n\n## Where the needle is\n\nThe needle lives here.\nAnd not here."))
+        all #{:var :test :section :task :schema}
+        rows (doc/grep db "needle" all nil)]
+    ;; the world may hold texts of its own: this test's are app.gr's and docs/gr.md's
+    (is (= #{"app.gr/total:2" "app.gr-test/needle-test:1" "docs/gr.md#where-the-needle-is:1"}
+           (set (keep #(when (re-find #"^(app\.gr|docs/gr\.md)" (:at %)) (:at %)) rows)))
+        (str "each line holding it, at its thing and line: " (pr-str rows)))
+    (is (every? #(and (:at %) (:kind %) (string? (:text %))) rows) "rows are plain maps: :at :kind :text")
+    (is (= [:var] (distinct (map :kind (doc/grep db "needle" #{:var} nil)))) ":in keeps the kinds asked")
+    (is (= ["app.gr/total:3"] (map :at (doc/grep db #"reduce \+" #{:var} "app.gr"))) "a regex, and a name prefix")
+    (is (= [] (doc/grep db "nowhere-at-all" all nil)) "no match is the empty vector")
+    (is (= ["docs/gr.md#gr" "docs/gr.md#where-the-needle-is"] (map :at (doc/outline db "docs/gr.md"))) "outline: the page's sections in order")
+    (is (nil? (doc/outline db "docs/none.md")) "a page db holds none of is nil")))

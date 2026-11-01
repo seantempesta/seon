@@ -48,6 +48,7 @@
             (pred :seon.host/throwable #(instance? Throwable %))
             (pred :seon.host/fn fn?)
             (pred :seon.host/var var?)
+            (pred :seon.host/regex #(instance? java.util.regex.Pattern %))
             (pred :seon.host/namespace #(instance? clojure.lang.Namespace %))
             ;; a db value, or one as of a t (d/as-of: a turn's records read as they were sent)
             (pred :seon.host/db #(or (instance? datahike.db.DB %) (instance? datahike.db.AsOfDB %)))

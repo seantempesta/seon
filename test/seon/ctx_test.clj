@@ -4,7 +4,7 @@
   each key by its own schema's render. Run: bin/test seon.ctx-test"
   (:refer-clojure :exclude [defn defn-])
   (:require [clojure.test :refer [deftest is testing]] [seon.contract :refer [defn defn-]] [seon.cost :as cost]
-            [seon.test-store :as ts] [datahike.api :as d] [seon.ctx :as ctx] [seon.db :as pdb] [seon.context :as context] [seon.task :as task] [seon.vector :as vector] [seon.render :as render] [seon.render.ui] [seon.repl] [seon.agent] [seon.web.html] [seon.root] [my.schema] [clojure.test.check :as tc] [clojure.test.check.generators :as gen] [clojure.test.check.properties :as prop] [seon.proofs :as proofs] [clojure.string :as str] [clojure.walk :as walk] [clojure.set]))
+            [seon.test-store :as ts] [datahike.api :as d] [seon.ctx :as ctx] [seon.db :as pdb] [seon.context :as context] [seon.task :as task] [seon.vector :as vector] [seon.render :as render] [seon.render.ui] [seon.repl] [seon.agent] [seon.web.html] [seon.root] [my.schema] [my.test] [clojure.test.check :as tc] [clojure.test.check.generators :as gen] [clojure.test.check.properties :as prop] [seon.proofs :as proofs] [clojure.string :as str] [clojure.walk :as walk] [clojure.set]))
 
 (def ^:private k "The test agent's key." "test-boot/a1")
 
@@ -729,7 +729,9 @@
               shown (:units parts)]
           (is (= (map :id shown) (keys page)) "every component, the conversation's too, in order: nothing left out")
           ;; the one difference: the page's html adds each root's render's style after its name (seon.render/styled)
-          (let [styles (keep #(some-> (requiring-resolve (symbol "seon.render.ui" %)) meta :seon.render/style) (map #(:class (second %)) (vals page)))
+          (let [;; every element class in the page's hiccup that names a render of seon.render.ui, nested components' too
+                classes (into #{} (comp (filter string?)) (keep #(when (map? %) (:class %)) (tree-seq coll? seq (vec (vals page)))))
+                styles (keep #(some-> (requiring-resolve (symbol "seon.render.ui" %)) meta :seon.render/style) classes)
                 ;; a style as the html attribute holds it, escaped
                 unstyled (fn [h] (reduce #(str/replace %1 (str " " (-> %2 (str/replace "&" "&amp;") (str/replace ">" "&gt;"))) "") h styles))]
             (is (= (map (comp unstyled :html) shown) (map (comp unstyled seon.web.html/html) (vals page)))
@@ -786,6 +788,32 @@
     (is (str/includes? after "What z does.") "the section the plan cites now, drawn in the same commit")
     (is (not (str/includes? after "What x does.")) "and not the one it no longer cites")
     (is (= cold after) "the live page is the cold draw of the db it is drawn to")))
+
+(deftest a-search-is-a-member-a-swap-adds-and-changes
+  ;; the owner, 2026-11-01: an agent changes what its page shows by swap! on its ctx, and the walk draws the part
+  ;; that changed alone. A search is a member like any other: added under a key of the agent's choosing, which
+  ;; gives way to its entity's id; its query changed in place; its part drawn with the new query's hits, and no
+  ;; other part of the page moved
+  (let [db (as-> (seeded 20 nil) db
+             (d/db-with db ((my.test/code 'app.srch (str "(ns app.srch)\n"
+                                                         "(defn untaken-entries\n  \"The messages addressed to this session that it has not taken.\"\n  [db] db)\n"
+                                                         "(defn render-tile\n  \"A tile of the dashboard.\"\n  [x] x)\n")) db)))
+        draw (fn [db] (context/drawn-parts db (ctx/build db (aid db) :b)))
+        part-of (fn [parts e] (some (fn [[pid v]] (when (str/includes? (str pid) (str "agent-" e)) v)) parts))
+        [_ db1] (as-agent! db #(swap! ctx/ctx assoc-in [:searches "a1/messages"]
+                                     {:seon.search/id "a1/messages" :seon.search/query "the messages addressed to this session" :seon.search/k 5}))
+        e (id db1 [:seon.search/id "a1/messages"])
+        p1 (draw db1)]
+    (is (some? e) "the swap! wrote the search, the agent's")
+    (is (= (aid db1) (:db/id (:seon.search/of (d/entity db1 e)))) "of the agent, joined by its pattern")
+    (is (contains? (:searches (:tree (ctx/build db1 (aid db1) :b))) e) "its key in ctx is its entity's id, the string key given way")
+    (is (str/includes? (pr-str (part-of p1 e)) "app.srch/untaken-entries") (str "its part draws the query's hits: " (pr-str (part-of p1 e))))
+    (let [[_ db2] (as-agent! db1 #(swap! ctx/ctx assoc-in [:searches e :seon.search/query] "a tile of the dashboard"))
+          p2 (draw db2)
+          moved (set (for [[pid v] p2 :when (not= v (get p1 pid))] pid))]
+      (is (str/includes? (pr-str (part-of p2 e)) "app.srch/render-tile") "a new query: its part draws the new hits")
+      (is (= #{(some (fn [pid] (when (str/includes? (str pid) (str "agent-" e)) pid)) (keys p2))} moved)
+          (str "and no other part moved: " (pr-str moved))))))
 
 (deftest a-tasks-record-holds-what-its-work-needs
   ;; the 20-turn context (shared note context-for-20-turns): the cited sections' text (D3), the

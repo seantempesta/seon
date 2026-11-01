@@ -68,7 +68,7 @@ An agent adds to its record, and to what it sees of it, with four evals (`seon.c
 @ctx
 ```
 
-A registered key is an attribute at once when no entity map lists it (``my.schema/registration`` carries its declaration). The next `@ctx` holds it, and its block draws it by `lab.ui/steps`, drawn by the agent, unmerged. A class a render names is styled only if the page's stylesheet was built with it.
+A related entity works the same way when its pattern joins it: a search the page draws on the db is one ([render](render.md#a-search-is-a-part)), a member added or changed by `swap!`. A registered key is an attribute at once when no entity map lists it (``my.schema/registration`` carries its declaration). The next `@ctx` holds it, and its block draws it by `lab.ui/steps`, drawn by the agent, unmerged. A class a render names is styled only if the page's stylesheet was built with it.
 
 ## Changing it: swap!
 

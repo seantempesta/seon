@@ -57,50 +57,54 @@ def schema_keys(text):
 def tasks_in(text):
     return {m.group(1):m.group(0) for m in re.finditer(r':seon\.task/name "([^"]+)".*?(?=:seon\.task/name "|\Z)',text,re.S)}
 def changed(fn,a,b): return {k for k in set(a)|set(b) if a.get(k)!=b.get(k) and k in b}
-rows=[]
-for line in git('log','main','--merges','--format=%H %P|%s').splitlines():
-    shas,subj=line.split('|',1)
-    m=re.match(r"Merge (?:branch ')?jolt/([\w\-]+)",subj)
-    if not m: continue
-    name=m.group(1); h,p1=shas.split()[0],shas.split()[1]
-    files=[f for f in git('diff','--name-only',p1,h).splitlines()]
-    plan=None; tid=None; at=None
-    for rev,where in [(p1,'parent'),(h,'merge')]:
-        for nm in [name, re.sub(r'-\d+$','',name)]:
-            for tf in [f for f in tree(rev,'resources/seon/tasks/') if f.endswith('.edn')]:
-                blk=tasks_in(show(rev,tf)).get(nm)
-                mm=blk and re.search(r':seon\.task/plan "((?:[^"\\]|\\.)*)"',blk)
-                if mm:
-                    plan=mm.group(1).replace('\\"','"').replace('\\\\','\\'); tid=tf.split('/')[-1][:-4]+'/'+nm; at=where; break
-            if plan: break
-        if plan: break
-    if not plan:
-        p2=shas.split()[2] if len(shas.split())>2 else None
-        if not p2: continue
-        plan=' '.join(git('log','--no-merges','--format=%s',f'{p1}..{p2}').splitlines()[:8]); tid='commits/'+name; at='commits'
-        if not plan.strip(): continue
-    fns=set(); secs=set(); sch=set(); tks=set()
-    for f in files:
-        a,b=show(p1,f),show(h,f)
-        if f.startswith('src/') and f.endswith('.clj'): fns|=changed(f,defs(a),defs(b))
-        elif f.startswith('docs/') and f.endswith('.md'): secs|=changed(f,sections(f,a),sections(f,b))
-        elif f.startswith('resources/seon/schemas/'): sch|=changed(f,schema_keys(a),schema_keys(b))
-        elif f.startswith('resources/seon/tasks/'):
-            ns=f.split('/')[-1][:-4]; tks|={ns+'/'+n for n in changed(f,tasks_in(a),tasks_in(b)) if n!=name}
-    if not (fns or secs or sch): continue
-    rows.append({'task':tid,'merge':h[:9],'plan-at':at,'plan':plan,'fns':sorted(fns),'sections':sorted(secs),'schemas':sorted(sch),'tasks':sorted(tks)})
-by={}
-for r in rows:
-    if r['task'] in by:
-        o=by[r['task']]
-        for k in ['fns','sections','schemas','tasks']: o[k]=sorted(set(o[k])|set(r[k]))
-    else: by[r['task']]=r
-rows=list(by.values())
 def edn(x):
     if isinstance(x,dict): return '{'+' '.join(f':{k} {edn(v)}' for k,v in x.items())+'}'
     if isinstance(x,list): return '['+' '.join(edn(v) for v in x)+']'
     return json.dumps(x)
-open(sys.argv[1],'w').write('['+'\n'.join(edn(r) for r in rows)+']')
-import collections
-print(len(rows),'tasks;', 'with fns',sum(1 for r in rows if r['fns']),'sections',sum(1 for r in rows if r['sections']),'schemas',sum(1 for r in rows if r['schemas']),'tasks',sum(1 for r in rows if r['tasks']))
-print('mean sizes', *[round(sum(len(r[k]) for r in rows)/len(rows),1) for k in ['fns','sections','schemas','tasks']])
+
+def main():
+    rows=[]
+    for line in git('log','main','--merges','--format=%H %P|%s').splitlines():
+        shas,subj=line.split('|',1)
+        m=re.match(r"Merge (?:branch ')?jolt/([\w\-]+)",subj)
+        if not m: continue
+        name=m.group(1); h,p1=shas.split()[0],shas.split()[1]
+        files=[f for f in git('diff','--name-only',p1,h).splitlines()]
+        plan=None; tid=None; at=None
+        for rev,where in [(p1,'parent'),(h,'merge')]:
+            for nm in [name, re.sub(r'-\d+$','',name)]:
+                for tf in [f for f in tree(rev,'resources/seon/tasks/') if f.endswith('.edn')]:
+                    blk=tasks_in(show(rev,tf)).get(nm)
+                    mm=blk and re.search(r':seon\.task/plan "((?:[^"\\]|\\.)*)"',blk)
+                    if mm:
+                        plan=mm.group(1).replace('\\"','"').replace('\\\\','\\'); tid=tf.split('/')[-1][:-4]+'/'+nm; at=where; break
+                if plan: break
+            if plan: break
+        if not plan:
+            p2=shas.split()[2] if len(shas.split())>2 else None
+            if not p2: continue
+            plan=' '.join(git('log','--no-merges','--format=%s',f'{p1}..{p2}').splitlines()[:8]); tid='commits/'+name; at='commits'
+            if not plan.strip(): continue
+        fns=set(); secs=set(); sch=set(); tks=set()
+        for f in files:
+            a,b=show(p1,f),show(h,f)
+            if f.startswith('src/') and f.endswith('.clj'): fns|=changed(f,defs(a),defs(b))
+            elif f.startswith('docs/') and f.endswith('.md'): secs|=changed(f,sections(f,a),sections(f,b))
+            elif f.startswith('resources/seon/schemas/'): sch|=changed(f,schema_keys(a),schema_keys(b))
+            elif f.startswith('resources/seon/tasks/'):
+                ns=f.split('/')[-1][:-4]; tks|={ns+'/'+n for n in changed(f,tasks_in(a),tasks_in(b)) if n!=name}
+        if not (fns or secs or sch): continue
+        rows.append({'task':tid,'merge':h[:9],'plan-at':at,'plan':plan,'fns':sorted(fns),'sections':sorted(secs),'schemas':sorted(sch),'tasks':sorted(tks)})
+    by={}
+    for r in rows:
+        if r['task'] in by:
+            o=by[r['task']]
+            for k in ['fns','sections','schemas','tasks']: o[k]=sorted(set(o[k])|set(r[k]))
+        else: by[r['task']]=r
+    rows=list(by.values())
+    open(sys.argv[1],'w').write('['+'\n'.join(edn(r) for r in rows)+']')
+    import collections
+    print(len(rows),'tasks;', 'with fns',sum(1 for r in rows if r['fns']),'sections',sum(1 for r in rows if r['sections']),'schemas',sum(1 for r in rows if r['schemas']),'tasks',sum(1 for r in rows if r['tasks']))
+    print('mean sizes', *[round(sum(len(r[k]) for r in rows)/len(rows),1) for k in ['fns','sections','schemas','tasks']])
+
+if __name__=='__main__': main()

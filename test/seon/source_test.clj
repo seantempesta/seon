@@ -1057,3 +1057,23 @@
   (is (= "defn" (seon.source/first-head 'never.loaded.ns "(defn f [] {::flow/in-ports {:in 1} ::own 2})")))
   (is (= "defmacro" (seon.source/first-head 'never.loaded.ns "(defmacro m [x] `(do ~x ::a/b))")))
   (is (nil? (seon.source/first-head 'never.loaded.ns "[::a/b 1]"))))
+
+(deftest a-renamed-alias-target-analyzes-beside-the-image
+  ;; task seon.source/another-trees-ns-form-analyzes-beside-the-image: one process analyzes two trees whose
+  ;; namespaces disagree (a namespace renamed, the alias of its requirer pointed at the new one), in either
+  ;; direction: the removed file's old text is never read again (refresh-tx's dependents), and a namespace
+  ;; no source root holds answers its requirer's require from the analysis (read-nss), never a load from disk
+  (let [old {"src/ra/old_lib.clj" "(ns ra.old-lib)\n\n(defn f [x] (inc x))\n"
+             "src/ra/user.clj" "(ns ra.user (:require [ra.old-lib :as lib]))\n\n(defn g [x] (lib/f x))\n"}
+        new {"src/ra/new_lib.clj" "(ns ra.new-lib)\n\n(defn f [x] (inc x))\n"
+             "src/ra/user.clj" "(ns ra.user (:require [ra.new-lib :as lib]))\n\n(defn g [x] (lib/f x))\n"}
+        db0 (empty-db)
+        a (d/db-with db0 (source/import-tx db0 old))
+        forward (d/db-with a (source/refresh-tx a {"src/ra/old_lib.clj" nil "src/ra/new_lib.clj" (new "src/ra/new_lib.clj") "src/ra/user.clj" (new "src/ra/user.clj")}))
+        b (d/db-with db0 (source/import-tx db0 new))
+        back (d/db-with b (source/refresh-tx b {"src/ra/new_lib.clj" nil "src/ra/old_lib.clj" (old "src/ra/old_lib.clj") "src/ra/user.clj" (old "src/ra/user.clj")}))]
+    (is (some? (seon.db/eid forward :var/name 'ra.new-lib/f)) "the renamed namespace is read")
+    (is (nil? (seon.db/eid forward :var/name 'ra.old-lib/f)) "the removed one is gone, its text never read again")
+    (is (some? (seon.db/eid back :var/name 'ra.old-lib/f)) "and back: a namespace on no root answers its requirer")
+    (is (nil? (seon.db/eid back :var/name 'ra.new-lib/f)))))
+
