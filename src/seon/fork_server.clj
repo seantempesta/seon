@@ -74,29 +74,6 @@
     (cond-> st (not= from (d/commit-id (:db st)))
             (assoc :index {:commit (d/commit-id (:db st)) :index (r/index idx (d/commit-as-db (:store st) from) (:db st))}))))
 
-(defn warm-written
-  "The index leaves that a commit's ops (resolved [op e a v], as :tx carries them) wrote, read on db (main
-  after it) into this process's node cache: each written entity's :eavt leaf, each written datom's :aevt
-  leaf and an indexed attribute's :avet leaf. The writer holds what it wrote in memory, so these leaves
-  are cold here, and every agent forked from here would otherwise decode the ones it reads itself; each
-  is read here once instead, and inherited. A commit that moves the program (an import, a merge's
-  forms: seon.program/moves-program?) is not read: an agent's start reads none of its leaves, and its
-  thousands of leaves would stall this thread and displace the cache. A read that throws is the step's
-  error (step-failed). nil. See docs/machine.md#an-agents-first-write."
-  {:malli/schema [:=> [:cat :seon.host/db [:sequential :any]] :nil]}
-  [db ops]
-  (when-not (program/moves-program? ops)
-    (let [indexed (get (dbi/-rschema db) :db/index #{}) db (d/history db)]
-      (reduce (fn [seen [_ e a v]]
-                (if (or (not (int? e)) (not (keyword? a)) (contains? seen [a e]))
-                  seen
-                  (do (first (d/seek-datoms db :aevt a e))
-                      (when (contains? indexed a) (first (d/seek-datoms db :avet a v)))
-                      (when-not (contains? seen e) (first (d/seek-datoms db :eavt e)))
-                      (conj seen e [a e]))))
-              #{} ops)))
-  nil)
-
 (defn evals-max-after
   "Main's highest eval number (seon.repl/evals-max) after a commit's ops (resolved [op e a v]), from
   n, its highest before: what each agent forked from here counts its evals on from, kept at the
@@ -104,30 +81,28 @@
   {:malli/schema [:=> [:cat nat-int? [:sequential :any]] nat-int?]}
   [n ops] (reduce (fn [n [_ _ a v]] (if (= :seon.eval/id a) (max n (or (repl/eval-number v) 0)) n)) n ops))
 
-(defn warm-first-write
-  "Server state st with the index nodes an agent's start reads read into this process's node cache
-  (:warm-t: the t of main it was done for), once per move of main: a write of the shape
-  seon.agent/begin-run! makes (a task's execution, a run and its agent, then the cites every agent is
-  made with) applied with d/with to :db and dropped, the warm agent's record built on it (seon.ctx/build:
-  the sections it cites) and main's schema changes read (seon.program/schema-changes, which an agent's
-  first eval reads). Each agent forked from here inherits those nodes decoded, and this process's reads
-  keep them in its full cache, which an agent's own reads never do. Nothing is written. See
-  docs/machine.md#an-agents-first-write."
-  {:malli/schema [:=> [:cat :map] :map]}
-  [st]
+(defn warm-start
+  "Server state st with the index nodes the start of the agent m forks reads read into this process's
+  node cache: its first write (seon.agent/begin-run-tx on its own task, run and key, then the cites
+  every agent is made with) applied with d/with to :db and dropped, and its record built on it
+  (seon.ctx/build: its task, run and the sections it cites); and, once per move of main (:warm-t), main's
+  schema changes, which an agent's first eval reads (seon.program/schema-changes). An agent's reads stay
+  in its own process, so without these each agent decoded them cold, and more of them as main's commits
+  rewrote leaves and its cache evicted the rest; read here, each agent inherits them decoded, and this
+  process's reads keep them in its cache. Only what this agent reads is read, so what the server holds
+  grows by that, not by what main writes (its static: seon.fork-server/static-due?). Nothing is written.
+  See docs/machine.md#an-agents-first-write."
+  {:malli/schema [:=> [:cat :map :map] :map]}
+  [st {:keys [task run key agent branch]}]
   (let [db (:db st) t (:max-tx db)]
+    (when (and task run key (d/entity db [:seon.task/id task]))
+      (let [db1 (:db-after (d/with db (agent/begin-run-tx db task run key agent)))
+            db2 (:db-after (d/with db1 (task/agent-cites-tx db1 [:seon.agent/key key] key)))]
+        (ctx/build db2 (pdb/eid db2 :seon.agent/key key) branch)))
     (if (= t (:warm-t st))
       st
-      (let [task (:v (first (d/datoms db :avet :seon.task/id)))]
-        (when task
-          (let [db1 (:db-after (d/with db [{:seon.task/id task :seon.task/execution :running}
-                                           {:seon.run/id "warm#0" :seon.run/task [:seon.task/id task]
-                                            :seon.run/agent {:seon.agent/key "warm" :seon.agent/id :warm :seon.agent/task {:seon.task/id task}}}]))
-                db2 (:db-after (d/with db1 (task/agent-cites-tx db1 [:seon.agent/key "warm"] "warm")))]
-            (ctx/build db2 (pdb/eid db2 :seon.agent/key "warm") :warm)
-            ;; read for its leaves, its value dropped: an agent's first eval keys its registry by it
-            (program/schema-changes db)))
-        (assoc st :warm-t t)))))
+      ;; read for its leaves, its value dropped: an agent's first eval keys its registry by it
+      (do (program/schema-changes db) (assoc st :warm-t t)))))
 
 (defn index-for-agent
   "What a forked agent is handed of st's index: {:db :index}, the db it is of being main's current
@@ -170,7 +145,6 @@
                  ;; persistent indexes), never its datoms replayed here: replaying a 42,942-datom
                  ;; import took 3.5 s, and the first fork waited behind it
                  db' (d/commit-as-db (:store st) (:commit m))
-                 _ (warm-written db' (:tx-data m))
                  st (cond-> (assoc st :db db' :evals-max (evals-max-after (:evals-max st) (:tx-data m))) (not= (:max-tx db') (:t m)) (update :mismatch inc)
                       ;; the program moved: the reach graph is brought to it at the next fork
                       (program/moves-program? (:tx-data m)) (assoc :graph-moved true :static-due true))
@@ -189,7 +163,7 @@
                  st (dissoc st :tests-due)
                  st (graph-at-fork st)
                  tg (profile/now-ns)
-                 st (-> st index-at-fork warm-first-write)
+                 st (-> st index-at-fork (warm-start m))
                  ;; the heap made static when it is due (static-due?), so the agent's collections never
                  ;; trace (and un-share) much of what it inherits (design agent-loop section 2: 163 MB
                  ;; of this heap sat in generations 3-4 at fork; static, an agent's work left 106 MB

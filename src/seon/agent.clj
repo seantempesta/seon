@@ -1314,7 +1314,7 @@
   (when (or (not= commit (d/commit-id branch)) (not= t (:max-tx image)))
     {:commit commit :t t :branch-commit (d/commit-id branch) :image-t (:max-tx image)}))
 
-(declare begin-run-tx!)
+(declare begin-run-tx! begin-run-tx)
 
 (defn begin-run!
   "Run run of task recorded as this process's session's on its branch, as root records it on main:
@@ -1338,27 +1338,34 @@
       (begin-run-tx! task run)
       (when made? (transact! (task/agent-cites-tx (db) [:seon.agent/key k] k))))))
 
+(defn begin-run-tx
+  "The write that makes run of task this agent's on db, its branch (begin-run-tx!'s second, and what
+  the fork server applies to warm what an agent's start reads: seon.fork-server/warm-start): the task
+  running, the run with the plan it began with, naming the agent (key k, id) and its task."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id :seon.run/id :string :any] :seon.db/tx-data]}
+  [db task run k id]
+  [{:seon.task/id task :seon.task/execution :running}
+   ;; the plan the run began with, as main records it at a run's start (seon.task/run-start-tx), when
+   ;; the branch was cut before it: what a design step's done rule compares (:no-design)
+   (cond-> {:seon.run/id run}
+     (not (:seon.run/plan (d/entity db [:seon.run/id run])))
+     (assoc :seon.run/plan (:plan (:seon.task/accumulated (task/task db task)))))
+   {:seon.run/id run :seon.run/task [:seon.task/id task] :seon.run/agent {:seon.agent/key k :seon.agent/id id
+                                                            ;; the agent's task, which its record pulls (the agent is the unit, docs/ctx.md#the-pattern);
+                                                            ;; nested: a top-level agent map takes a content id, one the key's upsert conflicts with
+                                                            :seon.agent/task {:seon.task/id task}}}])
+
 (defn- begin-run-tx!
   "Run run of task written on this agent's branch (begin-run!'s write): the task as main declares it when the
-  branch lacks it, the task running, the run with the plan it began with, naming this agent and its task."
+  branch lacks it, then begin-run-tx."
   {:malli/schema [:=> [:cat :seon.task/id :seon.run/id] :any]}
   [task run]
-  (do
-    (when-not (d/entity (db) [:seon.task/id task])
-      (let [t (task/task (heard-main) task)]
-        (transact! (task/create-tx (db) [(-> (select-keys t [:seon.task/ns :seon.task/name :seon.task/plan :seon.task/instructions :seon.task/proofs
-                                                             :seon.task/needs :seon.task/branch :seon.task/model :seon.task/kind])
-                                             (update :seon.task/ns symbol))]))))
-    (transact! [{:seon.task/id task :seon.task/execution :running}
-                ;; the plan the run began with, as main records it at a run's start (seon.task/run-start-tx), when
-                ;; the branch was cut before it: what a design step's done rule compares (:no-design)
-                (cond-> {:seon.run/id run}
-                  (not (:seon.run/plan (d/entity (db) [:seon.run/id run])))
-                  (assoc :seon.run/plan (:plan (:seon.task/accumulated (task/task (db) task)))))
-                {:seon.run/id run :seon.run/task [:seon.task/id task] :seon.run/agent {:seon.agent/key (:key @state) :seon.agent/id (:id @state)
-                                                         ;; the agent's task, which its record pulls (the agent is the unit, docs/ctx.md#the-pattern);
-                                                         ;; nested: a top-level agent map takes a content id, one the key's upsert conflicts with
-                                                         :seon.agent/task {:seon.task/id task}}}])))
+  (when-not (d/entity (db) [:seon.task/id task])
+    (let [t (task/task (heard-main) task)]
+      (transact! (task/create-tx (db) [(-> (select-keys t [:seon.task/ns :seon.task/name :seon.task/plan :seon.task/instructions :seon.task/proofs
+                                                           :seon.task/needs :seon.task/branch :seon.task/model :seon.task/kind])
+                                           (update :seon.task/ns symbol))]))))
+  (transact! (begin-run-tx (db) task run (:key @state) (:id @state))))
 
 (defn init!
   "Make this process the agent: its socket (fd), its namespace, its state map, its
