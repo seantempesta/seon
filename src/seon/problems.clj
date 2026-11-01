@@ -878,7 +878,7 @@
   "classes with each counted class's rows (`counted-classes`) at their true counts: a row's count
   raised to what fold (root's api's, seon.error/fold) saw of its signature, repeats main does not hold
   yet; the rows by count, most first, then in the order main holds their errors; :n their sum. The one
-  place a fold is applied: a whole read (`report-with`) and a held one (`with-fold`)."
+  place a fold is applied: a whole read (`report-with`) and a held one (`with-fold`). See docs/health.md#cost."
   {:malli/schema [:=> [:cat :map :seon.host/db :seon.error/fold] :map]}
   [classes db fold]
   (let [live (into {} (map (fn [{:keys [signature base] n :count}] [signature (+ (or base 0) n)])) (vals fold))
