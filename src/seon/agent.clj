@@ -1364,7 +1364,7 @@
   "Make this process the agent: its socket (fd), its namespace, its state map, its
   interrupt handlers. serve is the loop a clone runs (seon.repl/serve!)."
   {:malli/schema [:=> [:cat :seon.lib/fd :map :seon.host/db :seon.host/fn] :any]}
-  [fd {id :agent branch :branch task :task run :run cfg :cfg resumed :resumed commit :commit t :t graph :graph index :index session :key
+  [fd {id :agent branch :branch task :task run :run cfg :cfg resumed :resumed commit :commit t :t graph :graph index :index evals-max :evals-max session :key
        marks0 :marks} db0 serve]
   ;; the spawn's phases on the one clock, each with what this thread allocated in it: the fork
   ;; server's marks (marks0), then this process's, sent with its hello (spawn-phases)
@@ -1425,7 +1425,10 @@
                    graph (assoc :base-graph {:point (pdb/point db0) :graph graph})
                    ;; main's reconciler index as the fork server keeps it, for db0: the first turn
                    ;; observes the branch from it (seon.agent/reconcile-index), never lists it here
-                   index (assoc :index index)))
+                   index (assoc :index index)
+                   ;; main's highest eval number as the fork server keeps it: a new branch is main
+                   ;; at its fork, so its evals count on from it (seon.repl/eval-n!), never read here
+                   (and evals-max (not resumed)) (assoc :eval-n evals-max)))
      (swap! state vary-meta assoc :seon.render/schema :seon.agent/state)
      (mark! :state)
      (swap! state assoc :marks @marks)
