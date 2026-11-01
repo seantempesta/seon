@@ -2,6 +2,12 @@
 
 This file holds the owner's standing rulings, one entry each: the rule, the owner's words and date, and where the rule is stated now; current truth and mechanism live in `AGENTS.md` and the wiki (`docs/`), and superseded or done rulings are kept verbatim in git history.
 
+## 2026-11-01 rulings
+
+### Benefits are general; nothing leads an agent to its answer (owner, 2026-11-01)
+
+"We don't mimic repl output with comments it breaks the models. Do not lead the models just to score a win. All benefits should be general." Nothing an agent reads (the help page, its instructions, a cited section, a task's plan) tells a run's story or hints at the change it is asked for. A benchmark is work whose answer is not in the tree: a reverted change whose tests stay behind measures nothing. A red cost proof is never cleared by the changing agent raising its own bound; an overrun is accepted only as [cost](cost.md#an-accepted-overrun-and-its-ratchet) says, filed by a person (AGENTS §3, every change earns its place).
+
 ## 2026-10-31 rulings
 
 The owner's rulings of 2026-10-31; they stand over earlier entries where they differ.
