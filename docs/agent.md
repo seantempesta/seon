@@ -31,6 +31,17 @@ How a work or whole task is worked, step by step (its instructions cite this sec
 - Check each change with the proof's own expression, the failing assertion your status shows, at your REPL, before you prove again.
 - Never loosen a contract or a proof to make it pass.
 
+## Designing a task
+
+A design task turns a request, often a line or two, into the task the next agent implements: its plan, what the plan cites and its red proofs are that agent's whole starting context, so you build it for that agent (its instructions cite this section whole; the implement step reads your plan accumulated over its needs, and every citation in it is a part of its page).
+
+- Find what the change touches. Start from the request's own words: ``(my.agent/help "a word of it")`` names the docs and functions it finds; read the functions with ``(clojure.repl/source ns/f)``, a namespace's every definition with ``(clojure.repl/source ns)``, and who calls one with ``(my.agent/callers 'ns/f)``. Reproduce what the request says is wrong in one eval; when the output is already right, the premise is false: fail the task with it, ``(my.task/fail! "why" evidence)``.
+- Cite what you find into the plan as you find it, at the depth the implement agent needs: three backticks for each function it changes and each it must call as it is (its source is shown), one backtick for a doc that explains the area, a bare name for one it only needs to know of. ``(my.task/update! :seon.task/plan str "\n\nWhat changes: ...")``, each function's name between three backticks. Each citation is a part of your own page too, so you read it as the implement agent will.
+- Write the proofs that will show the change, first: each a deftest in its function's test namespace, its input built as its neighbours' (``(in-ns 'ns.x-test)``, then the deftest: no file), registered, ``(my.task/update! :seon.task/proofs conj 'ns.x-test/a-proof)``, and run red for the reason the plan gives, ``(my.agent/prove)``.
+- Then say in the plan what the implement step changes: each function and what it does then; a new function's defn with its contract and a stub body; each new schema registered; a cost proof (``seon.cost/proof``) for a function whose input grows.
+- Confirm the plan is enough: read your page as the implement agent will see it, the plan and each part it cites. Whatever it would still have to search for, cite; whatever it cites that the change does not need, take out. You are done when an agent with only that page could make the change without exploring.
+- Do not make the fix: the implement step makes it from your red proofs. Then end your turn with prose.
+
 ## From outside
 
 A Claude session attached through the MCP server works the same task as a Seon agent does, with the server's tools in place of the one eval tool (`docs/server.md`; the tool list says each one's arguments). Where this page says "a reply" or "your turn", read the tool that does it:
