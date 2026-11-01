@@ -911,6 +911,17 @@
               ;; and still nothing there after the reap: another process holds the pipe
               :else {:line line :held? true :status @status}))))))
 
+(defn named-tests
+  "The test vars of namespaces names on db (each var a deftest defines, :var/kind :test): what a request
+  naming them runs, beside the task's proofs, whether or not the branch changed what they reach
+  (bench-scope-1's design agent named three tests of seon.render-test on a branch that had changed nothing,
+  and four proves answered ran 0, reused 0, each test :none). See docs/agent.md#testing."
+  {:malli/schema [:=> [:cat :seon.host/db [:set :symbol]] [:set :qualified-symbol]]}
+  [db names]
+  (let [in (set (map str names))]
+    (into #{} (comp (map :v) (filter #(in (namespace %))) (filter #(= :test (:var/kind (d/entity db [:var/name %])))))
+          (d/datoms db :avet :var/name))))
+
 (defn run-selection
   "What a test-plan p runs when a request names namespaces (names; none: every test it selects), as
   p with :selected and :run restricted to them. A test that reaches a process of its own (p's
@@ -1041,7 +1052,7 @@
   the test service's runs of a branch) selects the plan's tests; mode :main (the test service's
   run of main, whose prove agent is a branch of main with nothing changed) selects them with no
   base: every test with no result at its digest, main's own tests among them. names (the test service's request: a set of
-  namespaces) restricts either to the tests of those namespaces. A process test (the plan's
+  namespaces) restricts either to the tests of those namespaces, and selects every one of them (named-tests). A process test (the plan's
   :process: it reaches an agent, a fork, a root or the binary; a shell call is none) never runs here unless its namespace
   is named; the ones the change reaches run at the judge's merge gate, on a checkout (seon.reconcile's :gate).
   The answer names those left out (:deferred), why each was (:why, {test {:uses :through}}: the
@@ -1053,7 +1064,9 @@
   ([ticks proofs mode] (run-tests-forked ticks proofs mode (fn [_] nil)))
   ([ticks proofs mode forked] (run-tests-forked ticks proofs mode forked nil))
   ([ticks proofs mode forked names]
-  (let [plan (test-plan (db) (when-not (= :main mode) (:base @state)) proofs (heard-main))]
+  ;; the tests of the namespaces a request names are selected as proofs are: named, they run whatever the branch changed
+  (let [proofs (cond-> proofs (seq names) (into (named-tests (db) names)))
+        plan (test-plan (db) (when-not (= :main mode) (:base @state)) proofs (heard-main))]
   (if-let [unread (:unread plan)]
     unread
   (let [{judge :selected deferred :skipped} (run-selection plan names proofs)
