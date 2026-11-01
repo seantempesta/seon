@@ -878,6 +878,23 @@
     (is (< (* 10 held) read) (str "a call of branch-registry with the registry held allocated " held " bytes; one read of the schema changes " read))
     (is (= [true false] (:value valid)) (str "after a registration the next eval binds it: " (pr-str reg) " " (pr-str valid)))))
 
+(deftest root-reads-the-health-the-render-proc-keeps
+  ;; docs/health.md#cost: my.root/problems read main's health whole at every call (~600 MB on the standing
+  ;; root); it reads the render proc's, kept by what each move of main changed, at the api's fold. It
+  ;; answers what the whole read does, after boot and after main moved, and a read with nothing moved
+  ;; costs under a tenth of the whole read.
+  (let [same "(let [h (my.root/problems sys) w (seon.problems/health @(:conn sys) (seon.root/errors sys))] [(= (:classes h) (:classes w)) (count (:classes h))])"
+        cost "(let [m (fn [f] (let [b (seon.profile/alloc-bytes)] (f) (- (seon.profile/alloc-bytes) b)))] (my.root/problems sys) [(m #(my.root/problems sys)) (m #(seon.problems/health @(:conn sys) (seon.root/errors sys)))])"
+        [booted moved costs]
+        (in-agent (fn [{:keys [task]}]
+                    [{:op :eval :agent "root" :code same}
+                     {:op :eval :agent "root" :code (str "(do @(seon.root/transact-main! sys [{:seon.task/id " (pr-str task) " :seon.task/failure {:reason \"provoked\"}}]) " same ")")}
+                     {:op :eval :agent "root" :code cost}]))
+        [held whole] (:value costs)]
+    (is (= true (first (:value booted))) (str "after boot, held and whole agree: " (pr-str booted)))
+    (is (= true (first (:value moved))) (str "after main moved, held and whole agree: " (pr-str moved)))
+    (is (< (* 10 held) whole) (str "a held read allocated " held " bytes; a whole read " whole))))
+
 (deftest an-agent-with-no-task-resumes-a-kept-branch
   ;; found by session global-ids, 2026-10-23: an agent spawned with no task onto a branch the
   ;; store already holds (a kept branch; e2e's fresh agent on a store an earlier run left)

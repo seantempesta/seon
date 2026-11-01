@@ -829,6 +829,14 @@
                           :keyframe (if (ready? st (:view m))
                                       (do (step/out! o :to-web {:op :keyframe :view (:view m) :html (view-html st (:view m))}) st)
                                       (ask-state (update st :kf-wanted conj (:view m)) o))
+                          ;; main's health for the api (seon.root's :health, my.root/problems): this proc's,
+                          ;; brought to the main the asker read (advance-main, health!), never read whole again
+                          :health (let [st (-> st (advance-main (:db m)) health!)
+                                        h (some-> (:root-walk st) :a deref :health)]
+                                    ;; none held (no root walk yet): read whole, as health! does when it holds none
+                                    (step/out! o :to-api {:op :health-answer :rid (:rid m) :db (:main-db st)
+                                                          :r (or h (problems/health (:main-db st)))})
+                                    (pass st o))
                           :context (let [st (-> st health! with-context)] (step/out! o :to-web {:op :text :k (:k m) :text (get-in st [:context :text] "")}) st)
                           ;; the end of a view's list scrolled into view: the next rows are rendered
                           :more (if (contains? (:watch st) (:view m)) (pass (update-in st [:shown (:view m)] (fnil + (history-cap)) (history-cap)) o) st)

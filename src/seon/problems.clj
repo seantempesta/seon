@@ -874,14 +874,34 @@
                        ;; the changed namespaces its gate could not read, and why
                        (:seon.run/gate-unread p) (assoc :unread (:seon.run/gate-unread p)))]))))
 
+(defn- fold-counted
+  "classes with each counted class's rows (`counted-classes`) at their true counts: a row's count
+  raised to what fold (root's api's, seon.error/fold) saw of its signature, repeats main does not hold
+  yet; the rows by count, most first, then in the order main holds their errors; :n their sum. The one
+  place a fold is applied: a whole read (`report-with`) and a held one (`with-fold`). See docs/health.md#cost."
+  {:malli/schema [:=> [:cat :map :seon.host/db :seon.error/fold] :map]}
+  [classes db fold]
+  (let [live (into {} (map (fn [{:keys [signature base] n :count}] [signature (+ (or base 0) n)])) (vals fold))
+        at (delay (into {} (map-indexed (fn [i dt] [(:v dt) i])) (d/datoms db :aevt :seon.error/signature)))]
+    (reduce (fn [cs c]
+              (let [rows (vec (sort-by (juxt (comp - :count) #(get @at (:signature %) 0))
+                                       (map #(update % :count max (get live (:signature %) 0)) (get-in cs [c :rows]))))]
+                (assoc cs c {:n (reduce + 0 (map :count rows)) :rows rows})))
+            classes counted-classes)))
+
+(defn with-fold
+  "Health report h of db at the true counts fold holds (`fold-counted`): what (health db fold) answers,
+  from a health read without the fold (the render proc's, kept by what each move of main changed:
+  seon.render.proc/health!). See docs/health.md#cost."
+  {:malli/schema [:=> [:cat :seon.problems/report :seon.host/db :seon.error/fold] :seon.problems/report]}
+  [h db fold] (update h :classes fold-counted db fold))
+
 (defn- report-with
   "`report` over the answers its caller read; with only (run entity ids) the run classes hold just
   those runs' rows, found without scanning the runs' attributes (`health-moved` carries the rest)."
   {:malli/schema [:=> [:cat :seon.host/db :map :seon.error/fold [:maybe [:set :int]]] :seon.problems/report]}
   [db ans fold only]
-  (let [live (into {} (map (fn [{:keys [signature base] n :count}] [signature (+ (or base 0) n)])) (vals fold))
-        errors (group-by :class (map #(let [r (error-row db ans %)] (update r :count max (get live (:signature r) 0)))
-                                     (es db :seon.error/signature)))
+  (let [errors (group-by :class (map #(error-row db ans %) (es db :seon.error/signature)))
         done? (memoize #(task/done? db %))
         ;; a run of a done task has no open problem but its unrun tests: its history is never pulled
         open-run? (fn [e] (or (seq (d/datoms db :eavt e :seon.run/deferred))
@@ -896,8 +916,7 @@
         failed (mapv #(failed-row db ans %) (es db :seon.task/failure))]
     ^{:seon.render/schema :seon.problems/report}
     {:t (:max-tx db)
-     :classes (merge (into {} (for [c counted-classes :let [rows (vec (sort-by (comp - :count) (get errors c)))]]
-                                [c {:n (reduce + 0 (map :count rows)) :rows rows}]))
+     :classes (merge (fold-counted (into {} (for [c counted-classes] [c {:rows (vec (get errors c))}])) db fold)
                      (into {} (for [c run-classes :let [rows (vec (sort-by #(- (or (:end-ms %) 0)) (get by-class c)))]]
                                 [c {:n (count rows) :rows rows}]))
                      {:failed {:n (count failed) :rows (vec (sort-by #(- (or (:at-ms %) 0)) failed))}})}))

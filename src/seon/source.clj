@@ -131,10 +131,13 @@
   "The name (a string) of the head of the form text (one form, as a recorded form's :form/src), read in namespace nsym, or nil when
   that form is not a list headed by a symbol: what kind of definition a recorded form's source is
   (`defn`, `defn-`, `defmacro`, whatever its namespace: seon.contract/defn is `defn`), told by the
-  reader and never by the text's first characters. See docs/health.md#a-function-that-cites-no-section."
+  reader and never by the text's first characters: seon.reader's, which reads `::alias/kw` without
+  the namespace loaded (read-string in a process that never loaded nsym could not resolve
+  `::flow/in-ports`, and bin/check health failed on any changed var holding one). See
+  docs/health.md#a-function-that-cites-no-section."
   {:malli/schema [:=> [:cat :symbol :string] [:maybe :string]]}
   [nsym text]
-  (let [f (binding [*ns* (or (find-ns nsym) *ns*)] (read-string text))]
+  (let [f (first (reader/read-all text nsym))]
     (when (and (seq? f) (symbol? (first f))) (name (first f)))))
 
 (defn mentions?
