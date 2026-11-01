@@ -19,11 +19,11 @@ What Seon is for, where it stands, the one step being worked now, and the steps 
 
 ## Where it stands (2026-11-01, afternoon)
 
-**Waste out of the agent loop** (the owner: "if we are doing wasteful shit for no reason we should address it"; main ae3bd0f901):
+**Waste out of the agent loop** (the owner: "if we are doing wasteful shit for no reason we should address it"; main 18995441d3):
 - an agent's start costs the same however long its root has run: the fork server reads what the agent it forks will read (seon.fork-server/warm-start) and hands main's highest eval number; 5.86-6.04 MB from 10 to 1,000 runs of history, where it grew 9.7 -> 12.7 MB (batch 72, [machine](machine.md#an-agents-first-write));
 - an eval reads no schema entry while none moved (seon.repl/branch-registry, up to three 1.08 MB reads an eval before; batch 72);
-- a whole health read reads each text once for its old words: my.root/problems on the standing root 560-645 MB -> 222-274 MB a call ([health](health.md#cost)).
-Next, by size: each eval's commit writes ~2.7 MB for a record of a few datoms (every index's path, current and history: Datahike's write amplification, a fork change); my.root/problems reads health whole where the render proc keeps it current by what changed (seon.render.proc/health!; using it needs the recorded part, with root's error fold, apart from the derived part: an owner's plan); then unnamed-sites (62 MB a whole read) and the first run's record build (~1.6 MB).
+- a whole health read reads each text once for its old words (508 -> 225 MB in a test root), and my.root/problems reads the render proc's held health at the api's fold: on the standing root 560-645 MB -> ~323 KB a call ([health](health.md#cost)).
+Next, by size: each eval's commit writes 2.4-3.3 MB for a record of a few datoms (datahike.writing/commit!'s node writes ~1.8 MB, db->stored 0.4-1.25 MB and growing over a branch's commits: a fork change, the owner's go); then unnamed-sites (62 MB a whole read, now only the render proc's first) and the first run's record build (~1.6 MB).
 
 ## Where it stands (2026-10-31, night)
 
