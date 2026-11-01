@@ -968,7 +968,8 @@
           ;; k is the search's own count: the hits it asks for, no cut of what it found
           hits (context/search db q {:kinds #{:var :section :schema} :k (or (:seon.search/k s) 10) :min 0.0}
                                (when (and e (vector/vector-of db e)) e))]
-      [:section [:h3 (str "search: " q)]
+      ;; the task's own request is on the page already: the heading names it rather than repeating it
+      [:section [:h3 (if (= q (get-in c [:task :seon.task/plan])) "search: this task's request" (str "search: " q))]
        (into [:ol] (for [{:keys [kind name e]} hits :when name]
                      [:li [:code (str name)]
                       (some->> (case kind :var (some-> (:var/doc (d/entity db [:var/name name])) ref/lead-sentence)

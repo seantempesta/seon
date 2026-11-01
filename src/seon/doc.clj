@@ -613,7 +613,8 @@
 (defn grep
   "Every line of the texts of kinds on db that pattern matches, as grep answers them, one row each
   {:at \"name:line\" :kind :text}: :at the thing holding it (a var or test, a section's address, a task's
-  id, a schema key) and the line's number within its text, :text the line, trimmed. pattern is a string,
+  id, a schema key) and the line's number within its text, :text the line, trimmed (in prose, a section's or a
+  task's, where a paragraph is one line: each sentence of it that matches). pattern is a string,
   matched as it is written, or a regex. A string's words narrow the texts read through `text-index` (its
   postings, built once a change of the store); a regex reads every text of kinds. ns, when given, keeps
   the names starting with it. Rows in the order of their texts' names, then lines. See docs/vector.md#search."
@@ -628,8 +629,11 @@
                h (named-hits db e a kinds (constantly true))
                :when (or (nil? ns) (str/starts-with? (str (:name h)) ns))
                [i line] (map-indexed vector (str/split-lines v))
-               :when (re-find re line)]
-           [(str (:name h)) i {:at (str (:name h) ":" (inc i)) :kind (:kind h) :text (str/trim line)}])
+               :when (re-find re line)
+               ;; prose (a section's, a plan's) holds a paragraph on one line: its row is each sentence that
+               ;; matches, as grep -o selects the match, so a hit costs its sentence and not its paragraph
+               part (if (#{:seon.doc/text :seon.task/plan} a) (filter #(re-find re %) (str/split line #"(?<=[.!?])\s+")) [line])]
+           [(str (:name h)) i {:at (str (:name h) ":" (inc i)) :kind (:kind h) :text (str/trim part)}])
          (sort-by (juxt first second))
          (mapv peek))))
 
