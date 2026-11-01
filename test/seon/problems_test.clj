@@ -452,7 +452,7 @@
     (is (seq rows) "the db has unlinked classes to judge")
     (is (= rows (vec (distinct rows))) "no row twice")
     (is (= :problem-unlinked (:class (peek rows))) "the unlinked class's own missing section is the last row")
-    (is (<= (:calls m) 72) "the contracted calls of one health read (72 on the world: its test namespace app.calc-test holds two forms carrying a catch (a deftest's `is`), which unnamed-sites reads lazily, so 8 calls the world before it did not make: live? and form-of per form, and the program namespaces read once (program-nss and its config value); 64 without them, with seon.config armed as at boot: value, resolve and resolve-in are one call more each; 59 before the fix; 51 with it and report-with's own contract; main has since added to health's reads, health-with's contract is one more, and the old-word class reads its table and texts in 4 contracted calls)")))
+    (is (<= (:calls m) 73) "the contracted calls of one health read (73 on the world: its test namespace app.calc-test holds two forms carrying a catch (a deftest's `is`), which unnamed-sites reads lazily, so 8 calls the world before it did not make: live? and form-of per form, and the program namespaces read once (program-nss and its config value); 64 without them, with seon.config armed as at boot: value, resolve and resolve-in are one call more each; 59 before the fix; 51 with it and report-with's own contract; main has since added to health's reads, health-with's contract is one more, and the old-word class reads its table and texts in 5 contracted calls: place-texts reads the places' texts)")))
 
 (deftest problems-lists-every-class-with-what-a-declaration-needs
   (let [db (seeded 3 5)
@@ -922,7 +922,8 @@
                ;; 68 calls at 10: :long-form (seon.problems/long-forms) is a class the changed vars are asked, with its bound read once (seon.config/value) each form's chars set against the bound's (seon.print.emit/chars-per-token), a long one's tokens estimated;
                ;; the 7 more contracted calls, each instrumented (its output checked), are the ticks and bytes the fixed part grew by (measured: the
                ;; seek and text of a var cost ~8k ticks of it)
-               :fixed {:ticks 460000 :bytes 1800000 :calls 68}
+               ;; 69: seon.problems/place-texts reads the changed places' texts, one contracted call
+               :fixed {:ticks 460000 :bytes 1800000 :calls 69}
                :sizes [10 30 100]}))
 
 ;; ---- the wiki kept true: stale sections, orphan pages, issues with no page ----------------------
