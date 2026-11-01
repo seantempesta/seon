@@ -853,7 +853,8 @@
            :fixed {:bytes 6.0e6}}
         measure "(- (seon.profile/alloc-bytes) (nth (last (:marks @seon.agent/state)) 2))"
         opts {:sets [":seon.config.store/node-cache-bytes=8388608"]}
-        grow (fn [{:keys [task]} from n] {:op :eval :agent "root" :code (str "@(seon.root/transact-main! sys (seon.agent-test/history-tx " (pr-str task) " " from " " n "))")})
+        ;; history as it grows: commits of 10 runs each (each rewrites the leaves it touches, as a root's runs do)
+        grow (fn [{:keys [task]} from n] {:op :eval :agent "root" :code (str "(doseq [i (range " from " " (+ from n) " 10)] @(seon.root/transact-main! sys (seon.agent-test/history-tx " (pr-str task) " i 10)))")})
         ;; each agent measures, then grows main to the next size; the next agent forks after it
         steps (map vector (cons 0 sizes) (concat sizes [nil]))
         measured (vec (for [[have want] steps]
@@ -894,6 +895,18 @@
     (is (= true (first (:value booted))) (str "after boot, held and whole agree: " (pr-str booted)))
     (is (= true (first (:value moved))) (str "after main moved, held and whole agree: " (pr-str moved)))
     (is (< (* 10 held) whole) (str "a held read allocated " held " bytes; a whole read " whole))))
+
+(deftest an-agents-first-search-reads-the-index-it-inherited
+  ;; docs/vector.md#search: an agent's first grep built the search's text indexes from nothing (seon.doc/text-index:
+  ;; the forms' 381 MB, the sections' 125 MB, ~1 s), and a moved db read every text again for its fingerprint (114 MB).
+  ;; The fork server builds main's once and each move that writes no text carries them (seon.doc/carry-index!): the
+  ;; first search costs under a fifth of one build.
+  (let [m "(fn [f] (let [b (seon.profile/alloc-bytes)] (f) (- (seon.profile/alloc-bytes) b)))"
+        [_ costs] (in-agent [(str "(def meas " m ")")
+                             "[(meas #(my.agent/grep \"accumulated\")) (meas #(#'seon.doc/build-index (:db @seon.agent/state) :form/src))]"])
+        [first-search build] (:value costs)]
+    ;; that a move writing text builds the index again: seon.doc-test/a-text-index-is-carried-past-a-move-that-writes-no-text
+    (is (< (* 5 first-search) build) (str "an agent's first grep allocated " first-search " bytes; building the forms' index " build))))
 
 (deftest an-agent-with-no-task-resumes-a-kept-branch
   ;; found by session global-ids, 2026-10-23: an agent spawned with no task onto a branch the
