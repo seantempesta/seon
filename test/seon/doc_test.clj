@@ -318,6 +318,31 @@
 
 ;; ---- text uses Clojure's words too (task seon.doc/names-are-clojures-words) ---------------
 
+(defn- texts-outside-store
+  "The checkout files (under root) no-text-uses-an-old-word reads: what git lists under dirs, tracked or
+  untracked and not ignored (`git ls-files -co --exclude-standard`, as the program's sample tree takes them),
+  so a file the repository ignores (config/local.edn, which bin/ports writes with the worktree's own name)
+  is no text of the repository; a tracked file deleted on disk is no file. text? and skip? pick by path."
+  [root dirs text? skip?]
+  (->> (:out (apply clojure.java.shell/sh "git" "-C" root "ls-files" "-co" "--exclude-standard" "--" dirs))
+       str/split-lines sort
+       (filter #(and (text? %) (not (skip? %)) (.isFile (java.io.File. (str root "/" %)))))))
+
+(deftest an-ignored-file-is-no-text-and-a-tracked-one-is
+  ;; the red of 2026-11-01: the worktree terminal-verbs failed no-text-uses-an-old-word with
+  ;; ["config/local.edn" 3 "verb"], a file git ignores that holds the worktree's name
+  (let [{:keys [dir]} (git-fixture)
+        put (fn [p t] (.mkdirs (.getParentFile (java.io.File. (str dir "/" p)))) (spit (str dir "/" p) t))
+        _ (do (put ".gitignore" "/config/local.edn\n")
+              (put "config/local.edn" "{:worktree \"terminal-verbs\"}\n")
+              (put "config/default.edn" "{:a-verb 1}\n")
+              (clojure.java.shell/sh "git" "-C" dir "add" ".gitignore" "config/default.edn"))
+        paths (texts-outside-store dir ["config"] #(str/ends-with? % ".edn") (constantly false))
+        words (seon.problems/old-word-spellings (slurp (str (config/checkout) "/AGENTS.md")))
+        hits (for [p paths [i w] (seon.problems/old-word-hits (map-indexed vector (str/split-lines (slurp (str dir "/" p)))) words)] [p (inc i) w])]
+    (is (= ["config/default.edn"] paths) "the ignored file is not read, the tracked one is")
+    (is (= [["config/default.edn" 1 "verb"]] hits) "and the tracked file's old word is still found")))
+
 (deftest no-text-uses-an-old-word
   ;; what the store holds is judged as a derived class (`seon.problems/old-words-in`, seon.problems-test/an-old-word-is-a-problem,
   ;; and by the health step on every branch); this reads what it does not hold: bin/, the root pages, the
@@ -331,10 +356,7 @@
         text? (fn [^String p] (or (str/starts-with? p "bin/") (re-find #"\.(clj|edn|md|html|js|css|c|h)$" p)))
         in-store? (fn [^String p] (or (str/starts-with? p "docs/") (str/starts-with? p "resources/seon/tasks/")))
         comment-only? (fn [^String p] (and (str/ends-with? p ".clj") (not (str/starts-with? p "bin/"))))
-        paths (for [dir ["bin" "resources" "src" "test" "web" "config" "native"]
-                    f (file-seq (java.io.File. (str root "/" dir))) :when (.isFile ^java.io.File f)
-                    :let [p (subs (.getPath ^java.io.File f) (inc (count root)))] :when (and (text? p) (not (in-store? p)))]
-                p)
+        paths (texts-outside-store root ["bin" "resources" "src" "test" "web" "config" "native"] text? in-store?)
         hits (for [p (concat ["AGENTS.md" "BAGGAGE.md" "README.md"] paths) :when (not (seon.problems/old-word-kept p))
                    :let [lines (vec (str/split-lines (slurp (str root "/" p))))]
                    [i w] (seon.problems/old-word-hits (for [[i l] (map-indexed vector lines) :when (or (not (comment-only? p)) (str/starts-with? (str/triml l) ";"))] [i l]) words)]
