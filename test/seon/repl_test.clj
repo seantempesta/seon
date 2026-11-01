@@ -558,6 +558,8 @@
       (is (str/includes? (printed "(my.agent/grep \"accumulated\")") "seon.task/accumulate:") "grep: a row per matching line, at its thing and line")
       (is (str/includes? (printed "(my.agent/lines 'seon.task/accumulate 3 6)") "seon.task/accumulate:3") "lines: the range, numbered as grep numbers it")
       (is (str/includes? (printed "(my.agent/ls 'seon.task)") "seon.task/accumulate") "ls: a namespace's definitions")
+      (is (not (:ex (by "(swap! ctx assoc-in [:searches \"a1/where-entries-are-read\"] {:seon.search/id \"a1/where-entries-are-read\" :seon.search/query \"entries an agent has not taken\" :seon.search/k 5})")))
+          "a search added through swap! on ctx: a new member, written under the agent")
       (is (str/includes? (printed "(get (my.schema/forms) :seon.task/task)") ":seon.task/own") "a schema's form")
       (is (str/includes? (printed "(my.schema/register! :app.workout/set [:map [:reps :int] [:kg :double]])") ":app.workout/set") "a new schema registers")
       (is (str/includes? (printed "(my.agent/help)") "docs/agent.md#done") "help lists the page's sections, from the branch's db")
