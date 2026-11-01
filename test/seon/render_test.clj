@@ -458,7 +458,14 @@
         own? #(str/starts-with? % "own-problems-")]
     (is (seq (sent branch)) "the page still sends its other parts")
     (is (not-any? own? (sent branch)) "no problem open: no own-problems part")
-    (is (some own? (sent red)) "a problem open: its part is sent")))
+    (is (some own? (sent red)) "a problem open: its part is sent")
+    ;; the parent's hiccup still holds the nil child's marker: resolved replaces it by the child's output (nil),
+    ;; which seon.web.html writes as nothing, so the whole layout holds no element or id for it
+    (let [w (a3-walk branch)]
+      (try (let [root @(:out w)]
+             (is (not (str/includes? (h/html (r/resolved w root true)) "own-problems")) "the page's layout: no element, no id")
+             (is (not (str/includes? (pr-str (r/resolved w root)) "own-problems")) "the model's resolved layout: a bare nil where it stood, no id and no element"))
+           (finally (r/dispose-walk! w))))))
 
 (deftest root-and-an-agent-are-one-chrome
   (let [[main branch eid] (paged-dbs)
