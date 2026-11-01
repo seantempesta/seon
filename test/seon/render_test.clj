@@ -446,8 +446,19 @@
   (let [[_ branch _] (paged-dbs)
         problems (fn [db] (filter #(str/starts-with? (:id %) "own-problems-") (:units (drawn-parts db))))
         red (datahike.api/db-with branch [{:seon.run/id "demo/f#1" :seon.run/failures {'demo/f-test [{:type :fail :message "m" :expected "1" :actual "2"}]}}])]
-    (is (not (re-find #">[^<]" (apply str (map :html (problems branch))))) "no problem open: nothing drawn (an empty element)")
+    (is (empty? (problems branch)) "no problem open: no unit, not an empty element")
     (is (str/includes? (apply str (map :html (problems red))) "red") "a red proof of its task, drawn as the report draws it")))
+
+(deftest an-empty-part-sends-nothing
+  ;; task seon.render/an-empty-part-draws-nothing: a component that draws nothing (own-problems with no
+  ;; problem open) sends the model no part, not an element holding nil; one with a problem still does
+  (let [[_ branch _] (paged-dbs)
+        red (d/db-with branch [{:seon.run/id "demo/f#1" :seon.run/failures {'demo/f-test [{:type :fail :message "m" :expected "1" :actual "2"}]}}])
+        sent (fn [db] (keys (seon.context/drawn-parts db (seon.ctx/build db (seon.db/eid db :seon.agent/key (seon.task/agent-key "b1" :a3)) :task-demo-f))))
+        own? #(str/starts-with? % "own-problems-")]
+    (is (seq (sent branch)) "the page still sends its other parts")
+    (is (not-any? own? (sent branch)) "no problem open: no own-problems part")
+    (is (some own? (sent red)) "a problem open: its part is sent")))
 
 (deftest root-and-an-agent-are-one-chrome
   (let [[main branch eid] (paged-dbs)
@@ -1049,8 +1060,8 @@
     ;; a cited var is a component of its own when the db holds it (ctx joins the task's references by
     ;; :var/name: seon.context-test/a-cited-var-redefined-shows-in-the-next-view); this db holds none
     (is (= [(str "task-data-" rid) (str "cited-" rid "-seon.render_2Fhtml") (str "cited-" rid "-seon.print") (str "cited-" rid "-docs_2Frender.md_23no-clipping")
-            (str "namespaces-" rid) (str "status-" rid) (str "run-head-" rid) (str "own-problems-" rid)] (mapv :id task))
-        "the task, each thing its plan cites (a part each), the namespaces it touches, how the work stands, the agent's turn, its open problems (the proof it fails; none open draws nothing) (and the keys the agent added, when it added one): each keyed by what it shows")
+            (str "namespaces-" rid) (str "status-" rid) (str "run-head-" rid)] (mapv :id task))
+        "the task, each thing its plan cites (a part each), the namespaces it touches, how the work stands, the agent's turn (its open problems when one is open: none here, so no part; and the keys the agent added, when it added one): each keyed by what it shows")
     (let [h (:html (unit-of task "status-"))]
       (is (str/includes? h "demo/f-test") "each proof as its var entity holds its verdict, (my.task/status)'s")
       (is (str/includes? h "text-error") "the failing proof's verdict is the status's mark")
@@ -1063,10 +1074,10 @@
       (is (str/includes? h "not written yet") "an unwritten proof: what to write"))
     (is (= [(str "chat-ask-" rid) (str "chat-start-" rid)
             (str "chat-message-" rid "-" (eid :seon.message/id "m-1")) (str "eval-item-" (eid :seon.eval/id "e1")) (str "eval-item-" (eid :seon.eval/id "e2"))
-            (str "chat-turn-" rid "-" (eid :seon.turn/id "demo/f#1/0")) (str "eval-item-" (eid :seon.eval/id "e3")) (str "chat-turn-" rid "-" (eid :seon.turn/id "demo/f#1/1"))
+            (str "chat-turn-" rid "-" (eid :seon.turn/id "demo/f#1/0")) (str "eval-item-" (eid :seon.eval/id "e3"))
             (str "chat-end-" rid)]
            (mapv :id conv))
-        "the conversation in the order it was written: by eid, each a component keyed by its entity, then how the agent stands")
+        "the conversation in the order it was written: by eid, each a component keyed by its entity, then how the agent stands; a turn with no reply, reasoning or eval (demo/f#1/1) draws nothing, so no row")
     (is (every? #(str/starts-with? (:html %) (str "<" )) units))
     (is (every? #(str/includes? (:html %) (str "id=\"" (:id %) "\"")) units) "each component's root element carries its key as its id")
     (is (= units (draw)) "pure: the same ctx, the same page")))

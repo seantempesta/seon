@@ -140,4 +140,8 @@ Correct:
 
 Replaces: the schema-declared render as the only way to choose one. Scoping: a render the agent defines wins on its branch at once; merged, it is the newest on main."
   :seon.task/kind :design
-  :seon.task/proofs #{}}]
+  :seon.task/proofs #{}}
+ {:seon.task/name "an-empty-part-draws-nothing"
+  :seon.task/plan "What exists: a component whose render answered nil (``seon.render.ui/own-problems`` with no problem open; ``seon.render.ui/chat-turn`` for a turn with no reply, reasoning or eval) was still wrapped by ``seon.render/with-id`` as [:div {:id :class} nil] and placed, so a first request carried `\"own-problems-<aid>\" [:div {:id ..., :class \"own-problems\"} nil]` (107 characters, 33 tokens by seon.context/messages-tokens) and the page an empty element. Cause: with-id gave every output a root element, nil included. Fix, at the cause in the walk: with-id answers nil for nil, and ``seon.render/placed`` places no component whose output is nil, so the page sends no unit and the model no part; when the component draws again its part is placed as a new one (docs/render.md#a-part-answers-data). Replaces nothing; no component changed. Other components: ``namespaces`` and ``cited`` answer nil when they hold nothing and ``chat-turn`` for an empty turn, all covered by the same walk rule."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.render-test/an-empty-part-sends-nothing seon.render-test/an-agents-page-draws-the-problems-of-its-own-run seon.render-test/a-page-is-its-components}}]
