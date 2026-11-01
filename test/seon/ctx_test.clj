@@ -729,7 +729,9 @@
               shown (:units parts)]
           (is (= (map :id shown) (keys page)) "every component, the conversation's too, in order: nothing left out")
           ;; the one difference: the page's html adds each root's render's style after its name (seon.render/styled)
-          (let [styles (keep #(some-> (requiring-resolve (symbol "seon.render.ui" %)) meta :seon.render/style) (map #(:class (second %)) (vals page)))
+          (let [;; every element class in the page's hiccup that names a render of seon.render.ui, nested components' too
+                classes (into #{} (comp (filter string?)) (keep #(when (map? %) (:class %)) (tree-seq coll? seq (vec (vals page)))))
+                styles (keep #(some-> (requiring-resolve (symbol "seon.render.ui" %)) meta :seon.render/style) classes)
                 ;; a style as the html attribute holds it, escaped
                 unstyled (fn [h] (reduce #(str/replace %1 (str " " (-> %2 (str/replace "&" "&amp;") (str/replace ">" "&gt;"))) "") h styles))]
             (is (= (map (comp unstyled :html) shown) (map (comp unstyled seon.web.html/html) (vals page)))
