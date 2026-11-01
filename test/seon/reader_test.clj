@@ -80,6 +80,15 @@
         r (tc/quick-check 300 (prop/for-all [ps (gen/vector piece 0 40)] (laws-hold? (apply str ps))) :seed (proofs/test-seed))]
     (is (:pass? r) (pr-str (select-keys r [:seed]) (get-in r [:shrunk :smallest])))))
 
+;; A line that starts with a backtick is read once, to ask whether it is one literal
+;; (docs/failure-points.md); edamame expands nested syntax-quote exponentially (10 backticks:
+;; 2e9 ticks), so a run of them in a reply looked like a loop. Shrunk from generated case 79
+;; (seed 821691108382395335): forgive answers by reading no syntax-quote, and the laws hold.
+(deftest a-run-of-backticks-in-a-reply-costs-a-read-of-no-syntax-quote
+  (let [t (str "`a" (apply str (repeat 12 "`")) "x")]
+    (is (laws-hold? t))
+    (is (laws-hold? (str "`#(~" (apply str (repeat 12 "`")) "clojure\n{#(#{ ```text\n:k1 ")))))
+
 (deftest line-starts-are-each-lines-offset
   (is (= [0] (reader/line-starts "")) "empty text is one line, at 0")
   (is (= [0 4 5] (reader/line-starts "abc\n\nd")) "each line starts just past the newline before it")
