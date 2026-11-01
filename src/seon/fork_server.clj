@@ -79,18 +79,23 @@
   after it) into this process's node cache: each written entity's :eavt leaf, each written datom's :aevt
   leaf and an indexed attribute's :avet leaf. The writer holds what it wrote in memory, so these leaves
   are cold here, and every agent forked from here would otherwise decode the ones it reads itself; each
-  is read here once instead, and inherited. nil. See docs/machine.md#an-agents-first-write."
+  is read here once instead, and inherited. A commit that moves the program (an import, a merge's
+  forms: seon.program/moves-program?) is not read: an agent's start reads none of its leaves, and its
+  thousands of leaves would stall this thread and displace the cache. A read that throws is the step's
+  error (step-failed). nil. See docs/machine.md#an-agents-first-write."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :any]] :nil]}
   [db ops]
-  (let [indexed (get (dbi/-rschema db) :db/index #{}) db (d/history db)]
-    (reduce (fn [seen [_ e a v]]
-              (if-not (and (int? e) (keyword? a))
-                seen
-                (do (first (d/seek-datoms db :aevt a e))
-                    (when (contains? indexed a) (first (d/seek-datoms db :avet a v)))
-                    (if (contains? seen e) seen (do (first (d/seek-datoms db :eavt e)) (conj seen e))))))
-            #{} ops)
-    nil))
+  (when-not (program/moves-program? ops)
+    (let [indexed (get (dbi/-rschema db) :db/index #{}) db (d/history db)]
+      (reduce (fn [seen [_ e a v]]
+                (if (or (not (int? e)) (not (keyword? a)) (contains? seen [a e]))
+                  seen
+                  (do (first (d/seek-datoms db :aevt a e))
+                      (when (contains? indexed a) (first (d/seek-datoms db :avet a v)))
+                      (when-not (contains? seen e) (first (d/seek-datoms db :eavt e)))
+                      (conj seen e [a e]))))
+              #{} ops)))
+  nil)
 
 (defn evals-max-after
   "Main's highest eval number (seon.repl/evals-max) after a commit's ops (resolved [op e a v]), from
@@ -120,6 +125,7 @@
                                             :seon.run/agent {:seon.agent/key "warm" :seon.agent/id :warm :seon.agent/task {:seon.task/id task}}}]))
                 db2 (:db-after (d/with db1 (task/agent-cites-tx db1 [:seon.agent/key "warm"] "warm")))]
             (ctx/build db2 (pdb/eid db2 :seon.agent/key "warm") :warm)
+            ;; read for its leaves, its value dropped: an agent's first eval keys its registry by it
             (program/schema-changes db)))
         (assoc st :warm-t t)))))
 
