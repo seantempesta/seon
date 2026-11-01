@@ -42,10 +42,6 @@
  ;; function body (seon.merge/mutations), refused at merge
  :seon.merge/mutation [:and :seon.error/base [:map [:seon.error/type [:= :seon.merge/mutation]]
                                                [:mutations [:vector [:map [:form :string] [:ns :symbol] [:defines [:vector :any]]]]]]]
- ;; a branch that changed wiki sections, whose pages the writer cannot write back to docs/ yet
- ;; (task seon.merge/what-merges-is-what-a-file-states, step 2), refused at merge so no change is lost
- :seon.merge/unwritten [:and :seon.error/base [:map [:seon.error/type [:= :seon.merge/unwritten]]
-                                                [:sections [:vector :string]]]]
  :seon.merge/behind [:and :seon.error/base [:map [:seon.error/type [:enum :seon.merge/behind]]
                                              [:behind pos-int?]]]
  :seon.merge/unmerged [:and :seon.error/base [:map [:seon.error/type [:enum :seon.merge/unmerged]]

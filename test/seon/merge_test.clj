@@ -120,16 +120,20 @@
     (is (some? (d/entity merged [:var/name 'app/n])) "the branch's own work stays")
     (is (empty? (:apply (pm/delta-three-way theirs theirs theirs #{}))) "a branch holding main's wiki takes nothing")))
 
-;; docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program: a branch's own wiki edit would merge into main's db
-;; and be lost at the next load of docs/, so the writer refuses it, naming the sections, until pages are written back
-(deftest a-branch-wiki-edit-is-refused-until-pages-are-written-back
+;; docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program: a branch's own doc edit merges as code does, and its
+;; page is written back with the merge (seon.source/changed-files names it, seon.doc/files draws it), so the next load of
+;; docs/ reads what merged (task seon.doc/any-markdown-file-is-docs-it-writes-back)
+(deftest a-branch-doc-edit-merges-and-its-page-is-written-back
   (let [load (fn [db pages] (d/db-with db (seon.doc/load-tx db "demo" pages)))
-        b (load (base) {"demo/p.md" "# P\n\nOne.\n"})
+        b (load (base) {"demo/p.md" "# P\n\nOne.\n" "demo/q.md" "# Q\n\nUntouched.\n"})
         edited (load b {"demo/p.md" "# P\n\nTwo.\n"})
-        coded (with b (var-tx "n" "1"))
-        refused #(#'seon.writer/merge-refused b % (pm/delta-three-way b % b #{}))]
-    (is (= [:seon.merge/unwritten ["demo/p.md#p"]] ((juxt :seon.error/type :sections) (refused edited))))
-    (is (not= :seon.merge/unwritten (:seon.error/type (refused coded))) "a branch that changed no section is not refused for it")))
+        r (pm/delta-three-way b edited b #{})
+        merged (d/db-with b (pm/merge-tx b b edited (keys (:ours r)) #{}))
+        paths (seon.source/changed-files merged (:ours r))]
+    (is (nil? (#'seon.writer/merge-refused b edited r)) "the writer takes it")
+    (is (= ["demo/p.md"] paths) "the merge writes the page its doc changed, and only it")
+    (is (= {"demo/p.md" "# P\n\nTwo.\n"} (seon.doc/files merged paths)) "as the merged store draws it: the next load reads it back unchanged")
+    (is (= [] (seon.doc/load-tx merged "demo" (seon.doc/files merged paths))) "loading what was written writes nothing")))
 
 (deftest unmap-merges-as-delete
   (let [ours (with (base) (unmap "g"))

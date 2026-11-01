@@ -136,7 +136,7 @@
                                         (str "run " id (if (runs id) " has no write-back to repeat" " does not exist")) {:run id})))
         paths (vec (sort (distinct (mapcat #(:seon.git/files (reconcile/lost-write-back (runs %))) lost))))
         root (config/value :seon.config.source/root)
-        files (when (and (seq lost) root) (source/files db paths))
+        files (when (and (seq lost) root) (doc/files db paths))
         members (vec (for [id lost] {:task (:seon.run/task (runs id)) :run id}))
         r (cond (empty? lost) {:written []}
                 (nil? root) (contract/error :seon.root/no-source-root #'my.root/write-back!

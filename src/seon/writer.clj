@@ -4,7 +4,7 @@
   proto.control's writer (session F2; writer design A, the session design papers in git history)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.lib :as lib]
-            [seon.program :as program] [seon.merge :as pm] [seon.union :as union] [seon.problems :as problems] [seon.source :as source] [seon.contract :as contract] [seon.sock :as sock] [seon.step :as step] [seon.config :as cfg]
+            [seon.program :as program] [seon.merge :as pm] [seon.union :as union] [seon.problems :as problems] [seon.source :as source] [seon.doc :as doc] [seon.contract :as contract] [seon.sock :as sock] [seon.step :as step] [seon.config :as cfg]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [clojure.string :as str]))
 
 (defn- union-caught-up
@@ -89,7 +89,7 @@
   (:seon.merge/unmerged); its program calls intern, alter-var-root, eval or load-string,
   or defines inside a function body (:seon.merge/mutation, seon.merge/mutations); it
   carries an uncontracted function (:seon.merge/uncontracted: contracts decide what is
-  admitted); it changed wiki sections, which no write-back writes to docs/ yet (:seon.merge/unwritten)."
+  admitted). A changed doc merges as code does: its page is written back with the merge (seon.doc/files)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.merge/result] [:maybe :map]]}
   [main head r]
   (let [unmerged (pm/unmerged head)
@@ -111,11 +111,6 @@
                                                                                     (if (:call m) (str " calls " (:call m)) (str " defines " (:inline-def m) " inside a function body"))))))
                         {:tx (:max-tx main) :mutations ms
                          :seon.error/fix "Every definition happens once, where it is defined: vary behaviour through arguments or the environment, and define at the top level, not inside a function."}))
-      (some #(= :section (first %)) (keys (:ours r)))
-      (contract/error :seon.merge/unwritten #'seon.writer/merge-refused
-                      "the branch changed wiki sections, and no write-back writes a page to docs/ yet: the merge would lose them at the next load"
-                      {:tx (:max-tx main) :sections (vec (sort (keep (fn [[k a]] (when (= :section k) a)) (keys (:ours r)))))
-                       :seon.error/fix "Edit the page in docs/ in a worktree session, or wait for the wiki's write-back (task seon.merge/what-merges-is-what-a-file-states)."})
       (seq uncontracted)
       (contract/error :seon.merge/uncontracted #'seon.writer/merge-refused
                       (str "the branch carries " (count uncontracted) " function(s) without a contract")
@@ -251,7 +246,7 @@
                                          [head r base] (branch-merge st (:branch m) data-attrs)
                                          db (d/db-with @conn (pm/merge-tx @conn base head (keys (:ours r)) data-attrs))
                                          w (written db (:ours r))]
-                                     (assoc w :ok true :text (source/files db (:files w))))
+                                     (assoc w :ok true :text (doc/files db (:files w))))
                                    (refused (str "no branch " (:branch m)) {})))
       ;; one derivation (seon.merge/three-way) for the dashboard, the done rule and merges
       :branch-diff (reply st (if (exists? (:branch m))

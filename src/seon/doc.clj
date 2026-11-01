@@ -280,6 +280,15 @@
      (letfn [(walk [e] (cons (or (get blocks e) (block db e)) (mapcat walk (children db e))))]
        (str (str/join "\n\n" (walk top)) "\n")))))
 
+(defn files
+  "{relative path text} of the files at paths that db holds: each namespace's file and schema
+  resource as seon.source/files writes them, and each page (a .md path) as markdown draws it, so a
+  merge writes the pages its docs changed beside its code (docs/source.md#write-back-mains-files-byte-for-byte)."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :string]] [:map-of :string :string]]}
+  [db paths]
+  (into (source/files db (remove #(str/ends-with? % ".md") paths))
+        (for [p paths :when (str/ends-with? p ".md") :let [t (markdown db p)] :when t] [p t])))
+
 (defn doc-source
   "The doc at address as an edit reads it, nil when db holds none: its own block (block), its heading
   line first, so its heading and its text are changed the way a definition's source is

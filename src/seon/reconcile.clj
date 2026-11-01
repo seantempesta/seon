@@ -7,7 +7,7 @@
   actions out as requests to the api, each action's facts written by the writer."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.sock :as sock] [seon.step :as step]
-            [seon.task :as task] [seon.proofs :as proofs] [seon.merge :as pm] [seon.program :as program] [seon.source :as source]
+            [seon.task :as task] [seon.proofs :as proofs] [seon.merge :as pm] [seon.program :as program] [seon.source :as source] [seon.doc :as doc]
             [datahike.api :as d] [seon.db :as pdb] [clojure.string :as str] [clojure.core.async.flow :as flow]
             [seon.config :as cfg] [seon.error :as err]))
 
@@ -1069,7 +1069,7 @@
                                                         (contract/error? r) (conj {:seon.run/id aid :seon.run/error r}))))))
       :write-back (one (request st aid :main-read {:op :write :req {:op :branch-db :branch :db}}))
       :main-read (let [{:keys [members] paths :files} (:writeback f)
-                       files (source/files (:db r) paths)]
+                       files (doc/files (:db r) paths)]
                    ;; paths main holds no text for: no commit, held on each member's run as a lost write-back
                    (if (empty? files)
                      (one (write st aid :done (commit-tx (:db st) (contract/error :seon.root/no-source-text #'seon.reconcile/commit-tx

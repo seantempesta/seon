@@ -579,14 +579,16 @@
 
 (defn changed-files
   "The files a merge's changes (seon.merge/three-way's :ours) touch, as db (after them) holds
-  them: the file of each namespace whose forms they add, change or remove, and the resource of
-  each schema entry they change; sorted relative paths."
+  them: the file of each namespace whose forms they add, change or remove, the resource of
+  each schema entry they change, and the page of each doc they change (its address's path,
+  drawn by seon.doc/files); sorted relative paths."
   {:malli/schema [:=> [:cat :seon.host/db :seon.merge/changes] [:vector :string]]}
   [db changes]
-  (vec (sort (distinct (for [[[k] [a b]] changes
+  (vec (sort (distinct (for [[[k x] [a b]] changes
                              :let [p (case k
                                        :form (ns-file db (:ns (or b a)))
                                        :schema (:file (or b a))
+                                       :section (first (str/split x #"#" 2))
                                        nil)]
                              :when p]
                          p)))))
