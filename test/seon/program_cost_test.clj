@@ -302,7 +302,10 @@
      ;; 18: reach-rows' two contracted calls the config and pin rules added (pin-rules once, config-reads
      ;; per added form), 2026-10-27; 19: computed-config-reader? once per added form (audit cuts 6 and 11)
      :fixed {:ticks 350000 :bytes 4000000 :calls 50}
-     :sizes [30 100 300]}))
+     ;; from 100: at [30 100 300] the increment at 100 was 35k ticks on 373k at 30, so a few thousand ticks
+     ;; of what the shard ran before read n^1.52 against the n^1.53 allowed (owner, 2026-11-01: fix the sizes;
+     ;; task seon.cost/a-growth-fit-holds-whatever-ran-before)
+     :sizes [100 300 1000]}))
 
 (defn indexed-top
   "reach-indexed's and reach-update's arguments: the graph of a branch holding n forms (app.pc/f0..fn-1, each
