@@ -17,6 +17,18 @@ What Seon is for, where it stands, the one step being worked now, and the steps 
 
 **Measured as** turns to green and tasks merged. **Held to:** nothing crashes or hangs (every failure is data to the agent); everything shown is derived from the db at t; one mechanism per job; every change earns its place; a v1 capability is present or dropped on purpose ([parity](parity.md)).
 
+## Where it stands (2026-11-02, after midnight)
+
+**Merged tonight** (batches 75-77, each `bin/prove --merge` green, root updated):
+- **A request's search is on its first page,** as data the context holds (`:seon.search/search-fact`, drawn by ```seon.render.ui/searched```, changed with `swap!` on ctx), and agents have terminal functions (`my.agent/grep`, `ls`, `lines`, `wc`). Measured on 49 historical tasks: given the search's ten names, a model named a changed item in 30 against 2 without (p = 7.5e-9).
+- **The text index is SQLite FTS5** (```seon.sqlite```; porter for ranking, trigram for grep): whole stemmed terms, half the memory a search, an index build 14 MB against 496 MB; on 51 tasks no paired loss and a changed item first 22 against 19 ([search](vector.md#search)).
+- **Datahike** at seven upstream correctness fixes, each reproduced on Jolt first (a GC that swept the store on a failed walk, history that lost a retraction, as-of, `or`, `not-join`, a schema-cache race, `:hash`), and on upstream's history so later syncs merge ([forks](forks.md)).
+- **Leaks and hangs closed:** another tree's program keeps its own docstrings (the lab's parent trees had held today's); a reply's backtick run no longer costs an exponential read; empty parts send nothing.
+
+**What the evaluation says so far:** search on the first page is the strongest signal (L0 and L1 agree); blind graph expansion is not (two hops reach the whole program); a similar past session's items reach a little more of what solvers read but at ten times the tokens; the first eval is `my.task/status` either way, so whether agents find the tools intuitive is an L2 question.
+
+**Next:** L2 at the parent with its own binary, in a standalone repo under `sandbox-exec` (the request alone against the request plus the search's names), first on one candidate end to end; the meaning-ranked one-hop expansion arm; FTS5 behind Datahike's secondary-index protocol; a curated-sessions arm once L2 yields Seon-native sessions; the owner's calls on masking (L1.5) and on a fuller system message, each as a measured arm.
+
 ## Where it stands (2026-11-01, evening)
 
 **Our benchmarks were contaminated, so context is now decided by an evaluation built to resist it** (the owner: "We found a lot of fraud and all of our benchmarking is now contaminated"; plan agreed by the context and optimization sessions, `claude_scratch/context-lab/PLAN.md`). What was wrong: bench tasks reverted src but kept main's tests, requests named the functions, and agent-facing docs held the bench's own solution.
