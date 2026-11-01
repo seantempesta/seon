@@ -434,7 +434,10 @@
                        ;; joined entity whole, a cited task among them, and the order of what each builds on; the cites' joins are the
                        ;; pull's, where the draw used to query them), 548 before; 583 since the task part, the status's proofs and the
                        ;; namespaces part read the pulled task (seon.render.ui/task-model, seon.context/task-of, namespaces-of), where
-                       ;; they queried the db: 1.77 MB at 10 (2.78 MB with the run join this branch tried and reverted)
+                       ;; they queried the db: 1.77 MB at 10 (2.78 MB with the run join this branch tried and reverted); 591 since
+                       ;; render-ctx watches the task's and the agent's searches ((:searches (:task c)), (:searches c): the tracked
+                       ;; reads a swap! of a search redraws by; 583 with that placement taken out, the fixture holding no search).
+                       ;; Accepted by the optimization session on the owner's deferral, 2026-11-01 ("I trust your judgement")
                        :per-n {:calls 4 :bytes 35000}
-                       :fixed {:calls 543 :bytes 3200000}
+                       :fixed {:calls 551 :bytes 3200000}
                        :sizes [10 40 80]}))))))
