@@ -853,7 +853,8 @@
            :fixed {:bytes 6.0e6}}
         measure "(- (seon.profile/alloc-bytes) (nth (last (:marks @seon.agent/state)) 2))"
         opts {:sets [":seon.config.store/node-cache-bytes=8388608"]}
-        grow (fn [{:keys [task]} from n] {:op :eval :agent "root" :code (str "@(seon.root/transact-main! sys (seon.agent-test/history-tx " (pr-str task) " " from " " n "))")})
+        ;; history as it grows: commits of 10 runs each (each rewrites the leaves it touches, as a root's runs do)
+        grow (fn [{:keys [task]} from n] {:op :eval :agent "root" :code (str "(doseq [i (range " from " " (+ from n) " 10)] @(seon.root/transact-main! sys (seon.agent-test/history-tx " (pr-str task) " i 10)))")})
         ;; each agent measures, then grows main to the next size; the next agent forks after it
         steps (map vector (cons 0 sizes) (concat sizes [nil]))
         measured (vec (for [[have want] steps]

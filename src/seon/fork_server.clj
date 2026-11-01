@@ -77,7 +77,8 @@
 (defn evals-max-after
   "Main's highest eval number (seon.repl/evals-max) after a commit's ops (resolved [op e a v]), from
   n, its highest before: what each agent forked from here counts its evals on from, kept at the
-  cost of the commit, never by reading main's evals."
+  cost of the commit, never by reading main's evals; a commit the writer's notice does not match
+  reads them again (the :tx step). See docs/machine.md#an-agents-first-write."
   {:malli/schema [:=> [:cat nat-int? [:sequential :any]] nat-int?]}
   [n ops] (reduce (fn [n [_ _ a v]] (if (= :seon.eval/id a) (max n (or (repl/eval-number v) 0)) n)) n ops))
 
@@ -155,7 +156,10 @@
                  ;; then checks the texts' fingerprint)
                  _ (when (contains? (set (get-in db' [:meta :datahike/parents])) (d/commit-id (:db st)))
                      (doc/carry-index! (:db st) db' (into #{} (map #(nth % 2 nil)) (:tx-data m))))
-                 st (cond-> (assoc st :db db' :evals-max (evals-max-after (:evals-max st) (:tx-data m))) (not= (:max-tx db') (:t m)) (update :mismatch inc)
+                 st (cond-> (assoc st :db db' :evals-max (evals-max-after (:evals-max st) (:tx-data m)))
+                      ;; a commit not the one the writer said: main is read again, its eval count included, so
+                      ;; no agent forked after counts from a number a commit it never saw raised
+                      (not= (:max-tx db') (:t m)) (-> (update :mismatch inc) (assoc :evals-max (repl/evals-max db')))
                       ;; the program moved: the reach graph is brought to it at the next fork
                       (program/moves-program? (:tx-data m)) (assoc :graph-moved true :static-due true))
                  ;; main's program changed: load it here, so agents forked from now on inherit it compiled; while
