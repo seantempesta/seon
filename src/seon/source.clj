@@ -78,9 +78,14 @@
         hv (head-var form nsx)
         ns-form? (= #'clojure.core/ns hv)
         macro? (= #'clojure.core/defmacro hv)]
-    ;; the ns form's aliases are its own, whatever the namespace held: another tree's ns form may point an
-    ;; alias at another namespace (a rename), which Jolt refuses while the old alias stands
-    (when ns-form? (doseq [a (keys (ns-aliases nsx))] (ns-unalias nsx a)))
+    ;; an alias the ns form points at another namespace (another tree's form, across a rename) is cleared first,
+    ;; since Jolt refuses it while the old alias stands; every other alias is left as the live namespace has it
+    (when ns-form?
+      (let [wanted (into {} (for [spec (mapcat rest (filter #(and (seq? %) (= :require (first %))) (rest form)))
+                                  :when (vector? spec) :let [[target & opts] spec as (:as (apply hash-map (rest spec)))] :when as]
+                              [as target]))]
+        (doseq [[a target] (ns-aliases nsx) :when (and (contains? wanted a) (not= (wanted a) (ns-name target)))]
+          (ns-unalias nsx a))))
     (when (or ns-form?
               (and macro? (not (some-> (ns-resolve nsx (second form)) bound?))))
       (binding [*ns* nsx] (eval form)))
@@ -257,27 +262,30 @@
   "The attributes that name a program entity (seon.facts.edn)."
   [:form/id :var/name :ns/name :method/key :impl/key :schema/key :schema.file/path])
 
-(def ^:private mark-loaded! (delay (jolt.scheme/proc "ldr-mark-loaded!")))
+(def ^:private mark-loaded!
+  "Jolt's loader's mark (ldr-mark-loaded!, by namespace name): a require of the namespace answers it loaded."
+  (delay (jolt.scheme/proc "ldr-mark-loaded!")))
 
-(defn- on-roots?
-  "Whether namespace nsym has a source file on this process's source roots (what a require would load)."
-  {:malli/schema [:=> [:cat :symbol] :boolean]}
-  [nsym]
-  (let [base (-> (str nsym) (str/replace "-" "_") (str/replace "." "/"))]
-    (boolean (some #(clojure.java.io/resource (str base %)) [".jolt" ".clj" ".cljc"]))))
+(defn- in-checkout?
+  "Whether the file of namespace nsym, at relative path p (as its db or its tree records it), exists in the
+  checkout: a namespace whose file the checkout lacks (another tree's, e.g. one since renamed) no require
+  of this process can load from disk."
+  {:malli/schema [:=> [:cat :symbol [:maybe :string]] :boolean]}
+  [nsym p]
+  (boolean (and p (.exists (java.io.File. (str (config/checkout) "/" p))))))
 
 (defn- read-nss
   "Each namespace of files ({relative path text}) read and analyzed in load order: {nsym
   {:accounts :tail :file}} (accounts, with its file's relative path). A namespace the files define
-  that no source root holds (another tree's, e.g. one since renamed) is marked loaded once analyzed,
-  so a later file's require of it answers from the analysis, never a load from disk that cannot
-  find it; one on the roots is never marked (a real require must still load it). See
+  whose file the checkout lacks (another tree's, e.g. one since renamed: in-checkout?) is marked loaded
+  once analyzed, so a later file's require of it answers from the analysis, never a load from disk that
+  cannot find it; one whose file the checkout has is never marked (a real require must still load it). See
   docs/source.md#main-s-program-follows-the-tree."
   {:malli/schema [:=> [:cat [:map-of :string :string]] [:map-of :symbol :map]]}
   [files]
   (reduce (fn [m [nsym path text]]
             (let [a (assoc (accounts nsym text) :file path)]
-              (when-not (on-roots? nsym) (@mark-loaded! (str nsym)))
+              (when-not (in-checkout? nsym path) (@mark-loaded! (str nsym)))
               (assoc m nsym a)))
           {} (load-order files)))
 
@@ -445,17 +453,12 @@
   form is written only where it differs from db (program-tx). The same program as replace-tx
   of the whole tree, at the cost of what changed: a body edit reads one file and writes its
   changed forms, whatever the program's size or the file's dependents (task
-  seon.source/an-import-reads-only-changed-files)."
+  seon.source/an-import-reads-only-changed-files). A dependent whose file the change removes is never
+  read again."
   {:malli/schema [:=> [:cat :seon.host/db [:map-of :string [:maybe :string]]] :seon.db/tx-data]}
   [db changed]
   (let [ns-of-path (fn [p] (some #(when (= p (:v %)) (:ns/name (d/entity db (:e %)))) (d/datoms db :aevt :ns/file)))
-        ;; the namespaces db holds that no source root has (another tree's, e.g. one since renamed) are read
-        ;; again with the change, from db's text, so a changed file requiring one finds it analyzed here
-        ;; (read-nss marks it loaded), never a load from disk that cannot find it; none for this tree's own
-        off-roots (into {} (for [dt (d/datoms db :aevt :ns/name) :let [n (:v dt)] :when (not (on-roots? n))
-                                 :let [p (:ns/file (d/entity db (:e dt)))] :when (and p (not (contains? changed p)))]
-                             [p (file-text db n)]))
-        texts (merge off-roots (into {} (filter val) changed))
+        texts (into {} (filter val) changed)
         gone (into {} (for [[p t] changed :when (and (nil? t) (str/ends-with? p ".clj")) :let [n (ns-of-path p)] :when n] [n nil]))
         read (loop [round texts check (keys gone) read gone]
                (if (and (empty? round) (empty? check))
