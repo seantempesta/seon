@@ -1,0 +1,58 @@
+;; The wiki as data (seon.doc, task seon.doc/docs-are-data-in-the-store): a section entity
+;; per heading of docs/*.md, as one parse (seon.ref/parse) reads it. Its references are what
+;; its own text cites (sections by link, vars by name), so a section's backlinks are who cites
+;; it. Stored shapes; the Datahike attributes are derived from :seon.doc/fact.
+{;; the section's address, path#anchor as seon.ref/parse writes it (docs/flow.md#idioms)
+ :seon.doc/address [:and {:seon.db/identity true} :string]
+ :seon.doc/heading :string
+ ;; the heading's next block when it is a paragraph: what summary depth shows
+ :seon.doc/lead :string
+ ;; the section's own text: the lines after its heading, up to the next heading of any level
+ :seon.doc/text :string
+ ;; the enclosing section
+ :seon.doc/parent :seon.db/ref
+ ;; what its own text cites and resolves to: a section (a link) or a var (a name)
+ :seon.doc/references [:set :seon.db/ref]
+ ;; the names its own text cites as references (seon.ref/kept: a prose word only when it named
+ ;; something at load), kept as names: a var deleted later leaves its name here, and a name that
+ ;; no longer names something is a dead citation (seon.problems, class :dead-citation)
+ ;; indexed (AVET): the sections that cite a name are sought by it, when a var or task of that name appears or
+ ;; vanishes (seon.problems/caused-split, docs/cost.md#a-diff-per-attribute-costs-a-descent-each)
+ :seon.doc/names [:set {:seon.db/index true} :qualified-symbol]
+ ;; the addresses its own text links to (a link or a cited path#anchor) that reached no section
+ ;; at load: the load goes on without them, and a target that is still no stored section is a
+ ;; dead citation (seon.problems, class :dead-citation)
+ :seon.doc/dead-links [:set :string]
+ ;; the form id of each var the section cites, as it stood when the section's text was last written
+ ;; (seon.doc/load-tx keeps it while the text is unchanged): a var whose form id now differs leaves the
+ ;; section stale (seon.problems, class :stale-section). From git's baseline (seon.doc/baseline-reads)
+ ;; a var may instead be :absent (no form defined it at the section's commit) or :changed (its form's
+ ;; docstring or contract changed since), each stale
+ :seon.doc/read [:map-of :qualified-symbol [:or :string [:enum :absent :changed]]]
+ ;; why the baseline of :read could not be taken from git (seon.doc/baseline-reads): the section's :read is as of
+ ;; the load, shown as attention (seon.problems, :stale-section) until the section is edited
+ :seon.doc/baseline-unread :string
+ ;; the last review that read the section as it is though its code changed (my.doc/reviewed!): who, and
+ ;; the form ids it read at. The older reviews stay in the history
+ :seon.doc/reviewed [:map [:by :string] [:forms [:map-of :qualified-symbol :string]]]
+ :seon.doc/fact [:map {:seon.db/attributes true}
+                     [:seon.doc/address :seon.doc/address]
+                     [:seon.doc/heading :seon.doc/heading]
+                     [:seon.doc/lead {:optional true} :seon.doc/lead]
+                     [:seon.doc/text {:optional true} :seon.doc/text]
+                     [:seon.doc/parent {:optional true} :seon.doc/parent]
+                     [:seon.doc/references {:optional true} :seon.doc/references]
+                     [:seon.doc/names {:optional true} :seon.doc/names]
+                     [:seon.doc/dead-links {:optional true} :seon.doc/dead-links]
+                     [:seon.doc/read {:optional true} :seon.doc/read]
+                     [:seon.doc/baseline-unread {:optional true} :seon.doc/baseline-unread]
+                     [:seon.doc/reviewed {:optional true} :seon.doc/reviewed]]
+ ;; a section as one parse reads it, before it is stored: its fact's values, its parent's
+ ;; address, and the citations of its own text
+ :seon.doc/parsed [:map {:closed true}
+                       [:seon.doc/address :seon.doc/address]
+                       [:seon.doc/heading :seon.doc/heading]
+                       [:seon.doc/lead {:optional true} :seon.doc/lead]
+                       [:seon.doc/text {:optional true} :seon.doc/text]
+                       [:seon.ref/parent {:optional true} :seon.ref/address]
+                       [:seon.ref/citations [:vector :seon.ref/citation]]]}

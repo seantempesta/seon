@@ -78,7 +78,7 @@
  ;; a section as a citation's depth shows it: at summary its heading and its lead's first
  ;; sentence, at doc its lead (or opening) and the sections below, at code its own text too;
  ;; with no lead, :no-lead at summary and doc
- ;; what a cited var shows at its citation's depth (seon.docs/resolve-ref)
+ ;; what a cited var shows at its citation's depth (seon.doc/resolve-ref)
  :seon.ref/var-view [:map
                      [:symbol :qualified-symbol] [:arglists {:optional true} :any] [:summary {:optional true} :string]
                      [:doc {:optional true} :string] [:contract {:optional true} :any] [:source {:optional true} :string]
@@ -102,8 +102,8 @@
                  [:seon.ref/pin {:optional true} :string]
                  [:seon.ref/problem-kind {:optional true} :seon.ref/problem-kind]
                  ;; a stored section's edges, each at summary depth: what its text cites (sections and vars)
-                 ;; and the sections that cite it (seon.docs/view)
+                 ;; and the sections that cite it (seon.doc/view)
                  [:seon.ref/references {:optional true} [:vector :seon.ref/edge]]
                  [:seon.ref/cited-by {:optional true} [:vector :seon.ref/edge]]
-                 ;; a section of a page read by seon.docs/page: its depth in the page, 1 for the page's own
+                 ;; a section of a page read by seon.doc/page: its depth in the page, 1 for the page's own
                  [:seon.ref/level {:optional true} pos-int?]]}

@@ -7,7 +7,7 @@
   analyzed in a disposable agent (first-move), since analysis runs a reply's ns form."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.lib :as lib] [seon.context :as context] [seon.source :as source]
-            [seon.reader :as reader] [seon.docs :as docs] [seon.step :as step] [seon.ref :as ref] [seon.edn :as sedn] [seon.config :as config]
+            [seon.reader :as reader] [seon.doc :as docs] [seon.step :as step] [seon.ref :as ref] [seon.edn :as sedn] [seon.config :as config]
             [seon.task :as task] [seon.program :as program] [seon.db :as pdb] [datahike.api :as d]))
 
 (defn request

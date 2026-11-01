@@ -31,7 +31,7 @@
     clojure.repl as at any Clojure REPL (source, doc, dir, apropos, find-doc, pst), with *1 *2 *3 *e:
     source reads this branch's own definitions first, then a library's file"
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.lib :as lib] [seon.context :as context] [seon.ref :as ref] [seon.docs :as docs]
+  (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.lib :as lib] [seon.context :as context] [seon.ref :as ref] [seon.doc :as docs]
             [seon.config :as cfg] [seon.proofs :as proofs] [seon.fx :as fx] [seon.program :as program] [seon.task :as task] [seon.vector :as vector] [seon.contract :as contract] [seon.ctx]
             [seon.db :as pdb] [seon.problems :as problems] [seon.render.ui :as ui] [my.schema :as schema] [jolt.analyzer] [clojure.java.io :as io] [clojure.string :as str] [clojure.main] [datahike.api :as d]))
 
@@ -152,7 +152,7 @@
 
 (defn callers
   "The program vars whose recorded definition names x on this branch, sorted, x itself left out
-  (seon.docs/callers): a var's callers (x a qualified symbol, or the var: named), or the functions
+  (seon.doc/callers): a var's callers (x a qualified symbol, or the var: named), or the functions
   operating on a qualified keyword, an attribute, config key or schema entry (its :form/keywords).
   A symbol through an alias reads as the var it resolves to; one that names no var answers so
   (:my.agent/no-var), never []. A keyword that is a schema, an attribute or a key the program
@@ -342,7 +342,7 @@
   in this process kept (seon.repl), else what this branch records for it, else the form at its
   :file and :line (a library's, or any in a process with no branch). A namespace's name answers its ns form as this branch records
   it (its requires and aliases), then each definition, privates included, a line each in file
-  order (seon.docs/namespace-source), which clojure.repl's does not (pipeline 1's F4: a design
+  order (seon.doc/namespace-source), which clojure.repl's does not (pipeline 1's F4: a design
   that asked (source ns) saw the ns form alone, took it for all that was recorded, and spent five
   turns finding the namespace's private functions). sym is a symbol or the var (named)."
   {:malli/schema [:=> [:cat [:or :symbol :seon.host/var]] [:maybe :string]]}
@@ -419,7 +419,7 @@
     (ui/cite-model {} (:tree (seon.ctx/build db' (pdb/eid db' :seon.cite/id (str "help " n)) nil)))))
 
 (defn help
-  "The wiki through the one view (seon.docs/view), as this branch holds it. No argument: the help
+  "The wiki through the one view (seon.doc/view), as this branch holds it. No argument: the help
   page (seon.context/help-page) at summary, each section its address, heading and lead's first
   sentence, with the sections it cites and those citing it. With an address (``docs/vector.md#the-model``) or
   an anchor of the help page (\"done\"), that section whole; with a page's path (\"docs/vector.md\"), that page

@@ -7,7 +7,7 @@
             [seon.contract :as contract] [seon.db :as pdb] [seon.error :as err] [seon.agent :as agent]
             [seon.repl :as repl] [seon.proofs :as proofs] [seon.root :as root] [seon.agent-proc :as ap]
             [seon.reconcile :as rec] [seon.sock :as sock]
-            [seon.render :as render] [konserve.jolt.fasl] [clojure.set] [clojure.string :as str] [seon.source] [seon.fx :as fx] [seon.model :as model] [clojure.data.json] [seon.problems :as problems] [seon.task] [seon.template] [seon.cost :as cost] [seon.docs]))
+            [seon.render :as render] [konserve.jolt.fasl] [clojure.set] [clojure.string :as str] [seon.source] [seon.fx :as fx] [seon.model :as model] [clojure.data.json] [seon.problems :as problems] [seon.task] [seon.template] [seon.cost :as cost] [seon.doc]))
 
 (defn- world
   "The world these tests run on: my.test's, keeping history, since stale sections are read from d/history
@@ -446,7 +446,7 @@
 
 (deftest health-reads-each-part-once
   (let [db0 (seeded 3 2)
-        db (d/db-with db0 (seon.docs/load-tx db0 "demo" {"demo/p.md" "# P\n\nIt says what it is about.\n"}))
+        db (d/db-with db0 (seon.doc/load-tx db0 "demo" {"demo/p.md" "# P\n\nIt says what it is about.\n"}))
         [h m] (measured-health db)
         rows (get-in h [:classes :problem-unlinked :rows])]
     (is (seq rows) "the db has unlinked classes to judge")
@@ -677,10 +677,10 @@
         e (pdb/eid db :var/name 'app.calc/inc2)
         none (symbol (namespace v) "no-such-var")
         page (str "# Health\n\nThe check reads `" v "` and `" none "`; a prose word " (namespace v) "/nor-this is no citation.\n")
-        db (d/db-with db (seon.docs/load-tx db "demo" {"demo/h.md" page}))
+        db (d/db-with db (seon.doc/load-tx db "demo" {"demo/h.md" page}))
         dead #(get-in (problems/health %) [:classes :dead-citation])]
     (testing "the loader keeps the names the text cites as references: a backticked name, never a prose word naming nothing"
-      (is (= #{v none} (set (:seon.section/names (d/pull db [:seon.section/names] [:seon.section/address "demo/h.md#health"]))))))
+      (is (= #{v none} (set (:seon.doc/names (d/pull db [:seon.doc/names] [:seon.doc/address "demo/h.md#health"]))))))
     (testing "a backticked name that never named anything is dead from its load"
       (is (= [[none "demo/h.md#health"]] (mapv (juxt :name :section) (:rows (dead db))))))
     (let [gone (d/db-with db [[:db/retractEntity e]])]
@@ -702,8 +702,8 @@
   [n] (let [db0 (world)
             vs (vec (take n (map :v (d/datoms db0 :aevt :var/name))))
             page (apply str "# Cited\n\nThe page.\n" (for [i (range n)] (str "\n## S" i "\n\nIt reads `" (nth vs (mod i (count vs))) "`.\n")))
-            db (d/db-with db0 (seon.docs/load-tx db0 "demo" {"demo/c.md" page}))
-            cited (into #{} (map :v) (d/datoms db :aevt :seon.section/names))]
+            db (d/db-with db0 (seon.doc/load-tx db0 "demo" {"demo/c.md" page}))
+            cited (into #{} (map :v) (d/datoms db :aevt :seon.doc/names))]
         [(d/db-with db (vec (for [s cited :let [e (pdb/eid db :var/name s)] :when e] [:db/retractEntity e]))) {}]))
 
 (deftest dead-citations-follow-the-citations
@@ -724,7 +724,7 @@
         e (fn [db s] (pdb/eid db :var/name s))
         none (symbol (namespace v) "no-such-var")
         page (str "# P\n\nIt reads `" v "`, `" w "` and `" none "`.\n")
-        base (d/db-with db0 (seon.docs/load-tx db0 "demo" {"demo/p.md" page}))]
+        base (d/db-with db0 (seon.doc/load-tx db0 "demo" {"demo/p.md" page}))]
     (testing "an unchanged branch caused nothing, though base has a dead citation of its own"
       (is (= #{} (problems/caused base base))))
     (testing "the branch deleted v: the citation of v is its; the one base had is not"
@@ -749,12 +749,12 @@
       (is (= [] (unnamed (d/db-with db1 [[:db/add ns-e :ns/file "test/app/x_test.clj"]])))))
     (testing "the page names it: no problem, nothing written to close it"
       (let [page (str "# Failure points\n\n| failure | edge |\n|---|---|\n| x | `" v "` |\n")]
-        (is (= [] (unnamed (d/db-with db1 (seon.docs/load-tx db1 "docs" {"docs/failure-points.md" page})))))))))
+        (is (= [] (unnamed (d/db-with db1 (seon.doc/load-tx db1 "docs" {"docs/failure-points.md" page})))))))))
 
 (deftest a-pin-the-wiki-states-is-the-recorded-gitlink
   (let [db0 (world)
         page "# Forks\n\n## Jolt\n\n`reference-code/jolt` pinned at `4342b73c`, the tip of ``jolt/x``.\n\n## Chez\n\n`reference-code/chez` pinned at `80e4b9f`.\n"
-        db (d/db-with db0 (seon.docs/load-tx db0 "docs" {"docs/forks.md" page}))
+        db (d/db-with db0 (seon.doc/load-tx db0 "docs" {"docs/forks.md" page}))
         pinned (fn [pins] (mapv (juxt :path :stated :recorded)
                                 (get-in (problems/health (cond-> db pins (d/db-with [{:seon.root/id :root :seon.root/source {:root "/c" :files 1 :forms 1 :ms 1 :pins pins}}])))
                                         [:classes :stale-pin :rows])))]
@@ -764,29 +764,29 @@
     (is (= [["reference-code/jolt" "4342b73c" nil]] (pinned {"reference-code/chez" "80e4b9f0"})) "a pin with no gitlink")))
 
 (deftest an-error-closes-when-its-subject-changes
-  ;; an old store's :seon.docs/refused error (the type left the code) names its link's target in
+  ;; an old store's :seon.doc/refused error (the type left the code) names its link's target in
   ;; its example; a new error may name :seon.error/subject. Neither is ever retracted.
   (let [db0 (world)
         refused (fn [db] (d/db-with db [{:seon.error/signature "aaaaaaaaaaaaaaaa" :seon.error/class :platform :seon.error/count 1
                                          :seon.error/agents 0 :seon.error/first-ms 1 :seon.error/last-ms 1
-                                         :seon.error/type :seon.docs/refused :seon.error/message "demo/a.md#a links to demo/b.md#b, which is no section"
-                                         :seon.error/example {:seon.error/type :seon.docs/refused :seon.ref/address "demo/b.md#b"}}]))
+                                         :seon.error/type :seon.doc/refused :seon.error/message "demo/a.md#a links to demo/b.md#b, which is no section"
+                                         :seon.error/example {:seon.error/type :seon.doc/refused :seon.ref/address "demo/b.md#b"}}]))
         row #(first (get-in (problems/report %) [:classes :platform :rows]))
         db (refused db0)]
     (testing "the target section is missing: the error is open"
       (is (some? (row db)) "the error has a row") (is (not (false? (:open? (row db))))))
-    (let [after (d/db-with db (seon.docs/load-tx db "demo" {"demo/b.md" "# B\n\nThe target.\n"}))]
+    (let [after (d/db-with db (seon.doc/load-tx db "demo" {"demo/b.md" "# B\n\nThe target.\n"}))]
       (testing "the section exists now: closed, with nothing written to close it"
-        (is (some? (pdb/eid after :seon.section/address "demo/b.md#b")))
+        (is (some? (pdb/eid after :seon.doc/address "demo/b.md#b")))
         (is (false? (:open? (row after))))
         (is (= 1 (:count (row after))) "the record is kept")))
     (testing "the citing section's link is changed to an existing target: closed, nothing written (the target never appears)"
-      (let [dbc (d/db-with db0 (seon.docs/load-tx db0 "demo" {"demo/a.md" "# A\n\nIt links to [b](b.md#nowhere).\n" "demo/c.md" "# C\n\nThe other.\n"}))
+      (let [dbc (d/db-with db0 (seon.doc/load-tx db0 "demo" {"demo/a.md" "# A\n\nIt links to [b](b.md#nowhere).\n" "demo/c.md" "# C\n\nThe other.\n"}))
             err (d/db-with dbc [{:seon.error/signature "cccccccccccccccc" :seon.error/class :platform :seon.error/count 1
-                                 :seon.error/agents 0 :seon.error/first-ms 1 :seon.error/last-ms 1 :seon.error/type :seon.docs/refused
-                                 :seon.error/example {:seon.error/type :seon.docs/refused :seon.ref/address "demo/b.md#nowhere" :seon.section/address "demo/a.md#a"}}])
+                                 :seon.error/agents 0 :seon.error/first-ms 1 :seon.error/last-ms 1 :seon.error/type :seon.doc/refused
+                                 :seon.error/example {:seon.error/type :seon.doc/refused :seon.ref/address "demo/b.md#nowhere" :seon.doc/address "demo/a.md#a"}}])
             rowc #(first (filter (fn [r] (= "cccccccccccccccc" (:signature r))) (get-in (problems/report %) [:classes :platform :rows])))
-            fixed (d/db-with err (seon.docs/load-tx err "demo" {"demo/a.md" "# A\n\nIt links to [c](c.md).\n" "demo/c.md" "# C\n\nThe other.\n"}))]
+            fixed (d/db-with err (seon.doc/load-tx err "demo" {"demo/a.md" "# A\n\nIt links to [c](c.md).\n" "demo/c.md" "# C\n\nThe other.\n"}))]
         (is (some? (rowc err)) "the error has a row") (is (not (false? (:open? (rowc err)))) "the citing section still has the link")
         (is (false? (:open? (rowc fixed))))))
     (testing "a named subject: open until a fact of the var is written after the error"
@@ -819,7 +819,7 @@
   recording a different gitlink for every one (so each is a :stale-pin)."
   [n] (let [db0 (world)
             page (apply str "# Forks\n\nThe pins.\n" (for [i (range n)] (str "\n## F" i "\n\n`reference-code/lib" i "` pinned at `abc" i "`.\n")))
-            db (d/db-with db0 (seon.docs/load-tx db0 "docs" {"docs/forks.md" page}))]
+            db (d/db-with db0 (seon.doc/load-tx db0 "docs" {"docs/forks.md" page}))]
         [(d/db-with db [{:seon.root/id :root :seon.root/source {:pins (into {} (for [i (range n)] [(str "reference-code/lib" i) (str "def" i)]))}}]) {}]))
 
 (deftest unnamed-sites-follow-the-catch-forms
@@ -869,18 +869,18 @@
         e (fn [db s] (pdb/eid db :var/name s))
         none (symbol (namespace v) "no-such-var")
         page (str "# P\n\nIt reads `" v "`, `" w "` and `" none "`.\n\n## Q\n\nAlso `" v "`.\n")
-        base (d/db-with db0 (seon.docs/load-tx db0 "demo" {"demo/p.md" page}))
+        base (d/db-with db0 (seon.doc/load-tx db0 "demo" {"demo/p.md" page}))
         base (catch-forms base 3)
         failure-points "# Failure points\n\n| x | `app.cost/v1` |\n"
         scenarios
         {"unchanged" base
          "a var both sections cite is deleted" (d/db-with base [[:db/retractEntity (e base v)]])
          "the var is back" (d/db-with (d/db-with base [[:db/retractEntity (e base v)]]) [{:var/name v}])
-         "a section is added citing a dead name" (d/db-with base (seon.docs/load-tx base "demo" {"demo/p.md" page "demo/r.md" (str "# R\n\nIt reads `" none "`.\n")}))
-         "a section is rewritten to cite a var that exists" (d/db-with base (seon.docs/load-tx base "demo" {"demo/p.md" (str "# P\n\nIt reads `" w "`.\n")}))
+         "a section is added citing a dead name" (d/db-with base (seon.doc/load-tx base "demo" {"demo/p.md" page "demo/r.md" (str "# R\n\nIt reads `" none "`.\n")}))
+         "a section is rewritten to cite a var that exists" (d/db-with base (seon.doc/load-tx base "demo" {"demo/p.md" (str "# P\n\nIt reads `" w "`.\n")}))
          "a catch site is added" (catch-forms base 4)
-         "the failure-points page names a site" (d/db-with base (seon.docs/load-tx base "docs" {"docs/failure-points.md" failure-points}))
-         "the page names it, then a var it cites is deleted" (let [b2 (d/db-with base (seon.docs/load-tx base "docs" {"docs/failure-points.md" failure-points}))]
+         "the failure-points page names a site" (d/db-with base (seon.doc/load-tx base "docs" {"docs/failure-points.md" failure-points}))
+         "the page names it, then a var it cites is deleted" (let [b2 (d/db-with base (seon.doc/load-tx base "docs" {"docs/failure-points.md" failure-points}))]
                                                               (d/db-with b2 [[:db/retractEntity (e b2 'app.cost/v1)]]))}]
     (doseq [[label head] scenarios]
       (testing label
@@ -901,9 +901,9 @@
   [n] (let [db0 (world)
             vs (vec (take 10 (map :v (d/datoms db0 :aevt :var/name))))
             page (apply str "# Cited\n\nThe page.\n" (for [i (range n)] (str "\n## S" i "\n\nIt reads `" (nth vs (mod i (count vs))) "`.\n")))
-            base (catch-forms (d/db-with db0 (seon.docs/load-tx db0 "demo" {"demo/c.md" page})) n)
+            base (catch-forms (d/db-with db0 (seon.doc/load-tx db0 "demo" {"demo/c.md" page})) n)
             changed (str/replace page "## S0\n\nIt reads `" (str "## S0\n\nIt reads `app.nowhere/dead` and `"))
-            head (catch-forms (d/db-with base (seon.docs/load-tx base "demo" {"demo/c.md" changed})) (inc n))]
+            head (catch-forms (d/db-with base (seon.doc/load-tx base "demo" {"demo/c.md" changed})) (inc n))]
         [base head (seon.merge/delta-changes base head #{}) (problems/caused-datoms base head)]))
 
 (deftest caused-follows-what-changed
@@ -956,7 +956,7 @@
   ;; naming it and the word, found for the places a branch changed and failing its health step; a kept file is not read
   (let [base (world)
         page (fn [text] {"demo/p.md" (str "# P\n\nThe lead.\n\n## Part\n\n" text "\n")})
-        with (fn [db text] (d/db-with db (seon.docs/load-tx db "demo" (page text))))
+        with (fn [db text] (d/db-with db (seon.doc/load-tx db "demo" (page text))))
         row (fn [db] (set (map (juxt :id :word) (get-in (problems/health db) [:classes :old-word :rows]))))]
     (testing "a section that says lane"
       (let [head (with base "A lane of work.")]
@@ -980,7 +980,7 @@
   (let [db0 (world)
         [v w] ['app.calc/inc2 'app.calc/add]
         page (str "# P\n\nIt reads `" v "` and `" w "`.\n")
-        db1 (d/db-with db0 (seon.docs/load-tx db0 "demo" {"demo/p.md" page}))
+        db1 (d/db-with db0 (seon.doc/load-tx db0 "demo" {"demo/p.md" page}))
         same? (fn [base head]
                 (let [moved (problems/health-moved (problems/health base) base head (diff base head)) whole (problems/health head)]
                   (and (= (set (keys (:classes whole))) (set (keys (:classes moved))))
@@ -991,8 +991,8 @@
                             :seon.run/start-ms 1 :seon.run/end-ms n :seon.run/branch :b :seon.run/max-turns 2 :seon.run/status status})]
     (is (same? db1 db1) "nothing moved")
     (testing "an old word added to a section opens a row, and editing it closes it"
-      (let [bad (d/db-with db1 (seon.docs/load-tx db1 "demo" {"demo/p.md" (str page "\nA lane of work.\n")}))
-            fixed (d/db-with bad (seon.docs/load-tx bad "demo" {"demo/p.md" (str page "\nA worktree session.\n")}))]
+      (let [bad (d/db-with db1 (seon.doc/load-tx db1 "demo" {"demo/p.md" (str page "\nA lane of work.\n")}))
+            fixed (d/db-with bad (seon.doc/load-tx bad "demo" {"demo/p.md" (str page "\nA worktree session.\n")}))]
         (is (same? db1 bad))
         (is (pos? (get-in (problems/health-moved (problems/health db1) db1 bad (diff db1 bad)) [:classes :old-word :n])))
         (is (same? bad fixed))))
@@ -1008,9 +1008,9 @@
         (is (same? db1 db2))
         (is (= 1 (get-in (problems/health-moved (problems/health db1) db1 db2 (diff db1 db2)) [:classes :stale-section :n])))
         (testing "and editing the section closes it"
-          (is (same? db2 (d/db-with db2 (seon.docs/load-tx db2 "demo" {"demo/p.md" (str page "\nMore.\n")})))))))
+          (is (same? db2 (d/db-with db2 (seon.doc/load-tx db2 "demo" {"demo/p.md" (str page "\nMore.\n")})))))))
     (testing "a cited name added to a section opens a dead citation, a deleted var opens another"
-      (let [dead (d/db-with db1 (seon.docs/load-tx db1 "demo" {"demo/p.md" (str page "\nAnd `" (namespace v) "/no-such-var`.\n")}))]
+      (let [dead (d/db-with db1 (seon.doc/load-tx db1 "demo" {"demo/p.md" (str page "\nAnd `" (namespace v) "/no-such-var`.\n")}))]
         (is (same? db1 dead))
         (is (pos? (get-in (problems/health-moved (problems/health db1) db1 dead (diff db1 dead)) [:classes :dead-citation :n])))
         (is (same? dead db1))
@@ -1021,8 +1021,8 @@
             (is (< (get-in (problems/health-moved (problems/health dead) dead back (diff dead back)) [:classes :dead-citation :n])
                    (get-in (problems/health dead) [:classes :dead-citation :n])))))))
     (testing "a section added that an unchanged section links to closes its dead link"
-      (let [linking (d/db-with db1 (seon.docs/load-tx db1 "demo" {"demo/p.md" (str page "\nSee [q](q.md).\n")}))
-            both (d/db-with linking (seon.docs/load-tx linking "demo" {"demo/p.md" (str page "\nSee [q](q.md).\n") "demo/q.md" "# Q\n\nLead.\n"}))]
+      (let [linking (d/db-with db1 (seon.doc/load-tx db1 "demo" {"demo/p.md" (str page "\nSee [q](q.md).\n")}))
+            both (d/db-with linking (seon.doc/load-tx linking "demo" {"demo/p.md" (str page "\nSee [q](q.md).\n") "demo/q.md" "# Q\n\nLead.\n"}))]
         (is (same? db1 linking))
         (is (same? linking both))))
     (testing "an answer added to an untouched run's row is carried current"
@@ -1037,13 +1037,13 @@
   (let [db0 (world)
         [v w] ['app.calc/inc2 'app.calc/add]
         page (str "# P\n\nIt reads `" v "`.\n")
-        db1 (d/db-with db0 (seon.docs/load-tx db0 "demo" {"demo/p.md" page}))
+        db1 (d/db-with db0 (seon.doc/load-tx db0 "demo" {"demo/p.md" page}))
         stale #(get-in (problems/health %) [:classes :stale-section])
-        read #(:seon.section/read (d/pull % [:seon.section/read] [:seon.section/address "demo/p.md#p"]))]
+        read #(:seon.doc/read (d/pull % [:seon.doc/read] [:seon.doc/address "demo/p.md#p"]))]
     (testing "the loader records the form id of each var the text cites"
       (is (= {v (form-id-of db1 v)} (read db1))))
     (testing "an unchanged wiki writes nothing, the record kept"
-      (is (= [] (seon.docs/load-tx db1 "demo" {"demo/p.md" page}))))
+      (is (= [] (seon.doc/load-tx db1 "demo" {"demo/p.md" page}))))
     (is (zero? (:n (stale db1))))
     (testing "a body changed, its contract and docstring not: not stale (owner, 2026-10-25, DECISIONS Dogfood rulings)"
       (is (zero? (:n (stale (change-var db1 v))))))
@@ -1058,15 +1058,15 @@
           (is (= (:var/doc (d/entity db1 (pdb/eid db1 :var/name v))) (get-in r [:was :var/doc])))
           (is (= (:var/doc (d/entity db2 (pdb/eid db2 :var/name v))) (get-in r [:now :var/doc])))))
       (testing "reloading the same text does not forgive it: the record is kept while the text is unchanged"
-        (is (= 1 (:n (stale (d/db-with db2 (seon.docs/load-tx db2 "demo" {"demo/p.md" page})))))))
+        (is (= 1 (:n (stale (d/db-with db2 (seon.doc/load-tx db2 "demo" {"demo/p.md" page})))))))
       (testing "editing the section re-reads the code: closed"
-        (is (zero? (:n (stale (d/db-with db2 (seon.docs/load-tx db2 "demo" {"demo/p.md" (str page "\nMore words.\n")})))))))
+        (is (zero? (:n (stale (d/db-with db2 (seon.doc/load-tx db2 "demo" {"demo/p.md" (str page "\nMore words.\n")})))))))
       (testing "a review closes it with the text untouched, and the review is kept"
-        (let [db3 (d/db-with db2 (seon.docs/reviewed-tx db2 "demo/p.md#p" "sean"))]
+        (let [db3 (d/db-with db2 (seon.doc/reviewed-tx db2 "demo/p.md#p" "sean"))]
           (is (zero? (:n (stale db3))))
-          (is (= "sean" (:by (:seon.section/reviewed (d/pull db3 [:seon.section/reviewed] [:seon.section/address "demo/p.md#p"])))))
-          (is (= (:seon.section/text (d/pull db2 [:seon.section/text] [:seon.section/address "demo/p.md#p"]))
-                 (:seon.section/text (d/pull db3 [:seon.section/text] [:seon.section/address "demo/p.md#p"])))))))
+          (is (= "sean" (:by (:seon.doc/reviewed (d/pull db3 [:seon.doc/reviewed] [:seon.doc/address "demo/p.md#p"])))))
+          (is (= (:seon.doc/text (d/pull db2 [:seon.doc/text] [:seon.doc/address "demo/p.md#p"]))
+                 (:seon.doc/text (d/pull db3 [:seon.doc/text] [:seon.doc/address "demo/p.md#p"])))))))
     (testing "it is attention, never a reason to refuse done: a branch that changes the code sees it, and the done rule does not"
       (let [head (change-meaning db1 v) {:keys [caused attention]} (problems/caused-split db1 head)]
         (is (= [] caused))
@@ -1078,29 +1078,29 @@
 (deftest a-page-nothing-links-to-is-an-orphan-until-something-does
   (let [db0 (world)
         pages {"docs/README.md" "# Map\n\nThe map.\n\n- [a](a.md)\n" "docs/a.md" "# A\n\nThe page A.\n" "docs/b.md" "# B\n\nThe page B.\n"}
-        db (d/db-with db0 (seon.docs/load-tx db0 "docs" pages))
+        db (d/db-with db0 (seon.doc/load-tx db0 "docs" pages))
         ;; the world's own page docs/calc.md is an orphan too (this load names only the test's pages); the test judges its own
         orphans #(into [] (comp (map :page) (remove #{"docs/calc.md"})) (get-in (problems/health %) [:classes :orphan-page :rows]))]
     (is (= ["docs/b.md"] (orphans db)) "the map is the root; a is linked by it; b by nothing")
-    (let [linked (d/db-with db (seon.docs/load-tx db "docs" (assoc pages "docs/a.md" "# A\n\nSee [b](b.md).\n")))]
+    (let [linked (d/db-with db (seon.doc/load-tx db "docs" (assoc pages "docs/a.md" "# A\n\nSee [b](b.md).\n")))]
       (is (= [] (orphans linked)) "another page links it: closed, nothing written to close it"))
-    (is (= [] (orphans (d/db-with db0 (seon.docs/load-tx db0 "docs" (dissoc pages "docs/README.md")))))
+    (is (= [] (orphans (d/db-with db0 (seon.doc/load-tx db0 "docs" (dissoc pages "docs/README.md")))))
         "no map in the db: unknown, not every page an orphan")))
 
 (deftest a-section-with-no-lead-is-a-problem
   (let [db0 (world)
         page "# A\n\nThe page A.\n\n## Listed\n\n- one\n- two\n\n## Said\n\nA sentence that says what it is.\n"
-        db (d/db-with db0 (seon.docs/load-tx db0 "docs" {"docs/a.md" page}))
+        db (d/db-with db0 (seon.doc/load-tx db0 "docs" {"docs/a.md" page}))
         rows #(mapv :section (get-in (problems/health %) [:classes :leadless-section :rows]))]
     (is (= ["docs/a.md#listed"] (rows db)) "a section whose first block is a list has no lead")
-    (let [fixed (d/db-with db (seon.docs/load-tx db "docs" {"docs/a.md" (str/replace page "- one" "It holds two items.\n\n- one")}))]
+    (let [fixed (d/db-with db (seon.doc/load-tx db "docs" {"docs/a.md" (str/replace page "- one" "It holds two items.\n\n- one")}))]
       (is (= [] (rows fixed)) "a paragraph before the list closes it, with nothing else written"))
     (is (contains? (:seon.problems/derived (contract/properties :seon.problems/class)) :leadless-section))))
 
 (defn leadless-input
   "The cost proof's input at n: n sections, none with a lead."
   [n] (let [db0 (world)]
-        [(d/db-with db0 (seon.docs/load-tx db0 "docs" {"docs/p.md" (apply str "# P\n\nThe page.\n" (for [i (range n)] (str "\n## S" i "\n\n- item\n")))})) {}]))
+        [(d/db-with db0 (seon.doc/load-tx db0 "docs" {"docs/p.md" (apply str "# P\n\nThe page.\n" (for [i (range n)] (str "\n## S" i "\n\n- item\n")))})) {}]))
 
 (deftest leadless-sections-follow-the-sections
   (cost/proof {:of 'seon.problems/leadless-sections :input 'seon.problems-test/leadless-input
@@ -1113,31 +1113,31 @@
 
 (deftest an-issue-with-no-page-is-a-problem
   (let [;; the world holds docs/calc.md; the test's first case is a db with no wiki, so its sections go
-        db0 (let [db (world)] (d/db-with db (for [{:keys [e]} (d/datoms db :aevt :seon.section/address)] [:db/retractEntity e])))
+        db0 (let [db (world)] (d/db-with db (for [{:keys [e]} (d/datoms db :aevt :seon.doc/address)] [:db/retractEntity e])))
         err {:seon.error/signature "eeeeeeeeeeeeeeee" :seon.error/class :platform :seon.error/count 1 :seon.error/agents 0
              :seon.error/first-ms 1 :seon.error/last-ms 1 :seon.error/type :seon.watch/died}
         unlinked #(filterv #{:platform} (mapv :class (get-in (problems/health %) [:classes :problem-unlinked :rows])))
         with-err (d/db-with db0 [err])]
     (is (= [] (unlinked with-err)) "no wiki loaded: unknown")
-    (let [wiki (d/db-with with-err (seon.docs/load-tx with-err "docs" {"docs/README.md" "# Map\n\nThe map.\n"}))]
+    (let [wiki (d/db-with with-err (seon.doc/load-tx with-err "docs" {"docs/README.md" "# Map\n\nThe map.\n"}))]
       (is (= [:platform] (unlinked wiki)) "a wiki without the class's section: the issue points nowhere")
-      (let [fixed (d/db-with wiki (seon.docs/load-tx wiki "docs" {"docs/README.md" "# Map\n\nThe map.\n" "docs/errors.md" "# Errors\n\n## Problems\n\nHow they are read.\n"}))]
+      (let [fixed (d/db-with wiki (seon.doc/load-tx wiki "docs" {"docs/README.md" "# Map\n\nThe map.\n" "docs/errors.md" "# Errors\n\n## Problems\n\nHow they are read.\n"}))]
         (is (= [] (unlinked fixed)) "the section exists: closed, nothing written")))))
 
 (deftest every-problem-class-points-at-a-section-of-the-real-wiki
   (let [docs (:seon.problems/docs (contract/properties :seon.problems/class))
         db0 (world)
-        db (d/db-with db0 (seon.docs/load-dir-tx db0 (seon.config/checkout) "docs"))]
+        db (d/db-with db0 (seon.doc/load-dir-tx db0 (seon.config/checkout) "docs"))]
     (is (every? docs (:seon.problems/derived (contract/properties :seon.problems/class))) "each derived class declares its section")
     (doseq [[c a] docs]
-      (is (some? (pdb/eid db :seon.section/address a)) (str c " points at " a ", which is no section of the wiki")))))
+      (is (some? (pdb/eid db :seon.doc/address a)) (str c " points at " a ", which is no section of the wiki")))))
 
 (defn stale-input
   "The cost proof's input at n: n sections each citing a var, every var's docstring then changed (each section stale)."
   [n] (let [db0 (world)
             vs (vec (take n (map :v (d/datoms db0 :aevt :var/name))))
             page (apply str "# Cited\n\nThe page.\n" (for [i (range n)] (str "\n## S" i "\n\nIt reads `" (nth vs (mod i (count vs))) "`.\n")))
-            db (d/db-with db0 (seon.docs/load-tx db0 "demo" {"demo/c.md" page}))]
+            db (d/db-with db0 (seon.doc/load-tx db0 "demo" {"demo/c.md" page}))]
         [(reduce change-meaning db (distinct vs)) {}]))
 
 (deftest stale-sections-follow-the-recorded-names
@@ -1155,7 +1155,7 @@
 (defn orphan-input
   "The cost proof's input at n: the map and n pages, none linked."
   [n] (let [db0 (world)]
-        [(d/db-with db0 (seon.docs/load-tx db0 "docs" (into {"docs/README.md" "# Map\n\nThe map.\n"} (for [i (range n)] [(str "docs/p" i ".md") (str "# P" i "\n\nThe page.\n")])))) {}]))
+        [(d/db-with db0 (seon.doc/load-tx db0 "docs" (into {"docs/README.md" "# Map\n\nThe map.\n"} (for [i (range n)] [(str "docs/p" i ".md") (str "# P" i "\n\nThe page.\n")])))) {}]))
 
 (deftest orphan-pages-follow-the-sections
   (cost/proof {:of 'seon.problems/orphan-pages :input 'seon.problems-test/orphan-input
@@ -1169,7 +1169,7 @@
 (defn unlinked-input
   "The cost proof's input at n: a db with a wiki, and every class holding n open rows."
   [n] (let [db0 (world)
-            db (d/db-with db0 (seon.docs/load-tx db0 "docs" {"docs/README.md" "# Map\n\nThe map.\n"}))
+            db (d/db-with db0 (seon.doc/load-tx db0 "docs" {"docs/README.md" "# Map\n\nThe map.\n"}))
             cs (:seon.problems/docs (contract/properties :seon.problems/class))]
         [db {} (into {} (for [c (keys cs)] [c {:n n :rows (vec (repeat n {:open? true}))}]))]))
 
@@ -1190,7 +1190,7 @@
   ;; (konserve's fasl), which ended every scripted turn's agent. caused-split answers vectors.
   (let [db0 (world)
         [v w] ['app.calc/inc2 'app.calc/add]
-        base (d/db-with db0 (seon.docs/load-tx db0 "demo" {"demo/p.md" (str "# P\n\nIt reads `" v "`.\n")}))
+        base (d/db-with db0 (seon.doc/load-tx db0 "demo" {"demo/p.md" (str "# P\n\nIt reads `" v "`.\n")}))
         head (change-meaning base v)
         {:keys [caused attention]} (problems/caused-split base head)]
     (is (seq attention) "the branch made a section stale")

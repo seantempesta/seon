@@ -1,5 +1,5 @@
-(ns seon.docs
-  "The wiki as data in the store (task seon.docs/docs-are-data-in-the-store,
+(ns seon.doc
+  "The wiki as data in the store (task seon.doc/docs-are-data-in-the-store,
   docs/references.md#the-wiki-in-the-store): a section entity per heading of docs/*.md, read
   by the one parse (seon.ref/parse). A section's references are what its own text cites,
   resolved on the db (a link to a section, a name to a var), so its backlinks are who cites
@@ -17,7 +17,7 @@
   "The sections of the page at path, read once (seon.ref/parse): each its address, heading,
   lead, own text, its parent's address and the citations its own text makes, each once at its
   strongest depth (seon.ref/cited)."
-  {:malli/schema [:=> [:cat :string :string] [:vector :seon.section/parsed]]}
+  {:malli/schema [:=> [:cat :string :string] [:vector :seon.doc/parsed]]}
   [path text]
   (let [{:seon.ref/keys [sections citations]} (ref/parse path text)
         starts (mapv :seon.ref/line sections)
@@ -28,10 +28,10 @@
                           (when (pos? lo) (dec lo)))))
         by-section (group-by #(owner (:seon.ref/line %)) citations)]
     (vec (for [[i {:seon.ref/keys [address heading lead parent text]}] (map-indexed vector sections)]
-           (cond-> {:seon.section/address address :seon.section/heading heading
+           (cond-> {:seon.doc/address address :seon.doc/heading heading
                     :seon.ref/citations (ref/cited (vec (get by-section i [])))}
-             lead (assoc :seon.section/lead lead)
-             text (assoc :seon.section/text text)
+             lead (assoc :seon.doc/lead lead)
+             text (assoc :seon.doc/text text)
              parent (assoc :seon.ref/parent parent))))))
 
 ;; ---- resolving a section's citations ----------------------------------------------------
@@ -66,25 +66,25 @@
 (defn- wanted
   "Section s as the attributes it should state: {attribute value}, a section named by its
   stored entity id or, when this load creates it, its tempid (its address)."
-  {:malli/schema [:=> [:cat [:map-of :string :int] :seon.section/parsed [:vector :any] [:set :qualified-symbol]] :map]}
+  {:malli/schema [:=> [:cat [:map-of :string :int] :seon.doc/parsed [:vector :any] [:set :qualified-symbol]] :map]}
   [stored s targets names]
   (let [ref (fn [a] (get stored a a))]
-    (cond-> (select-keys s [:seon.section/heading :seon.section/lead :seon.section/text])
-      (seq names) (assoc :seon.section/names names)
-      (:seon.ref/parent s) (assoc :seon.section/parent (ref (:seon.ref/parent s)))
+    (cond-> (select-keys s [:seon.doc/heading :seon.doc/lead :seon.doc/text])
+      (seq names) (assoc :seon.doc/names names)
+      (:seon.ref/parent s) (assoc :seon.doc/parent (ref (:seon.ref/parent s)))
       (seq (remove (comp #{:missing} first) targets))
-      (assoc :seon.section/references (into #{} (comp (remove (comp #{:missing} first)) (map (fn [[k x]] (if (= :var k) x (ref x))))) targets))
+      (assoc :seon.doc/references (into #{} (comp (remove (comp #{:missing} first)) (map (fn [[k x]] (if (= :var k) x (ref x))))) targets))
       (seq (filter (comp #{:missing} first) targets))
-      (assoc :seon.section/dead-links (into #{} (comp (filter (comp #{:missing} first)) (map second)) targets)))))
+      (assoc :seon.doc/dead-links (into #{} (comp (filter (comp #{:missing} first)) (map second)) targets)))))
 
 (def ^:private section-attrs
   "A stored section's stated attributes (seon.task/entity-tx makes them exactly what its text says).
-  :seon.section/read is stated too, but by the load: it keeps the stored value while the text is unchanged."
-  [:seon.section/heading :seon.section/lead :seon.section/text :seon.section/parent :seon.section/references :seon.section/names :seon.section/dead-links :seon.section/read :seon.section/baseline-unread])
+  :seon.doc/read is stated too, but by the load: it keeps the stored value while the text is unchanged."
+  [:seon.doc/heading :seon.doc/lead :seon.doc/text :seon.doc/parent :seon.doc/references :seon.doc/names :seon.doc/dead-links :seon.doc/read :seon.doc/baseline-unread])
 
 (defn read-map
   "The form id of each of names that is a var of db with a form, {name form-id}: the code as it
-  stands, which a section citing the names describes (:seon.section/read). The form id is the form's
+  stands, which a section citing the names describes (:seon.doc/read). The form id is the form's
   own digest, so it moves exactly when the form's text does."
   {:malli/schema [:=> [:cat :seon.host/db [:set :qualified-symbol]] [:map-of :qualified-symbol :string]]}
   [db names]
@@ -102,19 +102,19 @@
 
 (defn reviewed-tx
   "The transaction recording that who read section address as it is though its code changed: its
-  :seon.section/read made the current form ids, the text untouched, and the review (who, and the form
+  :seon.doc/read made the current form ids, the text untouched, and the review (who, and the form
   ids it read at) kept as a fact. nil when no such section."
   {:malli/schema [:=> [:cat :seon.host/db :string :string] [:maybe [:vector :map]]]}
   [db address who]
-  (when-let [e (pdb/eid db :seon.section/address address)]
-    (let [now (read-map db (set (:seon.section/names (d/pull db [:seon.section/names] e))))]
-      [{:db/id e :seon.section/read now :seon.section/reviewed {:by who :forms now}}])))
+  (when-let [e (pdb/eid db :seon.doc/address address)]
+    (let [now (read-map db (set (:seon.doc/names (d/pull db [:seon.doc/names] e))))]
+      [{:db/id e :seon.doc/read now :seon.doc/reviewed {:by who :forms now}}])))
 
 ;; ---- the load ---------------------------------------------------------------------------
 
 (defn- section-names
   "The qualified names section s (parsed) cites that name something on db (seon.ref/kept)."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.section/parsed] [:set :qualified-symbol]]}
+  {:malli/schema [:=> [:cat :seon.host/db :seon.doc/parsed] [:set :qualified-symbol]]}
   [db s]
   ;; only a name can be one of these: kept would resolve each path citation too (a page's anchors, read from the file)
   (into #{} (comp (map :seon.ref/name) (filter qualified-symbol?))
@@ -126,7 +126,7 @@
   other section of those pages; a page not given is left as it is (a page gone from the checkout
   is load-dir-tx's to retract). A section that already states it writes nothing, so an unchanged
   page answers []. A link (or cited path#anchor) that reaches no section is kept on its section
-  as :seon.section/dead-links, and the rest of the wiki loads as it is."
+  as :seon.doc/dead-links, and the rest of the wiki loads as it is."
   {:malli/schema [:function [:=> [:cat :seon.host/db [:or :string [:vector :string]] [:map-of :string :string]] [:vector :any]]
                   [:=> [:cat :seon.host/db [:or :string [:vector :string]] [:map-of :string :string] :map] [:vector :any]]]}
   ([db dir pages] (load-tx db dir pages {}))
@@ -134,33 +134,33 @@
   (let [baseline (fn [a] (get baseline a))
         by-page (into [] (map (fn [[p t]] [p (page-sections p t)])) (sort pages))
         parsed (into [] (mapcat second) by-page)
-        loaded (into {} (map (juxt :seon.section/address identity)) parsed)
-        firsts (into {} (for [[p ss] by-page :when (seq ss)] [p (:seon.section/address (first ss))]))
-        stored (into {} (map (juxt :v :e)) (d/datoms db :avet :seon.section/address))
+        loaded (into {} (map (juxt :seon.doc/address identity)) parsed)
+        firsts (into {} (for [[p ss] by-page :when (seq ss)] [p (:seon.doc/address (first ss))]))
+        stored (into {} (map (juxt :v :e)) (d/datoms db :avet :seon.doc/address))
         targets (into {} (for [s parsed]
-                           [(:seon.section/address s)
+                           [(:seon.doc/address s)
                             (into [] (keep #(citation-target db dir stored loaded firsts %)) (:seon.ref/citations s))]))]
     (vec (concat
            (mapcat (fn [s]
-                     (let [a (:seon.section/address s)
+                     (let [a (:seon.doc/address s)
                            names (section-names db s)
                            e (stored a)
-                           held (when e (d/pull db [:seon.section/text :seon.section/read :seon.section/baseline-unread] e))
-                           keep? (and held (= (:seon.section/text s) (:seon.section/text held)) (:seon.section/read held))
-                           base (when-not keep? (when (nil? (:seon.section/read held)) (baseline a)))
+                           held (when e (d/pull db [:seon.doc/text :seon.doc/read :seon.doc/baseline-unread] e))
+                           keep? (and held (= (:seon.doc/text s) (:seon.doc/text held)) (:seon.doc/read held))
+                           base (when-not keep? (when (nil? (:seon.doc/read held)) (baseline a)))
                            ;; what the section read is kept while its text is unchanged (the code as it stood when it was
                            ;; written); a section with none yet takes the baseline git gives (the code as of the commit that last
                            ;; changed it), else today's
-                           read (cond keep? (:seon.section/read held)
+                           read (cond keep? (:seon.doc/read held)
                                       (:read base) (:read base)
                                       :else (read-map db names))
-                           unread (cond keep? (:seon.section/baseline-unread held) :else (:unread base))
+                           unread (cond keep? (:seon.doc/baseline-unread held) :else (:unread base))
                            want (cond-> (wanted stored s (targets a) names)
-                                  (seq read) (assoc :seon.section/read read)
-                                  unread (assoc :seon.section/baseline-unread unread))]
+                                  (seq read) (assoc :seon.doc/read read)
+                                  unread (assoc :seon.doc/baseline-unread unread))]
                        (if e
                          (task/entity-tx db e section-attrs want)
-                         [(assoc want :db/id a :seon.section/address a)])))
+                         [(assoc want :db/id a :seon.doc/address a)])))
                    parsed)
            (for [[a e] stored :when (and (contains? pages (page-of a)) (not (loaded a)))]
              [:db/retractEntity e]))))))
@@ -170,7 +170,7 @@
 (defn- children
   "The sections whose parent is section entity e on db, in the order the wiki was written."
   {:malli/schema [:=> [:cat :seon.host/db :int] [:vector :int]]}
-  [db e] (vec (sort (d/q '[:find [?c ...] :in $ ?p :where [?c :seon.section/parent ?p]] db e))))
+  [db e] (vec (sort (d/q '[:find [?c ...] :in $ ?p :where [?c :seon.doc/parent ?p]] db e))))
 
 (declare resolve-ref)
 
@@ -179,7 +179,7 @@
   summary (a section's lead's first sentence, a var's docstring's)."
   {:malli/schema [:=> [:cat :seon.host/db :int] :map]}
   [db e]
-  (let [{:seon.section/keys [address heading lead] n :var/name} (d/pull db [:seon.section/address :seon.section/heading :seon.section/lead :var/name] e)
+  (let [{:seon.doc/keys [address heading lead] n :var/name} (d/pull db [:seon.doc/address :seon.doc/heading :seon.doc/lead :var/name] e)
         summary (if n (:summary (resolve-ref db n :summary)) (some-> lead ref/lead-sentence))]
     (cond-> {:seon.ref/address (or address (str n)) :seon.ref/heading (or heading (name n))}
       summary (assoc :seon.ref/summary summary))))
@@ -194,14 +194,14 @@
                   [:=> [:cat :seon.host/db :string :seon.ref/depth :boolean] [:maybe :seon.ref/view]]]}
   ([db address depth] (view db address depth true))
   ([db address depth edges?]
-  (when-let [e (pdb/eid db :seon.section/address address)]
-    (let [{:seon.section/keys [heading lead text references]} (d/pull db [:seon.section/heading :seon.section/lead :seon.section/text
-                                                                           {:seon.section/references [:db/id]}] e)
+  (when-let [e (pdb/eid db :seon.doc/address address)]
+    (let [{:seon.doc/keys [heading lead text references]} (d/pull db [:seon.doc/heading :seon.doc/lead :seon.doc/text
+                                                                           {:seon.doc/references [:db/id]}] e)
           below (for [c (children db e)
-                      :let [s (d/pull db [:seon.section/address :seon.section/heading] c)]]
-                  {:seon.ref/address (:seon.section/address s) :seon.ref/heading (:seon.section/heading s)})
+                      :let [s (d/pull db [:seon.doc/address :seon.doc/heading] c)]]
+                  {:seon.ref/address (:seon.doc/address s) :seon.ref/heading (:seon.doc/heading s)})
           edges (fn [es] (vec (sort-by :seon.ref/address (map #(edge db %) es))))
-          cited-by (map :e (d/datoms db :avet :seon.section/references e))
+          cited-by (map :e (d/datoms db :avet :seon.doc/references e))
           references (map :db/id references)]
       (cond-> (ref/shown (cond-> {:seon.ref/address address :seon.ref/heading heading :seon.ref/below (vec below)}
                            lead (assoc :seon.ref/lead lead)
@@ -217,7 +217,7 @@
   {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe :int]]}
   [db path]
   (let [h (d/history db)
-        es (into #{} (comp (filter #(str/starts-with? (:v %) (str path "#"))) (map :e)) (d/datoms h :aevt :seon.section/address))]
+        es (into #{} (comp (filter #(str/starts-with? (:v %) (str path "#"))) (map :e)) (d/datoms h :aevt :seon.doc/address))]
     (when (seq es) (reduce max (for [e es dt (d/datoms h :eavt e)] (:tx dt))))))
 
 (defn page
@@ -232,7 +232,7 @@
   ([db path depth edges?]
    (when-let [top (ref/page-top db path)]
      (letfn [(walk [e level]
-               (into [(assoc (view db (:seon.section/address (d/pull db [:seon.section/address] e)) depth edges?) :seon.ref/level level)]
+               (into [(assoc (view db (:seon.doc/address (d/pull db [:seon.doc/address] e)) depth edges?) :seon.ref/level level)]
                      (mapcat #(walk % (inc level))) (children db e)))]
        (walk top 1)))))
 
@@ -249,7 +249,7 @@
   "The paths of the pages db holds, sorted: the sections with no parent."
   {:malli/schema [:=> [:cat :seon.host/db] [:vector :string]]}
   [db]
-  (vec (sort (d/q '[:find [?p ...] :where [?e :seon.section/address ?a] (not [?e :seon.section/parent _])
+  (vec (sort (d/q '[:find [?p ...] :where [?e :seon.doc/address ?a] (not [?e :seon.doc/parent _])
                     [(clojure.string/index-of ?a "#") ?i] [(subs ?a 0 ?i) ?p]] db))))
 
 (defn pages
@@ -270,7 +270,7 @@
   ([db checkout dir baseline]
    (let [ps (into (sorted-map) (mapcat #(pages checkout %)) (if (string? dir) [dir] dir))]
      (into (load-tx db dir ps baseline)
-           (for [d (d/datoms db :avet :seon.section/address)
+           (for [d (d/datoms db :avet :seon.doc/address)
                  :when (and (under? dir (:v d)) (not (contains? ps (page-of (:v d)))))]
              [:db/retractEntity (:e d)])))))
 
@@ -289,15 +289,15 @@
 
 (defn baseline-plan
   "What the wiki's history must answer (the :history effect, seon.fx/wiki-history): for each section
-  of pages (path -> text) with no :seon.section/read stored on db, its page, its address, its lines
+  of pages (path -> text) with no :seon.doc/read stored on db, its page, its address, its lines
   and the file and namespace of each var it cites that db has a file for. A section citing none is
   left out: nothing to record."
   {:malli/schema [:=> [:cat :seon.host/db [:map-of :string :string]] [:vector :map]]}
   [db pages]
-  (let [stored (into {} (map (juxt :v :e)) (d/datoms db :avet :seon.section/address))]
+  (let [stored (into {} (map (juxt :v :e)) (d/datoms db :avet :seon.doc/address))]
     (vec (for [[p t] (sort pages) :let [lines (delay (section-lines p t))] s (page-sections p t)
-               :let [a (:seon.section/address s) e (stored a)]
-               :when (not (and e (:seon.section/read (d/pull db [:seon.section/read] e))))
+               :let [a (:seon.doc/address s) e (stored a)]
+               :when (not (and e (:seon.doc/read (d/pull db [:seon.doc/read] e))))
                :let [files (into {} (keep (fn [n] (when-let [ve (pdb/eid db :var/name n)]
                                                     (let [nsx (:var/ns (d/entity db ve))]
                                                       (when (:ns/file nsx) [n {:file (:ns/file nsx) :ns (:ns/name nsx)}])))))
@@ -385,13 +385,13 @@
                    x))))
 
 (defn citing-sections
-  "The addresses of the wiki sections that cite name x (a var or a keyword: :seon.section/names),
+  "The addresses of the wiki sections that cite name x (a var or a keyword: :seon.doc/names),
   at most :seon.config.ctx/cited-by of them, those of the decisions page last (a ruling cites what
   it concerns; a page about the mechanism says what x does). So a var a task cites carries the
   sections it owes an edit to and the sections that explain it. See docs/references.md#the-wiki-in-the-store."
   {:malli/schema [:=> [:cat :seon.host/db [:or :qualified-symbol :qualified-keyword]] [:vector :string]]}
   [db x]
-  (->> (d/q '[:find [?a ...] :in $ ?n :where [?e :seon.section/names ?n] [?e :seon.section/address ?a]] db x)
+  (->> (d/q '[:find [?a ...] :in $ ?n :where [?e :seon.doc/names ?n] [?e :seon.doc/address ?a]] db x)
        (sort-by (juxt #(str/starts-with? % "docs/decisions.md") str))
        (take (cfg/value :seon.config.ctx/cited-by))
        vec))
@@ -400,7 +400,7 @@
   "Each searchable kind of text and the attribute holding it, the kinds seon.vector embeds: a form's
   source names a :var (or a :test), a wiki section's text a :section, a task's plan a :task, a
   schema entry's form a :schema."
-  {:var :form/src :test :form/src :section :seon.section/text :task :seon.task/plan :schema :schema/form})
+  {:var :form/src :test :form/src :section :seon.doc/text :task :seon.task/plan :schema :schema/form})
 
 (defn line-at
   "Where index i of text v falls: {:at the 1-based number of its line, :line the whole line it begins in, trimmed
@@ -423,9 +423,9 @@
                            :let [v (d/entity db (:v dv)) n (:var/name v) kind (if (= :test (:var/kind v)) :test :var)]
                            :when (and n (kinds kind))]
                        {:kind kind :name n :rank (cond (in? (name n)) 0 (in? (:var/doc v)) 1 :else 2)}))
-      :seon.section/text (when (kinds :section)
-                           [{:kind :section :name (:seon.section/address x)
-                             :rank (cond (in? (:seon.section/address x)) 0 (in? (:seon.section/heading x)) 1 :else 2)}])
+      :seon.doc/text (when (kinds :section)
+                           [{:kind :section :name (:seon.doc/address x)
+                             :rank (cond (in? (:seon.doc/address x)) 0 (in? (:seon.doc/heading x)) 1 :else 2)}])
       :seon.task/plan (when (kinds :task) [{:kind :task :name (:seon.task/id x) :rank (if (in? (:seon.task/id x)) 0 2)}])
       :schema/form (when (kinds :schema) [{:kind :schema :name (:schema/key x) :rank (if (in? (str (:schema/key x))) 0 2)}]))))
 

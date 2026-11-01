@@ -9,7 +9,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [datahike.api :as d] [seon.render :as render]
             [seon.task :as task] [seon.db :as pdb] [seon.merge :as pm]
-            [seon.print :as print] [seon.print.select :as select] [seon.ref :as ref] [seon.docs :as docs] [seon.config :as cfg] [seon.vector :as vector] [seon.ctx :as ctx] [seon.ratom :as ratom] [seon.agent :as agent] [seon.program :as program] [seon.proofs :as proofs] [seon.problems :as problems] [seon.reconcile :as r] [seon.edn :as sedn] [clojure.edn] [hasch.core :as hasch]))
+            [seon.print :as print] [seon.print.select :as select] [seon.ref :as ref] [seon.doc :as docs] [seon.config :as cfg] [seon.vector :as vector] [seon.ctx :as ctx] [seon.ratom :as ratom] [seon.agent :as agent] [seon.program :as program] [seon.proofs :as proofs] [seon.problems :as problems] [seon.reconcile :as r] [seon.edn :as sedn] [clojure.edn] [hasch.core :as hasch]))
 
 (def help-page
   "The help page, docs/agent.md: what my.agent/help answers, each section on demand. Main holds
@@ -17,7 +17,7 @@
   "docs/agent.md")
 
 (defn help-text
-  "The help page as db holds it (seon.docs/page-text). A db without it (no root booted on it) is
+  "The help page as db holds it (seon.doc/page-text). A db without it (no root booted on it) is
   refused by this contract, never answered empty."
   {:malli/schema [:=> [:cat :seon.host/db] :string]}
   [db] (docs/page-text db help-page))
@@ -30,7 +30,7 @@
   "docs/prompt.md")
 
 (defn system-text
-  "The system prompt as db holds it (seon.docs/page-text): a turn's, at the commit it read. A db
+  "The system prompt as db holds it (seon.doc/page-text): a turn's, at the commit it read. A db
   without it is refused by this contract, never answered empty."
   {:malli/schema [:=> [:cat :seon.host/db] :string]}
   [db] (docs/page-text db system-page))
@@ -211,16 +211,16 @@
   [db e]
   (let [x (d/entity db e)
         [n t] (cond (:form/id x) [(some->> (:var/_form x) (map :var/name) sort first str) (:form/src x)]
-                    (:seon.section/address x) [(str (:seon.section/address x) " " (:seon.section/heading x)) (:seon.section/text x)]
+                    (:seon.doc/address x) [(str (:seon.doc/address x) " " (:seon.doc/heading x)) (:seon.doc/text x)]
                     (:schema/key x) [(str (:schema/key x)) (pr-str (:schema/form x))]
                     :else ["" ""])]
     (str n " " n " " t)))
 
 (defn- section-names
   "Each var name the wiki's sections name, to those sections: {name #{e}}, one read of
-  :seon.section/names (unindexed), so `neighbours` finds a var's sections by a lookup."
+  :seon.doc/names (unindexed), so `neighbours` finds a var's sections by a lookup."
   {:malli/schema [:=> [:cat :seon.host/db] [:map-of :qualified-symbol [:set :int]]]}
-  [db] (reduce (fn [m {:keys [e v]}] (update m v (fnil conj #{}) e)) {} (d/datoms db :aevt :seon.section/names)))
+  [db] (reduce (fn [m {:keys [e v]}] (update m v (fnil conj #{}) e)) {} (d/datoms db :aevt :seon.doc/names)))
 
 (defn- neighbours
   "Entity e's neighbours in the reference graph on db, a set of entities: a form's are the forms of
@@ -238,11 +238,11 @@
                                            (map #(pdb/eid db :schema/key %) (:form/keywords x))
                                            (for [v (:var/_form x) a [:form/refs :form/quoted] d (take cap (d/datoms db :avet a (:var/name v)))] (:e d))
                                            (for [v (:var/_form x) s (take cap (names (:var/name v)))] s))
-                      (:seon.section/address x) (concat (map form-of (:seon.section/names x))
-                                                        (map :db/id (:seon.section/references x))
-                                                        (map :db/id (:seon.section/_references x))
-                                                        (some-> (:seon.section/parent x) :db/id vector)
-                                                        (map :db/id (:seon.section/_parent x)))
+                      (:seon.doc/address x) (concat (map form-of (:seon.doc/names x))
+                                                        (map :db/id (:seon.doc/references x))
+                                                        (map :db/id (:seon.doc/_references x))
+                                                        (some-> (:seon.doc/parent x) :db/id vector)
+                                                        (map :db/id (:seon.doc/_parent x)))
                       (:schema/key x) (map :e (take cap (d/datoms db :avet :form/keywords (:schema/key x))))
                       :else []))
           e)))
@@ -262,9 +262,9 @@
                (+ (k :form/refs) (k :form/quoted) (k :form/keywords)
                   (reduce + 0 (for [v (d/datoms db :avet :var/form e) :let [nm (:v (first (d/datoms db :eavt (:e v) :var/name)))]]
                                 (+ (count (names nm)) (n :avet :form/refs nm) (n :avet :form/quoted nm)))))
-               (seq (d/datoms db :eavt e :seon.section/address))
+               (seq (d/datoms db :eavt e :seon.doc/address))
                (let [x (d/entity db e)]
-                 (+ (k :seon.section/names) (k :seon.section/references) (count (:seon.section/_references x)) (count (:seon.section/_parent x))))
+                 (+ (k :seon.doc/names) (k :seon.doc/references) (count (:seon.doc/_references x)) (count (:seon.doc/_parent x))))
                :else (if-let [key (:v (first (d/datoms db :eavt e :schema/key)))] (n :avet :form/keywords key) 0)))))
 
 (defn- pushed
@@ -301,7 +301,7 @@
 
 (def relevance-kinds
   "Each kind relevance ranks, the attribute its entities have."
-  {:function :form/id :section :seon.section/address :schema :schema/key})
+  {:function :form/id :section :seon.doc/address :schema :schema/key})
 
 (defn- percent
   "The relevance a logit l is, by kind k's calibration (:seon.config.render/relevance-calibration):
@@ -334,7 +334,7 @@
   neighbourhood (each seed's first neighbours by each read, and those `pushed` at
   :seon.config.render/relevance-eps reached), keep? (of kind and entity) true;
   each item scored by a logistic over five features (:seon.config.render/relevance-weights): zc its
-  cosine with qv, zb its BM25 (seon.docs/bm25) for the text's terms (seon.docs/terms), zt its cosine with the touched items' mean
+  cosine with qv, zb its BM25 (seon.doc/bm25) for the text's terms (seon.doc/terms), zt its cosine with the touched items' mean
   vector, each a z-score over the pool, g1 log(1 + the seeds it neighbours x its rarity,
   (1 + cap)/(1 + its degree to cap)) and ppr log(1 + scale x its rank), the constants
   :seon.config.render/relevance-features; the logit read as a chance by the kind's calibration (`percent`). Measured on 57 merged
@@ -394,12 +394,12 @@
   [db e kinds]
   (let [x (d/entity db e)]
     (cond (:form/id x) (vec (for [v (:var/_form x) :let [kind (if (= :test (:var/kind v)) :test :var)] :when (kinds kind)] [kind (:var/name v)]))
-          (:seon.section/address x) (if (kinds :section) [[:section (:seon.section/address x)]] [])
+          (:seon.doc/address x) (if (kinds :section) [[:section (:seon.doc/address x)]] [])
           (:seon.task/id x) (if (kinds :task) [[:task (:seon.task/id x)]] [])
           (:schema/key x) (if (kinds :schema) [[:schema (:schema/key x)]] [])
           :else [])))
 
-(def ^:private near-attr {:var :form/id :test :form/id :section :seon.section/address :task :seon.task/id :schema :schema/key})
+(def ^:private near-attr {:var :form/id :test :form/id :section :seon.doc/address :task :seon.task/id :schema :schema/key})
 
 (defn- kind-of
   "Var v's search kind: :test for a test, else :var."
@@ -412,7 +412,7 @@
   [db [kind n]]
   (case kind
     (:var :test) (pdb/eid db :var/name n)
-    :section (pdb/eid db :seon.section/address n)
+    :section (pdb/eid db :seon.doc/address n)
     :task (pdb/eid db :seon.task/id n)
     :schema (pdb/eid db :schema/key n)))
 
@@ -437,7 +437,7 @@
   :relevance the chance it is worth reading (seon.context/relevance, over q's vector, words and the
   names it holds, the first k x :seon.config.render/related-near hits by the fused score joined to its
   pool; a function, section or schema key, not yet a test or task),
-  :line the line of its text holding a word of q and :at its number. The rankings: the text (seon.docs/tokens:
+  :line the line of its text holding a word of q and :at its number. The rankings: the text (seon.doc/tokens:
   BM25 over q's identifier-split words, kept at z >= :seon.config.render/search-token-z), meaning
   (seon.vector/near from qv, the query's vector or an entity with one; none when qv is nil) and the
   references (the callers, callees and naming sections of the names in q: its var, its key, the
@@ -475,8 +475,8 @@
                (into [] (comp (filter in-ns?) (filter (comp kinds first)) (distinct))
                      (concat (for [s seeds :when (symbol? s) c (docs/callers db s) :let [kd (kind-of db c)] :when (kinds kd)] [kd c])
                              (for [s seeds :when (symbol? s) c (map :var (callees db s)) :let [kd (kind-of db c)] :when (kinds kd)] [kd c])
-                             (for [s seeds :when (symbol? s) e (d/q '[:find [?e ...] :in $ ?n :where [?e :seon.section/names ?n]] db s) :when (kinds :section)]
-                               [:section (:seon.section/address (d/entity db e))])
+                             (for [s seeds :when (symbol? s) e (d/q '[:find [?e ...] :in $ ?n :where [?e :seon.doc/names ?n]] db s) :when (kinds :section)]
+                               [:section (:seon.doc/address (d/entity db e))])
                              ;; a schema key: the functions whose code or contract name it
                              (for [s seeds :when (keyword? s) c (docs/callers db s) :let [kd (kind-of db c)] :when (kinds kd)] [kd c])))
                [])
@@ -485,7 +485,7 @@
         in (fn [h] (into #{} (keep (fn [[m r]] (when (some #{h} r) m))) rankings))
         first-line (fn [[kind n]] (case kind
                                     (:var :test) (or (some-> (d/entity db [:var/name n]) :var/doc ref/lead-sentence) "")
-                                    :section (or (some-> (d/entity db [:seon.section/address n]) :seon.section/lead) "")
+                                    :section (or (some-> (d/entity db [:seon.doc/address n]) :seon.doc/lead) "")
                                     :task (or (some-> (d/entity db [:seon.task/id n]) :seon.task/plan (str/split #"\n") first) "")
                                     ""))
         ;; each hit of a kind relevance weighs is scored by it, the hits joined to its pool: a function by

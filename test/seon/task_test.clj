@@ -1,5 +1,5 @@
 (ns seon.task-test
-  "The task writer derives what a task cites (seon.docs.edn's one-reference-reader, task
+  "The task writer derives what a task cites (seon.doc.edn's one-reference-reader, task
   seon.task/a-task-cites-what-it-needs): references from the plan, never authored, and a
   citation that resolves to nothing answered beside the write."
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]] [datahike.api :as d] [seon.repl :as repl]
@@ -31,8 +31,8 @@
 
 (deftest a-page-cited-whole-is-its-top-section
   ;; docs/references.md#an-entity-cites: a path with no anchor cites the page's top section, whose sections join below it
-  (let [db (d/db-with (db-with-program) [{:db/id "top" :seon.section/address "docs/x.md#x" :seon.section/heading "X"}
-                                         {:seon.section/address "docs/x.md#y" :seon.section/heading "Y" :seon.section/parent "top"}])]
+  (let [db (d/db-with (db-with-program) [{:db/id "top" :seon.doc/address "docs/x.md#x" :seon.doc/heading "X"}
+                                         {:seon.doc/address "docs/x.md#y" :seon.doc/heading "Y" :seon.doc/parent "top"}])]
     (is (= {"docs/x.md#x" :doc} (cited-in (task/create-tx db [(decl "Read [x](docs/x.md).")]))) "the page the db holds: its top section")
     (is (= {"docs/nowhere.md" :doc} (cited-in (task/create-tx db [(decl "Read [n](docs/nowhere.md).")]))) "a page it does not: the address as written, which joins nothing")))
 
@@ -51,8 +51,8 @@
 (deftest an-agent-is-made-citing-what-every-agent-cites
   ;; :seon.config.agent/cites written on a new agent's record (seon.task/agent-cites-tx, at its first run: seon.agent/begin-run!), never
   ;; read as a default at draw time: a page whole is its top section, a section its address, each at its ?depth
-  (let [db (d/db-with (db-with-program) [{:db/id "top" :seon.section/address "docs/testing.md#testing" :seon.section/heading "Testing"}
-                                         {:seon.section/address "docs/references.md#an-entity-cites" :seon.section/heading "An entity cites"}])
+  (let [db (d/db-with (db-with-program) [{:db/id "top" :seon.doc/address "docs/testing.md#testing" :seon.doc/heading "Testing"}
+                                         {:seon.doc/address "docs/references.md#an-entity-cites" :seon.doc/heading "An entity cites"}])
         tx (into (task/run-start-tx "demo/t#1" "demo/t" "b1" :a1 {:branch :b :model nil :max-turns 4} 0 "p") (task/agent-cites-tx db "b1/a1" "b1/a1"))
         db (d/db-with (d/db-with db (task/create-tx db [(decl "Do.")])) tx)]
     (is (= (count (seon.config/value :seon.config.agent/cites)) (count (filter :seon.cite/id tx))) "one per address the config names")

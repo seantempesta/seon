@@ -5,7 +5,7 @@
   under that main, and a recovery step reopens the same store on the same main."
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]]
             [clojure.java.shell] [datahike.api :as d]
-            [seon.db :as pdb] [clojure.core.async :as a] [seon.check] [test-runner] [seon.docs] [seon.problems] [seon.fx] [seon.source] [clojure.string] [clojure.string :as str] [seon.lib] [seon.contract :as contract]))
+            [seon.db :as pdb] [clojure.core.async :as a] [seon.check] [test-runner] [seon.doc] [seon.problems] [seon.fx] [seon.source] [clojure.string] [clojure.string :as str] [seon.lib] [seon.contract :as contract]))
 
 (defn- notes [db] (set (d/q '[:find [?t ...] :where [_ :note/text ?t]] db)))
 
@@ -226,7 +226,7 @@
   (let [db0 (ts/test-db)
         [v w] (map :v (take 2 (d/datoms db0 :aevt :var/name)))
         page (str "# P\n\nIt reads `" v "`, `" w "` and `" (symbol (namespace v) "no-such-var") "`.\n")]
-    [(d/db-with db0 (seon.docs/load-tx db0 "demo" {"demo/p.md" page})) v]))
+    [(d/db-with db0 (seon.doc/load-tx db0 "demo" {"demo/p.md" page})) v]))
 
 (deftest the-health-step-reads-the-task-files-relative-to-the-checkout
   ;; test-runner/health!: the config holds :seon.config.root/tasks-dir resolved against the

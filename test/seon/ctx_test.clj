@@ -84,7 +84,7 @@
                                                    {:ns/name 'app.x :ns/file "src/app/x.clj"}
                                                    {:db/id "f0" :form/id "app.x/f0-1" :form/src "(defn f0 [x] x)"} {:var/name 'app.x/f0 :var/form "f0"}
                                                    {:form/id "app.x/c-1" :form/src "(defn c [] (f0 1))" :form/refs #{'app.x/f0}}
-                                                   {:seon.section/address "docs/x.md#the-x" :seon.section/heading "The x" :seon.section/lead "What x does." :seon.section/text "What x does."}
+                                                   {:seon.doc/address "docs/x.md#the-x" :seon.doc/heading "The x" :seon.doc/lead "What x does." :seon.doc/text "What x does."}
                                                    {:db/id "t0" :form/id "app.x-test/t0-1" :form/src "(deftest t0 (is (= 1 (f0 1))))" :form/refs #{'app.x/f0 'clojure.test/is} :form/defines ["t0v"]}
                                                    {:db/id "t0v" :var/name 'app.x-test/t0 :var/kind :test :var/form "t0"}]
                                                   (concat
@@ -149,8 +149,8 @@
              [{:seon.cite/id cid :seon.cite/of [:seon.task/id "lab/ctx"] :seon.cite/name n :seon.cite/depth :doc :seon.cite/order (+ 10 i)}]))
       ;; a cited section's text edited, or the section another task cites written
       22 (if (.nextBoolean r)
-           [[:db/add [:seon.section/address "docs/x.md#the-x"] :seon.section/text (str "What x does, " i ".")]]
-           [{:seon.section/address (str "docs/y.md#y" i) :seon.section/heading "Y" :seon.section/text "Y."}
+           [[:db/add [:seon.doc/address "docs/x.md#the-x"] :seon.doc/text (str "What x does, " i ".")]]
+           [{:seon.doc/address (str "docs/y.md#y" i) :seon.doc/heading "Y" :seon.doc/text "Y."}
             {:seon.cite/id (str "lab/ctx docs/y.md#y" i) :seon.cite/of [:seon.task/id "lab/ctx"] :seon.cite/address (str "docs/y.md#y" i) :seon.cite/depth :doc :seon.cite/order (+ 10 i)}])
       ;; the agent edits its pattern: a narrower window of its evals, or its schema's again
       19 [[:db/add [:seon.agent/key k] :seon.ctx/pattern
@@ -773,8 +773,8 @@
   ;; it last drew (ctx's own diff of each move, seon.ctx/take-moved!), so a db component sees a write
   ;; however many others came after it in the same commit (the walk read the db as of its last commit
   ;; and saw only the last transaction's datoms: a plan's new citation drew nothing until a commit)
-  (let [db (d/db-with (seeded 20 nil) [{:seon.section/address "docs/x.md#the-z" :seon.section/heading "The z"
-                                         :seon.section/lead "What z does." :seon.section/text "What z does."}])
+  (let [db (d/db-with (seeded 20 nil) [{:seon.doc/address "docs/x.md#the-z" :seon.doc/heading "The z"
+                                         :seon.doc/lead "What z does." :seon.doc/text "What z does."}])
         page #(pr-str (second (seon.repl/page-hiccup)))
         [[before after] db'] (as-agent! db #(let [before (page)]
                                                (swap! ctx/ctx assoc-in [:task :seon.task/plan] "Make `app.x/f0` pass; see [the z](docs/x.md#the-z).")
@@ -794,7 +794,7 @@
   (let [db (seeded 10)
         t (get-in (:tree (ctx/build db (aid db) :b)) [:runs (id db [:seon.run/id "lab/ctx#1"]) :task])
         f0 (get-in t [:cites (id db [:seon.cite/id "lab/ctx app.x/f0"]) :var])]
-    (is (= "What x does." (get-in t [:cites (id db [:seon.cite/id "lab/ctx docs/x.md#the-x"]) :section :seon.section/text])) "D3: the cited section's text, by its address")
+    (is (= "What x does." (get-in t [:cites (id db [:seon.cite/id "lab/ctx docs/x.md#the-x"]) :section :seon.doc/text])) "D3: the cited section's text, by its address")
     (is (= "(defn f0 [x] x)" (get-in f0 [:form :form/src])) "D2: the cited var's source")
     (is (= #{(id db [:form/id "app.x/c-1"]) (id db [:form/id "app.x-test/t0-1"])} (set (keys (:callers f0)))) "D1: its callers, the test among them")
     (let [t0 (get-in t [:proved (id db [:var/name 'app.x-test/t0]) :form])]

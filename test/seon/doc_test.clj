@@ -1,12 +1,12 @@
-(ns seon.docs-test
-  "The wiki as data in the store (task seon.docs/docs-are-data-in-the-store): a section entity
+(ns seon.doc-test
+  "The wiki as data in the store (task seon.doc/docs-are-data-in-the-store): a section entity
   per heading, written only where a section changed; its references are what its own text
   cites, so its backlinks are who cites it."
   (:require [seon.test-store :as ts] [my.test :as mt] [clojure.java.shell] [clojure.test :refer [deftest is testing]]
             [clojure.string :as str]
             [datahike.api :as d]
             [seon.db :as pdb]
-            [seon.docs :as docs] [seon.root] [seon.config] [seon.source] [seon.fx] [seon.ref] [seon.problems :as problems]
+            [seon.doc :as docs] [seon.root] [seon.config] [seon.source] [seon.fx] [seon.ref] [seon.problems :as problems]
             [seon.config :as config]))
 
 (defn- empty-db [] (ts/test-db))
@@ -35,7 +35,7 @@
 
 (deftest a-changed-section-rewrites-only-itself
   (let [db (load-pages (empty-db) pages)
-        quiet (:db/id (d/pull db [:db/id] [:seon.section/address "demo/flow.md#quiet"]))
+        quiet (:db/id (d/pull db [:db/id] [:seon.doc/address "demo/flow.md#quiet"]))
         edited (assoc pages "demo/flow.md" (str/replace flow "Count messages" "Count every message"))
         tx (docs/load-tx db "demo" edited)]
     (is (seq tx) "the changed section is written")
@@ -52,7 +52,7 @@
         db' (d/db-with db (docs/load-tx db "demo" edited))]
     (is (= "Count every message, with `app.m0/f1`." (:seon.ref/text (docs/view db' "demo/flow.md#quiet" :code))) "the page given is loaded")
     (is (= #{"demo/async.md#async" "demo/async.md#waiting"}
-           (set (filter #(str/starts-with? % "demo/async.md") (map :v (d/datoms db' :avet :seon.section/address)))))
+           (set (filter #(str/starts-with? % "demo/async.md") (map :v (d/datoms db' :avet :seon.doc/address)))))
         "a page not given keeps every section")))
 
 (deftest a-link-to-no-section-is-a-dead-link-and-the-rest-loads
@@ -60,8 +60,8 @@
         db (load-pages (empty-db) broken)
         dead #(get-in (problems/health %) [:classes :dead-citation :rows])]
     (is (= #{"demo/flow.md#flow" "demo/flow.md#idioms" "demo/flow.md#quiet" "demo/async.md#async" "demo/async.md#waiting"}
-           (set (map :v (d/datoms db :avet :seon.section/address)))) "every section loads")
-    (is (= #{"demo/flow.md#nowhere"} (set (:seon.section/dead-links (d/pull db [:seon.section/dead-links] [:seon.section/address "demo/async.md#waiting"]))))
+           (set (map :v (d/datoms db :avet :seon.doc/address)))) "every section loads")
+    (is (= #{"demo/flow.md#nowhere"} (set (:seon.doc/dead-links (d/pull db [:seon.doc/dead-links] [:seon.doc/address "demo/async.md#waiting"]))))
         "the link is kept on the section that makes it")
     (is (= [["demo/async.md#waiting" "demo/flow.md#nowhere" "demo/async.md#waiting links to demo/flow.md#nowhere, which is no section"]]
            (mapv (juxt :section :target :message) (dead db))) "and is exactly one dead citation, naming page, section and target")
@@ -73,9 +73,9 @@
   "The addresses of the sections whose text cites target (a section's address or a var's name), sorted."
   [db target]
   (let [e (if (string? target)
-            (d/q '[:find ?e . :in $ ?a :where [?e :seon.section/address ?a]] db target)
+            (d/q '[:find ?e . :in $ ?a :where [?e :seon.doc/address ?a]] db target)
             (d/q '[:find ?e . :in $ ?n :where [?e :var/name ?n]] db target))]
-    (vec (sort (when e (d/q '[:find [?a ...] :in $ ?t :where [?s :seon.section/references ?t] [?s :seon.section/address ?a]] db e))))))
+    (vec (sort (when e (d/q '[:find [?a ...] :in $ ?t :where [?s :seon.doc/references ?t] [?s :seon.doc/address ?a]] db e))))))
 
 (deftest backlinks-are-a-sections-instances
   (let [quiet "# Quiet\n\nQuiet is the absence of messages.\n\n## Counting\n\nCount as the [idiom](flow.md#idioms) does, by `app.m0/f0`.\n"
@@ -124,7 +124,7 @@
   ;; real wiki as main holds it (the archived paper dogfood/docs-audit.md (git history) found 54 of 364 without)
   (let [db0 (empty-db)
         db (d/db-with db0 (docs/load-dir-tx db0 (config/checkout) "docs"))]
-    (is (< 300 (count (d/datoms db :aevt :seon.section/address))) "the real wiki is read")
+    (is (< 300 (count (d/datoms db :aevt :seon.doc/address))) "the real wiki is read")
     (is (= [] (mapv :section (get-in (problems/health db) [:classes :leadless-section :rows]))) "no section lacks a lead")))
 
 (deftest one-address-shows-one-text-through-ref-and-docs
@@ -142,7 +142,7 @@
     (is (= ["demo/flow.md#idioms" "demo/flow.md#quiet"] (mapv :seon.ref/address (:seon.ref/below (docs/view db "demo/flow.md#flow" :code))))
         "the sections below by address, not inline")))
 
-;; ---- names are Clojure's words (task seon.docs/names-are-clojures-words) ----------------
+;; ---- names are Clojure's words (task seon.doc/names-are-clojures-words) ----------------
 
 (def ^:private kept
   "Names that keep a word of AGENTS.md section 7a's table in another sense, each with its reason."
@@ -206,17 +206,17 @@
   (let [srcs (into {} (for [p (cons src-path (when (.exists (java.io.File. (str dir "/src/app/gl.clj"))) ["src/app/gl.clj"]))] [p (slurp (str dir "/" p))]))
         db0 (empty-db)
         db1 (d/db-with db0 (seon.source/import-tx db0 srcs))
-        pages (seon.docs/pages dir "docs")
-        plan (seon.docs/baseline-plan db1 pages)
+        pages (seon.doc/pages dir "docs")
+        plan (seon.doc/baseline-plan db1 pages)
         answer (seon.fx/wiki-history {:req {:root dir :sections plan}})
-        baseline (seon.docs/baseline-reads db1 plan (:value answer))]
+        baseline (seon.doc/baseline-reads db1 plan (:value answer))]
     {:db1 db1 :plan plan :answer answer :baseline baseline :pages pages
-     :db (d/db-with db1 (seon.docs/load-tx db1 "docs" pages baseline))}))
+     :db (d/db-with db1 (seon.doc/load-tx db1 "docs" pages baseline))}))
 
 (deftest a-sections-baseline-is-the-code-as-of-its-last-commit
   (let [{:keys [dir first second]} (git-fixture)
         {:keys [db plan answer baseline]} (db-of-fixture dir "src/app/gb.clj")
-        read #(:seon.section/read (d/pull db [:seon.section/read] [:seon.section/address %]))
+        read #(:seon.doc/read (d/pull db [:seon.doc/read] [:seon.doc/address %]))
         form-id #(:form/id (:var/form (d/entity db (pdb/eid db :var/name %))))
         stale (get-in (problems/health db) [:classes :stale-section :rows])]
     (is (= 2 (count plan)) "both sections cite code")
@@ -233,7 +233,7 @@
     (testing "so the sections stale today are exactly those, one name each"
       (is (= #{["docs/p.md#p" 'app.gb/f] ["docs/p.md#q" 'app.gb/h] ["docs/p.md#q" 'app.gl/z]} (set (map (juxt :section :name) stale)))))
     (testing "an unchanged reload keeps the baseline: nothing is rewritten, nothing forgiven"
-      (is (= [] (seon.docs/load-tx db "docs" (seon.docs/pages dir "docs")))))))
+      (is (= [] (seon.doc/load-tx db "docs" (seon.doc/pages dir "docs")))))))
 
 (deftest a-baseline-git-cannot-give-is-today-and-says-so
   (let [dir (.getCanonicalPath (doto (java.io.File. (str (seon.config/checkout) "/target/tmp/not-git-" (random-uuid))) (.mkdirs)))
@@ -259,7 +259,7 @@
                            "docs/p.md#e" {:commit (apply str (repeat 40 "a"))} "docs/p.md#c" {:commit nil} "docs/p.md#d" {:commit (apply str (repeat 40 "b"))}}
                 :files {[(apply str (repeat 40 "a")) "src/app/m0.clj"] old}
                 :errors {[(apply str (repeat 40 "b")) "src/app/m0.clj"] "git show: exploded"}}
-        r (seon.docs/baseline-reads db plan answer)]
+        r (seon.doc/baseline-reads db plan answer)]
     (testing "a var defined by a form of a head defining-ids knows is found at that commit, never absent"
       ;; this db holds no app.m0/f0 today, so what the section described of it (its meaning at the
       ;; commit) is not today's: :changed
@@ -271,12 +271,12 @@
       (is (nil? (:unread (r "docs/p.md#e"))))
       (is (= :absent (get-in r ["docs/p.md#e" :read 'app.m0/f5]))))
     (testing "a section with an uncommitted line is as of today, nothing unread"
-      (is (= {:read (seon.docs/read-map db #{'app.m0/f2})} (r "docs/p.md#c"))))
+      (is (= {:read (seon.doc/read-map db #{'app.m0/f2})} (r "docs/p.md#c"))))
     (testing "a file git could not show is unread with git's words, never absent"
       (is (re-find #"git show: exploded" (:unread (r "docs/p.md#d")))))))
 
 (deftest a-review-is-a-commit-and-survives-a-rebuilt-store
-  ;; a review (my.docs/reviewed!) is an empty git commit with `Reviewed: <address>`; the baseline takes, per
+  ;; a review (my.doc/reviewed!) is an empty git commit with `Reviewed: <address>`; the baseline takes, per
   ;; section, the newer of the commit that last changed its lines and the last review naming it, from one
   ;; git log, so a store rebuilt from scratch reads the reviewed section fresh
   (let [{:keys [dir]} (git-fixture)
@@ -284,7 +284,7 @@
                           (set (map (juxt :section :name) (get-in (problems/health db) [:classes :stale-section :rows])))))
         branch (str/trim (:out (clojure.java.shell/sh "git" "-C" dir "rev-parse" "--abbrev-ref" "HEAD")))]
     (is (contains? (stale-of) ["docs/p.md#p" 'app.gb/f]) "before the review the section is stale")
-    (let [r (seon.fx/git-commit {:req {:dir dir :branch branch :files {} :allow-empty? true :message (seon.docs/review-message "docs/p.md#p" "sean")}})]
+    (let [r (seon.fx/git-commit {:req {:dir dir :branch branch :files {} :allow-empty? true :message (seon.doc/review-message "docs/p.md#p" "sean")}})]
       (is (string? (get-in r [:value :sha])) "the review is a commit")
       (is (= 1 (count (re-seq #"Reviewed: docs/p.md#p" (:out (clojure.java.shell/sh "git" "-C" dir "log" "HEAD" "--format=%B")))))))
     (let [after (stale-of)]
@@ -295,11 +295,11 @@
   (let [{:keys [dir]} (git-fixture)
         stale-of (fn [] (let [{:keys [db]} (db-of-fixture dir "src/app/gb.clj")]
                           (set (map (juxt :section :name) (get-in (problems/health db) [:classes :stale-section :rows])))))
-        r (seon.fx/git-commit {:req {:dir dir :branch "elsewhere" :files {} :allow-empty? true :message (seon.docs/review-message "docs/p.md#p" "sean")}})]
+        r (seon.fx/git-commit {:req {:dir dir :branch "elsewhere" :files {} :allow-empty? true :message (seon.doc/review-message "docs/p.md#p" "sean")}})]
     (is (string? (get-in r [:value :sha])) "the review commit exists, on a branch HEAD does not contain")
     (is (contains? (stale-of) ["docs/p.md#p" 'app.gb/f]) "and HEAD's section is still stale")))
 
-;; ---- text uses Clojure's words too (task seon.docs/names-are-clojures-words) ---------------
+;; ---- text uses Clojure's words too (task seon.doc/names-are-clojures-words) ---------------
 
 (deftest no-text-uses-an-old-word
   ;; what the store holds is judged as a derived class (`seon.problems/old-words-in`, seon.problems-test/an-old-word-is-a-problem,
@@ -338,8 +338,8 @@
   "grep-db's forms beside a wiki section, a task and a schema entry that hold the word `fusing`."
   []
   (d/db-with (grep-db [["g" nil "(defn g []\n  (fusing 1))"] ["h" nil "(defn h [] 3)"]])
-             [{:seon.section/address "p.md#fusing-ranks" :seon.section/heading "Fusing ranks" :seon.section/text "Ranks are fused.\nThe fusing is by reciprocal rank."}
-              {:seon.section/address "p.md#other" :seon.section/heading "Other" :seon.section/text "Fusing, in the middle."}
+             [{:seon.doc/address "p.md#fusing-ranks" :seon.doc/heading "Fusing ranks" :seon.doc/text "Ranks are fused.\nThe fusing is by reciprocal rank."}
+              {:seon.doc/address "p.md#other" :seon.doc/heading "Other" :seon.doc/text "Fusing, in the middle."}
               {:seon.task/id "app/fusing-task" :seon.task/plan "Plan.\nMake the FUSING cheaper."}
               {:schema/key :app/fuse :schema/form "[:map {:doc \"fusing\"}]"}]))
 
@@ -351,22 +351,22 @@
              (vec (concat (mapcat (fn [i] [{:db/id (str "fv" i) :var/name (symbol "fill" (str "v" i))}
                                            {:form/id (str "fill/" i) :form/src (str "(defn v" i " [] (inc " i "))") :form/defines [(str "fv" i)]}])
                                   (range 40))
-                          (for [i (range 20)] {:seon.section/address (str "fill.md#s" i) :seon.section/heading (str "Filler " i)
-                                               :seon.section/text (str "Plain prose number " i ".")})))))
+                          (for [i (range 20)] {:seon.doc/address (str "fill.md#s" i) :seon.doc/heading (str "Filler " i)
+                                               :seon.doc/text (str "Plain prose number " i ".")})))))
 
 (deftest tokens-keep-the-texts-that-stand-out-by-the-words-of-a-query
   (let [db (corpus-db) hit (fn [h] [(:kind h) (:name h)])
         all #{:var :test :section :task :schema}]
     (is (= #{[:task "app/fusing-task"] [:section "p.md#fusing-ranks"] [:section "p.md#other"] [:var 'app/g] [:schema :app/fuse]}
-           (set (map hit (seon.docs/tokens db "fusing" all 2.0)))) "every kind holding the word, and none of the filler")
-    (is (= [:section "p.md#fusing-ranks"] (hit (first (seon.docs/tokens db "fusing ranks" all 2.0)))) "more of the words: first")
-    (is (every? #(< 2.0 (:z %)) (seon.docs/tokens db "fusing" all 2.0)))
-    (is (= [[:var 'app/g]] (map hit (seon.docs/tokens db "fusing" #{:var} 2.0))) "the kinds asked only")
-    (is (= [] (seon.docs/tokens db "nowhere" all 2.0)) "no word of it in any text")
-    (is (= [] (seon.docs/tokens db "" all 2.0)))
-    (is (= ["datoms" "diff" "seon" "run" "outcome" "near" "of"] (seon.docs/words "datoms-diff seon.run/outcome nearOf aB x")) "an identifier is its parts, camelCase too; a one-letter part is no word")
+           (set (map hit (seon.doc/tokens db "fusing" all 2.0)))) "every kind holding the word, and none of the filler")
+    (is (= [:section "p.md#fusing-ranks"] (hit (first (seon.doc/tokens db "fusing ranks" all 2.0)))) "more of the words: first")
+    (is (every? #(< 2.0 (:z %)) (seon.doc/tokens db "fusing" all 2.0)))
+    (is (= [[:var 'app/g]] (map hit (seon.doc/tokens db "fusing" #{:var} 2.0))) "the kinds asked only")
+    (is (= [] (seon.doc/tokens db "nowhere" all 2.0)) "no word of it in any text")
+    (is (= [] (seon.doc/tokens db "" all 2.0)))
+    (is (= ["datoms" "diff" "seon" "run" "outcome" "near" "of"] (seon.doc/words "datoms-diff seon.run/outcome nearOf aB x")) "an identifier is its parts, camelCase too; a one-letter part is no word")
     (testing "the first line holding a word, and its number"
-      (is (= {:line "(fusing 1))" :at 2} (select-keys (first (filter #(= 'app/g (:name %)) (seon.docs/tokens db "fusing" all 2.0))) [:line :at]))))))
+      (is (= {:line "(fusing 1))" :at 2} (select-keys (first (filter #(= 'app/g (:name %)) (seon.doc/tokens db "fusing" all 2.0))) [:line :at]))))))
 
 (defn- with-checkout
   "(f dir) where dir is a checkout of a few pages, as the files the wiki loads are read (docs/ and the top level, the
@@ -390,13 +390,13 @@
       (let [db0 (mt/world)
             tx (seon.root/wiki-tx db0 co)
             db (d/db-with db0 tx)
-            paths (set (seon.docs/page-paths db))]
+            paths (set (seon.doc/page-paths db))]
         (is (every? paths ["AGENTS.md" "BAGGAGE.md" "README.md" "docs/agent.md"]) "the top-level pages and docs/'s")
-        (is (seq (seon.docs/page db "AGENTS.md" :summary)) "a top-level page reads through the one view")
+        (is (seq (seon.doc/page db "AGENTS.md" :summary)) "a top-level page reads through the one view")
         (is (= [] (seon.root/wiki-tx db co)) "an unchanged wiki writes nothing")
         (is (= [] (mapv (juxt :section :message) (filter #(re-find #"^[^/#]+#" (:section %)) (problems/dead-citations db {})))) "the top-level pages add no dead citation")
         (is (= "docs" (first (seon.config/value :seon.config.root/wiki-dirs))))
-        (is (= {"AGENTS.md" true} (select-keys (into {} (map (fn [p] [p true])) (keys (seon.docs/pages co "."))) ["AGENTS.md"])) "pages of \".\" are named without a directory")))))
+        (is (= {"AGENTS.md" true} (select-keys (into {} (map (fn [p] [p true])) (keys (seon.doc/pages co "."))) ["AGENTS.md"])) "pages of \".\" are named without a directory")))))
 
 (deftest the-wiki-of-two-dirs-loads-in-one-pass
   ;; docs/references.md#the-wiki-in-the-store: a link from one dir's page to another's resolves in the one load
@@ -405,8 +405,8 @@
         pages {"demo/a.md" "# A\n\nSee [b](../other/b.md#b).\n" "other/b.md" "# B\n\nIt is the target.\n"}
         tx (docs/load-tx db ["demo" "other"] pages)
         db' (d/db-with db tx)]
-    (is (not-any? #(and (map? %) (:seon.section/dead-links %)) tx) "the link reaches the section of the other dir")
-    (is (= 1 (count (:seon.section/references (d/pull db' [{:seon.section/references [:seon.section/address]}] [:seon.section/address "demo/a.md#a"]))))
+    (is (not-any? #(and (map? %) (:seon.doc/dead-links %)) tx) "the link reaches the section of the other dir")
+    (is (= 1 (count (:seon.doc/references (d/pull db' [{:seon.doc/references [:seon.doc/address]}] [:seon.doc/address "demo/a.md#a"]))))
         "and is stored as a reference")
     (is (= [] (docs/load-tx db' ["demo" "other"] pages)) "an unchanged wiki writes nothing")
     (is (seq (docs/load-tx db' ["demo" "other"] (dissoc pages "other/b.md"))) "a page gone retracts its sections under the other dir")))

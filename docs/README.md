@@ -10,7 +10,7 @@ The wiki stays healthy by eight rules, each a page's or section's to keep, the l
 - **Every section leads with one sentence that stands alone.** At summary depth an agent sees a section's heading and that sentence (as in v1), and decides by it whether to read on; then the body; then links to related sections. A section with none is a `:leadless-section` ([health](health.md#a-section-with-no-lead)).
 - **Everything is linked.** Every section is reachable from the map, every page links its neighbours, and nothing is orphaned or duplicated.
 - **Sections state the current truth by topic.** A change rewrites the section it concerns; nothing is a dated log.
-- **A section that describes code is read again when that code changes.** The loader records the form of each var a section cites when its text is written; a changed form leaves the section a `:stale-section` until it is edited or reviewed (`my.docs/reviewed!`, which is also an empty git commit with a `Reviewed: docs/x.md#heading` trailer, so the review survives a rebuilt store).
+- **A section that describes code is read again when that code changes.** The loader records the form of each var a section cites when its text is written; a changed form leaves the section a `:stale-section` until it is edited or reviewed (`my.doc/reviewed!`, which is also an empty git commit with a `Reviewed: docs/x.md#heading` trailer, so the review survives a rebuilt store).
 - **Every page is reachable from the map or another page.** A page nothing links to is an `:orphan-page` ([health](health.md#an-orphan-page)).
 - **Every problem class links the section that explains its fix.** One that does not is a `:problem-unlinked` ([health](health.md#a-problem-with-no-page)).
 

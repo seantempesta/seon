@@ -69,14 +69,14 @@
 (deftest near-is-a-relation-in-a-query
   (let [[a b c] (vectors 5 3 3 768)
         close (unit (mapv + a (map #(* 0.05 %) b)))
-        db (d/db-with (db-with-vectors [a b c close]) [{:db/id "s" :seon.section/address "x.md#y" :seon.section/heading "y"}])
-        db (d/db-with db [(vector/fact [:seon.section/address "x.md#y"] 0 close 8 "m")])
+        db (d/db-with (db-with-vectors [a b c close]) [{:db/id "s" :seon.doc/address "x.md#y" :seon.doc/heading "y"}])
+        db (d/db-with db [(vector/fact [:seon.doc/address "x.md#y"] 0 close 8 "m")])
         f0 (ffirst (d/q '[:find ?e :where [?e :form/id "f0"]] db))]
     (is (= (rest (exact db (vector/vector-of db f0) 3))
            (mapv first (sort-by second > (d/q '[:find ?e ?s :in $ ?q :where [(seon.vector/near $ ?q 2 {:of :form/id}) [[?e ?s]]] [?e :form/id]] db f0))))
         "an entity's nearest others, as rows a query joins; :of keeps the forms")
     (is (= "f3" (:form/id (d/entity db (first (first (vector/near db f0 1 {:of :form/id})))))) "the form made beside it is first")
-    (is (= #{"f0" "f3" "x.md#y"} (set (map first (d/q '[:find ?n :in $ ?q :where [(seon.vector/near $ ?q 3) [[?e _]]] (or [?e :form/id ?n] [?e :seon.section/address ?n])] db a))))
+    (is (= #{"f0" "f3" "x.md#y"} (set (map first (d/q '[:find ?n :in $ ?q :where [(seon.vector/near $ ?q 3) [[?e _]]] (or [?e :form/id ?n] [?e :seon.doc/address ?n])] db a))))
         "a vector asks too, over every kind: itself, and the form and section beside it")
     (is (= [] (vector/near (ts/test-db) a 3)) "no vectors: no rows")))
 
@@ -84,7 +84,7 @@
   ;; each document titled as the model was trained (docs/vector.md#relevance): a form by its var's
   ;; name, a section by its heading
   (let [db (d/db-with (ts/test-db) [{:db/id "f" :form/id "x/1" :form/src "(defn g [])"} {:var/name 'x/g :var/form "f"}
-                                     {:db/id "s" :seon.section/address "p.md#a" :seon.section/heading "a" :seon.section/text "old"}])
+                                     {:db/id "s" :seon.doc/address "p.md#a" :seon.doc/heading "a" :seon.doc/text "old"}])
         due (vector/due db "m")
         mine (filterv #(#{"title: x/g | text: (defn g [])" "title: a | text: old"} (second %)) due)
         ;; each by its text: due answers in entity order, which says nothing of which is which
@@ -93,11 +93,11 @@
         db (d/db-with db (embedded mine (vectors 3 2 2 768) "m"))]
     (is (and f s) "a form and a section with no vector are due, as the model reads them")
     (is (not-any? (comp #{f s} first) (vector/due db "m")) "embedded, they are not due again")
-    (let [db (d/db-with db [[:db/add s :seon.section/text "new"]])]
+    (let [db (d/db-with db [[:db/add s :seon.doc/text "new"]])]
       (is (= [[s "title: a | text: new"]] (mapv pop (filterv (comp #{f s} first) (vector/due db "m"))))
           "a changed text is due again, and only it, titled by its heading"))
     (let [[_ _ t] (first (filter (comp #{s} first) mine))
-          db (d/db-with db [[:db/add s :seon.section/text "changed while its round was out"]])
+          db (d/db-with db [[:db/add s :seon.doc/text "changed while its round was out"]])
           db (d/db-with db (vector/tx-data [s] [t] (vectors 4 1 1 768) [10] "m"))]
       (is (= [s] (map first (filter (comp #{s} first) (vector/due db "m")))) "a vector of the text before is no vector of the text now"))
     (is (= #{f s} (set (filter #{f s} (map first (vector/due db "m2"))))) "another model's vectors are due again")

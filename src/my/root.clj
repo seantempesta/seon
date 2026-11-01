@@ -2,7 +2,7 @@
   "Root's functions on tasks (from proto.agents.root): write desired state on main;
   the reconciler proc does the rest. Each takes root's system (seon.root/start!)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.edn :as sedn] [seon.contract :as contract :refer [defn defn-]] [seon.root :as root] [seon.task :as task] [seon.docs :as docs] [seon.problems :as problems] [clojure.java.io :as io] [clojure.string :as str] [seon.config :as config]
+  (:require [seon.edn :as sedn] [seon.contract :as contract :refer [defn defn-]] [seon.root :as root] [seon.task :as task] [seon.doc :as docs] [seon.problems :as problems] [clojure.java.io :as io] [clojure.string :as str] [seon.config :as config]
             [seon.reconcile :as reconcile] [seon.db :as pdb] [seon.template :as tpl] [seon.watch :as watch] [datahike.api :as d]
             [seon.judge :as judge] [seon.model :as model] [seon.turn :as turn] [clojure.edn :as edn] [seon.lib :as lib] [seon.fx :as fx] [seon.error :as err] [seon.source :as source] [seon.program :as program] [seon.agent]))
 
@@ -253,7 +253,7 @@
 
 (defn load-docs!
   "Load the wiki (the pages under dir of the checkout, docs by default) into main as section
-  entities (seon.docs/load-tx): a changed section rewritten, a removed one retracted, an
+  entities (seon.doc/load-tx): a changed section rewritten, a removed one retracted, an
   unchanged wiki writing nothing. Answers the writer's answer with the counts."
   {:malli/schema [:function [:=> [:cat :seon.root/sys] :map] [:=> [:cat :seon.root/sys :string] :map]]}
   ([sys] (load-docs! sys "docs"))

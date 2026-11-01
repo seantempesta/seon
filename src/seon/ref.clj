@@ -663,10 +663,10 @@
   the page whole is written as (seon.task/cites-tx). See docs/references.md#an-entity-cites."
   {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe pos-int?]]}
   [db path]
-  ;; the page's sections, one seek of :seon.section/address from its prefix (its addresses sort together)
+  ;; the page's sections, one seek of :seon.doc/address from its prefix (its addresses sort together)
   (let [pre (str path "#")]
-    (some #(when (empty? (d/datoms db :eavt (:e %) :seon.section/parent)) (:e %))
-          (take-while #(and (= :seon.section/address (:a %)) (str/starts-with? (:v %) pre)) (d/seek-datoms db :avet :seon.section/address pre)))))
+    (some #(when (empty? (d/datoms db :eavt (:e %) :seon.doc/parent)) (:e %))
+          (take-while #(and (= :seon.doc/address (:a %)) (str/starts-with? (:v %) pre)) (d/seek-datoms db :avet :seon.doc/address pre)))))
 
 (defn task?
   "Does sym name a task on db: is its ns/name a :seon.task/id (seon.task/task-id), and no

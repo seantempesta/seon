@@ -1,9 +1,9 @@
-(ns seon.docs-cost-test
+(ns seon.doc-cost-test
   "Cost proof of loading the wiki: an unchanged reload costs one parse and a few seeks per
   section, and writes nothing."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.test-store :as ts] [my.test :as mt] [clojure.test :refer [deftest is]] [seon.contract :refer [defn defn-]]
-            [datahike.api :as d] [seon.db :as pdb] [seon.docs :as docs] [seon.cost :as cost] [seon.docs-test]))
+            [datahike.api :as d] [seon.db :as pdb] [seon.doc :as docs] [seon.cost :as cost] [seon.doc-test]))
 
 (defn- base
   "The world, and the namespace app.m0 the pages cite (f0 to f10)."
@@ -26,12 +26,12 @@
 
 (def ^:private reload-estimate
   "The estimate of an unchanged reload: see the test."
-  {:of 'seon.docs/load-tx :input 'seon.docs-cost-test/wiki
+  {:of 'seon.doc/load-tx :input 'seon.doc-cost-test/wiki
    :n "sections in the wiki"
    :work (str "per section of ~90 bytes: its parse (seon.ref's estimate, ~270 ns and ~360 B per byte, the read of "
               "its one name included: ~25 us, ~32 KB); on db, one AVET seek for its var and one EAVT seek per "
               "stated attribute, five (seon.task/entity-tx) (~5 seeks at ~17 us and ~33 KB each, seon.db/avet-seek-allocates: ~85 us, "
-              "~165 KB); ~19 contracted calls (own-text, cited, two citation-targets, kept and its alias check of the one name (seon.ref/kept: the names it keeps), wanted, entity-tx and one eid; the parse's ~3 per inline for its two inlines and the read's 3; the stored-section scan and page split amortized). Its second inline, a section of a file named by its address, costs a candidate and its target and reads no file (seon.docs/section-names keeps the names only: it used to parse the file for each, 1.2 MB a section). Since the wiki records what each section was written against, a stored section is also pulled once (its text, :seon.section/read, :seon.section/baseline-unread: one more seek each, ~+40 KB, ~+100 us) to keep that record while its text is unchanged. The stored sections are read once, one datom each, so a section's "
+              "~165 KB); ~19 contracted calls (own-text, cited, two citation-targets, kept and its alias check of the one name (seon.ref/kept: the names it keeps), wanted, entity-tx and one eid; the parse's ~3 per inline for its two inlines and the read's 3; the stored-section scan and page split amortized). Its second inline, a section of a file named by its address, costs a candidate and its target and reads no file (seon.doc/section-names keeps the names only: it used to parse the file for each, 1.2 MB a section). Since the wiki records what each section was written against, a stored section is also pulled once (its text, :seon.doc/read, :seon.doc/baseline-unread: one more seek each, ~+40 KB, ~+100 us) to keep that record while its text is unchanged. The stored sections are read once, one datom each, so a section's "
               "parent and link targets are map lookups. Nothing is written: the answer is []")
    :growth :linear
    ;; 2026-10-31 (shrink-tests-4): sizes [10 20 30] on the world (a size is a multiple of ten: pages of ten sections):
@@ -62,7 +62,7 @@
         v (docs/view db address depth)]
     (is (= 9 (count (:seon.ref/cited-by v))) "the page's nine sections cite it: the edges the proof prices are there"))
   (cost/proof
-    {:of 'seon.docs/view :input 'seon.docs-cost-test/view-of
+    {:of 'seon.doc/view :input 'seon.doc-cost-test/view-of
      :n "sections in the wiki"
      :work (str "one pull of the section, one of each section below it, and for each edge one seek (the VAET datoms "
                 "of the reverse edge, the references of the pull) and one pull of the edge's entity; none reads "
@@ -79,9 +79,9 @@
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :string :map :any]]}
   [n]
   (let [hit? (fn [i] (< i 10))
-        db (d/db-with (seon.docs-test/grep-db (for [i (range n)] [(str "f" i) nil (str "(defn f" i " []\n  " (if (hit? i) "(fused 1)" "(inc 1)") ")")]))
-                      (vec (concat (for [i (range (quot n 2))] {:seon.section/address (str "p.md#s" i) :seon.section/heading (str "S" i)
-                                                                :seon.section/text (str "Prose of section " i (when (hit? i) ", fused.") "\nMore prose.")})
+        db (d/db-with (seon.doc-test/grep-db (for [i (range n)] [(str "f" i) nil (str "(defn f" i " []\n  " (if (hit? i) "(fused 1)" "(inc 1)") ")")]))
+                      (vec (concat (for [i (range (quot n 2))] {:seon.doc/address (str "p.md#s" i) :seon.doc/heading (str "S" i)
+                                                                :seon.doc/text (str "Prose of section " i (when (hit? i) ", fused.") "\nMore prose.")})
                                    (for [i (range (quot n 4))] {:seon.task/id (str "app/t" i) :seon.task/plan (str "Plan " i (when (hit? i) " fused") ".")})
                                    (for [i (range (quot n 8))] {:schema/key (keyword "app" (str "k" i)) :schema/form (str "[:map " (when (hit? i) "fused ") i "]")}))))]
     ;; the postings are derived data, built once for a value of the store (docs/vector.md#search): the query is what is measured
@@ -96,8 +96,8 @@
   [n]
   (let [h (quot n 2)
         db (mt/with (mt/world)
-                    (vec (concat (for [i (range h)] {:seon.section/address (str "p.md#s" i) :seon.section/heading "S"
-                                                     :seon.section/text (if (< i 5) "Prose of a section, fused.\nMore prose." "Prose of a section.\nMore prose.")})
+                    (vec (concat (for [i (range h)] {:seon.doc/address (str "p.md#s" i) :seon.doc/heading "S"
+                                                     :seon.doc/text (if (< i 5) "Prose of a section, fused.\nMore prose." "Prose of a section.\nMore prose.")})
                                  (for [i (range h)] {:seon.task/id (str "app/t" i)
                                                      :seon.task/plan (if (< i 5) "Plan of a task fused." "Plan of a task.")}))))]
     ;; the postings are derived data, built once for a value of the store (docs/vector.md#search): the query is what is measured
@@ -112,7 +112,7 @@
   ;; texts: bytes and calls grow with n) or its hits are not the ten (the first assertion).
   (let [[db w kinds z] (tokens-input 40)]
     (is (= 10 (count (docs/tokens db w kinds z))) "the ten texts holding the word are the hits"))
-  (cost/proof {:of 'seon.docs/tokens :input 'seon.docs-cost-test/tokens-input
+  (cost/proof {:of 'seon.doc/tokens :input 'seon.doc-cost-test/tokens-input
                :n "texts of the kinds asked (sections and task plans), ten of them holding the word, the rest one vocabulary without it"
                :work "a scan of the index's vocabulary (the db unchanged since the index was checked: its :hash and :max-tx say so, no text is read), then the postings of the word: each text holding it scored, each hit read and named"
                :growth :constant
@@ -147,7 +147,7 @@
 
 ;; See docs/vector.md#search
 (deftest a-text-index-costs-its-texts
-  (cost/proof {:of 'seon.docs/build-index :input 'seon.docs-cost-test/index-input
+  (cost/proof {:of 'seon.doc/build-index :input 'seon.doc-cost-test/index-input
                :n "forms' sources the branch holds (search-input's mix, ten holding the word)"
                :work "one pass over the attribute's texts, each split into terms once and its terms added to the postings"
                :growth :linear
@@ -160,11 +160,11 @@
                :sizes [60 180 600]}))
 
 (deftest search-costs-its-texts
-  (cost/proof {:of 'seon.context/search :input 'seon.docs-cost-test/search-input
+  (cost/proof {:of 'seon.context/search :input 'seon.doc-cost-test/search-input
                :n "texts the branch holds (forms, sections, task plans and schema entries), ten of each kind holding the word"
                :work "one scan of each kind's text attribute, lower-cased once, a count of the query's words in each (BM25 and its z-score), then per hit its names and its line; the references of the names in the query; relevance over the first k x related-near hits (a bounded pool)"
                :growth :linear
-               ;; measured 2026-10-28 with search and relevance on the one seon.docs/bm25 (each text's counts a
+               ;; measured 2026-10-28 with search and relevance on the one seon.doc/bm25 (each text's counts a
                ;; sparse map, bm25's contract checking them): 3.78 MB / 623 calls at 100, 8.70 MB / 1,088 at 300,
                ;; 19.17 MB / 2,314 at 1,000, 67.68 MB / 7,714 at 4,000 (before the one bm25: 62.71 MB at 4,000)
                ;; measured 2026-10-28 with the postings (ten texts of each kind holding the word): 2.70 MB / 204 calls at 100, 2.75 MB / 204 at 300,
@@ -189,9 +189,9 @@
 ;; See docs/references.md#the-wiki-in-the-store
 (deftest a-cited-var-finds-its-sections-by-the-names-sections-hold
   (cost/proof
-    {:of 'seon.docs/citing-sections :input 'seon.docs-cost-test/citing-input
+    {:of 'seon.doc/citing-sections :input 'seon.doc-cost-test/citing-input
      :n "wiki sections citing the var (all of them)"
-     :work "one pass over the sections' cited names (:seon.section/names has no index), each match's address; the cut is the first :seon.config.ctx/cited-by of the sorted addresses"
+     :work "one pass over the sections' cited names (:seon.doc/names has no index), each match's address; the cut is the first :seon.config.ctx/cited-by of the sorted addresses"
      :growth :linear
      ;; 2026-10-31 (shrink-tests-4): sizes [30 100 300], on the world
      ;; measured 2026-10-27: 332k ticks / 1.42 MB at 100, 1.04M / 4.65 MB at 300, 3.86M / 18.1 MB at 1,000

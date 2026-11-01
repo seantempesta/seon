@@ -78,7 +78,7 @@ Each v1 capability for building and printing the model's context, and where it s
 | `(help)` checked against the program | [agent](agent.md), the system message; `my.agent/help`; every form on it run in an agent by `seon.repl-test/the-help-page-runs` | present |
 | context: stable run sections, cached; small turn sections; must-reads capped | ```seon.context/request``` (the help, the session's records, and the page's parts, whole at the first request then the parts that changed, from the live walk); vars at their citation's depth, cut only by the printer at the context's budget; cache hits on each turn | present |
 | one printer with a budget and runnable continuations; renders on schemas | `seon.print`, `seon.render` | present |
-| wiki sections in the context | `seon.docs` | new |
+| wiki sections in the context | `seon.doc` | new |
 | Datastar pages: `/`, `/agent/{id}` | `seon.web` | present |
 | `/agent/{id}/debug`: each model call, what it was sent, its tokens | `/agent/{id}/context` (`seon.render.proc/debug-value`; `/agent/{id}/debug` is the agent's `@ctx` printed): each model turn a row, newest first, read back from the records it sent (`:seon.model-call/sent`, ```seon.context/parts-of```), each part beside the record that made it, with its tokens, cache share and, for a failed call, its typed error | present (task `seon.context/a-turn-records-what-it-sent`) |
 | `/agent/{id}/message` (the owner's input bar) | the page's message bar and the server's `:message` op, both `seon.root/message!`: root's one delivery into the agent's inbox, which its next turn takes into its basis (`:messages` in the block) | present: a fact on main (from `"owner"`, to the run), and on the agent's branch when its turn takes it, named by id in the turn's basis |
@@ -107,4 +107,4 @@ Each v1 way of onboarding agents and keeping docs, and where it stands here.
 |---|---|---|
 | `CLAUDE.md` (the laws) | `AGENTS.md` alone: Claude Code reads it when the folder has no `CLAUDE.md` | present |
 | 13 skills in ``.agents/skills`` | the task's context and this wiki | dropped |
-| architecture pages | topic pages and the [map](README.md), loaded into the store as sections (`seon.docs`); no check fails on a dangling citation (task `seon.docs/the-wiki-stays-true-and-healthy`) | partial |
+| architecture pages | topic pages and the [map](README.md), loaded into the store as sections (`seon.doc`); no check fails on a dangling citation (task `seon.doc/the-wiki-stays-true-and-healthy`) | partial |

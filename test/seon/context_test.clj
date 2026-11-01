@@ -4,7 +4,7 @@
   proof is not shown again, a merge task's plan stays its own."
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]] [datahike.api :as d]
             [seon.db :as pdb] [seon.vector :as vector] [seon.task :as task] [seon.context :as context] [seon.print :as print]
-            [seon.docs-test] [seon.reader :as reader] [seon.proofs :as proofs] [seon.agent :as agent] [seon.docs :as docs] [seon.judge] [seon.ctx :as ctx] [seon.render :as render] [seon.render.ui] [seon.web.html]
+            [seon.doc-test] [seon.reader :as reader] [seon.proofs :as proofs] [seon.agent :as agent] [seon.doc :as docs] [seon.judge] [seon.ctx :as ctx] [seon.render :as render] [seon.render.ui] [seon.web.html]
             [seon.print.select :as select] [clojure.string :as str] [seon.edn] [seon.print-test :as print-test] [seon.repl :as repl] [seon.model]))
 
 (defn- ns-fact
@@ -268,7 +268,7 @@
 (deftest an-unresolved-citation-says-what-to-do
   ;; task seon.task/a-task-cites-what-it-needs: a name the plan cites that resolves to
   ;; nothing tells the agent what that means and what to do, not only that it is unresolved
-  (let [r (seon.docs/resolve-ref (db-with-program) 'demo/nowhere :doc)]
+  (let [r (seon.doc/resolve-ref (db-with-program) 'demo/nowhere :doc)]
     (is (:unresolved r))
     (is (string? (:problem r)) "a message beside the name")))
 
@@ -276,7 +276,7 @@
   "# Flow\n\nFlow runs procs.\n\n## Step\n\nA step returns its state and outputs. It never blocks.\n\n## Stop\n\nStop awaits each proc's exit. Then the graph is gone.\n")
 
 (deftest a-task-context-pulls-what-its-plan-cites-at-that-depth
-  ;; task seon.docs/a-task-cites-what-it-needs: a section the plan cites reaches the
+  ;; task seon.doc/a-task-cites-what-it-needs: a section the plan cites reaches the
   ;; context at the depth its delimiter asks for, read from the sections main holds
   (let [db (db-with-program)
         db (d/db-with db (docs/load-tx db "docs" {"docs/flow.md" wiki-page}))
@@ -438,7 +438,7 @@
   ;; task seon.context/a-cited-var-shows-at-its-citation-depth: the delimiter picks the depth
   ;; for a var as it does for a section (docs/references.md#the-delimiter-picks-the-depth)
   ;; the vars are the db's alone (no namespace of them in this process): what each shows is read
-  ;; from its facts (seon.docs/resolve-ref)
+  ;; from its facts (seon.doc/resolve-ref)
   (let [db (d/db-with (db-with-program)
                       (program-facts '[[ctx-depth/sq "(defn sq \"Squares x. Used by area.\" {:malli/schema [:=> [:cat :int] :int]} [x] (* x x))" []]
                                        [ctx-depth/cube "(defn cube \"Cubes x.\" {:malli/schema [:=> [:cat :int] :int]} [x] (* x x x))" []]
@@ -448,7 +448,7 @@
                                                :seon.task/proofs #{'demo-test/f-test}}]))
         ;; the rule lives in docs/resolve-ref (the task's data shows its write set's vars whole: their source)
         by (into {} (for [r (seon.ref/references db (:seon.task/plan (task/task db "demo/d")))]
-                      [(:seon.ref/name r) (seon.docs/resolve-ref db (:seon.ref/name r) (:seon.ref/depth r))]))]
+                      [(:seon.ref/name r) (seon.doc/resolve-ref db (:seon.ref/name r) (:seon.ref/depth r))]))]
     (is (= {:symbol 'ctx-depth/sq :arglists '([x]) :summary "Squares x."} (by 'ctx-depth/sq)) "bare: arglists and the first sentence")
     (is (= {:symbol 'ctx-depth/cube :arglists '([x]) :doc {:seon.print/prose "Cubes x."} :contract [:=> [:cat :int] :int]} (by 'ctx-depth/cube))
         "one backtick: arglists, doc and contract")
@@ -470,7 +470,7 @@
   (let [src (str "(defn big \"Does much.\" [] " (str/join " " (repeat 8000 "(inc 1)")) ")")
         db (d/db-with (db-with-program) (program-facts [['ctx-big/big src []]]))
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "r" :seon.task/plan "Make ```ctx-big/big``` fast."}]))
-        r (seon.docs/resolve-ref db 'ctx-big/big :code)
+        r (seon.doc/resolve-ref db 'ctx-big/big :code)
         ;; the task's cite as ctx holds it: the var it names, with its form
         part (with-meta {:seon.cite/name 'ctx-big/big :seon.cite/depth :code :var {:var/name 'ctx-big/big :form {:form/src src}}} {:seon.render/schema :seon.cite/cite-fact})
         html (seon.web.html/html (seon.render/html {:schema :seon.cite/cite-fact :as :block} part))
@@ -609,7 +609,7 @@
         r1 (turn! 1 {})
         _ (plan! "Later.")
         ;; and the system prompt changes: a turn's system prompt is its section as of the turn's t
-        _ (d/transact conn [{:db/id (seon.ref/page-top @conn context/system-page) :seon.section/text "Changed after the turns."}])
+        _ (d/transact conn [{:db/id (seon.ref/page-top @conn context/system-page) :seon.doc/text "Changed after the turns."}])
         db @conn
         e-of (fn [id] (d/q '[:find ?e . :in $ ?id :where [?e :seon.model-call/id ?id]] db id))]
     [db [r0 r1] [(e-of "demo/f#1/0") (e-of "demo/f#1/1")]]))
@@ -805,15 +805,15 @@
 
 (deftest a-cited-var-carries-the-sections-that-cite-it
   ;; root's coverage gap 7: the wiki sections reached the agent only through the task's own citations; a
-  ;; cited var now carries the sections that cite it (seon.docs/citing-sections), bounded by
+  ;; cited var now carries the sections that cite it (seon.doc/citing-sections), bounded by
   ;; :seon.config.ctx/cited-by, the decisions page last
   (let [db (d/db-with (db-with-program) (program-facts '[[demo/area "(defn area [x] (demo/f x))" [demo/f]]]))
         pages {"docs/a.md" "# A\n\nThe a page.\n\n## One\n\nWhat f does: ```demo/f``` doubles.\n"
                "docs/b.md" "# B\n\nThe b page.\n\n## Two\n\nAlso `demo/f`.\n"
                "docs/decisions.md" "# D\n\nRulings.\n\n## Ruled\n\nOwner chose `demo/f`.\n"}
-        db (d/db-with db (seon.docs/load-tx db "docs" pages))]
-    (is (= ["docs/a.md#one" "docs/b.md#two" "docs/decisions.md#ruled"] (seon.docs/citing-sections db 'demo/f)) "the sections citing it, the decisions page last")
-    (is (= [] (seon.docs/citing-sections db 'demo/area)) "none cite it")
+        db (d/db-with db (seon.doc/load-tx db "docs" pages))]
+    (is (= ["docs/a.md#one" "docs/b.md#two" "docs/decisions.md#ruled"] (seon.doc/citing-sections db 'demo/f)) "the sections citing it, the decisions page last")
+    (is (= [] (seon.doc/citing-sections db 'demo/area)) "none cite it")
     (is (= ["docs/a.md#one" "docs/b.md#two" "docs/decisions.md#ruled"] (:sections (context/cited db 'demo/f))) "the write set's entry for it carries them")
     (is (not (contains? (context/cited db 'demo/area) :sections)) "and an uncited var carries none")))
 
@@ -943,9 +943,9 @@
   (let [anchors (mapv #(str "docs/vector.md#" %) ["the-model" "what-is-embedded" "the-pyramid" "fused-with-the-call-graph" "what-the-work-is-likely-to-need-as-an-eval"])
         dir (fn [& xs] (let [v (vec (concat xs (repeat (- 768 (count xs)) 0.0))) n (Math/sqrt (reduce + (map #(* % %) v)))] (mapv #(/ % n) v)))
         db (ts/test-db)
-        db (d/db-with db (vec (for [i (range 5)] {:seon.section/address (anchors i) :seon.section/heading (str "S" i)
-                                                  :seon.section/lead (str "Section " i " says one thing. And more.")
-                                                  :seon.section/text (str "Section " i " says one thing. And more.")})))
+        db (d/db-with db (vec (for [i (range 5)] {:seon.doc/address (anchors i) :seon.doc/heading (str "S" i)
+                                                  :seon.doc/lead (str "Section " i " says one thing. And more.")
+                                                  :seon.doc/text (str "Section " i " says one thing. And more.")})))
         ;; demo is the program's (src/), demo-test and its helpers are test/'s (seon.program/program-nss),
         ;; held before the task cites them: a name in a namespace the program does not hold is not cited
         db (d/db-with db [{:ns/name 'demo :ns/file "src/demo.clj"} {:ns/name 'demo-test :ns/file "test/demo_test.clj"}])
@@ -953,7 +953,7 @@
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "r" :seon.task/plan plan
                                               :seon.task/config {:seon.config.render/relevance-summary 0.0}}]))
         te (pdb/eid db :seon.task/id "demo/r")
-        es (into [te] (for [i (range 5)] (pdb/eid db :seon.section/address (anchors i))))
+        es (into [te] (for [i (range 5)] (pdb/eid db :seon.doc/address (anchors i))))
         db (d/db-with db (vector/tx-data es (repeat 6 1) (into [(dir 1.0)] (for [i (range 5)] (dir 1.0 (* 0.1 (inc i))))) (repeat 6 10) "m"))
         ;; a function beside the plan by meaning, and a schema key its plan names
         db (d/db-with db [{:db/id "f" :form/id "demo/g" :form/src "(defn g [])" :form/keywords #{:demo/thing :demo/not-a-schema}} {:var/name 'demo/g :var/form "f" :var/doc "Gets it. More."}
@@ -966,7 +966,7 @@
   ;; best first; the touched items left out, and what is near them lifted (zt)
   (let [[db te] (sections-near "Make the page say one thing.")
         qv (vector/vector-of db te)
-        sec #(pdb/eid db :seon.section/address (str "docs/vector.md#" %))
+        sec #(pdb/eid db :seon.doc/address (str "docs/vector.md#" %))
         score (fn [touched] (into {} (:section (context/relevance db {:qv qv :text "Make the page say one thing." :seeds touched :touched touched}
                                                                   #{:section} (constantly true)))))
         cold (:section (context/relevance db {:qv qv :text "Make the page say one thing." :seeds #{} :touched #{}} #{:section} (constantly true)))]
@@ -986,13 +986,13 @@
         "a logit's chance: flat past either end, linear between knots"))
   (is (= [0.0 0.0] (#'seon.context/z [3.0 3.0])) "no spread, no evidence")
   (is (= [1.0 0.0 -1.0] (#'seon.context/z [2.0 nil 0.0])) "a missing value is no evidence; the rest over the values there are")
-  (is (= [] (seon.docs/bm25 #{"a"} [] [])) "an empty pool scores nothing")
-  (is (= [0.0 0.0] (seon.docs/bm25 #{} [{"a" 1} {"b" 2}] [1 2])) "an empty query scores every text 0")
-  (let [[x y] (seon.docs/bm25 #{"near"} [{"near" 1 "of" 1} {"of" 2}] [2 2])]
+  (is (= [] (seon.doc/bm25 #{"a"} [] [])) "an empty pool scores nothing")
+  (is (= [0.0 0.0] (seon.doc/bm25 #{} [{"a" 1} {"b" 2}] [1 2])) "an empty query scores every text 0")
+  (let [[x y] (seon.doc/bm25 #{"near"} [{"near" 1 "of" 1} {"of" 2}] [2 2])]
     (is (and (pos? x) (zero? y)) "a text holding the query's word scores above one that does not")))
 
 (deftest a-tokens-words-are-its-identifiers-parts
-  (is (= ["seon" "vector" "near" "of" "foo" "bar"] (seon.docs/terms "seon.vector/near-of fooBar a"))
+  (is (= ["seon" "vector" "near" "of" "foo" "bar"] (seon.doc/terms "seon.vector/near-of fooBar a"))
       "split at what is no letter or digit and at a case change, one-letter parts dropped"))
 
 (defn- walked
@@ -1045,7 +1045,7 @@
         part (str "cited-" rid "-docs_2Fvector.md_23the-model")
         html (fn [w] (into {} (map (juxt :id :html)) (render/placed-units w)))]
     (is (some? ((html w) part)) "the cited section, a part of its own")
-    (let [changed (step! walk [[:db/add [:seon.section/address "docs/vector.md#the-model"] :seon.section/lead "The model, as main now says it."]])
+    (let [changed (step! walk [[:db/add [:seon.doc/address "docs/vector.md#the-model"] :seon.doc/lead "The model, as main now says it."]])
           live (html w)
           cold (let [d @cell w2 (render/draw (:tree (ctx/build d (pdb/eid d :seon.agent/key "demo/a1") :b)) ctx/changes d
                                              (requiring-resolve (render/declared :seon.render/render-ctx)))]
@@ -1115,7 +1115,7 @@
 (deftest names-in-a-query-are-read-by-the-citation-parser
   ;; docs/references.md: a query's names come from seon.ref/parse: a var's symbol kept only when the db
   ;; holds it, a keyword always, once each in first-mention order, in backticks or bare
-  (let [db (d/db-with (seon.docs-test/corpus-db) [{:db/id "c" :var/name 'app/caller} {:db/id "d" :var/name 'app/other}])
+  (let [db (d/db-with (seon.doc-test/corpus-db) [{:db/id "c" :var/name 'app/caller} {:db/id "d" :var/name 'app/other}])
         names-in #'context/names-in]
     (is (= ['app/caller] (names-in db "who calls `app/caller`?")) "a name in backticks")
     (is (= ['app/caller] (names-in db "who calls app/caller now")) "a bare name")
@@ -1126,7 +1126,7 @@
 
 (deftest search-fuses-words-and-references-and-filters-by-plain-data
   ;; task one-index steps 4-5: one search over every kind; the answer is data an agent filters
-  (let [db (d/db-with (seon.docs-test/corpus-db)
+  (let [db (d/db-with (seon.doc-test/corpus-db)
                       [{:db/id "c" :var/name 'app/caller} {:form/id "app/caller" :form/src "(defn caller [] (g))" :form/defines ["c"] :form/refs ['app/g]}])
         ;; :min 0 unless a test asks its own: on a corpus of a few texts every chance is low, and the
         ;; page's cut (seon.config.render/relevance-summary) would hide them
@@ -1172,8 +1172,8 @@
   (let [with-vec (fn [m i] [m (vector/fact (:db/id m) 0 (unit-vec i) 4 "m")])
         db (d/db-with (ts/test-db)
                       (into [] cat
-                            [(with-vec {:db/id "s0" :seon.section/address "m.md#a" :seon.section/heading "a" :seon.section/text "about a"} 0)
-                             (with-vec {:db/id "s1" :seon.section/address "m.md#b" :seon.section/heading "b" :seon.section/text "about b"} 5)
+                            [(with-vec {:db/id "s0" :seon.doc/address "m.md#a" :seon.doc/heading "a" :seon.doc/text "about a"} 0)
+                             (with-vec {:db/id "s1" :seon.doc/address "m.md#b" :seon.doc/heading "b" :seon.doc/text "about b"} 5)
                              [{:db/id "v" :var/name 'm/f :var/form "f"}]
                              (with-vec {:db/id "f" :form/id "m/f" :form/src "(defn f [] 1)" :form/defines ["v"]} 1)]))
         hits (context/search db "zzz" {:by #{:meaning} :k 10 :min 0.0} (unit-vec 0))]

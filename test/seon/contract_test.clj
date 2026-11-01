@@ -125,7 +125,7 @@
 (deftest a-test-process-arms-what-root-arms-at-boot
   ;; a cost proof counts contracted calls on armed vars, so the same code counts the same in bin/test
   ;; and in an agent's test child only if both armed seon.config, seon.edn and seon.print as root's
-  ;; boot does: seon.docs/citing-sections read 1 call under bin/test and 4 in the agent (the config read it makes)
+  ;; boot does: seon.doc/citing-sections read 1 call under bin/test and 4 in the agent (the config read it makes)
   (is (contract/armed? #'seon.config/value) "seon.config/value is counted, as in root")
   (is (contract/armed? #'seon.print/print-value) "seon.print/print-value is counted, as in root")
   (is (every? contract/armed? (for [n contract/boot-nss v (vals (ns-interns (the-ns n))) :when (contract/contract v)] v))

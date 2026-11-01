@@ -433,7 +433,7 @@
   commit the running generation's tree checks out), and the ref moved only from that head. No
   working tree or checkout is touched, so main and every worktree's files stay as they are.
   With :allow-empty? and no files it commits the branch's own tree again (an empty commit: a review,
-  seon.docs/review-message). Answers {:value {:sha :files n}} ({:sha nil :files 0} when there is nothing
+  seon.doc/review-message). Answers {:value {:sha :files n}} ({:sha nil :files 0} when there is nothing
   to write), or :seon.fx/io-error."
   {:malli/schema [:=> [:cat :map] :map]}
   [{{:keys [dir branch files message allow-empty?]} :req}]
@@ -508,7 +508,7 @@
   {address {:commit sha}} :files {[sha file] text-or-nil} :errors {[sha file] message}}}: a page git
   cannot blame (not a git checkout, an untracked file) answers {:error message} for its sections, and
   a (commit, file) git cannot show is under :errors, never nil; or :seon.fx/io-error. The wiki's
-  loader records a section whose history is unread as of today and says so (seon.docs/baseline-reads)."
+  loader records a section whose history is unread as of today and says so (seon.doc/baseline-reads)."
   {:malli/schema [:=> [:cat :map] :map]}
   [{{:keys [root sections]} :req}]
   (try

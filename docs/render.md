@@ -227,7 +227,7 @@ Uses of take, subs and the like in display code that choose what to find or read
 - `seon.render.ui/markdown`, `seon.render.ui/task-title`: Markdown text split into its blocks by the offsets its parse (`seon.ref/scan`) gives (a fenced block's content and a list's items too), each kept as written; a name's first letter made capital: text rearranged, nothing left out.
 - `seon.context/similar`: the top k of a search (`take` the config's `:seon.config.render/similar` of its ranking), and the forms that search further beside them: a search's answer, not a cut of output.
 - `seon.context/search`: a search's answer, its first `:k` hits (`take`) with a count of the rest and the form that returns them, that form printed as code to evaluate (`pr-str` of the query and its options): not a cut of output.
-- `seon.context/item-text`: a text for relevance's lexical feature (`seon.docs/terms`) (a schema's form printed to find its words, a token's characters `subs` out of its text): an input to a score, never shown.
+- `seon.context/item-text`: a text for relevance's lexical feature (`seon.doc/terms`) (a schema's form printed to find its words, a token's characters `subs` out of its text): an input to a score, never shown.
 - `seon.context/neighbours`: the first `cap` of who names a var or key (`take`), a bounded read of the reference graph for a score (a var every form names would cost thousands of datoms): work bound, not output.
 - `seon.agent/embed-written!`: the first `:seon.config.vector/texts` of the texts due go in one `:embed` request (`take`), the rest stay due for the next: a batch bound on work, not a cut of output.
 - `my.agent/file-source`, `seon.repl/form-src`: a form's own text out of its file or its reply (`subs` at a reader's offsets).

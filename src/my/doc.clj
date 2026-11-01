@@ -1,8 +1,8 @@
-(ns my.docs
+(ns my.doc
   "The wiki's functions for an agent (a section it has read again): record that you read a section
   as it is, though the code it describes changed, so it is no longer stale."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.docs :as docs] [seon.config :as cfg]))
+  (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.doc :as docs] [seon.config :as cfg]))
 
 (defn reviewed!
   "Record that who read section address (docs/x.md#heading) as it is, with the code it cites as it

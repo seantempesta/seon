@@ -41,7 +41,7 @@
                     [:unit {:optional true} [:maybe :string]]
                     ;; an eval row's cuts opened on the page, each its continuation form as EDN text (seon.web/open-form read it)
                     [:opened {:optional true} [:set :string]]]
- ;; what a citation reached (seon.docs/reached: a var, a namespace, a task, a section, a file, or nothing)
+ ;; what a citation reached (seon.doc/reached: a var, a namespace, a task, a section, a file, or nothing)
  :seon.render/kind [:enum :entity :value :var :schema :namespace :task :section :file :unresolved]
  ;; the schema a value is drawn by: its entity schema, or a value's attribute
  :seon.render/schema :qualified-keyword

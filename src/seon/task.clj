@@ -78,7 +78,7 @@
   (cond (and (qualified-symbol? name) (ref/task? db name)) {:seon.cite/name name :seon.cite/task (str name)}
         name {:seon.cite/name name}
         anchor {:seon.cite/address (str path "#" anchor)}
-        :else {:seon.cite/address (or (some->> (ref/page-top db path) (d/pull db [:seon.section/address]) :seon.section/address) path)}))
+        :else {:seon.cite/address (or (some->> (ref/page-top db path) (d/pull db [:seon.doc/address]) :seon.doc/address) path)}))
 
 (defn cite-tx
   "The cite entity of entity of (a lookup ref, or the tempid of the write that makes it; of-id its identity

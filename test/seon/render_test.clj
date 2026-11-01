@@ -6,7 +6,7 @@
   (:require [seon.test-store :as ts] [test-runner :as runner] [clojure.test :refer [deftest is testing]]
             [clojure.string :as str] [clojure.core.async :as a]
             [seon.render :as r] [seon.render.ui :as ui] [seon.render.proc :as p]
-            [seon.web.html :as h] [clojure.walk] [clojure.set] [seon.print.select] [seon.config] [seon.docs] [seon.print] [seon.db] [seon.reconcile] [seon.task] [seon.edn] [seon.context] [seon.contract] [seon.repl] [datahike.api :as d]
+            [seon.web.html :as h] [clojure.walk] [clojure.set] [seon.print.select] [seon.config] [seon.doc] [seon.print] [seon.db] [seon.reconcile] [seon.task] [seon.edn] [seon.context] [seon.contract] [seon.repl] [datahike.api :as d]
             [seon.fx] [seon.source] [seon.program] [seon.web] [seon.template] [seon.context-test] [seon.render-cost-test] [seon.turn] [seon.model] [seon.problems] [my.agent]))
 
 (def ^:private task
@@ -1662,10 +1662,10 @@
   (let [k "b1/a1"
         db (d/db-with (ts/test-db)
                       [{:ns/name 'demo :ns/file "src/demo.clj"}
-                       {:seon.section/address "docs/x.md#the-x" :seon.section/heading "The x" :seon.section/lead "What x does. And more." :seon.section/text "What x does. And more."}
-                       {:db/id "top" :seon.section/address "docs/testing.md#testing" :seon.section/heading "Testing" :seon.section/lead "How a test is written."}
-                       {:seon.section/address "docs/testing.md#testing-in-the-world" :seon.section/heading "Testing in the world" :seon.section/parent "top"}
-                       {:seon.section/address "docs/references.md#an-entity-cites" :seon.section/heading "An entity cites" :seon.section/lead "A citation is an entity."}
+                       {:seon.doc/address "docs/x.md#the-x" :seon.doc/heading "The x" :seon.doc/lead "What x does. And more." :seon.doc/text "What x does. And more."}
+                       {:db/id "top" :seon.doc/address "docs/testing.md#testing" :seon.doc/heading "Testing" :seon.doc/lead "How a test is written."}
+                       {:seon.doc/address "docs/testing.md#testing-in-the-world" :seon.doc/heading "Testing in the world" :seon.doc/parent "top"}
+                       {:seon.doc/address "docs/references.md#an-entity-cites" :seon.doc/heading "An entity cites" :seon.doc/lead "A citation is an entity."}
                        {:db/id "g" :form/id "demo/g-1" :form/src "(defn g \"Gets it.\" [x] x)"} {:db/id "gv" :var/name 'demo/g :var/doc "Gets it." :var/form "g"}
                        {:db/id "t" :form/id "demo-test/g-test-1" :form/src "(deftest g-test (is (g 1)))" :form/refs #{'demo/g} :form/defines ["tv"]}
                        {:db/id "tv" :var/name 'demo-test/g-test :var/kind :test :var/form "t"}
@@ -1681,7 +1681,7 @@
 (deftest a-work-task-is-sent-how-a-task-is-worked
   (let [k "b1/a1"
         db (ts/test-db)
-        db (d/db-with db (seon.docs/load-tx db "docs" {"docs/agent.md" (slurp (str (seon.config/checkout) "/docs/agent.md"))}))
+        db (d/db-with db (seon.doc/load-tx db "docs" {"docs/agent.md" (slurp (str (seon.config/checkout) "/docs/agent.md"))}))
         db (d/db-with db (seon.task/create-tx db (seon.template/request {:seon.task/ns 'demo :seon.task/name "w" :seon.task/plan "Make w true."})))
         db (d/db-with db [{:db/id k :seon.agent/key k :seon.agent/id :a1 :seon.agent/task [:seon.task/id "demo/w"]}])
         aid (seon.db/eid db :seon.agent/key k)

@@ -2,7 +2,7 @@
   "An agent's REPL answers: asked of an agent in a root of its own (seon.agent-test/in-agent), and a form bounded by the work it does, never by a clock (seon.intr/run under a tick budget)."
   (:require [clojure.test :refer [deftest is testing]] [clojure.string :as str] [seon.agent-test :as at]
             [seon.intr :as intr] [seon.agent :as agent] [seon.contract :as contract]
-            [seon.ref :as ref] [seon.template :as template] [seon.repl :as repl] [seon.context :as context] [seon.docs :as docs]
+            [seon.ref :as ref] [seon.template :as template] [seon.repl :as repl] [seon.context :as context] [seon.doc :as docs]
             [seon.config :as cfg] [my.agent] [seon.render :as render] [seon.print :as print] [seon.render.ui :as ui] [seon.web.html :as h] [seon.test-store :as ts] [my.test] [datahike.api :as d]))
 
 (deftest an-eval-answers-its-value-as-clojure-does
@@ -607,7 +607,7 @@
 
 (deftest help-answers-a-section
   ;; the help page is read from the wiki's sections main holds (root's boot loads them), at
-  ;; the commit a turn read, through seon.docs's one reader
+  ;; the commit a turn read, through seon.doc's one reader
   (let [db0 (ts/test-db)
         db (d/db-with db0 (docs/load-tx db0 "docs" (docs/pages (cfg/checkout) "docs")))
         toc (docs/page db context/help-page)]
