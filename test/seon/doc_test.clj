@@ -127,6 +127,18 @@
     (is (< 300 (count (d/datoms db :aevt :seon.doc/address))) "the real wiki is read")
     (is (= [] (mapv :section (get-in (problems/health db) [:classes :leadless-section :rows]))) "no section lacks a lead")))
 
+(deftest no-section-names-a-bench-run
+  ;; docs/README.md#how-the-wiki-is-kept: a section states its rule as current truth, never which bench run showed it
+  ;; (what an agent reads must not hint at a task's answer); decisions.md and plan.md name the runs they were made on
+  (let [id #"(?:^|[^A-Za-z0-9_-])(bench-[a-z0-9]+(?:-[a-z0-9]+)*|[a-z][a-z0-9]*(?:-[a-z0-9]+)+ (?:#[0-9]+|bench\b))"
+        dir (java.io.File. (str (config/checkout) "/docs"))
+        hits (for [f (sort-by #(.getName ^java.io.File %) (.listFiles dir))
+                   :when (and (str/ends-with? (.getName ^java.io.File f) ".md") (not (#{"decisions.md" "plan.md"} (.getName ^java.io.File f))))
+                   :let [ids (distinct (map second (re-seq id (slurp f))))]
+                   :when (seq ids)]
+               [(.getName ^java.io.File f) (vec ids)])]
+    (is (empty? hits) "no page outside decisions.md and plan.md names a bench or a numbered run: each is [page ids]")))
+
 (deftest a-loaded-page-draws-back-as-its-file
   ;; docs as code (task seon.doc/any-markdown-file-is-docs-it-writes-back): the store holds each page, so the file is
   ;; drawn from it as src is from the program (seon.source-test/import-then-write-back-is-a-zero-diff); the real wiki,
