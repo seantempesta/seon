@@ -86,7 +86,7 @@
   node cache: its first write (seon.agent/begin-run-tx on its own task, run and key, then the cites
   every agent is made with) applied with d/with to :db and dropped, and its record built on it
   (seon.ctx/build: its task, run and the sections it cites); and, once per move of main (:warm-t), main's
-  schema changes, which an agent's first eval reads (seon.program/schema-changes). An agent's reads stay
+  schema registry (seon.program/schema-changes), which each agent forked holds as its branch's until it writes a schema entry (:schema-registry). An agent's reads stay
   in its own process, so without these each agent decoded them cold, and more of them as main's commits
   rewrote leaves and its cache evicted the rest; read here, each agent inherits them decoded, and this
   process's reads keep them in its cache. Only what this agent reads is read, so what the server holds
@@ -101,8 +101,9 @@
         (ctx/build db2 (pdb/eid db2 :seon.agent/key key) branch)))
     (if (= t (:warm-t st))
       st
-      ;; read for its leaves, its value dropped: an agent's first eval keys its registry by it
-      (do (program/schema-changes db) (assoc st :warm-t t)))))
+      ;; main's schema registry, which each agent forked holds until it writes a schema entry
+      (let [k (program/schema-changes db)]
+        (assoc st :warm-t t :schema-registry {:key k :registry (program/schema-registry k)})))))
 
 (defn index-for-agent
   "What a forked agent is handed of st's index: {:db :index}, the db it is of being main's current
@@ -176,7 +177,7 @@
                  static-ms (profile/ms-since t1)
                  ;; the spawn's phases here, on the one clock (seon.agent/spawn-phases)
                  marks [[:fork-server-in t0 nil] [:reach-graph tg nil] [:index t1 nil] [:static (profile/now-ns) nil]]]
-             (fork-carrying! st fd open #(repl/run! % (assoc m :graph (:graph st) :index (index-for-agent st) :evals-max (:evals-max st) :marks marks) (:db st) (:ns m))
+             (fork-carrying! st fd open #(repl/run! % (assoc m :graph (:graph st) :index (index-for-agent st) :evals-max (:evals-max st) :schema-registry (:schema-registry st) :marks marks) (:db st) (:ns m))
                              (fn [n] [st {:ev (cond-> [{:ev :fork-failed :agent (:agent m) :active-threads n}]
                                             load-errs (conj {:ev :load-errors :t (:max-tx (:db st)) :errors (vec load-errs)}))}])
                              (fn [pid] (let [[st evs] (adopt st pid)]

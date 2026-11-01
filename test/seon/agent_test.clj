@@ -863,6 +863,21 @@
         v (cost/judge e rows)]
     (is (:ok? v) (str (cost/explain e rows v) "\nat the root's start: " (first measured) " bytes"))))
 
+(deftest an-eval-reads-the-schema-entries-only-after-one-moved
+  ;; docs/machine.md#an-agents-first-write: seon.repl/branch-registry, which each eval calls (wrap-registry,
+  ;; instrument, the page walk), read every schema entry (two passes, seon.program/schema-changes: 748
+  ;; entries, 1.08 MB) to learn nothing had changed. With the registry held (the fork hands main's) a call
+  ;; costs under a tenth of one read; after a registration the next eval binds the registered schema.
+  (let [m "(fn [f] (let [b (seon.profile/alloc-bytes)] (f) (- (seon.profile/alloc-bytes) b)))"
+        [_ costs reg valid]
+        (in-agent [(str "(def meas " m ")")
+                   "[(meas #'seon.repl/branch-registry) (meas #(seon.program/schema-changes (:db @seon.agent/state)))]"
+                   "(my.schema/register! :lab.gap/n [:int {:min 3}])"
+                   "[(malli.core/validate :lab.gap/n 5 {:registry malli.registry/*registry*}) (malli.core/validate :lab.gap/n 1 {:registry malli.registry/*registry*})]"])
+        [held read] (:value costs)]
+    (is (< (* 10 held) read) (str "a call of branch-registry with the registry held allocated " held " bytes; one read of the schema changes " read))
+    (is (= [true false] (:value valid)) (str "after a registration the next eval binds it: " (pr-str reg) " " (pr-str valid)))))
+
 (deftest an-agent-with-no-task-resumes-a-kept-branch
   ;; found by session global-ids, 2026-10-23: an agent spawned with no task onto a branch the
   ;; store already holds (a kept branch; e2e's fresh agent on a store an earlier run left)

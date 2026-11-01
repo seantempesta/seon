@@ -432,18 +432,18 @@
 (defn- branch-registry
   "The registry this agent's evaluation binds (seon.program/schema-registry of its branch's
   schema changes), so what it defines next compiles against them; empty when no branch is
-  held (root, a scratch session). Reused while the changes are equal: keying is 0.7 ms,
-  compiling the population 5 ms."
+  held (root, a scratch session). The one held (:schema-registry) answers until a write moves a
+  schema entry (seon.agent/transact!, the merge of main: seon.agent/schema-moved), which drops it;
+  a new agent holds main's from its fork (seon.fork-server/warm-start). Reading the changes is two
+  passes over every schema entry (1.08 MB a call measured 2026-11-01), so no eval reads them while
+  none moved. See docs/machine.md#an-agents-first-write."
   {:malli/schema [:=> [:cat] :any]}
   []
   (if-let [db (:db @agent/state)]
-    (let [k (program/schema-changes db)
-          held (:schema-registry @agent/state)]
-      (if (= k (:key held))
-        (:registry held)
-        (let [r (program/schema-registry k)]
+    (or (:registry (:schema-registry @agent/state))
+        (let [k (program/schema-changes db) r (program/schema-registry k)]
           (swap! agent/state assoc :schema-registry {:key k :registry r})
-          r)))
+          r))
     {}))
 
 (defn with-branch-schemas
