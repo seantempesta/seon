@@ -6,4 +6,5 @@
  :seon.config.web/stylesheet [:string {:min 1 :seon.config/unit "path" :description "The page's stylesheet, bin/build's css step's output (read per request)."}]
  :seon.config.web/utc-offset [:string {:min 5 :max 5 :seon.config/unit "+hhmm" :description "The local offset clocks are shown in (Jolt has no time zones)."}]
  :seon.config.contract/instrument [:enum {:seon.config/unit "mode" :description "Contracts and their recording: on, contracts (wrappers, no recording), off."} :on :contracts :off]
- :seon.config.native/probe-lib [:string {:min 1 :seon.config/unit "path" :description "native/probe.c's library (bin/build native)."}]}
+ :seon.config.native/probe-lib [:string {:min 1 :seon.config/unit "path" :description "native/probe.c's library (bin/build native)."}]
+ :seon.config.native/sqlite-lib [:string {:min 1 :seon.config/unit "path" :description "The libsqlite3 seon.sqlite binds on first use, built with FTS5 (docs/vector.md#search). Missing or without FTS5: the first text index throws :seon.sqlite/unloaded or :seon.sqlite/refused, so no search by text runs."}]}

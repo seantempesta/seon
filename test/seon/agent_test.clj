@@ -897,16 +897,18 @@
     (is (< (* 10 held) whole) (str "a held read allocated " held " bytes; a whole read " whole))))
 
 (deftest an-agents-first-search-reads-the-index-it-inherited
-  ;; docs/vector.md#search: an agent's first grep built the search's text indexes from nothing (seon.doc/text-index:
-  ;; the forms' 381 MB, the sections' 125 MB, ~1 s), and a moved db read every text again for its fingerprint (114 MB).
-  ;; The fork server builds main's once and each move that writes no text carries them (seon.doc/carry-index!): the
-  ;; first search costs under a fifth of one build.
+  ;; docs/vector.md#search: an agent's first grep built the search's text index from nothing (seon.doc/text-index).
+  ;; The fork server builds main's once and each move that writes no text carries it (seon.doc/carry-index!): the
+  ;; first search allocates what a second does, not a build more, and its FTS5 table, an in-memory SQLite database,
+  ;; answers in the forked child.
   (let [m "(fn [f] (let [b (seon.profile/alloc-bytes)] (f) (- (seon.profile/alloc-bytes) b)))"
         [_ costs] (in-agent [(str "(def meas " m ")")
-                             "[(meas #(my.agent/grep \"accumulated\")) (meas #(#'seon.doc/build-index (:db @seon.agent/state) :form/src))]"])
-        [first-search build] (:value costs)]
+                             "[(meas #(my.agent/grep \"accumulated\")) (meas #(my.agent/grep \"accumulated\")) (meas #(#'seon.doc/build-index (:db @seon.agent/state))) (count (my.agent/grep \"accumulated\"))]"])
+        [first-search second-search build rows] (:value costs)]
+    (is (pos? rows) "the query of the index it inherited answers in the forked child")
     ;; that a move writing text builds the index again: seon.doc-test/a-text-index-is-carried-past-a-move-that-writes-no-text
-    (is (< (* 5 first-search) build) (str "an agent's first grep allocated " first-search " bytes; building the forms' index " build))))
+    (is (< (- first-search second-search) (quot build 2))
+        (str "an agent's first grep allocated " first-search " bytes, a second " second-search "; building the index " build))))
 
 (deftest an-agent-with-no-task-resumes-a-kept-branch
   ;; found by session global-ids, 2026-10-23: an agent spawned with no task onto a branch the

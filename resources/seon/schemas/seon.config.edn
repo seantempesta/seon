@@ -174,7 +174,8 @@
   [:seon.config.web/stylesheet :seon.config.web/stylesheet]
   [:seon.config.web/utc-offset :seon.config.web/utc-offset]
   [:seon.config.contract/instrument :seon.config.contract/instrument]
-  [:seon.config.native/probe-lib :seon.config.native/probe-lib]]
+  [:seon.config.native/probe-lib :seon.config.native/probe-lib]
+  [:seon.config.native/sqlite-lib :seon.config.native/sqlite-lib]]
 
  ;; which layer each key came from (seon.config/sources): the shipped file, a --config file
  ;; (the standing root's config/local.edn among them) or --set; written beside the config on main's root entity, as EDN text

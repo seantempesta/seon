@@ -3,7 +3,7 @@
   section, and writes nothing."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.test-store :as ts] [my.test :as mt] [clojure.test :refer [deftest is]] [seon.contract :refer [defn defn-]]
-            [datahike.api :as d] [seon.db :as pdb] [seon.doc :as doc] [seon.cost :as cost] [seon.doc-test]))
+            [datahike.api :as d] [seon.db :as pdb] [seon.doc :as doc] [seon.sqlite :as sqlite] [seon.cost :as cost] [seon.doc-test]))
 
 (defn- base
   "The world, and the namespace app.m0 the pages cite (f0 to f10)."
@@ -85,7 +85,7 @@
                                    (for [i (range (quot n 4))] {:seon.task/id (str "app/t" i) :seon.task/plan (str "Plan " i (when (hit? i) " fused") ".")})
                                    (for [i (range (quot n 8))] {:schema/key (keyword "app" (str "k" i)) :schema/form (str "[:map " (when (hit? i) "fused ") i "]")}))))]
     ;; the postings are derived data, built once for a value of the store (docs/vector.md#search): the query is what is measured
-    (run! #(doc/text-index db %) (vals doc/text-attrs))
+    (doc/text-index db)
     [db "fused" {:by #{:text :refs} :k 10} nil]))
 
 (defn tokens-input
@@ -101,68 +101,69 @@
                                  (for [i (range h)] {:seon.task/id (str "app/t" i)
                                                      :seon.task/plan (if (< i 5) "Plan of a task fused." "Plan of a task.")}))))]
     ;; the postings are derived data, built once for a value of the store (docs/vector.md#search): the query is what is measured
-    (run! #(doc/text-index db %) (vals doc/text-attrs))
+    (doc/text-index db)
     [db "fused" #{:section :task} 0.5]))
 
 ;; See docs/vector.md#search
 (deftest tokens-cost-the-texts-holding-the-word
-  ;; the claim: a text that holds no word of the query costs nothing; the work is the scan of the vocabulary and the postings
-  ;; of the texts holding it. The input (tokens-input) has ten texts holding the word and all the others one vocabulary that
-  ;; lacks it, so the vocabulary does not grow with n and the cost is flat. Red if tokens reads each text (a scan of the
+  ;; the claim: a text that holds no word of the query costs nothing; the work is the FTS5 query, which reads the rows holding it.
+  ;; The input (tokens-input) has ten texts holding the word, so the cost is flat. Red if tokens reads each text (a scan of the
   ;; texts: bytes and calls grow with n) or its hits are not the ten (the first assertion).
   (let [[db w kinds z] (tokens-input 40)]
     (is (= 10 (count (doc/tokens db w kinds z))) "the ten texts holding the word are the hits"))
   (cost/proof {:of 'seon.doc/tokens :input 'seon.doc-cost-test/tokens-input
                :n "texts of the kinds asked (sections and task plans), ten of them holding the word, the rest one vocabulary without it"
-               :work "a scan of the index's vocabulary (the db unchanged since the index was checked: its :hash and :max-tx say so, no text is read), then the postings of the word: each text holding it scored, each hit read and named"
+               :work "one FTS5 query of the index (the db unchanged since the index was built: its :hash and :max-tx say so, no text is read): each text holding the word scored, each hit read and named"
                :growth :constant
                ;; 2026-10-31 (shrink-tests-4): measured on this input; before it (search-input's mix, a vocabulary that grew
                ;; with the texts' names): 1.66 MB / 132 calls at 100 and 300, 1.83 MB / 132 at 1,000. Here 323 KB / 32 calls at 20 and 60,
                ;; 340 KB at 200 (z-min 0.5, so the ten holding the word are the hits at every size; at 2 a small store's z leaves fewer)
-               :fixed {:bytes 335000 :calls 32}
+               ;; with the FTS5 index (task seon.doc/the-text-index-is-fts5; no vocabulary to scan): 282 KB / 36 calls at 20 and 60, 300 KB at 200
+               :fixed {:bytes 305000 :calls 36}
                :sizes [20 60 200]}))
 
 (defn index-input
-  "text-index's arguments at size n: search-input's db and the attribute of a form's source."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :qualified-keyword]]}
+  "build-index's argument at size n: search-input's db, with a text added so it is a newer value."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db]]}
   [n]
   (let [[db] (search-input n)]
     ;; a db with the same texts but a newer index: the build is what is measured, not a hit
-    [(d/db-with db [{:schema/key :app/extra :schema/form "[:map]"}]) :form/src]))
+    [(d/db-with db [{:schema/key :app/extra :schema/form "[:map]"}])]))
 
 ;; See docs/vector.md#search
 (deftest a-text-index-is-built-once-for-the-value-it-reads
-  (let [[db] (search-input 10)
-        a :form/src]
-    (is (identical? (doc/text-index db a) (doc/text-index db a)) "a second read of the same value is the first's index")
+  (let [[db] (search-input 10)]
+    (is (identical? (doc/text-index db) (doc/text-index db)) "a second read of the same value is the first's index")
     (let [db2 (d/db-with db [{:db/id "v" :var/name 'app/new} {:form/id "app/new (defn new [] 1)" :form/src "(defn new [] 1)" :form/defines ["v"]}])
-          ix (doc/text-index db2 a)]
-      (is (= (inc (:n (doc/text-index db a))) (:n ix)) "a changed attribute is read again: the new text is in it")
-      (is (some? (get-in ix [:post "new"])) "its terms are postings"))
+          ix (doc/text-index db2)
+          found (:value (sqlite/using ix #(sqlite/fts-match % "\"new\"" #{})))
+          n (:n ix)]
+      (is (= (inc (:n (doc/text-index db))) n) "a changed text is read again: the new text is in it")
+      (is (= 1 (count found)) "and found by its word"))
     ;; the path search reads: a connection's value, read again with nothing written between
-    (is (identical? (doc/text-index db a) (doc/text-index (d/db-with db [{:schema/key :app/other :schema/form "[:map]"}]) a))
-        "a write to another attribute moves the db, and the texts' fingerprint keeps the index")
     (ts/test-branch! (fn [_ conn]
-                       (is (identical? (doc/text-index @conn a) (doc/text-index @conn a)) "two reads of a branch's value share one index")))))
+                       (is (identical? (doc/text-index @conn) (doc/text-index @conn)) "two reads of a branch's value share one index")))))
 
 ;; See docs/vector.md#search
 (deftest a-text-index-costs-its-texts
   (cost/proof {:of 'seon.doc/build-index :input 'seon.doc-cost-test/index-input
-               :n "forms' sources the branch holds (search-input's mix, ten holding the word)"
-               :work "one pass over the attribute's texts, each split into terms once and its terms added to the postings"
+               :n "forms' sources the branch holds (search-input's mix, ten holding the word); the index holds every kind's texts"
+               :work "one pass over every text attribute's texts, each bound once into the FTS5 table (sqlite tokenizes and stems it)"
                :growth :linear
                ;; measured 2026-10-28: 3.30 MB / 461 calls at 100, 4.20 MB / 661 at 300
                ;; 2026-10-31 (shrink-tests-4): on the world (no seed texts), sizes [60 180 600]: 316 KB / 71 calls at 60, 828 KB /
                ;; 191 at 180, 2.72 MB / 611 at 600: ~4.5 KB and 1 call a text, the fixed part ~20 KB / 10 calls (the 2.85 MB / 360
                ;; calls were the seed's texts)
-               :per-n {:bytes 4600 :calls 1.05}
-               :fixed {:bytes 60000 :calls 15}
+               ;; the FTS5 index of every text attribute (task seon.doc/the-text-index-is-fts5): 238 KB at 60, 599 KB at 180,
+               ;; 1.87 MB at 600, 19 calls at every size: ~3.7 KB a text (the text, its two C strings and its rows), the fixed part ~70 KB. Through seon.lib/defc's contracted bindings the same build is 21 calls and 7.5 KB a text (1,279 calls at 60 texts, 11,409 at 600), which is why the six a loop makes are locals of seon.sqlite/with-row-calls
+               :per-n {:bytes 3800 :calls 0}
+               :fixed {:bytes 72000 :calls 19}
                :sizes [60 180 600]}))
 
 (deftest search-costs-its-texts
   (cost/proof {:of 'seon.context/search :input 'seon.doc-cost-test/search-input
                :n "texts the branch holds (forms, sections, task plans and schema entries), ten of each kind holding the word"
-               :work "one scan of each kind's text attribute, lower-cased once, a count of the query's words in each (BM25 and its z-score), then per hit its names and its line; the references of the names in the query; relevance over the first k x related-near hits (a bounded pool)"
+               :work "one FTS5 query of the index (built once for the value), BM25 and a z-score of its rows, then per hit its names and its line; the references of the names in the query; relevance over the first k x related-near hits (a bounded pool)"
                :growth :linear
                ;; measured 2026-10-28 with search and relevance on the one seon.doc/bm25 (each text's counts a
                ;; sparse map, bm25's contract checking them): 3.78 MB / 623 calls at 100, 8.70 MB / 1,088 at 300,
@@ -171,8 +172,10 @@
                ;; 2.88 MB / 204 at 1,000; before them, a tenth holding it: 3.78 MB at 100, 19.17 MB at 1,000, 67.68 MB / 7,714 calls at 4,000
                ;; 2026-10-31 (shrink-tests-4): on the world, sizes [100 300 1000]: 2.64 / 2.69 / 2.83 MB, 204 calls: ~210 B a text,
                ;; the fixed part 2.62 MB (the 800 B a text was the seed's)
-               :per-n {:bytes 220 :calls 0}
-               :fixed {:bytes 2620000 :calls 204}
+               ;; with the FTS5 index (task seon.doc/the-text-index-is-fts5): 2.52 / 2.54 / 2.57 MB, 208 calls (the query's contracted functions; 290 with the bindings contracted): ~50 B a text, the
+               ;; fixed part 2.52 MB
+               :per-n {:bytes 55 :calls 0}
+               :fixed {:bytes 2530000 :calls 208}
                :sizes [100 300 1000]}))
 
 (defn citing-input
