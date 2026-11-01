@@ -8,7 +8,9 @@
     (send-message tos body)   body to the agents tos (ids), delivered by root
     (callers 'ns/f)           the program vars whose recorded definition names ns/f
     (callers :ns/key)         the functions whose code or contract names the key (an attribute, config, schema)
+    (callers 'a.ns)           the namespaces that require a.ns
     (callees 'ns/f)           the vars ns/f's recorded definition names
+    (callees 'a.ns)           the namespaces a.ns requires
     (search "text")           the best matches for text over code, docs, tasks and schemas, fusing its exact
                               text, its meaning and its references: [{:kind :name :score :by :line} ...]
     (search "text" {:kinds #{:section}}) only those kinds; :by #{:text :meaning :refs}, :ns "seon.merge", :k 20
@@ -31,7 +33,7 @@
     clojure.repl as at any Clojure REPL (source, doc, dir, apropos, find-doc, pst), with *1 *2 *3 *e:
     source reads this branch's own definitions first, then a library's file"
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.lib :as lib] [seon.context :as context] [seon.ref :as ref] [seon.doc :as doc]
+  (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.lib :as lib] [seon.context :as context] [seon.ref :as ref] [seon.doc :as doc] [seon.source :as source]
             [seon.config :as cfg] [seon.proofs :as proofs] [seon.fx :as fx] [seon.program :as program] [seon.task :as task] [seon.vector :as vector] [seon.contract :as contract] [seon.ctx]
             [seon.db :as pdb] [seon.problems :as problems] [seon.render.ui :as ui] [my.schema :as schema] [jolt.analyzer] [clojure.java.io :as io] [clojure.string :as str] [clojure.main] [datahike.api :as d]))
 
@@ -158,12 +160,15 @@
   (:my.agent/no-var), never []. A keyword that is a schema, an attribute or a key the program
   names answers its callers ([] when none uses it: the true answer); any other answers
   :seon.schema/unknown-key with the nearest registered keys (my.schema/unknown-key: a typo is no
-  \"nothing calls it\", the md-scan bench)."
-  {:malli/schema [:=> [:cat [:or :qualified-symbol :seon.host/var :qualified-keyword]] [:or [:vector :qualified-symbol] :my.agent/no-var :seon.schema/unknown-key]]}
+  \"nothing calls it\", the md-scan bench). A namespace's name answers the namespaces that require
+  it (seon.source/required-by; bench-scope-4's design, asking whether a proof's namespace would close
+  a require cycle, resolved an alias as a var four times)."
+  {:malli/schema [:=> [:cat [:or :symbol :seon.host/var :qualified-keyword]] [:or [:vector :symbol] :my.agent/no-var :seon.schema/unknown-key]]}
   [x]
-  (let [db (agent/db) x (cond (keyword? x) x (var? x) (named x) :else (asked x))
+  (let [db (agent/db) x (cond (keyword? x) x (var? x) (named x) (simple-symbol? x) x :else (asked x))
         fs (when (keyword? x) (schema/forms))]
     (or (when (symbol? x) (no-var db x))
+        (when (simple-symbol? x) (vec (sort (source/required-by db x))))
         (when (and (keyword? x) (not (or (contains? fs x) (contains? (d/schema db) x) (seq (d/datoms db :avet :form/keywords x)))))
           (schema/unknown-key fs x))
         (doc/callers db x))))
@@ -208,11 +213,13 @@
 (defn callees
   "The vars var sym's recorded definition names on this branch (its :form/refs: program,
   library and clojure.core alike), sorted; sym itself left out. sym is a qualified symbol or
-  the var (named). A symbol that names no var answers so (:my.agent/no-var), never []."
-  {:malli/schema [:=> [:cat [:or :qualified-symbol :seon.host/var]] [:or [:vector :qualified-symbol] :my.agent/no-var]]}
+  the var (named). A symbol that names no var answers so (:my.agent/no-var), never []. A
+  namespace's name answers the namespaces it requires (seon.source/requires)."
+  {:malli/schema [:=> [:cat [:or :symbol :seon.host/var]] [:or [:vector :symbol] :my.agent/no-var]]}
   [sym]
-  (let [db (agent/db) sym (if (var? sym) (named sym) (asked sym))]
+  (let [db (agent/db) sym (cond (var? sym) (named sym) (simple-symbol? sym) sym :else (asked sym))]
     (or (no-var db sym)
+        (when (simple-symbol? sym) (vec (sort (source/requires db sym))))
         (vec (sort (disj (set (d/q '[:find [?r ...] :in $ ?s :where [?e :var/name ?s] [?e :var/form ?f] [?f :form/refs ?r]] db sym))
                          sym))))))
 

@@ -553,6 +553,8 @@
       ;; the navigation functions answer from the program facts the branch records
       (is (str/includes? (printed "(my.agent/callers 'seon.task/accumulate)") "seon.task/tasks") "callers, from :form/refs")
       (is (str/includes? (printed "(my.agent/callees 'seon.task/accumulate)") "clojure.core/reduce") "callees, from its form's :form/refs")
+      (is (str/includes? (printed "(my.agent/callers 'seon.task)") "seon.task-test") "a namespace's callers, the namespaces requiring it")
+      (is (str/includes? (printed "(my.agent/callees 'seon.task)") "seon.ref") "and its callees, the namespaces it requires")
       (is (str/includes? (printed "(my.agent/grep \"accumulated\")") "seon.task/accumulate") "grep, over :form/src")
       (is (str/includes? (printed "(get (my.schema/forms) :seon.task/task)") ":seon.task/own") "a schema's form")
       (is (str/includes? (printed "(my.schema/register! :app.workout/set [:map [:reps :int] [:kg :double]])") ":app.workout/set") "a new schema registers")
