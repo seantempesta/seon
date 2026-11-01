@@ -21,7 +21,7 @@
             [malli.registry :as mr] [clojure.core.async :as a] [jolt.io-poller :as poller]))
 
 ;; One state map per agent process (this process is the agent). Fields:
-;; :id :branch :task :run (the task and run root forked it for, or nil) :fd :conn :db :base (main at the branch's merge base: as forked, then each merge-main!) :main (main's head as last read: as forked, then heard-main) :results :n :waits (seon.agent/await-reply's promises, by key) :busy (the :repl proc runs a request) :tx-seq :mode :ns :home :mismatch
+;; :id :branch :task :run (the task and run root forked it for, or nil) :db :base (main at the branch's merge base: as forked, then each merge-main!) :main (main's head as last read: as forked, then heard-main) :results :n :waits (seon.agent/await-reply's promises, by key) :busy (the :repl proc runs a request) :tx-seq :mode :ns :home :mismatch
 ;; :embedded-from (the db embed-written! last read the branch's writes up to)
 ;; :unembeddable (the entities whose text llama.cpp could not encode, as vectors-proc keeps them)
 ;; :base-graph (test-plan's reach graph of its base, keyed by the base's point (seon.db/point: commit and t, never the db), from the fork server's :graph of main: base-graph)
@@ -34,9 +34,10 @@
 ;; :eval (the id of the eval running, "e5", while seon.repl/eval-string runs it: what transact! names in its tx-meta)
 (defonce state (atom nil))
 
-(defonce ^{:doc "This process's socket to root, {:fd :conn}: the process's own, apart from state, so forms that
-  replace state (a test's helper resetting it at the REPL) leave the process able to answer root
-  (bench-scope-3's implement agent ran seon.ctx-test's cost measure, and died on its next reply)."}
+(defonce ^{:doc "This process's socket to root, {:fd :conn :ch}, its one reader's channel among it (intake): the
+  process's own, apart from state, so forms that replace state (a test's helper resetting it at the REPL)
+  leave the process able to answer root and reading with one reader (bench-scope-3's implement agent ran
+  seon.ctx-test's cost measure, and died on its next reply). See docs/processes.md#the-socket-and-the-agent-proc."}
   link (atom nil))
 
 
@@ -62,16 +63,15 @@
   See docs/processes.md#the-socket-and-the-agent-proc."
   {:malli/schema [:=> [:cat] :seon.host/chan]}
   []
-  (let [c (:conn @link) in (:intake @state)]
-    (if (and in (identical? c (:conn in)))
-      (:ch in)
-      ;; unbuffered: the reader parks with each message until the transport takes it, so root's
-      ;; further frames wait in the socket's own buffer
-      (let [ch (a/chan)]
-        (a/io-thread (loop [] (let [m (sock/recv! c)]
-                                (if (= :eof m) (a/close! ch) (when (a/>!! ch m) (recur))))))
-        (swap! state assoc :intake {:conn c :ch ch})
-        ch))))
+  (let [{c :conn ch :ch} @link]
+    (or ch
+        ;; unbuffered: the reader parks with each message until the transport takes it, so root's
+        ;; further frames wait in the socket's own buffer
+        (let [ch (a/chan)]
+          (a/io-thread (loop [] (let [m (sock/recv! c)]
+                                  (if (= :eof m) (a/close! ch) (when (a/>!! ch m) (recur))))))
+          (swap! link assoc :ch ch)
+          ch))))
 
 (declare commit!)
 

@@ -565,7 +565,7 @@
   ;; the live rounds (the archived paper live-2026-10-25.md (git history)): (my.agent/callers 'seon.proof/status) answered [],
   ;; read as "no callers", and the run asked again until it ended :no-progress. A symbol that names
   ;; no var says so, with the form for the registry key of that name when there is one
-  (let [[_ nothing key-name real callees library _ fresh aliased referred ns-typo] (at/in-agent #(vector {:op :context :agent (:agent %)}
+  (let [[_ nothing key-name real callees library _ fresh aliased referred ns-typo unmatched] (at/in-agent #(vector {:op :context :agent (:agent %)}
                                                          "(my.agent/callers 'seon.task/no-such-thing)"
                                                          "(my.agent/callers 'seon.task/plan)"
                                                          "(my.agent/callers 'seon.task/accumulate)"
@@ -575,7 +575,8 @@
                                                          "(my.agent/callers (symbol (str *ns*) \"zz-fresh\"))"
                                                          "(do (require '[clojure.string :as s-alias]) (my.agent/callers 's-alias/join))"
                                                          "(my.agent/callers 'map)"
-                                                         "(my.agent/callers 'seon.tsk)"))]
+                                                         "(my.agent/callers 'seon.tsk)"
+                                                         "(:unmatched (my.agent/prove '#{seon.task-test/no-such-test}))"))]
     (is (= :my.agent/no-var (:seon.error/type (:value nothing))) (pr-str nothing))
     (is (= 'seon.task/no-such-thing (:name (:value nothing))) "it names what was asked")
     (is (nil? (:ask (:value nothing))) "and no key of that name: nothing to ask instead")
@@ -586,7 +587,8 @@
     (is (vector? (:value fresh)) (str "a var just defined at the REPL is a var: " (pr-str fresh)))
     (is (seq (:value aliased)) (str "an alias reads as the var it resolves to, whose callers are recorded by its full name: " (pr-str aliased)))
     (is (seq (:value referred)) (str "a referred name is the var, not a namespace: " (pr-str referred)))
-    (is (= :my.agent/no-var (:seon.error/type (:value ns-typo))) (str "a bare name that is no namespace says so, nearest namespaces named: " (pr-str ns-typo)))))
+    (is (= :my.agent/no-var (:seon.error/type (:value ns-typo))) (str "a bare name that is no namespace says so, nearest namespaces named: " (pr-str ns-typo)))
+    (is (= '[seon.task-test/no-such-test] (:value unmatched)) (str "a prove naming no test says which: " (pr-str unmatched)))))
 
 (deftest a-missing-name-says-the-nearest
   ;; the live rounds' repeats (the archived paper live-2026-10-25.md (git history); jolt/repeat-causes): agents re-sent a guessed

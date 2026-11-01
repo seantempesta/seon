@@ -1937,6 +1937,15 @@
     (is (= {:pass 1} (select-keys (:value r) [:pass])) (pr-str r))
     (is (some #(str/includes? % "transact refused: no") (:unrecorded (:value r))) "named, not thrown")))
 
+(deftest the-reader-is-the-processs-own
+  ;; optimization's review: the intake's reader kept in state was lost to an eval replacing it, and the next
+  ;; intake started a second reader on the same socket; it is link's, beside the socket
+  (let [old @agent/state old-link @agent/link ch (clojure.core.async/chan)]
+    (try (reset! agent/link {:fd -1 :conn ::conn :ch ch})
+         (reset! agent/state {})
+         (is (identical? ch (agent/intake)) "the one reader's channel, whatever state became")
+         (finally (reset! agent/state old) (reset! agent/link old-link)))))
+
 (deftest a-named-namespace-selects-its-tests
   ;; bench-scope-1: a prove naming three tests of a namespace on a branch that had changed nothing ran none
   ;; (ran 0, reused 0, each :none); named, a namespace's tests run whatever the branch changed
