@@ -940,3 +940,30 @@
     (is (= (inc n0) (pending)) "one sweep, however many are pending")
     (sv/-free-exception s a)
     (sv/-free-exception s b)))
+
+(deftest a-stored-value-is-serialized-once
+  ;; task seon.db/a-commit-of-a-few-datoms-writes-what-it-changed: konserve wrote each value through
+  ;; ByteArrayOutputStreams (its serializer, then its compressor: each stream's buffer doubling, then copied
+  ;; out), six copies or more; konserve.impl.defaults/direct-bytes makes the same bytes once a link. A store
+  ;; of this test's own (the write path is the subject), removed at the end
+  (let [path (str (seon.config/checkout) "/target/db-test-" (random-uuid))]
+    (try
+      (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)
+            _ (d/transact conn {:tx-data (vec (for [i (range 200)] {:note/text (str "note " i)})) :tx-meta (pdb/tx-meta :db)})
+            store (:store @conn)
+            ser ((:compressor store) (get (:serializers store) (:default-serializer store)))
+            stream (fn [v] (let [bos (java.io.ByteArrayOutputStream.)] (konserve.protocols/-serialize ser bos (:write-handlers store) v) (vec (.toByteArray bos))))
+            direct (fn [v] (some-> (#'konserve.impl.defaults/direct-bytes ser v) vec))
+            ;; the commit's record (the db's storage layout) and the root node of its :eavt index
+            record (konserve.core/get store (get-in @conn [:meta :datahike/commit-id]) nil {:sync? true})
+            node (datahike.index.interface/-root-node (:eavt @conn))
+            values [record node]
+            m (fn [f] (let [b (seon.profile/alloc-bytes)] (f) (- (seon.profile/alloc-bytes) b)))]
+        (is (= (mapv stream values) (mapv direct values)) "the same bytes as the streams wrote")
+        ;; each stream copied the encoded bytes at least twice (the inner stream's write and its toByteArray):
+        ;; serialized once saves at least that
+        (let [s (m #(doseq [v values] (stream v))) o (m #(doseq [v values] (direct v)))
+              encoded (reduce + (map #(alength (konserve.jolt.fasl-store/serialize %)) values))]
+          (is (<= (* 2 encoded) (- s o)) (str "serialized once: " o " bytes against the streams' " s ", " encoded " bytes encoded")))
+        (d/release conn true))
+      (finally (clojure.java.shell/sh "rm" "-rf" path)))))
