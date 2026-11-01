@@ -310,17 +310,17 @@
                   (with-citations (db) tx-data)
                   tx-data)]
     (if (= :test (:mode @state))
-      (let [before (db) r (d/with before tx-data) attrs (into #{} (map :a) (:tx-data r))]
-        (doc/carry-index! before (:db-after r) attrs)
+      (let [r (d/with (db) tx-data) attrs (into #{} (map :a) (:tx-data r))]
+        (doc/carry-index! (:db-before r) (:db-after r) attrs)
         (swap! state #(-> % (assoc :db (:db-after r) :tx (select-keys r [:db-after :tx-data])) (schema-moved attrs)))
         {:t (:max-tx (:db-after r)) :datoms (count (:tx-data r)) :local true})
-      (let [before (db)
-            r (dw/apply! (:store-conn @state) {:tx-data tx-data :tx-meta (pdb/tx-meta (:branch @state) (cond-> {} (:eval @state) (assoc :seon.tx/eval (:eval @state))))})]
+      (let [r (dw/apply! (:store-conn @state) {:tx-data tx-data :tx-meta (pdb/tx-meta (:branch @state) (cond-> {} (:eval @state) (assoc :seon.tx/eval (:eval @state))))})]
         (when-not (map? r) (throw (ex-info (str "transact refused: " (ex-message r)) {:writer-error (ex-message r)})))
         ;; :tx, the transaction that moved :db: what seon.ctx patches @ctx from; the search's text
         ;; indexes and the schema registry carried past it when it wrote none of their attributes
         (let [attrs (into #{} (map :a) (:tx-data r))]
-          (doc/carry-index! before (:db-after r) attrs)
+          ;; from the db the writer applied it to (its report's), whatever the state held
+          (doc/carry-index! (:db-before r) (:db-after r) attrs)
           (swap! state #(-> % (assoc :db (:db-after r) :tx (select-keys r [:db-after :tx-data]) :dirty? true) (schema-moved attrs))))
         (cond-> {:t (:max-tx (:db-after r)) :datoms (count (:tx-data r))}
           (seq (:tempids r)) (assoc :tempids (into {} (filter (comp string? key)) (:tempids r))))))))

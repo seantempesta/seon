@@ -451,9 +451,13 @@
         r1 (d/with db0 [{:seon.root/id :root :seon.root/boot "a-boot"}])
         _ (seon.doc/carry-index! db0 (:db-after r1) (attrs r1))
         db1 (:db-after r1)
+        ;; the slot is keyed to db1 by the carry itself, before any read could fingerprint it
+        slot (get @@#'seon.doc/indexes :form/src)
         ix1 (seon.doc/text-index db1 :form/src)
         r2 (d/with db1 ((mt/code 'app.qq "(ns app.qq)\n\n(defn qqzz [] 1)\n") db1))
         _ (seon.doc/carry-index! db1 (:db-after r2) (attrs r2))
         ix2 (seon.doc/text-index (:db-after r2) :form/src)]
+    (is (= [(:hash db1) (:max-tx db1)] (first slot)) "the carry keys the held index to the move's db")
+    (is (identical? ix0 (nth slot 2)) "and keeps the same index")
     (is (identical? ix0 ix1) "a move that wrote no form text keeps the index")
     (is (= (+ 2 (:n ix0)) (:n ix2)) "a move that wrote two form texts is read into a new index")))
