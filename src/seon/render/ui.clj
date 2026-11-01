@@ -958,8 +958,8 @@
   :seon.config.render/search's), each a line: its name, then a function's doc's first sentence or a section's
   heading; the hits left out are one last line, how many and the call that answers them. A change of its query (a swap! on ctx)
   redraws this part alone, and the model is sent what changed of it
-  (docs/render.md#the-page-is-sent-as-what-changed). Measured (2026-11-01, 49 symptom-only requests from Seon's history,
-  each on its commit's parent): a request's search ranked a changed item first in 41% of them."
+  (docs/render.md#the-page-is-sent-as-what-changed). What it finds for a request is measured in
+  docs/vector.md#what-the-work-is-likely-to-need-as-an-eval."
   {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db] [:at [:vector :any]]]] :int :string] :any]}
   [{c :seon.ctx/ctx db :seon.db/db at :at} _aid _k]
   (when-let [s (some-> (get-in c at) ratom/realize)]
