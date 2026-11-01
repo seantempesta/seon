@@ -1317,7 +1317,7 @@
   (a set of symbols; none: all it selects): agent id's own branch in mode :turn (as its turn
   proves it; mode :judge, as root's judge does), or main (agent nil) in mode :main (every test
   with no result at its digest: seon.agent/run-tests-forked). The run is keyed by the digest of what it reads,
-  its branch's program (seon.program/program-digest), as its turn's seon.agent/prove! takes it,
+  its branch's program and tasks' proofs (seon.program/run-digest), as its turn's seon.agent/prove! takes it,
   so a session's request and the turn's are one run, and a request for main and the run main's
   own program commit started (seon.prove) are one. A promise of the run's answer ({:key :ran
   :reused :pass :fail :error :red :reports ...}), the same run for every asker of that key."
@@ -1330,7 +1330,7 @@
   (if-let [b (if agent-id (get-in @(call! sys {:op :state}) [:agents agent-id :branch]) (pdb/conn-main (:conn sys)))]
     (let [db (pdb/head (:conn sys) b)]
       (call! sys (cond-> {:op :prove :branch (if agent-id b :main) :t (:max-tx db) :mode mode
-                          :digest (program/program-digest db)}
+                          :digest (program/run-digest db)}
                    agent-id (assoc :agent agent-id) (seq names) (assoc :names names))))
     (doto (promise) (deliver (absent (get-in @(call! sys {:op :state}) [:agents agent-id]) agent-id))))))
 

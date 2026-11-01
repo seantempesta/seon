@@ -29,7 +29,7 @@
             [clojure.core.async.flow :as flow] [clojure.string :as str] [seon.db :as pdb]))
 
 (defn run-key
-  "The key of the run of branch whose program has digest dg (seon.program/program-digest of its
+  "The key of the run of branch whose program has digest dg (seon.program/run-digest of its
   head: what a run reads, so a write that changes no form never makes a second run), of the tests of
   namespaces names (nil: all it selects), in mode (:judge: the plan's tests; :turn: the proofs and
   what the branch changed, an agent's turn; :main: main's run, every test with no result at its
@@ -228,7 +228,7 @@
                      :answers (let [[st v] (step/answered st (:tag m))] (if v (answered st v (:r m)) [(update st :stale (fnil inc 0)) []]))
                      :main (let [st (assoc st :main-t (:t m))]
                              (if (and (cfg/value :seon.config.proofs/prove-main-on-commit) (program/moves-program? (:ops m)))
-                               (request st {:branch :main :t (:t m) :digest (program/program-digest (pdb/at-commit (:conn st) (:commit m))) :mode :main})
+                               (request st {:branch :main :t (:t m) :digest (program/run-digest (pdb/at-commit (:conn st) (:commit m))) :mode :main})
                                [st []])))]
      (let [outs (cond-> (vec outs) (not= (state-view st) (state-view st0)) (conj {:op :prove-state :r (state-view st)}))]
        [st (if (seq outs) {:to-api outs} {})]))))
