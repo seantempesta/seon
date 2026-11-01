@@ -6,7 +6,7 @@
             [clojure.string :as str]
             [datahike.api :as d]
             [seon.db :as pdb]
-            [seon.doc :as doc] [seon.root] [seon.config] [seon.source] [seon.fx] [seon.ref] [seon.problems :as problems]
+            [seon.doc :as doc] [seon.sqlite :as sqlite] [seon.root] [seon.config] [seon.source] [seon.fx] [seon.ref] [seon.problems :as problems]
             [seon.config :as config]))
 
 (defn- empty-db [] (ts/test-db))
@@ -418,7 +418,7 @@
     (is (= [[:var 'app/g]] (map hit (seon.doc/tokens db "fusing" #{:var} 2.0))) "the kinds asked only")
     (is (= [] (seon.doc/tokens db "nowhere" all 2.0)) "no word of it in any text")
     (is (= [] (seon.doc/tokens db "" all 2.0)))
-    (is (= ["datoms" "diff" "seon" "run" "outcome" "near" "of"] (seon.doc/words "datoms-diff seon.run/outcome nearOf aB x")) "an identifier is its parts, camelCase too; a one-letter part is no word")
+    (is (= ["datoms" "diff" "seon" "run" "outcome" "nearof" "ab"] (seon.doc/words "datoms-diff seon.run/outcome nearOf aB x")) "an identifier is its parts at separators, as the index tokenizes a text; a one-letter part is no word")
     (testing "the first line holding a word, and its number"
       (is (= {:line "(fusing 1))" :at 2} (select-keys (first (filter #(= 'app/g (:name %)) (seon.doc/tokens db "fusing" all 2.0))) [:line :at]))))))
 
@@ -503,22 +503,39 @@
   ;; docs/vector.md#search: the text ranking is FTS5's over Porter stems. The substring match it replaces found
   ;; "it" in every term holding it ("edit"), and a request's "watching" never found `watch!`
   (let [db (mt/with (mt/world)
-                    (mt/code 'app.sw "(ns app.sw)\n\n(defn watch! \"Observes a path.\" [] 1)\n(defn edit [] 2)\n(defn keep-it [] 3)\n"))
+                    (mt/code 'app.sw "(ns app.sw)\n\n(defn watch! \"Observes a path.\" [] 1)\n(defn edit [] 2)\n(defn keep-it [] 3)\n(defn seonRun [] 4)\n"))
         names (fn [q] (set (map :name (seon.doc/tokens db q #{:var} 1.0))))]
     (is (contains? (names "a watcher, watching") 'app.sw/watch!) "a stemmed word: watching is watch")
     (is (contains? (names "keep it") 'app.sw/keep-it) "a whole term")
+    (is (contains? (names "SeonRun") 'app.sw/seonRun) "a query is tokenized as a text is: an identifier is one term in both")
     (is (not (contains? (names "it") 'app.sw/edit)) "a short word is no part of a longer term")))
 
 (deftest grep-finds-a-string-inside-a-term-as-grep-does
   ;; docs/vector.md#search: grep's candidates come from the index's trigram table, so a string inside a longer
   ;; identifier, or across a separator inside one, is found; a string of two characters scans every text
   (let [db (mt/with (mt/world)
-                    (mt/code 'app.gi "(ns app.gi)\n(defn eval-n! [x] (destructure x))\n(defn other [] 1)"))
+                    (mt/code 'app.gi "(ns app.gi)\n(defn eval-n! [x] (destructure x))\n(defn decode-string [] 1)\n(defn other [] 1)"))
         at (fn [p] (set (keep #(when (re-find #"^app\.gi" (:at %)) (:at %)) (doc/grep db p #{:var} nil))))]
     (is (= #{"app.gi/eval-n!:1"} (at "val-n")) "inside a term and across its separator")
     (is (= #{"app.gi/eval-n!:1"} (at "stru")) "inside a term")
     (is (= #{"app.gi/eval-n!:1"} (at "n! [x")) "across a space and brackets")
+    (is (= #{"app.gi/decode-string:1"} (at "code-st")) "across a separator, from inside one term to the start of the next: the longest word, `code`, begins no term")
     (is (= #{"app.gi/eval-n!:1"} (at "x)")) "two characters: every text is read")))
+
+(deftest a-superseded-index-is-closed-once-nothing-uses-it
+  ;; docs/vector.md#search: SQLite's memory is native, invisible to the collector, so text-index retires the index it
+  ;; replaces: closed at once when nobody uses it, by the last reader's release when one does
+  (let [db1 (mt/world)
+        db2 (d/db-with db1 [{:schema/key :app/one :schema/form "[:map]"}])
+        db3 (d/db-with db1 [{:schema/key :app/two :schema/form "[:map]"}])
+        ix1 (doc/text-index db1)
+        ix2 (doc/text-index db2)
+        during (sqlite/using ix2 (fn [ix] (doc/text-index db3) (sqlite/fts-match ix "\"map\"" #{})))
+        ix3 (doc/text-index db3)]
+    (is (nil? (sqlite/using ix1 identity)) "an index nobody used is closed when replaced")
+    (is (vector? (:value during)) "an index in use stays open until its reader is done")
+    (is (nil? (sqlite/using ix2 identity)) "and is closed after")
+    (is (some? (sqlite/using ix3 identity)) "the current one is open")))
 
 (deftest grep-answers-each-matching-line-as-a-row
   ;; the owner, 2026-11-01: tools like the terminal's, with the same meaning, answering vectors of maps the agent

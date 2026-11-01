@@ -506,10 +506,11 @@
 
 
 (defn words
-  "The distinct `terms` of text s, in order: an identifier (datoms-diff, datomsDiff, :seon.run/outcome) is
-  its parts; a one-letter part is no word (search counts a word wherever it occurs in a text)."
+  "The distinct words of text s, in order, as the text index tokenizes a text (docs/vector.md#search): s lower-cased
+  and split at every character that is no letter or digit, those of two characters or more. A query is
+  asked in these, so `SeonRun` is the one word `seonrun`, the term unicode61 makes of the same text."
   {:malli/schema [:=> [:cat :string] [:vector :string]]}
-  [s] (vec (distinct (terms s))))
+  [s] (vec (distinct (terms (str/lower-case s)))))
 
 (defn- idf-of
   "BM25's idf of a word held by df of n texts."
@@ -557,20 +558,28 @@
   (sqlite/fts-open (for [[i a] (map-indexed vector index-attrs) {:keys [e v]} (d/datoms db :aevt a)] [e i (str v)])))
 
 (defn text-index
-  "The FTS5 index of every text attribute's texts on db (`text-attrs`), {:h :arena :n :counts}: tokens by Porter's
-  stems, so \"watching\" finds `watch!` and \"it\" is no part of \"edit\". Derived data (AGENTS section 5):
-  built once for a db value (its :hash and :max-tx say it is the same value: a db value is read again at every deref, so
-  its identity says nothing), reused until a move writes a text, regenerated from db whenever it is gone
-  (a build is 40 ms, 8 MB), never relied on. A race of two readers only builds one twice; an index is closed
-  when no reader holds it. See docs/vector.md#search."
+  "The index (seon.sqlite/fts-open) of every text attribute's texts on db (`text-attrs`), {:h :n :counts :state}: a
+  Porter-stemmed table for bm25 and a trigram table for substrings, so \"watching\" finds `watch!` and \"it\" is no
+  part of \"edit\". Derived data (AGENTS section 5): built once for a db value (its :hash and :max-tx say it is
+  the same value: a db value is read again at every deref, so its identity says nothing), reused until a move
+  writes a text, regenerated from db whenever it is gone, never relied on. The index it replaces is retired
+  (closed once no reader uses it: `with-index`). A race of two readers only builds one twice. See docs/vector.md#search."
   {:malli/schema [:=> [:cat :seon.host/db] :map]}
   [db]
   (let [at [(:hash db) (:max-tx db)] [was ix] @indexes]
     (if (= at was)
       ix
-      (let [ix (build-index db)]
-        (vreset! indexes [at ix])
-        ix))))
+      (let [new (build-index db)]
+        (vreset! indexes [at new])
+        (when ix (sqlite/retire! ix))
+        new))))
+
+(defn- with-index
+  "f applied to the current text index of db while it is held open (seon.sqlite/using); a reader that meets an index
+  retired since it asked for it asks again."
+  {:malli/schema [:=> [:cat :seon.host/db ifn?] :any]}
+  [db f]
+  (loop [] (if-let [r (sqlite/using (text-index db) f)] (:value r) (recur))))
 
 (defn carry-index!
   "The text index held for db before (`text-index`) as the index of db after, when the move wrote none of the
@@ -585,10 +594,10 @@
     nil))
 
 (defn- match-query
-  "The FTS5 query of words ws: each quoted (a prefix when prefix?) and joined by OR."
-  {:malli/schema [:=> [:cat [:sequential :string] :boolean] :string]}
-  [ws prefix?]
-  (str/join " OR " (map #(str "\"" % "\"" (when prefix? "*")) ws)))
+  "The FTS5 query of words ws: each quoted and joined by OR."
+  {:malli/schema [:=> [:cat [:sequential :string]] :string]}
+  [ws]
+  (str/join " OR " (map #(str "\"" % "\"") ws)))
 
 (defn- attr-numbers
   "The index's numbers of the attributes holding kinds' texts."
@@ -613,8 +622,10 @@
         ;; the candidate texts of each attribute: those holding a string pattern of 3 characters or more
         ;; (the trigram table), else all
         indexed? (and (string? pattern) (>= (count pattern) 3))
+        numbers (attr-numbers kinds)
+        indexed? (and indexed? (seq numbers))
         candidates (when indexed?
-                     (group-by second (map (fn [[e a]] [e (index-attrs a)]) (sqlite/fts-substring (text-index db) pattern (attr-numbers kinds)))))]
+                     (group-by second (map (fn [[e a]] [e (index-attrs a)]) (with-index db #(sqlite/fts-substring % pattern numbers)))))]
     (->> (for [a (distinct (keep text-attrs kinds))
                e (if indexed? (distinct (map first (get candidates a))) (map :e (d/datoms db :aevt a)))
                :let [v (:v (first (d/datoms db :eavt e a)))]
@@ -653,11 +664,12 @@
   [db s kinds z-min]
   (let [ws (words s)
         numbers (attr-numbers kinds)
-        ix (when (seq numbers) (text-index db))
-        n (reduce + (map #(get (:counts ix) % 0) numbers))]
-    (if (or (empty? ws) (zero? n))
+        [n rows] (when (and (seq ws) (seq numbers))
+                   (with-index db (fn [ix] [(reduce + (map #(get (:counts ix) % 0) numbers))
+                                            (sqlite/fts-match ix (match-query ws) numbers)])))]
+    (if (or (empty? ws) (zero? (or n 0)))
       []
-      (let [scored (for [[e a score] (sqlite/fts-match ix (match-query ws false) numbers)] {:e e :a (index-attrs a) :score score})
+      (let [scored (for [[e a score] rows] {:e e :a (index-attrs a) :score score})
             sum (reduce + (map :score scored))
             sumsq (reduce + (map #(* (:score %) (:score %)) scored))
             mean (/ sum n)

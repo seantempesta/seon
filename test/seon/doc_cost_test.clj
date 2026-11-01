@@ -118,8 +118,8 @@
                ;; 2026-10-31 (shrink-tests-4): measured on this input; before it (search-input's mix, a vocabulary that grew
                ;; with the texts' names): 1.66 MB / 132 calls at 100 and 300, 1.83 MB / 132 at 1,000. Here 323 KB / 32 calls at 20 and 60,
                ;; 340 KB at 200 (z-min 0.5, so the ten holding the word are the hits at every size; at 2 a small store's z leaves fewer)
-               ;; with the FTS5 index (task seon.doc/the-text-index-is-fts5; no vocabulary to scan): 282 KB / 30 calls at 20 and 60, 300 KB at 200
-               :fixed {:bytes 305000 :calls 30}
+               ;; with the FTS5 index (task seon.doc/the-text-index-is-fts5; no vocabulary to scan): 282 KB / 36 calls at 20 and 60, 300 KB at 200
+               :fixed {:bytes 305000 :calls 36}
                :sizes [20 60 200]}))
 
 (defn index-input
@@ -135,9 +135,11 @@
   (let [[db] (search-input 10)]
     (is (identical? (doc/text-index db) (doc/text-index db)) "a second read of the same value is the first's index")
     (let [db2 (d/db-with db [{:db/id "v" :var/name 'app/new} {:form/id "app/new (defn new [] 1)" :form/src "(defn new [] 1)" :form/defines ["v"]}])
-          ix (doc/text-index db2)]
-      (is (= (inc (:n (doc/text-index db))) (:n ix)) "a changed text is read again: the new text is in it")
-      (is (= 1 (count (sqlite/fts-match ix "\"new\"" #{}))) "and found by its word"))
+          ix (doc/text-index db2)
+          found (:value (sqlite/using ix #(sqlite/fts-match % "\"new\"" #{})))
+          n (:n ix)]
+      (is (= (inc (:n (doc/text-index db))) n) "a changed text is read again: the new text is in it")
+      (is (= 1 (count found)) "and found by its word"))
     ;; the path search reads: a connection's value, read again with nothing written between
     (ts/test-branch! (fn [_ conn]
                        (is (identical? (doc/text-index @conn) (doc/text-index @conn)) "two reads of a branch's value share one index")))))
@@ -153,9 +155,9 @@
                ;; 191 at 180, 2.72 MB / 611 at 600: ~4.5 KB and 1 call a text, the fixed part ~20 KB / 10 calls (the 2.85 MB / 360
                ;; calls were the seed's texts)
                ;; the FTS5 index of every text attribute (task seon.doc/the-text-index-is-fts5): 238 KB at 60, 599 KB at 180,
-               ;; 1.87 MB at 600, 10 calls at every size (the trigram table's create and fill are two more): ~3.0 KB a text (the text, its C string and its row), the fixed part ~56 KB
-               :per-n {:bytes 3100 :calls 0}
-               :fixed {:bytes 62000 :calls 10}
+               ;; 1.87 MB at 600, 19 calls at every size: ~3.7 KB a text (the text, its two C strings and its rows), the fixed part ~70 KB. Through seon.lib/defc's contracted bindings the same build is 21 calls and 7.5 KB a text (1,279 calls at 60 texts, 11,409 at 600), which is why the six a loop makes are locals of seon.sqlite/with-row-calls
+               :per-n {:bytes 3800 :calls 0}
+               :fixed {:bytes 72000 :calls 19}
                :sizes [60 180 600]}))
 
 (deftest search-costs-its-texts
@@ -170,10 +172,10 @@
                ;; 2.88 MB / 204 at 1,000; before them, a tenth holding it: 3.78 MB at 100, 19.17 MB at 1,000, 67.68 MB / 7,714 calls at 4,000
                ;; 2026-10-31 (shrink-tests-4): on the world, sizes [100 300 1000]: 2.64 / 2.69 / 2.83 MB, 204 calls: ~210 B a text,
                ;; the fixed part 2.62 MB (the 800 B a text was the seed's)
-               ;; with the FTS5 index (task seon.doc/the-text-index-is-fts5): 2.52 / 2.54 / 2.57 MB, 202 calls (select and in-attrs are two contracted calls): ~50 B a text, the
+               ;; with the FTS5 index (task seon.doc/the-text-index-is-fts5): 2.52 / 2.54 / 2.57 MB, 208 calls (the query's contracted functions; 290 with the bindings contracted): ~50 B a text, the
                ;; fixed part 2.52 MB
                :per-n {:bytes 55 :calls 0}
-               :fixed {:bytes 2530000 :calls 202}
+               :fixed {:bytes 2530000 :calls 208}
                :sizes [100 300 1000]}))
 
 (defn citing-input
