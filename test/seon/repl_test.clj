@@ -517,7 +517,7 @@
         page (slurp (str (cfg/checkout) "/" context/help-page))
         section (fn [anchor] (some (fn [[_ h body]] (when (= anchor (-> h str/lower-case (str/replace #"[^a-z0-9 -]" "") (str/replace " " "-"))) body))
                                    (re-seq #"(?m)^## (.+)\n([\s\S]*?)(?=^## |\z)" page)))
-        sent (fn [text] (apply str text (for [[_ a] (re-seq #"```doc/agent\.md#([a-z0-9-]+)```" text)] (str "\n" (section a)))))
+        sent (fn [text] (apply str text (for [[_ a] (re-seq #"```docs/agent\.md#([a-z0-9-]+)```" text)] (str "\n" (section a)))))
         forms (into [] (comp (mapcat (comp runnable sent val)) (distinct)) (sort-by key template/instructions))
         ends #{"(my.turn/wait)"}
         forms (concat (remove #(or (ends %) (str/starts-with? % "(my.task/fail!")) forms)
