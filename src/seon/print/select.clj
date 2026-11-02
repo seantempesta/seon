@@ -198,9 +198,9 @@
   {:malli/schema [:=> [:cat :any :seon.print/context] :map]}
   [x context]
   (let [c (class x) limit (:max-children context)
-        ;; a nested map whose schema declares a render shows as that render in its place: its text,
-        ;; one line (:text), or a value the render chooses to show (:value), printed here as any value
-        shown (when (and (:render context) (map-classes c) (not (identical? x (:root context)))) ((:render context) x))
+        ;; a nested map or vector whose schema declares a render shows as that render in its place: its
+        ;; text, one line (:text), or a value the render chooses to show (:value), printed here as any value
+        shown (when (and (:render context) (or (map-classes c) (vector? x)) (not (identical? x (:root context)))) ((:render context) x))
         rendered (when (contains? shown :text) shown)
         summary (when (contains? shown :value) shown)
         ;; a call ([#'f opts value], a vector headed by a var, as seon.web.html expands it, whose opts

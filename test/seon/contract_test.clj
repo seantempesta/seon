@@ -121,6 +121,12 @@
     (is (clojure.string/includes? (str msg) "at [:blocks 0 :text-from]") msg)
     (is (clojure.string/includes? (str msg) "in {:kind :para}") (str "a missing key: the map without it: " msg))))
 
+;; docs/checks.md#contracts-armed-at-definition: a call with the wrong number of arguments names the calls its var declares, a form to
+;; copy (a live session, cc7e6ac413, 2026-11-02, read the schema's form and called seon.doc/namespace-source wrong again)
+(deftest an-arity-error-names-the-calls-to-copy
+  (let [msg (try ((resolve 'seon.contract-test/armed-calls)) nil (catch clojure.lang.ExceptionInfo e (ex-message e)))]
+    (is (clojure.string/includes? (str msg) "called with 0 arguments; it is called as (seon.contract-test/armed-calls xs)") msg)))
+
 ;; See docs/cost.md#counting-calls
 (deftest a-test-process-arms-what-root-arms-at-boot
   ;; a cost proof counts contracted calls on armed vars, so the same code counts the same in bin/test

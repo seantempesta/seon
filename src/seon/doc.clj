@@ -623,6 +623,18 @@
     (and (str/starts-with? n ns)
          (or (= (count n) (count ns)) (contains? #{\/ \. \#} (nth n (count ns)))))))
 
+(defn- ns-hit
+  "The hit of an ns form's text, entity e under attribute a, which defines a namespace and no var: named by the
+  namespace, a :test when its name ends in -test (Clojure's naming of a test namespace), else a :var, and only
+  when kinds holds that kind; nil for any other text. What grep answers for a line of a namespace's ns form,
+  numbered as (lines 'the.ns) numbers it, the ns form first. See docs/vector.md#search."
+  {:malli/schema [:=> [:cat :seon.host/db :int :qualified-keyword [:set :keyword]] [:maybe [:vector :map]]]}
+  [db e a kinds]
+  (when (= :form/src a)
+    (when-let [n (some (fn [dv] (:ns/name (d/entity db (:v dv)))) (d/datoms db :eavt e :form/defines))]
+      (let [kind (if (str/ends-with? (str n) "-test") :test :var)]
+        (when (kinds kind) [{:kind kind :name n :rank 2}])))))
+
 (defn grep
   "Every line of the texts of kinds on db that pattern matches, as grep answers them, one row each
   {:at \"name:line\" :kind :text}: :at the thing holding it (a var or test, a section's address, a task's
@@ -647,7 +659,7 @@
                e (if indexed? (distinct (map first (get candidates a))) (map :e (d/datoms db :aevt a)))
                :let [v (:v (first (d/datoms db :eavt e a)))]
                :when (and v (re-find re v))
-               h (named-hits db e a kinds (constantly true))
+               h (or (seq (named-hits db e a kinds (constantly true))) (ns-hit db e a kinds))
                :when (or (nil? ns) (named-under? (str (:name h)) ns))
                [i line] (map-indexed vector (str/split-lines v))
                :when (re-find re line)
