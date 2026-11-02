@@ -582,6 +582,10 @@
     (is (= [] (doc/grep db "nowhere-at-all" all nil)) "no match is the empty vector")
     (is (= ["app.gr/total:2"] (map :at (doc/grep db "needle" #{:var :test} "app.gr")))
         ":ns is a name and what is under it: app.gr holds app.gr/total, not app.gr-test")
+    ;; a live session (cc7e6ac413, 2026-11-02) spent six evals on a test namespace's requires: grep answered []
+    (is (= [{:at "app.gr-test:1" :kind :test}] (map #(dissoc % :text) (doc/grep db "clojure.test :refer" #{:var :test} "app.gr-test")))
+        "an ns form's lines are the namespace's, at its line as (lines 'the.ns) numbers it, a test namespace's a :test")
+    (is (= ["app.gr:1"] (map :at (doc/grep db "ns app.gr" #{:var :test} "app.gr"))) "and a namespace's own, its -test one not under it")
     (is (= [":app/fuse:1"] (map :at (doc/grep (kinds-db) "fusing" #{:schema} "app")))
         "a schema key is under its namespace too, read without its colon")
     (is (= ["docs/gr.md#gr" "docs/gr.md#where-the-needle-is"] (map :at (doc/outline db "docs/gr.md"))) "outline: the page's sections in order")

@@ -17,7 +17,7 @@
     (grep "text")             like grep: every line holding it, over functions, tests, docs, tasks and schemas,
                               as rows [{:at "ns/f:3" :kind :text}]; {:in #{:var :test} :ns "seon.ref"} narrows it
     (ls 'a.ns) (ls "docs/x.md") like ls: a namespace's definitions or a page's sections, a row each
-    (lines 'ns/f 10 40)        like sed -n: x's lines (a var, a section "docs/x.md#a", a page, a task), a row each
+    (lines 'ns/f 10 40)        like sed -n: x's lines (a var, a namespace, a section "docs/x.md#a", a page, a task), numbered
     (wc x)                    like wc, in tokens: what x costs printed; rows are data: take, filter, count them
     (similar 'ns/f)           what is nearest ns/f's definition by meaning: vars, wiki sections, tasks
     (similar "text")          what is nearest the text by meaning (seon.vector/near)
@@ -39,7 +39,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.lib :as lib] [seon.context :as context] [seon.ref :as ref] [seon.doc :as doc] [seon.source :as source]
             [seon.config :as cfg] [seon.proofs :as proofs] [seon.fx :as fx] [seon.program :as program] [seon.task :as task] [seon.vector :as vector] [seon.contract :as contract] [seon.ctx]
-            [seon.db :as pdb] [seon.print :as print] [seon.print.select :as select] [seon.problems :as problems] [seon.render.ui :as ui] [my.schema :as schema] [jolt.analyzer] [clojure.java.io :as io] [clojure.string :as str] [clojure.main] [datahike.api :as d]))
+            [seon.db :as pdb] [seon.print :as print] [seon.print.select :as select] [seon.render :as render] [seon.problems :as problems] [seon.render.ui :as ui] [my.schema :as schema] [jolt.analyzer] [clojure.java.io :as io] [clojure.string :as str] [clojure.main] [datahike.api :as d]))
 
 (defn $ "An earlier eval's response (its live value under :value), by handle (:e3)." {:malli/schema [:=> [:cat :keyword] :any]}
   [h] (get-in @agent/state [:results h]))
@@ -401,23 +401,38 @@
 
 (defn lines
   "Like sed -n: the lines of x, whole or from line a to line b (1-based, inclusive), one row each
-  {:at \"seon.task/accumulate:3\" :text \"...\"}, numbered as grep numbers them. x is a var or a namespace
+  {:at \"seon.task/accumulate:3\" :text \"...\"}, numbered as grep numbers them, and shown as one block of
+  numbered lines (`lines-text`, the model render of :my.agent/lines). x is a var or a namespace
   ('seon.task/accumulate), a section (\"docs/x.md#anchor\"), a page (\"docs/x.md\") or a task's id. Each line
-  as it is written, untrimmed (grep's rows are trimmed), so an edit's old text is copied from lines, not grep. A name that holds no text answers my.agent/no-var."
+  as it is written, untrimmed (grep's rows are trimmed), so an edit's old text is copied from lines, not grep. A name that holds no text answers my.agent/no-var.
+  See docs/agent.md#small-answers."
   {:malli/schema [:function [:=> [:cat [:or :symbol :string]] [:or [:vector :map] :my.agent/no-var]]
                   [:=> [:cat [:or :symbol :string] pos-int? pos-int?] [:or [:vector :map] :my.agent/no-var]]]}
   ([x] (lines x 1 Integer/MAX_VALUE))
   ([x a b]
    (if-let [t (text-of x)]
-     (into [] (comp (map-indexed (fn [i l] {:at (str x ":" (inc i)) :text l})) (drop (dec a)) (take (inc (- b a))))
-           (str/split-lines t))
+     (with-meta (into [] (comp (map-indexed (fn [i l] {:at (str x ":" (inc i)) :text l})) (drop (dec a)) (take (inc (- b a))))
+                      (str/split-lines t))
+       {:seon.render/schema :my.agent/lines})
      (no-var (agent/db) (symbol (str x))))))
+
+(defn lines-text
+  "Rows rs of `lines` as the eval shows them (seon.render/model-printed, the schema :my.agent/lines): their
+  texts as code, each after its line number, so fifty lines cost their text and not fifty maps naming the
+  same thing; the rows stay the value (take, filter and count them). See docs/agent.md#small-answers."
+  {:malli/schema [:=> [:cat :seon.render/opts [:vector :map]] :any]}
+  [_ rs]
+  ;; a row a reader conj'd on without :at keeps the schema: it shows with no number
+  (let [n #(or (re-find #"\d+$" (str %)) "")
+        w (reduce max 0 (map (comp count n :at) rs))]
+    (print/code (str/join "\n" (for [{:keys [at text]} rs :let [k (n at)]] (if (seq k) (str (apply str (repeat (- w (count k)) \space)) k "  " text) text))))))
 
 (defn wc
   "Like wc, in tokens: what x costs printed, as the model is sent it (the one printer's text, whole, by its sizer):
   (wc (grep \"plan\")) before reading it whole."
   {:malli/schema [:=> [:cat :any] nat-int?]}
-  [x] (select/chars-tokens (count (if (string? x) x (:text (print/print-value x {:budget Integer/MAX_VALUE}))))))
+  [x] (let [v (if-let [r (render/model-printed x)] (:value r) x)]
+        (select/chars-tokens (count (if (string? v) v (:text (print/print-value v {:budget Integer/MAX_VALUE :render render/model-printed})))))))
 
 (defn- file-source
   "The text of the form at var v's :file and :line on the classpath (Clojure's clojure.repl/source-fn

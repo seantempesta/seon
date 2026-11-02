@@ -531,6 +531,17 @@
       (is (not (:ex item)) (str form " -> " (pr-str item))))
     (is (= (count forms) (count items)) "every form answered")))
 
+(deftest lines-show-as-numbered-lines
+  ;; docs/agent.md#small-answers: lines' rows are shown as one block of numbered lines (my.agent/lines-text), and
+  ;; wc counts what is shown: a live session (cc7e6ac413) paid 2.4k tokens for 50 lines as a map a line
+  (let [rs (with-meta (vec (for [i (range 8 13)] {:at (str "docs/x.md#a:" i) :text (str "  line " i " of the section")}))
+             {:seon.render/schema :my.agent/lines})
+        shown (:seon.print/code (my.agent/lines-text {} rs))]
+    (is (= " 8    line 8 of the section" (first (str/split-lines shown))) "a number right-aligned to the widest, then the line as written")
+    (is (= "12    line 12 of the section" (last (str/split-lines shown))))
+    (is (< (my.agent/wc rs) (my.agent/wc (with-meta rs nil))) "wc counts the numbered lines, fewer tokens than the maps")
+    (is (= "  no number" (:seon.print/code (my.agent/lines-text {} [{:text "  no number"}]))) "a row without :at shows its text alone")))
+
 (deftest the-help-page-runs
   ;; task seon.context/help-is-a-checked-docs-page (v1's help was tested data, its most-proven
   ;; turn saver): every form the help page tells an agent to run works in a real agent, in
@@ -556,7 +567,9 @@
       (is (str/includes? (printed "(my.agent/callers 'seon.task)") "seon.task-test") "a namespace's callers, the namespaces requiring it")
       (is (str/includes? (printed "(my.agent/callees 'seon.task)") "seon.ref") "and its callees, the namespaces it requires")
       (is (str/includes? (printed "(my.agent/grep \"accumulated\")") "seon.task/accumulate:") "grep: a row per matching line, at its thing and line")
-      (is (str/includes? (printed "(my.agent/lines 'seon.task/accumulate 3 6)") "seon.task/accumulate:3") (str "lines: the range, numbered as grep numbers it: " (subs (printed "(my.agent/lines 'seon.task/accumulate 3 6)") 0 (min 600 (count (printed "(my.agent/lines 'seon.task/accumulate 3 6)"))))))
+      (let [shown (printed "(my.agent/lines 'seon.task/accumulate 3 6)")]
+        (is (and (re-find #"(?m)^\s*3  " shown) (re-find #"(?m)^6  " shown) (not (re-find #"(?m)^7  " shown)) (not (str/includes? shown ":at")))
+            (str "lines: the range shown as numbered lines, numbered as grep numbers them, no map a line: " (subs shown 0 (min 600 (count shown))))))
       (is (str/includes? (printed "(my.agent/ls 'seon.task)") "seon.task/accumulate") (str "ls: a namespace's definitions: " (subs (printed "(my.agent/ls 'seon.task)") 0 (min 600 (count (printed "(my.agent/ls 'seon.task)"))))))
       (is (not (:ex (by "(swap! ctx assoc-in [:searches \"a1/where-sets-are-logged\"] {:seon.search/id \"a1/where-sets-are-logged\" :seon.search/query \"sets a workout has not logged\" :seon.search/k 5})")))
           "the help page's form runs in a real agent (that it is written, drawn and redrawn: seon.ctx-test/a-search-is-a-member-a-swap-adds-and-changes)")
