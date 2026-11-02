@@ -83,7 +83,8 @@
   does not define is one of main's tests the branch removed, which judges all the same (seon.agent/
   test-plan's :removed), so it is marked :removed and offered no form that makes it a proof. own? answers whether
   the branch's work wrote or changed a test (its source differs from its merge base's): only such a stray red is
-  offered the form that makes it a proof; another is main's test, which the work broke or its environment fails."
+  offered the form that makes it a proof; another is main's test, which the work broke or its environment fails.
+  See docs/render.md#how-the-work-stands."
   {:malli/schema [:=> [:cat [:vector :seon.reconcile/not-done] [:vector :map] ifn? ifn? ifn?] [:vector :map]]}
   [reasons reds src-of calls-of own?]
   (let [rs (remove #(= :proof-red (:reason %)) reasons)
