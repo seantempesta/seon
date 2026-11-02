@@ -747,13 +747,6 @@
   {:malli/schema [:=> [:cat :map] [:tuple :keyword :string]]}
   [v] (cond (:seon.eval/id v) [:eval (:seon.eval/id v)] (:seon.message/id v) [:message (:seon.message/id v)] :else [:turn (:seon.turn/id v)]))
 
-(defn- part-id
-  "The id printed-run keys a record's print by: its kind and its id, so an eval, a message, a turn, a parts message, an
-  example session and the opening of a session never meet by an id that happens to be alike. See
-  docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
-  {:malli/schema [:=> [:cat :keyword :string] :string]}
-  [kind id] (str (name kind) "/" id))
-
 (defn printed-run
   "The session's records new since cache (items, [ref v k tx] in tx order, ref [:eval id], [:message
   id], [:turn id], [:parts id], [:example key] or [:session id]) printed as the conversation sends them, each once (cache, what the
@@ -762,13 +755,13 @@
   session item (a delay of {:ref :whole}, `request`) drawn only when not printed before. A record's text depends
   on nothing before it, so a request prints only its new records and every older message is the same
   bytes (the provider's cache). An item already printed is skipped. Answers the cache: {:ids :parts
-  {part-id part} :tx}, each part {:ref :whole}, :tx the newest item's. See
+  {id part} :tx}, each part {:ref :whole}, :tx the newest item's. See
   docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
   {:malli/schema [:=> [:cat [:sequential :any] [:maybe :map]] :map]}
   [items cache]
   (reduce (fn [c [[kind id] v k tx]]
             (let [part (fn [ref whole] {:ref ref :whole whole})
-                  pid (part-id kind id)
+                  pid (str (name kind) "/" id)
                   c (cond-> (update c :ids conj pid) tx (assoc :tx tx))]
               (cond
                 (get-in c [:parts pid]) (update c :ids pop)
@@ -994,9 +987,10 @@
 (declare parts-of)
 
 (defn- ref-id
-  "The id printed-run keys a request's ref by (`part-id`): a record's kind and id, a parts ref's call."
+  "The id printed-run keys a request's ref by: its kind and a record's id or a parts ref's call, so an eval, a message, a turn, a parts message, an example session and the opening of a session never meet by an id that happens to be alike. See
+  docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
   {:malli/schema [:=> [:cat [:sequential :any]] :string]}
-  [ref] (part-id (first ref) (if (= :parts (first ref)) (nth ref 5) (second ref))))
+  [ref] (str (name (first ref)) "/" (if (= :parts (first ref)) (nth ref 5) (second ref))))
 
 (defn- cache-of
   "The print cache (printed-run's answer) of the refs a model call sent, each by its own render
@@ -1064,7 +1058,8 @@
         ref (cond-> [:parts e (d/commit-id db) whole? ids id] was (conj (nth prev-ref 2)))
         ;; a model's first request (whole) holds its task's example sessions right after the system message, then
         ;; the opening of its own session; a later one has them in the refs it continues
-        ex-items (when (and model? whole?)
+        ;; read from the task's datoms, so a task naming none costs no contracted call (examples-of is asked only when it names some)
+        ex-items (when (and model? whole? (seq (d/datoms db :eavt (:db/id (:seon.agent/task (d/entity db e))) :seon.task/examples)))
                    (when-let [ks (seq (examples-of db e))]
                      (conj (mapv (fn [k] (let [t (example-t db k)] [[:example k] (delay {:ref [:example k t] :whole (example-messages db k t)}) nil -2])) ks)
                            [[:session (:run basis)] (delay {:ref [:session (:run basis)] :whole (session-open (:run basis))}) nil -1])))

@@ -1475,7 +1475,8 @@
       (for [id conv :when (and (not (in-turn id)) (not (loop? id)))] (cond (ev? id) [#'eval-item {} id] (tu? id) [#'chat-turn {} aid id] :else [#'chat-message {} aid id]))
       (when aid [#'chat-end {} aid])]
      [:aside {:id "p-tiles"}
-      (when (seq (get-in c [:task :examples])) [#'examples {} aid])
+      ;; placed always: the component reads the task's examples when this list is drawn and answers nothing when it names none (a read here, in the layout, costs every draw of any list)
+      [#'examples {} aid]
       (for [[id e] evals :let [{{v :value} :response k :schema} (:seon.eval/record e)] :when (and (some? v) (render/render-of (ratom/realize v) k))]
         [#'eval-tile {} id])]]))
 
@@ -1759,19 +1760,6 @@
   [parts added]
   (vec (for [[ref ms] parts m ms] [ref m (context/messages-tokens [m]) (contains? added ref)])))
 
-(defn- session-labels
-  "Which session each message of a sent request belongs to, from its refs (:seon.model-call/sent), never
-  from the messages' text: [:example key] for the messages of an example session (an :example ref), :own
-  for the opening of the agent's own session (a :session ref) and every message after it, nil before any
-  (a request whose task names no example has none). One label per ref, in order. See
-  docs/render.md#the-page."
-  {:malli/schema [:=> [:cat [:sequential :any]] [:vector :any]]}
-  [refs]
-  (second (reduce (fn [[own? out] [kind x]]
-                    (let [own? (or own? (= :session kind))]
-                      [own? (conj out (cond (= :example kind) [:example x] own? :own))]))
-                  [false []] refs)))
-
 (defn- session-frame
   "Cards, the messages of one session of a sent request, in one bordered block under a header naming the
   session: label as `session-labels` gives it, continued? when the block continues a session that began
@@ -1828,8 +1816,12 @@
                  (when (= (inc i) cached) cache-line)))
         shared (vec (take-while #(not (nth % 3)) ms))
         n-shared (if same (count shared) 0)
-        ;; the cards from message index `from`, each session's in one frame (a request with no example has none)
-        labels (session-labels (map first ms))
+        ;; the session each message belongs to, from its ref: [:example key] for an :example ref, :own for a :session ref and what follows it,
+        ;; nil before any (a request whose task names no example has none); then the cards from message index `from`, each session's in one frame
+        labels (second (reduce (fn [[own? out] [kind x]]
+                                 (let [own? (or own? (= :session kind))]
+                                   [own? (conj out (cond (= :example kind) [:example x] own? :own))]))
+                               [false []] (map first ms)))
         cards (fn [from xs]
                 (mapcat (fn [group]
                           (let [i0 (ffirst group) label (get labels i0)
