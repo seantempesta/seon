@@ -861,7 +861,7 @@
   "The namespaces task t (a cite's :seon.cite/of as ctx holds it, filled) works in: its own, each proof's and the
   namespace each proof tests (its name less -test), and those its proofs' forms call into (:form/refs, as
   :proved holds them); none for what is no task (the agent's own cites). A cited var of these shows its source
-  (the md-scan bench's every run spent turn 0 reading scan and markdown: task
+  (an agent otherwise spends turn 0 reading them: task
   seon.context/an-agent-follows-its-instructions-to-green). See docs/references.md#an-entity-cites."
   {:malli/schema [:=> [:cat :any] [:set :symbol]]}
   [t]
@@ -1160,8 +1160,7 @@
   "The agent's run (a component over ctx): its relevant attributes and the turns it took, by the
   run schema's render, from the agent's record (its status, branch and turn cap, its turns; the cap
   its run's, `seon.context/run-of`, when the agent raised none), beside the turn what its evals changed
-  of the branch's program (`changed`: three of five md-scan bench runs changed nothing in 40 turns and
-  could not see it), and that its last reply was cut, when it was: the conversation's part of where the
+  of the branch's program (`changed`: an agent whose evals changed nothing sees that), and that its last reply was cut, when it was: the conversation's part of where the
   agent stands (the work's is seon.render.ui/status)."
   {:seon.render/style tile-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int] :any]}
   [{c :seon.ctx/ctx db :seon.db/db} aid]
