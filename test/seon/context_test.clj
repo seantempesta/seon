@@ -5,7 +5,7 @@
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]] [datahike.api :as d]
             [seon.db :as pdb] [seon.vector :as vector] [seon.task :as task] [seon.context :as context] [seon.print :as print]
             [seon.doc-test] [seon.reader :as reader] [seon.proofs :as proofs] [seon.agent :as agent] [seon.doc :as doc] [seon.judge] [seon.ctx :as ctx] [seon.render :as render] [seon.render.ui] [seon.web.html]
-            [seon.print.select :as select] [clojure.string :as str] [seon.edn] [seon.print-test :as print-test] [seon.repl :as repl] [seon.model]))
+            [seon.print.select :as select] [clojure.string :as str] [seon.lib] [seon.edn] [seon.print-test :as print-test] [seon.repl :as repl] [seon.model]))
 
 (defn- ns-fact
   "Var v's namespace with its file, as a store records it: a program namespace's under src/, a
@@ -1504,7 +1504,9 @@
 
 
 (deftest a-task-with-no-examples-sends-the-messages-main-sent
-  ;; the literal is main's request (9a35ff81ea, which holds no example) for this fixed fixture: the task demo/g
+  ;; The no-examples path only gains an empty ex-items (seon.context/request), so this literal is the branch's own
+  ;; output for it; the test asserts it and its digest, so a later change to that path goes red.
+  ;; The literal is main's request (9a35ff81ea, which holds no example) for this fixed fixture: the task demo/g
   ;; named by no example, a session of one eval, one message and one prose reply, two requests. Entity ids in the
   ;; page's part names (-457) are the seed's, so they are read as -N.
   (ts/test-branch!
@@ -1528,7 +1530,9 @@
                 {:role "user" :content "{:from \"owner\", :body \"Go on.\"}"}
                 {:role "assistant" :content "Thinking."}
                 {:role "user" :content "{\"run-head-N\" {:changed {:turn 3}}}"}]
-               (ids-as-n (rest (:messages r1)))))))))
+               (ids-as-n (rest (:messages r1)))))
+        (is (= "c63057ac93d419a3" (seon.lib/digest (str/join "\n--\n" (map #(str (:role %) ":" (:content %)) (ids-as-n (rest (:messages r1)))))))
+            "and the digest of its roles and contents (SHA-256, first 16 hex digits): a change to this path moves it")))))
 
 (deftest session-tx-answers-an-error-for-what-it-cannot-show
   (ts/test-branch!

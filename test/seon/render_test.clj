@@ -993,6 +993,25 @@
         (is (not-any? #(= :error (:op %)) (:to-api @o2)))
         (is (some #(and (= 3 (:k %)) (str/includes? (:html %) "seon.render/view-defect")) (:to-web @o2)) "its page is still the error")))))
 
+(deftest a-branchless-agent-on-main-opens-at-its-id-under-main
+  ;; an example session is an ended agent on main with no branch (my.root/load-example!): /agent/main/example-abc is
+  ;; the view :main/example-abc, found as :user is (an agent of main with no branch) and read from main
+  (let [db (reduce d/db-with (ts/test-db)
+                   [[{:seon.root/id :root :seon.root/boot "b1"}]
+                    [{:seon.agent/key "example/abc" :seon.agent/id :example-abc :seon.agent/status :ended :seon.agent/description "Make h."}]
+                    [{:seon.eval/id "example/abc/s1" :seon.eval/by "src" :seon.eval/agent [:seon.agent/key "example/abc"]
+                      :seon.eval/record {:code "(+ 1 2)" :response {:handle 'result/example-abc-s1 :value 3} :run "example/abc" :call-id "example-abc-call_1" :call 0}}]])
+        eid (seon.db/eid db :seon.agent/key "example/abc")
+        st {:rid 1 :pending {} :watch #{} :waiting {} :views {} :branches {} :main-db db :view {:agents {}}}
+        units (fn [view] (:seon.render/units (#'p/page-value st view)))
+        html (fn [view] (apply str (map :html (units view))))]
+    (is (= eid (#'p/location db :main/example-abc)) "found by its id under main's name")
+    (is (= eid (#'p/location db [:chat :main/example-abc])))
+    (is (nil? (#'p/location db :main/example-none)) "an id no agent has")
+    (is (str/includes? (html [:chat :main/example-abc]) "(+ 1 2)") "its chat page lists its evals")
+    (is (str/includes? (html [:chat :main/example-abc]) "href=\"/agent/main/example-abc") "its tabs name it by the same link")
+    (is (seq (units :main/example-abc)) "its record page reads main")))
+
 (deftest a-debug-page-of-an-agent-with-no-branch-answers
   ;; the browser pass (3b-root): /agent/user/debug never answered: the user has no branch on main, so
   ;; none was read, and the page waited for one. With no branch (or one that could not be read) its

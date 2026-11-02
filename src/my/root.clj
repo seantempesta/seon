@@ -282,10 +282,8 @@
   `example-txs` answers when the file is not one. A task names it by `[:seon.agent/key \"example/<id>\"]` in
   :seon.task/examples. Loading is idempotent: a session whose agent and every record main already holds
   writes nothing ({:ok true :changed 0 :batches 0}); else the last writer's answer with :batches, how many it
-  wrote. Gap: the example agent has no branch of its own (its :seon.agent/branch is not written), because
-  only the writer makes a branch, for an agent it forks or clones, and root has no function that makes one
-  without a process; its records are main's, so a task's page draws them, and a page of its own waits for
-  that function. See docs/tasks.md#a-task-names-example-sessions."
+  wrote. The example agent has no branch (only the writer makes a branch): its records are main's, and its pages
+  open at /agent/main/example-<id>, the page of a branchless agent on main (seon.render.proc/location). See docs/tasks.md#a-task-names-example-sessions."
   {:malli/schema [:=> [:cat :seon.root/sys :string] :map]}
   [sys path]
   (let [txs (example-txs path)]
