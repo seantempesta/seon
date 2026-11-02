@@ -163,6 +163,16 @@
                  (str ", in " (print/text holder (:part print/budgets)))))
              (when (next es) (str " (and " (dec (count es)) " more in :seon.error/problems)")))))))
 
+(clojure.core/defn- calls
+  "The calls fn-sym's var declares (its :arglists), each as a form to copy, joined by \" or \":
+  \"(seon.doc/namespace-source db sym)\"; nil when it declares none. What an arity error names.
+  See docs/checks.md#contracts-armed-at-definition."
+  {:malli/schema [:=> [:cat :qualified-symbol] [:maybe :string]]}
+  [fn-sym]
+  (some->> (some-> (find-var fn-sym) meta :arglists seq)
+           (map #(str "(" (str/join " " (cons fn-sym (map str %))) ")"))
+           (str/join " or ")))
+
 (clojure.core/defn- invalid
   "Malli's report for fn-sym, as the thrown error map."
   {:malli/schema [:=> [:cat :qualified-symbol :qualified-keyword :map] :any]}
@@ -175,7 +185,7 @@
                    :seon.error/message (str fn-sym " " (name kind)
                                             (case arm :input (str ": its arguments do not satisfy its contract" (first-problem (:input data) (:args data)))
                                                   :output (str ": its value does not satisfy its contract" (first-problem (:output data) (:value data)))
-                                                  :arity (str ": called with " (:arity data) " arguments")
+                                                  :arity (str ": called with " (:arity data) " arguments" (some->> (calls fn-sym) (str "; it is called as ")))
                                                   ""))
                    :seon.error/fix (case arm
                                      :output (str "Fix " fn-sym " (the producer), or its contract.")

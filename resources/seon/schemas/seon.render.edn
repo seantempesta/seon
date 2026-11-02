@@ -8,6 +8,8 @@
  ;; prints. The agent's process state: a Datahike db, the reach graph and host handles are shown by
  ;; name and size, each with the form that reads it (seon.agent/state-summary)
  :seon.agent/state [:map {:seon.render/model seon.agent/state-summary}]
+ ;; the rows of my.agent/lines, shown as one block of numbered lines (my.agent/lines-text)
+ :my.agent/lines [:vector {:seon.render/model my.agent/lines-text} :map]
  ;; the agent's run (its turn of its cap, the tokens it sent, a cut reply), a part of the page
  :seon.context/run [:map {:seon.render/html seon.render.ui/run-html}]
  ;; the namespaces the work touches (seon.context/namespaces-of): each the names the task cites or its proofs call
