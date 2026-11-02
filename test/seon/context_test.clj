@@ -838,6 +838,22 @@
     (is (= "not written yet" (get (:to-prove data) 'demo-test/q-test))
         "one the plan's sentences do not name: that it is not written, not the plan again (the page shows it)")))
 
+(deftest a-record-reads-as-its-live-response-through-its-model-render
+  ;; the context lab, 2026-11-02: a prove's tool message, drawn from its record, was its whole value printed (~15.8k
+  ;; tokens of map and :heap) where the live response was its model render's one line (my.agent/prove-summary): the
+  ;; value's schema is metadata, which the store does not keep, and record-text never read the record's :schema
+  (let [v (with-meta {:reports [] :ran 3 :reused 2 :fail 0 :error 0 :pass 3 :heap (vec (range 400))} {:seon.render/schema :seon.test/proved})
+        r {:handle 'result/e7 :value v}
+        live (seon.print/response-text r seon.render/model-printed)
+        rec (repl/record-details "(my.agent/prove)" r {} nil)
+        stored (:seon.eval/record (d/pull (d/db-with (db-with-program) [{:seon.eval/id "e7" :seon.eval/by "a1" :seon.eval/record rec}])
+                                          [:seon.eval/record] [:seon.eval/id "e7"]))
+        sent (:content (second (context/eval-messages {:seon.eval/by "a1" :seon.eval/record (assoc stored :call-id "c1")} nil)))]
+    (is (= :seon.test/proved (:schema stored)) "the record keeps the value's schema")
+    (is (str/includes? live "green: ran 3") "the live response is its one line")
+    (is (= live sent) (str "the record's tool message reads as the live response did: " sent))
+    (is (not (str/includes? sent ":heap")) "not the whole value")))
+
 (deftest a-record-keeps-its-value
   ;; the owner's rule (clipping audit 2026-10-25, P1/P8): data is cut only by the one printer,
   ;; when it is printed into a reader's view; the full result is stored. A record keeps its

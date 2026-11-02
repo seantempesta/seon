@@ -669,12 +669,11 @@
       r)))
 
 (defn- again
-  "Response r of code, with :again when an earlier eval of this agent ran the same code and answered the same
-  (its value, error, output and forms): which eval, and that it answered the same (equal answers do not show
-  what it reads is unchanged, so it says no more). An agent that runs one read again and again
-  reads each answer as new. Kept in the agent's state as a hash of the code to the eval and a hash of its answer, so it
-  costs one lookup an eval. An agent's own evals only (root's and an inner eval's are not
-  counted)."
+  "Response r of code, with :again, a string naming the earlier eval, when an earlier eval of this agent ran the same
+  code (compared trimmed) and answered the same (its value, error, output and forms). :again says the answer repeats
+  and nothing more: equal answers do not show what the code reads is unchanged. It is kept in the agent's state as a hash
+  of the code to the eval and a hash of its answer, one lookup an eval, and only for an agent's own evals (root's
+  and an inner eval's are not counted). See docs/agent.md#small-answers."
   {:malli/schema [:=> [:cat :string :map] :map]}
   [code r]
   (if (and (= :agent (:mode @agent/state)) (:handle r))
@@ -773,11 +772,10 @@
           (range n))))
 
 (defn- unpaired-by-line
-  "The delimiters new text leaves unpaired that its old text does not, each said by its line in new and that
-  line's text (an edit refused with how many delimiters but not where leaves the agent counting), as one string. d-old and d-new
-  are their `seon.reader/delimiters`. A delimiter of new is old's when it stands where old has the same one:
-  before their common prefix ends, or after their common suffix starts (an edit's fragment is often
-  unbalanced itself: an old (foo [a keeps its open ( and [). See docs/agent.md#changing-a-definition."
+  "The delimiters new leaves unpaired that old does not, each as its line number in new and that line's text,
+  joined as one string. d-old and d-new are their `seon.reader/delimiters`. A delimiter of new is old's when
+  it stands where old has the same one, before their common prefix ends or after their common suffix starts
+  (a fragment such as `(foo [a` is unbalanced in both). See docs/agent.md#changing-a-definition."
   {:malli/schema [:=> [:cat :string :string :map :map] :string]}
   [old new d-old d-new]
   (let [n (min (count old) (count new))

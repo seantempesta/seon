@@ -450,7 +450,8 @@
 (defn evaluation
   "One eval (the declared html render of :seon.db/eval-fact, its record, and of a response), as
   it ran: the prose beside it, its code, its response printed under its handle as it is shown
-  (seon.print/record-text of its record; a live response's own :text; an error's by its error
+  (seon.print/record-text of its record, through the model render of the schema it kept; a value in a row by that schema's
+  html render; a live response's own :text; an error's by its error
   map's render; a value recorded as its basis, @ctx's, rendered from the branch at it), and its cost and who evaluated it as recorded; :as :inline, its code and
   response in one line. Rendered from the record, which never changes."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
@@ -462,7 +463,7 @@
         ;; value's :printed, a live reply's :text) is prose
         data? (and (:seon.eval/record e) (nil? (:text r)) (not (:printed rec)))
         r (cond-> r (and (:seon.eval/record e) (nil? (:text r)))
-            (assoc :text (if data? (when (= :inline (:as opts)) (print/record-text rec)) (:printed rec))))
+            (assoc :text (if data? (when (= :inline (:as opts)) (print/record-text rec render/model-printed)) (:printed rec))))
         by (or (:seon.eval/by e) (:by r))
         err? (some? (:ex r))]
     (if (= :inline (:as opts))
@@ -481,9 +482,12 @@
          (render/html (cond-> {} (:handle r) (assoc :handle (list :ex (:handle r)))) (:ex r))
          (if data?
            ;; a value stored as data renders as structure, the printer's hiccup under its handle
-           (let [v (shown-value (:response rec))]
+           ;; a value of a schema with its own render is that value; any other, the response less what the row shows beside it
+           (let [v (if (:schema rec) (get-in rec [:response :value]) (shown-value (:response rec)))]
              [:div {:class "flex flex-col gap-1 text-text-200"}
-              [:div {:class "flex gap-2"} [:span {:class "text-text-500"} "⇒"] (render/html {:handle (:handle r)} v)]
+              ;; drawn by the html render of the schema the record kept (the value's metadata does not survive the store),
+              ;; as the live response is: a prove's run by seon.render.ui/proved, not as a map
+              [:div {:class "flex gap-2"} [:span {:class "text-text-500"} "⇒"] (render/html (cond-> {:handle (:handle r)} (:schema rec) (assoc :schema (:schema rec))) v)]
               ;; each cut opened: what its form reads, from the record, under that form (seon.web/open-form read it)
               (for [f (:opened opts) :let [form (edn/read-string f)]]
                 [:div {:class "flex gap-2"}
@@ -861,7 +865,7 @@
   "The namespaces task t (a cite's :seon.cite/of as ctx holds it, filled) works in: its own, each proof's and the
   namespace each proof tests (its name less -test), and those its proofs' forms call into (:form/refs, as
   :proved holds them); none for what is no task (the agent's own cites). A cited var of these shows its source
-  (an agent otherwise spends turn 0 reading them: task
+  (an agent otherwise spends turn 0 reading them; task
   seon.context/an-agent-follows-its-instructions-to-green). See docs/references.md#an-entity-cites."
   {:malli/schema [:=> [:cat :any] [:set :symbol]]}
   [t]
@@ -1160,7 +1164,7 @@
   "The agent's run (a component over ctx): its relevant attributes and the turns it took, by the
   run schema's render, from the agent's record (its status, branch and turn cap, its turns; the cap
   its run's, `seon.context/run-of`, when the agent raised none), beside the turn what its evals changed
-  of the branch's program (`changed`: an agent whose evals changed nothing sees that), and that its last reply was cut, when it was: the conversation's part of where the
+  of the branch's program (`changed`), and that its last reply was cut, when it was: the conversation's part of where the
   agent stands (the work's is seon.render.ui/status)."
   {:seon.render/style tile-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int] :any]}
   [{c :seon.ctx/ctx db :seon.db/db} aid]
@@ -1408,8 +1412,10 @@
       status [:p {:class "text-text-500"} (case status :busy "working…" :idle "waiting for you" (kname status))])))
 
 (defn examples
-  "The example sessions its task names (a component over ctx and the db, placed when the task names
-  any): under a heading naming each session, its evals as one line each in the order the agent's own
+  "The example sessions its task names (a component over ctx and the db), or nothing when it names none. It is placed
+  on every page, for the render cache runs a component once and again only when what it reads changes, so it costs
+  nothing on an idle page; placing it only when there are examples would cost 3 contracted calls on every list draw,
+  because the layout builds the whole page whatever list is drawn. It draws, under a heading naming each session, its evals as one line each in the order the agent's own
   conversation orders them (`conversation`), drawn by `evaluation` as the agent's own are. The model
   reads the same sessions as messages (seon.context/example-messages), so this is beside its page, not in it.
   See docs/tasks.md#a-task-names-example-sessions and docs/render.md#the-page."
@@ -1475,7 +1481,7 @@
       (for [id conv :when (and (not (in-turn id)) (not (loop? id)))] (cond (ev? id) [#'eval-item {} id] (tu? id) [#'chat-turn {} aid id] :else [#'chat-message {} aid id]))
       (when aid [#'chat-end {} aid])]
      [:aside {:id "p-tiles"}
-      ;; placed always: the component reads the task's examples when this list is drawn and answers nothing when it names none (a read here, in the layout, costs every draw of any list)
+      ;; placed on every page: the render cache runs a component once and again only when what it reads changes, so a page whose task names no examples pays nothing; reading the task here to place it only when it names examples would be 3 contracted calls on every list draw, because the layout builds the whole page whatever list is drawn
       [#'examples {} aid]
       (for [[id e] evals :let [{{v :value} :response k :schema} (:seon.eval/record e)] :when (and (some? v) (render/render-of (ratom/realize v) k))]
         [#'eval-tile {} id])]]))

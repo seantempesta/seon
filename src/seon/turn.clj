@@ -180,7 +180,7 @@
   call that turn, the message in its request; a throw counts the turn, and work! ends the agent's
   work :error on the second throw in a row with no model turn between (its request cannot be drawn,
   so no model turn could read the message). Answers st after it, :error its error map. The turn loop's entrant boundary (docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map):
-  Seon's code meets the agent's program each turn (a redefined scan of the agent's must not end its run)."
+  Seon's code meets the agent's program each turn (the agent may redefine a function of Seon's own, scan for one, and the turn then throws inside it)."
   {:malli/schema [:=> [:cat :map :seon.error/base] :map]}
   [st em]
   (tell-error! em "your turn threw: Seon's code ran with the program on your branch as it stands now (Seon's own code and what you changed of it), so the cause may be either")
