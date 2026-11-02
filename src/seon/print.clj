@@ -112,9 +112,11 @@
   ([rec render]
    (or (:printed rec)
        (let [r (:response rec) v (:value r)]
-         (response-text (cond-> r (and (:schema rec) (instance? clojure.lang.IObj v))
-                          (assoc :value (vary-meta v assoc :seon.render/schema (:schema rec))))
-                        render)))))
+         ;; only a record that kept a schema can render: a stored value's nested metadata is gone, so a render
+         ;; passed for any other would be asked of every value printed and answer nothing
+         (if (and (:schema rec) render (instance? clojure.lang.IObj v))
+           (response-text (assoc r :value (vary-meta v assoc :seon.render/schema (:schema rec))) render)
+           (response-text r))))))
 
 ;;; Prose: text read as itself (a message, a form's source, a plan, a printed value), not as
 ;;; a string literal. The one string cutter's (seon.print.select/break-at, its words
