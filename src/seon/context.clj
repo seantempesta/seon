@@ -718,7 +718,7 @@
   {:malli/schema [:=> [:cat :map :any] [:vector :seon.model/message]]}
   [{:seon.eval/keys [by record]} _]
   (let [{:keys [code prose content reasoning call-id call]} record
-        text (print/record-text record)]
+        text (print/record-text record render/model-printed)]
     (if call-id
       ;; as the model sent it: the reply's text (its first call's :content) and the call's own prose
       [(cond-> {:role "assistant" :content (or content "")

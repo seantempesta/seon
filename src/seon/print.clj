@@ -102,10 +102,19 @@
                   (when (keyword? op) (get x op))))))
 
 (defn record-text
-  "An eval's record (:seon.eval/record) as its response reads, printed now (`response-text`): its stored value printed; a value that is not plain data was printed as it was recorded
-  (:printed), and reads so."
-  {:malli/schema [:=> [:cat :map] :string]}
-  [rec] (or (:printed rec) (response-text (:response rec))))
+  "An eval's record (:seon.eval/record) as its response reads, printed now (`response-text`): its stored value printed,
+  through render (seon.render/model-printed) under the schema the record kept (:schema: the value's
+  :seon.render/schema, which metadata does not keep through the store), so a record reads as its live response did
+  (a prove's one line, not its whole map); a value that is not plain data was printed as it was recorded (:printed),
+  and reads so. See docs/render.md#a-render-is-a-value-printed-once."
+  {:malli/schema [:function [:=> [:cat :map] :string] [:=> [:cat :map [:maybe :seon.host/fn]] :string]]}
+  ([rec] (record-text rec nil))
+  ([rec render]
+   (or (:printed rec)
+       (let [r (:response rec) v (:value r)]
+         (response-text (cond-> r (and (:schema rec) (instance? clojure.lang.IObj v))
+                          (assoc :value (vary-meta v assoc :seon.render/schema (:schema rec))))
+                        render)))))
 
 ;;; Prose: text read as itself (a message, a form's source, a plan, a printed value), not as
 ;;; a string literal. The one string cutter's (seon.print.select/break-at, its words
