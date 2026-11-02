@@ -519,10 +519,10 @@
   "The namespaces agent record c's work touches, as the namespaces part shows them, from ctx alone: its task's own
   first (a task written from a symptom cites nothing yet), then those of what its task and its needs cite (a var's
   namespace, or a namespace cited itself) and of their proofs, once each, each {:names [...] :ns-form form}: its
-  names the task cites or its proofs call (their forms'
-  :form/refs, as :proved holds them), and the form that reads its ns form (its requires and aliases) and a line
-  per definition, ``(clojure.repl/source ns)`` (the form that shows a namespace's requires; my.agent/help does not hold them). It costs what it
-  shows, never the namespace's size. See docs/render.md#a-part-answers-data."
+  names the task cites or its proofs call (their forms' :form/refs, as :proved holds them), and the form that reads
+  its ns form (its requires and aliases) and a line per definition, ``(clojure.repl/source ns)`` (the form that shows
+  a namespace's requires; my.agent/help does not hold them). It costs what it shows, never the namespace's size.
+  See docs/render.md#a-part-answers-data."
   {:malli/schema [:=> [:cat :map] [:map-of :symbol :map]]}
   [c]
   (let [t (:task c)
