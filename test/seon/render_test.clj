@@ -186,6 +186,17 @@
     (is (= attrs (set (keys named))) "each is named by an entity schema")
     (is (every? #{1} (vals named)) (pr-str named))))
 
+(deftest a-stored-prove-draws-as-its-live-response
+  ;; the context lab, 2026-11-02: a stored prove's row drew its raw map (:at-judge, :error, :fail ...) where its live
+  ;; response drew seon.render.ui/proved; the value's schema is metadata the store does not keep, the record keeps :schema
+  (let [rec {:code "(my.agent/prove)" :prose "Prove." :schema :seon.test/proved
+             :response {:handle 'result/e9 :value {:reports [] :ran 3 :reused 2 :fail 0 :error 0 :pass 3 :heap [1 2 3]}}}
+        row (h/html (ui/evaluation {} {:seon.eval/record rec :seon.eval/by "a3"}))
+        line (h/html (ui/evaluation {:as :inline} {:seon.eval/record rec :seon.eval/by "a3"}))]
+    (is (str/includes? row "green: ran 3") (str "the row draws the prove's own render: " row))
+    (is (not (str/includes? row ":heap")) "not its map")
+    (is (not (str/includes? line ":heap")) (str "the one line is the model render's too: " line))))
+
 (deftest an-eval-and-a-turn-say-what-they-cost
   ;; an eval's cost as recorded, each number with its unit; a turn's header says which of how many
   (let [ev (h/html (ui/evaluation {} {:seon.eval/record {:code "(f 2)" :prose "f doubles?"

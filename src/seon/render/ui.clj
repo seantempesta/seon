@@ -450,7 +450,8 @@
 (defn evaluation
   "One eval (the declared html render of :seon.db/eval-fact, its record, and of a response), as
   it ran: the prose beside it, its code, its response printed under its handle as it is shown
-  (seon.print/record-text of its record; a live response's own :text; an error's by its error
+  (seon.print/record-text of its record, through the model render of the schema it kept; a value in a row by that schema's
+  html render; a live response's own :text; an error's by its error
   map's render; a value recorded as its basis, @ctx's, rendered from the branch at it), and its cost and who evaluated it as recorded; :as :inline, its code and
   response in one line. Rendered from the record, which never changes."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
@@ -462,7 +463,7 @@
         ;; value's :printed, a live reply's :text) is prose
         data? (and (:seon.eval/record e) (nil? (:text r)) (not (:printed rec)))
         r (cond-> r (and (:seon.eval/record e) (nil? (:text r)))
-            (assoc :text (if data? (when (= :inline (:as opts)) (print/record-text rec)) (:printed rec))))
+            (assoc :text (if data? (when (= :inline (:as opts)) (print/record-text rec render/model-printed)) (:printed rec))))
         by (or (:seon.eval/by e) (:by r))
         err? (some? (:ex r))]
     (if (= :inline (:as opts))
@@ -481,9 +482,12 @@
          (render/html (cond-> {} (:handle r) (assoc :handle (list :ex (:handle r)))) (:ex r))
          (if data?
            ;; a value stored as data renders as structure, the printer's hiccup under its handle
-           (let [v (shown-value (:response rec))]
+           ;; a value of a schema with its own render is that value; any other, the response less what the row shows beside it
+           (let [v (if (:schema rec) (get-in rec [:response :value]) (shown-value (:response rec)))]
              [:div {:class "flex flex-col gap-1 text-text-200"}
-              [:div {:class "flex gap-2"} [:span {:class "text-text-500"} "⇒"] (render/html {:handle (:handle r)} v)]
+              ;; drawn by the html render of the schema the record kept (the value's metadata does not survive the store),
+              ;; as the live response is: a prove's run by seon.render.ui/proved, not as a map
+              [:div {:class "flex gap-2"} [:span {:class "text-text-500"} "⇒"] (render/html (cond-> {:handle (:handle r)} (:schema rec) (assoc :schema (:schema rec))) v)]
               ;; each cut opened: what its form reads, from the record, under that form (seon.web/open-form read it)
               (for [f (:opened opts) :let [form (edn/read-string f)]]
                 [:div {:class "flex gap-2"}
