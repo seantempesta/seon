@@ -792,8 +792,8 @@
  ;; 2,000 (seon.ref/scan 6,005); 2,052 test forms, 76 over 1,000.
  :seon.config.shrink/form-tokens 1000
  ;; Relevance (seon.context/relevance, docs/vector.md#relevance): a logistic over five features of
- ;; an item near a context, one weight set a kind: zc its cosine with the query's vector, zb its FTS5 bm25
- ;; for the query's words among every text (seon.doc/scores), zt its cosine with the touched items' mean vector (each a z-score over
+ ;; an item near a context, one weight set a kind: zc its cosine with the query's vector, zb its BM25
+ ;; for the query's words, over the pool (seon.doc/bm25), zt its cosine with the touched items' mean vector (each a z-score over
  ;; the pool), g1 log(1 + the seeds it neighbours x its rarity), ppr log(1 + scale x its
  ;; personalized PageRank from the seeds), the constants :seon.config.render/relevance-features. Weighing a link by its rarity took plumbing
  ;; (seon.contract/checked, seon.db/eid ...) from 20 to 1 of 570 function lines at the same recall. Provenance: fitted (scikit-learn, L2 C=1) on 220 merges' commit subjects as queries
@@ -805,7 +805,9 @@
                                         :section {:zc 0.162 :zb 0.816 :zt 0.101 :g1 0.690 :ppr 0.255 :intercept -4.100}
                                         :schema {:zc 0.517 :zb 0.318 :zt 0.332 :g1 0.382 :ppr 0.435 :intercept -4.991}}
  ;; The constants relevance's features were fitted with (seon.context/relevance): :alpha the share a
- ;; PageRank push keeps (the field's 0.15, Andersen, Chung and Lang 2006); :rarity-cap the degree a link's rarity, (1 + cap)/(1 + degree), counts to (16, as the
+ ;; PageRank push keeps (the field's 0.15, Andersen, Chung and Lang 2006); :bm25-k1 and :bm25-b
+ ;; BM25's saturation and length normalization (the field's 1.2 and 0.75, Robertson and Zaragoza
+ ;; 2009); :rarity-cap the degree a link's rarity, (1 + cap)/(1 + degree), counts to (16, as the
  ;; rank fusion's measured cap was: no plumbing lines at 16, 64 and 256 alike), which is also the most
  ;; datoms that count reads; :ppr-scale the rank's scale inside its log (10^4: a rank of 1e-4, a
  ;; seed's typical neighbour, reads log 2); :hub the degree from which a node never pushes and is
@@ -813,7 +815,7 @@
  ;; push from counting seon.contract/checked's thousands of callers: each datom read costs ~1.4 KB
  ;; here). Provenance: the weights were fitted with these; no others were measured but :hub's.
  ;; At the bound: none; each is required.
- :seon.config.render/relevance-features {:alpha 0.15 :rarity-cap 16 :ppr-scale 10000.0 :hub 64}
+ :seon.config.render/relevance-features {:alpha 0.15 :bm25-k1 1.2 :bm25-b 0.75 :rarity-cap 16 :ppr-scale 10000.0 :hub 64}
  ;; Unit: [logit chance] knots a kind, read piecewise linearly. What a relevance logit means: the
  ;; chance an item is worth reading for the work now, as an independent judge (Sonnet) labelled 1,905
  ;; lines useful or noise: the first five of each kind on 59 merged tasks' pages and 20 search
@@ -859,12 +861,6 @@
  ;; embeddings-design.md): tokens kept at z >= 2 lifted R@10 from 0.68 to 0.71 without hurting the
  ;; paraphrase queries; unfiltered they are noise on prose. At the bound: a text scoring below it is not a hit.
  :seon.config.render/search-token-z 2.0
- ;; Unit: a weight. How much a text's name (a form's vars, a section's address and heading, a schema key) counts in
- ;; the text index's bm25 against its text, 1: an item whose name the query says ranks above one that only mentions it
- ;; (seon.sqlite/fts-match, seon.doc/name-of). Provenance: relevance's own BM25 read each item's name twice beside its
- ;; text; scored by FTS5 over the text alone, a changed item ranked first in 14 of 49 dev tasks against 23 (the context
- ;; lab's L0, 2026-11-02, jolt/one-search). At the bound: 0 ranks by the text alone.
- :seon.config.render/search-name-weight 2.0
  ;; Unit: candidates per hit shown. How many of the nearest by meaning my.agent/search reads for each hit
  ;; it may show (seon.vector/near takes this times :seon.config.render/search), before the
  ;; fusion and the filters cut them to the count. Provenance: the literal the

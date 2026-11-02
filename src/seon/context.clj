@@ -171,6 +171,18 @@
 
 ;; ---- relevance: one calibrated score for a context and an item (docs/vector.md#relevance) ----
 
+(defn- item-text
+  "Entity e's text as relevance's lexical feature reads it: its name twice (a var's, a section's
+  address and heading, a schema key) and its text (a form's source, a section's, a schema's form)."
+  {:malli/schema [:=> [:cat :seon.host/db :int] :string]}
+  [db e]
+  (let [x (d/entity db e)
+        [n t] (cond (:form/id x) [(some->> (:var/_form x) (map :var/name) sort first str) (:form/src x)]
+                    (:seon.doc/address x) [(str (:seon.doc/address x) " " (:seon.doc/heading x)) (:seon.doc/text x)]
+                    (:schema/key x) [(str (:schema/key x)) (pr-str (:schema/form x))]
+                    :else ["" ""])]
+    (str n " " n " " t)))
+
 (defn- section-names
   "Each var name the wiki's sections name, to those sections: {name #{e}}, one read of
   :seon.doc/names (unindexed), so `neighbours` finds a var's sections by a lookup."
@@ -291,12 +303,12 @@
   neighbourhood (each seed's first neighbours by each read, and those `pushed` at
   :seon.config.render/relevance-eps reached), keep? (of kind and entity) true;
   each item scored by a logistic over five features (:seon.config.render/relevance-weights): zc its
-  cosine with qv, zb its text's bm25 for the query's words among every text (seon.doc/scores, the score search's text ranking reads), zt its cosine with the touched items' mean
+  cosine with qv, zb its BM25 among the pool (seon.doc/bm25: idf over the pool itself, the name counted twice; search's own text ranking is the index's, over every text) for the text's terms (seon.doc/terms), zt its cosine with the touched items' mean
   vector, each a z-score over the pool, g1 log(1 + the seeds it neighbours x its rarity,
   (1 + cap)/(1 + its degree to cap)) and ppr log(1 + scale x its rank), the constants
-  :seon.config.render/relevance-features; the logit read as a chance by the kind's calibration (`percent`). The weights were
-  fitted when zb was a BM25 over the pool's own words; they are carried over to this zb unrefitted, judged by
-  the context lab's L0 before and after (docs/plan.md, step 1), and refitted with step 3's labels. Measured on 57 merged
+  :seon.config.render/relevance-features; the logit read as a chance by the kind's calibration (`percent`). zb scored by the
+  index's bm25 instead (idf over every text) ranked a changed item first in 14 of 49 dev tasks against 23: a pool of near
+  neighbours is told apart by the words rare among them, not in the whole program (L0, 2026-11-02). Measured on 57 merged
   tasks' plans held out: functions 0.427 at 5 against the rank fusion's 0.367, sections 0.798
   against 0.651. Answers {kind [[e p] ...]}, best first, the touched items left out (a caller leaves out
   what its page already shows)."
@@ -317,6 +329,7 @@
         rare (fn [e] (/ (inc rarity-cap) (inc (min rarity-cap (or (counted e) (degree db names e rarity-cap))))))
         weights (cfg/value :seon.config.render/relevance-weights)
         knots (cfg/value :seon.config.render/relevance-calibration)
+        qs (set (doc/terms text))
         centroid (when (seq touched)
                    (let [vs (keep #(vector/vector-of db %) touched)]
                      (when (seq vs)
@@ -335,7 +348,7 @@
                        []
                        (let [w (weights kind)
                              zc (z (if qv (vector/scores db qv pool) (repeat (count pool) nil)))
-                             zb (z (let [sc (doc/scores db text (set pool))] (mapv #(get sc % 0.0) pool)))
+                             zb (z (let [fs (mapv #(frequencies (doc/terms (item-text db %))) pool)] (doc/bm25 qs fs (mapv #(reduce + 0 (vals %)) fs))))
                              zt (z (if centroid (vector/scores db centroid pool) (repeat (count pool) nil)))]
                          (->> (map (fn [e c b t]
                                      (let [l (+ (:intercept w) (* (:zc w) c) (* (:zb w) b) (* (:zt w) t)

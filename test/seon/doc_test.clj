@@ -507,7 +507,7 @@
     (is (identical? ix0 ix1) "a move that wrote no text keeps the index")
     (is (identical? ix0 ix2) "a move that wrote form texts has those rows replaced in it")
     (is (= (+ 2 n0) (sqlite/size ix2)) "and the two texts are in it")
-    (is (= 1 (count (:value (sqlite/using ix2 #(sqlite/fts-match % "\"qqzz\"" #{} nil))))) "found by its word")
+    (is (= 1 (count (:value (sqlite/using ix2 #(sqlite/fts-match % "\"qqzz\"" #{}))))) "found by its word")
     (is (= [(:hash (:db-after r2)) (:max-tx (:db-after r2))] (first @@#'seon.doc/indexes)) "keyed to the db it was carried to")))
 
 (deftest a-written-plan-is-brought-into-the-index-without-a-rebuild
@@ -518,7 +518,7 @@
         r (d/with db0 [{:seon.task/id "app/zorb" :seon.task/plan "Zorblax the thing."}])
         _ (seon.doc/carry-index! db0 (:db-after r) (into #{} (map :a) (:tx-data r)))
         ix1 (seon.doc/text-index (:db-after r))
-        found #(count (:value (sqlite/using ix1 (fn [ix] (sqlite/fts-match ix "\"zorblax\"" #{} nil)))))]
+        found #(count (:value (sqlite/using ix1 (fn [ix] (sqlite/fts-match ix "\"zorblax\"" #{})))))]
     (is (identical? ix0 ix1) "the index stands")
     (is (= 1 (found)) "and holds the plan")))
 
@@ -532,19 +532,6 @@
     (is (contains? (names "keep it") 'app.sw/keep-it) "a whole term")
     (is (contains? (names "SeonRun") 'app.sw/seonRun) "a query is tokenized as a text is: an identifier is one term in both")
     (is (not (contains? (names "it") 'app.sw/edit)) "a short word is no part of a longer term")))
-
-(deftest scores-are-the-index-bm25-for-the-entities-asked
-  ;; docs/vector.md#search: relevance's lexical feature is the index's own bm25 (seon.doc/scores), so a search
-  ;; ranks by one lexical model; an entity holding no word of the query is absent, an empty ask scores nothing
-  (let [db (mt/with (mt/world)
-                    (mt/code 'app.sc "(ns app.sc)\n(defn near-of [watching x] x)\n(defn other [] 1)\n"))
-        form (fn [s] (:db/id (:var/form (d/entity db [:var/name s]))))
-        [a b] [(form 'app.sc/near-of) (form 'app.sc/other)]
-        sc (doc/scores db "watching what is near" #{a b})]
-    (is (= #{a} (set (keys sc))) "only the entity holding a word, by its stem")
-    (is (pos? (sc a)) "scored higher is better")
-    (is (= {} (doc/scores db "watching" #{})) "no entity asked: nothing")
-    (is (= {} (doc/scores db "" #{a b})) "no word: nothing")))
 
 (deftest grep-finds-a-string-inside-a-term-as-grep-does
   ;; docs/vector.md#search: grep's candidates come from the index's trigram table, so a string inside a longer
@@ -566,7 +553,7 @@
         db3 (d/db-with db1 [{:schema/key :app/two :schema/form "[:map]"}])
         ix1 (doc/text-index db1)
         ix2 (doc/text-index db2)
-        during (sqlite/using ix2 (fn [ix] (doc/text-index db3) (sqlite/fts-match ix "\"map\"" #{} nil)))
+        during (sqlite/using ix2 (fn [ix] (doc/text-index db3) (sqlite/fts-match ix "\"map\"" #{})))
         ix3 (doc/text-index db3)]
     (is (nil? (sqlite/using ix1 identity)) "an index nobody used is closed when replaced")
     (is (vector? (:value during)) "an index in use stays open until its reader is done")

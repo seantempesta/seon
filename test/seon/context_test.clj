@@ -954,7 +954,11 @@
     (is (= [0.0 0.0 0.05 0.1 0.5 0.5] (mapv #(#'seon.context/percent knots %) [-9.0 -2.0 -1.0 0.0 2.0 9.0]))
         "a logit's chance: flat past either end, linear between knots"))
   (is (= [0.0 0.0] (#'seon.context/z [3.0 3.0])) "no spread, no evidence")
-  (is (= [1.0 0.0 -1.0] (#'seon.context/z [2.0 nil 0.0])) "a missing value is no evidence; the rest over the values there are"))
+  (is (= [1.0 0.0 -1.0] (#'seon.context/z [2.0 nil 0.0])) "a missing value is no evidence; the rest over the values there are")
+  (is (= [] (seon.doc/bm25 #{"a"} [] [])) "an empty pool scores nothing")
+  (is (= [0.0 0.0] (seon.doc/bm25 #{} [{"a" 1} {"b" 2}] [1 2])) "an empty query scores every text 0")
+  (let [[x y] (seon.doc/bm25 #{"near"} [{"near" 1 "of" 1} {"of" 2}] [2 2])]
+    (is (and (pos? x) (zero? y)) "a text holding the query's word scores above one that does not")))
 
 (deftest a-tokens-words-are-its-identifiers-parts
   (is (= ["seon" "vector" "near" "of" "foo" "bar"] (seon.doc/terms "seon.vector/near-of fooBar a"))

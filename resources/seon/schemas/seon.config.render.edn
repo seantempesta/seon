@@ -12,8 +12,8 @@
  :seon.config.render/context-budget [:int {:min 1 :seon.config/unit "tokens" :description "The whole context block the model reads."}]
  :seon.config.render/relevance-weights [:map {:seon.config/unit "logit per feature" :description "Each kind's logistic weights over relevance's five features, and its intercept."}
                                        [:var [:map [:zc number?] [:zb number?] [:zt number?] [:g1 number?] [:ppr number?] [:intercept number?]]] [:section [:map [:zc number?] [:zb number?] [:zt number?] [:g1 number?] [:ppr number?] [:intercept number?]]] [:schema [:map [:zc number?] [:zb number?] [:zt number?] [:g1 number?] [:ppr number?] [:intercept number?]]]]
- :seon.config.render/relevance-features [:map {:seon.config/unit "the features' constants" :description "The constants relevance's features were fitted with: :alpha, :rarity-cap, :ppr-scale, :hub."}
-                                        [:alpha [:double {:min 0.01 :max 0.99}]]
+ :seon.config.render/relevance-features [:map {:seon.config/unit "the features' constants" :description "The constants relevance's features were fitted with: :alpha, :bm25-k1, :bm25-b, :rarity-cap, :ppr-scale, :hub."}
+                                        [:alpha [:double {:min 0.01 :max 0.99}]] [:bm25-k1 [:double {:min 0.0}]] [:bm25-b [:double {:min 0.0 :max 1.0}]]
                                         [:rarity-cap [:int {:min 1}]] [:ppr-scale [:double {:min 1.0}]] [:hub [:int {:min 1}]]]
  :seon.config.render/relevance-calibration [:map {:seon.config/unit "[logit chance] knots" :description "What each kind's relevance logit means as a chance, knots in ascending logit, read piecewise linearly."}
                                            [:var [:vector {:min 2} [:tuple number? number?]]] [:section [:vector {:min 2} [:tuple number? number?]]] [:schema [:vector {:min 2} [:tuple number? number?]]]]
@@ -22,7 +22,6 @@
  :seon.config.render/relevance-eps [:double {:min 1.0E-6 :seon.config/unit "residual mass per neighbour" :description "The local push's threshold for relevance's personalized PageRank: at most 1/(alpha x this) pushes; above 0, or the push never ends."}]
  :seon.config.render/search [:int {:min 1 :seon.config/unit "hits" :description "How many hits (my.agent/search) answers when its options give no :k, the best of exact text, meaning and references fused by reciprocal rank."}]
  :seon.config.render/search-token-z [:double {:min 0.0 :seon.config/unit "standard deviations" :description "How many standard deviations above the mean of every text's BM25 score for the query a text must score to be a text hit of my.agent/search."}]
- :seon.config.render/search-name-weight [:double {:min 0.0 :seon.config/unit "a weight" :description "How much a text's name counts in the text index's bm25 against its text (1)."}]
  :seon.config.render/related-near [:int {:min 1 :seon.config/unit "candidates per hit shown" :description "How many of the nearest by meaning my.agent/search reads for each hit it may show, before fusion and filters."}]
  :seon.config.render/big-alloc [:int {:min 1 :seon.config/unit "bytes" :description "An evaluation that allocated more is flagged on the page."}]
  :seon.config.render/value-budget [:int {:min 1 :seon.config/unit "tokens" :description "A rendered value whose env names no budget."}]

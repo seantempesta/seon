@@ -145,7 +145,6 @@
   [:seon.config.render/relevance-eps :seon.config.render/relevance-eps]
   [:seon.config.render/search :seon.config.render/search]
   [:seon.config.render/search-token-z :seon.config.render/search-token-z]
-  [:seon.config.render/search-name-weight :seon.config.render/search-name-weight]
   [:seon.config.render/related-near :seon.config.render/related-near]
   [:seon.config.vector/coarse-dims :seon.config.vector/coarse-dims]
   [:seon.config.vector/shortlist :seon.config.vector/shortlist]
