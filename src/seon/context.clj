@@ -7,7 +7,7 @@
   that no fact holds), and `render` makes the text from it, for the model and again for anyone who
   reads it later."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [datahike.api :as d] [seon.render :as render]
+  (:require [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str] [datahike.api :as d] [seon.render :as render]
             [seon.task :as task] [seon.db :as pdb] [seon.merge :as pm]
             [seon.print :as print] [seon.print.select :as select] [seon.ref :as ref] [seon.doc :as doc] [seon.config :as cfg] [seon.vector :as vector] [seon.ctx :as ctx] [seon.ratom :as ratom] [seon.agent :as agent] [seon.program :as program] [seon.proofs :as proofs] [seon.problems :as problems] [seon.reconcile :as r] [seon.edn :as sedn] [clojure.edn] [hasch.core :as hasch]))
 
@@ -747,26 +747,35 @@
   {:malli/schema [:=> [:cat :map] [:tuple :keyword :string]]}
   [v] (cond (:seon.eval/id v) [:eval (:seon.eval/id v)] (:seon.message/id v) [:message (:seon.message/id v)] :else [:turn (:seon.turn/id v)]))
 
+(defn- part-id
+  "The id printed-run keys a record's print by: its kind and its id, so an eval, a message, a turn, a parts message, an
+  example session and the opening of a session never meet by an id that happens to be alike. See
+  docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
+  {:malli/schema [:=> [:cat :keyword :string] :string]}
+  [kind id] (str (name kind) "/" id))
+
 (defn printed-run
-  "The run's records new since cache (items, [ref v k tx] in tx order, ref [:eval id], [:message
+  "The session's records new since cache (items, [ref v k tx] in tx order, ref [:eval id], [:message
   id], [:turn id], [:parts id], [:example key] or [:session id]) printed as the conversation sends them, each once (cache, what the
-  run's earlier requests printed: content-keyed reuse by the record's id, AGENTS section 5): an
+  session's earlier requests printed: content-keyed reuse by the record's kind and id, AGENTS section 5): an
   eval, a message or a prose reply by its own render, a function of that record alone; a parts, example or
   session item (a delay of {:ref :whole}, `request`) drawn only when not printed before. A record's text depends
   on nothing before it, so a request prints only its new records and every older message is the same
   bytes (the provider's cache). An item already printed is skipped. Answers the cache: {:ids :parts
-  {id part} :tx}, each part {:ref :whole}, :tx the newest item's."
+  {part-id part} :tx}, each part {:ref :whole}, :tx the newest item's. See
+  docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
   {:malli/schema [:=> [:cat [:sequential :any] [:maybe :map]] :map]}
   [items cache]
   (reduce (fn [c [[kind id] v k tx]]
             (let [part (fn [ref whole] {:ref ref :whole whole})
-                  c (cond-> (update c :ids conj id) tx (assoc :tx tx))]
+                  pid (part-id kind id)
+                  c (cond-> (update c :ids conj pid) tx (assoc :tx tx))]
               (cond
-                (get-in c [:parts id]) (update c :ids pop)
-                (= :message kind) (assoc-in c [:parts id] (part [:message id] (message-messages v {})))
-                (= :turn kind) (assoc-in c [:parts id] (part [:turn id] (turn-messages v {})))
-                (#{:parts :example :session} kind) (assoc-in c [:parts id] @v)
-                :else (assoc-in c [:parts id] (part [:eval id] (eval-messages v {}))))))
+                (get-in c [:parts pid]) (update c :ids pop)
+                (= :message kind) (assoc-in c [:parts pid] (part [:message id] (message-messages v {})))
+                (= :turn kind) (assoc-in c [:parts pid] (part [:turn id] (turn-messages v {})))
+                (#{:parts :example :session} kind) (assoc-in c [:parts pid] @v)
+                :else (assoc-in c [:parts pid] (part [:eval id] (eval-messages v {}))))))
           (or cache {:ids [] :parts {}}) items))
 
 (defn records
@@ -797,28 +806,32 @@
 
 (defn examples-of
   "The keys of the example sessions agent a's task names (:seon.task/examples, agents keyed
-  \"example/<id>\") on db, in key order; none when its task names none."
+  \"example/<id>\") on db, in key order; none when its task names none. See
+  docs/tasks.md#a-task-names-example-sessions."
   {:malli/schema [:=> [:cat :seon.host/db :int] [:vector :string]]}
   [db a]
   (vec (sort (d/q '[:find [?k ...] :in $ ?a :where [?a :seon.agent/task ?t] [?t :seon.task/examples ?x] [?x :seon.agent/key ?k]] db a))))
 
 (defn- example-t
   "The newest transaction of example session k on db: its agent's and its records'. The session never
-  changes after it, so a replay draws it as of this t."
+  changes after it, so a replay draws it as of this t. See
+  docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
   {:malli/schema [:=> [:cat :seon.host/db :string] :int]}
   [db k]
   (let [a (pdb/eid db :seon.agent/key k)]
     (reduce max (or (d/q '[:find (max ?tx) . :in $ ?a :where [?a :seon.agent/key _ ?tx]] db a) 0) (map first (records db a)))))
 
 (defn- session-open
-  "The user message that opens the agent's own session, id, in its request."
+  "The user message that opens the agent's own session, id, in its request, after its task's example
+  sessions. See docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
   {:malli/schema [:=> [:cat :string] [:vector :seon.model/message]]}
   [id] [{:role "user" :content (str "<session id=\"" id "\" from=\"seon\">\nYour own session: the work you are asked to do.")}])
 
 (defn example-messages
   "Example session k on db as of t as the model reads it: a user message `<session id=\"k\" kind=\"example\" from=\"seon\">` (Seon's framing, not a person's: a
   user message is the one turn every provider renders in place) saying it is finished work of another task, and the request it answered (its agent's description), the session's records printed by `printed-run`
-  exactly as `request` prints the agent's own, then a user message `</session>`."
+  exactly as `request` prints the agent's own, then a user message `</session>`. See
+  docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
   {:malli/schema [:=> [:cat :seon.host/db :string :int] [:vector :seon.model/message]]}
   [db k t]
   (let [db (d/as-of db t)
@@ -829,34 +842,55 @@
         (into (mapcat #(:whole (get-in c [:parts %]))) (:ids c))
         (conj {:role "user" :content "</session>"}))))
 
+(def ^:private session-kinds
+  "The kinds of record `records` answers, each with the attributes that name it and its agent."
+  {:seon.db/eval-fact [:seon.eval/id :seon.eval/agent]
+   :seon.message/fact [:seon.message/id :seon.message/agent]
+   :seon.turn/fact [:seon.turn/id :seon.turn/agent]})
+
 (defn session-tx
   "Agent key's session on db as example id: the transactions that recreate it as an example, a vector of
   tx-data in the records' own transaction order (one per transaction, so `records` reads them in the
-  order they ran). The first writes the example agent, an ended agent like any (key \"example/<id>\", id :example-<id>, its
-  description the request: its task's plan, else its own description); the model's evals are kept, an eval the
-  harness made in the agent is not; each other the records of one original
-  transaction, their ids and the agent ref re-keyed under the example's key and each call id prefixed
-  with it, so none meets a live agent's. Pure data: written with pr-str, read back, `my.root/load-example!`
-  transacts it."
-  {:malli/schema [:=> [:cat :seon.host/db :string :string] [:vector [:vector :map]]]}
+  order they ran), or the `:seon.context/session-refused` error when no agent has key, it has no request to
+  show (its task has no plan and it has no description) or a record is of a kind an example does not hold.
+  The first transaction writes the example agent, an ended agent like any (key \"example/<id>\", id
+  :example-<id>, its description the request: its task's plan, else its own description); the model's evals
+  are kept, an eval the harness made in the agent is not; each other holds the records of one original
+  transaction, their ids and the agent ref re-keyed under the example's key, each call id and result handle
+  prefixed with it (so none meets a live agent's, nor another example's) and each eval's :run the example's
+  id. Pure data: written with pr-str, read back, `my.root/load-example!` transacts it. See
+  docs/tasks.md#a-task-names-example-sessions."
+  {:malli/schema [:=> [:cat :seon.host/db :string :string]
+                  [:or [:vector [:vector :map]] :seon.context/session-refused]]}
   [db key id]
   (let [a (pdb/eid db :seon.agent/key key)
+        refuse #(contract/error :seon.context/session-refused #'seon.context/session-tx % {:key key})
         ek (str "example/" id)
         pre (str (str/replace ek "/" "-") "-")
-        request (or (:seon.task/plan (:seon.agent/task (d/pull db [{:seon.agent/task [:seon.task/plan]}] a))) (:seon.agent/description (d/pull db [:seon.agent/description] a)) "")
-        rekey (fn [m id-k agent-k]
+        request (when a (->> [(:seon.task/plan (:seon.agent/task (d/pull db [{:seon.agent/task [:seon.task/plan]}] a)))
+                              (:seon.agent/description (d/pull db [:seon.agent/description] a))]
+                             (remove str/blank?) first))
+        ;; the model's own evals (a call id) and its messages and replies: not an eval the harness made in the agent
+        rs (when a (remove (fn [[_ v k]] (and (= :seon.db/eval-fact k) (not (get-in v [:seon.eval/record :call-id])))) (records db a)))
+        unknown (first (remove #(session-kinds (nth % 2)) rs))
+        record (fn [r] (let [h (get-in r [:response :handle])
+                             h' (when h (symbol (namespace h) (str pre (name h))))]
+                         (cond-> r
+                           (contains? r :run) (assoc :run ek)
+                           (:call-id r) (update :call-id #(str pre %))
+                           h (assoc-in [:response :handle] h')
+                           (and h (:printed r)) (update :printed str/replace (str h) (str h')))))
+        rekey (fn [m [id-k agent-k]]
                 (-> (apply dissoc m (filter #(= "db" (namespace %)) (keys m)))
                     (update id-k #(str ek "/" %)) (assoc agent-k [:seon.agent/key ek])
-                    (cond-> (get-in m [:seon.eval/record :call-id]) (update-in [:seon.eval/record :call-id] #(str pre %)))))
-        ;; the model's own evals (a call id) and its messages and replies: not an eval the harness made in the agent
-        by-tx (group-by first (remove (fn [[_ v k]] (and (= :seon.db/eval-fact k) (not (get-in v [:seon.eval/record :call-id])))) (records db a)))]
-    (into [[{:seon.agent/key ek :seon.agent/id (keyword (str "example-" id)) :seon.agent/status :ended :seon.agent/description request}]]
-          (for [tx (sort (keys by-tx))]
-            (vec (for [[_ v k] (by-tx tx)]
-                   (case k
-                     :seon.db/eval-fact (rekey v :seon.eval/id :seon.eval/agent)
-                     :seon.message/fact (rekey v :seon.message/id :seon.message/agent)
-                     :seon.turn/fact (rekey v :seon.turn/id :seon.turn/agent))))))))
+                    (cond-> (:seon.eval/record m) (update :seon.eval/record record))))
+        by-tx (group-by first rs)]
+    (cond (nil? a) (refuse (str "no agent is keyed \"" key "\""))
+          (nil? request) (refuse (str "agent \"" key "\" has no request to show: its task has no plan and it has no description"))
+          unknown (refuse (str "agent \"" key "\" holds a record of kind " (nth unknown 2) ", which an example does not"))
+          :else (into [[{:seon.agent/key ek :seon.agent/id (keyword (str "example-" id)) :seon.agent/status :ended :seon.agent/description request}]]
+                      (for [tx (sort (keys by-tx))]
+                        (vec (for [[_ v k] (by-tx tx)] (rekey v (session-kinds k)))))))))
 
 (def page-lists "The lists of an agent's page its model reads: its task's (#p-task)." ["#p-task"])
 
@@ -941,9 +975,9 @@
 (declare parts-of)
 
 (defn- ref-id
-  "The id printed-run keys a request's ref by: a record's id, a parts ref's call."
+  "The id printed-run keys a request's ref by (`part-id`): a record's kind and id, a parts ref's call."
   {:malli/schema [:=> [:cat [:sequential :any]] :string]}
-  [ref] (if (= :parts (first ref)) (str "parts/" (nth ref 5)) (second ref)))
+  [ref] (part-id (first ref) (if (= :parts (first ref)) (nth ref 5) (second ref))))
 
 (defn- cache-of
   "The print cache (printed-run's answer) of the refs a model call sent, each by its own render
@@ -970,10 +1004,13 @@
   remain. Origin :outside (a read): the system prompt and the parts, whole at its first read, after it
   what changed since the read before. Answers {:messages :sent :printed}: provider-neutral messages
   (seon.model/wire-messages makes the wire shape) and the records they render, in order
-  (:seon.model-call/sent): [:section eid t]; [:eval id]; [:message id]; [:turn id]; [:parts a c whole?
+  (:seon.model-call/sent): [:section eid t]; [:example key t], an example session the agent's task names
+  (:seon.task/examples, `examples-of`), sent whole right after the system message by `example-messages` as of
+  its newest record's t; [:session id], the opening of the agent's own session after its examples (both only
+  in a model's first request of a task that names examples); [:eval id]; [:message id]; [:turn id]; [:parts a c whole?
   ids call], the parts the message holds (drawn cold at commit c on replay), and last [:hashes {id
   hash}], the content hash of every part the model has now, which the next request compares. Called by
-  the turn. See docs/render.md#the-page-is-sent-as-what-changed and the task
+  the turn. See docs/render.md#the-page-is-sent-as-what-changed, docs/tasks.md#a-task-names-example-sessions and the task
   seon.context/the-context-is-the-agents-evals-and-seons."
   {:malli/schema [:=> [:cat :map :map] [:map [:messages [:vector :seon.model/message]] [:sent [:vector :any]] [:printed :map]]]}
   [a {:keys [db basis help help-ref printed parts]}]

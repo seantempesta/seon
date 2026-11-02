@@ -1012,6 +1012,44 @@
     (is (not (str/includes? (row :outside) "in flight")))
     (is (str/includes? (row :model) "the call is in flight") "a model turn with no usage yet is in flight")))
 
+(deftest the-sent-page-frames-each-session-of-a-request-with-examples
+  ;; the debug page's request: a request holding an example session draws its messages in one bordered frame under a
+  ;; header, the agent's own session in another, found by the :example and :session refs (the messages' text is
+  ;; never read); the cards inside are as anywhere; a request with none is drawn as it was
+  (let [uuid (java.util.UUID/fromString "00000000-0000-0000-0000-000000000001")
+        sys-ref [:section 1 1]
+        ex-ref [:example "example/abc" 5]
+        open-ref [:session "t/x#1"]
+        parts-ref [:parts 1 uuid true ["p"] "t/x#1/1"]
+        eval-ref [:eval "e0"]
+        whole [[sys-ref [{:role "system" :content "help"}]]
+               [ex-ref [{:role "user" :content "an opening, whatever it says"}
+                        {:role "assistant" :content "" :tool-calls [{:id "x" :code "(+ 1 2)"}]}
+                        {:role "tool" :tool-call-id "x" :content "3"}
+                        {:role "user" :content "a closing"}]]
+               [open-ref [{:role "user" :content "own opening"}]]
+               [parts-ref [{:role "user" :content "page"}]]
+               [eval-ref [{:role "assistant" :content "" :tool-calls [{:id "y" :code "(+ 3 4)"}]}
+                          {:role "tool" :tool-call-id "y" :content "7"}]]]
+        draw (fn [input] (ui/sent-request {:unit "d-1"} (merge {:turn 1 :run "t/x#1" :view "a1" :refs 5 :whole whole :seon.turn/origin :model} input)))
+        frames (fn [h] (filter #(and (vector? %) (map? (second %)) (:data-session (second %))) (tree-seq coll? seq h)))
+        cards (fn [frame] (count (filter some? (drop 2 frame))))
+        header (fn [frame] (nth (nth frame 2) 2))
+        h (draw {})]
+    (is (= ["abc" "own"] (map (comp #(str/replace % "example/" "") :data-session second) (frames h))) "one frame per session, in order")
+    (is (= ["Example session abc · finished, another task" "This agent's session"] (map header (frames h))))
+    (is (= [4 4] (map #(dec (cards %)) (frames h))) "the example's four messages; the opening, the page and the eval's two")
+    (is (not (str/includes? (pr-str (first (frames h))) "help")) "the system message is no session's")
+    (is (str/includes? (pr-str (first (frames h))) "an opening, whatever it says") "the cards inside are drawn as they are")
+    (testing "a session that began in the messages the turn before sent continues in the new ones"
+      (let [h2 (draw {:same {:turn 0} :added-refs #{parts-ref eval-ref}})]
+        (is (= ["This agent's session · continued"] (map header (frames h2))))))
+    (testing "a request with no example session is drawn without frames"
+      (let [plain (draw {:whole [(first whole) [parts-ref [{:role "user" :content "page"}]] (last whole)] :refs 3})]
+        (is (empty? (frames plain)))
+        (is (not (str/includes? (h/html plain) "session")))
+        (is (= 4 (count (filter some? (drop 2 (last plain))))) "its four cards (the help page, the page, the eval and its result), directly under what this turn sent")))))
+
 (deftest a-cut-with-its-whole-form-holds-no-copy
   ;; the second context audit (F7): a plan cut on the page kept its whole text in the cut's :title,
   ;; which the model reads too (1.2k chars twice on two pages). A cut that names the form reading the

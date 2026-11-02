@@ -1409,17 +1409,18 @@
 
 (defn examples
   "The example sessions its task names (a component over ctx and the db, placed when the task names
-  any): under a heading naming each session, its evals as one line each, drawn by `evaluation` as the
-  agent's own are. The model reads the same sessions as messages (seon.context/example-messages), so
-  this is beside its page, not in it."
+  any): under a heading naming each session, its evals as one line each in the order the agent's own
+  conversation orders them (`conversation`), drawn by `evaluation` as the agent's own are. The model
+  reads the same sessions as messages (seon.context/example-messages), so this is beside its page, not in it.
+  See docs/tasks.md#a-task-names-example-sessions and docs/render.md#the-page."
   {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int] :any]}
   [{c :seon.ctx/ctx db :seon.db/db} _aid]
   (when-let [xs (seq (get-in c [:task :examples]))]
     [:section
      (for [[_ x] (sort-by key xs) :let [x (ratom/realize x)]]
        [:details [:summary (str "example session " (:seon.agent/key x))]
-        [:ol (for [[e v] (sort-by (fn [[e]] (:tx (first (d/datoms db :eavt e :seon.eval/id)))) (:evals x))]
-               [:li (render/html {:schema :seon.db/eval-fact :as :inline} (ratom/realize v))])]])]))
+        [:ol (for [e (conversation x db)]
+               [:li (render/html {:schema :seon.db/eval-fact :as :inline} (ratom/realize (get-in x [:evals e])))])]])]))
 
 (defn render-ctx
   "The render of an agent's ctx, the one layout the model and the person read (the declared html
@@ -1758,6 +1759,34 @@
   [parts added]
   (vec (for [[ref ms] parts m ms] [ref m (context/messages-tokens [m]) (contains? added ref)])))
 
+(defn- session-labels
+  "Which session each message of a sent request belongs to, from its refs (:seon.model-call/sent), never
+  from the messages' text: [:example key] for the messages of an example session (an :example ref), :own
+  for the opening of the agent's own session (a :session ref) and every message after it, nil before any
+  (a request whose task names no example has none). One label per ref, in order. See
+  docs/render.md#the-page."
+  {:malli/schema [:=> [:cat [:sequential :any]] [:vector :any]]}
+  [refs]
+  (second (reduce (fn [[own? out] [kind x]]
+                    (let [own? (or own? (= :session kind))]
+                      [own? (conj out (cond (= :example kind) [:example x] own? :own))]))
+                  [false []] refs)))
+
+(defn- session-frame
+  "Cards, the messages of one session of a sent request, in one bordered block under a header naming the
+  session: label as `session-labels` gives it, continued? when the block continues a session that began
+  above (in the messages the turn before sent). Formatting only: the cards are drawn as they are anywhere. See
+  docs/render.md#the-page."
+  {:malli/schema [:=> [:cat :any :boolean [:sequential :any]] :any]}
+  [label continued? cards]
+  (into [:div {:class "flex flex-col gap-1 rounded-md border border-base-600 p-2" :data-session (if (= :own label) "own" (second label))}
+         [:div {:class "text-2xs font-semibold uppercase text-text-400"}
+          (str (if (= :own label)
+                 "This agent's session"
+                 (str "Example session " (str/replace-first (second label) "example/" "") " · finished, another task"))
+               (when continued? " · continued"))]]
+        cards))
+
 (defn sent-request
   "A model turn's request as it recorded it (the declared html render of :seon.render/sent-request),
   whole, nothing hidden (owner: \"I want to understand what the agent was sent cleanly ...
@@ -1798,7 +1827,15 @@
                      (emit/marked-hiccup :seon.print/code code)])]
                  (when (= (inc i) cached) cache-line)))
         shared (vec (take-while #(not (nth % 3)) ms))
-        n-shared (if same (count shared) 0)]
+        n-shared (if same (count shared) 0)
+        ;; the cards from message index `from`, each session's in one frame (a request with no example has none)
+        labels (session-labels (map first ms))
+        cards (fn [from xs]
+                (mapcat (fn [group]
+                          (let [i0 (ffirst group) label (get labels i0)
+                                body (mapcat (fn [[i m]] (card i m)) group)]
+                            (if label [(session-frame label (= label (get labels (dec i0))) body)] body)))
+                        (partition-by #(get labels (first %)) (map-indexed (fn [i m] [(+ from i) m]) xs))))]
     [:li {:id unit :class "flex flex-col gap-2 rounded-md bg-base-900 p-3 text-xs"}
      [:div {:class "flex flex-wrap items-baseline gap-3"}
       [:b {:class "text-signal"} (str "turn " (inc turn))] [:span {:class "text-text-400"} run]
@@ -1819,7 +1856,7 @@
         [:summary {:class "cursor-pointer text-text-400"}
          (str "same as turn " (inc (:turn same)) " · " n-shared " messages · " (print/tokens-text (reduce + 0 (map #(nth % 2) shared)))
               (when (and cached (<= cached n-shared)) " · from cache up to the line inside"))]
-        (when open? (into [:div {:class "flex flex-col gap-1 pt-1"}] (mapcat card (range) shared)))])
+        (when open? (into [:div {:class "flex flex-col gap-1 pt-1"}] (cards 0 shared)))])
      [:div {:class "text-2xs uppercase text-text-500"} (if (pos? n-shared) "new this turn" "what this turn sent")]
      (into [:div {:class "flex flex-col gap-1"}]
-           (mapcat card (map #(+ % n-shared) (range)) (drop n-shared ms)))]))
+           (cards n-shared (drop n-shared ms)))]))

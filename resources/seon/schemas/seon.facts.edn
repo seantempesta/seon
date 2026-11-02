@@ -251,7 +251,7 @@
  :seon.task/needs [:set :seon.db/ref]
  ;; the example sessions its agent reads before its own (seon.context/request): agents keyed "example/<id>"
  ;; (seon.context/session-tx), drawn by the renders that draw its own session
- :seon.task/examples [:set :seon.db/ref]
+ :seon.task/examples [:set {:description "The example sessions its agent reads before its own: refs to agents keyed \"example/<id>\", finished sessions of other tasks, which the model reads as messages (seon.context/request) and the page draws with seon.render.ui/examples. See docs/tasks.md#a-task-names-example-sessions."} :seon.db/ref]
  :seon.task/branch :keyword
  :seon.task/model :string
  :seon.task/execution [:and {:seon.db/index true} [:enum :held :running :cancelled]]

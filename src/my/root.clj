@@ -39,23 +39,6 @@
        (assoc @(root/transact-main! sys tx)
               :tasks (mapv #(task/task-id (:seon.task/ns %) (:seon.task/name %)) ds))))))
 
-(defn load-example!
-  "Transact the example session in the EDN file at path (seon.context/session-tx's answer, written with
-  pr-str: a vector of tx-data) onto main, one transaction each in order, so its records keep the order
-  they ran in. A task names it by `[:seon.agent/key \"example/<id>\"]` in :seon.task/examples. Its records
-  are put on a branch of its own as well (example-<id> under root's main), which the agent names, so its pages
-  open as any agent's. Answers the last writer's answer with :batches, how many it wrote, and :branch."
-  {:malli/schema [:=> [:cat :seon.root/sys :string] :map]}
-  [sys path]
-  (let [txs (edn/read-string (slurp path))
-        k (:seon.agent/key (ffirst txs))
-        main (pdb/conn-main (:conn sys))
-        ;; its own branch, holding its records, so its pages open as any agent's (/agent/<branch>)
-        b (pdb/on-main main (keyword (str/replace k "/" "-")))
-        _ (reduce (fn [_ tx] @(root/transact-main! sys tx)) nil txs)]
-    (when-not (some #{b} (d/branches (:conn sys))) (d/branch! (:conn sys) main b))
-    (assoc @(root/transact-main! sys [{:seon.agent/key k :seon.agent/branch b}]) :batches (count txs) :branch b)))
-
 (defn run!
   "Release tasks ids: the one release (nothing autoruns). Each held task becomes running,
   by compare-and-swap on main (a cancel! between the read and the write refuses the write);
@@ -267,6 +250,54 @@
        ;; good read still writes nothing
        (load-answer (write-declared! sys (cond-> tx (and (not (contract/error? tx)) (not= outcome held)) (into (tasks-read-tx outcome)))
                                      {:files (count files)} (mapcat identity (vals files))))))))
+
+(def ^:private example-identities
+  "The attributes that name a record of an example session, each unique."
+  [:seon.agent/key :seon.eval/id :seon.message/id :seon.turn/id])
+
+(defn example-txs
+  "The tx-data of the example session file at path (seon.context/session-tx's answer written with pr-str: a
+  non-empty vector of transactions, the first writing the example agent keyed \"example/<id>\"), read as
+  `task-files` reads a task file (seon.lib/dir-texts, so a file gone when read is a file not found), or the
+  :seon.root/example-refused error naming path: not found, not readable EDN, or not that vector. The one edge
+  of an example file (docs/failure-points.md); the read is of the directory's files named like path, the
+  one by that name taken."
+  {:malli/schema [:=> [:cat :string] [:or [:vector [:vector :map]] :seon.root/example-refused]]}
+  [path]
+  (let [f (java.io.File. path)
+        n (.getName f)
+        text (get (lib/dir-texts (or (.getParent f) ".") n) n)
+        refuse #(contract/error :seon.root/example-refused #'my.root/example-txs (str "example file " path ": " %) {:path path})
+        [ok x] (if text (try [:read (edn/read-string text)] (catch Exception e [:unreadable (ex-message e)])) [:missing])]
+    (cond (= :missing ok) (refuse "not found")
+          (= :unreadable ok) (refuse (str "not readable EDN: " x))
+          (not (and (vector? x) (seq x) (every? #(and (vector? %) (seq %) (every? map? %)) x) (every? (fn [m] (some #(contains? m %) example-identities)) (mapcat identity x))
+                    (string? (:seon.agent/key (ffirst x))) (str/starts-with? (:seon.agent/key (ffirst x)) "example/")))
+          (refuse "not a non-empty vector of transactions whose first writes an agent keyed \"example/<id>\" (seon.context/session-tx)")
+          :else x)))
+
+(defn load-example!
+  "Transact the example session in the EDN file at path (`example-txs`: seon.context/session-tx's answer, written
+  with pr-str) onto main, one transaction each in order, so its records keep the order they ran in; the error
+  `example-txs` answers when the file is not one. A task names it by `[:seon.agent/key \"example/<id>\"]` in
+  :seon.task/examples. Loading is idempotent: a session whose agent and every record main already holds
+  writes nothing ({:ok true :changed 0 :batches 0}); else the last writer's answer with :batches, how many it
+  wrote. Gap: the example agent has no branch of its own (its :seon.agent/branch is not written), because
+  only the writer makes a branch, for an agent it forks or clones, and root has no function that makes one
+  without a process; its records are main's, so a task's page draws them, and a page of its own waits for
+  that function. See docs/tasks.md#a-task-names-example-sessions."
+  {:malli/schema [:=> [:cat :seon.root/sys :string] :map]}
+  [sys path]
+  (let [txs (example-txs path)]
+    (if (contract/error? txs)
+      txs
+      (locking load-lock
+        (let [db @(:conn sys)
+              held? (fn [m] (let [a (some #(when (contains? m %) %) example-identities)] (pdb/eid db a (get m a))))]
+          (if (every? held? (mapcat identity txs))
+            {:ok true :changed 0 :batches 0}
+            (assoc (reduce (fn [_ tx] (let [r @(root/transact-main! sys tx)] (if (contract/error? r) (reduced r) r))) nil txs)
+                   :batches (count txs))))))))
 
 (defn load-docs!
   "Load the wiki (the pages under dir of the checkout, docs by default) into main as section
