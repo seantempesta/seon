@@ -537,7 +537,7 @@
   ;; docs/vector.md#search: relevance's lexical feature is the index's own bm25 (seon.doc/scores), so a search
   ;; ranks by one lexical model; an entity holding no word of the query is absent, an empty ask scores nothing
   (let [db (mt/with (mt/world)
-                    (mt/code 'app.sc "(ns app.sc)\n(defn near-of [x] (watch x))\n(defn other [] 1)\n"))
+                    (mt/code 'app.sc "(ns app.sc)\n(defn near-of [watching x] x)\n(defn other [] 1)\n"))
         form (fn [s] (:db/id (:var/form (d/entity db [:var/name s]))))
         [a b] [(form 'app.sc/near-of) (form 'app.sc/other)]
         sc (doc/scores db "watching what is near" #{a b})]
