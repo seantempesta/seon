@@ -1417,3 +1417,117 @@
             evals (fn [sent] (set (keep (fn [[k x]] (when (= :eval k) x)) sent)))]
         (is (empty? (evals (:sent (context/render @conn b0)))) "turn 0 on the db after turn 2: no eval made after it")
         (is (= #{"e0" "e1"} (evals (:sent (context/render @conn (assoc b0 :turn 2))))) "turn 2: the evals before it")))))
+
+;; ---- example sessions in an agent's context (specs/example-sessions) ----
+
+(defn- source-session!
+  "Agent b/src's session on task demo/h, as a curated example would have it: an eval that called, a message and a
+  reply with no call, each in a transaction of its own."
+  [conn]
+  (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "h" :seon.task/plan "Make h." :seon.task/proofs #{'demo-test/h-test}}]))
+  (d/transact conn [{:seon.agent/key "b/src" :seon.agent/task [:seon.task/id "demo/h"]}])
+  (d/transact conn [{:seon.eval/id "s1" :seon.eval/by "src" :seon.eval/agent [:seon.agent/key "b/src"]
+                     :seon.eval/record {:code "(+ 1 2)" :response {:handle 'result/s1 :value 3} :run "demo/h#1" :call-id "call_1" :call 0 :prose "Add."}}])
+  (d/transact conn [{:seon.message/id "m1" :seon.message/agent [:seon.agent/key "b/src"] :seon.message/from "owner" :seon.message/body "Looks right."}])
+  (d/transact conn [{:seon.turn/id "demo/h#1/1" :seon.turn/agent [:seon.agent/key "b/src"] :seon.turn/reply "Done."}]))
+
+(defn- example-world!
+  "A branch with task demo/g, its agent b/a1 and run, the system prompt, and example session abc made from b/src
+  (`source-session!`, `context/session-tx`) named by the task; answers the session-tx."
+  [conn]
+  (d/transact conn (doc/load-tx @conn "docs" {context/system-page (slurp (str (seon.config/checkout) "/" context/system-page))}))
+  (source-session! conn)
+  (let [tx (context/session-tx @conn "b/src" "abc")]
+    (doseq [t tx] (d/transact conn t))
+    (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "g" :seon.task/plan "Make g." :seon.task/proofs #{'demo-test/g-test}
+                                             :seon.task/examples #{[:seon.agent/key "example/abc"]}}]))
+    (d/transact conn [{:seon.run/id "demo/g#1" :seon.run/task [:seon.task/id "demo/g"] :seon.run/agent {:seon.agent/key "b/a1" :seon.agent/task {:seon.task/id "demo/g"}}}])
+    tx))
+
+(defn- turn!
+  "Turn n of run demo/g#1 recorded and its request made: {:messages :sent}, the sent refs recorded as the turn does."
+  [conn n]
+  (let [b {:commit (d/commit-id @conn) :task "demo/g" :run "demo/g#1" :turn n :max-turns 9 :origin :model :agent "b/a1"}
+        _ (d/transact conn [{:db/id "turn" :seon.turn/id (str "demo/g#1/" n) :seon.turn/run {:seon.run/id "demo/g#1"} :seon.turn/agent {:seon.agent/key "b/a1"} :seon.turn/n n :seon.turn/origin :model}
+                            {:seon.model-call/id (str "demo/g#1/" n) :seon.model-call/turn "turn" :seon.model-call/basis b :seon.model-call/forms 1 :seon.model-call/errors 0 :seon.model-call/red 1 :seon.model-call/ms 1}])
+        r (context/render @conn b)]
+    (d/transact conn [{:seon.model-call/id (str "demo/g#1/" n) :seon.model-call/sent (:sent r)}])
+    r))
+
+(deftest a-task-with-an-example-reads-it-between-the-system-prompt-and-its-own-session
+  (ts/test-branch!
+    (fn [_ conn]
+      (example-world! conn)
+      (let [r0 (turn! conn 0)
+            _ (d/transact conn [{:seon.eval/id "e0" :seon.eval/by "a1" :seon.eval/agent [:seon.agent/key "b/a1"]
+                                 :seon.eval/record {:code "(+ 5 1)" :response {:handle 'result/e0 :value 6} :run "demo/g#1" :call-id "c0" :call 0}}])
+            r1 (turn! conn 1)
+            ms (:messages r0)
+            [sys open & more] ms
+            close-at (first (keep-indexed #(when (= "</session>" (:content %2)) %1) more))
+            example (subvec (vec more) 0 close-at)
+            db @conn
+            original (mapcat (fn [[_ v k]] (case k :seon.db/eval-fact (context/eval-messages v {}) :seon.message/fact (context/message-messages v {}) :seon.turn/fact (context/turn-messages v {})))
+                             (context/records db (pdb/eid db :seon.agent/key "b/src")))
+            prefix #(str/replace (pr-str %) "example-abc-" "")]
+        (is (= "system" (:role sys)))
+        (is (= {:role "user" :content "<session id=\"example/abc\" kind=\"example\">\nMake h."} open) "the example's opening and its request")
+        (is (= (prefix (vec original)) (prefix (vec example))) "its records, printed as the agent's own are, call ids prefixed")
+        (is (= ["assistant" "tool" "user" "assistant"] (mapv :role example)) "an eval's pair, a message, a reply")
+        (is (= "example-abc-call_1" (get-in example [0 :tool-calls 0 :id]) (:tool-call-id (second example))) "every call is followed by its tool message")
+        (is (= {:role "user" :content "</session>"} (nth more close-at)))
+        (is (= {:role "user" :content "<session id=\"demo/g#1\">"} (nth more (inc close-at))) "then the agent's own session")
+        (is (str/includes? (:content (nth more (+ 2 close-at))) "Make g.") "then the page, as today")
+        (is (= ms (subvec (:messages r1) 0 (count ms))) "the second request starts with the first, examples included")
+        (is (= (:messages r1) (into [] (mapcat second) (context/parts-of db (:sent r1)))) "replay draws the same bytes")
+        (is (= (:messages r0) (into [] (mapcat second) (context/parts-of db (:sent r0)))))
+        (is (= [:example "example/abc"] (vec (take 2 (second (:sent r0))))) "the example is a ref of the request")
+        (is (pos? (:examples (context/sent-split (context/parts-of db (:sent r1))))) "counted as its own share")))))
+
+(deftest a-task-with-no-examples-reads-what-it-read-before
+  ;; the same task with no :seon.task/examples and with an empty one: the same messages
+  (ts/test-branch!
+    (fn [_ conn]
+      (d/transact conn (doc/load-tx @conn "docs" {context/system-page (slurp (str (seon.config/checkout) "/" context/system-page))}))
+      (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "g" :seon.task/plan "Make g." :seon.task/proofs #{'demo-test/g-test}}]))
+      (d/transact conn [{:seon.run/id "demo/g#1" :seon.run/task [:seon.task/id "demo/g"] :seon.run/agent {:seon.agent/key "b/a1" :seon.agent/task {:seon.task/id "demo/g"}}}])
+      (let [none (turn! conn 0)
+            a (pdb/eid @conn :seon.agent/key "b/a1")
+            _ (d/transact conn [[:db/add [:seon.task/id "demo/g"] :seon.task/examples a]])
+            _ (d/transact conn [[:db/retract [:seon.task/id "demo/g"] :seon.task/examples a]])
+            b (:seon.model-call/basis (d/pull @conn [:seon.model-call/basis] [:seon.model-call/id "demo/g#1/0"]))
+            empty-set (context/render @conn b)]
+        (is (= ["system" "user"] (mapv :role (:messages none))))
+        (is (= (:messages none) (:messages empty-set)) "an emptied :seon.task/examples reads as none")
+        (is (not-any? #(str/includes? (:content %) "<session") (:messages none)))
+        (is (not (contains? (context/sent-split (context/parts-of @conn (:sent none))) :examples)))))))
+
+(deftest an-example-session-is-data-that-recreates-the-session
+  (ts/test-branch!
+    (fn [_ conn]
+      (source-session! conn)
+      (let [tx (context/session-tx @conn "b/src" "abc")
+            names (fn [db k] (let [a (pdb/eid db :seon.agent/key k)]
+                               (mapv (fn [[_ v kind]] (case kind :seon.db/eval-fact (context/eval-messages v {}) :seon.message/fact (context/message-messages v {}) :seon.turn/fact (context/turn-messages v {})))
+                                     (context/records db a))))]
+        (is (= tx (clojure.edn/read-string (pr-str tx))) "plain data: written with pr-str, read back")
+        (is (= {:seon.agent/key "example/abc" :seon.agent/description "Make h."} (ffirst tx)))
+        (is (= 4 (count tx)) "the agent, then a transaction for each of three records")
+        (ts/test-branch!
+          (fn [_ fresh]
+            (doseq [t (clojure.edn/read-string (pr-str tx))] (d/transact fresh t))
+            (is (= (str/replace (pr-str (names @conn "b/src")) "example-abc-" "") (str/replace (pr-str (names @fresh "example/abc")) "example-abc-" ""))
+                "the example draws the same messages as the original's records")
+            (is (= ["example/abc/s1" "example/abc/m1" "example/abc/demo/h#1/1"] (mapv (fn [[_ v]] (or (:seon.eval/id v) (:seon.message/id v) (:seon.turn/id v))) (context/records @fresh (pdb/eid @fresh :seon.agent/key "example/abc"))))
+                "ids re-keyed under the example, in the order they ran")))))))
+
+(deftest the-page-draws-its-tasks-examples-with-evaluation
+  (ts/test-branch!
+    (fn [_ conn]
+      (example-world! conn)
+      (let [db @conn
+            a (pdb/eid db :seon.agent/key "b/a1")
+            w (render/draw (:tree (ctx/build db a :b)) ctx/changes db (render/declared-var :seon.render/render-ctx))
+            html (try (pr-str (render/placed-hiccup w ["#p-tiles"])) (finally (render/dispose-walk! w)))]
+        (is (str/includes? html "example session example/abc"))
+        (is (str/includes? html "(+ 1 2)") "its eval, drawn by evaluation")))))
