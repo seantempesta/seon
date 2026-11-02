@@ -865,7 +865,7 @@
   "The namespaces task t (a cite's :seon.cite/of as ctx holds it, filled) works in: its own, each proof's and the
   namespace each proof tests (its name less -test), and those its proofs' forms call into (:form/refs, as
   :proved holds them); none for what is no task (the agent's own cites). A cited var of these shows its source
-  (an agent otherwise spends turn 0 reading them: task
+  (an agent otherwise spends turn 0 reading them; task
   seon.context/an-agent-follows-its-instructions-to-green). See docs/references.md#an-entity-cites."
   {:malli/schema [:=> [:cat :any] [:set :symbol]]}
   [t]
@@ -1164,7 +1164,7 @@
   "The agent's run (a component over ctx): its relevant attributes and the turns it took, by the
   run schema's render, from the agent's record (its status, branch and turn cap, its turns; the cap
   its run's, `seon.context/run-of`, when the agent raised none), beside the turn what its evals changed
-  of the branch's program (`changed`: an agent whose evals changed nothing sees that), and that its last reply was cut, when it was: the conversation's part of where the
+  of the branch's program (`changed`), and that its last reply was cut, when it was: the conversation's part of where the
   agent stands (the work's is seon.render.ui/status)."
   {:seon.render/style tile-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int] :any]}
   [{c :seon.ctx/ctx db :seon.db/db} aid]
@@ -1412,8 +1412,10 @@
       status [:p {:class "text-text-500"} (case status :busy "working…" :idle "waiting for you" (kname status))])))
 
 (defn examples
-  "The example sessions its task names (a component over ctx and the db, placed when the task names
-  any): under a heading naming each session, its evals as one line each in the order the agent's own
+  "The example sessions its task names (a component over ctx and the db), or nothing when it names none. It is placed
+  on every page, for the render cache runs a component once and again only when what it reads changes, so it costs
+  nothing on an idle page; placing it only when there are examples would cost 3 contracted calls on every list draw,
+  because the layout builds the whole page whatever list is drawn. It draws, under a heading naming each session, its evals as one line each in the order the agent's own
   conversation orders them (`conversation`), drawn by `evaluation` as the agent's own are. The model
   reads the same sessions as messages (seon.context/example-messages), so this is beside its page, not in it.
   See docs/tasks.md#a-task-names-example-sessions and docs/render.md#the-page."
@@ -1479,7 +1481,7 @@
       (for [id conv :when (and (not (in-turn id)) (not (loop? id)))] (cond (ev? id) [#'eval-item {} id] (tu? id) [#'chat-turn {} aid id] :else [#'chat-message {} aid id]))
       (when aid [#'chat-end {} aid])]
      [:aside {:id "p-tiles"}
-      ;; placed always: the component reads the task's examples when this list is drawn and answers nothing when it names none (a read here, in the layout, costs every draw of any list)
+      ;; placed on every page: the render cache runs a component once and again only when what it reads changes, so a page whose task names no examples pays nothing; reading the task here to place it only when it names examples would be 3 contracted calls on every list draw, because the layout builds the whole page whatever list is drawn
       [#'examples {} aid]
       (for [[id e] evals :let [{{v :value} :response k :schema} (:seon.eval/record e)] :when (and (some? v) (render/render-of (ratom/realize v) k))]
         [#'eval-tile {} id])]]))

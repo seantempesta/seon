@@ -130,8 +130,10 @@
 (deftest no-section-names-a-bench-run
   ;; docs/README.md#how-the-wiki-is-kept: a section states its rule as current truth, never which bench run showed it
   ;; (what an agent reads must not hint at a task's answer); decisions.md and plan.md name the runs they were made on.
-  ;; src is read whole, docstrings and comments both: an agent reads them through `doc`, `source` and `lines`
-  (let [id #"(?:^|[^A-Za-z0-9_-])(md-scan\b|bench-[a-z0-9]+(?:-[a-z0-9]+)*|[a-z][a-z0-9]*(?:-[a-z0-9]+)+ (?:#[0-9]+|bench\b))"
+  ;; src is read whole, docstrings and comments both: an agent reads them through `doc`, `source` and `lines`.
+  ;; the ids are the runs' real names (docs/decisions.md, docs/plan.md): md-scan, scope-<N>, bench-<md-scan|tools|scope-N|b..>,
+  ;; and a known bench's name before " #N" or " bench"; a hyphenated word alone (step-fn #2, read-only bench, bench-top) is not one
+  (let [id #"(?:^|[^A-Za-z0-9_-])(md-scan\b|bench-(?:md-scan|tools|scope-[0-9]+|b[0-9]*)\b|scope-[0-9]+\b|(?:md-scan|fence|scope) (?:#[0-9]+|bench\b))"
         root (config/checkout)
         pages (for [^java.io.File f (.listFiles (java.io.File. (str root "/docs")))
                     :when (and (str/ends-with? (.getName f) ".md") (not (#{"decisions.md" "plan.md"} (.getName f))))]

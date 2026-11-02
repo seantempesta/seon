@@ -17,6 +17,19 @@ What Seon is for, where it stands, the one step being worked now, and the steps 
 
 **Measured as** turns to green and tasks merged. **Held to:** nothing crashes or hangs (every failure is data to the agent); everything shown is derived from the db at t; one mechanism per job; every change earns its place; a v1 capability is present or dropped on purpose ([parity](parity.md)).
 
+## Where it stands (2026-11-02, afternoon)
+
+**Merged today** (each `bin/prove --merge` green, root updated):
+- **Batch 79, step 1, one search pipeline:** the first page's search ranks by meaning (its query embedded on the branch at the first turn), hits drawn as names, one kinds table (`seon.context/kind-attr`), one vector scan a search handed to relevance, `seon.context/similar` deleted. L0 at its tip against last night's: 47 tasks, no win and no loss at rank 1, top 3 or top 10. Kept, measured: relevance's pool BM25 (`seon.doc/bm25`); the index's bm25 in its place ranked a changed item first in 14 of 49 against 23 ([search](vector.md#search)).
+- **Batch 80, two causes of an agent never reaching green** (the context lab's curation pilot): an error-valued answer (a refused edit) stops the reply's later calls; an agent's test child starts with no interrupt or eval of its agent's (`seon.intr/forked!`).
+- **Batch 81, example sessions** (the context session's, the owner's ask): a task names finished sessions (`:seon.task/examples`), drawn into its agent's request after the system message and on its page ([tasks](tasks.md#a-task-names-example-sessions)).
+
+**In flight:** `jolt/record-renders`: an eval's record reads as its live response did, through the model and html renders of the schema it kept (a prove's tool message was its whole value, ~15.8k tokens, where the live one is one line; found by the context session).
+
+**Step 3, the ranker, first result:** a logistic reranker over search's own signals plus the request's name overlap, recency and co-change, fitted on 222 symptom-only training requests (DeepSeek-written, `claude_scratch/context-lab/data/req/train.jsonl`), judged on the 49 dev requests: no gain (rank 1 20 to 21, top 10 37 to 37). The headroom is in the order, not the recall: a changed item is in search's top 100 for 91-92% of tasks, first for 21-41%. Next: a cross-encoder reranker (a small model scoring the request beside each candidate, llama.cpp as the embedder runs), judged offline on the exported top 30 first.
+
+**Filed today:** `seon.proofs/a-prove-ended-ends-its-shards` (a timed-out prove left its shards running); `seon.agent/the-done-rule-holds-under-load` (at load 15-19 a change breaking a reached test merged with no reason named); `seon.turn/an-agent-that-breaks-its-own-render-is-told-and-goes-on` (its cause 2 waits for the owner's call on the design: resend the last request with the error). The run entity's removal is scheduled as the rest of `seon.agent/the-agent-is-the-unit-not-the-run` (A3, A4, B, C, cut 3), one branch, after the branches in flight.
+
 ## Where it stands (2026-11-02, morning): context is a ranking, measured by turns
 
 **The objective** (agreed with the owner, 2026-11-02: "fn(db-now) = context where we minimize turns to reach db-future"). Each turn the agent is sent c_t = f(db_t) and its eval moves db_t to db_t+1; T is the first turn whose db passes the task's hidden proofs. Choose f to maximise P(T <= N), then to minimise E[T] and tokens. Each turn f picks what to show under a budget, and an item earns its place when P(it is needed on the rest of the path | db_t) x the turns it saves exceeds its tokens' cost. So **context is a ranking**, and its labels exist: in mined sessions, the items an agent read and then used in a later edit or eval (5,231 of 41,821 items read over 350 windows). L0 (retrieval) and L1 (one call) count only once they predict L2's T, checked task by task on the first L2 runs.
