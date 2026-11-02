@@ -308,7 +308,7 @@
   (1 + cap)/(1 + its degree to cap)) and ppr log(1 + scale x its rank), the constants
   :seon.config.render/relevance-features; the logit read as a chance by the kind's calibration (`percent`). zb scored by the
   index's bm25 instead (idf over every text) ranked a changed item first in 14 of 49 dev tasks against 23: a pool of near
-  neighbours is told apart by the words rare among them, not in the whole program (L0, 2026-11-02). Measured on 57 merged
+  neighbours is told apart by the words rare among them, not in the whole program (the context lab's L0, docs/vector.md#relevance). Measured on 57 merged
   tasks' plans held out: functions 0.427 at 5 against the rank fusion's 0.367, sections 0.798
   against 0.651. Answers {kind [[e p] ...]}, best first, the touched items left out (a caller leaves out
   what its page already shows)."
