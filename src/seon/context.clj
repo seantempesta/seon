@@ -254,9 +254,10 @@
               (recur (update p u (fnil + 0.0) (* alpha ru)) r (into queue more) (into queued more) ds (assoc nbs u ns)))))
         {:rank p :degree ds}))))
 
-(def relevance-kinds
-  "Each kind relevance ranks, the attribute its entities have."
-  {:function :form/id :section :seon.doc/address :schema :schema/key})
+(def kind-attr
+  "Each kind a search finds and relevance scores, the identity attribute its entities have (a var's and a test's
+  form, a section, a task, a schema entry): the one table of kinds search's meaning scan and relevance's pool read."
+  {:var :form/id :test :form/id :section :seon.doc/address :task :seon.task/id :schema :schema/key})
 
 (defn- percent
   "The relevance a logit l is, by kind k's calibration (:seon.config.render/relevance-calibration):
@@ -285,7 +286,7 @@
   or changed, the sections it cites, the schema entries it names), :touched those of them it
   worked on (changed or read), :candidates (optional) entities a caller found by other means
   (a search's text hits), scored beside the pool, :near (optional) the caller's scan of each kind's nearest by
-  meaning, {attr [[e cosine] ...]}, read for that kind's pool in place of a second scan. For each kind of kinds (relevance-kinds) the pool is the
+  meaning, {attr [[e cosine] ...]}, read for that kind's pool in place of a second scan. For each kind of kinds (:var, :section or :schema; `kind-attr`) the pool is the
   :seon.config.render/relevance-pool nearest by meaning (seon.vector/near) and the seeds'
   neighbourhood (each seed's first neighbours by each read, and those `pushed` at
   :seon.config.render/relevance-eps reached), keep? (of kind and entity) true;
@@ -326,7 +327,7 @@
                               qv (map first (vector/near db qv cap {:of attr}))
                               :else []))]
     (into {} (for [kind kinds
-                   :let [attr (relevance-kinds kind)
+                   :let [attr (kind-attr kind)
                          of-kind? #(seq (d/datoms db :eavt % attr))
                          pool (into [] (comp (distinct) (remove touched) (filter #(and (of-kind? %) (keep? kind %))))
                                     (concat (near attr) seeds candidates (keys links) (keys rank)))]]
@@ -360,7 +361,6 @@
           (:schema/key x) (if (kinds :schema) [[:schema (:schema/key x)]] [])
           :else [])))
 
-(def ^:private near-attr {:var :form/id :test :form/id :section :seon.doc/address :task :seon.task/id :schema :schema/key})
 
 (defn- kind-of
   "Var v's search kind: :test for a test, else :var."
@@ -429,7 +429,7 @@
         ;; the pool relevance reads, which it is handed
         nears (when (and (by :meaning) qv)
                 (let [m (max n (cfg/value :seon.config.render/relevance-pool))]
-                  (into {} (for [attr (sort (distinct (map near-attr kinds)))] [attr (vector/near db qv m {:of attr})]))))
+                  (into {} (for [attr (sort (distinct (map kind-attr kinds)))] [attr (vector/near db qv m {:of attr})]))))
         ;; one ranking by meaning: each kind's first n nearest, merged by cosine, which one query's scores share
         meaning (if nears
                   (into [] (comp (mapcat (fn [[e _]] (hit-of db e kinds))) (filter in-ns?) (distinct))
@@ -455,7 +455,7 @@
                                     ""))
         ;; each hit of a kind relevance weighs is scored by it, the hits joined to its pool: a function by
         ;; its form, a section, a schema entry (seon.context/relevance; a test or a task has no chance yet)
-        rkind {:var :function :section :section :schema :schema}
+        rkind #{:var :section :schema}
         form-of (fn [[kind n]] (case kind
                                  ;; a var's form: its :var/form, or the form whose :form/defines holds it
                                  :var (let [v (d/entity db [:var/name n])] (or (some-> v :var/form :db/id) (some-> v :form/_defines first :db/id)))
