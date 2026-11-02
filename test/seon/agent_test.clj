@@ -354,6 +354,22 @@
     (is (every? pos-int? counts) (str "both children counted: " (pr-str counts) " " (pr-str run)))
     (is (apply = counts) (str "the two children hold the same descriptors: " (pr-str counts)))))
 
+(deftest a-test-child-starts-as-a-test-runner-does
+  ;; task seon.agent/a-test-child-starts-as-a-test-runner-does: an agent's test child ran its tests with the agent's
+  ;; interrupt pending (every eval "interrupted by root") and its live page's reactions (a cost test 15 calls over);
+  ;; the child starts with no interrupt of its parent's, none of its evals, no page. Here the agent has drawn its page
+  ;; and holds a pending interrupt when it forks; the child's test writes what it finds
+  (let [checkout (seon.config/checkout)
+        f (str checkout "/target/runs/child-clean-" (random-uuid))
+        proof (str "(ns clean-proof (:require [clojure.test :refer [deftest is]]))"
+                   " (deftest p (spit " (pr-str f) " (pr-str [@@#'seon.intr/pending (count @@#'seon.intr/stack) (some? (:walk @seon.agent/state))])) (is true))")
+        form (str "(do " proof " (seon.repl/page-hiccup) (reset! @#'seon.intr/pending true)"
+                  " (let [r (seon.agent/run-tests-forked 1000000000 '#{clean-proof/p} :turn)] (reset! @#'seon.intr/pending false) r))")
+        [run] (in-agent [form] {:sets [":seon.config.proofs/child-min-ms=1"]})
+        found (some-> (try (slurp f) (catch Throwable _ nil)) read-string)]
+    (sh/sh "rm" "-f" f)
+    (is (= [false 0 false] found) (str "no interrupt, no eval, no page of its parent's: " (pr-str found) " " (pr-str run)))))
+
 (deftest an-agent-answers-while-its-tests-run
   ;; task seon.turn/observe-reads-are-renders (phase B): root's :tests request forks the test child
   ;; and a fiber reads it, so the agent's loop answers an eval while its own tests run. The test

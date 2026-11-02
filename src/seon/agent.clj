@@ -17,7 +17,7 @@
   referred into its namespace. From proto/flow f2-final proto.agent (session F2)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.step :as step] [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.error :as err] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.doc :as doc] [seon.merge :as pm] [seon.config :as cfg] [seon.reconcile :as r] [seon.vector :as vector] [seon.lib :as lib] [seon.print :as print] [seon.sock :as sock] [jolt.scheme :as scm] [clojure.test :as t]
-            [clojure.string :as str] [seon.program :as program] [seon.proofs :as proofs] [seon.fx :as fx] [seon.task :as task] [seon.intr :as intr] [clojure.repl]
+            [clojure.string :as str] [seon.program :as program] [seon.proofs :as proofs] [seon.fx :as fx] [seon.task :as task] [seon.intr :as intr] [seon.render :as render] [clojure.repl]
             [malli.registry :as mr] [clojure.core.async :as a] [jolt.io-poller :as poller]))
 
 ;; One state map per agent process (this process is the agent). Fields:
@@ -992,7 +992,11 @@
                ;; the test child's own ceiling, from its own heap at its fork: the agent's absolute ceiling
                ;; left a child of a grown agent less room than any test needs (docs/machine.md#what-a-process-owns-in-memory)
                (lib/heap-cap! (+ (lib/bytes-in-heap) (cfg/value :seon.config.agent/heap-extra-bytes)) (cfg/value :seon.config.agent/trip-bytes))
-               (swap! state assoc :mode :test :evaluating false)
+               ;; its tests run as bin/test's runner runs them: no interrupt or eval of the agent's, and no live page,
+               ;; whose reactions answered a test's swap! of ctx (task seon.agent/a-test-child-starts-as-a-test-runner-does)
+               (intr/forked!)
+               (some-> (:walk @state) render/dispose-walk!)
+               (swap! state #(-> % (assoc :mode :test :evaluating false) (dissoc :walk)))
                ;; the test's own working directory: what a test writes relative to it is this run's, removed
                ;; below when the child has ended (docs/failure-points.md, a directory walk)
                (let [run-dir (fx/run-dir (lib/c-getpid))] (.mkdirs (java.io.File. ^String run-dir)) (lib/c-chdir run-dir))
