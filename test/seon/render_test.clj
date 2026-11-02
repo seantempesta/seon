@@ -1829,6 +1829,8 @@
         (is (some? before) "the request's search is a part of the page")
         (is (str/includes? (pr-str before) "app.srch/untaken-entries") (str "it finds what the request's words name: " (pr-str before)))
         (is (= :section (first before)) "one compact hiccup, the page's and the model's alike")
+        (is (not (str/includes? (pr-str before) "has not taken")) "a hit is its name: no first sentence of its doc")
+        (is (str/includes? (pr-str before) "no vector yet") "a query not yet embedded says it was searched by its words")
         (let [s (:db/id (d/entity @conn [:seon.search/id "demo/find/request"]))]
           (d/transact conn [{:db/id s :seon.search/query "a tile of the dashboard"}])
           (is (str/includes? (pr-str (search-part (draw))) "app.srch/render-tile") "a new query: the part draws its hits"))))))
