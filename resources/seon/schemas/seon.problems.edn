@@ -60,6 +60,12 @@
                                              [:execution [:maybe [:enum :held :running :cancelled]]]]]
  ;; a cancel (my.root/cancel-tx) of an id that names no task: answered, never upserted as a task
  :seon.root/unknown-task [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/unknown-task]] [:task :string]]]
+ ;; seon.context/session-tx of a key no agent holds, of a session with no request to show or with a record of a kind an
+ ;; example does not hold: docs/tasks.md#a-task-names-example-sessions
+ :seon.context/session-refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.context/session-refused]] [:key :string]]]
+ ;; my.root/example-txs of an example file that is missing, does not read as EDN, or is not the vector of tx-data
+ ;; seon.context/session-tx writes: docs/failure-points.md
+ :seon.root/example-refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/example-refused]] [:path :string]]]
  ;; my.root/write-back! of a run that lost no write-back (or does not exist), of a root with no source tree,
  ;; or of files main holds no text for: nothing to write
  :seon.root/nothing-lost [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/nothing-lost]] [:run :string]]]

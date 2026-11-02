@@ -171,3 +171,38 @@
       (is (empty? (ghosts (d/db-with db1 gone))))
       (is (thrown? Exception (d/db-with db0 gone)) "the same removal against a db that lacks the tasks is refused")
       (is (empty? (ghosts db0))))))
+
+(deftest loading-an-example-twice-changes-nothing-and-a-missing-file-is-an-error
+  ;; my.root/load-example!: an example session's file (seon.context/session-tx's transactions, written with pr-str)
+  ;; is transacted once; a second load of it writes nothing (main's t does not move); a file that is not there,
+  ;; does not read or is not that vector is the :seon.root/example-refused error and writes nothing
+  (let [checkout (seon.config/checkout)
+        path (ts/process-store checkout)
+        main (str "load-example-" (random-uuid))
+        runs (str checkout "/target/runs/" main "-runs")
+        _ (.mkdirs (java.io.File. (str runs "/tasks")))
+        file (str runs "/records.edn")
+        _ (spit file (pr-str [[{:seon.agent/key "example/abc" :seon.agent/id :example-abc :seon.agent/status :ended :seon.agent/description "Make h."}]
+                              [{:seon.eval/id "example/abc/s1" :seon.eval/by "src" :seon.eval/agent [:seon.agent/key "example/abc"]
+                                :seon.eval/record {:code "(+ 1 2)" :response {:handle 'result/example-abc-s1 :value 3} :run "example/abc" :call-id "example-abc-call_1" :call 0}}]]))
+        _ (spit (str runs "/bad.edn") "[[{:seon.agent/key \"someone\"}]]")
+        _ (spit (str runs "/unreadable.edn") "[[{:seon.agent/key")
+        root (ts/start-root! {:store path :main main :runs runs})
+        ask (fn [code] (ts/value-of (:response (ts/ask root {:op :eval :agent "root" :code code}))))
+        refused (fn [f] (ask (str "(let [r (my.root/load-example! sys " (pr-str f) ")] [(:seon.error/type r) (:path r) (:seon.error/message r)])")))]
+    (try
+      (is (= {:first 2 :second {:ok true :changed 0 :batches 0} :moved false :evals 1 :agents 1}
+             (ask (str "(let [f " (pr-str file) " a (my.root/load-example! sys f)
+                              t1 (:max-tx @(:conn sys))
+                              b (my.root/load-example! sys f)]
+                          {:first (:batches a) :second (select-keys b [:ok :changed :batches]) :moved (not= t1 (:max-tx @(:conn sys)))
+                           :evals (count (datahike.api/q '[:find [?e ...] :where [?e :seon.eval/id \"example/abc/s1\"]] @(:conn sys)))
+                           :agents (count (datahike.api/q '[:find [?e ...] :where [?e :seon.agent/key \"example/abc\"]] @(:conn sys)))})")))
+          "the first load writes its two transactions; the second writes nothing")
+      (let [missing (str runs "/nothing-here.edn")
+            [type p message] (refused missing)]
+        (is (= [:seon.root/example-refused missing] [type p]))
+        (is (str/includes? message "not found")))
+      (is (str/includes? (nth (refused (str runs "/unreadable.edn")) 2) "not readable EDN"))
+      (is (str/includes? (nth (refused (str runs "/bad.edn")) 2) "not a non-empty vector of transactions"))
+      (finally (ts/stop-root! root) (ts/drop-main! path main) (clojure.java.shell/sh "rm" "-rf" runs)))))
