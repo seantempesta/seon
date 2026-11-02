@@ -70,25 +70,34 @@
   (when (and (var? v) src) (alter-meta! v assoc :source src)))
 
 (def ^:private repl-helpers
-  "The clojure.repl names an agent's REPL keeps in every namespace it moves to (`equip-ns!`), and
-  warns of when the namespace's own var hides one (`shadowed`; docs/render.md#a-part-answers-data)."
-  '[source apropos dir pst doc find-doc])
+  "The names an agent's REPL keeps in every namespace it evaluates in (`equip-ns!`), by the namespace that holds
+  each, as clojure.main's REPL refers them into user (its repl-requires): clojure.repl's, whose source, source-fn
+  and pst are Seon's, interned under their own names (seon.agent/make-ns!), and pprint's. `shadowed` warns of a
+  namespace's own var that hides one (docs/render.md#a-part-answers-data)."
+  '{clojure.repl [source apropos dir pst doc find-doc] clojure.pprint [pp pprint]})
+
+(def ^:private repl-aliases
+  "The aliases an agent's REPL keeps in every namespace it evaluates in (`equip-ns!`), as its own namespace has them."
+  '{d datahike.api str clojure.string})
 
 (defn- equip-ns!
-  "Namespace ns as an agent's REPL has its helpers wherever it goes: the clojure.repl names the
-  agent's own namespace refers (source, doc, dir, apropos, find-doc, pst) referred into ns where
-  each is free and clojure.repl holds it (an agent's process interns source and pst there,
-  seon.agent/make-ns!), so an in-ns to another namespace keeps them (a name ns already holds is its
-  own, and left). Done here, at the reader, on purpose (audit cut 8): this loop is the one
-  place that carries *ns* from form to form, so it is the owner of what follows the agent into a new
-  one; a producer-side fix would redefine in-ns (a core var, a smell by AGENTS 5) or refer into
-  every program namespace at load, which are not the agent's. Answers ns."
+  "Namespace ns as an agent's REPL has its helpers wherever it evaluates: each of `repl-helpers` referred into ns
+  where the name is free and its namespace holds it, and each of `repl-aliases` where ns has no alias of that name,
+  so the standard names work in the task's namespace it starts in and in any it moves to (a name ns already maps is
+  its own, and left; a refer or an alias is no form, so it never becomes program). Done here, at the reader, on purpose
+  (audit cut 8): this loop is the one place that carries *ns* from form to form, so it is the owner of what follows
+  the agent into a new one; a producer-side fix would redefine in-ns (a core var, a smell by AGENTS 5) or refer into
+  every program namespace at load, which are not the agent's. Answers ns. See docs/agent.md#the-repl."
   {:malli/schema [:=> [:cat :seon.host/namespace] :seon.host/namespace]}
   [ns]
-  (let [held (ns-publics (find-ns 'clojure.repl))
-        free (vec (for [s repl-helpers :when (and (contains? held s) (not (ns-resolve ns s)))] s))]
-    (when (seq free) (binding [*ns* ns] (refer 'clojure.repl :only free)))
-    ns))
+  (doseq [[from names] repl-helpers
+          :let [held (some-> (find-ns from) ns-publics)
+                free (vec (for [s names :when (and (contains? held s) (not (ns-resolve ns s)))] s))]
+          :when (seq free)]
+    (binding [*ns* ns] (refer from :only free)))
+  (doseq [[a target] repl-aliases :when (and (not (contains? (ns-aliases ns) a)) (find-ns target))]
+    (binding [*ns* ns] (alias a target)))
+  ns)
 
 (defn- shadowed
   "The REPL helpers (`repl-helpers`) namespace ns holds a var of its own for, {name its-var}:
@@ -97,9 +106,9 @@
   error four times). nil when none. It answers a move's :helper-shadowed (docs/render.md#a-part-answers-data)."
   {:malli/schema [:=> [:cat :seon.host/namespace] [:maybe [:map-of :symbol :symbol]]]}
   [ns]
-  (not-empty (into {} (for [s repl-helpers
+  (not-empty (into {} (for [[from names] repl-helpers s names
                             :let [v (ns-resolve ns s)]
-                            :when (and (var? v) (not= 'clojure.repl (ns-name (:ns (meta v)))))]
+                            :when (and (var? v) (not= from (ns-name (:ns (meta v)))))]
                         [s (symbol (str (ns-name (:ns (meta v)))) (str s))]))))
 
 (defn- do-parts
@@ -217,7 +226,7 @@
                          (let [[ns' how] (exec! form src lead ns (or top k))]
                            (if (= :ok how) (recur ns' end (inc k)) [ns' how])))))))
         _ (vreset! forms-ref forms!)
-        [ns how] (forms! (get req "code") (or (some-> (get req "ns") symbol find-ns) (:ns @agent/state)) nil)]
+        [ns how] (forms! (get req "code") (equip-ns! (or (some-> (get req "ns") symbol find-ns) (:ns @agent/state))) nil)]
     ;; a read error leaves the agent's namespace as it was
     (when-not (= :read how) (swap! agent/state assoc :ns ns))
     (reply {"status" ["done"]})))

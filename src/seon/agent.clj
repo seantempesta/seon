@@ -1191,6 +1191,17 @@
 
 ;; ---- the loop ----------------------------------------------------------------------
 
+(defn- start-ns
+  "The namespace agent's REPL starts in: its task's :seon.task/ns on db (task its :seon.task/id), made as an ns form
+  would make it when the program has none (clojure.core referred), else its own scratch namespace nsx (a task that
+  names no namespace). Its first eval runs there and its context pulls it (seon.context/current-ns); the reader
+  carries the REPL's helpers into it (seon.repl/equip-ns!). See docs/agent.md#the-repl."
+  {:malli/schema [:=> [:cat :seon.host/db [:maybe :string] :seon.host/namespace] :seon.host/namespace]}
+  [db task nsx]
+  (if-let [sym (some->> task (pdb/eid db :seon.task/id) (d/entity db) :seon.task/ns)]
+    (or (find-ns sym) (binding [*ns* (create-ns sym)] (refer-clojure) *ns*))
+    nsx))
+
 (defn- make-ns! {:malli/schema [:=> [:cat :seon.agent/id] :seon.host/namespace]}
   [id]
   (let [sym (symbol (str "agent." (name id)))
@@ -1347,7 +1358,9 @@
                         (reset! link {:fd fd :conn (sock/conn fd)})
                         (swap! state assoc :task (or (:task m) (:task @state)) :id (:agent m) :key (key-of (pdb/head store-conn (pdb/main-branch (:cfg r))) (:agent m)) :branch (:branch m) :mode :agent :tx-seq 0
                                :fx-pending {} :waits {}
-                               :store-conn store-conn :db @store-conn))
+                               :store-conn store-conn :db @store-conn)
+                        ;; it starts where its task is, as a new agent does
+                        (swap! state #(assoc % :ns (start-ns (:db %) (:task %) (:ns %)))))
                       (let [unwatched (sock/signal-at-input! fd)]
                         (hello! t0 (cond-> {:cloned-from parent} unwatched (assoc :unwatched unwatched))))
                       ((:serve @state))))})))))
@@ -1474,7 +1487,7 @@
                    :base base :main db0 :store-conn store-conn :cfg cfg :results {} :n 0
                    :load-errors (vec load-errors) :misaligned misaligned :unwatched (sock/signal-at-input! fd)
                    :waits {} :inbox [] :tx-seq 0 :mode :agent
-                   :ns nsx :interrupt-ok intr-ok :serve serve :inherited-bytes inherited}
+                   :ns (start-ns @store-conn task nsx) :interrupt-ok intr-ok :serve serve :inherited-bytes inherited}
                    ;; main's reach graph as the fork server keeps it, for db0: test-plan's base
                    ;; graph starts from it (base-graph), never built in this process
                    graph (assoc :base-graph {:point (pdb/point db0) :graph graph})

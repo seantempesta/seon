@@ -1374,7 +1374,8 @@
 (deftest a-namespace-shows-the-names-the-task-names
   ;; docs/render.md#a-part-answers-data: a bench run's namespaces part was 1,256 tokens listing about 170 names
   ;; the task never needed. It shows the namespaces of what the task cites and of its proofs, each with the
-  ;; names the task cites or its proofs call and the form that lists the rest, from the record alone
+  ;; names the task cites or its proofs call and the form that lists the rest, from the record alone; the one the
+  ;; REPL is in and the task's own first (docs/agent.md#the-repl)
   (let [db (d/db-with (ts/test-db)
                       (into [{:db/id "n" :ns/name 'x.nsd} {:db/id "nt" :ns/name 'x.nsd-test}
                              {:db/id "tf" :form/id "x.nsd-test/t1" :form/src "(deftest t1 (is (= 1 (b 1))))" :form/refs #{'x.nsd/b 'clojure.test/is}}
@@ -1395,7 +1396,11 @@
       (is (= '[b c] (:names (get own 'x.nsd))) "with the names cited in it"))
     (is (= '{x {:ns-form (clojure.repl/source x)}}
            (context/namespaces-of (update tree :task dissoc :cites :needs :proved)))
-        "a task that cites and proves nothing answers its own namespace")))
+        "a task that cites and proves nothing answers its own namespace")
+    (is (= 'x (context/current-ns tree)) "before any eval the REPL is where it starts, the task's namespace")
+    (let [moved (assoc tree :evals [[1 {:seon.eval/record {:response {:ns 'y}}}]])]
+      (is (= 'y (context/current-ns moved)))
+      (is (= '[y x x.nsd x.nsd-test] (keys (context/namespaces-of moved))) "the part follows the REPL, the task's own still drawn"))))
 
 (deftest a-draw-reads-the-cites-its-plan-write-derived
   ;; md-scan #10, 2026-10-29: the agent redefined seon.ref/scan, and every draw that parsed the plan

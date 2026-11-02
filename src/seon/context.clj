@@ -510,14 +510,16 @@
 (defn current-ns
   "The namespace the REPL of agent record c (its ctx) is in: the one its newest eval left it in (its response's
   :ns, as nREPL's carries it), read from its :evals (newest first, docs/ctx.md#the-pattern), stopping at the
-  first that carries one; nil before it has evaluated anything there. Where its next eval runs
-  (docs/render.md#a-part-answers-data)."
+  first that carries one; before any, where it starts, its task's :seon.task/ns (seon.agent/start-ns); nil for a
+  task that names none. Where its next eval runs (docs/render.md#a-part-answers-data)."
   {:malli/schema [:=> [:cat :map] [:maybe :symbol]]}
-  [c] (some (fn [[_ e]] (ratom/realize (get-in e [:seon.eval/record :response :ns]))) (:evals c)))
+  [c] (or (some (fn [[_ e]] (ratom/realize (get-in e [:seon.eval/record :response :ns]))) (:evals c))
+          (:seon.task/ns (:task c))))
 
 (defn namespaces-of
-  "The namespaces agent record c's work touches, as the namespaces part shows them, from ctx alone: its task's own
-  first (a task written from a symptom cites nothing yet), then those of what its task and its needs cite (a var's
+  "The namespaces agent record c's work touches, as the namespaces part shows them, from ctx alone: the one its REPL is in
+  and its task's own first (`current-ns`, the task's until it moves, so a task written from a symptom, citing nothing
+  yet, draws it), then those of what its task and its needs cite (a var's
   namespace, or a namespace cited itself) and of their proofs, once each, each {:names [...] :ns-form form}: its
   names the task cites or its proofs call (their forms' :form/refs, as :proved holds them), and the form that reads
   its ns form (its requires and aliases) and a line per definition, ``(clojure.repl/source ns)`` (the form that shows
@@ -533,14 +535,15 @@
         proofs (map #(ratom/realize (:var/name %)) proved)
         calls (for [v proved r (ratom/realize (get-in v [:form :form/refs])) :when (qualified-symbol? r)] r)
         ns-of #(if (namespace %) (symbol (namespace %)) %)
-        own (:seon.task/ns t)   ; a symbol, never a view: read as it is
+        ;; where the REPL is, then where it started: the task's own
+        own (distinct (keep identity [(current-ns c) (:seon.task/ns t)]))
         names (group-by ns-of (filter namespace (concat named proofs calls)))]
     ;; a map by name, in the order first named (a part answers a map: a vector is hiccup)
     (apply array-map (mapcat (fn [n] [n (cond-> {}
                                            (seq (names n)) (assoc :names (vec (sort (distinct (map (comp symbol name) (names n))))))
                                            ;; named for what an agent asks for (the ns form is asked for beside :source)
                                            true (assoc :ns-form (list 'clojure.repl/source n)))])
-                             (distinct (concat (when own [own]) (map ns-of (concat named proofs))))))))
+                             (distinct (concat own (map ns-of (concat named proofs))))))))
 
 (defn task-data
   "The task's data: task t's run sections as data, the same each turn of a run: the task (its
