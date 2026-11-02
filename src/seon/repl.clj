@@ -774,7 +774,7 @@
 
 (defn- unpaired-by-line
   "The delimiters new text leaves unpaired that its old text does not, each said by its line in new and that
-  line's text (a refusal that says how many delimiters but not where leaves the agent counting), as one string. d-old and d-new
+  line's text (an edit refused with how many delimiters but not where leaves the agent counting), as one string. d-old and d-new
   are their `seon.reader/delimiters`. A delimiter of new is old's when it stands where old has the same one:
   before their common prefix ends, or after their common suffix starts (an edit's fragment is often
   unbalanced itself: an old (foo [a keeps its open ( and [). See docs/agent.md#changing-a-definition."
