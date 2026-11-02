@@ -843,10 +843,44 @@
         (conj {:role "user" :content "</session>"}))))
 
 (def ^:private session-kinds
-  "The kinds of record `records` answers, each with the attributes that name it and its agent."
+  "The kinds of record `records` answers, each with the attributes that name it and its agent. See
+  docs/tasks.md#a-task-names-example-sessions."
   {:seon.db/eval-fact [:seon.eval/id :seon.eval/agent]
    :seon.message/fact [:seon.message/id :seon.message/agent]
    :seon.turn/fact [:seon.turn/id :seon.turn/agent]})
+
+(defn- example-record
+  "An eval's record r as example ek keeps it (pre: ek's prefix for ids): its :run the example's id, its call id and
+  result handle prefixed with pre, and the handle's text in a result printed as recorded. See
+  docs/tasks.md#a-task-names-example-sessions."
+  {:malli/schema [:=> [:cat :string :string :map] :map]}
+  [ek pre r]
+  (let [h (get-in r [:response :handle])
+        h' (when h (symbol (namespace h) (str pre (name h))))]
+    (cond-> r
+      (contains? r :run) (assoc :run ek)
+      (:call-id r) (update :call-id #(str pre %))
+      h (assoc-in [:response :handle] h')
+      (and h (:printed r)) (update :printed str/replace (str h) (str h')))))
+
+(defn- example-rekey
+  "Record m of one of `session-kinds` (its id and agent attributes id-k and agent-k) as example ek keeps it: its db
+  attributes dropped, its id under ek, its agent ek's, an eval's record as `example-record` has it. See
+  docs/tasks.md#a-task-names-example-sessions."
+  {:malli/schema [:=> [:cat :string :string :map [:tuple :qualified-keyword :qualified-keyword]] :map]}
+  [ek pre m [id-k agent-k]]
+  (-> (apply dissoc m (filter #(= "db" (namespace %)) (keys m)))
+      (update id-k #(str ek "/" %)) (assoc agent-k [:seon.agent/key ek])
+      (cond-> (:seon.eval/record m) (update :seon.eval/record #(example-record ek pre %)))))
+
+(defn- session-request
+  "The request agent a answered, for an example: its task's plan, else its own description; nil when it has neither
+  (a blank one is none). See docs/tasks.md#a-task-names-example-sessions."
+  {:malli/schema [:=> [:cat :seon.host/db :int] [:maybe :string]]}
+  [db a]
+  (->> [(:seon.task/plan (:seon.agent/task (d/pull db [{:seon.agent/task [:seon.task/plan]}] a)))
+        (:seon.agent/description (d/pull db [:seon.agent/description] a))]
+       (remove str/blank?) first))
 
 (defn session-tx
   "Agent key's session on db as example id: the transactions that recreate it as an example, a vector of
@@ -854,43 +888,28 @@
   order they ran), or the `:seon.context/session-refused` error when no agent has key, it has no request to
   show (its task has no plan and it has no description) or a record is of a kind an example does not hold.
   The first transaction writes the example agent, an ended agent like any (key \"example/<id>\", id
-  :example-<id>, its description the request: its task's plan, else its own description); the model's evals
+  :example-<id>, its description the request, `session-request`); the model's evals
   are kept, an eval the harness made in the agent is not; each other holds the records of one original
-  transaction, their ids and the agent ref re-keyed under the example's key, each call id and result handle
-  prefixed with it (so none meets a live agent's, nor another example's) and each eval's :run the example's
-  id. Pure data: written with pr-str, read back, `my.root/load-example!` transacts it. See
-  docs/tasks.md#a-task-names-example-sessions."
+  transaction, re-keyed under the example's key (`example-rekey`: ids, call ids, result handles and each
+  eval's :run, so none meets a live agent's, nor another example's). Pure data: written with pr-str, read back,
+  `my.root/load-example!` transacts it. See docs/tasks.md#a-task-names-example-sessions."
   {:malli/schema [:=> [:cat :seon.host/db :string :string]
                   [:or [:vector [:vector :map]] :seon.context/session-refused]]}
   [db key id]
   (let [a (pdb/eid db :seon.agent/key key)
         refuse #(contract/error :seon.context/session-refused #'seon.context/session-tx % {:key key})
         ek (str "example/" id)
-        pre (str (str/replace ek "/" "-") "-")
-        request (when a (->> [(:seon.task/plan (:seon.agent/task (d/pull db [{:seon.agent/task [:seon.task/plan]}] a)))
-                              (:seon.agent/description (d/pull db [:seon.agent/description] a))]
-                             (remove str/blank?) first))
+        request (when a (session-request db a))
         ;; the model's own evals (a call id) and its messages and replies: not an eval the harness made in the agent
         rs (when a (remove (fn [[_ v k]] (and (= :seon.db/eval-fact k) (not (get-in v [:seon.eval/record :call-id])))) (records db a)))
         unknown (first (remove #(session-kinds (nth % 2)) rs))
-        record (fn [r] (let [h (get-in r [:response :handle])
-                             h' (when h (symbol (namespace h) (str pre (name h))))]
-                         (cond-> r
-                           (contains? r :run) (assoc :run ek)
-                           (:call-id r) (update :call-id #(str pre %))
-                           h (assoc-in [:response :handle] h')
-                           (and h (:printed r)) (update :printed str/replace (str h) (str h')))))
-        rekey (fn [m [id-k agent-k]]
-                (-> (apply dissoc m (filter #(= "db" (namespace %)) (keys m)))
-                    (update id-k #(str ek "/" %)) (assoc agent-k [:seon.agent/key ek])
-                    (cond-> (:seon.eval/record m) (update :seon.eval/record record))))
         by-tx (group-by first rs)]
     (cond (nil? a) (refuse (str "no agent is keyed \"" key "\""))
           (nil? request) (refuse (str "agent \"" key "\" has no request to show: its task has no plan and it has no description"))
           unknown (refuse (str "agent \"" key "\" holds a record of kind " (nth unknown 2) ", which an example does not"))
           :else (into [[{:seon.agent/key ek :seon.agent/id (keyword (str "example-" id)) :seon.agent/status :ended :seon.agent/description request}]]
                       (for [tx (sort (keys by-tx))]
-                        (vec (for [[_ v k] (by-tx tx)] (rekey v (session-kinds k)))))))))
+                        (vec (for [[_ v k] (by-tx tx)] (example-rekey ek (str (str/replace ek "/" "-") "-") v (session-kinds k)))))))))
 
 (def page-lists "The lists of an agent's page its model reads: its task's (#p-task)." ["#p-task"])
 

@@ -1503,35 +1503,51 @@
         (is (str/includes? html "(+ 1 2)") "its eval, drawn by evaluation")))))
 
 
-(deftest a-task-with-no-examples-sends-the-messages-main-sent
-  ;; The no-examples path only gains an empty ex-items (seon.context/request), so this literal is the branch's own
-  ;; output for it; the test asserts it and its digest, so a later change to that path goes red.
-  ;; The literal is main's request (9a35ff81ea, which holds no example) for this fixed fixture: the task demo/g
-  ;; named by no example, a session of one eval, one message and one prose reply, two requests. Entity ids in the
-  ;; page's part names (-457) are the seed's, so they are read as -N.
+(defn- no-example-requests!
+  "Two requests of the fixed fixture of task demo/g, named by no example: its session of one eval, one message and one
+  prose reply, on conn (a branch with the system prompt loaded); answers {:r0 :r1}."
+  [conn]
+  (d/transact conn (doc/load-tx @conn "docs" {context/system-page (slurp (str (seon.config/checkout) "/" context/system-page))}))
+  (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "g" :seon.task/plan "Make g." :seon.task/proofs #{'demo-test/g-test}}]))
+  (d/transact conn [{:seon.run/id "demo/g#1" :seon.run/task [:seon.task/id "demo/g"] :seon.run/agent {:seon.agent/key "b/a1" :seon.agent/task {:seon.task/id "demo/g"}}}])
+  (let [r0 (turn! conn 0)]
+    (d/transact conn [{:seon.eval/id "e0" :seon.eval/by "a1" :seon.eval/agent [:seon.agent/key "b/a1"]
+                       :seon.eval/record {:code "(+ 5 1)" :response {:handle 'result/e0 :value 6} :run "demo/g#1" :call-id "c0" :call 0 :prose "Add."}}])
+    (d/transact conn [{:seon.message/id "m0" :seon.message/agent [:seon.agent/key "b/a1"] :seon.message/from "owner" :seon.message/body "Go on."}])
+    (d/transact conn [{:seon.turn/id "demo/g#1/1x" :seon.turn/agent [:seon.agent/key "b/a1"] :seon.turn/reply "Thinking."}])
+    {:r0 r0 :r1 (turn! conn 1)}))
+
+(defn- ids-as-n
+  "Messages ms with the entity ids in the page's part names (-457, the test store's seed) read as -N."
+  [ms] (mapv #(update % :content str/replace #"-\d+\"" "-N\"") ms))
+
+(def ^:private no-example-page
+  "The page's part message main sent the fixture's agent, entity ids as -N."
+  "{\"task-data-N\"\n   {:to-prove {demo-test/g-test \"not written yet\"},\n    :task #:seon.task{:id \"demo/g\", :kind :work, :plan \"Make g.\"}},\n \"namespaces-N\" {},\n \"status-N\"\n   {:proofs [{:test demo-test/g-test, :status :undefined}],\n    :refused\n      [{:reason :proof-unknown,\n        :test demo-test/g-test,\n        :do\n          (do\n           (in-ns 'demo-test)\n           (clojure.test/deftest\n            g-test\n            (clojure.test/is false\n             \"write the assertion: the behaviour, on data\"))\n           (my.agent/prove))}]},\n \"run-head-N\" {:turn 1}}")
+
+;; The no-examples path only gains an empty ex-items (seon.context/request), so these literals are the branch's own
+;; output for it; the tests assert them and a digest, so a later change to that path goes red. They are main's request
+;; (9a35ff81ea, which holds no example) for the fixed fixture of `no-example-requests!`.
+(deftest a-task-with-no-examples-sends-the-first-request-main-sent
   (ts/test-branch!
     (fn [_ conn]
-      (d/transact conn (doc/load-tx @conn "docs" {context/system-page (slurp (str (seon.config/checkout) "/" context/system-page))}))
-      (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "g" :seon.task/plan "Make g." :seon.task/proofs #{'demo-test/g-test}}]))
-      (d/transact conn [{:seon.run/id "demo/g#1" :seon.run/task [:seon.task/id "demo/g"] :seon.run/agent {:seon.agent/key "b/a1" :seon.agent/task {:seon.task/id "demo/g"}}}])
-      (let [r0 (turn! conn 0)
-            _ (d/transact conn [{:seon.eval/id "e0" :seon.eval/by "a1" :seon.eval/agent [:seon.agent/key "b/a1"]
-                                 :seon.eval/record {:code "(+ 5 1)" :response {:handle 'result/e0 :value 6} :run "demo/g#1" :call-id "c0" :call 0 :prose "Add."}}])
-            _ (d/transact conn [{:seon.message/id "m0" :seon.message/agent [:seon.agent/key "b/a1"] :seon.message/from "owner" :seon.message/body "Go on."}])
-            _ (d/transact conn [{:seon.turn/id "demo/g#1/1x" :seon.turn/agent [:seon.agent/key "b/a1"] :seon.turn/reply "Thinking."}])
-            r1 (turn! conn 1)
-            ids-as-n (fn [ms] (mapv #(update % :content str/replace #"-\d+\"" "-N\"") ms))
-            page "{\"task-data-N\"\n   {:to-prove {demo-test/g-test \"not written yet\"},\n    :task #:seon.task{:id \"demo/g\", :kind :work, :plan \"Make g.\"}},\n \"namespaces-N\" {},\n \"status-N\"\n   {:proofs [{:test demo-test/g-test, :status :undefined}],\n    :refused\n      [{:reason :proof-unknown,\n        :test demo-test/g-test,\n        :do\n          (do\n           (in-ns 'demo-test)\n           (clojure.test/deftest\n            g-test\n            (clojure.test/is false\n             \"write the assertion: the behaviour, on data\"))\n           (my.agent/prove))}]},\n \"run-head-N\" {:turn 1}}"]
+      (let [{:keys [r0]} (no-example-requests! conn)]
         (is (= {:role "system" :content (context/system-text @conn)} (first (:messages r0))))
-        (is (= [{:role "user" :content page}] (ids-as-n (rest (:messages r0)))))
-        (is (= [{:role "user" :content page}
+        (is (= [{:role "user" :content no-example-page}] (ids-as-n (rest (:messages r0)))))))))
+
+(deftest a-task-with-no-examples-sends-the-conversation-main-sent
+  (ts/test-branch!
+    (fn [_ conn]
+      (let [{:keys [r1]} (no-example-requests! conn)
+            ms (ids-as-n (rest (:messages r1)))]
+        (is (= [{:role "user" :content no-example-page}
                 {:role "assistant" :content "" :tool-calls [{:id "c0" :code "(+ 5 1)" :prose "Add."}] :call 0}
                 {:role "tool" :tool-call-id "c0" :content "{:handle result/e0, :value 6}"}
                 {:role "user" :content "{:from \"owner\", :body \"Go on.\"}"}
                 {:role "assistant" :content "Thinking."}
                 {:role "user" :content "{\"run-head-N\" {:changed {:turn 3}}}"}]
-               (ids-as-n (rest (:messages r1)))))
-        (is (= "c63057ac93d419a3" (seon.lib/digest (str/join "\n--\n" (map #(str (:role %) ":" (:content %)) (ids-as-n (rest (:messages r1)))))))
+               ms))
+        (is (= "c63057ac93d419a3" (seon.lib/digest (str/join "\n--\n" (map #(str (:role %) ":" (:content %)) ms))))
             "and the digest of its roles and contents (SHA-256, first 16 hex digits): a change to this path moves it")))))
 
 (deftest session-tx-answers-an-error-for-what-it-cannot-show
@@ -1561,39 +1577,48 @@
         (is (= '#{result/example-abc-s1 result/example-abc-s2} (set (map #(get-in % [:response :handle]) recs))))
         (is (= "#atom result/example-abc-s2" (:printed (second recs))) "a result printed as recorded names the same handle")))))
 
-(deftest two-examples-keep-their-order-and-their-handles-apart
-  ;; two sessions whose records carry the same ids (s1, call_1, result/s1: ids are an agent's own), loaded into one db
+(defn- two-examples-request!
+  "Two sessions whose records carry the same ids (s1, call_1, result/s1: ids are an agent's own), loaded into one db
+  in the order def, abc and named by task demo/g; answers {:r0 :r1}, requests 0 and 1 of its session."
+  [conn]
   (let [from (fn [id code] (ts/test-branch! (fn [_ c] (source-session! c code) (context/session-tx @c "b/src" id))))
         tx-a (from "abc" "(+ 1 2)")
         tx-b (from "def" "(+ 3 4)")]
-    (ts/test-branch!
-      (fn [_ conn]
-        (d/transact conn (doc/load-tx @conn "docs" {context/system-page (slurp (str (seon.config/checkout) "/" context/system-page))}))
-        (doseq [t (concat tx-b tx-a)] (d/transact conn t))
-        (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "g" :seon.task/plan "Make g." :seon.task/proofs #{'demo-test/g-test}
-                                                 :seon.task/examples #{[:seon.agent/key "example/def"] [:seon.agent/key "example/abc"]}}]))
-        (d/transact conn [{:seon.run/id "demo/g#1" :seon.run/task [:seon.task/id "demo/g"] :seon.run/agent {:seon.agent/key "b/a1" :seon.agent/task {:seon.task/id "demo/g"}}}])
-        (let [r0 (turn! conn 0)
-              r1 (turn! conn 1)
-              ms (:messages r0)
-              opens (keep-indexed (fn [i m] (when (str/starts-with? (:content m "") "<session id=\"example/") i)) ms)
-              calls (keep #(get-in % [:tool-calls 0 :id]) ms)
-              results (keep :tool-call-id ms)
-              tool-text (fn [id] (:content (first (filter #(= id (:tool-call-id %)) ms))))]
-          (is (= [:example "example/abc"] (vec (take 2 (second (:sent r0))))) "in key order, whatever order they were loaded")
-          (is (= [[:example "example/def"]] (mapv #(vec (take 2 %)) (filter #(= :example (first %)) (drop 2 (:sent r0))))))
-          (is (= [1 7] (vec opens)) "each example opens after the system message and the one before it closes")
-          (is (= ["<session id=\"example/abc\" kind=\"example\" from=\"seon\">" "<session id=\"example/def\" kind=\"example\" from=\"seon\">"]
-                 (mapv #(first (str/split-lines (:content (nth ms %)))) opens)))
-          (is (= ["</session>" "</session>"] (mapv #(:content (nth ms %)) [6 12])))
-          (is (= [["assistant" "tool" "user" "assistant"] ["assistant" "tool" "user" "assistant"]] [(mapv :role (subvec ms 2 6)) (mapv :role (subvec ms 8 12))]) "each in the order its records ran")
-          (is (= ["example-abc-call_1" "example-def-call_1"] (vec calls)) "no call id is another's")
-          (is (= (vec calls) (vec results)) "every call is followed by its tool message")
-          (is (str/includes? (tool-text "example-abc-call_1") "result/example-abc-s1"))
-          (is (str/includes? (tool-text "example-def-call_1") "result/example-def-s1"))
-          (is (not-any? #(str/includes? (str (:content %)) "result/s1") ms) "no handle is the live agent's (result/s1)")
-          (let [ids (:ids (:printed r0))]
-            (is (apply distinct? ids))
-            (is (every? #(str/includes? % "/") ids) "each id is its kind's"))
-          (is (= ms (subvec (:messages r1) 0 (count ms))) "both examples are the prefix of the next request")
-          (is (= (:messages r1) (into [] (mapcat second) (context/parts-of @conn (:sent r1)))) "replay draws the same bytes"))))))
+    (d/transact conn (doc/load-tx @conn "docs" {context/system-page (slurp (str (seon.config/checkout) "/" context/system-page))}))
+    (doseq [t (concat tx-b tx-a)] (d/transact conn t))
+    (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "g" :seon.task/plan "Make g." :seon.task/proofs #{'demo-test/g-test}
+                                             :seon.task/examples #{[:seon.agent/key "example/def"] [:seon.agent/key "example/abc"]}}]))
+    (d/transact conn [{:seon.run/id "demo/g#1" :seon.run/task [:seon.task/id "demo/g"] :seon.run/agent {:seon.agent/key "b/a1" :seon.agent/task {:seon.task/id "demo/g"}}}])
+    (let [r0 (turn! conn 0)] {:r0 r0 :r1 (turn! conn 1)})))
+
+(deftest two-examples-keep-their-order
+  (ts/test-branch!
+    (fn [_ conn]
+      (let [{:keys [r0 r1]} (two-examples-request! conn)
+            ms (:messages r0)
+            opens (keep-indexed (fn [i m] (when (str/starts-with? (:content m "") "<session id=\"example/") i)) ms)]
+        (is (= [:example "example/abc"] (vec (take 2 (second (:sent r0))))) "in key order, whatever order they were loaded")
+        (is (= [[:example "example/def"]] (mapv #(vec (take 2 %)) (filter #(= :example (first %)) (drop 2 (:sent r0))))))
+        (is (= [1 7] (vec opens)) "each example opens after the system message and the one before it closes")
+        (is (= ["<session id=\"example/abc\" kind=\"example\" from=\"seon\">" "<session id=\"example/def\" kind=\"example\" from=\"seon\">"]
+               (mapv #(first (str/split-lines (:content (nth ms %)))) opens)))
+        (is (= ["</session>" "</session>"] (mapv #(:content (nth ms %)) [6 12])))
+        (is (= [["assistant" "tool" "user" "assistant"] ["assistant" "tool" "user" "assistant"]] [(mapv :role (subvec ms 2 6)) (mapv :role (subvec ms 8 12))]) "each in the order its records ran")
+        (is (= ms (subvec (:messages r1) 0 (count ms))) "both examples are the prefix of the next request")
+        (is (= (:messages r1) (into [] (mapcat second) (context/parts-of @conn (:sent r1)))) "replay draws the same bytes")))))
+
+(deftest two-examples-keep-their-call-ids-and-handles-apart
+  (ts/test-branch!
+    (fn [_ conn]
+      (let [{:keys [r0]} (two-examples-request! conn)
+            ms (:messages r0)
+            calls (keep #(get-in % [:tool-calls 0 :id]) ms)
+            tool-text (fn [id] (:content (first (filter #(= id (:tool-call-id %)) ms))))]
+        (is (= ["example-abc-call_1" "example-def-call_1"] (vec calls)) "no call id is another's")
+        (is (= (vec calls) (vec (keep :tool-call-id ms))) "every call is followed by its tool message")
+        (is (str/includes? (tool-text "example-abc-call_1") "result/example-abc-s1"))
+        (is (str/includes? (tool-text "example-def-call_1") "result/example-def-s1"))
+        (is (not-any? #(str/includes? (str (:content %)) "result/s1") ms) "no handle is the live agent's (result/s1)")
+        (let [ids (:ids (:printed r0))]
+          (is (apply distinct? ids))
+          (is (every? #(str/includes? % "/") ids) "each id is its kind's"))))))

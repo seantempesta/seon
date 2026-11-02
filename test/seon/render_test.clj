@@ -1009,7 +1009,7 @@
     (is (= eid (#'p/location db [:chat :main/example-abc])))
     (is (nil? (#'p/location db :main/example-none)) "an id no agent has")
     (is (str/includes? (html [:chat :main/example-abc]) "(+ 1 2)") "its chat page lists its evals")
-    (is (str/includes? (html [:chat :main/example-abc]) "href=\"/agent/main/example-abc") "its tabs name it by the same link")
+    (is (str/includes? (h/html (:seon.render/html (#'p/page-value st [:chat :main/example-abc]))) "href=\"/agent/main/example-abc/debug") "its tabs name it by the same link")
     (is (seq (units :main/example-abc)) "its record page reads main")))
 
 (deftest a-debug-page-of-an-agent-with-no-branch-answers

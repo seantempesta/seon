@@ -291,12 +291,12 @@
         ;; the evals a reader opened (main's :seon.agent/opened, read here, so its commit passes the
         ;; page again): drawn opened, as the agent draws them once it takes the fact
         opened (set (:seon.agent/opened e))
-        branch-units (fn [] (let [t (quiet #(:tree (ctx/build bdb (seon.db/eid bdb :seon.agent/key (:seon.agent/key e)) (:seon.agent/branch e))))
+        branch-units (fn [] (let [t (quiet #(:tree (ctx/build bdb (seon.db/eid bdb :seon.agent/key (:seon.agent/key e)) (or (:seon.agent/branch e) :db))))
                                   t (cond-> t (seq opened) (update :evals #(reduce-kv (fn [m k ev] (if (opened (:seon.eval/id ev)) (assoc m k (assoc ev :seon.eval/opened true)) m)) % %)))
                                   w (quiet #(render/draw t ctx/changes bdb (render/declared-var :seon.render/render-ctx)))]
                               (try (render/placed-units w) (finally (render/dispose-walk! w)))))
         ;; the debug view: @ctx printed, the agent's record as data by the one printer (its :seon.ctx/ctx render)
-        ctx-units (fn [] (let [t (quiet #(:tree (ctx/build bdb (seon.db/eid bdb :seon.agent/key (:seon.agent/key e)) (:seon.agent/branch e))))]
+        ctx-units (fn [] (let [t (quiet #(:tree (ctx/build bdb (seon.db/eid bdb :seon.agent/key (:seon.agent/key e)) (or (:seon.agent/branch e) :db))))]
                            [{:id "d-ctx" :container "#c-rows" :rev (:t t)
                              :html (h/html [:li {:id "d-ctx"} (quiet #(render/html {:db bdb} (with-meta t {:seon.render/schema :seon.ctx/ctx})))])}]))
         units (if own?

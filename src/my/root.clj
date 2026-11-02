@@ -252,7 +252,7 @@
                                      {:files (count files)} (mapcat identity (vals files))))))))
 
 (def ^:private example-identities
-  "The attributes that name a record of an example session, each unique."
+  "The attributes that name a record of an example session, each unique. See docs/tasks.md#a-task-names-example-sessions."
   [:seon.agent/key :seon.eval/id :seon.message/id :seon.turn/id])
 
 (defn example-txs
