@@ -1408,8 +1408,10 @@
       status [:p {:class "text-text-500"} (case status :busy "working…" :idle "waiting for you" (kname status))])))
 
 (defn examples
-  "The example sessions its task names (a component over ctx and the db, placed when the task names
-  any): under a heading naming each session, its evals as one line each in the order the agent's own
+  "The example sessions its task names (a component over ctx and the db), or nothing when it names none. It is placed
+  on every page, for the render cache runs a component once and again only when what it reads changes, so it costs
+  nothing on an idle page; placing it only when there are examples would cost 3 contracted calls on every list draw,
+  because the layout builds the whole page whatever list is drawn. Under a heading naming each session, its evals as one line each in the order the agent's own
   conversation orders them (`conversation`), drawn by `evaluation` as the agent's own are. The model
   reads the same sessions as messages (seon.context/example-messages), so this is beside its page, not in it.
   See docs/tasks.md#a-task-names-example-sessions and docs/render.md#the-page."
@@ -1475,7 +1477,7 @@
       (for [id conv :when (and (not (in-turn id)) (not (loop? id)))] (cond (ev? id) [#'eval-item {} id] (tu? id) [#'chat-turn {} aid id] :else [#'chat-message {} aid id]))
       (when aid [#'chat-end {} aid])]
      [:aside {:id "p-tiles"}
-      ;; placed always: the component reads the task's examples when this list is drawn and answers nothing when it names none (a read here, in the layout, costs every draw of any list)
+      ;; placed on every page: the render cache runs a component once and again only when what it reads changes, so a page whose task names no examples pays nothing; reading the task here to place it only when it names examples would be 3 contracted calls on every list draw, because the layout builds the whole page whatever list is drawn
       [#'examples {} aid]
       (for [[id e] evals :let [{{v :value} :response k :schema} (:seon.eval/record e)] :when (and (some? v) (render/render-of (ratom/realize v) k))]
         [#'eval-tile {} id])]]))
