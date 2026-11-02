@@ -45,6 +45,13 @@
 (defn clear-pending! {:malli/schema [:=> [:cat] :boolean]}
   [] (reset! pending false))
 
+(defn forked!
+  "A forked child's interrupt state cleared: none of its parent's evals on its stack, no interrupt of its parent's
+  pending, so the child's own evals run (a test child forked by an agent with root's interrupt pending answered every
+  eval \"interrupted by root\": task seon.agent/a-test-child-starts-as-a-test-runner-does). true."
+  {:malli/schema [:=> [:cat] :boolean]}
+  [] (reset! stack ()) (reset! pending false) true)
+
 (defn- on-usr1 {:malli/schema [:=> [:cat] :boolean]}
   []
   (let [es @stack]

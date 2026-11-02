@@ -284,6 +284,14 @@
                {:prose "Throw." :code "(throw (ex-info \"boom\" {}))"}
                {:prose "Increment a." :code "(inc a)"}]})
 
+(defn calls-one-refused
+  "The scripted model of a reply whose second call answers an error value, an edit refused (seon.agent-test): three
+  calls, the third, built on the edit, never run (task seon.turn/an-agent-that-breaks-its-own-render-is-told-and-goes-on)."
+  {:malli/schema [:=> [:cat :seon.model/request] :seon.model/script-reply]}
+  [_] {:calls [{:prose "Define a." :code "(def a 1)"}
+               {:prose "Change a text that is not there." :code "(seon.repl/edit! 'clojure.core/inc \"no such text\" \"x\")"}
+               {:prose "Increment a." :code "(inc a)"}]})
+
 (defn two-forms-in-a-call
   "The scripted model of a reply whose first call holds two forms (seon.agent-test): they run in
   order, and the call after it runs too (docs/prompt.md)."

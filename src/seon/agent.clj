@@ -997,6 +997,9 @@
                ;; the test child's own ceiling, from its own heap at its fork: the agent's absolute ceiling
                ;; left a child of a grown agent less room than any test needs (docs/machine.md#what-a-process-owns-in-memory)
                (lib/heap-cap! (+ (lib/bytes-in-heap) (cfg/value :seon.config.agent/heap-extra-bytes)) (cfg/value :seon.config.agent/trip-bytes))
+               ;; its tests run as bin/test's runner runs them: no interrupt or eval of the agent's
+               ;; (task seon.agent/a-test-child-starts-as-a-test-runner-does)
+               (intr/forked!)
                (swap! state assoc :mode :test :evaluating false)
                ;; the test's own working directory: what a test writes relative to it is this run's, removed
                ;; below when the child has ended (docs/failure-points.md, a directory walk)
