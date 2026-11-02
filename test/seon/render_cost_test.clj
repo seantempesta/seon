@@ -438,6 +438,8 @@
                        ;; render-ctx watches the task's and the agent's searches ((:searches (:task c)), (:searches c): the tracked
                        ;; reads a swap! of a search redraws by; 583 with that placement taken out, the fixture holding no search).
                        ;; Accepted by the optimization session on the owner's deferral, 2026-11-01 ("I trust your judgement")
+                       ;; 607 since the namespaces part shows the task's own namespace first (seon.context/namespaces-of): a task
+                       ;; that cites nothing drew {} there, now one entry. Accepted by the owner, 2026-11-03 ("Yes, record 607")
                        :per-n {:calls 4 :bytes 35000}
-                       :fixed {:calls 551 :bytes 3200000}
+                       :fixed {:calls 567 :bytes 3200000}
                        :sizes [10 40 80]}))))))
