@@ -293,7 +293,9 @@
   cosine with qv, zb its text's bm25 for the query's words among every text (seon.doc/scores, the score search's text ranking reads), zt its cosine with the touched items' mean
   vector, each a z-score over the pool, g1 log(1 + the seeds it neighbours x its rarity,
   (1 + cap)/(1 + its degree to cap)) and ppr log(1 + scale x its rank), the constants
-  :seon.config.render/relevance-features; the logit read as a chance by the kind's calibration (`percent`). Measured on 57 merged
+  :seon.config.render/relevance-features; the logit read as a chance by the kind's calibration (`percent`). The weights were
+  fitted when zb was a BM25 over the pool's own words; they are carried over to this zb unrefitted, judged by
+  the context lab's L0 before and after (docs/plan.md, step 1), and refitted with step 3's labels. Measured on 57 merged
   tasks' plans held out: functions 0.427 at 5 against the rank fusion's 0.367, sections 0.798
   against 0.651. Answers {kind [[e p] ...]}, best first, the touched items left out (a caller leaves out
   what its page already shows)."

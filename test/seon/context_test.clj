@@ -939,6 +939,10 @@
     (is (every? (fn [[_ p]] (<= 0.0 p 1.0)) cold) "each a chance")
     (is (apply >= (map second cold)) "best first")
     (is (= (sec "the-model") (ffirst cold)) "the nearest first, all else equal")
+    (is (= cold (:section (context/relevance db {:qv qv :text "Make the page say one thing." :seeds #{} :touched #{}
+                                                 :near {:seon.doc/address (vector/near db qv 100 {:of :seon.doc/address})}}
+                                             #{:section} (constantly true))))
+        "a search's own scan of the nearest, handed over, scores as relevance's own scan does")
     (let [warm (score #{(sec "what-the-work-is-likely-to-need-as-an-eval")}) cold (into {} cold)
           gap (fn [m] (- (m (sec "fused-with-the-call-graph")) (m (sec "the-model"))))]
       (is (not (contains? warm (sec "what-the-work-is-likely-to-need-as-an-eval"))) "a touched item is not offered again")

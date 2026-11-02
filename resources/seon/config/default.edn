@@ -400,10 +400,9 @@
  ;; one is the program's, one under test/ (a test's, a fixture's, a helper's like seon.check or
  ;; seon.fixtures, whose names do not end in -test) is not (seon.program/program-nss). Read where
  ;; the program is told from its tests: the failure-point law's sites (a namespace with no file,
- ;; an agent's REPL app, is no failure point), and similar's functions (there one
- ;; with no file is the agent's new work, and shown). Provenance: root, 2026-10-25 (the live round
- ;; 5's big-map request, whose similar functions were test/ helpers). At the bound: an empty
- ;; vector makes nothing the program's (no law site, no similar function but the agent's own).
+ ;; an agent's REPL app, is no failure point). Provenance: root, 2026-10-25 (the live round
+ ;; 5's big-map request, whose nearest functions were test/ helpers). At the bound: an empty
+ ;; vector makes nothing the program's (no law site).
  :seon.config.source/program-dirs ["src"]
  ;; Unit: paths. The checkout's top-level paths no file read and no binary build reads: left out of
  ;; its tree id (seon.fx/tree-id, bin/tree, which reads this line of the shipped file), so a

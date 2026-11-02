@@ -353,7 +353,9 @@
     (is (= [[:embed ["task: search result | query: messages sent while it ran are lost"]]] asked)
         "the query of the task's search is asked, the plan's vector being current")
     (is (= 1 n))
-    (is (some? (vector/vector-of db s)) "the search entity has its vector on the branch")))
+    (is (some? (vector/vector-of db s)) "the search entity has its vector on the branch")
+    (let [[n2 _ asked2] (on-branch main db answered #(agent/embed-written! 64 "m"))]
+      (is (= [0 []] [n2 asked2]) "the next turn asks nothing: its vector is current"))))
 
 (deftest a-turn-with-nothing-due-asks-nothing
   (let [main (d/db-with (ts/test-db) [{:seon.task/id "t/x" :seon.task/plan "a plan"}])
