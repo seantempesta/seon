@@ -129,15 +129,22 @@
 
 (deftest no-section-names-a-bench-run
   ;; docs/README.md#how-the-wiki-is-kept: a section states its rule as current truth, never which bench run showed it
-  ;; (what an agent reads must not hint at a task's answer); decisions.md and plan.md name the runs they were made on
-  (let [id #"(?:^|[^A-Za-z0-9_-])(bench-[a-z0-9]+(?:-[a-z0-9]+)*|[a-z][a-z0-9]*(?:-[a-z0-9]+)+ (?:#[0-9]+|bench\b))"
-        dir (java.io.File. (str (config/checkout) "/docs"))
-        hits (for [f (sort-by #(.getName ^java.io.File %) (.listFiles dir))
-                   :when (and (str/ends-with? (.getName ^java.io.File f) ".md") (not (#{"decisions.md" "plan.md"} (.getName ^java.io.File f))))
+  ;; (what an agent reads must not hint at a task's answer); decisions.md and plan.md name the runs they were made on.
+  ;; src is read whole, docstrings and comments both: an agent reads them through `doc`, `source` and `lines`
+  (let [id #"(?:^|[^A-Za-z0-9_-])(md-scan\b|bench-[a-z0-9]+(?:-[a-z0-9]+)*|[a-z][a-z0-9]*(?:-[a-z0-9]+)+ (?:#[0-9]+|bench\b))"
+        root (config/checkout)
+        pages (for [^java.io.File f (.listFiles (java.io.File. (str root "/docs")))
+                    :when (and (str/ends-with? (.getName f) ".md") (not (#{"decisions.md" "plan.md"} (.getName f))))]
+                f)
+        srcs (for [^java.io.File f (file-seq (java.io.File. (str root "/src")))
+                   :when (re-find #"\.cljc?$" (.getName f))]
+               f)
+        hits (for [^java.io.File f (sort-by #(.getPath ^java.io.File %) (concat pages srcs))
                    :let [ids (distinct (map second (re-seq id (slurp f))))]
                    :when (seq ids)]
-               [(.getName ^java.io.File f) (vec ids)])]
-    (is (empty? hits) "no page outside decisions.md and plan.md names a bench or a numbered run: each is [page ids]")))
+               [(subs (.getPath f) (inc (count root))) (vec ids)])]
+    (is (< 50 (count srcs)) "src is read")
+    (is (empty? hits) "no page outside decisions.md and plan.md, and no src file, names a bench or a numbered run: each is [path ids]")))
 
 (deftest a-loaded-page-draws-back-as-its-file
   ;; docs as code (task seon.doc/any-markdown-file-is-docs-it-writes-back): the store holds each page, so the file is
