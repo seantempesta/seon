@@ -104,6 +104,35 @@
      :fixed {:ticks 40000.0 :bytes 100000.0}
      :sizes [30 100 300]}))
 
+;; A store on disk of this test's own, the last resort (docs/storage.md): the in-memory test store gives
+;; its index nodes no addresses, so no two db values of it share a stored subtree and a structural diff
+;; of them reads everything (as in seon.merge-cost-test); main's dbs are LMDB's, which share them.
+(def ^:private store
+  (delay (:conn (pdb/open! :lmdb (str (seon.config/checkout) "/target/vector-cost-" (random-uuid)) 0 :db))))
+
+(defn round-of
+  "seon.vector/vectors-proc's arguments for main's notice of a commit that wrote one form, with n
+  forms in the store, every one due (a vector of another text's transaction), and the proc caught up
+  at the db before the commit: the one text is the only one looked at."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :map :keyword :map]]}
+  [n]
+  (let [conn @store
+        cfg (pdb/store-cfg :lmdb (get-in @conn [:config :store :path]))
+        b (keyword (str "r" n "-" (random-uuid)))
+        _ (d/branch! conn :db b)
+        bc (d/connect (assoc cfg :branch b))
+        _ (d/transact bc {:tx-data (vec (mapcat form-tx (range n)))})
+        s (keyword (str (name b) "-next"))
+        _ (d/branch! conn b s)
+        c (d/connect (assoc cfg :branch s))
+        _ (d/transact c {:tx-data [{:form/id "vnew" :form/src "(defn vnew [])"}]})
+        ;; the previous round read the clean commit's db (it asked for what was due there), so root's node cache
+        ;; holds its nodes when this round diffs from it: read them here, as that round did
+        _ (vector/due (d/commit-as-db c (d/commit-id (pdb/head conn b))) "m")
+        r [(assoc (vector/vectors-proc {:model "m" :texts 64 :conn c}) :clean {:t 0 :commit (d/commit-id (pdb/head conn b))} :seen (d/commit-id (pdb/head conn b))) :main {:t 1 :commit (d/commit-id (pdb/head conn s))}]]
+    (d/release bc)
+    r))
+
 (deftest a-commit-is-embedded-for-what-it-changed
   (try
     (cost/proof
