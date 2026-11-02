@@ -347,14 +347,27 @@
 (defn grep
   "Like grep, over this branch's program: every line matching pattern in the functions, tests, wiki sections,
   task plans and schema entries, one row each, [{:at \"seon.task/accumulate:3\" :kind :var :text \"...\"}] (seon.doc/grep).
-  pattern is a string, matched as written, or a regex (#\"plan|proof\"). opts: :in, a set of kinds (:var :test
-  :section :task :schema), :ns, a name prefix (\"seon.ref\"). The answer is data, and whole: narrow it as you
+  pattern is a string, matched as written, or a regex (#\"plan|proof\"); a string with a regex's operators that matches
+  nothing answers :my.agent/regex-text, naming its regex form. opts, and no others: :in, a set of kinds (:var :test
+  :section :task :schema), :ns, a name and what is under it (\"seon.ref\": seon.ref/x and seon.ref.y/z, not seon.ref-test). The answer is data, and whole: narrow it as you
   would a list, (take 10 (grep \"x\")), (filter #(= :test (:kind %)) ...), (count ...), and read a hit's lines
   with (lines \"seon.task/accumulate\" 1 20). (search s) ranks by meaning, words and references; grep finds text."
-  {:malli/schema [:function [:=> [:cat [:or :string :seon.host/regex]] [:vector :map]]
-                  [:=> [:cat [:or :string :seon.host/regex] :map] [:vector :map]]]}
+  {:malli/schema [:function [:=> [:cat [:or :string :seon.host/regex]] [:or [:vector :map] :my.agent/regex-text]]
+                  ;; closed: an option grep does not take is refused, never ignored (a live session, 2026-11-02, passed
+                  ;; search's :kinds and :k six times and read every kind's hits as the ones it asked for)
+                  [:=> [:cat [:or :string :seon.host/regex] [:map {:closed true} [:in {:optional true} [:set :keyword]] [:ns {:optional true} :string]]]
+                   [:or [:vector :map] :my.agent/regex-text]]]}
   ([pattern] (grep pattern {}))
-  ([pattern {:keys [in ns]}] (doc/grep (agent/db) pattern (or in every-kind) ns)))
+  ([pattern {:keys [in ns]}]
+   (let [db (agent/db) kinds (or in every-kind) rows (doc/grep db pattern kinds ns)]
+     ;; a string is its text as written: one holding a regex's operators that matches nothing says so, naming
+     ;; its regex form (the same session's 8 evals answered [] where the definitions are, "defn (a|b)")
+     (or (when (and (empty? rows) (string? pattern) (re-find #"[|^$()\[\]*+?\\]" pattern))
+           (contract/error :my.agent/regex-text (symbol #'grep)
+                           (str "no line holds " (pr-str pattern) " as written: a string is matched as its text, and a regex is written #\"...\", "
+                                "as (my.agent/grep #" (pr-str pattern) (when (or in ns) (str " " (pr-str (cond-> {} in (assoc :in in) ns (assoc :ns ns))))) ")")
+                           {:pattern pattern}))
+         rows))))
 
 (defn ls
   "Like ls: what x holds, one row each. A namespace ('seon.task): each definition, privates included, in file

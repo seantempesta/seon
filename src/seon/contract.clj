@@ -154,7 +154,8 @@
         (str " at " (pr-str in) ": "
              (case type
                :malli.core/missing-key "a key it must hold is missing"
-               :malli.core/extra-key "a key its closed map does not admit"
+               :malli.core/extra-key (str "a key its closed map does not admit (it admits "
+                                          (str/join ", " (map first (m/entries schema))) ")")
                (str (print/text value (:part print/budgets)) ", expected " expected))
              ;; the value holding it, as the caller would have seen it had the check let it through
              (let [holder (if (seq in) (get-in v (vec (butlast in))) v)]
