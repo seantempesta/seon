@@ -358,13 +358,13 @@
   ;; task seon.agent/a-test-child-starts-as-a-test-runner-does: an agent's test child ran its tests with the agent's
   ;; interrupt pending (every eval "interrupted by root") and its live page's reactions (a cost test 15 calls over);
   ;; the child starts with no interrupt of its parent's, none of its evals, no page. Here the agent has drawn its page
-  ;; and holds a pending interrupt when it forks; the child's test writes what it finds
+  ;; and forks from inside its eval; the child's test writes what it finds (a pending interrupt cleared:
+  ;; seon.intr-test/a-forked-child-holds-no-interrupt-of-its-parents)
   (let [checkout (seon.config/checkout)
         f (str checkout "/target/runs/child-clean-" (random-uuid))
         proof (str "(ns clean-proof (:require [clojure.test :refer [deftest is]]))"
                    " (deftest p (spit " (pr-str f) " (pr-str [@@#'seon.intr/pending (count @@#'seon.intr/stack) (some? (:walk @seon.agent/state))])) (is true))")
-        form (str "(do " proof " (seon.repl/page-hiccup) (reset! @#'seon.intr/pending true)"
-                  " (let [r (seon.agent/run-tests-forked 1000000000 '#{clean-proof/p} :turn)] (reset! @#'seon.intr/pending false) r))")
+        form (str "(do " proof " (seon.repl/page-hiccup) (seon.agent/run-tests-forked 1000000000 '#{clean-proof/p} :turn))")
         [run] (in-agent [form] {:sets [":seon.config.proofs/child-min-ms=1"]})
         found (some-> (try (slurp f) (catch Throwable _ nil)) read-string)]
     (sh/sh "rm" "-f" f)
