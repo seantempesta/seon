@@ -171,9 +171,8 @@
   (:my.agent/no-var), never []. A keyword that is a schema, an attribute or a key the program
   names answers its callers ([] when none uses it: the true answer); any other answers
   :seon.schema/unknown-key with the nearest registered keys (my.schema/unknown-key: a typo is no
-  \"nothing calls it\", the md-scan bench). A namespace's name answers the namespaces that require
-  it (seon.source/required-by; bench-scope-4's design, asking whether a proof's namespace would close
-  a require cycle, resolved an alias as a var four times)."
+  \"nothing calls it\"). A namespace's name answers the namespaces that require
+  it (seon.source/required-by; an alias resolves as the var it names, so a question of whether a new require would close a cycle gets the namespace's answer)."
   {:malli/schema [:=> [:cat [:or :symbol :seon.host/var :qualified-keyword]] [:or [:vector :symbol] :my.agent/no-var :seon.schema/unknown-key]]}
   [x]
   (let [db (agent/db) x (cond (keyword? x) x (var? x) (named x) (ns-named? db x) x :else (asked x))
@@ -290,7 +289,7 @@
   calls). Answers that test run ({:pass :fail :error :reports :ran :reused :ms ...}) with
   :results {test :pass|:fail|:error} and :proofs (each proof's status: the task's and the given ones,
   :deferred or :none when it has no result), and :unmatched, the given names that name no test (a var that
-  is none, a namespace with none: bench-scope-5's silent ran 0), printed as its verdict (prove-summary: the schema
+  is none, a namespace with none: a name that matches nothing must not run silently as 0), printed as its verdict (prove-summary: the schema
   :seon.test/proved): one line; the whole run is the value under the eval's handle, and what it found
   is the run's part of the page. Its results are kept at each test's reach digest (the test service
   records them), so (my.task/status) and the judge read a proof's status at its digest whichever call
@@ -472,8 +471,7 @@
 (defn- help-nearest
   "What a help address that is no section may have meant: the help page's sections and the pages
   whose address holds a word of it (four letters or more), the sections whose text the search finds
-  for it (`search`: \"schema\" named no address, though the help page says how a schema changes;
-  md-scan #6), then the nearest by Jolt's did-you-mean ranking (as no-var): a few
+  for it (`search`: \"schema\" named no address, though the help page says how a schema changes), then the nearest by Jolt's did-you-mean ranking (as no-var): a few
   addresses, never the page ((my.agent/help) lists it). See docs/references.md#a-section-read-at-a-depth-with-its-edges."
   {:malli/schema [:=> [:cat :seon.host/db :string] [:vector :string]]}
   [db address]

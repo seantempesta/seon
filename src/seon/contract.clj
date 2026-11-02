@@ -66,7 +66,7 @@
             ;; what a C function declared :void answers (Chez's void object, not nil)
             (pred :seon.host/void (constantly true))
             ;; a character, as malli's type keys name a value's type (:int, :string): malli names it only as the
-            ;; predicate char?, and agents write :char (bench-delims-1's [:cat :char] was an invalid schema)
+            ;; predicate char?, and agents write :char
             [:char (m/-simple-schema {:type :char :pred char?})]]))
 
 ;; ---- the registry ------------------------------------------------------------------
@@ -142,11 +142,8 @@
   "The first reason v does not satisfy s, in one line for an error's message: where (its :in path),
   what it got, and what was expected (its schema's form), each printed at the printer's :part budget, malli's kind for a
   missing or refused key; then the map or vector that holds it (the value at its path's parent: what a
-  REPL would print, which the failed check keeps from its caller); and how many reasons more. md-scan
-  #14: \"its value does not satisfy its contract\" sent an agent digging through ex-data for twelve
-  evals to find one nil key; #18's scan output was refused at [:seon.ref/blocks 0 :seon.ref/text-from],
-  and the agent spent ten evals, one looking for an unchecked scan, to see that its block never got the key.
-  See docs/errors.md#errors."
+  REPL would print, which the failed check keeps from its caller); and how many reasons more (\"its value does not satisfy its contract\"
+  alone sends an agent digging through ex-data for the one nil key). See docs/errors.md#errors."
   {:malli/schema [:=> [:cat :seon.host/schema :any] :string]}
   [s v]
   (let [[{:keys [in schema value type]} :as es] (:errors (m/explain s v))]

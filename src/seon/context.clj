@@ -49,7 +49,7 @@
 (defn failures
   "A test's failing assertions as the agent reads them (`failure`), those that got the same value
   with the same message one entry, {:asserts [assertion ...] :got v}, in first-failure order: nine
-  assertions that each threw one NullPointerException are one cause, read once (the md-scan bench). See docs/render.md#a-part-answers-data."
+  assertions that each threw one NullPointerException are one cause, read once. See docs/render.md#a-part-answers-data."
   {:malli/schema [:=> [:cat [:sequential :map]] [:vector :map]]}
   [fs]
   (let [ms (mapv failure fs)
@@ -62,10 +62,9 @@
 (defn callees
   "The program functions proof p calls directly (one level: its recorded form's :form/refs,
   the compiler's resolved references), each by its name, and for a helper of p's own namespace
-  its source too (what the proof means: the md-scan bench's agent read its proofs' block-of
-  first); a var is program when db holds it (a branch's callee this process never loaded
+  its source too (what the proof means, which an agent reads first); a var is program when db holds it (a branch's callee this process never loaded
   included). A callee's doc and contract are its source's or `doc`'s to show: a docstring
-  each was about 2.4k of the first request's 6.6k tokens on the md-scan bench (task
+  each was a large share of the first request (task
   seon.context/an-agent-follows-its-instructions-to-green). See docs/agent.md#what-you-read."
   {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:vector :map]]}
   [db p]
@@ -78,8 +77,7 @@
 (defn- refused
   "The done rule's reasons as the agent reads them, beyond its own red proofs (shown with
   the proofs): a red test names its failures and, as a red proof does, its source and the program
-  functions it calls (calls-of, `callees`: bench-b11 ended on 11 stray reds it could not trace
-  from their failures alone), a stray one the form that makes it a proof, a contract gap its var, a design step that
+  functions it calls (calls-of, `callees`: a stray red cannot be traced from its failures alone), a stray one the form that makes it a proof, a contract gap its var, a design step that
   has not improved its plan the call that does, an open problem its work made true what it
   is (seon.problems/caused). src-of answers the source the branch defines for a test, or nil: a stray red it
   does not define is one of main's tests the branch removed, which judges all the same (seon.agent/
@@ -538,8 +536,7 @@
   what its task and its needs cite (a var's namespace, or a namespace cited itself) and of their proofs,
   once each, each {:names [...] :ns-form form}: its names the task cites or its proofs call (their forms'
   :form/refs, as :proved holds them), and the form that reads its ns form (its requires and aliases) and a line
-  per definition, ``(clojure.repl/source ns)`` (md-scan bench-b14's agent spent six turns finding seon.ref's
-  requires: the form it had, my.agent/help, did not say it holds them). It costs what it
+  per definition, ``(clojure.repl/source ns)`` (the form that shows a namespace's requires; my.agent/help does not hold them). It costs what it
   shows, never the namespace's size. See docs/render.md#a-part-answers-data."
   {:malli/schema [:=> [:cat :map] [:map-of :symbol :map]]}
   [c]
@@ -555,7 +552,7 @@
     ;; a map by name, in the order first named (a part answers a map: a vector is hiccup)
     (apply array-map (mapcat (fn [n] [n (cond-> {}
                                            (seq (names n)) (assoc :names (vec (sort (distinct (map (comp symbol name) (names n))))))
-                                           ;; named for what an agent asks for (md-scan bench-b17 spent 16 turns finding "the ns form" beside :source)
+                                           ;; named for what an agent asks for (the ns form is asked for beside :source)
                                            true (assoc :ns-form (list 'clojure.repl/source n)))])
                              (distinct (map ns-of (concat named proofs)))))))
 
@@ -848,7 +845,7 @@
   seon.render/model-printed, else the part itself): when both are maps, {:changed {k new-value} :gone [k]} of
   their top-level keys, the keys that kept their value left out; else nil, and the part is sent whole. The
   owner's ruling (docs/decisions.md): a changed part that answers data sends what changed of it, never itself
-  again (md-scan #28: the status, 3-5k tokens, sent whole eleven times). Top-level keys, each value whole, by
+  again (the status, thousands of tokens, would otherwise be sent whole each turn). Top-level keys, each value whole, by
   intent: clojure.data/diff answers a vector by position, padded with nils a model reads as values (one
   proof's verdict would come as [nil nil {...}]); a changed key's value whole reads as the part does. See
   docs/render.md#the-page-is-sent-as-what-changed."

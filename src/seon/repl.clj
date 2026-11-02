@@ -247,8 +247,8 @@
   (let [tm (Throwable->map e)
         d (merge (clojure.main/ex-triage (assoc tm :clojure.error/phase :execution)) (ex-data e))
         compile? (:jolt.error/line d)
-        ;; a frame inside an anonymous fn is named ns/var$fn: the error is in that var (md-scan bench-b18: a cast
-        ;; in list-items' map-indexed fn named no fn, its frame ns/list-items$fn and its line -1)
+        ;; a frame inside an anonymous fn is named ns/var$fn: the error is in that var (a cast
+        ;; in a map-indexed fn would otherwise name no fn: its frame ns/var$fn, its line -1)
         ;; a contract's wrapper (malli's instrumented fn, seon.contract's) is never where an error is: whether its
         ;; frame tops the trace depends on what is armed, so an error at a request's top was located in malli.core
         ;; after some tests and in nothing after others
@@ -269,9 +269,8 @@
 (defn- clojure-message
   "Error map em's message as Clojure's REPL says it (clojure.main/ex-str): for an error in reading,
   macroexpanding or compiling, the phase, the symbol and the position before the cause, \"Syntax error
-  macroexpanding clojure.core/cond at (6:3). index out of bounds\"; else its message as it is. md-scan
-  #11: Jolt's cond failed on an odd number of forms, the message said only \"index out of
-  bounds\", and the agent bisected its runtime code for 40 evals. See docs/errors.md#an-eval-errors-diagnostics."
+  macroexpanding clojure.core/cond at (6:3). index out of bounds\"; else its message as it is: Jolt's cond failed on an odd
+  number of forms with only \"index out of bounds\", which names no form. See docs/errors.md#an-eval-errors-diagnostics."
   {:malli/schema [:=> [:cat :map] [:maybe :string]]}
   [{:clojure.error/keys [phase line column] sym :clojure.error/symbol msg :seon.error/message}]
   (let [what (case phase
@@ -288,9 +287,8 @@
   Jolt's position): the forms the macro call was given, each printed whole by the one printer (marked
   :seon.print/full: a cut would drop the tail a swallowed form sits in, and an agent's own error is never
   cut), as the reader read them, {:seon.error/given [..]}; else nil. A count or a grouping is what such an error is
-  about, and the reader's grouping is what the writer cannot see: md-scan #22 read \"cond requires an
-  even number of forms\" and bisected its clauses for twenty evals, its and one paren short (it counted
-  the literal \\) as a closer), the clause's value swallowed into the and. See
+  about, and the reader's grouping is what the writer cannot see: a clause short of a paren swallows
+  the next form into it, and \"cond requires an even number of forms\" does not say where. See
   docs/errors.md#an-eval-errors-diagnostics."
   {:malli/schema [:=> [:cat :map :map] [:maybe [:map [:seon.error/given [:vector :string]]]]]}
   [em m]
@@ -365,8 +363,8 @@
   (ns-unmap 'n 's) it calls (its namespace quoted, or *ns*, read in ns, where the form ran), whose var
   db records with a definition and n no longer interns, {var its-entity form-entity}. What the eval
   records as removed: Clojure's ns-unmap, observed, as v1's REPL recorded it (my.program/unmap-subject!;
-  docs/source.md#an-agent-changes-code-at-its-repl). md-scan #19 unmapped a scratch helper, and its
-  branch kept it as program, uncontracted, which the done rule refused at the cap."
+  docs/source.md#an-agent-changes-code-at-its-repl). An unmapped scratch helper is no longer program, so
+  the done rule does not see it as an uncontracted one."
   {:malli/schema [:=> [:cat :seon.host/db :any :seon.host/namespace] [:vector [:tuple :qualified-symbol :int :int]]]}
   [db form ns]
   (let [quoted (fn [x] (when (and (seq? x) (= 'quote (first x)) (symbol? (second x))) (second x)))]
@@ -588,7 +586,7 @@
       (some :unmapped fs) (assoc :unmapped (into [] (mapcat :unmapped) fs))
       (seq warnings) (assoc :warnings warnings)
       ;; what it printed, verbatim, as a REPL shows *out* (seon.print/code: never a string literal, whose escapes
-      ;; md-scan #20 copied back as code, every \\( doubled, its case constants broken)
+      ;; copied back as code double every \\( and break case constants)
       (joined :out) (assoc :out (print/code (joined :out)))
       (joined :err-out) (assoc :err (print/code (joined :err-out)))
       (= :err (:tag lst)) (assoc :ex (or (:err lst) {:seon.error/message (str (:err-text lst))}))
@@ -673,9 +671,8 @@
 (defn- again
   "Response r of code, with :again when an earlier eval of this agent ran the same code and answered the same
   (its value, error, output and forms): which eval, and that it answered the same (equal answers do not show
-  what it reads is unchanged, so it says no more). The md-scan
-  and fence benches' agents ran one read again and again (bench-fence-1: two evals, 25 turns each), each answer
-  reading as new. Kept in the agent's state as a hash of the code to the eval and a hash of its answer, so it
+  what it reads is unchanged, so it says no more). An agent that runs one read again and again
+  reads each answer as new. Kept in the agent's state as a hash of the code to the eval and a hash of its answer, so it
   costs one lookup an eval. An agent's own evals only (root's and an inner eval's are not
   counted)."
   {:malli/schema [:=> [:cat :string :map] :map]}
@@ -683,8 +680,8 @@
   (if (and (= :agent (:mode @agent/state)) (:handle r))
     (let [k (hash (clojure.string/trim code))
           ;; its answer without what differs every eval, at the one place it nests: an edit!'s value is its inner eval's
-          ;; response, whose handle and cost differ each time (bench-b21's agent swapped one line of scan back and forth
-          ;; 23 times). Nothing else is walked: the agent's own data keeps its keys, and a value holding a db or a host
+          ;; response, whose handle and cost differ each time (an agent swapping one line back and forth
+          ;; repeats it). Nothing else is walked: the agent's own data keeps its keys, and a value holding a db or a host
           ;; object is hashed as it is, never rebuilt
           v (:value r)
           v (if (and (map? v) (not (record? v)) (contains? v :handle)) (dissoc v :handle :ms :ticks :bytes :fns :record) v)
@@ -758,8 +755,7 @@
   line (it may start mid-line), its middle lines are whole lines, its last begins its line.
   {:line :old :source}, the first that does not, with :indent [old's source's] leading spaces when they
   differ only by those; nil when every line holds. What an edit's :not-found names, so the writer
-  sees the one line and how it differs, never the whole source again (md-scan #23 printed its lines
-  with visible whitespace for ten evals). See docs/agent.md#changing-a-definition."
+  sees the one line and how it differs, never the whole source again. See docs/agent.md#changing-a-definition."
   {:malli/schema [:=> [:cat [:vector :string] pos-int? [:vector :string]] [:maybe :map]]}
   [src-lines c old-lines]
   (let [n (count old-lines)
@@ -778,7 +774,7 @@
 
 (defn- unpaired-by-line
   "The delimiters new text leaves unpaired that its old text does not, each said by its line in new and that
-  line's text (md-scan bench-b15: a refused edit said how many, never where), as one string. d-old and d-new
+  line's text (an edit refused with how many delimiters but not where leaves the agent counting), as one string. d-old and d-new
   are their `seon.reader/delimiters`. A delimiter of new is old's when it stands where old has the same one:
   before their common prefix ends, or after their common suffix starts (an edit's fragment is often
   unbalanced itself: an old (foo [a keeps its open ( and [). See docs/agent.md#changing-a-definition."
@@ -809,12 +805,12 @@
   armed, as a typed defn would be. Given changes, a vector of [old new] pairs, every pair is checked
   so and all are applied together, then evaluated once: a change that must reach several places at
   once (a loop's bindings and each of its recurs) is one edit, since any of them alone does not
-  compile (md-scan bench-b13 lost 33 turns to such edits made one by one). It is read exactly as
+  compile. It is read exactly as
   written, never repaired: a repair of a whole definition is made far from the edit and reads as
-  another error there (md-scan #17). Answers that eval's response with :edited, the var and the lines
+  another error there. Answers that eval's response with :edited, the var and the lines
   around each change; throws the evaluation's error when the new definition does not compile or load,
-  its message saying nothing changed, so the eval it is called in answers it as its own :ex (bench-b13's
-  agent read an edit's error nested in its value, cut from sight, as a change that held; a caller
+  its message saying nothing changed, so the eval it is called in answers it as its own :ex (an error nested in an edit's value
+  could be cut from sight and read as a change that held; a caller
   outside an eval catches it, its ex-data the error map); or
   :seon.repl/edit-refused, nothing changed: no recorded source, an old not in it (with the lines that
   hold its first line, ignoring indentation), an old there more than once (each candidate's line), a
@@ -872,7 +868,7 @@
                                                           " than the old text (strings, character literals and comments aside)"
                                                           (when (seq there) (str "; in the new text: " there))
                                                           ;; the closers each text ends with, side by side: a run of ) is miscounted
-                                                          ;; where it is read (md-scan bench-b16 wrote seven for six, three times)
+                                                          ;; where it is read (a count of closers is what a miscounted edit gets wrong)
                                                           (let [run (fn [t] (re-find #"[\)\]\}]+$" (clojure.string/trimr t)))
                                                                 [ro rn] [(run old) (run new)]]
                                                             (when (and (or ro rn) (not= ro rn))
@@ -910,7 +906,7 @@
                (throw (ex-info (str (:seon.error/message ex))
                                (update ex :seon.error/message
                                        #(str sym ": the edited definition does not compile or load, so nothing changed: " %
-                                             ;; the line it names, in the definition as the edit made it (bench-b15's agent bisected instead)
+                                             ;; the line it names, in the definition as the edit made it
                                              (when-let [l (:clojure.error/line ex)]
                                                (str "; at line " l (some->> (:clojure.error/column ex) (str ", column ")) " of the new definition: "
                                                     (pr-str (clojure.string/trim (nth (clojure.string/split-lines text) (dec l) "")))))))))
@@ -1038,8 +1034,8 @@
   "The agent's :tests proc: root's :tests requests, one at a time, each run on this proc's fiber
   (seon.agent/handle!'s :tests: the plan, the forked children read to their end, the results
   recorded on the branch) and answered, whatever the :repl proc is running: a prove! waits for
-  root's answer while this proc serves root's request for the run (md-scan #21), and the run's
-  work is this fiber's, never charged to the eval that waits (md-scan #26). See
+  root's answer while this proc serves root's request for the run, and the run's
+  work is this fiber's, never charged to the eval that waits. See
   docs/processes.md#the-agent-process."
   {:malli/schema :seon.step/step-fn}
   ([] {:ins {:in "root's :tests requests"} :outs {} :workload :io :ping-map-fn (fn [_] {})})

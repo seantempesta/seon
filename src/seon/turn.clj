@@ -98,7 +98,7 @@
   whichever way the turn ended): {:model-calls n :tokens t}, n the calls recorded (a turn that threw
   before its call made none), t their :seon.model-call/tokens summed, absent when no call reported its
   usage (unknown, never 0). A count carried through the turn loop lost every turn that threw after its
-  call answered (a bench run wrote 111k of its calls' 3.54M), and the turns stood for the calls."
+  call answered, and the turns stood for the calls."
   {:malli/schema [:=> [:cat :seon.host/db :seon.run/id] [:map [:model-calls nat-int?] [:tokens {:optional true} :int]]]}
   [db run]
   (let [calls (keep #(d/entity db [:seon.model-call/id %])
@@ -180,7 +180,7 @@
   call that turn, the message in its request; a throw counts the turn, and work! ends the agent's
   work :error on the second throw in a row with no model turn between (its request cannot be drawn,
   so no model turn could read the message). Answers st after it, :error its error map. The turn loop's entrant boundary (docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map):
-  Seon's code meets the agent's program each turn (md-scan #7's redefined scan ended its run at turn 8)."
+  Seon's code meets the agent's program each turn (a redefined scan of the agent's must not end its run)."
   {:malli/schema [:=> [:cat :map :seon.error/base] :map]}
   [st em]
   (tell-error! em "your turn threw: Seon's code ran with the program on your branch as it stands now (Seon's own code and what you changed of it), so the cause may be either")
@@ -258,8 +258,7 @@
 
 (defn repeated
   "The ids of a turn's evals when every one it ran repeated code it had run before with the same answer (each
-  response's :again, seon.repl/again), else nil: a turn that can tell the agent nothing new (bench-scope-1 and -2's
-  design agents sent the same evals 34 turns running, each told :again, to the turn cap). See docs/agent.md#small-answers."
+  response's :again, seon.repl/again), else nil: a turn that can tell the agent nothing new (told :again, an agent that sends the same evals turn after turn runs to the turn cap). See docs/agent.md#small-answers."
   {:malli/schema [:=> [:cat [:sequential :map]] [:maybe [:vector :string]]]}
   [calls]
   (let [ran (remove :not-run calls)]
@@ -480,11 +479,11 @@
                :max-turns max-turns :merge? merge?}]
       ;; each turn under the branch's schemas as they are now (repl/with-branch-schemas): work! is one eval,
       ;; bound when it began, and a schema the agent registers since must be the one Seon's code checks its
-      ;; values against (md-scan #7: its new list blocks met the old :seon.ref/block in seon.ref/sections and
-      ;; ended the loop); a turn answers its end, or [::next st] to go on
+      ;; values against (a block registered since would otherwise meet the old :seon.ref/block in seon.ref/sections and
+      ;; end the loop); a turn answers its end, or [::next st] to go on
       ;; the turn answers what comes next, [::next st] or [::end st outcome reason error]: its draw, its model call
       ;; and its evals are inside the boundary, since every one runs Seon's code with the program on the
-      ;; agent's branch, Seon's own code included, which the agent may change (md-scan #7, and #16: a registered
+      ;; agent's branch, Seon's own code included, which the agent may change (a registered
       ;; :seon.ref/block re-armed seon.ref/scan's contract, which the request's own scan then broke); a throw is
       ;; the agent's to read, as data, and the loop goes on (turn-error!), root's interrupt passing as a stop.
       ;; end! is outside it, run once on the turn's answer, so a failing end is never taken for a turn
@@ -505,8 +504,8 @@
                              ;; its proofs pass: the tests its change reaches run now, judged as the judge judges them
                              ;; (agent/prove! :judge, their results facts on the branch), and the status is read again
                              ;; from the branch, before it is done or merges (the owner's ruling: a turn runs the
-                             ;; proofs, the reach runs once they are green). md-scan #24 ended green on its proofs
-                             ;; and the judge found 18 reds its change made
+                             ;; proofs, the reach runs once they are green). a run that ended green on its proofs
+                             ;; alone left the judge to find the reds its change made
                              s (if (and (not (contract/error? s)) (empty? (:reasons s)))
                                  (do (test-error! (agent/prove! :judge))
                                      ;; the walk drawn again, to the branch the judge's verdicts were written on
@@ -516,7 +515,7 @@
                              reasons (:reasons s)
                              stop (get-in @agent/state [:turn :stop])
                              ;; what the task references, as facts (its proofs, its plan's cites): never its plan re-parsed
-                             ;; here, by a seon.ref/scan the agent may have broken (md-scan's broken scan ended two runs :error)
+                             ;; here, by a seon.ref/scan the agent may have broken (a broken scan would end the run :error)
                              hairy (when (and merge? (not (contract/error? s)))
                                      (r/hairy (merge merge-cfg {:conflicts (vec (:unmerged s)) :merge-turns (:merge-turns st)
                                                                 :refs (into (set (:proofs (:seon.task/accumulated (:task obs))))
@@ -534,8 +533,8 @@
                            (= :failed (:outcome stop)) (ended st :failed (:reason stop) nil)
                            hairy (ended st :merge-failed (:reason hairy) nil)
                            ;; the one check of the cap, before any model call: every turn reaches it, one with no
-                           ;; status and one after a turn that threw included (md-scan #27: the agent's change broke
-                           ;; the status and its run made 156 model calls past a cap of 40)
+                           ;; status and one after a turn that threw included (a change that broke
+                           ;; the status would otherwise let the run make model calls past the cap)
                            (>= (:turn st) max-turns) (if no-status?
                                                        (ended st :cap (str "no status at the cap: " (:seon.error/message s)) s)
                                                        (ended st :cap (r/explain-text reasons) nil))

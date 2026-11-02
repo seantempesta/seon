@@ -282,7 +282,7 @@
   comments aside): :open, each opener no closer closed, [char offset], outermost first; :stray, each closer
   with no opener open, [char offset]; :crossed, each closer of another kind than the opener it meets,
   [closer offset opener opener-offset]. What a refused or failed edit names by line, so a slip is found where it
-  is (md-scan bench-b15's agent counted parens for 30 turns: a refused edit said how many, never where).
+  is (an edit refused with how many but not where leaves the agent counting parens).
   See docs/agent.md#changing-a-definition."
   {:malli/schema [:=> [:cat :string] [:map [:open [:vector [:tuple char? nat-int?]]] [:stray [:vector [:tuple char? nat-int?]]]
                                        [:crossed [:vector [:tuple char? nat-int? char? nat-int?]]]]]}
