@@ -249,6 +249,9 @@
  :seon.task/instructions [:string]
  :seon.task/proofs [:set :qualified-symbol]
  :seon.task/needs [:set :seon.db/ref]
+ ;; the example sessions its agent reads before its own (seon.context/request): agents keyed "example/<id>"
+ ;; (seon.context/session-tx), drawn by the renders that draw its own session
+ :seon.task/examples [:set :seon.db/ref]
  :seon.task/branch :keyword
  :seon.task/model :string
  :seon.task/execution [:and {:seon.db/index true} [:enum :held :running :cancelled]]
@@ -281,11 +284,12 @@
  ;; the declaration a task file last stated for this task (seon.task/load-tx), as EDN
  :seon.task/declared :string
  ;; config keys are attributes of the task, by their own names (schemas: seon.config.agent.edn, seon.config.merge.edn)
- :seon.task/task-fact [:map {:seon.db/attributes true :seon.ctx/pattern [* {[:seon.task/proofs :by :var/name :as :proved] :seon.db/var-fact} {[:seon.task/needs :as :needs] [* {[:seon.task/proofs :by :var/name :as :proved] :seon.db/var-fact} {[:seon.cite/_of :as :cites] :seon.cite/cite-fact}]} {[:seon.cite/_of :as :cites] :seon.cite/cite-fact} {[:seon.search/_of :as :searches] :seon.search/search-fact}] :seon.render/html seon.render.ui/task :seon.render/model seon.render.ui/task-model}
+ :seon.task/task-fact [:map {:seon.db/attributes true :seon.ctx/pattern [* {[:seon.task/proofs :by :var/name :as :proved] :seon.db/var-fact} {[:seon.task/needs :as :needs] [* {[:seon.task/proofs :by :var/name :as :proved] :seon.db/var-fact} {[:seon.cite/_of :as :cites] :seon.cite/cite-fact}]} {[:seon.cite/_of :as :cites] :seon.cite/cite-fact} {[:seon.search/_of :as :searches] :seon.search/search-fact} {[:seon.task/examples :as :examples] [:seon.agent/key :seon.agent/description {[:seon.eval/_agent :as :evals] [*]}]}] :seon.render/html seon.render.ui/task :seon.render/model seon.render.ui/task-model}
                           [:seon.task/id :seon.task/id] [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name]
                           [:seon.task/plan :seon.task/plan] [:seon.task/execution :seon.task/execution]
                           [:seon.task/branch :seon.task/branch] [:seon.task/kind :seon.task/kind]
                           [:seon.task/proofs {:optional true} :seon.task/proofs] [:seon.task/needs {:optional true} :seon.task/needs]
+                          [:seon.task/examples {:optional true} :seon.task/examples]
                           [:seon.task/instructions {:optional true} :seon.task/instructions]
                           [:seon.task/model {:optional true} :seon.task/model]
                           [:seon.task/evidence {:optional true} :seon.task/evidence]
@@ -621,7 +625,9 @@
  ;; what a model turn's request sent, the records it rendered in order (seon.context/request, parts-of):
  ;; the system prompt's section and the task, each as of a t; an eval or message by id, an eval with the fold it was
  ;; sent with (its value or output an earlier record showed: the handle there); a turn's prose reply with no call by its id
- :seon.model-call/sent [:vector [:or [:tuple [:enum :section :task] :int :int] [:tuple [:enum :eval :message :turn] :string] [:tuple [:= :eval] :string [:map-of :keyword :symbol]]
+ :seon.model-call/sent [:vector [:or [:tuple [:enum :section :task] :int :int] [:tuple [:enum :eval :message :turn :session] :string]
+                                      ;; an example session a request sent whole (seon.context/example-messages), as of its newest record's t
+                                      [:tuple [:= :example] :string :int] [:tuple [:= :eval] :string [:map-of :keyword :symbol]]
                                       ;; the page's parts a request sent: the agent, the commit they are drawn at on replay, whole?, their ids, the model call that sent them
                                       [:tuple [:= :parts] :int :uuid :boolean [:vector :string] :string]
                                       ;; the content hash of every part the model has after the request: what the next compares

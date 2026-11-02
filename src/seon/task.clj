@@ -665,7 +665,7 @@
 (def ^:private stated-attributes
   "The task attributes a declaration states (its members, config flattened), as stored."
   [:seon.task/plan :seon.task/instructions :seon.task/proofs :seon.task/branch :seon.task/model
-   :seon.task/kind :seon.task/evidence
+   :seon.task/kind :seon.task/evidence :seon.task/examples
    :seon.config.agent/max-turns :seon.config.merge/max-conflicts :seon.config.merge/max-merge-turns])
 
 (defn- file-refused
