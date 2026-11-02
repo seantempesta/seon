@@ -541,8 +541,8 @@
  ;; in its process: said, never answered as no callers or silence; :nearest the nearest existing
  ;; names (my.agent/no-var); :ask the form for the registry key of that name, when there is one
  :my.agent/no-var [:and :seon.error/base [:map [:seon.error/type [:= :my.agent/no-var]] [:name :symbol] [:nearest [:vector :symbol]] [:ask {:optional true} :string]]]
- ;; my.agent/grep of a string holding a regex's operators that matched nothing as written: the message names its regex form
- :my.agent/regex-text [:and :seon.error/base [:map [:seon.error/type [:= :my.agent/regex-text]] [:pattern :string]]]
+ ;; my.agent/grep of a string holding a regex's operators that matched nothing as written: :ask its regex form
+ :my.agent/regex-text [:and :seon.error/base [:map [:seon.error/type [:= :my.agent/regex-text]] [:pattern :string] [:ask :string]]]
  ;; my.task/update! of a member to a value its schema does not admit (seon.task/member-tx): nothing written
  :seon.task/invalid-member [:and :seon.error/base [:map [:seon.error/type [:= :seon.task/invalid-member]] [:member :keyword]
                                                         ;; what the update would have made it, printed by the error's render (the one printer)

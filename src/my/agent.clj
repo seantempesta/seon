@@ -351,7 +351,7 @@
   nothing answers :my.agent/regex-text, naming its regex form. opts, and no others: :in, a set of kinds (:var :test
   :section :task :schema), :ns, a name and what is under it (\"seon.ref\": seon.ref/x and seon.ref.y/z, not seon.ref-test). The answer is data, and whole: narrow it as you
   would a list, (take 10 (grep \"x\")), (filter #(= :test (:kind %)) ...), (count ...), and read a hit's lines
-  with (lines \"seon.task/accumulate\" 1 20). (search s) ranks by meaning, words and references; grep finds text."
+  with (lines \"seon.task/accumulate\" 1 20). (search s) ranks by meaning, words and references; grep finds text. See docs/vector.md#search."
   {:malli/schema [:function [:=> [:cat [:or :string :seon.host/regex]] [:or [:vector :map] :my.agent/regex-text]]
                   ;; closed: an option grep does not take is refused, never ignored (a live session, 2026-11-02, passed
                   ;; search's :kinds and :k six times and read every kind's hits as the ones it asked for)
@@ -363,10 +363,11 @@
      ;; a string is its text as written: one holding a regex's operators that matches nothing says so, naming
      ;; its regex form (the same session's 8 evals answered [] where the definitions are, "defn (a|b)")
      (or (when (and (empty? rows) (string? pattern) (re-find #"[|^$()\[\]*+?\\]" pattern))
-           (contract/error :my.agent/regex-text (symbol #'grep)
-                           (str "no line holds " (pr-str pattern) " as written: a string is matched as its text, and a regex is written #\"...\", "
-                                "as (my.agent/grep #" (pr-str pattern) (when (or in ns) (str " " (pr-str (cond-> {} in (assoc :in in) ns (assoc :ns ns))))) ")")
-                           {:pattern pattern}))
+           ;; a regex literal holds the pattern's text as it is: the form is the string's characters between #" and "
+           (let [ask (str "(my.agent/grep #\"" pattern "\"" (when (or in ns) (str " " (print/text (cond-> {} in (assoc :in in) ns (assoc :ns ns)) (:part print/budgets)))) ")")]
+             (contract/error :my.agent/regex-text (symbol #'grep)
+                             (str "no line holds the string as written: a string is matched as its text, and a regex is written #\"...\", as " ask)
+                             {:pattern pattern :ask ask})))
          rows))))
 
 (defn ls

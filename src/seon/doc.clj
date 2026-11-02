@@ -614,12 +614,14 @@
 
 (defn- named-under?
   "Whether the name n is under the prefix ns: n is ns, or goes on past it with a separator (/ . #), so
-  \"seon.print\" holds seon.print/text and seon.print.emit/x but not seon.print-test/x (a live session, 2026-11-02,
-  asked for seon.print and read its tests' hits as its own)."
+  \"seon.print\" holds seon.print/text and seon.print.emit/x but not seon.print-test/x; a schema key's name is read
+  without its colon. See docs/vector.md#search."
   {:malli/schema [:=> [:cat :string :string] :boolean]}
   [n ns]
-  (and (str/starts-with? n ns)
-       (or (= (count n) (count ns)) (contains? #{\/ \. \#} (nth n (count ns))))))
+  ;; a live session (cc7e6ac413, 2026-11-02) asked for seon.print and read seon.print-test's hits as its own
+  (let [n (str/replace-first n #"^:" "")]
+    (and (str/starts-with? n ns)
+         (or (= (count n) (count ns)) (contains? #{\/ \. \#} (nth n (count ns)))))))
 
 (defn grep
   "Every line of the texts of kinds on db that pattern matches, as grep answers them, one row each
