@@ -1511,7 +1511,7 @@
                                (mapv (fn [[_ v kind]] (case kind :seon.db/eval-fact (context/eval-messages v {}) :seon.message/fact (context/message-messages v {}) :seon.turn/fact (context/turn-messages v {})))
                                      (context/records db a))))]
         (is (= tx (clojure.edn/read-string (pr-str tx))) "plain data: written with pr-str, read back")
-        (is (= {:seon.agent/key "example/abc" :seon.agent/description "Make h."} (ffirst tx)))
+        (is (= {:seon.agent/key "example/abc" :seon.agent/id :example-abc :seon.agent/status :ended :seon.agent/description "Make h."} (ffirst tx)))
         (is (= 4 (count tx)) "the agent, then a transaction for each of three records")
         (ts/test-branch!
           (fn [_ fresh]

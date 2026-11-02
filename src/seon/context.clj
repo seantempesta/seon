@@ -855,8 +855,9 @@
 (defn session-tx
   "Agent key's session on db as example id: the transactions that recreate it as an example, a vector of
   tx-data in the records' own transaction order (one per transaction, so `records` reads them in the
-  order they ran). The first writes the example agent (key \"example/<id>\", its description the
-  request: its task's plan, else its own description); each other the records of one original
+  order they ran). The first writes the example agent, an ended agent like any (key \"example/<id>\", id :example-<id>, its
+  description the request: its task's plan, else its own description); the model's evals are kept, an eval the
+  harness made in the agent is not; each other the records of one original
   transaction, their ids and the agent ref re-keyed under the example's key and each call id prefixed
   with it, so none meets a live agent's. Pure data: written with pr-str, read back, `my.root/load-example!`
   transacts it."
@@ -870,8 +871,9 @@
                 (-> (apply dissoc m (filter #(= "db" (namespace %)) (keys m)))
                     (update id-k #(str ek "/" %)) (assoc agent-k [:seon.agent/key ek])
                     (cond-> (get-in m [:seon.eval/record :call-id]) (update-in [:seon.eval/record :call-id] #(str pre %)))))
-        by-tx (group-by first (records db a))]
-    (into [[{:seon.agent/key ek :seon.agent/description request}]]
+        ;; the model's own evals (a call id) and its messages and replies: not an eval the harness made in the agent
+        by-tx (group-by first (remove (fn [[_ v k]] (and (= :seon.db/eval-fact k) (not (get-in v [:seon.eval/record :call-id])))) (records db a)))]
+    (into [[{:seon.agent/key ek :seon.agent/id (keyword (str "example-" id)) :seon.agent/status :ended :seon.agent/description request}]]
           (for [tx (sort (keys by-tx))]
             (vec (for [[_ v k] (by-tx tx)]
                    (case k

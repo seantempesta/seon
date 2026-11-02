@@ -42,12 +42,19 @@
 (defn load-example!
   "Transact the example session in the EDN file at path (seon.context/session-tx's answer, written with
   pr-str: a vector of tx-data) onto main, one transaction each in order, so its records keep the order
-  they ran in. A task names it by `[:seon.agent/key \"example/<id>\"]` in :seon.task/examples. Answers
-  the last writer's answer with :batches, how many it wrote."
+  they ran in. A task names it by `[:seon.agent/key \"example/<id>\"]` in :seon.task/examples. Its records
+  are put on a branch of its own as well (example-<id> under root's main), which the agent names, so its pages
+  open as any agent's. Answers the last writer's answer with :batches, how many it wrote, and :branch."
   {:malli/schema [:=> [:cat :seon.root/sys :string] :map]}
   [sys path]
-  (let [txs (edn/read-string (slurp path))]
-    (assoc (reduce (fn [_ tx] @(root/transact-main! sys tx)) nil txs) :batches (count txs))))
+  (let [txs (edn/read-string (slurp path))
+        k (:seon.agent/key (ffirst txs))
+        main (pdb/conn-main (:conn sys))
+        ;; its own branch, holding its records, so its pages open as any agent's (/agent/<branch>)
+        b (pdb/on-main main (keyword (str/replace k "/" "-")))
+        _ (reduce (fn [_ tx] @(root/transact-main! sys tx)) nil txs)]
+    (when-not (some #{b} (d/branches (:conn sys))) (d/branch! (:conn sys) main b))
+    (assoc @(root/transact-main! sys [{:seon.agent/key k :seon.agent/branch b}]) :batches (count txs) :branch b)))
 
 (defn run!
   "Release tasks ids: the one release (nothing autoruns). Each held task becomes running,
