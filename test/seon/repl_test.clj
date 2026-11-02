@@ -594,6 +594,18 @@
     (is (= :my.agent/no-var (:seon.error/type (:value ns-typo))) (str "a bare name that is no namespace says so, nearest namespaces named: " (pr-str ns-typo)))
     (is (= '[seon.task-test/no-such-test] (:value unmatched)) (str "a prove naming no test says which: " (pr-str unmatched)))))
 
+(deftest grep-refuses-what-it-does-not-take
+  ;; docs/vector.md#search: a live session (2026-11-02) passed search's :kinds to grep six times, and a string
+  ;; holding a regex's | ( ^ eight times, each answer read as what it asked for. grep's options are a closed
+  ;; map, and a string with a regex's operators that matches nothing names its regex form
+  (let [[kinds piped regex] (at/in-agent ["(try (my.agent/grep \"accumulate\" {:kinds #{:var}}) (catch Exception e (:seon.error/message (ex-data e))))"
+                                          "(my.agent/grep \"defn (accumulate|tasks)\" {:ns \"seon.task\"})"
+                                          "(count (my.agent/grep #\"defn (accumulate|tasks)\" {:ns \"seon.task\"}))"])]
+    (is (re-find #":kinds.*does not admit.*:in" (str (:value kinds))) (str "an option grep does not take is refused, the ones it takes named: " (pr-str kinds)))
+    (is (= :my.agent/regex-text (:seon.error/type (:value piped))) (pr-str piped))
+    (is (str/includes? (:seon.error/message (:value piped)) "(my.agent/grep #\"defn (accumulate|tasks)\" {:ns \"seon.task\"})") "it names the regex form, its options kept")
+    (is (pos? (:value regex)) "and that form finds them")))
+
 (deftest a-missing-name-says-the-nearest
   ;; the live rounds' repeats (the archived paper live-2026-10-25.md (git history); jolt/repeat-causes): agents re-sent a guessed
   ;; name after "Source not found ... If your plan names it as new, write it" and after a missing

@@ -259,7 +259,7 @@
   "The tx-data of the example session file at path (seon.context/session-tx's answer written with pr-str: a
   non-empty vector of transactions, the first writing the example agent keyed \"example/<id>\"), read as
   `task-files` reads a task file (seon.lib/dir-texts, so a file gone when read is a file not found), or the
-  :seon.root/example-refused error naming path: not found, not readable EDN, or not that vector. The one edge
+  :seon.root/example-refused error naming path: not found, not readable EDN, not that vector, or an agent with no id. The one edge
   of an example file (docs/failure-points.md); the read is of the directory's files named like path, the
   one by that name taken."
   {:malli/schema [:=> [:cat :string] [:or [:vector [:vector :map]] :seon.root/example-refused]]}
@@ -274,6 +274,10 @@
           (not (and (vector? x) (seq x) (every? #(and (vector? %) (seq %) (every? map? %)) x) (every? (fn [m] (some #(contains? m %) example-identities)) (mapcat identity x))
                     (string? (:seon.agent/key (ffirst x))) (str/starts-with? (:seon.agent/key (ffirst x)) "example/")))
           (refuse "not a non-empty vector of transactions whose first writes an agent keyed \"example/<id>\" (seon.context/session-tx)")
+          ;; its page is found by the agent's id (seon.render.proc/location): one written before session-tx gave it one
+          ;; loaded and could not be opened
+          (not (keyword? (:seon.agent/id (ffirst x))))
+          (refuse "its agent has no :seon.agent/id, so its page cannot be found: write it again with seon.context/session-tx")
           :else x)))
 
 (defn load-example!

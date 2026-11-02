@@ -612,6 +612,17 @@
   (let [number (zipmap index-attrs (range))]
     (into #{} (keep (fn [k] (some-> (text-attrs k) number))) kinds)))
 
+(defn- named-under?
+  "Whether the name n is under the prefix ns: n is ns, or goes on past it with a separator (/ . #), so
+  \"seon.print\" holds seon.print/text and seon.print.emit/x but not seon.print-test/x; a schema key's name is read
+  without its colon. See docs/vector.md#search."
+  {:malli/schema [:=> [:cat :string :string] :boolean]}
+  [n ns]
+  ;; a live session (cc7e6ac413, 2026-11-02) asked for seon.print and read seon.print-test's hits as its own
+  (let [n (str/replace-first n #"^:" "")]
+    (and (str/starts-with? n ns)
+         (or (= (count n) (count ns)) (contains? #{\/ \. \#} (nth n (count ns)))))))
+
 (defn grep
   "Every line of the texts of kinds on db that pattern matches, as grep answers them, one row each
   {:at \"name:line\" :kind :text}: :at the thing holding it (a var or test, a section's address, a task's
@@ -621,7 +632,7 @@
   matched as it is written, or a regex. A string of three characters or more narrows the texts
   read to those the index's trigram table holds it in (anywhere, inside a term or across a separator); a
   string under three characters, or a regex, has no trigram to ask for, so it reads every text of kinds. ns, when given, keeps
-  the names starting with it. Rows in the order of their texts' names, then lines. See docs/vector.md#search."
+  the names under it (named-under?). Rows in the order of their texts' names, then lines. See docs/vector.md#search."
   {:malli/schema [:=> [:cat :seon.host/db [:or :string :seon.host/regex] [:set :keyword] [:maybe :string]] [:vector :map]]}
   [db pattern kinds ns]
   (let [re (if (string? pattern) (re-pattern (str/replace pattern #"[\\^$.|?*+()\[\]{}]" "\\\\$0")) pattern)
@@ -637,7 +648,7 @@
                :let [v (:v (first (d/datoms db :eavt e a)))]
                :when (and v (re-find re v))
                h (named-hits db e a kinds (constantly true))
-               :when (or (nil? ns) (str/starts-with? (str (:name h)) ns))
+               :when (or (nil? ns) (named-under? (str (:name h)) ns))
                [i line] (map-indexed vector (str/split-lines v))
                :when (re-find re line)
                ;; prose (a section's, a plan's) holds a paragraph on one line: its row is each sentence that
