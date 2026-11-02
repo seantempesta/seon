@@ -1737,7 +1737,8 @@
 
 (defn- source
   "What made part ref of a sent request, as a line: the help page as of a t, the page's parts at a turn
-  (whole, or what changed since the turn before), an eval, a message: every ref kind
+  (whole, or what changed since the turn before), an eval, a message, an example session and the opening
+  of the agent's own: every ref kind
   seon.context/request names (:seon.model-call/sent)."
   {:malli/schema [:=> [:cat :any] :string]}
   [[kind x t c :as ref]]
@@ -1746,7 +1747,9 @@
     :parts (str (if c "the page's parts whole" "the page's parts that changed") " at commit " t ": " (str/join ", " (nth ref 4)))
     :eval (str "eval " x)
     :turn (str "the reply of turn " x)
-    :message (str "message " x)))
+    :message (str "message " x)
+    :example (str "example session " x " as of t " t)
+    :session (str "the opening of session " x)))
 
 (defn- request-messages
   "A sent request's messages in order, from its parts [[ref messages]], each [ref message tokens new?]:
