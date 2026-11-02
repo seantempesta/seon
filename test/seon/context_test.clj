@@ -1432,7 +1432,7 @@
   (d/transact conn [{:seon.turn/id "demo/h#1/1" :seon.turn/agent [:seon.agent/key "b/src"] :seon.turn/reply "Done."}]))
 
 (defn- example-world!
-  "A branch with task demo/g, its agent b/a1 and run, the system prompt, and example session abc made from b/src
+  "A branch with task demo/g, its agent b/a1 and its session, the system prompt, and example session abc made from b/src
   (`source-session!`, `context/session-tx`) named by the task; answers the session-tx."
   [conn]
   (d/transact conn (doc/load-tx @conn "docs" {context/system-page (slurp (str (seon.config/checkout) "/" context/system-page))}))
@@ -1445,7 +1445,7 @@
     tx))
 
 (defn- turn!
-  "Turn n of run demo/g#1 recorded and its request made: {:messages :sent}, the sent refs recorded as the turn does."
+  "Turn n of session demo/g#1 recorded and its request made: {:messages :sent}, the sent refs recorded as the turn does."
   [conn n]
   (let [b {:commit (d/commit-id @conn) :task "demo/g" :run "demo/g#1" :turn n :max-turns 9 :origin :model :agent "b/a1"}
         _ (d/transact conn [{:db/id "turn" :seon.turn/id (str "demo/g#1/" n) :seon.turn/run {:seon.run/id "demo/g#1"} :seon.turn/agent {:seon.agent/key "b/a1"} :seon.turn/n n :seon.turn/origin :model}
@@ -1471,12 +1471,12 @@
                              (context/records db (pdb/eid db :seon.agent/key "b/src")))
             prefix #(str/replace (pr-str %) "example-abc-" "")]
         (is (= "system" (:role sys)))
-        (is (= {:role "user" :content "<session id=\"example/abc\" kind=\"example\">\nMake h."} open) "the example's opening and its request")
+        (is (= {:role "user" :content "<session id=\"example/abc\" kind=\"example\" from=\"seon\">\nA finished session of another task, shown for how its work was done; not yours. Its request:\nMake h."} open) "the example's opening and its request")
         (is (= (prefix (vec original)) (prefix (vec example))) "its records, printed as the agent's own are, call ids prefixed")
         (is (= ["assistant" "tool" "user" "assistant"] (mapv :role example)) "an eval's pair, a message, a reply")
         (is (= "example-abc-call_1" (get-in example [0 :tool-calls 0 :id]) (:tool-call-id (second example))) "every call is followed by its tool message")
         (is (= {:role "user" :content "</session>"} (nth more close-at)))
-        (is (= {:role "user" :content "<session id=\"demo/g#1\">"} (nth more (inc close-at))) "then the agent's own session")
+        (is (= {:role "user" :content "<session id=\"demo/g#1\" from=\"seon\">\nYour own session: the work you are asked to do."} (nth more (inc close-at))) "then the agent's own session")
         (is (str/includes? (:content (nth more (+ 2 close-at))) "Make g.") "then the page, as today")
         (is (= ms (subvec (:messages r1) 0 (count ms))) "the second request starts with the first, examples included")
         (is (= (:messages r1) (into [] (mapcat second) (context/parts-of db (:sent r1)))) "replay draws the same bytes")

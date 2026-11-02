@@ -772,7 +772,7 @@
 
 (defn printed-run
   "The run's records new since cache (items, [ref v k tx] in tx order, ref [:eval id], [:message
-  id], [:turn id], [:parts id], [:example key] or [:session run]) printed as the conversation sends them, each once (cache, what the
+  id], [:turn id], [:parts id], [:example key] or [:session id]) printed as the conversation sends them, each once (cache, what the
   run's earlier requests printed: content-keyed reuse by the record's id, AGENTS section 5): an
   eval, a message or a prose reply by its own render, a function of that record alone; a parts, example or
   session item (a delay of {:ref :whole}, `request`) drawn only when not printed before. A record's text depends
@@ -834,20 +834,21 @@
     (reduce max (or (d/q '[:find (max ?tx) . :in $ ?a :where [?a :seon.agent/key _ ?tx]] db a) 0) (map first (records db a)))))
 
 (defn- session-open
-  "The user message that opens the agent's own session in run's request."
+  "The user message that opens the agent's own session, id, in its request."
   {:malli/schema [:=> [:cat :string] [:vector :seon.model/message]]}
-  [run] [{:role "user" :content (str "<session id=\"" run "\">")}])
+  [id] [{:role "user" :content (str "<session id=\"" id "\" from=\"seon\">\nYour own session: the work you are asked to do.")}])
 
 (defn example-messages
-  "Example session k on db as of t as the model reads it: a user message `<session id=\"k\" kind=\"example\">`
-  and the request it answered (its agent's description), the session's records printed by `printed-run`
+  "Example session k on db as of t as the model reads it: a user message `<session id=\"k\" kind=\"example\" from=\"seon\">` (Seon's framing, not a person's: a
+  user message is the one turn every provider renders in place) saying it is finished work of another task, and the request it answered (its agent's description), the session's records printed by `printed-run`
   exactly as `request` prints the agent's own, then a user message `</session>`."
   {:malli/schema [:=> [:cat :seon.host/db :string :int] [:vector :seon.model/message]]}
   [db k t]
   (let [db (d/as-of db t)
         {a :db/id desc :seon.agent/description} (d/pull db [:db/id :seon.agent/description] [:seon.agent/key k])
         c (printed-run (map (fn [[tx v kk]] [(ref-of v) v kk tx]) (records db a)) nil)]
-    (-> [{:role "user" :content (str "<session id=\"" k "\" kind=\"example\">\n" desc)}]
+    (-> [{:role "user" :content (str "<session id=\"" k "\" kind=\"example\" from=\"seon\">\n"
+                                     "A finished session of another task, shown for how its work was done; not yours. Its request:\n" desc)}]
         (into (mapcat #(:whole (get-in c [:parts %]))) (:ids c))
         (conj {:role "user" :content "</session>"}))))
 
