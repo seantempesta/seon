@@ -81,9 +81,11 @@
   has not improved its plan the call that does, an open problem its work made true what it
   is (seon.problems/caused). src-of answers the source the branch defines for a test, or nil: a stray red it
   does not define is one of main's tests the branch removed, which judges all the same (seon.agent/
-  test-plan's :removed), so it is marked :removed and offered no form that makes it a proof."
-  {:malli/schema [:=> [:cat [:vector :seon.reconcile/not-done] [:vector :map] ifn? ifn?] [:vector :map]]}
-  [reasons reds src-of calls-of]
+  test-plan's :removed), so it is marked :removed and offered no form that makes it a proof. own? answers whether
+  the branch's work wrote or changed a test (its source differs from its merge base's): only such a stray red is
+  offered the form that makes it a proof; another is main's test, which the work broke or its environment fails."
+  {:malli/schema [:=> [:cat [:vector :seon.reconcile/not-done] [:vector :map] ifn? ifn? ifn?] [:vector :map]]}
+  [reasons reds src-of calls-of own?]
   (let [rs (remove #(= :proof-red (:reason %)) reasons)
         defined? (comp some? src-of)
         gaps (vec (keep #(when (= :contract-gap (:reason %)) (:symbol %)) rs))
@@ -101,8 +103,9 @@
                                             ;; its source and what it calls, as a red proof shows them
                                             src (assoc :source (print/code src))
                                             (seq calls) (assoc :calls calls)
-                                            ;; a red test the agent wrote is a proof it has not registered, or one to delete
-                                            (and (= :stray-red reason) src)
+                                            ;; a red test the agent wrote is a proof it has not registered, or one to delete; main's
+                                            ;; test is no proof of this task (a live session, cc7e6ac413, was told to register one)
+                                            (and (= :stray-red reason) src (own? symbol))
                                             (assoc :do (list 'my.task/update! :seon.task/proofs 'conj (list 'quote symbol)))
                                             ;; main's test the branch removed: it still judges, from main's definition
                                             (and (= :stray-red reason) (not src))
@@ -666,16 +669,22 @@
                        ;; in an agent's process its index, advanced by what differs; else one built cold
                        (= :agent (:mode @agent/state)) (agent/reconcile-index db)
                        :else (r/index db)))
+        ;; a test red outside the proofs that main was red on too, at the branch's merge base: main's, not a stray
+        ;; red of the work (one scan of the base's verdicts, only while such a red exists)
+        main-red (when (and claims base)
+                   (into #{} (keep (fn [[t {st :status}]] (when (and (= :fail st) (= :fail (get results t))) t))) (verdicts base)))
         input (cond-> (if claims
                         (r/done-input claims tid results (set gaps) (mapv #(sedn/encode (:key %)) unmerged) nil (:seon.run/plan run) (set deferred))
                         (cond-> {:proofs (set proofs) :kind kind :results results :main-green #{} :allowed-red #{}
                                  :uncontracted (set gaps) :unmerged (mapv #(sedn/encode (:key %)) unmerged) :deferred (set deferred)}
                           (= :design kind) (assoc :plan plan)
                           (and (= :design kind) (:seon.run/plan run)) (assoc :plan-before (:seon.run/plan run))))
-                (seq (:caused split)) (assoc :caused (set (:caused split))))
+                (seq (:caused split)) (assoc :caused (set (:caused split)))
+                (seq main-red) (assoc :main-red main-red))
         reasons (r/done-explain input)
         reds (vec (for [[p {:keys [failures]}] vs f failures] (assoc f :test p)))
-        blockers (refused reasons reds #(doc/source-of db %) #(callees db %))]
+        blockers (refused reasons reds #(doc/source-of db %) #(callees db %)
+                          #(or (nil? base) (not= (doc/source-of db %) (doc/source-of base %))))]
     (cond-> {:reasons reasons
              ;; each proof as :proved holds its var: its verdict (green :pass, red and flaky :fail, as `verdicts`), its source
              :proofs (vec (for [p (sort-by str proofs)

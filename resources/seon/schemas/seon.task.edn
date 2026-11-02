@@ -130,6 +130,8 @@
  :seon.reconcile/done-input [:map {:closed true}
                              [:proofs :seon.task/proofs] [:results :seon.proof/results]
                              [:main-green [:set :qualified-symbol]] [:allowed-red [:set :qualified-symbol]]
+                             ;; the tests red here that main was red on too, at the branch's merge base: main's, no stray red
+                             [:main-red {:optional true} [:set :qualified-symbol]]
                              [:uncontracted [:set :qualified-symbol]] [:unmerged {:optional true} [:vector :string]]
                              ;; the derived problems the branch's work made true (seon.problems/caused)
                              [:caused {:optional true} [:set :string]]
