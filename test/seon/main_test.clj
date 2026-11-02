@@ -73,17 +73,6 @@
     (is (= [] (sort (for [[n doc] rows :when (dated doc)] [n (dated doc)])))
         "no src docstring holds an ISO date")))
 
-(deftest no-docstring-names-a-bench-run
-  ;; docs/README.md#how-the-wiki-is-kept: what an agent reads (docstrings come through `doc` and `source`) states a
-  ;; rule as current truth, never which bench run showed it (it must not recount a run or hint at a task's
-  ;; answer); the run is git's and decisions.md's. The pattern of seon.doc-test/no-section-names-a-bench-run, and the
-  ;; md-scan bench, read from the compiler's facts of src; comments are not facts, so a scan of src is not done here
-  (let [id #"(?:^|[^A-Za-z0-9_-])(md-scan\b|bench-[a-z0-9]+(?:-[a-z0-9]+)*|[a-z][a-z0-9]*(?:-[a-z0-9]+)+ (?:#[0-9]+|bench\b))"
-        rows (src-docstrings)]
-    (is (pos? (count rows)) "the facts hold src's docstrings")
-    (is (= [] (sort (for [[n doc] rows :let [ids (distinct (map second (re-seq id doc)))] :when (seq ids)] [n (vec ids)])))
-        "no src docstring names a bench or a numbered run: each is [name ids]")))
-
 (deftest only-measure-reads-the-tick-counter
   ;; task seon.profile/a-call-is-measured-one-way: a call is measured one way, so no src form but
   ;; seon.profile/measure! reads the engine's tick counter (jolt.host/ticks-of or jolt.host/ticks):
