@@ -1150,6 +1150,24 @@
     (is (str/includes? (:content r2) "call-0-1") "naming the call that threw")
     (is (not (str/includes? (:content r2) ":value 2")) "(inc a) never ran")))
 
+(deftest an-error-answer-stops-the-replys-later-calls
+  ;; task seon.turn/an-agent-that-breaks-its-own-render-is-told-and-goes-on: a call answering an error value (a
+  ;; refused edit!) stops the reply's later calls as a throw does, so none builds on a change that never happened
+  ;; (a replay's refused edit of seon.ctx/members-map, then an applied edit of join calling it, broke its page)
+  (let [[_ msgs] (in-agent (fn [{:keys [task ns]}]
+                             (let [run (str ns "/t#refused")]
+                               [(str "(seon.turn/work! {:task " (pr-str task) " :run " (pr-str run) " :max-turns 1})")
+                                (str "(let [db (seon.agent/db)]"
+                                     " (->> (:messages (seon.context/render db {:commit (datahike.api/commit-id db) :task " (pr-str task) " :run " (pr-str run)
+                                     "                                       :turn 1 :max-turns 1 :origin :model :agent (:key @seon.agent/state)}))"
+                                     "      (filter #(= \"tool\" (:role %))) (mapv #(select-keys % [:tool-call-id :content]))))")]))
+                           {:config {:seon.config.ai/script 'seon.fixtures/calls-one-refused}})
+        [_ r1 r2 :as rs] (:value msgs)]
+    (is (= ["call-0-0" "call-0-1" "call-0-2"] (mapv :tool-call-id rs)) (str "every call has its result, by its id: " (pr-str msgs)))
+    (is (str/includes? (:content r1) "edit-refused") "the second call's error value")
+    (is (str/includes? (:content r2) "not-run") "the third call was not run, and its result says so")
+    (is (not (str/includes? (:content r2) ":value 2")) "(inc a) never ran")))
+
 (deftest a-call-is-prose-and-its-forms
   ;; owner, 2026-10-29: a call is prose and one or more forms, run in order; one with no prose or
   ;; no form answers a typed error as its one result and runs nothing (docs/prompt.md)
