@@ -521,24 +521,30 @@
   (vec (sort (distinct (vals text-attrs)))))
 
 (defn- name-of
-  "What names each text's entity on db, as a function of the entity: a form's vars, a section's address and heading, a
-  schema key, a task's id; the index's name column, which bm25 weighs above the text (an item whose name the query
-  says is the likely one, as relevance found when its text held its name twice). Read by seeks of the entity's own
-  datoms (a form's :form/defines, then each var's name), never by entity: a function, so the build makes no contracted
-  call a text."
+  "What names each text on db, as a function of its row (entity, attribute, text): a form's first line (its def and the
+  name it defines, read from the text itself), a section's address and heading, a schema entry's key, a task's id; the
+  index's name column, which bm25 weighs above the text (an item whose name the query says is the likely one, as
+  relevance found when its text held its name twice). The non-form names by one scan of each name attribute, made the
+  first time one is asked: a seek a text cost ~33 KB on the test world, nine times the rest of its row. A function, so
+  the build makes no contracted call a text."
   {:malli/schema [:=> [:cat :seon.host/db] :seon.host/fn]}
   [db]
-  (let [one (fn [e a] (some-> (first (d/datoms db :eavt e a)) :v str))]
-    (fn [e] (or (some->> (seq (d/datoms db :eavt e :form/defines)) (keep #(one (:v %) :var/name)) seq (str/join " "))
-                (when-let [ad (one e :seon.doc/address)] (str ad " " (one e :seon.doc/heading)))
-                (one e :schema/key) (one e :seon.task/id) ""))))
+  (let [by (fn [a] (delay (into {} (map (juxt :e :v)) (d/datoms db :aevt a))))
+        address (by :seon.doc/address) heading (by :seon.doc/heading) skey (by :schema/key) tid (by :seon.task/id)]
+    (fn [e a v]
+      (case a
+        :form/src (let [i (str/index-of v "\n")] (if i (subs v 0 i) v))
+        :seon.doc/text (str (get @address e) " " (get @heading e))
+        :schema/form (str (get @skey e))
+        :seon.task/plan (str (get @tid e))
+        ""))))
 
 (defn- build-index
   "The FTS5 index (seon.sqlite/fts-open) of every text attribute's texts on db: one row a text, its entity and
   its attribute's number in `index-attrs`, one corpus whose bm25 `tokens` ranks."
   {:malli/schema [:=> [:cat :seon.host/db] :map]}
   [db]
-  (let [nm (name-of db)] (sqlite/fts-open (for [[i a] (map-indexed vector index-attrs) {:keys [e v]} (d/datoms db :aevt a)] [e i (nm e) (str v)]))))
+  (let [nm (name-of db)] (sqlite/fts-open (for [[i a] (map-indexed vector index-attrs) {:keys [e v]} (d/datoms db :aevt a)] [e i (nm e a (str v)) (str v)]))))
 
 (defn text-index
   "The index (seon.sqlite/fts-open) of every text attribute's texts on db (`text-attrs`), {:h :state}: a
@@ -578,7 +584,7 @@
       (let [number (zipmap index-attrs (range))
             written (filter attrs index-attrs)]
         (when (seq written)
-          (sqlite/using ix #(sqlite/replace-attrs! % (let [nm (name-of after)] (into {} (for [a written] [(number a) (for [{:keys [e v]} (d/datoms after :aevt a)] [e (nm e) (str v)])]))))))
+          (sqlite/using ix #(sqlite/replace-attrs! % (let [nm (name-of after)] (into {} (for [a written] [(number a) (for [{:keys [e v]} (d/datoms after :aevt a)] [e (nm e a (str v)) (str v)])]))))))
         (vreset! indexes [at1 ix])))
     nil))
 
