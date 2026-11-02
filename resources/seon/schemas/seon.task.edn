@@ -29,6 +29,7 @@
                          [:seon.task/instructions {:optional true} :seon.task/instructions]
                          [:seon.task/proofs {:optional true} :seon.task/proofs]
                          [:seon.task/needs {:optional true} :seon.task/need-ids]
+                         [:seon.task/examples {:optional true} :seon.task/examples]
                          [:seon.task/branch {:optional true} :seon.task/branch]
                          [:seon.task/model {:optional true} :seon.task/model]
                          [:seon.task/config {:optional true} :seon.task/config]

@@ -184,14 +184,18 @@
   key, seon.task/agent-key, or the session's agent it continues) for an agent's id, the newest
   agent of a branch for its branch (:main/task-x, a durable name: an agent of any boot, ended or
   not, opens from the store; a query over the agents' branches, asked only for a branch's name,
-  until the agent is keyed by its branch, the schema design's D1), else the entity id it is; nil when main names none (no boot fact
+  until the agent is keyed by its branch, the schema design's D1; a branch no agent worked names, by its name, the branchless agent of that id: /agent/main/example-abc), else the entity id it is; nil when main names none (no boot fact
   yet, or no agent of that id in this boot). See docs/render.md#the-page."
   {:malli/schema [:=> [:cat :seon.host/db :any] [:maybe pos-int?]]}
   [db view]
   (cond (vector? view) (location db (second view))
         (= :root view) (:db/id (d/entity db [:seon.root/id :root]))
         ;; a branch: the newest agent that worked it (entity ids are issued in the order written)
-        (and (keyword? view) (namespace view)) (d/q '[:find (max ?e) . :in $ ?b :where [?e :seon.agent/branch ?b]] db view)
+        ;; else, as an id on main (the link /agent/main/<name>), the agent of that id that has no branch: its record is main's
+        (and (keyword? view) (namespace view))
+        (or (d/q '[:find (max ?e) . :in $ ?b :where [?e :seon.agent/branch ?b]] db view)
+            (some (fn [dt] (when (nil? (:seon.agent/branch (d/entity db (:e dt)))) (:e dt)))
+                  (d/datoms db :avet :seon.agent/id (keyword (name view)))))
         ;; the process's own key in this boot, else the session's agent it continues
         (keyword? view) (when-let [boot (task/boot-of db)]
                           (or (:db/id (d/entity db [:seon.agent/key (task/agent-key boot view)]))
@@ -278,24 +282,23 @@
         held (get-in st [:parts id])
         own? (and chat? (live? st id) (vector? (:units held)))
         berr (get-in st [:branches view :error])
-        bdb (get-in st [:branches view :db])
+        ;; an agent with no branch (the user's, an example) is read from main, its reads tracked as the page's own
+        branchless? (nil? (:seon.agent/branch e))
+        bdb (if branchless? db (get-in st [:branches view :db]))
+        quiet (fn [f] (if branchless? (f) (binding [datahike.index.interface/*reads* nil] (f))))
         ;; the branch's record, drawn outside the read set: a move of the branch marks this page dirty
         ;; when root reads it (take-read), and the branch's reads are not main's
         ;; the evals a reader opened (main's :seon.agent/opened, read here, so its commit passes the
         ;; page again): drawn opened, as the agent draws them once it takes the fact
         opened (set (:seon.agent/opened e))
-        branch-units (fn [] (let [t (binding [datahike.index.interface/*reads* nil]
-                                      (:tree (ctx/build bdb (seon.db/eid bdb :seon.agent/key (:seon.agent/key e)) (:seon.agent/branch e))))
+        branch-units (fn [] (let [t (quiet #(:tree (ctx/build bdb (seon.db/eid bdb :seon.agent/key (:seon.agent/key e)) (or (:seon.agent/branch e) :db))))
                                   t (cond-> t (seq opened) (update :evals #(reduce-kv (fn [m k ev] (if (opened (:seon.eval/id ev)) (assoc m k (assoc ev :seon.eval/opened true)) m)) % %)))
-                                  w (binding [datahike.index.interface/*reads* nil]
-                                      (render/draw t ctx/changes bdb (render/declared-var :seon.render/render-ctx)))]
+                                  w (quiet #(render/draw t ctx/changes bdb (render/declared-var :seon.render/render-ctx)))]
                               (try (render/placed-units w) (finally (render/dispose-walk! w)))))
         ;; the debug view: @ctx printed, the agent's record as data by the one printer (its :seon.ctx/ctx render)
-        ctx-units (fn [] (let [t (binding [datahike.index.interface/*reads* nil]
-                                   (:tree (ctx/build bdb (seon.db/eid bdb :seon.agent/key (:seon.agent/key e)) (:seon.agent/branch e))))]
+        ctx-units (fn [] (let [t (quiet #(:tree (ctx/build bdb (seon.db/eid bdb :seon.agent/key (:seon.agent/key e)) (or (:seon.agent/branch e) :db))))]
                            [{:id "d-ctx" :container "#c-rows" :rev (:t t)
-                             :html (h/html [:li {:id "d-ctx"} (binding [datahike.index.interface/*reads* nil]
-                                                                (render/html {:db bdb} (with-meta t {:seon.render/schema :seon.ctx/ctx})))])}]))
+                             :html (h/html [:li {:id "d-ctx"} (quiet #(render/html {:db bdb} (with-meta t {:seon.render/schema :seon.ctx/ctx})))])}]))
         units (if own?
                 (:units held)
                 (cond (and bdb (not chat?)) (ctx-units)
@@ -318,7 +321,7 @@
                               :value {:id (:seon.agent/id e) :live? (live? st id)
                                       :held (d/q '[:find ?id . :in $ ?a :where [?a :seon.agent/task ?t] [?t :seon.task/execution :held] [?t :seon.task/id ?id]] db eid)}}}
                      ;; its tabs name it by its id in this boot, else by its branch (an earlier boot's agent)
-                     (or id (:seon.agent/branch e) (:seon.agent/id e)))))
+                     (or id (:seon.agent/branch e) (let [v (if (vector? view) (second view) view)] (when (and (keyword? v) (namespace v)) v)) (:seon.agent/id e)))))
 
 (defn- root-walk
   "St with root's walk current as of main db: root's ctx (seon.ctx/build of root's entity on main)

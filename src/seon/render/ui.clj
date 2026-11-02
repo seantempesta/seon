@@ -1411,6 +1411,21 @@
                   (when (and reason (not= :green outcome)) (str " · " reason)))])
       status [:p {:class "text-text-500"} (case status :busy "working…" :idle "waiting for you" (kname status))])))
 
+(defn examples
+  "The example sessions its task names (a component over ctx and the db, placed when the task names
+  any): under a heading naming each session, its evals as one line each in the order the agent's own
+  conversation orders them (`conversation`), drawn by `evaluation` as the agent's own are. The model
+  reads the same sessions as messages (seon.context/example-messages), so this is beside its page, not in it.
+  See docs/tasks.md#a-task-names-example-sessions and docs/render.md#the-page."
+  {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int] :any]}
+  [{c :seon.ctx/ctx db :seon.db/db} _aid]
+  (when-let [xs (seq (get-in c [:task :examples]))]
+    [:section
+     (for [[_ x] (sort-by key xs) :let [x (ratom/realize x)]]
+       [:details [:summary (str "example session " (:seon.agent/key x))]
+        [:ol (for [e (conversation x db)]
+               [:li (render/html {:schema :seon.db/eval-fact :as :inline} (ratom/realize (get-in x [:evals e])))])]])]))
+
 (defn render-ctx
   "The render of an agent's ctx, the one layout the model and the person read (the declared html
   render of :seon.render/render-ctx, which an agent overrides on its branch like any render): its ctx,
@@ -1464,6 +1479,8 @@
       (for [id conv :when (and (not (in-turn id)) (not (loop? id)))] (cond (ev? id) [#'eval-item {} id] (tu? id) [#'chat-turn {} aid id] :else [#'chat-message {} aid id]))
       (when aid [#'chat-end {} aid])]
      [:aside {:id "p-tiles"}
+      ;; placed always: the component reads the task's examples when this list is drawn and answers nothing when it names none (a read here, in the layout, costs every draw of any list)
+      [#'examples {} aid]
       (for [[id e] evals :let [{{v :value} :response k :schema} (:seon.eval/record e)] :when (and (some? v) (render/render-of (ratom/realize v) k))]
         [#'eval-tile {} id])]]))
 
@@ -1725,7 +1742,8 @@
 
 (defn- source
   "What made part ref of a sent request, as a line: the help page as of a t, the page's parts at a turn
-  (whole, or what changed since the turn before), an eval, a message: every ref kind
+  (whole, or what changed since the turn before), an eval, a message, an example session and the opening
+  of the agent's own: every ref kind
   seon.context/request names (:seon.model-call/sent)."
   {:malli/schema [:=> [:cat :any] :string]}
   [[kind x t c :as ref]]
@@ -1734,7 +1752,9 @@
     :parts (str (if c "the page's parts whole" "the page's parts that changed") " at commit " t ": " (str/join ", " (nth ref 4)))
     :eval (str "eval " x)
     :turn (str "the reply of turn " x)
-    :message (str "message " x)))
+    :message (str "message " x)
+    :example (str "example session " x " as of t " t)
+    :session (str "the opening of session " x)))
 
 (defn- request-messages
   "A sent request's messages in order, from its parts [[ref messages]], each [ref message tokens new?]:
@@ -1743,6 +1763,21 @@
   {:malli/schema [:=> [:cat [:sequential :any] [:set :any]] [:vector :any]]}
   [parts added]
   (vec (for [[ref ms] parts m ms] [ref m (context/messages-tokens [m]) (contains? added ref)])))
+
+(defn- session-frame
+  "Cards, the messages of one session of a sent request, in one bordered block under a header naming the
+  session: label as `session-labels` gives it, continued? when the block continues a session that began
+  above (in the messages the turn before sent). Formatting only: the cards are drawn as they are anywhere. See
+  docs/render.md#the-page."
+  {:malli/schema [:=> [:cat :any :boolean [:sequential :any]] :any]}
+  [label continued? cards]
+  (into [:div {:class "flex flex-col gap-1 rounded-md border border-base-600 p-2" :data-session (if (= :own label) "own" (second label))}
+         [:div {:class "text-2xs font-semibold uppercase text-text-400"}
+          (str (if (= :own label)
+                 "This agent's session"
+                 (str "Example session " (str/replace-first (second label) "example/" "") " · finished, another task"))
+               (when continued? " · continued"))]]
+        cards))
 
 (defn sent-request
   "A model turn's request as it recorded it (the declared html render of :seon.render/sent-request),
@@ -1784,7 +1819,19 @@
                      (emit/marked-hiccup :seon.print/code code)])]
                  (when (= (inc i) cached) cache-line)))
         shared (vec (take-while #(not (nth % 3)) ms))
-        n-shared (if same (count shared) 0)]
+        n-shared (if same (count shared) 0)
+        ;; the session each message belongs to, from its ref: [:example key] for an :example ref, :own for a :session ref and what follows it,
+        ;; nil before any (a request whose task names no example has none); then the cards from message index `from`, each session's in one frame
+        labels (second (reduce (fn [[own? out] [kind x]]
+                                 (let [own? (or own? (= :session kind))]
+                                   [own? (conj out (cond (= :example kind) [:example x] own? :own))]))
+                               [false []] (map first ms)))
+        cards (fn [from xs]
+                (mapcat (fn [group]
+                          (let [i0 (ffirst group) label (get labels i0)
+                                body (mapcat (fn [[i m]] (card i m)) group)]
+                            (if label [(session-frame label (= label (get labels (dec i0))) body)] body)))
+                        (partition-by #(get labels (first %)) (map-indexed (fn [i m] [(+ from i) m]) xs))))]
     [:li {:id unit :class "flex flex-col gap-2 rounded-md bg-base-900 p-3 text-xs"}
      [:div {:class "flex flex-wrap items-baseline gap-3"}
       [:b {:class "text-signal"} (str "turn " (inc turn))] [:span {:class "text-text-400"} run]
@@ -1805,7 +1852,7 @@
         [:summary {:class "cursor-pointer text-text-400"}
          (str "same as turn " (inc (:turn same)) " · " n-shared " messages · " (print/tokens-text (reduce + 0 (map #(nth % 2) shared)))
               (when (and cached (<= cached n-shared)) " · from cache up to the line inside"))]
-        (when open? (into [:div {:class "flex flex-col gap-1 pt-1"}] (mapcat card (range) shared)))])
+        (when open? (into [:div {:class "flex flex-col gap-1 pt-1"}] (cards 0 shared)))])
      [:div {:class "text-2xs uppercase text-text-500"} (if (pos? n-shared) "new this turn" "what this turn sent")]
      (into [:div {:class "flex flex-col gap-1"}]
-           (mapcat card (map #(+ % n-shared) (range)) (drop n-shared ms)))]))
+           (cards n-shared (drop n-shared ms)))]))
