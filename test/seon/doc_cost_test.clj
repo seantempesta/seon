@@ -136,7 +136,7 @@
     (is (identical? (doc/text-index db) (doc/text-index db)) "a second read of the same value is the first's index")
     (let [db2 (d/db-with db [{:db/id "v" :var/name 'app/new} {:form/id "app/new (defn new [] 1)" :form/src "(defn new [] 1)" :form/defines ["v"]}])
           ix (doc/text-index db2)
-          found (:value (sqlite/using ix #(sqlite/fts-match % "\"new\"" #{})))
+          found (:value (sqlite/using ix #(sqlite/fts-match % "\"new\"" #{} nil)))
           n (sqlite/size ix)]
       (is (= (inc (sqlite/size (doc/text-index db))) n) "a changed text is read again: the new text is in it")
       (is (= 1 (count found)) "and found by its word"))

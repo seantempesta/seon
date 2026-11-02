@@ -827,11 +827,7 @@
                                                :seon.task/plan "Make `demo/f` triple. demo-test/h-test asserts (f 2) is 6."
                                                :seon.task/proofs #{'demo-test/f-test 'demo-test/h-test 'demo-test/q-test}}]))
         data (data-of db "demo/s")]
-    (is (= [:task :write-set :to-prove] (vec (keys data))) "plan, write set, proofs; nothing else uncited (what is near is off by default)")
-    (let [db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "n" :seon.task/plan "Make `demo/f` triple."
-                                                 :seon.task/proofs #{'demo-test/f-test} :seon.task/config {:seon.config.render/similar 5}}]))]
-      (is (contains? (:similar (data-of db "demo/n")) :not-embedded)
-          "a task that turns it on, its plan with no vector yet: says so"))
+    (is (= [:task :write-set :to-prove] (vec (keys data))) "plan, write set, proofs; nothing else uncited")
     (is (= [{:symbol 'demo/f :source (print/code "(defn f \"Doubles.\" [x] (* 2 x))") :callers '[demo/area demo/vol]
              :change (print/code "(seon.repl/edit! 'demo/f \"old text, exactly once\" \"new text\")")}] (:write-set data))
         "each cited var with its source and its callers")
@@ -875,37 +871,6 @@
     (is (= "{:a 1}" (:line (repl/record-details "{:a 1}" {:text "x" :value {:a 1}} {} nil))) "its value in one line, for the collapsed eval")
     (is (= "nil" (:line (repl/record-details "(source f)" {:text "(defn f [x] x)\nnil" :value nil} {} nil)))
         "a value of nil after printing is nil, not nothing (step 6: such evals' collapsed rows showed nothing)")))
-
-(deftest the-task-data-names-the-functions-nearest-its-plan
-  ;; the owner's ruling (2026-10-24, DECISIONS "Embeddings join the context"): the task's data's
-  ;; :similar, the program functions nearest the plan by meaning (exact), those it names and
-  ;; what is no function left out, the first :seon.config.render/similar (5, the task's own setting), each a line: its
-  ;; name and its doc's first sentence; a plan with no vector says so
-  (let [fns '[demo/area demo/pi demo/noise demo/e1 demo/e2 demo/e3]
-        db (d/db-with (db-with-program) (program-facts (vec (for [s (conj fns 'demo-test/near-test 'demo.fixtures/near-helper)] [s (str "(defn " (name s) " [])") []]))))
-        db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "c" :seon.task/plan "Make `demo/f` use the circle's area."
-                                               :seon.task/proofs #{'demo-test/f-test} :seon.task/config {:seon.config.render/similar 5}}]))
-        db (d/db-with db (vec (concat (for [s (conj fns 'demo/f)] {:var/name s :var/kind :fn :var/doc (str (name s) " does it. More.")})
-                                      [{:var/name 'demo-test/near-test :var/kind :test}
-                                       ;; a test/ helper of any name (seon.fixtures, seon.check): a function, not the program's
-                                       {:var/name 'demo.fixtures/near-helper :var/kind :fn :var/doc "near-helper does it."}
-                                       {:ns/name 'demo :ns/file "src/demo.clj"} {:ns/name 'demo-test :ns/file "test/demo_test.clj"}
-                                       {:ns/name 'demo.fixtures :ns/file "test/demo/fixtures.clj"}])))
-        dir (fn [& xs] (let [v (vec (concat xs (repeat (- 768 (count xs)) 0.0))) n (Math/sqrt (reduce + (map #(* % %) v)))] (mapv #(/ % n) v)))
-        form (fn [s] (:db/id (:var/form (d/entity db [:var/name s]))))
-        te (pdb/eid db :seon.task/id "demo/c")
-        ;; nearest first: the named f, a test, a test/ helper, then the six functions in order
-        order (into '[demo/f demo-test/near-test demo.fixtures/near-helper] fns)
-        es (into [te] (map form) order)
-        vs (into [(dir 1.0)] (map-indexed (fn [i _] (dir 1.0 (* 0.05 (inc i)))) order))
-        db (d/db-with db (vector/tx-data es (repeat (count es) 1) vs (repeat (count es) 10) "m"))
-        sim (context/similar db te #{'demo/f 'demo-test/f-test})]
-    (is (= ["demo/area: area does it." "demo/pi: pi does it." "demo/noise: noise does it." "demo/e1: e1 does it." "demo/e2: e2 does it."]
-           (:nearest sim))
-        "nearest first, the named one, the test and the test/ helper left out, the first five, each its name and first sentence")
-    (is (string? (:more sim)) "and the form that searches further")
-    (is (= sim (:similar (data-of db "demo/c"))) "in the task's data")
-    (is (nil? (context/similar db nil #{})) "off by default (:seon.config.render/similar 0): nothing listed")))
 
 (deftest a-red-proofs-source-reads-as-its-file
   ;; owner, 2026-10-25: a test's source in my.task/status read as one escaped string literal

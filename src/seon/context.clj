@@ -171,50 +171,7 @@
   (let [ss (filter #(str/includes? % (name p)) (str/split plan #"(?<=[.!?])\s+"))]
     (if (seq ss) (str "not written yet; it should assert what the plan says: " (str/join " " ss)) "not written yet")))
 
-(defn similar
-  "The program functions nearest task entity te's plan by meaning (its vector: seon.vector/near,
-  exact: every form's vector at every dim, no coarse first pass), those in named left out, the
-  first :seon.config.render/similar of them, each one line: its name and its doc's first
-  sentence ({:nearest :more}, :more the forms that search further). nil when the count is 0
-  (off, the default; a task turns it on in its :seon.task/config); a plan with no vector yet says
-  so ({:not-embedded}), never an empty list."
-  {:malli/schema [:=> [:cat :seon.host/db [:maybe :int] [:set :qualified-symbol]]
-                  [:maybe [:or [:map [:nearest [:vector :string]] [:more :string]] [:map [:not-embedded :string]]]]]}
-  [db te named]
-  (let [;; through the one resolver: a task's own setting (its flattened :seon.task/config), else its model's, else the config's
-        t (when te (d/pull db [:seon.config.render/similar :seon.task/model] te))
-        k (cfg/value :seon.config.render/similar {:task t :model (:seon.task/model t)})
-        ;; a program function: no test helper or fixture of test/
-        program (program/program-nss db)
-        function? #(let [n (symbol (namespace %))]
-                     (and (= :fn (:var/kind (d/entity db [:var/name %])))
-                          (or (contains? program n) (nil? (:ns/file (d/entity db [:ns/name n]))))))
-        ;; every vector, every dim, every rank: the exact ranking (near's shortlist and fine level
-        ;; over all of them; it sorts them all anyway), walked until k functions are found, as the
-        ;; nearest forms are often tests
-        all Long/MAX_VALUE]
-    (cond
-      (zero? k) nil
-      (nil? (some->> te (vector/vector-of db))) {:not-embedded "this plan has no vector yet: (my.agent/search \"text\") searches by any text"}
-      :else {:nearest (into [] (comp (mapcat (fn [[f _]] (map :var/name (:var/_form (d/entity db f)))))
-                                     (remove named) (filter function?) (distinct) (take k)
-                                     (map (fn [s] (str s (some->> (:var/doc (d/entity db [:var/name s])) ref/lead-sentence (str ": "))))))
-                            (vector/near db te all {:of :form/id :shortlist all :fine-dims all}))
-             :more "(my.agent/search 'ns/f) or (my.agent/search \"text\"): more, by meaning, exact words and references"})))
-
 ;; ---- relevance: one calibrated score for a context and an item (docs/vector.md#relevance) ----
-
-(defn- item-text
-  "Entity e's text as relevance's lexical feature reads it: its name twice (a var's, a section's
-  address and heading, a schema key) and its text (a form's source, a section's, a schema's form)."
-  {:malli/schema [:=> [:cat :seon.host/db :int] :string]}
-  [db e]
-  (let [x (d/entity db e)
-        [n t] (cond (:form/id x) [(some->> (:var/_form x) (map :var/name) sort first str) (:form/src x)]
-                    (:seon.doc/address x) [(str (:seon.doc/address x) " " (:seon.doc/heading x)) (:seon.doc/text x)]
-                    (:schema/key x) [(str (:schema/key x)) (pr-str (:schema/form x))]
-                    :else ["" ""])]
-    (str n " " n " " t)))
 
 (defn- section-names
   "Each var name the wiki's sections name, to those sections: {name #{e}}, one read of
@@ -329,12 +286,13 @@
   search's), :text its words, :seeds the entities it already holds (the forms of the vars it cites
   or changed, the sections it cites, the schema entries it names), :touched those of them it
   worked on (changed or read), :candidates (optional) entities a caller found by other means
-  (a search's text hits), scored beside the pool. For each kind of kinds (relevance-kinds) the pool is the
+  (a search's text hits), scored beside the pool, :near (optional) the caller's scan of each kind's nearest by
+  meaning, {attr [[e cosine] ...]}, read for that kind's pool in place of a second scan. For each kind of kinds (relevance-kinds) the pool is the
   :seon.config.render/relevance-pool nearest by meaning (seon.vector/near) and the seeds'
   neighbourhood (each seed's first neighbours by each read, and those `pushed` at
   :seon.config.render/relevance-eps reached), keep? (of kind and entity) true;
   each item scored by a logistic over five features (:seon.config.render/relevance-weights): zc its
-  cosine with qv, zb its BM25 (seon.doc/bm25) for the text's terms (seon.doc/terms), zt its cosine with the touched items' mean
+  cosine with qv, zb its text's bm25 for the query's words among every text (seon.doc/scores, the score search's text ranking reads), zt its cosine with the touched items' mean
   vector, each a z-score over the pool, g1 log(1 + the seeds it neighbours x its rarity,
   (1 + cap)/(1 + its degree to cap)) and ppr log(1 + scale x its rank), the constants
   :seon.config.render/relevance-features; the logit read as a chance by the kind's calibration (`percent`). Measured on 57 merged
@@ -342,10 +300,11 @@
   against 0.651. Answers {kind [[e p] ...]}, best first, the touched items left out (a caller leaves out
   what its page already shows)."
   {:malli/schema [:=> [:cat :seon.host/db [:map [:qv [:maybe [:vector number?]]] [:text :string] [:seeds [:set :int]] [:touched [:set :int]]
-                                           [:candidates {:optional true} [:set :int]]]
+                                           [:candidates {:optional true} [:set :int]]
+                                           [:near {:optional true} [:maybe [:map-of :keyword [:sequential [:tuple :int number?]]]]]]
                        [:set :keyword] :seon.host/fn]
                   [:map-of :keyword [:vector [:tuple :int number?]]]]}
-  [db {:keys [qv text seeds touched candidates]} kinds keep?]
+  [db {:keys [qv text seeds touched candidates] given :near} kinds keep?]
   (let [names (section-names db)
         {rank :rank counted :degree} (if (seq seeds) (pushed db names seeds (cfg/value :seon.config.render/relevance-eps)) {:rank {} :degree {}})
         ;; a link to a seed weighs by the item's rarity, (1 + cap)/(1 + its degree to cap), so what every form
@@ -357,13 +316,15 @@
         rare (fn [e] (/ (inc rarity-cap) (inc (min rarity-cap (or (counted e) (degree db names e rarity-cap))))))
         weights (cfg/value :seon.config.render/relevance-weights)
         knots (cfg/value :seon.config.render/relevance-calibration)
-        qs (set (doc/terms text))
         centroid (when (seq touched)
                    (let [vs (keep #(vector/vector-of db %) touched)]
                      (when (seq vs)
                        (let [s (apply mapv + vs) n (Math/sqrt (reduce + 0.0 (map #(* % %) s)))]
                          (when (pos? n) (mapv #(/ % n) s))))))
-        near (fn [attr] (if qv (map first (vector/near db qv cap {:of attr})) []))]
+        ;; a kind's nearest: the caller's scan when it handed one (a search scans each kind once), else its own
+        near (fn [attr] (cond (contains? given attr) (map first (take cap (given attr)))
+                              qv (map first (vector/near db qv cap {:of attr}))
+                              :else []))]
     (into {} (for [kind kinds
                    :let [attr (relevance-kinds kind)
                          of-kind? #(seq (d/datoms db :eavt % attr))
@@ -373,7 +334,7 @@
                        []
                        (let [w (weights kind)
                              zc (z (if qv (vector/scores db qv pool) (repeat (count pool) nil)))
-                             zb (z (let [fs (mapv #(frequencies (doc/terms (item-text db %))) pool)] (doc/bm25 qs fs (mapv #(reduce + 0 (vals %)) fs))))
+                             zb (z (let [sc (doc/scores db text (set pool))] (mapv #(get sc % 0.0) pool)))
                              zt (z (if centroid (vector/scores db centroid pool) (repeat (count pool) nil)))]
                          (->> (map (fn [e c b t]
                                      (let [l (+ (:intercept w) (* (:zc w) c) (* (:zb w) b) (* (:zt w) t)
@@ -464,11 +425,15 @@
         toks (if (by :text) (filterv #(in-ns? [(:kind %) (:name %)]) (doc/tokens db text kinds (cfg/value :seon.config.render/search-token-z))) [])
         known (into {} (map (fn [h] [[(:kind h) (:name h)] (select-keys h [:line :at :z])])) toks)
         n (* k (cfg/value :seon.config.render/related-near))
-        ;; one ranking by meaning: each kind's nearest (near takes one attribute), merged by cosine, which
-        ;; one query's scores share
-        meaning (if (and (by :meaning) qv)
+        ;; each kind's nearest, scanned once (near takes one attribute) to the larger of the n this ranking reads and
+        ;; the pool relevance reads, which it is handed
+        nears (when (and (by :meaning) qv)
+                (let [m (max n (cfg/value :seon.config.render/relevance-pool))]
+                  (into {} (for [attr (sort (distinct (map near-attr kinds)))] [attr (vector/near db qv m {:of attr})]))))
+        ;; one ranking by meaning: each kind's first n nearest, merged by cosine, which one query's scores share
+        meaning (if nears
                   (into [] (comp (mapcat (fn [[e _]] (hit-of db e kinds))) (filter in-ns?) (distinct))
-                        (sort-by (comp - second) (mapcat (fn [attr] (vector/near db qv n {:of attr})) (sort (distinct (map near-attr kinds))))))
+                        (sort-by (comp - second) (mapcat #(take n %) (vals nears))))
                   [])
         seeds (names-in db q)
         refs (if (by :refs)
@@ -503,7 +468,7 @@
                    {}
                    (let [qvec (if (int? qv) (vector/vector-of db qv) qv)
                          sd (into #{} (keep #(if (keyword? %) (pdb/eid db :schema/key %) (some-> (d/entity db [:var/name %]) :var/form :db/id))) seeds)
-                         r (relevance db {:qv qvec :text text :seeds sd :touched #{}
+                         r (relevance db {:qv qvec :text text :seeds sd :touched #{} :near nears
                                           :candidates (into #{} (comp (filter (comp rkind first)) (keep form-of)) hits)}
                                       ks (constantly true))]
                      (into {} (for [[_ es] r [e p] es] [e p])))))
@@ -565,8 +530,7 @@
   name with its source and its callers (doc/callers), the names that resolve to nothing said
   once; each proof to the form that runs it at the REPL, or, when it is not written, that it
   is not and what it should assert in the plan's words (whether it fails, and why, is the
-  proofs part's: it changes each turn); the wiki sections and the tasks cites name (a task by its plan, seon.ref/task-view); the functions nearest its plan
-  by meaning that it does not name (`similar`). cites: what the task cites, its cite entities and its needs'
+  proofs part's: it changes each turn); the wiki sections and the tasks cites name (a task by its plan, seon.ref/task-view). cites: what the task cites, its cite entities and its needs'
   (seon.task/task-cites). What `my.task/data` answers at the agent's REPL, on demand; the page's task part is
   the pulled task's own renders (seon.render.ui/task-data, docs/render.md#a-part-answers-data)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/task [:sequential :map]] :map]}
@@ -574,8 +538,7 @@
   (let [{:keys [plan proofs]} (:seon.task/accumulated t)
         refs (program-vars db cites)
         sections (into [] (keep (fn [{a :seon.cite/address n :seon.cite/name tk :seon.cite/task d :seon.cite/depth}]
-                                  (cond a (doc/view db a d) tk (ref/task-view db n d)))) cites)
-        near (similar db (some->> (:seon.task/id t) (pdb/eid db :seon.task/id)) (into (set proofs) refs))]
+                                  (cond a (doc/view db a d) tk (ref/task-view db n d)))) cites)]
     (cond-> {:task (assoc (select-keys t [:seon.task/id :seon.task/kind :seon.task/instructions])
                           :seon.task/plan plan)
              ;; a proof is shown with the proofs, not again in the write set; the names that
@@ -590,8 +553,7 @@
                                [p (if (doc/source-of db p)
                                     (list 'my.agent/prove #{p})
                                     (not-written p plan))]))}
-      (seq sections) (assoc :sections sections)
-      near (assoc :similar near))))
+      (seq sections) (assoc :sections sections))))
 
 (defn cited
   "Var v as the task's page shows it: its source and its callers (doc/callers), or that it

@@ -512,36 +512,6 @@
   {:malli/schema [:=> [:cat :string] [:vector :string]]}
   [s] (vec (distinct (terms (str/lower-case s)))))
 
-(defn- idf-of
-  "BM25's idf of a word held by df of n texts."
-  {:malli/schema [:=> [:cat :int :int] :double]}
-  [n df]
-  (Math/log (+ 1.0 (/ (+ (- n df) 0.5) (+ df 0.5)))))
-
-(defn- bm25-scores
-  "Each text's BM25 term, fs its word counts and lens its lengths, against the corpus' average length avg
-  and each word's idf (the parameters of `bm25`)."
-  {:malli/schema [:=> [:cat :map :double :map [:sequential [:map-of :string :int]] [:sequential number?]] [:vector number?]]}
-  [{k1 :bm25-k1 b :bm25-b} avg idf fs lens]
-  ;; over each text's own counts: a text holding no query word (an empty map) allocates nothing
-  (mapv (fn [f len] (reduce-kv (fn [acc w c] (if-let [i (when (pos? c) (idf w))]
-                                              (+ acc (* i (/ (* c (inc k1)) (+ c (* k1 (+ (- 1 b) (* b (/ len avg)))))))) acc))
-                               0.0 f))
-        fs lens))
-
-(defn bm25
-  "Each text's BM25 score (Robertson and Zaragoza 2009; k1 and b :seon.config.render/relevance-features's
-  :bm25-k1 and :bm25-b) for query words qs, fs each text's word counts and lens its length (in whatever
-  unit, the same for every text); its idf counted over fs, so the texts scored are their own corpus and no
-  index is read. In fs's order. Relevance's (seon.context/relevance) pool scorer, whose weights are fitted to it;
-  the store's own texts are ranked by FTS5 (`tokens`, `text-index`). See docs/vector.md#search."
-  {:malli/schema [:=> [:cat [:set :string] [:sequential [:map-of :string :int]] [:sequential number?]] [:vector number?]]}
-  [qs fs lens]
-  (let [feat (cfg/value :seon.config.render/relevance-features)
-        n (count fs) avg (max 1.0 (/ (reduce + 0.0 lens) (max 1 n)))
-        idf (into {} (for [w qs :let [df (reduce #(if (pos? (get %2 w 0)) (inc %1) %1) 0 fs)]] [w (idf-of n df)]))]
-    (bm25-scores feat avg idf fs lens)))
-
 (defonce ^:private indexes
   ;; [the db's [:hash :max-tx] it was built at, its text-index]; one slot, replaced by the next build
   (volatile! nil))
@@ -665,14 +635,14 @@
   word scoring 0). Only the texts with z >= z-min are answered. The line is the first holding a word as it is
   written (a text that holds only a stem of it, \"watch\" for \"watching\", has none). Cost: the index (built once
   a change of the store, not a query), one FTS5 query, and per hit its text and names; the one text ranking of
-  my.agent/search (relevance's pool is `bm25`). See docs/vector.md#search."
+  my.agent/search, whose relevance scores its pool by the same bm25 (`scores`). See docs/vector.md#search."
   {:malli/schema [:=> [:cat :seon.host/db :string [:set :keyword] :double] [:vector :map]]}
   [db s kinds z-min]
   (let [ws (words s)
         numbers (attr-numbers kinds)
         [n rows] (when (and (seq ws) (seq numbers))
                    (with-index db (fn [ix] [(reduce + (map #(get (sqlite/counts ix) % 0) numbers))
-                                            (sqlite/fts-match ix (match-query ws) numbers)])))]
+                                            (sqlite/fts-match ix (match-query ws) numbers nil)])))]
     (if (or (empty? ws) (zero? (or n 0)))
       []
       (let [scored (for [[e a score] rows] {:e e :a (index-attrs a) :score score})
@@ -693,6 +663,19 @@
                  (reduce (fn [[seen out :as acc] h] (let [k ((juxt :kind :name) h)] (if (seen k) acc [(conj seen k) (conj out (dissoc h :rank))])))
                          [#{} []])
                  second)))))))
+
+(defn scores
+  "Each of entities es's text score for the words of query s, {e score} (an entity holding no word absent): the
+  negated bm25 of FTS5's Porter table (`text-index`), its idf over every text the index holds, so a few entities
+  are scored as `tokens` scores them among all. The best of an entity's texts when it holds several. One FTS5
+  query. relevance's lexical feature (seon.context/relevance). See docs/vector.md#search."
+  {:malli/schema [:=> [:cat :seon.host/db :string [:set :int]] [:map-of :int :double]]}
+  [db s es]
+  (let [ws (words s)]
+    (if (or (empty? ws) (empty? es))
+      {}
+      (reduce (fn [m [e _ score]] (if (> score (get m e Double/NEGATIVE_INFINITY)) (assoc m e score) m)) {}
+              (with-index db #(sqlite/fts-match % (match-query ws) #{} es))))))
 
 (defn resolve-ref
   "Var sym as its citation's depth shows it (docs/references.md#resolving-and-showing):

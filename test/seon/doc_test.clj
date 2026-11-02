@@ -500,7 +500,7 @@
     (is (identical? ix0 ix1) "a move that wrote no text keeps the index")
     (is (identical? ix0 ix2) "a move that wrote form texts has those rows replaced in it")
     (is (= (+ 2 n0) (sqlite/size ix2)) "and the two texts are in it")
-    (is (= 1 (count (:value (sqlite/using ix2 #(sqlite/fts-match % "\"qqzz\"" #{}))))) "found by its word")
+    (is (= 1 (count (:value (sqlite/using ix2 #(sqlite/fts-match % "\"qqzz\"" #{} nil))))) "found by its word")
     (is (= [(:hash (:db-after r2)) (:max-tx (:db-after r2))] (first @@#'seon.doc/indexes)) "keyed to the db it was carried to")))
 
 (deftest a-written-plan-is-brought-into-the-index-without-a-rebuild
@@ -511,7 +511,7 @@
         r (d/with db0 [{:seon.task/id "app/zorb" :seon.task/plan "Zorblax the thing."}])
         _ (seon.doc/carry-index! db0 (:db-after r) (into #{} (map :a) (:tx-data r)))
         ix1 (seon.doc/text-index (:db-after r))
-        found #(count (:value (sqlite/using ix1 (fn [ix] (sqlite/fts-match ix "\"zorblax\"" #{})))))]
+        found #(count (:value (sqlite/using ix1 (fn [ix] (sqlite/fts-match ix "\"zorblax\"" #{} nil)))))]
     (is (identical? ix0 ix1) "the index stands")
     (is (= 1 (found)) "and holds the plan")))
 
@@ -546,7 +546,7 @@
         db3 (d/db-with db1 [{:schema/key :app/two :schema/form "[:map]"}])
         ix1 (doc/text-index db1)
         ix2 (doc/text-index db2)
-        during (sqlite/using ix2 (fn [ix] (doc/text-index db3) (sqlite/fts-match ix "\"map\"" #{})))
+        during (sqlite/using ix2 (fn [ix] (doc/text-index db3) (sqlite/fts-match ix "\"map\"" #{} nil)))
         ix3 (doc/text-index db3)]
     (is (nil? (sqlite/using ix1 identity)) "an index nobody used is closed when replaced")
     (is (vector? (:value during)) "an index in use stays open until its reader is done")

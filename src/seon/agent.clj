@@ -422,7 +422,7 @@
 
 (defn embed-written!
   "The texts this branch wrote since the last call (since its fork, at the first: after
-  my.branch/merge-main!, main's texts merged in too, which carry no vector) and its task's plan,
+  my.branch/merge-main!, main's texts merged in too, which carry no vector), its task's plan and the queries of its task's searches,
   those whose vector is due for model (seon.vector/due over seon.vector/written), embedded by
   root's :embed effect in one request (the first n of them; 0 asks nothing) and their vectors
   written on the branch: what seon.vector/near reads here follows the agent's own writes, and
@@ -437,7 +437,12 @@
         (if (pos? n) (embed-written! n (vector/model-id (cfg/value :seon.config.vector/model))) 0)))
   ([n model]
    (let [head (db)
-         plan (some->> (:task @state) (pdb/eid head :seon.task/id) (#(d/datoms head :eavt % :seon.task/plan)))
+         ;; the task's plan and the queries of the searches it holds (its request's among them), written on
+         ;; main before the fork: what the first page searches by meaning (docs/vector.md#search)
+         plan (when-let [te (some->> (:task @state) (pdb/eid head :seon.task/id))]
+                (into (vec (d/datoms head :eavt te :seon.task/plan))
+                      (mapcat #(d/datoms head :eavt (:db/id %) :seon.search/query))
+                      (:seon.search/_of (d/entity head te))))
          due (remove (comp (get @state :unembeddable #{}) first)
                      (vector/due head model (distinct (into (vector/written (get @state :embedded-from (:base @state)) head) plan))))
          ask (take n due)]

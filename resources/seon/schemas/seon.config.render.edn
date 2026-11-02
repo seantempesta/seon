@@ -10,11 +10,10 @@
  :seon.config.render/part-budget [:int {:min 1 :seon.config/unit "tokens" :description "A value shown inside another (a refused argument, a test's expected and actual)."}]
  :seon.config.render/form-budget [:int {:min 1 :seon.config/unit "tokens" :description "A form echoed back."}]
  :seon.config.render/context-budget [:int {:min 1 :seon.config/unit "tokens" :description "The whole context block the model reads."}]
- :seon.config.render/similar [:int {:min 0 :seon.config/unit "functions" :description "The program functions nearest the task's plan by meaning shown in its task data (:similar); 0 shows none."}]
  :seon.config.render/relevance-weights [:map {:seon.config/unit "logit per feature" :description "Each kind's logistic weights over relevance's five features, and its intercept."}
                                        [:function [:map [:zc number?] [:zb number?] [:zt number?] [:g1 number?] [:ppr number?] [:intercept number?]]] [:section [:map [:zc number?] [:zb number?] [:zt number?] [:g1 number?] [:ppr number?] [:intercept number?]]] [:schema [:map [:zc number?] [:zb number?] [:zt number?] [:g1 number?] [:ppr number?] [:intercept number?]]]]
- :seon.config.render/relevance-features [:map {:seon.config/unit "the features' constants" :description "The constants relevance's features were fitted with: :alpha, :bm25-k1, :bm25-b, :rarity-cap, :ppr-scale, :hub."}
-                                        [:alpha [:double {:min 0.01 :max 0.99}]] [:bm25-k1 [:double {:min 0.0}]] [:bm25-b [:double {:min 0.0 :max 1.0}]]
+ :seon.config.render/relevance-features [:map {:seon.config/unit "the features' constants" :description "The constants relevance's features were fitted with: :alpha, :rarity-cap, :ppr-scale, :hub."}
+                                        [:alpha [:double {:min 0.01 :max 0.99}]]
                                         [:rarity-cap [:int {:min 1}]] [:ppr-scale [:double {:min 1.0}]] [:hub [:int {:min 1}]]]
  :seon.config.render/relevance-calibration [:map {:seon.config/unit "[logit chance] knots" :description "What each kind's relevance logit means as a chance, knots in ascending logit, read piecewise linearly."}
                                            [:function [:vector {:min 2} [:tuple number? number?]]] [:section [:vector {:min 2} [:tuple number? number?]]] [:schema [:vector {:min 2} [:tuple number? number?]]]]

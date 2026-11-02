@@ -340,6 +340,21 @@
       (is (= 1 (count asked2)))
       (is (= 2 (count (vector/due db2 "m" (vector/written main db2)))) "and the texts stay due"))))
 
+(deftest a-requests-search-gets-its-vector-on-the-branch-before-the-first-page
+  ;; the request's search fact is written on main before the agent forks, and main's vectors proc embeds
+  ;; it after: the first turn's embed asks its query on the branch, so the first page's search ranks by
+  ;; meaning (seon.render.ui/searched reads the search entity's own vector; docs/vector.md#search)
+  (let [main (d/db-with (ts/test-db) [{:seon.task/id "t/x" :seon.task/plan "a plan"}])
+        e (plan-of main)
+        main (d/db-with main (into (vector/tx-data [e] [(:tx (first (d/datoms main :eavt e :seon.task/plan)))] (vectors 1 1 1 768) [4] "m")
+                                   [{:seon.search/id "t/x/request" :seon.search/of e :seon.search/query "messages sent while it ran are lost"}]))
+        s (:db/id (d/entity main [:seon.search/id "t/x/request"]))
+        [n db asked] (on-branch main main answered #(agent/embed-written! 64 "m"))]
+    (is (= [[:embed ["task: search result | query: messages sent while it ran are lost"]]] asked)
+        "the query of the task's search is asked, the plan's vector being current")
+    (is (= 1 n))
+    (is (some? (vector/vector-of db s)) "the search entity has its vector on the branch")))
+
 (deftest a-turn-with-nothing-due-asks-nothing
   (let [main (d/db-with (ts/test-db) [{:seon.task/id "t/x" :seon.task/plan "a plan"}])
         e (plan-of main)
