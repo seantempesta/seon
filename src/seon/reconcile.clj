@@ -45,7 +45,8 @@
   no proofs (never proven); a proof not passing (red), or with no result (unknown: it
   never ran); a regression (a test green on main, the
   proofs of merged tasks, red here); a stray red (a red test that is no task's open
-  proof); a contract gap (a function the run defined without a contract); an
+  proof); a test red on main too at the branch's merge base (main-red) is main's red, neither a regression
+  nor a stray red: red before and red after, whatever the work did to it (docs/render.md#how-the-work-stands); a contract gap (a function the run defined without a contract); an
   unmerged entry on the branch (a merge conflict not resolved); an open problem the
   branch's work made true (seon.problems/caused: a citation of a var it deleted). A :design task readies
   the interface and plan for its implement step, so its own proofs may stay red but not
@@ -56,7 +57,7 @@
   at the merge gate on a checkout, seon.reconcile's :gate) is neither red nor unknown
   here; while unrun it is the merge's open :unrun problem."
   {:malli/schema [:=> [:cat :seon.reconcile/done-input] [:vector :seon.reconcile/not-done]]}
-  [{:keys [proofs results main-green allowed-red uncontracted unmerged caused kind plan plan-before deferred behind]}]
+  [{:keys [proofs results main-green allowed-red main-red uncontracted unmerged caused kind plan plan-before deferred behind]}]
   (let [red? (fn [t] (#{:fail :error} (get results t)))
         design? (= :design kind)]
     (vec (concat
@@ -69,9 +70,9 @@
            ;; leaves its proofs red, never unknown (the implement step needs them written)
            (for [p (sort-by str proofs) :let [s (get results p)] :when (and (not (contains? deferred p)) (if design? (nil? s) (not= :pass s)))]
              {:reason (if s :proof-red :proof-unknown) :symbol p})
-           (for [t (sort-by str main-green) :when (and (not (proofs t)) (red? t))] {:reason :regression :symbol t})
+           (for [t (sort-by str main-green) :when (and (not (proofs t)) (red? t) (not (contains? main-red t)))] {:reason :regression :symbol t})
            (for [t (sort-by str (keys results))
-                 :when (and (red? t) (not (proofs t)) (not (main-green t)) (not (allowed-red t)))]
+                 :when (and (red? t) (not (proofs t)) (not (main-green t)) (not (allowed-red t)) (not (contains? main-red t)))]
              {:reason :stray-red :symbol t})
            (for [s (sort-by str uncontracted)] {:reason :contract-gap :symbol s})
            (for [k (sort unmerged)] {:reason :unmerged :key k})

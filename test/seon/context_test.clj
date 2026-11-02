@@ -355,6 +355,29 @@
         (is (= ['demo/helper] (:without-a-contract st)))
         (is (= [{:reason :contract-gap :vars ['demo/helper]}] (:refused st)))))))
 
+(deftest a-red-main-was-red-on-too-is-mains
+  ;; docs/render.md#how-the-work-stands: a live session (cc7e6ac413) ended refused over a test red on main as on its branch,
+  ;; and was told to register that test, one it never wrote, as its own proof. A test red at the branch's merge base
+  ;; is main's red; only a test the branch wrote or changed is offered the form that makes it a proof
+  (ts/test-branch!
+    (fn [_ conn]
+      (d/transact conn (program-facts '[[demo-test/env-test "(deftest env-test (is (pinned?)))" []]
+                                        [demo-test/kept-test "(deftest kept-test (is (= 1 1)))" []]]))
+      (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "p" :seon.task/proofs #{'demo-test/f-test}}]))
+      (d/transact conn [{:var/name 'demo-test/env-test :seon.test/status :red} {:var/name 'demo-test/kept-test :seon.test/status :green}])
+      (d/transact conn [{:seon.agent/key "b/a1" :seon.agent/task [:seon.task/id "demo/f"] :seon.agent/base-commit (d/commit-id @conn)}])
+      (d/transact conn (program-facts '[[demo-test/own-test "(deftest own-test (is (= 1 2)))" []]]))
+      (d/transact conn [{:var/name 'demo-test/f-test :seon.test/status :green} {:var/name 'demo-test/own-test :seon.test/status :red}
+                        {:var/name 'demo-test/kept-test :seon.test/status :red}])
+      (let [db @conn
+            st (context/status db (:tree (seon.ctx/build db (pdb/eid db :seon.agent/key "b/a1") :b))
+                               {:index (fn [] (index-of {"demo/f" #{'demo-test/f-test}} {} {}))})
+            by (into {} (map (juxt :test identity)) (:refused st))]
+        (is (= #{'demo-test/own-test 'demo-test/kept-test} (set (keys by))) (str "main's own red is no reason: " (pr-str (:refused st))))
+        (is (= '(my.task/update! :seon.task/proofs conj (quote demo-test/own-test)) (:do (by 'demo-test/own-test)))
+            "a red test the branch wrote is offered the form that makes it a proof")
+        (is (not (contains? (by 'demo-test/kept-test) :do)) "main's test the work turned red is not")))))
+
 (defn- turn-of
   "A recorded model turn n of run demo/f#1 with basis b: one call and its answer, and its model call
   (the two maps of one transaction)."
