@@ -48,9 +48,8 @@
 
 (defn- cited-texts
   "The texts a declaration cites from, each its own Markdown text: its plan and its instructions. Never one text:
-  a plan that quotes a backtick run (md-scan's \"a fenced block's ``` marks\") opened a code span that took the
-  instructions' delimiters, so their ```docs/agent.md#working-a-task``` was cited at summary depth, its heading alone
-  (md-scan bench-b17)."
+  a plan that quotes a backtick run (\"a fenced block's ``` marks\") opened a code span that took the
+  instructions' delimiters, so their ```docs/agent.md#working-a-task``` was cited at summary depth, its heading alone."
   {:malli/schema [:=> [:cat [:map [:seon.task/plan {:optional true} [:maybe :string]] [:seon.task/instructions {:optional true} [:maybe :string]]]] [:vector :string]]}
   [decl] (into [] (keep decl) [:seon.task/plan :seon.task/instructions]))
 

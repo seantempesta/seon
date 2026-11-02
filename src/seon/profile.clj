@@ -153,8 +153,7 @@
   "(thunk) run with its calls not counted, its work counted as a callee's of the call it interrupted:
   the work of a signal handler run at a safe point (seon.intr), which is not the running call's (an
   agent's test child counted its SIGIO handler's seon.sock/peer-gone? in the eval it interrupted,
-  and seon.profile-test/an-evals-record-carries-its-costliest-functions was red only there:
-  md-scan #28). See docs/cost.md#counting-calls."
+  and seon.profile-test/an-evals-record-carries-its-costliest-functions was red only there). See docs/cost.md#counting-calls."
   {:malli/schema [:=> [:cat :seon.host/fn] :any]}
   [thunk] ((:aside procs) thunk))
 
