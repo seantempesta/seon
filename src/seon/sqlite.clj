@@ -220,12 +220,6 @@
   [attrs]
   (if (seq attrs) (str " AND a IN (" (str/join "," (sort attrs)) ")") ""))
 
-(defn- in-entities
-  "The SQL restricting a query to entities es, empty for all (es nil)."
-  {:malli/schema [:=> [:cat [:maybe [:set :int]]] :string]}
-  [es]
-  (if es (str " AND e IN (" (str/join "," (sort es)) ")") ""))
-
 (defn fts-match
   "The rows of index ix holding a word of query (FTS5 syntax: words quoted and joined by OR), of the attributes
   in attrs (small integers as fts-open was given, all when attrs is empty) and, when es is a set, of those
@@ -235,7 +229,9 @@
   {:malli/schema [:=> [:cat [:map [:h :seon.ffi/address]] :string [:set :int] [:maybe [:set :int]]] [:vector [:tuple :int :int :double]]]}
   [{h :h} query attrs es]
   (with-row-calls
-    (select h :match (str "SELECT e, a, bm25(t) FROM t WHERE t MATCH ?1" (in-attrs attrs) (in-entities es)) query
+    (select h :match (str "SELECT e, a, bm25(t) FROM t WHERE t MATCH ?1" (in-attrs attrs)
+                  ;; the entities asked, when a caller restricts it (a contracted helper would count a call a query)
+                  (if es (str " AND e IN (" (str/join "," (sort es)) ")") "")) query
             (fn [st] [(c-column-int st 0) (c-column-int st 1) (- (c-column-double st 2))]))))
 
 (defn fts-substring

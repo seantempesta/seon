@@ -230,6 +230,7 @@ Uses of take, subs and the like in display code that choose what to find or read
 - `my.schema/unknown-key`: a registered key's text without its colon, to name the nearest keys of a key no schema registers by Jolt's ranking: a lookup, not a cut of output.
 - `seon.render.ui/kname`: a keyword's text without its colon.
 - `seon.render.ui/markdown`, `seon.render.ui/task-title`: Markdown text split into its blocks by the offsets its parse (`seon.ref/scan`) gives (a fenced block's content and a list's items too), each kept as written; a name's first letter made capital: text rearranged, nothing left out.
+- `seon.context/relevance`: the first `cap` of a search's scan of each kind's nearest (`take`), the pool it scores: a score's input, never shown.
 - `seon.context/search`: a search's answer, its first `:k` hits (`take`) with a count of the rest and the form that returns them, that form printed as code to evaluate (`pr-str` of the query and its options): not a cut of output.
 - `seon.context/neighbours`: the first `cap` of who names a var or key (`take`), a bounded read of the reference graph for a score (a var every form names would cost thousands of datoms): work bound, not output.
 - `seon.agent/embed-written!`: the first `:seon.config.vector/texts` of the texts due go in one `:embed` request (`take`), the rest stay due for the next: a batch bound on work, not a cut of output.

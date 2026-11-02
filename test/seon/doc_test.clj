@@ -533,6 +533,19 @@
     (is (contains? (names "SeonRun") 'app.sw/seonRun) "a query is tokenized as a text is: an identifier is one term in both")
     (is (not (contains? (names "it") 'app.sw/edit)) "a short word is no part of a longer term")))
 
+(deftest scores-are-the-index-bm25-for-the-entities-asked
+  ;; docs/vector.md#search: relevance's lexical feature is the index's own bm25 (seon.doc/scores), so a search
+  ;; ranks by one lexical model; an entity holding no word of the query is absent, an empty ask scores nothing
+  (let [db (mt/with (mt/world)
+                    (mt/code 'app.sc "(ns app.sc)\n(defn near-of [x] (watch x))\n(defn other [] 1)\n"))
+        form (fn [s] (:db/id (:var/form (d/entity db [:var/name s]))))
+        [a b] [(form 'app.sc/near-of) (form 'app.sc/other)]
+        sc (doc/scores db "watching what is near" #{a b})]
+    (is (= #{a} (set (keys sc))) "only the entity holding a word, by its stem")
+    (is (pos? (sc a)) "scored higher is better")
+    (is (= {} (doc/scores db "watching" #{})) "no entity asked: nothing")
+    (is (= {} (doc/scores db "" #{a b})) "no word: nothing")))
+
 (deftest grep-finds-a-string-inside-a-term-as-grep-does
   ;; docs/vector.md#search: grep's candidates come from the index's trigram table, so a string inside a longer
   ;; identifier, or across a separator inside one, is found; a string of two characters scans every text
