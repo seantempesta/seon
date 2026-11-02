@@ -422,9 +422,10 @@
   same thing; the rows stay the value (take, filter and count them). See docs/agent.md#small-answers."
   {:malli/schema [:=> [:cat :seon.render/opts [:vector :map]] :any]}
   [_ rs]
-  (let [n #(re-find #"\d+$" %)
+  ;; a row a reader conj'd on without :at keeps the schema: it shows with no number
+  (let [n #(or (re-find #"\d+$" (str %)) "")
         w (reduce max 0 (map (comp count n :at) rs))]
-    (print/code (str/join "\n" (for [{:keys [at text]} rs :let [k (n at)]] (str (apply str (repeat (- w (count k)) \space)) k "  " text))))))
+    (print/code (str/join "\n" (for [{:keys [at text]} rs :let [k (n at)]] (if (seq k) (str (apply str (repeat (- w (count k)) \space)) k "  " text) text))))))
 
 (defn wc
   "Like wc, in tokens: what x costs printed, as the model is sent it (the one printer's text, whole, by its sizer):

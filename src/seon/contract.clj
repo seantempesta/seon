@@ -165,7 +165,8 @@
 
 (clojure.core/defn- calls
   "The calls fn-sym's var declares (its :arglists), each as a form to copy, joined by \" or \":
-  \"(seon.doc/namespace-source db sym)\"; nil when it declares none. What an arity error names."
+  \"(seon.doc/namespace-source db sym)\"; nil when it declares none. What an arity error names.
+  See docs/checks.md#contracts-armed-at-definition."
   {:malli/schema [:=> [:cat :qualified-symbol] [:maybe :string]]}
   [fn-sym]
   (some->> (some-> (find-var fn-sym) meta :arglists seq)

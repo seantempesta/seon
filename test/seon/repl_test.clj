@@ -531,6 +531,17 @@
       (is (not (:ex item)) (str form " -> " (pr-str item))))
     (is (= (count forms) (count items)) "every form answered")))
 
+(deftest lines-show-as-numbered-lines
+  ;; docs/agent.md#small-answers: lines' rows are shown as one block of numbered lines (my.agent/lines-text), and
+  ;; wc counts what is shown: a live session (cc7e6ac413) paid 2.4k tokens for 50 lines as a map a line
+  (let [rs (with-meta (vec (for [i (range 8 13)] {:at (str "docs/x.md#a:" i) :text (str "  line " i " of the section")}))
+             {:seon.render/schema :my.agent/lines})
+        shown (:seon.print/code (my.agent/lines-text {} rs))]
+    (is (= " 8    line 8 of the section" (first (str/split-lines shown))) "a number right-aligned to the widest, then the line as written")
+    (is (= "12    line 12 of the section" (last (str/split-lines shown))))
+    (is (< (my.agent/wc rs) (my.agent/wc (with-meta rs nil))) "wc counts the numbered lines, fewer tokens than the maps")
+    (is (= "  no number" (:seon.print/code (my.agent/lines-text {} [{:text "  no number"}]))) "a row without :at shows its text alone")))
+
 (deftest the-help-page-runs
   ;; task seon.context/help-is-a-checked-docs-page (v1's help was tested data, its most-proven
   ;; turn saver): every form the help page tells an agent to run works in a real agent, in
