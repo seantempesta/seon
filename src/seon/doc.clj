@@ -523,15 +523,13 @@
 (defn- name-of
   "What names each text's entity on db, as a function of the entity: a form's vars, a section's address and heading, a
   schema key, a task's id; the index's name column, which bm25 weighs above the text (an item whose name the query
-  says is the likely one, as relevance found when its text held its name twice). Read by seeks and one scan of
-  :var/form, made the first time a form is named, never by entity: a function, so the build makes no contracted call a
-  text."
+  says is the likely one, as relevance found when its text held its name twice). Read by seeks of the entity's own
+  datoms (a form's :form/defines, then each var's name), never by entity: a function, so the build makes no contracted
+  call a text."
   {:malli/schema [:=> [:cat :seon.host/db] :seon.host/fn]}
   [db]
-  (let [one (fn [e a] (some-> (first (d/datoms db :eavt e a)) :v str))
-        vars (delay (let [nm (into {} (map (juxt :e :v)) (d/datoms db :aevt :var/name))]
-                      (reduce (fn [m {:keys [e v]}] (update m v (fnil conj []) (str (nm e)))) {} (d/datoms db :aevt :var/form))))]
-    (fn [e] (or (some->> (get @vars e) (str/join " "))
+  (let [one (fn [e a] (some-> (first (d/datoms db :eavt e a)) :v str))]
+    (fn [e] (or (some->> (seq (d/datoms db :eavt e :form/defines)) (keep #(one (:v %) :var/name)) seq (str/join " "))
                 (when-let [ad (one e :seon.doc/address)] (str ad " " (one e :seon.doc/heading)))
                 (one e :schema/key) (one e :seon.task/id) ""))))
 
