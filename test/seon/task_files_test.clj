@@ -187,6 +187,8 @@
                                 :seon.eval/record {:code "(+ 1 2)" :response {:handle 'result/example-abc-s1 :value 3} :run "example/abc" :call-id "example-abc-call_1" :call 0}}]]))
         _ (spit (str runs "/bad.edn") "[[{:seon.agent/key \"someone\"}]]")
         _ (spit (str runs "/unreadable.edn") "[[{:seon.agent/key")
+        ;; written before session-tx gave the agent an id: it loaded, and its page was not found
+        _ (spit (str runs "/no-id.edn") (pr-str [[{:seon.agent/key "example/old" :seon.agent/status :ended}]]))
         root (ts/start-root! {:store path :main main :runs runs})
         ask (fn [code] (ts/value-of (:response (ts/ask root {:op :eval :agent "root" :code code}))))
         refused (fn [f] (ask (str "(let [r (my.root/load-example! sys " (pr-str f) ")] [(:seon.error/type r) (:path r) (:seon.error/message r)])")))]
@@ -205,4 +207,5 @@
         (is (str/includes? message "not found")))
       (is (str/includes? (nth (refused (str runs "/unreadable.edn")) 2) "not readable EDN"))
       (is (str/includes? (nth (refused (str runs "/bad.edn")) 2) "not a non-empty vector of transactions"))
+      (is (str/includes? (nth (refused (str runs "/no-id.edn")) 2) "no :seon.agent/id") "an agent with no id is refused, not loaded unfindable")
       (finally (ts/stop-root! root) (ts/drop-main! path main) (clojure.java.shell/sh "rm" "-rf" runs)))))
