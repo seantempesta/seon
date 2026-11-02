@@ -147,6 +147,8 @@
     (ffi/reinterpret h 1 arena (fn [p] (settle! st p #(assoc % :retired? true))))
     (exec! h :create "CREATE VIRTUAL TABLE t USING fts5(body, e UNINDEXED, a UNINDEXED, name, tokenize='porter unicode61')")
     (exec! h :create "CREATE VIRTUAL TABLE g USING fts5(body, e UNINDEXED, a UNINDEXED, tokenize='trigram')")
+    ;; a match's rank is bm25 over the text and the name, the name weighed (FTS5's rank configuration, set once)
+    (exec! h :create (str "INSERT INTO t(t, rank) VALUES('rank', 'bm25(1.0, 0.0, 0.0, " (double (cfg/value :seon.config.render/search-name-weight)) ")')"))
     (exec! h :begin "BEGIN")
     (swap! st assoc :counts (insert-rows! h rows))
     (exec! h :commit "COMMIT")
@@ -231,7 +233,7 @@
   {:malli/schema [:=> [:cat [:map [:h :seon.ffi/address]] :string [:set :int] [:maybe [:set :int]]] [:vector [:tuple :int :int :double]]]}
   [{h :h} query attrs es]
   (with-row-calls
-    (select h :match (str "SELECT e, a, bm25(t, 1.0, 0.0, 0.0, " (double (cfg/value :seon.config.render/search-name-weight)) ") FROM t WHERE t MATCH ?1" (in-attrs attrs)
+    (select h :match (str "SELECT e, a, rank FROM t WHERE t MATCH ?1" (in-attrs attrs)
                   ;; the entities asked, when a caller restricts it (a contracted helper would count a call a query)
                   (if es (str " AND e IN (" (str/join "," (sort es)) ")") "")) query
             (fn [st] [(c-column-int st 0) (c-column-int st 1) (- (c-column-double st 2))]))))
