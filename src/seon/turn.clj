@@ -321,7 +321,7 @@
             ;; each eval call through the one REPL path, in order; its response is the call's
             ;; result; the reply's prose is the first call's
             ;; each eval's prose: the reply's text (on its first call) then the call's own, as the user reads it
-            ;; a call with no prose or no form, or after one that threw, is not run: its one
+            ;; a call with no prose or no form, or after one that threw or answered an error, is not run: its one
             ;; result says why (seon.repl/unrun, docs/prompt.md)
             calls (reduce (fn [acc [i {:keys [id code prose]}]]
                             (let [content (when (and (zero? i) (not (str/blank? (:text c)))) (:text c))
@@ -333,8 +333,9 @@
                                         content (assoc :content content)
                                         (and (zero? i) (:reasoning c)) (assoc :reasoning (:reasoning c))
                                         (seq repairs) (assoc :repaired (context/repaired src repairs)))
-                                  ;; a call that failed (threw, or had no prose or no form) stops the rest
-                                  failed (some #(when (:ex (:response %)) (:id %)) acc)
+                                  ;; a call that failed (threw, answered an error value such as a refused edit, or had no
+                                  ;; prose or no form) stops the rest: none builds on a change that never happened
+                                  failed (some #(when (or (:ex (:response %)) (contract/error? (:value (:response %)))) (:id %)) acc)
                                   why (if failed
                                         (contract/error :seon.turn/not-run #'act! (str "not run: call " failed " of this reply failed before it (its result says why)") {:after failed})
                                         (call-problem prose src))]

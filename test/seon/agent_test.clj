@@ -354,6 +354,21 @@
     (is (every? pos-int? counts) (str "both children counted: " (pr-str counts) " " (pr-str run)))
     (is (apply = counts) (str "the two children hold the same descriptors: " (pr-str counts)))))
 
+(deftest a-test-child-starts-as-a-test-runner-does
+  ;; task seon.agent/a-test-child-starts-as-a-test-runner-does: an agent's test child ran its tests with the agent's
+  ;; interrupt pending (every eval "interrupted by root"); the child starts with no interrupt of its parent's and
+  ;; none of its evals. Here the agent forks from inside its eval; the child's test writes what it finds (a pending
+  ;; interrupt cleared: seon.intr-test/a-forked-child-holds-no-interrupt-of-its-parents)
+  (let [checkout (seon.config/checkout)
+        f (str checkout "/target/runs/child-clean-" (random-uuid))
+        proof (str "(ns clean-proof (:require [clojure.test :refer [deftest is]]))"
+                   " (deftest p (spit " (pr-str f) " (pr-str [@@#'seon.intr/pending (count @@#'seon.intr/stack)])) (is true))")
+        form (str "(do " proof " (seon.agent/run-tests-forked 1000000000 '#{clean-proof/p} :turn))")
+        [run] (in-agent [form] {:sets [":seon.config.proofs/child-min-ms=1"]})
+        found (some-> (try (slurp f) (catch Throwable _ nil)) read-string)]
+    (sh/sh "rm" "-f" f)
+    (is (= [false 0] found) (str "no interrupt and no eval of its parent's: " (pr-str found) " " (pr-str run)))))
+
 (deftest an-agent-answers-while-its-tests-run
   ;; task seon.turn/observe-reads-are-renders (phase B): root's :tests request forks the test child
   ;; and a fiber reads it, so the agent's loop answers an eval while its own tests run. The test
@@ -1148,6 +1163,24 @@
     (is (str/includes? (:content r1) "boom") "the second call's error")
     (is (str/includes? (:content r2) "not-run") "the third call was not run, and its result says so")
     (is (str/includes? (:content r2) "call-0-1") "naming the call that threw")
+    (is (not (str/includes? (:content r2) ":value 2")) "(inc a) never ran")))
+
+(deftest an-error-answer-stops-the-replys-later-calls
+  ;; task seon.turn/an-agent-that-breaks-its-own-render-is-told-and-goes-on: a call answering an error value (a
+  ;; refused edit!) stops the reply's later calls as a throw does, so none builds on a change that never happened
+  ;; (a replay's refused edit of seon.ctx/members-map, then an applied edit of join calling it, broke its page)
+  (let [[_ msgs] (in-agent (fn [{:keys [task ns]}]
+                             (let [run (str ns "/t#refused")]
+                               [(str "(seon.turn/work! {:task " (pr-str task) " :run " (pr-str run) " :max-turns 1})")
+                                (str "(let [db (seon.agent/db)]"
+                                     " (->> (:messages (seon.context/render db {:commit (datahike.api/commit-id db) :task " (pr-str task) " :run " (pr-str run)
+                                     "                                       :turn 1 :max-turns 1 :origin :model :agent (:key @seon.agent/state)}))"
+                                     "      (filter #(= \"tool\" (:role %))) (mapv #(select-keys % [:tool-call-id :content]))))")]))
+                           {:config {:seon.config.ai/script 'seon.fixtures/calls-one-refused}})
+        [_ r1 r2 :as rs] (:value msgs)]
+    (is (= ["call-0-0" "call-0-1" "call-0-2"] (mapv :tool-call-id rs)) (str "every call has its result, by its id: " (pr-str msgs)))
+    (is (str/includes? (:content r1) "edit-refused") "the second call's error value")
+    (is (str/includes? (:content r2) "not-run") "the third call was not run, and its result says so")
     (is (not (str/includes? (:content r2) ":value 2")) "(inc a) never ran")))
 
 (deftest a-call-is-prose-and-its-forms
