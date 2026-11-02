@@ -1408,6 +1408,20 @@
                   (when (and reason (not= :green outcome)) (str " · " reason)))])
       status [:p {:class "text-text-500"} (case status :busy "working…" :idle "waiting for you" (kname status))])))
 
+(defn examples
+  "The example sessions its task names (a component over ctx and the db, placed when the task names
+  any): under a heading naming each session, its evals as one line each, drawn by `evaluation` as the
+  agent's own are. The model reads the same sessions as messages (seon.context/example-messages), so
+  this is beside its page, not in it."
+  {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int] :any]}
+  [{c :seon.ctx/ctx db :seon.db/db} _aid]
+  (when-let [xs (seq (get-in c [:task :examples]))]
+    [:section
+     (for [[_ x] (sort-by key xs) :let [x (ratom/realize x)]]
+       [:details [:summary (str "example session " (:seon.agent/key x))]
+        [:ol (for [[e v] (sort-by (fn [[e]] (:tx (first (d/datoms db :eavt e :seon.eval/id)))) (:evals x))]
+               [:li (render/html {:schema :seon.db/eval-fact :as :inline} (ratom/realize v))])]])]))
+
 (defn render-ctx
   "The render of an agent's ctx, the one layout the model and the person read (the declared html
   render of :seon.render/render-ctx, which an agent overrides on its branch like any render): its ctx,
@@ -1461,6 +1475,7 @@
       (for [id conv :when (and (not (in-turn id)) (not (loop? id)))] (cond (ev? id) [#'eval-item {} id] (tu? id) [#'chat-turn {} aid id] :else [#'chat-message {} aid id]))
       (when aid [#'chat-end {} aid])]
      [:aside {:id "p-tiles"}
+      (when (seq (get-in c [:task :examples])) [#'examples {} aid])
       (for [[id e] evals :let [{{v :value} :response k :schema} (:seon.eval/record e)] :when (and (some? v) (render/render-of (ratom/realize v) k))]
         [#'eval-tile {} id])]]))
 

@@ -39,6 +39,16 @@
        (assoc @(root/transact-main! sys tx)
               :tasks (mapv #(task/task-id (:seon.task/ns %) (:seon.task/name %)) ds))))))
 
+(defn load-example!
+  "Transact the example session in the EDN file at path (seon.context/session-tx's answer, written with
+  pr-str: a vector of tx-data) onto main, one transaction each in order, so its records keep the order
+  they ran in. A task names it by `[:seon.agent/key \"example/<id>\"]` in :seon.task/examples. Answers
+  the last writer's answer with :batches, how many it wrote."
+  {:malli/schema [:=> [:cat :seon.root/sys :string] :map]}
+  [sys path]
+  (let [txs (edn/read-string (slurp path))]
+    (assoc (reduce (fn [_ tx] @(root/transact-main! sys tx)) nil txs) :batches (count txs))))
+
 (defn run!
   "Release tasks ids: the one release (nothing autoruns). Each held task becomes running,
   by compare-and-swap on main (a cancel! between the read and the write refuses the write);
