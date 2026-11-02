@@ -955,8 +955,9 @@
   page shows and the model is sent as it is: the search fact at ctx path :at, its query searched on the branch's
   db by seon.context/search (exact words, meaning once its query has a vector, and the names it holds;
   functions, wiki sections and schema keys, no relevance cut), its :seon.search/k hits (else
-  :seon.config.render/search's), each a line: its name, then a function's doc's first sentence or a section's
-  heading; the hits left out are one last line, how many and the call that answers them. A change of its query (a swap! on ctx)
+  :seon.config.render/search's), each a line: its name (its first sentence added nothing a model used, at
+  ~90 tokens a hit against ~10: docs/vector.md#search); the hits left out are one last line, how many and the call
+  that answers them; a query with no vector yet says it was searched without meaning. A change of its query (a swap! on ctx)
   redraws this part alone, and the model is sent what changed of it
   (docs/render.md#the-page-is-sent-as-what-changed). What it finds for a request is measured in
   docs/vector.md#what-the-work-is-likely-to-need-as-an-eval."
@@ -966,19 +967,17 @@
     (let [q (:seon.search/query s)
           ;; the search fact's own vector, once the pipeline has embedded its query (seon.vector's due texts)
           e (pdb/eid db :seon.search/id (:seon.search/id s))
+          qv (when (and e (vector/vector-of db e)) e)
           ;; its own count when it names one, else :seon.config.render/search's; the hits it leaves out are
           ;; said by search's last entry ({:kind :more :left n :more \"the call that answers them\"}), drawn as such
-          hits (context/search db q (cond-> {:kinds #{:var :section :schema} :min 0.0} (:seon.search/k s) (assoc :k (:seon.search/k s)))
-                               (when (and e (vector/vector-of db e)) e))]
+          hits (context/search db q (cond-> {:kinds #{:var :section :schema} :min 0.0} (:seon.search/k s) (assoc :k (:seon.search/k s))) qv)]
       ;; the task's own request is on the page already: the heading names it rather than repeating it
-      [:section [:h3 (if (= q (get-in c [:task :seon.task/plan])) "search: this task's request" (str "search: " q))]
-       (into [:ol] (for [{:keys [kind name e left more]} hits]
+      [:section [:h3 (str (if (= q (get-in c [:task :seon.task/plan])) "search: this task's request" (str "search: " q))
+                          (when-not qv " (by its words: its query has no vector yet)"))]
+       (into [:ol] (for [{:keys [kind name left more]} hits]
                      (if (= :more kind)
                        [:li (str left " more: ") [:code more]]
-                       [:li [:code (str name)]
-                        (some->> (case kind :var (some-> (:var/doc (d/entity db [:var/name name])) ref/lead-sentence)
-                                            :section (:seon.doc/heading (d/entity db e)) nil)
-                                 (str " "))])))])))
+                       [:li [:code (str name)]])))])))
 
 (defn- held-whole
   "Where ctx c holds whole each entity the cites at paths ps joined, {e path}: the agent's task and its needs, the

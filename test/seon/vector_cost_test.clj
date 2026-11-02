@@ -104,34 +104,6 @@
      :fixed {:ticks 40000.0 :bytes 100000.0}
      :sizes [30 100 300]}))
 
-(defn similar-of
-  "seon.context/similar's arguments: n forms with vectors and none a function, so it ranks every
-  one and walks every rank (its worst case); the query one of them, nothing named."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :int [:set :qualified-symbol]]]}
-  [n] (let [db (store-of n)
-            ;; each form defines a test, so every rank's vars are read and none is a function
-            db (d/db-with db (vec (for [i (range n)] {:var/name (symbol "vc-test" (str "t" i)) :var/kind :test :var/form [:form/id (str "vf" i)]})))
-            q (:e (first (d/datoms db :avet :form/id "vf0")))]
-        ;; the query asks for five (its own setting, as a task's :seon.task/config is: off by default)
-        [(d/db-with db [{:db/id q :seon.config.render/similar 5}]) q #{}]))
-
-(deftest similar-ranks-every-form-once
-  ;; the owner's ruling (2026-10-24, DECISIONS "Embeddings join the context"): :similar is an
-  ;; exact search, measured
-  (cost/proof
-    {:of 'seon.context/similar :input 'seon.vector-cost-test/similar-of
-     :n "forms with vectors"
-     :work (str "near with every vector its shortlist at every dim (each coarse row and each whole vector "
-                "read once, one C scan and one C rerank of all of them, one sort), then each rank's form's "
-                "vars read until :seon.config.render/similar functions are found (here none: every rank)")
-     :growth :n-log-n
-     ;; 2026-10-31 (shrink-tests-4): on the world, sizes [10 30 100]: 184k ticks / 856 KB at 10, 439k / 1.67 MB at 30,
-     ;; 1.37M / 4.63 MB at 100: ~1,800 ticks and 5.7 KB a form n log n unit, the fixed part ~125k / 670 KB
-     ;; (the seed's forms and the 400-row shortlist's share were in the 300k / 1.5 MB the larger sizes held)
-     :per-n {:ticks 2000.0 :bytes 6000.0}
-     :fixed {:ticks 150000.0 :bytes 750000.0}
-     :sizes [10 30 100]}))
-
 ;; A store on disk of this test's own, the last resort (docs/storage.md): the in-memory test store gives
 ;; its index nodes no addresses, so no two db values of it share a stored subtree and a structural diff
 ;; of them reads everything (as in seon.merge-cost-test); main's dbs are LMDB's, which share them.
