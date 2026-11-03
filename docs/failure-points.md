@@ -60,6 +60,8 @@ Whatever an edge or boundary raises is data, and the requester gets it whole; ro
 
 The boundaries where a defect in a request becomes a recorded error map instead of ending its process.
 
+The error map is EDN, so its record is stored: a value of the exception's data that is no EDN (a library's record, such as the `datalog.parser.type.Variable`s Datahike's "Query for unknown vars" carries) is kept as its EDN text (```seon.agent/edn-values```). A refused record had thrown out of the turn that made it, which lost that turn's reply and evals and ran the turn again.
+
 | boundary | (`ns/fn`) | what it records |
 |---|---|---|
 | the agent's REPL: reading and evaluating an agent's form | `seon.repl/eval-code` | a form's read error or evaluation error as an `:err` reply item (the one error map itself, under `:err`; the evaluation of a form past its tick budget is the typed interrupt); the next form's reading goes on after an error, the request ends after an interrupt |

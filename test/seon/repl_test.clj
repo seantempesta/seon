@@ -811,6 +811,23 @@
     (is (= 1 (count (re-seq #"did you mean" (:text r)))) (:text r))
     (is (= 1 (count (re-seq #":jolt.error/suggestions" (:text r)))) (:text r))))
 
+;; task seon.repl/every-eval-of-a-turn-is-recorded (docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map):
+;; Datahike's "Query for unknown vars" carries datalog.parser.type.Variable records in its ex-data; the store refused
+;; the record of the eval that threw it, and the refusal ended the turn (a run lost turns 5-20 so). Its error map is
+;; EDN, and the eval is recorded with its error
+(deftest an-eval-that-throws-is-recorded-with-its-turn
+  (let [e (try (d/q '[:find ?y :where [?e :var/name _]] (d/db-with (ts/test-db) [])) nil (catch Throwable t t))]
+    (is (some? e) "the query throws")
+    (is (nil? (seon.program/non-edn (agent/error-map e))) "its error map is EDN, the record's value"))
+  (let [[r recorded] (at/in-agent (fn [{:keys [task]}]
+                                    ["(datahike.api/q '[:find ?y :where [?e :var/name _]] (my.db/db))"
+                                     {:op :eval :agent "root"
+                                      :code (str "(let [b (:db @(seon.root/branch-db sys (:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))))]"
+                                                 " (vec (for [[rec] (datahike.api/q '[:find ?r :where [_ :seon.eval/record ?r]] b) :when (get-in rec [:response :ex])]"
+                                                 " (get-in rec [:response :ex :seon.error/message]))))")}]))]
+    (is (:ex r) (pr-str r))
+    (is (some #(clojure.string/includes? (str %) "unknown vars") (:value recorded)) (str "the eval is recorded with its error: " (pr-str recorded)))))
+
 (deftest an-ordinary-exception-is-its-error-map
   (let [r (eval-in "(+ 1 :a)")
         em (:ex r)]
