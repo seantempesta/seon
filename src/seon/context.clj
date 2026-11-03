@@ -923,12 +923,12 @@
 (defn drawn-parts
   "The parts of an agent's page its model reads, drawn cold from its record c on db (its branch as of a
   commit): its task's list (the layout :seon.render/render-ctx declares, drawn once by the walk,
-  seon.render/draw), each component's hiccup exactly as its render returned it, by its element id,
+  seon.render/draw, which draws that list alone: the page's other lists are no part of the model's), each component's hiccup exactly as its render returned it, by its element id,
   in order: the same hiccup the person's page shows (seon.repl/page-hiccup has it from the live walk,
   at the cost of what changed). A read of history (a replay, a request with no live walk), never a turn's work. See docs/render.md#the-page-is-sent-as-what-changed."
   {:malli/schema [:=> [:cat :seon.host/db [:map [:tree :map]]] :map]}
   [db c]
-  (let [w (render/draw (:tree c) ctx/changes db (render/declared-var :seon.render/render-ctx))]
+  (let [w (render/draw (:tree c) ctx/changes db (render/declared-var :seon.render/render-ctx) page-lists)]
     (try (apply array-map (mapcat identity (render/placed-hiccup w page-lists)))
          (finally (render/dispose-walk! w)))))
 
@@ -1070,6 +1070,7 @@
         prev-ref (when-not whole? (last (filter #(= :parts (first %)) prev)))
         was (when (and prev-ref (some #(and (contains? live %) (contains? old %)) ids))
               (cond (= prev-ref (:live-ref printed)) (:live printed)
+                    (= prev-ref (:was-ref printed)) (:was printed)
                     model? (drawn-at db e (nth prev-ref 2))))
         ref (cond-> [:parts e (d/commit-id db) whole? ids id] was (conj (nth prev-ref 2)))
         ;; a model's first request (whole) holds its task's example sessions right after the system message, then
@@ -1082,14 +1083,20 @@
         current [[:parts id] (delay {:ref ref :whole (parts-message live ids was)}) nil (if whole? 0 now)]
         ;; what the previous request sent, its refs in order: this process's print of them, else read back from the records
         before (when (and model? (not whole?)) (into [] (remove #(#{:section :hashes} (first %))) prev))
+        ;; a print whose first refs are those (a later request's of the same session: the debug page's latest, drawn
+        ;; again as the branch moves) is reused as far as they go, each record's print a function of its ref
         base (when before
-               (if (= before (mapv #(:ref (get-in printed [:parts %])) (:ids printed))) printed (cache-of db before)))
+               (let [k (count before) ids (:ids printed)]
+                 (if (and ids (<= k (count ids)) (= before (mapv #(:ref (get-in printed [:parts %])) (subvec ids 0 k))))
+                   (let [ids (subvec ids 0 k)] {:ids ids :parts (select-keys (:parts printed) ids)})
+                   (cache-of db before))))
         rs (if model? (into [] (comp (filter (fn [[tx]] (<= tx now))) (map (fn [[tx v k]] [(ref-of v) v k tx]))) (records db e (when before prev-tx))) [])
         items (sort-by (fn [[_ _ _ tx]] (or tx Long/MAX_VALUE)) (concat rs ex-items [current]))
         cache (printed-run items base)
         ps (mapv #(get-in cache [:parts %]) (:ids cache))]
     {:messages (into [{:role "system" :content help}] (mapcat :whole) ps)
-     :printed (assoc cache :live live :live-ref ref)
+     ;; the parts it drew, and those it drew of the request before (the same for every later request until the next call)
+     :printed (cond-> (assoc cache :live live :live-ref ref) was (assoc :was was :was-ref prev-ref))
      :sent (-> [help-ref] (into (map :ref) ps) (conj [:hashes hs]))
      :parts (into [[help-ref [{:role "system" :content help}]]] (map (juxt :ref :whole)) ps)}))
 
@@ -1169,18 +1176,23 @@
 
 (defn wire-turn
   "Turn basis b's request as it went on the wire, made again from db at b's commit (one `render`):
-  {:body :provider :sources}, the body seon.model/request-body made of its messages under its provider
-  (`provider-of`), and :sources, for each of the body's messages in order the refs of the records that made it
-  (seon.model/wire-groups folds a reply's calls into one message). See docs/render.md#the-debug-page-is-the-wire-request."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.model-call/basis] [:map [:body :map] [:provider :seon.model/provider] [:sources [:vector [:vector :any]]]]]}
-  [db basis]
-  (let [{:keys [messages parts]} (render db basis)
+  {:body :provider :sources :printed}, the body seon.model/request-body made of its messages under its provider
+  (`provider-of`), :sources, for each of the body's messages in order the refs of the records that made it
+  (seon.model/wire-groups folds a reply's calls into one message), and :printed, the print cache `render`
+  answers. With printed, an earlier answer's :printed: what of it this request holds is not printed again
+  (the debug page's latest, drawn as the branch moves). See docs/render.md#the-debug-page-is-the-wire-request."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.model-call/basis] [:map [:body :map] [:provider :seon.model/provider] [:sources [:vector [:vector :any]]] [:printed :map]]]
+                  [:=> [:cat :seon.host/db :seon.model-call/basis [:maybe :map]] [:map [:body :map] [:provider :seon.model/provider] [:sources [:vector [:vector :any]]] [:printed :map]]]]}
+  ([db basis] (wire-turn db basis nil))
+  ([db basis printed]
+  (let [{:keys [messages parts] :as r} (render db basis {:printed printed})
         p (provider-of db basis)
         ;; each neutral message's ref, in order, then each wire message's refs by the one fold
         refs (into [] (mapcat (fn [[ref ms]] (repeat (count ms) ref))) parts)]
     {:body (model/request-body p {:messages messages :task (:task basis) :turn (:turn basis)})
      :provider p
-     :sources (mapv (fn [is] (vec (distinct (map refs is)))) (model/wire-groups messages))}))
+     :sources (mapv (fn [is] (vec (distinct (map refs is)))) (model/wire-groups messages))
+     :printed (:printed r)})))
 
 (defn wire-request
   "The request body turn basis b put on the wire, made again from db at b's commit (`wire-turn`'s :body).

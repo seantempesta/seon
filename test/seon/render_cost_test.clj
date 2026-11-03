@@ -194,7 +194,7 @@
 
 (defn latest-of
   "The input of size n: the render proc's state holding agent a1's debug page on latest after a pass, over a
-  session of n earlier evals and one model turn (its basis recorded as seon.turn/act! writes it), with one eval
+  session of n earlier evals and one model turn (its basis and what it sent recorded as seon.turn/act! writes them), with one eval
   more on the branch since: what the next pass draws (the turn to come's request, made at the head); and the view."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map :any]]}
   [n]
@@ -210,7 +210,9 @@
                      (into [] (mapcat #(ev (str "e" %))) (range n))
                      [{:seon.turn/id "t/x#1/0" :seon.turn/run [:seon.run/id "t/x#1"] :seon.turn/agent [:seon.agent/key k] :seon.turn/n 0 :seon.turn/origin :model}]])
         b {:commit (d/commit-id db0) :task "t/x" :run "t/x#1" :turn 0 :max-turns 9 :origin :model :agent k}
-        db (d/db-with db0 [{:seon.model-call/id "t/x#1/0" :seon.model-call/turn [:seon.turn/id "t/x#1/0"] :seon.model-call/basis b}])
+        ;; what the call sent, as the turn records it once its request is made (seon.turn/act!)
+        db (d/db-with db0 [{:seon.model-call/id "t/x#1/0" :seon.model-call/turn [:seon.turn/id "t/x#1/0"] :seon.model-call/basis b
+                            :seon.model-call/sent (:sent (seon.context/render db0 b))}])
         view [:debug :a1]
         st {:rid 1 :pending {} :watch #{view} :waiting {} :kf-wanted #{} :views {} :main-db db
             :branches {view {:db db :read [:task-x]}} :view {:agents {}}}
@@ -224,15 +226,17 @@
   (cost/proof
     {:of 'seon.render.proc/pass-view :input 'seon.render-cost-test/latest-of
      :n "earlier evals in the agent's session"
-     :work (str "one request made at the branch's head (seon.context/render: the system prompt, every eval of the "
-                "session printed as its messages, the page's parts drawn cold) under its provider, put in the wire shape "
+     :work (str "one request made at the branch's head (seon.context/render: the system prompt, the session's evals "
+                "from the print cache the draw before kept, the records since printed, the task's list drawn cold at the "
+                "head and, from the cache, as the call before drew it) under its provider, put in the wire shape "
                 "(seon.model/request-body) and drawn once (seon.render.ui/debug-turn: a row a message), and the timeline's "
-                "strip (a pull of each model call's basis). The session's evals are each printed and drawn: linear in them")
+                "strip (a pull of each model call's basis). Linear in the evals: the page's rows, and the cold draw's ctx")
      :growth :linear
-     ;; measured 2026-11-03: 8,708 / 21,668 / 67,028 calls and 16.6 / 33.2 / 92.7 MB at 10 / 30 / 100 evals;
-     ;; most of it the page's parts drawn cold at the head (seon.context/drawn-parts walks the whole page)
-     :per-n {:calls 648 :bytes 846000}
-     :fixed {:calls 2228 :bytes 8140000}
+     ;; measured 2026-11-03: 3,888 / 8,488 / 24.6k calls and 10.4 / 16.8 / 39.5 MB at 10 / 30 / 100 evals (before the
+     ;; print cache and the task's list drawn alone: 8,708 / 21,668 / 67,028 and 16.6 / 33.2 / 92.7 MB); what grows is
+     ;; the page's html, a row a message, and the cold draw's ctx (seon.ctx/build), each about a third
+     :per-n {:calls 232 :bytes 325000}
+     :fixed {:calls 1600 :bytes 7200000}
      :sizes [10 30 100]}))
 
 (deftest a-transaction-renders-what-it-touched

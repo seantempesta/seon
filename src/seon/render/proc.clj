@@ -104,14 +104,15 @@
 ;;; --- units, rendered incrementally ---------------------------------------------------------
 
 (defn- render-unit
-  "A unit as [hiccup html]: its html as drawn, else its draw thunk's hiccup (a debug turn's row),
-  else its input by the render its schema declares, its unit named (its element's id: :unit). The
-  hiccup is kept beside the html. step-units calls it only when the unit's input changed."
-  {:malli/schema [:=> [:cat :map] [:tuple :any :string]]}
-  [{:keys [id input schema html hiccup draw]}]
-  (cond html [hiccup html]
-        draw (let [hc (draw)] [hc (h/html hc)])
-        :else (let [hc (render/html {:schema schema :unit id} input)] [hc (h/html hc)])))
+  "A unit as [hiccup html kept]: its html as drawn, else its draw's hiccup (the debug page's turn: draw,
+  a function of what its last draw kept, kept, answers [hiccup kept']), else its input by the render its
+  schema declares, its unit named (its element's id: :unit). The hiccup and kept are held beside the html.
+  step-units calls it only when the unit's input changed."
+  {:malli/schema [:=> [:cat :map :any] [:tuple :any :string :any]]}
+  [{:keys [id input schema html hiccup draw]} kept]
+  (cond html [hiccup html nil]
+        draw (let [[hc k] (draw kept)] [hc (h/html hc) k])
+        :else (let [hc (render/html {:schema schema :unit id} input)] [hc (h/html hc) nil])))
 
 (defn- step-units
   "Run a layout's units, in the order the layout shows them, against what the view retained: a
@@ -122,7 +123,9 @@
   at its top, a conversation's older parts), else at its end. Answers [view' patch counts]."
   {:malli/schema [:=> [:cat [:maybe :map] [:sequential :map]] [:tuple :map :map :map]]}
   [view units]
-  (let [held (:units (or view {}))
+  ;; a page of no units (the debug page before a model turn) is held with none, never without :units
+  (let [view (or view {:units {}})
+        held (:units view)
         ;; for each unit, whether a unit after it in its container is held already
         before? (second (reduce (fn [[seen acc] {:keys [id container]}]
                                   [(cond-> seen (and container (contains? held id)) (conj container))
@@ -135,8 +138,8 @@
                      prev (cond-> prev container (assoc container id))]
                  (if (and old (= input (:input old)))
                    [[view patch n] prev placed]
-                   (let [[hiccup html] (render-unit u)
-                         view (assoc-in view [:units id] (cond-> {:input input :html html :hiccup hiccup} container (assoc :container container)))]
+                   (let [[hiccup html kept] (render-unit u (:kept old))
+                         view (assoc-in view [:units id] (cond-> {:input input :html html :hiccup hiccup} container (assoc :container container) (some? kept) (assoc :kept kept)))]
                      (cond
                        (= html (:html old)) [[view patch (update n :same inc)] prev placed]
                        (and container (nil? old))
@@ -235,7 +238,9 @@
                 {:turns (mapv (fn [e b] {:e e :turn (:turn b) :origin (:origin b)}) calls bases) :at at :to-come? to-come?}
                 (when (seq calls)
                   {:id "d-turn" :input [at (when (= :latest at) (:max-tx bdb)) raw?]
-                   :draw #(ui/debug-turn {:unit "d-turn"} (assoc (ui/debug-input bdb at calls raw?) :view (ui/view-param view)))})
+                   ;; the print cache its last draw kept: latest prints only the records new since
+                   :draw (fn [printed] (let [in (ui/debug-input bdb at calls raw? printed)]
+                                         [(ui/debug-turn {:unit "d-turn"} (-> in (dissoc :printed) (assoc :view (ui/view-param view)))) (:printed in)]))})
                 nil))))
 
 (def ^:private gone "The agent statuses of an ended process (:seon.agent/status)." (:seon.status/gone (contract/properties :seon.agent/status)))

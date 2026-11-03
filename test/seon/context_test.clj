@@ -771,7 +771,10 @@
                               :origin :model :agent "b/a1" :model "run-model"}
                            p (context/provider-of @conn b)
                            _ (d/transact conn [{:seon.model-call/id (str "demo/g#1/" n) :seon.model-call/turn [:seon.turn/id (str "demo/g#1/" n)] :seon.model-call/basis b}])
-                           body (seon.model/request-body p {:messages (:messages (context/render @conn b)) :task "demo/g" :turn n})]
+                           r (context/render @conn b)
+                           ;; what it sent, recorded as the turn does: the next request continues it
+                           _ (d/transact conn [{:seon.model-call/id (str "demo/g#1/" n) :seon.model-call/sent (:sent r)}])
+                           body (seon.model/request-body p {:messages (:messages r) :task "demo/g" :turn n})]
                        (d/transact conn [{:seon.eval/id (str "e" n) :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key "b/a1"}
                                           :seon.eval/record {:code (str "(e" n ")") :response {:handle (symbol "result" (str "e" n)) :value (vec (range (* 5 (inc n))))}
                                                              :line (str "e" n) :run "demo/g#1" :call-id (str "c" n) :call 0 :prose (str "Step " n ".")}}])
@@ -783,7 +786,14 @@
         (doseq [[b body] sent]
           (is (= (clojure.data.json/write-str body)
                  (clojure.data.json/write-str (context/wire-request (d/commit-as-db (:store @conn) (:commit b)) b)))
-              (str "turn " (:turn b) ": made again at its basis, the bytes it sent")))))))
+              (str "turn " (:turn b) ": made again at its basis, the bytes it sent")))
+        ;; the print cache of a later request (the debug page's latest keeps one) prints none of what it holds again,
+        ;; and changes no byte: each turn made again with the newest turn's cache is the bytes it sent
+        (let [at #(d/commit-as-db (:store @conn) (:commit %))
+              later (:printed (context/wire-turn (at (first (peek sent))) (first (peek sent))))]
+          (doseq [[b body] sent]
+            (is (= (clojure.data.json/write-str body) (clojure.data.json/write-str (:body (context/wire-turn (at b) b later))))
+                (str "turn " (:turn b) ": made again with a later request's print cache, the bytes it sent"))))))))
 
 (deftest a-turn-records-what-it-sent
   ;; task seon.context/a-turn-records-what-it-sent (A): a turn records the records its request

@@ -792,17 +792,17 @@
         (is (= (clojure.data.json/write-str (sent 1 r1)) (wire-text h1)) "turn 1: the same")
         (is (str/includes? h1 "the help page") "each message beside the records that made it")
         (is (str/includes? h1 "I call f.") "a call's arguments as sent, its prose in them")
-        (let [in1 (ui/debug-input db e1 [e0 e1] false)
+        (let [in1 (ui/debug-input db e1 [e0 e1] false nil)
               roles (mapv :role (get-in in1 [:body :messages]))]
           (is (= false (first (:new in1))) "the system prompt was sent before: not new")
           (is (some true? (map (fn [r n] (and (= "tool" r) n)) roles (:new in1))) "the call's result is new since turn 0")
-          (is (not-any? true? (:new (ui/debug-input db e0 [e0 e1] false))) "the first request marks nothing"))
+          (is (not-any? true? (:new (ui/debug-input db e0 [e0 e1] false nil))) "the first request marks nothing"))
         (testing "a chosen turn stays as it was when the branch moves"
           (let [moved (d/db-with db [{:seon.eval/id "e9" :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key "b/a1"}
                                       :seon.eval/record {:code "(f 9)" :response {:handle 'result/e9 :value 9} :run "demo/f#1"}}])]
             (is (= h0 (page (assoc-in st [:branches [:debug :a1] :db] moved) e0)))))
         (testing "latest, while the run goes on, is the turn to come, drawn at the head"
-          (let [in (ui/debug-input db :latest [e0 e1] false)]
+          (let [in (ui/debug-input db :latest [e0 e1] false nil)]
             (is (:to-come? in))
             (is (= 2 (:turn in)) "the next turn's request")
             (is (str/includes? (page st nil) "to come"))))
@@ -958,20 +958,36 @@
   (doseq [ref [[:section 397 536870918] [:parts 12 #uuid "00000000-0000-0000-0000-000000000001" true ["status-1"] "demo/f#1/0"] [:parts 12 #uuid "00000000-0000-0000-0000-000000000002" false ["status-1"] "demo/f#1/1"] [:turn "demo/f#1/2"] [:eval "e3"] [:eval "e4" {:since 'result/e3}] [:message "m1"]]]
     (is (string? (#'ui/source ref)) (pr-str ref))))
 
+(deftest a-debug-page-before-a-model-turn-answers
+  ;; a page of no units (an agent's debug page before its first model turn) is held with none and answered:
+  ;; it had no :units, and composing it threw out of the pass, so no page answered
+  (let [db (reduce d/db-with (ts/test-db)
+                   [[{:seon.root/id :root :seon.root/boot "b1"}] (seon.task/agent-tx "b1" :a1 {:status :busy})])
+        debug [:debug :a1]
+        o (volatile! {})
+        st {:rid 1 :pending {} :watch #{debug} :waiting {1 debug} :kf-wanted #{} :new-events [] :events [] :views {}
+            :main-db db :view {:agents {}} :branches {debug {:db db :read [:b]}}}
+        st' (#'p/pass st o)
+        page (some #(when (= 1 (:k %)) (:html %)) (:to-web @o))]
+    (is (str/includes? (str page) "no model turn yet") "its page says there is no turn")
+    (is (= {} (get-in st' [:views debug :units])) "held with no units")))
+
 (deftest a-view-that-throws-answers-its-page-with-the-error
   ;; root, 2026-10-26: a render that threw stopped every pass of the render proc, and every page
   ;; waited forever. A view renders on its own: one whose render throws answers its own page with
   ;; the error and is recorded as a problem, and a second page renders through the same pass
   (let [k (seon.task/agent-key "b1" :a1)
-        ;; a turn that sent a part no render names (a ref kind the debug page's source has no line for)
-        db (reduce d/db-with (ts/test-db)
+        ;; a turn that sent a part no render names: the request to come continues it, and making it again throws
+        db0 (reduce d/db-with (ts/test-db)
                    [[{:seon.root/id :root :seon.root/boot "b1" :seon.config.agent/max-running 4}]
                     (seon.task/agent-tx "b1" :a1 {:status :busy})
                     (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a1} "e1" "a1" {:code "(+ 1 2)" :response {:handle 'result/e1 :value 3} :run "t/x#1"})
                     [{:db/id "run" :seon.run/id "t/x#1"}]
                     [{:db/id "turn" :seon.turn/id "t/x#1/0" :seon.turn/run [:seon.run/id "t/x#1"] :seon.turn/agent {:seon.agent/key k} :seon.turn/n 0 :seon.turn/origin :model}
                      {:seon.model-call/id "t/x#1/0" :seon.model-call/turn "turn"
-                      :seon.model-call/sent [[:no-such-part "x"]] :seon.model-call/tokens 100 :seon.model-call/forms 1 :seon.model-call/errors 0 :seon.model-call/red 0 :seon.model-call/ms 1}]])
+                      :seon.model-call/sent [[:no-such-part "x"] [:hashes {}]] :seon.model-call/tokens 100 :seon.model-call/forms 1 :seon.model-call/errors 0 :seon.model-call/red 0 :seon.model-call/ms 1}]])
+        db0 (d/db-with db0 (seon.doc/load-tx db0 "docs" {seon.context/system-page "# You are a Seon agent\n\nThe help page."}))
+        db (d/db-with db0 [{:seon.model-call/id "t/x#1/0" :seon.model-call/basis {:commit (d/commit-id db0) :task "t/x" :run "t/x#1" :turn 0 :max-turns 9 :origin :model :agent k}}])
         debug [:debug :a1]
         o (volatile! {})
         st {:rid 1 :pending {} :watch #{debug [:chat :a1]} :waiting {1 debug 2 [:chat :a1]} :kf-wanted #{} :new-events [] :events [] :views {}

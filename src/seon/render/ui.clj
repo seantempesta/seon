@@ -720,11 +720,12 @@
   made again from its basis commit, seon.context/wire-turn), or :latest, the request the agent's next model
   turn would send now (its run going on: drawn at db's head as the turn would draw it, with the turn it
   writes first), else its newest turn. calls, the branch's model calls in order; raw?, the body's JSON
-  shown whole. Which messages are new: those made by a record the request before it did not send (its
+  shown whole; printed, the :printed an earlier answer holds (the print cache seon.context/wire-turn reuses),
+  answered again as :printed. Which messages are new: those made by a record the request before it did not send (its
   recorded :seon.model-call/sent), so a part that changed is new by its ref. See
   docs/render.md#the-debug-page-is-the-wire-request."
-  {:malli/schema [:=> [:cat :seon.host/db [:or pos-int? [:= :latest]] [:vector pos-int?] :boolean] [:maybe :map]]}
-  [db at calls raw?]
+  {:malli/schema [:=> [:cat :seon.host/db [:or pos-int? [:= :latest]] [:vector pos-int?] :boolean [:maybe :map]] [:maybe :map]]}
+  [db at calls raw? printed]
   (let [pull #(d/pull db [:seon.model-call/basis :seon.model-call/sent :seon.model-call/tokens :seon.model-call/cache-hit-tokens
                           :seon.model-call/cache-miss-tokens {:seon.model-call/turn [:seon.turn/error]}] %)
         last-e (peek calls)
@@ -745,9 +746,9 @@
             i (if to-come? (count calls) (.indexOf ^java.util.List calls e))
             prev-e (when (pos? i) (nth calls (dec i)))
             prev (set (remove #(= :hashes (first %)) (:seon.model-call/sent (some-> prev-e pull))))
-            w (context/wire-turn tdb b)]
+            w (context/wire-turn tdb b printed)]
         {:at at :to-come? to-come? :turn (:turn b) :run (:run b) :origin (:origin b) :raw? raw?
-         :body (:body w) :sources (:sources w)
+         :body (:body w) :sources (:sources w) :printed (:printed w)
          ;; with no request before it, nothing is marked: every message is the first request's
          :new (mapv (fn [rs] (boolean (and prev-e (some (complement prev) rs)))) (:sources w))
          :usage (select-keys m [:seon.model-call/tokens :seon.model-call/cache-hit-tokens :seon.model-call/cache-miss-tokens])
