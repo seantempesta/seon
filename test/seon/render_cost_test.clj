@@ -5,7 +5,7 @@
   root: a cost proof for the recursion). Run: bin/test seon.render-cost-test"
   (:refer-clojure :exclude [defn defn-])
   (:require [clojure.test :refer [deftest]] [seon.contract :refer [defn defn-]] [seon.cost :as cost] [seon.web.html] [seon.db]
-            [seon.test-store :as ts] [datahike.api :as d] [seon.render.proc] [seon.render] [seon.render.ui] [seon.config] [seon.task] [seon.repl]))
+            [seon.test-store :as ts] [datahike.api :as d] [seon.render.proc] [seon.render] [seon.render.ui] [seon.config] [seon.task] [seon.repl] [seon.doc] [seon.context]))
 
 (def ^:private fan "Children per node: a tree as deep as log3 n (10,000 nodes: 9 levels)." 3)
 
@@ -192,94 +192,48 @@
      :fixed {:calls 1 :bytes 212000}
      :sizes [100 300 1000 10000]}))
 
-(defn debug-of
-  "The input of size n: the render proc's state holding agent a1's debug page after a pass over n
-  model turns (its shown rows rendered as units), with one turn more on the
-  branch: each turn sent the same two evals (:seon.model-call/sent); and the view."
+(defn latest-of
+  "The input of size n: the render proc's state holding agent a1's debug page on latest after a pass, over a
+  session of n earlier evals and one model turn (its basis recorded as seon.turn/act! writes it), with one eval
+  more on the branch since: what the next pass draws (the turn to come's request, made at the head); and the view."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map :any]]}
   [n]
   (let [k (seon.task/agent-key "b1" :a1)
-        sent [[:eval "e1"] [:eval "e2"]]
-        turn (fn [i] [{:db/id (str "turn" i) :seon.turn/id (str "t/x#1/" i) :seon.turn/run [:seon.run/id "t/x#1"] :seon.turn/n i :seon.turn/origin :model}
-                      {:seon.model-call/id (str "t/x#1/" i) :seon.model-call/turn (str "turn" i) :seon.model-call/sent sent
-                       :seon.model-call/tokens 100 :seon.model-call/forms 1 :seon.model-call/errors 0 :seon.model-call/red 0 :seon.model-call/ms 1}])
-        db (reduce d/db-with (ts/test-db)
-                   [[{:seon.root/id :root :seon.root/boot "b1"}]
-                    (seon.task/agent-tx "b1" :a1 {:status :busy})
-                    (into [] (mapcat #(seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a1} % "a1" {:code "(+ 1 2)" :response {:handle 'result/e1 :value 3} :run "t/x#1" :call-id (str "c-" %) :call 0})) ["e1" "e2"])
-                    [{:db/id "run" :seon.run/id "t/x#1"}]
-                    (into [] (mapcat turn) (range n))])
+        ev (fn [id] (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a1} id "a1" {:code "(+ 1 2)" :response {:handle (symbol "result" id) :value 3} :run "t/x#1" :call-id (str "c-" id) :call 0}))
+        db0 (reduce d/db-with (ts/test-db)
+                    [[{:seon.root/id :root :seon.root/boot "b1"}]
+                     (seon.task/agent-tx "b1" :a1 {:status :busy})])
+        db0 (reduce d/db-with db0
+                    [(seon.doc/load-tx db0 "docs" {seon.context/system-page "# You are a Seon agent\n\nThe help page."})
+                     (seon.task/create-tx db0 [{:seon.task/ns 't :seon.task/name "x" :seon.task/plan "Make x." :seon.task/proofs #{'t-test/x-test}}])
+                     [{:seon.run/id "t/x#1" :seon.run/task [:seon.task/id "t/x"] :seon.run/agent [:seon.agent/key k]}]
+                     (into [] (mapcat #(ev (str "e" %))) (range n))
+                     [{:seon.turn/id "t/x#1/0" :seon.turn/run [:seon.run/id "t/x#1"] :seon.turn/agent [:seon.agent/key k] :seon.turn/n 0 :seon.turn/origin :model}]])
+        b {:commit (d/commit-id db0) :task "t/x" :run "t/x#1" :turn 0 :max-turns 9 :origin :model :agent k}
+        db (d/db-with db0 [{:seon.model-call/id "t/x#1/0" :seon.model-call/turn [:seon.turn/id "t/x#1/0"] :seon.model-call/basis b}])
         view [:debug :a1]
         st {:rid 1 :pending {} :watch #{view} :waiting {} :kf-wanted #{} :views {} :main-db db
             :branches {view {:db db :read [:task-x]}} :view {:agents {}}}
         [st _] (#'seon.render.proc/pass-view st view)]
-    [(assoc-in st [:branches view :db] (d/db-with db (turn n))) view]))
+    [(assoc-in st [:branches view :db] (d/db-with db (ev "next"))) view]))
 
-(deftest a-new-turn-costs-one-turns-messages
-  ;; task seon.context/a-turn-records-what-it-sent (C): a pass of the debug page after one new turn
-  ;; reads back that turn's records alone (seon.context/parts-of) and sizes them (where its tokens
-  ;; went, drawn once, flat in the turns held: root, 2026-10-25); every held turn keeps its input
+(deftest drawing-latest-costs-one-request
+  ;; task seon.render/the-debug-page-is-the-wire-request: a pass of the debug page on latest after the branch
+  ;; moved draws the one request the next turn would send (seon.context/wire-turn at the head), nothing per
+  ;; earlier turn; the request holds the session, so it grows with the session's evals, as the turn's own does
   (cost/proof
-    {:of 'seon.render.proc/pass-view :input 'seon.render-cost-test/debug-of
-     :n "model turns the debug page already holds"
-     :work (str "the new turn's row, a unit (drawn by seon.render.ui/sent-request when its input changes), read back from its "
-                "records (its two evals, each by seon.context/eval-messages), its request sized from those parts "
-                "(seon.context/sent-split: system, conversation, screen), and rendered once: the contracted calls, "
-                "flat in the turns held. A real turn also reads back its help page and its task data as of their t "
-                "(seon.context/parts-of: 2.24M ticks, 9.3 MB on context-test's fixture, mostly the task data's run "
-                "sections), once: a finished turn's row is cached and never rendered again (each message it sent is a card of the page). Per held turn: the list's "
-                "query of every turn's id, its place in the sort and its slot, no render")
+    {:of 'seon.render.proc/pass-view :input 'seon.render-cost-test/latest-of
+     :n "earlier evals in the agent's session"
+     :work (str "one request made at the branch's head (seon.context/render: the system prompt, every eval of the "
+                "session printed as its messages, the page's parts drawn cold) under its provider, put in the wire shape "
+                "(seon.model/request-body) and drawn once (seon.render.ui/debug-turn: a row a message), and the timeline's "
+                "strip (a pull of each model call's basis). The session's evals are each printed and drawn: linear in them")
      :growth :linear
-     ;; measured 2026-10-24: 357 / 357 calls and 1.20 / 4.37 MB at 100 / 1,000 held turns, one component
-     ;; rendered (before rows were components: 130 calls and 3.90 / 34.3 MB, ~34 KB a held turn)
-     :per-n {:bytes 3600}
-     ;; 403 once each row's id is seon.render.ui/comp-id;
-     ;; 404 since a row's records are printed as sent, in order (seon.context/record-parts, 2026-10-25);
-     ;; 429 and 1.51 MB: the whole request read once, and sized (where its tokens went), in place of
-     ;; the read of the added parts alone (2026-10-25); 458 with the page's shared bar and header
-     ;; (seon.render.ui/top-bar: their elements and attributes, serialized once a pass, 2026-10-25);
-     ;; 459 since sent-split sizes the parts together (seon.context/messages-tokens, one call a pass:
-     ;; the sizer is not additive across pieces; measured per function, 2026-10-25); 500 with the bar's
-     ;; toggle between a page and what its model reads (its tabs' elements and attributes serialized,
-     ;; seon.web.html: 41 calls, measured per function against main, 2026-10-26)
-     ;; 580 on jolt/ref-depth (seon.render.ui/sent-request shows every message the request sent as a card, nothing
-     ;; hidden: each card's elements and attributes serialized by seon.web.html, 152 raw?, 136 attr-name, 84 escape
-     ;; calls in the pass; the bytes did not grow: 1.21 MB)
-     :fixed {:calls 643 :bytes 1210000}
-     ;; the full run measures 4,000 too (:seon.config.proofs/cost-max-n)
-     :sizes [100 300 1000 4000]}))
-
-(defn growing-debug
-  "The render proc's state holding agent a1's debug page after n model turns as a real run
-  sends them: turn i sent every eval of the run so far (e0 .. e(i-1), its conversation) and its
-  screen eval (s<i>), so each request is one record longer than the one before; and the view."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :map :any]]}
-  [n]
-  (let [k (seon.task/agent-key "b1" :a1)
-        ev (fn [id by more] (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a1} id by (merge {:code "(+ 1 2)" :response {:handle 'result/e1 :value 3} :run "t/x#1"} more)))
-        db (reduce d/db-with (ts/test-db)
-                   [[{:seon.root/id :root :seon.root/boot "b1"}]
-                    (seon.task/agent-tx "b1" :a1 {:status :busy})
-                    [{:db/id "run" :seon.run/id "t/x#1"}]
-                    (into [] (mapcat (fn [i] (concat (ev (str "e" i) "a1" {:call-id (str "c" i) :call 0}) (ev (str "s" i) "screen" {})))) (range n))
-                    (vec (mapcat (fn [i]
-                                   [{:db/id (str "turn" i) :seon.turn/id (str "t/x#1/" i) :seon.turn/run [:seon.run/id "t/x#1"] :seon.turn/n i :seon.turn/origin :model}
-                                    {:seon.model-call/id (str "t/x#1/" i) :seon.model-call/turn (str "turn" i)
-                                     :seon.model-call/sent (conj (mapv #(vector :eval (str "e" %)) (range i)) [:eval (str "s" i)])
-                                     :seon.model-call/tokens 100 :seon.model-call/forms 1 :seon.model-call/errors 0 :seon.model-call/red 0 :seon.model-call/ms 1}])
-                                 (range n)))])
-        view [:debug :a1]]
-    [{:rid 1 :pending {} :watch #{view} :waiting {} :kf-wanted #{} :views {} :main-db db :branches {view {:db db}} :view {:agents {}}} view]))
-
-(defn page-size
-  "Agent a1's debug page after n turns (growing-debug), its first pass: {:bytes :nodes}, the
-  composed HTML's characters and its elements."
-  {:malli/schema [:=> [:cat pos-int?] :map]}
-  [n]
-  (let [[st v] (growing-debug n)
-        [st _] (#'seon.render.proc/pass-view st v)
-        html (seon.render.proc/view-html st v)]
-    {:bytes (count html) :nodes (count (re-seq #"<[a-z]" html))}))
+     ;; measured 2026-11-03: 8,708 / 21,668 / 67,028 calls and 16.6 / 33.2 / 92.7 MB at 10 / 30 / 100 evals;
+     ;; most of it the page's parts drawn cold at the head (seon.context/drawn-parts walks the whole page)
+     :per-n {:calls 648 :bytes 846000}
+     :fixed {:calls 2228 :bytes 8140000}
+     :sizes [10 30 100]}))
 
 (deftest a-transaction-renders-what-it-touched
   ;; task seon.render/a-page-is-its-entitys-view (4a), now every-page-is-its-parts: a commit on main touching

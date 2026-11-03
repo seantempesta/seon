@@ -204,37 +204,39 @@
         :else view))
 
 (defn- debug-value
-  "View [:debug id]'s page: what agent id's model was sent, each model turn that recorded it
-  (:seon.model-call/sent) on its branch as this proc last read it, newest first, only the rows its tab
-  scrolled to (:shown, as the agent's page: the rest are counted, and load as their end scrolls
-  into view). Each row is a unit drawn by seon.render.ui/sent-request when its input (its turn,
-  whether its tab has it open) changes: it reads its turn and the one before it, shows what its
-  turn added, and its whole request while open (:open, seon.web's /open); a finished turn is
-  never written again, so its row renders once. nil until the branch is read; an agent with no branch on main (the user's) or
-  whose branch could not be read has no turn to show, and its page says so, never a wait."
+  "View [:debug id]'s page: the timeline of agent id's requests on its branch as this proc last read it
+  (its model calls, each with its basis), the one shown at the view's :at (a model call's eid; absent,
+  :latest), drawn by seon.render.ui/debug-turn over seon.render.ui/debug-input when its input changes: a past
+  turn's is its eid (made again from its basis, it never changes), latest's the branch's newest transaction (drawn
+  again each time the branch moves, and only while a tab watches the view). nil until the branch is read;
+  an agent with no branch on main (the user's) or whose branch could not be read has no turn to show, and
+  its page says so, never a wait. See docs/render.md#the-debug-page-is-the-wire-request."
   {:malli/schema [:=> [:cat :map [:tuple [:= :debug] :any]] [:maybe :map]]}
   [st view]
   (cond
     (= :root (second view))
     ;; root has no model turn: what it reads is the system's value printed, held each pass (:context)
     (when-let [ctx (:context st)]
-      (ui/debug :root [] 0 {:id "d-context" :input ctx :schema :seon.render/root-context}))
+      (ui/debug :root nil nil {:id "d-context" :input ctx :schema :seon.render/root-context}))
     (nil? (get-in st [:branches view :db]))
     (let [db (:main-db st) eid (when db (location db view))]
       (when (or (get-in st [:branches view :error]) (and eid (nil? (:seon.agent/branch (d/entity db eid)))))
-        (ui/debug (second view) [] 0 nil)))
+        (ui/debug (second view) nil nil nil)))
     :else
-  (let [bdb (get-in st [:branches view :db])]
-    (let [open (get-in st [:open view] #{})
-          shown (get-in st [:shown view] (history-cap))
-          ;; newest first: entity ids are issued in the order model calls were written
-          ts (->> (d/q '[:find [?e ...] :where [?e :seon.model-call/sent _]] bdb) sort reverse vec)
-          on (take shown ts)
-          vp (ui/view-param view)]
+    (let [bdb (get-in st [:branches view :db])
+          ;; in the order written: entity ids are issued so
+          calls (vec (sort (d/q '[:find [?e ...] :where [?e :seon.model-call/basis _]] bdb)))
+          bases (mapv #(:seon.model-call/basis (d/pull bdb [:seon.model-call/basis] %)) calls)
+          at (let [x (get-in st [:at view] :latest)] (if (or (= :latest x) (some #{x} calls)) x :latest))
+          raw? (contains? (get-in st [:open view] #{}) "d-turn-raw")
+          lb (peek bases)
+          to-come? (boolean (and lb (= :model (:origin lb)) (nil? (:seon.run/outcome (d/entity bdb [:seon.run/id (:run lb)])))))]
       (ui/debug (second view)
-                (vec (for [e on :let [id (ui/comp-id e [:debug]) open? (contains? open id)]]
-                       {:id id :input [e open?] :draw #(ui/sent-request {:unit id} (ui/debug-input bdb e open? vp))}))
-                (- (count ts) (count on)) nil)))))
+                {:turns (mapv (fn [e b] {:e e :turn (:turn b) :origin (:origin b)}) calls bases) :at at :to-come? to-come?}
+                (when (seq calls)
+                  {:id "d-turn" :input [at (when (= :latest at) (:max-tx bdb)) raw?]
+                   :draw #(ui/debug-turn {:unit "d-turn"} (assoc (ui/debug-input bdb at calls raw?) :view (ui/view-param view)))})
+                nil))))
 
 (def ^:private gone "The agent statuses of an ended process (:seon.agent/status)." (:seon.status/gone (contract/properties :seon.agent/status)))
 
@@ -592,7 +594,7 @@
   [st v]
   (let [b (get-in st [:branches v :branch])
         st (-> (reindex st v (get-in st [:views v :reads]) #{})
-               (update :views dissoc v) (update :branches dissoc v) (update :shown dissoc v) (update :open dissoc v)
+               (update :views dissoc v) (update :branches dissoc v) (update :shown dissoc v) (update :open dissoc v) (update :at dissoc v)
                (update :dirty #(disj (or % #{}) v)))]
     (cond-> st (and b (not-any? #(= b (:branch %)) (vals (:branches st)))) (update :branch-reads dissoc b))))
 
@@ -844,6 +846,7 @@
                           ;; the end of a view's list scrolled into view: the next rows are rendered
                           :more (if (contains? (:watch st) (:view m)) (pass (update-in st [:shown (:view m)] (fnil + (history-cap)) (history-cap)) o) st)
                           ;; a row's <details> opened or closed: its whole content is rendered while it is open
+                          :at (if (contains? (:watch st) (:view m)) (pass (assoc-in st [:at (:view m)] (:turn m)) o) st)
                           :toggle (if (contains? (:watch st) (:view m))
                                   (pass (update-in st [:open (:view m)] (fnil (if (:open m) conj disj) #{}) (:unit m)) o)
                                   st)

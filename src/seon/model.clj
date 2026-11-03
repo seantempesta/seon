@@ -124,21 +124,32 @@
                                               tool-calls))
     tool-call-id (assoc :tool_call_id tool-call-id)))
 
+(defn wire-groups
+  "The provider-neutral messages msgs as the wire holds them, by index: for each wire message in order, the
+  indices of msgs it is made of. A reply's calls fold into one assistant message: a message whose :call is
+  past 0 continues the newest assistant message before it, and each tool message follows in order. The one
+  fold: `wire-messages` makes its messages from these groups, and the debug page labels them by it."
+  {:malli/schema [:=> [:cat [:vector :seon.model/message]] [:vector [:vector nat-int?]]]}
+  [msgs]
+  (reduce (fn [acc [j m]]
+            (if (and (= "assistant" (:role m)) (pos? (:call m 0)))
+              (let [i (some #(when (= "assistant" (:role (nth msgs (first (nth acc %))))) %) (range (dec (count acc)) -1 -1))]
+                (update acc i conj j))
+              (conj acc [j])))
+          [] (map-indexed vector msgs)))
+
 (defn wire-messages
   "The provider-neutral messages (seon.context/request) in the OpenAI-compatible shape
-  (DeepSeek's), the one provider format function: a reply's calls folded into one assistant
-  message (a message whose :call is past 0 continues the reply before it), each tool message
-  after it in order; reasoning as reasoning_content, left out only when replay is false
-  (:seon.config.ai/replay-reasoning; a config with thinking on refuses that at load)."
+  (DeepSeek's), the one provider format function: each wire message from its group (`wire-groups`), a
+  reply's calls in one assistant message, each tool message after it in order; reasoning as
+  reasoning_content, left out only when replay is false (:seon.config.ai/replay-reasoning; a config
+  with thinking on refuses that at load)."
   {:malli/schema [:=> [:cat [:maybe :boolean] [:vector :seon.model/message]] [:vector :map]]}
   [replay msgs]
-  (let [folded (reduce (fn [acc m]
-                         (if (and (= "assistant" (:role m)) (pos? (:call m 0)))
-                           (let [i (some #(when (= "assistant" (:role (nth acc %))) %) (range (dec (count acc)) -1 -1))]
-                             (update acc i update :tool-calls into (:tool-calls m)))
-                           (conj acc m)))
-                       [] msgs)]
-    (mapv #(wire-message (cond-> (dissoc % :call) (false? replay) (dissoc :reasoning))) folded)))
+  (mapv (fn [[i & more]]
+          (let [m (reduce (fn [m j] (update m :tool-calls into (:tool-calls (nth msgs j)))) (nth msgs i) more)]
+            (wire-message (cond-> (dissoc m :call) (false? replay) (dissoc :reasoning)))))
+        (wire-groups msgs)))
 
 (defn request-body
   "The chat-completions request (data, before JSON) for request under an :openai-compat

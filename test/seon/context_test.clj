@@ -614,13 +614,14 @@
   (d/transact conn [{:seon.run/id "demo/f#1" :seon.run/task [:seon.task/id "demo/f"] :seon.run/agent {:seon.agent/key "b/a1" :seon.agent/task {:seon.task/id "demo/f"}}}])
   (let [ev! (fn [id by code value & [more]] (d/transact conn [{:seon.eval/id id :seon.eval/by by :seon.eval/agent {:seon.agent/key "b/a1"}
                                                                :seon.eval/record (merge {:code code :response {:handle (symbol "result" id) :value value} :run "demo/f#1"} more)}]))
+        ;; as seon.turn/act! writes a turn: the turn, its basis commit holding it, then its model call
         turn! (fn [n more]
-                (let [b {:commit (d/commit-id @conn) :task "demo/f" :run "demo/f#1" :turn n :max-turns 4
-                         :origin :model :agent "b/a1"}
-                      _ (d/transact conn [(merge {:db/id "turn" :seon.turn/id (str "demo/f#1/" n) :seon.turn/run {:seon.run/id "demo/f#1"} :seon.turn/agent {:seon.agent/key "b/a1"} :seon.turn/n n
+                (let [_ (d/transact conn [(merge {:seon.turn/id (str "demo/f#1/" n) :seon.turn/run {:seon.run/id "demo/f#1"} :seon.turn/agent {:seon.agent/key "b/a1"} :seon.turn/n n
                                                   :seon.turn/origin :model}
-                                                 more)
-                                          {:seon.model-call/id (str "demo/f#1/" n) :seon.model-call/turn "turn" :seon.model-call/basis b :seon.model-call/forms 1
+                                                 more)])
+                      b {:commit (d/commit-id @conn) :task "demo/f" :run "demo/f#1" :turn n :max-turns 4
+                         :origin :model :agent "b/a1"}
+                      _ (d/transact conn [{:seon.model-call/id (str "demo/f#1/" n) :seon.model-call/turn [:seon.turn/id (str "demo/f#1/" n)] :seon.model-call/basis b :seon.model-call/forms 1
                                            :seon.model-call/errors 0 :seon.model-call/red 1 :seon.model-call/ms 1}])
                       {:keys [messages sent]} (context/render @conn b)]
                   (d/transact conn [{:seon.model-call/id (str "demo/f#1/" n) :seon.model-call/sent sent}])

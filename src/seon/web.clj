@@ -169,6 +169,12 @@
             {:status 400 :headers {"Content-Type" "text/plain"} :body (str "a cut's form reads as EDN: " (get q "unit"))}
             (do (a/>!! ch {:op :toggle :view (view-of (get q "view")) :unit (get q "unit") :open (= "true" (get q "open"))})
                 {:status 204 :headers {}}))
+          ;; a step of the debug timeline: the request to show, a model call's eid or latest
+          (and (= m :post) (= uri "/at"))
+          (let [t (get q "turn" "")]
+            (if-let [turn (if (= "latest" t) :latest (some-> (re-matches #"\d+" t) parse-long))]
+              (do (a/>!! ch {:op :at :view (view-of (get q "view")) :turn turn}) {:status 204 :headers {}})
+              {:status 400 :headers {"Content-Type" "text/plain"} :body (str "a step names a model call's id or latest: " t)}))
           (and (= m :get) (= uri "/feed"))
           (let [out (a/chan 64)]
             (a/>!! ch {:op :open :view (view-of (get q "view")) :ch out})
@@ -273,6 +279,7 @@
                st)
     :more (do (step/out! o :to-render {:op :more :view (:view m)}) st)
     :toggle (do (step/out! o :to-render (select-keys m [:op :view :unit :open])) st)
+    :at (do (step/out! o :to-render (select-keys m [:op :view :turn])) st)
     :stats (do (deliver (:p m) (stats st)) st)
     :call (let [c (:call m)
                 reqs (requests c (:index st {}))]

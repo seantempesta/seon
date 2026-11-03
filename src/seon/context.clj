@@ -1036,10 +1036,12 @@
   its newest record's t; [:session id], the opening of the agent's own session after its examples (both only
   in a model's first request of a task that names examples); [:eval id]; [:message id]; [:turn id]; [:parts a c whole?
   ids call], the parts the message holds (drawn cold at commit c on replay), and last [:hashes {id
-  hash}], the content hash of every part the model has now, which the next request compares. Called by
+  hash}], the content hash of every part the model has now, which the next request compares; :parts, each
+  record's ref beside the messages it made, in order (what the debug page labels its messages by). Called by
   the turn. See docs/render.md#the-page-is-sent-as-what-changed, docs/tasks.md#a-task-names-example-sessions and the task
   seon.context/the-context-is-the-agents-evals-and-seons."
-  {:malli/schema [:=> [:cat :map :map] [:map [:messages [:vector :seon.model/message]] [:sent [:vector :any]] [:printed :map]]]}
+  {:malli/schema [:=> [:cat :map :map] [:map [:messages [:vector :seon.model/message]] [:sent [:vector :any]] [:printed :map]
+                                              [:parts [:vector [:tuple :any [:vector :seon.model/message]]]]]]}
   [a {:keys [db basis help help-ref printed parts]}]
   (let [e (:db/id a)
         model? (= :model (:origin basis))
@@ -1088,7 +1090,8 @@
         ps (mapv #(get-in cache [:parts %]) (:ids cache))]
     {:messages (into [{:role "system" :content help}] (mapcat :whole) ps)
      :printed (assoc cache :live live :live-ref ref)
-     :sent (-> [help-ref] (into (map :ref) ps) (conj [:hashes hs]))}))
+     :sent (-> [help-ref] (into (map :ref) ps) (conj [:hashes hs]))
+     :parts (into [[help-ref [{:role "system" :content help}]]] (map (juxt :ref :whole)) ps)}))
 
 ;; ---- a turn's basis: what its context was built from, and the text made from it again ----
 
@@ -1144,15 +1147,15 @@
   context: the model's request is this, and so is every later reading of it. opts :printed, what
   the run's earlier requests printed (the cache `printed-run` answers): only what is new is printed;
   :parts, {id content}, the agent's live walk's parts at db (`request`; else drawn cold).
-  {:messages :sent :printed}."
-  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.model-call/basis] [:map [:messages [:vector :seon.model/message]] [:sent [:vector :any]] [:printed :map]]]
-                  [:=> [:cat :seon.host/db :seon.model-call/basis :map] [:map [:messages [:vector :seon.model/message]] [:sent [:vector :any]] [:printed :map]]]]}
+  {:messages :sent :printed :parts}: :parts, each record's ref beside its messages (`request`)."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.model-call/basis] [:map [:messages [:vector :seon.model/message]] [:sent [:vector :any]] [:printed :map] [:parts [:vector :any]]]]
+                  [:=> [:cat :seon.host/db :seon.model-call/basis :map] [:map [:messages [:vector :seon.model/message]] [:sent [:vector :any]] [:printed :map] [:parts [:vector :any]]]]]}
   ([db basis] (render db basis {}))
   ([db {:keys [agent] :as basis} {:keys [printed parts]}]
   (let [a (d/pull db [:db/id :seon.agent/key] [:seon.agent/key agent])
         r (request a {:db db :basis basis :help (system-text db) :printed printed :parts parts
                       :help-ref [:section (ref/page-top db system-page) (doc/page-t db system-page)]})]
-    (select-keys r [:messages :sent :printed]))))
+    (select-keys r [:messages :sent :printed :parts]))))
 
 (defn provider-of
   "The model provider a turn with basis b used, from db at b's commit: main as the agent last heard it
@@ -1164,9 +1167,24 @@
   (let [main (some->> (:seon.agent/main-commit (d/entity db [:seon.agent/key agent])) (d/commit-as-db (:store db)))]
     (cfg/provider-at (or main db) db task model)))
 
+(defn wire-turn
+  "Turn basis b's request as it went on the wire, made again from db at b's commit (one `render`):
+  {:body :provider :sources}, the body seon.model/request-body made of its messages under its provider
+  (`provider-of`), and :sources, for each of the body's messages in order the refs of the records that made it
+  (seon.model/wire-groups folds a reply's calls into one message). See docs/render.md#the-debug-page-is-the-wire-request."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.model-call/basis] [:map [:body :map] [:provider :seon.model/provider] [:sources [:vector [:vector :any]]]]]}
+  [db basis]
+  (let [{:keys [messages parts]} (render db basis)
+        p (provider-of db basis)
+        ;; each neutral message's ref, in order, then each wire message's refs by the one fold
+        refs (into [] (mapcat (fn [[ref ms]] (repeat (count ms) ref))) parts)]
+    {:body (model/request-body p {:messages messages :task (:task basis) :turn (:turn basis)})
+     :provider p
+     :sources (mapv (fn [is] (vec (distinct (map refs is)))) (model/wire-groups messages))}))
+
 (defn wire-request
-  "The request body turn basis b put on the wire (seon.model/request-body), made again from db at b's
-  commit: its messages (`render`) under its provider (`provider-of`). See docs/render.md#the-debug-page-is-the-wire-request."
+  "The request body turn basis b put on the wire, made again from db at b's commit (`wire-turn`'s :body).
+  See docs/render.md#the-debug-page-is-the-wire-request."
   {:malli/schema [:=> [:cat :seon.host/db :seon.model-call/basis] :map]}
   [db basis]
-  (model/request-body (provider-of db basis) {:messages (:messages (render db basis)) :task (:task basis) :turn (:turn basis)}))
+  (:body (wire-turn db basis)))
