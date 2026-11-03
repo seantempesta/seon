@@ -306,7 +306,7 @@
             data (volatile! nil)
             ;; its render and the drawing of its output in one: a lazy part of the hiccup reads (and
             ;; throws) only when it is drawn, and a db render's reads are all of what it drew
-            one #(try (with-id (emit w (part (apply f o args) data) (assoc env :children kids)) {:id id :class (name (first k))})
+            one #(try (with-id (emit w (part (apply f o args) data) (assoc env :children kids)) {:id (or (when (var? f) (:seon.render/list (meta f))) id) :class (name (first k))})
                       ;; a component that throws is a part of its own: its error as data (what threw, and the
                       ;; thrown error's own data: a contract's problems), which the page draws by the error's
                       ;; render and the model reads as the map it is, every other component drawn
@@ -371,6 +371,10 @@
         only (let [env (if (only sel) (dissoc env :only) (assoc env :inside true))]
                (into (cond-> [tag] attrs (conj attrs)) (map #(emit w % env)) kids))
         :else (into (cond-> [tag] attrs (conj attrs)) (map #(emit w % env)) kids)))
+    ;; a list component (its var's :seon.render/list, docs/render.md#a-layout-places-its-lists), in a draw of some
+    ;; lists only (draw's sels): not drawn when none of them names it, drawn whole when one does
+    (and (vector? x) (:only env) (:inside env) (var? (first x)) (:seon.render/list (meta (first x))))
+    (when ((:only env) (str "#" (:seon.render/list (meta (first x))))) (render! w (first x) (or (second x) {}) (drop 2 x) (dissoc env :only)))
     (and (vector? x) (seq (reads (first x)))) (render! w (first x) (or (second x) {}) (drop 2 x) env)
     (and (vector? x) (or (var? (first x)) (fn? (first x)))) (into [(first x)] (map ratom/realize) (rest x))
     :else (ratom/realize x)))
@@ -431,17 +435,28 @@
 
 (defn- placed
   "Walk w's components placed directly in a container of the root's output (an element with an id:
-  its list), in order, [[sel k]]: its container's selector and its key; a component that drew nothing
-  (with-id) is placed nowhere. The one prewalk of the root that placed-units and placed-hiccup read."
-  {:malli/schema [:=> [:cat :map] [:vector [:tuple :string [:vector :any]]]]}
-  [w]
-  (let [found (volatile! [])]
-    (clojure.walk/prewalk (fn [x] (when (and (vector? x) (keyword? (first x)) (map? (second x)) (:id (second x)))
-                                    (doseq [m (tree-seq seq? seq (drop 2 x)) :when (and (vector? m) (= ::child (first m)) (some? (:out (get @(:cache w) (second m)))))]
-                                      (vswap! found conj [(str "#" (:id (second x))) (second m)])))
-                            x)
-                          (:out (get @(:cache w) @(:out w))))
-    @found))
+  its list), in order, [[sel k]]: its container's selector and its key; a list component (its var's
+  :seon.render/list) is no
+  part: its output is its list, the components in it placed there; a component that drew nothing (with-id) is
+  placed nowhere. The one prewalk of the root that placed-units and placed-hiccup read. See
+  docs/render.md#a-layout-places-its-lists."
+  {:malli/schema [:function [:=> [:cat :map] [:vector [:tuple :string [:vector :any]]]]
+                  [:=> [:cat :map [:maybe [:set :string]]] [:vector [:tuple :string [:vector :any]]]]]}
+  ([w] (placed w nil))
+  ([w sels]
+  (let [found (volatile! [])
+        list (fn [k] (let [f (:f (get @(:cache w) k))] (when (var? f) (:seon.render/list (meta f)))))
+        walk (fn walk [out]
+               (clojure.walk/prewalk (fn [x] (when (and (vector? x) (keyword? (first x)) (map? (second x)) (:id (second x)))
+                                               (doseq [m (tree-seq seq? seq (drop 2 x)) :when (and (vector? m) (= ::child (first m)) (some? (:out (get @(:cache w) (second m)))))]
+                                                 (if-let [l (list (second m))]
+                                                   ;; a list a reader of some lists did not ask for is not walked
+                                                   (when (or (nil? sels) (sels (str "#" l))) (walk (:out (get @(:cache w) (second m)))))
+                                                   (vswap! found conj [(str "#" (:id (second x))) (second m)]))))
+                                       x)
+                                     out))]
+    (walk (:out (get @(:cache w) @(:out w))))
+    @found)))
 
 (defn placed-units
   "Walk w's render as the units root's render proc lays out (seon.render.ui/page-chrome): each
@@ -481,7 +496,7 @@
   prewalk. See docs/render.md#a-part-answers-data."
   {:malli/schema [:=> [:cat :map [:sequential :string]] [:vector [:tuple :string :any]]]}
   [w sels]
-  (let [by (group-by first (placed w))]
+  (let [by (group-by first (placed w (set sels)))]
     (vec (for [s sels [_ k] (get by s) :let [c (get @(:cache w) k)]]
            [(:id c) (if (some? (:data c)) (model-of w k) (resolved w k))]))))
 
@@ -493,7 +508,7 @@
   See docs/render.md#a-part-answers-data."
   {:malli/schema [:=> [:cat :map [:sequential :string]] [:map-of :qualified-keyword :any]]}
   [w sels]
-  (let [by (group-by first (placed w))]
+  (let [by (group-by first (placed w (set sels)))]
     (into {} (for [s sels [_ k] (get by s) :let [d (:data (get @(:cache w) k))] :when (some? d)]
                [(:seon.render/schema (meta d)) d]))))
 

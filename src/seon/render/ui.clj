@@ -1445,6 +1445,8 @@
         [:ol (for [e (conversation x db)]
                [:li (render/html {:schema :seon.db/eval-fact :as :inline} (ratom/realize (get-in x [:evals e])))])]])]))
 
+(declare task-list conversation-list tiles)
+
 (defn render-ctx
   "The render of an agent's ctx, the one layout the model and the person read (the declared html
   render of :seon.render/render-ctx, which an agent overrides on its branch like any render): its ctx,
@@ -1454,17 +1456,45 @@
   the run once it took a turn, then each key the agent added to its ctx. The conversation (c-rows, the chat a person reads): the run's turns as
   their replies (chat-turn), its evals as lines that open (eval-item) and its messages as bubbles
   (chat-message), in the order they were written (eids are issued in that order), then how the run
-  stands (chat-end). See docs/render.md#the-page. The
-  tiles (p-tiles): each eval whose value has a render of its own, newest first. It reads the
-  lists' members' ids and its task's cited names, and on the db the transaction of each member's
-  identity (when it was written: some ids are content-derived, so an id is no order), which is never
-  written again, so it runs again only when a list gains or loses a member, the newest run
-  changes, or the plan cites another var."
-  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
-  [{c :seon.ctx/ctx db :seon.db/db}]
-  (let [aid (:db/id c)
-        task (:task c)
-        evals (:evals c)
+  stands (chat-end). The tiles (p-tiles): each eval whose value has a render of its own, newest first. Each
+  list is a component of its own (`task-list`, `conversation-list`, `tiles`: a list, :seon.render/list), and
+  the layout reads only the agent's id, so a change of one list's members reruns that list alone: an eval
+  added never reruns the task's. See docs/render.md#the-page and docs/render.md#a-layout-places-its-lists."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+  [{c :seon.ctx/ctx}]
+  (let [aid (:db/id c)]
+    [:div {:id "render-ctx"} [#'task-list {} aid] [#'conversation-list {} aid] [#'tiles {} aid]]))
+
+(defn task-list
+  "The task's list of an agent's page (p-task, the parts its model is sent: seon.context/page-lists), agent aid's:
+  the newest run's task, each var its plan cites, each search, the namespaces, the status, the run once it
+  took a turn, its own problems and the keys it added to its ctx (`render-ctx`). See docs/render.md#the-page."
+  {:seon.render/list "p-task" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] [:maybe :int]] :any]}
+  [{c :seon.ctx/ctx} aid]
+  [:div {:id "p-task"}
+   (when (:task c) (list [#'task-data {} aid]
+                         ;; each thing its task, its needs and the agent cite, a part each, at the depth its cite asks
+                         (for [[p k held] (page-cites c)] [#'cited {:at p :held held} aid k])
+                         ;; each search its task and the agent hold, a part each, drawn on the branch's db
+                         (for [[p k] (concat (for [e (keys (get-in c [:task :searches]))] [[:task :searches e] (str "task-" e)])
+                                             (for [e (keys (get c :searches))] [[:searches e] (str "agent-" e)]))]
+                           [#'searched {:at p} aid k])
+                         ;; where the code lives: each namespace the work touches, the names the task cites or its proofs call
+                         [#'namespaces {} aid]
+                         ;; how the work stands: the proofs, the done rule's reasons, what the branch did (one diff)
+                         [#'status {} aid]))
+   ;; the run once it took a turn: before that it says only its id, which the task's names
+   (when (seq (:turns c)) [#'run-head {} aid])
+   (when aid [#'own-problems {} aid])
+   (when (seq (added-keys c)) [#'ctx-keys {}])])
+
+(defn conversation-list
+  "The conversation of an agent's page (c-rows, the chat a person reads), agent aid's: the run's turns as their
+  replies (chat-turn), its evals as lines that open (eval-item) and its messages as bubbles (chat-message), in
+  the order they were written, then how the run stands (chat-end) (`render-ctx`). See docs/render.md#the-page."
+  {:seon.render/list "c-rows" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] [:maybe :int]] :any]}
+  [{c :seon.ctx/ctx db :seon.db/db} aid]
+  (let [evals (:evals c)
         conv (conversation c db)
         ev? (set (keys evals))
         tu? (set (keys (:turns c)))
@@ -1475,33 +1505,22 @@
         ;; read by its paths, never realized whole: the layout reads no eval's opened flag
         loop? (fn [id] (let [e (get-in c [:evals id])]
                          (and (= (:seon.eval/by e) (some-> (:seon.agent/id c) name)) (get-in e [:seon.eval/record :run]) (not (get-in e [:seon.eval/record :call-id])))))]
-    [:div {:id "render-ctx"}
-     [:div {:id "p-task"}
-      (when task (list [#'task-data {} aid]
-                       ;; each thing its task, its needs and the agent cite, a part each, at the depth its cite asks
-                       (for [[p k held] (page-cites c)] [#'cited {:at p :held held} aid k])
-                       ;; each search its task and the agent hold, a part each, drawn on the branch's db
-                       (for [[p k] (concat (for [e (keys (get-in c [:task :searches]))] [[:task :searches e] (str "task-" e)])
-                                           (for [e (keys (get c :searches))] [[:searches e] (str "agent-" e)]))]
-                         [#'searched {:at p} aid k])
-                       ;; where the code lives: each namespace the work touches, the names the task cites or its proofs call
-                       [#'namespaces {} aid]
-                       ;; how the work stands: the proofs, the done rule's reasons, what the branch did (one diff)
-                       [#'status {} aid]))
-      ;; the run once it took a turn: before that it says only its id, which the task's names
-      (when (seq (:turns c)) [#'run-head {} aid])
-      (when aid [#'own-problems {} aid])
-      (when (seq (added-keys c)) [#'ctx-keys {}])]
-     [:ol {:id "c-rows"}
-      (when (:task c) [#'chat-ask {} aid])
-      (when aid [#'chat-start {} aid])
-      (for [id conv :when (and (not (in-turn id)) (not (loop? id)))] (cond (ev? id) [#'eval-item {} id] (tu? id) [#'chat-turn {} aid id] :else [#'chat-message {} aid id]))
-      (when aid [#'chat-end {} aid])]
-     [:aside {:id "p-tiles"}
-      ;; placed on every page: the render cache runs a component once and again only when what it reads changes, so a page whose task names no examples pays nothing; reading the task here to place it only when it names examples would be 3 contracted calls on every list draw, because the layout builds the whole page whatever list is drawn
-      [#'examples {} aid]
-      (for [[id e] evals :let [{{v :value} :response k :schema} (:seon.eval/record e)] :when (and (some? v) (render/render-of (ratom/realize v) k))]
-        [#'eval-tile {} id])]]))
+    [:ol {:id "c-rows"}
+     (when (:task c) [#'chat-ask {} aid])
+     (when aid [#'chat-start {} aid])
+     (for [id conv :when (and (not (in-turn id)) (not (loop? id)))] (cond (ev? id) [#'eval-item {} id] (tu? id) [#'chat-turn {} aid id] :else [#'chat-message {} aid id]))
+     (when aid [#'chat-end {} aid])]))
+
+(defn tiles
+  "The tiles of an agent's page (p-tiles), agent aid's: its task's example sessions, then each eval whose value
+  has a render of its own, newest first (`render-ctx`). See docs/render.md#the-page."
+  {:seon.render/list "p-tiles" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] [:maybe :int]] :any]}
+  [{c :seon.ctx/ctx} aid]
+  [:aside {:id "p-tiles"}
+   ;; placed on every page: the render cache runs a component once and again only when what it reads changes, so a page whose task names no examples pays nothing
+   [#'examples {} aid]
+   (for [[id e] (:evals c) :let [{{v :value} :response k :schema} (:seon.eval/record e)] :when (and (some? v) (render/render-of (ratom/realize v) k))]
+     [#'eval-tile {} id])])
 
 (defn agent
   "An agent's view (the declared html render of :seon.db/agent-fact), its head: its id, status,
