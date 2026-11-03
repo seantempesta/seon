@@ -65,7 +65,13 @@
           (let [[st _] (#'w/web-proc st :from-render {:op :patch :view :root :frags [["t" "<i id=\"t\"></i>"]] :appends [] :removes []})]
             (is (str/includes? (a/poll! root-tab) "<i id=\"t\"></i>"))
             (is (nil? (a/poll! zoom-tab)))
-            (is (= 1 (:patches st)))))))))
+            (is (= 1 (:patches st)))
+            (testing "a page sent whole by a pass (:whole: a patch it could not place) reaches every tab of its view, stale or not"
+              (let [_ (#'w/web-proc st :from-render {:op :keyframe :view :root :html "<div id=\"app\">w</div>"})]
+                (is (nil? (a/poll! root-tab)) "a keyframe asked for reaches only a stale tab"))
+              (let [_ (#'w/web-proc st :from-render {:op :keyframe :whole true :view :root :html "<div id=\"app\">w</div>"})]
+                (is (str/includes? (str (a/poll! root-tab)) "<div id=\"app\">w</div>"))
+                (is (nil? (a/poll! zoom-tab)))))))))))
 
 (deftest a-root-function-is-recorded-with-its-answer
   ;; task seon.render/one-owner-per-view-path (B9): root's function called from the page is

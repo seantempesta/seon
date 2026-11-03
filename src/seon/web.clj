@@ -222,21 +222,24 @@
              [st 0] (:tabs st)))
 
 (defn- keyframe!
-  "The view's keyframe (its composed body, morphed by id) to every stale tab of it."
-  {:malli/schema [:=> [:cat :map :any [:maybe :string]] :map]}
-  [st view html]
+  "The view's keyframe (its composed body, morphed by id) to every stale tab of it; with all?, to every tab of
+  it (the render proc's pass sends the page whole when a patch would replace an element no tab holds)."
+  {:malli/schema [:function [:=> [:cat :map :any [:maybe :string]] :map]
+                  [:=> [:cat :map :any [:maybe :string] :boolean] :map]]}
+  ([st view html] (keyframe! st view html false))
+  ([st view html all?]
   (if-not html
     st
     (let [chunk (patch-event html)]
       (reduce-kv (fn [st k {:keys [ch] :as tab}]
-                   (if (and (= view (:view tab)) (contains? (:stale st) k))
+                   (if (and (= view (:view tab)) (or all? (contains? (:stale st) k)))
                      (let [ok (a/offer! ch chunk)]
                        (cond (true? ok) (-> st (update :stale disj k) (update :bytes + (count chunk)))
                              ;; closed, or still full since it fell behind: the tab is gone (a
                              ;; live one's Datastar reconnects and gets a fresh keyframe)
                              :else (do (a/close! ch) (-> st (update :tabs dissoc k) (update :stale disj k)))))
                      st))
-                 st (:tabs st)))))
+                 st (:tabs st))))))
 
 (defn- page-doc
   "A view's composed body as the whole document (title, styles, Datastar, its feed)."
@@ -315,7 +318,7 @@
              (when (some #(= (:view m) (get-in st [:tabs % :view])) (:stale st))
                (step/out! o :to-render {:op :keyframe :view (:view m)}))
              st)
-    :keyframe (keyframe! st (:view m) (:html m))
+    :keyframe (keyframe! st (:view m) (:html m) (boolean (:whole m)))
     ;; the render proc has nothing in flight: an SSE comment on every feed (Datastar ignores
     ;; comments), the event a client or a check waits on before reading a current view
     :settled (reduce (fn [st view] (let [[st sent] (offer-all st view ": settled\n\n")] (update st :bytes + sent)))

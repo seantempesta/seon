@@ -908,6 +908,7 @@
         [st1 m1] (#'p/pass-view (assoc st0 :main-db main) [:chat :a3])]
     (is (nil? m0))
     (is (= :keyframe (:op m1)) "the page whole")
+    (is (:whole m1) "to every tab of the view, none of which holds where the patch would go")
     (is (= (p/view-html st1 [:chat :a3]) (:html m1)) "as the tab would load it")))
 
 (deftest a-chosen-turn-draws-once-and-latest-draws-on-a-move

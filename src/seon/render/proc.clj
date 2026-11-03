@@ -622,7 +622,7 @@
        (cond
          ;; a patch replaces only elements the tab holds: a unit new to it in no container (its slot in the layout,
          ;; not a list's) has no element there to replace, so the tab is sent the page whole
-         (and held (some #(not (contains? (:units held) (first %))) (:frags patch))) {:op :keyframe :view view-id :html (compose skel (:units view))}
+         (and held (some #(not (contains? (:units held) (first %))) (:frags patch))) {:op :keyframe :whole true :view view-id :html (compose skel (:units view))}
          (or (seq (:frags patch)) (seq (:appends patch)) (seq (:prepends patch)) (seq (:afters patch)) (seq (:removes patch)))
          (assoc patch :op :patch :view view-id))]))))
 
