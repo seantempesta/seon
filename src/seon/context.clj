@@ -508,13 +508,12 @@
 (declare cited)
 
 (defn current-ns
-  "The namespace the REPL of agent record c (its ctx) is in: the one its newest eval left it in (its response's
-  :ns, as nREPL's carries it), read from its :evals (newest first, docs/ctx.md#the-pattern), stopping at the
-  first that carries one; before any, where it starts, its task's :seon.task/ns (seon.agent/start-ns); nil for a
-  task that names none. Where its next eval runs (docs/render.md#a-part-answers-data)."
+  "The namespace the REPL of agent record c (its ctx) is in: its :seon.agent/ns, which its turn writes when the REPL
+  moved (one key, so what reads it redraws on a move alone, never on an eval); before its first turn, where it starts,
+  its task's :seon.task/ns (seon.agent/start-ns); nil for a task that names none. Where its next eval runs
+  (docs/render.md#a-part-answers-data)."
   {:malli/schema [:=> [:cat :map] [:maybe :symbol]]}
-  [c] (or (some (fn [[_ e]] (ratom/realize (get-in e [:seon.eval/record :response :ns]))) (:evals c))
-          (:seon.task/ns (:task c))))
+  [c] (or (:seon.agent/ns c) (:seon.task/ns (:task c))))
 
 (defn namespaces-of
   "The namespaces agent record c's work touches, as the namespaces part shows them, from ctx alone: the one its REPL is in

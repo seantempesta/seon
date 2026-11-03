@@ -1399,7 +1399,7 @@
            (context/namespaces-of (update tree :task dissoc :cites :needs :proved)))
         "a task that cites and proves nothing answers its own namespace")
     (is (= 'x (context/current-ns tree)) "before any eval the REPL is where it starts, the task's namespace")
-    (let [moved (assoc tree :evals [[1 {:seon.eval/record {:response {:ns 'y}}}]])]
+    (let [moved (assoc tree :seon.agent/ns 'y)]
       (is (= 'y (context/current-ns moved)))
       (is (= '[y x x.nsd x.nsd-test] (keys (context/namespaces-of moved))) "the part follows the REPL, the task's own still drawn"))))
 
