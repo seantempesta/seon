@@ -533,7 +533,7 @@
 
 (deftest lines-show-as-numbered-lines
   ;; docs/agent.md#small-answers: lines' rows are shown as one block of numbered lines (my.agent/lines-text), and
-  ;; wc counts what is shown: a live session (cc7e6ac413) paid 2.4k tokens for 50 lines as a map a line
+  ;; wc counts what is shown: 50 lines as a map a line cost 2.4k tokens
   (let [rs (with-meta (vec (for [i (range 8 13)] {:at (str "docs/x.md#a:" i) :text (str "  line " i " of the section")}))
              {:seon.render/schema :my.agent/lines})
         shown (:seon.print/code (my.agent/lines-text {} rs))]
@@ -608,16 +608,19 @@
     (is (= '[seon.task-test/no-such-test] (:value unmatched)) (str "a prove naming no test says which: " (pr-str unmatched)))))
 
 (deftest grep-refuses-what-it-does-not-take
-  ;; docs/vector.md#search: a live session (2026-11-02) passed search's :kinds to grep six times, and a string
-  ;; holding a regex's | ( ^ eight times, each answer read as what it asked for. grep's options are a closed
-  ;; map, and a string with a regex's operators that matches nothing names its regex form
-  (let [[kinds piped regex] (at/in-agent ["(try (my.agent/grep \"accumulate\" {:kinds #{:var}}) (catch Exception e (:seon.error/message (ex-data e))))"
-                                          "(my.agent/grep \"defn (accumulate|tasks)\" {:ns \"seon.task\"})"
-                                          "(count (my.agent/grep #\"defn (accumulate|tasks)\" {:ns \"seon.task\"}))"])]
+  ;; docs/vector.md#search: an option grep does not take, ignored, reads as what it asked for, and so does []
+  ;; for a string holding a regex's | ( ^. grep's options are a closed map, and a string with a regex's
+  ;; operators that matches nothing is [] shown with its regex form, a value, so the reply's next call runs
+  (let [[kinds piped regex quoted] (at/in-agent ["(try (my.agent/grep \"accumulate\" {:kinds #{:var}}) (catch Exception e (:seon.error/message (ex-data e))))"
+                                                 "(my.agent/grep \"defn (accumulate|tasks)\" {:ns \"seon.task\"})"
+                                                 "(count (my.agent/grep #\"defn (accumulate|tasks)\" {:ns \"seon.task\"}))"
+                                                 "(my.agent/grep \"(\\\"no such\\\")\")"])]
     (is (re-find #":kinds.*does not admit.*:in" (str (:value kinds))) (str "an option grep does not take is refused, the ones it takes named: " (pr-str kinds)))
-    (is (= :my.agent/regex-text (:seon.error/type (:value piped))) (pr-str piped))
-    (is (str/includes? (:seon.error/message (:value piped)) "(my.agent/grep #\"defn (accumulate|tasks)\" {:ns \"seon.task\"})") "it names the regex form, its options kept")
-    (is (pos? (:value regex)) "and that form finds them")))
+    (is (= [] (:value piped)) (str "a value, no error, so a reply's later calls run: " (pr-str piped)))
+    (is (str/includes? (str (:text piped)) "(my.agent/grep #\"defn (accumulate|tasks)\" {:ns \"seon.task\"})") (str "it shows the regex form, its options kept: " (pr-str piped)))
+    (is (pos? (:value regex)) "and that form finds them")
+    (let [form (second (re-find #"as (\(my.agent/grep #\".*\"\))" (str (:text quoted))))]
+      (is (re-find (second (read-string form)) "(\"no such\")") (str "a string holding a quote shows a form that reads, its regex the string's: " (pr-str quoted))))))
 
 (deftest a-missing-name-says-the-nearest
   ;; the live rounds' repeats (the archived paper live-2026-10-25.md (git history); jolt/repeat-causes): agents re-sent a guessed

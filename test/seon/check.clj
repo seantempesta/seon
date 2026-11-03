@@ -490,7 +490,10 @@
         _ (c/interrupt! sys b)
         r12 @p12
         r12b @(c/submit! sys b ":next")
-        r10 @(c/submit! sys x "(println \"hello from\" (:id (my.agent/whoami))) (def busy (future (loop [] (recur))))")
+        r10 @(c/submit! sys x (str "(println \"hello from\" (:id (my.agent/whoami)))"
+                                     ;; the fork is asked once the future's thread runs: a future only submitted may hold no
+                                     ;; thread yet, and the fork then (rightly) goes ahead
+                                     " (def started (promise)) (def busy (future (deliver started true) (loop [] (recur)))) @started"))
         t10 @(c/run-tests! sys x)
         _ (lib/c-kill (get-in (c/state sys) [:fork-server :pid]) 9)
         _ (await-event ev #(#{:fork-server-up :fork-server-lost} (:type %)))
