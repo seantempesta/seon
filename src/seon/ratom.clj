@@ -395,8 +395,14 @@
           new (set (remove vector? derefed))
           old (set (remove map? (keys watching)))]
       (set! last-captured derefed)
-      (doseq [[src rs] reads] (index-reads! src this rs disj))
-      (doseq [[src rs] by-src] (index-reads! src this rs conj))
+      ;; only the reads it gained or lost: a rerun that read what it read before (a layout over every row,
+      ;; a member added) indexes the one path that moved, not each path again (docs/render.md#reactive-renders)
+      (doseq [src (distinct (concat (keys reads) (keys by-src)))
+              :let [o (get reads src #{}) n (get by-src src #{})]
+              :when (not= o n)]
+        (let [gone (reduce disj o n) added (reduce disj n o)]
+          (when (seq gone) (index-reads! src this gone disj))
+          (when (seq added) (index-reads! src this added conj))))
       (set! reads by-src)
       (set! watching (zipmap (concat new (keys by-src)) (repeat true)))
       (doseq [w new :when (not (contains? old w))] (add-watch w this handle-reaction-change))

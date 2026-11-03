@@ -314,6 +314,30 @@
     (dispose! r-plan) (dispose! r-count) (dispose! r-e10)
     (is (= runs (running)))))
 
+(deftest a-rerun-indexes-only-the-reads-it-gained-or-lost
+  ;; docs/render.md#reactive-renders: a rerun that reads what it read before indexes none of it again (a layout
+  ;; over every row, rerun by one change, re-indexed each path with each prefix: one eval added at 100 evals was
+  ;; 37.7 MB, 13.0 MB after), and a read it gains or loses still decides what reruns it
+  (let [runs (running)
+        a (rv/atom {:db/id 1 :flag 0 :evals (#'seon.ctx/members-map (for [i (range 20)] [i {:db/id i :v i}]))})
+        v #(rv/ref-view a ctx/changes)
+        n (rv/atom 0)
+        r (run! (swap! n inc) [(:flag (v)) (reduce + (map (fn [[_ e]] (:v e)) (:evals (v))))])
+        indexed (fn [f] (seon.profile/begin!) (f) (flush!)
+                  (or (some #(when (= 'seon.ratom/index-reads! (:var %)) (:calls %)) (seon.profile/touched)) 0))]
+    (is (zero? (indexed #(swap! a assoc :flag 1))) "the same reads, rerun: nothing indexed again (it was each read, removed and added)")
+    (is (= 2 @n))
+    (is (= 1 (indexed #(swap! a assoc-in [:evals 20] {:db/id 20 :v 20}))) "a member added: its reads indexed, once")
+    (is (= 3 @n))
+    (swap! a assoc-in [:evals 20 :v] 5) (flush!)
+    (is (= 4 @n) "the read it gained reruns it")
+    (swap! a update :evals dissoc 3) (flush!)
+    (is (= 5 @n))
+    (swap! a assoc-in [:evals 3] {:db/id 3 :v 1}) (flush!)
+    (is (= 6 @n) "a member gone and back: read again")
+    (dispose! r)
+    (is (= runs (running)))))
+
 (deftest a-view-is-a-map
   ;; the view passes as the value it views wherever a map is read, and the printer takes the real one
   (let [a (rv/atom {:db/id 1 :task {:db/id 2 :plan "p"} :evals (#'seon.ctx/members-map [[10 {:db/id 10 :v 1}]])})
