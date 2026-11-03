@@ -132,8 +132,8 @@
   ;; (what an agent reads must not hint at a task's answer); decisions.md and plan.md name the runs they were made on.
   ;; src is read whole, docstrings and comments both: an agent reads them through `doc`, `source` and `lines`.
   ;; the ids are the runs' real names (docs/decisions.md, docs/plan.md): md-scan, scope-<N>, bench-<md-scan|tools|scope-N|b..>,
-  ;; and a known bench's name before " #N" or " bench"; a hyphenated word alone (step-fn #2, read-only bench, bench-top) is not one
-  (let [id #"(?:^|[^A-Za-z0-9_-])(md-scan\b|bench-(?:md-scan|tools|scope-[0-9]+|b[0-9]*)\b|scope-[0-9]+\b|(?:md-scan|fence|scope) (?:#[0-9]+|bench\b))"
+  ;; a known bench's name before " #N" or " bench", and a session's id after "session"; a hyphenated word alone (step-fn #2, read-only bench, bench-top) is not one
+  (let [id #"(?:^|[^A-Za-z0-9_-])(md-scan\b|bench-(?:md-scan|tools|scope-[0-9]+|b[0-9]*)\b|scope-[0-9]+\b|(?:md-scan|fence|scope) (?:#[0-9]+|bench\b)|session,? \(?[0-9a-f]{10}\b)"
         root (config/checkout)
         pages (for [^java.io.File f (.listFiles (java.io.File. (str root "/docs")))
                     :when (and (str/ends-with? (.getName f) ".md") (not (#{"decisions.md" "plan.md"} (.getName f))))]
@@ -582,7 +582,7 @@
     (is (= [] (doc/grep db "nowhere-at-all" all nil)) "no match is the empty vector")
     (is (= ["app.gr/total:2"] (map :at (doc/grep db "needle" #{:var :test} "app.gr")))
         ":ns is a name and what is under it: app.gr holds app.gr/total, not app.gr-test")
-    ;; a live session (cc7e6ac413, 2026-11-02) spent six evals on a test namespace's requires: grep answered []
+    ;; a test namespace's requires are in its ns form: grep answered [] for them, and six evals went on it
     (is (= [{:at "app.gr-test:1" :kind :test}] (map #(dissoc % :text) (doc/grep db "clojure.test :refer" #{:var :test} "app.gr-test")))
         "an ns form's lines are the namespace's, at its line as (lines 'the.ns) numbers it, a test namespace's a :test")
     (is (= ["app.gr:1"] (map :at (doc/grep db "ns app.gr" #{:var :test} "app.gr"))) "and a namespace's own, its -test one not under it")

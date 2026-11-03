@@ -356,7 +356,7 @@
         (is (= [{:reason :contract-gap :vars ['demo/helper]}] (:refused st)))))))
 
 (deftest a-red-main-was-red-on-too-is-mains
-  ;; docs/render.md#how-the-work-stands: a live session (cc7e6ac413) ended refused over a test red on main as on its branch,
+  ;; docs/render.md#how-the-work-stands: a session ended refused over a test red on main as on its branch,
   ;; and was told to register that test, one it never wrote, as its own proof. A test red at the branch's merge base
   ;; is main's red; only a test the branch wrote or changed is offered the form that makes it a proof
   (ts/test-branch!
@@ -1163,8 +1163,9 @@
       (is (= ['app/caller] (map :name (kind (s 'app/g {:by #{:refs}}) :var))))
       (is (= ['app/caller] (map :name (kind (s "who calls app/g" {:by #{:refs}}) :var))) "a name inside a text seeds them too")
       (is (= [] (kind (s "fusing" {:by #{:refs}}) :var)) "never the text hits' own"))
-    (testing ":ns keeps the vars of a namespace prefix"
+    (testing ":ns keeps the vars of a name and what is under it (seon.doc/named-under?)"
       (is (= ['app/g] (map :name (kind (s "fusing" {:ns "app"}) :var))))
+      (is (= [] (kind (s "fusing" {:ns "ap"}) :var)) "never a name it only starts with")
       (is (= [] (kind (s "fusing" {:ns "other"}) :var)))
       (is (seq (kind (s "fusing" {:ns "other"}) :section)) "and leaves the other kinds"))
     (testing ":min leaves out a hit whose known relevance is below it"
