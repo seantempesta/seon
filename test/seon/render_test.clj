@@ -907,6 +907,10 @@
         [st0 m0] (#'p/pass-view st [:chat :a3])
         [st1 m1] (#'p/pass-view (assoc st0 :main-db main) [:chat :a3])]
     (is (nil? m0))
+    ;; the browser check of 686f441544: the page whole reached the tab, and Datastar found no #app to place it in
+    (is (str/starts-with? (p/view-html st0 [:chat :a3]) "<div class=\"mx-auto flex max-w-screen-xl flex-col gap-3 p-3 sm:p-4\" id=\"app\"")
+        "the error page is in the root every page has, #app")
+    (is (re-find #"^<div [^>]*id=\"app\"" (:html m1)) "and so is the page that replaces it")
     (is (= :keyframe (:op m1)) "the page whole")
     (is (:whole m1) "to every tab of the view, none of which holds where the patch would go")
     (is (= (p/view-html st1 [:chat :a3]) (:html m1)) "as the tab would load it")))

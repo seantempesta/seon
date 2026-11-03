@@ -592,6 +592,12 @@
         (cond-> (root-walk (main-info st db moved) db held)
           (seq moved) (update :dirty (fnil into #{}) (touched st moved)))))))
 
+(defn- error-page
+  "A view's page that is its error e, by the error's render, in the root every page has (#app): a page sent
+  whole later replaces the tab's #app, so a page without it could never become its view's page."
+  {:malli/schema [:=> [:cat :map] :any]}
+  [e] [:div {:id "app" :class "mx-auto flex max-w-screen-xl flex-col gap-3 p-3 sm:p-4"} (render/html {} e)])
+
 (defn- pass-view
   "One view rendered: [st' patch-message-or-nil]; a view whose entity main does not hold yet renders
   nothing. Its walk runs inside d/with-reads, and what it read is kept (reindex): one index for
@@ -611,7 +617,7 @@
     ;; main not read yet: nothing held, nothing indexed; the next pass walks it
     (nil? out) [st nil]
     ;; a location naming no entity: its page is that error, by its render
-    (:seon.error/type out) [(let [hc (render/html {} out)] (hold st {:skeleton (h/html hc) :layout hc :units {}})) nil]
+    (:seon.error/type out) [(let [hc (error-page out)] (hold st {:skeleton (h/html hc) :layout hc :units {}})) nil]
     :else
     (let [units (:seon.render/units out)
           [view patch n] (step-units held units)
@@ -647,7 +653,7 @@
             e (contract/error :seon.render/view-defect #'pass-view (str "the page " named " threw rendering: " (step/error-msg ex))
                               (cond-> {:view named :class (.getName (class ex))}
                                 (:clojure.error/symbol d) (assoc :seon.error/in (:clojure.error/symbol d))))
-            hc (render/html {} e)]
+            hc (error-page e)]
         (when-not (= e (:error held))
           (step/out! o :to-api {:op :error :pid :render :message (:seon.error/message e) :data e}))
         [(-> st (update :dirty disj view-id)
