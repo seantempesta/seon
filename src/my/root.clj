@@ -596,7 +596,8 @@
                 @(root/transact-main! sys [{:seon.judge/digest (judge/digest {:pass ids :version version}) :seon.judge/stopped stopped}])
                 {:rows rows :usd spent :stopped stopped})
               :else
-              (let [r @(root/call! sys {:op :fx :kind :model :req {:messages (:messages req) :task id :turn 0 :model (:model req)}})
+              ;; the judge's model names its provider as a turn's does (seon.config/provider-at): the one way a call names its model
+              (let [r @(root/call! sys {:op :fx :kind :model :req {:messages (:messages req) :task id :turn 0 :provider (config/provider-at db db id (:model req))}})
                     c (:value r)
                     calls (mapv :code (:tool-calls c))
                     sc (when-not (contract/error? r) (score db t calls))

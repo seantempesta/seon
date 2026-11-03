@@ -104,14 +104,15 @@
 ;;; --- units, rendered incrementally ---------------------------------------------------------
 
 (defn- render-unit
-  "A unit as [hiccup html]: its html as drawn, else its draw thunk's hiccup (a debug turn's row),
-  else its input by the render its schema declares, its unit named (its element's id: :unit). The
-  hiccup is kept beside the html. step-units calls it only when the unit's input changed."
-  {:malli/schema [:=> [:cat :map] [:tuple :any :string]]}
-  [{:keys [id input schema html hiccup draw]}]
-  (cond html [hiccup html]
-        draw (let [hc (draw)] [hc (h/html hc)])
-        :else (let [hc (render/html {:schema schema :unit id} input)] [hc (h/html hc)])))
+  "A unit as [hiccup html kept]: its html as drawn, else its draw's hiccup (the debug page's turn: draw,
+  a function of what its last draw kept, kept, answers [hiccup kept']), else its input by the render its
+  schema declares, its unit named (its element's id: :unit). The hiccup and kept are held beside the html.
+  step-units calls it only when the unit's input changed."
+  {:malli/schema [:=> [:cat :map :any] [:tuple :any :string :any]]}
+  [{:keys [id input schema html hiccup draw]} kept]
+  (cond html [hiccup html nil]
+        draw (let [[hc k] (draw kept)] [hc (h/html hc) k])
+        :else (let [hc (render/html {:schema schema :unit id} input)] [hc (h/html hc) nil])))
 
 (defn- step-units
   "Run a layout's units, in the order the layout shows them, against what the view retained: a
@@ -122,7 +123,9 @@
   at its top, a conversation's older parts), else at its end. Answers [view' patch counts]."
   {:malli/schema [:=> [:cat [:maybe :map] [:sequential :map]] [:tuple :map :map :map]]}
   [view units]
-  (let [held (:units (or view {}))
+  ;; a page of no units (the debug page before a model turn) is held with none, never without :units
+  (let [view (or view {:units {}})
+        held (:units view)
         ;; for each unit, whether a unit after it in its container is held already
         before? (second (reduce (fn [[seen acc] {:keys [id container]}]
                                   [(cond-> seen (and container (contains? held id)) (conj container))
@@ -135,8 +138,8 @@
                      prev (cond-> prev container (assoc container id))]
                  (if (and old (= input (:input old)))
                    [[view patch n] prev placed]
-                   (let [[hiccup html] (render-unit u)
-                         view (assoc-in view [:units id] (cond-> {:input input :html html :hiccup hiccup} container (assoc :container container)))]
+                   (let [[hiccup html kept] (render-unit u (:kept old))
+                         view (assoc-in view [:units id] (cond-> {:input input :html html :hiccup hiccup} container (assoc :container container) (some? kept) (assoc :kept kept)))]
                      (cond
                        (= html (:html old)) [[view patch (update n :same inc)] prev placed]
                        (and container (nil? old))
@@ -204,37 +207,45 @@
         :else view))
 
 (defn- debug-value
-  "View [:debug id]'s page: what agent id's model was sent, each model turn that recorded it
-  (:seon.model-call/sent) on its branch as this proc last read it, newest first, only the rows its tab
-  scrolled to (:shown, as the agent's page: the rest are counted, and load as their end scrolls
-  into view). Each row is a unit drawn by seon.render.ui/sent-request when its input (its turn,
-  whether its tab has it open) changes: it reads its turn and the one before it, shows what its
-  turn added, and its whole request while open (:open, seon.web's /open); a finished turn is
-  never written again, so its row renders once. nil until the branch is read; an agent with no branch on main (the user's) or
-  whose branch could not be read has no turn to show, and its page says so, never a wait."
+  "View [:debug id]'s page: the timeline of agent id's requests on its branch as this proc last read it
+  (its model calls, each with its basis), the one shown at the view's :at (a model call's eid; absent,
+  :latest), drawn by seon.render.ui/debug-turn over seon.render.ui/debug-input when its input changes: a past
+  turn's is its eid (made again from its basis, it never changes), latest's the branch's newest transaction (drawn
+  again each time the branch moves, and only while a tab watches the view). nil until the branch is read;
+  an agent with no branch on main (the user's) or whose branch could not be read has no turn to show, and
+  its page says so, never a wait. See docs/render.md#the-debug-page-is-the-wire-request."
   {:malli/schema [:=> [:cat :map [:tuple [:= :debug] :any]] [:maybe :map]]}
   [st view]
   (cond
     (= :root (second view))
     ;; root has no model turn: what it reads is the system's value printed, held each pass (:context)
     (when-let [ctx (:context st)]
-      (ui/debug :root [] 0 {:id "d-context" :input ctx :schema :seon.render/root-context}))
+      (ui/debug :root nil nil {:id "d-context" :input ctx :schema :seon.render/root-context}))
     (nil? (get-in st [:branches view :db]))
     (let [db (:main-db st) eid (when db (location db view))]
       (when (or (get-in st [:branches view :error]) (and eid (nil? (:seon.agent/branch (d/entity db eid)))))
-        (ui/debug (second view) [] 0 nil)))
+        (ui/debug (second view) nil nil nil)))
     :else
-  (let [bdb (get-in st [:branches view :db])]
-    (let [open (get-in st [:open view] #{})
-          shown (get-in st [:shown view] (history-cap))
-          ;; newest first: entity ids are issued in the order model calls were written
-          ts (->> (d/q '[:find [?e ...] :where [?e :seon.model-call/sent _]] bdb) sort reverse vec)
-          on (take shown ts)
-          vp (ui/view-param view)]
+    (let [bdb (get-in st [:branches view :db])
+          ;; in the order written: entity ids are issued so
+          calls (vec (sort (d/q '[:find [?e ...] :where [?e :seon.model-call/basis _]] bdb)))
+          bases (mapv #(:seon.model-call/basis (d/pull bdb [:seon.model-call/basis] %)) calls)
+          chosen (get-in st [:tab view :at] :latest)
+          gone (when-not (or (= :latest chosen) (some #{chosen} calls)) chosen)
+          at (if gone :latest chosen)
+          raw? (contains? (get-in st [:tab view :open] #{}) "d-turn-raw")
+          lb (peek bases)
+          to-come? (ui/to-come? bdb lb)]
       (ui/debug (second view)
-                (vec (for [e on :let [id (ui/comp-id e [:debug]) open? (contains? open id)]]
-                       {:id id :input [e open?] :draw #(ui/sent-request {:unit id} (ui/debug-input bdb e open? vp))}))
-                (- (count ts) (count on)) nil)))))
+                (cond-> {:turns (mapv (fn [e b] {:e e :turn (:turn b) :origin (:origin b)}) calls bases) :at at :to-come? to-come?} gone (assoc :gone gone))
+                (when (seq calls)
+                  {:id "d-turn" :input [at (when (= :latest at) (:max-tx bdb)) raw?]
+                   ;; the print cache its last draw kept: latest prints only the records new since
+                   ;; the turn to come's parts are drawn cold at the head, the task's list alone (seon.context/drawn-parts):
+                   ;; measured cheaper than the kept walk flushed over the turn it writes and back (37.3 MB to 41.2 at 100 evals)
+                   :draw (fn [printed] (let [in (ui/debug-input bdb at calls raw? printed)]
+                                         [(ui/debug-turn {:unit "d-turn"} (-> in (dissoc :printed) (assoc :view (ui/view-param view)))) (:printed in)]))})
+                nil))))
 
 (def ^:private gone "The agent statuses of an ended process (:seon.agent/status)." (:seon.status/gone (contract/properties :seon.agent/status)))
 
@@ -246,6 +257,57 @@
   [db view]
   (when-let [eid (when db (let [v (if (= :chat (first-of view)) (second view) view)] (when-not (vector? v) (location db v))))]
     (let [e (d/entity db eid)] (when (:seon.agent/key e) [e (task/this-boots db e)]))))
+
+(defn- kept-walk
+  "A walk kept across moves: entity e's ctx on db (seon.ctx/build, its tree as mark makes it) in a reactive
+  atom, drawn once by layout var root-var over the db it holds: {:w :a :c :at}, :at a volatile of that db.
+  Root's own page (root-walk) and each watched agent's branch (`branch-walk!`) keep one; `advance-walk!`
+  moves it. See docs/render.md#a-page-is-a-kept-walk."
+  {:malli/schema [:=> [:cat :seon.host/db [:maybe pos-int?] :any :any :seon.host/fn] :map]}
+  [db e branch root-var mark]
+  (let [c (ctx/build db e branch) at (volatile! db) a (ratom/atom (mark (:tree c)))
+        w (render/walker {:ref a :changes ctx/changes} (fn [] @at) [root-var {}])]
+    (render/flush! w nil)
+    {:w w :a a :c c :at at}))
+
+(defn- advance-walk!
+  "Kept walk kw (`kept-walk`) as of db, a later value of its branch: its ctx patched by what moved
+  (seon.ctx/advance), its atom reset to the tree mark makes of it and the moved datoms flushed, so the
+  components their change reached are drawn and nothing else; at the db it holds, only what mark changed.
+  Answers kw with its ctx. See docs/render.md#a-page-is-a-kept-walk."
+  {:malli/schema [:=> [:cat :map :seon.host/db :any :seon.host/fn] :map]}
+  [{:keys [w a c at] :as kw} db branch mark]
+  (let [held @at
+        same? (identical? held db)
+        moved (if same? [] (ctx/moved held db nil))
+        c' (if same? c (ctx/patch c db moved branch))]
+    (vreset! at db)
+    (reset! a (mark (:tree c')))
+    (render/flush! w moved)
+    (assoc kw :c c')))
+
+(defn- branch-walk!
+  "The kept walk of agent e's page (e on main) on its branch, as of bdb, the evals main records it opened
+  (:seon.agent/opened) drawn opened: one a branch, held in its read's cell (:branch-reads b :walk, a
+  volatile) so every view of the agent (its chat drawn from its branch, @ctx, the debug page's latest)
+  draws from it; built at the first, after it advanced (`advance-walk!`), made again when the agent's entity on
+  the branch is not the one it holds (none yet at its first draw); at the same db and opened, nothing at all. Answers {:w :c}. See docs/render.md#a-page-is-a-kept-walk."
+  {:malli/schema [:=> [:cat :seon.host/volatile :seon.host/db :any] :map]}
+  [cell bdb e]
+  (let [opened (set (:seon.agent/opened e))
+        branch (or (:seon.agent/branch e) :db)
+        mark (fn [t] (cond-> t (seq opened) (update :evals #(reduce-kv (fn [m k ev] (if (opened (:seon.eval/id ev)) (assoc m k (assoc ev :seon.eval/opened true)) m)) % %))))
+        kw @cell]
+    (binding [datahike.index.interface/*reads* nil]
+      (let [eid (seon.db/eid bdb :seon.agent/key (:seon.agent/key e))]
+      (cond
+        ;; a walk of another entity than the branch holds now (none, before the agent's first write to its
+        ;; branch; another, a branch made again) is made again: a patch reaches only what its ctx holds
+        (or (nil? kw) (not= eid (get-in kw [:c :tree :db/id])))
+        (do (some-> kw :w render/dispose-walk!)
+            (vreset! cell (assoc (kept-walk bdb eid branch (render/declared-var :seon.render/render-ctx) mark) :opened opened)))
+        (and (identical? @(:at kw) bdb) (= opened (:opened kw))) kw
+        :else (vreset! cell (assoc (advance-walk! kw bdb branch mark) :opened opened)))))))
 
 (defn- live?
   "Is agent id a process root's view holds, running (it answers what it is asked)?"
@@ -291,13 +353,29 @@
         ;; the evals a reader opened (main's :seon.agent/opened, read here, so its commit passes the
         ;; page again): drawn opened, as the agent draws them once it takes the fact
         opened (set (:seon.agent/opened e))
-        branch-units (fn [] (let [t (quiet #(:tree (ctx/build bdb (seon.db/eid bdb :seon.agent/key (:seon.agent/key e)) (or (:seon.agent/branch e) :db))))
-                                  t (cond-> t (seq opened) (update :evals #(reduce-kv (fn [m k ev] (if (opened (:seon.eval/id ev)) (assoc m k (assoc ev :seon.eval/opened true)) m)) % %)))
-                                  w (quiet #(render/draw t ctx/changes bdb (render/declared-var :seon.render/render-ctx)))]
-                              (try (render/placed-units w) (finally (render/dispose-walk! w)))))
-        ;; the debug view: @ctx printed, the agent's record as data by the one printer (its :seon.ctx/ctx render)
-        ctx-units (fn [] (let [t (quiet #(:tree (ctx/build bdb (seon.db/eid bdb :seon.agent/key (:seon.agent/key e)) (or (:seon.agent/branch e) :db))))]
-                           [{:id "d-ctx" :container "#c-rows" :rev (:t t)
+        ;; the branch's kept walk (branch-walk!), one a branch; an agent read from main is drawn once, its reads the page's
+        cell (get-in st [:branch-reads (get-in st [:branches view :branch]) :walk])
+        walked #(when (and cell (not branchless?)) (branch-walk! cell bdb e))
+        cold-tree #(quiet (fn [] (:tree (ctx/build bdb (seon.db/eid bdb :seon.agent/key (:seon.agent/key e)) (or (:seon.agent/branch e) :db)))))
+        branch-units (fn [] (if-let [kw (walked)]
+                              (quiet #(render/placed-units (:w kw)))
+                              (let [t (cond-> (cold-tree) (seq opened) (update :evals #(reduce-kv (fn [m k ev] (if (opened (:seon.eval/id ev)) (assoc m k (assoc ev :seon.eval/opened true)) m)) % %)))
+                                    w (quiet #(render/draw t ctx/changes bdb (render/declared-var :seon.render/render-ctx)))]
+                                (try (render/placed-units w) (finally (render/dispose-walk! w))))))
+        ;; @ctx's part pairs (seon.render.ui/ctx-parts): what the model reads of each part of the task's list, beside
+        ;; its unit as the page draws it, from one walk of the page
+        pairs (fn [w] (let [us (filterv #((set context/page-lists) (:container %)) (render/placed-units w))]
+                        {:id "d-parts" :container "#c-rows" :rev (hash (mapv (juxt :id :rev) us))
+                         :html (h/html (ui/ctx-parts (render/placed-hiccup w context/page-lists) (into {} (map (juxt :id :html)) us)))}))
+        ;; the debug view: @ctx, its part pairs and the agent's record as data by the one printer (its :seon.ctx/ctx render)
+        ctx-units (fn [] (let [kw (walked)
+                               t (if kw (:tree (:c kw)) (cold-tree))
+                               part-unit (if kw
+                                           (quiet #(pairs (:w kw)))
+                                           (let [w (quiet #(render/draw t ctx/changes bdb (render/declared-var :seon.render/render-ctx)))]
+                                             (try (quiet #(pairs w)) (finally (render/dispose-walk! w)))))]
+                           [part-unit
+                            {:id "d-ctx" :container "#c-rows" :rev (:t t)
                              :html (h/html [:li {:id "d-ctx"} (quiet #(render/html {:db bdb} (with-meta t {:seon.render/schema :seon.ctx/ctx})))])}]))
         units (if own?
                 (:units held)
@@ -337,21 +415,16 @@
     (cond
       (nil? root) st
       (nil? rw)
-      (let [c (ctx/build db root :main) a (ratom/atom (:tree c)) at (volatile! db)
-            w (render/walker {:ref a :changes ctx/changes} (fn [] @at) [(render/declared-var :seon.render/root-ctx) {}])]
-        (render/flush! w nil)
-        (-> (assoc st :root-walk {:w w :a a :c c :at at})
-            (update :dirty (fnil into #{}) (keys (:views st)))))
+      (-> (assoc st :root-walk (kept-walk db root :main (render/declared-var :seon.render/root-ctx) identity))
+          (update :dirty (fnil into #{}) (keys (:views st))))
       (nil? held) st
       :else
-      (let [{:keys [w a c at]} rw
-            c' (ctx/advance c held db :main)
-            before (side w)]
-        (vreset! at db)
-        ;; root's process (process!) is root's own data beside the pull: kept across a move of main
-        (reset! a (cond-> (:tree c') (:process @a) (assoc :process (:process @a)) (:health @a) (assoc :health (:health @a))))
-        (render/flush! w (ctx/moved held db nil))
-        (cond-> (assoc-in st [:root-walk :c] c')
+      (let [{:keys [w a]} rw
+            before (side w)
+            ;; root's process (process!) is root's own data beside the pull: kept across a move of main
+            p (:process @a) h (:health @a)
+            rw (advance-walk! rw db :main #(cond-> % p (assoc :process p) h (assoc :health h)))]
+        (cond-> (assoc st :root-walk rw)
           true (update :dirty (fnil conj #{}) :root)
           (not= before (side w)) (update :dirty (fnil into #{}) (keys (:views st))))))))
 
@@ -464,7 +537,7 @@
   [st view]
   (let [db (:main-db st)
         id (when db (when-let [eid (location db view)] (task/this-boots db (d/entity db eid))))]
-    {:shown (get-in st [:shown view]) :open (get-in st [:open view]) :error (get-in st [:branches view :error])
+    {:tab (get-in st [:tab view]) :error (get-in st [:branches view :error])
      ;; whether its branch is read at all: what moved on it after that is its datoms-diff
      :branch? (some? (get-in st [:branches view :db]))
      :live (when id (ui/live (ui/shown-status (get-in st [:view :agents id] {}))))}))
@@ -519,12 +592,19 @@
         (cond-> (root-walk (main-info st db moved) db held)
           (seq moved) (update :dirty (fnil into #{}) (touched st moved)))))))
 
+(defn- error-page
+  "A view's page that is its error e, by the error's render, in the root every page has (#app): a page sent
+  whole later replaces the tab's #app, so a page without it could never become its view's page."
+  {:malli/schema [:=> [:cat :map] :any]}
+  [e] [:div {:id "app" :class "mx-auto flex max-w-screen-xl flex-col gap-3 p-3 sm:p-4"} (render/html {} e)])
+
 (defn- pass-view
   "One view rendered: [st' patch-message-or-nil]; a view whose entity main does not hold yet renders
   nothing. Its walk runs inside d/with-reads, and what it read is kept (reindex): one index for
   the dbs it reads, main's and its agent's branch's (a datom of either is matched against both: a
   needless walk at worst, never a missed one). A unit is drawn only when its input changed
-  (step-units)."
+  (step-units). A view whose patch would replace an element its tabs never held (a new unit in no list) is sent
+  whole, a keyframe."
   {:malli/schema [:=> [:cat :map :any] [:tuple :map [:maybe :map]]]}
   [st view-id]
   (let [held (get-in st [:views view-id])
@@ -537,14 +617,19 @@
     ;; main not read yet: nothing held, nothing indexed; the next pass walks it
     (nil? out) [st nil]
     ;; a location naming no entity: its page is that error, by its render
-    (:seon.error/type out) [(let [hc (render/html {} out)] (hold st {:skeleton (h/html hc) :layout hc :units {}})) nil]
+    (:seon.error/type out) [(let [hc (error-page out)] (hold st {:skeleton (h/html hc) :layout hc :units {}})) nil]
     :else
     (let [units (:seon.render/units out)
           [view patch n] (step-units held units)
           [view patch] (finish-patch view patch (set (map :id units)))
-          view (assoc view :skeleton (h/html (:seon.render/html out)) :layout (:seon.render/html out))]
+          skel (h/html (:seon.render/html out))
+          view (assoc view :skeleton skel :layout (:seon.render/html out))]
       [(-> (hold st view) (update-in [:counts :rendered] (fnil + 0) (:rendered n)) (update-in [:counts :same] (fnil + 0) (:same n)))
-       (when (or (seq (:frags patch)) (seq (:appends patch)) (seq (:prepends patch)) (seq (:afters patch)) (seq (:removes patch)))
+       (cond
+         ;; a patch replaces only elements the tab holds: a unit new to it in no container (its slot in the layout,
+         ;; not a list's) has no element there to replace, so the tab is sent the page whole
+         (and held (some #(not (contains? (:units held) (first %))) (:frags patch))) {:op :keyframe :whole true :view view-id :html (compose skel (:units view))}
+         (or (seq (:frags patch)) (seq (:appends patch)) (seq (:prepends patch)) (seq (:afters patch)) (seq (:removes patch)))
          (assoc patch :op :patch :view view-id))]))))
 
 (defn- view-pass
@@ -568,7 +653,7 @@
             e (contract/error :seon.render/view-defect #'pass-view (str "the page " named " threw rendering: " (step/error-msg ex))
                               (cond-> {:view named :class (.getName (class ex))}
                                 (:clojure.error/symbol d) (assoc :seon.error/in (:clojure.error/symbol d))))
-            hc (render/html {} e)]
+            hc (error-page e)]
         (when-not (= e (:error held))
           (step/out! o :to-api {:op :error :pid :render :message (:seon.error/message e) :data e}))
         [(-> st (update :dirty disj view-id)
@@ -583,6 +668,13 @@
   (when-let [{:keys [skeleton units]} (get-in st [:views view-id])]
     (compose skeleton units)))
 
+(defn- drop-read
+  "St without branch b's read (no view shows it): its db let go and its kept walk (branch-walk!) disposed."
+  {:malli/schema [:=> [:cat :map :any] :map]}
+  [st b]
+  (some-> (get-in st [:branch-reads b :walk]) deref :w render/dispose-walk!)
+  (update st :branch-reads dissoc b))
+
 (defn- drop-view
   "St without view v (no tab watches it, nothing waits on it): its page, its reads in :read-index,
   its branch read (and the branch's db, when no other view shows that branch: a db kept for a page
@@ -592,9 +684,9 @@
   [st v]
   (let [b (get-in st [:branches v :branch])
         st (-> (reindex st v (get-in st [:views v :reads]) #{})
-               (update :views dissoc v) (update :branches dissoc v) (update :shown dissoc v) (update :open dissoc v)
+               (update :views dissoc v) (update :branches dissoc v) (update :tab dissoc v)
                (update :dirty #(disj (or % #{}) v)))]
-    (cond-> st (and b (not-any? #(= b (:branch %)) (vals (:branches st)))) (update :branch-reads dissoc b))))
+    (cond-> st (and b (not-any? #(= b (:branch %)) (vals (:branches st)))) (drop-read b))))
 
 (defn- index-of
   "What the web proc needs to turn a UI call into root's request: each agent's pid, branch
@@ -769,8 +861,10 @@
           moved (when (and held (not err?)) (apply concat (d/datoms-diff held (:db r) :eavt [])))
           ;; an answer for a branch no view shows any more (its page was dropped while it was asked) is let go
           st (if (some #(= b (:branch %)) (vals (:branches st)))
-               (assoc-in st [:branch-reads b] (cond-> {:at asking} err? (assoc :error r) (not err?) (assoc :db (:db r))))
-               (update st :branch-reads dissoc b))
+               ;; its kept walk (branch-walk!) stays with the branch across reads
+               (assoc-in st [:branch-reads b] (cond-> {:at asking :walk (or (get-in st [:branch-reads b :walk]) (volatile! nil))}
+                                                err? (assoc :error r) (not err?) (assoc :db (:db r))))
+               (drop-read st b))
           st (reduce #(take-read %1 %2 b) st (filter #(= b (get-in st [:branches % :branch])) (keys (:branches st))))]
       (pass (cond-> st (seq moved) (update :dirty (fnil into #{}) (touched st moved))) o))
     :else st))
@@ -842,10 +936,12 @@
                                     (pass st o))
                           :context (let [st (-> st health! with-context)] (step/out! o :to-web {:op :text :k (:k m) :text (get-in st [:context :text] "")}) st)
                           ;; the end of a view's list scrolled into view: the next rows are rendered
-                          :more (if (contains? (:watch st) (:view m)) (pass (update-in st [:shown (:view m)] (fnil + (history-cap)) (history-cap)) o) st)
+                          :more (if (contains? (:watch st) (:view m)) (pass (update-in st [:tab (:view m) :shown] (fnil + (history-cap)) (history-cap)) o) st)
+                          ;; the debug timeline stepped to a turn, or to latest
+                          :at (if (contains? (:watch st) (:view m)) (pass (assoc-in st [:tab (:view m) :at] (:turn m)) o) st)
                           ;; a row's <details> opened or closed: its whole content is rendered while it is open
                           :toggle (if (contains? (:watch st) (:view m))
-                                  (pass (update-in st [:open (:view m)] (fnil (if (:open m) conj disj) #{}) (:unit m)) o)
+                                  (pass (update-in st [:tab (:view m) :open] (fnil (if (:open m) conj disj) #{}) (:unit m)) o)
                                   st)
                           :stats (do (step/out! o :to-web {:op :text :k (:k m) :text (sedn/encode (stats st))}) st)
                           st)

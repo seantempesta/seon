@@ -79,7 +79,7 @@
   ;; a call of the print's fixed part (19.8 against 7.8 KB at 100, 71 calls). Wall time is judged
   ;; unarmed above. The printer is left as this test found it: an armed seon.print stayed armed for
   ;; every test after it in the process, and a debug page's pass printed through it with 189 more
-  ;; contracted calls (seon.render-cost-test/a-new-turn-costs-one-turns-messages: 420 alone, 609 after this test)
+  ;; contracted calls (the debug page's pass of its rows, measured 2026-10-23: 420 alone, 609 after this test)
   (let [armed? (contract/armed? #'seon.print/print-value)
         armed (fn [own calls per-call] (round (assoc own :bytes (+ (:bytes own) (* calls per-call)) :calls calls)))]
     (contract/instrument! '[seon.print seon.print.select seon.print.emit])

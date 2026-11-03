@@ -5,7 +5,7 @@
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]] [datahike.api :as d]
             [seon.db :as pdb] [seon.vector :as vector] [seon.task :as task] [seon.context :as context] [seon.print :as print]
             [seon.doc-test] [seon.reader :as reader] [seon.proofs :as proofs] [seon.agent :as agent] [seon.doc :as doc] [seon.judge] [seon.ctx :as ctx] [seon.render :as render] [seon.render.ui] [seon.web.html]
-            [seon.print.select :as select] [clojure.string :as str] [seon.lib] [seon.edn] [seon.print-test :as print-test] [seon.repl :as repl] [seon.model]))
+            [seon.print.select :as select] [clojure.string :as str] [seon.lib] [seon.edn] [seon.print-test :as print-test] [seon.repl :as repl] [seon.model] [seon.config] [clojure.data.json]))
 
 (defn- ns-fact
   "Var v's namespace with its file, as a store records it: a program namespace's under src/, a
@@ -614,13 +614,14 @@
   (d/transact conn [{:seon.run/id "demo/f#1" :seon.run/task [:seon.task/id "demo/f"] :seon.run/agent {:seon.agent/key "b/a1" :seon.agent/task {:seon.task/id "demo/f"}}}])
   (let [ev! (fn [id by code value & [more]] (d/transact conn [{:seon.eval/id id :seon.eval/by by :seon.eval/agent {:seon.agent/key "b/a1"}
                                                                :seon.eval/record (merge {:code code :response {:handle (symbol "result" id) :value value} :run "demo/f#1"} more)}]))
+        ;; as seon.turn/act! writes a turn: the turn, its basis commit holding it, then its model call
         turn! (fn [n more]
-                (let [b {:commit (d/commit-id @conn) :task "demo/f" :run "demo/f#1" :turn n :max-turns 4
-                         :origin :model :agent "b/a1"}
-                      _ (d/transact conn [(merge {:db/id "turn" :seon.turn/id (str "demo/f#1/" n) :seon.turn/run {:seon.run/id "demo/f#1"} :seon.turn/agent {:seon.agent/key "b/a1"} :seon.turn/n n
+                (let [_ (d/transact conn [(merge {:seon.turn/id (str "demo/f#1/" n) :seon.turn/run {:seon.run/id "demo/f#1"} :seon.turn/agent {:seon.agent/key "b/a1"} :seon.turn/n n
                                                   :seon.turn/origin :model}
-                                                 more)
-                                          {:seon.model-call/id (str "demo/f#1/" n) :seon.model-call/turn "turn" :seon.model-call/basis b :seon.model-call/forms 1
+                                                 more)])
+                      b {:commit (d/commit-id @conn) :task "demo/f" :run "demo/f#1" :turn n :max-turns 4
+                         :origin :model :agent "b/a1"}
+                      _ (d/transact conn [{:seon.model-call/id (str "demo/f#1/" n) :seon.model-call/turn [:seon.turn/id (str "demo/f#1/" n)] :seon.model-call/basis b :seon.model-call/forms 1
                                            :seon.model-call/errors 0 :seon.model-call/red 1 :seon.model-call/ms 1}])
                       {:keys [messages sent]} (context/render @conn b)]
                   (d/transact conn [{:seon.model-call/id (str "demo/f#1/" n) :seon.model-call/sent sent}])
@@ -747,6 +748,52 @@
             (is (= (:messages warm) (into [] (mapcat second) (context/parts-of db (:seon.model-call/sent (d/pull db [:seon.model-call/sent] e)))))
                 (str "turn " n ": its read-back is the bytes it sent"))))
         (is (= 4 (count turns)))))))
+
+(deftest a-turns-wire-request-is-made-again-at-its-basis
+  ;; docs/render.md#the-debug-page-is-the-wire-request: the request body a turn put on the wire (its
+  ;; messages under the provider at its basis, the run's model) is made again from its basis commit
+  ;; byte for byte, after later turns, evals and a change of the task's own config
+  (ts/test-branch!
+    (fn [_ conn]
+      (d/transact conn (into (task/boot-tx "boot-1" 6) (seon.config/facts (merge seon.config/config {:seon.config.ai/provider :openai-compat}) {})))
+      (d/transact conn (doc/load-tx @conn "docs" {context/system-page (slurp (str (seon.config/checkout) "/" context/system-page))}))
+      (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "g" :seon.task/plan "Make g."
+                                               :seon.task/proofs #{'demo-test/g-test}}]))
+      (d/transact conn [{:seon.run/id "demo/g#1" :seon.run/task [:seon.task/id "demo/g"] :seon.run/agent {:seon.agent/key "b/a1" :seon.agent/task {:seon.task/id "demo/g"}}}])
+      (let [sent (loop [n 0 out []]
+                   (if (= n 3)
+                     out
+                     ;; as a turn goes (seon.turn/act!): the turn, its basis commit holding it, its provider
+                     ;; there, its model call, its request drawn on the db after them; then its call's eval
+                     (let [_ (d/transact conn [{:seon.turn/id (str "demo/g#1/" n) :seon.turn/run {:seon.run/id "demo/g#1"}
+                                                :seon.turn/agent {:seon.agent/key "b/a1"} :seon.turn/n n :seon.turn/origin :model}])
+                           b {:commit (d/commit-id @conn) :task "demo/g" :run "demo/g#1" :turn n :max-turns 9
+                              :origin :model :agent "b/a1" :model "run-model"}
+                           p (context/provider-of @conn b)
+                           _ (d/transact conn [{:seon.model-call/id (str "demo/g#1/" n) :seon.model-call/turn [:seon.turn/id (str "demo/g#1/" n)] :seon.model-call/basis b}])
+                           r (context/render @conn b)
+                           ;; what it sent, recorded as the turn does: the next request continues it
+                           _ (d/transact conn [{:seon.model-call/id (str "demo/g#1/" n) :seon.model-call/sent (:sent r)}])
+                           body (seon.model/request-body p {:messages (:messages r) :task "demo/g" :turn n})]
+                       (d/transact conn [{:seon.eval/id (str "e" n) :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key "b/a1"}
+                                          :seon.eval/record {:code (str "(e" n ")") :response {:handle (symbol "result" (str "e" n)) :value (vec (range (* 5 (inc n))))}
+                                                             :line (str "e" n) :run "demo/g#1" :call-id (str "c" n) :call 0 :prose (str "Step " n ".")}}])
+                       ;; the task's own config moves after turn 0: a later turn's provider, never turn 0's
+                       (when (zero? n) (d/transact conn [{:seon.task/id "demo/g" :seon.config.ai/max-tokens 77}]))
+                       (recur (inc n) (conj out [b body])))))]
+        (is (= ["run-model" "run-model" "run-model"] (mapv (comp :model second) sent)) "the run's model names the provider's")
+        (is (= [8192 77 77] (mapv (comp :max_tokens second) sent)) "each turn's provider is its basis's")
+        (doseq [[b body] sent]
+          (is (= (clojure.data.json/write-str body)
+                 (clojure.data.json/write-str (:body (context/wire-turn (d/commit-as-db (:store @conn) (:commit b)) b))))
+              (str "turn " (:turn b) ": made again at its basis, the bytes it sent")))
+        ;; the print cache of a later request (the debug page's latest keeps one) prints none of what it holds again,
+        ;; and changes no byte: each turn made again with the newest turn's cache is the bytes it sent
+        (let [at #(d/commit-as-db (:store @conn) (:commit %))
+              later (:printed (context/wire-turn (at (first (peek sent))) (first (peek sent))))]
+          (doseq [[b body] sent]
+            (is (= (clojure.data.json/write-str body) (clojure.data.json/write-str (:body (context/wire-turn (at b) b later))))
+                (str "turn " (:turn b) ": made again with a later request's print cache, the bytes it sent"))))))))
 
 (deftest a-turn-records-what-it-sent
   ;; task seon.context/a-turn-records-what-it-sent (A): a turn records the records its request

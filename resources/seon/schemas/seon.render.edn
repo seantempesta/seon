@@ -73,17 +73,14 @@
  ;; ---- the parts of a page (seon.render.ui/page-chrome): each unit's input, its render declared here ----
  ;; (a unit names its input's schema, never a render function: docs/render.md#the-page)
  ;; the entity a page is of, its main pane
- ;; a model turn's request as it recorded it, for the debug page (seon.render.proc/debug-value):
- ;; what the turn added beside the records that made it, what it shares, its whole request when open, its usage or error
- :seon.render/sent-request [:map {:seon.render/html seon.render.ui/sent-request} [:turn :int] [:run :string] [:view :string] [:refs :int]
-                            [:added [:vector [:tuple :any [:vector :seon.model/message]]]]
-                            [:same {:optional true} [:map [:turn :int] [:parts :int]]]
-                            [:split {:optional true} [:map [:system nat-int?] [:conversation nat-int?] [:page nat-int?]]]
-                            [:whole {:optional true} [:vector [:tuple :any [:vector :seon.model/message]]]]
-                            [:seon.model-call/tokens {:optional true} :int] [:seon.model-call/cache-hit-tokens {:optional true} :int]
-                            [:seon.model-call/cache-miss-tokens {:optional true} :int] [:seon.turn/error {:optional true} :map]
-                            [:added-refs {:optional true} [:set :any]] [:open? {:optional true} :boolean]]
- ;; an agent's page, the one layout the model and the person read: its ctx as components (seon.render.ui/render-ctx, drawn by the walk), which a branch may override
+ ;; one request of the debug timeline as it went on the wire (seon.render.ui/debug-input, seon.render.proc/debug-value):
+ ;; the body made again from its turn's basis, each message's records, which are new since the request before
+ :seon.render/debug-turn [:map {:seon.render/html seon.render.ui/debug-turn} [:at [:or pos-int? [:= :latest]]] [:to-come? :boolean]
+                          [:turn :int] [:run :string] [:origin :seon.turn/origin] [:raw? :boolean] [:view {:optional true} :string]
+                          [:body :map] [:sources [:vector [:vector :any]]] [:new [:vector :boolean]]
+                          [:usage [:map [:seon.model-call/tokens {:optional true} :int] [:seon.model-call/cache-hit-tokens {:optional true} :int]
+                                   [:seon.model-call/cache-miss-tokens {:optional true} :int]]]
+                          [:error {:optional true} [:maybe :map]]]
  :seon.render/render-ctx [:map {:seon.render/html seon.render.ui/render-ctx}]
  ;; root's page: its ctx as components (seon.render.ui/root-ctx, drawn by root's walk), which a branch may override
  :seon.render/root-ctx [:map {:seon.render/html seon.render.ui/root-ctx}]

@@ -13,8 +13,8 @@
   Every number shown is measured by the system and carried in the value; nothing here
   invents one."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.learn :as learn] [seon.doc :as doc] [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn] [seon.config :as config]
-            [seon.render :as render] [datahike.api :as d] [seon.context :as context] [seon.program :as program] [seon.print :as print] [seon.print.emit :as emit] [seon.print.select :as select] [seon.web.html :as h] [seon.reader :as reader] [seon.cost :as cost] [seon.task :as task] [seon.ctx] [seon.problems :as problems] [seon.edn :as sedn] [datahike.index.interface] [seon.ratom :as ratom] [seon.vector :as vector] [seon.db :as pdb] [seon.proofs :as proofs] [seon.merge :as pm] [seon.ref :as ref] [clojure.set]))
+  (:require [seon.learn :as learn] [seon.doc :as doc] [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn] [clojure.data.json :as json] [seon.config :as config]
+            [seon.render :as render] [datahike.api :as d] [seon.context :as context] [seon.program :as program] [seon.print :as print] [seon.print.emit :as emit] [seon.print.select :as select] [seon.web.html :as h] [seon.reader :as reader] [seon.cost :as cost] [seon.task :as task] [seon.ctx] [seon.problems :as problems] [seon.edn :as sedn] [datahike.index.interface] [seon.ratom :as ratom] [seon.vector :as vector] [seon.db :as pdb] [seon.proofs :as proofs] [seon.merge :as pm] [seon.ref :as ref] [seon.reconcile :as reconcile] [clojure.set]))
 
 ;;; --- small formatting helpers -------------------------------------------------
 
@@ -302,8 +302,8 @@
 (defn- top-bar
   "The bar above every page: Seon's mark, home, then, on root's or an agent's page (focus :root
   or its id), its tabs, tab the one shown: root's conversation and what its model reads; an
-  agent's chat (the page a person reads), its debug view (every render of its ctx) and what its
-  model was sent. See docs/render.md#the-page."
+  agent's chat (the page a person reads), @ctx (every render of its ctx) and debug (the timeline of
+  what its model is sent). See docs/render.md#the-page."
   {:malli/schema [:=> [:cat :any [:enum :chat :debug :context]] :any]}
   [focus tab]
   (let [link (fn [on? href label] [:a {:href href :class (str "rounded px-2 py-0.5 " (if on? "bg-base-800 text-text-50" "text-text-400 hover:text-text-100"))
@@ -316,7 +316,7 @@
           [:span {:class "mr-1 font-semibold text-text-100"} (kname focus)]
           (if (= :root focus)
             (list (link (= :chat tab) base "conversation") (link (= :context tab) "/root/debug" "context"))
-            (list (link (= :chat tab) base "chat") (link (= :debug tab) (str base "/debug") "record") (link (= :context tab) (str base "/context") "sent to model")))]))]))
+            (list (link (= :chat tab) base "chat") (link (= :debug tab) (str base "/debug") "@ctx") (link (= :context tab) (str base "/context") "debug")))]))]))
 
 (defn shell
   "The document around a view's body: head, the stylesheet, Datastar, and the feed of that view's
@@ -715,36 +715,51 @@
     (str (case (first as) :debug "d-" :chat "c-") eid)
     (case as :block "p-head" :row (str "r-" eid) :tile (str "t-" eid) :chat (str "c-" eid) :side (str "s-" eid))))
 
-(declare sent-request)
+(defn to-come?
+  "Whether a request is to come after the turn of basis b on branch db: b is a model turn's and its run has
+  written no end on the branch (seon.reconcile/pull-end; root copies it to main as :seon.run/outcome). See
+  docs/render.md#the-debug-page-is-the-wire-request."
+  {:malli/schema [:=> [:cat :seon.host/db [:maybe :seon.model-call/basis]] :boolean]}
+  [db b]
+  (boolean (and b (= :model (:origin b)) (nil? (reconcile/pull-end db (:run b))))))
 
 (defn debug-input
-  "Model call eid on db (a turn's :seon.model-call/*) as the debug page shows its turn, as data (sent-request's input): what it added to the
-  request (the refs the turn before it in its run did not send, read back by
-  seon.context/parts-of), what it shares with that turn, its whole request when open?, its usage
-  or error; view, its page's feed param."
-  {:malli/schema [:=> [:cat :seon.host/db pos-int? :boolean :string] :map]}
-  [db eid open? view]
-  (let [m (d/pull db [:seon.model-call/sent :seon.model-call/basis :seon.model-call/tokens :seon.model-call/cache-hit-tokens :seon.model-call/cache-miss-tokens
-                      {:seon.model-call/turn [:seon.turn/n :seon.turn/origin :seon.turn/error {:seon.turn/run [:seon.run/id]}]}] eid)
-        t (:seon.model-call/turn m)
-        n (:seon.turn/n t) r (get-in t [:seon.turn/run :seon.run/id])
-        ;; the hashes a request records for the next are no part of it
-        refs (remove #(= :hashes (first %)) (:seon.model-call/sent m))
-        prev (when (pos? n) (remove #(= :hashes (first %)) (:seon.model-call/sent (d/pull db [:seon.model-call/sent] [:seon.model-call/id (str r "/" (dec n))]))))
-        added (filterv (complement (set prev)) refs)
-        ;; its whole request read back from the records its refs name, once: the row is a component,
-        ;; drawn when its turn is first shown and cached after (a finished turn never changes)
-        whole (context/parts-of db refs)]
-    (cond-> (merge (select-keys t [:seon.turn/origin :seon.turn/error])
-                   (select-keys m [:seon.model-call/tokens :seon.model-call/cache-hit-tokens :seon.model-call/cache-miss-tokens])
-                   {:turn n :run r :view view :refs (count refs)
-                    :added (filterv (comp (set added) first) whole)
-                    ;; where its tokens went, sized from those parts
-                    :split (context/sent-split whole)})
-      prev (assoc :same {:turn (dec n) :parts (- (count refs) (count added))})
-      ;; the whole request, always (owner, 2026-10-29: "I don't want anything hidden"): a finished turn's
-      ;; row is drawn once and cached
-      true (assoc :whole whole :added-refs (set added) :open? open?))))
+  "Request at of the debug timeline on branch db, as data `debug-turn` draws: a model call's eid (its turn,
+  made again from its basis commit, seon.context/wire-turn), or :latest, the request the agent's next model
+  turn would send now (its run going on: drawn at db's head as the turn would draw it, with the turn it
+  writes first), else its newest turn. calls, the branch's model calls in order; raw?, the body's JSON
+  shown whole; printed, the :printed an earlier answer holds (the print cache seon.context/wire-turn reuses),
+  answered again as :printed. Which messages are new: those made by a record the request before it did not send (its
+  recorded :seon.model-call/sent), so a part that changed is new by its ref. See
+  docs/render.md#the-debug-page-is-the-wire-request."
+  {:malli/schema [:=> [:cat :seon.host/db [:or pos-int? [:= :latest]] [:vector pos-int?] :boolean [:maybe :map]] [:maybe :map]]}
+  [db at calls raw? printed]
+  (let [pull #(d/pull db [:seon.model-call/basis :seon.model-call/sent :seon.model-call/tokens :seon.model-call/cache-hit-tokens
+                          :seon.model-call/cache-miss-tokens {:seon.model-call/turn [:seon.turn/error]}] %)
+        last-e (peek calls)
+        lb (some-> last-e pull :seon.model-call/basis)
+        ;; the turn to come: on latest, while the newest model turn's run has no outcome
+        to-come? (and (= :latest at) (to-come? db lb))
+        e (cond to-come? nil (= :latest at) last-e :else at)
+        m (some-> e pull)]
+    (when (or to-come? (:seon.model-call/basis m))
+      (let [[tdb b] (if to-come?
+                      ;; as seon.turn/act! draws it: the turn written first, then the request at the head
+                      (let [n (inc (:turn lb)) b (assoc lb :commit (d/commit-id db) :turn n)]
+                        [(d/db-with db [{:seon.turn/id (str (:run lb) "/" n) :seon.turn/run [:seon.run/id (:run lb)]
+                                         :seon.turn/agent [:seon.agent/key (:agent lb)] :seon.turn/n n :seon.turn/origin :model}]) b])
+                      (let [b (:seon.model-call/basis m)]
+                        [(if (= (:commit b) (d/commit-id db)) db (d/commit-as-db (:store db) (:commit b))) b]))
+            i (if to-come? (count calls) (.indexOf ^java.util.List calls e))
+            prev-e (when (pos? i) (nth calls (dec i)))
+            prev (set (remove #(= :hashes (first %)) (:seon.model-call/sent (some-> prev-e pull))))
+            w (context/wire-turn tdb b printed)]
+        {:at at :to-come? to-come? :turn (:turn b) :run (:run b) :origin (:origin b) :raw? raw?
+         :body (:body w) :sources (:sources w) :printed (:printed w)
+         ;; with no request before it, nothing is marked: every message is the first request's
+         :new (mapv (fn [rs] (boolean (and prev-e (some (complement prev) rs)))) (:sources w))
+         :usage (select-keys m [:seon.model-call/tokens :seon.model-call/cache-hit-tokens :seon.model-call/cache-miss-tokens])
+         :error (get-in m [:seon.model-call/turn :seon.turn/error])}))))
 
 (defn more
   "The list's end, the unit's element (opts :unit): how many older rows there are, unrendered; it
@@ -1309,31 +1324,41 @@
     [:section
      (render/html (if-let [k (:schema r)] {:schema k} {}) (ratom/realize (get-in r [:response :value])))]))
 
+(defn- id-set
+  "The keys of join m (a member map of ctx, read through its view) as a set: one read of its key set, its
+  members not each made a view as a walk of its entries makes them (seon.ratom)."
+  {:malli/schema [:=> [:cat [:maybe :map]] [:set :any]]}
+  [m] (cond (nil? m) #{} (instance? java.util.Map m) (set (.keySet ^java.util.Map m)) :else (set (keys m))))
+
 (defn- conversation
   "The conversation of ctx c's agent: its evals, its turns and messages, in the order they were
   written (the transaction of each member's identity datom, then its id: some ids are
   content-derived, so an id is no order). See docs/render.md#the-page."
   {:malli/schema [:=> [:cat :map :seon.host/db] [:sequential :int]]}
   [c db]
-  (let [born (fn [a e] [(:tx (first (d/datoms db :eavt e a))) e])]
-    (map second (sort (concat (map #(born :seon.eval/id %) (keys (:evals c))) (map #(born :seon.turn/id %) (keys (:turns c)))
-                              (map #(born :seon.message/id %) (keys (:messages c))))))))
+  (let [born (fn [a e] [(:tx (first (d/datoms db :eavt e a))) e])
+        ids #(id-set (get c %))]
+    (map second (sort (concat (map #(born :seon.eval/id %) (ids :evals)) (map #(born :seon.turn/id %) (ids :turns))
+                              (map #(born :seon.message/id %) (ids :messages)))))))
 
 (defn- turn-evals
-  "The evals of each model turn of ctx c, {turn-eid [eval-eid ...]}: a model's eval (its record names
+  "The evals of each model turn of ctx c, {turn-eid [eval-eid ...]}, over its conversation (conv, when the
+  caller has it, else `conversation`): a model's eval (its record names
   the provider's call id) is its turn's, the turn written just before it (a turn's record is written
   before its evals land: seon.turn/act!), so a turn holds its evals as they arrive, live. See
   docs/render.md#the-page."
-  {:malli/schema [:=> [:cat :map :seon.host/db] [:map-of :int [:vector :int]]]}
-  [c db]
-  (let [tu? (set (keys (:turns c)))
+  {:malli/schema [:function [:=> [:cat :map :seon.host/db] [:map-of :int [:vector :int]]]
+                  [:=> [:cat :map :seon.host/db [:sequential :int]] [:map-of :int [:vector :int]]]]}
+  ([c db] (turn-evals c db (conversation c db)))
+  ([c db conv]
+  (let [tu? (id-set (:turns c))
         ;; the record's one key, read by its path (a realize reads the whole eval, its opened flag too: the layout would run again for an eval opened)
         model? (fn [id] (get-in c [:evals id :seon.eval/record :call-id]))]
     (first (reduce (fn [[m cur] id]
                      (cond (tu? id) [(assoc m id []) id]
                            (and cur (model? id)) [(update m cur conj id) cur]
                            :else [m cur]))
-                   [{} nil] (conversation c db)))))
+                   [{} nil] conv)))))
 
 (defn chat-turn
   "A model turn as the chat shows it (a component over ctx and the db), a message on the left as a
@@ -1428,6 +1453,8 @@
         [:ol (for [e (conversation x db)]
                [:li (render/html {:schema :seon.db/eval-fact :as :inline} (ratom/realize (get-in x [:evals e])))])]])]))
 
+(declare task-list conversation-list tiles)
+
 (defn render-ctx
   "The render of an agent's ctx, the one layout the model and the person read (the declared html
   render of :seon.render/render-ctx, which an agent overrides on its branch like any render): its ctx,
@@ -1437,54 +1464,71 @@
   the run once it took a turn, then each key the agent added to its ctx. The conversation (c-rows, the chat a person reads): the run's turns as
   their replies (chat-turn), its evals as lines that open (eval-item) and its messages as bubbles
   (chat-message), in the order they were written (eids are issued in that order), then how the run
-  stands (chat-end). See docs/render.md#the-page. The
-  tiles (p-tiles): each eval whose value has a render of its own, newest first. It reads the
-  lists' members' ids and its task's cited names, and on the db the transaction of each member's
-  identity (when it was written: some ids are content-derived, so an id is no order), which is never
-  written again, so it runs again only when a list gains or loses a member, the newest run
-  changes, or the plan cites another var."
-  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
-  [{c :seon.ctx/ctx db :seon.db/db}]
-  (let [aid (:db/id c)
-        task (:task c)
-        evals (:evals c)
+  stands (chat-end). The tiles (p-tiles): each eval whose value has a render of its own, newest first. Each
+  list is a component of its own (`task-list`, `conversation-list`, `tiles`: a list, :seon.render/list), and
+  the layout reads only the agent's id, so a change of one list's members reruns that list alone: an eval
+  added never reruns the task's. See docs/render.md#the-page and docs/render.md#a-layout-places-its-lists."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+  [{c :seon.ctx/ctx}]
+  (let [aid (:db/id c)]
+    [:div {:id "render-ctx"} [#'task-list {} aid] [#'conversation-list {} aid] [#'tiles {} aid]]))
+
+(defn task-list
+  "The task's list of an agent's page (p-task, the parts its model is sent: seon.context/page-lists), agent aid's:
+  the newest run's task, each var its plan cites, each search, the namespaces, the status, the run once it
+  took a turn, its own problems and the keys it added to its ctx (`render-ctx`). See docs/render.md#the-page."
+  {:seon.render/list "p-task" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] [:maybe :int]] :any]}
+  [{c :seon.ctx/ctx} aid]
+  [:div {:id "p-task"}
+   (when (:task c) (list [#'task-data {} aid]
+                         ;; each thing its task, its needs and the agent cite, a part each, at the depth its cite asks
+                         (for [[p k held] (page-cites c)] [#'cited {:at p :held held} aid k])
+                         ;; each search its task and the agent hold, a part each, drawn on the branch's db
+                         (for [[p k] (concat (for [e (keys (get-in c [:task :searches]))] [[:task :searches e] (str "task-" e)])
+                                             (for [e (keys (get c :searches))] [[:searches e] (str "agent-" e)]))]
+                           [#'searched {:at p} aid k])
+                         ;; where the code lives: each namespace the work touches, the names the task cites or its proofs call
+                         [#'namespaces {} aid]
+                         ;; how the work stands: the proofs, the done rule's reasons, what the branch did (one diff)
+                         [#'status {} aid]))
+   ;; the run once it took a turn: before that it says only its id, which the task's names
+   (when (seq (:turns c)) [#'run-head {} aid])
+   (when aid [#'own-problems {} aid])
+   (when (seq (added-keys c)) [#'ctx-keys {}])])
+
+(defn conversation-list
+  "The conversation of an agent's page (c-rows, the chat a person reads), agent aid's: the run's turns as their
+  replies (chat-turn), its evals as lines that open (eval-item) and its messages as bubbles (chat-message), in
+  the order they were written, then how the run stands (chat-end) (`render-ctx`). See docs/render.md#the-page."
+  {:seon.render/list "c-rows" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] [:maybe :int]] :any]}
+  [{c :seon.ctx/ctx db :seon.db/db} aid]
+  (let [evals (:evals c)
         conv (conversation c db)
-        ev? (set (keys evals))
-        tu? (set (keys (:turns c)))
+        ev? (id-set evals)
+        tu? (id-set (:turns c))
         ;; a model's evals are drawn in their turn's message, not again in the list
-        in-turn (into #{} cat (vals (turn-evals c db)))
+        in-turn (into #{} cat (vals (turn-evals c db conv)))
         ;; the agent's own loop (its eval with no model call that names a run: seon.turn/work!) is the chat's
         ;; start and end cards, not a row
         ;; read by its paths, never realized whole: the layout reads no eval's opened flag
         loop? (fn [id] (let [e (get-in c [:evals id])]
                          (and (= (:seon.eval/by e) (some-> (:seon.agent/id c) name)) (get-in e [:seon.eval/record :run]) (not (get-in e [:seon.eval/record :call-id])))))]
-    [:div {:id "render-ctx"}
-     [:div {:id "p-task"}
-      (when task (list [#'task-data {} aid]
-                       ;; each thing its task, its needs and the agent cite, a part each, at the depth its cite asks
-                       (for [[p k held] (page-cites c)] [#'cited {:at p :held held} aid k])
-                       ;; each search its task and the agent hold, a part each, drawn on the branch's db
-                       (for [[p k] (concat (for [e (keys (get-in c [:task :searches]))] [[:task :searches e] (str "task-" e)])
-                                           (for [e (keys (get c :searches))] [[:searches e] (str "agent-" e)]))]
-                         [#'searched {:at p} aid k])
-                       ;; where the code lives: each namespace the work touches, the names the task cites or its proofs call
-                       [#'namespaces {} aid]
-                       ;; how the work stands: the proofs, the done rule's reasons, what the branch did (one diff)
-                       [#'status {} aid]))
-      ;; the run once it took a turn: before that it says only its id, which the task's names
-      (when (seq (:turns c)) [#'run-head {} aid])
-      (when aid [#'own-problems {} aid])
-      (when (seq (added-keys c)) [#'ctx-keys {}])]
-     [:ol {:id "c-rows"}
-      (when (:task c) [#'chat-ask {} aid])
-      (when aid [#'chat-start {} aid])
-      (for [id conv :when (and (not (in-turn id)) (not (loop? id)))] (cond (ev? id) [#'eval-item {} id] (tu? id) [#'chat-turn {} aid id] :else [#'chat-message {} aid id]))
-      (when aid [#'chat-end {} aid])]
-     [:aside {:id "p-tiles"}
-      ;; placed on every page: the render cache runs a component once and again only when what it reads changes, so a page whose task names no examples pays nothing; reading the task here to place it only when it names examples would be 3 contracted calls on every list draw, because the layout builds the whole page whatever list is drawn
-      [#'examples {} aid]
-      (for [[id e] evals :let [{{v :value} :response k :schema} (:seon.eval/record e)] :when (and (some? v) (render/render-of (ratom/realize v) k))]
-        [#'eval-tile {} id])]]))
+    [:ol {:id "c-rows"}
+     (when (:task c) [#'chat-ask {} aid])
+     (when aid [#'chat-start {} aid])
+     (for [id conv :when (and (not (in-turn id)) (not (loop? id)))] (cond (ev? id) [#'eval-item {} id] (tu? id) [#'chat-turn {} aid id] :else [#'chat-message {} aid id]))
+     (when aid [#'chat-end {} aid])]))
+
+(defn tiles
+  "The tiles of an agent's page (p-tiles), agent aid's: its task's example sessions, then each eval whose value
+  has a render of its own, newest first (`render-ctx`). See docs/render.md#the-page."
+  {:seon.render/list "p-tiles" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] [:maybe :int]] :any]}
+  [{c :seon.ctx/ctx} aid]
+  [:aside {:id "p-tiles"}
+   ;; placed on every page: the render cache runs a component once and again only when what it reads changes, so a page whose task names no examples pays nothing
+   [#'examples {} aid]
+   (for [[id e] (:evals c) :let [{{v :value} :response k :schema} (:seon.eval/record e)] :when (and (some? v) (render/render-of (ratom/realize v) k))]
+     [#'eval-tile {} id])])
 
 (defn agent
   "An agent's view (the declared html render of :seon.db/agent-fact), its head: its id, status,
@@ -1688,7 +1732,8 @@
       ;; on a narrow screen they follow the conversation
       ;; three columns always: a page's side parts may arrive after its first frame (an agent's walk answers
       ;; later), and a layout chosen from the first frame's units wrapped them under the agents list
-      [:div {:class "grid grid-cols-1 gap-4 lg:grid-cols-[12rem_minmax(0,1fr)_26rem]"}
+      ;; @ctx (tab :debug) places nothing beside its record: two columns, the record the width of the rest
+      [:div {:class (if (= :debug tab) "grid grid-cols-1 gap-4 lg:grid-cols-[12rem_minmax(0,1fr)]" "grid grid-cols-1 gap-4 lg:grid-cols-[12rem_minmax(0,1fr)_26rem]")}
        [:aside {:class "min-w-0 lg:sticky lg:top-14 lg:self-start"}
         [:h2 {:class "kicker mb-1 hidden lg:block"} "agents"]
         [:ol {:id "c-side" :class "flex gap-2 overflow-x-auto pb-1 text-xs lg:flex-col lg:gap-0.5"} (for [u (in "#c-side")] (slot (:id u)))]]
@@ -1697,40 +1742,81 @@
         (slot "p-caption")
         [:ol {:id "c-rows" :class "flex flex-col gap-1" :data-view view} (for [u (in "#c-rows")] (slot (:id u)))]
         (when input (slot "p-input"))]
-       [:aside {:class "flex min-w-0 flex-col gap-2 lg:sticky lg:top-14 lg:max-h-[calc(100vh-4rem)] lg:self-start lg:overflow-y-auto"}
-        [:div {:id "p-task" :class "flex flex-col gap-2"} (for [u (in "#p-task")] (slot (:id u)))]
-        [:div {:id "p-tiles" :class "grid content-start gap-2"} (for [u (in "#p-tiles")] (slot (:id u)))]]]]
+       (when-not (= :debug tab)
+         [:aside {:class "flex min-w-0 flex-col gap-2 lg:sticky lg:top-14 lg:max-h-[calc(100vh-4rem)] lg:self-start lg:overflow-y-auto"}
+          [:div {:id "p-task" :class "flex flex-col gap-2"} (for [u (in "#p-task")] (slot (:id u)))]
+          [:div {:id "p-tiles" :class "grid content-start gap-2"} (for [u (in "#p-tiles")] (slot (:id u)))]])]]
      :seon.render/units
      (vec (concat [{:id "p-caption" :input {:caption caption} :html (h/html [:p {:id "p-caption" :class "text-2xs text-text-500"} (or caption "")])}]
                   (when input [{:id "p-input" :input (:value input) :schema (:schema input)}])
                   (map unit units)))}))
 
+(defn ctx-parts
+  "@ctx's parts, each a pair: what the model reads of the part (its data, or the hiccup its render returned, printed as a
+  request's parts message prints it, seon.context's parts-message), beside the part as the page draws it (its unit's
+  html). parts, [[id content]] of the task's list (seon.render/placed-hiccup); html, {id html} of its units. See
+  docs/render.md#the-page."
+  {:malli/schema [:=> [:cat [:sequential [:tuple :string :any]] [:map-of :string :string]] :any]}
+  [parts html]
+  [:li {:id "d-parts" :class "flex flex-col gap-2"}
+   [:h2 {:class "kicker"} "the task's parts: what the model reads, and the part drawn"]
+   (for [[id content] parts]
+     [:div {:class "grid grid-cols-1 gap-3 rounded-md border border-base-800 p-2 md:grid-cols-2" :data-part id}
+      [:div {:class "flex min-w-0 flex-col gap-1"}
+       [:span {:class "text-2xs text-text-500"} (str id " · sent to the model")]
+       [:pre {:class "whitespace-pre-wrap break-words font-mono text-xs text-text-100"}
+        (print/text (vary-meta (array-map id content) assoc :seon.print/full true))]]
+      [:div {:class "flex min-w-0 flex-col gap-1"}
+       [:span {:class "text-2xs text-text-500"} "drawn"]
+       (h/raw (get html id ""))]])])
+
 ;;; --- the debug page: what each turn sent, from its records ---------------------------------------
 
 (defn debug
-  "The debug page of id (an agent's id, :root) laid out: what its model reads. Each model turn's
-  request as it recorded it (turns: units, newest first, each a :seon.render/sent-request input),
-  only the rows its tab scrolled to and older ones counted (the list's end, `more`, loads the next
-  as it scrolls into view); for root, which has no model turn, the context it reads now (context:
-  a unit, :seon.render/root-context). The render proc renders a turn's unit once: a turn is
-  written once."
-  {:malli/schema [:=> [:cat :any [:vector :map] nat-int? [:maybe :map]] [:map [:seon.render/html :any] [:seon.render/units [:vector :map]]]]}
-  [id turns older context]
-  (let [view (view-param [:debug id])]
+  "The debug page of id (an agent's id, :root) laid out: what its model is sent. An agent's is a timeline
+  of its requests, live on latest or fixed on a turn chosen: steps, each request a button (strip: {:turns [{:e :turn
+  :origin}] :at e-or-:latest :to-come? b :gone e-chosen-but-no-request-of-the-branch}), previous, next and latest moving the view (/at), and the one
+  request shown (turn: a unit, :seon.render/debug-turn); for root, which has no model turn, the context it
+  reads now (context: a unit, :seon.render/root-context). See docs/render.md#the-debug-page-is-the-wire-request."
+  {:malli/schema [:=> [:cat :any [:maybe :map] [:maybe :map] [:maybe :map]] [:map [:seon.render/html :any] [:seon.render/units [:vector :map]]]]}
+  [id strip turn context]
+  (let [view (view-param [:debug id])
+        {:keys [turns at to-come?]} strip
+        es (mapv :e turns)
+        ;; where the view stands: a turn's eid, or past the newest (latest, while a turn is to come)
+        i (if (= :latest at) (if to-come? (count es) (dec (count es))) (.indexOf ^java.util.List es at))
+        go (fn [to] (str "@post('/at?view=" view "&turn=" to "')"))
+        btn (fn [on? to label] [:button {:type "button" (keyword "data-on:click") (go to)
+                                         :class (str "rounded px-2 py-0.5 tabular-nums " (if on? "bg-signal text-base-950" "bg-base-800 text-text-300 hover:text-text-50"))
+                                         :aria-current (when on? "step")} label])]
     {:seon.render/html
-     [:div {:id "app" :class "mx-auto flex max-w-screen-lg flex-col gap-3 p-3 sm:p-4"}
+     [:div {:id "app" :class "mx-auto flex max-w-screen-xl flex-col gap-3 p-3 sm:p-4"}
       (top-bar id :context)
       [:header {:class "flex flex-col gap-1"}
-       [:h1 {:class "text-base font-semibold text-text-50"} (if context (str "What " (kname id) " reads") (str "What " (kname id) "'s model was sent"))]
+       [:h1 {:class "text-base font-semibold text-text-50"} (if context (str "What " (kname id) " reads") (str "What " (kname id) "'s model is sent"))]
        [:p {:class "text-text-400"} (if context
                                       "Its page as it reads it: the render of its ctx, each component's hiccup by its id, the text /context.txt serves, drawn again when its ctx changes."
-                                      "Newest first: each turn, what it added to the request; its whole request opens on demand.")]]
+                                      "Each request as it went on the wire, made again from its turn's record; latest follows the branch live, a turn chosen stays as it was.")]]
       (when context (slot (:id context)))
-      [:ol {:id "d-turns" :class "flex flex-col gap-3"} (for [u turns] (slot (:id u)))]
-      [:div {:id "d-foot"} (slot (str "d-more-" (count turns)))]]
-     :seon.render/units (cond-> (conj (mapv #(assoc % :container "#d-turns") turns)
-                                      {:id (str "d-more-" (count turns)) :input {:older older :view view} :schema :seon.render/page-more :container "#d-foot"})
-                          context (conj context))}))
+      ;; an agent's: its strip and its turn are units, so its layout never moves: a step, a turn added or the first
+      ;; turn patches them in place (a patch reaches only the elements the tab holds)
+      (when-not context (list (slot "d-steps") (slot "d-turn")))]
+     :seon.render/units
+     (cond-> []
+       (not context)
+       (conj {:id "d-steps" :input strip
+              :html (h/html [:nav {:id "d-steps" :class "flex flex-wrap items-center gap-1 text-xs"}
+                             (when (seq turns)
+                               (list (btn false (if (pos? i) (nth es (dec i)) (first es)) "◀ previous")
+                                     (for [[j {:keys [e turn origin]}] (map-indexed vector turns)]
+                                       (btn (= j i) e (str (inc turn) (when (= :outside origin) " read"))))
+                                     (when to-come? (btn (= :latest at) "latest" (str (inc (count es)) " to come")))
+                                     (btn false (if (< (inc i) (count es)) (nth es (inc i)) "latest") "next ▶")
+                                     (btn (= :latest at) "latest" "latest")))
+                             ;; a turn chosen that is no request of this branch any more (the branch replaced): said, then latest shown
+                             (when-let [g (:gone strip)] [:span {:class "text-warning"} (str "the turn chosen (" g ") is no request of this branch: latest is shown")])])}
+             (or turn {:id "d-turn" :input :none :html (h/html [:p {:id "d-turn" :class "text-text-500"} "no model turn yet"])}))
+       context (conj context))}))
 
 (defn root-context
   "What root reads (the declared html render of :seon.render/root-context): its size, then the
@@ -1758,103 +1844,75 @@
     :example (str "example session " x " as of t " t)
     :session (str "the opening of session " x)))
 
-(defn- request-messages
-  "A sent request's messages in order, from its parts [[ref messages]], each [ref message tokens new?]:
-  tokens by the one sizer (seon.context/messages-tokens), new? whether its record is one this turn
-  added (added, its refs)."
-  {:malli/schema [:=> [:cat [:sequential :any] [:set :any]] [:vector :any]]}
-  [parts added]
-  (vec (for [[ref ms] parts m ms] [ref m (context/messages-tokens [m]) (contains? added ref)])))
-
-(defn- session-frame
-  "Cards, the messages of one session of a sent request, in one bordered block under a header naming the
-  session: label as `session-labels` gives it, continued? when the block continues a session that began
-  above (in the messages the turn before sent). Formatting only: the cards are drawn as they are anywhere. See
-  docs/render.md#the-page."
-  {:malli/schema [:=> [:cat :any :boolean [:sequential :any]] :any]}
-  [label continued? cards]
-  (into [:div {:class "flex flex-col gap-1 rounded-md border border-base-600 p-2" :data-session (if (= :own label) "own" (second label))}
-         [:div {:class "text-2xs font-semibold uppercase text-text-400"}
-          (str (if (= :own label)
-                 "This agent's session"
-                 (str "Example session " (str/replace-first (second label) "example/" "") " · finished, another task"))
-               (when continued? " · continued"))]]
-        cards))
-
-(defn sent-request
-  "A model turn's request as it recorded it (the declared html render of :seon.render/sent-request),
-  whole, nothing hidden (owner: \"I want to understand what the agent was sent cleanly ...
-  I don't want anything hidden\"): its turn and the provider's numbers (its tokens, the prompt tokens it
-  served from cache), then every message it sent in order, each a card with its role, the record that
-  made it and its tokens (the one sizer's estimate): what it sends as the turn before it did, grouped
-  under one line that opens to it (its cards drawn only while it is open: opening it posts /open and the
-  unit comes back with them, so a turn draws what it added, never the run's whole history again), then
-  what this turn added, whole; and the cache point, where the
-  provider's cached prefix ends, placed by its cache-hit count over the messages' estimates (an
-  estimate, said so). input {:turn :run :view :refs :whole :added-refs :same :split :open?}, the turn's origin,
-  usage or error. See docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
+(defn debug-turn
+  "One request of the debug timeline as it went on the wire (the declared html render of
+  :seon.render/debug-turn), nothing re-rendered or summarized (owner: \"I don't want to find out later
+  that the envelope was different and you just made a fake page for me\"): each message of the body in
+  order, its JSON fields as sent (content, tool_calls' arguments, tool_call_id, reasoning_content) beside
+  a gutter of its role, the records that made it (their refs, `source`) and its size (the one sizer over
+  its JSON); a message new since the request before it marked; the line where the provider's cached
+  prefix ends (placed by its cache-hit count over the sizes, an estimate, said so), or, with none recorded, where
+  the messages the request before sent the same way end; the envelope (every
+  field but the messages) and, while opened, the whole body's JSON as sent. input as `debug-input`
+  answers it. See docs/render.md#the-debug-page-is-the-wire-request."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
-  [opts {:keys [turn run view refs whole added-refs same split open?] :seon.turn/keys [origin error] :seon.model-call/keys [tokens cache-hit-tokens cache-miss-tokens]}]
-  (let [prompt (when (and cache-hit-tokens cache-miss-tokens) (+ cache-hit-tokens cache-miss-tokens))
-        unit (:unit opts)
-        ms (request-messages whole (or added-refs #{}))
-        est (reduce + 0 (map #(nth % 2) ms))
-        ;; the messages the provider's cached prefix covers: its cache-hit count apportioned over the estimates
+  [opts {:keys [view to-come? turn run origin body sources new raw? error]
+         {:seon.model-call/keys [tokens cache-hit-tokens cache-miss-tokens]} :usage}]
+  (let [unit (:unit opts)
+        ms (:messages body)
+        sizes (mapv #(select/estimate (json/write-str %)) ms)
+        prompt (when (and cache-hit-tokens cache-miss-tokens) (+ cache-hit-tokens cache-miss-tokens))
+        est (reduce + 0 sizes)
         scale (if (and prompt (pos? est)) (/ (double prompt) est) 1.0)
         cached (when (and cache-hit-tokens (pos? cache-hit-tokens))
-                 (count (take-while #(<= % cache-hit-tokens) (reductions + (map #(* scale (nth % 2)) ms)))))
-        cache-line [:div {:class "my-1 flex items-center gap-2 text-2xs text-info"}
-                    [:span {:class "h-px flex-1 bg-info/40"}]
-                    (str "the provider's cache ends here: " (group3 (or cache-hit-tokens 0)) " tokens served from cache (placed by estimate)")
-                    [:span {:class "h-px flex-1 bg-info/40"}]]
-        card (fn [i [ref {:keys [role content reasoning tool-calls tool-call-id]} tk]]
-               (list
-                 [:div {:class (str "flex flex-col gap-1 rounded-md border-l-2 bg-base-950 px-2 py-1 "
-                                    (case role "assistant" "border-signal" "tool" "border-base-600" "user" "border-text-400" "border-info"))}
-                  [:div {:class "flex items-baseline justify-between gap-2 text-2xs text-text-500"}
-                   [:span (str role (when tool-call-id " · result") " · ") (source ref)] [:span (print/tokens-text tk)]]
-                  (when reasoning [:details [:summary {:class "text-2xs text-text-500"} "reasoning, as returned"] [:pre {:class "whitespace-pre-wrap break-words"} reasoning]])
-                  (when-not (str/blank? content) [:pre {:class "whitespace-pre-wrap break-words text-text-100"} content])
-                  (for [{:keys [code prose]} tool-calls]
-                    [:div {:class "flex flex-col gap-0.5"}
-                     (when prose [:p {:class "italic text-text-300"} prose])
-                     (emit/marked-hiccup :seon.print/code code)])]
-                 (when (= (inc i) cached) cache-line)))
-        shared (vec (take-while #(not (nth % 3)) ms))
-        n-shared (if same (count shared) 0)
-        ;; the session each message belongs to, from its ref: [:example key] for an :example ref, :own for a :session ref and what follows it,
-        ;; nil before any (a request whose task names no example has none); then the cards from message index `from`, each session's in one frame
-        labels (second (reduce (fn [[own? out] [kind x]]
-                                 (let [own? (or own? (= :session kind))]
-                                   [own? (conj out (cond (= :example kind) [:example x] own? :own))]))
-                               [false []] (map first ms)))
-        cards (fn [from xs]
-                (mapcat (fn [group]
-                          (let [i0 (ffirst group) label (get labels i0)
-                                body (mapcat (fn [[i m]] (card i m)) group)]
-                            (if label [(session-frame label (= label (get labels (dec i0))) body)] body)))
-                        (partition-by #(get labels (first %)) (map-indexed (fn [i m] [(+ from i) m]) xs))))]
-    [:li {:id unit :class "flex flex-col gap-2 rounded-md bg-base-900 p-3 text-xs"}
+                 (count (take-while #(<= % cache-hit-tokens) (reductions + (map #(* scale %) sizes)))))
+        ;; with no cache count recorded (a turn to come, a provider that reports none): where the messages the
+        ;; request before sent the same way end, the prefix a provider's cache can serve
+        same (when (nil? cached) (first (keep-indexed (fn [i n?] (when n? i)) new)))
+        upto (vec (reductions + 0 sizes))
+        line (fn [cls text] [:div {:class (str "my-1 flex items-center gap-2 text-2xs " cls)}
+                             [:span {:class "h-px flex-1 bg-current opacity-40"}] text [:span {:class "h-px flex-1 bg-current opacity-40"}]])
+        field (fn [k v] [:div {:class "flex flex-col"} [:span {:class "text-2xs text-text-500"} k]
+                         [:pre {:class "whitespace-pre-wrap break-words font-mono text-text-100"} v]])
+        row (fn [i {:keys [role content tool_calls tool_call_id reasoning_content]}]
+              (let [rs (get sources i) new? (get new i)
+                    example (some (fn [[kind x]] (when (= :example kind) x)) rs)]
+                [:div {:class (str "grid grid-cols-[minmax(0,11rem)_minmax(0,1fr)] gap-3 rounded-md border-l-2 px-2 py-1 "
+                                   (if new? "border-signal bg-signal/10" "border-base-700 bg-base-950"))
+                       :data-new (str new?) :data-session (when example example)}
+                 [:div {:class "flex flex-col gap-0.5 text-2xs text-text-400"}
+                  [:b {:class "text-text-200"} role] (when new? [:span {:class "text-signal"} "new since the turn before"])
+                  (when example [:span {:class "text-info"} (str "example session " example)])
+                  (for [r rs] [:span (source r)])
+                  [:span {:class "tabular-nums"} (print/tokens-text (get sizes i))]]
+                 [:div {:class "flex min-w-0 flex-col gap-1"}
+                  (when tool_call_id (field "tool_call_id" tool_call_id))
+                  (when reasoning_content [:details [:summary {:class "text-2xs text-text-500"} "reasoning_content"]
+                                           [:pre {:class "whitespace-pre-wrap break-words font-mono"} reasoning_content]])
+                  (when (seq content) (field "content" content))
+                  (for [{:keys [id function]} tool_calls]
+                    (field (str "tool_calls · " (:name function) " · " id " · arguments") (:arguments function)))]]))]
+    [:section {:id unit :class "flex flex-col gap-2 rounded-md bg-base-900 p-3 text-xs"}
      [:div {:class "flex flex-wrap items-baseline gap-3"}
-      [:b {:class "text-signal"} (str "turn " (inc turn))] [:span {:class "text-text-400"} run]
+      [:b {:class "text-signal"} (if to-come? (str "turn " (inc turn) ", to come: what it would send now") (str "turn " (inc turn)))]
+      [:span {:class "text-text-400"} run]
       (when tokens [:span {:class "tabular-nums text-text-300"} (str (group3 tokens) " tokens")])
-      (when (and prompt (pos? prompt)) [:span {:class "tabular-nums text-text-400"} (str (group3 cache-hit-tokens) " of " (group3 prompt) " prompt tokens from cache (" (long (* 100 (/ cache-hit-tokens prompt))) "%)")])
-      [:span {:class "text-text-500"} (str (count ms) " messages · " refs " records")]
+      (when (and prompt (pos? prompt))
+        [:span {:class "tabular-nums text-text-400"} (str (group3 cache-hit-tokens) " of " (group3 prompt) " prompt tokens from cache (" (long (* 100 (/ cache-hit-tokens prompt))) "%)")])
+      [:span {:class "text-text-500"} (str (count ms) " messages · " (count (filter true? new)) " new")]
       (cond (= :outside origin) [:span {:class "text-text-500"} "an outside read: no model call"]
+            to-come? [:span {:class "text-text-500"} "redrawn as the branch moves"]
             (not (or tokens error)) [:span {:class "text-text-500"} "the call is in flight"])]
-     (when split
-       [:p {:class "tabular-nums text-text-500"}
-        (str/join " · " (for [[k w] [[:system "system"] [:conversation "conversation"] [:page "page"]]]
-                          (str w " " (print/tokens-text (get split k 0)))))])
      (when error [:div {:class "rounded border border-error p-2"} (render/html {} error)])
-     ;; what it sends as the turn before it did: one line that opens to it, its cache point inside
-     (when (pos? n-shared)
-       [:details (cond-> {(keyword "data-on:toggle") (str "@post('/open?view=" view "&unit=" unit "&open=' + el.open)")}
-                   open? (assoc :open true))
-        [:summary {:class "cursor-pointer text-text-400"}
-         (str "same as turn " (inc (:turn same)) " · " n-shared " messages · " (print/tokens-text (reduce + 0 (map #(nth % 2) shared)))
-              (when (and cached (<= cached n-shared)) " · from cache up to the line inside"))]
-        (when open? (into [:div {:class "flex flex-col gap-1 pt-1"}] (cards 0 shared)))])
-     [:div {:class "text-2xs uppercase text-text-500"} (if (pos? n-shared) "new this turn" "what this turn sent")]
+     [:details [:summary {:class "cursor-pointer text-text-400"} "the envelope: every field but the messages, as sent"]
+      [:pre {:class "whitespace-pre-wrap break-words font-mono text-text-100"} (json/write-str (dissoc body :messages))]]
      (into [:div {:class "flex flex-col gap-1"}]
-           (cards n-shared (drop n-shared ms)))]))
+           (mapcat (fn [i m] (cond-> [(row i m)]
+                               (= (inc i) cached) (conj (line "text-info" (str "the provider's cache ends here: " (group3 cache-hit-tokens) " tokens served from cache (placed by estimate)")))
+                               (and same (pos? same) (= (inc i) same))
+                               (conj (line "text-info" (str "sent the same by the request before down to here: " (group3 (long (nth upto same)))
+                                                            " tokens a provider's prefix cache can serve (none recorded for this request)")))))
+                   (range) ms))
+     [:details (cond-> {(keyword "data-on:toggle") (str "@post('/open?view=" view "&unit=" unit "-raw&open=' + el.open)")} raw? (assoc :open true))
+      [:summary {:class "cursor-pointer text-text-400"} "the body's JSON, whole, as sent"]
+      (when raw? [:pre {:class "whitespace-pre-wrap break-all font-mono text-text-100" :data-wire "body"} (json/write-str body)])]]))

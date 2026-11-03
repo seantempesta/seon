@@ -169,6 +169,12 @@
             {:status 400 :headers {"Content-Type" "text/plain"} :body (str "a cut's form reads as EDN: " (get q "unit"))}
             (do (a/>!! ch {:op :toggle :view (view-of (get q "view")) :unit (get q "unit") :open (= "true" (get q "open"))})
                 {:status 204 :headers {}}))
+          ;; a step of the debug timeline: the request to show, a model call's eid or latest
+          (and (= m :post) (= uri "/at"))
+          (let [t (get q "turn" "")]
+            (if-let [turn (if (= "latest" t) :latest (some-> (re-matches #"\d+" t) parse-long))]
+              (do (a/>!! ch {:op :at :view (view-of (get q "view")) :turn turn}) {:status 204 :headers {}})
+              {:status 400 :headers {"Content-Type" "text/plain"} :body (str "a step names a model call's id or latest: " t)}))
           (and (= m :get) (= uri "/feed"))
           (let [out (a/chan 64)]
             (a/>!! ch {:op :open :view (view-of (get q "view")) :ch out})
@@ -216,21 +222,24 @@
              [st 0] (:tabs st)))
 
 (defn- keyframe!
-  "The view's keyframe (its composed body, morphed by id) to every stale tab of it."
-  {:malli/schema [:=> [:cat :map :any [:maybe :string]] :map]}
-  [st view html]
+  "The view's keyframe (its composed body, morphed by id) to every stale tab of it; with all?, to every tab of
+  it (the render proc's pass sends the page whole when a patch would replace an element no tab holds)."
+  {:malli/schema [:function [:=> [:cat :map :any [:maybe :string]] :map]
+                  [:=> [:cat :map :any [:maybe :string] :boolean] :map]]}
+  ([st view html] (keyframe! st view html false))
+  ([st view html all?]
   (if-not html
     st
     (let [chunk (patch-event html)]
       (reduce-kv (fn [st k {:keys [ch] :as tab}]
-                   (if (and (= view (:view tab)) (contains? (:stale st) k))
+                   (if (and (= view (:view tab)) (or all? (contains? (:stale st) k)))
                      (let [ok (a/offer! ch chunk)]
                        (cond (true? ok) (-> st (update :stale disj k) (update :bytes + (count chunk)))
                              ;; closed, or still full since it fell behind: the tab is gone (a
                              ;; live one's Datastar reconnects and gets a fresh keyframe)
                              :else (do (a/close! ch) (-> st (update :tabs dissoc k) (update :stale disj k)))))
                      st))
-                 st (:tabs st)))))
+                 st (:tabs st))))))
 
 (defn- page-doc
   "A view's composed body as the whole document (title, styles, Datastar, its feed)."
@@ -273,6 +282,7 @@
                st)
     :more (do (step/out! o :to-render {:op :more :view (:view m)}) st)
     :toggle (do (step/out! o :to-render (select-keys m [:op :view :unit :open])) st)
+    :at (do (step/out! o :to-render (select-keys m [:op :view :turn])) st)
     :stats (do (deliver (:p m) (stats st)) st)
     :call (let [c (:call m)
                 reqs (requests c (:index st {}))]
@@ -308,7 +318,7 @@
              (when (some #(= (:view m) (get-in st [:tabs % :view])) (:stale st))
                (step/out! o :to-render {:op :keyframe :view (:view m)}))
              st)
-    :keyframe (keyframe! st (:view m) (:html m))
+    :keyframe (keyframe! st (:view m) (:html m) (boolean (:whole m)))
     ;; the render proc has nothing in flight: an SSE comment on every feed (Datastar ignores
     ;; comments), the event a client or a check waits on before reading a current view
     :settled (reduce (fn [st view] (let [[st sent] (offer-all st view ": settled\n\n")] (update st :bytes + sent)))
