@@ -348,27 +348,34 @@
   "Like grep, over this branch's program: every line matching pattern in the functions, tests, wiki sections,
   task plans and schema entries, one row each, [{:at \"seon.task/accumulate:3\" :kind :var :text \"...\"}] (seon.doc/grep).
   pattern is a string, matched as written, or a regex (#\"plan|proof\"); a string with a regex's operators that matches
-  nothing answers :my.agent/regex-text, naming its regex form. opts, and no others: :in, a set of kinds (:var :test
+  nothing answers [], shown with its regex form (`grep-none-text`). opts, and no others: :in, a set of kinds (:var :test
   :section :task :schema), :ns, a name and what is under it (\"seon.ref\": seon.ref/x and seon.ref.y/z, not seon.ref-test). The answer is data, and whole: narrow it as you
   would a list, (take 10 (grep \"x\")), (filter #(= :test (:kind %)) ...), (count ...), and read a hit's lines
   with (lines \"seon.task/accumulate\" 1 20). (search s) ranks by meaning, words and references; grep finds text. See docs/vector.md#search."
-  {:malli/schema [:function [:=> [:cat [:or :string :seon.host/regex]] [:or [:vector :map] :my.agent/regex-text]]
-                  ;; closed: an option grep does not take is refused, never ignored (a live session, 2026-11-02, passed
-                  ;; search's :kinds and :k six times and read every kind's hits as the ones it asked for)
+  {:malli/schema [:function [:=> [:cat [:or :string :seon.host/regex]] [:vector :map]]
+                  ;; closed: an option grep does not take is refused, never ignored (search's :kinds and :k, ignored,
+                  ;; read as every kind's hits)
                   [:=> [:cat [:or :string :seon.host/regex] [:map {:closed true} [:in {:optional true} [:set :keyword]] [:ns {:optional true} :string]]]
-                   [:or [:vector :map] :my.agent/regex-text]]]}
+                   [:vector :map]]]}
   ([pattern] (grep pattern {}))
   ([pattern {:keys [in ns]}]
    (let [db (agent/db) kinds (or in every-kind) rows (doc/grep db pattern kinds ns)]
-     ;; a string is its text as written: one holding a regex's operators that matches nothing says so, naming
-     ;; its regex form (the same session's 8 evals answered [] where the definitions are, "defn (a|b)")
-     (or (when (and (empty? rows) (string? pattern) (re-find #"[|^$()\[\]*+?\\]" pattern))
-           ;; a regex literal holds the pattern's text as it is: the form is the string's characters between #" and "
-           (let [ask (str "(my.agent/grep #\"" pattern "\"" (when (or in ns) (str " " (print/text (cond-> {} in (assoc :in in) ns (assoc :ns ns)) (:part print/budgets)))) ")")]
-             (contract/error :my.agent/regex-text (symbol #'grep)
-                             (str "no line holds the string as written: a string is matched as its text, and a regex is written #\"...\", as " ask)
-                             {:pattern pattern :ask ask})))
-         rows))))
+     ;; a string is its text as written: one holding a regex's operators that matches nothing is still [] (a
+     ;; value, so a reply's later calls run), shown with its regex form: the string's characters between #" and ",
+     ;; a quote escaped
+     (if (and (empty? rows) (string? pattern) (re-find #"[|^$()\[\]*+?\\]" pattern))
+       (with-meta rows {:seon.render/schema :my.agent/grep-none
+                        :ask (str "(my.agent/grep #\"" (str/replace pattern "\"" "\\\"") "\""
+                                  (when (or in ns) (str " " (print/text (cond-> {} in (assoc :in in) ns (assoc :ns ns)) (:part print/budgets)))) ")")})
+       rows))))
+
+(defn grep-none-text
+  "grep's empty answer to a string holding a regex's operators as the eval shows it (seon.render/model-printed, the
+  schema :my.agent/grep-none): [] and the regex form that asks for what it likely meant. See docs/agent.md#small-answers."
+  {:malli/schema [:=> [:cat :seon.render/opts [:vector :map]] :any]}
+  [_ rs]
+  (print/code (str "[] ; no line holds the string as written: a string is matched as its text, and a regex is written #\"...\", as "
+                   (:ask (meta rs)))))
 
 (defn ls
   "Like ls: what x holds, one row each. A namespace ('seon.task): each definition, privates included, in file

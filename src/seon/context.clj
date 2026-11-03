@@ -105,7 +105,7 @@
                                             src (assoc :source (print/code src))
                                             (seq calls) (assoc :calls calls)
                                             ;; a red test the agent wrote is a proof it has not registered, or one to delete; main's
-                                            ;; test is no proof of this task (a live session, cc7e6ac413, was told to register one)
+                                            ;; test is no proof of this task, so it is never offered as one to register
                                             (and (= :stray-red reason) src (own? symbol))
                                             (assoc :do (list 'my.task/update! :seon.task/proofs 'conj (list 'quote symbol)))
                                             ;; main's test the branch removed: it still judges, from main's definition
@@ -423,8 +423,8 @@
   has one, then by the fused score, equal ones by name. A hit with a relevance below :min is left out. When hits are left out by :k or :min, a last entry
   {:kind :more :left n :counts {kind n} :more \"...\"} says how many per kind and the call that returns
   them. opts, all optional: :kinds (a set of search-kinds; #{:var :section} by default: tests, tasks and
-  schema keys on request), :by (a set of :text :meaning :refs, all), :ns (a prefix: only vars and tests
-  whose namespace starts with it), :k (:seon.config.render/search), :min (:seon.config.render/relevance-summary,
+  schema keys on request), :by (a set of :text :meaning :refs, all), :ns (a name: only vars and tests
+  under it, seon.doc/named-under?), :k (:seon.config.render/search), :min (:seon.config.render/relevance-summary,
   the page's cut).
   Plain data, so a caller filters it by Clojure."
   {:malli/schema [:=> [:cat :seon.host/db [:or :string :qualified-symbol :qualified-keyword]
@@ -438,7 +438,7 @@
         k (or k (cfg/value :seon.config.render/search))
         minimum (or minimum (cfg/value :seon.config.render/relevance-summary))
         text (str q)
-        in-ns? (fn [[kind n]] (or (not (#{:var :test} kind)) (nil? prefix) (str/starts-with? (str n) prefix)))
+        in-ns? (fn [[kind n]] (or (not (#{:var :test} kind)) (nil? prefix) (doc/named-under? (str n) prefix)))
         toks (if (by :text) (filterv #(in-ns? [(:kind %) (:name %)]) (doc/tokens db text kinds (cfg/value :seon.config.render/search-token-z))) [])
         known (into {} (map (fn [h] [[(:kind h) (:name h)] (select-keys h [:line :at :z])])) toks)
         n (* k (cfg/value :seon.config.render/related-near))
