@@ -676,7 +676,7 @@
     ;; an eval within another (seon.repl/edit!'s) is that eval's: its definitions are program, its record the outer one
     (if (and contract/record? (= :agent (:mode @agent/state)) (not (:within req)))
       ;; the write is the edge: a branch that refuses it answers the eval :unrecorded with the writer's message, so the
-      ;; turn that asked goes on (a refusal thrown from here ended the whole turn: its reply and evals lost, the turn run again)
+      ;; turn that asked goes on (a refused write thrown from here ended the whole turn: its reply and evals lost, the turn run again)
       (try (agent/transact! (into defs (record-tx {:seon.agent/key (:key @agent/state) :seon.agent/id (:id @agent/state)} id (by (:origin req))
                                                   (record-details code r req (get-in @agent/state [:turn :run])))))
            (assoc r :record id)

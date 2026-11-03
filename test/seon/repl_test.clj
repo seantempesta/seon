@@ -811,10 +811,10 @@
     (is (= 1 (count (re-seq #"did you mean" (:text r)))) (:text r))
     (is (= 1 (count (re-seq #":jolt.error/suggestions" (:text r)))) (:text r))))
 
-;; task seon.repl/every-eval-of-a-turn-is-recorded (docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map):
-;; Datahike's "Query for unknown vars" carries datalog.parser.type.Variable records in its ex-data; the store refused
-;; the record of the eval that threw it, and the refusal ended the turn (a run lost turns 5-20 so). Its error map is
-;; EDN, and the eval is recorded with its error
+;; docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map: Datahike's "Query for unknown vars"
+;; carries datalog.parser.type.Variable records in its ex-data; the store refused the record of the eval that threw it,
+;; and the refused write ended the turn (a run lost turns 5-20 so). The record is made plain where it is built
+;; (seon.repl/record-details), and the eval is recorded with its error
 (deftest an-eval-that-throws-is-recorded-with-its-turn
   (let [e (try (d/q '[:find ?y :where [?e :var/name _]] (d/db-with (ts/test-db) [])) nil (catch Throwable t t))]
     (is (some? e) "the query throws")
