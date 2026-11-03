@@ -17,6 +17,18 @@ What Seon is for, where it stands, the one step being worked now, and the steps 
 
 **Measured as** turns to green and tasks merged. **Held to:** nothing crashes or hangs (every failure is data to the agent); everything shown is derived from the db at t; one mechanism per job; every change earns its place; a v1 capability is present or dropped on purpose ([parity](parity.md)).
 
+## Where it stands (2026-11-03)
+
+**Merged** (each `bin/prove --merge` green, root updated; one prove a batch, the owner's rule of the day):
+- **Batch 85** (2026-11-02, evening): `lines` shown as numbered lines, grep finds an ns form's lines, an arity error names the calls to copy.
+- **Batch 86, an audit's fixes:** grep's regex hint is `[]` drawn with its regex form (a value, so a reply's later calls run; batch 80 made an error stop them), the form reads; search's `:ns` is a name and what is under it; no session ids in comments, guarded; robust's busy-thread race. Step 2's task records today's rebuilds, measured: an agent rebuilt its text index at most once in 69 and 80 evals, the standing root on all 8 of its searching evals (450-2370 ms each), so step 2's gain is deletion and root's rebuilds.
+- **Batch 87, the REPL the owner asked for** ("We own the parser and we are making our own REPL"): the REPL's names work bare in every namespace through one table at Jolt's analyzer ([the REPL](agent.md#the-repl)), an agent starts in its task's namespace and its context follows the REPL (`:seon.agent/ns`); six stale tasks closed. Jolt pinned at b72de3d9.
+- **Batch 88:** the curated replay (`seon.fixtures/curated`, [model](model.md)): reconcile's batch-86 session, replayed under the scripted provider, ended green in 6 turns and 72k context tokens (its live run: 11 turns, 181k).
+
+**The six real tasks on batch 86** (REPL work only): one merged green (reconcile, 11 turns), five capped at 40 turns (1.2-3.0M tokens). Their Seon-side causes, the context session's review: an eval that throws loses its turn's recording (task `seon.repl/every-eval-of-a-turn-is-recorded`, evidence kept in `.worktrees/runs-86`); big results re-sent every turn; host errors with no var or line. The six rerun on batch 87, on a worktree root.
+
+**Open:** the REPL fallback's Jolt follow-ups (`seon.repl/the-repl-fallback-keeps-its-forms-position`); step 2 (the text index as a secondary index), step 3 (the ranker), waiting on the owner's order.
+
 ## Where it stands (2026-11-02, afternoon)
 
 **Merged today** (each `bin/prove --merge` green, root updated):
