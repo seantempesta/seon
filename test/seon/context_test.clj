@@ -1375,7 +1375,8 @@
 (deftest a-namespace-shows-the-names-the-task-names
   ;; docs/render.md#a-part-answers-data: a bench run's namespaces part was 1,256 tokens listing about 170 names
   ;; the task never needed. It shows the namespaces of what the task cites and of its proofs, each with the
-  ;; names the task cites or its proofs call and the form that lists the rest, from the record alone
+  ;; names the task cites or its proofs call and the form that lists the rest, from the record alone; the one the
+  ;; REPL is in and the task's own first (docs/agent.md#the-repl)
   (let [db (d/db-with (ts/test-db)
                       (into [{:db/id "n" :ns/name 'x.nsd} {:db/id "nt" :ns/name 'x.nsd-test}
                              {:db/id "tf" :form/id "x.nsd-test/t1" :form/src "(deftest t1 (is (= 1 (b 1))))" :form/refs #{'x.nsd/b 'clojure.test/is}}
@@ -1386,10 +1387,21 @@
                                               :seon.task/plan "Make `x.nsd/c` call `x.nsd/b`."}]))
         db (d/db-with db [{:seon.agent/key "b/a1" :seon.agent/task [:seon.task/id "x/nsd"]}])
         tree (:tree (ctx/build db (pdb/eid db :seon.agent/key "b/a1") :b))]
-    (is (= '{x.nsd {:names [b c] :ns-form (clojure.repl/source x.nsd)} x.nsd-test {:names [t1] :ns-form (clojure.repl/source x.nsd-test)}}
+    (is (= '{x {:ns-form (clojure.repl/source x)} x.nsd {:names [b c] :ns-form (clojure.repl/source x.nsd)} x.nsd-test {:names [t1] :ns-form (clojure.repl/source x.nsd-test)}}
            (context/namespaces-of tree))
-        "the cited names and the proof's callee, never the namespace's twenty others; a form for the rest")
-    (is (= '[x.nsd x.nsd-test] (keys (context/namespaces-of tree))) "the cited first, then the proofs'")))
+        "the task's own namespace, then the cited names and the proof's callee, never the namespace's twenty others; a form for the rest")
+    (is (= '[x x.nsd x.nsd-test] (keys (context/namespaces-of tree))) "the task's own first, then the cited, then the proofs'")
+    (is (= '{:ns-form (clojure.repl/source x)} (get (context/namespaces-of tree) 'x)) "the task's own namespace, cited nowhere: its ns form, no names")
+    (let [own (context/namespaces-of (assoc-in tree [:task :seon.task/ns] 'x.nsd))]
+      (is (= '[x.nsd x.nsd-test] (keys own)) "a cited own namespace is once, first")
+      (is (= '[b c] (:names (get own 'x.nsd))) "with the names cited in it"))
+    (is (= '{x {:ns-form (clojure.repl/source x)}}
+           (context/namespaces-of (update tree :task dissoc :cites :needs :proved)))
+        "a task that cites and proves nothing answers its own namespace")
+    (is (= 'x (context/current-ns tree)) "before any eval the REPL is where it starts, the task's namespace")
+    (let [moved (assoc tree :seon.agent/ns 'y)]
+      (is (= 'y (context/current-ns moved)))
+      (is (= '[y x x.nsd x.nsd-test] (keys (context/namespaces-of moved))) "the part follows the REPL, the task's own still drawn"))))
 
 (deftest a-draw-reads-the-cites-its-plan-write-derived
   ;; md-scan #10, 2026-10-29: the agent redefined seon.ref/scan, and every draw that parsed the plan
@@ -1563,11 +1575,12 @@
 
 (def ^:private no-example-page
   "The page's part message main sent the fixture's agent, entity ids as -N."
-  "{\"task-data-N\"\n   {:to-prove {demo-test/g-test \"not written yet\"},\n    :task #:seon.task{:id \"demo/g\", :kind :work, :plan \"Make g.\"}},\n \"namespaces-N\" {},\n \"status-N\"\n   {:proofs [{:test demo-test/g-test, :status :undefined}],\n    :refused\n      [{:reason :proof-unknown,\n        :test demo-test/g-test,\n        :do\n          (do\n           (in-ns 'demo-test)\n           (clojure.test/deftest\n            g-test\n            (clojure.test/is false\n             \"write the assertion: the behaviour, on data\"))\n           (my.agent/prove))}]},\n \"run-head-N\" {:turn 1}}")
+  "{\"task-data-N\"\n   {:to-prove {demo-test/g-test \"not written yet\"},\n    :task #:seon.task{:id \"demo/g\", :kind :work, :plan \"Make g.\"}},\n \"namespaces-N\" {demo {:ns-form (clojure.repl/source demo)}},\n \"status-N\"\n   {:proofs [{:test demo-test/g-test, :status :undefined}],\n    :refused\n      [{:reason :proof-unknown,\n        :test demo-test/g-test,\n        :do\n          (do\n           (in-ns 'demo-test)\n           (clojure.test/deftest\n            g-test\n            (clojure.test/is false\n             \"write the assertion: the behaviour, on data\"))\n           (my.agent/prove))}]},\n \"run-head-N\" {:turn 1, :ns demo}}")
 
 ;; The no-examples path only gains an empty ex-items (seon.context/request), so these literals are the branch's own
 ;; output for it; the tests assert them and a digest, so a later change to that path goes red. They are main's request
-;; (9a35ff81ea, which holds no example) for the fixed fixture of `no-example-requests!`.
+;; (9a35ff81ea, which holds no example) for the fixed fixture of `no-example-requests!`, its turn part naming the
+;; namespace the REPL starts in, the task's (seon.context/current-ns, docs/agent.md#the-repl).
 (deftest a-task-with-no-examples-sends-the-first-request-main-sent
   (ts/test-branch!
     (fn [_ conn]
@@ -1587,7 +1600,7 @@
                 {:role "assistant" :content "Thinking."}
                 {:role "user" :content "{\"run-head-N\" {:changed {:turn 3}}}"}]
                ms))
-        (is (= "c63057ac93d419a3" (seon.lib/digest (str/join "\n--\n" (map #(str (:role %) ":" (:content %)) ms))))
+        (is (= "772edec9a84dece1" (seon.lib/digest (str/join "\n--\n" (map #(str (:role %) ":" (:content %)) ms))))
             "and the digest of its roles and contents (SHA-256, first 16 hex digits): a change to this path moves it")))))
 
 (deftest session-tx-answers-an-error-for-what-it-cannot-show

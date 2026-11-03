@@ -149,7 +149,8 @@
                :growth :constant
                ;; measured: 7 contracted calls, 26.9 KB at 10 definitions; namespace-data, which it replaces, read every
                ;; definition of each namespace (34 KB a definition: 3.49 MB at 100)
-               :fixed {:calls 7 :bytes 30000}
+               ;; 8: 7 + the current-ns call. Accepted by the owner, 2026-11-03 ("Record 616 and 8")
+               :fixed {:calls 8 :bytes 30000}
                :sizes [10 100 1000]}))
 
 (deftest task-data-costs-what-the-plan-names

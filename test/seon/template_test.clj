@@ -99,7 +99,7 @@
                   ;; task's: the agent writes only those its status lists with no source)
                   steps ["their failures are the reproduction" "first reproduce it in one eval" "the output is already right" "(my.task/fail! "
                          "the output is wrong, stop reading" "with its source is written already" "with no source as a deftest beside the"
-                         "(my.agent/tests-reaching 'ns/f)" "never the live db" "egister it" "run it red" "(my.agent/prove)" "make it pass"]]
+                         "(tests-reaching 'ns/f)" "never the live db" "egister it" "run it red" "(prove)" "make it pass"]]
       (is (every? #(str/includes? w %) steps) "each step is in the section")
       (is (= steps (sort-by #(or (str/index-of w %) -1) steps)) "in that order: reproduce, fail! or stop reading, the deftest, red, green"))
     (is (= [:design :implement :merge] (mapv :seon.task/kind (tpl/stages d))) "the staged choice still makes its tasks")

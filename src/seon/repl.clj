@@ -69,37 +69,31 @@
   [v src]
   (when (and (var? v) src) (alter-meta! v assoc :source src)))
 
-(def ^:private repl-helpers
-  "The clojure.repl names an agent's REPL keeps in every namespace it moves to (`equip-ns!`), and
-  warns of when the namespace's own var hides one (`shadowed`; docs/render.md#a-part-answers-data)."
-  '[source apropos dir pst doc find-doc])
-
-(defn- equip-ns!
-  "Namespace ns as an agent's REPL has its helpers wherever it goes: the clojure.repl names the
-  agent's own namespace refers (source, doc, dir, apropos, find-doc, pst) referred into ns where
-  each is free and clojure.repl holds it (an agent's process interns source and pst there,
-  seon.agent/make-ns!), so an in-ns to another namespace keeps them (a name ns already holds is its
-  own, and left). Done here, at the reader, on purpose (audit cut 8): this loop is the one
-  place that carries *ns* from form to form, so it is the owner of what follows the agent into a new
-  one; a producer-side fix would redefine in-ns (a core var, a smell by AGENTS 5) or refer into
-  every program namespace at load, which are not the agent's. Answers ns."
-  {:malli/schema [:=> [:cat :seon.host/namespace] :seon.host/namespace]}
-  [ns]
-  (let [held (ns-publics (find-ns 'clojure.repl))
-        free (vec (for [s repl-helpers :when (and (contains? held s) (not (ns-resolve ns s)))] s))]
-    (when (seq free) (binding [*ns* ns] (refer 'clojure.repl :only free)))
-    ns))
+(defn- defines-program?
+  "Does form, read in namespace ns, define a var of the program: ns is no scratch (seon.program/scratch-ns?) and the
+  form's head is def or a macro named def... (defn, deftest; deferred, a function, is none), in ns or among the REPL's names (seon.agent/repl-name). Such
+  a form resolves as written, never through the REPL's names; one that only moves or requires does. Only the head is
+  read: a definition inside another form, (do (defn f ...)), evaluates with the REPL's names, as it ran at the REPL. See
+  docs/agent.md#the-repl."
+  {:malli/schema [:=> [:cat :any :seon.host/namespace] :boolean]}
+  [form ns]
+  (boolean
+    (when (and (seq? form) (symbol? (first form)) (not (program/scratch-ns? ns)))
+      (let [h (first form)
+            v (or (ns-resolve ns h) (some-> (agent/repl-name h) find-var))]
+        (or (= 'def h) (and (var? v) (:macro (meta v)) (clojure.string/starts-with? (str (:name (meta v))) "def")))))))
 
 (defn- shadowed
-  "The REPL helpers (`repl-helpers`) namespace ns holds a var of its own for, {name its-var}:
+  "The REPL helpers (clojure.repl's and pprint's of seon.agent/repl-names) namespace ns holds a var of its own for, {name its-var}:
   there the name is that var and not the REPL's, as Clojure warns when a definition replaces a
   referred var (an agent in seon.render.ui called its source with a function and read an nth
   error four times). nil when none. It answers a move's :helper-shadowed (docs/render.md#a-part-answers-data)."
   {:malli/schema [:=> [:cat :seon.host/namespace] [:maybe [:map-of :symbol :symbol]]]}
   [ns]
-  (not-empty (into {} (for [s repl-helpers
+  (not-empty (into {} (for [[from names] agent/repl-names :when ('#{clojure.repl clojure.pprint} from)
+                            s names
                             :let [v (ns-resolve ns s)]
-                            :when (and (var? v) (not= 'clojure.repl (ns-name (:ns (meta v)))))]
+                            :when (and (var? v) (not= from (ns-name (:ns (meta v)))))]
                         [s (symbol (str (ns-name (:ns (meta v)))) (str s))]))))
 
 (defn- do-parts
@@ -173,7 +167,10 @@
                        ;; *1 *2 *3 *e as clojure.main/repl keeps them; clojure.test reports to
                        ;; *test-out*, bound to the form's output as nREPL does
                        {v1 :v1 v2 :v2 v3 :v3 e1 :e} (:repl-vars @agent/state)
-                       [tag v ns' outer] (try (binding [*ns* ns *out* out *err* err clojure.test/*test-out* out *1 v1 *2 v2 *3 v3 *e e1]
+                       [tag v ns' outer] (try (binding [*ns* ns *out* out *err* err clojure.test/*test-out* out *1 v1 *2 v2 *3 v3 *e e1
+                                                         ;; the REPL's names in every namespace (seon.agent/repl-name), but for a
+                                                         ;; definition of the program, which resolves as written
+                                                         jolt.host/*resolve-unresolved* (when-not (defines-program? form ns) agent/repl-name)]
                                                 (let [v (intr/run ticks alloc #(eval-fn form))] [:ret v *ns*]))
                                               (catch Throwable e [:err e ns (outer-frames)]))
                        ;; the form as the wire carries it, whole: its own text, else its EDN (a symbol, a number)
@@ -186,7 +183,7 @@
                      (do (reply (cond-> (merge common {:repl/value v :tag :ret})
                                   ;; a move into a namespace whose own vars hide a helper says so, once, as it moves
                                   (not= ns ns') (merge (some->> (shadowed ns') (hash-map :shadowed)))))
-                         [(equip-ns! ns') :ok])
+                         [ns' :ok])
                      (do (reply (let [m (merge common {:tag :err :err-text (str err (nrepl/err->msg v {:outer outer}))
                                                         "status" (if (:interrupted (ex-data v)) ["interrupted"] ["eval-error"])})]
                                  (assoc m :repl/ex (error-data v m))))
@@ -611,11 +608,14 @@
   "The recording transaction of one eval: its entity, on the agent's, who evaluated it
   (:seon.eval/by), its details in one EDN attribute (the lean record: nothing queries them
   apart): `record-details`. Who is the one upsert, by its identity: an
-  agent's key ({:seon.agent/key k}, seon.task/agent-key) or root's ({:seon.root/id :root})."
+  agent's key ({:seon.agent/key k}, seon.task/agent-key) or root's ({:seon.root/id :root}); an agent's holds the
+  namespace the eval left its REPL in (:seon.agent/ns), a datom only when it moved (an unchanged value adds none),
+  which seon.context/current-ns reads. See docs/render.md#a-part-answers-data."
   {:malli/schema [:=> [:cat :map :string :string :map] :seon.db/tx-data]}
   [who id by details]
   [{:seon.eval/id id :seon.eval/agent "agent" :seon.eval/by by :seon.eval/record details}
-   (assoc who :db/id "agent")])
+   (cond-> (assoc who :db/id "agent")
+     (and (:seon.agent/key who) (symbol? (get-in details [:response :ns]))) (assoc :seon.agent/ns (get-in details [:response :ns])))])
 
 (defn record-details
   "What an eval's record holds (:seon.eval/record): its code, its response whole, its value
