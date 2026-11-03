@@ -502,6 +502,31 @@
 ;; ---- evaluation -----------------------------------------------------------------
 
 
+(def ^:private repl-names
+  "The names an agent's REPL resolves in any namespace where nothing else does (`repl-name`), by the namespace
+  holding each, first first: :all its publics. clojure.repl's source, source-fn and pst are Seon's, interned under
+  their own names (`make-ns!`)."
+  '[[clojure.repl :all] [clojure.pprint [pp pprint]] [my.agent :all] [my.db :all] [seon.ctx [ctx]]
+    [clojure.test [deftest is are testing use-fixtures]]])
+
+(def ^:private repl-aliases
+  "The aliases an agent's REPL resolves in any namespace that has none of the name (`repl-name`)."
+  '{"d" datahike.api "str" clojure.string})
+
+(defn repl-name
+  "The qualified symbol an agent's REPL reads sym as when nothing in its namespace resolves it (Jolt's
+  jolt.host/*resolve-unresolved*, bound by seon.repl): a REPL helper (`repl-names`), or a name under one of
+  `repl-aliases` (d/q); nil for any other. Nothing is written into a namespace. See docs/agent.md#the-repl."
+  {:malli/schema [:=> [:cat :symbol] [:maybe :qualified-symbol]]}
+  [sym]
+  (if-let [a (namespace sym)]
+    (when-let [t (get repl-aliases a)] (when (find-ns t) (symbol (str t) (name sym))))
+    (some (fn [[from names]]
+            (when-let [held (some-> (find-ns from) ns-publics)]
+              (when (and (contains? held sym) (or (= :all names) (some #{sym} names)))
+                (symbol (str from) (str sym)))))
+          repl-names)))
+
 (defn- unresolved-message
   "An unresolved symbol's message without the \"(did you mean ...)\" suffix (the suggestions are
   the error's fix). Its words are copied from `jolt.nrepl/err->msg`'s cause (jolt-core/jolt/nrepl.clj
@@ -534,10 +559,13 @@
            sym (:jolt.error/symbol jd)
            unresolved? (and sym (= :analyze/unresolved-symbol (:jolt.error/kind jd)))
            m (if unresolved? (unresolved-message sym) (step/error-msg e))
+           ;; a REPL name in a definition: the program resolves as written, so the definition calls it qualified
+           repl (when unresolved? (repl-name (symbol sym)))
            causes (mapv #(str (type %) ": " (ex-message %)) (take-while some? (rest (iterate ex-cause e))))]
        (contract/error :seon.agent/eval-error op m
                        (cond-> (assoc jd :class (str (type e)))
                          (seq (:jolt.error/suggestions jd)) (assoc :seon.error/fix (str "did you mean " (str/join ", " (:jolt.error/suggestions jd))))
+                         repl (assoc :seon.error/fix (str sym " is the REPL's: a definition is the program, which resolves as written, so it calls " repl))
                          other (assoc :data other)
                          heap (assoc :jolt/heap heap)
                          (seq causes) (assoc :causes causes)))))))
@@ -1194,8 +1222,8 @@
 (defn- start-ns
   "The namespace agent's REPL starts in: its task's :seon.task/ns on db (task its :seon.task/id), made as an ns form
   would make it when the program has none (clojure.core referred), else its own scratch namespace nsx (a task that
-  names no namespace). Its first eval runs there and its context pulls it (seon.context/current-ns); the reader
-  carries the REPL's helpers into it (seon.repl/equip-ns!). See docs/agent.md#the-repl."
+  names no namespace). Its first eval runs there and its context pulls it (seon.context/current-ns); the REPL's
+  names resolve there as anywhere (`repl-name`). See docs/agent.md#the-repl."
   {:malli/schema [:=> [:cat :seon.host/db [:maybe :string] :seon.host/namespace] :seon.host/namespace]}
   [db task nsx]
   (if-let [sym (some->> task (pdb/eid db :seon.task/id) (d/entity db) :seon.task/ns)]
@@ -1209,24 +1237,17 @@
     ;; the agent's own namespace is its scratch pad (seon.program/scratch-ns?): what it
     ;; defines here never becomes program
     (alter-meta! nsx assoc :scratch true)
+    ;; a namespace like any: the REPL's names (my.*, clojure.repl's, pprint, d and str) resolve in it as in every
+    ;; namespace (`repl-name`), referred nowhere
     (binding [*ns* nsx]
       (refer-clojure)
-      (refer 'clojure.test :only '[deftest is are testing use-fixtures])
-      (refer 'my.db)
-      (refer 'my.agent :exclude '[source source-fn pst])
-      ;; the agent's record as a map, @ctx (seon.ctx)
-      (refer 'seon.ctx :only '[ctx])
       ;; clojure.repl as clojure.main's REPL has it (clojure.main/repl-requires). Jolt's lacks
       ;; source, source-fn and pst: interned from my.agent, whose source also reads the agent's
       ;; own redefinitions from its branch db (task seon.context/the-standard-repl-tools moves the
       ;; file-reading part into Jolt's own clojure.repl)
       (doseq [s '[source-fn source pst] :let [v (ns-resolve 'my.agent s)]]
         (intern (find-ns 'clojure.repl) (with-meta s (select-keys (meta v) [:macro :arglists :doc])) @v))
-      (refer 'clojure.repl :only '[source apropos dir pst doc find-doc])
-      (require 'clojure.pprint)
-      (refer 'clojure.pprint :only '[pp pprint])
-      (alias 'd 'datahike.api)
-      (alias 'str 'clojure.string))
+      (require 'clojure.pprint))
     nsx))
 
 (defn state-summary

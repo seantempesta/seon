@@ -217,6 +217,51 @@
                                                 " (seon.context/current-ns (:tree (seon.ctx/build b a :b))))")}]))]
     (is (str/ends-with? (str (:value where)) ".here") (pr-str where))))
 
+;; docs/agent.md#the-repl (owner, 2026-11-03: "fix the commands so they work intuitively everywhere"): one table the
+;; analyzer falls back to (seon.agent/repl-name), so the REPL's names work bare in a namespace that refers nothing,
+;; a local or the namespace's own var still wins, and nothing is written into the namespace
+(deftest the-repl-helpers-resolve-in-any-namespace
+  (let [old @agent/state]
+    (try (reset! agent/state {:n 0 :ns (the-ns 'user)})
+         (let [ev #(repl/eval-string % {})
+               _ (ev "(in-ns 'x.repl-bare)")
+               src (ev "(source seon.doc/named-under?)")
+               doc (ev "(doc clojure.core/map)")
+               pp (ev "(pprint [1 2])")
+               mine (ev "(fn? grep)")
+               aliased (ev "(str/join \",\" [1 2])")
+               local (ev "(clojure.core/let [pprint 5] pprint)")]
+           (is (str/includes? (str (:seon.print/code (:out src))) "named-under?") (str "source, Seon's, in a bare namespace: " (pr-str src)))
+           (is (str/includes? (str (:seon.print/code (:out doc))) "clojure.core/map") (pr-str doc))
+           (is (= "[1 2]\n" (:seon.print/code (:out pp))) (pr-str pp))
+           (is (true? (:value mine)) "a my.* function, bare")
+           (is (= "1,2" (:value aliased)) "the str alias")
+           (is (= 5 (:value local)) "a local of the same name is the local")
+           (is (not-any? (set (keys (ns-map 'x.repl-bare))) '[source doc pprint grep]) "nothing referred into the namespace"))
+         (repl/eval-string "(ns x.repl-own) (defn doc [x] [:mine x])" {})
+         (is (= [:mine 1] (:value (repl/eval-string "(doc 1)" {}))) "the namespace's own doc wins")
+         (finally (reset! agent/state old)))))
+
+;; docs/agent.md#the-repl: a definition of the program resolves as written, so it never depends on the REPL's
+;; table; the error names the qualified call, and the same name still works in a form that defines nothing
+(deftest a-definition-never-depends-on-the-repl-table
+  (let [old @agent/state]
+    (try (reset! agent/state {:n 0 :ns (the-ns 'user)})
+         (repl/eval-string "(ns x.repl-def)" {})
+         (let [r (repl/eval-string "(defn uses-grep [] (grep \"x\"))" {})]
+           (is (= :seon.agent/eval-error (get-in r [:ex :seon.error/type])) (pr-str r))
+           (is (str/includes? (str (get-in r [:ex :seon.error/fix])) "my.agent/grep") (pr-str (:ex r)))
+           (is (nil? (find-var 'x.repl-def/uses-grep)) "nothing defined"))
+         (is (true? (:value (repl/eval-string "(fn? grep)" {}))) "a form that defines nothing reads it bare")
+         (finally (reset! agent/state old)))))
+
+;; docs/agent.md#the-repl (owner, 2026-11-03: "Have them start in the task namespace"): an agent's first eval runs
+;; in its task's namespace, made when the program has none, where the REPL's names resolve
+(deftest an-agent-starts-in-its-tasks-namespace
+  (let [[here helper] (at/in-agent ["(str *ns*)" "(fn? source-fn)"])]
+    (is (re-matches #"t[0-9a-f]{8}" (str (:value here))) (str "the task's namespace, t<id>: " (pr-str here)))
+    (is (true? (:value helper)) (pr-str helper))))
+
 (deftest a-move-into-a-namespace-that-hides-a-helper-says-so
   ;; owner, 2026-10-29: "don't some repls output a warning ... you are overwriting symbols in this
   ;; namespace?": an agent in-ns'd to seon.render.ui, whose own source shadows the REPL's, and read

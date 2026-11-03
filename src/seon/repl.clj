@@ -70,34 +70,9 @@
   (when (and (var? v) src) (alter-meta! v assoc :source src)))
 
 (def ^:private repl-helpers
-  "The names an agent's REPL keeps in every namespace it evaluates in (`equip-ns!`), by the namespace that holds
-  each, as clojure.main's REPL refers them into user (its repl-requires): clojure.repl's, whose source, source-fn
-  and pst are Seon's, interned under their own names (seon.agent/make-ns!), and pprint's. `shadowed` warns of a
-  namespace's own var that hides one (docs/render.md#a-part-answers-data)."
+  "The REPL helpers `shadowed` warns of when a namespace's own var hides one, by the namespace holding each
+  (seon.agent/repl-name resolves them in every namespace; docs/render.md#a-part-answers-data)."
   '{clojure.repl [source apropos dir pst doc find-doc] clojure.pprint [pp pprint]})
-
-(def ^:private repl-aliases
-  "The aliases an agent's REPL keeps in every namespace it evaluates in (`equip-ns!`), as its own namespace has them."
-  '{d datahike.api str clojure.string})
-
-(defn- equip-ns!
-  "Namespace ns as an agent's REPL has its helpers wherever it evaluates: each of `repl-helpers` referred into ns
-  where the name is free and its namespace holds it, and each of `repl-aliases` where ns has no alias of that name,
-  so the standard names work in the task's namespace it starts in and in any it moves to (a name ns already maps is
-  its own, and left; a refer or an alias is no form, so it never becomes program). Done here, at the reader, on purpose
-  (audit cut 8): this loop is the one place that carries *ns* from form to form, so it is the owner of what follows
-  the agent into a new one; a producer-side fix would redefine in-ns (a core var, a smell by AGENTS 5) or refer into
-  every program namespace at load, which are not the agent's. Answers ns. See docs/agent.md#the-repl."
-  {:malli/schema [:=> [:cat :seon.host/namespace] :seon.host/namespace]}
-  [ns]
-  (doseq [[from names] repl-helpers
-          :let [held (some-> (find-ns from) ns-publics)
-                free (vec (for [s names :when (and (contains? held s) (not (ns-resolve ns s)))] s))]
-          :when (seq free)]
-    (binding [*ns* ns] (refer from :only free)))
-  (doseq [[a target] repl-aliases :when (and (not (contains? (ns-aliases ns) a)) (find-ns target))]
-    (binding [*ns* ns] (alias a target)))
-  ns)
 
 (defn- shadowed
   "The REPL helpers (`repl-helpers`) namespace ns holds a var of its own for, {name its-var}:
@@ -182,7 +157,11 @@
                        ;; *1 *2 *3 *e as clojure.main/repl keeps them; clojure.test reports to
                        ;; *test-out*, bound to the form's output as nREPL does
                        {v1 :v1 v2 :v2 v3 :v3 e1 :e} (:repl-vars @agent/state)
-                       [tag v ns' outer] (try (binding [*ns* ns *out* out *err* err clojure.test/*test-out* out *1 v1 *2 v2 *3 v3 *e e1]
+                       [tag v ns' outer] (try (binding [*ns* ns *out* out *err* err clojure.test/*test-out* out *1 v1 *2 v2 *3 v3 *e e1
+                                                         ;; the REPL's names in every namespace (seon.agent/repl-name), but for a
+                                                         ;; definition of the program, which resolves as written
+                                                         jolt.host/*resolve-unresolved* (when-not (and (program/definition-form? form ns) (not (program/scratch-ns? ns)))
+                                                                                          agent/repl-name)]
                                                 (let [v (intr/run ticks alloc #(eval-fn form))] [:ret v *ns*]))
                                               (catch Throwable e [:err e ns (outer-frames)]))
                        ;; the form as the wire carries it, whole: its own text, else its EDN (a symbol, a number)
@@ -195,7 +174,7 @@
                      (do (reply (cond-> (merge common {:repl/value v :tag :ret})
                                   ;; a move into a namespace whose own vars hide a helper says so, once, as it moves
                                   (not= ns ns') (merge (some->> (shadowed ns') (hash-map :shadowed)))))
-                         [(equip-ns! ns') :ok])
+                         [ns' :ok])
                      (do (reply (let [m (merge common {:tag :err :err-text (str err (nrepl/err->msg v {:outer outer}))
                                                         "status" (if (:interrupted (ex-data v)) ["interrupted"] ["eval-error"])})]
                                  (assoc m :repl/ex (error-data v m))))
@@ -226,7 +205,7 @@
                          (let [[ns' how] (exec! form src lead ns (or top k))]
                            (if (= :ok how) (recur ns' end (inc k)) [ns' how])))))))
         _ (vreset! forms-ref forms!)
-        [ns how] (forms! (get req "code") (equip-ns! (or (some-> (get req "ns") symbol find-ns) (:ns @agent/state))) nil)]
+        [ns how] (forms! (get req "code") (or (some-> (get req "ns") symbol find-ns) (:ns @agent/state)) nil)]
     ;; a read error leaves the agent's namespace as it was
     (when-not (= :read how) (swap! agent/state assoc :ns ns))
     (reply {"status" ["done"]})))
