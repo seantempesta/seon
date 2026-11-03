@@ -69,6 +69,18 @@
   [v src]
   (when (and (var? v) src) (alter-meta! v assoc :source src)))
 
+(defn- defines-program?
+  "Does form, read in namespace ns, define a var of the program: ns is no scratch (seon.program/scratch-ns?) and the
+  form's head is def or a macro named def... (defn, deftest; deferred, a function, is none), in ns or among the REPL's names (seon.agent/repl-name). Such
+  a form resolves as written, never through the REPL's names; one that only moves or requires does. See docs/agent.md#the-repl."
+  {:malli/schema [:=> [:cat :any :seon.host/namespace] :boolean]}
+  [form ns]
+  (boolean
+    (when (and (seq? form) (symbol? (first form)) (not (program/scratch-ns? ns)))
+      (let [h (first form)
+            v (or (ns-resolve ns h) (some-> (agent/repl-name h) find-var))]
+        (or (= 'def h) (and (var? v) (:macro (meta v)) (clojure.string/starts-with? (str (:name (meta v))) "def")))))))
+
 (def ^:private repl-helpers
   "The REPL helpers `shadowed` warns of when a namespace's own var hides one, by the namespace holding each
   (seon.agent/repl-name resolves them in every namespace; docs/render.md#a-part-answers-data)."
@@ -160,8 +172,7 @@
                        [tag v ns' outer] (try (binding [*ns* ns *out* out *err* err clojure.test/*test-out* out *1 v1 *2 v2 *3 v3 *e e1
                                                          ;; the REPL's names in every namespace (seon.agent/repl-name), but for a
                                                          ;; definition of the program, which resolves as written
-                                                         jolt.host/*resolve-unresolved* (when-not (and (program/definition-form? form ns) (not (program/scratch-ns? ns)))
-                                                                                          agent/repl-name)]
+                                                         jolt.host/*resolve-unresolved* (when-not (defines-program? form ns) agent/repl-name)]
                                                 (let [v (intr/run ticks alloc #(eval-fn form))] [:ret v *ns*]))
                                               (catch Throwable e [:err e ns (outer-frames)]))
                        ;; the form as the wire carries it, whole: its own text, else its EDN (a symbol, a number)

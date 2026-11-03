@@ -251,7 +251,7 @@
          (let [r (repl/eval-string "(defn uses-grep [] (grep \"x\"))" {})]
            (is (= :seon.agent/eval-error (get-in r [:ex :seon.error/type])) (pr-str r))
            (is (str/includes? (str (get-in r [:ex :seon.error/fix])) "my.agent/grep") (pr-str (:ex r)))
-           (is (nil? (find-var 'x.repl-def/uses-grep)) "nothing defined"))
+           (is (not (some-> (find-var 'x.repl-def/uses-grep) bound?)) "nothing defined (the var interned unbound, as Clojure's def does)"))
          (is (true? (:value (repl/eval-string "(fn? grep)" {}))) "a form that defines nothing reads it bare")
          (finally (reset! agent/state old)))))
 
@@ -607,21 +607,21 @@
     (let [by (zipmap forms items)
           printed #(str (:text (by %)))]
       ;; the navigation functions answer from the program facts the branch records
-      (is (str/includes? (printed "(my.agent/callers 'seon.task/accumulate)") "seon.task/tasks") "callers, from :form/refs")
-      (is (str/includes? (printed "(my.agent/callees 'seon.task/accumulate)") "clojure.core/reduce") "callees, from its form's :form/refs")
-      (is (str/includes? (printed "(my.agent/callers 'seon.task)") "seon.task-test") "a namespace's callers, the namespaces requiring it")
-      (is (str/includes? (printed "(my.agent/callees 'seon.task)") "seon.ref") "and its callees, the namespaces it requires")
-      (is (str/includes? (printed "(my.agent/grep \"accumulated\")") "seon.task/accumulate:") "grep: a row per matching line, at its thing and line")
-      (let [shown (printed "(my.agent/lines 'seon.task/accumulate 3 6)")]
+      (is (str/includes? (printed "(callers 'seon.task/accumulate)") "seon.task/tasks") "callers, from :form/refs")
+      (is (str/includes? (printed "(callees 'seon.task/accumulate)") "clojure.core/reduce") "callees, from its form's :form/refs")
+      (is (str/includes? (printed "(callers 'seon.task)") "seon.task-test") "a namespace's callers, the namespaces requiring it")
+      (is (str/includes? (printed "(callees 'seon.task)") "seon.ref") "and its callees, the namespaces it requires")
+      (is (str/includes? (printed "(grep \"accumulated\")") "seon.task/accumulate:") "grep: a row per matching line, at its thing and line")
+      (let [shown (printed "(lines 'seon.task/accumulate 3 6)")]
         (is (and (re-find #"(?m)^\s*3  " shown) (re-find #"(?m)^6  " shown) (not (re-find #"(?m)^7  " shown)) (not (str/includes? shown ":at")))
             (str "lines: the range shown as numbered lines, numbered as grep numbers them, no map a line: " (subs shown 0 (min 600 (count shown))))))
-      (is (str/includes? (printed "(my.agent/ls 'seon.task)") "seon.task/accumulate") (str "ls: a namespace's definitions: " (subs (printed "(my.agent/ls 'seon.task)") 0 (min 600 (count (printed "(my.agent/ls 'seon.task)"))))))
+      (is (str/includes? (printed "(ls 'seon.task)") "seon.task/accumulate") (str "ls: a namespace's definitions: " (subs (printed "(ls 'seon.task)") 0 (min 600 (count (printed "(ls 'seon.task)"))))))
       (is (not (:ex (by "(swap! ctx assoc-in [:searches \"a1/where-sets-are-logged\"] {:seon.search/id \"a1/where-sets-are-logged\" :seon.search/query \"sets a workout has not logged\" :seon.search/k 5})")))
           "the help page's form runs in a real agent (that it is written, drawn and redrawn: seon.ctx-test/a-search-is-a-member-a-swap-adds-and-changes)")
       (is (str/includes? (printed "(get (my.schema/forms) :seon.task/task)") ":seon.task/own") "a schema's form")
       (is (str/includes? (printed "(my.schema/register! :app.workout/set [:map [:reps :int] [:kg :double]])") ":app.workout/set") "a new schema registers")
-      (is (str/includes? (printed "(my.agent/help)") "docs/agent.md#done") "help lists the page's sections, from the branch's db")
-      (is (str/includes? (printed "(my.agent/help \"done\")") "The judge counts exactly") "and one section's text"))))
+      (is (str/includes? (printed "(help)") "docs/agent.md#done") "help lists the page's sections, from the branch's db")
+      (is (str/includes? (printed "(help \"done\")") "The judge counts exactly") "and one section's text"))))
 
 (deftest a-name-that-is-no-var-says-so
   ;; the live rounds (the archived paper live-2026-10-25.md (git history)): (my.agent/callers 'seon.proof/status) answered [],
