@@ -785,7 +785,7 @@
         (is (= [8192 77 77] (mapv (comp :max_tokens second) sent)) "each turn's provider is its basis's")
         (doseq [[b body] sent]
           (is (= (clojure.data.json/write-str body)
-                 (clojure.data.json/write-str (context/wire-request (d/commit-as-db (:store @conn) (:commit b)) b)))
+                 (clojure.data.json/write-str (:body (context/wire-turn (d/commit-as-db (:store @conn) (:commit b)) b))))
               (str "turn " (:turn b) ": made again at its basis, the bytes it sent")))
         ;; the print cache of a later request (the debug page's latest keeps one) prints none of what it holds again,
         ;; and changes no byte: each turn made again with the newest turn's cache is the bytes it sent

@@ -208,7 +208,7 @@
 (defn- reads-in
   "What render var f reads (`reads`), as walk w found it: kept by f with the value its root held then, so
   each call of a render in a draw costs a lookup, and a redefinition (a defn sets a new root with its new
-  metadata) is read again."
+  metadata) is read again; an alter-meta! that leaves the root is not seen until the walk is made again."
   {:malli/schema [:=> [:cat :map :any] [:set :qualified-keyword]]}
   [w f]
   (if-not (var? f)
@@ -546,12 +546,14 @@
   [w] @(:ledger w))
 
 (defn dispose-walk!
-  "Every component of walk w disposed, and the render vars it watched let go: a cold walk's end."
+  "Every component of walk w disposed, and the render vars it watched and the reads it kept (reads-in) let go:
+  a cold walk's end."
   {:malli/schema [:=> [:cat :map] :nil]}
   [w]
   (when-let [k @(:out w)] (unmount! w k))
   (doseq [f @(:watched w)] (remove-watch f (:watched w)))
   (vreset! (:watched w) #{})
+  (vreset! (:reads w) {})
   nil)
 
 ;; ---- entity schemas and patterns (docs/ctx.md#the-pattern) ----

@@ -277,7 +277,7 @@
         _ (take! true)
         id (str run "/" turn)
         ;; the turn first, with the main and merge base it heard, then its basis: the commit that holds them, so
-        ;; everything its request and its provider are made from is a fact of that commit (seon.context/wire-request
+        ;; everything its request and its provider are made from is a fact of that commit (seon.context/wire-turn
         ;; makes them again there); then what it was made from (its model call's basis): its page is drawn on the db
         ;; that holds it (its proofs as this turn observed them), then what it sent, committed, so a page shows the
         ;; call in flight and a call that fails keeps what it sent

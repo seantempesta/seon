@@ -1194,9 +1194,3 @@
      :sources (mapv (fn [is] (vec (distinct (map refs is)))) (model/wire-groups messages))
      :printed (:printed r)})))
 
-(defn wire-request
-  "The request body turn basis b put on the wire, made again from db at b's commit (`wire-turn`'s :body).
-  See docs/render.md#the-debug-page-is-the-wire-request."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.model-call/basis] :map]}
-  [db basis]
-  (:body (wire-turn db basis)))

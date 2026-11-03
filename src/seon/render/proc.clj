@@ -230,12 +230,14 @@
           ;; in the order written: entity ids are issued so
           calls (vec (sort (d/q '[:find [?e ...] :where [?e :seon.model-call/basis _]] bdb)))
           bases (mapv #(:seon.model-call/basis (d/pull bdb [:seon.model-call/basis] %)) calls)
-          at (let [x (get-in st [:tab view :at] :latest)] (if (or (= :latest x) (some #{x} calls)) x :latest))
+          chosen (get-in st [:tab view :at] :latest)
+          gone (when-not (or (= :latest chosen) (some #{chosen} calls)) chosen)
+          at (if gone :latest chosen)
           raw? (contains? (get-in st [:tab view :open] #{}) "d-turn-raw")
           lb (peek bases)
           to-come? (ui/to-come? bdb lb)]
       (ui/debug (second view)
-                {:turns (mapv (fn [e b] {:e e :turn (:turn b) :origin (:origin b)}) calls bases) :at at :to-come? to-come?}
+                (cond-> {:turns (mapv (fn [e b] {:e e :turn (:turn b) :origin (:origin b)}) calls bases) :at at :to-come? to-come?} gone (assoc :gone gone))
                 (when (seq calls)
                   {:id "d-turn" :input [at (when (= :latest at) (:max-tx bdb)) raw?]
                    ;; the print cache its last draw kept: latest prints only the records new since
@@ -357,7 +359,7 @@
                                 (try (render/placed-units w) (finally (render/dispose-walk! w))))))
         ;; @ctx's part pairs (seon.render.ui/ctx-parts): what the model reads of each part of the task's list, beside
         ;; its unit as the page draws it, from one walk of the page
-        pairs (fn [w] (let [us (filterv #(= "#p-task" (:container %)) (render/placed-units w))]
+        pairs (fn [w] (let [us (filterv #((set context/page-lists) (:container %)) (render/placed-units w))]
                         {:id "d-parts" :container "#c-rows" :rev (hash (mapv (juxt :id :rev) us))
                          :html (h/html (ui/ctx-parts (render/placed-hiccup w context/page-lists) (into {} (map (juxt :id :html)) us)))}))
         ;; the debug view: @ctx, its part pairs and the agent's record as data by the one printer (its :seon.ctx/ctx render)

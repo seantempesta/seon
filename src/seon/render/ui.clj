@@ -1777,7 +1777,7 @@
   "The debug page of id (an agent's id, :root) laid out: what its model is sent. An agent's is a timeline
   of its requests (owner, 2026-11-03: \"a timeline with an option to be on latest and it live updates
   ... static on whatever turn a user decides\"): steps, each request a button (strip: {:turns [{:e :turn
-  :origin}] :at e-or-:latest :to-come? b}), previous, next and latest moving the view (/at), and the one
+  :origin}] :at e-or-:latest :to-come? b :gone e-chosen-but-no-request-of-the-branch}), previous, next and latest moving the view (/at), and the one
   request shown (turn: a unit, :seon.render/debug-turn); for root, which has no model turn, the context it
   reads now (context: a unit, :seon.render/root-context). See docs/render.md#the-debug-page-is-the-wire-request."
   {:malli/schema [:=> [:cat :any [:maybe :map] [:maybe :map] [:maybe :map]] [:map [:seon.render/html :any] [:seon.render/units [:vector :map]]]]}
@@ -1807,7 +1807,9 @@
            (btn (= j i) e (str (inc turn) (when (= :outside origin) " read"))))
          (when to-come? (btn (= :latest at) "latest" (str (inc (count es)) " to come")))
          (btn false (if (< (inc i) (count es)) (nth es (inc i)) "latest") "next ▶")
-         (btn (= :latest at) "latest" "latest")])
+         (btn (= :latest at) "latest" "latest")
+         ;; a turn chosen that is no request of this branch any more (the branch replaced): said, then latest shown
+         (when-let [g (:gone strip)] [:span {:class "text-warning"} (str "the turn chosen (" g ") is no request of this branch: latest is shown")])])
       (cond turn (slot (:id turn))
             (not context) [:p {:class "text-text-500"} "no model turn yet"])]
      :seon.render/units (cond-> []

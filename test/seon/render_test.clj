@@ -637,6 +637,12 @@
         (is (str/includes? html (str "data-part=\"" id "\"")) (str "@ctx pairs part " id))
         (is (str/includes? html (h/html (seon.print/text (vary-meta (array-map id content) assoc :seon.print/full true))))
             (str id ": what the model reads of it, as a request prints it"))))
+    (testing "a move to a value that does not follow it (the eval gone again): what a cold draw there draws"
+      (let [st5 (#'p/answered st2 o [:branch :task-demo-f] {:db branch})
+            back (let [w (r/draw (:tree (seon.ctx/build branch (seon.db/eid branch :seon.agent/key k) (:seon.agent/branch e))) seon.ctx/changes branch
+                                 (r/declared-var :seon.render/render-ctx))]
+                   (try (mapv (juxt :id :html) (r/placed-units w)) (finally (r/dispose-walk! w))))]
+        (is (= back (mapv (juxt :id :html) (r/placed-units (:w @(get-in st5 [:branch-reads :task-demo-f :walk]))))))))
     (testing "the branch's read let go: its walk is disposed"
       (let [[st4 _] (p/render-proc st2 :from-web {:op :views :views #{} :tabs 0})]
         (is (nil? (get-in st4 [:branch-reads :task-demo-f])))))))
@@ -866,6 +872,8 @@
             drawn (fn [st] (let [[st1 _] (#'p/pass-view st [:debug :a1]) [st2 _] (#'p/pass-view (moved st1) [:debug :a1])]
                              (- (get-in st2 [:counts :rendered] 0) (get-in st1 [:counts :rendered] 0))))]
         (is (zero? (drawn (assoc-in st [:tab [:debug :a1] :at] e0))) "a chosen turn: nothing drawn again")
+        (let [[st' _] (#'p/pass-view (assoc-in st [:tab [:debug :a1] :at] 999999) [:debug :a1])]
+          (is (str/includes? (p/view-html st' [:debug :a1]) "is no request of this branch: latest is shown") "a turn chosen that is gone is said, never shown as latest in silence"))
         (is (= 1 (drawn st)) "latest: its request, once")))))
 
 (deftest stepping-the-timeline-draws-the-turn-on-a-still-branch
