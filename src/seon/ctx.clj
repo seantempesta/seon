@@ -712,9 +712,9 @@
   "The watch on the agent's state: a new agent, key or branch builds ctx, as does a db moved while
   the record lacks its agent's entity; a db moved patches it, its datoms kept for the page walk (take-moved!);
   a commit of what was applied (one t, one branch) moves only its :commit. What the agent heard of
-  main and its merge base, and where its REPL is, are no part of it: its turn writes them as facts
-  (:seon.agent/main-commit, :seon.agent/base-commit, :seon.agent/ns), so a cold build and a replay hold what the live
-  record holds."
+  main and its merge base is no part of it: its turn writes them as facts (:seon.agent/main-commit,
+  :seon.agent/base-commit), as its eval's record writes where its REPL is (:seon.agent/ns), so a cold build and a replay
+  hold what the live record holds."
   {:malli/schema [:=> [:cat :any :any :any :any] :any]}
   [_ _ o n]
   (let [a (:db o) b (:db n)

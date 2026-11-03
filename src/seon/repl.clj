@@ -608,11 +608,14 @@
   "The recording transaction of one eval: its entity, on the agent's, who evaluated it
   (:seon.eval/by), its details in one EDN attribute (the lean record: nothing queries them
   apart): `record-details`. Who is the one upsert, by its identity: an
-  agent's key ({:seon.agent/key k}, seon.task/agent-key) or root's ({:seon.root/id :root})."
+  agent's key ({:seon.agent/key k}, seon.task/agent-key) or root's ({:seon.root/id :root}); an agent's holds the
+  namespace the eval left its REPL in (:seon.agent/ns), a datom only when it moved (an unchanged value adds none),
+  which seon.context/current-ns reads. See docs/render.md#a-part-answers-data."
   {:malli/schema [:=> [:cat :map :string :string :map] :seon.db/tx-data]}
   [who id by details]
   [{:seon.eval/id id :seon.eval/agent "agent" :seon.eval/by by :seon.eval/record details}
-   (assoc who :db/id "agent")])
+   (cond-> (assoc who :db/id "agent")
+     (and (:seon.agent/key who) (symbol? (get-in details [:response :ns]))) (assoc :seon.agent/ns (get-in details [:response :ns])))])
 
 (defn record-details
   "What an eval's record holds (:seon.eval/record): its code, its response whole, its value

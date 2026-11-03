@@ -180,8 +180,8 @@
  ;; page's branch views read, written by its turn, so a cold build draws what the live page does
  :seon.agent/main-commit :uuid
  :seon.agent/base-commit :uuid
- ;; the namespace its REPL is in (seon.agent's state :ns), written by its turn when it moved, so a cold build draws
- ;; what the live page does; before any, where the REPL starts (seon.context/current-ns)
+ ;; the namespace its REPL is in, as its newest eval left it (seon.repl/record-tx: a datom when it moved), so a cold
+ ;; build draws what the live page does; before any, where the REPL starts (seon.context/current-ns)
  :seon.agent/ns :symbol
  :seon.db/eval-fact [:map {:seon.db/attributes true :seon.render/html seon.render.ui/evaluation}
                      [:seon.eval/id :seon.eval/id] [:seon.eval/agent :seon.eval/agent] [:seon.eval/by {:optional true} :seon.eval/by]

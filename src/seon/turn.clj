@@ -244,16 +244,15 @@
                         (str "the prompt cache hit " cache-hit-tokens " tokens of the " expected " this request shares with the one before")
                             {:hit cache-hit-tokens :expected expected :block block :shared shared :messages (count ms)})))))))
 
-(defn- heard-tx
+(defn- main-base-tx
   "The transaction that records on the agent, before its request is drawn, the main and merge base it
-  last heard (the commits its page's branch views read) and the namespace its REPL is in: what the page and a
-  replay draw; none when nothing moved, so a move into a namespace is one datom, never one an eval."
+  last heard (the commits its page's branch views read): what the page and a replay draw; none when
+  nothing moved."
   {:malli/schema [:=> [:cat] [:vector :map]]}
   []
   (let [db (agent/db) k (:key @agent/state) e (some->> (pdb/eid db :seon.agent/key k) (d/entity db))
         now (into {} (remove (comp nil? val)) {:seon.agent/main-commit (some-> (:main @agent/state) d/commit-id)
-                                                 :seon.agent/base-commit (some-> (:base @agent/state) d/commit-id)
-                                                 :seon.agent/ns (some-> (:ns @agent/state) ns-name)})
+                                                 :seon.agent/base-commit (some-> (:base @agent/state) d/commit-id)})
         moved (into {} (remove (fn [[a v]] (= v (get e a)))) now)]
     (if (seq moved) [(assoc moved :seon.agent/key k)] [])))
 
@@ -284,7 +283,7 @@
         _ (agent/transact! (into [{:db/id "run" :seon.run/id run}
                                   {:db/id "turn" :seon.turn/id id :seon.turn/run "run" :seon.turn/agent {:seon.agent/key (:key @agent/state)} :seon.turn/n turn :seon.turn/origin :model}
                                   {:seon.model-call/id id :seon.model-call/turn "turn" :seon.model-call/basis basis}]
-                                 (heard-tx)))
+                                 (main-base-tx)))
         _ (agent/commit!)
         ;; what the run's earlier requests printed, reused by each record's id (seon.context/printed-run)
         ;; its parts are the live walk's (what changed since the frame before), never drawn cold, and the
@@ -410,7 +409,7 @@
         ;; an observer's read records nothing on the branch beyond the read and leaves the print cache
         _ (take! take?)
         ;; the main and merge base the read heard, decided as a model turn's are, before its request is drawn
-        _ (when take? (when-let [tx (not-empty (heard-tx))] (agent/transact! tx) (agent/commit!)))
+        _ (when take? (when-let [tx (not-empty (main-base-tx))] (agent/transact! tx) (agent/commit!)))
         basis (assoc (basis! task run n 1 :outside true) :agent (:key @agent/state))
         [db parts] (repl/page-hiccup)
         {:keys [messages printed sent]} (context/render db basis {:printed (get-in @agent/state [:printed run]) :parts parts})

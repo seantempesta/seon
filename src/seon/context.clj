@@ -508,8 +508,8 @@
 (declare cited)
 
 (defn current-ns
-  "The namespace the REPL of agent record c (its ctx) is in: its :seon.agent/ns, which its turn writes when the REPL
-  moved (one key, so what reads it redraws on a move alone, never on an eval); before its first turn, where it starts,
+  "The namespace the REPL of agent record c (its ctx) is in: its :seon.agent/ns, which its eval's record writes when the REPL
+  moved (seon.repl/record-tx; one key, so what reads it redraws on a move alone, never on an eval); before its first turn, where it starts,
   its task's :seon.task/ns (seon.agent/start-ns); nil for a task that names none. Where its next eval runs
   (docs/render.md#a-part-answers-data)."
   {:malli/schema [:=> [:cat :map] [:maybe :symbol]]}
