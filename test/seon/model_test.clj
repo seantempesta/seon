@@ -126,7 +126,10 @@
     (is (= turn (fixtures/curated-turn dir "demo/t" 0)) "turn 0 answers its calls")
     (is (= {:text "The curated session has no turn 1."} (fixtures/curated-turn dir "demo/t" 1)) "past the end: text only")
     (is (= {:text "No curated session for demo/u."} (fixtures/curated-turn dir "demo/u" 0)) "no file: text only")
-    (is (= {:text "No curated session for demo/t."} (fixtures/curated-turn nil "demo/t" 0)) "no directory: text only")))
+    (is (= {:text "No curated session for demo/t."} (fixtures/curated-turn nil "demo/t" 0)) "no directory: text only")
+    (spit (str dir "/demo_bad.edn") "{:turns [")
+    (is (= {:text "The curated session of demo/bad does not read as a map."} (fixtures/curated-turn dir "demo/bad" 0)) "a file that does not read: text only")
+    (run! #(.delete ^java.io.File %) (reverse (file-seq (java.io.File. dir))))))
 
 (deftest cost-prices-a-turn-at-its-models-rates
   (testing "a DeepSeek turn as seon.turn/usage records it: 10k prompt (8k cached), 500 completion"

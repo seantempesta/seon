@@ -400,22 +400,23 @@
 (defn curated-turn
   "The scripted reply of turn n of the curated session in dir for task id: the file
   <dir>/<ns>_<name>.edn is a map whose :turns vector holds {:text :calls}, answered as is; other keys
-  are provenance. A turn past the last, no dir or no file: a message that says so, which ends the turn."
+  are provenance. A turn past the last, no dir, no file or one that does not read as a map (seon.reader/read-text,
+  the edge for text read as data): a message that says so, which ends the turn. See docs/model.md#running-a-curated-session."
   {:malli/schema [:=> [:cat [:maybe :string] :string :int] :seon.model/script-reply]}
   [dir id n]
   (let [f (when dir (java.io.File. (str dir "/" (str/replace id "/" "_") ".edn")))]
     (if-not (and f (.exists f))
       (says (str "No curated session for " id "."))
-      (if-let [t (get (:turns (edn/read-string (slurp f))) n)]
-        (select-keys t [:text :calls])
-        (says (str "The curated session has no turn " n "."))))))
+      (let [m (first (reader/read-text (slurp f) 'user))]
+        (cond (not (map? m)) (says (str "The curated session of " id " does not read as a map."))
+              (get (:turns m) n) (select-keys (get (:turns m) n) [:text :calls])
+              :else (says (str "The curated session has no turn " n ".")))))))
 
 (defn curated
-  "A curated session (an agent's recorded session with its dead ends cut, docs/decisions.md
-  \"An agent's evals on a task are a session; past ones are shown as curated sessions\") replayed
+  "A curated session (an agent's recorded session with its dead ends cut) replayed
   through the scripted provider on a fresh branch: the scripted model for the request's task and turn,
   from <runs-dir>/curated (:seon.config.root/runs-dir; curated-turn). Every result it shows is evaluated
-  live, never copied."
+  live, never copied. See docs/model.md#running-a-curated-session."
   {:malli/schema [:=> [:cat :seon.model/request] :seon.model/script-reply]}
   [{:keys [task turn]}]
   (curated-turn (str (config/value :seon.config.root/runs-dir) "/curated") task turn))
