@@ -144,4 +144,9 @@ Correct:
 
 Replaces: the schema-declared render as the only way to choose one. Scoping: a render the agent defines wins on its branch at once; merged, it is the newest on main."
   :seon.task/kind :design
-  :seon.task/proofs #{}}]
+  :seon.task/proofs #{}}
+ {:seon.task/name "a-render-tag-is-a-checked-schema"
+  :seon.task/plan "The owner, 2026-11-03, on the bug-class audit read at c200a44aa9: \"make sure all of this fixes are applied and the docs are updated\"; by AGENTS section 3 step 4 its report says what allowed the class, why the change makes it impossible, and which siblings it checked. What exists: a value's render schema is named in metadata (:seon.render/schema) or guessed from its keys (seon.render/schema-of), never validated, and many tag schemas are bare [:map] (seon.render.edn: :seon.agent/state, :seon.context/run, :seon.context/status, :seon.test/proved, :seon.render/render-ctx, root-ctx, root-input, :my.agent/lines, :seon.context/namespaces). Metadata does not survive the store, so the record grew a second channel (:schema; 952fe4f3a0, 21e364cabc, 710b32c164), and new renders hung on with-meta (0a58e8aa31, 51825107d1). The change: one constructor seon.render/as [k v], the only writer of :seon.render/schema, validates v against k while contracts are on; each tag schema gets its real keys; if the record's tag then lives in the value's declared shape, the record's :schema channel goes, and error-key sniffing goes (an error's :seon.error/type is its schema). Sweep the 32 sites of the key in src. Docs: docs/render.md."
+  :seon.task/kind :work
+  :seon.task/needs #{"seon.repl/an-evals-record-has-its-declared-shape"}
+  :seon.task/proofs #{seon.render-test/a-tagged-value-is-checked-against-its-tag}}]

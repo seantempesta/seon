@@ -3,4 +3,9 @@
   :seon.task/kind :work
   :seon.task/needs #{"seon.program/definitions-from-the-compiler"}
   :seon.task/proofs #{seon.contract-test/a-contracted-definition-is-checked-from-its-definition
-                      seon.contract-test/one-contract-gap-rule-agrees-everywhere}}]
+                      seon.contract-test/one-contract-gap-rule-agrees-everywhere}}
+ {:seon.task/name "a-boundary-takes-keyed-schemas"
+  :seon.task/plan "The owner, 2026-11-03, on the bug-class audit read at c200a44aa9: \"make sure all of this fixes are applied and the docs are updated\"; by AGENTS section 3 step 4 its report says what allowed the class, why the change makes it impossible, and which siblings it checked. What exists: contracts are armed everywhere, but what they say is loose: of about 1,780 :malli/schema in src about 125 answer :any and 151 answer :map, about 460 take a bare :map; :seon.error/base and entity-fact maps are open, so any extra key with any value passes. The change: a var property {:seon/boundary true}, starting with the edge functions of docs/failure-points.md, the store writers and the wire (server/answer, web/ui-call, model/sse-reply, model/request-body, repl/record!, my.root/load-example!); a boundary takes and answers named keyed schemas, no bare :map, :any or host object; bin/check contracts reports the count of loose returns and arguments with a ratchet that may only fall; maps the system writes are closed ({:closed true} on entity facts and error variants; [:map-of :keyword :seon.db/plain] where extension is wanted; agents' own schemas stay open); each tagged kind has one checked constructor (seon.render/as, the error constructor). The rule is written in AGENTS.md section 5 and docs/decisions.md, with the owner's words. The cost bounds that count contracted calls exactly wait on the owner's ruling (cost proofs must not punish a new contract)."
+  :seon.task/kind :work
+  :seon.task/needs #{"seon.db/a-datom-its-schema-refuses-is-not-stored" "seon.render/a-render-tag-is-a-checked-schema"}
+  :seon.task/proofs #{seon.contract-test/a-loose-boundary-is-counted}}]
