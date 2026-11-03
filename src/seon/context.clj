@@ -1180,13 +1180,12 @@
   (`provider-of`), :sources, for each of the body's messages in order the refs of the records that made it
   (seon.model/wire-groups folds a reply's calls into one message), and :printed, the print cache `render`
   answers. With printed, an earlier answer's :printed: what of it this request holds is not printed again
-  (the debug page's latest, drawn as the branch moves); with page, {id hiccup}, the page's parts at db as a
-  kept walk holds them (else drawn cold, `drawn-parts`). See docs/render.md#the-debug-page-is-the-wire-request."
+  (the debug page's latest, drawn as the branch moves). See docs/render.md#the-debug-page-is-the-wire-request."
   {:malli/schema [:function [:=> [:cat :seon.host/db :seon.model-call/basis] [:map [:body :map] [:provider :seon.model/provider] [:sources [:vector [:vector :any]]] [:printed :map]]]
-                  [:=> [:cat :seon.host/db :seon.model-call/basis [:maybe :map] [:maybe :map]] [:map [:body :map] [:provider :seon.model/provider] [:sources [:vector [:vector :any]]] [:printed :map]]]]}
-  ([db basis] (wire-turn db basis nil nil))
-  ([db basis printed page]
-  (let [{:keys [messages parts] :as r} (render db basis {:printed printed :parts page})
+                  [:=> [:cat :seon.host/db :seon.model-call/basis [:maybe :map]] [:map [:body :map] [:provider :seon.model/provider] [:sources [:vector [:vector :any]]] [:printed :map]]]]}
+  ([db basis] (wire-turn db basis nil))
+  ([db basis printed]
+  (let [{:keys [messages parts] :as r} (render db basis {:printed printed})
         p (provider-of db basis)
         ;; each neutral message's ref, in order, then each wire message's refs by the one fold
         refs (into [] (mapcat (fn [[ref ms]] (repeat (count ms) ref))) parts)]

@@ -792,7 +792,7 @@
         (let [at #(d/commit-as-db (:store @conn) (:commit %))
               later (:printed (context/wire-turn (at (first (peek sent))) (first (peek sent))))]
           (doseq [[b body] sent]
-            (is (= (clojure.data.json/write-str body) (clojure.data.json/write-str (:body (context/wire-turn (at b) b later nil))))
+            (is (= (clojure.data.json/write-str body) (clojure.data.json/write-str (:body (context/wire-turn (at b) b later))))
                 (str "turn " (:turn b) ": made again with a later request's print cache, the bytes it sent"))))))))
 
 (deftest a-turn-records-what-it-sent

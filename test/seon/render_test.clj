@@ -816,24 +816,24 @@
         (is (= (clojure.data.json/write-str (sent 1 r1)) (wire-text h1)) "turn 1: the same")
         (is (str/includes? h1 "the help page") "each message beside the records that made it")
         (is (str/includes? h1 "I call f.") "a call's arguments as sent, its prose in them")
-        (let [in1 (ui/debug-input db e1 [e0 e1] false nil nil)
+        (let [in1 (ui/debug-input db e1 [e0 e1] false nil)
               roles (mapv :role (get-in in1 [:body :messages]))]
           (is (= false (first (:new in1))) "the system prompt was sent before: not new")
           (is (some true? (map (fn [r n] (and (= "tool" r) n)) roles (:new in1))) "the call's result is new since turn 0")
-          (is (not-any? true? (:new (ui/debug-input db e0 [e0 e1] false nil nil))) "the first request marks nothing"))
+          (is (not-any? true? (:new (ui/debug-input db e0 [e0 e1] false nil))) "the first request marks nothing"))
         (testing "a chosen turn stays as it was when the branch moves"
           (let [moved (d/db-with db [{:seon.eval/id "e9" :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key "b/a1"}
                                       :seon.eval/record {:code "(f 9)" :response {:handle 'result/e9 :value 9} :run "demo/f#1"}}])]
             (is (= h0 (page (assoc-in st [:branches [:debug :a1] :db] moved) e0)))))
         (testing "latest, while the run goes on, is the turn to come, drawn at the head"
-          (let [in (ui/debug-input db :latest [e0 e1] false nil nil)]
+          (let [in (ui/debug-input db :latest [e0 e1] false nil)]
             (is (:to-come? in))
             (is (= 2 (:turn in)) "the next turn's request")
             (is (str/includes? (page st nil) "to come"))
             ;; the browser check of 2026-11-03: the branch records its run's end as :seon.end/* (root copies it to
             ;; main as :seon.run/outcome), and an ended run showed a turn to come
             (let [ended (d/db-with db [{:seon.end/run "demo/f#1" :seon.end/outcome :green}])
-                  in (ui/debug-input ended :latest [e0 e1] false nil nil)]
+                  in (ui/debug-input ended :latest [e0 e1] false nil)]
               (is (not (:to-come? in)) "an ended run: nothing to come")
               (is (= 1 (:turn in)) "latest is its newest turn"))))
         (is (= [:debug :a1] (#'seon.web/view-of (java.net.URLDecoder/decode (ui/view-param [:debug :a1]) "UTF-8"))) "its feed names it, and reads it back")

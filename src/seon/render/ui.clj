@@ -729,12 +729,11 @@
   turn would send now (its run going on: drawn at db's head as the turn would draw it, with the turn it
   writes first), else its newest turn. calls, the branch's model calls in order; raw?, the body's JSON
   shown whole; printed, the :printed an earlier answer holds (the print cache seon.context/wire-turn reuses),
-  answered again as :printed; page-at, a function of a db and the datoms that moved the branch to it answering
-  the page's parts at it as the branch's kept walk holds them (the turn to come's; a past turn's are drawn cold at its commit), or nil. Which messages are new: those made by a record the request before it did not send (its
+  answered again as :printed. Which messages are new: those made by a record the request before it did not send (its
   recorded :seon.model-call/sent), so a part that changed is new by its ref. See
   docs/render.md#the-debug-page-is-the-wire-request."
-  {:malli/schema [:=> [:cat :seon.host/db [:or pos-int? [:= :latest]] [:vector pos-int?] :boolean [:maybe :map] [:maybe :seon.host/fn]] [:maybe :map]]}
-  [db at calls raw? printed page-at]
+  {:malli/schema [:=> [:cat :seon.host/db [:or pos-int? [:= :latest]] [:vector pos-int?] :boolean [:maybe :map]] [:maybe :map]]}
+  [db at calls raw? printed]
   (let [pull #(d/pull db [:seon.model-call/basis :seon.model-call/sent :seon.model-call/tokens :seon.model-call/cache-hit-tokens
                           :seon.model-call/cache-miss-tokens {:seon.model-call/turn [:seon.turn/error]}] %)
         last-e (peek calls)
@@ -744,18 +743,17 @@
         e (cond to-come? nil (= :latest at) last-e :else at)
         m (some-> e pull)]
     (when (or to-come? (:seon.model-call/basis m))
-      (let [[tdb b datoms] (if to-come?
+      (let [[tdb b] (if to-come?
                       ;; as seon.turn/act! draws it: the turn written first, then the request at the head
-                      (let [n (inc (:turn lb)) b (assoc lb :commit (d/commit-id db) :turn n)
-                            r (d/with db [{:seon.turn/id (str (:run lb) "/" n) :seon.turn/run [:seon.run/id (:run lb)]
-                                           :seon.turn/agent [:seon.agent/key (:agent lb)] :seon.turn/n n :seon.turn/origin :model}])]
-                        [(:db-after r) b (:tx-data r)])
+                      (let [n (inc (:turn lb)) b (assoc lb :commit (d/commit-id db) :turn n)]
+                        [(d/db-with db [{:seon.turn/id (str (:run lb) "/" n) :seon.turn/run [:seon.run/id (:run lb)]
+                                         :seon.turn/agent [:seon.agent/key (:agent lb)] :seon.turn/n n :seon.turn/origin :model}]) b])
                       (let [b (:seon.model-call/basis m)]
                         [(if (= (:commit b) (d/commit-id db)) db (d/commit-as-db (:store db) (:commit b))) b]))
             i (if to-come? (count calls) (.indexOf ^java.util.List calls e))
             prev-e (when (pos? i) (nth calls (dec i)))
             prev (set (remove #(= :hashes (first %)) (:seon.model-call/sent (some-> prev-e pull))))
-            w (context/wire-turn tdb b printed (when (and to-come? page-at) (page-at tdb datoms)))]
+            w (context/wire-turn tdb b printed)]
         {:at at :to-come? to-come? :turn (:turn b) :run (:run b) :origin (:origin b) :raw? raw?
          :body (:body w) :sources (:sources w) :printed (:printed w)
          ;; with no request before it, nothing is marked: every message is the first request's

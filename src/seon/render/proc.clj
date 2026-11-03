@@ -239,9 +239,9 @@
                 (when (seq calls)
                   {:id "d-turn" :input [at (when (= :latest at) (:max-tx bdb)) raw?]
                    ;; the print cache its last draw kept: latest prints only the records new since
-                   ;; the turn to come's parts are drawn cold at the head (seon.context/drawn-parts, the task's list alone):
-                   ;; the kept walk (branch-walk!) costs its whole list on a membership change until a rerun costs what changed
-                   :draw (fn [printed] (let [in (ui/debug-input bdb at calls raw? printed nil)]
+                   ;; the turn to come's parts are drawn cold at the head, the task's list alone (seon.context/drawn-parts):
+                   ;; measured cheaper than the kept walk flushed over the turn it writes and back (37.3 MB to 41.2 at 100 evals)
+                   :draw (fn [printed] (let [in (ui/debug-input bdb at calls raw? printed)]
                                          [(ui/debug-turn {:unit "d-turn"} (-> in (dissoc :printed) (assoc :view (ui/view-param view)))) (:printed in)]))})
                 nil))))
 
@@ -272,32 +272,26 @@
   "Kept walk kw (`kept-walk`) as of db, a later value of its branch: its ctx patched by what moved
   (seon.ctx/advance), its atom reset to the tree mark makes of it and the moved datoms flushed, so the
   components their change reached are drawn and nothing else; at the db it holds, only what mark changed.
-  Answers kw with its ctx. With datoms, what moved from its db to db when the caller knows it (a speculative
-  transaction's :tx-data), so no diff of the two values is taken. See docs/render.md#a-page-is-a-kept-walk."
-  {:malli/schema [:function [:=> [:cat :map :seon.host/db :any :seon.host/fn] :map]
-                  [:=> [:cat :map :seon.host/db :any :seon.host/fn [:maybe [:sequential :any]]] :map]]}
-  ([kw db branch mark] (advance-walk! kw db branch mark nil))
-  ([{:keys [w a c at] :as kw} db branch mark datoms]
+  Answers kw with its ctx. See docs/render.md#a-page-is-a-kept-walk."
+  {:malli/schema [:=> [:cat :map :seon.host/db :any :seon.host/fn] :map]}
+  [{:keys [w a c at] :as kw} db branch mark]
   (let [held @at
         same? (identical? held db)
-        moved (cond same? [] datoms datoms :else (ctx/moved held db nil))
+        moved (if same? [] (ctx/moved held db nil))
         c' (if same? c (ctx/patch c db moved branch))]
     (vreset! at db)
     (reset! a (mark (:tree c')))
     (render/flush! w moved)
-    (assoc kw :c c'))))
+    (assoc kw :c c')))
 
 (defn- branch-walk!
   "The kept walk of agent e's page (e on main) on its branch, as of bdb, the evals main records it opened
   (:seon.agent/opened) drawn opened: one a branch, held in its read's cell (:branch-reads b :walk, a
   volatile) so every view of the agent (its chat drawn from its branch, @ctx, the debug page's latest)
   draws from it; built at the first, after it advanced (`advance-walk!`); at the same db and opened,
-  nothing at all; datoms, what moved to bdb when the caller knows it (`advance-walk!`). Answers {:w :c}. See
-  docs/render.md#a-page-is-a-kept-walk."
-  {:malli/schema [:function [:=> [:cat :seon.host/volatile :seon.host/db :any] :map]
-                  [:=> [:cat :seon.host/volatile :seon.host/db :any [:maybe [:sequential :any]]] :map]]}
-  ([cell bdb e] (branch-walk! cell bdb e nil))
-  ([cell bdb e datoms]
+  nothing at all. Answers {:w :c}. See docs/render.md#a-page-is-a-kept-walk."
+  {:malli/schema [:=> [:cat :seon.host/volatile :seon.host/db :any] :map]}
+  [cell bdb e]
   (let [opened (set (:seon.agent/opened e))
         branch (or (:seon.agent/branch e) :db)
         mark (fn [t] (cond-> t (seq opened) (update :evals #(reduce-kv (fn [m k ev] (if (opened (:seon.eval/id ev)) (assoc m k (assoc ev :seon.eval/opened true)) m)) % %))))
@@ -306,7 +300,7 @@
       (cond
         (nil? kw) (vreset! cell (assoc (kept-walk bdb (seon.db/eid bdb :seon.agent/key (:seon.agent/key e)) branch (render/declared-var :seon.render/render-ctx) mark) :opened opened))
         (and (identical? @(:at kw) bdb) (= opened (:opened kw))) kw
-        :else (vreset! cell (assoc (advance-walk! kw bdb branch mark datoms) :opened opened)))))))
+        :else (vreset! cell (assoc (advance-walk! kw bdb branch mark) :opened opened))))))
 
 (defn- live?
   "Is agent id a process root's view holds, running (it answers what it is asked)?"
