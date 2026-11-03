@@ -1575,11 +1575,12 @@
 
 (def ^:private no-example-page
   "The page's part message main sent the fixture's agent, entity ids as -N."
-  "{\"task-data-N\"\n   {:to-prove {demo-test/g-test \"not written yet\"},\n    :task #:seon.task{:id \"demo/g\", :kind :work, :plan \"Make g.\"}},\n \"namespaces-N\" {demo {:ns-form (clojure.repl/source demo)}},\n \"status-N\"\n   {:proofs [{:test demo-test/g-test, :status :undefined}],\n    :refused\n      [{:reason :proof-unknown,\n        :test demo-test/g-test,\n        :do\n          (do\n           (in-ns 'demo-test)\n           (clojure.test/deftest\n            g-test\n            (clojure.test/is false\n             \"write the assertion: the behaviour, on data\"))\n           (my.agent/prove))}]},\n \"run-head-N\" {:turn 1}}")
+  "{\"task-data-N\"\n   {:to-prove {demo-test/g-test \"not written yet\"},\n    :task #:seon.task{:id \"demo/g\", :kind :work, :plan \"Make g.\"}},\n \"namespaces-N\" {demo {:ns-form (clojure.repl/source demo)}},\n \"status-N\"\n   {:proofs [{:test demo-test/g-test, :status :undefined}],\n    :refused\n      [{:reason :proof-unknown,\n        :test demo-test/g-test,\n        :do\n          (do\n           (in-ns 'demo-test)\n           (clojure.test/deftest\n            g-test\n            (clojure.test/is false\n             \"write the assertion: the behaviour, on data\"))\n           (my.agent/prove))}]},\n \"run-head-N\" {:turn 1, :ns demo}}")
 
 ;; The no-examples path only gains an empty ex-items (seon.context/request), so these literals are the branch's own
 ;; output for it; the tests assert them and a digest, so a later change to that path goes red. They are main's request
-;; (9a35ff81ea, which holds no example) for the fixed fixture of `no-example-requests!`.
+;; (9a35ff81ea, which holds no example) for the fixed fixture of `no-example-requests!`, its turn part naming the
+;; namespace the REPL starts in, the task's (seon.context/current-ns, docs/agent.md#the-repl).
 (deftest a-task-with-no-examples-sends-the-first-request-main-sent
   (ts/test-branch!
     (fn [_ conn]
@@ -1599,7 +1600,7 @@
                 {:role "assistant" :content "Thinking."}
                 {:role "user" :content "{\"run-head-N\" {:changed {:turn 3}}}"}]
                ms))
-        (is (= "971536cb8ee8d088" (seon.lib/digest (str/join "\n--\n" (map #(str (:role %) ":" (:content %)) ms))))
+        (is (= "772edec9a84dece1" (seon.lib/digest (str/join "\n--\n" (map #(str (:role %) ":" (:content %)) ms))))
             "and the digest of its roles and contents (SHA-256, first 16 hex digits): a change to this path moves it")))))
 
 (deftest session-tx-answers-an-error-for-what-it-cannot-show

@@ -507,7 +507,7 @@
   holding each, :all its publics; a name two hold is the first's (clojure.repl's source, source-fn and pst are
   Seon's, interned there under their own names by `make-ns!`, and my.agent's are the same functions). See
   docs/agent.md#the-repl."
-  '[[clojure.repl :all] [clojure.pprint [pp pprint]] [my.agent :all] [my.db :all] [seon.ctx [ctx]]
+  '[[clojure.repl [source source-fn apropos dir pst doc find-doc]] [clojure.pprint [pp pprint]] [my.agent :all] [my.db :all] [seon.ctx [ctx]]
     [clojure.test [deftest is are testing use-fixtures]]])
 
 (def ^:private repl-aliases

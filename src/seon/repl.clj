@@ -91,7 +91,7 @@
   {:malli/schema [:=> [:cat :seon.host/namespace] [:maybe [:map-of :symbol :symbol]]]}
   [ns]
   (not-empty (into {} (for [[from names] agent/repl-names :when ('#{clojure.repl clojure.pprint} from)
-                            s (if (= :all names) (keys (some-> (find-ns from) ns-publics)) names)
+                            s names
                             :let [v (ns-resolve ns s)]
                             :when (and (var? v) (not= from (ns-name (:ns (meta v)))))]
                         [s (symbol (str (ns-name (:ns (meta v)))) (str s))]))))
