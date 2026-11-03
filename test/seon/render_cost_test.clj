@@ -441,6 +441,9 @@
                        ;; 607 calls at 10 (the :fixed term 567, plus 4 an eval) since the namespaces part shows the task's own namespace
                        ;; first (seon.context/namespaces-of): a task that cites nothing drew {} there, now one entry. Accepted by
                        ;; the owner, 2026-11-03 ("Yes, record 607")
+                       ;; 616 at 10: 607 + 9, following the REPL: 3 calls a draw of the namespaces part (current-ns and its two
+                       ;; record lookups, :seon.agent/ns and the task's fallback), 3 draws. Accepted by the owner, 2026-11-03
+                       ;; ("Record 616 and 8")
                        :per-n {:calls 4 :bytes 35000}
-                       :fixed {:calls 567 :bytes 3200000}
+                       :fixed {:calls 576 :bytes 3200000}
                        :sizes [10 40 80]}))))))
