@@ -8,6 +8,10 @@ This file holds the owner's standing rulings, one entry each: the rule, the owne
 
 "Always be suspicious about bugs. Usually fixing them directly is the wrong solution. Root cause and see if we should be doing something that eliminates the bug class." Batch 89 guarded an open schema (`[:response :map]` let a value no store keeps through to the write) where declaring the shape removes the class (task `seon.repl/an-evals-record-has-its-declared-shape`; the owner: "The fix your question points at is to declare the response's real shape: correct"). Stated in AGENTS.md §3, the method's step 4.
 
+### A contract costs nothing on its one interface; the same data is checked once (owner, 2026-11-03)
+
+"Oh yeah contracts don't count against anything as long as you do it through the optimal interface and we aren't checking it multiple times for no reason. So understand what instrumentation does ensure we are instrumenting them and then if that is covering it then we don't need to check it multiple times if it's the same data." Cost proofs stop counting the contract's own calls (its checked wrapper) in `:calls`, once every contract is checked through the one instrumentation and no data is validated twice for no reason; a redundant re-check stays waste. The one-time re-pin of every proof it moves (the 616 and 8 included) is approved under it. Task `seon.contract/a-contract-is-checked-once-and-costs-nothing`; to be stated in [cost](cost.md) and the contract section when it merges.
+
 ## 2026-11-01 rulings
 
 The owner's rulings of 2026-11-01, after the audit of what agents read; they stand over earlier entries where they differ.
