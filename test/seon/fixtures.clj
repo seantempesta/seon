@@ -8,7 +8,7 @@
   task's agent redefines its function). The proofs namespace sorts after the subjects, so a boot that
   loads main's program in name order loads a subject before its proof."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn] [seon.template :as tpl] [seon.source :as source] [seon.reader :as reader]))
+  (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn] [seon.template :as tpl] [seon.source :as source] [seon.reader :as reader] [seon.config :as config]))
 
 (def calc
   "The six-task graph: add; twice and square need add; sum-sq needs both; neg (the one the demo
@@ -395,6 +395,31 @@
       (or (some (fn [[suffix r]] (when (str/ends-with? nm suffix) r)) generic)
           (swarm-reply nm)
           (says "No script for this task.")))))
+
+;; the curated session is read from its own file once per call (small), never held
+(defn curated-turn
+  "The scripted reply of turn n of the curated session in dir for task id: the file
+  <dir>/<ns>_<name>.edn is a map whose :turns vector holds {:text :calls}, answered as is; other keys
+  are provenance. A turn past the last, no dir, no file or one that does not read as a map (seon.reader/read-text,
+  the edge for text read as data): a message that says so, which ends the turn. See docs/model.md#running-a-curated-session."
+  {:malli/schema [:=> [:cat [:maybe :string] :string :int] :seon.model/script-reply]}
+  [dir id n]
+  (let [f (when dir (java.io.File. (str dir "/" (str/replace id "/" "_") ".edn")))]
+    (if-not (and f (.exists f))
+      (says (str "No curated session for " id "."))
+      (let [m (first (reader/read-text (slurp f) 'user))]
+        (cond (not (map? m)) (says (str "The curated session of " id " does not read as a map."))
+              (get (:turns m) n) (select-keys (get (:turns m) n) [:text :calls])
+              :else (says (str "The curated session has no turn " n ".")))))))
+
+(defn curated
+  "A curated session (an agent's recorded session with its dead ends cut) replayed
+  through the scripted provider on a fresh branch: the scripted model for the request's task and turn,
+  from <runs-dir>/curated (:seon.config.root/runs-dir; curated-turn). Every result it shows is evaluated
+  live, never copied. See docs/model.md#running-a-curated-session."
+  {:malli/schema [:=> [:cat :seon.model/request] :seon.model/script-reply]}
+  [{:keys [task turn]}]
+  (curated-turn (str (config/value :seon.config.root/runs-dir) "/curated") task turn))
 
 (defn calc-cancel
   "The scripted model of the calc run that cancels neg: `reply`, except neg's first turn derefs a
