@@ -205,6 +205,17 @@
   {:malli/schema [:=> [:cat :any] [:set :qualified-keyword]]}
   [v] (into #{} (filter #{:seon.ctx/ctx :seon.db/db}) (tree-seq vector? seq (opts-form v))))
 
+(defn- reads-in
+  "What render var f reads (`reads`), as walk w found it: kept by f with the value its root held then, so
+  each call of a render in a draw costs a lookup, and a redefinition (a defn sets a new root with its new
+  metadata) is read again."
+  {:malli/schema [:=> [:cat :map :any] [:set :qualified-keyword]]}
+  [w f]
+  (if-not (var? f)
+    (reads f)
+    (let [v (var-get f) [v0 rs] (get @(:reads w) f)]
+      (if (and rs (identical? v v0)) rs (let [rs (reads f)] (vswap! (:reads w) assoc f [v rs]) rs)))))
+
 (defn- child-key
   "A child as its component's key names it: a view by its path, an entity by its id, a name or
   number as itself, any other value by its hash."
@@ -247,7 +258,7 @@
   {:malli/schema [:=> [:cat :map :seon.host/fn [:vector :any]] :map]}
   [src db-fn root]
   {:src src :db db-fn :root root :cache (volatile! {}) :queue (volatile! #{}) :mounts (volatile! 0)
-   :ledger (volatile! {}) :out (volatile! nil) :db-keys (volatile! #{}) :watched (volatile! #{})})
+   :ledger (volatile! {}) :out (volatile! nil) :db-keys (volatile! #{}) :watched (volatile! #{}) :reads (volatile! {})})
 
 (defn- led!
   "Count k (:hit, :miss, :same) for render var f in w's ledger, with the ticks and bytes a run took."
@@ -283,7 +294,7 @@
   render in its place (docs/failure-points.md: a component's render); every other component draws."
   {:malli/schema [:=> [:cat :map :any :map [:sequential :any] :map] [:tuple [:= ::child] [:vector :any]]]}
   [w f opts children env]
-  (let [k (comp-key f children) prev (get @(:cache w) k) ks (reads f)]
+  (let [k (comp-key f children) prev (get @(:cache w) k) ks (reads-in w f)]
     (vswap! (:children env) conj k)
     (if (and prev (= opts (:opts prev)) (= (count children) (count (:args prev)))
              (every? true? (map ratom/view= children (:args prev)))
@@ -375,7 +386,7 @@
     ;; lists only (draw's sels): not drawn when none of them names it, drawn whole when one does
     (and (vector? x) (:only env) (:inside env) (var? (first x)) (:seon.render/list (meta (first x))))
     (when ((:only env) (str "#" (:seon.render/list (meta (first x))))) (render! w (first x) (or (second x) {}) (drop 2 x) (dissoc env :only)))
-    (and (vector? x) (seq (reads (first x)))) (render! w (first x) (or (second x) {}) (drop 2 x) env)
+    (and (vector? x) (seq (reads-in w (first x)))) (render! w (first x) (or (second x) {}) (drop 2 x) env)
     (and (vector? x) (or (var? (first x)) (fn? (first x)))) (into [(first x)] (map ratom/realize) (rest x))
     :else (ratom/realize x)))
 

@@ -1326,31 +1326,41 @@
     [:section
      (render/html (if-let [k (:schema r)] {:schema k} {}) (ratom/realize (get-in r [:response :value])))]))
 
+(defn- id-set
+  "The keys of join m (a member map of ctx, read through its view) as a set: one read of its key set, its
+  members not each made a view as a walk of its entries makes them (seon.ratom)."
+  {:malli/schema [:=> [:cat [:maybe :map]] [:set :any]]}
+  [m] (cond (nil? m) #{} (instance? java.util.Map m) (set (.keySet ^java.util.Map m)) :else (set (keys m))))
+
 (defn- conversation
   "The conversation of ctx c's agent: its evals, its turns and messages, in the order they were
   written (the transaction of each member's identity datom, then its id: some ids are
   content-derived, so an id is no order). See docs/render.md#the-page."
   {:malli/schema [:=> [:cat :map :seon.host/db] [:sequential :int]]}
   [c db]
-  (let [born (fn [a e] [(:tx (first (d/datoms db :eavt e a))) e])]
-    (map second (sort (concat (map #(born :seon.eval/id %) (keys (:evals c))) (map #(born :seon.turn/id %) (keys (:turns c)))
-                              (map #(born :seon.message/id %) (keys (:messages c))))))))
+  (let [born (fn [a e] [(:tx (first (d/datoms db :eavt e a))) e])
+        ids #(id-set (get c %))]
+    (map second (sort (concat (map #(born :seon.eval/id %) (ids :evals)) (map #(born :seon.turn/id %) (ids :turns))
+                              (map #(born :seon.message/id %) (ids :messages)))))))
 
 (defn- turn-evals
-  "The evals of each model turn of ctx c, {turn-eid [eval-eid ...]}: a model's eval (its record names
+  "The evals of each model turn of ctx c, {turn-eid [eval-eid ...]}, over its conversation (conv, when the
+  caller has it, else `conversation`): a model's eval (its record names
   the provider's call id) is its turn's, the turn written just before it (a turn's record is written
   before its evals land: seon.turn/act!), so a turn holds its evals as they arrive, live. See
   docs/render.md#the-page."
-  {:malli/schema [:=> [:cat :map :seon.host/db] [:map-of :int [:vector :int]]]}
-  [c db]
-  (let [tu? (set (keys (:turns c)))
+  {:malli/schema [:function [:=> [:cat :map :seon.host/db] [:map-of :int [:vector :int]]]
+                  [:=> [:cat :map :seon.host/db [:sequential :int]] [:map-of :int [:vector :int]]]]}
+  ([c db] (turn-evals c db (conversation c db)))
+  ([c db conv]
+  (let [tu? (id-set (:turns c))
         ;; the record's one key, read by its path (a realize reads the whole eval, its opened flag too: the layout would run again for an eval opened)
         model? (fn [id] (get-in c [:evals id :seon.eval/record :call-id]))]
     (first (reduce (fn [[m cur] id]
                      (cond (tu? id) [(assoc m id []) id]
                            (and cur (model? id)) [(update m cur conj id) cur]
                            :else [m cur]))
-                   [{} nil] (conversation c db)))))
+                   [{} nil] conv)))))
 
 (defn chat-turn
   "A model turn as the chat shows it (a component over ctx and the db), a message on the left as a
@@ -1496,10 +1506,10 @@
   [{c :seon.ctx/ctx db :seon.db/db} aid]
   (let [evals (:evals c)
         conv (conversation c db)
-        ev? (set (keys evals))
-        tu? (set (keys (:turns c)))
+        ev? (id-set evals)
+        tu? (id-set (:turns c))
         ;; a model's evals are drawn in their turn's message, not again in the list
-        in-turn (into #{} cat (vals (turn-evals c db)))
+        in-turn (into #{} cat (vals (turn-evals c db conv)))
         ;; the agent's own loop (its eval with no model call that names a run: seon.turn/work!) is the chat's
         ;; start and end cards, not a row
         ;; read by its paths, never realized whole: the layout reads no eval's opened flag
