@@ -1732,7 +1732,8 @@
       ;; on a narrow screen they follow the conversation
       ;; three columns always: a page's side parts may arrive after its first frame (an agent's walk answers
       ;; later), and a layout chosen from the first frame's units wrapped them under the agents list
-      [:div {:class "grid grid-cols-1 gap-4 lg:grid-cols-[12rem_minmax(0,1fr)_26rem]"}
+      ;; @ctx (tab :debug) places nothing beside its record: two columns, the record the width of the rest
+      [:div {:class (if (= :debug tab) "grid grid-cols-1 gap-4 lg:grid-cols-[12rem_minmax(0,1fr)]" "grid grid-cols-1 gap-4 lg:grid-cols-[12rem_minmax(0,1fr)_26rem]")}
        [:aside {:class "min-w-0 lg:sticky lg:top-14 lg:self-start"}
         [:h2 {:class "kicker mb-1 hidden lg:block"} "agents"]
         [:ol {:id "c-side" :class "flex gap-2 overflow-x-auto pb-1 text-xs lg:flex-col lg:gap-0.5"} (for [u (in "#c-side")] (slot (:id u)))]]
@@ -1741,13 +1742,34 @@
         (slot "p-caption")
         [:ol {:id "c-rows" :class "flex flex-col gap-1" :data-view view} (for [u (in "#c-rows")] (slot (:id u)))]
         (when input (slot "p-input"))]
-       [:aside {:class "flex min-w-0 flex-col gap-2 lg:sticky lg:top-14 lg:max-h-[calc(100vh-4rem)] lg:self-start lg:overflow-y-auto"}
-        [:div {:id "p-task" :class "flex flex-col gap-2"} (for [u (in "#p-task")] (slot (:id u)))]
-        [:div {:id "p-tiles" :class "grid content-start gap-2"} (for [u (in "#p-tiles")] (slot (:id u)))]]]]
+       (when-not (= :debug tab)
+         [:aside {:class "flex min-w-0 flex-col gap-2 lg:sticky lg:top-14 lg:max-h-[calc(100vh-4rem)] lg:self-start lg:overflow-y-auto"}
+          [:div {:id "p-task" :class "flex flex-col gap-2"} (for [u (in "#p-task")] (slot (:id u)))]
+          [:div {:id "p-tiles" :class "grid content-start gap-2"} (for [u (in "#p-tiles")] (slot (:id u)))]])]]
      :seon.render/units
      (vec (concat [{:id "p-caption" :input {:caption caption} :html (h/html [:p {:id "p-caption" :class "text-2xs text-text-500"} (or caption "")])}]
                   (when input [{:id "p-input" :input (:value input) :schema (:schema input)}])
                   (map unit units)))}))
+
+(defn ctx-parts
+  "@ctx's parts, each a pair (owner, 2026-11-03: \"the record is @ctx with each part that was rendered and the
+  rendered part\"): what the model reads of the part (its data, or the hiccup its render returned, printed as a
+  request's parts message prints it, seon.context's parts-message), beside the part as the page draws it (its unit's
+  html). parts, [[id content]] of the task's list (seon.render/placed-hiccup); html, {id html} of its units. See
+  docs/render.md#the-page."
+  {:malli/schema [:=> [:cat [:sequential [:tuple :string :any]] [:map-of :string :string]] :any]}
+  [parts html]
+  [:li {:id "d-parts" :class "flex flex-col gap-2"}
+   [:h2 {:class "kicker"} "the task's parts: what the model reads, and the part drawn"]
+   (for [[id content] parts]
+     [:div {:class "grid grid-cols-1 gap-3 rounded-md border border-base-800 p-2 md:grid-cols-2" :data-part id}
+      [:div {:class "flex min-w-0 flex-col gap-1"}
+       [:span {:class "text-2xs text-text-500"} (str id " · sent to the model")]
+       [:pre {:class "whitespace-pre-wrap break-words font-mono text-xs text-text-100"}
+        (print/text (vary-meta (array-map id content) assoc :seon.print/full true))]]
+      [:div {:class "flex min-w-0 flex-col gap-1"}
+       [:span {:class "text-2xs text-text-500"} "drawn"]
+       (h/raw (get html id ""))]])])
 
 ;;; --- the debug page: what each turn sent, from its records ---------------------------------------
 
@@ -1825,7 +1847,8 @@
   order, its JSON fields as sent (content, tool_calls' arguments, tool_call_id, reasoning_content) beside
   a gutter of its role, the records that made it (their refs, `source`) and its size (the one sizer over
   its JSON); a message new since the request before it marked; the line where the provider's cached
-  prefix ends (placed by its cache-hit count over the sizes, an estimate, said so); the envelope (every
+  prefix ends (placed by its cache-hit count over the sizes, an estimate, said so), or, with none recorded, where
+  the messages the request before sent the same way end; the envelope (every
   field but the messages) and, while opened, the whole body's JSON as sent. input as `debug-input`
   answers it. See docs/render.md#the-debug-page-is-the-wire-request."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
@@ -1839,6 +1862,10 @@
         scale (if (and prompt (pos? est)) (/ (double prompt) est) 1.0)
         cached (when (and cache-hit-tokens (pos? cache-hit-tokens))
                  (count (take-while #(<= % cache-hit-tokens) (reductions + (map #(* scale %) sizes)))))
+        ;; with no cache count recorded (a turn to come, a provider that reports none): where the messages the
+        ;; request before sent the same way end, the prefix a provider's cache can serve
+        same (when (nil? cached) (first (keep-indexed (fn [i n?] (when n? i)) new)))
+        upto (vec (reductions + 0 sizes))
         line (fn [cls text] [:div {:class (str "my-1 flex items-center gap-2 text-2xs " cls)}
                              [:span {:class "h-px flex-1 bg-current opacity-40"}] text [:span {:class "h-px flex-1 bg-current opacity-40"}]])
         field (fn [k v] [:div {:class "flex flex-col"} [:span {:class "text-2xs text-text-500"} k]
@@ -1877,7 +1904,10 @@
       [:pre {:class "whitespace-pre-wrap break-words font-mono text-text-100"} (json/write-str (dissoc body :messages))]]
      (into [:div {:class "flex flex-col gap-1"}]
            (mapcat (fn [i m] (cond-> [(row i m)]
-                               (= (inc i) cached) (conj (line "text-info" (str "the provider's cache ends here: " (group3 cache-hit-tokens) " tokens served from cache (placed by estimate)")))))
+                               (= (inc i) cached) (conj (line "text-info" (str "the provider's cache ends here: " (group3 cache-hit-tokens) " tokens served from cache (placed by estimate)")))
+                               (and same (pos? same) (= (inc i) same))
+                               (conj (line "text-info" (str "sent the same by the request before down to here: " (group3 (long (nth upto same)))
+                                                            " tokens a provider's prefix cache can serve (none recorded for this request)")))))
                    (range) ms))
      [:details (cond-> {(keyword "data-on:toggle") (str "@post('/open?view=" view "&unit=" unit "-raw&open=' + el.open)")} raw? (assoc :open true))
       [:summary {:class "cursor-pointer text-text-400"} "the body's JSON, whole, as sent"]

@@ -355,9 +355,20 @@
                               (let [t (cond-> (cold-tree) (seq opened) (update :evals #(reduce-kv (fn [m k ev] (if (opened (:seon.eval/id ev)) (assoc m k (assoc ev :seon.eval/opened true)) m)) % %)))
                                     w (quiet #(render/draw t ctx/changes bdb (render/declared-var :seon.render/render-ctx)))]
                                 (try (render/placed-units w) (finally (render/dispose-walk! w))))))
-        ;; the debug view: @ctx printed, the agent's record as data by the one printer (its :seon.ctx/ctx render)
-        ctx-units (fn [] (let [t (if-let [kw (walked)] (:tree (:c kw)) (cold-tree))]
-                           [{:id "d-ctx" :container "#c-rows" :rev (:t t)
+        ;; @ctx's part pairs (seon.render.ui/ctx-parts): what the model reads of each part of the task's list, beside
+        ;; its unit as the page draws it, from one walk of the page
+        pairs (fn [w] (let [us (filterv #(= "#p-task" (:container %)) (render/placed-units w))]
+                        {:id "d-parts" :container "#c-rows" :rev (hash (mapv (juxt :id :rev) us))
+                         :html (h/html (ui/ctx-parts (render/placed-hiccup w context/page-lists) (into {} (map (juxt :id :html)) us)))}))
+        ;; the debug view: @ctx, its part pairs and the agent's record as data by the one printer (its :seon.ctx/ctx render)
+        ctx-units (fn [] (let [kw (walked)
+                               t (if kw (:tree (:c kw)) (cold-tree))
+                               part-unit (if kw
+                                           (quiet #(pairs (:w kw)))
+                                           (let [w (quiet #(render/draw t ctx/changes bdb (render/declared-var :seon.render/render-ctx)))]
+                                             (try (quiet #(pairs w)) (finally (render/dispose-walk! w)))))]
+                           [part-unit
+                            {:id "d-ctx" :container "#c-rows" :rev (:t t)
                              :html (h/html [:li {:id "d-ctx"} (quiet #(render/html {:db bdb} (with-meta t {:seon.render/schema :seon.ctx/ctx})))])}]))
         units (if own?
                 (:units held)

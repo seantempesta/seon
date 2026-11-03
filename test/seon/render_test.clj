@@ -629,8 +629,14 @@
                (try (mapv (juxt :id :html) (r/placed-units w)) (finally (r/dispose-walk! w))))]
     (is (some? (:w @cell)) "the branch's read holds its walk")
     (is (= cold (mapv (juxt :id :html) (r/placed-units (:w @cell)))) "after the move, what a cold draw at the head draws")
-    (let [w (:w @cell) [st3 _] (#'p/pass-view st2 :a3)]
-      (is (identical? w (:w @(get-in st3 [:branch-reads :task-demo-f :walk]))) "@ctx draws from the same walk"))
+    (let [w (:w @cell) [st3 _] (#'p/pass-view st2 :a3)
+          html (p/view-html st3 :a3)]
+      (is (identical? w (:w @(get-in st3 [:branch-reads :task-demo-f :walk]))) "@ctx draws from the same walk")
+      ;; owner, 2026-11-03: "the record is @ctx with each part that was rendered and the rendered part"
+      (doseq [[id content] (r/placed-hiccup w seon.context/page-lists)]
+        (is (str/includes? html (str "data-part=\"" id "\"")) (str "@ctx pairs part " id))
+        (is (str/includes? html (h/html (seon.print/text (vary-meta (array-map id content) assoc :seon.print/full true))))
+            (str id ": what the model reads of it, as a request prints it"))))
     (testing "the branch's read let go: its walk is disposed"
       (let [[st4 _] (p/render-proc st2 :from-web {:op :views :views #{} :tabs 0})]
         (is (nil? (get-in st4 [:branch-reads :task-demo-f])))))))
@@ -816,6 +822,8 @@
         (is (= (clojure.data.json/write-str (sent 1 r1)) (wire-text h1)) "turn 1: the same")
         (is (str/includes? h1 "the help page") "each message beside the records that made it")
         (is (str/includes? h1 "I call f.") "a call's arguments as sent, its prose in them")
+        (is (str/includes? h1 "sent the same by the request before down to here") "where the unchanged prefix ends, with no cache count recorded")
+        (is (not (str/includes? h0 "sent the same by the request before")) "the first request has no request before")
         (let [in1 (ui/debug-input db e1 [e0 e1] false nil)
               roles (mapv :role (get-in in1 [:body :messages]))]
           (is (= false (first (:new in1))) "the system prompt was sent before: not new")
