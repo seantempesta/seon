@@ -536,15 +536,6 @@
   {:malli/schema [:=> [:cat :string] :string]}
   [sym] (str "Unable to resolve symbol: " sym " in this context"))
 
-(defn- edn-values
-  "Map m with each value that is no EDN (seon.program/non-edn: a library's record, an object in an ex-data) as its EDN
-  text (seon.edn/encode, a tagged literal for a record), so the error that holds it is recorded: the store refuses a
-  value it cannot encode, and a refused record ended the turn that made it (Datahike's \"Query for unknown vars\"
-  carries datalog.parser.type.Variable records). See docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map."
-  {:malli/schema [:=> [:cat :map] :map]}
-  [m]
-  (into {} (for [[k v] m] [k (if (program/non-edn v) (sedn/encode v) v)])))
-
 (defn error-map
   "An exception caught at one of the agent's entrant boundaries (operation: the REPL's
   seon.repl/eval-code by default) as the one error map: its ex-data when that already is
@@ -559,13 +550,13 @@
   ([e] (error-map e 'seon.repl/eval-code))
   ([^Throwable e op]
    (if (contract/error? (ex-data e))
-     (edn-values (ex-data e))
+     (ex-data e)
      (let [d (ex-data e)
            diag? (comp #{"jolt.error" "clojure.error"} namespace key)
            jd (into {} (filter (every-pred (comp qualified-keyword? key) diag?)) d)
            ;; an OutOfMemoryError's heap by type (Jolt: :jolt/heap): data on the map, never the Throwable
            heap (:jolt/heap d)
-           other (some-> (not-empty (into {} (remove (some-fn (every-pred (comp qualified-keyword? key) diag?) (comp #{:jolt/heap} key))) d)) edn-values)
+           other (not-empty (into {} (remove (some-fn (every-pred (comp qualified-keyword? key) diag?) (comp #{:jolt/heap} key))) d))
            sym (:jolt.error/symbol jd)
            unresolved? (and sym (= :analyze/unresolved-symbol (:jolt.error/kind jd)))
            m (if unresolved? (unresolved-message sym) (step/error-msg e))

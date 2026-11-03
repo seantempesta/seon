@@ -818,7 +818,9 @@
 (deftest an-eval-that-throws-is-recorded-with-its-turn
   (let [e (try (d/q '[:find ?y :where [?e :var/name _]] (d/db-with (ts/test-db) [])) nil (catch Throwable t t))]
     (is (some? e) "the query throws")
-    (is (nil? (seon.program/non-edn (agent/error-map e))) "its error map is EDN, the record's value"))
+    (is (not (seon.db/plain? (agent/error-map e))) "its error map holds the parser's records, as Datahike threw them")
+    (is (seon.db/plain? (repl/record-details "(q)" {:handle 'result/e1 :ex (agent/error-map e)} {} nil))
+        "the eval's record is plain data, the records kept as their text"))
   (let [[r recorded] (at/in-agent (fn [{:keys [task]}]
                                     ["(datahike.api/q '[:find ?y :where [?e :var/name _]] (my.db/db))"
                                      {:op :eval :agent "root"

@@ -617,6 +617,16 @@
    (cond-> (assoc who :db/id "agent")
      (and (:seon.agent/key who) (symbol? (get-in details [:response :ns]))) (assoc :seon.agent/ns (get-in details [:response :ns])))])
 
+(defn- plainly
+  "v as the store keeps it (seon.db/plain?): plain data as it is, a map's values each so, anything else (a library's
+  record, an object in an exception's data) as its printed text (seon.edn/encode). The one place a record's
+  response is made storable, whoever made it. See docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map."
+  {:malli/schema [:=> [:cat :any] :any]}
+  [v]
+  (cond (pdb/plain? v) v
+        (and (map? v) (not (record? v)) (not (sorted? v))) (into {} (for [[k x] v] [k (plainly x)]))
+        :else (sedn/encode v)))
+
 (defn record-details
   "What an eval's record holds (:seon.eval/record): its code, its response whole, its value
   included when it is plain data (seon.db/plain?: stored as data, once under its content key when
@@ -631,6 +641,8 @@
   {:malli/schema [:=> [:cat :string :map :map [:maybe :string]] :seon.eval/record]}
   [code r req run]
   (let [resp (dissoc r :text :recorded :fns :record)
+        ;; all but the value plain (its value is stored only when plain, else printed, below)
+        resp (cond-> (plainly (dissoc resp :value)) (contains? resp :value) (assoc :value (:value resp)))
         ;; a value that names its basis (@ctx: the branch's record at t, seon.ctx/build) is
         ;; recorded as that basis and its schema: the page renders it from what exists, and a
         ;; copy of the session's record is never stored at each @ctx
@@ -663,9 +675,13 @@
     (swap! agent/state dissoc :defs)
     ;; an eval within another (seon.repl/edit!'s) is that eval's: its definitions are program, its record the outer one
     (if (and contract/record? (= :agent (:mode @agent/state)) (not (:within req)))
-      (do (agent/transact! (into defs (record-tx {:seon.agent/key (:key @agent/state) :seon.agent/id (:id @agent/state)} id (by (:origin req))
-                                                 (record-details code r req (get-in @agent/state [:turn :run])))))
-          (assoc r :record id))
+      ;; the write is the edge: a branch that refuses it answers the eval :unrecorded with the writer's message, so the
+      ;; turn that asked goes on (a refusal thrown from here ended the whole turn: its reply and evals lost, the turn run again)
+      (try (agent/transact! (into defs (record-tx {:seon.agent/key (:key @agent/state) :seon.agent/id (:id @agent/state)} id (by (:origin req))
+                                                  (record-details code r req (get-in @agent/state [:turn :run])))))
+           (assoc r :record id)
+           (catch Throwable e
+             (assoc r :unrecorded (contract/error :seon.agent/unrecorded #'record! (str "the branch refused this eval's record: " (ex-message e)) {}))))
       r)))
 
 (defn- again
