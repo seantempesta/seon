@@ -625,7 +625,9 @@
                    [:turn :int] [:max-turns :int] [:origin :seon.turn/origin]
                    [:merge? {:optional true} :boolean]
                    ;; the agent whose record the request renders (its key)
-                   [:agent {:optional true} :string]]
+                   [:agent {:optional true} :string]
+                   ;; the run's own model, when it names one (seon.config/provider-at)
+                   [:model {:optional true} :string]]
  ;; what a model turn's request sent, the records it rendered in order (seon.context/request, parts-of):
  ;; the system prompt's section and the task, each as of a t; an eval or message by id, an eval with the fold it was
  ;; sent with (its value or output an earlier record showed: the handle there); a turn's prose reply with no call by its id

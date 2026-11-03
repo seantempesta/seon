@@ -275,15 +275,20 @@
   (let [t (:task obs)
         t0 (profile/now-ns)
         _ (take! true)
-        basis (assoc (basis! (:seon.task/id t) run turn max-turns :model (boolean merge?)) :agent (:key @agent/state))
         id (str run "/" turn)
-        ;; the turn first, what it was made from (its model call's basis): its page is drawn on the db that
-        ;; holds it (its proofs as this turn observed them), then what it sent, committed, so a page shows the
+        ;; the turn first, with the main and merge base it heard, then its basis: the commit that holds them, so
+        ;; everything its request and its provider are made from is a fact of that commit (seon.context/wire-request
+        ;; makes them again there); then what it was made from (its model call's basis): its page is drawn on the db
+        ;; that holds it (its proofs as this turn observed them), then what it sent, committed, so a page shows the
         ;; call in flight and a call that fails keeps what it sent
         _ (agent/transact! (into [{:db/id "run" :seon.run/id run}
-                                  {:db/id "turn" :seon.turn/id id :seon.turn/run "run" :seon.turn/agent {:seon.agent/key (:key @agent/state)} :seon.turn/n turn :seon.turn/origin :model}
-                                  {:seon.model-call/id id :seon.model-call/turn "turn" :seon.model-call/basis basis}]
+                                  {:seon.turn/id id :seon.turn/run "run" :seon.turn/agent {:seon.agent/key (:key @agent/state)} :seon.turn/n turn :seon.turn/origin :model}]
                                  (main-base-tx)))
+        basis (cond-> (assoc (basis! (:seon.task/id t) run turn max-turns :model (boolean merge?)) :agent (:key @agent/state))
+                model-name (assoc :model model-name))
+        ;; the provider as the config stands at the basis (main's as the turn heard it, over the task's own), never one copied at boot
+        provider (context/provider-of (agent/db) basis)
+        _ (agent/transact! [{:seon.model-call/id id :seon.model-call/turn [:seon.turn/id id] :seon.model-call/basis basis}])
         _ (agent/commit!)
         ;; what the run's earlier requests printed, reused by each record's id (seon.context/printed-run)
         ;; its parts are the live walk's (what changed since the frame before), never drawn cold, and the
@@ -295,11 +300,7 @@
         _ (when sent (agent/transact! [{:seon.model-call/id id :seon.model-call/sent sent}]))
         _ (agent/commit!)
         t1 (profile/now-ns)
-        ;; the provider as the config stands at this turn (main's, over the task's own), never one copied at boot
-        r (agent/fx! :model (cond-> {:messages messages :task (:seon.task/id t) :turn turn
-                                     :provider (cfg/provider-at (agent/heard-main) (agent/db) (:seon.task/id t))}
-                              model-name (assoc :model model-name))
-                     {})
+        r (agent/fx! :model {:messages messages :task (:seon.task/id t) :turn turn :provider provider} {})
         model-ms (long (profile/ms-since t1))
         c (:value r)
         ;; the request before this one in its run: what the cache check compares (cache-miss)

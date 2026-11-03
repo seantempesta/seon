@@ -9,7 +9,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str] [datahike.api :as d] [seon.render :as render]
             [seon.task :as task] [seon.db :as pdb] [seon.merge :as pm]
-            [seon.print :as print] [seon.print.select :as select] [seon.ref :as ref] [seon.doc :as doc] [seon.config :as cfg] [seon.vector :as vector] [seon.ctx :as ctx] [seon.ratom :as ratom] [seon.agent :as agent] [seon.program :as program] [seon.proofs :as proofs] [seon.problems :as problems] [seon.reconcile :as r] [seon.edn :as sedn] [clojure.edn] [hasch.core :as hasch]))
+            [seon.print :as print] [seon.print.select :as select] [seon.ref :as ref] [seon.doc :as doc] [seon.config :as cfg] [seon.model :as model] [seon.vector :as vector] [seon.ctx :as ctx] [seon.ratom :as ratom] [seon.agent :as agent] [seon.program :as program] [seon.proofs :as proofs] [seon.problems :as problems] [seon.reconcile :as r] [seon.edn :as sedn] [clojure.edn] [hasch.core :as hasch]))
 
 (def help-page
   "The help page, docs/agent.md: what my.agent/help answers, each section on demand. Main holds
@@ -1153,3 +1153,20 @@
         r (request a {:db db :basis basis :help (system-text db) :printed printed :parts parts
                       :help-ref [:section (ref/page-top db system-page) (doc/page-t db system-page)]})]
     (select-keys r [:messages :sent :printed]))))
+
+(defn provider-of
+  "The model provider a turn with basis b used, from db at b's commit: main as the agent last heard it
+  (its :seon.agent/main-commit; the branch itself before it heard any), the task's own settings and the
+  run's model (seon.config/provider-at). The turn calls it at its basis and a replay at the same commit, so
+  both name one provider. See docs/render.md#the-debug-page-is-the-wire-request."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.model-call/basis] :seon.model/provider]}
+  [db {:keys [agent task model]}]
+  (let [main (some->> (:seon.agent/main-commit (d/entity db [:seon.agent/key agent])) (d/commit-as-db (:store db)))]
+    (cfg/provider-at (or main db) db task model)))
+
+(defn wire-request
+  "The request body turn basis b put on the wire (seon.model/request-body), made again from db at b's
+  commit: its messages (`render`) under its provider (`provider-of`). See docs/render.md#the-debug-page-is-the-wire-request."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.model-call/basis] :map]}
+  [db basis]
+  (model/request-body (provider-of db basis) {:messages (:messages (render db basis)) :task (:task basis) :turn (:turn basis)}))

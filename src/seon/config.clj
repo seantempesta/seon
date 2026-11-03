@@ -375,8 +375,12 @@
   task's own settings over both (the declared :seon.config.* keys its entity holds on task-db, the
   flattened :seon.task/config): the one resolver (resolve-in: task, model, provider, config) read at
   the call, never a copy taken at boot. A task naming :seon.config.ai/provider or a model uses it
-  from its next turn; a change to main's config applies at the next turn with no restart."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:maybe :seon.task/id]] :seon.model/provider]}
-  [main task-db id]
-  (provider (merge config (from-db main)
-                   (when id (d/pull task-db (keys-declared) [:seon.task/id id])))))
+  from its next turn; a change to main's config applies at the next turn with no restart. model, a
+  run's own model, names an :openai-compat provider's model."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.host/db [:maybe :seon.task/id]] :seon.model/provider]
+                  [:=> [:cat :seon.host/db :seon.host/db [:maybe :seon.task/id] [:maybe :string]] :seon.model/provider]]}
+  ([main task-db id] (provider-at main task-db id nil))
+  ([main task-db id model]
+   (let [p (provider (merge config (from-db main)
+                            (when id (d/pull task-db (keys-declared) [:seon.task/id id]))))]
+     (cond-> p (and model (= :openai-compat (:kind p))) (assoc :model model)))))

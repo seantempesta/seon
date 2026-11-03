@@ -1128,13 +1128,12 @@
 (defn model
   "The model call (seon.model/complete) under the request's provider (the agent resolves it at its
   turn, seon.config/provider-at: it names the API key's environment variable, never the key; root
-  alone reads it), else root's boot provider (:ctx); a request's :model overrides the
-  provider's model. Answers {:value completion :cost tokens} or the provider error."
+  alone reads it, with the run's model), else root's boot provider (:ctx). Answers
+  {:value completion :cost tokens} or the provider error."
   {:malli/schema [:=> [:cat :map] :map]}
   [{:keys [req ctx]}]
-  (let [base (or (:provider req) (:provider ctx))
-        p (cond-> base (and (:model req) (= :openai-compat (:kind base))) (assoc :model (:model req)))
-        c (model/complete p (dissoc req :model :provider))]
+  (let [p (or (:provider req) (:provider ctx))
+        c (model/complete p (dissoc req :provider))]
     (cond (contract/error? c) c
           (and (:prompt-tokens c) (:completion-tokens c)) {:value c :cost (+ (:prompt-tokens c) (:completion-tokens c))}
           :else {:value c})))
