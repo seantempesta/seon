@@ -202,7 +202,7 @@
         ev (fn [id] (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a1} id "a1" {:code "(+ 1 2)" :response {:handle (symbol "result" id) :value 3} :run "t/x#1" :call-id (str "c-" id) :call 0}))
         db0 (reduce d/db-with (ts/test-db)
                     [[{:seon.root/id :root :seon.root/boot "b1"}]
-                     (seon.task/agent-tx "b1" :a1 {:status :busy})])
+                     (seon.task/agent-tx "b1" :a1 {:status :busy :branch :task-x})])
         db0 (reduce d/db-with db0
                     [(seon.doc/load-tx db0 "docs" {seon.context/system-page "# You are a Seon agent\n\nThe help page."})
                      (seon.task/create-tx db0 [{:seon.task/ns 't :seon.task/name "x" :seon.task/plan "Make x." :seon.task/proofs #{'t-test/x-test}}])
@@ -215,7 +215,7 @@
                             :seon.model-call/sent (:sent (seon.context/render db0 b))}])
         view [:debug :a1]
         st {:rid 1 :pending {} :watch #{view} :waiting {} :kf-wanted #{} :views {} :main-db db
-            :branches {view {:db db :read [:task-x]}} :view {:agents {}}}
+            :branches {view {:db db :read [:task-x] :branch :task-x}} :branch-reads {:task-x {:db db :walk (volatile! nil)}} :view {:agents {}}}
         [st _] (#'seon.render.proc/pass-view st view)]
     [(assoc-in st [:branches view :db] (d/db-with db (ev "next"))) view]))
 

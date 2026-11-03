@@ -611,6 +611,30 @@
     (is (= 1 (count (filter #(str/includes? (second %) "result/e4") (concat (:appends patch) (:afters patch))))) "one part, the new eval")
     (is (= 1 (count (concat (:appends patch) (:afters patch) (:prepends patch)))) "and nothing else sent")))
 
+(deftest a-branchs-kept-walk-draws-what-a-cold-draw-does
+  ;; docs/render.md#a-page-is-a-kept-walk: an agent's page drawn from its branch is one walk a branch, advanced by
+  ;; each move; after a move its units are those a walk drawn cold at the new head draws, and a second view of
+  ;; the agent draws from the same walk
+  (let [[main branch _] (paged-dbs)
+        o (volatile! {})
+        st (assoc (branch-state main branch) :watch #{[:chat :a3] :a3})
+        [st1 _] (#'p/pass-view st [:chat :a3])
+        k (seon.task/agent-key "b1" :a3)
+        branch' (d/db-with branch (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e4" "a3" {:code "(h)" :response {:handle 'result/e4 :value 1}}))
+        st2 (#'p/answered st1 o [:branch :task-demo-f] {:db branch'})
+        cell (get-in st2 [:branch-reads :task-demo-f :walk])
+        e (d/entity main [:seon.agent/key k])
+        cold (let [w (r/draw (:tree (seon.ctx/build branch' (seon.db/eid branch' :seon.agent/key k) (:seon.agent/branch e))) seon.ctx/changes branch'
+                             (r/declared-var :seon.render/render-ctx))]
+               (try (mapv (juxt :id :html) (r/placed-units w)) (finally (r/dispose-walk! w))))]
+    (is (some? (:w @cell)) "the branch's read holds its walk")
+    (is (= cold (mapv (juxt :id :html) (r/placed-units (:w @cell)))) "after the move, what a cold draw at the head draws")
+    (let [w (:w @cell) [st3 _] (#'p/pass-view st2 :a3)]
+      (is (identical? w (:w @(get-in st3 [:branch-reads :task-demo-f :walk]))) "@ctx draws from the same walk"))
+    (testing "the branch's read let go: its walk is disposed"
+      (let [[st4 _] (p/render-proc st2 :from-web {:op :views :views #{} :tabs 0})]
+        (is (nil? (get-in st4 [:branch-reads :task-demo-f])))))))
+
 (deftest a-branch-read-anew-renders-its-components-again
   ;; a branch read after an error has nothing held to diff against: what was cached from that
   ;; branch is rendered again, so a change made while it could not be read is shown
@@ -792,24 +816,24 @@
         (is (= (clojure.data.json/write-str (sent 1 r1)) (wire-text h1)) "turn 1: the same")
         (is (str/includes? h1 "the help page") "each message beside the records that made it")
         (is (str/includes? h1 "I call f.") "a call's arguments as sent, its prose in them")
-        (let [in1 (ui/debug-input db e1 [e0 e1] false nil)
+        (let [in1 (ui/debug-input db e1 [e0 e1] false nil nil)
               roles (mapv :role (get-in in1 [:body :messages]))]
           (is (= false (first (:new in1))) "the system prompt was sent before: not new")
           (is (some true? (map (fn [r n] (and (= "tool" r) n)) roles (:new in1))) "the call's result is new since turn 0")
-          (is (not-any? true? (:new (ui/debug-input db e0 [e0 e1] false nil))) "the first request marks nothing"))
+          (is (not-any? true? (:new (ui/debug-input db e0 [e0 e1] false nil nil))) "the first request marks nothing"))
         (testing "a chosen turn stays as it was when the branch moves"
           (let [moved (d/db-with db [{:seon.eval/id "e9" :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key "b/a1"}
                                       :seon.eval/record {:code "(f 9)" :response {:handle 'result/e9 :value 9} :run "demo/f#1"}}])]
             (is (= h0 (page (assoc-in st [:branches [:debug :a1] :db] moved) e0)))))
         (testing "latest, while the run goes on, is the turn to come, drawn at the head"
-          (let [in (ui/debug-input db :latest [e0 e1] false nil)]
+          (let [in (ui/debug-input db :latest [e0 e1] false nil nil)]
             (is (:to-come? in))
             (is (= 2 (:turn in)) "the next turn's request")
             (is (str/includes? (page st nil) "to come"))
             ;; the browser check of 2026-11-03: the branch records its run's end as :seon.end/* (root copies it to
             ;; main as :seon.run/outcome), and an ended run showed a turn to come
             (let [ended (d/db-with db [{:seon.end/run "demo/f#1" :seon.end/outcome :green}])
-                  in (ui/debug-input ended :latest [e0 e1] false nil)]
+                  in (ui/debug-input ended :latest [e0 e1] false nil nil)]
               (is (not (:to-come? in)) "an ended run: nothing to come")
               (is (= 1 (:turn in)) "latest is its newest turn"))))
         (is (= [:debug :a1] (#'seon.web/view-of (java.net.URLDecoder/decode (ui/view-param [:debug :a1]) "UTF-8"))) "its feed names it, and reads it back")
