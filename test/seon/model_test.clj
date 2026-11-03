@@ -5,7 +5,7 @@
   The model edge as data: a provider's reply body read into the completion (task
   seon.model/budgets-are-data-and-spend-is-measured). Run: bin/test seon.model-test"
   (:require [clojure.test :refer [deftest is testing]] [clojure.core.async :as a] [clojure.data.json :as json]
-            [ring-chez.adapter :as adapter] [seon.model :as model] [seon.fx :as fx] [seon.turn :as turn] [seon.contract] [clojure.string :as str] [seon.context] [seon.error] [seon.cost]))
+            [ring-chez.adapter :as adapter] [seon.model :as model] [seon.fx :as fx] [seon.turn :as turn] [seon.contract] [clojure.string :as str] [seon.context] [seon.error] [seon.cost] [seon.fixtures :as fixtures]))
 
 (defn- chunk-line [m] (str "data: " (json/write-str m) "\n\n"))
 
@@ -116,6 +116,17 @@
     (is (= :seon.model/no-provider (:seon.error/type r)))
     (is (seon.contract/valid? :seon.model/failure r))
     (is (not (contains? r :tool-calls)) "no reply, scripted or otherwise")))
+
+;; the curated session: read from <dir>/<ns>_<name>.edn, answered turn by turn, text only past its end
+(deftest a-curated-session-answers-its-turns-and-then-says-it-has-no-more
+  (let [dir (str (System/getProperty "java.io.tmpdir") "/curated-" (random-uuid))
+        turn {:text "Add one." :calls [{:prose "Add one." :code "(inc 1)"}]}]
+    (.mkdirs (java.io.File. dir))
+    (spit (str dir "/demo_t.edn") (pr-str {:task "demo/t" :curated true :turns [turn]}))
+    (is (= turn (fixtures/curated-turn dir "demo/t" 0)) "turn 0 answers its calls")
+    (is (= {:text "The curated session has no turn 1."} (fixtures/curated-turn dir "demo/t" 1)) "past the end: text only")
+    (is (= {:text "No curated session for demo/u."} (fixtures/curated-turn dir "demo/u" 0)) "no file: text only")
+    (is (= {:text "No curated session for demo/t."} (fixtures/curated-turn nil "demo/t" 0)) "no directory: text only")))
 
 (deftest cost-prices-a-turn-at-its-models-rates
   (testing "a DeepSeek turn as seon.turn/usage records it: 10k prompt (8k cached), 500 completion"

@@ -12,6 +12,10 @@ The profiles (aero's `#profile`, read by ```seon.config/profile```) are:
 
 ```seon.config/provider``` builds the provider value a config names (`:none`, `:scripted` or `:openai-compat`), and ```seon.config/with-provider``` states one handed to root's start in place of the file's, so the facts root writes say what a run really used. The models we use, their prices and ceilings are the manifest: [config](config.md#the-model-manifest).
 
+## Running a curated session
+
+A [curated session](decisions.md) is replayed for real through the scripted provider on a fresh branch: `--profile scripted --set :seon.config.ai/script=seon.fixtures/curated`. ```seon.fixtures/curated``` answers turn n of task `<ns>/<name>` with turn n of `<runs-dir>/curated/<ns>_<name>.edn` (`:seon.config.root/runs-dir`, the root's runs directory), a map whose `:turns` are `{:text :calls [{:prose :code}]}` (its other keys are provenance), so every result the agent sees is evaluated live, never copied. Past the last turn, or with no directory or file, it answers a message saying so, which ends the turn. The files hold answers: the runs directory is git-ignored and outside the program, so agents do not read them.
+
 ## One tool, eval
 
 Every request declares one tool, `eval` (`seon.model/eval-tool`), which the model may call or not (`tool_choice` auto: a reply with no call is prose to the user): its code is the REPL's input, one form a call by the prompt's ask though several run in order (they answer `:forms` and `:value`, the vector of their values: `seon.repl/response`, [prompt](prompt.md)), so the model sees each evaluation's answer before its next call. A reply's prose is read as comments. Every request sets `temperature 0` and streams its reply with its usage (`:stream true`, `:stream_options {:include_usage true}`, `seon.model/request-body`), so no clock has to guess a reply's length. What a request holds and in which order is the context's: [render](render.md#the-models-context-a-cached-prefix-then-the-turn).
