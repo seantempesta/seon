@@ -128,7 +128,8 @@
   "The provider-neutral messages msgs as the wire holds them, by index: for each wire message in order, the
   indices of msgs it is made of. A reply's calls fold into one assistant message: a message whose :call is
   past 0 continues the newest assistant message before it, and each tool message follows in order. The one
-  fold: `wire-messages` makes its messages from these groups, and the debug page labels them by it."
+  fold: `wire-messages` makes its messages from these groups, and the debug page labels them by it. See
+  docs/render.md#the-debug-page-is-the-wire-request."
   {:malli/schema [:=> [:cat [:vector :seon.model/message]] [:vector [:vector nat-int?]]]}
   [msgs]
   (reduce (fn [acc [j m]]

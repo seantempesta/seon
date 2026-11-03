@@ -4,6 +4,8 @@ This file holds the owner's standing rulings, one entry each: the rule, the owne
 
 ## 2026-11-03 rulings
 
+The owner's rulings of 2026-11-03, on bugs as classes and on what contracts cost; they stand over earlier entries where they differ.
+
 ### A bug is a class: remove what allowed it (owner, 2026-11-03)
 
 "Always be suspicious about bugs. Usually fixing them directly is the wrong solution. Root cause and see if we should be doing something that eliminates the bug class." Batch 89 guarded an open schema (`[:response :map]` let a value no store keeps through to the write) where declaring the shape removes the class (task `seon.repl/an-evals-record-has-its-declared-shape`; the owner: "The fix your question points at is to declare the response's real shape: correct"). Stated in AGENTS.md §3, the method's step 4.

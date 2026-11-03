@@ -1752,8 +1752,7 @@
                   (map unit units)))}))
 
 (defn ctx-parts
-  "@ctx's parts, each a pair (owner, 2026-11-03: \"the record is @ctx with each part that was rendered and the
-  rendered part\"): what the model reads of the part (its data, or the hiccup its render returned, printed as a
+  "@ctx's parts, each a pair: what the model reads of the part (its data, or the hiccup its render returned, printed as a
   request's parts message prints it, seon.context's parts-message), beside the part as the page draws it (its unit's
   html). parts, [[id content]] of the task's list (seon.render/placed-hiccup); html, {id html} of its units. See
   docs/render.md#the-page."
@@ -1775,8 +1774,7 @@
 
 (defn debug
   "The debug page of id (an agent's id, :root) laid out: what its model is sent. An agent's is a timeline
-  of its requests (owner, 2026-11-03: \"a timeline with an option to be on latest and it live updates
-  ... static on whatever turn a user decides\"): steps, each request a button (strip: {:turns [{:e :turn
+  of its requests, live on latest or fixed on a turn chosen: steps, each request a button (strip: {:turns [{:e :turn
   :origin}] :at e-or-:latest :to-come? b :gone e-chosen-but-no-request-of-the-branch}), previous, next and latest moving the view (/at), and the one
   request shown (turn: a unit, :seon.render/debug-turn); for root, which has no model turn, the context it
   reads now (context: a unit, :seon.render/root-context). See docs/render.md#the-debug-page-is-the-wire-request."
