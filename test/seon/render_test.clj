@@ -756,7 +756,7 @@
       (let [[st2 _] (#'p/render-proc (assoc st1 :shown {[:chat :a3] 21}) :from-web {:op :views :views #{:root} :tabs 1})]
         (is (nil? (get-in st2 [:views [:chat :a3]])))
         (is (nil? (get-in st2 [:branches [:chat :a3]])))
-        (is (nil? (get-in st2 [:shown [:chat :a3]])))
+        (is (nil? (get-in st2 [:tab [:chat :a3] :shown])))
         (is (= st2 (first (#'p/render-proc st2 :from-web {:op :more :view [:chat :a3]}))) "and its end scrolling into view asks for nothing")))))
 
 (defn- debug-state
@@ -784,7 +784,7 @@
       (let [[st [r0 r1] [e0 e1]] (debug-state conn)
             db (get-in st [:branches [:debug :a1] :db])
             sent (fn [n msgs] (seon.model/request-body (seon.config/provider-at db db "demo/f") {:messages msgs :task "demo/f" :turn n}))
-            page (fn [st at] (let [st (cond-> (assoc-in st [:open [:debug :a1]] #{"d-turn-raw"}) at (assoc-in [:at [:debug :a1]] at))
+            page (fn [st at] (let [st (cond-> (assoc-in st [:tab [:debug :a1] :open] #{"d-turn-raw"}) at (assoc-in [:tab [:debug :a1] :at] at))
                                    [st' _] (#'p/pass-view st [:debug :a1])]
                                (p/view-html st' [:debug :a1])))
             h0 (page st e0) h1 (page st e1)]
@@ -805,7 +805,13 @@
           (let [in (ui/debug-input db :latest [e0 e1] false nil)]
             (is (:to-come? in))
             (is (= 2 (:turn in)) "the next turn's request")
-            (is (str/includes? (page st nil) "to come"))))
+            (is (str/includes? (page st nil) "to come"))
+            ;; the browser check of 2026-11-03: the branch records its run's end as :seon.end/* (root copies it to
+            ;; main as :seon.run/outcome), and an ended run showed a turn to come
+            (let [ended (d/db-with db [{:seon.end/run "demo/f#1" :seon.end/outcome :green}])
+                  in (ui/debug-input ended :latest [e0 e1] false nil)]
+              (is (not (:to-come? in)) "an ended run: nothing to come")
+              (is (= 1 (:turn in)) "latest is its newest turn"))))
         (is (= [:debug :a1] (#'seon.web/view-of (java.net.URLDecoder/decode (ui/view-param [:debug :a1]) "UTF-8"))) "its feed names it, and reads it back")
         (is (= [:debug :a1] (#'seon.web/view-of "a1/context")) "/agent/a1/context")
         (testing "a turn whose call failed shows what it sent and its typed error"
@@ -827,8 +833,25 @@
                                           :seon.eval/record {:code "(f 9)" :response {:handle 'result/e9 :value 9} :run "demo/f#1"}}]))
             drawn (fn [st] (let [[st1 _] (#'p/pass-view st [:debug :a1]) [st2 _] (#'p/pass-view (moved st1) [:debug :a1])]
                              (- (get-in st2 [:counts :rendered] 0) (get-in st1 [:counts :rendered] 0))))]
-        (is (zero? (drawn (assoc-in st [:at [:debug :a1]] e0))) "a chosen turn: nothing drawn again")
+        (is (zero? (drawn (assoc-in st [:tab [:debug :a1] :at] e0))) "a chosen turn: nothing drawn again")
         (is (= 1 (drawn st)) "latest: its request, once")))))
+
+(deftest stepping-the-timeline-draws-the-turn-on-a-still-branch
+  ;; the browser check of 2026-11-03: a step (/at) on a branch that no longer moves (its run ended) drew
+  ;; nothing, as a view walks only when its dbs or its tab's choices move, and :at was none of those.
+  ;; A tab's choices are one map a view (:tab), read whole by what decides a walk
+  (ts/test-branch!
+    (fn [_ conn]
+      (let [[st _ [e0 _]] (debug-state conn)
+            view [:debug :a1]
+            [st _] (#'p/pass-view (update st :watch (fnil conj #{}) view) view)
+            step (fn [st turn] (let [[st' out] (p/render-proc st :from-web {:op :at :view view :turn turn})]
+                                 [st' (some #(when (= view (:view %)) %) (:to-web out))]))
+            [st1 patch] (step st e0)]
+        (is patch "the step sends the page a patch")
+        (is (str/includes? (p/view-html st view) "what it would send now") "on latest, the turn to come")
+        (is (not (str/includes? (p/view-html st1 view) "what it would send now")) "a step shows the turn chosen")
+        (is (str/includes? (p/view-html (first (step st1 :latest)) view) "what it would send now") "and latest again")))))
 
 (deftest the-html-fallback-folds-only-what-nests
   ;; the owner, 2026-10-23, on the default html: a fold and its "map 12 items, depth 0" header on

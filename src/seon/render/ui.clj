@@ -14,7 +14,7 @@
   invents one."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.learn :as learn] [seon.doc :as doc] [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn] [clojure.data.json :as json] [seon.config :as config]
-            [seon.render :as render] [datahike.api :as d] [seon.context :as context] [seon.program :as program] [seon.print :as print] [seon.print.emit :as emit] [seon.print.select :as select] [seon.web.html :as h] [seon.reader :as reader] [seon.cost :as cost] [seon.task :as task] [seon.ctx] [seon.problems :as problems] [seon.edn :as sedn] [datahike.index.interface] [seon.ratom :as ratom] [seon.vector :as vector] [seon.db :as pdb] [seon.proofs :as proofs] [seon.merge :as pm] [seon.ref :as ref] [clojure.set]))
+            [seon.render :as render] [datahike.api :as d] [seon.context :as context] [seon.program :as program] [seon.print :as print] [seon.print.emit :as emit] [seon.print.select :as select] [seon.web.html :as h] [seon.reader :as reader] [seon.cost :as cost] [seon.task :as task] [seon.ctx] [seon.problems :as problems] [seon.edn :as sedn] [datahike.index.interface] [seon.ratom :as ratom] [seon.vector :as vector] [seon.db :as pdb] [seon.proofs :as proofs] [seon.merge :as pm] [seon.ref :as ref] [seon.reconcile :as reconcile] [clojure.set]))
 
 ;;; --- small formatting helpers -------------------------------------------------
 
@@ -715,6 +715,14 @@
     (str (case (first as) :debug "d-" :chat "c-") eid)
     (case as :block "p-head" :row (str "r-" eid) :tile (str "t-" eid) :chat (str "c-" eid) :side (str "s-" eid))))
 
+(defn to-come?
+  "Whether a request is to come after the turn of basis b on branch db: b is a model turn's and its run has
+  written no end on the branch (seon.reconcile/pull-end; root copies it to main as :seon.run/outcome). See
+  docs/render.md#the-debug-page-is-the-wire-request."
+  {:malli/schema [:=> [:cat :seon.host/db [:maybe :seon.model-call/basis]] :boolean]}
+  [db b]
+  (boolean (and b (= :model (:origin b)) (nil? (reconcile/pull-end db (:run b))))))
+
 (defn debug-input
   "Request at of the debug timeline on branch db, as data `debug-turn` draws: a model call's eid (its turn,
   made again from its basis commit, seon.context/wire-turn), or :latest, the request the agent's next model
@@ -731,8 +739,7 @@
         last-e (peek calls)
         lb (some-> last-e pull :seon.model-call/basis)
         ;; the turn to come: on latest, while the newest model turn's run has no outcome
-        to-come? (boolean (and (= :latest at) lb (= :model (:origin lb))
-                               (nil? (:seon.run/outcome (d/entity db [:seon.run/id (:run lb)])))))
+        to-come? (and (= :latest at) (to-come? db lb))
         e (cond to-come? nil (= :latest at) last-e :else at)
         m (some-> e pull)]
     (when (or to-come? (:seon.model-call/basis m))

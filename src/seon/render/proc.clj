@@ -230,10 +230,10 @@
           ;; in the order written: entity ids are issued so
           calls (vec (sort (d/q '[:find [?e ...] :where [?e :seon.model-call/basis _]] bdb)))
           bases (mapv #(:seon.model-call/basis (d/pull bdb [:seon.model-call/basis] %)) calls)
-          at (let [x (get-in st [:at view] :latest)] (if (or (= :latest x) (some #{x} calls)) x :latest))
-          raw? (contains? (get-in st [:open view] #{}) "d-turn-raw")
+          at (let [x (get-in st [:tab view :at] :latest)] (if (or (= :latest x) (some #{x} calls)) x :latest))
+          raw? (contains? (get-in st [:tab view :open] #{}) "d-turn-raw")
           lb (peek bases)
-          to-come? (boolean (and lb (= :model (:origin lb)) (nil? (:seon.run/outcome (d/entity bdb [:seon.run/id (:run lb)])))))]
+          to-come? (ui/to-come? bdb lb)]
       (ui/debug (second view)
                 {:turns (mapv (fn [e b] {:e e :turn (:turn b) :origin (:origin b)}) calls bases) :at at :to-come? to-come?}
                 (when (seq calls)
@@ -471,7 +471,7 @@
   [st view]
   (let [db (:main-db st)
         id (when db (when-let [eid (location db view)] (task/this-boots db (d/entity db eid))))]
-    {:shown (get-in st [:shown view]) :open (get-in st [:open view]) :error (get-in st [:branches view :error])
+    {:tab (get-in st [:tab view]) :error (get-in st [:branches view :error])
      ;; whether its branch is read at all: what moved on it after that is its datoms-diff
      :branch? (some? (get-in st [:branches view :db]))
      :live (when id (ui/live (ui/shown-status (get-in st [:view :agents id] {}))))}))
@@ -599,7 +599,7 @@
   [st v]
   (let [b (get-in st [:branches v :branch])
         st (-> (reindex st v (get-in st [:views v :reads]) #{})
-               (update :views dissoc v) (update :branches dissoc v) (update :shown dissoc v) (update :open dissoc v) (update :at dissoc v)
+               (update :views dissoc v) (update :branches dissoc v) (update :tab dissoc v)
                (update :dirty #(disj (or % #{}) v)))]
     (cond-> st (and b (not-any? #(= b (:branch %)) (vals (:branches st)))) (update :branch-reads dissoc b))))
 
@@ -849,11 +849,12 @@
                                     (pass st o))
                           :context (let [st (-> st health! with-context)] (step/out! o :to-web {:op :text :k (:k m) :text (get-in st [:context :text] "")}) st)
                           ;; the end of a view's list scrolled into view: the next rows are rendered
-                          :more (if (contains? (:watch st) (:view m)) (pass (update-in st [:shown (:view m)] (fnil + (history-cap)) (history-cap)) o) st)
+                          :more (if (contains? (:watch st) (:view m)) (pass (update-in st [:tab (:view m) :shown] (fnil + (history-cap)) (history-cap)) o) st)
+                          ;; the debug timeline stepped to a turn, or to latest
+                          :at (if (contains? (:watch st) (:view m)) (pass (assoc-in st [:tab (:view m) :at] (:turn m)) o) st)
                           ;; a row's <details> opened or closed: its whole content is rendered while it is open
-                          :at (if (contains? (:watch st) (:view m)) (pass (assoc-in st [:at (:view m)] (:turn m)) o) st)
                           :toggle (if (contains? (:watch st) (:view m))
-                                  (pass (update-in st [:open (:view m)] (fnil (if (:open m) conj disj) #{}) (:unit m)) o)
+                                  (pass (update-in st [:tab (:view m) :open] (fnil (if (:open m) conj disj) #{}) (:unit m)) o)
                                   st)
                           :stats (do (step/out! o :to-web {:op :text :k (:k m) :text (sedn/encode (stats st))}) st)
                           st)
