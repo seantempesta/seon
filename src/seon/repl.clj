@@ -72,7 +72,9 @@
 (defn- defines-program?
   "Does form, read in namespace ns, define a var of the program: ns is no scratch (seon.program/scratch-ns?) and the
   form's head is def or a macro named def... (defn, deftest; deferred, a function, is none), in ns or among the REPL's names (seon.agent/repl-name). Such
-  a form resolves as written, never through the REPL's names; one that only moves or requires does. See docs/agent.md#the-repl."
+  a form resolves as written, never through the REPL's names; one that only moves or requires does. Only the head is
+  read: a definition inside another form, (do (defn f ...)), evaluates with the REPL's names, as it ran at the REPL. See
+  docs/agent.md#the-repl."
   {:malli/schema [:=> [:cat :any :seon.host/namespace] :boolean]}
   [form ns]
   (boolean
@@ -81,19 +83,15 @@
             v (or (ns-resolve ns h) (some-> (agent/repl-name h) find-var))]
         (or (= 'def h) (and (var? v) (:macro (meta v)) (clojure.string/starts-with? (str (:name (meta v))) "def")))))))
 
-(def ^:private repl-helpers
-  "The REPL helpers `shadowed` warns of when a namespace's own var hides one, by the namespace holding each
-  (seon.agent/repl-name resolves them in every namespace; docs/render.md#a-part-answers-data)."
-  '{clojure.repl [source apropos dir pst doc find-doc] clojure.pprint [pp pprint]})
-
 (defn- shadowed
-  "The REPL helpers (`repl-helpers`) namespace ns holds a var of its own for, {name its-var}:
+  "The REPL helpers (clojure.repl's and pprint's of seon.agent/repl-names) namespace ns holds a var of its own for, {name its-var}:
   there the name is that var and not the REPL's, as Clojure warns when a definition replaces a
   referred var (an agent in seon.render.ui called its source with a function and read an nth
   error four times). nil when none. It answers a move's :helper-shadowed (docs/render.md#a-part-answers-data)."
   {:malli/schema [:=> [:cat :seon.host/namespace] [:maybe [:map-of :symbol :symbol]]]}
   [ns]
-  (not-empty (into {} (for [[from names] repl-helpers s names
+  (not-empty (into {} (for [[from names] agent/repl-names :when ('#{clojure.repl clojure.pprint} from)
+                            s (if (= :all names) (keys (some-> (find-ns from) ns-publics)) names)
                             :let [v (ns-resolve ns s)]
                             :when (and (var? v) (not= from (ns-name (:ns (meta v)))))]
                         [s (symbol (str (ns-name (:ns (meta v)))) (str s))]))))
