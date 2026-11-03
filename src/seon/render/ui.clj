@@ -1798,21 +1798,25 @@
                                       "Its page as it reads it: the render of its ctx, each component's hiccup by its id, the text /context.txt serves, drawn again when its ctx changes."
                                       "Each request as it went on the wire, made again from its turn's record; latest follows the branch live, a turn chosen stays as it was.")]]
       (when context (slot (:id context)))
-      (when strip
-        [:nav {:id "d-steps" :class "flex flex-wrap items-center gap-1 text-xs"}
-         (btn false (if (pos? i) (nth es (dec i)) (first es)) "◀ previous")
-         (for [[j {:keys [e turn origin]}] (map-indexed vector turns)]
-           (btn (= j i) e (str (inc turn) (when (= :outside origin) " read"))))
-         (when to-come? (btn (= :latest at) "latest" (str (inc (count es)) " to come")))
-         (btn false (if (< (inc i) (count es)) (nth es (inc i)) "latest") "next ▶")
-         (btn (= :latest at) "latest" "latest")
-         ;; a turn chosen that is no request of this branch any more (the branch replaced): said, then latest shown
-         (when-let [g (:gone strip)] [:span {:class "text-warning"} (str "the turn chosen (" g ") is no request of this branch: latest is shown")])])
-      (cond turn (slot (:id turn))
-            (not context) [:p {:class "text-text-500"} "no model turn yet"])]
-     :seon.render/units (cond-> []
-                          turn (conj turn)
-                          context (conj context))}))
+      ;; an agent's: its strip and its turn are units, so its layout never moves: a step, a turn added or the first
+      ;; turn patches them in place (a patch reaches only the elements the tab holds)
+      (when-not context (list (slot "d-steps") (slot "d-turn")))]
+     :seon.render/units
+     (cond-> []
+       (not context)
+       (conj {:id "d-steps" :input strip
+              :html (h/html [:nav {:id "d-steps" :class "flex flex-wrap items-center gap-1 text-xs"}
+                             (when (seq turns)
+                               (list (btn false (if (pos? i) (nth es (dec i)) (first es)) "◀ previous")
+                                     (for [[j {:keys [e turn origin]}] (map-indexed vector turns)]
+                                       (btn (= j i) e (str (inc turn) (when (= :outside origin) " read"))))
+                                     (when to-come? (btn (= :latest at) "latest" (str (inc (count es)) " to come")))
+                                     (btn false (if (< (inc i) (count es)) (nth es (inc i)) "latest") "next ▶")
+                                     (btn (= :latest at) "latest" "latest")))
+                             ;; a turn chosen that is no request of this branch any more (the branch replaced): said, then latest shown
+                             (when-let [g (:gone strip)] [:span {:class "text-warning"} (str "the turn chosen (" g ") is no request of this branch: latest is shown")])])}
+             (or turn {:id "d-turn" :input :none :html (h/html [:p {:id "d-turn" :class "text-text-500"} "no model turn yet"])}))
+       context (conj context))}))
 
 (defn root-context
   "What root reads (the declared html render of :seon.render/root-context): its size, then the

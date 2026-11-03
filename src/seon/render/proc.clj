@@ -290,8 +290,8 @@
   "The kept walk of agent e's page (e on main) on its branch, as of bdb, the evals main records it opened
   (:seon.agent/opened) drawn opened: one a branch, held in its read's cell (:branch-reads b :walk, a
   volatile) so every view of the agent (its chat drawn from its branch, @ctx, the debug page's latest)
-  draws from it; built at the first, after it advanced (`advance-walk!`); at the same db and opened,
-  nothing at all. Answers {:w :c}. See docs/render.md#a-page-is-a-kept-walk."
+  draws from it; built at the first, after it advanced (`advance-walk!`), made again when the agent's entity on
+  the branch is not the one it holds (none yet at its first draw); at the same db and opened, nothing at all. Answers {:w :c}. See docs/render.md#a-page-is-a-kept-walk."
   {:malli/schema [:=> [:cat :seon.host/volatile :seon.host/db :any] :map]}
   [cell bdb e]
   (let [opened (set (:seon.agent/opened e))
@@ -299,10 +299,15 @@
         mark (fn [t] (cond-> t (seq opened) (update :evals #(reduce-kv (fn [m k ev] (if (opened (:seon.eval/id ev)) (assoc m k (assoc ev :seon.eval/opened true)) m)) % %))))
         kw @cell]
     (binding [datahike.index.interface/*reads* nil]
+      (let [eid (seon.db/eid bdb :seon.agent/key (:seon.agent/key e))]
       (cond
-        (nil? kw) (vreset! cell (assoc (kept-walk bdb (seon.db/eid bdb :seon.agent/key (:seon.agent/key e)) branch (render/declared-var :seon.render/render-ctx) mark) :opened opened))
+        ;; a walk of another entity than the branch holds now (none, before the agent's first write to its
+        ;; branch; another, a branch made again) is made again: a patch reaches only what its ctx holds
+        (or (nil? kw) (not= eid (get-in kw [:c :tree :db/id])))
+        (do (some-> kw :w render/dispose-walk!)
+            (vreset! cell (assoc (kept-walk bdb eid branch (render/declared-var :seon.render/render-ctx) mark) :opened opened)))
         (and (identical? @(:at kw) bdb) (= opened (:opened kw))) kw
-        :else (vreset! cell (assoc (advance-walk! kw bdb branch mark) :opened opened))))))
+        :else (vreset! cell (assoc (advance-walk! kw bdb branch mark) :opened opened)))))))
 
 (defn- live?
   "Is agent id a process root's view holds, running (it answers what it is asked)?"
@@ -592,7 +597,8 @@
   nothing. Its walk runs inside d/with-reads, and what it read is kept (reindex): one index for
   the dbs it reads, main's and its agent's branch's (a datom of either is matched against both: a
   needless walk at worst, never a missed one). A unit is drawn only when its input changed
-  (step-units)."
+  (step-units). A view whose patch would replace an element its tabs never held (a new unit in no list) is sent
+  whole, a keyframe."
   {:malli/schema [:=> [:cat :map :any] [:tuple :map [:maybe :map]]]}
   [st view-id]
   (let [held (get-in st [:views view-id])
@@ -610,9 +616,14 @@
     (let [units (:seon.render/units out)
           [view patch n] (step-units held units)
           [view patch] (finish-patch view patch (set (map :id units)))
-          view (assoc view :skeleton (h/html (:seon.render/html out)) :layout (:seon.render/html out))]
+          skel (h/html (:seon.render/html out))
+          view (assoc view :skeleton skel :layout (:seon.render/html out))]
       [(-> (hold st view) (update-in [:counts :rendered] (fnil + 0) (:rendered n)) (update-in [:counts :same] (fnil + 0) (:same n)))
-       (when (or (seq (:frags patch)) (seq (:appends patch)) (seq (:prepends patch)) (seq (:afters patch)) (seq (:removes patch)))
+       (cond
+         ;; a patch replaces only elements the tab holds: a unit new to it in no container (its slot in the layout,
+         ;; not a list's) has no element there to replace, so the tab is sent the page whole
+         (and held (some #(not (contains? (:units held) (first %))) (:frags patch))) {:op :keyframe :view view-id :html (compose skel (:units view))}
+         (or (seq (:frags patch)) (seq (:appends patch)) (seq (:prepends patch)) (seq (:afters patch)) (seq (:removes patch)))
          (assoc patch :op :patch :view view-id))]))))
 
 (defn- view-pass

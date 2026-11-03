@@ -647,6 +647,23 @@
       (let [[st4 _] (p/render-proc st2 :from-web {:op :views :views #{} :tabs 0})]
         (is (nil? (get-in st4 [:branch-reads :task-demo-f])))))))
 
+(deftest a-walk-made-before-its-agent-takes-the-agent
+  ;; the browser check of 4bc612cf89: @ctx of a live agent was empty, its walk made at its first draw, before the
+  ;; agent's first write to its branch, so its ctx held no entity and no patch could add one. A walk of another
+  ;; entity than the branch holds is made again
+  (let [[main branch _] (paged-dbs)
+        o (volatile! {})
+        k (seon.task/agent-key "b1" :a3)
+        bare (d/db-with branch [[:db/retractEntity (seon.db/eid branch :seon.agent/key k)]])
+        st (assoc (proc-state main bare) :watch #{:a3})
+        st (assoc-in st [:branch-reads :task-demo-f :walk] (volatile! nil))
+        [st1 _] (#'p/pass-view st :a3)
+        st2 (#'p/answered st1 o [:branch :task-demo-f] {:db branch})
+        html (p/view-html st2 :a3)]
+    (is (not (str/includes? (p/view-html st1 :a3) "data-part=")) "no agent on its branch yet: no parts")
+    (is (str/includes? html "data-part=") "the agent written: its parts")
+    (is (= (seon.db/eid branch :seon.agent/key k) (get-in @(get-in st2 [:branch-reads :task-demo-f :walk]) [:c :tree :db/id])) "the walk holds the agent")))
+
 (deftest a-branch-read-anew-renders-its-components-again
   ;; a branch read after an error has nothing held to diff against: what was cached from that
   ;; branch is rendered again, so a change made while it could not be read is shown
@@ -859,6 +876,40 @@
             (is (str/includes? html "no model provider") "its error, by the error's render")
             (is (str/includes? html "the page's parts whole") "beside what it sent")))))))
 
+(deftest a-page-opened-before-its-first-turn-takes-it
+  ;; the browser check of 4bc612cf89: a debug page opened at "no model turn yet" never showed the turns that
+  ;; came (496 patches whose targets its tab did not hold): its strip and turn were its layout, not units. Now a
+  ;; view's layout never moves on a turn (its units patch in place), and a view whose layout does move is sent whole
+  (ts/test-branch!
+    (fn [_ conn]
+      (let [[st _ [e0 e1]] (debug-state conn)
+            view [:debug :a1]
+            db (get-in st [:branches view :db])
+            none (d/db-with db [[:db/retractEntity e0] [:db/retractEntity e1]])
+            at #(-> % (assoc :main-db %2) (assoc-in [:branches view :db] %2))
+            [st0 _] (#'p/pass-view (at st none) view)
+            [st1 msg] (#'p/pass-view (at st0 db) view)]
+        (is (str/includes? (p/view-html st0 view) "no model turn yet"))
+        (is (= :patch (:op msg)) "the first turn is a patch of the tab's own elements")
+        (is (= (get-in st0 [:views view :skeleton]) (get-in st1 [:views view :skeleton])) "the layout did not move")
+        (is (every? #(contains? (get-in st0 [:views view :units]) %) (map first (:frags msg))) "each element it replaces, the tab holds")
+        (is (every? #(str/includes? (get-in st0 [:views view :skeleton]) (str "<!--s:" % "-->")) ["d-steps" "d-turn"]) "its slots are there before any turn")
+        (is (= #{"d-steps" "d-turn"} (set (map first (:frags msg)))) "the patch replaces the strip and the turn")
+        (is (str/includes? (p/view-html st1 view) "to come"))))))
+
+(deftest a-patch-it-could-not-place-is-the-page-whole
+  ;; a patch replaces only elements a tab holds: a page that was its error (no agent a3 on main yet) and becomes
+  ;; the agent's page has units in no list (its caption) the tab never held, so the tab is sent the page whole
+  (let [[main branch _] (paged-dbs)
+        k (seon.task/agent-key "b1" :a3)
+        none (d/db-with main [[:db/retractEntity (seon.db/eid main :seon.agent/key k)]])
+        st (assoc (proc-state none branch) :watch #{[:chat :a3]})
+        [st0 m0] (#'p/pass-view st [:chat :a3])
+        [st1 m1] (#'p/pass-view (assoc st0 :main-db main) [:chat :a3])]
+    (is (nil? m0))
+    (is (= :keyframe (:op m1)) "the page whole")
+    (is (= (p/view-html st1 [:chat :a3]) (:html m1)) "as the tab would load it")))
+
 (deftest a-chosen-turn-draws-once-and-latest-draws-on-a-move
   ;; task seon.render/the-debug-page-is-the-wire-request: a turn chosen is its eid, so a move of the branch
   ;; draws nothing of it; latest's input is the branch's commit, so a move draws it again, once
@@ -1033,7 +1084,7 @@
         st' (#'p/pass st o)
         page (some #(when (= 1 (:k %)) (:html %)) (:to-web @o))]
     (is (str/includes? (str page) "no model turn yet") "its page says there is no turn")
-    (is (= {} (get-in st' [:views debug :units])) "held with no units")))
+    (is (= #{"d-steps" "d-turn"} (set (keys (get-in st' [:views debug :units])))) "held with its strip and its turn's place, no turn in it")))
 
 (deftest a-view-that-throws-answers-its-page-with-the-error
   ;; root, 2026-10-26: a render that threw stopped every pass of the render proc, and every page
