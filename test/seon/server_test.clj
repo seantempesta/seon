@@ -12,7 +12,7 @@
 
 (deftest seon-agents-answers-what-is-live
   ;; seon_agents answered every task on main (580 on the standing root, most :held or
-  ;; :cancelled with no run), so an outside agent never saw what runs
+  ;; :cancelled with no agent), so an outside agent never saw what runs
   (ts/test-branch!
    (fn [_ conn]
      (let [before (:others (seon.server/live-tasks @conn))
@@ -92,9 +92,9 @@
 
 (deftest a-refused-attach-writes-nothing
   ;; task seon.server/attach-writes-nothing-when-it-is-refused: attach spawns first and
-  ;; writes the env, the release and the run in one transaction only once its agent
+  ;; writes the env, the release and the start in one transaction only once its agent
   ;; exists, so a refused spawn leaves the task as it was, and the reconciler never sees a
-  ;; release with no run (it would spawn a second agent for it). <ns>/u shares <ns>/t's
+  ;; release with no agent (it would spawn a second agent for it). <ns>/u shares <ns>/t's
   ;; branch, which <ns>/t's attached agent holds
   (let [[refused seen] (at/in-agent (fn [{:keys [ns]}]
                                       (let [u (str ns "/u")]
@@ -109,11 +109,11 @@
     (clojure.test/is (clojure.string/includes? (pr-str refused) "is held by live agent") "the attach is refused: the t task's agent holds the branch")
     (clojure.test/is (= [:held nil false] (:value seen)) "and wrote nothing: the u task is still held, with no env and no agent")))
 
-(deftest an-attached-agent-holds-its-run
+(deftest an-attached-agent-holds-its-task
   ;; agent view's browser check: an agent attached from outside (seon.server/attach!
-  ;; spawns it before it writes the run on main, so its branch is cut without the run) held no
-  ;; task in @ctx (then under :runs; now :task, the-agent-is-the-unit-not-the-run), and its page no task, until a turn or a context read began the run. Forked for
-  ;; a run, the agent records it on its branch as it starts (seon.agent/begin-run!): before any turn
+  ;; spawns it before it writes the start on main, so its branch is cut without the task) held no
+  ;; task in @ctx, and its page no task, until a turn or a context read began its work. Forked for
+  ;; a task, the agent records it on its branch as it starts (seon.agent/begin-run!): before any turn
   (let [names (volatile! nil)
         [held] (at/in-agent (fn [n] (vreset! names n) ["(let [t @seon.ctx/ctx] [(contains? t :runs) (get-in t [:task :seon.task/id])])"]))]
     (is (= [false (:task @names)] (:value held)) "its task, in its record, and no runs")))
@@ -128,23 +128,24 @@
     (is (= :running (:value current)) "the agent reads its task running, as main does")
     (is (clojure.string/includes? (:value page) "· running") "and so does its page")))
 
-(defn- in-run
-  "Root-REPL code that evaluates form in the agent run rid works, answering its value (read back
+(defn- in-agent-of
+  "Root-REPL code that evaluates form in the agent that works task id, answering its value (read back
   from the response's text, as the server's reader does)."
-  [rid form]
-  (str "(let [a (some #(when (= " (pr-str rid) " (:seon.run/id %)) (:seon.run/agent %)) (seon.task/running @(:conn sys)))]"
+  {:malli/schema [:=> [:cat :seon.task/id :any] :string]}
+  [id form]
+  (str "(let [a (some #(when (= " (pr-str id) " (:task %)) (:agent %)) (seon.task/running @(:conn sys)))]"
        " (:value (clojure.edn/read-string {:default tagged-literal} (:text @(c/submit! sys a " (pr-str form) ")))))"))
 
 (deftest a-reset-starts-the-task-again-from-main
   ;; the owner (2026-10-27): reset an agent easily. seon_attach {:fresh true}: a new branch cut from
-  ;; main and an empty conversation; the old branch and its runs stay, the record
+  ;; main and an empty conversation; the old branch and its records stay
   (let [[_ reset branch seen] (at/in-agent (fn [{:keys [ns task]}]
                                              [(str "(ns " ns ") (def x 41)")
                                               {:op :attach :task task :fresh true}
                                               {:op :eval :agent "root" :code (str "(:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))")}
-                                              {:op :eval :agent "root" :code (in-run (str task "#2") (str "[(some-> (find-ns '" ns ") (ns-resolve 'x)) (count (:evals @seon.ctx/ctx))]"))}]))]
-    (is (clojure.string/ends-with? (:run reset) "#2") (pr-str reset))
-    (is (clojure.string/ends-with? (name (:value branch)) "-r2") "the task's branch is a new one")
+                                              {:op :eval :agent "root" :code (in-agent-of task (str "[(some-> (find-ns '" ns ") (ns-resolve 'x)) (count (:evals @seon.ctx/ctx))]"))}]))]
+    (is (keyword? (:agent reset)) (pr-str reset))
+    (is (re-find #"-r[0-9a-f-]{36}$" (name (:value branch))) "the task's branch is a new one")
     (is (= [nil 0] (:value seen)) "whose agent holds nothing the old one defined, and no conversation")))
 
 (deftest a-fork-goes-on-from-an-agents-head
@@ -154,16 +155,16 @@
                                           [(str "(ns " ns ") (def x 41)")
                                            {:op :attach :from agent}
                                            {:op :eval :agent "root" :code (str "(:seon.task/plan (seon.task/task @(:conn sys) \"" ns "/t-fork-1\"))")}
-                                           {:op :eval :agent "root" :code (in-run (str ns "/t-fork-1#1") (str "[(some-> (find-ns '" ns ") (ns-resolve 'x) deref) (some? (datahike.api/entity (seon.agent/db) [:var/name '" ns "/x]))]"))}]))]
+                                           {:op :eval :agent "root" :code (in-agent-of (str ns "/t-fork-1") (str "[(some-> (find-ns '" ns ") (ns-resolve 'x) deref) (some? (datahike.api/entity (seon.agent/db) [:var/name '" ns "/x]))]"))}]))]
     (is (clojure.string/ends-with? (str (:task fork)) "/t-fork-1") (pr-str fork))
     (is (= "Work." (:value plan)) "the sibling task holds the task's plan")
     (is (= [41 true] (:value seen)) "and its agent what the forked one defined, live and on its branch")))
 
 (deftest an-agent-attached-by-one-client-is-refused-to-another
   ;; root, 2026-10-27: one session's seon_done named another session's agent (a1, not its own a2)
-  ;; and ended that run red. An agent attached by a client (bin/mcp stamps each request with its
+  ;; and ended that task red. An agent attached by a client (bin/mcp stamps each request with its
   ;; own) answers done, eval and message to that client, or to a request that names its task; any
-  ;; other is refused, naming who holds it, and the run stays open
+  ;; other is refused, naming who holds it, and the task stays open
   (let [[other-done other-eval other-message own named open]
         (at/in-agent (fn [{:keys [agent task]}]
                        [{:op :done :agent agent :client "c2"}
@@ -171,14 +172,14 @@
                         {:op :message :agent agent :body "hi" :client "c2"}
                         {:op :eval :agent agent :code "(+ 1 2)" :client "c1"}
                         {:op :eval :agent agent :code "(+ 2 2)" :client "c2" :task task}
-                        {:op :eval :agent "root" :code (str "(boolean (some #(= " (pr-str task) " (:seon.run/task %)) (seon.task/running @(:conn sys))))")}])
+                        {:op :eval :agent "root" :code (str "(boolean (some #(= " (pr-str task) " (:task %)) (seon.task/running @(:conn sys))))")}])
                      {:client "c1"})]
     (doseq [a [other-done other-eval other-message]]
       (is (= :seon.server/held (:seon.error/type a)) (pr-str a))
       (is (clojure.string/includes? (str (:seon.error/message a)) "c1") "naming who holds it"))
     (is (= 3 (:value own)) "its own client's eval answers")
     (is (= 4 (:value named)) "and so does one that names the agent's task")
-    (is (true? (:value open)) "the refused done left the run open")))
+    (is (true? (:value open)) "the refused done left the task open")))
 
 (deftest a-message-reaches-the-agent
   ;; task seon.render/a-debug-view-of-any-agent (parity row 73): the owner's message, sent as
@@ -267,8 +268,7 @@
   ;; written, so the done rule refuses, the task is held, and the answer says why
   (let [[done] (at/in-agent #(vector {:op :done :agent (:agent %)}))]
     ;; the answer is one line and the handle that reads the whole verdict (seon.server/verdict-line)
-    (is (clojure.string/includes? (:line done) ":status :closed") (pr-str done))
-    (is (clojure.string/includes? (:line done) ":outcome :red") (pr-str done))
+    (is (clojure.string/includes? (:line done) ":outcome :closed") (pr-str done))
     (is (clojure.string/includes? (:line done) "proof-unknown demo-test/t")
         "the done rule's reasons, as the judge wrote them on the held task")
     (is (clojure.string/includes? (:handle done) "seon.server/verdict"))))
@@ -333,9 +333,9 @@
   ;; so seon.context/drawn-parts, the cold draw, is never called, and it equals the cold draw on the db it is drawn to
   (let [[reads]
         (at/in-agent (fn [{:keys []}]
-                       [(str "(let [t (:task @seon.agent/state) r (:run @seon.agent/state)"
+                       [(str "(let [t (:task @seon.agent/state)"
                              " m (fn [] (let [v (volatile! nil)]"
-                             "           (seon.profile/measure! #(count (seon.turn/context-block t r true)) (fn [d] (vreset! v d)))"
+                             "           (seon.profile/measure! #(count (seon.turn/context-block t true)) (fn [d] (vreset! v d)))"
                              "           {:ticks (:ticks @v) :bytes (:bytes @v)"
                              "            :main (let [db (first (seon.repl/page-hiccup))] (:seon.agent/main-commit (datahike.api/entity db (seon.db/eid db :seon.agent/key (:key @seon.agent/state)))))"
                              "            :pages (some (fn [f] (when (= 'seon.context/drawn-parts (:var f)) (:calls f))) (seon.profile/touched))}))]"
@@ -407,7 +407,7 @@
     (is (= [(:agent attached) (:task attached)] [(:agent again) (:task again)]) "attaching again answers the same agent and task")
     (is (contract/error? other) "v's branch is t's, which t's agent holds: refused, as an answer, never a server defect")
     (is (= :seon.root/refused (:seon.error/type other)) (pr-str other))
-    (is (re-find #"held by live agent :a\d+ working t[0-9a-f]+/t \(run t[0-9a-f]+/t#1\)" (str (:seon.error/message other))) (pr-str other))))
+    (is (re-find #"held by live agent :a\d+ working t[0-9a-f]+/t: its seon_done" (str (:seon.error/message other))) (pr-str other))))
 
 (deftest a-prove-never-ends-the-agent-it-proves
   ;; THE PLAN 0.7 (root, 2026-10-27): after seon_prove, the outside agent had ended ("agent a7
@@ -433,7 +433,7 @@
     (is (not (contract/error? main-proved)) (pr-str main-proved))
     (is (= 3 (:value after2)) (str "and after a prove of main: " (pr-str after2)))
     (is (true? (:value live2)))
-    (is (not (contract/error? (:value failed))) (str "its fail! records on its run: " (pr-str failed)))))
+    (is (not (contract/error? (:value failed))) (str "its fail! records on its task: " (pr-str failed)))))
 
 ;; See docs/merging.md#main-moved-is-said-at-every-eval
 (deftest the-done-answer-is-a-line-and-a-handle
@@ -441,31 +441,35 @@
   ;; with every red. A line, each red with its first failure, cut by the one printer, and the form
   ;; that reads the whole
   (let [reds (vec (for [i (range 300)] (symbol "a.t-test" (str "x" i))))
-        db (d/db-with (ts/test-db) [{:seon.task/id "a/t" :seon.task/execution :held
+        db (d/db-with (ts/test-db) [{:seon.task/id "a/t" :seon.task/execution :held :seon.task/outcome :closed :seon.task/reason "red"
                                      :seon.task/failure {:reason (str "proof-red " (clojure.string/join " " reds))}
-                                     :seon.task/evidence {:from "a/t#1" :conflicts [] :unmerged [] :red reds}}
-                                    {:seon.run/id "a/t#1" :seon.run/status :closed :seon.run/outcome :red :seon.run/reason "red"
-                                     :seon.run/failures {'a.t-test/x0 [{:type :fail :message "expected 1, got 2"}]}}])
-        {:keys [line handle]} (seon.server/verdict-line db "a/t#1" "a/t" "main moved since your base: 2 names changed")]
+                                     :seon.task/evidence {:from "a/t" :conflicts [] :unmerged [] :red reds}
+                                     :seon.task/failures {'a.t-test/x0 [{:type :fail :message "expected 1, got 2"}]}}])
+        {:keys [line handle]} (seon.server/verdict-line db "a/t" "main moved since your base: 2 names changed")]
     (is (clojure.string/includes? line "expected 1, got 2") (str "a red with its first failure: " line))
     (is (clojure.string/includes? line "main moved since your base") "how main differs, so nothing at done is new")
     (is (< (count line) 4000) (str "300 reds, one line: " (count line) " characters"))
-    (is (= "(seon.server/verdict @(:conn sys) \"a/t#1\" \"a/t\")" handle) "the form that reads it whole")))
+    (is (= "(seon.server/verdict @(:conn sys) \"a/t\")" handle) "the form that reads it whole")))
 
 (deftest a-dead-agent-never-wedges-its-task
   ;; one-wait's real run (root, 2026-10-28): an agent that died left its task :running, and
   ;; seon_attach answered the dead agent, shared, so every eval said "agent a2 ended" with no way back.
-  ;; A death is a fact root's view holds: attach closes the dead run and starts a fresh agent on its branch
-  (let [kill (fn [ns] {:op :eval :agent "root"
-                       :code (str "(let [ev (c/events sys) r (some #(when (= \"" ns "/u\" (:seon.run/task %)) %) (seon.task/running @(:conn sys)))"
-                                  "      a (:seon.run/agent r)]"
+  ;; A death is a fact root's view holds: attach continues the session's agent on its branch with a new process
+  (let [agent-of "(some #(when (= \"%s/u\" (:task %%)) %%) (seon.task/running @(:conn sys)))"
+        pid-of (fn [ns] {:op :eval :agent "root"
+                         :code (str "(:pid (get (:agents (c/state sys)) (:agent " (format agent-of ns) ")))")})
+        key-of (fn [ns] {:op :eval :agent "root" :code (str "(:seon.task/agent (seon.task/task @(:conn sys) \"" ns "/u\"))")})
+        kill (fn [ns] {:op :eval :agent "root"
+                       :code (str "(let [ev (c/events sys) r " (format agent-of ns)
+                                  "      a (:agent r)]"
                                   "  (c/kill! sys a)"
                                   "  (loop [] (let [e (clojure.core.async/<!! ev)] (when-not (and (#{:ended :dead :killed} (:type e)) (= a (:agent e))) (recur))))"
                                   "  (clojure.core.async/untap (:events-mult sys) ev) a)")})
-        [first-a _ second-a]
-        (at/in-agent (fn [{:keys [ns]}] [{:op :attach :task (str ns "/u")} (kill ns) {:op :attach :task (str ns "/u")}])
+        [first-a pid1 key1 _ second-a pid2 key2]
+        (at/in-agent (fn [{:keys [ns]}] [{:op :attach :task (str ns "/u")} (pid-of ns) (key-of ns) (kill ns) {:op :attach :task (str ns "/u")} (pid-of ns) (key-of ns)])
                      {:decls (fn [_] [{:seon.task/name "u" :seon.task/plan "Work too." :seon.task/kind :work :seon.task/proofs #{'demo-test/u}}])})]
     (is (keyword? (:agent first-a)) (pr-str first-a))
     (is (keyword? (:agent second-a)) (str "attach after the death starts an agent: " (pr-str second-a)))
-    (is (not= (:agent first-a) (:agent second-a)) "a fresh one, never the dead one")
-    (is (not (:shared second-a)) "its own run, not the dead agent's")))
+    (is (and (string? (:value key1)) (= (:value key1) (:value key2))) (str "the session's agent continues (its key), as a retry after a death is: " (pr-str [key1 key2])))
+    (is (and (int? (:value pid1)) (int? (:value pid2)) (not= (:value pid1) (:value pid2))) (str "in a new process, never the dead one: " (pr-str [pid1 pid2])))
+    (is (not (:shared second-a)) "its own start, not the dead agent's")))

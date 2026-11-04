@@ -51,7 +51,7 @@
   {:malli/schema [:=> [:cat :seon.host/db] [:map [:tasks :map] [:others :map] [:all :any]]]}
   [db]
   (let [idx (r/index db)
-        started (fn [id] (get-in idx [:agents (get-in idx [:tasks id :seon.task/agent]) :seon.agent/started-ms] 0))
+        started (fn [id] (or (some->> (get-in idx [:tasks id :seon.task/agent]) (vector :seon.agent/key) (d/entity db) :seon.agent/started-ms) 0))
         all (task-summaries db idx)
         live? (fn [[_ s]] (or (= :running (:execution s)) (:agent s)))]
     {:tasks (apply array-map (mapcat identity (sort-by (comp started key) #(compare %2 %1) (filter live? all))))
