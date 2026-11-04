@@ -785,7 +785,7 @@
   "Record v of schema k as the conversation sends it: the model render k declares, a function of that record alone (and of db, for an eval that names its basis). See
   docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
   {:malli/schema [:=> [:cat :qualified-keyword :map [:maybe :seon.host/db]] [:vector :seon.model/message]]}
-  [k v db] (:value (render/model-with (vary-meta v assoc :seon.render/schema k) {:db db})))
+  [k v db] (:value (render/model (vary-meta v assoc :seon.render/schema k) {:db db})))
 
 (defn printed-run
   "The session's records new since cache (items, [ref v k position] in order, ref [:eval id], [:message

@@ -1001,7 +1001,7 @@
   ;; keeps, so a var, a fn and a data value read alike to both; the live value stays at the handle
   (let [old @agent/state
         ev (fn [code] (try (reset! agent/state {:n 0 :ns (the-ns 'user)})
-                           (repl/eval-string code {:origin :model :call-id "c1"})
+                           (repl/eval-string code {:origin :outside :call-id "c1"})
                            (finally (reset! agent/state old))))]
     (doseq [code ["#'clojure.core/inc" "(fn [x] x)" "{:a 1 :b [1 2 3] :c \"text\"}" "(throw (ex-info \"boom\" {:k 1}))"]]
       (let [r (ev code)

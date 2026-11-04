@@ -1063,7 +1063,7 @@
                                                      "  (seon.reconcile/task-state (seon.reconcile/index @(:conn sys)) " (pr-str task) ")])")}])
                                       {:own-root? true})
         [run state] (:value seen)]
-    (is (str/includes? (:text t) ":value #'demo-test/t") (pr-str t))
+    (is (str/includes? (:text t) ":value demo-test/t") (pr-str t))
     (is (and (str/includes? (:line done) ":outcome :green") (re-find #":status :(done|merged)" (:line done))) (str "the answer is the verdict line: " (pr-str done)))
     (is (= :green (:seon.run/outcome run)) (pr-str run))
     (is (#{:done :merged} state) (str "the task finishes, never held for root: " state))))
