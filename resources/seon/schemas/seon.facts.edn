@@ -149,8 +149,8 @@
  ;; what is stored of an eval's answer (:seon.repl/answer): its value made plain (seon.repl/record-details)
  :seon.eval/response [:and :seon.repl/answer :seon.db/plain]
  ;; an eval's details, each its own attribute, each only when present (seon.repl/record-details): the code; the
- ;; model's prose beside the call; the provider's call id, the call's place in its reply (:call) and the
- ;; reply's text (:content); its reasoning; its run (until runs go); its 10 costliest contracted functions
+ ;; model's prose beside the call; the provider's call id (the reply's text and reasoning are its model call's,
+ ;; :seon.model-call/reply, which an eval's turn number names); its run (until runs go); its 10 costliest contracted functions
  ;; ([{:var :calls :ms}], seon.profile); a value that names its render schema keeps that schema, and a value
  ;; that names its basis (@ctx, seon.ctx) the basis it is rendered from, in place of a copy (the page and the
  ;; model draw it from the branch at its t). The response is :seon.eval/response, whole, its value as plain data
@@ -159,9 +159,6 @@
  :seon.eval/code :string
  :seon.eval/prose :string
  :seon.eval/call-id :string
- :seon.eval/call :int
- :seon.eval/content :string
- :seon.eval/reasoning :string
  :seon.eval/run :string
  ;; the agent's turn number in force when it was written (0 before its first turn; absent on root's)
  :seon.eval/turn :int
@@ -200,8 +197,7 @@
  :seon.db/eval-fact [:map {:seon.db/attributes true :seon.render/html seon.render.ui/evaluation :seon.render/model seon.context/eval-messages}
                      [:seon.eval/id :seon.eval/id] [:seon.eval/agent :seon.eval/agent] [:seon.eval/by {:optional true} :seon.eval/by]
                      [:seon.eval/code :seon.eval/code] [:seon.eval/prose {:optional true} :seon.eval/prose]
-                     [:seon.eval/call-id {:optional true} :seon.eval/call-id] [:seon.eval/call {:optional true} :seon.eval/call]
-                     [:seon.eval/content {:optional true} :seon.eval/content] [:seon.eval/reasoning {:optional true} :seon.eval/reasoning]
+                     [:seon.eval/call-id {:optional true} :seon.eval/call-id]
                      [:seon.eval/schema {:optional true} :seon.eval/schema] [:seon.eval/basis {:optional true} :seon.eval/basis]
                      [:seon.eval/fns {:optional true} :seon.eval/fns] [:seon.eval/run {:optional true} :seon.eval/run] [:seon.eval/turn {:optional true} :seon.eval/turn]
                      [:seon.eval/response :seon.eval/response] [:seon.eval/opened {:optional true} :seon.eval/opened]]
@@ -641,7 +637,7 @@
                    [:model {:optional true} :string]]
  ;; what a model turn's request sent, the records it rendered in order (seon.context/request, parts-of):
  ;; the system prompt's section and the task, each as of a t; an eval or message by id, an eval with the fold it was
- ;; sent with (its value or output an earlier record showed: the handle there); a reply that called nothing by its model call's id
+ ;; sent with (its value or output an earlier record showed: the handle there); a reply (its text and reasoning, and its calls' place among them) by its model call's id
  :seon.model-call/sent [:vector [:or [:tuple [:enum :section :task] :int :int] [:tuple [:enum :eval :message :reply :session] :string]
                                       ;; an example session a request sent whole (seon.context/example-messages), as of its newest record's t
                                       [:tuple [:= :example] :string :int] [:tuple [:= :eval] :string [:map-of :keyword :symbol]]

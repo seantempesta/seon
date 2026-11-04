@@ -119,7 +119,7 @@
               "e3" {:code "(other)" :value (vec rows) :out "other\n"}}
         db (d/db-with (db-with-program) (for [[id r] recs]
                                           {:seon.eval/id id :seon.eval/by "a1"
-                                           :seon.eval/code (:code r) :seon.eval/call-id (str "c" id) :seon.eval/call 0 :seon.eval/response {:handle (symbol "result" id) :value (:value r) :out (:out r) :ms 1}}))
+                                           :seon.eval/code (:code r) :seon.eval/call-id (str "c" id) :seon.eval/response {:handle (symbol "result" id) :value (:value r) :out (:out r) :ms 1}}))
         ev (fn [id] [[:eval id] (d/pull db '[*] [:seon.eval/id id]) :seon.db/eval-fact 1])
         after (#'context/printed-run (mapv ev ["e1" "e2" "e3"]) nil db)]
     (doseq [id ["e1" "e2" "e3"]
@@ -308,15 +308,16 @@
   ;; scrollback. Each eval renders its own part (seon.context/eval-messages): the assistant message with
   ;; the call, then the response as a tool message; the provider's format folds a reply's calls
   ;; into one assistant message (docs/render.md, the request is a render)
-  (let [ev (fn [id call prose value] (cond-> {:seon.eval/id id :seon.eval/by "a1" :seon.eval/code (str "(" id ")") :seon.eval/response {:handle (symbol "result" id) :value value} :seon.eval/call-id (str "c-" id) :seon.eval/call call} prose (assoc :seon.eval/content prose)))
-        ms (into [] (mapcat #(context/eval-messages {} %)) [(ev "e1" 0 "R0" "E1") (ev "e2" 0 nil "E2") (ev "e3" 1 nil "E3")])]
+  (let [ev (fn [id value] {:seon.eval/id id :seon.eval/by "a1" :seon.eval/code (str "(" id ")") :seon.eval/response {:handle (symbol "result" id) :value value} :seon.eval/call-id (str "c-" id) :seon.eval/turn 1})
+        ms (into [] (mapcat #(context/eval-messages {} %)) [(ev "e1" "E1") (ev "e2" "E2") (ev "e3" "E3")])]
     (is (= ["assistant" "tool" "assistant" "tool" "assistant" "tool"] (mapv :role ms)) "each eval its call and its response")
-    (is (= {:role "assistant" :content "R0" :tool-calls [{:id "c-e1" :code "(e1)"}] :call 0} (first ms)))
+    (is (= {:role "assistant" :content "" :tool-calls [{:id "c-e1" :code "(e1)"}] :reply 1} (first ms)) "the call alone, naming its reply")
     (is (= {:role "tool" :tool-call-id "c-e1" :content "{:handle result/e1, :value \"E1\"}"} (second ms)))
     (let [wire (seon.model/wire-messages true ms)]
-      (is (= ["assistant" "tool" "assistant" "tool" "tool"] (mapv :role wire)) "a reply's two calls are one assistant message")
-      (is (= ["c-e2" "c-e3"] (mapv :id (:tool_calls (nth wire 2)))))
-      (is (= ["c-e2" "c-e3"] (mapv :tool_call_id (subvec wire 3 5))) "each call answered, in order")))
+      (is (= ["assistant" "tool" "tool" "tool"] (mapv :role wire)) "a reply's three calls are one assistant message")
+      (is (= ["c-e1" "c-e2" "c-e3"] (mapv :id (:tool_calls (nth wire 0)))))
+      (is (= ["c-e1" "c-e2" "c-e3"] (mapv :tool_call_id (subvec wire 1 4))) "each call answered, in order")
+      (is (not-any? #(contains? % :reply) wire) "the reply's number never reaches the wire")))
   (testing "a user's form is one user message carrying its response"
     (is (= [{:role "user" :content "{:by \"user\" :code \"(+ 1 2)\" :response {:handle result/e4, :value 3}}"}]
            (context/eval-messages {} {:seon.eval/by "user" :seon.eval/code "(+ 1 2)" :seon.eval/response {:handle 'result/e4 :value 3}})))))
@@ -398,7 +399,7 @@
                                                :seon.task/proofs #{'demo-test/f-test}}]))
       (d/transact conn [{:seon.run/id "demo/f#1" :seon.run/task [:seon.task/id "demo/f"] :seon.run/agent {:seon.agent/key "b/a1" :seon.agent/task {:seon.task/id "demo/f"}}}])
       (let [call! (fn [n] (d/transact conn [{:seon.eval/id (str "e" n) :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key "b/a1"}
-                                             :seon.eval/code (str "(+ " n " 1)") :seon.eval/response {:handle (symbol "result" (str "e" n)) :value (inc n)} :seon.eval/run "demo/f#1" :seon.eval/turn n :seon.eval/call-id (str "c" n) :seon.eval/call 0 :seon.eval/prose (str "Step " n ".")}]))
+                                             :seon.eval/code (str "(+ " n " 1)") :seon.eval/response {:handle (symbol "result" (str "e" n)) :value (inc n)} :seon.eval/run "demo/f#1" :seon.eval/turn n :seon.eval/call-id (str "c" n) :seon.eval/prose (str "Step " n ".")}]))
             ;; as seon.turn goes: the turn recorded, its request made on the db that holds it, what it sent added
             request (fn [n] (let [b {:commit (d/commit-id @conn) :task "demo/f" :run "demo/f#1" :turn n :max-turns 4 :origin :model :agent "b/a1"}
                                   _ (d/transact conn (turn-of b n))
@@ -546,14 +547,78 @@
 
 (deftest a-turns-reasoning-goes-back-with-its-reply
   ;; DeepSeek's thinking mode with tools needs each earlier reply's reasoning_content sent back
-  ;; (a 400 otherwise, measured: docs/model.md): the reply's first eval carries it,
+  ;; (a 400 otherwise, measured: docs/model.md): the reply's own message (its model call's) carries it,
   ;; exactly as returned, and the provider's format sends it unless replay-reasoning is false
-  (let [ms (context/eval-messages {} {:seon.eval/by "a1" :seon.eval/code "(f 3)" :seon.eval/response {:value 9} :seon.eval/call-id "c1" :seon.eval/call 0 :seon.eval/prose "f triples." :seon.eval/reasoning "Square it first."})
-        assistant (first ms)]
-    (is (= "Square it first." (:reasoning assistant)))
-    (is (not-any? :reasoning (rest ms)))
+  (let [reply (context/turn-messages {} {:seon.model-call/n 1 :seon.model-call/reply "" :seon.model-call/reasoning "Square it first."})
+        evals (context/eval-messages {} {:seon.eval/by "a1" :seon.eval/code "(f 3)" :seon.eval/response {:value 9} :seon.eval/call-id "c1" :seon.eval/prose "f triples." :seon.eval/turn 1})
+        ms (into reply evals)]
+    (is (= "Square it first." (:reasoning (first reply))))
+    (is (not-any? :reasoning evals))
+    (is (= ["assistant" "tool"] (mapv :role (seon.model/wire-messages true ms))) "one assistant message, its call in it")
     (is (= "Square it first." (:reasoning_content (first (seon.model/wire-messages true ms)))))
-    (is (not (contains? (first (seon.model/wire-messages false ms)) :reasoning_content)) "replay false leaves it out")))
+    (is (= ["c1"] (mapv :id (:tool_calls (first (seon.model/wire-messages true ms))))))
+    (is (not (contains? (first (seon.model/wire-messages false ms)) :reasoning_content)) "replay false leaves it out")
+    (is (= [] (context/turn-messages {} {:seon.model-call/n 2 :seon.model-call/reply ""})) "a reply with neither text nor reasoning makes no message")))
+
+(defn- model-call-fact
+  "Model call n of agent b/a1 as the turn loop writes it, with more."
+  [n more]
+  (merge {:seon.model-call/id (str "b/a1/" n) :seon.model-call/agent [:seon.agent/key "b/a1"] :seon.model-call/n n :seon.model-call/origin :model} more))
+
+(defn- reply-world
+  "The conversation of agent b/a1 on the world, as ctx holds it: model call 1 (text \"I look.\", reasoning \"think\") with evals e1 e2
+  e3, call 2 (\"Then.\", \"more\") with e4 e5, call 3 (no text, reasoning \"quiet\") with e6. Answers [db ctx-value]."
+  []
+  (let [ev (fn [n turn] {:seon.eval/id (str "e" n) :seon.eval/by "a1" :seon.eval/agent [:seon.agent/key "b/a1"] :seon.eval/turn turn :seon.eval/call-id (str "c" n)
+                         :seon.eval/code (str "(f " n ")") :seon.eval/response {:handle (symbol "result" (str "e" n)) :value n} :seon.eval/prose (str "Call " n ".")})
+        db (t/with (t/world)
+                   [{:seon.agent/key "b/a1" :seon.agent/id :a1 :seon.agent/turn 3}]
+                   [(model-call-fact 1 {:seon.model-call/forms 3 :seon.model-call/reply "I look." :seon.model-call/reasoning "think"})
+                    (model-call-fact 2 {:seon.model-call/forms 2 :seon.model-call/reply "Then." :seon.model-call/reasoning "more"})
+                    (model-call-fact 3 {:seon.model-call/forms 1 :seon.model-call/reply "" :seon.model-call/reasoning "quiet"})
+                    (ev 1 1) (ev 2 1) (ev 3 1) (ev 4 2) (ev 5 2) (ev 6 3)])]
+    [db (:tree (ctx/build db (pdb/eid db :seon.agent/key "b/a1") :b))]))
+
+(defn- wire-without
+  "The wire messages of the conversation of `reply-world` with the evals ids of its ctx unlinked (what swap! on @ctx does)."
+  [ids]
+  (let [[db c] (reply-world)
+        rs (context/records (update c :evals #(apply dissoc % (map (partial pdb/eid db :seon.eval/id) ids))) db)
+        printed (#'context/printed-run (mapv (fn [[_ v k]] [(#'context/ref-of v) v k]) rs) nil db)]
+    (seon.model/wire-messages true (into [] (mapcat #(:whole (get-in printed [:parts %]))) (:ids printed)))))
+
+(defn- reply-shape
+  "Each assistant wire message of wire as [text reasoning [call ids]]."
+  [wire] (vec (for [m wire :when (= "assistant" (:role m))] [(:content m) (:reasoning_content m) (mapv :id (:tool_calls m))])))
+
+(deftest cutting-a-replys-calls-leaves-one-assistant-message-per-reply
+  ;; docs/render.md#the-models-context-a-cached-prefix-then-the-turn: a reply's text and reasoning are its model call's, never an
+  ;; eval's, and evals fold by the reply they belong to: unlinking one (swap! on @ctx) cannot attach another to an earlier reply
+  (testing "nothing cut: one assistant message per reply, its calls in order, each answered after it"
+    (let [wire (wire-without [])]
+      (is (= [["I look." "think" ["c1" "c2" "c3"]] ["Then." "more" ["c4" "c5"]] ["" "quiet" ["c6"]]] (reply-shape wire)))
+      (is (= ["assistant" "tool" "tool" "tool" "assistant" "tool" "tool" "assistant" "tool"] (mapv :role wire)))
+      (is (= ["c1" "c2" "c3" "c4" "c5" "c6"] (keep :tool_call_id wire)) "answered in order")))
+  (testing "a reply's first call cut: its other calls stay on it, with its text and reasoning"
+    (is (= [["I look." "think" ["c2" "c3"]] ["Then." "more" ["c4" "c5"]] ["" "quiet" ["c6"]]] (reply-shape (wire-without ["e1"])))))
+  (testing "a middle call cut"
+    (is (= [["I look." "think" ["c1" "c3"]] ["Then." "more" ["c4" "c5"]] ["" "quiet" ["c6"]]] (reply-shape (wire-without ["e2"])))))
+  (testing "the calls of the second reply cut: the first is untouched, the second keeps its text"
+    (let [wire (wire-without ["e4" "e5"])]
+      (is (= [["I look." "think" ["c1" "c2" "c3"]] ["Then." "more" []] ["" "quiet" ["c6"]]] (reply-shape wire)))
+      (is (not-any? #(contains? % :tool_calls) (filter #(= "Then." (:content %)) wire)))))
+  (testing "all the calls of a reply cut: its text stays as a plain assistant message, with its reasoning"
+    (is (= [["I look." "think" []] ["Then." "more" ["c4" "c5"]] ["" "quiet" ["c6"]]] (reply-shape (wire-without ["e1" "e2" "e3"])))))
+  (testing "a reply with no text, all its calls cut: nothing stays of it"
+    (is (= [["I look." "think" ["c1" "c2" "c3"]] ["Then." "more" ["c4" "c5"]]] (reply-shape (wire-without ["e6"])))))
+  (testing "the reasoning survives a cut of call 0 and goes only when replay is off"
+    (let [[db c] (reply-world)
+          rs (context/records (update c :evals dissoc (pdb/eid db :seon.eval/id "e1")) db)
+          printed (#'context/printed-run (mapv (fn [[_ v k]] [(#'context/ref-of v) v k]) rs) nil db)
+          ms (into [] (mapcat #(:whole (get-in printed [:parts %]))) (:ids printed))]
+      (is (= "think" (:reasoning_content (first (seon.model/wire-messages true ms)))))
+      (is (not (contains? (first (seon.model/wire-messages false ms)) :reasoning_content))))))
+
 (deftest an-unknown-proof-says-what-to-write
   ;; a proof with no result: the reason names the deftest to write in its namespace and how
   ;; to run it (the dry run's agents read `{:reason :proof-unknown}` and searched for 25 turns)
@@ -623,8 +688,8 @@
                   (d/transact conn [{:seon.model-call/id (str "b/a1/" n) :seon.model-call/sent sent}])
                   messages))
         plan! (fn [p] (d/transact conn [{:seon.task/id "demo/f" :seon.task/plan p}]))
-        r0 (turn! 1 {})
-        _ (ev! "e2" "a1" "(f 1)" 1 {:call-id "call-0" :call 0 :prose "I call f." :reasoning "why" :turn 1})
+        r0 (turn! 1 {:seon.model-call/reasoning "why"})
+        _ (ev! "e2" "a1" "(f 1)" 1 {:call-id "call-0" :prose "I call f." :turn 1})
         _ (plan! "Make f triple.")
         r1 (turn! 2 {})
         _ (plan! "Later.")
@@ -672,7 +737,7 @@
                                               {:seon.task/ns 'demo :seon.task/name "i" :seon.task/plan "Implement d." :seon.task/proofs #{'demo-test/i-test}}]))
       (let [ev! (fn [id by run turn]
                   (d/transact conn [{:seon.eval/id id :seon.eval/by by :seon.eval/agent {:seon.agent/key "b/a1"}
-                                     :seon.eval/code (str "(" id ")") :seon.eval/response {:handle (symbol "result" id) :value 1} :seon.eval/run run :seon.eval/turn turn :seon.eval/call-id (str "c-" id) :seon.eval/call 0 :seon.eval/prose "Step."}]))
+                                     :seon.eval/code (str "(" id ")") :seon.eval/response {:handle (symbol "result" id) :value 1} :seon.eval/run run :seon.eval/turn turn :seon.eval/call-id (str "c-" id) :seon.eval/prose "Step."}]))
             run! (fn [run task] (d/transact conn [{:seon.run/id run :seon.run/task [:seon.task/id task] :seon.run/agent {:seon.agent/key "b/a1" :seon.agent/task {:seon.task/id task}}}]))
             basis (fn [task run n] {:commit (d/commit-id @conn) :task task :run run :turn n :max-turns 9 :origin :model
                                     :agent "b/a1"})
@@ -725,7 +790,7 @@
                                 warm (context/render @conn b {:printed printed})
                                 cold (context/render @conn b)]
                             (d/transact conn [{:seon.model-call/id (str "b/a1/" (inc n)) :seon.model-call/sent (:sent warm)}])
-                            (ev! (str "e" n) "a1" (if (odd? n) rows (vec (range (* 10 (inc n))))) {:call-id (str "c" n) :call 0 :prose (str "Step " n ".") :turn (inc n)})
+                            (ev! (str "e" n) "a1" (if (odd? n) rows (vec (range (* 10 (inc n))))) {:call-id (str "c" n) :prose (str "Step " n ".") :turn (inc n)})
                             (recur (inc n) (:printed warm) (conj out [n warm cold]))))))
             db @conn]
         (doseq [[n warm cold] turns]
@@ -767,7 +832,7 @@
                            _ (d/transact conn [{:seon.model-call/id (str "b/a1/" (inc n)) :seon.model-call/sent (:sent r)}])
                            body (seon.model/request-body p {:messages (:messages r) :task "demo/g" :turn (inc n)})]
                        (d/transact conn [{:seon.eval/id (str "e" n) :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key "b/a1"}
-                                          :seon.eval/code (str "(e" n ")") :seon.eval/response {:handle (symbol "result" (str "e" n)) :value (vec (range (* 5 (inc n))))} :seon.eval/run "demo/g#1" :seon.eval/turn (inc n) :seon.eval/call-id (str "c" n) :seon.eval/call 0 :seon.eval/prose (str "Step " n ".")}])
+                                          :seon.eval/code (str "(e" n ")") :seon.eval/response {:handle (symbol "result" (str "e" n)) :value (vec (range (* 5 (inc n))))} :seon.eval/run "demo/g#1" :seon.eval/turn (inc n) :seon.eval/call-id (str "c" n) :seon.eval/prose (str "Step " n ".")}])
                        ;; the task's own config moves after turn 0: a later turn's provider, never turn 0's
                        (when (zero? n) (d/transact conn [{:seon.task/id "demo/g" :seon.config.ai/max-tokens 77}]))
                        (recur (inc n) (conj out [b body])))))]
@@ -796,7 +861,7 @@
             sent #(:seon.model-call/sent (d/pull db [:seon.model-call/sent] %))]
         (is (= [:section :parts :hashes] (mapv first (sent e0))) "turn 0: the system prompt, the page's parts whole, their hashes")
         (is (pos-int? (second (first (sent e0)))) "the system prompt's own section, by entity")
-        (is (= [:section :parts :eval :parts :hashes] (mapv first (sent e1))) "turn 1: turn 0's parts, its call's eval, then what changed of the page")
+        (is (= [:section :parts :reply :eval :parts :hashes] (mapv first (sent e1))) "turn 1: turn 0's parts, its reply (the reasoning it made), its call's eval, then what changed of the page")
         (is (str/includes? (str (peek r1)) "Make f triple.") "the plan changed after turn 0: in turn 1's page diff")
         (is (= r0 (read-back db e0)) "turn 0's messages, read from its records")
         (is (= r1 (read-back db e1)) "turn 1's, though the plan changed after both")
@@ -840,14 +905,17 @@
                                      (d/transact conn [{:seon.model-call/id (str "b/a1/" n) :seon.model-call/sent sent}])
                                      [b messages])))
             [b0 r0] (request 1 {:seon.model-call/reply "I call f." :seon.model-call/reasoning "why"})
-            _ (ev! "e2" "a1" "(f 1)" 1 {:call-id "call-0" :call 0 :content "I call f." :reasoning "why" :turn 1})
+            _ (ev! "e2" "a1" "(f 1)" 1 {:call-id "call-0" :turn 1})
             _ (d/transact conn [{:var/name 'demo-test/f-test :seon.test/status :red}])
             [_ r1] (request 2 {})]
         (is (= ["system" "user"] (mapv :role r0)) "turn 0: the system prompt, then the page whole")
-        (is (= ["system" "user" "assistant" "tool" "user"] (mapv :role r1)) (pr-str (mapv :role r1)))
-        (is (= {:role "assistant" :content "I call f." :reasoning "why" :tool-calls [{:id "call-0" :code "(f 1)"}] :call 0} (nth r1 2))
-            "prose as content, the reasoning as returned, the call")
-        (is (= "{:handle result/e2, :value 1}" (:content (nth r1 3))) "the call's response, its recorded value printed as it is sent")
+        (is (= ["system" "user" "assistant" "assistant" "tool" "user"] (mapv :role r1)) (pr-str (mapv :role r1)))
+        (is (= {:role "assistant" :content "I call f." :reasoning "why" :reply 1} (nth r1 2)) "the reply: its text and the reasoning as returned")
+        (is (= {:role "assistant" :content "" :tool-calls [{:id "call-0" :code "(f 1)"}] :reply 1} (nth r1 3)) "then its call")
+        (is (= [{:role "assistant" :content "I call f." :reasoning_content "why" :tool_calls [{:id "call-0" :type "function" :function {:name "eval" :arguments "{\"code\":\"(f 1)\"}"}}]}
+                {:role "tool" :content "{:handle result/e2, :value 1}" :tool_call_id "call-0"}]
+               (subvec (seon.model/wire-messages true r1) 2 4)) "one assistant message on the wire")
+        (is (= "{:handle result/e2, :value 1}" (:content (nth r1 4))) "the call's response, its recorded value printed as it is sent")
         (is (= r0 (subvec r1 0 2)) "the whole earlier request is the prefix: its page stays, appended")
         (is (re-find #"status-\d+" (:content (peek r1))) "a verdict recorded after turn 0: how the work stands, told again")
         ;; (the task's data draws each proof's recorded status too, so it moves with a verdict: reported)
@@ -1300,7 +1368,7 @@
          r))
      ;; a record of the turn in force
      (fn ev! [id] (d/transact conn [{:seon.eval/id id :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key "b/a1"} :seon.eval/turn @turn
-                                     :seon.eval/code (str "(f " id ")") :seon.eval/response {:handle (symbol "result" id) :value 1} :seon.eval/run "demo/f#1" :seon.eval/call-id (str "c-" id) :seon.eval/call 0 :seon.eval/prose (str "Step " id ".")}]))
+                                     :seon.eval/code (str "(f " id ")") :seon.eval/response {:handle (symbol "result" id) :value 1} :seon.eval/run "demo/f#1" :seon.eval/call-id (str "c-" id) :seon.eval/prose (str "Step " id ".")}]))
      (fn plan! [p] (d/transact conn [{:seon.task/id "demo/f" :seon.task/plan p}]))]))
 
 (defn- part-ids
@@ -1444,15 +1512,10 @@
         a (:db/id (d/entity db [:seon.agent/key "b/a1"]))]
     (is (= ["Done: f0 is green."] (keep (comp :seon.model-call/reply second) (context/records (:tree (seon.ctx/build db a :b)) db))) "the whole reply is a record, the cut one is not")))
 
-(defn- model-call-fact
-  "Model call n of agent b/a1 as the turn loop writes it, with more."
-  [n more]
-  (merge {:seon.model-call/id (str "b/a1/" n) :seon.model-call/agent [:seon.agent/key "b/a1"] :seon.model-call/n n :seon.model-call/origin :model} more))
-
 (deftest a-reply-with-no-call-is-a-record-at-its-turn
   ;; docs/turn.md#the-turn-is-a-number (owner, 2026-11-04): the conversation is ordered by the numbers its records carry, not by
-  ;; when they were written. One session of two turns on the world: a message, a model's two evals, an outside eval (issue
-  ;; number 10, which a text sort puts before 9) and the model's reply that called something (no record of its own), then a
+  ;; when they were written. One session of two turns on the world: a message, the model's reply that called something and its two evals, an outside eval (issue
+  ;; number 10, which a text sort puts before 9), then a
   ;; message taken by the second turn, an outside eval made during it and its prose reply (a record, after what else the turn holds)
   (let [ev (fn [id by turn & [more]] (merge {:seon.eval/id id :seon.eval/by by :seon.eval/agent [:seon.agent/key "b/a1"] :seon.eval/turn turn
                                               :seon.eval/code (str "(" id ")") :seon.eval/response {:handle (symbol "result" id) :value 1}} more))
@@ -1463,19 +1526,19 @@
                    [(msg "m1" 1)
                     (model-call-fact 1 {:seon.model-call/forms 2 :seon.model-call/reply "I look."})
                     (ev "e10" "outside" 1)
-                    (ev "e9" "a1" 1 {:seon.eval/call-id "c9" :seon.eval/call 0})
-                    (ev "e8" "a1" 1 {:seon.eval/call-id "c8" :seon.eval/call 0})
+                    (ev "e9" "a1" 1 {:seon.eval/call-id "c9"})
+                    (ev "e8" "a1" 1 {:seon.eval/call-id "c8"})
                     (msg "m2" 2)
                     (model-call-fact 2 {:seon.model-call/forms 0 :seon.model-call/reply "Done." :seon.model-call/reasoning "easy"})
                     (ev "e11" "outside" 2)])
         a (pdb/eid db :seon.agent/key "b/a1")
         rs (context/records (:tree (ctx/build db a :b)) db)
         id (fn [[_ v]] (or (:seon.eval/id v) (:seon.message/id v) (:seon.model-call/id v)))]
-    (is (= ["m1" "e8" "e9" "e10" "m2" "e11" "b/a1/2"] (mapv id rs))
-        "per turn: its messages, its evals by issue number, its prose reply last; a reply that called is its evals' messages")
-    (is (= [[1 0] [1 1] [1 1] [1 1] [2 0] [2 1] [2 2]] (mapv (comp #(subvec % 0 2) first) rs)) "each record's turn and rank")
-    (is (= {:role "assistant" :content "Done." :reasoning "easy"} (first (context/turn-messages {} (nth (last rs) 1)))) "the reply is an assistant message")
-    (is (= ["m1" "m2" "e11" "b/a1/2"] (mapv id (context/records (:tree (ctx/build db a :b)) db 2)))
+    (is (= ["m1" "b/a1/1" "e8" "e9" "e10" "m2" "b/a1/2" "e11"] (mapv id rs))
+        "per turn: its messages, its reply, its evals by issue number; a reply that called is a record while it has evals")
+    (is (= [[1 0] [1 1] [1 2] [1 2] [1 2] [2 0] [2 1] [2 2]] (mapv (comp #(subvec % 0 2) first) rs)) "each record's turn and rank")
+    (is (= {:role "assistant" :content "Done." :reasoning "easy" :reply 2} (first (context/turn-messages {} (nth (nth rs 6) 1)))) "the reply is an assistant message")
+    (is (= ["m1" "m2" "b/a1/2" "e11"] (mapv id (context/records (:tree (ctx/build db a :b)) db 2)))
         "since turn 2: the evals and replies of turn 2 and later (read newest first), every message")))
 
 (deftest a-mid-turn-message-takes-the-number-in-force-and-the-prefix-holds
@@ -1578,7 +1641,7 @@
                             (d/transact conn (ts/turn-tx "b/a1" (inc i) "demo/g#1" {:seon.model-call/basis b}))
                             (d/transact conn [{:seon.model-call/id (str "b/a1/" (inc i)) :seon.model-call/sent (:sent (context/render @conn b))}])
                             (d/transact conn [{:seon.eval/id (str "e" i) :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key "b/a1"} :seon.eval/turn (inc i)
-                                               :seon.eval/code (str "(f " i ")") :seon.eval/response {:handle (symbol "result" (str "e" i)) :value i} :seon.eval/run "demo/g#1" :seon.eval/call-id (str "c" i) :seon.eval/call 0}])
+                                               :seon.eval/code (str "(f " i ")") :seon.eval/response {:handle (symbol "result" (str "e" i)) :value i} :seon.eval/run "demo/g#1" :seon.eval/call-id (str "c" i)}])
                             b))
             b0 (turn! 0) _ (turn! 1) _ (turn! 2)
             evals (fn [sent] (set (keep (fn [[k x]] (when (= :eval k) x)) sent)))]
@@ -1595,7 +1658,7 @@
    (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "h" :seon.task/plan "Make h." :seon.task/proofs #{'demo-test/h-test}}]))
    (d/transact conn [{:seon.agent/key "b/src" :seon.agent/task [:seon.task/id "demo/h"]}])
    (d/transact conn [{:seon.eval/id "s1" :seon.eval/by "src" :seon.eval/agent [:seon.agent/key "b/src"] :seon.eval/turn 1
-                      :seon.eval/code code :seon.eval/response {:handle 'result/s1 :value 3} :seon.eval/run "demo/h#1" :seon.eval/call-id "call_1" :seon.eval/call 0 :seon.eval/prose "Add."}])
+                      :seon.eval/code code :seon.eval/response {:handle 'result/s1 :value 3} :seon.eval/run "demo/h#1" :seon.eval/call-id "call_1" :seon.eval/prose "Add."}])
    (d/transact conn [{:seon.message/id "m1" :seon.message/agent [:seon.agent/key "b/src"] :seon.message/turn 2 :seon.message/from "owner" :seon.message/body "Looks right."}])
    (d/transact conn [{:seon.model-call/id "b/src/2" :seon.model-call/agent [:seon.agent/key "b/src"] :seon.model-call/n 2 :seon.model-call/origin :model :seon.model-call/forms 0 :seon.model-call/reply "Done."}])))
 
@@ -1629,7 +1692,7 @@
       (example-world! conn)
       (let [r0 (turn! conn 0)
             _ (d/transact conn [{:seon.eval/id "e0" :seon.eval/by "a1" :seon.eval/agent [:seon.agent/key "b/a1"]
-                                 :seon.eval/turn 1 :seon.eval/code "(+ 5 1)" :seon.eval/response {:handle 'result/e0 :value 6} :seon.eval/run "demo/g#1" :seon.eval/call-id "c0" :seon.eval/call 0}])
+                                 :seon.eval/turn 1 :seon.eval/code "(+ 5 1)" :seon.eval/response {:handle 'result/e0 :value 6} :seon.eval/run "demo/g#1" :seon.eval/call-id "c0"}])
             r1 (turn! conn 1)
             ms (:messages r0)
             [sys open & more] ms
@@ -1711,7 +1774,7 @@
   (d/transact conn [{:seon.run/id "demo/g#1" :seon.run/task [:seon.task/id "demo/g"] :seon.run/agent {:seon.agent/key "b/a1" :seon.agent/task {:seon.task/id "demo/g"}}}])
   (let [r0 (turn! conn 0)]
     (d/transact conn [{:seon.eval/id "e0" :seon.eval/by "a1" :seon.eval/agent [:seon.agent/key "b/a1"] :seon.eval/turn 1
-                       :seon.eval/code "(+ 5 1)" :seon.eval/response {:handle 'result/e0 :value 6} :seon.eval/run "demo/g#1" :seon.eval/call-id "c0" :seon.eval/call 0 :seon.eval/prose "Add."}])
+                       :seon.eval/code "(+ 5 1)" :seon.eval/response {:handle 'result/e0 :value 6} :seon.eval/run "demo/g#1" :seon.eval/call-id "c0" :seon.eval/prose "Add."}])
     (d/transact conn [{:seon.message/id "m0" :seon.message/agent [:seon.agent/key "b/a1"] :seon.message/turn 2 :seon.message/from "owner" :seon.message/body "Go on."}])
     (d/transact conn [{:seon.model-call/id "b/a1/2" :seon.model-call/agent [:seon.agent/key "b/a1"] :seon.model-call/n 2 :seon.model-call/origin :model :seon.model-call/forms 0 :seon.model-call/reply "Thinking."}])
     {:r0 r0 :r1 (turn! conn 2)}))
@@ -1741,10 +1804,10 @@
       (let [{:keys [r1]} (no-example-requests! conn)
             ms (ids-as-n (rest (:messages r1)))]
         (is (= [{:role "user" :content no-example-page}
-                {:role "assistant" :content "" :tool-calls [{:id "c0" :code "(+ 5 1)" :prose "Add."}] :call 0}
+                {:role "assistant" :content "" :tool-calls [{:id "c0" :code "(+ 5 1)" :prose "Add."}] :reply 1}
                 {:role "tool" :tool-call-id "c0" :content "{:handle result/e0, :value 6}"}
                 {:role "user" :content "{:from \"owner\", :body \"Go on.\"}"}
-                {:role "assistant" :content "Thinking."}
+                {:role "assistant" :content "Thinking." :reply 2}
                 {:role "user" :content "{\"run-head-N\" {:changed {:turn 3}}}"}]
                ms))
         (is (= "772edec9a84dece1" (seon.lib/digest (str/join "\n--\n" (map #(str (:role %) ":" (:content %)) ms))))
@@ -1770,7 +1833,7 @@
     (fn [_ conn]
       (source-session! conn)
       (d/transact conn [{:seon.eval/id "s3" :seon.eval/by "src" :seon.eval/agent [:seon.agent/key "b/src"] :seon.eval/turn 1 :seon.eval/schema :seon.ctx/ctx
-                         :seon.eval/basis {:t 5 :branch :b} :seon.eval/code "(swap! ctx assoc :x 1)" :seon.eval/run "demo/h#1" :seon.eval/call-id "call_3" :seon.eval/call 1
+                         :seon.eval/basis {:t 5 :branch :b} :seon.eval/code "(swap! ctx assoc :x 1)" :seon.eval/run "demo/h#1" :seon.eval/call-id "call_3"
                          :seon.eval/response {:handle 'result/s3}}])
       (let [recs (->> (context/session-tx @conn "b/src" "abc") (mapcat identity) (filter :seon.eval/code))
             r3 (first (filter #(= "(swap! ctx assoc :x 1)" (:seon.eval/code %)) recs))]
@@ -1786,7 +1849,7 @@
     (fn [_ conn]
       (source-session! conn)
       (d/transact conn [{:seon.eval/id "s2" :seon.eval/by "src" :seon.eval/agent [:seon.agent/key "b/src"]
-                         :seon.eval/turn 1 :seon.eval/code "(atom 1)" :seon.eval/response {:handle 'result/s2 :value {:seon.value/type "clojure.lang.Atom"}} :seon.eval/run "demo/h#1" :seon.eval/call-id "call_2" :seon.eval/call 1}])
+                         :seon.eval/turn 1 :seon.eval/code "(atom 1)" :seon.eval/response {:handle 'result/s2 :value {:seon.value/type "clojure.lang.Atom"}} :seon.eval/run "demo/h#1" :seon.eval/call-id "call_2"}])
       (let [recs (->> (context/session-tx @conn "b/src" "abc") (mapcat identity) (filter :seon.eval/code))]
         (is (= 2 (count recs)))
         (is (= #{"example/abc"} (set (map :seon.eval/run recs))))

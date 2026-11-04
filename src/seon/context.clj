@@ -724,8 +724,8 @@
 
 (def ^:private eval-keys
   "The attributes of an eval a reader of the conversation reads (:seon.db/eval-fact less :seon.eval/agent and :seon.eval/opened). See docs/render.md#a-part-answers-data."
-  [:seon.eval/id :seon.eval/by :seon.eval/code :seon.eval/prose :seon.eval/call-id :seon.eval/call :seon.eval/content
-   :seon.eval/reasoning :seon.eval/schema :seon.eval/basis :seon.eval/fns :seon.eval/run :seon.eval/turn :seon.eval/response])
+  [:seon.eval/id :seon.eval/by :seon.eval/code :seon.eval/prose :seon.eval/call-id
+   :seon.eval/schema :seon.eval/basis :seon.eval/fns :seon.eval/run :seon.eval/turn :seon.eval/response])
 
 (defn basis-value
   "The value eval e names by its basis (:seon.eval/basis, @ctx's: the record of e's agent on branch db as of t,
@@ -744,21 +744,19 @@
 (defn eval-messages
   "An eval's part of the conversation as
   provider-neutral messages: a model's eval (it names the provider's call id) is its
-  assistant message, the reply's prose and reasoning as returned with the eval call (:call, the
-  call's place in its reply: the provider's format folds a reply's calls into one message),
+  assistant message, the call alone, naming its reply (:reply, the turn it answered: the reply's
+  text and reasoning are its model call's `turn-messages`, and the provider's format folds a reply's messages into one),
   then its tool message, the response printed now (seon.print/record-text, a function of the
   eval alone, and of the db for an eval that names its basis: opts :db, `basis-value`, the same bytes cold as live);
   anyone else's (the user's) is one user message
-  {:by :code :response}, the response spliced as printed."
+  {:by :code :response}, the response spliced as printed. See docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
   {:malli/schema [:=> [:cat [:maybe :map] :map] [:vector :seon.model/message]]}
-  [opts {:seon.eval/keys [by code prose content reasoning call-id call basis] :as e}]
+  [opts {:seon.eval/keys [by code prose call-id basis turn] :as e}]
   (let [text (print/record-text (cond-> e basis (assoc-in [:seon.eval/response :value] (basis-value (:db opts) e))) render/model)]
     (if call-id
-      ;; as the model sent it: the reply's text (its first call's :content) and the call's own prose
-      [(cond-> {:role "assistant" :content (or content "")
+      [(cond-> {:role "assistant" :content ""
                 :tool-calls [(cond-> {:id call-id :code code} prose (assoc :prose prose))]}
-         reasoning (assoc :reasoning reasoning)
-         call (assoc :call call))
+         (pos? (or turn 0)) (assoc :reply turn))
        {:role "tool" :tool-call-id call-id :content text}]
       [{:role "user" :content (str "{:by " (pr-str by) " :code " (pr-str code) " :response " text "}")}])))
 
@@ -770,11 +768,15 @@
   [{:role "user" :content (print/text {:from from :body body} (:context print/budgets))}])
 
 (defn turn-messages
-  "A model call's reply with no call, as the conversation keeps it: one assistant message, the reply's
-  text and the reasoning as returned (a reply that called is its evals' messages, `eval-messages`). See docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
+  "A model call's reply as the conversation keeps it: one assistant message, the reply's text and the reasoning as
+  returned, naming the reply (:reply, the call's number n) so the provider's format folds the messages of its evals into
+  it; none for a reply with neither text nor reasoning (its evals' messages stand alone). See
+  docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
   {:malli/schema [:=> [:cat :any :map] [:vector :seon.model/message]]}
-  [_ {:seon.model-call/keys [reply reasoning]}]
-  [(cond-> {:role "assistant" :content reply} reasoning (assoc :reasoning reasoning))])
+  [_ {:seon.model-call/keys [reply reasoning n]}]
+  (if (and (str/blank? reply) (nil? reasoning))
+    []
+    [(cond-> {:role "assistant" :content (or reply "")} reasoning (assoc :reasoning reasoning) n (assoc :reply n))]))
 
 (defn- ref-of
   "The ref a conversation's record is sent as (:seon.model-call/sent): an eval's, a message's or a reply's (its model call's) id."
@@ -821,7 +823,7 @@
 (defn records
   "The conversation of ctx value c (an agent's @ctx, or one seon.ctx/build drew) on db, as [position value schema-key]
   in order: its evals (not a context read's, nor its own loop's: `loop-eval?`), the messages it took and its model calls'
-  replies that called nothing. The position is [turn rank n], docs/turn.md#the-turn-is-a-number. With since, a turn
+  replies (a call with evals left in c, or an uncut one with text; one with nothing to send is none). The position is [turn rank n], docs/turn.md#the-turn-is-a-number. With since, a turn
   number: the evals and replies of that turn and later only (read newest first from ctx, so a request costs what is new);
   every message. Reading them from ctx is the owner's ruling (docs/decisions.md): what the pattern leaves out, the model does not read."
   {:malli/schema [:function [:=> [:cat :map :seon.host/db] [:vector [:tuple [:vector :int] :map :qualified-keyword]]]
@@ -838,17 +840,21 @@
                           ;; a model's eval (nearly all of them) answers a call: no contracted call per record to say so
                           :when (not= "context" (:seon.eval/by v))]
                       v))
+         ;; the turns with an eval left in c
+         called (into #{} (keep #(when (:seon.eval/call-id %) (:seon.eval/turn %))) evals)
          ;; an eval's issue number: its id's trailing digits (e12 is 12; an example's example/x/e12 too), so e9 comes before e10
          issued (map #(or (some-> (re-find #"\d+$" (:seon.eval/id %)) parse-long) 0) evals)]
-     (->> (concat (map (fn [v n] [[(num (:seon.eval/turn v)) 1 n] (select-keys v eval-keys) :seon.db/eval-fact]) evals issued)
+     (->> (concat (map (fn [v n] [[(num (:seon.eval/turn v)) 2 n] (select-keys v eval-keys) :seon.db/eval-fact]) evals issued)
                   (for [[e v] (get c :messages)]
                     [[(num (:seon.message/turn v)) 0 (or (:tx (first (d/datoms db :eavt e :seon.message/agent))) 0)]
                      (select-keys v [:seon.message/id :seon.message/from :seon.message/body :seon.message/turn]) :seon.message/fact])
                   (for [[_ v] (fresh :calls :seon.model-call/n (constantly false))
-                        ;; a reply cut at the token limit is no message, as the turn loop reads it (seon.turn/act!)
-                        :when (and (= :model (:seon.model-call/origin v)) (zero? (num (:seon.model-call/forms v))) (not (:seon.model-call/truncated v))
-                                   (not (str/blank? (:seon.model-call/reply v))))]
-                    [[(num (:seon.model-call/n v)) 2 0] (select-keys v [:seon.model-call/id :seon.model-call/n :seon.model-call/origin :seon.model-call/reply :seon.model-call/reasoning :seon.model-call/forms])
+                        ;; a reply cut at the token limit is no message (seon.turn/act!), unless its calls were kept
+                        :when (and (= :model (:seon.model-call/origin v))
+                                   (or (contains? called (:seon.model-call/n v))
+                                       (and (not (:seon.model-call/truncated v)) (not (str/blank? (:seon.model-call/reply v)))))
+                                   (or (some? (:seon.model-call/reasoning v)) (not (str/blank? (:seon.model-call/reply v)))))]
+                    [[(num (:seon.model-call/n v)) 1 0] (select-keys v [:seon.model-call/id :seon.model-call/n :seon.model-call/origin :seon.model-call/reply :seon.model-call/reasoning :seon.model-call/forms])
                      :seon.model-call/fact]))
           (sort-by first)
           vec))))
@@ -1179,7 +1185,7 @@
             [ref (case kind
                    :section [{:role "system" :content (system-text (d/as-of db t))}]
                    :eval (record-messages :seon.db/eval-fact (ev x) db)
-                   :reply (record-messages :seon.model-call/fact (d/pull db [:seon.model-call/id :seon.model-call/reply :seon.model-call/reasoning] [:seon.model-call/id x]) db)
+                   :reply (record-messages :seon.model-call/fact (d/pull db [:seon.model-call/id :seon.model-call/n :seon.model-call/reply :seon.model-call/reasoning] [:seon.model-call/id x]) db)
                    :example (example-messages db x t)
                    :session (session-open x)
                    :parts (if (empty? (nth ref 4)) [] (parts-message (drawn x t) (nth ref 4) (when (< 6 (count ref)) (drawn x (nth ref 6)))))

@@ -634,14 +634,14 @@
 
 (defn record-details
   "What an eval records, each its own attribute of its entity (:seon.eval/code, :response, :schema, :basis, :prose,
-  :call-id and :call, :reasoning, :content, :run, :fns; each only when present): the code; the response whole with its
+  :call-id, :run, :fns; each only when present): the code; the response whole with its
   value as plain data (`kept`), never a text made for a reader (each prints it as it shows it: `text-of`),
   so a record is the same whatever came before it; the prose beside it, as written (never
   parsed here: the parser is program the agent may change, and an eval's record runs none of it; a reader
   that wants what the prose cites parses the kept prose, docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map);
   a value that names its render schema keeps it (the page draws the value by it); the value that IS the agent's ctx (@ctx, identical to the
   object seon.ctx/ctx holds: the branch's record at t, seon.ctx/build) keeps the basis in place of the value, so a copy of the session is never
-  stored at each @ctx; the provider's call id, its reasoning, its run, its costliest functions."
+  stored at each @ctx; the provider's call id, its run, its costliest functions (the reply's text and reasoning are its model call's)."
   {:malli/schema [:=> [:cat :string :map :map [:maybe :string]] [:map [:seon.eval/code :string] [:seon.eval/response :seon.eval/response]]]}
   [code r req run]
   (let [resp (dissoc r :text :fns :record)
@@ -658,9 +658,7 @@
       schema (assoc :seon.eval/schema schema)
       basis (assoc :seon.eval/basis basis)
       (:prose req) (assoc :seon.eval/prose (:prose req))
-      (:call-id req) (assoc :seon.eval/call-id (:call-id req) :seon.eval/call (:call req 0))
-      (:reasoning req) (assoc :seon.eval/reasoning (:reasoning req))
-      (:content req) (assoc :seon.eval/content (:content req))
+      (:call-id req) (assoc :seon.eval/call-id (:call-id req))
       run (assoc :seon.eval/run run)
       (seq (:fns r)) (assoc :seon.eval/fns (:fns r)))))
 

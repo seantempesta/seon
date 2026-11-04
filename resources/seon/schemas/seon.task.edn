@@ -182,8 +182,9 @@
  :seon.model/message [:map [:role [:enum "system" "user" "assistant" "tool"]] [:content :string]
                       [:tool-calls {:optional true} [:vector :seon.model/tool-call]] [:tool-call-id {:optional true} :string]
                       [:reasoning {:optional true} :string]
-                      ;; an assistant message's call's place in its reply: the provider's format folds a reply's calls into one message
-                      [:call {:optional true} :int]]
+                      ;; an assistant message's reply (its model call's number): the provider's format folds the consecutive assistant
+                      ;; messages of one reply into one, the reply's text first then each call; none stands alone. Never sent
+                      [:reply {:optional true} :int]]
  :seon.model/provider [:multi {:dispatch :kind}
                        [:none [:map [:kind [:= :none]]]]
                        [:scripted [:map [:kind [:= :scripted]] [:script :qualified-symbol]]]

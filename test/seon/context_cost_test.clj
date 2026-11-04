@@ -15,7 +15,7 @@
   (let [id (str "e" i)]
     [[:eval id]
      {:seon.eval/id id :seon.eval/by "a1"
-      :seon.eval/code (str "(rows " i ")") :seon.eval/call-id (str "c-" i) :seon.eval/call 0 :seon.eval/prose (str "Read the rows of part " i ".") :seon.eval/response {:handle (symbol "result" id) :value (vec (for [j (range 6)] {:part i :row j :name (str "row-" i "-" j)}))
+      :seon.eval/code (str "(rows " i ")") :seon.eval/call-id (str "c-" i) :seon.eval/prose (str "Read the rows of part " i ".") :seon.eval/response {:handle (symbol "result" id) :value (vec (for [j (range 6)] {:part i :row j :name (str "row-" i "-" j)}))
                                     :ms 0.5 :ticks 1000 :bytes 4096}}
      :seon.db/eval-fact (inc i)]))
 
@@ -244,7 +244,7 @@
         r1 (seon.context/request e (opts db2 2 (parts 2) (:printed r0)))
         db3 (d/db-with db2 (concat (sent 2 r1)
                                    [{:seon.eval/id "e-last" :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key "b/a1"} :seon.eval/turn 2
-                                     :seon.eval/code "(f)" :seon.eval/call-id "c-last" :seon.eval/call 0 :seon.eval/prose "Last." :seon.eval/response {:handle 'result/e-last :value 1}}]
+                                     :seon.eval/code "(f)" :seon.eval/call-id "c-last" :seon.eval/prose "Last." :seon.eval/response {:handle 'result/e-last :value 1}}]
                                    (turn 3)))]
     ;; with its @ctx, as a turn asks (seon.turn/act!)
     [e (assoc (opts db3 3 (parts 3) (:printed r1)) :ctx (:tree (seon.ctx/build db3 (:db/id e) :b)))]))

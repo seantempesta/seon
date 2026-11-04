@@ -1132,14 +1132,15 @@
   ;; batch of forms whose results came only after the whole reply, and 18% of model turns were
   ;; repetition loops asking for answers the model could not see. Now each call of the one
   ;; tool, eval, is answered as its own tool message before the next model call: the scripted model
-  ;; (seon.fixtures/two-calls) writes its second call from the answer its first call got
+  ;; (seon.fixtures/two-calls) writes its second call from the answer its first call got. (A reply's text and reasoning are
+  ;; an assistant message of their own before its calls, left out here: seon.context-test has them.)
   (let [[end msgs] (in-agent (fn [{:keys [task ns]}]
                                (let [run (str ns "/t#calls")]
                                  [(str "(seon.turn/work! {:task " (pr-str task) " :run " (pr-str run) " :max-turns 2})")
                                   (str "(let [db (seon.agent/db)]"
                                        " (->> (:messages (seon.context/render db {:commit (datahike.api/commit-id db) :task " (pr-str task) " :run " (pr-str run)
                                        "                                       :turn 3 :max-turns 2 :origin :model :agent (:key @seon.agent/state)}))"
-                                       "      (filter #(#{\"assistant\" \"tool\"} (:role %))) (mapv #(select-keys % [:role :tool-calls :tool-call-id :content]))))")]))
+                                       "      (filter #(#{\"assistant\" \"tool\"} (:role %))) (remove #(and (= \"assistant\" (:role %)) (empty? (:tool-calls %)))) (mapv #(select-keys % [:role :tool-calls :tool-call-id :content]))))")]))
                              {:config {:seon.config.ai/script 'seon.fixtures/two-calls}})
         end (:value end)
         [a0 r0 a1 r1 :as ms] (:value msgs)]

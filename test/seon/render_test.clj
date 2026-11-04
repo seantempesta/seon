@@ -1131,7 +1131,7 @@
                    [[{:seon.root/id :root :seon.root/boot "b1"}]
                     [{:seon.agent/key "example/abc" :seon.agent/id :example-abc :seon.agent/status :ended :seon.agent/description "Make h."}]
                     [{:seon.eval/id "example/abc/s1" :seon.eval/by "src" :seon.eval/agent [:seon.agent/key "example/abc"]
-                      :seon.eval/code "(+ 1 2)" :seon.eval/response {:handle 'result/example-abc-s1 :value 3} :seon.eval/run "example/abc" :seon.eval/call-id "example-abc-call_1" :seon.eval/call 0}]])
+                      :seon.eval/code "(+ 1 2)" :seon.eval/response {:handle 'result/example-abc-s1 :value 3} :seon.eval/run "example/abc" :seon.eval/call-id "example-abc-call_1"}]])
         eid (seon.db/eid db :seon.agent/key "example/abc")
         st {:rid 1 :pending {} :watch #{} :waiting {} :views {} :branches {} :main-db db :view {:agents {}}}
         units (fn [view] (:seon.render/units (#'p/page-value st view)))

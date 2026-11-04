@@ -199,7 +199,7 @@
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map :any]]}
   [n]
   (let [k (seon.task/agent-key "b1" :a1)
-        ev (fn [id turn] (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a1} id "a1" {:seon.eval/code "(+ 1 2)" :seon.eval/response {:handle (symbol "result" id) :value 3} :seon.eval/run "t/x#1" :seon.eval/turn turn :seon.eval/call-id (str "c-" id) :seon.eval/call 0}))
+        ev (fn [id turn] (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a1} id "a1" {:seon.eval/code "(+ 1 2)" :seon.eval/response {:handle (symbol "result" id) :value 3} :seon.eval/run "t/x#1" :seon.eval/turn turn :seon.eval/call-id (str "c-" id)}))
         db0 (reduce d/db-with (ts/test-db)
                     [[{:seon.root/id :root :seon.root/boot "b1"}]
                      (seon.task/agent-tx "b1" :a1 {:status :busy :branch :task-x})])
@@ -363,7 +363,7 @@
     (d/transact conn [{:seon.run/id run :seon.run/task [:seon.task/id tid] :seon.run/agent {:seon.agent/key k :seon.agent/task {:seon.task/id tid}}}])
     (doseq [i (range n)]
       (d/transact conn [{:seon.eval/id (str "p" n "e" i) :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key k}
-                         :seon.eval/code (str "(f " i ")") :seon.eval/response {:handle (symbol "result" (str "p" n "e" i)) :value (vec (range 5)) :ns 'user} :seon.eval/run run :seon.eval/call-id (str "c" i) :seon.eval/call 0 :seon.eval/prose (str "Step " i ".")}])
+                         :seon.eval/code (str "(f " i ")") :seon.eval/response {:handle (symbol "result" (str "p" n "e" i)) :value (vec (range 5)) :ns 'user} :seon.eval/run run :seon.eval/call-id (str "c" i) :seon.eval/prose (str "Step " i ".")}])
       (when (even? i)
         (d/transact conn (update (seon.task/message-tx (str "p" n "m" i) :message "user" (keyword (str "b-p" n)) (str "note " i)) 0 assoc :seon.message/agent {:seon.agent/key k}))))
     (let [db @conn a (:db/id (d/entity db [:seon.agent/key k]))]

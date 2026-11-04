@@ -1328,7 +1328,7 @@
   "The conversation of ctx c's agent: its messages, its model calls and its evals, in the order of their turn numbers, the
   one order of `seon.context/records` (docs/turn.md#the-turn-is-a-number): per turn its messages, then its model call (the
   reply and the evals it ran, folded into one row: `turn-evals`) and the evals of other hands (an outside eval, a session's) of
-  that turn by their issue number, then a reply that called nothing. A context read (a call of origin :outside) is no
+  that turn by their issue number. A context read (a call of origin :outside) is no
   conversation. See docs/render.md#the-page."
   {:malli/schema [:=> [:cat :map :seon.host/db] [:sequential :int]]}
   [c db]
@@ -1336,12 +1336,12 @@
         es (vec (:evals c))
         ;; an eval's issue number, as seon.context/records has it: its id's trailing digits (e9 before e10)
         issued (map (fn [[_ v]] (or (some-> (re-find #"\d+$" (:seon.eval/id v)) parse-long) 0)) es)
-        evals (map (fn [[e v] n] [[(num (:seon.eval/turn v)) 1 n] e]) es issued)
+        evals (map (fn [[e v] n] [[(num (:seon.eval/turn v)) 2 n] e]) es issued)
         msgs (for [[e v] (:messages c)] [[(num (:seon.message/turn v)) 0 (or (:tx (first (d/datoms db :eavt e :seon.message/agent))) 0)] e])
         calls (for [[e v] (:calls c) :when (= :model (:seon.model-call/origin v))
                     :let [n (num (:seon.model-call/n v))]]
-                ;; a reply that called: its row heads its turn's evals (before any, issue 0), one that called nothing comes last
-                [(if (pos? (num (:seon.model-call/forms v))) [n 1 -1] [n 2 0]) e])]
+                ;; a reply heads its turn's evals, as seon.context/records ranks it
+                [[n 1 0] e])]
     (map second (sort-by first (concat evals msgs calls)))))
 
 (defn- turn-evals

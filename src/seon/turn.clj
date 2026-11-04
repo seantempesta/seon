@@ -329,20 +329,16 @@
             t2 (profile/now-ns)
             ;; an interrupt left from before this turn's evals is not theirs
             _ (intr/clear-pending!)
-            ;; each eval call through the one REPL path, in order; its response is the call's
-            ;; result; the reply's prose is the first call's
-            ;; each eval's prose: the reply's text (on its first call) then the call's own, as the user reads it
+            ;; each eval call through the one REPL path, in order; its response is the call's result. The reply's text and
+            ;; reasoning are the model call's own (below), never copied onto an eval
             ;; a call with no prose or no form, or after one that threw or answered an error, is not run: its one
             ;; result says why (seon.repl/unrun, docs/prompt.md)
-            calls (reduce (fn [acc [i {:keys [id code prose]}]]
-                            (let [content (when (and (zero? i) (not (str/blank? (:text c)))) (:text c))
-                                  ;; the forgiving reader's repairs, told on this call's own result (:repaired)
+            calls (reduce (fn [acc {:keys [id code prose]}]
+                            (let [;; the forgiving reader's repairs, told on this call's own result (:repaired)
                                   {src :text repairs :repairs} (reader/forgive code)
-                                  ;; the reply's text heads its block, on its first call; each call keeps its own prose
-                                  req (cond-> {:origin :model :call-id id :call i}
+                                  ;; each call keeps its own prose
+                                  req (cond-> {:origin :model :call-id id}
                                         (not (str/blank? prose)) (assoc :prose prose)
-                                        content (assoc :content content)
-                                        (and (zero? i) (:reasoning c)) (assoc :reasoning (:reasoning c))
                                         (seq repairs) (assoc :repaired (context/repaired src repairs)))
                                   ;; a call that failed (threw, answered an error value such as a refused edit, or had no
                                   ;; prose or no form) stops the rest: none builds on a change that never happened
@@ -354,7 +350,7 @@
                                           {:id id :code code :prose prose :not-run (some? failed)
                                            :response (let [r (repl/unrun src req why)] (agent/commit!) r)}
                                           {:id id :code code :prose prose :response (evaluated! src req)}))))
-                          [] (map-indexed vector (:tool-calls c)))
+                          [] (:tool-calls c))
             rs (mapv :response calls)
             eval-ms (long (profile/ms-since t2))
             _ (swap! agent/state assoc-in [:turn :evals] rs)
