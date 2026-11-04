@@ -665,8 +665,9 @@
         split (when base (problems/caused-split base db ch (problems/caused-datoms base db)))
         gaps (vec (sort-by str (pm/uncontracted ch)))
         unmerged (pm/unmerged db)
-        ;; its run, the one its newest turn names (run-of): a design task's plan-before waits for its first turn
-        run (some->> (run-of rec) (d/entity db))
+        ;; a design task's run, the one its newest turn names (run-of): its plan-before waits for its first turn. Read for
+        ;; that task alone: run-of reads the newest turn, which would run every task's status again each turn
+        run (when (= :design kind) (some->> (run-of rec) (d/entity db)))
         proof? (set proofs)
         ;; main's claims only when a test outside the proofs is red: the agent's index, else one built cold
         claims (when (some (fn [[t st]] (and (= :fail st) (not (proof? t)))) results)
