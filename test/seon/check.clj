@@ -390,7 +390,7 @@
                  (remove #(= :merge (:seon.task/kind %)) (seon.fixtures/decls problem-specs 'problems nil)))
         _ (my.root/create! sys ds)
         _ (my.root/run! sys ["problems/p1" "problems/p2"])
-        ;; named: the report is made of what the reconciler's runs write (the judge's red and cost
+        ;; named: the report is made of what the reconciler writes (the judge's red and cost
         ;; rows), so the wait ends when root goes quiet with a class missing (:seon.root/quiet-before-true)
         ;; and the :checks below name which one, never a wait for a row that cannot come
         _ (seon.root/await-db sys "the provoked problems (a red proof, a cost verdict, a platform defect, a death) are on main"
@@ -407,8 +407,8 @@
       {:report {:replies (mapv short-items (conj r1 r2 r3))
                 :counts (into (sorted-map) (for [[k v] (:classes p)] [k (:n v)]))
                 :died (select-keys (:example died) [:exit :stderr :last-op])
-                :red (select-keys red [:run :test :assertions :evidence])
-                :cost (select-keys cost-row [:run :test :verdict])
+                :red (select-keys red [:task :test :assertions :evidence])
+                :cost (select-keys cost-row [:task :test :verdict])
                 :stalled (select-keys stall [:agent :message])
                 :ms (- (System/currentTimeMillis) t0)}
        :checks {:eval (every? (types :eval) [:seon.agent/eval-error :seon.instrument/contract-error])
