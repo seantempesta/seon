@@ -1718,6 +1718,25 @@
   [pid]
   (dec (count (clojure.string/split-lines (:out (clojure.java.shell/sh "ps" "-M" "-p" (str pid)))))))
 
+(defn agent-tests
+  "Every test that reaches no process, run as a Seon agent runs them: forked from one agent that has drawn its page, on a
+  root whose config is not bin/test's (docs/merging.md#a-test-child-is-a-fork-of-a-live-agent). Green under bin/test and
+  red here is a test reading its runner, or its agent's state leaking into it, which blocks a real agent's merge. bin/check
+  gives this step a verdict cache of its own, so nothing is reused. A namespace not named -test holds a task's proofs, red
+  until its task (seon.stall-proofs)."
+  []
+  (run-check "AGENT-TESTS" {:datoms 2000 :source {:root (seon.config/checkout) :dirs (seon.config/value :seon.config.source/dirs) :branch :none}}
+   (fn [sys]
+    (let [[a] (spawn-ready! sys {:task "agent-tests" :branch :agent-tests1})
+          out (str (:agents-dir (:store (c/state sys))) "/agent-tests.edn")
+          _ @(c/submit! sys a (str "(do (seon.repl/page-hiccup)"
+                                   " (let [r (seon.agent/run-tests-forked (seon.config/value :seon.config.agent/test-ticks) #{} :main)]"
+                                   " (spit " (pr-str out) " (pr-str (update r :reports (fn [rs] (filterv #(not= :pass (:type %)) rs)))))))"))
+          r (read-string (slurp out))
+          reds (filterv #(re-find #"-test/" (str (:var %))) (:reports r))]
+      {:report (assoc (select-keys r [:ran :pass :fail :error]) :reds (mapv (juxt :var :message :actual) reds))
+       :checks {:tests-ran (pos? (:ran r 0)) :none-red (empty? reds)}}))))
+
 (defn threads-check
   "Session RC1's physics rule: the processes that fork (the fork server; an agent, for its
   tests and clones) must stay single-threaded, so no sweeper thread ever starts in them.
@@ -1955,6 +1974,7 @@
      "durable-read" (fn [n more] (durable-read n))
      "window-write" (fn [n more] (window-write n))
      "window-read" (fn [n more] (window-read n))
+     "agent-tests" (fn [n more] (agent-tests))
      "scale" (fn [n more] (scale (n-or n "100")))
      "spawn-phases" (fn [n more] (spawn-phases (parse-long (or n "1"))))
      "scale-work" (fn [n more] (scale-work (n-or n "10") (not= "no-search" (first more))))
