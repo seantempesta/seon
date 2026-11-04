@@ -63,8 +63,8 @@
   {:malli/schema [:=> [:cat :string nat-int?] [:vector :map]]}
   [r n]
   (into [{:seon.run/id r :seon.run/task [:seon.task/id "lab/ctx"] :seon.run/status :running :seon.run/agent [:seon.agent/key k]}]
-        (for [t (range n)] {:seon.turn/id (str r "/" t) :seon.turn/run [:seon.run/id r] :seon.turn/n t
-                            :seon.turn/reply "I will check f0 against its failing assertion, then edit it."})))
+        (for [t (range n)] {:seon.model-call/id (str r "/" t) :seon.model-call/run [:seon.run/id r] :seon.model-call/n t
+                            :seon.model-call/reply "I will check f0 against its failing assertion, then edit it."})))
 
 (defn- seeded
   "The test store's db with the agent's record of n evals (seeded n pattern: the agent's own pattern, the schema's
@@ -93,7 +93,7 @@
                                                    (run-tx "lab/ctx#1" 0)))))]
     (reduce (fn [db part]
               (:db-after (d/with db (vec (mapcat (fn [i] (cond-> (eval-tx i)
-                                                            (zero? (mod i 3)) (conj {:seon.turn/id (str "lab/ctx#1/" i) :seon.turn/run [:seon.run/id "lab/ctx#1"] :seon.turn/agent [:seon.agent/key k] :seon.turn/n i})
+                                                            (zero? (mod i 3)) (conj {:seon.model-call/id (str "lab/ctx#1/" i) :seon.model-call/run [:seon.run/id "lab/ctx#1"] :seon.model-call/agent [:seon.agent/key k] :seon.model-call/n i})
                                                             (zero? (mod i 20)) (conj {:seon.message/id (str "m" i) :seon.message/from "user"
                                                                                       :seon.message/branch :lab-ctx :seon.message/agent [:seon.agent/key k] :seon.message/body "How is it going?"})))
                                                  part)))))
@@ -117,18 +117,18 @@
   (let [runs (vec (d/q '[:find [?id ...] :where [_ :seon.run/id ?id]] db))
         evals (vec (sort (d/q '[:find [?id ...] :where [_ :seon.eval/id ?id]] db)))
         run (nth runs (.nextInt r (count runs)))
-        turns (vec (sort (d/q '[:find [?id ...] :where [_ :seon.turn/id ?id]] db)))]
+        turns (vec (sort (d/q '[:find [?id ...] :where [_ :seon.model-call/id ?id]] db)))]
     (case (.nextInt r 23)
       0 (eval-tx (+ 10000 i))
       1 (run-tx (str "lab/ctx#" (+ 2 i)) 2)
-      2 [{:seon.turn/id (str run "/x" i) :seon.turn/run [:seon.run/id run] :seon.turn/n i}]
+      2 [{:seon.model-call/id (str run "/x" i) :seon.model-call/run [:seon.run/id run] :seon.model-call/n i}]
       3 [{:seon.message/id (str "mx" i) :seon.message/from "user" :seon.message/branch :lab-ctx :seon.message/agent [:seon.agent/key k] :seon.message/body (str "note " i)}]
       4 [[:db/add [:seon.run/id run] :seon.run/status (nth [:running :done :closed] (.nextInt r 3))]]
       5 [[:db/add [:seon.task/id "lab/ctx"] :seon.task/plan (str "plan " i)]]
       6 [[(if (.nextBoolean r) :db/add :db/retract) [:seon.task/id "lab/ctx"] :seon.task/proofs (symbol "app.x-test" (str "t" (.nextInt r 3)))]]
       7 (if (seq evals) [[:db/retractEntity [:seon.eval/id (nth evals (.nextInt r (count evals)))]]] (eval-tx (+ 20000 i)))
       8 [[:db/add [:seon.agent/key k] :seon.agent/status (nth [:idle :busy] (.nextInt r 2))]]
-      9 (if (seq turns) [[:db/add [:seon.turn/id (nth turns (.nextInt r (count turns)))] :seon.turn/run [:seon.run/id run]]] (eval-tx (+ 30000 i)))
+      9 (if (seq turns) [[:db/add [:seon.model-call/id (nth turns (.nextInt r (count turns)))] :seon.model-call/run [:seon.run/id run]]] (eval-tx (+ 30000 i)))
       10 (if (< 1 (count runs)) [[:db/retractEntity [:seon.run/id run]]] (eval-tx (+ 40000 i)))
       12 [{:seon.task/id (str "lab/other" i) :seon.task/ns 'app.y :seon.task/name (str "other" i) :seon.task/plan "Another."
            :seon.task/kind :work :seon.task/execution :held :seon.task/branch (keyword "main" (str "lab-other" i))}
@@ -179,13 +179,13 @@
                                      {:seon.task/id "lab/ctx" :seon.task/ns 'app.x :seon.task/name "ctx" :seon.task/plan "Make app.x/f0 pass."
                                       :seon.task/kind :work :seon.task/proofs #{} :seon.task/execution :running :seon.task/branch :main/lab-ctx}]
                                     (concat (mapcat eval-tx (range 1 6))
-                                            (for [t (range 3)] {:seon.turn/id (str "lab/ctx#1/" t) :seon.turn/agent [:seon.agent/key k] :seon.turn/n t})
+                                            (for [t (range 3)] {:seon.model-call/id (str "lab/ctx#1/" t) :seon.model-call/agent [:seon.agent/key k] :seon.model-call/n t})
                                             [{:seon.message/id "m1" :seon.message/from "user" :seon.message/body "How is it going?"
                                               :seon.message/agent [:seon.agent/key k]}]))))
         t (:tree (ctx/build db (aid db) :b))]
     (is (= "lab/ctx" (get-in t [:task :seon.task/id])) "the task, pulled whole by the agent's own ref")
     (is (= "Make app.x/f0 pass." (get-in t [:task :seon.task/plan])))
-    (is (= 3 (count (:turns t))) "every turn")
+    (is (= 3 (count (:calls t))) "every model call (the turn is a number on its records)")
     (is (= 5 (count (:evals t))) "every eval")
     (is (= ["m1"] (names (:messages t) :seon.message/id)) "the messages it took")
     (is (= [] (for [[j _] joins :when (some #{:limit} j)] (first j))) "no window on its own record: every turn, eval and message (the owner: deliver all messages and errors)")
@@ -201,8 +201,7 @@
                               [{:seon.agent/key k :seon.agent/id :a1 :seon.agent/task {:seon.task/id "lab/ctx"}}
                                {:seon.task/id "lab/ctx" :seon.task/ns 'app.x :seon.task/name "ctx" :seon.task/plan "Make app.x/f0 pass."
                                 :seon.task/kind :work :seon.task/proofs #{} :seon.task/execution :running :seon.task/branch :main/lab-ctx}
-                               {:seon.turn/id "lab/ctx#1/0" :seon.turn/agent [:seon.agent/key k] :seon.turn/n 0 :seon.turn/reply "I will check f0."}
-                               {:seon.model-call/id "lab/ctx#1/0" :seon.model-call/turn [:seon.turn/id "lab/ctx#1/0"]
+                               {:seon.model-call/id "lab/ctx#1/0" :seon.model-call/agent [:seon.agent/key k] :seon.model-call/n 0 :seon.model-call/reply "I will check f0."
                                 :seon.model-call/tokens 1200 :seon.model-call/cache-hit-tokens 1000 :seon.model-call/cache-miss-tokens 100
                                 :seon.model-call/ms 7 :seon.model-call/model "scripted" :seon.model-call/forms 1 :seon.model-call/errors 0 :seon.model-call/red 0
                                 :seon.model-call/split {:context-ms 2 :model-ms 5} :seon.model-call/sent [[:eval "e1"]]}
@@ -212,16 +211,19 @@
                                {:seon.vector/of [:seon.eval/id "e1"] :seon.vector/model "m" :seon.vector/tokens 3}]))
         t (:tree (ctx/build db (aid db) :b))
         keys-in (fn keys-in [x] (cond (map? x) (concat (keys x) (mapcat keys-in (vals x))) (coll? x) (mapcat keys-in x)))]
-    (is (= ["I will check f0."] (map :seon.turn/reply (vals (:turns t)))) "the turn is in the record, with its reply")
-    (is (empty? (filter #(and (keyword? %) (= "seon.model-call" (namespace %))) (keys-in t))) "no :seon.model-call/* key anywhere in the record")
+    (is (= ["I will check f0."] (map :seon.model-call/reply (vals (:calls t)))) "the model call is in the record, with its reply")
+    (is (empty? (remove #{:seon.model-call/id :seon.model-call/n :seon.model-call/origin :seon.model-call/run :seon.model-call/reply :seon.model-call/reasoning
+                          :seon.model-call/finish :seon.model-call/truncated :seon.model-call/error :seon.model-call/forms}
+                        (filter #(and (keyword? %) (= "seon.model-call" (namespace %))) (keys-in t))))
+        "no telemetry of a model call anywhere in the record: no tokens, sent, split, cost or model")
     (is (empty? (filter #(and (keyword? %) (or (= "seon.process" (namespace %)) (#{:seon.agent/pid :seon.agent/mem-mb} %))) (keys-in t)))
         "no :seon.process/* key, no pid or memory on the agent, anywhere in the record")
     (is (= #{[77 120.5]} (d/q '[:find ?p ?m :where [?x :seon.process/agent ?a] [?a :seon.agent/key] [?x :seon.process/pid ?p] [?x :seon.process/mem-mb ?m]] db))
         "the process is reached by a query on its agent")
     (is (contains? (set (map :seon.eval/id (vals (:evals t)))) "e1") "the eval is in the record")
     (is (empty? (filter #(and (keyword? %) (= "seon.vector" (namespace %))) (keys-in t))) "no :seon.vector/* in the record")
-    (is (= [1200] (d/q '[:find [?n ...] :where [?m :seon.model-call/turn ?t] [?t :seon.turn/id "lab/ctx#1/0"] [?m :seon.model-call/tokens ?n]] db))
-        "the model call is reached by a query on its turn")))
+    (is (= [1200] (d/q '[:find [?n ...] :where [?m :seon.model-call/id "lab/ctx#1/0"] [?m :seon.model-call/tokens ?n]] db))
+        "the model call's telemetry is reached by a query on it")))
 
 (deftest ctx-is-the-record-after-every-transaction
   ;; the patch holds what a build holds, its map and its index, after each of 60 changes of a
@@ -235,7 +237,7 @@
           (is (= {:seon.eval/id "e7" :by "a1"} {:seon.eval/id (get-in t [:evals e7 :seon.eval/id]) :by (get-in t [:evals e7 :seon.eval/by])}))
           (is (= "lab/ctx" (get-in t [:runs r1 :task :seon.task/id])))
           (is (= #{'app.x-test/t0} (get-in t [:runs r1 :task :seon.task/proofs])))
-          (is (= 20 (count (get-in t [:runs r1 :turns]))))
+          (is (= 20 (count (get-in t [:runs r1 :calls]))))
           (is (= #{"m20" "m40" "m60"} (set (names (:messages t) :seon.message/id)))))))
     (let [db (seeded 30 small-window-pattern)]
       (is (= 10 (count (:evals (:tree (ctx/build db (aid db) :b))))) "the window holds 10 of 30 evals"))
@@ -269,7 +271,7 @@
         te (:db/id (d/entity db0 [:seon.task/id "lab/ctx"]))
         re (:db/id (d/entity db0 [:seon.run/id "lab/ctx#1"]))]
     (is (= "lab/ctx" (:seon.task/id (:tree (ctx/build db0 te :main)))) "a task's record")
-    (is (seq (:turns (:tree (ctx/build db0 re :main)))) "a run's, with its joins")
+    (is (seq (:calls (:tree (ctx/build db0 re :main)))) "a run's, with its joins")
     (loop [db db0 cs {te (ctx/build db0 te :main) re (ctx/build db0 re :main)} i 0 bad []]
       (if (= i 60)
         (is (empty? bad) (str "the commit after which a followed record and a build differ: " (first bad)))
@@ -371,7 +373,7 @@
   (let [n 2400 db (seeded n nil) c (ctx/build db (aid db) :b)]
     (is (< (seon.config/value :seon.config.ctx/window) (quot n 20)) "more of each than the window")
     (is (= (quot n 20) (count (:messages (:tree c)))) "every message to the agent")
-    (is (= (quot n 3) (count (:turns (:tree c)))) "every turn it has")))
+    (is (= (quot n 3) (count (:calls (:tree c)))) "every model call it has")))
 
 (deftest the-patch-costs-the-change-not-the-session
   ;; a new eval's transaction patches the record in the work of its datoms, whatever the session's
@@ -941,9 +943,9 @@
     (testing "a new member with its own unit: a run and its turn, each naming its parent"
       (let [[[r same] db'] (step db #(swap! ctx/ctx assoc-in [:runs "lab/ctx#9"]
                                             {:seon.run/id "lab/ctx#9" :seon.run/status :running
-                                             :turns {"lab/ctx#9/0" {:seon.turn/id "lab/ctx#9/0" :seon.turn/n 0 :seon.turn/reply "begin"}}}))]
+                                             :calls {"lab/ctx#9/0" {:seon.model-call/id "lab/ctx#9/0" :seon.model-call/n 0 :seon.model-call/reply "begin"}}}))]
         (is (nil? (:seon.error/type r)) (pr-str r))
-        (is (= "lab/ctx#9" (:seon.run/id (:seon.turn/run (d/entity db' [:seon.turn/id "lab/ctx#9/0"])))))
+        (is (= "lab/ctx#9" (:seon.run/id (:seon.model-call/run (d/entity db' [:seon.model-call/id "lab/ctx#9/0"])))))
         (is (= k (:seon.agent/key (:seon.run/agent (d/entity db' [:seon.run/id "lab/ctx#9"])))))
         (is same)))
     (testing "refused, nothing written, the record as it was: a key with no schema, a value its schema

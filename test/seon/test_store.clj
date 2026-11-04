@@ -150,6 +150,17 @@
     (try (f (assoc @store :branch b) conn)
          (finally (d/release conn) (pdb/delete-main! seed b) (d/release seed)))))
 
+(defn turn-tx
+  "Model turn n of agent k (a key), run's, as seon.turn/act! writes it first: the agent's number n and its model call
+  <k>/<n> (origin :model, run run, a :seon.run/id), with more, the call's other attributes. A record the test writes
+  in that turn takes :seon.eval/turn or :seon.message/turn n. See docs/turn.md#the-turn-is-a-number."
+  {:malli/schema [:=> [:cat :string pos-int? :string :map] [:vector :map]]}
+  [k n run more]
+  [{:seon.agent/key k :seon.agent/turn n}
+   (merge {:seon.model-call/id (str k "/" n) :seon.model-call/agent {:seon.agent/key k} :seon.model-call/n n :seon.model-call/origin :model
+           :seon.model-call/run {:seon.run/id run}}
+          more)])
+
 (defn commit-of
   "The writer's main notice {:t :prev :ops :commit} for a db value made from the test store's seed
   (d/db-with, d/with): its datoms (what differs from conn's head, datahike.api/datoms-diff) are

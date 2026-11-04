@@ -2,7 +2,7 @@
   "The agent's record as one map, `@ctx` (docs/ctx.md): its agent entity pulled by a pattern,
   Datahike's pull syntax held as data (:seon.ctx/pattern: the agent's own edit, else its entity
   schema's), each join's members under the join's key (its :as: :evals, :runs, a run's :task,
-  :turns and :messages), a collection a map of its members by their ids, newest first; a window newest
+  :calls and :messages), a collection a map of its members by their ids, newest first; a window newest
   first (:limit with :reverse); a symbol joined by lookup (:by); every entity held once. Beside
   them its environment, :t :branch :commit.
 

@@ -229,14 +229,25 @@
                  :when (and e (not (:seon.eval/opened e)))]
              {:seon.eval/id id :seon.eval/opened true})))))
 
+(defn turn-now
+  "The agent's turn number in force: its :seon.agent/turn on this branch, 0 before its first model turn. Every record
+  the agent writes takes it (:seon.eval/turn, :seon.message/turn). See docs/turn.md#the-turn-is-a-number."
+  {:malli/schema [:=> [:cat] nat-int?]}
+  [] (or (:seon.agent/turn (d/entity (db) [:seon.agent/key (:key @state)])) 0))
+
+(defn own-message-tx
+  "Message mid of kind from from (to this agent) as this agent's branch records it, taken at turn n: the one message fact
+  (seon.task/message-tx) naming the agent that took it (:seon.message/agent: its record's messages) and the turn (:seon.message/turn).
+  See docs/turn.md#the-turn-is-a-number."
+  {:malli/schema [:=> [:cat :string :seon.message/kind :string [:maybe :seon.db/branch] :any nat-int?] :seon.db/tx-data]}
+  [mid kind from branch body n]
+  (update (task/message-tx mid kind from branch body) 0 assoc :seon.message/agent {:seon.agent/key (:key @state)} :seon.message/turn n))
+
 (defn entries-tx
-  "The transaction that writes entries (untaken-entries) on this branch: the same facts root
-  wrote on main, which their reader takes by writing them."
-  {:malli/schema [:=> [:cat [:sequential :map]] :seon.db/tx-data]}
-  [entries] (into [] (mapcat (fn [{:keys [id kind from branch body]}]
-                               ;; the agent that takes it (:seon.message/agent: its record's messages)
-                               (update (task/message-tx id kind from branch body) 0 assoc :seon.message/agent {:seon.agent/key (:key @state)})))
-                  entries))
+  "The transaction that writes entries (untaken-entries) on this branch, taken at turn n: the same facts root
+  wrote on main, which their reader takes by writing them (own-message-tx)."
+  {:malli/schema [:=> [:cat [:sequential :map] nat-int?] :seon.db/tx-data]}
+  [entries n] (into [] (mapcat (fn [{:keys [id kind from branch body]}] (own-message-tx id kind from branch body n))) entries))
 
 (defn taken!
   "The first n messages of the inbox leave it: their reader recorded them (seon.turn/basis!
@@ -332,23 +343,23 @@
 ;; ---- effects (seon.fx, worktree session FX1): root's owner procs, through the agent's proc ---
 
 (defn take-main!
-  "Take what main holds for this agent onto its branch, committed: its entries
+  "Take what main holds for this agent onto its branch, committed, as turn n's: its entries
   (untaken-entries) and the facts of its own entities (untaken-facts). The one take, a turn's
   (seon.turn/take!) and its code's (messages). Answers the entries taken."
-  {:malli/schema [:=> [:cat] [:vector :map]]}
-  []
+  {:malli/schema [:=> [:cat nat-int?] [:vector :map]]}
+  [n]
   (let [es (untaken-entries)
-        tx (into (untaken-facts) (entries-tx es))]
+        tx (into (untaken-facts) (entries-tx es n))]
     (when (seq tx) (transact! tx))
     (commit!)
     es))
 
 (defn messages
-  "The words to this agent not yet taken, taken (take-main!, as a turn takes them), then the
+  "The words to this agent not yet taken, taken (take-main!, as a turn takes them, at the turn in force: `turn-now`), then the
   inbox's sends (inbox). Its reader is the code that read them."
   {:malli/schema [:=> [:cat] [:vector :map]]}
   []
-  (let [es (take-main!)]
+  (let [es (take-main! (turn-now))]
     (inbox)
     (let [[old _] (swap-vals! state assoc :inbox [])] (into es (:inbox old)))))
 

@@ -253,7 +253,7 @@
 
 (def ^:private example-identities
   "The attributes that name a record of an example session, each unique. See docs/tasks.md#a-task-names-example-sessions."
-  [:seon.agent/key :seon.eval/id :seon.message/id :seon.turn/id])
+  [:seon.agent/key :seon.eval/id :seon.message/id :seon.model-call/id])
 
 (defn example-txs
   "The tx-data of the example session file at path (seon.context/session-tx's answer written with pr-str: a

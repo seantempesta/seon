@@ -199,7 +199,7 @@
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map :any]]}
   [n]
   (let [k (seon.task/agent-key "b1" :a1)
-        ev (fn [id] (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a1} id "a1" {:seon.eval/code "(+ 1 2)" :seon.eval/response {:handle (symbol "result" id) :value 3} :seon.eval/run "t/x#1" :seon.eval/call-id (str "c-" id) :seon.eval/call 0}))
+        ev (fn [id turn] (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a1} id "a1" {:seon.eval/code "(+ 1 2)" :seon.eval/response {:handle (symbol "result" id) :value 3} :seon.eval/run "t/x#1" :seon.eval/turn turn :seon.eval/call-id (str "c-" id) :seon.eval/call 0}))
         db0 (reduce d/db-with (ts/test-db)
                     [[{:seon.root/id :root :seon.root/boot "b1"}]
                      (seon.task/agent-tx "b1" :a1 {:status :busy :branch :task-x})])
@@ -207,17 +207,18 @@
                     [(seon.doc/load-tx db0 "docs" {seon.context/system-page "# You are a Seon agent\n\nThe help page."})
                      (seon.task/create-tx db0 [{:seon.task/ns 't :seon.task/name "x" :seon.task/plan "Make x." :seon.task/proofs #{'t-test/x-test}}])
                      [{:seon.run/id "t/x#1" :seon.run/task [:seon.task/id "t/x"] :seon.run/agent [:seon.agent/key k]}]
-                     (into [] (mapcat #(ev (str "e" %))) (range n))
-                     [{:seon.turn/id "t/x#1/0" :seon.turn/run [:seon.run/id "t/x#1"] :seon.turn/agent [:seon.agent/key k] :seon.turn/n 0 :seon.turn/origin :model}]])
-        b {:commit (d/commit-id db0) :task "t/x" :run "t/x#1" :turn 0 :max-turns 9 :origin :model :agent k}
+                     (into [] (mapcat #(ev (str "e" %) 0)) (range n))
+                     [{:seon.agent/key k :seon.agent/turn 1}
+                      {:seon.model-call/id (str k "/1") :seon.model-call/run [:seon.run/id "t/x#1"] :seon.model-call/agent [:seon.agent/key k] :seon.model-call/n 1 :seon.model-call/origin :model}]])
+        b {:commit (d/commit-id db0) :task "t/x" :run "t/x#1" :turn 1 :max-turns 9 :origin :model :agent k}
         ;; what the call sent, as the turn records it once its request is made (seon.turn/act!)
-        db (d/db-with db0 [{:seon.model-call/id "t/x#1/0" :seon.model-call/turn [:seon.turn/id "t/x#1/0"] :seon.model-call/basis b
+        db (d/db-with db0 [{:seon.model-call/id (str k "/1") :seon.model-call/basis b
                             :seon.model-call/sent (:sent (seon.context/render db0 b))}])
         view [:debug :a1]
         st {:rid 1 :pending {} :watch #{view} :waiting {} :kf-wanted #{} :views {} :main-db db
             :branches {view {:db db :read [:task-x] :branch :task-x}} :branch-reads {:task-x {:db db :walk (volatile! nil)}} :view {:agents {}}}
         [st _] (#'seon.render.proc/pass-view st view)]
-    [(assoc-in st [:branches view :db] (d/db-with db (ev "next"))) view]))
+    [(assoc-in st [:branches view :db] (d/db-with db (ev "next" 1))) view]))
 
 (deftest drawing-latest-costs-one-request
   ;; task seon.render/the-debug-page-is-the-wire-request: a pass of the debug page on latest after the branch

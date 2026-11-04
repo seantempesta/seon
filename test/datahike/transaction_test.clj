@@ -20,14 +20,14 @@
   ;; assertion (upstream's too), so a reader of a transaction's datoms (seon.ctx/patch) never saw a
   ;; ref move an entity away from its old parent. The report says the change whole, as DataScript's
   (let [db (d/db-with (ts/test-db) [{:seon.run/id "r#1" :seon.run/status :running} {:seon.run/id "r#2"}
-                                    {:seon.turn/id "r#1/0" :seon.turn/run [:seon.run/id "r#1"] :seon.turn/n 0}])
+                                    {:seon.model-call/id "r#1/0" :seon.model-call/run [:seon.run/id "r#1"] :seon.model-call/n 0}])
         e (fn [db a v] (:db/id (d/entity db [a v])))
         datoms (fn [tx] (set (map (juxt :a :v :added) (remove #(= :db/txInstant (:a %)) (:tx-data (d/with db tx))))))]
     (is (= #{[:seon.run/status :running false] [:seon.run/status :done true]}
            (datoms [[:db/add [:seon.run/id "r#1"] :seon.run/status :done]]))
         "a value replaced: its retraction, then its assertion")
-    (is (= #{[:seon.turn/run (e db :seon.run/id "r#1") false] [:seon.turn/run (e db :seon.run/id "r#2") true]}
-           (datoms [[:db/add [:seon.turn/id "r#1/0"] :seon.turn/run [:seon.run/id "r#2"]]]))
+    (is (= #{[:seon.model-call/run (e db :seon.run/id "r#1") false] [:seon.model-call/run (e db :seon.run/id "r#2") true]}
+           (datoms [[:db/add [:seon.model-call/id "r#1/0"] :seon.model-call/run [:seon.run/id "r#2"]]]))
         "a ref moved: the old link retracted")
     (is (= #{} (datoms [[:db/add [:seon.run/id "r#1"] :seon.run/status :running]])) "a value asserted again changes nothing")
     (is (= #{[:seon.run/status :done true]} (datoms [[:db/add [:seon.run/id "r#2"] :seon.run/status :done]])) "a first value retracts nothing")))

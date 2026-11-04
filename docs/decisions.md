@@ -622,7 +622,7 @@ The owner's rulings of 2026-10-24, each with his words and where it is now state
 
 ### A failed model call keeps what it sent and its typed error
 
-Owner, 2026-10-24: "Approve :seon.turn/error." A turn is written with its sent refs as the request goes; when the call ends it gains its reply and usage, or `:seon.turn/error` (the typed error as data, as the run's end has `:seon.end/error`). One turn entity either way. Stated in: not yet (owed docs/context.md with step 3).
+Owner, 2026-10-24: "Approve :seon.turn/error." A turn is written with its sent refs as the request goes; when the call ends it gains its reply and usage, or the typed error as data (as the run's end has `:seon.end/error`). Now the model call's `:seon.model-call/error`: a turn is a number, not an entity (owner, 2026-11-04). Stated in: docs/turn.md#the-turn-is-a-number.
 
 ### A turn records what it sent as refs; texts are read as of the turn
 

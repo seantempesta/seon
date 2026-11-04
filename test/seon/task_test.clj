@@ -176,7 +176,7 @@
            (d/transact conn (task/run-start-tx "demo/f#1" "demo/f" "b1" :a3 {:branch b :model "m" :max-turns 8} 0 "p"))
            (d/transact conn (task/message-tx "m-1" :message "owner" b "check g"))
            ;; on the branch, which forked before main held the run or the message
-           (d/transact bc [{:db/id "run" :seon.run/id "demo/f#1"} {:seon.turn/id "demo/f#1/0" :seon.turn/run "run" :seon.turn/n 0 :seon.turn/origin :model}])
+           (d/transact bc [{:db/id "run" :seon.run/id "demo/f#1"} {:seon.model-call/id "demo/f#1/0" :seon.model-call/run "run" :seon.model-call/n 0 :seon.model-call/origin :model}])
            (d/transact bc (task/message-tx "m-1" :message "owner" b "check g"))
            (d/transact bc (repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e1" "a3" {:seon.eval/code "(f 2)" :seon.eval/response {:handle 'result/e1 :value 4}}))
            (testing "from root on main: its agents, each agent's run"
@@ -188,9 +188,9 @@
                                                [:seon.root/id :root])))))
            (testing "the message is to the agent by its branch, on main"
              (is (= ["check g"] (d/q (quote [:find [?b ...] :in $ ?br :where [?m :seon.message/branch ?br] [?m :seon.message/body ?b]]) @conn b))))
-           (testing "on the branch: the run's turns and the message it took, the agent's evaluations"
-             (let [run (d/pull @bc '[{:seon.turn/_run [:seon.turn/id]} ] [:seon.run/id "demo/f#1"])]
-               (is (= [{:seon.turn/id "demo/f#1/0"}] (:seon.turn/_run run)))
+           (testing "on the branch: the run's model calls and the message it took, the agent's evaluations"
+             (let [run (d/pull @bc '[{:seon.model-call/_run [:seon.model-call/id]} ] [:seon.run/id "demo/f#1"])]
+               (is (= [{:seon.model-call/id "demo/f#1/0"}] (:seon.model-call/_run run)))
                (is (= ["m-1"] (d/q (quote [:find [?id ...] :in $ ?br :where [?m :seon.message/branch ?br] [?m :seon.message/id ?id]]) @bc b))))
              (is (= ["e1"] (mapv :seon.eval/id (:seon.eval/_agent (d/pull @bc '[{:seon.eval/_agent [:seon.eval/id]}] [:seon.agent/key k]))))))
            (testing "the run, the message and the agent are one entity on the branch and on main (content ids)"

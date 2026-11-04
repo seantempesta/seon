@@ -207,14 +207,20 @@
                                          [{:op :context :agent agent} "(my.task/status)"
                                           {:op :eval :agent "root"
                                            :code (str "(let [db (:db @(seon.root/branch-db sys (seon.task/default-branch " (pr-str task) ")))]"
-                                                      " (datahike.api/q '[:find [?n ...] :where [?t :seon.turn/origin :outside] [?m :seon.model-call/turn ?t] [?m :seon.model-call/sent _] [?t :seon.turn/n ?n]] db))")}]))
+                                                      " {:ns (datahike.api/q '[:find [?n ...] :where [?m :seon.model-call/origin :outside] [?m :seon.model-call/sent _] [?m :seon.model-call/n ?n]] db)"
+                                                      "  :ids (datahike.api/q '[:find [?id ...] :where [?m :seon.model-call/origin :outside] [?m :seon.model-call/id ?id]] db)"
+                                                      "  :turns (datahike.api/q '[:find [?t ...] :where [_ :seon.agent/turn ?t]] db)"
+                                                      "  :key (datahike.api/q '[:find ?k . :where [?a :seon.agent/key ?k] [?m :seon.model-call/agent ?a]] db)})")}]))
         text (:context ctx)]
     (is (clojure.string/starts-with? text "# You are a Seon agent") "the system prompt, first")
     (is (clojure.string/includes? text "(seon.repl/render-ctx-hiccup)") "the form that shows the render of ctx now")
     (is (re-find #"task-data-\d+" text) "the render of ctx by component key")
     (is (not (contract/error? (:value status))) (pr-str (:value status)))
     (is (contains? (:value status) :proofs) "status answers as the turn measured it")
-    (is (seq (:value sent)) "and the read records what it sent, as a model turn does (the debug page shows it)")))
+    (is (seq (:ns (:value sent))) "and the read records what it sent, as a model turn does (the debug page shows it)")
+    ;; docs/turn.md#the-turn-is-a-number: a read is a model call with its own count, and moves no turn
+    (is (= [(str (:key (:value sent)) "/read-1")] (:ids (:value sent))) "the read's model call is <agent key>/read-<k>")
+    (is (empty? (:turns (:value sent))) "a read moves no turn number: no agent holds one")))
 
 (deftest an-outside-agent-reads-its-context-after-it-defines
   ;; THE PLAN 0.7: the first real work through the server is an outside agent that attaches,

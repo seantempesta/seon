@@ -655,7 +655,7 @@
 
 (defn- record!
   "Record response r of code on this branch through the agent's write path (an agent's
-  only), with the defs its forms recorded and the effects asked during it (seon.agent/fx-record!).
+  only), under the turn in force (:seon.eval/turn, seon.agent/turn-now), with the defs its forms recorded and the effects asked during it (seon.agent/fx-record!).
   Answers r, with the id of its record (:record) when recorded."
   {:malli/schema [:=> [:cat :map :string :map] :map]}
   [r code req]
@@ -667,7 +667,10 @@
       ;; the write is the edge: a branch that refuses it answers the eval :unrecorded with the writer's message, so the
       ;; turn that asked goes on (a refused write thrown from here ended the whole turn: its reply and evals lost, the turn run again)
       (try (agent/transact! (into defs (record-tx {:seon.agent/key (:key @agent/state) :seon.agent/id (:id @agent/state)} id (by (:origin req))
-                                                  (record-details code r req (get-in @agent/state [:turn :run])))))
+                                                  (let [run (get-in @agent/state [:turn :run])]
+                                                    (cond-> (record-details code r req run)
+                                                      ;; the turn loop's own eval (a run's, no model call, made by the agent) is no conversation record: it takes no turn
+                                                      (not (and run (not (:call-id req)) (not (#{:ui :outside :context} (:origin req))))) (assoc :seon.eval/turn (agent/turn-now)))))))
            (assoc r :record id)
            (catch Throwable e
              (assoc r :unrecorded (contract/error :seon.agent/unrecorded #'record! (str "the branch refused this eval's record: " (ex-message e)) {}))))

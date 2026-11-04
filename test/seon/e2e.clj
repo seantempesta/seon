@@ -240,14 +240,14 @@
                  (when-not (some #(and (ready (:seon.run/agent %)) (= "calc/neg" (:seon.run/task %))) (vals (task/runs (db sys))))
                    (recur ready))))
              (println :cancel-neg (select-keys (root/cancel! sys ["calc/neg"]) [:ok])))
-   :check "[(app.calc/sum-sq 3 4) (count (my.db/q '[:find ?e :where [?e :seon.turn/id]]))]" :expect ["[25 0]"]
+   :check "[(app.calc/sum-sq 3 4) (count (my.db/q '[:find ?e :where [?e :seon.model-call/id]]))]" :expect ["[25 0]"]
    :ok (fn [{:keys [sys q d]}]
          (let [idx (r/index d)
                done? (every? #(r/done? idx %) ["calc/add-merge" "calc/twice-merge" "calc/square-merge" "calc/sum-sq-merge"])
                blocked (r/blocked-by idx "calc/abs")
                sq-db (:db @(c/branch-db sys (task/default-branch "calc/square")))
                sq-turns (sort-by first (map (fn [[n e s]] [n (str/join "\n\n" (keep :content (into [] (mapcat second) (context/parts-of sq-db (:seon.model-call/sent (d/pull sq-db [:seon.model-call/sent] e)))))) s])
-                                            (d/q '[:find ?n ?e ?s :where [?t :seon.turn/n ?n] [?t :seon.turn/origin :model] [?e :seon.model-call/turn ?t]
+                                            (d/q '[:find ?n ?e ?s :where [?e :seon.model-call/n ?n] [?e :seon.model-call/origin :model]
                                                    [?e :seon.model-call/basis _] [?e :seon.model-call/split ?s]] sq-db)))
                read-failure? (and (= 2 (count sq-turns))
                                   (str/includes? (second (second sq-turns)) ":assert (= 9 (app.calc/square 3))")

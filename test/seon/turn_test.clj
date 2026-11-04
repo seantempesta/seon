@@ -5,19 +5,19 @@
 (deftest a-runs-tokens-are-its-model-calls-sum
   ;; seon.turn/run-usage: a run's model calls and tokens are what its calls recorded, every turn's, a turn that
   ;; threw after its call answered included (the loop's own count lost those: a bench run wrote 111k
-  ;; of its calls' 3.54M); a call with no usage is left out, and a run none of whose calls reported is
-  ;; unknown (nil), never 0
-  (let [turn-of (fn [run n tokens]
-                  (cond-> [{:seon.turn/id (str run "/" n) :seon.turn/run [:seon.run/id run] :seon.turn/n n}]
-                    tokens (conj {:seon.model-call/id (str run "/" n) :seon.model-call/tokens tokens})))
+  ;; of its calls' 3.54M); a call with no usage counts as a call and adds no tokens, and a run none of whose calls reported is
+  ;; unknown (no :tokens), never 0
+  (let [call-of (fn [run n tokens]
+                  [(cond-> {:seon.model-call/id (str "b1/a1/" run "/" n) :seon.model-call/run [:seon.run/id run] :seon.model-call/n n}
+                     tokens (assoc :seon.model-call/tokens tokens))])
         db (t/with (t/world)
                    [{:seon.run/id "app.calc/total-is-exact#1"} {:seon.run/id "app.calc/total-is-exact#2"}]
-                   (concat (turn-of "app.calc/total-is-exact#1" 0 1000) (turn-of "app.calc/total-is-exact#1" 1 2500)
-                           (turn-of "app.calc/total-is-exact#1" 2 nil)
-                           (turn-of "app.calc/total-is-exact#2" 0 7)))]
-    (is (= {:model-calls 2 :tokens 3500} (turn/run-usage db "app.calc/total-is-exact#1"))
-        "every turn's call that reported, and no other run's; a turn with no call record is no call")
-    (is (= {:model-calls 0} (turn/run-usage (t/with (t/world) [{:seon.run/id "x/y#1"}] (turn-of "x/y#1" 0 nil)) "x/y#1"))
+                   (concat (call-of "app.calc/total-is-exact#1" 1 1000) (call-of "app.calc/total-is-exact#1" 2 2500)
+                           (call-of "app.calc/total-is-exact#1" 3 nil)
+                           (call-of "app.calc/total-is-exact#2" 1 7)))]
+    (is (= {:model-calls 3 :tokens 3500} (turn/run-usage db "app.calc/total-is-exact#1"))
+        "every call of the run, the tokens of those that reported, and no other run's")
+    (is (= {:model-calls 1} (turn/run-usage (t/with (t/world) [{:seon.run/id "x/y#1"}] (call-of "x/y#1" 1 nil)) "x/y#1"))
         "no call reported: its tokens unknown, never 0")))
 
 (deftest a-turn-that-only-repeats-is-named
