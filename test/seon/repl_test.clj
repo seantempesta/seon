@@ -313,7 +313,7 @@
   ;; the agent's own data keeps its keys: a timing of its own that changed is a different answer
   (let [[_ m5 m7] (at/in-agent ["(def t (atom 4))" "{:ms (swap! t inc)}" "{:ms (swap! t inc)}"])]
     (is (not (str/includes? (:text m7) ":again")) (str "{:ms 5} then {:ms 6} is no same answer: " (:text m7))))
-  ;; an answer holding a db is printed as it was, its host object named by the form that reads it
+  ;; an answer holding a db is printed as the record keeps it (the one text of an eval), its host object named by the form that reads it
   (let [[_ s2] (at/in-agent ["(select-keys @seon.agent/state [:db])" "(select-keys @seon.agent/state [:db])"])]
     (is (str/includes? (:text s2) "(get (deref seon.agent/state) :db)") (str "the db named by its form: " (:text s2)))))
 
@@ -438,7 +438,7 @@
   ;; (in-ns 'x) answers a Namespace: it is printed for the model, and the agent's reply to root
   ;; carries the text, never the live value (which no wire encodes)
   (let [[ns-call next-call] (at/in-agent ["(in-ns 'user)" "(+ 1 1)"])]
-    (is (str/includes? (str (:text ns-call)) "#namespace") "the value, printed")
+    (is (str/includes? (str (:text ns-call)) "user") "the value, printed as the record keeps it: the namespace's name")
     (is (= 2 (:value next-call)) "and the agent lives to answer the next")))
 
 (deftest a-redefinition-that-changes-a-docstring-says-so
@@ -994,3 +994,19 @@
          (is (= 7 (:fd @agent/link)) "the process keeps its socket")
          (is (= {:db nil} (select-keys @agent/state [:db :fd :conn])) "and the state is what the forms made it")
          (finally (reset! agent/state old) (reset! agent/link old-link)))))
+
+(deftest an-evals-text-is-one-text
+  ;; the owner, 2026-11-04: "Why does an outside session have a better understanding? That's wrong." The text an outside agent is
+  ;; answered (:text) is made by the function the model's message is (seon.print/record-text), from the plain data the record
+  ;; keeps, so a var, a fn and a data value read alike to both; the live value stays at the handle
+  (let [old @agent/state
+        ev (fn [code] (try (reset! agent/state {:n 0 :ns (the-ns 'user)})
+                           (repl/eval-string code {:origin :model :call-id "c1"})
+                           (finally (reset! agent/state old))))]
+    (doseq [code ["#'clojure.core/inc" "(fn [x] x)" "{:a 1 :b [1 2 3] :c \"text\"}" "(throw (ex-info \"boom\" {:k 1}))"]]
+      (let [r (ev code)
+            rec (assoc (repl/record-details code r {:call-id "c1"} nil) :seon.eval/id "e1" :seon.eval/by "a1")
+            msg (second (seon.context/eval-messages {} rec))]
+        (is (string? (:text r)) code)
+        (is (= (:text r) (:content msg)) (str "the outside text is the model's message for " code))))
+    (is (var? (:value @(resolve (:handle (ev "#'clojure.core/inc"))))) "the live value is at the handle")))

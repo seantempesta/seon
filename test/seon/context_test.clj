@@ -1763,6 +1763,22 @@
         (is (str/includes? (:seon.error/message bare) "no request to show"))
         (is (vector? (context/session-tx @conn "b/src" "x")) "an agent that has a request is shown")))))
 
+(deftest an-example-keeps-an-eval-of-ctx-as-its-marker
+  ;; the owner, 2026-11-04: "if an agent needs to swap or modify ctx then that needs to be present": no eval is left out of an
+  ;; example; one whose basis a copy cannot rebuild keeps its code and shows its value as the marker of what it was
+  (ts/test-branch!
+    (fn [_ conn]
+      (source-session! conn)
+      (d/transact conn [{:seon.eval/id "s3" :seon.eval/by "src" :seon.eval/agent [:seon.agent/key "b/src"] :seon.eval/turn 1 :seon.eval/schema :seon.ctx/ctx
+                         :seon.eval/basis {:t 5 :branch :b} :seon.eval/code "(swap! ctx assoc :x 1)" :seon.eval/run "demo/h#1" :seon.eval/call-id "call_3" :seon.eval/call 1
+                         :seon.eval/response {:handle 'result/s3}}])
+      (let [recs (->> (context/session-tx @conn "b/src" "abc") (mapcat identity) (filter :seon.eval/code))
+            r3 (first (filter #(= "(swap! ctx assoc :x 1)" (:seon.eval/code %)) recs))]
+        (is (= 2 (count recs)) "both evals are in the example")
+        (is (nil? (:seon.eval/basis r3)) "no basis a copy cannot rebuild")
+        (is (string? (get-in r3 [:seon.value/gone :type] (get-in r3 [:seon.eval/response :value :seon.value/gone :type]))) "its value, the marker of what it was")
+        (is (str/includes? (print/record-text r3) "seon.value/gone") "which the transcript prints like any map")))))
+
 (deftest an-example-keeps-no-id-of-the-session-it-was-made-from
   ;; its eval's :run is the example's id (nothing reads an example's evals by the source session's), and the
   ;; result handle its response and printed text name is the example's

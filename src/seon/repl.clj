@@ -629,19 +629,22 @@
 (defn record-details
   "What an eval records, each its own attribute of its entity (:seon.eval/code, :response, :schema, :basis, :prose,
   :call-id and :call, :reasoning, :content, :run, :fns; each only when present): the code; the response whole with its
-  value as plain data (`kept`), never a text made for a reader (each prints it as it shows it: seon.print/response-text),
+  value as plain data (`kept`), never a text made for a reader (each prints it as it shows it: `text-of`),
   so a record is the same whatever came before it; the prose beside it, as written (never
   parsed here: the parser is program the agent may change, and an eval's record runs none of it; a reader
   that wants what the prose cites parses the kept prose, docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map);
-  a value that names its render schema keeps it (the page draws the value by it); a value that names its basis (@ctx:
-  the branch's record at t, seon.ctx/build) keeps the basis in place of the value, so a copy of the session is never
+  a value that names its render schema keeps it (the page draws the value by it); the value that IS the agent's ctx (@ctx, identical to the
+  object seon.ctx/ctx holds: the branch's record at t, seon.ctx/build) keeps the basis in place of the value, so a copy of the session is never
   stored at each @ctx; the provider's call id, its reasoning, its run, its costliest functions."
   {:malli/schema [:=> [:cat :string :map :map [:maybe :string]] [:map [:seon.eval/code :string] [:seon.eval/response [:and :seon.eval/response :seon.db/plain]]]]}
   [code r req run]
   (let [resp (dissoc r :text :fns :record)
         v (:value resp)
-        basis (when (contains? resp :value) (:seon.render/basis (meta v)))
-        schema (when (contains? resp :value) (:seon.render/schema (meta v)))]
+        ;; the record at a t is the value of the agent's ctx itself (the one object ctx installs, seon.ctx/ctx): metadata
+        ;; travels through select-keys, assoc and dissoc, so a map made of it is the data it holds, never a basis
+        ctx? (and (contains? resp :value) (some? v) (identical? v @ctx/ctx))
+        basis (when ctx? (select-keys v [:t :branch]))
+        schema (when (contains? resp :value) (when-let [k (:seon.render/schema (meta v))] (when (or ctx? (not= :seon.ctx/ctx k)) k)))]
     (cond-> {:seon.eval/code code
              :seon.eval/response (cond basis (dissoc resp :value) (contains? resp :value) (assoc resp :value (kept v)) :else resp)}
       schema (assoc :seon.eval/schema schema)
@@ -701,9 +704,19 @@
                            "run something else, or change what it reads first."))))
     r))
 
+(defn- text-of
+  "The text of response r of code as every reader reads it: the one function the model's message prints with
+  (seon.print/record-text, through render/model, an @ctx eval's value rebuilt from its basis by seon.context/basis-value, as
+  seon.context/eval-messages does) of the plain data the record keeps (`record-details`), so the outside agent's text and the
+  model's cannot differ; the live value stays at the handle. See docs/render.md#a-render-is-a-value-printed-once."
+  {:malli/schema [:=> [:cat :string :map :map] :string]}
+  [code r req]
+  (let [rec (record-details code r req nil)]
+    (print/record-text (cond-> rec (:seon.eval/basis rec) (assoc-in [:seon.eval/response :value] (context/basis-value (:db @agent/state) rec))) render/model)))
+
 (defn eval-string
   "Evaluate code through the one REPL path (the handler and its middleware) and answer its one
-  response (`response`) with the text its caller reads (:text, seon.print/response-text) and what its forms
+  response (`response`) with the text its caller reads (:text, `text-of`) and what its forms
   recorded, its handle result/e<n> bound to it (the live value inside), and recorded (an
   agent's, on its branch). From inside an agent, the turn loop's calls; req adds to the request
   (root's: seon.server's namespace, origin, budget and eval fn; root's requests to an agent:
@@ -724,7 +737,7 @@
      (try (let [;; with the namespace the REPL is in after it (:ns, as every nREPL response carries): the prompt
                 answered (fn [] (let [r (again code (cond-> (repaired (response @answers handle) req)
                                                       (:ns @agent/state) (assoc :ns (ns-name (:ns @agent/state)))))]
-                                  [r (print/response-text r render/model)]))
+                                  [r (text-of code r req)]))
                 ;; printing is inside the boundary: a value that throws as it is realized is the error
                 [r text] (try (@the-handler (assoc req "code" code :reply #(vswap! answers conj %)))
                               (answered)
@@ -929,7 +942,7 @@
   (let [handle (symbol "result" (str "e" (eval-n!)))
         r (repaired (response [{:tag :err :err e}] handle) req)]
     (swap! agent/state assoc-in [:results (keyword (name handle))] r)
-    (record! (assoc r :text (print/response-text r render/model)) code req)))
+    (record! (assoc r :text (text-of code r req)) code req)))
 
 (defn- layout
   "The layout this branch renders its ctx with: the var :seon.render/render-ctx declares, an agent's own

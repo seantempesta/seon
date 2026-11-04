@@ -735,7 +735,9 @@
   {:malli/schema [:=> [:cat :seon.host/db :map] :map]}
   [db e]
   (let [{:keys [t branch]} (:seon.eval/basis e)
-        a (d/q '[:find ?a . :in $ ?id :where [?e :seon.eval/id ?id] [?e :seon.eval/agent ?a]] db (:seon.eval/id e))]
+        ;; the agent of the eval's record, else (an eval not yet recorded, whose text is made first) the one this process is
+        a (or (d/q '[:find ?a . :in $ ?id :where [?e :seon.eval/id ?id] [?e :seon.eval/agent ?a]] db (:seon.eval/id e))
+              (pdb/eid db :seon.agent/key (:key @agent/state)))]
     (with-meta (assoc (:tree (binding [datahike.index.interface/*reads* nil] (ctx/build (d/as-of db t) a branch))) :t t)
       {:seon.render/schema (:seon.eval/schema e)})))
 
@@ -817,16 +819,11 @@
   (boolean (and id (= (:seon.eval/by e) (name id)) (:seon.eval/run e) (not (:seon.eval/call-id e)))))
 
 (defn records
-  "What the conversation of ctx value c (an agent's @ctx, or one seon.ctx/build drew: what the agent's page reads) is made of,
-  on c's db, in the order of its turn numbers (docs/turn.md#the-turn-is-a-number): its evals (not a context read's: that ends only the
-  request that ran it; not its own loop's, `loop-eval?`), the messages it took (:seon.message/agent, written on its branch by the
-  turn that took each) and its model calls' replies that called nothing (the agent winding down: its prose is its assistant
-  message), each [position value schema-key]; the position is [turn rank n]: the record's turn, then rank 0 for a message, 1 for an
-  eval, 2 for a reply, then a message's transaction, an eval's issue number (compared as a number) or 0. With since, a turn number:
-  only evals and replies of turns since and later (what a request has not printed yet), read newest first from ctx until one is older,
-  so a request costs what is new; of messages, every one. The session's, not one run's: a run that wakes or loads the session reads
-  every run before it (design agent-loop section 1); an agent's own record is never windowed (docs/ctx.md#the-pattern). Reading
-  them from ctx is the owner's ruling (docs/decisions.md): what the agent's pattern leaves out, its model does not read."
+  "The conversation of ctx value c (an agent's @ctx, or one seon.ctx/build drew) on db, as [position value schema-key]
+  in order: its evals (not a context read's, nor its own loop's: `loop-eval?`), the messages it took and its model calls'
+  replies that called nothing. The position is [turn rank n], docs/turn.md#the-turn-is-a-number. With since, a turn
+  number: the evals and replies of that turn and later only (read newest first from ctx, so a request costs what is new);
+  every message. Reading them from ctx is the owner's ruling (docs/decisions.md): what the pattern leaves out, the model does not read."
   {:malli/schema [:function [:=> [:cat :map :seon.host/db] [:vector [:tuple [:vector :int] :map :qualified-keyword]]]
                   [:=> [:cat :map :seon.host/db [:maybe :int]] [:vector [:tuple [:vector :int] :map :qualified-keyword]]]]}
   ([c db] (records c db nil))
@@ -959,8 +956,14 @@
         refuse #(contract/error :seon.context/session-refused #'seon.context/session-tx % {:key key})
         ek (str "example/" id)
         request (when a (session-request db a))
-        ;; the model's own evals (a call id) and its messages and replies: not an eval the harness made in the agent, nor an eval of @ctx (its basis is a commit of the original branch, which a copy on another cannot rebuild)
-        rs (when a (remove (fn [[_ v k]] (and (= :seon.db/eval-fact k) (or (not (:seon.eval/call-id v)) (:seon.eval/basis v)))) (records (agent-ctx db a) db)))
+        ;; the model's own evals (a call id) and its messages and replies: not an eval the harness made in the agent
+        ;; an eval of @ctx keeps its code, and its value as the marker of what it was: its basis is a commit of the original branch, which a copy on another cannot rebuild
+        cannot (fn [[pos v k]] (if (and (= :seon.db/eval-fact k) (:seon.eval/basis v))
+                                 [pos (-> v (dissoc :seon.eval/basis :seon.eval/schema)
+                                          (assoc-in [:seon.eval/response :value] {:seon.value/gone {:type "the agent's record at a basis a copy cannot rebuild"}}))
+                                  k]
+                                 [pos v k]))
+        rs (when a (map cannot (remove (fn [[_ v k]] (and (= :seon.db/eval-fact k) (not (:seon.eval/call-id v)))) (records (agent-ctx db a) db))))
         unknown (first (remove #(session-kinds (nth % 2)) rs))
         ]
     (cond (nil? a) (refuse (str "no agent is keyed \"" key "\""))

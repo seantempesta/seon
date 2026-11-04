@@ -293,8 +293,8 @@
     (try
       (reset! seon.agent/state {:db db :key k :branch :b})
       (is (= (:tree (ctx/build db (aid db) :b)) @ctx/ctx) "built when the state first holds the db")
-      (is (= {:seon.render/schema :seon.ctx/ctx :seon.render/basis {:t (:max-tx db) :branch :b}} (meta @ctx/ctx))
-          "marked for its block, with the basis an eval of it records")
+      (is (= {:seon.render/schema :seon.ctx/ctx} (meta @ctx/ctx)) "marked for its block")
+      (is (= {:t (:max-tx db) :branch :b} (select-keys @ctx/ctx [:t :branch])) "its :t and :branch are what an eval of it records as its basis (only the value itself)")
       (swap! seon.agent/state assoc :db (:db-after rep) :tx (select-keys rep [:db-after :tx-data]))
       (is (contains? (:evals @ctx/ctx) (id (:db-after rep) [:seon.eval/id "e11"])) "a transaction's eval joins")
       (is (= (:tree (ctx/build (:db-after rep) (aid (:db-after rep)) :b)) @ctx/ctx))
@@ -713,8 +713,9 @@
     (let [db (:db-after (d/with db (:tx reg)))
           db (:db-after (d/with db [{:seon.agent/key k :lab.ctx/steps ["read the plan" "write the test" "read the plan"]}]))
           tree (:tree (ctx/build db (aid db) :b))
-          c (with-meta tree {:seon.render/schema :seon.ctx/ctx :seon.render/basis {:t (:t tree) :branch :b}})
-          as-agent (fn [f] (try (reset! seon.agent/state {:db db}) (f) (finally (end-agent!))))
+          c (with-meta tree {:seon.render/schema :seon.ctx/ctx})
+          as-agent (fn [f] (try (reset! seon.agent/state {:db db}) (binding [ctx/*installing* true] (reset! ctx/ctx c)) (f)
+                                (finally (binding [ctx/*installing* true] (reset! ctx/ctx nil)) (end-agent!))))
           rec (as-agent #(seon.repl/record-details "@ctx" {:handle 'result/e9 :value c} {} nil))
           drawn (try (reset! seon.agent/state {:db db :key k :branch :b}) (seon.repl/render-ctx) (finally (end-agent!)))
           ;; the keys it added, one component (ctx-keys) holding each key's own
@@ -1233,3 +1234,24 @@
     (is (some #(str/starts-with? % "eval-item") (keys page)) "the conversation is on the page")
     (is (= parts whole) "the model reads the same whether or not a person watches")))
 
+
+(deftest a-basis-is-recorded-only-for-the-ctx-value-itself
+  ;; the owner, 2026-11-04: a basis was inferred from metadata, which select-keys, assoc and dissoc keep, so (select-keys @ctx [:task])
+  ;; recorded a basis and was printed as the whole record. A basis is recorded only when the value IS the agent's ctx value
+  (let [db (seeded 3)
+        tree (:tree (ctx/build db (aid db) :b))
+        c (with-meta tree {:seon.render/schema :seon.ctx/ctx :seon.render/basis {:t (:t tree) :branch :b}})
+        rec (fn [v] (try (reset! seon.agent/state {:db db :key k :branch :b})
+                         (binding [ctx/*installing* true] (reset! ctx/ctx c))
+                         (seon.repl/record-details "x" {:handle 'result/e9 :value v} {} nil)
+                         (finally (binding [ctx/*installing* true] (reset! ctx/ctx nil)) (end-agent!))))
+        text (fn [r] (try (reset! seon.agent/state {:db db :key k :branch :b})
+                          (:content (first (seon.context/eval-messages {:db db} (assoc r :seon.eval/id "e9" :seon.eval/by "a1"))))
+                          (finally (end-agent!))))
+        part (select-keys c [:seon.agent/key])
+        more (assoc c :x 1)]
+    (is (contains? (rec c) :seon.eval/basis) "the ctx value itself: its basis")
+    (is (not (contains? (rec part) :seon.eval/basis)) "(select-keys @ctx [:seon.agent/key]) is a map of what it holds, no basis")
+    (is (not (contains? (rec more) :seon.eval/basis)) "(assoc @ctx :x 1) is not the record at a t either")
+    (is (= #{:seon.agent/key} (set (keys (get-in (rec part) [:seon.eval/response :value])))) (str "kept as the data it was: " (pr-str (select-keys (:seon.eval/response (rec part)) [:value]))))
+    (is (not (str/includes? (text (rec part)) ":evals")) "the model reads what the value was, not the whole record")))
