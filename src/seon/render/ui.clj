@@ -98,7 +98,7 @@
   becomes \"A long string\");  See docs/render.md#the-page."
   {:malli/schema [:=> [:cat :string] :string]}
   [id]
-  (let [s (str/replace (name (symbol (first (str/split id #"#")))) "-" " ")]
+  (let [s (str/replace (name (symbol id)) "-" " ")]
     (str (str/upper-case (subs s 0 (min 1 (count s)))) (subs s (min 1 (count s))))))
 
 (defn markdown
@@ -567,7 +567,7 @@
   [id] {(keyword "data-on:toggle") (str "@post('/open?view=' + el.closest('[data-view]').dataset.view + '&unit=" id "&open=' + el.open)")})
 
 (defn problem-about
-  "What problem row r is about, as words: its task, run, test and attribute, those it has (the
+  "What problem row r is about, as words: its task, test and attribute, those it has (the
   wording `problem-row` uses)."
   {:malli/schema [:=> [:cat :map] [:sequential :string]]}
   [r] (remove nil? [(:task r) (some-> (:test r) str) (some-> (:attr r) kname)]))

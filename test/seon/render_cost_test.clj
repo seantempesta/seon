@@ -52,23 +52,23 @@
      :fixed {:calls 3}
      :sizes [100 300 1000 10000]}))
 
-(defn runs
-  "The input of size n: a vector of n runs (each a value whose schema declares a render),
+(defn messages
+  "The input of size n: a vector of n messages (each a value whose schema declares a render),
   printed by the default render under a budget that shows them all."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map :any]]}
   [n] [{:budget 200000}
-       (vec (for [i (range n)] {:seon.run/id (str "t/x#" i) :seon.run/status :done :seon.run/outcome :green}))])
+       (vec (for [i (range n)] {:seon.message/id (str "m" i) :seon.message/from "user" :seon.message/body "hello"}))])
 
 (deftest the-printer-renders-nested-values-in-one-pass
   ;; the printer's auto-render: each nested value with a render is named in one lookup per key
   ;; (seon.render/schema-of, no validation) and rendered once, in the printer's one pass
   (cost/proof
-    {:of 'seon.render/html :input 'seon.render-cost-test/runs
-     :n "runs in a vector, each shown by its own render in the printer's hiccup"
-     :work (str "one pass: per run, the printer classifies it once and asks its render once: one "
-                "identity lookup over its three keys, a call of its render (seon.render.ui/run-row) inline, "
+    {:of 'seon.render/html :input 'seon.render-cost-test/messages
+     :n "messages in a vector, each shown by its own render in the printer's hiccup"
+     :work (str "one pass: per message, the printer classifies it once and asks its render once: one "
+                "identity lookup over its keys, a call of its render (seon.render.ui/message) inline, "
                 "and its one line by seon.print/line, then the printer lays it out as a leaf. Nothing per "
-                "run is done twice and no run is printed as data")
+                "message is done twice and no message is printed as data")
      :growth :linear
      ;; contracted calls a run, along the path above: seon.render's nested, render-of with
      ;; own-key, schema-of and declared (its parents) each, print/line and its prose.
@@ -92,12 +92,12 @@
 (deftest main-info-reads-what-the-page-shows
   ;; global-ids' profile (2026-10-23): main-info took 174 ms a call on the owner's main, 695 ms
   ;; of one loop turn; its count of every datom grew with main (15 ms at 47k datoms). What the
-  ;; render proc reads of main is its t and the reconciler's index (its runs, for :agent-run):
+  ;; render proc reads of main is its t and the reconciler's index (its tasks and agents):
   ;; none grows with main's other data
   (cost/proof
     {:of 'seon.render.proc/main-info :input 'seon.render-cost-test/main-of
      :n "units of 20 evaluation records on main (data that is neither program, task nor problem)"
-     :work (str "none per record: the runs are the reconciler's index over their own attributes; a record "
+     :work (str "none per record: the tasks and agents are the reconciler's index over their own attributes; a record "
                 "is never walked")
      :growth :constant
      ;; the contracted calls a first read of main makes, whatever main holds, never one per record;
@@ -199,18 +199,18 @@
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map :any]]}
   [n]
   (let [k (seon.task/agent-key "b1" :a1)
-        ev (fn [id turn] (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a1} id "a1" {:seon.eval/code "(+ 1 2)" :seon.eval/response {:handle (symbol "result" id) :value 3} :seon.eval/run "t/x#1" :seon.eval/turn turn :seon.eval/call-id (str "c-" id)}))
+        ev (fn [id turn] (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a1} id "a1" {:seon.eval/code "(+ 1 2)" :seon.eval/response {:handle (symbol "result" id) :value 3} :seon.eval/turn turn :seon.eval/call-id (str "c-" id)}))
         db0 (reduce d/db-with (ts/test-db)
                     [[{:seon.root/id :root :seon.root/boot "b1"}]
                      (seon.task/agent-tx "b1" :a1 {:status :busy :branch :task-x})])
         db0 (reduce d/db-with db0
                     [(seon.doc/load-tx db0 "docs" {seon.context/system-page "# You are a Seon agent\n\nThe help page."})
                      (seon.task/create-tx db0 [{:seon.task/ns 't :seon.task/name "x" :seon.task/plan "Make x." :seon.task/proofs #{'t-test/x-test}}])
-                     [{:seon.run/id "t/x#1" :seon.run/task [:seon.task/id "t/x"] :seon.run/agent [:seon.agent/key k]}]
+                     [{:seon.agent/key k :seon.agent/task [:seon.task/id "t/x"]}]
                      (into [] (mapcat #(ev (str "e" %) 0)) (range n))
                      [{:seon.agent/key k :seon.agent/turn 1}
-                      {:seon.model-call/id (str k "/1") :seon.model-call/run [:seon.run/id "t/x#1"] :seon.model-call/agent [:seon.agent/key k] :seon.model-call/n 1 :seon.model-call/origin :model}]])
-        b {:commit (d/commit-id db0) :task "t/x" :run "t/x#1" :turn 1 :max-turns 9 :origin :model :agent k}
+                      {:seon.model-call/id (str k "/1") :seon.model-call/agent [:seon.agent/key k] :seon.model-call/n 1 :seon.model-call/origin :model}]])
+        b {:commit (d/commit-id db0) :task "t/x" :turn 1 :max-turns 9 :origin :model :agent k}
         ;; what the call sent, as the turn records it once its request is made (seon.turn/act!)
         db (d/db-with db0 [{:seon.model-call/id (str k "/1") :seon.model-call/basis b
                             :seon.model-call/sent (:sent (seon.context/render db0 b))}])
@@ -358,12 +358,12 @@
   its ctx tree, the diff, the db, the layout and the lists to draw (*sels*)."
   {:malli/schema [:=> [:cat pos-int?] [:vector :any]]}
   [n]
-  (let [conn *conn* k (str "b/p" n) tid (str "demo/p" n) run (str tid "#1")]
+  (let [conn *conn* k (str "b/p" n) tid (str "demo/p" n)]
     (d/transact conn (seon.task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name (str "p" n) :seon.task/plan "Make p." :seon.task/proofs #{'demo-test/p-test}}]))
-    (d/transact conn [{:seon.run/id run :seon.run/task [:seon.task/id tid] :seon.run/agent {:seon.agent/key k :seon.agent/task {:seon.task/id tid}}}])
+    (d/transact conn [{:seon.agent/key k :seon.agent/task {:seon.task/id tid}}])
     (doseq [i (range n)]
       (d/transact conn [{:seon.eval/id (str "p" n "e" i) :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key k}
-                         :seon.eval/code (str "(f " i ")") :seon.eval/response {:handle (symbol "result" (str "p" n "e" i)) :value (vec (range 5)) :ns 'user} :seon.eval/run run :seon.eval/call-id (str "c" i) :seon.eval/prose (str "Step " i ".")}])
+                         :seon.eval/code (str "(f " i ")") :seon.eval/response {:handle (symbol "result" (str "p" n "e" i)) :value (vec (range 5)) :ns 'user} :seon.eval/call-id (str "c" i) :seon.eval/prose (str "Step " i ".")}])
       (when (even? i)
         (d/transact conn (update (seon.task/message-tx (str "p" n "m" i) :message "user" (keyword (str "b-p" n)) (str "note " i)) 0 assoc :seon.message/agent {:seon.agent/key k}))))
     (let [db @conn a (:db/id (d/entity db [:seon.agent/key k]))]
@@ -386,14 +386,14 @@
                        ;; 10.2 MB at 80 (about 27 calls and 0.1 MB an eval).
                        ;; jolt/ref-depth: 521 calls / 3.54 MB at 10, 641 / 4.60 MB at 40. The fixed part grew by the parts the list now
                        ;; draws (the namespaces part with each namespace's definitions, a cited part for each thing the plan cites,
-                       ;; the run head); an eval costs one call more (seon.render.ui/turn-evals reads each eval's call id to place it
+                       ;; the turn head); an eval costs one call more (seon.render.ui/turn-evals reads each eval's call id to place it
                        ;; in its model turn, the chat's grouping) and its fixture response now carries :ns, as every REPL response does
                        ;; (seon.context/current-ns reads the newest eval's, not every record: 11 KB an eval before)
                        ;; 555 calls at 10 since the layout places the cites from ctx (seon.render.ui/page-cites: where ctx holds each
                        ;; joined entity whole, a cited task among them, and the order of what each builds on; the cites' joins are the
                        ;; pull's, where the draw used to query them), 548 before; 583 since the task part, the status's proofs and the
                        ;; namespaces part read the pulled task (seon.render.ui/task-model, seon.context/task-of, namespaces-of), where
-                       ;; they queried the db: 1.77 MB at 10 (2.78 MB with the run join this branch tried and reverted); 591 since
+                       ;; they queried the db: 1.77 MB at 10 (2.78 MB with a join this branch tried and reverted); 591 since
                        ;; render-ctx watches the task's and the agent's searches ((:searches (:task c)), (:searches c): the tracked
                        ;; reads a swap! of a search redraws by; 583 with that placement taken out, the fixture holding no search).
                        ;; Accepted by the optimization session on the owner's deferral, 2026-11-01 ("I trust your judgement")

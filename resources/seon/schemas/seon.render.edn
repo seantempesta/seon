@@ -76,7 +76,7 @@
  ;; one request of the debug timeline as it went on the wire (seon.render.ui/debug-input, seon.render.proc/debug-value):
  ;; the body made again from its turn's basis, each message's records, which are new since the request before
  :seon.render/debug-turn [:map {:seon.render/html seon.render.ui/debug-turn} [:at [:or pos-int? [:= :latest]]] [:to-come? :boolean]
-                          [:turn :int] [:run :string] [:origin :seon.model-call/origin] [:raw? :boolean] [:view {:optional true} :string]
+                          [:turn :int] [:agent :string] [:origin :seon.model-call/origin] [:raw? :boolean] [:view {:optional true} :string]
                           [:body :map] [:sources [:vector [:vector :any]]] [:new [:vector :boolean]]
                           [:usage [:map [:seon.model-call/tokens {:optional true} :int] [:seon.model-call/cache-hit-tokens {:optional true} :int]
                                    [:seon.model-call/cache-miss-tokens {:optional true} :int]]]
