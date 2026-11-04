@@ -124,13 +124,13 @@
 (def ^:private watched-attrs
   "The agent attributes the index reads: when its root started it, when (a start writes both, and the environment with
   them: a session's next task has a boot unchanged but a start time that moved), and the messages it had taken. Not its
-  :seon.agent/branch as root observes it (seon.task/agent-tx writes that too, under the store's name for the branch)."
+  :seon.agent/branch as root observes it (seon.task/agent-tx writes that too, under the store's name for the branch). See docs/reconcile.md#the-reconcilers-index."
   #{:seon.agent/boot :seon.agent/started-ms :seon.agent/taken})
 
 (def ^:private watched?
   "Is attribute a one the index watches (an attribute of `watched-ns`, or one of `watched-attrs`)? A plain function and no
   contracted one, for it is asked once per datom of a move: a contracted call each would make a move cost its datoms in
-  calls (seon.render-cost-test/a-move-of-main-costs-what-moved)."
+  calls (seon.render-cost-test/a-move-of-main-costs-what-moved). See docs/reconcile.md#the-reconcilers-index."
   (fn [a] (boolean (and (keyword? a) (or (contains? watched-attrs a) (contains? watched-ns (namespace a)))))))
 
 (def park-outcomes
@@ -154,7 +154,8 @@
    :live #{} :reap #{} :kill {} :judge #{} :merging #{} :msgs {}})
 
 (def ^:private finished task/finished)
-(def ^:private judged-outcomes task/judged)
+(def ^:private judged-outcomes "The outcomes that wait for root's next step on a merge (task/judged). See docs/reconcile.md#a-task-holds-how-its-work-ended."
+  task/judged)
 
 (defn- task-agent
   "Task id's agent as the index holds it (the entity its start named, seon.task/start-tx), or nil before one."
@@ -707,7 +708,7 @@
 ;; started twice.
 
 (def ^:private refused-attrs
-  "The attributes a refused start writes on its task (seon.task/refused-tx: the outcome, and the judged attributes it sets and retracts)."
+  "The attributes a refused start writes on its task (seon.task/refused-tx: the outcome, and the judged attributes it sets and retracts). See docs/reconcile.md#a-task-holds-how-its-work-ended."
   (conj (set task/judged-attrs) :seon.task/outcome))
 
 (defn- request
@@ -837,7 +838,7 @@
   [db id]
   (or (d/q '[:find (count ?tx) . :in $ ?id :where [?t :seon.task/id ?id] [?t :seon.task/outcome :behind ?tx true]] (d/history db) id) 0))
 
-(defn- judge
+(defn- judge-tx
   "Task id's end judged on MEASURED facts and written on main, once: the end its agent wrote on the branch (pull-end),
   root's own proof results, the branch's merge entries, and diff, the writer's one read of the
   branch (:branch-diff: its head db, its merge base and main's t there, the keys it changed,
@@ -1020,7 +1021,7 @@
       ;; (docs/turn.md#parked: parking is work! returning)
       :diffed (if (contract/error? r)
                 (refused st r)
-                (let [{:keys [tx outcome]} (judge st f (:results f) r)
+                (let [{:keys [tx outcome]} (judge-tx st f (:results f) r)
                       k (:key (agent-of (:db st) id))
                       kept? (keeps? (get-in st [:idx :tasks id :seon.task/kind]) (:outcome (when k (pull-end (:db r) k))))
                       parks? (#{:parked :cap} outcome)]

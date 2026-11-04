@@ -93,7 +93,7 @@
   "What the model calls of the agent with key k spent, from their records on db (a model call is one fact, whichever way the turn
   ended): {:model-calls n :tokens t}, n the calls recorded (a turn that threw before its call made none), t their
   :seon.model-call/tokens summed, absent when no call reported its usage (unknown, never 0). A count carried
-  through the turn loop lost every turn that threw after its call answered, and the turns stood for the calls."
+  through the turn loop lost every turn that threw after its call answered, and the turns stood for the calls. See docs/turn.md#the-turn-is-a-number."
   {:malli/schema [:=> [:cat :seon.host/db :string] [:map [:model-calls nat-int?] [:tokens {:optional true} :int]]]}
   [db k]
   (let [calls (map #(d/entity db %) (d/q '[:find [?m ...] :in $ ?k :where [?a :seon.agent/key ?k] [?m :seon.model-call/agent ?a]] db k))

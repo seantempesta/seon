@@ -50,13 +50,13 @@
                        (for [[k v] end] [(keyword "seon.agent" (name k)) v]))]))
 
 (defn- judge!
-  "Root judges task nm's end on main db (`#'r/judge`): end is what its agent wrote on its branch (nil: none), results root's
+  "Root judges task nm's end on main db (`#'r/judge-tx`): end is what its agent wrote on its branch (nil: none), results root's
   own proof results, diff the writer's branch read (members over empty ones). The branch is main (or :branch) with :on-branch
   (tx-data) and the end written on it; the flight's other members are options. Answers {:db main after the judging :outcome :tx}."
   [db nm end & {:keys [results diff deferred run-problems worked-error turn ended-turn branch on-branch] :or {turn 1}}]
   (let [id (str "demo/" nm)
         branch (cond-> (or branch db) on-branch (d/db-with on-branch) end (ended nm end :turn turn :ended-turn ended-turn))
-        {:keys [tx outcome]} (#'r/judge (st-of db) {:act {:op :spawn :task id :env {:branch (task/default-branch id)}} :deferred deferred
+        {:keys [tx outcome]} (#'r/judge-tx (st-of db) {:act {:op :spawn :task id :env {:branch (task/default-branch id)}} :deferred deferred
                                                     :run-problems run-problems :worked-error worked-error}
                                         (or results {})
                                         (merge {:db branch :base db :base-t (:max-tx db) :ours [] :uncontracted [] :unmerged [] :caused [] :theirs 0} diff))]

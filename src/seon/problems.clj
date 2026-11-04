@@ -38,7 +38,9 @@
 
 (def counted-classes [:platform :eval :agent :effect])
 (def ^:private death-statuses task/failed)
-(def ended-classes [:red :cost :merge :dead :error :waste :task-conflict :unrun])
+(def ended-classes
+  "The classes of problem a task's ended work states (task-rows). See docs/reconcile.md#a-task-holds-how-its-work-ended."
+  [:red :cost :merge :dead :error :waste :task-conflict :unrun])
 
 (defn- es
   "The entities carrying attribute a (its aevt index: only the entities that have it)."
@@ -729,7 +731,7 @@
 ;; ---- how a task's work ended -----------------------------------------------------------
 
 (def ^:private task-pull
-  "What a problem row reads of how a task's work ended: one pull."
+  "What a problem row reads of how a task's work ended: one pull. See docs/reconcile.md#a-task-holds-how-its-work-ended."
   [:db/id :seon.task/id :seon.task/ns :seon.task/proofs :seon.task/execution :seon.task/outcome :seon.task/reason
    :seon.task/unmerged :seon.task/failures :seon.task/costs :seon.task/error :seon.task/waste :seon.task/task-conflicts
    :seon.task/deferred :seon.task/gate-unread :seon.task/deferred-results :seon.task/conflicts

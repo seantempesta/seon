@@ -373,7 +373,7 @@
 (defn move-tx
   "The write that moves task id's outcome from `from` to `to` after its judging (compare-and-swap, as outcome-tx), setting the
   members m beside it and retracting nothing: what judging stored of the task (its deferred tests, its changed keys) stays
-  for the merge, the gate and the problems that read it."
+  for the merge, the gate and the problems that read it. See docs/reconcile.md#a-task-holds-how-its-work-ended."
   {:malli/schema [:=> [:cat :seon.task/id [:maybe :seon.task/outcome] :seon.task/outcome :map] [:vector :any]]}
   [id from to m]
   (cond-> [[:db/cas [:seon.task/id id] :seon.task/outcome from to]]
@@ -406,7 +406,7 @@
 
 (defn refused-tx
   "Root refused to spawn task id's agent (the typed error e: the branch is held, or too many live agents): the task's outcome
-  :refused with root's reason and the error, from what it was; no agent is made."
+  :refused with root's reason and the error, from what it was; no agent is made. See docs/reconcile.md#a-task-holds-how-its-work-ended."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/id :map] [:vector :any]]}
   [db id e]
   (outcome-tx db id (:seon.task/outcome (d/entity db [:seon.task/id id])) :refused
@@ -562,7 +562,8 @@
     ;; the value names its schema, so a page draws it by its declared render (seon.render/html)
     (some-> (own id) (assoc :seon.task/accumulated (accumulate own id)) (vary-meta assoc :seon.render/schema :seon.task/task))))
 
-(def ^:private agent-pull '[:seon.agent/key :seon.agent/id :seon.agent/branch :seon.agent/model :seon.agent/holder :seon.agent/max-turns
+(def ^:private agent-pull "The attributes of an agent the reconciler's index reads. See docs/reconcile.md#a-task-holds-how-its-work-ended."
+  '[:seon.agent/key :seon.agent/id :seon.agent/branch :seon.agent/model :seon.agent/holder :seon.agent/max-turns
                            :seon.agent/boot :seon.agent/taken :seon.agent/started-ms])
 
 (defn- agent-value
@@ -575,7 +576,7 @@
         (assoc :seon.agent/env (cond-> {:branch branch :model model :max-turns max-turns} holder (assoc :holder holder))))))
 
 (defn agents
-  "Every agent root started on db, by key: the entities a start recorded (start-tx: :seon.agent/boot among them)."
+  "Every agent root started on db, by key: the entities a start recorded (start-tx: :seon.agent/boot among them). See docs/reconcile.md#a-task-holds-how-its-work-ended."
   {:malli/schema [:=> [:cat :seon.host/db] [:map-of :string :seon.reconcile/agent]]}
   [db]
   (into {} (for [{e :e} (d/datoms db :aevt :seon.agent/boot)
@@ -583,7 +584,7 @@
              [(:seon.agent/key a) (agent-value a)])))
 
 (defn started-agent
-  "Agent key k on db as root started it (agents), or nil: nil too where db only names it by reference."
+  "Agent key k on db as root started it (agents), or nil: nil too where db only names it by reference. See docs/reconcile.md#a-task-holds-how-its-work-ended."
   {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe :seon.reconcile/agent]]}
   [db k]
   (let [a (d/pull db agent-pull [:seon.agent/key k])]
@@ -645,7 +646,7 @@
 
 (defn tasks-of-agent
   "The task entities db names agent entity e as their agent (:seon.task/agent): the tasks whose state an agent's boot or taken count moves.
-  An agent holds two on a stage."
+  An agent holds two on a stage. See docs/reconcile.md#the-reconcilers-index."
   {:malli/schema [:=> [:cat :seon.host/db :int] [:vector :int]]}
   [db e]
   (mapv :e (d/datoms db :avet :seon.task/agent e)))

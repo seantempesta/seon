@@ -622,7 +622,7 @@
 
 (defn work
   "Main's work (the declared html render of :seon.render/work): how many tasks by outcome, and each
-  one being worked, a line."
+  one being worked, a line. See docs/render.md#the-page."
   {:malli/schema [:=> [:cat :seon.render/opts :seon.render/work] :any]}
   [_ {:keys [by-outcome working]}]
   [:div {:class "flex flex-col gap-1 text-xs"}
@@ -1600,7 +1600,7 @@
   [:section [:h2 "problems"] (when-let [h (:health c)] (render/html {:schema :seon.problems/report} (ratom/realize h)))])
 
 (defn work-tile
-  "Main's work (a component over the db): how many tasks by outcome and each one being worked (work-of)."
+  "Main's work (a component over the db): how many tasks by outcome and each one being worked (work-of). See docs/render.md#the-page."
   {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]]] :any]}
   [{db :seon.db/db}]
   [:section [:h2 "work"] (render/html {:schema :seon.render/work} (work-of db))])
