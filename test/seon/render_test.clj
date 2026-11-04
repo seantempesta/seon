@@ -87,7 +87,7 @@
                    :stats {:commits 2 :batched-tx 6 :lag-ms [3] :fork-ms [5]}
                    :root-errors [{:pid :render :message "boom"}] :root-errors-total 4}
             :system-p (doto (promise) (deliver {:procs {:api {} :render {}}}))
-            :events [{:type :ready :agent :a1 :at-ms 1}] :agent-run {}}
+            :events [{:type :ready :agent :a1 :at-ms 1}]}
         v (p/process-value st)]
     (is (= 4 (:root-errors-total v)) "how many defects, whole")
     (is (= {:render {:defects 1 :newest "boom"} :api {:defects 0}} (:health v)) "each declared proc's defects by pid")
@@ -95,7 +95,9 @@
     (is (= 3.0 (get-in v [:writer :tx-per-commit])) "a commit takes every queued transaction")
     (is (not-any? #{:recent :batch-ms} (keys (:writer v))) "the windows themselves dropped")
     (is (= {:status :up :pid 7} (select-keys (:fork-server v) [:status :pid])))
-    (is (= [:ready] (mapv :type (:events v))))))
+    (is (= [:ready] (mapv :type (:events v))))
+    (is (= [{:type :fork-server-up}] (:events (p/process-value (assoc st :events [{:type :fork-server-up}]))))
+        "an event that names no agent (the fork server's) reads as it is")))
 
 ;; ---- the GUARDS audit's names for the same law (seon.render/no-clip-in-renders) -------------
 

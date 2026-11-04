@@ -42,6 +42,8 @@ The no-runs schema is built on `jolt/simpler-schema` and unmerged (a task holds 
 | The schema, runs out | A turn number restarting each run; a test's error living on a process; seven attributes nothing names; 26 open tasks written on the old shape | ``seon.db/an-attribute-is-declared-because-something-uses-it``, and the runs commit |
 | The core | The model render runs outside the component's tracked run, so its reads are invisible and it can't ask for the db; an agent's own render choice doesn't redraw | ``seon.render/both-renders-run-in-the-components-tracked-run``: both renders run in the one tracked run |
 | The core | A var call a render can't draw is silently left as a call; the rule conflicts with the structure view | ``seon.render/a-var-call-a-render-cannot-draw-says-why`` |
+| The core | Two page cost proofs measure a page with no task, and their :work says they draw one | ``seon.cost/a-page-proof-draws-the-task-it-says-it-draws``: its bound rises, so it is the owner's |
+| The core | When the source import fails, the store refuses root's source fact over a sorted map | ``seon.root/a-source-fact-the-store-refuses-loses-nothing`` |
 | The core | The debug page draws a branch by main's code, and root's walk a branch's layout by main's | ``seon.render/the-debug-page-reads-a-branchs-own-renders``, ``seon.render/roots-walk-of-a-branch-draws-the-branchs-layout`` |
 | The core | Status repeats every failure in full: 22 reds, 32k tokens a turn | ``seon.context/the-status-declares-its-summary`` |
 | The core | After a layout changes, old parts stay on the page for a pass | ``seon.render/a-layout-change-leaves-no-old-parts``: trace it first |
