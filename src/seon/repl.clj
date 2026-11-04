@@ -935,13 +935,15 @@
 (defn- the-walk
   "This agent's walk of its render of ctx (seon.render/walker over @ctx, its diff seon.ctx/changes, and the
   branch's db), held in its state: the one cache of its components, made again when the branch declares another
-  layout (docs/ctx.md#the-record-is-the-agents-work)."
+  layout (docs/ctx.md#the-record-is-the-agents-work). It draws what its model reads (seon.context/page-lists) until a
+  person's page asks for the rest (`whole-walk`): the lists nobody reads cost nothing."
   {:malli/schema [:=> [:cat] :map]}
   []
   (let [held (:walk @agent/state) l (layout)]
     (if (and held (= l (first (:root held))))
       held
-      (let [w (render/walker {:ref ctx/ctx :changes ctx/changes} agent/db [l {}])]
+      (let [w (cond-> (render/walker {:ref ctx/ctx :changes ctx/changes} agent/db [l {}])
+                (or (nil? held) (:only held)) (assoc :only (set context/page-lists)))]
         (some-> held render/dispose-walk!)
         (swap! agent/state assoc :walk w)
         w))))
@@ -954,6 +956,14 @@
   []
   (with-branch-schemas #(let [w (the-walk)] (render/flush! w (ctx/take-moved!)) w)))
 
+(defn- whole-walk
+  "`page-walk` with every list drawn, for a reader of the whole page: a person's, who stays its reader from then on (a
+  walk holds no count of who is watching). See docs/render.md#a-layout-places-its-lists."
+  {:malli/schema [:=> [:cat] :map]}
+  []
+  (with-branch-schemas #(let [w (the-walk)] (when (:only w) (swap! agent/state assoc :walk (render/draw-all w)))))
+  (page-walk))
+
 (defn render-ctx
   "This agent's render of ctx as its components' html (root's render proc asks, its {:op :render}:
   seon.render.proc/ask-parts): {:t its ctx's t :units [{:id :container :rev :html}]}, each
@@ -961,7 +971,7 @@
   nothing (the :render op takes the facts main holds of its own entities first)."
   {:malli/schema [:=> [:cat] [:map [:t :int] [:units [:vector :map]]]]}
   []
-  {:t (or (:t @ctx/ctx) 0) :units (render/placed-units (page-walk))})
+  {:t (or (:t @ctx/ctx) 0) :units (render/placed-units (whole-walk))})
 
 (defn render-ctx-hiccup
   "This agent's render of ctx as the user sees it: every component of its three lists (its task's,
@@ -969,7 +979,7 @@
   as its render returned it, by its element id, in order: the hiccup render-ctx's html is written
   from, nothing left out."
   {:malli/schema [:=> [:cat] :map]}
-  [] (render/placed-hiccup (page-walk) ["#p-task" "#c-rows" "#p-tiles"]))
+  [] (render/placed-hiccup (whole-walk) ["#p-task" "#c-rows" "#p-tiles"]))
 
 (defn page-hiccup
   "This agent's parts as its model reads them now, from its live walk (seon.context/page-lists): each
