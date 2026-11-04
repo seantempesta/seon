@@ -17,6 +17,16 @@ What Seon is for, where it stands, the one step being worked now, and the steps 
 
 **Measured as** turns to green and tasks merged. **Held to:** nothing crashes or hangs (every failure is data to the agent); everything shown is derived from the db at t; one mechanism per job; every change earns its place; a v1 capability is present or dropped on purpose ([parity](parity.md)).
 
+## Where it stands (2026-11-04): one way to make what an agent reads
+
+**All work on context and rendering follows [the Seon way](seon-way.md); read it before touching either.** The owner's direction: what an agent reads is data on it or a query away, drawn by a declared render, so page and context adapt to the data with no hand assembly ([rulings](decisions.md#2026-11-04-rulings)). Steps 0-5 of the transcript's replacement are merged (task ``seon.render/one-way-to-make-what-an-agent-is-sent``), and a new turn no longer reruns the status. A live test agent has proven the shape; nothing of that is merged.
+
+**The order now:** a batch of fixes (namespace docs, the ``inputs`` rename, removal as unlink, the component rule, re-render on a function's change), then the core as one merge (the page last, the default render, structure, each part printed once, the transcript as a declared render, ``seon.context/request``'s assembly deleted), measured on the six tasks against the baselines before it merges, then in parallel the page controls, reset, and a browser spike for the image.
+
+**The baselines,** six tasks at f19afd9d35, two runs: 2 of 6 and 3 of 6 green. Identical runs of one task went from capped at 40 turns to green in 9, so a one-task difference means little.
+
+**Waiting on the owner:** how merged model renders are gated, what becomes of ``:printed``, erasing ``runs/store`` at the core's merge, how strictly a merge refuses a way around the rules, the default render's shape, and whether a turn owning its records goes ahead.
+
 ## Where it stands (2026-11-03)
 
 **Merged** (each `bin/prove --merge` green, root updated; one prove a batch, the owner's rule of the day):
