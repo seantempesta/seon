@@ -14,6 +14,10 @@ The owner's rulings of 2026-11-04, on what an agent is and how everything it rea
 
 "Yes you can erase the runs/store when we have the new schemas in place." At the core's merge, not before; runs/curated and runs/kept-fresh-87 stay.
 
+### Agent branches are kept and queried (owner, 2026-11-04)
+
+"In general I don't want to delete the agent branches and I want to query them when we need information on what happened for an agent. Mostly to avoid complicated merging but I can see the value of merging the agents entity, but then what about any refs too? How far do we merge back?"; "I think in production we'll be auto archiving the branches if they work, but in development I want us to be able to restore sessions and arbitrarily fork and edit them". An agent's records never merge; main holds what root needs, and a merge stays the program and tasks. Archiving is a later production policy, with no code for it now. Stated in [the Seon way](seon-way.md).
+
 ### An agent's data makes its page and its context (owner, 2026-11-04)
 
 "The fact that the agent's pull is what makes an agent an agent is what makes it render the UI and which parts go where. A different agent could have different data attached and we want it to render differently to adapt to whatever data we give it. This is a general core function of the seon system. Make all data known, validate it, and we make it easy to process it for whatever needs the user has." And: "No more hand crafting things. Let the system operate and figure out how to have everything declare itself". Stated in: [the rules](seon-way.md#the-rules).

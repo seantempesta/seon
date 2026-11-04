@@ -40,6 +40,7 @@ Each rule removes a way of doing it some other way.
 6. **Each thing is computed once,** kept by the walk's existing cache. There is no second cache and no second path to the model.
 7. **Derived values are drawn, never stored.** A summary, such as status's when many tests are red, is that schema's model render, and any agent can override it.
 8. **A value is stored as data, up to a stated maximum, and printed only by the one printer, for context.** Past the maximum, what it was is stored and the value is gone, and that is fine. Printing a value anywhere else is suspect (task seon.print/the-one-printer-is-for-context).
+9. **An agent's branch is kept and queried for what happened to it; its records never merge.** Main holds what root needs, and a merge stays the program and tasks. A branch is restorable and forkable, and the same agent key on two branches stays valid. The store only grows while this holds: reclaiming a record is the owner's act, and archiving successful branches is a later production policy.
 
 So adding something an agent reads is a schema and a pattern entry, or a schema and a part. Nothing else.
 
