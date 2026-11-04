@@ -66,6 +66,7 @@ A live test agent tried each of these by data alone, on the 2026-11-04 tip of th
 - Re-rendering when a declared render, or a helper it calls, is redefined. The prototype watched 665 vars for 736 ms once, so the real one should read the program's reach index, measured.
 - Reset to a turn's commit with the same key: the record, program and layout of that point, a further turn taken, and the source agent untouched.
 - A turn as a number on each record: one query reads a session (about 1 ms at 26 records) in the transcript's order, on a session mixing a model's turns, a message and outside evals. Writing it on new evals, and moving replies off the turn entity, are not yet tried.
+- An eval as real attributes, and a turn folded into its model call: on a copy of a real session, all 16 evals and 6 turns rebuilt to the same message bytes. Finding model evals cost about half (2.6 times fewer bytes), and summing tokens without joining through a turn cost about a third. Reading one field warm cost the same, because a warm read does not decode a stored value, and one edit about 30% less; so the gain is queries and less duplication, not reads. Writing them live is not yet tried.
 - The debug view made by the live agent: it shows the branch's own renders, which root's rebuild cannot.
 - A status summary: 22 red tests went from 32k tokens to 2k.
 
@@ -76,6 +77,11 @@ These are the known departures from the rules, in the order of the work, each wi
 **Facts nobody writes, so code guesses:**
 - ``:ns/doc`` is declared and read but never written: all 148 namespaces were empty.
 - Nothing says which turn an eval or a message belongs to, so ``seon.render.ui/turn-evals`` infers it from write order. A turn is a number, not an entity: each record carries it, and the conversation is one query, ordered by turn, messages first, then evals. What a turn entity holds today moves to where it belongs: a reply is a record, and what a call cost is on the model call. ``:seon.turn/n`` restarts each run, one more reason runs should go.
+
+**Data shaped against its use:**
+- ``:seon.eval/record`` holds an eval's code, prose, call id and more in one value, so nothing can query them. They become attributes, with the response kept as data.
+- ``:seon.turn/*`` and ``:seon.model-call/*`` describe one thing under one id, with reasoning and calls also on the eval. A turn entity goes: the number is on each record, and how a call went is on the model call.
+- Also: a branch is a keyword repeated on four entities; ``:seon.process/test-error`` is about tests but lives on a process; page state (``:seon.eval/opened``) sits in the record; seven declared attributes nothing names.
 
 **Assembly outside the render system:**
 - ``seon.context/request`` assembles the transcript. It should be a declared model render on the agent, answering a transcript schema, called by the turn, the debug page and the judge.
