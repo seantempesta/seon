@@ -1722,3 +1722,36 @@
         (let [ids (:ids (:printed r0))]
           (is (apply distinct? ids))
           (is (every? #(str/includes? % "/") ids) "each id is its kind's"))))))
+
+(defn- recorded-form
+  "A request's messages as the recording holds them: the wire's shape, the system prompt's text out (the wiki's own, moving
+  with its edits) and each number of three digits or more renumbered by first appearance (a test branch's eids and ts differ
+  run to run), everything else the bytes."
+  [ms]
+  (let [seen (volatile! {})]
+    (clojure.string/replace (pr-str (mapv #(if (= "system" (:role %)) (assoc % :content "<system>") %) ms))
+                            #"(?<![0-9.])[0-9]{3,}(?![0-9.])"
+                            (fn [n] (or (get @seen n) (let [k (str "N" (count @seen))] (vswap! seen assoc n k) k))))))
+
+(defn- recorded-sessions
+  "Three sessions' requests, each turn's: parts moved by a plan's change and evals between turns; replies with calls, prose and
+  reasoning and a changed system prompt; an example session."
+  []
+  (merge
+    (ts/test-branch! (fn [_ conn]
+                       (let [[ask! ev! plan!] (parts-session conn)
+                             r0 (ask! 0 {}) _ (ev! "e1") _ (ev! "e2") r1 (ask! 1 {}) _ (plan! "Make f, and g.") _ (ev! "e3") r2 (ask! 2 {})]
+                         {:parts (mapv (comp recorded-form :messages) [r0 r1 r2])})))
+    (ts/test-branch! (fn [_ conn] (let [[_ rs] (sent-turns conn)] {:calls (mapv recorded-form rs)})))
+    (ts/test-branch! (fn [_ conn] (example-world! conn) {:example (mapv #(recorded-form (:messages (turn! conn %))) [0 1])}))))
+
+(deftest the-recorded-requests-come-out-the-same
+  ;; task seon.render/one-way-to-make-what-an-agent-is-sent, steps 0-5: the transcript's assembly is replaced under this, and
+  ;; what the model is sent does not change by a byte. test/seon/recorded_requests.edn was made by f19afd9d35, before any of it; its first
+  ;; deliberate change is the step that changes what is sent, which rewrites it
+  (let [recorded (clojure.edn/read-string (slurp (str (seon.config/checkout) "/test/seon/recorded_requests.edn")))
+        now (recorded-sessions)]
+    (is (= (set (keys recorded)) (set (keys now))))
+    (doseq [[k turns] recorded [i t] (map-indexed vector turns)]
+      (is (= t (get-in now [k i])) (str k " turn " i ": the bytes it was recorded with")))))
+
