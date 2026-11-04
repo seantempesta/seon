@@ -76,8 +76,13 @@
     {:writer (:writer n) :fork-server (:fork-server n) :store (:store n)
      :root-errors-total (:root-errors-total v 0)
      :health (proc-health-of st (:root-errors v []))
-     ;; a stop that arrived before main recorded how the run ended says so once main does
-     :events (mapv #(ui/ended-as % (:agent %) (:agent-outcome st {})) (:events st []))}))
+     ;; a stop that arrived before main recorded how the work ended says so once main does
+     :events (let [evs (:events st []) ids (into #{} (keep :agent) evs)
+                   idx (:idx st)
+                   outcome (when (seq ids)
+                             (into {} (for [[_ t] (:tasks idx) :let [a (get (:agents idx) (:seon.task/agent t))] :when (and a (ids (:seon.agent/id a)))]
+                                        [(:seon.agent/id a) (:seon.task/outcome t)])))]
+               (mapv #(ui/ended-as % (:agent %) outcome) evs))}))
 
 ;;; --- main --------------------------------------------------------------------------------
 
@@ -85,8 +90,7 @@
   "St with main as db (when newer than the one held): its t, its db, and the reconciler's index of
   it held and moved by what changed (seon.reconcile/index over the watched datoms that differ:
   seon.render-cost-test/a-move-of-main-costs-what-moved), whose tasks
-  give how each agent's work ended (:agent-outcome, the words root's process tile uses for its
-  events). Nothing per task or per datom of main is read again. moved: the datoms that differ
+  give how each agent's work ended (`process-value` reads them for its events). Nothing per task or per datom of main is read again. moved: the datoms that differ
   between the main held and db, read once by advance-main; the index moves by those of its watched
   attributes, so no second diff of each of them is made (one descent apiece: 90 attributes, 14.6 MB)."
   {:malli/schema [:function [:=> [:cat :map :seon.host/db] :map]
@@ -98,9 +102,7 @@
     st
     (let [held (:main-db st)
           idx (if (and (:idx st) held) (if moved (reconcile/index (:idx st) held db moved) (reconcile/index (:idx st) held db)) (reconcile/index db))]
-      (assoc st :main {:t (:max-tx db)} :main-db db :idx idx
-             :agent-outcome (into {} (for [[_ t] (:tasks idx) :let [a (get (:agents idx) (:seon.task/agent t))] :when a]
-                                       [(:seon.agent/id a) (:seon.task/outcome t)])))))))
+      (assoc st :main {:t (:max-tx db)} :main-db db :idx idx)))))
 
 ;;; --- units, rendered incrementally ---------------------------------------------------------
 

@@ -130,7 +130,7 @@
       live {:agent (:agent live) :task id :shared true}
       :else
       (let [env (cond-> (assoc (r/desired-env t) :model "outside")
-                  fresh? (assoc :branch (keyword (str (name (task/default-branch id)) "-r" (subs (str (random-uuid)) 0 8))))
+                  fresh? (assoc :branch (keyword (str (name (task/default-branch id)) "-r" (random-uuid))))
                   client (assoc :holder client))
             ;; the session's agent continues (docs/turn.md#parked)
             k (when-not (or fresh? clone-of) (task/session-key db id))

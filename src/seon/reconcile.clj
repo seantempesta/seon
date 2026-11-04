@@ -127,9 +127,11 @@
   :seon.agent/branch as root observes it (seon.task/agent-tx writes that too, under the store's name for the branch)."
   #{:seon.agent/boot :seon.agent/started-ms :seon.agent/taken})
 
-(defn- watched?
-  {:malli/schema [:=> [:cat :any] :boolean]}
-  [a] (boolean (and (keyword? a) (or (contains? watched-attrs a) (contains? watched-ns (namespace a))))))
+(def ^:private watched?
+  "Is attribute a one the index watches (an attribute of `watched-ns`, or one of `watched-attrs`)? A plain function and no
+  contracted one, for it is asked once per datom of a move: a contracted call each would make a move cost its datoms in
+  calls (seon.render-cost-test/a-move-of-main-costs-what-moved)."
+  (fn [a] (boolean (and (keyword? a) (or (contains? watched-attrs a) (contains? watched-ns (namespace a)))))))
 
 (def park-outcomes
   "An agent's own ends that park its session instead of ending it (docs/turn.md#parked): a

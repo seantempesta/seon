@@ -70,12 +70,13 @@
                 "and its one line by seon.print/line, then the printer lays it out as a leaf. Nothing per "
                 "message is done twice and no message is printed as data")
      :growth :linear
-     ;; contracted calls a run, along the path above: seon.render's nested, render-of with
-     ;; own-key, schema-of and declared (its parents) each, print/line and its prose.
-     ;; Re-derived on sizes 20 to 180 (measured 4,499 calls at 30 runs, 7,359 at 50, 8,789 at 60: 143 a run and 209 once;
-     ;; 144 and 109 were read at 100 to 4,000 runs and overstated the slope by 0.7%)
-     :per-n {:calls 143}
-     :fixed {:calls 209}
+     ;; contracted calls a message, along the path above: seon.render's nested, render-of with
+     ;; own-key, schema-of and declared (its parents) each, print/line and its prose. The input was runs (a table row with no
+     ;; prose: 143 a run and 209 once, 2026-11-03) until they went; messages are the entity whose render is as light that is left,
+     ;; and its inline line holds its body as prose. Measured 2026-11-04 on sizes 20 to 180: 3,615 calls at 20, 10,375 at 60,
+     ;; 30,495 at 180 (168 a message and 255 once)
+     :per-n {:calls 170}
+     :fixed {:calls 260}
      :sizes [20 60 180]}))
 
 (defn main-of
