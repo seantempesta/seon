@@ -162,7 +162,7 @@
   :tests effect on the merges branch's head, which holds its change; their results are
   recorded on it (:seon.task/deferred-results), which closes the problem when each passed.
   Answers {:asked ids :ran {task {test status}}}; without a gate checkout declared, the
-  merged ones' tests are each :error, with :seon.root/no-gate-checkout on the task.
+  merged ones' tests are each :error, with :seon.root/no-gate-checkout on the task."
   {:malli/schema [:=> [:cat :seon.root/sys [:sequential :seon.task/id]] :map]}
   [sys ids]
   @(root/transact-main! sys (vec (for [id ids] {:seon.task/id id :seon.task/gate? true})))

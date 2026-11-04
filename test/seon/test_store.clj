@@ -4,7 +4,7 @@
   many branches, as in production; owner, 2026-10-21). Test-only, so it lives in test/, not
   in src (session DUP-HELPERS); it seeds and opens through seon.db's own seed! and open-main!."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.db :as pdb] [clojure.java.shell :as sh] [clojure.string] [clojure.edn] [clojure.test] [seon.lib] [seon.program :as program] [seon.fx :as fx] [seon.config :as config] [hasch.core :as hasch]))
+  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.db :as pdb] [clojure.java.shell :as sh] [clojure.string] [clojure.edn] [clojure.test] [seon.lib] [seon.program :as program] [seon.fx :as fx] [seon.task :as task] [seon.config :as config] [hasch.core :as hasch]))
 
 (def ^:private store
   "The test store's config, made and seeded with about 2,000 datoms on first use."
@@ -151,15 +151,29 @@
          (finally (d/release conn) (pdb/delete-main! seed b) (d/release seed)))))
 
 (defn turn-tx
-  "Model turn n of agent k (a key), run's, as seon.turn/act! writes it first: the agent's number n and its model call
-  <k>/<n> (origin :model, run run, a :seon.run/id), with more, the call's other attributes. A record the test writes
+  "Model turn n of agent k (a key) as seon.turn/act! writes it first: the agent's number n and its model call
+  <k>/<n> (origin :model), with more, the call's other attributes. A record the test writes
   in that turn takes :seon.eval/turn or :seon.message/turn n. See docs/turn.md#the-turn-is-a-number."
-  {:malli/schema [:=> [:cat :string pos-int? :string :map] [:vector :map]]}
-  [k n run more]
+  {:malli/schema [:=> [:cat :string pos-int? :map] [:vector :map]]}
+  [k n more]
   [{:seon.agent/key k :seon.agent/turn n}
-   (merge {:seon.model-call/id (str k "/" n) :seon.model-call/agent {:seon.agent/key k} :seon.model-call/n n :seon.model-call/origin :model
-           :seon.model-call/run {:seon.run/id run}}
+   (merge {:seon.model-call/id (str k "/" n) :seon.model-call/agent {:seon.agent/key k} :seon.model-call/n n :seon.model-call/origin :model}
           more)])
+
+(defn work-tx
+  "Task id's agent and how its work stands (outcome), as a root records them: what seon.task/start-tx writes (the task's
+  outcome and agent; the agent's key <boot>/<agent>, task, branch, boot, start and turn budget), with the members of
+  :members (:seon.task/* of its judging) beside. Options: :boot (\"boot-1\"), :agent (:a1), :branch (its task's default), :model, :holder,
+  :max-turns (8), :start-ms (1000), :members."
+  {:malli/schema [:=> [:cat :seon.task/id :seon.task/outcome :map] [:vector :map]]}
+  [id outcome {:keys [boot agent branch model holder max-turns start-ms members] :or {boot "boot-1" agent :a1 max-turns 8 start-ms 1000}}]
+  (let [k (task/agent-key boot agent)]
+    [(merge {:seon.task/id id :seon.task/outcome outcome :seon.task/agent k} members)
+     (cond-> {:db/id k :seon.agent/key k :seon.agent/id agent :seon.agent/task [:seon.task/id id]
+              :seon.agent/branch (or branch (task/default-branch id)) :seon.agent/boot boot :seon.agent/started-ms start-ms
+              :seon.agent/max-turns max-turns}
+       model (assoc :seon.agent/model model)
+       holder (assoc :seon.agent/holder holder))]))
 
 (defn commit-of
   "The writer's main notice {:t :prev :ops :commit} for a db value made from the test store's seed

@@ -44,24 +44,24 @@
 
 (deftest register-validates-against-the-population
   (let [[printed db] (evals (main-db)
-                            (str "(seon.contract/valid? :seon.run/status :paused)\n"
-                                 "(:seon.schema/key (my.schema/register! :seon.run/status " paused-status "))\n"
-                                 "(seon.contract/valid? :seon.run/status :paused)\n"
-                                 "(defn status-of {:malli/schema [:=> [:cat :seon.run/status] :keyword]} [s] s)\n"
+                            (str "(seon.contract/valid? :seon.task/outcome :paused)\n"
+                                 "(:seon.schema/key (my.schema/register! :seon.task/outcome " paused-status "))\n"
+                                 "(seon.contract/valid? :seon.task/outcome :paused)\n"
+                                 "(defn status-of {:malli/schema [:=> [:cat :seon.task/outcome] :keyword]} [s] s)\n"
                                  "(status-of :paused)\n"
-                                 "(seon.contract/valid? :seon.run/run-fact {:seon.run/id \"a#1\" :seon.run/task 1 :seon.run/status :paused :seon.run/boot \"b\" :seon.run/agent 2 :seon.run/start-ms 0})\n"
+                                 "(seon.contract/valid? :seon.run/run-fact {:seon.run/id \"a#1\" :seon.run/task 1 :seon.task/outcome :paused :seon.run/boot \"b\" :seon.run/agent 2 :seon.run/start-ms 0})\n"
                                  "(:seon.error/type (my.schema/register! :x.schema-test/thing [:map [:x.schema-test/part :x.schema-test/nowhere]]))\n"
                                  "(:seon.schema/key (my.schema/register! :seon.run/invalid :string))\n"
                                  "(:seon.schema/key (my.schema/register! :user/qty :int))\n"
                                  "(seon.contract/valid? :user/qty 3)\n"))
         entity (fn [k] (d/q '[:find (pull ?e [:schema/form :schema/file :schema/source]) . :in $ ?k :where [?e :schema/key ?k]] db k))]
-    (is (= ["false" ":seon.run/status" "true"] (subvec printed 0 3))
+    (is (= ["false" ":seon.task/outcome" "true"] (subvec printed 0 3))
         "before: the binary's schema refuses :paused; register! answers its registration; after: the agent's registry accepts it")
     (is (= ":paused" (nth printed 4)) "a function the agent defines next is checked against the registered schema")
     (is (= "true" (nth printed 5)) "and so is a schema that names it: the population is recompiled, not the one key")
     (is (= ":seon.schema/registration-refused" (nth printed 6)) "a form naming a schema that does not exist is refused as data")
     (testing "the registration is program on the agent's branch: no longer the binary's, in the resource it came from"
-      (is (= {:schema/form paused-status :schema/file "resources/seon/schemas/seon.facts.edn"} (entity :seon.run/status))))
+      (is (= {:schema/form paused-status :schema/file "resources/seon/schemas/seon.facts.edn"} (entity :seon.task/outcome))))
     (testing "a new key goes to the resource holding most keys of its namespace (owner, 2026-10-21)"
       (is (= {:schema/form ":string" :schema/file "resources/seon/schemas/seon.facts.edn"} (entity :seon.run/invalid))))
     (testing "a key in a scratch namespace is seen at the REPL but is no program: it has no resource"
@@ -70,7 +70,7 @@
       (is (= {:schema/form ":int"} (entity :user/qty))))
     (is (nil? (d/q '[:find ?e . :where [?e :schema/key :x.schema-test/thing]] db)) "nothing of a refused registration is written")
     (testing "the branch's population, as the next eval reads it"
-      (is (= #{:seon.run/status :seon.run/invalid :user/qty}
+      (is (= #{:seon.task/outcome :seon.run/invalid :user/qty}
              (set (keys (program/schema-changes db))))))))
 
 (deftest a-registration-counts-the-stored-values-it-refuses
@@ -78,20 +78,20 @@
   ;; seon.db/registration-check, ported later by the owner's ruling of 2026-10-21): a
   ;; registration that narrows a stored attribute answers how many stored values its new
   ;; form refuses, so the agent sees what its change would break before it merges
-  (let [db (d/db-with (main-db) [{:seon.run/id "a#1" :seon.run/status :merged}
-                                 {:seon.run/id "a#2" :seon.run/status :running}])
-        r (schema/registration db :seon.run/status [:and {:seon.db/index true} [:enum :running :ended]] false)]
+  (let [db (d/db-with (main-db) [{:seon.run/id "a#1" :seon.task/outcome :merged}
+                                 {:seon.run/id "a#2" :seon.task/outcome :running}])
+        r (schema/registration db :seon.task/outcome [:and {:seon.db/index true} [:enum :running :ended]] false)]
     (is (= {:checked 2 :refused 1} (:seon.schema.usage/check (:registration r))))))
 
 (deftest a-loaded-form-compiles-against-its-dbs-schemas
   ;; found by the live demonstration (2026-10-21): the merge agent loaded the work branch's
-  ;; (defn status-of {:malli/schema [:=> [:cat :seon.run/status] ...]}) with the built
+  ;; (defn status-of {:malli/schema [:=> [:cat :seon.task/outcome] ...]}) with the built
   ;; registry, so its proof erred on :refused. A process loading a db's forms (an agent's
   ;; merge of main, root and the fork server after a merge) compiles them against that db's
   ;; schemas
   (let [main (main-db)
-        branch (d/db-with main (:tx (schema/registration main :seon.run/status (read-string paused-status) false)))
-        branch (pt/record branch 'x.schema-load "(defn status-of {:malli/schema [:=> [:cat :seon.run/status] :keyword]} [s] s)")]
+        branch (d/db-with main (:tx (schema/registration main :seon.task/outcome (read-string paused-status) false)))
+        branch (pt/record branch 'x.schema-load "(defn status-of {:malli/schema [:=> [:cat :seon.task/outcome] :keyword]} [s] s)")]
     (remove-ns 'x.schema-load)
     (is (= [] (program/load-diff! main branch)))
     (is (= :paused ((resolve 'x.schema-load/status-of) :paused)) "its contract accepts the branch's :paused")))
@@ -100,14 +100,14 @@
   ;; BUILD plan P4: main's change to a schema reaches the code already loaded where main's
   ;; program runs (root, the fork server): each contracted var whose contract names it, or a
   ;; schema naming it, is loaded again against the changed population
-  (let [main (pt/record (main-db) 'x.schema-arm "(defn status-of {:malli/schema [:=> [:cat :seon.run/status] :keyword]} [s] s)")
+  (let [main (pt/record (main-db) 'x.schema-arm "(defn status-of {:malli/schema [:=> [:cat :seon.task/outcome] :keyword]} [s] s)")
         status-of (fn [s] ((resolve 'x.schema-arm/status-of) s))
         _ (remove-ns 'x.schema-arm)
         _ (is (= [] (:errors (program/load-all! main))) "main's program loaded, its contracts armed")
         _ (is (thrown? Exception (status-of :paused)) "the built schema refuses :paused")
-        rep (d/with main (:tx (schema/registration main :seon.run/status (read-string paused-status) false)))]
+        rep (d/with main (:tx (schema/registration main :seon.task/outcome (read-string paused-status) false)))]
     (is (= [] (program/load-changes! (:db-after rep) (pdb/report->tx rep))))
-    (is (= :paused (status-of :paused)) "re-armed against main's :seon.run/status")))
+    (is (= :paused (status-of :paused)) "re-armed against main's :seon.task/outcome")))
 
 (deftest an-unquoted-predicate-is-refused-naming-it
   ;; 2026-10-29: the md-scan bench's run registered [:vector [:tuple nat-int? nat-int?]] unquoted,
