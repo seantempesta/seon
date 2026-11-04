@@ -966,7 +966,7 @@
   as its render returned it, by its element id, in order: the hiccup render-ctx's html is written
   from, nothing left out."
   {:malli/schema [:=> [:cat] :map]}
-  [] (let [w (page-walk)] (apply array-map (mapcat identity (render/placed-hiccup w ["#p-task" "#c-rows" "#p-tiles"])))))
+  [] (render/placed-hiccup (page-walk) ["#p-task" "#c-rows" "#p-tiles"]))
 
 (defn page-hiccup
   "This agent's parts as its model reads them now, from its live walk (seon.context/page-lists): each
@@ -974,17 +974,14 @@
   draw, seon.context/drawn-parts, costs every component). [db parts]: the db it is drawn to, which the request is
   made on, and {element-id hiccup}, in order (seon.context/request sends what changed of them)."
   {:malli/schema [:=> [:cat] [:tuple :seon.host/db :map]]}
-  [] (let [w (page-walk)] [(agent/db) (apply array-map (mapcat identity (render/placed-hiccup w context/page-lists)))]))
+  [] (let [w (page-walk)] [(agent/db) (render/placed-hiccup w context/page-lists)]))
 
-(defn page-parts
-  "This agent's parts now, from its live walk drawn once (`page-hiccup`'s): [db parts data], the db it
-  is drawn to, what the model reads of each part ({element-id content}) and the data of each part that
-  answered data ({schema-key data}, seon.render/placed-data): the turn decides from the status and
-  draws its request from the same draw (docs/render.md#a-part-answers-data)."
-  {:malli/schema [:=> [:cat] [:tuple :seon.host/db :map :map]]}
-  [] (let [w (page-walk)]
-       [(agent/db) (apply array-map (mapcat identity (render/placed-hiccup w context/page-lists)))
-        (render/placed-data w context/page-lists)]))
+(defn page-data
+  "The data of this agent's parts now, from its live walk, as `page-hiccup` draws it: {schema-key data}
+  (seon.render/placed-data), what the turn decides from, with no model render made for it. See
+  docs/render.md#a-part-answers-data."
+  {:malli/schema [:=> [:cat] :map]}
+  [] (render/placed-data (page-walk) context/page-lists))
 
 ;; ---- the process: a Flow graph of three procs on the agent's one thread ----------------
 

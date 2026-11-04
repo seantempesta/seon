@@ -449,25 +449,26 @@
   its list), in order, [[sel k]]: its container's selector and its key; a list component (its var's
   :seon.render/list) is no
   part: its output is its list, the components in it placed there; a component that drew nothing (with-id) is
-  placed nowhere. The one prewalk of the root that placed-units and placed-hiccup read. See
-  docs/render.md#a-layout-places-its-lists."
+  placed nowhere. With sels, the element ids of some lists, those lists' alone, in sels' order. The one prewalk of
+  the root that placed-units, placed-hiccup and placed-data read. See docs/render.md#a-layout-places-its-lists."
   {:malli/schema [:function [:=> [:cat :map] [:vector [:tuple :string [:vector :any]]]]
-                  [:=> [:cat :map [:maybe [:set :string]]] [:vector [:tuple :string [:vector :any]]]]]}
+                  [:=> [:cat :map [:sequential :string]] [:vector [:tuple :string [:vector :any]]]]]}
   ([w] (placed w nil))
   ([w sels]
   (let [found (volatile! [])
+        want (some-> sels set)
         list (fn [k] (let [f (:f (get @(:cache w) k))] (when (var? f) (:seon.render/list (meta f)))))
         walk (fn walk [out]
                (clojure.walk/prewalk (fn [x] (when (and (vector? x) (keyword? (first x)) (map? (second x)) (:id (second x)))
                                                (doseq [m (tree-seq seq? seq (drop 2 x)) :when (and (vector? m) (= ::child (first m)) (some? (:out (get @(:cache w) (second m)))))]
                                                  (if-let [l (list (second m))]
                                                    ;; a list a reader of some lists did not ask for is not walked
-                                                   (when (or (nil? sels) (sels (str "#" l))) (walk (:out (get @(:cache w) (second m)))))
+                                                   (when (or (nil? want) (want (str "#" l))) (walk (:out (get @(:cache w) (second m)))))
                                                    (vswap! found conj [(str "#" (:id (second x))) (second m)]))))
                                        x)
                                      out))]
     (walk (:out (get @(:cache w) @(:out w))))
-    @found)))
+    (if sels (vec (mapcat (group-by first @found) sels)) @found))))
 
 (defn placed-units
   "Walk w's render as the units root's render proc lays out (seon.render.ui/page-chrome): each
@@ -501,27 +502,24 @@
 
 (defn placed-hiccup
   "Walk w's components placed in the root's lists with element ids sels ([\"#p-task\"]), in order, as
-  [[id content]]: what the model reads of each, a part's model render (model-of) or else a
+  {id content}: what the model reads of each, a part's model render (model-of) or else a
   component's output with its children's resolved, exactly as its render returned it (a call of the
-  printer kept as the call: the model reads the data); of each of sels, in their order, from one
-  prewalk. See docs/render.md#a-part-answers-data."
-  {:malli/schema [:=> [:cat :map [:sequential :string]] [:vector [:tuple :string :any]]]}
+  printer kept as the call: the model reads the data). See docs/render.md#a-part-answers-data."
+  {:malli/schema [:=> [:cat :map [:sequential :string]] :map]}
   [w sels]
-  (let [by (group-by first (placed w (set sels)))]
-    (vec (for [s sels [_ k] (get by s) :let [c (get @(:cache w) k)]]
-           [(:id c) (if (some? (:data c)) (model-of w k) (resolved w k))]))))
+  (apply array-map (mapcat (fn [[_ k]] (let [c (get @(:cache w) k)] [(:id c) (if (some? (:data c)) (model-of w k) (resolved w k))]))
+                           (placed w sels))))
 
 (defn placed-data
   "The data of walk w's parts placed in the root's lists with element ids sels: {schema-key data} of each
   component that answered data (a part: seon.render/part), by its schema (the metadata
-  :seon.render/schema its data names), from the same prewalk as placed-hiccup. What a reader that
-  decides from a part (the turn's done check reads the status) takes, so the walk computes it once.
+  :seon.render/schema its data names). What a reader that decides from a part (the turn's done check
+  reads the status) takes: the parts' data, with no model render made for it.
   See docs/render.md#a-part-answers-data."
   {:malli/schema [:=> [:cat :map [:sequential :string]] [:map-of :qualified-keyword :any]]}
   [w sels]
-  (let [by (group-by first (placed w (set sels)))]
-    (into {} (for [s sels [_ k] (get by s) :let [d (:data (get @(:cache w) k))] :when (some? d)]
-               [(:seon.render/schema (meta d)) d]))))
+  (into {} (for [[_ k] (placed w sels) :let [d (:data (get @(:cache w) k))] :when (some? d)]
+             [(:seon.render/schema (meta d)) d])))
 
 (defn draw
   "Tree t (a ctx value: seon.ctx/build's :tree) drawn once by the layout var root-var over db, its
