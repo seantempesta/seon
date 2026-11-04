@@ -619,7 +619,7 @@
 
 (defn- plainly
   "v as the store keeps it (seon.contract/plain?): plain data as it is, a map's keys and values each so, anything else (a library's
-  record, an object in an exception's data) as its printed text (seon.edn/encode). The one place a record's
+  record, an object in an exception's data) as its printed text (seon.edn/encode; two keys that print alike are then one). The one place a record's
   response is made storable, whoever made it. See docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map."
   {:malli/schema [:=> [:cat :any] :seon.db/plain]}
   [v]
