@@ -562,8 +562,12 @@
     ;; the value names its schema, so a page draws it by its declared render (seon.render/html)
     (some-> (own id) (assoc :seon.task/accumulated (accumulate own id)) (vary-meta assoc :seon.render/schema :seon.task/task))))
 
-(def ^:private agent-pull '[:seon.agent/key :seon.agent/id :seon.agent/branch :seon.agent/model :seon.agent/holder :seon.agent/max-turns
-                           :seon.agent/boot :seon.agent/taken :seon.agent/started-ms])
+(def agent-value-attrs
+  "The agent attributes `agent-value` reads: its id, boot, taken count and environment. The reconciler's index watches each, so
+  an agent a start moves to another task (the environment rewritten, its boot the same) is read again."
+  #{:seon.agent/id :seon.agent/boot :seon.agent/taken :seon.agent/branch :seon.agent/model :seon.agent/holder :seon.agent/max-turns})
+
+(def ^:private agent-pull (into [:seon.agent/key :seon.agent/started-ms] agent-value-attrs))
 
 (defn- agent-value
   "A pulled agent as :seon.reconcile/agent: what root decides on of it, its environment (the one desired-env compares)

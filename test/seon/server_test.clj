@@ -19,12 +19,12 @@
            decls (for [n ["a" "b" "c" "d" "e"]] {:seon.task/ns 'demo :seon.task/name n :seon.task/plan "Work." :seon.task/proofs #{}})
            _ (d/transact conn (task/create-tx @conn (vec decls)))
            env {:branch :demo :model nil :max-turns 4}
-           _ (d/transact conn (concat (task/execution-tx ["demo/b" "demo/d"] :running) (task/execution-tx ["demo/e"] :cancelled)
-                                      (task/run-start-tx "demo/b#1" "demo/b" "boot-1" :a1 env 1000 "Work.")
-                                      (task/run-start-tx "demo/d#1" "demo/d" "boot-1" :a2 env 2000 "Work.")))
+           _ (d/transact conn (concat (task/execution-tx ["demo/b" "demo/d"] :running) (task/execution-tx ["demo/e"] :cancelled)))
+           _ (d/transact conn (task/start-tx @conn "demo/b" "boot-1" :a1 env 1000))
+           _ (d/transact conn (task/start-tx @conn "demo/d" "boot-1" :a2 env 2000))
            {:keys [tasks others all]} (seon.server/live-tasks @conn)]
-       (is (= ["demo/d" "demo/b"] (filterv #(= "demo" (namespace (symbol %))) (keys tasks))) "the running tasks, newest run first, and no held one")
-       (is (= [["demo/d#1" :running nil nil nil]] (get-in tasks ["demo/d" :runs])) "each with its runs")
+       (is (= ["demo/d" "demo/b"] (filterv #(= "demo" (namespace (symbol %))) (keys tasks))) "the running tasks, newest start first, and no held one")
+       (is (= [:running :a2] ((juxt :outcome :agent) (get tasks "demo/d"))) "each with its outcome and agent")
        (is (= (merge-with + before {:held 2 :cancelled 1}) others) "the others counted by execution: demo/a and demo/c held, demo/e cancelled")
        (is (= '(seon.server/task-summaries @(:conn sys)) all) "with the form that lists every task")))))
 
@@ -102,12 +102,12 @@
                                          {:op :eval :agent "root"
                                           :code (str "(let [db @(:conn sys) t (seon.task/task db " (pr-str u) ")]"
                                                      " [(:seon.task/execution t) (:seon.task/model t)"
-                                                     " (count (filter #(= " (pr-str u) " (:seon.run/task %)) (vals (seon.task/runs db))))])")}]))
+                                                     " (some? (:seon.task/agent t))])")}]))
                                     {:decls (fn [{:keys [ns]}]
                                               [{:seon.task/name "u" :seon.task/plan "Work too." :seon.task/kind :work
                                                 :seon.task/proofs #{'demo-test/u} :seon.task/branch (keyword (str "task-" ns "-t"))}])})]
     (clojure.test/is (clojure.string/includes? (pr-str refused) "is held by live agent") "the attach is refused: the t task's agent holds the branch")
-    (clojure.test/is (= [:held nil 0] (:value seen)) "and wrote nothing: the u task is still held, with no env and no run")))
+    (clojure.test/is (= [:held nil false] (:value seen)) "and wrote nothing: the u task is still held, with no env and no agent")))
 
 (deftest an-attached-agent-holds-its-run
   ;; agent view's browser check: an agent attached from outside (seon.server/attach!

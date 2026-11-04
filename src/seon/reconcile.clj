@@ -122,9 +122,9 @@
   #{"seon.task" "seon.root" "seon.config.agent" "seon.config.merge" "seon.message"})
 
 (def ^:private watched-attrs
-  "The agent attributes the index reads: when its root started it, and the messages it had taken (the rest of its
-  environment is written with them)."
-  #{:seon.agent/boot :seon.agent/taken})
+  "The agent attributes the index reads (seon.task/agent-value-attrs): its boot, the messages it had taken and its environment.
+  A start of a session's next task rewrites the environment, which a boot unchanged does not move."
+  task/agent-value-attrs)
 
 (defn- watched?
   {:malli/schema [:=> [:cat :any] :boolean]}

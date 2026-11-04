@@ -335,7 +335,7 @@
                              ;; what its plan cites, as the task writer writes it (seon.task/cites-tx)
                              (seon.task/cites-tx (ts/test-db) "demo/f" "demo/f" (seon.ref/cited (:seon.ref/citations (seon.ref/parse nil walked-plan)))))
                        (seon.task/agent-tx "b1" :a3 {:status :idle :pid 77 :branch :task-demo-f})
-                       (seon.task/run-start-tx "demo/f#1" "demo/f" "b1" :a3 {:branch :task-demo-f :model "m" :max-turns 8} 0 "p")
+                       (seon.test-store/work-tx "demo/f" :running {:boot "b1" :agent :a3 :branch :task-demo-f :model "m" :max-turns 8 :start-ms 0})
                        (update (seon.task/message-tx "m-1" :message "owner" :task-demo-f "check g") 0 assoc :seon.message/agent {:seon.agent/key k})
                        ;; the agent's task, which its record pulls (seon.agent/the-agent-is-the-unit-not-the-run)
                        [{:seon.agent/key k :seon.agent/task {:seon.task/id "demo/f"}}]
@@ -1615,7 +1615,7 @@
                   [{:seon.task/id "demo/f" :seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "Make demo/f." :seon.task/execution :running
                     :seon.task/branch :task-demo-f :seon.task/kind :whole :seon.task/proofs #{'demo/f-test}}]
                   (seon.task/agent-tx "b1" :a3 {:status :idle :branch :task-demo-f})
-                  (seon.task/run-start-tx "demo/f#1" "demo/f" "b1" :a3 {:branch :task-demo-f :model "m" :max-turns 8} 0 "p")
+                  (seon.test-store/work-tx "demo/f" :running {:boot "b1" :agent :a3 :branch :task-demo-f :model "m" :max-turns 8 :start-ms 0})
                   ;; the agent's task, its record's :task (task seon.agent/the-agent-is-the-unit-not-the-run)
                   [{:seon.agent/key (seon.task/agent-key "b1" :a3) :seon.agent/task {:seon.task/id "demo/f"}}]]]
         (d/transact conn tx))
