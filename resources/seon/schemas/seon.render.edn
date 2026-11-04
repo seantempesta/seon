@@ -4,7 +4,7 @@
 ;; the value's own override key, else the declared render (the schema, then its parents),
 ;; else the one value printer (seon.print). The values below are what root's web renders.
 {;; a value shown by its model render: its schema declares {:seon.render/model sym}, a function of opts and
- ;; the value answering the value to show in its place (seon.render/model-printed), which the one printer
+ ;; the value answering the value to show in its place (seon.render/model), which the one printer
  ;; prints. The agent's process state: a Datahike db, the reach graph and host handles are shown by
  ;; name and size, each with the form that reads it (seon.agent/state-summary)
  :seon.agent/state [:map {:seon.render/model seon.agent/state-summary}]
