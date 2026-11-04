@@ -806,8 +806,8 @@
                   [:=> [:cat :seon.host/db :int [:maybe :int]] [:vector [:tuple :int :map :qualified-keyword]]]]}
   ([db a] (records db a nil))
   ([db a since]
-  (->> (concat (for [id [(:seon.agent/id (d/pull db [:seon.agent/id] a))]
-                     [e tx] (d/q '[:find ?e ?tx :in $ ?a ?since :where [?e :seon.eval/agent ?a ?tx] [(>= ?tx ?since)]] db a (or since 0))
+  (let [id (:seon.agent/id (d/pull db [:seon.agent/id] a))]
+  (->> (concat (for [[e tx] (d/q '[:find ?e ?tx :in $ ?a ?since :where [?e :seon.eval/agent ?a ?tx] [(>= ?tx ?since)]] db a (or since 0))
                      :let [v (d/pull db [:seon.eval/id :seon.eval/by :seon.eval/record] e)]
                      ;; a model's eval (nearly all of them) answers a call: no contracted call per record to say so
                      :when (and (not= "context" (:seon.eval/by v)) (or (get-in v [:seon.eval/record :call-id]) (not (loop-eval? id v))))]
@@ -820,7 +820,7 @@
                      :when (and (empty? (:seon.turn/calls v)) (not (:seon.turn/truncated v)) (not (str/blank? (:seon.turn/reply v))))]
                  [tx (dissoc v :seon.turn/calls :seon.turn/truncated) :seon.turn/fact]))
        (sort-by (fn [[tx v]] [tx (:seon.eval/id v (:seon.message/id v (:seon.turn/id v)))]))
-       vec)))
+       vec))))
 
 (defn examples-of
   "The keys of the example sessions agent a's task names (:seon.task/examples, agents keyed
