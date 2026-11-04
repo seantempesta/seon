@@ -6,7 +6,6 @@ This file holds the owner's standing rulings, one entry each: the rule, the owne
 
 The owner's rulings of 2026-11-04, on what an agent is and how everything it reads is made; the direction and what is proven are in [the Seon way](seon-way.md). They stand over earlier entries where they differ.
 
-
 ### Data is stored as data; the one printer is for context (owner, 2026-11-04)
 
 "All evals that we can store as data natively inside datahike or via the object storage we should do up to a reasonable point (we should have reasonable maxdese) and if that happens we can't resume that data and that's fine. Printed data is rarely the right choice and I want us to be very suspricious of any code that is printing values. The only value printer should be the one value printer and that's for assembling context for agents". Stated in [the Seon way](seon-way.md); the sweep is task seon.print/the-one-printer-is-for-context.

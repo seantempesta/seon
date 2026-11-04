@@ -33,7 +33,7 @@ the walk: each key by its schema's render, else the default; parts its data name
 Each rule removes a way of doing it some other way.
 
 1. **What an agent reads is data** on its entity, a pull away, or queried by a render.
-2. **Its schema declares its renders,** html for the page and model for the model. With none, a default draws it, and any valid entity renders.
+2. **Its schema declares its renders,** html for the page and model for the model. With none, a default draws it, and any valid entity renders. The nearest wins: the agent's own (`:seon.agent/renders`), over the schema's, over a parent's, over the default.
 3. **A render may ask for the db and query anything;** what it reads is tracked, so it runs again only when that moves. It need not be reachable from the agent, and nothing has to be pulled to be shown.
 4. **The agent's data names what it shows:** its pattern for what it holds, a list of parts for what is computed or queried. Defaults come from its schema.
 5. **A render runs again when its data changes or when a function that renders it changes,** at any depth.
