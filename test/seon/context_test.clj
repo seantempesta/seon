@@ -1751,7 +1751,7 @@
   ;; deliberate change is the step that changes what is sent, which rewrites it
   (let [recorded (clojure.edn/read-string (slurp (str (seon.config/checkout) "/test/seon/recorded_requests.edn")))
         now (recorded-sessions)]
-    (is (= (set (keys recorded)) (set (keys now))))
+    (is (= (update-vals recorded count) (update-vals now count)) "the same sessions, the same turns of each")
     (doseq [[k turns] recorded [i t] (map-indexed vector turns)]
       (is (= t (get-in now [k i])) (str k " turn " i ": the bytes it was recorded with")))))
 
