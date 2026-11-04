@@ -187,7 +187,8 @@
   (let [db (db-of [(decl "x" :model "m1")] :extra (work "x" :lost :model "outside"))]
     (is (= [(spawn "x" :model "outside")] (actions-for db)) "a lost outside task's next agent is outside"))
   (let [db (db-of [(decl "x" :model "m1")] :extra (work "x" :running :model "outside" :boot "boot-0"))]
-    (is (some #{(spawn "x" :model "outside")} (actions-for db)) "and so is the next agent of one the restart reaps in the same pass"))
+    (is (= [{:op :reap :task "demo/x"}] (actions-for db)) "a reap is the task's one action this pass")
+    (is (= [(spawn "x" :model "outside")] (actions-for (d/db-with db (task/move-tx "demo/x" :running :lost {})))) "and the next agent of one the restart reaped stays outside"))
   (testing "root cannot take back a task that is done: merged work keeps :running"
     (let [db (db-of [(decl "z")] :extra (work "z" :merged))
           {:keys [taken not-running]} (my.root/take-back-tx db ["demo/z"] "x")]
@@ -230,7 +231,7 @@
 
 (deftest a-previous-roots-work-is-reaped-and-resumed
   (let [db (db-of [(decl "x") (decl "y" :needs ["x"])] :extra (work "x" :running :boot "boot-0"))]
-    (is (= [{:op :reap :task "demo/x"} (spawn "x")] (actions-for db)))
+    (is (= [{:op :reap :task "demo/x"}] (actions-for db)) "one action a task: its flight is one, and the spawn is the next pass's, once the reap has written :lost")
     (is (= #{} (:live (r/index db))))))
 
 (deftest ended-work-is-judged-by-the-done-rule
@@ -605,7 +606,7 @@
       (is (= [{:op :close :task "demo/a-merge"}]
              (actions-for (mdb [(decl "a")] :extra (concat (work "a" :done) (work "a-merge" :ready) (task/execution-tx ["demo/a-merge"] :cancelled)))))))
     (testing ":running but not live (an earlier boot's): reaped, then started again"
-      (is (= [{:op :reap :task "demo/a"} (spawn "a")] (actions-for (db-of [(decl "a")] :extra (work "a" :running :boot "boot-0"))))))
+      (is (= [{:op :reap :task "demo/a"}] (actions-for (db-of [(decl "a")] :extra (work "a" :running :boot "boot-0"))))))
     (testing ":closed derives nothing: the hold was written with the outcome, and the task waits for a person to release it"
       (is (= [] (actions-for (db-of [(decl "a")] :extra (concat (work "a" :closed :members {:seon.task/reasons [{:reason :proof-red :symbol (t "a")}]})
                                                                 (task/execution-tx ["demo/a"] :held)))))))))
@@ -1370,10 +1371,9 @@
     (testing "it waited with its proofs green: done, never parked (start stops its kept process)"
       (is (= {:outcome :done :reasons []} (judgment-of db0 "a" {:end {:outcome :waiting} :results {(t "a") :pass}}))))
     (testing "its task moved to another branch: the parked process (forked on the old one) is stopped, and the next start is a spawn"
-      (is (= [{:op :kill :task "demo/a" :reason :env-changed}
-              (assoc-in (spawn "a") [:env :branch] :elsewhere)]
-             (actions-for (db-of [(decl "a")] :extra (concat (parked :parked 0) (msg "m1")
-                                                             [{:seon.task/id "demo/a" :seon.task/branch :elsewhere}]))))))
+      (let [db (db-of [(decl "a")] :extra (concat (parked :parked 0) (msg "m1") [{:seon.task/id "demo/a" :seon.task/branch :elsewhere}]))]
+        (is (= [{:op :kill :task "demo/a" :reason :env-changed}] (actions-for db)) "a task has one flight, so one action a pass")
+        (is (= [(assoc-in (spawn "a") [:env :branch] :elsewhere)] (actions-for (d/db-with db (task/move-tx "demo/a" :parked :killed {})))))))
     (testing "the message count is observed at each commit as listing finds it, whichever way it came"
       (let [db0 (db-of [(decl "a")] :extra (parked :parked 0))]
         (observed-steps db0 [["a first message" (msg "m1")] ["a second" (msg "m2")]])

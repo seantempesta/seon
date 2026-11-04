@@ -184,7 +184,7 @@
         file (str runs "/records.edn")
         _ (spit file (pr-str [[{:seon.agent/key "example/abc" :seon.agent/id :example-abc :seon.agent/status :ended :seon.agent/description "Make h."}]
                               [{:seon.eval/id "example/abc/s1" :seon.eval/by "src" :seon.eval/agent [:seon.agent/key "example/abc"]
-                                :seon.eval/code "(+ 1 2)" :seon.eval/response {:handle 'result/example-abc-s1 :value 3} :seon.eval/run "example/abc" :seon.eval/call-id "example-abc-call_1"}]]))
+                                :seon.eval/code "(+ 1 2)" :seon.eval/response {:handle 'result/example-abc-s1 :value 3} :seon.eval/call-id "example-abc-call_1"}]]))
         _ (spit (str runs "/bad.edn") "[[{:seon.agent/key \"someone\"}]]")
         _ (spit (str runs "/unreadable.edn") "[[{:seon.agent/key")
         ;; written before session-tx gave the agent an id: it loaded, and its page was not found

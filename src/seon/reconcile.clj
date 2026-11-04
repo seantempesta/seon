@@ -124,14 +124,9 @@
 (def ^:private watched-attrs
   "The agent attributes the index reads: when its root started it, when (a start writes both, and the environment with
   them: a session's next task has a boot unchanged but a start time that moved), and the messages it had taken. Not its
-  :seon.agent/branch as root observes it (seon.task/agent-tx writes that too, under the store's name for the branch). See docs/reconcile.md#the-reconcilers-index."
+  :seon.agent/branch as root observes it (seon.task/agent-tx writes that too, under the store's name for the branch). Asked inline, once per
+  datom of a move: a contracted call each would make a move cost its datoms in calls (seon.render-cost-test/a-move-of-main-costs-what-moved). See docs/reconcile.md#the-reconcilers-index."
   #{:seon.agent/boot :seon.agent/started-ms :seon.agent/taken})
-
-(def ^:private watched?
-  "Is attribute a one the index watches (an attribute of `watched-ns`, or one of `watched-attrs`)? A plain function and no
-  contracted one, for it is asked once per datom of a move: a contracted call each would make a move cost its datoms in
-  calls (seon.render-cost-test/a-move-of-main-costs-what-moved). See docs/reconcile.md#the-reconcilers-index."
-  (fn [a] (boolean (and (keyword? a) (or (contains? watched-attrs a) (contains? watched-ns (namespace a)))))))
 
 (def park-outcomes
   "An agent's own ends that park its session instead of ending it (docs/turn.md#parked): a
@@ -314,7 +309,7 @@
   db after it. Re-reads only the entities the commit touched."
   {:malli/schema [:=> [:cat :seon.reconcile/index :seon.host/db [:sequential :any]] :seon.reconcile/index]}
   [idx db ops]
-  (let [es (into #{} (keep (fn [[_ e a]] (when (watched? a) e))) ops)
+  (let [es (into #{} (keep (fn [[_ e a]] (when (and (keyword? a) (or (watched-attrs a) (watched-ns (namespace a)))) e))) ops)
         ;; a message to a branch's agent: its count moves by one (a commit's op names the branch;
         ;; a diff's op may name only the message, so its branch is counted again), and the tasks
         ;; on that branch are re-derived (the session its agent works)
@@ -364,11 +359,11 @@
   ([db] (observe empty-index db (concat (for [e (task/entity-ids db)] [:db/add e :seon.task/id nil])
                                         (for [dt (d/datoms db :aevt :seon.message/branch)] [:db/add (:e dt) :seon.message/branch (:v dt)]))))
   ([idx from db]
-   (index idx from db (for [a (sort (into #{} (filter watched?) (concat (keys (:schema from)) (keys (:schema db)))))
+   (index idx from db (for [a (sort (into #{} (filter #(or (watched-attrs %) (watched-ns (namespace %)))) (concat (keys (:schema from)) (keys (:schema db)))))
                             dt (apply concat (d/datoms-diff from db :aevt [a]))]
                         dt)))
   ([idx _from db moved]
-   (observe idx db (for [dt moved :let [a (:a dt)] :when (watched? a)]
+   (observe idx db (for [dt moved :let [a (:a dt)] :when (or (watched-attrs a) (watched-ns (namespace a)))]
                      [:db/add (:e dt) a]))))
 
 (defn done-input
@@ -512,15 +507,16 @@
                                        (recur more n m taken acc)))
                        :else (recur more (inc n) m taken (conj acc id))))
         spawns (for [id starts :let [t (get-in idx [:tasks id]) p (idle idx id) prior (task-agent idx id)
-                                     ;; work a root restart lost (or this pass reaps: an earlier boot's) was ended
-                                     ;; by nobody: an outside agent stays outside
-                                     lost? (or (= :lost (:seon.task/outcome t)) (contains? (:reap idx) id))
+                                     ;; work a root restart lost was ended by nobody: an outside agent stays outside
+                                     lost? (= :lost (:seon.task/outcome t))
                                      env (desired-env t (when lost? (:seon.agent/env prior)))]]
                  ;; its process is idle (parked in this boot, on its branch): its next work is a wake on it, no fork
                  (if (and p (not (get-in idx [:kill id])))
                    {:op :wake :task id :env env :agent (:seon.agent/id p)}
                    {:op :spawn :task id :env env}))]
-    (vec (concat reaps kills judged gates octopus spawns))))
+    ;; a task has one flight, so one action a pass: the first in root's order; what follows it waits for the pass its write moves main to
+    (first (reduce (fn [[acc seen] act] (if (contains? seen (:task act)) [acc seen] [(conj acc act) (conj seen (:task act))]))
+                   [[] #{}] (concat reaps kills judged gates octopus spawns)))))
 
 ;; ---- held for root, and the root causes at quiescence -----------------------------------
 
@@ -607,7 +603,7 @@
 (defn evidence
   "The measured evidence of task id held for root: its conflicts and unmerged keys (from its judging; none for a death), the
   proofs not passing in root's own test run (red), and the problem the reconciler stated (nil: none)."
-  {:malli/schema [:=> [:cat :seon.task/id [:map [:conflicts {:optional true} [:maybe [:sequential :any]]] [:unmerged {:optional true} [:maybe [:or [:sequential :string] [:set :string]]]]
+  {:malli/schema [:=> [:cat :seon.task/id [:map [:conflicts {:optional true} [:maybe [:sequential :seon.merge/conflict]]] [:unmerged {:optional true} [:maybe [:or [:sequential :string] [:set :string]]]]
                                          [:red {:optional true} [:sequential :qualified-symbol]]] [:maybe :string]] :seon.task/evidence]}
   [id {:keys [conflicts unmerged red]} problem]
   (cond-> {:from id :conflicts (vec conflicts) :unmerged (vec unmerged) :red (vec (sort-by str red))}

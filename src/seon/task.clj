@@ -569,7 +569,9 @@
 (defn- agent-value
   "A pulled agent as :seon.reconcile/agent: what root decides on of it, its environment (the one desired-env compares)
   beside its boot and the messages it had taken."
-  {:malli/schema [:=> [:cat :map] :seon.reconcile/agent]}
+  {:malli/schema [:=> [:cat [:map [:seon.agent/key :string] [:seon.agent/branch :keyword] [:seon.agent/model {:optional true} [:maybe :string]]
+                               [:seon.agent/max-turns pos-int?] [:seon.agent/holder {:optional true} :string]]]
+                   :seon.reconcile/agent]}
   [a]
   (let [{:seon.agent/keys [branch model max-turns holder]} a]
     (-> (select-keys a [:seon.agent/key :seon.agent/id :seon.agent/boot :seon.agent/taken])

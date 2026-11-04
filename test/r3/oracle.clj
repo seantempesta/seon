@@ -140,7 +140,9 @@
                  (cond (or (nil? id) (>= n room)) acc
                        (merge? id) (if (< m merge-room) (recur more (inc n) (inc m) (conj acc id)) (recur more n m acc))
                        :else (recur more (inc n) m (conj acc id))))
-        spawns (for [id starts
+        ;; a task has one flight, so one action a pass: reaped or killed now, it starts on the pass that write moves main to
+        stopping (into #{} (map :task) (concat reaps kills))
+        spawns (for [id starts :when (not (stopping id))
                      :let [t (get-in v [:tasks id])]]
                  {:op :spawn :task id :env (desired-env t)})
         ;; one gate at a time, while no merge task works (it runs on the merges branch's head); the merges follow the gate
