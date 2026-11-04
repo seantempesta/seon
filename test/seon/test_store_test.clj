@@ -118,7 +118,7 @@
   (let [decl (fn [k] {:db/ident k :db/valueType :db.type/string :db/cardinality :db.cardinality/one})
         base (vec pdb/schema)
         digest ts/program-schema-digest]
-    (is (= (digest base) (digest (conj base (decl :seon.run/zzz)))) "a run's attribute: the same store")
+    (is (= (digest base) (digest (conj base (decl :seon.agent/zzz)))) "an agent's attribute: the same store")
     (is (= (digest base) (digest (conj base (decl :app.task/zzz)))) "any other namespace too")
     (is (not= (digest base) (digest (conj base (decl :form/zzz)))) "a form's attribute: a new store")
     (is (not= (digest base) (digest (conj base (decl :var/zzz)))) "a var's too")
