@@ -152,6 +152,18 @@
            (is (= :overlap (:seon.repl/refused-because r)) (str "two changes over one text: " (pr-str r))))
          (finally (reset! agent/state old) (remove-ns 'x.repl-edit)))))
 
+(deftest a-reply-comes-after-its-commit
+  ;; a reply says what it did is on the branch (seon.repl's repl proc: the commit, then the answer): the agent's commit
+  ;; slowed, a read of the branch on hearing the reply holds it. Answered first, these reads raced the commit and
+  ;; lost under load (bin/prove --merge at load 10: an-eval-that-throws-is-recorded-with-its-turn and an edit's)
+  (let [[_ _ branch] (at/in-agent (fn [{:keys [ns task]}]
+                                    ["(alter-var-root #'seon.agent/commit! (fn [f] (fn [] (Thread/sleep 500) (f))))"
+                                     (str "(ns " ns ".rc) (defn f \"One.\" {:malli/schema [:=> [:cat] :int]} [] 1)")
+                                     {:op :eval :agent "root"
+                                      :code (str "(let [b (:db @(seon.root/branch-db sys (:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))))]"
+                                                 " (:form/src (:var/form (datahike.api/entity b [:var/name '" ns ".rc/f]))))")}]))]
+    (is (clojure.string/includes? (str (:value branch)) "[] 1") (str "the branch holds what the reply said was done: " (pr-str branch)))))
+
 (deftest an-edit-in-an-agent-is-program-on-its-branch
   ;; the edit's definition is recorded as a typed defn is: the branch's program holds the new source,
   ;; and its inner eval records no eval of its own
