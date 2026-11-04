@@ -38,10 +38,17 @@
 ;; docs/source.md): kept as a branch named by the tree's id, a content key
 ;; that is never updated, in one LMDB store per checkout (:seon.config.proofs/program-store).
 
+(def ^:private importer
+  "The text of the code that derives a program's facts from its files (seon.source, seon.program): a form's :form/refs
+  are its answer, and a kept tree's unchanged files are not read again, so facts another importer wrote are not
+  this one's."
+  (delay (lib/digest (str/join "\n" (map #(slurp (io/file (config/checkout) %)) ["src/seon/source.clj" "src/seon/program.clj"])))))
+
 (defn- tree-prefix
-  "The prefix of the branches keeping a tree's program as :seon.config.source/dirs import it:
-  a store's branches made under other dirs (another import) are none of this one's."
-  [] (str "tree-" (lib/digest (pr-str (config/value :seon.config.source/dirs))) "-"))
+  "The prefix of the branches keeping a tree's program as :seon.config.source/dirs and this importer import it:
+  a store's branches made under other dirs or other code (another import) are none of this one's. See
+  docs/source.md#tests-run-by-reach."
+  [] (str "tree-" (lib/digest (str (pr-str (config/value :seon.config.source/dirs)) @importer)) "-"))
 
 (defn tree-branch "The branch keeping the program of git tree id tree." [tree] (keyword (str (tree-prefix) tree)))
 

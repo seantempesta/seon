@@ -496,6 +496,28 @@
       (let [refs {'seon.system/read-decl #{'app.pt-calc/add}}]
         (is (= (digests (program/reach-graph db' refs)) (digests (runner/reach-graph-of db' refs dir))))))))
 
+(deftest a-types-method-is-in-the-reach-of-what-constructs-it
+  ;; task seon.proofs/a-types-method-moves-the-reach-of-what-uses-it: a change inside a type's method (a method of
+  ;; the type's own protocol, of a host interface, of a record, of a protocol extended to a type) moves the digest of a
+  ;; test that reaches the function using the type: 2026-11-03, seon.ratom's Reaction changed and a stale green was reused
+  (let [in {:env "e" :tree "t" :config {}}
+        digest (fn [db t] (get-in (program/graph-index (program/reach-graph db nil) in nil) [t :digest]))]
+    (doseq [[label nsym before after use]
+            [["a protocol's method, by its ctor" 'app.pt-ty1 "(do (defprotocol P1 (m1 [_])) (deftype T1 [] P1 (m1 [_] 1)))" "(do (defprotocol P1 (m1 [_])) (deftype T1 [] P1 (m1 [_] 2)))" "(defn f [] (T1.))"]
+             ["a host interface's method, by its ctor" 'app.pt-ty2 "(deftype T2 [] clojure.lang.IDeref (deref [_] 1))" "(deftype T2 [] clojure.lang.IDeref (deref [_] 2))" "(defn f [] (T2.))"]
+             ["a type's positional ctor" 'app.pt-ty3 "(deftype T3 [] clojure.lang.IDeref (deref [_] 1))" "(deftype T3 [] clojure.lang.IDeref (deref [_] 2))" "(defn f [] (->T3))"]
+             ["a record's method, by its ctor" 'app.pt-ty4 "(defrecord R4 [] clojure.lang.IDeref (deref [_] 1))" "(defrecord R4 [] clojure.lang.IDeref (deref [_] 2))" "(defn f [] (R4.))"]
+             ["a record's map ctor" 'app.pt-ty5 "(defrecord R5 [] clojure.lang.IDeref (deref [_] 1))" "(defrecord R5 [] clojure.lang.IDeref (deref [_] 2))" "(defn f [] (map->R5 {}))"]
+             ["a protocol extended to a type, by its method" 'app.pt-ty6 "(do (defprotocol P6 (m6 [_])) (extend-type String P6 (m6 [_] 1)))" "(do (defprotocol P6 (m6 [_])) (extend-type String P6 (m6 [_] 2)))" "(defn f [] (m6 \"x\"))"]
+             ["a reify's method, in the form that holds it" 'app.pt-ty7 "(defn g [] (reify clojure.lang.IDeref (deref [_] 1)))" "(defn g [] (reify clojure.lang.IDeref (deref [_] 2)))" "(defn f [] (g))"]]]
+      (let [tns (symbol (str nsym "-test"))
+            t (symbol (str tns) "f-test")
+            test-src (str "(deftest f-test (is (some? (" nsym "/f))))")
+            db (record (empty-db) nsym before nsym use tns test-src)
+            db' (record db nsym after)]
+        (is (some? (digest db t)) (str label ": the test has a digest"))
+        (is (not= (digest db t) (digest db' t)) (str label ": the method's change moves the test's digest"))))))
+
 (deftest an-update-gives-the-digests-a-rebuild-gives
   (let [db (calc-db)
         in {:env "e" :tree "t" :config {}}

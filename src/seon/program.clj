@@ -223,6 +223,11 @@
                            (when (banned s) (vswap! acc update :banned conj s))
                            (vswap! acc update :refs conj s))
          :host-static (vswap! acc update :refs conj (symbol (str (:class n)) (str (:member n))))
+         ;; (T. x): a type of the program, its class named ns.T, whose var holds it: the ctor reaches its methods. A
+         ;; host class's package is no namespace
+         :host-new (let [c (str (:class n)) i (str/last-index-of c ".")]
+                     (when (and i (find-ns (symbol (subs c 0 i))))
+                       (vswap! acc update :refs conj (symbol (subs c 0 i) (subs c (inc i))))))
          ;; a scalar names no var unless it is a qualified symbol, and no data but a qualified
          ;; keyword: most constants (unqualified keywords, strings, numbers) cost no walk
          (:quote :const) (let [x (datum n)]
