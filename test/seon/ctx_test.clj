@@ -1187,3 +1187,26 @@
     (doseq [[step dims] measured [d v] dims :let [stated (get-in ctx/change-steps [step d])]]
       ;; within the slack above (the bound would be under), and not past a third below (it would be loose)
       (is (<= (* cost/loose stated) v (* (get cost/slack d) stated)) (str step " " d ": measured " v " against " stated " stated")))))
+
+(defn other-part
+  "The one component of `other-layout`: a component declares what it reads of ctx."
+  {:malli/schema [:=> [:cat [:map [:seon.ctx/ctx :map]]] :any]}
+  [_] [:li "the other layout"])
+
+(defn other-layout
+  "A layout an agent registers for its page: one list holding one line."
+  {:malli/schema [:=> [:cat :map] :any]}
+  [_] [:div {:id "render-ctx"} [:ul {:id "p-task"} [#'other-part {}]]])
+
+(deftest a-layout-declared-after-the-first-draw-is-the-page
+  ;; task seon.render/one-way-to-make-what-an-agent-is-sent, step 2; docs/ctx.md, "the page is the agent's to change": the
+  ;; walk held the layout of its first draw, so one registered later drew nothing
+  (let [db (seeded 3)
+        db2 (:db-after (d/with db (:tx (my.schema/registration db :seon.render/render-ctx '[:map {:seon.render/html seon.ctx-test/other-layout}] false))))]
+    (try (reset! seon.agent/state {:db db :key k :branch :b})
+         (let [before (pr-str (seon.repl/render-ctx-hiccup))]
+           (is (not (str/includes? before "the other layout")) "the declared layout first")
+           (swap! seon.agent/state #(-> % (assoc :db db2) (dissoc :schema-registry)))
+           (is (= ["the other layout"] (map last (vals (seon.repl/render-ctx-hiccup)))) "the one registered since"))
+         (finally (end-agent!)))))
+

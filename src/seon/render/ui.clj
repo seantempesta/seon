@@ -1170,7 +1170,7 @@
   (into [] (distinct)
         (for [[_ e] (reverse (seq (:evals c)))
               :let [rec (:seon.eval/record e)]
-              s (concat (ratom/realize (:recorded rec)) (some-> (ratom/realize (get-in rec [:response :edited :var])) vector)
+              s (concat (ratom/realize (get-in rec [:response :recorded])) (some-> (ratom/realize (get-in rec [:response :edited :var])) vector)
                         (ratom/realize (get-in rec [:response :unmapped])))
               :when (symbol? s)]
           s)))
@@ -1508,11 +1508,8 @@
         tu? (id-set (:turns c))
         ;; a model's evals are drawn in their turn's message, not again in the list
         in-turn (into #{} cat (vals (turn-evals c db conv)))
-        ;; the agent's own loop (its eval with no model call that names a run: seon.turn/work!) is the chat's
-        ;; start and end cards, not a row
-        ;; read by its paths, never realized whole: the layout reads no eval's opened flag
-        loop? (fn [id] (let [e (get-in c [:evals id])]
-                         (and (= (:seon.eval/by e) (some-> (:seon.agent/id c) name)) (get-in e [:seon.eval/record :run]) (not (get-in e [:seon.eval/record :call-id])))))]
+        ;; the agent's own loop is the chat's start and end cards, not a row
+        loop? (fn [id] (context/loop-eval? (:seon.agent/id c) (get-in c [:evals id])))]
     [:ol {:id "c-rows"}
      (when (:task c) [#'chat-ask {} aid])
      (when aid [#'chat-start {} aid])

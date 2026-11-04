@@ -627,10 +627,10 @@
   that wants what the prose cites parses the kept prose, docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map),
   its value in one line, or its error's message (:line, the one printer
   under the line budget: an eval's row on the page), the provider's call id, its reasoning, its run, its costliest
-  functions and what it recorded."
+  functions."
   {:malli/schema [:=> [:cat :string :map :map [:maybe :string]] :seon.eval/record]}
   [code r req run]
-  (let [resp (dissoc r :text :recorded :fns :record)
+  (let [resp (dissoc r :text :fns :record)
         ;; a value that names its basis (@ctx: the branch's record at t, seon.ctx/build) is
         ;; recorded as that basis and its schema: the page renders it from what exists, and a
         ;; copy of the session's record is never stored at each @ctx
@@ -649,8 +649,7 @@
       (:reasoning req) (assoc :reasoning (:reasoning req))
       (:content req) (assoc :content (:content req))
       run (assoc :run run)
-      (seq (:fns r)) (assoc :fns (:fns r))
-      (seq (:recorded r)) (assoc :recorded (:recorded r)))))
+      (seq (:fns r)) (assoc :fns (:fns r)))))
 
 (defn- record!
   "Record response r of code on this branch through the agent's write path (an agent's
@@ -935,13 +934,17 @@
 
 (defn- the-walk
   "This agent's walk of its render of ctx (seon.render/walker over @ctx, its diff seon.ctx/changes, and the
-  branch's db), made once and held in its state: the one cache of its components."
+  branch's db), held in its state: the one cache of its components, made again when the branch declares another
+  layout (docs/ctx.md#the-record-is-the-agents-work)."
   {:malli/schema [:=> [:cat] :map]}
   []
-  (or (:walk @agent/state)
-      (let [w (render/walker {:ref ctx/ctx :changes ctx/changes} agent/db [(layout) {}])]
+  (let [held (:walk @agent/state) l (layout)]
+    (if (and held (= l (first (:root held))))
+      held
+      (let [w (render/walker {:ref ctx/ctx :changes ctx/changes} agent/db [l {}])]
+        (some-> held render/dispose-walk!)
         (swap! agent/state assoc :walk w)
-        w)))
+        w))))
 
 (defn- page-walk
   "This agent's page walk drawn up to now (seon.render/flush!), under its branch's schemas: the
