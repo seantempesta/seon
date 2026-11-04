@@ -1557,5 +1557,6 @@
      ;; agent with no task (a fresh one on a kept branch) takes none
      (when-let [tx (when (and resumed task) (not-empty (task/onto-tx db0 @store-conn task)))]
        (transact! tx))
-     ;; forked for a run: it is this session's on the branch from the start
-     (when task (begin-run! task))))))
+     ;; forked for a task: it is this session's on the branch from the start. A label that names no task of main's (a check's
+     ;; agent works "lc 0") begins none
+     (when (and task (d/entity (heard-main) [:seon.task/id task])) (begin-run! task))))))

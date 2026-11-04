@@ -100,8 +100,8 @@
   function (seon.generation/generation, 1 -> 2) on its branch, its merge task merges it, the
   reconciler commits main's file on the merges branch, and the merge loads in place: root
   and every agent forked after it run the new definition, with no build and no restart
-  (BUILD plan P4). Waits for quiescence. Answers {:commit sha (the merged run's)
-  :commits [[run sha]] :commit-errors [[run message]] :turn-ms (release to quiet) :spans [[run start end] ms
+  (BUILD plan P4). Waits for quiescence. Answers {:commit sha (the merged task's)
+  :commits [[task sha]] :commit-errors [[task message]] :turn-ms (release to quiet) :spans [[agent start end] ms
   from release]
   :root (seon.generation/generation in root) :agent (in an agent forked after the merge)
   :quiescent q}. k: the scenario (fixtures/scenarios), :loop by default; :loop-2 is the
@@ -114,11 +114,11 @@
         q (quiet! sys)
         turn-ms (- (now) t0)
         d (db sys)
-        commits (vec (d/q '[:find ?a ?c :where [?e :seon.run/commit ?c] [?e :seon.run/id ?a]] d))]
+        commits (vec (d/q '[:find ?a ?c :where [?e :seon.task/commit ?c] [?e :seon.task/id ?a]] d))]
     {:commit (second (first commits)) :commits commits
-     :commit-errors (vec (d/q '[:find ?a ?m :where [?e :seon.run/commit-error ?m] [?e :seon.run/id ?a]] d))
+     :commit-errors (vec (d/q '[:find ?a ?m :where [?e :seon.task/commit-error ?m] [?e :seon.task/id ?a]] d))
      :turn-ms turn-ms
-     :spans (vec (sort (for [[a s e] (d/q '[:find ?a ?s ?e :where [?x :seon.run/id ?a] [?x :seon.run/start-ms ?s] [?x :seon.run/end-ms ?e]] d)]
+     :spans (vec (sort (for [[a s e] (d/q '[:find ?a ?s ?e :where [?x :seon.agent/key ?a] [?x :seon.agent/started-ms ?s] [?x :seon.agent/ended-ms ?e]] d)]
                          [a (- s t0) (- e t0)])))
      :root (seon.generation/generation) :agent (first (fresh sys "(seon.generation/generation)"))
      :quiescent q})))
