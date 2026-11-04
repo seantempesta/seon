@@ -1210,3 +1210,18 @@
            (is (= ["the other layout"] (map last (vals (seon.repl/render-ctx-hiccup)))) "the one registered since"))
          (finally (end-agent!)))))
 
+(deftest a-page-nobody-watches-draws-what-its-model-reads
+  ;; task seon.render/one-way-to-make-what-an-agent-is-sent, step 3: a turn's draw ran the conversation and the tiles for nobody,
+  ;; which printed every eval a second time. A person's page draws them; what the model reads is the same either way
+  (let [db (seeded 3)
+        ledger #(set (keys (seon.render/ledger (:walk @seon.agent/state))))
+        as (fn [f] (try (reset! seon.agent/state {:db db :key k :branch :b}) (f) (finally (end-agent!))))
+        [parts unwatched watched page] (as #(let [p (second (seon.repl/page-hiccup)) u (ledger) pg (seon.repl/render-ctx-hiccup)]
+                                              [p u (ledger) pg]))
+        whole (as #(do (seon.repl/render-ctx-hiccup) (second (seon.repl/page-hiccup))))]
+    (is (unwatched 'seon.render.ui/task-list) "the model's list is drawn")
+    (is (not-any? unwatched '[seon.render.ui/conversation-list seon.render.ui/eval-item seon.render.ui/tiles]) (pr-str unwatched))
+    (is (every? watched '[seon.render.ui/conversation-list seon.render.ui/eval-item seon.render.ui/tiles]) "a person's page draws them")
+    (is (some #(str/starts-with? % "eval-item") (keys page)) "the conversation is on the page")
+    (is (= parts whole) "the model reads the same whether or not a person watches")))
+

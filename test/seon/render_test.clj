@@ -1998,3 +1998,34 @@
         (let [s (:db/id (d/entity @conn [:seon.search/id "demo/find/request"]))]
           (d/transact conn [{:db/id s :seon.search/query "a tile of the dashboard"}])
           (is (str/includes? (pr-str (search-part (draw))) "app.srch/render-tile") "a new query: the part draws its hits"))))))
+
+(defn some-lists-part "A component (it reads ctx) with an element of its own that has an id, inside its root."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+  [{c :seon.ctx/ctx}] [:section [:p {:id "inner"} (:v c)]])
+(defn some-lists-other "A component in a list the walk does not draw."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+  [{c :seon.ctx/ctx}] [:p (:v c)])
+(defn some-lists-layout "A layout of two lists."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+  [_] [:div [:div {:id "parts"} [#'some-lists-part {}]] [:div {:id "others"} [#'some-lists-other {}]]])
+
+(deftest a-kept-walk-of-some-lists-draws-them-whole-and-the-rest-when-asked
+  ;; task seon.render/one-way-to-make-what-an-agent-is-sent, step 3: :only places the root's lists. A kept walk's change of a
+  ;; part below them draws that part whole (an element of it with an id is no list), and the rest is drawn when a reader
+  ;; of them comes
+  (let [a (seon.ratom/atom {:v 1})
+        w (assoc (r/walker {:ref a :changes seon.ctx/changes} (constantly (ts/test-db)) [#'some-lists-layout {}]) :only #{"#parts"})
+        ran (fn [w] (set (keys (r/ledger w))))]
+    (try (r/flush! w nil)
+         (is (= ["#parts"] (distinct (map first (#'r/placed w)))) "the one list placed")
+         (reset! a {:v 2})
+         (r/flush! w nil)
+         (let [[content] (vals (r/placed-hiccup w ["#parts"]))]
+           (is (some #(= [:p {:id "inner"} 2] %) (tree-seq vector? seq content)) (str "the part moved, drawn whole: " (pr-str content))))
+         (is (not ((ran w) 'seon.render-test/some-lists-other)) "the other list never ran")
+         (let [w2 (r/draw-all w)]
+           (r/flush! w2 nil)
+           (is ((ran w2) 'seon.render-test/some-lists-other) "and runs when it is asked for")
+           (is (= ["#parts" "#others"] (distinct (map first (#'r/placed w2))))))
+         (finally (r/dispose-walk! w)))))
+

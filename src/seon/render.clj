@@ -431,7 +431,8 @@
                 (vswap! (:queue w) conj k))))
           (loop []
             (when-let [k (first (sort-by #(:order (get @(:cache w) %)) (filter #(contains? @(:cache w) %) @(:queue w))))]
-              (let [{:keys [f opts args]} (get @(:cache w) k)] (render! w f opts args (assoc env :children (volatile! []))))
+              ;; :only places the root's lists: below the root, a component draws whole
+              (let [{:keys [f opts args]} (get @(:cache w) k)] (render! w f opts args (cond-> (assoc env :children (volatile! [])) (not= k root) (dissoc :only))))
               (recur)))
           @(:ran env))
       (let [[f opts & children] (:root w) [_ k] (render! w f (or opts {}) (vec children) env)]
@@ -536,6 +537,15 @@
    (let [w (cond-> (walker {:ref (ratom/atom t) :changes changes} (constantly db) [root-var {}]) (seq sels) (assoc :only (set sels)))]
      (flush! w nil)
      w)))
+
+(defn draw-all
+  "Walk w as one that draws every list, the ones its :only left undrawn drawn at its next flush! (its root queued, whose
+  children they are): the walk whose reader asked for only some lists has a reader of them all. See
+  docs/render.md#a-layout-places-its-lists."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [w]
+  (some->> @(:out w) (vswap! (:queue w) conj))
+  (dissoc w :only))
 
 (defn ledger
   "Walk w's ledger: by render var, its :miss (ran, output new), :same (ran, output =) and :hit
