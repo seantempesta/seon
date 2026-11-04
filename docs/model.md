@@ -36,7 +36,7 @@ A completion carries what the provider reported: prompt, completion and reasonin
 
 ## Failures
 
-A model call fails as data, at its one edge ([failure points](failure-points.md)): HTTP 429 is `:seon.model/rate-limited`, which the `:model` owner keeps and sends again after the provider's Retry-After (one of the [clocks](clocks.md) exceptions); a connection that failed or dropped is `:seon.model/transport` and anything else `:seon.model/provider-error` with the whole response body, each answered to the asking agent, whose run ends `:error` with its message. Calls in flight are bounded by `:seon.config.ai/max-in-flight`.
+A model call fails as data, at its one edge ([failure points](failure-points.md)): HTTP 429 is `:seon.model/rate-limited`, which the `:model` owner keeps and sends again after the provider's Retry-After (one of the [clocks](clocks.md) exceptions); a connection that failed or dropped is `:seon.model/transport` and anything else `:seon.model/provider-error` with the whole response body, each answered to the asking agent, whose work ends `:error` with its message. Calls in flight are bounded by `:seon.config.ai/max-in-flight`.
 
 ## Paid runs
 

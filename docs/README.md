@@ -26,7 +26,8 @@ The page that says where each capability of v1 Seon stands here.
 
 The pages on the processes that run: root, each agent's fork and the server that answers them.
 
-- [root](root.md): the control process: the root graph's procs, boot, runs and judging, holders and refused spawns, root causes at quiescence.
+- [root](root.md): the control process: the root graph's procs, boot, judging, holders and refused spawns, root causes at quiescence.
+- [reconcile](reconcile.md): how a task holds how its work stands and ended, decided once by root when an agent ends, and the reconciler's index.
 - [processes](processes.md): the fork server and each agent's process: single-threaded, forked from main's db value, one socket to root.
 - [server](server.md): root's request server: its ops, one table, and MCP's `seon_*` tools over it.
 - [dashboard](dashboard.md): the live web page: the render proc, the web proc, callbacks as data.
