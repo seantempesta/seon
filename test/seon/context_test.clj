@@ -1840,12 +1840,12 @@
           (is (every? #(str/includes? % "/") ids) "each id is its kind's"))))))
 
 (defn- recorded-form
-  "A request's messages as the recording holds them: the wire's shape, the system prompt's text out (the wiki's own, moving
-  with its edits) and each number of three digits or more renumbered by first appearance (a test branch's eids and ts differ
-  run to run), everything else the bytes."
+  "A request's messages as the recording holds them: the wire's messages (seon.model/wire-messages, what the provider is sent),
+  the system prompt's text out (the wiki's own, moving with its edits) and each number of three digits or more renumbered by
+  first appearance (a test branch's eids and ts differ run to run), everything else the bytes."
   [ms]
   (let [seen (volatile! {})]
-    (clojure.string/replace (pr-str (mapv #(if (= "system" (:role %)) (assoc % :content "<system>") %) ms))
+    (clojure.string/replace (pr-str (mapv #(if (= "system" (:role %)) (assoc % :content "<system>") %) (seon.model/wire-messages true ms)))
                             #"(?<![0-9.])[0-9]{3,}(?![0-9.])"
                             (fn [n] (or (get @seen n) (let [k (str "N" (count @seen))] (vswap! seen assoc n k) k))))))
 
