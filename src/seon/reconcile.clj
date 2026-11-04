@@ -706,8 +706,8 @@
 ;; arriving on :answers keyed by its request id. A flight is its task's; an action whose task is in flight is not
 ;; started twice.
 
-(def ^:private refusal-attrs
-  "The attributes a refusal writes on its task (seon.task/refused-tx: the outcome, and the judged attributes it sets and retracts)."
+(def ^:private refused-attrs
+  "The attributes a refused start writes on its task (seon.task/refused-tx: the outcome, and the judged attributes it sets and retracts)."
   (conj (set task/judged-attrs) :seon.task/outcome))
 
 (defn- request
@@ -1191,10 +1191,10 @@
                  ;; a commit touching tasks, runs or config keys ends a quiet spell (root's own
                  ;; quiescent fact does not)
                  work? (or (not next?) (some (fn [[_ _ a]] (and (keyword? a) (watched-ns (namespace a)) (not= "seon.root" (namespace a)))) (:ops m)))
-                 ;; a commit holding only the writes of a refusal (the outcome and what it sets, seon.task/refused-tx) changes
+                 ;; a commit holding only the writes of a refused start (the outcome and what it sets, seon.task/refused-tx) changes
                  ;; nothing that refused it; any other work, an edit of the refused task itself too, lets it ask again
                  only-refused? (and next? (every? (fn [[_ e a]] (or (not (and (keyword? a) (watched-ns (namespace a))))
-                                                               (and (contains? refusal-attrs a)
+                                                               (and (contains? refused-attrs a)
                                                                     (= :refused (get-in idx [:tasks (second (get-in idx [:keys e])) :seon.task/outcome])))))
                                               (:ops m)))
                  st (assoc st :db db :t t :idx idx :seen (inc (:seen st)) :lists (cond-> (:lists st 0) (not= (:prev m) (:t st -2)) inc)

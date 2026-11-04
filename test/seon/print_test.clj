@@ -454,9 +454,9 @@
 (deftest a-lifted-map-keeps-its-namespace
   ;; self-review: a map of one namespace's keys prints #:ns{...}; the grid drops the braces, so its
   ;; caption keeps the namespace
-  (let [{:keys [text html]} (seon/print-value {:seon.run/id "r" :seon.run/status :done} {:outputs #{:text :hiccup}})]
-    (is (str/starts-with? text "#:seon.run{") text)
-    (is (= ["#:seon.run"] (map last (elements html :div "seon-print-caption"))))))
+  (let [{:keys [text html]} (seon/print-value {:seon.task/id "r" :seon.task/outcome :done} {:outputs #{:text :hiccup}})]
+    (is (str/starts-with? text "#:seon.task{") text)
+    (is (= ["#:seon.task"] (map last (elements html :div "seon-print-caption"))))))
 
 (deftest a-cuts-form-reads-its-rest
   ;; seon.print/read-rest reads what a cut's continuation reads, from the value its handle names

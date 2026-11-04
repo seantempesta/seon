@@ -368,7 +368,7 @@
  ;; the spawn; :closed, judged when its task was no longer running, or held for root
  :seon.task/outcome [:and {:seon.db/index true :seon.status/finished #{:done :merged} :seon.status/judged #{:ready :gate} :seon.status/failed #{:dead :lost}}
                      [:enum :running :parked :told :cap :done :ready :gate :merged :behind :dead :lost :killed :refused :closed]]
- ;; why it stands so: the agent's own words, or root's (the death, the refusal)
+ ;; why it stands so: the agent's own words, or root's (the death, a refused start)
  :seon.task/reason :string
  ;; what the done rule said was not done when root judged it (seon.reconcile/done-explain); the same again holds the task
  ;; (seon.reconcile/judgment); retracted when a person continues the task

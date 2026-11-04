@@ -362,7 +362,7 @@
         e (plan-of main)
         main (d/db-with main (vector/tx-data [e] [(:tx (first (d/datoms main :eavt e :seon.task/plan)))] (vectors 1 1 1 768) [4] "m"))
         ;; the branch wrote facts, none of them a text: a turn's and an eval's records
-        branch (d/db-with main [{:seon.run/id "r1"}])
+        branch (d/db-with main [{:seon.model-call/id "b/a1/1" :seon.model-call/n 1}])
         [n _ asked] (on-branch main branch answered #(agent/embed-written! 64 "m"))]
     (is (= 0 n))
     (is (empty? asked) "nothing written is due and the plan's vector is current: no request")

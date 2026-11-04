@@ -40,7 +40,7 @@
          (finally (reset! agent/state old)))))
 
 (def ^:private paused-status
-  "[:and {:seon.db/index true} [:enum :running :ended :killed :dead :lost :done :merged :behind :closed :refused :paused]]")
+  "[:and {:seon.db/index true} [:enum :running :parked :told :cap :done :ready :gate :merged :behind :dead :lost :killed :refused :closed :paused]]")
 
 (deftest register-validates-against-the-population
   (let [[printed db] (evals (main-db)
@@ -49,9 +49,9 @@
                                  "(seon.contract/valid? :seon.task/outcome :paused)\n"
                                  "(defn status-of {:malli/schema [:=> [:cat :seon.task/outcome] :keyword]} [s] s)\n"
                                  "(status-of :paused)\n"
-                                 "(seon.contract/valid? :seon.run/run-fact {:seon.run/id \"a#1\" :seon.run/task 1 :seon.task/outcome :paused :seon.run/boot \"b\" :seon.run/agent 2 :seon.run/start-ms 0})\n"
+                                 "(seon.contract/valid? :seon.task/own {:seon.task/id \"a/b\" :seon.task/ns 'a :seon.task/name \"b\" :seon.task/plan \"p\" :seon.task/execution :running :seon.task/branch :b :seon.task/proofs #{} :seon.task/needs #{} :seon.task/kind :work :seon.task/outcome :paused})\n"
                                  "(:seon.error/type (my.schema/register! :x.schema-test/thing [:map [:x.schema-test/part :x.schema-test/nowhere]]))\n"
-                                 "(:seon.schema/key (my.schema/register! :seon.run/invalid :string))\n"
+                                 "(:seon.schema/key (my.schema/register! :seon.agent/invalid :string))\n"
                                  "(:seon.schema/key (my.schema/register! :user/qty :int))\n"
                                  "(seon.contract/valid? :user/qty 3)\n"))
         entity (fn [k] (d/q '[:find (pull ?e [:schema/form :schema/file :schema/source]) . :in $ ?k :where [?e :schema/key ?k]] db k))]
@@ -63,14 +63,14 @@
     (testing "the registration is program on the agent's branch: no longer the binary's, in the resource it came from"
       (is (= {:schema/form paused-status :schema/file "resources/seon/schemas/seon.facts.edn"} (entity :seon.task/outcome))))
     (testing "a new key goes to the resource holding most keys of its namespace (owner, 2026-10-21)"
-      (is (= {:schema/form ":string" :schema/file "resources/seon/schemas/seon.facts.edn"} (entity :seon.run/invalid))))
+      (is (= {:schema/form ":string" :schema/file "resources/seon/schemas/seon.facts.edn"} (entity :seon.agent/invalid))))
     (testing "a key in a scratch namespace is seen at the REPL but is no program: it has no resource"
       (is (= ":user/qty" (nth printed 8)))
       (is (= "true" (nth printed 9)))
       (is (= {:schema/form ":int"} (entity :user/qty))))
     (is (nil? (d/q '[:find ?e . :where [?e :schema/key :x.schema-test/thing]] db)) "nothing of a refused registration is written")
     (testing "the branch's population, as the next eval reads it"
-      (is (= #{:seon.task/outcome :seon.run/invalid :user/qty}
+      (is (= #{:seon.task/outcome :seon.agent/invalid :user/qty}
              (set (keys (program/schema-changes db))))))))
 
 (deftest a-registration-counts-the-stored-values-it-refuses
@@ -78,8 +78,8 @@
   ;; seon.db/registration-check, ported later by the owner's ruling of 2026-10-21): a
   ;; registration that narrows a stored attribute answers how many stored values its new
   ;; form refuses, so the agent sees what its change would break before it merges
-  (let [db (d/db-with (main-db) [{:seon.run/id "a#1" :seon.task/outcome :merged}
-                                 {:seon.run/id "a#2" :seon.task/outcome :running}])
+  (let [db (d/db-with (main-db) [{:seon.task/id "a/one" :seon.task/outcome :merged}
+                                 {:seon.task/id "a/two" :seon.task/outcome :running}])
         r (schema/registration db :seon.task/outcome [:and {:seon.db/index true} [:enum :running :ended]] false)]
     (is (= {:checked 2 :refused 1} (:seon.schema.usage/check (:registration r))))))
 

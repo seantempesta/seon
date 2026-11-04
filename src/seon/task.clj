@@ -350,7 +350,7 @@
      br (assoc :seon.message/branch br))])
 
 (def judged-attrs
-  "The attributes root sets on a task when they happen (its judging, seon.reconcile/judge-tx; its refusal), and so
+  "The attributes root sets on a task when they happen (its judging, seon.reconcile/judge-tx; a refused start), and so
   retracts when they did not: otherwise an earlier end's error or deferred results read as this one's. Beside
   :seon.task/reasons, which a start keeps (the same verdict twice holds, seon.reconcile/judgment) and a person's
   continue retracts (my.root/run!). See docs/reconcile.md#a-task-holds-how-its-work-ended."
