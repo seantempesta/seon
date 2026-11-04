@@ -37,17 +37,17 @@ What Seon is for, where it stands, the one step being worked now, and the steps 
 | The schema, next | A success reported as an error when ``seon.repl/response`` fails its own contract | ``seon.repl/a-responses-contract-does-not-turn-success-into-an-error`` |
 | The schema, next | An agent dies when a commit throws, as it did on a Ratio; the Ratio's source is unknown | ``seon.db/a-ratio-at-a-commit-ends-its-agent``, ``seon.repl/a-commit-that-keeps-failing-ends-no-agent-silently`` |
 | The schema, runs out | A turn number restarting each run; a test's error living on a process; seven attributes nothing names; 26 open tasks written on the old shape | ``seon.db/an-attribute-is-declared-because-something-uses-it``, and the runs commit |
-| The core | The model render runs outside the component's tracked run, so its reads are invisible and it can't ask for the db; an agent's own render choice doesn't redraw | to file: both renders run in the one tracked run |
+| The core | The model render runs outside the component's tracked run, so its reads are invisible and it can't ask for the db; an agent's own render choice doesn't redraw | ``seon.render/both-renders-run-in-the-components-tracked-run``: both renders run in the one tracked run |
 | The core | A var call a render can't draw is silently left as a call; the rule conflicts with the structure view | ``seon.render/a-var-call-a-render-cannot-draw-says-why`` |
 | The core | The debug page draws a branch by main's code, and root's walk a branch's layout by main's | ``seon.render/the-debug-page-reads-a-branchs-own-renders``, ``seon.render/roots-walk-of-a-branch-draws-the-branchs-layout`` |
-| The core | Status repeats every failure in full: 22 reds, 32k tokens a turn | to file: status's declared summary |
-| The core | After a layout changes, old parts stay on the page for a pass | to file: trace it first |
+| The core | Status repeats every failure in full: 22 reds, 32k tokens a turn | ``seon.context/the-status-declares-its-summary`` |
+| The core | After a layout changes, old parts stay on the page for a pass | ``seon.render/a-layout-change-leaves-no-old-parts``: trace it first |
 | The core | Text printed where no agent reads it | ``seon.print/the-one-printer-is-for-context`` |
-| Beside the core | Result handles are a counter, so a curated cut shifts them | to file: a handle names its value |
-| Beside the core | Reset forks by hand: not through the writer, no turn loop from the reconciler, not at any eval; cutting between two calls of one reply is untried | to file: reset to any point |
+| Beside the core | Result handles are a counter, so a curated cut shifts them | ``seon.repl/a-handle-names-its-value`` |
+| Beside the core | Reset forks by hand: not through the writer, no turn loop from the reconciler, not at any eval; cutting between two calls of one reply is untried | ``seon.agent/reset-an-agent-to-any-point`` |
 | Beside the core | A proof child's death says nothing | ``seon.agent/a-proof-child-that-died-says-why`` |
-| Beside the core | A re-registered attribute of another type is refused only at the write | to file: registering says so |
-| After | History across all kept branches grows without a measure (``seon.union``) | to file: measure it |
+| Beside the core | A re-registered attribute of another type is refused only at the write | ``seon.db/registering-says-a-type-cannot-change`` |
+| After | History across all kept branches grows without a measure (``seon.union``) | ``seon.db/history-across-kept-branches-is-measured`` |
 | Each merge | The standing root misses merges while the main tree is on a topic branch (``bin/update``) | update it at each merge of the schema work |
 
 **Done so far:** the transcript's steps 0-5, a new turn no longer rerunning the status, namespace docs written, the ``inputs`` rename, removal as unlink, re-render when a definition moves.

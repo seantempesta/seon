@@ -61,4 +61,8 @@
  {:seon.task/name "a-responses-contract-does-not-turn-success-into-an-error"
   :seon.task/plan "What was seen, in the lab, 2026-11-04: an eval of a form holding a doseq of my.schema/register! then defns came back as an error from seon.repl/response failing its own output contract (:malli.core/invalid-output), while the forms took effect. So an agent is told its work failed when it succeeded. Cause not read; the likely place: a response whose value a schema just registered mid-form changes the meaning of (the contract is checked under the branch's schemas as they stand after the form). What should be true: the eval's own answer validates against what it was evaluated under, or an answer failing its contract says the forms ran. Reproduction: claude_scratch's lab/181.clj, on a copy of a real session, to be cut to a small form."
   :seon.task/kind :work
-  :seon.task/proofs #{seon.repl-test/an-eval-that-registers-a-schema-answers-what-it-did}}]
+  :seon.task/proofs #{seon.repl-test/an-eval-that-registers-a-schema-answers-what-it-did}}
+ {:seon.task/name "a-handle-names-its-value"
+  :seon.task/plan "What is wrong: a result handle, result/e12, is a counter. A curated session that cuts an eval shifts every handle after it, so a later eval's code naming an earlier handle reads the wrong value or none. Found in the lab, 2026-11-04. What should be true: a handle names its value by what survives a cut. Decide how with what forking and examples need (seon.context/example-record already rewrites handles for one case, and that rewrite should go with it). A handle must stay short: a model reads and writes it."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.repl-test/a-handle-survives-a-cut-of-an-earlier-eval}}]
