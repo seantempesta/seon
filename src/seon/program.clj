@@ -418,10 +418,13 @@
                              :let [mv (when (and nsx (symbol? multi)) (ns-resolve nsx multi))]
                              :when (var? mv)]
                          {:multi (symbol mv) :dispatch (sedn/encode dispatch)})))
-        impls (when (or ran? (nil? before)) (vec (distinct (:impls a))))]
+        impls (when (or ran? (nil? before)) (vec (distinct (:impls a))))
+        ;; an ns form's docstring, as written, as a def's is: its name's metadata, else the string after its name, else its attr map's
+        ns-doc (when ns-form? (let [x (when (seq? form) (nth form 2 nil))]
+                                (first (filter string? [(:doc ns-meta) x (when (map? x) (:doc x))]))))]
     (when (and nsx (not (scratch-ns? nsx)) (not (:scratch ns-meta))
                (or ns-form? (seq defs) (seq declares) (seq methods) (seq impls) (:env? a)))
-      (cond-> {:id (form-id nsym src k) :src src :ns nsym :ns-form? (boolean ns-form?)
+      (cond-> {:id (form-id nsym src k) :src src :ns nsym :ns-form? (boolean ns-form?) :ns-doc ns-doc
                :defs defs :declares declares :methods (or methods []) :impls (or impls [])
                :refs (-> (:refs a) (into (macro-uses nsx form))
                          ;; a ctor reaches its type's methods: ns.T, or a bare T (analyzed, not run, the type is in no
@@ -526,12 +529,12 @@
   {:malli/schema [:=> [:cat :seon.host/db :any [:maybe :int] [:maybe :map]] :seon.db/tx-data]}
   [db k e content]
   (let [x (when e (d/entity db e))
-        attrs (case (first k) :var [:var/form :var/kind :var/contract :var/doc] :ns [:ns/form :ns/file] [(pointer (first k))])
+        attrs (case (first k) :var [:var/form :var/kind :var/contract :var/doc] :ns [:ns/form :ns/file :ns/doc] [(pointer (first k))])
         now (when content
               (cond-> {(pointer (first k)) (form-tid (:form content))}
                 (:kind content) (assoc :var/kind (:kind content))
                 (:contract content) (assoc :var/contract (:contract content))
-                (:doc content) (assoc :var/doc (:doc content))
+                (:doc content) (assoc (if (= :ns (first k)) :ns/doc :var/doc) (:doc content))
                 (:file content) (assoc :ns/file (:file content))))]
     (into (if content [(merge (def-ref k e) now) {:db/id (form-tid (:form content)) :form/id (:form content)}] [])
           (for [a attrs :let [old (get x a)] :when (and (some? old) (not (contains? now a)))]
@@ -607,7 +610,10 @@
            (map #(def-ref [:var %] (eids [:var %])) declares)
            (mapcat (fn [{v :var :keys [kind contract doc]}] (def-tx db [:var v] (eids [:var v]) {:form id :kind kind :contract contract :doc doc})) defs)
            (mapcat #(def-tx db % (eids %) {:form id}) (filter (comp #{:method :impl} first) dkeys))
-           (when ns-form? [{:db/id (ns-tid ns) :ns/form (form-tid id)}])
+           (when ns-form? [(cond-> {:db/id (ns-tid ns) :ns/form (form-tid id)} (:ns-doc acct) (assoc :ns/doc (:ns-doc acct)))])
+           ;; an ns form that no longer holds one: the docstring goes with it
+           (when-let [old (when (and ns-form? (nil? (:ns-doc acct))) (some->> (pdb/eid db :ns/name ns) (d/entity db) :ns/doc))]
+             [[:db/retract (pdb/eid db :ns/name ns) :ns/doc old]])
            (for [o superseded] [:db/retractEntity o])))))
 
 (defn record-tx
@@ -730,6 +736,8 @@
         row (when fe (form-row db fe))
         held? (and row (= now (select-keys row (keys now)))
                    (every? #(= fe (some->> (def-eid db %) (form-of db))) dkeys)
+                   ;; so a store made before a namespace held its docstring gains it
+                   (or (not (:ns-form? acct)) (= (:ns-doc acct) (some->> (pdb/eid db :ns/name (:ns acct)) (d/entity db) :ns/doc)))
                    (every? (fn [{v :var :keys [kind contract doc]}]
                              (let [x (d/entity db (def-eid db [:var v]))]
                                (and (= kind (:var/kind x)) (= contract (:var/contract x)) (= doc (:var/doc x)))))

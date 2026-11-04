@@ -50,18 +50,12 @@
         "no src namespace requires a test/ one")))
 
 (defn- src-docstrings
-  "Every docstring of src as [name doc], read from the compiler's facts: a var's :var/doc, and a namespace's
-  from its ns form (the facts hold no :ns/doc), read as data."
+  "Every docstring of src as [name doc], read from the compiler's facts: a var's :var/doc and a namespace's :ns/doc."
   []
   (let [db (runner/program-db (seon.config/checkout) (ts/kept-program-store))]
     (concat (d/q '[:find ?n ?doc :where [?v :var/name ?n] [?v :var/doc ?doc] [?v :var/form ?f] [?f :form/ns ?ns] [?ns :ns/file ?file]
                    [(clojure.string/starts-with? ?file "src/")]] db)
-            (for [[n src] (d/q '[:find ?n ?src :where [?ns :ns/name ?n] [?ns :ns/form ?f] [?f :form/src ?src] [?ns :ns/file ?file]
-                                 [(clojure.string/starts-with? ?file "src/")]] db)
-                  :let [form (binding [*read-eval* false] (read-string {:read-cond :allow :features #{:clj}} src))
-                        doc (when (seq? form) (some #(when (string? %) %) (take 2 (drop 2 form))))]
-                  :when doc]
-              [n doc]))))
+            (d/q '[:find ?n ?doc :where [?ns :ns/name ?n] [?ns :ns/doc ?doc] [?ns :ns/file ?file] [(clojure.string/starts-with? ?file "src/")]] db))))
 
 (deftest no-docstring-carries-a-date
   ;; task seon.main/docstrings-carry-no-dates-and-no-old-words: a docstring says what a var or
