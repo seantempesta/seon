@@ -8,20 +8,19 @@
 
 (def ^:private k "The test agent's key." "test-boot/a1")
 
-;; The pattern these tests of seon.ctx's machinery (patch = build, windows, sharing) run on: the run-shaped
-;; record the agent's pull had until seon.agent/the-agent-is-the-unit-not-the-run, kept as the machinery's
-;; input (runs with their task and turns; the agent's messages and windowed evals: a message is to the agent). The agent's own pattern is proved by
-;; an-agents-record-holds-its-task-and-every-turn-and-eval.
-(def ^:private run-pattern
-  "The run-shaped agent pattern the machinery tests build their records by."
-  '[* {[:seon.run/_agent :as :runs :limit :seon.config.ctx/window :reverse true] :seon.run/run-fact}
+;; The pattern these tests of seon.ctx's machinery (patch = build, windows, sharing) run on: the agent's record as its
+;; schema pulls it (its task, its model calls, evals and messages), with a window on its calls and evals, which the
+;; agent's own pattern has not. The agent's own pattern is proved by an-agents-record-holds-its-task-and-every-turn-and-eval.
+(def ^:private session-pattern
+  "The windowed agent pattern the machinery tests build their records by."
+  '[* {[:seon.agent/task :as :task] :seon.task/task-fact}
+    {[:seon.model-call/_agent :as :calls :limit :seon.config.ctx/window :reverse true] [:seon.model-call/id :seon.model-call/n :seon.model-call/origin :seon.model-call/reply]}
     {[:seon.eval/_agent :as :evals :limit :seon.config.ctx/window :reverse true] [*]}
-    {[:seon.message/_agent :as :messages :reverse true] [*]}
-    {[:seon.catch-up/_agent :as :catch-ups :limit :seon.config.ctx/window :reverse true] [*]}])
+    {[:seon.message/_agent :as :messages :reverse true] [*]}])
 
 (def ^:private small-window-pattern
-  "run-pattern with a window of 10, not :seon.config.ctx/window's 100, so a short session moves its windows."
-  (walk/postwalk-replace {:seon.config.ctx/window 10} run-pattern))
+  "session-pattern with a window of 10, not :seon.config.ctx/window's 100, so a short session moves its windows."
+  (walk/postwalk-replace {:seon.config.ctx/window 10} session-pattern))
 
 (defn- end-agent!
   "The agent state ended as a test leaves it: the walk of its render (seon.repl/render-ctx holds one
@@ -56,29 +55,28 @@
   "Eval i of the agent, as the REPL records it."
   {:malli/schema [:=> [:cat nat-int?] [:vector :map]]}
   [i] [{:seon.eval/id (str "e" i) :seon.eval/agent [:seon.agent/key k] :seon.eval/by "a1"
-        :seon.eval/code (str "(app.x/f" (mod i 3) " " i ")") :seon.eval/response (response i)}])
+        :seon.eval/code (str "(app.x/f" (mod i 3) " " i ")") :seon.eval/response (response i) :seon.eval/call-id (str "c" i)}])
 
-(defn- run-tx
-  "Run r of the agent's task, with turns of it numbered from 0 below n."
+(defn- calls-tx
+  "The agent's model calls numbered from 0 below n, ids under prefix r."
   {:malli/schema [:=> [:cat :string nat-int?] [:vector :map]]}
   [r n]
-  (into [{:seon.run/id r :seon.run/task [:seon.task/id "lab/ctx"] :seon.run/status :running :seon.run/agent [:seon.agent/key k]}]
-        (for [t (range n)] {:seon.model-call/id (str r "/" t) :seon.model-call/run [:seon.run/id r] :seon.model-call/n t
-                            :seon.model-call/reply "I will check f0 against its failing assertion, then edit it."})))
+  (vec (for [t (range n)] {:seon.model-call/id (str r "/" t) :seon.model-call/agent [:seon.agent/key k] :seon.model-call/n t
+                           :seon.model-call/reply "I will check f0 against its failing assertion, then edit it."})))
 
 (defn- seeded
   "The test store's db with the agent's record of n evals (seeded n pattern: the agent's own pattern, the schema's
-  when nil; one arity less, run-pattern): its task, citing app.x/f0 (defined, with
-  one caller) and app.x/f1 (not written yet), one run with n/3 turns and n/20 messages, written in
+  when nil; one arity less, session-pattern): its task, citing app.x/f0 (defined, with
+  one caller) and app.x/f1 (not written yet), n/3 model calls and n/20 messages, written in
   transactions of 100 evals as a session writes them."
   {:malli/schema [:function [:=> [:cat nat-int?] :seon.host/db] [:=> [:cat nat-int? [:maybe [:vector :any]]] :seon.host/db]]}
-  ([n] (seeded n run-pattern))
+  ([n] (seeded n session-pattern))
   ([n pattern]
   (let [db (:db-after (d/with (ts/test-db) (into [(cond-> {:seon.agent/key k :seon.agent/id :a1 :seon.agent/task {:seon.task/id "lab/ctx"}}
                                                      pattern (assoc :seon.ctx/pattern pattern))
                                                    {:db/id "lab/ctx" :seon.task/id "lab/ctx" :seon.task/ns 'app.x :seon.task/name "ctx" :seon.task/plan "Make app.x/f0 pass."
                                                     :seon.task/kind :work :seon.task/proofs #{'app.x-test/t0}
-                                                    :seon.task/execution :running :seon.task/branch :main/lab-ctx}
+                                                    :seon.task/execution :running :seon.task/outcome :running :seon.task/branch :main/lab-ctx}
                                                    ;; app.x is the program's (a file under src/), so the references its plan's text
                                                    ;; derives are the ones written here (seon.program/program-names)
                                                    {:ns/name 'app.x :ns/file "src/app/x.clj"}
@@ -89,11 +87,10 @@
                                                    {:db/id "t0v" :var/name 'app.x-test/t0 :var/kind :test :var/form "t0"}]
                                                   (concat
                                                    ;; what its plan cites, as the task writer writes it (seon.task/cites-tx): the page draws one part each
-                                                   (task/cites-tx (ts/test-db) "lab/ctx" "lab/ctx" (seon.ref/cited (:seon.ref/citations (seon.ref/parse nil "Make `app.x/f0` pass, then `app.x/f1`; see [the x](docs/x.md#the-x)."))))
-                                                   (run-tx "lab/ctx#1" 0)))))]
+                                                   (task/cites-tx (ts/test-db) "lab/ctx" "lab/ctx" (seon.ref/cited (:seon.ref/citations (seon.ref/parse nil "Make `app.x/f0` pass, then `app.x/f1`; see [the x](docs/x.md#the-x)."))))))))]
     (reduce (fn [db part]
               (:db-after (d/with db (vec (mapcat (fn [i] (cond-> (eval-tx i)
-                                                            (zero? (mod i 3)) (conj {:seon.model-call/id (str "lab/ctx#1/" i) :seon.model-call/run [:seon.run/id "lab/ctx#1"] :seon.model-call/agent [:seon.agent/key k] :seon.model-call/n i})
+                                                            (zero? (mod i 3)) (conj {:seon.model-call/id (str "lab/ctx/" i) :seon.model-call/agent [:seon.agent/key k] :seon.model-call/n i})
                                                             (zero? (mod i 20)) (conj {:seon.message/id (str "m" i) :seon.message/from "user"
                                                                                       :seon.message/branch :lab-ctx :seon.message/agent [:seon.agent/key k] :seon.message/body "How is it going?"})))
                                                  part)))))
@@ -108,32 +105,31 @@
                    :when (coll? x)] [p (vec (keys x))]))))
 
 (defn- change
-  "The i-th change of a session, chosen by r from what one does: an eval, a new run with turns, a
-  turn or message on a run, a run's status, the task's plan and proofs, an eval gone, the agent's
-  own attribute, a turn moved to another run, a run gone, a run's messages all gone (a unit
+  "The i-th change of a session, chosen by r from what one does: an eval, new model calls, a
+  call or message, the task's outcome, its plan and proofs, an eval gone, the agent's
+  own attribute, a call gone, the agent's task moved to another task and back, its messages all gone (a unit
   emptied)."
   {:malli/schema [:=> [:cat :seon.host/db nat-int? :any] [:vector :any]]}
   [db i ^java.util.Random r]
-  (let [runs (vec (d/q '[:find [?id ...] :where [_ :seon.run/id ?id]] db))
-        evals (vec (sort (d/q '[:find [?id ...] :where [_ :seon.eval/id ?id]] db)))
-        run (nth runs (.nextInt r (count runs)))
+  (let [evals (vec (sort (d/q '[:find [?id ...] :where [_ :seon.eval/id ?id]] db)))
         turns (vec (sort (d/q '[:find [?id ...] :where [_ :seon.model-call/id ?id]] db)))]
     (case (.nextInt r 23)
       0 (eval-tx (+ 10000 i))
-      1 (run-tx (str "lab/ctx#" (+ 2 i)) 2)
-      2 [{:seon.model-call/id (str run "/x" i) :seon.model-call/run [:seon.run/id run] :seon.model-call/n i}]
+      1 (calls-tx (str "lab/ctx/n" i) 2)
+      2 [{:seon.model-call/id (str "lab/ctx/x" i) :seon.model-call/agent [:seon.agent/key k] :seon.model-call/n i}]
       3 [{:seon.message/id (str "mx" i) :seon.message/from "user" :seon.message/branch :lab-ctx :seon.message/agent [:seon.agent/key k] :seon.message/body (str "note " i)}]
-      4 [[:db/add [:seon.run/id run] :seon.run/status (nth [:running :done :closed] (.nextInt r 3))]]
+      4 [[:db/add [:seon.task/id "lab/ctx"] :seon.task/outcome (nth [:running :parked :done] (.nextInt r 3))]]
       5 [[:db/add [:seon.task/id "lab/ctx"] :seon.task/plan (str "plan " i)]]
       6 [[(if (.nextBoolean r) :db/add :db/retract) [:seon.task/id "lab/ctx"] :seon.task/proofs (symbol "app.x-test" (str "t" (.nextInt r 3)))]]
       7 (if (seq evals) [[:db/retractEntity [:seon.eval/id (nth evals (.nextInt r (count evals)))]]] (eval-tx (+ 20000 i)))
       8 [[:db/add [:seon.agent/key k] :seon.agent/status (nth [:idle :busy] (.nextInt r 2))]]
-      9 (if (seq turns) [[:db/add [:seon.model-call/id (nth turns (.nextInt r (count turns)))] :seon.model-call/run [:seon.run/id run]]] (eval-tx (+ 30000 i)))
-      10 (if (< 1 (count runs)) [[:db/retractEntity [:seon.run/id run]]] (eval-tx (+ 40000 i)))
+      9 (if (seq turns) [[:db/retractEntity [:seon.model-call/id (nth turns (.nextInt r (count turns)))]]] (eval-tx (+ 30000 i)))
+      ;; the agent's task back to its own (after case 12 moved it)
+      10 [[:db/add [:seon.agent/key k] :seon.agent/task [:seon.task/id "lab/ctx"]]]
       12 [{:seon.task/id (str "lab/other" i) :seon.task/ns 'app.y :seon.task/name (str "other" i) :seon.task/plan "Another."
            :seon.task/kind :work :seon.task/execution :held :seon.task/branch (keyword "main" (str "lab-other" i))}
-          [:db/add [:seon.run/id run] :seon.run/task [:seon.task/id (str "lab/other" i)]]]
-      ;; what a run's derived members read: the plan's vector written, a program form written
+          [:db/add [:seon.agent/key k] :seon.agent/task [:seon.task/id (str "lab/other" i)]]]
+      ;; what the task's derived members read: the plan's vector written, a program form written
       13 (vector/tx-data [(:db/id (d/entity db [:seon.task/id "lab/ctx"]))] [i] [(mapv #(Math/sin (* (inc i) (inc %) 0.37)) (range 768))] [10] "m")
       14 [{:db/id "f" :form/id (str "app.x/g" i) :form/src (str "(defn g" i " [])")} {:var/name (symbol "app.x" (str "g" i)) :var/form "f"}]
       ;; what a task's lookups read: a cited var redefined, a new caller, the var not written yet
@@ -155,8 +151,8 @@
       ;; the agent edits its pattern: a narrower window of its evals, or its schema's again
       19 [[:db/add [:seon.agent/key k] :seon.ctx/pattern
            (if (.nextBoolean r)
-             '[* {[:seon.eval/_agent :as :evals :limit 5 :reverse true] [*]} {[:seon.run/_agent :as :runs :limit 5 :reverse true] :seon.run/run-fact}]
-             run-pattern)]]
+             '[* {[:seon.eval/_agent :as :evals :limit 5 :reverse true] [*]} {[:seon.agent/task :as :task] :seon.task/task-fact}]
+             session-pattern)]]
       ;; a window's moves in one transaction: several evals join while one it holds leaves; a member's
       ;; ref retracted and asserted again (it leaves and comes back)
       20 (into (vec (mapcat #(eval-tx (+ 70000 (* 10 i) %)) (range 3)))
@@ -171,7 +167,7 @@
 (deftest an-agents-record-holds-its-task-and-every-turn-and-eval
   ;; the owner, 2026-10-29: "get rid of runs ... by default show everything: get rid of the limits for evals and
   ;; turns; messages at the newest 100 is fine" (seon.agent/the-agent-is-the-unit-not-the-run, cut 1): the agent's
-  ;; schema pattern reaches its task directly, holds its turns and evals with no window, and has no runs or catch-ups
+  ;; schema pattern reaches its task directly, holds its turns and evals with no window, and has no catch-ups
   (let [pattern (:seon.ctx/pattern (seon.contract/properties :seon.db/agent-fact))
         joins (into {} (keep #(when (map? %) (first %))) pattern)
         db (:db-after (d/with (ts/test-db)
@@ -189,7 +185,7 @@
     (is (= 5 (count (:evals t))) "every eval")
     (is (= ["m1"] (names (:messages t) :seon.message/id)) "the messages it took")
     (is (= [] (for [[j _] joins :when (some #{:limit} j)] (first j))) "no window on its own record: every turn, eval and message (the owner: deliver all messages and errors)")
-    (is (and (not (contains? t :runs)) (not (contains? t :catch-ups))) "no runs, no catch-ups")))
+    (is (not (contains? t :catch-ups)) "no catch-ups")))
 
 (deftest an-agents-record-holds-only-its-work
   ;; the owner, 2026-10-29: "The agent's record is facts about its work. Telemetry and derived data live on their
@@ -212,7 +208,7 @@
         t (:tree (ctx/build db (aid db) :b))
         keys-in (fn keys-in [x] (cond (map? x) (concat (keys x) (mapcat keys-in (vals x))) (coll? x) (mapcat keys-in x)))]
     (is (= ["I will check f0."] (map :seon.model-call/reply (vals (:calls t)))) "the model call is in the record, with its reply")
-    (is (empty? (remove #{:seon.model-call/id :seon.model-call/n :seon.model-call/origin :seon.model-call/run :seon.model-call/reply :seon.model-call/reasoning
+    (is (empty? (remove #{:seon.model-call/id :seon.model-call/n :seon.model-call/origin :seon.model-call/reply :seon.model-call/reasoning
                           :seon.model-call/finish :seon.model-call/truncated :seon.model-call/error :seon.model-call/forms}
                         (filter #(and (keyword? %) (= "seon.model-call" (namespace %))) (keys-in t))))
         "no telemetry of a model call anywhere in the record: no tokens, sent, split, cost or model")
@@ -226,23 +222,23 @@
         "the model call's telemetry is reached by a query on it")))
 
 (deftest ctx-is-the-record-after-every-transaction
-  ;; the patch holds what a build holds, its map and its index, after each of 60 changes of a
+  ;; the patch holds what a build holds, its map and its index, after each of 70 changes of a
   ;; session's kinds (a seeded random choice, so a failure repeats), on windows of 10 so a session of 30
   ;; moves them: the map is never a second record of its own
   (let [r (java.util.Random. 25)]
-    (testing "the record holds the session: its evals keyed by id, its runs with their task, turns and messages"
+    (testing "the record holds the session: its evals keyed by id, its task, calls and messages"
       (let [db (seeded 60) t (:tree (ctx/build db (aid db) :b))]
         (is (= 60 (count (:evals t))))
-        (let [e7 (id db [:seon.eval/id "e7"]) r1 (id db [:seon.run/id "lab/ctx#1"])]
+        (let [e7 (id db [:seon.eval/id "e7"])]
           (is (= {:seon.eval/id "e7" :by "a1"} {:seon.eval/id (get-in t [:evals e7 :seon.eval/id]) :by (get-in t [:evals e7 :seon.eval/by])}))
-          (is (= "lab/ctx" (get-in t [:runs r1 :task :seon.task/id])))
-          (is (= #{'app.x-test/t0} (get-in t [:runs r1 :task :seon.task/proofs])))
-          (is (= 20 (count (get-in t [:runs r1 :calls]))))
+          (is (= "lab/ctx" (get-in t [:task :seon.task/id])))
+          (is (= #{'app.x-test/t0} (get-in t [:task :seon.task/proofs])))
+          (is (= 20 (count (:calls t))))
           (is (= #{"m20" "m40" "m60"} (set (names (:messages t) :seon.message/id)))))))
     (let [db (seeded 30 small-window-pattern)]
       (is (= 10 (count (:evals (:tree (ctx/build db (aid db) :b))))) "the window holds 10 of 30 evals"))
     (loop [db (seeded 30 small-window-pattern) c (ctx/build db (aid db) :b) i 0 bad [] unshared [] checked 0]
-      (if (= i 60)
+      (if (= i 70)
         (do (is (empty? bad) (str "the change after which the patch and a build differ: " (first bad)))
             (is (< 1000 checked) (str "the sharing check reads the paths no change touched: " checked))
             (is (empty? unshared) (str "a path no change touched that is a new object: " (first unshared))))
@@ -269,10 +265,10 @@
   (let [r (java.util.Random. 7)
         db0 (seeded 20)
         te (:db/id (d/entity db0 [:seon.task/id "lab/ctx"]))
-        re (:db/id (d/entity db0 [:seon.run/id "lab/ctx#1"]))]
+        ae (aid db0)]
     (is (= "lab/ctx" (:seon.task/id (:tree (ctx/build db0 te :main)))) "a task's record")
-    (is (seq (:calls (:tree (ctx/build db0 re :main)))) "a run's, with its joins")
-    (loop [db db0 cs {te (ctx/build db0 te :main) re (ctx/build db0 re :main)} i 0 bad []]
+    (is (seq (:calls (:tree (ctx/build db0 ae :main)))) "an agent's, with its joins")
+    (loop [db db0 cs {te (ctx/build db0 te :main) ae (ctx/build db0 ae :main)} i 0 bad []]
       (if (= i 60)
         (is (empty? bad) (str "the commit after which a followed record and a build differ: " (first bad)))
         (let [tx (change db i r) rep (d/with db tx) db' (:db-after rep)
@@ -281,9 +277,9 @@
           (recur db' cs' (inc i)
                  (into bad (for [[e c] cs' :let [b (ctx/build db' (when (seq (d/datoms db' :eavt e)) e) :main)]
                                  :when (not= c b)] [i e tx]))))))
-    (testing "a followed run retracted: its environment alone, as a build of no entity"
-      (let [rep (d/with db0 [[:db/retractEntity re]]) db' (:db-after rep)
-            c (ctx/follow (ctx/build db0 re :main) {:t (:max-tx db') :ops (pdb/report->tx rep) :db db'} :main)]
+    (testing "a followed agent retracted: its environment alone, as a build of no entity"
+      (let [rep (d/with db0 [[:db/retractEntity ae]]) db' (:db-after rep)
+            c (ctx/follow (ctx/build db0 ae :main) {:t (:max-tx db') :ops (pdb/report->tx rep) :db db'} :main)]
         (is (= (ctx/build db' nil :main) c))))))
 
 (deftest the-agents-state-keeps-ctx
@@ -514,8 +510,8 @@
           (is (contains? (ctx/diff c0 c1) [:evals (id db0 [:seon.eval/id "e7"])]) "the old one's gone"))))
     (testing "a change undone within the turn is no change"
       (let [db0 (seeded 30)
-            db1 (-> db0 (d/with [[:db/add [:seon.run/id "lab/ctx#1"] :seon.run/status :done]]) :db-after
-                    (d/with [[:db/add [:seon.run/id "lab/ctx#1"] :seon.run/status :running]]) :db-after)
+            db1 (-> db0 (d/with [[:db/add [:seon.task/id "lab/ctx"] :seon.task/outcome :done]]) :db-after
+                    (d/with [[:db/add [:seon.task/id "lab/ctx"] :seon.task/outcome :running]]) :db-after)
             c0 (ctx/build db0 (aid db0) :b)]
         (is (= {} (ctx/diff c0 (ctx/advance c0 db0 db1 :b))))))
     (testing "an eval added: its member, old nil"
@@ -524,35 +520,12 @@
         (is (= [[:evals (id db1 [:seon.eval/id "e31"])]] (keys d)))
         (is (nil? (first (val (first d)))))))))
 
-(deftest a-window-of-content-ids-is-newest-first
-  ;; a run's, turn's and message's entity id is derived from its content, so the id's order is not the
-  ;; order they were written in: the window kept the members in the order members answers them (newest
-  ;; first) and then sorted them again by id, so (first (:runs @ctx)) was the lost run after a restart
-  ;; (found live by the context session). The window holds them newest first, and a patch that adds
-  ;; one keeps it so
-  (let [db0 (seeded 3)
-        run (fn [db r] (:db-after (d/with db [{:seon.run/id r :seon.run/task [:seon.task/id "lab/ctx"] :seon.run/status :running :seon.run/agent [:seon.agent/key k]}])))
-        ;; a pair of names whose later run has the smaller id
-        [db older newer] (first (for [i (range 400)
-                                      :let [a (str "w" i "#1") b (str "w" i "#2") db (run (run db0 a) b)
-                                            ea (id db [:seon.run/id a]) eb (id db [:seon.run/id b])]
-                                      :when (< eb ea)]
-                                  [db ea eb]))]
-    (is (some? db) "a later run with a smaller id exists among the names tried")
-    (let [c (ctx/build db (aid db) :b)]
-      (is (= newer (first (keys (:runs (:tree c))))) "the newer run first, whatever its id")
-      (is (= [older] (rest (filter #{older newer} (keys (:runs (:tree c)))))) "and the older after it")
-      (testing "a run added by a patch is first, and the diff names only it"
-        (let [db2 (run db "w-third#1") c2 (ctx/advance c db db2 :b) third (id db2 [:seon.run/id "w-third#1"])]
-          (is (= third (first (keys (:runs (:tree c2))))) "the newest first after the patch")
-          (is (contains? (ctx/diff c c2) [:runs third]) "and the diff names it as the member that joined (the task, held once under the newest run, moves to its path)"))))))
-
 (deftest a-lookups-patch-costs-its-change
   ;; a task's lookups (:by) patched in the work of what moved, whatever the session's size
   ;; (measured at 100 and 1,000 evals: a redefinition 23 calls and 118 KB, a new caller 22 and
   ;; 113 KB, a plan edit 10 and 86 KB), and each names the one path it changed
   (let [changed (fn [[c db tx b]] [db (set (map second (ctx/changes c (ctx/patch c db tx b))))])
-        task #(vector :runs (id % [:seon.run/id "lab/ctx#1"]) :task)
+        task (fn [_] [:task])
         f0 #(into (task %) [:cites (id % [:seon.cite/id "lab/ctx app.x/f0"]) :var])]
     (let [[db ps] (changed (cited-redefined 10))] (is (= #{(conj (f0 db) :form)} ps) "a redefinition: the cited var's form"))
     (let [[db ps] (changed (new-caller 10))] (is (= #{(conj (f0 db) :callers (id db [:form/id "app.x/c-2"]))} ps) "a new caller: that caller"))
@@ -560,7 +533,7 @@
   (cost/proof
     {:of 'seon.ctx/patch :input 'seon.ctx-test/cited-redefined
      :n "evals in the session's record"
-     :work "the var's datoms touch its :form join: the new form pulled whole, the old forgotten; the var, task, run and agent nodes copied up the path"
+     :work "the var's datoms touch its :form join: the new form pulled whole, the old forgotten; the var, task and agent nodes copied up the path"
      :growth :constant :fixed {:calls 23 :bytes 125000} :sizes [20 60 180]})
   (cost/proof
     {:of 'seon.ctx/patch :input 'seon.ctx-test/new-caller
@@ -716,7 +689,7 @@
           c (with-meta tree {:seon.render/schema :seon.ctx/ctx})
           as-agent (fn [f] (try (reset! seon.agent/state {:db db}) (binding [ctx/*installing* true] (reset! ctx/ctx c)) (f)
                                 (finally (binding [ctx/*installing* true] (reset! ctx/ctx nil)) (end-agent!))))
-          rec (as-agent #(seon.repl/record-details "@ctx" {:handle 'result/e9 :value c} {} nil))
+          rec (as-agent #(seon.repl/record-details "@ctx" {:handle 'result/e9 :value c} {}))
           drawn (try (reset! seon.agent/state {:db db :key k :branch :b}) (seon.repl/render-ctx) (finally (end-agent!)))
           ;; the keys it added, one component (ctx-keys) holding each key's own
           steps (some #(when (= "ctx-keys" (:id %)) %) (:units drawn))]
@@ -736,8 +709,12 @@
                 styles (keep #(some-> (requiring-resolve (symbol "seon.render.ui" %)) meta :seon.render/style) classes)
                 ;; a style as the html attribute holds it, escaped
                 unstyled (fn [h] (reduce #(str/replace %1 (str " " (-> %2 (str/replace "&" "&amp;") (str/replace ">" "&gt;"))) "") h styles))]
-            (is (= (map (comp unstyled :html) shown) (map (comp unstyled seon.web.html/html) (vals page)))
-                "each component's hiccup is the html the page shows, byte for byte, but for its render's style"))
+            ;; a part that answers data (docs/render.md#a-part-answers-data) holds its data here, which the page draws by its schema's html render
+            (let [by-id (into {} (map (juxt :id :html)) shown) hiccup (filter (comp vector? val) page)]
+              (is (seq hiccup) "the components that answer hiccup")
+              (is (= (map (comp unstyled by-id key) hiccup) (map (comp unstyled seon.web.html/html val) hiccup))
+                  "each component's hiccup is the html the page shows, byte for byte, but for its render's style")
+              (is (every? #(or (vector? %) (map? %)) (vals page)) "and the rest answer their data")))
           (is (str/includes? (pr-str (get page "ctx-keys")) "read the plan") "as hiccup, exactly as its render returned it")))
       (testing "the page rebuilds the value from the branch at its basis"
         (let [db (:db-after (d/with db [(into {:seon.eval/id "e9" :seon.eval/agent [:seon.agent/key k]} rec)]))
@@ -826,7 +803,7 @@
   ;; cited vars whole with their forms (D2) and their callers, the tests among them (D1), and
   ;; what each proof calls, by name (D5: its form's :form/refs)
   (let [db (seeded 10)
-        t (get-in (:tree (ctx/build db (aid db) :b)) [:runs (id db [:seon.run/id "lab/ctx#1"]) :task])
+        t (get-in (:tree (ctx/build db (aid db) :b)) [:task])
         f0 (get-in t [:cites (id db [:seon.cite/id "lab/ctx app.x/f0"]) :var])]
     (is (= "What x does." (get-in t [:cites (id db [:seon.cite/id "lab/ctx docs/x.md#the-x"]) :section :seon.doc/text])) "D3: the cited section's text, by its address")
     (is (= "(defn f0 [x] x)" (get-in f0 [:form :form/src])) "D2: the cited var's source")
@@ -838,7 +815,7 @@
       (is (= #{'app.x/f0 'clojure.test/is} (:form/refs t0)) "D5: what the proof calls, each var by its name"))))
 
 (deftest an-agents-record-holds-its-proofs-status
-  ;; task seon.proofs/test-results-are-a-few-facts (R2a): the status an agent's run recorded on a proof's
+  ;; task seon.proofs/test-results-are-a-few-facts (R2a): the status an agent's test run recorded on a proof's
   ;; var entity (seon.proofs/result-tx) is in the agent's record under the task's :proved, where the
   ;; one layout renders it from: the pattern's wildcard reaches it
   (let [db (seeded 3 nil)
@@ -857,7 +834,7 @@
   ;; the same name reversed; the references stay the author's symbols, and a name of no var joins
   ;; nothing until the var is written
   (let [db (seeded 10)
-        t #(get-in (:tree %) [:runs (id db [:seon.run/id "lab/ctx#1"]) :task])
+        t #(get-in (:tree %) [:task])
         c (ctx/build db (aid db) :b)]
     (let [cite #(get-in (t %1) [:cites (id db [:seon.cite/id (str "lab/ctx " %2)])])]
       (is (= ['app.x/f0 'app.x/f1] (sort-by str (keep :seon.cite/name (vals (:cites (t c)))))) "the cites' names, the author's symbols")
@@ -873,13 +850,12 @@
                      db (range 2 9))]
       (is (= #{"app.x/c8" "app.x/c7" "app.x/c6"}
              (set (names (get-in (:tree (ctx/build (:db-after (d/with db [[:db/add [:seon.agent/key k] :seon.ctx/pattern
-                                                                             [(symbol "*") {[:seon.run/_agent :as :runs :limit 5 :reverse true]
-                                                                                            [(symbol "*") {[:seon.run/task :as :task]
-                                                                                                           [(symbol "*") {[:seon.cite/_of :as :cites]
-                                                                                                                          [(symbol "*") {[:seon.cite/name :by :var/name :as :var]
-                                                                                                                                         [(symbol "*") {[:form/_refs :by :var/name :as :callers :limit 3 :reverse true] [(symbol "*")]}]}]}]}]}]]]))
+                                                                             [(symbol "*") {[:seon.agent/task :as :task]
+                                                                                            [(symbol "*") {[:seon.cite/_of :as :cites]
+                                                                                                           [(symbol "*") {[:seon.cite/name :by :var/name :as :var]
+                                                                                                                          [(symbol "*") {[:form/_refs :by :var/name :as :callers :limit 3 :reverse true] [(symbol "*")]}]}]}]}]]]))
                                                    (aid db) :b))
-                                 [:runs (id db [:seon.run/id "lab/ctx#1"]) :task :cites (id db [:seon.cite/id "lab/ctx app.x/f0"]) :var :callers]) :form/id)))
+                                 [:task :cites (id db [:seon.cite/id "lab/ctx app.x/f0"]) :var :callers]) :form/id)))
           "a callers' window of three: the newest three by when each was written (a form's id is its content's)"))
     (let [refused (fn [p] (:seon.error/type (try (render/pattern p) (catch clojure.lang.ExceptionInfo e (ex-data e)))))]
       (is (= :seon.ctx/invalid-pattern (refused '[* {[:seon.cite/name :via :var/name] [*]}])) "an option neither pull's nor :by: refused, naming it")
@@ -895,7 +871,7 @@
     (let [[[_ c] db'] (step db #(swap! ctx/ctx assoc :seon.ctx/pattern '[* {[:seon.eval/_agent :as :evals :limit 3 :reverse true] [*]}]))]
       (is (= '[* {[:seon.eval/_agent :as :evals :limit 3 :reverse true] [*]}] (:seon.ctx/pattern (d/entity db' [:seon.agent/key k]))) "the pattern, on the agent's entity")
       (is (= ["e20" "e19" "e18"] (names (:evals c) :seon.eval/id)) "the record pulled by it: its three newest evals")
-      (is (nil? (:runs c)) "and nothing the pattern does not name"))
+      (is (nil? (:task c)) "and nothing the pattern does not name"))
     (let [[[r _] _] (step db #(swap! ctx/ctx assoc :seon.ctx/pattern '[* {[:seon.eval/_agent :newest 3] [*]}]))]
       (is (= :seon.ctx/invalid-pattern (:seon.error/type r)) "a pattern the walk cannot read: refused, nothing written"))))
 
@@ -920,34 +896,30 @@
         (is (not (contains? (:evals (:tree (ctx/build db' a :b))) e3)) "so the record does not hold it")
         (is (some? (:seon.eval/agent (d/entity db' [:seon.eval/id "e4"]))) "the others stay")))
     (testing "a plan's cites follow its text: what it cites written with it, by the one parser (seon.task/rederive-tx)"
-      (let [r1 (id db [:seon.run/id "lab/ctx#1"])
-            plan "Make `app.x/f0` pass; see [the y](docs/x.md#the-y)."
-            [[_ same] db'] (step db #(swap! ctx/ctx assoc-in [:runs r1 :task :seon.task/plan] plan))
+      (let [plan "Make `app.x/f0` pass; see [the y](docs/x.md#the-y)."
+            [[_ same] db'] (step db #(swap! ctx/ctx assoc-in [:task :seon.task/plan] plan))
             t (d/entity db' [:seon.task/id "lab/ctx"])]
         (is (= plan (:seon.task/plan t)))
         (is (= ['app.x/f0 "docs/x.md#the-y"] (mapv #(or (:seon.cite/name %) (:seon.cite/address %)) (task/cites-of db' (:db/id t))))
             "its cites, the new text's: the section it links now and not the one before, app.x/f0 and not app.x/f1, which it no longer cites")
         (is same "the record after the swap! is the db's, the derived facts in it")))
     (testing "a member's attribute, and a new member, written under its parent by the unit's ref"
-      (let [r1 (id db [:seon.run/id "lab/ctx#1"])
-            [[_ same] db'] (step db #(swap! ctx/ctx (fn [c] (-> c (assoc-in [:runs r1 :seon.run/status] :done)
+      (let [[[_ same] db'] (step db #(swap! ctx/ctx (fn [c] (-> c (assoc-in [:task :seon.task/reason] "waiting for you")
                                                                 (assoc-in [:messages "m-new"]
                                                                           {:seon.message/id "m-new" :seon.message/from "agent" :seon.message/body "a note to myself"})))))]
-        (is (= :done (:seon.run/status (d/entity db' [:seon.run/id "lab/ctx#1"]))))
+        (is (= "waiting for you" (:seon.task/reason (d/entity db' [:seon.task/id "lab/ctx"]))))
         (is (= (aid db) (:db/id (:seon.message/agent (d/entity db' [:seon.message/id "m-new"])))) "the new message is the agent's")
         (is same)
         (is (= "a note to myself" (get-in @ctx/ctx [:messages (id db' [:seon.message/id "m-new"]) :seon.message/body])) "the swap!'s map gave way to the db's: the new member under its id")))
     (testing "a cardinality-many attribute of a forward unit, member by member"
-      (let [[[_ same] db'] (step db #(swap! ctx/ctx update-in [:runs (id db [:seon.run/id "lab/ctx#1"]) :task :seon.task/proofs] conj 'app.x-test/t9))]
+      (let [[[_ same] db'] (step db #(swap! ctx/ctx update-in [:task :seon.task/proofs] conj 'app.x-test/t9))]
         (is (= #{'app.x-test/t0 'app.x-test/t9} (:seon.task/proofs (d/entity db' [:seon.task/id "lab/ctx"]))))
         (is same)))
-    (testing "a new member with its own unit: a run and its turn, each naming its parent"
-      (let [[[r same] db'] (step db #(swap! ctx/ctx assoc-in [:runs "lab/ctx#9"]
-                                            {:seon.run/id "lab/ctx#9" :seon.run/status :running
-                                             :calls {"lab/ctx#9/0" {:seon.model-call/id "lab/ctx#9/0" :seon.model-call/n 0 :seon.model-call/reply "begin"}}}))]
+    (testing "a new member with its own unit: a model call, naming its parent"
+      (let [[[r same] db'] (step db #(swap! ctx/ctx assoc-in [:calls "lab/ctx/new"]
+                                            {:seon.model-call/id "lab/ctx/new" :seon.model-call/n 0 :seon.model-call/reply "begin"}))]
         (is (nil? (:seon.error/type r)) (pr-str r))
-        (is (= "lab/ctx#9" (:seon.run/id (:seon.model-call/run (d/entity db' [:seon.model-call/id "lab/ctx#9/0"])))))
-        (is (= k (:seon.agent/key (:seon.run/agent (d/entity db' [:seon.run/id "lab/ctx#9"])))))
+        (is (= k (:seon.agent/key (:seon.model-call/agent (d/entity db' [:seon.model-call/id "lab/ctx/new"])))))
         (is same)))
     (testing "refused, nothing written, the record as it was: a key with no schema, a value its schema
       refuses, the environment, a reset! to what is no record"
@@ -960,18 +932,18 @@
           (is same "the record is the db's")
           (is (= (:max-tx db) (:max-tx db')) "the branch is unchanged"))))
     (testing "a cited var's source is refused, naming its definition as the way to change it"
-      (let [r1 (id db [:seon.run/id "lab/ctx#1"]) f0 (id db [:seon.cite/id "lab/ctx app.x/f0"])
-            [[r same] db'] (step db #(swap! ctx/ctx assoc-in [:runs r1 :task :cites f0 :var :form :form/src] "(defn f0 [x] (inc x))"))]
+      (let [f0 (id db [:seon.cite/id "lab/ctx app.x/f0"])
+            [[r same] db'] (step db #(swap! ctx/ctx assoc-in [:task :cites f0 :var :form :form/src] "(defn f0 [x] (inc x))"))]
         (is (= :seon.ctx/invalid (:seon.error/type r)))
         (is (str/includes? (:why (first (:invalid r))) "(in-ns 'app.x) (defn f0 ...)") (pr-str r))
         (is same)
         (is (= (:max-tx db) (:max-tx db'))))
-      (let [r1 (id db [:seon.run/id "lab/ctx#1"]) f0 (id db [:seon.cite/id "lab/ctx app.x/f0"])
-            [[r] _] (step db #(swap! ctx/ctx update-in [:runs r1 :task :cites f0] dissoc :var))]
+      (let [f0 (id db [:seon.cite/id "lab/ctx app.x/f0"])
+            [[r] _] (step db #(swap! ctx/ctx update-in [:task :cites f0] dissoc :var))]
         (is (= "a lookup's members follow :seon.cite/name: change it" (:why (first (:invalid r))))
             "no var changed in it (one gone): what the members follow, no definition named")))
     (testing "a swap! that changes nothing writes nothing, and the record stays the db's"
-      (let [[[r same] db'] (step db #(swap! ctx/ctx update :runs dissoc "nope"))]
+      (let [[[r same] db'] (step db #(swap! ctx/ctx update :calls dissoc "nope"))]
         (is (map? r))
         (is same)
         (is (= (:max-tx db) (:max-tx db')))))
@@ -991,12 +963,12 @@
 
 (deftest a-write-costs-its-change-not-the-record
   ;; a swap!'s change found in the work of what differs: a unit identical to its old self (the
-  ;; session's evals, its runs) is skipped by one identical? test, whatever its size
+  ;; session's evals, its calls) is skipped by one identical? test, whatever its size
   (cost/proof
     {:of 'seon.ctx/edits :input 'seon.ctx-test/one-write
      :n "evals in the session's record"
      :work (str "one attribute of the agent's entity changed: its keys compared once (a dozen), the one "
-                "that differs checked by its schema and written as one datom; the evals and runs units, "
+                "that differs checked by its schema and written as one datom; the evals and calls units, "
                 "identical, skipped whole: five contracted calls (edits, why and registered? for its schema, "
                 "ref-of for its value, and edits' own return); measured 5 calls, 2,709 ticks and 23,280 bytes "
                 "at 100 and at 1,000 evals")
@@ -1005,27 +977,27 @@
      :sizes [100 300 1000 3000]}))
 
 (defn swap-input
-  "The input of size n: a session of n evals as the agent's state and its record, and its run's
-  id: [state record rid], one-swap's."
+  "The input of size n: a session of n evals as the agent's state and its record:
+  [state record], one-swap's."
   {:malli/schema [:=> [:cat pos-int?] [:vector :any]]}
   [n]
   (let [st {:db (seeded n) :key k :branch :b :mode :test}]
     ;; the state's watch builds the record the swap! starts from (seon.ctx/on-state)
     (reset! seon.agent/state st)
-    [st (ctx/record) (key (first (:runs (:tree (ctx/record)))))]))
+    [st (ctx/record)]))
 
 (defn one-swap
   "One swap! of the task's plan through @ctx, from the session's state and record (set again
   each call, the state's watch, seon.ctx's, off while it is: constant work, a share of what is
   measured): write!'s edits, its d/with, the transaction applied in test mode and its patch, and
   the record installed."
-  {:malli/schema [:=> [:cat :map :map :int] :nil]}
-  [st record rid]
+  {:malli/schema [:=> [:cat :map :map] :nil]}
+  [st record]
   (remove-watch seon.agent/state :seon.ctx/ctx)
   (reset! seon.agent/state st)
   (add-watch seon.agent/state :seon.ctx/ctx @#'seon.ctx/on-state)
   (#'seon.ctx/install! record)
-  (swap! ctx/ctx assoc-in [:runs rid :task :seon.task/plan] "Make app.x/f0 pass, then f1.")
+  (swap! ctx/ctx assoc-in [:task :seon.task/plan] "Make app.x/f0 pass, then f1.")
   nil)
 
 (deftest a-swap-costs-what-it-changed
@@ -1080,18 +1052,16 @@
    :seon.eval/code (str "(f " i ")") :seon.eval/response {:handle (symbol "result" (str "e" i)) :value (vec (range (mod i 9)))} :seon.eval/prose (text (inc i) len)})
 
 (defn- record-of
-  "An agent's record shaped as ctx holds it: evals, and runs each with the task (held once, a
-  stub under the others) and its cited vars with their forms."
-  {:malli/schema [:=> [:cat [:map [:evals nat-int?] [:runs nat-int?] [:cites nat-int?] [:len pos-int?]]] :map]}
-  [{:keys [evals runs cites len]}]
-  {:db/id 1 :seon.agent/key "b/a1"
-   :evals (members (map #(an-eval % len) (range evals)))
-   :runs (members (for [r (range runs)]
-                    {:db/id (+ 100 r) :seon.run/id (str "demo/f#" r)
-                     :task (if (pos? r) {:db/id 50}
-                               {:db/id 50 :seon.task/id "demo/f" :seon.task/plan (text r (* 4 len))
-                                :cited (members (for [i (range cites)] {:db/id (+ 5000 i) :var/name (symbol "demo" (str "f" i)) :var/doc (text i 40)
-                                                                        :var/form {:db/id (+ 6000 i) :form/src (text (* 3 i) len)}}))})}))})
+  "An agent's record shaped as ctx holds it: evals, model calls, and (with task? true) the task and its cited vars
+  with their forms."
+  {:malli/schema [:=> [:cat [:map [:evals nat-int?] [:calls nat-int?] [:cites nat-int?] [:len pos-int?] [:task? {:optional true} :boolean]]] :map]}
+  [{:keys [evals calls cites len task?]}]
+  (cond-> {:db/id 1 :seon.agent/key "b/a1"
+           :evals (members (map #(an-eval % len) (range evals)))
+           :calls (members (for [r (range calls)] {:db/id (+ 100 r) :seon.model-call/id (str "demo/f/" r) :seon.model-call/n r :seon.model-call/reply (text r len)}))}
+    task? (assoc :task {:db/id 50 :seon.task/id "demo/f" :seon.task/plan (text 0 (* 4 len))
+                        :cited (members (for [i (range cites)] {:db/id (+ 5000 i) :var/name (symbol "demo" (str "f" i)) :var/doc (text i 40)
+                                                                :var/form {:db/id (+ 6000 i) :form/src (text (* 3 i) len)}}))})))
 
 (defn- edited
   "Record t after edit [kind i], sharing every subtree it does not touch, as the patch does: a new
@@ -1099,19 +1069,19 @@
   redefined, an eval gone; or an equal copy sharing nothing (a record built twice)."
   {:malli/schema [:=> [:cat :map [:tuple :keyword nat-int?]] :map]}
   [t [kind i]]
-  (let [ev (keys (:evals t)) cited (some-> (get-in t [:runs 100 :task :cited]) keys)]
+  (let [ev (keys (:evals t)) cited (some-> (get-in t [:task :cited]) keys)]
     (case kind
       :new-eval (assoc-in t [:evals (+ 1900 i)] (an-eval (+ 900 i) 60))
       :eval-edit (if (seq ev) (assoc-in t [:evals (nth ev (mod i (count ev))) :seon.eval/prose] (text i 30)) t)
-      :plan (if (get-in t [:runs 100]) (assoc-in t [:runs 100 :task :seon.task/plan] (text (+ 7 i) 200)) t)
-      :cited (if (seq cited) (assoc-in t [:runs 100 :task :cited (nth cited (mod i (count cited))) :var/form :form/src] (text i 300)) t)
+      :plan (if (:task t) (assoc-in t [:task :seon.task/plan] (text (+ 7 i) 200)) t)
+      :cited (if (seq cited) (assoc-in t [:task :cited (nth cited (mod i (count cited))) :var/form :form/src] (text i 300)) t)
       :all-evals (reduce (fn [t e] (assoc-in t [:evals e :seon.eval/prose] (text (+ e i) 30))) t ev)
       :rebuilt (walk/postwalk identity t)
       :gone (if (seq ev) (update t :evals dissoc (nth ev (mod i (count ev)))) t))))
 
 (def records
   "changes' arguments, generated: a record and the same record after 0 to 5 edits."
-  (gen/let [shape (gen/hash-map :evals (gen/choose 0 40) :runs (gen/choose 0 4) :cites (gen/choose 0 15) :len (gen/choose 10 200))
+  (gen/let [shape (gen/hash-map :evals (gen/choose 0 40) :calls (gen/choose 0 4) :cites (gen/choose 0 15) :len (gen/choose 10 200) :task? gen/boolean)
             edits (gen/vector (gen/tuple (gen/elements [:new-eval :eval-edit :all-evals :plan :cited :gone :rebuilt]) gen/nat) 0 5)]
     (let [t (record-of shape)] [t (reduce edited t edits)])))
 
@@ -1159,10 +1129,10 @@
   ;; each step of seon.ctx/change-steps measured again on the case that isolates it, as the unit
   ;; table is (seon.cost-test/the-unit-table-is-current): a bound priced from stale steps is red here
   (let [m (fn [a b] (select-keys (cost/measure ctx/changes [a b]) [:ticks :bytes]))
-        t (record-of {:evals 0 :runs 0 :cites 0 :len 10})
+        t (record-of {:evals 0 :calls 0 :cites 0 :len 10})
         per (fn [case a b] (let [x (case a) y (case b)] (into {} (for [d [:ticks :bytes]] [d (/ (- (get y d) (get x d)) (double (- b a)))]))))
         ;; a collection of n members re-made as a new map: n entries stepped past, nothing changed
-        entries-at (fn [n] (let [t (record-of {:evals n :runs 0 :cites 0 :len 10})] (m t (update t :evals #(into (empty %) %)))))
+        entries-at (fn [n] (let [t (record-of {:evals n :calls 0 :cites 0 :len 10})] (m t (update t :evals #(into (empty %) %)))))
         ;; n members of two keys each re-made: n entity pairs walked into, each two entries and four keys
         entities-at (fn [n] (let [t {:db/id 1 :evals (members (for [i (range n)] {:db/id i :a (str "v" i)}))}]
                               (m t (update t :evals #(into (empty %) (map (fn [[i e]] [i (into {} e)])) %)))))
@@ -1184,7 +1154,7 @@
                              (m t (update t :evals #(into (empty %) (map (fn [[i e]] [i (into {} e)])) %)))))
         keys-per (let [x (members-of 2) y (members-of 6)] (into {} (for [d [:ticks :bytes]] [d (/ (- (get y d) (get x d)) (* 300.0 4))])))
         ;; n evals each changed
-        changes-at (fn [n] (let [t (record-of {:evals n :runs 0 :cites 0 :len 10})] (m t (edited t [:all-evals 1]))))
+        changes-at (fn [n] (let [t (record-of {:evals n :calls 0 :cites 0 :len 10})] (m t (edited t [:all-evals 1]))))
         side (fn [x] (update-vals x #(/ % 2)))
         ;; a key or an entry is a step of one side (walk-of counts both): half of each pair's
         key (side keys-per) entry (side (per entries-at 100 1000))
@@ -1243,7 +1213,7 @@
         c (with-meta tree {:seon.render/schema :seon.ctx/ctx :seon.render/basis {:t (:t tree) :branch :b}})
         rec (fn [v] (try (reset! seon.agent/state {:db db :key k :branch :b})
                          (binding [ctx/*installing* true] (reset! ctx/ctx c))
-                         (seon.repl/record-details "x" {:handle 'result/e9 :value v} {} nil)
+                         (seon.repl/record-details "x" {:handle 'result/e9 :value v} {})
                          (finally (binding [ctx/*installing* true] (reset! ctx/ctx nil)) (end-agent!))))
         text (fn [r] (try (reset! seon.agent/state {:db db :key k :branch :b})
                           (:content (first (seon.context/eval-messages {:db db} (assoc r :seon.eval/id "e9" :seon.eval/by "a1"))))
