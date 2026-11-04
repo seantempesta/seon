@@ -10,7 +10,7 @@ Root's reconciler forks an agent for a released task and evaluates ```seon.turn/
 - the done rule refuses nothing (`:green`; all green at the start ends it with no model call);
 - `my.task/fail!` asked to stop (`:failed`, the task held for root: [tasks](tasks.md#a-refused-run-is-held-for-root));
 - a merge task's merge of main is too hairy (`:merge-failed`, [below](#a-merge-tasks-loop));
-- the turns run out (`:cap`, with the done rule's reasons as its reason): a run whose last turn waits spent its budget, so it is `:cap`, never `:waiting` (`seon.agent-test/a-run-at-its-cap-is-recorded-cap-never-waiting`);
+- the turns run out (`:cap`, with the done rule's reasons as its reason): a run whose last turn waits spent its budget, so it is `:cap`, never `:waiting` (`seon.agent-test/a-task-at-its-cap-is-recorded-cap-never-waiting`);
 - `my.turn/wait` asked to stop, or a reply made no eval call (`:waiting`);
 - the model call fails (`:error`: [model](model.md#failures)).
 

@@ -1775,7 +1775,7 @@
     (is (some #{"(my.turn/wait)"} sent-codes) (str "it sent the model's own eval: " (pr-str sent-codes) " of " (pr-str r)))
     (is (not-any? #(str/includes? % "seon.turn/work!") sent-codes) (pr-str sent-codes))))
 
-(deftest a-run-at-its-cap-is-recorded-cap-never-waiting
+(deftest a-task-at-its-cap-is-recorded-cap-never-waiting
   ;; root, 2026-10-26: a run whose last turn waits spent its budget, so it ends :cap, which a
   ;; live view reads as the budget spent, not as a wait for a message; a wait before the cap is
   ;; :waiting, and the agent's own fail! at the cap is :failed (its verdict holds the task)
