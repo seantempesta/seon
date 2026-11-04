@@ -430,7 +430,7 @@
   pattern spec s, as transaction data (:tx), what its schemas refuse (:invalid) and the paths it
   writes (:paths): each attribute set, retracted or, cardinality many, each member added or
   retracted; each reverse join's member new (its attributes and its own joins, the same way from
-  nothing, naming its parent by the join's ref, its identity in its value), gone (retracted whole)
+  nothing, naming its parent by the join's ref, its identity in its value), gone (its ref to this entity retracted, the member kept: a removal unlinks, and a swap! can bring it back)
   or changed (the same, one level down); a forward join's entity changed in place. A join
   identical to its old self is skipped by one identical?; one that differs is walked member by
   member, each identical member skipped the same way. A member a lookup (:by) holds follows the
@@ -490,7 +490,7 @@
                                                  (update :named assoc (conj path k) t)))
                                   :else (edits db sub o m (:db/id o) (conj path k) acc))))
                             acc (or nm {}))
-                 (reduce-kv (fn [acc k o] (if (contains? nm k) acc (-> acc (update :tx conj [:db/retractEntity (:db/id o)]) (update :paths conj (conj path k)))))
+                 (reduce-kv (fn [acc k o] (if (contains? nm k) acc (-> acc (update :tx conj [:db/retract (:db/id o) attr e]) (update :paths conj (conj path k)))))
                             acc (or om {})))
              (many? db j)
              (reduce (fn [acc k] (let [o (get om k) m (get nm k)]

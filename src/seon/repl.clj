@@ -405,7 +405,7 @@
                        md (when (:ns-form? l) (not-empty (dissoc (meta (second (:repl/form m))) :line :column)))
                        _ (when md (alter-meta! (the-ns (:ns-after l)) merge md))
                        acct (when (and l (= :agent (:mode @agent/state)) (:repl/src m))
-                              (program/account (assoc l :src (:repl/src m) :lead (:lead m) :form (:repl/form m) :ran? (contains? m :repl/value))))
+                              (program/account (assoc l :src (:repl/src m) :lead (:lead m) :form (:repl/form m) :ns-meta md :ran? (contains? m :repl/value))))
                        ;; a def beside calls stays this eval (seon.program/definition-form?), and says so
                        nested? (and acct (not (program/definition-form? (:repl/form m) (the-ns (:ns l)))))
                        acct (when-not nested? acct)]
