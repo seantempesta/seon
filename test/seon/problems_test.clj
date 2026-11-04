@@ -117,7 +117,7 @@
         cs (proofs/costs run)]
     (is (= #{'app.t/red 'app.t/f-cost} (set (keys fs))))
     (is (= 9 (count (get fs 'app.t/red))) "every failing assertion of a test is kept")
-    (is (contract/valid? :seon.run/failures fs))
+    (is (contract/valid? :seon.task/failures fs))
     (is (= "(= 3 0)" (:expected (first (get fs 'app.t/red)))) "printed by the one printer")
     (is (= {'app.t/f-cost {:rows [] :verdict verdict}} cs) "a cost proof's rows and verdict, as data")))
 
@@ -178,14 +178,14 @@
 
 (deftest root-records-what-went-wrong-in-an-agent
   ;; the one producer of what is wrong (root's problems tile, seon.render.ui/problems-tile, reads only what is recorded):
-  ;; root records a red run of an agent with no task, and a refused spawn
+  ;; root records a red test run of an agent with no task, and a refused spawn
   (let [view {:agents {:a1 {:status :idle} :a2 {:status :idle :task "t/x"}}}
         red {:pass 1 :fail 1 :error 0 :reports [{:type :pass :var "#'app.t/ok"} {:type :fail :var "#'app.t/red"}]}
         written (fn [[_ o]] (mapv (juxt :seon.error/class :seon.error/type :seon.error/message :seon.error/last-agent) (first (writes o))))]
     (testing "a red run of an agent with no task"
       (is (= [[:agent :seon.agent/failed "tests red: #'app.t/red" :a1]]
              (written (step (api view) :back {:op :status :agent :a1 :set {:tests red}})))))
-    (testing "a task's agent: its run records its reds at its end, not root"
+    (testing "a task's agent: it records its reds at its end, not root"
       (is (= [] (written (step (api view) :back {:op :status :agent :a2 :set {:tests red}})))))
     (testing "a refused spawn, of any agent"
       (is (= [[:agent :seon.agent/failed "fork server went down before the fork" :a2]]
@@ -233,36 +233,36 @@
     (is (retracts? (second (step st :back {:op :spoke :agent :a1}))) "retracted when it speaks")
     (is (retracts? (second (step st :back {:op :status :agent :a1 :set {:status :dead}}))) "and when it ends")))
 
-(deftest a-stall-in-a-live-run-makes-one-task-for-root
+(deftest a-stall-in-a-live-task-makes-one-task-for-root
   ;; owner, 2026-10-26: no push; a stall "becomes a task for root to deal with, from a template":
-  ;; the first write of a stall in a live run writes one task (seon.template/stall), its cause
-  ;; pre-filled with the stall, its proofs the boundary conditions; a later stall of the same run
-  ;; writes none (one per agent and run), and an agent working no run gets none
+  ;; the first write of a stall in a live task writes one task (seon.template/stall), its cause
+  ;; pre-filled with the stall, its proofs the boundary conditions; a later stall of the same task
+  ;; writes none (one per agent and task), and an agent working no task gets none
   (let [db (world)
-        view {:agents {:a1 {:status :busy :pid 77 :task "demo/t" :run "demo/t#1"} :a2 {:status :busy :pid 78}}}
+        view {:agents {:a1 {:status :busy :pid 77 :task "demo/t"} :a2 {:status :busy :pid 78}}}
         stalled (fn [ag] {:op :stalled :agent ag
                           :error (contract/error :seon.agent/stalled 'seon.agent-proc/agent-in (str "agent " (name ag) " sent nothing for 4000 ms with a request in flight")
                                                  {:agent ag :quiet-ms 4000 :last-op {:kind :tests :form "#'app.t/hangs"}})})
         tasks (fn [o] (filter :seon.task/id (into [] cat (writes o))))
         [_ o1] (step (assoc (api view) :conn (atom db)) :back (stalled :a1))
         [t] (tasks o1)]
-    (is (= ["root/stall-a1-demo-t-1"] (mapv :seon.task/id (tasks o1))) "one task, named for the agent and its run")
-    (is (= {:agent :a1 :run "demo/t#1" :quiet-ms 4000 :pid 77 :last-op {:kind :tests :form "#'app.t/hangs"}} (dissoc (get-in t [:seon.task/cause :stall]) :api))
+    (is (= ["root/stall-a1-demo-t"] (mapv :seon.task/id (tasks o1))) "one task, named for the agent and its task")
+    (is (= {:agent :a1 :task "demo/t" :quiet-ms 4000 :pid 77 :last-op {:kind :tests :form "#'app.t/hangs"}} (dissoc (get-in t [:seon.task/cause :stall]) :api))
         "its cause pre-filled with the stall")
     (is (= {:open [] :prove nil} (get-in t [:seon.task/cause :stall :api]))
         "and what the api held then: no ask open, no report from the test service yet")
     (is (= [:held "outside" seon.template/stall-proofs] [(:seon.task/execution t) (:seon.task/model t) (set (:seon.task/proofs t))])
         "held, for an outside worker, its proofs the boundary conditions")
     (is (empty? (tasks (second (step (assoc (api view) :conn (atom (d/db-with db (vec (tasks o1))))) :back (stalled :a1)))))
-        "a later stall of the same run writes none")
-    (is (empty? (tasks (second (step (assoc (api view) :conn (atom db)) :back (stalled :a2))))) "an agent working no run: none")))
+        "a later stall of the same task writes none")
+    (is (empty? (tasks (second (step (assoc (api view) :conn (atom db)) :back (stalled :a2))))) "an agent working no task: none")))
 
 (deftest a-stall-tasks-evidence-is-captured-while-it-is-stuck
   ;; the evening audit (a6's hang left no evidence: the root restarted and the process went with
   ;; it): the stall task's first write asks for the stuck process's evidence (the :evidence effect,
   ;; seon.fx/stall-evidence), and its answer's files are written into the task's cause on main
   (let [db (world)
-        view {:agents {:a1 {:status :busy :pid 77 :task "demo/t" :run "demo/t#1"}}}
+        view {:agents {:a1 {:status :busy :pid 77 :task "demo/t"}}}
         st (assoc (api view) :conn (atom db) :system {:procs {:fx/evidence {}}})
         stalled {:op :stalled :agent :a1
                  :error (contract/error :seon.agent/stalled 'seon.agent-proc/agent-in "agent a1 sent nothing for 4000 ms with a request in flight"
@@ -274,7 +274,7 @@
         [_ o2] (step (assoc st :conn (atom db)) :back {:dest (:dest ask) :r {:value {:dir "/x" :files files}}})
         [[_ _ attr cause]] (filter #(and (vector? %) (= :seon.task/cause (nth % 2 nil))) (into [] cat (writes o2)))]
     (is (= 77 (get-in ask [:req :pid])) "asked for the stuck process")
-    (is (str/ends-with? (get-in ask [:req :dir]) "/stalls/stall-a1-demo-t-1") "its files under the runs directory's stalls/, by the task")
+    (is (str/ends-with? (get-in ask [:req :dir]) "/stalls/stall-a1-demo-t") "its files under the runs directory's stalls/, by the task")
     (is (= :seon.task/cause attr))
     (is (= files (:evidence cause)) "the evidence's files on the task's cause")
     (is (= :a1 (get-in cause [:stall :agent])) "beside the stall it was captured for")))
@@ -390,54 +390,57 @@
     (testing "the reconciler's commit: a failed :git, then the next merge's sha"
       (let [git (assoc (contract/error :seon.fx/io-error 'seon.fx/git-commit "git commit: index.lock exists" {}) :seon.fx/at-ms 2000)
             db0 (world)
-            db (d/db-with db0 (err/asked-tx db0 git :seon.run/commit [{:seon.run/id "r1" :seon.run/commit-error (:seon.error/message git)}]))
-            fixed (d/db-with db (err/asked-tx db {:value {:sha "abc"}} :seon.run/commit [{:seon.run/id "r2" :seon.run/commit "abc"}]))]
+            db (d/db-with db0 (err/asked-tx db0 git :seon.task/commit [{:seon.task/id "t/r1" :seon.task/commit-error (:seon.error/message git)}]))
+            fixed (d/db-with db (err/asked-tx db {:value {:sha "abc"}} :seon.task/commit [{:seon.task/id "t/r2" :seon.task/commit "abc"}]))]
         (is (= 1 (count (rows db))))
         (is (open? db) "a failed commit writes no sha: open")
         (is (false? (:open? (first (rows fixed)))) "the next merge's commit writes one: closed")))
     (testing "an error the asker made itself (no owner's stamp) writes its fact alone"
-      (is (= [{:a 1}] (err/asked-tx (world) (contract/error :seon.fx/io-error 'my.root/gate! "no gate checkout" {}) :seon.run/deferred-results [{:a 1}]))))
+      (is (= [{:a 1}] (err/asked-tx (world) (contract/error :seon.fx/io-error 'my.root/gate! "no gate checkout" {}) :seon.task/deferred-results [{:a 1}]))))
     (.setReadable (java.io.File. co "a.clj") true)
     (run! #(.delete ^java.io.File %) (reverse (file-seq (.getParentFile co))))))
 
 ;; ---- the read -----------------------------------------------------------------------------
 
+(defn- ended
+  "Task tid (a work task) as its work ended: m, the :seon.task/* of how (its outcome, failures, error), by the agent
+  b/a1, which ended at ms 2 (an agent holds its own end; the task points to it)."
+  {:malli/schema [:=> [:cat :string :map] :map]}
+  [tid m]
+  (merge {:seon.task/id tid :seon.task/ns 't :seon.task/name (subs tid 2) :seon.task/plan "p" :seon.task/execution :running
+          :seon.task/branch :b :seon.task/kind :work
+          :seon.task/agent {:seon.agent/key "b/a1" :seon.agent/id :a1 :seon.agent/ended-ms 2}}
+         m))
+
 (defn- seeded
-  "A main db with n recorded errors, n red runs and n dead runs over a task each,
-  plus k clean tasks with green runs (the program the read must not cost), on the world (my.test)."
+  "A main db with n recorded errors, n red tasks and n dead tasks (each ended by its agent), plus k clean
+  tasks done (the program the read must not cost), on the world (my.test)."
   [n k]
   (let [db (world)
         f (reduce err/fold {} (for [i (range n)] (err/occurrence {:seon.error/type :seon.agent/eval-error :seon.error/operation 'seon.repl/eval-code
                                                                   :seon.error/message (str "Unable to resolve symbol: s" (char (+ 97 (mod i 26))) i) :class "x"}
                                                                  :eval {:agent :a1 :task "t/x0"} 100)))
-        [_ tx] (err/flush-tx f db)
-        att (fn [tid aid m] (merge {:seon.run/id aid :seon.run/task [:seon.task/id tid] :seon.run/boot "b" :seon.run/agent {:seon.agent/key "b/a1" :seon.agent/id :a1}
-                                    :seon.run/start-ms 1 :seon.run/end-ms 2 :seon.run/branch :b :seon.run/max-turns 2} m))
-        task (fn [tid] {:seon.task/id tid :seon.task/ns 't :seon.task/name (subs tid 2) :seon.task/plan "p" :seon.task/execution :running
-                        :seon.task/branch :b :seon.task/kind :work})]
+        [_ tx] (err/flush-tx f db)]
     (d/db-with (d/db-with db tx)
-               (vec (concat (for [i (range k)] (task (str "t/c" i)))
-                            (for [i (range k)] (att (str "t/c" i) (str "t/c" i "#1") {:seon.run/status :done :seon.run/outcome :green}))
-                            (for [i (range n)] (assoc (task (str "t/r" i)) :seon.task/proofs #{'app.t/red}))
-                            (for [i (range n)] (att (str "t/r" i) (str "t/r" i "#1")
-                                                    {:seon.run/status :closed :seon.run/outcome :cap
-                                                     :seon.run/failures {'app.t/red [{:type :fail :message "m" :expected "1" :actual "2"}]}}))
-                            (for [i (range n)] (task (str "t/d" i)))
-                            (for [i (range n)] (att (str "t/d" i) (str "t/d" i "#1")
-                                                    {:seon.run/status :dead :seon.run/reason "its agent died"
-                                                     :seon.run/error (contract/error :seon.agent/died 'seon.root/end-agent "agent a1 died" {:agent :a1})})))))))
+               (vec (concat (for [i (range k)] (ended (str "t/c" i) {:seon.task/outcome :done}))
+                            (for [i (range n)] (ended (str "t/r" i)
+                                                      {:seon.task/proofs #{'app.t/red} :seon.task/outcome :cap
+                                                       :seon.task/failures {'app.t/red [{:type :fail :message "m" :expected "1" :actual "2"}]}}))
+                            (for [i (range n)] (ended (str "t/d" i)
+                                                      {:seon.task/outcome :dead :seon.task/reason "its agent died"
+                                                       :seon.task/error (contract/error :seon.agent/died 'seon.root/end-agent "agent a1 died" {:agent :a1})})))))))
 
-(deftest a-cancelled-tasks-run-problems-close
+(deftest a-cancelled-tasks-problems-close
   (let [db (seeded 2 1)
         red (fn [db] (get-in (problems/report db) [:classes :red :rows]))
         dead (fn [db] (get-in (problems/report db) [:classes :dead :rows]))]
-    (is (every? :open? (red db)) "a red run of a task still to be worked is open")
+    (is (every? :open? (red db)) "a red task still to be worked is open")
     (is (every? :open? (dead db)))
     (let [cancelled (d/db-with db [{:seon.task/id "t/r0" :seon.task/execution :cancelled}
                                    {:seon.task/id "t/d0" :seon.task/execution :cancelled}])
           open (fn [rows task] (:open? (first (filter #(= task (:task %)) rows))))]
-      (is (false? (open (red cancelled) "t/r0")) "the cancelled task's red run closes")
-      (is (false? (open (dead cancelled) "t/d0")) "and its dead run")
+      (is (false? (open (red cancelled) "t/r0")) "the cancelled task's red row closes")
+      (is (false? (open (dead cancelled) "t/d0")) "and its dead row")
       (is (true? (open (red cancelled) "t/r1")) "another task's stays open"))))
 
 (defn- measured-health [db]
@@ -465,7 +468,7 @@
     (is (= 3 (count (get-in r [:classes :dead :rows]))))
     (let [red (first (get-in r [:classes :red :rows]))]
       (is (= ['app.t/red] (:proofs red)) "the failing test reproduces it")
-      (is (= {:from (:run red) :red ['app.t/red]} (select-keys (:evidence red) [:from :red])) "evidence as data")
+      (is (= {:from (:task red) :red ['app.t/red]} (select-keys (:evidence red) [:from :red])) "evidence as data")
       (is (= 't (:owner-ns red)))
       (is (:open? red)))
     (let [e (first (get-in r [:classes :eval :rows]))]
@@ -475,16 +478,13 @@
       (is (some? s)))
     (testing "a merge: its conflicts, unmerged keys and the writer's refused answer, as evidence"
       (let [behind (contract/error :seon.merge/behind 'seon.writer/merge-refused "main changed 2 key(s)" {:behind 2})
-            db2 (:db-after (d/with db [{:seon.task/id "t/m" :seon.task/ns 't :seon.task/name "m" :seon.task/plan "p" :seon.task/execution :running
-                                         :seon.task/branch :b :seon.task/kind :merge}
-                                        {:seon.run/id "t/m#1" :seon.run/task [:seon.task/id "t/m"] :seon.run/boot "b" :seon.run/agent {:seon.agent/key "b/a2" :seon.agent/id :a2}
-                                         :seon.run/start-ms 1 :seon.run/end-ms 9 :seon.run/branch :b :seon.run/max-turns 2
-                                         :seon.run/status :behind :seon.run/unmerged ["[:var app/g]"]
-                                         :seon.run/conflicts [{:seon.merge/key [:var 'app/f] :seon.merge/kind :both-modified}]
-                                         :seon.run/error behind}]))
+            db2 (:db-after (d/with db [(ended "t/m" {:seon.task/kind :merge :seon.task/agent {:seon.agent/key "b/a2" :seon.agent/id :a2 :seon.agent/ended-ms 9}
+                                                     :seon.task/outcome :behind :seon.task/unmerged #{"[:var app/g]"}
+                                                     :seon.task/conflicts [{:key [:var 'app/f] :kind :both-modified}]
+                                                     :seon.task/error behind})]))
             [m] (get-in (problems/report db2) [:classes :merge :rows])]
-        (is (= ["t/m#1" :behind 1 ["[:var app/g]"] 'seon.writer/merge-refused]
-               [(:run m) (:status m) (:conflicts m) (:unmerged m) (:producer m)]))
+        (is (= ["t/m" :behind 1 ["[:var app/g]"] 'seon.writer/merge-refused]
+               [(:task m) (:status m) (:conflicts m) (:unmerged m) (:producer m)]))
         (is (= [{:key [:var 'app/f] :kind :both-modified}] (get-in m [:evidence :conflicts])))
         (is (= :seon.merge/behind (get-in m [:error :seon.error/type])))))
     (testing "a task whose evidence names a problem answers it: mining files no duplicate"
@@ -503,9 +503,9 @@
 
 (deftest problems-reads-only-the-problems
   (cost/proof {:of 'seon.problems/report :input 'seon.problems-test/rows-input
-               :n "recorded problems of each class (per n: one signature, one red run, one dead run)"
-               :work (str "one index seek per class, then per row one pull: the signature's 13 attributes; a run's 12 and "
-                          "its task's 2 (a nested pull), and one status pull to know whether its task is done; about 500 "
+               :n "recorded problems of each class (per n: one signature, one red task, one dead task)"
+               :work (str "one index seek per class, then per row one pull: the signature's 13 attributes; a task's "
+                          "outcome attributes and its agent's 2 (a nested pull), and one status pull to know whether it is done; about 500 "
                           "characters of EDN read (example, failures, error)")
                :growth :linear
                :ops {:db/pull 7 :db/pull-attr 38 :edn/read-char 500}
@@ -514,54 +514,49 @@
                :overrun {:task "seon.problems/report-beyond-its-pulls" :measured {:ns 218794000.0 :bytes 227801600.0}}}))
 
 (defn clean-input
-  "The flatness proof's input at k: 4 problems of each class over k clean tasks, each with a
-  green run."
+  "The flatness proof's input at k: 4 problems of each class over k clean tasks, each done."
   [k] [(seeded 4 k)])
 
 (defn- diff [base head] (apply concat (d/datoms-diff base head :eavt [])))
 
 (defn history-input
   "The flatness proof's input at k: the health of main with 4 problems of each class beside k finished
-  tasks, each with a merged run as production writes it (judge-tx records its cost verdict and its
-  waste too), then main one run later: [health base head moved]."
+  tasks, each merged by an agent of its own as production writes it (judge-tx records its cost verdict and its
+  waste too), then main one task's ending later: [health base head moved]."
   [k] (let [base (d/db-with (world)
-                            (vec (concat
-                                  (for [i (range k)] {:seon.task/id (str "t/h" i) :seon.task/ns 't :seon.task/name (str "h" i) :seon.task/plan "p"
-                                                      :seon.task/execution :running :seon.task/branch :b :seon.task/kind :work})
-                                  (for [i (range k)] {:seon.run/id (str "t/h" i "#1") :seon.run/task [:seon.task/id (str "t/h" i)] :seon.run/boot "b"
-                                                      :seon.run/agent {:seon.agent/key "b/a1" :seon.agent/id :a1} :seon.run/start-ms 1 :seon.run/end-ms 2
-                                                      :seon.run/branch :b :seon.run/max-turns 2 :seon.run/status :merged :seon.run/outcome :green
-                                                      :seon.run/costs {'app.t/cheap {:verdict {:ok? true :under []} :rows []}}
-                                                      :seon.run/waste {:turns 1}}))))
-            head (d/db-with base [{:seon.run/id "t/h0#2" :seon.run/task [:seon.task/id "t/h0"] :seon.run/boot "b"
-                                   :seon.run/agent {:seon.agent/key "b/a1" :seon.agent/id :a1} :seon.run/start-ms 3 :seon.run/end-ms 4
-                                   :seon.run/branch :b :seon.run/max-turns 2 :seon.run/status :merged :seon.run/outcome :green}])]
+                            (vec (for [i (range k)]
+                                   (ended (str "t/h" i)
+                                          {:seon.task/agent {:seon.agent/key (str "b/h" i) :seon.agent/id (keyword (str "h" i)) :seon.agent/ended-ms 2}
+                                           :seon.task/outcome :merged
+                                           :seon.task/costs {'app.t/cheap {:verdict {:ok? true :under []} :rows []}}
+                                           :seon.task/waste {:turns 1}}))))
+            head (d/db-with base [{:seon.agent/key "b/h0" :seon.agent/ended-ms 4}
+                                  {:seon.task/id "t/h0" :seon.task/merged-t 7}])]
         [(problems/health base) base head (diff base head)]))
 
 (defn own-input
   "The proof's input at k: a db with k finished tasks beside the agent of one: [db agent-entity]."
   [k] (let [[_ base] (history-input k)
-            ;; one agent of its own with its one run, as production has (the others' shared agent holds k runs)
-            db (d/db-with base [{:seon.run/id "t/h0#own" :seon.run/task [:seon.task/id "t/h0"] :seon.run/boot "b" :seon.run/start-ms 1 :seon.run/branch :b
-                                 :seon.run/max-turns 2 :seon.run/status :running
-                                 :seon.run/agent {:seon.agent/key "b/own" :seon.agent/id :own :seon.agent/task [:seon.task/id "t/h0"]}}])]
+            ;; one agent working a task, as production has beside the others' ended ones
+            db (d/db-with base [{:seon.agent/key "b/own" :seon.agent/id :own :seon.agent/boot "b" :seon.agent/started-ms 1 :seon.agent/branch :b
+                                 :seon.agent/max-turns 2 :seon.agent/task [:seon.task/id "t/h0"]}])]
         [db (pdb/eid db :seon.agent/key "b/own")]))
 
 (deftest an-agents-own-problems-cost-nothing-for-the-history
   (cost/proof {:of 'seon.problems/own :input 'seon.problems-test/own-input
-               :n "finished tasks, each with a merged run, beside the agent asked for"
-               :work "the newest run's pull, its task's, and the error signatures' last-task datoms: none per finished task"
+               :n "finished tasks, each merged by an agent of its own, beside the agent asked for"
+               :work "the agent's task's pull (its outcome, agent and attributes), and the error signatures' last-task datoms: none per finished task"
                :growth :constant
                :ops {:db/pull 0 :db/pull-attr 0 :edn/read-char 0}
                :fixed {:ticks 85000 :bytes 320000 :calls 4}
                :sizes [10 30 100]}))
 
 (deftest problems-move-at-the-cost-of-what-changed
-  ;; main moves by one run while its finished history grows: the health of the move reads the run it
-  ;; touched, not the history (health-moved; report read every run's cost verdict and waste)
+  ;; main moves by one task's ending while its finished history grows: the health of the move reads the task it
+  ;; touched, not the history (health-moved; report read every task's cost verdict and waste)
   (cost/proof {:of 'seon.problems/health-moved :input 'seon.problems-test/history-input
-               :n "finished tasks, each with a merged run carrying a cost verdict and waste"
-               :work "no pull and no contracted call per finished task: the move's datoms (given, the render proc's) name the touched run and its task's runs, the derived classes are carried and read where the two dbs differ; the program's changes come from the moved datoms (seon.merge/delta-changes given them), and the per-task part is the cold index nodes the task scans touch"
+               :n "finished tasks, each merged with a cost verdict and waste"
+               :work "no pull and no contracted call per finished task: the move's datoms (given, the render proc's) name the touched task and its agent's task, the derived classes are carried and read where the two dbs differ; the program's changes come from the moved datoms (seon.merge/delta-changes given them), and the per-task part is the cold index nodes the task scans touch"
                :growth :linear
                :per-n {:ticks 1700 :bytes 10500 :calls 0}
                :fixed {:ticks 650000 :bytes 3000000 :calls 54}
@@ -569,7 +564,7 @@
 
 (deftest problems-cost-nothing-for-a-clean-program
   (cost/proof {:of 'seon.problems/report :input 'seon.problems-test/clean-input
-               :n "clean tasks (each with a green run), beside 4 problems of each class"
+               :n "clean tasks (each done), beside 4 problems of each class"
                :work "none per clean task: the indexes the read seeks hold only problem rows; the 4 problem sets cost what they cost"
                :growth :constant
                :ops {:db/pull 28 :db/pull-attr 152 :edn/read-char 2000}
@@ -617,56 +612,44 @@
     (is (nil? (:truncated? (model/parse-reply (body "stop") 9.0 4096))) "a reply that stopped on its own is not cut")))
 
 (deftest another-tasks-unfinished-proof-is-not-a-problem
-  ;; T5's real run: one run's run reports every program test, so 210 rows named other
+  ;; T5's real run: one agent's test run reports every program test, so 210 rows named other
   ;; tasks' proofs not done yet (allowed reds); only the task's own proofs are its problems
   (ts/test-branch! (fn [_ conn]
-    (d/transact conn [{:seon.task/id "t/a" :seon.task/ns 't :seon.task/name "a" :seon.task/plan "p" :seon.task/execution :running
-                       :seon.task/branch :b :seon.task/kind :work :seon.task/proofs #{'app.t/a-test}}])
-    (d/transact conn [{:seon.run/id "t/a#1" :seon.run/task [:seon.task/id "t/a"] :seon.run/boot "b" :seon.run/agent {:seon.agent/key "b/a1" :seon.agent/id :a1}
-                       :seon.run/start-ms 1 :seon.run/end-ms 2 :seon.run/branch :b :seon.run/max-turns 2
-                       :seon.run/status :ended :seon.run/outcome :red
-                       :seon.run/failures {'app.t/a-test [{:type :fail :expected "1" :actual "2"}]
-                                               'app.t/other-test [{:type :fail :expected "3" :actual "4"}]}}])
+    (d/transact conn [(ended "t/a" {:seon.task/proofs #{'app.t/a-test} :seon.task/outcome :cap
+                                    :seon.task/failures {'app.t/a-test [{:type :fail :expected "1" :actual "2"}]
+                                                         'app.t/other-test [{:type :fail :expected "3" :actual "4"}]}})])
     (is (= ['app.t/a-test] (mapv :test (get-in (problems/report @conn) [:classes :red :rows])))))))
 
-(deftest a-lost-run-is-a-death
-  ;; task seon.render/one-owner-per-view-path (A1): the failed run statuses are the
+(deftest a-lost-task-is-a-death
+  ;; task seon.render/one-owner-per-view-path (A1): the failed outcomes are the
   ;; declared set (:seon.status/failed), not a literal in the reader
   (let [db (:db-after (d/with (seeded 1 5)
-                              [{:seon.task/id "t/l" :seon.task/ns 't :seon.task/name "l" :seon.task/plan "p" :seon.task/execution :running
-                                :seon.task/branch :l :seon.task/kind :work}
-                               {:seon.run/id "t/l#1" :seon.run/task [:seon.task/id "t/l"] :seon.run/boot "b" :seon.run/agent {:seon.agent/key "b/a9" :seon.agent/id :a9}
-                                :seon.run/start-ms 1 :seon.run/end-ms 9 :seon.run/branch :l :seon.run/max-turns 2
-                                :seon.run/status :lost}]))
+                              [(ended "t/l" {:seon.task/branch :l :seon.task/outcome :lost
+                                             :seon.task/agent {:seon.agent/key "b/a9" :seon.agent/id :a9 :seon.agent/ended-ms 9}})]))
         rows (get-in (problems/report db) [:classes :dead :rows])]
-    (is (= :lost (:status (first (filter #(= "t/l#1" (:run %)) rows)))))
-    (is (not-any? #(= "t/l#1" (:run %)) (get-in (problems/report db) [:classes :error :rows])))))
+    (is (= :lost (:status (first (filter #(= "t/l" (:task %)) rows)))))
+    (is (not-any? #(= "t/l" (:task %)) (get-in (problems/report db) [:classes :error :rows])))))
 
 (deftest a-merge-with-its-process-tests-unrun-is-an-open-problem
   ;; owner's ruling, 2026-10-23: a change that reaches process tests merges with them unrun
   ;; unless root asked; unknown stays visible, an open :unrun row, until each is recorded
   ;; passing (my.root/gate! runs them): one passing of two, or a red, keeps it open
   (let [att (fn [extra] (:db-after (d/with (seeded 1 5)
-                                           [{:seon.task/id "t/u" :seon.task/ns 't :seon.task/name "u" :seon.task/plan "p" :seon.task/execution :running
-                                             :seon.task/branch :u :seon.task/kind :merge}
-                                            (merge {:seon.run/id "t/u#1" :seon.run/task [:seon.task/id "t/u"] :seon.run/boot "b" :seon.run/agent {:seon.agent/key "b/a9" :seon.agent/id :a9}
-                                                    :seon.run/start-ms 1 :seon.run/end-ms 9 :seon.run/branch :u :seon.run/max-turns 2
-                                                    :seon.run/status :merged :seon.run/deferred ['seon.root-test/boots 'seon.check-test/clean]}
-                                                   extra)])))
+                                           [(ended "t/u" (merge {:seon.task/branch :u :seon.task/kind :merge :seon.task/outcome :merged
+                                                                 :seon.task/agent {:seon.agent/key "b/a9" :seon.agent/id :a9 :seon.agent/ended-ms 9}
+                                                                 :seon.task/deferred #{'seon.root-test/boots 'seon.check-test/clean}}
+                                                                extra))])))
         rows #(get-in (problems/report %) [:classes :unrun :rows])]
-    (is (= [["t/u#1" "merged with 2 process tests unrun" true]] (mapv (juxt :run :reason :open?) (rows (att {})))))
-    (is (= 1 (count (rows (att {:seon.run/deferred-results [{:seon.proof/test 'seon.root-test/boots :seon.proof/status :pass}]}))))
+    (is (= [["t/u" "merged with 2 process tests unrun" true]] (mapv (juxt :task :reason :open?) (rows (att {})))))
+    (is (= 1 (count (rows (att {:seon.task/deferred-results {'seon.root-test/boots :pass}}))))
         "one of two recorded: still open")
-    (is (= 1 (count (rows (att {:seon.run/deferred-results [{:seon.proof/test 'seon.root-test/boots :seon.proof/status :pass}
-                                                                {:seon.proof/test 'seon.check-test/clean :seon.proof/status :fail}]}))))
+    (is (= 1 (count (rows (att {:seon.task/deferred-results {'seon.root-test/boots :pass 'seon.check-test/clean :fail}}))))
         "a red among them: still open")
-    (is (= [] (rows (att {:seon.run/deferred-results [{:seon.proof/test 'seon.root-test/boots :seon.proof/status :pass}
-                                                         {:seon.proof/test 'seon.check-test/clean :seon.proof/status :pass}]})))
+    (is (= [] (rows (att {:seon.task/deferred-results {'seon.root-test/boots :pass 'seon.check-test/clean :pass}})))
         "each passing: the row closes")
     (is (= [{:ns 'app.repl-only :reason "no :ns/file on the branch: its forms were never written to a file"}]
-           (:unread (first (rows (att {:seon.run/deferred-results [{:seon.proof/test 'seon.root-test/boots :seon.proof/status :error}
-                                                                       {:seon.proof/test 'seon.check-test/clean :seon.proof/status :error}]
-                                       :seon.run/gate-unread [{:ns 'app.repl-only :reason "no :ns/file on the branch: its forms were never written to a file"}]})))))
+           (:unread (first (rows (att {:seon.task/deferred-results {'seon.root-test/boots :error 'seon.check-test/clean :error}
+                                       :seon.task/gate-unread [{:ns 'app.repl-only :reason "no :ns/file on the branch: its forms were never written to a file"}]})))))
         "a gate that could not read a changed namespace names it, and why, on the open row")))
 
 ;; ---- derived: a dead citation is true while it is true (docs/health.md) ----
@@ -987,9 +970,8 @@
                   (and (= (set (keys (:classes whole))) (set (keys (:classes moved))))
                        (every? #(= (set (get-in whole [:classes % :rows])) (set (get-in moved [:classes % :rows])))
                                (keys (:classes whole))))))
-        task {:seon.task/id "t/x" :seon.task/ns 't :seon.task/name "x" :seon.task/plan "p" :seon.task/execution :running :seon.task/branch :b :seon.task/kind :work :seon.task/proofs #{'t-test/x}}
-        run (fn [n status] {:seon.run/id (str "t/x#" n) :seon.run/task [:seon.task/id "t/x"] :seon.run/boot "b" :seon.run/agent {:seon.agent/key "b/a1" :seon.agent/id :a1}
-                            :seon.run/start-ms 1 :seon.run/end-ms n :seon.run/branch :b :seon.run/max-turns 2 :seon.run/status status})]
+        died (ended "t/x" {:seon.task/proofs #{'t-test/x} :seon.task/outcome :dead :seon.task/reason "its agent died"
+                           :seon.task/error (contract/error :seon.agent/died 'seon.root/end-agent "agent a1 died" {:agent :a1})})]
     (is (same? db1 db1) "nothing moved")
     (testing "an old word added to a section opens a row, and editing it closes it"
       (let [bad (d/db-with db1 (seon.doc/load-tx db1 "demo" {"demo/p.md" (str page "\nA lane of work.\n")}))
@@ -997,9 +979,9 @@
         (is (same? db1 bad))
         (is (pos? (get-in (problems/health-moved (problems/health db1) db1 bad (diff db1 bad)) [:classes :old-word :n])))
         (is (same? bad fixed))))
-    (testing "a run that died opens a problem, and a later run that finished its task closes it"
-      (let [db2 (d/db-with db1 [task (assoc (run 1 :dead) :seon.run/reason "its agent died" :seon.run/error (contract/error :seon.agent/died 'seon.root/end-agent "agent a1 died" {:agent :a1}))])
-            db3 (d/db-with db2 [(assoc (run 2 :merged) :seon.run/outcome :green)])]
+    (testing "a task whose agent died opens a problem, and a later wake that finished it closes it"
+      (let [db2 (d/db-with db1 [died])
+            db3 (d/db-with db2 [{:seon.task/id "t/x" :seon.task/outcome :merged}])]
         (is (same? db1 db2))
         (is (pos? (get-in (problems/health-moved (problems/health db1) db1 db2 (diff db1 db2)) [:classes :dead :n])))
         (is (same? db2 db3))
@@ -1026,10 +1008,10 @@
             both (d/db-with linking (seon.doc/load-tx linking "demo" {"demo/p.md" (str page "\nSee [q](q.md).\n") "demo/q.md" "# Q\n\nLead.\n"}))]
         (is (same? db1 linking))
         (is (same? linking both))))
-    (testing "an answer added to an untouched run's row is carried current"
-      (let [db2 (d/db-with db1 [task (assoc (run 1 :dead) :seon.run/reason "its agent died" :seon.run/error (contract/error :seon.agent/died 'seon.root/end-agent "agent a1 died" {:agent :a1}))])
+    (testing "an answer added to an untouched task's row is carried current"
+      (let [db2 (d/db-with db1 [died])
             db3 (d/db-with db2 [{:seon.task/id "fix/x" :seon.task/ns 'fix :seon.task/name "x" :seon.task/plan "p" :seon.task/execution :held
-                                 :seon.task/branch :f :seon.task/kind :work :seon.task/evidence {:kind :run :from "t/x#1"}}])
+                                 :seon.task/branch :f :seon.task/kind :work :seon.task/evidence {:kind :error :from "t/x"}}])
             moved (problems/health-moved (problems/health db2) db2 db3 (diff db2 db3))
             whole (problems/health db3)]
         (is (= (get-in whole [:classes :dead :rows]) (get-in moved [:classes :dead :rows])))))))
@@ -1202,7 +1184,7 @@
 
 (defn- uncited-fixture
   "A db of design/implement pairs for the uncited-task proofs: [db rows-fn]. Each pair is
-  [name design-plan & more design keys]; every design step has a finished run (its implement step
+  [name design-plan & more design keys]; every design step is a finished task (its implement step
   is ready) unless named in not-done."
   [pairs not-done]
   (let [db (world)
@@ -1217,15 +1199,15 @@
                [(apply decl n :design plan more)
                 (decl (str n "-impl") :implement "" :seon.task/needs #{(str "app/" n)} :seon.task/proofs #{})])
         stub (str "(deftest stub (is false \"" seon.task/placeholder-assertion "\"))")
-        done (first (:seon.status/finished (contract/properties :seon.run/status)))
+        done (first (:seon.status/finished (contract/properties :seon.task/outcome)))
         tx (seon.task/create-tx db0 (vec (mapcat pair pairs)))]
     (d/db-with db0 (concat tx [{:db/id -1 :var/name 'app-test/stub :var/form -2} {:db/id -2 :form/id "f-stub" :form/src stub}
                                {:db/id -3 :var/name 'app-test/real :var/form -4} {:db/id -4 :form/id "f-real" :form/src "(deftest real (is (= 1 1)))"}]
                               (for [[n] pairs :when (not (not-done n))]
-                                {:seon.run/task [:seon.task/id (str "app/" n)] :seon.run/status done})))))
+                                {:seon.task/id (str "app/" n) :seon.task/outcome done})))))
 
 (defn uncited-input
-  "The cost proof's input at n: n design steps (a finished run, a plan citing a var) and an
+  "The cost proof's input at n: n design steps (a finished task, a plan citing a var) and an
   implement step each, all ready and fine."
   [n] (let [v 'app.calc/inc2]
         [(uncited-fixture (for [i (range n)] [(str "t" i) (str "It changes `" v "`.")]) #{}) {}]))
