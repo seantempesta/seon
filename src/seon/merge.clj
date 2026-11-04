@@ -80,7 +80,7 @@
       :var (cond-> (assoc c :kind (:var/kind x))
              (:var/contract x) (assoc :contract (:var/contract x))
              (:var/doc x) (assoc :doc (:var/doc x)))
-      :ns (cond-> c (:ns/file x) (assoc :file (:ns/file x)))
+      :ns (cond-> c (:ns/file x) (assoc :file (:ns/file x)) (:ns/doc x) (assoc :doc (:ns/doc x)))
       c)))
 
 (defn- section-content

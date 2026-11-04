@@ -355,6 +355,30 @@
     (is (= [{:var 'app.pt-doc/told :kind :fn :doc "the file's own doc"}] (:defs (first accounts)))
         "the account of the file's form holds the file's docstring")))
 
+(deftest a-namespace-holds-its-docstring
+  ;; a namespace's docstring was never written: readers (seon.ref's help, seon.render.ui/cite-model) answered nil. It is
+  ;; written where a var's is, from the ns form as it reads: an agent's eval and an import, and it moves with the form
+  (let [doc (fn [db n] (some->> (seon.db/eid db :ns/name n) (d/entity db) :ns/doc))
+        db1 (record (empty-db) 'user "(ns app.pt-nd \"First words.\")")
+        db2 (record db1 'user "(ns app.pt-nd \"Second words.\")")
+        db3 (record db2 'user "(ns app.pt-nd)")
+        m (record (empty-db) 'user "(ns app.pt-nm {:doc \"From its attr map.\"})")
+        ;; an import, read from a file's text and run through the one account
+        imported (d/db-with (empty-db) (source/text-tx (empty-db) 'app.pt-ni "(ns app.pt-ni \"The file's words.\")\n(defn f [] 1)\n" "src/app/pt_ni.clj"))]
+    (is (= "First words." (doc db1 'app.pt-nd)) "an agent's own ns form")
+    (is (= "Second words." (doc db2 'app.pt-nd)) "redefined, the new words")
+    (is (nil? (doc db3 'app.pt-nd)) "a form that holds none: none")
+    (is (= "From its attr map." (doc m 'app.pt-nm)) "an attr map's")
+    (is (= "The file's words." (doc imported 'app.pt-ni)) "an import")
+    (let [{:keys [accounts]} (source/accounts 'app.pt-ni "(ns app.pt-ni \"The file's words.\")\n(defn f [] 1)\n")
+          older (d/db-with imported [[:db/retract (seon.db/eid imported :ns/name 'app.pt-ni) :ns/doc "The file's words."]])
+          healed (d/db-with older (mapcat #(program/account-diff-tx older %) accounts))]
+      (is (= "The file's words." (doc healed 'app.pt-ni)) "a store made before this gains it, on an unchanged file"))
+    (let [base (empty-db)
+          r (pm/three-way (pm/program base #{}) (pm/program db1 #{}) (pm/program base #{}))
+          main (d/db-with base (pm/merge-tx base base db1 (keys (:ours r)) #{}))]
+      (is (= "First words." (doc main 'app.pt-nd)) "merged, with its form"))))
+
 (deftest defmethod-extend-and-defrecord-merge-and-load-on-main
   (let [base (empty-db)
         branch (record base
