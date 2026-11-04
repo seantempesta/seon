@@ -44,6 +44,7 @@ The no-runs schema is built on `jolt/simpler-schema` and unmerged (a task holds 
 | The core | A var call a render can't draw is silently left as a call; the rule conflicts with the structure view | ``seon.render/a-var-call-a-render-cannot-draw-says-why`` |
 | The core | Two page cost proofs measure a page with no task, and their :work says they draw one | ``seon.cost/a-page-proof-draws-the-task-it-says-it-draws``: its bound rises, so it is the owner's |
 | The core | When the source import fails, the store refuses root's source fact over a sorted map | ``seon.root/a-source-fact-the-store-refuses-loses-nothing`` |
+| Before the core | A wake that ran no turn reads the previous wake's end: a death borrows its words, and a throw before the first turn can park the task and lose the message that woke it | ``seon.reconcile/a-wake-that-ran-no-turn-has-no-end`` |
 | The core | The debug page draws a branch by main's code, and root's walk a branch's layout by main's | ``seon.render/the-debug-page-reads-a-branchs-own-renders``, ``seon.render/roots-walk-of-a-branch-draws-the-branchs-layout`` |
 | The core | Status repeats every failure in full: 22 reds, 32k tokens a turn | ``seon.context/the-status-declares-its-summary`` |
 | The core | After a layout changes, old parts stay on the page for a pass | ``seon.render/a-layout-change-leaves-no-old-parts``: trace it first |
