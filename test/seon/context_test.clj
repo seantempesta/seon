@@ -1085,7 +1085,14 @@
         before (runs)]
     (is (pos? before) "the status was drawn")
     (step! walk [{:seon.turn/id "demo/r#1/0" :seon.turn/agent [:seon.agent/key "demo/a1"] :seon.turn/run [:seon.run/id "demo/r#1"] :seon.turn/n 0 :seon.turn/origin :model}])
-    (is (= before (runs)) "a turn taken moved nothing of how the work stands")))
+    (is (= before (runs)) "a turn taken moved nothing of how the work stands"))
+  ;; a design task's plan-before is its run's, which its first turn names: its status does read the turn
+  (let [[db te] (sections-near "Make ```demo/g``` say one thing.")
+        [w :as walk] (walked (d/db-with db [[:db/add te :seon.task/kind :design]]))
+        runs #(let [l (get (render/ledger w) 'seon.render.ui/status)] (+ (:miss l 0) (:same l 0)))
+        before (runs)]
+    (step! walk [{:seon.turn/id "demo/r#1/0" :seon.turn/agent [:seon.agent/key "demo/a1"] :seon.turn/run [:seon.run/id "demo/r#1"] :seon.turn/n 0 :seon.turn/origin :model}])
+    (is (< before (runs)) "a design task's first turn runs it again")))
 
 (deftest a-cited-var-redefined-shows-in-the-next-view
   ;; the task's data is a render, never held: a var the plan cites redefined (the agent's defn, or main
