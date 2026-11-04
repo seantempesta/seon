@@ -14,6 +14,10 @@ The owner's rulings of 2026-11-04, on what an agent is and how everything it rea
 
 "You can change how data is connected to each other and rename it and change directions on what is ref'ing what. We have full control so make a system that will work generally and optimally one way and make it so it's easier to build things the optimal way ... This isn't do anything you want it's a more rails style batteries included but you follow these constraints." Stated in: [the idea](seon-way.md#the-idea).
 
+### Store data for how it is used; a turn is a number (owner, 2026-11-04)
+
+"Whatever data we need you can store it any way you need to to retrieve it efficiently. That's how these databases work best. You plan ahead for how you want to use it and make sure that's easy and cheap". And: "I'm saying \"wtf is a turn\" but a number? An agent has turns and evals why are we organizing them on top of other entities". Stated in: [what needs to change](seon-way.md#what-needs-to-change).
+
 ### A render asks for the db and queries what it wants (owner, 2026-11-04)
 
 "We assemble an agent why can't we add some data that triggers a render function to get the data you want and render it? The render functions get the curretn db if they ask for it so you can do any query you want and it doesn't have to be reachable from the agent directly". Stated in: [the rules](seon-way.md#the-rules).

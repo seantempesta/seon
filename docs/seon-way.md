@@ -6,7 +6,7 @@ Everything an agent reads, and everything a person sees of it, is data on the ag
 
 Make all data known, validate it, and make it easy to process for whatever the user needs. The owner: "The fact that the agent's pull is what makes an agent an agent is what makes it render the UI and which parts go where."
 
-This is Rails-style, batteries included: there is one way, it is the easy way, and the constraints are the point. Before adding a mechanism, ask whether a schema, a pattern and a render do it. Before fixing a problem, ask whether it is the cause or a consequence of something else being wrong, and remove the cause (`docs/decisions.md#a-bug-is-a-class-remove-what-allowed-it-owner-2026-11-03`). The data's shape is ours to change: rename attributes, add refs, reverse their direction; the standing store is test data, so no change of shape needs a migration.
+This is Rails-style, batteries included: there is one way, it is the easy way, and the constraints are the point. Store data for how it will be used, so that use is easy and cheap, and do not organize things on top of other entities when a value on the record says it. Before adding a mechanism, ask whether a schema, a pattern and a render do it. Before fixing a problem, ask whether it is the cause or a consequence of something else being wrong, and remove the cause (`docs/decisions.md#a-bug-is-a-class-remove-what-allowed-it-owner-2026-11-03`). The data's shape is ours to change: rename attributes, add refs, reverse their direction; the standing store is test data, so no change of shape needs a migration.
 
 ## The flow
 
@@ -65,7 +65,7 @@ A live test agent tried each of these by data alone, on the 2026-11-04 tip of th
 - Examples as a set of refs, added mid-session: 24 real messages sent, and the same pull draws the list.
 - Re-rendering when a declared render, or a helper it calls, is redefined. The prototype watched 665 vars for 736 ms once, so the real one should read the program's reach index, measured.
 - Reset to a turn's commit with the same key: the record, program and layout of that point, a further turn taken, and the source agent untouched.
-- A turn tree: one real session's evals, grouped by their turn and flattened, reproduce the actual order.
+- A turn as a number on each record: one query reads a session (about 1 ms at 26 records) in the transcript's order, on a session mixing a model's turns, a message and outside evals. Writing it on new evals, and moving replies off the turn entity, are not yet tried.
 - The debug view made by the live agent: it shows the branch's own renders, which root's rebuild cannot.
 - A status summary: 22 red tests went from 32k tokens to 2k.
 
@@ -75,7 +75,7 @@ These are the known departures from the rules, in the order of the work, each wi
 
 **Facts nobody writes, so code guesses:**
 - ``:ns/doc`` is declared and read but never written: all 148 namespaces were empty.
-- Nothing says which turn an eval or a message belongs to, so ``seon.render.ui/turn-evals`` infers it from write order. A turn should own them, making the conversation one tree. Its call ids already hold the turn. Messages and evals from outside a model turn are not yet tried.
+- Nothing says which turn an eval or a message belongs to, so ``seon.render.ui/turn-evals`` infers it from write order. A turn is a number, not an entity: each record carries it, and the conversation is one query, ordered by turn, messages first, then evals. What a turn entity holds today moves to where it belongs: a reply is a record, and what a call cost is on the model call. ``:seon.turn/n`` restarts each run, one more reason runs should go.
 
 **Assembly outside the render system:**
 - ``seon.context/request`` assembles the transcript. It should be a declared model render on the agent, answering a transcript schema, called by the turn, the debug page and the judge.

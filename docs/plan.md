@@ -25,7 +25,7 @@ What Seon is for, where it stands, the one step being worked now, and the steps 
 
 **The baselines,** six tasks at f19afd9d35, two runs: 2 of 6 and 3 of 6 green. Identical runs of one task went from capped at 40 turns to green in 9, so a one-task difference means little.
 
-**Waiting on the owner:** how merged model renders are gated, what becomes of ``:printed``, erasing ``runs/store`` at the core's merge, how strictly a merge refuses a way around the rules, the default render's shape, and whether a turn owning its records goes ahead.
+**Waiting on the owner:** how merged model renders are gated, what becomes of ``:printed``, erasing ``runs/store`` at the core's merge, how strictly a merge refuses a way around the rules, and the default render's shape.
 
 ## Where it stands (2026-11-03)
 
