@@ -70,7 +70,7 @@
   "The failing assertions of the test run, per test: {test [{:type :message :expected :actual}]}, with the
   value the test got (:got) and a typed error's :seon.error/type, so a red reused at its digest reads as its run did;
   every one of each (expected and actual as the test child printed them)."
-  {:malli/schema [:=> [:cat [:map [:reports [:sequential {:gen/max 4} :seon.test/report]]]] :seon.run/failures]}
+  {:malli/schema [:=> [:cat [:map [:reports [:sequential {:gen/max 4} :seon.test/report]]]] :seon.task/failures]}
   [test-run]
   (reduce (fn [acc {:keys [type var] :as r}]
             (let [t (test-symbol var)]
@@ -81,7 +81,7 @@
 
 (defn costs
   "The cost proofs' reports of the test run, per test ({:rows :verdict}, kept as data)."
-  {:malli/schema [:=> [:cat [:map [:reports [:sequential {:gen/max 4} :seon.test/report]]]] :seon.run/costs]}
+  {:malli/schema [:=> [:cat [:map [:reports [:sequential {:gen/max 4} :seon.test/report]]]] :seon.task/costs]}
   [test-run]
   (into {} (for [{:keys [var cost]} (:reports test-run) :let [t (test-symbol var)] :when (and t cost)] [t cost])))
 

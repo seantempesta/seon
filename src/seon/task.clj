@@ -239,11 +239,6 @@
              (into (for [{p :e} (d/datoms db :aevt :seon.process/running)] [:db.fn/retractAttribute p :seon.process/running]))
              (into (for [{p :e} (d/datoms db :aevt :seon.process/stall)] [:db.fn/retractAttribute p :seon.process/stall])))))
 
-(defn run-id
-  "Task id's nth run's id: runs are numbered from 1, in the order they start."
-  {:malli/schema [:=> [:cat :seon.task/id pos-int?] :seon.run/id]}
-  [id n] (str id "#" n))
-
 (defn agent-key
   "Agent id's key in root's boot: its entity's identity (:seon.agent/key), one per agent per
   boot, since an id like :a3 starts again each boot."
@@ -258,14 +253,13 @@
 (defn this-boots
   "Agent entity e's id when it is an agent of root's boot on main db, else nil: an id like :a3
   starts again each boot, so only this boot's names a process root holds. Its key is that
-  boot's, or it is a session's agent a process of this boot continues (a run of this boot is
-  its: seon.task/session-key), read from the agent's runs: O(the session's runs)."
+  boot's, or it is a session's agent a process of this boot continues (it was started in this boot:
+  its :seon.agent/boot, seon.task/start-tx)."
   {:malli/schema [:=> [:cat :seon.host/db :any] [:maybe :keyword]]}
   [db e]
   ;; e an entity of main (its key: a walk shows only an agent's relevant attributes)
   (let [id (:seon.agent/id e) boot (boot-of db)]
-    (when (and id boot (or (= (:seon.agent/key e) (agent-key boot id))
-                           (some #(= boot (:seon.run/boot %)) (:seon.run/_agent e))))
+    (when (and id boot (or (= (:seon.agent/key e) (agent-key boot id)) (= boot (:seon.agent/boot e))))
       id)))
 
 (def ^:private agent-attrs
@@ -287,13 +281,12 @@
   [ps] (some->> (seq (filter :seon.process/forked-ms ps)) (apply max-key :seon.process/forked-ms)))
 
 (defn session-key
-  "The agent key of task id's session on db, or nil when none of its runs has had an agent: the
+  "The agent key of task id's session on db, or nil when none of its chain has had an agent: the
   session is id and the tasks on its branch it needs, transitively (a request's stages, a work
-  task and its merge: design agent-loop section 1a), and its agent is the agent of the newest
-  run among them. A run started for the session continues it, so its conversation and messages
-  go on across runs (seon.context/records). One process at a time holds it: a session is one
-  branch, and root refuses a spawn on a branch a live agent holds. Reads the chain's tasks and
-  their runs."
+  task and its merge: design agent-loop section 1a), and its agent is the newest started among
+  the chain's tasks' agents (:seon.task/agent). Work started for the session continues it, so its
+  conversation and messages go on (seon.context/records). One process at a time holds it: a session is one
+  branch, and root refuses a spawn on a branch a live agent holds. Reads the chain's tasks."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/id] [:maybe :string]]}
   [db id]
   (let [e0 (d/entity db [:seon.task/id id])
@@ -305,11 +298,10 @@
                     (recur (conj seen (:db/id e)) (into (rest todo) (filter #(= br (:seon.task/branch %)) (:seon.task/needs e)))))
                   seen))
         newest (->> chain
-                    (mapcat #(:seon.run/_task (d/entity db %)))
-                    (filter :seon.run/agent)
-                    (sort-by #(:seon.run/start-ms % 0))
+                    (keep #(:seon.task/agent (d/entity db %)))
+                    (sort-by #(:seon.agent/started-ms % 0))
                     last)]
-    (some-> newest :seon.run/agent :seon.agent/key)))
+    (:seon.agent/key newest)))
 
 (defn agent-tx
   "What root observes of agent id in its boot, as facts: on the agent's entity the root that
@@ -357,56 +349,68 @@
   [(cond-> {:seon.message/id mid :seon.message/kind kind :seon.message/from from :seon.message/body body}
      br (assoc :seon.message/branch br))])
 
-(defn run-start-tx
-  "A run begins: root observed it spawn agent id agent in its boot (nil: root refused the
-  spawn, and no agent exists), given the task's accumulated plan. The run refs the agent's
-  entity, named by its key in that boot (seon.task/agent-key) and holding its id, so a read of
-  the run names its agent before root has recorded anything else of it."
-  {:malli/schema [:function [:=> [:cat :seon.run/id :seon.task/id :string [:maybe :keyword] :seon.task/env :int :seon.task/plan] [:vector :map]]
-                  [:=> [:cat :seon.run/id :seon.task/id :string [:maybe :keyword] :seon.task/env :int :seon.task/plan [:maybe :string]] [:vector :map]]]}
-  ;; key: the session's agent the run continues (seon.task/session-key); nil, the agent's
-  ;; own key in this boot
-  ([aid task boot agent env start-ms plan] (run-start-tx aid task boot agent env start-ms plan nil))
-  ([aid task boot agent {:keys [branch model max-turns holder]} start-ms plan key]
-  (let [k (when agent (or key (agent-key boot agent)))]
-    (filterv some?
-             [(cond-> {:seon.run/id aid :seon.run/task [:seon.task/id task] :seon.run/status :running
-                       :seon.run/boot boot :seon.run/start-ms start-ms
-                       :seon.run/branch branch :seon.run/max-turns max-turns :seon.run/plan plan}
-                k (assoc :seon.run/agent k)
-                model (assoc :seon.run/model model)
-                holder (assoc :seon.run/holder holder))
-              ;; the agent its own entity map, so it takes its content id (Datahike's content-tempids);
-              ;; its tempid is its key, unique in a transaction that starts several runs
-              (when k {:db/id k :seon.agent/key k :seon.agent/id agent})]))))
+(def judged-attrs
+  "The attributes root sets on a task when they happen (its judging, seon.reconcile/judge-tx; its refusal), and so
+  retracts when they did not: otherwise an earlier end's error or deferred results read as this one's. Beside
+  :seon.task/reasons, which a start keeps (the same verdict twice holds, seon.reconcile/judgment) and a person's
+  continue retracts (my.root/run!). See docs/reconcile.md#a-task-holds-how-its-work-ended."
+  [:seon.task/reason :seon.task/commit :seon.task/commit-error :seon.task/merged-t :seon.task/error :seon.task/deferred
+   :seon.task/deferred-results :seon.task/gate-unread :seon.task/changed :seon.task/conflicts :seon.task/unmerged
+   :seon.task/task-conflicts :seon.task/failures :seon.task/costs :seon.task/waste])
 
-(defn status-tx
-  "Move run aid from status `from` to `to` (Datahike's compare-and-swap: a racing
-  observer that already moved it leaves it), with the observed members m."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.run/id :seon.run/status :seon.run/status :map] [:vector :any]]}
-  [db aid from to m]
-  (let [e (pdb/eid db :seon.run/id aid)]
-    (into [[:db/cas e :seon.run/status from to]]
-          (when (seq m) [(assoc m :db/id e)]))))
+(defn outcome-tx
+  "The write that moves task id's outcome from `from` to `to` (Datahike's compare-and-swap: a racing observer, a
+  cancel or a newer start that moved it leaves it, and refuses the whole write), setting the judged attributes
+  that are in want (a map of :seon.task/* members, with :seon.task/reasons among them when judged) and retracting every other
+  that db holds, as seon.program/def-tx does. See docs/reconcile.md#a-task-holds-how-its-work-ended."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id [:maybe :seon.task/outcome] :seon.task/outcome :map] [:vector :any]]}
+  [db id from to want]
+  (let [e (pdb/eid db :seon.task/id id)
+        attrs (cond-> judged-attrs (contains? want :seon.task/reasons) (conj :seon.task/reasons))]
+    (into [[:db/cas [:seon.task/id id] :seon.task/outcome from to]]
+          (entity-tx db e attrs (cond-> want (empty? (:seon.task/reasons want [nil])) (dissoc :seon.task/reasons))))))
 
-(defn end-members
-  "The observed members of a run's end (proto.agents/end), as attributes: a count
-  nobody measured (no end written, a reply without usage) is absent, never 0."
-  {:malli/schema [:=> [:cat :seon.turn/end :int :int] :map]}
-  [{:keys [outcome turns model-calls tokens results uncontracted reason conflicts unmerged changed deferred caused behind]} end-ms basis-t]
-  (cond-> {:seon.run/outcome outcome :seon.run/basis-t basis-t :seon.run/end-ms end-ms
-           :seon.run/results (vec (for [[t s] results] {:seon.proof/test t :seon.proof/status s}))}
-    turns (assoc :seon.run/turns turns)
-    model-calls (assoc :seon.run/model-calls model-calls)
-    tokens (assoc :seon.run/tokens tokens)
-    (seq uncontracted) (assoc :seon.run/uncontracted (vec uncontracted))
-    (seq conflicts) (assoc :seon.run/conflicts (mapv pm/conflict-tx conflicts))
-    (seq unmerged) (assoc :seon.run/unmerged (vec unmerged))
-    (seq changed) (assoc :seon.run/changed (vec changed))
-    (seq deferred) (assoc :seon.run/deferred (vec deferred))
-    (seq caused) (assoc :seon.run/caused (vec caused))
-    (some-> behind pos?) (assoc :seon.run/behind behind)
-    reason (assoc :seon.run/reason reason)))
+(defn move-tx
+  "The write that moves task id's outcome from `from` to `to` after its judging (compare-and-swap, as outcome-tx), setting the
+  members m beside it and retracting nothing: what judging stored of the task (its deferred tests, its changed keys) stays
+  for the merge, the gate and the problems that read it."
+  {:malli/schema [:=> [:cat :seon.task/id [:maybe :seon.task/outcome] :seon.task/outcome :map] [:vector :any]]}
+  [id from to m]
+  (cond-> [[:db/cas [:seon.task/id id] :seon.task/outcome from to]]
+    (seq m) (conj (assoc m :seon.task/id id))))
+
+(defn start-tx
+  "Agent `agent` (its id; nil: root refused the spawn, and no agent exists) begins task id in root's boot: the task's
+  outcome :running from what it was, naming the agent (key: the session's agent it continues, seon.task/session-key; nil, its own in
+  this boot), the judged attributes cleared; the agent's entity (key, id, task, branch and the rest of its environment,
+  its boot and when it started), its turn budget set only when it is new (a raised budget stays, docs/turn.md#the-cap).
+  A refused spawn is the task's outcome :refused with root's reason and error, and no agent."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.task/id :string [:maybe :keyword] :seon.task/env :int] [:vector :map]]
+                  [:=> [:cat :seon.host/db :seon.task/id :string [:maybe :keyword] :seon.task/env :int [:maybe :string]] [:vector :map]]]}
+  ([db id boot agent env start-ms] (start-tx db id boot agent env start-ms nil))
+  ([db id boot agent {:keys [branch model max-turns holder]} start-ms key]
+   (let [k (when agent (or key (agent-key boot agent)))
+         ae (when k (d/entity db [:seon.agent/key k]))
+         from (:seon.task/outcome (d/entity db [:seon.task/id id]))]
+     (into (outcome-tx db id from :running {})
+           (filterv some?
+                    [(when k {:seon.task/id id :seon.task/agent k})
+                     (when k (cond-> {:db/id k :seon.agent/key k :seon.agent/id agent :seon.agent/task [:seon.task/id id]
+                                      :seon.agent/branch branch :seon.agent/boot boot :seon.agent/started-ms start-ms}
+                               model (assoc :seon.agent/model model)
+                               holder (assoc :seon.agent/holder holder)
+                               (not (:seon.agent/max-turns ae)) (assoc :seon.agent/max-turns max-turns)))
+                     (when (and ae (not model) (:seon.agent/model ae)) [:db.fn/retractAttribute [:seon.agent/key k] :seon.agent/model])
+                     (when (and ae (not holder) (:seon.agent/holder ae)) [:db.fn/retractAttribute [:seon.agent/key k] :seon.agent/holder])
+                     (when (and ae (:seon.agent/ended-ms ae)) [:db.fn/retractAttribute [:seon.agent/key k] :seon.agent/ended-ms])])))))
+
+(defn refused-tx
+  "Root refused to spawn task id's agent (the typed error e: the branch is held, or too many live agents): the task's outcome
+  :refused with root's reason and the error, from what it was; no agent is made."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id :map] [:vector :any]]}
+  [db id e]
+  (outcome-tx db id (:seon.task/outcome (d/entity db [:seon.task/id id])) :refused
+              {:seon.task/reason (:seon.error/message e) :seon.task/error e}))
 
 (defn carry-tx
   "The task content (seon.merge/carried-platform-attrs) branch changed since base, carried
@@ -417,7 +421,7 @@
   A set member (the proofs) is compared and written as a set. Answers {:tx :conflicts [{:task
   :attr :base :ours :theirs}]}. Cost: the carried datoms of
   the three dbs, read once."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db] [:map [:tx [:vector :any]] [:conflicts :seon.run/task-conflicts]]]}
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db] [:map [:tx [:vector :any]] [:conflicts :seon.task/task-conflicts]]]}
   [base branch main]
   (let [many (fn [a] (dbu/multival? main a))
         ;; each member's value: a set member's values as a set, a single member's value
@@ -466,7 +470,9 @@
   holds them all as main does. Cost: the closure's tasks, pulled once each."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.task/id] [:vector :map]]}
   [main branch id]
-  (let [pull #(d/pull %1 '[* {:seon.task/needs [:seon.task/id]}] [:seon.task/id %2])
+  (let [;; how a task's work stands and ended is main's alone (judged-attrs): a branch's copy holds the task, not that
+        pull #(apply dissoc (d/pull %1 '[* {:seon.task/needs [:seon.task/id]}] [:seon.task/id %2])
+                     :seon.task/agent :seon.task/outcome :seon.task/reasons judged-attrs)
         held? #(and (pdb/eid branch :seon.task/id %)
                     (or (not= id %) (= (dissoc (pull main %) :db/id) (dissoc (pull branch %) :db/id))))
         closure (loop [todo [id] seen #{}]
@@ -484,7 +490,7 @@
 
 ;; ---- the reader ------------------------------------------------------------------
 
-(def ^:private task-pull '[* {:seon.task/needs [:seon.task/id]}])
+(def ^:private task-pull '[* {:seon.task/needs [:seon.task/id]} {:seon.task/agent [:seon.agent/key]}])
 
 (defn- task-value
   "A pulled task's own members (needs as a set of ids, proofs and references sets), without
@@ -497,7 +503,7 @@
               (update :seon.task/needs #(set (map :seon.task/id %)))
               (update :seon.task/proofs set)
               (update :seon.task/kind #(or % :work)))
-))
+    (:seon.task/agent t) (update :seon.task/agent :seon.agent/key)))
 
 (def placeholder-assertion
   "The assertion seon.context writes into a proof's test that does not exist yet (its :proof-unknown
@@ -552,71 +558,59 @@
     ;; the value names its schema, so a page draws it by its declared render (seon.render/html)
     (some-> (own id) (assoc :seon.task/accumulated (accumulate own id)) (vary-meta assoc :seon.render/schema :seon.task/task))))
 
-(def ^:private run-pull
-  '[* {:seon.run/task [:seon.task/id]} {:seon.run/agent [:seon.agent/id]}
-    {:seon.run/results [:seon.proof/test :seon.proof/status]}
-    {:seon.run/deferred-results [:seon.proof/test :seon.proof/status]}
-   {:seon.run/conflicts [:seon.merge/key :seon.merge/kind :seon.merge/base :seon.merge/ours :seon.merge/theirs]}])
+(def ^:private agent-pull '[:seon.agent/key :seon.agent/id :seon.agent/branch :seon.agent/model :seon.agent/holder :seon.agent/max-turns
+                           :seon.agent/boot :seon.agent/taken :seon.agent/started-ms])
 
-(defn- run-value
-  "A pulled run as :seon.run/run."
-  {:malli/schema [:=> [:cat :seon.run/pulled] :seon.run/run]}
+(defn- agent-value
+  "A pulled agent as :seon.reconcile/agent: what root decides on of it, its environment (the one desired-env compares)
+  beside its boot and the messages it had taken."
+  {:malli/schema [:=> [:cat :map] :seon.reconcile/agent]}
   [a]
-  (let [{:seon.run/keys [branch model max-turns holder results uncontracted conflicts unmerged]} a]
-    (cond-> (-> a (dissoc :db/id :seon.run/branch :seon.run/model :seon.run/max-turns :seon.run/holder :seon.run/results
-                          :seon.run/uncontracted :seon.run/conflicts :seon.run/unmerged)
-                (update :seon.run/task :seon.task/id)
-                (cond-> (:seon.run/agent a) (update :seon.run/agent :seon.agent/id))
-                (assoc :seon.run/env (cond-> {:branch branch :model model :max-turns max-turns} holder (assoc :holder holder))))
-      results (assoc :seon.run/results (into {} (map (juxt :seon.proof/test :seon.proof/status)) results))
-      uncontracted (assoc :seon.run/uncontracted (set uncontracted))
-      unmerged (assoc :seon.run/unmerged (vec (sort unmerged)))
-      (:seon.run/changed a) (update :seon.run/changed set)
-      (:seon.run/deferred a) (update :seon.run/deferred set)
-      (:seon.run/deferred-results a) (update :seon.run/deferred-results #(into {} (map (juxt :seon.proof/test :seon.proof/status)) %))
-      (:seon.run/caused a) (update :seon.run/caused set)
-      conflicts (assoc :seon.run/conflicts
-                       (vec (sort-by (comp str :key) (map pm/conflict-value conflicts)))))))
+  (let [{:seon.agent/keys [branch model max-turns holder]} a]
+    (-> (select-keys a [:seon.agent/key :seon.agent/id :seon.agent/boot :seon.agent/taken])
+        (assoc :seon.agent/env (cond-> {:branch branch :model model :max-turns max-turns} holder (assoc :holder holder))))))
 
-(defn runs
-  "Every run on db, by id: each entity its start recorded (run-start-tx: :seon.run/status among
-  it). A run a branch only names by reference (a turn's, a message's: an entity holding its id
-  alone, so the ref resolves to main's entity) is no run record on that branch."
-  {:malli/schema [:=> [:cat :seon.host/db] [:map-of :seon.run/id :seon.run/run]]}
+(defn agents
+  "Every agent root started on db, by key: the entities a start recorded (start-tx: :seon.agent/boot among them)."
+  {:malli/schema [:=> [:cat :seon.host/db] [:map-of :string :seon.reconcile/agent]]}
   [db]
-  (into {} (for [a (d/q '[:find [(pull ?e pattern) ...] :in $ pattern :where [?e :seon.run/status]] db run-pull)]
-             [(:seon.run/id a) (run-value a)])))
+  (into {} (for [{e :e} (d/datoms db :aevt :seon.agent/boot)
+                 :let [a (d/pull db agent-pull e)]]
+             [(:seon.agent/key a) (agent-value a)])))
+
+(defn started-agent
+  "Agent key k on db as root started it (agents), or nil: nil too where db only names it by reference."
+  {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe :seon.reconcile/agent]]}
+  [db k]
+  (let [a (d/pull db agent-pull [:seon.agent/key k])]
+    (when (:seon.agent/boot a) (agent-value a))))
 
 (def finished
-  "Run statuses that make its task done: a run's lifecycle sets are declared once, on
-  :seon.run/status's schema, and read once, here (seon.main-test/a-runs-lifecycle-is-read-once)."
-  (:seon.status/finished (contract/properties :seon.run/status)))
+  "Outcomes that make its task done: a task's outcomes are declared once, on :seon.task/outcome's schema, and read
+  once, here (seon.main-test/a-tasks-outcomes-are-read-once)."
+  (:seon.status/finished (contract/properties :seon.task/outcome)))
 
-(def judged "Run statuses the done rule judges (ended or dead)." (:seon.status/judged (contract/properties :seon.run/status)))
+(def judged "Outcomes root has the next step to take on (a merge ready, or at its gate)." (:seon.status/judged (contract/properties :seon.task/outcome)))
 
-(def failed "Run statuses of a death (its agent died or was lost)." (:seon.status/failed (contract/properties :seon.run/status)))
+(def failed "Outcomes of a death (its agent died or was lost)." (:seon.status/failed (contract/properties :seon.task/outcome)))
 
 (defn done?
-  "Has task entity te a run that finished (finished)? One AVET seek of its runs, then each one's
-  status; the reconciler's index answers the same from its own facts (seon.reconcile/task-state)."
+  "Has task entity te finished (finished: done or merged)? One datom read; the reconciler's index
+  answers the same from its own facts (seon.reconcile/task-state)."
   {:malli/schema [:=> [:cat :seon.host/db :int] :boolean]}
   [db te]
-  (boolean (some #(finished (:v (first (d/datoms db :eavt (:e %) :seon.run/status))))
-                 (d/datoms db :avet :seon.run/task te))))
+  (boolean (finished (:v (first (d/datoms db :eavt te :seon.task/outcome))))))
 
 (defn running
-  "The runs running on db (status :running), each as `run` answers it: one AVET seek of the status,
-  never a read of every run."
-  {:malli/schema [:=> [:cat :seon.host/db] [:vector :seon.run/run]]}
+  "The tasks whose agents work on db (outcome :running), each as {:task id :agent the agent's id :key its key :env its
+  environment}: one AVET seek of the outcome, the task and its agent pulled."
+  {:malli/schema [:=> [:cat :seon.host/db] [:vector [:map [:task :seon.task/id] [:agent {:optional true} :keyword] [:key {:optional true} :string] [:env {:optional true} :seon.task/env]]]]}
   [db]
-  (mapv #(run-value (d/pull db run-pull (:e %))) (d/datoms db :avet :seon.run/status :running)))
-
-(defn run
-  "Run aid on db, or nil: nil too where db only names it by reference (runs)."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.run/id] [:maybe :seon.run/run]]}
-  [db aid]
-  (let [a (d/pull db run-pull [:seon.run/id aid])]
-    (when (:seon.run/status a) (run-value a))))
+  (vec (for [{e :e} (d/datoms db :avet :seon.task/outcome :running)
+             :let [t (d/pull db [:seon.task/id {:seon.task/agent agent-pull}] e)
+                   a (some-> (:seon.task/agent t) agent-value)]]
+         (cond-> {:task (:seon.task/id t)}
+           a (assoc :agent (:seon.agent/id a) :key (:seon.agent/key a) :env (:seon.agent/env a))))))
 
 (defn root
   "Root's boot and config keys on db: {:boot :max-running :max-merging :gate-checkout :started-by}, nil
@@ -631,26 +625,33 @@
       (:seon.root/started-by r) (assoc :started-by (:seon.root/started-by r)))))
 
 (defn entity-value
-  "The task, run or root that entity e of db is now, as the reconciler's index holds it:
-  [:task own-value] (no accumulation), [:run run-value], [:root (root db)], or nil
-  when e is none of them (retracted, another kind, a run a branch only names, or root
+  "The task, agent or root that entity e of db is now, as the reconciler's index holds it:
+  [:task own-value] (no accumulation), [:agent agent-value], [:root (root db)], or nil
+  when e is none of them (retracted, another kind, an agent root never started, or root
   before its first boot: (root db) is nil then, as on a store an earlier build left with
   a quiescent fact and no boot). One pull of e."
   {:malli/schema [:=> [:cat :seon.host/db :int]
-                  [:maybe [:or [:tuple [:= :task] :seon.task/own] [:tuple [:= :run] :seon.run/run] [:tuple [:= :root] :map]]]]}
+                  [:maybe [:or [:tuple [:= :task] :seon.task/own] [:tuple [:= :agent] :seon.reconcile/agent] [:tuple [:= :root] :map]]]]}
   [db e]
-  (let [k (d/pull db [:seon.task/id :seon.run/status :seon.root/id] e)]
+  (let [k (d/pull db [:seon.task/id :seon.agent/boot :seon.root/id] e)]
     (cond (:seon.task/id k) [:task (task-value (d/pull db task-pull e))]
-          ;; a run its start recorded (runs): a branch's stub, its id alone, is none
-          (:seon.run/status k) [:run (run-value (d/pull db run-pull e))]
+          ;; an agent its start recorded: a branch's record of its own agent, with no boot, is none
+          (:seon.agent/boot k) [:agent (agent-value (d/pull db agent-pull e))]
           (:seon.root/id k) (some->> (root db) (vector :root)))))
 
+(defn tasks-of-agent
+  "The task entities db names agent entity e as their agent (:seon.task/agent): the tasks whose state an agent's boot or taken count moves.
+  An agent holds two on a stage."
+  {:malli/schema [:=> [:cat :seon.host/db :int] [:vector :int]]}
+  [db e]
+  (mapv :e (d/datoms db :avet :seon.task/agent e)))
+
 (defn entity-ids
-  "Every task, run and root entity of db (the reconciler's list, before it watches)."
+  "Every task, agent and root entity of db (the reconciler's list, before it watches)."
   {:malli/schema [:=> [:cat :seon.host/db] [:vector :int]]}
   [db]
   (vec (concat (map :e (d/datoms db :aevt :seon.root/id)) (map :e (d/datoms db :aevt :seon.task/id))
-               (map :e (d/datoms db :aevt :seon.run/id)))))
+               (map :e (d/datoms db :aevt :seon.agent/boot)))))
 
 ;; ---- task files: declarations as reviewable data -----------------------------------
 ;; resources/seon/tasks/<ns>.edn holds one vector of :seon.task/declaration entries (without

@@ -22,38 +22,38 @@
   [why] (contract/error :seon.root/refused #'seon.server/refused why))
 
 (defn task-summaries
-  "Every task on main db: {id {:execution :done :blocked-by :runs [[id status outcome
-  turns tokens]] :failure}}: the server's and the e2e harness's one summary. A key says something
-  or is left out: :done only when done, :blocked-by and :runs only when there are some (676 held
-  tasks spelled `:done false, :blocked-by #{}, :runs []` each). With idx, the db's reconciler index (`seon.reconcile/index`) that a caller holds already, none is built (docs/tasks.md)."
+  "Every task on main db: {id {:execution :done :blocked-by :agent :outcome :failure}}: the server's and the
+  e2e harness's one summary. A key says something or is left out: :done only when done, :blocked-by only when
+  there are some, :agent and :outcome only when an agent has worked it (676 held tasks spelled
+  `:done false, :blocked-by #{}` each). With idx, the db's reconciler index (`seon.reconcile/index`) that a caller holds already, none is built (docs/tasks.md)."
   {:malli/schema [:function [:=> [:cat :seon.host/db] :map] [:=> [:cat :seon.host/db :seon.reconcile/index] :map]]}
   ([db] (task-summaries db (r/index db)))
   ([db idx]
     (into (sorted-map)
           (for [[id t] (:tasks idx)
                 :let [blocked (r/blocked-by idx id)
-                      runs (mapv (juxt :seon.run/id :seon.run/status :seon.run/outcome :seon.run/turns :seon.run/tokens)
-                                 (sort-by :seon.run/id (map (:runs idx) (get-in idx [:by-task id]))))]]
+                      agent (get-in idx [:agents (:seon.task/agent t) :seon.agent/id])]]
             [id (cond-> {:execution (:seon.task/execution t)}
                   (r/done? idx id) (assoc :done true)
                   (seq blocked) (assoc :blocked-by blocked)
-                  (seq runs) (assoc :runs runs)
+                  agent (assoc :agent agent)
+                  (:seon.task/outcome t) (assoc :outcome (:seon.task/outcome t))
                   ;; the reason cut by the one printer: a held task's reason names every red (about
                   ;; 300 once), and an answer stays small; the whole is (seon.server/verdict ...)'s
                   (:seon.task/failure t) (assoc :failure (print/text (:reason (:seon.task/failure t)) (:part print/budgets))))]))))
 
 (defn live-tasks
-  "What is live on main db, as an outside agent reads it: :tasks, each task running or with runs
-  (task-summaries), newest run first; :others, every other task counted by its execution; :all,
-  the form that lists them all at root's REPL. Main holds hundreds of held tasks with no run
-  (580 on the standing root), which listed whole hid what runs. A running task whose run has not
+  "What is live on main db, as an outside agent reads it: :tasks, each task running or with an agent
+  (task-summaries), the latest started first; :others, every other task counted by its execution; :all,
+  the form that lists them all at root's REPL. Main holds hundreds of held tasks with no agent
+  (580 on the standing root), which listed whole hid what runs. A running task whose agent has not
   started yet comes last."
   {:malli/schema [:=> [:cat :seon.host/db] [:map [:tasks :map] [:others :map] [:all :any]]]}
   [db]
   (let [idx (r/index db)
-        started (fn [id] (some->> (seq (keep #(:seon.run/start-ms ((:runs idx) %)) (get-in idx [:by-task id]))) (apply max)))
+        started (fn [id] (get-in idx [:agents (get-in idx [:tasks id :seon.task/agent]) :seon.agent/started-ms] 0))
         all (task-summaries db idx)
-        live? (fn [[_ s]] (or (= :running (:execution s)) (seq (:runs s))))]
+        live? (fn [[_ s]] (or (= :running (:execution s)) (:agent s)))]
     {:tasks (apply array-map (mapcat identity (sort-by (comp started key) #(compare %2 %1) (filter live? all))))
      :others (frequencies (map (comp :execution val) (remove live? all)))
      :all '(seon.server/task-summaries @(:conn sys))}))
@@ -84,39 +84,39 @@
             (repl/eval-string code {"ns" "root.repl" :origin :outside :ticks 0 :bytes 0
                                     :repl/eval-fn (fn [form] (eval (list 'let '[sys seon.server/*sys*] form)))}))]
     @(c/transact-main! sys (repl/record-tx {:seon.root/id :root} (str "root-outside-" (profile/now-ns)) "outside"
-                                           (repl/record-details code r {} nil)))
+                                           (repl/record-details code r {})))
     ;; its value too: the :eval answer passes it on when it is plain data (op-answer :eval)
     r))
 
 (defn- live-run
-  "Task id's running run whose agent's process lives in root's view now, as [run nil], or [nil dead]
-  with dead its running run whose agent is gone (died, ended by seon_done, killed for memory): a
-  death is a fact root's view reads, so a dead agent's run never answers as the one to work the
-  task (attach! closes it and starts a fresh agent on the same branch). [nil nil] when none runs."
+  "Task id's running agent whose process lives in root's view now, as [work nil], or [nil dead]
+  with dead its running agent that is gone (died, ended by seon_done, killed for memory): a
+  death is a fact root's view reads, so a dead agent never answers as the one to work the
+  task (attach! starts a fresh agent on the same branch). [nil nil] when none runs."
   {:malli/schema [:=> [:cat :seon.root/sys :seon.host/db :seon.task/id] [:tuple [:maybe :map] [:maybe :map]]]}
   [sys db id]
-  (if-let [r (some #(when (= id (:seon.run/task %)) %) (task/running db))]
-    (let [a (get-in (c/state sys) [:agents (:seon.run/agent r)])]
+  (if-let [r (some #(when (= id (:task %)) %) (task/running db))]
+    (let [a (get-in (c/state sys) [:agents (:agent r)])]
       (if (and a (not (c/gone-statuses (:status a)))) [r nil] [nil r]))
     [nil nil]))
 
 (defn- attach!
-  "Start an outside run of task id: its env's model is \"outside\" (the task keeps its own), so the
+  "Start an outside agent on task id: its env's model is \"outside\" (the task keeps its own), so the
   reconciler starts no turn loop for it and does not kill it. The agent is spawned first;
-  only once it exists are its env, the release and the run written, in one transaction,
-  so a refused spawn writes nothing and the reconciler never sees a release with no run
+  only once it exists are its env, the release and its start written, in one transaction,
+  so a refused spawn writes nothing and the reconciler never sees a release with no agent
   (it would spawn a second agent for it). The session's agent continues (its key) unless fresh?:
-  a reset, the task's branch a new one cut from main and its conversation empty (the run on the
-  old branch is killed as its env changed; that branch and its runs stay, the record). A task
-  whose run is live answers that run's agent, :shared true: the caller has the branch, with
-  whoever attached it, and that one's seon_done ends it for both. A run whose agent is gone (live-run)
-  is closed :dead and a fresh agent starts on its branch, the session's key continuing. A branch another live agent holds
-  is spawn!'s refusal, answered as a value, naming the agent, the task it works and its run.
+  a reset, the task's branch a new one cut from main and its conversation empty (the agent on the
+  old branch is killed as its env changed; that branch and its records stay). A task
+  whose agent is live answers that agent, :shared true: the caller has the branch, with
+  whoever attached it, and that one's seon_done ends it for both. An agent that is gone (live-run)
+  is replaced by a fresh one on its branch, the session's key continuing. A branch another live agent holds
+  is spawn!'s refusal, answered as a value, naming the agent and the task it works.
   clone-of: the agent is that live agent's clone (seon.root/clone!: live values and all, its branch
   cut from the clone's once its writes commit), its own key and conversation (a fork's). client:
-  who attached it (bin/mcp's id for its session), the run's :holder: only that client's requests,
-  or ones that name the task, act on its agent (held).
-  Answers {:agent :task :run}."
+  who attached it (bin/mcp's id for its session), the agent's :holder: only that client's requests,
+  or ones that name the task, act on it (held).
+  Answers {:agent :task}."
   {:malli/schema [:function [:=> [:cat :seon.root/sys :seon.task/id] :map]
                   [:=> [:cat :seon.root/sys :seon.task/id [:map [:fresh? {:optional true} :boolean] [:clone-of {:optional true} :keyword] [:client {:optional true} [:maybe :string]]]] :map]]}
   ([sys id] (attach! sys id {}))
@@ -126,31 +126,25 @@
         [live dead] (if (or fresh? clone-of) [nil nil] (live-run sys db id))]
     (cond
       (not t) (refused (str "no task " id))
-      ;; its run is live: its agent is the one to work it (a second spawn on its branch is refused)
-      live {:agent (:seon.run/agent live) :task id :run (:seon.run/id live) :shared true}
+      ;; its agent is live: it is the one to work it (a second spawn on its branch is refused)
+      live {:agent (:agent live) :task id :shared true}
       :else
-      (let [n (inc (count (filter #(= id (:seon.run/task %)) (vals (task/runs db)))))
-            env (cond-> (assoc (r/desired-env t) :model "outside")
-                  fresh? (assoc :branch (keyword (str (name (task/default-branch id)) "-r" n)))
+      (let [env (cond-> (assoc (r/desired-env t) :model "outside")
+                  fresh? (assoc :branch (keyword (str (name (task/default-branch id)) "-r" (subs (str (random-uuid)) 0 8))))
                   client (assoc :holder client))
-            aid (task/run-id id n)
-            ;; the session's agent continues (design agent-loop section 1)
+            ;; the session's agent continues (docs/turn.md#parked)
             k (when-not (or fresh? clone-of) (task/session-key db id))
-            opts (cond-> {:branch (:branch env) :task id :run aid} k (assoc :key k))
+            opts (cond-> {:branch (:branch env) :task id} k (assoc :key k))
             r (if clone-of @(c/clone! sys clone-of opts) @(c/call! sys (c/request 'spawn! nil opts nil)))
             ag (:id r)]
         ;; spawn!'s request, its answer a value: a refusal (a branch another agent holds, named with
-        ;; its task and run) is the attach's answer, never a server defect
+        ;; its task) is the attach's answer, never a server defect
         (if-not ag
           r
           (do @(c/transact-main! sys (vec (concat (task/execution-tx [id] :running)
-                                              ;; the dead agent's run ends, so the task is no longer wedged on it
-                                              (when dead (task/status-tx db (:seon.run/id dead) :running :dead
-                                                                         {:seon.run/reason (str (name (:seon.run/agent dead)) " is gone: attach started " (name ag) " on its branch")}))
                                               (when fresh? [{:seon.task/id id :seon.task/branch (:branch env)}])
-                                              (task/run-start-tx aid id (:boot sys) ag env (System/currentTimeMillis)
-                                                                     (:plan (:seon.task/accumulated t)) k))))
-              {:agent ag :task id :run aid})))))))
+                                              (task/start-tx db id (:boot sys) ag env (System/currentTimeMillis) k))))
+              {:agent ag :task id})))))))
 
 (defn- fork!
   "A fork of live agent from: a sibling of its task, <name>-fork-<n> (its plan, proofs and kind, on
@@ -175,44 +169,43 @@
           @(c/transact-main! sys (task/execution-tx [id] :cancelled)))
         a))))
 
-(defn- run-of
-  "The live run agent ag works, from main: {:run :task :env}, or nil."
+(defn- work-of
+  "The task the live agent ag works, from main: {:task :env}, or nil."
   {:malli/schema [:=> [:cat :seon.root/sys :keyword] [:maybe :map]]}
   [sys ag]
-  (some (fn [a] (when (= ag (:seon.run/agent a)) {:run (:seon.run/id a) :task (:seon.run/task a) :env (:seon.run/env a)}))
+  (some (fn [a] (when (= ag (:agent a)) (select-keys a [:task :env])))
         (task/running @(:conn sys))))
 
 (defn verdict
-  "Run run of task as main db holds its judgement: its status (:done or :merged: the done rule
-  had no reason; :closed with its task held: it had some; :parked: it parked its session,
-  waiting for a message), outcome and reason, and, for a held
+  "Task's judgement as main db holds it: its outcome (:done or :merged: the done rule
+  had no reason; :closed with its task held: it had some; :parked, :told or :cap: it parked its session,
+  waiting for a message) and reason, and, for a held
   task, the failure the judge wrote (its reason names the done rule's reasons) and the evidence."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.run/id :seon.task/id] :map]}
-  [db run task]
-  (let [r (d/pull db [:seon.run/status :seon.run/outcome :seon.run/reason] [:seon.run/id run])
-        t (d/pull db [:seon.task/execution :seon.task/failure :seon.task/evidence] [:seon.task/id task])]
-    (cond-> {:run run :status (:seon.run/status r)}
-      (:seon.run/outcome r) (assoc :outcome (:seon.run/outcome r))
-      (:seon.run/reason r) (assoc :reason (:seon.run/reason r))
+  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id] :map]}
+  [db task]
+  (let [t (d/pull db [:seon.task/outcome :seon.task/reason :seon.task/execution :seon.task/failure :seon.task/evidence] [:seon.task/id task])]
+    (cond-> {:task task}
+      (:seon.task/outcome t) (assoc :outcome (:seon.task/outcome t))
+      (:seon.task/reason t) (assoc :reason (:seon.task/reason t))
       (= :held (:seon.task/execution t)) (assoc :held (select-keys t [:seon.task/failure :seon.task/evidence])))))
 
 (defn verdict-line
-  "The done answer (owner: a line and a handle): run's verdict as one line, its status, outcome and
+  "The done answer (owner: a line and a handle): the task's verdict as one line, its outcome and
   reason, and for each red test its first failing assertion's message, all cut by the one printer
   (:part print/budgets, the cut saying what it left), with how main differs from the branch when
   the agent said so (main, seon.agent/main-difference's line), and the form that reads the whole
   verdict at root (`verdict`)."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.run/id :seon.task/id [:maybe :string]] [:map [:line :string] [:handle :string]]]}
-  [db run task main]
-  (let [v (verdict db run task)
-        fails (:seon.run/failures (d/pull db [:seon.run/failures] [:seon.run/id run]))
+  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id [:maybe :string]] [:map [:line :string] [:handle :string]]]}
+  [db task main]
+  (let [v (verdict db task)
+        fails (:seon.task/failures (d/pull db [:seon.task/failures] [:seon.task/id task]))
         reds (get-in v [:held :seon.task/evidence :red])]
-    {:line (print/text (cond-> (select-keys v [:status :outcome :reason])
+    {:line (print/text (cond-> (select-keys v [:outcome :reason])
                          (and (:held v) (empty? reds)) (assoc :held (get-in v [:held :seon.task/failure :reason]))
                          (seq reds) (assoc :reds (vec (for [t reds] [t (or (some-> (get fails t) first :message) (some-> (get fails t) first :type name))])))
                          main (assoc :main main))
                        (:part print/budgets))
-     :handle (str "(seon.server/verdict @(:conn sys) " (pr-str run) " " (pr-str task) ")")}))
+     :handle (str "(seon.server/verdict @(:conn sys) " (pr-str task) ")")}))
 
 (def ops
   "The server's ops, the one table, keyed by a request's :op (an EDN request is a
@@ -220,7 +213,7 @@
   description and its arguments (JSON Schema properties; :required, the ones it needs); its
   answer is op-answer's method of its key. MCP lists each as the tool seon_<op> (mcp-reply)."
   (array-map
-   :agents {:doc "Live agents (id, branch, status, task); the tasks running or with runs, newest first (execution, done, blocked-by, its runs as [id status outcome turns tokens], problem); every other task counted by execution, and the form that lists them all."
+   :agents {:doc "Live agents (id, branch, status, task); the tasks running or with an agent, newest first (execution, done, blocked-by, its agent and outcome, problem); every other task counted by execution, and the form that lists them all."
             :args {}
             ;; the form that answers it again at root's REPL (seon_eval root): its reply's cuts read through it
             :again '(seon.server/agents-answer sys)}
@@ -230,7 +223,7 @@
           :required ["agent" "code"]}
    :context {:doc "The request of the task an agent works as a model is sent it now: system prompt, its page and its conversation. Name the agent, or a task (ns/name): the agent working it, else one attached to it now (attach), so one request reads a task's context."
              :args {:agent {:type "string"} :task {:type "string" :description "ns/name, instead of an agent"}}}
-   :message {:doc "Send an agent a message (the owner's words): an entry on main to the run it works (refused when it works none), which its next turn takes onto its branch and reads, and which wakes a parked session. The page's message bar sends the same request (seon.root/message!)."
+   :message {:doc "Send an agent a message (the owner's words): a message on main to the task it works (refused when it works none), which its next turn takes onto its branch and reads, and which wakes a parked session. The page's message bar sends the same request (seon.root/message!)."
              :args {:agent {:type "string"} :body {:type "string" :description "what to tell the agent"}
                     :task {:type "string" :description "the agent's task (ns/name): needed only for an agent another session attached"}} :required ["agent" "body"]}
    :attach {:doc "Work a task as a Seon agent: root starts an agent on the task's branch (model outside) and answers its id. fresh: reset it, a new branch from main and an empty conversation (the old branch kept). from: fork that agent, a clone of it on a branch of its head working a sibling task."
@@ -239,16 +232,16 @@
    :prove {:doc "Run the tests a branch's change reaches, once per branch and tx however many ask (a session, an agent's turn): the one test service (seon.prove). Names an agent (its branch at its head), else main. Answers the run: its key, the counts, the red tests; a result already held for a test's digest is not run again."
            :args {:agent {:type "string" :description "an agent id whose branch to prove; omit for main"}
                   :names {:type "array" :items {:type "string"} :description "test namespaces to run; omit for every test whose digest holds no green"}}}
-   :done {:doc "Hand the run the agent works back to root: the agent writes the run's end (its proofs run, seon.turn/hand-back!), then root judges it, and merges it when the done rule has no reason. Answers the verdict when main holds it, as one line and a handle (seon.server/verdict-line): the run's status (done, merged, or closed with its task held), outcome and reason, each red test with its first failure, and how main differs from the branch; the handle is the form that reads it whole at root. A defect of the reconciler that stops the judge, as that defect. It waits as long as the judge does (the run's proofs, a gate, a merge), so a caller's read timeout must allow minutes."
+   :done {:doc "Hand the task the agent works back to root: the agent writes its end (its proofs run, seon.turn/hand-back!), then root judges it, and merges it when the done rule has no reason. Answers the verdict when main holds it, as one line and a handle (seon.server/verdict-line): the task's outcome (done, merged, or closed with its task held) and reason, each red test with its first failure, and how main differs from the branch; the handle is the form that reads it whole at root. A defect of the reconciler that stops the judge, as that defect. It waits as long as the judge does (the run's proofs, a gate, a merge), so a caller's read timeout must allow minutes."
           :args {:agent {:type "string"} :task {:type "string" :description "the agent's task (ns/name): needed only for an agent another session attached"}} :required ["agent"]}))
 
 (defn- held
-  "The refusal of request req on agent ag when another client holds it, else nil: its run's
+  "The refusal of request req on agent ag when another client holds it, else nil: its
   :holder (attach!'s client) is not req's :client and req names no :task, or another than the
-  run's. One session's seon_done once named another session's agent and ended its run red."
+  agent's. One session's seon_done once named another session's agent and ended its work red."
   {:malli/schema [:=> [:cat :seon.root/sys :keyword :map] [:maybe :map]]}
   [sys ag req]
-  (when-let [{:keys [task env]} (run-of sys ag)]
+  (when-let [{:keys [task env]} (work-of sys ag)]
     (let [h (:holder env)]
       (when (and h (not= h (:client req)) (not= task (:task req)))
         (contract/error :seon.server/held #'seon.server/held
@@ -281,12 +274,12 @@
 ;; recorded with origin :context, a context read, which renders refer to, not repeat
 (defmethod op-answer :context [sys ag req]
   (let [ag (or ag (when-let [t (:task req)]
-                    (or (:seon.run/agent (first (live-run sys @(:conn sys) t)))
+                    (or (:agent (first (live-run sys @(:conn sys) t)))
                         (:agent (attach! sys t {:client (:client req)})))))]
-    (if-let [{:keys [task run env]} (when ag (run-of sys ag))]
+    (if-let [{:keys [task env]} (when ag (work-of sys ag))]
       ;; an outside model's read is its turn, and takes its messages; anyone
       ;; else's read of an agent its model drives only looks
-      (let [r @(c/submit! sys ag (sedn/encode (list 'print (list 'seon.turn/context-block task run (= "outside" (:model env))))) {:origin :context})]
+      (let [r @(c/submit! sys ag (sedn/encode (list 'print (list 'seon.turn/context-block task (= "outside" (:model env))))) {:origin :context})]
         (cond (contract/error? r) r (:ex r) (:ex r) :else {:context (:seon.print/code (:out r))}))
       (refused (if ag (str ag " works no task: attach one first") (str "no task " (:task req) ", and no agent named"))))))
 
@@ -307,31 +300,31 @@
         (seq (:deferred r)) (assoc :deferred (:deferred r) :why (:why r))))))
 
 (defmethod op-answer :done [sys ag _]
-  (if-let [{:keys [run task env]} (run-of sys ag)]
+  (if-let [{:keys [task env]} (work-of sys ag)]
     ;; the end first, as a turn loop's end is written, so the judge reads it
-    (let [r @(c/submit! sys ag (sedn/encode (list 'seon.turn/hand-back! task run)) {:origin :outside})]
+    (let [r @(c/submit! sys ag (sedn/encode (list 'seon.turn/hand-back! task)) {:origin :outside})]
       ;; judged only on the end written: an error or no answer is answered as it is,
-      ;; and the run stays the agent's to hand back again
+      ;; and the task stays the agent's to hand back again
       (cond (contract/error? r) r
             (:ex r) (:ex r)
             (:text r) (let [t (:max-tx @(:conn sys))
-                            status #(:seon.run/status (d/pull % [:seon.run/status] [:seon.run/id run]))
-                            ;; judged: the run left :running and :ended (the reconciler accepted,
+                            outcome #(:seon.task/outcome (d/pull % [:seon.task/outcome] [:seon.task/id task]))
+                            ;; judged: the task left :running (the reconciler accepted, parked,
                             ;; held or refused it), or a root defect stopped the judge
-                            _ (c/judge! sys {:run run :task task :env env :agent ag})
-                            db (c/await-db sys (str "the judge of " run)
-                                          #(or (not (#{:running :ended} (status %))) (c/defect % t "seon.reconcile")))]
+                            _ (c/judge! sys {:task task :env env :agent ag})
+                            db (c/await-db sys (str "the judge of " task)
+                                          #(or (not= :running (outcome %)) (c/defect % t "seon.reconcile")))]
                         ;; a judge that has not moved by root's quiet never will: that, or root
                         ;; stopped, is the answer
-                        (cond (contract/error? db) (assoc db :run run)
-                              :else (if-let [p (and (#{:running :ended} (status db)) (c/defect db t "seon.reconcile"))]
-                                      {:run run :defect (select-keys p [:seon.error/type :seon.error/message])}
-                                      (verdict-line db run task (:main r)))))
-            :else (refused (str ag " answered no end for " run))))
+                        (cond (contract/error? db) (assoc db :task task)
+                              :else (if-let [p (and (= :running (outcome db)) (c/defect db t "seon.reconcile"))]
+                                      {:task task :defect (select-keys p [:seon.error/type :seon.error/message])}
+                                      (verdict-line db task (:main r)))))
+            :else (refused (str ag " answered no end for " task))))
     (refused (str ag " works no task"))))
 
 (def ^:private held-ops
-  "The ops that act on an agent's run, which its holder's client (or a request naming its task) may ask."
+  "The ops that act on an agent's work, which its holder's client (or a request naming its task) may ask."
   #{:done :eval :message})
 
 (defn answer

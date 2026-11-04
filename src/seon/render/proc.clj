@@ -77,15 +77,15 @@
      :root-errors-total (:root-errors-total v 0)
      :health (proc-health-of st (:root-errors v []))
      ;; a stop that arrived before main recorded how the run ended says so once main does
-     :events (mapv #(ui/ended-as % (:agent %) (:agent-run st {})) (:events st []))}))
+     :events (mapv #(ui/ended-as % (:agent %) (:agent-outcome st {})) (:events st []))}))
 
 ;;; --- main --------------------------------------------------------------------------------
 
 (defn- main-info
   "St with main as db (when newer than the one held): its t, its db, and the reconciler's index of
   it held and moved by what changed (seon.reconcile/index over the watched datoms that differ:
-  seon.render-cost-test/a-move-of-main-costs-what-moved), whose runs
-  give how each agent's work ended (:agent-run, the words root's process tile uses for its
+  seon.render-cost-test/a-move-of-main-costs-what-moved), whose tasks
+  give how each agent's work ended (:agent-outcome, the words root's process tile uses for its
   events). Nothing per task or per datom of main is read again. moved: the datoms that differ
   between the main held and db, read once by advance-main; the index moves by those of its watched
   attributes, so no second diff of each of them is made (one descent apiece: 90 attributes, 14.6 MB)."
@@ -99,7 +99,8 @@
     (let [held (:main-db st)
           idx (if (and (:idx st) held) (if moved (reconcile/index (:idx st) held db moved) (reconcile/index (:idx st) held db)) (reconcile/index db))]
       (assoc st :main {:t (:max-tx db)} :main-db db :idx idx
-             :agent-run (into {} (for [a (sort-by :seon.run/start-ms (vals (:runs idx)))] [(:seon.run/agent a) a])))))))
+             :agent-outcome (into {} (for [[_ t] (:tasks idx) :let [a (get (:agents idx) (:seon.task/agent t))] :when a]
+                                       [(:seon.agent/id a) (:seon.task/outcome t)])))))))
 
 ;;; --- units, rendered incrementally ---------------------------------------------------------
 
@@ -819,7 +820,7 @@
         ;; cell, seon.render.ui/event-detail)
         detail (print/text r)]
     (when form
-      (let [rec (repl/record-details form (if err {:ex r} {:value r}) {} nil)]
+      (let [rec (repl/record-details form (if err {:ex r} {:value r}) {})]
         (step/out! o :to-api {:op :request :req {:op :write :req {:op :tx :branch :db :tx-data (repl/record-tx {:seon.root/id :root} (str "root-ui-" (profile/now-ns)) "user" rec)}}
                               :route [:render :answers] :tag [:web-record]})))
     (ask-state (cond-> (on-event st {:type :ui :call (str v) :agent agent :at-ms (System/currentTimeMillis) :error err :detail detail})

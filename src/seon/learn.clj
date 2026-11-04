@@ -4,8 +4,8 @@
   turns: each turn's forms, and what that turn's context block showed, by its producer.
   A form that looks for code instead of changing it is waste, charged to whoever should
   have shown that code; an error repeating an earlier turn's is charged to the render that
-  delivered it. Stored as one map per run (:seon.end/waste on the branch, carried to
-  :seon.run/waste by the judge). R4's template rows and trials are not ported (next)."
+  delivered it. Stored as one map per end (:seon.agent/waste on the branch, carried to
+  :seon.task/waste by the judge). R4's template rows and trials are not ported (next)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [seon.error :as err]
             [seon.reader :as reader]))

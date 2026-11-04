@@ -584,7 +584,7 @@
   namespace's bare name for all its tests): prove's one entry, each named test with no green at
   its reach digest run, the rest reused, its run written under out (bin/prove --out: the effect
   reads the plan there, never from a path the run did not name). A gate names exactly the
-  tests the change reached (:seon.run/deferred), never their namespaces' other tests
+  tests the change reached (:seon.task/deferred), never their namespaces' other tests
   (docs/merging.md#a-merge-runs-what-the-change-reaches)."
   {:malli/schema [:=> [:cat [:sequential :symbol] :string] [:vector :string]]}
   [tests out] (into ["nice" "-n" "15" "bin/prove" "--out" out "--tests"] (map str tests)))

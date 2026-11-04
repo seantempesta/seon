@@ -42,7 +42,7 @@
   and holds the task for root (state :failed): no retry. Answers the failure."
   {:malli/schema [:=> [:cat :string :any] :seon.task/failure]}
   [reason counterexample]
-  (let [f {:reason reason :counterexample (print/text counterexample (:part print/budgets)) :run (:run @agent/state)}]
+  (let [f {:reason reason :counterexample (print/text counterexample (:part print/budgets)) :agent (:key @agent/state) :turn (agent/turn-now)}]
     (agent/transact! [{:seon.task/id (turn/current-task) :seon.task/failure f}])
     (turn/request-stop! :failed reason)
     f))

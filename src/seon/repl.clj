@@ -634,7 +634,7 @@
 
 (defn record-details
   "What an eval records, each its own attribute of its entity (:seon.eval/code, :response, :schema, :basis, :prose,
-  :call-id, :run, :fns; each only when present): the code; the response whole with its
+:call-id, :fns; each only when present): the code; the response whole with its
   value as plain data (`kept`), never a text made for a reader (each prints it as it shows it: `text-of`),
   so a record is the same whatever came before it; the prose beside it, as written (never
   parsed here: the parser is program the agent may change, and an eval's record runs none of it; a reader
@@ -642,8 +642,8 @@
   a value that names its render schema keeps it (the page draws the value by it); the value that IS the agent's ctx (@ctx, identical to the
   object seon.ctx/ctx holds: the branch's record at t, seon.ctx/build) keeps the basis in place of the value, so a copy of the session is never
   stored at each @ctx; the provider's call id, its run, its costliest functions (the reply's text and reasoning are its model call's)."
-  {:malli/schema [:=> [:cat :string :map :map [:maybe :string]] [:map [:seon.eval/code :string] [:seon.eval/response :seon.eval/response]]]}
-  [code r req run]
+  {:malli/schema [:=> [:cat :string :map :map] [:map [:seon.eval/code :string] [:seon.eval/response :seon.eval/response]]]}
+  [code r req]
   (let [resp (dissoc r :text :fns :record)
         v (:value resp)
         ;; the record at a t is the value of the agent's ctx itself (the one object ctx installs, seon.ctx/ctx): metadata
@@ -659,7 +659,6 @@
       basis (assoc :seon.eval/basis basis)
       (:prose req) (assoc :seon.eval/prose (:prose req))
       (:call-id req) (assoc :seon.eval/call-id (:call-id req))
-      run (assoc :seon.eval/run run)
       (seq (:fns r)) (assoc :seon.eval/fns (:fns r)))))
 
 (defn- record!
@@ -676,10 +675,10 @@
       ;; the write is the edge: a branch that refuses it answers the eval :unrecorded with the writer's message, so the
       ;; turn that asked goes on (a refused write thrown from here ended the whole turn: its reply and evals lost, the turn run again)
       (try (agent/transact! (into defs (record-tx {:seon.agent/key (:key @agent/state) :seon.agent/id (:id @agent/state)} id (by (:origin req))
-                                                  (let [run (get-in @agent/state [:turn :run])]
+                                                  (let [working? (some? (:turn @agent/state))]
                                                     (cond-> rec
-                                                      ;; the turn loop's own eval (a run's, no model call, made by the agent) is no conversation record: it takes no turn
-                                                      (not (and run (not (:call-id req)) (not (#{:ui :outside :context} (:origin req))))) (assoc :seon.eval/turn (agent/turn-now)))))))
+                                                      ;; the turn loop's own eval (the agent working a task, no model call, made by the agent) is no conversation record: it takes no turn
+                                                      (not (and working? (not (:call-id req)) (not (#{:ui :outside :context} (:origin req))))) (assoc :seon.eval/turn (agent/turn-now)))))))
            (assoc r :record id)
            (catch Throwable e
              (assoc r :unrecorded (contract/error :seon.agent/unrecorded #'record! (str "the branch refused this eval's record: " (ex-message e)) {}))))
@@ -745,7 +744,7 @@
                 ;; realized is the error; text only for a reader who is not a model (whose message is printed at its request)
                 answered (fn [] (let [r (again code (cond-> (repaired (response @answers handle) req)
                                                       (:ns @agent/state) (assoc :ns (ns-name (:ns @agent/state)))))
-                                      rec (record-details code r req (get-in @agent/state [:turn :run]))]
+                                      rec (record-details code r req)]
                                   [r rec (when (not= :model (:origin req)) (text-of rec))]))
                 [r rec text] (try (@the-handler (assoc req "code" code :reply #(vswap! answers conj %)))
                               (answered)
@@ -951,7 +950,7 @@
   [code req e]
   (let [handle (symbol "result" (str "e" (eval-n!)))
         r (repaired (response [{:tag :err :err e}] handle) req)
-        rec (record-details code r req (get-in @agent/state [:turn :run]))]
+        rec (record-details code r req)]
     (swap! agent/state assoc-in [:results (keyword (name handle))] r)
     (record! (cond-> r (not= :model (:origin req)) (assoc :text (text-of rec))) rec code req)))
 

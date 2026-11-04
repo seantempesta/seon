@@ -88,11 +88,11 @@
   [:status :pid :mem-mb :running :task :branch :forked-ms :ended-ms :stalled])
 
 (defn- observed
-  "What root records of agent entry a: its observed-keys, less :task for an agent a run started,
-  whose :task is that run's task id (the run names its task; recording it again pulled the task
+  "What root records of agent entry a: its observed-keys, less :task for an agent started on a task,
+  whose :task is its task's id (its record names its task, :seon.agent/task; recording it again pulled the task
   into every walk of the agent twice)."
   {:malli/schema [:=> [:cat [:maybe :map]] :map]}
-  [a] (cond-> (select-keys a observed-keys) (:run a) (dissoc :task)))
+  [a] (cond-> (select-keys a observed-keys) (:task a) (dissoc :task)))
 
 (defn- record-agents
   "What root observed of its agents in this step, written to main as one transaction: an
@@ -224,8 +224,8 @@
     st))
 
 (defn- stall-task
-  "Root's task to deal with agent id's stall s, when it works a run (seon.template/stall: one per
-  agent and run, so a later stall of the same run writes none): written to main, held, worked by
+  "Root's task to deal with agent id's stall s, when it works a task (seon.template/stall: one per
+  agent and task, so a later stall of the same task writes none): written to main, held, worked by
   a Claude session through seon_attach (owner: \"a task that we can pre-fill with a template and we
   can give root\"). With it, its evidence is asked while the process is stuck (seon.fx/stall-evidence,
   the :evidence effect: sample, lsof, ps and its fiber dump, files under the runs directory's stalls/),
@@ -233,10 +233,10 @@
   its facts' are."
   {:malli/schema [:=> [:cat :seon.root/api-state :seon.host/volatile :seon.agent/id :map] :seon.root/api-state]}
   [st o id s]
-  (let [{:keys [run pid]} (get-in st [:view :agents id])
+  (let [{:keys [task pid]} (get-in st [:view :agents id])
         db (some-> (:conn st) deref)]
-    (if (and run db (not (:writer-closed st)))
-      (let [decl (tpl/stall id run (assoc s :pid pid
+    (if (and task db (not (:writer-closed st)))
+      (let [decl (tpl/stall id task (assoc s :pid pid
                                           ;; the api's open asks and the test service's state when it stalled: where a chain waits
                                           :api {:open (vec (sort (for [[rid {:keys [kind agent]}] (:pending st)] [rid kind agent])))
                                                 :prove (::prove st)}))
@@ -291,7 +291,7 @@
   end is a jolt.async.remote end (session RC1): its :in is the agent proc's :from, so the
   agent's port is an ordinary channel. Answers [st id agent-end-fd]."
   {:malli/schema [:=> [:cat :seon.root/api-state :map] [:tuple :seon.root/api-state :seon.agent/id :seon.lib/fd]]}
-  [st {:keys [branch task run cloned-from key]}]
+  [st {:keys [branch task cloned-from key]}]
   (let [n (inc (:next-id st))
         id (keyword (str "a" n))
         ;; named under root's main, so roots sharing a store never share a branch (seon.db/on-main)
@@ -308,7 +308,6 @@
                                       :chan-opts {:in {:buf-or-n (cfg/value :seon.config.agent/inbox-size)}}})
          (assoc-in [:view :agents id] (cond-> {:branch branch :status :spawning :task task :pid nil
                                                :forked-ms nil :mem-mb nil :evals [] :tests nil}
-                                        run (assoc :run run)
                                         ;; the session's agent this process continues (seon.task/session-key)
                                         key (assoc :key key)
                                         cloned-from (assoc :cloned-from cloned-from))))
@@ -374,11 +373,11 @@
                                                      aid))
                                      (get-in st [:view :agents])))]
                (cond
-                 holder (let [{:keys [task run]} (get-in st [:view :agents holder])]
+                 holder (let [{:keys [task]} (get-in st [:view :agents holder])]
                           (reply! st o p (refused 'seon.root/spawn! (str "branch " (:branch opts) " is held by live agent " holder
-                                                                       (when task (str " working " task)) (when run (str " (run " run ")"))
+                                                                       (when task (str " working " task))
                                                                        ": its seon_done or an end frees it")
-                                                  (cond-> {:branch (:branch opts) :agent holder} task (assoc :task task) run (assoc :run run)))))
+                                                  (cond-> {:branch (:branch opts) :agent holder} task (assoc :task task)))))
                  ;; no server to fork it: refused before an agent proc and its socket are made (a
                  ;; socket the lost server closes would end that agent first, as a death)
                  (= :lost (get-in st [:view :fork-server :status])) (reply! st o p (fs/lost))
@@ -386,7 +385,7 @@
                  :else (let [[st aid fd] (start-agent st opts)
                              branch (get-in st [:agents aid :branch])]
                          ;; the agent's key named here, in root's boot: the child reads none from main
-                         (step/out! o :to-writer {:op :spawn :agent aid :branch branch :task (:task opts) :run (:run opts) :ns (profile/now-ns) :fd fd :dest {:spawn aid}
+                         (step/out! o :to-writer {:op :spawn :agent aid :branch branch :task (:task opts) :ns (profile/now-ns) :fd fd :dest {:spawn aid}
                                                   :key (or (:key opts) (task/agent-key (:boot st) aid))})
                          ;; answered at its hello (set-agent's :ready), or the end it meets first
                          (assoc-in st [::spawning aid] p))))
@@ -1249,11 +1248,11 @@
   [sys task-id] (request! sys 'release! nil {:task task-id}))
 
 (defn judge!
-  "Hand an outside agent's run to the reconciler for judgement, as a turn loop's end
-  is: proofs in a fork, the branch read, the agent retired. run {:run :task :env
+  "Hand an outside agent's task to the reconciler for judgement, as a turn loop's end
+  is: proofs in a fork, the branch read, the agent retired. work {:task :env
   :agent}. nil."
   {:malli/schema [:=> [:cat :seon.root/sys :map] :nil]}
-  [sys run] (a/>!! (:judge sys) (assoc run :op :judge)) nil)
+  [sys work] (a/>!! (:judge sys) (assoc work :op :judge)) nil)
 
 (defn await-db
   "Main's first db value (now or after a later commit) for which (pred db) holds: a watch on

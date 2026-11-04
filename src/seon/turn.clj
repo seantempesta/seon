@@ -13,8 +13,8 @@
   merge is too hairy (seon.reconcile/hairy). Either way the live runtime is staged onto the
   branch at the end (seon.stage/stage!), so the next agent on the branch holds it.
 
-  Root starts it by evaluating (seon.turn/work! '{...}) in the agent; the run's end is
-  a fact on the branch (:seon.end/*), which root's judge reads."
+  Root starts it by evaluating (seon.turn/work! '{...}) in the agent; its end is
+  a fact on the agent's record on the branch (:seon.agent/outcome and the rest), which root's judge reads."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.ctx :as ctx] [seon.edn :as sedn] [seon.profile :as profile] [seon.intr :as intr] [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str]
             [seon.agent :as agent] [seon.repl :as repl] [seon.task :as task] [seon.reconcile :as r]
@@ -22,8 +22,8 @@
             [seon.stage :as stage] [my.branch :as branch] [seon.reader :as reader] [seon.learn :as learn] [seon.config :as cfg] [seon.lib :as lib] [seon.print :as print]
             [seon.error :as err] [datahike.api :as d] [seon.db :as pdb]))
 
-;; The turn loop's own facts live in the agent's one state map, under :turn: the run it
-;; works, and a stop a function requested.
+;; The turn loop's own facts live in the agent's one state map, under :turn: whether this
+;; process is working a task, the last turn's evals and a stop a function requested.
 
 (defn current-task
   "The id of the task this process works: the one root forked it for (seon.agent/init!), or
@@ -32,17 +32,13 @@
   [] (:task @agent/state))
 
 (defn- begin!
-  "This process works task as run: the run recorded as its session's on its branch, and the
-  turn state, begun once per run (the plan it began with is the run's fact, :seon.run/plan).
-  The turn loop and an outside agent's context read begin it the same way."
-  {:malli/schema [:=> [:cat :seon.task/id :seon.run/id] :map]}
-  [task run]
-  (if (= run (get-in @agent/state [:turn :run]))
-    (:turn @agent/state)
-    ;; the run is this session's on its own branch too (seon.agent/begin-run!), and a fork's task
-    ;; with it, read after that write
-    (do (agent/begin-run! task run)
-        (:turn (swap! agent/state assoc :turn {:run run})))))
+  "This process works task: the task recorded as its agent's on its branch (seon.agent/begin-run!), and the
+  turn state begun. The turn loop and an outside agent's context read begin it the same way."
+  {:malli/schema [:=> [:cat :seon.task/id] :map]}
+  [task]
+  ;; the task is this agent's on its own branch too, and a fork's task with it, read after that write
+  (agent/begin-run! task)
+  (or (:turn @agent/state) (:turn (swap! agent/state assoc :turn {}))))
 
 (defn last-evals
   "The responses of this process's last model turn, one per eval call, in order, each with its
@@ -58,15 +54,15 @@
 
 (defn- test-error!
   "Record on this agent's branch whether its test run test-run failed as a whole: the error as data on
-  its process's entity (:seon.process/test-error, \"<agent key>/<pid>\"), retracted when a run answers;
+  the agent (:seon.agent/test-error), retracted when a run answers;
   nothing written when it already says so (seon.context/status reads it)."
   {:malli/schema [:=> [:cat :any] :any]}
   [test-run]
-  (let [k (:key @agent/state) pk (str k "/" (lib/c-getpid))
-        held (:seon.process/test-error (d/entity (agent/db) [:seon.process/id pk]))
+  (let [k (:key @agent/state)
+        held (:seon.agent/test-error (d/entity (agent/db) [:seon.agent/key k]))
         err (when (contract/error? test-run) (select-keys test-run [:seon.error/type :seon.error/operation :seon.error/message]))]
-    (cond (and err (not= err held)) (agent/transact! [{:seon.process/id pk :seon.process/agent [:seon.agent/key k] :seon.process/test-error err}])
-          (and held (not err)) (agent/transact! [[:db.fn/retractAttribute [:seon.process/id pk] :seon.process/test-error]]))))
+    (cond (and err (not= err held)) (agent/transact! [{:seon.agent/key k :seon.agent/test-error err}])
+          (and held (not err)) (agent/transact! [[:db.fn/retractAttribute [:seon.agent/key k] :seon.agent/test-error]]))))
 
 (defn- observe
   "What a turn starts from: the proofs run now by the test service (seon.prove: one run per branch
@@ -93,28 +89,28 @@
   [] (or (get (repl/page-data) :seon.context/status)
          (contract/error :seon.turn/no-status #'status-now "the agent's walk drew no status (seon.render.ui/status threw, or no layout placed it): the done rule cannot be read" {})))
 
-(defn run-usage
-  "What run's model calls spent, from their records on db (a model call is one fact, whichever way the turn
+(defn agent-usage
+  "What the model calls of the agent with key k spent, from their records on db (a model call is one fact, whichever way the turn
   ended): {:model-calls n :tokens t}, n the calls recorded (a turn that threw before its call made none), t their
   :seon.model-call/tokens summed, absent when no call reported its usage (unknown, never 0). A count carried
   through the turn loop lost every turn that threw after its call answered, and the turns stood for the calls."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.run/id] [:map [:model-calls nat-int?] [:tokens {:optional true} :int]]]}
-  [db run]
-  (let [calls (map #(d/entity db %) (d/q '[:find [?m ...] :in $ ?r :where [?x :seon.run/id ?r] [?m :seon.model-call/run ?x]] db run))
+  {:malli/schema [:=> [:cat :seon.host/db :string] [:map [:model-calls nat-int?] [:tokens {:optional true} :int]]]}
+  [db k]
+  (let [calls (map #(d/entity db %) (d/q '[:find [?m ...] :in $ ?k :where [?a :seon.agent/key ?k] [?m :seon.model-call/agent ?a]] db k))
         ts (keep :seon.model-call/tokens calls)]
     (cond-> {:model-calls (count calls)} (seq ts) (assoc :tokens (reduce + ts)))))
 
 (defn- end!
-  "The run's end: the live runtime staged onto the branch, the end written there (with
+  "The agent's end: the live runtime staged onto the branch, the end written there (with
   the error that ended it and the turns' waste, as data: session D2), and the branch committed
   (a turn's end commits the agent's run-ahead writes)."
-  {:malli/schema [:=> [:cat :map :seon.run/outcome [:maybe :string] [:maybe :map]] :seon.turn/end]}
-  [{:keys [turn t0 run log]} outcome reason error]
+  {:malli/schema [:=> [:cat :map :seon.agent/outcome [:maybe :string] [:maybe :map]] :seon.turn/end]}
+  [{:keys [turn t0 log]} outcome reason error]
   (stage/stage!)
-  (let [{:keys [tokens model-calls]} (run-usage (agent/db) run)]
-  (agent/write-end! run {:outcome outcome :turns turn :tokens tokens :reason reason :error error
-                             :waste (learn/summary (learn/waste (or log []) (learn/final-symbols (or log []))))})
-  ;; what was not measured is absent, never 0: an outside run counts no model calls and no loop time
+  (let [{:keys [tokens model-calls]} (agent-usage (agent/db) (:key @agent/state))]
+  (agent/write-end! {:outcome outcome :reason reason :error error
+                     :waste (learn/summary (learn/waste (or log []) (learn/final-symbols (or log []))))})
+  ;; what was not measured is absent, never 0: an outside agent counts no model calls and no loop time
   (cond-> {:outcome outcome :results {} :uncontracted #{}}
     turn (assoc :turns turn :model-calls model-calls)
     t0 (assoc :ms (profile/ms-since t0))
@@ -190,12 +186,12 @@
 (defn- basis!
   "What a turn's context is built from, recorded instead of its text (a model call stores its
   basis, not its prompt): the commit it reads (the run-ahead writes committed now, as the
-  model call's wait would), the task, run and turn (its number: docs/turn.md#the-turn-is-a-number). Everything the request shows is a fact of that
+  model call's wait would), the task and turn (its number: docs/turn.md#the-turn-is-a-number). Everything the request shows is a fact of that
   commit: how the work stands (seon.context/status), what the turn took (take!)."
-  {:malli/schema [:=> [:cat :seon.task/id :seon.run/id :int :int :seon.model-call/origin :boolean] :seon.model-call/basis]}
-  [task run turn max-turns origin merge?]
+  {:malli/schema [:=> [:cat :seon.task/id :int :int :seon.model-call/origin :boolean] :seon.model-call/basis]}
+  [task turn max-turns origin merge?]
   (agent/commit!)
-  (cond-> {:commit (d/commit-id (agent/db)) :task task :run run :turn turn :max-turns max-turns :origin origin}
+  (cond-> {:commit (d/commit-id (agent/db)) :task task :turn turn :max-turns max-turns :origin origin}
     merge? (assoc :merge? true)))
 
 (defn- call-problem
@@ -276,7 +272,7 @@
   provider error. The model call is an effect (my.fx :model, session FX1): root's model owner
   admits, performs and answers it; the API key never enters this process."
   {:malli/schema [:=> [:cat :map :map :map [:maybe :string]] [:or :map :map]]}
-  [{:keys [turn max-turns merge? whole? run] :as st} {:keys [tests-ms] :as obs} s model-name]
+  [{:keys [turn max-turns merge? whole?] :as st} {:keys [tests-ms] :as obs} s model-name]
   (let [t (:task obs)
         t0 (profile/now-ns)
         ;; the turn this is: the agent's number, one past the one in force, which the messages taken now and every record
@@ -290,12 +286,10 @@
         ;; (seon.context/wire-turn makes them again there); then what it was made from (its model call's basis): its page is
         ;; drawn on the db that holds it (its proofs as this turn observed them), then what it sent, committed, so a page
         ;; shows the call in flight and a call that fails keeps what it sent
-        _ (agent/transact! (into [{:db/id "run" :seon.run/id run}
-                                  {:seon.agent/key k :seon.agent/turn n}
-                                  {:seon.model-call/id id :seon.model-call/agent {:seon.agent/key k} :seon.model-call/n n :seon.model-call/origin :model
-                                   :seon.model-call/run "run"}]
+        _ (agent/transact! (into [{:seon.agent/key k :seon.agent/turn n}
+                                  {:seon.model-call/id id :seon.model-call/agent {:seon.agent/key k} :seon.model-call/n n :seon.model-call/origin :model}]
                                  (main-base-tx)))
-        basis (cond-> (assoc (basis! (:seon.task/id t) run n max-turns :model (boolean merge?)) :agent k)
+        basis (cond-> (assoc (basis! (:seon.task/id t) n max-turns :model (boolean merge?)) :agent k)
                 model-name (assoc :model model-name))
         ;; the provider as the config stands at the basis (main's as the turn heard it, over the task's own), never one copied at boot
         provider (context/provider-of (agent/db) basis)
@@ -305,8 +299,8 @@
         ;; its parts are the live walk's (what changed since the frame before), never drawn cold, and the
         ;; request is made on the db the walk is drawn to: one db for both
         [db parts] (repl/page-hiccup)
-        {:keys [messages sent printed]} (context/render db basis {:printed (get-in @agent/state [:printed run]) :parts parts :ctx @ctx/ctx})
-        _ (swap! agent/state assoc :printed {run printed})
+        {:keys [messages sent printed]} (context/render db basis {:printed (:printed @agent/state) :parts parts :ctx @ctx/ctx})
+        _ (swap! agent/state assoc :printed printed)
         context-ms (long (profile/ms-since t0))
         _ (when sent (agent/transact! [{:seon.model-call/id id :seon.model-call/sent sent}]))
         _ (agent/commit!)
@@ -315,7 +309,7 @@
         model-ms (long (profile/ms-since t1))
         c (:value r)
         ;; the request before this one in its run: what the cache check compares (cache-miss)
-        prev (get-in @agent/state [:requests run])]
+        prev (:requests @agent/state)]
     (if (contract/error? r)
       ;; the call failed: its typed error on the model call (an error is data), and to the run's end
       (do (agent/transact! [{:seon.model-call/id id :seon.model-call/error r :seon.model-call/ms model-ms
@@ -323,7 +317,7 @@
           r)
       (let [;; a request answered is the next one's baseline (a failed call stored no prefix); a short
             ;; hit is the model call's outcome, an error this agent folds as :effect (seon.error/note)
-            _ (swap! agent/state assoc :requests {run messages})
+            _ (swap! agent/state assoc :requests messages)
             _ (when-let [miss (cache-miss prev messages c (cfg/value :seon.config.ai/cache-block-tokens {:task t :model model-name}))]
                 (swap! agent/state update :errors err/note miss :effect id (System/currentTimeMillis)))
             t2 (profile/now-ns)
@@ -401,9 +395,9 @@
   on it. take?: the read is the run's turn (its
   model is outside) and takes the messages delivered; else it is an observer's, and leaves them
   for the model's next turn."
-  {:malli/schema [:=> [:cat :seon.task/id :seon.run/id :boolean] :string]}
-  [task run take?]
-  (let [_ (begin! task run)
+  {:malli/schema [:=> [:cat :seon.task/id :boolean] :string]}
+  [task take?]
+  (let [_ (begin! task)
         {:keys [tests-ms]} (observe task)
         k (:key @agent/state)
         ;; the agent's own count of reads, from the branch: a process, a run or a wake does not restart it
@@ -415,15 +409,14 @@
         _ (take! take? (inc (agent/turn-now)))
         ;; the main and merge base the read heard, decided as a model turn's are, before its request is drawn
         _ (when take? (when-let [tx (not-empty (main-base-tx))] (agent/transact! tx) (agent/commit!)))
-        basis (assoc (basis! task run n 1 :outside true) :agent k)
+        basis (assoc (basis! task n 1 :outside true) :agent k)
         [db parts] (repl/page-hiccup)
-        {:keys [messages printed sent]} (context/render db basis {:printed (get-in @agent/state [:printed run]) :parts parts :ctx @ctx/ctx})
-        _ (when take? (swap! agent/state assoc-in [:printed run] printed))
+        {:keys [messages printed sent]} (context/render db basis {:printed (:printed @agent/state) :parts parts :ctx @ctx/ctx})
+        _ (when take? (swap! agent/state assoc :printed printed))
         text (str/join "\n\n" (map :content messages))]
-    ;; the read is a model call of this run, as a model turn's is: what it was built from and what it cost
-    (agent/transact! [{:db/id "run" :seon.run/id run}
-                      (cond-> {:seon.model-call/id (str k "/read-" n) :seon.model-call/agent {:seon.agent/key k} :seon.model-call/n n
-                               :seon.model-call/origin :outside :seon.model-call/run "run" :seon.model-call/basis basis
+    ;; the read is a model call of this agent, as a model turn's is: what it was built from and what it cost
+    (agent/transact! [(cond-> {:seon.model-call/id (str k "/read-" n) :seon.model-call/agent {:seon.agent/key k} :seon.model-call/n n
+                               :seon.model-call/origin :outside :seon.model-call/basis basis
                                :seon.model-call/split (cond-> {:context-ms (long (profile/ms-since t0))} tests-ms (assoc :tests-ms tests-ms))}
                         sent (assoc :seon.model-call/sent sent))])
     text))
@@ -433,7 +426,7 @@
   (my.task/fail! makes it :failed, with the reason it gave) and the done rule's reasons. A task
   the agent failed ends :failed whatever the proofs say, as the turn loop ends it (work!); else
   :green when the done rule has no reason, else :red with the reasons."
-  {:malli/schema [:=> [:cat [:maybe :map] [:sequential :any]] [:tuple :seon.run/outcome [:maybe :string]]]}
+  {:malli/schema [:=> [:cat [:maybe :map] [:sequential :any]] [:tuple :seon.agent/outcome [:maybe :string]]]}
   [stop reasons]
   (cond (= :failed (:outcome stop)) [:failed (:reason stop)]
         (empty? reasons) [:green nil]
@@ -446,33 +439,34 @@
   unknown here, so absent (never 0). The judge decides from its own run of the proofs and the
   plan the run began with on main; this end is what the run says of itself. Without it the
   judge read no end and named the run :no-end. Answers the end."
-  {:malli/schema [:=> [:cat :seon.task/id :seon.run/id] :seon.turn/end]}
-  [task run]
-  (let [;; read before begin!, which starts the turn state anew when this run has none yet
+  {:malli/schema [:=> [:cat :seon.task/id] :seon.turn/end]}
+  [task]
+  (let [;; read before begin!, which starts the turn state anew when it has none yet
         stop (get-in @agent/state [:turn :stop])
-        _ (begin! task run)
+        _ (begin! task)
         _ (observe task)
         s (status-now)
         [outcome reason] (if (contract/error? s) [:error (:seon.error/message s)] (hand-back-end stop (:reasons s)))]
-    (end! {:run run} outcome reason (when (contract/error? s) s))))
+    (end! {} outcome reason (when (contract/error? s) s))))
 
 (defn work!
-  "Work task `task` as run `run` (the model `model` when set, else root's), at most
-  max-turns model calls.
+  "Work task `task` (the model `model` when set, else root's), until the agent's turn reaches
+  max-turns (agent-wide: its :seon.agent/turn against its budget, which root passes from the agent's own on main).
   Answers the end ({:outcome :turns :model-calls :tokens :ms}); the same end is written on
   the branch. It first merges main into the branch (my.branch/merge-main!), as a merge task
   does again at each green."
-  {:malli/schema [:=> [:cat [:map [:task :seon.task/id] [:run :seon.run/id] [:model {:optional true} :string]
+  {:malli/schema [:=> [:cat [:map [:task :seon.task/id] [:model {:optional true} :string]
                              [:max-turns pos-int?]]]
                   :seon.turn/end]}
-  [{:keys [task run model] :as arg}]
-  (let [_ (begin! task run)
-        ;; the agent's own budget (:seon.agent/max-turns, raised to extend it) bounds the loop; the arg is the default
-        max-turns (or (:seon.agent/max-turns (d/entity (agent/db) [:seon.agent/key (:key @agent/state)])) (:max-turns arg))
-        ;; the cap this run works under, a fact of the run as root records it at a run's start (seon.task/run-start-tx),
-        ;; when the run began here: what its page's turn line reads (seon.render.ui/run-head)
-        _ (when-not (:seon.run/max-turns (d/entity (agent/db) [:seon.run/id run]))
-            (agent/transact! [{:seon.run/id run :seon.run/max-turns (:max-turns arg)}]))
+  [{:keys [task model] :as arg}]
+  (let [;; each wake begins its turn state and its prints anew
+        _ (swap! agent/state assoc :turn {} :printed nil :requests nil)
+        _ (begin! task)
+        ;; the agent's own budget (:seon.agent/max-turns on main, raised to extend it; root passes it) bounds the loop, and is
+        ;; the cap its page's turn line reads (seon.render.ui/run-head)
+        max-turns (:max-turns arg)
+        _ (when-not (= max-turns (:seon.agent/max-turns (d/entity (agent/db) [:seon.agent/key (:key @agent/state)])))
+            (agent/transact! [{:seon.agent/key (:key @agent/state) :seon.agent/max-turns max-turns}]))
         t0-task (task/task (agent/db) task)
         merge? (task/merges? (:seon.task/kind t0-task))
         merge-cfg (r/merge-limits t0-task)]
@@ -480,7 +474,7 @@
     ;; the branch's db, its base and this process hold one program (its tests' digests are the
     ;; program it runs); a branch at main's head brings nothing
     (branch/merge-main!)
-    (loop [st {:turn 0 :merge-turns 0 :t0 (profile/now-ns) :run run :whole? (= :whole (:seon.task/kind t0-task))
+    (loop [st {:turn 0 :merge-turns 0 :t0 (profile/now-ns) :whole? (= :whole (:seon.task/kind t0-task))
                :max-turns max-turns :merge? merge?}]
       ;; each turn under the branch's schemas as they are now (repl/with-branch-schemas): work! is one eval,
       ;; bound when it began, and a schema the agent registers since must be the one Seon's code checks its
@@ -495,7 +489,7 @@
       (let [ended (fn [st outcome reason err] [::end st outcome reason err])
             next-of (fn [st'] (if (contract/error? st') [::end st :error (:seon.error/message st') st'] [::next (dissoc st' :threw :error)]))
             ;; the request the last answered model call sent: a turn whose own call answered replaces it
-            asked (get-in @agent/state [:requests run])
+            asked (:requests @agent/state)
             step (repl/with-branch-schemas
                    (fn []
                      (try
@@ -540,7 +534,7 @@
                            ;; the one check of the cap, before any model call: every turn reaches it, one with no
                            ;; status and one after a turn that threw included (a change that broke
                            ;; the status would otherwise let the run make model calls past the cap)
-                           (>= (:turn st) max-turns) (if no-status?
+                           (>= (+ (agent/turn-now) (:thrown st 0)) max-turns) (if no-status?
                                                        (ended st :cap (str "no status at the cap: " (:seon.error/message s)) s)
                                                        (ended st :cap (r/explain-text reasons) nil))
                            stop (ended st (:outcome stop) (:reason stop) nil)
@@ -552,8 +546,8 @@
                            (throw e)
                            ;; the second in a row with no model turn between ends its work with that error: a turn
                            ;; whose model call answered before it threw was the agent's turn, so the count starts again
-                           (let [called? (not (identical? asked (get-in @agent/state [:requests run])))
-                                 st' (cond-> (update (turn-error! st (agent/error-map e 'seon.turn/work!)) :turn inc)
+                           (let [called? (not (identical? asked (:requests @agent/state)))
+                                 st' (cond-> (-> (turn-error! st (agent/error-map e 'seon.turn/work!)) (update :turn inc) (update :thrown (fnil inc 0)))
                                        called? (assoc :threw 1))]
                              ;; a turn that threw counts against the cap, which the next turn checks
                              (if (< 1 (:threw st'))
