@@ -2065,3 +2065,30 @@
                           {})]
     (is (= ["By a string." "By its name."] (:value r)) (pr-str r))))
 
+(deftest an-eval-that-registers-a-schema-seons-answer-names-answers-what-it-did
+  ;; the lab, 2026-11-04: an eval registered :seon.eval/response narrower, for its own use, and its later eval's answer failed
+  ;; seon.repl/response's own contract: told an error, though its forms took effect
+  (let [[reg made ran] (in-agent (fn [_]
+                                   ["(my.schema/register! :seon.eval/response '[:and :map :seon.db/plain])"
+                                    "(defn zz-made {:malli/schema [:=> [:cat] :int]} [] 41)"
+                                    "(zz-made)"])
+                                 {})]
+    (is (nil? (:ex made)) (str "the definition's answer: " (pr-str made) " after " (pr-str reg)))
+    (is (= 41 (:value ran)) (pr-str ran))))
+
+(deftest an-eval-makes-data-and-a-reader-makes-text
+  ;; the owner, 2026-11-04: "why are we generating text for each eval? If we can store the value store the value and text is a
+  ;; last resort". A model's eval prints nothing; a value that throws as it is realized is still its recorded error, since
+  ;; making it plain realizes it; a value that is no data is stored as what it was
+  (let [[model thrown atm rec]
+        (in-agent (fn [_] ["(dissoc (seon.repl/eval-string \"(+ 1 2)\" {:origin :model}) :ms :ticks :bytes)"
+                           "(let [r (seon.repl/eval-string \"(map (fn [_] (throw (ex-info \\\"late\\\" {}))) [1])\" {:origin :model})] (select-keys r [:ex :record]))"
+                           "(let [r (seon.repl/eval-string \"(atom 1)\" {:origin :model})] (:record r))"
+                           "(let [db (seon.agent/db)] (:value (:seon.eval/response (datahike.api/entity db [:seon.eval/id (:record (seon.repl/eval-string \"(atom 1)\" {:origin :model}))]))))"])
+                  {})]
+    (is (not (contains? (:value model) :text)) (pr-str model))
+    (is (some? (get-in thrown [:value :ex])) (str "a value throwing as it is realized is the eval's error: " (pr-str thrown)))
+    (is (some? (get-in thrown [:value :record])) "and recorded")
+    (is (some? (:value atm)) "an atom's eval is recorded")
+    (is (= "clojure.lang.Atom" (:seon.value/type (:value rec))) (pr-str rec))))
+

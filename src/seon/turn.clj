@@ -217,7 +217,7 @@
   "Code through the one REPL path (seon.repl/eval-string, req) and its record committed to the
   branch as it lands (seon.agent/commit!), so a page shows each eval then, not at the turn's end
   (design section 11, item 1). Answers the response."
-  {:malli/schema [:=> [:cat :string :map] :seon.eval/response]}
+  {:malli/schema [:=> [:cat :string :map] :seon.repl/answer]}
   [code req]
   (let [r (repl/eval-string code req)]
     (agent/commit!)

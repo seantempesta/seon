@@ -545,7 +545,7 @@
   and its cost summed over its forms (ms, ticks, bytes allocated);
   each key only when present (DECISIONS Dogfood rulings; a change to a schema
   is an explicit fact the eval shows)."
-  {:malli/schema [:=> [:cat [:sequential :seon.wire/msg] :qualified-symbol] :seon.eval/response]}
+  {:malli/schema [:=> [:cat [:sequential :seon.wire/msg] :qualified-symbol] :seon.repl/answer]}
   [answers handle]
   (let [fs (filterv :tag answers)
         lst (peek fs)
@@ -594,7 +594,7 @@
 (defn- repaired
   "Response r with what the forgiving reader changed of its code before it ran (req's :repaired,
   seon.context/repaired), so every call's own result tells it, a call not run included."
-  {:malli/schema [:=> [:cat :seon.eval/response :map] :seon.eval/response]}
+  {:malli/schema [:=> [:cat :seon.repl/answer :map] :seon.repl/answer]}
   [r req] (cond-> r (seq (:repaired req)) (assoc :repaired (:repaired req))))
 
 (defn- by
@@ -636,7 +636,7 @@
   a value that names its render schema keeps it (the page draws the value by it); the value that IS the agent's ctx (@ctx, identical to the
   object seon.ctx/ctx holds: the branch's record at t, seon.ctx/build) keeps the basis in place of the value, so a copy of the session is never
   stored at each @ctx; the provider's call id, its reasoning, its run, its costliest functions."
-  {:malli/schema [:=> [:cat :string :map :map [:maybe :string]] [:map [:seon.eval/code :string] [:seon.eval/response [:and :seon.eval/response :seon.db/plain]]]]}
+  {:malli/schema [:=> [:cat :string :map :map [:maybe :string]] [:map [:seon.eval/code :string] [:seon.eval/response :seon.eval/response]]]}
   [code r req run]
   (let [resp (dissoc r :text :fns :record)
         v (:value resp)
@@ -657,11 +657,11 @@
       (seq (:fns r)) (assoc :seon.eval/fns (:fns r)))))
 
 (defn- record!
-  "Record response r of code on this branch through the agent's write path (an agent's
+  "Record response r of code, eval fact rec (`record-details`), on this branch through the agent's write path (an agent's
   only), under the turn in force (:seon.eval/turn, seon.agent/turn-now), with the defs its forms recorded and the effects asked during it (seon.agent/fx-record!).
   Answers r, with the id of its record (:record) when recorded."
-  {:malli/schema [:=> [:cat :map :string :map] :map]}
-  [r code req]
+  {:malli/schema [:=> [:cat :map :map :string :map] :map]}
+  [r rec code req]
   (let [defs (into [] (mapcat val) (:defs @agent/state))
         id (name (:handle r))]
     (swap! agent/state dissoc :defs)
@@ -671,7 +671,7 @@
       ;; turn that asked goes on (a refused write thrown from here ended the whole turn: its reply and evals lost, the turn run again)
       (try (agent/transact! (into defs (record-tx {:seon.agent/key (:key @agent/state) :seon.agent/id (:id @agent/state)} id (by (:origin req))
                                                   (let [run (get-in @agent/state [:turn :run])]
-                                                    (cond-> (record-details code r req run)
+                                                    (cond-> rec
                                                       ;; the turn loop's own eval (a run's, no model call, made by the agent) is no conversation record: it takes no turn
                                                       (not (and run (not (:call-id req)) (not (#{:ui :outside :context} (:origin req))))) (assoc :seon.eval/turn (agent/turn-now)))))))
            (assoc r :record id)
@@ -705,14 +705,14 @@
     r))
 
 (defn- text-of
-  "The text of response r of code as every reader reads it: the one function the model's message prints with
+  "The text of eval fact rec as every reader reads it: the one function the model's message prints with
   (seon.print/record-text, through render/model, an @ctx eval's value rebuilt from its basis by seon.context/basis-value, as
-  seon.context/eval-messages does) of the plain data the record keeps (`record-details`), so the outside agent's text and the
-  model's cannot differ; the live value stays at the handle. See docs/render.md#a-render-is-a-value-printed-once."
-  {:malli/schema [:=> [:cat :string :map :map] :string]}
-  [code r req]
-  (let [rec (record-details code r req nil)]
-    (print/record-text (cond-> rec (:seon.eval/basis rec) (assoc-in [:seon.eval/response :value] (context/basis-value (:db @agent/state) rec))) render/model)))
+  seon.context/eval-messages does), so the outside agent's text and the model's cannot differ; the live value stays at
+  the handle. Made only for a reader: an eval makes and stores data, and a model's is printed where its request is
+  assembled. See docs/render.md#a-render-is-a-value-printed-once."
+  {:malli/schema [:=> [:cat :map] :string]}
+  [rec]
+  (print/record-text (cond-> rec (:seon.eval/basis rec) (assoc-in [:seon.eval/response :value] (context/basis-value (:db @agent/state) rec))) render/model))
 
 (defn eval-string
   "Evaluate code through the one REPL path (the handler and its middleware) and answer its one
@@ -725,7 +725,7 @@
   the response's :ex. Its cost (:ms :ticks :bytes, seon.repl/wrap-cost) is taken once when the
   forms ran, so what the model reads of it never changes in a later turn. The response's :ns is the
   namespace the REPL is in after it (docs/render.md#a-part-answers-data)."
-  {:malli/schema [:function [:=> [:cat :string] :seon.eval/response] [:=> [:cat :string :map] :seon.eval/response]]}
+  {:malli/schema [:function [:=> [:cat :string] :seon.repl/answer] [:=> [:cat :string :map] :seon.repl/answer]]}
   ([code] (eval-string code {:origin :model}))
   ([code req]
    (let [answers (volatile! [])
@@ -735,11 +735,13 @@
          outer (:eval @agent/state)]
      (swap! agent/state assoc :eval (name handle))
      (try (let [;; with the namespace the REPL is in after it (:ns, as every nREPL response carries): the prompt
+                ;; an eval makes data: its value made plain here, inside the boundary, so a value that throws as it is
+                ;; realized is the error; text only for a reader who is not a model (whose message is printed at its request)
                 answered (fn [] (let [r (again code (cond-> (repaired (response @answers handle) req)
-                                                      (:ns @agent/state) (assoc :ns (ns-name (:ns @agent/state)))))]
-                                  [r (text-of code r req)]))
-                ;; printing is inside the boundary: a value that throws as it is realized is the error
-                [r text] (try (@the-handler (assoc req "code" code :reply #(vswap! answers conj %)))
+                                                      (:ns @agent/state) (assoc :ns (ns-name (:ns @agent/state)))))
+                                      rec (record-details code r req (get-in @agent/state [:turn :run]))]
+                                  [r rec (when (not= :model (:origin req)) (text-of rec))]))
+                [r rec text] (try (@the-handler (assoc req "code" code :reply #(vswap! answers conj %)))
                               (answered)
                               (catch Throwable e
                                 (let [em (agent/error-map e)]
@@ -750,7 +752,9 @@
             (intern (create-ns 'result) (symbol (name handle)) r)
             ;; how main differs from the branch, said with the answer an outside agent's seon_eval gets, and never recorded
             ;; (seon.agent/main-difference): computed at t, so the agent is never surprised at done
-            (let [res (record! (cond-> (assoc r :text text) (some :fns @answers) (assoc :fns (into [] (mapcat :fns) @answers)))
+            (let [fns (when (some :fns @answers) (into [] (mapcat :fns) @answers))
+                  res (record! (cond-> r text (assoc :text text))
+                               (cond-> rec fns (assoc :seon.eval/fns fns))
                                code req)
                   m (when (= :agent (:mode @agent/state)) (agent/main-difference))]
               (cond-> res m (assoc :main m))))
@@ -840,8 +844,8 @@
   on this branch with the new text in its place (seon.doc/edit-tx), so a doc changes as a definition does;
   no delimiter is counted in prose. Answers {:edited {:doc address :lines ...}} (docs/agent.md#changing-a-doc)."
   {:malli/schema [:function
-                  [:=> [:cat [:or :qualified-symbol :string] :string :string] [:or :seon.repl/edit-refused :my.agent/no-var :seon.eval/response :seon.repl/doc-edited]]
-                  [:=> [:cat [:or :qualified-symbol :string] [:vector {:min 1} [:tuple :string :string]]] [:or :seon.repl/edit-refused :my.agent/no-var :seon.eval/response :seon.repl/doc-edited]]]}
+                  [:=> [:cat [:or :qualified-symbol :string] :string :string] [:or :seon.repl/edit-refused :my.agent/no-var :seon.repl/answer :seon.repl/doc-edited]]
+                  [:=> [:cat [:or :qualified-symbol :string] [:vector {:min 1} [:tuple :string :string]]] [:or :seon.repl/edit-refused :my.agent/no-var :seon.repl/answer :seon.repl/doc-edited]]]}
   ([sym old new] (edit! sym [[old new]]))
   ([sym changes]
    (let [doc? (string? sym)
@@ -937,12 +941,13 @@
   "A model's eval call that never ran, recorded as an eval whose response is error e, why
   (seon.turn's: a call before it in its reply threw, or the call has no prose or no form), so
   every call of a reply has its one result. See docs/prompt.md."
-  {:malli/schema [:=> [:cat :string :map :seon.error/base] :seon.eval/response]}
+  {:malli/schema [:=> [:cat :string :map :seon.error/base] :seon.repl/answer]}
   [code req e]
   (let [handle (symbol "result" (str "e" (eval-n!)))
-        r (repaired (response [{:tag :err :err e}] handle) req)]
+        r (repaired (response [{:tag :err :err e}] handle) req)
+        rec (record-details code r req (get-in @agent/state [:turn :run]))]
     (swap! agent/state assoc-in [:results (keyword (name handle))] r)
-    (record! (assoc r :text (text-of code r req)) code req)))
+    (record! (cond-> r (not= :model (:origin req)) (assoc :text (text-of rec))) rec code req)))
 
 (defn- layout
   "The layout this branch renders its ctx with: the var :seon.render/render-ctx declares, an agent's own

@@ -146,6 +146,8 @@
  ;; opened by a reader of the agent's page: true once, never retracted; root writes it on main as the
  ;; agent's :seon.agent/opened (an eval's id names it only within its agent), its turn on its branch
  :seon.eval/opened :boolean
+ ;; what is stored of an eval's answer (:seon.repl/answer): its value made plain (seon.repl/record-details)
+ :seon.eval/response [:and :seon.repl/answer :seon.db/plain]
  ;; an eval's details, each its own attribute, each only when present (seon.repl/record-details): the code; the
  ;; model's prose beside the call; the provider's call id, the call's place in its reply (:call) and the
  ;; reply's text (:content); its reasoning; its run (until runs go); its 10 costliest contracted functions

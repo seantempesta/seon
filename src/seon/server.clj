@@ -76,7 +76,7 @@
   d) with `sys` a local bound to this root, unbounded (root's own forms take no tick or allocation
   budget: a whole-program load allocates tens of GB, and the agent's per-form
   budget stopped it); its response recorded on main as root's eval, by \"outside\" (seon.repl/record-tx)."
-  {:malli/schema [:=> [:cat :seon.root/sys :string] :seon.eval/response]}
+  {:malli/schema [:=> [:cat :seon.root/sys :string] :seon.repl/answer]}
   [sys code]
   (when-not (find-ns 'root.repl)
     (binding [*ns* (create-ns 'root.repl)] (refer-clojure) (require '[my.root :as root] '[seon.root :as c] '[datahike.api :as d])))
