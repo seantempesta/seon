@@ -612,8 +612,8 @@
            (mapcat #(def-tx db % (eids %) {:form id}) (filter (comp #{:method :impl} first) dkeys))
            (when ns-form? [(cond-> {:db/id (ns-tid ns) :ns/form (form-tid id)} (:ns-doc acct) (assoc :ns/doc (:ns-doc acct)))])
            ;; an ns form that no longer holds one: the docstring goes with it
-           (when-let [old (when (and ns-form? (nil? (:ns-doc acct))) (some->> (pdb/eid db :ns/name ns) (d/entity db) :ns/doc))]
-             [[:db/retract (pdb/eid db :ns/name ns) :ns/doc old]])
+           (when-let [old (when (and ns-form? (nil? (:ns-doc acct))) (:ns/doc (d/entity db [:ns/name ns])))]
+             [[:db/retract [:ns/name ns] :ns/doc old]])
            (for [o superseded] [:db/retractEntity o])))))
 
 (defn record-tx
@@ -737,7 +737,7 @@
         held? (and row (= now (select-keys row (keys now)))
                    (every? #(= fe (some->> (def-eid db %) (form-of db))) dkeys)
                    ;; so a store made before a namespace held its docstring gains it
-                   (or (not (:ns-form? acct)) (= (:ns-doc acct) (some->> (pdb/eid db :ns/name (:ns acct)) (d/entity db) :ns/doc)))
+                   (or (not (:ns-form? acct)) (= (:ns-doc acct) (:ns/doc (d/entity db [:ns/name (:ns acct)]))))
                    (every? (fn [{v :var :keys [kind contract doc]}]
                              (let [x (d/entity db (def-eid db [:var v]))]
                                (and (= kind (:var/kind x)) (= contract (:var/contract x)) (= doc (:var/doc x)))))
