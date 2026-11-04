@@ -20,7 +20,7 @@ The pure decision, ```seon.reconcile/judgment```, is given the index and the mea
 - a merge task the done rule refuses nothing is `:ready`, or `:gate` when its change reaches process tests (held when this root has no checkout to run them on), and a task of any other kind is `:done`;
 - an agent that ended `:waiting` or `:cap` on a task that is no merge parks (`:parked`, or `:cap`): never a hold, its session waits ([turn](turn.md#parked));
 - an end the done rule refuses (`:green` or `:red` by the agent's word, not done by root's facts) is told why: outcome `:told`, with a verdict message that wakes the session; the same reasons again hold the task. A verdict of `:behind` alone is `:behind`, told again until `:seon.config.merge/max-behind` judgments; a task a merge task follows is never judged behind, since the merge task merges main into the branch and the gate tests what it writes;
-- every other refusal holds the task ([tasks](tasks.md#a-refused-run-is-held-for-root)).
+- every other reason holds the task ([tasks](tasks.md#a-refused-run-is-held-for-root)).
 
 ## The reconciler's index
 

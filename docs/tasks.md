@@ -43,7 +43,7 @@ An example is an ended agent holding the records of the session it was made from
 
 An agent holds the task root started it for from its first form: `my.task/current` reads the task through `seon.turn/current-task`. Both ride `seon.root/spawn!`'s opts (`:branch`, `:task`) into the writer's `:spawn` request and the fork server's `:fork` message, and `seon.agent/init!` keeps them in the agent's state (nil for an agent forked with none). A turn loop, a context read and an attached outside agent read it the same way.
 
-## Task content reaches main at the agent's end
+## Task content reaches main at the run's end
 
 When an agent ends, every task whose content its branch changed since the branch's base is written onto main, and one that main also changed, differently, is a conflict for root: a task edited on two live branches should not happen, and when it does, root resolves it.
 
