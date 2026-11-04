@@ -313,6 +313,7 @@
         tx-data (if (some #(if (map? %) (some text? (keys %)) (and (vector? %) (text? (nth % 2 nil)))) tx-data)
                   (with-citations (db) tx-data)
                   tx-data)]
+    (when-let [e (pdb/invalid-datom (db) tx-data)] (throw (ex-info (:seon.error/message e) e)))
     (if (= :test (:mode @state))
       (let [r (d/with (db) tx-data) attrs (into #{} (map :a) (:tx-data r))]
         (doc/carry-index! (:db-before r) (:db-after r) attrs)

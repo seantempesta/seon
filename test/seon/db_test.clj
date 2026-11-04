@@ -1004,3 +1004,21 @@
     (is (= (seon.print/code (seon.print/text (sorted-map :a 1) (:part seon.print/budgets))) (contract/kept (sorted-map :a 1))) "a sorted map is its print")
     (is (not= (vec (range 100000)) (contract/kept (vec (range 100000)))) "past the budget, its print")))
 
+(deftest a-datom-its-attribute-refuses-is-invalid-and-names-it
+  ;; docs/storage.md#the-write-checks-every-datom: the store checks a value's type, and a data attribute's only that it is
+  ;; plain, so a declared schema was not enforced; the write holds each value to its attribute's schema
+  (let [db (ts/test-db)
+        bad-record {:seon.eval/id "x" :seon.eval/record {:code 1 :response {:handle 'result/e1}}}
+        e (pdb/invalid-datom db [bad-record])]
+    (is (= :seon.db/invalid-datom (:seon.error/type e)) (pr-str e))
+    (is (= :seon.eval/record (:attribute e)) "it names the attribute")
+    (is (some #(= [:code] (:in %)) (:seon.error/problems e)) (str "and where in the value: " (pr-str (:seon.error/problems e))))
+    (testing "every way a transaction holds a value"
+      (is (= :seon.turn/origin (:attribute (pdb/invalid-datom db [{:seon.turn/id "t" :seon.turn/origin :no-such-origin}]))) "a scalar's narrower schema")
+      (is (= :seon.turn/origin (:attribute (pdb/invalid-datom db [[:db/add "t" :seon.turn/origin :no-such-origin]]))) ":db/add")
+      (is (= :seon.turn/origin (:attribute (pdb/invalid-datom db [{:seon.turn/id "m" :seon.turn/run {:seon.run/id "r" :seon.turn/origin :no-such-origin}}]))) "a nested entity"))
+    (testing "what it does not ask"
+      (is (nil? (pdb/invalid-datom db [{:seon.eval/id "x" :seon.eval/record {:code "c" :response {:handle 'result/e1}}}])) "a valid value")
+      (is (nil? (pdb/invalid-datom db [{:seon.turn/id "m" :seon.turn/run [:seon.run/id "r"]} [:db/retract 1 :seon.turn/origin :model] [:db.fn/retractAttribute 1 :seon.turn/origin]])) "a ref's lookup, a retraction, a function")
+      (is (nil? (pdb/invalid-datom db [{:lab.own/thing (Object.)}])) "an attribute no schema declares: the store's to judge"))))
+

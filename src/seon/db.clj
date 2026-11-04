@@ -20,6 +20,35 @@
   one that refuses to open (:seon.db/types-differ) or is migrated."
   (subs (clojure.string/replace (str (hasch/uuid schema)) "-" "") 0 8))
 
+(defn invalid-datom
+  "The first value of tx-data its attribute's declared schema refuses, as the error :seon.db/invalid-datom naming the
+  attribute and where in the value, or nil: an attribute's schema is what the store holds it to, at the write, where
+  the store itself checks only a value's type. A map's attributes and :db/add's are read; a ref is its entity's own
+  (a nested map is walked, an id or lookup names one); an attribute no schema declares (an agent's own, its registry
+  its branch's) and a transaction function are not asked. See docs/storage.md#the-write-checks-every-datom."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.db/tx-data] [:maybe :seon.error/base]]}
+  [db tx-data]
+  (let [schema (:schema db)]
+    (letfn [(refused [a v]
+              (when-not (contract/valid? a v)
+                (let [ps (contract/problems (contract/schema a) v)]
+                  (contract/error :seon.db/invalid-datom #'invalid-datom (let [{:keys [in value]} (first ps)] (str a " refuses this value at " in ": " (:seon.print/code value)))
+                                  {:attribute a :seon.error/problems ps}))))
+            (value [a v]
+              (let [{:db/keys [valueType cardinality]} (get schema a)
+                    many? (= :db.cardinality/many cardinality)
+                    vs (if (and many? (or (sequential? v) (set? v))) v [v])]
+                (if (= :db.type/ref valueType)
+                  (some #(when (map? %) (entity %)) vs)
+                  ;; a many attribute's schema is of its set, each value one member of it
+                  (refused a (if many? (set vs) v)))))
+            (entity [m]
+              (some (fn [[a v]] (when (and (qualified-keyword? a) (contains? contract/forms a) (some? v)) (value a v))) m))]
+      (some (fn [op]
+              (cond (map? op) (when-not (record? op) (entity op))
+                    (and (vector? op) (= :db/add (first op)) (contains? contract/forms (nth op 2 nil))) (value (nth op 2) (nth op 3 nil))))
+            tx-data))))
+
 (defn eid
   "The entity id of the entity whose unique attribute a has value v on db, or nil: one seek
   in a's AVET index, never a query (a Datalog query here cost ~95 us and 100 KB at 100

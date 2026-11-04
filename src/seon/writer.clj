@@ -284,7 +284,10 @@
   [st o {:keys [op] :as m}]
   (try
     (if (= op :tx)
-      (update st :pend (fnil conj []) m)
+      ;; what its attribute refuses is answered here, its requester's own, and never joins the batch
+      (if-let [e (pdb/invalid-datom @(:conn st) (:tx-data m))]
+        (do (answer o (:dest m) e) st)
+        (update st :pend (fnil conj []) m))
       (other-op (commit-batch st o) o m))
     (catch Throwable e
       ;; an interop edge (Datahike) refused: the request's answer is the error, as data

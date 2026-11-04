@@ -636,6 +636,8 @@
                                       [:tuple [:= :example] :string :int] [:tuple [:= :eval] :string [:map-of :keyword :symbol]]
                                       ;; the page's parts a request sent: the agent, the commit they are drawn at on replay, whole?, their ids, the model call that sent them
                                       [:tuple [:= :parts] :int :uuid :boolean [:vector :string] :string]
+                                      ;; and sent as what changed: the commit of the parts it changed from (seon.context/request)
+                                      [:tuple [:= :parts] :int :uuid :boolean [:vector :string] :string :uuid]
                                       ;; the content hash of every part the model has after the request: what the next compares
                                       [:tuple [:= :hashes] [:map-of :string :uuid]]]]
  ;; where the turn's time went, as the agent saw it: the proof run, the context render, the
