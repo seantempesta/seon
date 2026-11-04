@@ -27,6 +27,29 @@ What Seon is for, where it stands, the one step being worked now, and the steps 
 3. **Beside it:** page controls for delete, compact, forget and reset; reset through the writer; a browser spike for the image.
 4. **Then:** the image; agents improving renders by default.
 
+**Every known bug has a place in this order** (the owner, 2026-11-04: "Please fix all the bugs. Don't just ack them incorporate the fixes and schedule them"). Each is a task; a bug found later joins this list the day it is found, at the step it belongs to, and is closed by a test, not by a note. As root causes (AGENTS section 3).
+
+| When | Bug | Task |
+|---|---|---|
+| The schema, now | Two prints of one eval, so an outside agent read more than the model | done on the branch: one text |
+| The schema, now | An example dropped evals of ``@ctx`` | done on the branch: keeps every eval |
+| The schema, now | A part of ``@ctx`` recorded a basis through metadata, so a whole record could replace what the agent saw | done on the branch |
+| The schema, next | A success reported as an error when ``seon.repl/response`` fails its own contract | ``seon.repl/a-responses-contract-does-not-turn-success-into-an-error`` |
+| The schema, next | An agent dies when a commit throws, as it did on a Ratio; the Ratio's source is unknown | ``seon.db/a-ratio-at-a-commit-ends-its-agent``, ``seon.repl/a-commit-that-keeps-failing-ends-no-agent-silently`` |
+| The schema, runs out | A turn number restarting each run; a test's error living on a process; seven attributes nothing names; 26 open tasks written on the old shape | ``seon.db/an-attribute-is-declared-because-something-uses-it``, and the runs commit |
+| The core | The model render runs outside the component's tracked run, so its reads are invisible and it can't ask for the db; an agent's own render choice doesn't redraw | to file: both renders run in the one tracked run |
+| The core | A var call a render can't draw is silently left as a call; the rule conflicts with the structure view | ``seon.render/a-var-call-a-render-cannot-draw-says-why`` |
+| The core | The debug page draws a branch by main's code, and root's walk a branch's layout by main's | ``seon.render/the-debug-page-reads-a-branchs-own-renders``, ``seon.render/roots-walk-of-a-branch-draws-the-branchs-layout`` |
+| The core | Status repeats every failure in full: 22 reds, 32k tokens a turn | to file: status's declared summary |
+| The core | After a layout changes, old parts stay on the page for a pass | to file: trace it first |
+| The core | Text printed where no agent reads it | ``seon.print/the-one-printer-is-for-context`` |
+| Beside the core | Result handles are a counter, so a curated cut shifts them | to file: a handle names its value |
+| Beside the core | Reset forks by hand: not through the writer, no turn loop from the reconciler, not at any eval; cutting between two calls of one reply is untried | to file: reset to any point |
+| Beside the core | A proof child's death says nothing | ``seon.agent/a-proof-child-that-died-says-why`` |
+| Beside the core | A re-registered attribute of another type is refused only at the write | to file: registering says so |
+| After | History across all kept branches grows without a measure (``seon.union``) | to file: measure it |
+| Each merge | The standing root misses merges while the main tree is on a topic branch (``bin/update``) | update it at each merge of the schema work |
+
 **Done so far:** the transcript's steps 0-5, a new turn no longer rerunning the status, namespace docs written, the ``inputs`` rename, removal as unlink, re-render when a definition moves.
 
 **The baselines,** six tasks at f19afd9d35, two runs: 2 of 6 and 3 of 6 green. Identical runs of one task went from capped at 40 turns to green in 9, so a one-task difference means little.
