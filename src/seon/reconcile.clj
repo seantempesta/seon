@@ -854,6 +854,9 @@
         {k :key branch :branch} (agent-of main id)
         end (when k (pull-end db k))
         carried (task/carry-tx base db main)
+        ;; the done rule reads main as this judging leaves it: the task content its branch changed (the proofs a design or a whole
+        ;; task registered, its plan) is carried in the same write, so the rule is applied to the index with the carry observed
+        idx (if (seq (:tx carried)) (let [w (d/with main (:tx carried))] (index idx main (:db-after w) (:tx-data w))) idx)
         failure (:seon.task/failure (task/task db id))
         turn (:seon.agent/turn (d/entity db [:seon.agent/key k]) 0)
         ;; marked failed by its agent at the turn its end came on (my.task/fail!): the failure on main and the task held for root
