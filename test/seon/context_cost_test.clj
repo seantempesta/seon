@@ -51,15 +51,30 @@
                                     :seon.eval/record (assoc (:seon.eval/record v) :run (if (< i (quot n 2)) "demo/f#1" "demo/f#2"))))))]
     [db (:db/id (d/entity db [:seon.agent/key "b/a1"]))]))
 
+(defn records-of
+  "The input at n of seon.context/records: the agent's ctx value over session-of's db, as a request reads it."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :map :seon.host/db]]}
+  [n] (let [[db e] (session-of n)] [(:tree (seon.ctx/build db e :b)) db]))
+
+(deftest a-request-reads-what-the-agents-ctx-holds
+  ;; task seon.render/one-way-to-make-what-an-agent-is-sent, step 5; the owner, 2026-10-26: nothing in a request is read from
+  ;; anywhere but its ctx. Later records read newest first come out as all of them do, and a record the ctx does not hold
+  ;; is not sent
+  (let [[c db] (records-of 6)
+        all (seon.context/records c db)
+        since (first (nth all 3))]
+    (clojure.test/is (= 6 (count all)))
+    (clojure.test/is (= (filterv #(>= (first %) since) all) (seon.context/records c db since)) "the new ones, in order")
+    (clojure.test/is (= 5 (count (seon.context/records (update c :evals dissoc (first (keys (:evals c)))) db))) "what the pattern does not reach is no record")))
+
 (deftest a-sessions-records-cost-one-read-per-record
   ;; design agent-loop section 1: the conversation is the session's, so the first request after
   ;; a wake or a load reads every record of it, cold; a later request reads only what is new
   ;; (:printed, a-turn-prints-its-new-records-flat-in-the-history)
-  (cost/proof {:of 'seon.context/records :input 'seon.context-cost-test/session-of
+  (cost/proof {:of 'seon.context/records :input 'seon.context-cost-test/records-of
                :n "eval records of the session"
-               :work (str "per record: its datom found by the agent's AVET range (one seek), one pull of three attributes "
-                          "(its record a data value), and one place in the sort by tx; the messages' query adds nothing "
-                          "when none came")
+               :work (str "per record: its member of ctx read, one datom for its tx (one seek) and one place in the sort by tx; "
+                          "no message or reply costs nothing")
                :growth :linear
                ;; measured 2026-10-25: 798 KB at 10, 5.46 MB at 100, 52.8 MB at 1,000 (about 52 KB a
                ;; record: its pull and its record's data value), one contracted call (records itself)
@@ -232,7 +247,8 @@
                                    [{:seon.eval/id "e-last" :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key "b/a1"}
                                      :seon.eval/record {:code "(f)" :call-id "c-last" :call 0 :prose "Last." :response {:handle 'result/e-last :value 1}}}]
                                    (turn 2)))]
-    [e (opts db3 2 (parts 3) (:printed r1))]))
+    ;; with its @ctx, as a turn asks (seon.turn/act!)
+    [e (assoc (opts db3 2 (parts 3) (:printed r1)) :ctx (:tree (seon.ctx/build db3 (:db/id e) :b)))]))
 
 (deftest a-turns-request-costs-its-parts-flat-in-the-session
   ;; task seon.context/the-context-is-the-agents-evals-and-seons (R1): a request is the previous one and

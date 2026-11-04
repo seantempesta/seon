@@ -658,7 +658,7 @@
             _ (ev! "x1" "b/a9" "other#1" "(other)")
             db @conn
             a (:db/id (d/entity db [:seon.agent/key "b/a1"]))
-            ids (mapv (fn [[_ v]] (or (:seon.eval/id v) (:seon.message/id v))) (context/records db a))]
+            ids (mapv (fn [[_ v]] (or (:seon.eval/id v) (:seon.message/id v))) (context/records (:tree (seon.ctx/build db a :b)) db))]
         (is (= ["e1" "m1" "e2"] ids) "the first run's eval and message, then the second's, and no other agent's")))))
 
 (deftest a-sessions-next-stage-keeps-the-last-request-as-its-prefix
@@ -1406,7 +1406,7 @@
                                     {:seon.turn/id "b/a1/2" :seon.turn/agent [:seon.agent/key "b/a1"] :seon.turn/n 2 :seon.turn/reply "(defn f0 [x] (let [y"
                                      :seon.turn/truncated true}])
         a (:db/id (d/entity db [:seon.agent/key "b/a1"]))]
-    (is (= ["Done: f0 is green."] (keep (comp :seon.turn/reply second) (context/records db a))) "the whole reply is a record, the cut one is not")))
+    (is (= ["Done: f0 is green."] (keep (comp :seon.turn/reply second) (context/records (:tree (seon.ctx/build db a :b)) db))) "the whole reply is a record, the cut one is not")))
 
 (deftest failures-that-got-the-same-value-are-one-entry
   ;; 2026-10-29, the md-scan bench: nine assertions that each threw one NullPointerException were
@@ -1537,7 +1537,7 @@
             example (subvec (vec more) 0 close-at)
             db @conn
             original (mapcat (fn [[_ v k]] (case k :seon.db/eval-fact (context/eval-messages {} v) :seon.message/fact (context/message-messages {} v) :seon.turn/turn-fact (context/turn-messages {} v)))
-                             (context/records db (pdb/eid db :seon.agent/key "b/src")))
+                             (context/records (:tree (seon.ctx/build db (pdb/eid db :seon.agent/key "b/src") :b)) db))
             prefix #(str/replace (pr-str %) "example-abc-" "")]
         (is (= "system" (:role sys)))
         (is (= {:role "user" :content "<session id=\"example/abc\" kind=\"example\" from=\"seon\">\nA finished session of another task, shown for how its work was done; not yours. Its request:\nMake h."} open) "the example's opening and its request")
@@ -1578,7 +1578,7 @@
       (let [tx (context/session-tx @conn "b/src" "abc")
             names (fn [db k] (let [a (pdb/eid db :seon.agent/key k)]
                                (mapv (fn [[_ v kind]] (case kind :seon.db/eval-fact (context/eval-messages {} v) :seon.message/fact (context/message-messages {} v) :seon.turn/turn-fact (context/turn-messages {} v)))
-                                     (context/records db a))))]
+                                     (context/records (:tree (seon.ctx/build db a :b)) db))))]
         (is (= tx (clojure.edn/read-string (pr-str tx))) "plain data: written with pr-str, read back")
         (is (= {:seon.agent/key "example/abc" :seon.agent/id :example-abc :seon.agent/status :ended :seon.agent/description "Make h."} (ffirst tx)))
         (is (= 4 (count tx)) "the agent, then a transaction for each of three records")
@@ -1587,7 +1587,7 @@
             (doseq [t (clojure.edn/read-string (pr-str tx))] (d/transact fresh t))
             (is (= (str/replace (pr-str (names @conn "b/src")) "example-abc-" "") (str/replace (pr-str (names @fresh "example/abc")) "example-abc-" ""))
                 "the example draws the same messages as the original's records")
-            (is (= ["example/abc/s1" "example/abc/m1" "example/abc/demo/h#1/1"] (mapv (fn [[_ v]] (or (:seon.eval/id v) (:seon.message/id v) (:seon.turn/id v))) (context/records @fresh (pdb/eid @fresh :seon.agent/key "example/abc"))))
+            (is (= ["example/abc/s1" "example/abc/m1" "example/abc/demo/h#1/1"] (mapv (fn [[_ v]] (or (:seon.eval/id v) (:seon.message/id v) (:seon.turn/id v))) (context/records (:tree (seon.ctx/build @fresh (pdb/eid @fresh :seon.agent/key "example/abc") :b)) @fresh)))
                 "ids re-keyed under the example, in the order they ran")))))))
 
 (deftest the-page-draws-its-tasks-examples-with-evaluation
@@ -1764,4 +1764,3 @@
     (is (str/includes? (print/record-text data) "app.x/f") "the plain value's text, which the model reads")
     (is (str/includes? (print/record-text rec) "app.x/f") "and the text printed of a value that is no data")
     (is (not (contains? (:response rec) :fns)) "what the tool does not promise stays out")))
-

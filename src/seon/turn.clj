@@ -294,7 +294,7 @@
         ;; its parts are the live walk's (what changed since the frame before), never drawn cold, and the
         ;; request is made on the db the walk is drawn to: one db for both
         [db parts] (repl/page-hiccup)
-        {:keys [messages sent printed]} (context/render db basis {:printed (get-in @agent/state [:printed run]) :parts parts})
+        {:keys [messages sent printed]} (context/render db basis {:printed (get-in @agent/state [:printed run]) :parts parts :ctx @ctx/ctx})
         _ (swap! agent/state assoc :printed {run printed})
         context-ms (long (profile/ms-since t0))
         _ (when sent (agent/transact! [{:seon.model-call/id id :seon.model-call/sent sent}]))
@@ -413,7 +413,7 @@
         _ (when take? (when-let [tx (not-empty (main-base-tx))] (agent/transact! tx) (agent/commit!)))
         basis (assoc (basis! task run n 1 :outside true) :agent (:key @agent/state))
         [db parts] (repl/page-hiccup)
-        {:keys [messages printed sent]} (context/render db basis {:printed (get-in @agent/state [:printed run]) :parts parts})
+        {:keys [messages printed sent]} (context/render db basis {:printed (get-in @agent/state [:printed run]) :parts parts :ctx @ctx/ctx})
         _ (when take? (swap! agent/state assoc-in [:printed run] printed))
         text (str/join "\n\n" (map :content messages))]
     ;; the read is a turn of this run, as a model turn is: what it was built from and what it cost
