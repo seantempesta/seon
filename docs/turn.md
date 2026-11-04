@@ -5,6 +5,8 @@ An agent works its task in a loop inside its own process: run its proofs, end if
 ## One run, from release to judge
 
 Root's reconciler forks an agent for a released task and evaluates ```seon.turn/work!``` in it, naming the task, the run and `:seon.config.agent/max-turns`. The loop ends on the first of:
+
+**Being replaced:** there are no runs: an agent works, and root sets judged attributes on its task; a turn is a number. See [the Seon way](seon-way.md#what-needs-to-change); do not build on it.
 - the done rule refuses nothing (`:green`; all green at the start ends it with no model call);
 - `my.task/fail!` asked to stop (`:failed`, the task held for root: [tasks](tasks.md#a-refused-run-is-held-for-root));
 - a merge task's merge of main is too hairy (`:merge-failed`, [below](#a-merge-tasks-loop));
