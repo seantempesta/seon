@@ -617,14 +617,20 @@
      (and (:seon.agent/key who) (symbol? (get-in details [:seon.eval/response :ns]))) (assoc :seon.agent/ns (get-in details [:seon.eval/response :ns])))])
 
 (defn- kept
-  "Value v as an eval's record keeps it: plain data (seon.contract/plainly), or past the largest value kept
-  (:seon.config.store/max-value-chars, counted by seon.contract/within?) the marker of what it was and the bound it
-  passed, {:seon.value/gone {:type :over}}. See docs/storage.md#plain-data."
-  {:malli/schema [:=> [:cat :any] :any]}
+  "Value v as an eval's record keeps it, [value drawn?]: plain data (seon.contract/plainly); past the largest value kept
+  (:seon.config.store/max-value-chars, counted by seon.contract/within?), what its schema's model render draws of it,
+  when it declares one and that fits (drawn? true: it is that render's value, to print as it is); else the marker of what
+  it was and the bound it passed, {:seon.value/gone {:type :over}}. See docs/storage.md#plain-data."
+  {:malli/schema [:=> [:cat :any] [:tuple :any :boolean]]}
   [v]
   (let [bound (cfg/value :seon.config.store/max-value-chars)
         p (contract/plainly v bound)]
-    (if (contract/within? p bound) p {:seon.value/gone {:type (.getName (class v)) :over bound}})))
+    (if (contract/within? p bound)
+      [p false]
+      (let [m (some-> (render/model v) :value (contract/plainly bound))]
+        (if (and (some? m) (contract/within? m bound))
+          [m true]
+          [{:seon.value/gone {:type (.getName (class v)) :over bound}} false])))))
 
 (defn record-details
   "What an eval records, each its own attribute of its entity (:seon.eval/code, :response, :schema, :basis, :prose,
@@ -644,9 +650,11 @@
         ;; travels through select-keys, assoc and dissoc, so a map made of it is the data it holds, never a basis
         ctx? (and (contains? resp :value) (some? v) (identical? v @ctx/ctx))
         basis (when ctx? (select-keys v [:t :branch]))
-        schema (when (contains? resp :value) (when-let [k (:seon.render/schema (meta v))] (when (or ctx? (not= :seon.ctx/ctx k)) k)))]
+        [kv drawn?] (when (and (contains? resp :value) (not basis)) (kept v))
+        ;; a value its model render has already drawn prints as it is
+        schema (when (and (contains? resp :value) (not drawn?)) (when-let [k (:seon.render/schema (meta v))] (when (or ctx? (not= :seon.ctx/ctx k)) k)))]
     (cond-> {:seon.eval/code code
-             :seon.eval/response (cond basis (dissoc resp :value) (contains? resp :value) (assoc resp :value (kept v)) :else resp)}
+             :seon.eval/response (cond basis (dissoc resp :value) (contains? resp :value) (assoc resp :value kv) :else resp)}
       schema (assoc :seon.eval/schema schema)
       basis (assoc :seon.eval/basis basis)
       (:prose req) (assoc :seon.eval/prose (:prose req))
@@ -708,16 +716,11 @@
   "The text of eval fact rec as every reader reads it: the one function the model's message prints with
   (seon.print/record-text, through render/model, an @ctx eval's value rebuilt from its basis by seon.context/basis-value, as
   seon.context/eval-messages does), so the outside agent's text and the model's cannot differ; the live value stays at
-  the handle. The one difference: a value too large to keep (:seon.value/gone) is read from live answer r, which a reader
-  in this process holds whole, so its schema's render (the agent's state prints as its summary) still has the value it
-  describes, not the marker. Made only for a reader: an eval makes and stores data, and a model's is printed where its
-  request is assembled. See docs/render.md#a-render-is-a-value-printed-once."
-  {:malli/schema [:=> [:cat :map :map] :string]}
-  [rec r]
-  (print/record-text (cond-> rec
-                       (:seon.eval/basis rec) (assoc-in [:seon.eval/response :value] (context/basis-value (:db @agent/state) rec))
-                       (:seon.value/gone (get-in rec [:seon.eval/response :value])) (assoc-in [:seon.eval/response :value] (:value r)))
-                     render/model))
+  the handle. Made only for a reader: an eval makes and stores data, and a model's is printed where its request is
+  assembled. See docs/render.md#a-render-is-a-value-printed-once."
+  {:malli/schema [:=> [:cat :map] :string]}
+  [rec]
+  (print/record-text (cond-> rec (:seon.eval/basis rec) (assoc-in [:seon.eval/response :value] (context/basis-value (:db @agent/state) rec))) render/model))
 
 (defn eval-string
   "Evaluate code through the one REPL path (the handler and its middleware) and answer its one
@@ -745,7 +748,7 @@
                 answered (fn [] (let [r (again code (cond-> (repaired (response @answers handle) req)
                                                       (:ns @agent/state) (assoc :ns (ns-name (:ns @agent/state)))))
                                       rec (record-details code r req (get-in @agent/state [:turn :run]))]
-                                  [r rec (when (not= :model (:origin req)) (text-of rec r))]))
+                                  [r rec (when (not= :model (:origin req)) (text-of rec))]))
                 [r rec text] (try (@the-handler (assoc req "code" code :reply #(vswap! answers conj %)))
                               (answered)
                               (catch Throwable e
@@ -952,7 +955,7 @@
         r (repaired (response [{:tag :err :err e}] handle) req)
         rec (record-details code r req (get-in @agent/state [:turn :run]))]
     (swap! agent/state assoc-in [:results (keyword (name handle))] r)
-    (record! (cond-> r (not= :model (:origin req)) (assoc :text (text-of rec r))) rec code req)))
+    (record! (cond-> r (not= :model (:origin req)) (assoc :text (text-of rec))) rec code req)))
 
 (defn- layout
   "The layout this branch renders its ctx with: the var :seon.render/render-ctx declares, an agent's own

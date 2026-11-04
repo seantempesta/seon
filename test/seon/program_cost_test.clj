@@ -495,7 +495,8 @@
      ;; the test db's schema entries); 0.79M / 5.0 MB on the standing root's main (2699 forms, 660 entries)
      :per-n {:ticks 235.0 :bytes 1160.0}
      :fixed {:ticks 93000.0 :bytes 465000.0}
-     :sizes [30 100 300]}))
+     ;; past 70 forms: ticks step down about 11k between 60 and 70 at one per-form slope either side, the test db's index layout
+     :sizes [100 300 1000]}))
 
 (defn meaning-input
   "The cost proof's input at n: a db of n vars each with a docstring, and tx-data redefining each with another."
