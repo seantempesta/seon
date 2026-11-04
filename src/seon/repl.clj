@@ -761,7 +761,7 @@
             ;; how main differs from the branch, said with the answer an outside agent's seon_eval gets, and never recorded
             ;; (seon.agent/main-difference): computed at t, so the agent is never surprised at done
             (let [fns (when (some :fns @answers) (into [] (mapcat :fns) @answers))
-                  res (record! (cond-> r text (assoc :text text))
+                  res (record! (cond-> r text (assoc :text text) fns (assoc :fns fns))
                                (cond-> rec fns (assoc :seon.eval/fns fns))
                                code req)
                   m (when (= :agent (:mode @agent/state)) (agent/main-difference))]
