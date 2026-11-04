@@ -79,7 +79,7 @@ A live test agent tried each of these by data alone, on the 2026-11-04 tip of th
 These are the known departures from the rules, in the order of the work, each with its cause rather than its symptom.
 
 **Facts nobody writes, so code guesses:**
-- Nothing says which turn an eval or a message belongs to, so ``seon.render.ui/turn-evals`` infers it from write order. A turn is a number, not an entity: each record carries it, and the conversation is one query, ordered by turn, messages first, then evals. What a turn entity holds today moves to where it belongs: a reply is a record, and what a call cost is on the model call. ``:seon.turn/n`` restarts each run, one more reason runs should go.
+- Nothing says which turn an eval or a message belongs to, so ``seon.render.ui/turn-evals`` infers it from write order. A turn is a number, not an entity: each record carries it, and the conversation is one query, ordered by turn, messages first, then evals. What a turn entity holds today moves to where it belongs: a reply is a record, and what a call cost is on the model call.
 
 **Data shaped against its use:**
 - ``:seon.turn/*`` and ``:seon.model-call/*`` describe one thing under one id, with reasoning and calls also on the eval. A turn entity goes: the number is on each record, and how a call went is on the model call.
@@ -95,9 +95,9 @@ These are the known departures from the rules, in the order of the work, each wi
 
 **The debug page draws from root:** root's rebuild runs main's code and costs up to 5 GB a draw on a real page. A live agent should draw its own; an ended agent's needs an answer.
 
-**Runs:** the owner ruled there is no concept of a run, yet ``:seon.run/*`` remains: 17 source files, 64 schema lines and 422 test lines, most in the reconciler, and it is why a reset agent has no turn loop. It is the largest change here, and it is not needed by the core, so it comes after.
+**There are no runs** (owner, 2026-11-04: "There are no runs get rid of them"; built on `jolt/simpler-schema`, unmerged): an agent works a task and root decides once, when the agent ends, how the task stands; a task holds that (its agent, outcome, reason, reasons, commit, and when they happen the rest), the agent holds its environment and, on its branch, its own end, and a flight is keyed by task id ([reconcile](reconcile.md#a-task-holds-how-its-work-ended)). A retry after a failure, a wake and a load are the same agent, the cap is agent-wide ([turn](turn.md#the-cap)), and no verdict or merge entity exists beside the task.
 
-**Smaller:** two identities on an agent (``:seon.agent/id`` and ``:seon.agent/key``); two html renders of an eval; several words for a part (part, unit, component, tile); ``my.task/status`` and ``my.task/data`` computing what parts hold.
+**Smaller:** two identities on an agent (``:seon.agent/id``, this process's name, and ``:seon.agent/key``, the session); two html renders of an eval; several words for a part (part, unit, component, tile); ``my.task/status`` and ``my.task/data`` computing what parts hold.
 
 **Tried and not simpler:** an example cannot simply ref the finished agent, because a session's records live on its branch, not main, and its call ids would collide, so loading it as a copy stays. The agent's three html renders are a head, a record and a page, not three of one thing; the default render shrinks them but they remain.
 

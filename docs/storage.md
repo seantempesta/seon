@@ -97,9 +97,9 @@ The owner's example, root's message on main and the agent's reply on its branch,
 
 ```clojure
 (d/q '[:find ?body ?reply ?branch :in $ ?agent
-       :where [?run :seon.run/id ?agent] [?m :seon.message/to ?run] [?m :seon.message/id ?id] [?m :seon.message/body ?body]
+       :where [?m :seon.message/branch ?agent] [?m :seon.message/id ?id] [?m :seon.message/body ?body]
               [?r :seon.message/reply-to ?id ?tx] [?r :seon.message/body ?reply] [?tx :seon.tx/branch ?branch]]
-     (my.root/union sys) "demo/f#1")
+     (my.root/union sys) :task-demo-f)
 ```
 
 Measured 2026-10-23 (REPL, LMDB, main 46,708 datoms, each branch one turn of ~15 datoms; docs/storage.md):
