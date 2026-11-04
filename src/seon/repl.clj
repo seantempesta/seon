@@ -708,11 +708,16 @@
   "The text of eval fact rec as every reader reads it: the one function the model's message prints with
   (seon.print/record-text, through render/model, an @ctx eval's value rebuilt from its basis by seon.context/basis-value, as
   seon.context/eval-messages does), so the outside agent's text and the model's cannot differ; the live value stays at
-  the handle. Made only for a reader: an eval makes and stores data, and a model's is printed where its request is
-  assembled. See docs/render.md#a-render-is-a-value-printed-once."
-  {:malli/schema [:=> [:cat :map] :string]}
-  [rec]
-  (print/record-text (cond-> rec (:seon.eval/basis rec) (assoc-in [:seon.eval/response :value] (context/basis-value (:db @agent/state) rec))) render/model))
+  the handle. The one difference: a value too large to keep (:seon.value/gone) is read from live answer r, which a reader
+  in this process holds whole, so its schema's render (the agent's state prints as its summary) still has the value it
+  describes, not the marker. Made only for a reader: an eval makes and stores data, and a model's is printed where its
+  request is assembled. See docs/render.md#a-render-is-a-value-printed-once."
+  {:malli/schema [:=> [:cat :map :map] :string]}
+  [rec r]
+  (print/record-text (cond-> rec
+                       (:seon.eval/basis rec) (assoc-in [:seon.eval/response :value] (context/basis-value (:db @agent/state) rec))
+                       (:seon.value/gone (get-in rec [:seon.eval/response :value])) (assoc-in [:seon.eval/response :value] (:value r)))
+                     render/model))
 
 (defn eval-string
   "Evaluate code through the one REPL path (the handler and its middleware) and answer its one
@@ -740,7 +745,7 @@
                 answered (fn [] (let [r (again code (cond-> (repaired (response @answers handle) req)
                                                       (:ns @agent/state) (assoc :ns (ns-name (:ns @agent/state)))))
                                       rec (record-details code r req (get-in @agent/state [:turn :run]))]
-                                  [r rec (when (not= :model (:origin req)) (text-of rec))]))
+                                  [r rec (when (not= :model (:origin req)) (text-of rec r))]))
                 [r rec text] (try (@the-handler (assoc req "code" code :reply #(vswap! answers conj %)))
                               (answered)
                               (catch Throwable e
@@ -947,7 +952,7 @@
         r (repaired (response [{:tag :err :err e}] handle) req)
         rec (record-details code r req (get-in @agent/state [:turn :run]))]
     (swap! agent/state assoc-in [:results (keyword (name handle))] r)
-    (record! (cond-> r (not= :model (:origin req)) (assoc :text (text-of rec))) rec code req)))
+    (record! (cond-> r (not= :model (:origin req)) (assoc :text (text-of rec r))) rec code req)))
 
 (defn- layout
   "The layout this branch renders its ctx with: the var :seon.render/render-ctx declares, an agent's own
@@ -1024,9 +1029,10 @@
 (defn- told-refused
   "Replies rs, the first one that answers an eval (a map :response) carrying what the branch refused since the last answer
   under :unrecorded (seon.agent/take-refused!); rs as it was when none refused or none answers an eval (it waits
-  for the next). The commit that follows a request is where its writes are refused, after its answer was made.
+  for the next); nil when the request has no reply (a clone). The commit that follows a request is where its writes are
+  refused, after its answer was made.
   See docs/failure-points.md."
-  {:malli/schema [:=> [:cat [:sequential :map]] [:sequential :map]]}
+  {:malli/schema [:=> [:cat [:maybe [:sequential :map]]] [:maybe [:sequential :map]]]}
   [rs]
   (let [i (first (keep-indexed #(when (map? (:response %2)) %1) rs))]
     (if-let [e (and i (agent/take-refused!))]

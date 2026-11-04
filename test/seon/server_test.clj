@@ -257,7 +257,7 @@
     (is (clojure.string/includes? (str (:text no-ns)) "names no namespace") "a plain no-such-var answer")
     (is (clojure.string/includes? (str (:text not-a-name)) "Source not found") "and a name that is none")
     (is (< (count (:text state)) 6000) "a bare swap! of the agent's state answers its summary, not 42,000 characters")
-    (is (clojure.string/includes? (:text state) "(get (deref seon.agent/state) :db)") "each host object by its type, with the form that reads it")
+    (is (clojure.string/includes? (:text state) "(get (deref seon.agent/state) :db)") (str "each host object by its type, with the form that reads it: " (:text state)))
     (is (nil? (:ex sourced)) (str "source resolves in a namespace the agent switched to: " (pr-str (:ex sourced))))
     (is (clojure.string/includes? (str (:text sourced)) "defn help") "and reads the definition")))
 

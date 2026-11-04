@@ -154,6 +154,10 @@
       (is (= {:id 1 :name {:seon.value/type (.getName (class inc))}} (contract/plainly (->Row 1 inc))))
       (is (= {:a {:b 1}} (contract/plainly (sorted-map :a (sorted-map :b 1)))))
       (is (= #{1 2} (contract/plainly (sorted-set 1 2)))))
+    (testing "a db is a map to Clojure and a record, and still a host object: its class, never its fields"
+      (let [db (datahike.db/empty-db)]
+        (is (= {:seon.value/type (.getName (class db))} (contract/plainly db)))
+        (is (= {:db {:seon.value/type (.getName (class db))}} (contract/plainly {:db db})))))
     (testing "a lazy seq is a vector, realized to the bound and no further"
       (let [realized (volatile! 0)
             xs (map (fn [i] (vswap! realized inc) i) (range))]

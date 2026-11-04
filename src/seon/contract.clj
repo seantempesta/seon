@@ -75,7 +75,8 @@
    (let [again #(plainly % bound)]
      (cond (plain? v) v
            ;; a host object that is a record too (a db, a datom) is told by its class, never walked: a db's seq is not its fields
-           (and (clojure.core/record? v) (not (or (instance? datahike.db.DB v) (instance? datahike.db.AsOfDB v) (instance? datahike.datom.Datom v)))) (again (into {} v))
+           (or (instance? datahike.db.DB v) (instance? datahike.db.AsOfDB v) (instance? datahike.datom.Datom v)) {:seon.value/type (type-name v)}
+           (clojure.core/record? v) (again (into {} v))
            (sorted? v) (again (if (map? v) (into {} v) (into #{} v)))
            (map? v) (into {} (map (fn [[k x]] [(again k) (again x)])) v)
            (vector? v) (mapv again v)

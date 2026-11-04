@@ -82,9 +82,7 @@
   made when a request asks for it and kept on its cache entry by its revision, so the page never pays for it
   (docs/render.md#a-part-answers-data). The render is called (f {} v), whoever asks."
   {:malli/schema [:function [:=> [:cat :any] [:maybe [:map [:value :any]]]] [:=> [:cat :map [:vector :any]] :any]]}
-  ([v]
-   (when-let [sym (model-declared (:seon.render/schema (meta v)))]
-     {:value ((requiring-resolve sym) {} v)}))
+  ([v] (model-with v {}))
   ([w k]
    (let [c (get @(:cache w) k)]
      (if (= (:rev c) (:model-rev c))
