@@ -219,4 +219,8 @@ The design (approved):
 Cost: every :full reference is paid in every request's tokens (cached, still read), so defaults stay :lead and an agent opens more with my.agent/help or read!. A cost proof: an agent's reads cost the sections they name, drawn once a wiki change, not once a turn.
 Owner: the context session (the ctx pull and its render); the optimization session proves and merges it."
   :seon.task/kind :work
-  :seon.task/proofs #{}}]
+  :seon.task/proofs #{}}
+ {:seon.task/name "the-status-declares-its-summary"
+  :seon.task/plan "What was seen, in the lab, 2026-11-04: 22 stray red tests made the status 32k tokens a turn, repeated on the page each request. A prototype render, each red's name, its first failure and a form that reads it, made it 2k. What should be true: the status's declared model render is that summary, any agent can override it, and the whole is a read away, by a form the render names. The no-cuts ruling of 2026-10-30 is about an agent's own values: this is a render's choice with the rest a form away, and the owner's call. my.agent/red does not exist yet."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.context-test/many-red-tests-draw-a-summary-with-what-reads-the-rest}}]
