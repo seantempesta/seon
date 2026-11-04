@@ -144,6 +144,17 @@
 (defrecord Row [id name])
 
 ;; docs/storage.md#plain-data: a value that is not plain data is made plain as data, never as its print.
+;; See docs/storage.md#plain-data
+(deftest a-value-past-the-bound-costs-the-bound
+  ;; seon.repl/kept counts before it copies: an eval's huge or endless value is not walked past the bound
+  (let [realized (atom 0)
+        endless (map (fn [x] (swap! realized inc) x) (range))]
+    (is (false? (contract/within? endless 100)) "an endless seq is past any bound")
+    (is (< @realized 200) (str "and is realized no further than the bound and a chunk: " @realized)))
+  (is (true? (contract/within? (map inc (range 10)) 100)) "a short lazy seq is within it")
+  (is (false? (contract/within? {:a (vec (range 200))} 100)) "members count, at any depth")
+  (is (true? (contract/within? (datahike.db/empty-db) 1)) "a db is one thing: plainly keeps its type, and never walks it"))
+
 (deftest plainly-never-prints
   (let [gone #(= [:seon.value/gone] (keys %))
         e (ex-info "boom" {:a (atom 1)})]

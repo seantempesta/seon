@@ -90,17 +90,19 @@
            :else {:seon.value/type (type-name v)}))))
 
 (clojure.core/defn within?
-  "Is plain value v no larger than bound characters, counted by a walk that stops as soon as it passes the bound:
-  each scalar 1, a string, keyword or symbol its length, a collection its members (a map's keys and values). Nothing is
-  printed to measure. See docs/storage.md#plain-data."
+  "Is value v no larger than bound characters, counted by a walk that stops as soon as it passes the bound, so a value of any
+  size costs at most the bound, and a lazy seq is realized no further: each scalar 1, a string, keyword or symbol its length, a
+  collection or seq its members (a map's keys and values); a db or a datom, which `plainly` never walks, 1. Nothing is printed to
+  measure. See docs/storage.md#plain-data."
   {:malli/schema [:=> [:cat :any pos-int?] :boolean]}
   [v bound]
   (let [left (volatile! bound)
         ok (fn ok [x]
              (vswap! left - (if (or (string? x) (keyword? x) (symbol? x)) (count (str x)) 1))
              (and (>= @left 0)
-                  (cond (map? x) (every? (fn [[k y]] (and (ok k) (ok y))) x)
-                        (or (vector? x) (set? x) (list? x)) (every? ok x)
+                  (cond (or (instance? datahike.db.DB x) (instance? datahike.db.AsOfDB x) (instance? datahike.datom.Datom x)) true
+                        (map? x) (every? (fn [[k y]] (and (ok k) (ok y))) x)
+                        (or (vector? x) (set? x) (seq? x)) (every? ok x)
                         :else true)))]
     (ok v)))
 

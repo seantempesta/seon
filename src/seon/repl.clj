@@ -623,10 +623,10 @@
   it was and the bound it passed, {:seon.value/gone {:type :over}}. See docs/storage.md#plain-data."
   {:malli/schema [:=> [:cat :any] [:tuple :any :boolean]]}
   [v]
-  (let [bound (cfg/value :seon.config.store/max-value-chars)
-        p (contract/plainly v bound)]
-    (if (contract/within? p bound)
-      [p false]
+  (let [bound (cfg/value :seon.config.store/max-value-chars)]
+    ;; counted before anything is copied: a value past the bound costs the bound, whatever its size
+    (if (contract/within? v bound)
+      [(contract/plainly v bound) false]
       (let [m (some-> (render/model v) :value (contract/plainly bound))]
         (if (and (some? m) (contract/within? m bound))
           [m true]
