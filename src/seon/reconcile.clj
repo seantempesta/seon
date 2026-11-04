@@ -610,7 +610,7 @@
 (defn evidence
   "The measured evidence of task id held for root: its conflicts and unmerged keys (from its judging; none for a death), the
   proofs not passing in root's own test run (red), and the problem the reconciler stated (nil: none)."
-  {:malli/schema [:=> [:cat :seon.task/id [:map [:conflicts {:optional true} [:sequential :any]] [:unmerged {:optional true} [:sequential :string]]
+  {:malli/schema [:=> [:cat :seon.task/id [:map [:conflicts {:optional true} [:maybe [:sequential :any]]] [:unmerged {:optional true} [:maybe [:or [:sequential :string] [:set :string]]]]
                                          [:red {:optional true} [:sequential :qualified-symbol]]] [:maybe :string]] :seon.task/evidence]}
   [id {:keys [conflicts unmerged red]} problem]
   (cond-> {:from id :conflicts (vec conflicts) :unmerged (vec unmerged) :red (vec (sort-by str red))}
@@ -709,6 +709,10 @@
 ;; requests to the api (spawn, eval, tests, the writer's reads and writes, kill), each answer
 ;; arriving on :answers keyed by its request id. A flight is its task's; an action whose task is in flight is not
 ;; started twice.
+
+(def ^:private refusal-attrs
+  "The attributes a refusal writes on its task (seon.task/refused-tx: the outcome, and the judged attributes it sets and retracts)."
+  (conj (set task/judged-attrs) :seon.task/outcome))
 
 (defn- request
   "Send req to the api as this proc's request: the answer comes back on :answers tagged by a
@@ -813,8 +817,11 @@
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/id] [:maybe :string]]}
   [db id]
   (let [k (:key (agent-of db id))
+        ;; the stage opened by this start: the agent's task was replaced in the transaction that wrote its start time (seon.task/start-tx),
+        ;; so a later start of the same task (a wake) sees the old replacement and opens no stage again
+        started (when k (:tx (first (d/datoms db :eavt (:db/id (d/entity db [:seon.agent/key k])) :seon.agent/started-ms))))
         [prev-task] (when k (->> (d/q '[:find ?tid ?tx :in $ ?k :where [?a :seon.agent/key ?k] [?a :seon.agent/task ?t ?tx false] [?t :seon.task/id ?tid]] (d/history db) k)
-                                 (sort-by second) last))]
+                                 (filter #(= started (second %))) (sort-by second) last))]
     (when (and prev-task (not= prev-task id))
       (let [{:keys [plan proofs]} (:seon.task/accumulated (task/task db id))]
         (str prev-task " is done. Your task now is " id ", in this same session: what you did so far stays above.\n\n"
@@ -1050,8 +1057,8 @@
                                                        ;; (:seon.config.merge/max-behind), never a rerun without end
                                                        (and (= :seon.merge/behind (:seon.error/type r)) (< n (cfg/value :seon.config.merge/max-behind)))
                                                        (task/move-tx task :ready :behind {:seon.task/reason (:seon.error/message r) :seon.task/error r})
-                                                       :else (into (hold-tx (:db st) task (task/move-tx task :ready :closed {:seon.task/reason problem :seon.task/error r})
-                                                                            problem {:conflicts (:seon.task/conflicts t) :unmerged (:seon.task/unmerged t)})))))
+                                                       :else (hold-tx (:db st) task (task/move-tx task :ready :closed {:seon.task/reason problem :seon.task/error r})
+                                                                      problem {:conflicts (:seon.task/conflicts t) :unmerged (:seon.task/unmerged t)}))))
                                                  (:members act) (:results r))))))
       ;; the gate's candidate is the writer's: the files the octopus merge would write (seon.writer's :merge-candidate),
       ;; forms', tests' and schema resources' alike (a :seon.ref/block change left out would meet its new
@@ -1188,10 +1195,11 @@
                  ;; a commit touching tasks, runs or config keys ends a quiet spell (root's own
                  ;; quiescent fact does not)
                  work? (or (not next?) (some (fn [[_ _ a]] (and (keyword? a) (watched-ns (namespace a)) (not= "seon.root" (namespace a)))) (:ops m)))
-                 ;; a commit holding only refused runs (the refused runs' own writes) changes
-                 ;; nothing that refused them; any other work lets a refused task ask again
+                 ;; a commit holding only the writes of a refusal (the outcome and what it sets, seon.task/refused-tx) changes
+                 ;; nothing that refused it; any other work, an edit of the refused task itself too, lets it ask again
                  only-refused? (and next? (every? (fn [[_ e a]] (or (not (and (keyword? a) (watched-ns (namespace a))))
-                                                               (= :refused (get-in idx [:tasks (second (get-in idx [:keys e])) :seon.task/outcome]))))
+                                                               (and (contains? refusal-attrs a)
+                                                                    (= :refused (get-in idx [:tasks (second (get-in idx [:keys e])) :seon.task/outcome])))))
                                               (:ops m)))
                  st (assoc st :db db :t t :idx idx :seen (inc (:seen st)) :lists (cond-> (:lists st 0) (not= (:prev m) (:t st -2)) inc)
                            :quiet (boolean (and (:quiet st) (not work?)))

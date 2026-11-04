@@ -385,8 +385,8 @@
   this boot), the judged attributes cleared; the agent's entity (key, id, task, branch and the rest of its environment,
   its boot and when it started), its turn budget set only when it is new (a raised budget stays, docs/turn.md#the-cap).
   A refused spawn is the task's outcome :refused with root's reason and error, and no agent."
-  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.task/id :string [:maybe :keyword] :seon.task/env :int] [:vector :map]]
-                  [:=> [:cat :seon.host/db :seon.task/id :string [:maybe :keyword] :seon.task/env :int [:maybe :string]] [:vector :map]]]}
+  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.task/id :string [:maybe :keyword] :seon.task/env :int] [:vector :any]]
+                  [:=> [:cat :seon.host/db :seon.task/id :string [:maybe :keyword] :seon.task/env :int [:maybe :string]] [:vector :any]]]}
   ([db id boot agent env start-ms] (start-tx db id boot agent env start-ms nil))
   ([db id boot agent {:keys [branch model max-turns holder]} start-ms key]
    (let [k (when agent (or key (agent-key boot agent)))
@@ -503,7 +503,11 @@
               (update :seon.task/needs #(set (map :seon.task/id %)))
               (update :seon.task/proofs set)
               (update :seon.task/kind #(or % :work)))
-    (:seon.task/agent t) (update :seon.task/agent :seon.agent/key)))
+    (:seon.task/agent t) (update :seon.task/agent :seon.agent/key)
+    ;; a pull answers a card-many attribute as a vector; these are sets on the task's schema
+    (:seon.task/deferred t) (update :seon.task/deferred set)
+    (:seon.task/changed t) (update :seon.task/changed set)
+    (:seon.task/unmerged t) (update :seon.task/unmerged set)))
 
 (def placeholder-assertion
   "The assertion seon.context writes into a proof's test that does not exist yet (its :proof-unknown

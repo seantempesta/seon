@@ -145,7 +145,7 @@
                          [:spawn [:map {:closed true} [:op [:= :spawn]] [:task :seon.task/id] [:env :seon.task/env]]]
                          ;; a parked session's next work on its live process (agent): no fork
                          [:wake [:map {:closed true} [:op [:= :wake]] [:task :seon.task/id] [:env :seon.task/env]
-                                 [:agent :string]]]]
+                                 [:agent :keyword]]]]
  :seon.reconcile/actions [:vector :seon.reconcile/action]
  ;; ---- the model ----
  ;; a conversation message: an assistant's may carry its eval calls, a tool message answers one by its id
