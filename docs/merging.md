@@ -52,6 +52,10 @@ The full runs are explicit: `bin/test --all` and `bin/check 100`. They are also 
 
 Measured on the shared machine, niced, at about 370 tests and 34 steps: selecting takes the import plus the digests, 7-12 s; an unchanged tree reuses every green (`bin/prove --checks`: 34 of 34 steps reused in 8.5 s, against about 6 minutes for `bin/check 100`); a one-defn change on the agent's turn path ran 71 tests and 33 steps in about 11 minutes; a cold run (nothing green) took about 19 minutes. A digest follows the tree, never what the process analyzed, and a test takes the whole tree as an input only through ```seon.program/env-readers```; a pin bump moves `:env` for every test, honestly.
 
+## A test child is a fork of a live agent
+
+A test's verdict is a function of the test alone, but an agent's test child is a fork of a process that has been working, where a `bin/test` shard starts blank. It inherits the agent's walk, its config (profile, ports, source and runs directories), its environment, and a working directory of its own (```seon.fx/run-dir```). So a child disposes the walk as it starts (```seon.agent/run-tests-forked```), and a test reads nothing of its runner: a test of the config resolves the config it names, and a test of a file names it from ```seon.config/checkout```. The check that holds this is `agent-tests` ([checks](checks.md#modes)): it runs every test that reaches no process through one agent that has drawn its page, on a root whose provider is not the scripted one. The other direction is ```seon.repl/eval-string```'s: an eval that leaves the agent's state empty, as a test's cleanup run at its REPL can, gets it back.
+
 ## The test service
 
 One proc, `:prove` (```seon.prove/prove-proc```, declared in `resources/seon/system.edn`), admits every request to run tests, whoever asks: a Claude session (the server's `:prove` op, the MCP tool `seon_prove`, ```seon.root/prove!```) and an agent's turn (```seon.agent/prove!```, which ```seon.turn/observe``` calls) share it, so a change is proved once.

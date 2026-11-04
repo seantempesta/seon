@@ -369,6 +369,15 @@
     (sh/sh "rm" "-f" f)
     (is (= [false 0] found) (str "no interrupt and no eval of its parent's: " (pr-str found) " " (pr-str run)))))
 
+;; See docs/merging.md#a-test-child-is-a-fork-of-a-live-agent
+(deftest an-eval-that-empties-the-agents-state-leaves-it-working
+  ;; a test run at an agent's REPL ended by resetting the state it had taken for its own (seon.ctx-test's end-agent!):
+  ;; every later call was seon.agent/db's nil, and the agent died at its next prove (the control of 2026-11-05)
+  (let [[gone after page] (in-agent ["(do (reset! seon.agent/state nil) :emptied)" "(+ 1 2)" "(some? (seon.repl/page-hiccup))"])]
+    (is (= :emptied (:value gone)) (pr-str gone))
+    (is (= 3 (:value after)) (pr-str after))
+    (is (true? (:value page)) (pr-str page))))
+
 (deftest an-agent-answers-while-its-tests-run
   ;; task seon.turn/observe-reads-are-renders (phase B): root's :tests request forks the test child
   ;; and a fiber reads it, so the agent's loop answers an eval while its own tests run. The test

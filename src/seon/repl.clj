@@ -737,12 +737,16 @@
          handle (symbol "result" (str "e" (eval-n!)))
          ;; the writes its forms make and its record name it (seon.agent/transact!'s tx-meta); an
          ;; eval inside it (a context read's) names its own, then this one's again
-         outer (:eval @agent/state)]
+         outer (:eval @agent/state)
+         before @agent/state]
      (swap! agent/state assoc :eval (name handle))
      (try (let [;; with the namespace the REPL is in after it (:ns, as every nREPL response carries): the prompt
                 ;; an eval makes data: its value made plain here, inside the boundary, so a value that throws as it is
                 ;; realized is the error; text only for a reader who is not a model (whose message is printed at its request)
-                answered (fn [] (let [r (again code (cond-> (repaired (response @answers handle) req)
+                ;; its forms left the agent no db (a test's cleanup, run at this REPL): the agent goes on as it was, its walk made
+                ;; again, and ctx rebuilt by the state's watch (docs/merging.md#a-test-child-is-a-fork-of-a-live-agent)
+                answered (fn [] (when (and (:db before) (nil? (:db @agent/state))) (reset! agent/state (dissoc before :walk)))
+                               (let [r (again code (cond-> (repaired (response @answers handle) req)
                                                       (:ns @agent/state) (assoc :ns (ns-name (:ns @agent/state)))))
                                       rec (record-details code r req)]
                                   [r rec (when (not= :model (:origin req)) (text-of rec))]))
