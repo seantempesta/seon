@@ -518,6 +518,26 @@
         (is (some? (digest db t)) (str label ": the test has a digest"))
         (is (not= (digest db t) (digest db' t)) (str label ": the method's change moves the test's digest"))))))
 
+(deftest a-types-method-moves-the-digest-on-an-import
+  ;; the same, on the path bin/test and root read a program by: analyzed, never run, so the type is in no image and
+  ;; its ctor's class is the bare name as written. The answer does not depend on what the process has loaded
+  (let [in {:env "e" :tree "t" :config {}}
+        digest (fn [db t] (get-in (program/graph-index (program/reach-graph db nil) in nil) [t :digest]))]
+    (doseq [[label n before after use]
+            [["(T.)" "a" "(deftype TIa [] clojure.lang.IDeref (deref [_] 1))" "(deftype TIa [] clojure.lang.IDeref (deref [_] 2))" "(defn f [] (TIa.))"]
+             ["(new T)" "b" "(deftype TIb [] clojure.lang.IDeref (deref [_] 1))" "(deftype TIb [] clojure.lang.IDeref (deref [_] 2))" "(defn f [] (new TIb))"]
+             ["(R.)" "c" "(defrecord RIc [] clojure.lang.IDeref (deref [_] 1))" "(defrecord RIc [] clojure.lang.IDeref (deref [_] 2))" "(defn f [] (RIc.))"]]]
+      (let [nsym (str "app.pt-tyi" n) path (str "src/app/pt_tyi" n ".clj") tpath (str "src/app/pt_tyi" n "_test.clj")
+            text #(str "(ns " nsym ")\n" % "\n" use "\n")
+            test-src (str "(ns " nsym "-test (:require [clojure.test :refer [deftest is]] [" nsym "]))\n(deftest f-test (is (some? (" nsym "/f))))\n")
+            t (symbol (str nsym "-test") "f-test")
+            db (let [db (empty-db)] (d/db-with db (source/import-tx db {path (text before) tpath test-src})))
+            refreshed (d/db-with db (source/refresh-tx db {path (text after)}))
+            whole (let [db (empty-db)] (d/db-with db (source/import-tx db {path (text after) tpath test-src})))]
+        (is (some? (digest db t)) (str label ": the test has a digest"))
+        (is (not= (digest db t) (digest refreshed t)) (str label ": the method's change moves it on a refresh"))
+        (is (= (digest refreshed t) (digest whole t)) (str label ": and a whole import agrees"))))))
+
 (deftest an-update-gives-the-digests-a-rebuild-gives
   (let [db (calc-db)
         in {:env "e" :tree "t" :config {}}

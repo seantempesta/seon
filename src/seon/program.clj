@@ -205,12 +205,13 @@
   as one), the ops of the requests it builds (:ops: a map's constant keyword under :op), the qualified keywords its constants name (:keywords: the attributes, config keys
   and schema entries its code reads or writes), the banned vars it references, the
   calls it bounds by a clock (:timeouts: deref with a timeout), its catch clauses
-  (:catches, each {:class :answers}), the namespaces it requires, and whether it changes its
-  namespace's environment (:env?)."
+  (:catches, each {:class :answers}), the classes it constructs (:news, as the analyzer names them, which
+  `account` makes references), the namespaces it requires, and whether it changes its namespace's
+  environment (:env?)."
   {:malli/schema [:=> [:cat :map] :map]}
   [node]
   (let [acc (volatile! {:defs [] :inline-defs #{} :methods [] :impls [] :multis #{} :refs #{} :quoted #{} :keywords #{} :ops #{} :banned #{} :requires #{} :env? false
-                        :timeouts #{} :catches #{}})]
+                        :timeouts #{} :catches #{} :news #{}})]
     ((fn walk [n in-fn?]
        (case (:op n)
          :def (if in-fn?
@@ -223,11 +224,8 @@
                            (when (banned s) (vswap! acc update :banned conj s))
                            (vswap! acc update :refs conj s))
          :host-static (vswap! acc update :refs conj (symbol (str (:class n)) (str (:member n))))
-         ;; (T. x): a type of the program, its class named ns.T, whose var holds it: the ctor reaches its methods. A
-         ;; host class's package is no namespace
-         :host-new (let [c (str (:class n)) i (str/last-index-of c ".")]
-                     (when (and i (find-ns (symbol (subs c 0 i))))
-                       (vswap! acc update :refs conj (symbol (subs c 0 i) (subs c (inc i))))))
+         ;; (T. x): the class as the analyzer names it, read as a reference by `account`, which knows the namespace
+         :host-new (vswap! acc update :news conj (str (:class n)))
          ;; a scalar names no var unless it is a qualified symbol, and no data but a qualified
          ;; keyword: most constants (unqualified keywords, strings, numbers) cost no walk
          (:quote :const) (let [x (datum n)]
@@ -292,7 +290,7 @@
   [as]
   (reduce (fn [a b] (merge-with (fn [x y] (if (boolean? x) (or x y) (into x y))) a b))
           {:defs [] :inline-defs #{} :methods [] :impls [] :multis #{} :refs #{} :quoted #{} :keywords #{} :ops #{} :banned #{} :requires #{} :env? false
-           :timeouts #{} :catches #{}}
+           :timeouts #{} :catches #{} :news #{}}
           as))
 
 (defn root-of
@@ -425,7 +423,11 @@
                (or ns-form? (seq defs) (seq declares) (seq methods) (seq impls) (:env? a)))
       (cond-> {:id (form-id nsym src k) :src src :ns nsym :ns-form? (boolean ns-form?)
                :defs defs :declares declares :methods (or methods []) :impls (or impls [])
-               :refs (into (:refs a) (macro-uses nsx form)) :quoted (:quoted a) :ops (:ops a) :requires (:requires a) :banned (:banned a) :inline-defs (:inline-defs a)
+               :refs (-> (:refs a) (into (macro-uses nsx form))
+                         ;; a ctor reaches its type's methods: ns.T, or a bare T (analyzed, not run, the type is in no
+                         ;; image) of this namespace, the type's var; a host class's name is no var, and drops out of the graph
+                         (into (map (fn [c] (if-let [i (str/last-index-of c ".")] (symbol (subs c 0 i) (subs c (inc i))) (symbol (str nsym) c)))) (:news a)))
+               :quoted (:quoted a) :ops (:ops a) :requires (:requires a) :banned (:banned a) :inline-defs (:inline-defs a)
                ;; its code's keywords and its contracts': the data it operates on, read once here
                :keywords (into (:keywords a) (comp (keep :contract) (mapcat (comp names sedn/decode))) defs)
                :timeouts (:timeouts a) :catches (:catches a)}
