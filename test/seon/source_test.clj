@@ -251,7 +251,7 @@
         main-sha (git tree "rev-parse" "main")
         [main2 ours] (merged (main-with-file) 'app.pt-src "(defn twice [x] (* 2 x))")
         files (source/files main2 (source/changed-files main2 ours))
-        msg (source/commit-message [{:task :app.pt/twice :run "app.pt/twice#1"}])
+        msg (source/commit-message [{:task "app.pt/twice"}])
         r (fx/git-commit {:req {:dir tree :branch "jolt/seon-merges" :files files :message msg}})]
     (is (re-matches #"[0-9a-f]{40}" (str (get-in r [:value :sha]))) (pr-str r))
     (is (= (get-in r [:value :sha]) (git tree "rev-parse" "jolt/seon-merges")) "the merges branch, made at HEAD, holds the commit")
@@ -265,7 +265,7 @@
     (is (= main-sha (git tree "rev-parse" "main")) "main never moves")
     (is (= (get files "src/app/pt_src.clj") (str (git tree "show" (str (get-in r [:value :sha]) ":src/app/pt_src.clj")) "\n")) "the merged text is what was committed")
     (is (= ["src/app/pt_src.clj"] (str/split-lines (git tree "diff" "--name-only" "main" (get-in r [:value :sha])))) "only the merged file")
-    (is (str/includes? (git tree "log" "-1" "--format=%B" (get-in r [:value :sha])) "app.pt/twice#1") "the message names the run")
+    (is (str/includes? (git tree "log" "-1" "--format=%B" (get-in r [:value :sha])) "task app.pt/twice") "the message names the task")
     (is (= (str (config/value :seon.config.source/committer-name) " <" (config/value :seon.config.source/committer-email) "> "
                 (config/value :seon.config.source/committer-name) " <" (config/value :seon.config.source/committer-email) ">")
            (git tree "log" "-1" "--format=%an <%ae> %cn <%ce>" (get-in r [:value :sha])))
@@ -367,7 +367,7 @@
         (is (= 2 (count (:commits t2)))
             (when-not (= 2 (count (:commits t2)))
               (str "two merges committed: " (pr-str (select-keys t1 [:commits :commit-errors])) " then " (pr-str (select-keys t2 [:commits :commit-errors]))
-                 "; the runs: " (pr-str (ask "(vec (sort (datahike.api/q (quote [:find ?id ?st ?out ?turns :where [?r :seon.run/id ?id] [?r :seon.run/status ?st] [(get-else $ ?r :seon.run/outcome :none) ?out] [(get-else $ ?r :seon.run/turns :none) ?turns]]) @(:conn sys))))")))))
+                 "; the tasks: " (pr-str (ask "(vec (sort (datahike.api/q (quote [:find ?id ?out :where [?t :seon.task/id ?id] [(get-else $ ?t :seon.task/outcome :none) ?out]]) @(:conn sys))))")))))
         ;; a crash: answered at the root's death, as its holder reaped it
         (ts/kill-root! @root)
         (keep-boot!)
@@ -437,10 +437,10 @@
         db (d/db-with db (source/import-tx db {facts-path text}))
         ;; the entry's line as the file has it (a property added to the entry moves with it), and
         ;; its form with :paused added, as an edit would write it
-        status-line (some #(when (str/starts-with? % " :seon.run/status ") %) (str/split-lines text))
-        paused (str/trim (subs (str/replace status-line ":closed :refused]]" ":closed :refused :paused]]") (count " :seon.run/status ")))
+        status-line (some #(when (str/starts-with? % " :seon.task/reason ") %) (str/split-lines text))
+        paused (str/trim (subs (str/replace status-line ":string" "[:string {:min 1}]") (count " :seon.task/reason ")))
         edit (fn [tx] (get (source/files (d/db-with db tx) [facts-path]) facts-path))]
-    (is (str/ends-with? status-line ":closed :refused]]") "the entry's line ends its enum as the edit expects")
+    (is (str/ends-with? status-line " :string") "the entry's line is its plain value, as the edit expects")
     (testing "every schema resource imported and written back unchanged is the same text"
       (let [dir (java.io.File. (str here "/resources/seon/schemas"))
             files (into {} (for [f (.listFiles dir) :when (str/ends-with? (.getName f) ".edn")]
@@ -450,16 +450,16 @@
         (is (seq files) "the schemas directory holds resources")
         (is (= files (source/files db (source/source-files db))))))
     (testing "a replaced value: only its changed part"
-      (is (= (str/replace text status-line (str/replace status-line ":closed :refused]]" ":closed :refused :paused]]"))
-             (edit [{:schema/key :seon.run/status
+      (is (= (str/replace text status-line (str/replace status-line ":string" "[:string {:min 1}]"))
+             (edit [{:schema/key :seon.task/reason
                      :schema/form paused}]))))
     (testing "a removed entry takes its line"
-      (is (= (str/replace text "\n :seon.run/pid :int" "")
-             (edit [[:db/retractEntity [:schema/key :seon.run/pid]]]))))
+      (is (= (str/replace text "\n :seon.task/merged-t :int" "")
+             (edit [[:db/retractEntity [:schema/key :seon.task/merged-t]]]))))
     (testing "a new key after the last entry, read back as written"
-      (let [out (edit [{:schema/key :seon.run/invalid :schema/form "[:map [:seon.error/message :string]]" :schema/file facts-path}])]
-        (is (= (str (subs text 0 (- (count text) 2)) "\n :seon.run/invalid [:map [:seon.error/message :string]]}\n") out))
-        (is (= (assoc (edn/read-string text) :seon.run/invalid [:map [:seon.error/message :string]])
+      (let [out (edit [{:schema/key :seon.task/invalid :schema/form "[:map [:seon.error/message :string]]" :schema/file facts-path}])]
+        (is (= (str (subs text 0 (- (count text) 2)) "\n :seon.task/invalid [:map [:seon.error/message :string]]}\n") out))
+        (is (= (assoc (edn/read-string text) :seon.task/invalid [:map [:seon.error/message :string]])
                (edn/read-string out)))))))
 
 ;; ---- a merge loads in place (BUILD plan P4) ---------------------------------------------

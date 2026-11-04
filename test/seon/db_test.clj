@@ -424,7 +424,7 @@
   (let [i (mod (* k n) (- (count text) n))] (subs text i (+ i n))))
 
 (defn- turn-facts
-  "Turn k of a run as seon.turn/act! records it: the basis its context was built from
+  "Turn k of an agent as seon.turn/act! records it: the basis its context was built from
   (the commit, its red assertion; the text is made again from it, seon.context/render), its
   reply (1,500 bytes) and its eval call, whose eval's record holds what it evaluated to as the
   next turn shows it (2,000). The reply is real prose and the evaluated value real source, each turn its own
@@ -432,9 +432,9 @@
   printed data: a slurp, a source, a test's report): a repeated letter compressed ~3x better
   than real turn text and made LZ4 look like the fix (2026-10-22)."
   [k]
-  [{:seon.model-call/id (str "att/" k) :seon.model-call/run {:seon.run/id "att"} :seon.model-call/n k :seon.model-call/origin :model
+  [{:seon.model-call/id (str "att/" k) :seon.model-call/agent {:seon.agent/key "att"} :seon.model-call/n k :seon.model-call/origin :model
     :seon.model-call/reply (slice @prose k 1500) :seon.model-call/forms 1
-    :seon.model-call/basis {:commit (java.util.UUID. 0 k) :task "t/x" :run "att" :turn k :max-turns 8 :origin :model}}
+    :seon.model-call/basis {:commit (java.util.UUID. 0 k) :task "t/x" :turn k :max-turns 8 :origin :model}}
    ;; the call's eval, whose record holds its response as the next turn reads it
    {:seon.eval/id (str "e" k) :seon.eval/by "a1" :seon.eval/code "(f 2)" :seon.eval/response {:handle (symbol "result" (str "e" k)) :value (slice @code k 2000)}}])
 

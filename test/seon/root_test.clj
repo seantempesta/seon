@@ -99,7 +99,7 @@
   (let [checkout (seon.config/checkout)
         path (str checkout "/target/root-test-resume-" (random-uuid))
         later? #(or (str/starts-with? (namespace (:db/ident %)) "seon.config") (= "seon.ai.model" (namespace (:db/ident %)))
-                    (#{:ns/file :ns/tail :form/lead :form/source :seon.run/commit :seon.run/commit-error} (:db/ident %)))
+                    (#{:ns/file :ns/tail :form/lead :form/source :seon.task/commit :seon.task/commit-error} (:db/ident %)))
         cfg (pdb/store-cfg :lmdb path)
         _ (d/create-database cfg)
         c (d/connect cfg)
@@ -172,7 +172,7 @@
         _ (spit (str tasks "/demo.edn") (pr-str [{:seon.task/name "t" :seon.task/plan "Work." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]))
         main {:op :eval :agent "root" :code "(name (seon.db/conn-main (:conn sys)))"}
         ;; and root's watch fact: a task count off names the batch that loaded the task files (:last-load)
-        held {:op :eval :agent "root" :code "[(count (seon.task/tasks @(:conn sys))) (set (map str (keys (seon.task/runs @(:conn sys))))) (dissoc (:seon.root/watch (d/pull @(:conn sys) [:seon.root/watch] [:seon.root/id :root])) :roots :boot)]"}
+        held {:op :eval :agent "root" :code "[(count (seon.task/tasks @(:conn sys))) (set (keys (seon.task/agents @(:conn sys)))) (dissoc (:seon.root/watch (d/pull @(:conn sys) [:seon.root/watch] [:seon.root/id :root])) :roots :boot)]"}
         first-boot (str/split-lines (root-answers path "main" [main {:op :eval :agent "root" :code (str "(my.root/load-tasks! sys " (pr-str tasks) ")")}
                                                            {:op :attach :task "demo/t"} held]))
         second-boot (str/split-lines (root-answers path "main" [main held]))
@@ -180,11 +180,11 @@
     (try
       (is (= "main" (printed (first first-boot))) "a boot with no main named works on the config's main")
       (is (= "main" (printed (first second-boot))) "the second boot resumes the same main")
-      (let [[tasks-1 runs-1 watch-1] (printed (nth first-boot 3))
-            [tasks-2 runs-2 watch-2] (printed (second second-boot))]
-        (is (= [1 1] [tasks-1 (count runs-1)]) (str "the first boot holds the one task it loaded (a file task is one whole task) and the run it started; its watcher: " (pr-str watch-1)))
+      (let [[tasks-1 agents-1 watch-1] (printed (nth first-boot 3))
+            [tasks-2 agents-2 watch-2] (printed (second second-boot))]
+        (is (= [1 1] [tasks-1 (count agents-1)]) (str "the first boot holds the one task it loaded (a file task is one whole task) and the agent it started; its watcher: " (pr-str watch-1)))
         (is (= 1 tasks-2) (str "the second boot still holds the task; its watcher: " (pr-str watch-2)))
-        (is (every? runs-2 runs-1) "and the first boot's run (it reaps it and starts the next)"))
+        (is (every? agents-2 agents-1) "and the first boot's agent (its task is reaped, and started again by the next agent of the session)"))
       (finally (sh/sh "rm" "-rf" path tasks (str path "-in") (str path ".log") (str path "-agents"))))))
 
 (deftest a-test-roots-task-files-are-its-own

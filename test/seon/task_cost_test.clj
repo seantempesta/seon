@@ -2,8 +2,7 @@
   "Cost proofs of the task reader's hot lookups."
   (:refer-clojure :exclude [defn defn-])
   (:require [my.test :as mt] [clojure.test :refer [deftest is]] [seon.contract :refer [defn defn-]]
-            [datahike.api :as d] [seon.db :as pdb] [seon.task :as task] [seon.cost :as cost]
-            [seon.render.ui :as ui]))
+            [datahike.api :as d] [seon.db :as pdb] [seon.task :as task] [seon.cost :as cost]))
 
 (defn tasks-db
   "The input of size n: a main db holding n tasks, and the id of one of them."
@@ -30,61 +29,51 @@
      ;; 21 KB and 18 -> 21 us. The record a ratchet compares with is this measure's
      :overrun {:task "seon.db/avet-seek-allocates" :measured {:ns 21000.0 :bytes 21400.0}}}))
 
-(def ^:private explicit-run-pull
-  "The run pull before the wildcard (2026-10-22, research row 20): what the reader read."
-  [:seon.run/id {:seon.run/task [:seon.task/id]} :seon.run/status :seon.run/boot {:seon.run/agent [:seon.agent/id]}
-   :seon.run/pid :seon.run/start-ms :seon.run/end-ms :seon.run/branch :seon.run/model
-   :seon.run/max-turns :seon.run/outcome :seon.run/reason :seon.run/turns :seon.run/model-calls
-   :seon.run/tokens :seon.run/merged-t :seon.run/basis-t :seon.run/plan :seon.run/uncontracted
-   :seon.run/unmerged :seon.run/changed
-   {:seon.run/results [:seon.proof/test :seon.proof/status]}
-   {:seon.run/conflicts [:seon.merge/key :seon.merge/kind :seon.merge/base :seon.merge/ours :seon.merge/theirs]}])
-
-(defn runs-db
-  "The input of size n: a main db holding n ended runs of one task, each with what an
-  ended run carries on main: its end members (proof results, a commit) and the problem
-  members the judge writes (the error that ended it, a red test's assertions, a cost report,
-  the turns' waste)."
+(defn ended-db
+  "The input of size n: a main db holding n tasks whose agents ended, each with what a judging carries on main: its
+  reason, error, a commit, a red test's assertions, a cost report and the turns' waste (outcome-tx's members), and its agent."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db]]}
   [n]
   (let [db (mt/world)
-        db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "t" :seon.task/plan "p"}]))
-        report {:rows [{:n 100 :measured {:ns 1200.0 :bytes 900.0} :expected {:ns 1000.0 :bytes 800.0}}] :verdict {:ok? false :over [{:dim :ns :n 100 :ratio 1.2}] :steeper [] :under [] :unmerged []}}]
-    [(d/db-with db (vec (for [i (range n) :let [aid (str "demo/t#" i)]
-                              tx (concat (task/run-start-tx aid "demo/t" "boot-1" (keyword (str "a" i)) {:branch :b :model "m" :max-turns 4} 1000 "p")
-                                         [(assoc (task/end-members {:outcome :error :turns 3 :model-calls 3 :tokens 900 :results {'demo-test/t :fail}
-                                                                    :uncontracted #{} :reason "the model failed"} 2000 7)
-                                                 :seon.run/id aid :seon.run/commit "c0ffee"
-                                                 :seon.run/error {:seon.error/type :seon.model/no-provider :seon.error/operation 'seon.model/complete :seon.error/message "no model provider is configured"}
-                                                 :seon.run/failures {'demo-test/t [{:type :fail :message "sums" :expected "(= 3 (f 1 2))" :actual "(= 3 4)"}]}
-                                                 :seon.run/costs {'demo-test/c report}
-                                                 :seon.run/waste {'seon.doc/resolve-ref {:forms 2 :turns 1}})])]
-                          tx)))]))
+        ids (mapv #(str "demo/t" %) (range n))
+        db (d/db-with db (task/create-tx db (mapv (fn [i] {:seon.task/ns 'demo :seon.task/name (str "t" i) :seon.task/plan "p"}) (range n))))
+        report {:rows [{:n 100 :measured {:ns 1200.0 :bytes 900.0} :expected {:ns 1000.0 :bytes 800.0}}] :verdict {:ok? false :over [{:dim :ns :n 100 :ratio 1.2}] :steeper [] :under [] :unmerged []}}
+        started (d/db-with db (vec (mapcat (fn [i id] (task/start-tx db id "boot-1" (keyword (str "a" i)) {:branch :b :model "m" :max-turns 4} 1000)) (range) ids)))]
+    [(d/db-with started
+                (vec (mapcat (fn [id]
+                               (task/outcome-tx started id :running :dead
+                                                {:seon.task/reason "the model failed" :seon.task/commit "c0ffee"
+                                                 :seon.task/error {:seon.error/type :seon.model/no-provider :seon.error/operation 'seon.model/complete :seon.error/message "no model provider is configured"}
+                                                 :seon.task/failures {'demo-test/t [{:type :fail :message "sums" :expected "(= 3 (f 1 2))" :actual "(= 3 4)"}]}
+                                                 :seon.task/costs {'demo-test/c report}
+                                                 :seon.task/waste {'seon.doc/resolve-ref {:forms 2 :turns 1}}}))
+                             ids)))]))
 
-(deftest a-run-row-is-what-it-was-under-the-wildcard-pull
-  ;; land6 review: the wildcard pull (research row 20) brings every stored run member
-  ;; (its error, failures, cost reports, waste, commit) into the value; the dashboard's row
-  ;; reads its nine members, so it renders exactly what the explicit pull's value rendered
-  (let [[db] (runs-db 3)
-        old (#'task/run-value (d/pull db explicit-run-pull [:seon.run/id "demo/t#1"]))
-        new (task/run db "demo/t#1")]
-    (is (contains? new :seon.run/error) "the wildcard brings the problem members")
-    (is (= (ui/run-row {} old) (ui/run-row {} new)))))
+(deftest a-task-reads-with-every-member-its-judging-wrote
+  ;; land6 review: the wildcard pull (research row 20) brings every stored member (its error, failures, cost reports,
+  ;; waste, commit) into the value, so a row of a page draws from it what the judging recorded
+  (let [[db] (ended-db 3)
+        tk (task/task db "demo/t1")]
+    (is (= [:dead "c0ffee" "the model failed"] ((juxt :seon.task/outcome :seon.task/commit :seon.task/reason) tk)))
+    (is (every? #(contains? tk %) [:seon.task/error :seon.task/failures :seon.task/costs :seon.task/waste]) "the wildcard brings the problem members")
+    (is (= "boot-1/a1" (:seon.task/agent tk)) "and names its agent by key")))
 
-(deftest reading-every-run-costs-what-its-datoms-cost
+(deftest reading-every-task-costs-what-its-datoms-cost
   (cost/proof
-    {:of 'seon.task/runs :input 'seon.task-cost-test/runs-db
-     :n "ended runs on main, each with its end and problem members"
-     :work (str "one query for the run entities, then one wildcard pull each: every datom of the run read "
-                "once, its EDN members (error, failures, cost report, waste) decoded, its component results "
-                "pulled, then run-value (one contracted call). Measured 2026-10-22 at 100 runs: 14.9 ms "
-                "and 15.8 MB (149 us, 158 KB each); the explicit 23-attribute pull it replaced read the same "
+    {:of 'seon.task/tasks :input 'seon.task-cost-test/ended-db
+     :n "tasks whose agents ended on main, each with its judging's and problem members"
+     :work (str "one query for the task entities, then one wildcard pull each: every datom of the task read "
+                "once, its EDN members (error, failures, cost report, waste) decoded, then task-value (one contracted "
+                "call) and its accumulated plan and proofs. Measured 2026-10-22 at 100 runs (the entity this replaced): "
+                "14.9 ms and 15.8 MB (149 us, 158 KB each); the explicit 23-attribute pull it replaced read the same "
                 "input in 32.6 ms and 30.1 MB (one lookup per named attribute, absent ones included)")
      :growth :linear
-     ;; 2026-10-31 (shrink-tests-4): on the world, sizes [10 30 100]: 1.40M ns / 1.45 MB at 10, 3.87M / 4.18 MB at 30,
-     ;; 12.4M / 13.6 MB at 100 runs: ~124 us and 135 KB a run (the larger sizes read the same per run)
-     :per-n {:ns 130000 :bytes 140000 :calls 1}
-     :fixed {:ns 100000 :bytes 100000 :calls 1}
+     ;; 2026-10-31 (shrink-tests-4), as runs on the world, sizes [10 30 100]: 1.40M ns / 1.45 MB at 10, 3.87M / 4.18 MB at 30,
+     ;; 12.4M / 13.6 MB at 100: ~124 us and 135 KB each (the larger sizes read the same per entity)
+     ;; 2026-11-04, as tasks: 0.60M ns / 0.94 MB and 23 contracted calls at 10 (60 us, 94 KB, 2 calls each: task-value and
+     ;; accumulate; the runs it replaced made one, run-value). The ns and bytes bounds stay the runs' own
+     :per-n {:ns 130000 :bytes 140000 :calls 2}
+     :fixed {:ns 100000 :bytes 100000 :calls 3}
      :sizes [10 30 100]}))
 
 (defn carried-of
