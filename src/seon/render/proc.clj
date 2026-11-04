@@ -79,9 +79,10 @@
      ;; a stop that arrived before main recorded how the work ended says so once main does
      :events (let [evs (:events st []) ids (into #{} (keep :agent) evs)
                    idx (:idx st)
-                   outcome (when (seq ids)
+                   outcome (if (seq ids)
                              (into {} (for [[_ t] (:tasks idx) :let [a (get (:agents idx) (:seon.task/agent t))] :when (and a (ids (:seon.agent/id a)))]
-                                        [(:seon.agent/id a) (:seon.task/outcome t)])))]
+                                        [(:seon.agent/id a) (:seon.task/outcome t)]))
+                             {})]
                (mapv #(ui/ended-as % (:agent %) outcome) evs))}))
 
 ;;; --- main --------------------------------------------------------------------------------
