@@ -2,6 +2,42 @@
 
 This file holds the owner's standing rulings, one entry each: the rule, the owner's words and date, and where the rule is stated now; current truth and mechanism live in `AGENTS.md` and the wiki (`docs/`), and superseded or done rulings are kept verbatim in git history.
 
+## 2026-11-04 rulings
+
+The owner's rulings of 2026-11-04, on what an agent is and how everything it reads is made; the direction and what is proven are in [the Seon way](seon-way.md). They stand over earlier entries where they differ.
+
+### An agent's data makes its page and its context (owner, 2026-11-04)
+
+"The fact that the agent's pull is what makes an agent an agent is what makes it render the UI and which parts go where. A different agent could have different data attached and we want it to render differently to adapt to whatever data we give it. This is a general core function of the seon system. Make all data known, validate it, and we make it easy to process it for whatever needs the user has." And: "No more hand crafting things. Let the system operate and figure out how to have everything declare itself". Stated in: [the rules](seon-way.md#the-rules).
+
+### One way, batteries included (owner, 2026-11-04)
+
+"You can change how data is connected to each other and rename it and change directions on what is ref'ing what. We have full control so make a system that will work generally and optimally one way and make it so it's easier to build things the optimal way ... This isn't do anything you want it's a more rails style batteries included but you follow these constraints." Stated in: [the idea](seon-way.md#the-idea).
+
+### Store data for how it is used; a turn is a number (owner, 2026-11-04)
+
+"Whatever data we need you can store it any way you need to to retrieve it efficiently. That's how these databases work best. You plan ahead for how you want to use it and make sure that's easy and cheap". And: "I'm saying \"wtf is a turn\" but a number? An agent has turns and evals why are we organizing them on top of other entities". Stated in: [what needs to change](seon-way.md#what-needs-to-change).
+
+### A render asks for the db and queries what it wants (owner, 2026-11-04)
+
+"We assemble an agent why can't we add some data that triggers a render function to get the data you want and render it? The render functions get the curretn db if they ask for it so you can do any query you want and it doesn't have to be reachable from the agent directly". Stated in: [the rules](seon-way.md#the-rules).
+
+### Re-render when the data or its function changes (owner, 2026-11-04)
+
+"My point is thing in data and when data changes OR THE FUNCTION THAT RENDERS IT changes then you re-render". Stated in: [the rules](seon-way.md#the-rules).
+
+### Delete, compact and reset are data (owner, 2026-11-04)
+
+"A \"compaction\" is just removing and maybe modifying some data on the agent's entity and then the next message sent regenerates the context (which intentionally breaks caching) and we have the model keep working." And: "I want the ability to reset to any point AND to delete arbitrary data (the history is there if we ever need to revisit it) and have compaction work." Stated in: [what this gives you](seon-way.md#what-this-gives-you).
+
+### The page is latest only (owner, 2026-11-04)
+
+The owner approved the page as only the request's last message, narrowing the 2026-10-29 and 2026-10-30 rulings that a part is sent as what changed: "always include the most recent ... (not accumulating)". Stated in: [the flow](seon-way.md#the-flow).
+
+### Every agent improves the renders (owner, 2026-11-04)
+
+"We distrubute the task of writing rendering functions for data across the whole system so every agent helps build a better understanding o fthe data we are storing and processing in the system by default". Stated in: [what this gives you](seon-way.md#what-this-gives-you).
+
 ## 2026-11-03 rulings
 
 The owner's rulings of 2026-11-03, on bugs as classes and on what contracts cost; they stand over earlier entries where they differ.
