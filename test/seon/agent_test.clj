@@ -369,6 +369,21 @@
     (sh/sh "rm" "-f" f)
     (is (= [false 0] found) (str "no interrupt and no eval of its parent's: " (pr-str found) " " (pr-str run)))))
 
+;; See docs/reconcile.md#a-task-holds-how-its-work-ended
+(deftest a-wake-that-ran-no-turn-has-no-end
+  ;; task seon.reconcile/a-wake-that-ran-no-turn-has-no-end: a turn moves only inside a turn, so a wake whose work! threw before
+  ;; its first turn read the previous wake's end as its own: an old :waiting parked its task again and counted the message
+  ;; that woke it as taken, and the throw's error lost to the old end's
+  (let [end? "(seon.reconcile/pull-end (seon.agent/db) (:key @seon.agent/state))"
+        [before threw after]
+        (in-agent [(str "(do (seon.agent/transact! [{:seon.agent/key (:key @seon.agent/state) :seon.agent/outcome :waiting :seon.agent/reason \"the wake before\""
+                        " :seon.agent/ended-turn (:seon.agent/turn (d/entity (seon.agent/db) [:seon.agent/key (:key @seon.agent/state)]) 0)}]) " end? ")")
+                   "(seon.turn/work! {:task \"no/such-task\" :max-turns 9})"
+                   end?])]
+    (is (= :waiting (:outcome (:value before))) (str "the wake before ended waiting: " (pr-str before)))
+    (is (:ex threw) (str "this wake threw before its first turn: " (pr-str threw)))
+    (is (nil? (:value after)) (str "and it wrote no end, so root reads none: " (pr-str after)))))
+
 ;; See docs/merging.md#a-test-child-is-a-fork-of-a-live-agent
 (deftest an-eval-that-empties-the-agents-state-leaves-it-working
   ;; a test run at an agent's REPL ended by resetting the state it had taken for its own (seon.ctx-test's end-agent!):

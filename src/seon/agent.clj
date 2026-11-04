@@ -603,11 +603,20 @@
                          heap (assoc :jolt/heap heap)
                          (seq causes) (assoc :causes causes)))))))
 
+(defn clear-end!
+  "This wake begins: the end the wake before wrote is taken off this agent's branch, committed, so an end root reads there is this
+  wake's own, whether it ran a turn or threw before its first (seon.reconcile/pull-end). See docs/turn.md#the-end."
+  {:malli/schema [:=> [:cat] :any]}
+  []
+  (let [k (:key @state) e (d/entity (db) [:seon.agent/key k])
+        gone (for [a [:seon.agent/outcome :seon.agent/ended-turn :seon.agent/reason :seon.agent/error :seon.agent/waste] :when (get e a)]
+               [:db.fn/retractAttribute [:seon.agent/key k] a])]
+    (when (seq gone) (transact! (vec gone)) (commit!))))
+
 (defn write-end!
   "This agent's end on its branch (:seon.agent/outcome and the rest, which root's judge reads), committed: its
   outcome, and when known its reason, the error that ended it (as data) and its waste, naming the turn it came on
-  (:seon.agent/ended-turn: root takes it for this end only while the agent is still at that turn, seon.reconcile/pull-end), and
-  retracting what an earlier end set that this one does not. The turn loop's end and the process's death write it the same way.
+  (:seon.agent/ended-turn), and retracting what an earlier end set that this one does not. The turn loop's end and the process's death write it the same way.
   See docs/turn.md#the-end."
   {:malli/schema [:=> [:cat [:map [:outcome :seon.agent/outcome]]] :any]}
   [{:keys [outcome reason error waste]}]

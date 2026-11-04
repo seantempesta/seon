@@ -686,14 +686,13 @@
 ;; ---- what an agent wrote on its branch ----
 
 (defn pull-end
-  "The end agent k's turn loop wrote on branch db ({:outcome :reason :error :waste}), or nil: it wrote none. An end names
-  its turn (:seon.agent/ended-turn): one older than the agent's turn now (a wake that ran turns after it and died before
-  it wrote its own) is the previous wake's, no end of this one (docs/turn.md#the-end)."
+  "The end agent k's turn loop wrote on branch db ({:outcome :reason :error :waste :ended-turn}), or nil: this wake wrote none, since
+  each wake begins by clearing the one before's (seon.agent/clear-end!; docs/turn.md#the-end)."
   {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe :map]]}
   [db k]
-  (let [a (d/pull db [:seon.agent/outcome :seon.agent/reason :seon.agent/ended-turn :seon.agent/error :seon.agent/waste :seon.agent/turn] [:seon.agent/key k])]
-    (when (and (:seon.agent/outcome a) (= (:seon.agent/ended-turn a) (:seon.agent/turn a 0)))
-      (into {} (map (fn [[kw v]] [(keyword (name kw)) v])) (dissoc a :seon.agent/turn)))))
+  (let [a (d/pull db [:seon.agent/outcome :seon.agent/reason :seon.agent/ended-turn :seon.agent/error :seon.agent/waste] [:seon.agent/key k])]
+    (when (:seon.agent/outcome a)
+      (into {} (map (fn [[kw v]] [(keyword (name kw)) v])) a))))
 
 ;; ---- the reconciler proc: actions carried out as requests, every answer as data ----------
 ;; Root's executor (R1's proto.agents.root, a thread per task) as one step-fn: main's

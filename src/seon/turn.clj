@@ -461,6 +461,7 @@
   [{:keys [task model] :as arg}]
   (let [;; each wake begins its turn state and its prints anew
         _ (swap! agent/state assoc :turn {} :printed nil :requests nil)
+        _ (agent/clear-end!)
         _ (begin! task)
         ;; the agent's own budget (:seon.agent/max-turns on main, raised to extend it; root passes it) bounds the loop, and is
         ;; the cap its page's turn line reads (seon.render.ui/run-head)

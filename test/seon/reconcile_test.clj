@@ -317,21 +317,19 @@
   (let [db (db-of diamond :extra (work "a" :running))]
     (is (nil? (r/pull-end db (akey "a"))))
     (is (= {:outcome :green :reason "done" :ended-turn 2} (r/pull-end (ended db "a" {:outcome :green :reason "done"} :turn 2) (akey "a")))
-        "an end names its turn")
-    (is (nil? (r/pull-end (ended db "a" {:outcome :green} :turn 3 :ended-turn 2) (akey "a")))
-        "a wake that ran turns after its end and died before writing its own has no end")))
+        "an end names its turn")))
 
-(deftest an-end-of-an-earlier-turn-is-no-end
-  ;; owner, 2026-11-04: an end whose :seon.agent/ended-turn is below the agent's :seon.agent/turn is the previous wake's: a wake that
-  ;; died silently wrote no end, and is judged so, never on the old end's words
+(deftest a-wake-that-wrote-no-end-is-judged-so
+  ;; each wake clears the end before it (seon.agent/clear-end!, seon.agent-test/a-wake-that-ran-no-turn-has-no-end): one that
+  ;; died or threw silently has none on its branch, and is judged on what root measured, never on another wake's words
   (let [db (db-of diamond :extra (work "a" :running))
-        stale (judge! db "a" {:outcome :green :reason "all green"} :results {(t "a") :pass} :turn 3 :ended-turn 2)
-        tk (task/task (:db stale) "demo/a")]
+        none (judge! db "a" nil :results {(t "a") :pass})
+        tk (task/task (:db none) "demo/a")]
     (is (= "the agent wrote no end" (:seon.task/reason tk)))
-    (is (= :done (:outcome stale)) "the proofs root measured are green: the done rule holds whatever the agent wrote")
-    (testing "a stale green end is not the agent's word for this wake: red results are held, not told as its green end would be"
-      (is (= :closed (:outcome (judge! db "a" {:outcome :green :reason "all green"} :results {(t "a") :fail} :turn 3 :ended-turn 2))))
-      (is (= :told (:outcome (judge! db "a" {:outcome :green :reason "all green"} :results {(t "a") :fail} :turn 3))) "while an end of this turn is told"))))
+    (is (= :done (:outcome none)) "the proofs root measured are green: the done rule holds whatever the agent wrote")
+    (testing "with no end, red results are held, not told as a green end would be"
+      (is (= :closed (:outcome (judge! db "a" nil :results {(t "a") :fail}))))
+      (is (= :told (:outcome (judge! db "a" {:outcome :green :reason "all green"} :results {(t "a") :fail})))))))
 
 (deftest a-death-names-its-cause
   ;; task seon.agent/a-death-names-its-cause: a dead agent's task carries the end it wrote
