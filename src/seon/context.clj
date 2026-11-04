@@ -806,7 +806,7 @@
   since, only those of transaction since and later (what a request has not printed yet): of evals and turns, whose ids are
   issued in time order, ctx's newest first until one is older, so a request costs what is new; of messages, every one. The session's, not one run's: a run that wakes or loads the session reads every run before it
   (design agent-loop section 1); an agent's own record is never windowed (docs/ctx.md#the-pattern). Reading them from ctx is the
-  owner's ruling of 2026-10-26 (docs/decisions.md): what the agent's pattern leaves out, its model does not read."
+  owner's ruling (docs/decisions.md): what the agent's pattern leaves out, its model does not read."
   {:malli/schema [:function [:=> [:cat :map :seon.host/db] [:vector [:tuple :int :map :qualified-keyword]]]
                   [:=> [:cat :map :seon.host/db [:maybe :int]] [:vector [:tuple :int :map :qualified-keyword]]]]}
   ([c db] (records c db nil))
@@ -1084,7 +1084,7 @@
         cut? (boolean (and prev (trimmed? @c prev)))
         old (when-not cut? (some #(when (= :hashes (first %)) (second %)) prev))
         whole? (nil? old)
-        live (or parts (drawn-at db e (d/commit-id db)))
+        live (or parts (drawn-parts db {:tree @c}))
         ;; a part's hash is its printed form's: its hiccup holds the Vars of its components, which no content hash reads
         hs (into {} (map (fn [[k v]] [k (hasch/uuid (pr-str v))])) live)
         ids (into (vec (for [k (keys live) :when (or whole? (not= (get old k) (get hs k)))] k))
