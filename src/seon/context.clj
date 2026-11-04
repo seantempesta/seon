@@ -851,7 +851,10 @@
   {:malli/schema [:=> [:cat :seon.host/db :string] :int]}
   [db k]
   (let [a (pdb/eid db :seon.agent/key k)]
-    (reduce max (or (d/q '[:find (max ?tx) . :in $ ?a :where [?a :seon.agent/key _ ?tx]] db a) 0) (map first (records (agent-ctx db a) db)))))
+    (reduce max 0 (keep #(d/q % db a) '[[:find (max ?tx) . :in $ ?a :where [?a :seon.agent/key _ ?tx]]
+                                         [:find (max ?tx) . :in $ ?a :where [_ :seon.eval/agent ?a ?tx]]
+                                         [:find (max ?tx) . :in $ ?a :where [_ :seon.message/agent ?a ?tx]]
+                                         [:find (max ?tx) . :in $ ?a :where [?t :seon.turn/agent ?a] [?t :seon.turn/reply _ ?tx]]]))))
 
 (defn- session-open
   "The user message that opens the agent's own session, id, in its request, after its task's example
