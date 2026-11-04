@@ -982,7 +982,7 @@
         rec {:code "(my.task/status)" :response {:handle 'result/e4 :value {:source c}}}
         db (d/db-with (ts/test-db) [{:seon.eval/id "e4" :seon.eval/agent {:seon.agent/id :a1} :seon.eval/record rec}])
         back (:seon.eval/record (d/pull db [:seon.eval/record] [:seon.eval/id "e4"]))]
-    (is (pdb/plain? c) "plain data")
+    (is (seon.contract/plain? c) "plain data")
     (is (= c (seon.edn/decode (seon.edn/encode c))) "its EDN reads back")
     (is (= rec back) "the record reads back equal")
     (is (every? #(str/includes? (print/record-text back) %) (str/split-lines src)) "and prints verbatim")))

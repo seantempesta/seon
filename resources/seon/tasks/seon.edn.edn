@@ -1,0 +1,4 @@
+[{:seon.task/name "an-instant-prints-as-edn-that-reads-back"
+  :seon.task/plan "Seen 2026-11-04: Jolt prints a java.util.Date as #inst \"1970-01-01T00:00:00.SSS-00:00\", the literal letters SSS where the milliseconds go, and clojure.edn then refuses it (Unrecognized #inst timestamp). An instant is plain data (seon.contract/plain?), so it goes as data on the wire and in anything seon.edn/encode writes, and the reader of any such text throws: an eval that answers a date, a record holding one. The cause is Jolt's print-method for an instant's format, not seon.edn: fixed there, on a jolt/<topic> branch, with its gates. Reproduce: (seon.edn/decode (seon.edn/encode (java.util.Date. 0))). Sweep: every #inst and #uuid printer path Jolt has, and a java.sql or java.time value if Jolt prints one as #inst."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.edn-test/an-instant-reads-back}}]

@@ -270,11 +270,11 @@
 
 (defmethod op-answer :eval [sys ag req]
   (let [r (if (= :root ag) (root-eval sys (:code req)) @(c/submit! sys ag (:code req) {:origin :outside}))]
-    ;; its value as data beside its printed text when it is plain data (seon.db/plain?: what the wire's EDN carries):
+    ;; its value as data beside its printed text when it is plain data (seon.contract/plain?: what the wire's EDN carries):
     ;; a reader of the answer reads the value, never the text back (an eval that printed has its :out verbatim in the
     ;; text, which is no EDN since out-verbatim). The model reads the text alone (tools/call)
     (if (contract/error? r) r {:response (cond-> (select-keys r [:handle :text :ex :recorded :main])
-                                           (and (contains? r :value) (pdb/plain? (:value r))) (assoc :value (:value r)))})))
+                                           (and (contains? r :value) (contract/plain? (:value r))) (assoc :value (:value r)))})))
 
 ;; the block's text as the model reads it: printed to the agent's output, not as a
 ;; value (a value comes back as a string literal, escaped, under the reply's budget);

@@ -3,7 +3,7 @@
   store and each test takes a branch of it through one helper (seon.test-store/test-branch!)."
   (:require [seon.test-store :as ts] [my.test :as mt] [seon.profile :as profile] [clojure.test :refer [deftest is testing]]
             [clojure.java.shell] [clojure.java.io] [datahike.api :as d] [datahike.writer :as dw] [datahike.db.transaction :as dbt]
-            [seon.db :as pdb] [seon.schema.datahike] [malli.core] [malli.registry] [seon.config :as cfg] [seon.contract :as contract] [seon.edn]
+            [seon.db :as pdb] [seon.schema.datahike] [malli.core] [malli.registry] [seon.config :as cfg] [seon.contract :as contract] [seon.edn] [seon.repl] [seon.print] [datahike.schema]
             [konserve.jolt.lmdb :as klmdb] [konserve.jolt.lmdb-ffi :as lmdb] [konserve.jolt.lz4] [konserve.jolt.zstd] [clojure.string :as str] [konserve.core :as k] [hasch.core] [datahike.gc] [seon.cost :as cost] [seon.lib :as lib] [seon.intr :as intr]
             [datahike.datom :as dd] [datahike.index.persistent-set :as psi]
             [jolt.scheme :as scm] [superv.async :as sv]))
@@ -968,3 +968,39 @@
           (is (<= (* 2 encoded) (- s o)) (str "serialized once: " o " bytes against the streams' " s ", " encoded " bytes encoded")))
         (d/release conn true))
       (finally (clojure.java.shell/sh "rm" "-rf" path)))))
+
+(defrecord PlainR [x])
+
+(deftest plain-is-what-the-store-keeps
+  ;; docs/storage.md#plain-data: what seon.contract/plain? passes the store keeps and gives back equal, through its
+  ;; serializer: a store on disk of its own, reopened, since a db-with serializes nothing
+  (let [path (str (seon.config/checkout) "/target/db-test-" (random-uuid))
+        samples [nil true 1 10N 1.5 1/2 1.5M \a "s" :k 'n/s (random-uuid) (java.util.Date. 0)
+                 {:a [1 #{2} (list 3)]} {[1] {"k" 2}} [] #{} ()]]
+    (try
+      (is (every? contract/plain? samples) "each is plain")
+      (is (every? datahike.schema/plain-data? samples) "and Datahike's own test on a data value passes it")
+      (is (every? #(malli.core/validate :seon.db/plain % {:registry contract/registry}) samples) "and the schema says the same")
+      (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)]
+        (d/transact conn (vec (map-indexed (fn [i v] {:seon.eval/id (str "p" i) :seon.eval/record {:response {:value v}}}) samples)))
+        (d/release conn))
+      (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)
+            back (fn [i] (get-in (d/pull @conn [:seon.eval/record] [:seon.eval/id (str "p" i)]) [:seon.eval/record :response :value]))]
+        (doseq [[i v] (map-indexed vector samples)]
+          (is (= v (back i)) (str "kept and given back: " (pr-str v))))
+        (d/release conn))
+      (finally (clojure.java.shell/sh "rm" "-rf" path))))
+  (testing "what is not plain is refused, a lazy or infinite seq unrealized"
+    (let [realized (volatile! false)]
+      (doseq [v [(->PlainR 1) {:a (->PlainR 1)} {(->PlainR 1) 1} (sorted-map :a 1) (sorted-set 1) (byte-array 1) inc (Object.) (range) (map inc [1])
+                 (lazy-seq (vreset! realized true) [1])]]
+        (is (not (contract/plain? v)) (str (type v))))
+      (is (false? @realized) "telling does not realize it")))
+  (testing "seon.repl/plainly makes any value plain: a record as a key too, which it left as it was"
+    (doseq [v [{(->PlainR 1) (->PlainR 2)} [(->PlainR 1)] (sorted-map :a 1) (range 3)]]
+      (is (contract/plain? (#'seon.repl/plainly v)) (str (type v)))))
+  (testing "seon.contract/kept is the same walk, within its budget"
+    (is (= {:a [1 2]} (contract/kept {:a [1 2]})))
+    (is (= (seon.print/code (seon.print/text (sorted-map :a 1) (:part seon.print/budgets))) (contract/kept (sorted-map :a 1))) "a sorted map is its print")
+    (is (not= (vec (range 100000)) (contract/kept (vec (range 100000)))) "past the budget, its print")))
+

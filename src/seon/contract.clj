@@ -37,6 +37,24 @@
 ;; Named predicate schemas (malli simple schemas), so a contract names them like any
 ;; other schema and nothing is evaluated from text (no `[:fn ...]`, no SCI).
 
+(clojure.core/defn plain?
+  "Whether v is plain data, what the store keeps and EDN carries (docs/storage.md#plain-data): nil, a boolean, a number,
+  character, string, keyword, symbol, uuid or instant, or a map, vector, set or list of them. Not a record; not a sorted
+  collection, whose comparator is a function; not bytes, which EDN does not carry; not a seq that is no list (lazy, a
+  range), which telling would realize. A narrower test than Datahike's on a data value, which walks any seq. visit, called on
+  each node before it is looked at, ends the walk by answering false: `kept`'s budget."
+  {:malli/schema [:function [:=> [:cat :any] :boolean] [:=> [:cat :any [:maybe :seon.host/fn]] :boolean]]}
+  ([v] (plain? v nil))
+  ([v visit]
+   ((fn ok [x]
+      (and (or (nil? visit) (visit x))
+           (cond (or (nil? x) (boolean? x) (number? x) (char? x) (string? x) (keyword? x) (symbol? x) (uuid? x) (inst? x)) true
+                 (or (clojure.core/record? x) (sorted? x)) false
+                 (map? x) (every? (fn [[k y]] (and (ok k) (ok y))) x)
+                 (or (vector? x) (set? x) (list? x)) (every? ok x)
+                 :else false)))
+    v)))
+
 (clojure.core/defn- pred {:malli/schema [:=> [:cat :qualified-keyword :seon.host/fn] [:tuple :qualified-keyword :seon.host/schema]]} [k p] [k (m/-simple-schema {:type k :pred p})])
 
 (def ^:private host-schemas
@@ -47,6 +65,7 @@
             (pred :seon.host/bytes bytes?)
             (pred :seon.host/throwable #(instance? Throwable %))
             (pred :seon.host/fn fn?)
+            (pred :seon.db/plain plain?)
             (pred :seon.host/var var?)
             (pred :seon.host/regex #(instance? java.util.regex.Pattern %))
             (pred :seon.host/namespace #(instance? clojure.lang.Namespace %))
@@ -283,16 +302,10 @@
     (cond
       (or (nil? v) (boolean? v) (number? v) (keyword? v) (symbol? v) (uuid? v) (inst? v)) v
       (string? v) (if (<= (count v) room) v (:text (print/prose v budget)))
-      :else (let [left (volatile! budget)
-                  ok (fn ok [x]
-                       (and (pos? (vswap! left dec))
-                            (cond (or (nil? x) (boolean? x) (number? x) (keyword? x) (symbol? x) (uuid? x) (inst? x)) true
-                                  (string? x) (<= (count x) room)
-                                  (clojure.core/record? x) false
-                                  (map? x) (every? (fn [[k y]] (and (ok k) (ok y))) x)
-                                  (or (vector? x) (set? x) (list? x)) (every? ok x)
-                                  :else false)))]
-              (if (ok v) v (print/code (print/text v budget)))))))
+      :else (let [left (volatile! budget)]
+              (if (plain? v (fn [x] (and (pos? (vswap! left dec)) (or (not (string? x)) (<= (count x) room)))))
+                v
+                (print/code (print/text v budget)))))))
 
 (defn bounded
   "The error map m with each member kept (`kept`): for root, which keeps other processes' errors
