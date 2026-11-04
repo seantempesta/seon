@@ -15,7 +15,7 @@
         t0 (:max-tx db)]
     (case (.nextInt rng 9)
       0 (when t (task/execution-tx [t] (pick [:running :held :cancelled :running])))
-      1 (when t (task/start-tx db t (pick ["r3-boot" "old-boot"]) (pick [:ax :ay]) (env t) 0))
+      1 (when t (task/start-tx db t (pick ["r3-boot" "old-boot"]) (pick [:ax :ay]) (env t) (inc k)))
       2 (when t [{:seon.task/id t :seon.task/outcome (pick [:ready :gate :done :merged :parked :cap :told :closed :lost :dead :killed :behind :running])
                   :seon.task/merged-t (+ 900 (.nextInt rng 300))}])
       3 (let [nm (str "n" k) needs (set (remove nil? [t (pick ts)]))]
