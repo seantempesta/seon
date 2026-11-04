@@ -425,8 +425,12 @@
                :defs defs :declares declares :methods (or methods []) :impls (or impls [])
                :refs (-> (:refs a) (into (macro-uses nsx form))
                          ;; a ctor reaches its type's methods: ns.T, or a bare T (analyzed, not run, the type is in no
-                         ;; image) of this namespace, the type's var; a host class's name is no var, and drops out of the graph
-                         (into (map (fn [c] (if-let [i (str/last-index-of c ".")] (symbol (subs c 0 i) (subs c (inc i))) (symbol (str nsym) c)))) (:news a)))
+                         ;; image), imported or of this namespace, the type's var; a host class's name is no var, and drops
+                         ;; out of the graph
+                         (into (map (fn [c] (let [imported (some-> (get (ns-imports nsx) (symbol c)) str (str/replace #"^class " "") (str/replace "_" "-"))
+                                                  c (or imported c)]
+                                              (if-let [i (str/last-index-of c ".")] (symbol (subs c 0 i) (subs c (inc i))) (symbol (str nsym) c)))))
+                               (:news a)))
                :quoted (:quoted a) :ops (:ops a) :requires (:requires a) :banned (:banned a) :inline-defs (:inline-defs a)
                ;; its code's keywords and its contracts': the data it operates on, read once here
                :keywords (into (:keywords a) (comp (keep :contract) (mapcat (comp names sedn/decode))) defs)
