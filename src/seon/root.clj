@@ -88,11 +88,12 @@
   [:status :pid :mem-mb :running :task :branch :forked-ms :ended-ms :stalled])
 
 (defn- observed
-  "What root records of agent entry a: its observed-keys, less :task for an agent started on a task,
-  whose :task is its task's id (its record names its task, :seon.agent/task; recording it again pulled the task
-  into every walk of the agent twice)."
+  "What root records of agent entry a: its observed-keys, less :task and :branch for an agent started on a task:
+  its :task is its task's id (its record names its task, :seon.agent/task; recording it again pulled the task
+  into every walk of the agent twice) and its :branch is the one its start wrote (seon.task/start-tx; a second
+  writer under the store's name for the branch would change what the index reads of its environment)."
   {:malli/schema [:=> [:cat [:maybe :map]] :map]}
-  [a] (cond-> (select-keys a observed-keys) (:task a) (dissoc :task)))
+  [a] (cond-> (select-keys a observed-keys) (:task a) (dissoc :task :branch)))
 
 (defn- record-agents
   "What root observed of its agents in this step, written to main as one transaction: an

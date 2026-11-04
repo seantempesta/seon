@@ -159,12 +159,6 @@
   {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id] [:maybe :seon.reconcile/agent]]}
   [idx id] (get-in idx [:agents (get-in idx [:tasks id :seon.task/agent])]))
 
-(defn- live-in?
-  "Whether task id's agent works it in root's boot now: the task is :running, started in this boot."
-  {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id] :boolean]}
-  [idx id]
-  (boolean (and (= :running (get-in idx [:tasks id :seon.task/outcome])) (= (:boot (:root idx)) (:seon.agent/boot (task-agent idx id))))))
-
 (defn- idle
   "Task id's agent when its work is parked on its live process: parked or at its cap in this boot, by an agent (the
   judge parks only a task whose process is kept, keeps?). A wake reuses it; a cancel, a hold or a new branch for its
@@ -183,14 +177,6 @@
   {:malli/schema [:=> [:cat [:maybe :keyword] [:maybe :keyword]] :boolean]}
   [kind outcome] (boolean (and (park-outcomes outcome) (not= :merge kind))))
 
-(defn- done-info
-  "{:any? (merged or accepted) :merged-t (when merged)} of task id."
-  {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id] [:map [:any? :boolean] [:merged-t [:maybe :int]]]]}
-  [idx id]
-  (let [t (get-in idx [:tasks id])]
-    {:any? (boolean (finished (:seon.task/outcome t)))
-     :merged-t (when (= :merged (:seon.task/outcome t)) (:seon.task/merged-t t 0))}))
-
 (defn- idx-done? {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id] :boolean]}
   [idx id] (boolean (get-in idx [:done id :any?])))
 
@@ -198,23 +184,28 @@
   {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id] :boolean]}
   [idx id]
   (let [t (get-in idx [:tasks id]) o (:seon.task/outcome t)]
-    (boolean (and t (= :running (:seon.task/execution t)) (not (idx-done? idx id))
-                  (every? #(idx-done? idx %) (:seon.task/needs t))
-                  (not (live-in? idx id)) (not (judged-outcomes o))
+    (boolean (and t (= :running (:seon.task/execution t)) (not (get-in idx [:done id :any?]))
+                  (every? #(get-in idx [:done % :any?]) (:seon.task/needs t))
+                  ;; not live: working in this boot's root
+                  (not (and (= :running o) (= (:boot (:root idx)) (:seon.agent/boot (get-in idx [:agents (:seon.task/agent t)])))))
+                  (not (judged-outcomes o))
                   ;; at its cap an agent waits for its budget to be raised and its task released (my.root/run!), whatever comes
                   (not= :cap o)
                   ;; parked or told: ready again only when main holds more messages to its agent than it had taken
                   ;; (docs/turn.md#parked); judge-tx writes :seon.agent/taken at every judging, both count the messages
                   ;; to the agent's branch
                   (or (not (#{:parked :told} o))
-                      (let [a (task-agent idx id)]
+                      (let [a (get-in idx [:agents (:seon.task/agent t)])]
                         (> (get-in idx [:msgs (:branch (:seon.agent/env a))] 0) (:seon.agent/taken a 0))))))))
 
 (defn- refresh-done
   "Re-derive task id's done state from its outcome; answers [idx flipped?]."
   {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id] [:tuple :seon.reconcile/index :boolean]]}
   [idx id]
-  (let [old (get-in idx [:done id :any?]) d (done-info idx id)]
+  (let [old (get-in idx [:done id :any?])
+        t (get-in idx [:tasks id])
+        d {:any? (boolean (finished (:seon.task/outcome t)))
+           :merged-t (when (= :merged (:seon.task/outcome t)) (:seon.task/merged-t t 0))}]
     [(assoc-in idx [:done id] d) (not= old (:any? d))]))
 
 (defn- refresh-ready
@@ -275,11 +266,13 @@
   {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id] :seon.reconcile/index]}
   [idx id]
   (let [t (get-in idx [:tasks id])
-        a (task-agent idx id)
+        a (get-in idx [:agents (:seon.task/agent t)])
         o (:seon.task/outcome t)
-        live? (and t (live-in? idx id))
-        ;; its agent's process is parked, and stays until its task is cancelled or held (docs/turn.md#parked)
-        parked? (and t (some? (idle idx id)))
+        ;; started in this boot's root: it is live while it works, its process is parked while it waits, and stays until
+        ;; its task is cancelled or held (docs/turn.md#parked)
+        here? (and t (= (:boot (:root idx)) (:seon.agent/boot a)))
+        live? (and here? (= :running o))
+        parked? (and here? (#{:parked :cap} o))
         env (:seon.agent/env a)
         kill (cond
                live? (cond (= :cancelled (:seon.task/execution t)) :cancelled
