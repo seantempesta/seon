@@ -38,15 +38,14 @@
                :sizes [10 100 1000]}))
 
 (defn session-of
-  "The input at n: a main db holding a session of n evals by agent b/a1 across two runs (as a
+  "The input at n: a main db holding a session of n evals by agent b/a1 (as a
   woken or loaded session's first request reads it cold), each record production-shaped (item),
   and the agent's entity id."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :int]]}
   [n]
   (let [db (d/db-with (ts/test-db)
                       (vec (for [i (range n) :let [[_ v] (item i)]]
-                             (assoc v :seon.eval/agent {:seon.agent/key "b/a1"}
-                                    :seon.eval/run (if (< i (quot n 2)) "demo/f#1" "demo/f#2")))))]
+                             (assoc v :seon.eval/agent {:seon.agent/key "b/a1"}))))]
     [db (:db/id (d/entity db [:seon.agent/key "b/a1"]))]))
 
 (defn records-of
@@ -191,20 +190,20 @@
   each turn, one commit a turn: *conn*), and the refs a request sent, [:parts a c whole? ids call], each
   turn's parts as seon.context/request records them, drawn at that turn's commit, every one after the first
   sent as what changed since the turn before ([... was-commit]: its commit is the turn before's, drawn once).
-  Every turn sends the same parts (a plan and a run), so the cost is per ref."
+  Every turn sends the same parts (a plan and a task), so the cost is per ref."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db [:vector :any]]]}
   [n]
   (let [conn *conn* k (str "b/p" n) tid (str "demo/p" n)]
     (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name (str "p" n) :seon.task/plan "Make p."
                                              :seon.task/proofs #{'demo-test/p-test}}]))
-    (d/transact conn [{:seon.run/id (str tid "#1") :seon.run/task [:seon.task/id tid] :seon.run/agent {:seon.agent/key k}}])
+    (d/transact conn [{:seon.task/id tid :seon.task/agent {:seon.agent/key k :seon.agent/task [:seon.task/id tid]}}])
     (let [commits (vec (for [i (range n)]
                          (do (d/transact conn [{:seon.task/id tid :seon.task/plan (str "Make p, step " i ".")}])
                              (d/commit-id @conn))))
           a (:db/id (d/entity @conn [:seon.agent/key k]))]
       (let [ids (vec (keys (seon.context/drawn-parts @conn (seon.ctx/build @conn a (:seon.agent/branch (d/entity @conn a))))))]
         [@conn (vec (for [[i c] (map-indexed vector commits)]
-                      (cond-> [:parts a c (zero? i) ids (str tid "#1/" i)] (pos? i) (conj (commits (dec i))))))]))))
+                      (cond-> [:parts a c (zero? i) ids (str tid "/" i)] (pos? i) (conj (commits (dec i))))))]))))
 
 ;; See docs/render.md#the-branchs-views
 (deftest reading-a-request-back-draws-each-turns-parts-once
@@ -231,8 +230,8 @@
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map :map]]}
   [n]
   (let [[db a] (session-of n)
-        basis (fn [t] {:commit (d/commit-id db) :task "demo/f" :run "demo/f#1" :turn t :max-turns 9 :origin :model :agent "b/a1"})
-        turn (fn [t] (ts/turn-tx "b/a1" t "demo/f#1" {:seon.model-call/basis (basis t)}))
+        basis (fn [t] {:commit (d/commit-id db) :task "demo/f" :turn t :max-turns 9 :origin :model :agent "b/a1"})
+        turn (fn [t] (ts/turn-tx "b/a1" t {:seon.model-call/basis (basis t)}))
         sent (fn [t r] [{:seon.model-call/id (str "b/a1/" t) :seon.model-call/sent (:sent r)}])
         opts (fn [db t parts printed] {:db db :basis (basis t) :help "help" :help-ref [:section 1 1] :parts parts :printed printed})
         e {:db/id a}
