@@ -1076,6 +1076,24 @@
     (let [u1 (into {} (map (juxt :id :html)) (render/placed-units w))]
       (vec (sort (for [[id h] u1 :when (not= h (get u0 id))] id))))))
 
+(deftest a-new-turn-does-not-run-the-status-again
+  ;; docs/render.md#how-the-work-stands: the status reads facts about the work, never the conversation. Its read of the newest
+  ;; turn, for a design task's run, ran it again each turn for every task: about 11 MB a turn, for the same output
+  (let [[db _] (sections-near "Make ```demo/g``` say one thing.")
+        [w :as walk] (walked db)
+        runs #(let [l (get (render/ledger w) 'seon.render.ui/status)] (+ (:miss l 0) (:same l 0)))
+        before (runs)]
+    (is (pos? before) "the status was drawn")
+    (step! walk [{:seon.turn/id "demo/r#1/0" :seon.turn/agent [:seon.agent/key "demo/a1"] :seon.turn/run [:seon.run/id "demo/r#1"] :seon.turn/n 0 :seon.turn/origin :model}])
+    (is (= before (runs)) "a turn taken moved nothing of how the work stands"))
+  ;; a design task's plan-before is its run's, which its first turn names: its status does read the turn
+  (let [[db te] (sections-near "Make ```demo/g``` say one thing.")
+        [w :as walk] (walked (d/db-with db [[:db/add te :seon.task/kind :design]]))
+        runs #(let [l (get (render/ledger w) 'seon.render.ui/status)] (+ (:miss l 0) (:same l 0)))
+        before (runs)]
+    (step! walk [{:seon.turn/id "demo/r#1/0" :seon.turn/agent [:seon.agent/key "demo/a1"] :seon.turn/run [:seon.run/id "demo/r#1"] :seon.turn/n 0 :seon.turn/origin :model}])
+    (is (< before (runs)) "a design task's first turn runs it again")))
+
 (deftest a-cited-var-redefined-shows-in-the-next-view
   ;; the task's data is a render, never held: a var the plan cites redefined (the agent's defn, or main
   ;; caught up), the next view shows its new source. Each cited var is its own component, which reads
