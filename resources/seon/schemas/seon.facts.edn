@@ -152,7 +152,7 @@
  ;; prints it when it is sent or shown). The model's prose beside the call and the provider's call
  ;; id, its 10 costliest contracted functions ([{:var :calls :ms}], seon.profile), the vars it
  ;; recorded; its prose kept as written, never parsed as it is recorded (seon.repl/record-details)
- :seon.eval/record [:map {:seon.render/html seon.render.ui/evaluation} [:code :string] [:response :map]
+ :seon.eval/record [:map {:seon.render/html seon.render.ui/evaluation} [:code :string] [:response [:and :seon.eval/response :seon.db/plain]]
                     [:printed {:optional true} :string] [:type {:optional true} :string]
                     ;; a value that names its basis (@ctx, seon.ctx): its schema and the basis it is
                     ;; rendered from, in place of a copy (seon.repl/record-details); a data value its schema alone
@@ -172,7 +172,7 @@
  :seon.agent/task :seon.db/ref
  :seon.agent/max-turns :int
  :seon.agent/description [:string]
- :seon.ctx/pattern [:vector :any]
+ :seon.ctx/pattern [:and [:vector :any] :seon.db/plain]
  ;; the ids of its evals a reader of its page opened (seon.root/opened!), on main; its turn writes each
  ;; on its branch as the eval's :seon.eval/opened (seon.agent/untaken-facts)
  :seon.agent/opened [:set :string]
@@ -550,7 +550,7 @@
                                                         ;; what the update would have made it, printed by the error's render (the one printer)
                                                         [:value :any]]]
  ;; a model turn whose call failed: the typed error as data (the run's end holds it too, :seon.end/error)
- :seon.turn/error [:map]
+ :seon.turn/error :seon.error/base
  ;; a model turn's eval calls, each its id, its code and the eval it ran (whose record the
  ;; conversation sends as the call's tool message)
  :seon.turn/calls [:vector [:map [:id :string] [:code :string]
@@ -688,11 +688,11 @@
                      [:seon.fx/us :seon.fx/us] [:seon.fx/queue-us :seon.fx/queue-us]
                      [:seon.fx/cost {:optional true} :seon.fx/cost] [:seon.fx/error {:optional true} :seon.fx/error]]
  ;; ---- the program merge's facts (session D1's proto.merge.facts.edn) ----
- :seon.merge/key [:any {:seon.db/index true}]
+ :seon.merge/key [:and {:seon.db/index true} :seon.db/plain]
  :seon.merge/kind :keyword
- :seon.merge/base [:any]
- :seon.merge/ours [:any]
- :seon.merge/theirs [:any]
+ :seon.merge/base :seon.db/plain
+ :seon.merge/ours :seon.db/plain
+ :seon.merge/theirs :seon.db/plain
  :seon.merge/main-t :int
  :seon.merge/resolved? :boolean
  :seon.merge/entry-fact [:map {:seon.db/attributes true}

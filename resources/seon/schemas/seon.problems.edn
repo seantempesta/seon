@@ -80,7 +80,7 @@
  ;; a defect answering one outside request at root's server (seon.server/respond): the
  ;; line it took, and the cause's ex-data printed; the server goes on serving
  :seon.server/held [:and :seon.error/base [:map [:seon.error/type [:= :seon.server/held]] [:agent :keyword] [:task :seon.task/id] [:holder :string]]]
- :seon.server/defect [:and :seon.error/base [:map [:seon.error/type [:= :seon.server/defect]] [:line :string] [:data {:optional true} :string]]]
+ :seon.server/defect [:and :seon.error/base [:map [:seon.error/type [:= :seon.server/defect]] [:line :string] [:data {:optional true} :seon.db/plain]]]
  :seon.writer/refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.writer/refused]]]]
  :seon.merge/uncontracted [:and :seon.error/base [:map [:seon.error/type [:= :seon.merge/uncontracted]]
                                                   [:uncontracted [:vector :qualified-symbol]]]]
@@ -148,7 +148,7 @@
  :seon.error/last-task [:and {:seon.db/index true} :string]
  :seon.error/form :string
  ;; the first occurrence's error map, as EDN
- :seon.error/example [:map]
+ :seon.error/example :seon.error/base
  :seon.error/recorded-fact [:map {:seon.db/attributes true}
                             [:seon.error/signature :seon.error/signature] [:seon.error/class :seon.error/class]
                             [:seon.error/count :seon.error/count] [:seon.error/agents :seon.error/agents]
@@ -176,7 +176,7 @@
 
  ;; ---- problem members of a run's end (main; the judge writes them) and of the agent's end (branch) ----
  ;; the error that ended the run: the agent's death, the turn loop's error, a refused merge
- :seon.run/error [:map]
+ :seon.run/error :seon.error/base
  ;; failing assertions per red test (at most 8 each, printed by seon.print under :part)
  :seon.problems/assertion [:map [:type [:enum :fail :error]] [:message {:optional true} [:maybe :string]] [:flaky {:optional true} :boolean]
                            [:expected {:optional true} [:maybe :string]] [:actual {:optional true} [:maybe :string]]
@@ -197,7 +197,7 @@
  :seon.learn/waste [:map-of :any [:map [:forms :int] [:turns :int]]]
  :seon.run/waste :seon.learn/waste
  :seon.end/waste :seon.learn/waste
- :seon.end/error [:map]
+ :seon.end/error :seon.error/base
  :seon.fx/error-type :qualified-keyword
  ;; task content a branch and main both changed since the branch's base, differently: root's
  ;; to resolve (seon.task/carry-tx; owner, 2026-10-22, D4)

@@ -25,7 +25,7 @@
   - `:seon.db/ref` is a reference (entity id, tempid, lookup ref or nested map); `[:set X]`
     is cardinality many.
   - A map with `{:seon.db/attributes true}` declares its members as attributes.
-  - A vector, sequential, tuple, map, map-of, `:any`, or an `:or` whose arms differ in type
+  - A vector, sequential, tuple, map, map-of, `:any`, `:seon.db/plain`, or an `:or` whose arms differ in type
     stores its value whole as plain data (`:db.type/data`, our Datahike's: the store's
     serializer writes it as data, no text between, and a vector keeps its order and
     duplicates; docs/storage.md#plain-values)."
@@ -60,7 +60,7 @@
 
 (def ^:private data-types
   "The Malli types stored whole as plain data (`:db.type/data`)."
-  #{:vector :sequential :tuple :map :map-of :any})
+  #{:vector :sequential :tuple :map :map-of :any :seon.db/plain})
 
 (defn- refused
   {:malli/schema [:=> [:cat :qualified-keyword :any] :map]}

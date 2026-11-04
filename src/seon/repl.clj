@@ -586,7 +586,7 @@
       ;; copied back as code double every \\( and break case constants)
       (joined :out) (assoc :out (print/code (joined :out)))
       (joined :err-out) (assoc :err (print/code (joined :err-out)))
-      (= :err (:tag lst)) (assoc :ex (or (:err lst) {:seon.error/message (str (:err-text lst))}))
+      (= :err (:tag lst)) (assoc :ex (or (:err lst) (contract/error :seon.agent/eval-error #'response (str (:err-text lst)) {:class "unknown: the eval answered text, no error"})))
       (sum :ms) (assoc :ms (/ (Math/round (* 1000.0 (sum :ms))) 1000.0))
       (sum :ticks) (assoc :ticks (sum :ticks))
       (sum :alloc-bytes) (assoc :bytes (sum :alloc-bytes)))))
@@ -617,16 +617,6 @@
    (cond-> (assoc who :db/id "agent")
      (and (:seon.agent/key who) (symbol? (get-in details [:response :ns]))) (assoc :seon.agent/ns (get-in details [:response :ns])))])
 
-(defn- plainly
-  "v as the store keeps it (seon.contract/plain?): plain data as it is, a map's keys and values each so, anything else (a library's
-  record, an object in an exception's data) as its printed text (seon.edn/encode; two keys that print alike are then one). The one place a record's
-  response is made storable, whoever made it. See docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map."
-  {:malli/schema [:=> [:cat :any] :seon.db/plain]}
-  [v]
-  (cond (contract/plain? v) v
-        (and (map? v) (not (record? v)) (not (sorted? v))) (into {} (for [[k x] v] [(plainly k) (plainly x)]))
-        :else (sedn/encode v)))
-
 (defn record-details
   "What an eval's record holds (:seon.eval/record): its code, its response whole, its value
   included when it is plain data (seon.contract/plain?: stored as data, once under its content key when
@@ -641,8 +631,6 @@
   {:malli/schema [:=> [:cat :string :map :map [:maybe :string]] :seon.eval/record]}
   [code r req run]
   (let [resp (dissoc r :text :recorded :fns :record)
-        ;; all but the value plain (its value is stored only when plain, else printed, below)
-        resp (cond-> (plainly (dissoc resp :value)) (contains? resp :value) (assoc :value (:value resp)))
         ;; a value that names its basis (@ctx: the branch's record at t, seon.ctx/build) is
         ;; recorded as that basis and its schema: the page renders it from what exists, and a
         ;; copy of the session's record is never stored at each @ctx
@@ -1034,8 +1022,7 @@
                 ;; its value goes with the reply only when it is plain data (seon.contract/plain?: what the socket and the wire carry);
                 ;; root keeps none of it (its view keeps the head: seon.root/eval-head), and the asker reads the value as data,
                 ;; never the printed text back, which is no EDN once the eval printed (its :out verbatim)
-                [{:op :reply :id (:id m) :response (let [r (eval-string (:forms m) (select-keys m [:ticks :origin]))]
-                                                     (cond-> (dissoc r :value) (and (contains? r :value) (contract/plain? (:value r))) (assoc :value (:value r))))
+                [{:op :reply :id (:id m) :response (let [r (eval-string (:forms m) (select-keys m [:ticks :origin]))] (agent/on-the-wire r))
                   :t (:max-tx (agent/db))}])
               :else (agent/handle! m))]
      ;; a branch is committed whenever a request is done (its writes ran ahead in memory), before its answer: a
