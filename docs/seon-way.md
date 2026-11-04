@@ -56,14 +56,14 @@ Each of these is a change of data, and the next request regenerates from it; the
 
 ## What is proven
 
-A live test agent tried each of these by data alone, on the 2026-11-04 tip of the first-message work; each was one test, and none of it is merged.
+A live test agent tried each of these by data alone, on the 2026-11-04 tip of the first-message work; each was one test, and only what says merged here is.
 
 - A layout walking the agent's pull: new keys appear on both sides, a dropped join leaves both, a bad value is refused (``:seon.ctx/invalid``), and another agent stays as it was.
 - A part named by the agent's data that queries the db: a new red test redraws it; an unrelated write does not run it.
 - Delete, forget, restore, edit and compaction, with messages before the change byte-identical.
-- Removal as unlink: retracting the entity had made delivery send a removed message again.
+- Removal as unlink, merged: retracting the entity had made delivery send a removed message again.
 - Examples as a set of refs, added mid-session: 24 real messages sent, and the same pull draws the list.
-- Re-rendering when a declared render, or a helper it calls, is redefined. The prototype watched 665 vars for 736 ms once, so the real one should read the program's reach index, measured.
+- Re-rendering when a declared render, or a helper it calls, is redefined, merged ([reactive renders](render.md#reactive-renders)). The prototype watched 665 vars for 736 ms once; the merged one watches nothing and walks `:form/refs` only when a definition moves, about 2 MB for a typical render and 122 MB for one reaching 3,530 vars.
 - Reset to a turn's commit with the same key: the record, program and layout of that point, a further turn taken, and the source agent untouched.
 - A turn as a number on each record: one query reads a session (about 1 ms at 26 records) in the transcript's order, on a session mixing a model's turns, a message and outside evals. Writing it on new evals, and moving replies off the turn entity, are not yet tried.
 - An eval as real attributes, and a turn folded into its model call: on a copy of a real session, all 16 evals and 6 turns rebuilt to the same message bytes. Finding model evals cost about half (2.6 times fewer bytes), and summing tokens without joining through a turn cost about a third. Reading one field warm cost the same, because a warm read does not decode a stored value, and one edit about 30% less; so the gain is queries and less duplication, not reads. Writing them live is not yet tried.
@@ -75,7 +75,6 @@ A live test agent tried each of these by data alone, on the 2026-11-04 tip of th
 These are the known departures from the rules, in the order of the work, each with its cause rather than its symptom.
 
 **Facts nobody writes, so code guesses:**
-- ``:ns/doc`` is declared and read but never written: all 148 namespaces were empty.
 - Nothing says which turn an eval or a message belongs to, so ``seon.render.ui/turn-evals`` infers it from write order. A turn is a number, not an entity: each record carries it, and the conversation is one query, ordered by turn, messages first, then evals. What a turn entity holds today moves to where it belongs: a reply is a record, and what a call cost is on the model call. ``:seon.turn/n`` restarts each run, one more reason runs should go.
 
 **Data shaped against its use:**
@@ -89,8 +88,7 @@ These are the known departures from the rules, in the order of the work, each wi
 - A part sent as a diff (step 6 of the current work ends this): the page is only ever the last message, latest only.
 
 **Rendering not knowing its own functions:**
-- Redefining a declared render does not redraw until the data moves.
-- A var call in hiccup is a component only if its contract asks for ctx or the db; otherwise it is silently left as a call.
+- A var call in hiccup is a component only if its contract asks for ctx or the db; otherwise it is silently left as a call (seon.render/a-var-call-a-render-cannot-draw-says-why). Making every var call a component took one list's draw from 616 to 1,563 calls and removed the kept call structure needs, so it is not that simple.
 
 **The debug page draws from root:** root's rebuild runs main's code and costs up to 5 GB a draw on a real page. A live agent should draw its own; an ended agent's needs an answer.
 
