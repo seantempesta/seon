@@ -485,7 +485,7 @@
     (let [v @a t (:max-tx (:main-db st)) k (:context-key st)]
       (if (and k (identical? v (k 0)) (= t (k 1)))
         st
-        (let [r (print/print-value (apply array-map (mapcat identity (render/placed-hiccup w ["#p-tiles" "#c-rows" "#p-head" "#c-side"])))
+        (let [r (print/print-value (render/placed-hiccup w ["#p-tiles" "#c-rows" "#p-head" "#c-side"])
                                    {:budget (config/value :seon.config.render/root-context-budget)})
               ctx (or (:text r) (:seon.error/message r))]
           (assoc st :context {:text ctx :tokens (select/estimate ctx)} :context-key [v t]))))

@@ -929,7 +929,7 @@
   {:malli/schema [:=> [:cat :seon.host/db [:map [:tree :map]]] :map]}
   [db c]
   (let [w (render/draw (:tree c) ctx/changes db (render/declared-var :seon.render/render-ctx) page-lists)]
-    (try (apply array-map (mapcat identity (render/placed-hiccup w page-lists)))
+    (try (render/placed-hiccup w page-lists)
          (finally (render/dispose-walk! w)))))
 
 (defn- drawn-at

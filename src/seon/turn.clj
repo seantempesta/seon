@@ -85,12 +85,12 @@
     {:test-run test-run :tests-ms tests-ms :task (task/task (agent/db) id)}))
 
 (defn- status-now
-  "How the work stands now, from the agent's walk drawn once (seon.repl/page-parts): the status
+  "How the work stands now, from the agent's walk (seon.repl/page-data): the status
   part's data (seon.context/status), which the page and the model read too, so a turn computes it
   once. A walk that drew no status (its render threw, or the layout placed none) is the typed
   :seon.turn/no-status, never an empty status: no reason is not done (AGENTS 9, unknown is not {})."
   {:malli/schema [:=> [:cat] [:or :map :seon.error/base]]}
-  [] (or (get (nth (repl/page-parts) 2) :seon.context/status)
+  [] (or (get (repl/page-data) :seon.context/status)
          (contract/error :seon.turn/no-status #'status-now "the agent's walk drew no status (seon.render.ui/status threw, or no layout placed it): the done rule cannot be read" {})))
 
 (defn run-usage

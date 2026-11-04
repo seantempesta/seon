@@ -1753,7 +1753,7 @@
         units (:seon.render/units page)
         in (fn [sel] (filterv #(= sel (:container %)) units))
         w (a3-walk branch)
-        shown (try (apply array-map (mapcat identity (r/placed-hiccup w ["#p-task"]))) (finally (r/dispose-walk! w)))]
+        shown (try (r/placed-hiccup w ["#p-task"]) (finally (r/dispose-walk! w)))]
     (is (seq model) "the model reads parts")
     (is (= (keys model) (map :id (in "#p-task"))) "the page's task list is the model's parts, by id and in order")
     (is (= model shown) "each part's hiccup the model reads is the hiccup the page's unit of that id is written from")
@@ -1832,7 +1832,7 @@
   (let [w (r/walker {:ref (seon.ratom/atom {}) :changes seon.ctx/changes} (constantly (ts/test-db)) [#'two-part-layout {}])]
     (try (r/flush! w nil)
          (let [placed (r/placed-hiccup w ["#parts"])
-               [[_ broken] [_ fine]] placed]
+               [[_ broken] [_ fine]] (seq placed)]
            (is (= :seon.render/component-defect (:seon.error/type broken)) (str "the model reads the error as data: " (pr-str placed)))
            (is (str/includes? (:seon.error/message broken) "seon.ref/scan invalid-output") "what threw")
            (is (= [{:in [:seon.ref/blocks 3]}] (get-in broken [:seon.render/threw :problems])) "and the thrown error's own data")

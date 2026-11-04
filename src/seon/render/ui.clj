@@ -1754,9 +1754,9 @@
 (defn ctx-parts
   "@ctx's parts, each a pair: what the model reads of the part (its data, or the hiccup its render returned, printed as a
   request's parts message prints it, seon.context's parts-message), beside the part as the page draws it (its unit's
-  html). parts, [[id content]] of the task's list (seon.render/placed-hiccup); html, {id html} of its units. See
+  html). parts, {id content} of the task's list (seon.render/placed-hiccup); html, {id html} of its units. See
   docs/render.md#the-page."
-  {:malli/schema [:=> [:cat [:sequential [:tuple :string :any]] [:map-of :string :string]] :any]}
+  {:malli/schema [:=> [:cat :map [:map-of :string :string]] :any]}
   [parts html]
   [:li {:id "d-parts" :class "flex flex-col gap-2"}
    [:h2 {:class "kicker"} "the task's parts: what the model reads, and the part drawn"]
