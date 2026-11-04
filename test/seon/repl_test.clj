@@ -834,7 +834,15 @@
     (is (clojure.string/includes? (pr-str (:seon.error/problems r)) "Object") "it names the value"))
   (let [e (seon.contract/error :seon.agent/eval-error 'seon.repl/eval-code "m" {:class "c" :data {:held (Object.) (Object.) 1 :r (range)}})]
     (is (seon.contract/plain? e) "whatever a raiser held")
-    (is (string? (get-in e [:data :held])) "as its text"))
+    (is (string? (get-in e [:data :held])) "as its text")
+    (let [v (seon.contract/plainly {:v [1 (Object.) #{2}] :l (list 1 (Object.)) :s #{(Object.)}})]
+      (is (seon.contract/plain? v))
+      (is (vector? (:v v)) "a collection keeps its shape, each member plain, so a variant's schema of it still holds")
+      (is (= 1 (first (:v v))))
+      (is (= #{2} (peek (:v v))))))
+  (let [e (try ((seon.contract/wrap 'x.y/f (seon.contract/schema [:=> [:cat :int] :int]) identity) 1 2) (catch Throwable t (ex-data t)))]
+    (is (= :seon.instrument/arity-error (:seon.error/type e)) (pr-str e))
+    (is (seon.contract/plain? e) "a contract's own error is plain, whatever its form holds"))
   (is (some? (repl/record-details "(f)" {:handle 'result/e1 :value (Object.)} {} nil)) "a value that is no data is the one thing a record prints, by design"))
 
 ;; docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map: Datahike's "Query for unknown vars"

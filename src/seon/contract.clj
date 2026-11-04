@@ -56,14 +56,18 @@
     v)))
 
 (clojure.core/defn plainly
-  "v as the store keeps it (`plain?`): plain data as it is, a map's keys and values each so, whatever its size, anything
+  "v as the store keeps it (`plain?`): plain data as it is, a collection's members each so, whatever its size, anything
   else (a library's record, an object in an exception's data, a lazy seq, which printing it whole could never end) as
   the one printer's text of it under the part budget, which says what it left; two keys that print alike are then one.
   The one place a value is made plain: every error is, at its constructor (`error`). See docs/storage.md#plain-data."
   {:malli/schema [:=> [:cat :any] :any]}
   [v]
   (cond (plain? v) v
-        (and (map? v) (not (clojure.core/record? v)) (not (sorted? v))) (into {} (map (fn [[k x]] [(plainly k) (plainly x)])) v)
+        (or (clojure.core/record? v) (sorted? v)) (print/text v (:part print/budgets))
+        (map? v) (into {} (map (fn [[k x]] [(plainly k) (plainly x)])) v)
+        (vector? v) (mapv plainly v)
+        (set? v) (into #{} (map plainly) v)
+        (list? v) (apply list (map plainly v))
         :else (print/text v (:part print/budgets))))
 
 (clojure.core/defn- pred {:malli/schema [:=> [:cat :qualified-keyword :seon.host/fn] [:tuple :qualified-keyword :seon.host/schema]]} [k p] [k (m/-simple-schema {:type k :pred p})])
@@ -225,7 +229,8 @@
             (= arm :arity) (assoc :seon.error/expected (m/form (:schema data)))
             (= arm :schema) (assoc :seon.error/message (str fn-sym ": its contract could not be checked: "
                                                             (ex-message (:exception data)))))]
-    (throw (ex-info (:seon.error/message e) e))))
+    ;; plain as every error is (a contract's form may hold a predicate or a regex): it is recorded and sent as one
+    (throw (ex-info (:seon.error/message e) (plainly e)))))
 
 (clojure.core/defn wrap
   "f instrumented by the compiled function schema s, errors named fn-sym, and counted

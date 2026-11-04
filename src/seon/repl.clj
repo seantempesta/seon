@@ -586,7 +586,7 @@
       ;; copied back as code double every \\( and break case constants)
       (joined :out) (assoc :out (print/code (joined :out)))
       (joined :err-out) (assoc :err (print/code (joined :err-out)))
-      (= :err (:tag lst)) (assoc :ex (or (:err lst) {:seon.error/message (str (:err-text lst))}))
+      (= :err (:tag lst)) (assoc :ex (or (:err lst) (contract/error :seon.agent/eval-error #'response (str (:err-text lst)) {:class "unknown: the eval answered text, no error"})))
       (sum :ms) (assoc :ms (/ (Math/round (* 1000.0 (sum :ms))) 1000.0))
       (sum :ticks) (assoc :ticks (sum :ticks))
       (sum :alloc-bytes) (assoc :bytes (sum :alloc-bytes)))))
