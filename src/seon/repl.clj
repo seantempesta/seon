@@ -638,7 +638,7 @@
         data? (and (nil? basis) (or (not (contains? resp :value)) (contract/plain? (:value resp))))]
     (cond-> (if data?
               {:code code :response resp}
-              (cond-> {:code code :response (dissoc resp :value) :printed (print/response-text resp render/model-printed) :type (str (type (:value resp)))}
+              (cond-> {:code code :response (dissoc resp :value) :printed (print/response-text resp render/model) :type (str (type (:value resp)))}
                 basis (assoc :basis basis)))
       ;; a value that names its render schema keeps it (a basis's; data's, a prove's run): the page draws the value by it
       (:seon.render/schema (meta (:value resp))) (assoc :schema (:seon.render/schema (meta (:value resp))))
@@ -719,7 +719,7 @@
      (try (let [;; with the namespace the REPL is in after it (:ns, as every nREPL response carries): the prompt
                 answered (fn [] (let [r (again code (cond-> (repaired (response @answers handle) req)
                                                       (:ns @agent/state) (assoc :ns (ns-name (:ns @agent/state)))))]
-                                  [r (print/response-text r render/model-printed)]))
+                                  [r (print/response-text r render/model)]))
                 ;; printing is inside the boundary: a value that throws as it is realized is the error
                 [r text] (try (@the-handler (assoc req "code" code :reply #(vswap! answers conj %)))
                               (answered)
@@ -924,7 +924,7 @@
   (let [handle (symbol "result" (str "e" (eval-n!)))
         r (repaired (response [{:tag :err :err e}] handle) req)]
     (swap! agent/state assoc-in [:results (keyword (name handle))] r)
-    (record! (assoc r :text (print/response-text r render/model-printed)) code req)))
+    (record! (assoc r :text (print/response-text r render/model)) code req)))
 
 (defn- layout
   "The layout this branch renders its ctx with: the var :seon.render/render-ctx declares, an agent's own

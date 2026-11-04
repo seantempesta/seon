@@ -33,7 +33,10 @@
                           "that record alone; nothing of the earlier records is printed again")
                :growth :constant
                ;; measured 2026-10-25: 16 calls and 329 KB at 10 held records (the new record's two prints)
-               :fixed {:calls 560 :bytes 340000}
+               ;; 2026-11-04, the owner's yes ("Yes, raise by 4"), old 560: a record's text goes through the one lookup, record-messages,
+               ;; seon.render/model, model-declared, contract/properties (seon.render/one-way-to-make-what-an-agent-is-sent, step 4). Re-pinned
+               ;; to what it measures at step 6, which deletes part-change and parts-message from this path
+               :fixed {:calls 564 :bytes 340000}
                :sizes [10 100 1000]}))
 
 (defn session-of
@@ -240,6 +243,9 @@
                :work "the previous call and its refs read once, the parts that moved printed in one message, the new record printed; nothing earlier is printed or drawn again"
                :growth :constant
                ;; +5 with what changed of a moved part: seon.context/part-change and its two model reads (2026-10-31)
-               :fixed {:calls 332}
+               ;; 2026-11-04, the owner's yes ("Yes, raise by 4"), old 332: a record's text goes through the one lookup, record-messages,
+               ;; seon.render/model, model-declared, contract/properties (seon.render/one-way-to-make-what-an-agent-is-sent, step 4). Re-pinned
+               ;; to what it measures at step 6, which deletes part-change and parts-message from this path
+               :fixed {:calls 336}
                ;; measured 2026-10-29: 9 contracted calls at 10, 100 and 1,000 evals before the turn (the moved part printed once, the new record once)
                :sizes [10 30 100]}))

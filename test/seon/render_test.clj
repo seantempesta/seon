@@ -1970,7 +1970,7 @@
     (is (str/starts-with? (str (get-in m [:to-prove 'demo-test/n-test])) "not written yet") "its need's unwritten proof: what to write")
     (is (not (contains? data :cites)) "the cites are parts of their own")
     (is (nil? (meta (:task m))) "its model value names no schema: the printer does not draw it by this render again")
-    (is (str/includes? (seon.print/response-text {:value data} r/model-printed) "First the need.") "the part printed as an eval's value is, by its model render: it ends")
+    (is (str/includes? (seon.print/response-text {:value data} r/model) "First the need.") "the part printed as an eval's value is, by its model render: it ends")
     (is (str/includes? html "First the need.") "the page's html, by the task's html render")))
 
 (deftest a-request-draws-its-search-and-a-new-query-redraws-it

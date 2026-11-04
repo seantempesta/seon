@@ -65,17 +65,24 @@
     (do (vreset! data out) (html {:schema k :as :block} out))
     out))
 
-(defn model-printed
-  "What the printer shows in place of v (seon.print/print-value's :render): {:value m} when v's
-  schema (its metadata :seon.render/schema) declares a model render (`model-declared`), which makes
-  a value (an array map of what matters, docs/render.md#a-render-is-a-value-printed-once) that the
-  one printer then prints, at its budget, with its own cuts; else nil. Costs one metadata read.
-  The model render is called as a part's is, (f {} v): what an eval answers is what a request
-  sends (docs/render.md#a-part-answers-data)."
-  {:malli/schema [:=> [:cat :any] [:maybe [:map [:value :any]]]]}
-  [v]
-  (when-let [sym (model-declared (:seon.render/schema (meta v)))]
-    {:value ((requiring-resolve sym) {} v)}))
+(defn model
+  "What the model reads of a value. Of v, what the printer shows in its place (seon.print/print-value's :render): {:value m}
+  when v's schema (its metadata :seon.render/schema) declares a model render (`model-declared`), which makes a value
+  (docs/render.md#a-render-is-a-value-printed-once) that the one printer then prints, at its budget, with its own cuts; else
+  nil, for one metadata read. Of part k of walk w, a component that answered data: its data's model render, else its data,
+  made when a request asks for it and kept on its cache entry by its revision, so the page never pays for it
+  (docs/render.md#a-part-answers-data). The render is called (f {} v), whoever asks."
+  {:malli/schema [:function [:=> [:cat :any] [:maybe [:map [:value :any]]]] [:=> [:cat :map [:vector :any]] :any]]}
+  ([v]
+   (when-let [sym (model-declared (:seon.render/schema (meta v)))]
+     {:value ((requiring-resolve sym) {} v)}))
+  ([w k]
+   (let [c (get @(:cache w) k)]
+     (if (= (:rev c) (:model-rev c))
+       (:model c)
+       (let [r (model (:data c)) m (if r (:value r) (:data c))]
+         (vswap! (:cache w) update k assoc :model-rev (:rev c) :model m)
+         m)))))
 
 (defn- identity-attr?
   "Is attribute a an upsert key ([:and {:seon.db/identity true} ...])?"
@@ -486,29 +493,14 @@
                         (let [h (h/html (resolved w k true))] (vswap! (:cache w) update k assoc :unit-rev r :unit-html h) h))]
            {:id (:id c) :container sel :rev r :html html}))))
 
-(defn- model-of
-  "What part k of walk w (a component that answered data) sends the model: its schema's model render
-  of its data (model-declared; else the data itself), made when a request asks for it and kept on its
-  cache entry by its revision, so the page never pays for it and a request reuses an unchanged part's."
-  {:malli/schema [:=> [:cat :map [:vector :any]] :any]}
-  [w k]
-  (let [c (get @(:cache w) k)]
-    (if (= (:rev c) (:model-rev c))
-      (:model c)
-      (let [d (:data c)
-            sym (model-declared (:seon.render/schema (meta d)))
-            m (if sym ((requiring-resolve sym) {} d) d)]
-        (vswap! (:cache w) update k assoc :model-rev (:rev c) :model m)
-        m))))
-
 (defn placed-hiccup
   "Walk w's components placed in the root's lists with element ids sels ([\"#p-task\"]), in order, as
-  {id content}: what the model reads of each, a part's model render (model-of) or else a
+  {id content}: what the model reads of each, a part's model render (`model`) or else a
   component's output with its children's resolved, exactly as its render returned it (a call of the
   printer kept as the call: the model reads the data). See docs/render.md#a-part-answers-data."
   {:malli/schema [:=> [:cat :map [:sequential :string]] :map]}
   [w sels]
-  (apply array-map (mapcat (fn [[_ k]] (let [c (get @(:cache w) k)] [(:id c) (if (some? (:data c)) (model-of w k) (resolved w k))]))
+  (apply array-map (mapcat (fn [[_ k]] (let [c (get @(:cache w) k)] [(:id c) (if (some? (:data c)) (model w k) (resolved w k))]))
                            (placed w sels))))
 
 (defn placed-data

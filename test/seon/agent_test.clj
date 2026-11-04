@@ -1735,11 +1735,12 @@
                         {:config {:seon.config.ai/script 'seon.fixtures/wait-call}
                          :decls [{:seon.task/name "w" :seon.task/plan "Wait." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]})
         {:keys [evals sent]} (:value r)
-        loops (set (keep #(when (str/includes? (str (get-in % [:seon.eval/record :code])) "seon.turn/work!") (:seon.eval/id %)) evals))
-        last-sent (second (last sent))]
-    (is (= 2 (count loops)) "each run's own loop was recorded")
-    (is (some #(= :message (first %)) last-sent) (str "the wake's request is the one read: " (pr-str last-sent)))
-    (is (not-any? #(and (= :eval (first %)) (loops (second %))) last-sent) (pr-str last-sent))))
+        code (into {} (map (juxt :seon.eval/id #(get-in % [:seon.eval/record :code]))) evals)
+        ;; what the wake's request sent, each eval by its code: a record it sent is on the branch whatever was written since
+        sent-codes (keep #(when (= :eval (first %)) (code (second %))) (second (last sent)))]
+    (is (some #(= :message (first %)) (second (last sent))) (str "the wake's request is the one read: " (pr-str r)))
+    (is (some #{"(my.turn/wait)"} sent-codes) (str "it sent the model's own eval: " (pr-str sent-codes)))
+    (is (not-any? #(str/includes? % "seon.turn/work!") sent-codes) (pr-str sent-codes))))
 
 (deftest a-run-at-its-cap-is-recorded-cap-never-waiting
   ;; root, 2026-10-26: a run whose last turn waits spent its budget, so it ends :cap, which a

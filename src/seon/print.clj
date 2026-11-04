@@ -75,7 +75,7 @@
   "Eval response r as every reader reads it (the model's tool message, the page, an outside
   agent): printed by the one printer under its handle, so a cut names the form that reads its
   rest, `(get-in result/e43 [:value ..])`. Made when r is
-  sent or shown, never stored (seon.repl/record-details keeps the value). render (seon.render/model-printed):
+  sent or shown, never stored (seon.repl/record-details keeps the value). render (seon.render/model):
   a value whose schema declares a model render prints as that render's value, the printer's own values."
   {:malli/schema [:function [:=> [:cat :map] :string] [:=> [:cat :map [:maybe :seon.host/fn]] :string]]}
   ([r] (response-text r nil))
@@ -103,7 +103,7 @@
 
 (defn record-text
   "An eval's record (:seon.eval/record) as its response reads, printed now (`response-text`): its stored value printed,
-  through render (seon.render/model-printed) under the schema the record kept (:schema: the value's
+  through render (seon.render/model) under the schema the record kept (:schema: the value's
   :seon.render/schema, which metadata does not keep through the store), so a record reads as its live response did
   (a prove's one line, not its whole map); a value that is not plain data was printed as it was recorded (:printed),
   and reads so. See docs/render.md#a-render-is-a-value-printed-once."

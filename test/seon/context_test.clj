@@ -310,7 +310,7 @@
   ;; the call, then the response as a tool message; the provider's format folds a reply's calls
   ;; into one assistant message (docs/render.md, the request is a render)
   (let [ev (fn [id call prose value] {:seon.eval/id id :seon.eval/by "a1" :seon.eval/record (cond-> {:code (str "(" id ")") :response {:handle (symbol "result" id) :value value} :call-id (str "c-" id) :call call} prose (assoc :content prose))})
-        ms (into [] (mapcat #(context/eval-messages % {})) [(ev "e1" 0 "R0" "E1") (ev "e2" 0 nil "E2") (ev "e3" 1 nil "E3")])]
+        ms (into [] (mapcat #(context/eval-messages {} %)) [(ev "e1" 0 "R0" "E1") (ev "e2" 0 nil "E2") (ev "e3" 1 nil "E3")])]
     (is (= ["assistant" "tool" "assistant" "tool" "assistant" "tool"] (mapv :role ms)) "each eval its call and its response")
     (is (= {:role "assistant" :content "R0" :tool-calls [{:id "c-e1" :code "(e1)"}] :call 0} (first ms)))
     (is (= {:role "tool" :tool-call-id "c-e1" :content "{:handle result/e1, :value \"E1\"}"} (second ms)))
@@ -320,7 +320,7 @@
       (is (= ["c-e2" "c-e3"] (mapv :tool_call_id (subvec wire 3 5))) "each call answered, in order")))
   (testing "a user's form is one user message carrying its response"
     (is (= [{:role "user" :content "{:by \"user\" :code \"(+ 1 2)\" :response {:handle result/e4, :value 3}}"}]
-           (context/eval-messages {:seon.eval/by "user" :seon.eval/record {:code "(+ 1 2)" :response {:handle 'result/e4 :value 3}}} {})))))
+           (context/eval-messages {} {:seon.eval/by "user" :seon.eval/record {:code "(+ 1 2)" :response {:handle 'result/e4 :value 3}}})))))
 
 ;; ---- context v2: a stable prefix, each var at its citation's depth, the helpers -----------
 
@@ -528,7 +528,7 @@
   ;; root's delivery; the turn that takes them writes the message fact on its branch, so the
   ;; conversation holds it in tx order (seon.context/records), rendered by the message fact's
   ;; own messages (seon.context/eval-messages; docs/render.md)
-  (let [[m] (context/message-messages {:seon.message/from "owner" :seon.message/body "use demo/g, not a new helper"} {})]
+  (let [[m] (context/message-messages {} {:seon.message/from "owner" :seon.message/body "use demo/g, not a new helper"})]
     (is (= "user" (:role m)))
     (is (str/includes? (:content m) "use demo/g, not a new helper"))
     (is (str/includes? (:content m) ":from \"owner\"") "who sent it"))
@@ -551,7 +551,7 @@
   ;; DeepSeek's thinking mode with tools needs each earlier reply's reasoning_content sent back
   ;; (a 400 otherwise, measured: docs/model.md): the reply's first eval carries it,
   ;; exactly as returned, and the provider's format sends it unless replay-reasoning is false
-  (let [ms (context/eval-messages {:seon.eval/by "a1" :seon.eval/record {:code "(f 3)" :response {:value 9} :call-id "c1" :call 0 :prose "f triples." :reasoning "Square it first."}} {})
+  (let [ms (context/eval-messages {} {:seon.eval/by "a1" :seon.eval/record {:code "(f 3)" :response {:value 9} :call-id "c1" :call 0 :prose "f triples." :reasoning "Square it first."}})
         assistant (first ms)]
     (is (= "Square it first." (:reasoning assistant)))
     (is (not-any? :reasoning (rest ms)))
@@ -914,11 +914,11 @@
   ;; value's schema is metadata, which the store does not keep, and record-text never read the record's :schema
   (let [v (with-meta {:reports [] :ran 3 :reused 2 :fail 0 :error 0 :pass 3 :heap (vec (range 400))} {:seon.render/schema :seon.test/proved})
         r {:handle 'result/e7 :value v}
-        live (seon.print/response-text r seon.render/model-printed)
+        live (seon.print/response-text r seon.render/model)
         rec (repl/record-details "(my.agent/prove)" r {} nil)
         stored (:seon.eval/record (d/pull (d/db-with (db-with-program) [{:seon.eval/id "e7" :seon.eval/by "a1" :seon.eval/record rec}])
                                           [:seon.eval/record] [:seon.eval/id "e7"]))
-        sent (:content (second (context/eval-messages {:seon.eval/by "a1" :seon.eval/record (assoc stored :call-id "c1")} nil)))]
+        sent (:content (second (context/eval-messages nil {:seon.eval/by "a1" :seon.eval/record (assoc stored :call-id "c1")})))]
     (is (= :seon.test/proved (:schema stored)) "the record keeps the value's schema")
     (is (str/includes? live "green: ran 3") "the live response is its one line")
     (is (= live sent) (str "the record's tool message reads as the live response did: " sent))
@@ -1536,7 +1536,7 @@
             close-at (first (keep-indexed #(when (= "</session>" (:content %2)) %1) more))
             example (subvec (vec more) 0 close-at)
             db @conn
-            original (mapcat (fn [[_ v k]] (case k :seon.db/eval-fact (context/eval-messages v {}) :seon.message/fact (context/message-messages v {}) :seon.turn/fact (context/turn-messages v {})))
+            original (mapcat (fn [[_ v k]] (case k :seon.db/eval-fact (context/eval-messages {} v) :seon.message/fact (context/message-messages {} v) :seon.turn/turn-fact (context/turn-messages {} v)))
                              (context/records db (pdb/eid db :seon.agent/key "b/src")))
             prefix #(str/replace (pr-str %) "example-abc-" "")]
         (is (= "system" (:role sys)))
@@ -1577,7 +1577,7 @@
       (source-session! conn)
       (let [tx (context/session-tx @conn "b/src" "abc")
             names (fn [db k] (let [a (pdb/eid db :seon.agent/key k)]
-                               (mapv (fn [[_ v kind]] (case kind :seon.db/eval-fact (context/eval-messages v {}) :seon.message/fact (context/message-messages v {}) :seon.turn/fact (context/turn-messages v {})))
+                               (mapv (fn [[_ v kind]] (case kind :seon.db/eval-fact (context/eval-messages {} v) :seon.message/fact (context/message-messages {} v) :seon.turn/turn-fact (context/turn-messages {} v)))
                                      (context/records db a))))]
         (is (= tx (clojure.edn/read-string (pr-str tx))) "plain data: written with pr-str, read back")
         (is (= {:seon.agent/key "example/abc" :seon.agent/id :example-abc :seon.agent/status :ended :seon.agent/description "Make h."} (ffirst tx)))

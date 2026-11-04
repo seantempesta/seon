@@ -463,7 +463,7 @@
         ;; value's :printed, a live reply's :text) is prose
         data? (and (:seon.eval/record e) (nil? (:text r)) (not (:printed rec)))
         r (cond-> r (and (:seon.eval/record e) (nil? (:text r)))
-            (assoc :text (if data? (when (= :inline (:as opts)) (print/record-text rec render/model-printed)) (:printed rec))))
+            (assoc :text (if data? (when (= :inline (:as opts)) (print/record-text rec render/model)) (:printed rec))))
         by (or (:seon.eval/by e) (:by r))
         err? (some? (:ex r))]
     (if (= :inline (:as opts))
@@ -1266,7 +1266,7 @@
         v (ratom/realize value)
         ;; an error answered as a value (a function that returns its error) is a failure too
         err (or ex (when (contract/error? v) v))
-        tokens (context/messages-tokens (context/eval-messages e nil))]
+        tokens (context/messages-tokens (context/eval-messages nil e))]
     [:li
      ;; a step of a turn (opts :step) is drawn open: its turn's one fold opens them all, never a second click
      [:details (cond-> {:class "seon-eval" :id (str "eval-" (:seon.eval/id e))} (or opened? step?) (assoc :open true))
@@ -1308,7 +1308,7 @@
         failures (some-> run proofs/failures)
         died (into (sorted-set-by #(compare (str %1) (str %2))) (some-> run proofs/died))]
     [:section [:h2 "prove"]
-     [:p (str (:value (render/model-printed (with-meta r {:seon.render/schema :seon.test/proved}))))]
+     [:p (str (:value (render/model (with-meta r {:seon.render/schema :seon.test/proved}))))]
      (when (seq (:proofs r))
        [:ul (for [[p s] (sort-by (comp str key) (:proofs r))] [:li [:code (str p)] " " (name s)])])
      (for [[t fs] (sort-by (comp str key) failures) :when (not (died t))]

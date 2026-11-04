@@ -183,7 +183,7 @@
  ;; the namespace its REPL is in, as its newest eval left it (seon.repl/record-tx: a datom when it moved), so a cold
  ;; build draws what the live page does; before any, where the REPL starts (seon.context/current-ns)
  :seon.agent/ns :symbol
- :seon.db/eval-fact [:map {:seon.db/attributes true :seon.render/html seon.render.ui/evaluation}
+ :seon.db/eval-fact [:map {:seon.db/attributes true :seon.render/html seon.render.ui/evaluation :seon.render/model seon.context/eval-messages}
                      [:seon.eval/id :seon.eval/id] [:seon.eval/agent :seon.eval/agent] [:seon.eval/by {:optional true} :seon.eval/by]
                      [:seon.eval/record :seon.eval/record] [:seon.eval/opened {:optional true} :seon.eval/opened]]
  ;; an entity's record (seon.ctx, :seon.ctx/pattern: Datahike's pull syntax as data, docs/ctx.md#the-pattern;
@@ -503,7 +503,7 @@
  ;; stage boundary (:stage), the judge's verdict with its reasons (:verdict); each wakes its session
  :seon.message/kind [:and {:seon.db/index true} [:enum :message :stage :verdict]]
  :seon.message/reply-to [:and {:seon.db/index true} :string]
- :seon.message/fact [:map {:seon.db/attributes true :seon.render/html seon.render.ui/message} [:seon.message/id :seon.message/id] [:seon.message/from :seon.message/from]
+ :seon.message/fact [:map {:seon.db/attributes true :seon.render/html seon.render.ui/message :seon.render/model seon.context/message-messages} [:seon.message/id :seon.message/id] [:seon.message/from :seon.message/from]
                      [:seon.message/branch {:optional true} :seon.message/branch] [:seon.message/agent {:optional true} :seon.message/agent] [:seon.message/body :seon.message/body]
                      [:seon.message/kind {:optional true} :seon.message/kind]
                      [:seon.message/reply-to {:optional true} :seon.message/reply-to]]
@@ -564,7 +564,7 @@
  :seon.end/reason :string
  :seon.end/turns :int
  :seon.end/tokens :int
- :seon.turn/turn-fact [:map {:seon.db/attributes true :seon.render/html seon.render.ui/turn}
+ :seon.turn/turn-fact [:map {:seon.db/attributes true :seon.render/html seon.render.ui/turn :seon.render/model seon.context/turn-messages}
                           [:seon.turn/id :seon.turn/id] [:seon.turn/run :seon.turn/run] [:seon.turn/agent {:optional true} :seon.turn/agent] [:seon.turn/n :seon.turn/n]
                           [:seon.turn/reply :seon.turn/reply]
                           [:seon.turn/truncated {:optional true} :seon.turn/truncated]
