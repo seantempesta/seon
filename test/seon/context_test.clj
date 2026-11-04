@@ -101,8 +101,8 @@
   (let [head (fn [evals] (seon.render.ui/run-head {:seon.ctx/ctx {:seon.agent/max-turns 4 :turns {"t1" {:seon.turn/n 0}} :evals evals} :seon.db/db (ts/test-db)} 1))
         ;; newest first, as ctx holds :evals: a read, the definition redefined, the definition
         evals (array-map "e3" {:seon.eval/record {:code "(f 2)" :response {:value 4}}}
-                         "e2" {:seon.eval/record {:code "(defn f [x] (* 2 x))" :recorded '[demo/f] :response {}}}
-                         "e1" {:seon.eval/record {:code "(defn f [x] x)" :recorded '[demo/f] :response {}}})
+                         "e2" {:seon.eval/record {:code "(defn f [x] (* 2 x))" :response {:recorded '[demo/f]}}}
+                         "e1" {:seon.eval/record {:code "(defn f [x] x)" :response {:recorded '[demo/f]}}})
         m (head evals)]
     (is (nil? (:changed (head (array-map "e3" (get evals "e3"))))) "a read changes nothing")
     (is (= '[demo/f] (:changed m)) "one recorded definition, once however often redefined")
@@ -1754,4 +1754,14 @@
     (is (= (update-vals recorded count) (update-vals now count)) "the same sessions, the same turns of each")
     (doseq [[k turns] recorded [i t] (map-indexed vector turns)]
       (is (= t (get-in now [k i])) (str k " turn " i ": the bytes it was recorded with")))))
+
+(deftest what-an-eval-recorded-is-in-what-the-model-reads
+  ;; task seon.render/one-way-to-make-what-an-agent-is-sent, step 2: the eval tool promises :recorded, an outside agent read
+  ;; it, and the stored record kept it beside its response, where no model's message printed it
+  (let [rec (seon.repl/record-details "(defn f [] 1)" {:handle 'result/e1 :value #'clojure.core/inc :recorded '[app.x/f] :fns [{:f 'a/b}] :text "t"} {:call-id "c" :prose "p"} nil)
+        data (seon.repl/record-details "(defn f [] 1)" {:handle 'result/e1 :value 1 :recorded '[app.x/f]} {:call-id "c" :prose "p"} nil)]
+    (is (= '[app.x/f] (get-in data [:response :recorded])))
+    (is (str/includes? (print/record-text data) "app.x/f") "the plain value's text, which the model reads")
+    (is (str/includes? (print/record-text rec) "app.x/f") "and the text printed of a value that is no data")
+    (is (not (contains? (:response rec) :fns)) "what the tool does not promise stays out")))
 

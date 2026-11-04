@@ -924,7 +924,7 @@
             moved #(assoc-in % [:branches [:debug :a1] :db]
                              (d/db-with (get-in % [:branches [:debug :a1] :db])
                                         [{:seon.eval/id "e9" :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key "b/a1"}
-                                          :seon.eval/record {:code "(f 9)" :response {:handle 'result/e9 :value 9} :run "demo/f#1"}}]))
+                                          :seon.eval/record {:code "(f 9)" :response {:handle 'result/e9 :value 9} :run "demo/f#1" :call-id "c9"}}]))
             drawn (fn [st] (let [[st1 _] (#'p/pass-view st [:debug :a1]) [st2 _] (#'p/pass-view (moved st1) [:debug :a1])]
                              (- (get-in st2 [:counts :rendered] 0) (get-in st1 [:counts :rendered] 0))))]
         (is (zero? (drawn (assoc-in st [:tab [:debug :a1] :at] e0))) "a chosen turn: nothing drawn again")

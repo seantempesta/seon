@@ -1717,6 +1717,30 @@
                          :decls [{:seon.task/name "w" :seon.task/plan "Wait." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]})]
     (is (= ["Saw my own reply."] (:prose (:value r))) (pr-str r))))
 
+(deftest a-woken-agent-is-not-sent-its-own-loop
+  ;; task seon.render/one-way-to-make-what-an-agent-is-sent, step 2: the eval that ran the parked run (seon.turn/work!) is
+  ;; recorded when it returns, so a wake's request came to hold it as a message; it is no work of the agent's
+  (let [q (fn [w] (str "[:find ?id ?st :where [?e :seon.run/task ?t] [?t :seon.task/id \"" w "\"] [?e :seon.run/id ?id] [?e :seon.run/status ?st] [?e :seon.run/agent ?a]]"))
+        parked (fn [w n] (str "(seon.root/await-db sys \"the runs parked, or one ended\" #(let [rows (datahike.api/q '" (q w) " %)] (or (= " n " (count (filter (fn [[_ st]] (= :parked st)) rows))) (some (fn [[_ st]] (#{:held :done :failed} st)) rows))))"))
+        [_ r] (in-agent (fn [{:keys [ns]}]
+                          (let [w (str ns "/w")]
+                            [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")}
+                             {:op :eval :agent "root"
+                              :code (str "(do (my.root/run! sys [" (pr-str w) "]) " (parked w 1)
+                                         " (let [ag (ffirst (datahike.api/q '[:find ?ag :where [?e :seon.run/id " (pr-str (str w "#1")) "] [?e :seon.run/agent ?a] [?a :seon.agent/id ?ag]] @(:conn sys)))]"
+                                         "   @(seon.root/message! sys ag \"carry on\") " (parked w 2)
+                                         "   (let [db (:db @(seon.root/call! sys {:op :write :req {:op :branch-db :branch (seon.task/default-branch " (pr-str w) ")}}))]"
+                                         "     {:evals (mapv #(datahike.api/pull db '[:seon.eval/id :seon.eval/by :seon.eval/record] %) (datahike.api/q '[:find [?e ...] :where [?e :seon.eval/id]] db))"
+                                         "      :sent (sort-by first (datahike.api/q '[:find ?id ?s :where [?c :seon.model-call/id ?id] [?c :seon.model-call/sent ?s]] db))})))")}]))
+                        {:config {:seon.config.ai/script 'seon.fixtures/wait-call}
+                         :decls [{:seon.task/name "w" :seon.task/plan "Wait." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]})
+        {:keys [evals sent]} (:value r)
+        loops (set (keep #(when (str/includes? (str (get-in % [:seon.eval/record :code])) "seon.turn/work!") (:seon.eval/id %)) evals))
+        last-sent (second (last sent))]
+    (is (= 2 (count loops)) "each run's own loop was recorded")
+    (is (some #(= :message (first %)) last-sent) (str "the wake's request is the one read: " (pr-str last-sent)))
+    (is (not-any? #(and (= :eval (first %)) (loops (second %))) last-sent) (pr-str last-sent))))
+
 (deftest a-run-at-its-cap-is-recorded-cap-never-waiting
   ;; root, 2026-10-26: a run whose last turn waits spent its budget, so it ends :cap, which a
   ;; live view reads as the budget spent, not as a wait for a message; a wait before the cap is

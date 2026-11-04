@@ -785,9 +785,18 @@
                 :else (assoc-in c [:parts pid] (part [:eval id] (eval-messages v {}))))))
           (or cache {:ids [] :parts {}}) items))
 
+(defn loop-eval?
+  "Is eval e (:seon.eval/by, :seon.eval/record) the agent's own turn loop (seon.turn/work!, asked of the agent named id,
+  naming its run, answering no model's call)? It holds the run's turns; no reader of the conversation reads it as work:
+  neither the model (`records`) nor the page (seon.render.ui/conversation-list). Reads e by its paths, never realized
+  whole: the layout reads no eval's opened flag."
+  {:malli/schema [:=> [:cat [:maybe :keyword] :any] :boolean]}
+  [id e]
+  (boolean (and id (= (:seon.eval/by e) (name id)) (get-in e [:seon.eval/record :run]) (not (get-in e [:seon.eval/record :call-id])))))
+
 (defn records
   "What agent a's conversation is made of on db, in tx order: its evals (not a context read's: that
-  ends only the request that ran it), the messages it took
+  ends only the request that ran it; not its own loop's, `loop-eval?`), the messages it took
   (:seon.message/agent, written on its branch by the turn that took each) and its turns' replies that
   called nothing (the agent winding down: its prose is its assistant message), each [tx value schema-key]; with since,
   only those of transaction since and later (what a request has not printed yet). The
@@ -797,9 +806,11 @@
                   [:=> [:cat :seon.host/db :int [:maybe :int]] [:vector [:tuple :int :map :qualified-keyword]]]]}
   ([db a] (records db a nil))
   ([db a since]
+  (let [id (:seon.agent/id (d/pull db [:seon.agent/id] a))]
   (->> (concat (for [[e tx] (d/q '[:find ?e ?tx :in $ ?a ?since :where [?e :seon.eval/agent ?a ?tx] [(>= ?tx ?since)]] db a (or since 0))
                      :let [v (d/pull db [:seon.eval/id :seon.eval/by :seon.eval/record] e)]
-                     :when (not= "context" (:seon.eval/by v))]
+                     ;; a model's eval (nearly all of them) answers a call: no contracted call per record to say so
+                     :when (and (not= "context" (:seon.eval/by v)) (or (get-in v [:seon.eval/record :call-id]) (not (loop-eval? id v))))]
                  [tx v :seon.db/eval-fact])
                (for [[e tx] (d/q '[:find ?m ?tx :in $ ?a ?since :where [?m :seon.message/agent ?a ?tx] [(>= ?tx ?since)]] db a (or since 0))]
                  [tx (d/pull db [:seon.message/id :seon.message/from :seon.message/body] e) :seon.message/fact])
@@ -809,7 +820,7 @@
                      :when (and (empty? (:seon.turn/calls v)) (not (:seon.turn/truncated v)) (not (str/blank? (:seon.turn/reply v))))]
                  [tx (dissoc v :seon.turn/calls :seon.turn/truncated) :seon.turn/fact]))
        (sort-by (fn [[tx v]] [tx (:seon.eval/id v (:seon.message/id v (:seon.turn/id v)))]))
-       vec)))
+       vec))))
 
 (defn examples-of
   "The keys of the example sessions agent a's task names (:seon.task/examples, agents keyed
