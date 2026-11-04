@@ -6,6 +6,15 @@ This file holds the owner's standing rulings, one entry each: the rule, the owne
 
 The owner's rulings of 2026-11-04, on what an agent is and how everything it reads is made; the direction and what is proven are in [the Seon way](seon-way.md). They stand over earlier entries where they differ.
 
+
+### Data is stored as data; the one printer is for context (owner, 2026-11-04)
+
+"All evals that we can store as data natively inside datahike or via the object storage we should do up to a reasonable point (we should have reasonable maxdese) and if that happens we can't resume that data and that's fine. Printed data is rarely the right choice and I want us to be very suspricious of any code that is printing values. The only value printer should be the one value printer and that's for assembling context for agents". Stated in [the Seon way](seon-way.md); the sweep is task seon.print/the-one-printer-is-for-context.
+
+### The standing store is erased when the new schemas land (owner, 2026-11-04)
+
+"Yes you can erase the runs/store when we have the new schemas in place." At the core's merge, not before; runs/curated and runs/kept-fresh-87 stay.
+
 ### An agent's data makes its page and its context (owner, 2026-11-04)
 
 "The fact that the agent's pull is what makes an agent an agent is what makes it render the UI and which parts go where. A different agent could have different data attached and we want it to render differently to adapt to whatever data we give it. This is a general core function of the seon system. Make all data known, validate it, and we make it easy to process it for whatever needs the user has." And: "No more hand crafting things. Let the system operate and figure out how to have everything declare itself". Stated in: [the rules](seon-way.md#the-rules).
