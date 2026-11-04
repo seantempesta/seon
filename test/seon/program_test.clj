@@ -536,7 +536,16 @@
             whole (let [db (empty-db)] (d/db-with db (source/import-tx db {path (text after) tpath test-src})))]
         (is (some? (digest db t)) (str label ": the test has a digest"))
         (is (not= (digest db t) (digest refreshed t)) (str label ": the method's change moves it on a refresh"))
-        (is (= (digest refreshed t) (digest whole t)) (str label ": and a whole import agrees"))))))
+        (is (= (digest refreshed t) (digest whole t)) (str label ": and a whole import agrees"))))
+    (testing "a type another namespace imports and builds by its bare name reaches the type's own namespace"
+      (let [path "src/app/pt_tyid.clj" upath "src/app/pt_tyiu.clj" tpath "src/app/pt_tyiu_test.clj"
+            text #(str "(ns app.pt-tyid)\n(deftype TId [] clojure.lang.IDeref (deref [_] " % "))\n")
+            user "(ns app.pt-tyiu (:require [app.pt-tyid]) (:import [app.pt_tyid TId]))\n(defn f [] (TId.))\n"
+            test-src "(ns app.pt-tyiu-test (:require [clojure.test :refer [deftest is]] [app.pt-tyiu]))\n(deftest f-test (is (some? (app.pt-tyiu/f))))\n"
+            t 'app.pt-tyiu-test/f-test
+            db (let [db (empty-db)] (d/db-with db (source/import-tx db {path (text 1) upath user tpath test-src})))
+            db' (d/db-with db (source/refresh-tx db {path (text 2)}))]
+        (is (not= (digest db t) (digest db' t)))))))
 
 (deftest an-update-gives-the-digests-a-rebuild-gives
   (let [db (calc-db)

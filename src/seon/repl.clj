@@ -1143,9 +1143,10 @@
     (loop []
       (let [e (a/<!! error-chan) m (::flow/msg e)]
         (sock/write-line! 2 (print/text (agent/error-map (::flow/ex e) 'seon.repl/serve!) (:part print/budgets)))
+        ;; the answer first here: it reports a failure, not a write, and the failure may be the commit's
+        (when-let [r (when (map? m) (defect-answer m (::flow/ex e)))] (agent/send! r))
         (when (= :repl (::flow/pid e)) (swap! agent/state assoc :busy false))
         (when (:dirty? @agent/state) (agent/commit!))
-        (when-let [r (when (map? m) (defect-answer m (::flow/ex e)))] (agent/send! r))
         (recur)))))
 
 (defn run!
