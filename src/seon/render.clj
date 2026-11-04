@@ -419,6 +419,40 @@
      (clojure.walk/postwalk (fn [x] (if (and (vector? x) (= ::child (first x))) (resolved w (second x) html?) x))
                             (cond-> (:out c) html? (styled (:f c)))))))
 
+(defn- render-reach
+  "The vars whose work reaches any of vars names on db, names among them: each form naming one (:form/refs), and what
+  that form defines, to a fixed point. Read only when a definition moved."
+  {:malli/schema [:=> [:cat :seon.host/db [:set :symbol]] [:set :symbol]]}
+  [db names]
+  (loop [seen names forms #{} todo (seq names)]
+    (if-let [v (first todo)]
+      (let [fs (into [] (comp (map :e) (remove forms)) (d/datoms db :avet :form/refs v))
+            up (into [] (comp (mapcat #(d/datoms db :eavt % :form/defines))
+                              (mapcat #(d/datoms db :eavt (:v %) :var/name))
+                              (map :v) (remove seen))
+                     fs)]
+        (recur (into seen up) (into forms fs) (into (rest todo) up)))
+      seen)))
+
+(defn- queue-moved-renders!
+  "Each component of walk w whose render, or a render its data's schema declares, moved in datoms or reaches a var that did
+  (render-reach) or whose schema was registered again queued, and its kept model render let go: a render is an input of
+  what it draws, as the data is. It costs what a change of a definition reaches, and nothing else. See
+  docs/render.md#reactive-renders."
+  {:malli/schema [:=> [:cat :map [:sequential :any]] :nil]}
+  [w datoms]
+  (let [db ((:db w))
+        moved (into #{} (keep #(when (= :var/form (:a %)) (:var/name (d/entity db (:e %))))) datoms)
+        schemas (into #{} (keep #(when (= :schema/form (:a %)) (:schema/key (d/entity db (:e %))))) datoms)
+        reach (render-reach db moved)]
+    (doseq [[k c] @(:cache w)
+            :let [sk (some-> (:data c) meta :seon.render/schema)]
+            :when (or (schemas sk)
+                      (some reach (cons (when (var? (:f c)) (symbol (:f c))) (when sk [(declared sk) (model-declared sk)]))))]
+      (vswap! (:queue w) conj k)
+      (vswap! (:cache w) update k dissoc :model-rev))
+    nil))
+
 (defn flush!
   "Walk w drawn as of now, Reagent's batching flush (reagent.core/flush: the queued components rendered
   at once): its root on the first, then each component a change queued (a reaction's, after
@@ -434,6 +468,8 @@
           (if (= :all datoms)
             (vswap! (:queue w) into @(:db-keys w))
             (when (seq datoms)
+              ;; a definition moved: what draws by it again. No contracted call on a move that moved none
+              (when (some #(#{:var/form :schema/form} (:a %)) datoms) (queue-moved-renders! w datoms))
               (doseq [k @(:db-keys w) :let [c (get @(:cache w) k)] :when (d/reads-touched? (:reads c) datoms)]
                 (vswap! (:queue w) conj k))))
           (loop []

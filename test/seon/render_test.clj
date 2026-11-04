@@ -2029,3 +2029,47 @@
            (is (= ["#parts" "#others"] (distinct (map first (#'r/placed w2))))))
          (finally (r/dispose-walk! w)))))
 
+(defn rr-part "A component whose render calls a helper, by the facts of its form."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+  [_] [:p "drawn"])
+(defn rr-data "A component that answers data of a schema with a declared model render."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+  [_] (with-meta {:t 1 :classes {}} {:seon.render/schema :seon.problems/report}))
+(defn rr-layout "A layout of the two."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+  [_] [:div [:div {:id "parts"} [#'rr-part {}] [#'rr-data {}]]])
+
+(deftest a-render-that-changes-draws-again
+  ;; docs/render.md#reactive-renders; the owner, 2026-11-04: "when data changes OR THE FUNCTION THAT RENDERS IT changes then you
+  ;; re-render". A helper a render calls and a schema's declared render are inputs of what they draw; a var nothing here reaches is not
+  (let [facts (fn [form-id src refs defines]
+                {:db/id form-id :form/id form-id :form/src src :form/refs refs :form/defines defines})
+        db0 (d/db-with (ts/test-db)
+                       [{:db/id "v1" :var/name 'seon.render-test/rr-part} {:db/id "v2" :var/name 'demo/rr-helper} {:db/id "v3" :var/name 'demo/rr-deep}
+                        {:db/id "v4" :var/name 'demo/unrelated} {:db/id "v5" :var/name 'seon.render.ui/problems-model}
+                        (facts "f1" "(defn rr-part [_] (demo/rr-helper))" '#{demo/rr-helper} ["v1"])
+                        (facts "f2" "(defn rr-helper [] (demo/rr-deep))" '#{demo/rr-deep} ["v2"])
+                        (facts "f3" "(defn rr-deep [] 1)" #{} ["v3"])])
+        cell (volatile! db0)
+        w (r/walker {:ref (seon.ratom/atom {}) :changes seon.ctx/changes} #(deref cell) [#'rr-layout {}])
+        runs #(let [l (get (r/ledger w) %)] (+ (:miss l 0) (:same l 0)))
+        move! (fn [n src] (let [rep (d/with @cell [{:db/id "new" :form/id src :form/src src} [:db/add [:var/name n] :var/form "new"]])]
+                            (vreset! cell (:db-after rep))
+                            (r/flush! w (:tx-data rep))))]
+    (try
+      (r/flush! w nil)
+      (r/placed-hiccup w ["#parts"])
+      (let [p (runs 'seon.render-test/rr-part) d (runs 'seon.render-test/rr-data)
+            kept (fn [] (some #(when (= #'rr-data (:f %)) (:model-rev %)) (vals @(:cache w))))]
+        (is (some? (kept)) "the model render is kept")
+        (move! 'demo/unrelated "(defn unrelated [] 2)")
+        (is (= [p d] [(runs 'seon.render-test/rr-part) (runs 'seon.render-test/rr-data)]) "a var nothing here reaches: nothing runs")
+        (is (some? (kept)) "and the kept model render stays")
+        (move! 'demo/rr-deep "(defn rr-deep [] 2)")
+        (is (= (inc p) (runs 'seon.render-test/rr-part)) "a helper's helper moved: the render that reaches it runs")
+        (is (= d (runs 'seon.render-test/rr-data)) "the other does not")
+        (move! 'seon.render.ui/problems-model "(defn problems-model [_ v] v)")
+        (is (= (inc d) (runs 'seon.render-test/rr-data)) "a schema's declared render moved: what draws by it runs")
+        (is (nil? (kept)) "and its kept model render is let go"))
+      (finally (r/dispose-walk! w)))))
+
