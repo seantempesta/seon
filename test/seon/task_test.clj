@@ -61,14 +61,15 @@
         "on the agent's record, in the config's order")))
 
 (deftest the-writer-cites-what-names-something
-  ;; audit item 2a: a reproduction's prose names a test helper (demo-test/fixture) and a handle (result/e1) that name
+  ;; audit item 2a: a reproduction's prose names a test helper (demo-test/fixture) and a handle (result/e-none) that name
   ;; nothing: a prose word is cited only when it names something (seon.ref/kept); the program's names among the cites
-  ;; are what the judge reads (seon.judge/subject)
+  ;; are what the judge reads (seon.judge/subject). A handle no eval makes: seon.ref also asks this process, and a shard's
+  ;; other tests define result/e1
   (let [db (d/db-with (db-with-program) [{:ns/name 'demo-test :ns/file "test/demo_test.clj"}])
-        plan (str "Make demo/f exact and add `demo/g`. Reproduce: (let [db (demo-test/fixture)] (demo/f db)) answers result/e1.")
+        plan (str "Make demo/f exact and add `demo/g`. Reproduce: (let [db (demo-test/fixture)] (demo/f db)) answers result/e-none.")
         names (set (keep :seon.cite/name (task/create-tx db [(decl plan)])))]
     (is (every? names '[demo/f demo/g]) "the defined name and the one to make (cited by its backticks)")
-    (is (not-any? names '[demo-test/fixture result/e1]) "and no prose word that names nothing")
+    (is (not-any? names '[demo-test/fixture result/e-none]) "and no prose word that names nothing")
     (testing "a test the plan names is cited as any name; the page shows it as the task's proof"
       (let [tx (task/create-tx db [(assoc (decl "Make `demo-test/f-test` pass.") :seon.task/proofs #{'demo-test/f-test})])]
         (is (= #{'demo-test/f-test} (:seon.task/proofs (first tx))))))))

@@ -14,7 +14,8 @@
  ;; attribute (keyword: a proc's own fact, e.g. root's :seon.root/watch). Once its subject changes
  ;; after the error last happened, the error is closed (seon.problems), by a read
  :seon.error/subject [:or :string :symbol :qualified-keyword]
- :seon.error/base [:map {:seon.render/html seon.render.ui/error-box :description "Every error: its variant (a registered schema key), the operation that raised it, a short message."}
+ :seon.error/base [:and {:seon.render/html seon.render.ui/error-box :description "Every error: its variant (a registered schema key), the operation that raised it, a short message; plain data, all of it (seon.contract/error makes it so)."}
+                   [:map
                    [:seon.error/type :seon.error/type]
                    [:seon.error/operation :seon.error/operation]
                    [:seon.error/message :seon.error/message]
@@ -26,6 +27,7 @@
                    [:seon.error/given {:optional true} [:vector :string]]
                    [:seon.error/problems {:optional true} :seon.error/problems]
                    [:seon.error/subject {:optional true} :seon.error/subject]]
+                   :seon.db/plain]
  ;; the instrumented wrapper's errors (Seon's variant names)
  :seon.instrument/contract-error [:and :seon.error/base [:map [:seon.error/type [:enum :seon.instrument/contract-error]]]]
  :seon.instrument/arity-error [:and :seon.error/base [:map [:seon.error/type [:enum :seon.instrument/arity-error]]]]}

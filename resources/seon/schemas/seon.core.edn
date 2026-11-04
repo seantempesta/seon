@@ -94,7 +94,7 @@
                       [:redefined {:optional true} [:vector :seon.program/meaning-change]]
                       ;; what its definitions warn (seon.repl/instrument): an uncontracted definition, a contract not armed
                       [:warnings {:optional true} [:vector [:map [:seon.repl/finding :keyword]]]] [:out {:optional true} [:map [:seon.print/code :string]]]
-                      [:err {:optional true} [:map [:seon.print/code :string]]] [:ex {:optional true} :map]
+                      [:err {:optional true} [:map [:seon.print/code :string]]] [:ex {:optional true} :seon.error/base]
                       [:ms {:optional true} number?] [:ticks {:optional true} :int] [:bytes {:optional true} :int]
                       [:text {:optional true} :string] [:record {:optional true} :string]
                       [:recorded {:optional true} [:vector :symbol]] [:unmapped {:optional true} [:vector :qualified-symbol]] [:fns {:optional true} [:vector :map]]

@@ -10,7 +10,7 @@
                        :seon.schema.datahike/nilable :seon.schema.datahike/literal :seon.schema.datahike/enum :seon.schema.datahike/value-type-unavailable]
  ;; a schema an agent registers at its REPL (my.schema/register!; v1's seon.schema/register!)
  :seon.schema/key :qualified-keyword
- :seon.schema/definition :any
+ :seon.schema/definition :seon.db/plain
  ;; a registration of a stored attribute: its stored values on the branch, and how many the new
  ;; form refuses (v1's seon.db/registration-check)
  :seon.schema.usage/check [:map [:checked nat-int?] [:refused nat-int?]]

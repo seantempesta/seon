@@ -103,7 +103,7 @@
   "The keys :seon.error/base requires, read once from its form at load: what schema-of asks of a
   map before it draws it as an error. See docs/render.md#render-what-a-person-or-a-model-reads."
   (vec (keep #(when (and (vector? %) (not (:optional (when (map? (second %)) (second %))))) (first %))
-             (rest (get contract/forms :seon.error/base)))))
+             (rest (some #(when (and (vector? %) (= :map (first %))) %) (get contract/forms :seon.error/base))))))
 
 (defn schema-of
   "The named schema of v: hint (its producer's), the one its metadata names, an error map's

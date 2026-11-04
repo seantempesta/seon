@@ -231,6 +231,7 @@ An agent's namespace refers `clojure.pprint`'s `pp` and `pprint` (`seon.agent/ma
 The places that cut a value where it is made, not in the printer, each with its reason.
 
 - `seon.main/shown`: names a budget only to print whole (the value's ``:seon.print/full`` metadata).
+- `seon.contract/plainly`: what no store keeps (a live object, a lazy seq) at the error's constructor, as the printer's text under the part budget, since printing it whole might never end; plain data of any size is untouched.
 - `seon.contract/kept`: root keeps no live value of another process's error ([errors](errors.md#an-error-keeps-data)); a value past the part budget is kept as the printer's cut (`print/prose` for a string, `print/text` marked code for the rest), which says what it omitted.
 - `seon.contract/problems`, `seon.task/file-declarations`: a refused value (a function's argument, a task file's entry) may be infinite, lazy or a host object, and travels on the wire as text, so its error keeps the printer's cut, which says what it omitted; the live value stays with the caller.
 - `seon.turn/tell-error!`: the error a turn threw (or the missing status) becomes its message's text where the message is made, printed whole (`:seon.print/full`), never cut: the agent reads all of it, as it reads any message.

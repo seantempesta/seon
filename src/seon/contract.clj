@@ -55,6 +55,17 @@
                  :else false)))
     v)))
 
+(clojure.core/defn plainly
+  "v as the store keeps it (`plain?`): plain data as it is, a map's keys and values each so, whatever its size, anything
+  else (a library's record, an object in an exception's data, a lazy seq, which printing it whole could never end) as
+  the one printer's text of it under the part budget, which says what it left; two keys that print alike are then one.
+  The one place a value is made plain: every error is, at its constructor (`error`). See docs/storage.md#plain-data."
+  {:malli/schema [:=> [:cat :any] :any]}
+  [v]
+  (cond (plain? v) v
+        (and (map? v) (not (clojure.core/record? v)) (not (sorted? v))) (into {} (map (fn [[k x]] [(plainly k) (plainly x)])) v)
+        :else (print/text v (:part print/budgets))))
+
 (clojure.core/defn- pred {:malli/schema [:=> [:cat :qualified-keyword :seon.host/fn] [:tuple :qualified-keyword :seon.host/schema]]} [k p] [k (m/-simple-schema {:type k :pred p})])
 
 (def ^:private host-schemas
@@ -315,7 +326,7 @@
 
 (defn error
   "The error map of variant `type` raised by `operation`: message plus the variant's
-  members. Checked against the variant's registered schema here, at its constructor. A raiser
+  members, plain whatever a member held (`plainly`), so every error can be stored and sent. Checked against the variant's registered schema here, at its constructor. A raiser
   names itself by its var, #'ns/f, the function the error is built in: the compile resolves it, so
   a rename can never leave an error naming a function that is gone (the a-map design read
   seon.render.value/show, renamed away, and searched for it); a symbol is for an operation known
@@ -324,7 +335,7 @@
                   [:=> [:cat :qualified-keyword [:or :seon.host/var :qualified-symbol] :string [:maybe :map]] :seon.error/base]]}
   ([type operation message] (error type operation message nil))
   ([type operation message members]
-   (let [e (merge members {:seon.error/type type :seon.error/operation (if (var? operation) (symbol operation) operation) :seon.error/message message})]
+   (let [e (plainly (merge members {:seon.error/type type :seon.error/operation (if (var? operation) (symbol operation) operation) :seon.error/message message}))]
      (when-not ((m/validator (schema type)) e)
        (throw (ex-info (str "error construction refused for " type)
                        {:seon.error/type :seon.instrument/contract-error :seon.error/operation (symbol #'seon.contract/error)

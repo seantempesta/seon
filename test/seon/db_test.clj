@@ -996,9 +996,9 @@
                  (lazy-seq (vreset! realized true) [1])]]
         (is (not (contract/plain? v)) (str (type v))))
       (is (false? @realized) "telling does not realize it")))
-  (testing "seon.repl/plainly makes any value plain: a record as a key too, which it left as it was"
+  (testing "seon.contract/plainly makes any value plain: a record as a key too, which it left as it was"
     (doseq [v [{(->PlainR 1) (->PlainR 2)} [(->PlainR 1)] (sorted-map :a 1) (range 3)]]
-      (is (contract/plain? (#'seon.repl/plainly v)) (str (type v)))))
+      (is (contract/plain? (contract/plainly v)) (str (type v)))))
   (testing "seon.contract/kept is the same walk, within its budget"
     (is (= {:a [1 2]} (contract/kept {:a [1 2]})))
     (is (= (seon.print/code (seon.print/text (sorted-map :a 1) (:part seon.print/budgets))) (contract/kept (sorted-map :a 1))) "a sorted map is its print")

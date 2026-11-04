@@ -823,6 +823,20 @@
     (is (= 1 (count (re-seq #"did you mean" (:text r)))) (:text r))
     (is (= 1 (count (re-seq #":jolt.error/suggestions" (:text r)))) (:text r))))
 
+(deftest a-record-with-a-value-no-store-keeps-is-invalid-where-it-is-built
+  ;; task seon.repl/an-evals-record-has-its-declared-shape: the response has its declared shape and is plain, so a value
+  ;; no store keeps is invalid at record-details, explained, naming where it is; not refused later, by the store, at the write.
+  ;; Every error is plain at its constructor, whatever a raiser put in it, so an error cannot be the value
+  (let [bad {:handle 'result/e1 :warnings [{:seon.repl/finding :x :held (Object.)}]}
+        r (try (repl/record-details "(f)" bad {} nil) (catch Throwable t (ex-data t)))]
+    (is (= :seon.instrument/contract-error (:seon.error/type r)) (pr-str r))
+    (is (= 'seon.repl/record-details (:seon.error/operation r)))
+    (is (clojure.string/includes? (pr-str (:seon.error/problems r)) "Object") "it names the value"))
+  (let [e (seon.contract/error :seon.agent/eval-error 'seon.repl/eval-code "m" {:class "c" :data {:held (Object.) (Object.) 1 :r (range)}})]
+    (is (seon.contract/plain? e) "whatever a raiser held")
+    (is (string? (get-in e [:data :held])) "as its text"))
+  (is (some? (repl/record-details "(f)" {:handle 'result/e1 :value (Object.)} {} nil)) "a value that is no data is the one thing a record prints, by design"))
+
 ;; docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map: Datahike's "Query for unknown vars"
 ;; carries datalog.parser.type.Variable records in its ex-data; the store refused the record of the eval that threw it,
 ;; and the refused write ended the turn (a run lost turns 5-20 so). The record is made plain where it is built
@@ -830,9 +844,9 @@
 (deftest an-eval-that-throws-is-recorded-with-its-turn
   (let [e (try (d/q '[:find ?y :where [?e :var/name _]] (d/db-with (ts/test-db) [])) nil (catch Throwable t t))]
     (is (some? e) "the query throws")
-    (is (not (seon.contract/plain? (agent/error-map e))) "its error map holds the parser's records, as Datahike threw them")
+    (is (seon.contract/plain? (agent/error-map e)) "its error map is plain, the parser's records kept as their text, at the error's constructor")
     (is (seon.contract/plain? (repl/record-details "(q)" {:handle 'result/e1 :ex (agent/error-map e)} {} nil))
-        "the eval's record is plain data, the records kept as their text"))
+        "and so the eval's record"))
   (let [[r recorded] (at/in-agent (fn [{:keys [task]}]
                                     ["(datahike.api/q '[:find ?y :where [?e :var/name _]] (my.db/db))"
                                      {:op :eval :agent "root"

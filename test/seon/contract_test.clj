@@ -104,8 +104,12 @@
   (let [big (vec (range 100000)) text (apply str (repeat 100000 "x")) live (atom big)
         mapped ((requiring-resolve 'seon.agent/error-map) (ex-info "boom" {:v big :s text :a live}))
         made (contract/error :seon.root/refused 'app/f "boom" {:big big :took text :held live})]
-    (is (= {:v big :s text :a live} (:data mapped)) "an eval error's ex-data is its :data, whole")
-    (is (= {:big big :took text :held live} (select-keys made [:big :took :held])) "a built error carries its members whole")))
+    ;; plain data whole, whatever its size; what no store keeps, a live atom, is its print (seon.contract/plainly)
+    (is (= {:v big :s text} (select-keys (:data mapped) [:v :s])) "an eval error's ex-data is its :data, whole")
+    (is (string? (:a (:data mapped))))
+    (is (= {:big big :took text} (select-keys made [:big :took])) "a built error carries its members whole")
+    (is (string? (:held made)))
+    (is (contract/plain? made))))
 
 (deftest a-contract-error-says-where-and-what
   ;; md-scan #14, 2026-10-29: "its value does not satisfy its contract" sent the agent through
