@@ -245,7 +245,10 @@
 
 (def named-test-inputs
   "{[test-namespace var, the read] why its verdict is a function of its digest anyway}."
-  '{[seon.db-test/a-commit-costs-what-it-writes seon.profile/now-ns] "printed ms per turn; the verdict is on bytes"
+  '{[seon.config-test/env-reads-a-set-variable-and-nil-for-an-unset-one System/getenv] "the tag and the test read the one variable, so the verdict is the same whatever its value"
+    [seon.config-test/envf-formats-variables System/getenv] "the tag and the test read the one variable, so the verdict is the same whatever its value"
+    [seon.config-test/or-takes-the-first-non-nil System/getenv] "the tag and the test read the one variable, so the verdict is the same whatever its value"
+    [seon.db-test/a-commit-costs-what-it-writes seon.profile/now-ns] "printed ms per turn; the verdict is on bytes"
     [seon.db-test/a-commit-costs-what-it-writes seon.profile/ms-since] "printed ms per turn; the verdict is on bytes"
     [seon.model-test/a-streamed-reply-ends-when-the-server-ends-it Thread/sleep] "the stream's pacing is the subject: a deadline can only turn it red (FINDINGS #13)"
     [seon.model-test/a-streamed-reply-ends-when-the-server-ends-it clojure.core/rand-int] "a port: a collision can only turn it red (FINDINGS #14)"
