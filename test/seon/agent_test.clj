@@ -1722,7 +1722,9 @@
   ;; recorded when it returns, so a wake's request came to hold it as a message; it is no work of the agent's
   (let [q (fn [w] (str "[:find ?id ?st :where [?e :seon.run/task ?t] [?t :seon.task/id \"" w "\"] [?e :seon.run/id ?id] [?e :seon.run/status ?st] [?e :seon.run/agent ?a]]"))
         parked (fn [w n] (str "(seon.root/await-db sys \"the runs parked, or one ended\" #(let [rows (datahike.api/q '" (q w) " %)] (or (= " n " (count (filter (fn [[_ st]] (= :parked st)) rows))) (some (fn [[_ st]] (#{:held :done :failed} st)) rows))))"))
-        [_ r] (in-agent (fn [{:keys [ns]}]
+        names (volatile! nil)
+        [_ r] (in-agent (fn [{:keys [ns] :as n}]
+                          (vreset! names n)
                           (let [w (str ns "/w")]
                             [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")}
                              {:op :eval :agent "root"
@@ -1737,8 +1739,10 @@
         {:keys [evals sent]} (:value r)
         code (into {} (map (juxt :seon.eval/id #(get-in % [:seon.eval/record :code]))) evals)
         ;; what the wake's request sent, each eval by its code: a record it sent is on the branch whatever was written since
-        sent-codes (keep #(when (= :eval (first %)) (code (second %))) (second (last sent)))]
-    (is (some #(= :message (first %)) (second (last sent))) (str "the wake's request is the one read: " (pr-str r)))
+        ;; the wake's request: this run's own, since a shared root's branch holds what other tasks merged to main
+        woken (second (last (filter #(clojure.string/starts-with? (first %) (str (:ns @names) "/w#2/")) sent)))
+        sent-codes (keep #(when (= :eval (first %)) (code (second %))) woken)]
+    (is (some #(= :message (first %)) woken) (str "the wake's request is the one read: " (pr-str r)))
     (is (some #{"(my.turn/wait)"} sent-codes) (str "it sent the model's own eval: " (pr-str sent-codes) " of " (pr-str r)))
     (is (not-any? #(str/includes? % "seon.turn/work!") sent-codes) (pr-str sent-codes))))
 
