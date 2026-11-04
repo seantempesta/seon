@@ -19,13 +19,19 @@ What Seon is for, where it stands, the one step being worked now, and the steps 
 
 ## Where it stands (2026-11-04): one way to make what an agent reads
 
-**All work on context and rendering follows [the Seon way](seon-way.md); read it before touching either.** The owner's direction: what an agent reads is data on it or a query away, drawn by a declared render, so page and context adapt to the data with no hand assembly ([rulings](decisions.md#2026-11-04-rulings)). Steps 0-5 of the transcript's replacement are merged (task ``seon.render/one-way-to-make-what-an-agent-is-sent``), and a new turn no longer reruns the status. A live test agent has proven the shape; nothing of that is merged.
+**All work on context and rendering follows [the Seon way](seon-way.md); read it before touching either, and do not build on what it says is going.** The owner's direction: what an agent reads is data on it or a query away, drawn by a declared render, so page and context adapt to the data with no hand assembly; entities have attributes, not rows; store what is retrieved ([rulings](decisions.md#2026-11-04-rulings)).
 
-**The order now:** a batch of fixes (namespace docs, the ``inputs`` rename, removal as unlink, the component rule, re-render on a function's change), then the core as one merge (the page last, the default render, structure, each part printed once, the transcript as a declared render, ``seon.context/request``'s assembly deleted), measured on the six tasks against the baselines before it merges, then in parallel the page controls, reset, and a browser spike for the image.
+**The order now:**
+1. **The simpler schema,** one branch, now: evals as attributes with ``:printed`` gone; a turn as a number, with the model call holding what a turn held; no runs, ``:seon.end`` or turn entities. Root sets judged attributes on the task; a task's earlier states are the db's history; an agent's records stay on its branch. ``runs/store`` is erased when it lands. Reported to the owner before it merges.
+2. **The core,** one merge on top: the page as the last message, latest only (held on ``jolt/one-render-6-the-page-is-the-last-message``); the default render over the pattern; parts named by the agent's data; both renders in the component's tracked run; each part printed once; structure; the most specific render wins; the transcript as a declared render with ``seon.context/request``'s assembly deleted. Measured on the six tasks against the baselines before it merges.
+3. **Beside it:** page controls for delete, compact, forget and reset; reset through the writer; a browser spike for the image.
+4. **Then:** the image; agents improving renders by default.
+
+**Done so far:** the transcript's steps 0-5, a new turn no longer rerunning the status, namespace docs written, the ``inputs`` rename, removal as unlink, re-render when a definition moves.
 
 **The baselines,** six tasks at f19afd9d35, two runs: 2 of 6 and 3 of 6 green. Identical runs of one task went from capped at 40 turns to green in 9, so a one-task difference means little.
 
-**Waiting on the owner:** how merged model renders are gated, what becomes of ``:printed``, erasing ``runs/store`` at the core's merge, how strictly a merge refuses a way around the rules, and the default render's shape.
+**Waiting on the owner:** how strictly a merge refuses a way around the rules, and the default render's shape. A shared render needs no gate: it is code, merged and conflicted like any other.
 
 ## Where it stands (2026-11-03)
 
@@ -193,6 +199,8 @@ Open, in order:
 How to work them: merge batches through a temporary worktree when a helper holds the main tree (bin/worktree NAME; bin/update only with the main tree on main); never run git or tests beside a prove (a second prove turns the load-sensitive tests red); a plain prove leaves process tests out, so a change to a page or test a process test reads runs those by name before merging (the help page's section broke seon.repl-test/the-help-page-runs on main this way); read a stuck run's evidence (sample, lsof) before killing it.
 
 ## Now: one step
+
+The current order is [where it stands](#where-it-stands-2026-11-04-one-way-to-make-what-an-agent-reads). What follows is the longer goal, and where it speaks of runs or turns as things, they are being removed.
 
 **Step 1: one real task, end to end, through Seon.** Done when an agent attached to a real task file entry finishes it: green, merged by Seon into main, written back, and the owner can watch the whole run on its chat page. Nothing else is built until this works. The known problems in its way, in order (each is a task with its proof). Where it stands (2026-10-30, afternoon): md-scan #29 went green on its proofs and the merge gate held it on a candidate missing its schema resource, now fixed; its agent is to be released on main with batch 41, the first task merged by Seon ([above](#2026-10-30-afternoon)).
 

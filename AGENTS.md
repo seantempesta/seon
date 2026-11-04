@@ -6,7 +6,7 @@ Seon is where many agents do real work for their user, each in its own process o
 
 You are in `next/`, **Seon on Jolt, built to replace Seon** (`~/src/seon`, the JVM version, now read-only reference): everything v1 does, smaller, faster and more certain; a v1 capability left out is left out on purpose, with its reason in `BAGGAGE.md`.
 
-The repository's front page for a person arriving is [README.md](README.md#start-here). Read before acting: this file (§§1–3 first), then `docs/plan.md` (what is in flight, and THE PLAN), then `docs/README.md` (the wiki's map) and `docs/parity.md`, then your task (``resources/seon/tasks/<ns>.edn``) and what its plan cites.
+The repository's front page for a person arriving is [README.md](README.md#start-here). Read before acting: this file (§§1–3 first), then `docs/plan.md` (what is in flight, and THE PLAN), then `docs/seon-way.md` (the one way everything an agent reads is made; anything older that disagrees is what is being replaced), then `docs/README.md` (the wiki's map) and `docs/parity.md`, then your task (``resources/seon/tasks/<ns>.edn``) and what its plan cites.
 
 The running system: `bin/root status|start` (the owner's main tree: server port 7888, dashboard http://127.0.0.1:7777/); Claude reaches it through the `seon` MCP server (§6). The standing root's store (`runs/store`) holds kept runs, which are evidence: never experiment on it. Experiments run in a worktree (`bin/worktree NAME`) on that worktree's own root and stores.
 
@@ -21,7 +21,7 @@ The running system: `bin/root status|start` (the owner's main tree: server port 
 
 Progress is measured as **turns to green** and **tasks merged**, with every v1 capability present (`docs/parity.md`). A piece of work counts as progress when it moves one of those numbers or unblocks a step of THE PLAN that does. Infrastructure (storage, checks, builds) matters as far as it unblocks the loop, and no further.
 
-**The current priorities are THE PLAN in `docs/plan.md`,** in order. Before starting anything, know which step it serves.
+**The current priorities are THE PLAN in `docs/plan.md`,** in order. Before starting anything, know which step it serves. Before building anything an agent reads or a person sees, read `docs/seon-way.md`: a schema, a pattern entry and a declared render are the way, and something outside them needs the owner's go.
 
 How we keep the first version's spirit: run, then right, then fast; the demo is the spec (if you can't show it running, it isn't done); the system shows what it is doing, live; numbers are honest (estimated first, measured, with what wasn't measured stated); a cause in a dependency (Chez, Jolt, Datahike, konserve) is fixed there, on a `jolt/<topic>` branch; every addition names what it replaces.
 
@@ -289,6 +289,8 @@ The mistakes made so far, each stated so it is not made again.
 - **Deleting a record** (a store, a branch, history). Runs are kept, and reclaiming space is the owner's act. The one exception: until Seon holds a user's data, the standing store is test data, erased (never migrated) when its schema changes, on the owner's go ([machine](docs/machine.md#disk-stays-bounded)).
 - **Throwing away good work, or keeping its slow copy** (owner, 2026-10-23: "don't throw away good work have agents learn from it if you want a clean implementation. No crappy slow repetitive code"). Before rewriting, read what an earlier branch, worktree or note did and keep what it learned (its measurements, its proofs, its cause); then write the clean implementation once, with no repeated or slow code. A branch or temporary worktree is removed as soon as it is merged and nothing in it is unsaved: commits merged, findings written to the wiki or a task, and a store or run output recorded or handed to the owner.
 - **Flooding the machine,** killing by pattern, leaving things running, or walking past garbage (a leftover process, a merged worktree) because someone else left it.
+
+- **A parallel system** (owner, 2026-11-04: "I don't want agents to keep building parallel systems"): a second layout, a second cache, a second path to the model, an entity to hold what an attribute or the db's history already holds, a store of printed values. Before adding one, ask whether a schema, a pattern and a render do it, and whether the problem is a cause or a consequence of something else being wrong ([the Seon way](docs/seon-way.md#the-idea)). `run`, the turn entity and sending a part as what changed are the old shape, being removed: do not build on them.
 
 ## 10. Done
 

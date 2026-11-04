@@ -6,6 +6,8 @@ Everything an agent reads, and everything a person sees of it, is data on the ag
 
 Make all data known, validate it, and make it easy to process for whatever the user needs. The owner: "The fact that the agent's pull is what makes an agent an agent is what makes it render the UI and which parts go where."
 
+Entities have attributes and those have values; that is what makes something something. The database is not rows of table schemas, and we store only what we retrieve. A task's history is its earlier states, read from the db's history, so no entity holds a copy of them.
+
 This is Rails-style, batteries included: there is one way, it is the easy way, and the constraints are the point. Store data for how it will be used, so that use is easy and cheap, and do not organize things on top of other entities when a value on the record says it. Before adding a mechanism, ask whether a schema, a pattern and a render do it. Before fixing a problem, ask whether it is the cause or a consequence of something else being wrong, and remove the cause (`docs/decisions.md#a-bug-is-a-class-remove-what-allowed-it-owner-2026-11-03`). The data's shape is ours to change: rename attributes, add refs, reverse their direction; the standing store is test data, so no change of shape needs a migration.
 
 ## The flow
