@@ -80,7 +80,7 @@
  ;; a defect answering one outside request at root's server (seon.server/respond): the
  ;; line it took, and the cause's ex-data printed; the server goes on serving
  :seon.server/held [:and :seon.error/base [:map [:seon.error/type [:= :seon.server/held]] [:agent :keyword] [:task :seon.task/id] [:holder :string]]]
- :seon.server/defect [:and :seon.error/base [:map [:seon.error/type [:= :seon.server/defect]] [:line :string] [:data {:optional true} :string]]]
+ :seon.server/defect [:and :seon.error/base [:map [:seon.error/type [:= :seon.server/defect]] [:line :string] [:data {:optional true} :seon.db/plain]]]
  :seon.writer/refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.writer/refused]]]]
  :seon.merge/uncontracted [:and :seon.error/base [:map [:seon.error/type [:= :seon.merge/uncontracted]]
                                                   [:uncontracted [:vector :qualified-symbol]]]]

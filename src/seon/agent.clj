@@ -536,6 +536,13 @@
   {:malli/schema [:=> [:cat :string] :string]}
   [sym] (str "Unable to resolve symbol: " sym " in this context"))
 
+(defn on-the-wire
+  "Response r as its reply carries it: its value only when it is plain data (seon.contract/plain?: what the socket and the
+  wire carry), never the printed text back, which is no EDN once the eval printed. See
+  docs/storage.md#plain-data."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [r] (cond-> (dissoc r :value) (and (contains? r :value) (contract/plain? (:value r))) (assoc :value (:value r))))
+
 (defn error-map
   "An exception caught at one of the agent's entrant boundaries (operation: the REPL's
   seon.repl/eval-code by default) as the one error map: its ex-data when that already is

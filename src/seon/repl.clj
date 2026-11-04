@@ -1022,8 +1022,7 @@
                 ;; its value goes with the reply only when it is plain data (seon.contract/plain?: what the socket and the wire carry);
                 ;; root keeps none of it (its view keeps the head: seon.root/eval-head), and the asker reads the value as data,
                 ;; never the printed text back, which is no EDN once the eval printed (its :out verbatim)
-                [{:op :reply :id (:id m) :response (let [r (eval-string (:forms m) (select-keys m [:ticks :origin]))]
-                                                     (cond-> (dissoc r :value) (and (contains? r :value) (contract/plain? (:value r))) (assoc :value (:value r))))
+                [{:op :reply :id (:id m) :response (let [r (eval-string (:forms m) (select-keys m [:ticks :origin]))] (agent/on-the-wire r))
                   :t (:max-tx (agent/db))}])
               :else (agent/handle! m))]
      ;; a branch is committed whenever a request is done (its writes ran ahead in memory), before its answer: a
