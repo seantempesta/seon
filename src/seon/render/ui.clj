@@ -1393,18 +1393,19 @@
   {:seon.render/style "self-center rounded-xl border border-base-800 px-4 py-2 text-sm" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int] :any]}
   [{c :seon.ctx/ctx db :seon.db/db} aid]
   (let [outcome (ratom/realize (:seon.agent/outcome c))
-        turns (ratom/realize (:seon.agent/ended-turn c))
-        end? (and outcome (= turns (or (ratom/realize (:seon.agent/turn c)) 0)))
-        tokens (when end? (d/q '[:find (sum ?k) . :with ?m :in $ ?a :where [?m :seon.model-call/agent ?a] [?m :seon.model-call/tokens ?k]] db aid))
-        reason (ratom/realize (:seon.agent/reason c))
-        status (ratom/realize (:seon.agent/status c))]
-    (cond
-      end? [:p {:class (if (= :green outcome) "text-success" "text-text-100")}
-            (str (if (= :green outcome) "✓ Done" (str "Ended: " (kname outcome)))
-                 (when (pos? turns) (str " in " turns (if (= 1 turns) " turn" " turns")))
-                 (when tokens (str " · " (print/tokens-text tokens)))
-                 (when (and reason (not= :green outcome)) (str " · " reason)))]
-      status [:p {:class "text-text-500"} (case status :busy "working…" :idle "waiting for you" (kname status))])))
+        ;; an end is its agent's while the agent is at the turn it ended on
+        end? (and outcome (= (ratom/realize (:seon.agent/ended-turn c)) (or (ratom/realize (:seon.agent/turn c)) 0)))]
+    (if end?
+      (let [turns (ratom/realize (:seon.agent/ended-turn c))
+            tokens (d/q '[:find (sum ?k) . :with ?m :in $ ?a :where [?m :seon.model-call/agent ?a] [?m :seon.model-call/tokens ?k]] db aid)
+            reason (ratom/realize (:seon.agent/reason c))]
+        [:p {:class (if (= :green outcome) "text-success" "text-text-100")}
+         (str (if (= :green outcome) "✓ Done" (str "Ended: " (kname outcome)))
+              (when (pos? turns) (str " in " turns (if (= 1 turns) " turn" " turns")))
+              (when tokens (str " · " (print/tokens-text tokens)))
+              (when (and reason (not= :green outcome)) (str " · " reason)))])
+      (when-let [status (ratom/realize (:seon.agent/status c))]
+        [:p {:class "text-text-500"} (case status :busy "working…" :idle "waiting for you" (kname status))]))))
 
 (defn examples
   "The example sessions its task names (a component over ctx and the db), or nothing when it names none. It is placed

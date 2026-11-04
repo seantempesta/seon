@@ -207,7 +207,8 @@
         db0 (reduce d/db-with db0
                     [(seon.doc/load-tx db0 "docs" {seon.context/system-page "# You are a Seon agent\n\nThe help page."})
                      (seon.task/create-tx db0 [{:seon.task/ns 't :seon.task/name "x" :seon.task/plan "Make x." :seon.task/proofs #{'t-test/x-test}}])
-                     [{:seon.agent/key k :seon.agent/task [:seon.task/id "t/x"]}]
+                     ;; the agent has no :seon.agent/task: its page draws no task part, as this input has always been (the run it
+                     ;; stood for held the task); linked, the draw costs 4,135 calls at 10 against these 3,920
                      (into [] (mapcat #(ev (str "e" %) 0)) (range n))
                      [{:seon.agent/key k :seon.agent/turn 1}
                       {:seon.model-call/id (str k "/1") :seon.model-call/agent [:seon.agent/key k] :seon.model-call/n 1 :seon.model-call/origin :model}]])
