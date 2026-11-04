@@ -359,11 +359,11 @@
   ([db] (observe empty-index db (concat (for [e (task/entity-ids db)] [:db/add e :seon.task/id nil])
                                         (for [dt (d/datoms db :aevt :seon.message/branch)] [:db/add (:e dt) :seon.message/branch (:v dt)]))))
   ([idx from db]
-   (index idx from db (for [a (sort (into #{} (filter #(or (watched-attrs %) (watched-ns (namespace %)))) (concat (keys (:schema from)) (keys (:schema db)))))
+   (index idx from db (for [a (sort (into #{} (filter #(and (keyword? %) (or (watched-attrs %) (watched-ns (namespace %))))) (concat (keys (:schema from)) (keys (:schema db)))))
                             dt (apply concat (d/datoms-diff from db :aevt [a]))]
                         dt)))
   ([idx _from db moved]
-   (observe idx db (for [dt moved :let [a (:a dt)] :when (or (watched-attrs a) (watched-ns (namespace a)))]
+   (observe idx db (for [dt moved :let [a (:a dt)] :when (and (keyword? a) (or (watched-attrs a) (watched-ns (namespace a))))]
                      [:db/add (:e dt) a]))))
 
 (defn done-input
