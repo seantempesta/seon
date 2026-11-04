@@ -1739,7 +1739,7 @@
         ;; what the wake's request sent, each eval by its code: a record it sent is on the branch whatever was written since
         sent-codes (keep #(when (= :eval (first %)) (code (second %))) (second (last sent)))]
     (is (some #(= :message (first %)) (second (last sent))) (str "the wake's request is the one read: " (pr-str r)))
-    (is (some #{"(my.turn/wait)"} sent-codes) (str "it sent the model's own eval: " (pr-str sent-codes)))
+    (is (some #{"(my.turn/wait)"} sent-codes) (str "it sent the model's own eval: " (pr-str sent-codes) " of " (pr-str r)))
     (is (not-any? #(str/includes? % "seon.turn/work!") sent-codes) (pr-str sent-codes))))
 
 (deftest a-run-at-its-cap-is-recorded-cap-never-waiting

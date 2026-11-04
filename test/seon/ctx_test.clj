@@ -905,10 +905,14 @@
       (let [[[_ same] db'] (step db #(swap! ctx/ctx assoc :lab.ctx/steps ["read the plan" "make it pass"]))]
         (is (= ["read the plan" "make it pass"] (:lab.ctx/steps (d/pull db' [:lab.ctx/steps] [:seon.agent/key k]))))
         (is same "the record after the swap! is the db's")))
-    (testing "a member gone, retracted whole"
-      (let [[_ db'] (step db #(swap! ctx/ctx update :evals dissoc (id db [:seon.eval/id "e3"])))]
-        (is (nil? (d/entity db' [:seon.eval/id "e3"])))
-        (is (some? (d/entity db' [:seon.eval/id "e4"])))))
+    (testing "a member gone: unlinked, its ref retracted and the entity kept, so a message removed is not delivered again and a swap! can bring it back"
+      (let [e3 (id db [:seon.eval/id "e3"])
+            [_ db'] (step db #(swap! ctx/ctx update :evals dissoc e3))
+            a (aid db')]
+        (is (some? (:seon.eval/id (d/entity db' e3))) "the entity is kept")
+        (is (nil? (:seon.eval/agent (d/entity db' e3))) "and no longer the agent's")
+        (is (not (contains? (:evals (:tree (ctx/build db' a :b))) e3)) "so the record does not hold it")
+        (is (some? (:seon.eval/agent (d/entity db' [:seon.eval/id "e4"]))) "the others stay")))
     (testing "a plan's cites follow its text: what it cites written with it, by the one parser (seon.task/rederive-tx)"
       (let [r1 (id db [:seon.run/id "lab/ctx#1"])
             plan "Make `app.x/f0` pass; see [the y](docs/x.md#the-y)."
