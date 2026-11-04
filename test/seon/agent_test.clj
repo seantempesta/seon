@@ -1282,8 +1282,8 @@
   (let [[_ pid broken repaired after pid'] (in-agent (fn [_]
                                                ["(def p0 (seon.lib/c-getpid))"
                                                 "p0"
-                                                "(in-ns 'seon.db) (clojure.core/defn plain? [_] (throw (ex-info \"boom: the loop's own function\" {:x 1})))"
-                                                "(in-ns 'seon.db) (clojure.core/defn plain? [_] true)"
+                                                "(in-ns 'seon.contract) (clojure.core/defn plain? [_] (throw (ex-info \"boom: the loop's own function\" {:x 1})))"
+                                                "(in-ns 'seon.contract) (clojure.core/defn plain? [_] true)"
                                                 "(+ 20 22)"
                                                 "(seon.lib/c-getpid)"]))]
     (is (= "boom: the loop's own function" (get-in broken [:ex :seon.error/message])) (str "the request is answered with its error: " (pr-str broken)))
