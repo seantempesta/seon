@@ -127,13 +127,12 @@
  :task/plan :string
  :task/status [:and {:seon.db/index true} :keyword]
  :task/refs [:set :seon.db/ref]
- :task/agent :keyword
  :note/text :string
  :note/agent [:and {:seon.db/index true} :keyword]
  :note/about :seon.db/ref
  :seon.db/example-task-fact [:map {:seon.db/attributes true}
                               [:task/name :task/name] [:task/plan :task/plan] [:task/status :task/status]
-                              [:task/refs {:optional true} :task/refs] [:task/agent {:optional true} :task/agent]]
+                              [:task/refs {:optional true} :task/refs]]
  :seon.db/note-fact [:map {:seon.db/attributes true}
                       [:note/text :note/text] [:note/agent :note/agent] [:note/about {:optional true} :note/about]]
  ;; ---- the recording transaction of each eval request, and the agent's answered t.
