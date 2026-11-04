@@ -1038,9 +1038,10 @@
                                                      (cond-> (dissoc r :value) (and (contains? r :value) (pdb/plain? (:value r))) (assoc :value (:value r))))
                   :t (:max-tx (agent/db))}])
               :else (agent/handle! m))]
-     (doseq [r rs] (agent/send! r))
-     ;; a branch is committed whenever a request is done (its writes ran ahead in memory)
+     ;; a branch is committed whenever a request is done (its writes ran ahead in memory), before its answer: a
+     ;; reply says what it did is on the branch, so one who reads the branch on hearing it never races the commit
      (when (:dirty? @agent/state) (agent/commit!))
+     (doseq [r rs] (agent/send! r))
      (swap! agent/state assoc :busy false)
      [st nil])))
 
@@ -1056,10 +1057,11 @@
   ([_] {})
   ([st _] st)
   ([st _ m]
-   (doseq [r (agent/handle! m)] (agent/send! r))
-   ;; its results committed when the REPL is idle; a request it runs commits them with its own at its end,
-   ;; never half of it from here
-   (when (and (:dirty? @agent/state) (not (:busy @agent/state))) (agent/commit!))
+   ;; its results committed when the REPL is idle, before their answers; a request it runs commits them with its
+   ;; own at its end, never half of it from here
+   (let [rs (agent/handle! m)]
+     (when (and (:dirty? @agent/state) (not (:busy @agent/state))) (agent/commit!))
+     (doseq [r rs] (agent/send! r)))
    [st nil]))
 
 (def ^:private answers
@@ -1141,9 +1143,9 @@
     (loop []
       (let [e (a/<!! error-chan) m (::flow/msg e)]
         (sock/write-line! 2 (print/text (agent/error-map (::flow/ex e) 'seon.repl/serve!) (:part print/budgets)))
-        (when-let [r (when (map? m) (defect-answer m (::flow/ex e)))] (agent/send! r))
         (when (= :repl (::flow/pid e)) (swap! agent/state assoc :busy false))
         (when (:dirty? @agent/state) (agent/commit!))
+        (when-let [r (when (map? m) (defect-answer m (::flow/ex e)))] (agent/send! r))
         (recur)))))
 
 (defn run!
