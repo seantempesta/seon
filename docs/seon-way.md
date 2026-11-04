@@ -33,12 +33,14 @@ the walk: each key by its schema's render, else the default; parts its data name
 Each rule removes a way of doing it some other way.
 
 1. **What an agent reads is data** on its entity, a pull away, or queried by a render.
-2. **Its schema declares its renders,** html for the page and model for the model. With none, a default draws it, and any valid entity renders.
+2. **Its schema declares its renders,** html for the page and model for the model. With none, a default draws it, and any valid entity renders. The nearest wins: the agent's own (``:seon.agent/renders``), over the schema's, over a parent's, over the default.
 3. **A render may ask for the db and query anything;** what it reads is tracked, so it runs again only when that moves. It need not be reachable from the agent, and nothing has to be pulled to be shown.
 4. **The agent's data names what it shows:** its pattern for what it holds, a list of parts for what is computed or queried. Defaults come from its schema.
 5. **A render runs again when its data changes or when a function that renders it changes,** at any depth.
 6. **Each thing is computed once,** kept by the walk's existing cache. There is no second cache and no second path to the model.
 7. **Derived values are drawn, never stored.** A summary, such as status's when many tests are red, is that schema's model render, and any agent can override it.
+8. **A value is stored as data, up to a stated maximum, and printed only by the one printer, for context.** Past the maximum, what it was is stored and the value is gone, and that is fine. Printing a value anywhere else is suspect (task seon.print/the-one-printer-is-for-context).
+9. **An agent's branch is kept and queried for what happened to it; its records never merge.** Main holds what root needs, and a merge stays the program and tasks. A branch is restorable and forkable, and the same agent key on two branches stays valid. The store only grows while this holds: reclaiming a record is the owner's act, and archiving successful branches is a later production policy.
 
 So adding something an agent reads is a schema and a pattern entry, or a schema and a part. Nothing else.
 
@@ -80,6 +82,7 @@ These are the known departures from the rules, in the order of the work, each wi
 **Data shaped against its use:**
 - ``:seon.eval/record`` holds an eval's code, prose, call id and more in one value, so nothing can query them. They become attributes, with the response kept as data.
 - ``:seon.turn/*`` and ``:seon.model-call/*`` describe one thing under one id, with reasoning and calls also on the eval. A turn entity goes: the number is on each record, and how a call went is on the model call.
+- An eval whose value is not plain data is stored as its printed text (``:printed``, in 15-21% of evals counted, mostly vectors holding something that is not data), and ``:line`` is a printed value too. A value's members become data, a config key states the largest kept, and past it the transcript says it is gone.
 - Also: a branch is a keyword repeated on four entities; ``:seon.process/test-error`` is about tests but lives on a process; page state (``:seon.eval/opened``) sits in the record; seven declared attributes nothing names.
 
 **Assembly outside the render system:**
