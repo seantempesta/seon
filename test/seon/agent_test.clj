@@ -852,7 +852,7 @@
   [task i n]
   (vec (mapcat (fn [k] [{:seon.run/id (str "hist#" k) :seon.run/task [:seon.task/id task]
                          :seon.run/agent {:seon.agent/key (str "hist-" k) :seon.agent/id (keyword (str "hist" k)) :seon.agent/task {:seon.task/id task}}}
-                        {:seon.eval/id (str "e" (+ 1000000 k)) :seon.eval/by "root" :seon.eval/agent {:seon.root/id :root} :seon.eval/record {:code "(+ 1 1)"}}])
+                        {:seon.eval/id (str "e" (+ 1000000 k)) :seon.eval/by "root" :seon.eval/agent {:seon.root/id :root} :seon.eval/code "(+ 1 1)"}])
                (range i (+ i n)))))
 
 (deftest an-agents-start-costs-the-same-however-long-its-root-has-run
@@ -1470,7 +1470,7 @@
            store-conn (d/connect (assoc cfg :branch ab))
            _ (d/transact store-conn [{:db/id k :seon.agent/key k :seon.agent/id :a1}
                                      {:seon.run/id "demo/w#1" :seon.run/task [:seon.task/id "demo/w"] :seon.run/agent k}
-                                     {:seon.eval/id "e1" :seon.eval/agent [:seon.agent/key k] :seon.eval/by "a1" :seon.eval/record {:code "1" :response {}}}])
+                                     {:seon.eval/id "e1" :seon.eval/agent [:seon.agent/key k] :seon.eval/by "a1" :seon.eval/code "1" :seon.eval/response {}}])
            ;; on main: what root decided of the run, and the page's open
            _ (d/transact conn [{:seon.run/id "demo/w#1" :seon.run/status :parked :seon.run/outcome :waiting :seon.run/reason "waiting for a message"}
                                {:seon.agent/key k :seon.agent/opened #{"e1" "e9"}}])
@@ -1712,7 +1712,7 @@
                                          "           (datahike.api/q '[:find ?id ?st ?out ?ag :where [?e :seon.run/task ?t] [?t :seon.task/id " (pr-str w) "] [?e :seon.run/id ?id] [?e :seon.run/status ?st] [?e :seon.run/outcome ?out] [?e :seon.run/agent ?a] [?a :seon.agent/id ?ag]] @(:conn sys)))]"
                                          "   @(seon.root/message! sys ag \"carry on\") " (parked w 2)
                                          "   (let [db (:db @(seon.root/call! sys {:op :write :req {:op :branch-db :branch (seon.task/default-branch " (pr-str w) ")}}))]"
-                                         "     {:prose (sort (keep (comp :prose :seon.eval/record) (map #(datahike.api/pull db '[:seon.eval/record] %) (datahike.api/q '[:find [?e ...] :where [?e :seon.eval/record]] db))))})))")}]))
+                                         "     {:prose (sort (datahike.api/q '[:find [?p ...] :where [_ :seon.eval/prose ?p]] db))})))")}]))
                         {:config {:seon.config.ai/script 'seon.fixtures/prose-reply}
                          :decls [{:seon.task/name "w" :seon.task/plan "Wait." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]})]
     (is (= ["Saw my own reply."] (:prose (:value r))) (pr-str r))))
@@ -1732,12 +1732,12 @@
                                          " (let [ag (ffirst (datahike.api/q '[:find ?ag :where [?e :seon.run/id " (pr-str (str w "#1")) "] [?e :seon.run/agent ?a] [?a :seon.agent/id ?ag]] @(:conn sys)))]"
                                          "   @(seon.root/message! sys ag \"carry on\") " (parked w 2)
                                          "   (let [db (:db @(seon.root/call! sys {:op :write :req {:op :branch-db :branch (seon.task/default-branch " (pr-str w) ")}}))]"
-                                         "     {:evals (mapv #(datahike.api/pull db '[:seon.eval/id :seon.eval/by :seon.eval/record] %) (datahike.api/q '[:find [?e ...] :where [?e :seon.eval/id]] db))"
+                                         "     {:evals (mapv #(datahike.api/pull db '[:seon.eval/id :seon.eval/by :seon.eval/code] %) (datahike.api/q '[:find [?e ...] :where [?e :seon.eval/id]] db))"
                                          "      :sent (sort-by first (datahike.api/q '[:find ?id ?s :where [?c :seon.model-call/id ?id] [?c :seon.model-call/sent ?s]] db))})))")}]))
                         {:config {:seon.config.ai/script 'seon.fixtures/wait-call}
                          :decls [{:seon.task/name "w" :seon.task/plan "Wait." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]})
         {:keys [evals sent]} (:value r)
-        code (into {} (map (juxt :seon.eval/id #(get-in % [:seon.eval/record :code]))) evals)
+        code (into {} (map (juxt :seon.eval/id #(:seon.eval/code %))) evals)
         ;; what the wake's request sent, each eval by its code: a record it sent is on the branch whatever was written since
         ;; the wake's request: this run's own, since a shared root's branch holds what other tasks merged to main
         woken (second (last (filter #(clojure.string/starts-with? (first %) (str (:ns @names) "/w#2/")) sent)))
@@ -1828,7 +1828,7 @@
                                              "  {:calls (mapv #(select-keys % [:code :eval]) (:seon.turn/calls t)) :reply (:seon.turn/reply t) :basis-keys (set (keys (:seon.model-call/basis m)))"
                                              "   :agent-key (:key @seon.agent/state) :on-branch (msgs db)"
                                              "   :committed (msgs (datahike.api/commit-as-db db (get-in m [:seon.model-call/basis :commit])))"
-                                             "   :prose (mapv #(:prose (datahike.api/q '[:find ?r . :in $ ?i :where [?e :seon.eval/id ?i] [?e :seon.eval/record ?r]] db %)) (keep :eval (:seon.turn/calls t)))})")
+                                             "   :prose (mapv #(datahike.api/q '[:find ?r . :in $ ?i :where [?e :seon.eval/id ?i] [?e :seon.eval/prose ?r]] db %) (keep :eval (:seon.turn/calls t)))})")
                                         {:op :eval :agent "root"
                                          :code (str "(datahike.api/q '[:find ?id ?f ?to ?b :where [?m :seon.message/id ?id] [?m :seon.message/from ?f]"
                                                     " [?m :seon.message/branch ?br] [?r :seon.run/branch ?br] [?r :seon.run/id ?to] [(= ?to " (pr-str run) ")] [?m :seon.message/body ?b]] @(:conn sys))")}])

@@ -146,17 +146,24 @@
  ;; opened by a reader of the agent's page: true once, never retracted; root writes it on main as the
  ;; agent's :seon.agent/opened (an eval's id names it only within its agent), its turn on its branch
  :seon.eval/opened :boolean
- ;; its details as one EDN value (seon.repl/record-details): the code, the response whole with its
- ;; value when that is plain data (seon.contract/plain?), else the response as it printed then
- ;; (:printed) and the value's type (:type); never a text made for a reader (seon.print/record-text
- ;; prints it when it is sent or shown). The model's prose beside the call and the provider's call
- ;; id, its 10 costliest contracted functions ([{:var :calls :ms}], seon.profile), the vars it
- ;; recorded; its prose kept as written, never parsed as it is recorded (seon.repl/record-details)
- :seon.eval/record [:map {:seon.render/html seon.render.ui/evaluation} [:code :string] [:response [:and :seon.eval/response :seon.db/plain]]
-                    [:printed {:optional true} :string] [:type {:optional true} :string]
-                    ;; a value that names its basis (@ctx, seon.ctx): its schema and the basis it is
-                    ;; rendered from, in place of a copy (seon.repl/record-details); a data value its schema alone
-                    [:schema {:optional true} :qualified-keyword] [:basis {:optional true} [:map [:t :int] [:branch :seon.db/branch]]]]
+ ;; an eval's details, each its own attribute, each only when present (seon.repl/record-details): the code; the
+ ;; model's prose beside the call; the provider's call id, the call's place in its reply (:call) and the
+ ;; reply's text (:content); its reasoning; its run (until runs go); its 10 costliest contracted functions
+ ;; ([{:var :calls :ms}], seon.profile); a value that names its render schema keeps that schema, and a value
+ ;; that names its basis (@ctx, seon.ctx) the basis it is rendered from, in place of a copy (the page and the
+ ;; model draw it from the branch at its t). The response is :seon.eval/response, whole, its value as plain data
+ ;; (seon.contract/plainly) up to :seon.config.store/max-value-chars; never a text made for a reader (seon.print
+ ;; prints it when it is sent or shown). The prose is kept as written, never parsed as it is recorded
+ :seon.eval/code :string
+ :seon.eval/prose :string
+ :seon.eval/call-id :string
+ :seon.eval/call :int
+ :seon.eval/content :string
+ :seon.eval/reasoning :string
+ :seon.eval/run :string
+ :seon.eval/fns [:vector :map]
+ :seon.eval/schema :qualified-keyword
+ :seon.eval/basis [:map [:t :int] [:branch :seon.db/branch]]
  ;; an agent: one entity per agent per boot of its root (an id like :a3 starts again each boot),
  ;; named by its key (seon.task/agent-key: "<boot>/<id>"), a content id so root's entity on main
  ;; and the one its branch's records name are one; it refs the root that started it. What root
@@ -185,7 +192,12 @@
  :seon.agent/ns :symbol
  :seon.db/eval-fact [:map {:seon.db/attributes true :seon.render/html seon.render.ui/evaluation :seon.render/model seon.context/eval-messages}
                      [:seon.eval/id :seon.eval/id] [:seon.eval/agent :seon.eval/agent] [:seon.eval/by {:optional true} :seon.eval/by]
-                     [:seon.eval/record :seon.eval/record] [:seon.eval/opened {:optional true} :seon.eval/opened]]
+                     [:seon.eval/code :seon.eval/code] [:seon.eval/prose {:optional true} :seon.eval/prose]
+                     [:seon.eval/call-id {:optional true} :seon.eval/call-id] [:seon.eval/call {:optional true} :seon.eval/call]
+                     [:seon.eval/content {:optional true} :seon.eval/content] [:seon.eval/reasoning {:optional true} :seon.eval/reasoning]
+                     [:seon.eval/schema {:optional true} :seon.eval/schema] [:seon.eval/basis {:optional true} :seon.eval/basis]
+                     [:seon.eval/fns {:optional true} :seon.eval/fns] [:seon.eval/run {:optional true} :seon.eval/run]
+                     [:seon.eval/response :seon.eval/response] [:seon.eval/opened {:optional true} :seon.eval/opened]]
  ;; an entity's record (seon.ctx, :seon.ctx/pattern: Datahike's pull syntax as data, docs/ctx.md#the-pattern;
  ;; its joins are the page walk's units, seon.render/units), each member rendered by its own schema's render
  :seon.db/agent-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.agent/id :seon.agent/status :seon.agent/branch :seon.agent/description] :seon.ctx/pattern [* {[:seon.agent/task :as :task] :seon.task/task-fact} {[:seon.turn/_agent :as :turns] [*]} {[:seon.eval/_agent :as :evals] [*]} {[:seon.message/_agent :as :messages :reverse true] [*]} {[:seon.cite/_of :as :cites] :seon.cite/cite-fact} {[:seon.search/_of :as :searches] :seon.search/search-fact}] :seon.render/html seon.render.ui/agent}

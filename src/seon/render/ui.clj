@@ -435,43 +435,41 @@
   [response]
   (dissoc response :handle :ms :ticks :bytes :fns :ex :text :record :recorded))
 
-(defn- based-value
-  "The value eval e's record names by its basis (@ctx: the record of e's agent on branch db as of
-  t, seon.ctx/build), or nil: no basis, or no db to read it on."
-  {:malli/schema [:=> [:cat :map :map [:maybe :seon.host/db]] [:maybe :map]]}
-  [rec e db]
-  (when-let [{:keys [t branch]} (when db (:basis rec))]
-    (let [a (:db/id (:seon.eval/agent e))]
-      ;; a value as of t never changes: its reads are not the component's (no later transaction
-      ;; touches them), so it is built when the component renders and never because the branch moved
-      (with-meta (assoc (:tree (binding [datahike.index.interface/*reads* nil] (seon.ctx/build (d/as-of db t) a branch))) :t t)
-        {:seon.render/schema (:schema rec)}))))
-
 (defn evaluation
-  "One eval (the declared html render of :seon.db/eval-fact, its record, and of a response), as
+  "One eval (the declared html render of :seon.db/eval-fact, its attributes, and of a response), as
   it ran: the prose beside it, its code, its response printed under its handle as it is shown
-  (seon.print/record-text of its record, through the model render of the schema it kept; a value in a row by that schema's
+  (seon.print/record-text of the eval, through the model render of the schema it kept; a value in a row by that schema's
   html render; a live response's own :text; an error's by its error
-  map's render; a value recorded as its basis, @ctx's, rendered from the branch at it), and its cost and who evaluated it as recorded; :as :inline, its code and
-  response in one line. Rendered from the record, which never changes."
+  map's render; a value recorded as its basis, @ctx's, rendered from the branch at it, seon.context/basis-value), and its cost and who evaluated it as recorded; :as :inline, its code and
+  response in one line, the value's line printed now (seon.print/line: the one printer). Rendered from the eval, which never changes."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
   [opts e]
-  (let [rec (or (:seon.eval/record e) e)
-        r (merge (:response rec) (select-keys rec [:code :prose :fns]) (dissoc e :seon.eval/record))
+  (let [recorded? (contains? e :seon.eval/response)
+        resp (:seon.eval/response e)
+        basis (:seon.eval/basis e)
+        r (if recorded?
+            (cond-> resp (:seon.eval/code e) (assoc :code (:seon.eval/code e)) (:seon.eval/prose e) (assoc :prose (:seon.eval/prose e))
+                    (:seon.eval/fns e) (assoc :fns (:seon.eval/fns e)))
+            e)
         ;; a value recorded as data: inline, printed as its reply reads under its handle; in a row,
-        ;; rendered as structure (the printer's hiccup). Text with no value behind it (a host
-        ;; value's :printed, a live reply's :text) is prose
-        data? (and (:seon.eval/record e) (nil? (:text r)) (not (:printed rec)))
-        r (cond-> r (and (:seon.eval/record e) (nil? (:text r)))
-            (assoc :text (if data? (when (= :inline (:as opts)) (print/record-text rec render/model)) (:printed rec))))
+        ;; rendered as structure (the printer's hiccup). A live reply's :text is prose
+        data? (and recorded? (nil? (:text r)) (nil? basis))
+        r (cond-> r (and recorded? (nil? (:text r)) data? (= :inline (:as opts))) (assoc :text (print/record-text e render/model)))
         by (or (:seon.eval/by e) (:by r))
         err? (some? (:ex r))]
     (if (= :inline (:as opts))
-      ;; its code's first line ⇒ its value's line as recorded (seon.repl/record-details' :line), else its
+      ;; its code's first line ⇒ its value's line, printed now by the one printer under the line budget, else its
       ;; text; in the chat (:chat true), the agent's prose first: the chat is prose and a line an arrow opens
-      (let [line [:span {:class "font-mono"} [:code (merge-with #(str %1 " " %2) emit/highlight {:class "text-text-100"}) (prose (or (first (str/split-lines (or (:code r) ""))) "") (cell) {:one-line? true})]
+      (let [shown (when (and recorded? (or (contains? resp :value) (:ex resp) basis))
+                    (let [v (:value resp) k (:seon.eval/schema e)
+                          m (when (and k (instance? clojure.lang.IObj v)) (render/model (vary-meta v assoc :seon.render/schema k)))]
+                      (print/line (cond (:ex resp) (or (get-in resp [:ex :seon.error/message]) (:ex resp))
+                                        basis (when (:db opts) (context/basis-value (:db opts) e))
+                                        (nil? v) "nil" m (:value m) :else v)
+                                  (config/value :seon.config.render/line-budget) nil)))
+            line [:span {:class "font-mono"} [:code (merge-with #(str %1 " " %2) emit/highlight {:class "text-text-100"}) (prose (or (first (str/split-lines (or (:code r) ""))) "") (cell) {:one-line? true})]
                   [:span {:class (if err? "text-error" "text-text-500")} (if err? " ✕ " " ⇒ ")]
-                  [:code {:class "text-text-400"} (prose (or (:line rec) (:text r) "") (cell) {:one-line? true})]]]
+                  [:code {:class "text-text-400"} (prose (or shown (:text r) "") (cell) {:one-line? true})]]]
         (if (and (:chat opts) (not (str/blank? (:prose r))))
           [:span {:class "flex flex-col"} [:span {:class "whitespace-pre-wrap text-text-300 italic"} (prose (:prose r) (form-budget))] line]
           line))
@@ -483,11 +481,11 @@
          (if data?
            ;; a value stored as data renders as structure, the printer's hiccup under its handle
            ;; a value of a schema with its own render is that value; any other, the response less what the row shows beside it
-           (let [v (if (:schema rec) (get-in rec [:response :value]) (shown-value (:response rec)))]
+           (let [v (if (:seon.eval/schema e) (:value resp) (shown-value resp))]
              [:div {:class "flex flex-col gap-1 text-text-200"}
               ;; drawn by the html render of the schema the record kept (the value's metadata does not survive the store),
               ;; as the live response is: a prove's run by seon.render.ui/proved, not as a map
-              [:div {:class "flex gap-2"} [:span {:class "text-text-500"} "⇒"] (render/html (cond-> {:handle (:handle r)} (:schema rec) (assoc :schema (:schema rec))) v)]
+              [:div {:class "flex gap-2"} [:span {:class "text-text-500"} "⇒"] (render/html (cond-> {:handle (:handle r)} (:seon.eval/schema e) (assoc :schema (:seon.eval/schema e))) v)]
               ;; each cut opened: what its form reads, from the record, under that form (seon.web/open-form read it)
               (for [f (:opened opts) :let [form (edn/read-string f)]]
                 [:div {:class "flex gap-2"}
@@ -496,10 +494,10 @@
                            (keyword "data-on:click") (str "@post('/open?view=' + el.closest('[data-view]').dataset.view + '&unit=' + "
                                                           "encodeURIComponent(el.closest('li[id]').id + '/' + el.dataset.seonForm) + '&open=false')")} f]
                  (render/html {:handle form} (print/read-rest form (:handle r) v))])])
-           (if-let [v (based-value rec e (:db opts))]
+           (if-let [v (when (and basis (:db opts)) (context/basis-value (:db opts) e))]
              ;; a value recorded as its basis (@ctx): rendered from what the branch holds at it
              [:div {:class "flex gap-2 text-text-200"} [:span {:class "text-text-500"} "⇒"]
-              (render/html {:as :block :schema (:schema rec) :handle (:handle r) :db (:db opts)} v)]
+              (render/html {:as :block :schema (:seon.eval/schema e) :handle (:handle r) :db (:db opts)} v)]
              [:pre {:class "text-text-200"} [:span {:class "text-text-500"} "⇒ "] (prose (or (:text r) "") (part))])))
        [:div {:class "flex flex-wrap gap-3 text-2xs text-text-500"}
         (cost-line r)
@@ -1169,9 +1167,8 @@
   [c]
   (into [] (distinct)
         (for [[_ e] (reverse (seq (:evals c)))
-              :let [rec (:seon.eval/record e)]
-              s (concat (ratom/realize (get-in rec [:response :recorded])) (some-> (ratom/realize (get-in rec [:response :edited :var])) vector)
-                        (ratom/realize (get-in rec [:response :unmapped])))
+              s (concat (ratom/realize (get-in e [:seon.eval/response :recorded])) (some-> (ratom/realize (get-in e [:seon.eval/response :edited :var])) vector)
+                        (ratom/realize (get-in e [:seon.eval/response :unmapped])))
               :when (symbol? s)]
           s)))
 
@@ -1256,17 +1253,16 @@
   agent takes before it draws its page) it is drawn open. Root's evals (a ctx with no agent key) post
   nothing. Its <details> carries its handle's anchor (eval-<id>): a handle printed anywhere links here.
   See docs/render.md#the-page."
-  {:seon.render/style "[&>details>summary]:flex [&>details>summary]:min-w-0 [&>details>summary]:items-baseline [&>details>summary]:gap-x-2" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int] :any]}
-  [{c :seon.ctx/ctx step? :step} eid]
+  {:seon.render/style "[&>details>summary]:flex [&>details>summary]:min-w-0 [&>details>summary]:items-baseline [&>details>summary]:gap-x-2" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int] :any]}
+  [{c :seon.ctx/ctx db :seon.db/db step? :step} eid]
   (let [e (ratom/realize (get-in c [:evals eid]))
-        rec (:seon.eval/record e)
         opened? (:seon.eval/opened e)
         k (:seon.agent/key c)
-        {:keys [ex value ms handle]} (:response rec)
+        {:keys [ex value ms handle]} (:seon.eval/response e)
         v (ratom/realize value)
         ;; an error answered as a value (a function that returns its error) is a failure too
         err (or ex (when (contract/error? v) v))
-        tokens (context/messages-tokens (context/eval-messages nil e))]
+        tokens (context/messages-tokens (context/eval-messages {:db db} e))]
     [:li
      ;; a step of a turn (opts :step) is drawn open: its turn's one fold opens them all, never a second click
      [:details (cond-> {:class "seon-eval" :id (str "eval-" (:seon.eval/id e))} (or opened? step?) (assoc :open true))
@@ -1274,10 +1270,10 @@
       (into (if k [:summary {:seon/call 'seon.root/opened! :seon/agent (:seon.agent/id c) :seon/args {:key k :eval (:seon.eval/id e)}}] [:summary])
             (remove nil?)
             [(when err [:span {:class "shrink-0 text-error"} "⚠"])
-             (if (str/blank? (:prose rec))
-               [:code {:class "seon-form min-w-0 flex-1 truncate"} (first (str/split-lines (or (:code rec) "")))]
+             (if (str/blank? (:seon.eval/prose e))
+               [:code {:class "seon-form min-w-0 flex-1 truncate"} (first (str/split-lines (or (:seon.eval/code e) "")))]
                ;; the agent's prose is Markdown, rendered (owner, 2026-10-29); the model reads it as written
-               [:div {:class "seon-prose seon-md-inline min-w-0 flex-1"} (markdown (:prose rec))])
+               [:div {:class "seon-prose seon-md-inline min-w-0 flex-1"} (markdown (:seon.eval/prose e))])
              ;; how responsive it was and what it costs the context: quiet, at the line's end
              [:span {:class "ml-auto flex shrink-0 gap-2 text-2xs text-text-500"}
               (when ms [:span {:class "seon-ms"} (ms-str ms)])
@@ -1288,12 +1284,12 @@
         [:div {:class "ml-4 flex min-w-0 max-w-full flex-col gap-1 overflow-x-auto py-1"}
          ;; the code as the agent wrote it, whole, highlighted; its handle, which names its value anywhere
          [:div {:class "flex items-baseline justify-between gap-2"}
-          (emit/marked-hiccup :seon.print/code (or (:code rec) ""))
+          (emit/marked-hiccup :seon.print/code (or (:seon.eval/code e) ""))
           [:code {:class "seon-handle shrink-0"} (str handle)]]
          (if err
            [:div {:class "text-error"} "✗ " (:seon.error/message err)
             (render/html {:budget (config/value :seon.config.render/value-budget) :handle handle} (dissoc err :seon.error/message))]
-           (when (contains? (:response rec) :value)
+           (when (contains? (:seon.eval/response e) :value)
              [:div {:class "flex gap-2"} [:span {:class "text-text-500"} "→"]
               (render/html {:budget (config/value :seon.config.render/value-budget) :handle handle} v)]))])]]))
 
@@ -1320,9 +1316,9 @@
   or the schema its record names: seon.repl/record-details)."
   {:seon.render/style tile-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int] :any]}
   [{c :seon.ctx/ctx} eid]
-  (let [r (get-in c [:evals eid :seon.eval/record])]
+  (let [k (ratom/realize (get-in c [:evals eid :seon.eval/schema]))]
     [:section
-     (render/html (if-let [k (:schema r)] {:schema k} {}) (ratom/realize (get-in r [:response :value])))]))
+     (render/html (if k {:schema k} {}) (ratom/realize (get-in c [:evals eid :seon.eval/response :value])))]))
 
 (defn- id-set
   "The keys of join m (a member map of ctx, read through its view) as a set: one read of its key set, its
@@ -1353,7 +1349,7 @@
   ([c db conv]
   (let [tu? (id-set (:turns c))
         ;; the record's one key, read by its path (a realize reads the whole eval, its opened flag too: the layout would run again for an eval opened)
-        model? (fn [id] (get-in c [:evals id :seon.eval/record :call-id]))]
+        model? (fn [id] (get-in c [:evals id :seon.eval/call-id]))]
     (first (reduce (fn [[m cur] id]
                      (cond (tu? id) [(assoc m id []) id]
                            (and cur (model? id)) [(update m cur conj id) cur]
@@ -1372,9 +1368,9 @@
   (let [t (get-in c [:turns eid])
         [reply reasoning n] (map #(ratom/realize (get t %)) [:seon.turn/reply :seon.turn/reasoning :seon.turn/n])
         evals (get (turn-evals c db) eid [])
-        recs (map #(some-> (get-in c [:evals %]) ratom/realize :seon.eval/record) evals)
-        failed (count (filter #(or (get-in % [:response :ex]) (contract/error? (ratom/realize (get-in % [:response :value])))) recs))
-        ms (reduce + 0 (keep #(get-in % [:response :ms]) recs))
+        recs (map #(some-> (get-in c [:evals %]) ratom/realize :seon.eval/response) evals)
+        failed (count (filter #(or (:ex %) (contract/error? (ratom/realize (:value %)))) recs))
+        ms (reduce + 0 (keep :ms recs))
         tokens (d/q '[:find ?k . :in $ ?t :where [?m :seon.model-call/turn ?t] [?m :seon.model-call/tokens ?k]] db eid)]
     (when (or (not (str/blank? reply)) (not (str/blank? reasoning)) (seq evals))
       [:section {:class "flex flex-col gap-1.5"}
@@ -1524,7 +1520,7 @@
   [:aside {:id "p-tiles"}
    ;; placed on every page: the render cache runs a component once and again only when what it reads changes, so a page whose task names no examples pays nothing
    [#'examples {} aid]
-   (for [[id e] (:evals c) :let [{{v :value} :response k :schema} (:seon.eval/record e)] :when (and (some? v) (render/render-of (ratom/realize v) k))]
+   (for [[id e] (:evals c) :let [v (get-in e [:seon.eval/response :value]) k (:seon.eval/schema e)] :when (and (some? v) (render/render-of (ratom/realize v) k))]
      [#'eval-tile {} id])])
 
 (defn agent

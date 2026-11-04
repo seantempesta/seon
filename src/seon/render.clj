@@ -65,6 +65,15 @@
     (do (vreset! data out) (html {:schema k :as :block} out))
     out))
 
+(defn model-with
+  "What the model reads of value v (`model`'s first arity), the render called (f opts v): opts carry what a render
+  reads beside its value, the db a record's render rebuilds from (an eval that names its basis,
+  seon.context/eval-messages). See docs/render.md#a-part-answers-data."
+  {:malli/schema [:=> [:cat :any :map] [:maybe [:map [:value :any]]]]}
+  [v opts]
+  (when-let [sym (model-declared (:seon.render/schema (meta v)))]
+    {:value ((requiring-resolve sym) opts v)}))
+
 (defn model
   "What the model reads of a value. Of v, what the printer shows in its place (seon.print/print-value's :render): {:value m}
   when v's schema (its metadata :seon.render/schema) declares a model render (`model-declared`), which makes a value

@@ -214,9 +214,9 @@
    :seon.task/plan (fn [_ plan] (str query-prompt plan))
    ;; a search a context holds: its query, as search embeds a query, so its render ranks by meaning once embedded
    :seon.search/query (fn [_ q] (str query-prompt q))
-   ;; an eval: what the agent asked and what it got, as a search asks, so the agent's recent work is a
+   ;; an eval: what the agent asked, as a search asks, so the agent's recent work is a
    ;; direction a search can follow (docs/vector.md#relevance)
-   :seon.eval/record (fn [_ record] (str query-prompt (:code record) "\n" (:line record)))})
+   :seon.eval/code (fn [_ code] (str query-prompt code))})
 
 (defn- titles
   "Each titled entity's title on db, {e title}: a form's by the first of its vars' names, a

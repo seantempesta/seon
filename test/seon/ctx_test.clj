@@ -56,7 +56,7 @@
   "Eval i of the agent, as the REPL records it."
   {:malli/schema [:=> [:cat nat-int?] [:vector :map]]}
   [i] [{:seon.eval/id (str "e" i) :seon.eval/agent [:seon.agent/key k] :seon.eval/by "a1"
-        :seon.eval/record {:code (str "(app.x/f" (mod i 3) " " i ")") :response (response i)}}])
+        :seon.eval/code (str "(app.x/f" (mod i 3) " " i ")") :seon.eval/response (response i)}])
 
 (defn- run-tx
   "Run r of the agent's task, with turns of it numbered from 0 below n."
@@ -416,7 +416,7 @@
           s (share (:evals a) b')]
       (is (= "someone" (get-in s [e7 :seon.eval/by])) "the changed member: the new value")
       (is (every? (fn [[k v]] (or (= k e7) (identical? v (get (:evals a) k)))) s) "every other member: the record's own object")
-      (is (identical? (get-in s [e7 :seon.eval/record]) (get-in (:evals a) [e7 :seon.eval/record])) "and, in the changed one, what did not change")
+      (is (identical? (get-in s [e7 :seon.eval/response]) (get-in (:evals a) [e7 :seon.eval/response])) "and, in the changed one, what did not change")
       (is (= (keys b') (keys s)) "in the collection's order"))))
 
 (deftest a-window-moves-by-its-change
@@ -502,12 +502,12 @@
     (testing "a member retracted and made again under its key within the turn: the end's"
       (let [db0 (seeded 30)
             db1 (-> db0 (d/with [[:db/retractEntity [:seon.eval/id "e7"]]]) :db-after
-                    (d/with [{:seon.eval/id "e7" :seon.eval/agent [:seon.agent/key k] :seon.eval/by "a1" :seon.eval/record {:code "(again)" :response {:value 1}}}]) :db-after)
+                    (d/with [{:seon.eval/id "e7" :seon.eval/agent [:seon.agent/key k] :seon.eval/by "a1" :seon.eval/code "(again)" :seon.eval/response {:value 1}}]) :db-after)
             c0 (ctx/build db0 (aid db0) :b)
             c1 (ctx/advance c0 db0 db1 :b)]
         (is (= c1 (ctx/build db1 (aid db1) :b)))
         (let [e7 (id db1 [:seon.eval/id "e7"])]
-          (is (= "(again)" (get-in (:tree c1) [:evals e7 :seon.eval/record :code])))
+          (is (= "(again)" (get-in (:tree c1) [:evals e7 :seon.eval/code])))
           (is (contains? (ctx/diff c0 c1) [:evals e7]) "the new e7, another entity: its member")
           (is (contains? (ctx/diff c0 c1) [:evals (id db0 [:seon.eval/id "e7"])]) "the old one's gone"))))
     (testing "a change undone within the turn is no change"
@@ -718,9 +718,8 @@
           ;; the keys it added, one component (ctx-keys) holding each key's own
           steps (some #(when (= "ctx-keys" (:id %)) %) (:units drawn))]
       (is (= ["read the plan" "write the test" "read the plan"] (:lab.ctx/steps c)) "the vector comes back in its order, duplicates kept")
-      (is (= {:schema :seon.ctx/ctx :basis {:t (:t tree) :branch :b}} (select-keys rec [:schema :basis])) "the record names the value's basis")
-      (is (not (contains? (:response rec) :value)) "and holds no copy of the record")
-      (is (re-find #":lab.ctx/steps" (:printed rec)) "the model's text is the one printer's, as it read it")
+      (is (= {:seon.eval/schema :seon.ctx/ctx :seon.eval/basis {:t (:t tree) :branch :b}} (select-keys rec [:seon.eval/schema :seon.eval/basis])) "the record names the value's basis")
+      (is (not (contains? (:seon.eval/response rec) :value)) "and holds no copy of the record")
       (is (str/includes? (:html steps) "<ol><li>read the plan</li><li>write the test</li><li>read the plan</li></ol>")
           "the agent draws its key, a component of its page, by the render its branch names, recording nothing")
       (testing "the page the model reads (seon.repl/render-ctx-hiccup, the screen) is the page the user sees (seon.repl/render-ctx), hiccup for html"
@@ -738,9 +737,13 @@
                 "each component's hiccup is the html the page shows, byte for byte, but for its render's style"))
           (is (str/includes? (pr-str (get page "ctx-keys")) "read the plan") "as hiccup, exactly as its render returned it")))
       (testing "the page rebuilds the value from the branch at its basis"
-        (let [db (:db-after (d/with db [{:seon.eval/id "e9" :seon.eval/agent [:seon.agent/key k] :seon.eval/record rec}]))
+        (let [db (:db-after (d/with db [(into {:seon.eval/id "e9" :seon.eval/agent [:seon.agent/key k]} rec)]))
               h (seon.web.html/html (seon.render.ui/evaluation {:db db} (d/pull db '[*] [:seon.eval/id "e9"])))]
           (is (re-find (re-pattern (str "ctx · :b · t " (:t tree))) h) "the block of the record at t")
+          (let [text (fn [db] (:content (first (seon.context/eval-messages {:db db} (d/pull db '[*] [:seon.eval/id "e9"])))))
+                later (:db-after (d/with db [{:seon.eval/id "e10" :seon.eval/agent [:seon.agent/key k] :seon.eval/by "a1" :seon.eval/code "(f)" :seon.eval/response {:value 1}}]))]
+            (is (re-find #":lab.ctx/steps" (text db)) "the model's text is the one printer's, of the value rebuilt from the branch at its basis")
+            (is (= (text db) (text later)) "the same bytes read cold after the branch moved as live: the cached prefix depends on it"))
           (is (re-find #":lab.ctx/steps" h))))
       (testing "a render that throws in the agent is answered as its error, and the agent goes on"
         (let [db (:db-after (d/with db (:tx (my.schema/registration db :lab.ctx/boom '[:vector {:seon.render/html seon.ctx-test/boom} :any] false))))
@@ -1071,8 +1074,7 @@
 
 (defn- an-eval {:malli/schema [:=> [:cat nat-int? pos-int?] :map]} [i len]
   {:db/id (+ 1000 i) :seon.eval/id (str "e" i) :seon.eval/by "a1"
-   :seon.eval/record {:code (str "(f " i ")") :response {:handle (symbol "result" (str "e" i)) :value (vec (range (mod i 9)))}
-                      :line (text i (min len 80)) :prose (text (inc i) len)}})
+   :seon.eval/code (str "(f " i ")") :seon.eval/response {:handle (symbol "result" (str "e" i)) :value (vec (range (mod i 9)))} :seon.eval/prose (text (inc i) len)})
 
 (defn- record-of
   "An agent's record shaped as ctx holds it: evals, and runs each with the task (held once, a
@@ -1097,10 +1099,10 @@
   (let [ev (keys (:evals t)) cited (some-> (get-in t [:runs 100 :task :cited]) keys)]
     (case kind
       :new-eval (assoc-in t [:evals (+ 1900 i)] (an-eval (+ 900 i) 60))
-      :eval-edit (if (seq ev) (assoc-in t [:evals (nth ev (mod i (count ev))) :seon.eval/record :line] (text i 30)) t)
+      :eval-edit (if (seq ev) (assoc-in t [:evals (nth ev (mod i (count ev))) :seon.eval/prose] (text i 30)) t)
       :plan (if (get-in t [:runs 100]) (assoc-in t [:runs 100 :task :seon.task/plan] (text (+ 7 i) 200)) t)
       :cited (if (seq cited) (assoc-in t [:runs 100 :task :cited (nth cited (mod i (count cited))) :var/form :form/src] (text i 300)) t)
-      :all-evals (reduce (fn [t e] (assoc-in t [:evals e :seon.eval/record :line] (text (+ e i) 30))) t ev)
+      :all-evals (reduce (fn [t e] (assoc-in t [:evals e :seon.eval/prose] (text (+ e i) 30))) t ev)
       :rebuilt (walk/postwalk identity t)
       :gone (if (seq ev) (update t :evals dissoc (nth ev (mod i (count ev)))) t))))
 
@@ -1162,11 +1164,11 @@
         entities-at (fn [n] (let [t {:db/id 1 :evals (members (for [i (range n)] {:db/id i :a (str "v" i)}))}]
                               (m t (update t :evals #(into (empty %) (map (fn [[i e]] [i (into {} e)])) %)))))
         ;; n evals as the generator makes them, each rebuilt equal (walk/postwalk, as :rebuilt does):
-        ;; per member an entity pair, two entries, eight keys, and its :seon.eval/record compared by =
+        ;; per member an entity pair, two entries, twelve keys (six a side), and the rest of its attributes compared by =
         ;; (walk-of's size of it)
         eq-at (fn [n] (let [t {:db/id 1 :evals (members (map #(an-eval % 30) (range n)))}]
                         (m t (update t :evals #(into (empty %) (map (fn [[i e]] [i (walk/postwalk identity e)])) %)))))
-        rec-size (#'seon.ctx/walk-of {:db/id 1 :r (:seon.eval/record (an-eval 7 30))} {:db/id 1 :r (walk/postwalk identity (:seon.eval/record (an-eval 7 30)))})
+        rec-size (#'seon.ctx/walk-of {:db/id 1 :r (dissoc (an-eval 7 30) :db/id)} {:db/id 1 :r (walk/postwalk identity (dissoc (an-eval 7 30) :db/id))})
         ;; n members each holding a one-member collection re-made (the member itself kept): per member
         ;; what a member holding a string costs, less two entries, plus a collection pair walked into
         coll-at (fn [n] (let [t {:db/id 1 :evals (members (for [i (range n)] {:db/id i :c (members [{:db/id 0}])}))}]
@@ -1187,7 +1189,7 @@
         measured {:fixed (m t t) :key key :entry entry :change (per changes-at 100 1000)
                   :entity entity
                   :collection (merge-with - (per coll-at 100 1000) (per str-at 100 1000) (update-vals entry #(* 2 %)))
-                  :eq (update-vals (merge-with - (per eq-at 100 1000) entity (update-vals entry #(* 2 %)) (update-vals key #(* 8 %))) #(/ % (:eq rec-size)))}]
+                  :eq (update-vals (merge-with - (per eq-at 100 1000) entity (update-vals entry #(* 2 %)) (update-vals key #(* 12 %))) #(/ % (:eq rec-size)))}]
     (doseq [[step dims] measured [d v] dims :let [stated (get-in ctx/change-steps [step d])]]
       ;; within the slack above (the bound would be under), and not past a third below (it would be loose)
       (is (<= (* cost/loose stated) v (* (get cost/slack d) stated)) (str step " " d ": measured " v " against " stated " stated")))))

@@ -15,16 +15,14 @@
   (let [id (str "e" i)]
     [[:eval id]
      {:seon.eval/id id :seon.eval/by "a1"
-      :seon.eval/record {:code (str "(rows " i ")") :call-id (str "c-" i) :call 0 :prose (str "Read the rows of part " i ".")
-                         :response {:handle (symbol "result" id) :value (vec (for [j (range 6)] {:part i :row j :name (str "row-" i "-" j)}))
-                                    :ms 0.5 :ticks 1000 :bytes 4096}
-                         :line (str "[{:part " i " …}]")}}
+      :seon.eval/code (str "(rows " i ")") :seon.eval/call-id (str "c-" i) :seon.eval/call 0 :seon.eval/prose (str "Read the rows of part " i ".") :seon.eval/response {:handle (symbol "result" id) :value (vec (for [j (range 6)] {:part i :row j :name (str "row-" i "-" j)}))
+                                    :ms 0.5 :ticks 1000 :bytes 4096}}
      :seon.db/eval-fact (inc i)]))
 
 (defn held-of
   "The input at n: the run's next record, and the cache of its n records before it, printed."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :any :map]]}
-  [n] [[(item n)] (#'seon.context/printed-run (mapv item (range n)) nil)])
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :any :map :nil]]}
+  [n] [[(item n)] (#'seon.context/printed-run (mapv item (range n)) nil nil) nil])
 
 (deftest a-turn-prints-its-new-records-flat-in-the-history
   (cost/proof {:of 'seon.context/printed-run :input 'seon.context-cost-test/held-of
@@ -48,7 +46,7 @@
   (let [db (d/db-with (ts/test-db)
                       (vec (for [i (range n) :let [[_ v] (item i)]]
                              (assoc v :seon.eval/agent {:seon.agent/key "b/a1"}
-                                    :seon.eval/record (assoc (:seon.eval/record v) :run (if (< i (quot n 2)) "demo/f#1" "demo/f#2"))))))]
+                                    :seon.eval/run (if (< i (quot n 2)) "demo/f#1" "demo/f#2")))))]
     [db (:db/id (d/entity db [:seon.agent/key "b/a1"]))]))
 
 (defn records-of
@@ -245,7 +243,7 @@
         r1 (seon.context/request e (opts db2 1 (parts 2) (:printed r0)))
         db3 (d/db-with db2 (concat (sent 1 r1)
                                    [{:seon.eval/id "e-last" :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key "b/a1"}
-                                     :seon.eval/record {:code "(f)" :call-id "c-last" :call 0 :prose "Last." :response {:handle 'result/e-last :value 1}}}]
+                                     :seon.eval/code "(f)" :seon.eval/call-id "c-last" :seon.eval/call 0 :seon.eval/prose "Last." :seon.eval/response {:handle 'result/e-last :value 1}}]
                                    (turn 2)))]
     ;; with its @ctx, as a turn asks (seon.turn/act!)
     [e (assoc (opts db3 2 (parts 3) (:printed r1)) :ctx (:tree (seon.ctx/build db3 (:db/id e) :b)))]))

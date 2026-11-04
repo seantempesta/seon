@@ -178,7 +178,7 @@
            ;; on the branch, which forked before main held the run or the message
            (d/transact bc [{:db/id "run" :seon.run/id "demo/f#1"} {:seon.turn/id "demo/f#1/0" :seon.turn/run "run" :seon.turn/n 0 :seon.turn/origin :model}])
            (d/transact bc (task/message-tx "m-1" :message "owner" b "check g"))
-           (d/transact bc (repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e1" "a3" {:code "(f 2)" :response {:handle 'result/e1 :value 4}}))
+           (d/transact bc (repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e1" "a3" {:seon.eval/code "(f 2)" :seon.eval/response {:handle 'result/e1 :value 4}}))
            (testing "from root on main: its agents, each agent's run"
              (is (= [{:seon.agent/id :a3 :seon.agent/status :idle :seon.process/_agent [{:seon.process/pid 77 :seon.process/running "(f 2)"}]
                       :seon.run/_agent [{:seon.run/id "demo/f#1"}]}]

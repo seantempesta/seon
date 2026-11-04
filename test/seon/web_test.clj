@@ -84,11 +84,10 @@
     (let [rp {:rid 0 :pending {} :watch #{} :waiting {} :kf-wanted #{} :new-events [] :events [] :views {} :zoom {} :merges 0}
           [_ o] (#'p/render-proc rp :answers {:tag (:tag req) :r {:ok true :killed :a1}})
           w (first (filter #(= :write (get-in % [:req :op])) (:to-api o)))
-          e (some #(when (:seon.eval/record %) %) (get-in w [:req :req :tx-data]))
-          rec (:seon.eval/record e)]
-      (is (= "(seon.root/kill! :a1)" (:code rec)))
+          e (some #(when (:seon.eval/response %) %) (get-in w [:req :req :tx-data]))]
+      (is (= "(seon.root/kill! :a1)" (:seon.eval/code e)))
       (is (= "user" (:seon.eval/by e)))
-      (is (str/includes? (seon.print/record-text rec) ":killed :a1") "what root answered"))))
+      (is (str/includes? (seon.print/record-text e) ":killed :a1") "what root answered"))))
 
 (deftest an-eval-opened-on-a-page-is-no-eval-of-roots
   ;; the browser pass (3b-root): opening an agent's eval on its page called seon.root/opened!, and each
@@ -100,7 +99,7 @@
     (is (= :write (get-in req [:req :op])) (pr-str req))
     (let [rp {:rid 0 :pending {} :watch #{} :waiting {} :kf-wanted #{} :new-events [] :events [] :views {} :zoom {} :merges 0}
           [_ o] (#'p/render-proc rp :answers {:tag (:tag req) :r {:ok true}})]
-      (is (not-any? #(some :seon.eval/record (get-in % [:req :req :tx-data])) (:to-api o)) "no eval recorded for root"))))
+      (is (not-any? #(some :seon.eval/response (get-in % [:req :req :tx-data])) (:to-api o)) "no eval recorded for root"))))
 
 (deftest a-refused-ui-call-reaches-the-stream-and-main
   ;; root refuses a call of one of its fns that is none of its requests, before any request: the refused
@@ -114,9 +113,9 @@
     (let [rp {:rid 0 :pending {} :watch #{} :waiting {} :kf-wanted #{} :new-events [] :events [] :views {} :zoom {} :merges 0}
           [_ o] (#'p/render-proc rp :from-web m)
           w (first (filter #(= :write (get-in % [:req :op])) (:to-api o)))
-          rec (some :seon.eval/record (get-in w [:req :req :tx-data]))]
-      (is (= "(seon.root/nope! :a2)" (:code rec)))
-      (is (str/includes? (seon.print/record-text rec) "not one of root's requests") "what root refused, and why"))))
+          e (some #(when (:seon.eval/response %) %) (get-in w [:req :req :tx-data]))]
+      (is (= "(seon.root/nope! :a2)" (:seon.eval/code e)))
+      (is (str/includes? (seon.print/record-text e) "not one of root's requests") "what root refused, and why"))))
 
 (deftest a-listener-that-cannot-bind-is-the-one-error-map
   ;; task seon.render/one-owner-per-view-path (B2): a port taken is data, the one error map

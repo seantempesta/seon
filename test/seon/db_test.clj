@@ -438,7 +438,7 @@
    {:seon.model-call/id (str "att/" k) :seon.model-call/turn "turn"
     :seon.model-call/basis {:commit (java.util.UUID. 0 k) :task "t/x" :run "att" :turn k :max-turns 8 :origin :model}}
    ;; the call's eval, whose record holds its response as the next turn reads it
-   {:seon.eval/id (str "e" k) :seon.eval/by "a1" :seon.eval/record {:code "(f 2)" :response {:handle (symbol "result" (str "e" k)) :value (slice @code k 2000)}}}])
+   {:seon.eval/id (str "e" k) :seon.eval/by "a1" :seon.eval/code "(f 2)" :seon.eval/response {:handle (symbol "result" (str "e" k)) :value (slice @code k 2000)}}])
 
 (defn- write-turns!
   "Bytes the store at path gains when branch b gets n turns through the agent's run-ahead
@@ -982,10 +982,10 @@
       (is (every? datahike.schema/plain-data? samples) "and Datahike's own test on a data value passes it")
       (is (every? #(malli.core/validate :seon.db/plain % {:registry contract/registry}) samples) "and the schema says the same")
       (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)]
-        (d/transact conn (vec (map-indexed (fn [i v] {:seon.eval/id (str "p" i) :seon.eval/record {:response {:value v}}}) samples)))
+        (d/transact conn (vec (map-indexed (fn [i v] {:seon.eval/id (str "p" i) :seon.eval/response {:value v}}) samples)))
         (d/release conn))
       (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)
-            back (fn [i] (get-in (d/pull @conn [:seon.eval/record] [:seon.eval/id (str "p" i)]) [:seon.eval/record :response :value]))]
+            back (fn [i] (get-in (d/pull @conn [:seon.eval/response] [:seon.eval/id (str "p" i)]) [:seon.eval/response :value]))]
         (doseq [[i v] (map-indexed vector samples)]
           (is (= v (back i)) (str "kept and given back: " (pr-str v))))
         (d/release conn))

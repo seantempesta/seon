@@ -22,7 +22,7 @@
     (is (contains? r :ms) "the evaluation's facts: its cost")
     (is (= {:value 4} (select-keys (ev "(do (+ 1 1) (+ 2 2))") [:value :forms])) "a do is one form: its last form's value")
     (let [rec (repl/record-details "(atom 1)" {:handle 'result/e9 :value (atom 1)} {} nil)]
-      (is (:printed rec) "a value that is no plain data: the response as it printed"))
+      (is (= {:seon.value/type (.getName (class (atom 1)))} (get-in rec [:seon.eval/response :value])) "a value that is no plain data: what it was, as data"))
     (let [e (ev "(+ 1 2) (throw (ex-info \"no\" {})) 4")]
       (is (contains? e :ex) "the error stops it")
       (is (= {:forms 2 :value [3]} (select-keys e [:forms :value])) "the values of the forms before it, and the forms after it never ran"))
@@ -173,7 +173,7 @@
                                         {:op :eval :agent "root"
                                          :code (str "(let [b (:db @(seon.root/branch-db sys (:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))))]"
                                                     " [(:form/src (:var/form (datahike.api/entity b [:var/name '" ns ".ed/f])))"
-                                                    "  (count (filter #(clojure.string/includes? (:code %) \"[] 2)\") (datahike.api/q '[:find [?r ...] :where [_ :seon.eval/record ?r]] b)))])")}]))]
+                                                    "  (count (filter #(clojure.string/includes? % \"[] 2)\") (datahike.api/q '[:find [?c ...] :where [_ :seon.eval/code ?c]] b)))])")}]))]
     (is (get-in edit [:value :edited]) (pr-str edit))
     (is (clojure.string/includes? (str (first (:value branch))) "[] 2") "the branch's program holds the new source")
     (is (= 0 (second (:value branch))) "its inner eval records no eval of its own: the edit's call is the one kept")))
@@ -834,7 +834,7 @@
     (is (clojure.string/includes? (pr-str (:seon.error/problems r)) "Object") "it names the value"))
   (let [e (seon.contract/error :seon.agent/eval-error 'seon.repl/eval-code "m" {:class "c" :data {:held (Object.) (Object.) 1 :r (range)}})]
     (is (seon.contract/plain? e) "whatever a raiser held")
-    (is (string? (get-in e [:data :held])) "as its text")
+    (is (= {:seon.value/type "java.lang.Object"} (get-in e [:data :held])) "as what it was, as data")
     (let [v (seon.contract/plainly {:v [1 (Object.) #{2}] :l (list 1 (Object.)) :s #{(Object.)}})]
       (is (seon.contract/plain? v))
       (is (vector? (:v v)) "a collection keeps its shape, each member plain, so a variant's schema of it still holds")
@@ -854,13 +854,13 @@
     (is (some? e) "the query throws")
     (is (seon.contract/plain? (agent/error-map e)) "its error map is plain, the parser's records kept as their text, at the error's constructor")
     (is (seon.contract/plain? (repl/record-details "(q)" {:handle 'result/e1 :ex (agent/error-map e)} {} nil))
-        "and so the eval's record"))
+        "and so the eval's attributes"))
   (let [[r recorded] (at/in-agent (fn [{:keys [task]}]
                                     ["(datahike.api/q '[:find ?y :where [?e :var/name _]] (my.db/db))"
                                      {:op :eval :agent "root"
                                       :code (str "(let [b (:db @(seon.root/branch-db sys (:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))))]"
-                                                 " (vec (for [[rec] (datahike.api/q '[:find ?r :where [_ :seon.eval/record ?r]] b) :when (get-in rec [:response :ex])]"
-                                                 " (get-in rec [:response :ex :seon.error/message]))))")}]))]
+                                                 " (vec (for [[rec] (datahike.api/q '[:find ?r :where [_ :seon.eval/response ?r]] b) :when (:ex rec)]"
+                                                 " (get-in rec [:ex :seon.error/message]))))")}]))]
     (is (:ex r) (pr-str r))
     (is (some #(clojure.string/includes? (str %) "unknown vars") (:value recorded)) (str "the eval is recorded with its error: " (pr-str recorded)))))
 

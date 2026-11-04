@@ -1641,11 +1641,11 @@
 
 (defn- eval-records
   "The eval records on db of whom the evals are on, by its identity (seon.repl/record-tx): an
-  agent's [:seon.agent/id id], or root's [:seon.root/id :root], each its record with who
-  evaluated it (:by, :seon.eval/by): [{:code :text :by ...}]."
+  agent's [:seon.agent/id id], or root's [:seon.root/id :root], each its code and who
+  evaluated it (:by, :seon.eval/by): [{:code :by}]."
   [db [attr id]]
-  (vec (for [[r by] (d/q '[:find ?r ?by :in $ ?attr ?id :where [?a ?attr ?id] [?e :seon.eval/agent ?a] [?e :seon.eval/record ?r] [?e :seon.eval/by ?by]] db attr id)]
-         (assoc r :by by))))
+  (vec (for [[code by] (d/q '[:find ?c ?by :in $ ?attr ?id :where [?a ?attr ?id] [?e :seon.eval/agent ?a] [?e :seon.eval/code ?c] [?e :seon.eval/by ?by]] db attr id)]
+         {:code code :by by})))
 
 (defn await-records
   "What (read) answers once (enough? it) holds, read again at each :commit event of agent a

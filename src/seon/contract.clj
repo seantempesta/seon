@@ -55,20 +55,51 @@
                  :else false)))
     v)))
 
+(clojure.core/defn- type-name
+  "The name of v's class, the one word a value kept as its type is told by (`plainly`)."
+  {:malli/schema [:=> [:cat :any] :string]}
+  [v] (if (nil? v) "nil" (.getName (clojure.core/class v))))
+
 (clojure.core/defn plainly
-  "v as the store keeps it (`plain?`): plain data as it is, a collection's members each so, whatever its size, anything
-  else (a library's record, an object in an exception's data, a lazy seq, which printing it whole could never end) as
-  the one printer's text of it under the part budget, which says what it left; two keys that print alike are then one.
-  The one place a value is made plain: every error is, at its constructor (`error`). See docs/storage.md#plain-data."
-  {:malli/schema [:=> [:cat :any] :any]}
-  [v]
-  (cond (plain? v) v
-        (or (clojure.core/record? v) (sorted? v)) (print/text v (:part print/budgets))
-        (map? v) (into {} (map (fn [[k x]] [(plainly k) (plainly x)])) v)
-        (vector? v) (mapv plainly v)
-        (set? v) (into #{} (map plainly) v)
-        (list? v) (apply list (map plainly v))
-        :else (print/text v (:part print/budgets))))
+  "v as the store keeps it (`plain?`), never printed: plain data as it is; a record as a map of its fields and a sorted
+  collection as an unsorted one, each member so; a map, vector, set or list, each member so; a var as its symbol, a
+  namespace as its name; a seq that is no list (lazy, a range) as a vector of its first bound members, or past the bound
+  (default :seon.config.store/max-value-chars) the gone marker `{:seon.value/gone {:type :over}}`, never realized further;
+  anything else (a fn, an atom, a db, a connection, any host object) as `{:seon.value/type <its class's name>}`, a
+  throwable's message beside it as :seon.value/message when it is a string. The one place a value is made plain: every
+  error is, at its constructor (`error`). See docs/storage.md#plain-data."
+  {:malli/schema [:function [:=> [:cat :any] :any] [:=> [:cat :any pos-int?] :any]]}
+  ([v] (plainly v (config/value :seon.config.store/max-value-chars)))
+  ([v bound]
+   (let [again #(plainly % bound)]
+     (cond (plain? v) v
+           (clojure.core/record? v) (again (into {} v))
+           (sorted? v) (again (if (map? v) (into {} v) (into #{} v)))
+           (map? v) (into {} (map (fn [[k x]] [(again k) (again x)])) v)
+           (vector? v) (mapv again v)
+           (set? v) (into #{} (map again) v)
+           (list? v) (apply list (map again v))
+           (var? v) (symbol v)
+           (instance? clojure.lang.Namespace v) (ns-name v)
+           (seq? v) (let [xs (into [] (take (inc bound)) v)]
+                      (if (> (count xs) bound) {:seon.value/gone {:type (type-name v) :over bound}} (mapv again xs)))
+           (instance? Throwable v) (cond-> {:seon.value/type (type-name v)} (string? (ex-message v)) (assoc :seon.value/message (ex-message v)))
+           :else {:seon.value/type (type-name v)}))))
+
+(clojure.core/defn within?
+  "Is plain value v no larger than bound characters, counted by a walk that stops as soon as it passes the bound:
+  each scalar 1, a string, keyword or symbol its length, a collection its members (a map's keys and values). Nothing is
+  printed to measure. See docs/storage.md#plain-data."
+  {:malli/schema [:=> [:cat :any pos-int?] :boolean]}
+  [v bound]
+  (let [left (volatile! bound)
+        ok (fn ok [x]
+             (vswap! left - (if (or (string? x) (keyword? x) (symbol? x)) (count (str x)) 1))
+             (and (>= @left 0)
+                  (cond (map? x) (every? (fn [[k y]] (and (ok k) (ok y))) x)
+                        (or (vector? x) (set? x) (list? x)) (every? ok x)
+                        :else true)))]
+    (ok v)))
 
 (clojure.core/defn- pred {:malli/schema [:=> [:cat :qualified-keyword :seon.host/fn] [:tuple :qualified-keyword :seon.host/schema]]} [k p] [k (m/-simple-schema {:type k :pred p})])
 

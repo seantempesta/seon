@@ -362,9 +362,9 @@
                         "(my.agent/prove #{'app.okt/ok-test})"
                         "(let [s (my.task/status)] [(some #(when (= 'app.okt/ok-test (:test %)) (:status %)) (:proofs s)) (filterv #(= 'app.okt/ok-test (:symbol %)) (:refused s (:reasons s)))])"
                         ;; the prove's eval as recorded: its value, data, under the schema the page draws it by
-                        "(let [r (some (fn [[r]] (when (= \"(my.agent/prove #{'app.okt/ok-test})\" (:code r)) r)) (datahike.api/q '[:find ?r :where [_ :seon.eval/record ?r]] (seon.agent/db)))
-                               v (seon.ratom/realize (get-in r [:response :value]))]
-                           [(:schema r) (:proofs v) (seon.web.html/html (seon.render.ui/proved {} v))])"
+                        "(let [e (datahike.api/q '[:find [?r ?k] :in $ ?c :where [?e :seon.eval/code ?c] [?e :seon.eval/response ?r] [?e :seon.eval/schema ?k]] (seon.agent/db) \"(my.agent/prove #{'app.okt/ok-test})\")
+                               v (seon.ratom/realize (get-in (first e) [:value]))]
+                           [(second e) (:proofs v) (seon.web.html/html (seon.render.ui/proved {} v))])"
                         {:op :done :agent agent}]))]
     ;; the owner, 2026-10-27: an eval's answer stays small, its handle and one line; what the run
     ;; found is drawn on its eval, from its value (seon.render.ui/proved)

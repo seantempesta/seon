@@ -189,18 +189,18 @@
 (deftest a-stored-prove-draws-as-its-live-response
   ;; the context lab, 2026-11-02: a stored prove's row drew its raw map (:at-judge, :error, :fail ...) where its live
   ;; response drew seon.render.ui/proved; the value's schema is metadata the store does not keep, the record keeps :schema
-  (let [rec {:code "(my.agent/prove)" :prose "Prove." :schema :seon.test/proved
-             :response {:handle 'result/e9 :value {:reports [] :ran 3 :reused 2 :fail 0 :error 0 :pass 3 :heap [1 2 3]}}}
-        row (h/html (ui/evaluation {} {:seon.eval/record rec :seon.eval/by "a3"}))
-        line (h/html (ui/evaluation {:as :inline} {:seon.eval/record rec :seon.eval/by "a3"}))]
+  (let [e {:seon.eval/code "(my.agent/prove)" :seon.eval/prose "Prove." :seon.eval/schema :seon.test/proved
+           :seon.eval/response {:handle 'result/e9 :value {:reports [] :ran 3 :reused 2 :fail 0 :error 0 :pass 3 :heap [1 2 3]}}
+           :seon.eval/by "a3"}
+        row (h/html (ui/evaluation {} e))
+        line (h/html (ui/evaluation {:as :inline} e))]
     (is (str/includes? row "green: ran 3") (str "the row draws the prove's own render: " row))
     (is (not (str/includes? row ":heap")) "not its map")
     (is (not (str/includes? line ":heap")) (str "the one line is the model render's too: " line))))
 
 (deftest an-eval-and-a-turn-say-what-they-cost
   ;; an eval's cost as recorded, each number with its unit; a turn's header says which of how many
-  (let [ev (h/html (ui/evaluation {} {:seon.eval/record {:code "(f 2)" :prose "f doubles?"
-                                                         :response {:handle 'result/e1 :value 4 :ms 1.5 :bytes 2048 :ticks 120}}
+  (let [ev (h/html (ui/evaluation {} {:seon.eval/code "(f 2)" :seon.eval/prose "f doubles?" :seon.eval/response {:handle 'result/e1 :value 4 :ms 1.5 :bytes 2048 :ticks 120}
                                       :seon.eval/by "a3"}))
         turn (h/html (ui/turn {} {:seon.turn/n 0 :seon.model-call/tokens 1200 :seon.model-call/basis {:max-turns 8}}))]
     (is (str/includes? ev "f doubles?") "the prose beside the call")
@@ -340,13 +340,12 @@
                        ;; the agent's task, which its record pulls (seon.agent/the-agent-is-the-unit-not-the-run)
                        [{:seon.agent/key k :seon.agent/task {:seon.task/id "demo/f"}}]
                        ;; root's own evaluation, from its REPL
-                       (seon.repl/record-tx {:seon.root/id :root} "root-1" "outside" {:code "(my.root/problems sys)" :response {:handle 'result/e1 :value {}}})])
+                       (seon.repl/record-tx {:seon.root/id :root} "root-1" "outside" {:seon.eval/code "(my.root/problems sys)" :seon.eval/response {:handle 'result/e1 :value {}}})])
         branch (reduce d/db-with main0
                        [(seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e1" "a3"
-                                             {:code "(f 2)" :prose "f doubles?"
-                                              :response {:handle 'result/e1 :value 4 :ms 1.5 :bytes 2048 :ticks 120}})
+                                             {:seon.eval/code "(f 2)" :seon.eval/prose "f doubles?" :seon.eval/response {:handle 'result/e1 :value 4 :ms 1.5 :bytes 2048 :ticks 120}})
                         (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e2" "a3"
-                                             {:code "(f 3)" :response {:handle 'result/e2 :value 6 :ms 0.4 :bytes 512 :ticks 40}})
+                                             {:seon.eval/code "(f 3)" :seon.eval/response {:handle 'result/e2 :value 6 :ms 0.4 :bytes 512 :ticks 40}})
                         [{:db/id "run" :seon.run/id "demo/f#1"}
                          {:db/id "turn" :seon.turn/id "demo/f#1/0" :seon.turn/run "run" :seon.turn/agent {:seon.agent/key k} :seon.turn/n 0 :seon.turn/origin :model :seon.turn/reply "it doubles"
                           :seon.turn/calls [{:id "c0" :code "(f 2)" :eval "e1"} {:id "c1" :code "(f 3)" :eval "e2"}]}
@@ -354,8 +353,7 @@
                           :seon.model-call/forms 2 :seon.model-call/errors 0 :seon.model-call/red 0 :seon.model-call/ms 5 :seon.model-call/tokens 1200
                           :seon.model-call/basis {:commit #uuid "00000000-0000-0000-0000-000000000000" :task "demo/f" :run "demo/f#1" :turn 0 :max-turns 8 :origin :model}}]
                         (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e3" "user"
-                                             {:code "(g)" :text "{:handle result/e3, :ex {:seon.error/message \"boom\"}}"
-                                              :response {:handle 'result/e3 :ex {:seon.error/type :seon.agent/eval-error :seon.error/operation 'seon.repl/eval-code :seon.error/message "boom"}}})])
+                                             {:seon.eval/code "(g)" :seon.eval/response {:handle 'result/e3 :ex {:seon.error/type :seon.agent/eval-error :seon.error/operation 'seon.repl/eval-code :seon.error/message "boom"}}})])
         main (if conn (:db-after (d/transact conn {:tx-data (seon.task/agent-tx "b1" :a3 {:status :busy})})) (d/db-with main0 (seon.task/agent-tx "b1" :a3 {:status :busy})))]
     [main branch (eid-of main [:seon.agent/key k])])))
 
@@ -590,7 +588,7 @@
         o (volatile! {})
         st (#'p/pass (proc-state main branch) o)
         k (seon.task/agent-key "b1" :a3)
-        branch' (d/db-with branch (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e4" "a3" {:code "(h)" :response {:handle 'result/e4 :value 1}}))
+        branch' (d/db-with branch (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e4" "a3" {:seon.eval/code "(h)" :seon.eval/response {:handle 'result/e4 :value 1}}))
         answer (fn [st db] (#'p/answered (assoc-in st [:pending 9] [:branch :task-demo-f]) o [:branch :task-demo-f] {:db db}))]
     (is (not (some #{[:chat :a3]} (:last-walked (answer st branch)))) "the same branch db: nothing moved, nothing walked")
     (is (some #{[:chat :a3]} (:last-walked (answer st branch'))) "a new evaluation on it: the page walks")))
@@ -604,7 +602,7 @@
         st (assoc (branch-state main branch) :watch #{[:chat :a3]})
         [st1 _] (#'p/pass-view st [:chat :a3])
         k (seon.task/agent-key "b1" :a3)
-        branch' (d/db-with branch (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e4" "a3" {:code "(h)" :response {:handle 'result/e4 :value 1}}))
+        branch' (d/db-with branch (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e4" "a3" {:seon.eval/code "(h)" :seon.eval/response {:handle 'result/e4 :value 1}}))
         st2 (#'p/answered st1 o [:branch :task-demo-f] {:db branch'})
         patch (first (filter #(and (= :patch (:op %)) (= [:chat :a3] (:view %))) (:to-web @o)))]
     (is (empty? (:frags patch)) "no held part changed")
@@ -620,7 +618,7 @@
         st (assoc (branch-state main branch) :watch #{[:chat :a3] :a3})
         [st1 _] (#'p/pass-view st [:chat :a3])
         k (seon.task/agent-key "b1" :a3)
-        branch' (d/db-with branch (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e4" "a3" {:code "(h)" :response {:handle 'result/e4 :value 1}}))
+        branch' (d/db-with branch (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e4" "a3" {:seon.eval/code "(h)" :seon.eval/response {:handle 'result/e4 :value 1}}))
         st2 (#'p/answered st1 o [:branch :task-demo-f] {:db branch'})
         cell (get-in st2 [:branch-reads :task-demo-f :walk])
         e (d/entity main [:seon.agent/key k])
@@ -673,7 +671,7 @@
         [st1 _] (#'p/pass-view st [:chat :a3])
         err (seon.contract/error :seon.writer/refused 'seon.writer/writer-proc "no branch :task-demo-f" {})
         st2 (#'p/answered st1 o [:branch :task-demo-f] err)
-        branch' (d/db-with branch (seon.repl/record-tx {:seon.agent/key (seon.task/agent-key "b1" :a3) :seon.agent/id :a3} "e4" "a3" {:code "(h)" :response {:handle 'result/e4 :value 1}}))
+        branch' (d/db-with branch (seon.repl/record-tx {:seon.agent/key (seon.task/agent-key "b1" :a3) :seon.agent/id :a3} "e4" "a3" {:seon.eval/code "(h)" :seon.eval/response {:handle 'result/e4 :value 1}}))
         st3 (#'p/answered st2 o [:branch :task-demo-f] {:db branch'})]
     (is (not (str/includes? (p/view-html st1 [:chat :a3]) "result/e4")))
     (is (str/includes? (p/view-html st3 [:chat :a3]) "result/e4") "the eval, written while its branch was unread")))
@@ -749,7 +747,7 @@
         o (volatile! {})
         st (#'p/ask-branches st o)
         asks (filter #(= :branch-db (get-in % [:req :req :op])) (:to-api @o))
-        newer (d/db-with branch [{:seon.eval/id "e9" :seon.eval/by "a3" :seon.eval/record {:code "(f 9)" :response {:value 18}}}])
+        newer (d/db-with branch [{:seon.eval/id "e9" :seon.eval/by "a3" :seon.eval/code "(f 9)" :seon.eval/response {:value 18}}])
         [st _] (#'p/render-proc st :answers {:tag (:tag (first asks)) :r {:db newer}})]
     (is (= 1 (count asks)) "one read for the two views")
     (is (identical? newer (get-in st [:branches :a3 :db])))
@@ -773,7 +771,7 @@
         (is (empty? (:prepends p)))))
     (testing "a new evaluation on its branch: one new row, prepended above the rows the page holds; the others untouched"
       (let [k (seon.task/agent-key "b1" :a3)
-            branch' (d/db-with branch (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e4" "a3" {:code "(h)" :response {:handle 'result/e4 :value 1}}))
+            branch' (d/db-with branch (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e4" "a3" {:seon.eval/code "(h)" :seon.eval/response {:handle 'result/e4 :value 1}}))
             [_ p] (pass (assoc-in st1 [:branches [:chat :a3] :db] branch'))]
         (is (empty? (:frags p)) "no held unit changed its input")
         (is (= 1 (count (filter #(str/includes? (second %) "result/e4") (concat (:appends p) (:afters p))))) "one part, placed after the one before it")))
@@ -854,7 +852,7 @@
           (is (not-any? true? (:new (ui/debug-input db e0 [e0 e1] false nil))) "the first request marks nothing"))
         (testing "a chosen turn stays as it was when the branch moves"
           (let [moved (d/db-with db [{:seon.eval/id "e9" :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key "b/a1"}
-                                      :seon.eval/record {:code "(f 9)" :response {:handle 'result/e9 :value 9} :run "demo/f#1"}}])]
+                                      :seon.eval/code "(f 9)" :seon.eval/response {:handle 'result/e9 :value 9} :seon.eval/run "demo/f#1"}])]
             (is (= h0 (page (assoc-in st [:branches [:debug :a1] :db] moved) e0)))))
         (testing "latest, while the run goes on, is the turn to come, drawn at the head"
           (let [in (ui/debug-input db :latest [e0 e1] false nil)]
@@ -924,7 +922,7 @@
             moved #(assoc-in % [:branches [:debug :a1] :db]
                              (d/db-with (get-in % [:branches [:debug :a1] :db])
                                         [{:seon.eval/id "e9" :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key "b/a1"}
-                                          :seon.eval/record {:code "(f 9)" :response {:handle 'result/e9 :value 9} :run "demo/f#1" :call-id "c9"}}]))
+                                          :seon.eval/code "(f 9)" :seon.eval/response {:handle 'result/e9 :value 9} :seon.eval/run "demo/f#1" :seon.eval/call-id "c9"}]))
             drawn (fn [st] (let [[st1 _] (#'p/pass-view st [:debug :a1]) [st2 _] (#'p/pass-view (moved st1) [:debug :a1])]
                              (- (get-in st2 [:counts :rendered] 0) (get-in st1 [:counts :rendered] 0))))]
         (is (zero? (drawn (assoc-in st [:tab [:debug :a1] :at] e0))) "a chosen turn: nothing drawn again")
@@ -967,8 +965,7 @@
   (let [[main branch eid] (paged-dbs)
         k (:seon.agent/key (d/pull main [:seon.agent/key] eid))
         branch (d/db-with branch (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e9" "a3"
-                                                      {:code "(+ 2 2)" :text "{:handle result/e9, :ms 0.2, :ticks 900, :value 4}" :line "4"
-                                                       :response {:handle 'result/e9 :ms 0.2 :ticks 900}}))
+                                                      {:seon.eval/code "(+ 2 2)" :seon.eval/response {:handle 'result/e9 :ms 0.2 :ticks 900}}))
         e9 (str "eval-item-" (seon.db/eid branch :seon.eval/id "e9"))
         closed (:html (some #(when (= e9 (:id %)) %) (:units (drawn-parts branch))))]
     (is (some? closed) "the eval, a component of the page")
@@ -1020,16 +1017,16 @@
   ;; owner, 2026-10-25 (the value view): a value recorded as data is drawn from its data, a map as
   ;; rows and code as code, not as its printed text; the row's id is its handle's, which links reach
   (let [src "(deftest t\n  ;; why\n  (is (= 2 (f 1))))"
-        rec {:code "(my.task/status)" :response {:handle 'result/e157 :ms 2.5 :value {:turn "29 of 30" :proofs [{:test 'demo-test/t :status :fail :source (seon.print/code src)}
-                                                                                                           {:test 'demo-test/u :status :pass :source (seon.print/code "(deftest u)")}]}}}
-        html (h/html (ui/evaluation {} {:seon.eval/record rec :seon.eval/by "outside"}))
-        held (h/html (ui/evaluation {} {:seon.eval/record {:code "(Object.)" :printed "#object[java.lang.Object]" :response {:handle 'result/e2}}}))]
+        rec {:seon.eval/code "(my.task/status)" :seon.eval/response {:handle 'result/e157 :ms 2.5 :value {:turn "29 of 30" :proofs [{:test 'demo-test/t :status :fail :source (seon.print/code src)}
+                                                                                                                                  {:test 'demo-test/u :status :pass :source (seon.print/code "(deftest u)")}]}}}
+        html (h/html (ui/evaluation {} (assoc rec :seon.eval/by "outside")))
+        held (h/html (ui/evaluation {} {:seon.eval/code "(Object.)" :seon.eval/response {:handle 'result/e2 :value (seon.contract/plainly (Object.))}}))]
     (is (str/includes? html "seon-print-grid") "the value, a map, as rows")
     (is (str/includes? html "<table class=\"seon-print-table\"") "its proofs, maps sharing keys, as a table")
     (is (str/includes? html ";; why") "the source verbatim, its comment as written")
     (is (not (str/includes? html "\\\"")) "no escaped string literal")
     (is (not (str/includes? html ":ms")) "the cost is on its own line, not in the value")
-    (is (str/includes? held "#object[java.lang.Object]") "a value not held as data shows as it was printed")))
+    (is (str/includes? held "java.lang.Object") "a value that is no data shows what it was, as data")))
 
 (deftest a-page-an-agent-built-renders-nested
   ;; owner, 2026-10-25: an agent's hiccup renders as HTML. It is the value's own :seon.render/html
@@ -1059,11 +1056,11 @@
   ;; the button that closes it, so it shows what the cut left
   (let [body (fn [n] (str/join "\n" (repeat 50 (str "  (is (= " n " (f " n ")))"))))
         proof (fn [n] {:test (symbol "demo-test" (str "t" n)) :source (seon.print/code (str "(deftest t" n "\n" (body n) ")"))})
-        rec {:code "(my.task/status)" :response {:handle 'result/e5 :value {:proofs (mapv proof (range 1 5))}}}
+        rec {:seon.eval/code "(my.task/status)" :seon.eval/response {:handle 'result/e5 :value {:proofs (mapv proof (range 1 5))}}}
         shown (fn [html] (count (filter #(str/includes? html (body %)) (range 1 5))))
-        closed (h/html (ui/evaluation {} {:seon.eval/record rec}))
+        closed (h/html (ui/evaluation {} rec))
         path (some-> (re-find #"class=\"seon-print-cut\"[^>]*? data-seon-form=\"([^\"]*)\"" closed) second (str/replace "&amp;" "&"))
-        opened (when path (h/html (ui/evaluation {:opened #{path}} {:seon.eval/record rec})))]
+        opened (when path (h/html (ui/evaluation {:opened #{path}} rec)))]
     (is path (str "four sources over the value's budget: a cut, a toggle naming the form that reads its rest: "
                   (shown closed) " shown; " (pr-str (re-seq #"seon-print-(?:cut|elision)[^<]{0,160}" closed))))
     (is (< (shown closed) 4) "closed, a source is left out")
@@ -1100,7 +1097,7 @@
         db0 (reduce d/db-with (ts/test-db)
                    [[{:seon.root/id :root :seon.root/boot "b1" :seon.config.agent/max-running 4}]
                     (seon.task/agent-tx "b1" :a1 {:status :busy})
-                    (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a1} "e1" "a1" {:code "(+ 1 2)" :response {:handle 'result/e1 :value 3} :run "t/x#1"})
+                    (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a1} "e1" "a1" {:seon.eval/code "(+ 1 2)" :seon.eval/response {:handle 'result/e1 :value 3} :seon.eval/run "t/x#1"})
                     [{:db/id "run" :seon.run/id "t/x#1"}]
                     [{:db/id "turn" :seon.turn/id "t/x#1/0" :seon.turn/run [:seon.run/id "t/x#1"] :seon.turn/agent {:seon.agent/key k} :seon.turn/n 0 :seon.turn/origin :model}
                      {:seon.model-call/id "t/x#1/0" :seon.model-call/turn "turn"
@@ -1135,7 +1132,7 @@
                    [[{:seon.root/id :root :seon.root/boot "b1"}]
                     [{:seon.agent/key "example/abc" :seon.agent/id :example-abc :seon.agent/status :ended :seon.agent/description "Make h."}]
                     [{:seon.eval/id "example/abc/s1" :seon.eval/by "src" :seon.eval/agent [:seon.agent/key "example/abc"]
-                      :seon.eval/record {:code "(+ 1 2)" :response {:handle 'result/example-abc-s1 :value 3} :run "example/abc" :call-id "example-abc-call_1" :call 0}}]])
+                      :seon.eval/code "(+ 1 2)" :seon.eval/response {:handle 'result/example-abc-s1 :value 3} :seon.eval/run "example/abc" :seon.eval/call-id "example-abc-call_1" :seon.eval/call 0}]])
         eid (seon.db/eid db :seon.agent/key "example/abc")
         st {:rid 1 :pending {} :watch #{} :waiting {} :views {} :branches {} :main-db db :view {:agents {}}}
         units (fn [view] (:seon.render/units (#'p/page-value st view)))
@@ -1353,12 +1350,12 @@
 (defn lab-row
   "An eval's code: a component over ctx (docs/render.md#reactive-renders)."
   {:malli/schema [:=> [:cat [:map [:seon.ctx/ctx :map]] :int] :any]}
-  [{c :seon.ctx/ctx} id] [:li (get-in c [:evals id :seon.eval/record :code])])
+  [{c :seon.ctx/ctx} id] [:li (get-in c [:evals id :seon.eval/code])])
 
 (defn lab-length
   "An eval's code by its length."
   {:malli/schema [:=> [:cat [:map [:seon.ctx/ctx :map]] :int] :any]}
-  [{c :seon.ctx/ctx} id] [:li (count (get-in c [:evals id :seon.eval/record :code]))])
+  [{c :seon.ctx/ctx} id] [:li (count (get-in c [:evals id :seon.eval/code]))])
 
 (defn lab-page
   "The task's plan, then a row for each eval, each its own component."
@@ -1372,24 +1369,24 @@
   "The task's plan and every eval's code, read in this one render."
   {:malli/schema [:=> [:cat [:map [:seon.ctx/ctx :map]]] :any]}
   [{c :seon.ctx/ctx}]
-  [:div [:p (get-in c [:task :seon.task/plan])] (into [:ol] (for [[_ e] (:evals c)] [:li (:code (:seon.eval/record e))]))])
+  [:div [:p (get-in c [:task :seon.task/plan])] (into [:ol] (for [[_ e] (:evals c)] [:li (:seon.eval/code e)]))])
 
 (deftest a-flush-answers-what-it-redrew
   ;; docs/render.md#reactive-renders: each frame answers the components it ran, by key, new or the
   ;; same output, and what each kind of read costs: a member in its own component, or read inline
   (let [rec (seon.ratom/atom {:db/id 1 :t 5 :task {:db/id 2 :seon.task/plan "write the test"}
-                              :evals (#'seon.ctx/members-map [[12 {:db/id 12 :seon.eval/record {:code "(+ 1 2)"}}]
-                                                             [11 {:db/id 11 :seon.eval/record {:code "(inc 1)"}}]])})
+                              :evals (#'seon.ctx/members-map [[12 {:db/id 12 :seon.eval/code "(+ 1 2)"}]
+                                                             [11 {:db/id 11 :seon.eval/code "(inc 1)"}]])})
         walk #(doto (r/walker {:ref rec :changes seon.ctx/changes} (constantly nil) [% {}]) (r/flush! nil))
         w (walk #'lab-page)
         inline (walk #'lab-inline)
         both #(vector (r/flush! w nil) (r/flush! inline nil))]
-    (swap! rec assoc-in [:evals 12 :seon.eval/record :code] "(+ 1 5)")
+    (swap! rec assoc-in [:evals 12 :seon.eval/code] "(+ 1 5)")
     (is (= [{[`lab-row 12] :miss [`lab-length 12] :same} {[`lab-inline] :miss}] (both))
         "a member's change: its own rows, the length row the same; the inline render whole")
     (swap! rec assoc-in [:task :seon.task/plan] "ship it")
     (is (= [{[`lab-page] :miss} {[`lab-inline] :miss}] (both)) "the plan: the page, its rows skipped")
-    (swap! rec assoc-in [:evals 13] {:db/id 13 :seon.eval/record {:code "(dec 1)"}})
+    (swap! rec assoc-in [:evals 13] {:db/id 13 :seon.eval/code "(dec 1)"})
     (is (= [{[`lab-page] :miss [`lab-row 13] :miss [`lab-length 13] :miss} {[`lab-inline] :miss}] (both))
         "a member added: the page, and the new member's rows")
     (swap! rec assoc :t 6)
@@ -1457,7 +1454,7 @@
         k (seon.task/agent-key "b1" :a3)
         o (volatile! {})
         st (#'p/answered (first (#'p/pass-view (proc-state main branch) [:chat :a3])) o [:parts :a3] (drawn-parts branch))
-        branch2 (d/db-with branch (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e4" "a3" {:code "(f 4)" :response {:handle 'result/e4 :value 8}}))
+        branch2 (d/db-with branch (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e4" "a3" {:seon.eval/code "(f 4)" :seon.eval/response {:handle 'result/e4 :value 8}}))
         o2 (volatile! {})
         _ (#'p/answered st o2 [:parts :a3] (drawn-parts branch2))
         patch (first (filter #(= :patch (:op %)) (:to-web @o2)))

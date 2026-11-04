@@ -605,51 +605,53 @@
   (case origin :ui "user" :outside "outside" :context "context" (name (or (:id @agent/state) :root))))
 
 (defn record-tx
-  "The recording transaction of one eval: its entity, on the agent's, who evaluated it
-  (:seon.eval/by), its details in one EDN attribute (the lean record: nothing queries them
-  apart): `record-details`. Who is the one upsert, by its identity: an
+  "The recording transaction of one eval: its entity, on the agent's, who evaluated it (:seon.eval/by), and its
+  details, each its own attribute (`record-details`). Who is the one upsert, by its identity: an
   agent's key ({:seon.agent/key k}, seon.task/agent-key) or root's ({:seon.root/id :root}); an agent's holds the
   namespace the eval left its REPL in (:seon.agent/ns), a datom only when it moved (an unchanged value adds none),
   which seon.context/current-ns reads. See docs/render.md#a-part-answers-data."
   {:malli/schema [:=> [:cat :map :string :string :map] :seon.db/tx-data]}
   [who id by details]
-  [{:seon.eval/id id :seon.eval/agent "agent" :seon.eval/by by :seon.eval/record details}
+  [(into {:seon.eval/id id :seon.eval/agent "agent" :seon.eval/by by} details)
    (cond-> (assoc who :db/id "agent")
-     (and (:seon.agent/key who) (symbol? (get-in details [:response :ns]))) (assoc :seon.agent/ns (get-in details [:response :ns])))])
+     (and (:seon.agent/key who) (symbol? (get-in details [:seon.eval/response :ns]))) (assoc :seon.agent/ns (get-in details [:seon.eval/response :ns])))])
+
+(defn- kept
+  "Value v as an eval's record keeps it: plain data (seon.contract/plainly), or past the largest value kept
+  (:seon.config.store/max-value-chars, counted by seon.contract/within?) the marker of what it was and the bound it
+  passed, {:seon.value/gone {:type :over}}. See docs/storage.md#plain-data."
+  {:malli/schema [:=> [:cat :any] :any]}
+  [v]
+  (let [bound (cfg/value :seon.config.store/max-value-chars)
+        p (contract/plainly v bound)]
+    (if (contract/within? p bound) p {:seon.value/gone {:type (.getName (class v)) :over bound}})))
 
 (defn record-details
-  "What an eval's record holds (:seon.eval/record): its code, its response whole, its value
-  included when it is plain data (seon.contract/plain?: stored as data, once under its content key when
-  large), else the response as it printed then (:printed) and the value's type (:type), since only
-  data is stored; never a text made for a reader (each prints it as it shows it: seon.print/
-  record-text), so a record is the same whatever came before it. Then the prose beside it, as written (never
+  "What an eval records, each its own attribute of its entity (:seon.eval/code, :response, :schema, :basis, :prose,
+  :call-id and :call, :reasoning, :content, :run, :fns; each only when present): the code; the response whole with its
+  value as plain data (`kept`), never a text made for a reader (each prints it as it shows it: seon.print/response-text),
+  so a record is the same whatever came before it; the prose beside it, as written (never
   parsed here: the parser is program the agent may change, and an eval's record runs none of it; a reader
-  that wants what the prose cites parses the kept prose, docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map),
-  its value in one line, or its error's message (:line, the one printer
-  under the line budget: an eval's row on the page), the provider's call id, its reasoning, its run, its costliest
-  functions."
-  {:malli/schema [:=> [:cat :string :map :map [:maybe :string]] :seon.eval/record]}
+  that wants what the prose cites parses the kept prose, docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map);
+  a value that names its render schema keeps it (the page draws the value by it); a value that names its basis (@ctx:
+  the branch's record at t, seon.ctx/build) keeps the basis in place of the value, so a copy of the session is never
+  stored at each @ctx; the provider's call id, its reasoning, its run, its costliest functions."
+  {:malli/schema [:=> [:cat :string :map :map [:maybe :string]] [:map [:seon.eval/code :string] [:seon.eval/response [:and :seon.eval/response :seon.db/plain]]]]}
   [code r req run]
   (let [resp (dissoc r :text :fns :record)
-        ;; a value that names its basis (@ctx: the branch's record at t, seon.ctx/build) is
-        ;; recorded as that basis and its schema: the page renders it from what exists, and a
-        ;; copy of the session's record is never stored at each @ctx
-        basis (when (contains? resp :value) (:seon.render/basis (meta (:value resp))))
-        data? (and (nil? basis) (or (not (contains? resp :value)) (contract/plain? (:value resp))))]
-    (cond-> (if data?
-              {:code code :response resp}
-              (cond-> {:code code :response (dissoc resp :value) :printed (print/response-text resp render/model) :type (str (type (:value resp)))}
-                basis (assoc :basis basis)))
-      ;; a value that names its render schema keeps it (a basis's; data's, a prove's run): the page draws the value by it
-      (:seon.render/schema (meta (:value resp))) (assoc :schema (:seon.render/schema (meta (:value resp))))
-      (or (contains? r :value) (:ex r))
-      (assoc :line (print/line (cond (:ex r) (or (get-in r [:ex :seon.error/message]) (:ex r)) (nil? (:value r)) "nil" :else (:value r)) (cfg/value :seon.config.render/line-budget) nil))
-      (:prose req) (assoc :prose (:prose req))
-      (:call-id req) (assoc :call-id (:call-id req) :call (:call req 0))
-      (:reasoning req) (assoc :reasoning (:reasoning req))
-      (:content req) (assoc :content (:content req))
-      run (assoc :run run)
-      (seq (:fns r)) (assoc :fns (:fns r)))))
+        v (:value resp)
+        basis (when (contains? resp :value) (:seon.render/basis (meta v)))
+        schema (when (contains? resp :value) (:seon.render/schema (meta v)))]
+    (cond-> {:seon.eval/code code
+             :seon.eval/response (cond basis (dissoc resp :value) (contains? resp :value) (assoc resp :value (kept v)) :else resp)}
+      schema (assoc :seon.eval/schema schema)
+      basis (assoc :seon.eval/basis basis)
+      (:prose req) (assoc :seon.eval/prose (:prose req))
+      (:call-id req) (assoc :seon.eval/call-id (:call-id req) :seon.eval/call (:call req 0))
+      (:reasoning req) (assoc :seon.eval/reasoning (:reasoning req))
+      (:content req) (assoc :seon.eval/content (:content req))
+      run (assoc :seon.eval/run run)
+      (seq (:fns r)) (assoc :seon.eval/fns (:fns r)))))
 
 (defn- record!
   "Record response r of code on this branch through the agent's write path (an agent's

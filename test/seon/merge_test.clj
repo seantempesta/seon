@@ -171,7 +171,7 @@
 
 (deftest scratch-and-observations-never-merge
   (let [ours (with (base) [{:note/text "scratch" :note/agent :a1}
-                         {:seon.eval/id "e1" :seon.eval/by "a1" :seon.eval/record {:code "(+ 1 2)" :response {:handle 'result/e1 :value 3}}}
+                         {:seon.eval/id "e1" :seon.eval/by "a1" :seon.eval/code "(+ 1 2)" :seon.eval/response {:handle 'result/e1 :value 3}}
                          {:seon.agent/id :a1 :seon.process/pid 7}
                          {:task/name :x/y :task/status :done}])]
     (is (= (pm/program (base) #{}) (pm/program ours #{})))

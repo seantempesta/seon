@@ -87,7 +87,7 @@
   [n]
   [{} (d/db-with (ts/test-db) (into [{:db/id "a" :seon.agent/id :a1}]
                                     (for [i (range (* 20 n))] {:seon.eval/id (str "a1-1-1/" i) :seon.eval/agent "a"
-                                                        :seon.eval/record {:code "(+ 1 2)" :response {:value 3}}})))])
+                                                        :seon.eval/code "(+ 1 2)" :seon.eval/response {:value 3}})))])
 
 (deftest main-info-reads-what-the-page-shows
   ;; global-ids' profile (2026-10-23): main-info took 174 ms a call on the owner's main, 695 ms
@@ -142,7 +142,7 @@
                    [[{:seon.root/id :root :seon.root/boot "b1"}]
                     (seon.task/agent-tx "b1" :a1 {:status :idle})
                     (into [] (mapcat #(seon.repl/record-tx {:seon.agent/key "b1/a1" :seon.agent/id :a1} (str "e" %) "a1"
-                                                           {:code "(+ 1 2)" :response {:handle 'result/e1 :value 3}}))
+                                                           {:seon.eval/code "(+ 1 2)" :seon.eval/response {:handle 'result/e1 :value 3}}))
                           (range n))])]
     [[db] (:db/id (d/entity db [:seon.agent/key "b1/a1"]))]))
 
@@ -199,7 +199,7 @@
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map :any]]}
   [n]
   (let [k (seon.task/agent-key "b1" :a1)
-        ev (fn [id] (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a1} id "a1" {:code "(+ 1 2)" :response {:handle (symbol "result" id) :value 3} :run "t/x#1" :call-id (str "c-" id) :call 0}))
+        ev (fn [id] (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a1} id "a1" {:seon.eval/code "(+ 1 2)" :seon.eval/response {:handle (symbol "result" id) :value 3} :seon.eval/run "t/x#1" :seon.eval/call-id (str "c-" id) :seon.eval/call 0}))
         db0 (reduce d/db-with (ts/test-db)
                     [[{:seon.root/id :root :seon.root/boot "b1"}]
                      (seon.task/agent-tx "b1" :a1 {:status :busy :branch :task-x})])
@@ -261,7 +261,7 @@
   (let [evals (#'seon.ctx/members-map
                     (for [i (range n) :let [id (str "e" i)]]
                       [(+ 10 i) {:db/id (+ 10 i) :seon.eval/id id :seon.eval/by "a1"
-                                 :seon.eval/record {:code (str "(inc " i ")") :response {:handle (symbol "result" id) :value (inc i)}}}]))
+                                 :seon.eval/code (str "(inc " i ")") :seon.eval/response {:handle (symbol "result" id) :value (inc i)}}]))
         a (seon.ratom/atom {:db/id 1 :seon.agent/key "b/a1" :seon.agent/id :a1 :evals evals})
         w (seon.render/walker {:ref a :changes seon.ctx/changes} (constantly (ts/test-db)) [(requiring-resolve (seon.render/declared :seon.render/render-ctx)) {}])]
     (seon.render/flush! w nil)
@@ -362,7 +362,7 @@
     (d/transact conn [{:seon.run/id run :seon.run/task [:seon.task/id tid] :seon.run/agent {:seon.agent/key k :seon.agent/task {:seon.task/id tid}}}])
     (doseq [i (range n)]
       (d/transact conn [{:seon.eval/id (str "p" n "e" i) :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key k}
-                         :seon.eval/record {:code (str "(f " i ")") :response {:handle (symbol "result" (str "p" n "e" i)) :value (vec (range 5)) :ns 'user} :line (str i) :run run :call-id (str "c" i) :call 0 :prose (str "Step " i ".")}}])
+                         :seon.eval/code (str "(f " i ")") :seon.eval/response {:handle (symbol "result" (str "p" n "e" i)) :value (vec (range 5)) :ns 'user} :seon.eval/run run :seon.eval/call-id (str "c" i) :seon.eval/call 0 :seon.eval/prose (str "Step " i ".")}])
       (when (even? i)
         (d/transact conn (update (seon.task/message-tx (str "p" n "m" i) :message "user" (keyword (str "b-p" n)) (str "note " i)) 0 assoc :seon.message/agent {:seon.agent/key k}))))
     (let [db @conn a (:db/id (d/entity db [:seon.agent/key k]))]
