@@ -69,7 +69,8 @@
   throwable's message beside it as :seon.value/message when it is a string. The one place a value is made plain: every
   error is, at its constructor (`error`). See docs/storage.md#plain-data."
   {:malli/schema [:function [:=> [:cat :any] :any] [:=> [:cat :any pos-int?] :any]]}
-  ([v] (plainly v (config/value :seon.config.store/max-value-chars)))
+  ;; what is plain already reads no config: an error's members nearly always are, and every error comes through here
+  ([v] (if (plain? v) v (plainly v (config/value :seon.config.store/max-value-chars))))
   ([v bound]
    (let [again #(plainly % bound)]
      (cond (plain? v) v
