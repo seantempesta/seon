@@ -38,7 +38,7 @@
   (let [co (seon.config/checkout) refs "/g/refs" own #{"/g/refs/heads/jolt/health" "/g/refs/heads/jolt/merges"} k #(watch-kinds co refs own %)]
     (is (= #{:docs} (k [[:path (str co "/docs/health.md")]])))
     (is (= #{:source} (k [[:path (str co "/src/seon/watch.clj")]])))
-    (is (= #{:tasks} (k [[:path (str co "/resources/seon/tasks/seon.watch.edn")]])))
+    (is (= #{:tasks} (k [[:path (str (seon.config/value :seon.config.root/tasks-dir) "/seon.watch.edn")]])) "a task file under the tasks directory this root reads (the checkout's, or a test root's own)")
     (is (= #{} (k [[:path (str co "/claude_scratch/x.md")] [:path (str co "/target/seon")] [:path "/elsewhere/docs/x.md"]])) "no loader reads them: nothing loads")
     (is (= #{:source} (k [[:path "/g/refs/heads/jolt/health"]])) "this checkout's branch moved: a commit or a merge on it")
     (is (= #{:source} (k [[:path "/g/refs/heads/jolt/merges"]])) "the write-back branch moved")
@@ -47,7 +47,7 @@
       (is (= #{} (watch-kinds co refs #{} [[:path "/g/refs/heads/jolt/health"]])) "a detached HEAD follows no ref"))
     (testing "a rescan (FSEvents coalesced or dropped events) loads the loaders reading under its path"
       (is (= #{:docs} (k [[:rescan (str co "/docs")]])))
-      (is (= #{} (k [[:rescan (str co "/target")]])) "a build's writes under target/: nothing")
+      (is (= #{} (k [[:rescan (str co "/target/jolt")]])) "a build's writes under target/ (not a root's tasks directory, which a test root keeps there): nothing")
       (is (= #{:docs :tasks :source} (k [[:rescan co]]) (k [[:root co]])) "the checkout itself: every kind")
       (is (= #{:source} (k [[:rescan refs]])) "the refs: the source alone, never the task files"))))
 

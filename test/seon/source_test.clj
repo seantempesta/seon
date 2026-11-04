@@ -539,7 +539,7 @@
   ;; land6 review, must-fix 4: a cited reference-code file shows the revision main's source
   ;; pins it at; the :source effect reads each gitlink once, at import, so no render runs git
   (let [r (fx/read-source {:req {:root here :dirs ["src"]}})
-        head-tree (str/trim (:out (sh/sh "git" "rev-parse" "HEAD:reference-code/malli")))]
+        head-tree (str/trim (:out (sh/sh "git" "-C" here "rev-parse" "HEAD:reference-code/malli")))]
     (is (= head-tree (get (:pins r) "reference-code/malli")) "the gitlink HEAD's tree records for it")
     (is (every? #(str/starts-with? % "reference-code/") (keys (:pins r))))))
 
@@ -805,7 +805,7 @@
         text (source/file-text db 'app.wb)]
     (is (< (str/index-of text "(defn- h") (str/index-of text "(defn a")) text)
     (is (< (str/index-of text "(defn a") (str/index-of text "(defn b")) "the rest keeps its order")
-    (is (= 2 (try (load-string (str/replace text "app.wb" "app.wb-fresh")) ((resolve 'app.wb-fresh/b))
+    (is (= 2 (try (binding [*ns* *ns*] (load-string (str/replace text "app.wb" "app.wb-fresh"))) ((resolve 'app.wb-fresh/b))
                   (finally (remove-ns 'app.wb-fresh))))
         "the written file loads fresh and runs")
     (testing "a declare recorded after its user is written before it"

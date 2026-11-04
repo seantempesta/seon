@@ -234,7 +234,9 @@
 ;; a local or the namespace's own var still wins, and nothing is written into the namespace
 (deftest the-repl-helpers-resolve-in-any-namespace
   (let [old @agent/state]
-    (try (reset! agent/state {:n 0 :ns (the-ns 'user)})
+    ;; the process's own program record stays (an agent's branch db, a test process's none): `source` reads a var's
+    ;; text from it, else from the file at its relative :file, which only a process in the checkout can open
+    (try (reset! agent/state (assoc (select-keys old [:db]) :n 0 :ns (the-ns 'user)))
          (let [ev #(repl/eval-string % {})
                _ (ev "(in-ns 'x.repl-bare)")
                src (ev "(source seon.doc/named-under?)")

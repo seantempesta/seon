@@ -18,6 +18,11 @@
   classpath resource first, and from a worktree's test/ root ../../../ climbs into the main tree."
   [p prof dir] (config/resolved (aero/read-config p {:profile prof ::config/checkout dir :resolver aero/relative-resolver})))
 
+(defn- shipped
+  "The shipped config file read under profile p (resolved and validated), whatever process asks: its
+  checkout's, never the running config (a root's overrides: its tasks directory, ports and provider)."
+  [p] (read-file (config/path (config/checkout)) p (config/checkout)))
+
 (defn- tags
   "test/seon/config/tags.edn read with aero under profile p (default :default)."
   ([] (tags :default))
@@ -25,16 +30,17 @@
 
 ;; ---- aero under Jolt, tag by tag ---------------------------------------------------------
 
+;; tags.edn reads PATH, a variable every process has (JOLT_PWD is bin/test's own; an agent's test child has none)
 (deftest env-reads-a-set-variable-and-nil-for-an-unset-one
-  (is (= (config/checkout) (:env (tags))))
+  (is (= (System/getenv "PATH") (:env (tags))))
   (is (nil? (:env-unset (tags)))))
 
 (deftest envf-formats-variables
-  (is (= (str (config/checkout) "/x") (:envf (tags)))))
+  (is (= (str (System/getenv "PATH") "/x") (:envf (tags)))))
 
 (deftest or-takes-the-first-non-nil
   (is (= 7 (:or-unset (tags))))
-  (is (= (config/checkout) (:or-set (tags)))))
+  (is (= (System/getenv "PATH") (:or-set (tags)))))
 
 (deftest long-parses-and-composes-with-or
   (is (= 42 (:long (tags))))
@@ -109,15 +115,16 @@
 ;; ---- the shipped file and its schemas ----------------------------------------------------
 
 (deftest the-shipped-file-validates-under-every-profile
-  ;; the scripted model's script is stated only under :scripted (checks and tests)
+  ;; the scripted model's script is stated only under :scripted (checks and tests); :seon.config.source/root
+  ;; is `#env SEON_SOURCE_ROOT` (bin/root exports it, bin/test does not): present or absent by the process's
+  ;; environment, so it is left out of both sides
   (doseq [p [:default :scripted :deepseek]]
-    (let [c (read-file (config/path (config/checkout)) p (config/checkout))]
+    (let [c (dissoc (shipped p) :seon.config.source/root)]
       (is (= (set (keys c)) (set (remove (cond-> #{:seon.config.ai/reasoning-effort :seon.config.source/root :seon.config.source/gate-checkout :seon.config.root/profile} (not= :scripted p) (conj :seon.config.ai/script))
                                          (config/keys-declared)))) p)))
-  (let [shipped #(read-file (config/path (config/checkout)) % (config/checkout))]
-    (is (= {:kind :none} (config/provider (shipped :default))) "no profile: no provider, never the scripted model")
-    (is (= {:kind :scripted :script 'seon.fixtures/reply} (config/provider (shipped :scripted))))
-    (is (= :openai-compat (:seon.config.ai/provider (shipped :deepseek))))))
+  (is (= {:kind :none} (config/provider (shipped :default))) "no profile: no provider, never the scripted model")
+  (is (= {:kind :scripted :script 'seon.fixtures/reply} (config/provider (shipped :scripted))))
+  (is (= :openai-compat (:seon.config.ai/provider (shipped :deepseek)))))
 
 (deftest every-key-is-documented-by-its-schema
   (doseq [k (config/keys-declared)
@@ -127,10 +134,11 @@
     (is (string? (:seon.config/unit props)) (str k " has no :seon.config/unit"))))
 
 (deftest machine-dependent-values-are-derived-at-load
-  (is (= (str (config/checkout) "/resources/seon/tasks") (config/value :seon.config.root/tasks-dir)))
-  (is (= (str (config/checkout) "/resources/seon/system.edn") (config/value :seon.config.root/system-path)))
-  ;; the writer's buffer is the live agents' bound, by #ref
-  (is (= (config/value :seon.config.root/max-agents) (config/value :seon.config.root/writer-buf))))
+  (let [c (shipped :scripted)]
+    (is (= (str (config/checkout) "/resources/seon/tasks") (:seon.config.root/tasks-dir c)))
+    (is (= (str (config/checkout) "/resources/seon/system.edn") (:seon.config.root/system-path c)))
+    ;; the writer's buffer is the live agents' bound, by #ref
+    (is (= (:seon.config.root/max-agents c) (:seon.config.root/writer-buf c)))))
 
 (defn- refused [f] (try (f) nil (catch clojure.lang.ExceptionInfo e (ex-data e))))
 
@@ -157,8 +165,8 @@
   (is (= :seon.config/refused (:seon.error/type (refused #(config/value :seon.config.nope/x))))))
 
 (deftest the-provider-is-the-config-s
-  ;; bin/test runs its processes under --profile scripted
-  (is (= {:kind :scripted :script 'seon.fixtures/reply} (config/provider config/config)))
+  ;; the shipped file under --profile scripted (what bin/test runs under), not the running process's
+  (is (= {:kind :scripted :script 'seon.fixtures/reply} (config/provider (shipped :scripted))))
   (let [p (config/provider (assoc config/config :seon.config.ai/provider :openai-compat :seon.config.ai/thinking :disabled))]
     (is (= {:kind :openai-compat :base-url "https://api.deepseek.com" :model "deepseek-flash" :api-key-env "DEEPSEEK_API_KEY"
             :max-tokens (config/value :seon.config.ai/max-tokens) :replay-reasoning (config/value :seon.config.ai/replay-reasoning) :thinking :disabled}
@@ -326,10 +334,20 @@
   (is (= :unknown-key
          (:problem (first (:seon.config/problems (refused #(config/layered (config/load-layers (config/checkout) ["--set" ":seon.config.web/porrt=1"])))))))))
 
+(defn- shipped-default
+  "The value the shipped file states for key k when its #env variables are unset: the last alternative of
+  its `#or`, read from the file's text (edn tagged literals, as env-tags does), since the resolved value
+  is the process's environment's (a root's SEON_SERVER_PORT) when one is set."
+  [k]
+  (let [f (get (edn/read-string {:default tagged-literal} (slurp (config/path (config/checkout)))) k)
+        alts (-> f :form :form)]
+    (assert (= 'long (:tag f)))
+    (assert (= 'or (:tag (:form f))))
+    (last alts)))
+
 (deftest no-port-is-listened-on-unless-the-config-says-so
-  (let [c (:config (config/layered [(first (config/load-layers (config/checkout) []))]))]
-    (is (= 0 (:seon.config.web/port c)))
-    (is (= 0 (:seon.config.root/server-port c)))))
+  (is (= 0 (shipped-default :seon.config.web/port)))
+  (is (= 0 (shipped-default :seon.config.root/server-port))))
 
 (deftest the-loader-reads-the-command-line-as-the-process-has-it
   (binding [*command-line-args* '("ports" "--set" ":seon.config.web/port=7998")]

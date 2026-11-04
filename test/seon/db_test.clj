@@ -111,7 +111,7 @@
         cmd (str "'" jolt "' -A:test -e " (pr-str (code "x")) " > /dev/null 2> '" path "-x.err' & x=$!; "
                  "'" jolt "' -A:test -e " (pr-str (code "y")) " > /dev/null 2> '" path "-y.err' & y=$!; "
                  "wait $x; ex=$?; wait $y; ey=$?; echo \"$ex $ey\"")
-        r (clojure.java.shell/sh "nice" "-n" "10" "zsh" "-c" cmd)
+        r (clojure.java.shell/sh "nice" "-n" "10" "zsh" "-c" cmd :dir (seon.config/checkout))   ; -A:test reads the checkout's deps.edn: the test's own working directory is not it
         ends (zipmap ["x" "y"] (map parse-long (str/split (str/trim (:out r)) #" ")))
         {:keys [conn]} (pdb/open! :lmdb path 0 :db)
         made (for [t ["x" "y"] i (range 50)] (keyword (str t "-" i)))]

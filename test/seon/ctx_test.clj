@@ -22,15 +22,32 @@
   "session-pattern with a window of 10, not :seon.config.ctx/window's 100, so a short session moves its windows."
   (walk/postwalk-replace {:seon.config.ctx/window 10} session-pattern))
 
+(def ^:private found
+  "The agent state this process held when a test first took it (enter-agent!), ::unset while none has."
+  (atom ::unset))
+
+(defn- enter-agent!
+  "The agent state st for a test, the state the process held (a test child's own agent: its db, which
+  seon.agent/source-fn and the REPL read; none in bin/test's) kept for end-agent! to put back."
+  {:malli/schema [:=> [:cat [:maybe :map]] :nil]}
+  [st]
+  (when (= ::unset @found) (reset! found @seon.agent/state))
+  (reset! seon.agent/state st)
+  nil)
+
 (defn- end-agent!
   "The agent state ended as a test leaves it: the walk of its render (seon.repl/render-ctx holds one
-  in the state, reactions on @ctx that run at every write of it) disposed, then the state reset. A
-  walk left behind makes every later write of the record in this process cost its reactions
-  (seon.ctx-test/a-swap-costs-what-it-changed read 52 calls after this test, not 39)."
+  in the state, reactions on @ctx that run at every write of it) disposed, then the state put back as
+  enter-agent! found it (a test that left it empty broke the next one reading the process's own db: seon.render-test/
+  markdown-reads-no-text-again in a test child). A walk left behind makes every later write of the record in
+  this process cost its reactions (seon.ctx-test/a-swap-costs-what-it-changed read 52 calls after this test, not 39)."
   {:malli/schema [:=> [:cat] :nil]}
   []
   (some-> (:walk @seon.agent/state) seon.render/dispose-walk!)
-  (reset! seon.agent/state nil)
+  (remove-watch seon.agent/state :seon.ctx/ctx)       ; the record the test drew stays @ctx's (the test reads it after), as with an empty state
+  (reset! seon.agent/state (when (not= ::unset @found) @found))
+  (add-watch seon.agent/state :seon.ctx/ctx @#'seon.ctx/on-state)
+  (reset! found ::unset)
   nil)
 
 (defn- aid "The test agent's entity on db." {:malli/schema [:=> [:cat :seon.host/db] [:maybe pos-int?]]}
@@ -287,7 +304,7 @@
   ;; transaction transact! records, and from what two values differ by when no transaction moved it
   (let [db (seeded 10) rep (d/with db (eval-tx 11))]
     (try
-      (reset! seon.agent/state {:db db :key k :branch :b})
+      (enter-agent! {:db db :key k :branch :b})
       (is (= (:tree (ctx/build db (aid db) :b)) @ctx/ctx) "built when the state first holds the db")
       (is (= {:seon.render/schema :seon.ctx/ctx} (meta @ctx/ctx)) "marked for its block")
       (is (= {:t (:max-tx db) :branch :b} (select-keys @ctx/ctx [:t :branch])) "its :t and :branch are what an eval of it records as its basis (only the value itself)")
@@ -304,7 +321,7 @@
   ;; a cold build holds them as the live record does (the branch views read them)
   (let [db (seeded 10) m (ts/test-db)]
     (try
-      (reset! seon.agent/state {:db db :key k :branch :b})
+      (enter-agent! {:db db :key k :branch :b})
       (let [c0 @ctx/ctx]
         (swap! seon.agent/state assoc :main m :base m)
         (is (= c0 @ctx/ctx) "hearing main changes no record")
@@ -603,7 +620,7 @@
                                   {:db/id "t1v" :var/name 'app.x-test/t1 :var/kind :test :var/form "t1"}
                                   {:db/id "g" :form/id "app.x/g-1" :form/src "(defn g [] (f0 2))" :form/refs #{'app.x/f0} :form/defines ["gv"]}
                                   {:db/id "gv" :var/name 'app.x/g :var/kind :fn :var/form "g"}])
-        page (try (reset! seon.agent/state {:db db :key k :branch :b}) (seon.repl/render-ctx-hiccup) (finally (end-agent!)))
+        page (try (enter-agent! {:db db :key k :branch :b}) (seon.repl/render-ctx-hiccup) (finally (end-agent!)))
         part (fn [suffix] (some (fn [[id h]] (when (str/ends-with? id suffix) h)) page))
         cited (part "app.x_2Ff0")
         ;; the section is a part of its own, keyed by its address (a part per thing the plan cites)
@@ -621,7 +638,7 @@
   ;; is among f0's callers, never blank (ctx holds an entity whole at its first path, {:db/id e} at the others)
   (let [db (d/db-with (seeded 3 nil) [{:db/id "f1" :form/id "app.x/f1-1" :form/src "(defn f1 [] (f0 1))" :form/refs #{'app.x/f0} :form/defines ["f1v"]}
                                   {:db/id "f1v" :var/name 'app.x/f1 :var/kind :fn :var/form "f1"}])
-        page (try (reset! seon.agent/state {:db db :key k :branch :b}) (seon.repl/render-ctx-hiccup) (finally (end-agent!)))
+        page (try (enter-agent! {:db db :key k :branch :b}) (seon.repl/render-ctx-hiccup) (finally (end-agent!)))
         part (fn [id] (some (fn [[i h]] (when (str/ends-with? i id) h)) page))
         ;; a cite's part is what the model reads of it (seon.render.ui/cite-model): its value
         value identity]
@@ -638,7 +655,7 @@
   ;; class, its render's name; the page's html adds the Tailwind classes its render's var states
   ;; (:seon.render/style), and what the model reads holds the name only
   (let [db (seeded 3 nil)
-        as #(try (reset! seon.agent/state {:db db :key k :branch :b}) (%) (finally (end-agent!)))
+        as #(try (enter-agent! {:db db :key k :branch :b}) (%) (finally (end-agent!)))
         hiccup (into {} (as seon.repl/render-ctx-hiccup))
         units (:units (as seon.repl/render-ctx))
         ;; task-data is a part (the model reads its data); chat-ask is hiccup, its root the render's name
@@ -661,7 +678,7 @@
                    [(vec (mapcat (fn [i] [{:db/id (str "t" i) :form/id (str "app.x-test/w" i "-1") :form/src (str "(deftest w" i " (is (f0 1)))") :form/refs #{'app.x/f0} :form/defines [(str "tv" i)]}
                                           {:db/id (str "tv" i) :var/name (symbol "app.x-test" (str "w" i)) :var/kind :test :var/form (str "t" i)}])
                                  (range 3)))])
-        part #(let [page (try (reset! seon.agent/state {:db % :key k :branch :b}) (seon.repl/render-ctx-hiccup) (finally (end-agent!)))]
+        part #(let [page (try (enter-agent! {:db % :key k :branch :b}) (seon.repl/render-ctx-hiccup) (finally (end-agent!)))]
                 (some (fn [[i h]] (when (str/ends-with? i "app.x_2Ff0") h)) page))]
     (is (every? (set (:tests (part db))) '[app.x-test/w0 app.x-test/w1 app.x-test/w2]) "each test among its callers")
     (let [db (d/db-with db (vec (mapcat (fn [i] [{:db/id (str "c" i) :form/id (str "app.y/c" i "-1") :form/src (str "(defn c" i " [] (f0 1))") :form/refs #{'app.x/f0} :form/defines [(str "cv" i)]}
@@ -687,10 +704,10 @@
           db (:db-after (d/with db [{:seon.agent/key k :lab.ctx/steps ["read the plan" "write the test" "read the plan"]}]))
           tree (:tree (ctx/build db (aid db) :b))
           c (with-meta tree {:seon.render/schema :seon.ctx/ctx})
-          as-agent (fn [f] (try (reset! seon.agent/state {:db db}) (binding [ctx/*installing* true] (reset! ctx/ctx c)) (f)
+          as-agent (fn [f] (try (enter-agent! {:db db}) (binding [ctx/*installing* true] (reset! ctx/ctx c)) (f)
                                 (finally (binding [ctx/*installing* true] (reset! ctx/ctx nil)) (end-agent!))))
           rec (as-agent #(seon.repl/record-details "@ctx" {:handle 'result/e9 :value c} {}))
-          drawn (try (reset! seon.agent/state {:db db :key k :branch :b}) (seon.repl/render-ctx) (finally (end-agent!)))
+          drawn (try (enter-agent! {:db db :key k :branch :b}) (seon.repl/render-ctx) (finally (end-agent!)))
           ;; the keys it added, one component (ctx-keys) holding each key's own
           steps (some #(when (= "ctx-keys" (:id %)) %) (:units drawn))]
       (is (= ["read the plan" "write the test" "read the plan"] (:lab.ctx/steps c)) "the vector comes back in its order, duplicates kept")
@@ -699,7 +716,7 @@
       (is (str/includes? (:html steps) "<ol><li>read the plan</li><li>write the test</li><li>read the plan</li></ol>")
           "the agent draws its key, a component of its page, by the render its branch names, recording nothing")
       (testing "the page the model reads (seon.repl/render-ctx-hiccup, the screen) is the page the user sees (seon.repl/render-ctx), hiccup for html"
-        (let [[parts page] (try (reset! seon.agent/state {:db db :key k :branch :b}) [(seon.repl/render-ctx) (seon.repl/render-ctx-hiccup)]
+        (let [[parts page] (try (enter-agent! {:db db :key k :branch :b}) [(seon.repl/render-ctx) (seon.repl/render-ctx-hiccup)]
                                 (finally (end-agent!)))
               shown (:units parts)]
           (is (= (map :id shown) (keys page)) "every component, the conversation's too, in order: nothing left out")
@@ -728,7 +745,7 @@
       (testing "a render that throws in the agent is answered as its error, and the agent goes on"
         (let [db (:db-after (d/with db (:tx (my.schema/registration db :lab.ctx/boom '[:vector {:seon.render/html seon.ctx-test/boom} :any] false))))
               db (:db-after (d/with db [{:seon.agent/key k :lab.ctx/boom []}]))
-              r (try (reset! seon.agent/state {:db db :key k :branch :b}) (seon.repl/render-ctx) (finally (end-agent!)))
+              r (try (enter-agent! {:db db :key k :branch :b}) (seon.repl/render-ctx) (finally (end-agent!)))
               keys-html (:html (some #(when (= "ctx-keys" (:id %)) %) (:units r)))]
           (is (re-find #"cannot draw this" keys-html) "the render's throw, as its error's render in its component's place")
           (is (re-find #"<ol><li>read the plan" keys-html) "and every other component drawn"))))))
@@ -748,7 +765,7 @@
   test fork) and the branch's schemas bound, @ctx built from it; answers [f's value, the db after]."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/fn] [:tuple :any :seon.host/db]]}
   [db f]
-  (try (reset! seon.agent/state {:db db :key k :branch :b :mode :test})
+  (try (enter-agent! {:db db :key k :branch :b :mode :test})
        ;; under the branch's schemas, as the agent's REPL evaluates a form
        [(#'seon.repl/with-branch-schemas f) (:db @seon.agent/state)]
        (finally (end-agent!))))
@@ -983,7 +1000,7 @@
   [n]
   (let [st {:db (seeded n) :key k :branch :b :mode :test}]
     ;; the state's watch builds the record the swap! starts from (seon.ctx/on-state)
-    (reset! seon.agent/state st)
+    (enter-agent! st)
     [st (ctx/record)]))
 
 (defn one-swap
@@ -994,7 +1011,7 @@
   {:malli/schema [:=> [:cat :map :map] :nil]}
   [st record]
   (remove-watch seon.agent/state :seon.ctx/ctx)
-  (reset! seon.agent/state st)
+  (enter-agent! st)
   (add-watch seon.agent/state :seon.ctx/ctx @#'seon.ctx/on-state)
   (#'seon.ctx/install! record)
   (swap! ctx/ctx assoc-in [:task :seon.task/plan] "Make app.x/f0 pass, then f1.")
@@ -1020,7 +1037,7 @@
      :fixed {:calls 113}
      :sizes [100 300 1000 3000]})
   ;; no record left behind: an empty state builds none (as-agent!'s callers leave theirs too)
-  (reset! seon.agent/state nil))
+  (end-agent!))
 
 (defn one-attribute
   "The input of size n: a session of n evals and one attribute of its agent: [db e a], seon.ctx/made-by's."
@@ -1182,7 +1199,7 @@
   ;; walk held the layout of its first draw, so one registered later drew nothing
   (let [db (seeded 3)
         db2 (:db-after (d/with db (:tx (my.schema/registration db :seon.render/render-ctx '[:map {:seon.render/html seon.ctx-test/other-layout}] false))))]
-    (try (reset! seon.agent/state {:db db :key k :branch :b})
+    (try (enter-agent! {:db db :key k :branch :b})
          (let [before (pr-str (seon.repl/render-ctx-hiccup))]
            (is (not (str/includes? before "the other layout")) "the declared layout first")
            (swap! seon.agent/state #(-> % (assoc :db db2) (dissoc :schema-registry)))
@@ -1194,7 +1211,7 @@
   ;; which printed every eval a second time. A person's page draws them; what the model reads is the same either way
   (let [db (seeded 3)
         ledger #(set (keys (seon.render/ledger (:walk @seon.agent/state))))
-        as (fn [f] (try (reset! seon.agent/state {:db db :key k :branch :b}) (f) (finally (end-agent!))))
+        as (fn [f] (try (enter-agent! {:db db :key k :branch :b}) (f) (finally (end-agent!))))
         [parts unwatched watched page] (as #(let [p (second (seon.repl/page-hiccup)) u (ledger) pg (seon.repl/render-ctx-hiccup)]
                                               [p u (ledger) pg]))
         whole (as #(do (seon.repl/render-ctx-hiccup) (second (seon.repl/page-hiccup))))]
@@ -1211,11 +1228,11 @@
   (let [db (seeded 3)
         tree (:tree (ctx/build db (aid db) :b))
         c (with-meta tree {:seon.render/schema :seon.ctx/ctx :seon.render/basis {:t (:t tree) :branch :b}})
-        rec (fn [v] (try (reset! seon.agent/state {:db db :key k :branch :b})
+        rec (fn [v] (try (enter-agent! {:db db :key k :branch :b})
                          (binding [ctx/*installing* true] (reset! ctx/ctx c))
                          (seon.repl/record-details "x" {:handle 'result/e9 :value v} {})
                          (finally (binding [ctx/*installing* true] (reset! ctx/ctx nil)) (end-agent!))))
-        text (fn [r] (try (reset! seon.agent/state {:db db :key k :branch :b})
+        text (fn [r] (try (enter-agent! {:db db :key k :branch :b})
                           (:content (first (seon.context/eval-messages {:db db} (assoc r :seon.eval/id "e9" :seon.eval/by "a1"))))
                           (finally (end-agent!))))
         part (select-keys c [:seon.agent/key])

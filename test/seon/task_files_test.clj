@@ -10,6 +10,11 @@
 
 (defn- empty-db [] (ts/test-db))
 
+(defn- shipped-task-files
+  "The task files the checkout ships (root/task-files of its resources/seon/tasks), never the running
+  root's :seon.config.root/tasks-dir, which a root may point elsewhere."
+  [] (root/task-files (str (config/checkout) "/resources/seon/tasks")))
+
 (def ^:private file-a
   "[{:seon.task/name \"parse\" :seon.task/plan \"Parse the rows.\" :seon.task/proofs #{demo-test/parse-test}}
     {:seon.task/name \"index\" :seon.task/plan \"Index the rows.\" :seon.task/needs #{\"demo/parse\"}
@@ -85,7 +90,7 @@
   ;; task seon.task/the-shipped-task-files-load: every file in the shipped task directory
   ;; reads and loads onto a test branch with no error (a task file is no input of the digest: an edit
   ;; to one is found by the full run, bin/test --all)
-  (let [files (root/task-files)]
+  (let [files (shipped-task-files)]
     (is (seq files))
     (is (= [] (vec (for [[ns-sym ds] files :when (:seon.error/type ds)] ns-sym))) "every file reads")
     (is (not (:seon.error/type (task/load-tx (empty-db) files))) "and loads")))
@@ -101,7 +106,7 @@
   (let [root (config/checkout)
         bodies (str/split (:out (sh/sh "git" "-C" root "log" "--first-parent" "--merges" "--format=%B%x1e" "main")) #"\x1e")
         completes (set (for [b bodies m (re-seq #"(?m)^Completes: (\S+)\s*$" b)] (second m)))
-        left (for [[ns-sym ds] (root/task-files) :when (vector? ds) d ds
+        left (for [[ns-sym ds] (shipped-task-files) :when (vector? ds) d ds
                    :let [k (str ns-sym "/" (:seon.task/name d))]
                    :when (completes k)]
                k)]
@@ -126,7 +131,7 @@
 (deftest the-shipped-task-files-are-whole-tasks-that-merge-themselves
   ;; every shipped declaration is one :whole task, none a merge task (found by the full run when a
   ;; task file changes: the file is no input of the digest)
-  (let [ds (mapcat val (filter (comp vector? val) (root/task-files)))]
+  (let [ds (mapcat val (filter (comp vector? val) (shipped-task-files)))]
     (is (seq ds))
     (is (every? #(= :whole (:seon.task/kind %)) ds))
     (is (= (count ds) (count (distinct (map (juxt :seon.task/ns :seon.task/name) ds)))))))

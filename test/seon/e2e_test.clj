@@ -58,7 +58,7 @@
 
 (deftest a-model-run-is-judged-by-what-the-plan-asks
   (let [{:keys [check expect]} (e2e/expectation :newns true)]
-    (is (= expect [(pr-str (load-string (str plan-satisfied check)))])
+    (is (= expect [(pr-str (binding [*ns* *ns*] (load-string (str plan-satisfied check))))])
         "a program that does what the plan asks, and nothing more, passes the model-mode verdict"))
   (testing "the scripted model's extras are asked of the scripted model only"
     (is (str/includes? (first (:expect (e2e/expectation :newns false))) "(inc 1)"))

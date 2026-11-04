@@ -9,7 +9,7 @@
             [datahike.api :as d]
             [seon.db :as pdb]
             [seon.merge :as pm]
-            [seon.program :as program] [seon.doc]
+            [seon.program :as program] [seon.doc] [seon.config]
             [seon.edn :as sedn] [seon.contract :as contract] [malli.core :as m] [malli.generator :as mg]
             [my.schema :as schema]
             [seon.source :as source] [seon.writer]
@@ -284,7 +284,7 @@
   ;; task seon.source/schemas-are-part-of-the-program: a schema entry is a program key,
   ;; [:schema k], merged like a var (v1's [:seon.schema/key k] identity), and the merge's
   ;; changed resource is written back with only its entry changed
-  (let [text (slurp facts-path)
+  (let [text (slurp (str (seon.config/checkout) "/" facts-path))
         main (let [db (empty-db)] (d/db-with db (source/import-tx db {facts-path text})))
         ;; the entry's line as the file has it (a property added to the entry moves with it), and
         ;; its form with :paused added, read from that text
