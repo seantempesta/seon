@@ -729,10 +729,10 @@
   then its tool message, the response printed now (seon.print/record-text, a function of the
   record alone); anyone else's (the user's) is one user message
   {:by :code :response}, the response spliced as printed."
-  {:malli/schema [:=> [:cat :map :any] [:vector :seon.model/message]]}
-  [{:seon.eval/keys [by record]} _]
+  {:malli/schema [:=> [:cat :any :map] [:vector :seon.model/message]]}
+  [_ {:seon.eval/keys [by record]}]
   (let [{:keys [code prose content reasoning call-id call]} record
-        text (print/record-text record render/model-printed)]
+        text (print/record-text record render/model)]
     (if call-id
       ;; as the model sent it: the reply's text (its first call's :content) and the call's own prose
       [(cond-> {:role "assistant" :content (or content "")
@@ -745,21 +745,27 @@
 (defn message-messages
   "A message's part of the conversation: one
   user message {:from :body}."
-  {:malli/schema [:=> [:cat :map :any] [:vector :seon.model/message]]}
-  [{:seon.message/keys [from body]} _]
+  {:malli/schema [:=> [:cat :any :map] [:vector :seon.model/message]]}
+  [_ {:seon.message/keys [from body]}]
   [{:role "user" :content (print/text {:from from :body body} (:context print/budgets))}])
 
 (defn turn-messages
   "A turn's reply with no call, as the conversation keeps it: one assistant message, the reply's
   text and the reasoning as returned (a reply that called is its evals' messages, `eval-messages`). See docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
-  {:malli/schema [:=> [:cat :map :any] [:vector :seon.model/message]]}
-  [{:seon.turn/keys [reply reasoning]} _]
+  {:malli/schema [:=> [:cat :any :map] [:vector :seon.model/message]]}
+  [_ {:seon.turn/keys [reply reasoning]}]
   [(cond-> {:role "assistant" :content reply} reasoning (assoc :reasoning reasoning))])
 
 (defn- ref-of
   "The ref a conversation's record is sent as (:seon.model-call/sent): an eval's, a message's or a turn's id."
   {:malli/schema [:=> [:cat :map] [:tuple :keyword :string]]}
   [v] (cond (:seon.eval/id v) [:eval (:seon.eval/id v)] (:seon.message/id v) [:message (:seon.message/id v)] :else [:turn (:seon.turn/id v)]))
+
+(defn- record-messages
+  "Record v of schema k as the conversation sends it: the model render k declares, a function of that record alone. See
+  docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
+  {:malli/schema [:=> [:cat :qualified-keyword :map] [:vector :seon.model/message]]}
+  [k v] (:value (render/model (vary-meta v assoc :seon.render/schema k))))
 
 (defn printed-run
   "The session's records new since cache (items, [ref v k tx] in tx order, ref [:eval id], [:message
@@ -779,10 +785,8 @@
                   c (cond-> (update c :ids conj pid) tx (assoc :tx tx))]
               (cond
                 (get-in c [:parts pid]) (update c :ids pop)
-                (= :message kind) (assoc-in c [:parts pid] (part [:message id] (message-messages v {})))
-                (= :turn kind) (assoc-in c [:parts pid] (part [:turn id] (turn-messages v {})))
                 (#{:parts :example :session} kind) (assoc-in c [:parts pid] @v)
-                :else (assoc-in c [:parts pid] (part [:eval id] (eval-messages v {}))))))
+                :else (assoc-in c [:parts pid] (part [kind id] (record-messages k v))))))
           (or cache {:ids [] :parts {}}) items))
 
 (defn loop-eval?
@@ -818,7 +822,7 @@
                      :let [v (d/pull db [:seon.turn/id :seon.turn/reply :seon.turn/reasoning :seon.turn/calls :seon.turn/truncated] t)]
                      ;; a reply cut at the token limit is no message, as the turn loop reads it (seon.turn/act!)
                      :when (and (empty? (:seon.turn/calls v)) (not (:seon.turn/truncated v)) (not (str/blank? (:seon.turn/reply v))))]
-                 [tx (dissoc v :seon.turn/calls :seon.turn/truncated) :seon.turn/fact]))
+                 [tx (dissoc v :seon.turn/calls :seon.turn/truncated) :seon.turn/turn-fact]))
        (sort-by (fn [[tx v]] [tx (:seon.eval/id v (:seon.message/id v (:seon.turn/id v)))]))
        vec))))
 
@@ -865,7 +869,7 @@
   docs/tasks.md#a-task-names-example-sessions."
   {:seon.db/eval-fact [:seon.eval/id :seon.eval/agent]
    :seon.message/fact [:seon.message/id :seon.message/agent]
-   :seon.turn/fact [:seon.turn/id :seon.turn/agent]})
+   :seon.turn/turn-fact [:seon.turn/id :seon.turn/agent]})
 
 (defn- example-record
   "An eval's record r as example ek keeps it (pre: ek's prefix for ids): its :run the example's id, its call id and
@@ -953,7 +957,7 @@
 
 (defn- part-change
   "What changed of a part between two requests, by the data the model reads of it (its model render's value,
-  seon.render/model-printed, else the part itself): when both are maps, {:changed {k new-value} :gone [k]} of
+  seon.render/model, else the part itself): when both are maps, {:changed {k new-value} :gone [k]} of
   their top-level keys, the keys that kept their value left out; else nil, and the part is sent whole. The
   owner's ruling (docs/decisions.md): a changed part that answers data sends what changed of it, never itself
   again (the status, thousands of tokens, would otherwise be sent whole each turn). Top-level keys, each value whole, by
@@ -962,7 +966,7 @@
   docs/render.md#the-page-is-sent-as-what-changed."
   {:malli/schema [:=> [:cat :any :any] [:maybe :map]]}
   [was now]
-  (let [data #(if-let [m (render/model-printed %)] (:value m) %)
+  (let [data #(if-let [m (render/model %)] (:value m) %)
         a (data was) b (data now)]
     (when (and (map? a) (map? b))
       (let [changed (into (array-map) (for [[k v] b :when (not= v (get a k ::none))] [k v]))
@@ -1128,12 +1132,12 @@
     (mapv (fn [[kind x t :as ref]]
             [ref (case kind
                    :section [{:role "system" :content (system-text (d/as-of db t))}]
-                   :eval (eval-messages (ev x) {})
-                   :turn (turn-messages (d/pull db [:seon.turn/id :seon.turn/reply :seon.turn/reasoning] [:seon.turn/id x]) {})
+                   :eval (record-messages :seon.db/eval-fact (ev x))
+                   :turn (record-messages :seon.turn/turn-fact (d/pull db [:seon.turn/id :seon.turn/reply :seon.turn/reasoning] [:seon.turn/id x]))
                    :example (example-messages db x t)
                    :session (session-open x)
                    :parts (if (empty? (nth ref 4)) [] (parts-message (drawn x t) (nth ref 4) (when (< 6 (count ref)) (drawn x (nth ref 6)))))
-                   :message (message-messages (d/pull db [:seon.message/id :seon.message/from :seon.message/body] [:seon.message/id x]) {}))])
+                   :message (record-messages :seon.message/fact (d/pull db [:seon.message/id :seon.message/from :seon.message/body] [:seon.message/id x])))])
           (remove #(= :hashes (first %)) refs))))
 
 (defn messages-tokens

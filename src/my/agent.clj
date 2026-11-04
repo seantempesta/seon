@@ -313,7 +313,7 @@
            {:seon.render/schema :seon.test/proved}))))))
 
 (defn prove-summary
-  "A prove's run r as the eval answers it (seon.render/model-printed, the schema :seon.test/proved): one
+  "A prove's run r as the eval answers it (seon.render/model, the schema :seon.test/proved): one
   line, its verdict and what ran, was left to the judge (process tests), was reused and died (a death
   is no verdict: not counted). What it found (each proof's status, the reds with their first failing
   assertion, the deaths) is drawn on the eval, from its value (seon.render.ui/proved, the schema's
@@ -370,7 +370,7 @@
        rows))))
 
 (defn grep-none-text
-  "grep's empty answer to a string holding a regex's operators as the eval shows it (seon.render/model-printed, the
+  "grep's empty answer to a string holding a regex's operators as the eval shows it (seon.render/model, the
   schema :my.agent/grep-none): [] and the regex form that asks for what it likely meant. See docs/agent.md#small-answers."
   {:malli/schema [:=> [:cat :seon.render/opts [:vector :map]] :any]}
   [_ rs]
@@ -424,7 +424,7 @@
      (no-var (agent/db) (symbol (str x))))))
 
 (defn lines-text
-  "Rows rs of `lines` as the eval shows them (seon.render/model-printed, the schema :my.agent/lines): their
+  "Rows rs of `lines` as the eval shows them (seon.render/model, the schema :my.agent/lines): their
   texts as code, each after its line number, so fifty lines cost their text and not fifty maps naming the
   same thing; the rows stay the value (take, filter and count them). See docs/agent.md#small-answers."
   {:malli/schema [:=> [:cat :seon.render/opts [:vector :map]] :any]}
@@ -438,8 +438,8 @@
   "Like wc, in tokens: what x costs printed, as the model is sent it (the one printer's text, whole, by its sizer):
   (wc (grep \"plan\")) before reading it whole."
   {:malli/schema [:=> [:cat :any] nat-int?]}
-  [x] (let [v (if-let [r (render/model-printed x)] (:value r) x)]
-        (select/chars-tokens (count (if (string? v) v (:text (print/print-value v {:budget Integer/MAX_VALUE :render render/model-printed})))))))
+  [x] (let [v (if-let [r (render/model x)] (:value r) x)]
+        (select/chars-tokens (count (if (string? v) v (:text (print/print-value v {:budget Integer/MAX_VALUE :render render/model})))))))
 
 (defn- file-source
   "The text of the form at var v's :file and :line on the classpath (Clojure's clojure.repl/source-fn

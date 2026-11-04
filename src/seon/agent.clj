@@ -1259,7 +1259,7 @@
     nsx))
 
 (defn state-summary
-  "The agent's process state m as the printer shows it (seon.render/model-printed, the model render of the schema
+  "The agent's process state m as the printer shows it (seon.render/model, the model render of the schema
   :seon.agent/state): each key with its value when that is a scalar, else what it holds, a count
   for a collection and its type for a host object (a database, a connection, a descriptor),
   with the form that reads it whole. A bare (swap! seon.agent/state ...) answers the state: it
