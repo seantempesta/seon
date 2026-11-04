@@ -147,7 +147,7 @@
  ;; agent's :seon.agent/opened (an eval's id names it only within its agent), its turn on its branch
  :seon.eval/opened :boolean
  ;; its details as one EDN value (seon.repl/record-details): the code, the response whole with its
- ;; value when that is plain data (seon.db/plain?), else the response as it printed then
+ ;; value when that is plain data (seon.contract/plain?), else the response as it printed then
  ;; (:printed) and the value's type (:type); never a text made for a reader (seon.print/record-text
  ;; prints it when it is sent or shown). The model's prose beside the call and the provider's call
  ;; id, its 10 costliest contracted functions ([{:var :calls :ms}], seon.profile), the vars it

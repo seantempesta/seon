@@ -618,18 +618,18 @@
      (and (:seon.agent/key who) (symbol? (get-in details [:response :ns]))) (assoc :seon.agent/ns (get-in details [:response :ns])))])
 
 (defn- plainly
-  "v as the store keeps it (seon.db/plain?): plain data as it is, a map's values each so, anything else (a library's
+  "v as the store keeps it (seon.contract/plain?): plain data as it is, a map's keys and values each so, anything else (a library's
   record, an object in an exception's data) as its printed text (seon.edn/encode). The one place a record's
   response is made storable, whoever made it. See docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map."
-  {:malli/schema [:=> [:cat :any] :any]}
+  {:malli/schema [:=> [:cat :any] :seon.db/plain]}
   [v]
-  (cond (pdb/plain? v) v
-        (and (map? v) (not (record? v)) (not (sorted? v))) (into {} (for [[k x] v] [k (plainly x)]))
+  (cond (contract/plain? v) v
+        (and (map? v) (not (record? v)) (not (sorted? v))) (into {} (for [[k x] v] [(plainly k) (plainly x)]))
         :else (sedn/encode v)))
 
 (defn record-details
   "What an eval's record holds (:seon.eval/record): its code, its response whole, its value
-  included when it is plain data (seon.db/plain?: stored as data, once under its content key when
+  included when it is plain data (seon.contract/plain?: stored as data, once under its content key when
   large), else the response as it printed then (:printed) and the value's type (:type), since only
   data is stored; never a text made for a reader (each prints it as it shows it: seon.print/
   record-text), so a record is the same whatever came before it. Then the prose beside it, as written (never
@@ -647,7 +647,7 @@
         ;; recorded as that basis and its schema: the page renders it from what exists, and a
         ;; copy of the session's record is never stored at each @ctx
         basis (when (contains? resp :value) (:seon.render/basis (meta (:value resp))))
-        data? (and (nil? basis) (or (not (contains? resp :value)) (pdb/plain? (:value resp))))]
+        data? (and (nil? basis) (or (not (contains? resp :value)) (contract/plain? (:value resp))))]
     (cond-> (if data?
               {:code code :response resp}
               (cond-> {:code code :response (dissoc resp :value) :printed (print/response-text resp render/model-printed) :type (str (type (:value resp)))}
@@ -1031,11 +1031,11 @@
                 ;; waits on, never a sleep: one arriving from here on stops it
                 (intr/clear-pending!)
                 (agent/send! {:op :started :id (:id m)})
-                ;; its value goes with the reply only when it is plain data (seon.db/plain?: what the socket and the wire carry);
+                ;; its value goes with the reply only when it is plain data (seon.contract/plain?: what the socket and the wire carry);
                 ;; root keeps none of it (its view keeps the head: seon.root/eval-head), and the asker reads the value as data,
                 ;; never the printed text back, which is no EDN once the eval printed (its :out verbatim)
                 [{:op :reply :id (:id m) :response (let [r (eval-string (:forms m) (select-keys m [:ticks :origin]))]
-                                                     (cond-> (dissoc r :value) (and (contains? r :value) (pdb/plain? (:value r))) (assoc :value (:value r))))
+                                                     (cond-> (dissoc r :value) (and (contains? r :value) (contract/plain? (:value r))) (assoc :value (:value r))))
                   :t (:max-tx (agent/db))}])
               :else (agent/handle! m))]
      ;; a branch is committed whenever a request is done (its writes ran ahead in memory), before its answer: a

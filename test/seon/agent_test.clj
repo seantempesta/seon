@@ -1277,7 +1277,7 @@
   ;; task seon.agent/a-death-names-its-cause, as the owner ruled 2026-10-30 (task
   ;; seon.agent/the-agent-is-a-flow-graph, step 4): a defect no request's own boundary catches (here
   ;; the agent redefines, at its REPL as an agent changes the platform, a function its REPL proc calls
-  ;; after each eval: seon.db/plain?, which the reply reads) answers that request with the one error
+  ;; after each eval: seon.contract/plain?, which the reply reads) answers that request with the one error
   ;; map, and the agent goes on: it repairs the function at its REPL and works on, the same process
   (let [[_ pid broken repaired after pid'] (in-agent (fn [_]
                                                ["(def p0 (seon.lib/c-getpid))"
