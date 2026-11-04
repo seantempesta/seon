@@ -46,6 +46,7 @@ The no-runs schema is built on `jolt/simpler-schema` and unmerged (a task holds 
 | The core | When the source import fails, the store refuses root's source fact over a sorted map | ``seon.root/a-source-fact-the-store-refuses-loses-nothing`` |
 | The schema, now | A wake that ran no turn read the previous wake's end: a throw before the first turn could park the task and lose the message that woke it | done on the branch: ``seon.agent-test/a-wake-that-ran-no-turn-has-no-end`` |
 | The schema, now | Tests go red in an agent's fork and green under ``bin/test``, blocking finished work; a test at an agent's REPL could end it | done on the branch: the ``agent-tests`` check |
+| Beside the core | A first search allocates about 11 MB more after a long history on one root, with its index current | ``seon.doc/what-a-first-search-allocates-after-a-long-history`` |
 | The core | The debug page draws a branch by main's code, and root's walk a branch's layout by main's | ``seon.render/the-debug-page-reads-a-branchs-own-renders``, ``seon.render/roots-walk-of-a-branch-draws-the-branchs-layout`` |
 | The core | Status repeats every failure in full: 22 reds, 32k tokens a turn | ``seon.context/the-status-declares-its-summary`` |
 | The core | After a layout changes, old parts stay on the page for a pass | ``seon.render/a-layout-change-leaves-no-old-parts``: trace it first |

@@ -385,6 +385,15 @@
     (is (nil? (:value after)) (str "and it wrote no end, so root reads none: " (pr-str after)))))
 
 ;; See docs/merging.md#a-test-child-is-a-fork-of-a-live-agent
+(deftest a-stall-tasks-proofs-judge-only-a-task-that-names-them
+  ;; seon.stall-proofs read their task's cause, so on any other task they were stray reds (the control of 2026-11-05)
+  (let [p 'seon.stall-proofs/the-stall-ended
+        plan (fn [proofs] (str "(let [p (seon.agent/test-plan (seon.agent/db) nil " proofs ")] (contains? (set (:selected p)) '" p "))"))
+        [named not-named] (in-agent [(plan (str "'#{" p "}")) (plan "#{}")] {:dirs (seon.config/value :seon.config.source/dirs)})]
+    (is (true? (:value named)) (str "a stall task's proof is selected: " (pr-str named)))
+    (is (false? (:value not-named)) (str "and no other task's: " (pr-str not-named)))))
+
+;; See docs/merging.md#a-test-child-is-a-fork-of-a-live-agent
 (deftest an-eval-that-empties-the-agents-state-leaves-it-working
   ;; a test run at an agent's REPL ended by resetting the state it had taken for its own (seon.ctx-test's end-agent!):
   ;; every later call was seon.agent/db's nil, and the agent died at its next prove (the control of 2026-11-05)
@@ -945,7 +954,11 @@
   ;; answers in the forked child.
   (let [m "(fn [f] (let [b (seon.profile/alloc-bytes)] (f) (- (seon.profile/alloc-bytes) b)))"
         [_ costs] (in-agent [(str "(def meas " m ")")
-                             "[(meas #(my.agent/grep \"accumulated\")) (meas #(my.agent/grep \"accumulated\")) (meas #(#'seon.doc/build-index (:db @seon.agent/state))) (count (my.agent/grep \"accumulated\"))]"])
+                             "[(meas #(my.agent/grep \"accumulated\")) (meas #(my.agent/grep \"accumulated\")) (meas #(#'seon.doc/build-index (:db @seon.agent/state))) (count (my.agent/grep \"accumulated\"))]"]
+                            ;; a root of its own: on a shard's shared root the first grep allocates more after enough earlier tests,
+                            ;; with the inherited index still current (the control of 2026-11-05; what allocates it is open), so the verdict
+                            ;; was a function of what ran before it, here and on the merge gate
+                            {:own-root? true})
         [first-search second-search build rows] (:value costs)]
     (is (pos? rows) "the query of the index it inherited answers in the forked child")
     ;; that a move writing text builds the index again: seon.doc-test/a-text-index-is-carried-past-a-move-that-writes-no-text

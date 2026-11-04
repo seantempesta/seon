@@ -1724,9 +1724,9 @@
 (defn agent-tests
   "Every test that reaches no process, run as a Seon agent runs them: forked from one agent that has drawn its page, on a
   root whose config is not bin/test's (docs/merging.md#a-test-child-is-a-fork-of-a-live-agent). Green under bin/test and
-  red here is a test reading its runner, or its agent's state leaking into it, which blocks a real agent's merge. bin/check
-  gives this step a verdict cache of its own, so nothing is reused. A namespace not named -test holds a task's proofs, red
-  until its task (seon.stall-proofs)."
+  red here is a test reading its runner, or its agent's state leaking into it, which blocks a real agent's merge. It selects
+  through seon.agent/test-plan, as an agent's own run does, and judges everything it selected; bin/check gives it a verdict
+  cache of its own, so nothing is reused."
   []
   (run-check "AGENT-TESTS" {:datoms 2000 :source {:root (seon.config/checkout) :dirs (seon.config/value :seon.config.source/dirs) :branch :none}}
    (fn [sys]
@@ -1736,7 +1736,7 @@
                                    " (let [r (seon.agent/run-tests-forked (seon.config/value :seon.config.agent/test-ticks) #{} :main)]"
                                    " (spit " (pr-str out) " (pr-str (update r :reports (fn [rs] (filterv #(not= :pass (:type %)) rs)))))))"))
           r (read-string (slurp out))
-          reds (filterv #(re-find #"-test/" (str (:var %))) (:reports r))]
+          reds (:reports r)]
       {:report (assoc (select-keys r [:ran :pass :fail :error]) :reds (mapv (juxt :var :message :actual) reds))
        :checks {:tests-ran (pos? (:ran r 0)) :none-red (empty? reds)}}))))
 
