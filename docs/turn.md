@@ -32,6 +32,17 @@ Each record takes the number in force when it is written: `:seon.eval/turn` on e
 
 So the conversation is ordered by the numbers it carries (`seon.context/records`, and the page with it, `seon.render.ui/conversation`): turn, then rank (a message 0, an eval 1, a reply that called nothing 2), then the message's transaction or the eval's issue number (`e9` before `e10`). A request for turn *n* holds the records of earlier turns and the messages taken in *n*; its evals and its reply come of it. What a request has not printed yet is read newest first until a record's turn is below the previous request's.
 
+## Who runs which tests
+
+Tests run three times in a run's life, each on what it needs:
+- **each turn**, in the agent: the task's proofs and the tests the branch changed, in a fork, each test under `:seon.config.agent/test-ticks` (one bound everywhere, per test: a test past it is red, `:seon.test/ticks-spent`, the same in the judge);
+- **the judge**, in root: when the loop ends, root asks the agent's REPL for its test results (`:tests`, the plan's in-process tests under the same per-test bound; each green the turn left at its digest is reused, so the judge runs only what the turn did not, and forks nothing when that is none) and judges the end from them, the writer's diff of the branch and the branch's end (`seon.reconcile/judge-tx`); a process test that is none of the task's proofs never runs in a turn or the judge, and is read as deferred ([merging](merging.md#a-merge-runs-what-the-change-reaches));
+- **the merge**: the writer's merge gate takes the branch only when its contract gaps are none, the same `seon.merge/uncontracted` answer, and the process tests the change reaches run before it merges, on the root's gate checkout, nobody asking (a root with none holds it) ([merging](merging.md#a-merge-runs-what-the-change-reaches)).
+
+## A merge task's loop
+
+Every run's agent first merges main into its branch with no model call (a kept branch made before main moved holds main's program, its tests and their digests included; one at main's head brings nothing). A merge task's agent merges main again each time all is green, until a merge brings nothing new; it stops early when the merge is too hairy (`seon.reconcile/hairy`, over the run's facts: the conflicts, the turns, and the names the task's proofs and plan's cites hold, never the plan re-parsed). Its unmerged entries are in its context, and it resolves them at the REPL ([agent](agent.md#merging)).
+
 ## What a turn takes from main
 
 Words to the agent and what root decided of its runs are facts on main, and a turn takes them onto its branch before it observes, so its context and page read them from the branch like any other fact: `seon.turn/take!`, the one way outside facts reach the branch. Root writes nothing to a live process for them, so a session whose process is gone (parked in an earlier boot, a lost wake) takes them when it is spawned again.
