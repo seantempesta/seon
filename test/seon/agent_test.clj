@@ -2033,6 +2033,38 @@
     (is (= {:pass 1} (select-keys (:value r) [:pass])) (pr-str r))
     (is (some #(str/includes? % "transact refused: no") (:unrecorded (:value r))) "named, not thrown")))
 
+(deftest a-commit-the-store-refuses-leaves-the-agent-alive
+  ;; tasks seon.repl/a-commit-that-keeps-failing-ends-no-agent-silently and seon.db/a-ratio-at-a-commit-ends-its-agent;
+  ;; AGENTS.md section 4 (nothing crashes), docs/storage.md#a-commit-the-store-refuses. A commit the store refuses used
+  ;; to throw out of the agent's loop and end the process, the next commit throwing again on the same pending value.
+  ;; Now the eval answers what was refused as data under :unrecorded, its writes are dropped, the branch and @ctx are as
+  ;; committed, and the next eval and commit are as any. The store's refusing is made in the agent's own REPL (its
+  ;; definition of the commit, as the test above does for a write): it throws for as long as the run-ahead value holds
+  ;; the note "poison", as a value hasch or the codec cannot take does (seon.db-test/a-large-value-holding-ratios-commits-and-reads-back
+  ;; is the real one; a datom the schema refuses is refused at the write, so no plain value is left that only a commit refuses)
+  (let [[r1 r2 r3 r4 r5 r6]
+        (in-agent ["(seon.agent/transact! [{:note/text \"kept before\"}])"
+                   "(alter-var-root #'datahike.writer/commit-pending! (fn [f] (fn [c] (if (some #(= \"poison\" (:v %)) (datahike.api/datoms (:db @(:pending (:writer @(:wrapped-atom c)))) :aevt :note/text)) (throw (ex-info \"no encoding for this value\" {})) (f c)))))"
+                   "(do (seon.agent/transact! [{:note/text \"poison\"}]) :written)"
+                   "(+ 1 1)"
+                   "(do (seon.agent/transact! [{:note/text \"after\"}]) (my.db/q '[:find [?t ...] :where [_ :note/text ?t]]))"
+                   "(let [db (my.db/db)] {:ctx-t (:t @seon.ctx/ctx) :t (:max-tx db) :notes (sort (my.db/q '[:find [?t ...] :where [_ :note/text ?t]]))})"])
+        u (:unrecorded r3)]
+    (is (nil? (:ex r1)) (pr-str r1))
+    (is (nil? (:ex r2)) (pr-str r2))
+    (is (= :written (:value r3)) "the eval's value is still its answer")
+    (is (= :seon.agent/commit-refused (:seon.error/type u)) (pr-str r3))
+    (is (pos? (:transactions u)) (pr-str u))
+    (is (= [(name (:handle r3))] (:evals u)) (pr-str u))
+    (is (str/includes? (:seon.error/message u) "did not stay") (:seon.error/message u))
+    (is (nil? (:ex r4)) (pr-str r4))
+    (is (= 2 (:value r4)) "the next eval answers as any")
+    (is (nil? (:unrecorded r4)) (pr-str r4))
+    (is (= #{"kept before" "after"} (set (:value r5))) "what was committed before is intact, and a later commit holds")
+    (is (nil? (:unrecorded r5)) (pr-str r5))
+    (is (= ["after" "kept before"] (:notes (:value r6))) "the refused write is not on the branch")
+    (is (= (:t (:value r6)) (:ctx-t (:value r6))) "@ctx agrees with the committed db")))
+
 (deftest the-reader-is-the-processs-own
   ;; optimization's review: the intake's reader kept in state was lost to an eval replacing it, and the next
   ;; intake started a second reader on the same socket; it is link's, beside the socket

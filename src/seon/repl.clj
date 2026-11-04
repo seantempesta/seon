@@ -1021,6 +1021,18 @@
 
 ;; ---- the process: a Flow graph of three procs on the agent's one thread ----------------
 
+(defn- told-refused
+  "Replies rs, the first one that answers an eval (a map :response) carrying what the branch refused since the last answer
+  under :unrecorded (seon.agent/take-refused!); rs as it was when none refused or none answers an eval (it waits
+  for the next). The commit that follows a request is where its writes are refused, after its answer was made.
+  See docs/failure-points.md."
+  {:malli/schema [:=> [:cat [:sequential :map]] [:sequential :map]]}
+  [rs]
+  (let [i (first (keep-indexed #(when (map? (:response %2)) %1) rs))]
+    (if-let [e (and i (agent/take-refused!))]
+      (assoc-in (vec rs) [i :response :unrecorded] e)
+      rs)))
+
 (defn agent-step
   "The agent's :repl proc: the requests the :transport proc hands it, one at a time in arrival
   order: an eval ({:op :eval :id :forms}), its page's parts to draw ({:op :render :id}), Seon's
@@ -1061,7 +1073,7 @@
      ;; a branch is committed whenever a request is done (its writes ran ahead in memory), before its answer: a
      ;; reply says what it did is on the branch, so one who reads the branch on hearing it never races the commit
      (when (:dirty? @agent/state) (agent/commit!))
-     (doseq [r rs] (agent/send! r))
+     (doseq [r (told-refused rs)] (agent/send! r))
      (swap! agent/state assoc :busy false)
      [st nil])))
 

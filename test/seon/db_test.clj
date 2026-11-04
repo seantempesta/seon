@@ -503,6 +503,24 @@
         (is (not (stored?))))
       (finally (clojure.java.shell/sh "rm" "-rf" path)))))
 
+(deftest a-large-value-holding-ratios-commits-and-reads-back
+  ;; task seon.db/a-ratio-at-a-commit-ends-its-agent. A value past :seon.config.store/value-out-of-line-bytes is stored
+  ;; under its content key, hasch's uuid of the value (docs/storage.md#values-out-of-line): hasch.platform had no
+  ;; encoding for clojure.lang.Ratio, so a large value holding one threw at its commit, and a small one did not (its
+  ;; datom is no key). A store on disk of this test's own, the last resort: the in-memory store has no out-of-line
+  ;; values; removed at the end
+  (let [path (str (seon.config/checkout) "/target/db-test-ratio-" (random-uuid))
+        {:keys [cfg conn]} (pdb/open! :lmdb path 0 :db)
+        v {:value (mapv #(/ % 3) (range 1 3000)) :small (/ 1 3) :kinds [1.5 2N 3M 'a :b "c" \d (java.util.UUID. 0 1) (java.util.Date. 0)]}]
+    (try
+      (d/transact conn {:tx-data [{:seon.eval/response v}]})
+      (pdb/sync! cfg)
+      (d/release conn)
+      (let [c (d/connect cfg)]
+        (try (is (= [v] (d/q '[:find [?r ...] :where [_ :seon.eval/response ?r]] @c)) "the value reads back equal, ratios and all")
+             (finally (d/release c))))
+      (finally (clojure.java.shell/sh "rm" "-rf" path)))))
+
 (deftest gc-runs-through-the-sync-writer
   ;; datahike.api/gc-storage through Seon's :sync writer (seon.db/writer-cfg) answers what it
   ;; swept: the writer applied every op as a transaction and committed its result, so a

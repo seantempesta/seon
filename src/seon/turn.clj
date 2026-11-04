@@ -221,7 +221,11 @@
   [code req]
   (let [r (repl/eval-string code req)]
     (agent/commit!)
-    r))
+    ;; the record of this eval went with the dropped writes, so the next turn would find no trace of the call: its error is a
+    ;; message from seon on the branch (tell-error!) as well as under the answer's :unrecorded
+    (let [e (agent/take-refused!)]
+      (when e (tell-error! e "the branch refused the writes of your last eval at its commit; they were dropped"))
+      (cond-> r e (assoc :unrecorded e)))))
 
 (defn cache-miss
   "A :seon.turn/cache-miss when a request's prompt cache hit falls more than one block short of

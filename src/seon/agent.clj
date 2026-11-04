@@ -31,6 +31,7 @@
 ;; :index (seon.agent/reconcile-index: the reconciler's index and the commit it was observed for (the fork hands the db once), advanced each turn by what differs; at fork, main's from the fork server)
 ;; :schema-registry (seon.repl: the branch's schema registry, by its schema changes)
 ;; :tx (the last transaction transact! applied, {:db-after :tx-data}: seon.ctx patches @ctx from it: the db :db is, dropped by commit! when it moves :db)
+;; :refused (the :seon.agent/commit-refused errors since the agent last answered: commit!, take-refused!)
 ;; :eval (the id of the eval running, "e5", while seon.repl/eval-string runs it: what transact! names in its tx-meta)
 (defonce state (atom nil))
 
@@ -281,18 +282,51 @@
   {:malli/schema [:=> [:cat] :seon.lib/mb]}
   [] (lib/r2 (lib/real-mb)))
 
+(defn- refused!
+  "The agent after a commit its branch refused (e, what the writer threw): the run-ahead writes since the last good
+  commit dropped (datahike.writer/abandon-pending!), :db the committed value again, :dirty? and :tx cleared, the schema
+  registry read again, and the error kept in :refused for the next answer (`take-refused!`). Answers it as the
+  typed :seon.agent/commit-refused. See docs/storage.md#a-commit-the-store-refuses."
+  {:malli/schema [:=> [:cat :any :any] :seon.agent/commit-refused]}
+  [conn e]
+  (let [{:keys [tx-count reports]} (dw/abandon-pending! conn)
+        evals (into [] (comp (keep #(get-in % [:tx-meta :seon.tx/eval])) (distinct)) reports)
+        err (contract/error :seon.agent/commit-refused #'commit!
+                            (str "the branch refused these writes: " (ex-message e) ". The " tx-count " transactions since the last commit that held were dropped"
+                                 (when (seq evals) (str " (those of " (str/join ", " evals) ")"))
+                                 ", so what your code wrote to the branch did not stay, and its record is not on the branch. Definitions it evaluated are still in this process, not on the branch.")
+                            {:transactions (or tx-count 0) :evals evals})]
+    (swap! state #(-> % (assoc :db (d/db conn)) (dissoc :dirty? :tx :schema-registry) (update :refused (fnil conj []) err)))
+    err))
+
+(defn take-refused!
+  "The commits this agent's branch refused since it last answered (`refused!`), taken: one :seon.agent/commit-refused, the
+  last's message over the sum of their dropped transactions and the eval ids among them, or nil when none was.
+  See docs/failure-points.md."
+  {:malli/schema [:=> [:cat] [:maybe :seon.agent/commit-refused]]}
+  []
+  (when-let [es (seq (:refused @state))]
+    (swap! state dissoc :refused)
+    (assoc (last es) :transactions (reduce + (map :transactions es)) :evals (into [] (comp (mapcat :evals) (distinct)) es))))
+
 (defn commit!
   "Commit the writes this agent applied (run-ahead) to its branch, once, through its own
-  store handle, and tell root (its flush makes the commit durable). nil when nothing waits."
+  store handle, and tell root (its flush makes the commit durable). nil when nothing waits. A
+  commit the store refuses (a value it cannot hash) answers the typed :seon.agent/commit-refused and drops those
+  writes (`refused!`), never throws: no caller's loop ends on it. See docs/failure-points.md."
   {:malli/schema [:=> [:cat] :any]}
   []
-  (when-let [c (dw/commit-pending! (:store-conn @state))]
-    (swap! state #(-> % (assoc :db (:db c)) (dissoc :dirty? :tx)))
-    ;; the eval errors folded since the last commit ride it (seon.error/note): root counts
-    ;; them across agents
-    (let [errs (:errors @state)]
-      (when errs (swap! state dissoc :errors))
-      (send! (cond-> {:op :committed :t (:max-tx (:db c)) :txs (:tx-count c) :mem-mb (mem-mb)} errs (assoc :errors (vec (vals errs))))))))
+  (let [conn (:store-conn @state)
+        c (try (dw/commit-pending! conn) (catch Throwable e e))]
+    (cond
+      (instance? Throwable c) (refused! conn c)
+      c (do
+          (swap! state #(-> % (assoc :db (:db c)) (dissoc :dirty? :tx)))
+          ;; the eval errors folded since the last commit ride it (seon.error/note): root counts
+          ;; them across agents
+          (let [errs (:errors @state)]
+            (when errs (swap! state dissoc :errors))
+            (send! (cond-> {:op :committed :t (:max-tx (:db c)) :txs (:tx-count c) :mem-mb (mem-mb)} errs (assoc :errors (vec (vals errs))))))))))
 
 (defn- with-citations
   "tx-data, which writes a task's plan or instructions, with what that text cites derived in it

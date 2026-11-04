@@ -273,7 +273,7 @@
     ;; its value as data beside its printed text when it is plain data (seon.contract/plain?: what the wire's EDN carries):
     ;; a reader of the answer reads the value, never the text back (an eval that printed has its :out verbatim in the
     ;; text, which is no EDN since out-verbatim). The model reads the text alone (tools/call)
-    (if (contract/error? r) r {:response (cond-> (select-keys r [:handle :text :ex :recorded :main])
+    (if (contract/error? r) r {:response (cond-> (select-keys r [:handle :text :ex :recorded :main :unrecorded])
                                            (and (contains? r :value) (contract/plain? (:value r))) (assoc :value (:value r)))})))
 
 ;; the block's text as the model reads it: printed to the agent's output, not as a
@@ -384,7 +384,7 @@
                            ;; REPL answers again (:again) under the reply budget with that form as its
                            ;; handle, anything else whole by the printer (nothing could re-ask it)
                            (result {"content" [{"type" "text" "text" (cond (and (= :context op) (:context a)) (:context a)
-                                                                           (:response a) (:text (:response a))
+                                                                           (:response a) (let [r (:response a)] (str (:text r) (when-let [u (:unrecorded r)] (str "\n" (:seon.error/message u)))))
                                                                            (contract/error? a) (print/text a)
                                                                            (:again (ops op)) (let [p (print/print-value a {:handle (:again (ops op))})] (or (:text p) (:seon.error/message p)))
                                                                            :else (print/text (vary-meta a assoc :seon.print/full true)))}]}))))
