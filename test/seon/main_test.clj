@@ -64,6 +64,7 @@
   (let [dated (fn [s] (re-find #"\b20\d\d-\d\d-\d\d\b" (or s "")))
         rows (src-docstrings)]
     (is (pos? (count rows)) "the facts hold src's docstrings")
+    (is (some #(= 'seon.program (first %)) rows) "a namespace's among them")
     (is (= [] (sort (for [[n doc] rows :when (dated doc)] [n (dated doc)])))
         "no src docstring holds an ISO date")))
 

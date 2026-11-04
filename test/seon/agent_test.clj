@@ -2034,3 +2034,15 @@
     (is (= #{} (agent/named-tests db '#{app.none-test})) "a namespace with no tests names none")
     (is (= '#{app.nt-test/b-test} (agent/named-tests db '#{app.nt-test/b-test})) "a named test is itself, not its namespace")
     (is (= #{} (agent/named-tests db '#{app.nt-test/helper})) "a var that is no test names none")))
+
+(deftest an-agents-namespace-holds-the-docstring-its-form-gives
+  ;; docs/source.md: a namespace's docstring, on an agent's own eval, however its ns form gives it (a name's metadata
+  ;; reaches the account by seon.repl's own read of it, as a file's does by seon.source's)
+  (let [[_ _ r] (in-agent (fn [{:keys [ns]}]
+                            [(str "(ns " ns ".nd1 \"By a string.\")")
+                             (str "(ns ^{:doc \"By its name.\"} " ns ".nd2)")
+                             (str "(let [db (seon.agent/db) doc (fn [n] (:ns/doc (datahike.api/entity db [:ns/name n])))]"
+                                  " [(doc '" ns ".nd1) (doc '" ns ".nd2)])")])
+                          {})]
+    (is (= ["By a string." "By its name."] (:value r)) (pr-str r))))
+
