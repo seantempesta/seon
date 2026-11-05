@@ -1736,14 +1736,15 @@
 
 (defn- sessions-by-boot
   "Every agent on main db grouped by the boot that started it (the front of its key): [[boot [eid ...]] ...], the current boot's first,
-  then the others newest first (by the entity ids issued last), each boot's agents oldest first."
+  then the others newest first (by the transaction that wrote their newest agent: transaction ids only grow, where entity ids are not an order), each boot's agents by id number."
   {:malli/schema [:=> [:cat :seon.host/db] [:sequential [:tuple :string [:sequential :int]]]]}
   [db]
   (let [now (task/boot-of db)
         by (group-by #(first (str/split (:v %) #"/" 2)) (d/datoms db :avet :seon.agent/key))]
     (->> by
-         (map (fn [[boot dts]] [boot (mapv :e (sort-by #(session-order (:v %)) dts))]))
-         (sort-by (fn [[boot eids]] [(if (= boot now) 0 1) (- (apply max eids))])))))
+         (map (fn [[boot dts]] [boot (mapv :e (sort-by #(session-order (:v %)) dts)) (apply max (map :tx dts))]))
+         (sort-by (fn [[boot _ t]] [(if (= boot now) 0 1) (- t)]))
+         (mapv (fn [[boot eids _]] [boot eids])))))
 
 (defn root-head
   "Root's head (a component over its ctx): its boot, its generation and, when it last went quiet,

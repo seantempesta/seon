@@ -1819,16 +1819,19 @@
   the agents of any boot, as a store holds them after a root restarts (only this boot's keep their link to root)."
   [boot sessions]
   (reduce d/db-with (ts/test-db)
+          (concat
           [[{:seon.root/id :root :seon.root/boot boot}]
            (vec (for [[tid o b] (distinct (for [[_ _ _ tid o b] sessions :when tid] [tid o b]))]
                   (cond-> {:seon.task/id tid :seon.task/ns (symbol (namespace (symbol tid))) :seon.task/name (name (symbol tid)) :seon.task/plan "p"
                            :seon.task/execution :running :seon.task/branch (or b :task-b) :seon.task/kind :work}
                     o (assoc :seon.task/outcome o)
                     (= :cap o) (assoc :seon.task/reason "proof-red seon.ref-test/an-alias"))))
-           (vec (for [[k id status tid _ b] sessions]
-                  (cond-> {:seon.agent/key k :seon.agent/id id}
-                    status (assoc :seon.agent/status status) b (assoc :seon.agent/branch b)
-                    tid (assoc :seon.agent/task [:seon.task/id tid]))))]))
+           ]
+          ;; one transaction each, the last listed first: the list reads newest first, as the store's transaction ids order it
+          (for [[k id status tid _ b] (reverse sessions)]
+            [(cond-> {:seon.agent/key k :seon.agent/id id}
+               status (assoc :seon.agent/status status) b (assoc :seon.agent/branch b)
+               tid (assoc :seon.agent/task [:seon.task/id tid]))]))))
 
 (defn- session-eid [db k] (seon.db/eid db :seon.agent/key k))
 
