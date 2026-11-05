@@ -228,7 +228,7 @@ Each kind of information has one home, and a fact found anywhere else is moved t
 
 **Name things with Clojure's, its libraries' or Jolt's words** (owner, 2026-10-22: "stop using names that aren't clojure or clojure library or jolt or whatever related"; §5, "Use the library's words"). Write the right word in every new text. A file or command name keeps its old spelling until a rename task moves it.
 
-Library words stay: fence (CommonMark's code fence; for a guard, say guard), proc, step-fn, transact, branch, merge, schema, registry, contract (a Malli function schema), flusher, group commit, fork server, lease, generation. **Waste** stays our word for the turns and tokens a run spent past what its work needed (`:seon.agent/waste`; owner, 2026-10-23). A stored keyword is renamed by erasing the store, never by a migration (DECISIONS).
+Library words stay: fence (CommonMark's code fence; for a guard, say guard), proc, step-fn, transact, branch, merge, schema, registry, contract (a Malli function schema), flusher, group commit, fork server, lease, generation. **Waste** stays our word for the turns and tokens an agent spent past what its work needed (`:seon.agent/waste`; owner, 2026-10-23). A stored keyword is renamed by erasing the store, never by a migration (DECISIONS).
 
 ## 8. The machine
 
