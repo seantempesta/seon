@@ -841,7 +841,7 @@
   (when src
     (let [starts (keep #(str/index-of src %) [(str "(" sym " ") (str "(" sym ")") (str "(" (name sym) " ") (str "(" (name sym) ")")])
           call (when (seq starts) (context/form-at src (reduce min starts) 160))]
-      (when (and call (not (re-matches #"\([^\s()\"]+(\s+[A-Za-z][\w\-?!*.<>=/]*)*\)" call))) call))))
+      (when (and call (not (re-matches #"\([^\s()\"]+(\s+[A-Za-z][\w\-?!*.<>=/]*)*\)" call)) (not (re-find #"[a-z]{3,} [a-z]{3,} [a-z]{3,}" (str/replace call #"\"[^\"]*\"" "")))) call))))
 
 (defn cite-via
   "Why a cite is on the page, each with a quote copied from stored text: [:plan quote] or [:instructions quote]
@@ -855,7 +855,12 @@
           (when text
             (let [t (some #(when (str/includes? text %) %) [target (first (str/split target #"#"))])
                   i (when (and t (seq t)) (str/index-of text t))]
-              (when i [kind (subs text (max 0 (- i 60)) (min (count text) (+ i (count t) 60)))]))))
+              (when i [kind (let [from (max 0 (- i 60)) to (min (count text) (+ i (count t) 60))
+                                 q (subs text from to)
+                                 ;; whole words: a cut mid-word reads as a mistake
+                                 q (if (pos? from) (str/replace-first q #"^\S*\s" "") q)
+                                 q (if (< to (count text)) (str/replace-first q #"\s\S*$" "") q)]
+                             q)]))))
         sources))
 
 (defn- via-hiccup
@@ -897,8 +902,8 @@
         doc (or (:var/doc v) (:doc m))]
     [:section
      [:h3 (str sym)]
-     [:p "A function your plan names."]
-     (if (= :summary depth)
+     [:p (if (= :test (:var/kind v)) "A test your plan names." "A function your plan names.")]
+     (if (and (= :summary depth) (or doc m))
        (list (when src [:p (str (reader/arglists src (symbol (namespace sym))))])
              (when m [:p (str (:arglists m))])
              (when doc [:p (ref/lead-sentence doc)]))
@@ -929,7 +934,7 @@
         [:section
          [:h3 (str k)]
          [:p (str "An attribute your plan names." (when desc (str " " desc)))]
-         [:p (str "It holds " (str/replace (str (:schema/form sch)) #"\s*\{[^}]*\}" "") (when holder (str ", on " holder " entities")) ".")
+         [:p (str "It holds " (if (or holder schema) (str "a " (or (last (re-seq #":[^\s\]\}\)]+" (str/replace (str (:schema/form sch)) #"\{[^}]*\}" ""))) (:schema/form sch))) (:schema/form sch)) (when holder (str ", on " holder " entities")) ".")
           (when (seq others) (str " Those entities also hold " (str/join ", " (map str (subvec others 0 (min 8 (count others))))) "."))]
          (when (and datom (not ref?)) [:p "A real value: " [:code (print/line (:v datom) 80)]])
          (when target
@@ -953,7 +958,7 @@
                                           [:section [:h3 (str name)] [:p (:unresolved ref/problem-messages)]]
                                           (var-hiccup name (when (:var/name v) v) depth))
                (:schema/key sch) (key-hiccup db name sch named)
-               (:ns/name n) [:section [:h3 (str name)] [:p (str "A namespace your plan names." (when (:ns/doc n) (str " " (:ns/doc n))))] [:p "Read it: " [:code (help-form name)]]]
+               (:ns/name n) [:section [:h3 (str name)] [:p (str "A namespace your plan names." (when (:ns/doc n) (str " " (ref/lead-sentence (:ns/doc n)))))] [:p "Read it: " [:code (help-form name)]]]
                :else [:section [:h3 (str x)] [:p (str "Your plan names this. " (:unresolved ref/problem-messages))]])]
     (if via (conj body (via-hiccup via)) body))))
 
@@ -1088,7 +1093,7 @@
         (instance? Throwable x) (str "threw " (ex-message x))
         (and (map? x) (:via x)) (str "threw " (:message (first (:via x))))
         (string? x) x
-        :else (let [t (print/text x)]
+        :else (let [t (str/replace (print/line x 160) #"#object\[java\.util\.regex\.Pattern 0x[0-9a-f]+\]" "a regex")]
                 ;; a thrown error is the failure's got (clojure.test/is reports it): say what it threw, not its trace
                 (if-let [m (when (str/starts-with? t "#error") (second (re-find #":message \"([^\"]*)\"" t)))] (str "threw " m) t))))
 
@@ -1154,7 +1159,7 @@
                     (when (and do (not= do next-form)) [:span " " (form-hiccup do)])])))
          (when (or (seq (:conflicts merge)) (seq (:main-moved merge)))
            [:p "Main has moved: " (str (count (:conflicts merge)) " conflicts") (when (seq (:main-moved merge)) (str ", " (count (:main-moved merge)) " things changed"))])
-         (when next-form [:div [:p "Run:"] (form-hiccup next-form)])))]))
+         (when next-form [:div [:p (if (and (seq? next-form) (= 'do (first next-form))) "Start with this, then replace its placeholder assertion with the real one:" "Run:")] (form-hiccup next-form)])))]))
 
 (defn status
   "How the agent's work on its task stands (a component over ctx and the db): seon.context/status of its branch db, drawn

@@ -304,7 +304,7 @@
                                                :seon.task/plan "Read `demo.calc`, `:x.s/block` and `bin/env`."}]))
         t (:tree (ctx/build db (pdb/eid db :seon.task/id "demo/n") :b))
         m (into {} (for [c (vals (:cites t))] [(or (:seon.cite/address c) (:seon.cite/name c)) (seon.render/part-text [(quote seon.render.ui/cited) {} (seon.render.ui/cite-hiccup db c nil)])]))]
-    (is (str/includes? (m 'demo.calc) "Adds. More.") "a namespace: its doc")
+    (is (str/includes? (m 'demo.calc) "Adds.") "a namespace: the first sentence of its doc")
     (is (str/includes? (m 'demo.calc) "(my.agent/help 'demo.calc)") "and the form that reads it")
     (is (str/includes? (m :x.s/block) "[:map [:x.s/from :int]]") "a schema key: its form as written")
     (is (not (str/includes? (m :x.s/block) "my.schema/register!")) "its change is taught once, not on every cite")

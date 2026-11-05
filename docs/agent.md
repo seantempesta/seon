@@ -176,7 +176,7 @@ The judge's test selection follows reach: a change to a namespace many others re
 
 ## Merging
 
-How merging with main works: main's work is merged into your branch as main moves (a work agent's too), and a merge task's branch has main merged in: each entry both changed is unmerged, shown under your status's `:unmerged` with its `:base`, `:ours` and `:theirs`, and resolved by you at the REPL.
+How merging with main works, and what to do when your status shows an unmerged entry. Main's work is merged into your branch as main moves (a work agent's too), and a merge task's branch has main merged in: each entry both changed is unmerged, shown under your status's `:unmerged` with its `:base`, `:ours` and `:theirs`, and resolved by you at the REPL.
 
 - `(my.branch/unmerged)` lists them. Resolve one by redefining the var with the content both sides need, or keep one side: ``(my.branch/resolve! 'ns/var :theirs)``, or ``(my.branch/resolve! 'ns/var)`` to keep yours.
 - Your branch sees only its own changes until then.

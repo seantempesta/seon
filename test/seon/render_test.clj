@@ -1721,7 +1721,7 @@
                        {:type :error :var "#'app.okt/gone-test" :exit 137 :message "child died"}]
              :proofs {'app.okt/ok-test :pass 'app.okt/bad-test :fail}}
         html (h/html (ui/proved {} run))]
-    (is (= (str "red: 1 of 4 failed\n✗ app.okt/bad-test: the sum\nreused 1: their last result still counts, because nothing they reach has changed")
+    (is (= (str "red: 1 of 4 failed\n✗ app.okt/bad-test: the sum: expected (= 3 (+ 1 1))\nreused 1: their last result still counts, because nothing they reach has changed")
            (:seon.print/prose (my.agent/prove-summary {} run))) "what failed, first failure, and only what is true of this run")
     (is (= "green: 0 of 0 passed\nno test is named app.okt/typo-test"
            (:seon.print/prose (my.agent/prove-summary {} {:pass 0 :fail 0 :error 0 :ran 0 :reused 0 :deferred [] :reports [] :unmatched ['app.okt/typo-test]})))

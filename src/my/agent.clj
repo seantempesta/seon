@@ -327,9 +327,9 @@
           red (pos? (+ (:fail r 0) (:error r 0)))
           fails (apply dissoc (proofs/failures r) (proofs/died r))
           n (+ (:ran r 0) (:reused r 0))
-          first-line (fn [f] (let [t (str/trim (str (or (:message f) (:actual f) (:got f))))
+          first-line (fn [f] (let [t (str/trim (str (or (:actual f) (:got f))))
                                    m (when (str/starts-with? t "#error") (second (re-find #":message \"([^\"]*)\"" t)))]
-                               (print/line (if m (str "threw " m) t) 120)))]
+                               (str (when (:message f) (str (:message f) ": ")) (print/line (if m (str "threw " m) (str "expected " (str/replace (str (:expected f)) #"#object\[java\.util\.regex\.Pattern 0x[0-9a-f]+\]" "a regex"))) 120))))]
       {:seon.print/prose
        (str/join "\n" (remove nil?
          (concat
