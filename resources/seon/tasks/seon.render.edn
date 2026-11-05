@@ -143,6 +143,11 @@ Replaces: the schema-declared render as the only way to choose one. Scoping: a r
   :seon.task/plan "What was seen, in the lab, 2026-11-04: a branch's own render draws on the chat, through the agent's units, and not on its debug tab: seon.render.proc's debug value runs root's code (seon.context/wire-turn), under root's registry, so a recorded request is re-rendered by main's renders. What should be true: while the agent lives, its latest request is asked of it, as seon.render.proc/ask-parts asks its parts. A past turn's replay stays root's, and says so. Beside it: seon.render/roots-walk-of-a-branch-draws-the-branchs-layout."
   :seon.task/kind :work
   :seon.task/proofs #{seon.render-test/the-debug-page-reads-a-branchs-own-renders}}
+ {:seon.task/name "the-agent-page-draws-at-a-narrow-width"
+  :seon.task/plan "Seen 2026-11-06 in the browser pane at 554 wide: the agent's page (seon.render.ui/render-ctx, seon-page, seon-columns in resources/public/css/input.css) screenshots blank and its document overflows the width; at 1400 wide its three columns draw. What should be true: a page at phone width stacks its columns with no horizontal scroll. Proof: a browser check at 375 wide."
+  :seon.task/kind :work
+  :seon.task/proofs #{}}
+
  {:seon.task/name "both-renders-run-in-the-components-tracked-run"
   :seon.task/plan "What is wrong: seon.render/model runs a part's model render outside the component's run, lazily when a request asks, as (f {} v), kept by the part's revision. So what it reads is invisible to the walk, it cannot ask for the db, and an agent's own choice of render does not redraw. The html render runs inside (seon.render/part). The owner, 2026-11-04, asked why re-rendering has problems if everything is tracked; this is why. What should be true: both renders run inside the component's tracked run, given opts, the model's always since a model always reads and the html lazily if a page cost asks for it. Measure drawing-one-list-costs-that-list-not-the-page before and after; a page-only part with data pays for a render nobody reads, unmeasured. Part of the core."
   :seon.task/kind :work
