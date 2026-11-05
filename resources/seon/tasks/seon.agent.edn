@@ -44,7 +44,7 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.procs-test/an-agent-whose-interrupt-handler-never-ran-is-a-problem}}
  {:seon.task/name "an-agent-reports-its-threads"
-  :seon.task/plan "Filed by worktree session agent-view (task seon.render/a-debug-view-of-any-agent, 2026-10-23): the owner asked the agent's page to show its process's threads and uptime. The agent's :stats answer (seon.agent/handle! :stats) and its hello carry pid, memory and t, no thread count; root's view entry has no start stamp (its run has :seon.run/start-ms, which the page shows). Correct: the agent reports its OS thread count with its memory (a fact measured, as mem-mb is), root's view keeps it, and the page's head shows it; the head shows the run's start instead of a ticking uptime (a clock deciding a render)."
+  :seon.task/plan "Filed by worktree session agent-view (task seon.render/a-debug-view-of-any-agent, 2026-10-23): the owner asked the agent's page to show its process's threads and uptime. The agent's :stats answer (seon.agent/handle! :stats) and its hello carry pid, memory and t, no thread count; root's view entry has no start stamp (the agent has :seon.agent/started-ms, which the page shows). Correct: the agent reports its OS thread count with its memory (a fact measured, as mem-mb is), root's view keeps it, and the page's head shows it; the head shows the run's start instead of a ticking uptime (a clock deciding a render)."
   :seon.task/kind :work
   :seon.task/proofs #{seon.agent-test/an-agent-reports-its-threads}}
  {:seon.task/name "an-agent-edits-a-form-by-its-text"
