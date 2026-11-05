@@ -22,6 +22,18 @@ The owner's rulings of 2026-11-05, on looking before building and on what makes 
 
 Asked whether the debug page should draw history with today's renders plus a hash that flags any difference: "Yes, and try it". It stands over AGENTS.md §3's "as recorded" for a request. The work is task seon.context/the-agents-data-makes-its-context.
 
+### The render is an eval, and what changed is another (owner, 2026-11-05)
+
+"We can just make the rendering of the hiccup a normal eval that we inject into turn 0 and then we can just do diffs when it changes. That way the context is accumulating and each step you can see the updates". And: "If we detect a change in the @ctx and/or the hiccup we add another eval that gets the diffs and the agent on their next turn sees what's changed". It stands over the page being latest only. The work is task seon.context/the-agents-data-makes-its-context.
+
+### Large or changing output is the render's bug (owner, 2026-11-05)
+
+"Nothing we should be rendering should be huge or should be repeatedly changing dramatically. That's a failure of the render functions and the system for generating noise. Find and fix those don't blame the system."
+
+### There are no rows, and nothing is quadratic (owner, 2026-11-05)
+
+"There are no rows. ... Datomic like systems have entities and they have any number of attributes and values. That's what makes something a thing. An agent has turns, it has evals, it's just data." And: "Nothing should require N^2 because we are progressively building things if we aren't then again it's the wrong design."
+
 ## 2026-11-04 rulings
 
 The owner's rulings of 2026-11-04, on what an agent is and how everything it reads is made. They stand over earlier entries where they differ.
@@ -64,7 +76,7 @@ The owner's rulings of 2026-11-04, on what an agent is and how everything it rea
 
 ### The page is latest only (owner, 2026-11-04)
 
-The owner approved the page as only the request's last message, narrowing the 2026-10-29 and 2026-10-30 rulings that a part is sent as what changed: "always include the most recent ... (not accumulating)". Not on main yet: [the plan's core step](plan.md#where-it-stands-2026-11-04-what-an-agent-reads).
+The owner approved the page as only the request's last message, narrowing the 2026-10-29 and 2026-10-30 rulings that a part is sent as what changed: "always include the most recent ... (not accumulating)". The owner replaced this on 2026-11-05: the render is an eval, and what changed is another.
 
 ### Every agent improves the renders (owner, 2026-11-04)
 
