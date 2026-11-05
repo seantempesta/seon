@@ -523,14 +523,13 @@
 
 (defn- cited
   "Name n as a cite of it on the agent's page shows it, on demand: a cite of n at doc depth made on db (one
-  d/with), pulled by the cite's own pattern (seon.ctx/build) and drawn by the cite's model render
-  (seon.render.ui/cite-model), so on demand and on the page are one render. See
+  d/with), pulled by the cite's own pattern (seon.ctx/build) and drawn by seon.render.ui/cite-hiccup, so on demand and on the page are one render. See
   docs/references.md#an-entity-cites."
   {:malli/schema [:=> [:cat :seon.host/db [:or :symbol :qualified-keyword]] :any]}
   [db n]
   (let [r (d/with db [{:db/id "of" :seon.agent/key (str "help " n)} {:seon.cite/id (str "help " n) :seon.cite/of "of" :seon.cite/name n :seon.cite/depth :doc :seon.cite/order 0}])
         db' (:db-after r)]
-    (ui/cite-model {} (:tree (seon.ctx/build db' (pdb/eid db' :seon.cite/id (str "help " n)) nil)))))
+    (ui/cite-hiccup db' (:tree (seon.ctx/build db' (pdb/eid db' :seon.cite/id (str "help " n)) nil)) nil)))
 
 (defn help
   "The wiki through the one view (seon.doc/view), as this branch holds it. No argument: the help

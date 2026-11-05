@@ -1276,7 +1276,7 @@
         eid #(seon.db/eid branch %1 %2)]
     ;; a cited var is a component of its own when the db holds it (ctx joins the task's references by
     ;; :var/name: seon.context-test/a-cited-var-redefined-shows-in-the-next-view); this db holds none
-    (is (= [(str "task-data-" rid) (str "cited-" rid "-seon.render_2Fhtml") (str "cited-" rid "-seon.print") (str "cited-" rid "-docs_2Frender.md_23no-clipping")
+    (is (= [(str "task-data-" rid) (str "citations-" rid)
             (str "namespaces-" rid) (str "status-" rid) (str "agent-state-" rid)] (mapv :id task))
         "the task, each thing its plan cites (a part each), the namespaces it touches, how the work stands, the agent's turn (its open problems when one is open: none here, so no part; and the keys the agent added, when it added one): each keyed by what it shows")
     (let [h (:html (unit-of task "status-"))]
@@ -2165,6 +2165,13 @@
 
 ;; the instructions cite how a task is worked (docs/agent.md#working-a-task) at full depth: the agent is sent the
 ;; section's text, as the wiki holds it, not its address alone (a cite resolved at summary would show its heading)
+(defn- cite-text
+  "The parts of tree's citations drawn by a walk over db, {target text}: each `cited` as the model reads it."
+  [db tree aid]
+  (into {} (for [[p k held] (#'ui/page-cites tree)]
+             (let [w (r/walker {:ref (seon.ratom/atom tree) :changes seon.ctx/changes} (fn [] db) [#'ui/cited {:at p :held held} aid k])]
+               (try (r/flush! w nil) [k (r/part-text (r/part-form w @(:out w)))] (finally (r/dispose-walk! w)))))))
+
 (deftest a-work-task-is-sent-how-a-task-is-worked
   (let [k "b1/a1"
         db (ts/test-db)
@@ -2173,44 +2180,44 @@
         db (d/db-with db [{:db/id k :seon.agent/key k :seon.agent/id :a1 :seon.agent/task [:seon.task/id "demo/w"]}])
         aid (seon.db/eid db :seon.agent/key k)
         tree (:tree (seon.ctx/build db aid :b))
-        part (first (for [[p k held] (#'ui/page-cites tree) :when (= k "docs/agent.md#working-a-task")]
-                      (let [w (r/walker {:ref (seon.ratom/atom tree) :changes seon.ctx/changes} (fn [] (throw (ex-info "read the db" {})))
-                                        [#'ui/cited {:at p :held held} aid k])]
-                        (try (r/flush! w nil) (:data (get @(:cache w) @(:out w))) (finally (r/dispose-walk! w))))))
-        text (str (:text (ui/cite-model {} part)))]
-    (is (some? part) "the section is a part of the agent's context")
+        text (get (cite-text db tree aid) "docs/agent.md#working-a-task")]
+    (is (some? text) "the section is a part of the agent's context")
     (is (str/includes? text "their failures are the reproduction") (str "its text, whole: " (subs text 0 (min 300 (count text)))))
     (is (str/includes? text "Never loosen a contract or a proof") "to its last step")))
 
-;; docs/render.md#a-part-answers-data: a cite's part is drawn from what @ctx holds; its renders read no db
-(deftest a-cited-part-reads-only-what-ctx-holds
+;; docs/render.md#a-citation-says-why-it-is-there: each kind of cite read cold
+(deftest a-cited-thing-is-drawn-by-what-it-is
   (let [[db aid] (cited-world)
         tree (:tree (seon.ctx/build db aid :b))
-        ;; each cite the layout places, drawn as the walk draws it, over a db that throws when anything reads it
-        drawn (into {} (for [[p k held] (#'ui/page-cites tree)]
-                         (let [w (r/walker {:ref (seon.ratom/atom tree) :changes seon.ctx/changes}
-                                           (fn [] (throw (ex-info "a cite's part read the db" {})))
-                                           [#'ui/cited {:at p :held held} aid k])]
-                           (try (r/flush! w nil)
-                                (let [c (get @(:cache w) @(:out w))] [k {:data (:data c) :html (h/html (r/resolved w @(:out w) true))}])
-                                (finally (r/dispose-walk! w))))))
-        model #(ui/cite-model {} (:data (drawn %)))]
+        drawn (cite-text db tree aid)]
     (is (= #{"demo/g" "docs/x.md#the-x" "docs/testing.md#testing" "docs/references.md#an-entity-cites"} (set (keys drawn)))
         "a part per cite, the task's and the agent's (its proof's left to the status), each target once")
-    (is (every? #(= :seon.cite/cite-fact (:seon.render/schema (meta (:data %)))) (vals drawn)) (str "every cite's part draws with the db unread: " (pr-str drawn)))
-    (is (str/includes? (:seon.print/prose (:text (model "docs/x.md#the-x"))) "What x does. And more.") "a section at doc depth: its lead")
-    (is (str/includes? (:seon.print/prose (:text (model "docs/testing.md#testing"))) "Testing in the world (docs/testing.md#testing-in-the-world)")
+    (is (every? #(re-find #"\[:h3 \"" %) (vals drawn)) "every cite is headed")
+    (is (str/includes? (drawn "docs/x.md#the-x") "What x does. And more.") "a section at doc depth: its lead")
+    (is (str/includes? (drawn "docs/x.md#the-x") "(my.agent/help \"docs/x.md#the-x\")") "and how to read the rest")
+    (is (str/includes? (drawn "docs/testing.md#testing") "Testing in the world (docs/testing.md#testing-in-the-world)")
         "a page cited whole: its top section, the headings below it joined")
-    ;; task seon.context/an-agent-follows-its-instructions-to-green, item 3: the md-scan bench's every run spent turn 0
-    ;; reading the vars it changes; one of the task's own namespaces (demo, its task's and its proof's) shows its source
-    (is (= :doc (:depth (model "demo/g"))) "cited at doc depth")
-    (is (= (seon.print/code "(defn g \"Gets it.\" [x] x)") (:source (model "demo/g"))) "a var of the task's own namespace: its source, from the pulled form")
-    (let [elsewhere (update (:data (drawn "demo/g")) :seon.cite/of assoc :seon.task/id "other/c" :seon.task/ns 'other :seon.task/proofs #{} :proved {})]
-      (is (= {:seon.print/prose "Gets it."} (:doc (ui/cite-model {} elsewhere))) "a var of another namespace at doc depth: its doc")
-      (is (nil? (:source (ui/cite-model {} elsewhere))) "and no source"))
-    (is (= '[demo-test/g-test] (:tests (model "demo/g"))) "its test, among its pulled callers")
-    (is (= '[demo/h] (:callers (model "demo/g"))) "and its other caller")
-    (is (str/includes? (:html (drawn "docs/x.md#the-x")) "What x does.") "and the page's html, by the cite's html render")))
+    (is (str/includes? (drawn "demo/g") "(defn g \"Gets it.\" [x] x)") "a function at doc depth: its whole source, in a fence")
+    (is (str/includes? (drawn "demo/g") "Tested by: demo-test/g-test") "its test, among its pulled callers")
+    (is (str/includes? (drawn "demo/g") "Called by: demo/h") "and its other caller")
+    (is (str/includes? (drawn "demo/g") "A real call: ") "and one real call, taken from them")
+    (doseq [[k t] drawn] (is (not (re-find #":depth|:symbol|:change|:read " t)) (str k " carries none of how it was fetched")))))
+
+(deftest a-citation-says-why-from-a-quote-of-the-text-that-names-it
+  (let [plan "What exists: the store keeps history (`:seon.config.store/keep-history?`, docs/storage.md#history) and `seon.program/live-forms` reads the live ones."
+        instructions "How a task is worked, step by step."]
+    (doseq [t [":seon.config.store/keep-history?" "seon.program/live-forms" "docs/storage.md#history" "docs/storage.md"]]
+      (let [[kind q] (ui/cite-via t [[:plan plan] [:instructions instructions]])]
+        (is (= :plan kind))
+        (is (str/includes? plan q) (str "the quote is a substring of the plan: " q))
+        (is (str/includes? q (first (str/split t #"#"))) "and holds the mention")))
+    (is (nil? (ui/cite-via "my.agent/callers" [[:plan plan] [:instructions instructions]])) "named by neither: no reason is invented")
+    (is (= :instructions (first (ui/cite-via "step by step" [[:plan plan] [:instructions instructions]]))))
+    (testing "the model's text leaves it out behind the one switch, the page always shows it"
+      (let [via [:plan "the plan says"]]
+        (is (false? (:seon.cite/via-to-model (seon.contract/properties :seon.cite/cite-fact))) "the switch, off")
+        (is (str/includes? (h/html (#'ui/via-hiccup via)) "the plan says") "the page")
+        (is (= "page" (:data-for (second (#'ui/via-hiccup via)))) "for the page alone while the switch is off")))))
 
 ;; docs/turn.md#the-end: the agent's turn line, the chat's start and end all read the agent's own record: its cap
 ;; (:seon.agent/max-turns) and the end it wrote, which is an end only at the turn it ended on

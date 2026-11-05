@@ -303,12 +303,12 @@
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "n"
                                                :seon.task/plan "Read `demo.calc`, `:x.s/block` and `bin/env`."}]))
         t (:tree (ctx/build db (pdb/eid db :seon.task/id "demo/n") :b))
-        m (into {} (for [c (vals (:cites t))] [(or (:seon.cite/address c) (:seon.cite/name c)) (seon.render.ui/cite-model {} c)]))]
-    (is (= {:cites 'demo.calc :depth :doc :read '(my.agent/help (quote demo.calc)) :doc {:seon.print/prose "Adds. More."}} (m 'demo.calc))
-        "a namespace: its doc, and the form that lists its definitions")
-    (is (= "[:map [:x.s/from :int]]" (:seon.print/code (:form (m :x.s/block)))) "a schema key: its form as written")
-    (is (str/includes? (:seon.print/code (:change (m :x.s/block))) "(my.schema/register! :x.s/block") "and how it changes at the REPL")
-    (is (:unresolved (m "bin/env")) "a file: it joins nothing, and its part says so")))
+        m (into {} (for [c (vals (:cites t))] [(or (:seon.cite/address c) (:seon.cite/name c)) (seon.render/part-text [(quote seon.render.ui/cited) {} (seon.render.ui/cite-hiccup db c nil)])]))]
+    (is (str/includes? (m 'demo.calc) "Adds. More.") "a namespace: its doc")
+    (is (str/includes? (m 'demo.calc) "(my.agent/help 'demo.calc)") "and the form that reads it")
+    (is (str/includes? (m :x.s/block) "[:map [:x.s/from :int]]") "a schema key: its form as written")
+    (is (not (str/includes? (m :x.s/block) "my.schema/register!")) "its change is taught once, not on every cite")
+    (is (str/includes? (m "bin/env") (:unresolved seon.ref/problem-messages)) "a file: it joins nothing, and its part says so")))
 
 (deftest an-agent-reads-its-conversation-so-far
   ;; a live DeepSeek agent re-read the same Datahike source every other turn because each
@@ -480,12 +480,12 @@
       (let [db @conn
             a (pdb/eid db :seon.agent/key "b/a1")
             page (context/drawn-parts db (ctx/build db a :b))
-            text (print/text (vary-meta page assoc :seon.print/full true))
+            text (str/join "\n\n" (map render/part-text (vals page)))
             times (fn [s] (count (re-seq (re-pattern (java.util.regex.Pattern/quote s)) text)))]
         (is (some #(str/starts-with? % "status-") (keys page)) "how the work stands is on the page")
         (is (= 1 (times "Make ```demo/g``` exact.")) "the plan once")
         (is (= 1 (times "(defn g \"Halves.\"")) "a cited source once, as code: its quotes as written")
-        (is (= 1 (count (re-seq #"demo-test/f-test</code>|\[:td \[:code \"demo-test/f-test\"\]\]|\[:code \"demo-test/f-test\"\]\s+\[:td[^\]]*\"failed\"" text))) "the proofs' statuses once, in the status")))))
+        (is (= 1 (count (re-seq #"(?s)\[:code \"demo-test/f-test\"\]\s*\]\s*\[:td\s*\"failed\"\]" text))) "the proofs' statuses once, in the status")))))
 
 (deftest a-cited-var-shows-at-its-citations-depth
   ;; task seon.context/a-cited-var-shows-at-its-citation-depth: the delimiter picks the depth
@@ -525,17 +525,11 @@
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "r" :seon.task/plan "Make ```ctx-big/big``` fast."}]))
         r (seon.doc/resolve-ref db 'ctx-big/big :code)
         ;; the task's cite as ctx holds it: the var it names, with its form
-        part (with-meta {:seon.cite/name 'ctx-big/big :seon.cite/depth :code :var {:var/name 'ctx-big/big :form {:form/src src}}} {:seon.render/schema :seon.cite/cite-fact})
-        html (seon.web.html/html (seon.render/html {:schema :seon.cite/cite-fact :as :block} part))
-        view (seon.render.ui/cite-model {} part)
-        model (print/text view)]
+        part {:seon.cite/name 'ctx-big/big :seon.cite/depth :code :var {:var/name 'ctx-big/big :form {:form/src src}}}
+        model (seon.render/part-text [(quote seon.render.ui/cited) {} (seon.render.ui/cite-hiccup db part nil)])]
     (is (= {:symbol 'ctx-big/big :source (print/code src)} (select-keys r [:symbol :source])) "the source whole as code, never swapped for its doc by size")
-    (is (= (print/code src) (:source view)) "the part holds it whole, as data")
-    (is (< (:context seon.print/budgets) (select/estimate src)) "a source over the context's budget")
-    (is (< (count html) (count src)) "the page cuts it where it is written")
-    (is (str/includes? html "my.agent/help") "its cut names the form that reads the rest")
-    (is (< (select/estimate model) (select/estimate src)) (str "the model reads it cut too, at the printer's budget: " (select/estimate model) " tokens"))
-    (is (str/includes? model "(clojure.repl/source ctx-big/big)") "and the cut names the form that reads the rest")))
+    (is (str/includes? model src) "the part holds it whole, in a fence: a function cited to be changed is read whole")
+    (is (str/includes? model "```clojure") "fenced")))
 
 ;; a made unit vector, dim i weighted as a Matryoshka model's are (seon.vector-test/vectors)
 (defn- made-vector [seed]
@@ -683,12 +677,12 @@
         shown (into {} (map (juxt :seon.ref/address identity)) (:sections block))
         ;; the page's part: the cite joins the task by its id (:seon.cite/task), drawn by its plan
         cite (some #(when (= 'demo.other/g (:seon.cite/name %)) %) (vals (:cites (:tree (ctx/build db (pdb/eid db :seon.task/id "demo/f") :b)))))
-        part (seon.render.ui/cite-model {} cite)]
+        part (seon.render/part-text [(quote seon.render.ui/cited) {} (seon.render.ui/cite-hiccup db cite nil)])]
     (is (= "G is defined first. Then f calls it." (:seon.ref/lead (shown "demo.other/g"))) "doc depth: the task's plan")
     (is (= [] (:write-set block)) "and not a var of the write set, nor an unresolved name")
     (is (= "demo.other/g" (get-in cite [:task :seon.task/id])) "the cite joins the task by its id")
-    (is (str/includes? (:seon.print/prose (:text part)) "G is defined first. Then f calls it.") "and its part shows the plan")
-    (is (not (:unresolved part)) "not an unresolved name")))
+    (is (str/includes? part "G is defined first. Then f calls it.") "and its part shows the plan")
+    (is (not (str/includes? part (:unresolved seon.ref/problem-messages))) "not an unresolved name")))
 
 
 (defn- read-back
@@ -856,7 +850,7 @@
                               :origin :model :agent "b/a1" :model "run-model"}
                            p (context/provider-of @conn b)
                            _ (d/transact conn [{:seon.model-call/id (str "b/a1/" (inc n)) :seon.model-call/basis b}])
-                           r (render* @conn b)
+                           r (context/render @conn b)
                            ;; what it sent, recorded as the turn does: the next request continues it
                            _ (d/transact conn [{:seon.model-call/id (str "b/a1/" (inc n)) :seon.model-call/sent (:sent r)}])
                            body (seon.model/request-body p {:messages (:messages r) :task "demo/g" :turn (inc n)})]
@@ -1208,17 +1202,17 @@
 
 (deftest a-cited-var-redefined-shows-in-the-next-view
   ;; the task's data is a render, never held: a var the plan cites redefined (the agent's defn, or main
-  ;; caught up), the next view shows its new source. Each cited var is its own component, which reads
-  ;; the db, so the edit runs that var's component again (its db reads touched) and the task's not
+  ;; caught up), the next view shows its new source. The citations are one section, a component whose children are
+  ;; the cited things; the edit draws it again (its children's db reads touched) and the task's not
   (let [[db _] (sections-near "Make ```demo/g``` say one thing.")
         [w _ _ _ rid :as walk] (walked db)
-        cited (str "cited-" rid "-demo_2Fg")
+        cited (str "citations-" rid)
         html #(:html (some (fn [u] (when (= % (:id u)) u)) (render/placed-units w)))]
-    (is (some? (html cited)) "the cited var, a component of its own")
+    (is (some? (html cited)) "the citations, a component of their own")
     (is (not (str/includes? (html cited) ":redefined")))
     (let [changed (step! walk [{:db/id "f2" :form/id "demo/g-2" :form/src "(defn g [] :redefined)"} [:db/add [:var/name 'demo/g] :var/form "f2"]])]
       (is (str/includes? (html cited) "(defn g [] :redefined)") "the next view: the new source")
-      (is (some #{cited} changed) "the edit's page diff holds that var's component")
+      (is (some #{cited} changed) "the edit's page diff holds the citations")
       (is (not-any? #(str/starts-with? % "task-data-") changed) "and not the task's, which cites it"))
     (render/dispose-walk! w)))
 
@@ -1227,15 +1221,15 @@
 (deftest a-cited-section-main-changed-is-its-part-alone
   (let [[db _] (sections-near "Make ```demo/g``` say one thing; see [the model](docs/vector.md#the-model).")
         [w _ cell _ rid :as walk] (walked db)
-        part (str "cited-" rid "-docs_2Fvector.md_23the-model")
+        part (str "citations-" rid)
         html (fn [w] (into {} (map (juxt :id :html)) (render/placed-units w)))]
-    (is (some? ((html w) part)) "the cited section, a part of its own")
+    (is (some? ((html w) part)) "the cited section, among the citations")
     (let [changed (step! walk [[:db/add [:seon.doc/address "docs/vector.md#the-model"] :seon.doc/lead "The model, as main now says it."]])
           live (html w)
           cold (let [d @cell w2 (render/draw (:tree (ctx/build d (pdb/eid d :seon.agent/key "demo/a1") :b)) ctx/changes d
                                              (requiring-resolve (render/declared :seon.render/render-ctx)))]
                  (try (html w2) (finally (render/dispose-walk! w2))))]
-      (is (= [part] changed) "the section's part, and nothing else, drawn again")
+      (is (= [part] changed) "the citations, and nothing else, drawn again")
       (is (str/includes? (live part) "The model, as main now says it.") "with the section as it is now")
       (is (= cold live) "the live page is the cold draw"))
     (render/dispose-walk! w)))
@@ -1255,8 +1249,8 @@
     (is (not (str/includes? task "(deftest g-test")) "D1: the proof's source is the status's, the task's part does not repeat it")
     (is (str/includes? (html "status-") "demo-test/g-test") "D1: the proof written is the status's, by name")
 
-    (is (str/includes? (html (str "cited-" rid "-demo_2Fg")) "(defn g [])") "D2: the cited var's source, its own component")
-    (is (str/includes? (html (str "cited-" rid "-docs_2Fvector.md_23what-is-embedded")) "Section 1 says one thing.") "D3: the cited section's text, not its address, in its own component")
+    (is (str/includes? (html "citations-") "(defn g [])") "D2: the cited var's source, in the citations")
+    (is (str/includes? (html "citations-") "Section 1 says one thing.") "D3: the cited section's text, not its address, in the citations")
     (is (not (str/includes? task "Section 1 says one thing.")) "and not the task's again")
     (render/dispose-walk! w)))
 
@@ -2000,3 +1994,15 @@
         (is (= (butlast (:whole r0)) (take (dec (count (:whole r0))) (:whole r1))) "the prefix before it is byte-identical")
         (is (str/includes? (:content (peek (:whole r2))) "Turn 3 · in demo") (:content (peek (:whole r2))))
         (is (= (:whole r2) (into [] (mapcat second) (context/parts-of @conn (:whole-sent r2)))) "replay draws the same bytes")))))
+
+(deftest a-cited-attribute-says-what-it-is-and-shows-a-real-value
+  ;; owner, 2026-11-05: "useful first": :var/form followed to a real form entity shows at once that the text is :form/src
+  ;; (vars-history spent turns 4-8 finding it out)
+  (let [db (d/db-with (db-with-program) [{:schema/key :var/form :schema/form ":seon.db/ref"}
+                                         {:schema/key :var/name :schema/form ":symbol"}])
+        text (fn [k] (seon.render/part-text ['seon.render.ui/cited {} (seon.render.ui/cite-hiccup db {:seon.cite/name k :seon.cite/depth :doc :schema (d/pull db '[*] [:schema/key k])} nil)]))
+        t (text :var/form)]
+    (is (str/includes? t "Its form:") t)
+    (is (str/includes? t "Held by") "what kind of entity holds it")
+    (is (str/includes? t ":form/src") "a ref followed: what the form entity holds")
+    (is (str/includes? (text :var/name) "One real value:") "an attribute that is no ref: a real value")))

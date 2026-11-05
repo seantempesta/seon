@@ -348,7 +348,7 @@
         (cond-> (-> (assoc st :turn (inc turn))
                     ;; what this turn's parts showed, by producer, and what it evaluated (waste)
                     (update :log (fnil conj []) {:n turn
-                                                 :shown {'seon.render.ui/cite-model (set (keep :seon.cite/name (task/task-cites db (:seon.task/id t))))
+                                                 :shown {'seon.render.ui/cited (set (keep :seon.cite/name (task/task-cites db (:seon.task/id t))))
                                                          'seon.context/status (set (map :test (:proofs s)))}
                                                  :items (mapv (fn [{:keys [code response]}] {:form code :error (:ex response)}) calls)}))
           ;; a merge turn: each turn of a merge task; a whole task's own work comes first, so

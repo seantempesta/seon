@@ -96,7 +96,7 @@
   {:malli/schema [:=> [:cat :any] :boolean]}
   [a] (boolean (:seon.db/identity (contract/properties a))))
 
-(defn- map-keys
+(defn map-keys
   "The keys a schema's [:map ...] form names (inline, or in its [:and ...] members)."
   {:malli/schema [:=> [:cat :any] [:vector :any]]}
   [form]
