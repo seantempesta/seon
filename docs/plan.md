@@ -17,15 +17,19 @@ What Seon is for, where it stands, the one step being worked now, and the steps 
 
 **Measured as** turns to green and tasks merged. **Held to:** nothing crashes or hangs (every failure is data to the agent); everything shown is derived from the db at t; one mechanism per job; every change earns its place; a v1 capability is present or dropped on purpose ([parity](parity.md)).
 
-## Where it stands (2026-11-04): one way to make what an agent reads
+## Where it stands (2026-11-04): what an agent reads
 
-**All work on context and rendering follows [the Seon way](seon-way.md); read it before touching either, and do not build on what it says is going.** The owner's direction: what an agent reads is data on it or a query away, drawn by a declared render, so page and context adapt to the data with no hand assembly; entities have attributes, not rows; store what is retrieved ([rulings](decisions.md#2026-11-04-rulings)).
+**Look at what is already built before touching context or rendering: [ctx](ctx.md) and [render](render.md) say what exists.** The owner's direction: what an agent reads is data on it or a query away, drawn by a declared render, so page and context adapt to the data with no hand assembly; entities have attributes, not rows; store what is retrieved ([rulings](decisions.md#2026-11-04-rulings)).
 
 **The order now:**
 1. ~~**The simpler schema**~~, merged 2026-11-05: evals as attributes with ``:printed`` gone; a turn as a number, with the model call holding what a turn held; no runs, ``:seon.end`` or turn entities. Root sets judged attributes on the task; a task's earlier states are the db's history; an agent's records stay on its branch. ``runs/store`` was erased at its merge ([decisions](decisions.md)). 616a5224c7 is the control the core compares against.
 2. **The core,** one merge on top: the page as the last message, latest only (held on ``jolt/one-render-6-the-page-is-the-last-message``); the default render over the pattern; parts named by the agent's data; both renders in the component's tracked run; each part printed once; structure; the most specific render wins; the transcript as a declared render with ``seon.context/request``'s assembly deleted. Measured on the six tasks against the baselines before it merges.
 3. **Beside it:** page controls for delete, compact, forget and reset; reset through the writer; a browser spike for the image.
 4. **Then:** the image; agents improving renders by default.
+
+**Asked by the owner, 2026-11-05:** the agent's entity, pull and renders make most of its context, teaching it the system, its task and how messaging works (``seon.context/the-agents-data-makes-its-context``, design first). Agents declaring a render of their own is built and tested ([ctx](ctx.md#adding-a-datum-and-its-render)); no prompt teaches it yet.
+
+**Costs still open on the core step:** latest-only text costs more uncached tokens per turn until the page is small: on method-key about 3.5 times the baseline with cites still on the page, one run. Moving cites off the page should bring it to about 1.3k tokens, predicted and unmeasured. An image costs about 990 tokens uncached per turn, read names exactly at 1300 by 1300 pixels and invented them on a taller page, and needs a browser whose memory and time are unknown. Whether any of this makes agents better is not known until the six-task comparison.
 
 A task holds how its work stands and ended ([reconcile](reconcile.md#a-task-holds-how-its-work-ended)).
 
@@ -56,9 +60,25 @@ A task holds how its work stands and ended ([reconcile](reconcile.md#a-task-hold
 | The core | After a layout changes, old parts stay on the page for a pass | ``seon.render/a-layout-change-leaves-no-old-parts``: trace it first |
 | The core | Text printed where no agent reads it | ``seon.print/the-one-printer-is-for-context`` |
 | Beside the core | Result handles are a counter, so a curated cut shifts them | ``seon.repl/a-handle-names-its-value`` |
+| The core | ``seon.context/page-lists``, ``seon.render.ui/page-cites`` and ``seon.context/namespaces-of`` are hand assembly beside the pull and its renders | with ``seon.context/the-agents-data-makes-its-context`` |
+| The core | The debug page draws from root, by main's code, at up to 5 GB a draw on a real page; a live agent should draw its own, and an ended agent's needs an answer | ``seon.render/the-debug-page-reads-a-branchs-own-renders`` |
+| Beside the core | Smaller: two identities on an agent (``:seon.agent/id``, ``:seon.agent/key``); two html renders of an eval; several words for a part (part, unit, component, tile); ``my.task/status`` and ``my.task/data`` computing what parts hold; a branch as a keyword on four entities; ``begin-run!``, ``run-head``, ``of-run`` and other names that still say run | no task yet |
 | Beside the core | Reset forks by hand: not through the writer, no turn loop from the reconciler, not at any eval; cutting between two calls of one reply is untried | ``seon.agent/reset-an-agent-to-any-point`` |
 | Beside the core | A proof child's death says nothing | ``seon.agent/a-proof-child-that-died-says-why`` |
 | Beside the core | A re-registered attribute of another type is refused only at the write | ``seon.db/registering-says-a-type-cannot-change`` |
+| Now, known broken (2026-11-05) | What an agent reads is raw data and doesn't explain itself: citations are maps, status has no real render, words on the page are internal | ``jolt/render-core``, unmerged |
+| Now, known broken | Rebuilt requests mix in later state, so the page saying "as it went on the wire" isn't true: ``seon.context/request`` draws the page from the db it's given, not the turn's basis | not fixed; Optimization |
+| Now, known broken | Text is clipped outside the one printer: ``seon.ref/lead-sentence``, ``:summary`` depth, "(+N more)", ``subs`` in renders. ``docs/render.md#no-clipping`` already forbids it | render path on ``jolt/render-core``; the rest unstarted |
+| Now, known broken | ``edit!``'s balance accounting wasted ref 11 turns | on ``jolt/delete-unread``, with repair through the forgiving reader on ``jolt/forgiving-tools`` |
+| Now, known broken | Clojure's own forms fail or answer nothing: ``source``, ``source-fn`` and ``pst`` missing on root; ``(doc nope)`` blank; ``(help)`` isn't the system message | ``jolt/forgiving-tools``, review found ``help`` callers broken |
+| Now, known broken | Handles are a counter, and a repeated answer is sent again whole | ``jolt/handle-names-value``, review found host values sharing a handle |
+| Now, known broken | Agents go quiet and stop writing: silent at call 2 wrote in 2 of 5 fresh sessions against 27 of 27 with text, nearly all on one task. The cause isn't known. The prompt line is on main at 7baa40440d, not yet seen working | watch live runs |
+| Now, known broken | Breadth, ref and method-key have never merged, so half the benchmark can't show improvement | not investigated |
+| Now, known broken | The session list reads every key when it draws, with no cost proof | not filed; said in the merge message of 02dd5f568f |
+| Now, known broken | 15 Jolt gates fail on the base pin too; a red the same as before isn't green | ``jolt.host/the-gates-red-before-the-alias-pin``, with the pin |
+| Now, known broken | About 23 attributes are named at most once in src, likely written and never read | Optimization to check and delete |
+| Now, to judge | ``jolt/render-core`` adds a tail placement (``:seon.render/place``, ``[:tail ...]``), ``:seon.render/parts`` and ``part-rank``, and carries inserted evals. Each is judged by whether the pull's order and the existing renders already do it, by the code and tests | with ``seon.context/the-agents-data-makes-its-context`` |
+| Now, known broken | Nothing merged: ``history``, ``my.db/at`` (owner hasn't said), ``jolt/insert-and-run``, an opening of inserted evals gave 0 of 6 replies with text on the one shape tried | open |
 | After | History across all kept branches grows without a measure (``seon.union``) | ``seon.db/history-across-kept-branches-is-measured`` |
 | Each merge | The standing root misses merges while the main tree is on a topic branch (``bin/update``) | update it at each merge of the schema work |
 
@@ -234,7 +254,7 @@ How to work them: merge batches through a temporary worktree when a helper holds
 
 ## Now: one step
 
-The current order is [where it stands](#where-it-stands-2026-11-04-one-way-to-make-what-an-agent-reads). What follows is the longer goal, and where it speaks of runs or turns as things, they are being removed.
+The current order is [where it stands](#where-it-stands-2026-11-04-what-an-agent-reads). What follows is the longer goal, and where it speaks of runs or turns as things, they are being removed.
 
 **Step 1: one real task, end to end, through Seon.** Done when an agent attached to a real task file entry finishes it: green, merged by Seon into main, written back, and the owner can watch the whole run on its chat page. Nothing else is built until this works. The known problems in its way, in order (each is a task with its proof). Where it stands (2026-10-30, afternoon): md-scan #29 went green on its proofs and the merge gate held it on a candidate missing its schema resource, now fixed; its agent is to be released on main with batch 41, the first task merged by Seon ([above](#2026-10-30-afternoon)).
 

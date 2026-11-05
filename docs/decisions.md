@@ -2,13 +2,29 @@
 
 This file holds the owner's standing rulings, one entry each: the rule, the owner's words and date, and where the rule is stated now; current truth and mechanism live in `AGENTS.md` and the wiki (`docs/`), and superseded or done rulings are kept verbatim in git history.
 
+## 2026-11-05 rulings
+
+The owner's rulings of 2026-11-05, on looking before building and on what makes an agent's context; they stand over earlier entries where they differ.
+
+### Look around before building; no page of doctrine (owner, 2026-11-05)
+
+"I don't know wtf \"seon-way\" is so audit it for it's mertis and integrate them into the rest of th edocs and delete it. There is no ONE WAY, just fucking look around and don't rebuild shit that we've already built." And: "I want you to bring more engineering rigor and sanity to the work. Don't just act think and plan". Stated in AGENTS.md §1. A mechanism is judged by what the code and tests show, not by a page's say-so.
+
+### An agent experiments with a render of its own (owner, 2026-11-05)
+
+"Agents need to be able to declare their own render functions and they can either override the existing one, but that changes the entire system behavior if it's the default so it's better if they are experimenting to just declare their own. All functions are a trivial query away since all functions record their inputs and outputs and that's all a render function is." Stated in [ctx](ctx.md#adding-a-datum-and-its-render).
+
+### An agent's entity, pull and renders make most of its context (owner, 2026-11-05)
+
+"Design the agents entity with useful information and make it so the pull pattern and the render functions generate the majority of the agents context. It teaches them about the system, it explain what task they are working on, how messaging works when they get a message, evertyhing. It's all data driven." And: "Definitely got rid of \"runs\" (that concept doesn't exist) agents have turns, evals, max turns, etc." The work is task seon.context/the-agents-data-makes-its-context.
+
 ## 2026-11-04 rulings
 
-The owner's rulings of 2026-11-04, on what an agent is and how everything it reads is made; the direction and what is proven are in [the Seon way](seon-way.md). They stand over earlier entries where they differ.
+The owner's rulings of 2026-11-04, on what an agent is and how everything it reads is made. They stand over earlier entries where they differ.
 
 ### Data is stored as data; the one printer is for context (owner, 2026-11-04)
 
-"All evals that we can store as data natively inside datahike or via the object storage we should do up to a reasonable point (we should have reasonable maxdese) and if that happens we can't resume that data and that's fine. Printed data is rarely the right choice and I want us to be very suspricious of any code that is printing values. The only value printer should be the one value printer and that's for assembling context for agents". Stated in [the Seon way](seon-way.md); the sweep is task seon.print/the-one-printer-is-for-context.
+"All evals that we can store as data natively inside datahike or via the object storage we should do up to a reasonable point (we should have reasonable maxdese) and if that happens we can't resume that data and that's fine. Printed data is rarely the right choice and I want us to be very suspricious of any code that is printing values. The only value printer should be the one value printer and that's for assembling context for agents". Stated in [plain data](storage.md#plain-data); the sweep is task seon.print/the-one-printer-is-for-context.
 
 ### The standing store is erased when the new schemas land (owner, 2026-11-04)
 
@@ -16,39 +32,39 @@ The owner's rulings of 2026-11-04, on what an agent is and how everything it rea
 
 ### Agent branches are kept and queried (owner, 2026-11-04)
 
-"In general I don't want to delete the agent branches and I want to query them when we need information on what happened for an agent. Mostly to avoid complicated merging but I can see the value of merging the agents entity, but then what about any refs too? How far do we merge back?"; "I think in production we'll be auto archiving the branches if they work, but in development I want us to be able to restore sessions and arbitrarily fork and edit them". An agent's records never merge; main holds what root needs, and a merge stays the program and tasks. Archiving is a later production policy, with no code for it now. Stated in [the Seon way](seon-way.md).
+"In general I don't want to delete the agent branches and I want to query them when we need information on what happened for an agent. Mostly to avoid complicated merging but I can see the value of merging the agents entity, but then what about any refs too? How far do we merge back?"; "I think in production we'll be auto archiving the branches if they work, but in development I want us to be able to restore sessions and arbitrarily fork and edit them". An agent's records never merge; main holds what root needs, and a merge stays the program and tasks. Archiving is a later production policy, with no code for it now. Stated in [merging](merging.md#seons-merge-is-a-three-way-merge-of-the-program).
 
 ### An agent's data makes its page and its context (owner, 2026-11-04)
 
-"The fact that the agent's pull is what makes an agent an agent is what makes it render the UI and which parts go where. A different agent could have different data attached and we want it to render differently to adapt to whatever data we give it. This is a general core function of the seon system. Make all data known, validate it, and we make it easy to process it for whatever needs the user has." And: "No more hand crafting things. Let the system operate and figure out how to have everything declare itself". Stated in: [the rules](seon-way.md#the-rules).
+"The fact that the agent's pull is what makes an agent an agent is what makes it render the UI and which parts go where. A different agent could have different data attached and we want it to render differently to adapt to whatever data we give it. This is a general core function of the seon system. Make all data known, validate it, and we make it easy to process it for whatever needs the user has." And: "No more hand crafting things. Let the system operate and figure out how to have everything declare itself". Stated in: [render](render.md#one-rendering-system-drawn-from-the-data).
 
-### One way, batteries included (owner, 2026-11-04)
+### The data's shape is ours, batteries included (owner, 2026-11-04)
 
-"You can change how data is connected to each other and rename it and change directions on what is ref'ing what. We have full control so make a system that will work generally and optimally one way and make it so it's easier to build things the optimal way ... This isn't do anything you want it's a more rails style batteries included but you follow these constraints." Stated in: [the idea](seon-way.md#the-idea).
+"You can change how data is connected to each other and rename it and change directions on what is ref'ing what. We have full control so make a system that will work generally and optimally one way and make it so it's easier to build things the optimal way ... This isn't do anything you want it's a more rails style batteries included but you follow these constraints." Stated in: [storage](storage.md#store-data-for-how-it-is-used).
 
 ### Store data for how it is used; a turn is a number (owner, 2026-11-04)
 
-"Whatever data we need you can store it any way you need to to retrieve it efficiently. That's how these databases work best. You plan ahead for how you want to use it and make sure that's easy and cheap". And: "I'm saying \"wtf is a turn\" but a number? An agent has turns and evals why are we organizing them on top of other entities". Stated in: [what needs to change](seon-way.md#what-needs-to-change).
+"Whatever data we need you can store it any way you need to to retrieve it efficiently. That's how these databases work best. You plan ahead for how you want to use it and make sure that's easy and cheap". And: "I'm saying \"wtf is a turn\" but a number? An agent has turns and evals why are we organizing them on top of other entities". Stated in: [storage](storage.md#store-data-for-how-it-is-used), [turn](turn.md#the-turn-is-a-number).
 
 ### A render asks for the db and queries what it wants (owner, 2026-11-04)
 
-"We assemble an agent why can't we add some data that triggers a render function to get the data you want and render it? The render functions get the curretn db if they ask for it so you can do any query you want and it doesn't have to be reachable from the agent directly". Stated in: [the rules](seon-way.md#the-rules).
+"We assemble an agent why can't we add some data that triggers a render function to get the data you want and render it? The render functions get the curretn db if they ask for it so you can do any query you want and it doesn't have to be reachable from the agent directly". Stated in: [components](render.md#components).
 
 ### Re-render when the data or its function changes (owner, 2026-11-04)
 
-"My point is thing in data and when data changes OR THE FUNCTION THAT RENDERS IT changes then you re-render". Stated in: [the rules](seon-way.md#the-rules).
+"My point is thing in data and when data changes OR THE FUNCTION THAT RENDERS IT changes then you re-render". Stated in: [reactive renders](render.md#reactive-renders).
 
 ### Delete, compact and reset are data (owner, 2026-11-04)
 
-"A \"compaction\" is just removing and maybe modifying some data on the agent's entity and then the next message sent regenerates the context (which intentionally breaks caching) and we have the model keep working." And: "I want the ability to reset to any point AND to delete arbitrary data (the history is there if we ever need to revisit it) and have compaction work." Stated in: [what this gives you](seon-way.md#what-this-gives-you).
+"A \"compaction\" is just removing and maybe modifying some data on the agent's entity and then the next message sent regenerates the context (which intentionally breaks caching) and we have the model keep working." And: "I want the ability to reset to any point AND to delete arbitrary data (the history is there if we ever need to revisit it) and have compaction work." Stated in: [ctx](ctx.md#deleting-compacting-and-resetting-are-changes-of-data).
 
 ### The page is latest only (owner, 2026-11-04)
 
-The owner approved the page as only the request's last message, narrowing the 2026-10-29 and 2026-10-30 rulings that a part is sent as what changed: "always include the most recent ... (not accumulating)". Stated in: [the flow](seon-way.md#the-flow).
+The owner approved the page as only the request's last message, narrowing the 2026-10-29 and 2026-10-30 rulings that a part is sent as what changed: "always include the most recent ... (not accumulating)". Not on main yet: [the plan's core step](plan.md#where-it-stands-2026-11-04-what-an-agent-reads).
 
 ### Every agent improves the renders (owner, 2026-11-04)
 
-"We distrubute the task of writing rendering functions for data across the whole system so every agent helps build a better understanding o fthe data we are storing and processing in the system by default". Stated in: [what this gives you](seon-way.md#what-this-gives-you).
+"We distrubute the task of writing rendering functions for data across the whole system so every agent helps build a better understanding o fthe data we are storing and processing in the system by default". Stated in: [ctx](ctx.md#adding-a-datum-and-its-render).
 
 ## 2026-11-03 rulings
 

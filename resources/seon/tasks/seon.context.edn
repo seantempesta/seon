@@ -140,4 +140,11 @@ Owner: the context session (the ctx pull and its render); the optimization sessi
  {:seon.task/name "the-status-declares-its-summary"
   :seon.task/plan "What was seen, in the lab, 2026-11-04: 22 stray red tests made the status 32k tokens a turn, repeated on the page each request. A prototype render, each red's name, its first failure and a form that reads it, made it 2k. What should be true: the status's declared model render is that summary, any agent can override it, and the whole is a read away, by a form the render names. The no-cuts ruling of 2026-10-30 is about an agent's own values: this is a render's choice with the rest a form away, and the owner's call. my.agent/red does not exist yet."
   :seon.task/kind :work
-  :seon.task/proofs #{seon.context-test/many-red-tests-draw-a-summary-with-what-reads-the-rest}}]
+  :seon.task/proofs #{seon.context-test/many-red-tests-draw-a-summary-with-what-reads-the-rest}}
+ {:seon.task/name "the-agents-data-makes-its-context"
+  :seon.task/plan "The owner, 2026-11-05: \"Design the agents entity with useful information and make it so the pull pattern and the render functions generate the majority of the agents context. It teaches them about the system, it explain what task they are working on, how messaging works when they get a message, evertyhing. It's all data driven.\" Design first, written here and read by the owner before anything is built.
+What exists, so nothing is rebuilt: the agent's pattern, seon.ctx/pattern-of; what every agent reads beside its task, :seon.config.agent/cites and my.agent/cite!, drawn by the cite render; a key of an agent's own with its render, my.schema/register! (seon.ctx-test/an-agent-adds-a-datum-and-its-render); a layout on its branch (seon.ctx-test/a-layout-declared-after-the-first-draw-is-the-page); a message's records, seon.context/message-messages. What today is not data: the system message is docs/prompt.md, the same bytes for every agent (seon.context/system-text), and seon.context/request assembles the transcript.
+Questions the design answers, each with a measurement from a real request: which attributes of :seon.db/agent-fact answer a question the agent has, and which are bookkeeping; what of docs/prompt.md moves to data an agent's pull holds, given that a system message is cached and the page, once it is the last message, is not; how a message's own render says how messaging works when one arrives; what jolt/render-core's renders already do of this.
+Owner: the context session."
+  :seon.task/kind :work
+  :seon.task/proofs #{}}]
