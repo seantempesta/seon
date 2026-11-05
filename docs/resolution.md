@@ -22,6 +22,7 @@ The sites that resolve a name held in data to a var by design, each with its rea
 - `seon.system/step-fn`: `resources/seon/system.edn` names each proc's step-fn Var; the declaration is the set of these resolves.
 - `seon.render/model`: a schema's declared model render (`:seon.render/model`) is a symbol in data, resolved when a request sends the part or the printer prints the value, as `render-of` is for a render.
 - `seon.render/render-of`: a schema's declared render is a symbol in data, resolved when the value is shown.
+- `seon.web.html/write!`: a printed part's head is its render's name, a symbol in data (`seon.render/part-form`), resolved when the page writes it, the one expansion a var head has.
 - `seon.contract/function-var?`: a type's positional factory (`->T`) is known by its type `T` beside it in its namespace, looked up by name.
 - `seon.render/declared-var`: the same, as its var: a layout drawn by the walk is a component, whose var's contract says what it reads.
 - `seon.cost/run`: a cost estimate names its function and its input as symbols in data.
