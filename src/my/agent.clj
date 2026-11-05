@@ -487,11 +487,12 @@
   "Print the exception e (*e by default) as clojure.repl/pst does: its message, then each cause's
   class and message."
   {:malli/schema [:function [:=> [:cat] :nil] [:=> [:cat :any] :nil]]}
-  ([] (pst *e))
-  ([e] (when (instance? Throwable e)
-         (print (clojure.main/err->msg e))
-         (doseq [{:keys [type message]} (rest (:via (Throwable->map e)))]
-           (println "Caused by:" type message)))))
+  ([] (if *e (pst *e) (println "no error to print: *e is nil")))
+  ([e] (if (instance? Throwable e)
+         (do (print (clojure.main/err->msg e))
+             (doseq [{:keys [type message]} (rest (:via (Throwable->map e)))]
+               (println "Caused by:" type message)))
+         (println "pst prints an exception; this is" (pr-str (class e))))))
 
 (defn- missing
   "Why sym names nothing, in words, with the nearest real names: no-var's answer on a branch; in a process with no
@@ -513,7 +514,7 @@
     `(let [x# ~x]
        (println (if (or (symbol? x#) (var? x#))
                   (let [s# (named x#)]
-                    (or (source-fn s#) (#'my.agent/missing s#)))
+                    (or (source-fn s#) (if (resolve s#) (str s# " has no recorded source in this process") (#'my.agent/missing s#))))
                   (str "Source not found for " x# ": source reads a name or a var"))))))
 
 (defn- help-nearest

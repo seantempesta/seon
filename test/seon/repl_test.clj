@@ -771,7 +771,7 @@
   (let [forms ["(with-out-str (clojure.repl/doc map))" "(with-out-str (doc map))" "(with-out-str (doc nope-x))" "(with-out-str (dir nope-x))"
                "(with-out-str (dir map))" "(with-out-str (source nope-x))" "(with-out-str (clojure.repl/source nope-x))"
                "(clojure.repl/source-fn 'my.agent/named)" "(with-out-str (doc :var/form))" "(do (ns x.fresh) (with-out-str (doc map)))"
-               "(with-out-str (in-ns 'user) (clojure.repl/source my.agent/named))" "(with-out-str (doc if))"]
+               "(with-out-str (in-ns 'user) (clojure.repl/source my.agent/named))" "(with-out-str (doc if))" "(with-out-str (clojure.repl/pst 1))"]
         items (rest (at/in-agent #(into [{:op :context :agent (:agent %)}] forms)))
         by (zipmap forms items)
         out #(str (:value (by %)))]
@@ -785,7 +785,8 @@
     (is (str/includes? (out "(with-out-str (clojure.repl/source nope-x))") "nope-x names no") "qualified")
     (is (str/includes? (out "(clojure.repl/source-fn 'my.agent/named)") "defn named"))
     (is (str/includes? (out "(do (ns x.fresh) (with-out-str (doc map)))") "clojure.core/map") "in a namespace made with ns")
-    (is (str/includes? (out "(with-out-str (doc if))") "if") "a special form")))
+    (is (str/includes? (out "(with-out-str (doc if))") "if") "a special form")
+    (is (str/includes? (out "(with-out-str (clojure.repl/pst 1))") "pst prints an exception") "pst of what is none says so")))
 
 (defn- outcome [ticks thunk]
   (try {:value (intr/run ticks thunk)} (catch Throwable e {:error e})))
