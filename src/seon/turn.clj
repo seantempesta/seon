@@ -195,16 +195,16 @@
     merge? (assoc :merge? true)))
 
 (defn- call-problem
-  "Why an eval call, its prose and its code, is not the eval tool's shape, as the error its one
-  result is, or nil: a call is prose and one or more forms (docs/prompt.md).
+  "Why an eval call, its intent and its code, is not the eval tool's shape, as the error its one
+  result is, or nil: a call is intent and one or more forms (docs/prompt.md).
   Code that does not read is left to the REPL, whose read error says where."
   {:malli/schema [:=> [:cat [:maybe :string] :string] [:maybe :seon.turn/invalid-call]]}
-  [prose code]
+  [intent code]
   (let [forms (reader/read-text code 'user)]
     (cond
-      (str/blank? prose)
+      (str/blank? intent)
       (contract/error :seon.turn/invalid-call #'call-problem
-                      "this call has no prose: say in a sentence what its form does and what you expect; the form was not run" {:problem :no-prose})
+                      "this call has no intent: send intent, a little thinking (a sentence is fine: what these forms are about to do and what you expect), beside code; the form was not run" {:problem :no-intent})
       (and forms (empty? forms))
       (contract/error :seon.turn/invalid-call #'call-problem
                       "this call has no form: its code is empty; nothing was run" {:problem :forms :forms 0}))))
@@ -325,25 +325,25 @@
             _ (intr/clear-pending!)
             ;; each eval call through the one REPL path, in order; its response is the call's result. The reply's text and
             ;; reasoning are the model call's own (below), never copied onto an eval
-            ;; a call with no prose or no form, or after one that threw or answered an error, is not run: its one
+            ;; a call with no intent or no form, or after one that threw or answered an error, is not run: its one
             ;; result says why (seon.repl/unrun, docs/prompt.md)
-            calls (reduce (fn [acc {:keys [id code prose]}]
+            calls (reduce (fn [acc {:keys [id code intent]}]
                             (let [;; the forgiving reader's repairs, told on this call's own result (:repaired)
                                   {src :text repairs :repairs} (reader/forgive code)
-                                  ;; each call keeps its own prose
+                                  ;; each call keeps its own intent
                                   req (cond-> {:origin :model :call-id id}
-                                        (not (str/blank? prose)) (assoc :prose prose)
+                                        (not (str/blank? intent)) (assoc :intent intent)
                                         (seq repairs) (assoc :repaired (context/repaired src repairs)))
                                   ;; a call that failed (threw, answered an error value such as a refused edit, or had no
-                                  ;; prose or no form) stops the rest: none builds on a change that never happened
+                                  ;; intent or no form) stops the rest: none builds on a change that never happened
                                   failed (some #(when (or (:ex (:response %)) (contract/error? (:value (:response %)))) (:id %)) acc)
                                   why (if failed
                                         (contract/error :seon.turn/not-run #'act! (str "not run: call " failed " of this reply failed before it (its result says why)") {:after failed})
-                                        (call-problem prose src))]
+                                        (call-problem intent src))]
                               (conj acc (if why
-                                          {:id id :code code :prose prose :not-run (some? failed)
+                                          {:id id :code code :intent intent :not-run (some? failed)
                                            :response (let [r (repl/unrun src req why)] (agent/commit!) r)}
-                                          {:id id :code code :prose prose :response (evaluated! src req)}))))
+                                          {:id id :code code :intent intent :response (evaluated! src req)}))))
                           [] (:tool-calls c))
             rs (mapv :response calls)
             eval-ms (long (profile/ms-since t2))

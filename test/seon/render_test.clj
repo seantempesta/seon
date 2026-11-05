@@ -191,7 +191,7 @@
 (deftest a-stored-prove-draws-as-its-live-response
   ;; the context lab, 2026-11-02: a stored prove's row drew its raw map (:at-judge, :error, :fail ...) where its live
   ;; response drew seon.render.ui/proved; the value's schema is metadata the store does not keep, the record keeps :schema
-  (let [e {:seon.eval/code "(my.agent/prove)" :seon.eval/prose "Prove." :seon.eval/schema :seon.test/proved
+  (let [e {:seon.eval/code "(my.agent/prove)" :seon.eval/intent "Prove." :seon.eval/schema :seon.test/proved
            :seon.eval/response {:handle 'result/e9 :value {:reports [] :ran 3 :reused 2 :fail 0 :error 0 :pass 3 :heap [1 2 3]}}
            :seon.eval/by "a3"}
         row (h/html (ui/evaluation {} e))
@@ -202,7 +202,7 @@
 
 (deftest an-eval-and-a-turn-say-what-they-cost
   ;; an eval's cost as recorded, each number with its unit; a turn's header says which of how many
-  (let [ev (h/html (ui/evaluation {} {:seon.eval/code "(f 2)" :seon.eval/prose "f doubles?" :seon.eval/response {:handle 'result/e1 :value 4 :ms 1.5 :bytes 2048 :ticks 120}
+  (let [ev (h/html (ui/evaluation {} {:seon.eval/code "(f 2)" :seon.eval/intent "f doubles?" :seon.eval/response {:handle 'result/e1 :value 4 :ms 1.5 :bytes 2048 :ticks 120}
                                       :seon.eval/by "a3"}))
         turn (h/html (ui/turn {} {:seon.model-call/n 1 :seon.model-call/tokens 1200 :seon.model-call/basis {:max-turns 8}}))]
     (is (str/includes? ev "f doubles?") "the prose beside the call")
@@ -345,7 +345,7 @@
                        (seon.repl/record-tx {:seon.root/id :root} "root-1" "outside" {:seon.eval/code "(my.root/problems sys)" :seon.eval/response {:handle 'result/e1 :value {}}})])
         branch (reduce d/db-with main0
                        [(seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e1" "a3"
-                                             {:seon.eval/call-id "c-e1" :seon.eval/code "(f 2)" :seon.eval/prose "f doubles?" :seon.eval/response {:handle 'result/e1 :value 4 :ms 1.5 :bytes 2048 :ticks 120}})
+                                             {:seon.eval/call-id "c-e1" :seon.eval/code "(f 2)" :seon.eval/intent "f doubles?" :seon.eval/response {:handle 'result/e1 :value 4 :ms 1.5 :bytes 2048 :ticks 120}})
                         (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e2" "a3"
                                              {:seon.eval/call-id "c-e2" :seon.eval/code "(f 3)" :seon.eval/response {:handle 'result/e2 :value 6 :ms 0.4 :bytes 512 :ticks 40}})
                         [{:seon.agent/key k :seon.agent/turn 1}

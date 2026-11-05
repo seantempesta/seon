@@ -1193,10 +1193,10 @@
         [a0 r0 a1 r1 :as ms] (:value msgs)]
     (is (= [:cap 2] [(:outcome end) (:model-calls end)]) "two model calls (the proof stays red), then the cap")
     (is (= ["assistant" "tool" "assistant" "tool"] (mapv :role ms)) "each reply followed by its call's answer")
-    (is (= [{:id "call-0-0" :code "(+ 20 21)" :prose "Add twenty and twenty-one."}] (:tool-calls a0)))
+    (is (= [{:id "call-0-0" :code "(+ 20 21)" :intent "Add twenty and twenty-one."}] (:tool-calls a0)))
     (is (= "call-0-0" (:tool-call-id r0)) "the answer names its call")
     (is (str/includes? (:content r0) "41") "the first call's answer")
-    (is (= [{:id "call-1-0" :code "(+ 1 41)" :prose "Add one to the value the last call showed."}] (:tool-calls a1)) "the second call was made after the first call's answer, from it")
+    (is (= [{:id "call-1-0" :code "(+ 1 41)" :intent "Add one to the value the last call showed."}] (:tool-calls a1)) "the second call was made after the first call's answer, from it")
     (is (str/includes? (:content r1) "42") "and both answers are in the conversation")))
 
 (deftest a-call-after-one-that-threw-is-not-run
@@ -1240,7 +1240,7 @@
   ;; no form answers a typed error as its one result and runs nothing (docs/prompt.md)
   (let [problem #'seon.turn/call-problem]
     (is (nil? (problem "Add them." "(+ 1 2)")) "prose and one form")
-    (is (= :no-prose (:problem (problem " " "(+ 1 2)"))) "no prose")
+    (is (= :no-intent (:problem (problem " " "(+ 1 2)"))) "no intent")
     (is (nil? (problem "Two." "(def a 1) (inc a)")) "two forms")
     (is (= [:forms 0] ((juxt :problem :forms) (problem "None." "  "))) "no form")
     (is (nil? (problem "Unread." "(+ 1")) "code that does not read is left to the REPL, which says where"))
@@ -1781,10 +1781,10 @@
                                          " (let [ag (:seon.agent/id " (agent-code w) ")]"
                                          "   @(seon.root/message! sys ag \"carry on\") " (parked-code w 2)
                                          "   (let [db (:db @(seon.root/call! sys {:op :write :req {:op :branch-db :branch (seon.task/default-branch " (pr-str w) ")}}))]"
-                                         "     {:prose (sort (datahike.api/q '[:find [?p ...] :where [_ :seon.eval/prose ?p]] db))})))")}]))
+                                         "     {:intent (sort (datahike.api/q '[:find [?p ...] :where [_ :seon.eval/intent ?p]] db))})))")}]))
                         {:config {:seon.config.ai/script 'seon.fixtures/prose-reply}
                          :decls [{:seon.task/name "w" :seon.task/plan "Wait." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]})]
-    (is (= ["Saw my own reply."] (:prose (:value r))) (pr-str r))))
+    (is (= ["Saw my own reply."] (:intent (:value r))) (pr-str r))))
 
 (deftest a-woken-agent-is-not-sent-its-own-loop
   ;; task seon.render/one-way-to-make-what-an-agent-is-sent, step 2: the eval that ran the parked work (seon.turn/work!) is
@@ -1901,7 +1901,7 @@
                                              "   :message-turns (vec (datahike.api/q '[:find [?t ...] :where [?m :seon.message/turn ?t]] db))"
                                              "   :call-ids (vec (datahike.api/q '[:find [?id ...] :where [?m :seon.model-call/id ?id]] db))"
                                              "   :committed (msgs (datahike.api/commit-as-db db (get-in m [:seon.model-call/basis :commit])))"
-                                             "   :prose (mapv #(datahike.api/q '[:find ?r . :in $ ?i :where [?e :seon.eval/id ?i] [?e :seon.eval/prose ?r]] db %) (map first evals))})")
+                                             "   :intent (mapv #(datahike.api/q '[:find ?r . :in $ ?i :where [?e :seon.eval/id ?i] [?e :seon.eval/intent ?r]] db %) (map first evals))})")
                                         {:op :eval :agent "root"
                                          :code (str "(datahike.api/q '[:find ?id ?f ?to ?b :where [?m :seon.message/id ?id] [?m :seon.message/from ?f]"
                                                     " [?m :seon.message/branch ?br] [?a :seon.agent/branch ?br] [?a :seon.agent/id ?to] [?m :seon.message/body ?b]] @(:conn sys))")}])

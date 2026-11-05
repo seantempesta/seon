@@ -454,7 +454,7 @@
         resp (:seon.eval/response e)
         basis (:seon.eval/basis e)
         r (if recorded?
-            (cond-> resp (:seon.eval/code e) (assoc :code (:seon.eval/code e)) (:seon.eval/prose e) (assoc :prose (:seon.eval/prose e))
+            (cond-> resp (:seon.eval/code e) (assoc :code (:seon.eval/code e)) (:seon.eval/intent e) (assoc :intent (:seon.eval/intent e))
                     (:seon.eval/fns e) (assoc :fns (:seon.eval/fns e)))
             e)
         ;; a value recorded as data: inline, printed as its reply reads under its handle; in a row,
@@ -476,11 +476,11 @@
             line [:span {:class "font-mono"} [:code (merge-with #(str %1 " " %2) emit/highlight {:class "text-text-100"}) (prose (or (first (str/split-lines (or (:code r) ""))) "") (cell) {:one-line? true})]
                   [:span {:class (if err? "text-error" "text-text-500")} (if err? " ✕ " " ⇒ ")]
                   [:code {:class "text-text-400"} (prose (or shown (:text r) "") (cell) {:one-line? true})]]]
-        (if (and (:chat opts) (not (str/blank? (:prose r))))
-          [:span {:class "flex flex-col"} [:span {:class "whitespace-pre-wrap text-text-300 italic"} (prose (:prose r) (form-budget))] line]
+        (if (and (:chat opts) (not (str/blank? (:intent r))))
+          [:span {:class "flex flex-col"} [:span {:class "whitespace-pre-wrap text-text-300 italic"} (prose (:intent r) (form-budget))] line]
           line))
       [:div {:class (str "flex flex-col gap-1 border-l-2 pl-3 py-1 " (if err? "border-error" "border-base-700"))}
-       (when-not (str/blank? (:prose r)) [:p {:class "whitespace-pre-wrap text-text-300 italic"} (prose (:prose r) (form-budget))])
+       (when-not (str/blank? (:intent r)) [:p {:class "whitespace-pre-wrap text-text-300 italic"} (prose (:intent r) (form-budget))])
        (when (:code r) (code (:code r) (form-budget)))
        (if (map? (:ex r))
          (render/html (cond-> {} (:handle r) (assoc :handle (list :ex (:handle r)))) (:ex r))
@@ -1270,10 +1270,10 @@
       (into (if k [:summary {:seon/call 'seon.root/opened! :seon/agent (:seon.agent/id c) :seon/args {:key k :eval (:seon.eval/id e)}}] [:summary])
             (remove nil?)
             [(when err [:span {:class "shrink-0 text-error"} "⚠"])
-             (if (str/blank? (:seon.eval/prose e))
+             (if (str/blank? (:seon.eval/intent e))
                [:code {:class "seon-form min-w-0 flex-1 truncate"} (first (str/split-lines (or (:seon.eval/code e) "")))]
                ;; the agent's prose is Markdown, rendered (owner, 2026-10-29); the model reads it as written
-               [:div {:class "seon-prose seon-md-inline min-w-0 flex-1"} (markdown (:seon.eval/prose e))])
+               [:div {:class "seon-prose seon-md-inline min-w-0 flex-1"} (markdown (:seon.eval/intent e))])
              ;; how responsive it was and what it costs the context: quiet, at the line's end
              [:span {:class "ml-auto flex shrink-0 gap-2 text-2xs text-text-500"}
               (when ms [:span {:class "seon-ms"} (ms-str ms)])

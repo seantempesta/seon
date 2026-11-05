@@ -193,8 +193,8 @@
   [_]
   (let [prose "add is subtraction, surely."]
     {:text prose
-     :calls [{:prose prose :code "(in-ns 'app.calc)"}
-             {:prose prose :code "(defn add {:malli/schema [:=> [:cat :int :int] :int]} [a b] (- a b))"}]}))
+     :calls [{:intent prose :code "(in-ns 'app.calc)"}
+             {:intent prose :code "(defn add {:malli/schema [:=> [:cat :int :int] :int]} [a b] (- a b))"}]}))
 
 (defn expectation
   "Scenario k's {:check :expect} (seon.fixtures/scenarios); model? is a real model's run."

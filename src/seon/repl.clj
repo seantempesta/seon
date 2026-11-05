@@ -634,12 +634,12 @@
           [{:seon.value/gone {:type (.getName (class v)) :over bound}} false])))))
 
 (defn record-details
-  "What an eval records, each its own attribute of its entity (:seon.eval/code, :response, :schema, :basis, :prose,
+  "What an eval records, each its own attribute of its entity (:seon.eval/code, :response, :schema, :basis, :intent,
 :call-id, :fns; each only when present): the code; the response whole with its
   value as plain data (`kept`), never a text made for a reader (each prints it as it shows it: `text-of`),
-  so a record is the same whatever came before it; the prose beside it, as written (never
+  so a record is the same whatever came before it; the intent beside it, as written (never
   parsed here: the parser is program the agent may change, and an eval's record runs none of it; a reader
-  that wants what the prose cites parses the kept prose, docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map);
+  that wants what the intent cites parses the kept intent, docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map);
   a value that names its render schema keeps it (the page draws the value by it); the value that IS the agent's ctx (@ctx, identical to the
   object seon.ctx/ctx holds: the branch's record at t, seon.ctx/build) keeps the basis in place of the value, so a copy of the session is never
   stored at each @ctx; the provider's call id, its run, its costliest functions (the reply's text and reasoning are its model call's)."
@@ -658,7 +658,7 @@
              :seon.eval/response (cond basis (dissoc resp :value) (contains? resp :value) (assoc resp :value kv) :else resp)}
       schema (assoc :seon.eval/schema schema)
       basis (assoc :seon.eval/basis basis)
-      (:prose req) (assoc :seon.eval/prose (:prose req))
+      (:intent req) (assoc :seon.eval/intent (:intent req))
       (:call-id req) (assoc :seon.eval/call-id (:call-id req))
       (seq (:fns r)) (assoc :seon.eval/fns (:fns r)))))
 
@@ -726,7 +726,7 @@
   recorded, its handle result/e<n> bound to it (the live value inside), and recorded (an
   agent's, on its branch). From inside an agent, the turn loop's calls; req adds to the request
   (root's: seon.server's namespace, origin, budget and eval fn; root's requests to an agent:
-  agent-step's; a model's call: its :prose and :call-id). The request's entrant boundary: a
+  agent-step's; a model's call: its :intent and :call-id). The request's entrant boundary: a
   defect past a form's own (a middleware's, the printer's) ends the request with its error as
   the response's :ex. Its cost (:ms :ticks :bytes, seon.repl/wrap-cost) is taken once when the
   forms ran, so what the model reads of it never changes in a later turn. The response's :ns is the
@@ -959,7 +959,7 @@
 
 (defn unrun
   "A model's eval call that never ran, recorded as an eval whose response is error e, why
-  (seon.turn's: a call before it in its reply threw, or the call has no prose or no form), so
+  (seon.turn's: a call before it in its reply threw, or the call has no intent or no form), so
   every call of a reply has its one result. See docs/prompt.md."
   {:malli/schema [:=> [:cat :string :map :seon.error/base] :seon.repl/answer]}
   [code req e]

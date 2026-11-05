@@ -31,7 +31,7 @@
   is a call that carries the same prose (docs/prompt.md)."
   {:malli/schema [:=> [:cat :string [:* :string]] :seon.model/script-reply]}
   [prose & codes]
-  {:text prose :calls (mapv (fn [c] {:prose prose :code c}) codes)})
+  {:text prose :calls (mapv (fn [c] {:intent prose :code c}) codes)})
 
 (defn- says
   "A scripted reply of text and no call: a message, which ends the turn (docs/prompt.md)."
@@ -280,24 +280,24 @@
   "The scripted model of a reply whose second call throws (seon.agent-test): three calls, the
   third never run (docs/prompt.md)."
   {:malli/schema [:=> [:cat :seon.model/request] :seon.model/script-reply]}
-  [_] {:calls [{:prose "Define a." :code "(def a 1)"}
-               {:prose "Throw." :code "(throw (ex-info \"boom\" {}))"}
-               {:prose "Increment a." :code "(inc a)"}]})
+  [_] {:calls [{:intent "Define a." :code "(def a 1)"}
+               {:intent "Throw." :code "(throw (ex-info \"boom\" {}))"}
+               {:intent "Increment a." :code "(inc a)"}]})
 
 (defn calls-one-refused
   "The scripted model of a reply whose second call answers an error value, an edit refused (seon.agent-test): three
   calls, the third, built on the edit, never run (task seon.turn/an-agent-that-breaks-its-own-render-is-told-and-goes-on)."
   {:malli/schema [:=> [:cat :seon.model/request] :seon.model/script-reply]}
-  [_] {:calls [{:prose "Define a." :code "(def a 1)"}
-               {:prose "Change a text that is not there." :code "(seon.repl/edit! 'clojure.core/inc \"no such text\" \"x\")"}
-               {:prose "Increment a." :code "(inc a)"}]})
+  [_] {:calls [{:intent "Define a." :code "(def a 1)"}
+               {:intent "Change a text that is not there." :code "(seon.repl/edit! 'clojure.core/inc \"no such text\" \"x\")"}
+               {:intent "Increment a." :code "(inc a)"}]})
 
 (defn two-forms-in-a-call
   "The scripted model of a reply whose first call holds two forms (seon.agent-test): they run in
   order, and the call after it runs too (docs/prompt.md)."
   {:malli/schema [:=> [:cat :seon.model/request] :seon.model/script-reply]}
-  [_] {:calls [{:prose "Define g and increment it." :code "(def g 1) (inc g)"}
-               {:prose "Add five and six." :code "(+ 5 6)"}]})
+  [_] {:calls [{:intent "Define g and increment it." :code "(def g 1) (inc g)"}
+               {:intent "Add five and six." :code "(+ 5 6)"}]})
 
 (defn thinking-call
   "The scripted model that proves a reply's prose is recorded with its call (seon.agent-test):

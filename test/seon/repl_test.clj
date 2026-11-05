@@ -296,7 +296,7 @@
                "once, as it moves: an eval that stays says nothing"))
          ;; an eval with prose outside an agent (root's) is answered as any is
          (reset! agent/state {:n 0 :ns (the-ns 'user)})
-         (is (= 2 (:value (repl/eval-string "(+ 1 1)" {:prose "Adds, see seon.ref/scan."}))) "an eval with prose outside an agent")
+         (is (= 2 (:value (repl/eval-string "(+ 1 1)" {:intent "Adds, see seon.ref/scan."}))) "an eval with prose outside an agent")
          (finally (reset! agent/state old) (remove-ns 'x.repl-shadow)))))
 
 (deftest the-same-eval-answered-the-same-says-so
@@ -331,7 +331,7 @@
   ;; -> parse -> scan) with the parser the agent had broken: it could not inspect or undo its change. The eval path
   ;; runs no code the agent may redefine for its own bookkeeping: the record keeps the prose, and a reader parses it
   (let [prose "Counting, as `seon.ref/scan` reads docs/references.md#resolving-and-showing."
-        call (fn [code] (str "(let [r (seon.repl/eval-string " (pr-str code) " {:prose " (pr-str prose) "})]"
+        call (fn [code] (str "(let [r (seon.repl/eval-string " (pr-str code) " {:intent " (pr-str prose) "})]"
                             " {:value (when (number? (:value r)) (:value r)) :ex (some-> (:ex r) :seon.error/message str) :record (:record r)})"))
         [_ counted undone works]
         (at/in-agent [(str "(in-ns 'seon.ref) (def scan-was scan)"
