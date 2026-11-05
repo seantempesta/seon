@@ -145,9 +145,14 @@
          (let [r (repl/edit! 'x.repl-edit/l "" "x")]
            (is (= :empty (:seon.repl/refused-because r)) (str "an empty old text is refused, never matched everywhere: " (pr-str r))))
          (let [r (repl/edit! 'x.repl-edit/l [["(loop [i 0" "(loop [i 1"] ["(+ acc i)" "(+ acc i"]])]
-           (is (= :unbalanced (:seon.repl/refused-because r)) "each change is checked as one alone is")
+           (is (= :unbalanced (:seon.repl/refused-because r)) "a closer the whole edit lacks is refused")
            (is (str/includes? (:seon.error/message r) "change 2 of 2") (str "naming which: " (:seon.error/message r)))
            (is (= 16 ((resolve 'x.repl-edit/l) 4)) "and nothing changed"))
+         ;; a form wrapped by two changes, its opener in one and its closer in another, leaves the definition balanced
+         (repl/eval-string "(in-ns 'x.repl-edit) (defn w [n] (let [a n]\n  (+ a 1))) (in-ns 'user)" {})
+         (let [r (repl/edit! 'x.repl-edit/w [["(let [a n]" "(inc (let [a n]"] ["(+ a 1)))" "(+ a 1))))"]])]
+           (is (get-in r [:edited :var]) (str "wrapped: " (pr-str r)))
+           (is (= 4 ((resolve 'x.repl-edit/w) 2)) "and it runs"))
          (let [r (repl/edit! 'x.repl-edit/l [["(loop [i 0" "(loop [i 0"] ["0 acc" "0 acc"]])]
            (is (= :overlap (:seon.repl/refused-because r)) (str "two changes over one text: " (pr-str r))))
          (finally (reset! agent/state old) (remove-ns 'x.repl-edit)))))
