@@ -1312,15 +1312,6 @@
        [:div [:p [:code (str t)]] (render/html {} (first fs))])
      (when (seq died) [:p "died: " (for [t died] [:code (str t) " "])])]))
 
-(defn eval-tile
-  "An eval whose value has a render of its own (a component over ctx): that value, by it (its own,
-  or the schema its record names: seon.repl/record-details)."
-  {:seon.render/style tile-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int] :any]}
-  [{c :seon.ctx/ctx} eid]
-  (let [k (ratom/realize (get-in c [:evals eid :seon.eval/schema]))]
-    [:section
-     (render/html (if k {:schema k} {}) (ratom/realize (get-in c [:evals eid :seon.eval/response :value])))]))
-
 (defn- id-set
   "The keys of join m (a member map of ctx, read through its view) as a set: one read of its key set, its
   members not each made a view as a walk of its entries makes them (seon.ratom)."
@@ -1513,16 +1504,38 @@
    (when aid (for [n (range 0 (inc (or (ratom/realize (:seon.agent/turn c)) 0)))] [#'conversation-turn {} aid n]))
    (when aid [#'chat-end {} aid])])
 
+(defn eval-tile
+  "An eval whose value has a render of its own (a component over ctx): that value, by it (its own,
+  or the schema its record names: seon.repl/record-details)."
+  {:seon.render/style tile-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int] :any]}
+  [{c :seon.ctx/ctx} eid]
+  (let [k (ratom/realize (get-in c [:evals eid :seon.eval/schema]))]
+    [:section
+     (render/html (if k {:schema k} {}) (ratom/realize (get-in c [:evals eid :seon.eval/response :value])))]))
+
+(defn turn-tiles
+  "The tiles of turn n of agent aid: each of its evals whose value has a render of its own, newest first, found by the turn's
+  number, so another turn's eval reads nothing this read, and decided by the value as it is drawn, so a render defined later
+  counts. See docs/render.md#the-page."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int :int] :any]}
+  [{c :seon.ctx/ctx db :seon.db/db} aid n]
+  (let [tiled (for [d (reverse (d/datoms db :avet :seon.eval/turn n))
+                    :when (seq (d/datoms db :eavt (:e d) :seon.eval/agent aid))
+                    :let [v (ratom/realize (get-in c [:evals (:e d) :seon.eval/response :value]))
+                          k (ratom/realize (get-in c [:evals (:e d) :seon.eval/schema]))]
+                    :when (and (some? v) (render/render-of v k))]
+                [#'eval-tile {} (:e d)])]
+    (when (seq tiled) (into [:div] tiled))))
+
 (defn tiles
-  "The tiles of an agent's page (p-tiles), agent aid's: its task's example sessions, then each eval whose value
-  has a render of its own, newest first (`render-ctx`). See docs/render.md#the-page."
-  {:seon.render/list "p-tiles" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] [:maybe :int]] :any]}
-  [{db :seon.db/db} aid]
+  "The tiles of an agent's page (p-tiles), agent aid's: its task's example sessions, then each turn's, newest turn first
+  (`turn-tiles`, `render-ctx`). See docs/render.md#the-page."
+  {:seon.render/list "p-tiles" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] [:maybe :int]] :any]}
+  [{c :seon.ctx/ctx} aid]
   [:aside {:id "p-tiles"}
    ;; placed on every page: the render cache runs a component once and again only when what it reads changes, so a page whose task names no examples pays nothing
    [#'examples {} aid]
-   (for [d (d/datoms db :aevt :seon.eval/has-render) :when (seq (d/datoms db :eavt (:e d) :seon.eval/agent aid))]
-     [#'eval-tile {} (:e d)])])
+   (when aid (for [n (range (or (ratom/realize (:seon.agent/turn c)) 0) -1 -1)] [#'turn-tiles {} aid n]))])
 
 (def ^:private task-stands
   "How a task's :seon.task/outcome reads to a person: [words tone]. :parked and :told are woken by a message (seon.reconcile/park-outcomes);

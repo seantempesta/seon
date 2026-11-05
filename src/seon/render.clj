@@ -498,7 +498,7 @@
   render read changed). See docs/render.md#reactive-renders."
   {:malli/schema [:=> [:cat :map [:or [:= :all] [:maybe [:sequential :any]]]] [:map-of [:vector :any] [:enum :miss :same]]]}
   [w datoms]
-  (let [env {:children (volatile! []) :datoms (when-not (= :all datoms) datoms) :only (:only w) :ran (volatile! {})}]
+  (let [env {:children (volatile! []) :only (:only w) :ran (volatile! {})}]
     (if-let [root @(:out w)]
       (do (ratom/flush!)
           (if (= :all datoms)

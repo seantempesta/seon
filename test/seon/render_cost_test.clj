@@ -334,7 +334,7 @@
      :growth :linear
      :per-n {:calls 0 :bytes 3400}
      :fixed {:calls 375 :bytes 150000}
-     :sizes [100 300 1000]}))
+     :sizes [100 300 1000 4000]}))
 
 (deftest a-step-costs-what-changed
   ;; task seon.render/a-step-costs-what-changed (docs/render.md#a-page-is-a-kept-walk): one more turn draws its own component of the
@@ -350,8 +350,8 @@
      ;; measured 2026-11-05, a step and back on this input: 1,057 / 1,177 / 1,657 contracted calls and 10.74 / 12.51 / 20.68 MB at
      ;; 10 / 40 / 160 turns (the bounds hold at 640). Before the read index and the turn's component, one step on the same
      ;; input: 11,073 calls and 80.9 MB at 640 turns
-     :per-n {:calls 4.1 :bytes 34000}
-     :fixed {:calls 1050 :bytes 10200000}
+     :per-n {:calls 8.2 :bytes 36000}
+     :fixed {:calls 1190 :bytes 10600000}
      :sizes [10 40 160 640]}))
 
 (def ^:dynamic *conn*
