@@ -320,8 +320,9 @@
   [{:keys [messages]}]
   (if (some #(and (= "assistant" (:role %)) (= "Nothing to run; I wait for you." (:content %))) messages)
     (calls "Saw my own reply." "(my.turn/wait)")
-    ;; (an assistant message with text: the page Seon ran as an eval is an assistant call with none)
-    (if (some #(and (= "assistant" (:role %)) (seq (:content %))) messages)
+    ;; (an assistant message of the model's: the page Seon ran as an eval has text too, on a call of its own)
+    (if (some #(and (= "assistant" (:role %)) (seq (:content %))
+                    (not (some (fn [c] (clojure.string/starts-with? (str (:id c)) "eval-")) (:tool-calls %)))) messages)
       (calls "Lost my own reply." "(my.turn/wait)")
       {:text "Nothing to run; I wait for you."})))
 
