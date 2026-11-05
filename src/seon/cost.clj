@@ -142,11 +142,10 @@
   docs/cost.md#how-growth-is-judged). The basis: :increments, each size's increment over the
   smallest against the work's own (three sizes or more, not log work, with two increments over increment-floor
   of the smallest size's cost, the largest at least growth-share of it, no fixed part assumed);
-  :total, the cost itself, for constant work (it should not grow) and when the largest size leaves
+  :total, the cost itself, for constant work (it should not grow), when the largest size is within increment-floor of the smallest
+  (it did not grow) and when the largest size leaves
   nothing beyond the fixed part (a dropped largest size would leave a slope of what is left); log work takes :bounded-fixed,
-  never increments: its cost is a staircase (an index gains a level every so many entries), and
-  increments of a staircase have no power-law shape (675.6k, 695.8k and 1.07M bytes at 10, 100 and
-  1,000 read n^1.29 on increments against a log's n^0.60, and n^0.19 on the cost less its fixed part);
+  never increments: its cost is a staircase (an index gains a level every so many entries), which has no power-law shape;
   else :bounded-fixed, the estimate's :fixed taken off but never more than the smallest
   size leaves beyond its estimated per-unit part. On the stated :fixed alone, a faster fixed
   part left the smallest size's remainder near 0 and the fit read the speedup as growth."
@@ -170,6 +169,8 @@
     (cond
       (< (count rs) 2) nil
       (= :constant (:growth e)) (fit :total (for [r rs] [(:n r) (m r)]) (for [r rs] [(:n r) (w r)]))
+      ;; a largest size within increment-floor of the smallest did not grow: what is left past a fixed part is the measure's variance
+      (< (Math/abs (- (m (last rs)) (m r0))) (* increment-floor (m r0))) (fit :total (for [r rs] [(:n r) (m r)]) (for [r rs] [(:n r) (w r)]))
       (and (>= (count incs) 2) (>= (- (m (last incs)) (m r0)) (* growth-share (m r0))))
       (fit :increments (for [r incs] [(:n r) (- (m r) (m r0))]) (for [r incs] [(:n r) (- (w r) (w r0))]))
       :else (bounded))))
