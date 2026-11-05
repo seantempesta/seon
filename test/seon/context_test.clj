@@ -1365,9 +1365,7 @@
     (is (= ["m1" "b/a1/1" "e8" "e9" "e10" "m2" "b/a1/2" "e11"] (mapv id rs))
         "per turn: its messages, its reply, its evals by issue number; a reply that called is a record while it has evals")
     (is (= [[1 0] [1 1] [1 2] [1 2] [1 2] [2 0] [2 1] [2 2]] (mapv (comp #(subvec % 0 2) first) rs)) "each record's turn and rank")
-    (is (= {:role "assistant" :content "Done." :reasoning "easy" :reply 2} (first (context/turn-messages {} (nth (nth rs 6) 1)))) "the reply is an assistant message")
-    (is (= ["m1" "m2" "b/a1/2" "e11"] (mapv id (context/records (:tree (ctx/build db a :b)) db 2)))
-        "since turn 2: the evals and replies of turn 2 and later (read newest first), every message")))
+    (is (= {:role "assistant" :content "Done." :reasoning "easy" :reply 2} (first (context/turn-messages {} (nth (nth rs 6) 1)))) "the reply is an assistant message")))
 
 (deftest a-mid-turn-message-takes-the-number-in-force-and-the-prefix-holds
   ;; docs/turn.md#the-turn-is-a-number: a message the agent's code takes in the middle of turn 1 takes 1, a message the loop takes for

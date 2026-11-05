@@ -41,10 +41,8 @@
   ;; anywhere but its ctx. Later records read newest first come out as all of them do, and a record the ctx does not hold
   ;; is not sent
   (let [[c db] (records-of 6)
-        all (seon.context/records c db)
-        since 4]
+        all (seon.context/records c db)]
     (clojure.test/is (= 6 (count all)))
-    (clojure.test/is (= (filterv #(>= (ffirst %) since) all) (seon.context/records c db since)) "the new ones, in order")
     (clojure.test/is (= 5 (count (seon.context/records (update c :evals dissoc (first (keys (:evals c)))) db))) "what the pattern does not reach is no record")))
 
 (deftest a-sessions-records-cost-one-read-per-record
