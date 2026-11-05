@@ -664,7 +664,7 @@
 
 (defn- record!
   "Record response r of code, eval fact rec (`record-details`), on this branch through the agent's write path (an agent's
-  only), under the turn in force (:seon.eval/turn, seon.agent/turn-now), with the defs its forms recorded and the effects asked during it (seon.agent/fx-record!).
+  only), under the turn in force (:seon.eval/turn, seon.agent/turn-now), with the defs its forms recorded.
   Answers r, with the id of its record (:record) when recorded."
   {:malli/schema [:=> [:cat :map :map :string :map] :map]}
   [r rec code req]

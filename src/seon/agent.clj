@@ -382,29 +382,12 @@
   one binds this to a fn of [kind req] answering the outcome, an injected value."
   nil)
 
-(def ^:private model-cost-attrs
-  "A model call's cost members (seon.model's completion, or its failure) and their facts."
-  {:prompt-tokens :seon.fx/prompt-tokens :completion-tokens :seon.fx/completion-tokens
-   :reasoning-tokens :seon.fx/reasoning-tokens :cache-hit-tokens :seon.fx/cache-hit-tokens})
-
-(defn- fx-record!
-  "The outcome joins this eval request's recording transaction (the asker records): its
-  status, latency and queue wait, its error's type, and a model call's tokens (prompt,
-  completion, reasoning, cache hits) when the provider reported them. The effect k is no
-  longer pending (:fx-pending, its kind by key). Answers its kind."
-  {:malli/schema [:=> [:cat :int :map] [:maybe :keyword]]}
-  [k r]
-  (let [c (or (:value r) r)
-        kind (get-in @state [:fx-pending k])]
+(defn- fx-done!
+  "The effect k is no longer pending (:fx-pending, its kind by key). Answers its kind."
+  {:malli/schema [:=> [:cat :int] [:maybe :keyword]]}
+  [k]
+  (let [kind (get-in @state [:fx-pending k])]
     (swap! state update :fx-pending dissoc k)
-    (swap! state assoc-in [:defs [:fx k]]
-           [(cond-> (into {:seon.fx/id (str (name (:id @state)) "-" (lib/c-getpid) "-fx" k) :seon.fx/kind kind
-                           :seon.fx/status (if (contract/error? r) :error :ok)
-                           :seon.fx/us (long (:seon.fx/us r 0)) :seon.fx/queue-us (long (:seon.fx/queue-us r 0))}
-                          (for [[f a] model-cost-attrs :let [v (when (map? c) (get c f))] :when (int? v)] [a (long v)]))
-              (:cost r) (assoc :seon.fx/cost (long (:cost r)))
-              (contract/error? r) (assoc :seon.fx/error (str (:seon.error/type r) ": " (:seon.error/message r))
-                                          :seon.fx/error-type (:seon.error/type r)))])
     kind))
 
 (defn- fx-test
@@ -439,7 +422,7 @@
     (let [k (:tx-seq (swap! state update :tx-seq inc))
           _ (swap! state update :fx-pending (fnil assoc {}) k kind)
           r (dissoc (await-reply k (merge opts {:op :fx :k k :kind kind :req req})) :op :k)]
-      (fx-record! k r)
+      (fx-done! k)
       r)))
 
 ;; ---- the branch's own vectors (docs/vector.md#what-is-embedded) ----------------------------
@@ -506,12 +489,7 @@
       (let [carried (task/carry-tx (:base @state) main head)
             rep (d/merge-db conn #{main-b} (-> (pm/merge-tx head (:base @state) main (:apply r) data-attrs)
                                                (into (pm/unmerged-tx head (:conflicts r) (:max-tx main)))
-                                               (into (:tx carried))
-                                               ;; the catch-up itself, a fact of the agent's record (its :catch-ups)
-                                               (conj {:seon.catch-up/id (str (name (:branch @state)) "@" (:max-tx main))
-                                                      :seon.catch-up/agent {:seon.agent/key (:key @state)}
-                                                      :seon.catch-up/from main-b :seon.catch-up/from-t (:max-tx main)
-                                                      :seon.catch-up/applied (vec (:apply r)) :seon.catch-up/conflicts (vec (:conflicts r))}))
+                                               (into (:tx carried)))
                              (pdb/tx-meta (:branch @state) {:seon.tx/merged main-b}))
             ops (pdb/report->tx rep)
             errs (program/load-changes! (:db-after rep) ops)]
@@ -1351,7 +1329,7 @@
              [{:op :tests :id (:id m) :result (if (and (map? r) (not (contract/error? r))) (proofs/answer r proofs) r) :mem-mb (mem-mb)}])
     ;; an async effect's outcome (fx-send!): a message to this agent, recorded
     :fx-reply (let [r (dissoc m :op :k)]
-                (swap! state update :inbox (fnil conj []) {:from :fx :k (:k m) :kind (fx-record! (:k m) r) :body r})
+                (swap! state update :inbox (fnil conj []) {:from :fx :k (:k m) :kind (fx-done! (:k m)) :body r})
                 nil)
     ;; root asks this agent to merge main into its branch (it owns the branch's writes)
     :merge-main [{:op :merged-main :id (:id m) :result (merge-main! (:data-attrs m #{}))}]

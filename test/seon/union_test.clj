@@ -8,8 +8,8 @@
   "The owner's example: root's message on main, the agent's reply on its branch, as one query."
   '[:find ?body ?reply ?branch
     :in $ ?agent
-    :where [?m :seon.message/branch ?agent] [?m :seon.message/id ?id] [?m :seon.message/body ?body]
-           [?r :seon.message/reply-to ?id ?tx] [?r :seon.message/body ?reply]
+    :where [?m :seon.message/branch ?agent] [?m :seon.message/body ?body]
+           [?r :seon.message/from "demo/f#1" ?tx] [?r :seon.message/body ?reply]
            [?tx :seon.tx/branch ?branch]])
 
 (deftest a-message-and-its-reply-on-two-branches-are-one-query
@@ -23,7 +23,7 @@
          ;; root writes on main after the agent forked: the agent's branch never holds it
          (d/transact conn {:tx-data [{:seon.message/id "m1" :seon.message/from "root" :seon.message/branch :task-demo-f :seon.message/body "main moved, merge main"}]
                            :tx-meta (pdb/tx-meta main)})
-         (d/transact bc {:tx-data [{:seon.message/id "r1" :seon.message/from "demo/f#1" :seon.message/reply-to "m1" :seon.message/body "merged; 3 forms changed"}]
+         (d/transact bc {:tx-data [{:seon.message/id "r1" :seon.message/from "demo/f#1" :seon.message/body "merged; 3 forms changed"}]
                          :tx-meta (pdb/tx-meta b)})
          (let [un (-> (u/empty-union @conn)
                       (u/of-history main @conn)
@@ -37,7 +37,7 @@
            (testing "U applied each branch at its head"
              (is (= {main (d/commit-id @conn) b (d/commit-id @bc)} (select-keys (:applied un) [main b]))))
            (testing "a later commit on the branch is its datoms inserted; one already held is held once"
-             (d/transact bc {:tx-data [{:seon.message/id "r2" :seon.message/from "demo/f#1" :seon.message/reply-to "m1" :seon.message/body "tests green"}]
+             (d/transact bc {:tx-data [{:seon.message/id "r2" :seon.message/from "demo/f#1" :seon.message/body "tests green"}]
                              :tx-meta (pdb/tx-meta b)})
              (let [before (count (d/datoms (d/history U) :eavt))
                    un2 (u/catch-up un b (d/commit-as-db conn (get-in un [:applied b])) @bc)

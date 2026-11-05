@@ -1383,14 +1383,7 @@
            (is (= (jolt.host/runtime-fingerprint) (:seon.tx/runtime (d/entity (agent/db) (:t r))))
                "in a merge commit that names its runtime (task seon.db/each-commit-names-its-runtime)")
            (is (= [ab (:branch cfg)] ((juxt :seon.tx/branch :seon.tx/merged) (d/entity (agent/db) (:t r))))
-               "made on the agent's branch, of what it merged from main: a caught-up fact reads as main's (task seon.ctx/a-change-names-its-eval)")
-           ;; a fact on the agent's branch, no join of its pull (task seon.agent/the-agent-is-the-unit-not-the-run)
-           (let [db (agent/db)
-                 [cu] (for [e (d/q '[:find [?c ...] :in $ ?a :where [?c :seon.catch-up/agent ?a]] db (:db/id (d/entity db [:seon.agent/key "test/a1"])))]
-                        (d/pull db '[*] e))]
-             (is (= [(:branch cfg) (:max-tx @conn)] [(:seon.catch-up/from cu) (:seon.catch-up/from-t cu)])
-                 "the catch-up a fact of the agent's branch (task seon.ctx/one-derivation)")
-             (is (some #{[:var 'app.m0/f1]} (:seon.catch-up/applied cu)) "with what it applied")))
+               "made on the agent's branch, of what it merged from main: a caught-up fact reads as main's (task seon.ctx/a-change-names-its-eval)"))
          (is (empty? (pm/changed-vars (agent/branch-changes (:base @agent/state) (agent/db))))
              "and is main's, not the agent's: its base is the merge base")
          (is (= {} (pm/divergence (agent/branch-changes (:base @agent/state) (agent/db))))

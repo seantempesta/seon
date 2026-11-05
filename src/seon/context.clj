@@ -362,10 +362,6 @@
                                    pool zc zb zt)
                               sort (mapv (fn [[p _ e]] [e (- p)])))))]))))
 
-(def search-kinds
-  "What my.agent/search finds: a function (:var), a :test, a wiki :section, a :task, a :schema key."
-  #{:var :test :section :task :schema})
-
 (defn- hit-of
   "Entity e as the hits it is, each [kind name]: the vars (or tests) of a form, a section's address, a
   task's id, a schema key; the kinds asked only."
@@ -410,7 +406,7 @@
   "What on db is the best match for q (a text; a var's name, whose neighbours it also finds by who
   calls it, whom it calls and the sections naming it; or a schema key, whose readers and writers it
   finds), as a vector of hits best first, each {:kind :name :e :score :by :relevance :line :at}:
-  :kind one of search-kinds, :name the var, section address, task id or schema key, :e its entity,
+  :kind (:var, :test, :section, :task or :schema), :name the var, section address, task id or schema key, :e its entity,
   :score the reciprocal-rank score of seon.vector/rrf-scores over the rankings below, :by the set of them it is in (:text :meaning :refs),
   :relevance the chance it is worth reading (seon.context/relevance, over q's vector, words and the
   names it holds, the first k x :seon.config.render/related-near hits by the fused score joined to its
@@ -422,7 +418,7 @@
   qualified names and keywords of a text; never of the text hits). Best first: by relevance where a hit
   has one, then by the fused score, equal ones by name. A hit with a relevance below :min is left out. When hits are left out by :k or :min, a last entry
   {:kind :more :left n :counts {kind n} :more \"...\"} says how many per kind and the call that returns
-  them. opts, all optional: :kinds (a set of search-kinds; #{:var :section} by default: tests, tasks and
+  them. opts, all optional: :kinds (a set of those kinds; #{:var :section} by default: tests, tasks and
   schema keys on request), :by (a set of :text :meaning :refs, all), :ns (a name: only vars and tests
   under it, seon.doc/named-under?), :k (:seon.config.render/search), :min (:seon.config.render/relevance-summary,
   the page's cut).

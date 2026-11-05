@@ -176,14 +176,12 @@
 
 (deftest catches-and-clocks-are-recorded
   ;; for the guard detectors (session PATTERNS): a hiding guard is a catch answering a constant;
-  ;; time deciding is a sleep, a deref with a timeout, or core.async's timeout
+  ;; a sleep is a reference like any other
   (let [a (eval-account 'app.pt-guard (str "(defn guarded [f p] (Thread/sleep 1) (deref p 10 :late)"
                                            " (try (f) (catch IllegalStateException e nil) (catch Exception e (throw e)) (catch Throwable t (str t))))"))]
     (is (= #{{:class "IllegalStateException" :answers :constant} {:class "Exception" :answers :rethrows} {:class "*" :answers :expr}}
            (set (map read-string (:catches a)))) "each clause: its class, and what its handler answers")
-    (is (contains? (:refs a) 'Thread/sleep) "a host static is a reference")
-    (is (= '#{clojure.core/deref} (:timeouts a)) "a deref with a timeout")
-    (is (empty? (:timeouts (eval-account 'app.pt-guard "(defn plain [p] @p)"))) "a plain deref is no clock")))
+    (is (contains? (:refs a) 'Thread/sleep) "a host static is a reference")))
 
 (deftest a-redefinition-supersedes-the-form-it-replaces
   (let [db (record (empty-db) 'app.pt-re "(defn f [x] x)" 'app.pt-re "(defn g [x] (f x))")
@@ -331,6 +329,21 @@
         "add-test calls add through its :refer; sum3-test reaches add through sum3")
     (is (= '#{} (selected db (record db 'app.pt-calc "(defn neg [x] (- 0 x))"))) "no test reaches neg")
     (is (= [] (program/tests-reaching (program/reach-graph db nil) 'app.pt-calc/no-such)) "a var the graph holds no form of reaches none")))
+
+;; jolt.analyzer/a-missing-var-through-an-alias-says-no-such-var-in-any-namespace
+(deftest a-test-recorded-before-what-it-calls-moves-when-that-is-defined
+  (let [in {:env "e" :tree "t" :config {}}
+        base (record (empty-db) 'app.pt-late "(ns app.pt-late)"
+                     'app.pt-late-test "(ns app.pt-late-test (:require [clojure.test :refer [deftest is]] [app.pt-late :as late]))")
+        g (program/reach-graph base nil)
+        before (record base 'app.pt-late-test "(deftest t (is (= 1 (late/h 1))))")
+        after (record before 'app.pt-late "(defn h [x] x)")
+        digest (fn [db] (get-in (program/graph-index (program/reach-update g db) in nil) ['app.pt-late-test/t :digest]))
+        refs (d/q '[:find [?r ...] :in $ ?s :where [?e :var/name ?s] [?e :var/form ?f] [?f :form/refs ?r]] before 'app.pt-late-test/t)]
+    (is (some #{'app.pt-late/h} refs) "the test's reference names the namespace, not the alias as written")
+    (is (not-any? #{'late/h} refs))
+    (is (not= (digest before) (digest after)) "defining what it calls moves its digest, with no second record of the test")
+    (is (= '[app.pt-late-test/t] (program/tests-reaching (program/reach-update g after) 'app.pt-late/h)))))
 
 (deftest a-file-analyzed-gives-the-repl-facts
   (let [text "(ns app.pt-file\n  (:require [clojure.string :as s]))\n\n;; doubles\n(defn twice [x] (* 2 x))\n\n(comment (twice 2))\n(defmulti m :k)\n(defmethod m :a [_] (s/join [\"a\"]))\n"

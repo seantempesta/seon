@@ -123,21 +123,6 @@
             (= :break kind) [:hr]
             :else [:p body]))))
 
-(def utc-offset-ms
-  "Jolt has no time zones: the local offset is :seon.config.web/utc-offset (`date +%z`)."
-  (let [z (config/value :seon.config.web/utc-offset)
-        sign (if (str/starts-with? z "-") -1 1)]
-    (* sign (+ (* (parse-long (subs z 1 3)) 3600000) (* (parse-long (subs z 3 5)) 60000)))))
-
-(defn clock
-  "hh:mm:ss.mmm local, by arithmetic on epoch ms."
-  {:malli/schema [:=> [:cat :any] :string]}
-  [ms]
-  (if-not (number? ms)
-    "--:--:--"
-    (let [day-ms (mod (+ (long ms) utc-offset-ms) 86400000)]
-      (format "%02d:%02d:%02d.%03d" (quot day-ms 3600000) (mod (quot day-ms 60000) 60) (mod (quot day-ms 1000) 60) (mod day-ms 1000)))))
-
 (defn slot
   "Where the part with element id goes: a marker the render proc fills with the part's
   retained HTML when it composes a page or a keyframe."
@@ -694,16 +679,6 @@
                           [:td {:class "pr-3 font-mono text-text-400 whitespace-nowrap"} (str k)]
                           [:td (cell k v)]
                           [:td {:class "pl-3 text-2xs text-text-500 whitespace-nowrap"} (made k)]])]]])))
-
-(defn comp-id
-  "The element id of entity eid's component shown as as: the main pane p-head, a row r-<eid>, a
-  tile t-<eid>, a debug-page turn d-<eid>, a part of an agent's conversation c-<eid>, an agent
-  in the sidebar s-<eid>. The same on every page, so the cache's key names it."
-  {:malli/schema [:=> [:cat pos-int? :any] :string]}
-  [eid as]
-  (if (vector? as)
-    (str (case (first as) :debug "d-" :chat "c-") eid)
-    (case as :block "p-head" :row (str "r-" eid) :tile (str "t-" eid) :chat (str "c-" eid) :side (str "s-" eid))))
 
 (defn to-come?
   "Whether a request is to come after the turn of basis b on branch db: b is a model turn's and its agent has

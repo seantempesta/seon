@@ -138,7 +138,7 @@
   entities), then each send of the inbox (another agent's, root's request) as a message fact of its
   own. Each is :seon.message/agent's, so its presence on the branch is its delivery and the record's
   messages read it (seon.context/records); nothing is held for the turn's basis. An effect's outcome
-  (:from :fx) is no message: its fact is the effect's (seon.agent/fx-record!). A read that is not the
+  (:from :fx) is no message: the eval that asked holds its answer. A read that is not the
   run's turn (take? false: an observer's read of an agent its model drives) takes nothing."
   {:malli/schema [:=> [:cat :boolean nat-int?] :nil]}
   [take? n]
@@ -257,15 +257,6 @@
         moved (into {} (remove (fn [[a v]] (= v (get e a)))) now)]
     (if (seq moved) [(assoc moved :seon.agent/key k)] [])))
 
-(defn repeated
-  "The ids of a turn's evals when every one it ran repeated code it had run before with the same answer (each
-  response's :again, seon.repl/again), else nil: a turn that can tell the agent nothing new (told :again, an agent that sends the same evals turn after turn runs to the turn cap). See docs/agent.md#small-answers."
-  {:malli/schema [:=> [:cat [:sequential :map]] [:maybe [:vector :string]]]}
-  [calls]
-  (let [ran (remove :not-run calls)]
-    (when (and (seq ran) (every? #(get-in % [:response :again]) ran))
-      (mapv :id ran))))
-
 (defn- act!
   "One model turn: the agent's turn number moves (docs/turn.md#the-turn-is-a-number), the agent's context (its record and its parts, the status s among them) to the model, the reply's eval calls
   through the one REPL path, each answered as its own result, the turn's facts on its model call on the branch. Answers the loop state after it, or the
@@ -353,21 +344,12 @@
         ;; waits for the user (the design's tool_choice auto)
         ;; (a blank or cut reply is no message: the next turn reads the same state)
         (when (and (empty? calls) (not (str/blank? (:text c))) (not (:truncated? c))) (request-stop! :waiting (:text c)))
-        ;; a turn that only repeated: the agent is told so, as any message reaches it (its next request carries it)
-        (when-let [again (repeated calls)]
-          ;; the next turn's: the turn that reads it
-          (agent/transact! (agent/own-message-tx (str id "/repeated") :message "seon" nil
-                                                 (str "Turn " turn " only ran code you had run before, each answered as it was then ("
-                                                      (str/join ", " again) "): running it again tells you nothing new. Write what you know: "
-                                                      "the plan, a proof or a definition, or end your turn with prose.")
-                                                 (inc n))))
         ;; what it answered and how it stopped (its reply, reasoning and finish), the reply's usage, model and counts
         ;; (seon.model-call, beside the basis it read: seon.context/render makes the text from it), and where the turn's
         ;; time went as this agent saw it
         (agent/transact! [(cond-> (merge (usage c) {:seon.model-call/id id :seon.model-call/forms (count calls)
                                                     :seon.model-call/reply (:text c)
                                                     :seon.model-call/errors (count (filter :ex (map :response (remove :not-run calls))))
-                                                    :seon.model-call/red (count (remove #(= :pass (:status %)) (:proofs s)))
                                                     :seon.model-call/ms (+ model-ms eval-ms)})
                             (:truncated? c) (assoc :seon.model-call/truncated true)
                             (:finish-reason c) (assoc :seon.model-call/finish (:finish-reason c))

@@ -4,13 +4,13 @@ An agent's turns are answered by one function of a provider value and a request,
 
 ## No default model
 
-A root started without `--profile NAME` ([config](config.md#layers)) has no model provider: a run it releases ends at its first turn on `:seon.model/no-provider`, whose message names what to set. Production must never run a test fixture as if it were a model, so nothing is chosen for you.
+A root started without `--profile NAME` ([config](config.md#layers)) has no model provider: an agent it starts ends at its first turn on `:seon.model/no-provider`, whose message names what to set. Production must never run a test fixture as if it were a model, so nothing is chosen for you.
 
 The profiles (aero's `#profile`, read by ```seon.config/profile```) are:
 - `deepseek`: the OpenAI-compatible endpoint of `:seon.config.ai/providers` (DeepSeek), model `:seon.config.ai/model` (deepseek-flash unless `SEON_AI_MODEL` says otherwise);
 - `scripted`: the scripted provider, a test fixture (`seon.fixtures/reply`), which `bin/test` and `bin/check` run under; it makes no paid call.
 
-```seon.config/provider``` builds the provider value a config names (`:none`, `:scripted` or `:openai-compat`), and ```seon.config/with-provider``` states one handed to root's start in place of the file's, so the facts root writes say what a run really used. The models we use, their prices and ceilings are the manifest: [config](config.md#the-model-manifest).
+```seon.config/provider``` builds the provider value a config names (`:none`, `:scripted` or `:openai-compat`), and ```seon.config/with-provider``` states one handed to root's start in place of the file's, so the facts root writes say what an agent really used. The models we use, their prices and ceilings are the manifest: [config](config.md#the-model-manifest).
 
 ## Running a curated session
 

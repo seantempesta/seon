@@ -1026,6 +1026,23 @@
         (is (= (:text r) (:content msg)) (str "the outside text is the model's message for " code))))
     (is (var? (:value @(resolve (:handle (ev "#'clojure.core/inc"))))) "the live value is at the handle")))
 
+;; jolt.analyzer/a-missing-var-through-an-alias-says-no-such-var-in-any-namespace; docs/testing.md
+(deftest a-missing-var-through-an-alias-is-no-such-var-in-a-test
+  ;; as an agent writes a proof first: the proof names a function that is not there, then the function is defined
+  ;; and the proof, not evaluated again, runs at a new digest and finds it
+  (let [[_ _ _ red _ green]
+        (at/in-agent
+         (fn [{:keys [ns]}]
+           (let [impl (str ns ".late") tst (str ns ".late-test") t (str "'#{" tst "/proof}")]
+             [(str "(ns " impl ")")
+              (str "(ns " tst " (:require [clojure.test :refer [deftest is]] [" impl " :as late]))")
+              "(deftest proof (is (= 2 (late/g 1))))"
+              (str "(select-keys (my.agent/prove " t ") [:ran :reused :reports])")
+              (str "(do (in-ns '" impl ") (defn g [x] (inc x)))")
+              (str "(select-keys (my.agent/prove " t ") [:ran :reused :pass :fail :error])")])))]
+    (is (= 1 (:ran (:value red))) (pr-str red))
+    (is (some #(str/includes? (str %) "No such var: late/g") (:reports (:value red))) (pr-str red))
+    (is (= {:ran 1 :reused 0 :pass 1 :fail 0 :error 0} (select-keys (:value green) [:ran :reused :pass :fail :error])) (pr-str green))))
 ;; a task merged having defined its proof and function through eval: they ran here, and neither was on its branch
 (deftest a-proof-through-eval-is-told-and-has-no-result
   (let [[_ defined proved]
