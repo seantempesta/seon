@@ -1,6 +1,6 @@
 # Parity with v1 Seon
 
-next replaces v1 Seon (`~/src/seon`, JVM, read-only): each capability v1 had is present here, in progress, or left behind on purpose with its reason in [BAGGAGE](../BAGGAGE.md). This page is the tracker: a change that closes a gap updates its row in the same commit. Each row is checked in code unless it says "doc".
+next replaces v1 Seon (`~/src/seon`, JVM, read-only): each capability v1 had is present here, in progress, or left behind on purpose with its reason in [BAGGAGE](../BAGGAGE.md). This page is the tracker: a change that closes a gap updates its entry in the same commit. Each entry is checked in code unless it says "doc".
 
 Status words: **present** (the code exists here; not a claim that it passes), **partial**, **missing**, **dropped** (on purpose; BAGGAGE says why), **new** (v1 had none).
 
@@ -59,7 +59,7 @@ Each v1 capability for tasks, merges and tests, and where it stands here.
 | ``chain!`` and ``:seon.task/next`` | `:needs` only | dropped |
 | step templates (design, prove, implement, merge) | `seon.template/request` by default (one task that merges itself), one transaction; for experiments, `seon.template/design-build` (design-build, then merge) and `seon.template/stages` (design → implement → merge on one branch) ([tasks](tasks.md#a-request-is-one-transaction)) | present |
 | three-way program merge, conflicts as entries, forward merge | `seon.merge`, `my.branch/merge-main!` | present |
-| many agents merging onto shared definitions at once (v1's swarm) | `bin/check swarm` (`seon.e2e`'s swarm row: 20 tasks over 5 shared vars, 8 agents at once; red unless conflicts arose and every one was resolved, every task done, and a fresh agent on main gets every proof's value) | present |
+| many agents merging onto shared definitions at once (v1's swarm) | `bin/check swarm` (`seon.e2e`'s swarm entry: 20 tasks over 5 shared vars, 8 agents at once; red unless conflicts arose and every one was resolved, every task done, and a fresh agent on main gets every proof's value) | present |
 | main wins a conflict | ours is kept | missing |
 | a changed function no test reaches refuses the branch (``:seon.test/unreached``, ``:seon.source/unreached``) | none: `seon.reconcile/done-explain` has no coverage reason | missing |
 | one done rule shared with merge | `seon.reconcile/done-explain` (a proof that never ran is `:proof-unknown`, not red; a process test left out of a judging is neither; a problem the branch made true is `:open-problem`; [tasks](tasks.md#the-done-rule)) | present |
@@ -80,7 +80,7 @@ Each v1 capability for building and printing the model's context, and where it s
 | one printer with a budget and runnable continuations; renders on schemas | `seon.print`, `seon.render` | present |
 | wiki sections in the context | `seon.doc` | new |
 | Datastar pages: `/`, `/agent/{id}` | `seon.web` | present |
-| `/agent/{id}/debug`: each model call, what it was sent, its tokens | `/agent/{id}/context` (`seon.render.proc/debug-value`; `/agent/{id}/debug` is the agent's `@ctx` printed): each model turn a row, newest first, read back from the records it sent (`:seon.model-call/sent`, ```seon.context/parts-of```), each part beside the record that made it, with its tokens, cache share and, for a failed call, its typed error | present (task `seon.context-test/a-turn-records-what-it-sent`) |
+| `/agent/{id}/debug`: each model call, what it was sent, its tokens | `/agent/{id}/context` (`seon.render.proc/debug-value`; `/agent/{id}/debug` is the agent's `@ctx` printed): each model turn an entry, newest first, read back from the records it sent (`:seon.model-call/sent`, ```seon.context/parts-of```), each part beside the record that made it, with its tokens, cache share and, for a failed call, its typed error | present (task `seon.context-test/a-turn-records-what-it-sent`) |
 | `/agent/{id}/message` (the owner's input bar) | the page's message bar and the server's `:message` op, both `seon.root/message!`: root's one delivery into the agent's inbox, which its next turn takes into its basis (`:messages` in the block) | present: a fact on main (from `"owner"`, to the agent), and on the agent's branch when its turn takes it, named by id in the turn's basis |
 | `/ns/{ns}` and its debug pages; `/data`; `/chains`; `/health` | none (task `seon.render/namespace-agent-debug-and-data-pages`; the routes here: [dashboard](dashboard.md)) | missing |
 | POSTs refuse a cross-origin request (``::same-origin``) | `POST /call` reads no Origin or Sec-Fetch-Site (`seon.web/handler`): any page open in the owner's browser can post calls to every live agent | missing |

@@ -60,7 +60,7 @@ The pages on how agents change Seon's own program and how a text's references an
 The pages on how work is tasks, how it is checked and how it merges.
 
 - [tasks](tasks.md): all work is tasks linked by `:needs`; a request becomes one task one agent designs, builds and merges (design-build then merge, or design → implement → merge, for experiments), in one transaction, before any agent forks.
-- [checks](checks.md): the end-to-end proofs `bin/check` runs, and the task rows `seon.e2e` works.
+- [checks](checks.md): the end-to-end proofs `bin/check` runs, and the task entries `seon.e2e` works.
 - [merging](merging.md): how a branch merges into main: what it runs, how batches are proven, how conflicts are resolved.
 - [machine](machine.md): the machine Seon is built on and for, and the rules that keep builds, disk and processes bounded.
 - [plan](plan.md) (and [restart](restart.md): picking the work up on a fresh account): what is in flight, what the owner has not yet ruled, and the steps to the goal.

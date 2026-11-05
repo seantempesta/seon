@@ -77,7 +77,7 @@ The writer turns Datahike's tx-report into what main's readers receive: ```seon.
 
 Datahike records what a read scanned, so a cached view is valid until a transaction touches it ([render](render.md#components)). `d/with-reads` runs a read and answers `[value reads]`, and `d/reads-index` turns the reads into keys by what was scanned: `[:e e]` and `[:ea e a]` for entities and their attributes (a pull), `[:av a v]` for a point query on a unique value, `[:a a]` for an attribute scan, and `:any` for an open range (```datahike.reads-test/a-read-records-what-it-scanned```). The recorder is a dynamic binding, so a read made inside a Flow step, or from a go block inside it, is recorded too (```datahike.reads-test/a-read-inside-a-flow-step-is-recorded```). `d/reads-touched?` asks whether a transaction's datoms touch an index: a datom of a pulled entity, added or retracted, does; another entity's does not; and a schema datom touches every read (```datahike.reads-test/a-transaction-touches-only-what-a-read-scanned```). It costs the transaction's datoms, five keys and one set lookup each, and nothing per recorded read (```datahike.reads-test/a-transaction-costs-its-datoms-to-match```, ```datahike.reads-test/matching-is-flat-in-what-was-read```).
 
-The same fork makes a query answer what it asked ([forks](forks.md#datahike)). Datalog evaluates no call inside a predicate's arguments, so a nested call is refused rather than read as a constant list that matches no row (```datahike.query-test/a-nested-call-in-a-predicate-is-refused```), and a predicate that throws is an error, never a false that drops every row (```datahike.query-test/a-predicate-that-throws-is-an-error```).
+The same fork makes a query answer what it asked ([forks](forks.md#datahike)). Datalog evaluates no call inside a predicate's arguments, so a nested call is refused rather than read as a constant list that matches no result (```datahike.query-test/a-nested-call-in-a-predicate-is-refused```), and a predicate that throws is an error, never a false that drops every result (```datahike.query-test/a-predicate-that-throws-is-an-error```).
 
 ## An agent's reads and writes
 
@@ -113,7 +113,7 @@ Measured 2026-10-23 (REPL, LMDB, main 46,708 datoms, each branch one turn of ~15
 | build: main's history, then each branch | 991 ms | 1,274 ms (about 3 ms a branch) |
 | keeping it current: one branch's commit | 0.93 ms | 1.30 ms |
 | one agent's conversation | 0.75 ms | 0.63 ms |
-| every conversation | 0.87 ms | 4.2 ms (100 rows) |
+| every conversation | 0.87 ms | 4.2 ms (100 evals) |
 
 U lives in root's writer, in memory: about main's history plus what branches add. Persisting it under one store key, so a booted root does not rebuild it, waits until a measurement asks; the rebuild is about 1 s at 50k datoms. Proofs: `seon.union-test/a-message-and-its-reply-on-two-branches-are-one-query`, `seon.procs-test/the-writer-keeps-the-union-current`.
 
