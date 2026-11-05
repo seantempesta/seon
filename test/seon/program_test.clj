@@ -1264,7 +1264,7 @@
         db (d/db-with db (seon.doc/load-tx db "docs" {"docs/a.md" "# A\n\nIt reads `app/f`.\n"}))
         fe (pdb/eid db :var/name 'app/f)]
     (is (= [{:var 'app/f :was {:var/doc "Old words."} :now {:var/doc "New words."}
-             :cited-by [{:section "docs/a.md#a" :read '(my.agent/help "docs/a.md#a")}]}]
+             :cited-by [{:section "docs/a.md#a" :read '(doc "docs/a.md#a")}]}]
            (program/meaning-changes db [{:db/id -1 :var/name 'app/f :var/doc "New words." :var/form -2} {:db/id -2 :form/id "x"}]))
         "a docstring changed: before and after, and who cites it")
     (is (= [:var/contract] (keys (:was (first (program/meaning-changes db [{:var/name 'app/f :var/contract "[:=> [:cat :int] :int]"}]))))) "a contract changed")

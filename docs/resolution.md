@@ -37,10 +37,11 @@ The sites that resolve a name held in data to a var by design, each with its rea
 - `seon.repl/unmapped`: a form's `ns-unmap` calls are known by resolving their head in the namespace the form ran in (`ns-resolve`), and the var gone by the namespace's interns (`ns-interns`): a lookup to record the removal Clojure made, no definition made.
 - `seon.main/driver!`: the check driver (`seon.check`, in `test/`, outside the release binary: task `seon.main/drivers-leave-src`) is loaded from the checkout's source when a check mode runs, so its `-main` is resolved by name then; the program never names it.
 - `my.agent/asked`, `my.agent/no-var`, `my.agent/ns-named?`: a name an agent asks its navigation functions about (`callers`, `callees`, `source`) is read as its REPL reads it, in the agent's namespace (an alias resolved to the var's full name), and one that resolves to nothing is said so (`:my.agent/no-var`, the one answer for a missing name), never answered as no callers. A bare name is a namespace only when one of that name exists here or on the branch and no var of the agent's namespace resolves from it (`ns-named?`): `'seon.task` answers the namespaces requiring it, `'map` stays `clojure.core/map`.
+- `my.agent/help`: reads its own namespace's docstring, the map of what is there, by the namespace's name.
 - `seon.repl/eval-string`: each response's handle (``result/eN``, named by its eval), the agent REPL's own `*1`, defined by the REPL as it answers.
 
 ## Owed its owner's fix
 
 The sites that fill a gap in another namespace, each owed a fix in that namespace's owner.
 
-- `seon.agent/make-ns!`: interns `source`, `source-fn` and `pst` into Jolt's `clojure.repl`, a namespace it does not own ([AGENTS.md §5](../AGENTS.md): a gap in another namespace is fixed in its owner). Task `seon.context/the-standard-repl-tools` (Jolt's `clojure.repl` carries them) deletes the intern.
+- `my.agent` (its last form): interns `source`, `source-fn`, `pst`, `doc` and `dir` into Jolt's `clojure.repl`, in every process (root, a test child and an agent alike), a namespace it does not own ([AGENTS.md §5](../AGENTS.md): a gap in another namespace is fixed in its owner). Task `seon.context/the-standard-repl-tools` (Jolt's `clojure.repl` carries them) deletes the intern.

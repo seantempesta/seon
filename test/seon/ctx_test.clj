@@ -1066,7 +1066,7 @@
 
 (defn- an-eval {:malli/schema [:=> [:cat nat-int? pos-int?] :map]} [i len]
   {:db/id (+ 1000 i) :seon.eval/id (str "e" i) :seon.eval/by "a1"
-   :seon.eval/code (str "(f " i ")") :seon.eval/response {:handle (symbol "result" (str "e" i)) :value (vec (range (mod i 9)))} :seon.eval/prose (text (inc i) len)})
+   :seon.eval/code (str "(f " i ")") :seon.eval/response {:handle (symbol "result" (str "e" i)) :value (vec (range (mod i 9)))} :seon.eval/intent (text (inc i) len)})
 
 (defn- record-of
   "An agent's record shaped as ctx holds it: evals, model calls, and (with task? true) the task and its cited vars
@@ -1089,10 +1089,10 @@
   (let [ev (keys (:evals t)) cited (some-> (get-in t [:task :cited]) keys)]
     (case kind
       :new-eval (assoc-in t [:evals (+ 1900 i)] (an-eval (+ 900 i) 60))
-      :eval-edit (if (seq ev) (assoc-in t [:evals (nth ev (mod i (count ev))) :seon.eval/prose] (text i 30)) t)
+      :eval-edit (if (seq ev) (assoc-in t [:evals (nth ev (mod i (count ev))) :seon.eval/intent] (text i 30)) t)
       :plan (if (:task t) (assoc-in t [:task :seon.task/plan] (text (+ 7 i) 200)) t)
       :cited (if (seq cited) (assoc-in t [:task :cited (nth cited (mod i (count cited))) :var/form :form/src] (text i 300)) t)
-      :all-evals (reduce (fn [t e] (assoc-in t [:evals e :seon.eval/prose] (text (+ e i) 30))) t ev)
+      :all-evals (reduce (fn [t e] (assoc-in t [:evals e :seon.eval/intent] (text (+ e i) 30))) t ev)
       :rebuilt (walk/postwalk identity t)
       :gone (if (seq ev) (update t :evals dissoc (nth ev (mod i (count ev)))) t))))
 

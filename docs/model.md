@@ -14,7 +14,7 @@ The profiles (aero's `#profile`, read by ```seon.config/profile```) are:
 
 ## Running a curated session
 
-A [curated session](decisions.md) is replayed for real through the scripted provider on a fresh branch: `--profile scripted --set :seon.config.ai/script=seon.fixtures/curated`. ```seon.fixtures/curated``` answers turn n of task `<ns>/<name>` with turn n of `<runs-dir>/curated/<ns>_<name>.edn` (`:seon.config.root/runs-dir`, the root's runs directory), a map whose `:turns` are `{:text :calls [{:prose :code}]}` (its other keys are provenance), so every result the agent sees is evaluated live, never copied. Past the last turn, or with no directory or file, it answers a message saying so, which ends the turn. The files hold answers: the runs directory is git-ignored and outside the program, so agents do not read them.
+A [curated session](decisions.md) is replayed for real through the scripted provider on a fresh branch: `--profile scripted --set :seon.config.ai/script=seon.fixtures/curated`. ```seon.fixtures/curated``` answers turn n of task `<ns>/<name>` with turn n of `<runs-dir>/curated/<ns>_<name>.edn` (`:seon.config.root/runs-dir`, the root's runs directory), a map whose `:turns` are `{:text :calls [{:intent :code}]}` (its other keys are provenance), so every result the agent sees is evaluated live, never copied. Past the last turn, or with no directory or file, it answers a message saying so, which ends the turn. The files hold answers: the runs directory is git-ignored and outside the program, so agents do not read them.
 
 ## One tool, eval
 

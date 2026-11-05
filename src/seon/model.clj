@@ -7,7 +7,7 @@
   Providers (`:seon.model/provider`, dispatched on :kind):
   - :none, no provider configured: every request answers the typed :seon.model/no-provider;
   - :scripted, a test fixture: the function named by :script answers the reply as data
-    (:seon.model/script-reply: its text and its calls, each prose and code), as a provider's
+    (:seon.model/script-reply: its text and its calls, each intent and code), as a provider's
     reply is read (it sees the task id, turn and messages, as a test double may);
   - :openai-compat, an OpenAI-compatible chat API (DeepSeek's: base URL plus
     /chat/completions) over jolt-lang/http-client's transport (BSD sockets and OpenSSL
@@ -51,7 +51,7 @@
       (contract/error :seon.model/no-script #'seon.model/scripted
                       (str "the scripted provider's " script " is not on this process's source roots") {:script script})
       ;; a script answers a model's reply as data, as the provider's reply is read (docs/prompt.md):
-      ;; {:text :calls [{:prose :code}]}, each call given its id here; no :calls is a message
+      ;; {:text :calls [{:intent :code}]}, each call given its id here; no :calls is a message
       ;; that ends the turn
       (let [out (f request)
             s (contract/schema :seon.model/script-reply)]
@@ -102,12 +102,12 @@
    ;; (the id of the kept record) and :fns (the costliest functions, drawn on the page) are in :seon.eval/response and are not
    ;; shown to the agent, so they are left out here and in docs/prompt.md
    :function {:name "eval"
-              :description "Evaluate Clojure code at your REPL; prose and code are both required. Make each step its own call, one form each, so each result has its own handle; several forms in one call run in order until one throws and answer :forms and :value, the vector of their values. A reply may make several calls; they run in order, and a call after one that threw or answered an error (a refused edit) is not run. The response is data, {:handle :value :forms :ns :out :err :ex :recorded :unmapped :edited :redefined :warnings :repaired :again :ms :ticks :bytes}, each key only when present: the value as Clojure answers it (with :forms, each form's), the namespace your next eval runs in, what it wrote, its error, what it made program, the functions it unmapped, the var an edit! changed with the lines around the change, the functions whose contract or docstring it changed, what to fix, what the reader changed of your code, that an earlier eval ran the same code and answered the same, and its cost; result/e<n>, its handle, holds it."
-              ;; prose first: a model fills arguments in order, so it says what it expects before the code
+              :description "Evaluate Clojure code at your REPL; intent and code are both required. Make each step its own call, one form each, so each result has its own handle; several forms in one call run in order until one throws and answer :forms and :value, the vector of their values. A reply may make several calls; they run in order, and a call after one that threw or answered an error (a refused edit) is not run. The response is data, {:handle :value :forms :ns :out :err :ex :recorded :unmapped :edited :redefined :warnings :repaired :again :ms :ticks :bytes}, each key only when present: the value as Clojure answers it (with :forms, each form's), the namespace your next eval runs in, what it wrote, its error, what it made program, the functions it unmapped, the var an edit! changed with the lines around the change, the functions whose contract or docstring it changed, what to fix, what the reader changed of your code, that an earlier eval ran the same code and answered the same, and its cost; result/e<n>, its handle, holds it."
+              ;; intent first: a model fills arguments in order, so it says what it expects before the code
               :parameters {:type "object"
-                           :properties (array-map :prose {:type "string" :description "What you are doing and what you expect to see, in markdown; the user reads it."}
+                           :properties (array-map :intent {:type "string" :description "A little thinking: what these forms are about to do and what you expect. A sentence is fine. It's parsed as Markdown, and the user sees it."}
                                                   :code {:type "string" :description "Clojure code: one form for one step"})
-                           :required ["prose" "code"]}}})
+                           :required ["intent" "code"]}}})
 
 (defn- wire-message
   "A conversation message as the chat API reads it: an assistant's eval calls as tool_calls
@@ -118,9 +118,9 @@
   [{:keys [role content tool-calls tool-call-id reasoning]}]
   (cond-> {:role role :content content}
     reasoning (assoc :reasoning_content reasoning)
-    (seq tool-calls) (assoc :tool_calls (mapv (fn [{:keys [id code prose]}]
-                                                ;; the call's arguments as it sent them, prose first
-                                                {:id id :type "function" :function {:name "eval" :arguments (json/write-str (if prose (array-map :prose prose :code code) {:code code}))}})
+    (seq tool-calls) (assoc :tool_calls (mapv (fn [{:keys [id code intent]}]
+                                                ;; the call's arguments as it sent them, intent first
+                                                {:id id :type "function" :function {:name "eval" :arguments (json/write-str (if intent (array-map :intent intent :code code) {:code code}))}})
                                               tool-calls))
     tool-call-id (assoc :tool_call_id tool-call-id)))
 
@@ -173,14 +173,14 @@
     reasoning-effort (assoc :reasoning_effort (name reasoning-effort))))
 
 (defn- call-code
-  "An eval call's code and prose: the `code` and `prose` of its JSON arguments, or the arguments
+  "An eval call's code and intent: the `code` and `intent` of its JSON arguments, or the arguments
   as they came when they are not that JSON (a reply cut mid-call): the reader shows what they hold."
-  {:malli/schema [:=> [:cat [:maybe :string]] [:map [:code :string] [:prose {:optional true} :string]]]}
+  {:malli/schema [:=> [:cat [:maybe :string]] [:map [:code :string] [:intent {:optional true} :string]]]}
   [arguments]
   (let [a (or arguments "")
         j (try (json/read-str a) (catch Throwable _ nil))]
     (if (and (map? j) (string? (get j "code")))
-      (cond-> {:code (get j "code")} (string? (get j "prose")) (assoc :prose (get j "prose")))
+      (cond-> {:code (get j "code")} (string? (get j "intent")) (assoc :intent (get j "intent")))
       {:code a})))
 
 (defn reply-of

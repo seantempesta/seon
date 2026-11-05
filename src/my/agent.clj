@@ -31,9 +31,10 @@
                               transaction on the branch, or refused with why; the next turn tells it
     (cite! "docs/x.md?full#y") read a section (a page whole with no anchor, or a name) beside the task,
                               at its ?depth (summary, lead, full); (uncite! "docs/x.md#y") stops reading it
-    (help 'ns.name)           a namespace: every definition, privates included, a line each in file order
-    (help)                    the help page's sections (docs/agent.md); (help "done") one whole;
-                              (help "docs/vector.md#the-model") any section, (help "docs/vector.md") a page
+    (doc 'ns.name)            a namespace: its doc, then every definition, privates included, a line each in file order
+    (doc "done")              the help page's section (docs/agent.md) whole; (doc "docs/vector.md#the-model") any
+                              section, (doc "docs/vector.md") a page's sections; (doc :var/form) a schema key
+    (help)                    the system prompt as sent, then this map
     clojure.repl as at any Clojure REPL (source, doc, dir, apropos, find-doc, pst), with *1 *2 *3 *e:
     source reads this branch's own definitions first, then a library's file"
   (:refer-clojure :exclude [defn defn-])
@@ -138,8 +139,10 @@
   for the registry key of that name when db has one; and \"write it\" only when this agent's task
   cites sym in its plan (a plan's new function, not yet written; in-ns makes a new namespace).
   A namespace's name that names one is not missing (source answers what it records)."
-  {:malli/schema [:=> [:cat :seon.host/db :symbol] [:maybe :my.agent/no-var]]}
-  [db sym]
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] :symbol] [:maybe :my.agent/no-var]]}
+  [db0 sym]
+  ;; root holds no branch: its names are the process's alone (an empty db has no vars)
+  (let [db (or db0 (d/empty-db))]
   (when-not (or (pdb/eid db :var/name sym) (var? (ns-resolve *ns* sym))
                 (and (not (namespace sym)) (or (find-ns sym) (pdb/eid db :ns/name sym))))
     (let [nsym (some-> (namespace sym) symbol)
@@ -161,7 +164,7 @@
                            (when key? (str "; " k " is a registry key: (my.agent/callers " k ")"))
                            (when cited? (str "; your task cites it, so write it: (in-ns '" nsym ") (defn " (name sym) " ...)"))
                            (when threw (str "; your plan's parse threw (" threw "): its cites read from the stored ones (seon.task/task-cites)")))
-                      (cond-> {:name sym :nearest nearest} key? (assoc :ask (str "(my.agent/callers " k ")")))))))
+                      (cond-> {:name sym :nearest nearest} key? (assoc :ask (str "(my.agent/callers " k ")"))))))))
 
 (defn callers
   "The program vars whose recorded definition names x on this branch, sorted, x itself left out
@@ -258,7 +261,7 @@
   function, section or schema key hit holds :relevance, the chance it is worth reading for q (calibrated
   on a judge's labels: docs/vector.md#relevance), and hits are best first by it; those below :min are
   counted in the last entry, not shown. Each hit also holds :e, its entity, and :at, the line of its text
-  (my.agent/help takes a hit, or its :name, and shows it). Hits left out by :k are counted per kind in a
+  (doc takes a hit, or its :name, and shows it). Hits left out by :k are counted per kind in a
   last {:kind :more} entry with the call that returns them. A failed embedding answers its error; a var
   or key with no vector yet is searched without meaning."
   {:malli/schema [:function [:=> [:cat [:or :qualified-symbol :qualified-keyword :string]] [:or [:vector :map] :map]]
@@ -486,29 +489,38 @@
   "Print the exception e (*e by default) as clojure.repl/pst does: its message, then each cause's
   class and message."
   {:malli/schema [:function [:=> [:cat] :nil] [:=> [:cat :any] :nil]]}
-  ([] (pst *e))
-  ([e] (when (instance? Throwable e)
-         (print (clojure.main/err->msg e))
-         (doseq [{:keys [type message]} (rest (:via (Throwable->map e)))]
-           (println "Caused by:" type message)))))
+  ([] (if *e (pst *e) (println "no error to print: *e is nil")))
+  ([e] (if (instance? Throwable e)
+         (do (print (clojure.main/err->msg e))
+             (doseq [{:keys [type message]} (rest (:via (Throwable->map e)))]
+               (println "Caused by:" type message)))
+         (println "pst prints an exception; this is" (class e)))))
+
+(defn- none
+  "Why sym is none, in words: no-var's answer with the nearest names (on root, which holds no branch, the process's alone);
+  for a var no recorded source holds, that. Never nil, never blank."
+  {:malli/schema [:=> [:cat :symbol] :string]}
+  [sym]
+  (or (:seon.error/message (no-var (:db @agent/state) sym)) (str sym " has no recorded source in this process")))
 
 (defmacro source
   "Print the recorded source of the definition named by sym (as clojure.repl/source does). A
   name is taken as written; any other form (a quoted symbol, #'f, a local of a doseq) is
-  evaluated to the symbol or var it holds, as the call reads naturally."
+  evaluated to the symbol or var it holds, as the call reads naturally. A name that is none says so, with the
+  nearest names."
   [sym]
   (let [x (if (and (symbol? sym) (not (contains? &env sym))) (list 'quote sym) sym)]
     `(let [x# ~x]
        (println (if (or (symbol? x#) (var? x#))
                   (let [s# (named x#)]
-                    (or (source-fn s#) (:seon.error/message (no-var (agent/db) s#)) (str "Source not found for " s#)))
+                    (or (source-fn s#) (#'my.agent/none s#)))
                   (str "Source not found for " x# ": source reads a name or a var"))))))
 
 (defn- help-nearest
   "What a help address that is no section may have meant: the help page's sections and the pages
   whose address holds a word of it (four letters or more), the sections whose text the search finds
   for it (`search`: \"schema\" named no address, though the help page says how a schema changes), then the nearest by Jolt's did-you-mean ranking (as no-var): a few
-  addresses, never the page ((my.agent/help) lists it). See docs/references.md#a-section-read-at-a-depth-with-its-edges."
+  addresses, never the page ((doc \"docs/agent.md\") lists its sections). See docs/references.md#a-section-read-at-a-depth-with-its-edges."
   {:malli/schema [:=> [:cat :seon.host/db :string] [:vector :string]]}
   [db address]
   (let [sections (doc/page db context/help-page :summary)
@@ -532,38 +544,65 @@
         db' (:db-after r)]
     (ui/cite-model {} (:tree (seon.ctx/build db' (pdb/eid db' :seon.cite/id (str "help " n)) nil)))))
 
-(defn help
-  "The wiki through the one view (seon.doc/view), as this branch holds it. No argument: the help
-  page (seon.context/help-page) at summary, each section its address, heading and lead's first
-  sentence, with the sections it cites and those citing it. With an address (``docs/vector.md#the-model``) or
-  an anchor of the help page (\"done\"), that section whole; with a page's path (\"docs/vector.md\"), that page
-  at summary. A miss answers what it did not find, the nearest addresses (help-nearest) and the
-  forms that read one, never nil. (Before this an anchor answered its text alone; it answers the view, :seon.ref/text among its keys.)
-  With a namespace's name ('seon.print.select), the namespace as a plan's citation of it shows it:
-  its ns head and docstring, then each definition, privates included, in file order, a line each
-  (its name and its doc's first sentence; seon.ref/namespace-view). With a hit of (my.agent/search ...)
-  (a map with its :kind and :name), or its :name (a var's symbol, a schema key, a section's address),
-  the thing itself at doc depth: a var its docstring, contract and source, a section whole, a task its
-  plan, proofs and needs."
-  {:malli/schema [:function [:=> [:cat] [:vector :seon.ref/view]]
-                  [:=> [:cat [:or :string :symbol :qualified-keyword [:map [:kind :keyword]]]] :any]]}
-  ([] (vec (doc/page (agent/db) context/help-page :summary)))
-  ([address]
-   (cond
-     (map? address) (let [db (agent/db) {:keys [kind name]} address]
-                      (case kind
-                        :task (select-keys (task/task db name) [:seon.task/id :seon.task/plan :seon.task/proofs :seon.task/needs])
-                        :section (doc/view db name :code)
-                        :more address
-                        (cited db name)))
-     (or (symbol? address) (keyword? address))
-     (cited (agent/db) address)
-     :else
-   (let [db (agent/db)
-         a (if (str/includes? address "#") address (str context/help-page "#" address))]
-     (or (doc/view db a :code)
-         (doc/page db address :summary)
-         {:no-section address
-          :nearest (help-nearest db address)
-          :read-one "(my.agent/help) lists the help page's sections; (my.agent/help \"docs/<page>.md\") a page's sections; (my.agent/help \"docs/<page>.md#<section>\") reads one; (my.agent/help 'ns.name) a namespace, every definition a line"})))))
+(defn doc-of
+  "The thing x names as data, for `doc`: a schema key (:var/form, its form and what cites it), a wiki address
+  (\"docs/vector.md#the-model\" a section whole, \"docs/vector.md\" a page's sections, an anchor of the help page
+  \"done\"), a hit of (search ...) or its :name. A miss answers what it did not find, the nearest addresses
+  (help-nearest) and the forms that read one, never nil. See docs/references.md#a-section-read-at-a-depth-with-its-edges."
+  {:malli/schema [:=> [:cat [:or :string :symbol :qualified-keyword [:map [:kind :keyword]]]] :any]}
+  [x]
+  (let [db (agent/db)]
+    (cond
+      (map? x) (let [{:keys [kind name]} x]
+                 (case kind
+                   :task (select-keys (task/task db name) [:seon.task/id :seon.task/plan :seon.task/proofs :seon.task/needs])
+                   :section (doc/view db name :code)
+                   :more x
+                   (cited db name)))
+      (symbol? x) (cited db x)
+      (keyword? x) (let [f (schema/forms x)] (if (contract/error? f) f (cited db x)))
+      :else (let [a (if (str/includes? x "#") x (str context/help-page "#" x))]
+              (or (doc/view db a :code)
+                  (doc/page db x :summary)
+                  {:no-section x
+                   :nearest (help-nearest db x)
+                   :read-one "(doc \"docs/<page>.md\") lists a page's sections; (doc \"docs/<page>.md#<section>\") reads one; (doc 'ns.name) a namespace, every definition a line; (doc :ns/key) a schema key"})))))
 
+(defmacro doc
+  "Print the documentation of x and answer nil, as clojure.repl/doc does: a var, a namespace or a special form, named as written
+  or quoted (a namespace also lists its definitions, a line each). And what is Seon's: a schema key `(doc :var/form)` or a
+  wiki address `(doc \"docs/storage.md#history\")` prints what `doc-of` answers. A name that is none says so in words, with
+  the nearest names."
+  [x]
+  (let [x (if (and (seq? x) (= 'quote (first x))) (second x) x)]
+    (if-not (symbol? x)
+      `(do (println (:text (seon.print/print-value (my.agent/doc-of ~x) {:budget Integer/MAX_VALUE}))) nil)
+      (let [special ('{& fn catch try finally try} x)]
+        (cond (or special (@#'clojure.repl/special-doc-map x)) `(#'clojure.repl/print-doc (#'clojure.repl/special-doc '~(or special x)))
+              (find-ns x) `(do (#'clojure.repl/print-doc (#'clojure.repl/namespace-doc (find-ns '~x)))
+                               (when (:db @seon.agent/state) (doseq [r# (my.agent/ls '~x)] (println (str "  " (:at r#) (when (:text r#) (str "  " (:text r#))))))))
+              (resolve x) `(#'clojure.repl/print-doc (meta (var ~x)))
+              :else `(println (#'my.agent/none '~x)))))))
+
+(defmacro dir
+  "Print a sorted directory of the public vars of the namespace nsname (an alias too), as clojure.repl/dir does. A name
+  that is a var, or none, says so in words, with the nearest names. See docs/agent.md#the-repl."
+  [nsname]
+  `(let [n# '~nsname]
+     (cond (or (find-ns n#) (get (ns-aliases *ns*) n#)) (doseq [v# (clojure.repl/dir-fn n#)] (println v#))
+           (resolve n#) (println (str n# " is a var, not a namespace: (doc " n# ") or (source " n# ")"))
+           :else (println (#'my.agent/none n#)))))
+
+(defn help
+  "The system prompt as an agent is sent it (seon.context/system-text), then this namespace's forms: the map of what
+  is here. A wiki section, a page, a schema key or a name is `doc`'s (docs/agent.md#finding-your-way)."
+  {:malli/schema [:=> [:cat] :string]}
+  [] (str (context/system-text (agent/db)) "\n\n" (:doc (meta (the-ns 'my.agent)))))
+
+;; The REPL's tools in Jolt's clojure.repl: the one place a process gets them, so `clojure.repl/doc` and the bare `doc`
+;; are Seon's in every namespace of root, a test child and an agent alike (`seon.agent/repl-name` resolves the bare
+;; names there). `intern` is a code smell the rule allows where no definition form exists: these are another
+;; namespace's vars (Jolt's clojure.repl lacks source, source-fn and pst, and answers nothing for a missing name);
+;; task seon.context/the-standard-repl-tools moves them into Jolt's own clojure.repl (docs/resolution.md).
+(doseq [s '[source-fn source pst doc dir] :let [v (ns-resolve 'my.agent s)]]
+  (intern (find-ns 'clojure.repl) (with-meta s (select-keys (meta v) [:macro :arglists :doc])) @v))

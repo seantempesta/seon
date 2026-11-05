@@ -18,7 +18,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.step :as step] [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.error :as err] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.doc :as doc] [seon.merge :as pm] [seon.config :as cfg] [seon.reconcile :as r] [seon.vector :as vector] [seon.lib :as lib] [seon.print :as print] [seon.sock :as sock] [jolt.scheme :as scm] [clojure.test :as t]
             [clojure.string :as str] [seon.program :as program] [seon.proofs :as proofs] [seon.fx :as fx] [seon.task :as task] [seon.intr :as intr] [seon.render :as render] [seon.template :as template] [clojure.repl]
-            [malli.registry :as mr] [clojure.core.async :as a] [jolt.io-poller :as poller]))
+            [malli.registry :as mr] [malli.core] [jolt.analyzer] [clojure.core.async :as a] [jolt.io-poller :as poller]))
 
 ;; One state map per agent process (this process is the agent). Fields:
 ;; :id :branch :task (the task root forked it for, or nil) :db :base (main at the branch's merge base: as forked, then each merge-main!) :main (main's head as last read: as forked, then heard-main) :results :n :waits (seon.agent/await-reply's promises, by key) :busy (the :repl proc runs a request) :tx-seq :mode :ns :home :mismatch
@@ -508,7 +508,7 @@
 (def repl-names
   "The names an agent's REPL resolves in any namespace where nothing else does (`repl-name`), by the namespace
   holding each, :all its publics; a name two hold is the first's (clojure.repl's source, source-fn and pst are
-  Seon's, interned there under their own names by `make-ns!`, and my.agent's are the same functions). See
+  Seon's, interned there under their own names by my.agent's last form, and my.agent's are the same functions). See
   docs/agent.md#the-repl."
   '[[clojure.repl [source source-fn apropos dir pst doc find-doc]] [clojure.pprint [pp pprint]] [my.agent :all] [my.db :all] [seon.ctx [ctx]]
     [clojure.test [deftest is are testing use-fixtures]]])
@@ -546,6 +546,16 @@
   {:malli/schema [:=> [:cat :map] :map]}
   [r] (cond-> (dissoc r :value) (and (contains? r :value) (contract/plain? (:value r))) (assoc :value (:value r))))
 
+(defn- no-such-schema
+  "What ex-data d says when malli has no schema of that name, {:message :fix} with the nearest names it knows, else nil.
+  See docs/failure-points.md."
+  {:malli/schema [:=> [:cat :any] [:maybe [:map [:message :string] [:fix {:optional true} :string]]]]}
+  [d]
+  (when (= :malli.core/invalid-schema (:type d))
+    (let [schema (:schema (:data d))
+          near (jolt.analyzer/suggestions-for (str schema) (map str (keys (malli.core/default-schemas))))]
+      (cond-> {:message (str "malli has no schema " schema)} (seq near) (assoc :fix (str "did you mean " (str/join ", " near)))))))
+
 (defn error-map
   "An exception caught at one of the agent's entrant boundaries (operation: the REPL's
   seon.repl/eval-code by default) as the one error map: its ex-data when that already is
@@ -569,13 +579,17 @@
            other (not-empty (into {} (remove (some-fn (every-pred (comp qualified-keyword? key) diag?) (comp #{:jolt/heap} key))) d))
            sym (:jolt.error/symbol jd)
            unresolved? (and sym (= :analyze/unresolved-symbol (:jolt.error/kind jd)))
-           m (if unresolved? (unresolved-message sym) (step/error-msg e))
+           no-schema (no-such-schema d)
+           m (cond no-schema (:message no-schema) unresolved? (unresolved-message sym) :else (step/error-msg e))
            ;; a REPL name in a definition: the program resolves as written, so the definition calls it qualified
            repl (when unresolved? (repl-name (symbol sym)))
            causes (mapv #(str (type %) ": " (ex-message %)) (take-while some? (rest (iterate ex-cause e))))]
        (contract/error :seon.agent/eval-error op m
                        (cond-> (assoc jd :class (str (type e)))
                          (seq (:jolt.error/suggestions jd)) (assoc :seon.error/fix (str "did you mean " (str/join ", " (:jolt.error/suggestions jd))))
+                         (:fix no-schema) (assoc :seon.error/fix (:fix no-schema))
+                         ;; Clojure's own forms reach a private var
+                         (= :analyze/private-var (:jolt.error/kind jd)) (assoc :seon.error/fix (str sym " is private: call it (#'" sym " ...) or read it @#'" sym))
                          repl (assoc :seon.error/fix (str sym " is the REPL's: a definition is the program, which resolves as written, so it calls " repl))
                          other (assoc :data other)
                          heap (assoc :jolt/heap heap)
@@ -1268,12 +1282,8 @@
     ;; namespace (`repl-name`), referred nowhere
     (binding [*ns* nsx]
       (refer-clojure)
-      ;; clojure.repl as clojure.main's REPL has it (clojure.main/repl-requires). Jolt's lacks
-      ;; source, source-fn and pst: interned from my.agent, whose source also reads the agent's
-      ;; own redefinitions from its branch db (task seon.context/the-standard-repl-tools moves the
-      ;; file-reading part into Jolt's own clojure.repl)
-      (doseq [s '[source-fn source pst] :let [v (ns-resolve 'my.agent s)]]
-        (intern (find-ns 'clojure.repl) (with-meta s (select-keys (meta v) [:macro :arglists :doc])) @v))
+      ;; clojure.repl as clojure.main's REPL has it (clojure.main/repl-requires); my.agent puts Seon's source, source-fn,
+      ;; pst, doc and dir into it in every process
       (require 'clojure.pprint))
     nsx))
 
