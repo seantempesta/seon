@@ -1067,7 +1067,9 @@
         (instance? Throwable x) (str "threw " (ex-message x))
         (and (map? x) (:via x)) (str "threw " (:message (first (:via x))))
         (string? x) x
-        :else (print/text x)))
+        :else (let [t (print/text x)]
+                ;; a thrown error is the failure's got (clojure.test/is reports it): say what it threw, not its trace
+                (if-let [m (when (str/starts-with? t "#error") (second (re-find #":message \"([^\"]*)\"" t)))] (str "threw " m) t))))
 
 (defn- form-hiccup
   "A form to run, as code: inline when it is one line, a block when it spans several."
