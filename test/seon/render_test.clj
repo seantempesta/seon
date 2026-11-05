@@ -1972,7 +1972,14 @@
         html (h/html (ui/task {} t))]
     (is (str/includes? html "task · seon.program · stopped at its cap") html)
     (is (not (str/includes? html "running")))
-    (is (str/includes? (h/html (ui/task {} (dissoc t :seon.task/outcome))) "task · seon.program · running") "no outcome yet: its execution as before")))
+    (is (str/includes? (h/html (ui/task {} (dissoc t :seon.task/outcome))) "task · seon.program · running") "no outcome yet: its execution as before")
+    (testing "the side panel's task, drawn from the agent's branch, which holds no outcome of the task: its agent's own end says it"
+      (let [part (ui/task-data {:seon.ctx/ctx {:task (dissoc t :seon.task/outcome) :seon.agent/outcome :cap :seon.agent/ended-turn 40 :seon.agent/status :idle}} 1)]
+        (is (= "stopped at its cap · 40 turns" (:stands part)))
+        (is (str/includes? (h/html (ui/task {} part)) "task · seon.program · stopped at its cap · 40 turns"))
+        (is (not (str/includes? (h/html (ui/task {} part)) "running")))
+        (is (nil? (:stands (ui/task-data {:seon.ctx/ctx {:task t :seon.agent/status :busy}} 1))) "an agent with no end says nothing")
+        (is (= (ui/task-model {} (dissoc part :stands)) (ui/task-model {} part)) "and the model reads the same bytes")))))
 
 (deftest a-long-part-on-the-ctx-page-starts-closed-and-opens-on-demand
   ;; owner, 2026-11-05: @ctx was 1.3 MB and 614,773 px tall: the status part, as the model reads it, is a million

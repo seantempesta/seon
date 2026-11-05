@@ -554,7 +554,7 @@
 
 (defn task
   "A task (the declared html render of :seon.task/task-fact) as a person reads it, from what the pattern
-  joined (`task-model` its data): inline its id, kind and execution; whole, its name as a title, its
+  joined (`task-model` its data; :stands, task-data's words for how its agent's own end left it): inline its id, kind and execution; whole, its name as a title, its
   namespace and execution above it, how its kind is worked (folded), its plan accumulated over its needs as
   Markdown, how to run each proof (folded). See docs/render.md#a-part-answers-data."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
@@ -566,7 +566,10 @@
        ;; its name as a title (the id's name, words), its namespace and state above it
        [:p {:class "text-2xs uppercase tracking-wider text-text-500"}
         ;; how its work stands, as the header says it (standing), where the task holds an outcome: a capped task is not "running"
-        (str "task · " (namespace (symbol id)) (if-let [o (:seon.task/outcome t)] (str " · " (:text (standing nil {:seon.task/outcome o}))) (when execution (str " · " (kname execution)))))]
+        (str "task · " (namespace (symbol id))
+             (cond (:stands t) (str " · " (:stands t))
+                   (:seon.task/outcome t) (str " · " (:text (standing nil {:seon.task/outcome (:seon.task/outcome t)})))
+                   execution (str " · " (kname execution))))]
        [:p {:class "text-lg font-bold text-text-100"} (task-title id)]
        ;; how its kind is worked (the template's text, read before the plan) and what the task is (its plan),
        ;; each whole under the value budget, as prose; a cut names the form that answers the whole
@@ -794,8 +797,14 @@
   {:seon.render/style (str panel-style " [&_h3]:text-xs [&_h3]:text-text-300") :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int] :any]}
   [{c :seon.ctx/ctx} _aid]
   (let [t (:task c)
-        own (fn [x] (into {} (for [k (keys x) :when (not= :cites k)] [k (ratom/realize (get x k))])))]
-    (with-meta (assoc (own t) :needs (into {} (for [[k n] (:needs t)] [k (own n)])))
+        own (fn [x] (into {} (for [k (keys x) :when (not= :cites k)] [k (ratom/realize (get x k))])))
+        ;; how its work stands where the agent's own end says it (its record on this branch: outcome, turns): the task's own outcome
+        ;; is main's, which no branch holds. The page's words only (`task` reads :stands); the model's render takes the keys it names
+        agent (into {} (for [k [:seon.agent/outcome :seon.agent/ended-turn :seon.agent/turn :seon.agent/max-turns :seon.agent/reason :seon.agent/status]
+                             :let [v (ratom/realize (get c k))] :when (some? v)] [k v]))
+        stands (when (:seon.agent/outcome agent) (standing agent nil))]
+    (with-meta (cond-> (assoc (own t) :needs (into {} (for [[k n] (:needs t)] [k (own n)])))
+                 (and stands (= "end" (namespace (:state stands)))) (assoc :stands (str (:text stands) (when (:detail stands) (str " · " (:detail stands))))))
       {:seon.render/schema :seon.task/task-fact})))
 
 (defn task-model
@@ -1697,6 +1706,14 @@
            (when (:seon.agent/status a) [:span {:class (str "truncate text-2xs " (tone-class (:tone stands)))} (:text stands)])]
           (when what [:span {:class "truncate text-2xs text-text-400"} what])]]))
 
+(defn- session-order
+  "How a boot's sessions sort in the list: the numbered ids in their numbers (a2 before a10), a person's (user) after them."
+  {:malli/schema [:=> [:cat :string] [:tuple :int :string :int :string]]}
+  [k]
+  (let [id (or (second (str/split k #"/" 2)) k)
+        [_ p n] (re-matches #"(\D+)(\d+)" id)]
+    [(if n 0 1) (or p "") (if n (parse-long n) 0) id]))
+
 (defn boot-short
   "A boot's id, or a key (boot/id), as a person reads the boot: its first group of characters."
   {:malli/schema [:=> [:cat :string] :string]}
@@ -1709,7 +1726,7 @@
   every session on main stays short to read."
   {:seon.render/style "contents" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :string] :any]}
   [{db :seon.db/db} boot]
-  (let [eids (vec (sort (for [dt (d/datoms db :avet :seon.agent/key) :when (str/starts-with? (:v dt) (str boot "/"))] (:e dt))))
+  (let [eids (->> (d/datoms db :avet :seon.agent/key) (filter #(str/starts-with? (:v %) (str boot "/"))) (sort-by #(session-order (:v %))) (mapv :e))
         pills (for [eid eids] [#'agent-side {} eid])]
     (if (= boot (task/boot-of db))
       [:li {:class "contents"} [:ul {:class "contents"} pills]]
@@ -1725,8 +1742,8 @@
   (let [now (task/boot-of db)
         by (group-by #(first (str/split (:v %) #"/" 2)) (d/datoms db :avet :seon.agent/key))]
     (->> by
-         (map (fn [[boot dts]] [boot (vec (sort (map :e dts)))]))
-         (sort-by (fn [[boot eids]] [(if (= boot now) 0 1) (- (peek eids))])))))
+         (map (fn [[boot dts]] [boot (mapv :e (sort-by #(session-order (:v %)) dts))]))
+         (sort-by (fn [[boot eids]] [(if (= boot now) 0 1) (- (apply max eids))])))))
 
 (defn root-head
   "Root's head (a component over its ctx): its boot, its generation and, when it last went quiet,
