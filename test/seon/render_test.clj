@@ -350,7 +350,7 @@
                                              {:seon.eval/call-id "c-e2" :seon.eval/code "(f 3)" :seon.eval/response {:handle 'result/e2 :value 6 :ms 0.4 :bytes 512 :ticks 40}})
                         [{:seon.agent/key k :seon.agent/turn 1}
                          {:seon.model-call/id (str k "/1") :seon.model-call/agent {:seon.agent/key k} :seon.model-call/n 1 :seon.model-call/origin :model :seon.model-call/reply "it doubles"
-                          :seon.model-call/forms 2 :seon.model-call/errors 0 :seon.model-call/red 0 :seon.model-call/ms 5 :seon.model-call/tokens 1200
+                          :seon.model-call/forms 2 :seon.model-call/errors 0 :seon.model-call/ms 5 :seon.model-call/tokens 1200
                           :seon.model-call/basis {:commit #uuid "00000000-0000-0000-0000-000000000000" :task "demo/f" :turn 1 :max-turns 8 :origin :model}}]
                         (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e3" "user"
                                              {:seon.eval/code "(g)" :seon.eval/turn 1 :seon.eval/response {:handle 'result/e3 :ex {:seon.error/type :seon.agent/eval-error :seon.error/operation 'seon.repl/eval-code :seon.error/message "boom"}}})])
@@ -1155,7 +1155,7 @@
                     (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a1} "e1" "a1" {:seon.eval/call-id "c-e1" :seon.eval/code "(+ 1 2)" :seon.eval/response {:handle 'result/e1 :value 3}})
                     [{:seon.agent/key k :seon.agent/turn 1}
                      {:seon.model-call/id (str k "/1") :seon.model-call/agent {:seon.agent/key k} :seon.model-call/n 1 :seon.model-call/origin :model
-                      :seon.model-call/sent [[:no-such-part "x"] [:hashes {}]] :seon.model-call/tokens 100 :seon.model-call/forms 1 :seon.model-call/errors 0 :seon.model-call/red 0 :seon.model-call/ms 1}]])
+                      :seon.model-call/sent [[:no-such-part "x"] [:hashes {}]] :seon.model-call/tokens 100 :seon.model-call/forms 1 :seon.model-call/errors 0 :seon.model-call/ms 1}]])
         db0 (d/db-with db0 (seon.doc/load-tx db0 "docs" {seon.context/system-page "# You are a Seon agent\n\nThe help page."}))
         db (d/db-with db0 [{:seon.model-call/id (str k "/1") :seon.model-call/basis {:commit (d/commit-id db0) :task "t/x" :turn 1 :max-turns 9 :origin :model :agent k}}])
         debug [:debug :a1]

@@ -73,7 +73,7 @@
  ;; it, or it is there more than once; each line the error names [line text] (the near or the candidates)
  :seon.repl/edit-refused [:and :seon.error/base
                           [:map [:seon.error/type [:enum :seon.repl/edit-refused]] [:seon.repl/var [:or :symbol :string]]
-                           [:seon.repl/refused-because [:enum :no-source :not-found :ambiguous :unbalanced :overlap :empty]]
+                           [:seon.repl/refused-because [:enum :no-source :not-found :ambiguous :overlap :empty]]
                            [:seon.repl/lines {:optional true} [:vector [:tuple pos-int? :string]]]
                            ;; :not-found: at each candidate, the line where old stops matching (seon.repl/differs)
                            [:seon.repl/differs {:optional true} [:vector :map]]]]
