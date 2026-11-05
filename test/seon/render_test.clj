@@ -492,7 +492,7 @@
       (is (= 2 (count (in root "#c-side")) (count (in agent "#c-side"))))
       (is (= (map :html (in root "#c-side")) (map :html (in agent "#c-side"))))
       (is (str/includes? (:html (first (in root "#c-side"))) "href=\"/\"") "root's line links to its page")
-      (is (str/includes? (:html (second (in root "#c-side"))) "href=\"/agent/a3\"") "a link to its page"))
+      (is (str/includes? (:html (second (in root "#c-side"))) "href=\"/agent/b1/a3\"") "a link to its page, by its key"))
     (testing "root's focus: its process, main's open problems and work by their own renders, its input spawns"
       (is (= 3 (count (in root "#p-tiles"))))
       (is (str/includes? (:html (first (in root "#p-tiles"))) "process"))
@@ -500,7 +500,7 @@
       (is (str/includes? (:html (nth (in root "#p-tiles") 2)) "work"))
       (is (= :seon.render/root-input (:schema (input root)))))
     (testing "an agent's focus: its REPL and messages at the top, live while root's view holds it in this boot"
-      (is (= [:seon.render/agent-input {:id :a3 :live? true :held nil :focus? true}] [(:schema (input agent)) (:input (input agent))]))
+      (is (= [:seon.render/agent-input {:id :a3 :live? true :held nil :focus? true :busy? true :capped? false}] [(:schema (input agent)) (:input (input agent))]))
       (let [ctx-page (#'p/page-value st :a3)]
         (is (false? (:focus? (:input (input ctx-page)))) "@ctx's input takes no focus: a focused field at the page's end scrolls the page to its bottom")))
     (testing "a location naming no entity is that error, never an empty page; a branch that could not be read is shown as its error"
@@ -514,9 +514,9 @@
         (is (false? (:live? (:input (input (#'p/page-value st2 eid))))))
         (let [e (#'p/page-value st2 [:chat :a3])]
           (is (= :seon.render/no-location (:seon.error/type e)) "and its id in this boot names no entity: the page says so, never nothing")
-          (is (str/includes? (:seon.error/message e) "no agent a3 in root's boot b2"))
+          (is (str/includes? (:seon.error/message e) "no agent a3 on main"))
           (testing "the pass answers it as that page"
-            (is (str/includes? (p/view-html (first (#'p/pass-view st2 [:chat :a3])) [:chat :a3]) "no agent a3 in root's boot b2"))))))
+            (is (str/includes? (p/view-html (first (#'p/pass-view st2 [:chat :a3])) [:chat :a3]) "no agent a3 on main"))))))
     (r/dispose-walk! (get-in st [:root-walk :w]))))
 
 (deftest a-location-names-root-an-agent-or-an-entity
@@ -704,8 +704,9 @@
         ;; and a commit whose head reads the same sends nothing
         r (d/with main (seon.task/agent-tx "b1" :a3 {:status :ended}))
         [st2 patch] (#'p/pass-view (assoc st1 :main-db (:db-after r)) [:chat :a3])]
-    (is (= 1 (- (made st2) (made st1))) "the head rendered again, nothing else")
-    (is (= #{"p-agent-head"} (set (map first (:frags patch)))) "its fragment sent")
+    ;; its head, and its input (a process that ended is no longer busy: nothing to interrupt)
+    (is (= 2 (- (made st2) (made st1))) "the head and the input rendered again, nothing else")
+    (is (= #{"p-agent-head" "p-input"} (set (map first (:frags patch)))) "their fragments sent")
     (is (empty? (:prepends patch)))
     (testing "a pass with nothing touched renders nothing"
       (is (= (made st2) (made (first (#'p/pass-view st2 [:chat :a3]))))))))
@@ -717,16 +718,15 @@
         st (root-state (branch-state main branch) main)
         [st1 _] (#'p/pass-view st [:chat :a3])
         side (fn [st] (filter #(= "#c-side" (:container %)) (vals (get-in st [:views [:chat :a3] :units]))))]
-    (is (= 2 (count (side st1))) "root, and its one agent, a3")
+    (is (= 2 (count (side st1))) "root, and the boot's sessions, one component")
     (is (str/includes? (p/view-html st1 [:chat :a3]) "href=\"/\"") "root's line links to its page")
-    (is (str/includes? (p/view-html st1 [:chat :a3]) "href=\"/agent/a3\"") "a link to its page")
+    (is (str/includes? (p/view-html st1 [:chat :a3]) "href=\"/agent/b1/a3\"") "a link to its page, by its key: the name that survives a restart")
     (testing "a new agent of root's is a new line in the sidebar, its component; the others stay"
       (let [main' (d/db-with (:main-db st1) (seon.task/agent-tx "b1" :a4 {:status :busy}))
             st2 (#'p/advance-main st1 main')
             [st3 patch] (#'p/pass-view st2 [:chat :a3])]
-        (is (= 3 (count (side st3))))
-        (is (some #(str/includes? (second %) "href=\"/agent/a4\"") (concat (:appends patch) (:afters patch) (:prepends patch))) "its line is sent")
-        (is (not-any? #(str/includes? (second %) "href=\"/agent/a3\"") (:frags patch)) "a3's line is not sent again")))
+        (is (= 2 (count (side st3))) "the boot's sessions are one component")
+        (is (some #(str/includes? (second %) "href=\"/agent/b1/a4\"") (:frags patch)) "its line is sent, in its boot's unit")))
     (r/dispose-walk! (get-in st [:root-walk :w]))))
 
 (deftest a-part-that-sorts-into-the-middle-goes-there
@@ -771,7 +771,7 @@
     (testing "the agent changed on main (a commit, as the writer reports it): its head re-renders, nothing else"
       (let [r (d/with main (seon.task/agent-tx "b1" :a3 {:status :ended}))
             [_ p] (pass (assoc st1 :main-db (:db-after r)))]
-        (is (= #{"p-agent-head"} (:frags (patch-ids p))) "its head")
+        (is (= #{"p-agent-head" "p-input"} (:frags (patch-ids p))) "its head, and its input (it is no longer busy)")
         (is (empty? (:prepends p)))))
     (testing "a new evaluation on its branch: one new row, prepended above the rows the page holds; the others untouched"
       (let [k (seon.task/agent-key "b1" :a3)
@@ -1188,7 +1188,7 @@
     (is (= eid (#'p/location db [:chat :main/example-abc])))
     (is (nil? (#'p/location db :main/example-none)) "an id no agent has")
     (is (str/includes? (html [:chat :main/example-abc]) "(+ 1 2)") "its chat page lists its evals")
-    (is (str/includes? (h/html (:seon.render/html (#'p/page-value st [:chat :main/example-abc]))) "href=\"/agent/main/example-abc/debug") "its tabs name it by the same link")
+    (is (str/includes? (h/html (:seon.render/html (#'p/page-value st [:chat :main/example-abc]))) "href=\"/agent/example/abc/debug") "its tabs name it by its key")
     (is (seq (units :main/example-abc)) "its record page reads main")))
 
 (deftest a-debug-page-of-an-agent-with-no-branch-answers
@@ -1814,12 +1814,31 @@
       (is (= "idle" (text (ui/standing {:seon.agent/status :idle :seon.agent/outcome :cap :seon.agent/ended-turn 4 :seon.agent/turn 5} nil))) "it was woken since")
       (is (= ["working" "idle" "finished" "killed" "stopped"] (mapv #(text (ui/standing {:seon.agent/status %} nil)) [:busy :idle :ended :killed :dead]))))))
 
+(defn- sessions-db
+  "A main db whose root is at boot, holding sessions, each [key id status task-id outcome branch] (a part left nil is not written):
+  the agents of any boot, as a store holds them after a root restarts (only this boot's keep their link to root)."
+  [boot sessions]
+  (reduce d/db-with (ts/test-db)
+          [[{:seon.root/id :root :seon.root/boot boot}]
+           (vec (for [[tid o b] (distinct (for [[_ _ _ tid o b] sessions :when tid] [tid o b]))]
+                  (cond-> {:seon.task/id tid :seon.task/ns (symbol (namespace (symbol tid))) :seon.task/name (name (symbol tid)) :seon.task/plan "p"
+                           :seon.task/execution :running :seon.task/branch (or b :task-b) :seon.task/kind :work}
+                    o (assoc :seon.task/outcome o)
+                    (= :cap o) (assoc :seon.task/reason "proof-red seon.ref-test/an-alias"))))
+           (vec (for [[k id status tid _ b] sessions]
+                  (cond-> {:seon.agent/key k :seon.agent/id id}
+                    status (assoc :seon.agent/status status) b (assoc :seon.agent/branch b)
+                    tid (assoc :seon.agent/task [:seon.task/id tid]))))]))
+
+(defn- session-eid [db k] (seon.db/eid db :seon.agent/key k))
+
 (deftest a-stopped-agent-does-not-read-as-waiting-in-its-head-or-its-lists
-  (let [a {:seon.agent/id :a6 :seon.agent/status :idle :seon.agent/max-turns 40}
+  (let [a {:seon.agent/id :a6 :seon.agent/status :idle :seon.agent/max-turns 40 :seon.agent/key "b2/a6"}
         t {:seon.task/id "seon.ref/an-alias" :seon.task/outcome :cap :seon.task/reason "proof-red seon.ref-test/an-alias"}
         head (h/html (ui/agent {} (assoc a :seon.agent/task t)))
-        c {:agents {1 (assoc a :task t) 2 {:seon.agent/id :a7 :seon.agent/status :idle :task {:seon.task/id "x/y" :seon.task/outcome :parked}}}}
-        side (h/html (ui/agent-side {:seon.ctx/ctx c} 1))
+        db (sessions-db "b2" [["b2/a6" :a6 :idle "seon.ref/an-alias" :cap :task-b] ["b2/a7" :a7 :idle "x/y" :parked :task-y]])
+        c {:agents {1 (assoc a :task t)}}
+        side (h/html (ui/agent-side {:seon.db/db db} (session-eid db "b2/a6")))
         card (h/html (ui/agent-card {:seon.ctx/ctx c} 1))]
     (is (str/includes? head "● stopped at its cap · 40 turns") head)
     (is (str/includes? head "proof-red seon.ref-test/an-alias") "its reason, in the header line")
@@ -1828,23 +1847,23 @@
     (is (not-any? #(str/includes? side %) ["idle" "waiting"]))
     (is (str/includes? card "stopped at its cap") card)
     (is (not (str/includes? card "idle")))
-    (is (str/includes? (h/html (ui/agent-side {:seon.ctx/ctx c} 2)) "waiting for you") "a parked task can be answered")
+    (is (str/includes? (h/html (ui/agent-side {:seon.db/db db} (session-eid db "b2/a7"))) "waiting for you") "a parked task can be answered")
     (is (str/includes? (h/html (ui/agent {} {:seon.agent/id :a7 :seon.agent/status :idle :seon.agent/task {:seon.task/outcome :parked}})) "● waiting for you"))))
 
 (deftest an-agents-pill-is-one-link-that-names-its-task
   ;; owner, 2026-11-05: the agents list read "a6 idle" and only the name was a link, though the pill looks like a button.
   ;; The whole pill is the link and says what the agent works on, cut to fit, the whole name in its title
   (let [long-id "seon.print/a-long-string-that-does-not-starve-its-siblings-however-long-it-runs"
-        c {:agents {1 {:seon.agent/id :a6 :seon.agent/status :idle :seon.agent/branch :task-seon-ref-an-alias
-                       :task {:seon.task/id "seon.ref/an-alias" :seon.task/outcome :cap}}
-                    2 {:seon.agent/id :a7 :seon.agent/status :busy :task {:seon.task/id long-id :seon.task/outcome :running}}
-                    3 {:seon.agent/id :a8 :seon.agent/status :idle :seon.agent/branch :task-demo-f}}}
-        side (fn [eid] (h/html (ui/agent-side {:seon.ctx/ctx c} eid)))
-        link (fn [html] (re-find #"<a [^>]*href=\"/agent/(a\d)\"[^>]*>(.*)</a>" html))
-        a6 (side 1) a7 (side 2) a8 (side 3)]
+        db (sessions-db "b2" [["b2/a6" :a6 :idle "seon.ref/an-alias" :cap :task-seon-ref-an-alias]
+                              ["b2/a7" :a7 :busy long-id :running :task-long]
+                              ["b2/a8" :a8 :idle nil nil :task-demo-f]])
+        c {:agents {1 {:seon.agent/id :a6 :seon.agent/key "b2/a6" :seon.agent/status :idle :task {:seon.task/id "seon.ref/an-alias" :seon.task/outcome :cap}}}}
+        side (fn [k] (h/html (ui/agent-side {:seon.db/db db} (session-eid db k))))
+        a6 (side "b2/a6") a7 (side "b2/a7") a8 (side "b2/a8")]
     (is (= 1 (count (re-seq #"<a " a6))) "one link")
     (is (str/starts-with? a6 "<li") a6)
-    (let [[_ _ inside] (link a6)]
+    (is (str/includes? a6 "href=\"/agent/b2/a6\"") "by its key")
+    (let [[_ inside] (re-find #"<a [^>]*>(.*)</a>" a6)]
       (is (and (str/includes? inside "○") (str/includes? inside "a6") (str/includes? inside "stopped at its cap")) "its dot, name and status are inside the link")
       (is (str/includes? inside "An alias") "and its task in words"))
     (is (str/includes? a6 "title=\"") "the whole name in a title")
@@ -1856,7 +1875,104 @@
       (let [root (h/html (ui/root-side {:seon.ctx/ctx c}))
             card (h/html (ui/agent-card {:seon.ctx/ctx c} 1))]
         (is (str/includes? (second (re-find #"<a [^>]*href=\"/\"[^>]*>(.*)</a>" root)) "main"))
-        (is (str/includes? (second (re-find #"<a [^>]*href=\"/agent/a6\"[^>]*>(.*)</a>" card)) "stopped at its cap"))))))
+        (is (str/includes? (second (re-find #"<a [^>]*href=\"/agent/b2/a6\"[^>]*>(.*)</a>" card)) "stopped at its cap"))))))
+
+(deftest every-session-on-main-is-listed-across-boots
+  ;; coordinator, 2026-11-05: after a root restarts its agents list drew "agent-side threw: nil where a Named is required" and
+  ;; no agent. Root's ctx holds this boot's agents alone (a new boot unlinks the earlier ones: seon.task/earlier-agents-tx),
+  ;; and the person (user), with no status and no task, made standing throw. The list is every agent on main, by boot
+  (let [db (sessions-db "b2" [["b2/user" :user nil nil nil nil]
+                              ["b2/a1" :a1 :busy "seon.x/now" :running :task-now]
+                              ["b1/a1" :a1 :dead "seon.x/old" :cap :task-old]
+                              ["b1/a2" :a2 :ended "seon.x/older" :merged :task-older]
+                              ["b0/a1" :a1 :dead "seon.x/oldest" :cap :task-oldest]])
+        groups (#'ui/sessions-by-boot db)
+        keys-of (fn [eids] (set (map #(:seon.agent/key (d/pull db [:seon.agent/key] %)) eids)))
+        ;; root's page as its walk draws it: the agents list's units, each one composed with its components
+        st (root-state (proc-state db db) db)
+        side (fn [st] (apply str (map :html (filter #(= "#c-side" (:container %)) (:seon.render/units (#'p/page-value st :root))))))
+        html (side st)]
+    (is (= ["b2" "b1" "b0"] (mapv first groups)) "this boot's first, then the others, newest first")
+    (is (= [#{"b2/user" "b2/a1"} #{"b1/a1" "b1/a2"} #{"b0/a1"}] (mapv (comp keys-of second) groups)) "every agent on main")
+    (is (every? #(= (vec (sort %)) %) (map second groups)) "oldest first in its boot")
+    (testing "an agent with no status and no task reads nothing, and draws"
+      (is (= :status/none (:state (ui/standing {:seon.agent/id :user} nil))))
+      (is (str/includes? (h/html (ui/agent-side {:seon.db/db db} (session-eid db "b2/user"))) "href=\"/agent/b2/user\"")))
+    (testing "this boot's sessions are in the list; an earlier boot's are folded under its id and its count, each linked by its key"
+      (is (not (str/includes? html "defect")) html)
+      (is (str/includes? html "href=\"/agent/b2/a1\""))
+      (is (< (.indexOf ^String html "boot b1") (.indexOf ^String html "boot b0")) "newest boot first")
+      (is (= 2 (count (re-seq #"<details" html))) "the two earlier boots are folded")
+      (is (str/includes? html "boot b1 · 2 sessions"))
+      (is (and (str/includes? html "href=\"/agent/b1/a1\"") (str/includes? html "href=\"/agent/b1/a2\"") (str/includes? html "href=\"/agent/b0/a1\"")))
+      (is (str/includes? html "stopped at its cap") "each with its standing, no process needed")
+      (is (str/includes? html "merged"))
+      (is (str/includes? html "Older") "and its task"))))
+
+(deftest an-address-names-a-session-however-a-person-holds-it
+  ;; coordinator, 2026-11-05: after a root restarts no past session opened (an id names one of this boot's). The session's
+  ;; key is stable: one address for every page of it, its task's id or its branch resolve to its agent
+  (let [db (sessions-db "b2" [["b2/user" :user nil nil nil nil]
+                              ["b1/a4" :a4 :dead "seon.program/vars-history" :cap :task-seon-program-vars-history]
+                              ["b2/a4" :a4 :busy "seon.other/now" :running :task-other-now]])
+        old (session-eid db "b1/a4") now (session-eid db "b2/a4")
+        loc #(#'p/location db %)]
+    (is (= old (loc (keyword "b1/a4"))) "by its key")
+    (is (= old (loc [:chat (keyword "b1/a4")])) "its chat")
+    (is (= old (loc (keyword "seon.program/vars-history"))) "by its task's id")
+    (is (= old (loc :task-seon-program-vars-history)) "by its branch")
+    (is (= old (loc :main/task-seon-program-vars-history)) "or main's name for it")
+    (is (= now (loc :a4)) "an id names this boot's agent, as before")
+    (is (nil? (loc (keyword "b9/a1"))) "an address naming none")
+    (is (nil? (loc :task-nobody)))
+    (testing "the path: the suffix is cut first, so a key's slash is no matter"
+      (is (= [[:chat (keyword "b1/a4")] (keyword "b1/a4") [:debug (keyword "b1/a4")]]
+             (mapv #'seon.web/view-of ["b1/a4" "b1/a4/debug" "b1/a4/context"])))
+      (is (= [(keyword "seon.program/vars-history") [:chat :task-seon-program-vars-history]]
+             [(#'seon.web/view-of "seon.program/vars-history/debug") (#'seon.web/view-of "task-seon-program-vars-history")])))
+    (testing "every page of a session with no process reads from its branch, by its key, and its tabs link by it"
+      (let [st {:rid 1 :pending {} :watch #{} :waiting {} :views {} :branches {} :main-db db :view {:agents {}}}
+            chat (#'p/page-value st [:chat (keyword "b1/a4")])
+            ctx (#'p/page-value st (keyword "b1/a4"))
+            html (apply str (h/html (:seon.render/html chat)) (map :html (:seon.render/units chat)))]
+        (is (not (:seon.error/type chat)) (pr-str (:seon.error/message chat)))
+        (is (not (:seon.error/type ctx)))
+        (is (str/includes? html "href=\"/agent/b1/a4/debug\"") "its @ctx tab, by its key")
+        (is (str/includes? html "href=\"/agent/b1/a4/context\""))
+        (is (str/includes? html "stopped at its cap") "and how it stands")
+        (is (not (str/includes? html "<textarea")) "no process: no REPL box")
+        (is (not (str/includes? html "interrupt")))
+        (is (not (:seon.error/type (#'p/page-value (assoc st :branches {[:debug (keyword "b1/a4")] {:db db}}) [:debug (keyword "b1/a4")]))))))
+    (testing "an address naming no session is that error, answered 404, with the way home"
+      (let [st {:rid 1 :pending {} :watch #{} :waiting {9 [:chat (keyword "b9/a1")] 10 [:chat (keyword "b1/a4")]} :kf-wanted #{} :new-events [] :events [] :views {} :branches {}
+                :merges 0 :main-db db :view {:agents {}}}
+            o (volatile! {})
+            _ (#'p/pass st o)
+            pages (into {} (for [m (:to-web @o) :when (= :page (:op m))] [(:k m) m]))]
+        (is (= 404 (:status (get pages 9))))
+        (is (str/includes? (:html (get pages 9)) "href=\"/\"") "a link home")
+        (is (str/includes? (:html (get pages 9)) "b9/a1") "the message names the address")
+        (is (nil? (:status (get pages 10))) "a session's page has no status: 200")))))
+
+(deftest a-capped-or-process-less-agent-offers-only-what-it-can-answer
+  ;; the REPL answers forms while a process is held (a capped task's agent keeps its process, parked), but takes no message; a form
+  ;; to interrupt only while one runs (status :busy)
+  (let [html (fn [m] (h/html (ui/agent-input {:unit "p-input"} (merge {:id :a3 :live? true :held nil} m))))]
+    (is (str/includes? (html {:busy? true}) "interrupt"))
+    (is (not (str/includes? (html {:busy? false}) "interrupt")) "no form running: nothing to interrupt")
+    (is (str/includes? (html {}) "a message, read at its next turn") "a live agent takes a message")
+    (is (not (str/includes? (html {:capped? true}) "a message, read at its next turn")) "a capped task's agent does not")
+    (is (str/includes? (html {:capped? true}) "stopped at its cap") "and the page says why")
+    (is (str/includes? (html {:capped? true}) "<textarea") "it still answers a form")
+    (is (not-any? #(str/includes? (html {:live? false :busy? true :capped? true}) %) ["<textarea" "interrupt"]) "no process: neither")))
+
+(deftest the-task-line-of-the-side-panel-reads-through-standing
+  ;; the chat's side panel said "task · seon.program · running" of a capped task: running is the task's execution, not how it stands
+  (let [t {:seon.task/id "seon.program/x" :seon.task/execution :running :seon.task/outcome :cap :seon.task/plan "p"}
+        html (h/html (ui/task {} t))]
+    (is (str/includes? html "task · seon.program · stopped at its cap") html)
+    (is (not (str/includes? html "running")))
+    (is (str/includes? (h/html (ui/task {} (dissoc t :seon.task/outcome))) "task · seon.program · running") "no outcome yet: its execution as before")))
 
 (deftest a-long-part-on-the-ctx-page-starts-closed-and-opens-on-demand
   ;; owner, 2026-11-05: @ctx was 1.3 MB and 614,773 px tall: the status part, as the model reads it, is a million

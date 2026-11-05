@@ -285,6 +285,17 @@
   (let [st (get agent-outcome id)]
     (if (and x (gone (or (:status x) (:type x))) (finished st)) (assoc x :ended-as st) x)))
 
+(defn focus-of
+  "A page's focus as its bar and its head name it: {:address :label :view}. Root's is :root. An agent's is a map of its address
+  (its key, boot/id, the one name of a session that survives a root's restart: every link of its pages is /agent/<address>), its label
+  (what a person calls it) and the view's own address (the name this page was asked by, which its feed and toggles name); anything
+  else is its name for each."
+  {:malli/schema [:=> [:cat :any] [:map [:address :string] [:label :string]]]}
+  [focus]
+  (cond (map? focus) (merge {:view (keyword (:address focus))} focus)
+        (= :root focus) {:address "root" :label "root" :view :root}
+        :else {:address (kname focus) :label (kname focus) :view focus}))
+
 (defn- top-bar
   "The bar above every page: Seon's mark, home, then, on root's or an agent's page (focus :root
   or its id), its tabs, tab the one shown: root's conversation and what its model reads; an
@@ -292,14 +303,15 @@
   what its model is sent). See docs/render.md#the-page."
   {:malli/schema [:=> [:cat :any [:enum :chat :debug :context]] :any]}
   [focus tab]
-  (let [link (fn [on? href label] [:a {:href href :class (str "rounded px-2 py-0.5 " (if on? "bg-base-800 text-text-50" "text-text-400 hover:text-text-100"))
+  (let [{:keys [address label]} (focus-of focus)
+        link (fn [on? href label] [:a {:href href :class (str "rounded px-2 py-0.5 " (if on? "bg-base-800 text-text-50" "text-text-400 hover:text-text-100"))
                                       :aria-current (when on? "page")} label])]
     [:nav {:class "sticky top-0 z-10 -mx-3 flex items-baseline gap-3 border-b border-base-800 bg-base-950 px-3 py-2 sm:-mx-4 sm:px-4"}
      [:a {:href "/" :class "font-bold text-signal"} "◆ seon"] [:span {:class "hidden text-text-500 sm:inline"} "on jolt"]
      (when focus
-       (let [base (if (= :root focus) "/" (str "/agent/" (kname focus)))]
+       (let [base (if (= :root focus) "/" (str "/agent/" address))]
          [:div {:class "ml-auto flex items-baseline gap-1 text-xs"}
-          [:span {:class "mr-1 font-semibold text-text-100"} (kname focus)]
+          [:span {:class "mr-1 font-semibold text-text-100"} label]
           (if (= :root focus)
             (list (link (= :chat tab) base "conversation") (link (= :context tab) "/root/debug" "context"))
             (list (link (= :chat tab) base "chat") (link (= :debug tab) (str base "/debug") "@ctx") (link (= :context tab) (str base "/context") "debug")))]))]))
@@ -380,10 +392,11 @@
   the same): a line evaluates in its REPL (seon.root/submit!, origin :ui); a line that starts with
   > is a message its next turn reads (seon.root/message!); interrupt stops its running form;
   release runs its task's next run when the task is held (seon.root/release!). input {:id
-  :live? :held :focus?}: live, root's view holds its process in this boot; focus?, its field takes focus as the page loads (the chat's:
+  :live? :held :focus? :busy? :capped?}: live, root's view holds its process in this boot; busy?, it runs a form (what interrupt stops); capped?, its task is
+  at its cap (no message wakes it); focus?, its field takes focus as the page loads (the chat's:
   @ctx's page is long and the field ends it)."
   {:malli/schema [:=> [:cat :seon.render/opts :seon.render/agent-input] :any]}
-  [opts {:keys [id live? held focus?]}]
+  [opts {:keys [id live? held focus? busy? capped?]}]
   [:section {:id (:unit opts) :class "flex flex-col gap-2"}
    (if live?
      [:form {:class "flex gap-2" :seon/call 'seon.root/submit! :seon/agent id}
@@ -391,12 +404,16 @@
       ;; Enter sends, Shift+Enter is a new line: a form may span lines
       [:textarea (cond-> {:name "forms" :class "flex-1 min-w-0" :rows 3 :autocomplete "off" :spellcheck "false"
                           (keyword "data-on:keydown") "if (evt.key==='Enter' && !evt.shiftKey) { evt.preventDefault(); el.form.requestSubmit() }"
-                          :placeholder "(+ 1 2) evaluates in its REPL (Enter; Shift+Enter: a new line)\n> a message, read at its next turn"}
+                          :placeholder (str "(+ 1 2) evaluates in its REPL (Enter; Shift+Enter: a new line)" (when-not capped? "\n> a message, read at its next turn"))}
                    ;; the chat takes focus (it follows its tail); a browser scrolls a focused field into view, and this one ends the page
                    focus? (assoc :autofocus true))]
-      [:button {:type "button" :class "rounded border border-base-700 px-2" :title "interrupt the running form; the agent keeps its state"
-                :seon/call 'seon.root/interrupt! :seon/agent id} "⏹ interrupt"]]
+      ;; a form to interrupt only while its process runs one (status :busy); a capped task's agent answers forms but takes no message
+      (when busy?
+        [:button {:type "button" :class "rounded border border-base-700 px-2" :title "interrupt the running form; the agent keeps its state"
+                  :seon/call 'seon.root/interrupt! :seon/agent id} "⏹ interrupt"])]
      [:p {:class "text-text-500"} "no process of it in root's view: no REPL to evaluate in, no turn to read a message; what it did is below, read from the store"])
+   (when (and live? capped?)
+     [:p {:class "text-2xs text-text-500"} "stopped at its cap: its process answers forms, not messages; raise its turns and release the task to go on"])
    (when held
      [:button {:class "self-start rounded border border-base-700 px-2" :title (str "release " held ": the reconciler runs its next run (my.root/run!)")
                :seon/call 'seon.root/release! :seon/agent id :seon/args {:task held}}
@@ -533,7 +550,7 @@
      [:span {:class "text-2xs text-text-500"} (str "message from " from)]
      [:p {:class "seon-prose"} (prose body (part))]]))
 
-(declare task-model)
+(declare task-model standing)
 
 (defn task
   "A task (the declared html render of :seon.task/task-fact) as a person reads it, from what the pattern
@@ -548,7 +565,8 @@
       [:section
        ;; its name as a title (the id's name, words), its namespace and state above it
        [:p {:class "text-2xs uppercase tracking-wider text-text-500"}
-        (str "task · " (namespace (symbol id)) (when execution (str " · " (kname execution))))]
+        ;; how its work stands, as the header says it (standing), where the task holds an outcome: a capped task is not "running"
+        (str "task · " (namespace (symbol id)) (if-let [o (:seon.task/outcome t)] (str " · " (:text (standing nil {:seon.task/outcome o}))) (when execution (str " · " (kname execution)))))]
        [:p {:class "text-lg font-bold text-text-100"} (task-title id)]
        ;; how its kind is worked (the template's text, read before the plan) and what the task is (its plan),
        ;; each whole under the value budget, as prose; a cut names the form that answers the whole
@@ -1533,7 +1551,8 @@
   task's t (:seon.task/outcome, :seon.task/reason), each a map of the attributes it holds (a missing one is nothing).
   The task's outcome says it where a judge has written one (a capped task is stopped, a parked one waits for a
   message); else the agent's own end (:seon.agent/outcome, counted while the agent is at the turn it ended on); else its
-  process's status. A process that is gone is never working or waiting. {:state :text :detail :reason :tone :lit?}: the words, the
+  process's status (an agent with none of them, a person's like the user, reads nothing: its state is :status/none). A process that is
+  gone is never working or waiting. {:state :text :detail :reason :tone :lit?}: the state (:task/cap, :end/green, :status/idle), the words, the
   turns a cap spent, the reason (the task's, else the agent's end's) and the tone (tone-class); lit while it works."
   {:malli/schema [:=> [:cat [:maybe :map] [:maybe :map]] [:map [:state :keyword] [:text :string] [:tone :keyword] [:lit? :boolean]
                                                            [:detail {:optional true} :string] [:reason {:optional true} :string]]]}
@@ -1552,7 +1571,8 @@
         [text tone] (get from k [(kname k) :quiet])
         turns (when (= "stopped at its cap" text) (or (:seon.agent/ended-turn a) (:seon.agent/max-turns a)))
         reason (some #(when-not (str/blank? %) %) [(:seon.task/reason t) (when end (:seon.agent/reason a))])]
-    (cond-> {:state (if (= from status-stands) (keyword "status" (name k)) k) :text text :tone tone :lit? (= :live tone)}
+    (cond-> {:state (keyword (cond (= from task-stands) "task" (= from end-stands) "end" :else "status") (name (or k :none)))
+             :text text :tone tone :lit? (= :live tone)}
       turns (assoc :detail (str turns (if (= 1 turns) " turn" " turns")))
       reason (assoc :reason reason))))
 
@@ -1647,24 +1667,66 @@
   (cond (:seon.task/id t) (task-title (:seon.task/id t))
         (:seon.agent/branch a) (kname (:seon.agent/branch a))))
 
+(def ^:private session-attrs
+  "What an entry of the agents list reads of an agent on main: its identity, its process's status, its branch and turns, and its task."
+  [:seon.agent/key :seon.agent/id :seon.agent/status :seon.agent/branch :seon.agent/max-turns
+   {:seon.agent/task [:seon.task/id :seon.task/outcome :seon.task/reason]}])
+
+(defn session-address
+  "The name of an agent's page: its key (:seon.agent/key, boot/id), the one name of a session that survives a root's restart,
+  so a link to it is a bookmark. An agent without a key (a map the page is shown) is its id."
+  {:malli/schema [:=> [:cat :map] :string]}
+  [a] (or (:seon.agent/key a) (kname (:seon.agent/id a))))
+
 (defn agent-side
-  "An agent of root's in its agents list (a component over root's ctx, its :agents member eid): lit
-  while it works, its id, how its work stands (standing) and what it works on (its task in words, else its branch, cut to the pill's
-  width), the whole pill one link to its page, the whole name in its title."
-  {:seon.render/style side-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int] :any]}
-  [{c :seon.ctx/ctx} eid]
-  (let [a (relevant :seon.db/agent-fact (get-in c [:agents eid]))
+  "A session of main in the agents list (a component over the db, its agent's entity id: every agent on main, of any boot, a
+  process or none): lit while it works, its id, how its work stands (standing) and what it works on (its task in words, else its
+  branch, cut to the pill's width), the whole pill one link to its page by its stable address (session-address), the whole name in its title."
+  {:seon.render/style side-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :int] :any]}
+  [{db :seon.db/db} eid]
+  (let [a (d/pull db session-attrs eid)
+        t (:seon.agent/task a)
         id (:seon.agent/id a)
-        t (ratom/realize (get-in c [:agents eid :task]))
         stands (standing a t)
         what (task-name a t)]
-    [:li [:a {:href (str "/agent/" (kname id)) :class pill-link
+    [:li [:a {:href (str "/agent/" (session-address a)) :class pill-link
               :title (str/join " · " (remove nil? [(kname id) (:text stands) (:detail stands) what (:seon.task/id t)]))}
           [:span {:class "flex items-baseline gap-2"}
            [:span {:class (if (:lit? stands) "text-signal" "text-text-500")} (if (:lit? stands) "●" "○")]
            [:span {:class "font-semibold text-text-100"} (kname id)]
            (when (:seon.agent/status a) [:span {:class (str "truncate text-2xs " (tone-class (:tone stands)))} (:text stands)])]
           (when what [:span {:class "truncate text-2xs text-text-400"} what])]]))
+
+(defn boot-short
+  "A boot's id, or a key (boot/id), as a person reads the boot: its first group of characters."
+  {:malli/schema [:=> [:cat :string] :string]}
+  [boot-or-key] (first (str/split boot-or-key #"[-/]")))
+
+(defn boot-side
+  "One boot's sessions in the agents list (a component over the db, the boot's id: its agents oldest first, so a new session redraws its boot's
+  unit alone, whose element id is the boot's): the
+  current boot's, in the list itself; an earlier boot's, folded under the boot's id and how many it held, so a list of
+  every session on main stays short to read."
+  {:seon.render/style "contents" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :string] :any]}
+  [{db :seon.db/db} boot]
+  (let [eids (vec (sort (for [dt (d/datoms db :avet :seon.agent/key) :when (str/starts-with? (:v dt) (str boot "/"))] (:e dt))))
+        pills (for [eid eids] [#'agent-side {} eid])]
+    (if (= boot (task/boot-of db))
+      [:li {:class "contents"} [:ul {:class "contents"} pills]]
+      [:li {:class "shrink-0"}
+       [:details [:summary {:class "px-1 text-2xs text-text-500" :title (str "boot " boot)} (str "boot " (boot-short boot) " · " (count eids) (if (= 1 (count eids)) " session" " sessions"))]
+        [:ul {:class "flex gap-2 lg:flex-col lg:gap-0.5"} pills]]])))
+
+(defn- sessions-by-boot
+  "Every agent on main db grouped by the boot that started it (the front of its key): [[boot [eid ...]] ...], the current boot's first,
+  then the others newest first (by the entity ids issued last), each boot's agents oldest first."
+  {:malli/schema [:=> [:cat :seon.host/db] [:sequential [:tuple :string [:sequential :int]]]]}
+  [db]
+  (let [now (task/boot-of db)
+        by (group-by #(first (str/split (:v %) #"/" 2)) (d/datoms db :avet :seon.agent/key))]
+    (->> by
+         (map (fn [[boot dts]] [boot (vec (sort (map :e dts)))]))
+         (sort-by (fn [[boot eids]] [(if (= boot now) 0 1) (- (peek eids))])))))
 
 (defn root-head
   "Root's head (a component over its ctx): its boot, its generation and, when it last went quiet,
@@ -1728,7 +1790,7 @@
         on? (:lit? stands)]
     [:section
      ;; the whole line is the link, as a pill of the agents list is
-     [:a {:href (str "/agent/" (kname id)) :class "flex items-baseline gap-2 no-underline hover:no-underline"
+     [:a {:href (str "/agent/" (session-address a)) :class "flex items-baseline gap-2 no-underline hover:no-underline"
           :title (str/join " · " (remove nil? [(kname id) (:text stands) (:detail stands) (some-> task-id task-title)]))}
       [:span {:class (if on? "text-signal" "text-text-500")} (if on? "●" "○")]
       [:span {:class "font-bold text-text-100"} (kname id)]
@@ -1745,16 +1807,17 @@
 (defn root-ctx
   "Root's page, the render of root's ctx (the declared html render of :seon.render/root-ctx, which a
   branch overrides like any render), drawn by the walk as components in its lists: its agents list
-  (c-side: root, then each agent its ctx holds, by entity id), its head (p-head), each agent's card
+  (c-side: root, then every session on main by boot, `sessions-by-boot`), its head (p-head), each agent's card
   (p-task: what it works on and how its run stands, newest first; the user, a person, has none), its conversation
   (c-rows: its evals, in the order written) and its tiles (p-tiles: root's process, then main's
   problems and work). An
   agent's page shows the same agents list (seon.render.proc's agent page). It reads the ids of its
   ctx's agents and evals, so it runs again only when one comes or goes."
-  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
-  [{c :seon.ctx/ctx}]
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
+  [{c :seon.ctx/ctx db :seon.db/db}]
   [:div {:id "root-ctx"}
-   [:ol {:id "c-side"} [#'root-side {}] (for [eid (sort (keys (:agents c)))] [#'agent-side {} eid])]
+   ;; every session on main, of any boot: root's ctx holds this boot's agents alone (a new boot unlinks the earlier ones from root)
+   [:ol {:id "c-side"} [#'root-side {}] (for [[boot _] (sessions-by-boot db)] [#'boot-side {} boot])]
    [:div {:id "p-head"} [#'root-head {}]]
    ;; what each agent is doing, newest first
    [:div {:id "p-task"} (for [eid (sort > (keys (:agents c))) :when (not= :user (get-in c [:agents eid :seon.agent/id]))] [#'agent-card {} eid])]
@@ -1768,7 +1831,7 @@
   revision, so the render proc sends one only when its output changed, and a new one into its list
   where its walk placed it (an append). opts {:units :view :input :caption :tab}; id, the page's
   focus; tab, which of its tabs it is (top-bar)."
-  {:malli/schema [:=> [:cat :map :keyword] [:map [:seon.render/html :any] [:seon.render/units [:vector :map]]]]}
+  {:malli/schema [:=> [:cat :map :any] [:map [:seon.render/html :any] [:seon.render/units [:vector :map]]]]}
   [{:keys [units view input caption tab]} id]
   (let [in (fn [sel] (filterv #(= sel (:container %)) units))
         unit (fn [u] {:id (:id u) :input {:rev (:rev u)} :html (:html u) :container (:container u)})]
@@ -1838,8 +1901,9 @@
   request shown (turn: a unit, :seon.render/debug-turn); for root, which has no model turn, the context it
   reads now (context: a unit, :seon.render/root-context). See docs/render.md#the-debug-page-is-the-wire-request."
   {:malli/schema [:=> [:cat :any [:maybe :map] [:maybe :map] [:maybe :map]] [:map [:seon.render/html :any] [:seon.render/units [:vector :map]]]]}
-  [id strip turn context]
-  (let [view (view-param [:debug id])
+  [focus strip turn context]
+  (let [{:keys [label] :as id} (focus-of focus)
+        view (view-param (if (= :root focus) [:debug :root] [:debug (:view id)]))
         {:keys [turns at to-come?]} strip
         es (mapv :e turns)
         ;; where the view stands: a turn's eid, or past the newest (latest, while a turn is to come)
@@ -1850,9 +1914,9 @@
                                          :aria-current (when on? "step")} label])]
     {:seon.render/html
      [:div {:id "app" :class "mx-auto flex max-w-screen-xl flex-col gap-3 p-3 sm:p-4"}
-      (top-bar id :context)
+      (top-bar focus :context)
       [:header {:class "flex flex-col gap-1"}
-       [:h1 {:class "text-base font-semibold text-text-50"} (if context (str "What " (kname id) " reads") (str "What " (kname id) "'s model is sent"))]
+       [:h1 {:class "text-base font-semibold text-text-50"} (if context (str "What " label " reads") (str "What " label "'s model is sent"))]
        [:p {:class "text-text-400"} (if context
                                       "Its page as it reads it: the render of its ctx, each component's hiccup by its id, the text /context.txt serves, drawn again when its ctx changes."
                                       "Each request as it went on the wire, made again from its turn's record; latest follows the branch live, a turn chosen stays as it was.")]]
