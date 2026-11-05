@@ -8,7 +8,7 @@
                jolt.flow-test/an-owed-message-holds-quiet-off}}
  #:seon.task{:name "ping-says-where-a-proc-is-parked",
              :plan
-             "Reproduction (prototype e6): a back-pressure deadlock (a join that reads only what it lacks, fed by one sequential producer) leaves every proc :running with frozen counts, 99 messages in flight and no quiet event; nothing names the wait-for cycle. Cause: the proc loop (flow/impl.clj proc run, send-outputs) parks either in alts!! over its read set or in alts!! putting one output, and ping reports neither. Correct: the proc keeps its park site in the loop ({:reading #{cids}} or {:writing coord}), and ping answers it as ::flow/parked. With `jolt.async/a-channel-shows-its-fill`, a wait-for graph (writing -> a full in-chan -> its reader's park site) finds the cycle, and the blocked row names it.",
+             "Reproduction (prototype e6): a back-pressure deadlock (a join that reads only what it lacks, fed by one sequential producer) leaves every proc :running with frozen counts, 99 messages in flight and no quiet event; nothing names the wait-for cycle. Cause: the proc loop (flow/impl.clj proc run, send-outputs) parks either in alts!! over its read set or in alts!! putting one output, and ping reports neither. Correct: the proc keeps its park site in the loop ({:reading #{cids}} or {:writing coord}), and ping answers it as ::flow/parked. With `jolt.async/a-channel-shows-its-fill`, a wait-for graph (writing -> a full in-chan -> its reader's park site) finds the cycle, and the blocked entry names it.",
              :kind :work,
              :needs #{"jolt.async/a-channel-shows-its-fill"},
              :proofs

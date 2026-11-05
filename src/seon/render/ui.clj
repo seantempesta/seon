@@ -1139,19 +1139,14 @@
 (declare standing)
 
 (defn turn-line
-  "The agent's turn as one line, the same words on the page and in the model's request: `Turn 12 of 40. You're in seon.program. 13.5k
-  tokens sent so far.`: the model calls it has made of its cap, the namespace its REPL is in (seon.context/current-ns) and the tokens
-  its requests sent in all (the provider's counts, summed). Parts that are not known are left out. See docs/render.md#the-agents-turn."
-  {:malli/schema [:function [:=> [:cat [:maybe :int] [:maybe :int] [:maybe :symbol] [:maybe nat-int?]] :string]
-                  [:=> [:cat [:maybe :int] [:maybe :int] [:maybe :symbol] [:maybe nat-int?] [:maybe :string]] :string]]}
-  ([n cap in-ns sent] (turn-line n cap in-ns sent nil))
-  ([n cap in-ns sent session]
+  "The agent's turn as one line, the same words on the page and in the model's request: `Turn 12 of 40. You're in seon.program.`: the
+  model calls it has made of its cap and the namespace its REPL is in (seon.context/current-ns). Parts that are not known are left
+  out. See docs/render.md#the-agents-turn."
+  {:malli/schema [:=> [:cat [:maybe :int] [:maybe :int] [:maybe :symbol]] :string]}
+  [n cap in-ns]
   (str "Turn " n (when cap (str " of " cap)) "."
        (when (and cap n (<= 0 (- cap n) 5)) (if (zero? (- cap n)) " This is your last turn." (str " " (- cap n) (if (= 1 (- cap n)) " turn" " turns") " left.")))
-       (when in-ns (str " You're in " in-ns "."))
-       (when session (str " " session "."))
-       (when (pos? (or sent 0)) (str " " (str/replace (str/replace (print/tokens-text sent) "~" "") " tok" " tokens") " sent so far.")))))
-
+       (when in-ns (str " You're in " in-ns "."))))
 (defn turn
   "The agent's turn (a component over ctx and the db): its turn line as the part's heading, which is all the model is sent
   of it, and under it, when its last reply was cut at the model's token limit (the reply of the model call that answered
@@ -1160,18 +1155,13 @@
   {:seon.render/style tile-style
    :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int] :any]}
   [{c :seon.ctx/ctx db :seon.db/db} aid]
-  (let [sent (d/q '[:find (sum ?k) . :with ?m :in $ ?a :where [?m :seon.model-call/agent ?a] [?m :seon.model-call/tokens ?k]] db aid)
-        ;; the model and its thinking, as the turn's own resolver reads them (task, model, provider, config)
-        p (config/provider-at db db (ratom/realize (get-in c [:task :seon.task/id])) (ratom/realize (:seon.agent/model c)))
-        session (str (if (= :scripted (:kind p)) "A scripted model, not a real one" (or (:model p) "The provider's default model"))
-                     (case (:thinking p) :enabled ", thinking on" :disabled ", thinking off" ""))
-        n (or (ratom/realize (:seon.agent/turn c)) 0)
+  (let [n (or (ratom/realize (:seon.agent/turn c)) 0)
         k (ratom/realize (:seon.agent/key c))
         call-of (fn [i] (when k (pdb/eid db :seon.model-call/id (str k "/" i))))
         ;; its last reply: this turn's call once it answered (:seon.model-call/ms is written with its reply), else the turn before's
         call (let [now (call-of n)] (if (and now (seq (d/datoms db :eavt now :seon.model-call/ms))) now (call-of (dec n))))]
     [:section
-     [:h2 (turn-line n (ratom/realize (:seon.agent/max-turns c)) (context/current-ns c) sent session)]
+     [:h2 (turn-line n (ratom/realize (:seon.agent/max-turns c)) (context/current-ns c))]
      (when (and call (seq (d/datoms db :eavt call :seon.model-call/truncated)))
        [:p "Your last reply was cut at the model's token limit: what followed the cut was lost. Answer with less: one change at a time."])]))
 

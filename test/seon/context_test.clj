@@ -107,9 +107,10 @@
   (let [part (seon.render.ui/turn {:seon.ctx/ctx {:seon.agent/status :busy :seon.agent/max-turns 40 :seon.agent/ns 'seon.program :seon.agent/turn 1
                                                           :task {:seon.task/id "seon.program/a-var-is-read"}}
                                            :seon.db/db (ts/test-db)} 1)]
-    (is (= "Turn 12 of 40. You're in seon.program. 540.0k tokens sent so far." (seon.render.ui/turn-line 12 40 'seon.program 540000)))
-    (is (= "Turn 1 of 40. You're in seon.program." (seon.render.ui/turn-line 1 40 'seon.program nil)) "what is not known is left out")
-    (is (= "Turn 1 of 40. You're in seon.program. A scripted model, not a real one." (second (second part))) "the part's heading: the line and the model it speaks to")
+    (is (= "Turn 12 of 40. You're in seon.program." (seon.render.ui/turn-line 12 40 'seon.program)))
+    (is (= "Turn 12." (seon.render.ui/turn-line 12 nil nil)) "what is not known is left out")
+    (is (= "Turn 38 of 40. 2 turns left. You're in seon.program." (seon.render.ui/turn-line 38 40 'seon.program)) "the turns left, near the cap")
+    (is (= "Turn 1 of 40. You're in seon.program." (second (second part))) "the part's heading is the line")
     (is (nil? (:data-for (second (second part)))) "the model's part holds the heading only")))
 
 (deftest a-records-text-is-the-same-whatever-came-before

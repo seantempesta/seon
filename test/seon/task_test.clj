@@ -52,6 +52,7 @@
   ;; :seon.config.agent/cites written on a new agent's record (seon.task/agent-cites-tx, at its first start: seon.agent/begin-run!), never
   ;; read as a default at draw time: a page whole is its top section, a section its address, each at its ?depth
   (let [db (d/db-with (db-with-program) [{:db/id "top" :seon.doc/address "docs/testing.md#testing" :seon.doc/heading "Testing"}
+                                         {:seon.doc/address "docs/data-modeling.md" :seon.doc/heading "Data modeling"}
                                          {:seon.doc/address "docs/references.md#an-entity-cites" :seon.doc/heading "An entity cites"}])
         db (d/db-with db (task/create-tx db [(decl "Do.")]))
         tx (into (task/start-tx db "demo/t" "b1" :a1 {:branch :b :model nil :max-turns 4} 0) (task/agent-cites-tx db "b1/a1" "b1/a1"))

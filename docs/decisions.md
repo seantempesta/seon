@@ -30,9 +30,9 @@ Asked whether the debug page should draw history with today's renders plus a has
 
 "Nothing we should be rendering should be huge or should be repeatedly changing dramatically. That's a failure of the render functions and the system for generating noise. Find and fix those don't blame the system."
 
-### There are no rows, and nothing is quadratic (owner, 2026-11-05)
+### Data is entities with attributes, and nothing is quadratic (owner, 2026-11-05)
 
-"There are no rows. ... Datomic like systems have entities and they have any number of attributes and values. That's what makes something a thing. An agent has turns, it has evals, it's just data." And: "Nothing should require N^2 because we are progressively building things if we aren't then again it's the wrong design."
+"There are no rows. ... Datomic like systems have entities and they have any number of attributes and values. That's what makes something a thing. An agent has turns, it has evals, it's just data." And: "Nothing should require N^2 because we are progressively building things if we aren't then again it's the wrong design." And: "find and remove all \"row\" references and instill proper data modeling understanding for datahike entities and the relationships and how to properly query and store data efficiently". Stated in [data modeling](data-modeling.md).
 
 ## 2026-11-04 rulings
 
@@ -56,11 +56,11 @@ The owner's rulings of 2026-11-04, on what an agent is and how everything it rea
 
 ### The data's shape is ours, batteries included (owner, 2026-11-04)
 
-"You can change how data is connected to each other and rename it and change directions on what is ref'ing what. We have full control so make a system that will work generally and optimally one way and make it so it's easier to build things the optimal way ... This isn't do anything you want it's a more rails style batteries included but you follow these constraints." Stated in: [storage](storage.md#store-data-for-how-it-is-used).
+"You can change how data is connected to each other and rename it and change directions on what is ref'ing what. We have full control so make a system that will work generally and optimally one way and make it so it's easier to build things the optimal way ... This isn't do anything you want it's a more rails style batteries included but you follow these constraints." Stated in: [data modeling](data-modeling.md).
 
 ### Store data for how it is used; a turn is a number (owner, 2026-11-04)
 
-"Whatever data we need you can store it any way you need to to retrieve it efficiently. That's how these databases work best. You plan ahead for how you want to use it and make sure that's easy and cheap". And: "I'm saying \"wtf is a turn\" but a number? An agent has turns and evals why are we organizing them on top of other entities". Stated in: [storage](storage.md#store-data-for-how-it-is-used), [turn](turn.md#the-turn-is-a-number).
+"Whatever data we need you can store it any way you need to to retrieve it efficiently. That's how these databases work best. You plan ahead for how you want to use it and make sure that's easy and cheap". And: "I'm saying \"wtf is a turn\" but a number? An agent has turns and evals why are we organizing them on top of other entities". Stated in: [data modeling](data-modeling.md#things-relate-by-refs), [turn](turn.md#the-turn-is-a-number).
 
 ### A render asks for the db and queries what it wants (owner, 2026-11-04)
 
@@ -438,7 +438,7 @@ The owner's rulings of 2026-10-25, each with his words and where it is now state
 
 Owner, 2026-10-25, on main-first delivery (agent loop) against delivery by merging a fact from the sender's branch (ctx-atom §11): "Launch a comparison. I would prefer real flow semantics where processes are independent, but not at the cost of stability and performance and complexity. We either have a better design or we do the simple one that works". Result (agent loop, 2026-10-25, design §3a 16066cc0b): main-first, with `:seon.run/taken`; 4.96 ms vs >=16.79 ms a delivery, the reconciler reads only main, no lost wakes in either over 2,000 schedules. Stated in: docs/turn.md §3a on ``jolt/agent-loop``.
 
-### The related-section count is a config key; one problem-row helper's bounds accepted
+### The related-section count is a config key; one problem-entry helper's bounds accepted
 
 Owner, 2026-10-25: approved one new config key, how many related wiki sections the screen shows (0 turns it off); accepted raising 5 derived-problem cost proofs' call bounds by one contracted call per problem, for one helper in place of 8 copies. Stated in: this entry.
 
@@ -554,7 +554,7 @@ Owner, 2026-10-26: "I was thinking the webui needs to be built from rendering th
 
 ### Fix causes, not symptoms: the repeat rule is under investigation
 
-Owner, 2026-10-26 morning: "the repeat thing sounds like instructions or formatting and we should fix it not patch it. investigate." and "Design and launch fixes for all the F issues and ask me if you aren't sure how to fix them. We want less hacks and more fixing root causes". The provisional repeat rule (told once, ended at the second in a row) is a patch; the live-agents session classifies every recorded repeat by what the agent saw before it, and the fixes go to those causes (instructions, response format, the screen), after which the rule is expected to go. The pipeline's F1-F4 are fixed at their causes. The owner also approved deleting the superseded old branches (the scratch paper deleted-branches-2026-10-26.txt (git history)) and archiving finished sessions. Stated in: not yet.
+Owner, 2026-10-26 morning: "the repeat thing sounds like instructions or formatting and we should fix it not patch it. investigate." and "Design and launch fixes for all the F issues and ask me if you aren't sure how to fix them. We want less hacks and more fixing root causes". The provisional repeat rule (told once, ended at the second consecutive time) is a patch; the live-agents session classifies every recorded repeat by what the agent saw before it, and the fixes go to those causes (instructions, response format, the screen), after which the rule is expected to go. The pipeline's F1-F4 are fixed at their causes. The owner also approved deleting the superseded old branches (the scratch paper deleted-branches-2026-10-26.txt (git history)) and archiving finished sessions. Stated in: not yet.
 
 ### Overnight budget $30; old branches triaged forward; ctx built render-first
 

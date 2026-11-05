@@ -155,6 +155,7 @@ Every need is met by one of these. If one doesn't fit, stop and say so; never ro
 
 The laws every change is held to; a check or a test reads each of them.
 
+- **Data is entities, refs and indexes** ([data modeling](docs/data-modeling.md), owner, 2026-11-05: "Datomic like systems have entities and they have any number of attributes and values. That's what makes something a thing"). Put a fact on what it is about, read it by the seek that answers it, and let a change cost what changed: nothing is quadratic, because everything builds on what is already there.
 - **Only documented config.** Every limit, bound or default is a key in `resources/seon/config/default.edn`, with its unit, provenance and what happens at the bound, under a `seon.config.*` schema.
   - It's read through one resolver (task → model → provider → config).
   - No literals, no `System/getenv` outside the loader.
