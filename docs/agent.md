@@ -18,7 +18,7 @@ You have one tool, eval: call it with Clojure forms, and you see what the REPL a
 
 ## Working a task
 
-How a work or whole task is worked, step by step (its instructions cite this section whole, so it is a part of your context).
+How to work a task, step by step: read what you will change and the proofs that judge it, make the proofs fail for the right reason, then make them pass.
 
 - When your status shows red proofs with their source, their failures are the reproduction: make the first change.
 - Only when the plan says something is wrong and your status shows no failing proof, first reproduce it in one eval. If the output is already right, the premise is false: fail the task with it, ``(my.task/fail! "why" evidence)``. Once the output is wrong, stop reading.
@@ -176,7 +176,7 @@ The judge's test selection follows reach: a change to a namespace many others re
 
 ## Merging
 
-Main's work is merged into your branch as main moves (a work agent's too), and a merge task's branch has main merged in: each entry both changed is unmerged, shown under your status's `:unmerged` with its `:base`, `:ours` and `:theirs`, and resolved by you at the REPL.
+How merging with main works: main's work is merged into your branch as main moves (a work agent's too), and a merge task's branch has main merged in: each entry both changed is unmerged, shown under your status's `:unmerged` with its `:base`, `:ours` and `:theirs`, and resolved by you at the REPL.
 
 - `(my.branch/unmerged)` lists them. Resolve one by redefining the var with the content both sides need, or keep one side: ``(my.branch/resolve! 'ns/var :theirs)``, or ``(my.branch/resolve! 'ns/var)`` to keep yours.
 - Your branch sees only its own changes until then.

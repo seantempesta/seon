@@ -1275,8 +1275,8 @@
         eid #(seon.db/eid branch %1 %2)]
     ;; a cited var is a component of its own when the db holds it (ctx joins the task's references by
     ;; :var/name: seon.context-test/a-cited-var-redefined-shows-in-the-next-view); this db holds none
-    (is (= [(str "task-" rid) (str "citations-" rid)
-            (str "status-" rid) (str "agent-state-" rid) (str "turn-" rid)] (mapv :id task))
+    (is (= [(str "task-" rid) (str "status-" rid)
+            (str "citations-" rid) (str "agent-state-" rid) (str "turn-" rid)] (mapv :id task))
         "the task, each thing its plan cites (a part each), the namespaces it touches, how the work stands, the agent's turn (its open problems when one is open: none here, so no part; and the keys the agent added, when it added one): each keyed by what it shows")
     (let [h (:html (unit-of task "status-"))]
       (is (str/includes? h "demo/f-test") "each proof as its var entity holds its verdict, (my.task/status)'s")
@@ -1287,7 +1287,7 @@
       ;; how a proof runs is the status's (its verdict, its source, the form that runs it), not repeated in the task's
       ;; part; this fixture's proof has no source, so the part says what to write (seon.context/not-written)
       (is (not (str/includes? h "my.agent/prove")) "no proof's run form, which the status shows"))
-    (is (str/includes? (:html (unit-of task "status-")) "proofs green") "how the work stands is the status's")
+    (is (str/includes? (:html (unit-of task "status-")) "Your proofs") "how the work stands is the status's")
     (is (= [(str "chat-ask-" rid) (str "chat-start-" rid)
             (str "chat-message-" rid "-" (eid :seon.message/id "m-1")) (str "eval-item-" (eid :seon.eval/id "e1")) (str "eval-item-" (eid :seon.eval/id "e2"))
             (str "chat-turn-" rid "-" (eid :seon.model-call/id (str k "/1"))) (str "eval-item-" (eid :seon.eval/id "e3"))
@@ -1662,9 +1662,9 @@
         (let [html (h/html (ui/status-hiccup (select-keys st [:merge :its-merge-carries :without-a-contract])))
               merge-line (h/html (ui/status-hiccup {:merge (:merge st)}))]
           (is (str/includes? (pr-str (:main-moved (:merge st))) "demo/k") "what main changed since the base (the model reads it in the data)")
-          (is (re-find #"main moved \d+" html) "the page counts what main changed: something to do")
+          (is (re-find #"Main has moved" html) "the page says main moved: something to do")
           (is (str/includes? html "0 conflicts") "and which of those the branch changed too (none)")
-          (is (not (str/includes? (h/html (ui/status-hiccup {:merge {:conflicts [] :main-moved []} :its-merge-carries (:its-merge-carries st)})) "Merge:")) "no merge line when main moved nothing and nothing conflicts")
+          (is (not (str/includes? (h/html (ui/status-hiccup {:merge {:conflicts [] :main-moved []} :its-merge-carries (:its-merge-carries st)})) "Main has moved")) "no merge line when main moved nothing and nothing conflicts")
           (is (str/includes? html "demo/h") "what the branch's merge carries, and a function it defined with no contract")
           (is (not (str/includes? html "demo/k")) "never main's change")
           (is (not (str/includes? html "demo/f")) "never one it did not change"))
@@ -2215,7 +2215,7 @@
     (testing "the page shows it, the model's text does not"
       (let [via [:plan "the plan says"]]
         (is (str/includes? (h/html (#'ui/via-hiccup via)) "the plan says") "the page")
-        (is (= "page" (:data-for (second (#'ui/via-hiccup via)))) "for the page alone")))))
+        (is (str/includes? (pr-str (#'ui/via-hiccup via)) "Your plan says") "and the model reads it too: why it is here")))))
 
 (deftest the-three-agree-on-the-agents-own-end
   (let [[db aid] (cited-world)
@@ -2260,7 +2260,7 @@
                          [(r/part-text (r/part-form w @(:out w))) (h/html (r/resolved w @(:out w) true))]
                          (finally (r/dispose-walk! w)))]
     (is (nil? (:data (get @(:cache w) @(:out w)))) "hiccup, not a map of keys")
-    (is (re-find #"\[:h2 \"M\"\]" text) (str "its name as the heading: " text))
+    (is (re-find #"\[:h2 \"Your task\"\]" text) (str "the agent has a task: " text))
     (is (< (str/index-of text "First the need.") (str/index-of text "Then make")) "its plan accumulated over its need, the need's first")
     (is (not (str/includes? text "to-prove")) "the proofs are the status's")
     (is (not (str/includes? text ":seon.task/")) "no map keys")
@@ -2418,16 +2418,17 @@
         h (ui/status-hiccup st)
         t (h/html h)]
     (is (= :h2 (first (second h))) "headed")
-    (is (str/includes? t "0 of 2 proofs green"))
+    (is (str/includes? t "Your proofs") "headed to the agent")
     (is (str/includes? t "<table>") "the proofs are a table")
     (is (str/includes? t "not written yet") "each proof's state")
     (is (str/includes? t "Unknown class program") "a failure in a line")
     (is (str/includes? t "(deftest a-vars-history") "the failing proof's source")
     (is (str/includes? t "seon.program/history is public") "what blocks merging")
-    (is (re-find #"Next: <code>\(my.agent/prove\)</code>" t) "the next form, runnable")
+    (is (re-find #"What to do next" t) "what to do next")
+    (is (not (str/includes? t "(do ")) "separate top-level forms, never a do")
     (is (not (str/includes? t "tokens")) "no tokens sent")
     (is (not (str/includes? t "Merge:")) "no merge line with nothing to merge")
-    (is (str/includes? (h/html (ui/status-hiccup (assoc st :its-merge-carries {:added ['a/b]} :merge {:conflicts [] :main-moved ['a/b]}))) "Merge: 0 conflicts · main moved 1") "a merge line when there is something to merge")))
+    (is (str/includes? (h/html (ui/status-hiccup (assoc st :its-merge-carries {:added ['a/b]} :merge {:conflicts [] :main-moved ['a/b]}))) "Main has moved: 0 conflicts, 1 things changed") "a merge line when there is something to merge")))
 
 (deftest a-merged-task-reads-merged-everywhere
   ;; owner, 2026-11-05: the head said "merged" while the task's panel said "done": its agent's own end (:green) was read where

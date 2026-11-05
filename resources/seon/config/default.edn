@@ -243,11 +243,13 @@
  ;; sits above the measured p90. Tokens are the paid resource; task
  ;; seon.model/budgets-are-data-and-spend-is-measured makes them the budget.
  :seon.config.agent/max-turns 40
- ;; Unit: addresses. What every agent reads beside its task's citations: nothing (the owner, 2026-11-05: an agent's context holds what its
- ;; task needs and its plan cites, not a page every agent got: the 26 section parts of six first messages were read or named by no
- ;; later eval, claude_scratch/context-lab/render-chain-design.md section 4). Written as the agent's own cite entities by its first run on its branch
- ;; (seon.task/agent-cites-tx, seon.agent/begin-run!); the agent changes its own with my.agent/cite! and uncite!.
- :seon.config.agent/cites []
+ ;; Unit: addresses. Where every agent is told to look for more, beside its task's citations (the owner, 2026-11-05: "include some
+ ;; references they can use to get more information about completing tasks or merging or whatever else is secondary and we aren't
+ ;; showing right away"). Each is one line in the agent's "If you need more" part (seon.render.ui/references): the section's heading, a
+ ;; sentence of its lead and the form that reads it; none is shown whole. Written as the agent's own cite entities by its first run on
+ ;; its branch (seon.task/agent-cites-tx, seon.agent/begin-run!); the agent changes its own with my.agent/cite! and uncite!. An empty
+ ;; vector gives it none.
+ :seon.config.agent/cites ["docs/agent.md#working-a-task" "docs/agent.md#merging" "docs/testing.md#testing-in-the-world"]
  ;; Unit: path, every agent process's working directory, shared, made at the fork server's boot.
  ;; No repository above it: an agent changes code through its REPL, never git (owner, 2026-10-22:
  ;; "no git in agents"); it reads and writes any file by its absolute path. At the bound: n/a.

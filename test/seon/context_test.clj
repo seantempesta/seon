@@ -113,9 +113,9 @@
   (let [part (seon.render.ui/turn {:seon.ctx/ctx {:seon.agent/status :busy :seon.agent/max-turns 40 :seon.agent/ns 'seon.program :calls {"t1" {:seon.model-call/n 1}}
                                                           :task {:seon.task/id "seon.program/a-var-is-read"}}
                                            :seon.db/db (ts/test-db)} 1)]
-    (is (= "Turn 12 of 40 · in seon.program · ~540.0k tok sent" (seon.render.ui/turn-line 12 40 'seon.program 540000)))
-    (is (= "Turn 1 of 40 · in seon.program" (seon.render.ui/turn-line 1 40 'seon.program nil)) "what is not known is left out")
-    (is (= "Turn 1 of 40 · in seon.program" (second (second part))) "the part's heading")
+    (is (= "Turn 12 of 40. You're in seon.program. 540.0k tokens sent so far." (seon.render.ui/turn-line 12 40 'seon.program 540000)))
+    (is (= "Turn 1 of 40. You're in seon.program." (seon.render.ui/turn-line 1 40 'seon.program nil)) "what is not known is left out")
+    (is (= "Turn 1 of 40. You're in seon.program." (second (second part))) "the part's heading")
     (is (= :tail (:seon.render/place (meta #'seon.render.ui/turn))) "declared the request's last message")
     (is (nil? (:data-for (second (second part)))) "the model's part holds the heading only")))
 
@@ -483,7 +483,7 @@
             text (str/join "\n\n" (map render/part-text (vals page)))
             times (fn [s] (count (re-seq (re-pattern (java.util.regex.Pattern/quote s)) text)))]
         (is (some #(str/starts-with? % "status-") (keys page)) "how the work stands is on the page")
-        (is (= 1 (times "Make ```demo/g``` exact.")) "the plan once")
+        (is (= 2 (times "Make ```demo/g``` exact.")) "the plan in the task, and quoted once as why the cite is here")
         (is (= 1 (times "(defn g \"Halves.\"")) "a cited source once, as code: its quotes as written")
         (is (= 1 (count (re-seq #"(?s)\[:code \"demo-test/f-test\"\]\s*\]\s*\[:td\s*\"failed\"\]" text))) "the proofs' statuses once, in the status")))))
 
@@ -1946,7 +1946,7 @@
     (is (nil? (context/test-shape db 'nowhere-test/x)) "a namespace the branch lacks has no shape: the agent makes it first")
     (let [h (pr-str (seon.render.ui/status-hiccup {:proofs [{:test 'demo-test/new-test :status :undefined :shape shape}]}))]
       (is (re-find #"not written yet" h))
-      (is (re-find #"A test of it to copy" h))
+      (is (re-find #"Here's the shape" h))
       (is (re-find #"deftest g-test" h)))))
 
 (deftest the-turn-line-is-the-requests-last-message-replaced-each-request
@@ -1969,7 +1969,7 @@
         (is (str/includes? (:content (peek (:whole r1))) "Turn 2 of 9") "replaced each request")
         (is (not-any? #(str/includes? (str %) "Turn 1 of 9") (:whole r1)) "the earlier one is not left in the history")
         (is (= (butlast (:whole r0)) (take (dec (count (:whole r0))) (:whole r1))) "the prefix before it is byte-identical")
-        (is (str/includes? (:content (peek (:whole r2))) "Turn 3 · in demo") (:content (peek (:whole r2))))
+        (is (str/includes? (:content (peek (:whole r2))) "Turn 3. You're in demo.") (:content (peek (:whole r2))))
         (is (= (:whole r2) (into [] (mapcat second) (context/parts-of @conn (:whole-sent r2)))) "replay draws the same bytes")))))
 
 (deftest a-cited-attribute-says-what-it-is-and-shows-a-real-value
@@ -1979,7 +1979,7 @@
                                          {:schema/key :var/name :schema/form ":symbol"}])
         text (fn [k] (seon.render/part-text ['seon.render.ui/cited {} (seon.render.ui/cite-hiccup db {:seon.cite/name k :seon.cite/depth :doc :schema (d/pull db '[*] [:schema/key k])} nil)]))
         t (text :var/form)]
-    (is (str/includes? t "Its form:") t)
-    (is (str/includes? t "Held by") "what kind of entity holds it")
+    (is (str/includes? t "An attribute your plan names.") t)
+    (is (str/includes? t "on :seon.db/var-fact entities") "what kind of entity holds it")
     (is (str/includes? t ":form/src") "a ref followed: what the form entity holds")
     (is (str/includes? (text :var/name) "A real value:") "an attribute that is no ref: a real value")))
