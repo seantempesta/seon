@@ -216,6 +216,13 @@
   {:malli/schema [:=> [:cat] nat-int?]}
   [] (or (:seon.agent/turn (d/entity (db) [:seon.agent/key (:key @state)])) 0))
 
+(defn turns
+  "How far through its turns this agent is, `12 of 40`, its :seon.agent/turn and :seon.agent/max-turns on this branch; nil with no cap, as an
+  agent has before a turn loop gives it one. Each answer says it. See docs/render.md#the-agents-turn."
+  {:malli/schema [:=> [:cat] [:maybe :string]]}
+  [] (let [e (d/entity (db) [:seon.agent/key (:key @state)])]
+       (when-let [cap (:seon.agent/max-turns e)] (str (or (:seon.agent/turn e) 0) " of " cap))))
+
 (defn own-message-tx
   "Message mid of kind from from (to this agent) as this agent's branch records it, taken at turn n: the one message fact
   (seon.task/message-tx) naming the agent that took it (:seon.message/agent: its record's messages) and the turn (:seon.message/turn).

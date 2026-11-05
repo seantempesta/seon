@@ -1260,17 +1260,19 @@
 ;; docs/render.md#the-render-is-an-eval: a wake is told what moved since the page it last showed, never the page again: a second whole page
 ;; costs about 4k tokens a wake; and an eval Seon ran is not one the agent repeated, so it takes no :again
 (deftest a-wake-shows-what-moved-not-the-page-again
-  (let [[_ _ whole again calls]
+  (let [[_ _ whole again calls turn]
         (in-agent (fn [{:keys [task]}]
                     [(str "(seon.turn/work! {:task " (pr-str task) " :max-turns 1})")
                      (str "(seon.turn/work! {:task " (pr-str task) " :max-turns 2})")
                      "(count (datahike.api/q '[:find [?e ...] :where [?e :seon.eval/code \"(my.render/render-ctx)\"]] (seon.agent/db)))"
                      "(let [db (seon.agent/db)] (vec (keep #(:again (:seon.eval/response (datahike.api/pull db [:seon.eval/response] %))) (datahike.api/q '[:find [?e ...] :where [?e :seon.eval/by \"seon\"]] db))))"
-                     "(count (datahike.api/q '[:find [?m ...] :where [?m :seon.model-call/origin :model]] (seon.agent/db)))"])
+                     "(count (datahike.api/q '[:find [?m ...] :where [?m :seon.model-call/origin :model]] (seon.agent/db)))"
+                     "(let [db (seon.agent/db)] (:turn (:seon.eval/response (datahike.api/pull db [:seon.eval/response] (datahike.api/q '[:find ?e . :where [?e :seon.eval/call-id _] [?e :seon.eval/turn 1]] db)))))"])
                   {:config {:seon.config.ai/script 'seon.fixtures/two-calls}})]
     (is (= 2 (:value calls)) "the second wake took a turn, so it had the chance to show the page")
     (is (= 1 (:value whole)) "the page whole once, across both wakes")
-    (is (= [] (:value again)) "no eval Seon ran says it was repeated")))
+    (is (= [] (:value again)) "no eval Seon ran says it was repeated")
+    (is (= "1 of 1" (:value turn)) "an answer says how far through its turns the agent is, as it was then, though the cap was raised since")))
 
 (deftest a-call-after-one-that-threw-is-not-run
   ;; docs/prompt.md: a reply's calls run in order; a call after one that threw is not run, and

@@ -747,8 +747,12 @@
                 ;; its forms left the agent no db (a test's cleanup, run at this REPL): the agent goes on as it was, its walk made
                 ;; again, and ctx rebuilt by the state's watch (docs/merging.md#a-test-child-is-a-fork-of-a-live-agent)
                 answered (fn [] (when (and (:db before) (nil? (:db @agent/state))) (reset! agent/state (dissoc before :walk)))
-                               (let [r (again code (cond-> (repaired (response @answers handle) req)
-                                                      (:ns @agent/state) (assoc :ns (ns-name (:ns @agent/state))))
+                               (let [;; how far through its turns the agent is, on the answer it reads, once (an eval within another is that eval's): a record's
+                                     ;; bytes never move (docs/render.md#the-agents-turn)
+                                     turns (when (and (= :agent (:mode @agent/state)) (not (:within req))) (agent/turns))
+                                     r (again code (cond-> (repaired (response @answers handle) req)
+                                                      (:ns @agent/state) (assoc :ns (ns-name (:ns @agent/state)))
+                                                      turns (assoc :turn turns))
                                            req)
                                       rec (record-details code r req)]
                                   [r rec (when-not (#{:model :insert} (:origin req)) (text-of rec))]))

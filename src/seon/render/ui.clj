@@ -1144,7 +1144,7 @@
 (defn turn-line
   "What the agent's page says of its turns, the same words for the page and the model: `You have 40 turns. You're in seon.program.`, and
   how many are left once few are. It holds no turn number, so it moves when it has news: each eval says its own turn (:turn in its
-  answer, seon.context/eval-messages). Parts that are not known are left out. See docs/render.md#the-agents-turn."
+  answer: `12 of 40`, seon.repl/eval-string). Parts that are not known are left out. See docs/render.md#the-agents-turn."
   {:malli/schema [:=> [:cat [:maybe :int] [:maybe :int] [:maybe :symbol]] :string]}
   [n cap in-ns]
   (let [left (when (and cap n) (- cap n))]
