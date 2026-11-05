@@ -132,11 +132,15 @@
         c0 (d/connect cfg)
         ;; and one attribute installed before it was indexed
         _ (d/transact c0 {:tx-data (mapv #(if (= :seon.vector/text-t (:db/ident %)) (dissoc % :db/index) %) (butlast pdb/schema))})
+        ;; a datom written before the index: an AVET read of an unindexed attribute answers empty, with no error
+        _ (d/transact c0 {:tx-data [{:seon.vector/text-t 42}]})
+        _ (is (empty? (d/datoms @c0 :avet :seon.vector/text-t)) "unindexed, an AVET read finds nothing")
         _ (d/release c0)
         {:keys [conn]} (pdb/open! :lmdb path 0 :db)]
     (try
       (is (= lacking (:db/ident (get (d/schema @conn) lacking))) "the attribute the store lacked is installed")
       (is (true? (get-in (d/schema @conn) [:seon.vector/text-t :db/index])) "and the index an attribute lacked")
+      (is (= [42] (mapv :v (d/datoms @conn :avet :seon.vector/text-t))) "and the datoms it already held read through that index")
       (let [t (:max-tx @conn)
             _ (d/release conn)
             {c2 :conn} (pdb/open! :lmdb path 0 :db)]

@@ -270,6 +270,9 @@
         _ (is (some? (d/entity db [:seon.doc/address "docs/a.md#a"])) "the page was loaded")
         _ (.delete page)
         _ (java.nio.file.Files/createSymbolicLink (.toPath page) (.toPath (io/file docs "gone.md")) (make-array java.nio.file.attribute.FileAttribute 0))
+        ;; written before the watcher starts: its first batch may be the link above, reported as recent history, so a
+        ;; write after it could come after that read
+        _ (spit (io/file docs "b.md") "# B\n\nIt changed.\n")
         ;; whichever comes first: the batch's read, or the watcher's death (on the old read, the throw)
         outcome (promise)
         w (watch/start! [(.getCanonicalPath docs)]
@@ -279,7 +282,7 @@
     ;; a watcher that never started answers as a death, so the wait below always ends
     (when (contract/error? w) (deliver outcome [:died w]))
     (try
-    (spit (io/file docs "b.md") "# B\n\nIt changed.\n")
+    (spit (io/file docs "c.md") "# C\n\nA batch comes.\n")
     (let [[kind tx] @outcome]
       (testing "the batch read what was there and the watcher is still up"
         (is (= :read kind) (str "no death: a vanished file never ends the watch; " (pr-str tx)))

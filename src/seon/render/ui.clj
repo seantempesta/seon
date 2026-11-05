@@ -291,7 +291,7 @@
   (let [{:keys [address label]} (focus-of focus)
         link (fn [on? href label] [:a {:href href :class (str "rounded px-2 py-0.5 " (if on? "bg-base-800 text-text-50" "text-text-400 hover:text-text-100"))
                                       :aria-current (when on? "page")} label])]
-    [:nav {:class "sticky top-0 z-10 -mx-3 flex items-baseline gap-3 border-b border-base-800 bg-base-950 px-3 py-2 sm:-mx-4 sm:px-4"}
+    [:nav {:class "seon-bar"}
      [:a {:href "/" :class "font-bold text-signal"} "◆ seon"] [:span {:class "hidden text-text-500 sm:inline"} "on jolt"]
      (when focus
        (let [base (if (= :root focus) "/" (str "/agent/" address))]
@@ -382,9 +382,9 @@
   @ctx's page is long and the field ends it)."
   {:malli/schema [:=> [:cat :seon.render/opts :seon.render/agent-input] :any]}
   [opts {:keys [id live? held focus? busy? capped?]}]
-  [:section {:id (:unit opts) :class "flex flex-col gap-2"}
+  [:section {:id (:unit opts) :class "seon-stack-2"}
    (if live?
-     [:form {:class "flex gap-2" :seon/call 'seon.root/submit! :seon/agent id}
+     [:form {:class "seon-row" :seon/call 'seon.root/submit! :seon/agent id}
       [:span {:class "text-signal"} (str (kname id) "=>")]
       ;; Enter sends, Shift+Enter is a new line: a form may span lines
       [:textarea (cond-> {:name "forms" :class "flex-1 min-w-0" :rows 3 :autocomplete "off" :spellcheck "false"
@@ -396,9 +396,9 @@
       (when busy?
         [:button {:type "button" :class "rounded border border-base-700 px-2" :title "interrupt the running form; the agent keeps its state"
                   :seon/call 'seon.root/interrupt! :seon/agent id} "⏹ interrupt"])]
-     [:p {:class "text-text-500"} "no process of it in root's view: no REPL to evaluate in, no turn to read a message; what it did is below, read from the store"])
+     [:p {:class "muted"} "no process of it in root's view: no REPL to evaluate in, no turn to read a message; what it did is below, read from the store"])
    (when (and live? capped?)
-     [:p {:class "text-2xs text-text-500"} "stopped at its cap: its process answers forms, not messages; raise its turns and release the task to go on"])
+     [:p {:class "seon-note"} "stopped at its cap: its process answers forms, not messages; raise its turns and release the task to go on"])
    (when held
      [:button {:class "self-start rounded border border-base-700 px-2" :title (str "release " held ": the reconciler runs its next run (my.root/run!)")
                :seon/call 'seon.root/release! :seon/agent id :seon/args {:task held}}
@@ -459,7 +459,7 @@
                                         (nil? v) "nil" m (:value m) :else v)
                                   (config/value :seon.config.render/line-budget) nil)))
             line [:span {:class "font-mono"} [:code (merge-with #(str %1 " " %2) emit/highlight {:class "text-text-100"}) (prose (or (first (str/split-lines (or (:code r) ""))) "") (cell) {:one-line? true})]
-                  [:span {:class (if err? "text-error" "text-text-500")} (if err? " ✕ " " ⇒ ")]
+                  [:span {:class (if err? "text-error" "muted")} (if err? " ✕ " " ⇒ ")]
                   [:code {:class "text-text-400"} (prose (or shown (:text r) "") (cell) {:one-line? true})]]]
         (if (and (:chat opts) (not (str/blank? (:intent r))))
           [:span {:class "flex flex-col"} [:span {:class "whitespace-pre-wrap text-text-300 italic"} (prose (:intent r) (form-budget))] line]
@@ -476,10 +476,10 @@
              [:div {:class "flex flex-col gap-1 text-text-200"}
               ;; drawn by the html render of the schema the record kept (the value's metadata does not survive the store),
               ;; as the live response is: a prove's run by seon.render.ui/proved, not as a map
-              [:div {:class "flex gap-2"} [:span {:class "text-text-500"} "⇒"] (render/html (cond-> {:handle (:handle r)} (:seon.eval/schema e) (assoc :schema (:seon.eval/schema e))) v)]
+              [:div {:class "seon-row"} [:span {:class "muted"} "⇒"] (render/html (cond-> {:handle (:handle r)} (:seon.eval/schema e) (assoc :schema (:seon.eval/schema e))) v)]
               ;; each cut opened: what its form reads, from the record, under that form (seon.web/open-form read it)
               (for [f (:opened opts) :let [form (edn/read-string f)]]
-                [:div {:class "flex gap-2"}
+                [:div {:class "seon-row"}
                  ;; the form read, as the button that closes it
                  [:button {:type "button" :class "text-text-500 font-mono text-left" :data-seon-form f :title "close"
                            (keyword "data-on:click") (str "@post('/open?view=' + el.closest('[data-view]').dataset.view + '&unit=' + "
@@ -487,9 +487,9 @@
                  (render/html {:handle form} (print/read-rest form (:handle r) v))])])
            (if-let [v (when (and basis (:db opts)) (context/basis-value (:db opts) e))]
              ;; a value recorded as its basis (@ctx): rendered from what the branch holds at it
-             [:div {:class "flex gap-2 text-text-200"} [:span {:class "text-text-500"} "⇒"]
+             [:div {:class "flex gap-2 text-text-200"} [:span {:class "muted"} "⇒"]
               (render/html {:as :block :schema (:seon.eval/schema e) :handle (:handle r) :db (:db opts)} v)]
-             [:pre {:class "text-text-200"} [:span {:class "text-text-500"} "⇒ "] (prose (or (:text r) "") (part))])))
+             [:pre {:class "text-text-200"} [:span {:class "muted"} "⇒ "] (prose (or (:text r) "") (part))])))
        [:div {:class "flex flex-wrap gap-3 text-2xs text-text-500"}
         (cost-line r)
         [:span (get asked-by by "its own turn")]
@@ -511,19 +511,19 @@
         head (str (if (= :outside origin) (str "context read " n) (str "turn " n (when-let [m (:max-turns basis)] (str " of " m)))))]
     (if (= :inline (:as opts))
       [:span head]
-      [:div {:class "flex flex-col gap-1"}
+      [:div {:class "seon-stack"}
        [:div {:class "flex flex-wrap items-baseline gap-3 text-xs"}
         [:b {:class "text-signal"} head]
         (when tokens [:span {:class "tabular-nums text-text-400"} (str (group3 tokens) " tokens")])
         (when (and prompt (pos? prompt)) [:span {:class "tabular-nums text-text-400" :title "the share of the prompt its provider served from its prefix cache"}
                       (str (long (* 100 (/ cache-hit-tokens prompt))) "% of the prompt cached")])
-        (when finish [:span {:class "text-text-500" :title "how its reply stopped"} (str "stopped: " finish)])
-        (when model [:span {:class "text-text-500"} model])
+        (when finish [:span {:class "muted" :title "how its reply stopped"} (str "stopped: " finish)])
+        (when model [:span {:class "muted"} model])
         (when truncated [:span {:class "text-error"} "cut at the token limit"])
         (when (and errors (pos? errors)) [:span {:class "text-error"} (str errors " of " forms " forms failed")])]
        (when-not (str/blank? reply) [:p {:class "seon-prose"} (prose reply (part))])
        (when-not (str/blank? reasoning)
-         [:details [:summary {:class "text-2xs text-text-500"} "its reasoning"] [:p {:class "seon-prose text-text-300"} (prose reasoning (part))]])])))
+         [:details [:summary {:class "seon-note"} "its reasoning"] [:p {:class "seon-prose text-text-300"} (prose reasoning (part))]])])))
 
 (defn message
   "A message to a run (the declared html render of :seon.message/fact): who sent it and its body as prose."
@@ -532,7 +532,7 @@
   (if (= :inline (:as opts))
     [:span (str from ": ") (prose body (cell) {:one-line? true})]
     [:div {:class "border-l-2 border-info pl-3 py-1"}
-     [:span {:class "text-2xs text-text-500"} (str "message from " from)]
+     [:span {:class "seon-note"} (str "message from " from)]
      [:p {:class "seon-prose"} (prose body (part))]]))
 
 (declare task-model standing)
@@ -673,7 +673,7 @@
     (if (= :inline (:as opts))
       [:span {:class "font-mono"} (str "ctx " branch " t " t ", " (count ks) " keys")]
       [:div {:class "flex flex-col gap-1 border border-base-700 rounded p-2 text-xs"}
-       [:div {:class "text-text-500"} (str "ctx · " branch " · t " t (when commit (str " · commit " commit)))]
+       [:div {:class "muted"} (str "ctx · " branch " · t " t (when commit (str " · commit " commit)))]
        [:table [:tbody (for [k ks :let [v (get c k)]]
                          [:tr {:class "align-top"}
                           [:td {:class "pr-3 font-mono text-text-400 whitespace-nowrap"} (str k)]
@@ -1041,8 +1041,8 @@
   (case st
     :pass [:span {:class "text-success"} "✓"]
     (:fail :error) [:span {:class "text-error"} "✗"]
-    :deferred [:span {:class "text-text-500"} "⋯"]
-    [:span {:class "text-text-500"} "○"]))
+    :deferred [:span {:class "muted"} "⋯"]
+    [:span {:class "muted"} "○"]))
 
 (defn status-html
   "How the work stands as the page shows it (the declared html render of :seon.context/status; the
@@ -1057,7 +1057,7 @@
   (let [green (count (filter #(= :pass (:status %)) proofs))
         done? (and (empty? reasons) (seq proofs))
         value (fn [v] [#'render/html {:budget (config/value :seon.config.render/value-budget)} v])]
-    [:section {:class "flex flex-col gap-2"}
+    [:section {:class "seon-stack-2"}
      ;; the one line a person reads first: done, or what is left
      [:p {:class (str "font-[var(--font-prose)] text-sm " (if done? "text-success" "text-text-100"))}
       (cond done? "✓ Done: every check passes"
@@ -1065,21 +1065,21 @@
             (seq refused) (str "Not done yet: " (get reason-words (:reason (first refused)) (kname (:reason (first refused))))
                                (when (next refused) (str " and " (dec (count refused)) " more")))
             :else (str green " of " (count proofs) " checks pass"))]
-     [:p {:class "text-2xs text-text-500"} (str green "/" (count proofs) " proofs green")]
-     [:ul {:class "flex flex-col gap-1"}
+     [:p {:class "seon-note"} (str green "/" (count proofs) " proofs green")]
+     [:ul {:class "seon-stack"}
       (for [{:keys [test status failures]} proofs]
         [:li {:class "flex flex-col gap-0.5"}
-         [:div {:class "flex gap-2"} (verdict-badge status) [:code {:class "text-text-100"} (str test)]
-          (when-not (#{:pass :fail :error} status) [:span {:class "text-text-500"} (kname status)])]
+         [:div {:class "seon-row"} (verdict-badge status) [:code {:class "text-text-100"} (str test)]
+          (when-not (#{:pass :fail :error} status) [:span {:class "muted"} (kname status)])]
          ;; several assertions that got the same value are one entry (seon.context/failures)
          (for [{a :assert as :asserts g :got m :message} failures]
            [:div {:class "ml-5 grid grid-cols-[3.5rem_minmax(0,1fr)] gap-x-2 text-xs"}
             (when m [:span {:class "col-span-2 text-text-300"} m])
-            (for [a (or as [a])] (list [:span {:class "text-text-500"} "assert"] (value a)))
-            [:span {:class "text-text-500"} (if as (str "each got") "got")] (value g)])])]
+            (for [a (or as [a])] (list [:span {:class "muted"} "assert"] (value a)))
+            [:span {:class "muted"} (if as (str "each got") "got")] (value g)])])]
      (when test-run [:p {:class "text-error"} (str "the test run failed: " (str/join "; " (:failed test-run)))])
      (when (seq refused)
-       [:div {:class "flex flex-col gap-1"}
+       [:div {:class "seon-stack"}
         [:h3 {:class "kicker"} "blocks done"]
         (for [{:keys [reason do] :as r} refused]
           [:div {:class "flex flex-col gap-0.5"}
@@ -1189,7 +1189,7 @@
   "The keys the agent added to its ctx (a component over ctx, placed when there is one), each a
   component of its own (ctx-key). It reads ctx's own key set, so it runs again when ctx's own
   attributes change, and its output is the same unless a key came or went."
-  {:seon.render/style "flex flex-col gap-2" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+  {:seon.render/style "seon-stack-2" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
   [{c :seon.ctx/ctx}]
   [:div
    (for [k (added-keys c)] [#'ctx-key {} k])])
@@ -1243,14 +1243,14 @@
           [:code {:class "seon-handle shrink-0"} (str handle)]]
          ;; each by the one render under the value's budget; a cut reads the rest through its key of the handle
          (for [[label k s] printed]
-           [:div {:class "flex gap-2"} [:span {:class (if (#{:err :warnings} k) "text-warning" "text-text-500")} label]
+           [:div {:class "seon-row"} [:span {:class (if (#{:err :warnings} k) "text-warning" "muted")} label]
             (render/html {:budget (config/value :seon.config.render/value-budget) :handle (when handle (list k handle))} s)])
          (if err
            [:div {:class "text-error"} "✗ " (:seon.error/message err)
             (render/html {:budget (config/value :seon.config.render/value-budget) :handle handle} (dissoc err :seon.error/message))]
            ;; a nil beside output is the output's whole answer (clojure.repl/source prints and answers nil)
            (when (and (contains? (:seon.eval/response e) :value) (not (and (nil? v) (seq printed))))
-             [:div {:class "flex gap-2"} [:span {:class "text-text-500"} "→"]
+             [:div {:class "seon-row"} [:span {:class "muted"} "→"]
               (render/html {:budget (config/value :seon.config.render/value-budget) :handle handle} v)]))])]]))
 
 (defn proved
@@ -1331,7 +1331,7 @@
            (str (count evals) (if (= 1 (count evals)) " step" " steps") " · " (ms-str ms))
            (when (pos? failed) [:span {:class "text-error"} (str " · ⚠ " failed " failed")])]
           [:ol {:class "seon-turn mt-1 flex flex-col"} (for [e evals] [#'eval-item {:step true} e])]])
-       [:p {:class "text-2xs text-text-500"} (str/join " · " (remove nil? [(when n (str "turn " n)) (when tokens (str (print/tokens-text tokens) " of context"))]))]])))
+       [:p {:class "seon-note"} (str/join " · " (remove nil? [(when n (str "turn " n)) (when tokens (str (print/tokens-text tokens) " of context"))]))]])))
 
 (defn chat-ask
   "What was asked, the chat's first message, a person's on the right (a component over ctx): the
@@ -1350,7 +1350,7 @@
   (let [m (get-in c [:messages eid])
         [from body] (map #(ratom/realize (get m %)) [:seon.message/from :seon.message/body])]
     [:section
-     [:p {:class "text-2xs text-text-500"} (str from)]
+     [:p {:class "seon-note"} (str from)]
      (markdown (str body))]))
 
 (defn chat-start
@@ -1382,7 +1382,7 @@
               (when tokens (str " · " (print/tokens-text tokens)))
               (when (and reason (not= :green outcome)) (str " · " reason)))])
       (when-let [status (ratom/realize (:seon.agent/status c))]
-        [:p {:class "text-text-500"} (case status :busy "working…" :idle "waiting for you" (kname status))]))))
+        [:p {:class "muted"} (case status :busy "working…" :idle "waiting for you" (kname status))]))))
 
 (defn examples
   "The example sessions its task names (a component over ctx and the db), or nothing when it names none. It is placed
@@ -1506,7 +1506,7 @@
 
 (def ^:private tone-class
   "A standing's tone as the page's text colour."
-  {:live "text-signal" :ask "text-info" :done "text-success" :failed "text-error" :stopped "text-warning" :quiet "text-text-500"})
+  {:live "text-signal" :ask "text-info" :done "text-success" :failed "text-error" :stopped "text-warning" :quiet "muted"})
 
 (defn standing
   "How an agent's work stands, one answer for its head and its lists, from data: the agent's attributes a and its
@@ -1552,7 +1552,7 @@
         ;; a ctx join holds its members by id (a map); root's own pull, a vector
         proc (task/newest-process (let [ps (:processes v)] (if (map? ps) (vals ps) ps)))
         pid (when-not (:seon.process/ended-ms proc) (:seon.process/pid proc))]
-    [:div {:class "flex flex-col gap-1"}
+    [:div {:class "seon-stack"}
      [:div {:class "flex items-baseline gap-3"}
       [:h1 {:class "text-base font-bold text-signal"} (kname id)]
       ;; how its work stands, at a glance and in a person's words (standing): working, waiting for you only where a message
@@ -1583,7 +1583,7 @@
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
   [_ v]
   (let [{:seon.root/keys [boot generation quiescent]} v]
-    [:div {:class "flex flex-col gap-1"}
+    [:div {:class "seon-stack"}
      [:h1 {:class "text-base font-bold text-signal"} "root"]
      [:p {:class "text-text-300"} (str/join " · " (remove nil? [(str "boot " boot) (some->> (:commit generation) (str "generation "))]))]
      (when-let [cs (seq (:root-causes quiescent))]
@@ -1620,7 +1620,7 @@
   {:seon.render/style side-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
   [_]
   [:li [:a {:href "/" :class pill-link :title "root: main"}
-        [:span {:class "flex items-baseline gap-2"} [:span {:class "text-signal"} "●"] [:span {:class "font-semibold text-text-100"} "root"] [:span {:class "text-2xs text-text-500"} "main"]]]])
+        [:span {:class "flex items-baseline gap-2"} [:span {:class "text-signal"} "●"] [:span {:class "font-semibold text-text-100"} "root"] [:span {:class "seon-note"} "main"]]]])
 
 (defn- task-name
   "What an agent works on, in words: its task's title, else its branch's name; nil for neither."
@@ -1654,7 +1654,7 @@
     [:li [:a {:href (str "/agent/" (session-address a)) :class pill-link
               :title (str/join " · " (remove nil? [(kname id) (:text stands) (:detail stands) what (:seon.task/id t)]))}
           [:span {:class "flex items-baseline gap-2"}
-           [:span {:class (if (:lit? stands) "text-signal" "text-text-500")} (if (:lit? stands) "●" "○")]
+           [:span {:class (if (:lit? stands) "text-signal" "muted")} (if (:lit? stands) "●" "○")]
            [:span {:class "font-semibold text-text-100"} (kname id)]
            (when (:seon.agent/status a) [:span {:class (str "truncate text-2xs " (tone-class (:tone stands)))} (:text stands)])]
           (when what [:span {:class "truncate text-2xs text-text-400"} what])]]))
@@ -1728,7 +1728,7 @@
   {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
   [{c :seon.ctx/ctx}]
   (let [{:keys [writer fork-server root-errors-total health events]} (ratom/realize (:process c))
-        stat (fn [label v] (when (some? v) [:span [:span {:class "text-text-500"} (str label " ")] (str v)]))
+        stat (fn [label v] (when (some? v) [:span [:span {:class "muted"} (str label " ")] (str v)]))
         sick (filter (fn [[_ h]] (pos? (:defects h 0))) health)]
     [:section [:h2 "root's process"]
      [:p {:class "flex flex-wrap gap-x-3 text-xs tabular-nums"}
@@ -1741,7 +1741,7 @@
      (when (seq events)
        ;; every event the proc keeps, newest first (its window, :seon.config.render.list/stream)
        [:ol {:class "text-xs"} (for [ev events]
-                                 [:li {:class "flex gap-2"} [:span {:class "text-eval w-14 shrink-0"} (event-kind ev)]
+                                 [:li {:class "seon-row"} [:span {:class "text-eval w-14 shrink-0"} (event-kind ev)]
                                   [:span {:class "text-text-400 shrink-0"} (some-> (:agent ev) kname)]
                                   [:span {:class "min-w-0 break-all text-text-300"} (event-detail ev)]])])]))
 
@@ -1763,7 +1763,7 @@
      ;; the whole line is the link, as a pill of the agents list is
      [:a {:href (str "/agent/" (session-address a)) :class "flex items-baseline gap-2 no-underline hover:no-underline"
           :title (str/join " · " (remove nil? [(kname id) (:text stands) (:detail stands) (some-> task-id task-title)]))}
-      [:span {:class (if on? "text-signal" "text-text-500")} (if on? "●" "○")]
+      [:span {:class (if on? "text-signal" "muted")} (if on? "●" "○")]
       [:span {:class "font-bold text-text-100"} (kname id)]
       (when status [:span {:class (str "text-2xs " (tone-class (:tone stands)))} (:text stands)])
       (when model [:span {:class "ml-auto text-2xs text-text-500"} model])]
@@ -1773,7 +1773,7 @@
         [:p {:class "text-sm text-text-100"} (task-title task-id)]
         [:p {:class "text-xs text-text-300"}
          (str (when max-turns (str "up to " max-turns " turns · ")) (kname outcome))
-         (when-not (str/blank? reason) (list " · " [:span {:class "text-text-500"} (prose reason (cell) {:one-line? true})]))]))]))
+         (when-not (str/blank? reason) (list " · " [:span {:class "muted"} (prose reason (cell) {:one-line? true})]))]))]))
 
 (defn root-ctx
   "Root's page, the render of root's ctx (the declared html render of :seon.render/root-ctx, which a
@@ -1807,29 +1807,26 @@
   (let [in (fn [sel] (filterv #(= sel (:container %)) units))
         unit (fn [u] {:id (:id u) :input {:rev (:rev u)} :html (:html u) :container (:container u)})]
     {:seon.render/html
-     [:div {:id "app" :class "mx-auto flex max-w-screen-2xl flex-col gap-3 p-3 sm:p-4" :data-view view}
+     [:div {:id "app" :class "seon-page" :data-view view}
       (top-bar id tab)
-      ;; the conversation is what a person follows: it has the middle column; how the work stands and the
-      ;; task (#p-task) and the tiles sit beside it, sticky, so they stay in view while the chat scrolls;
-      ;; on a narrow screen they follow the conversation
-      ;; three columns always: a page's side parts may arrive after its first frame (an agent's walk answers
-      ;; later), and a layout chosen from the first frame's units wrapped them under the agents list
-      ;; @ctx (tab :debug) places nothing beside its record: two columns, the record the width of the rest
-      [:div {:class (if (= :debug tab) "grid grid-cols-1 gap-4 lg:grid-cols-[12rem_minmax(0,1fr)]" "grid grid-cols-1 gap-4 lg:grid-cols-[12rem_minmax(0,1fr)_26rem]")}
-       [:aside {:class "min-w-0 lg:sticky lg:top-14 lg:self-start"}
+      ;; the agents on the left, the chat large in the middle, what is rendered in blocks on the right, each scrolling on
+      ;; its own (docs/render.md#where-things-go). Three columns always: a page's side parts may arrive after its first
+      ;; frame (an agent's walk answers later). @ctx (tab :debug) places nothing beside its record
+      [:div {:class (if (= :debug tab) "seon-columns seon-columns-wide" "seon-columns")}
+       [:aside {:class "seon-agents"}
         [:h2 {:class "kicker mb-1 hidden lg:block"} "agents"]
         [:ol {:id "c-side" :class "seon-strip flex gap-2 overflow-x-auto pb-1 text-xs lg:flex-col lg:gap-0.5"} (for [u (in "#c-side")] (slot (:id u)))]]
-       [:main {:class "flex min-w-0 flex-col gap-3"}
-        [:div {:id "p-head" :class "lg:sticky lg:top-12 lg:z-10 lg:bg-base-950"} (for [u (in "#p-head")] (slot (:id u)))]
+       [:main {:class "seon-chat"}
+        [:div {:id "p-head"} (for [u (in "#p-head")] (slot (:id u)))]
         (slot "p-caption")
-        [:ol {:id "c-rows" :class "flex flex-col gap-1" :data-view view} (for [u (in "#c-rows")] (slot (:id u)))]
+        [:ol {:id "c-rows" :class "seon-chat-log" :data-view view} (for [u (in "#c-rows")] (slot (:id u)))]
         (when input (slot "p-input"))]
        (when-not (= :debug tab)
-         [:aside {:class "flex min-w-0 flex-col gap-2 lg:sticky lg:top-14 lg:max-h-[calc(100vh-4rem)] lg:self-start lg:overflow-y-auto"}
-          [:div {:id "p-task" :class "flex flex-col gap-2"} (for [u (in "#p-task")] (slot (:id u)))]
-          [:div {:id "p-tiles" :class "grid content-start gap-2"} (for [u (in "#p-tiles")] (slot (:id u)))]])]]
+         [:aside {:class "seon-context"}
+          [:div {:id "p-task" :class "seon-blocks"} (for [u (in "#p-task")] (slot (:id u)))]
+          [:div {:id "p-tiles" :class "seon-blocks"} (for [u (in "#p-tiles")] (slot (:id u)))]])]]
      :seon.render/units
-     (vec (concat [{:id "p-caption" :input {:caption caption} :html (h/html [:p {:id "p-caption" :class "text-2xs text-text-500"} (or caption "")])}]
+     (vec (concat [{:id "p-caption" :input {:caption caption} :html (h/html [:p {:id "p-caption" :class "seon-note"} (or caption "")])}]
                   (when input [{:id "p-input" :input (:value input) :schema (:schema input)}])
                   (map unit units)))}))
 
@@ -1842,7 +1839,7 @@
   is drawn once opened, and has the page's width where a short one shares the row with the part drawn. See docs/render.md#the-page."
   {:malli/schema [:=> [:cat :map [:map-of :string :string] [:set :string]] :any]}
   [parts html open]
-  [:li {:id "d-parts" :class "flex flex-col gap-2"}
+  [:li {:id "d-parts" :class "seon-stack-2"}
    [:h2 {:class "kicker"} "the task's parts: what the model reads, and the part drawn"]
    (for [[id content] parts
          :let [text (print/text (vary-meta (array-map id content) assoc :seon.print/full true))
@@ -1853,14 +1850,14 @@
                pre [:pre {:class "whitespace-pre-wrap break-words font-mono text-xs text-text-100"} text]]]
      [:div {:class (str "grid grid-cols-1 gap-3 rounded-md border border-base-800 p-2" (when-not long? " md:grid-cols-2")) :data-part id}
       [:div {:class "flex min-w-0 flex-col gap-1"}
-       [:span {:class "text-2xs text-text-500"} (str id " · sent to the model")]
+       [:span {:class "seon-note"} (str id " · sent to the model")]
        (if long?
          [:details (cond-> (toggle unit) opened? (assoc :open true))
           [:summary {:class "cursor-pointer text-text-300"} (str (print/tokens-text tokens) " read whole: open to read it")]
           (when opened? pre)]
          pre)]
       [:div {:class "flex min-w-0 flex-col gap-1"}
-       [:span {:class "text-2xs text-text-500"} "drawn"]
+       [:span {:class "seon-note"} "drawn"]
        (h/raw (get html id ""))]])])
 
 ;;; --- the debug page: what each turn sent, from its records ---------------------------------------
@@ -1886,7 +1883,7 @@
     {:seon.render/html
      [:div {:id "app" :class "mx-auto flex max-w-screen-xl flex-col gap-3 p-3 sm:p-4"}
       (top-bar focus :context)
-      [:header {:class "flex flex-col gap-1"}
+      [:header {:class "seon-stack"}
        [:h1 {:class "text-base font-semibold text-text-50"} (if context (str "What " label " reads") (str "What " label "'s model is sent"))]
        [:p {:class "text-text-400"} (if context
                                       "Its page as it reads it: the render of its ctx, each component's hiccup by its id, the text /context.txt serves, drawn again when its ctx changes."
@@ -1909,7 +1906,7 @@
                                      (btn (= :latest at) "latest" "latest")))
                              ;; a turn chosen that is no request of this branch any more (the branch replaced): said, then latest shown
                              (when-let [g (:gone strip)] [:span {:class "text-warning"} (str "the turn chosen (" g ") is no request of this branch: latest is shown")])])}
-             (or turn {:id "d-turn" :input :none :html (h/html [:p {:id "d-turn" :class "text-text-500"} "no model turn yet"])}))
+             (or turn {:id "d-turn" :input :none :html (h/html [:p {:id "d-turn" :class "muted"} "no model turn yet"])}))
        context (conj context))}))
 
 (defn root-context
@@ -1966,7 +1963,7 @@
         upto (vec (reductions + 0 sizes))
         line (fn [cls text] [:div {:class (str "my-1 flex items-center gap-2 text-2xs " cls)}
                              [:span {:class "h-px flex-1 bg-current opacity-40"}] text [:span {:class "h-px flex-1 bg-current opacity-40"}]])
-        field (fn [k v] [:div {:class "flex flex-col"} [:span {:class "text-2xs text-text-500"} k]
+        field (fn [k v] [:div {:class "flex flex-col"} [:span {:class "seon-note"} k]
                          [:pre {:class "whitespace-pre-wrap break-words font-mono text-text-100"} v]])
         row (fn [i {:keys [role content tool_calls tool_call_id reasoning_content]}]
               (let [rs (get sources i) new? (get new i)
@@ -1981,7 +1978,7 @@
                   [:span {:class "tabular-nums"} (print/tokens-text (get sizes i))]]
                  [:div {:class "flex min-w-0 flex-col gap-1"}
                   (when tool_call_id (field "tool_call_id" tool_call_id))
-                  (when reasoning_content [:details [:summary {:class "text-2xs text-text-500"} "reasoning_content"]
+                  (when reasoning_content [:details [:summary {:class "seon-note"} "reasoning_content"]
                                            [:pre {:class "whitespace-pre-wrap break-words font-mono"} reasoning_content]])
                   (when (seq content) (field "content" content))
                   (for [{:keys [id function]} tool_calls]
@@ -1993,14 +1990,14 @@
       (when tokens [:span {:class "tabular-nums text-text-300"} (str (group3 tokens) " tokens")])
       (when (and prompt (pos? prompt))
         [:span {:class "tabular-nums text-text-400"} (str (group3 cache-hit-tokens) " of " (group3 prompt) " prompt tokens from cache (" (long (* 100 (/ cache-hit-tokens prompt))) "%)")])
-      [:span {:class "text-text-500"} (str (count ms) " messages · " (count (filter true? new)) " new")]
-      (cond (= :outside origin) [:span {:class "text-text-500"} "an outside read: no model call"]
-            to-come? [:span {:class "text-text-500"} "redrawn as the branch moves"]
-            (not (or tokens error)) [:span {:class "text-text-500"} "the call is in flight"])]
+      [:span {:class "muted"} (str (count ms) " messages · " (count (filter true? new)) " new")]
+      (cond (= :outside origin) [:span {:class "muted"} "an outside read: no model call"]
+            to-come? [:span {:class "muted"} "redrawn as the branch moves"]
+            (not (or tokens error)) [:span {:class "muted"} "the call is in flight"])]
      (when error [:div {:class "rounded border border-error p-2"} (render/html {} error)])
      [:details [:summary {:class "cursor-pointer text-text-400"} "the envelope: every field but the messages, as sent"]
       [:pre {:class "whitespace-pre-wrap break-words font-mono text-text-100"} (json/write-str (dissoc body :messages))]]
-     (into [:div {:class "flex flex-col gap-1"}]
+     (into [:div {:class "seon-stack"}]
            (mapcat (fn [i m] (cond-> [(row i m)]
                                (= (inc i) cached) (conj (line "text-info" (str "the provider's cache ends here: " (group3 cache-hit-tokens) " tokens served from cache (placed by estimate)")))
                                (and same (pos? same) (= (inc i) same))
