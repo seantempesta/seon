@@ -374,13 +374,13 @@
                         {:op :done :agent agent}]))]
     ;; the owner, 2026-10-27: an eval's answer stays small, its handle and one line; what the run
     ;; found is drawn on its eval, from its value (seon.render.ui/proved)
-    (is (clojure.string/includes? (:text proved) "green: ran ") (:text proved))
+    (is (clojure.string/includes? (:text proved) "green: ") (:text proved))
     (is (< (count (:text proved)) 300) (str "the answer is its handle and one line: " (count (:text proved)) " chars"))
     (is (= [:pass []] (:value status)) (str "my.task/status: the proof's status, and no reason about it: " (pr-str status)))
     (let [[k proofs html] (:value drawn)]
       (is (= :seon.test/proved k) (str "the eval's record names the value's render schema: " (pr-str drawn)))
       (is (= :pass (get proofs 'app.okt/ok-test)) "the value is the run, stored as data")
-      (is (and (string? html) (clojure.string/includes? html "green: ran ") (clojure.string/includes? html "app.okt/ok-test"))
+      (is (and (string? html) (clojure.string/includes? html "green: ") (clojure.string/includes? html "app.okt/ok-test"))
           (str "drawn on the eval: the line, then each proof's status: " html)))
     ;; the harness's task also names demo-test/t, which no test defines: that one is the judge's unknown
     (is (not (clojure.string/includes? (pr-str done) "proof-unknown app.okt/ok-test")) (str "and the judge counts it: " (pr-str done)))))

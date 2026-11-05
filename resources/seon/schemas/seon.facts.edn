@@ -622,7 +622,7 @@
  ;; model round trip, the reply's evaluations, the turn's record (ms)
  :seon.model-call/split [:map [:tests-ms {:optional true} :int] [:context-ms :int]
                    [:model-ms {:optional true} :int] [:eval-ms {:optional true} :int] [:record-ms {:optional true} :int]]
- :seon.model-call/fact [:map {:seon.db/attributes true :seon.render/html seon.render.ui/turn :seon.render/model seon.context/turn-messages}
+ :seon.model-call/fact [:map {:seon.db/attributes true :seon.render/html seon.render.ui/model-call-view :seon.render/model seon.context/turn-messages}
                           [:seon.model-call/id :seon.model-call/id] [:seon.model-call/agent {:optional true} :seon.model-call/agent]
                           [:seon.model-call/n {:optional true} :seon.model-call/n] [:seon.model-call/origin {:optional true} :seon.model-call/origin]
                           [:seon.model-call/reply {:optional true} :seon.model-call/reply]

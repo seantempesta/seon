@@ -285,7 +285,7 @@ Uses of take, subs and the like in display code that choose what to find or read
 
 - `my.schema/unknown-key`: a registered key's text without its colon, to name the nearest keys of a key no schema registers by Jolt's ranking: a lookup, not a cut of output.
 - `seon.render.ui/kname`: a keyword's text without its colon.
-- `seon.render.ui/cite-via`, `seon.render.ui/call-in`: a quote is a slice (`subs`) of the plan's or instructions' own text around a mention, and a real call a slice of a test's or caller's own source from its opening parenthesis to its closing one: both are text the db holds, found by position, so each is a substring of what it quotes; a find, not a cut of output.
+- `seon.render.ui/cite-via`, `seon.context/form-at`: a quote is a slice (`subs`) of the plan's or instructions' own text around a mention, and a form (a real call, a namespace's `:require`) a slice of a test's, caller's or namespace's own source from its opening parenthesis to its closing one: both are text the db holds, found by position; a find, not a cut of output.
 - `seon.render.ui/markdown`, `seon.render.ui/task-title`: Markdown text split into its blocks by the offsets its parse (`seon.ref/scan`) gives (a fenced block's content and a list's items too), each kept as written; a name's first letter made capital: text rearranged, nothing left out.
 - `seon.context/relevance`: the first `cap` of a search's scan of each kind's nearest (`take`), the pool it scores: a score's input, never shown.
 - `seon.context/item-text`: a text for relevance's lexical feature (`seon.doc/terms`) (a schema's form printed to find its words, a token's characters `subs` out of its text): an input to a score, never shown.

@@ -35,20 +35,20 @@
 (def instructions
   "What each step's agent does, by task kind (its own work: instructions never flow): its goal,
   when it is done and by what means, short, the standard format's stage descriptions (seon.judge's). How every agent works at the REPL is the system prompt every agent reads first
-  (seon.context/system-page), and the help page it reads on demand (seon.context/help-page). How a work or whole task is worked is a section of the help page its instructions cite whole (docs/agent.md#working-a-task), so it is a part of the agent's context drawn from the wiki and changes as the wiki does: the instructions say only the goal."
+  (seon.context/system-page), and the help page it reads on demand (seon.context/help-page). How a task is worked is the system prompt's, and the wiki section docs/agent.md#working-a-task, which an agent reads when it wants it (the instructions no longer cite it into every context): the instructions say only the goal."
   {:design (str "Your task: turn the request below into the task the implement step works from: its plan, what the "
                 "plan cites and its red proofs. You are done when an agent with only that page could make the change without "
                 "exploring, and its proofs are written, registered and red for the reason the plan gives. How a task is "
                 "designed, step by step: ```docs/agent.md#designing-a-task```. Then end your turn with prose.")
    :implement (str "Your task: make the change the plan describes. You are done when every proof passes, the cost proofs "
-                   "included. How a task is worked, step by step: ```docs/agent.md#working-a-task```. Then end your turn with prose.")
+                   "included. Then end your turn with prose.")
    :merge (str "Your task: bring main's work into this branch and keep the proofs green. Main has been merged in "
                "(`my.branch/merge-main!`). You are done when nothing is unmerged and every proof passes on the combined program. "
                "How: ```docs/agent.md#merging```. Then end your turn with prose.")
    :work (str "Your task: do what the plan below asks: design it and build it. You are done when its proofs pass on your "
-              "branch. How a task is worked, step by step: ```docs/agent.md#working-a-task```.")
+              "branch.")
    :whole (str "Your task: do what the plan below asks, whole. You are done when its proofs pass on your branch with main's "
-               "work merged in. How a task is worked, step by step: ```docs/agent.md#working-a-task```. Your status says "
+               "work merged in. Your status says "
                "what main changed under you and what merging would conflict on: redefine each such var for both sides. "
                "Once it says nothing is left, your run ends and root merges your branch.")
    :test (str "Your task: test what the plan changed. You are done when the proofs and the tests of what changed pass, and "

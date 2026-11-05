@@ -602,7 +602,8 @@
                    :else (body-forms w out))
         place (when (var? (:f c)) (:seon.render/place (meta (:f c))))]
     ;; :tok is the model's own reading of it: what the form holds, not the page's alone
-    (cond-> (into [(symbol (:f c)) (cond-> {:tok (tokens-of (vec body))} (:at (:opts c)) (assoc :ctx (:at (:opts c))))] body) place (vary-meta assoc :seon.render/place place))))
+    (when (seq body)
+      (cond-> (into [(symbol (:f c)) (cond-> {:tok (tokens-of (vec body))} (:at (:opts c)) (assoc :ctx (:at (:opts c))))] body) place (vary-meta assoc :seon.render/place place)))))
 
 (defn fence
   "Source text s in a Markdown fence longer than any run of backticks inside it, so no line of s closes it: three, or one
@@ -638,8 +639,7 @@
   the model reads of each (`part-form`). See docs/render.md#a-part-prints-as-its-render."
   {:malli/schema [:=> [:cat :map [:sequential :string]] :map]}
   [w sels]
-  (apply array-map (mapcat (fn [[_ k]] (let [c (get @(:cache w) k)] [(:id c) (part-form w k)]))
-                           (placed w sels))))
+  (apply array-map (mapcat (fn [[_ k]] (when-let [f (part-form w k)] [(:id (get @(:cache w) k)) f])) (placed w sels))))
 
 (defn parts-since
   "The parts of walk w placed in the lists sels that moved since seen ({id tree-rev} of an earlier answer): {:parts {id form}
@@ -650,7 +650,7 @@
   [w sels seen]
   (let [ps (for [[_ k] (placed w sels)] [(:id (get @(:cache w) k)) k])
         revs (into {} (map (fn [[id k]] [id (tree-rev w k)])) ps)]
-    {:parts (into (array-map) (keep (fn [[id k]] (when (not= (get seen id) (get revs id)) [id (part-form w k)]))) ps)
+    {:parts (into (array-map) (keep (fn [[id k]] (when (not= (get seen id) (get revs id)) (when-let [f (part-form w k)] [id f])))) ps)
      :revs revs
      :gone (vec (remove revs (keys seen)))}))
 

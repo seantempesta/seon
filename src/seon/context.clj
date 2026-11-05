@@ -164,14 +164,19 @@
   [db cites]
   (vec (program/program-names db (into [] (comp (keep :seon.cite/name) (filter qualified-symbol?) (remove #(ref/task? db %))) cites))))
 
+(defn plan-says
+  "The plan's sentences that name unwritten proof p, one string, or nil when none does (the plan is on the page already): what
+  the proof should assert, in the plan's own words."
+  {:malli/schema [:=> [:cat :qualified-symbol :string] [:maybe :string]]}
+  [p plan]
+  (when-let [ss (seq (filter #(str/includes? % (name p)) (str/split plan #"(?<=[.!?])\s+")))] (str/join " " ss)))
+
 (defn not-written
-  "What unwritten proof p should assert, by the plan's own words: the plan's sentences that name
-  it, or that it is not written yet when none does (the plan is on the page already): the task part's
-  the status's unwritten proofs (seon.render.ui/status, docs/render.md#how-the-work-stands)."
+  "What unwritten proof p should assert, by the plan's own words (`plan-says`), or that it is not written yet when no sentence
+  names it: my.task/data's :to-prove."
   {:malli/schema [:=> [:cat :qualified-symbol :string] :string]}
   [p plan]
-  (let [ss (filter #(str/includes? % (name p)) (str/split plan #"(?<=[.!?])\s+"))]
-    (if (seq ss) (str "not written yet; it should assert what the plan says: " (str/join " " ss)) "not written yet")))
+  (if-let [s (plan-says p plan)] (str "not written yet; it should assert what the plan says: " s) "not written yet"))
 
 ;; ---- relevance: one calibrated score for a context and an item (docs/vector.md#relevance) ----
 
@@ -582,22 +587,43 @@
                           [n (cond-> (into {} (for [k [:var/name :seon.test/status :seon.test/failures :seon.test/ticks :seon.test/bytes] :let [x (get v k)] :when (some? x)] [k (ratom/realize x)]))
                                (get-in v [:form :form/src]) (assoc :form {:form/src (ratom/realize (get-in v [:form :form/src]))}))]))})))
 
+(defn form-at
+  "The form of src that opens at offset i, as written, up to its closing parenthesis (strings and character literals read as
+  such), or nil when it does not close within limit characters. A slice of src: text the db holds, found by position."
+  {:malli/schema [:=> [:cat [:maybe :string] [:maybe nat-int?] pos-int?] [:maybe :string]]}
+  [src i limit]
+  (when (and src i)
+    (let [n (count src)]
+      (loop [j i depth 0 in-str? false]
+        (if (or (>= j n) (> (- j i) limit))
+          nil
+          (let [ch (.charAt ^String src (int j))]
+            (cond
+              in-str? (cond (= ch \\) (recur (+ j 2) depth true) (= ch \") (recur (inc j) depth false) :else (recur (inc j) depth true))
+              (= ch \") (recur (inc j) depth true)
+              (= ch \\) (recur (+ j 2) depth false)
+              (= ch \() (recur (inc j) (inc depth) false)
+              (= ch \)) (if (= 1 depth) (subs src i (inc j)) (recur (inc j) (dec depth) false))
+              :else (recur (inc j) depth false))))))))
+
 (defn test-shape
-  "Where an unwritten proof p goes, as the agent needs it to write one: its test namespace's ns form (requires and aliases),
-  the helpers that namespace defines, and the shortest of its first five tests by name as the shape to
-  copy; nil when the branch has no such namespace yet (the agent makes it first). Two index reads and one source read. See
-  docs/render.md#how-the-work-stands."
+  "Where an unwritten proof p goes, as the agent needs it to write one: its test namespace's `:require` clause (the aliases it
+  can use), the helpers that namespace defines, and one test of it to copy: the shortest that uses a helper or `my.test`, else the
+  shortest. Nil when the branch has no such namespace yet (the agent makes it first). One index read, and each var of the namespace
+  read once. See docs/render.md#how-the-work-stands."
   {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:maybe :map]]}
   [db p]
   (when-let [n (d/entity db [:ns/name (symbol (namespace p))])]
     (let [vs (map #(d/entity db %) (d/q '[:find [?e ...] :in $ ?n :where [?e :var/ns ?n]] db (:db/id n)))
           {tests true others false} (group-by #(= :test (:var/kind %)) vs)
-          ;; the shortest of its first five tests by name: a shape to copy, not the longest of them
-          srcs (keep #(doc/source-of db (:var/name %)) (let [ts (vec (sort-by :var/name tests))] (subvec ts 0 (min 5 (count ts)))))
-          src (first (sort-by count srcs))
-          ns-src (get-in n [:ns/form :form/src])]
+          helpers (mapv #(name (:var/name %)) others)
+          srcs (keep #(get-in % [:var/form :form/src]) tests)
+          uses? (fn [s] (or (str/includes? s "my.test/") (some #(str/includes? s (str "(" % " ")) helpers)))
+          src (first (sort-by count (or (seq (filter uses? srcs)) srcs)))
+          ns-src (get-in n [:ns/form :form/src])
+          requires (when-let [i (some-> ns-src (str/index-of "(:require"))] (form-at ns-src i 1500))]
       (cond-> {:ns (symbol (namespace p))}
-        ns-src (assoc :ns-form ns-src)
+        requires (assoc :requires requires)
         (seq others) (assoc :helpers (vec (sort (map :var/name others))))
         src (assoc :example src)))))
 
@@ -683,7 +709,7 @@
                                       fs (when-not test-error (:seon.test/failures v))
                                       calls (when (and src (not= :pass st)) (callees db p))
                                       shape (when (= :undefined st) (test-shape db p))
-                                      says (when (= :undefined st) (not-written p (or plan "")))]]
+                                      says (when (= :undefined st) (plan-says p (or plan "")))]]
                             (cond-> {:test p :status st}
                               (or (:seon.test/ticks v) (:seon.test/bytes v)) (assoc :cost (cond-> {} (:seon.test/ticks v) (assoc :ticks (:seon.test/ticks v)) (:seon.test/bytes v) (assoc :bytes (:seon.test/bytes v))))
                               (and src (not= :pass st)) (assoc :source (print/code src))

@@ -313,21 +313,33 @@
            {:seon.render/schema :seon.test/proved}))))))
 
 (defn prove-summary
-  "A prove's run r as the eval answers it (seon.render/model, the schema :seon.test/proved): one
-  line, its verdict and what ran, was left to the judge (process tests), was reused and died (a death
-  is no verdict: not counted). What it found (each proof's status, the reds with their first failing
-  assertion, the deaths) is drawn on the eval, from its value (seon.render.ui/proved, the schema's
-  html render); the run whole is the value under the eval's handle. A part of the run (a select-keys
-  of it keeps its metadata) is that part, as data. See docs/agent.md#done."
+  "A prove's run r as the eval answers it (seon.render/model, the schema :seon.test/proved): its verdict as counts of the
+  proofs it judged (`red: 1 of 3 failed`), each failing test with its first failure in a line, and only what is true of this
+  run: the tests it reused (their last result still counts, because nothing they reach changed), the ones left to the judge
+  (process tests), the ones that died (no verdict) and a name that matched no test. The run whole is the value under the eval's
+  handle (the proofs' statuses, every failure, the deaths). A part of the run (a select-keys of it keeps its metadata) is that
+  part, as data. See docs/agent.md#done."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
   [_ r]
   (if-not (:reports r)
     (with-meta r nil)
     (let [died (count (proofs/died r))
-          red (pos? (+ (:fail r 0) (:error r 0)))]
-      (str (cond red "red" (pos? died) "died" :else "green")
-           ": ran " (:ran r 0) ", deferred " (count (:deferred r)) " (to the judge), reused " (:reused r 0) ", died " died
-           (when-let [u (seq (:unmatched r))] (str "; no test is named " (str/join ", " u)))))))
+          red (pos? (+ (:fail r 0) (:error r 0)))
+          fails (apply dissoc (proofs/failures r) (proofs/died r))
+          n (+ (:ran r 0) (:reused r 0))
+          first-line (fn [f] (let [t (str/trim (str (or (:message f) (:actual f) (:got f))))
+                                   m (when (str/starts-with? t "#error") (second (re-find #":message \"([^\"]*)\"" t)))]
+                               (print/line (if m (str "threw " m) t) 120)))]
+      {:seon.print/prose
+       (str/join "\n" (remove nil?
+         (concat
+           [(cond red (str "red: " (count fails) " of " n " failed")
+                  (pos? died) (str "died: " died " of " n " had no verdict")
+                  :else (str "green: " n " of " n " passed"))]
+           (for [[t fs] (sort-by (comp str key) fails)] (str "✗ " t ": " (first-line (first fs))))
+           [(when (pos? (:reused r 0)) (str "reused " (:reused r) ": their last result still counts, because nothing they reach has changed"))
+            (when (seq (:deferred r)) (str "left to the judge: " (count (:deferred r)) " process tests"))
+            (when (seq (:unmatched r)) (str "no test is named " (str/join ", " (:unmatched r))))])))})))
 
 (defn process-test?
   "Whether test t reaches a process of its own on this branch (an agent, a root, a fork, the binary:

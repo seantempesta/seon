@@ -17,7 +17,7 @@
 (defn- untail
   "Messages ms without the request's last message when it is the tail (the agent's turn line: a part declared :seon.render/place
   :tail, made again each request and never in the prefix): what a request's prefix and its page are judged on."
-  [ms] (if (str/starts-with? (str (:content (peek ms))) "[seon.render.ui/agent-state") (pop ms) ms))
+  [ms] (if (str/starts-with? (str (:content (peek ms))) "[seon.render.ui/turn") (pop ms) ms))
 
 (defn- strip-tail
   "Render result r without the tail: its message, its ref in :sent and its entry in :parts."
@@ -105,19 +105,19 @@
 
 (deftest a-cut-reply-is-told-to-the-agent
   ;; the agent state (seon.render.ui/agent-state), not the work's status: a cut reply is the conversation's
-  (let [head (fn [turn] (pr-str (seon.render.ui/agent-state {:seon.ctx/ctx {:seon.agent/status :running :seon.agent/max-turns 4 :calls {"t1" turn}} :seon.db/db (ts/test-db)} 1)))]
+  (let [head (fn [turn] (pr-str (seon.render.ui/turn {:seon.ctx/ctx {:seon.agent/status :running :seon.agent/max-turns 4 :calls {"t1" turn}} :seon.db/db (ts/test-db)} 1)))]
     (is (re-find #"at the model's token limit" (head {:seon.model-call/n 1 :seon.model-call/truncated true})) (head {:seon.model-call/n 1 :seon.model-call/truncated true}))
     (is (not (re-find #"token limit" (head {:seon.model-call/n 1}))))))
 
 (deftest the-turn-line-is-one-line-in-the-heading-and-the-model-is-sent-only-it
-  (let [part (seon.render.ui/agent-state {:seon.ctx/ctx {:seon.agent/status :busy :seon.agent/max-turns 40 :seon.agent/ns 'seon.program :calls {"t1" {:seon.model-call/n 1}}
+  (let [part (seon.render.ui/turn {:seon.ctx/ctx {:seon.agent/status :busy :seon.agent/max-turns 40 :seon.agent/ns 'seon.program :calls {"t1" {:seon.model-call/n 1}}
                                                           :task {:seon.task/id "seon.program/a-var-is-read"}}
                                            :seon.db/db (ts/test-db)} 1)]
     (is (= "Turn 12 of 40 · in seon.program · ~540.0k tok sent" (seon.render.ui/turn-line 12 40 'seon.program 540000)))
     (is (= "Turn 1 of 40 · in seon.program" (seon.render.ui/turn-line 1 40 'seon.program nil)) "what is not known is left out")
     (is (= "Turn 1 of 40 · in seon.program" (second (second part))) "the part's heading")
-    (is (= :tail (:seon.render/place (meta #'seon.render.ui/agent-state))) "declared the request's last message")
-    (is (some #(and (vector? %) (= "page" (:data-for (second %)))) (rest part)) "the rest is the page's alone")))
+    (is (= :tail (:seon.render/place (meta #'seon.render.ui/turn))) "declared the request's last message")
+    (is (nil? (:data-for (second (second part)))) "the model's part holds the heading only")))
 
 (deftest a-records-text-is-the-same-whatever-came-before
   ;; task seon.context/the-context-is-the-agents-evals-and-seons: a record's printed text is a
@@ -448,7 +448,7 @@
         (is (= r0 (subvec r1 0 (count r0))) "turn 1 starts with turn 0's request, whole")
         (is (= r1 (subvec r2 0 (count r1))) "turn 2 starts with turn 1's request, whole")
         (is (= (context/system-text @conn) (:content (first r0))) "the system message is the system prompt as main holds it")
-        (is (str/starts-with? (:content (first r0)) "# You are a Seon agent\n\nYou work at a Clojure REPL") "the page, from its sections")
+        (is (str/starts-with? (:content (first r0)) "# You are a Seon agent\n\nYou're at a Clojure REPL") "the page, from its sections")
         (is (= ["system" "user"] (mapv :role r0)) "the first request: the system prompt, then the page whole")
         (is (every? #(re-find % (:content (second r0))) [#"seon\.render\.ui/cited" #"Doubles\." #"seon\.render\.ui/status"]) "the page whole, each part by the function that drew it: how the work stands too")
         (is (re-find #"seon\.render\.ui/cited" (:content (peek r1))) "the cited var's edit: its part, by its function")
@@ -1002,7 +1002,7 @@
                        '[:seon.eval/code :seon.eval/response :seon.eval/schema] [:seon.eval/id "e7"])
         sent (:content (second (context/eval-messages nil (assoc stored :seon.eval/by "a1" :seon.eval/call-id "c1"))))]
     (is (= :seon.test/proved (:seon.eval/schema stored)) "the eval keeps the value's schema")
-    (is (str/includes? live "green: ran 3") "the live response is its one line")
+    (is (str/includes? live "green: 5 of 5 passed") "the live response is its one line")
     (is (= live sent) (str "the record's tool message reads as the live response did: " sent))
     (is (not (str/includes? sent ":heap")) "not the whole value")))
 
@@ -1945,8 +1945,8 @@
     (is (= "(deftest g-test (is (= 1 (g))))" (:example shape)) "one real test of it: the shortest of its first five by name")
     (is (nil? (context/test-shape db 'nowhere-test/x)) "a namespace the branch lacks has no shape: the agent makes it first")
     (let [h (pr-str (seon.render.ui/status-hiccup {:proofs [{:test 'demo-test/new-test :status :undefined :shape shape}]}))]
-      (is (re-find #"demo-test/new-test is not written" h))
-      (is (re-find #"shape to copy" h))
+      (is (re-find #"not written yet" h))
+      (is (re-find #"A test of it to copy" h))
       (is (re-find #"deftest g-test" h)))))
 
 (deftest the-turn-line-is-the-requests-last-message-replaced-each-request
@@ -1956,7 +1956,7 @@
     (fn [_ conn]
       (let [[ask! ev! _] (parts-session conn)
             status ['seon.render.ui/status {:ctx [:task :proved]} [:h2 "Where your work stands"] [:p "0 of 1 proofs green"]]
-            tail (fn [n] (with-meta ['seon.render.ui/agent-state {:ctx [:seon.agent/id]} [:h2 (str "Turn " n " of 9")]] {:seon.render/place :tail}))
+            tail (fn [n] (with-meta ['seon.render.ui/turn {:ctx [:seon.agent/id]} [:h2 (str "Turn " n " of 9")]] {:seon.render/place :tail}))
             parts (fn [n] (constantly {"status-1" status "agent-state-1" (tail n)}))
             r0 (ask! 0 {:parts (parts 1)})
             _ (ev! "e1")
@@ -1982,4 +1982,4 @@
     (is (str/includes? t "Its form:") t)
     (is (str/includes? t "Held by") "what kind of entity holds it")
     (is (str/includes? t ":form/src") "a ref followed: what the form entity holds")
-    (is (str/includes? (text :var/name) "One real value:") "an attribute that is no ref: a real value")))
+    (is (str/includes? (text :var/name) "A real value:") "an attribute that is no ref: a real value")))
