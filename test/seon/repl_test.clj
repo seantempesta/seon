@@ -1017,3 +1017,15 @@
         (is (string? (:text r)) code)
         (is (= (:text r) (:content msg)) (str "the outside text is the model's message for " code))))
     (is (var? (:value @(resolve (:handle (ev "#'clojure.core/inc"))))) "the live value is at the handle")))
+
+;; a task merged having defined its proof and function through eval: they ran here, and neither was on its branch
+(deftest a-proof-through-eval-is-told-and-has-no-result
+  (let [[_ defined proved]
+        (at/in-agent
+         (fn [{:keys [ns]}]
+           (let [n (str ns ".viaeval")]
+             [(str "(ns " n " (:require [clojure.test]))")
+              (str "(do (in-ns '" n ") (eval '(clojure.test/deftest p (clojure.test/is true))))")
+              (str "(:results (my.agent/prove '#{" n "/p}))")])))]
+    (is (str/includes? (str (:text defined)) "will not merge") (pr-str defined))
+    (is (empty? (:value proved)) (str "no form on the branch, so it does not run: " (pr-str proved)))))

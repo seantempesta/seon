@@ -991,6 +991,11 @@
         unit (str "eval-item-" (seon.db/eid branch :seon.eval/id id))]
     (:html (some #(when (= unit (:id %)) %) (:units (drawn-parts branch))))))
 
+(deftest an-evals-warning-is-drawn-with-its-value
+  ;; a task merged having defined its proof through eval: the model's text said so and the page did not
+  (is (str/includes? (eval-html "e24" "(eval '(defn g []))" {:handle 'result/e24 :value 1 :warnings [{:seon.repl/finding :not-program :seon.repl/fix "it will not merge"}]})
+                     "it will not merge")))
+
 (deftest an-evals-printed-output-is-drawn-with-its-value
   ;; owner, 2026-11-05: (clojure.repl/source x) showed "→ nil" though the response held the source under :out
   ;; (seon.repl/response keeps *out* as seon.print/code and *err* under :err). The eval's row draws both, by the
