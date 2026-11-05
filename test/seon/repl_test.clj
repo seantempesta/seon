@@ -94,29 +94,10 @@
          (let [r2 (repl/edit! 'x.repl-edit/f "c" "d")]
            (is (= :ambiguous (:seon.repl/refused-because r2)) "there more than once: refused")
            (is (<= 2 (count (:seon.repl/lines r2))) "naming each candidate's line"))
-         ;; md-scan #17: an edit one paren short was repaired far from it and failed as cond there
-         (let [r (repl/edit! 'x.repl-edit/g "(+ 1 1)" "(+ 1 (inc 1)")]
-           (is (= :unbalanced (:seon.repl/refused-because r)) "a delimiter the new text leaves open: refused, never repaired")
-           (is (str/includes? (:seon.error/message r) "opens 1 more (") (:seon.error/message r))
-           (is (str/includes? (:seon.error/message r) "a ( left open at its line 1, \"(+ 1 (inc 1)\"") (str "and where (md-scan bench-b15): " (:seon.error/message r)))
-           (is (= 2 ((resolve 'x.repl-edit/g))) "nothing changed"))
-         (let [r (repl/edit! 'x.repl-edit/g "(+ 1 1)" "(+ 1 [1)]")]
-           (is (= :unbalanced (:seon.repl/refused-because r)) (str "a ( met by ], as many of each: refused, never read as \"Unmatched delimiter\": " (pr-str r)))
-           (is (str/includes? (:seon.error/message r) "the ) at its line 1") (:seon.error/message r))
-           (is (str/includes? (:seon.error/message r) "pairs a delimiter with another kind") (:seon.error/message r)))
-         ;; an old text that is itself unbalanced keeps its own unpaired delimiters: only what the edit made is named,
-         ;; at its line (the review: an extra ( added before old's own was named at old's line)
-         (repl/eval-string "(in-ns 'x.repl-edit) (defn u [x]\n  (let [a (inc x)\n        b 2]\n    (+ a b)))\n(in-ns 'user)" {})
-         (let [r (repl/edit! 'x.repl-edit/u "(let [a (inc x)" "(do\n  (let [a (inc x)")]
-           (is (= :unbalanced (:seon.repl/refused-because r)) (pr-str r))
-           (is (str/includes? (:seon.error/message r) "a ( left open at its line 1, \"(do\"") (str "the wrapping ( named, not old's own: " (:seon.error/message r)))
-           (is (not (str/includes? (:seon.error/message r) "line 2")) (:seon.error/message r)))
-         (let [r (repl/edit! 'x.repl-edit/u "(let [a (inc x)" "(let [a (inc x)\n        z (inc")]
-           (is (str/includes? (:seon.error/message r) "a ( left open at its line 2, \"z (inc\"") (str "an appended ( named at its own line: " (:seon.error/message r))))
-         (let [r (repl/edit! 'x.repl-edit/g "(+ 1 1)" "(+ 1 1))")]
-           (is (= :unbalanced (:seon.repl/refused-because r)) "a closer more")
-           (is (str/includes? (:seon.error/message r) "closes 1 more )") (:seon.error/message r))
-           (is (str/includes? (:seon.error/message r) "the old text ends \")\" (1), the new text \"))\" (2)") (str "the closing runs side by side: " (:seon.error/message r))))
+         ;; an edit one paren short is read as written, never repaired: the reader's error is its answer, and nothing changed
+         (let [r (repl/eval-string "(seon.repl/edit! 'x.repl-edit/g \"(+ 1 1)\" \"(+ 1 (inc 1)\")" {})]
+           (is (str/includes? (str (get-in r [:ex :seon.error/message])) "nothing changed") (pr-str r))
+           (is (= 2 ((resolve 'x.repl-edit/g))) "and it still is what it was"))
          (let [r (repl/edit! 'x.repl-edit/g "(+ 1 1)" "(str \\) \")\" ;)\n 1)")]
            (is (nil? (:seon.repl/refused-because r)) (str "a closer in a character literal, a string or a comment is none: " (pr-str r)))
            (is (= "))1" ((resolve 'x.repl-edit/g)))))
@@ -144,10 +125,9 @@
            (is (= :overlap (:seon.repl/refused-because r)) (str "two changes whose texts overlap, neither the other: " (pr-str r))))
          (let [r (repl/edit! 'x.repl-edit/l "" "x")]
            (is (= :empty (:seon.repl/refused-because r)) (str "an empty old text is refused, never matched everywhere: " (pr-str r))))
-         (let [r (repl/edit! 'x.repl-edit/l [["(loop [i 0" "(loop [i 1"] ["(+ acc i)" "(+ acc i"]])]
-           (is (= :unbalanced (:seon.repl/refused-because r)) "a closer the whole edit lacks is refused")
-           (is (str/includes? (:seon.error/message r) "change 2 of 2") (str "naming which: " (:seon.error/message r)))
-           (is (= 16 ((resolve 'x.repl-edit/l) 4)) "and nothing changed"))
+         (is (some? (try (repl/edit! 'x.repl-edit/l [["(loop [i 0" "(loop [i 1"] ["(+ acc i)" "(+ acc i"]]) nil (catch Exception e (ex-message e))))
+             "a closer the whole edit lacks does not read, and says so")
+         (is (= 16 ((resolve 'x.repl-edit/l) 4)) "and nothing changed")
          ;; a form wrapped by two changes, its opener in one and its closer in another, leaves the definition balanced
          (repl/eval-string "(in-ns 'x.repl-edit) (defn w [n] (let [a n]\n  (+ a 1))) (in-ns 'user)" {})
          (let [r (repl/edit! 'x.repl-edit/w [["(let [a n]" "(inc (let [a n]"] ["(+ a 1)))" "(+ a 1))))"]])]
@@ -1018,6 +998,23 @@
         (is (= (:text r) (:content msg)) (str "the outside text is the model's message for " code))))
     (is (var? (:value @(resolve (:handle (ev "#'clojure.core/inc"))))) "the live value is at the handle")))
 
+;; jolt.analyzer/a-missing-var-through-an-alias-says-no-such-var-in-any-namespace; docs/testing.md
+(deftest a-missing-var-through-an-alias-is-no-such-var-in-a-test
+  ;; as an agent writes a proof first: the proof names a function that is not there, then the function is defined
+  ;; and the proof, not evaluated again, runs at a new digest and finds it
+  (let [[_ _ _ red _ green]
+        (at/in-agent
+         (fn [{:keys [ns]}]
+           (let [impl (str ns ".late") tst (str ns ".late-test") t (str "'#{" tst "/proof}")]
+             [(str "(ns " impl ")")
+              (str "(ns " tst " (:require [clojure.test :refer [deftest is]] [" impl " :as late]))")
+              "(deftest proof (is (= 2 (late/g 1))))"
+              (str "(select-keys (my.agent/prove " t ") [:ran :reused :reports])")
+              (str "(do (in-ns '" impl ") (defn g [x] (inc x)))")
+              (str "(select-keys (my.agent/prove " t ") [:ran :reused :pass :fail :error])")])))]
+    (is (= 1 (:ran (:value red))) (pr-str red))
+    (is (some #(str/includes? (str %) "No such var: late/g") (:reports (:value red))) (pr-str red))
+    (is (= {:ran 1 :reused 0 :pass 1 :fail 0 :error 0} (select-keys (:value green) [:ran :reused :pass :fail :error])) (pr-str green))))
 ;; a task merged having defined its proof and function through eval: they ran here, and neither was on its branch
 (deftest a-proof-through-eval-is-told-and-has-no-result
   (let [[_ defined proved]

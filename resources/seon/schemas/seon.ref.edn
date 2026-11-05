@@ -98,10 +98,9 @@
                  [:seon.ref/opening {:optional true} :string]
                  [:seon.ref/below {:optional true} [:vector [:map [:seon.ref/address :seon.ref/address] [:seon.ref/heading :string]]]]
                  ;; a section's own text at code depth, or a file's whole text; the line count of a file
-                 ;; that is not Markdown; the revision a reference-code file is pinned at
+                 ;; that is not Markdown
                  [:seon.ref/text {:optional true} :string]
                  [:seon.ref/lines {:optional true} nat-int?]
-                 [:seon.ref/pin {:optional true} :string]
                  [:seon.ref/problem-kind {:optional true} :seon.ref/problem-kind]
                  ;; a stored section's edges, each at summary depth: what its text cites (sections and vars)
                  ;; and the sections that cite it (seon.doc/view)

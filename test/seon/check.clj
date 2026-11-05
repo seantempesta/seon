@@ -161,7 +161,7 @@
                            (deftest doc-test (is (= \"f1 adds 1 to x\" (doc-of 'app.m0/f1)))
                              (transact! [{:var/name 'app.m0/f1 :var/doc \"changed inside a test\"}])
                              (is (= \"changed inside a test\" (doc-of 'app.m0/f1))))
-                           (transact! [{:note/text \"f1 adds one\" :note/agent :a3 :note/about [:var/name 'app.m0/f1]}
+                           (transact! [{:note/text \"f1 adds one\" :note/agent :a3}
                                        {:var/name 'app.m0/f1 :var/doc \"f1 adds 1 to x\"}])
                            (doc-of 'app.m0/f1)"}
         replies (into {} (pmap (fn [id] [id @(c/submit! sys id (programs id))]) ids))
@@ -179,8 +179,7 @@
         _ (out! "merge main into " (ids 2) " first: " (select-keys mm3 [:ok :applied :conflicts]))
         _ (out! "merge " (ids 0) ": " m1 "\nmerge " (ids 2) ": " m3)
         _ (out! "main notes: " (main-q sys '[:find ?a ?t :where [?n :note/agent ?a] [?n :note/text ?t]]))
-        _ (out! "main f1 doc: " (main-q sys '[:find ?d . :where [?e :var/name app.m0/f1] [?e :var/doc ?d]])
-                "; note about: " (main-q sys '[:find ?v . :where [?n :note/about ?e] [?e :var/name ?v]]))
+        _ (out! "main f1 doc: " (main-q sys '[:find ?d . :where [?e :var/name app.m0/f1] [?e :var/doc ?d]]))
         ;; a second merge of the same branch: the note a3 created is the same entity on main
         _ @(c/submit! sys (ids 2) "(transact! [[:db/add (q '[:find ?n . :where [?n :note/agent :a3]]) :note/text \"f1 adds one (edited)\"]])")
         m3b (merge-in! sys (ids 2))
@@ -1558,14 +1557,9 @@
                                 (is (= {:value 7} (binding [seon.agent/*fx-stub* (fn [_ _] {:value 7})] (my.fx/call :echo {:x 1})))))")
                           (select-keys @(c/run-tests! sys a) [:pass :fail :error]))
            :file-text (slurp (str dir "/b.txt"))}
-        bdb (:db @(c/branch-db sys :fx1))
-        recs (d/q '[:find ?k (count ?e) :where [?e :seon.fx/kind ?k]] bdb)
-        q (d/q '[:find [?q ...] :where [?e :seon.fx/kind :echo] [?e :seon.fx/queue-us ?q]] bdb)
-        us (d/q '[:find [?q ...] :where [?e :seon.fx/kind :echo] [?e :seon.fx/us ?q]] bdb)
         echo-ping (ping sys :fx/echo)]
       (seon.fx/remove-tree! dir)
-      {:report (assoc r :recorded (into {} recs) :echo-queue-us (lib/summ (vec q)) :echo-perform-us (lib/summ (vec us))
-                      :owner-ping echo-ping :load (clojure.string/trim (:out (clojure.java.shell/sh "uptime"))))
+      {:report (assoc r :owner-ping echo-ping :load (clojure.string/trim (:out (clojure.java.shell/sh "uptime"))))
        ;; the effect answered, its unknown kind is a typed error, and inside the test fork a
        ;; call is refused unless stubbed (both assertions ran and passed)
        :checks {:unknown-kind-is-typed (= ":seon.fx/unknown-kind" (:unknown r)) :test-fork-refuses-unless-stubbed (= {:pass 2 :fail 0 :error 0} (:test-fork r))}}))))
