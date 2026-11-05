@@ -428,7 +428,7 @@ Owner, 2026-10-25, on main-first delivery (agent loop) against delivery by mergi
 
 ### The related-section count is a config key; one problem-row helper's bounds accepted
 
-Owner, 2026-10-25: approved one new config key, how many related wiki sections the screen shows (0 turns it off); accepted raising 5 derived-problem cost proofs' call bounds by one contracted call per row, for one helper in place of 8 copies. Stated in: this entry.
+Owner, 2026-10-25: approved one new config key, how many related wiki sections the screen shows (0 turns it off); accepted raising 5 derived-problem cost proofs' call bounds by one contracted call per problem, for one helper in place of 8 copies. Stated in: this entry.
 
 ### Dogfood rulings: design registers proofs; each form's value (superseded 2026-10-28: one form, Clojure's value); stale means meaning changed; pilot budget $5
 
@@ -468,7 +468,7 @@ Owner, 2026-10-25 night: "the agent will have the value printer print out the at
 
 ### No invented words; a render is a function and its data (owner, 2026-10-26)
 
-"Please stop making up words just use the components and terms we agree on and stick with clojure terms and their library terms for everything else. A render is just a function and the data being rendered. No story". "Story" and "run-state" become the task's render; any new name is a Clojure or library term or one already agreed. Its §7a row merges with the rename (agent view and ctx-atom), since docs-test holds every listed word to zero uses.
+"Please stop making up words just use the components and terms we agree on and stick with clojure terms and their library terms for everything else. A render is just a function and the data being rendered. No story". "Story" and "run-state" become the task's render; any new name is a Clojure or library term or one already agreed. Its §7a entry merges with the rename (agent view and ctx-atom), since docs-test holds every listed word to zero uses.
 
 ### Everything the agent and the page show comes through ctx (owner, 2026-10-26)
 
@@ -807,7 +807,7 @@ Owner, 2026-10-23: "We should explain the task in terms of clojure code executin
 
 ### waste stays (`:seon.run/waste`); stuck went with the budget
 
-Owner, 2026-10-23: quote not recorded; from root's note "Owner answers, 2026-10-23 morning" (archive) and the triage's C5. Stated in: AGENTS §7a ("Waste stays our word"; the stuck row is gone).
+Owner, 2026-10-23: quote not recorded; from root's note "Owner answers, 2026-10-23 morning" (archive) and the triage's C5. Stated in: AGENTS §7a ("Waste stays our word"; the stuck entry is gone).
 
 ### The dashboard stays in `src`
 
