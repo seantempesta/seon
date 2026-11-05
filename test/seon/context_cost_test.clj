@@ -37,7 +37,7 @@
         [(:tree (seon.ctx/build db e :b)) db]))
 
 (deftest a-request-reads-what-the-agents-ctx-holds
-  ;; task seon.render/one-way-to-make-what-an-agent-is-sent, step 5; the owner, 2026-10-26: nothing in a request is read from
+  ;; docs/render.md#the-render-is-an-eval; the owner, 2026-10-26: nothing in a request is read from
   ;; anywhere but its ctx. Later records read newest first come out as all of them do, and a record the ctx does not hold
   ;; is not sent
   (let [[c db] (records-of 6)
@@ -154,7 +154,9 @@
 (deftest a-requests-cost-is-its-records
   ;; docs/render.md#the-models-context-a-cached-prefix-then-the-turn: a request is the system prompt, the examples and the agent's
   ;; records in turn order, each by its own render, a function of that record alone, so a turn prints its new record and reuses the rest
-  ;; (:printed); without the cache a record cost 546 calls and 0.32 MB in every request, n squared over a session
+  ;; (:printed); without the cache a record cost 546 calls and 0.32 MB in every request, n squared over a session. Linear, not flat: each
+  ;; record is read and compared. Accepted on task seon.context/a-request-costs-its-new-records: the wire body holds n messages anyway, and
+  ;; 8 calls an eval is small at a 40-turn cap
   (cost/proof {:of 'seon.context/request :input 'seon.context-cost-test/request-of
                :n "evals of the session before the turn"
                :work "the one new record printed; each earlier record read from ctx and compared with the one it was printed from; the page at the end, drawn once"

@@ -254,8 +254,8 @@
      ;; measured 2026-11-03: 3,888 / 8,488 / 24.6k calls and 10.4 / 16.8 / 39.5 MB at 10 / 30 / 100 evals (before the
      ;; print cache and the task's list drawn alone: 8,708 / 21,668 / 67,028 and 16.6 / 33.2 / 92.7 MB); what grows is
      ;; the page's html, an entry a message, and the cold draw's ctx (seon.ctx/build), each about a third
-     ;; measured 2026-11-05, with no print kept (every record printed again: seon.context-cost-test/a-requests-cost-is-its-records):
-     ;; 4,920 / 11.0k / 32.4k calls and 9.38 / 14.9 / 34.2 MB at 10 / 30 / 100 evals
+     ;; measured 2026-11-06, a debug read's cold request, no print handed to it: 5,040 / 11.4k / 33.6k calls and 8.77 / 14.4 / 34.3 MB at
+     ;; 10 / 30 / 100 evals. Follow-up on seon.context/the-context-is-records: pass it an earlier :printed, as a turn does
      :per-n {:calls 317 :bytes 280000}
      :fixed {:calls 1900 :bytes 6600000}
      :sizes [10 30 100]}))
@@ -329,7 +329,7 @@
      :n "evals in the agent's ctx"
      :work (str "the one eval's component and the turn holding it, drawn again, on real records, and nothing else: no other turn's "
                 "reads are reached by an eval opened. The reset! runs ctx's diff once (seon.ctx/changes) and looks up the components its "
-                "changed paths reach by index; the diff walks every key of the changed collection, which is linear. 367 contracted calls "
+                "changed paths reach by index; the diff walks every key of the changed collection, which is linear. 379 contracted calls "
                 "at 100 turns, the owner's 2026-11-05: cull the calls later if the perf is bad")
      :growth :linear
      :per-n {:calls 0 :bytes 3400}
@@ -352,7 +352,8 @@
      ;; input: 11,073 calls and 80.9 MB at 640 turns
      ;; render-core's agent-facing renders (the status written to the agent, a part for each cite, the turn line): 1,355 calls and
      ;; 11.31 MB at 10 turns under the test binary's contracts, 8 calls and 36 KB a turn, as before them; the fixed part is the
-     ;; renders the model now reads drawn on a step
+     ;; renders the model now reads drawn on a step. 1,365 at 10 since the turn line holds no number and the cost line is sized once
+     ;; (seon.print/response-text); the owner approved 250 for a change's 379, and said cull later
      :per-n {:calls 8.2 :bytes 37000}
      :fixed {:calls 1285 :bytes 11250000}
      :sizes [10 40 160 640]}))

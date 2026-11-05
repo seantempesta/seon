@@ -775,7 +775,7 @@
     [(cond-> {:role "assistant" :content (or reply "")} reasoning (assoc :reasoning reasoning) n (assoc :reply n))]))
 
 (defn- ref-of
-  "The ref a conversation's record is sent as (:seon.model-call/sent): an eval's, a message's or a reply's (its model call's) id."
+  "The ref a conversation's record goes by (a request's :parts and :printed): an eval's, a message's or a reply's (its model call's) id."
   {:malli/schema [:=> [:cat :map] [:tuple :keyword :string]]}
   [v] (cond (:seon.eval/id v) [:eval (:seon.eval/id v)] (:seon.message/id v) [:message (:seon.message/id v)] :else [:reply (:seon.model-call/id v)]))
 
@@ -798,20 +798,12 @@
 (defn records
   "The conversation of ctx value c (an agent's @ctx, or one seon.ctx/build drew) on db, as [position value schema-key]
   in order: its evals (not a context read's, nor its own loop's: `loop-eval?`), the messages it took and its model calls'
-  replies (a call with evals left in c, or an uncut one with text; one with nothing to send is none). The position is [turn rank n], docs/turn.md#the-turn-is-a-number. With since, a turn
-  number: the evals and replies of that turn and later only (read newest first from ctx, so a request costs what is new);
-  every message. Reading them from ctx is the owner's ruling (docs/decisions.md): what the pattern leaves out, the model does not read."
-  {:malli/schema [:function [:=> [:cat :map :seon.host/db] [:vector [:tuple [:vector :int] :map :qualified-keyword]]]
-                  [:=> [:cat :map :seon.host/db [:maybe :int]] [:vector [:tuple [:vector :int] :map :qualified-keyword]]]]}
-  ([c db] (records c db nil))
-  ([c db since]
-   (let [since (or since 0)
-         num (fn [x] (or x 0))
-         ;; ctx's members are newest first: those whose turn (a) is not below since. The agent's own loop eval takes no
-         ;; turn and is recorded last, so it is left out before the turns are read (a model's eval, nearly all of them, answers a
-         ;; call: no contracted call per record to say so)
-         fresh (fn [k a skip?] (take-while (fn [[_ v]] (>= (num (a v)) since)) (remove (fn [[_ v]] (skip? v)) (get c k))))
-         evals (vec (for [[_ v] (fresh :evals :seon.eval/turn #(and (not (:seon.eval/call-id %)) (loop-eval? %)))
+  replies (a call with evals left in c, or an uncut one with text; one with nothing to send is none). The position is [turn rank n], docs/turn.md#the-turn-is-a-number. Reading them from ctx is the owner's ruling (docs/decisions.md): what the pattern leaves out, the model does not read."
+  {:malli/schema [:=> [:cat :map :seon.host/db] [:vector [:tuple [:vector :int] :map :qualified-keyword]]]}
+  [c db]
+   (let [num (fn [x] (or x 0))
+         ;; the agent's own loop eval is left out (a model's eval, nearly all of them, answers a call: no contracted call per record to say so)
+         evals (vec (for [[_ v] (get c :evals) :when (not (and (not (:seon.eval/call-id v)) (loop-eval? v)))
                           ;; a model's eval (nearly all of them) answers a call: no contracted call per record to say so
                           :when (not= "context" (:seon.eval/by v))]
                       v))
@@ -823,7 +815,7 @@
                   (for [[e v] (get c :messages)]
                     [[(num (:seon.message/turn v)) 0 (or (:tx (first (d/datoms db :eavt e :seon.message/agent))) 0)]
                      (select-keys v [:seon.message/id :seon.message/from :seon.message/body :seon.message/turn]) :seon.message/fact])
-                  (for [[_ v] (fresh :calls :seon.model-call/n (constantly false))
+                  (for [[_ v] (get c :calls)
                         ;; a reply cut at the token limit is no message (seon.turn/act!), unless its calls were kept
                         :when (and (= :model (:seon.model-call/origin v))
                                    (or (contains? called (:seon.model-call/n v))
@@ -832,7 +824,7 @@
                     [[(num (:seon.model-call/n v)) 1 0] (select-keys v [:seon.model-call/id :seon.model-call/n :seon.model-call/origin :seon.model-call/reply :seon.model-call/reasoning :seon.model-call/forms])
                      :seon.model-call/fact]))
           (sort-by first)
-          vec))))
+          vec)))
 
 (defn- agent-ctx
   "Agent a's ctx value as db holds it, drawn cold (seon.ctx/build): a read of a session with no live @ctx. See

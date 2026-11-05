@@ -423,8 +423,8 @@
                              [:max-turns pos-int?]]]
                   :seon.turn/end]}
   [{:keys [task model] :as arg}]
-  (let [;; each wake begins its turn state and its prints anew
-        _ (swap! agent/state assoc :turn {} :render-seen nil :requests nil)
+  (let [;; each wake begins its turn state; the page it last showed stands, so a wake is told only what moved since
+        _ (swap! agent/state assoc :turn {} :requests nil)
         _ (agent/clear-end!)
         _ (begin! task)
         ;; the agent's own budget (:seon.agent/max-turns on main, raised to extend it; root passes it) bounds the loop, and is

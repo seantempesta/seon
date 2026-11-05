@@ -1747,9 +1747,8 @@
     (ts/test-branch! (fn [_ conn] (example-world! conn) {:example (mapv #(recorded-form (:messages (turn! conn %))) [0 1])}))))
 
 (deftest the-recorded-requests-come-out-the-same
-  ;; task seon.render/one-way-to-make-what-an-agent-is-sent, steps 0-5: the transcript's assembly is replaced under this, and
-  ;; what the model is sent does not change by a byte. test/seon/recorded_requests.edn was made by f19afd9d35, before any of it; its first
-  ;; deliberate change is the step that changes what is sent, which rewrites it
+  ;; docs/render.md#the-render-is-an-eval: what the model is sent does not change by a byte unless a change means it to, and then this
+  ;; rewrites test/seon/recorded_requests.edn in the same commit
   (let [recorded (clojure.edn/read-string (slurp (str (seon.config/checkout) "/test/seon/recorded_requests.edn")))
         now (recorded-sessions)]
     (is (= (update-vals recorded count) (update-vals now count)) "the same sessions, the same turns of each")

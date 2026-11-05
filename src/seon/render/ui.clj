@@ -1868,8 +1868,8 @@
                   (map unit units)))}))
 
 (defn ctx-parts
-  "@ctx's parts, each a pair: what the model reads of the part (its data, or the hiccup its render returned, printed as a
-  request's parts message prints it, seon.context's parts-message), beside the part as the page draws it (its unit's
+  "@ctx's parts, each a pair: what the model reads of the part (its data, or the hiccup its render returned, printed as
+  seon.render/part-text prints it), beside the part as the page draws it (its unit's
   html). parts, {id content} of the task's list (seon.render/placed-hiccup); html, {id html} of its units; open, the
   units the tab opened (/open: d-part-<id>). What the model reads is shown whole, so a part may be a million characters:
   one over the value budget (:seon.config.render/value-budget) is a closed <details> with its size in tokens, whose text
