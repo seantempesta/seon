@@ -330,7 +330,7 @@
           first-line (fn [f] (let [t (str/trim (str (or (:actual f) (:got f))))
                                    m (when (str/starts-with? t "#error") (second (re-find #":message \"([^\"]*)\"" t)))]
                                (str (when (:message f) (str (:message f) ": ")) (print/line (if m (str "threw " m) (str "expected " (str/replace (str (:expected f)) #"#object\[java\.util\.regex\.Pattern 0x[0-9a-f]+\]" "a regex"))) 120))))]
-      {:seon.print/prose
+      (print/code
        (str/join "\n" (remove nil?
          (concat
            [(cond red (str "red: " (count fails) " of " n " failed")
@@ -339,7 +339,7 @@
            (for [[t fs] (sort-by (comp str key) fails)] (str "✗ " t ": " (first-line (first fs))))
            [(when (pos? (:reused r 0)) (str "reused " (:reused r) ": their last result still counts, because nothing they reach has changed"))
             (when (seq (:deferred r)) (str "left to the judge: " (count (:deferred r)) " process tests"))
-            (when (seq (:unmatched r)) (str "no test is named " (str/join ", " (:unmatched r))))])))})))
+            (when (seq (:unmatched r)) (str "no test is named " (str/join ", " (:unmatched r))))])))))))
 
 (defn process-test?
   "Whether test t reaches a process of its own on this branch (an agent, a root, a fork, the binary:
