@@ -319,6 +319,30 @@
     (is (= [{:role "user" :content "{:by \"user\" :code \"(+ 1 2)\" :response {:handle result/e4, :value 3}}"}]
            (context/eval-messages {} {:seon.eval/by "user" :seon.eval/code "(+ 1 2)" :seon.eval/response {:handle 'result/e4 :value 3}})))))
 
+(deftest an-inserted-eval-reaches-the-model-as-a-call-of-its-own
+  ;; docs/turn.md#an-eval-can-be-inserted: an eval someone asked before (or between) the model's turns has prose and
+  ;; no call id. Its request is made from its own id, prose and code, in the normal format: the assistant message that
+  ;; made the call, then the tool message. Nothing is stored for it, and no reader asks who ran it.
+  (let [ev (fn [id by turn] {:seon.eval/id id :seon.eval/by by :seon.eval/prose "Read the pattern." :seon.eval/code "(:seon.ctx/pattern @ctx)"
+                             :seon.eval/response {:handle (symbol "result" id) :value [:a]} :seon.eval/turn turn})
+        ms (context/eval-messages {} (ev "e1" "root" 0))]
+    (is (= [{:role "assistant" :content "" :tool-calls [{:id "eval-e1" :code "(:seon.ctx/pattern @ctx)" :prose "Read the pattern."}]}
+            {:role "tool" :tool-call-id "eval-e1" :content "{:handle result/e1, :value [:a]}"}]
+           ms)
+        "a call made from the eval's own prose and code, answered by its response; turn 0 has no reply to name")
+    (is (= ms (context/eval-messages {} (ev "e1" "anyone at all" 0))) "who asked is read by no one")
+    (testing "after a model's reply it stands alone: the reply's own message is never edited"
+      (let [model-eval {:seon.eval/id "e4" :seon.eval/by "a1" :seon.eval/code "(e4)" :seon.eval/call-id "c-e4" :seon.eval/turn 2
+                        :seon.eval/response {:handle 'result/e4 :value 1}}
+            conv (into [] (mapcat #(context/eval-messages {} %)) [model-eval (ev "e5" "root" 2)])
+            wire (seon.model/wire-messages true conv)]
+        (is (not-any? :reply (context/eval-messages {} (ev "e5" "root" 2))) "it names no reply")
+        (is (= ["assistant" "tool" "assistant" "tool"] (mapv :role wire)) "two calls of two messages, not one folded into the other")
+        (is (= ["c-e4"] (mapv :id (:tool_calls (nth wire 0)))) "the reply's message holds only its own call")
+        (is (= ["eval-e5"] (mapv :id (:tool_calls (nth wire 2)))))))
+    (testing "an eval with no prose is still one user message, as an outside agent's always was"
+      (is (= 1 (count (context/eval-messages {} (dissoc (ev "e6" "outside" 3) :seon.eval/prose))))))))
+
 ;; ---- context v2: a stable prefix, each var at its citation's depth, the helpers -----------
 
 (defn- program-facts

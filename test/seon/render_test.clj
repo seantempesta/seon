@@ -3,7 +3,7 @@
   and the render proc's step as a plain function: inputs before render, bytes before
   send, a new agent appended, a retired one removed, keyframes composed from what was
   retained. Run: bin/test seon.render-test"
-  (:require [seon.test-store :as ts] [test-runner :as runner] [clojure.test :refer [deftest is testing]] [clojure.data.json]
+  (:require [clojure.edn] [seon.test-store :as ts] [test-runner :as runner] [clojure.test :refer [deftest is testing]] [clojure.data.json]
             [clojure.string :as str] [clojure.core.async :as a]
             [seon.render :as r] [seon.render.ui :as ui] [seon.render.proc :as p]
             [seon.web.html :as h] [clojure.walk] [clojure.set] [seon.print.select] [seon.config] [seon.doc] [seon.print] [seon.db] [seon.reconcile] [seon.task] [seon.edn] [seon.context] [seon.contract] [seon.repl] [datahike.api :as d]
@@ -1441,6 +1441,31 @@
     (swap! rec assoc :t 6)
     (is (= [{} {}] (both)) "a key no render read: nothing")
     (r/dispose-walk! w) (r/dispose-walk! inline)))
+
+(deftest a-walk-says-what-draws-what
+  ;; docs/render.md#what-draws-what: seon.render/tree is a walk's cache read as data that chains, from its root: each entry
+  ;; {:fn :args :id :tokens :children}, :tokens its own output's (the one sizer over it, a child standing as its marker),
+  ;; :reads? only for an entry that read the db. A walk is a walk: an agent's own (my.render/tree) and one root
+  ;; draws of a branch (r/draw) answer alike.
+  (let [long-code (apply str (repeat 2000 "x"))
+        rec (seon.ratom/atom {:db/id 1 :t 5 :task {:db/id 2 :seon.task/plan "write the test"}
+                              :evals (#'seon.ctx/members-map [[12 {:db/id 12 :seon.eval/code long-code}]
+                                                             [11 {:db/id 11 :seon.eval/code "(inc 1)"}]])})
+        w (doto (r/walker {:ref rec :changes seon.ctx/changes} (constantly nil) [#'lab-page {}]) (r/flush! nil))
+        t (r/tree w)
+        kid (fn [f id] (first (filter #(and (= f (:fn %)) (= [id] (:args %))) (:children t))))]
+    (try
+      (is (= {:fn `lab-page :args []} (select-keys t [:fn :args])) "from the root")
+      (is (= #{[`lab-row 12] [`lab-row 11] [`lab-length 12] [`lab-length 11]} (set (map (juxt :fn (comp first :args)) (:children t)))) "each component it drew, with its args")
+      (is (= (:id (get @(:cache w) [`lab-row 12])) (:id (kid `lab-row 12))) "named by its element id")
+      (is (every? #(and (empty? (:children %)) (nat-int? (:tokens %))) (:children t)) "leaves have none")
+      (is (= (seon.print.select/chars-tokens (count (pr-str (:out (get @(:cache w) [`lab-row 12]))))) (:tokens (kid `lab-row 12)))
+          "its tokens are the one sizer's over its own output")
+      (is (< (:tokens t) (:tokens (kid `lab-row 12))) "the root's are its own: the 2,000 characters are its child's, not counted in it")
+      (is (not-any? :reads? (cons t (:children t))) "no db read, no flag")
+      (is (= t (clojure.edn/read-string (pr-str t))) "plain data: it reads back from its print, so it chains")
+      (is (seon.contract/valid? (seon.contract/schema :seon.render/tree) t) "and its schema")
+      (finally (r/dispose-walk! w)))))
 
 (defn lab-said
   "A line of text, a render redefined by the test below."
