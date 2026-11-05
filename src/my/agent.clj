@@ -586,7 +586,7 @@
 
 (defmacro dir
   "Print a sorted directory of the public vars of the namespace nsname (an alias too), as clojure.repl/dir does. A name
-  that is a var, or none, says so in words, with the nearest names."
+  that is a var, or none, says so in words, with the nearest names. See docs/agent.md#the-repl."
   [nsname]
   `(let [n# '~nsname]
      (cond (or (find-ns n#) (get (ns-aliases *ns*) n#)) (doseq [v# (clojure.repl/dir-fn n#)] (println v#))

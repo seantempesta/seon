@@ -1900,7 +1900,7 @@
                                                     " [?m :seon.message/branch ?br] [?a :seon.agent/branch ?br] [?a :seon.agent/id ?to] [?m :seon.message/body ?b]] @(:conn sys))")}])
                                        {:config {:seon.config.ai/script 'seon.fixtures/thinking-call}})
         end (:value end)
-        {:keys [calls on-branch committed prose reply agent-key basis-keys] :as probed} (:value turn)
+        {:keys [calls on-branch committed intent reply agent-key basis-keys] :as probed} (:value turn)
         ;; the shared root's main holds every earlier test's messages: this agent's are the ones to its id
         [[mid from to body] :as facts] (filterv #(= (keyword (:agent @names)) (nth % 2)) (:value on-main))]
     (is (= 1 (:model-calls end)) (pr-str end))
@@ -1911,7 +1911,7 @@
     ;; the prose comes in the eval call (docs/prompt.md); the scripted reply's text is the same prose
     (is (= "check the sum before the proof" reply) "the reply's text: the prose")
     (is (string? (:eval (first calls))) (str "the call names its one eval: " (pr-str calls)))
-    (is (= ["check the sum before the proof"] prose) "whose record keeps the prose beside it")
+    (is (= ["check the sum before the proof"] intent) "whose record keeps the intent beside it")
     ;; docs/turn.md#the-turn-is-a-number: the agent's number, the model call's id and the number each record took
     (is (= 1 (:turn probed)) "the agent's first turn")
     (is (= [(str agent-key "/1")] (:call-ids probed)) "its model call is <agent key>/<n>")

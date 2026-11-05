@@ -546,6 +546,16 @@
   {:malli/schema [:=> [:cat :map] :map]}
   [r] (cond-> (dissoc r :value) (and (contains? r :value) (contract/plain? (:value r))) (assoc :value (:value r))))
 
+(defn- no-such-schema
+  "What ex-data d says when malli has no schema of that name, {:message :fix} with the nearest names it knows, else nil.
+  See docs/failure-points.md."
+  {:malli/schema [:=> [:cat :any] [:maybe [:map [:message :string] [:fix {:optional true} :string]]]]}
+  [d]
+  (when (= :malli.core/invalid-schema (:type d))
+    (let [schema (:schema (:data d))
+          near (jolt.analyzer/suggestions-for (str schema) (map str (keys (malli.core/default-schemas))))]
+      (cond-> {:message (str "malli has no schema " schema)} (seq near) (assoc :fix (str "did you mean " (str/join ", " near)))))))
+
 (defn error-map
   "An exception caught at one of the agent's entrant boundaries (operation: the REPL's
   seon.repl/eval-code by default) as the one error map: its ex-data when that already is
@@ -569,18 +579,15 @@
            other (not-empty (into {} (remove (some-fn (every-pred (comp qualified-keyword? key) diag?) (comp #{:jolt/heap} key))) d))
            sym (:jolt.error/symbol jd)
            unresolved? (and sym (= :analyze/unresolved-symbol (:jolt.error/kind jd)))
-           m (if unresolved? (unresolved-message sym) (step/error-msg e))
-           ;; a schema malli has no name for (ex-data :data :schema): its message names it, and the nearest it knows
-           schema (when (= :malli.core/invalid-schema (:type d)) (:schema (:data d)))
-           m (if schema (str "malli has no schema " schema) m)
-           near (when schema (jolt.analyzer/suggestions-for (str schema) (map str (keys (malli.core/default-schemas)))))
+           no-schema (no-such-schema d)
+           m (cond no-schema (:message no-schema) unresolved? (unresolved-message sym) :else (step/error-msg e))
            ;; a REPL name in a definition: the program resolves as written, so the definition calls it qualified
            repl (when unresolved? (repl-name (symbol sym)))
            causes (mapv #(str (type %) ": " (ex-message %)) (take-while some? (rest (iterate ex-cause e))))]
        (contract/error :seon.agent/eval-error op m
                        (cond-> (assoc jd :class (str (type e)))
                          (seq (:jolt.error/suggestions jd)) (assoc :seon.error/fix (str "did you mean " (str/join ", " (:jolt.error/suggestions jd))))
-                         (seq near) (assoc :seon.error/fix (str "did you mean " (str/join ", " near)))
+                         (:fix no-schema) (assoc :seon.error/fix (:fix no-schema))
                          ;; Clojure's own forms reach a private var
                          (= :analyze/private-var (:jolt.error/kind jd)) (assoc :seon.error/fix (str sym " is private: call it (#'" sym " ...) or read it @#'" sym))
                          repl (assoc :seon.error/fix (str sym " is the REPL's: a definition is the program, which resolves as written, so it calls " repl))
