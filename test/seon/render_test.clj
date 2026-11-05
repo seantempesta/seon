@@ -1176,6 +1176,26 @@
     (is (not (str/includes? html ":ms")) "the cost is on its own line, not in the value")
     (is (str/includes? held "java.lang.Object") "a value that is no data shows what it was, as data")))
 
+(deftest a-turns-tiles-are-drawn-from-its-evals-newest-first
+  ;; docs/render.md#the-page: a value with a render of its own is a tile, decided as it is drawn, newest turn first
+  (let [[_ branch _] (paged-dbs)
+        k (seon.task/agent-key "b1" :a3)
+        ;; a value its schema gives a render of its own (a value holding hiccup already made is drawn where it sits)
+        tile (fn [id turn text] (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} id "a3"
+                                                     {:seon.eval/turn turn :seon.eval/code "(page)" :seon.eval/schema :seon.context/run
+                                                      :seon.eval/response {:handle (symbol "result" id) :value {:turn text}}}))
+        db (d/db-with branch (vec (concat [{:seon.agent/key k :seon.agent/turn 6}]
+                                          (tile "t1" 2 "older tile") (tile "t2" 5 "newer tile")
+                                          (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "t3" "a3"
+                                                               {:seon.eval/turn 5 :seon.eval/code "1" :seon.eval/response {:handle 'result/t3 :value 1}}))))
+        w (a3-walk db)]
+    (try
+      (let [html (apply str (map :html (filter #(= "#p-tiles" (:container %)) (r/placed-units w))))]
+        (is (str/includes? html "newer tile"))
+        (is (< (str/index-of html "newer tile") (str/index-of html "older tile")) "the newest turn's first")
+        (is (not (str/includes? html "result/t3")) "a value with no render of its own is no tile"))
+      (finally (r/dispose-walk! w)))))
+
 (deftest a-page-an-agent-built-renders-nested
   ;; owner, 2026-10-25: an agent's hiccup renders as HTML. It is the value's own :seon.render/html
   ;; key (a render already made), wherever the value sits

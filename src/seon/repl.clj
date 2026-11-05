@@ -658,7 +658,6 @@
              :seon.eval/response (cond basis (dissoc resp :value) (contains? resp :value) (assoc resp :value kv) :else resp)}
       schema (assoc :seon.eval/schema schema)
       basis (assoc :seon.eval/basis basis)
-      (and (contains? resp :value) (not basis) (some? v) (render/render-of v schema)) (assoc :seon.eval/has-render true)
       (:intent req) (assoc :seon.eval/intent (:intent req))
       (:call-id req) (assoc :seon.eval/call-id (:call-id req))
       (seq (:fns r)) (assoc :seon.eval/fns (:fns r)))))
