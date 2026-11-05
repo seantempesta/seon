@@ -491,4 +491,8 @@
     (is (re-find #":cost \"5\.2 ms · 873k ticks · 4\.1 MB · ~\d+ tok\"\}$" t) t)
     (is (not (re-find #":ms|:ticks|:bytes" t)) "the numbers are the record's data, the text has the line")
     (is (= 5.2 (:ms r)) "and stay data")
-    (is (str/includes? (seon/response-text (dissoc r :ms :ticks :bytes)) ":cost \"not run\"") "an eval never run says so")))
+    (is (str/includes? (seon/response-text (dissoc r :ms :ticks :bytes)) ":cost \"not run\"") "an eval never run says so"))
+  (testing "the line is inside the printer's budget: a value that fills the budget and its cost still fit"
+    (let [t (seon/response-text {:handle 'result/e1 :value (apply str (repeat 100000 "x")) :ms 5.2 :ticks 873000 :bytes 4300000})]
+      (is (str/includes? t ":cost ") "the value was cut, and its cost is shown")
+      (is (<= (count t) (seon.print.select/estimate-chars seon/default-budget)) (str (count t) " characters")))))

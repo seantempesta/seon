@@ -76,6 +76,11 @@
    (let [r (print-value v {:budget budget})]
      (or (:text r) (:seon.error/message r)))))
 
+(def ^:private cost-line-tokens
+  "Tokens an eval's cost line can take, its longest wording, set aside from the printer's budget so the line counts inside it.
+  Sized once: this runs for every eval printed. See docs/render.md#cost-is-shown-one-way."
+  (inc (emit/chars-tokens (count (str ", :cost " (pr-str (emit/cost-text {:ms 1e12 :ticks 1e15 :bytes 1e15 :tok default-budget})))))))
+
 (defn response-text
   "Eval response r as every reader reads it (the model's tool message, the page, an outside
   agent): printed by the one printer under its handle, so a cut names the form that reads its
@@ -88,15 +93,14 @@
    ;; a value that is a page prints whole: its metadata says so as it is made, and its schema's (record-text) when it is read back
    (let [r (cond-> r (:seon.print/full (meta (:value r))) (vary-meta assoc :seon.print/full true))
          shown (cond-> r (:handle r) (-> (dissoc :ms :ticks :bytes) (with-meta (meta r))))
-         p (print-value shown (cond-> {:handle (:handle r)} render (assoc :render render)))
+         ;; an eval's cost is one line with its result, what the result costs the context among it; its numbers stay data on the
+         ;; record. An eval that recorded none was not run
+         cost (fn [tok] (str ", :cost " (pr-str (if (some r [:ms :ticks :bytes]) (emit/cost-text (assoc (select-keys r [:ms :ticks :bytes]) :tok tok)) "not run"))))
+         p (print-value shown (cond-> {:handle (:handle r) :budget (cond-> default-budget (:handle r) (- cost-line-tokens))} render (assoc :render render)))
          text (or (:text p) (:seon.error/message p))]
-     ;; an eval's cost is one line with its result, what the result costs the context among it; its numbers stay data on the
-     ;; record. Spliced after the printed map's last entry: the text is the only place its own size is known. An eval that
-     ;; recorded none was not run
+     ;; spliced after the printed map's last entry: the text is the only place its own size is known
      (if (and (:handle r) (:text p) (str/ends-with? text "}"))
-       (str (subs text 0 (dec (count text))) ", :cost "
-            (pr-str (if (some r [:ms :ticks :bytes]) (emit/cost-text (assoc (select-keys r [:ms :ticks :bytes]) :tok (select/chars-tokens (count text)))) "not run"))
-            "}")
+       (str (subs text 0 (dec (count text))) (cost (select/chars-tokens (count text))) "}")
        text))))
 
 (defn read-rest
