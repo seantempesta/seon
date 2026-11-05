@@ -58,7 +58,7 @@
             (d/q '[:find ?n ?doc :where [?ns :ns/name ?n] [?ns :ns/doc ?doc] [?ns :ns/file ?file] [(clojure.string/starts-with? ?file "src/")]] db))))
 
 (deftest no-docstring-carries-a-date
-  ;; task seon.main/docstrings-carry-no-dates-and-no-old-words: a docstring says what a var or
+  ;; a docstring says what a var or
   ;; namespace is now; when a ruling was made and what a measurement read that day are git's and
   ;; DECISIONS'. Read from the compiler's facts of src (:var/doc, :ns/doc), so a new one is red
   (let [dated (fn [s] (re-find #"\b20\d\d-\d\d-\d\d\b" (or s "")))

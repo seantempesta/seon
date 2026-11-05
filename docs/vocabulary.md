@@ -2,7 +2,7 @@
 
 The words this repo uses, and the namespace that owns each. Library words first (Clojure,
 core.async.flow, Datahike, Malli, nREPL, git); a word below is ours only where no library
-owns the concept. A new concept gets its word here before it appears in code. The words that replace house words (a function, not a verb; a merge, not a landing; the server, not the door) are `AGENTS.md` §7a's table; a stored keyword keeps its old spelling until it is migrated.
+owns the concept. A new concept gets its word here before it appears in code. Names are Clojure's, its libraries' or Jolt's words (`AGENTS.md` §7a: a function, not a verb; a merge, not a landing; the server, not the door); a stored keyword keeps its old spelling until it is migrated.
 
 ## Processes (core.async.flow's words)
 
