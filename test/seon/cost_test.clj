@@ -107,14 +107,14 @@
         (is (empty? (:steeper (cost/judge e (at #(- (+ 50000.0 (* 90.0 %)) d)))))
             (str "one pass, " d " cheaper at every size, is not steeper"))))))
 
-(deftest a-largest-size-no-dearer-than-the-smallest-did-not-grow
+(deftest a-largest-size-within-the-fixed-part-did-not-grow
   ;; docs/cost.md#how-growth-is-judged: seon.vector/vectors-proc at 30, 100 and 300 cost 278k, 299k and
   ;; 251k ticks, the same on every run (where the index's nodes split); less its fixed part the largest
   ;; came out negative, was dropped, and the two sizes left read n^1.93
   (let [e (assoc linear :per-n {:ticks 100.0} :fixed {:ticks 309000.0} :sizes [30 100 300])
         at (fn [ticks] (rows e (fn [n] {:ticks (ticks n)})))]
     (is (empty? (:steeper (cost/judge e (at {30 278000.0 100 299000.0 300 251000.0}))))
-        "the largest cost the least")
+        "the largest cost the least, and read on the cost itself")
     (is (= [:ticks] (map :dim (:steeper (cost/judge e (at {30 278000.0 100 299000.0 300 2000000.0})))))
         "the same two sizes and a dear largest is still steeper, so the rule reads the largest, not the bump")))
 
