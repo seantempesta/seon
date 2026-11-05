@@ -88,15 +88,16 @@
    ;; a value that is a page prints whole: its metadata says so as it is made, and its schema's (record-text) when it is read back
    (let [r (cond-> r (:seon.print/full (meta (:value r))) (vary-meta assoc :seon.print/full true))
          shown (cond-> r (:handle r) (-> (dissoc :ms :ticks :bytes) (with-meta (meta r))))
-         p (print-value shown (cond-> {:handle (:handle r)} render (assoc :render render)))
+         ;; an eval's cost is one line with its result, what the result costs the context among it; its numbers stay data on the
+         ;; record. An eval that recorded none was not run
+         cost (fn [tok] (str ", :cost " (pr-str (if (some r [:ms :ticks :bytes]) (emit/cost-text (assoc (select-keys r [:ms :ticks :bytes]) :tok tok)) "not run"))))
+         ;; the line is inside the budget: the printer is given what is left once its longest wording is set aside
+         room (if (:handle r) (inc (select/chars-tokens (count (cost default-budget)))) 0)
+         p (print-value shown (cond-> {:handle (:handle r) :budget (- default-budget room)} render (assoc :render render)))
          text (or (:text p) (:seon.error/message p))]
-     ;; an eval's cost is one line with its result, what the result costs the context among it; its numbers stay data on the
-     ;; record. Spliced after the printed map's last entry: the text is the only place its own size is known. An eval that
-     ;; recorded none was not run
+     ;; spliced after the printed map's last entry: the text is the only place its own size is known
      (if (and (:handle r) (:text p) (str/ends-with? text "}"))
-       (str (subs text 0 (dec (count text))) ", :cost "
-            (pr-str (if (some r [:ms :ticks :bytes]) (emit/cost-text (assoc (select-keys r [:ms :ticks :bytes]) :tok (select/chars-tokens (count text)))) "not run"))
-            "}")
+       (str (subs text 0 (dec (count text))) (cost (select/chars-tokens (count text))) "}")
        text))))
 
 (defn read-rest
