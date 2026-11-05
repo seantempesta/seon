@@ -584,7 +584,7 @@
 
 (defn test-shape
   "Where an unwritten proof p goes, as the agent needs it to write one: its test namespace's ns form (requires and aliases),
-  the helpers that namespace defines, and its first test by name as the shape to
+  the helpers that namespace defines, and the shortest of its first five tests by name as the shape to
   copy; nil when the branch has no such namespace yet (the agent makes it first). Two index reads and one source read. See
   docs/render.md#how-the-work-stands."
   {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:maybe :map]]}
@@ -592,7 +592,9 @@
   (when-let [n (d/entity db [:ns/name (symbol (namespace p))])]
     (let [vs (map #(d/entity db %) (d/q '[:find [?e ...] :in $ ?n :where [?e :var/ns ?n]] db (:db/id n)))
           {tests true others false} (group-by #(= :test (:var/kind %)) vs)
-          src (some->> (first (sort-by :var/name tests)) :var/name (doc/source-of db))
+          ;; the shortest of its first five tests by name: a shape to copy, not the longest of them
+          srcs (keep #(doc/source-of db (:var/name %)) (let [ts (vec (sort-by :var/name tests))] (subvec ts 0 (min 5 (count ts)))))
+          src (first (sort-by count srcs))
           ns-src (get-in n [:ns/form :form/src])]
       (cond-> {:ns (symbol (namespace p))}
         ns-src (assoc :ns-form ns-src)

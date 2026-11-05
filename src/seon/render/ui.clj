@@ -926,11 +926,11 @@
     [:section
      [:h3 (str k)]
      [:p (str "Its form: ") [:code (str (:schema/form sch))]]
-     (when desc [:p desc])
-     (when holder [:p (str "Held by " holder " entities") (when (seq others) (str ", which also hold " (str/join ", " (map str (subvec others 0 (min 8 (count others)))))))])
-     (when (and datom (not ref?)) [:p "One real value: " [:code (print/text (:v datom))]])
+     (when (and desc (not (str/includes? (str (:schema/form sch)) desc))) [:p desc])
+     (when (and holder (not setting)) [:p (str "Held by " holder " entities") (when (seq others) (str ", which also hold " (str/join ", " (map str (subvec others 0 (min 8 (count others)))))))])
+     (when (and datom (not ref?) (not setting)) [:p "One real value: " [:code (print/line (:v datom) 80)]])
      (when target [:p (str "It refers to an entity holding " (str/join ", " (map str (subvec (vec (keys target)) 0 (min 8 (count target))))) ". One of its values: ")
-                   (let [[tk tv] (first (remove (comp #{:db/id} key) target))] [:code (str tk " " (print/text tv))])])
+                   (let [[tk tv] (first (remove (comp #{:db/id} key) target))] [:code (str tk " " (print/line tv 80))])])
      (when (some? setting) [:p "Now: " [:code (print/text setting)]])]))
 
 (defn cite-hiccup
@@ -1124,7 +1124,7 @@
         (into [:ul]
               (for [[what x do] todo]
                 [:li what (when (some? x) (str ": " (if (coll? x) (str/join ", " (map #(as-text (if (map? %) (or (:key %) (:symbol %) (as-text %)) %)) x)) x)))
-                 (when do [:span " " (form-hiccup do)])]))])
+                 (when (and do (not= do next-form)) [:span " " (form-hiccup do)])]))])
      (when (and merge (seq its-merge-carries))
        [:p "Merge: " (if (seq (:conflicts merge)) (str (count (:conflicts merge)) " conflicts") "no conflicts")
         (when (seq (:main-moved merge)) (str " · main moved " (count (:main-moved merge))))

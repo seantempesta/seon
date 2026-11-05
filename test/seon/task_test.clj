@@ -56,10 +56,9 @@
         db (d/db-with db (task/create-tx db [(decl "Do.")]))
         tx (into (task/start-tx db "demo/t" "b1" :a1 {:branch :b :model nil :max-turns 4} 0) (task/agent-cites-tx db "b1/a1" "b1/a1"))
         db (d/db-with db tx)]
-    (is (= (count (seon.config/value :seon.config.agent/cites)) (count (filter :seon.cite/id tx))) "one per address the config names")
-    (is (= [["docs/testing.md#testing" :doc] ["docs/references.md#an-entity-cites" :doc]]
-           (mapv (juxt :seon.cite/address :seon.cite/depth) (task/cites-of db (pdb/eid db :seon.agent/key "b1/a1"))))
-        "on the agent's record, in the config's order")))
+    (is (= [] (seon.config/value :seon.config.agent/cites)) "no default citations: an agent's context holds what its task cites")
+    (is (= 0 (count (filter :seon.cite/id tx))) "so none is written on a new agent's record")
+    (is (= [] (task/cites-of db (pdb/eid db :seon.agent/key "b1/a1"))))))
 
 (deftest the-writer-cites-what-names-something
   ;; audit item 2a: a reproduction's prose names a test helper (demo-test/fixture) and a handle (result/e-none) that name

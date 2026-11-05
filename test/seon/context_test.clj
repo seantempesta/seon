@@ -1942,12 +1942,12 @@
         shape (context/test-shape db 'demo-test/new-test)]
     (is (= 'demo-test (:ns shape)) "the namespace it goes in")
     (is (= ['demo-test/shared-world] (:helpers shape)) "what is defined there that is not a test")
-    (is (= "(deftest f-test (is (= 4 (f 2))))" (:example shape)) "one real test of it: its first by name")
+    (is (= "(deftest g-test (is (= 1 (g))))" (:example shape)) "one real test of it: the shortest of its first five by name")
     (is (nil? (context/test-shape db 'nowhere-test/x)) "a namespace the branch lacks has no shape: the agent makes it first")
     (let [h (pr-str (seon.render.ui/status-hiccup {:proofs [{:test 'demo-test/new-test :status :undefined :shape shape}]}))]
       (is (re-find #"demo-test/new-test is not written" h))
       (is (re-find #"shape to copy" h))
-      (is (re-find #"deftest f-test" h)))))
+      (is (re-find #"deftest g-test" h)))))
 
 (deftest the-turn-line-is-the-requests-last-message-replaced-each-request
   ;; owner, 2026-11-05: the model gets the turn as a small part at the very end of the request, replaced each request, never in
