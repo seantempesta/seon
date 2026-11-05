@@ -2024,11 +2024,11 @@
 (deftest an-agent-cites-what-it-reads-beside-its-task
   (let [[before added gone] (in-agent ["(mapv :cites (my.agent/uncite! \"docs/none.md\"))"
                                        "(mapv (juxt :cites :depth) (my.agent/cite! \"docs/agent.md?summary#the-agent\"))"
-                                       "(mapv :cites (my.agent/uncite! \"docs/testing.md\"))"])]
-    (is (= ["docs/testing.md#testing" "docs/references.md#an-entity-cites"] (:value before))
-        (str "made with every agent's, a page whole as its top section: " (pr-str before)))
-    (is (= [["docs/testing.md#testing" :doc] ["docs/references.md#an-entity-cites" :doc] ["docs/agent.md#the-agent" :summary]] (:value added)) (pr-str added))
-    (is (= ["docs/references.md#an-entity-cites" "docs/agent.md#the-agent"] (:value gone))
+                                       "(mapv :cites (my.agent/uncite! \"docs/testing.md#testing-in-the-world\"))"])]
+    (is (= ["docs/agent.md#working-a-task" "docs/agent.md#merging" "docs/testing.md#testing-in-the-world"] (:value before))
+        (str "made with every agent's, the config's references: " (pr-str before)))
+    (is (= [["docs/agent.md#working-a-task" :doc] ["docs/agent.md#merging" :doc] ["docs/testing.md#testing-in-the-world" :doc] ["docs/agent.md#the-agent" :summary]] (:value added)) (pr-str added))
+    (is (= ["docs/agent.md#working-a-task" "docs/agent.md#merging" "docs/agent.md#the-agent"] (:value gone))
         (str "a default it uncites is gone from its own: " (pr-str gone)))))
 
 ;; See docs/merging.md#main-moved-is-said-at-every-eval

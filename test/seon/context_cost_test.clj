@@ -195,8 +195,11 @@
                        ;; measured 2026-10-28 (a plan and a run a page): 2.68 MB / 433 calls at 1, 9.51 MB / 881 at 2,
                        ;; 23.2 MB / 1,777 at 4, 50.7 MB / 3,569 at 8; before the pages map (every page drawn twice):
                        ;; 11.0 MB / 1,195 at 2, 27.7 MB / 2,719 at 4, 61.2 MB / 5,767 at 8 (762 calls a page, not 448)
-                       :per-n {:bytes 6800000 :calls 516}
-                       :fixed {:bytes 500000 :calls 50}
+                       ;; 660 calls and 2.32 MB at 1 since render-core's agent-facing renders (a part for each cite, the status
+                       ;; written to the agent): from 566 calls; the bytes of a page fell (7.3 MB estimated, 2.32 MB measured)
+                       ;; 2.32 MB / 660 calls at 1, 4.74 MB / 1,319 at 2
+                       :per-n {:bytes 2420000 :calls 660}
+                       :fixed {:bytes 1000 :calls 1}
                        :sizes [1 2 4 8]}))))))
 
 

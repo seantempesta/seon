@@ -626,9 +626,9 @@
         ;; every cite is a part of its own inside the one citations part: found by what its text holds
         cites (filter #(and (vector? %) (= 'seon.render.ui/cited (first %))) (tree-seq coll? seq page))
         part (fn [x] (some #(let [t (seon.render/part-text %)] (when (str/includes? t x) t)) cites))
-        cited (part "A real call")]
-    (is (some? (part "Tested by: app.x-test/t0, app.x-test/t1")) (str "the cited var's tests, then its other callers: " (pr-str cites)))
-    (is (str/includes? (part "Tested by: app.x-test/t0") "Called by: app.x/g") "its other callers")
+        cited (part "Tests that reach it")]
+    (is (some? (part "Tests that reach it: app.x-test/t0, app.x-test/t1")) (str "the cited var's tests: " (pr-str cites)))
+    (is (not (str/includes? (part "Tests that reach it: app.x-test/t0") "app.x/g")) "and nothing of who else calls it")
     (is (str/includes? (part "What x does.") "docs/x.md#the-x") "the cited section's lead under its heading and address")
     (is (not (str/includes? (pr-str (some (fn [[i h]] (when (str/starts-with? i "task-") h)) page)) "What x does.")) "and the task's own part holds it once, not again")))
 
@@ -646,7 +646,6 @@
         "the source of a form ctx holds at another path (f1's form is f0's caller)")
     (is (some? f0) "the source, in the one call")
     (is (str/includes? f0 "app.x-test/t0") "and the tests beside it")
-    (is (str/includes? f0 "app.x/f1") "and its callers, f1 among them")
     (is (not-any? #(= "ctx-keys" (first %)) page) "no part for keys the agent never added")))
 
 (deftest a-component-is-styled-by-its-renders-name
@@ -679,14 +678,14 @@
         part #(let [page (try (enter-agent! {:db % :key k :branch :b}) (seon.repl/render-ctx-hiccup) (finally (end-agent!)))]
                 (some (fn [f] (let [t (seon.render/part-text f)] (when (str/includes? t "(defn f0 [x] x)") t)))
                       (filter #(and (vector? %) (= 'seon.render.ui/cited (first %))) (tree-seq coll? seq page))))]
-    (is (str/includes? (str (part db)) "Tested by: app.x-test/t0, app.x-test/w0, app.x-test/w1, app.x-test/w2") (str "every test among its pulled callers: " (part db)))
+    (is (str/includes? (str (part db)) "Tests that reach it: app.x-test/t0, app.x-test/w0, app.x-test/w1, app.x-test/w2") (str "every test among its pulled callers: " (part db)))
     (let [db (d/db-with db (vec (mapcat (fn [i] [{:db/id (str "c" i) :form/id (str "app.y/c" i "-1") :form/src (str "(defn c" i " [] (f0 1))") :form/refs #{'app.x/f0} :form/defines [(str "cv" i)]}
                                                  {:db/id (str "cv" i) :var/name (symbol "app.y" (str "c" i)) :var/kind :fn :var/form (str "c" i)}])
                                         (range (inc n)))))
           p (part db)]
-      (is (= n (count (re-seq #"app\.y/c\d+" (re-find #"Called by: [^\n\]]*" p)))) "the other callers: every one the pull's window holds")
+      (is (not (str/includes? p "app.y/c")) "callers that are no test are not told")
       (is (not (re-find #"\(\+\d+ more\)" p)) "no list is cut by the render")
-      (is (not (str/includes? p "Tested by")) "the older tests past the window")
+      (is (not (str/includes? p "Tests that reach it")) "the older tests past the window")
       (is (not (str/includes? p "tests-reaching")) "the prompt names how to list every test reaching it: not on every cite"))))
 
 (deftest an-agent-adds-a-datum-and-its-render

@@ -762,7 +762,7 @@
        [:p "You have one task, and your job is to finish it. Everything else here is to help you do that."]
        (when plan (markdown plan))
        ;; a work or whole task is done when its proofs pass; the other kinds (design, merge, test) say what they are for
-       (if (#{:work :whole} (:seon.task/kind t))
+       (if (#{:work :whole} (:seon.task/kind t :work))
          [:p "You're done when every proof under \"Your proofs\" passes on your branch. Then reply saying what you changed and how it's proved, and your branch is merged."]
          (when-let [ins (:seon.task/instructions t)] [:p ins]))
        [:p (str "Task: " id)]])))
@@ -791,9 +791,9 @@
 
 (defn help-form
   "The form an agent runs to read more of x, a wiki address (a string), a namespace or a function (a symbol): the one place it is
-  written, so it changes in one place when `clojure.repl/doc` takes these (jolt/forgiving-tools)."
+  written, so it changes in one place: `doc` takes a wiki address, a schema key or a name (docs/agent.md#finding-your-way)."
   {:malli/schema [:=> [:cat [:or :string :symbol]] :string]}
-  [x] (if (string? x) (str "(my.agent/help \"" x "\")") (str "(my.agent/help '" x ")")))
+  [x] (if (string? x) (str "(doc \"" x "\")") (str "(doc '" x ")")))
 
 (defn- source-block
   "Source text src as the model and the page read code: a block the printer fences verbatim."
@@ -889,7 +889,7 @@
 (defn cite-hiccup
   "A cite as pulled (and filled) with its joins, as one hiccup by what it cites: a wiki section (`section-hiccup`), a function
   (`var-hiccup`), a schema key or setting (`key-hiccup`), a namespace (its doc and how to read it), a task (its plan), or what
-  resolves to nothing, said so. The page and the model read it alike; `my.agent/help` answers it on demand. See
+  resolves to nothing, said so. The page and the model read it alike; `doc` answers it on demand. See
   docs/references.md#an-entity-cites."
   {:malli/schema [:function [:=> [:cat :seon.host/db :map] :any] [:=> [:cat :seon.host/db :map :map] :any]]}
   ([db c] (cite-hiccup db c {}))
@@ -1462,7 +1462,7 @@
   [:div {:id "p-task"}
    (when (:task c)
      (list [#'task {:at [:task]} aid] [#'status {:at [:task :proved]} aid] [#'citations {:at [:task :cites]} aid]
-           (cite-parts c aid)
+           (seq (cite-parts c aid))
            ;; each search its task and the agent hold, a part each, drawn on the branch's db
            (for [[p k] (concat (for [e (keys (get-in c [:task :searches]))] [[:task :searches e] (str "task-" e)])
                                (for [e (keys (get c :searches))] [[:searches e] (str "agent-" e)]))]

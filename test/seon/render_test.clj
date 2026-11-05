@@ -1183,17 +1183,17 @@
         k (seon.task/agent-key "b1" :a3)
         ;; a value its schema gives a render of its own (a value holding hiccup already made is drawn where it sits)
         tile (fn [id turn text] (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} id "a3"
-                                                     {:seon.eval/turn turn :seon.eval/code "(page)" :seon.eval/schema :seon.context/run
-                                                      :seon.eval/response {:handle (symbol "result" id) :value {:turn text}}}))
+                                                     {:seon.eval/turn turn :seon.eval/code "(page)" :seon.eval/schema :seon.render/proofs
+                                                      :seon.eval/response {:handle (symbol "result" id) :value {(symbol "app" text) {:status :pass}}}}))
         db (d/db-with branch (vec (concat [{:seon.agent/key k :seon.agent/turn 6}]
-                                          (tile "t1" 2 "older tile") (tile "t2" 5 "newer tile")
+                                          (tile "t1" 2 "older-tile") (tile "t2" 5 "newer-tile")
                                           (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "t3" "a3"
                                                                {:seon.eval/turn 5 :seon.eval/code "1" :seon.eval/response {:handle 'result/t3 :value 1}}))))
         w (a3-walk db)]
     (try
       (let [html (apply str (map :html (filter #(= "#p-tiles" (:container %)) (r/placed-units w))))]
-        (is (str/includes? html "newer tile"))
-        (is (< (str/index-of html "newer tile") (str/index-of html "older tile")) "the newest turn's first")
+        (is (str/includes? html "newer-tile"))
+        (is (< (str/index-of html "newer-tile") (str/index-of html "older-tile")) "the newest turn's first")
         (is (not (str/includes? html "result/t3")) "a value with no render of its own is no tile"))
       (finally (r/dispose-walk! w)))))
 
@@ -1393,12 +1393,13 @@
         eid #(seon.db/eid branch %1 %2)]
     ;; a cited var is a component of its own when the db holds it (ctx joins the task's references by
     ;; :var/name: seon.context-test/a-cited-var-redefined-shows-in-the-next-view); this db holds none
-    (is (= [(str "task-" rid) (str "status-" rid)
-            (str "citations-" rid) (str "turn-" rid) (str "agent-state-" rid)] (mapv :id task))
-        "the task, each thing its plan cites (a part each), the namespaces it touches, how the work stands, the agent's turn (its open problems when one is open: none here, so no part; and the keys the agent added, when it added one): each keyed by what it shows")
+    (is (= [(str "task-" rid) (str "status-" rid) (str "citations-" rid)] (vec (take 3 (mapv :id task))))
+        "the task, how its work stands, what its plan mentions (open problems and added keys only when there are some)")
+    (is (= [(str "turn-" rid) (str "agent-state-" rid)] (vec (take-last 2 (mapv :id task)))) "the turn and the agent's state are placed last")
+    (is (every? #(str/starts-with? % "cited-") (drop 3 (drop-last 2 (mapv :id task)))) "between them a part for each thing the plan cites")
     (let [h (:html (unit-of task "status-"))]
       (is (str/includes? h "demo/f-test") "each proof as its var entity holds its verdict, (my.task/status)'s")
-      (is (str/includes? h "class=\"bad\"") "the failing proof's verdict is the status's mark")
+      (is (str/includes? h "demo/f-test</code> fails") "the failing proof's verdict is the status's")
       (is (str/includes? h "(= 4 5)") "and what its assertion got"))
     (let [h (:html (unit-of task "task-"))]
       (is (str/includes? h "task · demo") "the task's part, its namespace above its plan")
@@ -1437,11 +1438,11 @@
                               {:var/name 'demo/f-test :seon.test/digest "digest-2" :seon.test/status :green}])]
     (is (not (str/includes? (draw written) "digest-1")) "a proof not yet run shows no result")
     (let [h (draw red)]
-      (is (str/includes? h "class=\"bad\"") (str "the recorded status, red: " h))
+      (is (str/includes? h "demo/f-test</code> fails") (str "the recorded status, red: " h))
       (is (str/includes? h "it doubles") "and its failing assertion")
       (is (str/includes? h "(= 4 5)") "as the assertion it got, printed as code"))
     (let [h (draw green)]
-      (is (str/includes? h "class=\"ok\"") "green is the status's mark")
+      (is (str/includes? h "You're done") "green is the status's word")
       (is (not (str/includes? h "it doubles")) "a green keeps no failure"))))
 
 (deftest the-status-is-drawn-from-facts-with-no-turn-of-the-reader
@@ -1455,7 +1456,7 @@
         standing (try (unit-of (r/placed-units w) "status-") (finally (r/dispose-walk! w)))
         h (:html standing)]
     (is (some? standing) "the status is drawn")
-    (is (str/includes? h "class=\"ok\"") (str "the verdict the branch holds: " h))
+    (is (str/includes? h "You're done") (str "the verdict the branch holds: " h))
     (is (not (str/includes? h "Turn")) "and has no turn count")))
 
 (deftest the-models-page-holds-the-plan-whole
@@ -1782,9 +1783,9 @@
         (let [html (h/html (ui/status-hiccup (select-keys st [:merge :its-merge-carries :without-a-contract])))
               merge-line (h/html (ui/status-hiccup {:merge (:merge st)}))]
           (is (str/includes? (pr-str (:main-moved (:merge st))) "demo/k") "what main changed since the base (the model reads it in the data)")
-          (is (re-find #"Main has moved" html) "the page says main moved: something to do")
-          (is (str/includes? html "0 conflicts") "and which of those the branch changed too (none)")
-          (is (not (str/includes? (h/html (ui/status-hiccup {:merge {:conflicts [] :main-moved []} :its-merge-carries (:its-merge-carries st)})) "Main has moved")) "no merge line when main moved nothing and nothing conflicts")
+          (is (not (re-find #"Main has moved" html)) "main's move reaches the branch between turns: the agent is told only what conflicts")
+          (is (not (str/includes? html "conflict")) "and which of those the branch changed too (none)")
+          (is (str/includes? (h/html (ui/status-hiccup {:merge {:conflicts ['demo/k] :main-moved ['demo/k]}})) "1 things conflict with main") "a conflict is said")
           (is (str/includes? html "demo/h") "what the branch's merge carries, and a function it defined with no contract")
           (is (not (str/includes? html "demo/k")) "never main's change")
           (is (not (str/includes? html "demo/f")) "never one it did not change"))
@@ -1841,7 +1842,7 @@
                        {:type :error :var "#'app.okt/gone-test" :exit 137 :message "child died"}]
              :proofs {'app.okt/ok-test :pass 'app.okt/bad-test :fail}}
         html (h/html (ui/proved {} run))]
-    (is (= (str "red: 1 of 4 failed\n✗ app.okt/bad-test: the sum: expected (= 3 (+ 1 1))\nreused 1: their last result still counts, because nothing they reach has changed")
+    (is (= (str "red: 1 of 4 failed\n✗ app.okt/bad-test: the sum\n    asserted (= 3 (+ 1 1))\n    and got  (not (= 3 2))\nreused 1: their last result still counts, because nothing they reach has changed")
            (:seon.print/code (my.agent/prove-summary {} run))) "what failed, first failure, and only what is true of this run")
     (is (= "green: 0 of 0 passed\nno test is named app.okt/typo-test"
            (:seon.print/code (my.agent/prove-summary {} {:pass 0 :fail 0 :error 0 :ran 0 :reused 0 :deferred [] :reports [] :unmatched ['app.okt/typo-test]})))
@@ -2283,10 +2284,11 @@
 ;; the instructions cite how a task is worked (docs/agent.md#working-a-task) at full depth: the agent is sent the
 ;; section's text, as the wiki holds it, not its address alone (a cite resolved at summary would show its heading)
 (defn- cite-text
-  "The parts of tree's citations drawn by a walk over db, {target text}: each `cited` as the model reads it."
+  "The parts of tree's citations drawn by a walk over db, {target text}: each `cited` as the layout places it (seon.render.ui/cite-parts:
+  what the agent will do with it, its lookups) and as the model reads it."
   [db tree aid]
-  (into {} (for [[p k held] (#'ui/page-cites tree)]
-             (let [w (r/walker {:ref (seon.ratom/atom tree) :changes seon.ctx/changes} (fn [] db) [#'ui/cited {:at p :held held} aid k])]
+  (into {} (for [[f opts a k] (#'ui/cite-parts tree aid)]
+             (let [w (r/walker {:ref (seon.ratom/atom tree) :changes seon.ctx/changes} (fn [] db) [f opts a k])]
                (try (r/flush! w nil) [k (r/part-text (r/part-form w @(:out w)))] (finally (r/dispose-walk! w)))))))
 
 (deftest a-work-task-is-sent-how-a-task-is-worked
@@ -2311,15 +2313,15 @@
         "a part per cite of the task (its proof's left to the status), each target once; the agent cites nothing by default")
     (is (every? #(re-find #"\[:h3 \"" %) (vals drawn)) "every cite is headed")
     (is (str/includes? (drawn "docs/x.md#the-x") "What x does. And more.") "a section at doc depth: its lead")
-    (is (str/includes? (drawn "docs/x.md#the-x") "(my.agent/help \"docs/x.md#the-x\")") "and how to read the rest")
+    (is (str/includes? (drawn "docs/x.md#the-x") "(doc \"docs/x.md#the-x\")") "and how to read the rest")
     (let [sec (r/part-text ['seon.render.ui/cited {} (ui/cite-hiccup (ts/test-db) {:seon.cite/address "docs/testing.md#testing" :seon.cite/depth :doc
                                                                           :section {:seon.doc/address "docs/testing.md#testing" :seon.doc/heading "Testing" :seon.doc/lead "How a test is written."
                                                                                     :below {1 {:seon.doc/address "docs/testing.md#testing-in-the-world" :seon.doc/heading "Testing in the world"}}}})])]
       (is (str/includes? sec "Testing in the world (docs/testing.md#testing-in-the-world)") "a page cited whole: its top section, the headings below it joined"))
     (is (str/includes? (drawn "demo/g") "(defn g \"Gets it.\" [x] x)") "a function at doc depth: its whole source, in a fence")
-    (is (str/includes? (drawn "demo/g") "Tested by: demo-test/g-test") "its test, among its pulled callers")
-    (is (str/includes? (drawn "demo/g") "Called by: demo/h") "and its other caller")
-    (is (str/includes? (drawn "demo/g") "A real call: ") "and one real call, taken from them")
+    (is (str/includes? (drawn "demo/g") "Tests that reach it: demo-test/g-test") "the tests that will judge the change")
+    (is (not (str/includes? (drawn "demo/g") "Called by")) "and nothing of who calls it")
+    (is (not (str/includes? (drawn "demo/g") "A real call")) "a function it will change is read whole: no call to copy")
     (doseq [[k t] drawn] (is (not (re-find #":depth|:symbol|:change|:read " t)) (str k " carries none of how it was fetched")))))
 
 (deftest the-three-agree-on-the-agents-own-end
@@ -2524,16 +2526,16 @@
         t (h/html h)]
     (is (= :h2 (first (second h))) "headed")
     (is (str/includes? t "Your proofs") "headed to the agent")
-    (is (str/includes? t "<table>") "the proofs are a table")
+    (is (str/includes? t "<ul><li><code>seon.program-test/a-vars-history</code>") "several proofs: a list of their states")
     (is (str/includes? t "not written yet") "each proof's state")
     (is (str/includes? t "Unknown class program") "a failure in a line")
-    (is (str/includes? t "(deftest a-vars-history") "the failing proof's source")
+    (is (not (str/includes? t "(deftest a-vars-history")) "the failing proof's source is the agent's own: not repeated")
     (is (str/includes? t "seon.program/history is public") "what blocks merging")
-    (is (re-find #"What to do next" t) "what to do next")
+    (is (re-find #"blocking merging" t) "what blocks merging, and below it the form to run")
     (is (not (str/includes? t "(do ")) "separate top-level forms, never a do")
     (is (not (str/includes? t "tokens")) "no tokens sent")
-    (is (not (str/includes? t "Merge:")) "no merge line with nothing to merge")
-    (is (str/includes? (h/html (ui/status-hiccup (assoc st :its-merge-carries {:added ['a/b]} :merge {:conflicts [] :main-moved ['a/b]}))) "Main has moved: 0 conflicts, 1 things changed") "a merge line when there is something to merge")))
+    (is (not (str/includes? t "conflict")) "no merge line with nothing to merge")
+    (is (str/includes? (h/html (ui/status-hiccup (assoc st :merge {:conflicts ['a/b] :main-moved ['a/b]}))) "1 things conflict with main") "a merge line only when something conflicts")))
 
 (deftest a-merged-task-reads-merged-everywhere
   ;; owner, 2026-11-05: the head said "merged" while the task's panel said "done": its agent's own end (:green) was read where

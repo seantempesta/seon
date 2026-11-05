@@ -109,7 +109,7 @@
                                            :seon.db/db (ts/test-db)} 1)]
     (is (= "Turn 12 of 40. You're in seon.program. 540.0k tokens sent so far." (seon.render.ui/turn-line 12 40 'seon.program 540000)))
     (is (= "Turn 1 of 40. You're in seon.program." (seon.render.ui/turn-line 1 40 'seon.program nil)) "what is not known is left out")
-    (is (= "Turn 1 of 40. You're in seon.program." (second (second part))) "the part's heading")
+    (is (= "Turn 1 of 40. You're in seon.program. A scripted model, not a real one." (second (second part))) "the part's heading: the line and the model it speaks to")
     (is (nil? (:data-for (second (second part)))) "the model's part holds the heading only")))
 
 (deftest a-records-text-is-the-same-whatever-came-before
@@ -298,8 +298,8 @@
         t (:tree (ctx/build db (pdb/eid db :seon.task/id "demo/n") :b))
         m (into {} (for [c (vals (:cites t))] [(or (:seon.cite/address c) (:seon.cite/name c)) (seon.render/part-text [(quote seon.render.ui/cited) {} (seon.render.ui/cite-hiccup db c)])]))]
     (is (str/includes? (m 'demo.calc) "Adds.") "a namespace: the first sentence of its doc")
-    (is (str/includes? (m 'demo.calc) "(my.agent/help 'demo.calc)") "and the form that reads it")
-    (is (str/includes? (m :x.s/block) "[:map [:x.s/from :int]]") "a schema key: its form as written")
+    (is (str/includes? (m 'demo.calc) "(doc 'demo.calc)") "and the form that reads it")
+    (is (str/includes? (m :x.s/block) ":int") "a schema key: what it holds")
     (is (not (str/includes? (m :x.s/block) "my.schema/register!")) "its change is taught once, not on every cite")
     (is (str/includes? (m "bin/env") (:unresolved seon.ref/problem-messages)) "a file: it joins nothing, and its part says so")))
 
@@ -476,9 +476,9 @@
             text (str/join "\n\n" (map render/part-text (vals page)))
             times (fn [s] (count (re-seq (re-pattern (java.util.regex.Pattern/quote s)) text)))]
         (is (some #(str/starts-with? % "status-") (keys page)) "how the work stands is on the page")
-        (is (= 2 (times "Make ```demo/g``` exact.")) "the plan in the task, and quoted once as why the cite is here")
+        (is (= 1 (times "Make ```demo/g``` exact.")) "the plan, once, in the task")
         (is (= 1 (times "(defn g \"Halves.\"")) "a cited source once, as code: its quotes as written")
-        (is (= 1 (count (re-seq #"(?s)\[:code \"demo-test/f-test\"\]\s*\]\s*\[:td\s*\"failed\"\]" text))) "the proofs' statuses once, in the status")))))
+        (is (= 1 (count (re-seq #"\[:code \"demo-test/f-test\"\]" text))) "the proofs' statuses once, in the status")))))
 
 (deftest a-cited-var-shows-at-its-citations-depth
   ;; task seon.context/a-cited-var-shows-at-its-citation-depth: the delimiter picks the depth
@@ -519,7 +519,7 @@
         r (seon.doc/resolve-ref db 'ctx-big/big :code)
         ;; the task's cite as ctx holds it: the var it names, with its form
         part {:seon.cite/name 'ctx-big/big :seon.cite/depth :code :var {:var/name 'ctx-big/big :form {:form/src src}}}
-        model (seon.render/part-text [(quote seon.render.ui/cited) {} (seon.render.ui/cite-hiccup db part)])]
+        model (seon.render/part-text [(quote seon.render.ui/cited) {} (seon.render.ui/cite-hiccup db part {:changing? true})])]
     (is (= {:symbol 'ctx-big/big :source (print/code src)} (select-keys r [:symbol :source])) "the source whole as code, never swapped for its doc by size")
     (is (str/includes? model src) "the part holds it whole, in a fence: a function cited to be changed is read whole")
     (is (str/includes? model "```clojure") "fenced")))
@@ -875,10 +875,10 @@
     (fn [_ conn]
       (let [[db [r0 r1] [e0 e1]] (sent-turns conn)
             sent #(:seon.model-call/sent (d/pull db [:seon.model-call/sent] %))]
-        (is (= [:section :parts :tail :hashes] (mapv first (sent e0))) "turn 0: the system prompt, the page's parts whole, the turn line last, their hashes")
+        (is (= [:section :parts :hashes] (mapv first (sent e0))) "turn 0: the system prompt, the page's parts whole (the turn line among them), their hashes")
         (is (pos-int? (second (first (sent e0)))) "the system prompt's own section, by entity")
-        (is (= [:section :parts :reply :eval :parts :tail :hashes] (mapv first (sent e1))) "turn 1: turn 0's parts, its reply (the reasoning it made), its call's eval, what changed of the page, the turn line last")
-        (is (str/includes? (str (butlast r1)) "Make f triple.") "the plan changed after turn 0: in turn 1's page")
+        (is (= [:section :parts :reply :eval :parts :hashes] (mapv first (sent e1))) "turn 1: turn 0's parts, its reply (the reasoning it made), its call's eval, what changed of the page (the turn line moved)")
+        (is (str/includes? (str r1) "Make f triple.") "the plan changed after turn 0: in turn 1's page")
         (is (= r0 (read-back db e0)) "turn 0's messages, read from its records")
         (is (= r1 (read-back db e1)) "turn 1's, though the plan changed after both")
         (is (not (str/includes? (str (read-back db e1)) "Later.")) "the task as it was sent, not as it is")
@@ -936,7 +936,7 @@
         (is (re-find #"seon\.render\.ui/status" (:content (peek r1))) "a verdict recorded after turn 0: how the work stands, told again")
         ;; (the task's data draws each proof's recorded status too, so it moves with a verdict: reported)
         (is (not (re-find #"related-\d+" (:content (peek r1)))) "what a verdict does not move is not told again")
-        (is (str/includes? (:content (peek r1)) "failed") "the proof's new verdict")
+        (is (str/includes? (:content (peek r1)) "fails") "the proof's new verdict")
         (is (not (str/includes? (:content (peek r1)) "seon.render.ui/task")) "the rest unchanged, not told again")
         (is (not-any? #(str/includes? (str (:content %)) ";;") (rest r1)) "no ;; reaches the model")
         (is (nil? (resolve 'seon.context/messages)) "one path: no request without an agent")))))
@@ -1193,17 +1193,17 @@
 
 (deftest a-cited-var-redefined-shows-in-the-next-view
   ;; the task's data is a render, never held: a var the plan cites redefined (the agent's defn, or main
-  ;; caught up), the next view shows its new source. The citations are one section, a component whose children are
-  ;; the cited things; the edit draws it again (its children's db reads touched) and the task's not
+  ;; caught up), the next view shows its new source. Each cited thing is a component of its own; the edit draws that
+  ;; one again (its db reads touched) and the task's not
   (let [[db _] (sections-near "Make ```demo/g``` say one thing.")
         [w _ _ _ rid :as walk] (walked db)
-        cited (str "citations-" rid)
+        cited (str "cited-" rid "-demo_2Fg")
         html #(:html (some (fn [u] (when (= % (:id u)) u)) (render/placed-units w)))]
-    (is (some? (html cited)) "the citations, a component of their own")
+    (is (some? (html cited)) "the cited var, a component of its own")
     (is (not (str/includes? (html cited) ":redefined")))
     (let [changed (step! walk [{:db/id "f2" :form/id "demo/g-2" :form/src "(defn g [] :redefined)"} [:db/add [:var/name 'demo/g] :var/form "f2"]])]
       (is (str/includes? (html cited) "(defn g [] :redefined)") "the next view: the new source")
-      (is (some #{cited} changed) "the edit's page diff holds the citations")
+      (is (some #{cited} changed) "the edit's page diff holds the cited var's part")
       (is (not-any? #(str/starts-with? % "task-") changed) "and not the task's, which cites it"))
     (render/dispose-walk! w)))
 
@@ -1212,15 +1212,15 @@
 (deftest a-cited-section-main-changed-is-its-part-alone
   (let [[db _] (sections-near "Make ```demo/g``` say one thing; see [the model](docs/vector.md#the-model).")
         [w _ cell _ rid :as walk] (walked db)
-        part (str "citations-" rid)
+        part (str "cited-" rid "-docs_2Fvector.md_23the-model")
         html (fn [w] (into {} (map (juxt :id :html)) (render/placed-units w)))]
-    (is (some? ((html w) part)) "the cited section, among the citations")
+    (is (some? ((html w) part)) "the cited section, a part of its own")
     (let [changed (step! walk [[:db/add [:seon.doc/address "docs/vector.md#the-model"] :seon.doc/lead "The model, as main now says it."]])
           live (html w)
           cold (let [d @cell w2 (render/draw (:tree (ctx/build d (pdb/eid d :seon.agent/key "demo/a1") :b)) ctx/changes d
                                              (requiring-resolve (render/declared :seon.render/render-ctx)))]
                  (try (html w2) (finally (render/dispose-walk! w2))))]
-      (is (= [part] changed) "the citations, and nothing else, drawn again")
+      (is (= [part] changed) "the cited section's part, and nothing else, drawn again")
       (is (str/includes? (live part) "The model, as main now says it.") "with the section as it is now")
       (is (= cold live) "the live page is the cold draw"))
     (render/dispose-walk! w)))
@@ -1235,13 +1235,14 @@
         [w _ _ _ rid] (walked db)
         units (render/placed-units w)
         html #(:html (some (fn [u] (when (str/starts-with? (:id u) %) u)) units))
-        task (html "task-")]
+        task (html "task-")
+        cites (apply str (map :html (filter #(str/starts-with? (:id %) "cited-") units)))]
     (is (str/includes? task "Make ```demo/g``` say one thing") "D4: the whole plan")
     (is (not (str/includes? task "(deftest g-test")) "D1: the proof's source is the status's, the task's part does not repeat it")
     (is (str/includes? (html "status-") "demo-test/g-test") "D1: the proof written is the status's, by name")
 
-    (is (str/includes? (html "citations-") "(defn g [])") "D2: the cited var's source, in the citations")
-    (is (str/includes? (html "citations-") "Section 1 says one thing.") "D3: the cited section's text, not its address, in the citations")
+    (is (str/includes? cites "(defn g [])") "D2: the cited var's source, in its part")
+    (is (str/includes? cites "Section 1 says one thing.") "D3: the cited section's text, not its address, in its part")
     (is (not (str/includes? task "Section 1 says one thing.")) "and not the task's again")
     (render/dispose-walk! w)))
 
@@ -1563,8 +1564,8 @@
             r1 (ask! 1 {:printed (:printed r0)})
             ]
         (is (= (:messages r0) (subvec (:messages r1) 0 (count (:messages r0)))) "request 2 starts with request 1 whole, its page the first request's")
-        (is (= ["system" "user" "user" "assistant" "tool"] (mapv :role (:messages r1)))
-            "then the message of turn 1 (rank 0 before turn 1's eval, though written after it), the eval and its result; no part moved, so none is sent again")
+        (is (= ["system" "user" "user" "assistant" "tool" "user"] (mapv :role (:messages r1)))
+            "then the message of turn 1 (rank 0 before turn 1's eval, though written after it), the eval and its result, and the turn line, the one part that moved (sent whole)")
         (is (str/includes? (:content (nth (:messages r1) 2)) "note taken in turn 1"))))))
 
 (deftest a-record-takes-the-agents-turn-in-force
@@ -1931,35 +1932,31 @@
                              {:var/name 'demo-test/shared-world :var/kind :fn}]))
         shape (context/test-shape db 'demo-test/new-test)]
     (is (= 'demo-test (:ns shape)) "the namespace it goes in")
-    (is (= ['demo-test/shared-world] (:helpers shape)) "what is defined there that is not a test")
+    (is (empty? (:helpers shape)) "only the helpers its example calls (it calls none)")
     (is (= "(deftest g-test (is (= 1 (g))))" (:example shape)) "one real test of it: the shortest of its first five by name")
     (is (nil? (context/test-shape db 'nowhere-test/x)) "a namespace the branch lacks has no shape: the agent makes it first")
     (let [h (pr-str (seon.render.ui/status-hiccup {:proofs [{:test 'demo-test/new-test :status :undefined :shape shape}]}))]
-      (is (re-find #"not written yet" h))
-      (is (re-find #"Here's the shape" h))
+      (is (re-find #"Write " h) "it is told to write it")
+      (is (re-find #"Write it like this one" h))
       (is (re-find #"deftest g-test" h)))))
 
-(deftest the-turn-line-is-the-requests-last-message-replaced-each-request
-  ;; owner, 2026-11-05: the model gets the turn as a small part at the very end of the request, replaced each request, never in
-  ;; the cached prefix: a part declared :seon.render/place :tail
+(deftest the-turn-line-is-a-part-sent-whole-when-it-moved
+  ;; owner, 2026-11-05: the turn is an ordinary component placed last; a part that moved is sent whole, so each request
+  ;; carries the new line and the prefix before it is byte-identical (docs/render.md#the-agents-turn)
   (ts/test-branch!
     (fn [_ conn]
       (let [[ask! ev! _] (parts-session conn)
             status ['seon.render.ui/status {:ctx [:task :proved]} [:h2 "Where your work stands"] [:p "0 of 1 proofs green"]]
-            tail (fn [n] (with-meta ['seon.render.ui/turn {:ctx [:seon.agent/id]} [:h2 (str "Turn " n " of 9")]] {:seon.render/place :tail}))
-            parts (fn [n] (constantly {"status-1" status "agent-state-1" (tail n)}))
+            turn (fn [n] ['seon.render.ui/turn {:ctx [:seon.agent/id]} [:h2 (str "Turn " n " of 9")]])
+            parts (fn [n] (constantly {"status-1" status "turn-1" (turn n)}))
             r0 (ask! 0 {:parts (parts 1)})
             _ (ev! "e1")
             r1 (ask! 1 {:parts (parts 2) :printed (:printed r0)})
-            ;; the real page, drawn cold: a replay draws the same
             r2 (ask! 2 {})]
-        (is (= "user" (:role (peek (:whole r0)))))
-        (is (str/includes? (:content (peek (:whole r0))) "Turn 1 of 9") "the turn is the last message")
-        (is (not (str/includes? (:content (second (:whole r0))) "Turn")) "and not in the page's message")
-        (is (str/includes? (:content (peek (:whole r1))) "Turn 2 of 9") "replaced each request")
-        (is (not-any? #(str/includes? (str %) "Turn 1 of 9") (:whole r1)) "the earlier one is not left in the history")
-        (is (= (butlast (:whole r0)) (take (dec (count (:whole r0))) (:whole r1))) "the prefix before it is byte-identical")
-        (is (str/includes? (:content (peek (:whole r2))) "Turn 3. You're in demo.") (:content (peek (:whole r2))))
+        (is (str/includes? (:content (second (:whole r0))) "Turn 1 of 9") "the turn is in the page, with the other parts")
+        (is (str/includes? (:content (peek (:whole r1))) "Turn 2 of 9") "sent whole when it moved")
+        (is (not (str/includes? (:content (peek (:whole r1))) "Where your work stands")) "and the part that did not move is not sent again")
+        (is (= (:whole r0) (take (count (:whole r0)) (:whole r1))) "the prefix before it is byte-identical")
         (is (= (:whole r2) (into [] (mapcat second) (context/parts-of @conn (:whole-sent r2)))) "replay draws the same bytes")))))
 
 (deftest a-cited-attribute-says-what-it-is-and-shows-a-real-value
@@ -1970,6 +1967,6 @@
         text (fn [k] (seon.render/part-text ['seon.render.ui/cited {} (seon.render.ui/cite-hiccup db {:seon.cite/name k :seon.cite/depth :doc :schema (d/pull db '[*] [:schema/key k])})]))
         t (text :var/form)]
     (is (str/includes? t "An attribute your plan names.") t)
-    (is (str/includes? t "on :seon.db/var-fact entities") "what kind of entity holds it")
     (is (str/includes? t ":form/src") "a ref followed: what the form entity holds")
     (is (str/includes? (text :var/name) "A real value:") "an attribute that is no ref: a real value")))
+

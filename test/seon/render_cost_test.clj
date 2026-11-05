@@ -350,8 +350,13 @@
      ;; measured 2026-11-05, a step and back on this input: 1,057 / 1,177 / 1,657 contracted calls and 10.74 / 12.51 / 20.68 MB at
      ;; 10 / 40 / 160 turns (the bounds hold at 640). Before the read index and the turn's component, one step on the same
      ;; input: 11,073 calls and 80.9 MB at 640 turns
-     :per-n {:calls 8.2 :bytes 36000}
-     :fixed {:calls 1190 :bytes 10600000}
+     ;; render-core's agent-facing renders (the status written to the agent, a part for each cite, the turn line with its token sum
+     ;; and model): 1,387 calls and 17.10 MB at 10 turns, from 1,272 and 10.96 MB before this merge (a step and back)
+     ;; 17.11 / 20.81 / 36.43 MB and 1,387 / 1,627 / 2,587 calls at 10 / 40 / 160 turns: linear, the bytes about 130 KB a turn, from
+     ;; 59 KB. What grew with the turns is the turn line's and the agent state's sums over every model call of the agent
+     ;; (seon.render.ui/turn, agent-state: the tokens its requests sent, a d/q over its calls), drawn again at each step
+     :per-n {:calls 8.2 :bytes 130000}
+     :fixed {:calls 1305 :bytes 15800000}
      :sizes [10 40 160 640]}))
 
 (def ^:dynamic *conn*
@@ -464,6 +469,8 @@
                        ;; 616 at 10: 607 + 9, following the REPL: 3 calls a draw of the namespaces part (current-ns and its two
                        ;; record lookups, :seon.agent/ns and the task's fallback), 3 draws. Accepted by the owner, 2026-11-03
                        ;; ("Record 616 and 8")
+                       ;; 1,066 calls and 4.61 MB at 10 evals since render-core's agent-facing renders (the status written to the agent,
+                       ;; its unwritten proof's shape, a part for each cite, the turn line's token sum and model): from 616 and 3.55 MB
                        :per-n {:calls 4 :bytes 35000}
-                       :fixed {:calls 576 :bytes 3200000}
+                       :fixed {:calls 1026 :bytes 4260000}
                        :sizes [10 40 80]}))))))
