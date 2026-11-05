@@ -1296,3 +1296,15 @@
     (is (= [] (program/schema-declarations db (program/schema-registry {}))) "the built schema, all declared already")
     (is (identical? seon.contract/registry (program/schema-registry {})))))
 
+
+(deftest a-vars-history-names-each-definition-it-had
+  ;; task seon.program/a-vars-history-is-read-at-the-repl; docs/storage.md#history: a var's past definitions
+  ;; are its :var/form datoms in the db's history, read by seon.db/history
+  (let [def-of #(mt/code 'app.h (str "(ns app.h)\n(defn f [x] (+ x " % "))\n"))
+        db (mt/with (mt/world {:history? true}) (def-of 1) (def-of 2) (def-of 3))
+        rows (pdb/history db [:var/name 'app.h/f] {:attrs #{:var/form} :pull [:form/src]})
+        texts (mapv (comp :form/src :v) (filter :added? rows))]
+    (is (= 3 (count texts)) (pr-str rows))
+    (is (every? true? (map #(str/includes? %1 %2) texts ["(+ x 1)" "(+ x 2)" "(+ x 3)"]))
+        (str "oldest first, each the text it had: " (pr-str texts)))
+    (is (= 2 (count (remove :added? rows))) "the two replaced forms were each retracted")))

@@ -16,6 +16,12 @@
                                                 [:causes {:optional true} [:vector :string]]]]
  :seon.db/types-differ [:and :seon.error/base [:map [:seon.error/type [:= :seon.db/types-differ]]
                                                 [:seon.db/attributes [:map-of :qualified-keyword [:map [:stored :keyword] [:declared :keyword]]]]]]
+ ;; a store that keeps no history (:seon.config.store/keep-history? false, fixed when it is made): d/history and d/as-of throw on it, so
+ ;; seon.db/history and at answer this, never an empty history (docs/storage.md#history)
+ :seon.db/no-history [:and :seon.error/base [:map [:seon.error/type [:= :seon.db/no-history]]]]
+ ;; what seon.db/history or at was asked to read and the store does not hold: an :entity, :branch, :commit or :t (a t this branch never
+ ;; had: t ids are unique across the store, so another branch's t is none of this one's)
+ :seon.db/unresolved [:and :seon.error/base [:map [:seon.error/type [:= :seon.db/unresolved]] [:kind [:enum :entity :branch :commit :t]] [:value :any]]]
  :seon.db/ids-unopened [:and :seon.error/base [:map [:seon.error/type [:= :seon.db/ids-unopened]] [:path :string] [:errno :int]]]
  :seon.db/store-unplaced [:and :seon.error/base [:map [:seon.error/type [:= :seon.db/store-unplaced]] [:path :string] [:errno :int]]]
  :seon.sqlite/unloaded [:and :seon.error/base [:map [:seon.error/type [:= :seon.sqlite/unloaded]] [:path :string]]]

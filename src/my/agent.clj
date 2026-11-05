@@ -11,6 +11,7 @@
     (callers 'a.ns)           the namespaces that require a.ns
     (callees 'ns/f)           the vars ns/f's recorded definition names
     (callees 'a.ns)           the namespaces a.ns requires
+    (history x)               what x's attributes have been, oldest first: x a var (qualified symbol), an entity id or a lookup ref
     (search "text")           the best matches for text over code, docs, tasks and schemas, fusing its exact
                               text, its meaning and its references: [{:kind :name :score :by :line} ...]
     (search "text" {:kinds #{:section}}) only those kinds; :by #{:text :meaning :refs}, :ns "seon.merge", :k 20
@@ -232,6 +233,25 @@
         (when (ns-named? db sym) (vec (sort (source/requires db sym))))
         (vec (sort (disj (set (d/q '[:find [?r ...] :in $ ?s :where [?e :var/name ?s] [?e :var/form ?f] [?f :form/refs ?r]] db sym))
                          sym))))))
+
+(defn history
+  "What an entity's attributes have been on this branch, oldest first, a row {:a :v :added? :t :at} for each
+  datom the store's history keeps (seon.db/history): x is what it takes (an entity id or a lookup ref), or a
+  qualified symbol or the var, which means that var's entity. opts: :attrs, :pull (seon.db/history), and
+  :db, the db to read (default this branch's; (my.db/at {:t t}) names another). A symbol that names no var
+  answers so (:my.agent/no-var), as callers does.
+    (history 'seon.x/f {:attrs #{:var/form} :pull [:form/src]})                  a var's definitions
+    (history [:seon.task/id \"x\"] {:attrs #{:seon.task/outcome}})                 a task's outcomes
+  See docs/storage.md#history."
+  {:malli/schema [:function [:=> [:cat [:or :seon.db/entity :qualified-symbol :seon.host/var]] [:or [:vector :seon.db/history-row] :my.agent/no-var :seon.db/unresolved :seon.db/no-history]]
+                  [:=> [:cat [:or :seon.db/entity :qualified-symbol :seon.host/var]
+                        [:map {:closed true} [:attrs {:optional true} [:set :keyword]] [:pull {:optional true} [:vector :any]] [:db {:optional true} :seon.host/db]]]
+                   [:or [:vector :seon.db/history-row] :my.agent/no-var :seon.db/unresolved :seon.db/no-history]]]}
+  ([x] (history x {}))
+  ([x {:keys [db] :as opts}]
+   (let [db (or db (agent/db)) sym (cond (var? x) (named x) (symbol? x) (asked x))]
+     (or (when sym (no-var db sym))
+         (pdb/history db (if sym [:var/name sym] x) (dissoc opts :db))))))
 
 (defn- query-of
   "x's vector on db: a var's definition's (its entity, whose vector near reads), or text embedded

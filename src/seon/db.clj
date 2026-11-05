@@ -432,10 +432,72 @@
   "The db of commit cid on conn's store: conn's own head when cid is the commit it holds (already
   in memory, no store read), else made from the store (datahike.api/commit-as-db). What a reader
   of main's commit notices (seon.writer/main-commit) calls when it takes one, so it keeps the
-  commit and lets the db go. See docs/machine.md#what-a-process-owns-in-memory."
-  {:malli/schema [:=> [:cat :seon.host/conn :uuid] :seon.host/db]}
+  commit and lets the db go; nil when the store holds no such commit (datahike.api/commit-as-db answers
+  nil, as for an id it never made). See docs/machine.md#what-a-process-owns-in-memory."
+  {:malli/schema [:=> [:cat :seon.host/conn :uuid] [:maybe :seon.host/db]]}
   [conn cid]
   (let [db @conn] (if (= cid (d/commit-id db)) db (d/commit-as-db db cid))))
+
+(defn- no-history
+  "The :seon.db/no-history error of operation op when db keeps no history, else nil: d/history and d/as-of
+  throw on such a db, and an empty answer would read as an entity that never changed."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/var] [:maybe :seon.db/no-history]]}
+  [db op]
+  (when-not (:keep-history? (:config db))
+    (contract/error :seon.db/no-history op "this store keeps no history (:seon.config.store/keep-history? was false when it was made): nothing was recorded to read")))
+
+(defn- unresolved
+  "The :seon.db/unresolved error of operation op: the kind of thing asked for (:entity :branch :commit :t) and what was asked."
+  {:malli/schema [:=> [:cat :seon.host/var [:enum :entity :branch :commit :t] :any] :seon.db/unresolved]}
+  [op kind value]
+  (contract/error :seon.db/unresolved op (str "no " (name kind) " " (pr-str value) " in this store") {:kind kind :value value}))
+
+(defn history
+  "What entity e's attributes have been, oldest first, as plain data rows {:a :v :added? :t :at} (a retraction
+  before the assertion of one transaction; :at the transaction's :db/txInstant), read from db's history and
+  stored nowhere else. e is an entity id or a lookup ref of a unique attribute; a deleted entity's is still read.
+  opts: :attrs, a set of attributes (default all); :pull, a pull pattern applied to a ref attribute's value as of
+  its row's transaction (d/as-of), so a replaced form shows the text it had; :v is then the pulled map. An opt
+  it does not know is refused. An e that names no entity answers :seon.db/unresolved, a store that keeps no
+  history :seon.db/no-history, never []. See docs/storage.md#history."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.db/entity] [:or [:vector :seon.db/history-row] :seon.db/unresolved :seon.db/no-history]]
+                  [:=> [:cat :seon.host/db :seon.db/entity :seon.db/history-opts] [:or [:vector :seon.db/history-row] :seon.db/unresolved :seon.db/no-history]]]}
+  ([db e] (history db e {}))
+  ([db e {:keys [attrs pull]}]
+   (or (no-history db #'seon.db/history)
+       (let [h (d/history db)
+             id (if (int? e)
+                  (when (seq (d/datoms h :eavt e)) e)
+                  (let [[a v] e] (when (:db/unique (get (d/schema db) a)) (:e (first (d/datoms h :avet a v))))))]
+         (if-not id
+           (unresolved #'seon.db/history :entity e)
+           (let [ds (sort-by (juxt :tx :added) (if attrs (mapcat #(d/datoms h :eavt id %) (sort attrs)) (d/datoms h :eavt id)))
+                 at (into {} (map (fn [t] [t (:v (first (d/datoms db :eavt t :db/txInstant)))])) (distinct (map :tx ds)))
+                 ref? #(= :db.type/ref (get-in (d/schema db) [% :db/valueType]))]
+             (mapv (fn [{:keys [a v tx added]}]
+                     {:a a :added? added :t tx :at (at tx)
+                      :v (if (and pull (ref? a)) (d/pull (d/as-of db tx) pull v) v)})
+                   ds)))))))
+
+(defn at
+  "The db at a named point of the store, or the error saying it is none: opts {} is db itself; {:t t}
+  db as of t (d/as-of); {:commit cid} that commit (at-commit); {:branch b} branch b's last committed value
+  (head: a write on b not yet committed is not seen); {:branch b :t t} b as of t. :commit with :branch or :t,
+  and any other opt, is refused. A t that db never had is :seon.db/unresolved, never the nearest point: t ids
+  are unique across the store, so a t is a transaction of this branch exactly when its transaction entity
+  holds a :db/txInstant here (one seek), and another branch's is none. An unknown commit or branch is
+  :seon.db/unresolved; a base keeping no history, with a :t, :seon.db/no-history. conn is any connection to
+  the store, db the base of {} and {:t}. See docs/storage.md#history."
+  {:malli/schema [:=> [:cat :seon.host/conn :seon.host/db :seon.db/at-opts] [:or :seon.host/db :seon.db/unresolved :seon.db/no-history]]}
+  [conn db {:keys [t commit branch]}]
+  (cond
+    commit (or (at-commit conn commit) (unresolved #'seon.db/at :commit commit))
+    (and branch (not (branch? conn branch))) (unresolved #'seon.db/at :branch branch)
+    :else (let [base (if branch (head conn branch) db)]
+            (if-not t
+              base
+              (or (no-history base #'seon.db/at)
+                  (if (and (pos? t) (seq (d/datoms base :eavt t :db/txInstant))) (d/as-of base t) (unresolved #'seon.db/at :t t)))))))
 
 ;; ---- tx-data with explicit ids ----------------------------------------------------
 ;; The store issues every entity id and transaction id once (ids!), so ids are unique

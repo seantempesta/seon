@@ -1020,3 +1020,144 @@
     (is (= (seon.print/code (seon.print/text (sorted-map :a 1) (:part seon.print/budgets))) (contract/kept (sorted-map :a 1))) "a sorted map is its print")
     (is (not= (vec (range 100000)) (contract/kept (vec (range 100000)))) "past the budget, its print")))
 
+
+;; ---- history: what an entity's attributes have been (docs/storage.md#history) ----
+
+(def ^:private task-e [:seon.task/id "app.calc/total-is-exact"])
+
+(defn- set-outcome [db o] (mt/with db [[:db/add task-e :seon.task/outcome o]]))
+
+(deftest history-reads-a-non-var-entitys-replaced-attribute
+  ;; docs/storage.md#history: any entity, a row per datom, oldest first, a retraction before its assertion
+  (let [db (-> (mt/world {:history? true}) (set-outcome :running) (set-outcome :ready) (set-outcome :done))
+        rows (pdb/history db task-e {:attrs #{:seon.task/outcome}})]
+    (is (= [[:running true] [:running false] [:ready true] [:ready false] [:done true]]
+           (mapv (juxt :v :added?) rows))
+        "three outcomes: each replaced one retracted, in its transaction, before the assertion that replaced it")
+    (is (apply <= (map :t rows)) "oldest first (a retraction shares its transaction with the assertion that replaced it)")
+    (is (every? #(= #{:a :v :added? :t :at} (set (keys %))) rows) "plain data rows")
+    (is (every? #(and (= :seon.task/outcome (:a %)) (inst? (:at %))) rows))
+    (is (= (mapv :t rows) (mapv :t (pdb/history db (:db/id (d/entity db task-e)) {:attrs #{:seon.task/outcome}})))
+        "an entity id reads as the lookup ref does")))
+
+(deftest history-shows-a-retraction
+  (let [db (-> (mt/world {:history? true}) (set-outcome :running) (mt/with [[:db/retract task-e :seon.task/outcome :running]]))
+        rows (pdb/history db task-e {:attrs #{:seon.task/outcome}})]
+    (is (= [[:running true] [:running false]] (mapv (juxt :v :added?) rows)) "the retraction is a row with :added? false")))
+
+(deftest history-attrs-narrows-and-default-is-all
+  (let [db (set-outcome (mt/world {:history? true}) :running)
+        all (pdb/history db task-e)
+        one (pdb/history db task-e {:attrs #{:seon.task/outcome}})]
+    (is (< 1 (count (set (map :a all)))) "no :attrs: every attribute the entity has had")
+    (is (= #{:seon.task/outcome} (set (map :a one))) ":attrs narrows to the attributes named")
+    (is (= (filter #(= :seon.task/outcome (:a %)) all) one) "and is the same rows")))
+
+(deftest history-refuses-an-unknown-option
+  (let [db (mt/world {:history? true})
+        said (try (pdb/history db task-e {:attr #{:seon.task/outcome}}) nil (catch Exception e (str (ex-message e) (pr-str (ex-data e)))))]
+    (is (some? said) "a misspelt option is refused, never ignored")
+    (is (str/includes? (str said) ":attr") (str said))))
+
+(deftest history-of-an-entity-that-does-not-resolve-says-so
+  (let [db (mt/world {:history? true})]
+    (doseq [e [[:seon.task/id "no/such-task"] 12345]
+            :let [a (pdb/history db e)]]
+      (is (= :seon.db/unresolved (:seon.error/type a)) (pr-str a))
+      (is (= :entity (:kind a)))
+      (is (= e (:value a))))))
+
+(deftest history-on-a-store-with-history-off-says-so
+  ;; Datahike's d/history throws "history is only allowed on temporal indexed databases" on such a db
+  (let [a (pdb/history (mt/world) task-e)]
+    (is (= :seon.db/no-history (:seon.error/type a)) (pr-str a))))
+
+(deftest a-deleted-entitys-history-is-still-read
+  (let [db (mt/with (mt/world {:history? true}) (mt/without 'app.calc/inc2))
+        rows (pdb/history db [:var/name 'app.calc/inc2] {:attrs #{:var/name}})]
+    (is (= [true false] (mapv :added? rows)) "its name asserted, then retracted: the lookup ref resolves through history")))
+
+(deftest history-pull-reads-a-ref-as-it-was-at-that-transaction
+  (let [w (mt/world {:history? true})
+        db1 (mt/with w (mt/code 'app.h "(ns app.h)\n(defn f [x] (+ x 1))\n"))
+        old-form (:db/id (:var/form (d/entity db1 [:var/name 'app.h/f])))
+        db2 (mt/with db1 (mt/code 'app.h "(ns app.h)\n(defn f [x] (+ x 2))\n"))
+        ;; the old form's text changes after the fact: a pull as of now would show this
+        db3 (mt/with db2 [[:db/add old-form :form/src "(defn f [x] :changed-later)"]])
+        rows (pdb/history db3 [:var/name 'app.h/f] {:attrs #{:var/form} :pull [:form/src]})
+        added (filter :added? rows)]
+    (is (= 2 (count added)))
+    (is (str/includes? (:form/src (:v (first added))) "(+ x 1)") "the replaced form shows the text it had then")
+    (is (str/includes? (:form/src (:v (second added))) "(+ x 2)"))
+    (is (= "(defn f [x] :changed-later)" (:form/src (d/pull db3 [:form/src] old-form))) "while now it reads otherwise")
+    (is (= 'app.h/f (:v (first (pdb/history db3 [:var/name 'app.h/f] {:attrs #{:var/name} :pull [:form/src]}))))
+        "a value that is no ref is not pulled")))
+
+;; ---- at: the db at a named point (docs/storage.md#history) ----
+
+(defn- note-text [db e] (:note/text (d/entity db e)))
+
+(defn- two-writes
+  "On a test branch: a note written, then replaced. [conn e report-1 report-2]."
+  [conn]
+  (let [r1 (d/transact conn {:tx-data [{:db/id "n" :note/text "first" :note/agent :x}]})
+        e (get (:tempids r1) "n")
+        r2 (d/transact conn {:tx-data [[:db/add e :note/text "second"]]})]
+    [conn e r1 r2]))
+
+(deftest at-names-the-db-at-a-point
+  (ts/test-branch!
+   (fn [cfg conn]
+     (let [[_ e r1 r2] (two-writes conn)
+           t1 (:max-tx (:db-after r1)) t2 (:max-tx (:db-after r2))
+           now @conn
+           rows (pdb/history now e {:attrs #{:note/text}})]
+       (is (identical? now (pdb/at conn now {})) "no point named: the db it was given")
+       (is (= "first" (note-text (pdb/at conn now {:t t1}) e)) "{:t t} is the db as of t")
+       (is (= "second" (note-text (pdb/at conn now {:t t2}) e)))
+       (is (= (first (map :t rows)) t1) "a t history gave reads the old value")
+       (is (= "first" (note-text (pdb/at conn now {:t (:t (first rows))}) e)))
+       (is (= "first" (note-text (pdb/at conn now {:commit (d/commit-id (:db-after r1))}) e)) "{:commit} is that commit")
+       (is (= "second" (note-text (pdb/at conn now {:branch (:branch cfg)}) e)) "{:branch b} is b's last committed value")
+       (is (= "first" (note-text (pdb/at conn now {:branch (:branch cfg) :t t1}) e)) "{:branch b :t t} is b as of t")))))
+
+(deftest at-refuses-a-t-the-branch-never-had
+  (ts/test-branch!
+   (fn [cfg conn]
+     (let [[_ _ r1 _] (two-writes conn)
+           t1 (:max-tx (:db-after r1))]
+       (ts/test-branch!
+        (fn [cfg2 conn2]
+          (let [[_ _ s1 _] (two-writes conn2)
+                foreign (:max-tx (:db-after s1))
+                a (pdb/at conn @conn {:t foreign})]
+            (is (not= foreign t1))
+            (is (= [:seon.db/unresolved :t foreign] ((juxt :seon.error/type :kind :value) a))
+                "another branch's t is not 'around then' on this one")
+            (is (= :seon.db/unresolved (:seon.error/type (pdb/at conn @conn {:t (inc (:max-tx @conn))}))) "nor is a t after its last transaction")
+            (is (= :seon.db/unresolved (:seon.error/type (pdb/at conn @conn {:branch (:branch cfg) :t foreign}))))
+            (is (= :seon.db/unresolved (:seon.error/type (pdb/at conn @conn {:t 0})))))))))))
+
+(deftest at-says-an-unknown-commit-or-branch
+  (ts/test-branch!
+   (fn [cfg conn]
+     (let [c (random-uuid)
+           a (pdb/at conn @conn {:commit c})
+           b (pdb/at conn @conn {:branch :no-such-branch})]
+       (is (= [:seon.db/unresolved :commit c] ((juxt :seon.error/type :kind :value) a)))
+       (is (= [:seon.db/unresolved :branch :no-such-branch] ((juxt :seon.error/type :kind :value) b)))))))
+
+(deftest at-refuses-an-unknown-or-contradictory-option
+  (ts/test-branch!
+   (fn [cfg conn]
+     (let [said #(try (pdb/at conn @conn %) nil (catch Exception e (str (ex-message e) (pr-str (ex-data e)))))]
+       (is (str/includes? (str (said {:time 1})) ":time") "an unknown option")
+       (is (some? (said {:commit (random-uuid) :t 1})) ":commit with :t")
+       (is (some? (said {:commit (random-uuid) :branch :db})) ":commit with :branch")))))
+
+(deftest at-on-a-store-with-history-off-says-so
+  ;; the base db keeps no history: a t cannot be read, and d/as-of would throw
+  (ts/test-branch!
+   (fn [cfg conn]
+     (let [a (pdb/at conn (mt/world) {:t 536870913})]
+       (is (= :seon.db/no-history (:seon.error/type a)) (pr-str a))))))
