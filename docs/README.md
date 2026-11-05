@@ -50,7 +50,7 @@ The pages on how agents change Seon's own program and how a text's references an
 - [ctx](ctx.md): the agent's record as one map, `@ctx`, facts about its work kept by the change; the model and the person read one render of it (`render-ctx`), and `/agent/<id>/debug` prints it.
 - [render](render.md): every view, the model's context included, is the one value printer or a render declared on the value's schema; nothing clips.
 - [prompt](prompt.md): the system prompt, what every agent reads first (the standard format's short prompt).
-- [agent](agent.md): the help page, which `my.agent/help` answers section by section.
+- [agent](agent.md): the help page, which `my.agent/doc` reads section by section.
 - [turn](turn.md): the turn loop an agent works its task in: observe, act, end, and who runs which tests.
 - [model](model.md): the provider a profile names (none by default), the one tool, thinking off by default, usage as recorded.
 - [cost](cost.md): what a cost proof measures (the calling thread's CPU time and allocation) and why.
