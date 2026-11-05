@@ -389,7 +389,7 @@
                       berr [{:id "p-branch-error" :container "#p-task" :rev 0 :html (h/html [:section {:id "p-branch-error"} (render/html {} berr)])}]))
         ;; root's agents list, as root's walk drew it, and the agent's head from its facts on main
         sides (filterv #(= "#c-side" (:container %)) (some-> (:root-walk st) :w render/placed-units))
-        head (d/pull db [:seon.agent/id :seon.agent/status :seon.agent/branch :seon.agent/description {[:seon.process/_agent :as :processes] [:seon.process/pid :seon.process/forked-ms]}] eid)
+        head (d/pull db [:seon.agent/id :seon.agent/status :seon.agent/branch :seon.agent/description :seon.agent/max-turns {:seon.agent/task [:seon.task/id :seon.task/outcome :seon.task/reason]} {[:seon.process/_agent :as :processes] [:seon.process/pid :seon.process/forked-ms]}] eid)
         head-unit {:id "p-agent-head" :container "#p-head" :rev (hash head)
                    :html (h/html [:section {:id "p-agent-head" :class "rounded-md bg-base-900 p-3 text-sm text-text-100"} (ui/agent {} head)])}]
     (ui/page-chrome {:units (vec (concat sides [head-unit] units)) :view (ui/view-param view) :tab (if chat? :chat :debug)

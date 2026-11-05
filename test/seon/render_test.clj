@@ -698,7 +698,9 @@
   (let [[main branch _] (paged-dbs)
         [st1 _] (#'p/pass-view (branch-state main branch) [:chat :a3])
         made #(get-in % [:counts :rendered] 0)
-        r (d/with main (seon.task/agent-tx "b1" :a3 {:status :idle}))
+        ;; its process ended: the head reads "finished" where a busy or idle one of a running task reads "working" (ui/standing),
+        ;; and a commit whose head reads the same sends nothing
+        r (d/with main (seon.task/agent-tx "b1" :a3 {:status :ended}))
         [st2 patch] (#'p/pass-view (assoc st1 :main-db (:db-after r)) [:chat :a3])]
     (is (= 1 (- (made st2) (made st1))) "the head rendered again, nothing else")
     (is (= #{"p-agent-head"} (set (map first (:frags patch)))) "its fragment sent")
@@ -765,7 +767,7 @@
         (is (nil? p2))
         (is (= (get-in st1 [:counts :rendered]) (get-in st2 [:counts :rendered])))))
     (testing "the agent changed on main (a commit, as the writer reports it): its head re-renders, nothing else"
-      (let [r (d/with main (seon.task/agent-tx "b1" :a3 {:status :idle}))
+      (let [r (d/with main (seon.task/agent-tx "b1" :a3 {:status :ended}))
             [_ p] (pass (assoc st1 :main-db (:db-after r)))]
         (is (= #{"p-agent-head"} (:frags (patch-ids p))) "its head")
         (is (empty? (:prepends p)))))
@@ -1759,6 +1761,62 @@
     (is (str/includes? a3 "deepseek-flash") "its model")
     (is (str/includes? a3 "href=\"/agent/a3\"") "its page")
     (is (str/includes? (card 2) "no task yet"))))
+
+(deftest how-an-agents-work-stands-is-said-from-its-data
+  ;; owner, 2026-11-05: an agent whose task hit its turn cap read "waiting" and "idle", though a capped task is not woken
+  ;; by a message. ui/standing is the one function the header and both agent lists ask (seon.reconcile/park-outcomes: a
+  ;; parked task is woken by a message, a capped one waits for its budget to be raised)
+  (let [st (fn [status o & {:as more}] (ui/standing (merge {:seon.agent/status status} (select-keys more [:seon.agent/max-turns :seon.agent/outcome :seon.agent/ended-turn :seon.agent/turn :seon.agent/reason]))
+                                                     (when o {:seon.task/outcome o :seon.task/reason (:task-reason more)})))
+        text (fn [x] (str (:text x) (when (:detail x) (str " · " (:detail x)))))]
+    (testing "a task its agent works"
+      (is (= "working" (text (st :busy :running))))
+      (is (= "working" (text (st :idle :running))) "between two forms it still works")
+      (is (= "starting" (text (st :spawning :running))))
+      (is (= :live (:tone (st :busy :running)))))
+    (testing "waiting for you only where a message would be taken"
+      (is (= "waiting for you" (text (st :idle :parked))))
+      (is (= "waiting for you" (text (st :idle :told))))
+      (is (not= "waiting for you" (text (st :ended :parked))) "its process is gone: nothing answers")
+      (is (not= "waiting for you" (text (st :dead :parked)))))
+    (testing "a capped task is stopped, however idle its process looks"
+      (is (= "stopped at its cap · 40 turns" (text (st :idle :cap :seon.agent/max-turns 40))))
+      (is (= "stopped at its cap · 38 turns" (text (st :idle :cap :seon.agent/max-turns 40 :seon.agent/ended-turn 38))) "the turns it took when it recorded them")
+      (is (= "stopped at its cap" (text (st :idle :cap))) "no turns known, none said")
+      (is (not-any? #(str/includes? (text (st :idle :cap)) %) ["waiting" "idle"]))
+      (is (= :stopped (:tone (st :idle :cap)))))
+    (testing "a task's end"
+      (is (= ["done" "ready to merge" "at the merge gate" "merged" "behind main"]
+             (mapv #(text (st :ended %)) [:done :ready :gate :merged :behind])))
+      (is (= ["died" "lost" "killed" "refused" "closed"] (mapv #(text (st :dead %)) [:dead :lost :killed :refused :closed])))
+      (is (= :done (:tone (st :ended :merged))))
+      (is (= :failed (:tone (st :dead :dead)))))
+    (testing "its reason, the task's else the agent's own"
+      (is (= "proof-red seon.x/y" (:reason (st :idle :cap :task-reason "proof-red seon.x/y"))))
+      (is (= "proof-red seon.x/y" (:reason (ui/standing {:seon.agent/status :idle :seon.agent/outcome :cap :seon.agent/ended-turn 4 :seon.agent/reason "proof-red seon.x/y"} nil))))
+      (is (nil? (:reason (st :busy :running)))))
+    (testing "an agent with no task outcome: its own end while it is at the turn it ended on, else its status"
+      (is (= "stopped at its cap · 4 turns" (text (ui/standing {:seon.agent/status :idle :seon.agent/outcome :cap :seon.agent/ended-turn 4 :seon.agent/turn 4} nil))))
+      (is (= "done" (text (ui/standing {:seon.agent/status :idle :seon.agent/outcome :green :seon.agent/ended-turn 4} nil))))
+      (is (= "idle" (text (ui/standing {:seon.agent/status :idle :seon.agent/outcome :cap :seon.agent/ended-turn 4 :seon.agent/turn 5} nil))) "it was woken since")
+      (is (= ["working" "idle" "finished" "killed" "stopped"] (mapv #(text (ui/standing {:seon.agent/status %} nil)) [:busy :idle :ended :killed :dead]))))))
+
+(deftest a-stopped-agent-does-not-read-as-waiting-in-its-head-or-its-lists
+  (let [a {:seon.agent/id :a6 :seon.agent/status :idle :seon.agent/max-turns 40}
+        t {:seon.task/id "seon.ref/an-alias" :seon.task/outcome :cap :seon.task/reason "proof-red seon.ref-test/an-alias"}
+        head (h/html (ui/agent {} (assoc a :seon.agent/task t)))
+        c {:agents {1 (assoc a :task t) 2 {:seon.agent/id :a7 :seon.agent/status :idle :task {:seon.task/id "x/y" :seon.task/outcome :parked}}}}
+        side (h/html (ui/agent-side {:seon.ctx/ctx c} 1))
+        card (h/html (ui/agent-card {:seon.ctx/ctx c} 1))]
+    (is (str/includes? head "● stopped at its cap · 40 turns") head)
+    (is (str/includes? head "proof-red seon.ref-test/an-alias") "its reason, in the header line")
+    (is (not (str/includes? head "waiting")))
+    (is (str/includes? side "stopped at its cap") side)
+    (is (not-any? #(str/includes? side %) ["idle" "waiting"]))
+    (is (str/includes? card "stopped at its cap") card)
+    (is (not (str/includes? card "idle")))
+    (is (str/includes? (h/html (ui/agent-side {:seon.ctx/ctx c} 2)) "waiting for you") "a parked task can be answered")
+    (is (str/includes? (h/html (ui/agent {} {:seon.agent/id :a7 :seon.agent/status :idle :seon.agent/task {:seon.task/outcome :parked}})) "● waiting for you"))))
 
 (deftest the-model-and-the-page-read-the-same-parts
   ;; task seon.context/the-context-is-the-agents-evals-and-seons (2026-10-29: "build with both the context

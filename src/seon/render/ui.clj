@@ -1505,6 +1505,54 @@
    (for [[id e] (:evals c) :let [v (get-in e [:seon.eval/response :value]) k (:seon.eval/schema e)] :when (and (some? v) (render/render-of (ratom/realize v) k))]
      [#'eval-tile {} id])])
 
+(def ^:private task-stands
+  "How a task's :seon.task/outcome reads to a person: [words tone]. :parked and :told are woken by a message (seon.reconcile/park-outcomes);
+  :cap is not: it waits for its agent's turns to be raised and the task released."
+  {:running ["working" :live] :parked ["waiting for you" :ask] :told ["waiting for you" :ask] :cap ["stopped at its cap" :stopped]
+   :done ["done" :done] :merged ["merged" :done] :ready ["ready to merge" :quiet] :gate ["at the merge gate" :quiet] :behind ["behind main" :stopped]
+   :dead ["died" :failed] :lost ["lost" :failed] :killed ["killed" :failed] :refused ["refused" :failed] :closed ["closed" :quiet]})
+
+(def ^:private end-stands
+  "How the agent's own end (:seon.agent/outcome) reads where its task holds none: [words tone]."
+  {:green ["done" :done] :waiting ["waiting for you" :ask] :cap ["stopped at its cap" :stopped] :red ["ended red" :failed]
+   :failed ["failed" :failed] :merge-failed ["merge failed" :failed] :error ["ended in error" :failed]})
+
+(def ^:private status-stands
+  "How an agent's process reads where nothing else says how its work stands (:seon.agent/status): [words tone]."
+  {:spawning ["starting" :live] :busy ["working" :live] :idle ["idle" :quiet] :ended ["finished" :quiet] :killed ["killed" :quiet] :dead ["stopped" :quiet]})
+
+(def ^:private tone-class
+  "A standing's tone as the page's text colour."
+  {:live "text-signal" :ask "text-info" :done "text-success" :failed "text-error" :stopped "text-warning" :quiet "text-text-500"})
+
+(defn standing
+  "How an agent's work stands, one answer for its head and its lists, from data: the agent's attributes a and its
+  task's t (:seon.task/outcome, :seon.task/reason), each a map of the attributes it holds (a missing one is nothing).
+  The task's outcome says it where a judge has written one (a capped task is stopped, a parked one waits for a
+  message); else the agent's own end (:seon.agent/outcome, counted while the agent is at the turn it ended on); else its
+  process's status. A process that is gone is never working or waiting. {:state :text :detail :reason :tone :lit?}: the words, the
+  turns a cap spent, the reason (the task's, else the agent's end's) and the tone (tone-class); lit while it works."
+  {:malli/schema [:=> [:cat [:maybe :map] [:maybe :map]] [:map [:state :keyword] [:text :string] [:tone :keyword] [:lit? :boolean]
+                                                           [:detail {:optional true} :string] [:reason {:optional true} :string]]]}
+  [a t]
+  (let [status (:seon.agent/status a)
+        o (:seon.task/outcome t)
+        turn (:seon.agent/turn a)
+        end (when (and (:seon.agent/outcome a) (or (nil? turn) (= turn (:seon.agent/ended-turn a)))) (:seon.agent/outcome a))
+        gone? (contains? gone status)
+        [from k] (cond (and gone? (#{:running :parked :told} o)) [status-stands status]
+                       (and o (not= :running o)) [task-stands o]
+                       end [end-stands end]
+                       (and (= :running o) (= :spawning status)) [status-stands :spawning]
+                       o [task-stands o]
+                       :else [status-stands status])
+        [text tone] (get from k [(kname k) :quiet])
+        turns (when (= "stopped at its cap" text) (or (:seon.agent/ended-turn a) (:seon.agent/max-turns a)))
+        reason (some #(when-not (str/blank? %) %) [(:seon.task/reason t) (when end (:seon.agent/reason a))])]
+    (cond-> {:state (if (= from status-stands) (keyword "status" (name k)) k) :text text :tone tone :lit? (= :live tone)}
+      turns (assoc :detail (str turns (if (= 1 turns) " turn" " turns")))
+      reason (assoc :reason reason))))
+
 (defn agent
   "An agent's view (the declared html render of :seon.db/agent-fact), its head: its id, status,
   what it runs and on which branch. Its page is its parts (seon.render.proc's agent page,
@@ -1513,6 +1561,8 @@
   [opts v]
   ;; what it evaluates now (its process's :seon.process/running) is its conversation's newest part
   (let [{:seon.agent/keys [id status branch description]} v
+        ;; how its work stands: the task's outcome (a ctx's pull names the task :task), the agent's own end, else its status
+        stands (standing v (ratom/realize (or (:task v) (:seon.agent/task v))))
         ;; its current process's pid while it runs: an ended process's pid names nothing live
         ;; a ctx join holds its members by id (a map); root's own pull, a vector
         proc (task/newest-process (let [ps (:processes v)] (if (map? ps) (vals ps) ps)))
@@ -1520,10 +1570,12 @@
     [:div {:class "flex flex-col gap-1"}
      [:div {:class "flex items-baseline gap-3"}
       [:h1 {:class "text-base font-bold text-signal"} (kname id)]
-      ;; how it is now, at a glance: working (its process runs a form), waiting, or ended
-      [:span {:class (case status :busy "text-signal" (:green :done) "text-success" (:red :failed :error) "text-error" "text-text-500")}
-       ;; in a person's words: working while its process runs a form, waiting for you, finished
-       (str "● " (case status :busy "working" :idle "waiting" :ended "finished" :dead "stopped" (kname status)))]
+      ;; how its work stands, at a glance and in a person's words (standing): working, waiting for you only where a message
+      ;; is taken, stopped at its cap, merged; the reason it stands so beside it
+      [:span {:class (str "shrink-0 " (tone-class (:tone stands)))}
+       (str "● " (:text stands) (when (:detail stands) (str " · " (:detail stands))))]
+      (when-let [r (:reason stands)]
+        [:span {:class "min-w-0 truncate text-text-400" :title r} r])
       ;; what it evaluates now, while its process runs one: the newest thing it does, live
       (when-let [r (and pid (:seon.process/running proc))]
         [:code {:class "min-w-0 truncate text-text-300"} r])]
@@ -1585,11 +1637,12 @@
   while busy or running, its id linking to its page, its status."
   {:seon.render/style side-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int] :any]}
   [{c :seon.ctx/ctx} eid]
-  (let [{:seon.agent/keys [id status]} (relevant :seon.db/agent-fact (get-in c [:agents eid]))
-        on? (contains? #{:busy :running} status)]
-    [:li [:span {:class (if on? "text-signal" "text-text-500")} (if on? "●" "○")]
+  (let [a (relevant :seon.db/agent-fact (get-in c [:agents eid]))
+        id (:seon.agent/id a)
+        stands (standing a (ratom/realize (get-in c [:agents eid :task])))]
+    [:li [:span {:class (if (:lit? stands) "text-signal" "text-text-500")} (if (:lit? stands) "●" "○")]
      [:a {:href (str "/agent/" (kname id)) :class "font-semibold text-text-100"} (kname id)]
-     (when status [:span {:class "text-2xs text-text-500"} (name status)])]))
+     (when (:seon.agent/status a) [:span {:class (str "text-2xs " (tone-class (:tone stands)))} (:text stands)])]))
 
 (defn root-head
   "Root's head (a component over its ctx): its boot, its generation and, when it last went quiet,
@@ -1646,15 +1699,16 @@
   (let [a (get-in c [:agents eid])
         ;; its id, status and task alone, so another agent's eval redraws no card
         id (get a :seon.agent/id) status (get a :seon.agent/status)
-        on? (contains? #{:busy :running} status)
         t (ratom/realize (get a :task))
         {:seon.task/keys [outcome reason] task-id :seon.task/id} t
-        model (get a :seon.agent/model) max-turns (get a :seon.agent/max-turns)]
+        model (get a :seon.agent/model) max-turns (get a :seon.agent/max-turns)
+        stands (standing {:seon.agent/status status :seon.agent/max-turns max-turns} t)
+        on? (:lit? stands)]
     [:section
      [:p {:class "flex items-baseline gap-2"}
       [:span {:class (if on? "text-signal" "text-text-500")} (if on? "●" "○")]
       [:a {:href (str "/agent/" (kname id)) :class "font-bold text-text-100"} (kname id)]
-      (when status [:span {:class "text-2xs text-text-500"} (name status)])
+      (when status [:span {:class (str "text-2xs " (tone-class (:tone stands)))} (:text stands)])
       (when model [:span {:class "ml-auto text-2xs text-text-500"} model])]
      (if-not task-id
        [:p {:class "text-xs text-text-500"} "no task yet"]
