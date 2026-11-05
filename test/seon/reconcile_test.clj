@@ -1468,3 +1468,21 @@
       (is (some #(= {'seon.root-test/boots :error} (:seon.task/deferred-results %)) tx)
           (str "each deferred test :error: " (pr-str tx)))
       (is (some #(= refused (:seon.task/error %)) tx) "with why it was refused as the task's error"))))
+
+(clojure.test/deftest
+ an-observed-retraction-leaves-no-residue
+ (let [db (db-of diamond)
+       {db' :db-after txd :tx-data} (d/with db [[:db/retractEntity [:seon.task/id "demo/d"]]])
+       ops (for [dt txd] [(if (:added dt) :db/add :db/retract) (:e dt) (:a dt) (:v dt)])
+       idx (r/index db)
+       obs (r/observe idx db' ops)
+       listed (r/index db')]
+   (testing "a retraction observed from the last index is the index listed"
+     (is (= listed obs)))
+   (testing "no entry of the gone task is left behind"
+     (is (not (contains? (:tasks obs) "demo/d")))
+     (is (not (contains? (:acc obs) "demo/d")))
+     (is (not (contains? (:depth obs) "demo/d")))
+     (is (not (contains? (:done obs) "demo/d")))
+     (is (not (contains? (:needed-by obs) "demo/d")))
+     (is (every? seq (vals (:needed-by obs))) "no empty needed-by set"))))
