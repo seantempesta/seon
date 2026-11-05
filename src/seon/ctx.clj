@@ -2,7 +2,7 @@
   "The agent's record as one map, `@ctx` (docs/ctx.md): its agent entity pulled by a pattern,
   Datahike's pull syntax held as data (:seon.ctx/pattern: the agent's own edit, else its entity
   schema's), each join's members under the join's key (its :as: :evals, :runs, a run's :task,
-  :turns and :messages), a collection a map of its members by their ids, newest first; a window newest
+  :calls and :messages), a collection a map of its members by their ids, newest first; a window newest
   first (:limit with :reverse); a symbol joined by lookup (:by); every entity held once. Beside
   them its environment, :t :branch :commit.
 
@@ -558,11 +558,11 @@
 
 
 (defn- install!
-  "c as the atom's value: the tree, marked as ctx for its renders and with its basis (the branch
-  and t it is the record of: what an eval of it records, seon.repl/record-details); the index
-  held beside it."
+  "c as the atom's value: the tree, marked as ctx for its renders; the index held beside it. The one object
+  the atom holds until the next install is what an eval of `@ctx` records the basis of (identical to it, with
+  its :t and :branch: seon.repl/record-details); a map made of it is not."
   {:malli/schema [:=> [:cat [:map [:tree :map] [:ix :seon.ctx/ix]]] :nil]}
-  [c] (vreset! held c) (binding [*installing* true] (reset! ctx (with-meta (:tree c) {:seon.render/schema :seon.ctx/ctx :seon.render/basis (select-keys (:tree c) [:t :branch])}))) nil)
+  [c] (vreset! held c) (binding [*installing* true] (reset! ctx (with-meta (:tree c) {:seon.render/schema :seon.ctx/ctx}))) nil)
 
 (defn moved
   "The datoms db moved by from a to b: the last transaction's when b is its db (agent/transact!

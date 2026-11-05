@@ -141,6 +141,13 @@
  ;; Provenance: measured 2026-10-22 on seon.db-test/a-commit-costs-what-it-writes
  ;; (docs/storage.md#values-out-of-line); v1 kept values up to 4,096 bytes inline (seon.blob).
  :seon.config.store/value-out-of-line-bytes 1024
+ ;; Unit: characters. The largest value an eval's record keeps (seon.repl/record-details): a count over the value by a
+ ;; walk that stops once it passes the bound (each scalar 1, a string or keyword its length; nothing is printed to
+ ;; measure). At the bound: the value is not kept, its type and this bound are ({:seon.value/gone {:type :over}}),
+ ;; the transcript says it is gone, and the handle (result/e<n>) still reads it in the live process.
+ ;; Provenance: the owner's ruling, 2026-11-04 ("We only need to store what we need to retrieve"); 1 MiB is a
+ ;; round number above any value a reply shows, which the printer cuts to its token budget (docs/storage.md#plain-data).
+ :seon.config.store/max-value-chars 1048576
  ;; Codec: konserve's per-value compressor for every stored value (index nodes, values out of
  ;; line, commits): zstd frames at level 3 through libzstd (konserve.jolt.zstd, built from
  ;; reference-code/zstd), :lz4 frames (liblz4), or :none; a value's header names its codec, so a
@@ -423,7 +430,9 @@
  ;; roots and spun for minutes in an agent's fork; process tests were 782 s of 917 s of recorded
  ;; test time (pure-tests, 2026-10-23). A var missing here makes its tests run automatically
  ;; (slower, never wrong).
- :seon.config.source/process-vars #{seon.agent-test/in-agent seon.lib/fork! seon.test-store/binary-sh}
+ ;; seon.cost-test/measure-unit and seon.print-cost-test/as-defined! start no process, but measure or reload the runtime
+ ;; they run on, which is bin/test's and not the built binary an agent's test child forks from: those proofs run at the gate.
+ :seon.config.source/process-vars #{seon.agent-test/in-agent seon.cost-test/measure-unit seon.lib/fork! seon.print-cost-test/as-defined! seon.test-store/binary-sh}
  ;; Unit: vars. What the processes a test starts run for it: a form using a process var or a binary
  ;; var reaches them. seon.server/op-answer, the server's answer, a multimethod on a request's :op:
  ;; a form reaches only the methods of the ops it sends (its :form/ops), so a change to the :done

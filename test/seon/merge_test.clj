@@ -9,7 +9,7 @@
             [datahike.api :as d]
             [seon.db :as pdb]
             [seon.merge :as pm]
-            [seon.program :as program] [seon.doc]
+            [seon.program :as program] [seon.doc] [seon.config]
             [seon.edn :as sedn] [seon.contract :as contract] [malli.core :as m] [malli.generator :as mg]
             [my.schema :as schema]
             [seon.source :as source] [seon.writer]
@@ -171,7 +171,7 @@
 
 (deftest scratch-and-observations-never-merge
   (let [ours (with (base) [{:note/text "scratch" :note/agent :a1}
-                         {:seon.eval/id "e1" :seon.eval/by "a1" :seon.eval/record {:code "(+ 1 2)" :response {:handle 'result/e1 :value 3}}}
+                         {:seon.eval/id "e1" :seon.eval/by "a1" :seon.eval/code "(+ 1 2)" :seon.eval/response {:handle 'result/e1 :value 3}}
                          {:seon.agent/id :a1 :seon.process/pid 7}
                          {:task/name :x/y :task/status :done}])]
     (is (= (pm/program (base) #{}) (pm/program ours #{})))
@@ -284,29 +284,29 @@
   ;; task seon.source/schemas-are-part-of-the-program: a schema entry is a program key,
   ;; [:schema k], merged like a var (v1's [:seon.schema/key k] identity), and the merge's
   ;; changed resource is written back with only its entry changed
-  (let [text (slurp facts-path)
+  (let [text (slurp (str (seon.config/checkout) "/" facts-path))
         main (let [db (empty-db)] (d/db-with db (source/import-tx db {facts-path text})))
         ;; the entry's line as the file has it (a property added to the entry moves with it), and
         ;; its form with :paused added, read from that text
-        status-line (some #(when (str/starts-with? % " :seon.run/status ") %) (str/split-lines text))
-        status (edn/read-string (str/replace (subs status-line (count " :seon.run/status ")) ":closed :refused]]" ":closed :refused :paused]]"))
-        ours (-> main (registered :seon.run/status status) (registered :user/qty :int))
-        theirs (registered main :seon.run/pid [:int {:min 1}])
+        status-line (some #(when (str/starts-with? % " :seon.task/reason ") %) (str/split-lines text))
+        status (edn/read-string "[:string {:min 1}]")
+        ours (-> main (registered :seon.task/reason status) (registered :user/qty :int))
+        theirs (registered main :seon.task/merged-t [:int {:min 1}])
         prog #(pm/program % #{})
         r (pm/three-way (prog main) (prog ours) (prog theirs))]
-    (is (= [[:schema :seon.run/status]] (keys (:ours r)))
+    (is (= [[:schema :seon.task/reason]] (keys (:ours r)))
         "the branch's change is its key; a scratch key is no program")
-    (is (= {:form (binding [*print-namespace-maps* false] (sedn/encode status)) :file facts-path} (second (get (:ours r) [:schema :seon.run/status]))))
-    (is (= [[:schema :seon.run/pid]] (:apply r)) "a key only the other side changed applies")
+    (is (= {:form (binding [*print-namespace-maps* false] (sedn/encode status)) :file facts-path} (second (get (:ours r) [:schema :seon.task/reason]))))
+    (is (= [[:schema :seon.task/merged-t]] (:apply r)) "a key only the other side changed applies")
     (is (= [] (:conflicts r)) "different keys of one resource do not conflict")
     (testing "one key changed two ways conflicts at its key"
-      (let [r2 (pm/three-way (prog main) (prog ours) (prog (registered main :seon.run/status [:enum :running])))]
-        (is (= [[:schema :seon.run/status] :both-modified] ((juxt :key :kind) (first (:conflicts r2)))))))
+      (let [r2 (pm/three-way (prog main) (prog ours) (prog (registered main :seon.task/reason [:string {:max 5}])))]
+        (is (= [[:schema :seon.task/reason] :both-modified] ((juxt :key :kind) (first (:conflicts r2)))))))
     (testing "merged into main: the entry is main's, no longer the binary's, and write-back changes only its bytes"
       (let [main2 (d/db-with main (pm/merge-tx main main ours (keys (:ours r)) #{}))]
-        (is (= #{:seon.run/status} (set (keys (program/schema-changes main2)))))
+        (is (= #{:seon.task/reason} (set (keys (program/schema-changes main2)))))
         (is (= [facts-path] (source/changed-files main2 (:ours r))))
-        (is (= {facts-path (str/replace text status-line (str/replace status-line ":closed :refused]]" ":closed :refused :paused]]"))}
+        (is (= {facts-path (str/replace text status-line (str/replace status-line ":string" "[:string {:min 1}]"))}
                (source/files main2 (source/changed-files main2 (:ours r)))))))))
 
 (deftest the-delta-three-way-reads-data-and-schema-entries-as-the-program-does

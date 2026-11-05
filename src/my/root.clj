@@ -43,7 +43,9 @@
   "Release tasks ids: the one release (nothing autoruns). Each held task becomes running,
   by compare-and-swap on main (a cancel! between the read and the write refuses the write);
   each id that is not held (unknown, running, cancelled) is answered :seon.root/not-held
-  under :not-held, and only the held ones are written. Answers the writer's answer (or
+  under :not-held, and only the held ones are written. A release is a person's continue: the reasons root last gave
+  (:seon.task/reasons) are retracted, so the same again is news to the next judgment (seon.reconcile/judgment); to go
+  on past a turn cap, raise the agent's :seon.agent/max-turns first (docs/turn.md#the-cap). Answers the writer's answer (or
   {:ok true :changed 0} when none is held) with :not-held when any."
   {:malli/schema [:=> [:cat :seon.root/sys [:sequential :seon.task/id]] :map]}
   [sys ids]
@@ -55,7 +57,7 @@
                                        (str "task " id (if-let [e (x id)] (str " is " (name e)) " does not exist") ", not held: nothing to release")
                                        {:task id :execution (x id)})))]
     (cond-> (if (seq held)
-              @(root/transact-main! sys (mapv #(vector :db/cas [:seon.task/id %] :seon.task/execution :held :running) held))
+              @(root/transact-main! sys (into [] (mapcat #(vector [:db/cas [:seon.task/id %] :seon.task/execution :held :running] [:db.fn/retractAttribute [:seon.task/id %] :seon.task/reasons])) held))
               {:ok true :changed 0})
       (seq refused) (assoc :not-held refused))))
 
@@ -121,26 +123,26 @@
   failed write-back left (the :seon.git/commit-failed error on the run, naming them), read from
   main as it is now and committed in one :git effect like the reconciler's. What the git effect
   answers is recorded by seon.reconcile/commit-tx: the sha on each run, which clears the error (and
-  holds a new one for any file main has no text for), or the error again. A run with no lost
+  holds a new one for any file main has no text for), or the error again. A task with no lost
   write-back is answered :seon.root/nothing-lost under :not-lost and left out; no source root, or no
-  text on main for any of the files, is answered at once and recorded nowhere (the runs keep their
+  text on main for any of the files, is answered at once and recorded nowhere (the tasks keep their
   error). Answers {:written ids :sha}, the git effect's error, or the precondition's, with :not-lost
   when any."
-  {:malli/schema [:=> [:cat :seon.root/sys [:sequential :seon.run/id]] :map]}
+  {:malli/schema [:=> [:cat :seon.root/sys [:sequential :seon.task/id]] :map]}
   [sys ids]
   (let [db @(:conn sys)
-        runs (into {} (for [id ids] [id (task/run db id)]))
-        lost (filterv #(some? (reconcile/lost-write-back (runs %))) ids)
+        tasks (into {} (for [id ids] [id (d/pull db [:seon.task/outcome :seon.task/error] [:seon.task/id id])]))
+        lost (filterv #(some? (reconcile/lost-write-back (tasks %))) ids)
         not-lost (vec (for [id ids :when (not-any? #{id} lost)]
                         (contract/error :seon.root/nothing-lost #'my.root/write-back!
-                                        (str "run " id (if (runs id) " has no write-back to repeat" " does not exist")) {:run id})))
-        paths (vec (sort (distinct (mapcat #(:seon.git/files (reconcile/lost-write-back (runs %))) lost))))
+                                        (str "task " id (if (:seon.task/outcome (tasks id)) " has no write-back to repeat" " does not exist")) {:task id})))
+        paths (vec (sort (distinct (mapcat #(:seon.git/files (reconcile/lost-write-back (tasks %))) lost))))
         root (config/value :seon.config.source/root)
         files (when (and (seq lost) root) (doc/files db paths))
-        members (vec (for [id lost] {:task (:seon.run/task (runs id)) :run id}))
+        members (vec (for [id lost] {:task id}))
         r (cond (empty? lost) {:written []}
                 (nil? root) (contract/error :seon.root/no-source-root #'my.root/write-back!
-                                            "no source root declared (:seon.config.source/root): nothing is written back here" {:runs lost})
+                                            "no source root declared (:seon.config.source/root): nothing is written back here" {:tasks lost})
                 (empty? files) (contract/error :seon.root/no-source-text #'my.root/write-back!
                                                (str "main holds no text for " (str/join ", " paths) ": nothing to write back") {:paths paths})
                 :else @(root/effect! sys :git {:dir root :branch (config/value :seon.config.source/branch) :files files
@@ -155,21 +157,23 @@
   gate checkout (:seon.config.source/gate-checkout). A merge's gate runs them before it merges
   with nobody asking (seon.reconcile's :gate), so the :seon.task/gate? this sets is no longer
   read; it stays until THE PLAN step 0.7 has exercised the gate (task
-  seon.proofs/prove-is-the-one-runner). A run
+  seon.proofs/prove-is-the-one-runner). A task
   that already merged unasked (its open :unrun problem) has them run now, through the
   :tests effect on the merges branch's head, which holds its change; their results are
-  recorded on it (:seon.run/deferred-results), which closes the problem when each passed.
-  Answers {:asked ids :ran {run {test status}}}; without a gate checkout declared, the
-  merged ones' tests are each :error, with :seon.root/no-gate-checkout on the run."
+  recorded on it (:seon.task/deferred-results), which closes the problem when each passed.
+  Answers {:asked ids :ran {task {test status}}}; without a gate checkout declared, the
+  merged ones' tests are each :error, with :seon.root/no-gate-checkout on the task."
   {:malli/schema [:=> [:cat :seon.root/sys [:sequential :seon.task/id]] :map]}
   [sys ids]
   @(root/transact-main! sys (vec (for [id ids] {:seon.task/id id :seon.task/gate? true})))
   (let [want (set ids)
-        unrun (for [[aid a] (sort-by key (task/runs @(:conn sys)))
-                    :when (and (want (:seon.run/task a)) (= :merged (:seon.run/status a))
-                               (seq (:seon.run/deferred a))
-                               (not-every? #(= :pass (get (:seon.run/deferred-results a) %)) (:seon.run/deferred a)))]
-                [aid (vec (sort-by str (:seon.run/deferred a)))])
+        db @(:conn sys)
+        unrun (for [id (sort want)
+                    :let [t (d/pull db [:seon.task/outcome :seon.task/deferred :seon.task/deferred-results] [:seon.task/id id])]
+                    :when (and (= :merged (:seon.task/outcome t))
+                               (seq (:seon.task/deferred t))
+                               (not-every? #(= :pass (get (:seon.task/deferred-results t) %)) (:seon.task/deferred t)))]
+                [id (vec (sort-by str (:seon.task/deferred t)))])
         ran (into {} (for [[aid tests] unrun
                            :let [repo (config/value :seon.config.source/gate-checkout)
                                  r (if repo
@@ -177,10 +181,9 @@
                                      (contract/error :seon.root/no-gate-checkout #'my.root/gate!
                                                      "no gate checkout declared (:seon.config.source/gate-checkout): the process tests cannot run here" {:tests tests}))
                                  rs (if (contract/error? r) (zipmap tests (repeat :error)) (get-in r [:value :results]))]]
-                       (do @(root/transact-main! sys (err/asked-tx @(:conn sys) r :seon.run/deferred-results
-                                                                   (cond-> [{:seon.run/id aid
-                                                                             :seon.run/deferred-results (vec (for [[t st] rs] {:seon.proof/test t :seon.proof/status st}))}]
-                                                                     (contract/error? r) (conj {:seon.run/id aid :seon.run/error r}))))
+                       (do @(root/transact-main! sys (err/asked-tx @(:conn sys) r :seon.task/deferred-results
+                                                                   (cond-> [{:seon.task/id aid :seon.task/deferred-results rs}]
+                                                                     (contract/error? r) (conj {:seon.task/id aid :seon.task/error r}))))
                            [aid rs])))]
     {:asked (vec ids) :ran ran}))
 
@@ -253,7 +256,7 @@
 
 (def ^:private example-identities
   "The attributes that name a record of an example session, each unique. See docs/tasks.md#a-task-names-example-sessions."
-  [:seon.agent/key :seon.eval/id :seon.message/id :seon.turn/id])
+  [:seon.agent/key :seon.eval/id :seon.message/id :seon.model-call/id])
 
 (defn example-txs
   "The tx-data of the example session file at path (seon.context/session-tx's answer written with pr-str: a

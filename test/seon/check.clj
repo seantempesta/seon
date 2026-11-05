@@ -245,7 +245,10 @@
 
 (def named-test-inputs
   "{[test-namespace var, the read] why its verdict is a function of its digest anyway}."
-  '{[seon.db-test/a-commit-costs-what-it-writes seon.profile/now-ns] "printed ms per turn; the verdict is on bytes"
+  '{[seon.config-test/env-reads-a-set-variable-and-nil-for-an-unset-one System/getenv] "the tag and the test read the one variable, so the verdict is the same whatever its value"
+    [seon.config-test/envf-formats-variables System/getenv] "the tag and the test read the one variable, so the verdict is the same whatever its value"
+    [seon.config-test/or-takes-the-first-non-nil System/getenv] "the tag and the test read the one variable, so the verdict is the same whatever its value"
+    [seon.db-test/a-commit-costs-what-it-writes seon.profile/now-ns] "printed ms per turn; the verdict is on bytes"
     [seon.db-test/a-commit-costs-what-it-writes seon.profile/ms-since] "printed ms per turn; the verdict is on bytes"
     [seon.model-test/a-streamed-reply-ends-when-the-server-ends-it Thread/sleep] "the stream's pacing is the subject: a deadline can only turn it red (FINDINGS #13)"
     [seon.model-test/a-streamed-reply-ends-when-the-server-ends-it clojure.core/rand-int] "a port: a collision can only turn it red (FINDINGS #14)"
@@ -390,7 +393,7 @@
                  (remove #(= :merge (:seon.task/kind %)) (seon.fixtures/decls problem-specs 'problems nil)))
         _ (my.root/create! sys ds)
         _ (my.root/run! sys ["problems/p1" "problems/p2"])
-        ;; named: the report is made of what the reconciler's runs write (the judge's red and cost
+        ;; named: the report is made of what the reconciler writes (the judge's red and cost
         ;; rows), so the wait ends when root goes quiet with a class missing (:seon.root/quiet-before-true)
         ;; and the :checks below name which one, never a wait for a row that cannot come
         _ (seon.root/await-db sys "the provoked problems (a red proof, a cost verdict, a platform defect, a death) are on main"
@@ -407,8 +410,8 @@
       {:report {:replies (mapv short-items (conj r1 r2 r3))
                 :counts (into (sorted-map) (for [[k v] (:classes p)] [k (:n v)]))
                 :died (select-keys (:example died) [:exit :stderr :last-op])
-                :red (select-keys red [:run :test :assertions :evidence])
-                :cost (select-keys cost-row [:run :test :verdict])
+                :red (select-keys red [:task :test :assertions :evidence])
+                :cost (select-keys cost-row [:task :test :verdict])
                 :stalled (select-keys stall [:agent :message])
                 :ms (- (System/currentTimeMillis) t0)}
        :checks {:eval (every? (types :eval) [:seon.agent/eval-error :seon.instrument/contract-error])
@@ -1641,11 +1644,11 @@
 
 (defn- eval-records
   "The eval records on db of whom the evals are on, by its identity (seon.repl/record-tx): an
-  agent's [:seon.agent/id id], or root's [:seon.root/id :root], each its record with who
-  evaluated it (:by, :seon.eval/by): [{:code :text :by ...}]."
+  agent's [:seon.agent/id id], or root's [:seon.root/id :root], each its code and who
+  evaluated it (:by, :seon.eval/by): [{:code :by}]."
   [db [attr id]]
-  (vec (for [[r by] (d/q '[:find ?r ?by :in $ ?attr ?id :where [?a ?attr ?id] [?e :seon.eval/agent ?a] [?e :seon.eval/record ?r] [?e :seon.eval/by ?by]] db attr id)]
-         (assoc r :by by))))
+  (vec (for [[code by] (d/q '[:find ?c ?by :in $ ?attr ?id :where [?a ?attr ?id] [?e :seon.eval/agent ?a] [?e :seon.eval/code ?c] [?e :seon.eval/by ?by]] db attr id)]
+         {:code code :by by})))
 
 (defn await-records
   "What (read) answers once (enough? it) holds, read again at each :commit event of agent a
@@ -1717,6 +1720,25 @@
   "The OS threads of process pid (ps -M lists one line per thread after its header)."
   [pid]
   (dec (count (clojure.string/split-lines (:out (clojure.java.shell/sh "ps" "-M" "-p" (str pid)))))))
+
+(defn agent-tests
+  "Every test that reaches no process, run as a Seon agent runs them: forked from one agent that has drawn its page, on a
+  root whose config is not bin/test's (docs/merging.md#a-test-child-is-a-fork-of-a-live-agent). Green under bin/test and
+  red here is a test reading its runner, or its agent's state leaking into it, which blocks a real agent's merge. It selects
+  through seon.agent/test-plan, as an agent's own run does, and judges everything it selected; bin/check gives it a verdict
+  cache of its own, so nothing is reused."
+  []
+  (run-check "AGENT-TESTS" {:datoms 2000 :source {:root (seon.config/checkout) :dirs (seon.config/value :seon.config.source/dirs) :branch :none}}
+   (fn [sys]
+    (let [[a] (spawn-ready! sys {:task "agent-tests" :branch :agent-tests1})
+          out (str (:agents-dir (:store (c/state sys))) "/agent-tests.edn")
+          _ @(c/submit! sys a (str "(do (seon.repl/page-hiccup)"
+                                   " (let [r (seon.agent/run-tests-forked (seon.config/value :seon.config.agent/test-ticks) #{} :main)]"
+                                   " (spit " (pr-str out) " (pr-str (update r :reports (fn [rs] (filterv #(not= :pass (:type %)) rs)))))))"))
+          r (read-string (slurp out))
+          reds (:reports r)]
+      {:report (assoc (select-keys r [:ran :pass :fail :error]) :reds (mapv (juxt :var :message :actual) reds))
+       :checks {:tests-ran (pos? (:ran r 0)) :none-red (empty? reds)}}))))
 
 (defn threads-check
   "Session RC1's physics rule: the processes that fork (the fork server; an agent, for its
@@ -1955,6 +1977,7 @@
      "durable-read" (fn [n more] (durable-read n))
      "window-write" (fn [n more] (window-write n))
      "window-read" (fn [n more] (window-read n))
+     "agent-tests" (fn [n more] (agent-tests))
      "scale" (fn [n more] (scale (n-or n "100")))
      "spawn-phases" (fn [n more] (spawn-phases (parse-long (or n "1"))))
      "scale-work" (fn [n more] (scale-work (n-or n "10") (not= "no-search" (first more))))

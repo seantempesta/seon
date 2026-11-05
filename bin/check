@@ -1,6 +1,6 @@
 #!/bin/zsh
 # bin/check [N] — the platform's end-to-end checks on target/seon (bin/build seon), each a
-# mode of seon.check (laws is bin/laws and health bin/test --health, neither on the binary): contracts, mg-check, fx, config, system, mcp, threads, instrument, record,
+# mode of seon.check (laws is bin/laws and health bin/test --health, neither on the binary): contracts, mg-check, fx, config, system, mcp, agent-tests, threads, instrument, record,
 # problems, smoke, robust, lifecycle, backpressure, hotreload, drain, idle, orphan,
 # durable, window, e2e tasks and scenarios, swarm (10 tasks over 5 shared vars, max-running 8),
 # resume, scale N (default N = 100), scale-work N [no-search], spawn-phases N (N = 10 agents that work: evals and a prove of ~60 tests each; a single mode, not in a full run). A run's steps run at once, :seon.config.proofs/jobs at a
@@ -159,7 +159,7 @@ if (( NEEDS )); then
 echo "== seed (the one store every step branches from: made when missing)"; step seed "" run seed 2000
 read -r STORE KB0 BR0 <<< "$(run store)"
 # the steps' own mains: what a failed earlier run left is deleted before this run's step
-STEPS=(seed fx config system mcp threads instrument record problems smoke robust lifecycle backpressure hotreload drain idle
+STEPS=(seed fx config system mcp agent-tests threads instrument record problems smoke robust lifecycle backpressure hotreload drain idle
        orphan durable window ids vectors e2e-calc e2e-conflict e2e-semantic e2e-hairy e2e-newns e2e-sibling swarm e2e-loop e2e-held resume scale)
 run drop ${STEPS/#/check-} > "$OUT/drop-before.log" 2>&1 || failed "drop-before ($OUT/drop-before.log)"
 fi
@@ -209,6 +209,7 @@ u-fx() { echo "== fx (an effect from an agent through its owner proc)"; step fx 
 u-config() { echo "== config (the config in force as facts on main; an agent reads them from its branch)"; step config "" run config }
 u-system() { echo "== system (root's procs from resources/seon/system.edn; apply! touches only what changed)"; step system "" run system }
 u-mcp() { echo "== mcp (an outside MCP client evals in an agent and as root; both recorded :outside)"; step mcp "" run mcp-proof }
+u-agent-tests() { echo "== agent-tests (every test that reaches no process, forked from an agent that has drawn its page, on a verdict cache of its own)"; mkdir -p "$OUT/agent-tests-results"; SEON_RESULTS_DIR=$OUT/agent-tests-results step agent-tests "" run agent-tests --set ':seon.config.ai/provider=:openai-compat' }
 u-threads() { echo "== threads (the fork server, an agent and its clone stay single-threaded: no GC sweepers where we fork)"; step threads "" run threads }
 u-instrument() { echo "== instrument"; step instrument "" run instrument }
 u-record() { echo "== record"; step record "" run record }
@@ -260,7 +261,7 @@ u-e2e-calc() { echo "== tasks: calc (6-task graph, cancel)"; step e2e-calc "" ru
 for k in conflict semantic hairy newns sibling; do functions[u-e2e-$k]="echo '== tasks: scenario $k'; step e2e-$k '' run e2e scenario $k"; done
 u-swarm() { echo "== swarm (10 tasks over 5 shared vars, max-running 8)"; step swarm ":merges|:checks|^SWARM " run swarm 10 8 }
 u-e2e-loop() { echo "== loop (Seon's own source is main's program: a task changes seon.generation/generation, its merge is written back, committed on a clone's jolt/seon-merges, and live in root and in an agent forked after it, nothing built)"; step e2e-loop ":source|:commits|:live|LOOP" run e2e loop "$OUT/loop" }
-u-e2e-held() { echo "== held (add always wrong: parked at its cap, its process kept, named the root cause of what it blocks; the owner's message wakes the same agent: one new run on its branch, parked again and named again; each wait ends on quiescence)"; step e2e-held ":root-causes|:message" run e2e held }
+u-e2e-held() { echo "== held (add always wrong: parked at its cap, its process kept, named the root cause of what it blocks; the owner raises its agent's budget, holds and releases it: the same agent works on from its turn count, parked again and named again; each wait ends on quiescence)"; step e2e-held ":root-causes|:release" run e2e held }
 u-resume() {
   echo "== resume (root SIGKILLed mid-graph; a new root finishes it)"
   want resume && run e2e resume check-resume > "$OUT/resume1.log" 2>&1; step resume "" run e2e resume2 check-resume
@@ -274,7 +275,7 @@ u-resume() {
 # seeded store (its data file; LMDB makes its lock file), the same content as a branch of it,
 # deleted when the unit is green. scale runs alone after them: it measures the machine's memory.
 if (( NEEDS )); then JOBS=$(run jobs); else JOBS=2; fi
-UNITS=(laws lmdb-kill lmdb-sem forks health contracts test-inputs mg-check fx config system mcp threads instrument record problems smoke robust lifecycle
+UNITS=(laws lmdb-kill lmdb-sem forks health contracts test-inputs mg-check fx config system mcp agent-tests threads instrument record problems smoke robust lifecycle
        backpressure hotreload drain idle orphan durable window ids e2e-calc e2e-conflict e2e-semantic e2e-hairy e2e-newns
        e2e-sibling swarm e2e-loop e2e-held resume vectors)
 # the longest first, by the last full run's measured wall seconds (a unit not measured yet first):

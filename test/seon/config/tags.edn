@@ -1,9 +1,9 @@
 ;; Every aero tag the config may use, read under Jolt by seon.config-test (one deftest each).
-{:env #env JOLT_PWD
+{:env #env PATH
  :env-unset #env SEON_CONFIG_TEST_NEVER_SET
- :envf #envf ["%s/x" JOLT_PWD]
+ :envf #envf ["%s/x" PATH]
  :or-unset #or [#env SEON_CONFIG_TEST_NEVER_SET 7]
- :or-set #or [#env JOLT_PWD 7]
+ :or-set #or [#env PATH 7]
  :long #long "42"
  :long-or #long #or [#env SEON_CONFIG_TEST_NEVER_SET "5"]
  :double #double "1.5"

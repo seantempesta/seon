@@ -111,7 +111,7 @@
         cmd (str "'" jolt "' -A:test -e " (pr-str (code "x")) " > /dev/null 2> '" path "-x.err' & x=$!; "
                  "'" jolt "' -A:test -e " (pr-str (code "y")) " > /dev/null 2> '" path "-y.err' & y=$!; "
                  "wait $x; ex=$?; wait $y; ey=$?; echo \"$ex $ey\"")
-        r (clojure.java.shell/sh "nice" "-n" "10" "zsh" "-c" cmd)
+        r (clojure.java.shell/sh "nice" "-n" "10" "zsh" "-c" cmd :dir (seon.config/checkout))   ; -A:test reads the checkout's deps.edn: the test's own working directory is not it
         ends (zipmap ["x" "y"] (map parse-long (str/split (str/trim (:out r)) #" ")))
         {:keys [conn]} (pdb/open! :lmdb path 0 :db)
         made (for [t ["x" "y"] i (range 50)] (keyword (str t "-" i)))]
@@ -424,7 +424,7 @@
   (let [i (mod (* k n) (- (count text) n))] (subs text i (+ i n))))
 
 (defn- turn-facts
-  "Turn k of a run as seon.turn/act! records it: the basis its context was built from
+  "Turn k of an agent as seon.turn/act! records it: the basis its context was built from
   (the commit, its red assertion; the text is made again from it, seon.context/render), its
   reply (1,500 bytes) and its eval call, whose eval's record holds what it evaluated to as the
   next turn shows it (2,000). The reply is real prose and the evaluated value real source, each turn its own
@@ -432,13 +432,11 @@
   printed data: a slurp, a source, a test's report): a repeated letter compressed ~3x better
   than real turn text and made LZ4 look like the fix (2026-10-22)."
   [k]
-  [{:db/id "turn" :seon.turn/id (str "att/" k) :seon.turn/run {:seon.run/id "att"} :seon.turn/n k :seon.turn/origin :model
-    :seon.turn/reply (slice @prose k 1500)
-    :seon.turn/calls [{:id "call-0" :code "(f 2)" :eval (str "e" k)}]}
-   {:seon.model-call/id (str "att/" k) :seon.model-call/turn "turn"
-    :seon.model-call/basis {:commit (java.util.UUID. 0 k) :task "t/x" :run "att" :turn k :max-turns 8 :origin :model}}
+  [{:seon.model-call/id (str "att/" k) :seon.model-call/agent {:seon.agent/key "att"} :seon.model-call/n k :seon.model-call/origin :model
+    :seon.model-call/reply (slice @prose k 1500) :seon.model-call/forms 1
+    :seon.model-call/basis {:commit (java.util.UUID. 0 k) :task "t/x" :turn k :max-turns 8 :origin :model}}
    ;; the call's eval, whose record holds its response as the next turn reads it
-   {:seon.eval/id (str "e" k) :seon.eval/by "a1" :seon.eval/record {:code "(f 2)" :response {:handle (symbol "result" (str "e" k)) :value (slice @code k 2000)}}}])
+   {:seon.eval/id (str "e" k) :seon.eval/by "a1" :seon.eval/code "(f 2)" :seon.eval/response {:handle (symbol "result" (str "e" k)) :value (slice @code k 2000)}}])
 
 (defn- write-turns!
   "Bytes the store at path gains when branch b gets n turns through the agent's run-ahead
@@ -484,7 +482,7 @@
         reply (slice @prose 7 3000)
         vk (hasch.core/uuid reply)
         on (fn [b f] (let [c (d/connect (assoc cfg :branch b))] (try (f c) (finally (d/release c)))))
-        cold-read (fn [] (on :turns (fn [c] [(d/q '[:find ?r . :where [_ :seon.turn/reply ?r]] @c)
+        cold-read (fn [] (on :turns (fn [c] [(d/q '[:find ?r . :where [_ :seon.model-call/reply ?r]] @c)
                                              (:reads @(:stats (:storage (:store @c))))])))
         stored? (fn [] (on :db #(k/exists? (:store @%) vk {:sync? true})))
         gc! (fn [] (on :db #(datahike.gc/gc-storage! @% (java.util.Date. 0) {:sync? true})))]
@@ -492,7 +490,7 @@
       (on :db #(d/branch! % :db :turns))
       (on :turns (fn [c]
                    (d/transact c {:tx-data (turn-facts 0)})
-                   (d/transact c {:tx-data [{:seon.turn/id "att/0" :seon.turn/reply reply}]})
+                   (d/transact c {:tx-data [{:seon.model-call/id "att/0" :seon.model-call/reply reply}]})
                    (pdb/sync! cfg)))
       (is (= reply (on :db #(k/get (:store @%) vk nil {:sync? true}))) "the value is stored under its content key")
       (testing "GC keeps a value a branch reaches, and a cold read swaps the reference back for it"
@@ -503,6 +501,24 @@
         (on :db #(d/delete-branch! % :turns))
         (gc!)
         (is (not (stored?))))
+      (finally (clojure.java.shell/sh "rm" "-rf" path)))))
+
+(deftest a-large-value-holding-ratios-commits-and-reads-back
+  ;; task seon.db/a-ratio-at-a-commit-ends-its-agent. A value past :seon.config.store/value-out-of-line-bytes is stored
+  ;; under its content key, hasch's uuid of the value (docs/storage.md#values-out-of-line): hasch.platform had no
+  ;; encoding for clojure.lang.Ratio, so a large value holding one threw at its commit, and a small one did not (its
+  ;; datom is no key). A store on disk of this test's own, the last resort: the in-memory store has no out-of-line
+  ;; values; removed at the end
+  (let [path (str (seon.config/checkout) "/target/db-test-ratio-" (random-uuid))
+        {:keys [cfg conn]} (pdb/open! :lmdb path 0 :db)
+        v {:value (mapv #(/ % 3) (range 1 3000)) :small (/ 1 3) :kinds [1.5 2N 3M 'a :b "c" \d (java.util.UUID. 0 1) (java.util.Date. 0)]}]
+    (try
+      (d/transact conn {:tx-data [{:seon.eval/response v}]})
+      (pdb/sync! cfg)
+      (d/release conn)
+      (let [c (d/connect cfg)]
+        (try (is (= [v] (d/q '[:find [?r ...] :where [_ :seon.eval/response ?r]] @c)) "the value reads back equal, ratios and all")
+             (finally (d/release c))))
       (finally (clojure.java.shell/sh "rm" "-rf" path)))))
 
 (deftest gc-runs-through-the-sync-writer
@@ -538,14 +554,14 @@
       (d/transact conn [{:note/text "main's"}])
       ;; garbage before the first collection: a branch made and deleted
       (d/branch! conn :db :early)
-      (on :early #(d/transact % {:tx-data [{:seon.turn/id "att/e" :seon.turn/reply (slice @prose 3 3000)}]}))
+      (on :early #(d/transact % {:tx-data [{:seon.model-call/id "att/e" :seon.model-call/reply (slice @prose 3 3000)}]}))
       (d/delete-branch! conn :early)
       (let [r1 (record! (pdb/collect! conn true))]
         (is (= #{:db} (:branches r1)) "the first collection records the branches it saw")
         (is (zero? (:swept r1)) "and sweeps nothing: a new main must not hold its first work behind a full sweep"))
       (is (:skipped (pdb/collect! conn true)) "the same branches: nothing to reclaim, nothing written")
       (d/branch! conn :db :gone)
-      (on :gone #(d/transact % {:tx-data [{:seon.turn/id "att/0" :seon.turn/reply reply}]}))
+      (on :gone #(d/transact % {:tx-data [{:seon.model-call/id "att/0" :seon.model-call/reply reply}]}))
       (let [r (record! (pdb/collect! conn true))]
         (is (= {:swept 0 :gone 0 :branches #{:db :gone}} (select-keys r [:swept :gone :branches]))
             "a branch made since: recorded as seen, nothing swept"))
@@ -573,7 +589,7 @@
     (try
       (d/branch! conn :db :gone)
       (let [c (d/connect (assoc (:config @conn) :branch :gone))]
-        (try (d/transact c {:tx-data [{:seon.turn/id "att/0" :seon.turn/reply reply}]}) (finally (d/release c))))
+        (try (d/transact c {:tx-data [{:seon.model-call/id "att/0" :seon.model-call/reply reply}]}) (finally (d/release c))))
       (d/delete-branch! conn :gone)
       (is (= {:skipped true :shared true} (pdb/collect! conn false)) "a shared store: nothing swept, nothing recorded")
       (is (k/exists? (:store @conn) vk {:sync? true}) "the gone branch's value out of line is kept")
@@ -982,10 +998,10 @@
       (is (every? datahike.schema/plain-data? samples) "and Datahike's own test on a data value passes it")
       (is (every? #(malli.core/validate :seon.db/plain % {:registry contract/registry}) samples) "and the schema says the same")
       (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)]
-        (d/transact conn (vec (map-indexed (fn [i v] {:seon.eval/id (str "p" i) :seon.eval/record {:response {:value v}}}) samples)))
+        (d/transact conn (vec (map-indexed (fn [i v] {:seon.eval/id (str "p" i) :seon.eval/response {:value v}}) samples)))
         (d/release conn))
       (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)
-            back (fn [i] (get-in (d/pull @conn [:seon.eval/record] [:seon.eval/id (str "p" i)]) [:seon.eval/record :response :value]))]
+            back (fn [i] (get-in (d/pull @conn [:seon.eval/response] [:seon.eval/id (str "p" i)]) [:seon.eval/response :value]))]
         (doseq [[i v] (map-indexed vector samples)]
           (is (= v (back i)) (str "kept and given back: " (pr-str v))))
         (d/release conn))

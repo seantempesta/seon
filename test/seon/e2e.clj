@@ -10,7 +10,7 @@
   Each run ends on what the system observes (the reconciler's quiescence report, an event,
   or a fact on main), never on a deadline. Prints one EDN line per phase; the last line is
   the run's numbers and its verdict."
-  (:require [seon.await :as await] [seon.root :as c] [my.root :as root] [seon.task :as task] [seon.context :as context] [seon.reconcile :as r]
+  (:require [seon.await :as await] [seon.root :as c] [my.root :as root] [seon.task :as task] [seon.turn :as turn] [seon.context :as context] [seon.reconcile :as r]
             [seon.fixtures :as fx] [datahike.api :as d] [seon.lib :as lib] [clojure.string :as str] [seon.config] [clojure.java.shell :as sh]
             [clojure.core.async :as a] [seon.server :as server] [seon.contract :as contract] [seon.test-store :as ts]))
 
@@ -30,44 +30,66 @@
     (mapv #(task/task-id tns (:seon.task/name %)) ds)))
 
 (defn agents-reused
-  "Agent ids whose runs worked more than one branch (must be empty): a session's runs (a
+  "Agent keys that serve tasks of more than one branch (must be empty): a session's tasks (a
   task and the tasks on its branch it needs, a work task and its merge: seon.task/session-key)
-  continue its one agent, and no agent serves two sessions; a run naming no branch is a session
-  of its own. The branch stands for the session (a session is one branch): two sessions on one
-  branch with no :needs between them sharing an agent pass unseen. session-key cannot judge it,
-  since it answers the agent this check asks about."
-  [d] (vec (for [[ag rs] (group-by :seon.run/agent (vals (task/runs d)))
-                 :when (and ag (< 1 (count (distinct (map #(or (get-in % [:seon.run/env :branch]) (:seon.run/id %)) rs)))))]
-             ag)))
+  continue its one agent, and no agent serves two sessions. The branch stands for the session (a
+  session is one branch): two sessions on one branch with no :needs between them sharing an agent
+  pass unseen. session-key cannot judge it, since it answers the agent this check asks about."
+  {:malli/schema [:=> [:cat :seon.host/db] [:vector :string]]}
+  [d] (vec (for [[k ts] (group-by :seon.task/agent (vals (task/tasks d)))
+                 :when (and k (< 1 (count (distinct (map :seon.task/branch ts)))))]
+             k)))
 
-(defn- merge-counts [d]
-  (let [ts (task/tasks d)
-        merge-as (filter #(= :merge (get-in ts [(:seon.run/task %) :seon.task/kind])) (vals (task/runs d)))]
-    {:merge-runs (frequencies (map :seon.run/status merge-as))
-     :behind-reruns (count (filter #(= :behind (:seon.run/status %)) merge-as))
-     :conflicts-measured (reduce + (map #(count (:seon.run/conflicts % [])) merge-as))
-     :held-tasks (count (filter #(= :held (:seon.task/execution %)) (vals ts)))
-     :model-calls-in-merges (reduce + (map #(:seon.run/model-calls % 0) merge-as))}))
+(defn- branch-db-of
+  "A function from an agent key to the db of its branch on sys: an agent's turns and model calls are written there (main holds its
+  start and its end, as the task's outcome), d being main."
+  {:malli/schema [:=> [:cat :seon.root/sys :seon.host/db] fn?]}
+  [sys d]
+  (fn [k] (:db @(c/branch-db sys (:seon.agent/branch (d/entity d [:seon.agent/key k]))))))
+
+(defn- agent-usages
+  "What the model calls of the agents of tasks ts spent: [{:model-calls n :tokens t}], one per distinct agent, read on the db that
+  db-of answers for its key."
+  {:malli/schema [:=> [:cat fn? [:sequential :map]] [:vector :map]]}
+  [db-of ts]
+  (vec (for [k (distinct (keep :seon.task/agent ts))] (turn/agent-usage (db-of k) k))))
+
+(defn- merge-counts
+  {:malli/schema [:=> [:cat :seon.host/db fn?] :map]}
+  [d db-of]
+  (let [ts (vals (task/tasks d))
+        merge-ts (filter #(= :merge (:seon.task/kind %)) ts)
+        behinds (fn [t] (or (d/q '[:find (count ?tx) . :in $ ?id :where [?t :seon.task/id ?id] [?t :seon.task/outcome :behind ?tx true]] (d/history d) (:seon.task/id t)) 0))]
+    {:merge-outcomes (frequencies (map :seon.task/outcome merge-ts))
+     :behind-reruns (reduce + (map behinds merge-ts))
+     :conflicts-measured (reduce + (map #(count (:seon.task/conflicts % [])) ts))
+     :held-tasks (count (filter #(= :held (:seon.task/execution %)) ts))
+     :model-calls-in-merges (reduce + (map :model-calls (agent-usages db-of merge-ts)))}))
 
 (defn turns-per-merged-task
-  "Turns spent per task that reached main on d: for each task with a :merged run (a
-  merge task, 0 turns of its own), the turns of every run of the other tasks on its
-  branch (the work it merged), averaged; nil when none merged."
-  [d]
+  "Turns spent per task that reached main on d: for each task whose outcome is :merged (a merge
+  task, 0 turns of its own), the turns (:seon.agent/turn, agent-wide) of every distinct agent of
+  the other tasks on its branch (the work it merged) and of its own, averaged; nil when none merged. The turns are read on
+  the db that db-of answers for an agent's key (its branch's, where its turns are written; d, main, by default)."
+  {:malli/schema [:function [:=> [:cat :seon.host/db] [:maybe :double]] [:=> [:cat :seon.host/db fn?] [:maybe :double]]]}
+  ([d] (turns-per-merged-task d (constantly d)))
+  ([d db-of]
   (let [ts (task/tasks d)
-        by-task (group-by :seon.run/task (vals (task/runs d)))
-        merged (filter #(some (comp #{:merged} :seon.run/status) (by-task %)) (keys ts))
-        work (fn [id] (for [[wid w] ts :when (and (not= wid id) (= (:seon.task/branch w) (:seon.task/branch (ts id)))) a (by-task wid)] a))]
+        merged (filter #(= :merged (:seon.task/outcome (ts %))) (keys ts))
+        turns (fn [k] (:seon.agent/turn (d/entity (db-of k) [:seon.agent/key k]) 0))
+        agents (fn [id] (distinct (keep :seon.task/agent (cons (ts id) (for [[wid w] ts :when (and (not= wid id) (= (:seon.task/branch w) (:seon.task/branch (ts id))))] w)))))]
     (when (seq merged)
-      (lib/r2 (/ (double (reduce + (for [id merged a (concat (work id) (by-task id))] (:seon.run/turns a 0)))) (count merged))))))
+      (lib/r2 (/ (double (reduce + (for [id merged k (agents id)] (turns k)))) (count merged)))))))
 
 (defn- numbers [sys t0]
-  (let [as (vals (task/runs (db sys)))
-        merged (filter #(= :merged (:seon.run/status %)) as)]
-    {:wall-ms (- (now) t0) :runs (count as) :merged (count merged)
-     :turns-per-merged-task (turns-per-merged-task (db sys))
-     :model-calls (reduce + (map #(:seon.run/model-calls % 0) as))
-     :tokens (reduce + (map #(:seon.run/tokens % 0) as))
+  (let [d (db sys)
+        db-of (branch-db-of sys d)
+        ts (vals (task/tasks d))
+        us (agent-usages db-of ts)]
+    {:wall-ms (- (now) t0) :agents (count us) :merged (count (filter #(= :merged (:seon.task/outcome %)) ts))
+     :turns-per-merged-task (turns-per-merged-task d db-of)
+     :model-calls (reduce + (map :model-calls us))
+     :tokens (reduce + (map #(:tokens % 0) us))
      :root-real-mb (lib/r2 (lib/real-mb)) :writer (:writer (c/state sys))
      :root-errors (vec (take 3 (:root-errors (c/state sys))))}))
 
@@ -100,8 +122,8 @@
   function (seon.generation/generation, 1 -> 2) on its branch, its merge task merges it, the
   reconciler commits main's file on the merges branch, and the merge loads in place: root
   and every agent forked after it run the new definition, with no build and no restart
-  (BUILD plan P4). Waits for quiescence. Answers {:commit sha (the merged run's)
-  :commits [[run sha]] :commit-errors [[run message]] :turn-ms (release to quiet) :spans [[run start end] ms
+  (BUILD plan P4). Waits for quiescence. Answers {:commit sha (the merged task's)
+  :commits [[task sha]] :commit-errors [[task message]] :turn-ms (release to quiet) :spans [[agent start end] ms
   from release]
   :root (seon.generation/generation in root) :agent (in an agent forked after the merge)
   :quiescent q}. k: the scenario (fixtures/scenarios), :loop by default; :loop-2 is the
@@ -114,11 +136,11 @@
         q (quiet! sys)
         turn-ms (- (now) t0)
         d (db sys)
-        commits (vec (d/q '[:find ?a ?c :where [?e :seon.run/commit ?c] [?e :seon.run/id ?a]] d))]
+        commits (vec (d/q '[:find ?a ?c :where [?e :seon.task/commit ?c] [?e :seon.task/id ?a]] d))]
     {:commit (second (first commits)) :commits commits
-     :commit-errors (vec (d/q '[:find ?a ?m :where [?e :seon.run/commit-error ?m] [?e :seon.run/id ?a]] d))
+     :commit-errors (vec (d/q '[:find ?a ?m :where [?e :seon.task/commit-error ?m] [?e :seon.task/id ?a]] d))
      :turn-ms turn-ms
-     :spans (vec (sort (for [[a s e] (d/q '[:find ?a ?s ?e :where [?x :seon.run/id ?a] [?x :seon.run/start-ms ?s] [?x :seon.run/end-ms ?e]] d)]
+     :spans (vec (sort (for [[a s e] (d/q '[:find ?a ?s ?e :where [?x :seon.agent/key ?a] [?x :seon.agent/started-ms ?s] [?x :seon.agent/ended-ms ?e]] d)]
                          [a (- s t0) (- e t0)])))
      :root (seon.generation/generation) :agent (first (fresh sys "(seon.generation/generation)"))
      :quiescent q})))
@@ -206,7 +228,7 @@
           checks (if ok (ok {:sys sys :q q :d d}) {:ok true})
           reused (agents-reused d)]
       (doseq [[id s] (server/task-summaries d)] (println :task id s))
-      (println :agents-reused reused :merges (merge-counts d) :fresh-agent fresh-r)
+      (println :agents-reused reused :merges (merge-counts d (branch-db-of sys d)) :fresh-agent fresh-r)
       (println :checks (dissoc checks :ok))
       (println :numbers (numbers sys t0))
       (verdict! sys (and (:ok checks) (or (nil? specs) (empty? reused)) (or (nil? expect) (= expect fresh-r))) (or label "E2E")))))
@@ -237,17 +259,17 @@
    :during (fn [sys ev]
              (loop [ready #{}]
                (let [e (a/<!! ev) ready (cond-> ready (= :ready (:type e)) (conj (:agent e)))]
-                 (when-not (some #(and (ready (:seon.run/agent %)) (= "calc/neg" (:seon.run/task %))) (vals (task/runs (db sys))))
+                 (when-not (some #(and (ready (:agent %)) (= "calc/neg" (:task %))) (task/running (db sys)))
                    (recur ready))))
              (println :cancel-neg (select-keys (root/cancel! sys ["calc/neg"]) [:ok])))
-   :check "[(app.calc/sum-sq 3 4) (count (my.db/q '[:find ?e :where [?e :seon.turn/id]]))]" :expect ["[25 0]"]
+   :check "[(app.calc/sum-sq 3 4) (count (my.db/q '[:find ?e :where [?e :seon.model-call/id]]))]" :expect ["[25 0]"]
    :ok (fn [{:keys [sys q d]}]
          (let [idx (r/index d)
                done? (every? #(r/done? idx %) ["calc/add-merge" "calc/twice-merge" "calc/square-merge" "calc/sum-sq-merge"])
                blocked (r/blocked-by idx "calc/abs")
                sq-db (:db @(c/branch-db sys (task/default-branch "calc/square")))
                sq-turns (sort-by first (map (fn [[n e s]] [n (str/join "\n\n" (keep :content (into [] (mapcat second) (context/parts-of sq-db (:seon.model-call/sent (d/pull sq-db [:seon.model-call/sent] e)))))) s])
-                                            (d/q '[:find ?n ?e ?s :where [?t :seon.turn/n ?n] [?t :seon.turn/origin :model] [?e :seon.model-call/turn ?t]
+                                            (d/q '[:find ?n ?e ?s :where [?e :seon.model-call/n ?n] [?e :seon.model-call/origin :model]
                                                    [?e :seon.model-call/basis _] [?e :seon.model-call/split ?s]] sq-db)))
                read-failure? (and (= 2 (count sq-turns))
                                   (str/includes? (second (second sq-turns)) ":assert (= 9 (app.calc/square 3))")
@@ -292,8 +314,8 @@
   [n m]
   {:boot {:max-running (parse-long (or m "8"))} :specs (fx/swarm-specs (parse-long (or n "20"))) :tns 'sw :label "SWARM"
    :check "(mapv #(% 100) [app.sw/v0 app.sw/v1 app.sw/v2 app.sw/v3 app.sw/v4])" :expect ["[100 101 102 103 104]"]
-   :ok (fn [{:keys [q d]}]
-         (let [c (:conflicts-measured (merge-counts d))]
+   :ok (fn [{:keys [sys q d]}]
+         (let [c (:conflicts-measured (merge-counts d (branch-db-of sys d)))]
            (-> (all-done d) (assoc :conflicts c) (update :ok #(and % (empty? (:root-causes q)) (pos? c))))))})
 
 (defn- model-run
@@ -307,12 +329,13 @@
      :ok (fn [{:keys [d]}] (all-done d))}))
 
 (defn- held
-  "A task that always fails parks its session at its cap, and the owner's message wakes the
-  same process (design agent-loop section 2: always park): add (always wrong) runs out of turns,
-  its run parked with outcome :cap, its process kept; nothing else starts, no task is created,
+  "A task that always fails parks its session at its cap, and only a raised budget and a release
+  continue it (design agent-loop section 2: always park; docs/turn.md#the-cap): add (always wrong) runs out of turns,
+  its task parked with outcome :cap, its process kept; nothing else starts, no task is created,
   and the reconciler reports quiescence naming add as the root cause of twice and the merges
-  (parked, waiting for a message). Root messages add's agent: one new run, a wake on the same
-  agent and branch, which parks again at its cap and is named again. Each wait ends on the
+  (parked, waiting for a message). A message does not wake a task at its cap. The owner raises add's agent's
+  :seon.agent/max-turns, holds the task (my.root/hold!) and releases it (my.root/run!): the same agent (key and branch) works on, its turn
+  count continuing from the cap, and parks again at the raised cap and is named again. Each wait ends on the
   reconciler's quiescence report, with no deadline."
   []
   {:boot {:max-running 2 :provider {:kind :scripted :script 'seon.e2e/always-wrong}} :specs (vec (take 2 fx/calc)) :tns 'calc :max-turns 2
@@ -321,27 +344,38 @@
                cause "parked: cap, waiting for a message"
                [row & more] (:root-causes q)
                ts (task/tasks d)
-               a1 (task/run d "calc/add#1")
-               agent (:seon.run/agent a1)
-               first? (and (nil? more) (= {:task "calc/add" :cause cause :run "calc/add#1" :blocks blocks} row)
-                           (= [:parked :cap] [(:seon.run/status a1) (:seon.run/outcome a1)])
+               k (:seon.task/agent (get ts "calc/add"))
+               turn-of (fn [d] (:seon.agent/turn (d/entity d [:seon.agent/key k]) 0))
+               first? (and (nil? more) (= {:task "calc/add" :cause cause :agent k :blocks blocks} row)
+                           (= :cap (:seon.task/outcome (get ts "calc/add")))
                            (= :running (:seon.task/execution (get ts "calc/add")))
                            (= #{"calc/add" "calc/add-merge" "calc/twice" "calc/twice-merge"} (set (keys ts)))
-                           (= 1 (count (task/runs d))))
-               ;; the owner answers the parked session: its next run wakes the same agent
-               _ (println :message (select-keys @(c/message! sys agent "try again") [:ok]))
+                           (= 1 (count (task/agents d))))
+               turns1 (turn-of (:db @(c/branch-db sys (task/default-branch "calc/add"))))
+               ;; the owner raises the budget, holds the task and releases it: the same agent works on
+               _ (println :raise (select-keys @(c/transact-main! sys [[:db/add [:seon.agent/key k] :seon.agent/max-turns 4]]) [:ok]))
+               _ (println :hold (select-keys (root/hold! sys ["calc/add"] "its budget is raised") [:ok]))
+               _ (println :held (:root-causes (quiet! sys)))
+               ended-of (fn [d] (:seon.agent/ended-ms (d/entity d [:seon.agent/key k])))
+               ended1 (ended-of (db sys))
+               _ (println :release (select-keys (root/run! sys ["calc/add"]) [:ok]))
+               ;; the release is news to the reconciler a moment after its write: the wait is on the agent's next end
+               _ (c/await-db sys "add parked at its raised cap, a second time"
+                             #(and (= :cap (:seon.task/outcome (d/entity % [:seon.task/id "calc/add"]))) (< (or ended1 0) (or (ended-of %) 0))))
                q2 (quiet! sys)
                d2 (db sys)
-               a2 (task/run d2 "calc/add#2")
-               second? (and (= [:parked :cap] [(:seon.run/status a2) (:seon.run/outcome a2)])
-                            (= agent (:seon.run/agent a2))
-                            (= (task/default-branch "calc/add") (get-in a2 [:seon.run/env :branch]))
-                            (= 2 (count (task/runs d2))) (= 4 (count (task/tasks d2)))
-                            (= [{:task "calc/add" :cause cause :run "calc/add#2" :blocks blocks}] (:root-causes q2)))]
+               ts2 (task/tasks d2)
+               turns2 (turn-of (:db @(c/branch-db sys (task/default-branch "calc/add"))))
+               second? (and (= :cap (:seon.task/outcome (get ts2 "calc/add")))
+                            (= k (:seon.task/agent (get ts2 "calc/add")))
+                            (= 1 (count (task/agents d2))) (= 4 (count ts2))
+                            (= 2 turns1) (= 4 turns2)
+                            (= [{:task "calc/add" :cause cause :agent k :blocks blocks}] (:root-causes q2)))]
            {:ok (and first? second?)
-            :first-park first? :a-message-wakes-the-same-agent second?
-            :root-causes (:root-causes q) :root-causes-after-message (:root-causes q2)
-            :runs (mapv #(select-keys % [:seon.run/id :seon.run/status :seon.run/outcome]) (vals (task/runs d2)))}))})
+            :first-park first? :a-raised-budget-and-a-release-continue-the-same-agent second?
+            :turns [turns1 turns2]
+            :root-causes (:root-causes q) :root-causes-after-release (:root-causes q2)
+            :tasks (into (sorted-map) (map (fn [[id t]] [id (select-keys t [:seon.task/outcome :seon.task/agent])])) ts2)}))})
 
 (defn run
   "One e2e mode; answers whether it passed. No mode, or an unknown one: its usage, then

@@ -545,7 +545,7 @@
   and its cost summed over its forms (ms, ticks, bytes allocated);
   each key only when present (DECISIONS Dogfood rulings; a change to a schema
   is an explicit fact the eval shows)."
-  {:malli/schema [:=> [:cat [:sequential :seon.wire/msg] :qualified-symbol] :seon.eval/response]}
+  {:malli/schema [:=> [:cat [:sequential :seon.wire/msg] :qualified-symbol] :seon.repl/answer]}
   [answers handle]
   (let [fs (filterv :tag answers)
         lst (peek fs)
@@ -594,7 +594,7 @@
 (defn- repaired
   "Response r with what the forgiving reader changed of its code before it ran (req's :repaired,
   seon.context/repaired), so every call's own result tells it, a call not run included."
-  {:malli/schema [:=> [:cat :seon.eval/response :map] :seon.eval/response]}
+  {:malli/schema [:=> [:cat :seon.repl/answer :map] :seon.repl/answer]}
   [r req] (cond-> r (seq (:repaired req)) (assoc :repaired (:repaired req))))
 
 (defn- by
@@ -605,58 +605,68 @@
   (case origin :ui "user" :outside "outside" :context "context" (name (or (:id @agent/state) :root))))
 
 (defn record-tx
-  "The recording transaction of one eval: its entity, on the agent's, who evaluated it
-  (:seon.eval/by), its details in one EDN attribute (the lean record: nothing queries them
-  apart): `record-details`. Who is the one upsert, by its identity: an
+  "The recording transaction of one eval: its entity, on the agent's, who evaluated it (:seon.eval/by), and its
+  details, each its own attribute (`record-details`). Who is the one upsert, by its identity: an
   agent's key ({:seon.agent/key k}, seon.task/agent-key) or root's ({:seon.root/id :root}); an agent's holds the
   namespace the eval left its REPL in (:seon.agent/ns), a datom only when it moved (an unchanged value adds none),
   which seon.context/current-ns reads. See docs/render.md#a-part-answers-data."
   {:malli/schema [:=> [:cat :map :string :string :map] :seon.db/tx-data]}
   [who id by details]
-  [{:seon.eval/id id :seon.eval/agent "agent" :seon.eval/by by :seon.eval/record details}
+  [(into {:seon.eval/id id :seon.eval/agent "agent" :seon.eval/by by} details)
    (cond-> (assoc who :db/id "agent")
-     (and (:seon.agent/key who) (symbol? (get-in details [:response :ns]))) (assoc :seon.agent/ns (get-in details [:response :ns])))])
+     (and (:seon.agent/key who) (symbol? (get-in details [:seon.eval/response :ns]))) (assoc :seon.agent/ns (get-in details [:seon.eval/response :ns])))])
+
+(defn- kept
+  "Value v as an eval's record keeps it, [value drawn?]: plain data (seon.contract/plainly); past the largest value kept
+  (:seon.config.store/max-value-chars, counted by seon.contract/within?), what its schema's model render draws of it,
+  when it declares one and that fits (drawn? true: it is that render's value, to print as it is); else the marker of what
+  it was and the bound it passed, {:seon.value/gone {:type :over}}. See docs/storage.md#plain-data."
+  {:malli/schema [:=> [:cat :any] [:tuple :any :boolean]]}
+  [v]
+  (let [bound (cfg/value :seon.config.store/max-value-chars)]
+    ;; counted before anything is copied: a value past the bound costs the bound, whatever its size
+    (if (contract/within? v bound)
+      [(contract/plainly v bound) false]
+      (let [m (some-> (render/model v) :value (contract/plainly bound))]
+        (if (and (some? m) (contract/within? m bound))
+          [m true]
+          [{:seon.value/gone {:type (.getName (class v)) :over bound}} false])))))
 
 (defn record-details
-  "What an eval's record holds (:seon.eval/record): its code, its response whole, its value
-  included when it is plain data (seon.contract/plain?: stored as data, once under its content key when
-  large), else the response as it printed then (:printed) and the value's type (:type), since only
-  data is stored; never a text made for a reader (each prints it as it shows it: seon.print/
-  record-text), so a record is the same whatever came before it. Then the prose beside it, as written (never
+  "What an eval records, each its own attribute of its entity (:seon.eval/code, :response, :schema, :basis, :prose,
+:call-id, :fns; each only when present): the code; the response whole with its
+  value as plain data (`kept`), never a text made for a reader (each prints it as it shows it: `text-of`),
+  so a record is the same whatever came before it; the prose beside it, as written (never
   parsed here: the parser is program the agent may change, and an eval's record runs none of it; a reader
-  that wants what the prose cites parses the kept prose, docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map),
-  its value in one line, or its error's message (:line, the one printer
-  under the line budget: an eval's row on the page), the provider's call id, its reasoning, its run, its costliest
-  functions."
-  {:malli/schema [:=> [:cat :string :map :map [:maybe :string]] :seon.eval/record]}
-  [code r req run]
+  that wants what the prose cites parses the kept prose, docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map);
+  a value that names its render schema keeps it (the page draws the value by it); the value that IS the agent's ctx (@ctx, identical to the
+  object seon.ctx/ctx holds: the branch's record at t, seon.ctx/build) keeps the basis in place of the value, so a copy of the session is never
+  stored at each @ctx; the provider's call id, its run, its costliest functions (the reply's text and reasoning are its model call's)."
+  {:malli/schema [:=> [:cat :string :map :map] [:map [:seon.eval/code :string] [:seon.eval/response :seon.eval/response]]]}
+  [code r req]
   (let [resp (dissoc r :text :fns :record)
-        ;; a value that names its basis (@ctx: the branch's record at t, seon.ctx/build) is
-        ;; recorded as that basis and its schema: the page renders it from what exists, and a
-        ;; copy of the session's record is never stored at each @ctx
-        basis (when (contains? resp :value) (:seon.render/basis (meta (:value resp))))
-        data? (and (nil? basis) (or (not (contains? resp :value)) (contract/plain? (:value resp))))]
-    (cond-> (if data?
-              {:code code :response resp}
-              (cond-> {:code code :response (dissoc resp :value) :printed (print/response-text resp render/model) :type (str (type (:value resp)))}
-                basis (assoc :basis basis)))
-      ;; a value that names its render schema keeps it (a basis's; data's, a prove's run): the page draws the value by it
-      (:seon.render/schema (meta (:value resp))) (assoc :schema (:seon.render/schema (meta (:value resp))))
-      (or (contains? r :value) (:ex r))
-      (assoc :line (print/line (cond (:ex r) (or (get-in r [:ex :seon.error/message]) (:ex r)) (nil? (:value r)) "nil" :else (:value r)) (cfg/value :seon.config.render/line-budget) nil))
-      (:prose req) (assoc :prose (:prose req))
-      (:call-id req) (assoc :call-id (:call-id req) :call (:call req 0))
-      (:reasoning req) (assoc :reasoning (:reasoning req))
-      (:content req) (assoc :content (:content req))
-      run (assoc :run run)
-      (seq (:fns r)) (assoc :fns (:fns r)))))
+        v (:value resp)
+        ;; the record at a t is the value of the agent's ctx itself (the one object ctx installs, seon.ctx/ctx): metadata
+        ;; travels through select-keys, assoc and dissoc, so a map made of it is the data it holds, never a basis
+        ctx? (and (contains? resp :value) (some? v) (identical? v @ctx/ctx))
+        basis (when ctx? (select-keys v [:t :branch]))
+        [kv drawn?] (when (and (contains? resp :value) (not basis)) (kept v))
+        ;; a value its model render has already drawn prints as it is
+        schema (when (and (contains? resp :value) (not drawn?)) (when-let [k (:seon.render/schema (meta v))] (when (or ctx? (not= :seon.ctx/ctx k)) k)))]
+    (cond-> {:seon.eval/code code
+             :seon.eval/response (cond basis (dissoc resp :value) (contains? resp :value) (assoc resp :value kv) :else resp)}
+      schema (assoc :seon.eval/schema schema)
+      basis (assoc :seon.eval/basis basis)
+      (:prose req) (assoc :seon.eval/prose (:prose req))
+      (:call-id req) (assoc :seon.eval/call-id (:call-id req))
+      (seq (:fns r)) (assoc :seon.eval/fns (:fns r)))))
 
 (defn- record!
-  "Record response r of code on this branch through the agent's write path (an agent's
-  only), with the defs its forms recorded and the effects asked during it (seon.agent/fx-record!).
+  "Record response r of code, eval fact rec (`record-details`), on this branch through the agent's write path (an agent's
+  only), under the turn in force (:seon.eval/turn, seon.agent/turn-now), with the defs its forms recorded and the effects asked during it (seon.agent/fx-record!).
   Answers r, with the id of its record (:record) when recorded."
-  {:malli/schema [:=> [:cat :map :string :map] :map]}
-  [r code req]
+  {:malli/schema [:=> [:cat :map :map :string :map] :map]}
+  [r rec code req]
   (let [defs (into [] (mapcat val) (:defs @agent/state))
         id (name (:handle r))]
     (swap! agent/state dissoc :defs)
@@ -665,7 +675,10 @@
       ;; the write is the edge: a branch that refuses it answers the eval :unrecorded with the writer's message, so the
       ;; turn that asked goes on (a refused write thrown from here ended the whole turn: its reply and evals lost, the turn run again)
       (try (agent/transact! (into defs (record-tx {:seon.agent/key (:key @agent/state) :seon.agent/id (:id @agent/state)} id (by (:origin req))
-                                                  (record-details code r req (get-in @agent/state [:turn :run])))))
+                                                  (let [working? (some? (:turn @agent/state))]
+                                                    (cond-> rec
+                                                      ;; the turn loop's own eval (the agent working a task, no model call, made by the agent) is no conversation record: it takes no turn
+                                                      (not (and working? (not (:call-id req)) (not (#{:ui :outside :context} (:origin req))))) (assoc :seon.eval/turn (agent/turn-now)))))))
            (assoc r :record id)
            (catch Throwable e
              (assoc r :unrecorded (contract/error :seon.agent/unrecorded #'record! (str "the branch refused this eval's record: " (ex-message e)) {}))))
@@ -696,9 +709,19 @@
                            "run something else, or change what it reads first."))))
     r))
 
+(defn- text-of
+  "The text of eval fact rec as every reader reads it: the one function the model's message prints with
+  (seon.print/record-text, through render/model, an @ctx eval's value rebuilt from its basis by seon.context/basis-value, as
+  seon.context/eval-messages does), so the outside agent's text and the model's cannot differ; the live value stays at
+  the handle. Made only for a reader: an eval makes and stores data, and a model's is printed where its request is
+  assembled. See docs/render.md#a-render-is-a-value-printed-once."
+  {:malli/schema [:=> [:cat :map] :string]}
+  [rec]
+  (print/record-text (cond-> rec (:seon.eval/basis rec) (assoc-in [:seon.eval/response :value] (context/basis-value (:db @agent/state) rec))) render/model))
+
 (defn eval-string
   "Evaluate code through the one REPL path (the handler and its middleware) and answer its one
-  response (`response`) with the text its caller reads (:text, seon.print/response-text) and what its forms
+  response (`response`) with the text its caller reads (:text, `text-of`) and what its forms
   recorded, its handle result/e<n> bound to it (the live value inside), and recorded (an
   agent's, on its branch). From inside an agent, the turn loop's calls; req adds to the request
   (root's: seon.server's namespace, origin, budget and eval fn; root's requests to an agent:
@@ -707,21 +730,27 @@
   the response's :ex. Its cost (:ms :ticks :bytes, seon.repl/wrap-cost) is taken once when the
   forms ran, so what the model reads of it never changes in a later turn. The response's :ns is the
   namespace the REPL is in after it (docs/render.md#a-part-answers-data)."
-  {:malli/schema [:function [:=> [:cat :string] :seon.eval/response] [:=> [:cat :string :map] :seon.eval/response]]}
+  {:malli/schema [:function [:=> [:cat :string] :seon.repl/answer] [:=> [:cat :string :map] :seon.repl/answer]]}
   ([code] (eval-string code {:origin :model}))
   ([code req]
    (let [answers (volatile! [])
          handle (symbol "result" (str "e" (eval-n!)))
          ;; the writes its forms make and its record name it (seon.agent/transact!'s tx-meta); an
          ;; eval inside it (a context read's) names its own, then this one's again
-         outer (:eval @agent/state)]
+         outer (:eval @agent/state)
+         before @agent/state]
      (swap! agent/state assoc :eval (name handle))
      (try (let [;; with the namespace the REPL is in after it (:ns, as every nREPL response carries): the prompt
-                answered (fn [] (let [r (again code (cond-> (repaired (response @answers handle) req)
-                                                      (:ns @agent/state) (assoc :ns (ns-name (:ns @agent/state)))))]
-                                  [r (print/response-text r render/model)]))
-                ;; printing is inside the boundary: a value that throws as it is realized is the error
-                [r text] (try (@the-handler (assoc req "code" code :reply #(vswap! answers conj %)))
+                ;; an eval makes data: its value made plain here, inside the boundary, so a value that throws as it is
+                ;; realized is the error; text only for a reader who is not a model (whose message is printed at its request)
+                ;; its forms left the agent no db (a test's cleanup, run at this REPL): the agent goes on as it was, its walk made
+                ;; again, and ctx rebuilt by the state's watch (docs/merging.md#a-test-child-is-a-fork-of-a-live-agent)
+                answered (fn [] (when (and (:db before) (nil? (:db @agent/state))) (reset! agent/state (dissoc before :walk)))
+                               (let [r (again code (cond-> (repaired (response @answers handle) req)
+                                                      (:ns @agent/state) (assoc :ns (ns-name (:ns @agent/state)))))
+                                      rec (record-details code r req)]
+                                  [r rec (when (not= :model (:origin req)) (text-of rec))]))
+                [r rec text] (try (@the-handler (assoc req "code" code :reply #(vswap! answers conj %)))
                               (answered)
                               (catch Throwable e
                                 (let [em (agent/error-map e)]
@@ -732,7 +761,9 @@
             (intern (create-ns 'result) (symbol (name handle)) r)
             ;; how main differs from the branch, said with the answer an outside agent's seon_eval gets, and never recorded
             ;; (seon.agent/main-difference): computed at t, so the agent is never surprised at done
-            (let [res (record! (cond-> (assoc r :text text) (some :fns @answers) (assoc :fns (into [] (mapcat :fns) @answers)))
+            (let [fns (when (some :fns @answers) (into [] (mapcat :fns) @answers))
+                  res (record! (cond-> r text (assoc :text text) fns (assoc :fns fns))
+                               (cond-> rec fns (assoc :seon.eval/fns fns))
                                code req)
                   m (when (= :agent (:mode @agent/state)) (agent/main-difference))]
               (cond-> res m (assoc :main m))))
@@ -822,8 +853,8 @@
   on this branch with the new text in its place (seon.doc/edit-tx), so a doc changes as a definition does;
   no delimiter is counted in prose. Answers {:edited {:doc address :lines ...}} (docs/agent.md#changing-a-doc)."
   {:malli/schema [:function
-                  [:=> [:cat [:or :qualified-symbol :string] :string :string] [:or :seon.repl/edit-refused :my.agent/no-var :seon.eval/response :seon.repl/doc-edited]]
-                  [:=> [:cat [:or :qualified-symbol :string] [:vector {:min 1} [:tuple :string :string]]] [:or :seon.repl/edit-refused :my.agent/no-var :seon.eval/response :seon.repl/doc-edited]]]}
+                  [:=> [:cat [:or :qualified-symbol :string] :string :string] [:or :seon.repl/edit-refused :my.agent/no-var :seon.repl/answer :seon.repl/doc-edited]]
+                  [:=> [:cat [:or :qualified-symbol :string] [:vector {:min 1} [:tuple :string :string]]] [:or :seon.repl/edit-refused :my.agent/no-var :seon.repl/answer :seon.repl/doc-edited]]]}
   ([sym old new] (edit! sym [[old new]]))
   ([sym changes]
    (let [doc? (string? sym)
@@ -919,12 +950,13 @@
   "A model's eval call that never ran, recorded as an eval whose response is error e, why
   (seon.turn's: a call before it in its reply threw, or the call has no prose or no form), so
   every call of a reply has its one result. See docs/prompt.md."
-  {:malli/schema [:=> [:cat :string :map :seon.error/base] :seon.eval/response]}
+  {:malli/schema [:=> [:cat :string :map :seon.error/base] :seon.repl/answer]}
   [code req e]
   (let [handle (symbol "result" (str "e" (eval-n!)))
-        r (repaired (response [{:tag :err :err e}] handle) req)]
+        r (repaired (response [{:tag :err :err e}] handle) req)
+        rec (record-details code r req)]
     (swap! agent/state assoc-in [:results (keyword (name handle))] r)
-    (record! (assoc r :text (print/response-text r render/model)) code req)))
+    (record! (cond-> r (not= :model (:origin req)) (assoc :text (text-of rec))) rec code req)))
 
 (defn- layout
   "The layout this branch renders its ctx with: the var :seon.render/render-ctx declares, an agent's own
@@ -998,6 +1030,19 @@
 
 ;; ---- the process: a Flow graph of three procs on the agent's one thread ----------------
 
+(defn- told-refused
+  "Replies rs, the first one that answers an eval (a map :response) carrying what the branch refused since the last answer
+  under :unrecorded (seon.agent/take-refused!); rs as it was when none refused or none answers an eval (it waits
+  for the next); nil when the request has no reply (a clone). The commit that follows a request is where its writes are
+  refused, after its answer was made.
+  See docs/failure-points.md."
+  {:malli/schema [:=> [:cat [:maybe [:sequential :map]]] [:maybe [:sequential :map]]]}
+  [rs]
+  (let [i (first (keep-indexed #(when (map? (:response %2)) %1) rs))]
+    (if-let [e (and i (agent/take-refused!))]
+      (assoc-in (vec rs) [i :response :unrecorded] e)
+      rs)))
+
 (defn agent-step
   "The agent's :repl proc: the requests the :transport proc hands it, one at a time in arrival
   order: an eval ({:op :eval :id :forms}), its page's parts to draw ({:op :render :id}), Seon's
@@ -1038,7 +1083,7 @@
      ;; a branch is committed whenever a request is done (its writes ran ahead in memory), before its answer: a
      ;; reply says what it did is on the branch, so one who reads the branch on hearing it never races the commit
      (when (:dirty? @agent/state) (agent/commit!))
-     (doseq [r rs] (agent/send! r))
+     (doseq [r (told-refused rs)] (agent/send! r))
      (swap! agent/state assoc :busy false)
      [st nil])))
 

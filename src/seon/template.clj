@@ -156,22 +156,22 @@
   '#{seon.stall-proofs/the-stall-ended seon.stall-proofs/its-cause-is-recorded seon.stall-proofs/a-bug-is-filed})
 
 (defn stall
-  "The task for root to deal with stall s of agent on run (seon.root's first write of a stall in a
-  live run): one per agent and run (its name), in ns root, its cause pre-filled with the stall
+  "The task for root to deal with stall s of agent on task (seon.root's first write of a stall in a
+  live task): one per agent and task (its name), in ns root, its cause pre-filled with the stall
   (s: :quiet-ms, :last-op, :pid), its proofs the boundary conditions (stall-proofs). Its model is
   \"outside\": a Claude session works it through seon_attach, and the reconciler forks no model's
   agent for it (it is written held, and attached it starts no turn loop)."
-  {:malli/schema [:=> [:cat :seon.agent/id :seon.run/id [:map [:quiet-ms :int] [:pid {:optional true} [:maybe :int]]
+  {:malli/schema [:=> [:cat :seon.agent/id :seon.task/id [:map [:quiet-ms :int] [:pid {:optional true} [:maybe :int]]
                                                        [:last-op {:optional true} [:maybe :seon.agent/last-op]]
                                                        [:api {:optional true} :map]]]
                   :seon.task/declaration]}
-  [agent run s]
+  [agent task s]
   (let [pid (:pid s)
-        stall (cond-> {:agent agent :run run :quiet-ms (:quiet-ms s)} pid (assoc :pid pid) (:last-op s) (assoc :last-op (:last-op s)) (:api s) (assoc :api (:api s)))]
-    {:seon.task/ns 'root :seon.task/name (str "stall-" (name agent) "-" (str/replace run #"[^A-Za-z0-9]+" "-"))
+        stall (cond-> {:agent agent :task task :quiet-ms (:quiet-ms s)} pid (assoc :pid pid) (:last-op s) (assoc :last-op (:last-op s)) (:api s) (assoc :api (:api s)))]
+    {:seon.task/ns 'root :seon.task/name (str "stall-" (name agent) "-" (str/replace task #"[^A-Za-z0-9]+" "-"))
      :seon.task/kind :work :seon.task/model "outside" :seon.task/proofs stall-proofs
      :seon.task/cause {:stall stall}
-     :seon.task/plan (str "Agent " (name agent) " stalled on run " run ": it sent root nothing for " (:quiet-ms s)
+     :seon.task/plan (str "Agent " (name agent) " stalled on task " task ": it sent root nothing for " (:quiet-ms s)
                           " ms with a request in flight" (some->> (:last-op s) :kind name (str ", "))
                           (some->> (:last-op s) :form (str " "))
                           " (its :seon.process/stall on main, an open :stalled problem in my.root/problems).\n\n"

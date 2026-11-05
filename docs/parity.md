@@ -27,7 +27,7 @@ Each v1 MCP tool and where it stands here.
 | an outside agent works a task | `seon_attach`, `seon_context`, `seon_done` | new |
 | reasons and defects answered per request | a defect answers that request the typed `:seon.server/defect` and the server goes on (`seon.server/respond`); a refused attach still writes the task's state first (task `seon.server/attach-writes-nothing-when-it-is-refused`) | partial |
 
-The server's ops, the MCP tools and root's evaluation path are [server](server.md#ops). `seon_agents` answers the live agents and the tasks running or with runs, and counts the rest (```seon.server/live-tasks```).
+The server's ops, the MCP tools and root's evaluation path are [server](server.md#ops). `seon_agents` answers the live agents and the tasks running or judged, and counts the rest (```seon.server/live-tasks```).
 
 ## The agent's REPL (`my.*`)
 
@@ -62,10 +62,10 @@ Each v1 capability for tasks, merges and tests, and where it stands here.
 | many agents merging onto shared definitions at once (v1's swarm) | `bin/check swarm` (`seon.e2e`'s swarm row: 20 tasks over 5 shared vars, 8 agents at once; red unless conflicts arose and every one was resolved, every task done, and a fresh agent on main gets every proof's value) | present |
 | main wins a conflict | ours is kept | missing |
 | a changed function no test reaches refuses the branch (``:seon.test/unreached``, ``:seon.source/unreached``) | none: `seon.reconcile/done-explain` has no coverage reason | missing |
-| one done rule shared with merge | `seon.reconcile/done-explain` (a proof that never ran is `:proof-unknown`, not red; a process test left out of a run is neither; a problem the branch made true is `:open-problem`; [tasks](tasks.md#the-done-rule)) | present |
+| one done rule shared with merge | `seon.reconcile/done-explain` (a proof that never ran is `:proof-unknown`, not red; a process test left out of a judging is neither; a problem the branch made true is `:open-problem`; [tasks](tasks.md#the-done-rule)) | present |
 | tests selected by reach; results reused by reach digest | `seon.proofs/plan` over `seon.program/graph-index`: `bin/prove`, `bin/test` and `bin/check` reuse the verdicts cached by digest in the main tree's `target/results`, where every checkout's runs write them ([merging](merging.md#verdicts-are-a-cache)) (check steps keyed too); agents' runs select and reuse by the same plan against their merge base (`seon.agent/test-plan`), from the same facts | present; an agent shares the greens when its root's binary is built from its source tree ([merging](merging.md#a-merge-runs-what-the-change-reaches)) |
 | contracts armed at definition; cost proofs; per-function profile | `seon.contract`, `seon.cost`, `seon.profile` | present |
-| turns-to-green report (median, p90) | `seon.learn` charges overrun per run (stored as ``:seon.run/waste``) | partial |
+| turns-to-green report (median, p90) | `seon.learn` charges overrun per agent (stored as ``:seon.task/waste``) | partial |
 | scheduled work (``seon.schedule``) | the cron proc (``seon.cron``): one daily message, the full run of main (`:seon.config.proofs/full-run-at`); no general schedules | partial |
 
 ## Context, printing, the page
@@ -80,7 +80,7 @@ Each v1 capability for building and printing the model's context, and where it s
 | one printer with a budget and runnable continuations; renders on schemas | `seon.print`, `seon.render` | present |
 | wiki sections in the context | `seon.doc` | new |
 | Datastar pages: `/`, `/agent/{id}` | `seon.web` | present |
-| `/agent/{id}/debug`: each model call, what it was sent, its tokens | `/agent/{id}/context` (`seon.render.proc/debug-value`; `/agent/{id}/debug` is the agent's `@ctx` printed): each model turn a row, newest first, read back from the records it sent (`:seon.model-call/sent`, ```seon.context/parts-of```), each part beside the record that made it, with its tokens, cache share and, for a failed call, its typed error | present (task `seon.context/a-turn-records-what-it-sent`) |
+| `/agent/{id}/debug`: each model call, what it was sent, its tokens | `/agent/{id}/context` (`seon.render.proc/debug-value`; `/agent/{id}/debug` is the agent's `@ctx` printed): each model turn a row, newest first, read back from the records it sent (`:seon.model-call/sent`, ```seon.context/parts-of```), each part beside the record that made it, with its tokens, cache share and, for a failed call, its typed error | present (task `seon.context-test/a-turn-records-what-it-sent`) |
 | `/agent/{id}/message` (the owner's input bar) | the page's message bar and the server's `:message` op, both `seon.root/message!`: root's one delivery into the agent's inbox, which its next turn takes into its basis (`:messages` in the block) | present: a fact on main (from `"owner"`, to the run), and on the agent's branch when its turn takes it, named by id in the turn's basis |
 | `/ns/{ns}` and its debug pages; `/data`; `/chains`; `/health` | none (task `seon.render/namespace-agent-debug-and-data-pages`; the routes here: [dashboard](dashboard.md)) | missing |
 | POSTs refuse a cross-origin request (``::same-origin``) | `POST /call` reads no Origin or Sec-Fetch-Site (`seon.web/handler`): any page open in the owner's browser can post calls to every live agent | missing |

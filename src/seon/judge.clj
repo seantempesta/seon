@@ -11,17 +11,17 @@
             [seon.task :as task] [seon.program :as program] [seon.db :as pdb] [datahike.api :as d]))
 
 (defn request
-  "Task t's first-turn model request on db, as seon.turn/act! sends it at turn 0: the
-  messages seon.context/render makes for a fresh agent's run whose proofs have no result yet
-  (the agent and its run written on a speculative db, d/with: nothing stored), and the model
-  and thinking mode the task resolves to. A fresh run's status has no verdicts yet: a proof
+  "Task t's first-turn model request on db, as seon.turn/act! sends it at turn 1: the
+  messages seon.context/render makes for a fresh agent whose proofs have no result yet
+  (the agent written on a speculative db, d/with: nothing stored), and the model
+  and thinking mode the task resolves to. A fresh agent's status has no verdicts yet: a proof
   not written reads :undefined, so the judge's tasks are ones whose proofs are not written."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/task] [:map [:messages [:vector :seon.model/message]] [:model :string] [:thinking :any]]]}
   [db t]
   (let [id (:seon.task/id t)
-        k (str id "/first-move") run (str id "#first-move")
-        db (:db-after (d/with db [{:seon.agent/key k} {:seon.run/id run :seon.run/task [:seon.task/id id] :seon.run/agent [:seon.agent/key k]}]))]
-    {:messages (:messages (context/render db {:commit (d/commit-id db) :task id :run run :turn 0
+        k (str id "/first-move")
+        db (:db-after (d/with db [{:seon.agent/key k :seon.agent/task [:seon.task/id id]}]))]
+    {:messages (:messages (context/render db {:commit (d/commit-id db) :task id :turn 1
                                               :max-turns (config/value :seon.config.agent/max-turns) :origin :model :agent k}))
      :model (:value (config/resolve :seon.config.ai/model {:task t}))
      :thinking (:value (config/resolve :seon.config.ai/thinking {:task t}))}))

@@ -19,18 +19,18 @@
   ;; assertion over a held value replaced it in the index, but the report's :tx-data held only the
   ;; assertion (upstream's too), so a reader of a transaction's datoms (seon.ctx/patch) never saw a
   ;; ref move an entity away from its old parent. The report says the change whole, as DataScript's
-  (let [db (d/db-with (ts/test-db) [{:seon.run/id "r#1" :seon.run/status :running} {:seon.run/id "r#2"}
-                                    {:seon.turn/id "r#1/0" :seon.turn/run [:seon.run/id "r#1"] :seon.turn/n 0}])
+  (let [db (d/db-with (ts/test-db) [{:seon.agent/key "b/a1" :seon.agent/outcome :waiting} {:seon.agent/key "b/a2"}
+                                    {:seon.model-call/id "b/a1/0" :seon.model-call/agent [:seon.agent/key "b/a1"] :seon.model-call/n 0}])
         e (fn [db a v] (:db/id (d/entity db [a v])))
         datoms (fn [tx] (set (map (juxt :a :v :added) (remove #(= :db/txInstant (:a %)) (:tx-data (d/with db tx))))))]
-    (is (= #{[:seon.run/status :running false] [:seon.run/status :done true]}
-           (datoms [[:db/add [:seon.run/id "r#1"] :seon.run/status :done]]))
+    (is (= #{[:seon.agent/outcome :waiting false] [:seon.agent/outcome :green true]}
+           (datoms [[:db/add [:seon.agent/key "b/a1"] :seon.agent/outcome :green]]))
         "a value replaced: its retraction, then its assertion")
-    (is (= #{[:seon.turn/run (e db :seon.run/id "r#1") false] [:seon.turn/run (e db :seon.run/id "r#2") true]}
-           (datoms [[:db/add [:seon.turn/id "r#1/0"] :seon.turn/run [:seon.run/id "r#2"]]]))
+    (is (= #{[:seon.model-call/agent (e db :seon.agent/key "b/a1") false] [:seon.model-call/agent (e db :seon.agent/key "b/a2") true]}
+           (datoms [[:db/add [:seon.model-call/id "b/a1/0"] :seon.model-call/agent [:seon.agent/key "b/a2"]]]))
         "a ref moved: the old link retracted")
-    (is (= #{} (datoms [[:db/add [:seon.run/id "r#1"] :seon.run/status :running]])) "a value asserted again changes nothing")
-    (is (= #{[:seon.run/status :done true]} (datoms [[:db/add [:seon.run/id "r#2"] :seon.run/status :done]])) "a first value retracts nothing")))
+    (is (= #{} (datoms [[:db/add [:seon.agent/key "b/a1"] :seon.agent/outcome :waiting]])) "a value asserted again changes nothing")
+    (is (= #{[:seon.agent/outcome :green true]} (datoms [[:db/add [:seon.agent/key "b/a2"] :seon.agent/outcome :green]])) "a first value retracts nothing")))
 
 (deftest a-schema-transaction-rebuilds-the-reverse-schema-once-per-attribute-not-once-per-datom
   ;; task datahike.transaction/a-schema-transaction-costs-its-attributes: update-rschema rebuilt the whole reverse

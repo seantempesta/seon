@@ -647,9 +647,8 @@
             f)))
 
 (defn commit-message
-  "The merges commit's message, from the facts of what merged: each member's task and
-  run."
-  {:malli/schema [:=> [:cat [:sequential [:map [:task :any] [:run :string]]]] :string]}
+  "The merges commit's message, from the facts of what merged: each member's task."
+  {:malli/schema [:=> [:cat [:sequential [:map [:task :any]]]] :string]}
   [members]
   (str "Seon merge: " (str/join ", " (map (comp str :task) members)) "\n\n"
-       (str/join "\n" (for [{:keys [task run]} members] (str "run " run " (task " task ")"))) "\n"))
+       (str/join "\n" (for [{:keys [task]} members] (str "task " task))) "\n"))

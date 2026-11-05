@@ -53,7 +53,7 @@
  ;; part (seon.render/render-ctx)
  :seon.render/proofs [:map-of {:seon.render/html seon.render.ui/proofs} :symbol [:map [:status :keyword] [:failure {:optional true} [:map [:assert :any] [:got :any]]]]]
  ;; root's page's tile of main's runs (seon.render.ui/runs-tile): how many by status, and each running one
- :seon.render/runs [:map {:seon.render/html seon.render.ui/runs} [:by-status [:map-of :keyword nat-int?]] [:running [:vector :map]]]
+ :seon.render/work [:map {:seon.render/html seon.render.ui/work} [:by-outcome [:map-of :keyword nat-int?]] [:working [:vector :map]]]
  ;; a page's location that main names no entity for (seon.render.proc/page-value): an agent's id of no agent in root's boot
  :seon.render/no-location [:and :seon.error/base [:map [:seon.error/type [:= :seon.render/no-location]] [:view :string]]]
  ;; a component whose render threw (seon.render/render!, a failure point: renders are code, and agents write
@@ -76,7 +76,7 @@
  ;; one request of the debug timeline as it went on the wire (seon.render.ui/debug-input, seon.render.proc/debug-value):
  ;; the body made again from its turn's basis, each message's records, which are new since the request before
  :seon.render/debug-turn [:map {:seon.render/html seon.render.ui/debug-turn} [:at [:or pos-int? [:= :latest]]] [:to-come? :boolean]
-                          [:turn :int] [:run :string] [:origin :seon.turn/origin] [:raw? :boolean] [:view {:optional true} :string]
+                          [:turn :int] [:agent :string] [:origin :seon.model-call/origin] [:raw? :boolean] [:view {:optional true} :string]
                           [:body :map] [:sources [:vector [:vector :any]]] [:new [:vector :boolean]]
                           [:usage [:map [:seon.model-call/tokens {:optional true} :int] [:seon.model-call/cache-hit-tokens {:optional true} :int]
                                    [:seon.model-call/cache-miss-tokens {:optional true} :int]]]

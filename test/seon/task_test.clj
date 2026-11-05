@@ -49,12 +49,13 @@
         "written again: no cite datom changes")))
 
 (deftest an-agent-is-made-citing-what-every-agent-cites
-  ;; :seon.config.agent/cites written on a new agent's record (seon.task/agent-cites-tx, at its first run: seon.agent/begin-run!), never
+  ;; :seon.config.agent/cites written on a new agent's record (seon.task/agent-cites-tx, at its first start: seon.agent/begin-run!), never
   ;; read as a default at draw time: a page whole is its top section, a section its address, each at its ?depth
   (let [db (d/db-with (db-with-program) [{:db/id "top" :seon.doc/address "docs/testing.md#testing" :seon.doc/heading "Testing"}
                                          {:seon.doc/address "docs/references.md#an-entity-cites" :seon.doc/heading "An entity cites"}])
-        tx (into (task/run-start-tx "demo/t#1" "demo/t" "b1" :a1 {:branch :b :model nil :max-turns 4} 0 "p") (task/agent-cites-tx db "b1/a1" "b1/a1"))
-        db (d/db-with (d/db-with db (task/create-tx db [(decl "Do.")])) tx)]
+        db (d/db-with db (task/create-tx db [(decl "Do.")]))
+        tx (into (task/start-tx db "demo/t" "b1" :a1 {:branch :b :model nil :max-turns 4} 0) (task/agent-cites-tx db "b1/a1" "b1/a1"))
+        db (d/db-with db tx)]
     (is (= (count (seon.config/value :seon.config.agent/cites)) (count (filter :seon.cite/id tx))) "one per address the config names")
     (is (= [["docs/testing.md#testing" :doc] ["docs/references.md#an-entity-cites" :doc]]
            (mapv (juxt :seon.cite/address :seon.cite/depth) (task/cites-of db (pdb/eid db :seon.agent/key "b1/a1"))))
@@ -129,39 +130,39 @@
     (is (= [] (task/onto-tx main after "demo/store")) "nothing when the branch holds them")))
 
 (deftest a-released-branch-takes-its-task-from-main
-  ;; owner, 2026-10-23: a refused run holds its task for root, and root's release runs it
+  ;; owner, 2026-10-23: a refused end holds its task for root, and root's release starts it
   ;; again on the same, kept branch; root's judge wrote the failure and the evidence on main
   ;; after the branch last moved, so the resumed agent takes its task as main holds it
   (let [db0 (ts/test-db)
         branch (d/db-with db0 (task/create-tx db0 [{:seon.task/ns 'demo :seon.task/name "a" :seon.task/plan "Make a true."}]))
-        ev {:from "demo/a#1" :conflicts [] :unmerged [] :red ['demo-test/a-test] :problem "proof-red demo-test/a-test"}
-        main (d/db-with branch [{:seon.task/id "demo/a" :seon.task/evidence ev :seon.task/failure {:reason "proof-red demo-test/a-test" :run "demo/a#1"}}])
+        ev {:from "demo/a" :conflicts [] :unmerged [] :red ['demo-test/a-test] :problem "proof-red demo-test/a-test"}
+        main (d/db-with branch [{:seon.task/id "demo/a" :seon.task/evidence ev :seon.task/failure {:reason "proof-red demo-test/a-test" :agent "boot-1/a1"}}])
         after (d/db-with branch (task/onto-tx main branch "demo/a"))]
     (is (= ev (:seon.task/evidence (task/task after "demo/a"))) "the evidence")
-    (is (= "demo/a#1" (:run (:seon.task/failure (task/task after "demo/a")))) "and the failure it answers")
+    (is (= "boot-1/a1" (:agent (:seon.task/failure (task/task after "demo/a")))) "and the failure it answers")
     (is (= [] (task/onto-tx main after "demo/a")) "nothing when the branch holds it as main does")))
 
-(deftest a-runs-lifecycle-is-read-from-its-schema
+(deftest a-tasks-lifecycle-is-read-from-its-schema
   ;; task seon.task/a-runs-lifecycle-is-read-once: the sets are the schema's, and the two reads
-  ;; every view and judge shares answer from the runs' own facts
+  ;; every view and judge shares answer from the tasks' own outcomes
   (let [db0 (d/db-with (ts/test-db) [{:seon.task/id "demo/a" :seon.task/ns 'demo :seon.task/name "a" :seon.task/plan "p" :seon.task/execution :running :seon.task/branch :b :seon.task/kind :work}
                                      {:seon.task/id "demo/b" :seon.task/ns 'demo :seon.task/name "b" :seon.task/plan "p" :seon.task/execution :running :seon.task/branch :b2 :seon.task/kind :work}])
-        start (fn [db aid tid ag] (d/db-with db (task/run-start-tx aid tid "boot-1" ag {:branch :b :model nil :max-turns 4} 1000 "p")))
-        db (-> db0 (start "demo/a#1" "demo/a" :a1) (start "demo/b#1" "demo/b" :a2)
-               (d/db-with [{:seon.run/id "demo/b#1" :seon.run/status :merged}]))
+        start (fn [db tid ag] (d/db-with db (task/start-tx db tid "boot-1" ag {:branch :b :model nil :max-turns 4} 1000)))
+        db (-> db0 (start "demo/a" :a1) (start "demo/b" :a2)
+               (d/db-with [{:seon.task/id "demo/b" :seon.task/outcome :merged}]))
         te #(:db/id (d/entity db [:seon.task/id %]))]
     (is (= #{:done :merged} task/finished) "the schema's finished set")
-    (is (= ["demo/a#1"] (mapv :seon.run/id (task/running db))) "only the running run, one seek of the status")
-    (is (= :a1 (:seon.run/agent (first (task/running db)))) "as `run` answers it")
-    (is (false? (task/done? db (te "demo/a"))) "a running run makes no task done")
-    (is (true? (task/done? db (te "demo/b"))) "a merged run does")))
+    (is (= ["demo/a"] (mapv :task (task/running db))) "only the running task, one seek of the outcome")
+    (is (= [:a1 "boot-1/a1"] ((juxt :agent :key) (first (task/running db)))) "with its agent's id and key")
+    (is (false? (task/done? db (te "demo/a"))) "a running task is not done")
+    (is (true? (task/done? db (te "demo/b"))) "a merged one is")))
 
-;; ---- the links between root, an agent, its run, turns and messages are refs (task
+;; ---- the links between root, an agent, its task, turns and messages are refs (task
 ;; seon.render/the-agents-links-are-refs): a pull follows them ----------------------------
 
 (deftest an-agents-links-pull-from-its-root
-  ;; root records its agent on main; the reconciler records the run, naming the agent by its key;
-  ;; the agent's branch records a turn of the run, its evaluations and the message it took: each
+  ;; root records its agent on main; the reconciler records the task's start, naming the agent by its key;
+  ;; the agent's branch records a turn of the agent, its evaluations and the message it took: each
   ;; written by its producer's own function, each link a ref a pull follows from root down
   (ts/test-branch!
    (fn [cfg conn]
@@ -173,31 +174,31 @@
        (d/branch! conn main b)
        (let [bc (d/connect (assoc cfg :branch b))]
          (try
-           (d/transact conn (task/run-start-tx "demo/f#1" "demo/f" "b1" :a3 {:branch b :model "m" :max-turns 8} 0 "p"))
+           (d/transact conn (task/start-tx @conn "demo/f" "b1" :a3 {:branch b :model "m" :max-turns 8} 0))
            (d/transact conn (task/message-tx "m-1" :message "owner" b "check g"))
-           ;; on the branch, which forked before main held the run or the message
-           (d/transact bc [{:db/id "run" :seon.run/id "demo/f#1"} {:seon.turn/id "demo/f#1/0" :seon.turn/run "run" :seon.turn/n 0 :seon.turn/origin :model}])
+           ;; on the branch, which forked before main held the task's start or the message
+           (d/transact bc (ts/turn-tx k 1 {}))
            (d/transact bc (task/message-tx "m-1" :message "owner" b "check g"))
-           (d/transact bc (repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e1" "a3" {:code "(f 2)" :response {:handle 'result/e1 :value 4}}))
-           (testing "from root on main: its agents, each agent's run"
+           (d/transact bc (repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e1" "a3" {:seon.eval/code "(f 2)" :seon.eval/response {:handle 'result/e1 :value 4}}))
+           (testing "from root on main: its agents, each agent's task"
              (is (= [{:seon.agent/id :a3 :seon.agent/status :idle :seon.process/_agent [{:seon.process/pid 77 :seon.process/running "(f 2)"}]
-                      :seon.run/_agent [{:seon.run/id "demo/f#1"}]}]
+                      :seon.task/_agent [{:seon.task/id "demo/f"}]}]
                     (:seon.agent/_root (d/pull @conn '[{:seon.agent/_root [:seon.agent/id :seon.agent/status
                                                                            {:seon.process/_agent [:seon.process/pid :seon.process/running]}
-                                                                           {:seon.run/_agent [:seon.run/id]}]}]
+                                                                           {:seon.task/_agent [:seon.task/id]}]}]
                                                [:seon.root/id :root])))))
            (testing "the message is to the agent by its branch, on main"
              (is (= ["check g"] (d/q (quote [:find [?b ...] :in $ ?br :where [?m :seon.message/branch ?br] [?m :seon.message/body ?b]]) @conn b))))
-           (testing "on the branch: the run's turns and the message it took, the agent's evaluations"
-             (let [run (d/pull @bc '[{:seon.turn/_run [:seon.turn/id]} ] [:seon.run/id "demo/f#1"])]
-               (is (= [{:seon.turn/id "demo/f#1/0"}] (:seon.turn/_run run)))
+           (testing "on the branch: the agent's model calls and the message it took, the agent's evaluations"
+             (let [agent (d/pull @bc '[{:seon.model-call/_agent [:seon.model-call/id]} ] [:seon.agent/key k])]
+               (is (= [{:seon.model-call/id (str k "/1")}] (:seon.model-call/_agent agent)))
                (is (= ["m-1"] (d/q (quote [:find [?id ...] :in $ ?br :where [?m :seon.message/branch ?br] [?m :seon.message/id ?id]]) @bc b))))
              (is (= ["e1"] (mapv :seon.eval/id (:seon.eval/_agent (d/pull @bc '[{:seon.eval/_agent [:seon.eval/id]}] [:seon.agent/key k]))))))
-           (testing "the run, the message and the agent are one entity on the branch and on main (content ids)"
-             (doseq [ref [[:seon.run/id "demo/f#1"] [:seon.message/id "m-1"] [:seon.agent/key k]]]
+           (testing "the message and the agent are one entity on the branch and on main (content ids)"
+             (doseq [ref [[:seon.message/id "m-1"] [:seon.agent/key k]]]
                (is (= (:db/id (d/entity @conn ref)) (:db/id (d/entity @bc ref))) (pr-str ref))))
-           (testing "the run's reader names its agent by id"
-             (is (= :a3 (:seon.run/agent (task/run @conn "demo/f#1")))))
+           (testing "the task's reader names its agent by key"
+             (is (= k (:seon.task/agent (task/task @conn "demo/f")))))
            (finally (d/release bc) (d/delete-branch! conn b))))))))
 
 (deftest an-agents-live-state-is-facts-on-its-entity

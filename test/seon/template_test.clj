@@ -141,19 +141,19 @@
 
 (deftest a-requests-stages-are-one-sessions-agent
   ;; design agent-loop section 1a (owner, 2026-10-25: "just have it be the same session right?"):
-  ;; a stage's run continues the agent of its request's earlier stages, found through :needs on
-  ;; the one branch and the runs' own agents; a task on another branch is a session of its own
+  ;; a stage's agent continues the agent of its request's earlier stages, found through :needs on
+  ;; the one branch and the tasks' own agents; a task on another branch is a session of its own
   (let [db (d/db-with (main) (tpl/request-tx (main) (tpl/stages req)))
-        db (d/db-with db (task/run-start-tx "demo/workouts#1" "demo/workouts" "boot-1" :a1 {:branch (task/default-branch "demo/workouts") :model nil :max-turns 4} 1 "p"))
-        ;; on a branch of its own, and needing design, whose run has an agent: still not design's session
+        db (d/db-with db (task/start-tx db "demo/workouts" "boot-1" :a1 {:branch (task/default-branch "demo/workouts") :model nil :max-turns 4} 1))
+        ;; on a branch of its own, and needing design, whose task has an agent: still not design's session
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "other" :seon.task/plan "x" :seon.task/proofs #{'demo-test/other}
                                               :seon.task/needs #{"demo/workouts"}}]))]
     (is (= "boot-1/a1" (task/session-key db "demo/workouts-implement")) "implement continues design's agent")
     (is (= "boot-1/a1" (task/session-key db "demo/workouts-merge")) "merge too, through implement")
     (is (nil? (task/session-key db "demo/other")) "a task on another branch is not the session of a task it needs")
-    (let [db (d/db-with db (task/run-start-tx "demo/workouts-implement#1" "demo/workouts-implement" "boot-2" :a4 {:branch (task/default-branch "demo/workouts") :model nil :max-turns 4} 2 "p"
-                                              (task/session-key db "demo/workouts-implement")))]
-      (is (= "boot-1/a1" (:seon.agent/key (:seon.run/agent (d/entity db [:seon.run/id "demo/workouts-implement#1"]))))
+    (let [db (d/db-with db (task/start-tx db "demo/workouts-implement" "boot-2" :a4 {:branch (task/default-branch "demo/workouts") :model nil :max-turns 4} 2
+                                          (task/session-key db "demo/workouts-implement")))]
+      (is (= "boot-1/a1" (:seon.agent/key (:seon.task/agent (d/entity db [:seon.task/id "demo/workouts-implement"]))))
           "a process of a later boot, on the session's agent"))))
 
 (deftest a-long-form-becomes-a-task-that-names-its-size-tests-and-ticks

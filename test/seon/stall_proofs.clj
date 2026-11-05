@@ -1,7 +1,7 @@
 (ns seon.stall-proofs
   "A stall task's proofs, its boundary conditions (seon.template/stall-proofs): each reads the task
-  the agent works (my.task/current) and its :seon.task/cause. Not a *_test namespace: bin/test
-  never selects them; they run as a stall task's proofs, in the agent that works it."
+  the agent works (my.task/current) and its :seon.task/cause. Not a *_test namespace, so bin/test never selects them, and no agent's plan does unless they
+  are its task's (seon.agent/test-plan): they run as a stall task's proofs, in the agent that works it."
   (:require [clojure.test :refer [deftest is]] [clojure.string :as str] [datahike.api :as d]
             [seon.agent :as agent] [seon.db :as pdb] [my.task]))
 
@@ -10,10 +10,10 @@
 (defn- main [] (pdb/head (:store-conn @agent/state) (pdb/main-branch (:cfg @agent/state))))
 
 (deftest the-stall-ended
-  ;; the stalled agent spoke or ended: main holds no :seon.process/stall on a process of the agent of its run
-  (let [{:keys [run agent]} (:stall (cause))
-        a (:seon.run/agent (d/entity (main) [:seon.run/id run]))]
-    (is (some? a) (str "main holds run " run " and its agent " agent))
+  ;; the stalled agent spoke or ended: main holds no :seon.process/stall on a process of the agent of its task
+  (let [{:keys [task agent]} (:stall (cause))
+        a (:seon.task/agent (d/entity (main) [:seon.task/id task]))]
+    (is (some? a) (str "main holds task " task " and its agent " agent))
     (is (nil? (some :seon.process/stall (:seon.process/_agent a))) (str "agent " agent " is still stalled: " (pr-str (mapv :seon.process/stall (:seon.process/_agent a)))))))
 
 (deftest its-cause-is-recorded

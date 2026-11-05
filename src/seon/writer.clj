@@ -231,7 +231,7 @@
                (when (:durable? st) (pdb/sync! (:cfg st)))
                (when-not resumed? (d/branch! conn main branch))
                ;; main's commit and t, which this branch starts at and the image it forks from holds
-               (step/out! o :to-fork-server {:op :fork :agent agent :branch branch :task (:task m) :run (:run m) :ns (:ns m) :fd (:fd m) :key (:key m)
+               (step/out! o :to-fork-server {:op :fork :agent agent :branch branch :task (:task m) :ns (:ns m) :fd (:fd m) :key (:key m)
                                               :cfg (:cfg st) :resumed resumed?
                                               :commit (d/commit-id @conn) :t (:max-tx @conn)})
                (reply st {:ok true :t (:max-tx @conn) :resumed resumed?}))

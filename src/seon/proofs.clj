@@ -70,7 +70,7 @@
   "The failing assertions of the test run, per test: {test [{:type :message :expected :actual}]}, with the
   value the test got (:got) and a typed error's :seon.error/type, so a red reused at its digest reads as its run did;
   every one of each (expected and actual as the test child printed them)."
-  {:malli/schema [:=> [:cat [:map [:reports [:sequential {:gen/max 4} :seon.test/report]]]] :seon.run/failures]}
+  {:malli/schema [:=> [:cat [:map [:reports [:sequential {:gen/max 4} :seon.test/report]]]] :seon.task/failures]}
   [test-run]
   (reduce (fn [acc {:keys [type var] :as r}]
             (let [t (test-symbol var)]
@@ -81,7 +81,7 @@
 
 (defn costs
   "The cost proofs' reports of the test run, per test ({:rows :verdict}, kept as data)."
-  {:malli/schema [:=> [:cat [:map [:reports [:sequential {:gen/max 4} :seon.test/report]]]] :seon.run/costs]}
+  {:malli/schema [:=> [:cat [:map [:reports [:sequential {:gen/max 4} :seon.test/report]]]] :seon.task/costs]}
   [test-run]
   (into {} (for [{:keys [var cost]} (:reports test-run) :let [t (test-symbol var)] :when (and t cost)] [t cost])))
 
@@ -93,7 +93,7 @@
   seon.check mode functions its body runs, whose reach is the step's (seon.program/
   graph-index with roots), with the checkout's :env (bin/, native/, resources/, the pins:
   the binary's other inputs) in every digest. laws (bin/laws) reads the whole tree and has no
-  functions: its key is the tree's digest (step-digests). health (what the checkout caused since its
+  functions: its key is the tree's digest (step-digests), as agent-tests' is, which runs every test (docs/merging.md#a-test-child-is-a-fork-of-a-live-agent). health (what the checkout caused since its
   base, seon.problems/caused-split over the program and the wiki, booted on the checkout's source)
   is keyed by the tree and its base's tree (:caused): a moved var leaves the citations of docs/
   dead, which no function's reach shows, and the same tree against another base is another answer.
@@ -103,7 +103,7 @@
   its own: its keys are one per pure contracted function (mg-roots) and the schema registry (mg-registry),
   each digested by what it reaches and run in bin/test's shards beside the tests (mg-run); the step runs
   them all, in the binary, for bin/check mg-check and the full run (docs/checks.md#the-generative-check-is-per-function)."
-  '{"laws" :tree "health" :caused "lmdb-kill" :pins "lmdb-sem" :pins "forks" :pins "contracts" [seon.check/contracts] "test-inputs" [seon.check/test-inputs] "mg-check" :mg "fx" [seon.check/fx]
+  '{"laws" :tree "agent-tests" :tree "health" :caused "lmdb-kill" :pins "lmdb-sem" :pins "forks" :pins "contracts" [seon.check/contracts] "test-inputs" [seon.check/test-inputs] "mg-check" :mg "fx" [seon.check/fx]
     "config" [seon.check/config-check] "system" [seon.check/system-check] "mcp" [seon.check/mcp-proof]
     "threads" [seon.check/threads-check] "instrument" [seon.check/instrument] "record" [seon.check/record]
     "problems" [seon.check/problems-check] "smoke" [seon.check/smoke] "robust" [seon.check/robust]

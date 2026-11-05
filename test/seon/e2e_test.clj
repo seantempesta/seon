@@ -1,5 +1,5 @@
 (ns seon.e2e-test
-  "A run ends on what the system observes: quiescence, or a recorded defect (audit GUARDS
+  "A scenario ends on what the system observes: quiescence, or a recorded defect (audit GUARDS
   #26: a flight whose answer is lost never ends, so quiescence never comes; a root proc's
   defect recorded on main ends the wait instead). No clock."
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]]
@@ -17,7 +17,7 @@
         waiting (future (await/await-quiet sys t))]
     (d/transact c {:tx-data [{:seon.error/signature "0123456789abcdef" :seon.error/class :eval :seon.error/count 1 :seon.error/agents 1
                               :seon.error/first-ms start :seon.error/last-ms start}]})
-    (is (not (realized? (do (d/transact c {:tx-data [{:note/text "work goes on"}]}) waiting))) "an agent's eval error is no defect of the run")
+    (is (not (realized? (do (d/transact c {:tx-data [{:note/text "work goes on"}]}) waiting))) "an agent's eval error is no defect of the scenario")
     (d/transact c {:tx-data [{:seon.error/signature "fedcba9876543210" :seon.error/class :platform :seon.error/count 1 :seon.error/agents 0
                               :seon.error/first-ms start :seon.error/last-ms start :seon.error/message "seon.reconcile/reconciler-proc: boom"}]})
     (let [r (deref waiting)]
@@ -58,22 +58,24 @@
 
 (deftest a-model-run-is-judged-by-what-the-plan-asks
   (let [{:keys [check expect]} (e2e/expectation :newns true)]
-    (is (= expect [(pr-str (load-string (str plan-satisfied check)))])
+    (is (= expect [(pr-str (binding [*ns* *ns*] (load-string (str plan-satisfied check))))])
         "a program that does what the plan asks, and nothing more, passes the model-mode verdict"))
   (testing "the scripted model's extras are asked of the scripted model only"
     (is (str/includes? (first (:expect (e2e/expectation :newns false))) "(inc 1)"))
     (is (not-any? #(str/includes? % "(inc 1)") (:expect (e2e/expectation :newns true))))))
 
-(deftest turns-count-the-work-runs
+(deftest turns-count-the-work-of-the-merged-tasks
+  ;; turns-per-merged-task: the turns (agent-wide, :seon.agent/turn) of each distinct agent that worked the tasks a merge merged
   (let [decls (tpl/with-merge (vec (for [nm ["a" "b" "c"]]
                                      {:seon.task/ns 'demo :seon.task/name nm :seon.task/plan "Make it true." :seon.task/proofs #{(symbol "demo-test" nm)}})))
         empty-db (ts/test-db)
         db (d/db-with empty-db (task/create-tx empty-db decls))
-        att (fn [id n status turns]
-              (let [tid (str "demo/" id) branch (task/default-branch (str "demo/" (first (str/split id #"-"))))]
-                (conj (task/run-start-tx (str tid "#" n) tid "boot-1" (keyword (str "a-" id n)) {:branch branch :model nil :max-turns 4} 1000 "Make it true.")
-                      {:seon.run/id (str tid "#" n) :seon.run/status status :seon.run/turns turns})))
-        db (d/db-with db (concat (att "a" 1 :closed 3) (att "a" 2 :ended 2) (att "a-merge" 1 :merged 0)
-                                 (att "b" 1 :ended 1) (att "b-merge" 1 :merged 0)
-                                 (att "c" 1 :ended 4) (att "c-merge" 1 :closed 0)))]
-    (is (= 3.0 (double (e2e/turns-per-merged-task db))) "a and b reached main: (3 + 2 + 1) turns over 2 tasks; c did not")))
+        att (fn [id outcome turns]
+              (let [tid (str "demo/" id) branch (task/default-branch (str "demo/" (first (str/split id #"-"))))
+                    agent (keyword (str "a-" id))]
+                (concat (ts/work-tx tid outcome {:agent agent :branch branch :max-turns 4})
+                        (when (pos? turns) [{:seon.agent/key (task/agent-key "boot-1" agent) :seon.agent/turn turns}]))))
+        db (d/db-with db (concat (att "a" :done 5) (att "a-merge" :merged 0)
+                                 (att "b" :done 1) (att "b-merge" :merged 0)
+                                 (att "c" :cap 4) (att "c-merge" :closed 0)))]
+    (is (= 3.0 (double (e2e/turns-per-merged-task db))) "a and b reached main: (5 + 1) turns over 2 tasks; c did not")))

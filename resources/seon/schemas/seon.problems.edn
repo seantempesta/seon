@@ -5,6 +5,8 @@
 {;; ---- variants of the one error map (each [:and :seon.error/base ...]) ----
  ;; an agent's test results not recorded as facts on its branch: its schema lacks them, or the branch refused the write (seon.agent/record-results!); the run answers it under :unrecorded
  :seon.agent/unrecorded [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/unrecorded]]]]
+ ;; a commit the agent's branch refused (a value the store cannot hash): its run-ahead writes dropped, the eval ids among them named (seon.agent/commit!); an eval answers it under :unrecorded
+ :seon.agent/commit-refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/commit-refused]] [:transactions :int] [:evals [:vector :string]]]]
  :seon.agent/eval-error [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/eval-error]]
                                                 [:class :string] [:data {:optional true} :map] [:phase {:optional true} :keyword]
                                                 [:jolt.error/line {:optional true} :int] [:jolt.error/column {:optional true} :int]
@@ -99,7 +101,7 @@
  :seon.test/ticks-spent [:and :seon.error/base [:map [:seon.error/type [:= :seon.test/ticks-spent]] [:ticks :int] [:budget :int]
                                                 [:test {:optional true} :string]]]
  :seon.fx/io-error [:and :seon.error/base [:map [:seon.error/type [:= :seon.fx/io-error]]]]
- ;; a merged run's write-back the git effect refused (seon.reconcile/commit-tx): held in the run's :seon.run/error
+ ;; a merged task's write-back the git effect refused (seon.reconcile/commit-tx): held in the task's :seon.task/error
  ;; with the source files no commit holds yet, until one does (my.root/write-back!)
  :seon.git/commit-failed [:and :seon.error/base [:map [:seon.error/type [:= :seon.git/commit-failed]] [:seon.git/files [:vector :string]]]]
  ;; a cost proof the cap (:seon.config.proofs/cost-max-n) leaves fewer than seon.cost/min-points sizes: refused, measured nothing
@@ -174,9 +176,9 @@
  ;; what an agent sends root with its commit: its occurrences since the last commit, folded
  :seon.error/sent [:map [:error :map] [:class :seon.error/class] [:form [:maybe :string]] [:n pos-int?] [:first-ms :int] [:last-ms :int]]
 
- ;; ---- problem members of a run's end (main; the judge writes them) and of the agent's end (branch) ----
- ;; the error that ended the run: the agent's death, the turn loop's error, a refused merge
- :seon.run/error :seon.error/base
+ ;; ---- problem members of how a task's work ended (on the task, on main; the judge writes them) and of the agent's end (its branch) ----
+ ;; the error that ended it: the agent's death, the turn loop's error, a refused merge
+ :seon.task/error :seon.error/base
  ;; failing assertions per red test (at most 8 each, printed by seon.print under :part)
  :seon.problems/assertion [:map [:type [:enum :fail :error]] [:message {:optional true} [:maybe :string]] [:flaky {:optional true} :boolean]
                            [:expected {:optional true} [:maybe :string]] [:actual {:optional true} [:maybe :string]]
@@ -189,27 +191,19 @@
                     ;; a run stopped by its tick budget: the typed error, on the test that was running
                     [:seon.error/type {:optional true} :qualified-keyword] [:ticks {:optional true} :int] [:budget {:optional true} :int]
                     [:cost {:optional true} :seon.cost/report]]
- :seon.run/failures [:map-of :qualified-symbol [:vector :seon.problems/assertion]]
+ :seon.task/failures [:map-of :qualified-symbol [:vector :seon.problems/assertion]]
  ;; a cost proof's measured rows and verdict per test (seon.cost/proof's report)
  :seon.cost/report [:map [:rows [:vector {:gen/max 4} :seon.cost/row]] [:verdict :seon.cost/verdict]]
- :seon.run/costs [:map-of :qualified-symbol :seon.cost/report]
+ :seon.task/costs [:map-of :qualified-symbol :seon.cost/report]
  ;; waste charged to the producer of what the agent was shown (R4, v1 survey idea 14)
  :seon.learn/waste [:map-of :any [:map [:forms :int] [:turns :int]]]
- :seon.run/waste :seon.learn/waste
- :seon.end/waste :seon.learn/waste
- :seon.end/error :seon.error/base
+ :seon.task/waste :seon.learn/waste
+ :seon.agent/waste :seon.learn/waste
+ :seon.agent/error :seon.error/base
  :seon.fx/error-type :qualified-keyword
  ;; task content a branch and main both changed since the branch's base, differently: root's
  ;; to resolve (seon.task/carry-tx; owner, 2026-10-22, D4)
- :seon.run/task-conflicts [:vector [:map [:task :seon.task/id] [:attr :keyword] [:base :any] [:ours :any] [:theirs :any]]]
- :seon.problems/run-fact [:map {:seon.db/attributes true}
-                              [:seon.run/task-conflicts {:optional true} :seon.run/task-conflicts]
-                              [:seon.run/error {:optional true} :seon.run/error]
-                              [:seon.run/failures {:optional true} :seon.run/failures]
-                              [:seon.run/costs {:optional true} :seon.run/costs]
-                              [:seon.run/waste {:optional true} :seon.run/waste]]
- :seon.problems/end-fact [:map {:seon.db/attributes true}
-                          [:seon.end/error {:optional true} :seon.end/error] [:seon.end/waste {:optional true} :seon.end/waste]]
+ :seon.task/task-conflicts [:vector [:map [:task :seon.task/id] [:attr :keyword] [:base :any] [:ours :any] [:theirs :any]]]
  ;; what a model call cost, on the asker's branch (latency is :seon.fx/us, admission :seon.fx/queue-us)
  :seon.fx/prompt-tokens :int
  :seon.fx/completion-tokens :int

@@ -1,6 +1,6 @@
 (ns r3.fx
   "R3's synthetic main: n work tasks, each with its merge task (seon.template/with-merge),
-  runs spread over the lifecycle the way a busy swarm holds them. Pure tx builders plus
+  the work of each spread over the lifecycle the way a busy swarm holds it. Pure tx builders plus
   one loader; nothing here is product code."
   (:require [seon.test-store :as ts] [seon.task :as task] [seon.template :as tpl] [seon.db :as pdb] [datahike.api :as d] [seon.config]))
 
@@ -15,28 +15,30 @@
 
 (defn- env [id] {:branch (task/default-branch (clojure.string/replace id #"-merge$" "")) :model nil :max-turns (seon.config/value :seon.config.agent/max-turns)})
 
-(defn- run [aid id status extra]
-  (into (task/run-start-tx aid id boot :a0 (env id) 0 "p")
-        [(merge {:seon.run/id aid :seon.run/status status} extra)]))
-
-(defn- results [k] [{:seon.proof/test (symbol "app.proofs" (str "p" k "-test")) :seon.proof/status :pass}])
+(defn- work
+  "Task id's agent and how its work stands (outcome), as a root would have recorded them: what seon.task/start-tx writes
+  and, beside the outcome, the members (the stored answer of its judging)."
+  [id outcome members]
+  (let [k (task/agent-key boot :a0) e (env id)]
+    [(merge {:seon.task/id id :seon.task/outcome outcome :seon.task/agent k} members)
+     {:db/id k :seon.agent/key k :seon.agent/id :a0 :seon.agent/task [:seon.task/id id] :seon.agent/branch (:branch e)
+      :seon.agent/boot boot :seon.agent/started-ms 0 :seon.agent/max-turns (:max-turns e)}]))
 
 (defn runs-tx
-  "The runs of work task k and its merge, by k mod 10 (see ns doc)."
+  "How the work of task k and its merge stands, by k mod 10 (see ns doc)."
   [k t]
-  (let [w (str "r3/p" k) m (str "r3/p" k "-merge")
-        done-w (run (str w "#1") w :done {:seon.run/results (results k) :seon.run/basis-t 1})]
+  (let [w (str "r3/p" k) m (str "r3/p" k "-merge")]
     (case (mod k 10)
-      (0 1 2 3) (concat done-w (run (str m "#1") m :merged {:seon.run/results (results k) :seon.run/merged-t (+ t k) :seon.run/basis-t 1}))
-      (4 5) (run (str w "#1") w :running {})
-      6 (run (str w "#1") w :ended {:seon.run/results (results k) :seon.run/basis-t 1 :seon.run/outcome :green})
-      7 (concat done-w (run (str m "#1") m :running {}))
-      8 (concat done-w (run (str m "#1") m :ended {:seon.run/results (results k) :seon.run/basis-t 1 :seon.run/outcome :green}))
+      (0 1 2 3) (concat (work w :done {}) (work m :merged {:seon.task/merged-t (+ t k)}))
+      (4 5) (work w :running {})
+      6 (work w :told {:seon.task/reasons [{:reason :proof-unknown :symbol (symbol "app.proofs" (str "p" k "-test"))}]})
+      7 (concat (work w :done {}) (work m :running {}))
+      8 (concat (work w :done {}) (work m :ready {}))
       9 [])))
 
 (defn load!
-  "(f conn) on a branch of the test store holding n work tasks (2n tasks) and their
-  runs; the branch is deleted when f returns."
+  "(f conn) on a branch of the test store holding n work tasks (2n tasks) and how their
+  work stands; the branch is deleted when f returns."
   [n max-running f]
   (ts/test-branch! (fn [_ conn] (let [ds (decls n)]
     (d/transact conn {:tx-data (task/boot-tx boot max-running)})

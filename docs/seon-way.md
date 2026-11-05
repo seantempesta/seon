@@ -70,7 +70,7 @@ A live test agent tried each of these by data alone, on the 2026-11-04 tip of th
 - Re-rendering when a declared render, or a helper it calls, is redefined, merged ([reactive renders](render.md#reactive-renders)). The prototype watched 665 vars for 736 ms once; the merged one watches nothing and walks `:form/refs` only when a definition moves, about 2 MB for a typical render and 122 MB for one reaching 3,530 vars.
 - Reset to a turn's commit with the same key: the record, program and layout of that point, a further turn taken, and the source agent untouched.
 - A turn as a number on each record: one query reads a session (about 1 ms at 26 records) in the transcript's order, on a session mixing a model's turns, a message and outside evals. Writing it on new evals, and moving replies off the turn entity, are not yet tried.
-- An eval as real attributes, and a turn folded into its model call: on a copy of a real session, all 16 evals and 6 turns rebuilt to the same message bytes. Finding model evals cost about half (2.6 times fewer bytes), and summing tokens without joining through a turn cost about a third. Reading one field warm cost the same, because a warm read does not decode a stored value, and one edit about 30% less; so the gain is queries and less duplication, not reads. Writing them live is not yet tried.
+- An eval as real attributes, and a turn folded into its model call: on a copy of a real session, all 16 evals and 6 turns rebuilt to the same message bytes. Finding model evals cost about half (2.6 times fewer bytes), and summing tokens without joining through a turn cost about a third. Reading one field warm cost the same, because a warm read does not decode a stored value, and one edit about 30% less; so the gain is queries and less duplication, not reads. The eval half is built on branch jolt/simpler-schema (unmerged): an eval is attributes (`:seon.eval/code`, `response`, `call-id`, `prose`, `schema`, `basis` and the rest), its value is plain data up to `:seon.config.store/max-value-chars` and a marker past it, and an `@ctx` eval is rebuilt from its basis for the model as for the page; the turn folded into its model call is not yet.
 - The debug view made by the live agent: it shows the branch's own renders, which root's rebuild cannot.
 - A status summary: 22 red tests went from 32k tokens to 2k.
 
@@ -79,13 +79,11 @@ A live test agent tried each of these by data alone, on the 2026-11-04 tip of th
 These are the known departures from the rules, in the order of the work, each with its cause rather than its symptom.
 
 **Facts nobody writes, so code guesses:**
-- Nothing says which turn an eval or a message belongs to, so ``seon.render.ui/turn-evals`` infers it from write order. A turn is a number, not an entity: each record carries it, and the conversation is one query, ordered by turn, messages first, then evals. What a turn entity holds today moves to where it belongs: a reply is a record, and what a call cost is on the model call. ``:seon.turn/n`` restarts each run, one more reason runs should go.
+- Nothing says which turn an eval or a message belongs to, so ``seon.render.ui/turn-evals`` infers it from write order. A turn is a number, not an entity: each record carries it, and the conversation is one query, ordered by turn, messages first, then evals. What a turn entity holds today moves to where it belongs: a reply is a record, and what a call cost is on the model call.
 
 **Data shaped against its use:**
-- ``:seon.eval/record`` holds an eval's code, prose, call id and more in one value, so nothing can query them. They become attributes, with the response kept as data.
 - ``:seon.turn/*`` and ``:seon.model-call/*`` describe one thing under one id, with reasoning and calls also on the eval. A turn entity goes: the number is on each record, and how a call went is on the model call.
-- An eval whose value is not plain data is stored as its printed text (``:printed``, in 15-21% of evals counted, mostly vectors holding something that is not data), and ``:line`` is a printed value too. A value's members become data, a config key states the largest kept, and past it the transcript says it is gone.
-- Also: a branch is a keyword repeated on four entities; ``:seon.process/test-error`` is about tests but lives on a process; page state (``:seon.eval/opened``) sits in the record; seven declared attributes nothing names.
+- Also: a branch is a keyword repeated on four entities; ``:seon.process/test-error`` is about tests but lives on a process; seven declared attributes nothing names.
 
 **Assembly outside the render system:**
 - ``seon.context/request`` assembles the transcript. It should be a declared model render on the agent, answering a transcript schema, called by the turn, the debug page and the judge.
@@ -97,9 +95,9 @@ These are the known departures from the rules, in the order of the work, each wi
 
 **The debug page draws from root:** root's rebuild runs main's code and costs up to 5 GB a draw on a real page. A live agent should draw its own; an ended agent's needs an answer.
 
-**Runs:** the owner ruled there is no concept of a run, yet ``:seon.run/*`` remains: 17 source files, 64 schema lines and 422 test lines, most in the reconciler, and it is why a reset agent has no turn loop. It is the largest change here, and it is not needed by the core, so it comes after.
+**There are no runs** (owner, 2026-11-04: "There are no runs get rid of them"; built on `jolt/simpler-schema`, unmerged): an agent works a task and root decides once, when the agent ends, how the task stands; a task holds that (its agent, outcome, reason, reasons, commit, and when they happen the rest), the agent holds its environment and, on its branch, its own end, and a flight is keyed by task id ([reconcile](reconcile.md#a-task-holds-how-its-work-ended)). A retry after a failure, a wake and a load are the same agent, the cap is agent-wide ([turn](turn.md#the-cap)), and no verdict or merge entity exists beside the task.
 
-**Smaller:** two identities on an agent (``:seon.agent/id`` and ``:seon.agent/key``); two html renders of an eval; several words for a part (part, unit, component, tile); ``my.task/status`` and ``my.task/data`` computing what parts hold.
+**Smaller:** two identities on an agent (``:seon.agent/id``, this process's name, and ``:seon.agent/key``, the session); two html renders of an eval; several words for a part (part, unit, component, tile); ``my.task/status`` and ``my.task/data`` computing what parts hold.
 
 **Tried and not simpler:** an example cannot simply ref the finished agent, because a session's records live on its branch, not main, and its call ids would collide, so loading it as a copy stays. The agent's three html renders are a head, a record and a page, not three of one thing; the default render shrinks them but they remain.
 

@@ -84,9 +84,9 @@
 
 (defn warm-start
   "Server state st with the index nodes the start of the agent m forks reads read into this process's
-  node cache: its first write (seon.agent/begin-run-tx on its own task, run and key, then the cites
+  node cache: its first write (seon.agent/begin-run-tx on its own task and key, then the cites
   every agent is made with) applied with d/with to :db and dropped, and its record built on it
-  (seon.ctx/build: its task, run and the sections it cites); and, once per move of main (:warm-t), main's
+  (seon.ctx/build: its task and the sections it cites); and, once per move of main (:warm-t), main's
   schema registry (seon.program/schema-changes), which each agent forked holds as its branch's until it writes a schema entry (:schema-registry). An agent's reads stay
   in its own process, so without these each agent decoded them cold, and more of them as main's commits
   rewrote leaves and its cache evicted the rest; read here, each agent inherits them decoded, and this
@@ -94,10 +94,10 @@
   grows by that, not by what main writes (its static: seon.fork-server/static-due?). Nothing is written.
   See docs/machine.md#an-agents-first-write."
   {:malli/schema [:=> [:cat :map :map] :map]}
-  [st {:keys [task run key agent branch]}]
+  [st {:keys [task key agent branch]}]
   (let [db (:db st) t (:max-tx db)]
-    (when (and task run key (d/entity db [:seon.task/id task]))
-      (let [db1 (:db-after (d/with db (agent/begin-run-tx db task run key agent)))
+    (when (and task key (d/entity db [:seon.task/id task]))
+      (let [db1 (:db-after (d/with db (agent/begin-run-tx db task key agent)))
             db2 (:db-after (d/with db1 (task/agent-cites-tx db1 [:seon.agent/key key] key)))]
         (ctx/build db2 (pdb/eid db2 :seon.agent/key key) branch)))
     (if (= t (:warm-t st))

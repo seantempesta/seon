@@ -117,7 +117,7 @@
 
   ```clojure
   (my.schema/register! :app.shape/area [:int {:min 0}])
-  (get (my.schema/forms) :seon.run/status) ; an existing key: start from its form, never retype it
+  (get (my.schema/forms) :seon.task/outcome) ; an existing key: start from its form, never retype it
   ```"
   {:malli/schema [:=> [:cat :qualified-keyword :any] [:or :seon.schema/registration :seon.schema/registration-refused]]}
   [k v]

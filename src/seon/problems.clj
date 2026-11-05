@@ -11,13 +11,13 @@
 
   Classes:
     :platform :eval :agent :effect  recorded errors (seon.error), counted by signature
-    :red :cost                      a run's red assertions, its cost proofs' verdicts
+    :red :cost                      a task's red assertions, its cost proofs' verdicts
     :merge                          conflicts, unmerged keys, behind, a refused merge
     :dead                           a run whose agent died or was lost
     :error                          a run the turn loop ended on an error (the model)
     :waste                          forms charged to the producer of what was shown
     :task-conflict                  task content a branch and main both changed, differently,
-                                    recorded at its run's end (seon.task/carry-tx)
+                                    recorded at its agent's end (seon.task/carry-tx)
     :failed                         a task held for root with a failure: a run refused, its
                                     agent dead or its merge refused (seon.reconcile/hold-tx), or
                                     marked failed (my.task/fail!, root or a check): its reason, a
@@ -38,7 +38,9 @@
 
 (def counted-classes [:platform :eval :agent :effect])
 (def ^:private death-statuses task/failed)
-(def run-classes [:red :cost :merge :dead :error :waste :task-conflict :unrun])
+(def ended-classes
+  "The classes of problem a task's ended work states (task-rows). See docs/reconcile.md#a-task-holds-how-its-work-ended."
+  [:red :cost :merge :dead :error :waste :task-conflict :unrun])
 
 (defn- es
   "The entities carrying attribute a (its aevt index: only the entities that have it)."
@@ -47,16 +49,15 @@
 
 (defn answers
   "The tasks on db whose evidence names a problem: {signature [task-id]} and
-  {run-id [task-id]} under :signature and :from. A task's evidence about its own
-  run (a hold's, seon.reconcile/hold-tx) answers nothing: it is that problem. Reads
+  {task-id [task-id]} under :signature and :from. A task's evidence about its own
+  work (a hold's, seon.reconcile/hold-tx) answers nothing: it is that problem. Reads
   only the tasks that carry evidence (aevt :seon.task/evidence)."
   {:malli/schema [:=> [:cat :seon.host/db] [:map [:signature :map] [:from :map]]]}
   [db]
   (reduce (fn [acc {:keys [e v]}]
             (let [ev v
                   id (:seon.task/id (d/pull db [:seon.task/id] e))
-                  own? (some->> (:from ev) (pdb/eid db :seon.run/id) (d/pull db [{:seon.run/task [:seon.task/id]}])
-                                :seon.run/task :seon.task/id (= id))]
+                  own? (= (:from ev) id)]
               (cond-> acc
                 (:signature ev) (update-in [:signature (:signature ev)] (fnil conj []) id)
                 (and (:from ev) (not own?)) (update-in [:from (:from ev)] (fnil conj []) id))))
@@ -727,16 +728,14 @@
   ([base head ch] (into (sorted-set) (:caused (caused-split base head ch))))
   ([base head ch moved] (into (sorted-set) (:caused (caused-split base head ch moved)))))
 
-;; ---- runs ------------------------------------------------------------------------
+;; ---- how a task's work ended -----------------------------------------------------------
 
-(def ^:private run-pull
-  "What a problem row reads of a run: one pull (its conflicts are read only when it has
-  them)."
-  [:seon.run/id :seon.run/status :seon.run/outcome :seon.run/reason :seon.run/end-ms {:seon.run/agent [:seon.agent/id]}
-   :seon.run/unmerged :seon.run/failures :seon.run/costs :seon.run/error :seon.run/waste :seon.run/task-conflicts
-   :seon.run/deferred :seon.run/gate-unread {:seon.run/deferred-results [:seon.proof/test :seon.proof/status]}
-   {:seon.run/task [:db/id :seon.task/id :seon.task/ns :seon.task/proofs :seon.task/execution]}
-   {:seon.run/conflicts [:seon.merge/key :seon.merge/kind :seon.merge/base :seon.merge/ours :seon.merge/theirs]}])
+(def ^:private task-pull
+  "What a problem row reads of how a task's work ended: one pull. See docs/reconcile.md#a-task-holds-how-its-work-ended."
+  [:db/id :seon.task/id :seon.task/ns :seon.task/proofs :seon.task/execution :seon.task/outcome :seon.task/reason
+   :seon.task/unmerged :seon.task/failures :seon.task/costs :seon.task/error :seon.task/waste :seon.task/task-conflicts
+   :seon.task/deferred :seon.task/gate-unread :seon.task/deferred-results :seon.task/conflicts
+   {:seon.task/agent [:seon.agent/id :seon.agent/ended-ms]}])
 
 (defn- task-ready?
   "Is task te one not done whose needs are all done? Here ready deliberately means only that: the
@@ -794,74 +793,73 @@
   "Task entity e, which carries a failure, as a row: open while the task is held for root."
   {:malli/schema [:=> [:cat :seon.host/db :map :int] :seon.problems/row]}
   [db ans e]
-  (let [t (d/pull db [:seon.task/id :seon.task/ns :seon.task/failure :seon.task/evidence :seon.task/execution :seon.task/proofs] e)
-        {:keys [run] :as f} (:seon.task/failure t)
+  (let [t (d/pull db [:seon.task/id :seon.task/ns :seon.task/failure :seon.task/evidence :seon.task/execution :seon.task/proofs {:seon.task/agent [:seon.agent/ended-ms]}] e)
+        f (:seon.task/failure t)
+        id (:seon.task/id t)
         ;; the measured evidence, when it is this failure's (hold-tx writes both)
-        ev (let [ev (:seon.task/evidence t)] (when (and run (= run (:from ev))) ev))
-        end-ms (some-> run (as-> a (d/pull db [:seon.run/end-ms] [:seon.run/id a])) :seon.run/end-ms)]
+        ev (let [ev (:seon.task/evidence t)] (when (and (:agent f) (= id (:from ev))) ev))]
     (merge (select-keys f [:reason :counterexample])
-           {:task (:seon.task/id t) :run run :open? (= :held (:seon.task/execution t))
+           {:task id :judged id :open? (= :held (:seon.task/execution t))
             :owner-ns (:seon.task/ns t) :producer nil :proofs (vec (sort-by str (:seon.task/proofs t)))
-            :evidence (merge ev f {:kind :failed}) :answered-by (get-in ans [:from run] []) :at-ms end-ms})))
+            :evidence (merge ev (select-keys f [:reason :counterexample]) {:kind :failed}) :answered-by (get-in ans [:from id] []) :at-ms (get-in t [:seon.task/agent :seon.agent/ended-ms])})))
 
-(defn- run-rows
-  "The rows of run entity e, by class."
+(defn- task-rows
+  "The rows of how task entity e's work ended, by class."
   {:malli/schema [:=> [:cat :seon.host/db :map :int] [:map-of :keyword [:vector :seon.problems/row]]]}
   [db ans e]
-  (let [p (d/pull db run-pull e)
-        aid (:seon.run/id p)
-        te (get-in p [:seon.run/task :db/id])
-        status (:seon.run/status p)
-        conflicts (mapv pm/conflict-value (:seon.run/conflicts p))
-        unmerged (vec (sort (:seon.run/unmerged p)))
-        base {:run aid :task (get-in p [:seon.run/task :seon.task/id]) :agent (get-in p [:seon.run/agent :seon.agent/id]) :status status
-              :outcome (:seon.run/outcome p) :reason (:seon.run/reason p) :end-ms (:seon.run/end-ms p)
-              :open? (and (not= :cancelled (get-in p [:seon.run/task :seon.task/execution])) (not (task/done? db te))) :owner-ns (get-in p [:seon.run/task :seon.task/ns]) :producer nil :proofs []
-              :answered-by (get-in ans [:from aid] []) :at-ms (:seon.run/end-ms p)}
-        ;; a red proof is this run's problem when the task itself states it: an inherited
+  (let [p (d/pull db task-pull e)
+        id (:seon.task/id p)
+        status (:seon.task/outcome p)
+        conflicts (vec (:seon.task/conflicts p))
+        unmerged (vec (sort (:seon.task/unmerged p)))
+        end-ms (get-in p [:seon.task/agent :seon.agent/ended-ms])
+        base {:task id :judged id :agent (get-in p [:seon.task/agent :seon.agent/id]) :status status
+              :outcome status :reason (:seon.task/reason p) :end-ms end-ms
+              :open? (and (not= :cancelled (:seon.task/execution p)) (not (task/done? db e))) :owner-ns (:seon.task/ns p) :producer nil :proofs []
+              :answered-by (get-in ans [:from id] []) :at-ms end-ms}
+        ;; a red proof is this task's problem when the task itself states it: an inherited
         ;; proof was green on main when the task started (its needs were done), so red now it
-        ;; is a regression, the run's reason; another task's proof not green yet is
-        ;; an allowed red. Both stay in the run's facts as evidence, never problem rows.
-        own (set (get-in p [:seon.run/task :seon.task/proofs]))
-        failures (select-keys (:seon.run/failures p) own)
-        costs (select-keys (:seon.run/costs p) own)
-        err (:seon.run/error p)
-        waste (:seon.run/waste p)
-        merge? (or (seq conflicts) (seq unmerged) (= :behind status) (= :merge-failed (:outcome base))
+        ;; is a regression, its reason; another task's proof not green yet is
+        ;; an allowed red. Both stay in its facts as evidence, never problem rows.
+        own (set (:seon.task/proofs p))
+        failures (select-keys (:seon.task/failures p) own)
+        costs (select-keys (:seon.task/costs p) own)
+        err (:seon.task/error p)
+        waste (:seon.task/waste p)
+        merge? (or (seq conflicts) (seq unmerged) (= :behind status)
                    (some-> err :seon.error/type namespace #{"seon.merge" "seon.writer"}))]
     (cond-> {}
       (seq failures)
       (assoc :red (vec (for [[test asserts] (sort-by (comp str key) failures)]
                          (assoc base :test test :assertions asserts :proofs [test]
-                                :evidence {:from aid :red [test] :failures {test asserts}}))))
+                                :evidence {:from id :red [test] :failures {test asserts}}))))
       (seq (remove (fn [[_ {v :verdict}]] (and (:ok? v) (empty? (:under v)))) costs))
       (assoc :cost (vec (for [[test {v :verdict :as c}] (sort-by (comp str key) costs) :when (not (and (:ok? v) (empty? (:under v))))]
-                          (assoc base :test test :verdict v :rows (:rows c) :proofs [test] :evidence {:from aid :red [test] :cost {test c}}))))
+                          (assoc base :test test :verdict v :rows (:rows c) :proofs [test] :evidence {:from id :red [test] :cost {test c}}))))
       merge?
       (assoc :merge [(assoc base :conflicts (count conflicts) :unmerged unmerged :error err
                             :producer (:seon.error/operation err)
-                            :evidence (cond-> {:from aid :conflicts conflicts :unmerged unmerged
+                            :evidence (cond-> {:from id :conflicts conflicts :unmerged unmerged
                                                :red []}
                                         err (assoc :error err)))])
-      (seq (:seon.run/task-conflicts p))
-      (assoc :task-conflict (vec (for [c (:seon.run/task-conflicts p)]
-                                   (assoc base :task (:task c) :attr (:attr c) :evidence (assoc c :from aid)))))
+      (seq (:seon.task/task-conflicts p))
+      (assoc :task-conflict (vec (for [c (:seon.task/task-conflicts p)]
+                                   (assoc base :task (:task c) :attr (:attr c) :evidence (assoc c :from id)))))
       (death-statuses status)
-      (assoc :dead [(assoc base :error err :producer (:seon.error/operation err) :evidence (cond-> {:from aid} err (assoc :error err)))])
+      (assoc :dead [(assoc base :error err :producer (:seon.error/operation err) :evidence (cond-> {:from id} err (assoc :error err)))])
       (and err (not merge?) (not (death-statuses status)))
-      (assoc :error [(assoc base :error err :producer (:seon.error/operation err) :evidence {:from aid :error err})])
+      (assoc :error [(assoc base :error err :producer (:seon.error/operation err) :evidence {:from id :error err})])
       (seq waste)
-      (assoc :waste [(assoc base :waste waste :evidence {:from aid :waste waste})])
+      (assoc :waste [(assoc base :waste waste :evidence {:from id :waste waste})])
       ;; merged with its deferred process tests unasked (or no gate checkout declared): open until
       ;; each is recorded passing (my.root/gate!; DECISIONS, Process tests are not automatic)
-      (and (= :merged status) (seq (:seon.run/deferred p))
-           (not-every? (into #{} (keep #(when (= :pass (:seon.proof/status %)) (:seon.proof/test %))) (:seon.run/deferred-results p))
-                       (:seon.run/deferred p)))
-      (assoc :unrun [(cond-> (assoc base :open? true :tests (vec (sort-by str (:seon.run/deferred p)))
-                            :reason (str "merged with " (count (:seon.run/deferred p)) " process tests unrun")
-                            :evidence {:from aid :deferred (vec (sort-by str (:seon.run/deferred p)))})
+      (and (= :merged status) (seq (:seon.task/deferred p))
+           (not-every? #(= :pass (get (:seon.task/deferred-results p) %)) (:seon.task/deferred p)))
+      (assoc :unrun [(cond-> (assoc base :open? true :tests (vec (sort-by str (:seon.task/deferred p)))
+                            :reason (str "merged with " (count (:seon.task/deferred p)) " process tests unrun")
+                            :evidence {:from id :deferred (vec (sort-by str (:seon.task/deferred p)))})
                        ;; the changed namespaces its gate could not read, and why
-                       (:seon.run/gate-unread p) (assoc :unread (:seon.run/gate-unread p)))]))))
+                       (:seon.task/gate-unread p) (assoc :unread (:seon.task/gate-unread p)))]))))
 
 (defn- fold-counted
   "classes with each counted class's rows (`counted-classes`) at their true counts: a row's count
@@ -886,27 +884,26 @@
   [h db fold] (update h :classes fold-counted db fold))
 
 (defn- report-with
-  "`report` over the answers its caller read; with only (run entity ids) the run classes hold just
-  those runs' rows, found without scanning the runs' attributes (`health-moved` carries the rest)."
+  "`report` over the answers its caller read; with only (task entity ids) the judged classes hold just
+  those tasks' rows, found without scanning the tasks' attributes (`health-moved` carries the rest)."
   {:malli/schema [:=> [:cat :seon.host/db :map :seon.error/fold [:maybe [:set :int]]] :seon.problems/report]}
   [db ans fold only]
   (let [errors (group-by :class (map #(error-row db ans %) (es db :seon.error/signature)))
         done? (memoize #(task/done? db %))
-        ;; a run of a done task has no open problem but its unrun tests: its history is never pulled
-        open-run? (fn [e] (or (seq (d/datoms db :eavt e :seon.run/deferred))
-                              (not (done? (:v (first (d/datoms db :eavt e :seon.run/task)))))))
-        runs (into (sorted-set)
-                       (filter open-run?)
-                       (or only
-                           (concat (mapcat #(es db %) [:seon.run/failures :seon.run/costs :seon.run/error :seon.run/waste :seon.run/deferred
-                                                       :seon.run/conflicts :seon.run/unmerged :seon.run/task-conflicts])
-                                   (mapcat (fn [s] (map :e (d/datoms db :avet :seon.run/status s))) (conj death-statuses :behind)))))
-        by-class (apply merge-with into (map #(run-rows db ans %) runs))
+        ;; a done task has no open problem but its unrun tests: its history is never pulled
+        open-task? (fn [e] (or (seq (d/datoms db :eavt e :seon.task/deferred)) (not (done? e))))
+        tasks (into (sorted-set)
+                    (filter open-task?)
+                    (or only
+                        (concat (mapcat #(es db %) [:seon.task/failures :seon.task/costs :seon.task/error :seon.task/waste :seon.task/deferred
+                                                    :seon.task/conflicts :seon.task/unmerged :seon.task/task-conflicts])
+                                (mapcat (fn [s] (map :e (d/datoms db :avet :seon.task/outcome s))) (conj death-statuses :behind)))))
+        by-class (apply merge-with into (map #(task-rows db ans %) tasks))
         failed (mapv #(failed-row db ans %) (es db :seon.task/failure))]
     ^{:seon.render/schema :seon.problems/report}
     {:t (:max-tx db)
      :classes (merge (fold-counted (into {} (for [c counted-classes] [c {:rows (vec (get errors c))}])) db fold)
-                     (into {} (for [c run-classes :let [rows (vec (sort-by #(- (or (:end-ms %) 0)) (get by-class c)))]]
+                     (into {} (for [c ended-classes :let [rows (vec (sort-by #(- (or (:end-ms %) 0)) (get by-class c)))]]
                                 [c {:n (count rows) :rows rows}]))
                      {:failed {:n (count failed) :rows (vec (sort-by #(- (or (:at-ms %) 0)) failed))}})}))
 
@@ -954,23 +951,22 @@
                                                                      :tasks (into #{} (map :v) (d/datoms db :aevt :seon.task/id))
                                                                      :all? true}))))))
 
-(defn- touched-runs
-  "The run entities of head the move touched (moved: the datoms that differ between the dbs, as
-  `d/datoms-diff` gives them): those with a datom that differs, and every run of a task whose own datoms
-  or a run's differ (a task's runs share its done-ness and its cancel)."
+(defn- touched-tasks
+  "The task entities of head the move touched (moved: the datoms that differ between the dbs, as
+  `d/datoms-diff` gives them): those with a datom that differs, and the tasks of an agent whose datoms differ (an
+  agent's ending time is a row's)."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :any]] [:set :int]]}
   [head moved]
-  (let [moved (into #{} (map :e) moved)
-        task-of (fn [e] (cond (seq (d/datoms head :eavt e :seon.task/id)) e
-                              (seq (d/datoms head :eavt e :seon.run/id)) (:v (first (d/datoms head :eavt e :seon.run/task)))))]
-    (into #{} (comp (keep task-of) (mapcat #(map :e (d/datoms head :avet :seon.run/task %)))) moved)))
+  (into #{} (comp (map :e) (mapcat (fn [e] (cond (seq (d/datoms head :eavt e :seon.task/id)) [e]
+                                                 (seq (d/datoms head :eavt e :seon.agent/key)) (map :e (d/datoms head :avet :seon.task/agent e))))))
+        moved))
 
 (defn health-moved
   "Health of head, given prev, the health of base and moved, the datoms that differ between them (`d/datoms-diff`, which the render proc reads already): the classes `caused-split` reads
   (`caused-classes`) are prev's rows less those base had and head has not, plus those head has and
-  base had not (`split-rows`, read where the two differ, each row's answers current), and a run
-  class holds prev's rows of the runs the move left alone and the rows of those it touched
-  (`touched-runs`), so a move of main costs what it changed, not its closed history; the errors
+  base had not (`split-rows`, read where the two differ, each row's answers current), and a judged
+  class holds prev's rows of the tasks the move left alone and the rows of those it touched
+  (`touched-tasks`), so a move of main costs what it changed, not its closed history; the errors
   and the few cheap derived classes are read anew. Measured on main's own db (514 tasks, 3,472 vars)
   for a one-run change: 8.2 M ticks, 43.6 MB and 77 contracted calls, against 168 M, 462 MB and 3,674 for
   `health` of the head. Equal to `health` of head (seon.problems-test/health-moved-is-health). `health` is
@@ -981,14 +977,14 @@
   (let [ans (answers head)
         {:keys [made closed]} (split-rows base head ans (pm/delta-changes base head #{} moved) moved)
         gone (into #{} (map :signature) closed)
-        current (fn [row] (assoc row :answered-by (get-in ans (if (:run row) [:from (:run row)] [:signature (:signature row)]) [])))
+        current (fn [row] (assoc row :answered-by (get-in ans (if (:signature row) [:signature (:signature row)] [:from (:judged row)]) [])))
         carried (fn [c] (into (into [] (comp (remove #(gone (:signature %))) (map current)) (get-in prev [:classes c :rows]))
                               (comp (filter #(= c (:class %))) (map #(dissoc % :class))) made))
-        touched (touched-runs head moved)
-        ids (into #{} (keep #(:v (first (d/datoms head :eavt % :seon.run/id)))) touched)
+        touched (touched-tasks head moved)
+        ids (into #{} (keep #(:v (first (d/datoms head :eavt % :seon.task/id)))) touched)
         recorded (:classes (report-with head ans {} touched))
-        recorded (into recorded (for [c run-classes
-                                      :let [rows (into (into [] (comp (remove #(ids (:run %))) (map current)) (get-in prev [:classes c :rows])) (get-in recorded [c :rows]))
+        recorded (into recorded (for [c ended-classes
+                                      :let [rows (into (into [] (comp (remove #(ids (:judged %))) (map current)) (get-in prev [:classes c :rows])) (get-in recorded [c :rows]))
                                             rows (vec (sort-by #(- (or (:end-ms %) 0)) rows))]]
                                   [c {:n (count rows) :rows rows}]))]
     (health-with head ans recorded (assoc (other-derived head ans) :dead-citation (carried :dead-citation)
@@ -997,19 +993,18 @@
 
 (defn own
   "The open problems of one agent, by class and shaped as `report` (so the one render draws it, an
-  agent's page and root's alike): the agent with entity aid on db (its branch): its newest run's
-  (the run's own facts: run-rows), its task's (:seon.agent/task) failure, and the recorded errors last
-  raised in its task. Cost: the run's pull, the task's, and an index seek of the task's id on
+  agent's page and root's alike): the agent with entity aid on db (its branch): its task's
+  (how its work ended: task-rows), its task's (:seon.agent/task) failure, and the recorded errors last
+  raised in its task. Cost: the task's pull, and an index seek of the task's id on
   :seon.error/last-task with a pull for each error it finds; never main's history nor other tasks' errors. See docs/health.md#two-kinds-of-problem."
   {:malli/schema [:=> [:cat :seon.host/db :int] :seon.problems/report]}
   [db aid]
   (let [ans (answers db)
-        run-e (some->> (d/datoms db :avet :seon.run/agent aid) seq (map :e) (apply max))
         te (:v (first (d/datoms db :eavt aid :seon.agent/task)))
         tid (when te (:v (first (d/datoms db :eavt te :seon.task/id))))
         open (fn [rows] (vec (remove #(false? (:open? %)) rows)))
         by-class (merge-with into
-                             (when run-e (run-rows db ans run-e))
+                             (when te (task-rows db ans te))
                              (when (and te (seq (d/datoms db :eavt te :seon.task/failure))) {:failed [(failed-row db ans te)]})
                              (group-by :class (for [{:keys [e]} (when tid (d/datoms db :avet :seon.error/last-task tid))] (error-row db ans e))))]
     (vary-meta {:t (:max-tx db)

@@ -47,45 +47,33 @@
                  [:seon.config.agent/max-turns {:optional true} :seon.config.agent/max-turns]
                  [:seon.task/kind :seon.task/kind]
                  [:seon.task/evidence {:optional true} :seon.task/evidence]
-                 [:seon.task/failure {:optional true} :seon.task/failure]]
+                 [:seon.task/failure {:optional true} :seon.task/failure]
+                 ;; how its work stands and ended (judged by root, docs/reconcile.md#a-task-holds-how-its-work-ended), the agent as its key
+                 [:seon.task/agent {:optional true} :string] [:seon.task/outcome {:optional true} :seon.task/outcome]
+                 [:seon.task/reason {:optional true} :string] [:seon.task/reasons {:optional true} :seon.task/reasons]
+                 [:seon.task/commit {:optional true} :string] [:seon.task/commit-error {:optional true} :string] [:seon.task/merged-t {:optional true} :int]
+                 [:seon.task/error {:optional true} :map]
+                 [:seon.task/deferred {:optional true} [:set :qualified-symbol]] [:seon.task/deferred-results {:optional true} :seon.proof/results]
+                 [:seon.task/gate-unread {:optional true} :seon.task/gate-unread] [:seon.task/changed {:optional true} :seon.task/changed]
+                 [:seon.task/conflicts {:optional true} [:vector :seon.merge/conflict]] [:seon.task/unmerged {:optional true} [:set :string]]]
  ;; its plan and proofs accumulated along :needs (derived by the reader)
  :seon.task/task [:and {:seon.render/html seon.render.ui/task-box} :seon.task/own [:map [:seon.task/accumulated [:map [:plan :string] [:proofs :seon.task/proofs]]]]]
- ;; the environment a run runs in; desired (the task's) = observed (the run's), or restart
+ ;; the environment an agent works in; desired (the task's) = observed (the agent's), or restart
  :seon.task/env [:map {:closed true} [:branch :keyword] [:model [:maybe :string]] [:max-turns pos-int?]
                  ;; an outside run's: the client that attached it (seon.server/held)
                  [:holder {:optional true} :string]]
  :seon.proof/results [:map-of :qualified-symbol :seon.proof/status]
- :seon.run/run [:map {:seon.render/html seon.render.ui/run-row}
-                        [:seon.run/id :seon.run/id] [:seon.run/task :seon.task/id]
-                        [:seon.run/status :seon.run/status] [:seon.run/boot :string]
-                        [:seon.run/agent {:optional true} :keyword] [:seon.run/start-ms :int]
-                        [:seon.run/env :seon.task/env]
-                        [:seon.run/pid {:optional true} :int]
-                        [:seon.run/end-ms {:optional true} :int]
-                        [:seon.run/outcome {:optional true} :seon.run/outcome]
-                        [:seon.run/turns {:optional true} :int]
-                        [:seon.run/model-calls {:optional true} :int]
-                        [:seon.run/tokens {:optional true} :int]
-                        [:seon.run/reason {:optional true} :string]
-                        [:seon.run/merged-t {:optional true} :int]
-                        [:seon.run/basis-t {:optional true} :int]
-                        [:seon.run/plan {:optional true} :seon.task/plan]
-                        [:seon.run/uncontracted {:optional true} [:set :qualified-symbol]]
-                        [:seon.run/results {:optional true} :seon.proof/results]
-                        [:seon.run/conflicts {:optional true} [:vector :seon.merge/conflict]]
-                        [:seon.run/unmerged {:optional true} [:vector :string]]
-                        [:seon.run/changed {:optional true} :seon.run/changed]
-                        [:seon.run/deferred {:optional true} [:set :qualified-symbol]]
-                        [:seon.run/deferred-results {:optional true} :seon.proof/results]
-                        [:seon.run/caused {:optional true} [:set :string]]
-                        [:seon.run/behind {:optional true} pos-int?]]
+ ;; an agent as the reconciler's index holds it: what root decides on of its process and environment (the entity's attributes,
+ ;; seon.task/agent-value)
+ :seon.reconcile/agent [:map [:seon.agent/key :string] [:seon.agent/boot {:optional true} :string] [:seon.agent/taken {:optional true} :int]
+                        [:seon.agent/env :seon.task/env] [:seon.agent/id {:optional true} :keyword]]
  ;; ---- the done rule and the reconciler's answer ----
  :seon.reconcile/merge-limits [:map [:max-conflicts nat-int?] [:max-merge-turns nat-int?]]
  ;; a released task not done at quiescence: a root cause (held for root with its failure, a
  ;; refused spawn, or cancelled or held)
  ;; and the released tasks it blocks, transitively
  :seon.reconcile/root-cause [:map {:closed true} [:task :seon.task/id] [:cause :string]
-                            [:run {:optional true} :seon.run/id] [:blocks [:vector :seon.task/id]]]
+                            [:agent {:optional true} :string] [:blocks [:vector :seon.task/id]]]
  ;; the reconciler proc's state, and the steps of a flight
  :seon.reconcile/state [:map [:db :seon.host/db] [:boot :string]
                         [:rid :int] [:flights :map] [:pending :map] [:quiet {:optional true} :boolean]
@@ -108,25 +96,21 @@
  ;; tasks x tasks a listing; each entry is checked once, where it enters (put-task's
  ;; :seon.task/own, put-run's :seon.run/run, the ids of derive-needs and refresh-ready)
  :seon.reconcile/index [:map {:gen/elements [{:root nil :tasks {} :keys {} :needed-by {} :acc {} :depth {} :claims {}
-                                              :runs {} :by-task {} :done {} :ready #{} :ready-key {}
+                                              :agents {} :done {} :ready #{} :ready-key {}
                                               :live #{} :reap #{} :kill {} :judge #{} :merging #{} :msgs {}}]}
                         [:root [:maybe :map]] [:tasks :map] [:keys :map] [:needed-by :map]
                         [:acc :map] [:depth :map] [:claims :map]
-                        [:runs :map] [:by-task :map] [:done :map]
+                        [:agents :map] [:done :map]
                         [:ready set?] [:ready-key :map]
                         [:live set?] [:reap set?] [:kill :map]
                         [:judge set?] [:merging set?]
-                        ;; messages main holds to each branch's runs (seon.reconcile/branch-messages): a parked session's wake
+                        ;; messages main holds to each branch's agent (seon.reconcile/branch-messages): a parked session's wake
                         [:msgs {:optional true} :map]]
  :seon.reconcile/step [:enum :ignored :done :dead-read :spawned :started :briefed :worked :tested :read :diffed :merged :octopus-merged :write-back :main-read :committed :commit-recorded :built :gate-read :gated]
- ;; a task and a run as Datahike pulls them (the readers' inputs)
+ ;; a task as Datahike pulls it (the readers' input)
  :seon.task/pulled [:map [:seon.task/id :seon.task/id] [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name]
                     [:seon.task/plan :seon.task/plan] [:seon.task/execution [:enum :held :running :cancelled]]
                     [:seon.task/branch :seon.task/branch]]
- :seon.run/pulled [:map [:seon.run/id :seon.run/id] [:seon.run/task [:map [:seon.task/id :seon.task/id]]]
-                       [:seon.run/status :seon.run/status] [:seon.run/boot :string]
-                       [:seon.run/agent {:optional true} [:map [:seon.agent/id :keyword]]] [:seon.run/start-ms :int]
-                       [:seon.run/branch :keyword] [:seon.run/max-turns pos-int?]]
  :seon.reconcile/done-input [:map {:closed true}
                              [:proofs :seon.task/proofs] [:results :seon.proof/results]
                              [:main-green [:set :qualified-symbol]] [:allowed-red [:set :qualified-symbol]]
@@ -138,43 +122,30 @@
                              ;; the keys main changed since the branch's merge base (the writer's :theirs)
                              [:behind {:optional true} pos-int?]
                              [:kind {:optional true} :seon.task/kind]
-                             ;; a :design task's accumulated plan now and as its run began
+                             ;; a :design task's accumulated plan now and as its branch began (its merge base's)
                              [:plan {:optional true} :seon.task/plan] [:plan-before {:optional true} :seon.task/plan]
-                             ;; the process tests the run's run left to root's gate (neither red nor unknown)
+                             ;; the process tests the work left to root's gate (neither red nor unknown)
                              [:deferred {:optional true} [:set :qualified-symbol]]]
  :seon.reconcile/not-done [:map {:closed true}
                           [:reason [:enum :no-proofs :proof-red :proof-unknown :regression :stray-red :contract-gap :unmerged :no-design :open-problem :behind]]
                           [:symbol {:optional true} :qualified-symbol] [:key {:optional true} :string] [:behind {:optional true} pos-int?]]
  :seon.reconcile/action [:multi {:dispatch :op}
-                         [:reap [:map {:closed true} [:op [:= :reap]] [:run :seon.run/id]]]
-                         [:kill [:map {:closed true} [:op [:= :kill]] [:run :seon.run/id]
+                         [:reap [:map {:closed true} [:op [:= :reap]] [:task :seon.task/id]]]
+                         [:kill [:map {:closed true} [:op [:= :kill]] [:task :seon.task/id]
                                  [:reason [:enum :cancelled :held :env-changed]]]]
-                         ;; an octopus merge: every green merge run whose keys are disjoint merges in one commit
-                         [:octopus-merge [:map {:closed true} [:op [:= :octopus-merge]] [:run :seon.run/id]
-                                        [:members [:vector [:map {:closed true} [:run :seon.run/id] [:task :seon.task/id]]]]]]
-                         ;; a green merge whose change reaches process tests: they run on a checkout of the
+                         ;; an octopus merge: every ready merge task whose keys are disjoint merges in one commit
+                         [:octopus-merge [:map {:closed true} [:op [:= :octopus-merge]] [:task :seon.task/id]
+                                        [:members [:vector [:map {:closed true} [:task :seon.task/id]]]]]]
+                         ;; a ready merge whose change reaches process tests: they run on a checkout of the
                          ;; merge candidate first (seon.fx/run-tests), and gate it like proofs
-                         [:gate [:map {:closed true} [:op [:= :gate]] [:run :seon.run/id] [:task :seon.task/id]
+                         [:gate [:map {:closed true} [:op [:= :gate]] [:task :seon.task/id]
                                  [:tests [:vector :qualified-symbol]]]]
-                         [:accept [:map {:closed true} [:op [:= :accept]] [:run :seon.run/id] [:task :seon.task/id]]]
-                         ;; a failed run: its task held for root, the problem as data (seon.reconcile/hold-tx)
-                         [:hold [:map {:closed true} [:op [:= :hold]] [:run :seon.run/id] [:task :seon.task/id]
-                                 [:problem :string]]]
-                         ;; a judged run closed: its task no longer running
-                         [:close [:map {:closed true} [:op [:= :close]] [:run :seon.run/id]]]
-                         ;; a judged run parked its session (a park outcome: its process kept, the next message
-                         ;; wakes it, design agent-loop section 2): written :parked, once
-                         [:park [:map {:closed true} [:op [:= :park]] [:run :seon.run/id]]]
-                         ;; a work run's end the done rule refused: a :verdict entry to its session (its
-                         ;; reasons, what root judged on) which wakes it, or a hold when the session's last
-                         ;; verdict gave the same reasons (seon.reconcile start)
-                         [:verdict [:map {:closed true} [:op [:= :verdict]] [:run :seon.run/id] [:task :seon.task/id]
-                                    [:reasons [:vector :seon.reconcile/not-done]]]]
-                         [:spawn [:map {:closed true} [:op [:= :spawn]] [:task :seon.task/id] [:env :seon.task/env]
-                                  [:run :seon.run/id]]]
-                         ;; a parked session's next run on its live process (agent): no fork
+                         ;; a judged task whose execution is no longer running: closed
+                         [:close [:map {:closed true} [:op [:= :close]] [:task :seon.task/id]]]
+                         [:spawn [:map {:closed true} [:op [:= :spawn]] [:task :seon.task/id] [:env :seon.task/env]]]
+                         ;; a parked session's next work on its live process (agent): no fork
                          [:wake [:map {:closed true} [:op [:= :wake]] [:task :seon.task/id] [:env :seon.task/env]
-                                 [:run :seon.run/id] [:agent :keyword]]]]
+                                 [:agent :keyword]]]]
  :seon.reconcile/actions [:vector :seon.reconcile/action]
  ;; ---- the model ----
  ;; a conversation message: an assistant's may carry its eval calls, a tool message answers one by its id
@@ -182,8 +153,9 @@
  :seon.model/message [:map [:role [:enum "system" "user" "assistant" "tool"]] [:content :string]
                       [:tool-calls {:optional true} [:vector :seon.model/tool-call]] [:tool-call-id {:optional true} :string]
                       [:reasoning {:optional true} :string]
-                      ;; an assistant message's call's place in its reply: the provider's format folds a reply's calls into one message
-                      [:call {:optional true} :int]]
+                      ;; an assistant message's reply (its model call's number): the provider's format folds the consecutive assistant
+                      ;; messages of one reply into one, the reply's text first then each call; none stands alone. Never sent
+                      [:reply {:optional true} :int]]
  :seon.model/provider [:multi {:dispatch :kind}
                        [:none [:map [:kind [:= :none]]]]
                        [:scripted [:map [:kind [:= :scripted]] [:script :qualified-symbol]]]
@@ -214,12 +186,6 @@
                              [:status {:optional true} :int] [:body {:optional true} :string]]
  ;; ---- the turn loop's end, as the agent writes it on its branch ----
  :seon.turn/end [:map {:closed true}
-                 [:outcome :seon.run/outcome] [:turns {:optional true} :int] [:model-calls {:optional true} :int] [:tokens {:optional true} :int]
+                 [:outcome :seon.agent/outcome] [:turns {:optional true} :int] [:model-calls {:optional true} :int] [:tokens {:optional true} :int]
                  [:results :seon.proof/results] [:uncontracted [:set :qualified-symbol]]
-                 [:reason {:optional true} :string] [:ms {:optional true} number?]
-                 [:conflicts {:optional true} [:vector :seon.merge/conflict]]
-                 [:unmerged {:optional true} [:vector :string]]
-                 [:changed {:optional true} [:set :string]]
-                 [:deferred {:optional true} [:vector :qualified-symbol]]
-                 [:caused {:optional true} [:set :string]]
-                 [:behind {:optional true} nat-int?]]}
+                 [:reason {:optional true} :string] [:ms {:optional true} number?]]}

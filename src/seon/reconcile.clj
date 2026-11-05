@@ -1,10 +1,12 @@
 (ns seon.reconcile
   "The one reconciler (sessions R1 and M1's proto.agents.reconcile): a pure function of main's
-  db value (desired state: the tasks; observed state: runs, their ends and proof
-  results, root's boot) to the minimal actions that close the gap, and the done rule
+  db value (desired state: the tasks; observed state: what root recorded on each task of its agent and how its
+  work ended, proof results, root's boot) to the minimal actions that close the gap, and the done rule
   `done-explain` (one function, used by root to judge and by the agent to know when to
-  stop). `reconciler-proc` is the root proc that runs it on main's commits and carries the
-  actions out as requests to the api, each action's facts written by the writer."
+  stop). Root judges an agent's end once, when its facts are in hand (`judgment`), and stores the answer on the task
+  (docs/reconcile.md#a-task-holds-how-its-work-ended). `reconciler-proc` is the root proc that runs the
+  reconciler on main's commits and carries the actions out as requests to the api, each action's facts written
+  by the writer."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.sock :as sock] [seon.step :as step]
             [seon.task :as task] [seon.proofs :as proofs] [seon.merge :as pm] [seon.program :as program] [seon.source :as source] [seon.doc :as doc]
@@ -22,15 +24,16 @@
 ;; ---- the view: one read of main ---------------------------------------------------
 
 (defn- outside?
-  "Whether env, a run's environment, is an outside agent's (seon.server's attach): no turn loop
+  "Whether env, an agent's environment, is an outside agent's (seon.server's attach): no turn loop
   drives it, so it is handed back at :started and its refused end holds rather than taking a verdict."
   {:malli/schema [:=> [:cat [:maybe :map]] :boolean]}
   [env] (= "outside" (:model env)))
 
 (defn desired-env
-  "The environment task t's runs must run in; with prior, a run's environment it goes on from,
+  "The environment task t's agent must work in; with prior, an agent's environment it goes on from,
   an outside agent's stays outside (seon.server's attach: the model and its :holder are the
-  outside agent's, whatever the task's)."
+  outside agent's, whatever the task's). Its :max-turns is the budget a new agent is made with
+  (:seon.agent/max-turns), never compared with an agent's: raised, it is the agent's to keep (docs/turn.md#the-cap)."
   {:malli/schema [:function [:=> [:cat :seon.task/own] :seon.task/env] [:=> [:cat :seon.task/own [:maybe :map]] :seon.task/env]]}
   ([t] (desired-env t nil))
   ([t prior]
@@ -41,17 +44,17 @@
 ;; ---- the done rule -----------------------------------------------------------------
 
 (defn done-explain
-  "Why a run's measured facts do not make its task done; empty means done. Refused:
+  "Why the facts measured at a task's end do not make it done; empty means done. Refused:
   no proofs (never proven); a proof not passing (red), or with no result (unknown: it
   never ran); a regression (a test green on main, the
   proofs of merged tasks, red here); a stray red (a red test that is no task's open
   proof); a test red on main too at the branch's merge base (main-red) is main's red, neither a regression
-  nor a stray red: red before and red after, whatever the work did to it (docs/render.md#how-the-work-stands); a contract gap (a function the run defined without a contract); an
+  nor a stray red: red before and red after, whatever the work did to it (docs/render.md#how-the-work-stands); a contract gap (a function its branch defined without a contract); an
   unmerged entry on the branch (a merge conflict not resolved); an open problem the
   branch's work made true (seon.problems/caused: a citation of a var it deleted). A :design task readies
   the interface and plan for its implement step, so its own proofs may stay red but not
   unknown (each written and run), and it is refused :no-design until its plan differs from
-  the one its run began with (or that one is unknown), and :no-proofs, as every task is, until
+  the one its branch began with (its merge base's; or that one is unknown), and :no-proofs, as every task is, until
   it registers one (a design that only rewrote its plan was green at its first plan edit, its
   proofs named in prose and never written: the live agents' rounds). A deferred proof (a process test, run
   at the merge gate on a checkout, seon.reconcile's :gate) is neither red nor unknown
@@ -108,26 +111,33 @@
 
 ;; ---- the incremental reconciler: an index watched through main's tx reports --------------
 ;; k8s's informer + W1's engine: list once (index), then each commit's resolved datoms name the
-;; task, run and root entities it touched (observe); only those are re-read (one pull
+;; task, agent and root entities it touched (observe); only those are re-read (one pull
 ;; each) and only the tasks they reach are re-derived: the task itself, the tasks of its
-;; runs, and the tasks that need it (the reverse :needs index), transitively for a needs
-;; change. `actions` derives the same actions as the full view from the index alone; it walks
-;; only the active runs (running, ended, dead) and the head of the ready set, so a pass
-;; costs what changed plus what is in flight, never the number of tasks.
+;; agent (an agent holds two on a stage), and the tasks that need it (the reverse :needs index),
+;; transitively for a needs change. `actions` derives the same actions as the full view from the
+;; index alone; it walks only the tasks with an agent in flight (running, judged) and the head of the
+;; ready set, so a pass costs what changed plus what is in flight, never the number of tasks.
 
 (def ^:private watched-ns
-  #{"seon.task" "seon.run" "seon.root" "seon.config.agent" "seon.config.merge" "seon.message"})
+  #{"seon.task" "seon.root" "seon.config.agent" "seon.config.merge" "seon.message"})
+
+(def ^:private watched-attrs
+  "The agent attributes the index reads: when its root started it, when (a start writes both, and the environment with
+  them: a session's next task has a boot unchanged but a start time that moved), and the messages it had taken. Not its
+  :seon.agent/branch as root observes it (seon.task/agent-tx writes that too, under the store's name for the branch). Asked inline, once per
+  datom of a move: a contracted call each would make a move cost its datoms in calls (seon.render-cost-test/a-move-of-main-costs-what-moved). See docs/reconcile.md#the-reconcilers-index."
+  #{:seon.agent/boot :seon.agent/started-ms :seon.agent/taken})
 
 (def park-outcomes
-  "A run's ends that park its session instead of ending it (design agent-loop section 1): a
-  reply with no eval (waiting), its turn budget spent. Its run is written
-  :parked, its process stays, and the next message to the session wakes it with a fresh
-  budget. An error is not one: it holds the task with its cause, as any failed run does."
+  "An agent's own ends that park its session instead of ending it (docs/turn.md#parked): a
+  reply with no eval (waiting), its turn budget spent (cap). The task is written :parked (:cap, for the
+  budget), its process stays, and the next message to the session wakes it. An error is not one: it holds the
+  task with its cause, as any failed end does."
   #{:waiting :cap})
 
 (defn- branch-messages
   "How many messages main holds to the agent on branch br: what a parked agent on br is woken
-  by when it has taken fewer (:seon.run/taken). O(the messages to br)."
+  by when it has taken fewer (:seon.agent/taken). O(the messages to br)."
   {:malli/schema [:=> [:cat :seon.host/db :keyword] :int]}
   [db br]
   (or (d/q '[:find (count ?m) . :in $ ?b :where [?m :seon.message/branch ?b]] db br) 0))
@@ -135,56 +145,35 @@
 (def empty-index
   "The index of a db with no tasks."
   {:root nil :tasks {} :keys {} :needed-by {} :acc {} :depth {} :claims {}
-   :runs {} :by-task {} :done {} :ready (sorted-set) :ready-key {}
+   :agents {} :done {} :ready (sorted-set) :ready-key {}
    :live #{} :reap #{} :kill {} :judge #{} :merging #{} :msgs {}})
 
 (def ^:private finished task/finished)
-(def ^:private judged task/judged)
+(def ^:private judged-outcomes "The outcomes that wait for root's next step on a merge (task/judged). See docs/reconcile.md#a-task-holds-how-its-work-ended."
+  task/judged)
 
-(defn- live-in?
-  {:malli/schema [:=> [:cat :seon.reconcile/index :seon.run/run] :boolean]}
-  [idx a] (and (= :running (:seon.run/status a)) (= (:boot (:root idx)) (:seon.run/boot a))))
+(defn- task-agent
+  "Task id's agent as the index holds it (the entity its start named, seon.task/start-tx), or nil before one."
+  {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id] [:maybe :seon.reconcile/agent]]}
+  [idx id] (get-in idx [:agents (get-in idx [:tasks id :seon.task/agent])]))
 
-(defn- newest-run
-  "Task id's newest run: runs are numbered in the order they start (actions' spawns), so it is
-  the count's. nil before its first."
-  {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id] [:maybe :seon.run/run]]}
-  [idx id] (let [n (count (get-in idx [:by-task id]))] (when (pos? n) (get-in idx [:runs (task/run-id id n)]))))
-
-(defn- parked
-  "Task id's newest run when it parked its session (its status :parked, written where it
-  parked: the :park action), or nil."
-  {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id] [:maybe :seon.run/run]]}
-  [idx id] (let [a (newest-run idx id)] (when (= :parked (:seon.run/status a)) a)))
+(defn- idle
+  "Task id's agent when its work is parked on its live process: parked or at its cap in this boot, by an agent (the
+  judge parks only a task whose process is kept, keeps?). A wake reuses it; a cancel, a hold or a new branch for its
+  task stops it (classify: its process works only the branch it was forked on). nil otherwise."
+  {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id] [:maybe :seon.reconcile/agent]]}
+  [idx id]
+  (let [a (task-agent idx id)]
+    (when (and a (#{:parked :cap} (get-in idx [:tasks id :seon.task/outcome])) (= (:boot (:root idx)) (:seon.agent/boot a)))
+      a)))
 
 (defn- keeps?
-  "Whether a run of a task of kind, ended with outcome, keeps its process at its end (:diffed):
-  the agent ended it on a park outcome, and the task is no merge (a merge's run ends its
+  "Whether a task of kind, whose agent ended with outcome, keeps its agent's process at its end (:diffed):
+  the agent ended on a park outcome, and the task is no merge (a merge's agent ends its
   process; a whole task, which merges too (seon.task/merges?), keeps its process, since its
   own work is what parked). Its judge then parks it, or stops the kept process (stop-kept)."
   {:malli/schema [:=> [:cat [:maybe :keyword] [:maybe :keyword]] :boolean]}
   [kind outcome] (boolean (and (park-outcomes outcome) (not= :merge kind))))
-
-(defn- idle
-  "Task id's parked run whose process is idle now: parked in this boot, by an agent. A wake
-  reuses it; a cancel, a hold or a new branch for its task stops it (classify: its process
-  works only the branch it was forked on). nil otherwise."
-  {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id] [:maybe :seon.run/run]]}
-  [idx id]
-  (let [a (parked idx id)]
-    ;; kept at its end (keeps?): a run parked by a verdict ended without its process
-    (when (and a (:seon.run/agent a) (= (:boot (:root idx)) (:seon.run/boot a))
-               (keeps? (get-in idx [:tasks id :seon.task/kind]) (:seon.run/outcome a)))
-      a)))
-
-(defn- done-info
-  "{:any? (merged or accepted) :merged-t (the earliest merge, or nil)} of task id."
-  {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id] [:map [:any? :boolean] [:merged-t [:maybe :int]]]]}
-  [idx id]
-  (let [as (map (:runs idx) (get-in idx [:by-task id]))
-        ms (keep #(when (= :merged (:seon.run/status %)) (:seon.run/merged-t % 0)) as)]
-    {:any? (boolean (some #(finished (:seon.run/status %)) as))
-     :merged-t (when (seq ms) (apply min ms))}))
 
 (defn- idx-done? {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id] :boolean]}
   [idx id] (boolean (get-in idx [:done id :any?])))
@@ -192,23 +181,29 @@
 (defn- idx-ready?
   {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id] :boolean]}
   [idx id]
-  (let [t (get-in idx [:tasks id])]
-    (boolean (and t (= :running (:seon.task/execution t)) (not (idx-done? idx id))
-                  (every? #(idx-done? idx %) (:seon.task/needs t))
-                  (not-any? #(let [a (get-in idx [:runs %])] (or (live-in? idx a) (judged (:seon.run/status a))))
-                            (get-in idx [:by-task id]))
-                  ;; parked (its newest run :parked): ready again only when main holds
-                  ;; more messages to its session's runs than the run had taken (design agent-loop section 2)
-                  ;; judge-tx writes :seon.run/taken on every judged run, so a parked one has it; both
-                  ;; count the messages to the runs on the parked run's branch
-                  (let [p (parked idx id)]
-                    (or (nil? p) (> (get-in idx [:msgs (get-in p [:seon.run/env :branch])] 0) (:seon.run/taken p))))))))
+  (let [t (get-in idx [:tasks id]) o (:seon.task/outcome t)]
+    (boolean (and t (= :running (:seon.task/execution t)) (not (get-in idx [:done id :any?]))
+                  (every? #(get-in idx [:done % :any?]) (:seon.task/needs t))
+                  ;; not live: working in this boot's root
+                  (not (and (= :running o) (= (:boot (:root idx)) (:seon.agent/boot (get-in idx [:agents (:seon.task/agent t)])))))
+                  (not (judged-outcomes o))
+                  ;; at its cap an agent waits for its budget to be raised and its task released (my.root/run!), whatever comes
+                  (not= :cap o)
+                  ;; parked or told: ready again only when main holds more messages to its agent than it had taken
+                  ;; (docs/turn.md#parked); judge-tx writes :seon.agent/taken at every judging, both count the messages
+                  ;; to the agent's branch
+                  (or (not (#{:parked :told} o))
+                      (let [a (get-in idx [:agents (:seon.task/agent t)])]
+                        (> (get-in idx [:msgs (:branch (:seon.agent/env a))] 0) (:seon.agent/taken a 0))))))))
 
 (defn- refresh-done
-  "Re-derive task id's done state from its runs; answers [idx flipped?]."
+  "Re-derive task id's done state from its outcome; answers [idx flipped?]."
   {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id] [:tuple :seon.reconcile/index :boolean]]}
   [idx id]
-  (let [old (get-in idx [:done id :any?]) d (done-info idx id)]
+  (let [old (get-in idx [:done id :any?])
+        t (get-in idx [:tasks id])
+        d {:any? (boolean (finished (:seon.task/outcome t)))
+           :merged-t (when (= :merged (:seon.task/outcome t)) (:seon.task/merged-t t 0))}]
     [(assoc-in idx [:done id] d) (not= old (:any? d))]))
 
 (defn- refresh-ready
@@ -245,14 +240,10 @@
              (reduce (fn [nb n] (update nb n (fnil conj #{}) id)) nb (remove old new)))]
     (assoc idx :needed-by nb :tasks (if t (assoc (:tasks idx) id t) (dissoc (:tasks idx) id)))))
 
-(defn- put-run
-  {:malli/schema [:=> [:cat :seon.reconcile/index :seon.run/id [:maybe :seon.run/run]] :seon.reconcile/index]}
-  [idx aid a]
-  (let [old (get-in idx [:runs aid])
-        tid (or (:seon.run/task a) (:seon.run/task old))]
-    (-> idx
-        (assoc :runs (if a (assoc (:runs idx) aid a) (dissoc (:runs idx) aid)))
-        (update-in [:by-task tid] (fnil (if a conj disj) #{}) aid))))
+(defn- put-agent
+  {:malli/schema [:=> [:cat :seon.reconcile/index :string [:maybe :seon.reconcile/agent]] :seon.reconcile/index]}
+  [idx k a]
+  (assoc idx :agents (if a (assoc (:agents idx) k a) (dissoc (:agents idx) k))))
 
 (defn- downstream
   "ids and every task that needs one of them, transitively (seon.program/closure over :needed-by)."
@@ -268,54 +259,57 @@
     (program/topo (vec all) #(filter all (get-in idx [:tasks % :seon.task/needs])) identity)))
 
 (defn- classify
-  "Run aid's place in the sets actions reads: live, reap, kill (with the reason), judge
-  (ended or dead), merging (a merge task's run live or ended)."
-  {:malli/schema [:=> [:cat :seon.reconcile/index :seon.run/id] :seon.reconcile/index]}
-  [idx aid]
-  (let [a (get-in idx [:runs aid])
-        t (get-in idx [:tasks (:seon.run/task a)])
-        st (:seon.run/status a)
-        live? (and a (live-in? idx a))
-        ;; the newest run of its task, parked in this boot: its process is
-        ;; parked, and stays until its task is cancelled or held (design agent-loop section 2)
-        parked? (and a (= a (idle idx (:seon.run/task a))))
+  "Task id's place in the sets actions reads: live, reap, kill (with the reason), judge
+  (ready or at its gate), merging (a merge task live or judged, a whole task judged)."
+  {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id] :seon.reconcile/index]}
+  [idx id]
+  (let [t (get-in idx [:tasks id])
+        a (get-in idx [:agents (:seon.task/agent t)])
+        o (:seon.task/outcome t)
+        ;; started in this boot's root: it is live while it works, its process is parked while it waits, and stays until
+        ;; its task is cancelled or held (docs/turn.md#parked)
+        here? (and t (= (:boot (:root idx)) (:seon.agent/boot a)))
+        live? (and here? (= :running o))
+        parked? (and here? (#{:parked :cap} o))
+        env (:seon.agent/env a)
         kill (cond
                live? (cond (= :cancelled (:seon.task/execution t)) :cancelled
                            (= :held (:seon.task/execution t)) :held
-                           (not= (desired-env t (:seon.run/env a)) (:seon.run/env a)) :env-changed)
+                           ;; its budget is the agent's own and not compared (desired-env)
+                           (not= (select-keys (desired-env t env) [:branch :model]) (select-keys env [:branch :model])) :env-changed)
                parked? (cond (= :cancelled (:seon.task/execution t)) :cancelled
                              (= :held (:seon.task/execution t)) :held
-                             (not= (:seon.task/branch t) (get-in a [:seon.run/env :branch])) :env-changed))
-        mark (fn [idx k on?] (update idx k (if on? conj disj) aid))]
+                             (not= (:seon.task/branch t) (:branch env)) :env-changed))
+        mark (fn [idx k on?] (update idx k (if on? conj disj) id))]
     (-> idx
         (mark :live live?)
-        (mark :reap (and a (= :running st) (not live?)))
-        (update :kill #(if kill (assoc % aid kill) (dissoc % aid)))
-        (mark :judge (boolean (judged st)))
-        ;; a merge run merges while it runs; a whole run (its own work first) once it ends
-        (mark :merging (and a (case (:seon.task/kind t) :merge (or live? (= :ended st)) :whole (= :ended st) false))))))
+        (mark :reap (and t (= :running o) (not live?)))
+        (update :kill #(if kill (assoc % id kill) (dissoc % id)))
+        (mark :judge (boolean (and t (judged-outcomes o))))
+        ;; a merge task merges while it works; a whole one (its own work first) once it is judged
+        (mark :merging (and t (case (:seon.task/kind t) :merge (or live? (judged-outcomes o)) :whole (boolean (judged-outcomes o)) false))))))
 
 (defn- settle
   "Re-derive after entities changed: tasks whose needs or proofs changed (and the tasks that
   need them, transitively) get depth and accumulated proofs again in dependency order; each
-  dirty task's done state is re-derived (it depends on its own runs only); then readiness
+  dirty task's done state is re-derived (it depends on its own outcome only); then readiness
   of the dirty tasks and of the tasks needing one whose done state flipped."
-  {:malli/schema [:=> [:cat :seon.reconcile/index [:set :seon.task/id] [:set :seon.task/id] [:set :seon.run/id]] :seon.reconcile/index]}
-  [idx needs-changed dirty touched]
+  {:malli/schema [:=> [:cat :seon.reconcile/index [:set :seon.task/id] [:set :seon.task/id]] :seon.reconcile/index]}
+  [idx needs-changed dirty]
   (let [order (topo idx needs-changed)
         idx (reduce derive-needs idx order)
         dirty (into dirty order)
         [idx flipped] (reduce (fn [[idx fl] id] (let [[idx f?] (refresh-done idx id)] [idx (cond-> fl f? (conj id))])) [idx []] dirty)]
     (reduce classify
             (reduce refresh-ready idx (into dirty (mapcat #(get-in idx [:needed-by %])) flipped))
-            (into touched (mapcat #(get-in idx [:by-task %])) dirty))))
+            dirty)))
 
 (defn observe
   "The index after main's commit: ops are the commit's resolved datoms ([op e a v]), db the
   db after it. Re-reads only the entities the commit touched."
   {:malli/schema [:=> [:cat :seon.reconcile/index :seon.host/db [:sequential :any]] :seon.reconcile/index]}
   [idx db ops]
-  (let [es (into #{} (keep (fn [[_ e a]] (when (and (keyword? a) (watched-ns (namespace a))) e))) ops)
+  (let [es (into #{} (keep (fn [[_ e a]] (when (and (keyword? a) (or (watched-attrs a) (watched-ns (namespace a)))) e))) ops)
         ;; a message to a branch's agent: its count moves by one (a commit's op names the branch;
         ;; a diff's op may name only the message, so its branch is counted again), and the tasks
         ;; on that branch are re-derived (the session its agent works)
@@ -330,7 +324,7 @@
                       e))]
     (if (empty? es)
       idx
-      (let [step (fn [[idx nc dirty all? touched] e]
+      (let [step (fn [[idx nc dirty all?] e]
                    (let [[kind v :as ev] (task/entity-value db e)
                          [okind oid] (get-in idx [:keys e])]
                      (case (or kind okind)
@@ -338,20 +332,20 @@
                                    needs? (not= (get-in idx [:tasks id :seon.task/needs]) (:seon.task/needs v))]
                                [(-> idx (put-task id v) (update :keys #(if v (assoc % e [:task id]) (dissoc % e))))
                                 (cond-> nc (or needs? (nil? (get-in idx [:acc id])) (not= (get-in idx [:tasks id :seon.task/proofs]) (:seon.task/proofs v))) (conj id))
-                                (conj dirty id) all? touched])
-                       :run (let [aid (or (:seon.run/id v) oid)
-                                      tid (or (:seon.run/task v) (get-in idx [:runs aid :seon.run/task]))]
-                                  [(-> idx (put-run aid v) (update :keys #(if v (assoc % e [:run aid]) (dissoc % e))))
-                                   nc (conj dirty tid) all? (conj touched aid)])
+                                (conj dirty id) all?])
+                       ;; an agent's boot or taken count moved: the tasks that name it (an agent on a stage holds two) are re-derived
+                       :agent (let [k (or (:seon.agent/key v) oid)]
+                                [(-> idx (put-agent k v) (update :keys #(if v (assoc % e [:agent k]) (dissoc % e))))
+                                 nc (into dirty (keep #(:seon.task/id (d/entity db %))) (task/tasks-of-agent db e)) all?])
                        :root [(-> idx (assoc :root v) (assoc-in [:keys e] [:root :root]))
-                              nc dirty (or all? (not= (:boot (:root idx)) (:boot v))) touched]
-                       [idx nc dirty all? touched])))
-            [idx nc dirty all? touched] (reduce step [idx #{} #{} false #{}] (sort es))]
-        ;; a new boot changes which runs are live: every task is re-derived (once per boot)
-        (settle idx nc (if all? (set (keys (:tasks idx))) dirty) touched)))))
+                              nc dirty (or all? (not= (:boot (:root idx)) (:boot v)))]
+                       [idx nc dirty all?])))
+            [idx nc dirty all?] (reduce step [idx #{} #{} false] (sort es))]
+        ;; a new boot changes which tasks are live: every task is re-derived (once per boot)
+        (settle idx nc (if all? (set (keys (:tasks idx))) dirty))))))
 
 (defn index
-  "The index of db, listed: observe of every task, run and root entity at once. Given idx,
+  "The index of db, listed: observe of every task, agent and root entity at once. Given idx,
   the index of db from, the index of db observed from it over the datoms of the watched
   attributes that differ (datahike.api/datoms-diff of each attribute's range, which skips the
   stored subtrees both share): the cost of the watched datoms and what changed, never of the
@@ -365,19 +359,19 @@
   ([db] (observe empty-index db (concat (for [e (task/entity-ids db)] [:db/add e :seon.task/id nil])
                                         (for [dt (d/datoms db :aevt :seon.message/branch)] [:db/add (:e dt) :seon.message/branch (:v dt)]))))
   ([idx from db]
-   (index idx from db (for [a (sort (into #{} (filter #(and (keyword? %) (watched-ns (namespace %)))) (concat (keys (:schema from)) (keys (:schema db)))))
+   (index idx from db (for [a (sort (into #{} (filter #(and (keyword? %) (or (watched-attrs %) (watched-ns (namespace %))))) (concat (keys (:schema from)) (keys (:schema db)))))
                             dt (apply concat (d/datoms-diff from db :aevt [a]))]
                         dt)))
   ([idx _from db moved]
-   (observe idx db (for [dt moved :let [a (:a dt)] :when (and (keyword? a) (watched-ns (namespace a)))]
+   (observe idx db (for [dt moved :let [a (:a dt)] :when (and (keyword? a) (or (watched-attrs a) (watched-ns (namespace a))))]
                      [:db/add (:e dt) a]))))
 
 (defn done-input
-  "The done rule's input for run results of task id, observed against main at t basis
+  "The done rule's input for the results of task id's end, observed against main at t basis
   (nil: main as idx holds it), over the index: the regression and allowed-red sets restricted to the tests
   that ran (the only ones done-explain asks about), each test looked up by its claimants; for
-  a :design task, its accumulated plan now and plan-before, the one its run began with
-  (:seon.run/plan; nil: unknown); deferred, the process tests its run left to root's gate."
+  a :design task, its accumulated plan now and plan-before, the one its branch began with
+  (its merge base's; nil: unknown); deferred, the process tests its end left to root's gate."
   {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id :seon.proof/results [:set :qualified-symbol] [:sequential :string] [:maybe :int] [:maybe :seon.task/plan] [:set :qualified-symbol]] :seon.reconcile/done-input]}
   [idx id results uncontracted unmerged basis plan-before deferred]
   (let [by? (fn [x] (when-let [mt (get-in idx [:done x :merged-t])] (or (nil? basis) (<= mt basis))))
@@ -395,94 +389,98 @@
       (and (= :design kind) plan-before) (assoc :plan-before plan-before))))
 
 (defn- merge-keys
-  "The program keys merge task id merges: what the runs on its branch measured as changed
-  (:seon.run/changed of its own runs and of the tasks it needs on the same branch),
-  or nil when no run there measured it (unknown: it overlaps every merge)."
+  "The program keys merge task id merges: what the tasks on its branch measured as changed
+  (:seon.task/changed of its own and of the tasks it needs on the same branch),
+  or nil when none measured it (unknown: it overlaps every merge)."
   {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id] [:maybe [:set :string]]]}
   [idx id]
   (let [br (get-in idx [:tasks id :seon.task/branch])
         ts (cons id (filter #(= br (get-in idx [:tasks % :seon.task/branch])) (get-in idx [:tasks id :seon.task/needs])))
-        cs (keep #(:seon.run/changed (get-in idx [:runs %])) (mapcat #(get-in idx [:by-task %]) ts))]
+        cs (keep #(:seon.task/changed (get-in idx [:tasks %])) ts)]
     (when (seq cs) (into #{} cat cs))))
+
+;; ---- the end, judged once ---------------------------------------------------------------
+
+(defn judgment
+  "How task id's agent's end stands, decided once, where its facts are in hand (judge-tx; the gate's answer, gated),
+  from the index and facts, a map of: :end (the agent's own end, {:outcome :reason}, or nil: it wrote none, :no-end), :died
+  (the error an agent that died left), :execution (the task's now), and the done rule's measured input (:results :uncontracted
+  :unmerged :caused :behind :plan-before :basis :deferred), :behinds (how many times the task was already judged :behind) and
+  :told (the reasons last told, the task's own). Answers {:outcome the work's state next (:seon.task/outcome) :reasons the done
+  rule's :hold a problem when the task is held for root :verdict the reasons to tell its agent when they are}; the reconciler's
+  actions read the answer stored, never derive it again. See docs/reconcile.md#a-task-holds-how-its-work-ended."
+  {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id :map]
+                  [:map [:outcome :seon.task/outcome] [:reasons [:vector :seon.reconcile/not-done]]
+                   [:hold {:optional true} :string] [:verdict {:optional true} [:vector :seon.reconcile/not-done]]]]}
+  [idx id {:keys [end died results uncontracted unmerged caused behind plan plan-before basis deferred behinds told]}]
+  (let [t (get-in idx [:tasks id]) kind (:seon.task/kind t) merge? (task/merges? kind) oc (:outcome end) execution (:seon.task/execution t)
+        outside (outside? (:seon.agent/env (task-agent idx id)))]
+    (cond
+      (not= :running execution) {:outcome :closed :reasons []}
+      died {:outcome :dead :reasons [] :hold (str "its agent died" (some->> (:seon.error/message died) (str ": ")))}
+      :else
+      (let [rs (done-explain (cond-> (cond-> (assoc (done-input idx id results uncontracted unmerged basis plan-before (set deferred))
+                                              :caused (set caused))
+                                (and plan (= :design kind)) (assoc :plan plan))
+                               ;; behind is the work's own to fix only when no merge task follows it: a merge task
+                               ;; merges main into the branch and the gate tests what it writes (seon.template's
+                               ;; merge-decl), so a green work task is never judged behind; a merge that main moves under is the merge
+                               ;; task's, held at :seon.config.merge/max-behind (the :octopus-merged step). Told again, a green task behind a
+                               ;; busy main was held at that bound (swarm held sw/s8 and sw/s9 so, 2026-10-31)
+                               (and (some-> behind pos?) (not-any? #(= :merge (get-in idx [:tasks % :seon.task/kind])) (get-in idx [:needed-by id])))
+                               (assoc :behind behind)))
+            ended (str "ended" (some->> oc name (str " ")) (some->> (:reason end) (str " (") (#(str % ")"))) ": " (explain-text rs))]
+        (cond
+          ;; the process tests the branch's change reaches run before its merge, on a checkout (:gate, seon.fx/run-tests),
+          ;; nobody asking (owner's ruling, 2026-10-27: process tests the change reaches run automatically at the judge)
+          (and (empty? rs) merge?)
+          (let [self (get-in idx [:root :started-by])
+                ;; a test cannot be its own gate (:seon.root/started-by): left out, with no result recorded
+                deferred (vec (sort-by str (remove #(= self (str %)) deferred)))]
+            (cond (empty? deferred) {:outcome :ready :reasons rs}
+                  ;; with no checkout to run them on (a root with no source), the merge is held with that reason, never merged with them unrun
+                  (nil? (get-in idx [:root :gate-checkout]))
+                  {:outcome :closed :reasons rs :deferred deferred
+                   :hold (str "its change reaches process tests (" (str/join ", " deferred)
+                              ") and this root has no checkout to run them on (:seon.config.source/gate-checkout, or a source root)")}
+                  :else {:outcome :gate :reasons rs :deferred deferred}))
+          (empty? rs) {:outcome :done :reasons rs}
+          ;; it parked (waiting, out of turns): never a hold, the session waits for its next message (docs/turn.md#parked)
+          (keeps? kind oc) {:outcome (if (= :cap oc) :cap :parked) :reasons rs}
+          ;; its end refused by the done rule (the agent's own check, or root's facts that its branch did not show): words
+          ;; to the agent, with what root judged on, which wakes the session; the same verdict twice holds. A whole task's
+          ;; goes back to its own session too (it merges itself, so it is told why it could not); a merge task's holds,
+          ;; and an outside agent's: it read the verdict as :done's answer, and no turn loop takes messages
+          (and (not= :merge kind) (not outside) (#{:green :red} oc))
+          (let [behind-only? (every? #(= :behind (:reason %)) rs)
+                ;; behind alone is main moving under the branch, not the agent's news: the same count twice is two different
+                ;; mains, so it is told again, merging main first, until :seon.config.merge/max-behind judgments of the task
+                again? (and behind-only? (< behinds (cfg/value :seon.config.merge/max-behind)))]
+            (if (and (= told rs) (not again?))
+              {:outcome :closed :reasons rs :hold (str "the same verdict again: " (explain-text rs))}
+              {:outcome (if behind-only? :behind :told) :reasons rs :verdict rs}))
+          :else {:outcome :closed :reasons rs :hold ended})))))
 
 (defn actions
   "The actions for index idx, in the order root executes them (the full view's rule): reap,
-  kill, judge, then start ready tasks up to max-running, merges up to max-merging. Reads the
-  index's sets: its cost is the runs to reap, kill and judge plus the starts."
+  kill, close, gate, then the octopus merge of the ready, then start ready tasks up to max-running,
+  merges up to max-merging. Reads the index's sets and the stored answer of each judged task
+  (`judgment` decided it once, at its end): its cost is the tasks to reap, kill and judge plus the starts."
   {:malli/schema [:=> [:cat :seon.reconcile/index] :seon.reconcile/actions]}
   [idx]
   (let [root (merge {:max-running (cfg/value :seon.config.agent/max-running) :max-merging (cfg/value :seon.config.merge/max-running)} (:root idx))
-        att (:runs idx)
-        reaps (for [aid (sort (:reap idx))] {:op :reap :run aid})
-        kills (for [[aid r] (sort-by key (:kill idx))] {:op :kill :run aid :reason r})
-        ;; a failed run (refused by the done rule, or its agent died) holds its task for
-        ;; root, which decides whether it runs again (DECISIONS, No automatic retries: a refused
-        ;; or failed run is held for root)
-        failed (fn [aid id problem] {:op :hold :run aid :task id :problem problem})
-        judged (for [aid (sort (:judge idx))
-                     :let [a (att aid) id (:seon.run/task a) t (get-in idx [:tasks id])
-                           merge? (task/merges? (:seon.task/kind t))]]
+        reaps (for [id (sort (:reap idx))] {:op :reap :task id})
+        kills (for [[id r] (sort-by key (:kill idx))] {:op :kill :task id :reason r})
+        ;; a judged task (a merge ready, or at its gate); the rest of what judging decided was written at its end
+        judged (for [id (sort (:judge idx))
+                     :let [t (get-in idx [:tasks id])]]
                  (cond
-                   (not= :running (:seon.task/execution t)) {:op :close :run aid}
-                   (= :dead (:seon.run/status a))
-                   (failed aid id (str "its agent died" (some->> (:seon.run/reason a) (str ": "))))
-                   :else
-                   (let [rs (done-explain (cond-> (assoc (done-input idx id (:seon.run/results a {}) (:seon.run/uncontracted a #{})
-                                                                     (:seon.run/unmerged a []) (:seon.run/basis-t a) (:seon.run/plan a)
-                                                                     (set (:seon.run/deferred a)))
-                                                          :caused (:seon.run/caused a #{}))
-                                            ;; behind is the run's own to fix only when no merge task follows it: a merge task
-                                            ;; merges main into the branch and the gate tests what it writes (seon.template's
-                                            ;; merge-decl), so a green work run is never judged behind; a merge that main moves under is the merge
-                                            ;; task's, held at :seon.config.merge/max-behind (the :octopus-merged step). Told again, a green run behind a
-                                            ;; busy main was held at that bound (swarm held sw/s8 and sw/s9 so, 2026-10-31)
-                                            (and (:seon.run/behind a)
-                                                 (not-any? #(= :merge (get-in idx [:tasks % :seon.task/kind])) (get-in idx [:needed-by id])))
-                                            (assoc :behind (:seon.run/behind a))))]
-                     (cond
-                       ;; the process tests the branch's change reaches run before its merge, on a
-                       ;; checkout (:gate, seon.fx/run-tests), nobody asking (owner's ruling,
-                       ;; 2026-10-27: process tests the change reaches run automatically at the judge)
-                       (and (empty? rs) merge?)
-                       (let [self (get-in idx [:root :started-by])
-                             ;; a test cannot be its own gate (:seon.root/started-by): left out, with no result recorded
-                             deferred (sort-by str (remove #(= self (str %)) (:seon.run/deferred a #{}))) dres (:seon.run/deferred-results a)
-                             red (for [t deferred :let [s (get dres t)] :when (not= :pass s)] [t (or s :unknown)])]
-                         ;; with no checkout to run them on (a root with no source), the merge is
-                         ;; held with that reason, never merged with them unrun
-                         (cond (empty? deferred) {:op :ready-to-merge :run aid :task id}
-                               (nil? (get-in idx [:root :gate-checkout]))
-                               (failed aid id (str "run " aid "'s change reaches process tests (" (str/join ", " deferred)
-                                                   ") and this root has no checkout to run them on (:seon.config.source/gate-checkout, or a source root)"))
-                               (nil? dres) {:op :gate :run aid :task id :tests (vec deferred)}
-                               (empty? red) {:op :ready-to-merge :run aid :task id}
-                               :else (failed aid id (str "run " aid "'s deferred tests, run on a checkout at its merge, are not green: "
-                                                           (str/join ", " (for [[t s] red] (str t " " (name s))))
-                                                           ;; why they could not run, when the gate itself failed: the effect's error, or a changed
-                                                           ;; namespace with no file on the branch (each test then reads :error)
-                                                           (let [why (concat (some-> (:seon.run/error a) :seon.error/message vector)
-                                                                             (for [u (:seon.run/gate-unread a)] (str (:ns u) ": " (:reason u))))]
-                                                             (when (seq why) (str "; the gate could not run them: " (str/join "; " why))))))))
-                       (empty? rs) {:op :accept :run aid :task id}
-                       ;; it parked (waiting, out of turns, no progress, a provider's error): never a
-                       ;; hold, the session waits for its next message (design agent-loop section 1)
-                       (keeps? (:seon.task/kind t) (:seon.run/outcome a)) {:op :park :run aid}
-                       ;; its end refused by the done rule (the agent's own check, or root's facts
-                       ;; that its branch did not show): words to the agent, a :verdict entry with
-                       ;; what root judged on, which wakes the session; the same verdict twice holds
-                       ;; (start) (design one-derivation 4.1 section 5). A whole task's goes back to
-                       ;; its own session too (it merges itself, so it is told why it could not); a
-                       ;; merge task's holds, and an outside agent's: it read the verdict as :done's
-                       ;; answer, and no turn loop takes entries
-                       (and (not= :merge (:seon.task/kind t)) (not (outside? (:seon.run/env a))) (#{:green :red} (:seon.run/outcome a)))
-                       {:op :verdict :run aid :task id :reasons rs}
-                       :else
-                       (failed aid id (str "run " aid " ended" (some->> (:seon.run/outcome a) name (str " "))
-                                             (some->> (:seon.run/reason a) (str " (") (#(str % ")")))
-                                             ": " (explain-text rs)))))))
-        ;; the octopus merge (bors, GitHub's merge queue): green merge runs merge together in
-        ;; one commit once no merge run is still running, so every member merged the same
-        ;; main; an octopus merge closes when its first member ends (no new member joins until it
+                   (not= :running (:seon.task/execution t)) {:op :close :task id}
+                   (= :gate (:seon.task/outcome t)) {:op :gate :task id :tests (vec (sort-by str (remove #(= (get-in idx [:root :started-by]) (str %)) (:seon.task/deferred t))))}
+                   :else {:op :ready-to-merge :task id}))
+        ;; the octopus merge (bors, GitHub's merge queue): ready merge tasks merge together in
+        ;; one commit once no merge task is still working, so every member merged the same
+        ;; main; an octopus merge closes when its first member is judged (no new member joins until it
         ;; merges, so merging cannot starve)
         ready (filter #(= :ready-to-merge (:op %)) judged)
         live-merge? (some (:live idx) (:merging idx))
@@ -490,14 +488,14 @@
         gates (when-not live-merge? (take 1 (filter #(= :gate (:op %)) judged)))
         judged (remove #(#{:ready-to-merge :gate} (:op %)) judged)
         octopus (when (and (seq ready) (not live-merge?))
-                [{:op :octopus-merge :run (:run (first ready)) :members (mapv #(select-keys % [:run :task]) ready)}])
-        closed? (some #(= :ended (get-in idx [:runs % :seon.run/status])) (:merging idx))
+                [{:op :octopus-merge :task (:task (first ready)) :members (mapv #(select-keys % [:task]) ready)}])
+        closed? (some #(judged-outcomes (get-in idx [:tasks % :seon.task/outcome])) (:merging idx))
         room (max 0 (- (:max-running root) (- (count (:live idx)) (count (filter (:live idx) (keys (:kill idx)))))))
         merge? (fn [id] (= :merge (get-in idx [:tasks id :seon.task/kind])))
         merge-room (max 0 (- (:max-merging root) (count (:merging idx))))
         ;; a merge joins only when what it changes is disjoint from every merge in flight;
         ;; one whose changes are unknown runs alone; conflicting merges serialize
-        flying (map #(merge-keys idx (get-in idx [:runs % :seon.run/task])) (:merging idx))
+        flying (map #(merge-keys idx %) (:merging idx))
         taken0 (when-not (some nil? flying) (into #{} cat flying))
         starts (loop [[[_ id] & more] (seq (:ready idx)) n 0 m 0 taken taken0 acc []]
                  (cond (or (nil? id) (>= n room)) acc
@@ -508,18 +506,17 @@
                                        (recur more (inc n) (inc m) (when ks (into taken ks)) (conj acc id))
                                        (recur more n m taken acc)))
                        :else (recur more (inc n) m taken (conj acc id))))
-        spawns (for [id starts :let [t (get-in idx [:tasks id]) p (idle idx id)
-                                     run (task/run-id id (inc (count (get-in idx [:by-task id]))))
-                                     ;; a run a root restart lost (or this pass reaps: an earlier boot's) was ended
-                                     ;; by nobody: an outside one stays outside
-                                     newest (last (sort-by :seon.run/start-ms (map (:runs idx) (get-in idx [:by-task id]))))
-                                     lost? (or (= :lost (:seon.run/status newest)) (contains? (:reap idx) (:seon.run/id newest)))
-                                     env (desired-env t (when lost? (:seon.run/env newest)))]]
-                 ;; its process is idle (parked in this boot, on its branch): its next run is a wake on it, no fork
-                 (if (and p (not (get-in idx [:kill (:seon.run/id p)])))
-                   {:op :wake :task id :env env :run run :agent (:seon.run/agent p)}
-                   {:op :spawn :task id :env env :run run}))]
-    (vec (concat reaps kills judged gates octopus spawns))))
+        spawns (for [id starts :let [t (get-in idx [:tasks id]) p (idle idx id) prior (task-agent idx id)
+                                     ;; work a root restart lost was ended by nobody: an outside agent stays outside
+                                     lost? (= :lost (:seon.task/outcome t))
+                                     env (desired-env t (when lost? (:seon.agent/env prior)))]]
+                 ;; its process is idle (parked in this boot, on its branch): its next work is a wake on it, no fork
+                 (if (and p (not (get-in idx [:kill id])))
+                   {:op :wake :task id :env env :agent (:seon.agent/id p)}
+                   {:op :spawn :task id :env env}))]
+    ;; a task has one flight, so one action a pass: the first in root's order; what follows it waits for the pass its write moves main to
+    (first (reduce (fn [[acc seen] act] (if (contains? seen (:task act)) [acc seen] [(conj acc act) (conj seen (:task act))]))
+                   [[] #{}] (concat reaps kills judged gates octopus spawns)))))
 
 ;; ---- held for root, and the root causes at quiescence -----------------------------------
 
@@ -531,52 +528,51 @@
                      (disj (downstream idx #{id}) id)))))
 
 (defn lost-write-back
-  "The :seon.git/commit-failed error a merged run holds (its write-back was refused and no commit
+  "The :seon.git/commit-failed error a merged task t holds (its write-back was refused and no commit
   has held its files since), or nil."
   {:malli/schema [:=> [:cat :map] [:maybe :map]]}
-  [a]
-  (let [e (:seon.run/error a)]
-    (when (and (= :merged (:seon.run/status a)) (= :seon.git/commit-failed (:seon.error/type e))) e)))
+  [t]
+  (let [e (:seon.task/error t)]
+    (when (and (= :merged (:seon.task/outcome t)) (= :seon.git/commit-failed (:seon.error/type e))) e)))
 
 (defn root-causes
   "Why released work is not done, as root causes: each task held for root with a failure
-  (a run refused, its agent dead, its merge refused, or marked failed: its reason),
-  each task whose latest run root refused to spawn (its reason: the branch is held, or
-  too many live agents), each task whose latest run parked its session (its outcome: it waits
+  (its work refused, its agent dead, its merge refused, or marked failed: its reason),
+  each task whose root refused to spawn (its reason: the branch is held, or
+  too many live agents), each task whose agent parked its session (its outcome: it waits
   for a message, which wakes it), and each other task not released (cancelled, held) that released
-  work needs, with the released tasks it blocks, and each merged run whose write-back failed (its
+  work needs, with the released tasks it blocks, and each merged task whose write-back failed (its
   :seon.git/commit-failed error: no commit holds its files). Read once at quiescence: one pass over the
-  tasks and runs."
+  tasks."
   {:malli/schema [:=> [:cat :seon.reconcile/index] [:vector :seon.reconcile/root-cause]]}
   [idx]
   (vec (concat (for [[id t] (sort-by key (:tasks idx))
              :when (not (idx-done? idx id))
              :let [ex (:seon.task/execution t)
+                   o (:seon.task/outcome t)
                    f (when (= :held ex) (:seon.task/failure t))
-                   ;; runs are numbered in order (actions' spawns), so the latest is the count's
-                   latest (let [n (count (get-in idx [:by-task id]))] (when (pos? n) (get-in idx [:runs (task/run-id id n)])))
-                   refused (when (= :refused (:seon.run/status latest)) latest)
-                   parked (when (= :parked (:seon.run/status latest)) latest)
+                   refused (when (= :refused o) t)
+                   parked (when (#{:parked :told :cap} o) t)
                    stopped (or refused parked)
                    bs (blocks idx id)]
              :when (cond (= :running ex) stopped f true :else (seq bs))]
-         (cond-> {:task id :cause (cond f (:reason f) refused (:seon.run/reason refused)
-                                        parked (str "parked: " (some-> (:seon.run/outcome parked) name) ", waiting for a message")
+         (cond-> {:task id :cause (cond f (:reason f) refused (:seon.task/reason refused)
+                                        parked (str "parked: " (name o) ", waiting for a message")
                                         :else (name ex))
                   :blocks bs}
-           (:run f) (assoc :run (:run f))
-           stopped (assoc :run (:seon.run/id stopped))))
-               ;; a merged run whose source files no commit holds: its write-back failed (my.root/write-back!)
-               (for [[aid a] (sort-by key (:runs idx)) :let [e (lost-write-back a)] :when e]
-                 {:task (:seon.run/task a) :run aid :blocks []
-                  :cause (str "write-back lost: " (:seon.error/message e) " [" (str/join ", " (:seon.git/files e)) "]; (my.root/write-back! sys [\"" aid "\"]) writes it again")}))))
+           (:agent f) (assoc :agent (:agent f))
+           (and stopped (:seon.task/agent t)) (assoc :agent (:seon.task/agent t))))
+               ;; a merged task whose source files no commit holds: its write-back failed (my.root/write-back!)
+               (for [[id t] (sort-by key (:tasks idx)) :let [e (lost-write-back t)] :when e]
+                 {:task id :blocks []
+                  :cause (str "write-back lost: " (:seon.error/message e) " [" (str/join ", " (:seon.git/files e)) "]; (my.root/write-back! sys [\"" id "\"]) writes it again")}))))
 
 (defn commit-tx
-  "Main's write of the :git effect's answer r for the runs of members, which wanted paths written
-  and gave the effect those in written: a sha is :seon.run/commit on each, clears the
+  "Main's write of the :git effect's answer r for the tasks of members, which wanted paths written
+  and gave the effect those in written: a sha is :seon.task/commit on each, clears the
   :seon.git/commit-failed error an earlier failure left (beside any note of forms that name no
   file, which stays), and holds a new one for the paths main had no text for (wanted, not written);
-  a failure is that error for every wanted path, as the run's :seon.run/error (root-causes names it
+  a failure is that error for every wanted path, as the task's :seon.task/error (root-causes names it
   until a commit holds the paths), and its :effect row (seon.error/asked-tx), closed by the next
   commit's sha. Nil when r is neither. The reconciler's write-back and my.root/write-back! write it
   alike."
@@ -588,12 +584,12 @@
         error (cond (contract/error? r) (failed (:seon.error/message r) paths)
                     (and sha (seq missing)) (failed (str "main holds no text for " (str/join ", " (sort missing))) missing))]
     (when (or sha error)
-      (err/asked-tx db r :seon.run/commit
-                    (vec (mapcat (fn [{:keys [run]}]
-                                   (let [old (:seon.run/error (task/run db run))]
-                                     (cond-> (if sha [{:seon.run/id run :seon.run/commit sha}] [])
-                                       (and sha (= :seon.git/commit-failed (:seon.error/type old))) (conj [:db/retract [:seon.run/id run] :seon.run/error old])
-                                       error (conj {:seon.run/id run :seon.run/error error}))))
+      (err/asked-tx db r :seon.task/commit
+                    (vec (mapcat (fn [{:keys [task]}]
+                                   (let [old (:seon.task/error (d/pull db [:seon.task/error] [:seon.task/id task]))]
+                                     (cond-> (if sha [{:seon.task/id task :seon.task/commit sha}] [])
+                                       (and sha (= :seon.git/commit-failed (:seon.error/type old))) (conj [:db/retract [:seon.task/id task] :seon.task/error old])
+                                       error (conj {:seon.task/id task :seon.task/error error}))))
                                  members))))))
 
 (defn- unfiled-error
@@ -604,65 +600,43 @@
   (str "merged at t " (:tx r) "; these changed forms name no source file to write back: "
        (str/join "; " (for [[n ds] (:unfiled r)] (str n " " (str/join ", " (map sedn/encode ds)))))))
 
-(defn- cas-tx
-  "Move run aid's status from -> to (Datahike's compare-and-swap, by lookup ref: a racing
-  observer that already moved it leaves it), with the observed members m."
-  {:malli/schema [:=> [:cat :seon.run/id :seon.run/status :seon.run/status :map] [:vector :any]]}
-  [aid from to m]
-  (cond-> [[:db/cas [:seon.run/id aid] :seon.run/status from to]]
-    (seq m) (conj (assoc m :seon.run/id aid))))
-
 (defn evidence
-  "The measured evidence of failed run a: its conflicts (read from the branch by root's
-  judge), its unmerged keys, the proofs not passing in root's own test run, and the problem
-  the reconciler stated (nil: none)."
-  {:malli/schema [:=> [:cat :seon.run/run [:maybe :string]] :seon.task/evidence]}
-  [a problem]
-  (cond-> {:from (:seon.run/id a)
-           :conflicts (vec (:seon.run/conflicts a []))
-           :unmerged (vec (:seon.run/unmerged a []))
-           :red (vec (sort-by str (for [[t s] (:seon.run/results a) :when (not= :pass s)] t)))}
+  "The measured evidence of task id held for root: its conflicts and unmerged keys (from its judging; none for a death), the
+  proofs not passing in root's own test run (red), and the problem the reconciler stated (nil: none)."
+  {:malli/schema [:=> [:cat :seon.task/id [:map [:conflicts {:optional true} [:maybe [:sequential :seon.merge/conflict]]] [:unmerged {:optional true} [:maybe [:or [:sequential :string] [:set :string]]]]
+                                         [:red {:optional true} [:sequential :qualified-symbol]]] [:maybe :string]] :seon.task/evidence]}
+  [id {:keys [conflicts unmerged red]} problem]
+  (cond-> {:from id :conflicts (vec conflicts) :unmerged (vec unmerged) :red (vec (sort-by str red))}
     problem (assoc :problem problem)))
 
 (defn verdict-body
-  "A :verdict entry's body: the done rule's reasons and the facts root judged run a on, as data
-  the agent reads (its results, the tests deferred to the merge and their results, what its
+  "A :verdict message's body: the done rule's reasons and the facts root judged on, as data
+  the agent reads (its results, the tests deferred to the merge, what its
   branch left unmerged or caused, main's t), so what root saw and its branch did not is
   in front of it."
-  {:malli/schema [:=> [:cat :seon.run/run [:vector :seon.reconcile/not-done]] :string]}
-  [a reasons]
-  (sedn/encode (cond-> {:reasons reasons :results (:seon.run/results a {})}
-            (seq (:seon.run/deferred a)) (assoc :deferred (:seon.run/deferred a) :deferred-results (:seon.run/deferred-results a {}))
-            (seq (:seon.run/unmerged a)) (assoc :unmerged (:seon.run/unmerged a))
-            (seq (:seon.run/caused a)) (assoc :caused (:seon.run/caused a))
-            (:seon.run/basis-t a) (assoc :main-t (:seon.run/basis-t a)))))
-
-(defn- last-verdict
-  "The reasons of the newest :verdict entry to run aid's agent on its task (to its branch, of a run of its task:
-  a verdict's id is v-<run>, and a session's earlier stage is another task), or nil."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.run/id] [:maybe [:vector :any]]]}
-  [db aid]
-  (let [x (d/entity db [:seon.run/id aid])
-        pfx (str "v-" (:seon.task/id (:seon.run/task x)) "#")]
-    (some->> (d/q '[:find ?tx ?body :in $ ?b ?pfx :where [?m :seon.message/branch ?b ?tx] [?m :seon.message/kind :verdict]
-                    [?m :seon.message/id ?id] [(clojure.string/starts-with? ?id ?pfx)] [?m :seon.message/body ?body]] db (:seon.run/branch x) pfx)
-             (sort-by first) last second sedn/decode :reasons)))
+  {:malli/schema [:=> [:cat [:vector :seon.reconcile/not-done] :map] :string]}
+  [reasons {:keys [results deferred unmerged caused basis]}]
+  (sedn/encode (cond-> {:reasons reasons :results (or results {})}
+                 (seq deferred) (assoc :deferred (set deferred) :deferred-results {})
+                 (seq unmerged) (assoc :unmerged (vec unmerged))
+                 (seq caused) (assoc :caused (set caused))
+                 basis (assoc :main-t basis))))
 
 (defn hold-tx
-  "Run a failed (the done rule refused it, its agent died, or its merge was refused):
-  its task held for root with the failure (problem, the run) and the measured evidence,
-  exactly as my.task/fail!'s failure holds it, and the run closed, in one write. Root
-  decides: release it again (my.root/run!: the next run continues its branch, from the
-  evidence), edit it, or cancel it (DECISIONS, No automatic retries: a refused or failed run is
-  held for root). The hold is a
-  compare-and-swap from :running, so a cancel! that merged first refuses it (the run is
+  "Task id's work failed (the done rule refused it, its agent died, or its merge was refused): its task held
+  for root with the failure (problem, its agent) and the measured evidence (facts: conflicts, unmerged, red), exactly as
+  my.task/fail!'s failure holds it, beside move, the write of its outcome (seon.task/outcome-tx, move-tx), in one write.
+  Root decides: release it again (my.root/run!: the next agent continues its branch, from the evidence), edit it, or cancel it
+  (DECISIONS, No automatic retries: a refused or failed end is held for root). The hold is a
+  compare-and-swap from :running, so a cancel! that merged first refuses it (the task is
   then closed by the judged rule, its task not running)."
-  {:malli/schema [:=> [:cat :seon.run/run :string] [:vector :any]]}
-  [a problem]
-  (let [aid (:seon.run/id a) id (:seon.run/task a)]
-    (into (cas-tx aid (:seon.run/status a) :closed {})
+  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id [:sequential :any] :string :map] [:vector :any]]}
+  [db id move problem facts]
+  (let [agent (some-> (d/entity db [:seon.task/id id]) :seon.task/agent :seon.agent/key)]
+    (into (vec move)
           [[:db/cas [:seon.task/id id] :seon.task/execution :running :held]
-           {:seon.task/id id :seon.task/failure {:reason problem :run aid} :seon.task/evidence (evidence a problem)}])))
+           {:seon.task/id id :seon.task/failure (cond-> {:reason problem} agent (assoc :agent agent))
+            :seon.task/evidence (evidence id facts problem)}])))
 
 (defn quiescent
   "Main's last quiescence report on db ({:t :root-causes}, written by the reconciler proc), or nil."
@@ -671,10 +645,10 @@
   (:seon.root/quiescent (d/pull db [:seon.root/quiescent] [:seon.root/id :root])))
 
 (defn last-commit
-  "The merges commit of db's last merged run (the write-back's sha), or nil."
+  "The merges commit of db's last merged task (the write-back's sha), or nil."
   {:malli/schema [:=> [:cat :seon.host/db] [:maybe :string]]}
   [db]
-  (some->> (d/q '[:find ?t ?c :where [?e :seon.run/commit ?c] [?e :seon.run/merged-t ?t]] db) (sort-by first) last second))
+  (some->> (d/q '[:find ?t ?c :where [?e :seon.task/commit ?c] [?e :seon.task/merged-t ?t]] db) (sort-by first) last second))
 
 (defn generation
   "The next generation on db: the last merges commit the :build effect built or refused
@@ -704,153 +678,142 @@
   (let [x (get-in idx [:tasks id :seon.task/execution])]
     (cond (= :cancelled x) :cancelled
           (idx-done? idx id) (if (get-in idx [:done id :merged-t]) :merged :done)
-          (some #(= :running (get-in idx [:runs % :seon.run/status])) (get-in idx [:by-task id])) :running
+          (= :running (get-in idx [:tasks id :seon.task/outcome])) :running
           (seq (blocked-by idx id)) :blocked
           (= :held x) (if (get-in idx [:tasks id :seon.task/failure]) :failed :held)
           :else :open)))
 
-;; ---- what a run's agent wrote on its branch ----
+;; ---- what an agent wrote on its branch ----
 
 (defn pull-end
-  "The end run aid's turn loop wrote on branch db ({:outcome :reason :turns :tokens},
-  and the error that ended it and its waste as data), or nil: it wrote none."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.run/id] [:maybe :map]]}
-  [db aid]
-  (some->> (d/pull db [:seon.end/outcome :seon.end/reason :seon.end/turns :seon.end/tokens :seon.end/error :seon.end/waste]
-                   [:seon.end/run aid])
-           (into {} (map (fn [[k v]] [(keyword (name k)) v])))))
+  "The end agent k's turn loop wrote on branch db ({:outcome :reason :error :waste :ended-turn}), or nil: this wake wrote none, since
+  each wake begins by clearing the one before's (seon.agent/clear-end!; docs/turn.md#the-end)."
+  {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe :map]]}
+  [db k]
+  (let [a (d/pull db [:seon.agent/outcome :seon.agent/reason :seon.agent/ended-turn :seon.agent/error :seon.agent/waste] [:seon.agent/key k])]
+    (when (:seon.agent/outcome a)
+      (into {} (map (fn [[kw v]] [(keyword (name kw)) v])) a))))
 
 ;; ---- the reconciler proc: actions carried out as requests, every answer as data ----------
-;; Root's executor (R1's proto.agents.root, a thread per run) as one step-fn: main's
+;; Root's executor (R1's proto.agents.root, a thread per task) as one step-fn: main's
 ;; commits arrive in order through a blocking buffer (:seon.config.root/reconciler-buf: it reads
 ;; every commit's datoms); each action is a flight, a short chain of
 ;; requests to the api (spawn, eval, tests, the writer's reads and writes, kill), each answer
-;; arriving on :answers keyed by its request id. An action whose run is in flight is not
+;; arriving on :answers keyed by its request id. A flight is its task's; an action whose task is in flight is not
 ;; started twice.
+
+(def ^:private refused-attrs
+  "The attributes a refused start writes on its task (seon.task/refused-tx: the outcome, and the judged attributes it sets and retracts). See docs/reconcile.md#a-task-holds-how-its-work-ended."
+  (conj (set task/judged-attrs) :seon.task/outcome))
 
 (defn- request
   "Send req to the api as this proc's request: the answer comes back on :answers tagged by a
-  new request id, which then names step of run aid's flight. Answers [st output]."
-  {:malli/schema [:=> [:cat :seon.reconcile/state :seon.run/id :seon.reconcile/step :map] [:tuple :seon.reconcile/state :map]]}
-  [st aid step req] (step/ask st [:reconciler :answers] [aid step] req))
+  new request id, which then names step of task id's flight. Answers [st output]."
+  {:malli/schema [:=> [:cat :seon.reconcile/state :seon.task/id :seon.reconcile/step :map] [:tuple :seon.reconcile/state :map]]}
+  [st id step req] (step/ask st [:reconciler :answers] [id step] req))
 
 (defn- write
-  "A write on main through the writer, as step of aid's flight."
-  {:malli/schema [:=> [:cat :seon.reconcile/state :seon.run/id :seon.reconcile/step [:sequential :any]] [:tuple :seon.reconcile/state :map]]}
-  [st aid step tx] (request st aid step {:op :write :req {:op :tx :branch :db :tx-data (vec tx)}}))
+  "A write on main through the writer, as step of task id's flight."
+  {:malli/schema [:=> [:cat :seon.reconcile/state :seon.task/id :seon.reconcile/step [:sequential :any]] [:tuple :seon.reconcile/state :map]]}
+  [st id step tx] (request st id step {:op :write :req {:op :tx :branch :db :tx-data (vec tx)}}))
 
-(defn- kept?
-  "Whether ended run a's process was kept at its end (:diffed, keeps?): a judge that does not
-  park it stops it."
-  {:malli/schema [:=> [:cat :seon.reconcile/state [:maybe :map]] :boolean]}
-  [st a] (and (= :ended (:seon.run/status a)) (keeps? (:seon.task/kind (task/task (:db st) (:seon.run/task a))) (:seon.run/outcome a))))
+(defn- agent-of
+  "Task id's agent on db: {:key :id :branch}, or nil before one started it."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id] [:maybe [:map [:key :string] [:id {:optional true} :keyword] [:branch {:optional true} :keyword]]]]}
+  [db id]
+  (when-let [a (:seon.task/agent (d/entity db [:seon.task/id id]))]
+    {:key (:seon.agent/key a) :id (:seon.agent/id a) :branch (:seon.agent/branch a)}))
+
+(defn- ended-ms-tx
+  "The write that records task id's agent ended at ms (:seon.agent/ended-ms), or none when it has no agent."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id :int] [:vector :map]]}
+  [db id ms]
+  (if-let [{:keys [key]} (agent-of db id)] [{:seon.agent/key key :seon.agent/ended-ms ms}] []))
 
 (defn- stop-kept
-  "[st outputs] with run's kept process stopped too (its run ended: root's view says :ended)."
-  {:malli/schema [:=> [:cat [:tuple :seon.reconcile/state [:vector :map]] :seon.run/id :keyword] [:tuple :seon.reconcile/state [:vector :map]]]}
-  [[st os] run agent]
-  (let [[st o] (request st run :ignored {:op :kill :id agent :ended true})] [st (conj os o)]))
+  "[st outputs] with task id's kept process stopped too (its work judged: root's view says :ended)."
+  {:malli/schema [:=> [:cat [:tuple :seon.reconcile/state [:vector :map]] :seon.task/id :keyword] [:tuple :seon.reconcile/state [:vector :map]]]}
+  [[st os] id agent]
+  (let [[st o] (request st id :ignored {:op :kill :id agent :ended true})] [st (conj os o)]))
 
 (defn- start
   "Begin action act's flight. Answers [st outputs]."
   {:malli/schema [:=> [:cat :seon.reconcile/state :seon.reconcile/action] [:tuple :seon.reconcile/state [:vector :map]]]}
-  [st {:keys [op run] :as act}]
-  (let [;; a kill reaches a live run whose observer chain is in flight: that flight stays
+  [st {:keys [op task] :as act}]
+  (let [id task
+        ;; a kill reaches a live task whose observer chain is in flight: that flight stays
         ;; and sees its agent die
-        killing? (and (= :kill op) (get-in st [:flights run]))
-        st (if killing? (assoc-in st [:flights run :killing] true) (assoc-in st [:flights run] {:act act}))
-        a (task/run (:db st) run)
-        agent (:seon.run/agent a)
+        killing? (and (= :kill op) (get-in st [:flights id]))
+        st (if killing? (assoc-in st [:flights id :killing] true) (assoc-in st [:flights id] {:act act}))
+        db (:db st)
+        from (get-in st [:idx :tasks id :seon.task/outcome])
+        agent (:seon.agent/id (task-agent (:idx st) id))
+        now (System/currentTimeMillis)
         one (fn [[st o]] [st [o]])]
     (case op
       :wake (let [ag (:agent act)]
-              ;; the parked process's next run: written running, then work! (the :started step); synced
+              ;; the parked process's next work: written running, then work! (the :started step); synced
               ;; first, as a write an outside effect follows is (AGENTS section 5): work!'s first turn
-              ;; reads the entries that woke it from the store (seon.agent/untaken-entries)
-              (one (request (assoc-in st [:flights run :agent] ag) run :started
+              ;; reads the messages that woke it from the store (seon.agent/untaken-entries)
+              (one (request (assoc-in st [:flights id :agent] ag) id :started
                             {:op :write :req {:op :tx :branch :db :flush? true
-                                              :tx-data (task/run-start-tx run (:task act) (:boot st) ag (:env act) (System/currentTimeMillis)
-                                                                          (:plan (task/accumulate (get-in st [:idx :tasks]) (:task act)))
-                                                                          (task/session-key (:db st) (:task act)))}})))
-      :spawn (let [k (task/session-key (:db st) (:task act))]
-               ;; the session's agent continues (design agent-loop section 1); kept on the flight for its run's start
-               (one (request (cond-> st k (assoc-in [:flights run :key] k)) run :spawned
-                             {:op :spawn :opts (cond-> {:branch (get-in act [:env :branch]) :task (:task act) :run run} k (assoc :key k))})))
-      :reap (one (write st run :done (cas-tx run :running :lost {:seon.run/end-ms (System/currentTimeMillis) :seon.run/outcome :lost :seon.run/reason "root restarted"})))
-      ;; the run parked its session: written once, here; its process stays (design agent-loop section 1)
-      :park (one (write st run :done (cas-tx run :ended :parked {})))
-      :close (cond-> (one (write st run :done (cas-tx run :ended :closed {})))
-               (kept? st a) (stop-kept run agent))
-      ;; a run that parked yet is judged done or held (its proofs green, or a failure it marked)
-      ;; ends its session: its kept process is stopped (kept, :diffed)
-      :accept (cond-> (one (write st run :done (cas-tx run :ended :done {})))
-                (kept? st a) (stop-kept run agent))
-      ;; a live run, or a parked one (its process idle) whose task was cancelled or held
-      :kill (let [[st o1] (request st run :ignored {:op :kill :id agent})
-                  [st o2] (write st run (if killing? :ignored :done) (cas-tx run (:seon.run/status a :running) :killed
-                                                                             (cond-> {:seon.run/reason (name (:reason act))}
-                                                                               (= :running (:seon.run/status a)) (assoc :seon.run/end-ms (System/currentTimeMillis) :seon.run/outcome :killed))))]
+                                              :tx-data (task/start-tx db id (:boot st) ag (:env act) now (task/session-key db id))}})))
+      :spawn (let [k (task/session-key db id)]
+               ;; the session's agent continues (docs/turn.md#parked); kept on the flight for its start
+               (one (request (cond-> st k (assoc-in [:flights id :key] k)) id :spawned
+                             {:op :spawn :opts (cond-> {:branch (get-in act [:env :branch]) :task id} k (assoc :key k))})))
+      :reap (one (write st id :done (into (task/move-tx id :running :lost {:seon.task/reason "root restarted"}) (ended-ms-tx db id now))))
+      ;; a judged task whose execution is no longer running: closed
+      :close (one (write st id :done (task/move-tx id from :closed {})))
+      ;; a live task, or a parked one (its process idle) whose task was cancelled or held
+      :kill (let [[st o1] (request st id :ignored {:op :kill :id agent})
+                  [st o2] (write st id (if killing? :ignored :done)
+                                 (into (task/move-tx id from :killed {:seon.task/reason (name (:reason act))}) (ended-ms-tx db id now)))]
               [st [o1 o2]])
-      ;; refused, dead or its merge refused: the task is held for root, with the evidence
-      :verdict (let [prev (last-verdict (:db st) run)
-                     ;; behind alone is main moving under the run, not the agent's news: the same count twice is
-                     ;; two different mains (swarm: s9 behind s0's 3 keys, then s1's), so it runs again, merging main
-                     ;; first, until :seon.config.merge/max-behind of the task's runs were judged behind
-                     behind-again? (and (every? #(= :behind (:reason %)) (:reasons act))
-                                        (< (count (d/q '[:find [?r ...] :in $ ?t :where [?r :seon.run/task ?t] [?r :seon.run/behind _]]
-                                                       (:db st) (:db/id (d/entity (:db st) [:seon.task/id (:task act)]))))
-                                           (cfg/value :seon.config.merge/max-behind)))]
-                 (if (and (= prev (:reasons act)) (not behind-again?))
-                   ;; told the same again would be no news: root decides
-                   (cond-> (one (write st run :done (hold-tx a (str "the same verdict again: " (explain-text (:reasons act))))))
-                     (kept? st a) (stop-kept run agent))
-                   ;; synced before the spawn that follows reads it (AGENTS section 5, durability)
-                   (cond-> (one (request st run :done {:op :write :req {:op :tx :branch :db :flush? true
-                                                                       :tx-data (into (cas-tx run :ended :parked {})
-                                                                                      (task/message-tx (str "v-" run) :verdict "root" (get-in (task/run (:db st) run) [:seon.run/env :branch])
-                                                                                                       (verdict-body (task/run (:db st) run) (:reasons act))))}}))
-                     (kept? st a) (stop-kept run agent))))
-      :hold (cond-> (one (write st run :done (hold-tx a (:problem act))))
-              (kept? st a) (stop-kept run agent))
       ;; a merge task's branch into main: clean by construction when the branch holds main's
-      ;; program head; behind: its task runs again, a new agent
+      ;; program head; behind: its task runs again, the same agent
       ;; an octopus merge: every member's branch into main in one commit (each holds main's
       ;; program head, the members' changes are disjoint); a member found behind or refused
       ;; is answered alone
-      :octopus-merge (let [bs (mapv #(get-in (task/run (:db st) (:run %)) [:seon.run/env :branch]) (:members act))]
-                     (one (request (assoc-in st [:flights run :branches] bs) run :octopus-merged
-                                   {:op :write :req {:op :octopus-merge :branches bs :data-attrs #{}}})))
+      :octopus-merge (let [bs (mapv #(:branch (:seon.agent/env (task-agent (:idx st) (:task %)))) (:members act))]
+                       (one (request (assoc-in st [:flights id :branches] bs) id :octopus-merged
+                                     {:op :write :req {:op :octopus-merge :branches bs :data-attrs #{}}})))
       ;; the merge gate (a change reaching process tests): the candidate's files read from its
       ;; branch, then its deferred tests run on a checkout of the merges head with them (seon.fx/run-tests)
-      :gate (one (request st run :gate-read
-                          {:op :write :req {:op :merge-candidate :branch (get-in (task/run (:db st) run) [:seon.run/env :branch]) :data-attrs #{}}})))))
+      :gate (one (request st id :gate-read
+                          {:op :write :req {:op :merge-candidate :branch (:branch (:seon.agent/env (task-agent (:idx st) id))) :data-attrs #{}}}))
+      ;; an action the reconciler cannot start keeps no flight
+      (throw (ex-info "no such action" {:op op})))))
 
 (defn- work
-  "[st [output]]: the agent's turn loop for run aid of act, asked of agent: seon.turn/work!,
+  "[st [output]]: the agent's turn loop for task id of act, asked of agent: seon.turn/work!,
   quoted as data (a form sent to another process is no call in this one; a quoted name is no
-  reference, seon.program/unit-account)."
-  {:malli/schema [:=> [:cat :seon.reconcile/state :seon.run/id :map :keyword] [:tuple :seon.reconcile/state [:vector :map]]]}
-  [st aid act agent]
-  (let [[st o] (request st aid :worked
+  reference, seon.program/unit-account). Its budget is the agent's own on main (:seon.agent/max-turns), raised or not."
+  {:malli/schema [:=> [:cat :seon.reconcile/state :seon.task/id :map :keyword] [:tuple :seon.reconcile/state [:vector :map]]]}
+  [st id act agent]
+  (let [k (:key (agent-of (:db st) id))
+        max-turns (or (:seon.agent/max-turns (d/entity (:db st) [:seon.agent/key k])) (get-in act [:env :max-turns]))
+        [st o] (request st id :worked
                         {:op :eval :id agent
-                         :forms (sedn/encode (list 'seon.turn/work! (list 'quote (cond-> {:task (:task act) :run aid :max-turns (get-in act [:env :max-turns])}
+                         :forms (sedn/encode (list 'seon.turn/work! (list 'quote (cond-> {:task (:task act) :max-turns max-turns}
                                                                                 (get-in act [:env :model]) (assoc :model (get-in act [:env :model]))))))})]
     [st [o]]))
 
 (defn- stage-boundary
-  "The message that opens run aid's stage of its session, or nil: when the session's agent ran
-  another task before (its newest earlier run, by the transaction that started it), the new
+  "The message that opens task id's stage of its session, or nil: when the session's agent worked
+  another task before (the task its :seon.agent/task held before, history), the new
   task's plan and proofs, said once at the boundary (its whole task data is (my.task/data): the
   task data's render reaches the vector search, a process, which no reconciler test may), so the conversation above stays as it was
-  sent (design agent-loop section 1a; the live agents' finding A1: the new stage's task data put at
+  sent (docs/turn.md#parked; the live agents' finding A1: the new stage's task data put at
   the top cached 1% of 33k tokens, and the agent took the design for its task)."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.run/id] [:maybe :string]]}
-  [db aid]
-  (let [task-of #(:seon.task/id (:seon.run/task (d/entity db [:seon.run/id %])))
-        id (task-of aid)
-        [_ prev] (->> (d/q '[:find ?tx ?id :in $ ?me :where [?x :seon.run/id ?me] [?x :seon.run/agent ?g ?mt] [?r :seon.run/agent ?g ?tx] [(< ?tx ?mt)] [?r :seon.run/id ?id]] db aid)
-                      (sort-by first) last)
-        prev-task (some-> prev task-of)]
+  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id] [:maybe :string]]}
+  [db id]
+  (let [k (:key (agent-of db id))
+        ;; the stage opened by this start: the agent's task was replaced in the transaction that wrote its start time (seon.task/start-tx),
+        ;; so a later start of the same task (a wake) sees the old replacement and opens no stage again
+        started (when k (:tx (first (d/datoms db :eavt (:db/id (d/entity db [:seon.agent/key k])) :seon.agent/started-ms))))
+        [prev-task] (when k (->> (d/q '[:find ?tid ?tx :in $ ?k :where [?a :seon.agent/key ?k] [?a :seon.agent/task ?t ?tx false] [?t :seon.task/id ?tid]] (d/history db) k)
+                                 (filter #(= started (second %))) (sort-by second) last))]
     (when (and prev-task (not= prev-task id))
       (let [{:keys [plan proofs]} (:seon.task/accumulated (task/task db id))]
         (str prev-task " is done. Your task now is " id ", in this same session: what you did so far stays above.\n\n"
@@ -858,236 +821,279 @@
              "\n\nIts whole task as data (what it cites, its write set): (my.task/data)")))))
 
 (defn- taken-messages
-  "How many messages to the agent on run aid's branch (as main names it) branch db holds: those
-  its turns took (each written on the branch by the turn that took it). The other side of
-  branch-messages' count: one seek for the run's branch on main, one for the branch's messages."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.run/id] :int]}
-  [main db aid]
-  (let [br (:seon.run/branch (d/entity main [:seon.run/id aid]))]
-    (or (when br (d/q '[:find (count ?m) . :in $ ?b :where [?m :seon.message/branch ?b]] db br)) 0)))
+  "How many messages to the agent on branch br branch db holds: those its turns took (each written on the branch by the
+  turn that took it). The other side of branch-messages' count: one seek for the branch's messages."
+  {:malli/schema [:=> [:cat :seon.host/db :keyword] :int]}
+  [db br]
+  (or (d/q '[:find (count ?m) . :in $ ?b :where [?m :seon.message/branch ?b]] db br) 0))
+
+(defn- behinds
+  "How many times task id was judged behind main (its outcome was written :behind: d/history), what max-behind bounds."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id] :int]}
+  [db id]
+  (or (d/q '[:find (count ?tx) . :in $ ?id :where [?t :seon.task/id ?id] [?t :seon.task/outcome :behind ?tx true]] (d/history db) id) 0))
 
 (defn- judge-tx
-  "Run aid's end on main from MEASURED facts: the end its agent wrote on the branch,
+  "Task id's end judged on MEASURED facts and written on main, once: the end its agent wrote on the branch (pull-end),
   root's own proof results, the branch's merge entries, and diff, the writer's one read of the
   branch (:branch-diff: its head db, its merge base and main's t there, the keys it changed,
-  its unmerged keys, its contract gaps); the
-  task content the branch changed carried to main, or its conflicts with main's recorded on
-  the run for root (seon.task/carry-tx); and a failure it marked (my.task/fail!)
-  carried with the task held."
-  {:malli/schema [:=> [:cat :seon.reconcile/state :map :seon.proof/results [:map [:db :seon.host/db] [:base :seon.host/db] [:ours [:sequential :any]] [:unmerged [:sequential :any]] [:uncontracted [:sequential :qualified-symbol]]]] [:vector :any]]}
+  its unmerged keys, its contract gaps); `judgment` decides from them what comes next (the outcome, the reasons the done rule gave,
+  a verdict to tell, a hold for root) and the answer is stored on the task (:seon.task/outcome and the rest, retracting
+  what this end did not set); the task content the branch changed carried to main, or its conflicts with main's recorded
+  for root (seon.task/carry-tx); and a failure the agent marked (my.task/fail!) carried with the task held.
+  Answers {:tx :outcome :kept?}: kept? when the agent's process is to stay."
+  {:malli/schema [:=> [:cat :seon.reconcile/state :map :seon.proof/results [:map [:db :seon.host/db] [:base :seon.host/db] [:ours [:sequential :any]] [:unmerged [:sequential :any]] [:uncontracted [:sequential :qualified-symbol]]]] [:map [:tx [:vector :any]] [:outcome :seon.task/outcome]]]}
   [st {:keys [act run-problems worked-error deferred]} results {:keys [db base base-t] :as diff}]
-  (let [main (:db st)
-        aid (:run act) id (:task act)
-        end (pull-end db aid)
+  (let [main (:db st) idx (:idx st)
+        id (:task act)
+        t (get-in idx [:tasks id])
+        {k :key branch :branch} (agent-of main id)
+        end (when k (pull-end db k))
         carried (task/carry-tx base db main)
-        failure (:seon.task/failure (task/task db id))]
-    (into (cas-tx aid :running :ended
-                    ;; spend is what the end measured: no end (died, killed, never reached
-                    ;; seon.turn/end!) is outcome :no-end with its turns, calls and tokens absent
-                    (merge (task/end-members (cond-> (merge (select-keys end [:turns :model-calls :tokens])
-                                                      {:outcome (:outcome end :no-end) :results results :uncontracted (set (:uncontracted diff)) :caused (set (:caused diff))
-                                                       :conflicts (mapv #(dissoc % :main-t :resolved?) (pm/entries db))
-                                                       :unmerged (mapv sedn/encode (:unmerged diff))
-                                                       :changed (into #{} (map sedn/encode) (:ours diff))
-                                                       :deferred (vec deferred)})
-                                        (:reason end) (assoc :reason (:reason end))
-                                        (pos? (:theirs diff 0)) (assoc :behind (:theirs diff))
-                                        (not (:outcome end)) (assoc :reason (if worked-error
-                                                                             (str "seon.turn/work! threw: " (:seon.error/message worked-error))
-                                                                             "the agent wrote no end")))
-                                      (System/currentTimeMillis) (or base-t (:max-tx main)))
-                    ;; the problems measured at its end (session D2): red assertions, cost verdicts,
-                    ;; the error that ended it, its waste
-                    (cond-> {;; the messages to its session's runs (those on its branch) its branch had taken:
-                             ;; main holding more (branch-messages) wakes it once parked (idx-ready?),
-                             ;; whatever came between its last turn and now
-                             :seon.run/taken (taken-messages main db aid)}
-                      (seq (:failures run-problems)) (assoc :seon.run/failures (:failures run-problems))
-                      (seq (:costs run-problems)) (assoc :seon.run/costs (:costs run-problems))
-                      (or (:error end) worked-error) (assoc :seon.run/error (or (:error end) worked-error))
-                      (seq (:waste end)) (assoc :seon.run/waste (:waste end))
-                      (seq (:conflicts carried)) (assoc :seon.run/task-conflicts (:conflicts carried)))))
-            (concat (:tx carried)
-                    ;; marked failed in this run (my.task/fail!): the failure on main and the
-                    ;; task held for root (a compare-and-swap from :running), so the judge closes
-                    ;; the run (no retry); one root already cancelled or held keeps root's
-                    (when (= aid (:run failure))
-                      (cond-> [{:seon.task/id id :seon.task/failure failure}]
-                        (= :running (:seon.task/execution (task/task main id)))
-                        (conj [:db/cas [:seon.task/id id] :seon.task/execution :running :held])))))))
+        ;; the done rule reads main as this judging leaves it: the task content its branch changed (the proofs a design or a whole
+        ;; task registered, its plan) is carried in the same write, so the rule is applied to the index with the carry observed
+        idx (if (seq (:tx carried)) (let [w (d/with main (:tx carried))] (index idx main (:db-after w) (:tx-data w))) idx)
+        failure (:seon.task/failure (task/task db id))
+        turn (:seon.agent/turn (d/entity db [:seon.agent/key k]) 0)
+        ;; marked failed by its agent at the turn its end came on (my.task/fail!): the failure on main and the task held for root
+        marked? (and failure end (= k (:agent failure)) (= (:turn failure) (:ended-turn end)))
+        kind (:seon.task/kind t)
+        unmerged (mapv sedn/encode (:unmerged diff))
+        j (judgment idx id {:end end :results results :uncontracted (set (:uncontracted diff)) :unmerged unmerged :caused (set (:caused diff))
+                            :behind (when (pos? (:theirs diff 0)) (:theirs diff)) :basis (or base-t (:max-tx main)) :deferred (set deferred)
+                            :plan (when (= :design kind) (some-> (task/task db id) :seon.task/accumulated :plan))
+                            :plan-before (when (= :design kind) (some-> (task/task base id) :seon.task/accumulated :plan))
+                            :behinds (behinds main id) :told (:seon.task/reasons t)})
+        conflicts (mapv #(dissoc % :main-t :resolved?) (pm/entries db))
+        reason (or (:reason end) (when-not end (if worked-error (str "seon.turn/work! threw: " (:seon.error/message worked-error)) "the agent wrote no end")))
+        error (or (:error end) worked-error)
+        now (System/currentTimeMillis)
+        ;; what this end measured, each only when there is one to say (and what an earlier end set that this did not, retracted)
+        want (cond-> {:seon.task/reasons (:reasons j)}
+               reason (assoc :seon.task/reason reason)
+               (seq conflicts) (assoc :seon.task/conflicts conflicts)
+               (seq unmerged) (assoc :seon.task/unmerged (set unmerged))
+               (seq (:ours diff)) (assoc :seon.task/changed (into #{} (map sedn/encode) (:ours diff)))
+               (seq deferred) (assoc :seon.task/deferred (set deferred))
+               (seq (:failures run-problems)) (assoc :seon.task/failures (:failures run-problems))
+               (seq (:costs run-problems)) (assoc :seon.task/costs (:costs run-problems))
+               error (assoc :seon.task/error error)
+               (seq (:waste end)) (assoc :seon.task/waste (:waste end))
+               (seq (:conflicts carried)) (assoc :seon.task/task-conflicts (:conflicts carried)))
+        facts {:conflicts conflicts :unmerged unmerged :red (for [[tt s] results :when (not= :pass s)] tt)}
+        outcome (if marked? :closed (:outcome j))
+        move (if (and (:hold j) (not marked?))
+               (hold-tx main id (task/outcome-tx main id :running outcome want) (:hold j) facts)
+               (task/outcome-tx main id :running outcome want))
+        tx (-> move
+               ;; the messages to its agent's branch its turns had taken: main holding more wakes it once parked (idx-ready?),
+               ;; whatever came between its last turn and now
+               (into [{:seon.agent/key k :seon.agent/taken (taken-messages db branch) :seon.agent/ended-ms now}])
+               (into (when (and (:verdict j) (not marked?))
+                       (task/message-tx (str "v-" id "-" turn) :verdict "root" branch
+                                        (verdict-body (:verdict j) {:results results :deferred deferred :unmerged unmerged :caused (:caused diff)
+                                                                    :basis (or base-t (:max-tx main))}))))
+               (into (:tx carried))
+               ;; marked failed (my.task/fail!): the failure on main and the task held for root (a compare-and-swap from :running),
+               ;; so the judge closes it (no retry); one root already cancelled or held keeps root's
+               (into (when marked?
+                       (cond-> [{:seon.task/id id :seon.task/failure failure}]
+                         (= :running (:seon.task/execution (task/task main id)))
+                         (conj [:db/cas [:seon.task/id id] :seon.task/execution :running :held])))))]
+    {:tx tx :outcome outcome}))
 
 (defn- dead-tx
-  "Run aid's death on main: the end its agent wrote on its branch before it exited (its
+  "Task id's agent's death on main: the end it wrote on its branch before it exited (its
   reason, and its error as the cause), beside e, the death root observed (:seon.agent/died:
-  exit status, stderr tail, last op; or :seon.root/no-agent or :seon.root/ended). A silent death wrote no end."
-  {:malli/schema [:=> [:cat :seon.run/id :seon.error/base [:maybe :map]] [:vector :any]]}
-  [aid e end]
-  (cas-tx aid :running :dead {:seon.run/end-ms (System/currentTimeMillis) :seon.run/outcome :dead
-                              :seon.run/reason (if (:reason end) (str (:reason end) " (" (:seon.error/message e) ")") (:seon.error/message e))
-                              :seon.run/error (cond-> e (:error end) (assoc :cause (:error end)))}))
+  exit status, stderr tail, last op; or :seon.root/no-agent or :seon.root/ended). A silent death wrote no end. The task is
+  held for root (the hold of `judgment`), or closed when it no longer runs."
+  {:malli/schema [:=> [:cat :seon.reconcile/state :seon.task/id :seon.error/base [:maybe :map]] [:vector :any]]}
+  [st id e end]
+  (let [main (:db st) now (System/currentTimeMillis)
+        msg (if (:reason end) (str (:reason end) " (" (:seon.error/message e) ")") (:seon.error/message e))
+        j (judgment (:idx st) id {:died (assoc e :seon.error/message msg)})
+        want {:seon.task/reason msg :seon.task/error (cond-> e (:error end) (assoc :cause (:error end)))}
+        move (if (:hold j) (hold-tx main id (task/outcome-tx main id :running :dead want) (:hold j) {}) (task/outcome-tx main id :running (:outcome j) want))]
+    (into move (ended-ms-tx main id now))))
+
+(defn- gated
+  "Task id's gate answered: rs, each deferred test's status (the gate's run of them, or :error for each when it
+  could not run: unread, or err the effect's error), written on the task with the decision `judgment` leaves to it: all
+  passing, the merge is ready; else the task is held for root with the tests not green and why they could not run. A failed
+  :tests effect is recorded here, with the results, in one transaction."
+  {:malli/schema [:=> [:cat :seon.reconcile/state :seon.task/id :map [:vector :map] [:maybe :map]] [:vector :any]]}
+  [st id rs unread err]
+  (let [main (:db st)
+        red (for [[tt s] (sort-by (comp str key) rs) :when (not= :pass s)] [tt s])
+        why (concat (some-> err :seon.error/message vector) (for [u unread] (str (:ns u) ": " (:reason u))))
+        want (cond-> {:seon.task/deferred-results rs}
+               (seq unread) (assoc :seon.task/gate-unread unread)
+               err (assoc :seon.task/error err))
+        move (if (empty? red)
+               (task/move-tx id :gate :ready want)
+               (hold-tx main id (task/move-tx id :gate :closed want)
+                        (str "its deferred tests, run on a checkout at its merge, are not green: "
+                             (str/join ", " (for [[tt s] red] (str tt " " (name s))))
+                             ;; why they could not run, when the gate itself failed: the effect's error, or a changed
+                             ;; namespace with no file on the branch (each test then reads :error)
+                             (when (seq why) (str "; the gate could not run them: " (str/join "; " why))))
+                        {:conflicts (:seon.task/conflicts (get-in st [:idx :tasks id])) :unmerged (:seon.task/unmerged (get-in st [:idx :tasks id]))}))]
+    (if err (err/asked-tx main err :seon.task/deferred-results move) move)))
 
 (defn- advance
-  "Run aid's flight takes answer r of its step. Answers [st outputs]."
-  {:malli/schema [:=> [:cat :seon.reconcile/state :seon.run/id :seon.reconcile/step :any] [:tuple :seon.reconcile/state [:vector :map]]]}
-  [st aid step r]
-  (let [{:keys [act agent] :as f} (get-in st [:flights aid])
-        done (fn [st] [(update st :flights dissoc aid) []])
+  "Task id's flight takes answer r of its step. Answers [st outputs]."
+  {:malli/schema [:=> [:cat :seon.reconcile/state :seon.task/id :seon.reconcile/step :any] [:tuple :seon.reconcile/state [:vector :map]]]}
+  [st id step r]
+  (let [{:keys [act agent] :as f} (get-in st [:flights id])
+        done (fn [st] [(update st :flights dissoc id) []])
         one (fn [[st o]] [st [o]])
+        now (System/currentTimeMillis)
         ;; its agent died: the one error map root answered with (:seon.agent/died: exit
         ;; status, last op, stderr tail; or :seon.root/no-agent or :seon.root/ended), and the end the agent wrote
         ;; on its branch before it exited, read from the branch
-        dead (fn [st e] (one (request (assoc-in st [:flights aid :died] e) aid :dead-read
+        dead (fn [st e] (one (request (assoc-in st [:flights id :died] e) id :dead-read
                                       {:op :write :req {:op :branch-db :branch (get-in act [:env :branch])}})))
-        ;; the writer refused to read or diff its branch: its agent is stopped and the run
+        ;; the writer refused to read or diff its branch: its agent is stopped and the task
         ;; ends with the reason as its error, not judged on facts nobody measured
-        refused (fn [st e] (let [[st o1] (request st aid :ignored {:op :kill :id agent :ended true})
-                                 [st o2] (write st aid :done (cas-tx aid :running :ended {:seon.run/end-ms (System/currentTimeMillis) :seon.run/outcome :error
-                                                                                          :seon.run/reason (:seon.error/message e) :seon.run/error e}))]
+        refused (fn [st e] (let [[st o1] (request st id :ignored {:op :kill :id agent :ended true})
+                                 [st o2] (write st id :done (into (task/move-tx id :running :closed {:seon.task/reason (:seon.error/message e) :seon.task/error e})
+                                                                  (ended-ms-tx (:db st) id now)))]
                              [st [o1 o2]]))]
     (case step
       :ignored [st []]
       :done (done st)
-      :dead-read (one (write st aid :done (dead-tx aid (:died f) (some-> (:db r) (pull-end aid)))))
+      :dead-read (one (write st id :done (dead-tx st id (:died f) (let [k (:key (agent-of (:db st) id))] (when (and k (:db r)) (pull-end (:db r) k))))))
       ;; root answers a spawn at its agent's hello, or at the end the agent met first: a death,
-      ;; a failed spawn or a stop (each names the agent) is this run's death, its row
-      ;; started first; the flight keeps the error's base and exit status, which `dead` records
+      ;; a failed spawn or a stop (each names the agent) is this task's death, its start
+      ;; written first; the flight keeps the error's base and exit status, which `dead` records
       :spawned (if-let [ag (or (:id r) (when (#{:seon.agent/died :seon.agent/failed :seon.root/no-agent :seon.root/ended} (:seon.error/type r)) (:agent r)))]
-                 (one (write (cond-> (assoc-in st [:flights aid :agent] ag)
-                               (:seon.error/type r) (assoc-in [:flights aid :died-at-spawn]
+                 (one (write (cond-> (assoc-in st [:flights id :agent] ag)
+                               (:seon.error/type r) (assoc-in [:flights id :died-at-spawn]
                                                               (select-keys r [:seon.error/type :seon.error/operation :seon.error/message :exit :agent])))
-                             aid :started
-                             (task/run-start-tx aid (:task act) (:boot st) ag (:env act) (System/currentTimeMillis)
-                                                   (:plan (task/accumulate (get-in st [:idx :tasks]) (:task act)))
-                                                   (:key f))))
+                             id :started
+                             (task/start-tx (:db st) id (:boot st) ag (:env act) now (:key f))))
                  ;; root refused it (the branch is held, or too many live agents): the refused answer
-                 ;; is the run, written on main with root's reason; the task starts again,
-                 ;; as its next run, once main moves for another reason (:refused, pass)
-                 (one (write (update st :refused (fnil conj #{}) (:task act)) aid :done
-                             [(let [now (System/currentTimeMillis)]
-                                (-> (first (task/run-start-tx aid (:task act) (:boot st) nil (:env act) now
-                                                                  (:plan (task/accumulate (get-in st [:idx :tasks]) (:task act)))))
-                                    (assoc :seon.run/status :refused :seon.run/outcome :refused :seon.run/end-ms now
-                                           :seon.run/reason (:seon.error/message r) :seon.run/error r)))])))
-      ;; an outside agent works this run (seon.server): no turn loop; it hands it back
+                 ;; is the task's outcome, with root's reason; the task starts again
+                 ;; once main moves for another reason (:refused, pass)
+                 (one (write (update st :refused (fnil conj #{}) id) id :done (task/refused-tx (:db st) id r))))
+      ;; an outside agent works this task (seon.server): no turn loop; it hands it back
       :started (cond
                  (:died-at-spawn f) (dead st (:died-at-spawn f))
                  (outside? (:env act))
                  (done st)
                  :else
-                 ;; a session's next stage: the boundary is a :stage entry, root's, a fact on main to this
-                 ;; run (written before it is pushed), taken by its first turn like any other (the
-                 ;; conversation above it unchanged, its prefix cached; design one-derivation 4.1 section 5)
-                 (if-let [body (stage-boundary (:db st) aid)]
-                   (one (request st aid :briefed {:op :message :id agent :from :root :kind :stage :body body}))
-                   (work st aid act agent)))
-      :briefed (if (contract/error? r) (dead st r) (work st aid act agent))
+                 ;; a session's next stage: the boundary is a :stage message, root's, a fact on main to this
+                 ;; agent (written before it is pushed), taken by its first turn like any other (the
+                 ;; conversation above it unchanged, its prefix cached; docs/turn.md#parked)
+                 (if-let [body (stage-boundary (:db st) id)]
+                   (one (request st id :briefed {:op :message :id agent :from :root :kind :stage :body body}))
+                   (work st id act agent)))
+      :briefed (if (contract/error? r) (dead st r) (work st id act agent))
       ;; the turn loop answered: died (no live agent), or judge it from measured facts
       ;; work! that threw was answered by the agent's REPL (the process lives): its error
-      ;; names the run's end when the loop wrote none
+      ;; names the task's end when the loop wrote none
       :worked (cond
                 ;; a wake whose parked process had ended before the work! reached it (root's
-                ;; view: ended or never there): the run took nothing, so it is lost, not a death, and
-                ;; the task starts again as a spawn, a load of the session (design agent-loop section 4)
+                ;; view: ended or never there): the agent took nothing, so it is lost, not a death, and
+                ;; the task starts again as a spawn, a load of the session (docs/turn.md#parked)
                 (and (= :wake (:op act)) (#{:seon.root/ended :seon.root/no-agent} (:seon.error/type r)))
-                (one (write st aid :done (cas-tx aid :running :lost {:seon.run/end-ms (System/currentTimeMillis) :seon.run/outcome :lost
-                                                                     :seon.run/reason (str "its parked process was gone: " (:seon.error/message r))})))
+                (one (write st id :done (into (task/move-tx id :running :lost {:seon.task/reason (str "its parked process was gone: " (:seon.error/message r))})
+                                              (ended-ms-tx (:db st) id now))))
                 (contract/error? r) (dead st r)
                 :else
-                (one (request (cond-> st (:ex r) (assoc-in [:flights aid :worked-error] (:ex r)))
-                              aid :tested {:op :judge :id agent})))
+                (one (request (cond-> st (:ex r) (assoc-in [:flights id :worked-error] (:ex r)))
+                              id :tested {:op :judge :id agent})))
       :tested (if (contract/error? r)
                 (dead st r)
-                (one (request (-> st (assoc-in [:flights aid :results] (proofs/results r))
-                                  (assoc-in [:flights aid :deferred] (:deferred r))
-                                  (assoc-in [:flights aid :run-problems] {:failures (proofs/failures r) :costs (proofs/costs r)}))
+                (one (request (-> st (assoc-in [:flights id :results] (proofs/results r))
+                                  (assoc-in [:flights id :deferred] (:deferred r))
+                                  (assoc-in [:flights id :run-problems] {:failures (proofs/failures r) :costs (proofs/costs r)}))
                               ;; the branch read once: its head, its merge base, and what it changed
                               ;; since (three-way's :ours, measured for the octopus merge)
-                              aid :diffed {:op :write :req {:op :branch-diff :branch (get-in act [:env :branch])}})))
-      ;; root stops the agent because its run ended (its view says :ended, not :killed), unless
-      ;; the run parked its session: then the process stays, idle, for the next message's run
-      ;; (design agent-loop section 2: parking is work! returning)
-      :diffed (cond
-                (contract/error? r) (refused st r)
-                (keeps? (:seon.task/kind (task/task (:db st) (:task act))) (:outcome (pull-end (:db r) aid))) (one (write st aid :done (judge-tx st f (:results f) r)))
-                :else (let [[st o1] (request st aid :ignored {:op :kill :id agent :ended true})
-                            [st o2] (write st aid :done (judge-tx st f (:results f) r))]
-                        [st [o1 o2]]))
+                              id :diffed {:op :write :req {:op :branch-diff :branch (get-in act [:env :branch])}})))
+      ;; root stops the agent because its work ended (its view says :ended, not :killed), unless
+      ;; its session parked: then the process stays, idle, for the next message's wake
+      ;; (docs/turn.md#parked: parking is work! returning)
+      :diffed (if (contract/error? r)
+                (refused st r)
+                (let [{:keys [tx outcome]} (judge-tx st f (:results f) r)
+                      k (:key (agent-of (:db st) id))
+                      kept? (keeps? (get-in st [:idx :tasks id :seon.task/kind]) (:outcome (when k (pull-end (:db r) k))))
+                      parks? (#{:parked :cap} outcome)]
+                  (cond (and kept? parks?) (one (write st id :done tx))
+                        kept? (stop-kept (one (write st id :done tx)) id agent)
+                        :else (let [[st o1] (request st id :ignored {:op :kill :id agent :ended true})
+                                    [st o2] (write st id :done tx)]
+                                [st [o1 o2]]))))
       ;; each member's answer, as one write: merged at the octopus merge's t, behind (its merge task
-      ;; runs again, a new agent), or refused: a failed run like any other (held for root)
+      ;; runs again, the same agent), or refused: a failed end like any other (held for root)
       ;; the merged members' namespaces that are Seon's own source are written back: main's
       ;; files after the octopus merge, committed on the merges branch (:git), the sha recorded on
-      ;; each merged run (the self-improvement loop: the next generation builds it)
+      ;; each merged task (the self-improvement loop: the next generation builds it)
       :octopus-merged (let [merged (keep (fn [[m x]] (when (:merged? x) [m x])) (map vector (:members act) (:results r)))
-                     paths (vec (sort (distinct (mapcat (comp :files second) merged))))
-                     back? (and (:source st) (seq paths))]
-                 (one (write (cond-> st back? (assoc-in [:flights aid :writeback] {:files paths :members (vec (for [[m x] merged :when (seq (:files x))] m))}))
-                             aid (if back? :write-back :done)
-                           (vec (mapcat (fn [{:keys [run task]} r]
-                                          (let [behinds (count (filter #(= :behind (get-in (:idx st) [:runs % :seon.run/status])) (get-in (:idx st) [:by-task task])))
-                                                problem (if (= :seon.merge/behind (:seon.error/type r))
-                                                          (str "merge behind main " (inc behinds) " times (past :seon.config.merge/max-behind): " (:seon.error/message r))
-                                                          (str "merge refused: " (:seon.error/message r)))]
-                                            (cond
-                                              (:merged? r) (cas-tx run :ended :merged
-                                                                    (cond-> {:seon.run/merged-t (long (:tx r))}
-                                                                      ;; source it changed that names no file: no write-back writes it, so this
-                                                                      ;; names it (beside the sha of what one wrote, when it wrote some)
-                                                                      (and (:source st) (seq (:unfiled r)))
-                                                                      (assoc :seon.run/commit-error (unfiled-error r))))
-                                              ;; behind again and again: a merge that main moves under every time it runs is root's
-                                              ;; (:seon.config.merge/max-behind), never a rerun without end
-                                              (and (= :seon.merge/behind (:seon.error/type r)) (< behinds (cfg/value :seon.config.merge/max-behind)))
-                                              (cas-tx run :ended :behind {:seon.run/reason (:seon.error/message r) :seon.run/error r})
-                                              :else (conj (hold-tx (task/run (:db st) run) problem)
-                                                          {:seon.run/id run :seon.run/error r}))))
-                                        (:members act) (:results r))))))
+                            paths (vec (sort (distinct (mapcat (comp :files second) merged))))
+                            back? (and (:source st) (seq paths))]
+                        (one (write (cond-> st back? (assoc-in [:flights id :writeback] {:files paths :members (vec (for [[m x] merged :when (seq (:files x))] m))}))
+                                    id (if back? :write-back :done)
+                                    (vec (mapcat (fn [{:keys [task]} r]
+                                                   (let [n (behinds (:db st) task)
+                                                         problem (if (= :seon.merge/behind (:seon.error/type r))
+                                                                   (str "merge behind main " (inc n) " times (past :seon.config.merge/max-behind): " (:seon.error/message r))
+                                                                   (str "merge refused: " (:seon.error/message r)))
+                                                         t (get-in st [:idx :tasks task])]
+                                                     (cond
+                                                       (:merged? r) (task/move-tx task :ready :merged
+                                                                                  (cond-> {:seon.task/merged-t (long (:tx r))}
+                                                                                    ;; source it changed that names no file: no write-back writes it, so this
+                                                                                    ;; names it (beside the sha of what one wrote, when it wrote some)
+                                                                                    (and (:source st) (seq (:unfiled r)))
+                                                                                    (assoc :seon.task/commit-error (unfiled-error r))))
+                                                       ;; behind again and again: a merge that main moves under every time it runs is root's
+                                                       ;; (:seon.config.merge/max-behind), never a rerun without end
+                                                       (and (= :seon.merge/behind (:seon.error/type r)) (< n (cfg/value :seon.config.merge/max-behind)))
+                                                       (task/move-tx task :ready :behind {:seon.task/reason (:seon.error/message r) :seon.task/error r})
+                                                       :else (hold-tx (:db st) task (task/move-tx task :ready :closed {:seon.task/reason problem :seon.task/error r})
+                                                                      problem {:conflicts (:seon.task/conflicts t) :unmerged (:seon.task/unmerged t)}))))
+                                                 (:members act) (:results r))))))
       ;; the gate's candidate is the writer's: the files the octopus merge would write (seon.writer's :merge-candidate),
       ;; forms', tests' and schema resources' alike (a :seon.ref/block change left out would meet its new
       ;; seon.ref/scan in the checkout, and the seed would throw on scan's contract). A refused candidate is the gate's
       ;; answer, each deferred test :error with why it was refused: no files would test main as it is and vouch for nothing
       :gate-read (if (contract/error? r)
-                   (one (write st aid :done (err/asked-tx (:db st) r :seon.run/deferred-results
-                                                          [{:seon.run/id aid
-                                                            :seon.run/deferred-results (vec (for [t (:tests act)] {:seon.proof/test t :seon.proof/status :error}))}
-                                                           {:seon.run/id aid :seon.run/error r}])))
-                 (let [files (:text r)
-                       ;; a changed namespace with no file on the branch (made at the REPL, never
-                       ;; written) cannot be put over the checkout: named, never dropped
-                       unread (vec (for [n (sort (keys (:unfiled r)))]
-                                     {:ns n :reason "no :ns/file on the branch: its forms were never written to a file"}))]
-                   (one (request (assoc-in st [:flights aid :gate-unread] unread) aid :gated
-                                 {:op :fx :kind :tests :req {:repo (get-in st [:idx :root :gate-checkout]) :branch (:branch (:source st))
-                                                             :files files :tests (:tests act)}}))))
-      ;; each deferred test's status on the run; the next judgment merges it or holds it. A
-      ;; run over a tree missing a changed namespace (gate-unread) vouches for none: each :error
+                   (one (write st id :done (gated st id (zipmap (:tests act) (repeat :error)) [] r)))
+                   (let [files (:text r)
+                         ;; a changed namespace with no file on the branch (made at the REPL, never
+                         ;; written) cannot be put over the checkout: named, never dropped
+                         unread (vec (for [n (sort (keys (:unfiled r)))]
+                                       {:ns n :reason "no :ns/file on the branch: its forms were never written to a file"}))]
+                     (one (request (assoc-in st [:flights id :gate-unread] unread) id :gated
+                                   {:op :fx :kind :tests :req {:repo (get-in st [:idx :root :gate-checkout]) :branch (:branch (:source st))
+                                                               :files files :tests (:tests act)}}))))
+      ;; each deferred test's status on the task; a task over a tree missing a changed namespace (gate-unread)
+      ;; vouches for none: each :error
       :gated (let [unread (:gate-unread f)
                    rs (if (or (contract/error? r) (seq unread)) (zipmap (:tests act) (repeat :error)) (get-in r [:value :results]))]
-               ;; a failed :tests effect is recorded here, with the results, in one transaction
-               (one (write st aid :done (err/asked-tx (:db st) r :seon.run/deferred-results
-                                                      (cond-> [{:seon.run/id aid
-                                                                :seon.run/deferred-results (vec (for [[t s] rs] {:seon.proof/test t :seon.proof/status s}))}]
-                                                        (seq unread) (conj {:seon.run/id aid :seon.run/gate-unread unread})
-                                                        (contract/error? r) (conj {:seon.run/id aid :seon.run/error r}))))))
-      :write-back (one (request st aid :main-read {:op :write :req {:op :branch-db :branch :db}}))
+               (one (write st id :done (gated st id rs unread (when (contract/error? r) r)))))
+      :write-back (one (request st id :main-read {:op :write :req {:op :branch-db :branch :db}}))
       :main-read (let [{:keys [members] paths :files} (:writeback f)
                        files (doc/files (:db r) paths)]
-                   ;; paths main holds no text for: no commit, held on each member's run as a lost write-back
+                   ;; paths main holds no text for: no commit, held on each member's task as a lost write-back
                    (if (empty? files)
-                     (one (write st aid :done (commit-tx (:db st) (contract/error :seon.root/no-source-text #'seon.reconcile/commit-tx
-                                                                                  (str "main holds no text for " (str/join ", " paths)) {:paths (vec paths)})
-                                                         members paths [])))
-                     (one (request (assoc-in st [:flights aid :writeback :written] (vec (keys files))) aid :committed
+                     (one (write st id :done (commit-tx (:db st) (contract/error :seon.root/no-source-text #'seon.reconcile/commit-tx
+                                                                                 (str "main holds no text for " (str/join ", " paths)) {:paths (vec paths)})
+                                                        members paths [])))
+                     (one (request (assoc-in st [:flights id :writeback :written] (vec (keys files))) id :committed
                                    {:op :fx :kind :git :req {:dir (:root (:source st)) :branch (:branch (:source st)) :files files
                                                              :message (source/commit-message members)}}))))
-      ;; the sha on each merged run; the merge already runs where main's program runs
+      ;; the sha on each merged task; the merge already runs where main's program runs
       ;; (seon.program/load-changes!), so nothing is built (BUILD plan P4)
       :committed (if-let [tx (commit-tx (:db st) r (:members (:writeback f)) (:files (:writeback f)) (:written (:writeback f)))]
-                   (one (write st aid :done tx))
+                   (one (write st id :done tx))
                    (done st)))))
 
 (defn- quiet
   "Report quiescence positively, once per quiet spell: when no flight is in the air and no
-  run is live after a pass that started nothing, write main's :seon.root/quiescent (the
+  task is live after a pass that started nothing, write main's :seon.root/quiescent (the
   t judged, and the root causes), and ask the writer to collect the store (:collect: it sweeps
   only when a branch is gone, and root refuses it while an agent is live). Their answers are
   not awaited (no flight), and the commits they make touch only root, which does not end the
@@ -1126,7 +1132,7 @@
   {:malli/schema [:=> [:cat :seon.reconcile/state] [:tuple :seon.reconcile/state [:vector :map]]]}
   [st]
   (let [early (count (filter #(and (= :spawn (get-in % [:act :op])) (not (:agent %))) (vals (:flights st))))
-        acts (remove #(let [f (get-in st [:flights (:run %)])]
+        acts (remove #(let [f (get-in st [:flights (:task %)])]
                         (or (and f (or (not= :kill (:op %)) (:killing f)))
                             (and (= :spawn (:op %)) (contains? (:refused st) (:task %)))))
                      (actions (:idx st)))
@@ -1162,7 +1168,7 @@
   Starts deepest-first (finish chains under way)."
   {:malli/schema :seon.step/step-fn}
   ([] {:params {:boot "root's boot id"
-                :judge "outside agents' runs to judge {:op :judge :run :task :env :agent}, and waits on main {:op :quiet :after t :p promise}, each answered at the first quiet at or after t (external; seon.root/await-db)"}
+                :judge "outside agents' tasks to judge {:op :judge :task :env :agent}, and waits on main {:op :quiet :after t :p promise}, each answered at the first quiet at or after t (external; seon.root/await-db)"}
        :ins {:main "main's commits" :answers "the api's answers"} :outs {:to-api "requests"}
        :workload :io
        :ping-map-fn (fn [st] {:seen (:seen st 0) :lists (:lists st 0) :t (:t st) :flights (count (:flights st)) :pending (count (:pending st)) :behind (count (:behind st))
@@ -1184,10 +1190,11 @@
                  ;; a commit touching tasks, runs or config keys ends a quiet spell (root's own
                  ;; quiescent fact does not)
                  work? (or (not next?) (some (fn [[_ _ a]] (and (keyword? a) (watched-ns (namespace a)) (not= "seon.root" (namespace a)))) (:ops m)))
-                 ;; a commit holding only refused runs (the refused runs' own writes) changes
-                 ;; nothing that refused them; any other work lets a refused task ask again
+                 ;; a commit holding only the writes of a refused start (the outcome and what it sets, seon.task/refused-tx) changes
+                 ;; nothing that refused it; any other work, an edit of the refused task itself too, lets it ask again
                  only-refused? (and next? (every? (fn [[_ e a]] (or (not (and (keyword? a) (watched-ns (namespace a))))
-                                                               (= :refused (get-in idx [:runs (second (get-in idx [:keys e])) :seon.run/status]))))
+                                                               (and (contains? refused-attrs a)
+                                                                    (= :refused (get-in idx [:tasks (second (get-in idx [:keys e])) :seon.task/outcome])))))
                                               (:ops m)))
                  st (assoc st :db db :t t :idx idx :seen (inc (:seen st)) :lists (cond-> (:lists st 0) (not= (:prev m) (:t st -2)) inc)
                            :quiet (boolean (and (:quiet st) (not work?)))
@@ -1202,10 +1209,10 @@
      ;; else held. Otherwise an outside agent handed its run back: judged as a turn loop's end is
      :judge (case (:op m)
               :quiet [(answer-waits (update st :waits (fnil conj []) (select-keys m [:after :p]))) {}]
-              :judge (let [{:keys [run task env agent]} m
+              :judge (let [{:keys [task env agent]} m
                   ;; a flight: the quiet spell ends, and a wait behind this judge waits for it
-                  st (-> st (assoc-in [:flights run] {:act {:op :spawn :run run :task task :env env} :agent agent}) (assoc :quiet false))
-                  [st o] (request st run :tested {:op :judge :id agent})]
+                  st (-> st (assoc-in [:flights task] {:act {:op :spawn :task task :env env} :agent agent}) (assoc :quiet false))
+                  [st o] (request st task :tested {:op :judge :id agent})]
               [st {:to-api [o]}]))
      ;; an answer to a write main has not reached waits for main's commit of it (taken by :main)
      :answers (if (behind? st m)

@@ -104,11 +104,11 @@
   (let [big (vec (range 100000)) text (apply str (repeat 100000 "x")) live (atom big)
         mapped ((requiring-resolve 'seon.agent/error-map) (ex-info "boom" {:v big :s text :a live}))
         made (contract/error :seon.root/refused 'app/f "boom" {:big big :took text :held live})]
-    ;; plain data whole, whatever its size; what no store keeps, a live atom, is its print (seon.contract/plainly)
+    ;; plain data whole, whatever its size; what no store keeps, a live atom, is what it was (seon.contract/plainly)
     (is (= {:v big :s text} (select-keys (:data mapped) [:v :s])) "an eval error's ex-data is its :data, whole")
-    (is (string? (:a (:data mapped))))
+    (is (= {:seon.value/type (.getName (class live))} (:a (:data mapped))))
     (is (= {:big big :took text} (select-keys made [:big :took])) "a built error carries its members whole")
-    (is (string? (:held made)))
+    (is (= {:seon.value/type (.getName (class live))} (:held made)))
     (is (contract/plain? made))))
 
 (deftest a-contract-error-says-where-and-what
@@ -140,3 +140,48 @@
   (is (contract/armed? #'seon.print/print-value) "seon.print/print-value is counted, as in root")
   (is (every? contract/armed? (for [n contract/boot-nss v (vals (ns-interns (the-ns n))) :when (contract/contract v)] v))
       "every contracted var of the boot namespaces is armed"))
+
+(defrecord Row [id name])
+
+;; docs/storage.md#plain-data: a value that is not plain data is made plain as data, never as its print.
+;; See docs/storage.md#plain-data
+(deftest a-value-past-the-bound-costs-the-bound
+  ;; seon.repl/kept counts before it copies: an eval's huge or endless value is not walked past the bound
+  (let [realized (atom 0)
+        endless (map (fn [x] (swap! realized inc) x) (range))]
+    (is (false? (contract/within? endless 100)) "an endless seq is past any bound")
+    (is (< @realized 200) (str "and is realized no further than the bound and a chunk: " @realized)))
+  (is (true? (contract/within? (map inc (range 10)) 100)) "a short lazy seq is within it")
+  (is (false? (contract/within? {:a (vec (range 200))} 100)) "members count, at any depth")
+  (is (true? (contract/within? (datahike.db/empty-db) 1)) "a db is one thing: plainly keeps its type, and never walks it"))
+
+(deftest plainly-never-prints
+  (let [gone #(= [:seon.value/gone] (keys %))
+        e (ex-info "boom" {:a (atom 1)})]
+    (testing "a var, a fn, a namespace and an atom each answer what they are, as data"
+      (is (= ['clojure.core/inc {:seon.value/type (.getName (class inc))} 'clojure.core {:seon.value/type (.getName (class (atom 1)))}]
+             (contract/plainly [#'clojure.core/inc inc (the-ns 'clojure.core) (atom 1)]))))
+    (testing "a record is a map of its fields, a sorted map and set unsorted, each member so"
+      (is (= {:id 1 :name {:seon.value/type (.getName (class inc))}} (contract/plainly (->Row 1 inc))))
+      (is (= {:a {:b 1}} (contract/plainly (sorted-map :a (sorted-map :b 1)))))
+      (is (= #{1 2} (contract/plainly (sorted-set 1 2)))))
+    (testing "a db is a map to Clojure and a record, and still a host object: its class, never its fields"
+      (let [db (datahike.db/empty-db)]
+        (is (= {:seon.value/type (.getName (class db))} (contract/plainly db)))
+        (is (= {:db {:seon.value/type (.getName (class db))}} (contract/plainly {:db db})))))
+    (testing "a lazy seq is a vector, realized to the bound and no further"
+      (let [realized (volatile! 0)
+            xs (map (fn [i] (vswap! realized inc) i) (range))]
+        (is (= [0 1 2] (contract/plainly (take 3 xs) 5)))
+        (is (gone (contract/plainly xs 5)) "past the bound, the marker")
+        (is (= 5 (:over (:seon.value/gone (contract/plainly xs 5)))))
+        (is (<= @realized 12) (str "never realized further: " @realized))))
+    (testing "a throwable keeps its type and its message, as data"
+      (is (= {:seon.value/type (.getName (class e)) :seon.value/message "boom"} (contract/plainly e))))
+    (is (contract/plain? (contract/plainly [inc (->Row 1 (atom 1)) (sorted-map :a (range 3)) e])) "whatever it held, plain")))
+
+(deftest within-counts-by-a-walk-that-stops-at-the-bound
+  (is (contract/within? {:a [1 2 "abc"]} 20))
+  (is (not (contract/within? (vec (range 100)) 10)) "a scalar is 1")
+  (is (not (contract/within? (apply str (repeat 50 "x")) 10)) "a string is its length")
+  (is (contract/within? nil 1)))

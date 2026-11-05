@@ -35,7 +35,7 @@ Making a store costs what its schema and its seed are. ```seon.db/make!``` alloc
 
 ## Plain data
 
-Plain data is what the store keeps as data and EDN carries, and one predicate says what it is: ```seon.contract/plain?```, the schema `:seon.db/plain`: nil, a boolean, a number, character, string, keyword, symbol, uuid or instant, or a map, vector, set or list of them. It is narrower than the test Datahike runs on a data value (`datahike.schema/plain-data?`), on purpose: that one walks any seq, and asking of a lazy or infinite value would realize it, and it admits bytes, which EDN does not carry; a sorted collection's comparator is a function, and a record is a type. So everything plain the store keeps (`seon.db-test/plain-is-what-the-store-keeps`), and what is not plain is made so where it is written: `seon.contract/plainly` prints what no store keeps (every error passes through it at its constructor, `seon.contract/error`), `seon.contract/kept` bounds what an error holds past its moment, by the same walk.
+Plain data is what the store keeps as data and EDN carries, and one predicate says what it is: ```seon.contract/plain?```, the schema `:seon.db/plain`: nil, a boolean, a number, character, string, keyword, symbol, uuid or instant, or a map, vector, set or list of them. It is narrower than the test Datahike runs on a data value (`datahike.schema/plain-data?`), on purpose: that one walks any seq, and asking of a lazy or infinite value would realize it, and it admits bytes, which EDN does not carry; a sorted collection's comparator is a function, and a record is a type. So everything plain the store keeps (`seon.db-test/plain-is-what-the-store-keeps`), and what is not plain is made so where it is written: `seon.contract/plainly` answers data and never prints (a record as a map of its fields, a sorted collection unsorted, a var as its symbol, a lazy seq as a vector up to the bound, anything else as `{:seon.value/type <class>}`; every error passes through it at its constructor, `seon.contract/error`), `seon.contract/kept` bounds what an error holds past its moment, by the same walk. An eval's record keeps a value only up to `:seon.config.store/max-value-chars` (1,048,576 characters, counted by a walk that stops at the bound, `seon.contract/within?`): past it the response holds `{:seon.value/gone {:type :over}}`, the transcript says it is gone, and the handle (`result/e<n>`) still reads the value in the live process.
 
 ## Entity ids
 
@@ -97,9 +97,9 @@ The owner's example, root's message on main and the agent's reply on its branch,
 
 ```clojure
 (d/q '[:find ?body ?reply ?branch :in $ ?agent
-       :where [?run :seon.run/id ?agent] [?m :seon.message/to ?run] [?m :seon.message/id ?id] [?m :seon.message/body ?body]
+       :where [?m :seon.message/branch ?agent] [?m :seon.message/id ?id] [?m :seon.message/body ?body]
               [?r :seon.message/reply-to ?id ?tx] [?r :seon.message/body ?reply] [?tx :seon.tx/branch ?branch]]
-     (my.root/union sys) "demo/f#1")
+     (my.root/union sys) :task-demo-f)
 ```
 
 Measured 2026-10-23 (REPL, LMDB, main 46,708 datoms, each branch one turn of ~15 datoms; docs/storage.md):
@@ -152,6 +152,10 @@ A datom value at least `:seon.config.store/value-out-of-line-bytes` large (1,024
 The size is a lower bound of the value's serialized size: a string's characters, a collection's elements. Hashing a 2 KB value and asking the store for it each cost about 15–18 µs on Jolt, and a commit rewrites the tail nodes with every large value in them. So the key of a value known to be stored (read back, or found by the store) is kept in the node cache under its datom, whose hash the datom caches. A value only queued for writing is not kept there, so a commit that fails before the write leaves no reference to a value the store lacks. Stored nodes describe themselves, so a store holding both kinds reads either, whatever the config key says now. Proof: `seon.db-test/a-large-value-lives-once-under-its-own-key`.
 
 Thresholds measured at 20 turns with LZ4: 4,096 B moves nothing (a turn's values are 1.5–2.5 KB) and costs 862 KB per turn; 1,024 B costs 237 KB; 256 B costs 223 KB (it also moves the basis, ~400 B). 1,024 is the default: it takes nearly all the gain, and every value it moves is its own LMDB key.
+
+## A commit the store refuses
+
+A commit can throw on a value the writes hold: the key of a value out of line is hasch's uuid of it, and hasch had no encoding for `clojure.lang.Ratio`, so a large value holding a ratio (`(mapv #(/ % 3) (range 1 3000))`) threw at its commit while a small one, whose datom is no key, did not (our `jolt-overlay` now encodes it as a number, [forks](forks.md#jolt-overlay); `seon.db-test/a-large-value-holding-ratios-commits-and-reads-back`). Any such value must leave the agent alive, so the commit is the edge ([failure points](failure-points.md)): `seon.agent/commit!` catches the throw, drops the writes applied since the last commit that held (`datahike.writer/abandon-pending!`, which resets the writer's run-ahead value, so the connection's committed value is the truth and the next commit starts from the last good one), puts the agent's `:db` back to the committed value (`seon.ctx` patches `@ctx` by the datoms the two values differ by, so the dropped writes leave it too) and answers `:seon.agent/commit-refused`. The agent hears it under `:unrecorded` beside its next eval's answer, and as a message from seon in a model turn: what its code wrote to the branch did not stay, definitions it evaluated are still in the process. Proof: `seon.agent-test/a-commit-the-store-refuses-leaves-the-agent-alive`.
 
 ## Plain values
 

@@ -21,8 +21,8 @@
     (is (= {:value 3} (select-keys (ev "(+ 1 2)") [:value :forms])) "one form: its value, no :forms")
     (is (contains? r :ms) "the evaluation's facts: its cost")
     (is (= {:value 4} (select-keys (ev "(do (+ 1 1) (+ 2 2))") [:value :forms])) "a do is one form: its last form's value")
-    (let [rec (repl/record-details "(atom 1)" {:handle 'result/e9 :value (atom 1)} {} nil)]
-      (is (:printed rec) "a value that is no plain data: the response as it printed"))
+    (let [rec (repl/record-details "(atom 1)" {:handle 'result/e9 :value (atom 1)} {})]
+      (is (= {:seon.value/type (.getName (class (atom 1)))} (get-in rec [:seon.eval/response :value])) "a value that is no plain data: what it was, as data"))
     (let [e (ev "(+ 1 2) (throw (ex-info \"no\" {})) 4")]
       (is (contains? e :ex) "the error stops it")
       (is (= {:forms 2 :value [3]} (select-keys e [:forms :value])) "the values of the forms before it, and the forms after it never ran"))
@@ -173,7 +173,7 @@
                                         {:op :eval :agent "root"
                                          :code (str "(let [b (:db @(seon.root/branch-db sys (:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))))]"
                                                     " [(:form/src (:var/form (datahike.api/entity b [:var/name '" ns ".ed/f])))"
-                                                    "  (count (filter #(clojure.string/includes? (:code %) \"[] 2)\") (datahike.api/q '[:find [?r ...] :where [_ :seon.eval/record ?r]] b)))])")}]))]
+                                                    "  (count (filter #(clojure.string/includes? % \"[] 2)\") (datahike.api/q '[:find [?c ...] :where [_ :seon.eval/code ?c]] b)))])")}]))]
     (is (get-in edit [:value :edited]) (pr-str edit))
     (is (clojure.string/includes? (str (first (:value branch))) "[] 2") "the branch's program holds the new source")
     (is (= 0 (second (:value branch))) "its inner eval records no eval of its own: the edit's call is the one kept")))
@@ -234,7 +234,9 @@
 ;; a local or the namespace's own var still wins, and nothing is written into the namespace
 (deftest the-repl-helpers-resolve-in-any-namespace
   (let [old @agent/state]
-    (try (reset! agent/state {:n 0 :ns (the-ns 'user)})
+    ;; the process's own program record stays (an agent's branch db, a test process's none): `source` reads a var's
+    ;; text from it, else from the file at its relative :file, which only a process in the checkout can open
+    (try (reset! agent/state (assoc (select-keys old [:db]) :n 0 :ns (the-ns 'user)))
          (let [ev #(repl/eval-string % {})
                _ (ev "(in-ns 'x.repl-bare)")
                src (ev "(source seon.doc/named-under?)")
@@ -313,7 +315,7 @@
   ;; the agent's own data keeps its keys: a timing of its own that changed is a different answer
   (let [[_ m5 m7] (at/in-agent ["(def t (atom 4))" "{:ms (swap! t inc)}" "{:ms (swap! t inc)}"])]
     (is (not (str/includes? (:text m7) ":again")) (str "{:ms 5} then {:ms 6} is no same answer: " (:text m7))))
-  ;; an answer holding a db is printed as it was, its host object named by the form that reads it
+  ;; an answer holding a db is printed as the record keeps it (the one text of an eval), its host object named by the form that reads it
   (let [[_ s2] (at/in-agent ["(select-keys @seon.agent/state [:db])" "(select-keys @seon.agent/state [:db])"])]
     (is (str/includes? (:text s2) "(get (deref seon.agent/state) :db)") (str "the db named by its form: " (:text s2)))))
 
@@ -438,7 +440,7 @@
   ;; (in-ns 'x) answers a Namespace: it is printed for the model, and the agent's reply to root
   ;; carries the text, never the live value (which no wire encodes)
   (let [[ns-call next-call] (at/in-agent ["(in-ns 'user)" "(+ 1 1)"])]
-    (is (str/includes? (str (:text ns-call)) "#namespace") "the value, printed")
+    (is (str/includes? (str (:text ns-call)) "user") "the value, printed as the record keeps it: the namespace's name")
     (is (= 2 (:value next-call)) "and the agent lives to answer the next")))
 
 (deftest a-redefinition-that-changes-a-docstring-says-so
@@ -483,12 +485,12 @@
               ["(with-out-str (clojure.repl/source seon.reconcile/root-causes))" :text "(defn root-causes"]
               ;; a namespace's ns form, its requires and aliases (step E's run 3: the real design
               ;; asked for seon.problems-test/ns 18 turns running, to write its deftest)
-              ["(my.schema/forms :seon.run/status)" :text ":enum"]
+              ["(my.schema/forms :seon.task/outcome)" :text ":enum"]
               ;; a key no schema registers is said so, with its namespace's keys (md-scan #6 read nil twenty times)
-              ["(my.schema/forms (keyword \"seon.run\" \"no-such-key\"))" :text ":seon.schema/unknown-key"]
+              ["(my.schema/forms (keyword \"seon.task\" \"no-such-key\"))" :text ":seon.schema/unknown-key"]
               ;; (the typo made at run time: a key this file names is one the program knows)
-              ["(my.schema/forms (keyword \"seon.run\" \"statu\"))" :text ":seon.run/status"]
-              ["(my.agent/callers (keyword \"seon.run\" \"statu\"))" :text ":seon.schema/unknown-key"]
+              ["(my.schema/forms (keyword \"seon.task\" \"outcom\"))" :text ":seon.task/outcome"]
+              ["(my.agent/callers (keyword \"seon.task\" \"outcom\"))" :text ":seon.schema/unknown-key"]
               ;; a help address that is no section names the sections whose text holds it
               ["(:nearest (my.agent/help \"schema\"))" :text "docs/"]
               ["(clojure.repl/source seon.reconcile)" :text "(ns seon.reconcile"]
@@ -828,13 +830,13 @@
   ;; no store keeps is invalid at record-details, explained, naming where it is; not refused later, by the store, at the write.
   ;; Every error is plain at its constructor, whatever a raiser put in it, so an error cannot be the value
   (let [bad {:handle 'result/e1 :warnings [{:seon.repl/finding :x :held (Object.)}]}
-        r (try (repl/record-details "(f)" bad {} nil) (catch Throwable t (ex-data t)))]
+        r (try (repl/record-details "(f)" bad {}) (catch Throwable t (ex-data t)))]
     (is (= :seon.instrument/contract-error (:seon.error/type r)) (pr-str r))
     (is (= 'seon.repl/record-details (:seon.error/operation r)))
     (is (clojure.string/includes? (pr-str (:seon.error/problems r)) "Object") "it names the value"))
   (let [e (seon.contract/error :seon.agent/eval-error 'seon.repl/eval-code "m" {:class "c" :data {:held (Object.) (Object.) 1 :r (range)}})]
     (is (seon.contract/plain? e) "whatever a raiser held")
-    (is (string? (get-in e [:data :held])) "as its text")
+    (is (= {:seon.value/type "java.lang.Object"} (get-in e [:data :held])) "as what it was, as data")
     (let [v (seon.contract/plainly {:v [1 (Object.) #{2}] :l (list 1 (Object.)) :s #{(Object.)}})]
       (is (seon.contract/plain? v))
       (is (vector? (:v v)) "a collection keeps its shape, each member plain, so a variant's schema of it still holds")
@@ -843,7 +845,7 @@
   (let [e (try ((seon.contract/wrap 'x.y/f (seon.contract/schema [:=> [:cat :int] :int]) identity) 1 2) (catch Throwable t (ex-data t)))]
     (is (= :seon.instrument/arity-error (:seon.error/type e)) (pr-str e))
     (is (seon.contract/plain? e) "a contract's own error is plain, whatever its form holds"))
-  (is (some? (repl/record-details "(f)" {:handle 'result/e1 :value (Object.)} {} nil)) "a value that is no data is the one thing a record prints, by design"))
+  (is (some? (repl/record-details "(f)" {:handle 'result/e1 :value (Object.)} {})) "a value that is no data is the one thing a record prints, by design"))
 
 ;; docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map: Datahike's "Query for unknown vars"
 ;; carries datalog.parser.type.Variable records in its ex-data; the store refused the record of the eval that threw it,
@@ -853,14 +855,14 @@
   (let [e (try (d/q '[:find ?y :where [?e :var/name _]] (d/db-with (ts/test-db) [])) nil (catch Throwable t t))]
     (is (some? e) "the query throws")
     (is (seon.contract/plain? (agent/error-map e)) "its error map is plain, the parser's records kept as their text, at the error's constructor")
-    (is (seon.contract/plain? (repl/record-details "(q)" {:handle 'result/e1 :ex (agent/error-map e)} {} nil))
-        "and so the eval's record"))
+    (is (seon.contract/plain? (repl/record-details "(q)" {:handle 'result/e1 :ex (agent/error-map e)} {}))
+        "and so the eval's attributes"))
   (let [[r recorded] (at/in-agent (fn [{:keys [task]}]
                                     ["(datahike.api/q '[:find ?y :where [?e :var/name _]] (my.db/db))"
                                      {:op :eval :agent "root"
                                       :code (str "(let [b (:db @(seon.root/branch-db sys (:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))))]"
-                                                 " (vec (for [[rec] (datahike.api/q '[:find ?r :where [_ :seon.eval/record ?r]] b) :when (get-in rec [:response :ex])]"
-                                                 " (get-in rec [:response :ex :seon.error/message]))))")}]))]
+                                                 " (vec (for [[rec] (datahike.api/q '[:find ?r :where [_ :seon.eval/response ?r]] b) :when (:ex rec)]"
+                                                 " (get-in rec [:ex :seon.error/message]))))")}]))]
     (is (:ex r) (pr-str r))
     (is (some #(clojure.string/includes? (str %) "unknown vars") (:value recorded)) (str "the eval is recorded with its error: " (pr-str recorded)))))
 
@@ -994,3 +996,19 @@
          (is (= 7 (:fd @agent/link)) "the process keeps its socket")
          (is (= {:db nil} (select-keys @agent/state [:db :fd :conn])) "and the state is what the forms made it")
          (finally (reset! agent/state old) (reset! agent/link old-link)))))
+
+(deftest an-evals-text-is-one-text
+  ;; the owner, 2026-11-04: "Why does an outside session have a better understanding? That's wrong." The text an outside agent is
+  ;; answered (:text) is made by the function the model's message is (seon.print/record-text), from the plain data the record
+  ;; keeps, so a var, a fn and a data value read alike to both; the live value stays at the handle
+  (let [old @agent/state
+        ev (fn [code] (try (reset! agent/state {:n 0 :ns (the-ns 'user)})
+                           (repl/eval-string code {:origin :outside :call-id "c1"})
+                           (finally (reset! agent/state old))))]
+    (doseq [code ["#'clojure.core/inc" "(fn [x] x)" "{:a 1 :b [1 2 3] :c \"text\"}" "(throw (ex-info \"boom\" {:k 1}))"]]
+      (let [r (ev code)
+            rec (assoc (repl/record-details code r {:call-id "c1"}) :seon.eval/id "e1" :seon.eval/by "a1")
+            msg (second (seon.context/eval-messages {} rec))]
+        (is (string? (:text r)) code)
+        (is (= (:text r) (:content msg)) (str "the outside text is the model's message for " code))))
+    (is (var? (:value @(resolve (:handle (ev "#'clojure.core/inc"))))) "the live value is at the handle")))

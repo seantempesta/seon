@@ -15,16 +15,14 @@
   (let [id (str "e" i)]
     [[:eval id]
      {:seon.eval/id id :seon.eval/by "a1"
-      :seon.eval/record {:code (str "(rows " i ")") :call-id (str "c-" i) :call 0 :prose (str "Read the rows of part " i ".")
-                         :response {:handle (symbol "result" id) :value (vec (for [j (range 6)] {:part i :row j :name (str "row-" i "-" j)}))
-                                    :ms 0.5 :ticks 1000 :bytes 4096}
-                         :line (str "[{:part " i " …}]")}}
+      :seon.eval/code (str "(rows " i ")") :seon.eval/call-id (str "c-" i) :seon.eval/prose (str "Read the rows of part " i ".") :seon.eval/response {:handle (symbol "result" id) :value (vec (for [j (range 6)] {:part i :row j :name (str "row-" i "-" j)}))
+                                    :ms 0.5 :ticks 1000 :bytes 4096}}
      :seon.db/eval-fact (inc i)]))
 
 (defn held-of
   "The input at n: the run's next record, and the cache of its n records before it, printed."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :any :map]]}
-  [n] [[(item n)] (#'seon.context/printed-run (mapv item (range n)) nil)])
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :any :map :nil]]}
+  [n] [[(item n)] (#'seon.context/printed-run (mapv item (range n)) nil nil) nil])
 
 (deftest a-turn-prints-its-new-records-flat-in-the-history
   (cost/proof {:of 'seon.context/printed-run :input 'seon.context-cost-test/held-of
@@ -40,21 +38,23 @@
                :sizes [10 100 1000]}))
 
 (defn session-of
-  "The input at n: a main db holding a session of n evals by agent b/a1 across two runs (as a
+  "The input at n: a main db holding a session of n evals by agent b/a1 (as a
   woken or loaded session's first request reads it cold), each record production-shaped (item),
   and the agent's entity id."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :int]]}
   [n]
   (let [db (d/db-with (ts/test-db)
                       (vec (for [i (range n) :let [[_ v] (item i)]]
-                             (assoc v :seon.eval/agent {:seon.agent/key "b/a1"}
-                                    :seon.eval/record (assoc (:seon.eval/record v) :run (if (< i (quot n 2)) "demo/f#1" "demo/f#2"))))))]
+                             (assoc v :seon.eval/agent {:seon.agent/key "b/a1"}))))]
     [db (:db/id (d/entity db [:seon.agent/key "b/a1"]))]))
 
 (defn records-of
   "The input at n of seon.context/records: the agent's ctx value over session-of's db, as a request reads it."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map :seon.host/db]]}
-  [n] (let [[db e] (session-of n)] [(:tree (seon.ctx/build db e :b)) db]))
+  [n] (let [[db e] (session-of n)
+            ;; one eval a turn
+            db (d/db-with db (vec (for [i (range n)] [:db/add [:seon.eval/id (str "e" i)] :seon.eval/turn (inc i)])))]
+        [(:tree (seon.ctx/build db e :b)) db]))
 
 (deftest a-request-reads-what-the-agents-ctx-holds
   ;; task seon.render/one-way-to-make-what-an-agent-is-sent, step 5; the owner, 2026-10-26: nothing in a request is read from
@@ -62,9 +62,9 @@
   ;; is not sent
   (let [[c db] (records-of 6)
         all (seon.context/records c db)
-        since (first (nth all 3))]
+        since 4]
     (clojure.test/is (= 6 (count all)))
-    (clojure.test/is (= (filterv #(>= (first %) since) all) (seon.context/records c db since)) "the new ones, in order")
+    (clojure.test/is (= (filterv #(>= (ffirst %) since) all) (seon.context/records c db since)) "the new ones, in order")
     (clojure.test/is (= 5 (count (seon.context/records (update c :evals dissoc (first (keys (:evals c)))) db))) "what the pattern does not reach is no record")))
 
 (deftest a-sessions-records-cost-one-read-per-record
@@ -73,7 +73,7 @@
   ;; (:printed, a-turn-prints-its-new-records-flat-in-the-history)
   (cost/proof {:of 'seon.context/records :input 'seon.context-cost-test/records-of
                :n "eval records of the session"
-               :work (str "per record: its member of ctx read, one datom for its tx (one seek) and one place in the sort by tx; "
+               :work (str "per record: its member of ctx read and one place in the sort by its turn number; "
                           "no message or reply costs nothing")
                :growth :linear
                ;; measured 2026-10-25: 798 KB at 10, 5.46 MB at 100, 52.8 MB at 1,000 (about 52 KB a
@@ -190,20 +190,23 @@
   each turn, one commit a turn: *conn*), and the refs a request sent, [:parts a c whole? ids call], each
   turn's parts as seon.context/request records them, drawn at that turn's commit, every one after the first
   sent as what changed since the turn before ([... was-commit]: its commit is the turn before's, drawn once).
-  Every turn sends the same parts (a plan and a run), so the cost is per ref."
+  Every turn sends the same parts (a plan and a task), so the cost is per ref."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db [:vector :any]]]}
   [n]
   (let [conn *conn* k (str "b/p" n) tid (str "demo/p" n)]
     (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name (str "p" n) :seon.task/plan "Make p."
                                              :seon.task/proofs #{'demo-test/p-test}}]))
-    (d/transact conn [{:seon.run/id (str tid "#1") :seon.run/task [:seon.task/id tid] :seon.run/agent {:seon.agent/key k}}])
+    ;; the agent has no :seon.agent/task: its record draws no task part, as this proof's input has always been (the run it
+    ;; stood for held the task; measured with the task linked it draws the page: 1,586 calls at n=1 against these 566, so the
+    ;; bound is the unlinked agent's and the page's is unmeasured here)
+    (d/transact conn [{:seon.agent/key k}])
     (let [commits (vec (for [i (range n)]
                          (do (d/transact conn [{:seon.task/id tid :seon.task/plan (str "Make p, step " i ".")}])
                              (d/commit-id @conn))))
           a (:db/id (d/entity @conn [:seon.agent/key k]))]
       (let [ids (vec (keys (seon.context/drawn-parts @conn (seon.ctx/build @conn a (:seon.agent/branch (d/entity @conn a))))))]
         [@conn (vec (for [[i c] (map-indexed vector commits)]
-                      (cond-> [:parts a c (zero? i) ids (str tid "#1/" i)] (pos? i) (conj (commits (dec i))))))]))))
+                      (cond-> [:parts a c (zero? i) ids (str tid "/" i)] (pos? i) (conj (commits (dec i))))))]))))
 
 ;; See docs/render.md#the-branchs-views
 (deftest reading-a-request-back-draws-each-turns-parts-once
@@ -230,25 +233,23 @@
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map :map]]}
   [n]
   (let [[db a] (session-of n)
-        basis (fn [t] {:commit (d/commit-id db) :task "demo/f" :run "demo/f#1" :turn t :max-turns 9 :origin :model :agent "b/a1"})
-        turn (fn [t] [{:db/id (str "t" t) :seon.turn/id (str "demo/f#1/" t) :seon.turn/run {:seon.run/id "demo/f#1"} :seon.turn/agent {:seon.agent/key "b/a1"}
-                       :seon.turn/n t :seon.turn/origin :model}
-                      {:seon.model-call/id (str "demo/f#1/" t) :seon.model-call/turn (str "t" t) :seon.model-call/basis (basis t)}])
-        sent (fn [t r] [{:seon.model-call/id (str "demo/f#1/" t) :seon.model-call/sent (:sent r)}])
+        basis (fn [t] {:commit (d/commit-id db) :task "demo/f" :turn t :max-turns 9 :origin :model :agent "b/a1"})
+        turn (fn [t] (ts/turn-tx "b/a1" t {:seon.model-call/basis (basis t)}))
+        sent (fn [t r] [{:seon.model-call/id (str "b/a1/" t) :seon.model-call/sent (:sent r)}])
         opts (fn [db t parts printed] {:db db :basis (basis t) :help "help" :help-ref [:section 1 1] :parts parts :printed printed})
         e {:db/id a}
         part (fn [k text] [:section {:id k} text])
         parts (fn [t] {"task-1" (part "task-1" "Make f.") "status-1" (part "status-1" (str t " of 9"))})
-        db1 (d/db-with db (turn 0))
-        r0 (seon.context/request e (opts db1 0 (parts 1) nil))
-        db2 (d/db-with db1 (concat (sent 0 r0) (turn 1)))
-        r1 (seon.context/request e (opts db2 1 (parts 2) (:printed r0)))
-        db3 (d/db-with db2 (concat (sent 1 r1)
-                                   [{:seon.eval/id "e-last" :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key "b/a1"}
-                                     :seon.eval/record {:code "(f)" :call-id "c-last" :call 0 :prose "Last." :response {:handle 'result/e-last :value 1}}}]
-                                   (turn 2)))]
+        db1 (d/db-with db (turn 1))
+        r0 (seon.context/request e (opts db1 1 (parts 1) nil))
+        db2 (d/db-with db1 (concat (sent 1 r0) (turn 2)))
+        r1 (seon.context/request e (opts db2 2 (parts 2) (:printed r0)))
+        db3 (d/db-with db2 (concat (sent 2 r1)
+                                   [{:seon.eval/id "e-last" :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key "b/a1"} :seon.eval/turn 2
+                                     :seon.eval/code "(f)" :seon.eval/call-id "c-last" :seon.eval/prose "Last." :seon.eval/response {:handle 'result/e-last :value 1}}]
+                                   (turn 3)))]
     ;; with its @ctx, as a turn asks (seon.turn/act!)
-    [e (assoc (opts db3 2 (parts 3) (:printed r1)) :ctx (:tree (seon.ctx/build db3 (:db/id e) :b)))]))
+    [e (assoc (opts db3 3 (parts 3) (:printed r1)) :ctx (:tree (seon.ctx/build db3 (:db/id e) :b)))]))
 
 (deftest a-turns-request-costs-its-parts-flat-in-the-session
   ;; task seon.context/the-context-is-the-agents-evals-and-seons (R1): a request is the previous one and

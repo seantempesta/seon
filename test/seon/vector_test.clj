@@ -102,10 +102,10 @@
       (is (= [s] (map first (filter (comp #{s} first) (vector/due db "m")))) "a vector of the text before is no vector of the text now"))
     (is (= #{f s} (set (filter #{f s} (map first (vector/due db "m2"))))) "another model's vectors are due again")
     (let [db (d/db-with db [{:db/id "a" :seon.agent/key "demo/a1" :seon.agent/id :a1}
-                            {:seon.eval/id "e1" :seon.eval/agent "a" :seon.eval/by "a1" :seon.eval/record {:code "(f)" :response {} :line "1"}}])
+                            {:seon.eval/id "e1" :seon.eval/agent "a" :seon.eval/by "a1" :seon.eval/code "(f)" :seon.eval/response {}}])
           ev (:e (first (d/datoms db :avet :seon.eval/id "e1")))]
-      (is (= [[ev "task: search result | query: (f)\n1"]] (mapv pop (filterv (comp #{ev} first) (vector/due db "m"))))
-          "an eval is embedded as a search asks: its code and its result's line"))))
+      (is (= [[ev "task: search result | query: (f)"]] (mapv pop (filterv (comp #{ev} first) (vector/due db "m"))))
+          "an eval is embedded as a search asks: its code"))))
 
 (defn- with!
   "conn's head after tx-data is committed on it (db, the head before, is the one the test holds):
@@ -362,7 +362,7 @@
         e (plan-of main)
         main (d/db-with main (vector/tx-data [e] [(:tx (first (d/datoms main :eavt e :seon.task/plan)))] (vectors 1 1 1 768) [4] "m"))
         ;; the branch wrote facts, none of them a text: a turn's and an eval's records
-        branch (d/db-with main [{:seon.run/id "r1"}])
+        branch (d/db-with main [{:seon.model-call/id "b/a1/1" :seon.model-call/n 1}])
         [n _ asked] (on-branch main branch answered #(agent/embed-written! 64 "m"))]
     (is (= 0 n))
     (is (empty? asked) "nothing written is due and the plan's vector is current: no request")
@@ -393,7 +393,7 @@
 ;; its work; its embedding is a vector entity pointing at it (:seon.vector/of)
 (deftest a-vector-is-its-own-entity
   (let [db (d/db-with (ts/test-db) [{:seon.task/id "t/x" :seon.task/plan "a plan"}
-                                    {:db/id "e" :seon.eval/id "e1" :seon.eval/by "a1" :seon.eval/record {:code "(f)" :response {} :line "x"}}])
+                                    {:db/id "e" :seon.eval/id "e1" :seon.eval/by "a1" :seon.eval/code "(f)" :seon.eval/response {}}])
         t (plan-of db)
         ev (ffirst (d/q '[:find ?e :where [?e :seon.eval/id "e1"]] db))
         [v1 v2] (vectors 3 2 2 768)

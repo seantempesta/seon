@@ -17,11 +17,11 @@
   referred into its namespace. From proto/flow f2-final proto.agent (session F2)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.step :as step] [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.error :as err] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.doc :as doc] [seon.merge :as pm] [seon.config :as cfg] [seon.reconcile :as r] [seon.vector :as vector] [seon.lib :as lib] [seon.print :as print] [seon.sock :as sock] [jolt.scheme :as scm] [clojure.test :as t]
-            [clojure.string :as str] [seon.program :as program] [seon.proofs :as proofs] [seon.fx :as fx] [seon.task :as task] [seon.intr :as intr] [clojure.repl]
+            [clojure.string :as str] [seon.program :as program] [seon.proofs :as proofs] [seon.fx :as fx] [seon.task :as task] [seon.intr :as intr] [seon.render :as render] [seon.template :as template] [clojure.repl]
             [malli.registry :as mr] [clojure.core.async :as a] [jolt.io-poller :as poller]))
 
 ;; One state map per agent process (this process is the agent). Fields:
-;; :id :branch :task :run (the task and run root forked it for, or nil) :db :base (main at the branch's merge base: as forked, then each merge-main!) :main (main's head as last read: as forked, then heard-main) :results :n :waits (seon.agent/await-reply's promises, by key) :busy (the :repl proc runs a request) :tx-seq :mode :ns :home :mismatch
+;; :id :branch :task (the task root forked it for, or nil) :db :base (main at the branch's merge base: as forked, then each merge-main!) :main (main's head as last read: as forked, then heard-main) :results :n :waits (seon.agent/await-reply's promises, by key) :busy (the :repl proc runs a request) :tx-seq :mode :ns :home :mismatch
 ;; :embedded-from (the db embed-written! last read the branch's writes up to)
 ;; :unembeddable (the entities whose text llama.cpp could not encode, as vectors-proc keeps them)
 ;; :base-graph (test-plan's reach graph of its base, keyed by the base's point (seon.db/point: commit and t, never the db), from the fork server's :graph of main: base-graph)
@@ -31,6 +31,7 @@
 ;; :index (seon.agent/reconcile-index: the reconciler's index and the commit it was observed for (the fork hands the db once), advanced each turn by what differs; at fork, main's from the fork server)
 ;; :schema-registry (seon.repl: the branch's schema registry, by its schema changes)
 ;; :tx (the last transaction transact! applied, {:db-after :tx-data}: seon.ctx patches @ctx from it: the db :db is, dropped by commit! when it moves :db)
+;; :refused (the :seon.agent/commit-refused errors since the agent last answered: commit!, take-refused!)
 ;; :eval (the id of the eval running, "e5", while seon.repl/eval-string runs it: what transact! names in its tx-meta)
 (defonce state (atom nil))
 
@@ -91,11 +92,11 @@
   [] (:inbox @state))
 
 (defn- session-branch
-  "The branch main names this agent's session by: its run's :seon.run/branch, which the store
+  "The branch main names this agent's session by: its agent's :seon.agent/branch, which the store
   qualifies on a main that is not :db (seon.db/on-main), so (:branch @state) is not it. nil
-  with no run: then no entry is to it."
-  {:malli/schema [:=> [:cat :seon.host/db] [:maybe :seon.run/branch]]}
-  [main] (some->> (:run @state) (vector :seon.run/id) (d/entity main) :seon.run/branch))
+  before root recorded its start: then no message is to it."
+  {:malli/schema [:=> [:cat :seon.host/db] [:maybe :seon.agent/branch]]}
+  [main] (some->> (:key @state) (vector :seon.agent/key) (d/entity main) :seon.agent/branch))
 
 (defn heard-main
   "Main's head as the store holds it now, held on the state as what this agent last heard of main
@@ -195,48 +196,39 @@
          (sort-by (juxt first second))
          (mapv (fn [[_ id kind from br body]] {:id id :kind kind :from from :branch br :body body})))))
 
-(def taken-attributes
-  "The attributes of the runs of an agent's session that root writes on main and its turn copies
-  onto its branch (seon.turn/take!), so its ctx holds them: those whose schema says
-  {:seon.db/taken true}, read here once. Its outcome and reason, never its status: a branch
-  holds its run by reference (the agent's own record), and a status there says the branch holds
-  the whole run (seon.task/run, seon.task/running read it so)."
-  (into #{} (filter #(:seon.db/taken (contract/properties %))) (keys contract/forms)))
-
 (defn untaken-facts
   "The transaction that copies onto this branch what main holds and its branch does not, of its
-  own entities: the taken attributes (taken-attributes) of the runs on its branch that it
-  holds, and each eval of its own its agent's :seon.agent/opened names, as that eval's
+  own entities: each eval of its own its agent's :seon.agent/opened names, as that eval's
   :seon.eval/opened. take! is the one way outside facts reach the branch, and so its ctx (a
-  change the agent's context and page show goes through the data its context reads). Root is
-  the one writer of these: the agent writes its run's end as :seon.end/*, so main's value is
-  never older than the branch's; a value main retracts stays on the branch. O(the session's
-  runs and the opened evals on main)."
+  change the agent's context and page show goes through the data its context reads). O(the opened evals on main)."
   {:malli/schema [:=> [:cat] :seon.db/tx-data]}
   []
   (let [main (heard-main)
-        b (db)
-        pattern (into [:seon.run/id] taken-attributes)
-        br (session-branch main)]
-    (vec (concat
-           (for [m (when br (d/q '[:find [(pull ?r pattern) ...] :in $ pattern ?br :where [?r :seon.run/branch ?br]] main pattern br))
-                 :let [held (d/entity b [:seon.run/id (:seon.run/id m)])
-                       new (into {} (remove (fn [[k v]] (= v (get held k)))) m)]
-                 :when (and held (seq (dissoc new :seon.run/id)))]
-             (assoc new :seon.run/id (:seon.run/id m)))
-           (for [id (:seon.agent/opened (d/entity main [:seon.agent/key (:key @state)]))
-                 :let [e (d/entity b [:seon.eval/id id])]
-                 :when (and e (not (:seon.eval/opened e)))]
-             {:seon.eval/id id :seon.eval/opened true})))))
+        b (db)]
+    (vec (for [id (:seon.agent/opened (d/entity main [:seon.agent/key (:key @state)]))
+               :let [e (d/entity b [:seon.eval/id id])]
+               :when (and e (not (:seon.eval/opened e)))]
+           {:seon.eval/id id :seon.eval/opened true}))))
+
+(defn turn-now
+  "The agent's turn number in force: its :seon.agent/turn on this branch, 0 before its first model turn. Every record
+  the agent writes takes it (:seon.eval/turn, :seon.message/turn). See docs/turn.md#the-turn-is-a-number."
+  {:malli/schema [:=> [:cat] nat-int?]}
+  [] (or (:seon.agent/turn (d/entity (db) [:seon.agent/key (:key @state)])) 0))
+
+(defn own-message-tx
+  "Message mid of kind from from (to this agent) as this agent's branch records it, taken at turn n: the one message fact
+  (seon.task/message-tx) naming the agent that took it (:seon.message/agent: its record's messages) and the turn (:seon.message/turn).
+  See docs/turn.md#the-turn-is-a-number."
+  {:malli/schema [:=> [:cat :string :seon.message/kind :string [:maybe :seon.db/branch] :any nat-int?] :seon.db/tx-data]}
+  [mid kind from branch body n]
+  (update (task/message-tx mid kind from branch body) 0 assoc :seon.message/agent {:seon.agent/key (:key @state)} :seon.message/turn n))
 
 (defn entries-tx
-  "The transaction that writes entries (untaken-entries) on this branch: the same facts root
-  wrote on main, which their reader takes by writing them."
-  {:malli/schema [:=> [:cat [:sequential :map]] :seon.db/tx-data]}
-  [entries] (into [] (mapcat (fn [{:keys [id kind from branch body]}]
-                               ;; the agent that takes it (:seon.message/agent: its record's messages)
-                               (update (task/message-tx id kind from branch body) 0 assoc :seon.message/agent {:seon.agent/key (:key @state)})))
-                  entries))
+  "The transaction that writes entries (untaken-entries) on this branch, taken at turn n: the same facts root
+  wrote on main, which their reader takes by writing them (own-message-tx)."
+  {:malli/schema [:=> [:cat [:sequential :map] nat-int?] :seon.db/tx-data]}
+  [entries n] (into [] (mapcat (fn [{:keys [id kind from branch body]}] (own-message-tx id kind from branch body n))) entries))
 
 (defn taken!
   "The first n messages of the inbox leave it: their reader recorded them (seon.turn/basis!
@@ -270,18 +262,51 @@
   {:malli/schema [:=> [:cat] :seon.lib/mb]}
   [] (lib/r2 (lib/real-mb)))
 
+(defn- refused!
+  "The agent after a commit its branch refused (e, what the writer threw): the run-ahead writes since the last good
+  commit dropped (datahike.writer/abandon-pending!), :db the committed value again, :dirty? and :tx cleared, the schema
+  registry read again, and the error kept in :refused for the next answer (`take-refused!`). Answers it as the
+  typed :seon.agent/commit-refused. See docs/storage.md#a-commit-the-store-refuses."
+  {:malli/schema [:=> [:cat :any :any] :seon.agent/commit-refused]}
+  [conn e]
+  (let [{:keys [tx-count reports]} (dw/abandon-pending! conn)
+        evals (into [] (comp (keep #(get-in % [:tx-meta :seon.tx/eval])) (distinct)) reports)
+        err (contract/error :seon.agent/commit-refused #'commit!
+                            (str "the branch refused these writes: " (ex-message e) ". The " tx-count " transactions since the last commit that held were dropped"
+                                 (when (seq evals) (str " (those of " (str/join ", " evals) ")"))
+                                 ", so what your code wrote to the branch did not stay, and its record is not on the branch. Definitions it evaluated are still in this process, not on the branch.")
+                            {:transactions (or tx-count 0) :evals evals})]
+    (swap! state #(-> % (assoc :db (d/db conn)) (dissoc :dirty? :tx :schema-registry) (update :refused (fnil conj []) err)))
+    err))
+
+(defn take-refused!
+  "The commits this agent's branch refused since it last answered (`refused!`), taken: one :seon.agent/commit-refused, the
+  last's message over the sum of their dropped transactions and the eval ids among them, or nil when none was.
+  See docs/failure-points.md."
+  {:malli/schema [:=> [:cat] [:maybe :seon.agent/commit-refused]]}
+  []
+  (when-let [es (seq (:refused @state))]
+    (swap! state dissoc :refused)
+    (assoc (last es) :transactions (reduce + (map :transactions es)) :evals (into [] (comp (mapcat :evals) (distinct)) es))))
+
 (defn commit!
   "Commit the writes this agent applied (run-ahead) to its branch, once, through its own
-  store handle, and tell root (its flush makes the commit durable). nil when nothing waits."
+  store handle, and tell root (its flush makes the commit durable). nil when nothing waits. A
+  commit the store refuses (a value it cannot hash) answers the typed :seon.agent/commit-refused and drops those
+  writes (`refused!`), never throws: no caller's loop ends on it. See docs/failure-points.md."
   {:malli/schema [:=> [:cat] :any]}
   []
-  (when-let [c (dw/commit-pending! (:store-conn @state))]
-    (swap! state #(-> % (assoc :db (:db c)) (dissoc :dirty? :tx)))
-    ;; the eval errors folded since the last commit ride it (seon.error/note): root counts
-    ;; them across agents
-    (let [errs (:errors @state)]
-      (when errs (swap! state dissoc :errors))
-      (send! (cond-> {:op :committed :t (:max-tx (:db c)) :txs (:tx-count c) :mem-mb (mem-mb)} errs (assoc :errors (vec (vals errs))))))))
+  (let [conn (:store-conn @state)
+        c (try (dw/commit-pending! conn) (catch Throwable e e))]
+    (cond
+      (instance? Throwable c) (refused! conn c)
+      c (do
+          (swap! state #(-> % (assoc :db (:db c)) (dissoc :dirty? :tx)))
+          ;; the eval errors folded since the last commit ride it (seon.error/note): root counts
+          ;; them across agents
+          (let [errs (:errors @state)]
+            (when errs (swap! state dissoc :errors))
+            (send! (cond-> {:op :committed :t (:max-tx (:db c)) :txs (:tx-count c) :mem-mb (mem-mb)} errs (assoc :errors (vec (vals errs))))))))))
 
 (defn- with-citations
   "tx-data, which writes a task's plan or instructions, with what that text cites derived in it
@@ -332,23 +357,23 @@
 ;; ---- effects (seon.fx, worktree session FX1): root's owner procs, through the agent's proc ---
 
 (defn take-main!
-  "Take what main holds for this agent onto its branch, committed: its entries
+  "Take what main holds for this agent onto its branch, committed, as turn n's: its entries
   (untaken-entries) and the facts of its own entities (untaken-facts). The one take, a turn's
   (seon.turn/take!) and its code's (messages). Answers the entries taken."
-  {:malli/schema [:=> [:cat] [:vector :map]]}
-  []
+  {:malli/schema [:=> [:cat nat-int?] [:vector :map]]}
+  [n]
   (let [es (untaken-entries)
-        tx (into (untaken-facts) (entries-tx es))]
+        tx (into (untaken-facts) (entries-tx es n))]
     (when (seq tx) (transact! tx))
     (commit!)
     es))
 
 (defn messages
-  "The words to this agent not yet taken, taken (take-main!, as a turn takes them), then the
+  "The words to this agent not yet taken, taken (take-main!, as a turn takes them, at the turn in force: `turn-now`), then the
   inbox's sends (inbox). Its reader is the code that read them."
   {:malli/schema [:=> [:cat] [:vector :map]]}
   []
-  (let [es (take-main!)]
+  (let [es (take-main! (turn-now))]
     (inbox)
     (let [[old _] (swap-vals! state assoc :inbox [])] (into es (:inbox old)))))
 
@@ -578,19 +603,33 @@
                          heap (assoc :jolt/heap heap)
                          (seq causes) (assoc :causes causes)))))))
 
+(defn clear-end!
+  "This wake begins: the end the wake before wrote is taken off this agent's branch, committed, so an end root reads there is this
+  wake's own, whether it ran a turn or threw before its first (seon.reconcile/pull-end). See docs/turn.md#the-end."
+  {:malli/schema [:=> [:cat] :any]}
+  []
+  (let [k (:key @state) e (d/entity (db) [:seon.agent/key k])
+        gone (for [a [:seon.agent/outcome :seon.agent/ended-turn :seon.agent/reason :seon.agent/error :seon.agent/waste] :when (get e a)]
+               [:db.fn/retractAttribute [:seon.agent/key k] a])]
+    (when (seq gone) (transact! (vec gone)) (commit!))))
+
 (defn write-end!
-  "Run's end on this branch (:seon.end/*, which root's judge reads), committed: its
-  outcome, and when known its reason, the error that ended it (as data), its turns, tokens
-  and waste. The turn loop's end and the process's death write it the same way."
-  {:malli/schema [:=> [:cat :seon.run/id [:map [:outcome :seon.run/outcome]]] :any]}
-  [run {:keys [outcome reason error turns tokens waste]}]
-  (transact! [(cond-> {:seon.end/run run :seon.end/outcome outcome}
-                turns (assoc :seon.end/turns turns)
-                tokens (assoc :seon.end/tokens tokens)
-                reason (assoc :seon.end/reason reason)
-                error (assoc :seon.end/error error)
-                (seq waste) (assoc :seon.end/waste waste))])
-  (commit!))
+  "This agent's end on its branch (:seon.agent/outcome and the rest, which root's judge reads), committed: its
+  outcome, and when known its reason, the error that ended it (as data) and its waste, naming the turn it came on
+  (:seon.agent/ended-turn), and retracting what an earlier end set that this one does not. The turn loop's end and the process's death write it the same way.
+  See docs/turn.md#the-end."
+  {:malli/schema [:=> [:cat [:map [:outcome :seon.agent/outcome]]] :any]}
+  [{:keys [outcome reason error waste]}]
+  (let [k (:key @state)
+        e (d/entity (db) [:seon.agent/key k])
+        now (cond-> {:seon.agent/outcome outcome :seon.agent/ended-turn (turn-now)}
+              reason (assoc :seon.agent/reason reason)
+              error (assoc :seon.agent/error error)
+              (seq waste) (assoc :seon.agent/waste waste))]
+    (transact! (into [(assoc now :seon.agent/key k)]
+                     (for [a [:seon.agent/reason :seon.agent/error :seon.agent/waste] :when (and (not (contains? now a)) (get e a))]
+                       [:db.fn/retractAttribute [:seon.agent/key k] a])))
+    (commit!)))
 
 (defn- interrupt-self-test
   "T1's boot check: SIGUSR1 reaches a Chez handler only in a process whose ancestors were
@@ -733,7 +772,7 @@
   it is a proof or reaches what the branch changed since base (a var, method, fixture, ns form,
   macro or schema entry), and runs when no result is stored at its digest (a red is reused as recorded)
   (seon.reconcile/done-explain reads the selected). Scratch namespaces' tests (user,
-  ^:scratch) never merge, so they never judge; a proof with no test var here does not run, and
+  ^:scratch) never merge, so they never judge; seon.template/stall-proofs judge only a task whose proofs name them; a proof with no test var here does not run, and
   one with a var but no program facts (loaded, never recorded) has no digest: it always runs.
   With no base (a tree with nothing to diff against: root's on-change runs), the proofs and
   every test with no green at its digest, of which those with no result run (seon.proofs/plan's own rule). Answers the plan with
@@ -763,7 +802,8 @@
         ;; run, mode :main, selects with no base; measured 2026-10-30, 1,169 tests)
         g (branch-graph db (or base (:base @state)) in)
         g (program/reach-indexed g in)
-        idx (into {} (filter (comp judges? key)) (program/index-of g))
+        ;; a stall task's proofs read that task's cause, so they judge only a task that names them
+        idx (into {} (filter (fn [[t _]] (and (judges? t) (or (contains? proofs t) (not (template/stall-proofs t)))))) (program/index-of g))
         cd (update-vals idx :digest)
         unrecorded (sort-by str (filter #(and (judges? %) (not (cd %))) proofs))
         ;; main's tests the branch removed: each judges from base's definition, loaded in the test
@@ -1036,7 +1076,10 @@
                ;; its tests run as bin/test's runner runs them: no interrupt or eval of the agent's
                ;; (task seon.agent/a-test-child-starts-as-a-test-runner-does)
                (intr/forked!)
-               (swap! state assoc :mode :test :evaluating false)
+               ;; nor the agent's walk: a fork holds its reactions on @ctx, which would run at a test's every write of a
+               ;; record of its own (docs/merging.md#a-test-child-is-a-fork-of-a-live-agent)
+               (some-> (:walk @state) render/dispose-walk!)
+               (swap! state #(-> % (dissoc :walk) (assoc :mode :test :evaluating false)))
                ;; the test's own working directory: what a test writes relative to it is this run's, removed
                ;; below when the child has ended (docs/failure-points.md, a directory walk)
                (let [run-dir (fx/run-dir (lib/c-getpid))] (.mkdirs (java.io.File. ^String run-dir)) (lib/c-chdir run-dir))
@@ -1406,61 +1449,51 @@
 (declare begin-run-tx! begin-run-tx)
 
 (defn begin-run!
-  "Run run of task recorded as this process's session's on its branch, as root records it on main:
-  the conversation finds the messages its runs took by it (seon.context/records), and @ctx holds
-  the run with its task. Written as the process starts with its run (init!: an outside agent's
-  branch is cut before its run is written on main), or by the turn that begins a later run of the
-  session; once, nothing written when the branch holds it. The task is running, as main holds it
+  "This agent begins task on its branch: the agent's record names it as its task (:seon.agent/task: the conversation finds the
+  messages it took by the agent, seon.context/records, and @ctx holds the task), the task running as main holds it. Written as
+  the process starts (init!: an outside agent's branch is cut before root writes its start on main), or by the turn that begins a
+  later task of the session; once, nothing written when the branch holds it. The task is running, as main holds it
   (its release, written on main after the branch was cut, read :held here: my.task/current and the
   page's task said held); a task's execution is no content a merge carries (seon.merge/carried-platform-attrs).
   A task the branch lacks (a fork's: its branch is cut from another task's) is written as main
-  declares it first (seon.task/create-tx). A run the branch holds for another agent (one killed
-  before main recorded the run, so a restarted root starts the same run again) is this agent's:
-  its record names this agent, or the run is no session's and its turns draw no status (the
-  resume check capped at 40 turns so). The agent's first run on its branch (its entity there with no task yet) is
+  declares it first (seon.task/create-tx). The agent's first task on its branch (its entity there with no task yet) is
   where the agent is made: it is written with what every agent cites (seon.task/agent-cites-tx), on its branch, so
   its record holds them and its own cite! and uncite! change them, and a merge of main never brings one back."
-  {:malli/schema [:=> [:cat :seon.task/id :seon.run/id] :any]}
-  [task run]
-  (when-not (= (:key @state) (some-> (d/entity (db) [:seon.run/id run]) :seon.run/agent :seon.agent/key))
-    (let [k (:key @state) made? (nil? (some->> (pdb/eid (db) :seon.agent/key k) (d/entity (db)) :seon.agent/task))]
-      (begin-run-tx! task run)
-      (when made? (transact! (task/agent-cites-tx (db) [:seon.agent/key k] k))))))
+  {:malli/schema [:=> [:cat :seon.task/id] :any]}
+  [task]
+  (let [k (:key @state) e (d/entity (db) [:seon.agent/key k])]
+    (when-not (= task (:seon.task/id (:seon.agent/task e)))
+      (let [made? (nil? (:seon.agent/task e))]
+        (begin-run-tx! task)
+        (when made? (transact! (task/agent-cites-tx (db) [:seon.agent/key k] k)))))))
 
 (defn begin-run-tx
-  "The write that makes run of task this agent's on db, its branch (begin-run-tx!'s second, and what
+  "The write that makes task this agent's on db, its branch (begin-run-tx!'s second, and what
   the fork server applies to warm what an agent's start reads: seon.fork-server/warm-start): the task
-  running, the run with the plan it began with, naming the agent (key k, id) and its task."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id :seon.run/id :string :any] :seon.db/tx-data]}
-  [db task run k id]
+  running, naming the agent (key k, id) and its task."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id :string :any] :seon.db/tx-data]}
+  [db task k id]
   [{:seon.task/id task :seon.task/execution :running}
-   ;; the plan the run began with, as main records it at a run's start (seon.task/run-start-tx), when
-   ;; the branch was cut before it: what a design step's done rule compares (:no-design)
-   (cond-> {:seon.run/id run}
-     (not (:seon.run/plan (d/entity db [:seon.run/id run])))
-     (assoc :seon.run/plan (:plan (:seon.task/accumulated (task/task db task)))))
-   {:seon.run/id run :seon.run/task [:seon.task/id task] :seon.run/agent {:seon.agent/key k :seon.agent/id id
-                                                            ;; the agent's task, which its record pulls (the agent is the unit, docs/ctx.md#the-pattern);
-                                                            ;; nested: a top-level agent map takes a content id, one the key's upsert conflicts with
-                                                            :seon.agent/task {:seon.task/id task}}}])
+   ;; the agent's task, which its record pulls (the agent is the unit, docs/ctx.md#the-pattern)
+   {:db/id k :seon.agent/key k :seon.agent/id id :seon.agent/task {:seon.task/id task}}])
 
 (defn- begin-run-tx!
-  "Run run of task written on this agent's branch (begin-run!'s write): the task as main declares it when the
+  "Task written on this agent's branch (begin-run!'s write): the task as main declares it when the
   branch lacks it, then begin-run-tx."
-  {:malli/schema [:=> [:cat :seon.task/id :seon.run/id] :any]}
-  [task run]
+  {:malli/schema [:=> [:cat :seon.task/id] :any]}
+  [task]
   (when-not (d/entity (db) [:seon.task/id task])
     (let [t (task/task (heard-main) task)]
       (transact! (task/create-tx (db) [(-> (select-keys t [:seon.task/ns :seon.task/name :seon.task/plan :seon.task/instructions :seon.task/proofs
                                                            :seon.task/needs :seon.task/branch :seon.task/model :seon.task/kind])
                                            (update :seon.task/ns symbol))]))))
-  (transact! (begin-run-tx (db) task run (:key @state) (:id @state))))
+  (transact! (begin-run-tx (db) task (:key @state) (:id @state))))
 
 (defn init!
   "Make this process the agent: its socket (fd), its namespace, its state map, its
   interrupt handlers. serve is the loop a clone runs (seon.repl/serve!)."
   {:malli/schema [:=> [:cat :seon.lib/fd :map :seon.host/db :seon.host/fn] :any]}
-  [fd {id :agent branch :branch task :task run :run cfg :cfg resumed :resumed commit :commit t :t graph :graph index :index evals-max :evals-max schema-registry :schema-registry session :key
+  [fd {id :agent branch :branch task :task cfg :cfg resumed :resumed commit :commit t :t graph :graph index :index evals-max :evals-max schema-registry :schema-registry session :key
        marks0 :marks} db0 serve]
   ;; the spawn's phases on the one clock, each with what this thread allocated in it: the fork
   ;; server's marks (marks0), then this process's, sent with its hello (spawn-phases)
@@ -1512,7 +1545,7 @@
      ;; its key as root named it in its boot (seon.root's :spawn), never pulled from main here: that
      ;; pull cost what the inherited node cache lacked, 24-183 KB a spawn
      (reset! link {:fd fd :conn c})
-     (reset! state (cond-> {:id id :key session :branch branch :task task :run run :db @store-conn
+     (reset! state (cond-> {:id id :key session :branch branch :task task :db @store-conn
                    :base base :main db0 :store-conn store-conn :cfg cfg :results {} :n 0
                    :load-errors (vec load-errors) :misaligned misaligned :unwatched (sock/signal-at-input! fd)
                    :waits {} :inbox [] :tx-seq 0 :mode :agent
@@ -1537,5 +1570,6 @@
      ;; agent with no task (a fresh one on a kept branch) takes none
      (when-let [tx (when (and resumed task) (not-empty (task/onto-tx db0 @store-conn task)))]
        (transact! tx))
-     ;; forked for a run: it is this session's on the branch from the start
-     (when (and task run) (begin-run! task run))))))
+     ;; forked for a task: it is this session's on the branch from the start. A label that names no task of main's (a check's
+     ;; agent works "lc 0") begins none
+     (when (and task (d/entity (heard-main) [:seon.task/id task])) (begin-run! task))))))

@@ -79,7 +79,9 @@
                            [:seon.repl/differs {:optional true} [:vector :map]]]]
  ;; seon.repl/edit! of a doc's address, written: the doc and the lines around each change in its new block
  :seon.repl/doc-edited [:map [:edited [:map [:doc :string] [:lines [:vector :any]]]]]
- :seon.eval/response [:map {:seon.render/html seon.render.ui/evaluation}
+ ;; an eval's answer while it is live: its value is whatever the form answered, a var or a fn among them (seon.repl/response).
+ ;; What is stored of it is :seon.eval/response, plain data
+ :seon.repl/answer [:map {:seon.render/html seon.render.ui/evaluation}
                       ;; none on a call of root's from the page, recorded with what root answered (seon.render.proc/web-answered)
                       [:handle {:optional true} :qualified-symbol] [:value {:optional true} :any]
                       ;; the namespace the REPL is in after it, as every nREPL response carries: where the next eval runs
@@ -97,6 +99,8 @@
                       [:warnings {:optional true} [:vector [:map [:seon.repl/finding :keyword]]]] [:out {:optional true} [:map [:seon.print/code :string]]]
                       [:err {:optional true} [:map [:seon.print/code :string]]] [:ex {:optional true} :seon.error/base]
                       [:ms {:optional true} number?] [:ticks {:optional true} :int] [:bytes {:optional true} :int]
+                      ;; the branch refused this eval's record (seon.repl/record!, :seon.agent/unrecorded), or the commit that followed its writes (seon.agent/commit!, :seon.agent/commit-refused: the writes were dropped)
+                      [:unrecorded {:optional true} :seon.error/base]
                       [:text {:optional true} :string] [:record {:optional true} :string]
                       [:recorded {:optional true} [:vector :symbol]] [:unmapped {:optional true} [:vector :qualified-symbol]] [:fns {:optional true} [:vector :map]]
                       ;; seon.repl/edit!'s: the var it changed and the lines around the change, [line text] each

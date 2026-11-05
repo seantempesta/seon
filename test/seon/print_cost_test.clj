@@ -54,11 +54,18 @@
   work below 65 entries: the sizes start above it."
   (round (priced {:map/assoc! 60})))
 
+(defn- as-defined!
+  "The printer's namespaces loaded again from their source, unarmed: this runner's own, since in a built binary an agent's
+  test child runs, a reload changes nothing. Named in :seon.config.source/process-vars so these proofs run on bin/test's
+  runner, at the merge gate, and never in an agent's fork (docs/merging.md#a-test-child-is-a-fork-of-a-live-agent)."
+  []
+  (require 'seon.print.emit 'seon.print.select 'seon.print :reload))
+
 (deftest printing-a-map-is-one-pass-over-its-entries
   ;; the printer's own work: its namespaces as defined, whatever an earlier test armed (and
   ;; armed again after, as that test left them)
   (let [armed? (contract/armed? #'seon.print/print-value)]
-    (require 'seon.print.emit 'seon.print.select 'seon.print :reload)
+    (as-defined!)
     (try
       (cost/proof
         {:of 'seon.print/print-value :input 'seon.print-cost-test/entries
@@ -101,7 +108,7 @@
          ;; #:ns{ lift, made once per map over its keys with no call per key)
          :fixed (dissoc (armed fixed 86 170) :ns)
          :sizes [100 300 1000 10000]})
-      (finally (when-not armed? (require 'seon.print.emit 'seon.print.select 'seon.print :reload))))))
+      (finally (when-not armed? (as-defined!))))))
 
 (def ^:private shown-budget
   "The budget the cut inputs print under, stated here so a proof's input does not move with the
@@ -122,7 +129,7 @@
   ;; the literal, and read by the sizing passes (fill-end and escaped-width, about three).
   (let [armed? (contract/armed? #'seon.print/print-value)
         shown (select/estimate-chars shown-budget)]
-    (require 'seon.print.emit 'seon.print.select 'seon.print :reload)
+    (as-defined!)
     (try
       (cost/proof
         {:of 'seon.print/print-value :input 'seon.print-cost-test/text
@@ -159,7 +166,7 @@
   ;; for 493 cuts and no row shown. The fixed part is the selection trying each level whole
   ;; (the root map, its :rows entry, the vector, each row: about four walks of what shows).
   (let [armed? (contract/armed? #'seon.print/print-value)]
-    (require 'seon.print.emit 'seon.print.select 'seon.print :reload)
+    (as-defined!)
     (try
       (cost/proof
         {:of 'seon.print/print-value :input 'seon.print-cost-test/rows
@@ -190,7 +197,7 @@
   ;; code-width) and copied once as written (emit/code-text)
   (let [armed? (contract/armed? #'seon.print/print-value)
         shown (select/estimate-chars shown-budget)]
-    (require 'seon.print.emit 'seon.print.select 'seon.print :reload)
+    (as-defined!)
     (try
       (cost/proof
         {:of 'seon.print/print-value :input 'seon.print-cost-test/code
