@@ -677,13 +677,13 @@
         part #(let [page (try (enter-agent! {:db % :key k :branch :b}) (seon.repl/render-ctx-hiccup) (finally (end-agent!)))]
                 (some (fn [f] (let [t (seon.render/part-text f)] (when (str/includes? t "(defn f0 [x] x)") t)))
                       (filter #(and (vector? %) (= 'seon.render.ui/cited (first %))) (tree-seq coll? seq page))))]
-    (is (str/includes? (str (part db)) "Tested by: app.x-test/t0, app.x-test/w0, app.x-test/w1 (+1 more)") (str "a few tests among its callers, and how many more: " (part db)))
+    (is (str/includes? (str (part db)) "Tested by: app.x-test/t0, app.x-test/w0, app.x-test/w1, app.x-test/w2") (str "every test among its pulled callers: " (part db)))
     (let [db (d/db-with db (vec (mapcat (fn [i] [{:db/id (str "c" i) :form/id (str "app.y/c" i "-1") :form/src (str "(defn c" i " [] (f0 1))") :form/refs #{'app.x/f0} :form/defines [(str "cv" i)]}
                                                  {:db/id (str "cv" i) :var/name (symbol "app.y" (str "c" i)) :var/kind :fn :var/form (str "c" i)}])
                                         (range (inc n)))))
           p (part db)]
-      (is (= 3 (count (re-seq #"app\.y/c\d+" (re-find #"Called by: [^\n\]]*" p)))) "the other callers: a few names, however many the window holds")
-      (is (re-find #"\(\+\d+ more\)" p) "and how many more")
+      (is (= n (count (re-seq #"app\.y/c\d+" (re-find #"Called by: [^\n\]]*" p)))) "the other callers: every one the pull's window holds")
+      (is (not (re-find #"\(\+\d+ more\)" p)) "no list is cut by the render")
       (is (not (str/includes? p "Tested by")) "the older tests past the window")
       (is (not (str/includes? p "tests-reaching")) "the prompt names how to list every test reaching it: not on every cite"))))
 

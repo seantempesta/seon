@@ -2194,28 +2194,13 @@
     (is (str/includes? (drawn "docs/x.md#the-x") "(my.agent/help \"docs/x.md#the-x\")") "and how to read the rest")
     (let [sec (r/part-text ['seon.render.ui/cited {} (ui/cite-hiccup (ts/test-db) {:seon.cite/address "docs/testing.md#testing" :seon.cite/depth :doc
                                                                           :section {:seon.doc/address "docs/testing.md#testing" :seon.doc/heading "Testing" :seon.doc/lead "How a test is written."
-                                                                                    :below {1 {:seon.doc/address "docs/testing.md#testing-in-the-world" :seon.doc/heading "Testing in the world"}}}} nil)])]
+                                                                                    :below {1 {:seon.doc/address "docs/testing.md#testing-in-the-world" :seon.doc/heading "Testing in the world"}}}})])]
       (is (str/includes? sec "Testing in the world (docs/testing.md#testing-in-the-world)") "a page cited whole: its top section, the headings below it joined"))
     (is (str/includes? (drawn "demo/g") "(defn g \"Gets it.\" [x] x)") "a function at doc depth: its whole source, in a fence")
     (is (str/includes? (drawn "demo/g") "Tested by: demo-test/g-test") "its test, among its pulled callers")
     (is (str/includes? (drawn "demo/g") "Called by: demo/h") "and its other caller")
     (is (str/includes? (drawn "demo/g") "A real call: ") "and one real call, taken from them")
     (doseq [[k t] drawn] (is (not (re-find #":depth|:symbol|:change|:read " t)) (str k " carries none of how it was fetched")))))
-
-(deftest a-citation-says-why-from-a-quote-of-the-text-that-names-it
-  (let [plan "What exists: the store keeps history (`:seon.config.store/keep-history?`, docs/storage.md#history) and `seon.program/live-forms` reads the live ones."
-        instructions "How a task is worked, step by step."]
-    (doseq [t [":seon.config.store/keep-history?" "seon.program/live-forms" "docs/storage.md#history" "docs/storage.md"]]
-      (let [[kind q] (ui/cite-via t [[:plan plan] [:instructions instructions]])]
-        (is (= :plan kind))
-        (is (str/includes? plan q) (str "the quote is a substring of the plan: " q))
-        (is (str/includes? q (first (str/split t #"#"))) "and holds the mention")))
-    (is (nil? (ui/cite-via "my.agent/callers" [[:plan plan] [:instructions instructions]])) "named by neither: no reason is invented")
-    (is (= :instructions (first (ui/cite-via "step by step" [[:plan plan] [:instructions instructions]]))))
-    (testing "the page shows it, the model's text does not"
-      (let [via [:plan "the plan says"]]
-        (is (str/includes? (h/html (#'ui/via-hiccup via)) "the plan says") "the page")
-        (is (str/includes? (pr-str (#'ui/via-hiccup via)) "Your plan says") "and the model reads it too: why it is here")))))
 
 (deftest the-three-agree-on-the-agents-own-end
   (let [[db aid] (cited-world)

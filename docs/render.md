@@ -93,10 +93,6 @@ Wherever work is shown it is one line from one function, ```seon.print/cost-text
 
 What the walk does not know, so `render-changes` cannot say: a data part's model render redefined (its revision is its data's); config read inside a render (a changed `:seon.config.render/value-budget` moves no revision); the printer's own code; a process restart (a new walk holds no revisions, so the first ask is every part, which is also what a new process owes). A hiccup part's render redefined is known (one render serves the page and the model).
 
-### A citation says why it is there
-
-Each cite carries its reason, computed as a render input (```seon.render.ui/cite-via```): `[:plan quote]` or `[:instructions quote]`, a slice of the plan's or instructions' text around the first mention of the cited name or address (about 60 characters each side); none when no text names it (the agent's own cites). It is for the page alone (`:data-for "page"`): the person sees why a cite is here, the model reads what it is. Nothing refuses by it.
-
 ### A search is a part
 
 A search is data a context holds, a `:seon.search/search-fact` (its query, and `:seon.search/k` when it asks other than `:seon.config.render/search`) of a task or an agent, joined by their patterns beside their cites, so `@ctx` holds it and an agent changes or adds one with `swap!` as any member ([ctx](ctx.md)). Its component, ```seon.render.ui/searched```, reads the db and answers one compact hiccup, which the page shows and the model is sent as it is (owner, 2026-11-01: one render that the person and the model both see, not a data render beside the page's): its query searched by `seon.context/search` (words, meaning once the vector pipeline has embedded the query, the names it holds), a line a hit (a function's name and its doc's first sentence, a section's address and heading, a schema key) and, when hits were left out, how many and the call that answers them. A request's own search names it in its heading rather than repeating the plan the task part shows. A changed query redraws that part alone (`seon.ctx-test/a-search-is-a-member-a-swap-adds-and-changes`). What it was measured to find: [vector](vector.md#what-the-work-is-likely-to-need-as-an-eval).
@@ -285,7 +281,7 @@ Uses of take, subs and the like in display code that choose what to find or read
 
 - `my.schema/unknown-key`: a registered key's text without its colon, to name the nearest keys of a key no schema registers by Jolt's ranking: a lookup, not a cut of output.
 - `seon.render.ui/kname`: a keyword's text without its colon.
-- `seon.render.ui/cite-via`, `seon.context/form-at`: a quote is a slice (`subs`) of the plan's or instructions' own text around a mention, and a form (a real call, a namespace's `:require`) a slice of a test's, caller's or namespace's own source from its opening parenthesis to its closing one: both are text the db holds, found by position; a find, not a cut of output.
+- `seon.context/form-at`: a form (a real call, a namespace's `:require`) is a slice (`subs`) of a test's, caller's or namespace's own source from its opening delimiter to its closing one: text the db holds, found by position; a find, not a cut of output.
 - `seon.render.ui/markdown`, `seon.render.ui/task-title`: Markdown text split into its blocks by the offsets its parse (`seon.ref/scan`) gives (a fenced block's content and a list's items too), each kept as written; a name's first letter made capital: text rearranged, nothing left out.
 - `seon.context/relevance`: the first `cap` of a search's scan of each kind's nearest (`take`), the pool it scores: a score's input, never shown.
 - `seon.context/item-text`: a text for relevance's lexical feature (`seon.doc/terms`) (a schema's form printed to find its words, a token's characters `subs` out of its text): an input to a score, never shown.

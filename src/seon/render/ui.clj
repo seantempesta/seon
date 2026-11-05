@@ -826,173 +826,152 @@
   [src] [:pre [:code src]])
 
 (defn- names-line
-  "A line naming at most n of the symbols in xs, then how many more: `Called by: a, b, c (+2 more)`; nothing for none."
-  {:malli/schema [:=> [:cat :string [:sequential :any] pos-int?] :any]}
-  [label xs n]
-  (when (seq xs)
-    [:p (str label ": " (str/join ", " (map str (subvec (vec xs) 0 (min n (count xs))))) (when (> (count xs) n) (str " (+" (- (count xs) n) " more)")))]))
+  "A line naming every symbol of xs, `Called by: a, b, c`; nothing for none. Which names there are is the pull's (ctx's callers window)."
+  {:malli/schema [:=> [:cat :string [:sequential :any]] :any]}
+  [label xs]
+  (when (seq xs) [:p (str label ": " (str/join ", " (map str xs)))]))
 
 (defn call-in
   "One real call of sym in source src: the first form opening `(sym ` or `(name `, as written (`seon.context/form-at`), or nil
-  when src has none, the call spans more than 160 characters, or it is only the function's name and bare symbols (that is its
-  arglist, which the source above says). What a test or a caller that reaches a function shows of how it is called."
+  when src has none or it is only the function's name and bare symbols (that is its arglist, which the source above says). What a
+  test or a caller that reaches a function shows of how it is called."
   {:malli/schema [:=> [:cat [:maybe :string] :qualified-symbol] [:maybe :string]]}
   [src sym]
   (when src
     (let [starts (keep #(str/index-of src %) [(str "(" sym " ") (str "(" sym ")") (str "(" (name sym) " ") (str "(" (name sym) ")")])
-          call (when (seq starts) (context/form-at src (reduce min starts) 160))]
+          call (when (seq starts) (context/form-at src (reduce min starts)))]
       (when (and call (not (re-matches #"\([^\s()\"]+(\s+[A-Za-z][\w\-?!*.<>=/]*)*\)" call)) (not (re-find #"[a-z]{3,} [a-z]{3,} [a-z]{3,}" (str/replace call #"\"[^\"]*\"" "")))) call))))
-
-(defn cite-via
-  "Why a cite is on the page, each with a quote copied from stored text: [:plan quote] or [:instructions quote]
-  where target (the cited name or address as text, or its page when only the section's page is written) appears in that text,
-  the quote that text with about 60 characters each side of the mention; nil when no text names it (the agent's own cites,
-  config's). Simple data for the page; nothing refuses by it. sources, [[kind text]] in order of preference. See
-  docs/render.md#a-citation-says-why-it-is-there."
-  {:malli/schema [:=> [:cat :string [:sequential [:tuple :keyword [:maybe :string]]]] [:maybe [:tuple :keyword :string]]]}
-  [target sources]
-  (some (fn [[kind text]]
-          (when text
-            (let [t (some #(when (str/includes? text %) %) [target (first (str/split target #"#"))])
-                  i (when (and t (seq t)) (str/index-of text t))]
-              (when i [kind (let [from (max 0 (- i 60)) to (min (count text) (+ i (count t) 60))
-                                 q (subs text from to)
-                                 ;; whole words: a cut mid-word reads as a mistake
-                                 q (if (pos? from) (str/replace-first q #"^\S*\s" "") q)
-                                 q (if (< to (count text)) (str/replace-first q #"\s\S*$" "") q)]
-                             q)]))))
-        sources))
-
-(defn- via-hiccup
-  "Why a cite is here, in the words of the text that names it: `Your plan says: \"...\"`. Nothing when no text names it."
-  {:malli/schema [:=> [:cat [:maybe [:tuple :keyword :string]]] :any]}
-  [via]
-  (when via (let [[kind q] via] [:p (str "Your " (name kind) " says: ") [:q q]])))
 
 (defn- section-hiccup
   "A wiki section as pulled (its :below joined) at depth: what it is in a sentence, its heading and address, its text at that
-  depth (its lead's first sentence at :summary, its lead and the headings below it at :doc, its text whole at :code), and how to
-  read the rest."
+  depth (its stored lead at :summary, its lead and the headings below it at :doc, its text whole at :code), and how to read the rest."
   {:malli/schema [:=> [:cat :map :seon.ref/depth] :any]}
   [{:seon.doc/keys [address heading lead text] below :below} depth]
   [:section
    [:h3 (str heading " (" address ")")]
    [:p "A section of the docs your plan names."]
    (case depth
-     :summary (when lead [:p (ref/lead-sentence lead)])
+     :summary (when lead [:p lead])
      :doc (list (when lead (markdown lead))
                 (when (seq below) (into [:ul] (for [b (sort-by :seon.doc/address (vals below))] [:li (str (:seon.doc/heading b) " (" (:seon.doc/address b) ")")]))))
      (when text (markdown text)))
    (when-not (= :code depth) [:p "Read the rest: " [:code (help-form address)]])])
 
 (defn- var-hiccup
-  "A cited function: its heading, at :summary its arglists and the first sentence of its doc, at :doc or :code its source whole
-  (its docstring and contract are inside it); then the tests that reach it and the functions that call it, a few names each,
-  and one real call taken from a test, else a caller, as written. A library var (v nil) from the process's own metadata."
-  {:malli/schema [:=> [:cat :qualified-symbol [:maybe :map] :seon.ref/depth] :any]}
-  [sym v depth]
+  "A cited function, drawn for the question the agent has of it. One it will change (the plan's task is in its namespace, or its
+  proofs reach it): its source whole, which holds its doc and contract, and the tests that will judge the change. One it only
+  calls or copies: its signature, its doc and one real call taken from a test or a caller. A library var (v nil) from the
+  process's own metadata. Nothing of who calls it."
+  {:malli/schema [:=> [:cat :qualified-symbol [:maybe :map] :boolean] :any]}
+  [sym v changing?]
   (let [src (get-in v [:form :form/src])
         m (when-not v (some-> (find-ns (symbol (namespace sym))) ns-interns (get (symbol (name sym))) meta))
         forms (vals (:callers v))
         defs-of (fn [f] (for [d (or (vals (:defines f)) (:form/defines f)) :when (and (:var/name d) (not= sym (:var/name d)))] d))
         test? (fn [f] (some #(= :test (:var/kind %)) (defs-of f)))
         tests (sort-by str (distinct (for [f forms :when (test? f) d (defs-of f) :when (= :test (:var/kind d))] (:var/name d))))
-        others (sort-by str (distinct (for [f forms :when (not (test? f)) d (defs-of f)] (:var/name d))))
         call (some #(call-in (:form/src %) sym) (concat (filter test? forms) (remove test? forms)))
         doc (or (:var/doc v) (:doc m))]
     [:section
      [:h3 (str sym)]
-     [:p (if (= :test (:var/kind v)) "A test your plan names." "A function your plan names.")]
-     (if (and (= :summary depth) (or doc m))
-       (list (when src [:p (str (reader/arglists src (symbol (namespace sym))))])
-             (when m [:p (str (:arglists m))])
-             (when doc [:p (ref/lead-sentence doc)]))
-       (if src (source-block src) (list (when m [:p (str (:arglists m))]) (when doc [:p doc]))))
-     (names-line "Tested by" tests 3)
-     (names-line "Called by" others 3)
-     (when call [:p "A real call: " [:code call]])]))
+     (if changing?
+       (list [:p (if (= :test (:var/kind v)) "A test your plan names." "A function your plan names, in the code you will change. Here is its source, and the tests that will judge your change.")]
+             (if src (source-block src) (list (when m [:p (str (:arglists m))]) (when doc [:p doc])))
+             (names-line "Tests that reach it" tests))
+       (list [:p (if (= :test (:var/kind v)) "A test your plan names." "A function your plan names. You call it; here is how.")]
+             (when src [:p [:code (str (reader/arglists src (symbol (namespace sym))))]])
+             (when m [:p [:code (str (:arglists m))]])
+             (when doc [:p doc])
+             (when call [:p "A real call: " [:code call]])
+             (when (and (:var/kind v) (= :test (:var/kind v)) src) (source-block src))))]))
 
 (defn- key-hiccup
-  "A cited attribute or setting by its schema entry. A setting: what it is for (its :description, a sentence) and its value now.
-  An attribute: its form and :description; what kind of entity holds it and that entity's other attributes; and a real value,
-  taken from a var the task names where it holds one, else the first the db has: for a ref, each attribute of the entity it
-  refers to, its text cut. A few index reads."
-  {:malli/schema [:=> [:cat :seon.host/db :qualified-keyword :map [:sequential :qualified-symbol]] :any]}
-  [db k sch named]
+  "A cited attribute or setting by its schema entry. A setting: what it is for (its :description) and its value now. An
+  attribute: what it is (its :description, else its type) and a real value taken from this task's own data where it holds one
+  (lookups: lookup refs of the task and the functions it names), else the first the db has; for a ref, each attribute of the entity
+  it refers to, since that is what the agent reads next. Nothing of which entities hold it."
+  {:malli/schema [:=> [:cat :seon.host/db :qualified-keyword :map [:sequential :any]] :any]}
+  [db k sch lookups]
   (let [desc (:description (contract/properties k))
         setting? (str/starts-with? (str (namespace k)) "seon.config")]
     (if setting?
       [:section [:h3 (str k)] [:p (str "A setting your plan names." (when desc (str " " desc)))] [:p "Its value now: " [:code (print/text (config/value k))]]]
-      (let [holder (get render/entity-schemas k)
-            others (when holder (vec (remove #{k} (render/map-keys (get contract/forms holder)))))
-            schema (get (d/schema db) k)
+      (let [schema (get (d/schema db) k)
             ref? (= :db.type/ref (:db/valueType schema))
+            typ (or (last (re-seq #":[^\s\]\}\)]+" (str/replace (str (:schema/form sch)) #"\{[^}]*\}" ""))) (:schema/form sch))
             datom (when schema
-                    (or (some #(first (d/datoms db :eavt (:db/id (d/entity db [:var/name %])) k)) (filter #(d/entity db [:var/name %]) named))
+                    (or (some #(when-let [e (d/entity db %)] (first (d/datoms db :eavt (:db/id e) k))) lookups)
                         (first (d/datoms db :aevt k))))
             target (when (and datom ref?) (d/pull db '[*] (:v datom)))]
         [:section
          [:h3 (str k)]
-         [:p (str "An attribute your plan names." (when desc (str " " desc)))]
-         [:p (str "It holds " (if (or holder schema) (str "a " (or (last (re-seq #":[^\s\]\}\)]+" (str/replace (str (:schema/form sch)) #"\{[^}]*\}" ""))) (:schema/form sch))) (:schema/form sch)) (when holder (str ", on " holder " entities")) ".")
-          (when (seq others) (str " Those entities also hold " (str/join ", " (map str (subvec others 0 (min 8 (count others))))) "."))]
-         (when (and datom (not ref?)) [:p "A real value: " [:code (print/line (:v datom) 80)]])
+         [:p (str "An attribute your plan names." (if desc (str " " desc) (str " It holds " typ ".")))]
+         (when (and datom (not ref?)) [:p "A real value: " [:code (print/text (:v datom))]])
          (when target
-           (list [:p "It refers to an entity, which holds:"]
-                 (into [:ul] (for [[tk tv] (remove (comp #{:db/id} key) target)] [:li [:code (str tk " " (print/line tv 60))]]))))]))))
+           (list [:p "Each entity points to another with it, which holds:"]
+                 (into [:ul] (for [[tk tv] (remove (comp #{:db/id} key) target)] [:li [:code (str tk " " (print/text tv))]]))))]))))
 
 (defn cite-hiccup
   "A cite as pulled (and filled) with its joins, as one hiccup by what it cites: a wiki section (`section-hiccup`), a function
-  (`var-hiccup`), a schema key or setting (`key-hiccup`), a namespace (its doc and how to read it), a task (its plan), or
-  what resolves to nothing, said so. via is its reason (`cite-via`). The page and the model read it alike; `my.agent/help`
-  answers it on demand. See docs/references.md#an-entity-cites."
-  {:malli/schema [:function [:=> [:cat :seon.host/db :map [:maybe [:tuple :keyword :string]]] :any] [:=> [:cat :seon.host/db :map [:maybe [:tuple :keyword :string]] [:sequential :qualified-symbol]] :any]]}
-  ([db c via] (cite-hiccup db c via []))
-  ([db {:seon.cite/keys [address name depth] sec :section v :var tk :task sch :schema n :ns} via named]
-  (let [x (or address name)
-        body (cond
-               (:seon.doc/address sec) (section-hiccup sec depth)
-               (:seon.task/id tk) [:section [:h3 (str (:seon.task/id tk))] [:p "Another task your plan names."]
-                                   (when-let [pl (:seon.task/plan tk)] (if (= :summary depth) [:p (ref/lead-sentence pl)] (markdown pl)))]
-               (qualified-symbol? name) (if (and (nil? (:var/name v)) (nil? (some-> (find-ns (symbol (namespace name))) ns-interns (get (symbol (clojure.core/name name))))))
-                                          [:section [:h3 (str name)] [:p (:unresolved ref/problem-messages)]]
-                                          (var-hiccup name (when (:var/name v) v) depth))
-               (:schema/key sch) (key-hiccup db name sch named)
-               (:ns/name n) [:section [:h3 (str name)] [:p (str "A namespace your plan names." (when (:ns/doc n) (str " " (ref/lead-sentence (:ns/doc n)))))] [:p "Read it: " [:code (help-form name)]]]
-               :else [:section [:h3 (str x)] [:p (str "Your plan names this. " (:unresolved ref/problem-messages))]])]
-    (if via (conj body (via-hiccup via)) body))))
+  (`var-hiccup`), a schema key or setting (`key-hiccup`), a namespace (its doc and how to read it), a task (its plan), or what
+  resolves to nothing, said so. The page and the model read it alike; `my.agent/help` answers it on demand. See
+  docs/references.md#an-entity-cites."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :map] :any] [:=> [:cat :seon.host/db :map :map] :any]]}
+  ([db c] (cite-hiccup db c {}))
+  ([db {:seon.cite/keys [address name depth] sec :section v :var tk :task sch :schema n :ns} {:keys [lookups changing?]}]
+   (let [x (or address name)]
+     (cond
+       (:seon.doc/address sec) (section-hiccup sec depth)
+       (:seon.task/id tk) [:section [:h3 (str (:seon.task/id tk))] [:p "Another task your plan names."]
+                           (when-let [pl (:seon.task/plan tk)] (markdown pl))]
+       (qualified-symbol? name) (if (and (nil? (:var/name v)) (nil? (some-> (find-ns (symbol (namespace name))) ns-interns (get (symbol (clojure.core/name name))))))
+                                  [:section [:h3 (str name)] [:p (:unresolved ref/problem-messages)]]
+                                  (var-hiccup name (when (:var/name v) v) (boolean changing?)))
+       (:schema/key sch) (key-hiccup db name sch (or lookups []))
+       (:ns/name n) [:section [:h3 (str name)] [:p (str "A namespace your plan names." (when (:ns/doc n) (str " " (:ns/doc n))))] [:p "Read it: " [:code (help-form name)]]]
+       :else [:section [:h3 (str x)] [:p (str "Your plan names this. " (:unresolved ref/problem-messages))]]))))
 
 (defn cited
-  "One thing the agent's task, its needs or the agent cites (a component over ctx and the db), named by its target k: the cite at
-  ctx path :at as ctx holds it, each entity it joined that ctx holds at another path filled from there (:held, e to that path,
-  which the layout found), drawn by `cite-hiccup` with :via, its reason, the layout computed. See docs/references.md#an-entity-cites."
+  "One thing the agent's task or its needs cite (a component over ctx and the db), named by its target k: the cite at ctx path :at
+  as ctx holds it, each entity it joined that ctx holds at another path filled from there (:held, e to that path, which the layout
+  found), drawn by `cite-hiccup`. A part of its own, so a cite that changes is sent alone. See docs/references.md#an-entity-cites."
   {:seon.render/style panel-style
-   :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db] [:at [:vector :any]] [:held [:map-of :int [:vector :any]]] [:names {:optional true} [:sequential :qualified-symbol]]]] :int :string] :any]}
-  [{c :seon.ctx/ctx db :seon.db/db at :at held :held via :via names :names} _aid _k]
+   :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db] [:at [:vector :any]] [:held [:map-of :int [:vector :any]]] [:lookups {:optional true} [:sequential :any]] [:changing? {:optional true} :boolean]]] :int :string] :any]}
+  [{c :seon.ctx/ctx db :seon.db/db at :at held :held lookups :lookups changing? :changing?} _aid _k]
   (when-let [x (get-in c at)]
-    (cite-hiccup db (fill c held (ratom/realize x)) via (or names []))))
+    (cite-hiccup db (fill c held (ratom/realize x)) {:lookups (or lookups []) :changing? (boolean changing?)})))
 
 (defn citations
-  "Everything the task and its needs cite, under one section that says what it is and why it is here (a component over ctx): each a
-  `cited` part of its own, with the reason the plan or instructions give for it (`cite-via`). Nothing when there is none. See
-  docs/references.md#an-entity-cites."
+  "The heading of what the task and its needs cite (a component over ctx): what it is and why it is here. The cites follow it, each a
+  `cited` part of its own (`cite-parts`). Nothing when there is none. See docs/references.md#an-entity-cites."
   {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int] :any]}
-  [{c :seon.ctx/ctx} aid]
-  (let [t (:task c)
-        sources [[:plan (ratom/realize (:seon.task/plan t))] [:instructions (ratom/realize (:seon.task/instructions t))]]
-        cs (page-cites c)
-        ;; the functions the task names: where an attribute's real value is taken from
-        names (vec (keep #(when (re-matches #"[^\s:/#]+/[^\s:#]+" %) (symbol %)) (map second cs)))]
-    (when (seq cs)
-      [:section
-       [:h2 "What your plan mentions"]
-       [:p "Your plan names each of these, so here's what they are. Use what helps; you don't need to read them all."]
-       (for [[p k held] cs] [#'cited {:at p :held held :via (cite-via k sources) :names names} aid k])])))
+  [{c :seon.ctx/ctx} _aid]
+  (when (seq (page-cites c))
+    [:section
+     [:h2 "What your plan mentions"]
+     [:p "Your plan names each of these, so here's what they are. Use what helps; you don't need to read them all."]]))
+
+(defn- cite-parts
+  "The `cited` components of agent aid's page, one for each thing its task and its needs cite (`page-cites`). Each is told what
+  the agent will do with it: a function in the task's own namespace or reached by its proofs is one it will change (its source and
+  tests are drawn), any other one it calls (its signature and doc); and the lookup refs an attribute's real value is taken from
+  (this task's own entity, and the functions the cites name)."
+  {:malli/schema [:=> [:cat :map [:maybe :int]] [:vector :any]]}
+  [c aid]
+  (let [cs (page-cites c)
+        task-ns (some-> (ratom/realize (get-in c [:task :seon.task/ns])) str)
+        reach (into #{} (for [[_ v] (get-in c [:task :proved]) r (ratom/realize (get-in v [:form :form/refs]))] r))
+        lookups (into [[:seon.task/id (ratom/realize (get-in c [:task :seon.task/id]))]]
+                      (keep #(when (re-matches #"[^\s:/#]+/[^\s:#]+" %) [:var/name (symbol %)])) (map second cs))]
+    (vec (for [[p k held] cs
+               :let [sym (when (re-matches #"[^\s:/#]+/[^\s:#]+" k) (symbol k))]]
+           [#'cited {:at p :held held :lookups lookups
+                     :changing? (boolean (and sym (or (contains? reach sym) (= task-ns (namespace sym)))))} aid k]))))
 
 (defn references
   "Where to look for more, beside the task (a component over ctx): the agent's own cites (what every agent cites, the config's
-  :seon.config.agent/cites, and what it adds with my.agent/cite!), each as one line: what it is, a sentence of what it answers
-  (the section's lead) and the form that reads it. Not shown whole: an agent reads one when it needs it. Nothing when it has none."
+  :seon.config.agent/cites, and what it adds with my.agent/cite!), each as one line: what it is, what it answers (the section's
+  stored lead) and the form that reads it. Not shown whole: an agent reads one when it needs it. Nothing when it has none."
   {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int] :any]}
   [{c :seon.ctx/ctx} _aid]
   (let [cites (for [k (sort-by #(get-in c [:cites % :seon.cite/order]) (keys (:cites c)))] (ratom/realize (get-in c [:cites k])))]
@@ -1002,7 +981,7 @@
        [:p "You don't need these now. Here's where to look when you do."]
        (into [:ul]
              (for [{:seon.cite/keys [address name] sec :section} cites :let [x (or address name)]]
-               [:li (or (:seon.doc/heading sec) (str x)) ": " (ref/lead-sentence (or (:seon.doc/lead sec) "")) " " [:code (help-form x)]]))])))
+               [:li (or (:seon.doc/heading sec) (str x)) ": " (:seon.doc/lead sec) " " [:code (help-form x)]]))])))
 
 (defn searched
   "One search the agent's context holds (a component over ctx and the db), drawn as one compact hiccup that the
@@ -1093,7 +1072,7 @@
         (instance? Throwable x) (str "threw " (ex-message x))
         (and (map? x) (:via x)) (str "threw " (:message (first (:via x))))
         (string? x) x
-        :else (let [t (str/replace (print/line x 160) #"#object\[java\.util\.regex\.Pattern 0x[0-9a-f]+\]" "a regex")]
+        :else (let [t (str/replace (print/text x) #"#object\[java\.util\.regex\.Pattern 0x[0-9a-f]+\]" "a regex")]
                 ;; a thrown error is the failure's got (clojure.test/is reports it): say what it threw, not its trace
                 (if-let [m (when (str/starts-with? t "#error") (second (re-find #":message \"([^\"]*)\"" t)))] (str "threw " m) t))))
 
@@ -1107,59 +1086,69 @@
     (if (str/includes? t "\n") [:pre [:code t]] [:code t])))
 
 (defn status-hiccup
-  "How the work stands (seon.context/status's data s), written to the agent: `Your proofs`, the tests that decide when it is done,
-  each with its state once; one that fails with the assertion and what it got and its source; one not yet written with where it
-  goes (its test namespace's requires, the helpers there, a test to copy); then `What to do next`: what blocks merging, each with
-  the form that does something about it, and the next form to run, as top-level forms. The merge line only when main moved or
-  conflicts. See docs/render.md#how-the-work-stands."
+  "How the work stands (seon.context/status's data s), written to the agent at the moment it reads it. Each proof answers the
+  question its state asks: not written, `write it here, like this`; red, what it asserted, what it got and what to try; every proof
+  green and something blocks merging, exactly what and the form that clears it; all green and nothing blocks, `you're done`.
+  Main's side only when something conflicts: both sides and the form that settles each. No table beside the same words: a list of
+  the proofs' states only when there are several. See docs/render.md#how-the-work-stands."
   {:malli/schema [:=> [:cat :map] :any]}
   [{:keys [proofs refused test-run unmerged without-a-contract caused attention merge reasons]}]
-  (let [done? (and (empty? reasons) (seq proofs))
-        unwritten (into #{} (comp (filter #(= :undefined (:status %))) (map :test)) proofs)
-        ;; a proof not written has its one state in the table and its place below: no second line for it
-        todo (cond-> []
-               (seq refused) (into (for [r refused :when (not (and (= :proof-unknown (:reason r)) (unwritten (:test r))))]
-                                     [(get reason-words (:reason r) (kname (:reason r))) (or (:test r) (:vars r) (:keys r) (:problems r)) (:do r)]))
-               (seq without-a-contract) (conj ["functions without a contract" without-a-contract nil])
-               (seq unmerged) (conj ["unmerged entries" unmerged nil])
-               (seq caused) (conj ["problems the work caused" caused nil])
-               (seq attention) (into (for [a attention] [a nil nil])))
-        next-form (or (some :do refused) (when (some #(not= :pass (:status %)) proofs) '(my.agent/prove)))]
+  (let [state #(:status %)
+        unwritten (filter #(= :undefined (state %)) proofs)
+        red (filter #(#{:fail :error} (state %)) proofs)
+        unknown (filter #(#{:unknown :not-run :deferred} (state %)) proofs)
+        green? (and (seq proofs) (every? #(= :pass (state %)) proofs))
+        blocks (cond-> []
+                 (seq refused) (into (for [r refused :when (not (and (= :proof-unknown (:reason r)) (some #(= (:test r) (:test %)) unwritten)))]
+                                       [(get reason-words (:reason r) (kname (:reason r))) (or (:test r) (:vars r) (:keys r) (:problems r)) (:do r)]))
+                 (seq without-a-contract) (conj ["functions without a contract" without-a-contract nil])
+                 (seq caused) (conj ["problems the work caused" caused nil])
+                 (seq attention) (into (for [a attention] [a nil nil])))
+        scaffold (some :do refused)]
     [:section
      [:h2 "Your proofs"]
      [:p "These tests decide when you're done."]
      (when test-run [:p "The tests could not run: " (str/join "; " (:failed test-run))])
-     (when (seq proofs)
-       (into [:table [:tr [:th "Proof"] [:th "State"]]]
-             (for [{:keys [test status cost]} proofs]
-               [:tr [:td [:code (str test)]] [:td {:class (if (= :pass status) "ok" "bad")} (str (get state-words status (kname status)) (when cost (str " · " (print/cost-text cost))))]])))
-     (for [{:keys [test shape says]} proofs :when (and (unwritten test) (or shape says)) :let [{:keys [ns requires helpers example]} shape]]
+     (when (next proofs)
+       (into [:ul] (for [{:keys [test status cost]} proofs] [:li [:code (str test)] ": " (get state-words status (kname status)) (when cost (str " · " (print/cost-text cost)))])))
+     ;; not written: where it goes and a test to copy
+     (for [{:keys [test shape]} unwritten :let [{:keys [ns requires helpers example]} shape]]
        [:div
-        [:p "You still need to write " [:code (str test)] "." (when ns (list " It goes in " [:code (str ns)] (if requires ", which requires:" ".")))]
+        [:p "Write " [:code (str test)] "." (when ns (list " It goes in " [:code (str ns)] (if requires ", which requires:" ".")))]
         (when requires [:pre [:code requires]])
-        (when (seq helpers) [:p "Helpers defined there: " (str/join ", " (map #(str "`" (name %) "`") helpers))])
-        (when says [:p "Your plan says it should assert: " says])
-        (when example [:p "Here's the shape, a test from that namespace:"])
-        (when example [:pre [:code example]])])
-     (for [{:keys [test failures source calls]} proofs :when (and (not (unwritten test)) (or (seq failures) source))]
+        (when (seq helpers) [:p "Helpers a test there uses: " (str/join ", " (map #(str "`" (name %) "`") helpers)) ". Every helper there: " [:code (str "(dir " ns ")")]])
+        (when example [:p "Write it like this one:"])
+        (when example [:pre [:code example]])
+        (when scaffold [:div [:p "Start with this, then replace the placeholder assertion with what your plan says should hold:"] (form-hiccup scaffold)])])
+     ;; red: which, what it asserted, what it got, what to try
+     (for [{:keys [test failures cost]} red]
        [:div
-        [:p "This one fails: " [:code (str test)]]
+        [:p [:code (str test)] " fails." (when cost (str " (" (print/cost-text cost) ")"))]
         (for [{a :assert as :asserts g :got m :message} failures]
           [:p "It asserts " [:code (str/join ", " (map #(as-text %) (or as [a])))] " and got " [:code (as-text g)] (when m (str " (" m ")")) "."])
-        (when (seq calls) [:p "It calls: " (str/join ", " (map #(str (:var %)) calls))])
-        (when source [:pre [:code (as-text source)]])])
-     [:h3 "What to do next"]
-     (if (and done? (empty? todo))
-       [:p "Nothing more: every proof passes. Reply saying what you changed and how it's proved."]
-       (list
-         (when (seq todo)
-           (into [:ul]
-                 (for [[what x do] todo]
-                   [:li what (when (some? x) (str ": " (if (coll? x) (str/join ", " (map #(as-text (if (map? %) (or (:key %) (:symbol %) %) %)) x)) x)))
-                    (when (and do (not= do next-form)) [:span " " (form-hiccup do)])])))
-         (when (or (seq (:conflicts merge)) (seq (:main-moved merge)))
-           [:p "Main has moved: " (str (count (:conflicts merge)) " conflicts") (when (seq (:main-moved merge)) (str ", " (count (:main-moved merge)) " things changed"))])
-         (when next-form [:div [:p (if (and (seq? next-form) (= 'do (first next-form))) "Start with this, then replace its placeholder assertion with the real one:" "Run:")] (form-hiccup next-form)])))]))
+        [:p "This is the result of your last run: it changes when you change what the test reaches. Evaluate the assertion's own expression at your REPL to see the difference, change the code, then " [:code "(prove)"] "."]])
+     (when (seq unknown) [:p "Not run yet: " (str/join ", " (map #(str "`" (:test %) "`") unknown)) ". " [:code "(prove)"] " runs them."])
+     ;; merge: nothing until something conflicts; then both sides and the form that settles each
+     (when (seq unmerged)
+       [:div
+        [:p "Main changed these too, so they are unmerged. Settle each: keep yours, or take main's."]
+        (for [{:keys [key ours theirs]} unmerged]
+          [:div [:p [:code (str key)] ". Yours:"] [:pre [:code (as-text ours)]] [:p "Main's:"] [:pre [:code (as-text theirs)]]
+           [:p "Keep yours: " [:code (str "(my.branch/resolve! '" key ")")] ". Take main's: " [:code (str "(my.branch/resolve! '" key " :theirs)")] "."]])])
+     (cond
+       (and green? (empty? blocks) (empty? unmerged))
+       [:p "You're done: every proof passes and nothing blocks merging. Reply saying what you changed and how it's proved."]
+       (and green? (seq blocks))
+       [:div [:p "Every proof passes, but your branch can't merge yet:"]
+        (into [:ul] (for [[what x do] blocks]
+                      [:li what (when (some? x) (str ": " (if (coll? x) (str/join ", " (map #(as-text (if (map? %) (or (:key %) (:symbol %) %) %)) x)) x)))
+                       (when do [:span ". To clear it: " (form-hiccup do)])]))]
+       (seq blocks)
+       [:div [:p "Also blocking merging:"]
+        (into [:ul] (for [[what x do] blocks]
+                      [:li what (when (some? x) (str ": " (if (coll? x) (str/join ", " (map #(as-text (if (map? %) (or (:key %) (:symbol %) %) %)) x)) x)))
+                       (when do [:span ". To clear it: " (form-hiccup do)])]))])
+     (when (seq (:conflicts merge)) [:p (str (count (:conflicts merge)) " things conflict with main; they are listed above.")])]))
 
 (defn status
   "How the agent's work on its task stands (a component over ctx and the db): seon.context/status of its branch db, drawn
@@ -1178,11 +1167,15 @@
   "The agent's turn as one line, the same words on the page and in the model's request: `Turn 12 of 40. You're in seon.program. 13.5k
   tokens sent so far.`: the model calls it has made of its cap, the namespace its REPL is in (seon.context/current-ns) and the tokens
   its requests sent in all (the provider's counts, summed). Parts that are not known are left out. See docs/render.md#the-agents-turn."
-  {:malli/schema [:=> [:cat [:maybe :int] [:maybe :int] [:maybe :symbol] [:maybe nat-int?]] :string]}
-  [n cap in-ns sent]
+  {:malli/schema [:function [:=> [:cat [:maybe :int] [:maybe :int] [:maybe :symbol] [:maybe nat-int?]] :string]
+                  [:=> [:cat [:maybe :int] [:maybe :int] [:maybe :symbol] [:maybe nat-int?] [:maybe :string]] :string]]}
+  ([n cap in-ns sent] (turn-line n cap in-ns sent nil))
+  ([n cap in-ns sent session]
   (str "Turn " n (when cap (str " of " cap)) "."
+       (when (and cap n (<= 0 (- cap n) 5)) (if (zero? (- cap n)) " This is your last turn." (str " " (- cap n) (if (= 1 (- cap n)) " turn" " turns") " left.")))
        (when in-ns (str " You're in " in-ns "."))
-       (when (pos? (or sent 0)) (str " " (str/replace (str/replace (print/tokens-text sent) "~" "") " tok" " tokens") " sent so far."))))
+       (when session (str " " session "."))
+       (when (pos? (or sent 0)) (str " " (str/replace (str/replace (print/tokens-text sent) "~" "") " tok" " tokens") " sent so far.")))))
 
 (defn turn
   "The agent's turn (a component over ctx and the db): its turn line as the part's heading, which is all the model is sent
@@ -1192,9 +1185,13 @@
   {:seon.render/place :tail :seon.render/style tile-style
    :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int] :any]}
   [{c :seon.ctx/ctx db :seon.db/db} aid]
-  (let [sent (d/q '[:find (sum ?k) . :with ?m :in $ ?a :where [?m :seon.model-call/agent ?a] [?m :seon.model-call/tokens ?k]] db aid)]
+  (let [sent (d/q '[:find (sum ?k) . :with ?m :in $ ?a :where [?m :seon.model-call/agent ?a] [?m :seon.model-call/tokens ?k]] db aid)
+        ;; the model and its thinking, as the turn's own resolver reads them (task, model, provider, config)
+        p (config/provider-at db db (ratom/realize (get-in c [:task :seon.task/id])) (ratom/realize (:seon.agent/model c)))
+        session (str (if (= :scripted (:kind p)) "A scripted model, not a real one" (or (:model p) "The provider's default model"))
+                     (case (:thinking p) :enabled ", thinking on" :disabled ", thinking off" ""))]
     [:section
-     [:h2 (turn-line (count (:calls c)) (ratom/realize (:seon.agent/max-turns c)) (context/current-ns c) sent)]
+     [:h2 (turn-line (count (:calls c)) (ratom/realize (:seon.agent/max-turns c)) (context/current-ns c) sent session)]
      (when (some-> (:calls c) vals first ratom/realize :seon.model-call/truncated)
        [:p "Your last reply was cut at the model's token limit: what followed the cut was lost. Answer with less: one change at a time."])]))
 
@@ -1524,6 +1521,7 @@
         parts (concat
                 (when (:task c)
                   (concat [[#'task {:at [:task]} aid] [#'citations {:at [:task :cites]} aid] [#'status {:at [:task :proved]} aid]]
+                          (cite-parts c aid)
                           ;; each search its task and the agent hold, a part each, drawn on the branch's db
                           (for [[p k] (concat (for [e (keys (get-in c [:task :searches]))] [[:task :searches e] (str "task-" e)])
                                               (for [e (keys (get c :searches))] [[:searches e] (str "agent-" e)]))]

@@ -303,7 +303,7 @@
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "n"
                                                :seon.task/plan "Read `demo.calc`, `:x.s/block` and `bin/env`."}]))
         t (:tree (ctx/build db (pdb/eid db :seon.task/id "demo/n") :b))
-        m (into {} (for [c (vals (:cites t))] [(or (:seon.cite/address c) (:seon.cite/name c)) (seon.render/part-text [(quote seon.render.ui/cited) {} (seon.render.ui/cite-hiccup db c nil)])]))]
+        m (into {} (for [c (vals (:cites t))] [(or (:seon.cite/address c) (:seon.cite/name c)) (seon.render/part-text [(quote seon.render.ui/cited) {} (seon.render.ui/cite-hiccup db c)])]))]
     (is (str/includes? (m 'demo.calc) "Adds.") "a namespace: the first sentence of its doc")
     (is (str/includes? (m 'demo.calc) "(my.agent/help 'demo.calc)") "and the form that reads it")
     (is (str/includes? (m :x.s/block) "[:map [:x.s/from :int]]") "a schema key: its form as written")
@@ -526,7 +526,7 @@
         r (seon.doc/resolve-ref db 'ctx-big/big :code)
         ;; the task's cite as ctx holds it: the var it names, with its form
         part {:seon.cite/name 'ctx-big/big :seon.cite/depth :code :var {:var/name 'ctx-big/big :form {:form/src src}}}
-        model (seon.render/part-text [(quote seon.render.ui/cited) {} (seon.render.ui/cite-hiccup db part nil)])]
+        model (seon.render/part-text [(quote seon.render.ui/cited) {} (seon.render.ui/cite-hiccup db part)])]
     (is (= {:symbol 'ctx-big/big :source (print/code src)} (select-keys r [:symbol :source])) "the source whole as code, never swapped for its doc by size")
     (is (str/includes? model src) "the part holds it whole, in a fence: a function cited to be changed is read whole")
     (is (str/includes? model "```clojure") "fenced")))
@@ -677,7 +677,7 @@
         shown (into {} (map (juxt :seon.ref/address identity)) (:sections block))
         ;; the page's part: the cite joins the task by its id (:seon.cite/task), drawn by its plan
         cite (some #(when (= 'demo.other/g (:seon.cite/name %)) %) (vals (:cites (:tree (ctx/build db (pdb/eid db :seon.task/id "demo/f") :b)))))
-        part (seon.render/part-text [(quote seon.render.ui/cited) {} (seon.render.ui/cite-hiccup db cite nil)])]
+        part (seon.render/part-text [(quote seon.render.ui/cited) {} (seon.render.ui/cite-hiccup db cite)])]
     (is (= "G is defined first. Then f calls it." (:seon.ref/lead (shown "demo.other/g"))) "doc depth: the task's plan")
     (is (= [] (:write-set block)) "and not a var of the write set, nor an unresolved name")
     (is (= "demo.other/g" (get-in cite [:task :seon.task/id])) "the cite joins the task by its id")
@@ -984,9 +984,7 @@
              :change (print/code "(seon.repl/edit! 'demo/f \"old text, exactly once\" \"new text\")")}] (:write-set data))
         "each cited var with its source and its callers")
     (is (= '(my.agent/prove #{demo-test/f-test}) (get (:to-prove data) 'demo-test/f-test)) "a written proof: the form that runs it")
-    (is (= "not written yet; it should assert what the plan says: demo-test/h-test asserts (f 2) is 6."
-           (get (:to-prove data) 'demo-test/h-test))
-        "an unwritten proof: what the plan says it should assert")
+    (is (= "not written yet" (get (:to-prove data) 'demo-test/h-test)) "an unwritten proof: not written yet (the plan is above it)")
     (is (= "not written yet" (get (:to-prove data) 'demo-test/q-test))
         "one the plan's sentences do not name: that it is not written, not the plan again (the page shows it)")))
 
@@ -1977,7 +1975,7 @@
   ;; (vars-history spent turns 4-8 finding it out)
   (let [db (d/db-with (db-with-program) [{:schema/key :var/form :schema/form ":seon.db/ref"}
                                          {:schema/key :var/name :schema/form ":symbol"}])
-        text (fn [k] (seon.render/part-text ['seon.render.ui/cited {} (seon.render.ui/cite-hiccup db {:seon.cite/name k :seon.cite/depth :doc :schema (d/pull db '[*] [:schema/key k])} nil)]))
+        text (fn [k] (seon.render/part-text ['seon.render.ui/cited {} (seon.render.ui/cite-hiccup db {:seon.cite/name k :seon.cite/depth :doc :schema (d/pull db '[*] [:schema/key k])})]))
         t (text :var/form)]
     (is (str/includes? t "An attribute your plan names.") t)
     (is (str/includes? t "on :seon.db/var-fact entities") "what kind of entity holds it")

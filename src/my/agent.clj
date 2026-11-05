@@ -327,16 +327,18 @@
           red (pos? (+ (:fail r 0) (:error r 0)))
           fails (apply dissoc (proofs/failures r) (proofs/died r))
           n (+ (:ran r 0) (:reused r 0))
-          first-line (fn [f] (let [t (str/trim (str (or (:actual f) (:got f))))
-                                   m (when (str/starts-with? t "#error") (second (re-find #":message \"([^\"]*)\"" t)))]
-                               (str (when (:message f) (str (:message f) ": ")) (print/line (if m (str "threw " m) (str "expected " (str/replace (str (:expected f)) #"#object\[java\.util\.regex\.Pattern 0x[0-9a-f]+\]" "a regex"))) 120))))]
+          clean (fn [x] (str/replace (str x) #"#object\[java\.util\.regex\.Pattern 0x[0-9a-f]+\]" "a regex"))
+          failure (fn [t f] (let [got (str/trim (str (or (:actual f) (:got f))))
+                                  m (when (str/starts-with? got "#error") (second (re-find #":message \"([^\"]*)\"" got)))]
+                              (str "✗ " t (when (:message f) (str ": " (:message f))) "\n    asserted " (clean (:expected f))
+                                   "\n    and got  " (if m (str "an error: " m) (clean got)))))]
       (print/code
        (str/join "\n" (remove nil?
          (concat
            [(cond red (str "red: " (count fails) " of " n " failed")
                   (pos? died) (str "died: " died " of " n " had no verdict")
                   :else (str "green: " n " of " n " passed"))]
-           (for [[t fs] (sort-by (comp str key) fails)] (str "✗ " t ": " (first-line (first fs))))
+           (for [[t fs] (sort-by (comp str key) fails)] (failure t (first fs)))
            [(when (pos? (:reused r 0)) (str "reused " (:reused r) ": their last result still counts, because nothing they reach has changed"))
             (when (seq (:deferred r)) (str "left to the judge: " (count (:deferred r)) " process tests"))
             (when (seq (:unmatched r)) (str "no test is named " (str/join ", " (:unmatched r))))])))))))
@@ -541,7 +543,7 @@
   [db n]
   (let [r (d/with db [{:db/id "of" :seon.agent/key (str "help " n)} {:seon.cite/id (str "help " n) :seon.cite/of "of" :seon.cite/name n :seon.cite/depth :doc :seon.cite/order 0}])
         db' (:db-after r)]
-    (ui/cite-hiccup db' (:tree (seon.ctx/build db' (pdb/eid db' :seon.cite/id (str "help " n)) nil)) nil)))
+    (ui/cite-hiccup db' (:tree (seon.ctx/build db' (pdb/eid db' :seon.cite/id (str "help " n)) nil)))))
 
 (defn help
   "The wiki through the one view (seon.doc/view), as this branch holds it. No argument: the help

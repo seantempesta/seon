@@ -164,20 +164,6 @@
   [db cites]
   (vec (program/program-names db (into [] (comp (keep :seon.cite/name) (filter qualified-symbol?) (remove #(ref/task? db %))) cites))))
 
-(defn plan-says
-  "The plan's sentences that name unwritten proof p, one string, or nil when none does (the plan is on the page already): what
-  the proof should assert, in the plan's own words."
-  {:malli/schema [:=> [:cat :qualified-symbol :string] [:maybe :string]]}
-  [p plan]
-  (when-let [ss (seq (filter #(str/includes? % (name p)) (str/split plan #"(?<=[.!?])\s+")))] (str/join " " ss)))
-
-(defn not-written
-  "What unwritten proof p should assert, by the plan's own words (`plan-says`), or that it is not written yet when no sentence
-  names it: my.task/data's :to-prove."
-  {:malli/schema [:=> [:cat :qualified-symbol :string] :string]}
-  [p plan]
-  (if-let [s (plan-says p plan)] (str "not written yet; it should assert what the plan says: " s) "not written yet"))
-
 ;; ---- relevance: one calibrated score for a context and an item (docs/vector.md#relevance) ----
 
 (defn- item-text
@@ -548,7 +534,7 @@
                              (for [p proofs]
                                [p (if (doc/source-of db p)
                                     (list 'my.agent/prove #{p})
-                                    (not-written p plan))]))}
+                                    "not written yet")]))}
       (seq sections) (assoc :sections sections))))
 
 (defn cited
@@ -588,43 +574,49 @@
                                (get-in v [:form :form/src]) (assoc :form {:form/src (ratom/realize (get-in v [:form :form/src]))}))]))})))
 
 (defn form-at
-  "The form of src that opens at offset i, as written, up to its closing parenthesis (strings and character literals read as
-  such), or nil when it does not close within limit characters. A slice of src: text the db holds, found by position."
-  {:malli/schema [:=> [:cat [:maybe :string] [:maybe nat-int?] pos-int?] [:maybe :string]]}
-  [src i limit]
+  "The form of src that opens at offset i, as written, up to its closing delimiter (strings and character literals read as such),
+  or nil when it never closes. A slice of src: text the db holds, found by position."
+  {:malli/schema [:=> [:cat [:maybe :string] [:maybe nat-int?]] [:maybe :string]]}
+  [src i]
   (when (and src i)
     (let [n (count src)]
       (loop [j i depth 0 in-str? false]
-        (if (or (>= j n) (> (- j i) limit))
-          nil
+        (when (< j n)
           (let [ch (.charAt ^String src (int j))]
             (cond
               in-str? (cond (= ch \\) (recur (+ j 2) depth true) (= ch \") (recur (inc j) depth false) :else (recur (inc j) depth true))
               (= ch \") (recur (inc j) depth true)
               (= ch \\) (recur (+ j 2) depth false)
-              (= ch \() (recur (inc j) (inc depth) false)
-              (= ch \)) (if (= 1 depth) (subs src i (inc j)) (recur (inc j) (dec depth) false))
+              (#{\( \[ \{} ch) (recur (inc j) (inc depth) false)
+              (#{\) \] \}} ch) (if (= 1 depth) (subs src i (inc j)) (recur (inc j) (dec depth) false))
               :else (recur (inc j) depth false))))))))
 
 (defn test-shape
-  "Where an unwritten proof p goes, as the agent needs it to write one: its test namespace's `:require` clause (the aliases it
-  can use), the helpers that namespace defines, and one test of it to copy: the shortest that uses a helper or `my.test`, else the
-  shortest. Nil when the branch has no such namespace yet (the agent makes it first). One index read, and each var of the namespace
-  read once. See docs/render.md#how-the-work-stands."
+  "Where an unwritten proof p goes, as the agent needs it to write one: its test namespace's `:require` entries that the example
+  uses (an alias it calls, `clojure.test`, the namespace under test), the helpers the example calls (the rest are `(dir ns)`), and
+  one test of it to copy: the shortest that uses a helper or `my.test`, else the shortest. Nil when the branch has no such
+  namespace yet (the agent makes it first). One index read, and each var of the namespace read once. See
+  docs/render.md#how-the-work-stands."
   {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:maybe :map]]}
   [db p]
   (when-let [n (d/entity db [:ns/name (symbol (namespace p))])]
     (let [vs (map #(d/entity db %) (d/q '[:find [?e ...] :in $ ?n :where [?e :var/ns ?n]] db (:db/id n)))
           {tests true others false} (group-by #(= :test (:var/kind %)) vs)
-          helpers (mapv #(name (:var/name %)) others)
+          names (mapv #(name (:var/name %)) others)
           srcs (keep #(get-in % [:var/form :form/src]) tests)
-          uses? (fn [s] (or (str/includes? s "my.test/") (some #(str/includes? s (str "(" % " ")) helpers)))
+          calls? (fn [s h] (re-find (re-pattern (str "\\(" (java.util.regex.Pattern/quote h) "[\\s)]")) s))
+          uses? (fn [s] (or (str/includes? s "my.test/") (some #(calls? s %) names)))
           src (first (sort-by count (or (seq (filter uses? srcs)) srcs)))
           ns-src (get-in n [:ns/form :form/src])
-          requires (when-let [i (some-> ns-src (str/index-of "(:require"))] (form-at ns-src i 1500))]
+          under (str/replace (namespace p) #"-test$" "")
+          req (when-let [i (some-> ns-src (str/index-of "(:require"))] (form-at ns-src i))
+          entries (when req (re-seq #"\[[^\[\]]*(?:\[[^\[\]]*\][^\[\]]*)*\]" req))
+          keep? (fn [e] (let [alias (second (re-find #":as\s+(\S+?)[\s\]]" e))]
+                          (or (and alias src (str/includes? src (str alias "/"))) (str/includes? e "clojure.test") (str/starts-with? e (str "[" under " ")) (str/starts-with? e (str "[" under "]")))))
+          requires (when (seq entries) (str "(:require " (str/join " " (filter keep? entries)) ")"))]
       (cond-> {:ns (symbol (namespace p))}
         requires (assoc :requires requires)
-        (seq others) (assoc :helpers (vec (sort (map :var/name others))))
+        (and src (seq others)) (assoc :helpers (vec (sort (map symbol (filter #(calls? src %) names)))))
         src (assoc :example src)))))
 
 (defn status
@@ -708,13 +700,11 @@
                                                (nil? src) :undefined (some? test-error) :not-run :else :unknown)
                                       fs (when-not test-error (:seon.test/failures v))
                                       calls (when (and src (not= :pass st)) (callees db p))
-                                      shape (when (= :undefined st) (test-shape db p))
-                                      says (when (= :undefined st) (plan-says p (or plan "")))]]
+                                      shape (when (= :undefined st) (test-shape db p))]]
                             (cond-> {:test p :status st}
                               (or (:seon.test/ticks v) (:seon.test/bytes v)) (assoc :cost (cond-> {} (:seon.test/ticks v) (assoc :ticks (:seon.test/ticks v)) (:seon.test/bytes v) (assoc :bytes (:seon.test/bytes v))))
                               (and src (not= :pass st)) (assoc :source (print/code src))
                               shape (assoc :shape shape)
-                              says (assoc :says says)
                               (seq fs) (assoc :failures (failures fs))
                               (seq calls) (assoc :calls calls))))}
       (seq blockers) (assoc :refused blockers)

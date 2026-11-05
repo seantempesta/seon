@@ -50,7 +50,7 @@
 (defn status
   "How this agent's work on its task stands now, as its page and its model read it
   (seon.context/status, drawn by seon.render.ui/status): each proof by the verdict its branch holds (a red one
-  with its failures, source and calls), what else the done rule refuses with the form that does
+  with its failures), what else the done rule refuses with the form that does
   it, the functions without a contract, the problems its work caused, what its merge carries, its
   unmerged entries, a test run that failed as a whole. A verdict is what the branch's last run
   recorded, reused greens included: (my.agent/prove) runs what changed since."
@@ -58,5 +58,8 @@
   []
   ;; from the agent's record (@seon.ctx/ctx: its run, its task's proofs), as the page's status part reads it; never
   ;; the walk from inside an eval (drawing the page within an eval spun the agent: seon.server-test's my.task/status)
-  (dissoc (context/status (agent/db) @seon.ctx/ctx {}) :reasons))
+  (let [slim (fn [x] (cond-> (dissoc x :calls :shape) (:source x) (dissoc :source)))
+        st (dissoc (context/status (agent/db) @seon.ctx/ctx {}) :reasons)]
+    ;; what an agent reads as data: its proofs and what blocks, not the sources of the helpers they call
+    (cond-> (update st :proofs #(mapv slim %)) (:refused st) (update :refused #(mapv slim %)))))
 
