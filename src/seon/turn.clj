@@ -257,15 +257,6 @@
         moved (into {} (remove (fn [[a v]] (= v (get e a)))) now)]
     (if (seq moved) [(assoc moved :seon.agent/key k)] [])))
 
-(defn repeated
-  "The ids of a turn's evals when every one it ran repeated code it had run before with the same answer (each
-  response's :again, seon.repl/again), else nil: a turn that can tell the agent nothing new (told :again, an agent that sends the same evals turn after turn runs to the turn cap). See docs/agent.md#small-answers."
-  {:malli/schema [:=> [:cat [:sequential :map]] [:maybe [:vector :string]]]}
-  [calls]
-  (let [ran (remove :not-run calls)]
-    (when (and (seq ran) (every? #(get-in % [:response :again]) ran))
-      (mapv :id ran))))
-
 (defn- act!
   "One model turn: the agent's turn number moves (docs/turn.md#the-turn-is-a-number), the agent's context (its record and its parts, the status s among them) to the model, the reply's eval calls
   through the one REPL path, each answered as its own result, the turn's facts on its model call on the branch. Answers the loop state after it, or the
@@ -353,14 +344,6 @@
         ;; waits for the user (the design's tool_choice auto)
         ;; (a blank or cut reply is no message: the next turn reads the same state)
         (when (and (empty? calls) (not (str/blank? (:text c))) (not (:truncated? c))) (request-stop! :waiting (:text c)))
-        ;; a turn that only repeated: the agent is told so, as any message reaches it (its next request carries it)
-        (when-let [again (repeated calls)]
-          ;; the next turn's: the turn that reads it
-          (agent/transact! (agent/own-message-tx (str id "/repeated") :message "seon" nil
-                                                 (str "Turn " turn " only ran code you had run before, each answered as it was then ("
-                                                      (str/join ", " again) "): running it again tells you nothing new. Write what you know: "
-                                                      "the plan, a proof or a definition, or end your turn with prose.")
-                                                 (inc n))))
         ;; what it answered and how it stopped (its reply, reasoning and finish), the reply's usage, model and counts
         ;; (seon.model-call, beside the basis it read: seon.context/render makes the text from it), and where the turn's
         ;; time went as this agent saw it
