@@ -106,6 +106,24 @@
      :per-n {:calls 33 :bytes 4000000}
      :sizes [10 40 100]}))
 
+(defn boots-of
+  "The input of size n: the agents list's opts over a db holding n sessions of another boot and one of boot \"b\", and that boot."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :map :string]]}
+  [n]
+  [{:seon.db/db (d/db-with (ts/test-db) (into [{:seon.agent/key "b/a1" :seon.agent/id :a1}]
+                                              (for [i (range n)] {:seon.agent/key (str "other/a" i) :seon.agent/id (keyword (str "o" i))})))}
+   "b"])
+
+(deftest a-boots-sessions-cost-no-other-boots
+  ;; docs/render.md#a-sessions-address-and-the-agents-list: every session on main is listed, and a store's sessions only grow
+  (cost/proof
+    {:of 'seon.render.ui/boot-side :input 'seon.render-cost-test/boots-of
+     :n "sessions of another boot on main"
+     :work "one index range over this boot's keys, never a step per session of another"
+     :growth :constant
+     :per-n {:calls 3 :bytes 16000}
+     :sizes [10 40 160]}))
+
 (defn moved-of
   "The input of size n: the render state holding main with n tasks (main-info's first read), and
   main one agent status later (one of the four status and running commits an eval makes), and the

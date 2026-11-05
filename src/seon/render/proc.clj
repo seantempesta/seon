@@ -186,29 +186,59 @@
   {:malli/schema [:=> [:cat :any] :any]}
   [view] (when (vector? view) (first view)))
 
+(defn- address-of
+  "The text of a keyword address (view-of made it of the path): \"b0/a1\", the name with its namespace."
+  {:malli/schema [:=> [:cat :keyword] :string]}
+  [k] (str/replace-first (str k) ":" ""))
+
+(defn- session-of
+  "The newest agent entity on main db that address names, nil when it names none: the one resolver of an agent's page,
+  by whichever name a person holds, the stable one first. Its key (:seon.agent/key, boot/id: the session, which stays
+  when a root restarts), its id in this boot (:a3, or the session's agent a process of this boot continues), its task's id, its
+  branch (:task-x, or main/task-x), else, as an id on main (the link /agent/main/<name>), the agent of that id that has no
+  branch: its record is main's. Entity ids are issued in the order written, so the newest is the largest. See docs/render.md#a-sessions-address-and-the-agents-list."
+  {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe pos-int?]]}
+  [db address]
+  (let [newest (fn [q & args] (apply d/q q db args))
+        eid (fn [lookup] (:db/id (d/entity db lookup)))
+        id (keyword address)
+        boot (task/boot-of db)
+        branch (keyword (str/replace address #"^main/" ""))]
+    (or (eid [:seon.agent/key address])
+        (when boot
+          (or (eid [:seon.agent/key (task/agent-key boot id)])
+              (some (fn [dt] (when (= id (task/this-boots db (d/entity db (:e dt)))) (:e dt))) (d/datoms db :avet :seon.agent/id id))))
+        (when-let [t (eid [:seon.task/id address])]
+          (newest '[:find (max ?a) . :in $ ?t :where [?a :seon.agent/task ?t]] t))
+        (some #(newest '[:find (max ?e) . :in $ ?b :where [?e :seon.agent/branch ?b]] %) [id branch])
+        (when-let [[_ n] (re-matches #"main/(.+)" address)]
+          (some (fn [dt] (when (nil? (:seon.agent/branch (d/entity db (:e dt)))) (:e dt)))
+                (d/datoms db :avet :seon.agent/id (keyword n)))))))
+
 (defn- location
-  "The entity view names on main db: root's for :root, the agent of that id in root's boot (its
-  key, seon.task/agent-key, or the session's agent it continues) for an agent's id, the newest
-  agent of a branch for its branch (:main/task-x, a durable name: an agent of any boot, ended or
-  not, opens from the store; a query over the agents' branches, asked only for a branch's name,
-  until the agent is keyed by its branch, the schema design's D1; a branch no agent worked names, by its name, the branchless agent of that id: /agent/main/example-abc), else the entity id it is; nil when main names none (no boot fact
-  yet, or no agent of that id in this boot). See docs/render.md#the-page."
+  "The entity view names on main db: root's for :root, the agent a keyword address names for an agent's page (session-of), else the entity
+  id it is; nil when main names none (no boot fact yet, or no agent of that address). See docs/render.md#the-page."
   {:malli/schema [:=> [:cat :seon.host/db :any] [:maybe pos-int?]]}
   [db view]
   (cond (vector? view) (location db (second view))
         (= :root view) (:db/id (d/entity db [:seon.root/id :root]))
-        ;; a branch: the newest agent that worked it (entity ids are issued in the order written)
-        ;; else, as an id on main (the link /agent/main/<name>), the agent of that id that has no branch: its record is main's
-        (and (keyword? view) (namespace view))
-        (or (d/q '[:find (max ?e) . :in $ ?b :where [?e :seon.agent/branch ?b]] db view)
-            (some (fn [dt] (when (nil? (:seon.agent/branch (d/entity db (:e dt)))) (:e dt)))
-                  (d/datoms db :avet :seon.agent/id (keyword (name view)))))
-        ;; the process's own key in this boot, else the session's agent it continues
-        (keyword? view) (when-let [boot (task/boot-of db)]
-                          (or (:db/id (d/entity db [:seon.agent/key (task/agent-key boot view)]))
-                              (some (fn [dt] (when (= view (task/this-boots db (d/entity db (:e dt)))) (:e dt)))
-                                    (d/datoms db :avet :seon.agent/id view))))
+        (keyword? view) (session-of db (address-of view))
         :else view))
+
+(defn- focus
+  "The focus of view's page for its bar and its head (seon.render.ui/focus-of): :root, else the agent its address names on main db:
+  its address (its key: every link of its pages is /agent/<key>, which survives a root's restart), its label (its id, with the
+  boot's when it is not this boot's) and the address this view was asked by. The address itself when main names none."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] :any] :any]}
+  [db view]
+  (let [v (if (vector? view) (second view) view)
+        e (when (and db (keyword? v) (not= :root v)) (some->> (location db v) (d/entity db)))]
+    (cond (= :root v) :root
+          (:seon.agent/key e) {:address (:seon.agent/key e)
+                               :label (str (ui/kname (:seon.agent/id e))
+                                           (when-not (task/this-boots db e) (str " · boot " (ui/boot-short (:seon.agent/key e)))))
+                               :view v}
+          :else v)))
 
 (defn- debug-value
   "View [:debug id]'s page: the timeline of agent id's requests on its branch as this proc last read it
@@ -228,7 +258,7 @@
     (nil? (get-in st [:branches view :db]))
     (let [db (:main-db st) eid (when db (location db view))]
       (when (or (get-in st [:branches view :error]) (and eid (nil? (:seon.agent/branch (d/entity db eid)))))
-        (ui/debug (second view) nil nil nil)))
+        (ui/debug (focus (:main-db st) view) nil nil nil)))
     :else
     (let [bdb (get-in st [:branches view :db])
           ;; in the order written: entity ids are issued so
@@ -240,7 +270,7 @@
           raw? (contains? (get-in st [:tab view :open] #{}) "d-turn-raw")
           lb (peek bases)
           to-come? (ui/to-come? bdb lb)]
-      (ui/debug (second view)
+      (ui/debug (focus (:main-db st) view)
                 (cond-> {:turns (mapv (fn [e b] {:e e :turn (:turn b) :origin (:origin b)}) calls bases) :at at :to-come? to-come?} gone (assoc :gone gone))
                 (when (seq calls)
                   {:id "d-turn" :input [at (when (= :latest at) (:max-tx bdb)) raw?]
@@ -368,9 +398,11 @@
                                 (try (render/placed-units w) (finally (render/dispose-walk! w))))))
         ;; @ctx's part pairs (seon.render.ui/ctx-parts): what the model reads of each part of the task's list, beside
         ;; its unit as the page draws it, from one walk of the page
+        ;; the part texts the tab opened (/open: a long one is drawn closed, ui/ctx-parts)
+        opened-parts (into #{} (filter #(str/starts-with? % "d-part-")) (get-in st [:tab view :open] #{}))
         pairs (fn [w] (let [us (filterv #((set context/page-lists) (:container %)) (render/placed-units w))]
-                        {:id "d-parts" :container "#c-rows" :rev (hash (mapv (juxt :id :rev) us))
-                         :html (h/html (ui/ctx-parts (render/placed-hiccup w context/page-lists) (into {} (map (juxt :id :html)) us)))}))
+                        {:id "d-parts" :container "#c-rows" :rev (hash [(mapv (juxt :id :rev) us) opened-parts])
+                         :html (h/html (ui/ctx-parts (render/placed-hiccup w context/page-lists) (into {} (map (juxt :id :html)) us) opened-parts))}))
         ;; the debug view: @ctx, its part pairs and the agent's record as data by the one printer (its :seon.ctx/ctx render)
         ctx-units (fn [] (let [kw (walked)
                                t (if kw (:tree (:c kw)) (cold-tree))
@@ -389,7 +421,9 @@
                       berr [{:id "p-branch-error" :container "#p-task" :rev 0 :html (h/html [:section {:id "p-branch-error"} (render/html {} berr)])}]))
         ;; root's agents list, as root's walk drew it, and the agent's head from its facts on main
         sides (filterv #(= "#c-side" (:container %)) (some-> (:root-walk st) :w render/placed-units))
-        head (d/pull db [:seon.agent/id :seon.agent/status :seon.agent/branch :seon.agent/description {[:seon.process/_agent :as :processes] [:seon.process/pid :seon.process/forked-ms]}] eid)
+        head (cond-> (d/pull db [:seon.agent/id :seon.agent/status :seon.agent/branch :seon.agent/description :seon.agent/max-turns {:seon.agent/task [:seon.task/id :seon.task/outcome :seon.task/reason]} {[:seon.process/_agent :as :processes] [:seon.process/pid :seon.process/forked-ms]}] eid)
+               ;; an earlier boot's process recorded no end (its root went away): its pid names nothing now
+               (not (task/this-boots db e)) (dissoc :processes))
         head-unit {:id "p-agent-head" :container "#p-head" :rev (hash head)
                    :html (h/html [:section {:id "p-agent-head" :class "rounded-md bg-base-900 p-3 text-sm text-text-100"} (ui/agent {} head)])}]
     (ui/page-chrome {:units (vec (concat sides [head-unit] units)) :view (ui/view-param view) :tab (if chat? :chat :debug)
@@ -400,10 +434,12 @@
                                        :else "not running · shown from its branch"))
                       ;; its REPL and its messages while its process runs; its held task's release
                       :input {:schema :seon.render/agent-input
-                              :value {:id (:seon.agent/id e) :live? (live? st id)
+                              :value {:id (:seon.agent/id e) :live? (live? st id) :focus? chat?
+                              ;; what its process can answer: a form running is interrupted (busy); a capped task's agent takes no message (docs/turn.md#the-cap)
+                              :busy? (= :busy (:seon.agent/status e)) :capped? (= :cap (:seon.task/outcome (:seon.agent/task e)))
                                       :held (d/q '[:find ?id . :in $ ?a :where [?a :seon.agent/task ?t] [?t :seon.task/execution :held] [?t :seon.task/id ?id]] db eid)}}}
                      ;; its tabs name it by its id in this boot, else by its branch (an earlier boot's agent)
-                     (or id (:seon.agent/branch e) (let [v (if (vector? view) (second view) view)] (when (and (keyword? v) (namespace v)) v)) (:seon.agent/id e)))))
+                     (focus db view))))
 
 (defn- root-walk
   "St with root's walk current as of main db: root's ctx (seon.ctx/build of root's entity on main)
@@ -517,8 +553,8 @@
      (and eid (= :chat (first-of view)) (agent-of db (second view))) (agent-view st view db eid)
      (and eid (agent-of db view)) (agent-view st view db eid)
      db (contract/error :seon.render/no-location #'seon.render.proc/page-value
-                        (str "no " (let [v (if (vector? view) (second view) view)] (if (keyword? v) (str "agent " (ui/kname v) " in root's boot " (task/boot-of db)) (ui/kname v)))
-                             " on main: an agent's id names one of this boot's (ids start again each boot)")
+                        (str "no " (let [v (if (vector? view) (second view) view)] (if (keyword? v) (str "agent " (address-of v)) (ui/kname v)))
+                             " on main: an address names an agent by its key (boot/id), its id in this boot, its task or its branch; the home page lists every session")
                         {:view (ui/kname view)}))))
 
 (defn- ready?
@@ -600,7 +636,10 @@
   "A view's page that is its error e, by the error's render, in the root every page has (#app): a page sent
   whole later replaces the tab's #app, so a page without it could never become its view's page."
   {:malli/schema [:=> [:cat :map] :any]}
-  [e] [:div {:id "app" :class "mx-auto flex max-w-screen-xl flex-col gap-3 p-3 sm:p-4"} (render/html {} e)])
+  [e] [:div {:id "app" :class "mx-auto flex max-w-screen-xl flex-col gap-3 p-3 sm:p-4"}
+       (render/html {} e)
+       ;; the nearest way to look: every session, from the home page
+       (when (= :seon.render/no-location (:seon.error/type e)) [:p [:a {:href "/"} "◆ seon: every session on main"]])])
 
 (defn- pass-view
   "One view rendered: [st' patch-message-or-nil]; a view whose entity main does not hold yet renders
@@ -621,7 +660,9 @@
     ;; main not read yet: nothing held, nothing indexed; the next pass walks it
     (nil? out) [st nil]
     ;; a location naming no entity: its page is that error, by its render
-    (:seon.error/type out) [(let [hc (error-page out)] (hold st {:skeleton (h/html hc) :layout hc :units {}})) nil]
+    (:seon.error/type out) [(let [hc (error-page out)]
+                                          ;; an address naming no agent answers 404 (:status, which the page's answer carries to the edge)
+                                          (hold st (cond-> {:skeleton (h/html hc) :layout hc :units {}} (= :seon.render/no-location (:seon.error/type out)) (assoc :status 404)))) nil]
     :else
     (let [units (:seon.render/units out)
           [view patch n] (step-units held units)
@@ -730,7 +771,7 @@
       (when (not= idx (:index st)) (step/out! o :to-web {:op :index :agents idx}))
       ;; a page or keyframe is answered once its view is whole (ready?); one asked before main or its
       ;; branch was read waits for the pass that read's answer brings
-      (doseq [[k v] (:waiting st) :when (ready? st v)] (step/out! o :to-web {:op :page :k k :view v :html (view-html st v)}))
+      (doseq [[k v] (:waiting st) :when (ready? st v)] (step/out! o :to-web (cond-> {:op :page :k k :view v :html (view-html st v)} (get-in st [:views v :status]) (assoc :status (get-in st [:views v :status])))))
       (doseq [v (:kf-wanted st) :when (ready? st v)] (step/out! o :to-web {:op :keyframe :view v :html (view-html st v)}))
       (-> st
           (assoc :index idx
@@ -925,7 +966,7 @@
                           ;; a UI call root refused before it became a request: answered as root's are
                           :refused (web-answered st o (:tag m) (:r m))
                           :page (if (and (get-in st [:views (:view m)]) (contains? (:watch st) (:view m)))
-                                  (do (step/out! o :to-web {:op :page :k (:k m) :view (:view m) :html (view-html st (:view m))}) st)
+                                  (do (step/out! o :to-web (cond-> {:op :page :k (:k m) :view (:view m) :html (view-html st (:view m))} (get-in st [:views (:view m) :status]) (assoc :status (get-in st [:views (:view m) :status])))) st)
                                   (ask-state (assoc-in st [:waiting (:k m)] (:view m)) o))
                           :keyframe (if (ready? st (:view m))
                                       (do (step/out! o :to-web {:op :keyframe :view (:view m) :html (view-html st (:view m))}) st)

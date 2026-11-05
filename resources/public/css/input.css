@@ -83,6 +83,14 @@
   button { cursor: pointer; }
 }
 
+/* The agents strip scrolls sideways on a narrow page: its bar in the page's palette, not the system's white track */
+.seon-strip { scrollbar-width: thin; scrollbar-color: var(--color-base-700) transparent; }
+@supports not (scrollbar-color: auto) {
+  .seon-strip::-webkit-scrollbar { height: 6px; }
+  .seon-strip::-webkit-scrollbar-track { background: transparent; }
+  .seon-strip::-webkit-scrollbar-thumb { background: var(--color-base-700); border-radius: 3px; }
+}
+
 /* The words values' own renders use (a task, an error, a cost verdict, the config: seon.render.ui,
    seon.cost): their classes name what a part is, styled here once, so each render stays data. */
 @layer components {
