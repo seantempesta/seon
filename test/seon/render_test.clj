@@ -338,16 +338,16 @@
                              (seon.task/cites-tx (ts/test-db) "demo/f" "demo/f" (seon.ref/cited (:seon.ref/citations (seon.ref/parse nil walked-plan)))))
                        (seon.task/agent-tx "b1" :a3 {:status :idle :pid 77 :branch :task-demo-f})
                        (seon.test-store/work-tx "demo/f" :running {:boot "b1" :agent :a3 :branch :task-demo-f :model "m" :max-turns 8 :start-ms 0})
-                       (update (seon.task/message-tx "m-1" :message "owner" :task-demo-f "check g") 0 assoc :seon.message/agent {:seon.agent/key k})
+                       (update (seon.task/message-tx "m-1" :message "owner" :task-demo-f "check g") 0 assoc :seon.message/agent {:seon.agent/key k} :seon.message/turn 1)
                        ;; the agent's task, which its record pulls (seon.agent/the-agent-is-the-unit-not-the-run)
                        [{:seon.agent/key k :seon.agent/task {:seon.task/id "demo/f"}}]
                        ;; root's own evaluation, from its REPL
                        (seon.repl/record-tx {:seon.root/id :root} "root-1" "outside" {:seon.eval/code "(my.root/problems sys)" :seon.eval/response {:handle 'result/e1 :value {}}})])
         branch (reduce d/db-with main0
                        [(seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e1" "a3"
-                                             {:seon.eval/call-id "c-e1" :seon.eval/code "(f 2)" :seon.eval/intent "f doubles?" :seon.eval/response {:handle 'result/e1 :value 4 :ms 1.5 :bytes 2048 :ticks 120}})
+                                             {:seon.eval/call-id "c-e1" :seon.eval/turn 1 :seon.eval/code "(f 2)" :seon.eval/intent "f doubles?" :seon.eval/response {:handle 'result/e1 :value 4 :ms 1.5 :bytes 2048 :ticks 120}})
                         (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e2" "a3"
-                                             {:seon.eval/call-id "c-e2" :seon.eval/code "(f 3)" :seon.eval/response {:handle 'result/e2 :value 6 :ms 0.4 :bytes 512 :ticks 40}})
+                                             {:seon.eval/call-id "c-e2" :seon.eval/turn 1 :seon.eval/code "(f 3)" :seon.eval/response {:handle 'result/e2 :value 6 :ms 0.4 :bytes 512 :ticks 40}})
                         [{:seon.agent/key k :seon.agent/turn 1}
                          {:seon.model-call/id (str k "/1") :seon.model-call/agent {:seon.agent/key k} :seon.model-call/n 1 :seon.model-call/origin :model :seon.model-call/reply "it doubles"
                           :seon.model-call/forms 2 :seon.model-call/errors 0 :seon.model-call/ms 5 :seon.model-call/tokens 1200
@@ -424,6 +424,22 @@
   render proc's {:op :render} ask is answered with."
   [branch]
   (let [w (a3-walk branch)] (try {:units (r/placed-units w)} (finally (r/dispose-walk! w)))))
+
+(defn- component-html
+  "The html of the component whose element id is id in a3's page drawn from branch, however deep it sits (an eval is a
+  component of its turn's, not a unit of the list): as the page writes it, or nil when the page draws none."
+  [branch id]
+  (let [w (a3-walk branch)]
+    (try (some (fn [[k c]] (when (= id (:id c)) (h/html (r/resolved w k true)))) @(:cache w))
+         (finally (r/dispose-walk! w)))))
+
+(defn- turn-2-eval-tx
+  "Agent k's turn 2 begun with an eval of its own, e4, as the agent's REPL records it: its number moves and the eval
+  takes it (docs/turn.md#the-turn-is-a-number)."
+  [k code]
+  (into [{:seon.agent/key k :seon.agent/turn 2}]
+        (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e4" "a3"
+                             {:seon.eval/turn 2 :seon.eval/code code :seon.eval/response {:handle 'result/e4 :value 1}})))
 
 (deftest the-problems-tile-follows-main-without-reading-it-whole
   ;; task seon.problems/health-at-the-cost-of-what-changed: root's walk holds main's health; a move of
@@ -590,25 +606,25 @@
         o (volatile! {})
         st (#'p/pass (proc-state main branch) o)
         k (seon.task/agent-key "b1" :a3)
-        branch' (d/db-with branch (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e4" "a3" {:seon.eval/call-id "c-e4" :seon.eval/code "(h)" :seon.eval/response {:handle 'result/e4 :value 1}}))
+        branch' (d/db-with branch (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e4" "a3" {:seon.eval/turn 1 :seon.eval/code "(h)" :seon.eval/response {:handle 'result/e4 :value 1}}))
         answer (fn [st db] (#'p/answered (assoc-in st [:pending 9] [:branch :task-demo-f]) o [:branch :task-demo-f] {:db db}))]
     (is (not (some #{[:chat :a3]} (:last-walked (answer st branch)))) "the same branch db: nothing moved, nothing walked")
     (is (some #{[:chat :a3]} (:last-walked (answer st branch'))) "a new evaluation on it: the page walks")))
 
 (deftest a-new-evaluation-is-one-append
-  ;; an agent's commit on its branch: what moved (the datoms-diff) touches the list, and the new
-  ;; evaluation renders once, sent as one row above the others
+  ;; an agent's commit on its branch: what moved (the datoms-diff) touches the list, and the agent's new turn
+  ;; renders once, sent as one component placed after the others (docs/render.md#the-page)
   (let [[main branch _] (paged-dbs)
         o (volatile! {})
         ;; one tab, on a3's page
         st (assoc (branch-state main branch) :watch #{[:chat :a3]})
         [st1 _] (#'p/pass-view st [:chat :a3])
         k (seon.task/agent-key "b1" :a3)
-        branch' (d/db-with branch (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e4" "a3" {:seon.eval/call-id "c-e4" :seon.eval/code "(h)" :seon.eval/response {:handle 'result/e4 :value 1}}))
+        branch' (d/db-with branch (turn-2-eval-tx k "(h)"))
         st2 (#'p/answered st1 o [:branch :task-demo-f] {:db branch'})
         patch (first (filter #(and (= :patch (:op %)) (= [:chat :a3] (:view %))) (:to-web @o)))]
     (is (empty? (:frags patch)) "no held part changed")
-    (is (= 1 (count (filter #(str/includes? (second %) "result/e4") (concat (:appends patch) (:afters patch))))) "one part, the new eval")
+    (is (= 1 (count (filter #(str/includes? (second %) "result/e4") (concat (:appends patch) (:afters patch))))) "one part, the new turn with its eval")
     (is (= 1 (count (concat (:appends patch) (:afters patch) (:prepends patch)))) "and nothing else sent")))
 
 (deftest a-branchs-kept-walk-draws-what-a-cold-draw-does
@@ -620,7 +636,7 @@
         st (assoc (branch-state main branch) :watch #{[:chat :a3] :a3})
         [st1 _] (#'p/pass-view st [:chat :a3])
         k (seon.task/agent-key "b1" :a3)
-        branch' (d/db-with branch (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e4" "a3" {:seon.eval/call-id "c-e4" :seon.eval/code "(h)" :seon.eval/response {:handle 'result/e4 :value 1}}))
+        branch' (d/db-with branch (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e4" "a3" {:seon.eval/turn 1 :seon.eval/code "(h)" :seon.eval/response {:handle 'result/e4 :value 1}}))
         st2 (#'p/answered st1 o [:branch :task-demo-f] {:db branch'})
         cell (get-in st2 [:branch-reads :task-demo-f :walk])
         e (d/entity main [:seon.agent/key k])
@@ -646,6 +662,84 @@
     (testing "the branch's read let go: its walk is disposed"
       (let [[st4 _] (p/render-proc st2 :from-web {:op :views :views #{} :tabs 0})]
         (is (nil? (get-in st4 [:branch-reads :task-demo-f])))))))
+
+;; ---- a step costs what changed (task seon.render/a-step-costs-what-changed) ----
+
+(defn- step-turn-tx
+  "Turn i of a3's work after the fixture's, as production writes it (docs/turn.md#the-turn-is-a-number): its turn number moves with
+  its model call (reply and all), an eval the call ran, and every third turn a message the agent took."
+  [i]
+  (let [k (seon.task/agent-key "b1" :a3) n (+ 2 i) id (str "x" i)]
+    (concat
+     [{:seon.agent/key k :seon.agent/turn n}
+      {:seon.model-call/id (str k "/" n) :seon.model-call/agent {:seon.agent/key k} :seon.model-call/n n :seon.model-call/origin :model
+       :seon.model-call/reply (str "Checking step " i ".") :seon.model-call/ms 1}]
+     (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} id "a3"
+                          {:seon.eval/call-id (str "c-" id) :seon.eval/turn n :seon.eval/code (str "(inc " i ")")
+                           :seon.eval/response {:handle (symbol "result" id) :value {:step i}}})
+     (when (zero? (mod i 3))
+       (update (seon.task/message-tx (str "mm-" i) :message "owner" :task-demo-f (str "How is step " i "?")) 0 assoc
+               :seon.message/agent {:seon.agent/key k} :seon.message/turn n)))))
+
+(defn- step-dbs
+  "a3's branch as of each of n further turns: [before turn 0, after turn 0, ... after turn n-1]."
+  [n]
+  (let [[_ branch _] (paged-dbs)]
+    (vec (reductions (fn [db i] (d/db-with db (vec (step-turn-tx i)))) branch (range n)))))
+
+(defn- step-walk
+  "A kept walk of a3's page on db, as seon.render.proc/kept-walk holds one: {:w :a :c :at}."
+  [db]
+  (let [k (seon.task/agent-key "b1" :a3)
+        c (seon.ctx/build db (seon.db/eid db :seon.agent/key k) :task-demo-f)
+        at (volatile! db)
+        a (seon.ratom/atom (:tree c))
+        w (r/walker {:ref a :changes seon.ctx/changes} (fn [] @at) [(r/declared-var :seon.render/render-ctx) {}])]
+    (r/flush! w nil)
+    {:w w :a a :c c :at at}))
+
+(defn- step-cold
+  "What a walk drawn cold on db holds: [its units' ids and html, its ctx tree without the marks of its commit]."
+  [db]
+  (let [k (seon.task/agent-key "b1" :a3)
+        c (seon.ctx/build db (seon.db/eid db :seon.agent/key k) :task-demo-f)
+        w (r/draw (:tree c) seon.ctx/changes db (r/declared-var :seon.render/render-ctx))]
+    [(try (mapv (juxt :id :html) (r/placed-units w)) (finally (r/dispose-walk! w))) (dissoc (:tree c) :t :commit)]))
+
+(deftest a-kept-walk-steps-any-way
+  ;; docs/render.md#a-page-is-a-kept-walk: a kept walk moved to any value of its branch, forward, back and across several turns (the
+  ;; components of the turns between drawn, mounted or let go), draws what a walk drawn cold at that value draws, its units and its ctx
+  (let [vs (step-dbs 5)
+        kw0 (step-walk (nth vs 2))
+        kw (reduce (fn [kw i]
+                     (let [db (nth vs i)
+                           kw' (#'p/advance-walk! kw db :task-demo-f identity)
+                           [units tree] (step-cold db)]
+                       (is (= units (mapv (juxt :id :html) (r/placed-units (:w kw')))) (str "its units at " i))
+                       (is (= tree (dissoc (:tree (:c kw')) :t :commit)) (str "its ctx at " i))
+                       kw'))
+                   kw0 [3 4 3 1 5 0 4 4 2])]
+    (r/dispose-walk! (:w kw))))
+
+(deftest a-record-of-another-turn-reads-nothing-this-turn-read
+  ;; docs/render.md#the-page: an agent's page is a component for each turn number, each reading its records through the index by
+  ;; that number: a new eval at turn n draws turn n's component and its eval, and no other turn's, nor the list's
+  (let [vs (step-dbs 5)
+        db (nth vs 5)
+        k (seon.task/agent-key "b1" :a3)
+        kw (step-walk db)
+        ran (fn [] (into {} (for [[f l] (r/ledger (:w kw))] [(str f) (+ (:miss l 0) (:same l 0))])))
+        before (ran)
+        ;; turn 3 (the agent's turn 5 is the newest): an eval of another hand, as the owner's from the page
+        db' (d/db-with db (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "late" "user"
+                                               {:seon.eval/turn 4 :seon.eval/code "(late)" :seon.eval/response {:handle 'result/late :value 1}}))
+        _ (#'p/advance-walk! kw db' :task-demo-f identity)
+        after (ran)
+        ran-now (fn [f] (- (get after (str f) 0) (get before (str f) 0)))]
+    (is (= 1 (ran-now `ui/conversation-turn)) "the turn the eval took draws again")
+    (is (= 1 (ran-now `ui/eval-item)) "and the eval, new")
+    (is (zero? (+ (ran-now `ui/conversation-list) (ran-now `ui/chat-message) (ran-now `ui/chat-turn))) "no other turn's records, nor the list, are read again")
+    (r/dispose-walk! (:w kw))))
 
 (deftest a-walk-made-before-its-agent-takes-the-agent
   ;; the browser check of 4bc612cf89: @ctx of a live agent was empty, its walk made at its first draw, before the
@@ -673,7 +767,7 @@
         [st1 _] (#'p/pass-view st [:chat :a3])
         err (seon.contract/error :seon.writer/refused 'seon.writer/writer-proc "no branch :task-demo-f" {})
         st2 (#'p/answered st1 o [:branch :task-demo-f] err)
-        branch' (d/db-with branch (seon.repl/record-tx {:seon.agent/key (seon.task/agent-key "b1" :a3) :seon.agent/id :a3} "e4" "a3" {:seon.eval/call-id "c-e4" :seon.eval/code "(h)" :seon.eval/response {:handle 'result/e4 :value 1}}))
+        branch' (d/db-with branch (seon.repl/record-tx {:seon.agent/key (seon.task/agent-key "b1" :a3) :seon.agent/id :a3} "e4" "a3" {:seon.eval/turn 1 :seon.eval/code "(h)" :seon.eval/response {:handle 'result/e4 :value 1}}))
         st3 (#'p/answered st2 o [:branch :task-demo-f] {:db branch'})]
     (is (not (str/includes? (p/view-html st1 [:chat :a3]) "result/e4")))
     (is (str/includes? (p/view-html st3 [:chat :a3]) "result/e4") "the eval, written while its branch was unread")))
@@ -687,8 +781,7 @@
         [st1 _] (#'p/pass-view st [:chat :a3])
         html (p/view-html st1 [:chat :a3])
         at #(str/index-of html %)]
-    ;; the fixture writes the turn after its evals (seon.turn writes it as its request goes, before them)
-    (is (< (at "check g") (at "f doubles?") (at "it doubles") (at "result/e3")) "in the order written: the message, an eval's prose, the turn, the owner's eval")
+    (is (< (at "check g") (at "it doubles") (at "f doubles?") (at "result/e3")) "in the order of the turn's number: the message, the reply, its eval's prose, then the owner's eval")
     (is (< (at "id=\"c-rows\"") (at "id=\"p-input\"")) "the input under the conversation")
     (is (re-find #"<details [^>]*class=\"seon-eval\"" html) "an eval is a block that opens")
     (is (re-find #"<details [^>]*id=\"eval-e1\"" html) "the row is its handle's anchor, open or not")
@@ -775,9 +868,9 @@
             [_ p] (pass (assoc st1 :main-db (:db-after r)))]
         (is (= #{"p-agent-head" "p-input"} (:frags (patch-ids p))) "its head, and its input (it is no longer busy)")
         (is (empty? (:prepends p)))))
-    (testing "a new evaluation on its branch: one new row, prepended above the rows the page holds; the others untouched"
+    (testing "a new turn on its branch: one new component, placed after the rows the page holds; the others untouched"
       (let [k (seon.task/agent-key "b1" :a3)
-            branch' (d/db-with branch (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e4" "a3" {:seon.eval/call-id "c-e4" :seon.eval/code "(h)" :seon.eval/response {:handle 'result/e4 :value 1}}))
+            branch' (d/db-with branch (turn-2-eval-tx k "(h)"))
             [_ p] (pass (assoc-in st1 [:branches [:chat :a3] :db] branch'))]
         (is (empty? (:frags p)) "no held unit changed its input")
         (is (= 1 (count (filter #(str/includes? (second %) "result/e4") (concat (:appends p) (:afters p))))) "one part, placed after the one before it")))
@@ -971,9 +1064,9 @@
   (let [[main branch eid] (paged-dbs)
         k (:seon.agent/key (d/pull main [:seon.agent/key] eid))
         branch (d/db-with branch (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e9" "a3"
-                                                      {:seon.eval/call-id "c-e9" :seon.eval/code "(+ 2 2)" :seon.eval/response {:handle 'result/e9 :ms 0.2 :ticks 900}}))
+                                                      {:seon.eval/turn 1 :seon.eval/code "(+ 2 2)" :seon.eval/response {:handle 'result/e9 :ms 0.2 :ticks 900}}))
         e9 (str "eval-item-" (seon.db/eid branch :seon.eval/id "e9"))
-        closed (:html (some #(when (= e9 (:id %)) %) (:units (drawn-parts branch))))]
+        closed (component-html branch e9)]
     (is (some? closed) "the eval, a component of the page")
     (is (str/includes? closed "(+ 2 2)") "its code's first line")
     (is (str/includes? closed "0.20 ms") closed)
@@ -987,9 +1080,9 @@
   (let [[_ branch0 eid] (paged-dbs)
         k (:seon.agent/key (d/pull (first (paged-dbs)) [:seon.agent/key] eid))
         branch (d/db-with branch0 (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} id "a3"
-                                                       {:seon.eval/call-id (str "c-" id) :seon.eval/code code :seon.eval/response resp}))
+                                                       {:seon.eval/turn 1 :seon.eval/code code :seon.eval/response resp}))
         unit (str "eval-item-" (seon.db/eid branch :seon.eval/id id))]
-    (:html (some #(when (= unit (:id %)) %) (:units (drawn-parts branch))))))
+    (component-html branch unit)))
 
 (deftest an-evals-warning-is-drawn-with-its-value
   ;; a task merged having defined its proof through eval: the model's text said so and the page did not
@@ -1082,6 +1175,26 @@
     (is (not (str/includes? html "\\\"")) "no escaped string literal")
     (is (not (str/includes? html ":ms")) "the cost is on its own line, not in the value")
     (is (str/includes? held "java.lang.Object") "a value that is no data shows what it was, as data")))
+
+(deftest a-turns-tiles-are-drawn-from-its-evals-newest-first
+  ;; docs/render.md#the-page: a value with a render of its own is a tile, decided as it is drawn, newest turn first
+  (let [[_ branch _] (paged-dbs)
+        k (seon.task/agent-key "b1" :a3)
+        ;; a value its schema gives a render of its own (a value holding hiccup already made is drawn where it sits)
+        tile (fn [id turn text] (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} id "a3"
+                                                     {:seon.eval/turn turn :seon.eval/code "(page)" :seon.eval/schema :seon.context/run
+                                                      :seon.eval/response {:handle (symbol "result" id) :value {:turn text}}}))
+        db (d/db-with branch (vec (concat [{:seon.agent/key k :seon.agent/turn 6}]
+                                          (tile "t1" 2 "older tile") (tile "t2" 5 "newer tile")
+                                          (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "t3" "a3"
+                                                               {:seon.eval/turn 5 :seon.eval/code "1" :seon.eval/response {:handle 'result/t3 :value 1}}))))
+        w (a3-walk db)]
+    (try
+      (let [html (apply str (map :html (filter #(= "#p-tiles" (:container %)) (r/placed-units w))))]
+        (is (str/includes? html "newer tile"))
+        (is (< (str/index-of html "newer tile") (str/index-of html "older tile")) "the newest turn's first")
+        (is (not (str/includes? html "result/t3")) "a value with no render of its own is no tile"))
+      (finally (r/dispose-walk! w)))))
 
 (deftest a-page-an-agent-built-renders-nested
   ;; owner, 2026-10-25: an agent's hiccup renders as HTML. It is the value's own :seon.render/html
@@ -1184,8 +1297,8 @@
   ;; the view :main/example-abc, found as :user is (an agent of main with no branch) and read from main
   (let [db (reduce d/db-with (ts/test-db)
                    [[{:seon.root/id :root :seon.root/boot "b1"}]
-                    [{:seon.agent/key "example/abc" :seon.agent/id :example-abc :seon.agent/status :ended :seon.agent/description "Make h."}]
-                    [{:seon.eval/id "example/abc/s1" :seon.eval/by "src" :seon.eval/agent [:seon.agent/key "example/abc"]
+                    [{:seon.agent/key "example/abc" :seon.agent/id :example-abc :seon.agent/status :ended :seon.agent/description "Make h." :seon.agent/turn 1}]
+                    [{:seon.eval/id "example/abc/s1" :seon.eval/by "src" :seon.eval/agent [:seon.agent/key "example/abc"] :seon.eval/turn 1
                       :seon.eval/code "(+ 1 2)" :seon.eval/response {:handle 'result/example-abc-s1 :value 3} :seon.eval/call-id "example-abc-call_1"}]])
         eid (seon.db/eid db :seon.agent/key "example/abc")
         st {:rid 1 :pending {} :watch #{} :waiting {} :views {} :branches {} :main-db db :view {:agents {}}}
@@ -1294,12 +1407,16 @@
       ;; part; this fixture's proof has no source, so the part says what to write (seon.context/not-written)
       (is (not (str/includes? h "my.agent/prove")) "no proof's run form, which the status shows")
       (is (str/includes? h "not written yet") "an unwritten proof: what to write"))
-    (is (= [(str "chat-ask-" rid) (str "chat-start-" rid)
-            (str "chat-message-" rid "-" (eid :seon.message/id "m-1")) (str "eval-item-" (eid :seon.eval/id "e1")) (str "eval-item-" (eid :seon.eval/id "e2"))
-            (str "chat-turn-" rid "-" (eid :seon.model-call/id (str k "/1"))) (str "eval-item-" (eid :seon.eval/id "e3"))
-            (str "chat-end-" rid)]
+    (is (= [(str "chat-ask-" rid) (str "chat-start-" rid) (str "conversation-turn-" rid "-1") (str "conversation-turn-" rid "-2") (str "chat-end-" rid)]
            (mapv :id conv))
-        "the conversation in the order it was written: by eid, each a component keyed by its entity, then how the agent stands; a turn with no reply, reasoning or eval (the agent's turn 2) draws nothing, so no row")
+        "the conversation by turn number, each turn a component keyed by the agent and its number (turn 0 took no record: no component), then how the agent stands")
+    (let [turn1 (:html (unit-of conv "conversation-turn-"))
+          at #(str/index-of turn1 %)]
+      (is (< (at (str "id=\"chat-message-" rid "-" (eid :seon.message/id "m-1") "\"")) (at (str "id=\"chat-turn-" rid "-" (eid :seon.model-call/id (str k "/1")) "-"))
+             (at (str "id=\"eval-item-" (eid :seon.eval/id "e3") "\"")))
+          "a turn: the messages it took, its model call, then the evals of other hands")
+      (is (every? #(str/includes? turn1 (str "id=\"eval-item-" (eid :seon.eval/id %) "\"")) ["e1" "e2" "e3"]) "its model call's evals among its steps")
+      (is (not (str/includes? (:html (second (filter #(str/starts-with? (:id %) "conversation-turn-") conv))) "chat-turn")) "the agent's turn 2 said nothing: its component holds no bubble"))
     (is (every? #(str/starts-with? (:html %) (str "<" )) units))
     (is (every? #(str/includes? (:html %) (str "id=\"" (:id %) "\"")) units) "each component's root element carries its key as its id")
     (is (= units (draw)) "pure: the same ctx, the same page")))
@@ -1392,12 +1509,12 @@
   ;; Reagent's rule with the cursor inferred: a change re-runs only the components whose read paths
   ;; it reaches; every other is not visited, and a re-run whose output is = sends nothing
   (let [[w a branch] (live-walk)
-        e1 (seon.db/eid branch :seon.eval/id "e1")]
-    (swap! a assoc-in [:evals e1 :seon.eval/opened] true)
-    (is (= {[`ui/eval-item e1] :miss} (r/flush! w nil)) "an eval opened: that eval's component alone runs, its list's layout does not")
+        e3 (seon.db/eid branch :seon.eval/id "e3")]
+    (swap! a assoc-in [:evals e3 :seon.eval/opened] true)
+    (is (= {[`ui/eval-item e3] :miss} (r/flush! w nil)) "an eval opened: that eval's component alone runs, its turn's and its list's layout do not")
     (swap! a assoc :t 99)
     (is (= {} (r/flush! w nil)) "a change no component read: nothing runs")
-    (swap! a assoc-in [:evals e1 :seon.eval/opened] true)
+    (swap! a assoc-in [:evals e3 :seon.eval/opened] true)
     (is (= {} (r/flush! w nil)) "the same value again: nothing runs")
     (r/dispose-walk! w)))
 
@@ -1495,11 +1612,12 @@
   ;; :seon.agent/opened, which the agent would take) is drawn open
   (let [[main branch _] (paged-dbs)
         k (seon.task/agent-key "b1" :a3)
-        main (d/db-with main [{:seon.agent/key k :seon.agent/opened #{"e1"}}])
+        main (d/db-with main [{:seon.agent/key k :seon.agent/opened #{"e3"}}])
         [st _] (#'p/pass-view (assoc (proc-state main branch) :view {:agents {}}) [:chat :a3])
-        e1 (str "eval-item-" (seon.db/eid branch :seon.eval/id "e1"))
-        html (get-in st [:views [:chat :a3] :units e1 :html])]
-    (is (re-find #"<details[^>]* open" html) (str "drawn open: " html))))
+        ;; e3 is an eval of another hand, the turn's own: it sits in its turn's unit, in a details of its handle's anchor
+        html (get-in st [:views [:chat :a3] :units (str "conversation-turn-" (seon.db/eid branch :seon.agent/key k) "-1") :html])
+        tag (re-find #"<details[^>]*id=\"eval-e3\"[^>]*>" html)]
+    (is (re-find #" open" tag) (str "drawn open: " tag))))
 
 (deftest a-new-member-is-an-append
   ;; a keyed component new in its list, its parent's output otherwise unchanged, is sent as an append
@@ -1508,14 +1626,14 @@
         k (seon.task/agent-key "b1" :a3)
         o (volatile! {})
         st (#'p/answered (first (#'p/pass-view (proc-state main branch) [:chat :a3])) o [:parts :a3] (drawn-parts branch))
-        branch2 (d/db-with branch (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e4" "a3" {:seon.eval/call-id "c-e4" :seon.eval/code "(f 4)" :seon.eval/response {:handle 'result/e4 :value 8}}))
+        branch2 (d/db-with branch (turn-2-eval-tx k "(f 4)"))
         o2 (volatile! {})
         _ (#'p/answered st o2 [:parts :a3] (drawn-parts branch2))
         patch (first (filter #(= :patch (:op %)) (:to-web @o2)))
-        e4 (str "eval-item-" (seon.db/eid branch2 :seon.eval/id "e4"))]
-    ;; the run's end line (chat-end) closes the conversation, so a new row is placed before it, after the row it follows
-    (is (= [e4] (mapv (fn [[_ html]] (second (re-find #"id=\"([^\"]+)\"" html))) (:afters patch)))
-        "the new eval, placed in the conversation before its end line")
+        turn2 (str "conversation-turn-" (seon.db/eid branch2 :seon.agent/key k) "-2")]
+    ;; the agent's end line (chat-end) closes the conversation, so a new turn is placed before it, after the one it follows
+    (is (= [turn2] (mapv (fn [[_ html]] (second (re-find #"id=\"([^\"]+)\"" html))) (:afters patch)))
+        "the new turn, placed in the conversation before its end line")
     (is (empty? (:appends patch)) "nothing else appended")
     (is (empty? (:frags patch)) "nothing else of the page sent")))
 
@@ -1524,14 +1642,11 @@
   ;; links to its eval: the eval's component draws its anchor (eval-e1) from the eval's id; opened
   ;; (:seon.eval/opened, the reader's fact taken onto the branch), it draws its value
   (let [[_ branch _] (paged-dbs)
-        k (seon.task/agent-key "b1" :a3)
-        units #(let [w (r/draw (:tree (seon.ctx/build % (seon.db/eid % :seon.agent/key k) :task-demo-f)) seon.ctx/changes %
-                               (requiring-resolve (r/declared :seon.render/render-ctx)))]
-                 (try (r/placed-units w) (finally (r/dispose-walk! w))))
-        e1 (str "eval-item-" (seon.db/eid branch :seon.eval/id "e1"))
-        closed (:html (some #(when (= e1 (:id %)) %) (units branch)))
-        opened (:html (some #(when (= e1 (:id %)) %) (units (d/db-with branch [{:seon.eval/id "e1" :seon.eval/opened true}]))))]
-    (is (str/includes? closed "id=\"eval-e1\"") "the handle's anchor, on the eval's own element")
+        ;; e3, an eval of another hand: the model's evals are the steps of their turn, drawn open
+        e3 (str "eval-item-" (seon.db/eid branch :seon.eval/id "e3"))
+        closed (component-html branch e3)
+        opened (component-html (d/db-with branch [{:seon.eval/id "e3" :seon.eval/opened true}]) e3)]
+    (is (str/includes? closed "id=\"eval-e3\"") "the handle's anchor, on the eval's own element")
     (is (str/includes? (h/html (r/print-html {} {:it 'result/e1})) "href=\"#eval-e1\"") "and a printed handle links to it")
     (is (not (re-find #"<details[^>]* open" closed)) "no one opened it: its one line")
     (is (str/includes? closed "seon.root%2Fopened") "opening it posts the fact (seon.root/opened!)")
@@ -2065,12 +2180,12 @@
            :messages {4 {:seon.message/from "user" :seon.message/body "Is the premise right?"}}}
         h #(h/html %)]
     (testing "a model turn is its reply, its thinking folded"
-      (let [t (h (ui/chat-turn {:seon.ctx/ctx c :seon.db/db (ts/test-db)} 1 2))]
+      (let [t (h (ui/chat-turn {:seon.ctx/ctx c :seon.db/db (ts/test-db)} 1 2 []))]
         (is (str/includes? t "I'll **reproduce** it first."))
         (is (str/includes? t "<details") "its thinking folded")
         (is (str/includes? t "Read select first."))
         (is (str/includes? t "turn 1")))
-      (is (nil? (ui/chat-turn {:seon.ctx/ctx c :seon.db/db (ts/test-db)} 1 3)) "a turn that said nothing draws no bubble"))
+      (is (nil? (ui/chat-turn {:seon.ctx/ctx c :seon.db/db (ts/test-db)} 1 3 [])) "a turn that said nothing draws no bubble"))
     (testing "a message is a bubble with its sender"
       (let [m (h (ui/chat-message {:seon.ctx/ctx c} 1 4))]
         (is (str/includes? m "user"))
@@ -2176,7 +2291,7 @@
                                 (let [c (get @(:cache w) @(:out w))] [k {:data (:data c) :html (h/html (r/resolved w @(:out w) true))}])
                                 (finally (r/dispose-walk! w))))))
         model #(ui/cite-model {} (:data (drawn %)))]
-    (is (= #{"demo/g" "docs/x.md#the-x" "docs/testing.md#testing" "docs/references.md#an-entity-cites"} (set (keys drawn)))
+    (is (= #{"demo/g" "docs/x.md#the-x" "docs/testing.md#testing" "docs/data-modeling.md" "docs/references.md#an-entity-cites"} (set (keys drawn)))
         "a part per cite, the task's and the agent's (its proof's left to the status), each target once")
     (is (every? #(= :seon.cite/cite-fact (:seon.render/schema (meta (:data %)))) (vals drawn)) (str "every cite's part draws with the db unread: " (pr-str drawn)))
     (is (str/includes? (:seon.print/prose (:text (model "docs/x.md#the-x"))) "What x does. And more.") "a section at doc depth: its lead")

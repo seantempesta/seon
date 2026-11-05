@@ -160,8 +160,8 @@
 
 (defn- window-moves
   "Join j's new members (r: the record's state) from moves, the datoms that touched it, when j is a
-  window of ids issued in time order (rseek's newest first) and old holds its members: [v r
-  entered], each member a retraction names and no assertion brings back dissoc'd (forgotten), each
+  reverse join with no limit, or a window of ids issued in time order (rseek's newest first), and old
+  holds its members: [v r entered], each member a retraction names and no assertion brings back dissoc'd (forgotten), each
   an assertion names that it does not hold assoc'd (built), the oldest past its
   limit dropped, a window left short by one that left filled from below its oldest by rseek, and
   the ids it built; nil when moves are not the join's own ref datoms (its full read answers then).
@@ -169,7 +169,8 @@
   {:malli/schema [:=> [:cat :seon.host/db pos-int? :map [:vector :any] :map :seon.ctx/ix [:sequential :any] [:map-of :any [:vector :any]]]
                   [:maybe [:tuple :map :seon.ctx/ix [:set :int]]]]}
   [db e j p old r moves touched]
-  (when (and (:rev? j) (not (:by j)) (:reverse? j) (in-time-order? j) (seq old)
+  (when (and (:rev? j) (not (:by j)) (seq old) (not (:seon.ctx/by-position (meta old)))
+             (or (nil? (:limit j)) (and (:reverse? j) (in-time-order? j)))
              (every? #(and (= (:attr j) (:a %)) (= e (:v %))) moves))
     (let [full? (and (:limit j) (= (:limit j) (count old)))
           asserted (into #{} (comp (filter :added) (map :e)) moves)
@@ -198,8 +199,8 @@
 (defn- join
   "Join j of entity e (m, its own attributes) at path p: [value r], value its members' nodes (a
   collection: a map by their ids, newest first; else the one node), r the record's state gaining
-  their paths and the join's watch keys. old, the join's value before: a window of ids issued in
-  time order changes by the datoms that touched it (window-moves); any other collection is read
+  their paths and the join's watch keys. old, the join's value before: a reverse join changes by the
+  datoms that touched it (window-moves), so a member joining costs that member; any other collection is read
   again, keeping every member still in it that nothing touched (the same object) and changing only
   the members that joined, left or were touched; a member that left is forgotten (forget)."
   {:malli/schema [:=> [:cat :seon.host/db pos-int? :map :map [:vector :any] :any :seon.ctx/ix [:map-of :any [:vector :any]]] [:tuple :any :seon.ctx/ix]]}

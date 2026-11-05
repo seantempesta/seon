@@ -912,12 +912,14 @@
 
 (defn- example-rekey
   "Record m of one of `session-kinds` (its id and agent attributes id-k and agent-k) as example ek keeps it: its db
-  attributes dropped, its id under ek, its agent ek's, an eval as `example-record` has it. See
+  attributes dropped, its id under ek (a model call's is `<ek>/<n>`), its agent ek's, an eval as `example-record` has it. See
   docs/tasks.md#a-task-names-example-sessions."
   {:malli/schema [:=> [:cat :string :string :map [:tuple :qualified-keyword :qualified-keyword]] :map]}
   [ek pre m [id-k agent-k]]
   (-> (apply dissoc m (filter #(= "db" (namespace %)) (keys m)))
-      (update id-k #(str ek "/" %)) (assoc agent-k [:seon.agent/key ek])
+      ;; a model call is `<agent key>/<n>` (docs/turn.md#the-turn-is-a-number), the example's too: the page finds it by that
+      (as-> m (if-let [n (:seon.model-call/n m)] (assoc m id-k (str ek "/" n)) (update m id-k #(str ek "/" %))))
+      (assoc agent-k [:seon.agent/key ek])
       (cond-> (:seon.eval/code m) (->> (example-record ek pre)))))
 
 (defn- session-request
@@ -935,7 +937,7 @@
   the copy in that order), or the `:seon.context/session-refused` error when no agent has key, it has no request to
   show (its task has no plan and it has no description) or a record is of a kind an example does not hold.
   The first transaction writes the example agent, an ended agent like any (key \"example/<id>\", id
-  :example-<id>, its description the request, `session-request`); the model's evals
+  :example-<id>, its description the request, `session-request`, its turn the last its records carry); the model's evals
   are kept, an eval the harness made in the agent is not; each other holds one record,
   re-keyed under the example's key (`example-rekey`: ids, call ids and result handles,
   so none meets a live agent's, nor another example's). Pure data: written with pr-str, read back,
@@ -960,7 +962,9 @@
     (cond (nil? a) (refuse (str "no agent is keyed \"" key "\""))
           (nil? request) (refuse (str "agent \"" key "\" has no request to show: its task has no plan and it has no description"))
           unknown (refuse (str "agent \"" key "\" holds a record of kind " (nth unknown 2) ", which an example does not"))
-          :else (into [[{:seon.agent/key ek :seon.agent/id (keyword (str "example-" id)) :seon.agent/status :ended :seon.agent/description request}]]
+          ;; its turn is the last its records carry (docs/turn.md#the-turn-is-a-number): the page draws a component for each
+          :else (into [[{:seon.agent/key ek :seon.agent/id (keyword (str "example-" id)) :seon.agent/status :ended :seon.agent/description request
+                         :seon.agent/turn (reduce max 0 (map (fn [[pos]] (first pos)) rs))}]]
                       (for [[_ v k] rs]
                         [(example-rekey ek (str (str/replace ek "/" "-") "-") v (session-kinds k))])))))
 

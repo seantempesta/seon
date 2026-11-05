@@ -5,7 +5,7 @@
   root: a cost proof for the recursion). Run: bin/test seon.render-cost-test"
   (:refer-clojure :exclude [defn defn-])
   (:require [clojure.test :refer [deftest]] [seon.contract :refer [defn defn-]] [seon.cost :as cost] [seon.web.html] [seon.db]
-            [seon.test-store :as ts] [datahike.api :as d] [seon.render.proc] [seon.render] [seon.render.ui] [seon.config] [seon.task] [seon.repl] [seon.doc] [seon.context]))
+            [seon.test-store :as ts] [datahike.api :as d] [seon.render.proc] [seon.render] [seon.render.ui] [seon.config] [seon.task] [seon.repl] [seon.doc] [seon.context] [seon.ctx] [seon.ratom]))
 
 (def ^:private fan "Children per node: a tree as deep as log3 n (10,000 nodes: 9 levels)." 3)
 
@@ -272,28 +272,53 @@
           [st2 _] (#'seon.render.proc/pass-view (assoc st1 :main-db (:db-after r)) :a1)]
       (clojure.test/is (= 1 (- (get-in st2 [:counts :rendered]) (get-in st1 [:counts :rendered]))) (str n " rows: the agent's head rendered, nothing else")))))
 
+(defn step-of
+  "The input of size n: a kept walk of an agent's page (as seon.render.proc/kept-walk holds one) drawn over n-1 of its turns, each
+  as production writes it (docs/turn.md#the-turn-is-a-number: its model call and reply, an eval the call ran, and every third turn a message
+  it took), and the db with the n-th turn written: [kept-walk db-before db-after]."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :map :seon.host/db :seon.host/db]]}
+  [n]
+  (let [k "b1/a1"
+        turn (fn [i] (let [id (str "x" i)]
+                       (concat
+                        [{:seon.agent/key k :seon.agent/turn (inc i)}
+                         {:seon.model-call/id (str k "/" (inc i)) :seon.model-call/agent {:seon.agent/key k} :seon.model-call/n (inc i) :seon.model-call/origin :model
+                          :seon.model-call/reply (str "Checking step " i ".") :seon.model-call/ms 1}]
+                        (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a1} id "a1"
+                                             {:seon.eval/call-id (str "c-" id) :seon.eval/turn (inc i) :seon.eval/code (str "(inc " i ")")
+                                              :seon.eval/response {:handle (symbol "result" id) :value {:step i}}})
+                        (when (zero? (mod i 3))
+                          (update (seon.task/message-tx (str "mm-" i) :message "owner" :b (str "How is step " i "?")) 0 assoc
+                                  :seon.message/agent {:seon.agent/key k} :seon.message/turn (inc i))))))
+        base (reduce d/db-with (ts/test-db) [[{:seon.root/id :root :seon.root/boot "b1"}] (seon.task/agent-tx "b1" :a1 {:status :busy :branch :b})])
+        db (reduce (fn [db i] (d/db-with db (vec (turn i)))) base (range (dec n)))
+        c (seon.ctx/build db (seon.db/eid db :seon.agent/key k) :b)
+        at (volatile! db)
+        a (seon.ratom/atom (:tree c))
+        w (seon.render/walker {:ref a :changes seon.ctx/changes} (fn [] @at) [(requiring-resolve (seon.render/declared :seon.render/render-ctx)) {}])]
+    (seon.render/flush! w nil)
+    [{:w w :a a :c c :at at} db (d/db-with db (vec (turn (dec n))))]))
+
+(defn step!
+  "The kept walk kw (held at db, a branch) moved to later, the branch with one more turn, and back (seon.render.proc/advance-walk!
+  twice, so that a call repeats): ctx patched by what moved and the components it reached drawn, each way."
+  {:malli/schema [:=> [:cat :map :seon.host/db :seon.host/db] :map]}
+  [kw db later]
+  (-> kw (#'seon.render.proc/advance-walk! later :b identity) (#'seon.render.proc/advance-walk! db :b identity)))
+
 (defn change-of
-  "The input of size n: an agent's page walked live (seon.render/walker over a reactive atom holding
-  its ctx: n evals, each a record of a short form and its value, by eid newest first, as
-  seon.ctx/build holds them) and drawn once, then one eval's value changed (the atom reset! as the
-  patch does, the eval's component queued by its reaction): what flush! draws."
+  "The input of size n: an agent's page kept over n turns as production writes them (`step-of`): its walk and the atom holding its
+  ctx, then one eval's value changed (the atom reset! as the patch does): what flush! draws."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map :seon.host/deref]]}
   [n]
-  (let [evals (#'seon.ctx/members-map
-                    (for [i (range n) :let [id (str "e" i)]]
-                      [(+ 10 i) {:db/id (+ 10 i) :seon.eval/id id :seon.eval/by "a1"
-                                 :seon.eval/code (str "(inc " i ")") :seon.eval/response {:handle (symbol "result" id) :value (inc i)}}]))
-        a (seon.ratom/atom {:db/id 1 :seon.agent/key "b/a1" :seon.agent/id :a1 :evals evals})
-        w (seon.render/walker {:ref a :changes seon.ctx/changes} (constantly (ts/test-db)) [(requiring-resolve (seon.render/declared :seon.render/render-ctx)) {}])]
-    (seon.render/flush! w nil)
-    [w a]))
+  (let [[kw] (step-of n)] [(:w kw) (:a kw)]))
 
 (defn redraw!
-  "One change drawn: eval 10 opened or closed in the atom (each call a change, as a patch reset!s ctx:
-  each component watching it asked whether one of its read paths moved), then the walk's frame: what it redrew."
+  "One change drawn: an eval opened or closed in the atom (each call a change, as a patch reset!s ctx: each component watching it
+  asked whether one of its read paths moved), then the walk's frame: what it redrew."
   {:malli/schema [:=> [:cat :map :seon.host/deref] [:map-of [:vector :any] [:enum :miss :same]]]}
   [w a]
-  (swap! a update-in [:evals 10 :seon.eval/opened] not)
+  (swap! a (fn [c] (update-in c [:evals (first (keys (:evals c))) :seon.eval/opened] not)))
   (seon.render/flush! w nil))
 
 (deftest a-change-costs-its-components
@@ -302,16 +327,32 @@
   (cost/proof
     {:of 'seon.render-cost-test/redraw! :input 'seon.render-cost-test/change-of
      :n "evals in the agent's ctx"
-     :work (str "the one eval's component, drawn again (its record printed in one line), and nothing else: the "
-                "layout's reads (the evals' ids and their values) are not reached by an eval opened. The reset! runs "
-                "ctx's diff once (seon.ctx/changes) and looks up the components its changed paths reach by index: the "
-                "walk's part is flat (137 contracted calls, about 100 KB, measured 100 to 4,000); the diff walks every "
-                "key of the changed collection, about 3.2 KB an eval (seon.ctx/changes alone: 268 KB at 100, 12.8 MB "
-                "at 4,000), which is linear")
+     :work (str "the one eval's component and the turn holding it, drawn again, on real records, and nothing else: no other turn's "
+                "reads are reached by an eval opened. The reset! runs ctx's diff once (seon.ctx/changes) and looks up the components its "
+                "changed paths reach by index; the diff walks every key of the changed collection, which is linear. 367 contracted calls "
+                "at 100 turns, the owner's 2026-11-05: cull the calls later if the perf is bad")
      :growth :linear
      :per-n {:calls 0 :bytes 3400}
-     :fixed {:calls 235 :bytes 150000}
+     :fixed {:calls 375 :bytes 150000}
      :sizes [100 300 1000 4000]}))
+
+(deftest a-step-costs-what-changed
+  ;; task seon.render/a-step-costs-what-changed (docs/render.md#a-page-is-a-kept-walk): one more turn draws its own component of the
+  ;; conversation, found by its number; the earlier turns are a lookup each (a form drawn keeps its marker) and are not drawn again
+  (cost/proof
+    {:of 'seon.render-cost-test/step! :input 'seon.render-cost-test/step-of
+     :n "turns the agent took before the one stepped to and back from"
+     :work (str "the turn's records read through the index by its number and drawn (its message, its reply and its eval), ctx patched "
+                "by the datoms that moved with one assoc a member, and the list's one lookup of each earlier turn's marker; the datoms "
+                "matched once against the walk's index of what each component read. Linear in that lookup and in seon.ctx/moved, the diff "
+                "of two db values, which a step through history pays and a live turn, holding its transaction's datoms, does not")
+     :growth :linear
+     ;; measured 2026-11-05, a step and back on this input: 1,231 / 1,471 / 2,431 / 6,271 contracted calls and 10.86 / 11.95 / 16.68 /
+     ;; 33.70 MB at 10 / 40 / 160 / 640 turns; 8 calls a turn, two components each (its turn, its tiles). Before the read index and the turn's component, one step on the same
+     ;; input: 11,073 calls and 80.9 MB at 640 turns
+     :per-n {:calls 8.2 :bytes 36000}
+     :fixed {:calls 1190 :bytes 10600000}
+     :sizes [10 40 160 640]}))
 
 (def ^:dynamic *conn*
   "The branch's connection the status's proof writes its base, main and branch on (bound by its deftest)."

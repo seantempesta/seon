@@ -248,7 +248,7 @@
  ;; section's heading, lead and the headings below). Written as the agent's own cite entities by its first
  ;; run on its branch (seon.task/agent-cites-tx, seon.agent/begin-run!); the agent changes its own with my.agent/cite! and uncite!. At the
  ;; bound: an empty vector makes an agent cite nothing beside its task.
- :seon.config.agent/cites ["docs/testing.md?lead" "docs/references.md?lead#an-entity-cites"]
+ :seon.config.agent/cites ["docs/testing.md?lead" "docs/data-modeling.md?lead" "docs/references.md?lead#an-entity-cites"]
  ;; Unit: path, every agent process's working directory, shared, made at the fork server's boot.
  ;; No repository above it: an agent changes code through its REPL, never git (owner, 2026-10-22:
  ;; "no git in agents"); it reads and writes any file by its absolute path. At the bound: n/a.

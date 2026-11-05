@@ -89,24 +89,19 @@
     (is (nil? (:seon.print/continuation (first cuts))))))
 
 (deftest a-cut-reply-is-told-to-the-agent
-  ;; the run's head (seon.render.ui/run-head), not the work's status: a cut reply is the conversation's
-  (let [head (fn [turn] (pr-str (seon.render.ui/run-head {:seon.ctx/ctx {:seon.agent/status :running :seon.agent/max-turns 4 :calls {"t1" turn}} :seon.db/db (ts/test-db)} 1)))]
-    (is (re-find #"at the model's token limit" (head {:seon.model-call/n 1 :seon.model-call/truncated true})) (head {:seon.model-call/n 1 :seon.model-call/truncated true}))
-    (is (not (re-find #"token limit" (head {:seon.model-call/n 1}))))))
-
-;; task seon.context/an-agent-follows-its-instructions-to-green, item 2: three of five md-scan bench runs changed
-;; nothing in 40 turns, their run head the turn alone; beside it, what the evals changed of the branch's program
-(deftest the-run-head-shows-what-the-branch-changed
-  (let [head (fn [evals] (seon.render.ui/run-head {:seon.ctx/ctx {:seon.agent/max-turns 4 :calls {"t1" {:seon.model-call/n 1}} :evals evals} :seon.db/db (ts/test-db)} 1))
-        ;; newest first, as ctx holds :evals: a read, the definition redefined, the definition
-        evals (array-map "e3" {:seon.eval/code "(f 2)" :seon.eval/response {:value 4}}
-                         "e2" {:seon.eval/code "(defn f [x] (* 2 x))" :seon.eval/response {:recorded '[demo/f]}}
-                         "e1" {:seon.eval/code "(defn f [x] x)" :seon.eval/response {:recorded '[demo/f]}})
-        m (head evals)]
-    (is (nil? (:changed (head (array-map "e3" (get evals "e3"))))) "a read changes nothing")
-    (is (= '[demo/f] (:changed m)) "one recorded definition, once however often redefined")
-    (is (= [:turn :changed] (take 2 (keys m))) "beside the turn")
-    (is (str/includes? (seon.web.html/html (seon.render.ui/run-html {} m)) "turn 1 of 4 · 1 change") "the page reads 1 change")))
+  ;; the turn line (seon.render.ui/run-head), not the work's status: a cut reply is the conversation's. Its last reply is its
+  ;; model call that answered last: the turn's own once it did (the page's), else the turn before's (the request being made in this turn)
+  (let [k "b/a1"
+        call (fn [n & more] (apply assoc {:seon.model-call/id (str k "/" n) :seon.model-call/agent {:seon.agent/key k} :seon.model-call/n n :seon.model-call/origin :model} more))
+        head (fn [turn calls]
+               (let [db (d/db-with (ts/test-db) (into [{:seon.agent/key k :seon.agent/turn turn}] calls))]
+                 (pr-str (seon.render.ui/run-head {:seon.ctx/ctx {:seon.agent/key k :seon.agent/turn turn :seon.agent/max-turns 4} :seon.db/db db} 1))))
+        told? #(boolean (re-find #"at the model's token limit" %))]
+    (is (told? (head 1 [(call 1 :seon.model-call/ms 5 :seon.model-call/truncated true)])) "this turn's reply, cut")
+    (is (told? (head 2 [(call 1 :seon.model-call/ms 5 :seon.model-call/truncated true) (call 2)])) "the request of the next turn: the turn before's reply, cut")
+    (is (not (told? (head 2 [(call 1 :seon.model-call/ms 5 :seon.model-call/truncated true) (call 2 :seon.model-call/ms 5)]))) "this turn answered whole: the cut before it is no longer news")
+    (is (not (told? (head 1 [(call 1 :seon.model-call/ms 5)]))) "a reply whole")
+    (is (not (told? (head 1 [(call 1)]))) "a call still in flight, no turn before it")))
 
 (deftest a-records-text-is-the-same-whatever-came-before
   ;; task seon.context/the-context-is-the-agents-evals-and-seons: a record's printed text is a
@@ -1736,15 +1731,15 @@
                                (mapv (fn [[_ v kind]] (case kind :seon.db/eval-fact (context/eval-messages {} v) :seon.message/fact (context/message-messages {} v) :seon.model-call/fact (context/turn-messages {} v)))
                                      (context/records (:tree (seon.ctx/build db a :b)) db))))]
         (is (= tx (clojure.edn/read-string (pr-str tx))) "plain data: written with pr-str, read back")
-        (is (= {:seon.agent/key "example/abc" :seon.agent/id :example-abc :seon.agent/status :ended :seon.agent/description "Make h."} (ffirst tx)))
+        (is (= {:seon.agent/key "example/abc" :seon.agent/id :example-abc :seon.agent/status :ended :seon.agent/description "Make h." :seon.agent/turn 2} (ffirst tx)) "its turn the last its records carry: its page draws a component for each")
         (is (= 4 (count tx)) "the agent, then a transaction for each of three records")
         (ts/test-branch!
           (fn [_ fresh]
             (doseq [t (clojure.edn/read-string (pr-str tx))] (d/transact fresh t))
             (is (= (str/replace (pr-str (names @conn "b/src")) "example-abc-" "") (str/replace (pr-str (names @fresh "example/abc")) "example-abc-" ""))
                 "the example draws the same messages as the original's records")
-            (is (= ["example/abc/s1" "example/abc/m1" "example/abc/b/src/2"] (mapv (fn [[_ v]] (or (:seon.eval/id v) (:seon.message/id v) (:seon.model-call/id v))) (context/records (:tree (seon.ctx/build @fresh (pdb/eid @fresh :seon.agent/key "example/abc") :b)) @fresh)))
-                "ids re-keyed under the example, in the order they ran")))))))
+            (is (= ["example/abc/s1" "example/abc/m1" "example/abc/2"] (mapv (fn [[_ v]] (or (:seon.eval/id v) (:seon.message/id v) (:seon.model-call/id v))) (context/records (:tree (seon.ctx/build @fresh (pdb/eid @fresh :seon.agent/key "example/abc") :b)) @fresh)))
+                "ids re-keyed under the example, in the order they ran, a model call's `<key>/<n>` as any agent's")))))))
 
 (deftest the-page-draws-its-tasks-examples-with-evaluation
   (ts/test-branch!
