@@ -42,7 +42,7 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.program-test/a-changed-schema-moves-only-the-digests-reaching-it}}
  {:seon.task/name "a-method-key-is-decoded-once"
-  :seon.task/plan "What exists: a method's dispatch value is encoded twice. `seon.program` stores {:dispatch (sedn/encode dispatch)}, and `seon.program/method-key` encodes [multi that-string] again. `remove-definition!` then reads the inner string back with clojure.core/read-string (program.clj:646), not `seon.edn/decode`. This is audit item C10's remnant: DUP-ROOT moved the outer decodes (program.clj:447, :705) onto seon.edn. Correct: the dispatch value is encoded once inside `method-key`, and every read goes through `seon.edn/decode`. Deletes: the inner encode and the read-string."
+  :seon.task/plan "What exists: a method's dispatch value is encoded twice. `seon.program` stores {:dispatch (sedn/encode dispatch)}, and `seon.program/method-key` encodes [multi that-string] again. `remove-definition!` then reads the inner string back with clojure.core/read-string (program.clj:646), not `seon.edn/decode`. This is audit row C10's remnant: DUP-ROOT moved the outer decodes (program.clj:447, :705) onto seon.edn. Correct: the dispatch value is encoded once inside `method-key`, and every read goes through `seon.edn/decode`. Deletes: the inner encode and the read-string."
   :seon.task/kind :work
   :seon.task/proofs #{seon.program-test/a-removed-method-with-a-vector-dispatch-is-gone}}
  {:seon.task/name "one-closure-over-a-graph"

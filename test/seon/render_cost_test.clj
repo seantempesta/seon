@@ -347,8 +347,8 @@
                 "matched once against the walk's index of what each component read. Linear in that lookup and in seon.ctx/moved, the diff "
                 "of two db values, which a step through history pays and a live turn, holding its transaction's datoms, does not")
      :growth :linear
-     ;; measured 2026-11-05, a step and back on this input: 1,057 / 1,177 / 1,657 contracted calls and 10.74 / 12.51 / 20.68 MB at
-     ;; 10 / 40 / 160 turns (the bounds hold at 640). Before the read index and the turn's component, one step on the same
+     ;; measured 2026-11-05, a step and back on this input: 1,231 / 1,471 / 2,431 / 6,271 contracted calls and 10.86 / 11.95 / 16.68 /
+     ;; 33.70 MB at 10 / 40 / 160 / 640 turns; 8 calls a turn, two components each (its turn, its tiles). Before the read index and the turn's component, one step on the same
      ;; input: 11,073 calls and 80.9 MB at 640 turns
      :per-n {:calls 8.2 :bytes 36000}
      :fixed {:calls 1190 :bytes 10600000}
