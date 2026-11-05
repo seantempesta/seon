@@ -1,8 +1,6 @@
 (ns seon.context-cost-test
-  "The conversation's cost proofs: a turn prints only its new records (seon.context/printed-run),
-  flat in the run's history (root's ruling 2026-10-25: a record's printed message is a function
-  of it and the records before it, which never change, so it is printed once and reused by its
-  id). Run: bin/test seon.context-cost-test"
+  "The conversation's cost proofs: a request costs its records (seon.context/request), each a function of that record alone
+  (docs/render.md#the-models-context-a-cached-prefix-then-the-turn), and what reads them. Run: bin/test seon.context-cost-test"
   (:refer-clojure :exclude [defn defn-])
   (:require [clojure.test :refer [deftest]] [seon.contract :refer [defn defn-]] [seon.cost :as cost] [seon.context] [seon.ctx]
             [datahike.api :as d] [seon.test-store :as ts] [my.test :as t] [seon.db :as pdb] [seon.task :as task] [seon.vector :as vector]))
@@ -18,24 +16,6 @@
       :seon.eval/code (str "(rows " i ")") :seon.eval/call-id (str "c-" i) :seon.eval/intent (str "Read the rows of part " i ".") :seon.eval/response {:handle (symbol "result" id) :value (vec (for [j (range 6)] {:part i :row j :name (str "row-" i "-" j)}))
                                     :ms 0.5 :ticks 1000 :bytes 4096}}
      :seon.db/eval-fact (inc i)]))
-
-(defn held-of
-  "The input at n: the run's next record, and the cache of its n records before it, printed."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :any :map :nil]]}
-  [n] [[(item n)] (#'seon.context/printed-run (mapv item (range n)) nil nil) nil])
-
-(deftest a-turn-prints-its-new-records-flat-in-the-history
-  (cost/proof {:of 'seon.context/printed-run :input 'seon.context-cost-test/held-of
-               :n "records of the run printed before (the cache)"
-               :work (str "the new record printed whole, once, by the one printer, a function of "
-                          "that record alone; nothing of the earlier records is printed again")
-               :growth :constant
-               ;; measured 2026-10-25: 16 calls and 329 KB at 10 held records (the new record's two prints)
-               ;; 2026-11-04, the owner's yes ("Yes, raise by 4"), old 560: a record's text goes through the one lookup, record-messages,
-               ;; seon.render/model, model-declared, contract/properties (seon.render/one-way-to-make-what-an-agent-is-sent, step 4). Re-pinned
-               ;; to what it measures at step 6, which deletes part-change and parts-message from this path
-               :fixed {:calls 564 :bytes 340000}
-               :sizes [10 100 1000]}))
 
 (defn session-of
   "The input at n: a main db holding a session of n evals by agent b/a1 (as a
@@ -57,20 +37,18 @@
         [(:tree (seon.ctx/build db e :b)) db]))
 
 (deftest a-request-reads-what-the-agents-ctx-holds
-  ;; task seon.render/one-way-to-make-what-an-agent-is-sent, step 5; the owner, 2026-10-26: nothing in a request is read from
+  ;; docs/render.md#the-render-is-an-eval; the owner, 2026-10-26: nothing in a request is read from
   ;; anywhere but its ctx. Later records read newest first come out as all of them do, and a record the ctx does not hold
   ;; is not sent
   (let [[c db] (records-of 6)
-        all (seon.context/records c db)
-        since 4]
+        all (seon.context/records c db)]
     (clojure.test/is (= 6 (count all)))
-    (clojure.test/is (= (filterv #(>= (ffirst %) since) all) (seon.context/records c db since)) "the new ones, in order")
     (clojure.test/is (= 5 (count (seon.context/records (update c :evals dissoc (first (keys (:evals c)))) db))) "what the pattern does not reach is no record")))
 
 (deftest a-sessions-records-cost-one-read-per-record
   ;; design agent-loop section 1: the conversation is the session's, so the first request after
   ;; a wake or a load reads every record of it, cold; a later request reads only what is new
-  ;; (:printed, a-turn-prints-its-new-records-flat-in-the-history)
+  ;; (a request prints them all: a-requests-cost-is-its-records)
   (cost/proof {:of 'seon.context/records :input 'seon.context-cost-test/records-of
                :n "eval records of the session"
                :work (str "per record: its member of ctx read and one place in the sort by its turn number; "
@@ -155,91 +133,32 @@
                :fixed {:calls 18}
                :sizes [10 100 1000]}))
 
-(def ^:dynamic *conn*
-  "The branch's connection the parts-of proof reads and writes (bound by its deftest)."
-  nil)
-
-(defn turns-of
-  "The input at n: the db of a branch where agent b/p<n> took n turns on a task (its plan changing
-  each turn, one commit a turn: *conn*), and the refs a request sent, [:parts a c whole? ids call], each
-  turn's parts as seon.context/request records them, drawn at that turn's commit, every one after the first
-  sent as what changed since the turn before ([... was-commit]: its commit is the turn before's, drawn once).
-  Every turn sends the same parts (a plan and a task), so the cost is per ref."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db [:vector :any]]]}
-  [n]
-  (let [conn *conn* k (str "b/p" n) tid (str "demo/p" n)]
-    (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name (str "p" n) :seon.task/plan "Make p."
-                                             :seon.task/proofs #{'demo-test/p-test}}]))
-    ;; the agent has no :seon.agent/task: its record draws no task part, as this proof's input has always been (the run it
-    ;; stood for held the task; measured with the task linked it draws the page: 1,586 calls at n=1 against these 566, so the
-    ;; bound is the unlinked agent's and the page's is unmeasured here)
-    (d/transact conn [{:seon.agent/key k}])
-    (let [commits (vec (for [i (range n)]
-                         (do (d/transact conn [{:seon.task/id tid :seon.task/plan (str "Make p, step " i ".")}])
-                             (d/commit-id @conn))))
-          a (:db/id (d/entity @conn [:seon.agent/key k]))]
-      (let [ids (vec (keys (seon.context/drawn-parts @conn (seon.ctx/build @conn a (:seon.agent/branch (d/entity @conn a))))))]
-        [@conn (vec (for [[i c] (map-indexed vector commits)]
-                      (cond-> [:parts a c (zero? i) ids (str tid "/" i)] (pos? i) (conj (commits (dec i))))))]))))
-
-;; See docs/render.md#the-branchs-views
-(deftest reading-a-request-back-draws-each-turns-parts-once
-  (binding [*conn* nil]
-    (ts/test-branch!
-      (fn [_ conn]
-        (binding [*conn* conn]
-          (cost/proof {:of 'seon.context/parts-of :input 'seon.context-cost-test/turns-of
-                       :n "parts refs of the request (one turn's parts each, each drawn at its own commit)"
-                       :work "one page drawn a ref (the walk of the agent's record at that commit), every commit once; 488 calls a ref since the layout places the cites from ctx (seon.render.ui/page-cites, its stubs filled from where ctx holds them: the cites' joins are the pull's, where the draw used to query them), 480 before; 516 since the task part and the status read the pulled task (seon.render.ui/task-model, seon.context/task-of: the accumulated plan over the joined needs), 1.36 MB -> 1.23 MB a ref"
-                       :growth :linear
-                       ;; measured 2026-10-28 (a plan and a run a page): 2.68 MB / 433 calls at 1, 9.51 MB / 881 at 2,
-                       ;; 23.2 MB / 1,777 at 4, 50.7 MB / 3,569 at 8; before the pages map (every page drawn twice):
-                       ;; 11.0 MB / 1,195 at 2, 27.7 MB / 2,719 at 4, 61.2 MB / 5,767 at 8 (762 calls a page, not 448)
-                       ;; 660 calls and 2.32 MB at 1 since render-core's agent-facing renders (a part for each cite, the status
-                       ;; written to the agent): from 566 calls; the bytes of a page fell (7.3 MB estimated, 2.32 MB measured)
-                       ;; 2.32 MB / 660 calls at 1, 4.74 MB / 1,319 at 2
-                       :per-n {:bytes 2420000 :calls 660}
-                       :fixed {:bytes 1000 :calls 1}
-                       :sizes [1 2 4 8]}))))))
-
-
 (defn request-of
-  "The input at n: seon.context/request's arguments for the turn after n earlier evals, each printed by the
-  turn that follows it (the run's print kept, :printed), the page's parts the walk's (two, one moved since the
-  request before), the previous request's refs recorded on its model call."
+  "The input at n: seon.context/request's arguments for the model turn after n earlier evals, one a turn, each production-shaped
+  (item), the page's parts the walk's (two) drawn as the call Seon made, since the session holds no eval of it, and :printed, all
+  of them but the newest printed by a request before."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map :map]]}
   [n]
   (let [[db a] (session-of n)
-        basis (fn [t] {:commit (d/commit-id db) :task "demo/f" :turn t :max-turns 9 :origin :model :agent "b/a1"})
-        turn (fn [t] (ts/turn-tx "b/a1" t {:seon.model-call/basis (basis t)}))
-        sent (fn [t r] [{:seon.model-call/id (str "b/a1/" t) :seon.model-call/sent (:sent r)}])
-        opts (fn [db t parts printed] {:db db :basis (basis t) :help "help" :help-ref [:section 1 1] :parts parts :printed printed})
-        e {:db/id a}
+        db (d/db-with db (vec (for [i (range n)] [:db/add [:seon.eval/id (str "e" i)] :seon.eval/turn (inc i)])))
         part (fn [k text] [:section {:id k} text])
-        parts (fn [t] {"task-1" (part "task-1" "Make f.") "status-1" (part "status-1" (str t " of 9"))})
-        db1 (d/db-with db (turn 1))
-        r0 (seon.context/request e (opts db1 1 (parts 1) nil))
-        db2 (d/db-with db1 (concat (sent 1 r0) (turn 2)))
-        r1 (seon.context/request e (opts db2 2 (parts 2) (:printed r0)))
-        db3 (d/db-with db2 (concat (sent 2 r1)
-                                   [{:seon.eval/id "e-last" :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key "b/a1"} :seon.eval/turn 2
-                                     :seon.eval/code "(f)" :seon.eval/call-id "c-last" :seon.eval/intent "Last." :seon.eval/response {:handle 'result/e-last :value 1}}]
-                                   (turn 3)))]
-    ;; with its @ctx, as a turn asks (seon.turn/act!)
-    [e (assoc (opts db3 3 (parts 3) (:printed r1)) :ctx (:tree (seon.ctx/build db3 (:db/id e) :b)))]))
+        opts {:db db :basis {:commit (d/commit-id db) :task "demo/f" :turn (inc n) :max-turns 9999 :origin :model :agent "b/a1"}
+              :help "help" :help-ref [:section 1 1]
+              :parts {"task-1" (part "task-1" "Make f.") "status-1" (part "status-1" "0 of 9")}
+              :ctx (:tree (seon.ctx/build db a :b))}
+        printed (:printed (seon.context/request {:db/id a} opts))]
+    [{:db/id a} (assoc opts :printed (dissoc printed [:eval (str "e" (dec n))]))]))
 
-(deftest a-turns-request-costs-its-parts-flat-in-the-session
-  ;; task seon.context/the-context-is-the-agents-evals-and-seons (R1): a request is the previous one and
-  ;; what was added, so with the run's print it prints the parts that moved and the new record, whatever
-  ;; the session held before (the replacement of the cold page draws of seon.context/world, 35M ticks a page)
+(deftest a-requests-cost-is-its-records
+  ;; docs/render.md#the-models-context-a-cached-prefix-then-the-turn: a request is the system prompt, the examples and the agent's
+  ;; records in turn order, each by its own render, a function of that record alone, so a turn prints its new record and reuses the rest
+  ;; (:printed); without the cache a record cost 546 calls and 0.32 MB in every request, n squared over a session. Linear, not flat: each
+  ;; record is read and compared. Accepted on task seon.context/a-request-costs-its-new-records: the wire body holds n messages anyway, and
+  ;; 8 calls an eval is small at a 40-turn cap
   (cost/proof {:of 'seon.context/request :input 'seon.context-cost-test/request-of
                :n "evals of the session before the turn"
-               :work "the previous call and its refs read once, the parts that moved printed in one message, the new record printed; nothing earlier is printed or drawn again"
-               :growth :constant
-               ;; +5 with what changed of a moved part: seon.context/part-change and its two model reads (2026-10-31)
-               ;; 2026-11-04, the owner's yes ("Yes, raise by 4"), old 332: a record's text goes through the one lookup, record-messages,
-               ;; seon.render/model, model-declared, contract/properties (seon.render/one-way-to-make-what-an-agent-is-sent, step 4). Re-pinned
-               ;; to what it measures at step 6, which deletes part-change and parts-message from this path
-               :fixed {:calls 336}
-               ;; measured 2026-10-29: 9 contracted calls at 10, 100 and 1,000 evals before the turn (the moved part printed once, the new record once)
+               :work "the one new record printed; each earlier record read from ctx and compared with the one it was printed from; the page at the end, drawn once"
+               :growth :linear
+               :per-n {:calls 8 :bytes 15000}
+               :fixed {:calls 900 :bytes 600000}
                :sizes [10 30 100]}))

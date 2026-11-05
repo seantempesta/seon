@@ -20,7 +20,7 @@
             [seon.agent :as agent] [seon.repl :as repl] [seon.task :as task] [seon.reconcile :as r]
             [seon.proofs :as proofs] [seon.context :as context] [seon.merge :as pm] [seon.problems :as problems]
             [seon.stage :as stage] [my.branch :as branch] [seon.reader :as reader] [seon.learn :as learn] [seon.config :as cfg] [seon.lib :as lib] [seon.print :as print]
-            [seon.error :as err] [datahike.api :as d] [seon.db :as pdb]))
+            [seon.error :as err] [datahike.api :as d] [seon.db :as pdb] [seon.render :as render]))
 
 ;; The turn loop's own facts live in the agent's one state map, under :turn: whether this
 ;; process is working a task, the last turn's evals and a stop a function requested.
@@ -242,8 +242,22 @@
         moved (into {} (remove (fn [[a v]] (= v (get e a)))) now)]
     (if (seq moved) [(assoc moved :seon.agent/key k)] [])))
 
+(defn- show-page!
+  "Seon shows the agent its page as an eval of its own (docs/render.md#the-render-is-an-eval), before the turn's number moves, so
+  the eval takes the turn in force and falls at the end of the turn before: the page whole (`seon.context/render-calls` :whole)
+  when this process has shown it none, else, when a part moved since (seon.render/revs against what the agent was last shown), what
+  moved (:changes); nothing moved, no eval. Recorded like any eval (origin :insert, by seon: seon.repl/insert!), so a render that
+  throws is its error value in the conversation and the turn goes on. See docs/turn.md#an-eval-can-be-inserted."
+  {:malli/schema [:=> [:cat] :nil]}
+  []
+  (let [seen (:render-seen @agent/state)
+        call (cond (nil? seen) (:whole context/render-calls)
+                   (not= seen (render/revs (repl/page-walk) context/page-lists)) (:changes context/render-calls))]
+    (when call (repl/insert! "seon" [call]))
+    nil))
+
 (defn- act!
-  "One model turn: the agent's turn number moves (docs/turn.md#the-turn-is-a-number), the agent's context (its record and its parts, the status s among them) to the model, the reply's eval calls
+  "One model turn: the page shown to the agent if it moved (`show-page!`), the agent's turn number moves (docs/turn.md#the-turn-is-a-number), the agent's context (its records, the page among them as evals; the status s is the page's) to the model, the reply's eval calls
   through the one REPL path, each answered as its own result, the turn's facts on its model call on the branch. Answers the loop state after it, or the
   provider error. The model call is an effect (my.fx :model, session FX1): root's model owner
   admits, performs and answers it; the API key never enters this process."
@@ -256,6 +270,7 @@
         n (inc (agent/turn-now))
         k (:key @agent/state)
         _ (take! true n)
+        _ (show-page!)
         id (str k "/" n)
         ;; the turn first (the agent's number and its model call's first facts, with the main and merge base it heard), then its
         ;; basis: the commit that holds them, so everything its request and its provider are made from is a fact of that commit
@@ -271,14 +286,13 @@
         provider (context/provider-of (agent/db) basis)
         _ (agent/transact! [{:seon.model-call/id id :seon.model-call/basis basis}])
         _ (agent/commit!)
-        ;; what the run's earlier requests printed, reused by each record's id (seon.context/printed-run)
-        ;; its parts are the live walk's (what changed since the frame before), never drawn cold, and the
-        ;; request is made on the db the walk is drawn to: one db for both
-        [db parts] (repl/page-hiccup)
-        {:keys [messages sent printed]} (context/render db basis {:printed (:printed @agent/state) :parts parts :ctx @ctx/ctx})
+        ;; the request is the agent's records, the page among them as evals (show-page!): made on the db that holds them
+        db (agent/db)
+        {:keys [messages printed]} (context/render db basis {:ctx @ctx/ctx :printed (:printed @agent/state)})
         _ (swap! agent/state assoc :printed printed)
         context-ms (long (profile/ms-since t0))
-        _ (when sent (agent/transact! [{:seon.model-call/id id :seon.model-call/sent sent}]))
+        ;; a hash of the bytes sent, which the debug page compares with its redraw
+        _ (agent/transact! [{:seon.model-call/id id :seon.model-call/sent-hash (lib/digest (sedn/encode messages))}])
         _ (agent/commit!)
         t1 (profile/now-ns)
         r (agent/fx! :model {:messages messages :task (:seon.task/id t) :turn turn :provider provider} {})
@@ -361,14 +375,14 @@
         _ (when take? (when-let [tx (not-empty (main-base-tx))] (agent/transact! tx) (agent/commit!)))
         basis (assoc (basis! task n 1 :outside true) :agent k)
         [db parts] (repl/page-hiccup)
-        {:keys [messages printed sent]} (context/render db basis {:printed (:printed @agent/state) :parts parts :ctx @ctx/ctx})
-        _ (when take? (swap! agent/state assoc :printed printed))
-        text (str/join "\n\n" (map :content messages))]
+        {:keys [messages]} (context/render db basis {:parts parts :ctx @ctx/ctx})
+        ;; as a person reads it: the system prompt, then the page as the call Seon made and its result
+        text (str/join "\n\n" (remove str/blank? (mapcat (fn [{:keys [content tool-calls]}] (concat (map #(str (:intent %) "\n" (:code %)) tool-calls) [content])) messages)))]
     ;; the read is a model call of this agent, as a model turn's is: what it was built from and what it cost
     (agent/transact! [(cond-> {:seon.model-call/id (str k "/read-" n) :seon.model-call/agent {:seon.agent/key k} :seon.model-call/n n
                                :seon.model-call/origin :outside :seon.model-call/basis basis
                                :seon.model-call/split (cond-> {:context-ms (long (profile/ms-since t0))} tests-ms (assoc :tests-ms tests-ms))}
-                        sent (assoc :seon.model-call/sent sent))])
+                        true (assoc :seon.model-call/sent-hash (lib/digest (sedn/encode messages))))])
     text))
 
 (defn hand-back-end
@@ -409,8 +423,8 @@
                              [:max-turns pos-int?]]]
                   :seon.turn/end]}
   [{:keys [task model] :as arg}]
-  (let [;; each wake begins its turn state and its prints anew
-        _ (swap! agent/state assoc :turn {} :printed nil :requests nil)
+  (let [;; each wake begins its turn state; the page it last showed stands, so a wake is told only what moved since
+        _ (swap! agent/state assoc :turn {} :requests nil)
         _ (agent/clear-end!)
         _ (begin! task)
         ;; the agent's own budget (:seon.agent/max-turns on main, raised to extend it; root passes it) bounds the loop, and is

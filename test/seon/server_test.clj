@@ -207,16 +207,16 @@
                                          [{:op :context :agent agent} "(my.task/status)"
                                           {:op :eval :agent "root"
                                            :code (str "(let [db (:db @(seon.root/branch-db sys (seon.task/default-branch " (pr-str task) ")))]"
-                                                      " {:ns (datahike.api/q '[:find [?n ...] :where [?m :seon.model-call/origin :outside] [?m :seon.model-call/sent _] [?m :seon.model-call/n ?n]] db)"
+                                                      " {:ns (datahike.api/q '[:find [?n ...] :where [?m :seon.model-call/origin :outside] [?m :seon.model-call/sent-hash _] [?m :seon.model-call/n ?n]] db)"
                                                       "  :ids (datahike.api/q '[:find [?id ...] :where [?m :seon.model-call/origin :outside] [?m :seon.model-call/id ?id]] db)"
                                                       "  :turns (datahike.api/q '[:find [?t ...] :where [_ :seon.agent/turn ?t]] db)"
                                                       "  :key (datahike.api/q '[:find ?k . :where [?a :seon.agent/key ?k] [?m :seon.model-call/agent ?a]] db)})")}]))
         text (:context ctx)]
     (is (clojure.string/starts-with? text "# You are a Seon agent") "the system prompt, first")
-    (is (re-find #"(?m)^\[seon\.render\.ui/task\b" text) "the render of ctx, each part headed by the function that drew it")
+    (is (re-find #"(?m)^\s*\[seon\.render\.ui/task\b" text) "the render of ctx, each part headed by the function that drew it, as the call Seon made and its answer")
     (is (not (contract/error? (:value status))) (pr-str (:value status)))
     (is (contains? (:value status) :proofs) "status answers as the turn measured it")
-    (is (seq (:ns (:value sent))) "and the read records what it sent, as a model turn does (the debug page shows it)")
+    (is (seq (:ns (:value sent))) "and the read records the hash of what it sent, as a model turn does (the debug page compares its redraw with it)")
     ;; docs/turn.md#the-turn-is-a-number: a read is a model call with its own count, and moves no turn
     (is (= [(str (:key (:value sent)) "/read-1")] (:ids (:value sent))) "the read's model call is <agent key>/read-<k>")
     (is (empty? (:turns (:value sent))) "a read moves no turn number: no agent holds one")))
@@ -276,8 +276,7 @@
   ;; pulling and they can do easy ops there on the atom rather than learning datalog". An agent
   ;; attached from outside reads its task in @ctx, changes the plan by swap! (no query, no my.*
   ;; function), and the change is on its branch, in its next @ctx, on its page, and told as its
-  ;; next read as the part that moved (seon.context/request: the task's part, whole, the others as the
-  ;; read before sent them)
+  ;; next read, which holds the page whole (seon.context/request: an outside read ends with the render as the call Seon made)
   (let [plan "Work: f0 returns its input."
         [first-turn _ swapped page elsewhere on-branch next-turn]
         (at/in-agent (fn [{:keys [agent task]}]

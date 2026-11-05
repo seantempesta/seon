@@ -544,7 +544,7 @@
                           [:seon.process/stall {:optional true} :seon.process/stall]]
  ;; ---- a model call: one request to the model, on its own entity pointing at its agent (the turn is a
  ;; number on each record, docs/turn.md#the-turn-is-a-number: what a turn entity held is the model call's). Its reply, its
- ;; reasoning and how it stopped are the model's words; its tokens, sent and split are bookkeeping, which the agent's
+ ;; reasoning and how it stopped are the model's words; its tokens, sent-hash and split are bookkeeping, which the agent's
  ;; pull leaves out (docs/ctx.md#the-record-is-the-agents-work); the debug page and the turn's header read it ----
  ;; "<agent key>/<n>", n the agent's turn it answers; an outside read of the context (seon.turn/context-block) "<agent key>/read-<k>"
  :seon.model-call/id [:and {:seon.db/identity true} :string]
@@ -586,16 +586,9 @@
                    [:agent {:optional true} :string]
                    ;; the run's own model, when it names one (seon.config/provider-at)
                    [:model {:optional true} :string]]
- ;; what a model turn's request sent, the records it rendered in order (seon.context/request, parts-of):
- ;; the system prompt's section and the task, each as of a t; an eval or message by id, an eval with the fold it was
- ;; sent with (its value or output an earlier record showed: the handle there); a reply (its text and reasoning, and its calls' place among them) by its model call's id
- :seon.model-call/sent [:vector [:or [:tuple [:enum :section :task] :int :int] [:tuple [:enum :eval :message :reply :session] :string]
-                                      ;; an example session a request sent whole (seon.context/example-messages), as of its newest record's t
-                                      [:tuple [:= :example] :string :int] [:tuple [:= :eval] :string [:map-of :keyword :symbol]]
-                                      ;; the page's parts a request sent: the agent, the commit they are drawn at on replay, whole?, their ids, the model call that sent them
-                                      [:tuple [:= :parts] :int :uuid :boolean [:vector :string] :string]
-                                      ;; the content hash of every part the model has after the request: what the next compares
-                                      [:tuple [:= :hashes] [:map-of :string :uuid]]]]
+ ;; a hash of the bytes a request sent (seon.lib/digest of its messages, seon.turn/act!): the debug page draws a turn again from
+ ;; its records at its commit with today's renders, and says when its redraw hashes to something else (docs/render.md#the-debug-page-is-the-wire-request)
+ :seon.model-call/sent-hash [:string {:min 16 :max 16}]
  ;; where the turn's time went, as the agent saw it: the proof run, the context render, the
  ;; model round trip, the reply's evaluations, the turn's record (ms)
  :seon.model-call/split [:map [:tests-ms {:optional true} :int] [:context-ms :int]
@@ -612,7 +605,7 @@
                           [:seon.model-call/cache-hit-tokens {:optional true} :seon.model-call/cache-hit-tokens]
                           [:seon.model-call/cache-miss-tokens {:optional true} :seon.model-call/cache-miss-tokens]
                           [:seon.model-call/model {:optional true} :seon.model-call/model]
-                          [:seon.model-call/basis {:optional true} :seon.model-call/basis] [:seon.model-call/sent {:optional true} :seon.model-call/sent]
+                          [:seon.model-call/basis {:optional true} :seon.model-call/basis] [:seon.model-call/sent-hash {:optional true} :seon.model-call/sent-hash]
                           [:seon.model-call/split {:optional true} :seon.model-call/split]]
  ;; ---- a first move scored (seon.judge, my.root/first-moves!) ----
  ;; the digest of the request it answers (seon.judge/digest): the same context is scored once

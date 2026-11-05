@@ -912,7 +912,7 @@
 
 (defn- debug-state
   "The render proc's state holding agent a1's debug page: context-test's two model turns (each
-  recorded what it sent), root's boot b whose agent a1 is, main and the branch the same db."
+  recorded the hash of what it sent), root's boot b whose agent a1 is, main and the branch the same db."
   [conn]
   (let [[db sent [e0 e1]] (#'seon.context-test/sent-turns conn)
         db (d/db-with db [{:seon.root/id :root :seon.root/boot "b"} {:seon.agent/key "b/a1" :seon.agent/id :a1}])]
@@ -945,24 +945,28 @@
         (is (str/includes? h1 "I call f.") "a call's arguments as sent, its prose in them")
         (is (str/includes? h1 "sent the same by the request before down to here") "where the unchanged prefix ends, with no cache count recorded")
         (is (not (str/includes? h0 "sent the same by the request before")) "the first request has no request before")
-        (let [in1 (ui/debug-input db e1 [e0 e1] false nil)
+        (let [in1 (ui/debug-input db e1 [e0 e1] false)
               roles (mapv :role (get-in in1 [:body :messages]))]
           (is (= false (first (:new in1))) "the system prompt was sent before: not new")
           (is (some true? (map (fn [r n] (and (= "tool" r) n)) roles (:new in1))) "the call's result is new since turn 0")
-          (is (not-any? true? (:new (ui/debug-input db e0 [e0 e1] false nil))) "the first request marks nothing"))
+          (is (not-any? true? (:new (ui/debug-input db e0 [e0 e1] false))) "the first request marks nothing")
+          (is (false? (:differs? in1)) "drawn again, the bytes the turn hashed")
+          (let [other (d/db-with db [{:seon.model-call/id "b/a1/2" :seon.model-call/sent-hash "0000000000000000"}])]
+            (is (true? (:differs? (ui/debug-input other e1 [e0 e1] false))) "a hash that is not the redraw's: said")
+            (is (str/includes? (page (assoc-in st [:branches [:debug :a1] :db] other) e1) "the bytes differ") "on the page")))
         (testing "a chosen turn stays as it was when the branch moves"
           (let [moved (d/db-with db [{:seon.eval/id "e9" :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key "b/a1"} :seon.eval/turn 2
                                       :seon.eval/code "(f 9)" :seon.eval/response {:handle 'result/e9 :value 9}}])]
             (is (= h0 (page (assoc-in st [:branches [:debug :a1] :db] moved) e0)))))
         (testing "latest, while the agent's work goes on, is the turn to come, drawn at the head"
-          (let [in (ui/debug-input db :latest [e0 e1] false nil)]
+          (let [in (ui/debug-input db :latest [e0 e1] false)]
             (is (:to-come? in))
             (is (= 3 (:turn in)) "the next turn's request")
             (is (str/includes? (page st nil) "to come"))
             ;; the browser check of 2026-11-03: the agent records its own end on its branch (:seon.agent/outcome and
             ;; the turn it ended on), and an ended agent showed a turn to come
             (let [ended (d/db-with db [{:seon.agent/key "b/a1" :seon.agent/outcome :green :seon.agent/ended-turn 2}])
-                  in (ui/debug-input ended :latest [e0 e1] false nil)]
+                  in (ui/debug-input ended :latest [e0 e1] false)]
               (is (not (:to-come? in)) "an agent that ended: nothing to come")
               (is (= 2 (:turn in)) "latest is its newest turn"))))
         (is (= [:debug :a1] (#'seon.web/view-of (java.net.URLDecoder/decode (ui/view-param [:debug :a1]) "UTF-8"))) "its feed names it, and reads it back")
@@ -972,7 +976,7 @@
                                                                                 :seon.error/message "no model provider"}}])
                 html (page (-> st (assoc :main-db db) (assoc-in [:branches [:debug :a1] :db] db)) e0)]
             (is (str/includes? html "no model provider") "its error, by the error's render")
-            (is (str/includes? html "the page's parts whole") "beside what it sent")))))))
+            (is (str/includes? html "eval p101") "beside what it sent: the page, the first eval")))))))
 
 (deftest a-page-opened-before-its-first-turn-takes-it
   ;; the browser check of 4bc612cf89: a debug page opened at "no model turn yet" never showed the turns that
@@ -1240,7 +1244,7 @@
 (deftest every-sent-part-names-its-record
   ;; root, 2026-10-26: a part kind with no clause in the debug page's source line made every pass
   ;; of the render proc throw, so no page answered; each ref kind seon.context/request documents names its record
-  (doseq [ref [[:section 397 536870918] [:parts 12 #uuid "00000000-0000-0000-0000-000000000001" true ["status-1"] "demo/f#1/0"] [:parts 12 #uuid "00000000-0000-0000-0000-000000000002" false ["status-1"] "demo/f#1/1"] [:reply "b/a1/3"] [:eval "e3"] [:eval "e4" {:since 'result/e3}] [:message "m1"]]]
+  (doseq [ref [[:section 397 536870918] [:reply "b/a1/3"] [:eval "e3"] [:message "m1"] [:example "example/abc" 12] [:session "demo/g#1"] [:render]]]
     (is (string? (#'ui/source ref)) (pr-str ref))))
 
 (deftest a-debug-page-before-a-model-turn-answers
@@ -1262,15 +1266,14 @@
   ;; waited forever. A view renders on its own: one whose render throws answers its own page with
   ;; the error and is recorded as a problem, and a second page renders through the same pass
   (let [k (seon.task/agent-key "b1" :a1)
-        ;; a turn that sent a part no render names: the request to come continues it, and making it again throws
+        ;; a db that holds no system prompt: the request a turn made again needs it, and making it throws
         db0 (reduce d/db-with (ts/test-db)
                    [[{:seon.root/id :root :seon.root/boot "b1" :seon.config.agent/max-running 4}]
                     (seon.task/agent-tx "b1" :a1 {:status :busy})
                     (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a1} "e1" "a1" {:seon.eval/call-id "c-e1" :seon.eval/code "(+ 1 2)" :seon.eval/response {:handle 'result/e1 :value 3}})
                     [{:seon.agent/key k :seon.agent/turn 1}
                      {:seon.model-call/id (str k "/1") :seon.model-call/agent {:seon.agent/key k} :seon.model-call/n 1 :seon.model-call/origin :model
-                      :seon.model-call/sent [[:no-such-part "x"] [:hashes {}]] :seon.model-call/tokens 100 :seon.model-call/forms 1 :seon.model-call/errors 0 :seon.model-call/ms 1}]])
-        db0 (d/db-with db0 (seon.doc/load-tx db0 "docs" {seon.context/system-page "# You are a Seon agent\n\nThe help page."}))
+                      :seon.model-call/tokens 100 :seon.model-call/forms 1 :seon.model-call/errors 0 :seon.model-call/ms 1}]])
         db (d/db-with db0 [{:seon.model-call/id (str k "/1") :seon.model-call/basis {:commit (d/commit-id db0) :task "t/x" :turn 1 :max-turns 9 :origin :model :agent k}}])
         debug [:debug :a1]
         o (volatile! {})
@@ -1282,7 +1285,7 @@
         pages (into {} (for [m (:to-web @o) :when (= :page (:op m))] [(:k m) (:html m)]))]
     (is (= #{1 2} (set (keys pages))) "both pages are answered: neither waits on the other's render")
     (is (str/includes? (str (pages 1)) "seon.render/view-defect") "the debug page is its error")
-    (is (str/includes? (str (pages 1)) ":no-such-part") "it says what threw")
+    (is (str/includes? (str (pages 1)) "seon.context/system-text invalid-output") "it says what threw: the system prompt the db lacks")
     (is (str/includes? (str (pages 2)) "shown from its branch") "the agent's own page renders through the same pass")
     (is (some #(and (= :error (:op %)) (= :seon.render/view-defect (get-in % [:data :seon.error/type]))) (:to-api @o))
         "recorded as the problem it is: the api's proc error")
@@ -2330,7 +2333,7 @@
         db (d/db-with db [{:db/id aid :seon.agent/max-turns 7 :seon.agent/turn 1 :seon.agent/outcome :green :seon.agent/ended-turn 0}
                           {:seon.model-call/id "b1/a1/1" :seon.model-call/agent aid :seon.model-call/n 1 :seon.model-call/origin :model}])
         opts (fn [db] {:seon.ctx/ctx (:tree (seon.ctx/build db aid :b)) :seon.db/db db})]
-    (is (str/includes? (pr-str (ui/turn (opts db) aid)) "Turn 1 of 7") "the turn line: the agent's own cap")
+    (is (str/includes? (pr-str (ui/turn (opts db) aid)) "You have 7 turns") "the turn line: the agent's own cap")
     (is (str/includes? (pr-str (ui/chat-start (opts db) aid)) "a budget of 7 turns") "the chat's start: the same cap")
     (is (not (str/includes? (pr-str (ui/chat-end (opts db) aid)) "Done")) "the chat's end: an earlier wake's end is no end of this one")
     (let [ended (d/db-with db [{:db/id aid :seon.agent/ended-turn 1}])]

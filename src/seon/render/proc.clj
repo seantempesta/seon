@@ -274,11 +274,7 @@
                 (cond-> {:turns (mapv (fn [e b] {:e e :turn (:turn b) :origin (:origin b)}) calls bases) :at at :to-come? to-come?} gone (assoc :gone gone))
                 (when (seq calls)
                   {:id "d-turn" :input [at (when (= :latest at) (:max-tx bdb)) raw?]
-                   ;; the print cache its last draw kept: latest prints only the records new since
-                   ;; the turn to come's parts are drawn cold at the head, the task's list alone (seon.context/drawn-parts):
-                   ;; measured cheaper than the kept walk flushed over the turn it writes and back (37.3 MB to 41.2 at 100 evals)
-                   :draw (fn [printed] (let [in (ui/debug-input bdb at calls raw? printed)]
-                                         [(ui/debug-turn {:unit "d-turn"} (-> in (dissoc :printed) (assoc :view (ui/view-param view)))) (:printed in)]))})
+                   :draw (fn [_] [(ui/debug-turn {:unit "d-turn"} (-> (ui/debug-input bdb at calls raw?) (assoc :view (ui/view-param view)))) nil])})
                 nil))))
 
 (def ^:private gone "The agent statuses of an ended process (:seon.agent/status)." (:seon.status/gone (contract/properties :seon.agent/status)))

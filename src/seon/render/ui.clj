@@ -14,7 +14,7 @@
   invents one."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.learn :as learn] [seon.doc :as doc] [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn] [clojure.data.json :as json] [seon.config :as config]
-            [seon.render :as render] [datahike.api :as d] [seon.context :as context] [seon.program :as program] [seon.print :as print] [seon.print.emit :as emit] [seon.print.select :as select] [seon.web.html :as h] [seon.reader :as reader] [seon.cost :as cost] [seon.task :as task] [seon.ctx] [seon.problems :as problems] [seon.edn :as sedn] [datahike.index.interface] [seon.ratom :as ratom] [seon.vector :as vector] [seon.db :as pdb] [seon.proofs :as proofs] [seon.merge :as pm] [seon.ref :as ref] [seon.reconcile :as reconcile] [clojure.set]))
+            [seon.render :as render] [datahike.api :as d] [seon.context :as context] [seon.program :as program] [seon.print :as print] [seon.print.emit :as emit] [seon.print.select :as select] [seon.web.html :as h] [seon.reader :as reader] [seon.cost :as cost] [seon.task :as task] [seon.ctx] [seon.problems :as problems] [seon.edn :as sedn] [seon.lib :as lib] [datahike.index.interface] [seon.ratom :as ratom] [seon.vector :as vector] [seon.db :as pdb] [seon.proofs :as proofs] [seon.merge :as pm] [seon.ref :as ref] [seon.reconcile :as reconcile] [clojure.set]))
 
 ;;; --- small formatting helpers -------------------------------------------------
 
@@ -664,16 +664,15 @@
 
 (defn debug-input
   "Request at of the debug timeline on branch db, as data `debug-turn` draws: a model call's eid (its turn,
-  made again from its basis commit, seon.context/wire-turn), or :latest, the request the agent's next model
+  made again from its records at its basis commit, seon.context/wire-turn), or :latest, the request the agent's next model
   turn would send now (its run going on: drawn at db's head as the turn would draw it, with the turn it
   writes first), else its newest turn. calls, the branch's model calls in order; raw?, the body's JSON
-  shown whole; printed, the :printed an earlier answer holds (the print cache seon.context/wire-turn reuses),
-  answered again as :printed. Which messages are new: those made by a record the request before it did not send (its
-  recorded :seon.model-call/sent), so a part that changed is new by its ref. See
-  docs/render.md#the-debug-page-is-the-wire-request."
-  {:malli/schema [:=> [:cat :seon.host/db [:or pos-int? [:= :latest]] [:vector pos-int?] :boolean [:maybe :map]] [:maybe :map]]}
-  [db at calls raw? printed]
-  (let [pull #(d/pull db [:seon.model-call/basis :seon.model-call/sent :seon.model-call/tokens :seon.model-call/cache-hit-tokens
+  shown whole. Which messages are new: those of a record the request before it did not hold (the turns after its number).
+  :differs? says the redraw is not what went out: the turn hashed the bytes it sent (:seon.model-call/sent-hash), and
+  today's renders drew others. See docs/render.md#the-debug-page-is-the-wire-request."
+  {:malli/schema [:=> [:cat :seon.host/db [:or pos-int? [:= :latest]] [:vector pos-int?] :boolean] [:maybe :map]]}
+  [db at calls raw?]
+  (let [pull #(d/pull db [:seon.model-call/basis :seon.model-call/sent-hash :seon.model-call/tokens :seon.model-call/cache-hit-tokens
                           :seon.model-call/cache-miss-tokens :seon.model-call/error] %)
         last-e (peek calls)
         lb (some-> last-e pull :seon.model-call/basis)
@@ -690,12 +689,13 @@
                         [(if (= (:commit b) (d/commit-id db)) db (d/commit-as-db (:store db) (:commit b))) b]))
             i (if to-come? (count calls) (.indexOf ^java.util.List calls e))
             prev-e (when (pos? i) (nth calls (dec i)))
-            prev (set (remove #(= :hashes (first %)) (:seon.model-call/sent (some-> prev-e pull))))
-            w (context/wire-turn tdb b printed)]
+            ;; with no request before it, nothing is marked: every message is the first request's
+            since (some-> prev-e pull :seon.model-call/basis :turn)
+            w (context/wire-turn tdb b since)
+            sent-hash (:seon.model-call/sent-hash m)]
         {:at at :to-come? to-come? :turn (:turn b) :agent (:agent b) :origin (:origin b) :raw? raw?
-         :body (:body w) :sources (:sources w) :printed (:printed w)
-         ;; with no request before it, nothing is marked: every message is the first request's
-         :new (mapv (fn [rs] (boolean (and prev-e (some (complement prev) rs)))) (:sources w))
+         :body (:body w) :sources (:sources w) :new (:new w)
+         :differs? (boolean (and sent-hash (not= sent-hash (lib/digest (sedn/encode (:messages w))))))
          :usage (select-keys m [:seon.model-call/tokens :seon.model-call/cache-hit-tokens :seon.model-call/cache-miss-tokens])
          :error (:seon.model-call/error m)}))))
 
@@ -969,7 +969,7 @@
   ~90 tokens a hit against ~10: docs/vector.md#search); the hits left out are one last line, how many and the call
   that answers them; a query with no vector yet says it was searched without meaning. A change of its query (a swap! on ctx)
   redraws this part alone, and the model is sent what changed of it
-  (docs/render.md#the-page-is-sent-as-what-changed). What it finds for a request is measured in
+  (docs/render.md#the-render-is-an-eval). What it finds for a request is measured in
   docs/vector.md#what-the-work-is-likely-to-need-as-an-eval."
   {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db] [:at [:vector :any]]]] :int :string] :any]}
   [{c :seon.ctx/ctx db :seon.db/db at :at} _aid _k]
@@ -1142,14 +1142,16 @@
 (declare standing)
 
 (defn turn-line
-  "The agent's turn as one line, the same words on the page and in the model's request: `Turn 12 of 40. You're in seon.program.`: the
-  model calls it has made of its cap and the namespace its REPL is in (seon.context/current-ns). Parts that are not known are left
-  out. See docs/render.md#the-agents-turn."
+  "What the agent's page says of its turns, the same words for the page and the model: `You have 40 turns. You're in seon.program.`, and
+  how many are left once few are. It holds no turn number, so it moves when it has news: each eval says its own turn (:turn in its
+  answer, seon.context/eval-messages). Parts that are not known are left out. See docs/render.md#the-agents-turn."
   {:malli/schema [:=> [:cat [:maybe :int] [:maybe :int] [:maybe :symbol]] :string]}
   [n cap in-ns]
-  (str "Turn " n (when cap (str " of " cap)) "."
-       (when (and cap n (<= 0 (- cap n) 5)) (if (zero? (- cap n)) " This is your last turn." (str " " (- cap n) (if (= 1 (- cap n)) " turn" " turns") " left.")))
-       (when in-ns (str " You're in " in-ns "."))))
+  (let [left (when (and cap n) (- cap n))]
+    (str/trim
+      (str (when cap (str "You have " cap " turns."))
+           (when (and left (<= 0 left 5)) (if (zero? left) " This is your last turn." (str " " left (if (= 1 left) " turn" " turns") " left.")))
+           (when in-ns (str " You're in " in-ns "."))))))
 (defn turn
   "The agent's turn (a component over ctx and the db): its turn line as the part's heading, which is all the model is sent
   of it, and under it, when its last reply was cut at the model's token limit (the reply of the model call that answered
@@ -1471,7 +1473,7 @@
         model? (fn [e] (seq (d/datoms db :eavt e :seon.eval/call-id)))
         call (when-let [k (ratom/realize (:seon.agent/key c))] (seon.db/eid db :seon.model-call/id (str k "/" n)))
         others (if call (remove model? evs) evs)
-        loop? (fn [e] (context/loop-eval? (:seon.agent/id c) (get-in c [:evals e])))]
+        loop? (fn [e] (context/loop-eval? (get-in c [:evals e])))]
     (when (or (seq msgs) call (seq evs))
       (into [:div {:class "seon-stack"}]
             (concat (for [m msgs] [#'chat-message {} aid m])
@@ -1866,8 +1868,8 @@
                   (map unit units)))}))
 
 (defn ctx-parts
-  "@ctx's parts, each a pair: what the model reads of the part (its data, or the hiccup its render returned, printed as a
-  request's parts message prints it, seon.context's parts-message), beside the part as the page draws it (its unit's
+  "@ctx's parts, each a pair: what the model reads of the part (its data, or the hiccup its render returned, printed as
+  seon.render/part-text prints it), beside the part as the page draws it (its unit's
   html). parts, {id content} of the task's list (seon.render/placed-hiccup); html, {id html} of its units; open, the
   units the tab opened (/open: d-part-<id>). What the model reads is shown whole, so a part may be a million characters:
   one over the value budget (:seon.config.render/value-budget) is a closed <details> with its size in tokens, whose text
@@ -1922,7 +1924,7 @@
        [:h1 {:class "text-base font-semibold text-text-50"} (if context (str "What " label " reads") (str "What " label "'s model is sent"))]
        [:p {:class "text-text-400"} (if context
                                       "Its page as it reads it: the render of its ctx, each component's hiccup by its id, the text /context.txt serves, drawn again when its ctx changes."
-                                      "Each request as it went on the wire, made again from its turn's record; latest follows the branch live, a turn chosen stays as it was.")]]
+                                      "Each request as it went on the wire, made again from its turn's records; latest follows the branch live, a turn chosen stays as it was.")]]
       (when context (slot (:id context)))
       ;; an agent's: its strip and its turn are units, so its layout never moves: a step, a turn added or the first
       ;; turn patches them in place (a patch reaches only the elements the tab holds)
@@ -1955,16 +1957,13 @@
    [:pre {:class "whitespace-pre-wrap break-words text-text-100"} text]])
 
 (defn- source
-  "What made part ref of a sent request, as a line: the help page as of a t, the page's parts at a turn
-  (whole, or what changed since the turn before), an eval, a message, an example session and the opening
-  of the agent's own: every ref kind
-  seon.context/request names (:seon.model-call/sent)."
+  "What made part ref of a sent request, as a line: the help page as of a t, an eval, a message, a reply, an example session, the
+  opening of the agent's own and the page whole a read ended with: every ref kind seon.context/request names."
   {:malli/schema [:=> [:cat :any] :string]}
-  [[kind x t c :as ref]]
+  [[kind x t]]
   (case kind
     :section (str "the help page (its section, entity " x ") as of t " t)
-    :parts (str (if c "the page's parts whole" "the page's parts that changed") " at commit " t ": " (str/join ", " (nth ref 4)))
-    :tail (str "the turn line (last, made again each request) at commit " t ": " (str/join ", " (nth ref 4)))
+    :render "the page, whole (a read's last: Seon ran it as a call of its own)"
     :eval (str "eval " x)
     :reply (str "the reply of " x)
     :message (str "message " x)
@@ -1983,7 +1982,7 @@
   field but the messages) and, while opened, the whole body's JSON as sent. input as `debug-input`
   answers it. See docs/render.md#the-debug-page-is-the-wire-request."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
-  [opts {:keys [view to-come? turn agent origin body sources new raw? error]
+  [opts {:keys [view to-come? turn agent origin body sources new raw? error differs?]
          {:seon.model-call/keys [tokens cache-hit-tokens cache-miss-tokens]} :usage}]
   (let [unit (:unit opts)
         ms (:messages body)
@@ -2031,6 +2030,8 @@
             to-come? [:span {:class "muted"} "redrawn as the branch moves"]
             (not (or tokens error)) [:span {:class "muted"} "the call is in flight"])]
      (when error [:div {:class "rounded border border-error p-2"} (render/html {} error)])
+     (when differs?
+       [:p {:class "text-warning"} "This page draws the turn again from its records with today's renders, and the bytes differ from the ones the turn sent (its hash, :seon.model-call/sent-hash): a render or a record changed since."])
      [:details [:summary {:class "cursor-pointer text-text-400"} "the envelope: every field but the messages, as sent"]
       [:pre {:class "whitespace-pre-wrap break-words font-mono text-text-100"} (json/write-str (dissoc body :messages))]]
      (into [:div {:class "seon-stack"}]

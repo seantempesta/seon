@@ -689,11 +689,11 @@
   "Response r of code, with :again, a string naming the earlier eval, when an earlier eval of this agent ran the same
   code (compared trimmed) and answered the same (its value, error, output and forms). :again says the answer repeats
   and nothing more: equal answers do not show what the code reads is unchanged. It is kept in the agent's state as a hash
-  of the code to the eval and a hash of its answer, one lookup an eval, and only for an agent's own evals (root's
-  and an inner eval's are not counted). See docs/agent.md#small-answers."
-  {:malli/schema [:=> [:cat :string :map] :map]}
-  [code r]
-  (if (and (= :agent (:mode @agent/state)) (:handle r))
+  of the code to the eval and a hash of its answer, one lookup an eval, and only for an agent's own evals (root's,
+  an inner eval's and one Seon ran for it, origin :insert, which it did not ask for, are not counted). See docs/agent.md#small-answers."
+  {:malli/schema [:=> [:cat :string :map :map] :map]}
+  [code r req]
+  (if (and (= :agent (:mode @agent/state)) (:handle r) (not= :insert (:origin req)))
     (let [k (hash (clojure.string/trim code))
           ;; its answer without what differs every eval, at the one place it nests: an edit!'s value is its inner eval's
           ;; response, whose handle and cost differ each time (an agent swapping one line back and forth
@@ -748,7 +748,8 @@
                 ;; again, and ctx rebuilt by the state's watch (docs/merging.md#a-test-child-is-a-fork-of-a-live-agent)
                 answered (fn [] (when (and (:db before) (nil? (:db @agent/state))) (reset! agent/state (dissoc before :walk)))
                                (let [r (again code (cond-> (repaired (response @answers handle) req)
-                                                      (:ns @agent/state) (assoc :ns (ns-name (:ns @agent/state)))))
+                                                      (:ns @agent/state) (assoc :ns (ns-name (:ns @agent/state))))
+                                           req)
                                       rec (record-details code r req)]
                                   [r rec (when-not (#{:model :insert} (:origin req)) (text-of rec))]))
                 [r rec text] (try (@the-handler (assoc req "code" code :reply #(vswap! answers conj %)))
