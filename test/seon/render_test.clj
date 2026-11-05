@@ -724,9 +724,11 @@
     (testing "a new agent of root's is a new line in the sidebar, its component; the others stay"
       (let [main' (d/db-with (:main-db st1) (seon.task/agent-tx "b1" :a4 {:status :busy}))
             st2 (#'p/advance-main st1 main')
-            [st3 patch] (#'p/pass-view st2 [:chat :a3])]
+            [st3 patch] (#'p/pass-view st2 [:chat :a3])
+            a3 (re-find #"id=\"agent-side-\d+\"><a [^>]*href=\"/agent/b1/a3\".*?</li>" (p/view-html st1 [:chat :a3]))]
         (is (= 2 (count (side st3))) "the boot's sessions are one component")
-        (is (some #(str/includes? (second %) "href=\"/agent/b1/a4\"") (:frags patch)) "its line is sent, in its boot's unit")))
+        (is (some #(str/includes? (second %) "href=\"/agent/b1/a4\"") (:frags patch)) "its line is sent, in its boot's unit")
+        (is (and a3 (some #(str/includes? (second %) a3) (:frags patch))) "the unit holds the other session's pill as it was: one unit, so sent again, unchanged")))
     (r/dispose-walk! (get-in st [:root-walk :w]))))
 
 (deftest a-part-that-sorts-into-the-middle-goes-there

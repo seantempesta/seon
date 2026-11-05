@@ -289,7 +289,7 @@
   "A page's focus as its bar and its head name it: {:address :label :view}. Root's is :root. An agent's is a map of its address
   (its key, boot/id, the one name of a session that survives a root's restart: every link of its pages is /agent/<address>), its label
   (what a person calls it) and the view's own address (the name this page was asked by, which its feed and toggles name); anything
-  else is its name for each."
+  else is its name for each. See docs/render.md#a-sessions-address-and-the-agents-list."
   {:malli/schema [:=> [:cat :any] [:map [:address :string] [:label :string]]]}
   [focus]
   (cond (map? focus) (merge {:view (keyword (:address focus))} focus)
@@ -1562,7 +1562,7 @@
   message); else the agent's own end (:seon.agent/outcome, counted while the agent is at the turn it ended on); else its
   process's status (an agent with none of them, a person's like the user, reads nothing: its state is :status/none). A process that is
   gone is never working or waiting. {:state :text :detail :reason :tone :lit?}: the state (:task/cap, :end/green, :status/idle), the words, the
-  turns a cap spent, the reason (the task's, else the agent's end's) and the tone (tone-class); lit while it works."
+  turns a cap spent, the reason (the task's, else the agent's end's) and the tone (tone-class); lit while it works. See docs/render.md#a-sessions-address-and-the-agents-list."
   {:malli/schema [:=> [:cat [:maybe :map] [:maybe :map]] [:map [:state :keyword] [:text :string] [:tone :keyword] [:lit? :boolean]
                                                            [:detail {:optional true} :string] [:reason {:optional true} :string]]]}
   [a t]
@@ -1683,14 +1683,14 @@
 
 (defn session-address
   "The name of an agent's page: its key (:seon.agent/key, boot/id), the one name of a session that survives a root's restart,
-  so a link to it is a bookmark. An agent without a key (a map the page is shown) is its id."
+  so a link to it is a bookmark. An agent without a key (a map the page is shown) is its id. See docs/render.md#a-sessions-address-and-the-agents-list."
   {:malli/schema [:=> [:cat :map] :string]}
   [a] (or (:seon.agent/key a) (kname (:seon.agent/id a))))
 
 (defn agent-side
   "A session of main in the agents list (a component over the db, its agent's entity id: every agent on main, of any boot, a
   process or none): lit while it works, its id, how its work stands (standing) and what it works on (its task in words, else its
-  branch, cut to the pill's width), the whole pill one link to its page by its stable address (session-address), the whole name in its title."
+  branch, cut to the pill's width), the whole pill one link to its page by its stable address (session-address), the whole name in its title. See docs/render.md#a-sessions-address-and-the-agents-list."
   {:seon.render/style side-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :int] :any]}
   [{db :seon.db/db} eid]
   (let [a (d/pull db session-attrs eid)
@@ -1715,7 +1715,7 @@
     [(if n 0 1) (or p "") (if n (parse-long n) 0) id]))
 
 (defn boot-short
-  "A boot's id, or a key (boot/id), as a person reads the boot: its first group of characters."
+  "A boot's id, or a key (boot/id), as a person reads the boot: its first group of characters. See docs/render.md#a-sessions-address-and-the-agents-list."
   {:malli/schema [:=> [:cat :string] :string]}
   [boot-or-key] (first (str/split boot-or-key #"[-/]")))
 
@@ -1723,10 +1723,10 @@
   "One boot's sessions in the agents list (a component over the db, the boot's id: its agents oldest first, so a new session redraws its boot's
   unit alone, whose element id is the boot's): the
   current boot's, in the list itself; an earlier boot's, folded under the boot's id and how many it held, so a list of
-  every session on main stays short to read."
+  every session on main stays short to read. It reads its boot's keys alone, by their index range, whatever other boots hold. See docs/render.md#a-sessions-address-and-the-agents-list."
   {:seon.render/style "contents" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :string] :any]}
   [{db :seon.db/db} boot]
-  (let [eids (->> (d/datoms db :avet :seon.agent/key) (filter #(str/starts-with? (:v %) (str boot "/"))) (sort-by #(session-order (:v %))) (mapv :e))
+  (let [eids (->> (d/index-range db {:attrid :seon.agent/key :start (str boot "/") :end (str boot "/\uffff")}) (sort-by #(session-order (:v %))) (mapv :e))
         pills (for [eid eids] [#'agent-side {} eid])]
     (if (= boot (task/boot-of db))
       [:li {:class "contents"} [:ul {:class "contents"} pills]]
@@ -1736,7 +1736,7 @@
 
 (defn- sessions-by-boot
   "Every agent on main db grouped by the boot that started it (the front of its key): [[boot [eid ...]] ...], the current boot's first,
-  then the others newest first (by the transaction that wrote their newest agent: transaction ids only grow, where entity ids are not an order), each boot's agents by id number."
+  then the others newest first (by the transaction that wrote their newest agent: transaction ids only grow, where entity ids are not an order), each boot's agents by id number. See docs/render.md#a-sessions-address-and-the-agents-list."
   {:malli/schema [:=> [:cat :seon.host/db] [:sequential [:tuple :string [:sequential :int]]]]}
   [db]
   (let [now (task/boot-of db)

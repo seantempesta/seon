@@ -196,7 +196,7 @@
   by whichever name a person holds, the stable one first. Its key (:seon.agent/key, boot/id: the session, which stays
   when a root restarts), its id in this boot (:a3, or the session's agent a process of this boot continues), its task's id, its
   branch (:task-x, or main/task-x), else, as an id on main (the link /agent/main/<name>), the agent of that id that has no
-  branch: its record is main's. Entity ids are issued in the order written, so the newest is the largest."
+  branch: its record is main's. Entity ids are issued in the order written, so the newest is the largest. See docs/render.md#a-sessions-address-and-the-agents-list."
   {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe pos-int?]]}
   [db address]
   (let [newest (fn [q & args] (apply d/q q db args))
