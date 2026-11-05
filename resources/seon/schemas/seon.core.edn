@@ -121,7 +121,10 @@
                     [:fx {:optional true} [:map-of :keyword :map]] [:conns [:vector [:tuple [:tuple :keyword :keyword] [:tuple :keyword :keyword]]]]]
  :seon.root/spawn-opts [:maybe [:map [:branch {:optional true} :seon.db/branch] [:task {:optional true} [:maybe :string]] [:run {:optional true} [:maybe :string]]
                                      ;; the session's agent the process continues (seon.task/session-key)
-                                     [:key {:optional true} :string]]]
+                                     [:key {:optional true} :string]
+                                     ;; evals run on its REPL queue before anything else, intent and code each, recorded as evals any
+                                     ;; reader reads (docs/turn.md#an-eval-can-be-inserted)
+                                     [:evals {:optional true} [:vector [:tuple :string :string]]]]]
  ;; contracts (seon.contract, from G1)
  :seon.contract/arm-result [:enum :armed :unchanged :off :uncontracted]
  :seon.contract/invalid [:and :seon.error/base [:map [:seon.error/type [:enum :seon.contract/invalid]] [:seon.contract/var :qualified-symbol]]]

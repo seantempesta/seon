@@ -243,12 +243,13 @@
  ;; sits above the measured p90. Tokens are the paid resource; task
  ;; seon.model/budgets-are-data-and-spend-is-measured makes them the budget.
  :seon.config.agent/max-turns 40
- ;; Unit: addresses. What every agent reads beside its task (the owner, 2026-10-30: every agent reads the
- ;; testing instructions, no copy to drift): the page whole, sections added later too, at lead depth (each
- ;; section's heading, lead and the headings below). Written as the agent's own cite entities by its first
- ;; run on its branch (seon.task/agent-cites-tx, seon.agent/begin-run!); the agent changes its own with my.agent/cite! and uncite!. At the
- ;; bound: an empty vector makes an agent cite nothing beside its task.
- :seon.config.agent/cites ["docs/testing.md?lead" "docs/references.md?lead#an-entity-cites"]
+ ;; Unit: addresses. Where every agent is told to look for more, beside its task's citations (the owner, 2026-11-05: "include some
+ ;; references they can use to get more information about completing tasks or merging or whatever else is secondary and we aren't
+ ;; showing right away"). Each is one line in the agent's "If you need more" part (seon.render.ui/references): the section's heading, a
+ ;; sentence of its lead and the form that reads it; none is shown whole. Written as the agent's own cite entities by its first run on
+ ;; its branch (seon.task/agent-cites-tx, seon.agent/begin-run!); the agent changes its own with my.agent/cite! and uncite!. An empty
+ ;; vector gives it none.
+ :seon.config.agent/cites ["docs/agent.md#working-a-task" "docs/agent.md#merging" "docs/testing.md#testing-in-the-world"]
  ;; Unit: path, every agent process's working directory, shared, made at the fork server's boot.
  ;; No repository above it: an agent changes code through its REPL, never git (owner, 2026-10-22:
  ;; "no git in agents"); it reads and writes any file by its absolute path. At the bound: n/a.
@@ -921,9 +922,6 @@
  ;; Unit: ranks. Reciprocal rank fusion's k (Cormack et al. 2009 use 60; v1 used 10): measured on
  ;; the 283 pairs, 10 gave recall@10 0.451 and 60 0.448. Read by seon.vector/rrf.
  :seon.config.vector/rrf-k 10
- ;; Unit: bytes. An evaluation that allocated more is flagged on its card and row
- ;; (seon.render.ui/alloc-span). Provenance: render.ui's BIG-ALLOC literal (10 MiB).
- :seon.config.render/big-alloc 10485760
  ;; Unit: tokens a rendered value spends when its env names no budget (seon.render/print-html,
  ;; an agent's history row). Provenance: the literal 600 render.clj and
  ;; render.ui carried (2026-10-22), kept as it was.

@@ -145,13 +145,13 @@
  ;; what is stored of an eval's answer (:seon.repl/answer): its value made plain (seon.repl/record-details)
  :seon.eval/response [:and :seon.repl/answer :seon.db/plain]
  ;; an eval's details, each its own attribute, each only when present (seon.repl/record-details): the code; the
- ;; model's prose beside the call; the provider's call id (the reply's text and reasoning are its model call's,
+ ;; model's intent beside the call; the provider's call id (the reply's text and reasoning are its model call's,
  ;; :seon.model-call/reply, which an eval's turn number names); its run (until runs go); its 10 costliest contracted functions
  ;; ([{:var :calls :ms}], seon.profile); a value that names its render schema keeps that schema, and a value
  ;; that names its basis (@ctx, seon.ctx) the basis it is rendered from, in place of a copy (the page and the
  ;; model draw it from the branch at its t). The response is :seon.eval/response, whole, its value as plain data
  ;; (seon.contract/plainly) up to :seon.config.store/max-value-chars; never a text made for a reader (seon.print
- ;; prints it when it is sent or shown). The prose is kept as written, never parsed as it is recorded
+ ;; prints it when it is sent or shown). The intent is kept as written, never parsed as it is recorded
  :seon.eval/code :string
  :seon.eval/intent :string
  :seon.eval/call-id :string
@@ -280,7 +280,7 @@
                                                 {[:seon.cite/task :by :seon.task/id :as :task] [:seon.task/id :seon.task/plan :seon.task/kind]}
                                                 {[:seon.cite/name :by :schema/key :as :schema] [*]}
                                                 {[:seon.cite/name :by :ns/name :as :ns] [:ns/name :ns/doc]}]
-                             :seon.render/html seon.render.ui/cite :seon.render/model seon.render.ui/cite-model}
+                            }
                        [:seon.cite/id :seon.cite/id] [:seon.cite/of :seon.cite/of] [:seon.cite/depth :seon.cite/depth] [:seon.cite/order :seon.cite/order]
                        [:seon.cite/address {:optional true} :seon.cite/address] [:seon.cite/name {:optional true} :seon.cite/name] [:seon.cite/task {:optional true} :seon.cite/task]]
  ;; ---- tasks, runs, proof results, root's boot, turns and ends (session D1's proto.agents.facts.edn) ----
@@ -327,7 +327,7 @@
  ;; the declaration a task file last stated for this task (seon.task/load-tx), as EDN
  :seon.task/declared :string
  ;; config keys are attributes of the task, by their own names (schemas: seon.config.agent.edn, seon.config.merge.edn)
- :seon.task/task-fact [:map {:seon.db/attributes true :seon.ctx/pattern [* {[:seon.task/proofs :by :var/name :as :proved] :seon.db/var-fact} {[:seon.task/needs :as :needs] [* {[:seon.task/proofs :by :var/name :as :proved] :seon.db/var-fact} {[:seon.cite/_of :as :cites] :seon.cite/cite-fact}]} {[:seon.cite/_of :as :cites] :seon.cite/cite-fact} {[:seon.search/_of :as :searches] :seon.search/search-fact} {[:seon.task/examples :as :examples] [:seon.agent/key :seon.agent/description {[:seon.eval/_agent :as :evals] [*]}]}] :seon.render/html seon.render.ui/task :seon.render/model seon.render.ui/task-model}
+ :seon.task/task-fact [:map {:seon.db/attributes true :seon.ctx/pattern [* {[:seon.task/proofs :by :var/name :as :proved] :seon.db/var-fact} {[:seon.task/needs :as :needs] [* {[:seon.task/proofs :by :var/name :as :proved] :seon.db/var-fact} {[:seon.cite/_of :as :cites] :seon.cite/cite-fact}]} {[:seon.cite/_of :as :cites] :seon.cite/cite-fact} {[:seon.search/_of :as :searches] :seon.search/search-fact} {[:seon.task/examples :as :examples] [:seon.agent/key :seon.agent/description {[:seon.eval/_agent :as :evals] [*]}]}] :seon.render/html seon.render.ui/task-view}
                           [:seon.task/id :seon.task/id] [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name]
                           [:seon.task/plan :seon.task/plan] [:seon.task/execution :seon.task/execution]
                           [:seon.task/branch :seon.task/branch] [:seon.task/kind :seon.task/kind]
@@ -511,7 +511,7 @@
  ;; a turn whose agent's walk drew no status (its render threw, or no layout placed it): the done rule
  ;; cannot be read, so the run ends :error on it, never :green (seon.turn/status-now)
  :seon.turn/no-status [:and :seon.error/base [:map [:seon.error/type [:= :seon.turn/no-status]]]]
- ;; a model's eval call with no prose or no form, not run (seon.turn/call-problem): :problem why, :forms 0 for an empty one
+ ;; a model's eval call with no intent or no form, not run (seon.repl/call-problem): :problem why, :forms 0 for an empty one
  :seon.turn/invalid-call [:and :seon.error/base [:map [:seon.error/type [:= :seon.turn/invalid-call]] [:problem [:enum :no-intent :forms]] [:forms {:optional true} nat-int?]]]
  ;; a name an agent asked about (my.agent/source, callers, callees) that is no var on its branch nor
  ;; in its process: said, never answered as no callers or silence; :nearest the nearest existing
@@ -602,7 +602,7 @@
  ;; model round trip, the reply's evaluations, the turn's record (ms)
  :seon.model-call/split [:map [:tests-ms {:optional true} :int] [:context-ms :int]
                    [:model-ms {:optional true} :int] [:eval-ms {:optional true} :int] [:record-ms {:optional true} :int]]
- :seon.model-call/fact [:map {:seon.db/attributes true :seon.render/html seon.render.ui/turn :seon.render/model seon.context/turn-messages}
+ :seon.model-call/fact [:map {:seon.db/attributes true :seon.render/html seon.render.ui/model-call-view :seon.render/model seon.context/turn-messages}
                           [:seon.model-call/id :seon.model-call/id] [:seon.model-call/agent {:optional true} :seon.model-call/agent]
                           [:seon.model-call/n {:optional true} :seon.model-call/n] [:seon.model-call/origin {:optional true} :seon.model-call/origin]
                           [:seon.model-call/reply {:optional true} :seon.model-call/reply]

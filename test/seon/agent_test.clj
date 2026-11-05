@@ -1238,7 +1238,7 @@
 (deftest a-call-is-prose-and-its-forms
   ;; owner, 2026-10-29: a call is prose and one or more forms, run in order; one with no prose or
   ;; no form answers a typed error as its one result and runs nothing (docs/prompt.md)
-  (let [problem #'seon.turn/call-problem]
+  (let [problem #'seon.repl/call-problem]
     (is (nil? (problem "Add them." "(+ 1 2)")) "prose and one form")
     (is (= :no-intent (:problem (problem " " "(+ 1 2)"))) "no intent")
     (is (nil? (problem "Two." "(def a 1) (inc a)")) "two forms")
@@ -2202,3 +2202,26 @@
     (is (some? (:value atm)) "an atom's eval is recorded")
     (is (= "clojure.lang.Atom" (:seon.value/type (:value rec))) (pr-str rec))))
 
+
+(deftest evals-given-at-spawn-run-first-as-ordinary-evals
+  ;; docs/turn.md#an-eval-can-be-inserted: an agent spawned with :evals (pairs of prose and code) runs them on its one REPL
+  ;; queue before anything else, each recorded as any eval is, by whoever asked, at turn 0 and with no call id. One that
+  ;; throws is recorded with its error and the rest are not run, as the calls of a reply are not. A reader of the
+  ;; conversation then sees them in order and, in the request, as calls of their own.
+  (let [read (str "(let [rs (seon.context/records @seon.ctx/ctx (seon.agent/db))] "
+                  "{:turn (seon.agent/turn-now) "
+                  " :records (mapv (fn [[pos v _]] [pos (:seon.eval/by v) (:seon.eval/intent v) (:seon.eval/call-id v) (some? (get-in v [:seon.eval/response :ex])) (get-in v [:seon.eval/response :value])]) rs) "
+                  " :roles (mapv :role (mapcat #(seon.context/eval-messages {:db (seon.agent/db)} (second %)) rs))})")
+        code (str "(let [id (c/spawn! sys {:evals [[\"Add.\" \"(+ 1 2)\"] [\"Throw.\" \"(throw (ex-info \\\"boom\\\" {}))\"] [\"Never.\" \"(+ 3 4)\"]]}) "
+                  "r @(c/submit! sys id " (pr-str read) " {:origin :outside})] "
+                  "(c/kill! sys id) (:value r))")
+        [r] (in-agent [{:op :eval :agent "root" :code code}] {})
+        v (:value r)]
+    (is (= 0 (:turn v)) (pr-str r))
+    (is (= [[0 2 "root" "Add." nil false 3]
+            [0 2 "root" "Throw." nil true nil]
+            [0 2 "root" "Never." nil true nil]]
+           (mapv (fn [[pos & more]] (into (vec (take 2 pos)) more)) (:records v)))
+        "three ordinary evals at turn 0 in order, by whoever asked, none a model's call; the throw recorded, the next not run")
+    (is (apply = 1 (map - (rest (map (comp last first) (:records v))) (map (comp last first) (:records v)))) "issued one after another")
+    (is (= ["assistant" "tool" "assistant" "tool" "assistant" "tool"] (:roles v)) "each reaches the request as a call and its result")))

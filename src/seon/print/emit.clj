@@ -145,6 +145,32 @@
   {:malli/schema [:=> [:cat nat-int?] :string]}
   [n] (if (< n 1000) (str "~" n " tok") (str "~" (/ (Math/round (/ n 100.0)) 10.0) "k tok")))
 
+(defn- short-num
+  "n as a reader skims it: 873, 4.4k, 873k, 1.2M, 3.1B."
+  {:malli/schema [:=> [:cat :any] :string]}
+  [n]
+  (let [d (fn [x u] (let [r (/ (Math/round (* 10.0 x)) 10.0)] (str (if (== r (Math/floor r)) (long r) r) u)))]
+    (cond (< n 1000) (str (long n)) (< n 10000) (d (/ n 1000.0) "k") (< n 1000000) (str (Math/round (/ n 1000.0)) "k")
+          (< n 1000000000) (d (/ n 1000000.0) "M") :else (d (/ n 1000000000.0) "B"))))
+
+(defn ms-text
+  "Milliseconds as one wording: 0.21 ms, 5.2 ms, 873 ms."
+  {:malli/schema [:=> [:cat :any] :string]}
+  [ms] (cond (not (number? ms)) "–" (< ms 1) (format "%.2f ms" (double ms)) (< ms 100) (format "%.1f ms" (double ms)) :else (str (long ms) " ms")))
+
+(defn bytes-text
+  "A byte count as one wording: 812 B, 2.0 KB, 4.1 MB."
+  {:malli/schema [:=> [:cat :any] :string]}
+  [b] (cond (not (number? b)) "–" (< b 1024) (str (long b) " B") (< b 1048576) (format "%.1f KB" (/ b 1024.0)) :else (format "%.1f MB" (/ b 1048576.0))))
+
+(defn cost-text
+  "What work cost, the one wording wherever work is shown (an eval's text and its page row, a prove, a part, the tree):
+  `5.2 ms · 873k ticks · 4.1 MB · ~1.2k tok`, time, ticks, bytes allocated, and what the result costs the context in tokens
+  (`chars-tokens`, `tokens-text`); a number not given is left out. Cost is work done (docs/cost.md); time is measured, never judged."
+  {:malli/schema [:=> [:cat :map] :string]}
+  [{:keys [ms ticks bytes tok]}]
+  (str/join " · " (cond-> [] ms (conj (ms-text ms)) ticks (conj (str (short-num ticks) " ticks")) bytes (conj (bytes-text bytes)) tok (conj (tokens-text tok)))))
+
 (defn cut-words
   "The words of a text's cut, the same in a value (after its string's shown prefix) and in prose:
   `…+~N tokens` of what it omitted (omitted, its characters, sized by `chars-tokens`, at least one)

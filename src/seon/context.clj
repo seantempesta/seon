@@ -164,15 +164,6 @@
   [db cites]
   (vec (program/program-names db (into [] (comp (keep :seon.cite/name) (filter qualified-symbol?) (remove #(ref/task? db %))) cites))))
 
-(defn not-written
-  "What unwritten proof p should assert, by the plan's own words: the plan's sentences that name
-  it, or that it is not written yet when none does (the plan is on the page already): the task part's
-  to-prove (seon.render.ui/task-model, docs/render.md#a-part-answers-data)."
-  {:malli/schema [:=> [:cat :qualified-symbol :string] :string]}
-  [p plan]
-  (let [ss (filter #(str/includes? % (name p)) (str/split plan #"(?<=[.!?])\s+"))]
-    (if (seq ss) (str "not written yet; it should assert what the plan says: " (str/join " " ss)) "not written yet")))
-
 ;; ---- relevance: one calibrated score for a context and an item (docs/vector.md#relevance) ----
 
 (defn- item-text
@@ -511,35 +502,6 @@
   {:malli/schema [:=> [:cat :map] [:maybe :symbol]]}
   [c] (or (:seon.agent/ns c) (:seon.task/ns (:task c))))
 
-(defn namespaces-of
-  "The namespaces agent record c's work touches, as the namespaces part shows them, from ctx alone: the one its REPL is in
-  and its task's own first (`current-ns`, the task's until it moves, so a task written from a symptom, citing nothing
-  yet, draws it), then those of what its task and its needs cite (a var's
-  namespace, or a namespace cited itself) and of their proofs, once each, each {:names [...] :ns-form form}: its
-  names the task cites or its proofs call (their forms' :form/refs, as :proved holds them), and the form that reads
-  its ns form (its requires and aliases) and a line per definition, ``(clojure.repl/source ns)`` (the form that shows
-  a namespace's requires; doc does not hold them). It costs what it shows, never the namespace's size.
-  See docs/render.md#a-part-answers-data."
-  {:malli/schema [:=> [:cat :map] [:map-of :symbol :map]]}
-  [c]
-  (let [t (:task c)
-        needs (vals (:needs t))
-        named (for [cs (cons (:cites t) (for [n needs :when (not= :merge (ratom/realize (:seon.task/kind n)))] (:cites n)))
-                    x (vals cs) :let [n (ratom/realize (:seon.cite/name x))] :when (symbol? n)] n)
-        proved (for [ps (cons (:proved t) (map :proved needs)) v (vals ps) :when (:var/name v)] v)
-        proofs (map #(ratom/realize (:var/name %)) proved)
-        calls (for [v proved r (ratom/realize (get-in v [:form :form/refs])) :when (qualified-symbol? r)] r)
-        ns-of #(if (namespace %) (symbol (namespace %)) %)
-        ;; where the REPL is, then where it started: the task's own
-        own (distinct (keep identity [(current-ns c) (:seon.task/ns t)]))
-        names (group-by ns-of (filter namespace (concat named proofs calls)))]
-    ;; a map by name, in the order first named (a part answers a map: a vector is hiccup)
-    (apply array-map (mapcat (fn [n] [n (cond-> {}
-                                           (seq (names n)) (assoc :names (vec (sort (distinct (map (comp symbol name) (names n))))))
-                                           ;; named for what an agent asks for (the ns form is asked for beside :source)
-                                           true (assoc :ns-form (list 'clojure.repl/source n)))])
-                             (distinct (concat own (map ns-of (concat named proofs))))))))
-
 (defn task-data
   "The task's data: task t's run sections as data, the same each turn of a run: the task (its
   plan as it accumulated along :needs, prerequisites first); its write set, each program var cites
@@ -548,7 +510,7 @@
   is not and what it should assert in the plan's words (whether it fails, and why, is the
   proofs part's: it changes each turn); the wiki sections and the tasks cites name (a task by its plan, seon.ref/task-view). cites: what the task cites, its cite entities and its needs'
   (seon.task/task-cites). What `my.task/data` answers at the agent's REPL, on demand; the page's task part is
-  the pulled task's own renders (seon.render.ui/task-data, docs/render.md#a-part-answers-data)."
+  the pulled task's own renders (seon.render.ui/task, docs/render.md#a-part-answers-data)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/task [:sequential :map]] :map]}
   [db t cites]
   (let [{:keys [plan proofs]} (:seon.task/accumulated t)
@@ -568,7 +530,7 @@
                              (for [p proofs]
                                [p (if (doc/source-of db p)
                                     (list 'my.agent/prove #{p})
-                                    (not-written p plan))]))}
+                                    "not written yet")]))}
       (seq sections) (assoc :sections sections))))
 
 (defn cited
@@ -604,8 +566,54 @@
       {:task (assoc (own t) :needs (into {} (map-indexed (fn [i n] [i (own n)])) needs))
        :proved (into {} (for [ps (cons (:proved t) (map :proved needs)) v (vals ps) :let [n (:var/name v)] :when n]
                           ;; its verdict and failures, and its source (whether it is defined): its form's text
-                          [n (cond-> (into {} (for [k [:var/name :seon.test/status :seon.test/failures] :let [x (get v k)] :when (some? x)] [k (ratom/realize x)]))
+                          [n (cond-> (into {} (for [k [:var/name :seon.test/status :seon.test/failures :seon.test/ticks :seon.test/bytes] :let [x (get v k)] :when (some? x)] [k (ratom/realize x)]))
                                (get-in v [:form :form/src]) (assoc :form {:form/src (ratom/realize (get-in v [:form :form/src]))}))]))})))
+
+(defn form-at
+  "The form of src that opens at offset i, as written, up to its closing delimiter (strings and character literals read as such),
+  or nil when it never closes. A slice of src: text the db holds, found by position."
+  {:malli/schema [:=> [:cat [:maybe :string] [:maybe nat-int?]] [:maybe :string]]}
+  [src i]
+  (when (and src i)
+    (let [n (count src)]
+      (loop [j i depth 0 in-str? false]
+        (when (< j n)
+          (let [ch (.charAt ^String src (int j))]
+            (cond
+              in-str? (cond (= ch \\) (recur (+ j 2) depth true) (= ch \") (recur (inc j) depth false) :else (recur (inc j) depth true))
+              (= ch \") (recur (inc j) depth true)
+              (= ch \\) (recur (+ j 2) depth false)
+              (#{\( \[ \{} ch) (recur (inc j) (inc depth) false)
+              (#{\) \] \}} ch) (if (= 1 depth) (subs src i (inc j)) (recur (inc j) (dec depth) false))
+              :else (recur (inc j) depth false))))))))
+
+(defn test-shape
+  "Where an unwritten proof p goes, as the agent needs it to write one: its test namespace's `:require` entries that the example
+  uses (an alias it calls, `clojure.test`, the namespace under test), the helpers the example calls (the rest are `(dir ns)`), and
+  one test of it to copy: the shortest that uses a helper or `my.test`, else the shortest. Nil when the branch has no such
+  namespace yet (the agent makes it first). One index read, and each var of the namespace read once. See
+  docs/render.md#how-the-work-stands."
+  {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:maybe :map]]}
+  [db p]
+  (when-let [n (d/entity db [:ns/name (symbol (namespace p))])]
+    (let [vs (map #(d/entity db %) (d/q '[:find [?e ...] :in $ ?n :where [?e :var/ns ?n]] db (:db/id n)))
+          {tests true others false} (group-by #(= :test (:var/kind %)) vs)
+          names (mapv #(name (:var/name %)) others)
+          srcs (keep #(get-in % [:var/form :form/src]) tests)
+          calls? (fn [s h] (re-find (re-pattern (str "\\(" (java.util.regex.Pattern/quote h) "[\\s)]")) s))
+          uses? (fn [s] (or (str/includes? s "my.test/") (some #(calls? s %) names)))
+          src (first (sort-by count (or (seq (filter uses? srcs)) srcs)))
+          ns-src (get-in n [:ns/form :form/src])
+          under (str/replace (namespace p) #"-test$" "")
+          req (when-let [i (some-> ns-src (str/index-of "(:require"))] (form-at ns-src i))
+          entries (when req (re-seq #"\[[^\[\]]*(?:\[[^\[\]]*\][^\[\]]*)*\]" req))
+          keep? (fn [e] (let [alias (second (re-find #":as\s+(\S+?)[\s\]]" e))]
+                          (or (and alias src (str/includes? src (str alias "/"))) (str/includes? e "clojure.test") (str/starts-with? e (str "[" under " ")) (str/starts-with? e (str "[" under "]")))))
+          requires (when (seq entries) (str "(:require " (str/join " " (filter keep? entries)) ")"))]
+      (cond-> {:ns (symbol (namespace p))}
+        requires (assoc :requires requires)
+        (and src (seq others)) (assoc :helpers (vec (sort (map symbol (filter #(calls? src %) names)))))
+        src (assoc :example src)))))
 
 (defn status
   "How the agent of record rec (its ctx: its :db/id and its task) works on its task stands on its branch db, as data (task
@@ -620,7 +628,7 @@
   unmerged entries; a test run that failed as a whole (:seon.agent/test-error). It reads facts
   about the work only, never the conversation (its turns, evals and messages), so a turn's record
   draws it again only when it changed the work; turns left and a cut reply are the run's
-  (seon.render.ui/run-head). Nothing is held: each is a fact of db. :reasons is the done rule's
+  (seon.render.ui/agent-state). Nothing is held: each is a fact of db. :reasons is the done rule's
   own answer, the turn's check (seon.turn/work!), which the model and the page read as :refused. A design task's plan before its run (:no-design) is its run's, the run its newest model call names, so it waits for the first turn. opts :index, a function answering the reconciler's index of db (seon.reconcile/index; else
   one built cold), called only when a test outside the task's proofs is red (whether it is a
   regression or a stray red is main's claims: measured cold on a demo branch, 14.8M ticks and
@@ -687,9 +695,12 @@
                                                (or (deferred p) (= :deferred verdict)) :deferred
                                                (nil? src) :undefined (some? test-error) :not-run :else :unknown)
                                       fs (when-not test-error (:seon.test/failures v))
-                                      calls (when (and src (not= :pass st)) (callees db p))]]
+                                      calls (when (and src (not= :pass st)) (callees db p))
+                                      shape (when (= :undefined st) (test-shape db p))]]
                             (cond-> {:test p :status st}
+                              (or (:seon.test/ticks v) (:seon.test/bytes v)) (assoc :cost (cond-> {} (:seon.test/ticks v) (assoc :ticks (:seon.test/ticks v)) (:seon.test/bytes v) (assoc :bytes (:seon.test/bytes v))))
                               (and src (not= :pass st)) (assoc :source (print/code src))
+                              shape (assoc :shape shape)
                               (seq fs) (assoc :failures (failures fs))
                               (seq calls) (assoc :calls calls))))}
       (seq blockers) (assoc :refused blockers)
@@ -700,13 +711,6 @@
       (seq (:attention split)) (assoc :attention (:attention split))
       (seq (pm/divergence ch)) (assoc :its-merge-carries (pm/divergence ch))
       (and main base) (assoc :merge (pm/readiness base db (d/commit-as-db (:store db) main) moved)))))
-
-(defn status-model
-  "The status as the model is sent it (the declared model render of :seon.context/status): its
-  data, the done rule's raw :reasons left out (each is told as what to do, :refused). See
-  docs/render.md#a-part-answers-data."
-  {:malli/schema [:=> [:cat :map :map] :map]}
-  [_opts v] (dissoc v :reasons))
 
 (def ^:private eval-keys
   "The attributes of an eval a reader of the conversation reads (:seon.db/eval-fact less :seon.eval/agent and :seon.eval/opened). See docs/render.md#a-part-answers-data."
@@ -734,16 +738,19 @@
   text and reasoning are its model call's `turn-messages`, and the provider's format folds a reply's messages into one),
   then its tool message, the response printed now (seon.print/record-text, a function of the
   eval alone, and of the db for an eval that names its basis: opts :db, `basis-value`, the same bytes cold as live);
+  an eval with intent and no call id was asked, not called (docs/turn.md#an-eval-can-be-inserted): its call is made here from its
+  own id, intent and code, standing alone (no reply to name, so a model's message is never edited), and no reader asks who asked;
   anyone else's (the user's) is one user message
   {:by :code :response}, the response spliced as printed. See docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
   {:malli/schema [:=> [:cat [:maybe :map] :map] [:vector :seon.model/message]]}
-  [opts {:seon.eval/keys [by code intent call-id basis turn] :as e}]
-  (let [text (print/record-text (cond-> e basis (assoc-in [:seon.eval/response :value] (basis-value (:db opts) e))) render/model)]
-    (if call-id
+  [opts {:seon.eval/keys [id by code intent call-id basis turn] :as e}]
+  (let [text (print/record-text (cond-> e basis (assoc-in [:seon.eval/response :value] (basis-value (:db opts) e))) render/model)
+        cid (or call-id (when-not (str/blank? intent) (str "eval-" id)))]
+    (if cid
       [(cond-> {:role "assistant" :content ""
-                :tool-calls [(cond-> {:id call-id :code code} intent (assoc :intent intent))]}
-         (pos? (or turn 0)) (assoc :reply turn))
-       {:role "tool" :tool-call-id call-id :content text}]
+                :tool-calls [(cond-> {:id cid :code code} intent (assoc :intent intent))]}
+         (and call-id (pos? (or turn 0))) (assoc :reply turn))
+       {:role "tool" :tool-call-id cid :content text}]
       [{:role "user" :content (str "{:by " (pr-str by) " :code " (pr-str code) " :response " text "}")}])))
 
 (defn message-messages
@@ -990,36 +997,14 @@
   (let [db1 (if (= c (d/commit-id db)) db (d/commit-as-db db c))]
     (drawn-parts db1 (ctx/build db1 a (:seon.agent/branch (d/entity db a))))))
 
-(defn- part-change
-  "What changed of a part between two requests, by the data the model reads of it (its model render's value,
-  seon.render/model, else the part itself): when both are maps, {:changed {k new-value} :gone [k]} of
-  their top-level keys, the keys that kept their value left out; else nil, and the part is sent whole. The
-  owner's ruling (docs/decisions.md): a changed part that answers data sends what changed of it, never itself
-  again (the status, thousands of tokens, would otherwise be sent whole each turn). Top-level keys, each value whole, by
-  intent: clojure.data/diff answers a vector by position, padded with nils a model reads as values (one
-  proof's verdict would come as [nil nil {...}]); a changed key's value whole reads as the part does. See
-  docs/render.md#the-page-is-sent-as-what-changed."
-  {:malli/schema [:=> [:cat :any :any] [:maybe :map]]}
-  [was now]
-  (let [data #(if-let [m (render/model %)] (:value m) %)
-        a (data was) b (data now)]
-    (when (and (map? a) (map? b))
-      (let [changed (into (array-map) (for [[k v] b :when (not= v (get a k ::none))] [k v]))
-            gone (vec (remove #(contains? b %) (keys a)))]
-        (cond-> {} (seq changed) (assoc :changed changed) (seq gone) (assoc :gone gone))))))
-
 (defn- parts-message
-  "The one user message of the parts a request sent: {id hiccup} in the order of ids, nil for a part
-  that left; a part the request before also sent (in was, the parts as of then) as what changed of it
-  (`part-change`) when it answers a map, else printed whole; none when ids is empty."
-  {:malli/schema [:=> [:cat :map [:sequential :string] [:maybe :map]] [:vector :seon.model/message]]}
-  [live ids was]
-  (if (empty? ids)
-    []
-    [{:role "user" :content (print/text (vary-meta (apply array-map (mapcat (fn [k] [k (let [v (get live k)]
-                                                                                        (or (when (and was (contains? was k) (some? v)) (part-change (get was k) v)) v))])
-                                                                             ids))
-                                                   assoc :seon.print/full true))}]))
+  "The one user message of the parts a request sent, each printed as its render (seon.render/part-text), a blank line
+  between: those of ids that are in live, whole (a part that moved is sent again whole; one that left is not named: it
+  was said once); none when ids is empty or none of them is live."
+  {:malli/schema [:=> [:cat :map [:sequential :string]] [:vector :seon.model/message]]}
+  [live ids]
+  (let [texts (into [] (keep #(some-> (get live %) render/part-text)) ids)]
+    (if (empty? texts) [] [{:role "user" :content (str/join "\n\n" texts)}])))
 
 (defn- calls-of
   "The model calls of agent a of origin o that sent, [id n call-entity] oldest first (n: the turn a model's call answers,
@@ -1072,8 +1057,8 @@
   keeps its scrollback): each eval (eval-messages), message (message-messages) and prose reply
   (turn-messages), and the page's parts as one user message each request holds (`parts-message`):
   every part whole at the session's first request (before the records), after it the parts whose
-  content differs from what the previous model call recorded of them (:hashes) and nil for one that
-  left, at the turn's place in the records; none when none changed. So the request is the previous
+  content differs from what the previous model call recorded of them (:hashes), each whole, at the turn's place in the
+  records; none when none changed. So the request is the previous
   request's refs (read back from its model call when this process holds no print of them) and what
   was added. opts :parts, {id hiccup}, the agent's live walk's (seon.repl/page-hiccup; else drawn cold
   at db's commit), and :ctx, its @ctx at db (else drawn cold). A record the previous request sent that is gone (the agent trimmed its context
@@ -1113,19 +1098,7 @@
         hs (into {} (map (fn [[k v]] [k (hasch/uuid (pr-str v))])) live)
         ids (into (vec (for [k (keys live) :when (or whole? (not= (get old k) (get hs k)))] k))
                   (when old (sort (remove #(contains? live %) (keys old)))))
-        ;; the parts as the request before drew them, to send what changed of each: this process's, kept with its print
-        ;; of that request; else, for a model turn, drawn at the commit it recorded, so a turn's request is the same
-        ;; bytes whatever the process printed before (seon.context-test/a-run-printed-once-sends-what-a-cold-read-sends),
-        ;; drawn only when a part both requests sent moved, and once a process (the turn keeps its parts, :live, for the
-        ;; next). A read that is no model turn (an observer's, which keeps no print) is never drawn again to diff: it
-        ;; sends a moved part whole, and its record replays as sent (seon.server-test/a-later-read-draws-no-page-cold-
-        ;; and-costs-what-the-one-before-did)
-        prev-ref (when-not whole? (last (filter #(= :parts (first %)) prev)))
-        was (when (and prev-ref (some #(and (contains? live %) (contains? old %)) ids))
-              (cond (= prev-ref (:live-ref printed)) (:live printed)
-                    (= prev-ref (:was-ref printed)) (:was printed)
-                    model? (drawn-at db e (nth prev-ref 2))))
-        ref (cond-> [:parts e (d/commit-id db) whole? ids id] was (conj (nth prev-ref 2)))
+        ref [:parts e (d/commit-id db) whole? ids id]
         ;; a model's first request (whole) holds its task's example sessions right after the system message, then
         ;; the opening of its own session; a later one has them in the refs it continues
         ;; read from the task's datoms, so a task naming none costs no contracted call (examples-of is asked only when it names some)
@@ -1135,7 +1108,7 @@
                            [[:session (:session basis (:agent basis))] (delay {:ref [:session (:session basis (:agent basis))] :whole (session-open (:session basis (:agent basis)))}) nil [1 0 0 0]])))
         ;; every item beside its position, [group turn rank n]: the examples, the session's opening, the page whole, the
         ;; records by their turn numbers, then the page's change, last
-        current [[:parts id] (delay {:ref ref :whole (parts-message live ids was)}) nil (if whole? [2 0 0 0] [4 0 0 0])]
+        current [[:parts id] (delay {:ref ref :whole (parts-message live ids)}) nil (if whole? [2 0 0 0] [4 0 0 0])]
         ;; what the previous request sent, its refs in order: this process's print of them, else read back from the records
         before (when (and model? (not whole?)) (into [] (remove #(#{:section :hashes} (first %))) prev))
         ;; a print whose first refs are those (a later request's of the same session: the debug page's latest, drawn
@@ -1152,7 +1125,7 @@
         ps (mapv #(get-in cache [:parts %]) (:ids cache))]
     {:messages (into [{:role "system" :content help}] (mapcat :whole) ps)
      ;; the parts it drew, and those it drew of the request before (the same for every later request until the next call)
-     :printed (cond-> (assoc cache :live live :live-ref ref) was (assoc :was was :was-ref prev-ref))
+     :printed cache
      :sent (-> [help-ref] (into (map :ref) ps) (conj [:hashes hs]))
      :parts (into [[help-ref [{:role "system" :content help}]]] (map (juxt :ref :whole)) ps)}))
 
@@ -1177,7 +1150,7 @@
                    :reply (record-messages :seon.model-call/fact (d/pull db [:seon.model-call/id :seon.model-call/n :seon.model-call/reply :seon.model-call/reasoning] [:seon.model-call/id x]) db)
                    :example (example-messages db x t)
                    :session (session-open x)
-                   :parts (if (empty? (nth ref 4)) [] (parts-message (drawn x t) (nth ref 4) (when (< 6 (count ref)) (drawn x (nth ref 6)))))
+                   :parts (let [ids (nth ref 4)] (if (empty? ids) [] (parts-message (drawn x t) ids)))
                    :message (record-messages :seon.message/fact (d/pull db [:seon.message/id :seon.message/from :seon.message/body] [:seon.message/id x]) db))])
           (remove #(= :hashes (first %)) refs))))
 

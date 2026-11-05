@@ -95,6 +95,10 @@
     (write! sb (try (apply (first node) (rest node))
                     (catch Throwable e
                       [:span {:class "err"} (str (if (var? (first node)) (symbol (first node)) "a render") " threw: " (or (ex-message e) (str e)))])))
+    ;; a qualified symbol head names the render a printed part has (seon.render/part-form): the page calls the function it resolves
+    ;; to, the one expansion a var head has, never a second render path
+    (and (vector? node) (qualified-symbol? (first node)) (some-> (requiring-resolve (first node)) var?))
+    (write! sb (into [(requiring-resolve (first node))] (rest node)))
     (vector? node)
     (let [[tag & more] node
           tag (name tag)

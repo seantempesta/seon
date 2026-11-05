@@ -4,7 +4,7 @@ How a test is written in Seon: on a small world, with what it adds, cheaply, by 
 
 ## Testing in the world
 
-A test runs on **the world**: a small db shaped like production, plus what the test adds. Never
+How to write a test here: it runs on **the world**, a small db shaped like production, plus what the test adds. Never
 build a test on the real program, the real wiki or a store of its own: those cost seconds and a
 store, where the world costs about a millisecond and nothing (the owner, 2026-10-30).
 
