@@ -2,6 +2,16 @@
 
 This file holds the owner's standing rulings, one entry each: the rule, the owner's words and date, and where the rule is stated now; current truth and mechanism live in `AGENTS.md` and the wiki (`docs/`), and superseded or done rulings are kept verbatim in git history.
 
+## 2026-11-06 rulings
+
+### A reply with no calls pauses the agent, whatever its proofs say
+
+Owner, 2026-11-06: "I think that's fine to pause the agent if they don't do any tool calls"; "No more turns even if it's red. If we tell the agent that a reply with no tool calls will pause their session that's then we pause their session." Stated: docs/prompt.md, docs/turn.md#parked, seon.turn/act!.
+
+### A parked agent stays in memory, and replay is deliberate
+
+Owner, 2026-11-06: "I think we decided not to focus on making agents cheap (highly efficient) and not taking them out of memory. If by park you mean in the flow sense where it's a blocking wait and no cpu is used that's great. If it's replaying sessions -- no we know this is deeply problematic (fire-the-missles! kind of problematic) and we want to be intentional about replay and maybe even do selective replay". This tempers the automatic replay in the 2026-10-25 entry below, which was never built. Stated: docs/turn.md#parked.
+
 ## 2026-11-05 rulings
 
 The owner's rulings of 2026-11-05, on looking before building and on what makes an agent's context; they stand over earlier entries where they differ.

@@ -322,8 +322,8 @@
             eval-ms (long (profile/ms-since t2))
             _ (swap! agent/state assoc-in [:turn :evals] rs)
             t3 (profile/now-ns)]
-        ;; a reply with prose and no call is a message to the user: the turn ends, and the run
-        ;; waits for the user (the design's tool_choice auto)
+        ;; a reply with prose and no call pauses the agent until someone answers, whatever its proofs say
+        ;; (docs/decisions.md#a-reply-with-no-calls-pauses-the-agent-whatever-its-proofs-say)
         ;; (a blank or cut reply is no message: the next turn reads the same state)
         (when (and (empty? calls) (not (str/blank? (:text c))) (not (:truncated? c))) (request-stop! :waiting (:text c)))
         ;; what it answered and how it stopped (its reply, reasoning and finish), the reply's usage, model and counts
