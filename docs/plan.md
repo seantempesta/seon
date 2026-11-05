@@ -17,15 +17,19 @@ What Seon is for, where it stands, the one step being worked now, and the steps 
 
 **Measured as** turns to green and tasks merged. **Held to:** nothing crashes or hangs (every failure is data to the agent); everything shown is derived from the db at t; one mechanism per job; every change earns its place; a v1 capability is present or dropped on purpose ([parity](parity.md)).
 
-## Where it stands (2026-11-04): one way to make what an agent reads
+## Where it stands (2026-11-04): what an agent reads
 
-**All work on context and rendering follows [the Seon way](seon-way.md); read it before touching either, and do not build on what it says is going.** The owner's direction: what an agent reads is data on it or a query away, drawn by a declared render, so page and context adapt to the data with no hand assembly; entities have attributes, not rows; store what is retrieved ([rulings](decisions.md#2026-11-04-rulings)).
+**Look at what is already built before touching context or rendering: [ctx](ctx.md) and [render](render.md) say what exists.** The owner's direction: what an agent reads is data on it or a query away, drawn by a declared render, so page and context adapt to the data with no hand assembly; entities have attributes; store what is retrieved ([rulings](decisions.md#2026-11-04-rulings)).
 
 **The order now:**
 1. ~~**The simpler schema**~~, merged 2026-11-05: evals as attributes with ``:printed`` gone; a turn as a number, with the model call holding what a turn held; no runs, ``:seon.end`` or turn entities. Root sets judged attributes on the task; a task's earlier states are the db's history; an agent's records stay on its branch. ``runs/store`` was erased at its merge ([decisions](decisions.md)). 616a5224c7 is the control the core compares against.
 2. **The core,** one merge on top: the page as the last message, latest only (held on ``jolt/one-render-6-the-page-is-the-last-message``); the default render over the pattern; parts named by the agent's data; both renders in the component's tracked run; each part printed once; structure; the most specific render wins; the transcript as a declared render with ``seon.context/request``'s assembly deleted. Measured on the six tasks against the baselines before it merges.
 3. **Beside it:** page controls for delete, compact, forget and reset; reset through the writer; a browser spike for the image.
 4. **Then:** the image; agents improving renders by default.
+
+**Asked by the owner, 2026-11-05:** the agent's entity, pull and renders make most of its context, teaching it the system, its task and how messaging works (``seon.context/the-agents-data-makes-its-context``, design first). Agents declaring a render of their own is built and tested ([ctx](ctx.md#adding-a-datum-and-its-render)); no prompt teaches it yet.
+
+**Costs still open on the core step:** latest-only text costs more uncached tokens per turn until the page is small: on method-key about 3.5 times the baseline with cites still on the page, one run. Moving cites off the page should bring it to about 1.3k tokens, predicted and unmeasured. An image costs about 990 tokens uncached per turn, read names exactly at 1300 by 1300 pixels and invented them on a taller page, and needs a browser whose memory and time are unknown. Whether any of this makes agents better is not known until the six-task comparison.
 
 A task holds how its work stands and ended ([reconcile](reconcile.md#a-task-holds-how-its-work-ended)).
 
@@ -57,6 +61,9 @@ A task holds how its work stands and ended ([reconcile](reconcile.md#a-task-hold
 | The core | After a layout changes, old parts stay on the page for a pass | ``seon.render/a-layout-change-leaves-no-old-parts``: trace it first |
 | The core | Text printed where no agent reads it | ``seon.print/the-one-printer-is-for-context`` |
 | Beside the core | Result handles are a counter, so a curated cut shifts them | ``seon.repl/a-handle-names-its-value`` |
+| The core | ``seon.context/page-lists``, ``seon.render.ui/page-cites`` and ``seon.context/namespaces-of`` are hand assembly beside the pull and its renders | with ``seon.context/the-agents-data-makes-its-context`` |
+| The core | The debug page draws from root, by main's code, at up to 5 GB a draw on a real page; a live agent should draw its own, and an ended agent's needs an answer | ``seon.render/the-debug-page-reads-a-branchs-own-renders`` |
+| Beside the core | Smaller: two identities on an agent (``:seon.agent/id``, ``:seon.agent/key``); two html renders of an eval; several words for a part (part, unit, component, tile); ``my.task/status`` and ``my.task/data`` computing what parts hold; a branch as a keyword on four entities; ``begin-run!``, ``run-head`` and other names that still say run; ``#c-rows``, ``:as :row``, the ``:rows`` keys, ``seon.print.select/fill-rows``, ``seon.program/form-row`` and other names that still say row | no task yet |
 | Beside the core | Reset forks by hand: not through the writer, no turn loop from the reconciler, not at any eval; cutting between two calls of one reply is untried | ``seon.agent/reset-an-agent-to-any-point`` |
 | Beside the core | A proof child's death says nothing | ``seon.agent/a-proof-child-that-died-says-why`` |
 | Beside the core | A re-registered attribute of another type is refused only at the write | ``seon.db/registering-says-a-type-cannot-change`` |
@@ -71,7 +78,7 @@ A task holds how its work stands and ended ([reconcile](reconcile.md#a-task-hold
 | Now, known broken | The session list reads every key when it draws, with no cost proof | not filed; said in the merge message of 02dd5f568f |
 | Now, known broken | 15 Jolt gates fail on the base pin too; a red the same as before isn't green | ``jolt.host/the-gates-red-before-the-alias-pin``, with the pin |
 | Now, known broken | About 23 attributes are named at most once in src, likely written and never read | Optimization to check and delete |
-| Now, known broken | ``jolt/render-core`` adds mechanisms that break the one way (``docs/seon-way.md``): a tail placement (``:seon.render/place``, ``[:tail ...]``), ``:seon.render/parts``, ``part-rank``. The turn line and order should be the pull and a render | to remove or put to the owner |
+| Now, to judge | ``jolt/render-core`` adds a tail placement (``:seon.render/place``, ``[:tail ...]``), ``:seon.render/parts`` and ``part-rank``, and carries inserted evals. Each is judged by whether the pull's order and the existing renders already do it, by the code and tests | with ``seon.context/the-agents-data-makes-its-context`` |
 | Now, known broken | Nothing merged: ``history``, ``my.db/at`` (owner hasn't said), ``jolt/insert-and-run``, an opening of inserted evals gave 0 of 6 replies with text on the one shape tried | open |
 | After | History across all kept branches grows without a measure (``seon.union``) | ``seon.db/history-across-kept-branches-is-measured`` |
 | Each merge | The standing root misses merges while the main tree is on a topic branch (``bin/update``) | update it at each merge of the schema work |
@@ -92,7 +99,7 @@ A task holds how its work stands and ended ([reconcile](reconcile.md#a-task-hold
 
 **The six real tasks on batch 86** (REPL work only): one merged green (reconcile, 11 turns), five capped at 40 turns (1.2-3.0M tokens). Their Seon-side causes, the context session's review: an eval that throws loses its turn's recording (fixed in batch 89: Datahike's "Query for unknown vars" carried `datalog.parser.type.Variable` records into the eval's error map, the store refused its record, and the refused write ended the turn; a record is now made plain where it is built, and a refused one answers the eval ([failure points](failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map))); big results re-sent every turn; host errors with no var or line. The six rerun on batch 87, on a worktree root.
 
-**In flight** (jolt/debug-timeline, unmerged): the debug tab is a timeline of wire requests ([the debug page](render.md#the-debug-page-is-the-wire-request)); an agent's page drawn from its branch is a kept walk ([render](render.md#a-page-is-a-kept-walk)); a reaction's rerun indexes only the reads it gained or lost and each list is a component of its own ([lists](render.md#a-layout-places-its-lists)). Known, the agent's hot path: its page walk costs about 0.1 MB and 70 contracted calls per eval of the session for each eval it makes (30 MB at 300 evals, from 0.36 MB per eval), the lists that changed rerun over their rows; the owner, 2026-11-03: no new mechanism for it ("We are using our existing caching system not making another system right?").
+**In flight** (jolt/debug-timeline, unmerged): the debug tab is a timeline of wire requests ([the debug page](render.md#the-debug-page-is-the-wire-request)); an agent's page drawn from its branch is a kept walk ([render](render.md#a-page-is-a-kept-walk)); a reaction's rerun indexes only the reads it gained or lost and each list is a component of its own ([lists](render.md#a-layout-places-its-lists)). Known, the agent's hot path: its page walk costs about 0.1 MB and 70 contracted calls per eval of the session for each eval it makes (30 MB at 300 evals, from 0.36 MB per eval), the lists that changed rerun over their members; the owner, 2026-11-03: no new mechanism for it ("We are using our existing caching system not making another system right?").
 
 **Open:** the REPL fallback's Jolt follow-ups (`seon.repl/the-repl-fallback-keeps-its-forms-position`); step 2 (the text index as a secondary index), step 3 (the ranker), waiting on the owner's order.
 
@@ -106,7 +113,7 @@ A task holds how its work stands and ended ([reconcile](reconcile.md#a-task-hold
 - **Batch 82, an eval's record reads as its live response did** (the context session's find: a prove's tool message was its whole value, ~15.8k tokens, where the live one is one line).
 - **Batches 83 and 84, the first live L2 session's review** (cc7e6ac413, "a failing form at load names the definition": it did real work and capped at 40 turns; an independent review found these). 83, grep: an option it does not take is refused, naming the ones it takes (`docs/agent.md` had taught `:k`; six evals passed search's `:kinds`); a string holding a regex's operators that matches nothing answers `:my.agent/regex-text` with its regex form (eight evals answered `[]`); `:ns` is a name and what is under it. 84, the done rule: a red main was red on too at the merge base is main's, neither a regression nor a stray red, and only a test the branch wrote is offered as a proof to register (the session was told to register a test of main's its environment failed) ([how the work stands](render.md#how-the-work-stands)).
 
-**Open from that review:** a repeated eval prints its value whole again (`:again`; the same two calls ran three times): a pointer in its place would cut what the agent is sent, so the context session asks the owner. `tests-reaching` already answers nearest first (150 rows are what the loader reaches). The reader's repair of a missing closer can land at a later line and change the code's meaning (one turn lost, once): queued low, each repair to name the opener it closed. `seon.check/a-paused-proc-takes-nothing-in-backpressure`, red once under load.
+**Open from that review:** a repeated eval prints its value whole again (`:again`; the same two calls ran three times): a pointer in its place would cut what the agent is sent, so the context session asks the owner. `tests-reaching` already answers nearest first (150 results are what the loader reaches). The reader's repair of a missing closer can land at a later line and change the code's meaning (one turn lost, once): queued low, each repair to name the opener it closed. `seon.check/a-paused-proc-takes-nothing-in-backpressure`, red once under load.
 
 **Step 3, the ranker, first result:** a logistic reranker over search's own signals plus the request's name overlap, recency and co-change, fitted on 222 symptom-only training requests (DeepSeek-written, `claude_scratch/context-lab/data/req/train.jsonl`), judged on the 49 dev requests: no gain (rank 1 20 to 21, top 10 37 to 37). The headroom is in the order, not the recall: a changed item is in search's top 100 for 91-92% of tasks, first for 21-41%. Next: a cross-encoder reranker (a small model scoring the request beside each candidate, llama.cpp as the embedder runs), judged offline on the exported top 30 first.
 
@@ -214,7 +221,7 @@ Then (ad9f049dc6, d7f1f1cee4, fbb83163a8): the contract check is per function (a
 
 **Overnight 2026-10-29, merged so far** (batches 6-10 and singles, 375c42252e ... 063ce028e7), from four audits (costs mined from every test's recorded per-function spend; an idle root, the fork server and a turn measured; duplicate and dead code; test waste):
 - A turn: root 2.96 GB -> ~670 MB a scripted turn (the render proc prints root's context only for a viewer; health only when read; a green verdict is found by its file); an agent's test index comes made from the fork server (19.2 M ticks / 136 MB -> 2.2 k / 1.2 KB); its first write finds its nodes decoded (11-16 -> 7-8 MB); its test run is dealt across children (262 tests 92 -> 49 s).
-- Tests: a test spends at most 10 G ticks and its budget follows its own history (max(4 G, 10 x its median)); scripted agent tests share one root a shard; the nine heaviest tests under 1.4 G; restart tests from cloned stores; the merge gate names exact tests; a form's row is one seek; every digest takes the Jolt and Chez pins.
+- Tests: a test spends at most 10 G ticks and its budget follows its own history (max(4 G, 10 x its median)); scripted agent tests share one root a shard; the nine heaviest tests under 1.4 G; restart tests from cloned stores; the merge gate names exact tests; reading a form is one seek; every digest takes the Jolt and Chez pins.
 - Jolt: a byte budget on run-interruptible (seon.repl's use: the context session's branch); lazy seqs claim nothing for pure producers when threaded (a string's char seq 272 -> 80 B a step).
 - Found, not a regression: cost proofs measured one of two regimes by run order (Jolt's first thread); the audit's "22% store setup" was mostly charged to the wrong test.
 Then (87387c1c8d, d5f6399975): the context session's ref-depth, reviewed (the causes of md-scan's lost turns); a fork-server step that throws answers and the server serves on; cost proofs hold in any shard order (a print test left the printer armed; a :log proof is fitted on the cost less its fixed part); an agent gaining its first test namespace updates the reach graph (721 -> 66 MB; a working agent ends at ~190 MB, was ~270); ten agents ready in 172 ms on an unmoved main; `bin/check scale-work` and `spawn-phases` measure them (root + fork server + ten working agents 2.9-4.5 GB on a busy machine: re-run quiet).
@@ -248,7 +255,7 @@ How to work them: merge batches through a temporary worktree when a helper holds
 
 ## Now: one step
 
-The current order is [where it stands](#where-it-stands-2026-11-04-one-way-to-make-what-an-agent-reads). What follows is the longer goal, and where it speaks of runs or turns as things, they are being removed.
+The current order is [where it stands](#where-it-stands-2026-11-04-what-an-agent-reads). What follows is the longer goal, and where it speaks of runs or turns as things, they are being removed.
 
 **Step 1: one real task, end to end, through Seon.** Done when an agent attached to a real task file entry finishes it: green, merged by Seon into main, written back, and the owner can watch the whole run on its chat page. Nothing else is built until this works. The known problems in its way, in order (each is a task with its proof). Where it stands (2026-10-30, afternoon): md-scan #29 went green on its proofs and the merge gate held it on a candidate missing its schema resource, now fixed; its agent is to be released on main with batch 41, the first task merged by Seon ([above](#2026-10-30-afternoon)).
 
@@ -291,7 +298,7 @@ Each step is done when its demo runs, measured.
 5. **Work the system can check**: contracts with cost bounds on every function a change touches, the composed bound within the task's budget.
 6. **Root is main, one system**, then a **self-modifying environment**.
 
-Beside these, the missing and partial rows of [parity](parity.md) are the backlog.
+Beside these, what [parity](parity.md) marks missing or partial is the backlog.
 
 ## Waiting on the owner
 
