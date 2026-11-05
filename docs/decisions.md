@@ -438,7 +438,7 @@ The owner's rulings of 2026-10-25, each with his words and where it is now state
 
 Owner, 2026-10-25, on main-first delivery (agent loop) against delivery by merging a fact from the sender's branch (ctx-atom §11): "Launch a comparison. I would prefer real flow semantics where processes are independent, but not at the cost of stability and performance and complexity. We either have a better design or we do the simple one that works". Result (agent loop, 2026-10-25, design §3a 16066cc0b): main-first, with `:seon.run/taken`; 4.96 ms vs >=16.79 ms a delivery, the reconciler reads only main, no lost wakes in either over 2,000 schedules. Stated in: docs/turn.md §3a on ``jolt/agent-loop``.
 
-### The related-section count is a config key; one problem-row helper's bounds accepted
+### The related-section count is a config key; one problem-entry helper's bounds accepted
 
 Owner, 2026-10-25: approved one new config key, how many related wiki sections the screen shows (0 turns it off); accepted raising 5 derived-problem cost proofs' call bounds by one contracted call per problem, for one helper in place of 8 copies. Stated in: this entry.
 
@@ -554,7 +554,7 @@ Owner, 2026-10-26: "I was thinking the webui needs to be built from rendering th
 
 ### Fix causes, not symptoms: the repeat rule is under investigation
 
-Owner, 2026-10-26 morning: "the repeat thing sounds like instructions or formatting and we should fix it not patch it. investigate." and "Design and launch fixes for all the F issues and ask me if you aren't sure how to fix them. We want less hacks and more fixing root causes". The provisional repeat rule (told once, ended at the second in a row) is a patch; the live-agents session classifies every recorded repeat by what the agent saw before it, and the fixes go to those causes (instructions, response format, the screen), after which the rule is expected to go. The pipeline's F1-F4 are fixed at their causes. The owner also approved deleting the superseded old branches (the scratch paper deleted-branches-2026-10-26.txt (git history)) and archiving finished sessions. Stated in: not yet.
+Owner, 2026-10-26 morning: "the repeat thing sounds like instructions or formatting and we should fix it not patch it. investigate." and "Design and launch fixes for all the F issues and ask me if you aren't sure how to fix them. We want less hacks and more fixing root causes". The provisional repeat rule (told once, ended at the second consecutive time) is a patch; the live-agents session classifies every recorded repeat by what the agent saw before it, and the fixes go to those causes (instructions, response format, the screen), after which the rule is expected to go. The pipeline's F1-F4 are fixed at their causes. The owner also approved deleting the superseded old branches (the scratch paper deleted-branches-2026-10-26.txt (git history)) and archiving finished sessions. Stated in: not yet.
 
 ### Overnight budget $30; old branches triaged forward; ctx built render-first
 

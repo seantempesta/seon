@@ -3,6 +3,6 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.root-test/root-threads-are-what-root-declares}}
  {:seon.task/name "call-checks-the-origin"
-  :seon.task/plan "What exists: `POST /call` (the handler in `seon.web`, `seon.web/requests`) submits forms to one or every live agent and calls root's functions, and it reads no Origin or Sec-Fetch-Site header. Any page open in the owner's browser can POST to 127.0.0.1:<port>/call. v1 refused cross-origin on every POST (::same-origin middleware, ~/src/seon/src/seon/render/route.clj). Correct: refuse (403, recorded) a POST whose Origin is present and not the dashboard's own origin, or whose Sec-Fetch-Site is cross-site; one row in docs/failure-points.md."
+  :seon.task/plan "What exists: `POST /call` (the handler in `seon.web`, `seon.web/requests`) submits forms to one or every live agent and calls root's functions, and it reads no Origin or Sec-Fetch-Site header. Any page open in the owner's browser can POST to 127.0.0.1:<port>/call. v1 refused cross-origin on every POST (::same-origin middleware, ~/src/seon/src/seon/render/route.clj). Correct: refuse (403, recorded) a POST whose Origin is present and not the dashboard's own origin, or whose Sec-Fetch-Site is cross-site; one entry in docs/failure-points.md."
   :seon.task/kind :work
   :seon.task/proofs #{seon.web-test/a-cross-origin-call-is-refused}}]
