@@ -67,8 +67,8 @@ A task holds how its work stands and ended ([reconcile](reconcile.md#a-task-hold
 | Now, known broken | Handles are a counter, and a repeated answer is sent again whole | ``jolt/handle-names-value``, review found host values sharing a handle |
 | Now, known broken | Agents go quiet and stop writing: silent at call 2 wrote in 2 of 5 fresh sessions against 27 of 27 with text, nearly all on one task. The cause isn't known. The prompt line is on main at 7baa40440d, not yet seen working | watch live runs |
 | Now, known broken | Breadth, ref and method-key have never merged, so half the benchmark can't show improvement | not investigated |
-| Now, known broken | The session list reads every key when it draws, with no cost proof | filed by Optimization's review |
-| Now, known broken | 16 Jolt gates fail on the base pin too; a red the same as before isn't green | Optimization files a task naming them |
+| Now, known broken | The session list reads every key when it draws, with no cost proof | not filed; said in the merge message of 02dd5f568f |
+| Now, known broken | 15 Jolt gates fail on the base pin too; a red the same as before isn't green | ``jolt.host/the-gates-red-before-the-alias-pin``, with the pin |
 | Now, known broken | About 23 attributes are named at most once in src, likely written and never read | Optimization to check and delete |
 | Now, known broken | ``jolt/render-core`` adds mechanisms that break the one way (``docs/seon-way.md``): a tail placement (``:seon.render/place``, ``[:tail ...]``), ``:seon.render/parts``, ``part-rank``. The turn line and order should be the pull and a render | to remove or put to the owner |
 | Now, known broken | Nothing merged: ``history``, ``my.db/at`` (owner hasn't said), ``jolt/insert-and-run``, an opening of inserted evals gave 0 of 6 replies with text on the one shape tried | open |
