@@ -884,7 +884,7 @@
                                                (seq diffs) (assoc :seon.repl/differs diffs))})
                      (next at) {:refused (refuse :ambiguous (str (which k) "the old text occurs " (count at) " times: give more of it, so it is one") (lines-at at))}
                      :else {:at (first at) :old old :new new})))
-         ;; how one change moves the delimiters, what the refusal of an edit that leaves the definition unbalanced names
+         ;; how one change moves the delimiters: what an edit refused for leaving the definition unbalanced names
          unbalanced (fn [k [old new]]
                  (let [dn (reader/delimiters new) do (reader/delimiters old)]
                    (when (or (not= (reader/delimiter-counts dn) (reader/delimiter-counts do))
