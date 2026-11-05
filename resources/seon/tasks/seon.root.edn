@@ -106,4 +106,7 @@
  {:seon.task/name "a-source-fact-the-store-refuses-loses-nothing"
   :seon.task/plan "Found 2026-11-05 on jolt/simpler-schema, in seon.source-test/main-s-program-follows-the-checkout-while-root-runs-and-across-a-restart: when the source import failed (seon.source/unanalyzable), the store refused root's source fact (konserve.jolt.fasl: no stable encoding for clojure.lang.PersistentTreeMap), and seon.root/import-source! appended that to :error, so the fact's own values were lost. Cause to find: which value of the failed import's fact is a sorted map. Correct: the fact is plain data (seon.contract/plainly at its write, or the value's owner), and the failure stays readable. Reproduce by making a source form the analyzer rejects."
   :seon.task/kind :work
-  :seon.task/proofs #{}}]
+  :seon.task/proofs #{}}
+ {:seon.task/name "a-running-root-spawns-the-binary-it-was-built-as"
+  :seon.task/plan "Seen 2026-11-05 in the standing store's problems before its erase, 32 rows of 5 kinds: target/seon ended before its model loaded (exit 1), the config does not satisfy :seon.config/config, with keys missing or unknown (:seon.config.store/max-value-chars, :seon.config.render/similar, :seon.config.native/sqlite-lib). Cause not confirmed, the likely one: a root spawns its model child by the path target/seon, and building another branch in that tree replaces the binary under it, so the child and the root's config disagree. Correct: a process a root spawns is the root's own build (its binary held open, or named by generation), so no rebuild reaches it; seon.check-test/a-stale-binary-is-refused is this class's neighbour. Proof to write: replacing the file at the path leaves a running root's next child its own build."
+  :seon.task/kind :work}]

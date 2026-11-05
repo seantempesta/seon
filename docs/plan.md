@@ -46,6 +46,9 @@ A task holds how its work stands and ended ([reconcile](reconcile.md#a-task-hold
 | The core | When the source import fails, the store refuses root's source fact over a sorted map | ``seon.root/a-source-fact-the-store-refuses-loses-nothing`` |
 | The schema, now | A wake that ran no turn read the previous wake's end: a throw before the first turn could park the task and lose the message that woke it | done: ``seon.agent-test/a-wake-that-ran-no-turn-has-no-end`` |
 | The schema, now | Tests go red in an agent's fork and green under ``bin/test``, blocking finished work; a test at an agent's REPL could end it | done: the ``agent-tests`` check |
+| Needs the owner's go (a Jolt pin) | A proof written before its function reads a stale red: the alias is compiled as a class, so refs, digest and message are all wrong, and the same text run again answers the finished run | ``jolt.analyzer/a-missing-var-through-an-alias-says-no-such-var-in-any-namespace`` |
+| Beside the core | The fork server's step threw on a map in a commit's tx-data | ``seon.fork-server/a-tx-step-that-threw-on-a-map-says-which`` |
+| Beside the core | A root's model child ended on a config its binary did not know | ``seon.root/a-running-root-spawns-the-binary-it-was-built-as`` |
 | Beside the core | A first search allocates about 11 MB more after a long history on one root, with its index current | ``seon.doc/what-a-first-search-allocates-after-a-long-history`` |
 | The core | The debug page draws a branch by main's code, and root's walk a branch's layout by main's | ``seon.render/the-debug-page-reads-a-branchs-own-renders``, ``seon.render/roots-walk-of-a-branch-draws-the-branchs-layout`` |
 | The core | Status repeats every failure in full: 22 reds, 32k tokens a turn | ``seon.context/the-status-declares-its-summary`` |
