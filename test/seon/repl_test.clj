@@ -155,6 +155,14 @@
            (is (= 4 ((resolve 'x.repl-edit/w) 2)) "and it runs"))
          (let [r (repl/edit! 'x.repl-edit/l [["(loop [i 0" "(loop [i 0"] ["0 acc" "0 acc"]])]
            (is (= :overlap (:seon.repl/refused-because r)) (str "two changes over one text: " (pr-str r))))
+         ;; data (12120, ref/an-alias, seven edits in a row): a change that starts inside the docstring and opens an arity the
+         ;; edit never closes was refused as "a delimiter paired with another kind", naming no place; the answer names the
+         ;; delimiter left open and its line in the new definition
+         (repl/eval-string "(in-ns 'x.repl-edit) (defn d\n  \"Doc one.\n  Doc two.\"\n  [x]\n  (inc x)) (in-ns 'user)" {})
+         (let [r (repl/edit! 'x.repl-edit/d [["Doc two.\"\n  [x]" "Doc two.\"\n  ([x] (d x 0))\n  ([x y]"]])]
+           (is (= :unbalanced (:seon.repl/refused-because r)) (pr-str r))
+           (is (str/includes? (:seon.error/message r) "a ( left open at its line 1, \"(defn d\" (the definition itself: close it at its end)") (:seon.error/message r))
+           (is (not (str/includes? (:seon.error/message r) "another kind")) (:seon.error/message r)))
          (finally (reset! agent/state old) (remove-ns 'x.repl-edit)))))
 
 (deftest a-reply-comes-after-its-commit
@@ -497,7 +505,7 @@
               ["(my.schema/forms (keyword \"seon.task\" \"outcom\"))" :text ":seon.task/outcome"]
               ["(my.agent/callers (keyword \"seon.task\" \"outcom\"))" :text ":seon.schema/unknown-key"]
               ;; a help address that is no section names the sections whose text holds it
-              ["(:nearest (my.agent/help \"schema\"))" :text "docs/"]
+              ["(:nearest (doc \"schema\"))" :text "docs/"]
               ["(clojure.repl/source seon.reconcile)" :text "(ns seon.reconcile"]
               ;; then every definition, privates included, a line each (pipeline 1's F4: a design took
               ;; the ns form alone for all that was recorded and spent five turns finding the privates)
@@ -639,8 +647,8 @@
           "the help page's form runs in a real agent (that it is written, drawn and redrawn: seon.ctx-test/a-search-is-a-member-a-swap-adds-and-changes)")
       (is (str/includes? (printed "(get (my.schema/forms) :seon.task/task)") ":seon.task/own") "a schema's form")
       (is (str/includes? (printed "(my.schema/register! :app.workout/set [:map [:reps :int] [:kg :double]])") ":app.workout/set") "a new schema registers")
-      (is (str/includes? (printed "(help)") "docs/agent.md#done") "help lists the page's sections, from the branch's db")
-      (is (str/includes? (printed "(help \"done\")") "The judge counts exactly") "and one section's text"))))
+      (is (str/includes? (printed "(help)") "You are a Seon agent") "help is the system prompt, from the branch's db")
+      (is (str/includes? (printed "(doc \"done\")") "The judge counts exactly") "and of an anchor of it, the section's text"))))
 
 (deftest a-name-that-is-no-var-says-so
   ;; the live rounds (the archived paper live-2026-10-25.md (git history)): (my.agent/callers 'seon.proof/status) answered [],
@@ -741,13 +749,13 @@
     (is (str/starts-with? (context/help-text db) "# The agent\n\nYou are a Seon agent") "the page, made from its sections")
     (is (nil? (doc/page db0 context/help-page)) "a db without the wiki holds no help page")))
 
-(deftest help-reads-any-address-and-lists-on-a-miss
-  ;; dogfood 2026-10-25: (my.agent/help "references") answered nil, three evals lost. Help is the
+(deftest doc-reads-any-address-and-lists-on-a-miss
+  ;; dogfood 2026-10-25: (my.agent/help "references") answered nil, three evals lost. Doc is the
   ;; wiki's one view: the help page at :summary, any section at :code, and on a miss what it
   ;; did not find, the nearest addresses and the form that lists the rest, never nil or a page dump
   (let [[toc anchor other miss] (rest (at/in-agent #(vector {:op :context :agent (:agent %)}
-                                                       "(my.agent/help)" "(my.agent/help \"done\")" "(my.agent/help \"docs/vector.md#the-model\")"
-                                                       "(my.agent/help \"references\")")))
+                                                       "(doc \"docs/agent.md\")" "(doc \"done\")" "(doc \"docs/vector.md#the-model\")"
+                                                       "(doc \"references\")")))
         printed #(str (:text %))]
     (is (str/includes? (printed toc) "docs/agent.md#done") "no argument: the help page's sections at summary")
     (is (str/includes? (printed anchor) "The judge counts exactly") "an anchor of the help page")
@@ -755,7 +763,29 @@
     (is (= #{:no-section :nearest :read-one} (set (keys (:value miss)))) "a miss is the declared map, not nil")
     (is (some #(str/starts-with? % "docs/references.md") (:nearest (:value miss))) "a miss names the nearest addresses: the page that holds the word")
     (is (< (count (printed miss)) 1500) "and not the help page: a miss costs what it names")
-    (is (str/includes? (printed miss) "my.agent/help") "and the form that reads one")))
+    (is (str/includes? (printed miss) "lists a page's sections") "and the form that reads one")))
+
+(deftest the-repl-tools-answer-in-words-in-every-namespace
+  ;; owner, 2026-11-05: doc, dir, source and source-fn work bare and qualified in any namespace, and a name that is none,
+  ;; a var where a namespace was meant, say so with the nearest names, never a silent nil, blank or contract error
+  (let [forms ["(with-out-str (clojure.repl/doc map))" "(with-out-str (doc map))" "(with-out-str (doc nope-x))" "(with-out-str (dir nope-x))"
+               "(with-out-str (dir map))" "(with-out-str (source nope-x))" "(with-out-str (clojure.repl/source nope-x))"
+               "(clojure.repl/source-fn 'my.agent/named)" "(with-out-str (doc :var/form))" "(do (ns x.fresh) (with-out-str (doc map)))"
+               "(with-out-str (in-ns 'user) (clojure.repl/source my.agent/named))" "(with-out-str (doc if))"]
+        items (rest (at/in-agent #(into [{:op :context :agent (:agent %)}] forms)))
+        by (zipmap forms items)
+        out #(str (:value (by %)))]
+    (is (every? #(not (:ex %)) items) (pr-str (map :ex items)))
+    (is (str/includes? (out (first forms)) "clojure.core/map"))
+    (is (str/includes? (out "(with-out-str (doc map))") "clojure.core/map") "bare")
+    (is (str/includes? (out "(with-out-str (doc nope-x))") "nope-x names no") "a name that is none says so")
+    (is (str/includes? (out "(with-out-str (dir nope-x))") "nope-x names no"))
+    (is (str/includes? (out "(with-out-str (dir map))") "is a var, not a namespace") "a var where a namespace was meant")
+    (is (str/includes? (out "(with-out-str (source nope-x))") "nope-x names no"))
+    (is (str/includes? (out "(with-out-str (clojure.repl/source nope-x))") "nope-x names no") "qualified")
+    (is (str/includes? (out "(clojure.repl/source-fn 'my.agent/named)") "defn named"))
+    (is (str/includes? (out "(do (ns x.fresh) (with-out-str (doc map)))") "clojure.core/map") "in a namespace made with ns")
+    (is (str/includes? (out "(with-out-str (doc if))") "if") "a special form")))
 
 (defn- outcome [ticks thunk]
   (try {:value (intr/run ticks thunk)} (catch Throwable e {:error e})))

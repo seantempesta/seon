@@ -1940,6 +1940,43 @@
     (is (= "Unable to resolve symbol: prinltn in this context" (:seon.error/message em)) "the suggestions are not in the message too")
     (is (nil? (:data em)) "no printed copy of the ex-data")))
 
+(defn- thrown
+  "The error map of evaluating the Clojure text code in the user namespace."
+  [code]
+  (agent/error-map (try (binding [*ns* (the-ns 'user)] (eval (read-string code))) (catch Throwable e e))))
+
+(deftest a-private-var-says-the-form-that-reaches-it
+  ;; forgiving tools (data: 11 evals over 5 sessions died on "var: #'ns/f is not public", six in a row in one): Clojure's own
+  ;; forms reach a private var, the var's value and a call through the var; the error says so
+  (let [em (thrown "(seon.reader/fence \"x\")")]
+    (is (= :analyze/private-var (:jolt.error/kind em)))
+    (is (str/includes? (str (:seon.error/fix em)) "(#'seon.reader/fence") (pr-str em))
+    (is (str/includes? (str (:seon.error/fix em)) "@#'seon.reader/fence") (pr-str em))))
+
+(deftest a-missing-var-names-the-vars-of-that-name-elsewhere
+  ;; data: 6 evals named a var a namespace does not hold (seon.print/show, held by seon.print.select), each read
+  ;; "No such var" and spent a turn finding it; the error names the same name where it is, as forms
+  (let [em (thrown "(seon.print/show 1)")]
+    (is (str/includes? (str (:seon.error/message em)) "No such var: seon.print/show"))
+    (is (str/includes? (str (:seon.error/fix em)) "seon.print.select/show") (pr-str em))))
+
+(deftest an-alias-of-another-namespace-is-named
+  ;; data: ref/references in a namespace with no alias ref; the error names the namespace the alias means elsewhere and the
+  ;; Clojure form that makes it one here
+  (create-ns 'x.alias-probe)
+  (binding [*ns* (the-ns 'x.alias-probe)] (alias 'rdr 'seon.reader))
+  (let [em (thrown "(rdr/forgive \"a\")")]
+    (is (= :analyze/unknown-namespace (:jolt.error/kind em)))
+    (is (str/includes? (str (:seon.error/fix em)) "seon.reader/forgive") (pr-str em))
+    (is (str/includes? (str (:seon.error/fix em)) "(alias 'rdr 'seon.reader)") (pr-str em))))
+
+(deftest a-schema-malli-does-not-know-is-named-with-its-nearest
+  ;; data: a contract written [:time :inst] answered ":malli.core/invalid-schema" and nothing else; six turns went to
+  ;; finding that the predicate is the symbol inst?
+  (let [em (agent/error-map (try ((requiring-resolve 'malli.core/schema) [:vector :inst]) (catch Throwable e e)))]
+    (is (str/includes? (str (:seon.error/message em)) ":inst") (pr-str em))
+    (is (str/includes? (str (:seon.error/fix em)) "inst?") (pr-str em))))
+
 (deftest memory-is-read-when-asked
   ;; task seon.agent/memory-is-read-when-asked: mem-mb is a reading made at the call, never a
   ;; value kept for a time, so each call reads the process's footprint again (jolt.host/

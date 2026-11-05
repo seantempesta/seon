@@ -18,7 +18,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.step :as step] [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.error :as err] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.doc :as doc] [seon.merge :as pm] [seon.config :as cfg] [seon.reconcile :as r] [seon.vector :as vector] [seon.lib :as lib] [seon.print :as print] [seon.sock :as sock] [jolt.scheme :as scm] [clojure.test :as t]
             [clojure.string :as str] [seon.program :as program] [seon.proofs :as proofs] [seon.fx :as fx] [seon.task :as task] [seon.intr :as intr] [seon.render :as render] [seon.template :as template] [clojure.repl]
-            [malli.registry :as mr] [clojure.core.async :as a] [jolt.io-poller :as poller]))
+            [malli.registry :as mr] [malli.core] [jolt.analyzer] [clojure.core.async :as a] [jolt.io-poller :as poller]))
 
 ;; One state map per agent process (this process is the agent). Fields:
 ;; :id :branch :task (the task root forked it for, or nil) :db :base (main at the branch's merge base: as forked, then each merge-main!) :main (main's head as last read: as forked, then heard-main) :results :n :waits (seon.agent/await-reply's promises, by key) :busy (the :repl proc runs a request) :tx-seq :mode :ns :home :mismatch
@@ -530,7 +530,7 @@
 (def repl-names
   "The names an agent's REPL resolves in any namespace where nothing else does (`repl-name`), by the namespace
   holding each, :all its publics; a name two hold is the first's (clojure.repl's source, source-fn and pst are
-  Seon's, interned there under their own names by `make-ns!`, and my.agent's are the same functions). See
+  Seon's, interned there under their own names by my.agent's last form, and my.agent's are the same functions). See
   docs/agent.md#the-repl."
   '[[clojure.repl [source source-fn apropos dir pst doc find-doc]] [clojure.pprint [pp pprint]] [my.agent :all] [my.db :all] [seon.ctx [ctx]]
     [clojure.test [deftest is are testing use-fixtures]]])
@@ -560,6 +560,42 @@
   cannot be called alone; a pin bump that rewords it is a wording change here."
   {:malli/schema [:=> [:cat :string] :string]}
   [sym] (str "Unable to resolve symbol: " sym " in this context"))
+
+(defn- near-fix
+  "What an eval error says to do next, in Clojure's own forms, or nil: a private var is reached through its var
+  (`(#'ns/f ...)` calls it, `@#'ns/f` reads it); a var a namespace does not hold is named where the same name
+  is held, and by the nearest names there (Jolt's did-you-mean ranking, as my.agent/no-var); an alias another
+  namespace has is named with the form that makes it one here; a schema malli does not know is named with the
+  nearest it does (`:inst`: `inst?`). jd is the error's Jolt diagnostics, msg its message, d its ex-data. See
+  docs/agent.md#the-repl."
+  {:malli/schema [:=> [:cat :map :string [:maybe :map]] [:maybe :string]]}
+  [jd msg d]
+  (let [sym (:jolt.error/symbol jd)
+        near (fn [s xs] (not-empty (jolt.analyzer/suggestions-for s (map str xs))))
+        listed (fn [xs] (str/join ", " xs))]
+    (cond
+      (= :analyze/private-var (:jolt.error/kind jd))
+      (str sym " is private: call it (#'" sym " ...) or read it @#'" sym)
+
+      (= :analyze/unknown-namespace (:jolt.error/kind jd))
+      (let [a (:jolt.error/namespace jd)
+            held (distinct (for [n (all-ns) [k t] (ns-aliases n) :when (= a (str k))] (ns-name t)))]
+        (if (seq held)
+          (str a " is no alias here, and is " (listed (for [t held] (str "an alias of " t))) " elsewhere: write "
+               (listed (for [t held] (str t "/" (name (symbol sym))))) ", or (alias '" a " '" (first held) ") first")
+          (when-let [ns-near (near a (map ns-name (all-ns)))] (str "no namespace " a ": did you mean " (listed ns-near)))))
+
+      (re-find #"^No such var: " msg)
+      (let [[_ n v] (re-matches #"No such var: (.+)/(.+)" msg)
+            same (for [x (all-ns) :when (not= (str (ns-name x)) n) :let [f (find-var (symbol (str (ns-name x)) v))] :when f] (str (ns-name x) "/" v))
+            close (some-> (find-ns (symbol (or n ""))) ns-publics keys (->> (near v)))]
+        (when (or (seq same) close)
+          (str (when (seq same) (str v " is held by " (listed same))) (when (and (seq same) close) "; ")
+               (when close (str "in " n ", the nearest are " (listed close))))))
+
+      (= :malli.core/invalid-schema (:type d))
+      (let [x (:schema (:data d))]
+        (when-let [c (near (str x) (keys (malli.core/default-schemas)))] (str "did you mean " (listed c)))))))
 
 (defn on-the-wire
   "Response r as its reply carries it: its value only when it is plain data (seon.contract/plain?: what the socket and the
@@ -592,12 +628,15 @@
            sym (:jolt.error/symbol jd)
            unresolved? (and sym (= :analyze/unresolved-symbol (:jolt.error/kind jd)))
            m (if unresolved? (unresolved-message sym) (step/error-msg e))
+           m (if (= :malli.core/invalid-schema (:type d)) (str "malli has no schema " (pr-str (:schema (:data d)))) m)
+           fix (near-fix jd m d)
            ;; a REPL name in a definition: the program resolves as written, so the definition calls it qualified
            repl (when unresolved? (repl-name (symbol sym)))
            causes (mapv #(str (type %) ": " (ex-message %)) (take-while some? (rest (iterate ex-cause e))))]
        (contract/error :seon.agent/eval-error op m
                        (cond-> (assoc jd :class (str (type e)))
                          (seq (:jolt.error/suggestions jd)) (assoc :seon.error/fix (str "did you mean " (str/join ", " (:jolt.error/suggestions jd))))
+                         fix (assoc :seon.error/fix fix)
                          repl (assoc :seon.error/fix (str sym " is the REPL's: a definition is the program, which resolves as written, so it calls " repl))
                          other (assoc :data other)
                          heap (assoc :jolt/heap heap)
@@ -1290,12 +1329,8 @@
     ;; namespace (`repl-name`), referred nowhere
     (binding [*ns* nsx]
       (refer-clojure)
-      ;; clojure.repl as clojure.main's REPL has it (clojure.main/repl-requires). Jolt's lacks
-      ;; source, source-fn and pst: interned from my.agent, whose source also reads the agent's
-      ;; own redefinitions from its branch db (task seon.context/the-standard-repl-tools moves the
-      ;; file-reading part into Jolt's own clojure.repl)
-      (doseq [s '[source-fn source pst] :let [v (ns-resolve 'my.agent s)]]
-        (intern (find-ns 'clojure.repl) (with-meta s (select-keys (meta v) [:macro :arglists :doc])) @v))
+      ;; clojure.repl as clojure.main's REPL has it (clojure.main/repl-requires); my.agent puts Seon's source, source-fn,
+      ;; pst, doc and dir into it in every process
       (require 'clojure.pprint))
     nsx))
 

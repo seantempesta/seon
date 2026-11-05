@@ -831,6 +831,18 @@
               (for [[c i] (new-only :open)] (str "a " c " left open at " (where i)))
               (for [[c i] (new-only :stray)] (str "a " c " with nothing to close at " (where i)))))))
 
+(defn- left-open
+  "Where text leaves delimiters open (seon.reader/delimiters), as `a ( left open at its line 5, \"(let [a 1]\"` each, joined by
+  \"; \", or nil when none: what a refused or failed edit names so the slip is found where it is, never only counted.
+  See docs/agent.md#changing-a-definition."
+  {:malli/schema [:=> [:cat :string] [:maybe :string]]}
+  [text]
+  (when-let [open (seq (:open (reader/delimiters text)))]
+    (clojure.string/join "; " (for [[c i] open
+                                    :let [l (inc (count (filter #{\newline} (subs text 0 i))))]]
+                                (str "a " c " left open at its line " l ", " (pr-str (clojure.string/trim (nth (clojure.string/split-lines text) (dec l) "")))
+                                     (when (zero? i) " (the definition itself: close it at its end)"))))))
+
 (defn edit!
   "Change the definition var sym names by replacing old, exact text that occurs once in its
   recorded source (`(source sym)`), with new, then evaluating the whole new definition in its
@@ -918,7 +930,9 @@
                                 (when (or (not= (reader/delimiter-counts dt) (reader/delimiter-counts ds))
                                           (< (count (:crossed ds)) (count (:crossed dt))))
                                   (or (first (keep-indexed unbalanced changes))
-                                      (refuse :unbalanced "the changes together pair a delimiter with another kind; nothing changed" nil))))))]
+                                      (refuse :unbalanced (if-let [o (left-open text)]
+                                                            (str "the changes together leave the definition unbalanced: " o "; nothing changed")
+                                                            "the changes together pair a delimiter with another kind; nothing changed") nil))))))]
      (if (nil? src)
        ;; a name that is no var: the nearest names, as source and callers answer (my.agent/no-var)
        (if doc?
@@ -952,7 +966,8 @@
                                              ;; the line it names, in the definition as the edit made it
                                              (when-let [l (:clojure.error/line ex)]
                                                (str "; at line " l (some->> (:clojure.error/column ex) (str ", column ")) " of the new definition: "
-                                                    (pr-str (clojure.string/trim (nth (clojure.string/split-lines text) (dec l) "")))))))))
+                                                    (pr-str (clojure.string/trim (nth (clojure.string/split-lines text) (dec l) "")))))
+                                             (when (= :read (:phase ex)) (some->> (left-open text) (str "; ")))))))
                ;; the response as data: its printed text and costliest functions are the outer eval's to print
                (assoc (dissoc r :text :fns :record)
                       :edited {(if doc? :doc :var) sym :lines (into [] (comp (mapcat (fn [[from new]] (numbered text (- from k) (+ from (count (filter #{\newline} new)) k)))) (distinct)) starts)})))))))))))

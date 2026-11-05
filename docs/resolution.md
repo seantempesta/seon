@@ -43,4 +43,4 @@ The sites that resolve a name held in data to a var by design, each with its rea
 
 The sites that fill a gap in another namespace, each owed a fix in that namespace's owner.
 
-- `seon.agent/make-ns!`: interns `source`, `source-fn` and `pst` into Jolt's `clojure.repl`, a namespace it does not own ([AGENTS.md §5](../AGENTS.md): a gap in another namespace is fixed in its owner). Task `seon.context/the-standard-repl-tools` (Jolt's `clojure.repl` carries them) deletes the intern.
+- `my.agent` (its last form): interns `source`, `source-fn`, `pst`, `doc` and `dir` into Jolt's `clojure.repl`, in every process (root, a test child and an agent alike), a namespace it does not own ([AGENTS.md §5](../AGENTS.md): a gap in another namespace is fixed in its owner). Task `seon.context/the-standard-repl-tools` (Jolt's `clojure.repl` carries them) deletes the intern.
