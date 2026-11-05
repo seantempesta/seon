@@ -974,9 +974,6 @@
  ;; resources/public/css/input.css, docs/render.md#tailwind); read per request, so a build's
  ;; new stylesheet shows on reload. Missing (no build yet): the page is served unstyled.
  :seon.config.web/stylesheet #seon/checkout "target/css/app.css"
- ;; Unit: +hhmm. Jolt has no time zones: clocks on the page add this offset (`date +%z`).
- ;; Unset: UTC, which the page's clocks then show.
- :seon.config.web/utc-offset "+0000"
 
  ;; Contracts and their recording (session G1): :on, :contracts (wrappers, no recording
  ;; transaction: the two measured apart), :off (no wrapper, no recording: the same binary

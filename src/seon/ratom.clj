@@ -51,11 +51,6 @@
   {:malli/schema [:=> [:cat] :int]}
   [] @-running)
 
-(defn reactive?
-  "Is a reaction's run in progress?"
-  {:malli/schema [:=> [:cat] :boolean]}
-  [] (some? *ratom-context*))
-
 (defn- check-watches
   "new, the watches map, counted against old into the running count."
   {:malli/schema [:=> [:cat [:maybe :map] [:maybe :map]] [:maybe :map]]}

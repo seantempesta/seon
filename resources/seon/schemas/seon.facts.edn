@@ -129,12 +129,11 @@
  :task/refs [:set :seon.db/ref]
  :note/text :string
  :note/agent [:and {:seon.db/index true} :keyword]
- :note/about :seon.db/ref
  :seon.db/example-task-fact [:map {:seon.db/attributes true}
                               [:task/name :task/name] [:task/plan :task/plan] [:task/status :task/status]
                               [:task/refs {:optional true} :task/refs]]
  :seon.db/note-fact [:map {:seon.db/attributes true}
-                      [:note/text :note/text] [:note/agent :note/agent] [:note/about {:optional true} :note/about]]
+                      [:note/text :note/text] [:note/agent :note/agent]]
  ;; ---- the recording transaction of each eval request, and the agent's answered t.
  ;; Observations: data on the branch that recorded them, never carried by a merge ----
  ;; an eval: one per eval request (a model's tool call, a form the user or a session typed),
@@ -404,7 +403,7 @@
  :seon.root/quiescent [:map [:t :int] [:root-causes [:vector :seon.reconcile/root-cause]]]
  ;; Seon's own source imported at boot as main's program (seon.source), one fact per boot: the tree, its HEAD
  ;; commit (none when it is no repository), the revision it pins each reference-code submodule
- ;; at (its gitlink, what a cited reference-code file shows: seon.ref/file-view), the digest of
+ ;; at (its gitlink), the digest of
  ;; the files and pins read (a boot whose tree
  ;; reads the same imports nothing), its files and forms, the program entities the import
  ;; retracted, how long reading, analysing and transacting took, or why it was refused
@@ -509,20 +508,6 @@
                      [:seon.message/kind {:optional true} :seon.message/kind]
                      [:seon.message/reply-to {:optional true} :seon.message/reply-to]]
  ;; ---- written by an agent on its own branch; they reach main with its merge ----
- ;; a catch-up: one merge of main into the agent's branch (seon.agent/merge-main!), written in the
- ;; merge's own transaction, so the agent's record holds what main brought it (its ctx's
- ;; :catch-ups, in the order they happened) and a view reads it as a fact
- :seon.catch-up/id [:and {:seon.db/identity true} :string]
- :seon.catch-up/agent [:and {:seon.db/index true} :seon.db/ref]
- ;; the branch merged in, and its t: main's head the catch-up merged
- :seon.catch-up/from :seon.db/branch
- :seon.catch-up/from-t :int
- ;; the program keys main changed that applied, and those that conflicted (left unmerged)
- :seon.catch-up/applied [:vector :seon.merge/program-key]
- :seon.catch-up/conflicts [:vector :seon.merge/conflict]
- :seon.catch-up/fact [:map {:seon.db/attributes true} [:seon.catch-up/id :seon.catch-up/id] [:seon.catch-up/agent :seon.catch-up/agent]
-                      [:seon.catch-up/from :seon.catch-up/from] [:seon.catch-up/from-t :seon.catch-up/from-t]
-                      [:seon.catch-up/applied :seon.catch-up/applied] [:seon.catch-up/conflicts :seon.catch-up/conflicts]]
  ;; (my.task/status) asked before any turn of this process observed its task: why, and what runs its proofs
  :seon.turn/not-observed [:and :seon.error/base [:map [:seon.error/type [:= :seon.turn/not-observed]]]]
  ;; a model's eval call left unrun because an earlier call of its reply threw (seon.repl/unrun): :after, that call's id
@@ -655,18 +640,6 @@
                          [:seon.model-call/tokens {:optional true} :seon.model-call/tokens]
                          [:seon.model-call/cache-hit-tokens {:optional true} :seon.model-call/cache-hit-tokens]
                          [:seon.model-call/cache-miss-tokens {:optional true} :seon.model-call/cache-miss-tokens]]
- ;; ---- an effect's outcome, recorded by its asker on its own branch (seon.fx, session FX1) ----
- :seon.fx/id [:and {:seon.db/identity true} :string]
- :seon.fx/kind :keyword
- :seon.fx/status :keyword
- :seon.fx/us :int
- :seon.fx/queue-us :int
- :seon.fx/cost :int
- :seon.fx/error :string
- :seon.fx/fx-fact [:map {:seon.db/attributes true}
-                     [:seon.fx/id :seon.fx/id] [:seon.fx/kind :seon.fx/kind] [:seon.fx/status :seon.fx/status]
-                     [:seon.fx/us :seon.fx/us] [:seon.fx/queue-us :seon.fx/queue-us]
-                     [:seon.fx/cost {:optional true} :seon.fx/cost] [:seon.fx/error {:optional true} :seon.fx/error]]
  ;; ---- the program merge's facts (session D1's proto.merge.facts.edn) ----
  :seon.merge/key [:and {:seon.db/index true} :seon.db/plain]
  :seon.merge/kind :keyword

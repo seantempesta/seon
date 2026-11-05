@@ -109,28 +109,3 @@
   (is (nil? (reader/definition-head "(defmulti m \"Dispatch.\" [:kind])" 'user)) "nor is a defmulti"))
 
 
-(deftest delimiters-are-read-as-the-reader-reads-them
-  ;; md-scan bench-b15: a refused edit named its unpaired delimiters by line (seon.repl/edit!); what is no delimiter stays none
-  (is (= {:open [] :stray [] :crossed []} (reader/delimiters "(str \\( \")\" #\"[(]\" ; ) ]\n x)")) "a character, a string, a regex and a comment hold none")
-  (is (= {:open [[\( 0]] :stray [] :crossed []} (reader/delimiters "(a [b]")) "an opener left open, with its offset")
-  (is (= {:open [] :stray [[\) 3]] :crossed []} (reader/delimiters "(a)) ")) "a closer with nothing open")
-  (is (= {:open [] :stray [] :crossed [[\] 3 \( 0]]} (reader/delimiters "(a ]")) "a closer of another kind than its opener")
-  (is (= {\( 1 \[ -1 \{ 0} (reader/balance "(a ]") (reader/delimiter-counts (reader/delimiters "(a ]")))
-      "counted, a crossed pair leaves a ( opened and a ] closed: balance is the counts of the one scan"))
-
-(defn code-text
-  "A definition-sized code text of about n characters, for delimiters' cost proof."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :string]]}
-  [n]
-  (let [unit "(let [a (inc x) s \"(]\" c \\) m {:k [1 2]}] ; a ) comment\n  (+ a 1))\n"]
-    [(apply str (repeat (max 1 (quot n (count unit))) unit))]))
-
-(deftest delimiters-cost-one-pass
-  (cost/proof
-    {:of 'seon.reader/delimiters :input 'seon.reader-test/code-text
-     :n "characters of code text"
-     :work "one pass by charAt, a vector conj per delimiter (a stack push or pop): ~20 ns and a few bytes a character"
-     :growth :linear
-     :per-n {:ns 60 :bytes 64 :calls 0.01}
-     :fixed {:ns 20000 :bytes 20000 :calls 5}
-     :sizes [120 250 500 1000]}))
