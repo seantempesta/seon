@@ -1622,27 +1622,46 @@
 ;;; --- root-ctx: root's ctx as components (docs/render.md#components) ---------------------------
 
 (def ^:private side-style
-  "An entry of the agents list: a dot lit while it works, its name linking to its page, its status."
-  "flex shrink-0 items-baseline gap-2 rounded-md bg-base-900 px-2 py-1 lg:bg-transparent lg:px-1 hover:bg-base-850")
+  "An entry of the agents list: the pill, which its link fills."
+  "flex max-w-[15rem] shrink-0 rounded-md bg-base-900 lg:max-w-none lg:bg-transparent hover:bg-base-850")
+
+(def ^:private pill-link
+  "The one link of a pill: it fills the pill, so a click anywhere on it (its dot, its status, its task) opens the page."
+  "flex min-w-0 flex-1 flex-col px-2 py-1 no-underline hover:no-underline lg:px-1")
 
 (defn root-side
   "Root's own entry in its agents list (a component over ctx): lit, as root is the process answering
-  the page, linking to root's page."
+  the page; the whole pill links to root's page."
   {:seon.render/style side-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
   [_]
-  [:li [:span {:class "text-signal"} "●"] [:a {:href "/" :class "font-semibold text-text-100"} "root"] [:span {:class "text-2xs text-text-500"} "main"]])
+  [:li [:a {:href "/" :class pill-link :title "root: main"}
+        [:span {:class "flex items-baseline gap-2"} [:span {:class "text-signal"} "●"] [:span {:class "font-semibold text-text-100"} "root"] [:span {:class "text-2xs text-text-500"} "main"]]]])
+
+(defn- task-name
+  "What an agent works on, in words: its task's title, else its branch's name; nil for neither."
+  {:malli/schema [:=> [:cat [:maybe :map] [:maybe :map]] [:maybe :string]]}
+  [a t]
+  (cond (:seon.task/id t) (task-title (:seon.task/id t))
+        (:seon.agent/branch a) (kname (:seon.agent/branch a))))
 
 (defn agent-side
   "An agent of root's in its agents list (a component over root's ctx, its :agents member eid): lit
-  while busy or running, its id linking to its page, its status."
+  while it works, its id, how its work stands (standing) and what it works on (its task in words, else its branch, cut to the pill's
+  width), the whole pill one link to its page, the whole name in its title."
   {:seon.render/style side-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int] :any]}
   [{c :seon.ctx/ctx} eid]
   (let [a (relevant :seon.db/agent-fact (get-in c [:agents eid]))
         id (:seon.agent/id a)
-        stands (standing a (ratom/realize (get-in c [:agents eid :task])))]
-    [:li [:span {:class (if (:lit? stands) "text-signal" "text-text-500")} (if (:lit? stands) "●" "○")]
-     [:a {:href (str "/agent/" (kname id)) :class "font-semibold text-text-100"} (kname id)]
-     (when (:seon.agent/status a) [:span {:class (str "text-2xs " (tone-class (:tone stands)))} (:text stands)])]))
+        t (ratom/realize (get-in c [:agents eid :task]))
+        stands (standing a t)
+        what (task-name a t)]
+    [:li [:a {:href (str "/agent/" (kname id)) :class pill-link
+              :title (str/join " · " (remove nil? [(kname id) (:text stands) (:detail stands) what (:seon.task/id t)]))}
+          [:span {:class "flex items-baseline gap-2"}
+           [:span {:class (if (:lit? stands) "text-signal" "text-text-500")} (if (:lit? stands) "●" "○")]
+           [:span {:class "font-semibold text-text-100"} (kname id)]
+           (when (:seon.agent/status a) [:span {:class (str "truncate text-2xs " (tone-class (:tone stands)))} (:text stands)])]
+          (when what [:span {:class "truncate text-2xs text-text-400"} what])]]))
 
 (defn root-head
   "Root's head (a component over its ctx): its boot, its generation and, when it last went quiet,
@@ -1692,7 +1711,7 @@
 
 (defn agent-card
   "An agent of root's as its board shows it (a component over root's ctx, its :agents member eid):
-  its id linking to its page, its status, then its task: the task in words, its model, its budget of turns,
+  its line (dot, id, how its work stands, model) one link to its page, then its task: the task in words, its model, its budget of turns,
   how its work stands or why it waits. See docs/render.md#the-page."
   {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int] :any]}
   [{c :seon.ctx/ctx} eid]
@@ -1705,9 +1724,11 @@
         stands (standing {:seon.agent/status status :seon.agent/max-turns max-turns} t)
         on? (:lit? stands)]
     [:section
-     [:p {:class "flex items-baseline gap-2"}
+     ;; the whole line is the link, as a pill of the agents list is
+     [:a {:href (str "/agent/" (kname id)) :class "flex items-baseline gap-2 no-underline hover:no-underline"
+          :title (str/join " · " (remove nil? [(kname id) (:text stands) (:detail stands) (some-> task-id task-title)]))}
       [:span {:class (if on? "text-signal" "text-text-500")} (if on? "●" "○")]
-      [:a {:href (str "/agent/" (kname id)) :class "font-bold text-text-100"} (kname id)]
+      [:span {:class "font-bold text-text-100"} (kname id)]
       (when status [:span {:class (str "text-2xs " (tone-class (:tone stands)))} (:text stands)])
       (when model [:span {:class "ml-auto text-2xs text-text-500"} model])]
      (if-not task-id
@@ -1760,7 +1781,7 @@
       [:div {:class (if (= :debug tab) "grid grid-cols-1 gap-4 lg:grid-cols-[12rem_minmax(0,1fr)]" "grid grid-cols-1 gap-4 lg:grid-cols-[12rem_minmax(0,1fr)_26rem]")}
        [:aside {:class "min-w-0 lg:sticky lg:top-14 lg:self-start"}
         [:h2 {:class "kicker mb-1 hidden lg:block"} "agents"]
-        [:ol {:id "c-side" :class "flex gap-2 overflow-x-auto pb-1 text-xs lg:flex-col lg:gap-0.5"} (for [u (in "#c-side")] (slot (:id u)))]]
+        [:ol {:id "c-side" :class "seon-strip flex gap-2 overflow-x-auto pb-1 text-xs lg:flex-col lg:gap-0.5"} (for [u (in "#c-side")] (slot (:id u)))]]
        [:main {:class "flex min-w-0 flex-col gap-3"}
         [:div {:id "p-head" :class "lg:sticky lg:top-12 lg:z-10 lg:bg-base-950"} (for [u (in "#p-head")] (slot (:id u)))]
         (slot "p-caption")

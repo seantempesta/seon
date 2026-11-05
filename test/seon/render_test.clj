@@ -1818,6 +1818,33 @@
     (is (str/includes? (h/html (ui/agent-side {:seon.ctx/ctx c} 2)) "waiting for you") "a parked task can be answered")
     (is (str/includes? (h/html (ui/agent {} {:seon.agent/id :a7 :seon.agent/status :idle :seon.agent/task {:seon.task/outcome :parked}})) "● waiting for you"))))
 
+(deftest an-agents-pill-is-one-link-that-names-its-task
+  ;; owner, 2026-11-05: the agents list read "a6 idle" and only the name was a link, though the pill looks like a button.
+  ;; The whole pill is the link and says what the agent works on, cut to fit, the whole name in its title
+  (let [long-id "seon.print/a-long-string-that-does-not-starve-its-siblings-however-long-it-runs"
+        c {:agents {1 {:seon.agent/id :a6 :seon.agent/status :idle :seon.agent/branch :task-seon-ref-an-alias
+                       :task {:seon.task/id "seon.ref/an-alias" :seon.task/outcome :cap}}
+                    2 {:seon.agent/id :a7 :seon.agent/status :busy :task {:seon.task/id long-id :seon.task/outcome :running}}
+                    3 {:seon.agent/id :a8 :seon.agent/status :idle :seon.agent/branch :task-demo-f}}}
+        side (fn [eid] (h/html (ui/agent-side {:seon.ctx/ctx c} eid)))
+        link (fn [html] (re-find #"<a [^>]*href=\"/agent/(a\d)\"[^>]*>(.*)</a>" html))
+        a6 (side 1) a7 (side 2) a8 (side 3)]
+    (is (= 1 (count (re-seq #"<a " a6))) "one link")
+    (is (str/starts-with? a6 "<li") a6)
+    (let [[_ _ inside] (link a6)]
+      (is (and (str/includes? inside "○") (str/includes? inside "a6") (str/includes? inside "stopped at its cap")) "its dot, name and status are inside the link")
+      (is (str/includes? inside "An alias") "and its task in words"))
+    (is (str/includes? a6 "title=\"") "the whole name in a title")
+    (is (str/includes? a6 "seon.ref/an-alias") "the title names the task whole")
+    (is (re-find #"truncate[^>]*>A long string that does not starve" a7) "a long name is cut to the pill's width by the page (truncate), never by dropping text")
+    (is (re-find #"title=\"[^\"]*however long it runs" a7) "and the whole name is in its title")
+    (is (str/includes? (second (re-find #"<a [^>]*>(.*)</a>" a8)) "task-demo-f") "no task: its branch")
+    (testing "root's entry and the board's card are one link too"
+      (let [root (h/html (ui/root-side {:seon.ctx/ctx c}))
+            card (h/html (ui/agent-card {:seon.ctx/ctx c} 1))]
+        (is (str/includes? (second (re-find #"<a [^>]*href=\"/\"[^>]*>(.*)</a>" root)) "main"))
+        (is (str/includes? (second (re-find #"<a [^>]*href=\"/agent/a6\"[^>]*>(.*)</a>" card)) "stopped at its cap"))))))
+
 (deftest the-model-and-the-page-read-the-same-parts
   ;; task seon.context/the-context-is-the-agents-evals-and-seons (2026-10-29: "build with both the context
   ;; render and the web ui render in mind so we don't let one get out of sync with the other"): the
