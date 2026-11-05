@@ -8,43 +8,36 @@ Make all data known, validate it, and make it easy to process for whatever the u
 
 Entities have attributes and those have values; that is what makes something something. The database is not rows of table schemas, and we store only what we retrieve. A task's history is its earlier states, read from the db's history, so no entity holds a copy of them.
 
-This is Rails-style, batteries included: there is one way, it is the easy way, and the constraints are the point. Store data for how it will be used, so that use is easy and cheap, and do not organize things on top of other entities when a value on the record says it. Before adding a mechanism, ask whether a schema, a pattern and a render do it. Before fixing a problem, ask whether it is the cause or a consequence of something else being wrong, and remove the cause (`docs/decisions.md#a-bug-is-a-class-remove-what-allowed-it-owner-2026-11-03`). The data's shape is ours to change: rename attributes, add refs, reverse their direction; the standing store is test data, so no change of shape needs a migration.
+This is Rails-style, batteries included: there is one way, it is the easy way, and the constraints are the point. Store data for how it will be used, so that use is easy and cheap, and do not organize things on top of other entities when a value on the record says it. Before fixing a problem, ask whether it is the cause or a consequence of something else being wrong, and remove the cause (`docs/decisions.md#a-bug-is-a-class-remove-what-allowed-it-owner-2026-11-03`). The data's shape is ours to change: rename attributes, add refs, reverse their direction; the standing store is test data, so no change of shape needs a migration.
 
 ## The flow
 
-One pass makes both views, and nothing later in it is read by anything earlier.
+There is one way, in three steps, and nothing else.
 
 ```
-schemas: what data exists, validated, each declaring its renders
+curated data: attributes on the agent, or a lookup ref away, each with a schema
    |
-the agent's pull pattern (:seon.ctx/pattern), which it can edit
+the pull: the agent's pattern (:seon.ctx/pattern), an ordered vector, into @ctx
    |
-@ctx: one record, written from the REPL or the db
-   |
-the walk: each key by its schema's render, else the default; parts its data names
-   |
-   |- html -> the person's page -> an image of the page, overwritten each turn
-   |
-   '- the model's render -> the transcript:
-        system prompt, example sessions, the conversation   (cached, each record once)
-        the page, latest only, and the image                (redrawn each request)
+render functions: data to hiccup, one render, which the page draws and the model reads
 ```
+
+Everything before the model's own conversation, evals and replies, is that. The pattern's order is the order things appear.
 
 ## The rules
 
-Each rule removes a way of doing it some other way.
+Before changing anything an agent reads or a person sees, **name the attribute, the pull clause and the render function.** A change is one or more of those three. If it can't be said that way, it is the owner's to decide: do not build around it.
 
-1. **What an agent reads is data** on its entity, a pull away, or queried by a render.
-2. **Its schema declares its renders,** html for the page and model for the model. With none, a default draws it, and any valid entity renders. The nearest wins: the agent's own (``:seon.agent/renders``), over the schema's, over a parent's, over the default.
-3. **A render may ask for the db and query anything;** what it reads is tracked, so it runs again only when that moves. It need not be reachable from the agent, and nothing has to be pulled to be shown.
-4. **The agent's data names what it shows:** its pattern for what it holds, a list of parts for what is computed or queried. Defaults come from its schema.
-5. **A render runs again when its data changes or when a function that renders it changes,** at any depth.
-6. **Each thing is computed once,** kept by the walk's existing cache. There is no second cache and no second path to the model.
-7. **Derived values are drawn, never stored.** A summary, such as status's when many tests are red, is that schema's model render, and any agent can override it.
-8. **A value is stored as data, up to a stated maximum, and printed only by the one printer, for context.** Past the maximum, what it was is stored and the value is gone, and that is fine. Printing a value anywhere else is suspect (task seon.print/the-one-printer-is-for-context).
-9. **An agent's branch is kept and queried for what happened to it; its records never merge.** Main holds what root needs, and a merge stays the program and tasks. A branch is restorable and forkable, and the same agent key on two branches stays valid. The store only grows while this holds: reclaiming a record is the owner's act, and archiving successful branches is a later production policy.
+1. **Data is curated.** Add, remove or refactor what's on an entity and how it's joined. Data nothing reads gets deleted, not stored.
+2. **The pull says what an agent holds and in what order.** An agent can edit its own.
+3. **A render is a function of data, and may query the db.** What it reads is tracked, so it runs again when that moves. Its schema names it; the nearest wins: the agent's own (``:seon.agent/renders``), over the schema's, over a parent's, over the default, which draws any valid entity.
+4. **One render, read by both.** The page and the model read the same hiccup and the same words. A render speaks to the agent: what this is, why it matters now, what to do next. If a field answers no question the agent has at that moment, take it out.
+5. **Only the one printer cuts** ([no clipping](render.md#no-clipping)). A render chooses what to show; it never trims text.
+6. **Each thing is computed once,** kept by the walk's cache. There is no second cache and no second path to the model.
+7. **A value is stored as data, up to a stated maximum.** Past it, what it was is stored and the value is gone, and that is fine.
+8. **An agent's branch is kept and queried for what happened to it; its records never merge.** Main holds what root needs, and a merge stays the program and tasks. Reclaiming a record is the owner's act.
 
-So adding something an agent reads is a schema and a pattern entry, or a schema and a part. Nothing else.
+There is no other kind of thing to add: no new part, placement, slot or layout mechanism, no separate render for the model, no list beside the pull, no new word for a piece of the page, and no guard where a clear message would do. If you find yourself adding one, stop.
 
 ## What this gives you
 
