@@ -1224,8 +1224,10 @@
   (let [e (ratom/realize (get-in c [:evals eid]))
         opened? (:seon.eval/opened e)
         k (:seon.agent/key c)
-        {:keys [ex value ms handle]} (:seon.eval/response e)
+        {:keys [ex value ms handle out] errout :err} (:seon.eval/response e)
         v (ratom/realize value)
+        ;; what its forms printed (*out*, *err*: seon.repl/response keeps each as seon.print/code), drawn before its value as a REPL shows it
+        printed (into [] (keep (fn [[label k s]] (when-let [s (ratom/realize s)] [label k s]))) [["out" :out out] ["err" :err errout]])
         ;; an error answered as a value (a function that returns its error) is a failure too
         err (or ex (when (contract/error? v) v))
         tokens (context/messages-tokens (context/eval-messages {:db db} e))]
@@ -1252,10 +1254,15 @@
          [:div {:class "flex items-baseline justify-between gap-2"}
           (emit/marked-hiccup :seon.print/code (or (:seon.eval/code e) ""))
           [:code {:class "seon-handle shrink-0"} (str handle)]]
+         ;; each by the one render under the value's budget; a cut reads the rest through its key of the handle
+         (for [[label k s] printed]
+           [:div {:class "flex gap-2"} [:span {:class (if (= :err k) "text-warning" "text-text-500")} label]
+            (render/html {:budget (config/value :seon.config.render/value-budget) :handle (when handle (list k handle))} s)])
          (if err
            [:div {:class "text-error"} "✗ " (:seon.error/message err)
             (render/html {:budget (config/value :seon.config.render/value-budget) :handle handle} (dissoc err :seon.error/message))]
-           (when (contains? (:seon.eval/response e) :value)
+           ;; a nil beside output is the output's whole answer (clojure.repl/source prints and answers nil)
+           (when (and (contains? (:seon.eval/response e) :value) (not (and (nil? v) (seq printed))))
              [:div {:class "flex gap-2"} [:span {:class "text-text-500"} "→"]
               (render/html {:budget (config/value :seon.config.render/value-budget) :handle handle} v)]))])]]))
 

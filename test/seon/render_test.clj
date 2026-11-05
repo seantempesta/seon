@@ -975,6 +975,39 @@
     (is (not (str/includes? closed ">4<")) "not its value: that opens under it")
     (is (not (str/includes? closed "ticks")) "and no cost line twice")))
 
+(defn- eval-html
+  "The html of a3's eval e (id \"e<n>\"): its unit as the page draws it, from a branch recording an eval whose response is resp."
+  [id code resp]
+  (let [[_ branch0 eid] (paged-dbs)
+        k (:seon.agent/key (d/pull (first (paged-dbs)) [:seon.agent/key] eid))
+        branch (d/db-with branch0 (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} id "a3"
+                                                       {:seon.eval/call-id (str "c-" id) :seon.eval/code code :seon.eval/response resp}))
+        unit (str "eval-item-" (seon.db/eid branch :seon.eval/id id))]
+    (:html (some #(when (= unit (:id %)) %) (:units (drawn-parts branch))))))
+
+(deftest an-evals-printed-output-is-drawn-with-its-value
+  ;; owner, 2026-11-05: (clojure.repl/source x) showed "→ nil" though the response held the source under :out
+  ;; (seon.repl/response keeps *out* as seon.print/code and *err* under :err). The eval's row draws both, by the
+  ;; one render and the value's budget; a nil value beside output is not drawn; a real nil with none still is
+  (let [src "(defn twice [x]\n  (* 2 x))"
+        printed (eval-html "e20" "(clojure.repl/source twice)" {:handle 'result/e20 :value nil :out (seon.print/code src)})
+        silent (eval-html "e21" "(identity nil)" {:handle 'result/e21 :value nil})
+        both (eval-html "e22" "(do (println \"hi\") 7)" {:handle 'result/e22 :value 7 :out (seon.print/code "printed-out\n") :err (seon.print/code "warned-err\n")})
+        long-out (str/join "\n" (map #(str "line-" %) (range 3000)))
+        cut (eval-html "e23" "(dotimes [i 3000] (println i))" {:handle 'result/e23 :value nil :out (seon.print/code long-out)})]
+    (is (str/includes? printed "(defn twice [x]") "the printed source is drawn")
+    (is (str/includes? printed "(* 2 x)"))
+    (is (not (str/includes? printed "→")) "a nil value beside output draws no arrow")
+    (is (not (str/includes? printed "nil")) printed)
+    (is (str/includes? silent "→") "a real nil with no output is still shown")
+    (is (str/includes? silent "nil"))
+    (is (str/includes? both "printed-out") "output beside a value")
+    (is (str/includes? both "warned-err") "and its stderr, under :err")
+    (is (str/includes? both "→") "the value is still drawn when it is not nil")
+    (is (and (str/includes? cut "line-0") (not (str/includes? cut "line-2999"))) "output over the value budget is cut")
+    (is (< (count cut) 6000) (str "cut by the value's budget: " (count cut) " chars"))
+    (is (str/includes? cut "(subs (:seon.print/code (:out result/e23))") "and the cut says how to read the rest")))
+
 (deftest roots-context-is-its-debug-page
   ;; root, 2026-10-26: root's page and an agent's both toggle to what their model reads; root has no
   ;; model turn, so its debug page is the context the render proc holds (its :context, the system's
