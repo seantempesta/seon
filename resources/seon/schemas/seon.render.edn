@@ -22,10 +22,10 @@
  ;; tokens
  ;; every part of an agent's page as the hiccup its request holds it, whole (my.render/render-ctx, render-changes): a value that is a page prints whole, the stored one too
  :seon.render/parts [:map-of {:seon.print/full true} :string :any]
- :seon.render/tree [:map [:fn :symbol] [:args [:vector :any]] [:id :string] [:tokens nat-int?]
+ :seon.render/tree [:map [:render :symbol] [:args [:vector :any]] [:id :string] [:tokens nat-int?]
                     [:reads? {:optional true} :boolean]
                     ;; each child is a tree too; a recursive schema cannot be built by the registry (a [:ref] overflows its eager parse)
-                    [:children [:vector [:map [:fn :symbol] [:children [:vector :any]]]]]]
+                    [:children [:vector [:map [:render :symbol] [:children [:vector :any]]]]]]
  ;; how a value is shown: in one line, as a full panel, a tile, a row of a list
  :seon.render/as [:enum :inline :block :tile :row]
  ;; a render's props (its second argument), every one optional: like React's, a render that

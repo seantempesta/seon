@@ -151,7 +151,7 @@ The frame is the one part with no value behind it: the document (`seon.web/page-
 
 ### What draws what
 
-`seon.render/tree` reads a walk's cache as data, from its root: each component `{:fn :args :id :tokens :reads? :children}`, `:tokens` the one sizer's over the entry's own output (its children stand there as markers, so a parent is not charged for them), `:reads?` present only for a component that read the db. It prints nothing, so it chains: `(->> (my.render/tree) :children (sort-by :tokens) last)`. An agent's own is `my.render/tree`, over its live walk, brought up to date by the same flush a request makes (the lists drawn so far: the model's, and every other once a person's page has asked); root's draw of a branch (`seon.render/draw`, the page root builds for an ended agent) answers alike, checked on a real agent's branch (144 components).
+`seon.render/tree` reads a walk's cache as data, from its root: each component `{:render :args :id :tokens :reads? :children}`, `:tokens` the one sizer's over the entry's own output (its children stand there as markers, so a parent is not charged for them), `:reads?` present only for a component that read the db. It prints nothing, so it chains: `(->> (my.render/tree) :children (sort-by :tokens) last)`. An agent's own is `my.render/tree`, over its live walk, brought up to date by the same flush a request makes (the lists drawn so far: the model's, and every other once a person's page has asked); root's draw of a branch (`seon.render/draw`, the page root builds for an ended agent) answers alike, checked on a real agent's branch (144 components).
 
 ## Tailwind
 
