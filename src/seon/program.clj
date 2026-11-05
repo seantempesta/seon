@@ -203,7 +203,7 @@
   quotes, which its expansion calls), the qualified names its quoted data holds (:quoted:
   quoted-names, data, not references; a string that opens a form is code sent to a REPL, read
   as one), the ops of the requests it builds (:ops: a map's constant keyword under :op), the qualified keywords its constants name (:keywords: the attributes, config keys
-  and schema entries its code reads or writes), the banned vars it references, the
+  and schema entries its code reads or writes), the banned vars it references,
   its catch clauses
   (:catches, each {:class :answers}), the classes it constructs (:news, as the analyzer names them, which
   `account` makes references), the namespaces it requires, and whether it changes its namespace's

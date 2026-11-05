@@ -42,8 +42,7 @@
  ;; inside a function body: judged at merge (every definition happens once)
  :form/banned [:set :qualified-symbol]
  :form/inline-defs [:set :qualified-symbol]
- ;; the calls it bounds by a clock (deref with a timeout; Thread/sleep and core.async's
- ;; timeout are in its refs), and its catch clauses as EDN {:class name ("*" for a catch-all)
+ ;; its catch clauses as EDN {:class name ("*" for a catch-all)
  ;; :answers :constant|:rethrows|:expr}: the facts the guard detectors query
  :form/catches [:set :string]
  :ns/name [:and {:seon.db/identity true :seon.db/content-id true} :symbol]
