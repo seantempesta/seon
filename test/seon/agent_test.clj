@@ -2025,10 +2025,10 @@
   (let [[before added gone] (in-agent ["(mapv :cites (my.agent/uncite! \"docs/none.md\"))"
                                        "(mapv (juxt :cites :depth) (my.agent/cite! \"docs/agent.md?summary#the-agent\"))"
                                        "(mapv :cites (my.agent/uncite! \"docs/testing.md\"))"])]
-    (is (= ["docs/testing.md#testing" "docs/references.md#an-entity-cites"] (:value before))
+    (is (= ["docs/testing.md#testing" "docs/data-modeling.md#data-modeling" "docs/references.md#an-entity-cites"] (:value before))
         (str "made with every agent's, a page whole as its top section: " (pr-str before)))
-    (is (= [["docs/testing.md#testing" :doc] ["docs/references.md#an-entity-cites" :doc] ["docs/agent.md#the-agent" :summary]] (:value added)) (pr-str added))
-    (is (= ["docs/references.md#an-entity-cites" "docs/agent.md#the-agent"] (:value gone))
+    (is (= [["docs/testing.md#testing" :doc] ["docs/data-modeling.md#data-modeling" :doc] ["docs/references.md#an-entity-cites" :doc] ["docs/agent.md#the-agent" :summary]] (:value added)) (pr-str added))
+    (is (= ["docs/data-modeling.md#data-modeling" "docs/references.md#an-entity-cites" "docs/agent.md#the-agent"] (:value gone))
         (str "a default it uncites is gone from its own: " (pr-str gone)))))
 
 ;; See docs/merging.md#main-moved-is-said-at-every-eval
