@@ -2176,7 +2176,7 @@
                                 (let [c (get @(:cache w) @(:out w))] [k {:data (:data c) :html (h/html (r/resolved w @(:out w) true))}])
                                 (finally (r/dispose-walk! w))))))
         model #(ui/cite-model {} (:data (drawn %)))]
-    (is (= #{"demo/g" "docs/x.md#the-x" "docs/testing.md#testing" "docs/references.md#an-entity-cites"} (set (keys drawn)))
+    (is (= #{"demo/g" "docs/x.md#the-x" "docs/testing.md#testing" "docs/data-modeling.md" "docs/references.md#an-entity-cites"} (set (keys drawn)))
         "a part per cite, the task's and the agent's (its proof's left to the status), each target once")
     (is (every? #(= :seon.cite/cite-fact (:seon.render/schema (meta (:data %)))) (vals drawn)) (str "every cite's part draws with the db unread: " (pr-str drawn)))
     (is (str/includes? (:seon.print/prose (:text (model "docs/x.md#the-x"))) "What x does. And more.") "a section at doc depth: its lead")

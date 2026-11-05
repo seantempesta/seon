@@ -28,7 +28,7 @@ What happened before needs no entity either. A task's earlier states are read fr
 
 ## A ref or a value
 
-Before declaring a ref, ask what the fact means to whoever writes it: a statement about an entity that must exist, or an observation of a name. A statement is a ref: an eval belongs to an agent. An observation is a value: a form that mentions `seon.task/run` saw a name, and whether anything by that name exists is a separate question, so `:form/refs` holds symbols. A value survives what it names being deleted or renamed, and "names something with no entity" is one query. The tell for a name stored as a ref is machinery to survive a rename.
+Before declaring a ref, ask what the fact means to whoever writes it: a statement about an entity that must exist, or an observation of a name. A statement is a ref: an eval belongs to an agent. An observation is a value: a form that mentions a function saw a name, and whether anything by that name exists is a separate question, so `:form/refs` holds symbols. A value survives what it names being deleted or renamed, and "names something with no entity" is one query. The tell for a name stored as a ref is machinery to survive a rename.
 
 ## Absence and retraction
 
@@ -64,9 +64,11 @@ The same holds for `@ctx`: read the path you need, since walking `(:evals c)` to
 
 Everything here builds on what is already there, so a change costs what changed, and a cost that grows with the size of the session is a defect in the design, never a thing to optimize later. A transaction says which datoms moved, so one member joining a collection costs that member (```seon.ctx/window-moves```), and a render draws only what those datoms touch. If you are about to re-read, re-sort or re-print something whole because one piece of it changed, stop: there is a shape where you do not need to. A component reads what it draws and nothing around it; a function that rebuilds a whole list inside each of its members is quadratic however fast it looks at small sizes.
 
-So derive nothing you can read, and store nothing you can derive: a value computed from the db at t is drawn by a render and kept by the walk's cache, which anything may evict ([AGENTS §5](../AGENTS.md#5-laws)). Never store a printed value: a value is stored as data, and only the [one printer](render.md#one-printer) makes text of it, for context.
+So derive nothing you can read, and store nothing you can derive: a value computed from the db at t is drawn by a render and kept by the walk's cache, which anything may evict (AGENTS §5). Never store a printed value: a value is stored as data, and only the [one printer](render.md#one-printer) makes text of it, for context.
 
 ## Before you add something
+
+Four questions settle most new data, and each one can end with adding nothing.
 
 1. **What question does it answer, and what reads it?** If nothing reads it, it is not stored. If the answer is already an attribute or a query away, use that.
 2. **Whose fact is it?** Put it on the entity it is about, and on the many side of a relationship.
