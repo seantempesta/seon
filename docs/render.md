@@ -273,7 +273,6 @@ Uses of take, subs and the like in display code that choose what to find or read
 - `seon.repl/unpaired-by-line`: a refused edit's unpaired delimiters, each with the line of the new text it is on, quoted whole (`pr-str` of one source line, `subs` for the text before an offset to count its lines): code text for the agent to find, nothing left out.
 - `seon.problems/old-word-hits`: a line a spelling occurs in, cut out of the texts searched together (`subs` at the line's offsets) to be checked for its old words: a cut of data, not of output.
 - `my.root/task-files`: a task file's owning namespace from its file name (`subs` off the `.edn`).
-- `seon.render.ui/utc-offset-ms`: parsing `:seon.config.web/utc-offset`.
 - `seon.web/handler`, `seon.web/view-of`, `seon.server/mcp-reply`: parsing a request's path and a tool's name.
 - `seon.context/near`: the whole line a repaired delimiter is on, the printer budgets it.
 - `seon.render.proc/pass`: root's process keeps the newest `:seon.config.render.list/stream` events, and its tile (`seon.render.ui/process-tile`) draws the newest `:seon.config.render.list/history` of them: a window of data, as ctx's are.

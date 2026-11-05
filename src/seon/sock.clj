@@ -209,14 +209,6 @@
                 (and park? (= :again r)) (do (poller/wait-ready (:fd c) :read) (recur))
                 :else (recur)))))))
 
-(defn readable?
-  "Is there something on c to read now: a whole frame (or the end frame) in its buffer, or bytes
-  or the EOF on its socket? A non-blocking peek; it takes nothing."
-  {:malli/schema [:=> [:cat :seon.sock/conn] :boolean]}
-  [{:keys [fd ^longs st] :as c}]
-  (or (>= (- (aget st 3) (aget st 2)) (wanted c))
-      (with-mem [b 1] (not= -1 (c-recv-nb fd b 1 (bit-or MSG-PEEK MSG-DONTWAIT))))))
-
 (defn close-pending-fds!
   "Close every descriptor received on c and not yet taken (a forked child does this: they
   belong to its parent's later frames)."

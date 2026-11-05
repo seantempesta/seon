@@ -585,13 +585,6 @@
                  :let [a (d/pull db agent-pull e)]]
              [(:seon.agent/key a) (agent-value a)])))
 
-(defn started-agent
-  "Agent key k on db as root started it (agents), or nil: nil too where db only names it by reference. See docs/reconcile.md#a-task-holds-how-its-work-ended."
-  {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe :seon.reconcile/agent]]}
-  [db k]
-  (let [a (d/pull db agent-pull [:seon.agent/key k])]
-    (when (:seon.agent/boot a) (agent-value a))))
-
 (def finished
   "Outcomes that make its task done: a task's outcomes are declared once, on :seon.task/outcome's schema, and read
   once, here (seon.main-test/a-tasks-outcomes-are-read-once)."

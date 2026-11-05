@@ -404,7 +404,7 @@
  :seon.root/quiescent [:map [:t :int] [:root-causes [:vector :seon.reconcile/root-cause]]]
  ;; Seon's own source imported at boot as main's program (seon.source), one fact per boot: the tree, its HEAD
  ;; commit (none when it is no repository), the revision it pins each reference-code submodule
- ;; at (its gitlink, what a cited reference-code file shows: seon.ref/file-view), the digest of
+ ;; at (its gitlink), the digest of
  ;; the files and pins read (a boot whose tree
  ;; reads the same imports nothing), its files and forms, the program entities the import
  ;; retracted, how long reading, analysing and transacting took, or why it was refused
