@@ -244,7 +244,7 @@
   ;; missed help address answered the whole help page (10k characters), (source ..) of a name that
   ;; is no var failed inside its own contract, and after (in-ns 'my.task) the next eval had no
   ;; source, as clojure.repl's names stay referred at a REPL that switches namespaces
-  (let [[miss no-ns not-a-name a-class switched sourced state] (at/in-agent ["(my.agent/help \"a-section-that-is-not-there\")"
+  (let [[miss no-ns not-a-name a-class switched sourced state] (at/in-agent ["(my.agent/doc-of \"a-section-that-is-not-there\")"
                                                                       "(source 'no.such.ns/missing-var)"
                                                                       "(source :kw)"
                                                                       "(source 'java.lang.String)"

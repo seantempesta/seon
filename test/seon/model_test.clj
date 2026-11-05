@@ -120,7 +120,7 @@
 ;; the curated session: read from <dir>/<ns>_<name>.edn, answered turn by turn, text only past its end
 (deftest a-curated-session-answers-its-turns-and-then-says-it-has-no-more
   (let [dir (str (System/getProperty "java.io.tmpdir") "/curated-" (random-uuid))
-        turn {:text "Add one." :calls [{:prose "Add one." :code "(inc 1)"}]}]
+        turn {:text "Add one." :calls [{:intent "Add one." :code "(inc 1)"}]}]
     (.mkdirs (java.io.File. dir))
     (spit (str dir "/demo_t.edn") (pr-str {:task "demo/t" :curated true :turns [turn]}))
     (is (= turn (fixtures/curated-turn dir "demo/t" 0)) "turn 0 answers its calls")
@@ -171,7 +171,7 @@
                                           {:role "tool" :tool-call-id "c1" :content "{:handle result/e1, :value 1}"}]
                                :task "t/x" :turn 1})]
     (is (= "auto" (:tool_choice b)))
-    (is (= [:prose :code] (keys (get-in b [:tools 0 :function :parameters :properties]))) "prose first, then code: the model states its intent before the code")
+    (is (= [:intent :code] (keys (get-in b [:tools 0 :function :parameters :properties]))) "prose first, then code: the model states its intent before the code")
     (is (not (str/includes? (pr-str (:tools b)) ";;")) "no ;; in the tool")
     (is (= {:role "assistant" :content "I read f." :reasoning_content "r"
             :tool_calls [{:id "c1" :type "function" :function {:name "eval" :arguments "{\"code\":\"(f)\"}"}}]}

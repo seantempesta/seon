@@ -153,7 +153,7 @@
  ;; (seon.contract/plainly) up to :seon.config.store/max-value-chars; never a text made for a reader (seon.print
  ;; prints it when it is sent or shown). The prose is kept as written, never parsed as it is recorded
  :seon.eval/code :string
- :seon.eval/prose :string
+ :seon.eval/intent :string
  :seon.eval/call-id :string
  ;; the agent's turn number in force when it was written (0 before its first turn; absent on root's)
  :seon.eval/turn [:and {:seon.db/index true} :int]
@@ -211,7 +211,7 @@
  :seon.agent/ns :symbol
  :seon.db/eval-fact [:map {:seon.db/attributes true :seon.render/html seon.render.ui/evaluation :seon.render/model seon.context/eval-messages}
                      [:seon.eval/id :seon.eval/id] [:seon.eval/agent :seon.eval/agent] [:seon.eval/by {:optional true} :seon.eval/by]
-                     [:seon.eval/code :seon.eval/code] [:seon.eval/prose {:optional true} :seon.eval/prose]
+                     [:seon.eval/code :seon.eval/code] [:seon.eval/intent {:optional true} :seon.eval/intent]
                      [:seon.eval/call-id {:optional true} :seon.eval/call-id]
                      [:seon.eval/schema {:optional true} :seon.eval/schema] [:seon.eval/basis {:optional true} :seon.eval/basis]
                      [:seon.eval/fns {:optional true} :seon.eval/fns] [:seon.eval/turn {:optional true} :seon.eval/turn]
@@ -510,7 +510,7 @@
  ;; cannot be read, so the run ends :error on it, never :green (seon.turn/status-now)
  :seon.turn/no-status [:and :seon.error/base [:map [:seon.error/type [:= :seon.turn/no-status]]]]
  ;; a model's eval call with no prose or no form, not run (seon.turn/call-problem): :problem why, :forms 0 for an empty one
- :seon.turn/invalid-call [:and :seon.error/base [:map [:seon.error/type [:= :seon.turn/invalid-call]] [:problem [:enum :no-prose :forms]] [:forms {:optional true} nat-int?]]]
+ :seon.turn/invalid-call [:and :seon.error/base [:map [:seon.error/type [:= :seon.turn/invalid-call]] [:problem [:enum :no-intent :forms]] [:forms {:optional true} nat-int?]]]
  ;; a name an agent asked about (my.agent/source, callers, callees) that is no var on its branch nor
  ;; in its process: said, never answered as no callers or silence; :nearest the nearest existing
  ;; names (my.agent/no-var); :ask the form for the registry key of that name, when there is one

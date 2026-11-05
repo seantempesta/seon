@@ -1193,10 +1193,10 @@
         [a0 r0 a1 r1 :as ms] (:value msgs)]
     (is (= [:cap 2] [(:outcome end) (:model-calls end)]) "two model calls (the proof stays red), then the cap")
     (is (= ["assistant" "tool" "assistant" "tool"] (mapv :role ms)) "each reply followed by its call's answer")
-    (is (= [{:id "call-0-0" :code "(+ 20 21)" :prose "Add twenty and twenty-one."}] (:tool-calls a0)))
+    (is (= [{:id "call-0-0" :code "(+ 20 21)" :intent "Add twenty and twenty-one."}] (:tool-calls a0)))
     (is (= "call-0-0" (:tool-call-id r0)) "the answer names its call")
     (is (str/includes? (:content r0) "41") "the first call's answer")
-    (is (= [{:id "call-1-0" :code "(+ 1 41)" :prose "Add one to the value the last call showed."}] (:tool-calls a1)) "the second call was made after the first call's answer, from it")
+    (is (= [{:id "call-1-0" :code "(+ 1 41)" :intent "Add one to the value the last call showed."}] (:tool-calls a1)) "the second call was made after the first call's answer, from it")
     (is (str/includes? (:content r1) "42") "and both answers are in the conversation")))
 
 (deftest a-call-after-one-that-threw-is-not-run
@@ -1240,7 +1240,7 @@
   ;; no form answers a typed error as its one result and runs nothing (docs/prompt.md)
   (let [problem #'seon.turn/call-problem]
     (is (nil? (problem "Add them." "(+ 1 2)")) "prose and one form")
-    (is (= :no-prose (:problem (problem " " "(+ 1 2)"))) "no prose")
+    (is (= :no-intent (:problem (problem " " "(+ 1 2)"))) "no intent")
     (is (nil? (problem "Two." "(def a 1) (inc a)")) "two forms")
     (is (= [:forms 0] ((juxt :problem :forms) (problem "None." "  "))) "no form")
     (is (nil? (problem "Unread." "(+ 1")) "code that does not read is left to the REPL, which says where"))
@@ -1774,10 +1774,10 @@
                                          " (let [ag (:seon.agent/id " (agent-code w) ")]"
                                          "   @(seon.root/message! sys ag \"carry on\") " (parked-code w 2)
                                          "   (let [db (:db @(seon.root/call! sys {:op :write :req {:op :branch-db :branch (seon.task/default-branch " (pr-str w) ")}}))]"
-                                         "     {:prose (sort (datahike.api/q '[:find [?p ...] :where [_ :seon.eval/prose ?p]] db))})))")}]))
+                                         "     {:intent (sort (datahike.api/q '[:find [?p ...] :where [_ :seon.eval/intent ?p]] db))})))")}]))
                         {:config {:seon.config.ai/script 'seon.fixtures/prose-reply}
                          :decls [{:seon.task/name "w" :seon.task/plan "Wait." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]})]
-    (is (= ["Saw my own reply."] (:prose (:value r))) (pr-str r))))
+    (is (= ["Saw my own reply."] (:intent (:value r))) (pr-str r))))
 
 (deftest a-woken-agent-is-not-sent-its-own-loop
   ;; task seon.render/one-way-to-make-what-an-agent-is-sent, step 2: the eval that ran the parked work (seon.turn/work!) is
@@ -1894,13 +1894,13 @@
                                              "   :message-turns (vec (datahike.api/q '[:find [?t ...] :where [?m :seon.message/turn ?t]] db))"
                                              "   :call-ids (vec (datahike.api/q '[:find [?id ...] :where [?m :seon.model-call/id ?id]] db))"
                                              "   :committed (msgs (datahike.api/commit-as-db db (get-in m [:seon.model-call/basis :commit])))"
-                                             "   :prose (mapv #(datahike.api/q '[:find ?r . :in $ ?i :where [?e :seon.eval/id ?i] [?e :seon.eval/prose ?r]] db %) (map first evals))})")
+                                             "   :intent (mapv #(datahike.api/q '[:find ?r . :in $ ?i :where [?e :seon.eval/id ?i] [?e :seon.eval/intent ?r]] db %) (map first evals))})")
                                         {:op :eval :agent "root"
                                          :code (str "(datahike.api/q '[:find ?id ?f ?to ?b :where [?m :seon.message/id ?id] [?m :seon.message/from ?f]"
                                                     " [?m :seon.message/branch ?br] [?a :seon.agent/branch ?br] [?a :seon.agent/id ?to] [?m :seon.message/body ?b]] @(:conn sys))")}])
                                        {:config {:seon.config.ai/script 'seon.fixtures/thinking-call}})
         end (:value end)
-        {:keys [calls on-branch committed prose reply agent-key basis-keys] :as probed} (:value turn)
+        {:keys [calls on-branch committed intent reply agent-key basis-keys] :as probed} (:value turn)
         ;; the shared root's main holds every earlier test's messages: this agent's are the ones to its id
         [[mid from to body] :as facts] (filterv #(= (keyword (:agent @names)) (nth % 2)) (:value on-main))]
     (is (= 1 (:model-calls end)) (pr-str end))
@@ -1911,7 +1911,7 @@
     ;; the prose comes in the eval call (docs/prompt.md); the scripted reply's text is the same prose
     (is (= "check the sum before the proof" reply) "the reply's text: the prose")
     (is (string? (:eval (first calls))) (str "the call names its one eval: " (pr-str calls)))
-    (is (= ["check the sum before the proof"] prose) "whose record keeps the prose beside it")
+    (is (= ["check the sum before the proof"] intent) "whose record keeps the intent beside it")
     ;; docs/turn.md#the-turn-is-a-number: the agent's number, the model call's id and the number each record took
     (is (= 1 (:turn probed)) "the agent's first turn")
     (is (= [(str agent-key "/1")] (:call-ids probed)) "its model call is <agent key>/<n>")
@@ -1932,6 +1932,26 @@
     (is (= "did you mean print, printf, println" (:seon.error/fix em)))
     (is (= "Unable to resolve symbol: prinltn in this context" (:seon.error/message em)) "the suggestions are not in the message too")
     (is (nil? (:data em)) "no printed copy of the ex-data")))
+
+(defn- thrown
+  "The error map of evaluating the Clojure text code in the user namespace."
+  [code]
+  (agent/error-map (try (binding [*ns* (the-ns 'user)] (eval (read-string code))) (catch Throwable e e))))
+
+(deftest a-private-var-says-the-form-that-reaches-it
+  ;; forgiving tools (data: 11 evals over 5 sessions died on "var: #'ns/f is not public", six in a row in one): Clojure's own
+  ;; forms reach a private var, the var's value and a call through the var; the error says so
+  (let [em (thrown "(seon.reader/fence \"x\")")]
+    (is (= :analyze/private-var (:jolt.error/kind em)))
+    (is (str/includes? (str (:seon.error/fix em)) "(#'seon.reader/fence") (pr-str em))
+    (is (str/includes? (str (:seon.error/fix em)) "@#'seon.reader/fence") (pr-str em))))
+
+(deftest a-schema-malli-does-not-know-is-named-with-its-nearest
+  ;; data: a contract written [:time :inst] answered ":malli.core/invalid-schema" and nothing else; six turns went to
+  ;; finding that the predicate is the symbol inst?
+  (let [em (agent/error-map (try ((requiring-resolve 'malli.core/schema) [:vector :inst]) (catch Throwable e e)))]
+    (is (str/includes? (str (:seon.error/message em)) ":inst") (pr-str em))
+    (is (str/includes? (str (:seon.error/fix em)) "inst?") (pr-str em))))
 
 (deftest memory-is-read-when-asked
   ;; task seon.agent/memory-is-read-when-asked: mem-mb is a reading made at the call, never a

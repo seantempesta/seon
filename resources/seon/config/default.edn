@@ -789,7 +789,7 @@
  ;; the most), 801 past 5.
  :seon.config.ctx/callers 50
  ;; Unit: sections. The wiki sections that cite a var a task cites, shown with it (its :sections, seon.doc/
- ;; citing-sections: the addresses, to read with (my.agent/help address)): the sections it owes an edit to
+ ;; citing-sections: the addresses, to read with (my.agent/doc address)): the sections it owes an edit to
  ;; and the ones that explain it. Provenance: root's coverage gap 7 (2026-10-27): wiki sections reached the
  ;; agent only through the task's own citations. At the bound: 0 shows none.
  :seon.config.ctx/cited-by 3

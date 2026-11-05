@@ -276,4 +276,3 @@
   (let [r (scan reply false)
         r (if (pos? (:delimiters r)) (scan reply true) r)]
     (select-keys r [:text :repairs])))
-

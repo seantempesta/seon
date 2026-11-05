@@ -108,4 +108,3 @@
   (is (nil? (reader/definition-head "(def x [1 2 3])" 'user)) "a def holding a vector is no function: no head")
   (is (nil? (reader/definition-head "(defmulti m \"Dispatch.\" [:kind])" 'user)) "nor is a defmulti"))
 
-

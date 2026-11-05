@@ -575,7 +575,7 @@
                    :cited-by (vec (sort-by :section (for [dt (d/datoms db :avet :seon.doc/references (:db/id e))
                                                           :let [a (:seon.doc/address (d/entity db (:e dt)))]]
                                                       ;; the form that reads it, as data (no reference: unit-account)
-                                                      {:section a :read (list 'my.agent/help a)})))})]
+                                                      {:section a :read (list 'doc a)})))})]
     (not-empty (vec changes))))
 
 (defn- def-keys
