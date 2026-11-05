@@ -920,9 +920,6 @@
  ;; Unit: ranks. Reciprocal rank fusion's k (Cormack et al. 2009 use 60; v1 used 10): measured on
  ;; the 283 pairs, 10 gave recall@10 0.451 and 60 0.448. Read by seon.vector/rrf.
  :seon.config.vector/rrf-k 10
- ;; Unit: bytes. An evaluation that allocated more is flagged on its card and row
- ;; (seon.render.ui/alloc-span). Provenance: render.ui's BIG-ALLOC literal (10 MiB).
- :seon.config.render/big-alloc 10485760
  ;; Unit: tokens a rendered value spends when its env names no budget (seon.render/print-html,
  ;; an agent's history row). Provenance: the literal 600 render.clj and
  ;; render.ui carried (2026-10-22), kept as it was.

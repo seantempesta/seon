@@ -53,14 +53,10 @@
   [n] (if (number? n) (format "%,d" (long n)) "–"))
 
 (defn bytes-str {:malli/schema [:=> [:cat :any] :string]}
-  [b]
-  (cond (not (number? b)) "–"
-        (< b 1024) (str (long b) " B")
-        (< b (* 1024 1024)) (str (fmt1 (/ b 1024.0)) " KB")
-        :else (str (fmt1 (/ b 1048576.0)) " MB")))
+  [b] (emit/bytes-text b))
 
 (defn ms-str {:malli/schema [:=> [:cat :any] :string]}
-  [ms] (cond (not (number? ms)) "–" (< ms 1) (str (fmt2 ms) " ms") (< ms 100) (str (fmt1 ms) " ms") :else (str (long ms) " ms")))
+  [ms] (emit/ms-text ms))
 
 (defn prose
   "Text on the page as the one printer's prose (seon.print/prose) under budget tokens: whole,
@@ -193,14 +189,6 @@
   "A test run's counts in words: the card's, the stream's and the proofs box's one line."
   {:malli/schema [:=> [:cat [:maybe :map]] :string]}
   [t] (str (:pass t 0) " pass · " (:fail t 0) " fail · " (:error t 0) " error"))
-
-(defn alloc-span
-  "An evaluation's allocated bytes, flagged when large (over :seon.config.render/big-alloc)."
-  {:malli/schema [:=> [:cat :any] :any]}
-  [b]
-  (if (and (number? b) (> b (config/value :seon.config.render/big-alloc)))
-    [:span {:class "big-alloc" :title "this evaluation allocated a lot: a cost to look at"} (str "⚠ " (bytes-str b) " alloc")]
-    [:span (bytes-str b)]))
 
 (def error-shown
   "The keys an error's render shows in their own lines (`error-box`);
@@ -422,13 +410,12 @@
 ;;; --- an eval's parts ---------------------------------------------------------------
 
 (defn- cost-line
-  "What an evaluation cost, as recorded when it ran: ticks, ms and bytes allocated, each with its
-  unit; one not recorded is left out, never shown as 0."
+  "What an evaluation cost, as recorded when it ran, in the one wording (`seon.print/cost-text`), its result's cost to the context
+  among it; one not recorded is left out, never shown as 0, and an eval never run says so."
   {:malli/schema [:=> [:cat :map] :any]}
   [r]
-  (when-let [parts (seq (remove nil? [(when (:ticks r) (str (group3 (:ticks r)) " ticks")) (when (:ms r) (ms-str (:ms r)))
-                                       (when (:bytes r) (alloc-span (:bytes r)))]))]
-    [:span {:class "tabular-nums text-text-400"} (interpose " · " parts)]))
+  [:span {:class "tabular-nums text-text-400"}
+   (if (some r [:ms :ticks :bytes]) (print/cost-text (select-keys r [:ms :ticks :bytes])) "not run")])
 
 (def ^:private asked-by
   "Who evaluated, by its :seon.eval/by (any other: the agent's own, its model's turn)."
@@ -1113,8 +1100,8 @@
      [:p (str green " of " (count proofs) " proofs green")]
      (when (seq proofs)
        (into [:table [:tr [:th "Proof"] [:th "State"]]]
-             (for [{:keys [test status]} proofs]
-               [:tr [:td [:code (str test)]] [:td {:class (if (= :pass status) "ok" "bad")} (get state-words status (kname status))]])))
+             (for [{:keys [test status cost]} proofs]
+               [:tr [:td [:code (str test)]] [:td {:class (if (= :pass status) "ok" "bad")} (str (get state-words status (kname status)) (when cost (str " · " (print/cost-text cost))))]])))
      (for [{:keys [test shape says]} proofs :when (or shape says) :let [{:keys [ns ns-form helpers example]} shape]]
        [:div
         [:h3 (str test " is not written")]

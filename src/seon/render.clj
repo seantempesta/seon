@@ -554,6 +554,18 @@
   {:malli/schema [:=> [:cat :any] :boolean]}
   [x] (and (vector? x) (keyword? (first x)) (map? (second x)) (= "page" (:data-for (second x)))))
 
+(defn- size
+  "The characters x holds, as the one sizer counts them: its strings and the text of its other leaves, a mark for each collection
+  and nothing printed: an estimate of what is shown, not a text made."
+  {:malli/schema [:=> [:cat :any] nat-int?]}
+  [x] (cond (coll? x) (reduce + 1 (map size x)) (nil? x) 0 :else (count (str x))))
+
+(defn- tokens-of
+  "What x costs the context in tokens: the one sizer (`seon.print.emit/chars-tokens`) over the characters x holds, the same count
+  a part's head (`part-form`) and the tree (`tree`) give."
+  {:malli/schema [:=> [:cat :any] nat-int?]}
+  [x] (select/chars-tokens (size x)))
+
 (declare part-form)
 
 (defn- body-forms
@@ -582,7 +594,6 @@
   {:malli/schema [:=> [:cat :map [:vector :any]] :any]}
   [w k]
   (let [c (get @(:cache w) k)
-        attrs (cond-> {} (:at (:opts c)) (assoc :ctx (:at (:opts c))))
         out (:out c)
         ;; a part's own root element, a plain section or div, is the part itself: its children stand under the head
         wrapper? (and (vector? out) (#{:section :div} (first out)) (nil? (strip-attrs (if (map? (second out)) (second out) {}))))
@@ -590,7 +601,8 @@
                    wrapper? (mapcat #(body-forms w %) (if (map? (second out)) (drop 2 out) (rest out)))
                    :else (body-forms w out))
         place (when (var? (:f c)) (:seon.render/place (meta (:f c))))]
-    (cond-> (into [(symbol (:f c)) attrs] body) place (vary-meta assoc :seon.render/place place))))
+    ;; :tok is the model's own reading of it: what the form holds, not the page's alone
+    (cond-> (into [(symbol (:f c)) (cond-> {:tok (tokens-of (vec body))} (:at (:opts c)) (assoc :ctx (:at (:opts c))))] body) place (vary-meta assoc :seon.render/place place))))
 
 (defn fence
   "Source text s in a Markdown fence longer than any run of backticks inside it, so no line of s closes it: three, or one
@@ -684,12 +696,6 @@
   {:malli/schema [:=> [:cat :map] :map]}
   [w] @(:ledger w))
 
-(defn- size
-  "The characters x holds, as the one sizer counts them: its strings and the text of its other leaves, a mark for each collection
-  and nothing printed: an estimate of what is shown, not a text made."
-  {:malli/schema [:=> [:cat :any] nat-int?]}
-  [x] (cond (coll? x) (reduce + 1 (map size x)) (nil? x) 0 :else (count (str x))))
-
 (defn tree
   "What draws what in walk w, from its root, as data that chains and prints nothing: each component its cache holds as
   {:fn the render's name, :args what it was called with, :id its element id, :tokens the one sizer's over the characters of its own output
@@ -703,7 +709,7 @@
         node (fn node [k]
                (when-let [c (get cache k)]
                  (cond-> {:fn (symbol (:f c)) :args (:args c) :id (:id c)
-                          :tokens (select/chars-tokens (size (:out c)))
+                          :tokens (tokens-of (:out c))
                           :children (into [] (keep node) (:children c))}
                    (seq (:reads c)) (assoc :reads? true))))]
     (some-> @(:out w) node)))

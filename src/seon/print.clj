@@ -62,6 +62,11 @@
   {:malli/schema [:=> [:cat nat-int?] :string]}
   [n] (emit/tokens-text n))
 
+(defn cost-text
+  "seon.print.emit/cost-text, the one wording of what work cost (docs/render.md#cost-is-shown-one-way)."
+  {:malli/schema [:=> [:cat :map] :string]}
+  [m] (emit/cost-text m))
+
 (defn text
   "`v` as text under budget tokens: the printed text, or the error's message when even
   its first part does not fit."
@@ -82,8 +87,17 @@
   ([r render]
    ;; a value that is a page prints whole: its metadata says so as it is made, and its schema's (record-text) when it is read back
    (let [r (cond-> r (:seon.print/full (meta (:value r))) (vary-meta assoc :seon.print/full true))
-         p (print-value r (cond-> {:handle (:handle r)} render (assoc :render render)))]
-     (or (:text p) (:seon.error/message p)))))
+         shown (cond-> r (:handle r) (-> (dissoc :ms :ticks :bytes) (with-meta (meta r))))
+         p (print-value shown (cond-> {:handle (:handle r)} render (assoc :render render)))
+         text (or (:text p) (:seon.error/message p))]
+     ;; an eval's cost is one line with its result, what the result costs the context among it; its numbers stay data on the
+     ;; record. Spliced after the printed map's last entry: the text is the only place its own size is known. An eval that
+     ;; recorded none was not run
+     (if (and (:handle r) (:text p) (str/ends-with? text "}"))
+       (str (subs text 0 (dec (count text))) ", :cost "
+            (pr-str (if (some r [:ms :ticks :bytes]) (emit/cost-text (assoc (select-keys r [:ms :ticks :bytes]) :tok (select/chars-tokens (count text)))) "not run"))
+            "}")
+       text))))
 
 (defn read-rest
   "What a cut's continuation form (seon.print.emit/continuation: get-in, nth, seq, key, val, a

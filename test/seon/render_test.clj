@@ -206,8 +206,9 @@
                                       :seon.eval/by "a3"}))
         turn (h/html (ui/turn {} {:seon.model-call/n 1 :seon.model-call/tokens 1200 :seon.model-call/basis {:max-turns 8}}))]
     (is (str/includes? ev "f doubles?") "the prose beside the call")
-    (is (str/includes? ev "1.5 ms · <span>2.0 KB</span>") "its cost as recorded, each number with its unit")
-    (is (str/includes? (h/html (#'ui/cost-line {:ticks 1200 :ms 1.5})) "1,200 ticks · 1.5 ms") "ticks too, when recorded; nothing not recorded")
+    (is (str/includes? ev "1.5 ms · 120 ticks · 2.0 KB") "its cost as recorded, in the one wording")
+    (is (str/includes? (h/html (#'ui/cost-line {:ticks 1200 :ms 1.5})) "1.5 ms · 1.2k ticks") "ticks too, when recorded; nothing not recorded")
+    (is (str/includes? (h/html (#'ui/cost-line {})) "not run") "an eval never run says so")
     (is (str/includes? turn "turn 1 of 8"))
     (is (str/includes? turn "1,200 tokens"))))
 

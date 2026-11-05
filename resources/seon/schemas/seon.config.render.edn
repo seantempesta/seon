@@ -23,7 +23,6 @@
  :seon.config.render/search [:int {:min 1 :seon.config/unit "hits" :description "How many hits (my.agent/search) answers when its options give no :k, the best of exact text, meaning and references fused by reciprocal rank."}]
  :seon.config.render/search-token-z [:double {:min 0.0 :seon.config/unit "standard deviations" :description "How many standard deviations above the mean of every text's BM25 score for the query a text must score to be a text hit of my.agent/search."}]
  :seon.config.render/related-near [:int {:min 1 :seon.config/unit "candidates per hit shown" :description "How many of the nearest by meaning my.agent/search reads for each hit it may show, before fusion and filters."}]
- :seon.config.render/big-alloc [:int {:min 1 :seon.config/unit "bytes" :description "An evaluation that allocated more is flagged on the page."}]
  :seon.config.render/value-budget [:int {:min 1 :seon.config/unit "tokens" :description "A rendered value whose env names no budget."}]
  :seon.config.render/root-context-budget [:int {:min 1 :seon.config/unit "tokens" :description "Root's context, the system's AI face; later sections past it are named."}]
  :seon.config.render/line-budget [:int {:min 1 :seon.config/unit "tokens" :description "A message or reason in one line: root's context, a page's tile or row, a declared AI render's line."}]

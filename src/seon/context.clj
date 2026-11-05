@@ -579,7 +579,7 @@
       {:task (assoc (own t) :needs (into {} (map-indexed (fn [i n] [i (own n)])) needs))
        :proved (into {} (for [ps (cons (:proved t) (map :proved needs)) v (vals ps) :let [n (:var/name v)] :when n]
                           ;; its verdict and failures, and its source (whether it is defined): its form's text
-                          [n (cond-> (into {} (for [k [:var/name :seon.test/status :seon.test/failures] :let [x (get v k)] :when (some? x)] [k (ratom/realize x)]))
+                          [n (cond-> (into {} (for [k [:var/name :seon.test/status :seon.test/failures :seon.test/ticks :seon.test/bytes] :let [x (get v k)] :when (some? x)] [k (ratom/realize x)]))
                                (get-in v [:form :form/src]) (assoc :form {:form/src (ratom/realize (get-in v [:form :form/src]))}))]))})))
 
 (defn test-shape
@@ -683,6 +683,7 @@
                                       shape (when (= :undefined st) (test-shape db p))
                                       says (when (= :undefined st) (not-written p (or plan "")))]]
                             (cond-> {:test p :status st}
+                              (or (:seon.test/ticks v) (:seon.test/bytes v)) (assoc :cost (cond-> {} (:seon.test/ticks v) (assoc :ticks (:seon.test/ticks v)) (:seon.test/bytes v) (assoc :bytes (:seon.test/bytes v))))
                               (and src (not= :pass st)) (assoc :source (print/code src))
                               shape (assoc :shape shape)
                               says (assoc :says says)

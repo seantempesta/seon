@@ -262,7 +262,7 @@
       (is (= :stray-red (:reason r)) (pr-str (:refused stray)))
       (is (= (print/code "(deftest stray-test (is (= 2 (square 1))))") (:source r)) "its source, as a proof's")
       (is (= [{:var 'ctx-calc/square}] (:calls r)) "and what it calls, as a proof's"))
-    (is (= {:test 'ctx-calc-test/cube-test :status :undefined} (dissoc (by 'ctx-calc-test/cube-test) :shape))
+    (is (= {:test 'ctx-calc-test/cube-test :status :undefined} (dissoc (by 'ctx-calc-test/cube-test) :shape :says))
         "a proof not written yet says so")
     (is (= :unknown (:status (by 'ctx-calc-test/empty-test))) "a proof no report named never ran: the judge's :proof-unknown")
     (let [db (d/db-with db [{:seon.agent/key "b/a1" :seon.agent/task [:seon.task/id "ctx/sq"]
@@ -320,14 +320,14 @@
         ms (into [] (mapcat #(context/eval-messages {} %)) [(ev "e1" "E1") (ev "e2" "E2") (ev "e3" "E3")])]
     (is (= ["assistant" "tool" "assistant" "tool" "assistant" "tool"] (mapv :role ms)) "each eval its call and its response")
     (is (= {:role "assistant" :content "" :tool-calls [{:id "c-e1" :code "(e1)"}] :reply 1} (first ms)) "the call alone, naming its reply")
-    (is (= {:role "tool" :tool-call-id "c-e1" :content "{:handle result/e1, :value \"E1\"}"} (second ms)))
+    (is (= {:role "tool" :tool-call-id "c-e1" :content "{:handle result/e1, :value \"E1\", :cost \"not run\"}"} (second ms)))
     (let [wire (seon.model/wire-messages true ms)]
       (is (= ["assistant" "tool" "tool" "tool"] (mapv :role wire)) "a reply's three calls are one assistant message")
       (is (= ["c-e1" "c-e2" "c-e3"] (mapv :id (:tool_calls (nth wire 0)))))
       (is (= ["c-e1" "c-e2" "c-e3"] (mapv :tool_call_id (subvec wire 1 4))) "each call answered, in order")
       (is (not-any? #(contains? % :reply) wire) "the reply's number never reaches the wire")))
   (testing "a user's form is one user message carrying its response"
-    (is (= [{:role "user" :content "{:by \"user\" :code \"(+ 1 2)\" :response {:handle result/e4, :value 3}}"}]
+    (is (= [{:role "user" :content "{:by \"user\" :code \"(+ 1 2)\" :response {:handle result/e4, :value 3, :cost \"not run\"}}"}]
            (context/eval-messages {} {:seon.eval/by "user" :seon.eval/code "(+ 1 2)" :seon.eval/response {:handle 'result/e4 :value 3}})))))
 
 (deftest an-inserted-eval-reaches-the-model-as-a-call-of-its-own
@@ -338,7 +338,7 @@
                              :seon.eval/response {:handle (symbol "result" id) :value [:a]} :seon.eval/turn turn})
         ms (context/eval-messages {} (ev "e1" "root" 0))]
     (is (= [{:role "assistant" :content "" :tool-calls [{:id "eval-e1" :code "(:seon.ctx/pattern @ctx)" :prose "Read the pattern."}]}
-            {:role "tool" :tool-call-id "eval-e1" :content "{:handle result/e1, :value [:a]}"}]
+            {:role "tool" :tool-call-id "eval-e1" :content "{:handle result/e1, :value [:a], :cost \"not run\"}"}]
            ms)
         "a call made from the eval's own prose and code, answered by its response; turn 0 has no reply to name")
     (is (= ms (context/eval-messages {} (ev "e1" "anyone at all" 0))) "who asked is read by no one")
@@ -652,7 +652,7 @@
                                                                             :seon.task/proofs #{'demo-test/unwritten-test}}]))
         b (status-at db "demo/f" {})
         r (first (:refused b))]
-    (is (= [{:test 'demo-test/unwritten-test :status :undefined}] (mapv #(dissoc % :shape) (:proofs b))) "a proof not written says so")
+    (is (= [{:test 'demo-test/unwritten-test :status :undefined}] (mapv #(dissoc % :shape :says) (:proofs b))) "a proof not written says so")
     (is (= :proof-unknown (:reason r)))
     (is (= 'demo-test/unwritten-test (:test r)))
     (is (re-find #"deftest unwritten-test" (pr-str (:do r))) (pr-str r))
@@ -936,9 +936,9 @@
         (is (= {:role "assistant" :content "I call f." :reasoning "why" :reply 1} (nth r1 2)) "the reply: its text and the reasoning as returned")
         (is (= {:role "assistant" :content "" :tool-calls [{:id "call-0" :code "(f 1)"}] :reply 1} (nth r1 3)) "then its call")
         (is (= [{:role "assistant" :content "I call f." :reasoning_content "why" :tool_calls [{:id "call-0" :type "function" :function {:name "eval" :arguments "{\"code\":\"(f 1)\"}"}}]}
-                {:role "tool" :content "{:handle result/e2, :value 1}" :tool_call_id "call-0"}]
+                {:role "tool" :content "{:handle result/e2, :value 1, :cost \"not run\"}" :tool_call_id "call-0"}]
                (subvec (seon.model/wire-messages true r1) 2 4)) "one assistant message on the wire")
-        (is (= "{:handle result/e2, :value 1}" (:content (nth r1 4))) "the call's response, its recorded value printed as it is sent")
+        (is (= "{:handle result/e2, :value 1, :cost \"not run\"}" (:content (nth r1 4))) "the call's response, its recorded value printed as it is sent")
         (is (= r0 (subvec r1 0 2)) "the whole earlier request is the prefix: its page stays, appended")
         (is (re-find #"seon\.render\.ui/status" (:content (peek r1))) "a verdict recorded after turn 0: how the work stands, told again")
         ;; (the task's data draws each proof's recorded status too, so it moves with a verdict: reported)
@@ -1795,7 +1795,7 @@
             ms (:messages r1)]
         (is (= (:messages r0) (subvec ms 0 (count (:messages r0)))) "the first request is the prefix of the next")
         (is (= [{:role "assistant" :content "" :tool-calls [{:id "c0" :code "(+ 5 1)" :prose "Add."}] :reply 1}
-                {:role "tool" :tool-call-id "c0" :content "{:handle result/e0, :value 6}"}
+                {:role "tool" :tool-call-id "c0" :content "{:handle result/e0, :value 6, :cost \"not run\"}"}
                 {:role "user" :content "{:from \"owner\", :body \"Go on.\"}"}
                 {:role "assistant" :content "Thinking." :reply 2}]
                (subvec ms (count (:messages r0)) (+ 4 (count (:messages r0)))))

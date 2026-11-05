@@ -1012,3 +1012,15 @@
         (is (string? (:text r)) code)
         (is (= (:text r) (:content msg)) (str "the outside text is the model's message for " code))))
     (is (var? (:value @(resolve (:handle (ev "#'clojure.core/inc"))))) "the live value is at the handle")))
+
+(deftest every-eval-carries-its-cost-whatever-asked-it-and-whether-it-threw
+  ;; owner, 2026-11-05: "I want all evals to have the perf info with the results": one path (eval-string) for a model's call, an
+  ;; inserted eval, an outside agent's, the page's and the context's; a form that threw cost what it did before it threw
+  (let [old @agent/state
+        ev (fn [code origin] (try (reset! agent/state {:n 0 :ns (the-ns 'user)}) (repl/eval-string code {:origin origin})
+                                  (finally (reset! agent/state old))))]
+    (doseq [origin [:model :insert :outside :ui :context] code ["(+ 1 2)" "(throw (ex-info \"boom\" {}))"]]
+      (let [r (ev code origin) t (print/response-text r)]
+        (is (every? #(number? (get r %)) [:ms :ticks :bytes]) (str origin " " code ": its cost is data on the response"))
+        (is (re-find #":cost \"[\d.]+ ms · [\d.]+k? ticks · [\d.]+ [KM]?B · ~[\d.]+k? tok\"" t) (str origin " " code ": and one line of its text: " t))
+        (is (not (str/includes? t "not run")))))))
