@@ -76,6 +76,11 @@
    (let [r (print-value v {:budget budget})]
      (or (:text r) (:seon.error/message r)))))
 
+(def ^:private cost-line-tokens
+  "Tokens an eval's cost line can take, its longest wording, set aside from the printer's budget so the line counts inside it.
+  Sized once: this runs for every eval printed. See docs/render.md#cost-is-shown-one-way."
+  (inc (emit/chars-tokens (count (str ", :cost " (pr-str (emit/cost-text {:ms 1e12 :ticks 1e15 :bytes 1e15 :tok default-budget})))))))
+
 (defn response-text
   "Eval response r as every reader reads it (the model's tool message, the page, an outside
   agent): printed by the one printer under its handle, so a cut names the form that reads its
@@ -91,9 +96,7 @@
          ;; an eval's cost is one line with its result, what the result costs the context among it; its numbers stay data on the
          ;; record. An eval that recorded none was not run
          cost (fn [tok] (str ", :cost " (pr-str (if (some r [:ms :ticks :bytes]) (emit/cost-text (assoc (select-keys r [:ms :ticks :bytes]) :tok tok)) "not run"))))
-         ;; the line is inside the budget: the printer is given what is left once its longest wording is set aside
-         room (if (:handle r) (inc (select/chars-tokens (count (cost default-budget)))) 0)
-         p (print-value shown (cond-> {:handle (:handle r) :budget (- default-budget room)} render (assoc :render render)))
+         p (print-value shown (cond-> {:handle (:handle r) :budget (cond-> default-budget (:handle r) (- cost-line-tokens))} render (assoc :render render)))
          text (or (:text p) (:seon.error/message p))]
      ;; spliced after the printed map's last entry: the text is the only place its own size is known
      (if (and (:handle r) (:text p) (str/ends-with? text "}"))
