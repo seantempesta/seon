@@ -203,8 +203,8 @@
     ;; scratch as the platform declares the agent's own namespace (seon.agent/make-ns!);
     ;; Jolt's (ns ^:scratch x) does not carry the metadata yet (reported to root)
     (alter-meta! (find-ns 'ctx-scratch-ns) assoc :scratch true)
-    (let [db (d/db-with (db-with-program) [{:ns/name 'ctx-prog-ns} {:ns/name 'ctx-scratch-ns} {:ns/name 'user}])]
-      (is (= ['ctx-prog-ns/p-test] (:selected (agent/test-plan db db '#{ctx-prog-ns/p-test ctx-scratch-ns/s-test})))))))
+    (is (agent/judges? 'ctx-prog-ns/p-test))
+    (is (not (agent/judges? 'ctx-scratch-ns/s-test)))))
 
 (deftest a-failure-reads-as-assert-and-got
   (binding [*ns* *ns*]

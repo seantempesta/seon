@@ -1035,3 +1035,14 @@
     (is (= 1 (:ran (:value red))) (pr-str red))
     (is (some #(str/includes? (str %) "No such var: late/g") (:reports (:value red))) (pr-str red))
     (is (= {:ran 1 :reused 0 :pass 1 :fail 0 :error 0} (select-keys (:value green) [:ran :reused :pass :fail :error])) (pr-str green))))
+;; a task merged having defined its proof and function through eval: they ran here, and neither was on its branch
+(deftest a-proof-through-eval-is-told-and-has-no-result
+  (let [[_ defined proved]
+        (at/in-agent
+         (fn [{:keys [ns]}]
+           (let [n (str ns ".viaeval")]
+             [(str "(ns " n " (:require [clojure.test]))")
+              (str "(do (in-ns '" n ") (eval '(clojure.test/deftest p (clojure.test/is true))))")
+              (str "(:results (my.agent/prove '#{" n "/p}))")])))]
+    (is (str/includes? (str (:text defined)) "will not merge") (pr-str defined))
+    (is (empty? (:value proved)) (str "no form on the branch, so it does not run: " (pr-str proved)))))

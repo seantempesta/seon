@@ -319,6 +319,11 @@
       (vswap! acc (fn [m] (-> m (update :nodes conj node) (assoc :before @before))))
       nil)))
 
+(defn calls-eval?
+  "Whether tap account acc's form calls eval, whose definitions the tap does not see (Jolt turns it off while a unit runs). See docs/agent.md#changing-a-definition."
+  {:malli/schema [:=> [:cat :map] :boolean]}
+  [{:keys [nodes]}] (boolean (some #(contains? (:refs (unit-account %)) 'clojure.core/eval) nodes)))
+
 (defn set-vars
   "The vars an evaluated form set (readback: their root changed while it ran), from its
   tap's nodes and roots before, in any namespace, scratch ones included."
