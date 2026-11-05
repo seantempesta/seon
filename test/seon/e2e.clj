@@ -253,7 +253,7 @@
   promise nothing delivers: seon.fixtures/calc-cancel), the rest merges. square's branch records what its model read each turn
   and where the time went: its second turn read its first answer's failure as the
   assertion and what it got (square was (twice x), and twice is still its stub on square's
-  branch: 0); each turn's text is every message it sent, read back from its refs (seon.context/parts-of)."
+  branch: 0); each turn's text is every message it sent, made again from its records (seon.context/render)."
   [path]
   {:boot (cond-> {:max-running 2 :provider {:kind :scripted :script 'seon.fixtures/calc-cancel}} path (assoc :path path)) :specs fx/calc :tns 'calc
    :during (fn [sys ev]
@@ -268,7 +268,7 @@
                done? (every? #(r/done? idx %) ["calc/add-merge" "calc/twice-merge" "calc/square-merge" "calc/sum-sq-merge"])
                blocked (r/blocked-by idx "calc/abs")
                sq-db (:db @(c/branch-db sys (task/default-branch "calc/square")))
-               sq-turns (sort-by first (map (fn [[n e s]] [n (str/join "\n\n" (keep :content (into [] (mapcat second) (context/parts-of sq-db (:seon.model-call/sent (d/pull sq-db [:seon.model-call/sent] e)))))) s])
+               sq-turns (sort-by first (map (fn [[n e s]] [n (str/join "\n\n" (keep :content (:messages (context/render sq-db (:seon.model-call/basis (d/pull sq-db [:seon.model-call/basis] e)))))) s])
                                             (d/q '[:find ?n ?e ?s :where [?e :seon.model-call/n ?n] [?e :seon.model-call/origin :model]
                                                    [?e :seon.model-call/basis _] [?e :seon.model-call/split ?s]] sq-db)))
                read-failure? (and (= 2 (count sq-turns))
