@@ -624,9 +624,8 @@
         body (cond (some? (:data c)) [(part-model w k)]
                    wrapper? (mapcat #(body-forms w %) (if (map? (second out)) (drop 2 out) (rest out)))
                    :else (body-forms w out))]
-    ;; :tok is the model's own reading of it: what the form holds, not the page's alone
     (when (seq body)
-      (into [(symbol (:f c)) (cond-> {:tok (tokens-of (vec body))} (:at (:opts c)) (assoc :ctx (:at (:opts c))))] body))))
+      (into [(symbol (:f c)) (if-let [at (:at (:opts c))] {:ctx at} {})] body))))
 
 (defn fence
   "Source text s in a Markdown fence longer than any run of backticks inside it, so no line of s closes it: three, or one
@@ -740,7 +739,7 @@
 
 (defn tree
   "What draws what in walk w, from its root, as data that chains and prints nothing: each component its cache holds as
-  {:fn the render's name, :args what it was called with, :id its element id, :tokens the one sizer's over the characters of its own output
+  {:render the render's name, :args what it was called with, :id its element id, :tokens the one sizer's over the characters of its own output
   (its children stand there as markers: their output is theirs), :reads? true when it read the db, :children
   [those it drew, in order]}. Whatever has been drawn so far: a walk of the lists a reader asked for draws no others. Nil
   for a walk not yet flushed. An agent's own is `my.render/tree`; root's draws of a branch (`draw`) answer alike. See
@@ -750,7 +749,7 @@
   (let [cache @(:cache w)
         node (fn node [k]
                (when-let [c (get cache k)]
-                 (cond-> {:fn (symbol (:f c)) :args (:args c) :id (:id c)
+                 (cond-> {:render (symbol (:f c)) :args (:args c) :id (:id c)
                           :tokens (tokens-of (:out c))
                           :children (into [] (keep node) (:children c))}
                    (seq (:reads c)) (assoc :reads? true))))]

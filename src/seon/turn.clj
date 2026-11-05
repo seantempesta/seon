@@ -288,7 +288,8 @@
         _ (agent/commit!)
         ;; the request is the agent's records, the page among them as evals (show-page!): made on the db that holds them
         db (agent/db)
-        {:keys [messages]} (context/render db basis {:ctx @ctx/ctx})
+        {:keys [messages printed]} (context/render db basis {:ctx @ctx/ctx :printed (:printed @agent/state)})
+        _ (swap! agent/state assoc :printed printed)
         context-ms (long (profile/ms-since t0))
         ;; a hash of the bytes sent, which the debug page compares with its redraw
         _ (agent/transact! [{:seon.model-call/id id :seon.model-call/sent-hash (lib/digest (sedn/encode messages))}])

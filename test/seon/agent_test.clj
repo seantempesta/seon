@@ -1897,7 +1897,7 @@
     (is (= 16 (count (:sent-hash (:value turn)))) "the hash of the bytes it sent, written before the call")
     (is (= (:sent-hash (:value turn)) (:redrawn (:value turn))) "and its request made again from its records is those bytes")
     (is (= ["system" "assistant" "tool"] (:roles (:value turn))) "the help page, then the page as the call Seon made and its answer")
-    (is (str/includes? (str (peek (:read (:value turn)))) "Turn 0 of 1") (str "the page's turn line: " (peek (:read (:value turn)))))
+    (is (str/includes? (str (peek (:read (:value turn)))) "You have 1 turns") (str "the page's turn line: " (peek (:read (:value turn)))))
     (is (= :seon.model/no-provider (:error (:value turn))) "and the typed error the call answered")))
 
 (deftest a-whole-tasks-work-turns-are-no-merge-turns

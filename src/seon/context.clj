@@ -743,7 +743,11 @@
   {:by :code :response}, the response spliced as printed. See docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
   {:malli/schema [:=> [:cat [:maybe :map] :map] [:vector :seon.model/message]]}
   [opts {:seon.eval/keys [id by code intent call-id basis turn] :as e}]
-  (let [text (print/record-text (cond-> e basis (assoc-in [:seon.eval/response :value] (basis-value (:db opts) e))) render/model)
+  (let [text (print/record-text (cond-> e
+                                  basis (assoc-in [:seon.eval/response :value] (basis-value (:db opts) e))
+                                  ;; the turn is data on the eval, so the record says it and its bytes never move (docs/render.md#the-agents-turn)
+                                  (and turn (map? (:seon.eval/response e))) (assoc-in [:seon.eval/response :turn] turn))
+                                render/model)
         cid (or call-id (when-not (str/blank? intent) (str "eval-" id)))]
     (if cid
       [(cond-> {:role "assistant" :content ""
@@ -992,9 +996,11 @@
   provider-neutral messages (seon.model/wire-messages makes the wire shape), and :parts, each record's [ref messages position]
   in order (what the debug page labels its messages by): ref [:section eid t] the system prompt, [:example key t], [:session id],
   [:eval id], [:message id], [:reply id] or [:render]; position [turn rank n] (docs/turn.md#the-turn-is-a-number), nil for
-  what is no record."
-  {:malli/schema [:=> [:cat :map :map] [:map [:messages [:vector :seon.model/message]] [:parts [:vector :any]]]]}
-  [a {:keys [db basis help help-ref parts ctx]}]
+  what is no record. opts :printed, an earlier answer's :printed ({ref [record messages]}): a record equal to the one printed there
+  is not printed again, so a request prints what is new; it is a cache of what the record alone answers, so an absent or evicted
+  entry only prints again, and an eval that names its basis is never kept (AGENTS.md#5-laws)."
+  {:malli/schema [:=> [:cat :map :map] [:map [:messages [:vector :seon.model/message]] [:parts [:vector :any]] [:printed :map]]]}
+  [a {:keys [db basis help help-ref parts ctx printed]}]
   (let [e (:db/id a)
         c (delay (or ctx (agent-ctx db e)))
         model? (= :model (:origin basis))
@@ -1022,11 +1028,17 @@
                                             :seon.eval/schema :seon.render/parts
                                             :seon.eval/response {:value (render/parts-value (or parts (drawn-parts db {:tree @c})))}})
                    nil]]))
+        ;; each record [ref messages position record], its messages reused when its record is the one they were printed from
+        recs (mapv (fn [[pos v k]]
+                     (let [r (ref-of v) [old ms] (get printed r)]
+                       [r (if (and ms (= old v)) ms (record-messages k v db)) pos v]))
+                   rs)
         ps (-> [[help-ref [{:role "system" :content help}] nil]]
                (into ex)
-               (into (map (fn [[pos v k]] [(ref-of v) (record-messages k v db) pos])) rs)
+               (into (map #(subvec % 0 3)) recs)
                (into page))]
-    {:messages (into [] (mapcat second) ps) :parts ps}))
+    {:messages (into [] (mapcat second) ps) :parts ps
+     :printed (into {} (keep (fn [[r ms _ v]] (when-not (:seon.eval/basis v) [r [v ms]]))) recs)}))
 
 
 
@@ -1043,13 +1055,13 @@
   the commit b names: the agent's request (`request`), b's :agent's: the system prompt and its record, how its work stands
   among them (the page's evals, `status` in the first). The one maker of a context: the model's request is this, and so is every
   later reading of it. opts :parts, {id content}, the agent's live walk's parts at db (else drawn cold); :ctx, its @ctx at db
-  (else drawn cold). {:messages :parts} (`request`)."
-  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.model-call/basis] [:map [:messages [:vector :seon.model/message]] [:parts [:vector :any]]]]
-                  [:=> [:cat :seon.host/db :seon.model-call/basis :map] [:map [:messages [:vector :seon.model/message]] [:parts [:vector :any]]]]]}
+  (else drawn cold); :printed, an earlier answer's. {:messages :parts :printed} (`request`)."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.model-call/basis] [:map [:messages [:vector :seon.model/message]] [:parts [:vector :any]] [:printed :map]]]
+                  [:=> [:cat :seon.host/db :seon.model-call/basis :map] [:map [:messages [:vector :seon.model/message]] [:parts [:vector :any]] [:printed :map]]]]}
   ([db basis] (render db basis {}))
-  ([db {:keys [agent] :as basis} {:keys [parts ctx]}]
+  ([db {:keys [agent] :as basis} {:keys [parts ctx printed]}]
    (request (d/pull db [:db/id :seon.agent/key] [:seon.agent/key agent])
-            {:db db :basis basis :help (system-text db) :parts parts :ctx ctx
+            {:db db :basis basis :help (system-text db) :parts parts :ctx ctx :printed printed
              :help-ref [:section (ref/page-top db system-page) (doc/page-t db system-page)]})))
 
 

@@ -107,10 +107,11 @@
   (let [part (seon.render.ui/turn {:seon.ctx/ctx {:seon.agent/status :busy :seon.agent/max-turns 40 :seon.agent/ns 'seon.program :seon.agent/turn 1
                                                           :task {:seon.task/id "seon.program/a-var-is-read"}}
                                            :seon.db/db (ts/test-db)} 1)]
-    (is (= "Turn 12 of 40. You're in seon.program." (seon.render.ui/turn-line 12 40 'seon.program)))
-    (is (= "Turn 12." (seon.render.ui/turn-line 12 nil nil)) "what is not known is left out")
-    (is (= "Turn 38 of 40. 2 turns left. You're in seon.program." (seon.render.ui/turn-line 38 40 'seon.program)) "the turns left, near the cap")
-    (is (= "Turn 1 of 40. You're in seon.program." (second (second part))) "the part's heading is the line")
+    (is (= "You have 40 turns. You're in seon.program." (seon.render.ui/turn-line 12 40 'seon.program)))
+    (is (= (seon.render.ui/turn-line 12 40 'seon.program) (seon.render.ui/turn-line 13 40 'seon.program)) "a turn passing is no news")
+    (is (= "" (seon.render.ui/turn-line 12 nil nil)) "what is not known is left out")
+    (is (= "You have 40 turns. 2 turns left. You're in seon.program." (seon.render.ui/turn-line 38 40 'seon.program)) "the turns left, near the cap")
+    (is (= "You have 40 turns. You're in seon.program." (second (second part))) "the part's heading is the line")
     (is (nil? (:data-for (second (second part)))) "the model's part holds the heading only")))
 
 (deftest a-records-text-is-the-same-whatever-came-before
@@ -312,7 +313,7 @@
         ms (into [] (mapcat #(context/eval-messages {} %)) [(ev "e1" "E1") (ev "e2" "E2") (ev "e3" "E3")])]
     (is (= ["assistant" "tool" "assistant" "tool" "assistant" "tool"] (mapv :role ms)) "each eval its call and its response")
     (is (= {:role "assistant" :content "" :tool-calls [{:id "c-e1" :code "(e1)"}] :reply 1} (first ms)) "the call alone, naming its reply")
-    (is (= {:role "tool" :tool-call-id "c-e1" :content "{:handle result/e1, :value \"E1\", :cost \"not run\"}"} (second ms)))
+    (is (= {:role "tool" :tool-call-id "c-e1" :content "{:handle result/e1, :value \"E1\", :turn 1, :cost \"not run\"}"} (second ms)))
     (let [wire (seon.model/wire-messages true ms)]
       (is (= ["assistant" "tool" "tool" "tool"] (mapv :role wire)) "a reply's three calls are one assistant message")
       (is (= ["c-e1" "c-e2" "c-e3"] (mapv :id (:tool_calls (nth wire 0)))))
@@ -330,7 +331,7 @@
                              :seon.eval/response {:handle (symbol "result" id) :value [:a]} :seon.eval/turn turn})
         ms (context/eval-messages {} (ev "e1" "root" 0))]
     (is (= [{:role "assistant" :content "" :tool-calls [{:id "eval-e1" :code "(:seon.ctx/pattern @ctx)" :intent "Read the pattern."}]}
-            {:role "tool" :tool-call-id "eval-e1" :content "{:handle result/e1, :value [:a], :cost \"not run\"}"}]
+            {:role "tool" :tool-call-id "eval-e1" :content "{:handle result/e1, :value [:a], :turn 0, :cost \"not run\"}"}]
            ms)
         "a call made from the eval's own intent and code, answered by its response; turn 0 has no reply to name")
     (is (= ms (context/eval-messages {} (ev "e1" "anyone at all" 0))) "who asked is read by no one")
@@ -826,9 +827,9 @@
         (is (= {:role "assistant" :content "I call f." :reasoning "why" :reply 1} (nth r1 3)) "the reply: its text and the reasoning as returned")
         (is (= {:role "assistant" :content "" :tool-calls [{:id "call-0" :code "(f 1)"}] :reply 1} (nth r1 4)) "then its call")
         (is (= [{:role "assistant" :content "I call f." :reasoning_content "why" :tool_calls [{:id "call-0" :type "function" :function {:name "eval" :arguments "{\"code\":\"(f 1)\"}"}}]}
-                {:role "tool" :content "{:handle result/e2, :value 1, :cost \"not run\"}" :tool_call_id "call-0"}]
+                {:role "tool" :content "{:handle result/e2, :value 1, :turn 1, :cost \"not run\"}" :tool_call_id "call-0"}]
                (subvec (seon.model/wire-messages true r1) 3 5)) "one assistant message on the wire")
-        (is (= "{:handle result/e2, :value 1, :cost \"not run\"}" (:content (nth r1 5))) "the call's response, its recorded value printed as it is sent")
+        (is (= "{:handle result/e2, :value 1, :turn 1, :cost \"not run\"}" (:content (nth r1 5))) "the call's response, its recorded value printed as it is sent")
         (is (= r0 (subvec r1 0 3)) "the whole earlier request is the prefix: its page stays, appended")
         (is (re-find #"seon\.render\.ui/status" (:content (peek r1))) "a verdict recorded after turn 0: how the work stands, told again")
         ;; (the task's data draws each proof's recorded status too, so it moves with a verdict: reported)
@@ -1379,8 +1380,8 @@
             _ (d/transact conn [{:seon.message/id "mid" :seon.message/agent [:seon.agent/key "b/a1"] :seon.message/turn 1 :seon.message/from "owner" :seon.message/body "note taken in turn 1"}])
             r1 (ask! 1)]
         (is (= (:messages r0) (subvec (:messages r1) 0 (count (:messages r0)))) "request 2 starts with request 1 whole, its page the first request's")
-        (is (= ["system" "assistant" "tool" "user" "assistant" "tool" "assistant" "tool"] (mapv :role (:messages r1)))
-            "then the message of turn 1 (rank 0 before turn 1's eval, though written after it), the eval and its result, and the turn line, the one part that moved (answered whole)")
+        (is (= ["system" "assistant" "tool" "user" "assistant" "tool"] (mapv :role (:messages r1)))
+            "then the message of turn 1 (rank 0 before turn 1's eval, though written after it), the eval and its result")
         (is (str/includes? (:content (nth (:messages r1) 3)) "note taken in turn 1"))))))
 
 (deftest a-record-takes-the-agents-turn-in-force
@@ -1601,7 +1602,7 @@
             ms (:messages r1)]
         (is (= (:messages r0) (subvec ms 0 (count (:messages r0)))) "the first request is the prefix of the next")
         (is (= [{:role "assistant" :content "" :tool-calls [{:id "c0" :code "(+ 5 1)" :intent "Add."}] :reply 1}
-                {:role "tool" :tool-call-id "c0" :content "{:handle result/e0, :value 6, :cost \"not run\"}"}
+                {:role "tool" :tool-call-id "c0" :content "{:handle result/e0, :value 6, :turn 1, :cost \"not run\"}"}
                 {:role "user" :content "{:from \"owner\", :body \"Go on.\"}"}
                 {:role "assistant" :content "Thinking." :reply 2}]
                (subvec ms (count (:messages r0)) (+ 4 (count (:messages r0)))))
@@ -1782,19 +1783,18 @@
       (is (re-find #"Write it like this one" h))
       (is (re-find #"deftest g-test" h)))))
 
-(deftest the-turn-line-moves-with-the-turn-and-the-prefix-before-it-stays
-  ;; owner, 2026-11-05: the turn is an ordinary component placed last; a part that moved is answered whole by the next
-  ;; render-changes, so each request carries the new line and the prefix before it is byte-identical (docs/render.md#the-agents-turn)
+(deftest a-turn-passing-adds-no-eval-and-each-eval-says-its-turn
+  ;; owner, 2026-11-05: what repeatedly changes is the render's failure, not a reason for an eval: the turn is data on each eval, whose
+  ;; bytes never move, so the page says nothing new as a turn passes (docs/render.md#the-agents-turn)
   (ts/test-branch!
     (fn [_ conn]
       (let [[ask! ev! _] (parts-session conn)
             r0 (ask! 0)
             _ (ev! "e1")
             r1 (ask! 1)
-            changes (:content (peek (:messages r1)))]
-        (is (re-find #"Turn 0\. " (:content (peek (:messages r0)))) "the turn is in the page, with the other parts")
-        (is (re-find #"Turn 1\. " changes) "whole, when it moved")
-        (is (not (str/includes? changes "Where your work stands")) "and the part that did not move is not answered")
+            all (pr-str (:messages r1))]
+        (is (re-find #"You have " (:content (peek (:messages r0)))) "the page says the cap")
+        (is (not (re-find #"Turn \d" all)) "no message holds a turn number as a line")
         (is (= (:messages r0) (subvec (:messages r1) 0 (count (:messages r0)))) "the prefix before it is byte-identical")))))
 
 (deftest a-cited-attribute-says-what-it-is-and-shows-a-real-value

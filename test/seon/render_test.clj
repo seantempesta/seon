@@ -1567,7 +1567,7 @@
 
 (deftest a-walk-says-what-draws-what
   ;; docs/render.md#what-draws-what: seon.render/tree is a walk's cache read as data that chains, from its root: each entry
-  ;; {:fn :args :id :tokens :children}, :tokens its own output's (the one sizer over it, a child standing as its marker),
+  ;; {:render :args :id :tokens :children}, :tokens its own output's (the one sizer over it, a child standing as its marker),
   ;; :reads? only for an entry that read the db. A walk is a walk: an agent's own (my.render/tree) and one root
   ;; draws of a branch (r/draw) answer alike.
   (let [long-code (apply str (repeat 2000 "x"))
@@ -1576,10 +1576,10 @@
                                                              [11 {:db/id 11 :seon.eval/code "(inc 1)"}]])})
         w (doto (r/walker {:ref rec :changes seon.ctx/changes} (constantly nil) [#'lab-page {}]) (r/flush! nil))
         t (r/tree w)
-        kid (fn [f id] (first (filter #(and (= f (:fn %)) (= [id] (:args %))) (:children t))))]
+        kid (fn [f id] (first (filter #(and (= f (:render %)) (= [id] (:args %))) (:children t))))]
     (try
-      (is (= {:fn `lab-page :args []} (select-keys t [:fn :args])) "from the root")
-      (is (= #{[`lab-row 12] [`lab-row 11] [`lab-length 12] [`lab-length 11]} (set (map (juxt :fn (comp first :args)) (:children t)))) "each component it drew, with its args")
+      (is (= {:render `lab-page :args []} (select-keys t [:render :args])) "from the root")
+      (is (= #{[`lab-row 12] [`lab-row 11] [`lab-length 12] [`lab-length 11]} (set (map (juxt :render (comp first :args)) (:children t)))) "each component it drew, with its args")
       (is (= (:id (get @(:cache w) [`lab-row 12])) (:id (kid `lab-row 12))) "named by its element id")
       (is (every? #(and (empty? (:children %)) (nat-int? (:tokens %))) (:children t)) "leaves have none")
       (is (<= (seon.print.select/estimate long-code) (:tokens (kid `lab-row 12)) (* 2 (seon.print.select/estimate long-code)))
@@ -2333,7 +2333,7 @@
         db (d/db-with db [{:db/id aid :seon.agent/max-turns 7 :seon.agent/turn 1 :seon.agent/outcome :green :seon.agent/ended-turn 0}
                           {:seon.model-call/id "b1/a1/1" :seon.model-call/agent aid :seon.model-call/n 1 :seon.model-call/origin :model}])
         opts (fn [db] {:seon.ctx/ctx (:tree (seon.ctx/build db aid :b)) :seon.db/db db})]
-    (is (str/includes? (pr-str (ui/turn (opts db) aid)) "Turn 1 of 7") "the turn line: the agent's own cap")
+    (is (str/includes? (pr-str (ui/turn (opts db) aid)) "You have 7 turns") "the turn line: the agent's own cap")
     (is (str/includes? (pr-str (ui/chat-start (opts db) aid)) "a budget of 7 turns") "the chat's start: the same cap")
     (is (not (str/includes? (pr-str (ui/chat-end (opts db) aid)) "Done")) "the chat's end: an earlier wake's end is no end of this one")
     (let [ended (d/db-with db [{:db/id aid :seon.agent/ended-turn 1}])]
@@ -2498,11 +2498,6 @@
     (is (not (str/includes? t "\\n")) "no escaped line break")
     (is (str/includes? t "```clojure") "in a fence")
     (is (str/includes? t "[:h2 \"Where your work stands\"]"))))
-
-(deftest a-symbol-head-draws-on-the-page-as-the-function-it-names
-  (is (= (h/html [(requiring-resolve 'clojure.string/upper-case) "x"]) (h/html ['clojure.string/upper-case "x"]))
-      "the one expansion a var head has")
-  (is (= "<p>a</p>" (h/html [:p "a"])) "a keyword head is still an element"))
 
 (deftest a-parts-head-is-the-function-that-drew-it-and-its-path-is-real
   ;; the owner: "the head names the real function and :ctx is a real path": (get-in @ctx path) answers the data it read

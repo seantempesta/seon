@@ -1142,14 +1142,16 @@
 (declare standing)
 
 (defn turn-line
-  "The agent's turn as one line, the same words on the page and in the model's request: `Turn 12 of 40. You're in seon.program.`: the
-  model calls it has made of its cap and the namespace its REPL is in (seon.context/current-ns). Parts that are not known are left
-  out. See docs/render.md#the-agents-turn."
+  "What the agent's page says of its turns, the same words for the page and the model: `You have 40 turns. You're in seon.program.`, and
+  how many are left once few are. It holds no turn number, so it moves when it has news: each eval says its own turn (:turn in its
+  answer, seon.context/eval-messages). Parts that are not known are left out. See docs/render.md#the-agents-turn."
   {:malli/schema [:=> [:cat [:maybe :int] [:maybe :int] [:maybe :symbol]] :string]}
   [n cap in-ns]
-  (str "Turn " n (when cap (str " of " cap)) "."
-       (when (and cap n (<= 0 (- cap n) 5)) (if (zero? (- cap n)) " This is your last turn." (str " " (- cap n) (if (= 1 (- cap n)) " turn" " turns") " left.")))
-       (when in-ns (str " You're in " in-ns "."))))
+  (let [left (when (and cap n) (- cap n))]
+    (str/trim
+      (str (when cap (str "You have " cap " turns."))
+           (when (and left (<= 0 left 5)) (if (zero? left) " This is your last turn." (str " " left (if (= 1 left) " turn" " turns") " left.")))
+           (when in-ns (str " You're in " in-ns "."))))))
 (defn turn
   "The agent's turn (a component over ctx and the db): its turn line as the part's heading, which is all the model is sent
   of it, and under it, when its last reply was cut at the model's token limit (the reply of the model call that answered
@@ -1170,16 +1172,11 @@
 
 (defn agent-state
   "The agent's state for the person (a component over ctx and the db), nothing of it for the model: how its work stands
-  (`standing`, from the task's outcome where it holds one), its task, the form it is running, its proofs green, the tokens its
-  requests sent (cached and not) and the time they took."
+  (`standing`, from the task's outcome where it holds one), its task, the form it is running and its proofs green."
   {:seon.render/style tile-style
    :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int] :any]}
   [{c :seon.ctx/ctx db :seon.db/db} aid]
-  (let [sum (fn [a] (d/q '[:find (sum ?k) . :with ?m :in $ ?a ?at :where [?m :seon.model-call/agent ?a] [?m ?at ?k]] db aid a))
-        sent (sum :seon.model-call/tokens)
-        cached (sum :seon.model-call/cache-hit-tokens)
-        ms (sum :seon.model-call/ms)
-        task (:task c)
+  (let [task (:task c)
         t (into {} (for [k [:seon.task/id :seon.task/outcome :seon.task/reason] :let [v (ratom/realize (get task k))] :when (some? v)] [k v]))
         agent (into {} (for [k [:seon.agent/outcome :seon.agent/ended-turn :seon.agent/turn :seon.agent/max-turns :seon.agent/reason :seon.agent/status]
                              :let [v (ratom/realize (get c k))] :when (some? v)] [k v]))
@@ -1190,9 +1187,7 @@
      [:p (str "● " (:text stands) (when (:detail stands) (str " · " (:detail stands))) (when (:reason stands) (str " · " (:reason stands))))]
      (when-let [id (:seon.task/id t)] [:p "task " (task-title id)])
      (when running [:p "running " [:code running]])
-     (when (seq verdicts) [:p (str (count (filter #{:green} verdicts)) " of " (count verdicts) " proofs green")])
-     (when sent [:p (str (print/tokens-text sent) " sent in all" (when cached (str ", " (print/tokens-text cached) " of them cached, " (print/tokens-text (- sent cached)) " not")))])
-     (when (pos? (or ms 0)) [:p (str (ms-str ms) " in the model")])]))
+     (when (seq verdicts) [:p (str (count (filter #{:green} verdicts)) " of " (count verdicts) " proofs green")])]))
 
 (defn own-problems
   "The open problems of the agent (a component over its branch db, seon.problems/own: its newest run's,

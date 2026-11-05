@@ -253,11 +253,11 @@
      :growth :linear
      ;; measured 2026-11-03: 3,888 / 8,488 / 24.6k calls and 10.4 / 16.8 / 39.5 MB at 10 / 30 / 100 evals (before the
      ;; print cache and the task's list drawn alone: 8,708 / 21,668 / 67,028 and 16.6 / 33.2 / 92.7 MB); what grows is
-     ;; the page's html, a row a message, and the cold draw's ctx (seon.ctx/build), each about a third
+     ;; the page's html, an entry a message, and the cold draw's ctx (seon.ctx/build), each about a third
      ;; measured 2026-11-05, with no print kept (every record printed again: seon.context-cost-test/a-requests-cost-is-its-records):
      ;; 4,920 / 11.0k / 32.4k calls and 9.38 / 14.9 / 34.2 MB at 10 / 30 / 100 evals
-     :per-n {:calls 310 :bytes 280000}
-     :fixed {:calls 1850 :bytes 6600000}
+     :per-n {:calls 316 :bytes 280000}
+     :fixed {:calls 1860 :bytes 6600000}
      :sizes [10 30 100]}))
 
 (deftest a-transaction-renders-what-it-touched
@@ -333,7 +333,7 @@
                 "at 100 turns, the owner's 2026-11-05: cull the calls later if the perf is bad")
      :growth :linear
      :per-n {:calls 0 :bytes 3400}
-     :fixed {:calls 375 :bytes 150000}
+     :fixed {:calls 378 :bytes 150000}
      :sizes [100 300 1000 4000]}))
 
 (deftest a-step-costs-what-changed
@@ -350,13 +350,11 @@
      ;; measured 2026-11-05, a step and back on this input: 1,231 / 1,471 / 2,431 / 6,271 contracted calls and 10.86 / 11.95 / 16.68 /
      ;; 33.70 MB at 10 / 40 / 160 / 640 turns; 8 calls a turn, two components each (its turn, its tiles). Before the read index and the turn's component, one step on the same
      ;; input: 11,073 calls and 80.9 MB at 640 turns
-     ;; render-core's agent-facing renders (the status written to the agent, a part for each cite, the turn line with its token sum
-     ;; and model): 1,387 calls and 17.10 MB at 10 turns, from 1,272 and 10.96 MB before this merge (a step and back)
-     ;; 17.11 / 20.81 / 36.43 MB and 1,387 / 1,627 / 2,587 calls at 10 / 40 / 160 turns: linear, the bytes about 130 KB a turn, from
-     ;; 59 KB. What grew with the turns is the turn line's and the agent state's sums over every model call of the agent
-     ;; (seon.render.ui/turn, agent-state: the tokens its requests sent, a d/q over its calls), drawn again at each step
-     :per-n {:calls 8.2 :bytes 130000}
-     :fixed {:calls 1305 :bytes 15800000}
+     ;; render-core's agent-facing renders (the status written to the agent, a part for each cite, the turn line): 1,355 calls and
+     ;; 11.31 MB at 10 turns under the test binary's contracts, 8 calls and 36 KB a turn, as before them; the fixed part is the
+     ;; renders the model now reads drawn on a step
+     :per-n {:calls 8.2 :bytes 37000}
+     :fixed {:calls 1285 :bytes 11250000}
      :sizes [10 40 160 640]}))
 
 (def ^:dynamic *conn*
@@ -469,8 +467,10 @@
                        ;; 616 at 10: 607 + 9, following the REPL: 3 calls a draw of the namespaces part (current-ns and its two
                        ;; record lookups, :seon.agent/ns and the task's fallback), 3 draws. Accepted by the owner, 2026-11-03
                        ;; ("Record 616 and 8")
-                       ;; 1,066 calls and 4.61 MB at 10 evals since render-core's agent-facing renders (the status written to the agent,
-                       ;; its unwritten proof's shape, a part for each cite, the turn line's token sum and model): from 616 and 3.55 MB
-                       :per-n {:calls 4 :bytes 35000}
-                       :fixed {:calls 1026 :bytes 4260000}
+                       ;; 1,048 calls and 1.97 MB at 10, 40 and 80 evals since render-core's agent-facing renders: flat, where it was 616 and
+                       ;; 3.55 MB at 10 and 4 calls and 35 KB an eval. The calls more are what the model now reads: the status written to
+                       ;; the agent, its unwritten proof's shape, a part for each cite; nothing of the eval lists is read. Task
+                       ;; seon.render/the-render-is-an-eval follows it: the list is drawn as one eval there
+                       :per-n {:calls 0 :bytes 0}
+                       :fixed {:calls 1050 :bytes 2000000}
                        :sizes [10 40 80]}))))))

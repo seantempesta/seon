@@ -137,28 +137,28 @@
 
 (defn request-of
   "The input at n: seon.context/request's arguments for the model turn after n earlier evals, one a turn, each production-shaped
-  (item), and the page's parts the walk's (two) drawn as the call Seon made, since the session holds no eval of it."
+  (item), the page's parts the walk's (two) drawn as the call Seon made, since the session holds no eval of it, and :printed, all
+  of them but the newest printed by a request before."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map :map]]}
   [n]
   (let [[db a] (session-of n)
         db (d/db-with db (vec (for [i (range n)] [:db/add [:seon.eval/id (str "e" i)] :seon.eval/turn (inc i)])))
-        part (fn [k text] [:section {:id k} text])]
-    [{:db/id a} {:db db :basis {:commit (d/commit-id db) :task "demo/f" :turn (inc n) :max-turns 9999 :origin :model :agent "b/a1"}
-                 :help "help" :help-ref [:section 1 1]
-                 :parts {"task-1" (part "task-1" "Make f.") "status-1" (part "status-1" "0 of 9")}
-                 :ctx (:tree (seon.ctx/build db a :b))}]))
+        part (fn [k text] [:section {:id k} text])
+        opts {:db db :basis {:commit (d/commit-id db) :task "demo/f" :turn (inc n) :max-turns 9999 :origin :model :agent "b/a1"}
+              :help "help" :help-ref [:section 1 1]
+              :parts {"task-1" (part "task-1" "Make f.") "status-1" (part "status-1" "0 of 9")}
+              :ctx (:tree (seon.ctx/build db a :b))}
+        printed (:printed (seon.context/request {:db/id a} opts))]
+    [{:db/id a} (assoc opts :printed (dissoc printed [:eval (str "e" (dec n))]))]))
 
 (deftest a-requests-cost-is-its-records
   ;; docs/render.md#the-models-context-a-cached-prefix-then-the-turn: a request is the system prompt, the examples and the agent's
-  ;; records in turn order, each by its own render, a function of that record alone. Nothing is held between requests (no print cache),
-  ;; so a request costs its records: the bytes it sends, and no more than a record's read and print
+  ;; records in turn order, each by its own render, a function of that record alone, so a turn prints its new record and reuses the rest
+  ;; (:printed); without the cache a record cost 546 calls and 0.32 MB in every request, n squared over a session
   (cost/proof {:of 'seon.context/request :input 'seon.context-cost-test/request-of
                :n "evals of the session before the turn"
-               :work "per record: its member of ctx read and its messages printed once by the one printer; the page at the end, drawn once"
+               :work "the one new record printed; each earlier record read from ctx and compared with the one it was printed from; the page at the end, drawn once"
                :growth :linear
-               :per-n {:calls 550 :bytes 325000}
-               ;; measured 2026-11-05: 5,847 calls and 3.67 MB at 10 evals, 16.7k and 10.07 MB at 30, 54.9k and 32.5 MB at 100 (about 546 calls and 0.32 MB a
-               ;; record, as a record's print was when printed-run kept it: 564 calls and 340 KB). Before: 336 calls whatever the session held, since
-               ;; a request printed only its new records and read the rest back from the print the run kept; this change keeps no print
-               :fixed {:calls 400 :bytes 450000}
+               :per-n {:calls 8 :bytes 15000}
+               :fixed {:calls 900 :bytes 600000}
                :sizes [10 30 100]}))
