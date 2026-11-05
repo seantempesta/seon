@@ -500,7 +500,9 @@
       (is (str/includes? (:html (nth (in root "#p-tiles") 2)) "work"))
       (is (= :seon.render/root-input (:schema (input root)))))
     (testing "an agent's focus: its REPL and messages at the top, live while root's view holds it in this boot"
-      (is (= [:seon.render/agent-input {:id :a3 :live? true :held nil}] [(:schema (input agent)) (:input (input agent))])))
+      (is (= [:seon.render/agent-input {:id :a3 :live? true :held nil :focus? true}] [(:schema (input agent)) (:input (input agent))]))
+      (let [ctx-page (#'p/page-value st :a3)]
+        (is (false? (:focus? (:input (input ctx-page)))) "@ctx's input takes no focus: a focused field at the page's end scrolls the page to its bottom")))
     (testing "a location naming no entity is that error, never an empty page; a branch that could not be read is shown as its error"
       (is (= :seon.render/no-location (:seon.error/type (#'p/page-value st 99999999))))
       (let [err (seon.contract/error :seon.writer/refused 'seon.writer/writer-proc "no branch :task-demo-f" {})
@@ -1009,6 +1011,17 @@
     (is (and (str/includes? cut "line-0") (not (str/includes? cut "line-2999"))) "output over the value budget is cut")
     (is (< (count cut) 6000) (str "cut by the value's budget: " (count cut) " chars"))
     (is (str/includes? cut "(subs (:seon.print/code (:out result/e23))") "and the cut says how to read the rest")))
+
+(deftest the-repl-input-takes-focus-only-on-the-chat
+  ;; owner, 2026-11-05: @ctx opened scrolled to its very bottom. The REPL's textarea is the page's last element and was
+  ;; autofocus on every tab: a browser scrolls a focused field into view as the page loads. The chat, which follows its
+  ;; tail, takes it; @ctx does not (and an agent with no process has no field at all)
+  (let [html (fn [m] (h/html (ui/agent-input {:unit "p-input"} (merge {:id :a3 :live? true :held nil} m))))]
+    (is (str/includes? (html {:focus? true}) "autofocus"))
+    (is (not (str/includes? (html {:focus? false}) "autofocus")))
+    (is (not (str/includes? (html {}) "autofocus")) "no word of it, no focus")
+    (is (str/includes? (html {:focus? false}) "<textarea") "the field is still there")
+    (is (not (str/includes? (html {:live? false :focus? true}) "<textarea")) "no process: no field")))
 
 (deftest roots-context-is-its-debug-page
   ;; root, 2026-10-26: root's page and an agent's both toggle to what their model reads; root has no
@@ -1844,6 +1857,36 @@
             card (h/html (ui/agent-card {:seon.ctx/ctx c} 1))]
         (is (str/includes? (second (re-find #"<a [^>]*href=\"/\"[^>]*>(.*)</a>" root)) "main"))
         (is (str/includes? (second (re-find #"<a [^>]*href=\"/agent/a6\"[^>]*>(.*)</a>" card)) "stopped at its cap"))))))
+
+(deftest a-long-part-on-the-ctx-page-starts-closed-and-opens-on-demand
+  ;; owner, 2026-11-05: @ctx was 1.3 MB and 614,773 px tall: the status part, as the model reads it, is a million
+  ;; characters printed whole beside the part drawn. A part over the value budget is a closed <details> (its size in tokens); opened
+  ;; (the tab's /open toggle, :open) it is the whole text, never cut. A part within budget is shown as it was
+  (let [big (into [:ul] (for [i (range 4000)] [:li (str "row " i " of a long part")]))
+        parts {"p-small" [:p "a short part"] "p-big" big}
+        html {"p-small" "<p>drawn small</p>" "p-big" "<p>drawn big</p>"}
+        closed (h/html (ui/ctx-parts parts html #{}))
+        opened (h/html (ui/ctx-parts parts html #{"d-part-p-big"}))
+        pair (fn [h id] (second (re-find (re-pattern (str "(?s)(<div[^>]*data-part=\"" id "\".*?drawn)")) h)))]
+    (is (str/includes? closed "a short part") "a part within budget is shown whole, as before")
+    (is (not (str/includes? (pair closed "p-small") "<details")) "and not folded")
+    (is (str/includes? closed "drawn big") "the part drawn is shown")
+    (is (not (str/includes? closed "row 3999 of a long part")) "the long text is not in the page until opened")
+    (is (< (count closed) 10000) (str "a long part costs its summary: " (count closed) " chars"))
+    (is (re-find #"<details[^>]*>\s*<summary[^>]*>[^<]*tok" (pair closed "p-big")) "folded, its size in tokens on the line")
+    (is (not (re-find #"<details[^>]* open" (pair closed "p-big"))) "closed")
+    (is (str/includes? closed "unit=d-part-p-big") "its toggle tells the render proc (/open)")
+    (is (str/includes? opened "row 3999 of a long part") "opened it is whole")
+    (is (re-find #"<details[^>]* open" (pair opened "p-big")) "and its details are open")
+    (is (not (str/includes? (pair closed "p-big") "md:grid-cols-2")) "a long text does not share the row with the part drawn: it has the width")
+    (is (str/includes? (pair closed "p-small") "md:grid-cols-2") "a short one does")
+    (testing "a part the tab opened (the /open toggle) moves the page's unit, so the render proc sends it"
+      (let [[main branch _] (paged-dbs)
+            st (root-state (proc-state main branch) main)
+            rev (fn [st] (:input (some #(when (= "d-parts" (:id %)) %) (:seon.render/units (#'p/page-value st :a3)))))]
+        (is (some? (rev st)))
+        (is (not= (rev st) (rev (assoc-in st [:tab :a3 :open] #{"d-part-p-big"}))))
+        (is (= (rev st) (rev (assoc-in st [:tab :a3 :open] #{"pc-error"}))) "a toggle of another unit does not")))))
 
 (deftest the-model-and-the-page-read-the-same-parts
   ;; task seon.context/the-context-is-the-agents-evals-and-seons (2026-10-29: "build with both the context

@@ -368,9 +368,11 @@
                                 (try (render/placed-units w) (finally (render/dispose-walk! w))))))
         ;; @ctx's part pairs (seon.render.ui/ctx-parts): what the model reads of each part of the task's list, beside
         ;; its unit as the page draws it, from one walk of the page
+        ;; the part texts the tab opened (/open: a long one is drawn closed, ui/ctx-parts)
+        opened-parts (into #{} (filter #(str/starts-with? % "d-part-")) (get-in st [:tab view :open] #{}))
         pairs (fn [w] (let [us (filterv #((set context/page-lists) (:container %)) (render/placed-units w))]
-                        {:id "d-parts" :container "#c-rows" :rev (hash (mapv (juxt :id :rev) us))
-                         :html (h/html (ui/ctx-parts (render/placed-hiccup w context/page-lists) (into {} (map (juxt :id :html)) us)))}))
+                        {:id "d-parts" :container "#c-rows" :rev (hash [(mapv (juxt :id :rev) us) opened-parts])
+                         :html (h/html (ui/ctx-parts (render/placed-hiccup w context/page-lists) (into {} (map (juxt :id :html)) us) opened-parts))}))
         ;; the debug view: @ctx, its part pairs and the agent's record as data by the one printer (its :seon.ctx/ctx render)
         ctx-units (fn [] (let [kw (walked)
                                t (if kw (:tree (:c kw)) (cold-tree))
@@ -400,7 +402,7 @@
                                        :else "not running · shown from its branch"))
                       ;; its REPL and its messages while its process runs; its held task's release
                       :input {:schema :seon.render/agent-input
-                              :value {:id (:seon.agent/id e) :live? (live? st id)
+                              :value {:id (:seon.agent/id e) :live? (live? st id) :focus? chat?
                                       :held (d/q '[:find ?id . :in $ ?a :where [?a :seon.agent/task ?t] [?t :seon.task/execution :held] [?t :seon.task/id ?id]] db eid)}}}
                      ;; its tabs name it by its id in this boot, else by its branch (an earlier boot's agent)
                      (or id (:seon.agent/branch e) (let [v (if (vector? view) (second view) view)] (when (and (keyword? v) (namespace v)) v)) (:seon.agent/id e)))))

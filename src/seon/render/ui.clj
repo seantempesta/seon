@@ -380,17 +380,20 @@
   the same): a line evaluates in its REPL (seon.root/submit!, origin :ui); a line that starts with
   > is a message its next turn reads (seon.root/message!); interrupt stops its running form;
   release runs its task's next run when the task is held (seon.root/release!). input {:id
-  :live? :held}: live, root's view holds its process in this boot."
+  :live? :held :focus?}: live, root's view holds its process in this boot; focus?, its field takes focus as the page loads (the chat's:
+  @ctx's page is long and the field ends it)."
   {:malli/schema [:=> [:cat :seon.render/opts :seon.render/agent-input] :any]}
-  [opts {:keys [id live? held]}]
+  [opts {:keys [id live? held focus?]}]
   [:section {:id (:unit opts) :class "flex flex-col gap-2"}
    (if live?
      [:form {:class "flex gap-2" :seon/call 'seon.root/submit! :seon/agent id}
       [:span {:class "text-signal"} (str (kname id) "=>")]
       ;; Enter sends, Shift+Enter is a new line: a form may span lines
-      [:textarea {:name "forms" :class "flex-1 min-w-0" :rows 3 :autocomplete "off" :spellcheck "false" :autofocus true
-                  (keyword "data-on:keydown") "if (evt.key==='Enter' && !evt.shiftKey) { evt.preventDefault(); el.form.requestSubmit() }"
-                  :placeholder "(+ 1 2) evaluates in its REPL (Enter; Shift+Enter: a new line)\n> a message, read at its next turn"}]
+      [:textarea (cond-> {:name "forms" :class "flex-1 min-w-0" :rows 3 :autocomplete "off" :spellcheck "false"
+                          (keyword "data-on:keydown") "if (evt.key==='Enter' && !evt.shiftKey) { evt.preventDefault(); el.form.requestSubmit() }"
+                          :placeholder "(+ 1 2) evaluates in its REPL (Enter; Shift+Enter: a new line)\n> a message, read at its next turn"}
+                   ;; the chat takes focus (it follows its tail); a browser scrolls a focused field into view, and this one ends the page
+                   focus? (assoc :autofocus true))]
       [:button {:type "button" :class "rounded border border-base-700 px-2" :title "interrupt the running form; the agent keeps its state"
                 :seon/call 'seon.root/interrupt! :seon/agent id} "⏹ interrupt"]]
      [:p {:class "text-text-500"} "no process of it in root's view: no REPL to evaluate in, no turn to read a message; what it did is below, read from the store"])
@@ -1799,18 +1802,29 @@
 (defn ctx-parts
   "@ctx's parts, each a pair: what the model reads of the part (its data, or the hiccup its render returned, printed as a
   request's parts message prints it, seon.context's parts-message), beside the part as the page draws it (its unit's
-  html). parts, {id content} of the task's list (seon.render/placed-hiccup); html, {id html} of its units. See
-  docs/render.md#the-page."
-  {:malli/schema [:=> [:cat :map [:map-of :string :string]] :any]}
-  [parts html]
+  html). parts, {id content} of the task's list (seon.render/placed-hiccup); html, {id html} of its units; open, the
+  units the tab opened (/open: d-part-<id>). What the model reads is shown whole, so a part may be a million characters:
+  one over the value budget (:seon.config.render/value-budget) is a closed <details> with its size in tokens, whose text
+  is drawn once opened, and has the page's width where a short one shares the row with the part drawn. See docs/render.md#the-page."
+  {:malli/schema [:=> [:cat :map [:map-of :string :string] [:set :string]] :any]}
+  [parts html open]
   [:li {:id "d-parts" :class "flex flex-col gap-2"}
    [:h2 {:class "kicker"} "the task's parts: what the model reads, and the part drawn"]
-   (for [[id content] parts]
-     [:div {:class "grid grid-cols-1 gap-3 rounded-md border border-base-800 p-2 md:grid-cols-2" :data-part id}
+   (for [[id content] parts
+         :let [text (print/text (vary-meta (array-map id content) assoc :seon.print/full true))
+               tokens (emit/chars-tokens (count text))
+               long? (> tokens (config/value :seon.config.render/value-budget))
+               unit (str "d-part-" id)
+               opened? (contains? open unit)
+               pre [:pre {:class "whitespace-pre-wrap break-words font-mono text-xs text-text-100"} text]]]
+     [:div {:class (str "grid grid-cols-1 gap-3 rounded-md border border-base-800 p-2" (when-not long? " md:grid-cols-2")) :data-part id}
       [:div {:class "flex min-w-0 flex-col gap-1"}
        [:span {:class "text-2xs text-text-500"} (str id " · sent to the model")]
-       [:pre {:class "whitespace-pre-wrap break-words font-mono text-xs text-text-100"}
-        (print/text (vary-meta (array-map id content) assoc :seon.print/full true))]]
+       (if long?
+         [:details (cond-> (toggle unit) opened? (assoc :open true))
+          [:summary {:class "cursor-pointer text-text-300"} (str (print/tokens-text tokens) " read whole: open to read it")]
+          (when opened? pre)]
+         pre)]
       [:div {:class "flex min-w-0 flex-col gap-1"}
        [:span {:class "text-2xs text-text-500"} "drawn"]
        (h/raw (get html id ""))]])])
