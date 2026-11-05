@@ -705,13 +705,6 @@
       (seq (pm/divergence ch)) (assoc :its-merge-carries (pm/divergence ch))
       (and main base) (assoc :merge (pm/readiness base db (d/commit-as-db (:store db) main) moved)))))
 
-(defn status-model
-  "The status as the model is sent it (the declared model render of :seon.context/status): its
-  data, the done rule's raw :reasons left out (each is told as what to do, :refused). See
-  docs/render.md#a-part-answers-data."
-  {:malli/schema [:=> [:cat :map :map] :map]}
-  [_opts v] (dissoc v :reasons))
-
 (def ^:private eval-keys
   "The attributes of an eval a reader of the conversation reads (:seon.db/eval-fact less :seon.eval/agent and :seon.eval/opened). See docs/render.md#a-part-answers-data."
   [:seon.eval/id :seon.eval/by :seon.eval/code :seon.eval/prose :seon.eval/call-id

@@ -1059,80 +1059,83 @@
    :open-problem "problems the work caused" :no-proofs "no proof registered" :no-design "plan unchanged since the run began"
    :behind "judged before main moved"})
 
-(defn- verdict-badge
-  "A proof's verdict as one mark and its colour: green, red, deferred to root's gate, or none yet."
-  {:malli/schema [:=> [:cat :keyword] :any]}
-  [st]
-  (case st
-    :pass [:span {:class "text-success"} "✓"]
-    (:fail :error) [:span {:class "text-error"} "✗"]
-    :deferred [:span {:class "text-text-500"} "⋯"]
-    [:span {:class "text-text-500"} "○"]))
+(def ^:private state-words
+  "What a proof's verdict says in the status table."
+  {:pass "green" :fail "failed" :error "failed" :undefined "not written yet" :unknown "no verdict yet" :not-run "not run" :deferred "left to root's gate"})
 
-(defn status-html
-  "How the work stands as the page shows it (the declared html render of :seon.context/status; the
-  model reads the same value by its model render): a line of the proofs green of all and whether
-  anything blocks done, then each proof with its verdict and, while red, each failing assertion as
-  written beside what it got; what blocks done, each with the form that does something about it;
-  whether the branch can merge and what its merge carries; what it left without a contract, what it
-  caused and the sections it made stale. Values by the one printer, whole. See
+(defn- as-text
+  "A value of the status as one line of source: marked code as its text, a thrown error as its message, any other value by the printer."
+  {:malli/schema [:=> [:cat :any] :string]}
+  [x]
+  (cond (and (map? x) (string? (:seon.print/code x))) (:seon.print/code x)
+        (instance? Throwable x) (str "threw " (ex-message x))
+        (and (map? x) (:via x)) (str "threw " (:message (first (:via x))))
+        (string? x) x
+        :else (print/text x)))
+
+(defn- form-hiccup
+  "A form to run, as code: inline when it is one line, a block when it spans several."
+  {:malli/schema [:=> [:cat :any] :any]}
+  [form]
+  (let [t (if (string? form) form (print/text (cond-> form (instance? clojure.lang.IObj form) (vary-meta assoc :seon.print/full true))))]
+    (if (str/includes? t "\n") [:pre [:code t]] [:code t])))
+
+(defn status-hiccup
+  "How the work stands (seon.context/status's data s) as the one hiccup the page and the model both read: what finishes the
+  task, the proofs as a table, each failure in a line with the proof's source, what blocks merging each with the form that
+  does something about it, a merge line only when the branch has something to merge, and the next form to run. See
   docs/render.md#how-the-work-stands."
-  {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
-  [_opts {:keys [proofs refused test-run unmerged without-a-contract caused attention its-merge-carries merge reasons]}]
+  {:malli/schema [:=> [:cat :map] :any]}
+  [{:keys [proofs refused test-run unmerged without-a-contract caused attention its-merge-carries merge reasons]}]
   (let [green (count (filter #(= :pass (:status %)) proofs))
         done? (and (empty? reasons) (seq proofs))
-        value (fn [v] [#'render/html {:budget (config/value :seon.config.render/value-budget)} v])]
-    [:section {:class "flex flex-col gap-2"}
-     ;; the one line a person reads first: done, or what is left
-     [:p {:class (str "font-[var(--font-prose)] text-sm " (if done? "text-success" "text-text-100"))}
-      (cond done? "✓ Done: every check passes"
-            test-run "⚠ The tests could not run"
-            (seq refused) (str "Not done yet: " (get reason-words (:reason (first refused)) (kname (:reason (first refused))))
-                               (when (next refused) (str " and " (dec (count refused)) " more")))
-            :else (str green " of " (count proofs) " checks pass"))]
-     [:p {:class "text-2xs text-text-500"} (str green "/" (count proofs) " proofs green")]
-     [:ul {:class "flex flex-col gap-1"}
-      (for [{:keys [test status failures]} proofs]
-        [:li {:class "flex flex-col gap-0.5"}
-         [:div {:class "flex gap-2"} (verdict-badge status) [:code {:class "text-text-100"} (str test)]
-          (when-not (#{:pass :fail :error} status) [:span {:class "text-text-500"} (kname status)])]
-         ;; several assertions that got the same value are one entry (seon.context/failures)
-         (for [{a :assert as :asserts g :got m :message} failures]
-           [:div {:class "ml-5 grid grid-cols-[3.5rem_minmax(0,1fr)] gap-x-2 text-xs"}
-            (when m [:span {:class "col-span-2 text-text-300"} m])
-            (for [a (or as [a])] (list [:span {:class "text-text-500"} "assert"] (value a)))
-            [:span {:class "text-text-500"} (if as (str "each got") "got")] (value g)])])]
-     (when test-run [:p {:class "text-error"} (str "the test run failed: " (str/join "; " (:failed test-run)))])
-     (when (seq refused)
-       [:div {:class "flex flex-col gap-1"}
-        [:h3 {:class "kicker"} "blocks done"]
-        (for [{:keys [reason do] :as r} refused]
-          [:div {:class "flex flex-col gap-0.5"}
-           [:span {:class "text-text-300"} (get reason-words reason (kname reason))
-            (when-let [x (or (:test r) (:vars r) (:keys r) (:problems r))] [:span " " (value x)])]
-           (when do [:div {:class "ml-3"} (value do)])])])
-     (when merge
-       [:p {:class "text-text-300"} "merge: "
-        (if (seq (:conflicts merge)) [:span {:class "text-error"} (str (count (:conflicts merge)) " conflicts")] "no conflicts")
-        (when (seq (:main-moved merge)) (str " · main moved " (count (:main-moved merge))))])
-     (when (seq unmerged) [:div [:h3 {:class "kicker"} "unmerged"] (value unmerged)])
-     (when (seq its-merge-carries)
-       [:details [:summary {:class "text-text-300"} (str "its merge carries " (str/join ", " (for [[k vs] its-merge-carries] (str (count vs) " " (name k)))))]
-        (value its-merge-carries)])
-     (when (seq without-a-contract) [:div [:h3 {:class "kicker"} "without a contract"] (value without-a-contract)])
-     (when (seq caused) [:div [:h3 {:class "kicker text-error"} "caused"] (value caused)])
-     (when (seq attention) [:details [:summary {:class "text-text-300"} (str (count attention) " sections made stale")] (value attention)])]))
+        todo (cond-> []
+               (seq refused) (into (for [r refused] [(get reason-words (:reason r) (kname (:reason r))) (or (:test r) (:vars r) (:keys r) (:problems r)) (:do r)]))
+               (seq without-a-contract) (conj ["functions without a contract" without-a-contract nil])
+               (seq unmerged) (conj ["unmerged entries" unmerged nil])
+               (seq caused) (conj ["problems the work caused" caused nil])
+               (seq attention) (into (for [a attention] [a nil nil])))
+        next-form (or (some :do refused) (when (some #(not= :pass (:status %)) proofs) '(my.agent/prove)))]
+    [:section
+     [:h2 "Where your work stands"]
+     [:p (if done? "Every proof is green and nothing blocks merging: reply in prose and root merges your branch."
+                   "You finish when every proof is green and nothing below blocks merging.")]
+     (when test-run [:p "The tests could not run: " (str/join "; " (:failed test-run))])
+     [:p (str green " of " (count proofs) " proofs green")]
+     (when (seq proofs)
+       (into [:table [:tr [:th "Proof"] [:th "State"]]]
+             (for [{:keys [test status]} proofs]
+               [:tr [:td [:code (str test)]] [:td {:class (if (= :pass status) "ok" "bad")} (get state-words status (kname status))]])))
+     (for [{:keys [test failures source calls]} proofs :when (or (seq failures) source)]
+       [:div
+        [:h3 (str test)]
+        (for [{a :assert as :asserts g :got m :message} failures]
+          [:p "Failing: " (str/join ", " (map #(as-text %) (or as [a]))) " got " (as-text g) (when m (str " (" m ")"))])
+        (when (seq calls) [:p "It calls: " (str/join ", " (map #(str (:var %)) calls))])
+        (when source [:pre [:code (as-text source)]])])
+     (when (seq todo)
+       [:div
+        [:h3 "Before this can merge"]
+        (into [:ul]
+              (for [[what x do] todo]
+                [:li what (when (some? x) (str ": " (if (coll? x) (str/join ", " (map #(as-text (if (map? %) (or (:key %) (:symbol %) (pr-str %)) %)) x)) x)))
+                 (when do [:span " " (form-hiccup do)])]))])
+     (when (and merge (seq its-merge-carries))
+       [:p "Merge: " (if (seq (:conflicts merge)) (str (count (:conflicts merge)) " conflicts") "no conflicts")
+        (when (seq (:main-moved merge)) (str " · main moved " (count (:main-moved merge))))
+        " · it carries " (str/join ", " (for [[k vs] its-merge-carries] (str (count vs) " " (name k))))])
+     (when next-form [:p "Next: " (form-hiccup next-form)])]))
 
 (defn status
-  "How the agent's work on its task stands (a component over ctx and the db): seon.context/status
-  of its branch db, a part (its data, :seon.context/status, drawn by its schema's html render for
-  the page and its model render for the model: docs/render.md#a-part-answers-data). It reads main's
-  commit from ctx only when the task merges itself (the merge view), so a move of main redraws it
-  only then."
+  "How the agent's work on its task stands (a component over ctx and the db): seon.context/status of its branch db, drawn
+  as one hiccup (`status-hiccup`) for the page and the model alike; the data it was drawn from (:seon.context/status) is its
+  answer, what the turn decides done from (seon.render/placed-data). It reads main's commit from ctx only when the task
+  merges itself (the merge view), so a move of main redraws it only then."
   {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int] :any]}
   [{c :seon.ctx/ctx db :seon.db/db} aid]
-  (let [main (when (task/merges? (:seon.task/kind (:task c))) (ratom/realize (:seon.agent/main-commit c)))]
-    (with-meta (context/status db c {:main main}) {:seon.render/schema :seon.context/status})))
+  (let [main (when (task/merges? (:seon.task/kind (:task c))) (ratom/realize (:seon.agent/main-commit c)))
+        s (context/status db c {:main main})]
+    (with-meta (status-hiccup s) {:seon.render/answer (with-meta s {:seon.render/schema :seon.context/status})})))
 
 (defn namespaces-html
   "The namespaces the work touches as the page shows them (the declared html render of

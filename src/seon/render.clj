@@ -58,12 +58,13 @@
 (defn- part
   "A component's output out as the walk draws it: a part (a value whose metadata names its schema,
   :seon.render/schema, not hiccup) is kept in data and drawn by its schema's html render (`html`);
-  hiccup is drawn as it is."
-  {:malli/schema [:=> [:cat :any :any] :any]}
-  [out data]
+  hiccup is drawn as it is, and the data it was drawn from, when its metadata holds it (:seon.render/answer), is kept in
+  answer: what a turn decides from (`placed-data`) while the page and the model read the hiccup."
+  {:malli/schema [:=> [:cat :any :any :any] :any]}
+  [out data answer]
   (if-let [k (and (not (vector? out)) (not (seq? out)) (:seon.render/schema (meta out)))]
     (do (vreset! data out) (html {:schema k :as :block} out))
-    out))
+    (do (when (vector? out) (vreset! answer (:seon.render/answer (meta out)))) out)))
 
 (defn model
   "What the printer shows in place of value v (seon.print/print-value's :render): {:value m} when v's schema (its metadata
@@ -328,9 +329,10 @@
             id (key-id k)
             reads (volatile! nil)
             data (volatile! nil)
+            answer (volatile! nil)
             ;; its render and the drawing of its output in one: a lazy part of the hiccup reads (and
             ;; throws) only when it is drawn, and a db render's reads are all of what it drew
-            one #(try (with-id (emit w (part (apply f o args) data) (assoc env :children kids)) {:id (or (when (var? f) (:seon.render/list (meta f))) id) :class (name (first k))})
+            one #(try (with-id (emit w (part (apply f o args) data answer) (assoc env :children kids)) {:id (or (when (var? f) (:seon.render/list (meta f))) id) :class (name (first k))})
                       ;; a component that throws is a part of its own: its error as data (what threw, and the
                       ;; thrown error's own data: a contract's problems), which the page draws by the error's
                       ;; render and the model reads as the map it is, every other component drawn
@@ -341,7 +343,7 @@
                                                                   (cond-> {:seon.error/in (symbol f)}
                                                                     (map? (ex-data e)) (assoc :seon.render/threw (ex-data e))))
                                                   {:seon.render/schema :seon.render/component-defect})
-                                       data)
+                                       data (volatile! nil))
                                  {:id id :class "err"})))
             draw #(if db? (let [[out rs] (d/with-reads one)] (vreset! reads rs) out) (one))
             a0 (profile/alloc-bytes)
@@ -357,7 +359,7 @@
         (some-> (:ran env) (vswap! assoc k (if same? :same :miss)))
         ;; merged: its written html (placed-units) stays while its revision does
         (vswap! (:cache w) update k merge {:f f :opts opts :args args :rx rx :out (if same? (:out prev) out) :children children
-                                    :order order :id id :rev (if same? (:rev prev) (inc (:rev prev 0))) :data @data
+                                    :order order :id id :rev (if same? (:rev prev) (inc (:rev prev 0))) :data @data :answer @answer
                                     :reads (some-> @reads seq d/reads-index)})
         ;; the components that read the db: the ones a transaction's datoms are matched against
         (vswap! (:db-keys w) (if (seq @reads) conj disj) k)
@@ -550,7 +552,7 @@
 (defn- body-forms
   "Part output out as the forms its printed hiccup holds, in w: a child component a part of its own (`part-form`),
   an element without its presentation, an element for the page alone left out, a call of a function its var named."
-  {:malli/schema [:=> [:cat :map :any] [:sequential :any]]}
+  {:malli/schema [:=> [:cat :map :any] [:maybe [:sequential :any]]]}
   [w out]
   (cond
     (nil? out) nil
@@ -574,7 +576,12 @@
   [w k]
   (let [c (get @(:cache w) k)
         attrs (cond-> {} (:at (:opts c)) (assoc :ctx (:at (:opts c))))
-        body (if (some? (:data c)) [(part-model w k)] (body-forms w (:out c)))
+        out (:out c)
+        ;; a part's own root element, a plain section or div, is the part itself: its children stand under the head
+        wrapper? (and (vector? out) (#{:section :div} (first out)) (nil? (strip-attrs (if (map? (second out)) (second out) {}))))
+        body (cond (some? (:data c)) [(part-model w k)]
+                   wrapper? (mapcat #(body-forms w %) (if (map? (second out)) (drop 2 out) (rest out)))
+                   :else (body-forms w out))
         place (when (var? (:f c)) (:seon.render/place (meta (:f c))))]
     (cond-> (into [(symbol (:f c)) attrs] body) place (vary-meta assoc :seon.render/place place))))
 
@@ -595,7 +602,8 @@
   (cond
     (and (vector? x) (= :pre (first x)) (= 2 (count x)) (vector? (second x)) (= :code (first (second x))) (string? (last (second x))))
     [:pre {:seon.print/code (fence (last (second x)))}]
-    (vector? x) (with-meta (mapv verbatim x) (meta x))
+    ;; a vector's children without the nils a (when ..) leaves and with the lists a (for ..) makes spliced in, as the page's writer reads them
+    (vector? x) (with-meta (into [] (comp (mapcat (fn [c] (if (seq? c) c [c]))) (remove nil?) (map verbatim)) x) (meta x))
     (and (string? x) (or (str/includes? x "\n") (str/includes? x "\""))) {:seon.print/prose x}
     (map? x) (if (:seon.print/code x) x (into (empty x) (map (fn [[k v]] [k (verbatim v)])) x))
     :else x))
@@ -635,7 +643,7 @@
   See docs/render.md#a-part-answers-data."
   {:malli/schema [:=> [:cat :map [:sequential :string]] [:map-of :qualified-keyword :any]]}
   [w sels]
-  (into {} (for [[_ k] (placed w sels) :let [d (:data (get @(:cache w) k))] :when (some? d)]
+  (into {} (for [[_ k] (placed w sels) :let [c (get @(:cache w) k) d (or (:answer c) (:data c))] :when (some? d)]
              [(:seon.render/schema (meta d)) d])))
 
 (defn draw

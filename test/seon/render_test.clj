@@ -1281,7 +1281,7 @@
         "the task, each thing its plan cites (a part each), the namespaces it touches, how the work stands, the agent's turn (its open problems when one is open: none here, so no part; and the keys the agent added, when it added one): each keyed by what it shows")
     (let [h (:html (unit-of task "status-"))]
       (is (str/includes? h "demo/f-test") "each proof as its var entity holds its verdict, (my.task/status)'s")
-      (is (str/includes? h "text-error") "the failing proof's verdict is the status's mark")
+      (is (str/includes? h "class=\"bad\"") "the failing proof's verdict is the status's mark")
       (is (str/includes? h "(= 4 5)") "and what its assertion got"))
     (let [h (:html (unit-of task "task-data-"))]
       (is (str/includes? h "demo/f") "drawn by the task's html render")
@@ -1316,11 +1316,11 @@
                               {:var/name 'demo/f-test :seon.test/digest "digest-2" :seon.test/status :green}])]
     (is (not (str/includes? (draw written) "digest-1")) "a proof not yet run shows no result")
     (let [h (draw red)]
-      (is (str/includes? h "text-error") (str "the recorded status, red: " h))
+      (is (str/includes? h "class=\"bad\"") (str "the recorded status, red: " h))
       (is (str/includes? h "it doubles") "and its failing assertion")
       (is (str/includes? h "(= 4 5)") "as the assertion it got, printed as code"))
     (let [h (draw green)]
-      (is (str/includes? h "text-success") "green is the status's mark")
+      (is (str/includes? h "class=\"ok\"") "green is the status's mark")
       (is (not (str/includes? h "it doubles")) "a green keeps no failure"))))
 
 (deftest the-status-is-drawn-from-facts-with-no-turn-of-the-reader
@@ -1334,8 +1334,8 @@
         standing (try (unit-of (r/placed-units w) "status-") (finally (r/dispose-walk! w)))
         h (:html standing)]
     (is (some? standing) "the status is drawn")
-    (is (str/includes? h "text-success") (str "the verdict the branch holds: " h))
-    (is (not (str/includes? h " of ")) "and has no turn count")))
+    (is (str/includes? h "class=\"ok\"") (str "the verdict the branch holds: " h))
+    (is (not (str/includes? h "Turn")) "and has no turn count")))
 
 (deftest the-models-page-holds-the-plan-whole
   ;; the blind agent's plan was cut "+86 chars" at a part's budget: the task itself took an eval to read
@@ -1662,16 +1662,15 @@
         (is (= (seon.merge/readiness b ours (d/commit-as-db (:store ours) main)) (:merge st))
             "the merge's readiness, as its own function answers it")
         (is (= (seon.merge/divergence ch) (:its-merge-carries st)) "and what the branch's merge carries, from the one diff")
-        (let [merge (h/html (ui/status-html {} {:merge (:merge st)}))
-              carries (h/html (ui/status-html {} {:its-merge-carries (:its-merge-carries st)}))
-              gaps (h/html (ui/status-html {} {:without-a-contract (:without-a-contract st)}))]
+        (let [html (h/html (ui/status-hiccup (select-keys st [:merge :its-merge-carries :without-a-contract])))
+              merge-line (h/html (ui/status-hiccup {:merge (:merge st)}))]
           (is (str/includes? (pr-str (:main-moved (:merge st))) "demo/k") "what main changed since the base (the model reads it in the data)")
-          (is (re-find #"main moved \d+" merge) "the page counts what main changed")
-          (is (str/includes? merge "no conflicts") "and which of those the branch changed too (none)")
-          (is (str/includes? carries "demo/h") "what the branch's merge carries")
-          (is (not (str/includes? carries "demo/k")) "never main's change")
-          (is (str/includes? gaps "demo/h") "a function the branch defined with no contract")
-          (is (not (str/includes? gaps "demo/f")) "never one it did not change"))
+          (is (not (str/includes? merge-line "Merge:")) "no merge line while the branch carries nothing to merge")
+          (is (re-find #"main moved \d+" html) "the page counts what main changed")
+          (is (str/includes? html "no conflicts") "and which of those the branch changed too (none)")
+          (is (str/includes? html "demo/h") "what the branch's merge carries, and a function it defined with no contract")
+          (is (not (str/includes? html "demo/k")) "never main's change")
+          (is (not (str/includes? html "demo/f")) "never one it did not change"))
         ;; a branch that changed nothing: the status holds none of them, not a header over an empty answer
         (let [same (agent-on (d/commit-as-db conn base))
               st0 (seon.context/status same (:tree (seon.ctx/build same (seon.db/eid same :seon.agent/key "b1/a3") :b)) {})]
@@ -2287,7 +2286,7 @@
             before (search-part (draw))]
         (is (some? before) "the request's search is a part of the page")
         (is (str/includes? (pr-str before) "app.srch/untaken-entries") (str "it finds what the request's words name: " (pr-str before)))
-        (is (= :section (first (nth before 2))) "one compact hiccup, the page's and the model's alike")
+        (is (= :h3 (first (nth before 2))) "one compact hiccup, headed, the page's and the model's alike")
         (is (not (str/includes? (pr-str before) "has not taken")) "a hit is its name: no first sentence of its doc")
         (is (str/includes? (pr-str before) "no vector yet") "a query not yet embedded says it was searched by its words")
         (let [s (:db/id (d/entity @conn [:seon.search/id "demo/find/request"]))]
@@ -2410,3 +2409,26 @@
     (is (= [:no-heading] (r/part-faults ['seon.render.ui/status {:ctx [:task]} [:p "x"]] c)) "a part without a heading is a fault")
     (is (= [:unresolved-ctx] (r/part-faults ['seon.render.ui/status {:ctx [:nope]} [:h2 "x"]] c)) "a path that answers nothing")
     (is (= [:unresolved-head] (r/part-faults ['no.such/render {:ctx [:task]} [:h2 "x"]] c)) "a head that names no function")))
+
+(deftest the-status-is-one-hiccup-with-its-proofs-failures-and-next-form
+  ;; owner, 2026-11-05 (render-audit.md, how the work stands): the status read cold says what it is, what finishes the task,
+  ;; each proof, each failure in a line, what blocks merging, and the next form to run; no :tokens-sent
+  (let [st {:reasons [{:reason :proof-red}]
+            :proofs [{:test 'seon.program-test/a-vars-history :status :fail :source {:seon.print/code "(deftest a-vars-history\n  (is (= 1 (history 'a))))"}
+                      :failures [{:assert {:seon.print/code "(= 1 (history 'a))"} :got {:seon.print/code "Unknown class program"} :message "Uncaught exception, not in assertion."}]}
+                     {:test 'seon.program-test/b :status :undefined}]
+            :attention ["seon.program/history is public and its docstring cites no docs/ section"]
+            :refused [{:reason :proof-unknown :test 'seon.program-test/b :do '(my.agent/prove)}]}
+        h (ui/status-hiccup st)
+        t (h/html h)]
+    (is (= :h2 (first (second h))) "headed")
+    (is (str/includes? t "0 of 2 proofs green"))
+    (is (str/includes? t "<table>") "the proofs are a table")
+    (is (str/includes? t "not written yet") "each proof's state")
+    (is (str/includes? t "Unknown class program") "a failure in a line")
+    (is (str/includes? t "(deftest a-vars-history") "the failing proof's source")
+    (is (str/includes? t "seon.program/history is public") "what blocks merging")
+    (is (re-find #"Next: <code>\(my.agent/prove\)</code>" t) "the next form, runnable")
+    (is (not (str/includes? t "tokens")) "no tokens sent")
+    (is (not (str/includes? t "Merge:")) "no merge line with nothing to merge")
+    (is (str/includes? (h/html (ui/status-hiccup (assoc st :its-merge-carries {:added ['a/b]} :merge {:conflicts []}))) "Merge: no conflicts") "a merge line when there is something to merge")))

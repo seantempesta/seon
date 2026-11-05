@@ -151,14 +151,14 @@
                :do '(my.task/update! :seon.task/proofs conj (quote user/scratch-test))}]
              (:refused st)))
       (is (= [:proof-red :regression :stray-red] (mapv :reason (:reasons st))) "the done rule's own answer, beside it")
-      (is (not (contains? (context/status-model {} st) :reasons)) "and the model is told each as what to do, not twice"))
+      (is (not (re-find #":proof-red" (pr-str (seon.render.ui/status-hiccup st)))) "and the page and the model are told each as what to do, not the raw reasons"))
     (testing "a test run that failed as a whole is said, not read as tests not run"
       (let [err {:seon.error/type :seon.proofs/test-run-died :seon.error/operation 'seon.agent/test-run :seon.error/message "namespace app-test did not load: Unable to resolve symbol: g"}
             db (d/db-with db [{:seon.agent/key "b/a1" :seon.agent/task [:seon.task/id "demo/f"] :seon.agent/test-error err}])
             st (context/status db (:tree (seon.ctx/build db (pdb/eid db :seon.agent/key "b/a1") :b)) {})]
         (is (= {:failed ["namespace app-test did not load: Unable to resolve symbol: g"]} (:test-run st)))
         (is (= [{:test 'demo-test/f-test :status :not-run :source (print/code "(deftest f-test (is (= 4 (f 2))))")}] (:proofs st)) "a written proof did not run")
-        (is (re-find #"did not load" (print/text (vary-meta (context/status-model {} st) assoc :seon.print/full true))) "printed, as the page and (my.task/status) print it, it is there"))
+        (is (re-find #"did not load" (pr-str (seon.render.ui/status-hiccup st))) "drawn, it is there"))
       (is (= ["namespace app-test did not load: Unable to resolve symbol: g" "test process died: 9"]
              (proofs/test-run-errors {:reports [{:type :error :message "namespace app-test did not load: Unable to resolve symbol: g"}
                                            {:type :fail :var "#'demo-test/f-test" :message "x"}
@@ -474,7 +474,7 @@
         (is (some #(str/starts-with? % "status-") (keys page)) "how the work stands is on the page")
         (is (= 1 (times "Make ```demo/g``` exact.")) "the plan once")
         (is (= 1 (times "(defn g \"Halves.\"")) "a cited source once, as code: its quotes as written")
-        (is (= 1 (count (re-seq #":test demo-test/f-test,\s+:status :fail" text))) "the proofs' statuses once, in the status")))))
+        (is (= 1 (count (re-seq #"demo-test/f-test</code>|\[:td \[:code \"demo-test/f-test\"\]\]|\[:code \"demo-test/f-test\"\]\s+\[:td[^\]]*\"failed\"" text))) "the proofs' statuses once, in the status")))))
 
 (deftest a-cited-var-shows-at-its-citations-depth
   ;; task seon.context/a-cited-var-shows-at-its-citation-depth: the delimiter picks the depth
@@ -938,7 +938,7 @@
         (is (re-find #"seon\.render\.ui/status" (:content (peek r1))) "a verdict recorded after turn 0: how the work stands, told again")
         ;; (the task's data draws each proof's recorded status too, so it moves with a verdict: reported)
         (is (not (re-find #"related-\d+" (:content (peek r1)))) "what a verdict does not move is not told again")
-        (is (str/includes? (:content (peek r1)) ":fail") "the proof's new verdict")
+        (is (str/includes? (:content (peek r1)) "failed") "the proof's new verdict")
         (is (not (str/includes? (:content (peek r1)) "seon.render.ui/task-data")) "the rest unchanged, not told again")
         (is (not-any? #(str/includes? (str (:content %)) ";;") (rest r1)) "no ;; reaches the model")
         (is (nil? (resolve 'seon.context/messages)) "one path: no request without an agent")))))
