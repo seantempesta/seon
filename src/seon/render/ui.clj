@@ -1106,6 +1106,14 @@
        (into [:table [:tr [:th "Proof"] [:th "State"]]]
              (for [{:keys [test status]} proofs]
                [:tr [:td [:code (str test)]] [:td {:class (if (= :pass status) "ok" "bad")} (get state-words status (kname status))]])))
+     (for [{:keys [test shape]} proofs :when shape :let [{:keys [ns ns-form helpers example]} shape]]
+       [:div
+        [:h3 (str test " is not written")]
+        [:p "It goes in " [:code (str ns)] (if ns-form ", whose ns form is:" ".")]
+        (when ns-form [:pre [:code ns-form]])
+        (when (seq helpers) [:p "Helpers defined there: " (str/join ", " (map #(str "`" (name %) "`") helpers))])
+        (when example [:p "One of its tests, as the shape to copy:"])
+        (when example [:pre [:code example]])])
      (for [{:keys [test failures source calls]} proofs :when (or (seq failures) source)]
        [:div
         [:h3 (str test)]

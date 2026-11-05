@@ -1947,3 +1947,20 @@
     (is (str/includes? (print/record-text data) "app.x/f") "the plain value's text, which the model reads")
     (is (str/includes? (print/record-text rec) "app.x/f") "and the text printed of a value that is no data")
     (is (not (contains? (:seon.eval/response rec) :fns)) "what the tool does not promise stays out")))
+
+(deftest an-unwritten-proof-comes-with-the-shape-of-its-namespace
+  ;; owner, 2026-11-05: "useful first": a proof not written is told where it goes, what that namespace defines, and one real
+  ;; test of it to copy (vars-history spent turns 10-14 finding these)
+  (let [db (d/db-with (db-with-program)
+                      (into (program-facts '[[demo-test/shared-world "(defn- shared-world [] 1)" []]])
+                            [{:var/name 'demo-test/f-test :var/kind :test} {:var/name 'demo-test/g-test :var/kind :test}
+                             {:var/name 'demo-test/shared-world :var/kind :fn}]))
+        shape (context/test-shape db 'demo-test/new-test)]
+    (is (= 'demo-test (:ns shape)) "the namespace it goes in")
+    (is (= ['demo-test/shared-world] (:helpers shape)) "what is defined there that is not a test")
+    (is (= "(deftest g-test (is (= 1 (g))))" (:example shape)) "one real test of it: the shortest of its first five by name")
+    (is (nil? (context/test-shape db 'nowhere-test/x)) "a namespace the branch lacks has no shape: the agent makes it first")
+    (let [h (pr-str (seon.render.ui/status-hiccup {:proofs [{:test 'demo-test/new-test :status :undefined :shape shape}]}))]
+      (is (re-find #"demo-test/new-test is not written" h))
+      (is (re-find #"shape to copy" h))
+      (is (re-find #"deftest g-test" h)))))

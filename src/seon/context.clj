@@ -611,6 +611,24 @@
                           [n (cond-> (into {} (for [k [:var/name :seon.test/status :seon.test/failures] :let [x (get v k)] :when (some? x)] [k (ratom/realize x)]))
                                (get-in v [:form :form/src]) (assoc :form {:form/src (ratom/realize (get-in v [:form :form/src]))}))]))})))
 
+(defn test-shape
+  "Where an unwritten proof p goes, as the agent needs it to write one: its test namespace's ns form (requires and aliases),
+  the helpers that namespace defines, and one real test from it (the shortest of its first five by name) as the shape to
+  copy; nil when the branch has no such namespace yet (the agent makes it first). Two index reads and one source read. See
+  docs/render.md#how-the-work-stands."
+  {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:maybe :map]]}
+  [db p]
+  (when-let [n (d/entity db [:ns/name (symbol (namespace p))])]
+    (let [vs (map #(d/entity db %) (d/q '[:find [?e ...] :in $ ?n :where [?e :var/ns ?n]] db (:db/id n)))
+          {tests true others false} (group-by #(= :test (:var/kind %)) vs)
+          srcs (keep #(some->> (doc/source-of db (:var/name %)) (vector (:var/name %))) (take 5 (sort-by :var/name tests)))
+          [_ src] (first (sort-by (comp count second) srcs))
+          ns-src (get-in n [:ns/form :form/src])]
+      (cond-> {:ns (symbol (namespace p))}
+        ns-src (assoc :ns-form ns-src)
+        (seq others) (assoc :helpers (vec (sort (map :var/name others))))
+        src (assoc :example src)))))
+
 (defn status
   "How the agent of record rec (its ctx: its :db/id and its task) works on its task stands on its branch db, as data (task
   seon.context/the-context-is-the-agents-evals-and-seons, R2b-1): each proof by the verdict its var
@@ -694,6 +712,7 @@
                                       calls (when (and src (not= :pass st)) (callees db p))]]
                             (cond-> {:test p :status st}
                               (and src (not= :pass st)) (assoc :source (print/code src))
+                              (= :undefined st) (assoc :shape (test-shape db p))
                               (seq fs) (assoc :failures (failures fs))
                               (seq calls) (assoc :calls calls))))}
       (seq blockers) (assoc :refused blockers)
