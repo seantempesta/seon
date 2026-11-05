@@ -1176,8 +1176,7 @@
     unread
   (let [{judge :selected deferred :skipped} (run-selection plan names proofs)
         selected (if (and (= :turn mode) (not (seq names)))
-                   ;; the proofs as the plan selects them (one loaded but never recorded has
-                   ;; no digest and is selected all the same), and the tests the branch changed
+                   ;; the proofs as the plan selects them (one with no form on the branch is not), and the tests the branch changed
                    (vec (sort-by str (filter (set judge) (-> (set (filter proofs (:selected plan)))
                                                              (into (filter (:digests plan) (pm/changed-vars (branch-changes (:base @state) (db)))))
                                                              (into (keys (:removed plan)))))))
