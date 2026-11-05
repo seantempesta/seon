@@ -122,16 +122,19 @@
   {:malli/schema [:=> [:cat :seon.host/chan :map] :any]}
   [ch m] @(step/ask-edge ch m nil))
 
-(defn- html-response {:malli/schema [:=> [:cat [:maybe :string]] :map]}
-  [s]
-  (if s
-    {:status 200 :headers {"Content-Type" "text/html; charset=utf-8" "Cache-Control" "no-store"} :body s}
+(defn- html-response
+  "A page as the render proc answered it, {:html :status} (status absent: 200; an address naming no agent: 404)."
+  {:malli/schema [:=> [:cat [:maybe :map]] :map]}
+  [{:keys [html status]}]
+  (if html
+    {:status (or status 200) :headers {"Content-Type" "text/html; charset=utf-8" "Cache-Control" "no-store"} :body html}
     {:status 503 :headers {"Content-Type" "text/plain"} :body "not rendered yet: reload"}))
 
 (defn- view-of
   "The view a path names, each a location the render proc resolves to an entity on main: :root, an
-  entity's id (a number), or an agent by its id in root's boot or its branch: `<agent>` is
-  [:chat agent], its chat; `<agent>/debug` the agent itself, every render of its ctx;
+  entity's id (a number), or an agent by an address, `<agent>` ([:chat agent], its chat), which names it by its key (boot/id: a session,
+  stable across a root's restarts, so what a link or a bookmark holds), its id in this boot, its task's id or its branch
+  (seon.render.proc/session-of resolves it; the suffix is cut first, so a key's slash is no matter); `<agent>/debug` the agent itself, every render of its ctx;
   `<agent>/context` [:debug agent], what its model was sent; `root/debug` what root reads. The
   inverse of seon.render.ui/view-param. See docs/render.md#the-page."
   {:malli/schema [:=> [:cat [:maybe :string]] :any]}
@@ -159,7 +162,7 @@
           ;; what root reads: its page's other face, as an agent's /debug is
           (and (= m :get) (= uri "/root/debug")) (html-response (ask! ch {:op :page :view [:debug :root]}))
           ;; an agent's page, the render of its ctx, by its id in root's boot
-          (and (= m :get) (str/starts-with? uri "/agent/")) (html-response (ask! ch {:op :page :view (view-of (subs uri 7))}))
+          (and (= m :get) (str/starts-with? uri "/agent/")) (html-response (ask! ch {:op :page :view (view-of (java.net.URLDecoder/decode (str/replace (subs uri 7) "+" "%2B") "UTF-8"))}))
           ;; a page's list end scrolled into view: its next rows
           (and (= m :post) (= uri "/more")) (do (a/>!! ch {:op :more :view (view-of (get q "view"))}) {:status 204 :headers {}})
           ;; a row's <details> toggled (the debug page): its unit renders its whole content while open
@@ -324,7 +327,7 @@
     :settled (reduce (fn [st view] (let [[st sent] (offer-all st view ": settled\n\n")] (update st :bytes + sent)))
                      st (distinct (map :view (vals (:tabs st)))))
     (:page :text) (let [[st [p view]] (step/answered st (:k m))]
-                    (some-> p (deliver (if (= :page (:op m)) (page-doc view (:html m)) (:text m))))
+                    (some-> p (deliver (if (= :page (:op m)) {:html (page-doc view (:html m)) :status (:status m)} (:text m))))
                     st)
     :index (assoc st :index (:agents m))
     st))

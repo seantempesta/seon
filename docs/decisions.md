@@ -12,7 +12,7 @@ The owner's rulings of 2026-11-04, on what an agent is and how everything it rea
 
 ### The standing store is erased when the new schemas land (owner, 2026-11-04)
 
-"Yes you can erase the runs/store when we have the new schemas in place." At the core's merge, not before; runs/curated and runs/kept-fresh-87 stay.
+"Yes you can erase the runs/store when we have the new schemas in place." Erased when the simpler schema merged (2026-11-05), with what could not be recreated at boot saved and read first; runs/curated and runs/kept-fresh-87 stay.
 
 ### Agent branches are kept and queried (owner, 2026-11-04)
 
