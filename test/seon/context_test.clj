@@ -453,7 +453,7 @@
         (is (every? #(re-find % (:content (second r0))) [#"seon\.render\.ui/cited" #"Doubles\." #"seon\.render\.ui/status"]) "the page whole, each part by the function that drew it: how the work stands too")
         (is (re-find #"seon\.render\.ui/cited" (:content (peek r1))) "the cited var's edit: its part, by its function")
         (is (str/includes? (:content (peek r1)) "Triples."))
-        (is (not (re-find #"task-data-\d+" (:content (peek r1)))) "a component that did not change is not told again")
+        (is (not (re-find #"seon\.render\.ui/task\b" (:content (peek r1)))) "a component that did not change is not told again")
         (is (not (re-find #"status-\d+" (:content (peek r1)))) "a turn taken moved nothing of how the work stands: not told again")
         (is (str/includes? (:content (peek r2)) "quadruple") "the plan changed mid-run: the task's part in the next diff")
         (let [db @conn
@@ -944,7 +944,7 @@
         ;; (the task's data draws each proof's recorded status too, so it moves with a verdict: reported)
         (is (not (re-find #"related-\d+" (:content (peek r1)))) "what a verdict does not move is not told again")
         (is (str/includes? (:content (peek r1)) "failed") "the proof's new verdict")
-        (is (not (str/includes? (:content (peek r1)) "seon.render.ui/task-data")) "the rest unchanged, not told again")
+        (is (not (str/includes? (:content (peek r1)) "seon.render.ui/task")) "the rest unchanged, not told again")
         (is (not-any? #(str/includes? (str (:content %)) ";;") (rest r1)) "no ;; reaches the model")
         (is (nil? (resolve 'seon.context/messages)) "one path: no request without an agent")))))
 
@@ -1213,7 +1213,7 @@
     (let [changed (step! walk [{:db/id "f2" :form/id "demo/g-2" :form/src "(defn g [] :redefined)"} [:db/add [:var/name 'demo/g] :var/form "f2"]])]
       (is (str/includes? (html cited) "(defn g [] :redefined)") "the next view: the new source")
       (is (some #{cited} changed) "the edit's page diff holds the citations")
-      (is (not-any? #(str/starts-with? % "task-data-") changed) "and not the task's, which cites it"))
+      (is (not-any? #(str/starts-with? % "task-") changed) "and not the task's, which cites it"))
     (render/dispose-walk! w)))
 
 ;; docs/references.md#an-entity-cites: a section a cite joins, changed (main's datoms patched into ctx), redraws that
@@ -1244,7 +1244,7 @@
         [w _ _ _ rid] (walked db)
         units (render/placed-units w)
         html #(:html (some (fn [u] (when (str/starts-with? (:id u) %) u)) units))
-        task (html "task-data-")]
+        task (html "task-")]
     (is (str/includes? task "Make ```demo/g``` say one thing") "D4: the whole plan")
     (is (not (str/includes? task "(deftest g-test")) "D1: the proof's source is the status's, the task's part does not repeat it")
     (is (str/includes? (html "status-") "demo-test/g-test") "D1: the proof written is the status's, by name")
@@ -1260,8 +1260,8 @@
   (let [[db te] (sections-near "Make ```demo/g``` say one thing (docs/vector.md#what-is-embedded).")
         [w :as walk] (walked db)
         ran #(do (vreset! (:ledger w) {}) (step! walk %) (into #{} (for [[f c] (render/ledger w) :when (or (:miss c) (:same c))] (name f))))]
-    (is (not (contains? (ran [{:seon.agent/key "demo/a2"}]) "task-data")) "an agent written: nothing the task's data reads")
-    (is (contains? (ran [[:db/add te :seon.task/plan "Make ```demo/g``` say two things."]]) "task-data") "the plan rewritten: the task's data runs again")
+    (is (not (contains? (ran [{:seon.agent/key "demo/a2"}]) "task")) "an agent written: nothing the task's data reads")
+    (is (contains? (ran [[:db/add te :seon.task/plan "Make ```demo/g``` say two things."]]) "task") "the plan rewritten: the task's data runs again")
     (render/dispose-walk! w)))
 
 (deftest a-vars-arglists-are-its-recorded-sources
@@ -1602,36 +1602,13 @@
     (is (= npe (:seon.print/code (:got (first fs)))))
     (is (= "(= 3 (g))" (:seon.print/code (:assert (second fs)))) "a failure of its own keeps its one assertion")))
 
-(deftest a-namespace-shows-the-names-the-task-names
-  ;; docs/render.md#a-part-answers-data: a bench run's namespaces part was 1,256 tokens listing about 170 names
-  ;; the task never needed. It shows the namespaces of what the task cites and of its proofs, each with the
-  ;; names the task cites or its proofs call and the form that lists the rest, from the record alone; the one the
-  ;; REPL is in and the task's own first (docs/agent.md#the-repl)
-  (let [db (d/db-with (ts/test-db)
-                      (into [{:db/id "n" :ns/name 'x.nsd} {:db/id "nt" :ns/name 'x.nsd-test}
-                             {:db/id "tf" :form/id "x.nsd-test/t1" :form/src "(deftest t1 (is (= 1 (b 1))))" :form/refs #{'x.nsd/b 'clojure.test/is}}
-                             {:var/name 'x.nsd-test/t1 :var/ns "nt" :var/kind :test :var/form "tf"}
-                             {:var/name 'x.nsd/b :var/ns "n"} {:var/name 'x.nsd/c :var/ns "n"}]
-                            (for [i (range 20)] {:var/name (symbol "x.nsd" (str "unrelated-" i)) :var/ns "n"})))
-        db (d/db-with db (task/create-tx db [{:seon.task/ns 'x :seon.task/name "nsd" :seon.task/proofs #{'x.nsd-test/t1}
-                                              :seon.task/plan "Make `x.nsd/c` call `x.nsd/b`."}]))
+(deftest the-repl-is-where-its-last-eval-left-it-or-where-its-task-starts
+  ;; docs/agent.md#the-repl: before any eval the REPL is where it starts, the task's namespace; the turn line says where it is
+  (let [db (d/db-with (ts/test-db) (task/create-tx (ts/test-db) [{:seon.task/ns 'x :seon.task/name "nsd" :seon.task/plan "Make it."}]))
         db (d/db-with db [{:seon.agent/key "b/a1" :seon.agent/task [:seon.task/id "x/nsd"]}])
         tree (:tree (ctx/build db (pdb/eid db :seon.agent/key "b/a1") :b))]
-    (is (= '{x {:ns-form (clojure.repl/source x)} x.nsd {:names [b c] :ns-form (clojure.repl/source x.nsd)} x.nsd-test {:names [t1] :ns-form (clojure.repl/source x.nsd-test)}}
-           (context/namespaces-of tree))
-        "the task's own namespace, then the cited names and the proof's callee, never the namespace's twenty others; a form for the rest")
-    (is (= '[x x.nsd x.nsd-test] (keys (context/namespaces-of tree))) "the task's own first, then the cited, then the proofs'")
-    (is (= '{:ns-form (clojure.repl/source x)} (get (context/namespaces-of tree) 'x)) "the task's own namespace, cited nowhere: its ns form, no names")
-    (let [own (context/namespaces-of (assoc-in tree [:task :seon.task/ns] 'x.nsd))]
-      (is (= '[x.nsd x.nsd-test] (keys own)) "a cited own namespace is once, first")
-      (is (= '[b c] (:names (get own 'x.nsd))) "with the names cited in it"))
-    (is (= '{x {:ns-form (clojure.repl/source x)}}
-           (context/namespaces-of (update tree :task dissoc :cites :needs :proved)))
-        "a task that cites and proves nothing answers its own namespace")
-    (is (= 'x (context/current-ns tree)) "before any eval the REPL is where it starts, the task's namespace")
-    (let [moved (assoc tree :seon.agent/ns 'y)]
-      (is (= 'y (context/current-ns moved)))
-      (is (= '[y x x.nsd x.nsd-test] (keys (context/namespaces-of moved))) "the part follows the REPL, the task's own still drawn"))))
+    (is (= 'x (context/current-ns tree)))
+    (is (= 'y (context/current-ns (assoc tree :seon.agent/ns 'y))))))
 
 (deftest a-draw-reads-the-cites-its-plan-write-derived
   ;; md-scan #10, 2026-10-29: the agent redefined seon.ref/scan, and every draw that parsed the plan
@@ -1808,7 +1785,7 @@
             ms (:messages r0)]
         (is (= {:role "system" :content (context/system-text @conn)} (first ms)))
         (is (= ["system" "user"] (mapv :role ms)) "the system prompt, then the page whole in one message")
-        (is (re-find #"(?m)^\[seon\.render\.ui/task-data" (:content (second ms))) "the task, headed by the function that drew it")
+        (is (re-find #"(?m)^\[seon\.render\.ui/task\b" (:content (second ms))) "the task, headed by the function that drew it")
         (is (re-find #"demo-test/g-test" (:content (second ms))) "and its proof")))))
 
 (deftest a-task-with-no-examples-sends-the-conversation

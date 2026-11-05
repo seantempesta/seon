@@ -80,7 +80,9 @@
   {:malli/schema [:function [:=> [:cat :map] :string] [:=> [:cat :map [:maybe :seon.host/fn]] :string]]}
   ([r] (response-text r nil))
   ([r render]
-   (let [p (print-value r (cond-> {:handle (:handle r)} render (assoc :render render)))]
+   ;; a value that is a page prints whole: its metadata says so as it is made, and its schema's (record-text) when it is read back
+   (let [r (cond-> r (:seon.print/full (meta (:value r))) (vary-meta assoc :seon.print/full true))
+         p (print-value r (cond-> {:handle (:handle r)} render (assoc :render render)))]
      (or (:text p) (:seon.error/message p)))))
 
 (defn read-rest
@@ -114,7 +116,10 @@
      ;; only an eval that kept a schema can render: a stored value's nested metadata is gone, so a render
      ;; passed for any other would be asked of every value printed and answer nothing
      (if (and k render (instance? clojure.lang.IObj v))
-       (response-text (assoc r :value (vary-meta v assoc :seon.render/schema k)) render)
+       (let [v (vary-meta v assoc :seon.render/schema k)
+             ;; what the store does not keep of a value, its schema says (render answers :full for a schema that declares it)
+             v (cond-> v (:full (render v)) (vary-meta assoc :seon.print/full true))]
+         (response-text (assoc r :value v) render))
        (response-text r)))))
 
 ;;; Prose: text read as itself (a message, a form's source, a plan, a printed value), not as

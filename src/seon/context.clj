@@ -167,7 +167,7 @@
 (defn not-written
   "What unwritten proof p should assert, by the plan's own words: the plan's sentences that name
   it, or that it is not written yet when none does (the plan is on the page already): the task part's
-  to-prove (seon.render.ui/task-model, docs/render.md#a-part-answers-data)."
+  the status's unwritten proofs (seon.render.ui/status, docs/render.md#how-the-work-stands)."
   {:malli/schema [:=> [:cat :qualified-symbol :string] :string]}
   [p plan]
   (let [ss (filter #(str/includes? % (name p)) (str/split plan #"(?<=[.!?])\s+"))]
@@ -515,35 +515,6 @@
   {:malli/schema [:=> [:cat :map] [:maybe :symbol]]}
   [c] (or (:seon.agent/ns c) (:seon.task/ns (:task c))))
 
-(defn namespaces-of
-  "The namespaces agent record c's work touches, as the namespaces part shows them, from ctx alone: the one its REPL is in
-  and its task's own first (`current-ns`, the task's until it moves, so a task written from a symptom, citing nothing
-  yet, draws it), then those of what its task and its needs cite (a var's
-  namespace, or a namespace cited itself) and of their proofs, once each, each {:names [...] :ns-form form}: its
-  names the task cites or its proofs call (their forms' :form/refs, as :proved holds them), and the form that reads
-  its ns form (its requires and aliases) and a line per definition, ``(clojure.repl/source ns)`` (the form that shows
-  a namespace's requires; my.agent/help does not hold them). It costs what it shows, never the namespace's size.
-  See docs/render.md#a-part-answers-data."
-  {:malli/schema [:=> [:cat :map] [:map-of :symbol :map]]}
-  [c]
-  (let [t (:task c)
-        needs (vals (:needs t))
-        named (for [cs (cons (:cites t) (for [n needs :when (not= :merge (ratom/realize (:seon.task/kind n)))] (:cites n)))
-                    x (vals cs) :let [n (ratom/realize (:seon.cite/name x))] :when (symbol? n)] n)
-        proved (for [ps (cons (:proved t) (map :proved needs)) v (vals ps) :when (:var/name v)] v)
-        proofs (map #(ratom/realize (:var/name %)) proved)
-        calls (for [v proved r (ratom/realize (get-in v [:form :form/refs])) :when (qualified-symbol? r)] r)
-        ns-of #(if (namespace %) (symbol (namespace %)) %)
-        ;; where the REPL is, then where it started: the task's own
-        own (distinct (keep identity [(current-ns c) (:seon.task/ns t)]))
-        names (group-by ns-of (filter namespace (concat named proofs calls)))]
-    ;; a map by name, in the order first named (a part answers a map: a vector is hiccup)
-    (apply array-map (mapcat (fn [n] [n (cond-> {}
-                                           (seq (names n)) (assoc :names (vec (sort (distinct (map (comp symbol name) (names n))))))
-                                           ;; named for what an agent asks for (the ns form is asked for beside :source)
-                                           true (assoc :ns-form (list 'clojure.repl/source n)))])
-                             (distinct (concat own (map ns-of (concat named proofs))))))))
-
 (defn task-data
   "The task's data: task t's run sections as data, the same each turn of a run: the task (its
   plan as it accumulated along :needs, prerequisites first); its write set, each program var cites
@@ -552,7 +523,7 @@
   is not and what it should assert in the plan's words (whether it fails, and why, is the
   proofs part's: it changes each turn); the wiki sections and the tasks cites name (a task by its plan, seon.ref/task-view). cites: what the task cites, its cite entities and its needs'
   (seon.task/task-cites). What `my.task/data` answers at the agent's REPL, on demand; the page's task part is
-  the pulled task's own renders (seon.render.ui/task-data, docs/render.md#a-part-answers-data)."
+  the pulled task's own renders (seon.render.ui/task, docs/render.md#a-part-answers-data)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/task [:sequential :map]] :map]}
   [db t cites]
   (let [{:keys [plan proofs]} (:seon.task/accumulated t)
@@ -709,10 +680,12 @@
                                                (nil? src) :undefined (some? test-error) :not-run :else :unknown)
                                       fs (when-not test-error (:seon.test/failures v))
                                       calls (when (and src (not= :pass st)) (callees db p))
-                                      shape (when (= :undefined st) (test-shape db p))]]
+                                      shape (when (= :undefined st) (test-shape db p))
+                                      says (when (= :undefined st) (not-written p (or plan "")))]]
                             (cond-> {:test p :status st}
                               (and src (not= :pass st)) (assoc :source (print/code src))
                               shape (assoc :shape shape)
+                              says (assoc :says says)
                               (seq fs) (assoc :failures (failures fs))
                               (seq calls) (assoc :calls calls))))}
       (seq blockers) (assoc :refused blockers)

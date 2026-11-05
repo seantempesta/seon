@@ -66,6 +66,11 @@
     (do (vreset! data out) (html {:schema k :as :block} out))
     (do (when (vector? out) (vreset! answer (:seon.render/answer (meta out)))) out)))
 
+(defn full-declared?
+  "Does schema k declare its values print whole, {:seon.print/full true}: a value that is a page (docs/render.md#a-part-prints-as-its-render)?"
+  {:malli/schema [:=> [:cat [:maybe :qualified-keyword]] :boolean]}
+  [k] (boolean (and k (:seon.print/full (contract/properties k)))))
+
 (defn model
   "What the printer shows in place of value v (seon.print/print-value's :render): {:value m} when v's schema (its metadata
   :seon.render/schema) declares a model render (`model-declared`), which makes a value
@@ -75,8 +80,10 @@
   {:malli/schema [:function [:=> [:cat :any] [:maybe [:map [:value :any]]]] [:=> [:cat :any :map] [:maybe [:map [:value :any]]]]]}
   ([v] (model v {}))
   ([v opts]
-   (when-let [sym (model-declared (:seon.render/schema (meta v)))]
-     {:value ((requiring-resolve sym) opts v)})))
+   (let [k (:seon.render/schema (meta v)) sym (model-declared k) full? (full-declared? k)]
+     (when (or sym full?)
+       ;; a schema that declares no render shows the value itself, no longer named by it (the printer would draw it by this again)
+       (cond-> {:value (if sym ((requiring-resolve sym) opts v) (vary-meta v dissoc :seon.render/schema))} full? (assoc :full true))))))
 
 (defn- part-model
   "What the model reads of part k of walk w, a component that answered data: its data's model render (`model`), else its
@@ -594,7 +601,7 @@
         f (apply str (repeat n "`"))]
     (str f "clojure\n" s "\n" f)))
 
-(defn- verbatim
+(defn printable
   "Form x ready to print: an element [:pre [:code s]] its source in a fence (the code marker, verbatim, later lines at
   column 0), a string with a line break or a quote the prose marker (verbatim, not escaped), the rest as it is."
   {:malli/schema [:=> [:cat :any] :any]}
@@ -603,29 +610,16 @@
     (and (vector? x) (= :pre (first x)) (= 2 (count x)) (vector? (second x)) (= :code (first (second x))) (string? (last (second x))))
     [:pre {:seon.print/code (fence (last (second x)))}]
     ;; a vector's children without the nils a (when ..) leaves and with the lists a (for ..) makes spliced in, as the page's writer reads them
-    (vector? x) (with-meta (into [] (comp (mapcat (fn [c] (if (seq? c) c [c]))) (remove nil?) (map verbatim)) x) (meta x))
+    (vector? x) (with-meta (into [] (comp (mapcat (fn [c] (if (seq? c) c [c]))) (remove nil?) (map printable)) x) (meta x))
     (and (string? x) (or (str/includes? x "\n") (str/includes? x "\""))) {:seon.print/prose x}
-    (map? x) (if (:seon.print/code x) x (into (empty x) (map (fn [[k v]] [k (verbatim v)])) x))
+    (map? x) (if (:seon.print/code x) x (into (empty x) (map (fn [[k v]] [k (printable v)])) x))
     :else x))
 
 (defn part-text
   "Part form f (`part-form`) printed as text the model reads: whole (:seon.print/full), the head and its path, then the
   hiccup, a verbatim block in its fence. See docs/render.md#a-part-prints-as-its-render."
   {:malli/schema [:=> [:cat :any] :string]}
-  [f] (print/text (vary-meta (verbatim f) assoc :seon.print/full true)))
-
-(defn part-faults
-  "What is untrue of part form f (`part-form`) against ctx value c: :unresolved-head (its head names no function), :unresolved-ctx
-  ((get-in c path) answers nothing, or it has no :ctx path), :no-heading (its first element is no heading, h1 to h6). A
-  part whose faults are empty may be sent. See docs/render.md#a-part-prints-as-its-render."
-  {:malli/schema [:=> [:cat :any :any] [:vector :keyword]]}
-  [f c]
-  (let [[head attrs & body] f
-        first-el (first (filter vector? body))]
-    (cond-> []
-      (not (and (qualified-symbol? head) (find-ns (symbol (namespace head))) (ns-resolve (find-ns (symbol (namespace head))) (symbol (name head))))) (conj :unresolved-head)
-      (nil? (some->> (:ctx attrs) (get-in c))) (conj :unresolved-ctx)
-      (not (and first-el (#{:h1 :h2 :h3 :h4 :h5 :h6} (first first-el)))) (conj :no-heading))))
+  [f] (print/text (vary-meta (printable f) assoc :seon.print/full true)))
 
 (defn placed-hiccup
   "The parts of walk w placed in the root's lists with element ids sels ([\"#p-task\"]), in order, as {id form}: what
@@ -634,6 +628,19 @@
   [w sels]
   (apply array-map (mapcat (fn [[_ k]] (let [c (get @(:cache w) k)] [(:id c) (part-form w k)]))
                            (placed w sels))))
+
+(defn parts-since
+  "The parts of walk w placed in the lists sels that moved since seen ({id tree-rev} of an earlier answer): {:parts {id form}
+  :revs {id tree-rev} :gone [id]}. The walk already compared each part's output with its last (a revision moves only when it
+  differs, `render!`), so nothing is compared or drawn here but the revisions, and a part's form (`part-form`) is made only for a
+  part that moved; nothing moved, nothing made. A walk new to its process has seen nothing: every part."
+  {:malli/schema [:=> [:cat :map [:sequential :string] [:maybe :map]] [:map [:parts :map] [:revs :map] [:gone [:vector :string]]]]}
+  [w sels seen]
+  (let [ps (for [[_ k] (placed w sels)] [(:id (get @(:cache w) k)) k])
+        revs (into {} (map (fn [[id k]] [id (tree-rev w k)])) ps)]
+    {:parts (into (array-map) (keep (fn [[id k]] (when (not= (get seen id) (get revs id)) [id (part-form w k)]))) ps)
+     :revs revs
+     :gone (vec (remove revs (keys seen)))}))
 
 (defn placed-data
   "The data of walk w's parts placed in the root's lists with element ids sels: {schema-key data} of each

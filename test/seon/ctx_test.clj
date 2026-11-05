@@ -4,7 +4,7 @@
   each key by its own schema's render. Run: bin/test seon.ctx-test"
   (:refer-clojure :exclude [defn defn-])
   (:require [clojure.test :refer [deftest is testing]] [seon.contract :refer [defn defn-]] [seon.cost :as cost]
-            [seon.test-store :as ts] [datahike.api :as d] [seon.ctx :as ctx] [seon.db :as pdb] [seon.context :as context] [seon.task :as task] [seon.vector :as vector] [seon.render :as render] [seon.render.ui] [seon.repl] [seon.agent] [seon.web.html] [seon.root] [my.schema] [my.test] [clojure.test.check :as tc] [clojure.test.check.generators :as gen] [clojure.test.check.properties :as prop] [seon.proofs :as proofs] [clojure.string :as str] [clojure.walk :as walk] [clojure.set]))
+            [seon.test-store :as ts] [datahike.api :as d] [seon.ctx :as ctx] [seon.db :as pdb] [seon.context :as context] [seon.task :as task] [seon.vector :as vector] [seon.render :as render] [seon.render.ui] [my.render] [seon.repl] [seon.agent] [seon.web.html] [seon.root] [my.schema] [my.test] [clojure.test.check :as tc] [clojure.test.check.generators :as gen] [clojure.test.check.properties :as prop] [seon.proofs :as proofs] [clojure.string :as str] [clojure.walk :as walk] [clojure.set]))
 
 (def ^:private k "The test agent's key." "test-boot/a1")
 
@@ -628,7 +628,7 @@
     (is (some? (part "Tested by: app.x-test/t0, app.x-test/t1")) (str "the cited var's tests, then its other callers: " (pr-str cites)))
     (is (str/includes? (part "Tested by: app.x-test/t0") "Called by: app.x/g") "its other callers")
     (is (str/includes? (part "What x does.") "docs/x.md#the-x") "the cited section's lead under its heading and address")
-    (is (not (str/includes? (pr-str (some (fn [[i h]] (when (str/starts-with? i "task-data-") h)) page)) "What x does.")) "and the task's own part holds it once, not again")))
+    (is (not (str/includes? (pr-str (some (fn [[i h]] (when (str/starts-with? i "task-") h)) page)) "What x does.")) "and the task's own part holds it once, not again")))
 
 (deftest a-cited-part-shows-its-source-beside-its-tests
   ;; the cited var is one part: its source, its tests, its callers and one real call.
@@ -655,15 +655,14 @@
         as #(try (enter-agent! {:db db :key k :branch :b}) (%) (finally (end-agent!)))
         hiccup (into {} (as seon.repl/render-ctx-hiccup))
         units (:units (as seon.repl/render-ctx))
-        ;; task-data is a part (the model reads its data); chat-ask is hiccup, its root the render's name
-        task-id (some #(when (str/starts-with? % "task-data-") %) (keys hiccup))
+        task-id (some #(when (str/starts-with? % "task-") %) (keys hiccup))
         ask-id (some #(when (str/starts-with? % "chat-ask-") %) (keys hiccup))
-        style (:seon.render/style (meta #'seon.render.ui/task-data))]
+        style (:seon.render/style (meta #'seon.render.ui/task))]
     (is (string? style) "the render's var states its style")
     (is (= 'seon.render.ui/chat-ask (first (hiccup ask-id))) "the model reads the render's name as the part's head")
     (is (not (str/includes? (pr-str (hiccup ask-id)) (:seon.render/style (meta #'seon.render.ui/chat-ask)))) "the model reads no style")
     (is (not (str/includes? (pr-str hiccup) style)) "the model reads no style")
-    (is (str/includes? (:html (some #(when (= task-id (:id %)) %) units)) (str "class=\"task-data " (first (str/split style #" "))))
+    (is (str/includes? (:html (some #(when (= task-id (:id %)) %) units)) (str "class=\"task " (first (str/split style #" "))))
         "the page's html has the name, then its var's classes")))
 
 (deftest a-cited-vars-tests-are-its-pulled-callers
@@ -731,7 +730,7 @@
               (is (every? (fn [[id f]] (str/starts-with? id (name (first f)))) hiccup)
                   "each component's part is headed by the render whose unit the page shows")
               (is (every? #(or (vector? %) (map? %)) (vals page)) "and the rest answer their data")))
-          (is (str/includes? (pr-str (get page "ctx-keys")) "read the plan") "as hiccup, exactly as its render returned it")))
+          (is (str/includes? (pr-str (get page "ctx-keys")) "read the plan") "as the render returned it")))
       (testing "the page rebuilds the value from the branch at its basis"
         (let [db (:db-after (d/with db [(into {:seon.eval/id "e9" :seon.eval/agent [:seon.agent/key k]} rec)]))
               h (seon.web.html/html (seon.render.ui/evaluation {:db db} (d/pull db '[*] [:seon.eval/id "e9"])))]
@@ -1241,3 +1240,35 @@
     (is (not (contains? (rec more) :seon.eval/basis)) "(assoc @ctx :x 1) is not the record at a t either")
     (is (= #{:seon.agent/key} (set (keys (get-in (rec part) [:seon.eval/response :value])))) (str "kept as the data it was: " (pr-str (select-keys (:seon.eval/response (rec part)) [:value]))))
     (is (not (str/includes? (text (rec part)) ":evals")) "the model reads what the value was, not the whole record")))
+
+(deftest render-ctx-and-render-changes-answer-the-render-as-evals
+  ;; owner, 2026-11-05: the whole render as an ordinary eval, whole; what changed from the walk, computing nothing when nothing moved
+  (let [db (seeded 3 nil)]
+    (try
+      (enter-agent! {:db db :key k :branch :b})
+      (let [all (my.render/render-ctx)
+            first-changes (my.render/render-changes)
+            again (my.render/render-changes)
+            tid (get-in @ctx/ctx [:task :seon.task/id])
+            _ (swap! seon.agent/state assoc :db (d/db-with db [{:seon.task/id tid :seon.task/plan "A plan that moved."}]))
+            moved (my.render/render-changes)]
+        (is (seq all) "every part")
+        (is (every? (fn [[_ f]] (and (symbol? (first f)) (map? (second f)))) all) "each headed by its function and its path")
+        (is (= (set (keys all)) (set (keys first-changes))) "the first ask is every part")
+        (is (= {} (into {} again)) "nothing moved: nothing")
+        (is (= {:seon.render/schema :seon.render/parts :seon.print/full true} (meta all)) "named, so its record prints it whole")
+        (is (some #(str/starts-with? % "task-") (keys moved)) "the plan moved: the task's part")
+        (is (not-any? #(str/starts-with? % "status-") (keys moved)) "and not what read nothing of it")
+        (is (str/includes? (pr-str (some (fn [[i f]] (when (str/starts-with? i "task-") f)) moved)) "A plan that moved.") "whole"))
+      (finally (end-agent!)))))
+
+(deftest a-value-that-is-a-page-prints-whole-stored-and-live
+  ;; the printer cut a render-sized value (12,697 chars to 4,258) because :seon.print/full is metadata and the store keeps none:
+  ;; its schema says it now, :seon.render/parts
+  (let [big (with-meta (into (array-map) (for [i (range 40)] [(str "part-" i) ['seon.render.ui/x {:ctx [:task]} [:h2 (str "Heading " i)] [:p (apply str (repeat 40 "word "))]]]))
+              {:seon.render/schema :seon.render/parts :seon.print/full true})
+        live (seon.print/response-text {:handle 'result/e1 :value big})
+        stored (seon.print/record-text {:seon.eval/schema :seon.render/parts :seon.eval/response {:handle 'result/e1 :value (into {} big)}} render/model)]
+    (is (str/includes? live "Heading 39") "live: whole")
+    (is (str/includes? stored "Heading 39") "stored and read back: whole")
+    (is (not (re-find #"…\d" stored)) "no cut")))

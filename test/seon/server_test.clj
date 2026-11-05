@@ -215,7 +215,7 @@
         text (:context ctx)]
     (is (clojure.string/starts-with? text "# You are a Seon agent") "the system prompt, first")
     (is (clojure.string/includes? text "(seon.repl/render-ctx-hiccup)") "the form that shows the render of ctx now")
-    (is (re-find #"task-data-\d+" text) "the render of ctx by component key")
+    (is (re-find #"task-\d+" text) "the render of ctx by component key")
     (is (not (contract/error? (:value status))) (pr-str (:value status)))
     (is (contains? (:value status) :proofs) "status answers as the turn measured it")
     (is (seq (:ns (:value sent))) "and the read records what it sent, as a model turn does (the debug page shows it)")

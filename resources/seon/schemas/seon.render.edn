@@ -12,8 +12,6 @@
  :my.agent/lines [:vector {:seon.render/model my.agent/lines-text} :map]
  ;; my.agent/grep's [] for a string holding a regex's operators, shown with its regex form (my.agent/grep-none-text)
  :my.agent/grep-none [:vector {:seon.render/model my.agent/grep-none-text} :map]
- ;; the namespaces the work touches (seon.context/namespaces-of): each the names the task cites or its proofs call
- :seon.context/namespaces [:map-of {:seon.render/html seon.render.ui/namespaces-html} :symbol :map]
  ;; how an agent's work on its task stands (seon.context/status), a part of its page: the page draws it by
  ;; its html render, the model is sent its data (docs/render.md#a-part-answers-data)
  :seon.context/status [:map]
@@ -22,6 +20,8 @@
  :seon.test/proved [:map {:seon.render/model my.agent/prove-summary :seon.render/html seon.render.ui/proved}]
  ;; what draws what in a walk (seon.render/tree, my.render/tree): a component and those it drew, each with its own output's
  ;; tokens
+ ;; every part of an agent's page as the hiccup its request holds it, whole (my.render/render-ctx, render-changes): a value that is a page prints whole, the stored one too
+ :seon.render/parts [:map-of {:seon.print/full true} :string :any]
  :seon.render/tree [:map [:fn :symbol] [:args [:vector :any]] [:id :string] [:tokens nat-int?]
                     [:reads? {:optional true} :boolean]
                     ;; each child is a tree too; a recursive schema cannot be built by the registry (a [:ref] overflows its eager parse)

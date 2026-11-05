@@ -46,12 +46,11 @@
                "(`my.branch/merge-main!`). You are done when nothing is unmerged and every proof passes on the combined program. "
                "How: ```docs/agent.md#merging```. Then end your turn with prose.")
    :work (str "Your task: do what the plan below asks: design it and build it. You are done when its proofs pass on your "
-              "branch. How a task is worked, step by step: ```docs/agent.md#working-a-task```; main's work reaches your "
-              "branch as main moves, and you resolve what conflicts: ```docs/agent.md#merging```.")
+              "branch. How a task is worked, step by step: ```docs/agent.md#working-a-task```.")
    :whole (str "Your task: do what the plan below asks, whole. You are done when its proofs pass on your branch with main's "
-               "work merged in. How a task is worked, step by step: ```docs/agent.md#working-a-task```. Your status's :merge says "
-               "what main changed under you and what merging would conflict on: redefine each such var for both sides "
-               "(```docs/agent.md#merging```). Once :merge says :ready, your run ends and root merges your branch.")
+               "work merged in. How a task is worked, step by step: ```docs/agent.md#working-a-task```. Your status says "
+               "what main changed under you and what merging would conflict on: redefine each such var for both sides. "
+               "Once it says nothing is left, your run ends and root merges your branch.")
    :test (str "Your task: test what the plan changed. You are done when the proofs and the tests of what changed pass, and "
               "each behaviour that broke has a deftest of its own. You do it by running them (`(my.agent/prove)`), writing a "
               "deftest in the proofs' namespace for each break, and fixing the code until all pass. Then end your turn with prose.")})

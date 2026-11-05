@@ -550,39 +550,26 @@
      [:span {:class "text-2xs text-text-500"} (str "message from " from)]
      [:p {:class "seon-prose"} (prose body (part))]]))
 
-(declare task-model standing)
+(declare standing)
 
-(defn task
-  "A task (the declared html render of :seon.task/task-fact) as a person reads it, from what the pattern
-  joined (`task-model` its data; :stands, task-data's words for how its agent's own end left it): inline its id, kind and execution; whole, its name as a title, its
-  namespace and execution above it, how its kind is worked (folded), its plan accumulated over its needs as
-  Markdown, how to run each proof (folded). See docs/render.md#a-part-answers-data."
+(defn task-view
+  "A task (the declared html render of :seon.task/task-fact) as a person reads it, wherever the pattern joined one: inline its
+  id, kind and execution; whole, its name as a title, its namespace and how its work stands above it (the task's outcome
+  where it holds one: a capped task is not \"running\"), how its kind is worked and its plan accumulated over its needs
+  as Markdown. The agent's own task part is `task`. See docs/render.md#a-part-answers-data."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
-  [opts {:seon.task/keys [id kind execution] :as t}]
+  [opts {:seon.task/keys [id kind execution instructions] :as t}]
   (if (= :inline (:as opts))
     [:span (str "task " id (when kind (str " · " (kname kind))) (when execution (str " · " (kname execution))))]
-    (let [data (task-model opts t)]
+    (let [{:keys [plan]} (task/pulled-accumulated t)]
       [:section
-       ;; its name as a title (the id's name, words), its namespace and state above it
        [:p {:class "text-2xs uppercase tracking-wider text-text-500"}
-        ;; how its work stands, as the header says it (standing), where the task holds an outcome: a capped task is not "running"
         (str "task · " (namespace (symbol id))
-             (cond (:stands t) (str " · " (:stands t))
-                   (:seon.task/outcome t) (str " · " (:text (standing nil {:seon.task/outcome (:seon.task/outcome t)})))
+             (cond (:seon.task/outcome t) (str " · " (:text (standing nil {:seon.task/outcome (:seon.task/outcome t)})))
                    execution (str " · " (kname execution))))]
        [:p {:class "text-lg font-bold text-text-100"} (task-title id)]
-       ;; how its kind is worked (the template's text, read before the plan) and what the task is (its plan),
-       ;; each whole under the value budget, as prose; a cut names the form that answers the whole
-       (when-let [ins (get-in data [:task :seon.task/instructions])]
-         [:details [:summary "how the agent works it"]
-          [:p {:class "seon-prose"} (prose ins (config/value :seon.config.render/value-budget) {:whole '(:seon.task/instructions (:task (my.task/data)))})]])
-       (when-let [plan (get-in data [:task :seon.task/plan])]
-         (let [p (prose plan (config/value :seon.config.render/value-budget) {:whole '(:seon.task/plan (:task (my.task/data)))})]
-           (if (string? p) (markdown plan) [:p {:class "seon-prose"} p])))
-       ;; the rest folds: a person opens what they want, the model reads it all
-       (when (seq (:to-prove data))
-         [:details [:summary "proofs and data"]
-          [#'render/html {:budget (config/value :seon.config.render/value-budget) :handle '(dissoc (my.task/data) :task :write-set :sections)} (dissoc data :task)]])])))
+       (when instructions [:details [:summary "how the agent works it"] [:p {:class "seon-prose"} instructions]])
+       (when plan (markdown plan))])))
 
 (defn- toggle
   "A <details>' attrs that tell the render proc it opened or closed (/open), for the conversation's
@@ -789,54 +776,29 @@
   "A tile: a value on its own, scrolled when wide."
   "rounded-md bg-base-900 p-2 min-w-0 overflow-x-auto")
 
-(defn task-data
-  "The task its agent works (a component over ctx alone): the task as the agent's record pulls it, its
-  :needs with their :proved, its :proved (docs/ctx.md#the-pattern), each read by its path, the cites left to
-  their own parts (`cited`), as a part (its data, :seon.task/task-fact, drawn by `task` for the page and
-  `task-model` for the model: docs/render.md#a-part-answers-data). It reads no db."
-  {:seon.render/style (str panel-style " [&_h3]:text-xs [&_h3]:text-text-300") :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int] :any]}
+(defn task
+  "The task its agent works (a component over ctx alone): its name as the heading, its plan accumulated over its needs
+  (seon.task/pulled-accumulated), and the done line, the instructions of its kind (what it is to do and when it is done; they
+  cite how a task is worked). Not a map of keys: what the agent reads cold. For the person, beside it, the namespace and how the
+  work stands (`standing`, from the task's outcome where the task holds one, else the agent's own end). The cites are
+  their own parts (`citations`); which proofs are written is the status's. It reads no db. See
+  docs/render.md#a-part-answers-data."
+  {:seon.render/style (str panel-style " [&_h3]:text-xs [&_h3]:text-text-300")
+   :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int] :any]}
   [{c :seon.ctx/ctx} _aid]
-  (let [t (:task c)
-        own (fn [x] (into {} (for [k (keys x) :when (not= :cites k)] [k (ratom/realize (get x k))])))
-        ;; how its work stands where the agent's own end says it (its record on this branch: outcome, turns): the task's own outcome
-        ;; is main's, which no branch holds. The page's words only (`task` reads :stands); the model's render takes the keys it names
-        agent (into {} (for [k [:seon.agent/outcome :seon.agent/ended-turn :seon.agent/turn :seon.agent/max-turns :seon.agent/reason :seon.agent/status]
-                             :let [v (ratom/realize (get c k))] :when (some? v)] [k v]))
-        task-end {:seon.task/outcome (ratom/realize (:seon.task/outcome t)) :seon.task/reason (ratom/realize (:seon.task/reason t))}
-        stands (when (or (:seon.agent/outcome agent) (:seon.task/outcome task-end)) (standing agent task-end))]
-    (with-meta (cond-> (assoc (own t) :needs (into {} (for [[k n] (:needs t)] [k (own n)])))
-                 (and stands (= "end" (namespace (:state stands)))) (assoc :stands (str (:text stands) (when (:detail stands) (str " · " (:detail stands))))))
-      {:seon.render/schema :seon.task/task-fact})))
-
-(defn task-model
-  "A task as the model reads it (the declared model render of :seon.task/task-fact), a regular function of the
-  pulled task: its id, kind and instructions and its plan accumulated over its joined needs
-  (seon.task/pulled-accumulated), then each proof, its own and its needs', not written yet (no form :proved
-  holds) with what the plan says it should assert (seon.context/not-written); a written one is the status's
-  to show, with its verdict and how it runs (`:to-prove` repeated them: task
-  seon.context/an-agent-follows-its-instructions-to-green). See docs/render.md#a-part-answers-data."
-  {:malli/schema [:=> [:cat :map :map] :map]}
-  [_opts t]
-  (let [{:keys [plan proofs]} (task/pulled-accumulated t)
-        defined (into #{} (for [ps (cons (:proved t) (map :proved (vals (:needs t)))) v (vals ps) :when (get-in v [:form :form/src])] (:var/name v)))
-        unwritten (remove defined proofs)]
-    ;; a plain map, never t's metadata (select-keys keeps it): named :seon.task/task-fact, the printer drew it by this render again, without end
-    (cond-> {:task (into {} (assoc (select-keys t [:seon.task/id :seon.task/instructions]) :seon.task/kind (:seon.task/kind t :work) :seon.task/plan plan))}
-      (seq unwritten) (assoc :to-prove (into (sorted-map-by #(compare (str %1) (str %2)))
-                                             (for [p unwritten] [p (context/not-written p plan)]))))))
-
-(defn- section-text
-  "Pulled section sec (its :below joined) as Markdown at depth: :summary its heading and its lead's first
-  sentence, :doc its heading, its lead and the headings below it, :code its heading and its own text whole."
-  {:malli/schema [:=> [:cat :map :seon.ref/depth] :string]}
-  [{:seon.doc/keys [address heading lead text] below :below} depth]
-  (let [head (str "## " heading " (" address ")")]
-    (case depth
-      :summary (cond-> head lead (str "\n\n" (ref/lead-sentence lead)))
-      :doc (cond-> head lead (str "\n\n" lead)
-             (seq below) (str "\n\n" (str/join "\n" (for [b (sort-by :seon.doc/address (vals below))]
-                                                       (str "- " (:seon.doc/heading b) " (" (:seon.doc/address b) ")")))))
-      (cond-> head text (str "\n\n" text)))))
+  (when-let [t* (:task c)]
+    (let [own (fn [x] (into {} (for [k (keys x) :when (not= :cites k)] [k (ratom/realize (get x k))])))
+          t (assoc (own t*) :needs (into {} (for [[k n] (:needs t*)] [k (own n)])))
+          id (:seon.task/id t)
+          {:keys [plan]} (task/pulled-accumulated t)
+          agent (into {} (for [k [:seon.agent/outcome :seon.agent/ended-turn :seon.agent/turn :seon.agent/max-turns :seon.agent/reason :seon.agent/status]
+                               :let [v (ratom/realize (get c k))] :when (some? v)] [k v]))
+          stands (when (or (:seon.agent/outcome agent) (:seon.task/outcome t)) (standing agent (select-keys t [:seon.task/outcome :seon.task/reason])))]
+      [:section
+       [:h2 (task-title id)]
+       [:p {:data-for "page"} (str "task · " (namespace (symbol id)) (when stands (str " · " (:text stands) (when (:detail stands) (str " · " (:detail stands))))))]
+       (when plan (markdown plan))
+       (when-let [ins (:seon.task/instructions t)] [:p ins])])))
 
 (def ^:private cite-joins
   "Where a cite's joins hold an entity, and the identity attribute that marks it held whole there (an entity
@@ -896,10 +858,10 @@
                 :else (recur (inc j) depth false)))))))))
 
 (defn cite-via
-  "Why a cite is on the page, from a closed set, each with a quote copied from stored text: [:plan quote] or [:instructions quote]
+  "Why a cite is on the page, each with a quote copied from stored text: [:plan quote] or [:instructions quote]
   where target (the cited name or address as text, or its page when only the section's page is written) appears in that text,
-  the quote that text with about 60 characters each side of the mention (a slice, so a substring of it); nil when no text
-  names it (the agent's own cites, config's). sources, [[kind text]] in order of preference. See
+  the quote that text with about 60 characters each side of the mention; nil when no text names it (the agent's own cites,
+  config's). Simple data for the page; nothing refuses by it. sources, [[kind text]] in order of preference. See
   docs/render.md#a-citation-says-why-it-is-there."
   {:malli/schema [:=> [:cat :string [:sequential [:tuple :keyword [:maybe :string]]]] [:maybe [:tuple :keyword :string]]]}
   [target sources]
@@ -911,14 +873,13 @@
         sources))
 
 (defn- via-hiccup
-  "A cite's reason, the quote its plan or instructions hold: for the page always, for the model only when the cite's schema
-  switches it on (:seon.cite/via-to-model, the one switch, false: a test compares both). Nothing when the cite has none."
+  "A cite's reason, the quote its plan or instructions hold, for the page alone (:data-for \"page\"): the model reads what the
+  cite is, and the person sees why it is there. Nothing when the cite has none."
   {:malli/schema [:=> [:cat [:maybe [:tuple :keyword :string]]] :any]}
   [via]
   (when via
     (let [[kind q] via]
-      [:p (cond-> {} (not (:seon.cite/via-to-model (contract/properties :seon.cite/cite-fact))) (assoc :data-for "page"))
-       (str "Because your " (name kind) " says: ") [:q q]])))
+      [:p {:data-for "page"} (str "Because your " (name kind) " says: ") [:q q]])))
 
 (defn- section-hiccup
   "A wiki section as pulled (its :below joined) at depth: its heading and address, its text at that depth (its lead's first
@@ -1076,24 +1037,10 @@
                       (for [p ps j cite-joins q (join-paths p j)] q))]
     (reduce (fn [m [q whole? id]] (if (and whole? (not (contains? m id))) (assoc m id q) m)) {} found)))
 
-(defn- builds-on
-  "The places 0..n-1 of n cites in the order of what each builds on: each after those whose sections (secs, by
-  place) its own links reach (links, by place); where they loop the earlier first, else their order holds."
-  {:malli/schema [:=> [:cat [:vector [:set :int]] [:vector [:set :int]]] [:vector :int]]}
-  [secs links]
-  (let [n (count secs)
-        deps (vec (for [i (range n)] (into #{} (filter #(and (not= i %) (seq (clojure.set/intersection (links i) (secs %))))) (range n))))]
-    (loop [placed [] done #{}]
-      (if (= n (count placed))
-        placed
-        (let [i (or (first (filter #(and (not (done %)) (every? done (deps %))) (range n))) (first (remove done (range n))))]
-          (recur (conj placed i) (conj done i)))))))
-
 (defn- page-cites
   "The cites agent record c's page draws, read from ctx alone: its task's (:cites), then each need's (one
   level, a merge task's left out), then the agent's own, each target once at the strongest depth any asks,
-  the task's proofs left out (the status shows them), in the order of what each builds on (a section after
-  the sections its own links reach, :seon.doc/references; where they loop, the earlier first). Each
+  the task's proofs left out (the status shows them), in the order the cites were written. Each
   [path target held]: the cite's path, its target as text and where ctx holds each entity it joined whole
   (an entity is held once: docs/ctx.md#the-pattern)."
   {:malli/schema [:=> [:cat :map] [:vector [:tuple [:vector :any] :string [:map-of :int [:vector :any]]]]]}
@@ -1111,12 +1058,8 @@
         all (remove #(proofs (:name %)) all)
         by (group-by :target all)
         chosen (vec (for [t (distinct (map :target all))] (reduce (fn [a b] (if (> (:rank b) (:rank a)) b a)) (by t))))
-        held (held-whole c (map :path all))
-        ;; what each builds on: its section's own links, among the sections the others joined
-        sec (fn [p] (let [id (get-in c (conj p :section :db/id))] (when id (or (held id) (conj p :section)))))
-        secs (mapv (fn [{p :path}] (if-let [sp (sec p)] (into #{(get-in c (conj sp :db/id))} (keys (get-in c (conj sp :below)))) #{})) chosen)
-        links (mapv (fn [{p :path}] (if-let [sp (sec p)] (into #{} (map :db/id) (ratom/realize (get-in c (conj sp :seon.doc/references)))) #{})) chosen)]
-    (vec (for [i (builds-on secs links) :let [{:keys [path target]} (chosen i)]] [path target held]))))
+        held (held-whole c (map :path all))]
+    (vec (for [{:keys [path target]} chosen] [path target held]))))
 
 (def ^:private reason-words
   "What each of the done rule's reasons (seon.reconcile/done-explain) says to a person reading the page (docs/agent.md#what-you-read: `:refused`)."
@@ -1172,10 +1115,11 @@
        (into [:table [:tr [:th "Proof"] [:th "State"]]]
              (for [{:keys [test status]} proofs]
                [:tr [:td [:code (str test)]] [:td {:class (if (= :pass status) "ok" "bad")} (get state-words status (kname status))]])))
-     (for [{:keys [test shape]} proofs :when shape :let [{:keys [ns ns-form helpers example]} shape]]
+     (for [{:keys [test shape says]} proofs :when (or shape says) :let [{:keys [ns ns-form helpers example]} shape]]
        [:div
         [:h3 (str test " is not written")]
-        [:p "It goes in " [:code (str ns)] (if ns-form ", whose ns form is:" ".")]
+        (when says [:p says])
+        (when ns [:p "It goes in " [:code (str ns)] (if ns-form ", whose ns form is:" ".")])
         (when ns-form [:pre [:code ns-form]])
         (when (seq helpers) [:p "Helpers defined there: " (str/join ", " (map #(str "`" (name %) "`") helpers))])
         (when example [:p "One of its tests, as the shape to copy:"])
@@ -1198,6 +1142,7 @@
        [:p "Merge: " (if (seq (:conflicts merge)) (str (count (:conflicts merge)) " conflicts") "no conflicts")
         (when (seq (:main-moved merge)) (str " · main moved " (count (:main-moved merge))))
         " · it carries " (str/join ", " (for [[k vs] its-merge-carries] (str (count vs) " " (name k))))])
+     (when (seq unmerged) [:p "How merging works: " [:code "(my.agent/help \"docs/agent.md#merging\")"]])
      (when next-form [:p "Next: " (form-hiccup next-form)])]))
 
 (defn status
@@ -1210,27 +1155,6 @@
   (let [main (when (task/merges? (:seon.task/kind (:task c))) (ratom/realize (:seon.agent/main-commit c)))
         s (context/status db c {:main main})]
     (with-meta (status-hiccup s) {:seon.render/answer (with-meta s {:seon.render/schema :seon.context/status})})))
-
-(defn namespaces-html
-  "The namespaces the work touches as the page shows them (the declared html render of
-  :seon.context/namespaces; the model is sent the value): folded to their names, opened to each one's
-  names the task cites or its proofs call and the form that reads its ns form and definitions, by the one printer. See docs/render.md#a-part-answers-data."
-  {:malli/schema [:=> [:cat :seon.render/opts [:map-of :symbol :map]] :any]}
-  [_opts v]
-  [:details
-   [:summary {:class "kicker"} (str "namespaces · " (str/join ", " (keys v)))]
-   (into [:div {:class "mt-1 flex flex-col gap-1"}]
-         (for [[n d] v] [#'render/html {:budget (config/value :seon.config.render/value-budget)} {n d}]))])
-
-(defn namespaces
-  "The namespaces the agent's work touches (a component over ctx alone): those of what its task and needs cite
-  and of their proofs, each the names the task cites or its proofs call and the form that reads its ns form
-  and definitions (seon.context/namespaces-of), a part (its data, :seon.context/namespaces:
-  docs/render.md#a-part-answers-data). It reads no db."
-  {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int] :any]}
-  [{c :seon.ctx/ctx} _aid]
-  (when (:task c)
-    (with-meta (context/namespaces-of c) {:seon.render/schema :seon.context/namespaces})))
 
 (declare standing)
 
@@ -1562,15 +1486,13 @@
   {:seon.render/list "p-task" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] [:maybe :int]] :any]}
   [{c :seon.ctx/ctx} aid]
   [:div {:id "p-task"}
-   (when (:task c) (list [#'task-data {:at [:task]} aid]
+   (when (:task c) (list [#'task {:at [:task]} aid]
                          ;; each thing its task, its needs and the agent cite, under one section, a part each, at the depth its cite asks
                          [#'citations {:at [:task :cites]} aid]
                          ;; each search its task and the agent hold, a part each, drawn on the branch's db
                          (for [[p k] (concat (for [e (keys (get-in c [:task :searches]))] [[:task :searches e] (str "task-" e)])
                                              (for [e (keys (get c :searches))] [[:searches e] (str "agent-" e)]))]
                            [#'searched {:at p} aid k])
-                         ;; where the code lives: each namespace the work touches, the names the task cites or its proofs call
-                         [#'namespaces {:at [:task]} aid]
                          ;; how the work stands: the proofs, the done rule's reasons, what the branch did (one diff)
                          [#'status {:at [:task]} aid]))
    ;; the run once it took a turn: before that it says only its id, which the task's names

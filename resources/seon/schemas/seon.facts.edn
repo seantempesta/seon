@@ -281,7 +281,7 @@
                                                 {[:seon.cite/task :by :seon.task/id :as :task] [:seon.task/id :seon.task/plan :seon.task/kind]}
                                                 {[:seon.cite/name :by :schema/key :as :schema] [*]}
                                                 {[:seon.cite/name :by :ns/name :as :ns] [:ns/name :ns/doc]}]
-                             :seon.cite/via-to-model false}
+                            }
                        [:seon.cite/id :seon.cite/id] [:seon.cite/of :seon.cite/of] [:seon.cite/depth :seon.cite/depth] [:seon.cite/order :seon.cite/order]
                        [:seon.cite/address {:optional true} :seon.cite/address] [:seon.cite/name {:optional true} :seon.cite/name] [:seon.cite/task {:optional true} :seon.cite/task]]
  ;; ---- tasks, runs, proof results, root's boot, turns and ends (session D1's proto.agents.facts.edn) ----
@@ -328,7 +328,7 @@
  ;; the declaration a task file last stated for this task (seon.task/load-tx), as EDN
  :seon.task/declared :string
  ;; config keys are attributes of the task, by their own names (schemas: seon.config.agent.edn, seon.config.merge.edn)
- :seon.task/task-fact [:map {:seon.db/attributes true :seon.ctx/pattern [* {[:seon.task/proofs :by :var/name :as :proved] :seon.db/var-fact} {[:seon.task/needs :as :needs] [* {[:seon.task/proofs :by :var/name :as :proved] :seon.db/var-fact} {[:seon.cite/_of :as :cites] :seon.cite/cite-fact}]} {[:seon.cite/_of :as :cites] :seon.cite/cite-fact} {[:seon.search/_of :as :searches] :seon.search/search-fact} {[:seon.task/examples :as :examples] [:seon.agent/key :seon.agent/description {[:seon.eval/_agent :as :evals] [*]}]}] :seon.render/html seon.render.ui/task :seon.render/model seon.render.ui/task-model}
+ :seon.task/task-fact [:map {:seon.db/attributes true :seon.ctx/pattern [* {[:seon.task/proofs :by :var/name :as :proved] :seon.db/var-fact} {[:seon.task/needs :as :needs] [* {[:seon.task/proofs :by :var/name :as :proved] :seon.db/var-fact} {[:seon.cite/_of :as :cites] :seon.cite/cite-fact}]} {[:seon.cite/_of :as :cites] :seon.cite/cite-fact} {[:seon.search/_of :as :searches] :seon.search/search-fact} {[:seon.task/examples :as :examples] [:seon.agent/key :seon.agent/description {[:seon.eval/_agent :as :evals] [*]}]}] :seon.render/html seon.render.ui/task-view}
                           [:seon.task/id :seon.task/id] [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name]
                           [:seon.task/plan :seon.task/plan] [:seon.task/execution :seon.task/execution]
                           [:seon.task/branch :seon.task/branch] [:seon.task/kind :seon.task/kind]
