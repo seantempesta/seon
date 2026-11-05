@@ -30,9 +30,9 @@ Asked whether the debug page should draw history with today's renders plus a has
 
 "Nothing we should be rendering should be huge or should be repeatedly changing dramatically. That's a failure of the render functions and the system for generating noise. Find and fix those don't blame the system."
 
-### There are no rows, and nothing is quadratic (owner, 2026-11-05)
+### Data is entities with attributes, and nothing is quadratic (owner, 2026-11-05)
 
-"There are no rows. ... Datomic like systems have entities and they have any number of attributes and values. That's what makes something a thing. An agent has turns, it has evals, it's just data." And: "Nothing should require N^2 because we are progressively building things if we aren't then again it's the wrong design."
+"There are no rows. ... Datomic like systems have entities and they have any number of attributes and values. That's what makes something a thing. An agent has turns, it has evals, it's just data." And: "Nothing should require N^2 because we are progressively building things if we aren't then again it's the wrong design." And: "find and remove all \"row\" references and instill proper data modeling understanding for datahike entities and the relationships and how to properly query and store data efficiently". Stated in [data modeling](data-modeling.md).
 
 ## 2026-11-04 rulings
 
@@ -56,11 +56,11 @@ The owner's rulings of 2026-11-04, on what an agent is and how everything it rea
 
 ### The data's shape is ours, batteries included (owner, 2026-11-04)
 
-"You can change how data is connected to each other and rename it and change directions on what is ref'ing what. We have full control so make a system that will work generally and optimally one way and make it so it's easier to build things the optimal way ... This isn't do anything you want it's a more rails style batteries included but you follow these constraints." Stated in: [storage](storage.md#store-data-for-how-it-is-used).
+"You can change how data is connected to each other and rename it and change directions on what is ref'ing what. We have full control so make a system that will work generally and optimally one way and make it so it's easier to build things the optimal way ... This isn't do anything you want it's a more rails style batteries included but you follow these constraints." Stated in: [data modeling](data-modeling.md).
 
 ### Store data for how it is used; a turn is a number (owner, 2026-11-04)
 
-"Whatever data we need you can store it any way you need to to retrieve it efficiently. That's how these databases work best. You plan ahead for how you want to use it and make sure that's easy and cheap". And: "I'm saying \"wtf is a turn\" but a number? An agent has turns and evals why are we organizing them on top of other entities". Stated in: [storage](storage.md#store-data-for-how-it-is-used), [turn](turn.md#the-turn-is-a-number).
+"Whatever data we need you can store it any way you need to to retrieve it efficiently. That's how these databases work best. You plan ahead for how you want to use it and make sure that's easy and cheap". And: "I'm saying \"wtf is a turn\" but a number? An agent has turns and evals why are we organizing them on top of other entities". Stated in: [data modeling](data-modeling.md#things-relate-by-refs), [turn](turn.md#the-turn-is-a-number).
 
 ### A render asks for the db and queries what it wants (owner, 2026-11-04)
 

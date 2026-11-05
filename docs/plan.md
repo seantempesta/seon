@@ -23,14 +23,13 @@ What Seon is for, where it stands, the one step being worked now, and the steps 
 
 **The order now:**
 1. ~~**The simpler schema**~~, merged 2026-11-05: evals as attributes with ``:printed`` gone; a turn as a number, with the model call holding what a turn held; no runs, ``:seon.end`` or turn entities. Root sets judged attributes on the task; a task's earlier states are the db's history; an agent's records stay on its branch. ``runs/store`` was erased at its merge ([decisions](decisions.md)). 616a5224c7 is the control the core compares against.
-2. **The conversion,** ordered by the owner, 2026-11-05 ("schedule all fixes and get this converted. Name changes too. I don't want these old ideas to come back and haunt us again"), one merge each, each with its proofs and numbers:
-   1. ``seon.render/a-step-costs-what-changed``: a component per turn number, one match of datoms to readers.
-   2. ``seon.context/renders-show-what-the-agent-needs``: the renders that are large or change without news.
-   3. ``seon.render/the-render-is-an-eval``: the hiccup, named and without CSS, is an eval at turn 0, and what changed another.
-   4. ``seon.context/the-context-is-records``: the context is records in turn order; ``seon.context/request`` and its assembly go; the debug page steps through what is recorded.
-   5. ``seon.context/teaching-is-data``: what teaches an agent is data on it or an eval; no special case for citing.
-   6. ``seon.problems/the-names-change``: the names change, and every doc and open task reads in them.
-   7. ``seon.context/context-makes-agents-better``: the six-task comparison decides whether it worked.
+2. **The conversion,** ordered by the owner, 2026-11-05 ("schedule all fixes and get this converted. Name changes too"; "I want correctness and agents getting the context they need to work with minimal exploratory work and mistakes and minimum turns"), one merge each. Judge each by what an agent reads and by turns to green; a cost that is not pathological is left for later.
+   1. ``seon.render/a-step-costs-what-changed``: a component per turn number, datoms matched once, a member joining costs that member (proved, on its branch).
+   2. ``seon.context/renders-show-what-the-agent-needs`` and ``seon.render/the-render-is-an-eval``, together, from ``jolt/render-core``: each render speaks to the agent and names itself, with no CSS, an eval at turn 0 and an eval of what changed.
+   3. ``seon.context/the-context-is-records``: the context is records in turn order; ``seon.context/request`` and its assembly go; the debug page steps through what is recorded.
+   4. ``seon.context/teaching-is-data``: what teaches an agent is data on it or an eval; no special case for citing.
+   5. ``seon.problems/the-names-change``: the names change, code included, and every doc and open task reads in them.
+   6. ``seon.context/context-makes-agents-better``: real tasks decide whether it worked.
 3. **Beside it:** page controls for delete, compact, forget and reset; reset through the writer; a browser spike for an image of the page an agent changing the layout can ask for.
 
 A task holds how its work stands and ended ([reconcile](reconcile.md#a-task-holds-how-its-work-ended)).
