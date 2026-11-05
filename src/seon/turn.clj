@@ -430,6 +430,7 @@
         ;; the agent's own budget (:seon.agent/max-turns on main, raised to extend it; root passes it) bounds the loop, and is
         ;; the cap its page's turn line reads (seon.render.ui/agent-state)
         max-turns (:max-turns arg)
+        _ (swap! agent/state assoc :max-turns max-turns)
         _ (when-not (= max-turns (:seon.agent/max-turns (d/entity (agent/db) [:seon.agent/key (:key @agent/state)])))
             (agent/transact! [{:seon.agent/key (:key @agent/state) :seon.agent/max-turns max-turns}]))
         t0-task (task/task (agent/db) task)

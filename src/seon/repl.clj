@@ -748,7 +748,10 @@
                 ;; again, and ctx rebuilt by the state's watch (docs/merging.md#a-test-child-is-a-fork-of-a-live-agent)
                 answered (fn [] (when (and (:db before) (nil? (:db @agent/state))) (reset! agent/state (dissoc before :walk)))
                                (let [r (again code (cond-> (repaired (response @answers handle) req)
-                                                      (:ns @agent/state) (assoc :ns (ns-name (:ns @agent/state))))
+                                                      (:ns @agent/state) (assoc :ns (ns-name (:ns @agent/state)))
+                                                      ;; how far through its turns the agent is, on the answer it reads: a record's bytes never move
+                                                      ;; (docs/render.md#the-agents-turn)
+                                                      (:max-turns @agent/state) (assoc :turn (str (agent/turn-now) " of " (:max-turns @agent/state))))
                                            req)
                                       rec (record-details code r req)]
                                   [r rec (when-not (#{:model :insert} (:origin req)) (text-of rec))]))
