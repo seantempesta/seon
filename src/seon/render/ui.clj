@@ -1130,54 +1130,34 @@
   (when (:task c)
     (with-meta (context/namespaces-of c) {:seon.render/schema :seon.context/namespaces})))
 
-(defn- changed
-  "What agent record c's evals changed of its branch's program, each name once, oldest first: what each
-  recorded (a var, an ns form's namespace), edited (seon.repl/edit!) or unmapped, read from its :evals as ctx
-  holds them (docs/ctx.md#the-pattern); evals removed from the record are not counted. See
-  docs/render.md#a-part-answers-data."
-  {:malli/schema [:=> [:cat :map] [:vector :symbol]]}
-  [c]
-  (into [] (distinct)
-        (for [[_ e] (reverse (seq (:evals c)))
-              s (concat (ratom/realize (get-in e [:seon.eval/response :recorded])) (some-> (ratom/realize (get-in e [:seon.eval/response :edited :var])) vector)
-                        (ratom/realize (get-in e [:seon.eval/response :unmapped])))
-              :when (symbol? s)]
-          s)))
-
 (defn run-head
-  "The agent's turn line (a component over ctx): its relevant attributes and the model calls it made, from
-  the agent's record (its status, branch and turn cap, its turns), beside the turn what its evals changed
-  of the branch's program (`changed`), and that its last reply was cut, when it was: the conversation's part of where the
-  agent stands (the work's is seon.render.ui/status)."
+  "The agent's turn line (a component over ctx): its turn of its cap, the namespace its REPL is in, and that its last reply
+  was cut, when it was (the reply of its model call that answered last: this turn's, else the turn before's, which the request
+  being made follows). See docs/render.md#a-part-answers-data."
   {:seon.render/style tile-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int] :any]}
   [{c :seon.ctx/ctx db :seon.db/db} aid]
-  (let [;; its cap: the agent's own (raised to extend it), as the turn loop reads it
-        cap (ratom/realize (:seon.agent/max-turns c))
-        n (count (:calls c))
-        ;; the tokens its requests sent so far, the provider's counts summed (each request the whole context then)
-        sent (d/q '[:find (sum ?k) . :with ?m :in $ ?a :where [?m :seon.model-call/agent ?a] [?m :seon.model-call/tokens ?k]] db aid)
-        ;; the namespace the REPL is in: the one its newest eval left it in
-        in-ns (context/current-ns c)
-        ;; what its evals changed of the branch's program
-        ch (changed c)]
-    ;; a part: the page draws it by run-html, the model is sent the value (docs/render.md#a-part-answers-data); this
-    ;; turn's number (its record is written before its page is drawn), of the cap, and a cut reply
+  (let [cap (ratom/realize (:seon.agent/max-turns c))
+        n (or (ratom/realize (:seon.agent/turn c)) 0)
+        k (ratom/realize (:seon.agent/key c))
+        call-of (fn [i] (when k (seon.db/eid db :seon.model-call/id (str k "/" i))))
+        ;; its last reply: this turn's call once it answered (:seon.model-call/ms is written with its reply), else the turn before's,
+        ;; which the request being made in this turn follows
+        call (let [now (call-of n)] (if (and now (seq (d/datoms db :eavt now :seon.model-call/ms))) now (call-of (dec n))))
+        in-ns (context/current-ns c)]
+    ;; a part: the page draws it by run-html, the model is sent the value (docs/render.md#a-part-answers-data)
     (with-meta (cond-> {:turn (if cap (str n " of " cap) n)}
-                 (seq ch) (assoc :changed ch)
                  in-ns (assoc :ns in-ns)
-                 sent (assoc :tokens-sent sent)
-                 (some-> (:calls c) vals first ratom/realize :seon.model-call/truncated)
+                 (and call (seq (d/datoms db :eavt call :seon.model-call/truncated)))
                  (assoc :your-last-reply "cut at the model's token limit: what followed the cut was lost. Answer with less: one change at a time."))
       {:seon.render/schema :seon.context/run})))
 
 (defn run-html
   "The turn line as the page shows it (the declared html render of :seon.context/run; the model is sent the
-  value): its turn of its cap, the namespace its REPL is in, the tokens it sent in all, a cut reply. See docs/render.md#a-part-answers-data."
+  value): its turn of its cap, the namespace its REPL is in, a cut reply. See docs/render.md#a-part-answers-data."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
-  [_opts {:keys [turn changed ns tokens-sent your-last-reply]}]
+  [_opts {:keys [turn ns your-last-reply]}]
   [:section
-   [:p (str "turn " turn (when (seq changed) (str " · " (count changed) (if (next changed) " changes" " change")))
-            (when ns (str " · in " ns)) (when tokens-sent (str " · " (print/tokens-text tokens-sent) " sent in all")))]
+   [:p (str "turn " turn (when ns (str " · in " ns)))]
    (when your-last-reply [:p {:class "err"} (str "your last reply was " your-last-reply)])])
 
 (defn own-problems
@@ -1291,15 +1271,6 @@
        [:div [:p [:code (str t)]] (render/html {} (first fs))])
      (when (seq died) [:p "died: " (for [t died] [:code (str t) " "])])]))
 
-(defn eval-tile
-  "An eval whose value has a render of its own (a component over ctx): that value, by it (its own,
-  or the schema its record names: seon.repl/record-details)."
-  {:seon.render/style tile-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int] :any]}
-  [{c :seon.ctx/ctx} eid]
-  (let [k (ratom/realize (get-in c [:evals eid :seon.eval/schema]))]
-    [:section
-     (render/html (if k {:schema k} {}) (ratom/realize (get-in c [:evals eid :seon.eval/response :value])))]))
-
 (defn- id-set
   "The keys of join m (a member map of ctx, read through its view) as a set: one read of its key set, its
   members not each made a view as a walk of its entries makes them (seon.ratom)."
@@ -1326,35 +1297,18 @@
                 [[n 1 0] e])]
     (map second (sort-by first (concat evals msgs calls)))))
 
-(defn- turn-evals
-  "The evals of each model call of ctx c, {call-eid [eval-eid ...]}, over its conversation (conv, when the
-  caller has it, else `conversation`): a model's eval (its record names the provider's call id) is its call's, the one
-  of its turn number (:seon.eval/turn is :seon.model-call/n), so a call holds its evals as they arrive, live. See
-  docs/render.md#the-page."
-  {:malli/schema [:function [:=> [:cat :map :seon.host/db] [:map-of :int [:vector :int]]]
-                  [:=> [:cat :map :seon.host/db [:sequential :int]] [:map-of :int [:vector :int]]]]}
-  ([c db] (turn-evals c db (conversation c db)))
-  ([c db conv]
-  (let [by-n (into {} (for [[e v] (:calls c) :when (= :model (:seon.model-call/origin v))] [(ratom/realize (:seon.model-call/n v)) e]))
-        ;; the record's one key, read by its path (a realize reads the whole eval, its opened flag too: the layout would run again for an eval opened)
-        turn-of (fn [id] (when (get-in c [:evals id :seon.eval/call-id]) (ratom/realize (get-in c [:evals id :seon.eval/turn]))))
-        ev? (id-set (:evals c))
-        evals (group-by turn-of (filter ev? conv))]
-    (into {} (for [[n e] by-n] [e (vec (get evals n))])))))
-
 (defn chat-turn
-  "A model turn as the chat shows it (a component over ctx and the db), a message on the left as a
+  "A model turn as the chat shows it (a component over ctx and the db, given its evals), a message on the left as a
   person reads a chat (owner: \"Does that look like a friendly chat window that my mom could
   use?\"): its reply's prose, then its evals folded into one quiet line (how many steps, how long they
   ran, any that failed), opened to one line each (`eval-item`); its thinking folded; a small footer
   with its turn and the tokens its request sent, the provider's count on its model call
   (:seon.model-call/tokens: the whole context at that turn). See docs/render.md#the-page."
-  {:seon.render/style "max-w-[85%] self-start rounded-2xl rounded-tl-sm bg-base-900 px-4 py-2.5 text-text-100" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int :int] :any]}
-  [{c :seon.ctx/ctx db :seon.db/db} _aid eid]
+  {:seon.render/style "max-w-[85%] self-start rounded-2xl rounded-tl-sm bg-base-900 px-4 py-2.5 text-text-100" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int :int [:sequential :int]] :any]}
+  [{c :seon.ctx/ctx db :seon.db/db} _aid eid evals]
   (let [t (get-in c [:calls eid])
         [reply reasoning n] (map #(ratom/realize (get t %)) [:seon.model-call/reply :seon.model-call/reasoning :seon.model-call/n])
-        evals (get (turn-evals c db) eid [])
-        recs (map #(some-> (get-in c [:evals %]) ratom/realize :seon.eval/response) evals)
+        recs (map #(some-> (get-in c [:evals % :seon.eval/response]) ratom/realize) evals)
         failed (count (filter #(or (:ex %) (contract/error? (ratom/realize (:value %)))) recs))
         ms (reduce + 0 (keep :ms recs))
         tokens (d/q '[:find ?k . :in $ ?m :where [?m :seon.model-call/tokens ?k]] db eid)]
@@ -1476,41 +1430,76 @@
                          [#'namespaces {} aid]
                          ;; how the work stands: the proofs, the done rule's reasons, what the branch did (one diff)
                          [#'status {} aid]))
-   ;; the run once it took a turn: before that it says only its id, which the task's names
-   (when (seq (:calls c)) [#'run-head {} aid])
+   ;; the turn line once it took a turn
+   (when (pos? (or (ratom/realize (:seon.agent/turn c)) 0)) [#'run-head {} aid])
    (when aid [#'own-problems {} aid])
    (when (seq (added-keys c)) [#'ctx-keys {}])])
 
+(defn conversation-turn
+  "Turn n of agent aid as the chat shows it: the messages it took, its model call with the evals it ran, and the evals of
+  other hands, found by their turn number in the index, so a record of another turn touches nothing this read and an
+  earlier turn never runs again. Each record says which agent's it is, for a store that holds several. See
+  docs/render.md#the-page."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int :int] :any]}
+  [{c :seon.ctx/ctx db :seon.db/db} aid n]
+  (let [mine (fn [turn-attr agent-attr] (vec (for [d (d/datoms db :avet turn-attr n) :when (seq (d/datoms db :eavt (:e d) agent-attr aid))] (:e d))))
+        msgs (mine :seon.message/turn :seon.message/agent)
+        issue (fn [e] (or (some-> (re-find #"\d+$" (:v (first (d/datoms db :eavt e :seon.eval/id)))) parse-long) 0))
+        evs (sort-by issue (mine :seon.eval/turn :seon.eval/agent))
+        model? (fn [e] (seq (d/datoms db :eavt e :seon.eval/call-id)))
+        call (when-let [k (ratom/realize (:seon.agent/key c))] (seon.db/eid db :seon.model-call/id (str k "/" n)))
+        others (if call (remove model? evs) evs)
+        loop? (fn [e] (context/loop-eval? (:seon.agent/id c) (get-in c [:evals e])))]
+    (when (or (seq msgs) call (seq evs))
+      (into [:div {:class "seon-stack"}]
+            (concat (for [m msgs] [#'chat-message {} aid m])
+                    (when call [[#'chat-turn {} aid call (filterv model? evs)]])
+                    (for [e others :when (not (loop? e))] [#'eval-item {} e]))))))
+
 (defn conversation-list
-  "The conversation of an agent's page (c-rows, the chat a person reads), agent aid's: the run's model calls as their
-  replies (chat-turn), its evals as lines that open (eval-item) and its messages as bubbles (chat-message), in
-  the order they were written, then how the run stands (chat-end) (`render-ctx`). See docs/render.md#the-page."
-  {:seon.render/list "c-rows" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] [:maybe :int]] :any]}
-  [{c :seon.ctx/ctx db :seon.db/db} aid]
-  (let [evals (:evals c)
-        conv (conversation c db)
-        ev? (id-set evals)
-        tu? (id-set (:calls c))
-        ;; a model's evals are drawn in their turn's message, not again in the list
-        in-turn (into #{} cat (vals (turn-evals c db conv)))
-        ;; the agent's own loop is the chat's start and end cards, not a row
-        loop? (fn [id] (context/loop-eval? (:seon.agent/id c) (get-in c [:evals id])))]
-    [:ol {:id "c-rows"}
-     (when (:task c) [#'chat-ask {} aid])
-     (when aid [#'chat-start {} aid])
-     (for [id conv :when (and (not (in-turn id)) (not (loop? id)))] (cond (ev? id) [#'eval-item {} id] (tu? id) [#'chat-turn {} aid id] :else [#'chat-message {} aid id]))
-     (when aid [#'chat-end {} aid])]))
+  "The conversation of an agent's page (c-rows, the chat a person reads), agent aid's: what was asked, a component for each
+  of its turn numbers (`conversation-turn`), then how it stands (chat-end) (`render-ctx`). It reads the agent's turn and
+  nothing of its records, so a new eval runs its turn alone. See docs/render.md#the-page."
+  {:seon.render/list "c-rows" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] [:maybe :int]] :any]}
+  [{c :seon.ctx/ctx} aid]
+  [:ol {:id "c-rows"}
+   (when (:task c) [#'chat-ask {} aid])
+   (when aid [#'chat-start {} aid])
+   (when aid (for [n (range 0 (inc (or (ratom/realize (:seon.agent/turn c)) 0)))] [#'conversation-turn {} aid n]))
+   (when aid [#'chat-end {} aid])])
+
+(defn eval-tile
+  "An eval whose value has a render of its own (a component over ctx): that value, by it (its own,
+  or the schema its record names: seon.repl/record-details)."
+  {:seon.render/style tile-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int] :any]}
+  [{c :seon.ctx/ctx} eid]
+  (let [k (ratom/realize (get-in c [:evals eid :seon.eval/schema]))]
+    [:section
+     (render/html (if k {:schema k} {}) (ratom/realize (get-in c [:evals eid :seon.eval/response :value])))]))
+
+(defn turn-tiles
+  "The tiles of turn n of agent aid: each of its evals whose value has a render of its own, newest first, found by the turn's
+  number, so another turn's eval reads nothing this read, and decided by the value as it is drawn, so a render defined later
+  counts. See docs/render.md#the-page."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int :int] :any]}
+  [{c :seon.ctx/ctx db :seon.db/db} aid n]
+  (let [tiled (for [d (reverse (d/datoms db :avet :seon.eval/turn n))
+                    :when (seq (d/datoms db :eavt (:e d) :seon.eval/agent aid))
+                    :let [v (ratom/realize (get-in c [:evals (:e d) :seon.eval/response :value]))
+                          k (ratom/realize (get-in c [:evals (:e d) :seon.eval/schema]))]
+                    :when (and (some? v) (render/render-of v k))]
+                [#'eval-tile {} (:e d)])]
+    (when (seq tiled) (into [:div] tiled))))
 
 (defn tiles
-  "The tiles of an agent's page (p-tiles), agent aid's: its task's example sessions, then each eval whose value
-  has a render of its own, newest first (`render-ctx`). See docs/render.md#the-page."
+  "The tiles of an agent's page (p-tiles), agent aid's: its task's example sessions, then each turn's, newest turn first
+  (`turn-tiles`, `render-ctx`). See docs/render.md#the-page."
   {:seon.render/list "p-tiles" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] [:maybe :int]] :any]}
   [{c :seon.ctx/ctx} aid]
   [:aside {:id "p-tiles"}
    ;; placed on every page: the render cache runs a component once and again only when what it reads changes, so a page whose task names no examples pays nothing
    [#'examples {} aid]
-   (for [[id e] (:evals c) :let [v (get-in e [:seon.eval/response :value]) k (:seon.eval/schema e)] :when (and (some? v) (render/render-of (ratom/realize v) k))]
-     [#'eval-tile {} id])])
+   (when aid (for [n (range (or (ratom/realize (:seon.agent/turn c)) 0) -1 -1)] [#'turn-tiles {} aid n]))])
 
 (def ^:private task-stands
   "How a task's :seon.task/outcome reads to a person: [words tone]. :parked and :told are woken by a message (seon.reconcile/park-outcomes);
