@@ -587,9 +587,15 @@
   {:malli/schema [:=> [:cat :map] :map]}
   [w] @(:ledger w))
 
+(defn- size
+  "The characters x holds, as the one sizer counts them: its strings and the text of its other leaves, a mark for each collection
+  and nothing printed: an estimate of what is shown, not a text made."
+  {:malli/schema [:=> [:cat :any] nat-int?]}
+  [x] (cond (coll? x) (reduce + 1 (map size x)) (nil? x) 0 :else (count (str x))))
+
 (defn tree
   "What draws what in walk w, from its root, as data that chains and prints nothing: each component its cache holds as
-  {:fn the render's name, :args what it was called with, :id its element id, :tokens the one sizer's over its own output
+  {:fn the render's name, :args what it was called with, :id its element id, :tokens the one sizer's over the characters of its own output
   (its children stand there as markers: their output is theirs), :reads? true when it read the db, :children
   [those it drew, in order]}. Whatever has been drawn so far: a walk of the lists a reader asked for draws no others. Nil
   for a walk not yet flushed. An agent's own is `my.render/tree`; root's draws of a branch (`draw`) answer alike. See
@@ -600,7 +606,7 @@
         node (fn node [k]
                (when-let [c (get cache k)]
                  (cond-> {:fn (symbol (:f c)) :args (:args c) :id (:id c)
-                          :tokens (select/chars-tokens (count (pr-str (:out c))))
+                          :tokens (select/chars-tokens (size (:out c)))
                           :children (into [] (keep node) (:children c))}
                    (seq (:reads c)) (assoc :reads? true))))]
     (some-> @(:out w) node)))
