@@ -138,7 +138,7 @@
   entities), then each send of the inbox (another agent's, root's request) as a message fact of its
   own. Each is :seon.message/agent's, so its presence on the branch is its delivery and the record's
   messages read it (seon.context/records); nothing is held for the turn's basis. An effect's outcome
-  (:from :fx) is no message: its fact is the effect's (seon.agent/fx-record!). A read that is not the
+  (:from :fx) is no message: the eval that asked holds its answer. A read that is not the
   run's turn (take? false: an observer's read of an agent its model drives) takes nothing."
   {:malli/schema [:=> [:cat :boolean nat-int?] :nil]}
   [take? n]

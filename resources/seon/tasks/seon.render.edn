@@ -55,7 +55,7 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.render-test/the-config-panel-names-each-source}}
  {:seon.task/name "spend-has-a-render"
-  :seon.task/plan "What exists: what the effect owner spent (the fx proc's :spent per budget key, :seon.fx/cost facts) is shown nowhere; the page sums run tokens only. Correct: a named spend value with ai and html renders, on the page and at root's REPL."
+  :seon.task/plan "What exists: what the effect owner spent (the fx proc's :spent per budget key) is shown nowhere; the page sums run tokens only. Correct: a named spend value with ai and html renders, on the page and at root's REPL."
   :seon.task/kind :work
   :seon.task/proofs #{seon.render-test/spend-reads-by-its-render}}
  {:seon.task/name "namespace-agent-debug-and-data-pages"

@@ -1558,14 +1558,9 @@
                                 (is (= {:value 7} (binding [seon.agent/*fx-stub* (fn [_ _] {:value 7})] (my.fx/call :echo {:x 1})))))")
                           (select-keys @(c/run-tests! sys a) [:pass :fail :error]))
            :file-text (slurp (str dir "/b.txt"))}
-        bdb (:db @(c/branch-db sys :fx1))
-        recs (d/q '[:find ?k (count ?e) :where [?e :seon.fx/kind ?k]] bdb)
-        q (d/q '[:find [?q ...] :where [?e :seon.fx/kind :echo] [?e :seon.fx/queue-us ?q]] bdb)
-        us (d/q '[:find [?q ...] :where [?e :seon.fx/kind :echo] [?e :seon.fx/us ?q]] bdb)
         echo-ping (ping sys :fx/echo)]
       (seon.fx/remove-tree! dir)
-      {:report (assoc r :recorded (into {} recs) :echo-queue-us (lib/summ (vec q)) :echo-perform-us (lib/summ (vec us))
-                      :owner-ping echo-ping :load (clojure.string/trim (:out (clojure.java.shell/sh "uptime"))))
+      {:report (assoc r :owner-ping echo-ping :load (clojure.string/trim (:out (clojure.java.shell/sh "uptime"))))
        ;; the effect answered, its unknown kind is a typed error, and inside the test fork a
        ;; call is refused unless stubbed (both assertions ran and passed)
        :checks {:unknown-kind-is-typed (= ":seon.fx/unknown-kind" (:unknown r)) :test-fork-refuses-unless-stubbed (= {:pass 2 :fail 0 :error 0} (:test-fork r))}}))))
