@@ -59,6 +59,19 @@ A task holds how its work stands and ended ([reconcile](reconcile.md#a-task-hold
 | Beside the core | Reset forks by hand: not through the writer, no turn loop from the reconciler, not at any eval; cutting between two calls of one reply is untried | ``seon.agent/reset-an-agent-to-any-point`` |
 | Beside the core | A proof child's death says nothing | ``seon.agent/a-proof-child-that-died-says-why`` |
 | Beside the core | A re-registered attribute of another type is refused only at the write | ``seon.db/registering-says-a-type-cannot-change`` |
+| Now, known broken (2026-11-05) | What an agent reads is raw data and doesn't explain itself: citations are maps, status has no real render, words on the page are internal | ``jolt/render-core``, unmerged |
+| Now, known broken | Rebuilt requests mix in later state, so the page saying "as it went on the wire" isn't true: ``seon.context/request`` draws the page from the db it's given, not the turn's basis | not fixed; Optimization |
+| Now, known broken | Text is clipped outside the one printer: ``seon.ref/lead-sentence``, ``:summary`` depth, "(+N more)", ``subs`` in renders. ``docs/render.md#no-clipping`` already forbids it | render path on ``jolt/render-core``; the rest unstarted |
+| Now, known broken | ``edit!``'s balance accounting wasted ref 11 turns | on ``jolt/delete-unread``, with repair through the forgiving reader on ``jolt/forgiving-tools`` |
+| Now, known broken | Clojure's own forms fail or answer nothing: ``source``, ``source-fn`` and ``pst`` missing on root; ``(doc nope)`` blank; ``(help)`` isn't the system message | ``jolt/forgiving-tools``, review found ``help`` callers broken |
+| Now, known broken | Handles are a counter, and a repeated answer is sent again whole | ``jolt/handle-names-value``, review found host values sharing a handle |
+| Now, known broken | Agents go quiet and stop writing: silent at call 2 wrote in 2 of 5 fresh sessions against 27 of 27 with text, nearly all on one task. The cause isn't known. The prompt line is on main at 7baa40440d, not yet seen working | watch live runs |
+| Now, known broken | Breadth, ref and method-key have never merged, so half the benchmark can't show improvement | not investigated |
+| Now, known broken | The session list reads every key when it draws, with no cost proof | not filed; said in the merge message of 02dd5f568f |
+| Now, known broken | 15 Jolt gates fail on the base pin too; a red the same as before isn't green | ``jolt.host/the-gates-red-before-the-alias-pin``, with the pin |
+| Now, known broken | About 23 attributes are named at most once in src, likely written and never read | Optimization to check and delete |
+| Now, known broken | ``jolt/render-core`` adds mechanisms that break the one way (``docs/seon-way.md``): a tail placement (``:seon.render/place``, ``[:tail ...]``), ``:seon.render/parts``, ``part-rank``. The turn line and order should be the pull and a render | to remove or put to the owner |
+| Now, known broken | Nothing merged: ``history``, ``my.db/at`` (owner hasn't said), ``jolt/insert-and-run``, an opening of inserted evals gave 0 of 6 replies with text on the one shape tried | open |
 | After | History across all kept branches grows without a measure (``seon.union``) | ``seon.db/history-across-kept-branches-is-measured`` |
 | Each merge | The standing root misses merges while the main tree is on a topic branch (``bin/update``) | update it at each merge of the schema work |
 
