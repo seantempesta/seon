@@ -272,47 +272,6 @@
           [st2 _] (#'seon.render.proc/pass-view (assoc st1 :main-db (:db-after r)) :a1)]
       (clojure.test/is (= 1 (- (get-in st2 [:counts :rendered]) (get-in st1 [:counts :rendered]))) (str n " rows: the agent's head rendered, nothing else")))))
 
-(defn change-of
-  "The input of size n: an agent's page walked live (seon.render/walker over a reactive atom holding
-  its ctx: n evals, each a record of a short form and its value, by eid newest first, as
-  seon.ctx/build holds them) and drawn once, then one eval's value changed (the atom reset! as the
-  patch does, the eval's component queued by its reaction): what flush! draws."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :map :seon.host/deref]]}
-  [n]
-  (let [evals (#'seon.ctx/members-map
-                    (for [i (range n) :let [id (str "e" i)]]
-                      [(+ 10 i) {:db/id (+ 10 i) :seon.eval/id id :seon.eval/by "a1"
-                                 :seon.eval/code (str "(inc " i ")") :seon.eval/response {:handle (symbol "result" id) :value (inc i)}}]))
-        a (seon.ratom/atom {:db/id 1 :seon.agent/key "b/a1" :seon.agent/id :a1 :evals evals})
-        w (seon.render/walker {:ref a :changes seon.ctx/changes} (constantly (ts/test-db)) [(requiring-resolve (seon.render/declared :seon.render/render-ctx)) {}])]
-    (seon.render/flush! w nil)
-    [w a]))
-
-(defn redraw!
-  "One change drawn: eval 10 opened or closed in the atom (each call a change, as a patch reset!s ctx:
-  each component watching it asked whether one of its read paths moved), then the walk's frame: what it redrew."
-  {:malli/schema [:=> [:cat :map :seon.host/deref] [:map-of [:vector :any] [:enum :miss :same]]]}
-  [w a]
-  (swap! a update-in [:evals 10 :seon.eval/opened] not)
-  (seon.render/flush! w nil))
-
-(deftest a-change-costs-its-components
-  ;; task seon.render/a-page-is-its-components: a change draws the components whose read paths it
-  ;; reaches, and nothing else of the page
-  (cost/proof
-    {:of 'seon.render-cost-test/redraw! :input 'seon.render-cost-test/change-of
-     :n "evals in the agent's ctx"
-     :work (str "the one eval's component, drawn again (its record printed in one line), and nothing else: the "
-                "layout's reads (the evals' ids and their values) are not reached by an eval opened. The reset! runs "
-                "ctx's diff once (seon.ctx/changes) and looks up the components its changed paths reach by index: the "
-                "walk's part is flat (137 contracted calls, about 100 KB, measured 100 to 4,000); the diff walks every "
-                "key of the changed collection, about 3.2 KB an eval (seon.ctx/changes alone: 268 KB at 100, 12.8 MB "
-                "at 4,000), which is linear")
-     :growth :linear
-     :per-n {:calls 0 :bytes 3400}
-     :fixed {:calls 235 :bytes 150000}
-     :sizes [100 300 1000 4000]}))
-
 (defn step-of
   "The input of size n: a kept walk of an agent's page (as seon.render.proc/kept-walk holds one) drawn over n-1 of its turns, each
   as production writes it (docs/turn.md#the-turn-is-a-number: its model call and reply, an eval the call ran, and every third turn a message
@@ -346,6 +305,36 @@
   {:malli/schema [:=> [:cat :map :seon.host/db :seon.host/db] :map]}
   [kw db later]
   (-> kw (#'seon.render.proc/advance-walk! later :b identity) (#'seon.render.proc/advance-walk! db :b identity)))
+
+(defn change-of
+  "The input of size n: an agent's page kept over n turns as production writes them (`step-of`): its walk and the atom holding its
+  ctx, then one eval's value changed (the atom reset! as the patch does): what flush! draws."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :map :seon.host/deref]]}
+  [n]
+  (let [[kw] (step-of n)] [(:w kw) (:a kw)]))
+
+(defn redraw!
+  "One change drawn: an eval opened or closed in the atom (each call a change, as a patch reset!s ctx: each component watching it
+  asked whether one of its read paths moved), then the walk's frame: what it redrew."
+  {:malli/schema [:=> [:cat :map :seon.host/deref] [:map-of [:vector :any] [:enum :miss :same]]]}
+  [w a]
+  (swap! a (fn [c] (update-in c [:evals (first (keys (:evals c))) :seon.eval/opened] not)))
+  (seon.render/flush! w nil))
+
+(deftest a-change-costs-its-components
+  ;; task seon.render/a-page-is-its-components: a change draws the components whose read paths it
+  ;; reaches, and nothing else of the page
+  (cost/proof
+    {:of 'seon.render-cost-test/redraw! :input 'seon.render-cost-test/change-of
+     :n "evals in the agent's ctx"
+     :work (str "the one eval's component and the turn holding it, drawn again, on real records, and nothing else: no other turn's "
+                "reads are reached by an eval opened. The reset! runs ctx's diff once (seon.ctx/changes) and looks up the components its "
+                "changed paths reach by index; the diff walks every key of the changed collection, which is linear. 367 contracted calls "
+                "at 100 turns, the owner's 2026-11-05: cull the calls later if the perf is bad")
+     :growth :linear
+     :per-n {:calls 0 :bytes 3400}
+     :fixed {:calls 375 :bytes 150000}
+     :sizes [100 300 1000]}))
 
 (deftest a-step-costs-what-changed
   ;; task seon.render/a-step-costs-what-changed (docs/render.md#a-page-is-a-kept-walk): one more turn draws its own component of the

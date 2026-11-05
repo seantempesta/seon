@@ -1317,7 +1317,7 @@
   [{c :seon.ctx/ctx db :seon.db/db} _aid eid evals]
   (let [t (get-in c [:calls eid])
         [reply reasoning n] (map #(ratom/realize (get t %)) [:seon.model-call/reply :seon.model-call/reasoning :seon.model-call/n])
-        recs (map #(some-> (get-in c [:evals %]) ratom/realize :seon.eval/response) evals)
+        recs (map #(some-> (get-in c [:evals % :seon.eval/response]) ratom/realize) evals)
         failed (count (filter #(or (:ex %) (contract/error? (ratom/realize (:value %)))) recs))
         ms (reduce + 0 (keep :ms recs))
         tokens (d/q '[:find ?k . :in $ ?m :where [?m :seon.model-call/tokens ?k]] db eid)]
