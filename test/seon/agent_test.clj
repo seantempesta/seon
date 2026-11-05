@@ -1238,7 +1238,7 @@
 (deftest a-call-is-prose-and-its-forms
   ;; owner, 2026-10-29: a call is prose and one or more forms, run in order; one with no prose or
   ;; no form answers a typed error as its one result and runs nothing (docs/prompt.md)
-  (let [problem #'seon.turn/call-problem]
+  (let [problem (ns-resolve 'seon.turn 'call-problem)]
     (is (nil? (problem "Add them." "(+ 1 2)")) "prose and one form")
     (is (= :no-intent (:problem (problem " " "(+ 1 2)"))) "no intent")
     (is (nil? (problem "Two." "(def a 1) (inc a)")) "two forms")
