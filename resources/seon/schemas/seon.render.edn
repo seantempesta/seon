@@ -22,6 +22,12 @@
  ;; a prove's run (my.agent/prove): its verdict, each proof's status, the reds with their first
  ;; failing assertion and the deaths, and counts (my.agent/prove-summary); the lists are the value
  :seon.test/proved [:map {:seon.render/model my.agent/prove-summary :seon.render/html seon.render.ui/proved}]
+ ;; what draws what in a walk (seon.render/tree, my.render/tree): a component and those it drew, each with its own output's
+ ;; tokens
+ :seon.render/tree [:map [:fn :symbol] [:args [:vector :any]] [:id :string] [:tokens nat-int?]
+                    [:reads? {:optional true} :boolean]
+                    ;; each child is a tree too; a recursive schema cannot be built by the registry (a [:ref] overflows its eager parse)
+                    [:children [:vector [:map [:fn :symbol] [:children [:vector :any]]]]]]
  ;; how a value is shown: in one line, as a full panel, a tile, a row of a list
  :seon.render/as [:enum :inline :block :tile :row]
  ;; a render's props (its second argument), every one optional: like React's, a render that

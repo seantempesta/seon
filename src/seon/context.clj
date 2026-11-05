@@ -738,16 +738,19 @@
   text and reasoning are its model call's `turn-messages`, and the provider's format folds a reply's messages into one),
   then its tool message, the response printed now (seon.print/record-text, a function of the
   eval alone, and of the db for an eval that names its basis: opts :db, `basis-value`, the same bytes cold as live);
+  an eval with prose and no call id was asked, not called (docs/turn.md#an-eval-can-be-inserted): its call is made here from its
+  own id, prose and code, standing alone (no reply to name, so a model's message is never edited), and no reader asks who asked;
   anyone else's (the user's) is one user message
   {:by :code :response}, the response spliced as printed. See docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
   {:malli/schema [:=> [:cat [:maybe :map] :map] [:vector :seon.model/message]]}
-  [opts {:seon.eval/keys [by code prose call-id basis turn] :as e}]
-  (let [text (print/record-text (cond-> e basis (assoc-in [:seon.eval/response :value] (basis-value (:db opts) e))) render/model)]
-    (if call-id
+  [opts {:seon.eval/keys [id by code prose call-id basis turn] :as e}]
+  (let [text (print/record-text (cond-> e basis (assoc-in [:seon.eval/response :value] (basis-value (:db opts) e))) render/model)
+        cid (or call-id (when-not (str/blank? prose) (str "eval-" id)))]
+    (if cid
       [(cond-> {:role "assistant" :content ""
-                :tool-calls [(cond-> {:id call-id :code code} prose (assoc :prose prose))]}
-         (pos? (or turn 0)) (assoc :reply turn))
-       {:role "tool" :tool-call-id call-id :content text}]
+                :tool-calls [(cond-> {:id cid :code code} prose (assoc :prose prose))]}
+         (and call-id (pos? (or turn 0))) (assoc :reply turn))
+       {:role "tool" :tool-call-id cid :content text}]
       [{:role "user" :content (str "{:by " (pr-str by) " :code " (pr-str code) " :response " text "}")}])))
 
 (defn message-messages

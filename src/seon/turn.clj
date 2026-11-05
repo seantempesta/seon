@@ -194,21 +194,6 @@
   (cond-> {:commit (d/commit-id (agent/db)) :task task :turn turn :max-turns max-turns :origin origin}
     merge? (assoc :merge? true)))
 
-(defn- call-problem
-  "Why an eval call, its prose and its code, is not the eval tool's shape, as the error its one
-  result is, or nil: a call is prose and one or more forms (docs/prompt.md).
-  Code that does not read is left to the REPL, whose read error says where."
-  {:malli/schema [:=> [:cat [:maybe :string] :string] [:maybe :seon.turn/invalid-call]]}
-  [prose code]
-  (let [forms (reader/read-text code 'user)]
-    (cond
-      (str/blank? prose)
-      (contract/error :seon.turn/invalid-call #'call-problem
-                      "this call has no prose: say in a sentence what its form does and what you expect; the form was not run" {:problem :no-prose})
-      (and forms (empty? forms))
-      (contract/error :seon.turn/invalid-call #'call-problem
-                      "this call has no form: its code is empty; nothing was run" {:problem :forms :forms 0}))))
-
 (defn- evaluated!
   "Code through the one REPL path (seon.repl/eval-string, req) and its record committed to the
   branch as it lands (seon.agent/commit!), so a page shows each eval then, not at the turn's end
@@ -327,24 +312,7 @@
             ;; reasoning are the model call's own (below), never copied onto an eval
             ;; a call with no prose or no form, or after one that threw or answered an error, is not run: its one
             ;; result says why (seon.repl/unrun, docs/prompt.md)
-            calls (reduce (fn [acc {:keys [id code prose]}]
-                            (let [;; the forgiving reader's repairs, told on this call's own result (:repaired)
-                                  {src :text repairs :repairs} (reader/forgive code)
-                                  ;; each call keeps its own prose
-                                  req (cond-> {:origin :model :call-id id}
-                                        (not (str/blank? prose)) (assoc :prose prose)
-                                        (seq repairs) (assoc :repaired (context/repaired src repairs)))
-                                  ;; a call that failed (threw, answered an error value such as a refused edit, or had no
-                                  ;; prose or no form) stops the rest: none builds on a change that never happened
-                                  failed (some #(when (or (:ex (:response %)) (contract/error? (:value (:response %)))) (:id %)) acc)
-                                  why (if failed
-                                        (contract/error :seon.turn/not-run #'act! (str "not run: call " failed " of this reply failed before it (its result says why)") {:after failed})
-                                        (call-problem prose src))]
-                              (conj acc (if why
-                                          {:id id :code code :prose prose :not-run (some? failed)
-                                           :response (let [r (repl/unrun src req why)] (agent/commit!) r)}
-                                          {:id id :code code :prose prose :response (evaluated! src req)}))))
-                          [] (:tool-calls c))
+            calls (repl/run-calls (:tool-calls c) (fn [id] {:origin :model :call-id id}) evaluated!)
             rs (mapv :response calls)
             eval-ms (long (profile/ms-since t2))
             _ (swap! agent/state assoc-in [:turn :evals] rs)
