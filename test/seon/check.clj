@@ -161,7 +161,7 @@
                            (deftest doc-test (is (= \"f1 adds 1 to x\" (doc-of 'app.m0/f1)))
                              (transact! [{:var/name 'app.m0/f1 :var/doc \"changed inside a test\"}])
                              (is (= \"changed inside a test\" (doc-of 'app.m0/f1))))
-                           (transact! [{:note/text \"f1 adds one\" :note/agent :a3 :note/about [:var/name 'app.m0/f1]}
+                           (transact! [{:note/text \"f1 adds one\" :note/agent :a3}
                                        {:var/name 'app.m0/f1 :var/doc \"f1 adds 1 to x\"}])
                            (doc-of 'app.m0/f1)"}
         replies (into {} (pmap (fn [id] [id @(c/submit! sys id (programs id))]) ids))
@@ -179,8 +179,7 @@
         _ (out! "merge main into " (ids 2) " first: " (select-keys mm3 [:ok :applied :conflicts]))
         _ (out! "merge " (ids 0) ": " m1 "\nmerge " (ids 2) ": " m3)
         _ (out! "main notes: " (main-q sys '[:find ?a ?t :where [?n :note/agent ?a] [?n :note/text ?t]]))
-        _ (out! "main f1 doc: " (main-q sys '[:find ?d . :where [?e :var/name app.m0/f1] [?e :var/doc ?d]])
-                "; note about: " (main-q sys '[:find ?v . :where [?n :note/about ?e] [?e :var/name ?v]]))
+        _ (out! "main f1 doc: " (main-q sys '[:find ?d . :where [?e :var/name app.m0/f1] [?e :var/doc ?d]]))
         ;; a second merge of the same branch: the note a3 created is the same entity on main
         _ @(c/submit! sys (ids 2) "(transact! [[:db/add (q '[:find ?n . :where [?n :note/agent :a3]]) :note/text \"f1 adds one (edited)\"]])")
         m3b (merge-in! sys (ids 2))
