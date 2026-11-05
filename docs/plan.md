@@ -23,13 +23,16 @@ What Seon is for, where it stands, the one step being worked now, and the steps 
 
 **The order now:**
 1. ~~**The simpler schema**~~, merged 2026-11-05: evals as attributes with ``:printed`` gone; a turn as a number, with the model call holding what a turn held; no runs, ``:seon.end`` or turn entities. Root sets judged attributes on the task; a task's earlier states are the db's history; an agent's records stay on its branch. ``runs/store`` was erased at its merge ([decisions](decisions.md)). 616a5224c7 is the control the core compares against.
-2. **The core,** one merge on top: the page as the last message, latest only (held on ``jolt/one-render-6-the-page-is-the-last-message``); the default render over the pattern; parts named by the agent's data; both renders in the component's tracked run; each part printed once; structure; the most specific render wins; the transcript as a declared render with ``seon.context/request``'s assembly deleted. Measured on the six tasks against the baselines before it merges.
-3. **Beside it:** page controls for delete, compact, forget and reset; reset through the writer; a browser spike for the image.
-4. **Then:** the image; agents improving renders by default.
-
-**Asked by the owner, 2026-11-05:** the agent's entity, pull and renders make most of its context, teaching it the system, its task and how messaging works (``seon.context/the-agents-data-makes-its-context``, design first). Agents declaring a render of their own is built and tested ([ctx](ctx.md#adding-a-datum-and-its-render)); no prompt teaches it yet.
-
-**Costs still open on the core step:** latest-only text costs more uncached tokens per turn until the page is small: on method-key about 3.5 times the baseline with cites still on the page, one run. Moving cites off the page should bring it to about 1.3k tokens, predicted and unmeasured. An image costs about 990 tokens uncached per turn, read names exactly at 1300 by 1300 pixels and invented them on a taller page, and needs a browser whose memory and time are unknown. Whether any of this makes agents better is not known until the six-task comparison.
+2. **The conversion,** ordered by the owner, 2026-11-05 ("schedule all fixes and get this converted. Name changes too. I don't want these old ideas to come back and haunt us again"), one merge each, each with its proofs and numbers:
+   1. ``seon.problems/the-old-word-check-goes``: deleted first; a list of old words keeps them alive, and the docs and tasks say what is true.
+   2. ``seon.render/a-step-costs-what-changed``: a component per turn number, one match of datoms to readers.
+   3. ``seon.context/renders-show-what-the-agent-needs``: the renders that are large or change without news.
+   4. ``seon.render/the-render-is-an-eval``: the hiccup, named and without CSS, is an eval at turn 0, and what changed another.
+   5. ``seon.context/the-context-is-records``: the context is records in turn order; ``seon.context/request`` and its assembly go; the debug page steps through what is recorded.
+   6. ``seon.context/teaching-is-data``: what teaches an agent is data on it or an eval; no special case for citing.
+   7. ``seon.problems/the-names-change``: the names change, and every doc and open task reads in them.
+   8. ``seon.context/context-makes-agents-better``: the six-task comparison decides whether it worked.
+3. **Beside it:** page controls for delete, compact, forget and reset; reset through the writer; a browser spike for an image of the page an agent changing the layout can ask for.
 
 A task holds how its work stands and ended ([reconcile](reconcile.md#a-task-holds-how-its-work-ended)).
 
