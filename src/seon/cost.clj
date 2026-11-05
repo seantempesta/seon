@@ -142,7 +142,8 @@
   docs/cost.md#how-growth-is-judged). The basis: :increments, each size's increment over the
   smallest against the work's own (three sizes or more, not log work, with two increments over increment-floor
   of the smallest size's cost, the largest at least growth-share of it, no fixed part assumed);
-  :total, the cost itself, for constant work (it should not grow); log work takes :bounded-fixed,
+:total, the cost itself, for constant work (it should not grow) and whenever the largest size
+  costs no more than the smallest (nothing grew, whatever the middle sizes did); log work takes :bounded-fixed,
   never increments: its cost is a staircase (an index gains a level every so many entries), and
   increments of a staircase have no power-law shape (675.6k, 695.8k and 1.07M bytes at 10, 100 and
   1,000 read n^1.29 on increments against a log's n^0.60, and n^0.19 on the cost less its fixed part);
@@ -166,7 +167,7 @@
                          (fit :bounded-fixed (for [r pts] [(:n r) (- (m r) f)]) (for [r pts] [(:n r) (w r)]))))]
     (cond
       (< (count rs) 2) nil
-      (= :constant (:growth e)) (fit :total (for [r rs] [(:n r) (m r)]) (for [r rs] [(:n r) (w r)]))
+      (or (= :constant (:growth e)) (<= (m (last rs)) (m r0))) (fit :total (for [r rs] [(:n r) (m r)]) (for [r rs] [(:n r) (w r)]))
       (and (>= (count incs) 2) (>= (- (m (last incs)) (m r0)) (* growth-share (m r0))))
       (fit :increments (for [r incs] [(:n r) (- (m r) (m r0))]) (for [r incs] [(:n r) (- (w r) (w r0))]))
       :else (bounded))))
