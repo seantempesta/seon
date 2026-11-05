@@ -750,8 +750,8 @@
   it is a proof or reaches what the branch changed since base (a var, method, fixture, ns form,
   macro or schema entry), and runs when no result is stored at its digest (a red is reused as recorded)
   (seon.reconcile/done-explain reads the selected). Scratch namespaces' tests (user,
-  ^:scratch) never merge, so they never judge; seon.template/stall-proofs judge only a task whose proofs name them; a proof with no test var here does not run, and
-  one with a var but no program facts (loaded, never recorded) has no digest: it always runs.
+  ^:scratch) never merge, so they never judge; seon.template/stall-proofs judge only a task whose proofs name them; a proof with no form on the branch does not run, whatever
+  this process holds, so it has no result (:proof-unknown): nothing of it merges.
   With no base (a tree with nothing to diff against: root's on-change runs), the proofs and
   every test with no green at its digest, of which those with no result run (seon.proofs/plan's own rule). Answers the plan with
   :digests {test digest}, :graph (the reach graph it
@@ -783,7 +783,6 @@
         ;; a stall task's proofs read that task's cause, so they judge only a task that names them
         idx (into {} (filter (fn [[t _]] (and (judges? t) (or (contains? proofs t) (not (template/stall-proofs t)))))) (program/index-of g))
         cd (update-vals idx :digest)
-        unrecorded (sort-by str (filter #(and (judges? %) (not (cd %))) proofs))
         ;; main's tests the branch removed: each judges from base's definition, loaded in the test
         ;; child, its namespace's ns form first when the branch removed the namespace too; one
         ;; that reaches a process of its own (base's index says) stays a process test
@@ -801,8 +800,8 @@
     ;; cache that could not be read is the plan's :unread, which a run answers (never zero greens)
     (let [found (fx/stored-results cd) unread (when (contract/error? found) found)]
       (cond-> (-> (proofs/plan (some-> b :index (update-vals :digest)) cd (if unread {} found) proofs)
-                  (update :selected into (concat unrecorded (keys removed)))
-                  (update :run into (concat unrecorded (keys removed)))
+                  (update :selected into (keys removed))
+                  (update :run into (keys removed))
                   (assoc :digests cd :graph g :removed removed
                          :process (into (program/process-tests idx) removed-process)))
         unread (assoc :unread unread))))))
@@ -1155,8 +1154,7 @@
     unread
   (let [{judge :selected deferred :skipped} (run-selection plan names proofs)
         selected (if (and (= :turn mode) (not (seq names)))
-                   ;; the proofs as the plan selects them (one loaded but never recorded has
-                   ;; no digest and is selected all the same), and the tests the branch changed
+                   ;; the proofs as the plan selects them (one with no form on the branch is not), and the tests the branch changed
                    (vec (sort-by str (filter (set judge) (-> (set (filter proofs (:selected plan)))
                                                              (into (filter (:digests plan) (pm/changed-vars (branch-changes (:base @state) (db)))))
                                                              (into (keys (:removed plan)))))))

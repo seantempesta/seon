@@ -426,7 +426,8 @@
                          redefined (assoc :redefined redefined)))
                      (cond-> m
                        l (assoc :repl/defined (program/set-vars l))
-                       nested? (assoc :not-program "a def beside calls is not program: it stays this eval (seon.program/definition-form?); define at a form's top level to make it program"))))))))))))
+                       (or nested? (and l (= :agent (:mode @agent/state)) (program/calls-eval? l)))
+                       (assoc :not-program "A definition inside a let or through eval runs in this process and is not program, so it will not merge: define it at a form's top level (seon.program/definition-form?)."))))))))))))
 
 (defn- branch-registry
   "The registry this agent's evaluation binds (seon.program/schema-registry of its branch's
