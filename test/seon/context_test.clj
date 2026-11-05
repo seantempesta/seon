@@ -439,8 +439,8 @@
         (is (= (context/system-text @conn) (:content (first r0))) "the system message is the system prompt as main holds it")
         (is (str/starts-with? (:content (first r0)) "# You are a Seon agent\n\nYou work at a Clojure REPL") "the page, from its sections")
         (is (= ["system" "user"] (mapv :role r0)) "the first request: the system prompt, then the page whole")
-        (is (every? #(re-find % (:content (second r0))) [#"cited-\d+-demo_2Ff" #"Doubles\." #"status-\d+"]) "the page whole, by component key: how the work stands too")
-        (is (re-find #"cited-\d+-demo_2Ff" (:content (peek r1))) "the cited var's edit: its component, by its key")
+        (is (every? #(re-find % (:content (second r0))) [#"seon\.render\.ui/cited" #"Doubles\." #"seon\.render\.ui/status"]) "the page whole, each part by the function that drew it: how the work stands too")
+        (is (re-find #"seon\.render\.ui/cited" (:content (peek r1))) "the cited var's edit: its part, by its function")
         (is (str/includes? (:content (peek r1)) "Triples."))
         (is (not (re-find #"task-data-\d+" (:content (peek r1)))) "a component that did not change is not told again")
         (is (not (re-find #"status-\d+" (:content (peek r1)))) "a turn taken moved nothing of how the work stands: not told again")
@@ -935,11 +935,11 @@
                (subvec (seon.model/wire-messages true r1) 2 4)) "one assistant message on the wire")
         (is (= "{:handle result/e2, :value 1}" (:content (nth r1 4))) "the call's response, its recorded value printed as it is sent")
         (is (= r0 (subvec r1 0 2)) "the whole earlier request is the prefix: its page stays, appended")
-        (is (re-find #"status-\d+" (:content (peek r1))) "a verdict recorded after turn 0: how the work stands, told again")
+        (is (re-find #"seon\.render\.ui/status" (:content (peek r1))) "a verdict recorded after turn 0: how the work stands, told again")
         ;; (the task's data draws each proof's recorded status too, so it moves with a verdict: reported)
         (is (not (re-find #"related-\d+" (:content (peek r1)))) "what a verdict does not move is not told again")
         (is (str/includes? (:content (peek r1)) ":fail") "the proof's new verdict")
-        (is (not (str/includes? (:content (peek r1)) "[:task]")) "the rest unchanged, not told again")
+        (is (not (str/includes? (:content (peek r1)) "seon.render.ui/task-data")) "the rest unchanged, not told again")
         (is (not-any? #(str/includes? (str (:content %)) ";;") (rest r1)) "no ;; reaches the model")
         (is (nil? (resolve 'seon.context/messages)) "one path: no request without an agent")))))
 
@@ -1404,7 +1404,7 @@
         (is (= [:section :parts :eval :hashes] (mapv first sent)))
         (is (true? (nth (second sent) 3)) "whole")
         (is (= (vec all) (part-ids sent)) "every part of the page, in the layout's order")
-        (is (every? #(str/includes? (:content (second messages)) %) all) "each by its id")
+        (is (= (count all) (count (re-seq #"(?m)^\[seon\.render\.ui/" (:content (second messages))))) "each part headed by its function")
         (is (= (set all) (set (keys (second (peek sent))))) "and the hash of each is recorded")
         (is (seq all))))))
 
@@ -1453,26 +1453,22 @@
         (is (str/includes? (:content (peek (:messages r3))) "moved"))
         (is (= [] (sent-ids r4)) "and once: the next request finds it as sent")))))
 
-(deftest a-changed-part-is-sent-as-what-changed
-  ;; owner, 2026-10-30 (approved in docs/decisions.md): a changed part that answers data sends what changed of it;
-  ;; md-scan #28's status, 3-5k tokens, was sent whole eleven times. A map part's top-level keys: the new or changed
-  ;; values under :changed, the keys that left under :gone, the keys that kept their value not sent again
+(deftest a-changed-part-is-sent-whole
+  ;; a part is a hiccup render, headed by its function and its ctx path (seon.render/part-text): one that moved is sent
+  ;; again whole, as the person's page redraws it, and a part with no change is not sent (no empty diff)
   (ts/test-branch!
     (fn [_ conn]
       (let [[ask! _ _] (parts-session conn)
-            p0 {"status-1" {:proofs [:red] :turn "1 of 40" :caused 2}}
-            p1 {"status-1" {:proofs [:green] :turn "1 of 40" :ns 'demo}}
-            r0 (ask! 0 {:parts (constantly p0)})
-            r1 (ask! 1 {:parts (constantly p1) :printed (:printed r0)})
+            form (fn [state] ['seon.render.ui/status {:ctx [:task :proved]} [:h2 "Where your work stands"] [:p state] [:p "turn 1 of 40"]])
+            r0 (ask! 0 {:parts (constantly {"status-1" (form "red")})})
+            r1 (ask! 1 {:parts (constantly {"status-1" (form "green")}) :printed (:printed r0)})
+            r2 (ask! 2 {:parts (constantly {"status-1" (form "green")}) :printed (:printed r1)})
             sent (:content (peek (:messages r1)))]
-        (is (str/includes? sent ":changed") (str "what changed of the part: " sent))
-        (is (str/includes? sent ":green") "its new value")
-        (is (str/includes? sent "demo") "a key it gained")
-        (is (str/includes? sent ":gone [:caused]") "a key it lost")
-        (is (not (str/includes? sent "1 of 40")) (str "a key that kept its value is not sent again: " sent))
-        (let [hiccup {"status-1" [:p "moved"]}
-              r2 (ask! 2 {:parts (constantly hiccup) :printed (:printed r1)})]
-          (is (str/includes? (:content (peek (:messages r2))) "moved") "a part that is no map is sent whole"))))))
+        (is (str/includes? sent "[seon.render.ui/status") "headed by the function that drew it")
+        (is (str/includes? sent "turn 1 of 40") "whole: what did not change is in it too")
+        (is (str/includes? sent "green") "its new state")
+        (is (not (str/includes? sent ":changed")) "never a diff")
+        (is (= (:messages r1) (:messages r2)) "a part that did not move is not sent again, and nothing empty in its place")))))
 
 (deftest a-part-sent-as-what-changed-replays-as-sent
   ;; ts/test-branch!: a request reads its turns, model calls and parts from a branch's commits, as root's turns
@@ -1491,11 +1487,11 @@
             r2 (ask! 2 {:printed nil})
             r2' (ask! 2 {:printed (:printed r1)})
             ref2 (last (filter #(= :parts (first %)) (:sent r2)))]
-        (is (= 7 (count ref1)) (str "sent as what changed, its ref naming the commit it changed from: " (pr-str ref1)))
-        (is (str/includes? (:content (peek (:messages r1))) ":changed") (:content (peek (:messages r1))))
+        (is (= 6 (count ref1)) (str "sent as what changed, its ref naming the commit it changed from: " (pr-str ref1)))
+        (is (str/includes? (:content (peek (:messages r1))) "[seon.render.ui/status") (:content (peek (:messages r1))))
         (is (= (peek (:messages r1)) (first (second (first (filter #(= ref1 (first %)) (context/parts-of @conn (:sent r1)))))))
             "read back from the record, the same bytes")
-        (is (= 7 (count ref2)) (str "after a restart, still what changed: " (pr-str ref2)))
+        (is (= 6 (count ref2)) (str "after a restart, still what changed: " (pr-str ref2)))
         (is (= (peek (:messages r2)) (peek (:messages r2'))) "the same bytes as a process that printed the run")))))
 
 (deftest a-trimmed-conversation-draws-the-request-whole
@@ -1796,39 +1792,30 @@
     (d/transact conn [{:seon.model-call/id "b/a1/2" :seon.model-call/agent [:seon.agent/key "b/a1"] :seon.model-call/n 2 :seon.model-call/origin :model :seon.model-call/forms 0 :seon.model-call/reply "Thinking."}])
     {:r0 r0 :r1 (turn! conn 2)}))
 
-(defn- ids-as-n
-  "Messages ms with the entity ids in the page's part names (-457, the test store's seed) read as -N."
-  [ms] (mapv #(update % :content str/replace #"-\d+\"" "-N\"") ms))
-
-(def ^:private no-example-page
-  "The page's part message main sent the fixture's agent, entity ids as -N."
-  "{\"task-data-N\"\n   {:to-prove {demo-test/g-test \"not written yet\"},\n    :task #:seon.task{:id \"demo/g\", :kind :work, :plan \"Make g.\"}},\n \"namespaces-N\" {demo {:ns-form (clojure.repl/source demo)}},\n \"status-N\"\n   {:proofs [{:test demo-test/g-test, :status :undefined}],\n    :refused\n      [{:reason :proof-unknown,\n        :test demo-test/g-test,\n        :do\n          (do\n           (in-ns 'demo-test)\n           (clojure.test/deftest\n            g-test\n            (clojure.test/is false\n             \"write the assertion: the behaviour, on data\"))\n           (my.agent/prove))}]},\n \"run-head-N\" {:turn 1, :ns demo}}")
-
-;; The no-examples path only gains an empty ex-items (seon.context/request), so these literals are the branch's own
-;; output for it; the tests assert them and a digest, so a later change to that path goes red. They are main's request
-;; (9a35ff81ea, which holds no example) for the fixed fixture of `no-example-requests!`, its turn part naming the
-;; namespace the REPL starts in, the task's (seon.context/current-ns, docs/agent.md#the-repl).
-(deftest a-task-with-no-examples-sends-the-first-request-main-sent
+(deftest a-task-with-no-examples-sends-the-first-request
+  ;; (the bytes of main's request were pinned here by a literal; the page is now each part printed as its render, which
+  ;; changes with each render step: the request's shape is what this holds)
   (ts/test-branch!
     (fn [_ conn]
-      (let [{:keys [r0]} (no-example-requests! conn)]
-        (is (= {:role "system" :content (context/system-text @conn)} (first (:messages r0))))
-        (is (= [{:role "user" :content no-example-page}] (ids-as-n (rest (:messages r0)))))))))
+      (let [{:keys [r0]} (no-example-requests! conn)
+            ms (:messages r0)]
+        (is (= {:role "system" :content (context/system-text @conn)} (first ms)))
+        (is (= ["system" "user"] (mapv :role ms)) "the system prompt, then the page whole in one message")
+        (is (re-find #"(?m)^\[seon\.render\.ui/task-data" (:content (second ms))) "the task, headed by the function that drew it")
+        (is (re-find #"demo-test/g-test" (:content (second ms))) "and its proof")))))
 
-(deftest a-task-with-no-examples-sends-the-conversation-main-sent
+(deftest a-task-with-no-examples-sends-the-conversation
   (ts/test-branch!
     (fn [_ conn]
-      (let [{:keys [r1]} (no-example-requests! conn)
-            ms (ids-as-n (rest (:messages r1)))]
-        (is (= [{:role "user" :content no-example-page}
-                {:role "assistant" :content "" :tool-calls [{:id "c0" :code "(+ 5 1)" :prose "Add."}] :reply 1}
+      (let [{:keys [r0 r1]} (no-example-requests! conn)
+            ms (:messages r1)]
+        (is (= (:messages r0) (subvec ms 0 (count (:messages r0)))) "the first request is the prefix of the next")
+        (is (= [{:role "assistant" :content "" :tool-calls [{:id "c0" :code "(+ 5 1)" :prose "Add."}] :reply 1}
                 {:role "tool" :tool-call-id "c0" :content "{:handle result/e0, :value 6}"}
                 {:role "user" :content "{:from \"owner\", :body \"Go on.\"}"}
-                {:role "assistant" :content "Thinking." :reply 2}
-                {:role "user" :content "{\"run-head-N\" {:changed {:turn 3}}}"}]
-               ms))
-        (is (= "772edec9a84dece1" (seon.lib/digest (str/join "\n--\n" (map #(str (:role %) ":" (:content %)) ms))))
-            "and the digest of its roles and contents (SHA-256, first 16 hex digits): a change to this path moves it")))))
+                {:role "assistant" :content "Thinking." :reply 2}]
+               (subvec ms (count (:messages r0)) (+ 4 (count (:messages r0)))))
+            "then the records, each by its own render")))))
 
 (deftest session-tx-answers-an-error-for-what-it-cannot-show
   (ts/test-branch!

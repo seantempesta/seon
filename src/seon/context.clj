@@ -800,7 +800,7 @@
                   c (update c :ids conj pid)]
               (cond
                 (get-in c [:parts pid]) (update c :ids pop)
-                (#{:parts :example :session} kind) (assoc-in c [:parts pid] @v)
+                (#{:parts :tail :example :session} kind) (assoc-in c [:parts pid] @v)
                 :else (assoc-in c [:parts pid] (part [kind id] (record-messages k v db))))))
           (or cache {:ids [] :parts {}}) items))
 
@@ -993,36 +993,14 @@
   (let [db1 (if (= c (d/commit-id db)) db (d/commit-as-db db c))]
     (drawn-parts db1 (ctx/build db1 a (:seon.agent/branch (d/entity db a))))))
 
-(defn- part-change
-  "What changed of a part between two requests, by the data the model reads of it (its model render's value,
-  seon.render/model, else the part itself): when both are maps, {:changed {k new-value} :gone [k]} of
-  their top-level keys, the keys that kept their value left out; else nil, and the part is sent whole. The
-  owner's ruling (docs/decisions.md): a changed part that answers data sends what changed of it, never itself
-  again (the status, thousands of tokens, would otherwise be sent whole each turn). Top-level keys, each value whole, by
-  intent: clojure.data/diff answers a vector by position, padded with nils a model reads as values (one
-  proof's verdict would come as [nil nil {...}]); a changed key's value whole reads as the part does. See
-  docs/render.md#the-page-is-sent-as-what-changed."
-  {:malli/schema [:=> [:cat :any :any] [:maybe :map]]}
-  [was now]
-  (let [data #(if-let [m (render/model %)] (:value m) %)
-        a (data was) b (data now)]
-    (when (and (map? a) (map? b))
-      (let [changed (into (array-map) (for [[k v] b :when (not= v (get a k ::none))] [k v]))
-            gone (vec (remove #(contains? b %) (keys a)))]
-        (cond-> {} (seq changed) (assoc :changed changed) (seq gone) (assoc :gone gone))))))
-
 (defn- parts-message
-  "The one user message of the parts a request sent: {id hiccup} in the order of ids, nil for a part
-  that left; a part the request before also sent (in was, the parts as of then) as what changed of it
-  (`part-change`) when it answers a map, else printed whole; none when ids is empty."
-  {:malli/schema [:=> [:cat :map [:sequential :string] [:maybe :map]] [:vector :seon.model/message]]}
-  [live ids was]
-  (if (empty? ids)
-    []
-    [{:role "user" :content (print/text (vary-meta (apply array-map (mapcat (fn [k] [k (let [v (get live k)]
-                                                                                        (or (when (and was (contains? was k) (some? v)) (part-change (get was k) v)) v))])
-                                                                             ids))
-                                                   assoc :seon.print/full true))}]))
+  "The one user message of the parts a request sent, each printed as its render (seon.render/part-text), a blank line
+  between: those of ids that are in live, whole (a part that moved is sent again whole; one that left is not named: it
+  was said once); none when ids is empty or none of them is live."
+  {:malli/schema [:=> [:cat :map [:sequential :string]] [:vector :seon.model/message]]}
+  [live ids]
+  (let [texts (into [] (keep #(some-> (get live %) render/part-text)) ids)]
+    (if (empty? texts) [] [{:role "user" :content (str/join "\n\n" texts)}])))
 
 (defn- calls-of
   "The model calls of agent a of origin o that sent, [id n call-entity] oldest first (n: the turn a model's call answers,
@@ -1056,7 +1034,7 @@
   "The id printed-run keys a request's ref by: its kind and a record's id or a parts ref's call, so an eval, a message, a reply, a parts message, an example session and the opening of a session never meet by an id that happens to be alike. See
   docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
   {:malli/schema [:=> [:cat [:sequential :any]] :string]}
-  [ref] (str (name (first ref)) "/" (if (= :parts (first ref)) (nth ref 5) (second ref))))
+  [ref] (str (name (first ref)) "/" (case (first ref) :parts (nth ref 5) :tail (nth ref 3) (second ref))))
 
 (defn- cache-of
   "The print cache (printed-run's answer) of the refs a model call sent, each by its own render
@@ -1075,8 +1053,9 @@
   keeps its scrollback): each eval (eval-messages), message (message-messages) and prose reply
   (turn-messages), and the page's parts as one user message each request holds (`parts-message`):
   every part whole at the session's first request (before the records), after it the parts whose
-  content differs from what the previous model call recorded of them (:hashes) and nil for one that
-  left, at the turn's place in the records; none when none changed. So the request is the previous
+  content differs from what the previous model call recorded of them (:hashes), each whole, at the turn's place in the
+  records; none when none changed. A part whose render is declared :seon.render/place :tail is the request's last message,
+  made again each request ([:tail a c call ids]) and kept out of the cached prefix. So the request is the previous
   request's refs (read back from its model call when this process holds no print of them) and what
   was added. opts :parts, {id hiccup}, the agent's live walk's (seon.repl/page-hiccup; else drawn cold
   at db's commit), and :ctx, its @ctx at db (else drawn cold). A record the previous request sent that is gone (the agent trimmed its context
@@ -1111,24 +1090,17 @@
         cut? (boolean (and prev (trimmed? @c prev)))
         old (when-not cut? (some #(when (= :hashes (first %)) (second %)) prev))
         whole? (nil? old)
-        live (or parts (drawn-parts db {:tree @c}))
+        all (or parts (drawn-parts db {:tree @c}))
+        ;; a part whose render is declared :seon.render/place :tail is no part of the page's changes: it is the request's last
+        ;; message, made again for each request (the turn line), never in the cached prefix
+        tail? #(= :tail (:seon.render/place (meta (val %))))
+        live (into (empty all) (remove tail?) all)
+        tails (vec (keys (into {} (filter tail?) all)))
         ;; a part's hash is its printed form's: its hiccup holds the Vars of its components, which no content hash reads
         hs (into {} (map (fn [[k v]] [k (hasch/uuid (pr-str v))])) live)
         ids (into (vec (for [k (keys live) :when (or whole? (not= (get old k) (get hs k)))] k))
                   (when old (sort (remove #(contains? live %) (keys old)))))
-        ;; the parts as the request before drew them, to send what changed of each: this process's, kept with its print
-        ;; of that request; else, for a model turn, drawn at the commit it recorded, so a turn's request is the same
-        ;; bytes whatever the process printed before (seon.context-test/a-run-printed-once-sends-what-a-cold-read-sends),
-        ;; drawn only when a part both requests sent moved, and once a process (the turn keeps its parts, :live, for the
-        ;; next). A read that is no model turn (an observer's, which keeps no print) is never drawn again to diff: it
-        ;; sends a moved part whole, and its record replays as sent (seon.server-test/a-later-read-draws-no-page-cold-
-        ;; and-costs-what-the-one-before-did)
-        prev-ref (when-not whole? (last (filter #(= :parts (first %)) prev)))
-        was (when (and prev-ref (some #(and (contains? live %) (contains? old %)) ids))
-              (cond (= prev-ref (:live-ref printed)) (:live printed)
-                    (= prev-ref (:was-ref printed)) (:was printed)
-                    model? (drawn-at db e (nth prev-ref 2))))
-        ref (cond-> [:parts e (d/commit-id db) whole? ids id] was (conj (nth prev-ref 2)))
+        ref [:parts e (d/commit-id db) whole? ids id]
         ;; a model's first request (whole) holds its task's example sessions right after the system message, then
         ;; the opening of its own session; a later one has them in the refs it continues
         ;; read from the task's datoms, so a task naming none costs no contracted call (examples-of is asked only when it names some)
@@ -1138,9 +1110,12 @@
                            [[:session (:session basis (:agent basis))] (delay {:ref [:session (:session basis (:agent basis))] :whole (session-open (:session basis (:agent basis)))}) nil [1 0 0 0]])))
         ;; every item beside its position, [group turn rank n]: the examples, the session's opening, the page whole, the
         ;; records by their turn numbers, then the page's change, last
-        current [[:parts id] (delay {:ref ref :whole (parts-message live ids was)}) nil (if whole? [2 0 0 0] [4 0 0 0])]
+        current [[:parts id] (delay {:ref ref :whole (parts-message live ids)}) nil (if whole? [2 0 0 0] [4 0 0 0])]
+        ;; the tail: the request's last message, whole each request
+        tail-ref [:tail e (d/commit-id db) id tails]
+        tail (when (seq tails) [[:tail id] (delay {:ref tail-ref :whole (parts-message all tails)}) nil [5 0 0 0]])
         ;; what the previous request sent, its refs in order: this process's print of them, else read back from the records
-        before (when (and model? (not whole?)) (into [] (remove #(#{:section :hashes} (first %))) prev))
+        before (when (and model? (not whole?)) (into [] (remove #(#{:section :hashes :tail} (first %))) prev))
         ;; a print whose first refs are those (a later request's of the same session: the debug page's latest, drawn
         ;; again as the branch moves) is reused as far as they go, each record's print a function of its ref
         base (when before
@@ -1150,12 +1125,12 @@
                    (cache-of db before))))
         rs (if model? (into [] (comp (filter (fn [[pos]] (neg? (compare (subvec pos 0 2) [n 1])))) (map (fn [[pos v k]] [(ref-of v) v k (into [3] pos)])))
                             (records @c db (when before prev-n))) [])
-        items (sort-by #(nth % 3) (concat rs ex-items [current]))
+        items (sort-by #(nth % 3) (concat rs ex-items [current] (some-> tail vector)))
         cache (printed-run items base db)
         ps (mapv #(get-in cache [:parts %]) (:ids cache))]
     {:messages (into [{:role "system" :content help}] (mapcat :whole) ps)
      ;; the parts it drew, and those it drew of the request before (the same for every later request until the next call)
-     :printed (cond-> (assoc cache :live live :live-ref ref) was (assoc :was was :was-ref prev-ref))
+     :printed cache
      :sent (-> [help-ref] (into (map :ref) ps) (conj [:hashes hs]))
      :parts (into [[help-ref [{:role "system" :content help}]]] (map (juxt :ref :whole)) ps)}))
 
@@ -1180,7 +1155,7 @@
                    :reply (record-messages :seon.model-call/fact (d/pull db [:seon.model-call/id :seon.model-call/n :seon.model-call/reply :seon.model-call/reasoning] [:seon.model-call/id x]) db)
                    :example (example-messages db x t)
                    :session (session-open x)
-                   :parts (if (empty? (nth ref 4)) [] (parts-message (drawn x t) (nth ref 4) (when (< 6 (count ref)) (drawn x (nth ref 6)))))
+                   (:parts :tail) (let [ids (nth ref 4)] (if (empty? ids) [] (parts-message (drawn x t) ids)))
                    :message (record-messages :seon.message/fact (d/pull db [:seon.message/id :seon.message/from :seon.message/body] [:seon.message/id x]) db))])
           (remove #(= :hashes (first %)) refs))))
 

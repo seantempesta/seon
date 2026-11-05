@@ -1488,7 +1488,7 @@
   {:seon.render/list "p-task" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] [:maybe :int]] :any]}
   [{c :seon.ctx/ctx} aid]
   [:div {:id "p-task"}
-   (when (:task c) (list [#'task-data {} aid]
+   (when (:task c) (list [#'task-data {:at [:task]} aid]
                          ;; each thing its task, its needs and the agent cite, a part each, at the depth its cite asks
                          (for [[p k held] (page-cites c)] [#'cited {:at p :held held} aid k])
                          ;; each search its task and the agent hold, a part each, drawn on the branch's db
@@ -1496,13 +1496,13 @@
                                              (for [e (keys (get c :searches))] [[:searches e] (str "agent-" e)]))]
                            [#'searched {:at p} aid k])
                          ;; where the code lives: each namespace the work touches, the names the task cites or its proofs call
-                         [#'namespaces {} aid]
+                         [#'namespaces {:at [:task]} aid]
                          ;; how the work stands: the proofs, the done rule's reasons, what the branch did (one diff)
-                         [#'status {} aid]))
+                         [#'status {:at [:task :proved]} aid]))
    ;; the run once it took a turn: before that it says only its id, which the task's names
-   (when (seq (:calls c)) [#'run-head {} aid])
-   (when aid [#'own-problems {} aid])
-   (when (seq (added-keys c)) [#'ctx-keys {}])])
+   (when (seq (:calls c)) [#'run-head {:at [:calls]} aid])
+   (when aid [#'own-problems {:at [:seon.agent/id]} aid])
+   (when (seq (added-keys c)) [#'ctx-keys {:at [:db/id]}])])
 
 (defn conversation-list
   "The conversation of an agent's page (c-rows, the chat a person reads), agent aid's: the run's model calls as their
@@ -1892,7 +1892,7 @@
   [:li {:id "d-parts" :class "flex flex-col gap-2"}
    [:h2 {:class "kicker"} "the task's parts: what the model reads, and the part drawn"]
    (for [[id content] parts
-         :let [text (print/text (vary-meta (array-map id content) assoc :seon.print/full true))
+         :let [text (render/part-text content)
                tokens (emit/chars-tokens (count text))
                long? (> tokens (config/value :seon.config.render/value-budget))
                unit (str "d-part-" id)

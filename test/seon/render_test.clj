@@ -635,7 +635,7 @@
       ;; owner, 2026-11-03: "the record is @ctx with each part that was rendered and the rendered part"
       (doseq [[id content] (r/placed-hiccup w seon.context/page-lists)]
         (is (str/includes? html (str "data-part=\"" id "\"")) (str "@ctx pairs part " id))
-        (is (str/includes? html (h/html (seon.print/text (vary-meta (array-map id content) assoc :seon.print/full true))))
+        (is (str/includes? html (h/html (r/part-text content)))
             (str id ": what the model reads of it, as a request prints it"))))
     (testing "a move to a value that does not follow it (the eval gone again): what a cold draw there draws"
       (let [st5 (#'p/answered st2 o [:branch :task-demo-f] {:db branch})
@@ -1358,7 +1358,7 @@
         walk-of #(let [w (r/draw (:tree (seon.ctx/build branch (seon.db/eid branch :seon.agent/key k) :task-demo-f)) seon.ctx/changes branch
                                  (requiring-resolve (r/declared :seon.render/render-ctx)))]
                    (try (let [d (get (r/placed-data w ["#p-task"]) :seon.task/task-fact)]
-                          {:data d :model (second (first (r/placed-hiccup w ["#p-task"]))) :html (r/html {:schema :seon.task/task-fact :as :block} d)})
+                          {:data d :model (nth (second (first (r/placed-hiccup w ["#p-task"]))) 2) :html (r/html {:schema :seon.task/task-fact :as :block} d)})
                         (finally (r/dispose-walk! w))))
         call-of (fn [h] (some #(when (and (vector? %) (= #'r/html (first %))) %) (tree-seq coll? seq h)))
         {:keys [data model] h0 :html} (walk-of)
@@ -2135,7 +2135,7 @@
   (let [w (r/walker {:ref (seon.ratom/atom {}) :changes seon.ctx/changes} (constantly (ts/test-db)) [#'two-part-layout {}])]
     (try (r/flush! w nil)
          (let [placed (r/placed-hiccup w ["#parts"])
-               [[_ broken] [_ fine]] (seq placed)]
+               [[_ [_ _ broken]] [_ [_ _ fine]]] (seq placed)]
            (is (= :seon.render/component-defect (:seon.error/type broken)) (str "the model reads the error as data: " (pr-str placed)))
            (is (str/includes? (:seon.error/message broken) "seon.ref/scan invalid-output") "what threw")
            (is (= [{:in [:seon.ref/blocks 3]}] (get-in broken [:seon.render/threw :problems])) "and the thrown error's own data")
@@ -2287,7 +2287,7 @@
             before (search-part (draw))]
         (is (some? before) "the request's search is a part of the page")
         (is (str/includes? (pr-str before) "app.srch/untaken-entries") (str "it finds what the request's words name: " (pr-str before)))
-        (is (= :section (first before)) "one compact hiccup, the page's and the model's alike")
+        (is (= :section (first (nth before 2))) "one compact hiccup, the page's and the model's alike")
         (is (not (str/includes? (pr-str before) "has not taken")) "a hit is its name: no first sentence of its doc")
         (is (str/includes? (pr-str before) "no vector yet") "a query not yet embedded says it was searched by its words")
         (let [s (:db/id (d/entity @conn [:seon.search/id "demo/find/request"]))]
@@ -2316,7 +2316,7 @@
          (reset! a {:v 2})
          (r/flush! w nil)
          (let [[content] (vals (r/placed-hiccup w ["#parts"]))]
-           (is (some #(= [:p {:id "inner"} 2] %) (tree-seq vector? seq content)) (str "the part moved, drawn whole: " (pr-str content))))
+           (is (some #(= [:p 2] %) (tree-seq vector? seq content)) (str "the part moved, drawn whole: " (pr-str content))))
          (is (not ((ran w) 'seon.render-test/some-lists-other)) "the other list never ran")
          (let [w2 (r/draw-all w)]
            (r/flush! w2 nil)
@@ -2368,3 +2368,45 @@
         (is (nil? (kept)) "and its kept model render is let go"))
       (finally (r/dispose-walk! w)))))
 
+
+;; ---- a part prints as its render (docs/render.md#a-part-prints-as-its-render) ----
+
+(deftest a-fence-is-longer-than-any-backtick-run-in-its-source
+  (let [src "(defn f\n  \"doc with \\\"escaped\\\" quotes\n```\nlone fence\n``````\n  \"\n  [x] x)"
+        f (r/fence src)]
+    (is (str/starts-with? f "```````clojure\n") "one more than the longest run (6)")
+    (is (str/includes? f src) "the source verbatim, not escaped")
+    (is (= 1 (count (filter #(= "```````" %) (str/split-lines f)))) "only its own closing line closes it")
+    (is (str/starts-with? (r/fence "(+ 1 2)") "```clojure\n") "three when the source has none")))
+
+(deftest a-part-prints-as-its-head-its-path-and-its-hiccup
+  (let [form [(quote seon.render.ui/status) {:ctx [:task :proved]}
+              [:h2 "Where your work stands"]
+              [:p "You finish when every proof is green."]
+              [:pre [:code "(deftest t\n  (is (= \"a\" x)))"]]
+              [:p "Next: " [:code "(prove)"]]]
+        t (r/part-text form)]
+    (is (some? (re-find #"^\[seon\.render\.ui/status\s+\{:ctx \[:task :proved\]\}" t)) "the real function and the path")
+    (is (str/includes? t "(deftest t\n  (is (= \"a\" x)))") "source verbatim: no \\n and no \\\" in it")
+    (is (not (str/includes? t "\\n")) "no escaped line break")
+    (is (str/includes? t "```clojure") "in a fence")
+    (is (str/includes? t "[:h2 \"Where your work stands\"]"))))
+
+(deftest a-symbol-head-draws-on-the-page-as-the-function-it-names
+  (is (= (h/html [(requiring-resolve 'clojure.string/upper-case) "x"]) (h/html ['clojure.string/upper-case "x"]))
+      "the one expansion a var head has")
+  (is (= "<p>a</p>" (h/html [:p "a"])) "a keyword head is still an element"))
+
+(deftest every-model-facing-part-has-a-heading-and-a-head-that-is-true
+  ;; the owner: "the head names the real function and :ctx is a real path"
+  (let [[_ branch _] (paged-dbs)
+        k (seon.task/agent-key "b1" :a3)
+        c (:tree (seon.ctx/build branch (seon.db/eid branch :seon.agent/key k) :task-demo-f))
+        w (a3-walk branch)
+        parts (try (r/placed-hiccup w ["#p-task"]) (finally (r/dispose-walk! w)))]
+    (is (seq parts))
+    (doseq [[id form] parts]
+      (is (empty? (r/part-faults form c)) (str id ": " (pr-str (r/part-faults form c)))))
+    (is (= [:no-heading] (r/part-faults ['seon.render.ui/status {:ctx [:task]} [:p "x"]] c)) "a part without a heading is a fault")
+    (is (= [:unresolved-ctx] (r/part-faults ['seon.render.ui/status {:ctx [:nope]} [:h2 "x"]] c)) "a path that answers nothing")
+    (is (= [:unresolved-head] (r/part-faults ['no.such/render {:ctx [:task]} [:h2 "x"]] c)) "a head that names no function")))

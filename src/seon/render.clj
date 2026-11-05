@@ -535,14 +535,96 @@
                         (let [h (h/html (resolved w k true))] (vswap! (:cache w) update k assoc :unit-rev r :unit-html h) h))]
            {:id (:id c) :container sel :rev r :html html}))))
 
+(defn- strip-attrs
+  "An element's attributes as the model reads them: its presentation (class, id, style) is the page's."
+  {:malli/schema [:=> [:cat :map] [:maybe :map]]}
+  [attrs] (not-empty (dissoc attrs :class :id :style)))
+
+(defn- page-only?
+  "Is element x for the page alone (an attribute :data-for \"page\": what the model is not sent of a part)?"
+  {:malli/schema [:=> [:cat :any] :boolean]}
+  [x] (and (vector? x) (keyword? (first x)) (map? (second x)) (= "page" (:data-for (second x)))))
+
+(declare part-form)
+
+(defn- body-forms
+  "Part output out as the forms its printed hiccup holds, in w: a child component a part of its own (`part-form`),
+  an element without its presentation, an element for the page alone left out, a call of a function its var named."
+  {:malli/schema [:=> [:cat :map :any] [:sequential :any]]}
+  [w out]
+  (cond
+    (nil? out) nil
+    (and (vector? out) (= ::child (first out))) [(part-form w (second out))]
+    (page-only? out) nil
+    (and (vector? out) (keyword? (first out)))
+    (let [[tag & more] out m? (and (map? (first more)) (not (h/raw? (first more))))
+          attrs (when m? (strip-attrs (first more)))]
+      [(into (cond-> [tag] attrs (conj attrs)) (mapcat #(body-forms w %)) (if m? (rest more) more))])
+    (and (vector? out) (or (var? (first out)) (fn? (first out)))) [(into [(if (var? (first out)) (symbol (first out)) (first out))] (rest out))]
+    (seq? out) (mapcat #(body-forms w %) out)
+    (h/raw? out) [(str out)]
+    :else [out]))
+
+(defn part-form
+  "Component k of walk w as the form the model reads it, `[seon.render.ui/status {:ctx [:task :proved]} [:h2 ...] ...]`:
+  the render's name, the ctx path it read (its opts' :at: (get-in @ctx path) answers the data it drew), then the hiccup
+  it returned, each child component a part of its own and no presentation (class, id, style) in it; a part that answered
+  data, that data's model render. Its metadata carries the render var's :seon.render/place. See docs/render.md#a-part-prints-as-its-render."
+  {:malli/schema [:=> [:cat :map [:vector :any]] :any]}
+  [w k]
+  (let [c (get @(:cache w) k)
+        attrs (cond-> {} (:at (:opts c)) (assoc :ctx (:at (:opts c))))
+        body (if (some? (:data c)) [(part-model w k)] (body-forms w (:out c)))
+        place (when (var? (:f c)) (:seon.render/place (meta (:f c))))]
+    (cond-> (into [(symbol (:f c)) attrs] body) place (vary-meta assoc :seon.render/place place))))
+
+(defn fence
+  "Source text s in a Markdown fence longer than any run of backticks inside it, so no line of s closes it: three, or one
+  more than the longest run. Verbatim: s is not escaped."
+  {:malli/schema [:=> [:cat :string] :string]}
+  [s]
+  (let [n (max 3 (inc (reduce max 0 (map count (re-seq #"`+" s)))))
+        f (apply str (repeat n "`"))]
+    (str f "clojure\n" s "\n" f)))
+
+(defn- verbatim
+  "Form x ready to print: an element [:pre [:code s]] its source in a fence (the code marker, verbatim, later lines at
+  column 0), a string with a line break or a quote the prose marker (verbatim, not escaped), the rest as it is."
+  {:malli/schema [:=> [:cat :any] :any]}
+  [x]
+  (cond
+    (and (vector? x) (= :pre (first x)) (= 2 (count x)) (vector? (second x)) (= :code (first (second x))) (string? (last (second x))))
+    [:pre {:seon.print/code (fence (last (second x)))}]
+    (vector? x) (with-meta (mapv verbatim x) (meta x))
+    (and (string? x) (or (str/includes? x "\n") (str/includes? x "\""))) {:seon.print/prose x}
+    (map? x) (if (:seon.print/code x) x (into (empty x) (map (fn [[k v]] [k (verbatim v)])) x))
+    :else x))
+
+(defn part-text
+  "Part form f (`part-form`) printed as text the model reads: whole (:seon.print/full), the head and its path, then the
+  hiccup, a verbatim block in its fence. See docs/render.md#a-part-prints-as-its-render."
+  {:malli/schema [:=> [:cat :any] :string]}
+  [f] (print/text (vary-meta (verbatim f) assoc :seon.print/full true)))
+
+(defn part-faults
+  "What is untrue of part form f (`part-form`) against ctx value c: :unresolved-head (its head names no function), :unresolved-ctx
+  ((get-in c path) answers nothing, or it has no :ctx path), :no-heading (its first element is no heading, h1 to h6). A
+  part whose faults are empty may be sent. See docs/render.md#a-part-prints-as-its-render."
+  {:malli/schema [:=> [:cat :any :any] [:vector :keyword]]}
+  [f c]
+  (let [[head attrs & body] f
+        first-el (first (filter vector? body))]
+    (cond-> []
+      (not (and (qualified-symbol? head) (find-ns (symbol (namespace head))) (ns-resolve (find-ns (symbol (namespace head))) (symbol (name head))))) (conj :unresolved-head)
+      (nil? (some->> (:ctx attrs) (get-in c))) (conj :unresolved-ctx)
+      (not (and first-el (#{:h1 :h2 :h3 :h4 :h5 :h6} (first first-el)))) (conj :no-heading))))
+
 (defn placed-hiccup
-  "Walk w's components placed in the root's lists with element ids sels ([\"#p-task\"]), in order, as
-  {id content}: what the model reads of each, a part's model render (`model`) or else a
-  component's output with its children's resolved, exactly as its render returned it (a call of the
-  printer kept as the call: the model reads the data). See docs/render.md#a-part-answers-data."
+  "The parts of walk w placed in the root's lists with element ids sels ([\"#p-task\"]), in order, as {id form}: what
+  the model reads of each (`part-form`). See docs/render.md#a-part-prints-as-its-render."
   {:malli/schema [:=> [:cat :map [:sequential :string]] :map]}
   [w sels]
-  (apply array-map (mapcat (fn [[_ k]] (let [c (get @(:cache w) k)] [(:id c) (if (some? (:data c)) (part-model w k) (resolved w k))]))
+  (apply array-map (mapcat (fn [[_ k]] (let [c (get @(:cache w) k)] [(:id c) (part-form w k)]))
                            (placed w sels))))
 
 (defn placed-data
