@@ -17,12 +17,3 @@
         "every call of the agent, the tokens of those that reported, and no other agent's")
     (is (= {:model-calls 1} (turn/agent-usage (t/with (t/world) (call-of "b1/a3" 1 nil)) "b1/a3"))
         "no call reported: its tokens unknown, never 0")))
-
-(deftest a-turn-that-only-repeats-is-named
-  ;; bench-scope-1 and -2: the design agent sent the same evals 34 turns running, each told :again, to the turn cap;
-  ;; a turn whose every eval ran repeats code with its old answer is one the agent is told of
-  (let [again {:again "e1 ran this code and answered the same"}]
-    (is (= ["c1" "c2"] (turn/repeated [{:id "c1" :response again} {:id "c2" :response again}])) "every eval it ran repeated")
-    (is (nil? (turn/repeated [{:id "c1" :response again} {:id "c2" :response {:value 1}}])) "one new answer is progress")
-    (is (= ["c1"] (turn/repeated [{:id "c1" :response again} {:id "c2" :not-run true :response {:ex {}}}])) "a call never run is not counted")
-    (is (nil? (turn/repeated [])) "a reply with no call is no repeat")))

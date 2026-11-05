@@ -200,20 +200,9 @@
  :seon.task/waste :seon.learn/waste
  :seon.agent/waste :seon.learn/waste
  :seon.agent/error :seon.error/base
- :seon.fx/error-type :qualified-keyword
  ;; task content a branch and main both changed since the branch's base, differently: root's
  ;; to resolve (seon.task/carry-tx; owner, 2026-10-22, D4)
  :seon.task/task-conflicts [:vector [:map [:task :seon.task/id] [:attr :keyword] [:base :any] [:ours :any] [:theirs :any]]]
- ;; what a model call cost, on the asker's branch (latency is :seon.fx/us, admission :seon.fx/queue-us)
- :seon.fx/prompt-tokens :int
- :seon.fx/completion-tokens :int
- :seon.fx/reasoning-tokens :int
- :seon.fx/cache-hit-tokens :int
- :seon.problems/fx-fact [:map {:seon.db/attributes true} [:seon.fx/error-type {:optional true} :seon.fx/error-type]
-                         [:seon.fx/prompt-tokens {:optional true} :seon.fx/prompt-tokens]
-                         [:seon.fx/completion-tokens {:optional true} :seon.fx/completion-tokens]
-                         [:seon.fx/reasoning-tokens {:optional true} :seon.fx/reasoning-tokens]
-                         [:seon.fx/cache-hit-tokens {:optional true} :seon.fx/cache-hit-tokens]]
 
  ;; ---- the one read: seon.problems/report ----
  ;; each class's area, the group root's page and context show it under (docs/health.md),

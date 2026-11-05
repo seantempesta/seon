@@ -332,6 +332,21 @@
     (is (= '#{} (selected db (record db 'app.pt-calc "(defn neg [x] (- 0 x))"))) "no test reaches neg")
     (is (= [] (program/tests-reaching (program/reach-graph db nil) 'app.pt-calc/no-such)) "a var the graph holds no form of reaches none")))
 
+;; jolt.analyzer/a-missing-var-through-an-alias-says-no-such-var-in-any-namespace
+(deftest a-test-recorded-before-what-it-calls-moves-when-that-is-defined
+  (let [in {:env "e" :tree "t" :config {}}
+        base (record (empty-db) 'app.pt-late "(ns app.pt-late)"
+                     'app.pt-late-test "(ns app.pt-late-test (:require [clojure.test :refer [deftest is]] [app.pt-late :as late]))")
+        g (program/reach-graph base nil)
+        before (record base 'app.pt-late-test "(deftest t (is (= 1 (late/h 1))))")
+        after (record before 'app.pt-late "(defn h [x] x)")
+        digest (fn [db] (get-in (program/graph-index (program/reach-update g db) in nil) ['app.pt-late-test/t :digest]))
+        refs (d/q '[:find [?r ...] :in $ ?s :where [?e :var/name ?s] [?e :var/form ?f] [?f :form/refs ?r]] before 'app.pt-late-test/t)]
+    (is (some #{'app.pt-late/h} refs) "the test's reference names the namespace, not the alias as written")
+    (is (not-any? #{'late/h} refs))
+    (is (not= (digest before) (digest after)) "defining what it calls moves its digest, with no second record of the test")
+    (is (= '[app.pt-late-test/t] (program/tests-reaching (program/reach-update g after) 'app.pt-late/h)))))
+
 (deftest a-file-analyzed-gives-the-repl-facts
   (let [text "(ns app.pt-file\n  (:require [clojure.string :as s]))\n\n;; doubles\n(defn twice [x] (* 2 x))\n\n(comment (twice 2))\n(defmulti m :k)\n(defmethod m :a [_] (s/join [\"a\"]))\n"
         {:keys [forms tail]} (source/read-forms 'user text)]

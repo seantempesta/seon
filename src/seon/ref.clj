@@ -623,37 +623,6 @@
                  doc (assoc :seon.ref/lead doc))
                depth)))))
 
-(defn- pin
-  "The revision main's source pins the reference-code submodule at path to (root's import
-  records each gitlink on its :seon.root/source fact), or nil for any other path or when
-  root imported no source."
-  {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe :string]]}
-  [db path]
-  (let [[top sub] (str/split path #"/")]
-    (when (and (= "reference-code" top) sub)
-      (get-in (d/pull db [:seon.root/source] [:seon.root/id :root]) [:seon.root/source :pins (str top "/" sub)]))))
-
-(defn file-view
-  "File path of the checkout as depth shows it, read now: a Markdown file by the one parse and
-  the one rule (`view`, anchor or else its first section; at :code its own text), any
-  other file by its address and line count, the text whole at :code. A file of reference-code
-  carries the revision main's source pins it at (pin, from db). nil when there is no such
-  file or no such anchor."
-  {:malli/schema [:=> [:cat :seon.host/db :string :string [:maybe :string] :seon.ref/depth] [:maybe :seon.ref/view]]}
-  [db checkout path anchor depth]
-  (let [f (io/file checkout path)]
-    (when (.isFile f)
-      (let [text (slurp f)
-            doc (when (str/ends-with? path ".md") (parse path text))
-            secs (:seon.ref/sections doc)
-            address (if anchor (str path "#" anchor) (:seon.ref/address (first secs)))
-            v (if (seq secs)
-                (view doc address depth)
-                (when-not anchor
-                  (cond-> {:seon.ref/address path :seon.ref/heading path :seon.ref/lines (count (str/split-lines text))}
-                    (= :code depth) (assoc :seon.ref/text text))))]
-        (when v (if-let [p (pin db path)] (assoc v :seon.ref/pin p) v))))))
-
 ;; ---- resolution ---------------------------------------------------------------------------
 
 (def problem-messages
@@ -750,12 +719,4 @@
   {:malli/schema [:=> [:cat :string] [:vector :qualified-symbol]]}
   [text]
   (into [] (comp (map :seon.ref/name) (filter qualified-symbol?) (distinct))
-        (:seon.ref/citations (parse nil text))))
-
-(defn addresses
-  "The wiki sections text cites (a page's path with a section's anchor), as their addresses, once
-  each in first-mention order: names' twin for the sections a text cites."
-  {:malli/schema [:=> [:cat :string] [:vector :string]]}
-  [text]
-  (into [] (comp (filter :seon.ref/anchor) (map #(str (:seon.ref/path %) "#" (:seon.ref/anchor %))) (distinct))
         (:seon.ref/citations (parse nil text))))
