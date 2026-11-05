@@ -18,6 +18,10 @@ The owner's rulings of 2026-11-05, on looking before building and on what makes 
 
 "Design the agents entity with useful information and make it so the pull pattern and the render functions generate the majority of the agents context. It teaches them about the system, it explain what task they are working on, how messaging works when they get a message, evertyhing. It's all data driven." And: "NO SPECIAL CASE FOR CITING. That's just data and a render function". And: "Definitely got rid of \"runs\" (that concept doesn't exist) agents have turns, evals, max turns, etc." The work is task seon.context/the-agents-data-makes-its-context.
 
+### The debug page draws history with today's renders, and says when that differs (owner, 2026-11-05)
+
+Asked whether the debug page should draw history with today's renders plus a hash that flags any difference: "Yes, and try it". It stands over AGENTS.md §3's "as recorded" for a request. The work is task seon.context/the-agents-data-makes-its-context.
+
 ## 2026-11-04 rulings
 
 The owner's rulings of 2026-11-04, on what an agent is and how everything it reads is made. They stand over earlier entries where they differ.
