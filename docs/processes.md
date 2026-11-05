@@ -54,7 +54,7 @@ A parked process is one thread at 0% CPU, and root holds it as a fiber parked on
 The flow-lab's wake hazards, each a proof:
 1. A stop the parked agent left must not end the next work at once with its message untaken: `work!` starts each wake's loop state anew (`seon.agent-test/a-waiting-agent-parks-and-a-message-wakes-the-same-process`: the wake takes the message and runs turns of its own).
 2. A re-entered loop must not number its turns over the recorded ones: the turn is the agent's own number, never restarting across wakes ([turn](turn.md#the-turn-is-a-number); the same test: a wake's turns continue the agent's count).
-3. A message must wake a parked session whatever turn of the run before it came in: main counts every message to the branch, so an agent that parked having taken fewer is woken (`seon.reconcile-test/a-waiting-agent-parks-its-task-and-a-message-wakes-it`).
+3. A message must wake a parked session whatever turn of the agent's earlier wake it came in: main counts every message to the branch, so an agent that parked having taken fewer is woken (`seon.reconcile-test/a-waiting-agent-parks-its-task-and-a-message-wakes-it`).
 4. Two wakes must never run two `work!` forms in one process: a wake stands its task `:running`, so the session is not parked and more messages start nothing more (the same test).
 5. The judge must not end a parked session: a park outcome parks the task, never holds it (the same test).
 6. A wake whose parked process died before it reached it took nothing: the task is `:lost`, not a death, and the next start is a spawn (`seon.reconcile-test/a-wake-whose-parked-process-is-gone-is-lost-and-the-next-start-a-spawn`).

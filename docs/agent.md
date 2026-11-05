@@ -55,7 +55,7 @@ A Claude session attached through the MCP server works the same task as a Seon a
 - `seon_eval` evaluates Clojure in your agent: the forms in this page, `@ctx` and its `swap!`, your definitions. It is your REPL, one call per eval, answered as an eval is (`:handle :value :out :err :ex`). Pass the agent `root` for root's own REPL.
 - `seon_prove` runs the tests your branch's change reaches, as the judge will; a result already green at its digest is not run again.
 - `seon_message` tells an agent something; `seon_agents` lists the live agents and the tasks running or judged, newest first, and counts the rest.
-- `seon_done` ends your run: your proofs run, then root judges the run and merges it when the done rule refuses nothing. It answers the verdict, with the done rule's reasons when the task is held. There is no reply that ends a turn: finishing is `seon_done`, and a task that cannot be done as planned is failed with `my.task/fail!` through `seon_eval`, then handed back with `seon_done`, and root holds the task.
+- `seon_done` ends your work on the task: your proofs run, then root judges its end and merges the branch when the done rule refuses nothing. It answers the verdict, with the done rule's reasons when the task is held. There is no reply that ends a turn: finishing is `seon_done`, and a task that cannot be done as planned is failed with `my.task/fail!` through `seon_eval`, then handed back with `seon_done`, and root holds the task.
 
 ## What you read
 
@@ -77,7 +77,7 @@ How your work stands, one part (`status`; `(my.task/status)` answers the same), 
 - `:test-run`: the test run itself failing (a dead fork, a namespace that did not load); no verdict is real until it runs.
 - `:without-a-contract`, `:caused` and `:attention` (the wiki sections your code changes made stale, to read and probably fix, never a reason to refuse), `:its-merge-carries` (every var you added, changed and removed and every schema you changed: anything the task does not need, put back), `:unmerged` (the entries to resolve), and on a task that merges itself `:merge` (what main changed since your merge base, `:main-moved`, and which of those you changed too, `:conflicts`; once your proofs pass and nothing conflicts, your work ends when merging main brings nothing new, and root merges your branch).
 - "Already green on main: …", first on your task's part: a written proof of yours whose last result on main is green (`seon.context/task-data`'s `:green-on-main`). The premise may already hold: reproduce it, and if the output is right, fail the task with that output in this turn.
-- The turn part (`run`) shows your turn of your cap, the changes your evals made to your branch's program (`:changed`, each var defined, edited or unmapped, once: turn 11 of 40 · 0 changes means nothing has changed yet), `:ns`, the namespace your REPL is in (every eval's response carries it too, as nREPL's do: where your next eval runs), and, when it happened, that your last reply was cut at the model's token limit. A move into a namespace whose own var hides a REPL helper answers `:helper-shadowed`, naming both (`docs/render.md#a-part-answers-data`).
+- The turn part shows your turn of your cap, the changes your evals made to your branch's program (`:changed`, each var defined, edited or unmapped, once: turn 11 of 40 · 0 changes means nothing has changed yet), `:ns`, the namespace your REPL is in (every eval's response carries it too, as nREPL's do: where your next eval runs), and, when it happened, that your last reply was cut at the model's token limit. A move into a namespace whose own var hides a REPL helper answers `:helper-shadowed`, naming both (`docs/render.md#a-part-answers-data`).
 Your tests: `(prove)` runs them; `(deferred)` lists the process tests root runs when it asks.
 
 ## The REPL
@@ -166,7 +166,7 @@ A test runs on the world: `my.test`'s small db shaped like production, plus what
 
 ## Done
 
-Your task is done when every proof passes and the done rule refuses nothing; the proofs run after each of your replies. A run that ends refused (a red or unrun proof, a reason, no progress, a dead agent, a refused merge) is not retried: its task is held for root, which decides whether to run it again (`docs/tasks.md#a-refused-run-is-held-for-root`).
+Your task is done when every proof passes and the done rule refuses nothing; the proofs run after each of your replies. An end that is refused (a red or unrun proof, a reason, no progress, a dead agent, a refused merge) is not retried: its task is held for root, which decides whether to run it again (`docs/tasks.md#a-refused-run-is-held-for-root`).
 
 - A proof is a deftest in a test namespace: `(ns app.workout-test (:require [clojure.test :refer [deftest is]] [app.workout :as w]))`, then `(deftest total-sums (is (= 6 (w/total [1 2 3]))))`, judged by ``(prove)``, which runs it with the rest of what your change reaches and records its verdict for the done rule (clojure.test's own run records nothing, so it judges nothing).
 - A cost proof (`seon.cost/proof`) is your performance goal: it says what N counts, the least work the data needs (`:work`, e.g. one pass with one lookup per row), how that grows and what it may cost. Read it before writing code and do no more work than it states.
