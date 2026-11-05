@@ -72,7 +72,9 @@
   "Eval i of the agent, as the REPL records it."
   {:malli/schema [:=> [:cat nat-int?] [:vector :map]]}
   [i] [{:seon.eval/id (str "e" i) :seon.eval/agent [:seon.agent/key k] :seon.eval/by "a1"
-        :seon.eval/code (str "(app.x/f" (mod i 3) " " i ")") :seon.eval/response (response i) :seon.eval/call-id (str "c" i)}])
+        :seon.eval/code (str "(app.x/f" (mod i 3) " " i ")") :seon.eval/response (response i) :seon.eval/call-id (str "c" i)
+        ;; each takes the number in force when it is written (docs/turn.md#the-turn-is-a-number): here the turn is its own i
+        :seon.eval/turn i}])
 
 (defn- calls-tx
   "The agent's model calls numbered from 0 below n, ids under prefix r."
@@ -89,7 +91,7 @@
   {:malli/schema [:function [:=> [:cat nat-int?] :seon.host/db] [:=> [:cat nat-int? [:maybe [:vector :any]]] :seon.host/db]]}
   ([n] (seeded n session-pattern))
   ([n pattern]
-  (let [db (:db-after (d/with (ts/test-db) (into [(cond-> {:seon.agent/key k :seon.agent/id :a1 :seon.agent/task {:seon.task/id "lab/ctx"}}
+  (let [db (:db-after (d/with (ts/test-db) (into [(cond-> {:seon.agent/key k :seon.agent/id :a1 :seon.agent/task {:seon.task/id "lab/ctx"} :seon.agent/turn n}
                                                      pattern (assoc :seon.ctx/pattern pattern))
                                                    {:db/id "lab/ctx" :seon.task/id "lab/ctx" :seon.task/ns 'app.x :seon.task/name "ctx" :seon.task/plan "Make app.x/f0 pass."
                                                     :seon.task/kind :work :seon.task/proofs #{'app.x-test/t0}
@@ -107,9 +109,9 @@
                                                    (task/cites-tx (ts/test-db) "lab/ctx" "lab/ctx" (seon.ref/cited (:seon.ref/citations (seon.ref/parse nil "Make `app.x/f0` pass, then `app.x/f1`; see [the x](docs/x.md#the-x)."))))))))]
     (reduce (fn [db part]
               (:db-after (d/with db (vec (mapcat (fn [i] (cond-> (eval-tx i)
-                                                            (zero? (mod i 3)) (conj {:seon.model-call/id (str "lab/ctx/" i) :seon.model-call/agent [:seon.agent/key k] :seon.model-call/n i})
+                                                            (zero? (mod i 3)) (conj {:seon.model-call/id (str k "/" i) :seon.model-call/agent [:seon.agent/key k] :seon.model-call/n i})
                                                             (zero? (mod i 20)) (conj {:seon.message/id (str "m" i) :seon.message/from "user"
-                                                                                      :seon.message/branch :lab-ctx :seon.message/agent [:seon.agent/key k] :seon.message/body "How is it going?"})))
+                                                                                      :seon.message/branch :lab-ctx :seon.message/agent [:seon.agent/key k] :seon.message/turn i :seon.message/body "How is it going?"})))
                                                  part)))))
             db (partition-all 100 (range 1 (inc n)))))))
 
@@ -1217,7 +1219,7 @@
     (is (unwatched 'seon.render.ui/task-list) "the model's list is drawn")
     (is (not-any? unwatched '[seon.render.ui/conversation-list seon.render.ui/eval-item seon.render.ui/tiles]) (pr-str unwatched))
     (is (every? watched '[seon.render.ui/conversation-list seon.render.ui/eval-item seon.render.ui/tiles]) "a person's page draws them")
-    (is (some #(str/starts-with? % "eval-item") (keys page)) "the conversation is on the page")
+    (is (some #(str/starts-with? % "conversation-turn") (keys page)) "the conversation is on the page, a component for each turn")
     (is (= parts whole) "the model reads the same whether or not a person watches")))
 
 

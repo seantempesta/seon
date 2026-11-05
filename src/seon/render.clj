@@ -24,7 +24,7 @@
   A nested value renders by a call ([render opts v] in hiccup, or render's result)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.print :as print] [seon.print.select :as select] [seon.config :as config]
-            [clojure.string :as str] [clojure.walk] [datahike.api :as d] [datahike.db.utils :as dbu] [seon.web.html :as h] [seon.ratom :as ratom] [seon.profile :as profile]))
+            [clojure.string :as str] [clojure.walk] [datahike.api :as d] [datahike.reads :as reads] [datahike.db.utils :as dbu] [seon.web.html :as h] [seon.ratom :as ratom] [seon.profile :as profile]))
 
 (defn parents
   "The named schemas k's form extends ([:and p ...] or [:merge p ...])."
@@ -263,7 +263,7 @@
   "A walk of a render of ctx: its source (src, {:ref r :changes f}: the reference ctx is, seon.ctx/ctx, and its
   one diff, seon.ctx/changes), the db its db renders read (db-fn, called when one runs) and its
   root call. Holds, in this process, the one cache: each component's reaction, args, output and
-  db reads ({key entry}), its render queue (the keys a change reached), mount counter and ledger
+  db reads ({key entry}), an index from read key to the components that read it, the marker of each form drawn, its render queue (the keys a change reached), mount counter and ledger
   (calls, hits, misses and allocation by render var), and the render vars it watches: each it drew, once,
   whose redefinition (a defn at the REPL: Clojure's watch on a var's root) queues that var's components
   for the next flush!, found in the cache when it fires. A cold walk (root drawing a branch) is a
@@ -271,7 +271,7 @@
   {:malli/schema [:=> [:cat :map :seon.host/fn [:vector :any]] :map]}
   [src db-fn root]
   {:src src :db db-fn :root root :cache (volatile! {}) :queue (volatile! #{}) :mounts (volatile! 0)
-   :ledger (volatile! {}) :out (volatile! nil) :db-keys (volatile! #{}) :watched (volatile! #{}) :inputs (volatile! {})})
+   :ledger (volatile! {}) :out (volatile! nil) :db-keys (volatile! #{}) :readers (volatile! {}) :forms (volatile! {}) :watched (volatile! #{}) :inputs (volatile! {})})
 
 (defn- led!
   "Count k (:hit, :miss, :same) for render var f in w's ledger, with the ticks and bytes a run took."
@@ -296,10 +296,16 @@
       (if (map? (first more)) (into [tag (merge (first more) attrs)] (rest more)) (into [tag attrs] more)))
     :else [:div attrs hc]))
 
+(defn- forget-readers!
+  "Component k out of walk w's index of readers, for the read keys it held. See docs/render.md#components."
+  {:malli/schema [:=> [:cat :map [:vector :any] [:maybe [:set :any]]] :nil]}
+  [w k read-keys]
+  (doseq [rk read-keys] (vswap! (:readers w) update rk disj k)))
+
 (defn render!
   "Component [f opts & children] drawn in walk w: its marker [::child key], its output kept in w's
   cache. Skipped when its children are = to last time's (views by source and path) and nothing it
-  read changed: no reaction queued it and no transaction (w's :datoms) touched its db reads;
+  read changed: no reaction and no transaction (`flush!`, by what it read) queued it;
   otherwise run in its reaction (seon.ratom/run-in-reaction), opts filled with the view of ctx
   (:seon.ctx/ctx) and the db (:seon.db/db) it declares, a db render under d/with-reads, and its
   output drawn (emit) with its root element's id its key. An output = to last time's is the
@@ -311,8 +317,7 @@
     (vswap! (:children env) conj k)
     (if (and prev (= opts (:opts prev)) (= (count children) (count (:args prev)))
              (every? true? (map ratom/view= children (:args prev)))
-             (not (contains? @(:queue w) k))
-             (not (and (:reads prev) (seq (:datoms env)) (d/reads-touched? (:reads prev) (:datoms env)))))
+             (not (contains? @(:queue w) k)))
       (do (led! w f :hit nil nil) [::child k])
       (let [args (mapv ratom/fresh children)
             db? (contains? ks :seon.db/db)
@@ -350,7 +355,8 @@
                        (ratom/run-in-reaction draw k (fn [k] (vswap! (:queue w) conj k)) {}))
             bytes (- (profile/alloc-bytes) a0)
             children @kids
-            same? (and prev (= out (:out prev)))]
+            same? (and prev (= out (:out prev)))
+            read-keys (some-> @reads seq d/reads-index)]
         (vswap! (:queue w) disj k)
         (doseq [c (:children prev) :when (not (some #{c} children))] (unmount! w c))
         (led! w f (if same? :same :miss) nil bytes)
@@ -358,9 +364,11 @@
         ;; merged: its written html (placed-units) stays while its revision does
         (vswap! (:cache w) update k merge {:f f :opts opts :args args :rx rx :out (if same? (:out prev) out) :children children
                                     :order order :id id :rev (if same? (:rev prev) (inc (:rev prev 0))) :data @data
-                                    :reads (some-> @reads seq d/reads-index)})
+                                    :reads read-keys})
         ;; the components that read the db: the ones a transaction's datoms are matched against
         (vswap! (:db-keys w) (if (seq @reads) conj disj) k)
+        (forget-readers! w k (:reads prev))
+        (doseq [rk read-keys] (vswap! (:readers w) update rk (fnil conj #{}) k))
         [::child k]))))
 
 (defn unmount!
@@ -372,6 +380,8 @@
     (vswap! (:cache w) dissoc k)
     (vswap! (:queue w) disj k)
     (vswap! (:db-keys w) disj k)
+    (forget-readers! w k (:reads c))
+    (some->> (:form c) (vswap! (:forms w) dissoc))
     (doseq [ch (:children c)] (unmount! w ch)))
   nil)
 
@@ -399,7 +409,16 @@
     ;; lists only (draw's sels): not drawn when none of them names it, drawn whole when one does
     (and (vector? x) (:only env) (:inside env) (var? (first x)) (:seon.render/list (meta (first x))))
     (when ((:only env) (str "#" (:seon.render/list (meta (first x))))) (render! w (first x) (or (second x) {}) (drop 2 x) (dissoc env :only)))
-    (and (vector? x) (seq (inputs-in w (first x)))) (render! w (first x) (or (second x) {}) (drop 2 x) env)
+    ;; a form drawn before whose component nothing queued: its marker, with nothing asked of it (a list's earlier
+    ;; members cost the list a lookup each). Only plain arguments: a view's equality reads the source
+    (and (vector? x) (var? (first x)) (when-let [k (get @(:forms w) x)] (and (contains? @(:cache w) k) (not (contains? @(:queue w) k)))))
+    (let [k (get @(:forms w) x)] (vswap! (:children env) conj k) [::child k])
+    (and (vector? x) (seq (inputs-in w (first x))))
+    (let [m (render! w (first x) (or (second x) {}) (drop 2 x) env)]
+      (when (every? (some-fn number? string? keyword? nil?) (drop 2 x))
+        (vswap! (:forms w) assoc x (second m))
+        (vswap! (:cache w) update (second m) assoc :form x))
+      m)
     (and (vector? x) (or (var? (first x)) (fn? (first x)))) (into [(first x)] (map ratom/realize) (rest x))
     :else (ratom/realize x)))
 
@@ -476,8 +495,11 @@
             (when (seq datoms)
               ;; a definition moved: what draws by it again. No contracted call on a move that moved none
               (when (some #(#{:var/form :schema/form} (:a %)) datoms) (queue-moved-renders! w datoms))
-              (doseq [k @(:db-keys w) :let [c (get @(:cache w) k)] :when (d/reads-touched? (:reads c) datoms)]
-                (vswap! (:queue w) conj k))))
+              ;; each datom's keys once, then who read them: what moved, whatever the components
+              (let [ks (into #{} (mapcat reads/datom-keys) datoms)]
+                (if (contains? ks :all)
+                  (vswap! (:queue w) into @(:db-keys w))
+                  (doseq [rk ks] (vswap! (:queue w) into (get @(:readers w) rk #{})))))))
           (loop []
             (when-let [k (first (sort-by #(:order (get @(:cache w) %)) (filter #(contains? @(:cache w) %) @(:queue w))))]
               ;; :only places the root's lists: below the root, a component draws whole

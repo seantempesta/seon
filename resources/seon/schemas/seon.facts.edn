@@ -159,6 +159,8 @@
  :seon.eval/turn [:and {:seon.db/index true} :int]
  :seon.eval/fns [:vector :map]
  :seon.eval/schema :qualified-keyword
+ ;; its value has a render of its own, so the page's tiles find it with no walk of every eval (seon.render.ui/tiles)
+ :seon.eval/has-render :boolean
  :seon.eval/basis [:map [:t :int] [:branch :seon.db/branch]]
  ;; an agent: one entity per agent per boot of its root (an id like :a3 starts again each boot),
  ;; named by its key (seon.task/agent-key: "<boot>/<id>"), a content id so root's entity on main
@@ -213,7 +215,7 @@
                      [:seon.eval/id :seon.eval/id] [:seon.eval/agent :seon.eval/agent] [:seon.eval/by {:optional true} :seon.eval/by]
                      [:seon.eval/code :seon.eval/code] [:seon.eval/intent {:optional true} :seon.eval/intent]
                      [:seon.eval/call-id {:optional true} :seon.eval/call-id]
-                     [:seon.eval/schema {:optional true} :seon.eval/schema] [:seon.eval/basis {:optional true} :seon.eval/basis]
+                     [:seon.eval/schema {:optional true} :seon.eval/schema] [:seon.eval/has-render {:optional true} :seon.eval/has-render] [:seon.eval/basis {:optional true} :seon.eval/basis]
                      [:seon.eval/fns {:optional true} :seon.eval/fns] [:seon.eval/turn {:optional true} :seon.eval/turn]
                      [:seon.eval/response :seon.eval/response] [:seon.eval/opened {:optional true} :seon.eval/opened]]
  ;; an entity's record (seon.ctx, :seon.ctx/pattern: Datahike's pull syntax as data, docs/ctx.md#the-pattern;
