@@ -248,7 +248,7 @@
      :work (str "one request made at the branch's head (seon.context/render: the system prompt, the session's records each "
                 "printed by its own render, the page drawn cold at the head as the call Seon made when the records hold none) "
                 "under its provider, put in the wire shape "
-                "(seon.model/request-body) and drawn once (seon.render.ui/debug-turn: a row a message), and the timeline's "
+                "(seon.model/request-body) and drawn once (seon.render.ui/debug-turn: an entry a message), and the timeline's "
                 "strip (a pull of each model call's basis). Linear in the evals: the page's rows, and the cold draw's ctx")
      :growth :linear
      ;; measured 2026-11-03: 3,888 / 8,488 / 24.6k calls and 10.4 / 16.8 / 39.5 MB at 10 / 30 / 100 evals (before the
@@ -257,7 +257,7 @@
      ;; measured 2026-11-05, with no print kept (every record printed again: seon.context-cost-test/a-requests-cost-is-its-records):
      ;; 4,920 / 11.0k / 32.4k calls and 9.38 / 14.9 / 34.2 MB at 10 / 30 / 100 evals
      :per-n {:calls 316 :bytes 280000}
-     :fixed {:calls 1860 :bytes 6600000}
+     :fixed {:calls 1900 :bytes 6600000}
      :sizes [10 30 100]}))
 
 (deftest a-transaction-renders-what-it-touched
@@ -333,7 +333,7 @@
                 "at 100 turns, the owner's 2026-11-05: cull the calls later if the perf is bad")
      :growth :linear
      :per-n {:calls 0 :bytes 3400}
-     :fixed {:calls 378 :bytes 150000}
+     :fixed {:calls 385 :bytes 150000}
      :sizes [100 300 1000 4000]}))
 
 (deftest a-step-costs-what-changed

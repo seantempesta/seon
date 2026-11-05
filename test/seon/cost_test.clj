@@ -87,6 +87,14 @@
     (is (< 1.9 (:exponent (first (:steeper v))) 2.1))
     (is (not (:ok? v)))))
 
+;; docs/cost.md#how-growth-is-judged: a flat cost's own variance past its fixed part is no shape (1.91 MB +400 B, +1,424 B read n^1.83 and
+;; held a finished agent's merge for 30 turns); a real growth on the same base is still steeper
+(deftest a-flat-costs-variance-is-not-growth
+  (let [row (fn [n b] {:n n :measured {:bytes b} :expected {:bytes 2000000.0}})
+        e (assoc linear :fixed {:bytes 2000000.0} :per-n {:bytes 0.0} :sizes [10 40 80])]
+    (is (empty? (:steeper (cost/judge e [(row 10 1912208.0) (row 40 1912608.0) (row 80 1913632.0)]))))
+    (is (seq (:steeper (cost/judge e [(row 10 1000000.0) (row 40 1160000.0) (row 80 1640000.0)]))) "growth past the floor is still judged")))
+
 (deftest a-speedup-never-reads-as-steeper
   ;; task seon.cost/a-speedup-never-reads-as-steeper: reach-update on Jolt 0d39edc3, cheaper at
   ;; both sizes than its estimate; with the stated :fixed (420k) taken off, 7k was left at n=100
