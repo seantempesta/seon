@@ -876,7 +876,7 @@
           _ (is (true? (:ok r)))
           [st _] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:seon.message/id "m1" :seon.message/from "root" :seon.message/branch :a1 :seon.message/body "from main"}] :dest {:rid 1}})
           bc (d/connect (assoc cfg :branch ab))
-          _ (d/transact bc {:tx-data [{:seon.message/id "r1" :seon.message/from "a1" :seon.message/reply-to "m1" :seon.message/body "from a1"}] :tx-meta (pdb/tx-meta ab)})
+          _ (d/transact bc {:tx-data [{:seon.message/id "r1" :seon.message/from "a1" :seon.message/body "from a1"}] :tx-meta (pdb/tx-meta ab)})
           _ (d/release bc)
           [st _] (step #'writer/writer-proc st :in {:op :agent-commit :branch :a1})
           [_ r2] (union-of st)]

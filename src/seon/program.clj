@@ -204,14 +204,14 @@
   quoted-names, data, not references; a string that opens a form is code sent to a REPL, read
   as one), the ops of the requests it builds (:ops: a map's constant keyword under :op), the qualified keywords its constants name (:keywords: the attributes, config keys
   and schema entries its code reads or writes), the banned vars it references, the
-  calls it bounds by a clock (:timeouts: deref with a timeout), its catch clauses
+  its catch clauses
   (:catches, each {:class :answers}), the classes it constructs (:news, as the analyzer names them, which
   `account` makes references), the namespaces it requires, and whether it changes its namespace's
   environment (:env?)."
   {:malli/schema [:=> [:cat :map] :map]}
   [node]
   (let [acc (volatile! {:defs [] :inline-defs #{} :methods [] :impls [] :multis #{} :refs #{} :quoted #{} :keywords #{} :ops #{} :banned #{} :requires #{} :env? false
-                        :timeouts #{} :catches #{} :news #{}})]
+                        :catches #{} :news #{}})]
     ((fn walk [n in-fn?]
        (case (:op n)
          :def (if in-fn?
@@ -249,8 +249,6 @@
                 (vswap! acc update :ops conj k))
          :try (vswap! acc update :catches into (map sedn/encode) (catches n))
          :invoke (let [f (invoked n)]
-                   (when (and (= 'clojure.core/deref f) (= 3 (count (:args n))))
-                     (vswap! acc update :timeouts conj 'clojure.core/deref))
                    ;; (resolve 'ns/x): the var it looks up by name is one it references
                    (when-some [s (when (resolvers f) (resolved f (mapv datum (:args n))))]
                      (vswap! acc update :refs conj s)))
@@ -290,7 +288,7 @@
   [as]
   (reduce (fn [a b] (merge-with (fn [x y] (if (boolean? x) (or x y) (into x y))) a b))
           {:defs [] :inline-defs #{} :methods [] :impls [] :multis #{} :refs #{} :quoted #{} :keywords #{} :ops #{} :banned #{} :requires #{} :env? false
-           :timeouts #{} :catches #{} :news #{}}
+           :catches #{} :news #{}}
           as))
 
 (defn root-of
@@ -442,7 +440,7 @@
                :quoted (:quoted a) :ops (:ops a) :requires (:requires a) :banned (:banned a) :inline-defs (:inline-defs a)
                ;; its code's keywords and its contracts': the data it operates on, read once here
                :keywords (into (:keywords a) (comp (keep :contract) (mapcat (comp names sedn/decode))) defs)
-               :timeouts (:timeouts a) :catches (:catches a)}
+               :catches (:catches a)}
         lead (assoc :lead lead)
         order (assoc :order order)))))
 
@@ -480,7 +478,7 @@
 (def ^:private form-sets
   "A form's card-many facts, as stored and as its row (form-row) and its account name them."
   [[:form/refs :refs] [:form/quoted :quoted] [:form/keywords :keywords] [:form/ops :ops] [:form/requires :requires] [:form/banned :banned] [:form/inline-defs :inline-defs]
-   [:form/timeouts :timeouts] [:form/catches :catches]])
+   [:form/catches :catches]])
 
 (def ^:private form-set-keys
   "form-sets as a map, {attribute -> row key}: what form-row folds one seek's datoms by. See
