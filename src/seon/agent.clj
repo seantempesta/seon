@@ -561,42 +561,6 @@
   {:malli/schema [:=> [:cat :string] :string]}
   [sym] (str "Unable to resolve symbol: " sym " in this context"))
 
-(defn- near-fix
-  "What an eval error says to do next, in Clojure's own forms, or nil: a private var is reached through its var
-  (`(#'ns/f ...)` calls it, `@#'ns/f` reads it); a var a namespace does not hold is named where the same name
-  is held, and by the nearest names there (Jolt's did-you-mean ranking, as my.agent/no-var); an alias another
-  namespace has is named with the form that makes it one here; a schema malli does not know is named with the
-  nearest it does (`:inst`: `inst?`). jd is the error's Jolt diagnostics, msg its message, d its ex-data. See
-  docs/agent.md#the-repl."
-  {:malli/schema [:=> [:cat :map :string [:maybe :map]] [:maybe :string]]}
-  [jd msg d]
-  (let [sym (:jolt.error/symbol jd)
-        near (fn [s xs] (not-empty (jolt.analyzer/suggestions-for s (map str xs))))
-        listed (fn [xs] (str/join ", " xs))]
-    (cond
-      (= :analyze/private-var (:jolt.error/kind jd))
-      (str sym " is private: call it (#'" sym " ...) or read it @#'" sym)
-
-      (= :analyze/unknown-namespace (:jolt.error/kind jd))
-      (let [a (:jolt.error/namespace jd)
-            held (distinct (for [n (all-ns) [k t] (ns-aliases n) :when (= a (str k))] (ns-name t)))]
-        (if (seq held)
-          (str a " is no alias here, and is " (listed (for [t held] (str "an alias of " t))) " elsewhere: write "
-               (listed (for [t held] (str t "/" (name (symbol sym))))) ", or (alias '" a " '" (first held) ") first")
-          (when-let [ns-near (near a (map ns-name (all-ns)))] (str "no namespace " a ": did you mean " (listed ns-near)))))
-
-      (re-find #"^No such var: " msg)
-      (let [[_ n v] (re-matches #"No such var: (.+)/(.+)" msg)
-            same (for [x (all-ns) :when (not= (str (ns-name x)) n) :let [f (find-var (symbol (str (ns-name x)) v))] :when f] (str (ns-name x) "/" v))
-            close (some-> (find-ns (symbol (or n ""))) ns-publics keys (->> (near v)))]
-        (when (or (seq same) close)
-          (str (when (seq same) (str v " is held by " (listed same))) (when (and (seq same) close) "; ")
-               (when close (str "in " n ", the nearest are " (listed close))))))
-
-      (= :malli.core/invalid-schema (:type d))
-      (let [x (:schema (:data d))]
-        (when-let [c (near (str x) (keys (malli.core/default-schemas)))] (str "did you mean " (listed c)))))))
-
 (defn on-the-wire
   "Response r as its reply carries it: its value only when it is plain data (seon.contract/plain?: what the socket and the
   wire carry), never the printed text back, which is no EDN once the eval printed. See
@@ -628,15 +592,19 @@
            sym (:jolt.error/symbol jd)
            unresolved? (and sym (= :analyze/unresolved-symbol (:jolt.error/kind jd)))
            m (if unresolved? (unresolved-message sym) (step/error-msg e))
-           m (if (= :malli.core/invalid-schema (:type d)) (str "malli has no schema " (:schema (:data d))) m)
-           fix (near-fix jd m d)
+           ;; a schema malli has no name for (ex-data :data :schema): its message names it, and the nearest it knows
+           schema (when (= :malli.core/invalid-schema (:type d)) (:schema (:data d)))
+           m (if schema (str "malli has no schema " schema) m)
+           near (when schema (jolt.analyzer/suggestions-for (str schema) (map str (keys (malli.core/default-schemas)))))
            ;; a REPL name in a definition: the program resolves as written, so the definition calls it qualified
            repl (when unresolved? (repl-name (symbol sym)))
            causes (mapv #(str (type %) ": " (ex-message %)) (take-while some? (rest (iterate ex-cause e))))]
        (contract/error :seon.agent/eval-error op m
                        (cond-> (assoc jd :class (str (type e)))
                          (seq (:jolt.error/suggestions jd)) (assoc :seon.error/fix (str "did you mean " (str/join ", " (:jolt.error/suggestions jd))))
-                         fix (assoc :seon.error/fix fix)
+                         (seq near) (assoc :seon.error/fix (str "did you mean " (str/join ", " near)))
+                         ;; Clojure's own forms reach a private var
+                         (= :analyze/private-var (:jolt.error/kind jd)) (assoc :seon.error/fix (str sym " is private: call it (#'" sym " ...) or read it @#'" sym))
                          repl (assoc :seon.error/fix (str sym " is the REPL's: a definition is the program, which resolves as written, so it calls " repl))
                          other (assoc :data other)
                          heap (assoc :jolt/heap heap)

@@ -12,7 +12,7 @@
             [seon.print :as print] [seon.print.select :as select] [seon.ref :as ref] [seon.doc :as doc] [seon.config :as cfg] [seon.model :as model] [seon.vector :as vector] [seon.ctx :as ctx] [seon.ratom :as ratom] [seon.agent :as agent] [seon.program :as program] [seon.proofs :as proofs] [seon.problems :as problems] [seon.reconcile :as r] [seon.edn :as sedn] [clojure.edn] [hasch.core :as hasch]))
 
 (def help-page
-  "The help page, docs/agent.md: what my.agent/help answers, each section on demand. Main holds
+  "The help page, docs/agent.md: what `doc` answers of an anchor, each section on demand. Main holds
   it as the wiki's sections from root's boot on (seon.root/start!)."
   "docs/agent.md")
 
@@ -26,7 +26,7 @@
   "The system prompt, docs/prompt.md: what every agent reads first (its system message, the same
   bytes for every agent and turn, so a provider caches it): the standard format's short prompt
   (the owner's ruling: the model's context is the standard format; the help page is read on
-  demand, my.agent/help). Main holds it as the wiki's sections, as the help page."
+  demand, doc). Main holds it as the wiki's sections, as the help page."
   "docs/prompt.md")
 
 (defn system-text
@@ -522,7 +522,7 @@
   namespace, or a namespace cited itself) and of their proofs, once each, each {:names [...] :ns-form form}: its
   names the task cites or its proofs call (their forms' :form/refs, as :proved holds them), and the form that reads
   its ns form (its requires and aliases) and a line per definition, ``(clojure.repl/source ns)`` (the form that shows
-  a namespace's requires; my.agent/help does not hold them). It costs what it shows, never the namespace's size.
+  a namespace's requires; doc does not hold them). It costs what it shows, never the namespace's size.
   See docs/render.md#a-part-answers-data."
   {:malli/schema [:=> [:cat :map] [:map-of :symbol :map]]}
   [c]

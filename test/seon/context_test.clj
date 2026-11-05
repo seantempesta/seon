@@ -293,7 +293,7 @@
                                                :seon.task/plan "Read `demo.calc`, `:x.s/block` and `bin/env`."}]))
         t (:tree (ctx/build db (pdb/eid db :seon.task/id "demo/n") :b))
         m (into {} (for [c (vals (:cites t))] [(or (:seon.cite/address c) (:seon.cite/name c)) (seon.render.ui/cite-model {} c)]))]
-    (is (= {:cites 'demo.calc :depth :doc :read '(my.agent/help (quote demo.calc)) :doc {:seon.print/prose "Adds. More."}} (m 'demo.calc))
+    (is (= {:cites 'demo.calc :depth :doc :read '(doc demo.calc) :doc {:seon.print/prose "Adds. More."}} (m 'demo.calc))
         "a namespace: its doc, and the form that lists its definitions")
     (is (= "[:map [:x.s/from :int]]" (:seon.print/code (:form (m :x.s/block)))) "a schema key: its form as written")
     (is (str/includes? (:seon.print/code (:change (m :x.s/block))) "(my.schema/register! :x.s/block") "and how it changes at the REPL")
@@ -498,7 +498,7 @@
     (is (= (print/code src) (:source view)) "the part holds it whole, as data")
     (is (< (:context seon.print/budgets) (select/estimate src)) "a source over the context's budget")
     (is (< (count html) (count src)) "the page cuts it where it is written")
-    (is (str/includes? html "my.agent/help") "its cut names the form that reads the rest")
+    (is (str/includes? html "my.agent/doc-of") "its cut names the form that reads the rest")
     (is (< (select/estimate model) (select/estimate src)) (str "the model reads it cut too, at the printer's budget: " (select/estimate model) " tokens"))
     (is (str/includes? model "(clojure.repl/source ctx-big/big)") "and the cut names the form that reads the rest")))
 

@@ -139,8 +139,10 @@
   for the registry key of that name when db has one; and \"write it\" only when this agent's task
   cites sym in its plan (a plan's new function, not yet written; in-ns makes a new namespace).
   A namespace's name that names one is not missing (source answers what it records)."
-  {:malli/schema [:=> [:cat :seon.host/db :symbol] [:maybe :my.agent/no-var]]}
-  [db sym]
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] :symbol] [:maybe :my.agent/no-var]]}
+  [db0 sym]
+  ;; root holds no branch: its names are the process's alone (an empty db has no vars)
+  (let [db (or db0 (d/empty-db))]
   (when-not (or (pdb/eid db :var/name sym) (var? (ns-resolve *ns* sym))
                 (and (not (namespace sym)) (or (find-ns sym) (pdb/eid db :ns/name sym))))
     (let [nsym (some-> (namespace sym) symbol)
@@ -162,7 +164,7 @@
                            (when key? (str "; " k " is a registry key: (my.agent/callers " k ")"))
                            (when cited? (str "; your task cites it, so write it: (in-ns '" nsym ") (defn " (name sym) " ...)"))
                            (when threw (str "; your plan's parse threw (" threw "): its cites read from the stored ones (seon.task/task-cites)")))
-                      (cond-> {:name sym :nearest nearest} key? (assoc :ask (str "(my.agent/callers " k ")")))))))
+                      (cond-> {:name sym :nearest nearest} key? (assoc :ask (str "(my.agent/callers " k ")"))))))))
 
 (defn callers
   "The program vars whose recorded definition names x on this branch, sorted, x itself left out
@@ -494,15 +496,12 @@
                (println "Caused by:" type message)))
          (println "pst prints an exception; this is" (class e)))))
 
-(defn- missing
-  "Why sym names nothing, in words, with the nearest real names: no-var's answer on a branch; in a process with no
-  branch (root), Jolt's did-you-mean ranking over the namespaces and this namespace's names. Never nil, never blank."
+(defn- none
+  "Why sym is none, in words: no-var's answer with the nearest names (on root, which holds no branch, the process's alone);
+  for a var no recorded source holds, that. Never nil, never blank."
   {:malli/schema [:=> [:cat :symbol] :string]}
   [sym]
-  (if-let [db (:db @agent/state)]
-    (str (or (:seon.error/message (no-var db sym)) (str sym " names something here")))
-    (let [near (jolt.analyzer/suggestions-for (str sym) (map str (concat (map ns-name (all-ns)) (keys (ns-map *ns*)))))]
-      (str sym " names no var or namespace here" (when (seq near) (str "; nearest: " (str/join ", " near)))))))
+  (or (:seon.error/message (no-var (:db @agent/state) sym)) (str sym " has no recorded source in this process")))
 
 (defmacro source
   "Print the recorded source of the definition named by sym (as clojure.repl/source does). A
@@ -514,7 +513,7 @@
     `(let [x# ~x]
        (println (if (or (symbol? x#) (var? x#))
                   (let [s# (named x#)]
-                    (or (source-fn s#) (if (resolve s#) (str s# " has no recorded source in this process") (#'my.agent/missing s#))))
+                    (or (source-fn s#) (#'my.agent/none s#)))
                   (str "Source not found for " x# ": source reads a name or a var"))))))
 
 (defn- help-nearest
@@ -570,19 +569,20 @@
                    :read-one "(doc \"docs/<page>.md\") lists a page's sections; (doc \"docs/<page>.md#<section>\") reads one; (doc 'ns.name) a namespace, every definition a line; (doc :ns/key) a schema key"})))))
 
 (defmacro doc
-  "Print the documentation of x as clojure.repl/doc does: a var, a namespace or a special form, named as written (a
-  namespace also lists its definitions, a line each). And what is Seon's, which a form that is no symbol reads as a
-  value: a schema key `(doc :var/form)` or a wiki address `(doc \"docs/storage.md#history\")` answers its data. A name
-  that is none says so in words, with the nearest names."
+  "Print the documentation of x and answer nil, as clojure.repl/doc does: a var, a namespace or a special form, named as written
+  or quoted (a namespace also lists its definitions, a line each). And what is Seon's: a schema key `(doc :var/form)` or a
+  wiki address `(doc \"docs/storage.md#history\")` prints what `doc-of` answers. A name that is none says so in words, with
+  the nearest names."
   [x]
-  (if-not (symbol? x)
-    `(my.agent/doc-of ~x)
-    (let [special ('{& fn catch try finally try} x)]
-      (cond (or special (@#'clojure.repl/special-doc-map x)) `(#'clojure.repl/print-doc (#'clojure.repl/special-doc '~(or special x)))
-            (find-ns x) `(do (#'clojure.repl/print-doc (#'clojure.repl/namespace-doc (find-ns '~x)))
-                             (when (:db @seon.agent/state) (doseq [r# (my.agent/ls '~x)] (println (str "  " (:at r#) (when (:text r#) (str "  " (:text r#))))))))
-            (resolve x) `(#'clojure.repl/print-doc (meta (var ~x)))
-            :else `(println (#'my.agent/missing '~x))))))
+  (let [x (if (and (seq? x) (= 'quote (first x))) (second x) x)]
+    (if-not (symbol? x)
+      `(do (println (:text (seon.print/print-value (my.agent/doc-of ~x) {:budget Integer/MAX_VALUE}))) nil)
+      (let [special ('{& fn catch try finally try} x)]
+        (cond (or special (@#'clojure.repl/special-doc-map x)) `(#'clojure.repl/print-doc (#'clojure.repl/special-doc '~(or special x)))
+              (find-ns x) `(do (#'clojure.repl/print-doc (#'clojure.repl/namespace-doc (find-ns '~x)))
+                               (when (:db @seon.agent/state) (doseq [r# (my.agent/ls '~x)] (println (str "  " (:at r#) (when (:text r#) (str "  " (:text r#))))))))
+              (resolve x) `(#'clojure.repl/print-doc (meta (var ~x)))
+              :else `(println (#'my.agent/none '~x)))))))
 
 (defmacro dir
   "Print a sorted directory of the public vars of the namespace nsname (an alias too), as clojure.repl/dir does. A name
@@ -591,7 +591,7 @@
   `(let [n# '~nsname]
      (cond (or (find-ns n#) (get (ns-aliases *ns*) n#)) (doseq [v# (clojure.repl/dir-fn n#)] (println v#))
            (resolve n#) (println (str n# " is a var, not a namespace: (doc " n# ") or (source " n# ")"))
-           :else (println (#'my.agent/missing n#)))))
+           :else (println (#'my.agent/none n#)))))
 
 (defn help
   "The system prompt as an agent is sent it (seon.context/system-text), then this namespace's forms: the map of what

@@ -1953,23 +1953,6 @@
     (is (str/includes? (str (:seon.error/fix em)) "(#'seon.reader/fence") (pr-str em))
     (is (str/includes? (str (:seon.error/fix em)) "@#'seon.reader/fence") (pr-str em))))
 
-(deftest a-missing-var-names-the-vars-of-that-name-elsewhere
-  ;; data: 6 evals named a var a namespace does not hold (seon.print/show, held by seon.print.select), each read
-  ;; "No such var" and spent a turn finding it; the error names the same name where it is, as forms
-  (let [em (thrown "(seon.print/show 1)")]
-    (is (str/includes? (str (:seon.error/message em)) "No such var: seon.print/show"))
-    (is (str/includes? (str (:seon.error/fix em)) "seon.print.select/show") (pr-str em))))
-
-(deftest an-alias-of-another-namespace-is-named
-  ;; data: ref/references in a namespace with no alias ref; the error names the namespace the alias means elsewhere and the
-  ;; Clojure form that makes it one here
-  (create-ns 'x.alias-probe)
-  (binding [*ns* (the-ns 'x.alias-probe)] (alias 'rdr 'seon.reader))
-  (let [em (thrown "(rdr/forgive \"a\")")]
-    (is (= :analyze/unknown-namespace (:jolt.error/kind em)))
-    (is (str/includes? (str (:seon.error/fix em)) "seon.reader/forgive") (pr-str em))
-    (is (str/includes? (str (:seon.error/fix em)) "(alias 'rdr 'seon.reader)") (pr-str em))))
-
 (deftest a-schema-malli-does-not-know-is-named-with-its-nearest
   ;; data: a contract written [:time :inst] answered ":malli.core/invalid-schema" and nothing else; six turns went to
   ;; finding that the predicate is the symbol inst?

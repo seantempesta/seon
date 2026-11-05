@@ -94,29 +94,18 @@
          (let [r2 (repl/edit! 'x.repl-edit/f "c" "d")]
            (is (= :ambiguous (:seon.repl/refused-because r2)) "there more than once: refused")
            (is (<= 2 (count (:seon.repl/lines r2))) "naming each candidate's line"))
-         ;; md-scan #17: an edit one paren short was repaired far from it and failed as cond there
+         ;; an edit one paren short is read as a reply's code is: the delimiter closed at the definition's end, said in :repaired
+         ;; (data, 12120 ref/an-alias: seven edits in a row on one missing paren); a closer more is a comma, said too
          (let [r (repl/edit! 'x.repl-edit/g "(+ 1 1)" "(+ 1 (inc 1)")]
-           (is (= :unbalanced (:seon.repl/refused-because r)) "a delimiter the new text leaves open: refused, never repaired")
-           (is (str/includes? (:seon.error/message r) "opens 1 more (") (:seon.error/message r))
-           (is (str/includes? (:seon.error/message r) "a ( left open at its line 1, \"(+ 1 (inc 1)\"") (str "and where (md-scan bench-b15): " (:seon.error/message r)))
-           (is (= 2 ((resolve 'x.repl-edit/g))) "nothing changed"))
-         (let [r (repl/edit! 'x.repl-edit/g "(+ 1 1)" "(+ 1 [1)]")]
-           (is (= :unbalanced (:seon.repl/refused-because r)) (str "a ( met by ], as many of each: refused, never read as \"Unmatched delimiter\": " (pr-str r)))
-           (is (str/includes? (:seon.error/message r) "the ) at its line 1") (:seon.error/message r))
-           (is (str/includes? (:seon.error/message r) "pairs a delimiter with another kind") (:seon.error/message r)))
-         ;; an old text that is itself unbalanced keeps its own unpaired delimiters: only what the edit made is named,
-         ;; at its line (the review: an extra ( added before old's own was named at old's line)
-         (repl/eval-string "(in-ns 'x.repl-edit) (defn u [x]\n  (let [a (inc x)\n        b 2]\n    (+ a b)))\n(in-ns 'user)" {})
-         (let [r (repl/edit! 'x.repl-edit/u "(let [a (inc x)" "(do\n  (let [a (inc x)")]
-           (is (= :unbalanced (:seon.repl/refused-because r)) (pr-str r))
-           (is (str/includes? (:seon.error/message r) "a ( left open at its line 1, \"(do\"") (str "the wrapping ( named, not old's own: " (:seon.error/message r)))
-           (is (not (str/includes? (:seon.error/message r) "line 2")) (:seon.error/message r)))
-         (let [r (repl/edit! 'x.repl-edit/u "(let [a (inc x)" "(let [a (inc x)\n        z (inc")]
-           (is (str/includes? (:seon.error/message r) "a ( left open at its line 2, \"z (inc\"") (str "an appended ( named at its own line: " (:seon.error/message r))))
-         (let [r (repl/edit! 'x.repl-edit/g "(+ 1 1)" "(+ 1 1))")]
-           (is (= :unbalanced (:seon.repl/refused-because r)) "a closer more")
-           (is (str/includes? (:seon.error/message r) "closes 1 more )") (:seon.error/message r))
-           (is (str/includes? (:seon.error/message r) "the old text ends \")\" (1), the new text \"))\" (2)") (str "the closing runs side by side: " (:seon.error/message r))))
+           (is (= 3 ((resolve 'x.repl-edit/g))) (pr-str r))
+           (is (= ")" (get-in r [:repaired 0 :inserted])) (str "the repair is said: " (pr-str (:repaired r)))))
+         (let [r (repl/edit! 'x.repl-edit/g "(+ 1 (inc 1))" "(+ 1 1))")]
+           (is (= 2 ((resolve 'x.repl-edit/g))) (pr-str r))
+           (is (= "," (get-in r [:repaired 0 :inserted])) (str "a closer more is a comma, said: " (pr-str (:repaired r)))))
+         (repl/eval-string "(in-ns 'x.repl-edit) (defn d\n  \"Doc one.\n  Doc two.\"\n  [x]\n  (inc x)) (in-ns 'user)" {})
+         (let [r (repl/edit! 'x.repl-edit/d [["Doc two.\"\n  [x]" "Doc two.\"\n  ([x] (d x 0))\n  ([x y]"]])]
+           (is (= 2 ((resolve 'x.repl-edit/d) 1 5)) "an arity opened inside the docstring's change and never closed: closed at the end, and it runs")
+           (is (seq (:repaired r)) (pr-str r)))
          (let [r (repl/edit! 'x.repl-edit/g "(+ 1 1)" "(str \\) \")\" ;)\n 1)")]
            (is (nil? (:seon.repl/refused-because r)) (str "a closer in a character literal, a string or a comment is none: " (pr-str r)))
            (is (= "))1" ((resolve 'x.repl-edit/g)))))
@@ -144,10 +133,6 @@
            (is (= :overlap (:seon.repl/refused-because r)) (str "two changes whose texts overlap, neither the other: " (pr-str r))))
          (let [r (repl/edit! 'x.repl-edit/l "" "x")]
            (is (= :empty (:seon.repl/refused-because r)) (str "an empty old text is refused, never matched everywhere: " (pr-str r))))
-         (let [r (repl/edit! 'x.repl-edit/l [["(loop [i 0" "(loop [i 1"] ["(+ acc i)" "(+ acc i"]])]
-           (is (= :unbalanced (:seon.repl/refused-because r)) "a closer the whole edit lacks is refused")
-           (is (str/includes? (:seon.error/message r) "change 2 of 2") (str "naming which: " (:seon.error/message r)))
-           (is (= 16 ((resolve 'x.repl-edit/l) 4)) "and nothing changed"))
          ;; a form wrapped by two changes, its opener in one and its closer in another, leaves the definition balanced
          (repl/eval-string "(in-ns 'x.repl-edit) (defn w [n] (let [a n]\n  (+ a 1))) (in-ns 'user)" {})
          (let [r (repl/edit! 'x.repl-edit/w [["(let [a n]" "(inc (let [a n]"] ["(+ a 1)))" "(+ a 1))))"]])]
@@ -155,14 +140,6 @@
            (is (= 4 ((resolve 'x.repl-edit/w) 2)) "and it runs"))
          (let [r (repl/edit! 'x.repl-edit/l [["(loop [i 0" "(loop [i 0"] ["0 acc" "0 acc"]])]
            (is (= :overlap (:seon.repl/refused-because r)) (str "two changes over one text: " (pr-str r))))
-         ;; data (12120, ref/an-alias, seven edits in a row): a change that starts inside the docstring and opens an arity the
-         ;; edit never closes was refused as "a delimiter paired with another kind", naming no place; the answer names the
-         ;; delimiter left open and its line in the new definition
-         (repl/eval-string "(in-ns 'x.repl-edit) (defn d\n  \"Doc one.\n  Doc two.\"\n  [x]\n  (inc x)) (in-ns 'user)" {})
-         (let [r (repl/edit! 'x.repl-edit/d [["Doc two.\"\n  [x]" "Doc two.\"\n  ([x] (d x 0))\n  ([x y]"]])]
-           (is (= :unbalanced (:seon.repl/refused-because r)) (pr-str r))
-           (is (str/includes? (:seon.error/message r) "a ( left open at its line 1, \"(defn d\" (the definition itself: close it at its end)") (:seon.error/message r))
-           (is (not (str/includes? (:seon.error/message r) "another kind")) (:seon.error/message r)))
          (finally (reset! agent/state old) (remove-ns 'x.repl-edit)))))
 
 (deftest a-reply-comes-after-its-commit
@@ -505,7 +482,7 @@
               ["(my.schema/forms (keyword \"seon.task\" \"outcom\"))" :text ":seon.task/outcome"]
               ["(my.agent/callers (keyword \"seon.task\" \"outcom\"))" :text ":seon.schema/unknown-key"]
               ;; a help address that is no section names the sections whose text holds it
-              ["(:nearest (doc \"schema\"))" :text "docs/"]
+              ["(:nearest (my.agent/doc-of \"schema\"))" :text "docs/"]
               ["(clojure.repl/source seon.reconcile)" :text "(ns seon.reconcile"]
               ;; then every definition, privates included, a line each (pipeline 1's F4: a design took
               ;; the ns form alone for all that was recorded and spent five turns finding the privates)
@@ -755,7 +732,7 @@
   ;; did not find, the nearest addresses and the form that lists the rest, never nil or a page dump
   (let [[toc anchor other miss] (rest (at/in-agent #(vector {:op :context :agent (:agent %)}
                                                        "(doc \"docs/agent.md\")" "(doc \"done\")" "(doc \"docs/vector.md#the-model\")"
-                                                       "(doc \"references\")")))
+                                                       "(my.agent/doc-of \"references\")")))
         printed #(str (:text %))]
     (is (str/includes? (printed toc) "docs/agent.md#done") "no argument: the help page's sections at summary")
     (is (str/includes? (printed anchor) "The judge counts exactly") "an anchor of the help page")

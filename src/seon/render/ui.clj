@@ -902,7 +902,7 @@
     (cond
       ;; what reads it whole first, as code the printer shows verbatim, so a cut of the rest still names it
       ;; and how it changes, as a definition does (docs/agent.md#changing-a-doc)
-      (:seon.doc/address sec) (assoc head :read (print/code (str "(my.agent/help " (emit/string-literal address) ")"))
+      (:seon.doc/address sec) (assoc head :read (print/code (str "(doc " (emit/string-literal address) ")"))
                                      :change (print/code (str "(seon.repl/edit! " (emit/string-literal (:seon.doc/address sec)) " \"old text\" \"new text\")"))
                                      :text {:seon.print/prose (section-text sec depth)})
       ;; a task by its plan, as seon.ref/task-view shows one: its first sentence at summary, else whole
@@ -916,7 +916,7 @@
       (:schema/key sch) (if (= :summary depth)
                           (assoc head :read (list 'my.schema/forms name))
                           (assoc head :form (print/code (:schema/form sch)) :change (print/code (str "(my.schema/register! " name " '[...its new form])"))))
-      (:ns/name n) (cond-> (assoc head :read (list 'my.agent/help (list 'quote name))) (:ns/doc n) (assoc :doc {:seon.print/prose (:ns/doc n)}))
+      (:ns/name n) (cond-> (assoc head :read (list 'doc name)) (:ns/doc n) (assoc :doc {:seon.print/prose (:ns/doc n)}))
       :else (assoc head :unresolved true :problem (:unresolved ref/problem-messages)))))
 
 (defn cite
@@ -930,7 +930,7 @@
      [:summary {:class "kicker"} (str cites " · " (name depth))]
      (if text
        (markdown (:seon.print/prose text))
-       [#'render/html {:budget (config/value :seon.config.render/value-budget) :handle (list 'my.agent/help (if (string? cites) cites (list 'quote cites)))}
+       [#'render/html {:budget (config/value :seon.config.render/value-budget) :handle (list 'my.agent/doc-of (if (string? cites) cites (list 'quote cites)))}
         (dissoc m :cites :depth)])]))
 
 (def ^:private cite-joins

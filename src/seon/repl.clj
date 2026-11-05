@@ -806,43 +806,6 @@
                   (assoc :indent [(lead o) (lead s)])))))
           (range n))))
 
-(defn- unpaired-by-line
-  "The delimiters new leaves unpaired that old does not, each as its line number in new and that line's text,
-  joined as one string. d-old and d-new are their `seon.reader/delimiters`. A delimiter of new is old's when
-  it stands where old has the same one, before their common prefix ends or after their common suffix starts
-  (a fragment such as `(foo [a` is unbalanced in both). See docs/agent.md#changing-a-definition."
-  {:malli/schema [:=> [:cat :string :string :map :map] :string]}
-  [old new d-old d-new]
-  (let [n (min (count old) (count new))
-        ;; how much the two share from the front and from the back, each within what the other left
-        front (fn [limit] (loop [i 0] (if (and (< i limit) (= (.charAt ^String old i) (.charAt ^String new i))) (recur (inc i)) i)))
-        back (fn [limit] (loop [i 0] (if (and (< i limit) (= (.charAt ^String old (- (count old) 1 i)) (.charAt ^String new (- (count new) 1 i)))) (recur (inc i)) i)))
-        ;; the alignment that shares more, the back first on a tie: a wrapped form ((do (let ...)) shares its back
-        [p q] (let [p1 (front n) q1 (back (- n p1)) q2 (back n) p2 (front (- n q2))]
-                (if (> (+ p1 q1) (+ p2 q2)) [p1 q1] [p2 q2]))
-        ;; new's offset i at old's place, when it is in the shared prefix or suffix
-        old-at (fn [i] (cond (< i p) i (>= i (- (count new) q)) (- i (- (count new) (count old)))))
-        old-has (fn [k] (set (map (juxt first second) (k d-old))))
-        new-only (fn [k] (remove (fn [[c i]] (some-> (old-at i) (#(contains? (old-has k) [c %])))) (k d-new)))
-        where (fn [i] (let [l (inc (count (filter #{\newline} (subs new 0 i))))]
-                        (str "its line " l ", " (pr-str (clojure.string/trim (nth (clojure.string/split-lines new) (dec l) ""))))))]
-    (clojure.string/join "; "
-      (concat (for [[c i oc oi] (new-only :crossed)] (str "the " c " at " (where i) " closes the " oc " at " (where oi)))
-              (for [[c i] (new-only :open)] (str "a " c " left open at " (where i)))
-              (for [[c i] (new-only :stray)] (str "a " c " with nothing to close at " (where i)))))))
-
-(defn- left-open
-  "Where text leaves delimiters open (seon.reader/delimiters), as `a ( left open at its line 5, \"(let [a 1]\"` each, joined by
-  \"; \", or nil when none: what a refused or failed edit names so the slip is found where it is, never only counted.
-  See docs/agent.md#changing-a-definition."
-  {:malli/schema [:=> [:cat :string] [:maybe :string]]}
-  [text]
-  (when-let [open (seq (:open (reader/delimiters text)))]
-    (clojure.string/join "; " (for [[c i] open
-                                    :let [l (inc (count (filter #{\newline} (subs text 0 i))))]]
-                                (str "a " c " left open at its line " l ", " (pr-str (clojure.string/trim (nth (clojure.string/split-lines text) (dec l) "")))
-                                     (when (zero? i) " (the definition itself: close it at its end)"))))))
-
 (defn edit!
   "Change the definition var sym names by replacing old, exact text that occurs once in its
   recorded source (`(source sym)`), with new, then evaluating the whole new definition in its
@@ -850,17 +813,15 @@
   armed, as a typed defn would be. Given changes, a vector of [old new] pairs, every pair is checked
   so and all are applied together, then evaluated once: a change that must reach several places at
   once (a loop's bindings and each of its recurs) is one edit, since any of them alone does not
-  compile. It is read exactly as
-  written, never repaired: a repair of a whole definition is made far from the edit and reads as
-  another error there. Answers that eval's response with :edited, the var and the lines
+  compile. The new definition is read by the forgiving reader (seon.reader/forgive) as a call's code is:
+  a delimiter it leaves open is closed at the definition's end, a stray one made a comma, and each repair is the
+  answer's :repaired. Answers that eval's response with :edited, the var and the lines
   around each change; throws the evaluation's error when the new definition does not compile or load,
   its message saying nothing changed, so the eval it is called in answers it as its own :ex (an error nested in an edit's value
   could be cut from sight and read as a change that held; a caller
   outside an eval catches it, its ex-data the error map); or
   :seon.repl/edit-refused, nothing changed: no recorded source, an old not in it (with the lines that
-  hold its first line, ignoring indentation), an old there more than once (each candidate's line), an
-  edit that leaves the definition with delimiters it did not have (seon.reader/balance, over the whole edit:
-  :unbalanced, by how many of each, a form wrapped by two changes being none), two olds that overlap (:overlap), or an empty old (:empty). Exact text and one occurrence, as file editors converged
+  hold its first line, ignoring indentation), an old there more than once (each candidate's line), two olds that overlap (:overlap), or an empty old (:empty). Exact text and one occurrence, as file editors converged
   on (docs/agent.md#changing-a-definition). Given a doc's address (docs/x.md#heading) for sym, the same
   edit of the doc's own block (seon.doc/doc-source: its heading line and its text), its page loaded again
   on this branch with the new text in its place (seon.doc/edit-tx), so a doc changes as a definition does;
@@ -896,47 +857,11 @@
                                                              cands)
                                                (seq diffs) (assoc :seon.repl/differs diffs))})
                      (next at) {:refused (refuse :ambiguous (str (which k) "the old text occurs " (count at) " times: give more of it, so it is one") (lines-at at))}
-                     :else {:at (first at) :old old :new new})))
-         ;; how one change moves the delimiters: what an edit refused for leaving the definition unbalanced names
-         unbalanced (fn [k [old new]]
-                 (let [dn (reader/delimiters new) do (reader/delimiters old)]
-                   (when (or (not= (reader/delimiter-counts dn) (reader/delimiter-counts do))
-                             (< (count (:crossed do)) (count (:crossed dn))))
-                     (let [d (merge-with - (reader/delimiter-counts dn) (reader/delimiter-counts do))
-                           closer {\( \) \[ \] \{ \}}
-                           there (unpaired-by-line old new do dn)
-                           at (offsets src old)]
-                       (refuse :unbalanced (str (which k) "the new text does not balance as the old text did: it "
-                                                          (or (not-empty (clojure.string/join ", " (for [[o c] (sort-by key d) :when (not (zero? c))]
-                                                                                                     (if (pos? c) (str "opens " c " more " o) (str "closes " (- c) " more " (closer o))))))
-                                                              "pairs a delimiter with another kind")
-                                                          " than the old text (strings, character literals and comments aside)"
-                                                          (when (seq there) (str "; in the new text: " there))
-                                                          ;; the closers each text ends with, side by side: a run of ) is miscounted
-                                                          ;; where it is read (a count of closers is what a miscounted edit gets wrong)
-                                                          (let [run (fn [t] (re-find #"[\)\]\}]+$" (clojure.string/trimr t)))
-                                                                [ro rn] [(run old) (run new)]]
-                                                            (when (and (or ro rn) (not= ro rn))
-                                                              (str "; the old text ends " (pr-str (or ro "")) " (" (count ro) "), the new text "
-                                                                   (pr-str (or rn "")) " (" (count rn) ")")))
-                                                          "; nothing changed")
-                                         (lines-at at))))))
-         ;; the edit as a whole must leave the definition as balanced as it was, so a form wrapped by two changes
-         ;; (its opener in one, its closer in another) is one edit; the compiler judges the rest
-         ;; (a doc is prose: its parentheses pair as its sentences do)
-         whole-unbalanced (fn [text]
-                            (when-not doc?
-                              (let [ds (reader/delimiters src) dt (reader/delimiters text)]
-                                (when (or (not= (reader/delimiter-counts dt) (reader/delimiter-counts ds))
-                                          (< (count (:crossed ds)) (count (:crossed dt))))
-                                  (or (first (keep-indexed unbalanced changes))
-                                      (refuse :unbalanced (if-let [o (left-open text)]
-                                                            (str "the changes together leave the definition unbalanced: " o "; nothing changed")
-                                                            "the changes together pair a delimiter with another kind; nothing changed") nil))))))]
+                     :else {:at (first at) :old old :new new})))]
      (if (nil? src)
        ;; a name that is no var: the nearest names, as source and callers answer (my.agent/no-var)
        (if doc?
-         (refuse :no-source "no doc at this address: (my.agent/help address) names the nearest" nil)
+         (refuse :no-source "no doc at this address: (doc address) names the nearest" nil)
          (or (some-> (:db @agent/state) (my.agent/no-var sym)) (refuse :no-source "no recorded source: define it whole first" nil)))
        (let [cs (map-indexed check changes)
              ;; the changes in source order, and two whose old texts overlap
@@ -947,8 +872,9 @@
            overlap (refuse :overlap "two changes' old texts overlap: make them one change, or give each its own text" (lines-at (map :at overlap)))
            :else
            (let [;; applied from the last, so each earlier offset still holds
-                 text (reduce (fn [t {:keys [at old new]}] (str (subs t 0 at) new (subs t (+ at (count old))))) src (reverse ordered))]
-             (or (whole-unbalanced text)
+                 text (reduce (fn [t {:keys [at old new]}] (str (subs t 0 at) new (subs t (+ at (count old))))) src (reverse ordered))
+                 ;; the forgiving reader's repairs (a delimiter closed at its end, a stray one made a comma), said as a call's are
+                 {text :text repairs :repairs} (if doc? {:text text} (reader/forgive text))]
            (let [;; a doc's page is loaded again with the new text in its place; a definition is evaluated
                  r (if doc?
                      (do (agent/transact! (doc/edit-tx (agent/db) sym text)) {})
@@ -966,11 +892,11 @@
                                              ;; the line it names, in the definition as the edit made it
                                              (when-let [l (:clojure.error/line ex)]
                                                (str "; at line " l (some->> (:clojure.error/column ex) (str ", column ")) " of the new definition: "
-                                                    (pr-str (clojure.string/trim (nth (clojure.string/split-lines text) (dec l) "")))))
-                                             (when (= :read (:phase ex)) (some->> (left-open text) (str "; ")))))))
+                                                    (pr-str (clojure.string/trim (nth (clojure.string/split-lines text) (dec l) "")))))))))
                ;; the response as data: its printed text and costliest functions are the outer eval's to print
-               (assoc (dissoc r :text :fns :record)
-                      :edited {(if doc? :doc :var) sym :lines (into [] (comp (mapcat (fn [[from new]] (numbered text (- from k) (+ from (count (filter #{\newline} new)) k)))) (distinct)) starts)})))))))))))
+               (cond-> (assoc (dissoc r :text :fns :record)
+                              :edited {(if doc? :doc :var) sym :lines (into [] (comp (mapcat (fn [[from new]] (numbered text (- from k) (+ from (count (filter #{\newline} new)) k)))) (distinct)) starts)})
+                 (seq repairs) (assoc :repaired (context/repaired text repairs))))))))))))
 
 (defn unrun
   "A model's eval call that never ran, recorded as an eval whose response is error e, why
