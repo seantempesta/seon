@@ -12,6 +12,25 @@
         decls (vec (for [i (range n)] {:seon.task/ns 'demo :seon.task/name (str "t" i) :seon.task/plan "p"}))]
     [(d/db-with db (task/create-tx db decls)) :seon.task/id (str "demo/t" (quot n 2))]))
 
+(defn replaced-db
+  "The input of size n: a db keeping history where one note's text was replaced n times, and the note."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :int]]}
+  [n]
+  (let [db0 (d/db-with (mt/world {:history? true}) [{:db/id "n" :note/text "t0" :note/agent :x}])
+        e (:e (first (d/datoms db0 :avet :note/agent :x)))]
+    [(reduce (fn [db i] (d/db-with db [[:db/add e :note/text (str "t" i)]])) db0 (range 1 (inc n))) e]))
+
+(deftest an-entitys-history-costs-its-rows
+  ;; docs/storage.md#history
+  (cost/proof
+    {:of 'seon.db/history :input 'seon.task-cost-test/replaced-db
+     :n "times the entity's attribute was replaced"
+     :work "one seek of the entity in the history index, then a row per datom, each with one seek of its transaction's time"
+     :growth :linear
+     :per-n {:calls 1 :bytes 1}
+     :fixed {:calls 1 :bytes 1}
+     :sizes [10 40 160]}))
+
 (deftest finding-a-task-by-its-id-is-one-index-seek
   (cost/proof
     {:of 'seon.db/eid :input 'seon.task-cost-test/tasks-db

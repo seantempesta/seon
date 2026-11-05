@@ -1016,13 +1016,14 @@
 (deftest an-agent-reads-what-its-entities-have-been
   ;; docs/storage.md#history: my.agent/history on a var (a symbol), a task (a lookup ref) and a name that is no var;
   ;; my.db/at the db at a point, each shape, read in a real agent (a fork of the fork server on its own branch)
+  ;; :at stays on the agent's side: a date's pr-str does not read back (jolt.host/a-date-prints-what-reads-back)
   (let [[_ _ rows task-rows nothing both opt-t foreign bad-branch bad-commit branch-ok commit-ok mix]
         (at/in-agent
          (fn [{:keys [task]}]
            ["(defn zz-h [] 1)"
             "(defn zz-h [] 2)"
-            "(my.agent/history (symbol (str *ns*) \"zz-h\") {:attrs #{:var/form} :pull [:form/src]})"
-            (str "(my.agent/history [:seon.task/id " (pr-str task) "] {:attrs #{:seon.task/outcome}})")
+            "(let [rows (my.agent/history (symbol (str *ns*) \"zz-h\") {:attrs #{:var/form} :pull [:form/src]})] (assert (every? inst? (map :at rows))) (mapv #(dissoc % :at) rows))"
+            (str "(mapv #(dissoc % :at) (my.agent/history [:seon.task/id " (pr-str task) "] {:attrs #{:seon.task/outcome}}))")
             "(my.agent/history 'seon.task/no-such-thing)"
             ;; the var's entity by lookup ref and the symbol answer the same rows
             "(let [s (symbol (str *ns*) \"zz-h\")] (= (map :t (my.agent/history s)) (map :t (my.agent/history [:var/name s]))))"
