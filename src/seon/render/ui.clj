@@ -850,8 +850,10 @@
     [:section
      [:h3 (str sym)]
      (if changing?
-       (list [:p (if (= :test (:var/kind v)) "A test your plan names." "A function your plan names, in the code you will change. Here is its source, and the tests that will judge your change.")]
-             (if src (source-block src) (list (when m [:p (str (:arglists m))]) (when doc [:p doc])))
+       (list [:p (cond (= :test (:var/kind v)) "A test your plan names."
+                       src "A function your plan names, in the code you will change. Here is its source, and the tests that will judge your change."
+                       :else "A function your plan names, in the code you will change.")]
+             (if src (source-block src) (list (when m [:p (str (:arglists m))]) (when doc [:p doc]) [:p "Read it: " [:code (str "(source " sym ")")]]))
              (names-line "Tests that reach it" tests))
        (list [:p (if (= :test (:var/kind v)) "A test your plan names." "A function your plan names. You call it; here is how.")]
              (when src [:p [:code (str (reader/arglists src (symbol (namespace sym))))]])
@@ -1043,13 +1045,13 @@
   "A value of the status as one line of source: marked code as its text, a thrown error as its message, any other value by the printer."
   {:malli/schema [:=> [:cat :any] :string]}
   [x]
-  (cond (and (map? x) (string? (:seon.print/code x))) (:seon.print/code x)
-        (instance? Throwable x) (str "threw " (ex-message x))
+  (cond (instance? Throwable x) (str "threw " (ex-message x))
         (and (map? x) (:via x)) (str "threw " (:message (first (:via x))))
-        (string? x) x
-        :else (let [t (str/replace (print/text x) #"#object\[java\.util\.regex\.Pattern 0x[0-9a-f]+\]" "a regex")]
+        :else (let [t (cond (and (map? x) (string? (:seon.print/code x))) (:seon.print/code x)
+                            (string? x) x
+                            :else (str/replace (print/text x) #"#object\[java\.util\.regex\.Pattern 0x[0-9a-f]+\]" "a regex"))]
                 ;; a thrown error is the failure's got (clojure.test/is reports it): say what it threw, not its trace
-                (if-let [m (when (str/starts-with? t "#error") (second (re-find #":message \"([^\"]*)\"" t)))] (str "threw " m) t))))
+                (if-let [m (when (str/starts-with? t "#error") (second (re-find #":message\s+\"([^\"]*)\"" t)))] (str "threw " m) t))))
 
 (defn- form-hiccup
   "A form to run, as code: inline when it is one line, a block when it spans several. A `do` of forms is the forms, one after
@@ -1085,7 +1087,7 @@
      [:p "These tests decide when you're done."]
      (when test-run [:p "The tests could not run: " (str/join "; " (:failed test-run))])
      (when (next proofs)
-       (into [:ul] (for [{:keys [test status cost]} proofs] [:li [:code (str test)] ": " (get state-words status (kname status)) (when cost (str " · " (print/cost-text cost)))])))
+       (into [:ul] (for [{:keys [test status]} proofs] [:li [:code (str test)] ": " (get state-words status (kname status))])))
      ;; not written: where it goes and a test to copy
      (for [{:keys [test shape]} unwritten :let [{:keys [ns requires helpers example]} shape]]
        [:div
@@ -1096,12 +1098,13 @@
         (when example [:pre [:code example]])
         (when scaffold [:div [:p "Start with this, then replace the placeholder assertion with what your plan says should hold:"] (form-hiccup scaffold)])])
      ;; red: which, what it asserted, what it got, what to try
-     (for [{:keys [test failures cost]} red]
+     (for [{:keys [test failures]} red]
        [:div
-        [:p [:code (str test)] " fails." (when cost (str " (" (print/cost-text cost) ")"))]
-        (for [{a :assert as :asserts g :got m :message} failures]
-          [:p "It asserts " [:code (str/join ", " (map #(as-text %) (or as [a])))] " and got " [:code (as-text g)] (when m (str " (" m ")")) "."])
-        [:p "This is the result of your last run: it changes when you change what the test reaches. Evaluate the assertion's own expression at your REPL to see the difference, change the code, then " [:code "(prove)"] "."]])
+        [:p [:code (str test)] " fails."]
+        (for [{a :assert as :asserts g :got m :message} (take 1 failures)]
+          [:p "It asserts " [:code (str/join ", " (map #(as-text %) (or as [a])))] " and got " [:code (as-text g)] (when m (str " (" m ")")) "."
+           (when (next failures) (str " Fix this first: " (count (rest failures)) " more " (if (nnext failures) "assertions fail" "assertion fails") ", and proving again shows the next."))])
+        [:p "This is the result of your last test: it changes when you change what the test reaches. Evaluate the assertion's own expression at your REPL to see the difference, change the code, then " [:code "(prove)"] "."]])
      (when (seq unknown) [:p "Not run yet: " (str/join ", " (map #(str "`" (:test %) "`") unknown)) ". " [:code "(prove)"] " runs them."])
      ;; merge: nothing until something conflicts; then both sides and the form that settles each
      (when (seq unmerged)

@@ -285,6 +285,7 @@ Uses of take, subs and the like in display code that choose what to find or read
 
 - `my.schema/unknown-key`: a registered key's text without its colon, to name the nearest keys of a key no schema registers by Jolt's ranking: a lookup, not a cut of output.
 - `seon.render.ui/kname`: a keyword's text without its colon.
+- `seon.render.ui/status-hiccup`: a failing test's first assertion, its line saying how many more fail and that proving again shows the next: what to do first, chosen, with what it left said.
 - `seon.context/form-at`: a form (a real call, a namespace's `:require`) is a slice (`subs`) of a test's, caller's or namespace's own source from its opening delimiter to its closing one: text the db holds, found by position; a find, not a cut of output.
 - `seon.render.ui/markdown`, `seon.render.ui/task-title`: Markdown text split into its blocks by the offsets its parse (`seon.ref/scan`) gives (a fenced block's content and a list's items too), each kept as written; a name's first letter made capital: text rearranged, nothing left out.
 - `seon.context/relevance`: the first `cap` of a search's scan of each kind's nearest (`take`), the pool it scores: a score's input, never shown.
