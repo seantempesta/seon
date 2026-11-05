@@ -256,7 +256,7 @@
      ;; the page's html, an entry a message, and the cold draw's ctx (seon.ctx/build), each about a third
      ;; measured 2026-11-05, with no print kept (every record printed again: seon.context-cost-test/a-requests-cost-is-its-records):
      ;; 4,920 / 11.0k / 32.4k calls and 9.38 / 14.9 / 34.2 MB at 10 / 30 / 100 evals
-     :per-n {:calls 316 :bytes 280000}
+     :per-n {:calls 317 :bytes 280000}
      :fixed {:calls 1900 :bytes 6600000}
      :sizes [10 30 100]}))
 

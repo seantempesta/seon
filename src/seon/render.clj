@@ -677,7 +677,7 @@
 
 (defn revs
   "The revisions of the parts of walk w placed in the lists sels, {id tree-rev}: what moves when a part's output, or one below it,
-  changed. Compared with an earlier answer it says whether anything moved, with no part made."
+  changed. Compared with an earlier answer it says whether anything moved, with no part made. See docs/render.md#the-render-is-an-eval."
   {:malli/schema [:=> [:cat :map [:sequential :string]] [:map-of :string :int]]}
   [w sels]
   (into {} (map (fn [[id k]] [id (tree-rev w k)])) (placed-ids w sels)))
