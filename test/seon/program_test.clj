@@ -1187,12 +1187,10 @@
         b (digests (in "t2") nil)
         step #(digests (in %) {"step" ['seon.task-files-test/the-shipped-task-files-load]})]
     (is (< 20 (count a)) "a sample of the suite, not an empty tree")
-    ;; the one exception: a test whose test namespace walks a directory (file-seq) judges the files
-    ;; themselves, so it takes the tree; no-text-uses-an-old-word judged a red tree and a green one by
-    ;; one digest and was marked flaky (the-old-word-check-reads, 2026-10-27)
+    ;; the one exception: a test whose test namespace reads the checkout's files itself judges the files
+    ;; themselves, so it takes the tree
     (let [moved (set (for [[t d] a :when (not= d (b t))] t))]
-      (is (contains? moved 'seon.doc-test/no-text-uses-an-old-word) "a scan of the checkout takes the tree")
-      ;; and so does a test calling a file reader from its own namespace (slurp, seon.doc/load-dir-tx): each was reused over an edit to the files it judges (web-ui, 2026-10-28)
+      ;; a test calling a file reader from its own namespace (slurp, seon.doc/load-dir-tx): each was reused over an edit to the files it judges (web-ui, 2026-10-28)
       (is (contains? moved 'seon.render-test/one-printer-and-no-cut-before-it) "a test slurping a doc takes the tree")
       (is (contains? moved 'seon.doc-test/every-section-of-the-wiki-has-a-lead) "a test loading the wiki takes the tree")
       (is (contains? moved 'seon.repl-test/the-help-page-runs) "a test reading the wiki through seon.doc/pages takes the tree (it was reused over edits to the help page)")

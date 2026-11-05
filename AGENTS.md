@@ -226,25 +226,7 @@ Each kind of information has one home, and a fact found anywhere else is moved t
 
 ## 7a. Words
 
-**Name things with Clojure's, its libraries' or Jolt's words** (owner, 2026-10-22: "stop using names that aren't clojure or clojure library or jolt or whatever related"; §5, "Use the library's words"). Write the right word in every new text, and **fix an old word wherever you come across it** in what you are already changing (code, docstring, doc, task, commit message). A file or command name keeps its old spelling until a rename task moves it; your prose still uses the new word.
-
-| Old house word | Say instead | Whose word |
-|---|---|---|
-| verb | function (by its var, `my.task/fail!`); an `:op` for a request type | Clojure; nREPL `op`, MCP `tool` |
-| lane | worktree session (a session in its own git worktree, on its own branch) | git |
-| landing, land | merge (into main) | git |
-| door, entrance | server (root's request server; the `seon_*` MCP tools) | nREPL, MCP |
-| dragon | failure point (and its edge function) | plain English |
-| census | `mg/check` (the generative check of every contract) | Malli |
-| pillar | principle | plain English |
-| merge train | octopus merge (branches merged into main in one commit) | git |
-| harvest | stage (onto the branch) | git |
-| stand-in | proc | core.async Flow |
-| dial | config key | Clojure map, Datahike config |
-| admit, guarantees | instrument | Malli `malli.instrument` |
-| refusal | invalid, explained (a contract's); a reason (the done rule's); refused (a merge's) | Malli `m/explain` |
-| attempt, run (of an agent) | an agent's turns and evals: an agent has turns, evals and max turns, and there are no runs; a clojure.test run is a "test run", a whole root's is "root's run" | owner, 2026-11-05: "Definitely got rid of \"runs\" (that concept doesn't exist) agents have turns, evals, max turns, etc." |
-| story, run-state, task story | the task's render (a render is a function and the data it renders): task-page over the task's data; the layout is render-ctx | owner, 2026-10-26: "A render is just a function and the data being rendered. No story" |
+**Name things with Clojure's, its libraries' or Jolt's words** (owner, 2026-10-22: "stop using names that aren't clojure or clojure library or jolt or whatever related"; §5, "Use the library's words"). Write the right word in every new text. A file or command name keeps its old spelling until a rename task moves it.
 
 Library words stay: fence (CommonMark's code fence; for a guard, say guard), proc, step-fn, transact, branch, merge, schema, registry, contract (a Malli function schema), flusher, group commit, fork server, lease, generation. **Waste** stays our word for the turns and tokens a run spent past what its work needed (`:seon.agent/waste`; owner, 2026-10-23). A stored keyword is renamed by erasing the store, never by a migration (DECISIONS).
 

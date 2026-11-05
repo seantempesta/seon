@@ -1496,8 +1496,8 @@
                   (into starters)
                   (as-> d (into #{} (remove gone-ids) d)))
         ;; a test namespace's form reading the checkout's files itself (file-readers) judges those files:
-        ;; the tests reaching it take the tree (no-text-uses-an-old-word and one-printer-and-no-cut-before-it
-        ;; were reused over edits to what they read, and read as flaky)
+        ;; the tests reaching it take the tree (one-printer-and-no-cut-before-it
+        ;; was reused over edits to what it read, and read as flaky)
         scans (flag :scans #(and (test-nss (:ns %)) (some file-readers (:refs %))))
         adj (into (apply dissoc (:adj g) gone-ids) (for [id dirty] [id (edges (rows id))]))
         rev (if bulk?

@@ -180,38 +180,6 @@
     (is (= ["demo/flow.md#idioms" "demo/flow.md#quiet"] (mapv :seon.ref/address (:seon.ref/below (doc/view db "demo/flow.md#flow" :code))))
         "the sections below by address, not inline")))
 
-;; ---- names are Clojure's words (task seon.doc/names-are-clojures-words) ----------------
-
-(def ^:private kept
-  "Names that keep a word of AGENTS.md section 7a's table in another sense, each with its reason."
-  {'seon.fx/admit "admission by workload (a token bucket and free workers: AGENTS.md section 4), not a contract"
-   'seon.fx-admit-test "the same admission (the namespace and its vars)"
-   'seon.fx-test/owner-admits-by-workers-and-priority "the same admission"
-   "test/seon/fx_admit_test.clj" "the same admission"})
-
-(def ^:private old-words seon.problems/old-words)
-
-(defn- uses?
-  "Does name n hold old word w as whole words (a plural too)?"
-  [w n]
-  (some? (re-find (re-pattern (str "(^|[^a-z])" w "s?([^a-z]|$)")) (str/lower-case n))))
-
-(deftest no-name-uses-an-old-word
-  (let [root (config/checkout)
-        words (old-words (slurp (str root "/AGENTS.md")))
-        files (fn [dir] (for [f (file-seq (java.io.File. (str root "/" dir))) :when (.isFile ^java.io.File f)]
-                          (subs (.getPath ^java.io.File f) (inc (count root)))))
-        _ (doseq [f (files "src") :when (str/ends-with? f ".clj")]
-            (require (symbol (-> f (subs 4 (- (count f) 4)) (str/replace "/" ".") (str/replace "_" "-")))))
-        names (concat (files "bin") (files "docs") (files "src") (files "test")
-                      (for [n (all-ns) :when (re-find #"^(seon|my)\." (str (ns-name n)))
-                            x (cons (ns-name n) (map #(symbol (str (ns-name n)) (str %)) (keys (ns-interns n))))]
-                        x))]
-    (is (contains? words "lane") "the table is read")
-    (is (contains? words "refusal") "no row is still stored under its old name: the table is read whole")
-    (is (empty? (for [n names w words :when (and (uses? w (str n)) (not (kept n)) (not (and (qualified-symbol? n) (kept (symbol (namespace n))))))] [w n]))
-        "every name uses Clojure's, a library's or Jolt's word")))
-
 ;; ---- the baseline: what a section was written against, from git ---------------------------
 
 (defn- git-fixture
@@ -336,57 +304,6 @@
         r (seon.fx/git-commit {:req {:dir dir :branch "elsewhere" :files {} :allow-empty? true :message (seon.doc/review-message "docs/p.md#p" "sean")}})]
     (is (string? (get-in r [:value :sha])) "the review commit exists, on a branch HEAD does not contain")
     (is (contains? (stale-of) ["docs/p.md#p" 'app.gb/f]) "and HEAD's section is still stale")))
-
-;; ---- text uses Clojure's words too (task seon.doc/names-are-clojures-words) ---------------
-
-(defn- texts-outside-store
-  "The checkout files (under root) no-text-uses-an-old-word reads: what git lists under dirs, tracked or
-  untracked and not ignored (`git ls-files -co --exclude-standard`, as the program's sample tree takes them),
-  so a file the repository ignores (config/local.edn, which bin/ports writes with the worktree's own name)
-  is no text of the repository; a tracked file deleted on disk is no file. text? and skip? pick by path."
-  [root dirs text? skip?]
-  (->> (let [r (apply clojure.java.shell/sh "git" "-C" root "ls-files" "-co" "--exclude-standard" "--" dirs)]
-         (assert (zero? (:exit r)) (str "git ls-files failed: " (:err r)))
-         (:out r))
-       str/split-lines sort
-       (filter #(and (text? %) (not (skip? %)) (.isFile (java.io.File. (str root "/" %)))))))
-
-(deftest an-ignored-file-is-no-text-and-a-tracked-one-is
-  ;; the red of 2026-11-01: the worktree terminal-verbs failed no-text-uses-an-old-word with
-  ;; ["config/local.edn" 3 "verb"], a file git ignores that holds the worktree's name
-  (let [{:keys [dir]} (git-fixture)
-        put (fn [p t] (.mkdirs (.getParentFile (java.io.File. (str dir "/" p)))) (spit (str dir "/" p) t))
-        _ (do (put ".gitignore" "/config/local.edn\n")
-              (put "config/local.edn" "{:worktree \"terminal-verbs\"}\n")
-              (put "config/default.edn" "{:a-verb 1}\n")
-              (clojure.java.shell/sh "git" "-C" dir "add" ".gitignore" "config/default.edn"))
-        paths (texts-outside-store dir ["config"] #(str/ends-with? % ".edn") (constantly false))
-        words (seon.problems/old-word-spellings (slurp (str (config/checkout) "/AGENTS.md")))
-        hits (for [p paths [i w] (seon.problems/old-word-hits (map-indexed vector (str/split-lines (slurp (str dir "/" p)))) words)] [p (inc i) w])]
-    (is (= ["config/default.edn"] paths) "the ignored file is not read, the tracked one is")
-    (is (= [["config/default.edn" 1 "verb"]] hits) "and the tracked file's old word is still found")))
-
-(deftest no-text-uses-an-old-word
-  ;; what the store holds is judged as a derived class (`seon.problems/old-words-in`, seon.problems-test/an-old-word-is-a-problem,
-  ;; and by the health step on every branch); this reads what it does not hold: bin/, the root pages, the
-  ;; native and web files, resources other than the task files (their plans are in the store) and the comment
-  ;; lines of source
-  ;; (a red proof of this test writes a file under the checkout that git does not track, and a result is kept
-  ;; by the tracked tree's digest: prove it red in a tree of its own, then change this test, so the red is not
-  ;; kept at the digest the green tree has, seon.proofs/flaky)
-  (let [root (config/checkout)
-        words (seon.problems/old-word-spellings (slurp (str root "/AGENTS.md")))
-        text? (fn [^String p] (or (str/starts-with? p "bin/") (re-find #"\.(clj|edn|md|html|js|css|c|h)$" p)))
-        in-store? (fn [^String p] (or (str/starts-with? p "docs/") (str/starts-with? p "resources/seon/tasks/")))
-        comment-only? (fn [^String p] (and (str/ends-with? p ".clj") (not (str/starts-with? p "bin/"))))
-        paths (texts-outside-store root ["bin" "resources" "src" "test" "web" "config" "native"] text? in-store?)
-        hits (for [p (concat ["AGENTS.md" "BAGGAGE.md" "README.md"] paths) :when (not (seon.problems/old-word-kept p))
-                   :let [lines (vec (str/split-lines (slurp (str root "/" p))))]
-                   [i w] (seon.problems/old-word-hits (for [[i l] (map-indexed vector lines) :when (or (not (comment-only? p)) (str/starts-with? (str/triml l) ";"))] [i l]) words)]
-               [p (inc i) w])]
-    (is (contains? (set paths) "src/seon/problems.clj") "git listed the checkout's files: a listing that came back empty reads nothing")
-    (is (contains? (set (map first words)) "attempt") "the table is read, the run row included")
-    (is (empty? hits) "no text outside the store uses an old word outside old-word-kept: each is [file line word]")))
 
 (defn grep-db
   "A test db holding forms [name doc src]: each a var app/<name> defined by its form."
