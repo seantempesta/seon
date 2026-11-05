@@ -1277,7 +1277,7 @@
     ;; a cited var is a component of its own when the db holds it (ctx joins the task's references by
     ;; :var/name: seon.context-test/a-cited-var-redefined-shows-in-the-next-view); this db holds none
     (is (= [(str "task-data-" rid) (str "cited-" rid "-seon.render_2Fhtml") (str "cited-" rid "-seon.print") (str "cited-" rid "-docs_2Frender.md_23no-clipping")
-            (str "namespaces-" rid) (str "status-" rid) (str "run-head-" rid)] (mapv :id task))
+            (str "namespaces-" rid) (str "status-" rid) (str "agent-state-" rid)] (mapv :id task))
         "the task, each thing its plan cites (a part each), the namespaces it touches, how the work stands, the agent's turn (its open problems when one is open: none here, so no part; and the keys the agent added, when it added one): each keyed by what it shows")
     (let [h (:html (unit-of task "status-"))]
       (is (str/includes? h "demo/f-test") "each proof as its var entity holds its verdict, (my.task/status)'s")
@@ -1586,7 +1586,7 @@
   (let [[main branch _] (paged-dbs)
         main (d/db-with main [{:seon.task/id "demo/f" :seon.task/outcome :parked}])
         [st _] (#'p/pass-view (assoc (proc-state main branch) :view {:agents {}}) [:chat :a3])
-        tile (some (fn [[id u]] (when (str/starts-with? id "run-head-") (:html u))) (get-in st [:views [:chat :a3] :units]))]
+        tile (some (fn [[id u]] (when (str/starts-with? id "agent-state-") (:html u))) (get-in st [:views [:chat :a3] :units]))]
     ;; the tile is the agent's record's (its status, turn cap and turns taken)
     (is (some? tile) "the turn tile, from the agent's record")
     (is (not (str/includes? (str tile) "parked")) (str "not main's outcome: " tile))))
@@ -1795,7 +1795,7 @@
         card (fn [eid] (h/html (ui/agent-card {:seon.ctx/ctx c} eid)))
         a3 (card 1)]
     (is (str/includes? a3 "A long string") "its task, in words")
-    (is (str/includes? a3 "up to 10 turns · running") "its cap of turns, and how its work stands: the task's outcome")
+    (is (str/includes? a3 "up to 10 turns · working") "its cap of turns, and how its work stands: the task's outcome")
     (is (str/includes? a3 "waiting on its tests") "and its reason")
     (is (str/includes? a3 "deepseek-flash") "its model")
     (is (str/includes? a3 "href=\"/agent/a3\"") "its page")
@@ -2220,7 +2220,7 @@
         db (d/db-with db [{:db/id aid :seon.agent/max-turns 7 :seon.agent/turn 1 :seon.agent/outcome :green :seon.agent/ended-turn 0}
                           {:seon.model-call/id "b1/a1/1" :seon.model-call/agent aid :seon.model-call/n 1 :seon.model-call/origin :model}])
         opts (fn [db] {:seon.ctx/ctx (:tree (seon.ctx/build db aid :b)) :seon.db/db db})]
-    (is (= "1 of 7" (:turn (ui/run-head (opts db) aid))) "the turn line: the agent's own cap")
+    (is (str/includes? (pr-str (ui/agent-state (opts db) aid)) "Turn 1 of 7") "the turn line: the agent's own cap")
     (is (str/includes? (pr-str (ui/chat-start (opts db) aid)) "a budget of 7 turns") "the chat's start: the same cap")
     (is (not (str/includes? (pr-str (ui/chat-end (opts db) aid)) "Done")) "the chat's end: an earlier wake's end is no end of this one")
     (let [ended (d/db-with db [{:db/id aid :seon.agent/ended-turn 1}])]
@@ -2432,3 +2432,16 @@
     (is (not (str/includes? t "tokens")) "no tokens sent")
     (is (not (str/includes? t "Merge:")) "no merge line with nothing to merge")
     (is (str/includes? (h/html (ui/status-hiccup (assoc st :its-merge-carries {:added ['a/b]} :merge {:conflicts []}))) "Merge: no conflicts") "a merge line when there is something to merge")))
+
+(deftest a-merged-task-reads-merged-everywhere
+  ;; owner, 2026-11-05: the head said "merged" while the task's panel said "done": its agent's own end (:green) was read where
+  ;; the task's outcome (:merged) was ignored; standing is one answer, from the task's outcome where it holds one
+  (let [c {:seon.agent/outcome :green :seon.agent/status :idle :seon.agent/max-turns 4 :calls {"t1" {:seon.model-call/n 1}}
+           :task {:seon.task/id "app.x/a-thing" :seon.task/outcome :merged}}
+        opts {:seon.ctx/ctx c :seon.db/db (ts/test-db)}]
+    (is (= "merged" (:text (ui/standing {:seon.agent/outcome :green} {:seon.task/outcome :merged}))))
+    (let [h (h/html (ui/task {} (ui/task-data opts 1)))]
+      (is (str/includes? h "task · app.x · merged") "the task's part")
+      (is (not (str/includes? h "· done")) "not the agent's own end"))
+    (is (str/includes? (pr-str (ui/agent-state opts 1)) "● merged") "the agent state")
+    (is (not (str/includes? (pr-str (ui/agent-state opts 1)) "● done")))))

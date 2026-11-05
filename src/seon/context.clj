@@ -613,7 +613,7 @@
 
 (defn test-shape
   "Where an unwritten proof p goes, as the agent needs it to write one: its test namespace's ns form (requires and aliases),
-  the helpers that namespace defines, and one real test from it (the shortest of its first five by name) as the shape to
+  the helpers that namespace defines, and its first test by name as the shape to
   copy; nil when the branch has no such namespace yet (the agent makes it first). Two index reads and one source read. See
   docs/render.md#how-the-work-stands."
   {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:maybe :map]]}
@@ -621,8 +621,7 @@
   (when-let [n (d/entity db [:ns/name (symbol (namespace p))])]
     (let [vs (map #(d/entity db %) (d/q '[:find [?e ...] :in $ ?n :where [?e :var/ns ?n]] db (:db/id n)))
           {tests true others false} (group-by #(= :test (:var/kind %)) vs)
-          srcs (keep #(some->> (doc/source-of db (:var/name %)) (vector (:var/name %))) (take 5 (sort-by :var/name tests)))
-          [_ src] (first (sort-by (comp count second) srcs))
+          src (some->> (first (sort-by :var/name tests)) :var/name (doc/source-of db))
           ns-src (get-in n [:ns/form :form/src])]
       (cond-> {:ns (symbol (namespace p))}
         ns-src (assoc :ns-form ns-src)
@@ -642,7 +641,7 @@
   unmerged entries; a test run that failed as a whole (:seon.agent/test-error). It reads facts
   about the work only, never the conversation (its turns, evals and messages), so a turn's record
   draws it again only when it changed the work; turns left and a cut reply are the run's
-  (seon.render.ui/run-head). Nothing is held: each is a fact of db. :reasons is the done rule's
+  (seon.render.ui/agent-state). Nothing is held: each is a fact of db. :reasons is the done rule's
   own answer, the turn's check (seon.turn/work!), which the model and the page read as :refused. A design task's plan before its run (:no-design) is its run's, the run its newest model call names, so it waits for the first turn. opts :index, a function answering the reconciler's index of db (seon.reconcile/index; else
   one built cold), called only when a test outside the task's proofs is red (whether it is a
   regression or a stray red is main's claims: measured cold on a demo branch, 14.8M ticks and
@@ -709,10 +708,11 @@
                                                (or (deferred p) (= :deferred verdict)) :deferred
                                                (nil? src) :undefined (some? test-error) :not-run :else :unknown)
                                       fs (when-not test-error (:seon.test/failures v))
-                                      calls (when (and src (not= :pass st)) (callees db p))]]
+                                      calls (when (and src (not= :pass st)) (callees db p))
+                                      shape (when (= :undefined st) (test-shape db p))]]
                             (cond-> {:test p :status st}
                               (and src (not= :pass st)) (assoc :source (print/code src))
-                              (= :undefined st) (assoc :shape (test-shape db p))
+                              shape (assoc :shape shape)
                               (seq fs) (assoc :failures (failures fs))
                               (seq calls) (assoc :calls calls))))}
       (seq blockers) (assoc :refused blockers)

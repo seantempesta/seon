@@ -802,7 +802,8 @@
         ;; is main's, which no branch holds. The page's words only (`task` reads :stands); the model's render takes the keys it names
         agent (into {} (for [k [:seon.agent/outcome :seon.agent/ended-turn :seon.agent/turn :seon.agent/max-turns :seon.agent/reason :seon.agent/status]
                              :let [v (ratom/realize (get c k))] :when (some? v)] [k v]))
-        stands (when (:seon.agent/outcome agent) (standing agent nil))]
+        task-end {:seon.task/outcome (ratom/realize (:seon.task/outcome t)) :seon.task/reason (ratom/realize (:seon.task/reason t))}
+        stands (when (or (:seon.agent/outcome agent) (:seon.task/outcome task-end)) (standing agent task-end))]
     (with-meta (cond-> (assoc (own t) :needs (into {} (for [[k n] (:needs t)] [k (own n)])))
                  (and stands (= "end" (namespace (:state stands)))) (assoc :stands (str (:text stands) (when (:detail stands) (str " · " (:detail stands))))))
       {:seon.render/schema :seon.task/task-fact})))
@@ -1126,7 +1127,7 @@
         [:h3 "Before this can merge"]
         (into [:ul]
               (for [[what x do] todo]
-                [:li what (when (some? x) (str ": " (if (coll? x) (str/join ", " (map #(as-text (if (map? %) (or (:key %) (:symbol %) (pr-str %)) %)) x)) x)))
+                [:li what (when (some? x) (str ": " (if (coll? x) (str/join ", " (map #(as-text (if (map? %) (or (:key %) (:symbol %) (as-text %)) %)) x)) x)))
                  (when do [:span " " (form-hiccup do)])]))])
      (when (and merge (seq its-merge-carries))
        [:p "Merge: " (if (seq (:conflicts merge)) (str (count (:conflicts merge)) " conflicts") "no conflicts")
@@ -1166,55 +1167,52 @@
   (when (:task c)
     (with-meta (context/namespaces-of c) {:seon.render/schema :seon.context/namespaces})))
 
-(defn- changed
-  "What agent record c's evals changed of its branch's program, each name once, oldest first: what each
-  recorded (a var, an ns form's namespace), edited (seon.repl/edit!) or unmapped, read from its :evals as ctx
-  holds them (docs/ctx.md#the-pattern); evals removed from the record are not counted. See
-  docs/render.md#a-part-answers-data."
-  {:malli/schema [:=> [:cat :map] [:vector :symbol]]}
-  [c]
-  (into [] (distinct)
-        (for [[_ e] (reverse (seq (:evals c)))
-              s (concat (ratom/realize (get-in e [:seon.eval/response :recorded])) (some-> (ratom/realize (get-in e [:seon.eval/response :edited :var])) vector)
-                        (ratom/realize (get-in e [:seon.eval/response :unmapped])))
-              :when (symbol? s)]
-          s)))
+(declare standing)
 
-(defn run-head
-  "The agent's turn line (a component over ctx): its relevant attributes and the model calls it made, from
-  the agent's record (its status, branch and turn cap, its turns), beside the turn what its evals changed
-  of the branch's program (`changed`), and that its last reply was cut, when it was: the conversation's part of where the
-  agent stands (the work's is seon.render.ui/status)."
-  {:seon.render/style tile-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int] :any]}
+(defn turn-line
+  "The agent's turn as one line, the same words on the page and in the model's request: `Turn 12 of 40 · in seon.program ·
+  ~540k tok sent`: the model calls it has made of its cap, the namespace its REPL is in (seon.context/current-ns) and the
+  tokens its requests sent in all (the provider's counts, summed). Parts that are not known are left out. See
+  docs/render.md#the-agents-turn."
+  {:malli/schema [:=> [:cat [:maybe :int] [:maybe :int] [:maybe :symbol] [:maybe nat-int?]] :string]}
+  [n cap in-ns sent]
+  (str "Turn " n (when cap (str " of " cap)) (when in-ns (str " · in " in-ns)) (when (pos? (or sent 0)) (str " · " (print/tokens-text sent) " sent"))))
+
+(defn agent-state
+  "The agent's state (a component over ctx and the db): its turn line as the part's heading, which is all the model is sent of it
+  (a part declared :seon.render/place :tail: the request's last message, made again each request, never in the cached
+  prefix), and for the person, beside it, how its work stands (`standing`, from the task's outcome where it holds one), its
+  task, the form it is running, its proofs green, the tokens its requests sent (cached and not) and the time they took. A
+  reply cut at the model's token limit is said to both. See docs/render.md#the-agents-turn."
+  {:seon.render/place :tail :seon.render/style tile-style
+   :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int] :any]}
   [{c :seon.ctx/ctx db :seon.db/db} aid]
-  (let [;; its cap: the agent's own (raised to extend it), as the turn loop reads it
-        cap (ratom/realize (:seon.agent/max-turns c))
+  (let [cap (ratom/realize (:seon.agent/max-turns c))
         n (count (:calls c))
-        ;; the tokens its requests sent so far, the provider's counts summed (each request the whole context then)
-        sent (d/q '[:find (sum ?k) . :with ?m :in $ ?a :where [?m :seon.model-call/agent ?a] [?m :seon.model-call/tokens ?k]] db aid)
-        ;; the namespace the REPL is in: the one its newest eval left it in
+        sum (fn [a] (d/q '[:find (sum ?k) . :with ?m :in $ ?a ?at :where [?m :seon.model-call/agent ?a] [?m ?at ?k]] db aid a))
+        sent (sum :seon.model-call/tokens)
+        cached (sum :seon.model-call/cache-hit-tokens)
+        ms (sum :seon.model-call/ms)
         in-ns (context/current-ns c)
-        ;; what its evals changed of the branch's program
-        ch (changed c)]
-    ;; a part: the page draws it by run-html, the model is sent the value (docs/render.md#a-part-answers-data); this
-    ;; turn's number (its record is written before its page is drawn), of the cap, and a cut reply
-    (with-meta (cond-> {:turn (if cap (str n " of " cap) n)}
-                 (seq ch) (assoc :changed ch)
-                 in-ns (assoc :ns in-ns)
-                 sent (assoc :tokens-sent sent)
-                 (some-> (:calls c) vals first ratom/realize :seon.model-call/truncated)
-                 (assoc :your-last-reply "cut at the model's token limit: what followed the cut was lost. Answer with less: one change at a time."))
-      {:seon.render/schema :seon.context/run})))
-
-(defn run-html
-  "The turn line as the page shows it (the declared html render of :seon.context/run; the model is sent the
-  value): its turn of its cap, the namespace its REPL is in, the tokens it sent in all, a cut reply. See docs/render.md#a-part-answers-data."
-  {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
-  [_opts {:keys [turn changed ns tokens-sent your-last-reply]}]
-  [:section
-   [:p (str "turn " turn (when (seq changed) (str " · " (count changed) (if (next changed) " changes" " change")))
-            (when ns (str " · in " ns)) (when tokens-sent (str " · " (print/tokens-text tokens-sent) " sent in all")))]
-   (when your-last-reply [:p {:class "err"} (str "your last reply was " your-last-reply)])])
+        task (:task c)
+        t (into {} (for [k [:seon.task/id :seon.task/outcome :seon.task/reason] :let [v (ratom/realize (get task k))] :when (some? v)] [k v]))
+        agent (into {} (for [k [:seon.agent/outcome :seon.agent/ended-turn :seon.agent/turn :seon.agent/max-turns :seon.agent/reason :seon.agent/status]
+                             :let [v (ratom/realize (get c k))] :when (some? v)] [k v]))
+        stands (standing agent t)
+        verdicts (for [[_ ps] (concat [[nil (:proved task)]] (map (fn [[_ nd]] [nil (:proved nd)]) (:needs task))) [_ v] ps] (ratom/realize (:seon.test/status v)))
+        running (d/q '[:find ?r . :in $ ?a :where [?p :seon.process/agent ?a] [?p :seon.process/running ?r]] db aid)
+        truncated? (some-> (:calls c) vals first ratom/realize :seon.model-call/truncated)]
+    [:section
+     [:h2 (turn-line n cap in-ns sent)]
+     (when truncated?
+       [:p "Your last reply was cut at the model's token limit: what followed the cut was lost. Answer with less: one change at a time."])
+     [:div {:data-for "page"}
+      [:p (str "● " (:text stands) (when (:detail stands) (str " · " (:detail stands))) (when (:reason stands) (str " · " (:reason stands))))]
+      (when-let [id (:seon.task/id t)] [:p "task " (task-title id)])
+      (when running [:p "running " [:code running]])
+      (when (seq verdicts) [:p (str (count (filter #{:green} verdicts)) " of " (count verdicts) " proofs green")])
+      (when sent [:p (str (print/tokens-text sent) " sent in all" (when cached (str ", " (print/tokens-text cached) " of them cached, " (print/tokens-text (- sent cached)) " not")))])
+      (when (pos? (or ms 0)) [:p (str (ms-str ms) " in the model")])]]))
 
 (defn own-problems
   "The open problems of the agent (a component over its branch db, seon.problems/own: its newest run's,
@@ -1509,9 +1507,9 @@
                          ;; where the code lives: each namespace the work touches, the names the task cites or its proofs call
                          [#'namespaces {:at [:task]} aid]
                          ;; how the work stands: the proofs, the done rule's reasons, what the branch did (one diff)
-                         [#'status {:at [:task :proved]} aid]))
+                         [#'status {:at [:task]} aid]))
    ;; the run once it took a turn: before that it says only its id, which the task's names
-   (when (seq (:calls c)) [#'run-head {:at [:calls]} aid])
+   (when aid [#'agent-state {:at [:seon.agent/id]} aid])
    (when aid [#'own-problems {:at [:seon.agent/id]} aid])
    (when (seq (added-keys c)) [#'ctx-keys {:at [:db/id]}])])
 
@@ -1830,7 +1828,7 @@
        (list
         [:p {:class "text-sm text-text-100"} (task-title task-id)]
         [:p {:class "text-xs text-text-300"}
-         (str (when max-turns (str "up to " max-turns " turns · ")) (kname outcome))
+         (str (when max-turns (str "up to " max-turns " turns · ")) (if outcome (:text stands) "no outcome yet"))
          (when-not (str/blank? reason) (list " · " [:span {:class "text-text-500"} (prose reason (cell) {:one-line? true})]))]))]))
 
 (defn root-ctx
@@ -1990,6 +1988,7 @@
   (case kind
     :section (str "the help page (its section, entity " x ") as of t " t)
     :parts (str (if c "the page's parts whole" "the page's parts that changed") " at commit " t ": " (str/join ", " (nth ref 4)))
+    :tail (str "the turn line (last, made again each request) at commit " t ": " (str/join ", " (nth ref 4)))
     :eval (str "eval " x)
     :reply (str "the reply of " x)
     :message (str "message " x)
