@@ -628,7 +628,7 @@
            sym (:jolt.error/symbol jd)
            unresolved? (and sym (= :analyze/unresolved-symbol (:jolt.error/kind jd)))
            m (if unresolved? (unresolved-message sym) (step/error-msg e))
-           m (if (= :malli.core/invalid-schema (:type d)) (str "malli has no schema " (pr-str (:schema (:data d)))) m)
+           m (if (= :malli.core/invalid-schema (:type d)) (str "malli has no schema " (:schema (:data d))) m)
            fix (near-fix jd m d)
            ;; a REPL name in a definition: the program resolves as written, so the definition calls it qualified
            repl (when unresolved? (repl-name (symbol sym)))

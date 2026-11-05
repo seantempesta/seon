@@ -492,7 +492,7 @@
          (do (print (clojure.main/err->msg e))
              (doseq [{:keys [type message]} (rest (:via (Throwable->map e)))]
                (println "Caused by:" type message)))
-         (println "pst prints an exception; this is" (pr-str (class e))))))
+         (println "pst prints an exception; this is" (class e)))))
 
 (defn- missing
   "Why sym names nothing, in words, with the nearest real names: no-var's answer on a branch; in a process with no
