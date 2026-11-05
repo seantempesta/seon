@@ -358,8 +358,8 @@
           ;; the next turn's: the turn that reads it
           (agent/transact! (agent/own-message-tx (str id "/repeated") :message "seon" nil
                                                  (str "Turn " turn " only ran code you had run before, each answered as it was then ("
-                                                      (str/join ", " again) "): running it again tells you nothing new. Write what you know: "
-                                                      "the plan, a proof or a definition, or end your turn with prose.")
+                                                      (str/join ", " again) "). If nothing it reads changed, write what you know: the plan, a proof or a definition, or end your turn "
+                                                      "with prose. If something did, the same answer is what to look at.")
                                                  (inc n))))
         ;; what it answered and how it stopped (its reply, reasoning and finish), the reply's usage, model and counts
         ;; (seon.model-call, beside the basis it read: seon.context/render makes the text from it), and where the turn's
