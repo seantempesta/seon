@@ -335,7 +335,7 @@
 ;; jolt.analyzer/a-missing-var-through-an-alias-says-no-such-var-in-any-namespace
 (deftest a-test-recorded-before-what-it-calls-moves-when-that-is-defined
   (let [in {:env "e" :tree "t" :config {}}
-        base (record (calc-db) 'app.pt-late "(ns app.pt-late)"
+        base (record (empty-db) 'app.pt-late "(ns app.pt-late)"
                      'app.pt-late-test "(ns app.pt-late-test (:require [clojure.test :refer [deftest is]] [app.pt-late :as late]))")
         g (program/reach-graph base nil)
         before (record base 'app.pt-late-test "(deftest t (is (= 1 (late/h 1))))")
