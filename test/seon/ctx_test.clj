@@ -219,7 +219,7 @@
                                {:seon.model-call/id "lab/ctx#1/0" :seon.model-call/agent [:seon.agent/key k] :seon.model-call/n 0 :seon.model-call/reply "I will check f0."
                                 :seon.model-call/tokens 1200 :seon.model-call/cache-hit-tokens 1000 :seon.model-call/cache-miss-tokens 100
                                 :seon.model-call/ms 7 :seon.model-call/model "scripted" :seon.model-call/forms 1 :seon.model-call/errors 0
-                                :seon.model-call/split {:context-ms 2 :model-ms 5} :seon.model-call/sent [[:eval "e1"]]}
+                                :seon.model-call/split {:context-ms 2 :model-ms 5} :seon.model-call/sent-hash "0123456789abcdef"}
                                {:seon.process/id (str k "/77") :seon.process/agent [:seon.agent/key k] :seon.process/pid 77 :seon.process/mem-mb 120.5
                                 :seon.process/forked-ms 5.0}
                                {:seon.eval/id "e1" :seon.eval/agent [:seon.agent/key k] :seon.eval/by "a1"}
@@ -1247,15 +1247,18 @@
     (try
       (enter-agent! {:db db :key k :branch :b})
       (let [all (my.render/render-ctx)
-            first-changes (my.render/render-changes)
+            after-all (my.render/render-changes)
             again (my.render/render-changes)
             tid (get-in @ctx/ctx [:task :seon.task/id])
             _ (swap! seon.agent/state assoc :db (d/db-with db [{:seon.task/id tid :seon.task/plan "A plan that moved."}]))
-            moved (my.render/render-changes)]
+            moved (my.render/render-changes)
+            _ (swap! seon.agent/state dissoc :render-seen)
+            restarted (my.render/render-changes)]
         (is (seq all) "every part")
         (is (every? (fn [[_ f]] (and (symbol? (first f)) (map? (second f)))) all) "each headed by its function and its path")
-        (is (= (set (keys all)) (set (keys first-changes))) "the first ask is every part")
+        (is (= {} (into {} after-all)) "shown whole by render-ctx, nothing has moved since")
         (is (= {} (into {} again)) "nothing moved: nothing")
+        (is (= (set (keys all)) (set (keys restarted))) "a process that has shown nothing (a restart) is every part")
         (is (= {:seon.render/schema :seon.render/parts :seon.print/full true} (meta all)) "named, so its record prints it whole")
         (is (some #(str/starts-with? % "task-") (keys moved)) "the plan moved: the task's part")
         (is (not-any? #(str/starts-with? % "status-") (keys moved)) "and not what read nothing of it")

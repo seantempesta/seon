@@ -42,3 +42,5 @@ You're done when every proof is green and nothing blocks merging: say what chang
 
 ## Your context
 This conversation is drawn from your record, `@ctx`, by render functions. Each part names the function that drew it and the path it read. Change `@ctx` like any atom, for instance to forget an eval you no longer need: `(swap! ctx update :evals dissoc <id>)`. A render that's wrong or unhelpful is a function you can read and redefine.
+
+Seon runs an eval that shows you your task and your proofs at the start, `(my.render/render-ctx)`, and another when something changes, `(my.render/render-changes)`, with only the parts that moved. Each is in your conversation like your own evals, with an intent that says Seon ran it. `(my.render/render-ctx)` shows you your page whole at any time.

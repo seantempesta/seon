@@ -657,6 +657,12 @@
   {:malli/schema [:=> [:cat :any] :string]}
   [f] (print/text (vary-meta (printable f) assoc :seon.print/full true)))
 
+(defn parts-value
+  "Parts m ({id form}) as the value an eval answers: each form ready to print (`printable`), the map named a :seon.render/parts,
+  which prints whole (:seon.print/full on its schema), the stored value too. See docs/render.md#the-render-is-an-eval."
+  {:malli/schema [:=> [:cat :map] :seon.render/parts]}
+  [m] (with-meta (into (array-map) (map (fn [[id f]] [id (printable f)])) m) {:seon.render/schema :seon.render/parts :seon.print/full true}))
+
 (defn placed-hiccup
   "The parts of walk w placed in the root's lists with element ids sels ([\"#p-task\"]), in order, as {id form}: what
   the model reads of each (`part-form`). See docs/render.md#a-part-prints-as-its-render."
@@ -664,14 +670,27 @@
   [w sels]
   (apply array-map (mapcat (fn [[_ k]] (when-let [f (part-form w k)] [(:id (get @(:cache w) k)) f])) (placed w sels))))
 
+(defn- placed-ids
+  "The parts of walk w placed in the lists sels, [[id k]] in order: the element id and the cache key of each."
+  {:malli/schema [:=> [:cat :map [:sequential :string]] [:vector [:tuple :string [:vector :any]]]]}
+  [w sels]
+  (vec (for [[_ k] (placed w sels)] [(:id (get @(:cache w) k)) k])))
+
+(defn revs
+  "The revisions of the parts of walk w placed in the lists sels, {id tree-rev}: what moves when a part's output, or one below it,
+  changed. Compared with an earlier answer it says whether anything moved, with no part made."
+  {:malli/schema [:=> [:cat :map [:sequential :string]] [:map-of :string :int]]}
+  [w sels]
+  (into {} (map (fn [[id k]] [id (tree-rev w k)])) (placed-ids w sels)))
+
 (defn parts-since
   "The parts of walk w placed in the lists sels that moved since seen ({id tree-rev} of an earlier answer): {:parts {id form}
   :revs {id tree-rev} :gone [id]}. The walk already compared each part's output with its last (a revision moves only when it
-  differs, `render!`), so nothing is compared or drawn here but the revisions, and a part's form (`part-form`) is made only for a
+  differs, `render!`), so nothing is compared or drawn here but the revisions (`revs`), and a part's form (`part-form`) is made only for a
   part that moved; nothing moved, nothing made. A walk new to its process has seen nothing: every part."
   {:malli/schema [:=> [:cat :map [:sequential :string] [:maybe :map]] [:map [:parts :map] [:revs :map] [:gone [:vector :string]]]]}
   [w sels seen]
-  (let [ps (for [[_ k] (placed w sels)] [(:id (get @(:cache w) k)) k])
+  (let [ps (placed-ids w sels)
         revs (into {} (map (fn [[id k]] [id (tree-rev w k)])) ps)]
     {:parts (into (array-map) (keep (fn [[id k]] (when (not= (get seen id) (get revs id)) (when-let [f (part-form w k)] [id f])))) ps)
      :revs revs
@@ -695,7 +714,7 @@
   model's page at a commit. With sels, the element ids of the lists its caller reads ([\"#p-task\"]),
   only those lists are drawn: the layout's outer element is, and of the elements inside it the ones with an
   id that is none of sels are neither rendered nor placed (the layout's lists are its outer element's
-  children), so a read of one list costs that list, not the page (docs/render.md#the-page-is-sent-as-what-changed)."
+  children), so a read of one list costs that list, not the page (docs/render.md#the-render-is-an-eval)."
   {:malli/schema [:function [:=> [:cat :map :seon.host/fn :seon.host/db :any] :map]
                   [:=> [:cat :map :seon.host/fn :seon.host/db :any [:sequential :string]] :map]]}
   ([t changes db root-var] (draw t changes db root-var nil))
