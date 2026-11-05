@@ -302,6 +302,11 @@
     (is (not (str/includes? (:text ab) ":again")) (pr-str ab))
     (is (not (str/includes? (:text ba) ":again")) "the swap back is other code")
     (is (str/includes? (:text ab2) "ran this code and answered the same") (str "the same edit again, answered the same but for its handle: " (:text ab2))))
+  ;; an answer says its turn once: the inner eval of an edit is the edit's, and a turn inside its value would differ every turn
+  (let [[_ _ ab] (at/in-agent ["(ns x.swap) (defn g [] 1)"
+                               "(seon.agent/transact! [{:seon.agent/key (:key @seon.agent/state) :seon.agent/turn 1 :seon.agent/max-turns 9}])"
+                               "(seon.repl/edit! 'x.swap/g \"[] 1\" \"[] 2\")"])]
+    (is (= [":turn \"1 of 9\""] (re-seq #":turn \"[^\"]*\"" (:text ab))) (:text ab)))
   ;; the agent's own data keeps its keys: a timing of its own that changed is a different answer
   (let [[_ m5 m7] (at/in-agent ["(def t (atom 4))" "{:ms (swap! t inc)}" "{:ms (swap! t inc)}"])]
     (is (not (str/includes? (:text m7) ":again")) (str "{:ms 5} then {:ms 6} is no same answer: " (:text m7))))

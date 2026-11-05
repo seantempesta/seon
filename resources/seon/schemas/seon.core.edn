@@ -88,6 +88,8 @@
                       [:ns {:optional true} :symbol]
                       ;; an earlier eval of the same code answered the same (seon.repl/again): which, and that nothing changed
                       [:again {:optional true} :string]
+                      ;; how far through its turns the agent was when it answered, `12 of 40` (seon.agent/turns)
+                      [:turn {:optional true} :string]
                       ;; code of several top-level forms: how many ran, its :value each one's in order (seon.repl/response)
                       [:forms {:optional true} [:int {:min 2}]]
                       ;; what the forgiving reader changed of the call's code before it ran (seon.context/repaired)
