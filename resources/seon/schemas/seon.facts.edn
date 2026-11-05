@@ -42,10 +42,8 @@
  ;; inside a function body: judged at merge (every definition happens once)
  :form/banned [:set :qualified-symbol]
  :form/inline-defs [:set :qualified-symbol]
- ;; the calls it bounds by a clock (deref with a timeout; Thread/sleep and core.async's
- ;; timeout are in its refs), and its catch clauses as EDN {:class name ("*" for a catch-all)
+ ;; its catch clauses as EDN {:class name ("*" for a catch-all)
  ;; :answers :constant|:rethrows|:expr}: the facts the guard detectors query
- :form/timeouts [:set {:seon.db/index true} :qualified-symbol]
  :form/catches [:set :string]
  :ns/name [:and {:seon.db/identity true :seon.db/content-id true} :symbol]
  :ns/doc :string
@@ -105,7 +103,7 @@
                       [:form/declares {:optional true} :form/declares] [:form/refs {:optional true} :form/refs] [:form/quoted {:optional true} :form/quoted] [:form/ops {:optional true} :form/ops] [:form/keywords {:optional true} :form/keywords]
                       [:form/requires {:optional true} :form/requires] [:form/banned {:optional true} :form/banned]
                       [:form/inline-defs {:optional true} :form/inline-defs] [:form/source {:optional true} :form/source]
-                      [:form/timeouts {:optional true} :form/timeouts] [:form/catches {:optional true} :form/catches]]
+                      [:form/catches {:optional true} :form/catches]]
  :seon.db/ns-fact [:map {:seon.db/attributes true} [:ns/name :ns/name] [:ns/doc {:optional true} :ns/doc]
                     [:ns/form {:optional true} :ns/form] [:ns/file {:optional true} :ns/file] [:ns/tail {:optional true} :ns/tail]]
  :seon.db/var-fact [:map {:seon.db/attributes true :seon.ctx/pattern [* {[:var/form :as :form] [*]}]}
@@ -486,8 +484,6 @@
  ;; "root", or "owner" (the page's message bar and the server's :message op, written by root):
  ;; an agent id starts again every boot, a run's names one worker for good. The agent that
  ;; takes a message writes the same fact on its own branch, and its turn's basis names it by id.
- ;; reply-to is the replied message's id, a value, since that message may be on a branch the
- ;; reply's is not
  :seon.message/id [:and {:seon.db/identity true :seon.db/content-id true} :string]
  :seon.message/from [:and {:seon.db/index true} :string]
  ;; the agent it is to, by its branch: the agent's identity across boots and wakes (task
@@ -502,11 +498,9 @@
  ;; what an entry is (design one-derivation 4.1 section 5): a person's words (:message), root's at a
  ;; stage boundary (:stage), the judge's verdict with its reasons (:verdict); each wakes its session
  :seon.message/kind [:and {:seon.db/index true} [:enum :message :stage :verdict]]
- :seon.message/reply-to [:and {:seon.db/index true} :string]
  :seon.message/fact [:map {:seon.db/attributes true :seon.render/html seon.render.ui/message :seon.render/model seon.context/message-messages} [:seon.message/id :seon.message/id] [:seon.message/from :seon.message/from]
                      [:seon.message/branch {:optional true} :seon.message/branch] [:seon.message/agent {:optional true} :seon.message/agent] [:seon.message/turn {:optional true} :seon.message/turn] [:seon.message/body :seon.message/body]
-                     [:seon.message/kind {:optional true} :seon.message/kind]
-                     [:seon.message/reply-to {:optional true} :seon.message/reply-to]]
+                     [:seon.message/kind {:optional true} :seon.message/kind]]
  ;; ---- written by an agent on its own branch; they reach main with its merge ----
  ;; (my.task/status) asked before any turn of this process observed its task: why, and what runs its proofs
  :seon.turn/not-observed [:and :seon.error/base [:map [:seon.error/type [:= :seon.turn/not-observed]]]]
@@ -570,7 +564,6 @@
  :seon.model-call/error :seon.error/base
  :seon.model-call/forms :int
  :seon.model-call/errors :int
- :seon.model-call/red :int
  :seon.model-call/ms :int
  :seon.model-call/tokens :int
  ;; the prompt tokens the provider served from its prefix cache, and those it did not, as its
@@ -614,7 +607,7 @@
                           [:seon.model-call/reasoning {:optional true} :seon.model-call/reasoning] [:seon.model-call/finish {:optional true} :seon.model-call/finish]
                           [:seon.model-call/truncated {:optional true} :seon.model-call/truncated] [:seon.model-call/error {:optional true} :seon.model-call/error]
                           [:seon.model-call/forms {:optional true} :seon.model-call/forms] [:seon.model-call/errors {:optional true} :seon.model-call/errors]
-                          [:seon.model-call/red {:optional true} :seon.model-call/red] [:seon.model-call/ms {:optional true} :seon.model-call/ms]
+                          [:seon.model-call/ms {:optional true} :seon.model-call/ms]
                           [:seon.model-call/tokens {:optional true} :seon.model-call/tokens]
                           [:seon.model-call/cache-hit-tokens {:optional true} :seon.model-call/cache-hit-tokens]
                           [:seon.model-call/cache-miss-tokens {:optional true} :seon.model-call/cache-miss-tokens]

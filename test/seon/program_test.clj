@@ -176,14 +176,12 @@
 
 (deftest catches-and-clocks-are-recorded
   ;; for the guard detectors (session PATTERNS): a hiding guard is a catch answering a constant;
-  ;; time deciding is a sleep, a deref with a timeout, or core.async's timeout
+  ;; a sleep is a reference like any other
   (let [a (eval-account 'app.pt-guard (str "(defn guarded [f p] (Thread/sleep 1) (deref p 10 :late)"
                                            " (try (f) (catch IllegalStateException e nil) (catch Exception e (throw e)) (catch Throwable t (str t))))"))]
     (is (= #{{:class "IllegalStateException" :answers :constant} {:class "Exception" :answers :rethrows} {:class "*" :answers :expr}}
            (set (map read-string (:catches a)))) "each clause: its class, and what its handler answers")
-    (is (contains? (:refs a) 'Thread/sleep) "a host static is a reference")
-    (is (= '#{clojure.core/deref} (:timeouts a)) "a deref with a timeout")
-    (is (empty? (:timeouts (eval-account 'app.pt-guard "(defn plain [p] @p)"))) "a plain deref is no clock")))
+    (is (contains? (:refs a) 'Thread/sleep) "a host static is a reference")))
 
 (deftest a-redefinition-supersedes-the-form-it-replaces
   (let [db (record (empty-db) 'app.pt-re "(defn f [x] x)" 'app.pt-re "(defn g [x] (f x))")

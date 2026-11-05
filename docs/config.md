@@ -26,7 +26,7 @@ Later layers win, key by key, and the merged map is validated once (```seon.conf
 
 ## The model manifest
 
-`:seon.config.ai/providers` and `:seon.config.ai/models` are v1's manifest rows, for the models we use; each field is documented beside its value in the file. A provider carries its base URL, the name of its key's environment variable (never the key) and its wire key; a model its provider, version, context window, max output, prices and the provider's concurrency ceiling. Either can state a setting by its `:seon.config.*` key to override the top-level one for itself. ```seon.config/provider``` builds a model's provider and ```seon.config/with-provider``` attaches it. Which provider runs: [model](model.md).
+`:seon.config.ai/providers` and `:seon.config.ai/models` are v1's manifest entries, for the models we use; each field is documented beside its value in the file. A provider carries its base URL, the name of its key's environment variable (never the key) and its wire key; a model its provider, version, context window, max output, prices and the provider's concurrency ceiling. Either can state a setting by its `:seon.config.*` key to override the top-level one for itself. ```seon.config/provider``` builds a model's provider and ```seon.config/with-provider``` attaches it. Which provider runs: [model](model.md).
 
 ## Facts on main
 

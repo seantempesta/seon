@@ -350,7 +350,6 @@
         (agent/transact! [(cond-> (merge (usage c) {:seon.model-call/id id :seon.model-call/forms (count calls)
                                                     :seon.model-call/reply (:text c)
                                                     :seon.model-call/errors (count (filter :ex (map :response (remove :not-run calls))))
-                                                    :seon.model-call/red (count (remove #(= :pass (:status %)) (:proofs s)))
                                                     :seon.model-call/ms (+ model-ms eval-ms)})
                             (:truncated? c) (assoc :seon.model-call/truncated true)
                             (:finish-reason c) (assoc :seon.model-call/finish (:finish-reason c))
