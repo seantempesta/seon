@@ -329,7 +329,8 @@
   (let [db (apply record (empty-db) calc-srcs)]
     (is (= '#{app.pt-calc-test/add-test app.pt-calc-test/sum3-test} (selected db (record db 'app.pt-calc "(defn add [a b] (+ b a))")))
         "add-test calls add through its :refer; sum3-test reaches add through sum3")
-    (is (= '#{} (selected db (record db 'app.pt-calc "(defn neg [x] (- 0 x))"))) "no test reaches neg")))
+    (is (= '#{} (selected db (record db 'app.pt-calc "(defn neg [x] (- 0 x))"))) "no test reaches neg")
+    (is (= [] (program/tests-reaching (program/reach-graph db nil) 'app.pt-calc/no-such)) "a var the graph holds no form of reaches none")))
 
 (deftest a-file-analyzed-gives-the-repl-facts
   (let [text "(ns app.pt-file\n  (:require [clojure.string :as s]))\n\n;; doubles\n(defn twice [x] (* 2 x))\n\n(comment (twice 2))\n(defmulti m :k)\n(defmethod m :a [_] (s/join [\"a\"]))\n"

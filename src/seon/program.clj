@@ -1381,7 +1381,7 @@
   {:malli/schema [:=> [:cat :map :qualified-symbol] [:vector :qualified-symbol]]}
   [{:keys [rows defs rev tests]} v]
   (into [] (comp (mapcat #(keep (fn [[k s]] (when (and (= :var k) (tests s) (not= v s)) s)) (:defines (rows %)))) (distinct))
-        (reached-by rev (get defs v))))
+        (reached-by rev (get defs v []))))
 
 (defn- indexed
   "{k ids} of pairs [k id], in order, each ids a vector (a set when set? is true): the map a graph's

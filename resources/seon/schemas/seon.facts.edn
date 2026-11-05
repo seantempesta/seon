@@ -21,7 +21,7 @@
  :form/order :int
  :form/defines [:set :seon.db/ref]
  :form/declares [:set :seon.db/ref]
- ;; the vars it references, resolved by the compiler (clojure.core's left out): callers are
+ ;; the vars it references, resolved by the compiler (program, library and clojure.core alike): callers are
  ;; one AVET seek
  :form/refs [:set {:seon.db/index true} :qualified-symbol]
  ;; the qualified names its quoted data holds (seon.program/quoted-names): names, not references,
