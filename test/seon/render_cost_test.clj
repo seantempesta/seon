@@ -354,13 +354,14 @@
     {:of 'seon.render-cost-test/step! :input 'seon.render-cost-test/step-of
      :n "turns the agent took before the one stepped to and back from"
      :work (str "the turn's records read through the index by its number and drawn (its message, its reply and its eval), ctx patched "
-                "by the datoms that moved, and the list's one lookup of each earlier turn's marker; the datoms matched once against "
-                "the walk's index of what each component read. Linear only in that lookup")
+                "by the datoms that moved with one assoc a member, and the list's one lookup of each earlier turn's marker; the datoms "
+                "matched once against the walk's index of what each component read. Linear in that lookup and in seon.ctx/moved, the diff "
+                "of two db values, which a step through history pays and a live turn, holding its transaction's datoms, does not")
      :growth :linear
      ;; measured 2026-11-05, a step and back on this input: 1,057 / 1,177 / 1,657 contracted calls and 10.74 / 12.51 / 20.68 MB at
      ;; 10 / 40 / 160 turns (the bounds hold at 640). Before the read index and the turn's component, one step on the same
      ;; input: 11,073 calls and 80.9 MB at 640 turns
-     :per-n {:calls 4.1 :bytes 68000}
+     :per-n {:calls 4.1 :bytes 34000}
      :fixed {:calls 1050 :bytes 10200000}
      :sizes [10 40 160 640]}))
 
