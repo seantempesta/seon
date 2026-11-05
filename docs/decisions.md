@@ -188,7 +188,7 @@ The owner's rulings of 2026-10-29, each with where it is now stated; they stand 
 
 ### An eval call holds one or more forms (owner, 2026-10-29)
 
-"remove that from the docs that only one form runs". A call is intent and one or more forms, each run top level in order, the first throw stopping the rest; the prompt asks for one form per call. Several forms answer as a REPL prints them (verified on Clojure 1.12.5: `(+ 1 1) (+ 2 2)` prints 2 then 4): `:forms` (how many ran) and `:value` the vector of their values ("okay that works"); one form, or one `do`, answers its value. The code is never rewritten (a vector of the forms compiles as one: an alias a `require` in it makes is unknown, a `def` after an `ns` lands in the old namespace). A call with no prose or no form answers `:seon.turn/invalid-call`. Supersedes "one form per call" in the two 2026-10-28 entries below. Stated in: docs/prompt.md, docs/agent.md, `seon.model/eval-tool`, `seon.turn/call-problem`, `seon.repl/response`.
+"remove that from the docs that only one form runs". A call is intent and one or more forms, each run top level in order, the first throw stopping the rest; the prompt asks for one form per call. Several forms answer as a REPL prints them (verified on Clojure 1.12.5: `(+ 1 1) (+ 2 2)` prints 2 then 4): `:forms` (how many ran) and `:value` the vector of their values ("okay that works"); one form, or one `do`, answers its value. The code is never rewritten (a vector of the forms compiles as one: an alias a `require` in it makes is unknown, a `def` after an `ns` lands in the old namespace). A call with no prose or no form answers `:seon.turn/invalid-call`. Supersedes "one form per call" in the two 2026-10-28 entries below. Stated in: docs/prompt.md, docs/agent.md, `seon.model/eval-tool`, `seon.repl/call-problem`, `seon.repl/response`.
 
 ### The model's context is the render of the agent's record, by the one walk (owner, 2026-10-29)
 
@@ -276,7 +276,7 @@ The owner's rulings of 2026-10-28, each with where it is now stated; they stand 
 
 ### An eval call is intent and one form; its result is data with Clojure's value (owner, 2026-10-28; one form superseded 2026-10-29)
 
-"we can also just require both fields and be explicit"; "Okay match clojure for the eval output (4)"; "I mean the full data output with timing and result too. Not just the value". A call with no intent, or not exactly one form, is not run and answers `:seon.turn/invalid-call`; a `;` comment is code, never the description. The response is the full data map, its `:value` the one Clojure answers ((do (+ 1 1) (+ 2 2)) is 4): no `:values`. Supersedes the 2026-10-25 "each form's value" ruling. Stated in: docs/prompt.md, docs/agent.md, `seon.repl/response`, `seon.turn/call-problem`.
+"we can also just require both fields and be explicit"; "Okay match clojure for the eval output (4)"; "I mean the full data output with timing and result too. Not just the value". A call with no intent, or not exactly one form, is not run and answers `:seon.turn/invalid-call`; a `;` comment is code, never the description. The response is the full data map, its `:value` the one Clojure answers ((do (+ 1 1) (+ 2 2)) is 4): no `:values`. Supersedes the 2026-10-25 "each form's value" ruling. Stated in: docs/prompt.md, docs/agent.md, `seon.repl/response`, `seon.repl/call-problem`.
 
 ### The model is sent the whole conversation; no history budget (owner, 2026-10-28)
 

@@ -145,32 +145,6 @@
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :map [:vector :map]]]}
   [n] (let [[db _] (sections-of n)] [db (seon.task/task db "demo/r") (seon.task/task-cites db "demo/r")]))
 
-(defn namespaces-at
-  "seon.context/namespaces-of's argument at n definitions: the record of an agent whose task cites one var of a
-  namespace that defines n, its proof calling two of them."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :map]]}
-  [n]
-  (let [db (d/db-with (ts/test-db)
-                      (into [{:db/id "n" :ns/name 'app.w} {:db/id "tf" :form/id "app.w-test/t" :form/src "(deftest t (is (f0)))" :form/refs #{'app.w/f0 'app.w/f1}}
-                             {:var/name 'app.w-test/t :var/kind :test :var/form "tf"}]
-                            (for [i (range n)] {:var/name (symbol "app.w" (str "f" i)) :var/ns "n" :var/kind :fn})))
-        db (d/db-with db (seon.task/create-tx db [{:seon.task/ns 'app :seon.task/name "w" :seon.task/proofs #{'app.w-test/t} :seon.task/plan "Make `app.w/f0` right."}]))
-        db (d/db-with db [{:seon.agent/key "b/w1" :seon.agent/task [:seon.task/id "app/w"]}])]
-    [(:tree (seon.ctx/build db (pdb/eid db :seon.agent/key "b/w1") :b))]))
-
-(deftest the-namespaces-part-costs-what-it-shows
-  ;; the namespaces part (docs/render.md#a-part-answers-data) is what the record holds of the task's names: the
-  ;; namespace's size never reaches it (a bench run's part listed ~170 names the task never needed, 1,256 tokens)
-  (cost/proof {:of 'seon.context/namespaces-of :input 'seon.context-cost-test/namespaces-at
-               :n "definitions in the cited namespace"
-               :work "the task's cites, its needs' and its proofs' vars as the record holds them, each name grouped by its namespace: what it shows, flat in the namespace's definitions"
-               :growth :constant
-               ;; measured: 7 contracted calls, 26.9 KB at 10 definitions; namespace-data, which it replaces, read every
-               ;; definition of each namespace (34 KB a definition: 3.49 MB at 100)
-               ;; 8: 7 + the current-ns call. Accepted by the owner, 2026-11-03 ("Record 616 and 8")
-               :fixed {:calls 8 :bytes 30000}
-               :sizes [10 100 1000]}))
-
 (deftest task-data-costs-what-the-plan-names
   ;; the task's data (task-data over the task as of t), as my.task/data answers it at the REPL: what the plan
   ;; cites read and resolved, its write set among it, flat in the wiki's size
@@ -221,8 +195,11 @@
                        ;; measured 2026-10-28 (a plan and a run a page): 2.68 MB / 433 calls at 1, 9.51 MB / 881 at 2,
                        ;; 23.2 MB / 1,777 at 4, 50.7 MB / 3,569 at 8; before the pages map (every page drawn twice):
                        ;; 11.0 MB / 1,195 at 2, 27.7 MB / 2,719 at 4, 61.2 MB / 5,767 at 8 (762 calls a page, not 448)
-                       :per-n {:bytes 6800000 :calls 516}
-                       :fixed {:bytes 500000 :calls 50}
+                       ;; 660 calls and 2.32 MB at 1 since render-core's agent-facing renders (a part for each cite, the status
+                       ;; written to the agent): from 566 calls; the bytes of a page fell (7.3 MB estimated, 2.32 MB measured)
+                       ;; 2.32 MB / 660 calls at 1, 4.74 MB / 1,319 at 2
+                       :per-n {:bytes 2420000 :calls 660}
+                       :fixed {:bytes 1000 :calls 1}
                        :sizes [1 2 4 8]}))))))
 
 

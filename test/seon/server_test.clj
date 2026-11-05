@@ -121,12 +121,11 @@
 (deftest an-agent-reads-its-task-running
   ;; task seon.task/an-agent-reads-its-task-as-main-holds-it: an attached agent's branch is cut
   ;; before main writes the task's release, so (my.task/current) and its page read :held
-  ;; the page as a person reads it: its parts' HTML (seon.repl/render-ctx; the hiccup is each part as the model
-  ;; reads it, and the model's task part leaves the execution to :task)
-  (let [[current page] (at/in-agent ["(:seon.task/execution (my.task/current))"
-                                     "(apply str (map :html (:units (seon.repl/render-ctx))))"])]
+  ;; its record, which every part of its page is drawn from (the agent's own task part tells it its work, not the execution)
+  (let [[current held] (at/in-agent ["(:seon.task/execution (my.task/current))"
+                                     "(:seon.task/execution (:task @seon.ctx/ctx))"])]
     (is (= :running (:value current)) "the agent reads its task running, as main does")
-    (is (clojure.string/includes? (:value page) "· running") "and so does its page")))
+    (is (= :running (:value held)) "and so does its record")))
 
 (defn- in-agent-of
   "Root-REPL code that evaluates form in the agent that works task id, answering its value (read back
@@ -214,8 +213,7 @@
                                                       "  :key (datahike.api/q '[:find ?k . :where [?a :seon.agent/key ?k] [?m :seon.model-call/agent ?a]] db)})")}]))
         text (:context ctx)]
     (is (clojure.string/starts-with? text "# You are a Seon agent") "the system prompt, first")
-    (is (clojure.string/includes? text "(seon.repl/render-ctx-hiccup)") "the form that shows the render of ctx now")
-    (is (re-find #"task-data-\d+" text) "the render of ctx by component key")
+    (is (re-find #"(?m)^\[seon\.render\.ui/task\b" text) "the render of ctx, each part headed by the function that drew it")
     (is (not (contract/error? (:value status))) (pr-str (:value status)))
     (is (contains? (:value status) :proofs) "status answers as the turn measured it")
     (is (seq (:ns (:value sent))) "and the read records what it sent, as a model turn does (the debug page shows it)")
@@ -374,13 +372,13 @@
                         {:op :done :agent agent}]))]
     ;; the owner, 2026-10-27: an eval's answer stays small, its handle and one line; what the run
     ;; found is drawn on its eval, from its value (seon.render.ui/proved)
-    (is (clojure.string/includes? (:text proved) "green: ran ") (:text proved))
+    (is (clojure.string/includes? (:text proved) "green: ") (:text proved))
     (is (< (count (:text proved)) 300) (str "the answer is its handle and one line: " (count (:text proved)) " chars"))
     (is (= [:pass []] (:value status)) (str "my.task/status: the proof's status, and no reason about it: " (pr-str status)))
     (let [[k proofs html] (:value drawn)]
       (is (= :seon.test/proved k) (str "the eval's record names the value's render schema: " (pr-str drawn)))
       (is (= :pass (get proofs 'app.okt/ok-test)) "the value is the run, stored as data")
-      (is (and (string? html) (clojure.string/includes? html "green: ran ") (clojure.string/includes? html "app.okt/ok-test"))
+      (is (and (string? html) (clojure.string/includes? html "green: ") (clojure.string/includes? html "app.okt/ok-test"))
           (str "drawn on the eval: the line, then each proof's status: " html)))
     ;; the harness's task also names demo-test/t, which no test defines: that one is the judge's unknown
     (is (not (clojure.string/includes? (pr-str done) "proof-unknown app.okt/ok-test")) (str "and the judge counts it: " (pr-str done)))))

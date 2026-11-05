@@ -38,7 +38,7 @@ An attribute with no value has no datom, so a stored nil and an empty set do not
 
 ## A read is a seek in an index
 
-Datahike keeps datoms sorted three ways, and each question has one read. Measured on 4,273 vars, allocation of one read:
+Datahike keeps datoms sorted three ways, and each question has one read. Measured on the standing root at 4,273 vars, allocation of one read (commit 05f92cce57):
 
 | Question | Read | Index | Allocates |
 |---|---|---|---|

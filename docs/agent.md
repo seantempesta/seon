@@ -17,7 +17,7 @@ You have one tool, eval: call it with Clojure forms, and you see what the REPL a
 
 ## Working a task
 
-How a work or whole task is worked, step by step (its instructions cite this section whole, so it is a part of your context).
+How to work a task, step by step: read what you will change and the proofs that judge it, make the proofs fail for the right reason, then make them pass.
 
 - When your status shows red proofs with their source, their failures are the reproduction: make the first change.
 - Only when the plan says something is wrong and your status shows no failing proof, first reproduce it in one eval. If the output is already right, the premise is false: fail the task with it, ``(my.task/fail! "why" evidence)``. Once the output is wrong, stop reading.
@@ -76,7 +76,7 @@ How your work stands, one part (`status`; `(my.task/status)` answers the same), 
 - `:test-run`: the test run itself failing (a dead fork, a namespace that did not load); no verdict is real until it runs.
 - `:without-a-contract`, `:caused` and `:attention` (the wiki sections your code changes made stale, to read and probably fix, never a reason to refuse), `:its-merge-carries` (every var you added, changed and removed and every schema you changed: anything the task does not need, put back), `:unmerged` (the entries to resolve), and on a task that merges itself `:merge` (what main changed since your merge base, `:main-moved`, and which of those you changed too, `:conflicts`; once your proofs pass and nothing conflicts, your work ends when merging main brings nothing new, and root merges your branch).
 - "Already green on main: …", first on your task's part: a written proof of yours whose last result on main is green (`seon.context/task-data`'s `:green-on-main`). The premise may already hold: reproduce it, and if the output is right, fail the task with that output in this turn.
-- The turn part (``seon.render.ui/run-head``) shows your turn of your cap (turn 11 of 40), `:ns`, the namespace your REPL is in (every eval's response carries it too, as nREPL's do: where your next eval runs), and, when it happened, that your last reply (your model call that answered last) was cut at the model's token limit. What your evals changed of your branch's program is `(my.branch/changes)` and the status, not this line. A move into a namespace whose own var hides a REPL helper answers `:helper-shadowed`, naming both (`docs/render.md#a-part-answers-data`).
+- The turn part (``seon.render.ui/turn``) shows your turn of your cap (turn 11 of 40), the namespace your REPL is in (every eval's response carries it too, as nREPL's do: where your next eval runs), and, when it happened, that your last reply (your model call that answered last) was cut at the model's token limit. What your evals changed of your branch's program is `(my.branch/changes)` and the status, not this line. A move into a namespace whose own var hides a REPL helper answers `:helper-shadowed`, naming both (`docs/render.md#a-part-answers-data`).
 Your tests: `(prove)` runs them; `(deferred)` lists the process tests root runs when it asks.
 
 ## The REPL
@@ -177,7 +177,7 @@ The judge's test selection follows reach: a change to a namespace many others re
 
 ## Merging
 
-Main's work is merged into your branch as main moves (a work agent's too), and a merge task's branch has main merged in: each entry both changed is unmerged, shown under your status's `:unmerged` with its `:base`, `:ours` and `:theirs`, and resolved by you at the REPL.
+How merging with main works, and what to do when your status shows an unmerged entry. Main's work is merged into your branch as main moves (a work agent's too), and a merge task's branch has main merged in: each entry both changed is unmerged, shown under your status's `:unmerged` with its `:base`, `:ours` and `:theirs`, and resolved by you at the REPL.
 
 - `(my.branch/unmerged)` lists them. Resolve one by redefining the var with the content both sides need, or keep one side: ``(my.branch/resolve! 'ns/var :theirs)``, or ``(my.branch/resolve! 'ns/var)`` to keep yours.
 - Your branch sees only its own changes until then.

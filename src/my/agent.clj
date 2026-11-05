@@ -316,21 +316,35 @@
            {:seon.render/schema :seon.test/proved}))))))
 
 (defn prove-summary
-  "A prove's run r as the eval answers it (seon.render/model, the schema :seon.test/proved): one
-  line, its verdict and what ran, was left to the judge (process tests), was reused and died (a death
-  is no verdict: not counted). What it found (each proof's status, the reds with their first failing
-  assertion, the deaths) is drawn on the eval, from its value (seon.render.ui/proved, the schema's
-  html render); the run whole is the value under the eval's handle. A part of the run (a select-keys
-  of it keeps its metadata) is that part, as data. See docs/agent.md#done."
+  "A prove's run r as the eval answers it (seon.render/model, the schema :seon.test/proved): its verdict as counts of the
+  proofs it judged (`red: 1 of 3 failed`), each failing test with its first failure in a line, and only what is true of this
+  run: the tests it reused (their last result still counts, because nothing they reach changed), the ones left to the judge
+  (process tests), the ones that died (no verdict) and a name that matched no test. The run whole is the value under the eval's
+  handle (the proofs' statuses, every failure, the deaths). A part of the run (a select-keys of it keeps its metadata) is that
+  part, as data. See docs/agent.md#done."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
   [_ r]
   (if-not (:reports r)
     (with-meta r nil)
     (let [died (count (proofs/died r))
-          red (pos? (+ (:fail r 0) (:error r 0)))]
-      (str (cond red "red" (pos? died) "died" :else "green")
-           ": ran " (:ran r 0) ", deferred " (count (:deferred r)) " (to the judge), reused " (:reused r 0) ", died " died
-           (when-let [u (seq (:unmatched r))] (str "; no test is named " (str/join ", " u)))))))
+          red (pos? (+ (:fail r 0) (:error r 0)))
+          fails (apply dissoc (proofs/failures r) (proofs/died r))
+          n (+ (:ran r 0) (:reused r 0))
+          clean (fn [x] (str/replace (str x) #"#object\[java\.util\.regex\.Pattern 0x[0-9a-f]+\]" "a regex"))
+          failure (fn [t f] (let [got (str/trim (str (or (:actual f) (:got f))))
+                                  m (when (str/starts-with? got "#error") (second (re-find #":message \"([^\"]*)\"" got)))]
+                              (str "✗ " t (when (:message f) (str ": " (:message f))) "\n    asserted " (clean (:expected f))
+                                   "\n    and got  " (if m (str "an error: " m) (clean got)))))]
+      (print/code
+       (str/join "\n" (remove nil?
+         (concat
+           [(cond red (str "red: " (count fails) " of " n " failed")
+                  (pos? died) (str "died: " died " of " n " had no verdict")
+                  :else (str "green: " n " of " n " passed"))]
+           (for [[t fs] (sort-by (comp str key) fails)] (failure t (first fs)))
+           [(when (pos? (:reused r 0)) (str "reused " (:reused r) ": their last result still counts, because nothing they reach has changed"))
+            (when (seq (:deferred r)) (str "left to the judge: " (count (:deferred r)) " process tests"))
+            (when (seq (:unmatched r)) (str "no test is named " (str/join ", " (:unmatched r))))])))))))
 
 (defn process-test?
   "Whether test t reaches a process of its own on this branch (an agent, a root, a fork, the binary:
@@ -535,14 +549,13 @@
 
 (defn- cited
   "Name n as a cite of it on the agent's page shows it, on demand: a cite of n at doc depth made on db (one
-  d/with), pulled by the cite's own pattern (seon.ctx/build) and drawn by the cite's model render
-  (seon.render.ui/cite-model), so on demand and on the page are one render. See
+  d/with), pulled by the cite's own pattern (seon.ctx/build) and drawn by seon.render.ui/cite-hiccup, so on demand and on the page are one render. See
   docs/references.md#an-entity-cites."
   {:malli/schema [:=> [:cat :seon.host/db [:or :symbol :qualified-keyword]] :any]}
   [db n]
   (let [r (d/with db [{:db/id "of" :seon.agent/key (str "help " n)} {:seon.cite/id (str "help " n) :seon.cite/of "of" :seon.cite/name n :seon.cite/depth :doc :seon.cite/order 0}])
         db' (:db-after r)]
-    (ui/cite-model {} (:tree (seon.ctx/build db' (pdb/eid db' :seon.cite/id (str "help " n)) nil)))))
+    (ui/cite-hiccup db' (:tree (seon.ctx/build db' (pdb/eid db' :seon.cite/id (str "help " n)) nil)))))
 
 (defn doc-of
   "The thing x names as data, for `doc`: a schema key (:var/form, its form and what cites it), a wiki address

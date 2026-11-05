@@ -62,6 +62,11 @@
   {:malli/schema [:=> [:cat nat-int?] :string]}
   [n] (emit/tokens-text n))
 
+(defn cost-text
+  "seon.print.emit/cost-text, the one wording of what work cost (docs/render.md#cost-is-shown-one-way)."
+  {:malli/schema [:=> [:cat :map] :string]}
+  [m] (emit/cost-text m))
+
 (defn text
   "`v` as text under budget tokens: the printed text, or the error's message when even
   its first part does not fit."
@@ -70,6 +75,11 @@
   ([v budget]
    (let [r (print-value v {:budget budget})]
      (or (:text r) (:seon.error/message r)))))
+
+(def ^:private cost-line-tokens
+  "Tokens an eval's cost line can take, its longest wording, set aside from the printer's budget so the line counts inside it.
+  Sized once: this runs for every eval printed. See docs/render.md#cost-is-shown-one-way."
+  (inc (emit/chars-tokens (count (str ", :cost " (pr-str (emit/cost-text {:ms 1e12 :ticks 1e15 :bytes 1e15 :tok default-budget})))))))
 
 (defn response-text
   "Eval response r as every reader reads it (the model's tool message, the page, an outside
@@ -80,8 +90,18 @@
   {:malli/schema [:function [:=> [:cat :map] :string] [:=> [:cat :map [:maybe :seon.host/fn]] :string]]}
   ([r] (response-text r nil))
   ([r render]
-   (let [p (print-value r (cond-> {:handle (:handle r)} render (assoc :render render)))]
-     (or (:text p) (:seon.error/message p)))))
+   ;; a value that is a page prints whole: its metadata says so as it is made, and its schema's (record-text) when it is read back
+   (let [r (cond-> r (:seon.print/full (meta (:value r))) (vary-meta assoc :seon.print/full true))
+         shown (cond-> r (:handle r) (-> (dissoc :ms :ticks :bytes) (with-meta (meta r))))
+         ;; an eval's cost is one line with its result, what the result costs the context among it; its numbers stay data on the
+         ;; record. An eval that recorded none was not run
+         cost (fn [tok] (str ", :cost " (pr-str (if (some r [:ms :ticks :bytes]) (emit/cost-text (assoc (select-keys r [:ms :ticks :bytes]) :tok tok)) "not run"))))
+         p (print-value shown (cond-> {:handle (:handle r) :budget (cond-> default-budget (:handle r) (- cost-line-tokens))} render (assoc :render render)))
+         text (or (:text p) (:seon.error/message p))]
+     ;; spliced after the printed map's last entry: the text is the only place its own size is known
+     (if (and (:handle r) (:text p) (str/ends-with? text "}"))
+       (str (subs text 0 (dec (count text))) (cost (select/chars-tokens (count text))) "}")
+       text))))
 
 (defn read-rest
   "What a cut's continuation form (seon.print.emit/continuation: get-in, nth, seq, key, val, a
@@ -114,7 +134,10 @@
      ;; only an eval that kept a schema can render: a stored value's nested metadata is gone, so a render
      ;; passed for any other would be asked of every value printed and answer nothing
      (if (and k render (instance? clojure.lang.IObj v))
-       (response-text (assoc r :value (vary-meta v assoc :seon.render/schema k)) render)
+       (let [v (vary-meta v assoc :seon.render/schema k)
+             ;; what the store does not keep of a value, its schema says (render answers :full for a schema that declares it)
+             v (cond-> v (:full (render v)) (vary-meta assoc :seon.print/full true))]
+         (response-text (assoc r :value v) render))
        (response-text r)))))
 
 ;;; Prose: text read as itself (a message, a form's source, a plan, a printed value), not as

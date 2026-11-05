@@ -27,7 +27,7 @@
             [seon.config :as cfg] [seon.contract :as contract] [seon.print :as print] [seon.task :as task] [seon.template :as tpl] [seon.doc :as doc] [seon.error :as err] [seon.agent :as agent] [konserve.jolt.lmdb :as klmdb] [clojure.java.shell]
             [clojure.core.async :as a]
             ;; the agent side, loaded here so the fork server and every agent inherit it compiled
-            [seon.turn] [my.fx] [my.task] [my.turn] [my.branch] [my.doc] [clojure.core.async.flow :as flow] [clojure.test]
+            [seon.turn] [my.fx] [my.task] [my.turn] [my.render] [my.branch] [my.doc] [clojure.core.async.flow :as flow] [clojure.test]
             [taoensso.trove :as trove]))
 
 
@@ -130,7 +130,7 @@
 
 (declare deliver-rid answer-taken)
 
-(declare answer-spawn)
+(declare answer-spawn insert-evals)
 
 (defn- record-death
   "Agent aid's death, folded, and answered to the requests it died in (inflight): its died
@@ -220,6 +220,8 @@
         ;; its hello: the spawn is answered now, the agent ready
         ;; its hello answers the spawn, whatever a request sent before it made its status
         (:ready m) (answer-spawn o id {:id id})
+        ;; and the evals given at its spawn are the first things its REPL queue holds, before any request the answer makes
+        (:ready m) (insert-evals o id)
         ;; the agents with an eval in flight: the stall check's set (a gone one never)
         (contains? m :running) (update ::busy (fnil (if (and (:running m) (not (gone-statuses (:status a))) (not (gone-statuses (:status a')))) conj disj) #{}) id)))
     st))
@@ -264,6 +266,15 @@
   [st o id m]
   (when (get-in st [:agents id]) (step/out! o [id :in] m))
   st)
+
+(defn- insert-evals
+  "Agent id's :evals (spawn!'s opts, held under ::inserting since its :spawn) sent to it as one write, which its REPL runs in order
+  before any request the spawn's answer makes (docs/turn.md#an-eval-can-be-inserted). Answers st."
+  {:malli/schema [:=> [:cat :seon.root/api-state :seon.host/volatile :seon.agent/id] :seon.root/api-state]}
+  [st o id]
+  (if-let [es (get-in st [::inserting id])]
+    (-> st (to-agent o id {:op :write :msg {:op :evals :by "root" :evals es}}) (update ::inserting dissoc id))
+    st))
 
 (defn- deliver-message
   "Send an agent's message m ({:from :to [id ...] :body}) to each agent it names, as a frame:
@@ -345,7 +356,7 @@
                ;; answered then, with the status that names the death
                :else (assoc-in st [::dying (or pid (:pid v))] [agent died inflight]))
           st (cond-> st rid (deliver-rid o rid {:stopped true :agent agent}))]
-      (-> st (update :agents dissoc agent) (update :agent-procs dissoc agent) (assoc ::update true)
+      (-> st (update :agents dissoc agent) (update :agent-procs dissoc agent) (update ::inserting dissoc agent) (assoc ::update true)
           (set-agent o agent {:status (or stop :dead) :ended-ms (System/currentTimeMillis) :running nil})))))
 
 (defn- pend
@@ -389,7 +400,8 @@
                          (step/out! o :to-writer {:op :spawn :agent aid :branch branch :task (:task opts) :ns (profile/now-ns) :fd fd :dest {:spawn aid}
                                                   :key (or (:key opts) (task/agent-key (:boot st) aid))})
                          ;; answered at its hello (set-agent's :ready), or the end it meets first
-                         (assoc-in st [::spawning aid] p))))
+                         (cond-> (assoc-in st [::spawning aid] p)
+                           (seq (:evals opts)) (assoc-in [::inserting aid] (:evals opts))))))
       :clone (let [parent (:parent m)]
                (cond
                  (nil? (get-in st [:agents parent])) (reply! st o p (absent (get-in st [:view :agents parent]) parent))

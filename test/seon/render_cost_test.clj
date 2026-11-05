@@ -350,8 +350,11 @@
      ;; measured 2026-11-05, a step and back on this input: 1,231 / 1,471 / 2,431 / 6,271 contracted calls and 10.86 / 11.95 / 16.68 /
      ;; 33.70 MB at 10 / 40 / 160 / 640 turns; 8 calls a turn, two components each (its turn, its tiles). Before the read index and the turn's component, one step on the same
      ;; input: 11,073 calls and 80.9 MB at 640 turns
-     :per-n {:calls 8.2 :bytes 36000}
-     :fixed {:calls 1190 :bytes 10600000}
+     ;; render-core's agent-facing renders (the status written to the agent, a part for each cite, the turn line): 1,355 calls and
+     ;; 11.31 MB at 10 turns under the test binary's contracts, 8 calls and 36 KB a turn, as before them; the fixed part is the
+     ;; renders the model now reads drawn on a step
+     :per-n {:calls 8.2 :bytes 37000}
+     :fixed {:calls 1275 :bytes 11250000}
      :sizes [10 40 160 640]}))
 
 (def ^:dynamic *conn*
@@ -464,6 +467,10 @@
                        ;; 616 at 10: 607 + 9, following the REPL: 3 calls a draw of the namespaces part (current-ns and its two
                        ;; record lookups, :seon.agent/ns and the task's fallback), 3 draws. Accepted by the owner, 2026-11-03
                        ;; ("Record 616 and 8")
-                       :per-n {:calls 4 :bytes 35000}
-                       :fixed {:calls 576 :bytes 3200000}
+                       ;; 1,048 calls and 1.97 MB at 10, 40 and 80 evals since render-core's agent-facing renders: flat, where it was 616 and
+                       ;; 3.55 MB at 10 and 4 calls and 35 KB an eval. The calls more are what the model now reads: the status written to
+                       ;; the agent, its unwritten proof's shape, a part for each cite; nothing of the eval lists is read. Task
+                       ;; seon.render/the-render-is-an-eval follows it: the list is drawn as one eval there
+                       :per-n {:calls 0 :bytes 0}
+                       :fixed {:calls 1050 :bytes 2000000}
                        :sizes [10 40 80]}))))))

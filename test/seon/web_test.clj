@@ -10,6 +10,21 @@
 (def ^:private index {:a1 {:pid 11 :branch :agent-1 :status :idle} :a2 {:pid 12 :branch :agent-2 :status :killed}
                       :a3 {:pid 13 :branch :agent-3 :status :busy}})
 
+;; docs/render.md#a-part-prints-as-its-render: a printed part names its render with a symbol, and a value the page draws may hold what an
+;; agent wrote, so a symbol head in data is drawn as data and resolves nothing; only a var or a function a render itself returned is a call
+(def ^:private called? (atom false))
+(defn ^:private witness [& _] (reset! called? true) [:b "called"])
+
+(deftest a-symbol-in-stored-data-calls-nothing
+  (reset! called? false)
+  (let [out (h/html ['seon.web-test/witness "arg"])]
+    (is (not @called?) "the function the symbol names did not run")
+    (is (str/includes? out "arg") (str "its contents are drawn: " out))
+    (is (not (str/includes? out "called")) out))
+  (testing "a var head, which only a render's own code holds, is still a call"
+    (is (str/includes? (h/html [#'witness]) "called"))
+    (is @called?)))
+
 (deftest calls-become-requests
   (testing "the REPL box: an eval in that agent, origin :ui"
     (is (= [[{:op :eval :id :a1 :forms "(+ 1 2)" :origin :ui} :a1]]

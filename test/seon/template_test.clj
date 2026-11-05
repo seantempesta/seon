@@ -87,13 +87,14 @@
     (is (not (str/includes? (:work tpl/instructions) "merge-main!")) "nor is it told to")
     ;; a work agent merges main every turn main moved (2026-10-30), so a conflict meets it: swarm's scripted work agent
     ;; never resolved one (4 of 10 swarm runs red at 20 tasks); the old sentence left it to the merge task
-    (is (str/includes? (:work tpl/instructions) "you resolve what conflicts: ```docs/agent.md#merging```") "it resolves main's conflicts itself, as the help page's merging section says")
+    (is (not (str/includes? (:work tpl/instructions) "docs/agent.md#merging")) "merging is read when the status has unmerged entries (it says where), not cited by every task")
+    (is (str/includes? (:merge tpl/instructions) "docs/agent.md#merging") "a merge task cites it")
     ;; the capped runs of 2026-10-26 (notes: context-for-20-turns): three agents hunted a bug main had
     ;; already fixed, five had what they needed by turns 1-18 and read on, and proofs were built on the
     ;; live db and on zipmap's order: reproduce first and fail! if it is right, stop reading once it is
     ;; wrong and write the deftest red, and build its input as the existing tests build theirs
     ;; how a task is worked is the help page's section the instructions cite whole (a wiki section, its context's part)
-    (doseq [k [:whole :work :implement]] (is (str/includes? (k tpl/instructions) "```docs/agent.md#working-a-task```") (str k ": cites how a task is worked")))
+    (doseq [k [:whole :work :implement]] (is (not (str/includes? (k tpl/instructions) "docs/agent.md#working-a-task")) (str k ": the system prompt says how a task is worked, not every task's context")))
     (let [w (working-a-task)
                   ;; (2026-10-29: the premise step applies to a fix only, and a proof written already is the
                   ;; task's: the agent writes only those its status lists with no source)
@@ -128,14 +129,14 @@
     (is (= (:whole tpl/instructions) (:seon.task/instructions w)))
     (is (str/includes? (:whole tpl/instructions) "main's work merged in") "done on main's merged program")
     ;; owner, 2026-10-26: the agent reads its merge readiness on its page and is done when it can merge
-    (is (str/includes? (:whole tpl/instructions) "status's :merge") "it reads whether it can merge on its page")
-    (is (str/includes? (:whole tpl/instructions) "Once :merge says :ready, your run ends and root merges your branch"))
+    (is (str/includes? (:whole tpl/instructions) "Your status says") "it reads whether it can merge on its page")
+    (is (str/includes? (:whole tpl/instructions) "your run ends and root merges your branch"))
     ;; agent loop's park findings: a green run ends before its closing prose, so "end your turn
     ;; with prose" left the next turn parked :waiting; a false premise was reported in prose
     (doseq [k [:whole :work]]
       (is (not (str/includes? (k tpl/instructions) "end your turn")) (str k ": no closing-prose step"))
-      ;; a false premise is a failed task: the steps they cite say so (docs/agent.md#working-a-task)
-      (is (str/includes? (k tpl/instructions) "```docs/agent.md#working-a-task```") (str k ": cites the steps")))
+      ;; a false premise is a failed task: the system prompt says so (my.task/fail!), and the wiki section has the steps
+      (is (not (str/includes? (k tpl/instructions) "docs/agent.md#working-a-task")) (str k ": does not cite the steps into every context")))
     (is (seq (task/create-tx (ts/test-db) ws)) "a valid task")))
 
 

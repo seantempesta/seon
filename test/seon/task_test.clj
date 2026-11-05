@@ -58,9 +58,9 @@
         tx (into (task/start-tx db "demo/t" "b1" :a1 {:branch :b :model nil :max-turns 4} 0) (task/agent-cites-tx db "b1/a1" "b1/a1"))
         db (d/db-with db tx)]
     (is (= (count (seon.config/value :seon.config.agent/cites)) (count (filter :seon.cite/id tx))) "one per address the config names")
-    (is (= [["docs/testing.md#testing" :doc] ["docs/data-modeling.md" :doc] ["docs/references.md#an-entity-cites" :doc]]
+    (is (= (mapv (fn [a] [a :doc]) (seon.config/value :seon.config.agent/cites))
            (mapv (juxt :seon.cite/address :seon.cite/depth) (task/cites-of db (pdb/eid db :seon.agent/key "b1/a1"))))
-        "on the agent's record, in the config's order")))
+        "on the agent's record, in the config's order (the references it is told it can read, not pulled into its context whole)")))
 
 (deftest the-writer-cites-what-names-something
   ;; audit item 2a: a reproduction's prose names a test helper (demo-test/fixture) and a handle (result/e-none) that name

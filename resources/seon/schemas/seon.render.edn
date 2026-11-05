@@ -12,16 +12,20 @@
  :my.agent/lines [:vector {:seon.render/model my.agent/lines-text} :map]
  ;; my.agent/grep's [] for a string holding a regex's operators, shown with its regex form (my.agent/grep-none-text)
  :my.agent/grep-none [:vector {:seon.render/model my.agent/grep-none-text} :map]
- ;; the agent's run (its turn of its cap, the tokens it sent, a cut reply), a part of the page
- :seon.context/run [:map {:seon.render/html seon.render.ui/run-html}]
- ;; the namespaces the work touches (seon.context/namespaces-of): each the names the task cites or its proofs call
- :seon.context/namespaces [:map-of {:seon.render/html seon.render.ui/namespaces-html} :symbol :map]
  ;; how an agent's work on its task stands (seon.context/status), a part of its page: the page draws it by
  ;; its html render, the model is sent its data (docs/render.md#a-part-answers-data)
- :seon.context/status [:map {:seon.render/html seon.render.ui/status-html :seon.render/model seon.context/status-model}]
+ :seon.context/status [:map]
  ;; a prove's run (my.agent/prove): its verdict, each proof's status, the reds with their first
  ;; failing assertion and the deaths, and counts (my.agent/prove-summary); the lists are the value
  :seon.test/proved [:map {:seon.render/model my.agent/prove-summary :seon.render/html seon.render.ui/proved}]
+ ;; what draws what in a walk (seon.render/tree, my.render/tree): a component and those it drew, each with its own output's
+ ;; tokens
+ ;; every part of an agent's page as the hiccup its request holds it, whole (my.render/render-ctx, render-changes): a value that is a page prints whole, the stored one too
+ :seon.render/parts [:map-of {:seon.print/full true} :string :any]
+ :seon.render/tree [:map [:render :symbol] [:args [:vector :any]] [:id :string] [:tokens nat-int?]
+                    [:reads? {:optional true} :boolean]
+                    ;; each child is a tree too; a recursive schema cannot be built by the registry (a [:ref] overflows its eager parse)
+                    [:children [:vector [:map [:render :symbol] [:children [:vector :any]]]]]]
  ;; how a value is shown: in one line, as a full panel, a tile, a row of a list
  :seon.render/as [:enum :inline :block :tile :row]
  ;; a render's props (its second argument), every one optional: like React's, a render that

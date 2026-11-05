@@ -37,9 +37,9 @@
 
 (def ^:private budgeted
   "The origins whose forms run under the config's budgets of ticks and bytes (an agent's model, an
-  outside agent, the page): root's own platform requests and the agent's loop run unbounded. See
+  outside agent, the page, an inserted eval): root's own platform requests and the agent's loop run unbounded. See
   docs/processes.md#interrupts."
-  #{:model :outside :ui})
+  #{:model :outside :ui :insert})
 
 (defn- form-src
   "The exact text of form in code, from its reader position (:line, :column; 1-based) to end,
@@ -599,11 +599,11 @@
   [r req] (cond-> r (seq (:repaired req)) (assoc :repaired (:repaired req))))
 
 (defn- by
-  "Who evaluated, as the record names it (:seon.eval/by): the user (the page), an outside
+  "Who evaluated, as the record names it (:seon.eval/by): whoever asked an inserted eval (the request's :by), the user (the page), an outside
   session (root's server), a context read (seon.turn/context-block), else the agent itself (its model's turn)."
-  {:malli/schema [:=> [:cat [:maybe :keyword]] :string]}
-  [origin]
-  (case origin :ui "user" :outside "outside" :context "context" (name (or (:id @agent/state) :root))))
+  {:malli/schema [:=> [:cat :map] :string]}
+  [{:keys [origin] asked :by}]
+  (case origin :insert asked :ui "user" :outside "outside" :context "context" (name (or (:id @agent/state) :root))))
 
 (defn record-tx
   "The recording transaction of one eval: its entity, on the agent's, who evaluated it (:seon.eval/by), and its
@@ -675,11 +675,11 @@
     (if (and contract/record? (= :agent (:mode @agent/state)) (not (:within req)))
       ;; the write is the edge: a branch that refuses it answers the eval :unrecorded with the writer's message, so the
       ;; turn that asked goes on (a refused write thrown from here ended the whole turn: its reply and evals lost, the turn run again)
-      (try (agent/transact! (into defs (record-tx {:seon.agent/key (:key @agent/state) :seon.agent/id (:id @agent/state)} id (by (:origin req))
+      (try (agent/transact! (into defs (record-tx {:seon.agent/key (:key @agent/state) :seon.agent/id (:id @agent/state)} id (by req)
                                                   (let [working? (some? (:turn @agent/state))]
                                                     (cond-> rec
                                                       ;; the turn loop's own eval (the agent working a task, no model call, made by the agent) is no conversation record: it takes no turn
-                                                      (not (and working? (not (:call-id req)) (not (#{:ui :outside :context} (:origin req))))) (assoc :seon.eval/turn (agent/turn-now)))))))
+                                                      (not (and working? (not (:call-id req)) (not (#{:ui :outside :context :insert} (:origin req))))) (assoc :seon.eval/turn (agent/turn-now)))))))
            (assoc r :record id)
            (catch Throwable e
              (assoc r :unrecorded (contract/error :seon.agent/unrecorded #'record! (str "the branch refused this eval's record: " (ex-message e)) {}))))
@@ -750,7 +750,7 @@
                                (let [r (again code (cond-> (repaired (response @answers handle) req)
                                                       (:ns @agent/state) (assoc :ns (ns-name (:ns @agent/state)))))
                                       rec (record-details code r req)]
-                                  [r rec (when (not= :model (:origin req)) (text-of rec))]))
+                                  [r rec (when-not (#{:model :insert} (:origin req)) (text-of rec))]))
                 [r rec text] (try (@the-handler (assoc req "code" code :reply #(vswap! answers conj %)))
                               (answered)
                               (catch Throwable e
@@ -908,7 +908,58 @@
         r (repaired (response [{:tag :err :err e}] handle) req)
         rec (record-details code r req)]
     (swap! agent/state assoc-in [:results (keyword (name handle))] r)
-    (record! (cond-> r (not= :model (:origin req)) (assoc :text (text-of rec))) rec code req)))
+    (record! (cond-> r (not (#{:model :insert} (:origin req))) (assoc :text (text-of rec))) rec code req)))
+
+(defn- call-problem
+  "Why an eval call, its intent and its code, is not the eval tool's shape, as the error its one
+  result is, or nil: a call is intent and one or more forms (docs/prompt.md).
+  Code that does not read is left to the REPL, whose read error says where."
+  {:malli/schema [:=> [:cat [:maybe :string] :string] [:maybe :seon.turn/invalid-call]]}
+  [intent code]
+  (let [forms (reader/read-text code 'user)]
+    (cond
+      (clojure.string/blank? intent)
+      (contract/error :seon.turn/invalid-call #'call-problem
+                      "this call has no intent: send intent, a little thinking (a sentence is fine: what these forms are about to do and what you expect), beside code; the form was not run" {:problem :no-intent})
+      (and forms (empty? forms))
+      (contract/error :seon.turn/invalid-call #'call-problem
+                      "this call has no form: its code is empty; nothing was run" {:problem :forms :forms 0}))))
+
+(defn run-calls
+  "Eval calls ({:id :intent :code}, a reply's or an insert's: docs/turn.md#an-eval-can-be-inserted) through the one REPL
+  path in order, each answered as its own result: {:id :code :intent :not-run :response}. req-of is a call's id to its
+  request (its origin, and its call id when a model made it); eval! runs code under a request and answers its response. A call with no
+  intent or no form, or after one that threw or answered an error (a refused edit), is not run: `unrun` records
+  its one result, which says why, so none builds on a change that never happened and every call has its result."
+  {:malli/schema [:=> [:cat [:sequential :map] ifn? ifn?] [:vector :map]]}
+  [calls req-of eval!]
+  (reduce (fn [acc {:keys [id code intent]}]
+            (let [;; the forgiving reader's repairs, told on this call's own result (:repaired)
+                  {src :text repairs :repairs} (reader/forgive code)
+                  ;; each call keeps its own intent
+                  req (cond-> (req-of id)
+                        (not (clojure.string/blank? intent)) (assoc :intent intent)
+                        (seq repairs) (assoc :repaired (context/repaired src repairs)))
+                  failed (some #(when (or (:ex (:response %)) (contract/error? (:value (:response %)))) (:id %)) acc)
+                  why (if failed
+                        (contract/error :seon.turn/not-run #'run-calls (str "not run: call " failed " of this reply failed before it (its result says why)") {:after failed})
+                        (call-problem intent src))]
+              (conj acc (if why
+                          {:id id :code code :intent intent :not-run (some? failed)
+                           :response (let [r (unrun src req why)] (agent/commit!) r)}
+                          {:id id :code code :intent intent :response (eval! src req)}))))
+          [] calls))
+
+(defn insert!
+  "Evals, pairs of intent and code, run now on this agent's REPL queue as calls of nobody's (`run-calls`), each recorded
+  as an eval like any other (origin :insert, :seon.eval/by who asked), under the turn in force; one that fails stops the rest.
+  Answers the responses. See docs/turn.md#an-eval-can-be-inserted."
+  {:malli/schema [:=> [:cat :string [:sequential [:tuple :string :string]]] [:vector :map]]}
+  [who evals]
+  (mapv :response
+        (run-calls (vec (map-indexed (fn [i [intent code]] {:id (str "insert-" i) :intent intent :code code}) evals))
+                   (fn [_] {:origin :insert :by who})
+                   (fn [code req] (let [r (eval-string code req)] (agent/commit!) r)))))
 
 (defn- layout
   "The layout this branch renders its ctx with: the var :seon.render/render-ctx declares, an agent's own
@@ -932,7 +983,7 @@
         (swap! agent/state assoc :walk w)
         w))))
 
-(defn- page-walk
+(defn page-walk
   "This agent's page walk drawn up to now (seon.render/flush!), under its branch's schemas: the
   components ctx's patches reached, and the db renders whose reads the datoms its db moved by since
   the last draw touched (seon.ctx/take-moved!)."
@@ -1031,6 +1082,8 @@
                 ;; never the printed text back, which is no EDN once the eval printed (its :out verbatim)
                 [{:op :reply :id (:id m) :response (let [r (eval-string (:forms m) (select-keys m [:ticks :origin]))] (agent/on-the-wire r))
                   :t (:max-tx (agent/db))}])
+              ;; evals given at its spawn (seon.root/spawn!'s :evals) or inserted later: run on this queue, in order, answering no one
+              (= :evals (:op m)) (do (intr/clear-pending!) (insert! (:by m) (:evals m)) [])
               :else (agent/handle! m))]
      ;; a branch is committed whenever a request is done (its writes ran ahead in memory), before its answer: a
      ;; reply says what it did is on the branch, so one who reads the branch on hearing it never races the commit

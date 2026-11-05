@@ -2,7 +2,7 @@
   "Laws of the value printer (Seon's `seon.render.value-law-test`, on the slice): the text stays
   inside the budget, every cut's form reads exactly what the cut says it left (read off the
   text, as an agent reads it), and an uncut text reads back as the value."
-  (:require [clojure.edn :as edn] [seon.proofs :as proofs]
+  (:require [seon.print.emit] [clojure.edn :as edn] [seon.proofs :as proofs]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [clojure.test.check :as tc]
@@ -479,3 +479,20 @@
     (testing "keys of one namespace beside a key of another are not lifted, and a lone key is not"
       (is (str/starts-with? (:text (seon/print-value {:a/x 1 :b/y 2} {:width 20 :budget 400})) "{:a/x 1"))
       (is (str/starts-with? (:text (seon/print-value {:a/x 1} {:width 20 :budget 400})) "{:a/x 1")))))
+
+(deftest cost-is-one-wording-from-one-function
+  ;; owner, 2026-11-05: "I want the cost of things to be concise and present wherever work is being done": one function behind
+  ;; an eval's line, the page's row, a part's head and the tree, so they cannot drift apart
+  (is (= "5.2 ms · 873k ticks · 4.1 MB · ~1.2k tok" (seon/cost-text {:ms 5.2 :ticks 873000 :bytes 4300000 :tok 1200})))
+  (is (= "0.21 ms · 4.4k ticks · 39.9 KB" (seon/cost-text {:ms 0.21 :ticks 4400 :bytes 40880})) "a number not given is left out")
+  (is (= (seon/cost-text {:ms 3.0 :ticks 10 :bytes 5}) (seon.print.emit/cost-text {:ms 3.0 :ticks 10 :bytes 5})) "seon.print's is the emitter's")
+  (let [r {:handle 'result/e1 :value [1 2] :ms 5.2 :ticks 873000 :bytes 4300000}
+        t (seon/response-text r)]
+    (is (re-find #":cost \"5\.2 ms · 873k ticks · 4\.1 MB · ~\d+ tok\"\}$" t) t)
+    (is (not (re-find #":ms|:ticks|:bytes" t)) "the numbers are the record's data, the text has the line")
+    (is (= 5.2 (:ms r)) "and stay data")
+    (is (str/includes? (seon/response-text (dissoc r :ms :ticks :bytes)) ":cost \"not run\"") "an eval never run says so"))
+  (testing "the line is inside the printer's budget: a value that fills the budget and its cost still fit"
+    (let [t (seon/response-text {:handle 'result/e1 :value (apply str (repeat 100000 "x")) :ms 5.2 :ticks 873000 :bytes 4300000})]
+      (is (str/includes? t ":cost ") "the value was cut, and its cost is shown")
+      (is (<= (count t) (seon.print.select/estimate-chars seon/default-budget)) (str (count t) " characters")))))
