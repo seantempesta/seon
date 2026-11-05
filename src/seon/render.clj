@@ -624,9 +624,8 @@
         body (cond (some? (:data c)) [(part-model w k)]
                    wrapper? (mapcat #(body-forms w %) (if (map? (second out)) (drop 2 out) (rest out)))
                    :else (body-forms w out))]
-    ;; :tok is the model's own reading of it: what the form holds, not the page's alone
     (when (seq body)
-      (into [(symbol (:f c)) (cond-> {:tok (tokens-of (vec body))} (:at (:opts c)) (assoc :ctx (:at (:opts c))))] body))))
+      (into [(symbol (:f c)) (if-let [at (:at (:opts c))] {:ctx at} {})] body))))
 
 (defn fence
   "Source text s in a Markdown fence longer than any run of backticks inside it, so no line of s closes it: three, or one

@@ -1170,16 +1170,11 @@
 
 (defn agent-state
   "The agent's state for the person (a component over ctx and the db), nothing of it for the model: how its work stands
-  (`standing`, from the task's outcome where it holds one), its task, the form it is running, its proofs green, the tokens its
-  requests sent (cached and not) and the time they took."
+  (`standing`, from the task's outcome where it holds one), its task, the form it is running and its proofs green."
   {:seon.render/style tile-style
    :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int] :any]}
   [{c :seon.ctx/ctx db :seon.db/db} aid]
-  (let [sum (fn [a] (d/q '[:find (sum ?k) . :with ?m :in $ ?a ?at :where [?m :seon.model-call/agent ?a] [?m ?at ?k]] db aid a))
-        sent (sum :seon.model-call/tokens)
-        cached (sum :seon.model-call/cache-hit-tokens)
-        ms (sum :seon.model-call/ms)
-        task (:task c)
+  (let [task (:task c)
         t (into {} (for [k [:seon.task/id :seon.task/outcome :seon.task/reason] :let [v (ratom/realize (get task k))] :when (some? v)] [k v]))
         agent (into {} (for [k [:seon.agent/outcome :seon.agent/ended-turn :seon.agent/turn :seon.agent/max-turns :seon.agent/reason :seon.agent/status]
                              :let [v (ratom/realize (get c k))] :when (some? v)] [k v]))
@@ -1190,9 +1185,7 @@
      [:p (str "● " (:text stands) (when (:detail stands) (str " · " (:detail stands))) (when (:reason stands) (str " · " (:reason stands))))]
      (when-let [id (:seon.task/id t)] [:p "task " (task-title id)])
      (when running [:p "running " [:code running]])
-     (when (seq verdicts) [:p (str (count (filter #{:green} verdicts)) " of " (count verdicts) " proofs green")])
-     (when sent [:p (str (print/tokens-text sent) " sent in all" (when cached (str ", " (print/tokens-text cached) " of them cached, " (print/tokens-text (- sent cached)) " not")))])
-     (when (pos? (or ms 0)) [:p (str (ms-str ms) " in the model")])]))
+     (when (seq verdicts) [:p (str (count (filter #{:green} verdicts)) " of " (count verdicts) " proofs green")])]))
 
 (defn own-problems
   "The open problems of the agent (a component over its branch db, seon.problems/own: its newest run's,

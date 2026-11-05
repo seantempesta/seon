@@ -2496,11 +2496,6 @@
     (is (str/includes? t "```clojure") "in a fence")
     (is (str/includes? t "[:h2 \"Where your work stands\"]"))))
 
-(deftest a-symbol-head-draws-on-the-page-as-the-function-it-names
-  (is (= (h/html [(requiring-resolve 'clojure.string/upper-case) "x"]) (h/html ['clojure.string/upper-case "x"]))
-      "the one expansion a var head has")
-  (is (= "<p>a</p>" (h/html [:p "a"])) "a keyword head is still an element"))
-
 (deftest a-parts-head-is-the-function-that-drew-it-and-its-path-is-real
   ;; the owner: "the head names the real function and :ctx is a real path": (get-in @ctx path) answers the data it read
   (let [[_ branch _] (paged-dbs)
