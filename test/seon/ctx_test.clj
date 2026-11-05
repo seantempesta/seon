@@ -685,7 +685,7 @@
       (is (= 3 (count (re-seq #"app\.y/c\d+" (re-find #"Called by: [^\n\]]*" p)))) "the other callers: a few names, however many the window holds")
       (is (re-find #"\(\+\d+ more\)" p) "and how many more")
       (is (not (str/includes? p "Tested by")) "the older tests past the window")
-      (is (str/includes? p "(my.agent/tests-reaching 'app.x/f0)") "and the form that reads every test reaching it"))))
+      (is (not (str/includes? p "tests-reaching")) "the prompt names how to list every test reaching it: not on every cite"))))
 
 (deftest an-agent-adds-a-datum-and-its-render
   ;; what an agent evaluates to add to its record and draw it (the owner, 2026-10-25: "they can
@@ -717,7 +717,7 @@
         (let [[parts page] (try (enter-agent! {:db db :key k :branch :b}) [(seon.repl/render-ctx) (seon.repl/render-ctx-hiccup)]
                                 (finally (end-agent!)))
               shown (:units parts)]
-          (is (= (map :id shown) (keys page)) "every component, the conversation's too, in order: nothing left out")
+          (is (= (remove #(str/starts-with? % "agent-state-") (map :id shown)) (keys page)) "every component, the conversation's too, in order: nothing left out but the person's own state, which the model is sent none of")
           ;; the one difference: the page's html adds each root's render's style after its name (seon.render/styled)
           (let [;; every element class in the page's hiccup that names a render of seon.render.ui, nested components' too
                 classes (into #{} (comp (filter string?)) (keep #(when (map? %) (:class %)) (tree-seq coll? seq (vec (vals page)))))
