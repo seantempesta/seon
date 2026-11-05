@@ -1032,7 +1032,6 @@
                 "and the task's cites read to retract the gone)")
      :growth :constant
      ;; +1: a task's plan and instructions are parsed apart, each its own text (seon.task/cited-texts, md-scan bench-b17);
-     ;; +1: the changed plan's text read for its old words (seon.problems/place-texts);
      ;; +1: seon.doc/carry-index! keeps the search's text index across the transaction (the owner accepted it, 2026-11-01)
      :fixed {:calls 113}
      :sizes [100 300 1000 3000]})

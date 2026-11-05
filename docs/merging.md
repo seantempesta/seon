@@ -18,7 +18,7 @@ A worktree session merges main into its branch, proves the merged result with `b
 
 ## Every branch is reviewed before it merges
 
-A reviewer reads the branch's diff against main for AGENTS §9's mistakes (a guard, a fake default, a clock deciding, a second mechanism, a fix at the reader instead of the producer, an old word of §7a, a test that cannot fail, an ignored answer), each finding with its file:line and its right fix. The worktree session fixes them before its branch merges; the proof it reports is the run after the fixes.
+A reviewer reads the branch's diff against main for AGENTS §9's mistakes (a guard, a fake default, a clock deciding, a second mechanism, a fix at the reader instead of the producer, a test that cannot fail, an ignored answer), each finding with its file:line and its right fix. The worktree session fixes them before its branch merges; the proof it reports is the run after the fixes.
 
 ## Root merges, and reads the verdict
 

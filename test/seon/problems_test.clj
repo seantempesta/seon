@@ -455,7 +455,7 @@
     (is (seq rows) "the db has unlinked classes to judge")
     (is (= rows (vec (distinct rows))) "no row twice")
     (is (= :problem-unlinked (:class (peek rows))) "the unlinked class's own missing section is the last row")
-    (is (<= (:calls m) 74) "the contracted calls of one health read (74 on the world: its test namespace app.calc-test holds two forms carrying a catch (a deftest's `is`), which unnamed-sites reads lazily, so 8 calls the world before it did not make: live? and form-of per form, and the program namespaces read once (program-nss and its config value); 64 without them, with seon.config armed as at boot: value, resolve and resolve-in are one call more each; 59 before the fix; 51 with it and report-with's own contract; main has since added to health's reads, health-with's contract is one more, and the old-word class reads its table and texts in 5 contracted calls: place-texts reads the places' texts; the fold of the counted classes is one, fold-counted)")))
+    (is (<= (:calls m) 74) "the contracted calls of one health read (74 on the world: its test namespace app.calc-test holds two forms carrying a catch (a deftest's `is`), which unnamed-sites reads lazily, so 8 calls the world before it did not make: live? and form-of per form, and the program namespaces read once (program-nss and its config value); 64 without them, with seon.config armed as at boot: value, resolve and resolve-in are one call more each; 59 before the fix; 51 with it and report-with's own contract; main has since added to health's reads, health-with's contract is one more, and the fold of the counted classes is one, fold-counted)")))
 
 (deftest problems-lists-every-class-with-what-a-declaration-needs
   (let [db (seeded 3 5)
@@ -893,19 +893,18 @@
   ;; the program grows (n sections citing, n catch sites); the change is fixed (one section, one
   ;; site): the work is the scan of the attributes' datoms, a few bytes each, never a pull or a rule
   ;; per citation or site. Before: ~150 KB per catch site, both dbs read in full. 24 contracted calls were its three
-  ;; classes; 32 since split-rows (1) and the old-word class, which reads the table and the changed texts on each side (6).
+  ;; classes; 32 since split-rows (1) and a class read from the changed texts (6, since removed).
   ;; The input holds the branch's changes (ch), as a caller does: the 1.5 M ticks and 40 calls of the program diff are not caused's.
   (cost/proof {:of 'seon.problems/caused :input 'seon.problems-test/caused-flat-input
                :n "sections citing a var and catch sites in the program, one of each changed"
                :work "the datoms that differ (given), one entity seek per section, name, form and task they touch on each side, the rule for the candidates only; the sections, vars and catch sites the branch did not touch are not read"
                :growth :constant
                :per-n {}
-               ;; measured 2026-10-29: ~0.45M ticks / 1.8 MB / 48 calls at 10, 100 and 1000 given the diff (the old-word table
-               ;; read on each side is most of it); before, 0.69M / 2.8 MB / 37 at 10 and linear (docs/cost.md#a-diff-per-attribute-costs-a-descent-each)
+               ;; measured 2026-10-29: ~0.45M ticks / 1.8 MB / 48 calls at 10, 100 and 1000 given the diff (a class read
+               ;; from the changed texts on each side was most of it, since removed); before, 0.69M / 2.8 MB / 37 at 10 and linear (docs/cost.md#a-diff-per-attribute-costs-a-descent-each)
                ;; 68 calls at 10: :long-form (seon.problems/long-forms) is a class the changed vars are asked, with its bound read once (seon.config/value) each form's chars set against the bound's (seon.print.emit/chars-per-token), a long one's tokens estimated;
                ;; the 7 more contracted calls, each instrumented (its output checked), are the ticks and bytes the fixed part grew by (measured: the
                ;; seek and text of a var cost ~8k ticks of it)
-               ;; 69: seon.problems/place-texts reads the changed places' texts, one contracted call
                :fixed {:ticks 460000 :bytes 1800000 :calls 69}
                :sizes [10 30 100]}))
 
@@ -927,37 +926,6 @@
   (let [ve (pdb/eid db :var/name v)]
     (d/db-with (change-var db v) [[:db/add ve (or attr :var/doc) (str "changed " (random-uuid))]])))
 
-(deftest a-markdown-code-fence-is-no-old-word
-  ;; md-scan bench-b14: the agent's own namespace for Markdown code fences was flagged as using the old word
-  ;; "fence" (AGENTS.md section 7a, as it was: a guard), and it spent nine turns on it; CommonMark's word is a
-  ;; library's, which section 7a keeps
-  (let [words (problems/old-word-spellings (slurp (str (seon.config/checkout) "/AGENTS.md")))]
-    (is (empty? (problems/old-word-hits [[:k "A fenced code block: the content between its fence lines."]] words)) "a Markdown fence is no old word")
-    (is (seq (problems/old-word-hits [[:k "A census of every contract."]] words)) "an old word still is")))
-
-(deftest an-old-word-is-a-problem
-  ;; task seon.problems/an-old-word-is-a-problem: a place that uses a word of AGENTS.md section 7a's table is a row
-  ;; naming it and the word, found for the places a branch changed and failing its health step; a kept file is not read
-  (let [base (world)
-        page (fn [text] {"demo/p.md" (str "# P\n\nThe lead.\n\n## Part\n\n" text "\n")})
-        with (fn [db text] (d/db-with db (seon.doc/load-tx db "demo" (page text))))
-        row (fn [db] (set (map (juxt :id :word) (get-in (problems/health db) [:classes :old-word :rows]))))]
-    (testing "a section that says lane"
-      (let [head (with base "A lane of work.")]
-        (is (= #{["demo/p.md#part" "lane"]} (row head)) "the section and the word")
-        ;; what to say instead is in the row (bench-delims-1's agent spent three turns finding section 7a)
-        (is (= [{:class :old-word :message "demo/p.md#part (demo/p.md) uses the old word \"lane\": say instead worktree session (a session in its own git worktree, on its own branch) (AGENTS.md section 7a)"}]
-               (:rows (problems/caused-split base head))) "the branch that added it caused it")
-        (is (seq (:caused (problems/caused-split base head))) "the done rule refuses")
-        (is (empty? (row (with head "A worktree session."))) "editing it closes the row")))
-    (testing "a task plan that says verb, and a clean one"
-      (let [t (fn [plan] {:seon.task/id "demo/x" :seon.task/ns 'demo :seon.task/name "x" :seon.task/plan plan :seon.task/execution :held :seon.task/branch :b :seon.task/kind :work})
-            head (d/db-with base [(t "Add a verb for it.")])]
-        (is (= #{["demo/x" "verb"]} (row head)))
-        (is (empty? (row (d/db-with base [(t "Add a function for it.")]))))))
-    (testing "a word as part of another word is no use of it"
-      (is (empty? (row (with base "The landscape and a laneway.")))))))
-
 (deftest health-moved-is-health
   ;; health-moved carries prev's rows and reads where base and head differ: for each kind of move
   ;; of main it equals health read whole (set of rows by class; the row order is the scan's)
@@ -973,12 +941,6 @@
         died (ended "t/x" {:seon.task/proofs #{'t-test/x} :seon.task/outcome :dead :seon.task/reason "its agent died"
                            :seon.task/error (contract/error :seon.agent/died 'seon.root/end-agent "agent a1 died" {:agent :a1})})]
     (is (same? db1 db1) "nothing moved")
-    (testing "an old word added to a section opens a row, and editing it closes it"
-      (let [bad (d/db-with db1 (seon.doc/load-tx db1 "demo" {"demo/p.md" (str page "\nA lane of work.\n")}))
-            fixed (d/db-with bad (seon.doc/load-tx bad "demo" {"demo/p.md" (str page "\nA worktree session.\n")}))]
-        (is (same? db1 bad))
-        (is (pos? (get-in (problems/health-moved (problems/health db1) db1 bad (diff db1 bad)) [:classes :old-word :n])))
-        (is (same? bad fixed))))
     (testing "a task whose agent died opens a problem, and a later wake that finished it closes it"
       (let [db2 (d/db-with db1 [died])
             db3 (d/db-with db2 [{:seon.task/id "t/x" :seon.task/outcome :merged}])]
@@ -1339,19 +1301,3 @@
                :per-n {:ticks 13000 :bytes 39500 :calls 3}
                :fixed {:ticks 10000 :bytes 30000 :calls 5}
                :sizes [10 30 100]}))
-
-
-
-(deftest old-word-hits-finds-each-word-a-text-uses-once
-  ;; docs/health.md#an-old-word: each text's old words, whole words (a plural too), each [key word] once, in the
-  ;; texts' order then the lines'; a text whose lowered form changes length (U+0130) is read line by line
-  (let [words [["lane" ["lane"]] ["dragon" ["dragon"]]]
-        texts [[:none "nothing here\nplanet, plane, lanemark"]
-               [:mid "first line\na Lane here\r\nand a DRAGON\r\nlane again"]
-               [:edge "lane"]
-               [:plural "two lanes, one dragons"]
-               [:empty ""]
-               [:dotted "İ a lane"]
-               [:last "x\n\ny dragon"]]]
-    (is (= [[:mid "lane"] [:mid "dragon"] [:edge "lane"] [:plural "lane"] [:plural "dragon"] [:dotted "lane"] [:last "dragon"]]
-           (seon.problems/old-word-hits texts words)))))

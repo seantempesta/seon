@@ -379,7 +379,7 @@
 ;; ---- caused: what a branch's own work made true -----------------------------------------
 
 (def ^:private section-attrs
-  "The attributes `section-at` reads of a section: what a stale-section, dead-citation or old-word row of it depends on (docs/health.md#a-stale-section)."
+  "The attributes `section-at` reads of a section: what a stale-section or dead-citation row of it depends on (docs/health.md#a-stale-section)."
   [:seon.doc/address :seon.doc/names :seon.doc/dead-links :seon.doc/read :seon.doc/reviewed
    :seon.doc/baseline-unread :seon.doc/text])
 
@@ -408,167 +408,6 @@
   (when-let [e (pdb/eid db :form/id id)]
     (when-let [cs (seq (map :v (d/datoms db :eavt e fact)))]
       {:e e :catches (set cs) :src (:v (first (d/datoms db :eavt e :form/src)))})))
-
-(def old-word-kept
-  "Files whose text keeps an old word of AGENTS.md section 7a's table (it is the subject, a quoted word of the
-  owner's, or another sense), each with its reason: a place no :old-word row is made for. The quoted
-  span of an owner's sentence is kept too (`old-word-span`)."
-  {"AGENTS.md" "the table names the old words"
-   "docs/vocabulary.md" "its rows say `(was X)`"
-   "docs/decisions.md" "the owner's rulings quote his words, and their titles stay as stated"
-   "resources/seon/tasks/seon.doc.edn" "the rename's plan names the old words"
-   "resources/seon/tasks/seon.db.edn" "the stored-names plan names the old words"
-   "test/seon/doc_test.clj" "this test names the old words"
-   "src/seon/problems.clj" "this class names the old words"
-   "test/seon/problems_test.clj" "this class's tests name the old words"
-   "src/seon/server.clj" "cites v1's namespace proto.agents.entrance"
-   "BAGGAGE.md" "cites a decision by its title, \"No locks, no lane cap, no waiting\""
-   "resources/seon/tasks/seon.context.edn" "t5.refusal/* is the name of a past agent's test namespace"})
-
-(def old-word-span
-  "The spans of a line that keep an old word: an owner's quoted sentence, Jolt's message and a past image name."
-  #"(?i)owner,? [^\"]{0,40}?\"[^\"]*\"|Attempting to call unbound fn|zoom-a8-attempt|\(was attempt\)|collection landing")
-
-(defn- old-word-rows
-  "AGENTS.md section 7a's table (text agents) as [old-word say-instead] pairs, each old word hyphenated
-  (\"merge train\" -> \"merge-train\"), leaving out a row still stored under its old name (\"stored as\")."
-  {:malli/schema [:=> [:cat :string] [:vector [:tuple :string :string]]]}
-  [agents]
-  (let [table (->> (str/split-lines agents)
-                   (drop-while #(not (str/starts-with? % "| Old house word")))
-                   (drop 2)
-                   (take-while #(str/starts-with? % "|")))]
-    (vec (for [row table :when (not (str/includes? row "stored as"))
-               :let [[_ olds instead] (str/split row #"\|")]
-               w (str/split olds #",")]
-           [(str/replace (str/trim w) " " "-") (str/trim (str instead))]))))
-
-(defn old-words
-  "The old house words of AGENTS.md section 7a's table (text agents), hyphenated (\"merge train\" ->
-  \"merge-train\"), leaving out a row still stored under its old name (\"stored as\")."
-  {:malli/schema [:=> [:cat :string] [:set :string]]}
-  [agents]
-  (set (map first (old-word-rows agents))))
-
-(defn- spellings-of
-  "The old words of the table's rows (`old-word-rows`) as the text spells them, [word [spelling ...]]
-  (\"merge train\" either way); \"admit\" and \"land\" are also plain English and Seon's admission, so only names
-  are read for them."
-  {:malli/schema [:=> [:cat [:vector [:tuple :string :string]]] [:sequential [:tuple :string [:vector :string]]]]}
-  [rows]
-  (vec (for [w (sort (set (map first rows))) :when (not (#{"admit" "land"} w))]
-         [w (if (= w "merge-train") ["merge train" "merge-train"] [w])])))
-
-(defn old-word-spellings
-  "The table's old words of AGENTS.md text agents as the text spells them, [word [spelling ...]] (`spellings-of`)."
-  {:malli/schema [:=> [:cat :string] [:sequential [:tuple :string [:vector :string]]]]}
-  [agents]
-  (spellings-of (old-word-rows agents)))
-
-(defn old-word-hits
-  "The old words (of words, `old-word-spellings`) each text uses: [[key word] ...], key being the text's
-  own, line by line without the spans `old-word-span` keeps. One contracted call however many texts: a
-  whole-word match is what (?<!\\w)s s?(?!\\w) matches, found by indexOf (a regex costs ~140 us a line here).
-  Each text is lowered once and searched whole; only a line a spelling occurs in is cut and checked, so
-  the cost is the texts' length and the lines that hit, not a copy of every line. A text whose lowered
-  form differs in length is read line by line, by the same check. See docs/health.md#cost."
-  {:malli/schema [:=> [:cat [:sequential [:tuple :any :string]] [:sequential [:tuple :string [:vector :string]]]] [:vector [:tuple :any :string]]]}
-  [texts words]
-  (let [word-char? (fn [c] (let [c (int c)] (or (<= 97 c 122) (<= 48 c 57) (= c 95))))
-        at? (fn [^String low ^String s i]
-              (let [n (.length low) e (+ i (.length s))]
-                (and (or (zero? i) (not (word-char? (.charAt low (dec i)))))
-                     (or (>= e n) (not (word-char? (.charAt low e)))
-                         (and (= \s (.charAt low e)) (or (>= (inc e) n) (not (word-char? (.charAt low (inc e))))))))))
-        whole-word? (fn [^String low ^String s]
-                      (loop [i (.indexOf low s 0)]
-                        (when (<= 0 i) (or (at? low s i) (recur (.indexOf low s (inc i)))))))
-        spellings (vec (distinct (mapcat second words)))
-        ;; a line some spelling is in (low, lowered), then each word its kept text uses
-        hits (fn [k ^String line ^String low]
-               (when (some (fn [[_ ss]] (some #(whole-word? low %) ss)) words)
-                 (let [kept (str/lower-case (str/replace line old-word-span ""))]
-                   (for [[w ss] words :when (some #(whole-word? kept %) ss)] [k w]))))
-        ;; the [start end] of each line of low a spelling occurs in, in order: a loop that allocates
-        ;; only at a hit (a lazy seq a spelling cost ~46 KB a text, 194 MB over a program's forms)
-        spans (fn [^String low]
-                (let [n (.length low)
-                      found (reduce (fn [acc ^String s]
-                                      (loop [i (.indexOf low s 0) acc acc]
-                                        (if (neg? i)
-                                          acc
-                                          (recur (.indexOf low s (inc i))
-                                                 (if (at? low s i)
-                                                   (let [st (inc (.lastIndexOf low "\n" (int i)))
-                                                         e (let [e (.indexOf low "\n" (int i))] (if (neg? e) n e))
-                                                         e (if (and (< st e) (= \return (.charAt low (dec e)))) (dec e) e)]
-                                                     (conj acc [st e]))
-                                                   acc)))))
-                                    [] spellings)]
-                  (if (seq found) (into (sorted-set) found) found)))]
-    ;; each text lowered once and searched whole, a line cut only where a spelling occurs; a text whose
-    ;; lowered form changes length (its offsets would not be the text's) read line by line
-    (vec (distinct (for [[k ^String text] texts
-                         :let [^String low (str/lower-case text)]
-                         hit (if (= (.length low) (.length text))
-                               (mapcat (fn [[st e]] (hits k (subs text st e) (subs low st e))) (spans low))
-                               (mapcat #(hits k % (str/lower-case %)) (str/split-lines text)))]
-                     hit)))))
-
-(defn- place-texts
-  "The texts of the places named, [[kind id path] text] in old-words-in's order (vars, sections, tasks,
-  each sorted), `old-word-kept` files left out: a var's form source in its namespace's file, a section's
-  text in its page, a task's plan in its file. all? (every place on db, health's read): each attribute
-  scanned once and joined by entity (29 MB over a program's 4,017 vars, against 164 MB seeking each var's
-  name, form and namespace in turn); else each named place sought (a move's few). See docs/health.md#cost."
-  {:malli/schema [:=> [:cat :seon.host/db [:map [:vars [:set :symbol]] [:sections [:set :string]] [:tasks [:set :string]] [:all? {:optional true} :boolean]]] [:vector [:tuple :any [:maybe :string]]]]}
-  [db {:keys [vars sections tasks all?]}]
-  (let [;; {e v}, an attribute's first value an entity holds, and {v e}, the first entity holding a value
-        by-e (fn [a] (reduce (fn [m dt] (if (contains? m (:e dt)) m (assoc m (:e dt) (:v dt)))) {} (d/datoms db :aevt a)))
-        by-v (fn [a] (reduce (fn [m dt] (if (contains? m (:v dt)) m (assoc m (:v dt) (:e dt)))) {} (d/datoms db :aevt a)))
-        [var-e form-of src ns-of file sec-e text task-e task-ns plan]
-        (if all?
-          [(by-v :var/name) (by-e :var/form) (by-e :form/src) (by-e :form/ns) (by-e :ns/file)
-           (by-v :seon.doc/address) (by-e :seon.doc/text) (by-v :seon.task/id) (by-e :seon.task/ns) (by-e :seon.task/plan)]
-          (let [one (fn [a] (fn [e] (:v (first (d/datoms db :eavt e a)))))
-                eid (fn [a] (fn [v] (:e (first (d/datoms db :avet a v)))))]
-            [(eid :var/name) (one :var/form) (one :form/src) (one :form/ns) (one :ns/file)
-             (eid :seon.doc/address) (one :seon.doc/text) (eid :seon.task/id) (one :seon.task/ns) (one :seon.task/plan)]))]
-    (vec (concat
-           (for [v (sort vars)
-                 :let [form (some-> (var-e v) form-of)
-                       path (when form (or (some-> (ns-of form) file) (str "src/" (namespace v))))]
-                 :when (and form (not (old-word-kept path)))]
-             [[:var (str v) path] (src form)])
-           (for [a (sort sections)
-                 :let [e (sec-e a) path (first (str/split a #"#" 2))]
-                 :when (and e (not (old-word-kept path)))]
-             [[:section a path] (text e)])
-           (for [t (sort tasks)
-                 :let [e (task-e t) path (when e (str "resources/seon/tasks/" (task-ns e) ".edn"))]
-                 :when (and e (not (old-word-kept path)))]
-             [[:task t path] (plan e)])))))
-
-(defn old-words-in
-  "Each old word the places named use, as an :old-word row naming the place and the word: a var's
-  form (its source and docstring), a wiki section's text and a task's plan, each in the file it
-  is stored from (`old-word-kept` files are not read). places: {:vars #{var symbols} :sections
-  #{addresses} :tasks #{task ids}}, and :all? when they are every place db holds (`place-texts`). The
-  words are AGENTS.md section 7a's table, read from the checkout (what seon.doc-test reads). Open while
-  true. Cost: the named places' texts, in one `old-word-hits` call."
-  {:malli/schema [:=> [:cat :seon.host/db :map [:map [:vars [:set :symbol]] [:sections [:set :string]] [:tasks [:set :string]] [:all? {:optional true} :boolean]]] [:vector :seon.problems/row]]}
-  [db ans {:keys [vars sections tasks] :as places}]
-  (if (and (empty? vars) (empty? sections) (empty? tasks))
-    []
-  (let [rows (old-word-rows (slurp (str (config/checkout) "/AGENTS.md")))
-        words (spellings-of rows)
-        ;; what to say instead, so the row says it
-        instead (into {} rows)
-        texts (place-texts db places)]
-    (vec (for [[[kind id path] w] (old-word-hits (filterv (comp some? second) texts) words)
-               :let [s (str "old-word " path " " (name kind) " " id " " w)]]
-           (derived-row ans s nil (str id " (" path ") uses the old word \"" w "\": say instead " (get instead w "what AGENTS.md section 7a's table says") " (AGENTS.md section 7a)")
-                        {:kind :old-word :path path :word w :place kind :id id} {:path path :word w :place kind :id id}))))))
 
 (defn uncited-vars
   "Each of the named vars (a set of symbols, the vars a branch changed) that is public in a
@@ -609,7 +448,7 @@
 
 (def caused-classes
   "The derived classes `caused-split` reads: the only ones a branch is judged on (the health step refuses any other). An attention class among them never fails a branch."
-  #{:dead-citation :unnamed-site :stale-section :old-word :uncited-var :long-form})
+  #{:dead-citation :unnamed-site :stale-section :uncited-var :long-form})
 
 (defn caused-datoms
   "The datoms that differ between base and head in the attributes `caused-split` reads (a section's, the var
@@ -665,17 +504,10 @@
                                         id))))
         ;; the stale sections the branch's change can have made: those citing a var it changed, and the sections that differ
         moved-vars (pm/changed-vars ch)
-        ;; the places whose text changed: sections whose text differs, tasks whose plan differs
-        text-secs (set (for [a cand :let [h (hs a)] :when (and h (not= (:text h) (:text (bs a))))] a))
-        task-ids (set (for [e (ents [:seon.task/plan])
-                            :let [plan (first-v head e :seon.task/plan)]
-                            :when (and plan (not= plan (first-v base e :seon.task/plan)))]
-                        (first-v head e :seon.task/id)))
         rows (fn [db state forms-of]
                (concat (map #(assoc % :class :dead-citation) (dead-citations db ans (eids state)))
                        (map #(assoc % :class :unnamed-site) (sites db state forms-of))
                        (map #(assoc % :class :stale-section) (stale-sections db ans {:names moved-vars :sections (eids state)}))
-                       (map #(assoc % :class :old-word) (old-words-in db ans {:vars moved-vars :sections text-secs :tasks task-ids}))
                        (map #(assoc % :class :uncited-var) (uncited-vars db ans moved-vars))
                        (map #(assoc % :class :long-form) (long-forms db ans moved-vars))))
         forms-in (fn [db] (fn [fact] (set (keep #(:e (law-form-at db fact %)) (changed-forms fact)))))
@@ -945,11 +777,7 @@
   ([db fold]
    (let [ans (answers db)]
      (health-with db ans (:classes (report-with db ans fold nil)) (assoc (other-derived db ans) :dead-citation (dead-citations db ans)
-                                     :unnamed-site (unnamed-sites db ans) :stale-section (stale-sections db ans)
-                                     :old-word (old-words-in db ans {:vars (into #{} (map :v) (d/datoms db :aevt :var/name))
-                                                                     :sections (into #{} (map :v) (d/datoms db :aevt :seon.doc/address))
-                                                                     :tasks (into #{} (map :v) (d/datoms db :aevt :seon.task/id))
-                                                                     :all? true}))))))
+                                     :unnamed-site (unnamed-sites db ans) :stale-section (stale-sections db ans))))))
 
 (defn- touched-tasks
   "The task entities of head the move touched (moved: the datoms that differ between the dbs, as
@@ -988,8 +816,7 @@
                                             rows (vec (sort-by #(- (or (:end-ms %) 0)) rows))]]
                                   [c {:n (count rows) :rows rows}]))]
     (health-with head ans recorded (assoc (other-derived head ans) :dead-citation (carried :dead-citation)
-                                          :unnamed-site (carried :unnamed-site) :stale-section (carried :stale-section)
-                                          :old-word (carried :old-word)))))
+                                          :unnamed-site (carried :unnamed-site) :stale-section (carried :stale-section)))))
 
 (defn own
   "The open problems of one agent, by class and shaped as `report` (so the one render draws it, an

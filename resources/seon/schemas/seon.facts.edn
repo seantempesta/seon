@@ -156,7 +156,7 @@
  :seon.eval/intent :string
  :seon.eval/call-id :string
  ;; the agent's turn number in force when it was written (0 before its first turn; absent on root's)
- :seon.eval/turn :int
+ :seon.eval/turn [:and {:seon.db/index true} :int]
  :seon.eval/fns [:vector :map]
  :seon.eval/schema :qualified-keyword
  :seon.eval/basis [:map [:t :int] [:branch :seon.db/branch]]
@@ -493,7 +493,7 @@
  :seon.message/agent [:and {:seon.db/index true} :seon.db/ref]
  ;; the turn that read it: the number a model turn that takes it (seon.turn/take!) or the agent's code (seon.agent/messages)
  ;; takes it under; the loop's own messages (seon.turn/tell-error!) the next turn's
- :seon.message/turn :int
+ :seon.message/turn [:and {:seon.db/index true} :int]
  :seon.message/body [:string]
  ;; what an entry is (design one-derivation 4.1 section 5): a person's words (:message), root's at a
  ;; stage boundary (:stage), the judge's verdict with its reasons (:verdict); each wakes its session
