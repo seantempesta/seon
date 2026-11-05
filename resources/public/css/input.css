@@ -105,6 +105,38 @@
   .costrows td, .cfg td { font-variant-numeric: tabular-nums; }
 }
 
+/* Where things go: a page is a bar over three columns, each scrolling on its own on a wide screen, and the names say
+   which is which (seon.render.ui/page-chrome, docs/render.md#where-things-go). On a narrow screen they stack and the
+   page scrolls. */
+@layer components {
+  .seon-page { display: flex; flex-direction: column; min-height: 100dvh; }
+  .seon-bar { @apply sticky top-0 z-10 flex items-baseline gap-3 border-b border-base-800 bg-base-950 px-4 py-2; }
+  .seon-columns { @apply grid grid-cols-1 gap-4 p-3; }
+  .seon-agents, .seon-chat, .seon-context { min-width: 0; }
+  .seon-chat { @apply flex flex-col gap-3; }
+  .seon-chat-log { @apply flex flex-col gap-1; overflow-wrap: anywhere; }
+  .seon-context { @apply flex flex-col gap-2; }
+  .seon-blocks { @apply flex flex-col gap-2; }
+  /* each thing rendered is a block saying which render drew it (seon.render/styled) */
+  .seon-blocks > * { @apply rounded-md border border-base-800 bg-base-900 p-2; min-width: 0; overflow-wrap: anywhere; }
+  .seon-blocks > [data-render]::before { content: attr(data-render); @apply mb-1 block text-2xs text-text-500; }
+  /* common styling, named once */
+  .seon-note { @apply text-2xs text-text-500; }
+  .seon-stack { @apply flex flex-col gap-1; }
+  .seon-stack-2 { @apply flex flex-col gap-2; }
+  .seon-row { @apply flex gap-2; }
+}
+@media (min-width: 64rem) {
+  .seon-page { height: 100dvh; overflow: hidden; }
+  .seon-columns { flex: 1 1 0; min-height: 0; }
+  .seon-agents, .seon-chat, .seon-context { min-height: 0; }
+  /* the chat is the largest: the context takes a third at most, and gives way first */
+  .seon-columns { grid-template-columns: 11rem minmax(0, 1fr) clamp(18rem, 30%, 30rem); }
+  .seon-columns-wide { grid-template-columns: 11rem minmax(0, 1fr); }
+  .seon-agents, .seon-context, .seon-chat-log { overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--color-base-700) transparent; }
+  .seon-chat-log { flex: 1 1 0; min-height: 0; overflow-x: hidden; }
+}
+
 /* The one printer's structural HTML (seon.print.emit): its classes are the printer's, so they are
    styled here by name rather than as utilities in its hiccup. */
 .seon-print-root, .seon-print-node { color: var(--color-text-200); font-family: var(--font-mono); }

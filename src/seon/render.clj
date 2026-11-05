@@ -407,12 +407,14 @@
   "Component output out as the page writes it: its root's class, its render's name, followed by the
   Tailwind classes render var f states (:seon.render/style, literal text in its source, so the
   stylesheet's scan builds them): the style of each render drawn, by reference, never in what the
-  model reads."
+  model reads; and the render's name as :data-render, which a block shows. See docs/render.md#where-things-go."
   {:malli/schema [:=> [:cat :any :any] :any]}
   [out f]
   (let [style (:seon.render/style (meta f))]
-    (if (and style (vector? out) (map? (second out)) (:class (second out)))
-      (update-in out [1 :class] str " " style)
+    (if (and (vector? out) (map? (second out)) (:class (second out)))
+      (cond-> out
+        style (update-in [1 :class] str " " style)
+        (var? f) (assoc-in [1 :data-render] (str (symbol f))))
       out)))
 
 (defn resolved

@@ -720,7 +720,7 @@
                                 (finally (end-agent!)))
               shown (:units parts)]
           (is (= (map :id shown) (keys page)) "every component, the conversation's too, in order: nothing left out")
-          ;; the one difference: the page's html adds each root's render's style after its name (seon.render/styled)
+          ;; the differences: the page's html adds each root's render's style after its name, and its name as :data-render (seon.render/styled)
           (let [;; every element class in the page's hiccup that names a render of seon.render.ui, nested components' too
                 classes (into #{} (comp (filter string?)) (keep #(when (map? %) (:class %)) (tree-seq coll? seq (vec (vals page)))))
                 styles (keep #(some-> (requiring-resolve (symbol "seon.render.ui" %)) meta :seon.render/style) classes)
@@ -729,7 +729,7 @@
             ;; a part that answers data (docs/render.md#a-part-answers-data) holds its data here, which the page draws by its schema's html render
             (let [by-id (into {} (map (juxt :id :html)) shown) hiccup (filter (comp vector? val) page)]
               (is (seq hiccup) "the components that answer hiccup")
-              (is (= (map (comp unstyled by-id key) hiccup) (map (comp unstyled seon.web.html/html val) hiccup))
+              (is (= (map (comp #(str/replace % #" data-render=\"[^\"]*\"" "") unstyled by-id key) hiccup) (map (comp unstyled seon.web.html/html val) hiccup))
                   "each component's hiccup is the html the page shows, byte for byte, but for its render's style")
               (is (every? #(or (vector? %) (map? %)) (vals page)) "and the rest answer their data")))
           (is (str/includes? (pr-str (get page "ctx-keys")) "read the plan") "as hiccup, exactly as its render returned it")))
