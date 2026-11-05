@@ -1254,10 +1254,12 @@
   (let [e (ratom/realize (get-in c [:evals eid]))
         opened? (:seon.eval/opened e)
         k (:seon.agent/key c)
-        {:keys [ex value ms handle out] errout :err} (:seon.eval/response e)
+        {:keys [ex value ms handle out warnings] errout :err} (:seon.eval/response e)
         v (ratom/realize value)
         ;; what its forms printed (*out*, *err*: seon.repl/response keeps each as seon.print/code), drawn before its value as a REPL shows it
-        printed (into [] (keep (fn [[label k s]] (when-let [s (ratom/realize s)] [label k s]))) [["out" :out out] ["err" :err errout]])
+        printed (into [] (keep (fn [[label k s]] (when-let [s (ratom/realize s)] [label k s]))) [["out" :out out] ["err" :err errout]
+                                                                                                         ;; what its definitions warn (seon.repl's :warnings), in the words the model read
+                                                                                                         ["note" :warnings (not-empty (str/join " " (keep :seon.repl/fix (ratom/realize warnings))))]])
         ;; an error answered as a value (a function that returns its error) is a failure too
         err (or ex (when (contract/error? v) v))
         tokens (context/messages-tokens (context/eval-messages {:db db} e))]
@@ -1286,7 +1288,7 @@
           [:code {:class "seon-handle shrink-0"} (str handle)]]
          ;; each by the one render under the value's budget; a cut reads the rest through its key of the handle
          (for [[label k s] printed]
-           [:div {:class "flex gap-2"} [:span {:class (if (= :err k) "text-warning" "text-text-500")} label]
+           [:div {:class "flex gap-2"} [:span {:class (if (#{:err :warnings} k) "text-warning" "text-text-500")} label]
             (render/html {:budget (config/value :seon.config.render/value-budget) :handle (when handle (list k handle))} s)])
          (if err
            [:div {:class "text-error"} "✗ " (:seon.error/message err)
