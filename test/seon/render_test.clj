@@ -2922,6 +2922,22 @@
     (is (str/includes? (h/html (ui/status-hiccup {} (assoc st :merge {:conflicts ['a/b] :main-moved ['a/b]}))) "1 things conflict with main") "a merge line only when something conflicts")))
 
 
+(deftest a-proofs-story-is-a-row-for-each-change
+  ;; docs/render.md#the-page: a stretch of the same reading is one row, and a change of status, count or first failure is a new one
+  (is (= [{:from 1 :to 2 :status nil :failures 0 :first nil}
+          {:from 3 :to 4 :status :red :failures 2 :first {:message "a"}}
+          {:from 5 :to 5 :status :red :failures 2 :first {:message "b"}}
+          {:from 6 :to 6 :status :green :failures 0 :first nil}]
+         (ui/story-rows [[1 nil 0 nil] [2 nil 0 nil] [3 :red 2 {:message "a"}] [4 :red 2 {:message "a"}] [5 :red 2 {:message "b"}] [6 :green 0 nil]])))
+  (is (= [] (ui/story-rows []))))
+
+(deftest a-closed-tasks-standing-gives-the-gates-reason
+  (let [why "its deferred tests, run on a checkout at its merge, are not green: a/b fail"
+        s (#'ui/standing {:seon.agent/outcome :green :seon.agent/ended-turn 7 :seon.agent/turn 7}
+                         {:seon.task/outcome :closed :seon.task/failure {:reason why}})]
+    (is (= :task/closed (:state s)) "what root decided wins over the agent's own end")
+    (is (= why (:reason s)))))
+
 (deftest a-steps-buttons-call-roots-table
   ;; docs/turn.md#an-eval-can-be-run-again: each button is a call of root's one table, and a request the button makes is no record of the conversation
   (let [tools (#'ui/step-tools :a1 {:seon.eval/id "e3" :seon.eval/code "(+ 1 2)"})
