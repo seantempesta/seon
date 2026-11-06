@@ -39,12 +39,12 @@
   {:design (str "Your task: turn the request below into the task the implement step works from: its plan, what the "
                 "plan cites and its red proofs. You are done when an agent with only that page could make the change without "
                 "exploring, and its proofs are written, registered and red for the reason the plan gives. How a task is "
-                "designed, step by step: ```docs/agent.md#designing-a-task```. Then end your turn with prose.")
+                "designed, step by step: ```docs/agent.md#designing-a-task```. Then end your turn with a message to the user.")
    :implement (str "Your task: make the change the plan describes. You are done when every proof passes, the cost proofs "
-                   "included. Then end your turn with prose.")
+                   "included. Then end your turn with a message to the user.")
    :merge (str "Your task: bring main's work into this branch and keep the proofs green. Main has been merged in "
                "(`my.branch/merge-main!`). You are done when nothing is unmerged and every proof passes on the combined program. "
-               "How: ```docs/agent.md#merging```. Then end your turn with prose.")
+               "How: ```docs/agent.md#merging```. Then end your turn with a message to the user.")
    :work (str "Your task: do what the plan below asks: design it and build it. You are done when its proofs pass on your "
               "branch.")
    :whole (str "Your task: do what the plan below asks, whole. You are done when its proofs pass on your branch with main's "
@@ -53,7 +53,7 @@
                "Once it says nothing is left, your run ends and root merges your branch.")
    :test (str "Your task: test what the plan changed. You are done when the proofs and the tests of what changed pass, and "
               "each behaviour that broke has a deftest of its own. You do it by running them (`(my.agent/prove)`), writing a "
-              "deftest in the proofs' namespace for each break, and fixing the code until all pass. Then end your turn with prose.")})
+              "deftest in the proofs' namespace for each break, and fixing the code until all pass. Then end your turn with a message to the user.")})
 
 (defn- merge-decl
   "Merge task nm (merge-name of its work's) of work declaration d (id wid), on d's branch,
