@@ -302,13 +302,13 @@
            (if (contract/error? r) r (into [] (comp (remove #(= :more (:kind %))) (map (juxt :name :score))) r)))))
 
 (defn prove
-  "Run what root's judge will run on this branch, through the test service (seon.agent/prove!
-  :judge, so the run is recorded on main and is one run with any other asker's of this head):
+  "Run what root's judge will run on this branch, through the test service (seon.agent/judge!, so the
+  run is recorded on main and is one run with any other asker's of this head):
   the task's proofs and every in-process test reaching what the branch changed since the main it
   forked from, each test with a result at its reach digest reused (a red as recorded), not run;
-  given proofs, those tests (a namespace's name, its tests). The process tests it reaches, a proof among them, run
-  at the judge, before a merge (:deferred, and :why each: the process it reaches through which
-  calls). Answers that test run ({:pass :fail :error :reports :ran :reused :ms ...}) with
+  given proofs, those tests (a namespace's name, its tests). Once those are green, the process tests it reaches, a proof
+  among them, run on the merge gate's checkout, slower, and the verdict counts them; any that couldn't stay :deferred
+  (with :why each: the process it reaches through which calls, and :unjudged, why they stay), and the verdict says not green. Answers that test run ({:pass :fail :error :reports :ran :reused :ms ...}) with
   :results {test :pass|:fail|:error} and :proofs (each proof's status: the task's and the given ones,
   :deferred or :none when it has no result), and :unmatched, the given names that name no test (a var that
   is none, a namespace with none: a name that matches nothing must not run silently as 0), printed as its verdict (prove-summary: the schema
@@ -319,7 +319,7 @@
   {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat [:set :qualified-symbol]] :map]]}
   ([] (prove #{}))
   ([proofs]
-   (let [test-run (agent/prove! :judge proofs)]
+   (let [test-run (agent/judge! proofs)]
      (if (contract/error? test-run)
        test-run
        (let [results (proofs/results test-run)
@@ -338,8 +338,8 @@
 (defn prove-summary
   "A prove's run r as the eval answers it (seon.render/model, the schema :seon.test/proved): its verdict as counts of the
   proofs it judged (`red: 1 of 3 failed`), each failing test with its first failure in a line, and only what is true of this
-  run: the tests it reused (their last result still counts, because nothing they reach changed), the ones left to the judge
-  (process tests), the ones that died (no verdict) and a name that matched no test. The run whole is the value under the eval's
+  run: the tests it reused (their last result still counts, because nothing they reach changed), the process tests with no
+  verdict (then it is not green), those red on main too (not this change's), the ones that died (no verdict) and a name that matched no test. The run whole is the value under the eval's
   handle (the proofs' statuses, every failure, the deaths). A part of the run (a select-keys of it keeps its metadata) is that
   part, as data. See docs/agent.md#done."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
@@ -364,11 +364,14 @@
            [(cond red (str "red: " (count fails) " of " n " failed")
                   (pos? died) (str "died: " died " of " n " had no verdict")
                   (seq none) (str "not green: " (count none) " of " (count (:proofs r)) " proofs have no verdict: " (str/join ", " none))
+                  ;; a process test nobody ran has no verdict, a proof or not: green can't be said of it
+                  (seq (:deferred r)) (str "not green: " n " of " n " passed, and " (count (:deferred r)) " process tests have no verdict: "
+                                           (str/join ", " (sort-by str (:deferred r))) (some->> (:unjudged r) (str "; ")))
                   (zero? n) "nothing judged: no proof and no test this change reaches"
                   :else (str "green: " n " of " n " passed"))]
            (for [[t fs] (sort-by (comp str key) fails)] (failure t (first fs)))
            [(when (pos? (:reused r 0)) (str "reused " (:reused r) ": their last result still counts, because nothing they reach has changed"))
-            (when (seq (:deferred r)) (str "left to the judge: " (count (:deferred r)) " process tests"))
+            (when (seq (:main-red r)) (str "red on main too, so not this change's: " (str/join ", " (sort-by str (keys (:main-red r))))))
             (when (seq (:unmatched r)) (str "no test is named " (str/join ", " (:unmatched r))))])))))))
 
 (defn process-test?
@@ -515,9 +518,8 @@
       (some-> (:db @agent/state) (doc/namespace-source sym)))))
 
 (defn deferred
-  "The process tests this branch's change reaches, a proof among them: an agent's turn and
-  root's judge never run them in a fork; the judge's merge gate runs them on a checkout before
-  the merge, nobody asking (seon.reconcile's :gate). seon.agent/test-plan's :process among what it selects, each
+  "The process tests this branch's change reaches, a proof among them: never run in a fork of an agent; (prove) and a clear
+  status run them on the merge gate's checkout (seon.agent/judge!), and the judge's gate before the merge, nobody asking. seon.agent/test-plan's :process among what it selects, each
   with why: the process var it uses and the calls from the test to it (seon.program/process-path)."
   {:malli/schema [:=> [:cat] [:vector [:map [:test :qualified-symbol] [:uses [:vector :qualified-symbol]] [:through [:vector :qualified-symbol]]]]]}
   [] (let [proofs (or (some->> (:task @agent/state) (task/task (agent/db)) :seon.task/accumulated :proofs) #{})

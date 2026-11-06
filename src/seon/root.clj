@@ -500,6 +500,14 @@
                    dest (case (:op req) :merge-main {:merge-main (:agent req) :rid rid} {:rid rid})]
                (step/out! o :to-writer (assoc (dissoc req :agent) :dest dest))
                (update st :writes (fnil conj #{}) rid)))
+      ;; the merge gate's run, whoever asks (the reconciler's :gate, an agent's seon.agent/judge!): branch's candidate
+      ;; (the writer's: the files the octopus merge would write), then the :tests effect over them on the gate checkout
+      :gate (let [checkout (:gate-checkout (task/root @(:conn st)))]
+              (if-not (and checkout (:branch (:source st)))
+                (reply! st o p (contract/error :seon.root/no-gate-checkout #'seon.root/ext-op "this root has no checkout to run process tests on (:seon.config.source/gate-checkout, or a source root)"))
+                (let [[st rid] (pend st p :gate nil)]
+                  (step/out! o :to-writer {:op :merge-candidate :branch (:branch m) :data-attrs #{} :dest {:gate rid :tests (:tests m) :repo checkout}})
+                  st)))
       ;; the test service (seon.prove): the request goes to its proc, the caller (a session, or an
       ;; agent's turn through its proc) is answered when the run it joined ends
       :prove (let [[st rid] (pend st p :prove (:agent m))]
@@ -568,6 +576,17 @@
                            ;; started before the old one is counted out of root's agents: no-room above asked for that one
                            (-> st (set-agent o id {:status :killed :replaced true}) (to-agent o id {:op :kill})
                                (start-spawn o p (cond-> {:branch branch :key k} task (assoc :task task)))))))
+        ;; a merge gate's candidate is read (the :gate request): refused, or a changed namespace with no file on the branch
+        ;; (made at the REPL, never written; it cannot be put over the checkout), is its answer, and no test runs: no files
+        ;; would test main as it is and vouch for nothing; else its tests run with its files, answered by rid
+        (:gate dest) (let [rid (:gate dest)
+                           unread (vec (for [n (sort (keys (:unfiled r)))]
+                                         {:ns n :reason "no :ns/file on the branch: its forms were never written to a file"}))]
+                       (cond (contract/error? r) (deliver-rid st o rid r)
+                             (seq unread) (deliver-rid st o rid {:unread unread})
+                             :else (do (step/out! o [:fx/tests :in] {:req {:repo (:repo dest) :branch (:branch (:source st)) :files (:text r) :tests (:tests dest)}
+                                                                     :prio 0 :dest {:rid rid}})
+                                       st)))
         ;; the recorded errors' write was answered: the next window may write
         (:errors-flushed dest) (dissoc st ::errors-flight)
         ;; a stall's evidence was captured (stall-task): its files on the stall task's cause, on main

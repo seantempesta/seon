@@ -5,6 +5,7 @@
 {;; ---- variants of the one error map (each [:and :seon.error/base ...]) ----
  ;; an agent's test results not recorded as facts on its branch: its schema lacks them, or the branch refused the write (seon.agent/record-results!); the run answers it under :unrecorded
  :seon.agent/unrecorded [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/unrecorded]]]]
+ :seon.agent/gate-unread [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/gate-unread]]]]
  ;; a commit the agent's branch refused (a value the store cannot hash): its run-ahead writes dropped, the eval ids among them named (seon.agent/commit!); an eval answers it under :unrecorded
  :seon.agent/no-branch [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/no-branch]]]]
  :seon.agent/commit-refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/commit-refused]] [:transactions :int] [:evals [:vector :string]]]]
@@ -61,6 +62,7 @@
  :seon.root/proc-defect [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/proc-defect]] [:pid {:optional true} [:maybe :keyword]]
                                                      [:took {:optional true} [:or :keyword [:vector :keyword]]]]]
  :seon.root/refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/refused]]]]
+ :seon.root/no-gate-checkout [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/no-gate-checkout]]]]
  ;; a step of the fork server that threw (seon.fork-server/server-step): docs/processes.md#a-step-that-throws
  :seon.fork-server/step-failed [:and :seon.error/base [:map [:seon.error/type [:= :seon.fork-server/step-failed]] [:op {:optional true} [:maybe :keyword]]]]
  ;; a release (my.root/run!) of a task that is not held: unknown (execution nil), already
@@ -193,7 +195,7 @@
  ;; the error that ended it: the agent's death, the turn loop's error, a refused merge
  :seon.task/error :seon.error/base
  ;; failing assertions per red test (at most 8 each, printed by seon.print under :part)
- :seon.problems/assertion [:map [:type [:enum :fail :error]] [:message {:optional true} [:maybe :string]] [:flaky {:optional true} :boolean]
+ :seon.problems/assertion [:map [:type [:enum :fail :error]] [:message {:optional true} [:maybe :string]] [:flaky {:optional true} :boolean] [:main-red {:optional true} :boolean]
                            [:expected {:optional true} [:maybe :string]] [:actual {:optional true} [:maybe :string]]
                            [:got {:optional true} [:maybe :string]] [:seon.error/type {:optional true} :qualified-keyword]]
  ;; one clojure.test report as the test child keeps it (seon.agent/test-report)

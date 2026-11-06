@@ -224,7 +224,7 @@
                                     "(+ 1 1)"
                                     {:op :eval :agent "root"
                                      :code (str "(let [b (:db @(seon.root/branch-db sys (:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))))"
-                                                " a (datahike.api/q '[:find ?a . :where [_ :seon.eval/agent ?a] [?a :seon.agent/key _]] b)]"
+                                                " a (datahike.api/q '[:find ?a . :in $ ?id :where [?t :seon.task/id ?id] [?a :seon.agent/task ?t] [_ :seon.eval/agent ?a]] b " (pr-str task) ")]"
                                                 " (seon.context/current-ns (:tree (seon.ctx/build b a :b))))")}]))]
     (is (str/ends-with? (str (:value where)) ".here") (pr-str where))))
 

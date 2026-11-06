@@ -686,7 +686,8 @@
         ;; a test red outside the proofs that main was red on too, at the branch's merge base: main's, not a stray
         ;; red of the work (one scan of the base's verdicts, only while such a red exists)
         main-red (when (and claims base)
-                   (into #{} (keep (fn [[t {st :status}]] (when (and (= :fail st) (= :fail (get results t))) t))) (verdicts base)))
+                   (into (into #{} (keep (fn [[t {fs :failures}]] (when (some :main-red fs) t))) vs)
+                         (keep (fn [[t {st :status}]] (when (and (= :fail st) (= :fail (get results t))) t))) (verdicts base)))
         input (cond-> (if claims
                         (r/done-input claims tid results (set gaps) (mapv #(sedn/encode (:key %)) unmerged) nil plan-before (set deferred))
                         (cond-> {:proofs (set proofs) :kind kind :results results :main-green #{} :allowed-red #{}
@@ -696,6 +697,8 @@
                 (seq (:caused split)) (assoc :caused (set (:caused split)))
                 (seq main-red) (assoc :main-red main-red))
         reasons (r/done-explain input)
+        unjudged (when-let [ds (seq (sort-by str (keep (fn [[t {st :status}]] (when (= :deferred st) t)) vs)))]
+                   (task/unjudged db t (vec ds)))
         reds (vec (for [[p {:keys [failures]}] vs f failures] (assoc f :test p)))
         blockers (refused reasons reds #(doc/source-of db %) #(callees db %)
                           #(or (nil? base) (not= (doc/source-of db %) (doc/source-of base %))))]
@@ -718,6 +721,8 @@
                               (seq fs) (assoc :failures (failures fs))
                               (seq calls) (assoc :calls calls))))}
       (seq blockers) (assoc :refused blockers)
+      ;; what no gate will run stays unjudged, said here because it ends no run (seon.task/unjudged)
+      unjudged (assoc :unjudged unjudged)
       test-error (assoc :test-run {:failed [(:seon.error/message test-error)]})
       (seq unmerged) (assoc :unmerged (mapv #(select-keys % [:key :kind :base :ours :theirs]) unmerged))
       (seq gaps) (assoc :without-a-contract gaps)
