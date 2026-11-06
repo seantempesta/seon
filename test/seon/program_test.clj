@@ -1358,3 +1358,20 @@
     (is (= '#{app.pt-ck-test/reads-the-map-test} (moved (schema db :app.pt-ck/config "[:map {:closed false} [:seon.config.pt/a :seon.config.pt/a] [:seon.config.pt/b :seon.config.pt/b]]")))
         "what the map says besides its keys still moves the tests reaching it")))
 
+(defmulti pt-by-vector first)
+
+(deftest a-removed-method-with-a-vector-dispatch-is-gone
+  ;; seon.program/remove-definition!: a method's dispatch reads back through seon.edn, as its key was written
+  (defmethod pt-by-vector [:a 1] [_] :hit)
+  (is (contains? (methods pt-by-vector) [:a 1]))
+  (#'program/remove-definition! [:method 'seon.program-test/pt-by-vector (seon.edn/encode [:a 1])])
+  (is (not (contains? (methods pt-by-vector) [:a 1])) "the method is gone"))
+
+(deftest a-vars-history-names-each-definition-it-had
+  ;; docs/storage.md#history: my.agent/history reads a var's past definitions from the db's history
+  (let [db (record (empty-db) 'app.pt-h "(defn f [] 1)" 'app.pt-h "(defn f [] 2)")
+        rows (program/var-history db 'app.pt-h/f)]
+    (is (= ["(defn f [] 1)" "(defn f [] 2)"] (map :src rows)) "each definition, oldest first")
+    (is (apply < (map :t rows)) "each with its transaction")
+    (is (every? inst? (map :at rows)) "and its time")
+    (is (= [] (program/var-history db 'app.pt-h/no-such)) "a var it never had")))

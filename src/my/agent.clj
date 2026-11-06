@@ -187,21 +187,27 @@
         (doc/callers db x))))
 
 (defn tests-reaching
-  "The tests whose reach includes var x on this branch, nearest first, each {:test}: the tests a change to
+  "The tests whose reach includes var x on this branch, nearest first: the tests a change to
   x selects, read from the reach graph the test plan reads (seon.agent/branch-graph) by the same
   reverse walk (seon.program/tests-reaching). A cited var's page lists only its direct tests; run
   this on the function you will change, before writing its proof, to find the test that goes red
   first. A test of a scratch namespace is left out, as the plan leaves it (seon.agent/judges?); a
   library's var, which the reach graph holds no form of, answers []. A symbol that names no var
   answers so (:my.agent/no-var)."
-  {:malli/schema [:=> [:cat [:or :qualified-symbol :seon.host/var]] [:or [:vector [:map [:test :qualified-symbol]]] :my.agent/no-var]]}
+  {:malli/schema [:=> [:cat [:or :qualified-symbol :seon.host/var]] [:or [:vector :qualified-symbol] :my.agent/no-var]]}
   [x]
   (let [db (agent/db) x (if (var? x) (named x) (asked x))]
     (or (no-var db x)
         (let [[_ in] (agent/test-inputs db)
               g (agent/branch-graph db (:base @agent/state) in)]
-          (into [] (comp (filter agent/judges?) (map (fn [t] {:test t})))
-                (program/tests-reaching g x))))))
+          (filterv agent/judges? (program/tests-reaching g x))))))
+
+(defn history
+  "Each definition var x has had on this branch, oldest first (seon.program/var-history). A symbol that names no var answers so (:my.agent/no-var). See docs/storage.md#history."
+  {:malli/schema [:=> [:cat [:or :qualified-symbol :seon.host/var]] [:or [:vector :map] :my.agent/no-var]]}
+  [x]
+  (let [db (agent/db) x (if (var? x) (named x) (asked x))]
+    (or (no-var db x) (program/var-history db x))))
 
 (defn cost
   "What contracted function x costs, measured by the test runs, never estimated: :per-call, its

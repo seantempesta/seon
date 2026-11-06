@@ -739,6 +739,14 @@
         pointed (into #{} (comp (mapcat #(d/datoms db :aevt %)) (map :v)) [:var/form :method/form :impl/form :ns/form])]
     (into {} (for [dt (d/datoms db :aevt :form/id) :when (or (not (defining (:e dt))) (pointed (:e dt)))] [(:v dt) (:e dt)]))))
 
+(defn var-history
+  "Each definition var sym has had on db, oldest first: {:src :t :at}, the form's text, the transaction that pointed the var at it and that transaction's time, read from db's history over the var's :var/form datoms. See docs/storage.md#history."
+  {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:vector [:map [:src :string] [:t :int] [:at inst?]]]]}
+  [db sym]
+  (->> (d/q '[:find ?tx ?src ?at :in $ ?s :where [?v :var/name ?s] [?v :var/form ?f ?tx true] [?f :form/src ?src] [?tx :db/txInstant ?at]] (d/history db) sym)
+       (sort-by first)
+       (mapv (fn [[tx src at]] {:src src :t tx :at at}))))
+
 (defn live-forms
   "Every live form of db, as form-row, in entity order (live-ids: index scans, then one row a
   live form)."
@@ -1042,7 +1050,7 @@
   [[kind a b]]
   (case kind
     :var (when-let [n (find-ns (symbol (namespace a)))] (ns-unmap n (symbol (name a))))
-    :method (when-let [v (find-var a)] (when (instance? clojure.lang.MultiFn @v) (remove-method @v (read-string b))))
+    :method (when-let [v (find-var a)] (when (instance? clojure.lang.MultiFn @v) (remove-method @v (sedn/decode b))))
     nil))
 
 (defn- loadable
