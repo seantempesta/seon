@@ -32,7 +32,7 @@
   the proofs, share their forms, and packing a 768-dim vector is the dearest part of making one."
   (memoize
     (fn [i] [{:db/id (str "f" i) :form/id (str "vf" i) :form/src (str "(defn vf" i " [])")}
-             (vector/fact (str "f" i) 0 (unit-vector i) 8 "m")])))
+             (vector/fact (str "f" i) 0 (unit-vector i) "m")])))
 
 (def ^:private grown
   "{n db}: the stores store-of made, so the next, a larger one, adds only the forms past the largest

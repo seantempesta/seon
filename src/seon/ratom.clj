@@ -161,6 +161,11 @@
   [x]
   (if (view? x) (let [src (.-src x)] (notify-deref-watcher! [src (.-path x) :deep]) (.-m x)) x))
 
+(defn untracked
+  "View x's value with no read recorded (any other x as it is): for a reader of what is written once, an entity's id, which a read per member would make a list's reading cost a read per member. See docs/render.md#reactive-renders."
+  {:malli/schema [:=> [:cat :any] :any]}
+  [x] (if (view? x) (.-m x) x))
+
 (defn realize
   "x with every view in it (its own, its map values', its vector's members) its real value,
   each read whole."

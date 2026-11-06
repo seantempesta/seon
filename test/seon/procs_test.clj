@@ -938,7 +938,7 @@
     (is (= -1 (seon.lib/c-kill pid 0)) "and gone when the stop answers: killed and reaped")))
 
 (deftest an-agents-memory-alone-moves-no-main
-  ;; root wrote :seon.process/mem-mb on every change, so main moved five times under three reads of a
+  ;; root wrote an agent's memory on every change, so main moved five times under three reads of a
   ;; working agent (seon.server-test/a-later-read-draws-no-page-cold-and-costs-what-the-one-before-did)
   (let [st {:boot "b1" :agents {} :pending {} :rid 0 :view {:agents {:a1 {:status :busy :pid 7 :mem-mb 151.66}}}}
         o (volatile! {})
@@ -947,4 +947,5 @@
     (is (empty? (rec (assoc-in st [:view :agents :a1 :mem-mb] 152.42) (get-in st [:view :agents])))
         "memory alone writes nothing")
     (let [[w] (rec (update-in st [:view :agents :a1] assoc :status :idle :mem-mb 152.42) (get-in st [:view :agents]))]
-      (is (some #(= 152.42 (:seon.process/mem-mb %)) (:tx-data w)) "it goes with the agent's next other change"))))
+      (is (some #(= :idle (:seon.agent/status %)) (:tx-data w)) "another change writes that change")
+      (is (not-any? #(contains? % :seon.process/mem-mb) (:tx-data w)) "and no memory: nothing reads it as a fact"))))

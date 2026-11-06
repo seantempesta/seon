@@ -209,11 +209,11 @@
         db2 (d/db-with db1 (task/agent-tx "b1" :a3 {:status :idle :pid 77 :running nil}))
         db3 (d/db-with db2 (task/agent-tx "b2" :a3 {:status :spawning}))
         pull (fn [db boot] (d/pull db [:seon.agent/status {:seon.agent/root [:seon.root/id]}
-                                   {:seon.process/_agent [:seon.process/pid :seon.process/running :seon.process/mem-mb]}]
+                                   {:seon.process/_agent [:seon.process/pid :seon.process/running]}]
                                    [:seon.agent/key (task/agent-key boot :a3)]))
         proc (fn [m] {:seon.agent/status (:seon.agent/status m) :seon.agent/root (:seon.agent/root m) :p (first (:seon.process/_agent m))})]
-    (is (= {:seon.agent/status :running :seon.agent/root {:seon.root/id :root} :p {:seon.process/pid 77 :seon.process/running "(f 2)" :seon.process/mem-mb 120.5}} (proc (pull db1 "b1"))))
-    (is (= {:seon.agent/status :idle :seon.agent/root {:seon.root/id :root} :p {:seon.process/pid 77 :seon.process/mem-mb 120.5}} (proc (pull db2 "b1")))
+    (is (= {:seon.agent/status :running :seon.agent/root {:seon.root/id :root} :p {:seon.process/pid 77 :seon.process/running "(f 2)"}} (proc (pull db1 "b1"))))
+    (is (= {:seon.agent/status :idle :seon.agent/root {:seon.root/id :root} :p {:seon.process/pid 77}} (proc (pull db2 "b1")))
         "the form returned: no longer running")
     (is (= :spawning (:seon.agent/status (pull db3 "b2"))) "the next boot's a3")
     (is (= :idle (:seon.agent/status (pull db3 "b1"))) "is not the earlier boot's")))
