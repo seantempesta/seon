@@ -896,10 +896,10 @@
     (cond
       (clojure.string/blank? intent)
       (contract/error :seon.turn/invalid-call #'call-problem
-                      "this call has no intent: send intent, a sentence on what this eval is about to do, beside code; the form was not run" {:problem :no-intent})
+                      "this eval has no intent: send intent, a sentence on what it is about to do, beside code; the form was not run" {:problem :no-intent})
       (and forms (empty? forms))
       (contract/error :seon.turn/invalid-call #'call-problem
-                      "this call has no form: its code is empty; nothing was run" {:problem :forms :forms 0}))))
+                      "this eval has no form: its code is empty; nothing was run" {:problem :forms :forms 0}))))
 
 (defn run-calls
   "Eval calls ({:id :intent :code}, a reply's or an insert's: docs/turn.md#an-eval-can-be-inserted) through the one REPL
@@ -918,7 +918,7 @@
                         (seq repairs) (assoc :repaired (context/repaired src repairs)))
                   failed (some #(when (or (:ex (:response %)) (contract/error? (:value (:response %)))) (context/wire-id (name (:handle (:response %))))) acc)
                   why (if failed
-                        (contract/error :seon.turn/not-run #'run-calls (str "not run: call " failed " of this reply failed before it (its result says why)") {:after failed})
+                        (contract/error :seon.turn/not-run #'run-calls (str "not run: eval " failed " of this reply failed before it (its result says why)") {:after failed})
                         (if problem
                           (contract/error :seon.turn/invalid-call #'run-calls problem {:problem :arguments})
                           (call-problem intent src)))]
@@ -1047,12 +1047,7 @@
                 ;; its value goes with the reply only when it is plain data (seon.contract/plain?: what the socket and the wire carry);
                 ;; root keeps none of it (its view keeps the head: seon.root/eval-head), and the asker reads the value as data,
                 ;; never the printed text back, which is no EDN once the eval printed (its :out verbatim)
-                ;; a request with :intent is a model's call in everything but who made it (run-calls: the forgiving reader, the intent rule)
-                [{:op :reply :id (:id m) :response (let [req (select-keys m [:ticks :origin])
-                                                         r (if (contains? m :intent)
-                                                             (:response (peek (run-calls [{:id "outside" :intent (:intent m) :code (:forms m)}] (constantly req) eval-string)))
-                                                             (eval-string (:forms m) req))]
-                                                     (agent/on-the-wire r))
+                [{:op :reply :id (:id m) :response (agent/on-the-wire (eval-string (:forms m) (select-keys m [:ticks :origin])))
                   :t (:max-tx (agent/db))}])
               ;; evals given at its spawn (seon.root/spawn!'s :evals) or inserted later: run on this queue, in order, answering no one
               (= :evals (:op m)) (do (intr/clear-pending!) (insert! (:by m) (:evals m)) [])

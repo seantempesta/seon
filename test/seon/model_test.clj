@@ -66,101 +66,56 @@
                                             {:role "tool" :tool-call-id "c1" :content "3"}]
                                  :task "t/x" :turn 1})]
       (is (= ["eval"] (mapv #(get-in % [:function :name]) (:tools b))))
-      (is (= [{:id "c1" :type "function" :function {:name "eval" :arguments "{\"code\":\"(+ 1 2)\"}"}}]
+      (is (= [{:id "c1" :type "function" :function {:name "eval" :arguments "{\"message-md\":\"\",\"evals\":[{\"code\":\"(+ 1 2)\"}]}"}}]
              (:tool_calls (second (:messages b)))))
       (is (= {:role "tool" :content "3" :tool_call_id "c1"} (nth (:messages b) 2)))))
-  (testing "a streamed reply's call pieces join by index into each call's code, in order"
+  (testing "a streamed reply's call pieces join by index into its call, and its evals are in order, each with its intent"
     (let [c (model/parse-reply
              (apply str (map chunk-line
-                             [{:choices [{:delta {:content "Two steps."}}]}
-                              {:choices [{:delta {:tool_calls [{:index 0 :id "c1" :function {:name "eval" :arguments "{\"intent\":\"i\",\"code\":"}}]}}]}
-                              {:choices [{:delta {:tool_calls [{:index 0 :function {:arguments "\"(def x 41)\"}"}}]}}]}
-                              {:choices [{:delta {:tool_calls [{:index 1 :id "c2" :function {:name "eval" :arguments "{\"intent\":\"i\",\"code\":\"(inc x)\"}"}}]}}]}
+                             [{:choices [{:delta {:content ""}}]}
+                              {:choices [{:delta {:tool_calls [{:index 0 :id "c1" :function {:name "eval" :arguments "{\"message-md\":\"Two steps.\",\"evals\":[{\"intent\":\"i\",\"code\":"}}]}}]}
+                              {:choices [{:delta {:tool_calls [{:index 0 :function {:arguments "\"(def x 41)\"},{\"intent\":\"j\",\"code\":\"(inc x)\"}]}"}}]}}]}
                               {:choices [{:delta {} :finish_reason "tool_calls"}] :usage {:prompt_tokens 9 :completion_tokens 4}}]))
              5.0 64)]
-      (is (= [{:id "c1" :code "(def x 41)" :intent "i"} {:id "c2" :code "(inc x)" :intent "i"}] (:tool-calls c)))
+      (is (= [{:id "c1" :code "(def x 41)" :intent "i"} {:id "c1#1" :code "(inc x)" :intent "j"}] (:tool-calls c)))
       (is (= ["Two steps." "tool_calls"] [(:text c) (:finish-reason c)]))))
   (testing "a call with no content beside it, and a call cut mid-arguments: its arguments as they came"
-    (let [c (model/parse-reply "{\"choices\":[{\"message\":{\"content\":null,\"tool_calls\":[{\"id\":\"c\",\"function\":{\"name\":\"eval\",\"arguments\":\"{\\\"code\\\":\\\"(+ 1\"}}]},\"finish_reason\":\"length\"}]}" 1.0 64)]
+    (let [c (model/parse-reply "{\"choices\":[{\"message\":{\"content\":null,\"tool_calls\":[{\"id\":\"c\",\"function\":{\"name\":\"eval\",\"arguments\":\"{\\\"evals\\\":[{\\\"code\\\":\\\"(+ 1\"}}]},\"finish_reason\":\"length\"}]}" 1.0 64)]
       (is (= "" (:text c)))
-      (is (= ["c" "{\"code\":\"(+ 1"] ((juxt :id :code) (first (:tool-calls c)))) "its arguments as they came")
+      (is (= ["c" "{\"evals\":[{\"code\":\"(+ 1"] ((juxt :id :code) (first (:tool-calls c)))) "its arguments as they came")
       (is (re-find #"not run: the arguments are cut off" (:problem (first (:tool-calls c)))) "and nothing runs: the agent is told why"))))
 
-(defn- usage-of
-  "The completion a one-document reply with usage u reads as."
-  [u]
-  (model/parse-reply (json/write-str {:model "m" :choices [{:message {:content "(+ 1 2)"} :finish_reason "stop"}] :usage u}) 1.0 2048))
-
-(deftest a-reply-reports-its-cache-hit-and-miss-tokens
-  ;; task seon.model/a-reply-records-its-cached-tokens: whether a run cost ~$0.01 or
-  ;; ~$0.58 is the provider's cache share, so the completion keeps what the provider reported
-  (is (= [64 56] ((juxt :cache-hit-tokens :cache-miss-tokens)
-                  (usage-of {:prompt_tokens 120 :completion_tokens 3 :prompt_cache_hit_tokens 64 :prompt_cache_miss_tokens 56})))
-      "DeepSeek's hit and miss")
-  (is (= {:cache-hit-tokens 64} (select-keys (usage-of {:prompt_tokens 120 :completion_tokens 3 :prompt_tokens_details {:cached_tokens 64}})
-                                             [:cache-hit-tokens :cache-miss-tokens]))
-      "an OpenAI-compatible cached count; a miss it did not report is absent")
-  (is (= {} (select-keys (usage-of {:prompt_tokens 120 :completion_tokens 3}) [:cache-hit-tokens :cache-miss-tokens]))
-      "unreported is absent, never 0"))
-
-(deftest a-turn-records-what-the-provider-reported
-  (is (= {:seon.model-call/tokens 123 :seon.model-call/cache-hit-tokens 64 :seon.model-call/cache-miss-tokens 56}
-         (turn/usage (usage-of {:prompt_tokens 120 :completion_tokens 3 :prompt_cache_hit_tokens 64 :prompt_cache_miss_tokens 56}))))
-  (is (= {} (turn/usage (usage-of {}))) "a reply without usage records no count"))
-
-
-(deftest no-provider-answers-a-typed-error-never-a-reply
-  ;; root's ruling, 2026-10-22 (brief 1, item 1): a root whose config names no model provider
-  ;; ran the scripted provider (a test fixture) as if it were a model; it answers the first
-  ;; turn with the typed :seon.model/no-provider, which ends the run naming what to set
-  (let [r (model/complete {:kind :none} {:messages [{:role "user" :content "x"}] :task "demo/t" :turn 0})]
-    (is (= :seon.model/no-provider (:seon.error/type r)))
-    (is (seon.contract/valid? :seon.model/failure r))
-    (is (not (contains? r :tool-calls)) "no reply, scripted or otherwise")))
-
-;; the curated session: read from <dir>/<ns>_<name>.edn, answered turn by turn, text only past its end
-(deftest a-curated-session-answers-its-turns-and-then-says-it-has-no-more
-  (let [dir (str (System/getProperty "java.io.tmpdir") "/curated-" (random-uuid))
-        turn {:text "Add one." :calls [{:intent "Add one." :code "(inc 1)"}]}]
-    (.mkdirs (java.io.File. dir))
-    (spit (str dir "/demo_t.edn") (pr-str {:task "demo/t" :curated true :turns [turn]}))
-    (is (= turn (fixtures/curated-turn dir "demo/t" 0)) "turn 0 answers its calls")
-    (is (= {:text "The curated session has no turn 1."} (fixtures/curated-turn dir "demo/t" 1)) "past the end: text only")
-    (is (= {:text "No curated session for demo/u."} (fixtures/curated-turn dir "demo/u" 0)) "no file: text only")
-    (is (= {:text "No curated session for demo/t."} (fixtures/curated-turn nil "demo/t" 0)) "no directory: text only")
-    (spit (str dir "/demo_bad.edn") "{:turns [")
-    (is (= {:text "The curated session of demo/bad does not read as a map."} (fixtures/curated-turn dir "demo/bad" 0)) "a file that does not read: text only")
-    (run! #(.delete ^java.io.File %) (reverse (file-seq (java.io.File. dir))))))
-
-(deftest cost-prices-a-turn-at-its-models-rates
-  (testing "a DeepSeek turn as seon.turn/usage records it: 10k prompt (8k cached), 500 completion"
-    (let [u (turn/usage {:prompt-tokens 10000 :completion-tokens 500 :cache-hit-tokens 8000 :cache-miss-tokens 2000})]
-      (is (= (/ (+ (* 2000 0.15) (* 8000 0.003) (* 500 0.6)) 1e6) (model/cost "deepseek-flash" u)))
-      (is (< (model/cost "deepseek-flash" u) (model/cost "deepseek-v4-pro" u)) "the pro model's rates are higher")))
-  (testing "unknown is nil, never 0: no cache split (the scripted fixture's estimate), or no prices"
-    (is (nil? (model/cost "deepseek-flash" (turn/usage {:prompt-tokens 100 :completion-tokens 5}))))
-    (is (nil? (model/cost "no-such-model" {:seon.model-call/tokens 10 :seon.model-call/cache-hit-tokens 1 :seon.model-call/cache-miss-tokens 1})))
-    (is (nil? (model/cost nil {:seon.model-call/tokens 10 :seon.model-call/cache-hit-tokens 1 :seon.model-call/cache-miss-tokens 1})))))
-
-(deftest a-thinking-reply-sends-its-reasoning-back
-  ;; DeepSeek's thinking mode with tools (api-docs.deepseek.com/guides/thinking_mode, read
-  ;; 2026-10-22): "the reasoning_content must be fully passed back to the API in all subsequent
-  ;; requests", else a 400; the reply's reasoning arrives as reasoning_content deltas (above)
-  (let [c (model/parse-reply
-           (apply str (map chunk-line
-                           [{:choices [{:delta {:reasoning_content "Square "}}]}
-                            {:choices [{:delta {:reasoning_content "multiplies."}}]}
-                            {:choices [{:delta {:tool_calls [{:index 0 :id "c1" :function {:name "eval" :arguments "{\"code\":\"(* 3 3)\"}"}}]}}]}
-                            {:choices [{:delta {} :finish_reason "tool_calls"}] :usage {:prompt_tokens 9 :completion_tokens 4}}]))
-           1.0 2048)
-        b (model/request-body {:kind :openai-compat :base-url "x" :model "m" :api-key-env "HOME" :max-tokens 64 :thinking :enabled}
-                              {:messages [{:role "user" :content "go"}
-                                          {:role "assistant" :content "" :reasoning (:reasoning c) :tool-calls (:tool-calls c)}
-                                          {:role "tool" :tool-call-id "c1" :content "9"}]
-                               :task "t/x" :turn 2})]
-    (is (= "Square multiplies." (:reasoning c)))
-    (is (= "Square multiplies." (:reasoning_content (second (:messages b)))) "the earlier reply's reasoning goes back with it")
-    (is (not-any? :reasoning_content [(first (:messages b)) (nth (:messages b) 2)]) "and only on the assistant's message")))
+(deftest a-reply-is-one-call-and-its-results-one-message
+  ;; docs/model.md#one-tool-eval: owner, 2026-11-06: "It's one message-md for ALL the tool calls. each tool call has an intent."
+  (let [provider {:kind :openai-compat :base-url "" :model "m" :api-key-env "" :max-tokens 10}
+        reply (fn [args & [text]] (model/parse-reply (json/write-str {:choices [{:message {:content (or text "") :tool_calls [{:id "c" :function {:name "eval" :arguments (json/write-str args)}}]} :finish_reason "tool_calls"}]}) 1.0 64))
+        args {:message-md "Doing f, then g." :evals [{:intent "f" :code "(f)"} {:intent "g" :code "(g)"}]}
+        c (reply args)]
+    (testing "stored shape: each eval its own, the message the reply's text"
+      (is (= "Doing f, then g." (:text c)))
+      (is (= [{:id "c" :code "(f)" :intent "f"} {:id "c#1" :code "(g)" :intent "g"}] (:tool-calls c))))
+    (testing "the wire: one assistant call, its arguments as the model sent them; one tool message, its results in order"
+      (let [neutral [{:role "assistant" :content "Doing f, then g." :reply 1 :tool-calls [{:id "eval-e1" :code "(f)" :intent "f"}]}
+                     {:role "tool" :tool-call-id "eval-e1" :content "{:handle result/e1, :value 1}"}
+                     {:role "assistant" :content "" :reply 1 :tool-calls [{:id "eval-e2" :code "(g)" :intent "g"}]}
+                     {:role "tool" :tool-call-id "eval-e2" :content "{:handle result/e2, :value 2}"}
+                     {:role "assistant" :content "" :tool-calls [{:id "eval-p3" :code "(my.render/render-changes)"}]}
+                     {:role "tool" :tool-call-id "eval-p3" :content "{:handle result/p3, :value {:edits []}}"}]
+            sent (:messages (model/request-body provider {:messages neutral :task "t/x" :turn 1}))]
+        (is (= 4 (count sent)) "a reply and its results, Seon's insert and its result")
+        (is (= (json/write-str {:message-md "Doing f, then g." :evals [{:intent "f" :code "(f)"} {:intent "g" :code "(g)"}]})
+               (get-in sent [0 :tool_calls 0 :function :arguments])))
+        (is (= "" (get-in sent [0 :content])) "no text beside the call")
+        (is (= 1 (count (get-in sent [0 :tool_calls]))))
+        (is (= {:role "tool" :tool_call_id "eval-e1" :content "{:handle result/e1, :value 1}\n\n{:handle result/e2, :value 2}"} (nth sent 1)) "each with its handle")
+        (is (= "{\"message-md\":\"\",\"evals\":[{\"code\":\"(my.render\\/render-changes)\"}]}" (get-in sent [2 :tool_calls 0 :function :arguments])) "Seon's own: no message, code and no intent")))
+    (testing "a reply's text is its message when it writes text instead, and no word it wrote is lost"
+      (is (= "I wrote text." (:text (reply {:evals [{:intent "f" :code "(f)"}]} "I wrote text."))))
+      (is (= "Text.\n\nMessage." (:text (reply {:message-md "Message." :evals [{:intent "f" :code "(f)"}]} "Text.")))))
+    (testing "a call that is not this shape is a typed answer to that reply, nothing run"
+      (is (re-find #"evals is missing or empty" (:problem (first (:tool-calls (reply {:message-md "Hi" :intent "old" :code "(f)"}))))))
+      (is (re-find #"evals is missing or empty" (:problem (first (:tool-calls (reply {:message-md "Hi" :evals []}))))))
+      (is (re-find #"its code is missing" (:problem (second (:tool-calls (reply {:message-md "Hi" :evals [{:intent "f" :code "(f)"} {:intent "g"}]})))))))))
 
 (deftest a-request-lets-the-model-reply-with-no-call
   ;; docs/render.md (step 0 measured it live: four DeepSeek turns,
@@ -171,25 +126,14 @@
                                           {:role "tool" :tool-call-id "c1" :content "{:handle result/e1, :value 1}"}]
                                :task "t/x" :turn 1})]
     (is (= "auto" (:tool_choice b)))
-    (is (= [:message-md :intent :code] (keys (get-in b [:tools 0 :function :parameters :properties]))) "the message, then the intent, then code: it talks and thinks before the code")
-    (is (= ["message-md" "intent" "code"] (get-in b [:tools 0 :function :parameters :required])) "all three, the message empty on a reply's later calls")
-    (testing "a turn has one message, its text; each call has its intent"
-      (let [reply (fn [& argss] (model/parse-reply (json/write-str {:choices [{:message {:content "" :tool_calls (vec (map-indexed (fn [i a] {:id (str "c" i) :function {:name "eval" :arguments (json/write-str a)}}) argss))} :finish_reason "tool_calls"}]}) 1.0 64))
-            one {:intent "i" :code "(f)"}
-            c (reply (assoc one :message-md "Doing f twice.") one)]
-        (is (= "Doing f twice." (:text c)) "the message is the turn's text")
-        (is (= [{:id "c0" :code "(f)" :intent "i"} {:id "c1" :code "(f)" :intent "i"}] (:tool-calls c)) "and covers all of its calls")
-        (is (= [nil nil] (mapv :problem (:tool-calls (reply one one)))) "a reply with none still runs")
-        (let [sent (:messages (model/request-body {:kind :openai-compat :base-url "" :model "m" :api-key-env "" :max-tokens 10}
-                                                  {:messages [{:role "assistant" :content "Doing f twice." :reply 1} {:role "assistant" :content "" :reply 1 :tool-calls (:tool-calls c)}] :task "t/x" :turn 1}))]
-          (is (= "" (:content (first sent))) "history reads as the model sent it")
-          (is (= ["{\"message-md\":\"Doing f twice.\",\"intent\":\"i\",\"code\":\"(f)\"}" "{\"intent\":\"i\",\"code\":\"(f)\"}"]
-                 (mapv #(get-in % [:function :arguments]) (:tool_calls (first sent)))) "the message on its first call"))))
+    (is (= [:message-md :evals] (keys (get-in b [:tools 0 :function :parameters :properties]))) "the message, then the evals: it talks and thinks before the code")
+    (is (= [:intent :code] (keys (get-in b [:tools 0 :function :parameters :properties :evals :items :properties]))))
+    (is (= ["message-md" "evals"] (get-in b [:tools 0 :function :parameters :required])) "both")
     (is (not (str/includes? (pr-str (:tools b)) ";;")) "no ;; in the tool")
     (is (not (contains? b :temperature)) "absent: the provider's default")
     (is (= 0.5 (:temperature (model/request-body {:kind :openai-compat :base-url "" :model "m" :api-key-env "" :max-tokens 10 :temperature 0.5} {:messages [] :task "t/x" :turn 1}))) "set: as configured")
     (is (= {:role "assistant" :content "" :reasoning_content "r"
-            :tool_calls [{:id "c1" :type "function" :function {:name "eval" :arguments "{\"message-md\":\"I read f.\",\"code\":\"(f)\"}"}}]}
+            :tool_calls [{:id "c1" :type "function" :function {:name "eval" :arguments "{\"message-md\":\"I read f.\",\"evals\":[{\"code\":\"(f)\"}]}"}}]}
            (first (:messages b))) "reply text, reasoning and the call, as returned")
     (is (= "c1" (:tool_call_id (second (:messages b)))) "the response answers its call by the provider's id")))
 

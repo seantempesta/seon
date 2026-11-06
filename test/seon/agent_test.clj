@@ -52,7 +52,12 @@
   ([forms opts]
    (mapv #(if (contains? % :response) (let [r (:response %)] (assoc r :value (value-of r))) %)
          (with-agent opts (fn [{:keys [names ask]}]
-                            (mapv #(ask (if (map? %) % {:op :eval :agent (:agent names) :code %})) (if (fn? forms) (forms names) forms)))))))
+                            ;; a string: a form on the agent's REPL, by root's submit!, no reply and no turn of anyone's
+                            (mapv #(if (map? %)
+                                     (ask %)
+                                     (let [a (ask {:op :eval :agent "root" :code (str "@(c/submit! sys :" (:agent names) " " (pr-str %) " {:origin :outside})")})]
+                                       (if-let [r (get-in a [:response :value])] {:response r} a)))
+                                  (if (fn? forms) (forms names) forms)))))))
 
 (defn with-agent
   "in-agent's setup and teardown around a body of the test's own: f is called with {:names {:ns :task :agent}

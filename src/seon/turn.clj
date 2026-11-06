@@ -20,7 +20,7 @@
             [seon.agent :as agent] [seon.repl :as repl] [seon.task :as task] [seon.reconcile :as r]
             [seon.proofs :as proofs] [seon.context :as context] [seon.merge :as pm] [seon.problems :as problems]
             [seon.stage :as stage] [my.branch :as branch] [seon.reader :as reader] [seon.learn :as learn] [seon.config :as cfg] [seon.lib :as lib] [seon.print :as print]
-            [seon.error :as err] [datahike.api :as d] [seon.db :as pdb] [seon.render :as render] [clojure.data.json :as json]))
+            [seon.error :as err] [datahike.api :as d] [seon.db :as pdb] [seon.render :as render] [seon.model :as model] [clojure.data.json :as json]))
 
 ;; The turn loop's own facts live in the agent's one state map, under :turn: whether this
 ;; process is working a task, the last turn's evals and a stop a function requested.
@@ -254,6 +254,20 @@
     (when call (repl/insert! "seon" [call]))
     nil))
 
+(defn- open-turn!
+  "Turn n of task opens: what it takes, the page shown if it moved, then the turn (the agent's number and its model call's first facts, with the main and merge base it heard), then its
+  basis: the commit that holds them, so everything its request and its provider are made from is a fact of that commit
+  (seon.context/wire-turn makes them again there). A model's turn and an outside agent's reply open alike. Answers [its model call's id, its basis]. See docs/turn.md#the-turn-is-a-number."
+  {:malli/schema [:=> [:cat :seon.task/id :int [:maybe :int] :boolean [:maybe :string]] [:tuple :string :map]]}
+  [task n max-turns merge? model-name]
+  (let [k (:key @agent/state) id (str k "/" n)]
+    (take! true n)
+    (show-page!)
+    (agent/transact! (into [{:seon.agent/key k :seon.agent/turn n}
+                            {:seon.model-call/id id :seon.model-call/agent {:seon.agent/key k} :seon.model-call/n n :seon.model-call/origin :model}]
+                           (main-base-tx)))
+    [id (cond-> (assoc (basis! task n max-turns :model merge?) :agent k) model-name (assoc :model model-name))]))
+
 (defn- act!
   "One model turn: the page shown to the agent if it moved (`show-page!`), the agent's turn number moves (docs/turn.md#the-turn-is-a-number), the agent's context (its one tree read by seon.context/request, the page among it as evals; the status s is the turn's own) to the model, the reply's eval calls
   through the one REPL path, each answered as its own result, the turn's facts on its model call on the branch. Answers the loop state after it, or the
@@ -266,19 +280,7 @@
         ;; this turn writes take
         n (inc (agent/turn-now))
         k (:key @agent/state)
-        _ (take! true n)
-        _ (show-page!)
-        id (str k "/" n)
-        ;; the turn first (the agent's number and its model call's first facts, with the main and merge base it heard), then its
-        ;; basis: the commit that holds them, so everything its request and its provider are made from is a fact of that commit
-        ;; (seon.context/wire-turn makes them again there); then what it was made from (its model call's basis): its page is
-        ;; drawn on the db that holds it (its proofs as this turn observed them), then what it sent, committed, so a page
-        ;; shows the call in flight and a call that fails keeps what it sent
-        _ (agent/transact! (into [{:seon.agent/key k :seon.agent/turn n}
-                                  {:seon.model-call/id id :seon.model-call/agent {:seon.agent/key k} :seon.model-call/n n :seon.model-call/origin :model}]
-                                 (main-base-tx)))
-        basis (cond-> (assoc (basis! (:seon.task/id t) n max-turns :model (boolean merge?)) :agent k)
-                model-name (assoc :model model-name))
+        [id basis] (open-turn! (:seon.task/id t) n max-turns (boolean merge?) model-name)
         ;; the provider as the config stands at the basis (main's as the turn heard it, over the task's own), never one copied at boot
         provider (context/provider-of (agent/db) basis)
         _ (agent/transact! [{:seon.model-call/id id :seon.model-call/basis basis}])
@@ -378,6 +380,23 @@
                                 :seon.model-call/origin :outside :seon.model-call/basis basis}
                          true (assoc :seon.model-call/sent-hash (lib/digest (sedn/encode messages))))])
      text)))
+
+(defn outside-reply!
+  "An outside agent's seon_eval on this process, one reply as a model's is: its evals (`seon.model/call-evals`) through the one REPL path in order, stopping at the first that throws, the rest answered not-run. With turn?, the agent works task with its model outside: the reply is its turn, its message on its model call, opened as a model's turn is, so it reads as a model's in the conversation. Otherwise it is someone at the REPL of an agent its own model drives: no turn moves. Answers each eval's response as the wire carries it, printed as EDN for the server (`seon.server/op-answer`). See docs/turn.md#an-outside-agent."
+  {:malli/schema [:=> [:cat [:maybe :seon.task/id] [:maybe :string] :any :boolean] :nil]}
+  [task message evals turn?]
+  (let [n (when turn? (begin! task) (inc (agent/turn-now)))
+        id (when turn? (first (open-turn! task n 1 false nil)))
+        _ (when turn? (agent/commit!))
+        calls (model/call-evals {"message-md" message "evals" evals} (str "outside-" (or n (profile/now-ns))))
+        rs (repl/run-calls (mapv #(dissoc % :message-md) calls) (fn [cid] {:origin :outside :call-id cid}) evaluated!)]
+    (when turn?
+      (agent/transact! [{:seon.model-call/id id :seon.model-call/forms (count rs) :seon.model-call/model "outside"
+                         :seon.model-call/reply (or message "")
+                         :seon.model-call/errors (count (filter :ex (map :response (remove :not-run rs))))}])
+      (agent/commit!))
+    (print (sedn/encode (mapv (comp agent/on-the-wire :response) rs)))
+    nil))
 
 (defn hand-back-end
   "How an outside agent's run ends: [outcome reason] from the stop its agent requested
