@@ -20,6 +20,18 @@
    (chunk-line {:model "deepseek-flash" :choices [] :usage {:prompt_tokens 120 :completion_tokens 30 :prompt_cache_hit_tokens 64}})
    "data: [DONE]\n\n"])
 
+(deftest a-call-that-came-back-as-text-is-answered-not-parked
+  ;; deepseek-run4, 2026-11-07: v4-pro's reply was text ending in its own closing tag, finish stop, no call and no opening tag to read one
+  ;; from; read as a message it parked all 3 agents silently. It is one eval that says so, so the run goes on, with its usage
+  (let [body (fn [content] {:usage {:prompt_tokens 10 :completion_tokens 2}
+                            :choices [{:finish_reason "stop" :message {:content content}}]})
+        garbled (model/reply-of (body "Reading the two tests next.</｜｜DSML｜｜parameter>\n") 1 100)
+        plain (model/reply-of (body "Nothing to run; I wait for you.") 1 100)]
+    (is (= ["text-as-call"] (mapv :id (:tool-calls garbled))) (pr-str garbled))
+    (is (clojure.string/includes? (:problem (first (:tool-calls garbled))) "came back as text"))
+    (is (= 10 (:prompt-tokens garbled)) "its usage is the reply's")
+    (is (nil? (:tool-calls plain)) "a reply that is only text stays a reply")))
+
 (deftest a-streamed-reply-ends-when-the-server-ends-it
   (let [port (+ 20000 (rand-int 20000))
         seen (promise)

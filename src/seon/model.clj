@@ -234,6 +234,21 @@
   (let [said (remove str/blank? (cons text (map :message-md ks)))]
     [(if (seq said) (str/join "\n\n" said) text) (mapv #(dissoc % :message-md) ks)]))
 
+(def ^:private markup
+  "What DeepSeek's own tool-call markup holds, its fullwidth bars and name, when its call comes back as text (deepseek-run4, 2026-11-07: the
+  text ends in a closing parameter tag, and no opening one came with it, so no call can be read out of it)."
+  "｜DSML｜")
+
+(defn- text-as-call
+  "A reply with no call whose text ends in the provider's tool-call markup as the one eval that says so: it meant a call, so it isn't a reply
+  that parks the agent, and what it held is no call to run. Its usage is recorded as any turn's. See docs/model.md#one-tool-eval."
+  {:malli/schema [:=> [:cat [:maybe :string] [:vector :map]] [:vector :map]]}
+  [text calls]
+  (if (and (empty? calls) text (str/includes? text markup))
+    [{:id "text-as-call" :code text
+      :problem "your call came back as text, with the tool-call markup in it, so nothing ran. Send it again as a call of the eval tool: {\"message-md\": <string>, \"evals\": [{\"intent\": <string>, \"code\": <string>}, ...]}."}]
+    calls))
+
 (defn reply-of
   "A 200 reply (its chat-completion JSON as data) as the completion: its text, its eval calls
   ({:id :code}, in order), what it cost (prompt, completion, reasoning, cache-hit and cache-miss tokens)
@@ -245,6 +260,7 @@
   (let [msg (get-in j [:choices 0 :message])
         [text calls] (spoken (or (:content msg) (when (seq (:tool_calls msg)) ""))
                              (into [] (mapcat (fn [c] (evals-of (get-in c [:function :name]) (get-in c [:function :arguments]) (str (:id c))))) (:tool_calls msg)))
+        calls (text-as-call text calls)
         reasoning (:reasoning_content msg)
         u (:usage j)
         rt (get-in u [:completion_tokens_details :reasoning_tokens])
