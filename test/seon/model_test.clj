@@ -73,12 +73,12 @@
     (let [c (model/parse-reply
              (apply str (map chunk-line
                              [{:choices [{:delta {:content "Two steps."}}]}
-                              {:choices [{:delta {:tool_calls [{:index 0 :id "c1" :function {:name "eval" :arguments "{\"message-md\":\"m\",\"intent\":\"i\",\"code\":"}}]}}]}
+                              {:choices [{:delta {:tool_calls [{:index 0 :id "c1" :function {:name "eval" :arguments "{\"intent\":\"i\",\"code\":"}}]}}]}
                               {:choices [{:delta {:tool_calls [{:index 0 :function {:arguments "\"(def x 41)\"}"}}]}}]}
-                              {:choices [{:delta {:tool_calls [{:index 1 :id "c2" :function {:name "eval" :arguments "{\"message-md\":\"m\",\"intent\":\"i\",\"code\":\"(inc x)\"}"}}]}}]}
+                              {:choices [{:delta {:tool_calls [{:index 1 :id "c2" :function {:name "eval" :arguments "{\"intent\":\"i\",\"code\":\"(inc x)\"}"}}]}}]}
                               {:choices [{:delta {} :finish_reason "tool_calls"}] :usage {:prompt_tokens 9 :completion_tokens 4}}]))
              5.0 64)]
-      (is (= [{:id "c1" :code "(def x 41)" :intent "i" :message-md "m"} {:id "c2" :code "(inc x)" :intent "i" :message-md "m"}] (:tool-calls c)))
+      (is (= [{:id "c1" :code "(def x 41)" :intent "i"} {:id "c2" :code "(inc x)" :intent "i"}] (:tool-calls c)))
       (is (= ["Two steps." "tool_calls"] [(:text c) (:finish-reason c)]))))
   (testing "a call with no content beside it, and a call cut mid-arguments: its arguments as they came"
     (let [c (model/parse-reply "{\"choices\":[{\"message\":{\"content\":null,\"tool_calls\":[{\"id\":\"c\",\"function\":{\"name\":\"eval\",\"arguments\":\"{\\\"code\\\":\\\"(+ 1\"}}]},\"finish_reason\":\"length\"}]}" 1.0 64)]
@@ -172,14 +172,15 @@
                                :task "t/x" :turn 1})]
     (is (= "auto" (:tool_choice b)))
     (is (= [:message-md :intent :code] (keys (get-in b [:tools 0 :function :parameters :properties]))) "the message, then the intent, then code: it talks and thinks before the code")
-    (is (= ["message-md" "intent" "code"] (get-in b [:tools 0 :function :parameters :required])) "all three are required")
-    (testing "a call's message and intent are two fields, sent back in the tool's order"
-      (let [args "{\"message-md\":\"Reading f.\",\"intent\":\"Shows f's source.\",\"code\":\"(source f)\"}"
-            c (first (:tool-calls (model/parse-reply (str "{\"choices\":[{\"message\":{\"content\":\"\",\"tool_calls\":[{\"id\":\"c\",\"function\":{\"name\":\"eval\",\"arguments\":" (json/write-str args) "}}]},\"finish_reason\":\"tool_calls\"}]}") 1.0 64)))
-            sent (get-in (model/request-body {:kind :openai-compat :base-url "" :model "m" :api-key-env "" :max-tokens 10} {:messages [{:role "assistant" :content "" :tool-calls [c]}] :task "t/x" :turn 1}) [:messages 0 :tool_calls 0 :function :arguments])]
-        (is (= {:id "c" :code "(source f)" :intent "Shows f's source." :message-md "Reading f."} c))
-        (is (= args sent))
-        (is (re-find #"message-md is missing" (:problem (first (:tool-calls (model/parse-reply "{\"choices\":[{\"message\":{\"content\":\"\",\"tool_calls\":[{\"id\":\"c\",\"function\":{\"name\":\"eval\",\"arguments\":\"{\\\"intent\\\":\\\"i\\\",\\\"code\\\":\\\"(f)\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}" 1.0 64))))) "a call with no message is not run")))
+    (is (= ["intent" "code"] (get-in b [:tools 0 :function :parameters :required])) "each call has its intent; the message is the reply's")
+    (testing "a turn has one message, its text; each call has its intent"
+      (let [reply (fn [& argss] (model/parse-reply (json/write-str {:choices [{:message {:content "" :tool_calls (vec (map-indexed (fn [i a] {:id (str "c" i) :function {:name "eval" :arguments (json/write-str a)}}) argss))} :finish_reason "tool_calls"}]}) 1.0 64))
+            one {:intent "i" :code "(f)"}
+            c (reply (assoc one :message-md "Doing f twice.") one)]
+        (is (= "Doing f twice." (:text c)) "the message is the turn's text")
+        (is (= [{:id "c0" :code "(f)" :intent "i"} {:id "c1" :code "(f)" :intent "i"}] (:tool-calls c)) "and covers all of its calls")
+        (is (re-find #"has no message" (:problem (first (:tool-calls (reply one one))))) "a reply with none is refused at its first call")
+        (is (nil? (:problem (first (:tool-calls (model/parse-reply (json/write-str {:choices [{:message {:content "Said it." :tool_calls [{:id "c" :function {:name "eval" :arguments (json/write-str one)}}]} :finish_reason "tool_calls"}]}) 1.0 64))))) "its text is a message too")))
     (is (not (str/includes? (pr-str (:tools b)) ";;")) "no ;; in the tool")
     (is (= {:role "assistant" :content "I read f." :reasoning_content "r"
             :tool_calls [{:id "c1" :type "function" :function {:name "eval" :arguments "{\"code\":\"(f)\"}"}}]}

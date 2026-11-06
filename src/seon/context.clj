@@ -712,7 +712,7 @@
 
 (def ^:private eval-keys
   "The attributes of an eval a reader of the conversation reads (:seon.db/eval-fact less :seon.eval/agent and :seon.eval/opened). See docs/render.md#a-part-answers-data."
-  [:seon.eval/id :seon.eval/by :seon.eval/code :seon.eval/intent :seon.eval/message-md :seon.eval/call-id
+  [:seon.eval/id :seon.eval/by :seon.eval/code :seon.eval/intent :seon.eval/call-id
    :seon.eval/schema :seon.eval/basis :seon.eval/fns :seon.eval/turn :seon.eval/response])
 
 (defn basis-value
@@ -741,13 +741,13 @@
   anyone else's (the user's) is one user message
   {:by :code :response}, the response spliced as printed. See docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
   {:malli/schema [:=> [:cat [:maybe :map] :map] [:vector :seon.model/message]]}
-  [opts {:seon.eval/keys [id by code intent message-md call-id basis turn] :as e}]
+  [opts {:seon.eval/keys [id by code intent call-id basis turn] :as e}]
   (let [text (print/record-text (cond-> e basis (assoc-in [:seon.eval/response :value] (basis-value (:db opts) e))) render/model)
         cid (or call-id (when-not (str/blank? intent) (str "eval-" id)))]
     (if cid
       ;; an eval nobody's reply made is its code alone, like any other call (docs/render.md#the-render-is-an-eval)
       [(cond-> {:role "assistant" :content ""
-                :tool-calls [(cond-> {:id cid :code code} (and call-id intent) (assoc :intent intent) message-md (assoc :message-md message-md))]}
+                :tool-calls [(cond-> {:id cid :code code} (and call-id intent) (assoc :intent intent))]}
          (and call-id (pos? (or turn 0))) (assoc :reply turn))
        {:role "tool" :tool-call-id cid :content text}]
       [{:role "user" :content (str "{:by " (pr-str by) " :code " (pr-str code) " :response " text "}")}])))
