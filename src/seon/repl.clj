@@ -659,6 +659,7 @@
       schema (assoc :seon.eval/schema schema)
       basis (assoc :seon.eval/basis basis)
       (:intent req) (assoc :seon.eval/intent (:intent req))
+      (:message-md req) (assoc :seon.eval/message-md (:message-md req))
       (:call-id req) (assoc :seon.eval/call-id (:call-id req))
       (seq (:fns r)) (assoc :seon.eval/fns (:fns r)))))
 
@@ -925,7 +926,7 @@
     (cond
       (clojure.string/blank? intent)
       (contract/error :seon.turn/invalid-call #'call-problem
-                      "this call has no message-user-md: send message-user-md, your message to your user in Markdown (what you just learned and what you are doing next: a sentence is fine), beside code; the form was not run" {:problem :no-intent})
+                      "this call has no intent: send intent, a sentence on what this eval is about to do and what you expect it to show, beside code; the form was not run" {:problem :no-intent})
       (and forms (empty? forms))
       (contract/error :seon.turn/invalid-call #'call-problem
                       "this call has no form: its code is empty; nothing was run" {:problem :forms :forms 0}))))
@@ -938,12 +939,13 @@
   its one result, which says why, so none builds on a change that never happened and every call has its result."
   {:malli/schema [:=> [:cat [:sequential :map] ifn? ifn?] [:vector :map]]}
   [calls req-of eval!]
-  (reduce (fn [acc {:keys [id code intent problem]}]
+  (reduce (fn [acc {:keys [id code intent message-md problem]}]
             (let [;; the forgiving reader's repairs, told on this call's own result (:repaired)
                   {src :text repairs :repairs} (reader/forgive code)
                   ;; each call keeps its own intent
                   req (cond-> (req-of id)
                         (not (clojure.string/blank? intent)) (assoc :intent intent)
+                        (not (clojure.string/blank? message-md)) (assoc :message-md message-md)
                         (seq repairs) (assoc :repaired (context/repaired src repairs)))
                   failed (some #(when (or (:ex (:response %)) (contract/error? (:value (:response %)))) (:id %)) acc)
                   why (if failed

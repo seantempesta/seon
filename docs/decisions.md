@@ -14,9 +14,9 @@ The owner's rulings of 2026-11-06, on one tree for the model and the page, on da
 
 Freeform Markdown on the wire is "a loss of precision"; "We saw a boost in internal model performance when we focused more on returning data." "I disagree that we can't have teaching and direct word statements. I just want them presented as data and strings." "I want evals to be data and not some magical structure so we can remove them re-eval them etc." Diffs: "There must be a clear way for the model to understand where the change is happening and then we only show the changed parts so we never reprint the full data structure"; editscript, "I want the gains". Keyframes: "Buiild the system so this is easy to do", tested after the refactoring.
 
-### An agent talks to whoever started it, through `message-user-md`
+### An eval has an intent, and an agent talks to whoever started it through `message-md`
 
-Agents "should be messaging the user regularly if not with every turn... with the user in mind", and "we will have agents running sub agents so maybe we just explain who launched them as part of their rendered context and that's who they are talking to". Stated in [prompt](prompt.md).
+Two ideas, two fields: "theres' sa field for natural language responses to anything going to the user/agent and that's in markdown and then there are intents for each eval that forces the agent to think about what it's doing before it does it and it's just describing the eval." Who it talks to: "some agents will be sub agents so they will be talking to their parent agent and not the user, but the idea is the same. Natural language markdown describing what to the agent/user what the next evals will be doing and answering questions or otherwise commnuicating." `intent` is required on every call, `message-md` optional. Stated in [prompt](prompt.md).
 
 ### Design for classes of problems, and look for root causes
 

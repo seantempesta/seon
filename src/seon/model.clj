@@ -102,12 +102,13 @@
    ;; (the id of the kept record) and :fns (the costliest functions, drawn on the page) are in :seon.eval/response and are not
    ;; shown to the agent, so they are left out here and in docs/prompt.md
    :function {:name "eval"
-              :description "Run Clojure code at your REPL, and tell your user what you're doing. Each call takes one top-level form, so each result has its own handle; you may make several calls in one reply, and they run in order, a call after one that threw or answered an error not being run. If one call holds several top-level forms they run in order and answer :forms and :value, the vector of their values. Your system message says what comes back."
-              ;; the message first: a model fills arguments in order, so the user hears before the code runs
+              :description "Run Clojure code at your REPL. Each call takes one top-level form, so each result has its own handle; you may make several calls in one reply, and they run in order, a call after one that threw or answered an error not being run. If one call holds several top-level forms they run in order and answer :forms and :value, the vector of their values. Your system message says what comes back."
+              ;; in the order a model fills them: it talks and thinks before the code
               :parameters {:type "object"
-                           :properties (array-map :message-user-md {:type "string" :description "Your message to your user, in Markdown: what you just learned and what you're doing next, written for them, since they read this rather than your code. One or two sentences."}
+                           :properties (array-map :message-md {:type "string" :description "Optional. Your message to whoever started you, in Markdown: what the next evals will do, an answer to a question, anything they should know. Send one with a reply's first call, and whenever there's something to say."}
+                                                  :intent {:type "string" :description "What this eval is about to do and what you expect it to show. A sentence is fine."}
                                                   :code {:type "string" :description "Clojure to evaluate. One top-level form per call."})
-                           :required ["message-user-md" "code"]
+                           :required ["intent" "code"]
                            :additionalProperties false}}})
 
 (defn- wire-message
@@ -119,9 +120,9 @@
   [{:keys [role content tool-calls tool-call-id reasoning]}]
   (cond-> {:role role :content content}
     reasoning (assoc :reasoning_content reasoning)
-    (seq tool-calls) (assoc :tool_calls (mapv (fn [{:keys [id code intent]}]
-                                                ;; the call's arguments as it sent them, the message first
-                                                {:id id :type "function" :function {:name "eval" :arguments (json/write-str (if intent (array-map :message-user-md intent :code code) {:code code}))}})
+    (seq tool-calls) (assoc :tool_calls (mapv (fn [{:keys [id code intent message-md]}]
+                                                ;; the call's arguments as it sent them, in the tool's order
+                                                {:id id :type "function" :function {:name "eval" :arguments (json/write-str (cond-> (array-map) message-md (assoc :message-md message-md) intent (assoc :intent intent) true (assoc :code code)))}})
                                               tool-calls))
     tool-call-id (assoc :tool_call_id tool-call-id)))
 
@@ -174,10 +175,10 @@
     reasoning-effort (assoc :reasoning_effort (name reasoning-effort))))
 
 (defn- call-code
-  "An eval call's code and message from its tool name and JSON arguments, or :problem, what is wrong with them, so nothing is
+  "An eval call's code, intent and message from its tool name and JSON arguments, or :problem, what is wrong with them, so nothing is
   run: another tool's name, arguments cut off or not JSON, or code that is no string. :code holds the arguments as they came for
   the record. See docs/model.md#one-tool-eval."
-  {:malli/schema [:=> [:cat [:maybe :string] [:maybe :string]] [:map [:code :string] [:intent {:optional true} :string] [:problem {:optional true} :string]]]}
+  {:malli/schema [:=> [:cat [:maybe :string] [:maybe :string]] [:map [:code :string] [:intent {:optional true} :string] [:message-md {:optional true} :string] [:problem {:optional true} :string]]]}
   [tool arguments]
   (let [a (or arguments "")
         j (try (json/read-str a) (catch Throwable _ nil))
@@ -187,8 +188,10 @@
                   (not (contains? j "code")) "code is missing"
                   (not (string? (get j "code"))) "code is not a string")]
     (if problem
-      {:code a :problem (str "this call was not run: " problem ". A call is {\"message-user-md\": <string>, \"code\": <string>}.")}
-      (cond-> {:code (get j "code")} (string? (get j "message-user-md")) (assoc :intent (get j "message-user-md"))))))
+      {:code a :problem (str "this call was not run: " problem ". A call is {\"message-md\": <optional string>, \"intent\": <string>, \"code\": <string>}.")}
+      (cond-> {:code (get j "code")}
+        (string? (get j "intent")) (assoc :intent (get j "intent"))
+        (string? (get j "message-md")) (assoc :message-md (get j "message-md"))))))
 
 (defn reply-of
   "A 200 reply (its chat-completion JSON as data) as the completion: its text, its eval calls
