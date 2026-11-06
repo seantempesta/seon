@@ -3,7 +3,7 @@
   into main. A new entry is created held; an unchanged one costs nothing and keeps what main
   learned (the improved plan); a changed one updates what it states; a removed one is
   cancelled, never deleted."
-  (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]]
+  (:require [seon.test-store :as ts] [seon.agent-test :as at] [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
             [seon.db :as pdb]
             [seon.task :as task] [my.root :as root] [clojure.string :as str] [clojure.java.shell :as sh] [seon.config :as config]))
@@ -143,25 +143,22 @@
   ;; changed (the same declarations loaded from one db twice, in order, fail: Conflicting upsert). A load
   ;; takes the lock the other loaders take, so a second waits for the first's write: here the lock is held
   ;; and a load started on another thread must be blocked on it, never past it
-  (let [checkout (seon.config/checkout)
-        path (ts/process-store checkout)
-        main (str "load-lock-" (random-uuid))
-        runs (str checkout "/target/runs/" main "-runs")
-        _ (.mkdirs (java.io.File. (str runs "/tasks")))
-        _ (spit (str runs "/tasks/demo.edn") (pr-str [{:seon.task/name "t" :seon.task/plan "Work." :seon.task/kind :work}]))
-        root (ts/start-root! {:store path :main main :runs runs})
-        ask (fn [code] (ts/value-of (:response (ts/ask root {:op :eval :agent "root" :code code}))))]
+  ;; (on the process's shared root, loading a directory of its own: a root's boot was most of this test's time)
+  (let [dir (str (seon.config/checkout) "/target/runs/load-lock-" (random-uuid) "-tasks")
+        _ (.mkdirs (java.io.File. dir))
+        _ (spit (str dir "/lockdemo.edn") (pr-str [{:seon.task/name "t" :seon.task/plan "Work." :seon.task/kind :work}]))]
     (try
-      (is (= :blocked (ask "(let [lock @#'my.root/load-lock
+      (let [[r] (at/in-agent [{:op :eval :agent "root"
+                               :code (str "(let [lock @#'my.root/load-lock
                                   state (promise)]
                               (locking lock
-                                (let [t (Thread. ^Runnable (fn [] (my.root/load-tasks! sys)))]
+                                (let [t (Thread. ^Runnable (fn [] (my.root/load-tasks! sys " (pr-str dir) ")))]
                                   (.start t)
                                   ;; until it waits on the lock or has finished (no sleep: the state is read)
                                   (loop [] (let [s (str (.getState t))] (if (#{\"BLOCKED\" \"TERMINATED\"} s) (deliver state s) (do (Thread/yield) (recur)))))
-                                  (case @state \"BLOCKED\" :blocked :ran-past-the-lock))))"))
-          "a load started while the lock is held waits on it")
-      (finally (ts/stop-root! root) (ts/drop-main! path main) (clojure.java.shell/sh "rm" "-rf" runs)))))
+                                  (case @state \"BLOCKED\" :blocked :ran-past-the-lock))))")}])]
+        (is (= :blocked (:value r)) "a load started while the lock is held waits on it"))
+      (finally (clojure.java.shell/sh "rm" "-rf" dir)))))
 
 (deftest a-stale-task-load-never-creates-a-task-it-did-not-declare
   ;; found on the standing root 2026-10-28: 199 invalid-input errors of seon.task/task-value, a task whose
@@ -181,36 +178,38 @@
   ;; my.root/load-example!: an example session's file (seon.context/session-tx's transactions, written with pr-str)
   ;; is transacted once; a second load of it writes nothing (main's t does not move); a file that is not there,
   ;; does not read or is not that vector is the :seon.root/example-refused error and writes nothing
+  ;; (on the process's shared root, with keys of its own: a root's boot was most of this test's time)
   (let [checkout (seon.config/checkout)
-        path (ts/process-store checkout)
-        main (str "load-example-" (random-uuid))
-        runs (str checkout "/target/runs/" main "-runs")
-        _ (.mkdirs (java.io.File. (str runs "/tasks")))
+        id (subs (str (random-uuid)) 0 8)
+        runs (str checkout "/target/runs/load-example-" id)
+        _ (.mkdirs (java.io.File. runs))
         file (str runs "/records.edn")
-        _ (spit file (pr-str [[{:seon.agent/key "example/abc" :seon.agent/id :example-abc :seon.agent/status :ended :seon.agent/description "Make h."}]
-                              [{:seon.eval/id "example/abc/s1" :seon.eval/by "src" :seon.eval/agent [:seon.agent/key "example/abc"]
-                                :seon.eval/code "(+ 1 2)" :seon.eval/response {:handle 'result/example-abc-s1 :value 3} :seon.eval/call-id "example-abc-call_1"}]]))
+        key (str "example/" id)
+        _ (spit file (pr-str [[{:seon.agent/key key :seon.agent/id (keyword (str "example-" id)) :seon.agent/status :ended :seon.agent/description "Make h."}]
+                              [{:seon.eval/id (str key "/s1") :seon.eval/by "src" :seon.eval/agent [:seon.agent/key key]
+                                :seon.eval/code "(+ 1 2)" :seon.eval/response {:handle (symbol (str "result/example-" id "-s1")) :value 3} :seon.eval/call-id (str "example-" id "-call_1")}]]))
         _ (spit (str runs "/bad.edn") "[[{:seon.agent/key \"someone\"}]]")
         _ (spit (str runs "/unreadable.edn") "[[{:seon.agent/key")
         ;; written before session-tx gave the agent an id: it loaded, and its page was not found
-        _ (spit (str runs "/no-id.edn") (pr-str [[{:seon.agent/key "example/old" :seon.agent/status :ended}]]))
-        root (ts/start-root! {:store path :main main :runs runs})
-        ask (fn [code] (ts/value-of (:response (ts/ask root {:op :eval :agent "root" :code code}))))
-        refused (fn [f] (ask (str "(let [r (my.root/load-example! sys " (pr-str f) ")] [(:seon.error/type r) (:path r) (:seon.error/message r)])")))]
+        _ (spit (str runs "/no-id.edn") (pr-str [[{:seon.agent/key (str key "-old") :seon.agent/status :ended}]]))
+        missing (str runs "/nothing-here.edn")
+        refused (fn [f] {:op :eval :agent "root" :code (str "(let [r (my.root/load-example! sys " (pr-str f) ")] [(:seon.error/type r) (:path r) (:seon.error/message r)])")})]
     (try
-      (is (= {:first 2 :second {:ok true :changed 0 :batches 0} :moved false :evals 1 :agents 1}
-             (ask (str "(let [f " (pr-str file) " a (my.root/load-example! sys f)
+      (let [[twice [type p message] unreadable bad no-id]
+            (map :value
+                 (at/in-agent [{:op :eval :agent "root"
+                                :code (str "(let [f " (pr-str file) " a (my.root/load-example! sys f)
                               t1 (:max-tx @(:conn sys))
                               b (my.root/load-example! sys f)]
                           {:first (:batches a) :second (select-keys b [:ok :changed :batches]) :moved (not= t1 (:max-tx @(:conn sys)))
-                           :evals (count (datahike.api/q '[:find [?e ...] :where [?e :seon.eval/id \"example/abc/s1\"]] @(:conn sys)))
-                           :agents (count (datahike.api/q '[:find [?e ...] :where [?e :seon.agent/key \"example/abc\"]] @(:conn sys)))})")))
-          "the first load writes its two transactions; the second writes nothing")
-      (let [missing (str runs "/nothing-here.edn")
-            [type p message] (refused missing)]
+                           :evals (count (datahike.api/q '[:find [?e ...] :where [?e :seon.eval/id " (pr-str (str key "/s1")) "]] @(:conn sys)))
+                           :agents (count (datahike.api/q '[:find [?e ...] :where [?e :seon.agent/key " (pr-str key) "]] @(:conn sys)))})")}
+                               (refused missing) (refused (str runs "/unreadable.edn")) (refused (str runs "/bad.edn")) (refused (str runs "/no-id.edn"))]))]
+        (is (= {:first 2 :second {:ok true :changed 0 :batches 0} :moved false :evals 1 :agents 1} twice)
+            "the first load writes its two transactions; the second writes nothing")
         (is (= [:seon.root/example-refused missing] [type p]))
-        (is (str/includes? message "not found")))
-      (is (str/includes? (nth (refused (str runs "/unreadable.edn")) 2) "not readable EDN"))
-      (is (str/includes? (nth (refused (str runs "/bad.edn")) 2) "not a non-empty vector of transactions"))
-      (is (str/includes? (nth (refused (str runs "/no-id.edn")) 2) "no :seon.agent/id") "an agent with no id is refused, not loaded unfindable")
-      (finally (ts/stop-root! root) (ts/drop-main! path main) (clojure.java.shell/sh "rm" "-rf" runs)))))
+        (is (str/includes? message "not found"))
+        (is (str/includes? (nth unreadable 2) "not readable EDN"))
+        (is (str/includes? (nth bad 2) "not a non-empty vector of transactions"))
+        (is (str/includes? (nth no-id 2) "no :seon.agent/id") "an agent with no id is refused, not loaded unfindable"))
+      (finally (clojure.java.shell/sh "rm" "-rf" runs)))))

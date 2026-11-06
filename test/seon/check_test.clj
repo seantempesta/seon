@@ -114,8 +114,11 @@
   ;; compiler's references, not a text search over files), no test var but the helper's one
   ;; launcher runs bin/root or `./seon root` through binary-sh, so every test root names its
   ;; store and main and waits on its listening line
-  (let [files (into {} (for [^java.io.File f (file-seq (java.io.File. (seon.config/checkout) "test")) :when (.endsWith (.getName f) ".clj")]
-                         [(.getPath f) (slurp f)]))
+  ;; only the files that name the primitive are analyzed (a launcher's source holds its name, in a call or a
+  ;; refer): the analysis of the whole of test/ was most of this test's time
+  (let [files (into {} (for [^java.io.File f (file-seq (java.io.File. (seon.config/checkout) "test")) :when (.endsWith (.getName f) ".clj")
+                             :let [text (slurp f)] :when (clojure.string/includes? text "binary-sh")]
+                         [(.getPath f) text]))
         db (d/db-with (ts/test-db) (seon.source/import-tx (ts/test-db) files))
         launchers (set (for [[v src] (d/q '[:find ?v ?s :where [?e :var/name ?v] [?e :var/form ?f]
                                              [?f :form/refs seon.test-store/binary-sh] [?f :form/src ?s]] db)

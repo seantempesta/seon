@@ -297,21 +297,23 @@
 (deftest an-edit-swapped-back-and-forth-says-so
   ;; bench-b21: an agent swapped one line of scan back and forth 23 times; each edit!'s answer differed only by its
   ;; inner eval's handle and cost, so none read as answered the same
-  (let [ed (fn [a b] (str "(seon.repl/edit! 'x.swap/f " (pr-str a) " " (pr-str b) ")"))
-        [_ ab ba ab2] (at/in-agent ["(ns x.swap) (defn f [] 1)" (ed "[] 1" "[] 2") (ed "[] 2" "[] 1") (ed "[] 1" "[] 2")])]
+  ;; one agent answers all four claims in order (each on a name of its own): an attach is most of what an agent costs a test
+  (let [ed (fn [f a b] (str "(seon.repl/edit! 'x.swap/" f " " (pr-str a) " " (pr-str b) ")"))
+        [_ ab ba ab2 _ _ turned _ _ m7 _ s2]
+        (at/in-agent ["(ns x.swap) (defn f [] 1)" (ed "f" "[] 1" "[] 2") (ed "f" "[] 2" "[] 1") (ed "f" "[] 1" "[] 2")
+                      ;; an answer says its turn once: the inner eval of an edit is the edit's, and a turn inside its value would differ every turn
+                      "(ns x.swap) (defn g [] 1)"
+                      "(seon.agent/transact! [{:seon.agent/key (:key @seon.agent/state) :seon.agent/turn 1 :seon.agent/max-turns 9}])"
+                      (ed "g" "[] 1" "[] 2")
+                      ;; the agent's own data keeps its keys: a timing of its own that changed is a different answer
+                      "(def t (atom 4))" "{:ms (swap! t inc)}" "{:ms (swap! t inc)}"
+                      ;; an answer holding a db is printed as the record keeps it (the one text of an eval), its host object named by the form that reads it
+                      "(select-keys @seon.agent/state [:db])" "(select-keys @seon.agent/state [:db])"])]
     (is (not (str/includes? (:text ab) ":again")) (pr-str ab))
     (is (not (str/includes? (:text ba) ":again")) "the swap back is other code")
-    (is (str/includes? (:text ab2) "ran this code and answered the same") (str "the same edit again, answered the same but for its handle: " (:text ab2))))
-  ;; an answer says its turn once: the inner eval of an edit is the edit's, and a turn inside its value would differ every turn
-  (let [[_ _ ab] (at/in-agent ["(ns x.swap) (defn g [] 1)"
-                               "(seon.agent/transact! [{:seon.agent/key (:key @seon.agent/state) :seon.agent/turn 1 :seon.agent/max-turns 9}])"
-                               "(seon.repl/edit! 'x.swap/g \"[] 1\" \"[] 2\")"])]
-    (is (= [":turn \"1 of 9\""] (re-seq #":turn \"[^\"]*\"" (:text ab))) (:text ab)))
-  ;; the agent's own data keeps its keys: a timing of its own that changed is a different answer
-  (let [[_ m5 m7] (at/in-agent ["(def t (atom 4))" "{:ms (swap! t inc)}" "{:ms (swap! t inc)}"])]
-    (is (not (str/includes? (:text m7) ":again")) (str "{:ms 5} then {:ms 6} is no same answer: " (:text m7))))
-  ;; an answer holding a db is printed as the record keeps it (the one text of an eval), its host object named by the form that reads it
-  (let [[_ s2] (at/in-agent ["(select-keys @seon.agent/state [:db])" "(select-keys @seon.agent/state [:db])"])]
+    (is (str/includes? (:text ab2) "ran this code and answered the same") (str "the same edit again, answered the same but for its handle: " (:text ab2)))
+    (is (= [":turn \"1 of 9\""] (re-seq #":turn \"[^\"]*\"" (:text turned))) (:text turned))
+    (is (not (str/includes? (:text m7) ":again")) (str "{:ms 5} then {:ms 6} is no same answer: " (:text m7)))
     (is (str/includes? (:text s2) "(get (deref seon.agent/state) :db)") (str "the db named by its form: " (:text s2)))))
 
 (deftest a-broken-parser-leaves-the-repl-answering
