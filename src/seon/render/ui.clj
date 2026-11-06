@@ -1759,7 +1759,7 @@
 (defn boot-side
   "One boot's sessions in the agents list (a component over the db, the boot's id: its agents oldest first, so a new session redraws its boot's
   unit alone, whose element id is the boot's): the
-  current boot's, in the list itself; an earlier boot's, folded under the boot's id and how many it held, so a list of
+  current boot's in the list itself, an earlier boot's inside `earlier-sessions`'s one fold, so a list of
   every session on main stays short to read. It reads its boot's keys alone, by their index range, whatever other boots hold. See docs/render.md#a-sessions-address-and-the-agents-list."
   {:seon.render/style "contents" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :string] :any]}
   [{db :seon.db/db} boot]
