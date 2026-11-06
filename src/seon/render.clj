@@ -70,6 +70,11 @@
        ;; a schema that declares no render shows the value itself, no longer named by it (the printer would draw it by this again)
        (cond-> {:value (if sym ((requiring-resolve sym) opts v) (vary-meta v dissoc :seon.render/schema))} full? (assoc :full true))))))
 
+(defn stored-model
+  "`model` of a stored value, an eval's record: nil when it no longer fits the schema it kept, so an old record prints as the data it is. See docs/render.md#the-page."
+  {:malli/schema [:=> [:cat :any] [:maybe [:map [:value :any]]]]}
+  [v] (when (some-> (:seon.render/schema (meta v)) (contract/fits? v)) (model v)))
+
 (defn- identity-attr?
   "Is attribute a an upsert key ([:and {:seon.db/identity true} ...])?"
   {:malli/schema [:=> [:cat :any] :boolean]}
@@ -180,7 +185,8 @@
   (let [own (own-key v :seon.render/html)]
     (if (and (some? own) (not (symbol? own)))
       own
-      ((or (render-of v (:schema opts)) print-html) opts v))))
+      ;; a producer's schema a stored value no longer fits: it is drawn as the data it is
+      ((or (when (or (nil? (:schema opts)) (contract/fits? (:schema opts) v)) (render-of v (:schema opts))) print-html) opts v))))
 
 ;;; --- the walk: a render of components (docs/render.md#components) -------------------------------
 
@@ -758,11 +764,11 @@
 ;;; --- the model's reading of the tree: one generic conversion to provider-neutral messages ---------
 
 (defn result-text
-  "What came of an eval as the model reads it, printed now by the one printer (seon.print/record-text, through `model`), from its mark :wire/result {:record e}: :value-of, a function of db and e, when the value is rebuilt rather than kept, and
+  "What came of an eval as the model reads it, printed now by the one printer (seon.print/record-text, through `stored-model`), from its mark :wire/result {:record e}: :value-of, a function of db and e, when the value is rebuilt rather than kept, and
   :with, what a message that is not a call's answer says around it as {.. :response text}. A function of the record alone and of db at the t it names, so the same bytes cold as live. See docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] :map] :string]}
   [db {:keys [record value-of with]}]
-  (let [text (print/record-text (cond-> record value-of (assoc-in [:seon.eval/response :value] (value-of db record))) model)]
+  (let [text (print/record-text (cond-> record value-of (assoc-in [:seon.eval/response :value] (value-of db record))) stored-model)]
     (if with
       (str "{" (str/join " " (map (fn [[k v]] (str k " " (pr-str v))) with)) " :response " text "}")
       text)))
