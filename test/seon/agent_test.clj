@@ -1839,7 +1839,7 @@
                     "      went-on (clojure.core/deref (seon.root/submit! sys new \"(do (def there 3) (:key (clojure.core/deref seon.agent/state)))\"))]"
                     "  {:missing (:seon.error/message missing) :second (:seon.error/message second-call) :was (name a) :new new :old-branch b :new-branch nb"
                     "   :old-kept (= before (codes (seon.db/head conn b))) :at (codes (seon.db/head conn nb))"
-                    "   :task (let [on-main (seon.root/await-db sys #(= nb (:seon.task/branch (datahike.api/entity % [:seon.task/id task]))))] (:seon.task/execution (datahike.api/entity on-main [:seon.task/id task]))) :went-on (:value went-on) :this-boots (let [k (:value went-on) on-main (seon.root/await-db sys #(= new (seon.task/this-boots % (datahike.api/entity % [:seon.agent/key k]))))] (and (:max-tx on-main) (contains? (seon.task/agents on-main) k) (some? (seon.server/agents-answer sys))))})"))
+                    "   :task (let [on-main (seon.root/await-db sys #(= (seon.db/off-main (seon.db/conn-main conn) nb) (:seon.task/branch (datahike.api/entity % [:seon.task/id task])))) t (datahike.api/entity on-main [:seon.task/id task])] {:outcome (:seon.task/outcome t) :agent-branch (:seon.agent/branch (:seon.task/agent t)) :task-branch (:seon.task/branch t)}) :went-on (:value went-on) :this-boots (let [k (:value went-on) on-main (seon.root/await-db sys #(= new (seon.task/this-boots % (datahike.api/entity % [:seon.agent/key k]))))] (and (:max-tx on-main) (contains? (seon.task/agents on-main) k) (some? (seon.server/agents-answer sys))))})"))
         r (peek (in-agent (fn [names]
                             ["(def here 1)" "(def here 2)" "(def here 3)"
                              {:op :eval :agent "root" :code (back names)}])))
@@ -1852,7 +1852,8 @@
     (is (contains? (:at v) "(def here 2)") "the new branch holds the point")
     (is (not (contains? (:at v) "(def here 3)")) "and nothing after it, a reader's opening of the eval no later point")
     (is (:this-boots v) "the session's agent is this boot's, so its page knows it is running")
-    (is (= :held (:task v)) "its task moved to the new branch, held for the person")
+    (is (= :parked (:outcome (:task v))) "its task moved to the new branch, parked on the new process, which a message wakes")
+    (is (= (:task-branch (:task v)) (:agent-branch (:task v))) "and its agent on main with it: the reconciler compares the two")
     (is (not= (:was v) (name (:new v))) "a new process")
     (is (str/ends-with? (:went-on v) (str "/" (:was v))) "under the session's key, and it goes on")))
 
