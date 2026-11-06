@@ -834,6 +834,6 @@
                              (when te (task-rows db ans te))
                              (when (and te (seq (d/datoms db :eavt te :seon.task/failure))) {:failed [(failed-row db ans te)]})
                              (group-by :class (for [{:keys [e]} (when tid (d/datoms db :avet :seon.error/last-task tid))] (error-row db ans e))))]
-    (vary-meta {:t (:max-tx db)
+    (vary-meta {:t (or (:max-tx db) (:time-point db))
                 :classes (into {} (for [[c rows] by-class :let [rows (open rows)] :when (seq rows)] [c {:n (count rows) :rows rows}]))}
                assoc :seon.render/schema :seon.problems/report)))

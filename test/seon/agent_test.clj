@@ -2036,6 +2036,7 @@
     (is (= [[mid "owner" "use demo/g" agent-key]] on-branch) "the turn wrote the fact root wrote, by its id, naming the agent")
     (is (= on-branch committed) "and it is in the commit the turn read")
     (is (not-any? #{:observed :taken} basis-keys) "the basis names no message: the fact is the record")
+    (is (contains? basis-keys :t) "it holds its t: a commit a sweep took is drawn as of it (docs/storage.md#collection)")
     ;; the prose comes in the eval call (docs/prompt.md); the scripted reply's text is the same prose
     (is (= "check the sum before the proof" reply) "the reply's text: the prose")
     (is (string? (:eval (first calls))) (str "the call names its one eval: " (pr-str calls)))

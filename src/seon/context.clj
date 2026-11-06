@@ -664,7 +664,8 @@
         ;; a deferred proof is neither red nor unknown (seon.reconcile/done-explain)
         deferred (into (set deferred) (keep (fn [[t {st :status}]] (when (= :deferred st) t))) vs)
         results (into {} (keep (fn [[t {st :status}]] (when (not= :deferred st) [t st]))) vs)
-        base (some->> (:seon.agent/base-commit ag) (d/commit-as-db (:store db)))
+        ;; what the branch did since its merge base is a diff of two commits' trees, and a db as of a t (a past turn past the store's keep, docs/storage.md#collection) has none: it leaves that out
+        base (when (:store db) (some->> (:seon.agent/base-commit ag) (d/commit-as-db (:store db))))
         moved (when base (pm/content-datoms base db #{}))
         ch (if base (pm/delta-changes base db #{} moved) {})
         ;; what caused-split reads differs from the content (sections, names, plans, catches): its own
@@ -721,7 +722,7 @@
       (seq (:caused split)) (assoc :caused (:caused split))
       (seq (:attention split)) (assoc :attention (:attention split))
       (seq (pm/divergence ch)) (assoc :its-merge-carries (pm/divergence ch))
-      (and main base) (assoc :merge (pm/readiness base db (d/commit-as-db (:store db) main) moved)))))
+      (and main base) (assoc :merge (pm/readiness base db (d/commit-as-db (pdb/store-of db) main) moved)))))
 
 (defn basis-value
   "The value eval e names by its basis (:seon.eval/basis, @ctx's: the record of e's agent on branch db as of t,
@@ -1029,7 +1030,7 @@
   both name one provider. See docs/render.md#the-debug-page-is-the-wire-request."
   {:malli/schema [:=> [:cat :seon.host/db :seon.model-call/basis] :seon.model/provider]}
   [db {:keys [agent task model]}]
-  (let [main (some->> (:seon.agent/main-commit (d/entity db [:seon.agent/key agent])) (d/commit-as-db (:store db)))]
+  (let [main (some->> (:seon.agent/main-commit (d/entity db [:seon.agent/key agent])) (d/commit-as-db (pdb/store-of db)))]
     (cfg/provider-at (or main db) db task model)))
 
 (defn wire-turn

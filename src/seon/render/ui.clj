@@ -701,9 +701,10 @@
                       (let [n (inc (:turn lb)) b (assoc lb :commit (d/commit-id db) :turn n)]
                         [db b])
                       (let [b (:seon.model-call/basis m)]
-                        ;; a commit past the store's keep (seon.db/retain!) draws from the head, and the page says so
-                        (let [at-commit (if (= (:commit b) (d/commit-id db)) db (d/commit-as-db (:store db) (:commit b)))]
-                          [(or at-commit db) b (nil? at-commit)])))
+                        ;; a commit past the store's keep (seon.db/retain!) is the same records as of its t (docs/storage.md#collection); a basis with no t draws from the head, and the page says so
+                        (let [at-commit (if (= (:commit b) (d/commit-id db)) db (d/commit-as-db (:store db) (:commit b)))
+                              as-of (when (and (nil? at-commit) (:t b)) (d/as-of db (:t b)))]
+                          [(or at-commit as-of db) b (and (nil? at-commit) (nil? as-of))])))
             i (if to-come? (count calls) (.indexOf ^java.util.List calls e))
             prev-e (when (pos? i) (nth calls (dec i)))
             ;; with no request before it, nothing is marked: every message is the first request's
