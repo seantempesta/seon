@@ -108,33 +108,58 @@
     old))
 
 (defn- insert-rows!
-  "Rows [[e a text] ...] inserted into both tables of connection h, inside a transaction the caller holds: the rows
-  per attribute, {a rows}."
+  "Rows [[e a text] ...] inserted into the index on connection h, inside a transaction the caller holds: each its row of r,
+  whose id is its text's rowid in both tables (`fts-open`). The rows per attribute, {a rows}."
   {:malli/schema [:=> [:cat :seon.ffi/address [:sequential [:tuple :int :int :string]]] [:map-of :int :int]]}
   [h rows]
   (with-row-calls
-    (let [ins-t (prepare h :insert "INSERT INTO t(body, e, a) VALUES (?1, ?2, ?3)")
-          ins-g (prepare h :insert "INSERT INTO g(body, e, a) VALUES (?1, ?2, ?3)")]
+    (let [ins-r (prepare h :insert "INSERT INTO r(e, a) VALUES (?1, ?2)")
+          ins-t (prepare h :insert "INSERT INTO t(rowid, body) VALUES (last_insert_rowid(), ?1)")
+          ins-g (prepare h :insert "INSERT INTO g(rowid, body) VALUES (last_insert_rowid(), ?1)")]
       (try (loop [rs (seq rows) counts (transient {})]
              (if rs
                (let [[e a text] (first rs)]
+                 (ok! h :bind (c-bind-int ins-r 1 e))
+                 (ok! h :bind (c-bind-int ins-r 2 a))
+                 (let [rc (c-step ins-r)] (when-not (= SQLITE_DONE rc) (refused h :insert rc)))
+                 (ok! h :reset (c-reset ins-r))
                  (doseq [stm [ins-t ins-g]]
                    (ok! h :bind (c-bind-text stm 1 text -1 SQLITE_TRANSIENT))
-                   (ok! h :bind (c-bind-int stm 2 e))
-                   (ok! h :bind (c-bind-int stm 3 a))
                    (let [rc (c-step stm)] (when-not (= SQLITE_DONE rc) (refused h :insert rc)))
                    (ok! h :reset (c-reset stm)))
                  (recur (next rs) (assoc! counts a (inc (get counts a 0)))))
                (persistent! counts)))
-           (finally (c-finalize ins-t) (c-finalize ins-g))))))
+           (finally (c-finalize ins-r) (c-finalize ins-t) (c-finalize ins-g))))))
+
+(defn- delete-rows!
+  "Rows [[e a] ...], each a text the index holds, deleted from the index on connection h by one seek of r each, inside a
+  transaction the caller holds. The rows per attribute, {a rows}."
+  {:malli/schema [:=> [:cat :seon.ffi/address [:sequential [:tuple :int :int]]] [:map-of :int :int]]}
+  [h rows]
+  (with-row-calls
+    (let [stms [(prepare h :delete "DELETE FROM t WHERE rowid = (SELECT id FROM r WHERE e = ?1 AND a = ?2)")
+                (prepare h :delete "DELETE FROM g WHERE rowid = (SELECT id FROM r WHERE e = ?1 AND a = ?2)")
+                (prepare h :delete "DELETE FROM r WHERE e = ?1 AND a = ?2")]]
+      (try (loop [rs (seq rows) counts (transient {})]
+             (if rs
+               (let [[e a] (first rs)]
+                 (doseq [stm stms]
+                   (ok! h :bind (c-bind-int stm 1 e))
+                   (ok! h :bind (c-bind-int stm 2 a))
+                   (let [rc (c-step stm)] (when-not (= SQLITE_DONE rc) (refused h :delete rc)))
+                   (ok! h :reset (c-reset stm)))
+                 (recur (next rs) (assoc! counts a (inc (get counts a 0)))))
+               (persistent! counts)))
+           (finally (doseq [stm stms] (c-finalize stm)))))))
 
 (defn fts-open
   "An index over rows [[e a text] ...] (an entity, a small integer naming the attribute it came from, its
-  text): {:h the connection :state an atom}, the atom holding the readers, whether it is retired and closed,
-  and :counts {a rows} (`counts`). Two FTS5 tables hold every row, built in the one transaction: t, `porter
-  unicode61`, whose terms are stems (\"it\" is not a part of \"edit\"), ranks by bm25; g, `trigram`, answers a
-  substring. In memory, so it survives fork() as plain memory. Used through `using` and closed by `retire!` once
-  no reader holds it, or by the collector when the map is garbage: the native memory is invisible to the
+  text; one text for each [e a]): {:h the connection :state an atom}, the atom holding the readers, whether it is
+  retired and closed, and :counts {a rows} (`counts`). Built in the one transaction, two FTS5 tables hold every text:
+  t, `porter unicode61`, whose terms are stems (\"it\" is not a part of \"edit\"), ranks by bm25; g, `trigram`, answers a
+  substring. A third, r, names a text's rowid in both by its [e a], so one text is found by one seek (an entity's id
+  is 60 bits, so no rowid can be made of it, and FTS5 holds no index on a column of its own). In memory, so it
+  survives fork() as plain memory. Used through `using` and closed by `retire!` once no reader holds it, or by the collector when the map is garbage: the native memory is invisible to the
   collector's accounting, which is why a superseded index is retired and not left. See docs/vector.md#search."
   {:malli/schema [:=> [:cat [:sequential [:tuple :int :int :string]]] [:map [:h :seon.ffi/address]]]}
   [rows]
@@ -143,27 +168,25 @@
         st (atom {:uses 0 :retired? false :closed? false :counts {}})
         arena (ffi/auto-arena)]
     (ffi/reinterpret h 1 arena (fn [p] (settle! st p #(assoc % :retired? true))))
-    (exec! h :create "CREATE VIRTUAL TABLE t USING fts5(body, e UNINDEXED, a UNINDEXED, tokenize='porter unicode61')")
-    (exec! h :create "CREATE VIRTUAL TABLE g USING fts5(body, e UNINDEXED, a UNINDEXED, tokenize='trigram')")
-    (exec! h :begin "BEGIN")
+    (exec! h :create (str "BEGIN;"
+                          "CREATE TABLE r(id INTEGER PRIMARY KEY, e INTEGER NOT NULL, a INTEGER NOT NULL, UNIQUE(e, a));"
+                          "CREATE VIRTUAL TABLE t USING fts5(body, tokenize='porter unicode61');"
+                          "CREATE VIRTUAL TABLE g USING fts5(body, tokenize='trigram')"))
     (swap! st assoc :counts (insert-rows! h rows))
     (exec! h :commit "COMMIT")
     {:h h :state st :arena arena}))
 
-(defn replace-attrs!
-  "Index ix with the rows of the attributes in rows-by-attr {a [[e text] ...]} replaced: every row of each such
-  attribute deleted from both tables and its new rows inserted, in one transaction. The rest of the index is
-  untouched, so a write to one attribute reads only that attribute's texts. Call it inside `using`.
-  nil. See docs/vector.md#search."
-  {:malli/schema [:=> [:cat [:map [:h :seon.ffi/address]] [:map-of :int [:sequential [:tuple :int :string]]]] :nil]}
-  [{:keys [h state]} rows-by-attr]
+(defn replace-rows!
+  "Index ix moved by one write, in one transaction: gone [[e a] ...], the texts it holds that the write changed or
+  retracted, deleted by rowid, and added [[e a text] ...], their new texts and the new ones, inserted. The rest of the
+  index is untouched, so a write costs its texts whatever the index holds. Call it inside `using`. nil.
+  See docs/vector.md#search."
+  {:malli/schema [:=> [:cat [:map [:h :seon.ffi/address]] [:sequential [:tuple :int :int]] [:sequential [:tuple :int :int :string]]] :nil]}
+  [{:keys [h state]} gone added]
   (exec! h :begin "BEGIN")
   (let [done (volatile! false)]
-    (try (doseq [a (keys rows-by-attr)]
-           (exec! h :delete (str "DELETE FROM t WHERE a = " a))
-           (exec! h :delete (str "DELETE FROM g WHERE a = " a)))
-         (let [added (insert-rows! h (for [[a rows] rows-by-attr [e text] rows] [e a text]))]
-           (swap! state update :counts (fn [m] (merge (apply dissoc m (keys rows-by-attr)) added))))
+    (try (let [out (delete-rows! h gone) in (insert-rows! h added)]
+           (swap! state update :counts (fn [m] (merge-with + m in (into {} (for [[a n] out] [a (- n)]))))))
          (exec! h :commit "COMMIT")
          (vreset! done true)
          (finally (when-not @done (c-exec h "ROLLBACK" ffi/null ffi/null ffi/null)))))
@@ -218,7 +241,7 @@
   "The SQL restricting a query to attributes attrs (small integers), empty for all."
   {:malli/schema [:=> [:cat [:set :int]] :string]}
   [attrs]
-  (if (seq attrs) (str " AND a IN (" (str/join "," (sort attrs)) ")") ""))
+  (if (seq attrs) (str " AND r.a IN (" (str/join "," (sort attrs)) ")") ""))
 
 (defn fts-match
   "The rows of index ix holding a word of query (FTS5 syntax: words quoted and joined by OR), of the attributes
@@ -228,7 +251,7 @@
   {:malli/schema [:=> [:cat [:map [:h :seon.ffi/address]] :string [:set :int]] [:vector [:tuple :int :int :double]]]}
   [{h :h} query attrs]
   (with-row-calls
-    (select h :match (str "SELECT e, a, bm25(t) FROM t WHERE t MATCH ?1" (in-attrs attrs)) query
+    (select h :match (str "SELECT r.e, r.a, bm25(t) FROM t CROSS JOIN r ON r.id = t.rowid WHERE t MATCH ?1" (in-attrs attrs)) query
             (fn [st] [(c-column-int st 0) (c-column-int st 1) (- (c-column-double st 2))]))))
 
 (defn fts-substring
@@ -238,6 +261,6 @@
   {:malli/schema [:=> [:cat [:map [:h :seon.ffi/address]] [:string {:min 3}] [:set :int]] [:vector [:tuple :int :int]]]}
   [{h :h} text attrs]
   (with-row-calls
-    (select h :substring (str "SELECT e, a FROM g WHERE g MATCH ?1" (in-attrs attrs))
+    (select h :substring (str "SELECT r.e, r.a FROM g CROSS JOIN r ON r.id = g.rowid WHERE g MATCH ?1" (in-attrs attrs))
             (str "\"" (str/replace text "\"" "\"\"") "\"")
             (fn [st] [(c-column-int st 0) (c-column-int st 1)]))))
