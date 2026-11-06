@@ -107,7 +107,8 @@
   so a refused spawn writes nothing and the reconciler never sees a release with no agent
   (it would spawn a second agent for it). The session's agent continues (its key) unless fresh?:
   a reset, the task's branch a new one cut from main and its conversation empty (the agent on the
-  old branch is killed as its env changed; that branch and its records stay). A task
+  old branch is killed here once the task is the new one's: the reconciler compares the task's own agent, so it never
+  saw the old one; that branch and its records stay). A task
   whose agent is live answers that agent, :shared true: the caller has the branch, with
   whoever attached it, and that one's seon_done ends it for both. An agent that is gone (live-run)
   is replaced by a fresh one on its branch, the session's key continuing. A branch another live agent holds
@@ -141,10 +142,12 @@
         ;; its task) is the attach's answer, never a server defect
         (if-not ag
           r
-          (do @(c/transact-main! sys (vec (concat (task/execution-tx [id] :running)
-                                              (when fresh? [{:seon.task/id id :seon.task/branch (:branch env)}])
-                                              (task/start-tx db id (:boot sys) ag env (System/currentTimeMillis) k))))
-              {:agent ag :task id})))))))
+          (let [replaced (when fresh? (:agent (first (live-run sys db id))))]
+            @(c/transact-main! sys (vec (concat (task/execution-tx [id] :running)
+                                                (when fresh? [{:seon.task/id id :seon.task/branch (:branch env)}])
+                                                (task/start-tx db id (:boot sys) ag env (System/currentTimeMillis) k))))
+            (when replaced (c/kill! sys replaced))
+            {:agent ag :task id})))))))
 
 (defn- fork!
   "A fork of live agent from: a sibling of its task, <name>-fork-<n> (its plan, proofs and kind, on
@@ -217,16 +220,18 @@
             :args {}
             ;; the form that answers it again at root's REPL (seon_eval root): its reply's cuts read through it
             :again '(seon.server/agents-answer sys)}
-   :eval {:doc "Evaluate Clojure in a running agent's process (recorded on its branch, origin :outside) or as \"root\" in root's process (root.repl: `sys` is root; my.root/run!, my.root/cancel! ...), each through the one REPL path. Answers its response (:seon.eval/response): {:handle :value :out :err :ex}, printed under its handle."
+   :eval {:doc "Evaluate Clojure in a running agent's process (recorded on its branch, origin :outside; my.agent/*, my.db/*, my.task/*, my.branch/* and (my.agent/prove) are its API) or as \"root\" in root's process (root.repl: `sys` is root, main is @(:conn sys); my.root/run!, my.root/cancel! ...), each through the one REPL path. With intent, in an agent, it runs as a model's call does: the forgiving reader, not run without a real intent, and recorded as a call in the conversation; without it, as a person's eval. Answers its response (:seon.eval/response): {:handle :value :out :err :ex}, printed under its handle, then :main when main has moved past the branch's base."
           :args {:agent {:type "string" :description "an agent id (a3) or root"} :code {:type "string" :description "Clojure forms"}
+                 :intent {:type "string" :description "what these forms are about to do and what you expect, as a model sends it"}
                  :task {:type "string" :description "the agent's task (ns/name): needed only for an agent another session attached"}}
           :required ["agent" "code"]}
-   :context {:doc "The request of the task an agent works as a model is sent it now: system prompt, its page and its conversation. Name the agent, or a task (ns/name): the agent working it, else one attached to it now (attach), so one request reads a task's context."
-             :args {:agent {:type "string"} :task {:type "string" :description "ns/name, instead of an agent"}}}
+   :context {:doc "The request of the task an agent works as a model is sent it now: system prompt, its conversation and its page. Name the agent, or a task (ns/name): the agent working it, else one attached to it now (attach), so one request reads a task's context. wire: the request body as JSON, as a provider is sent it (roles, call ids, tools; a root with no --profile has no model or max_tokens in it). No model is called."
+             :args {:agent {:type "string"} :task {:type "string" :description "ns/name, instead of an agent"}
+                    :wire {:type "boolean" :description "answer the request body as JSON, not the text"}}}
    :message {:doc "Send an agent a message (the owner's words): a message on main to the task it works (refused when it works none), which its next turn takes onto its branch and reads, and which wakes a parked session. The page's message bar sends the same request (seon.root/message!)."
              :args {:agent {:type "string"} :body {:type "string" :description "what to tell the agent"}
                     :task {:type "string" :description "the agent's task (ns/name): needed only for an agent another session attached"}} :required ["agent" "body"]}
-   :attach {:doc "Work a task as a Seon agent: root starts an agent on the task's branch (model outside) and answers its id. fresh: reset it, a new branch from main and an empty conversation (the old branch kept). from: fork that agent, a clone of it on a branch of its head working a sibling task."
+   :attach {:doc "Work a task as a Seon agent: root starts an agent on the task's branch (model outside) and answers its id and the next step. fresh: reset it, a new branch from main and an empty conversation (the old branch kept). from: fork that agent, a clone of it on a branch of its head working a sibling task."
             :args {:task {:type "string" :description "ns/name"} :fresh {:type "boolean" :description "reset: start the task again from main"}
                    :from {:type "string" :description "fork: an agent id (a3) whose program, live values and branch the new agent goes on from, on a sibling of its task"}}}
    :prove {:doc "Run the tests a branch's change reaches, once per branch and tx however many ask (a session, an agent's turn): the one test service (seon.prove). Names an agent (its branch at its head), else main. Answers the run: its key, the counts, the red tests; a result already held for a test's digest is not run again."
@@ -262,7 +267,7 @@
   (agents-answer sys))
 
 (defmethod op-answer :eval [sys ag req]
-  (let [r (if (= :root ag) (root-eval sys (:code req)) @(c/submit! sys ag (:code req) {:origin :outside}))]
+  (let [r (if (= :root ag) (root-eval sys (:code req)) @(c/submit! sys ag (:code req) (cond-> {:origin :outside} (contains? req :intent) (assoc :intent (:intent req)))))]
     ;; its value as data beside its printed text when it is plain data (seon.contract/plain?: what the wire's EDN carries):
     ;; a reader of the answer reads the value, never the text back (an eval that printed has its :out verbatim in the
     ;; text, which is no EDN since out-verbatim). The model reads the text alone (tools/call)
@@ -279,7 +284,7 @@
     (if-let [{:keys [task env]} (when ag (work-of sys ag))]
       ;; an outside model's read is its turn, and takes its messages; anyone
       ;; else's read of an agent its model drives only looks
-      (let [r @(c/submit! sys ag (sedn/encode (list 'print (list 'seon.turn/context-block task (= "outside" (:model env))))) {:origin :context})]
+      (let [r @(c/submit! sys ag (sedn/encode (list 'print (list 'seon.turn/context-block task (= "outside" (:model env)) (true? (:wire req))))) {:origin :context})]
         (cond (contract/error? r) r (:ex r) (:ex r) :else {:context (:seon.print/code (:out r))}))
       (refused (if ag (str ag " works no task: attach one first") (str "no task " (:task req) ", and no agent named"))))))
 
@@ -287,7 +292,10 @@
   @(c/message! sys ag (:body req)))
 
 (defmethod op-answer :attach [sys _ req]
-  (if-let [from (:from req)] (fork! sys (keyword from) (:client req)) (attach! sys (:task req) {:fresh? (true? (:fresh req)) :client (:client req)})))
+  (let [a (if-let [from (:from req)] (fork! sys (keyword from) (:client req)) (attach! sys (:task req) {:fresh? (true? (:fresh req)) :client (:client req)}))]
+    (cond-> a
+      (:agent a) (assoc :next (str "seon_context with agent " (name (:agent a)) " reads what its model reads (wire true: the request body). "
+                                   "seon_eval with it, intent and code, is a model's call; (my.agent/prove) there runs its proofs. seon_done hands it back.")))))
 
 (defmethod op-answer :prove [sys ag req]
   (let [r @(c/prove! sys ag (set (map symbol (:names req))))]
@@ -348,6 +356,12 @@
   [id code message]
   {"jsonrpc" "2.0" "id" id "error" {"code" code "message" message}})
 
+(defn- eval-text
+  "An eval's response r as a tool's text: what it printed, how main differs from the branch (:main, said only to an outside agent:
+  seon.agent/main-difference), and that its record was refused. See docs/server.md#mcp."
+  {:malli/schema [:=> [:cat :map] :string]}
+  [r] (str (:text r) (when-let [m (:main r)] (str "\n:main " m)) (when-let [u (:unrecorded r)] (str "\n" (:seon.error/message u)))))
+
 (defn mcp-reply
   "The JSON-RPC answer to one MCP message, or nil for a notification: initialize; ping;
   tools/list, each op the tool seon_<op>; tools/call, the op's answer as the tool's text
@@ -377,7 +391,7 @@
                            ;; REPL answers again (:again) under the reply budget with that form as its
                            ;; handle, anything else whole by the printer (nothing could re-ask it)
                            (result {"content" [{"type" "text" "text" (cond (and (= :context op) (:context a)) (:context a)
-                                                                           (:response a) (let [r (:response a)] (str (:text r) (when-let [u (:unrecorded r)] (str "\n" (:seon.error/message u)))))
+                                                                           (:response a) (eval-text (:response a))
                                                                            (contract/error? a) (print/text a)
                                                                            (:again (ops op)) (let [p (print/print-value a {:handle (:again (ops op))})] (or (:text p) (:seon.error/message p)))
                                                                            :else (print/text (vary-meta a assoc :seon.print/full true)))}]}))))

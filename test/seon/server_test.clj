@@ -138,12 +138,15 @@
 (deftest a-reset-starts-the-task-again-from-main
   ;; the owner (2026-10-27): reset an agent easily. seon_attach {:fresh true}: a new branch cut from
   ;; main and an empty conversation; the old branch and its records stay
-  (let [[_ reset branch seen] (at/in-agent (fn [{:keys [ns task]}]
+  (let [[_ reset branch seen old] (at/in-agent (fn [{:keys [ns task agent]}]
                                              [(str "(ns " ns ") (def x 41)")
                                               {:op :attach :task task :fresh true}
                                               {:op :eval :agent "root" :code (str "(:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))")}
-                                              {:op :eval :agent "root" :code (in-agent-of task (str "[(some-> (find-ns '" ns ") (ns-resolve 'x)) (count (:evals @seon.ctx/ctx))]"))}]))]
+                                              {:op :eval :agent "root" :code (in-agent-of task (str "[(some-> (find-ns '" ns ") (ns-resolve 'x)) (count (:evals @seon.ctx/ctx))]"))}
+                                              ;; root's requests run in order: its kill, then this eval, which only the agent's death can answer
+                                              {:op :eval :agent agent :code "(+ 1 1)"}]))]
     (is (keyword? (:agent reset)) (pr-str reset))
+    (is (contract/error? old) (str "the agent on the old branch ended: " (pr-str old)))
     (is (re-find #"-r[0-9a-f-]{36}$" (name (:value branch))) "the task's branch is a new one")
     (is (= [nil 0] (:value seen)) "whose agent holds nothing the old one defined, and no conversation")))
 
@@ -220,6 +223,46 @@
     ;; docs/turn.md#the-turn-is-a-number: a read is a model call with its own count, and moves no turn
     (is (= [(str (:key (:value sent)) "/read-1")] (:ids (:value sent))) "the read's model call is <agent key>/read-<k>")
     (is (empty? (:turns (:value sent))) "a read moves no turn number: no agent holds one")))
+
+(deftest an-outside-agent-plays-the-model
+  ;; docs/server.md#working-a-task-from-a-worktree: a read holds the conversation, as JSON the body a provider is sent;
+  ;; an eval with intent is a call (its message a call and a tool result), without it a person's (one user message), and a
+  ;; blank intent is not run, as a model's call is not
+  (let [[attach person called blank wire text]
+        (at/in-agent (fn [{:keys [agent task]}]
+                       [{:op :attach :task task}
+                        "(+ 40 2)"
+                        {:op :eval :agent agent :intent "add one and one, expecting 2" :code "(+ 1 1)"}
+                        {:op :eval :agent agent :intent " " :code "(def not-run-form 1)"}
+                        {:op :context :agent agent :wire true}
+                        {:op :context :agent agent}]))
+        body (clojure.data.json/read-str (:context wire))
+        msgs (get body "messages")
+        call (first (filter #(some-> (get-in % ["tool_calls" 0 "function" "arguments"]) (clojure.string/includes? "(+ 1 1)")) msgs))
+        cid (get-in call ["tool_calls" 0 "id"])]
+    (is (clojure.string/includes? (:next attach) "seon_context") "an attach names the next step")
+    (is (= 42 (:value person)))
+    (is (= 2 (:value called)) "a call with an intent runs")
+    (is (= :seon.turn/invalid-call (:seon.error/type (:ex blank))) (pr-str blank))
+    (is (= ["eval"] (mapv #(get-in % ["function" "name"]) (get body "tools"))) "the body holds the tool a model is given")
+    (is (= "system" (get (first msgs) "role")))
+    (is (clojure.string/includes? (get-in call ["tool_calls" 0 "function" "arguments"]) "add one and one") "the call holds its intent")
+    (is (some #(and (= "tool" (get % "role")) (= cid (get % "tool_call_id"))) msgs) "and its result names the call")
+    (is (some #(and (= "user" (get % "role")) (clojure.string/includes? (get % "content") ":code \"(+ 40 2)\"")) msgs) "a person's eval is a user message")
+    (is (clojure.string/includes? (:context text) "(+ 1 1)") "the text read holds the conversation too")))
+
+(deftest roots-repl-names-what-has-no-branch
+  ;; my.agent/* and my.db/* at root answered seon.agent/db's invalid-output, "Fix seon.agent/db (the producer)", and
+  ;; (my.agent/prove) an NPE from datahike.writer/abandon-pending!: root has no branch, and neither said so
+  (let [[db prove] (at/in-agent [{:op :eval :agent "root" :code "(my.db/db)"} {:op :eval :agent "root" :code "(my.agent/prove)"}])]
+    (doseq [r [db prove]]
+      (is (= :seon.agent/no-branch (:seon.error/type (:ex r))) (pr-str r))
+      (is (clojure.string/includes? (:seon.error/fix (:ex r)) "@(:conn sys)") (pr-str r)))))
+
+(deftest an-eval-text-says-how-main-differs
+  ;; the answer held :main and the tool's text dropped it, though main-difference's doc promises it to an outside agent
+  (is (= "{:value 1}\n:main main moved" (#'seon.server/eval-text {:text "{:value 1}" :main "main moved"})))
+  (is (= "{:value 1}" (#'seon.server/eval-text {:text "{:value 1}"}))))
 
 (deftest an-outside-agent-reads-its-context-after-it-defines
   ;; THE PLAN 0.7: the first real work through the server is an outside agent that attaches,

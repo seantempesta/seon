@@ -470,10 +470,10 @@
         (is (not (re-find #"status-\d+" (:content (peek r1)))) "a turn taken moved nothing of how the work stands: not told again")
         (is (str/includes? (:content (peek r2)) "quadruple") "the plan changed mid-run: the task's part in the next diff")
         (let [db @conn
-              read (:messages (context/render db {:commit (d/commit-id db) :task "demo/f" :turn 1 :max-turns 1
-                                                  :origin :outside :agent "b/a1"}))]
-          (is (= ["system" "assistant" "tool"] (mapv :role read)) "an outside agent's read: the system prompt and the page whole, as the call Seon made and its answer")
-          (is (str/includes? (:content (peek read)) "quadruple")))))))
+              at (fn [origin] (:messages (context/render db {:commit (d/commit-id db) :task "demo/f" :turn 4 :max-turns 1 :origin origin :agent "b/a1"})))]
+          ;; a read that held only the system prompt and the page hid the conversation a model reads (docs/turn.md#an-outside-agent)
+          (is (= (at :model) (at :outside)) "an outside agent's read is the request a model's turn is sent, its conversation in it")
+          (is (str/includes? (:content (peek r2)) "quadruple")))))))
 
 (deftest each-section-is-told-once-on-the-page
   ;; the old request sent the task, its references and its sections in the first turn's context
