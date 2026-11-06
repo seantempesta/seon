@@ -2664,9 +2664,9 @@
         db (d/db-with db [{:db/id aid :seon.agent/max-turns 7 :seon.agent/turn 1 :seon.agent/outcome :green :seon.agent/ended-turn 0}
                           {:seon.model-call/id "b1/a1/1" :seon.model-call/agent aid :seon.model-call/n 1 :seon.model-call/origin :model}])
         opts (fn [db] {:seon.ctx/ctx (:tree (seon.ctx/build db aid :b)) :seon.db/db db})]
-    (is (not (str/includes? (pr-str (ui/chat-end (opts db))) "Done")) "the chat's end: an earlier wake's end is no end of this one")
+    (is (not (str/includes? (pr-str (ui/chat-end (opts db))) "finished")) "the chat's end: an earlier wake's end is no end of this one")
     (let [ended (d/db-with db [{:db/id aid :seon.agent/ended-turn 1}])]
-      (is (str/includes? (pr-str (ui/chat-end (opts ended))) "Done in 1 turn") "the end it wrote at its turn now is"))))
+      (is (str/includes? (pr-str (ui/chat-end (opts ended))) "It finished its work in 1 turn") "the end it wrote at its turn now is"))))
 
 ;; docs/render.md#how-the-work-stands: the status's proofs are the task's :proved as the record pulls them (each
 ;; var's verdict, failures and form), never read again from the db; the done rule's verdict scan and the diff read it
