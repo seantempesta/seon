@@ -1719,12 +1719,14 @@
   its root causes, by root's own render (`root`). See docs/render.md#the-page."
   {:seon.render/style "rounded-md bg-base-900 p-3 text-sm text-text-100" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
   [{c :seon.ctx/ctx db :seon.db/db}]
-  (let [{:keys [running held]} (frequencies (map :v (d/datoms db :aevt :seon.task/execution)))
+  ;; what an agent is doing is its task's outcome; :seon.task/execution stays :running once it has finished
+  (let [held (count (d/datoms db :avet :seon.task/execution :held))
+        running (count (d/datoms db :avet :seon.task/outcome :running))
         needs (count (d/datoms db :avet :seon.task/outcome :parked))]
     [:section
      [:h1 {:class "text-base font-semibold text-text-50"}
-      (str/join " " (remove nil? [(if running (str running " running.") "Nothing running.")
-                                  (when held (str held (if (= 1 held) " task" " tasks") " held."))
+      (str/join " " (remove nil? [(if (pos? running) (str running " running.") "Nothing running.")
+                                  (when (pos? held) (str held (if (= 1 held) " task" " tasks") " held."))
                                   (if (pos? needs) (str needs " " (if (= 1 needs) "needs" "need") " you.") "Nothing needs you.")]))]
      (render/html {:schema :seon.root/root-fact} (relevant :seon.root/root-fact c))]))
 

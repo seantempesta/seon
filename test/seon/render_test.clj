@@ -1992,7 +1992,9 @@
     (is (< (.indexOf text "Needs you") (.indexOf text "Working") (.indexOf text "Finished")))
     (is (< (.indexOf text "b2/a1") (.indexOf text "Working")) "what waits on a person comes first")
     (is (str/includes? text "Finished · 1"))
-    (is (str/includes? (pr-str (ui/root-head {:seon.ctx/ctx (or c {}) :seon.db/db db})) "needs you") "the head says so")))
+    (let [head (pr-str (ui/root-head {:seon.ctx/ctx (or c {}) :seon.db/db db}))]
+      (is (str/includes? head "1 needs you") "the head says so")
+      (is (str/includes? head "1 running") "a finished task is not running, whatever its execution still says"))))
 
 (deftest how-an-agents-work-stands-is-said-from-its-data
   ;; owner, 2026-11-05: an agent whose task hit its turn cap read "waiting" and "idle", though a capped task is not woken
