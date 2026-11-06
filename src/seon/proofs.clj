@@ -476,8 +476,10 @@
         {steps :digests missing :missing} (when checks? (step-digests #(update-vals (select-keys step-idx (keys %)) :digest) (assoc inputs :base base)))
         steps (when checks? (assoc (merge steps (update-vals (select-keys step-idx (keys mg)) :digest)) mg-registry (mg-registry-digest graph (:env inputs))))
         ;; both its own code's digest and its tests' without the tree: it runs each in a fork of an agent, which an edit to a file a test scans does not change
+        ;; it reads test/'s files themselves, which the code a step's key takes leaves out
+        steps (cond-> steps (get steps "test-inputs") (update "test-inputs" #(lib/digest (str % "\n" (:tree inputs)))))
         steps (cond-> steps (get steps "agent-tests")
-                (assoc "agent-tests" (let [in (assoc inputs :tree "")]
+                (assoc "agent-tests" (let [in (assoc inputs :tree "" :code "")]
                                        (agent-tests-digest (:digest (get (program/graph-index graph in (select-keys check-steps ["agent-tests"])) "agent-tests"))
                                                            (cfg/value :seon.config.proofs/agent-tests-sample)
                                                            (program/graph-index graph in nil)))))

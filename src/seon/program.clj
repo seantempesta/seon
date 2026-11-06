@@ -1713,7 +1713,7 @@
   "The function of a key and its starting forms' ids that answers {:digest :process? :binary?} (graph-index)
   over graph g under inputs: the config lines and env keys it shares are made once here, for every key asked."
   {:malli/schema [:=> [:cat :map :seon.program/inputs :boolean] :seon.host/fn]}
-  [{:keys [rows plain comp-of cd flags]} {:keys [env tree config]} roots?]
+  [{:keys [rows plain comp-of cd flags]} {:keys [env tree code config]} roots?]
   (let [line (into {} (for [[ck v] config] [ck (str "\n" ck " " v)]))
         ;; :seon.env/src is a direct reader's (kept-program-store): a process test runs a program it names
         env-keys (filterv #(and (= "seon.env" (namespace %)) (not= % :seon.env/src)) (keys config))]
@@ -1725,14 +1725,15 @@
             ;; files (:seon.env/*); a pin it takes by its reach, as any test does: Jolt's runtime
             ;; core and Chez, which every process runs on, are the forks' suites' and the daily full run's
             ks (if (some #(let [f (flags %)] (or (:reads f) (:proc f) (:bin f))) cs) (into ks env-keys) ks)]
-        {:digest (lib/digest (apply str k "\n" env "\n" (when (some #(let [f (flags %)] (or (:scans f) (and roots? (:reads f)))) cs) tree)
+        {:digest (lib/digest (apply str k "\n" env "\n" (when (some #(:scans (flags %)) cs) tree)
+                                      (when (and roots? (some #(:reads (flags %)) cs)) code)
                                       (concat (sort (map cd cs)) (map line (sort ks)))))
          :process? (boolean (some #(:proc (flags %)) cs)) :binary? (boolean (some #(:bin (flags %)) cs))}))))
 
 (defn graph-index
   "{test {:digest :process? :binary?}} of graph g's tests under inputs (or of each key of
-  roots, {key [var ...]}): a key's digest is of its name, :env, :tree when it is a root (a
-  check step) and what it reaches reads the tree, or when it reaches a test namespace's form that
+  roots, {key [var ...]}): a key's digest is of its name, :env, :code when it is a root (a
+  check step, which runs the whole program whatever its reach names) and what it reaches reads the tree, :tree when it reaches a test namespace's form that
   calls a reader of the checkout's files (file-readers, :scans: what it judges is the files themselves); any
   other test never takes the tree: it is digested by what it reaches, a file it reads or a binary
   it runs not in its reach is the full run's to catch, bin/test --all, docs/merging.md), its

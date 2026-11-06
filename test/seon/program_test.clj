@@ -690,12 +690,14 @@
         "checkout b reuses every result checkout a recorded")
     (spit (str b "/docs/a.md") "# a, edited")
     (is (= (:env in-a) (:env (fx/inputs b))) "prose is no input of a test that reads no files")
+    (is (= (:code in-a) (:code (fx/inputs b))) "nor of a check step")
     ;; the shipped config is no input of every test (root, 2026-10-27: a batch's greens were reused
     ;; by none, because :env moved in 8 of 12 batches): its values are :config's, taken by the keys
     ;; a test reads
     (.mkdirs (java.io.File. (str b "/resources/seon/config")))
     (spit (str b "/resources/seon/config/default.edn") "{:a 1}")
     (is (= (:env in-a) (:env (fx/inputs b))) "the shipped config file is no input of every test")
+    (is (not= (:code in-a) (:code (fx/inputs b))) "though it is of a check step, which runs with all of it")
     (spit (str b "/resources/seon/schemas/x.edn") "{:x :string}")
     (is (= (:env in-a) (:env (fx/inputs b))) "a schema resource is no input of every test: its entries are program facts, taken by the tests whose reach names them")
     (is (not= (get-in in-a [:config :seon.env/schemas]) (get-in (fx/inputs b) [:config :seon.env/schemas]))
@@ -1378,3 +1380,17 @@
     (is (every? true? (map #(str/includes? %1 %2) texts ["(+ x 1)" "(+ x 2)" "(+ x 3)"]))
         (str "oldest first, each the text it had: " (pr-str texts)))
     (is (= 2 (count (remove :added? rows))) "the two replaced forms were each retracted")))
+
+;; docs/merging.md#a-merge-runs-what-the-change-reaches: a step runs the whole program, so its key moves with the code; a test that reads a file stays by the tree
+(deftest a-step-is-keyed-by-the-code-not-the-whole-tree
+  (let [db (d/db-with (ts/test-db) [{:ns/name 'app.k :ns/file "src/app/k.clj"}])
+        db (d/db-with db (program/record-tx db {:id "app.k/f" :src "(defn f [] (slurp \"x\"))" :ns 'app.k :ns-form? false
+                                                :defs [{:var 'app.k/f :kind :fn}] :declares #{} :methods [] :impls [] :refs #{'clojure.core/slurp} :requires #{} :banned #{} :inline-defs #{}}))
+        g (program/reach-graph db nil)
+        key-at (fn [in] (:digest (get (program/graph-index g in {"s" ['app.k/f]}) "s")))
+        in {:env "e" :tree "t" :code "c" :config {}}]
+    (is (some? (key-at in)))
+    (is (= (key-at in) (key-at (assoc in :tree "t2"))) "a move of the tree alone, a wiki edit, does not move it")
+    (is (not= (key-at in) (key-at (assoc in :code "c2"))) "a move of the code does")
+    (is (not= (key-at in) (key-at (assoc in :env "e2"))) "and so does the rest of what the binary is built from")))
+
