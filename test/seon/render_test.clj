@@ -1511,7 +1511,7 @@
 (defn data-view
   "A component that answers data, a part of a schema that declares no render of its own."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
-  [_] (with-meta {:plan "Make it" :n 3} {:seon.render/schema :seon.context/status}))
+  [_] (with-meta {:plan "Make it" :n 3} {:seon.render/schema :seon.render-test/no-render}))
 
 (deftest a-part-returns-its-data-as-a-call-of-the-printer
   ;; root, 2026-10-26 (the owner's compact renders, not stripped), moved with the parts that answer data
@@ -1819,12 +1819,12 @@
         (is (= (seon.merge/readiness b ours (d/commit-as-db (:store ours) main)) (:merge st))
             "the merge's readiness, as its own function answers it")
         (is (= (seon.merge/divergence ch) (:its-merge-carries st)) "and what the branch's merge carries, from the one diff")
-        (let [html (h/html (ui/status-hiccup (select-keys st [:merge :its-merge-carries :without-a-contract])))
-              merge-line (h/html (ui/status-hiccup {:merge (:merge st)}))]
+        (let [html (h/html (ui/status-hiccup {} (select-keys st [:merge :its-merge-carries :without-a-contract])))
+              merge-line (h/html (ui/status-hiccup {} {:merge (:merge st)}))]
           (is (str/includes? (pr-str (:main-moved (:merge st))) "demo/k") "what main changed since the base (the model reads it in the data)")
           (is (not (re-find #"Main has moved" html)) "main's move reaches the branch between turns: the agent is told only what conflicts")
           (is (not (str/includes? html "conflict")) "and which of those the branch changed too (none)")
-          (is (str/includes? (h/html (ui/status-hiccup {:merge {:conflicts ['demo/k] :main-moved ['demo/k]}})) "1 things conflict with main") "a conflict is said")
+          (is (str/includes? (h/html (ui/status-hiccup {} {:merge {:conflicts ['demo/k] :main-moved ['demo/k]}})) "1 things conflict with main") "a conflict is said")
           (is (str/includes? html "demo/h") "what the branch's merge carries, and a function it defined with no contract")
           (is (not (str/includes? html "demo/k")) "never main's change")
           (is (not (str/includes? html "demo/f")) "never one it did not change"))
@@ -2512,6 +2512,132 @@
       (finally (r/dispose-walk! w)))))
 
 
+;; ---- a component that answers a map (docs/render.md#a-part-answers-data) ----
+
+(defn dm-report "A component answering the report held in ctx's :r."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+  [{c :seon.ctx/ctx}] (with-meta (merge {:t 0 :classes {}} (seon.ratom/realize (:r c))) {:seon.render/schema :seon.problems/report}))
+(defn dm-layout "The component, in one list."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+  [_] [:div [:div {:id "parts"} [#'dm-report {}]]])
+
+(deftest a-components-revision-follows-its-map
+  ;; docs/render.md#a-part-answers-data: what allowed the stale text was a revision judged by the html alone. :t is the model's alone
+  ;; (seon.render.ui/problems-model reads it, seon.render.ui/problems does not): it moves the revision and the model's text
+  (let [a (seon.ratom/atom {:db/id 1 :r {:t 1}})
+        w (r/walker {:ref a :changes seon.ctx/changes} (constantly nil) [#'dm-layout {}])
+        k [`dm-report]
+        rev #(:rev (get @(:cache w) k))
+        text #(r/part-text (r/part-form w k))
+        html #(:html (first (r/placed-units w)))]
+    (try
+      (r/flush! w nil)
+      (let [rev0 (rev) html0 (html)]
+        (is (str/includes? (text) ":t 1"))
+        (swap! a assoc :r {:t 2})
+        (is (= :miss (get (r/flush! w nil) k)) "its map moved: a new answer, whatever its html says")
+        (is (not= rev0 (rev)) "its revision follows its map")
+        (is (str/includes? (text) ":t 2") "and the model's text, kept by that revision, is not stale")
+        (is (= html0 (html)) "its html did not change"))
+      (is (= {:t 2 :classes {}} (get (r/placed-data w ["#parts"]) :seon.problems/report)) "what a turn decides from is the map as it stands")
+      (let [rev1 (rev)]
+        (vswap! (:queue w) conj k)
+        (is (= :same (get (r/flush! w nil) k)) "run again to an equal map: the same")
+        (is (= rev1 (rev)) "and its revision stays"))
+      (finally (r/dispose-walk! w)))))
+
+(def ^:private html-got "What `recording-html` was last given." (volatile! nil))
+(defn recording-html "An html render that records what it is given."
+  {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
+  [opts v] (vreset! html-got [opts v]) [:section [:p (str "t is " (:t v))]])
+(defn dm-recorded "A component over ctx and the db drawn by `recording-html`."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
+  [{c :seon.ctx/ctx}] (with-meta {:t (:n c) :classes {}} {:seon.render/schema :seon.problems/report :seon.render/html 'seon.render-test/recording-html}))
+(defn dm-recorded-layout "That component, in one list."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+  [_] [:div [:div {:id "parts"} [#'dm-recorded {}]]])
+
+(deftest a-schemas-html-is-given-only-the-map
+  ;; docs/render.md#a-part-answers-data: the component reads ctx and the db and puts what the html needs in its map, and the html is a function of that map
+  (let [w (r/walker {:ref (seon.ratom/atom {:db/id 1 :n 7}) :changes seon.ctx/changes} (constantly (ts/test-db)) [#'dm-recorded-layout {}])]
+    (try
+      (r/flush! w nil)
+      (let [[opts v] @html-got]
+        (is (= {:t 7 :classes {}} v) "the map the component answered")
+        (is (not-any? #(contains? opts %) [:db :seon.db/db :seon.ctx/ctx]) (str "and no db or ctx: " (pr-str (keys opts)))))
+      (is (str/includes? (:html (first (r/placed-units w))) "t is 7"))
+      (finally (r/dispose-walk! w)))))
+
+(defn mv-child "A child, its text read from ctx."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int] :any]}
+  [{c :seon.ctx/ctx} id] [:li (get-in c [:items id :text])])
+(defn mv-wrap "A child's parent, itself a child."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int] :any]}
+  [_ id] [:ol [#'mv-child {} id]])
+(defn mv-parent "The members of ctx's side: an id, a child; [id], its wrapped child."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :keyword] :any]}
+  [{c :seon.ctx/ctx} side]
+  (into [:ul] (for [x (seon.ratom/realize (get c side))] (if (vector? x) [#'mv-wrap {} (first x)] [#'mv-child {} x]))))
+(defn mv-layout "Two parents."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+  [_] [:div [:div {:id "parts"} [#'mv-parent {} :a] [#'mv-parent {} :b]]])
+
+(deftest a-child-moved-between-parents-stays
+  ;; docs/render.md#components: what allowed it was a parent's rerun unmounting at once what it no longer drew, whoever else draws it. A
+  ;; component goes when, at the end of the flush, no parent holds it
+  (let [start (fn [a b] (let [at (seon.ratom/atom {:db/id 1 :a a :b b :items {1 {:db/id 11 :text "one"} 2 {:db/id 12 :text "two"}}})
+                              w (r/walker {:ref at :changes seon.ctx/changes} (constantly nil) [#'mv-layout {}])]
+                          (r/flush! w nil)
+                          [w at]))
+        shown #(pr-str (r/resolved % @(:out %)))
+        child (fn [id] [`mv-child id])]
+    (testing "to a parent drawn later"
+      (let [[w a] (start [1] [2])]
+        (try (swap! a assoc :a [] :b [2 1])
+             (r/flush! w nil)
+             (is (str/includes? (shown w) "one"))
+             (is (contains? @(:cache w) (child 1)))
+             (finally (r/dispose-walk! w)))))
+    (testing "to a parent drawn earlier: the old parent's rerun comes after the new parent's"
+      (let [[w a] (start [2] [1])]
+        (try (swap! a assoc :a [2 1] :b [])
+             (r/flush! w nil)
+             (is (str/includes? (shown w) "one") "it stays on the page")
+             (is (contains? @(:cache w) (child 1)) "and in the walk")
+             (swap! a assoc-in [:items 1 :text] "uno")
+             (is (= :miss (get (r/flush! w nil) (child 1))) "still reactive: its reaction was not disposed")
+             (is (str/includes? (shown w) "uno"))
+             (finally (r/dispose-walk! w)))))
+    (testing "a child's parent goes and the child moves"
+      (let [[w a] (start [2] [[1]])]
+        (try (swap! a assoc :a [2 1] :b [])
+             (r/flush! w nil)
+             (is (str/includes? (shown w) "one"))
+             (is (not (contains? @(:cache w) [`mv-wrap 1])) "the parent went")
+             (is (contains? @(:cache w) (child 1)) "its child did not")
+             (finally (r/dispose-walk! w)))))
+    (testing "held by two parents, dropped by one"
+      (let [[w a] (start [1] [1 2])]
+        (try (swap! a assoc :a [])
+             (r/flush! w nil)
+             (is (str/includes? (shown w) "one"))
+             (is (contains? @(:cache w) (child 1)))
+             (finally (r/dispose-walk! w)))))
+    (testing "held by none: it goes, with what it held, and does not run on its way out"
+      (let [[w a] (start [1 [2]] [])
+            running (seon.ratom/running)]
+        (try (swap! a (fn [c] (-> c (assoc :a []) (assoc-in [:items 1 :text] "uno") (assoc-in [:items 2 :text] "dos"))))
+             (let [ran (r/flush! w nil)]
+               (is (not (contains? ran (child 1))) "a change reached it, and its parent let go of it first")
+               (is (not (contains? ran (child 2))) "nor below one that went")
+               (is (not (str/includes? (shown w) "uno"))))
+             (is (not (contains? @(:cache w) (child 1))))
+             (is (not (contains? @(:cache w) [`mv-wrap 2])))
+             (is (not (contains? @(:cache w) (child 2))) "what it alone held")
+             (is (empty? @(:queue w)) "nothing left queued")
+             (is (<= (seon.ratom/running) running) "its reaction disposed")
+             (finally (r/dispose-walk! w)))))))
+
 ;; ---- a part prints as its render (docs/render.md#a-part-prints-as-its-render) ----
 
 (deftest a-fence-is-longer-than-any-backtick-run-in-its-source
@@ -2556,7 +2682,7 @@
                      {:test 'seon.program-test/b :status :undefined}]
             :attention ["seon.program/history is public and its docstring cites no docs/ section"]
             :refused [{:reason :proof-unknown :test 'seon.program-test/b :do '(my.agent/prove)}]}
-        h (ui/status-hiccup st)
+        h (ui/status-hiccup {} st)
         t (h/html h)]
     (is (= :h2 (first (second h))) "headed")
     (is (str/includes? t "Your proofs") "headed to the agent")
@@ -2569,7 +2695,7 @@
     (is (not (str/includes? t "(do ")) "separate top-level forms, never a do")
     (is (not (str/includes? t "tokens")) "no tokens sent")
     (is (not (str/includes? t "conflict")) "no merge line with nothing to merge")
-    (is (str/includes? (h/html (ui/status-hiccup (assoc st :merge {:conflicts ['a/b] :main-moved ['a/b]}))) "1 things conflict with main") "a merge line only when something conflicts")))
+    (is (str/includes? (h/html (ui/status-hiccup {} (assoc st :merge {:conflicts ['a/b] :main-moved ['a/b]}))) "1 things conflict with main") "a merge line only when something conflicts")))
 
 (deftest a-merged-task-reads-merged-everywhere
   ;; owner, 2026-11-05: the head said "merged" while the task's panel said "done": its agent's own end (:green) was read where

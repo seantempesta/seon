@@ -155,14 +155,14 @@
                :do '(my.task/update! :seon.task/proofs conj (quote user/scratch-test))}]
              (:refused st)))
       (is (= [:proof-red :regression :stray-red] (mapv :reason (:reasons st))) "the done rule's own answer, beside it")
-      (is (not (re-find #":proof-red" (pr-str (seon.render.ui/status-hiccup st)))) "and the page and the model are told each as what to do, not the raw reasons"))
+      (is (not (re-find #":proof-red" (pr-str (seon.render.ui/status-hiccup {} st)))) "and the page and the model are told each as what to do, not the raw reasons"))
     (testing "a test run that failed as a whole is said, not read as tests not run"
       (let [err {:seon.error/type :seon.proofs/test-run-died :seon.error/operation 'seon.agent/test-run :seon.error/message "namespace app-test did not load: Unable to resolve symbol: g"}
             db (d/db-with db [{:seon.agent/key "b/a1" :seon.agent/task [:seon.task/id "demo/f"] :seon.agent/test-error err}])
             st (context/status db (:tree (seon.ctx/build db (pdb/eid db :seon.agent/key "b/a1") :b)) {})]
         (is (= {:failed ["namespace app-test did not load: Unable to resolve symbol: g"]} (:test-run st)))
         (is (= [{:test 'demo-test/f-test :status :not-run :source (print/code "(deftest f-test (is (= 4 (f 2))))")}] (:proofs st)) "a written proof did not run")
-        (is (re-find #"did not load" (pr-str (seon.render.ui/status-hiccup st))) "drawn, it is there"))
+        (is (re-find #"did not load" (pr-str (seon.render.ui/status-hiccup {} st))) "drawn, it is there"))
       (is (= ["namespace app-test did not load: Unable to resolve symbol: g" "test process died: 9"]
              (proofs/test-run-errors {:reports [{:type :error :message "namespace app-test did not load: Unable to resolve symbol: g"}
                                            {:type :fail :var "#'demo-test/f-test" :message "x"}
@@ -1781,7 +1781,7 @@
     (is (empty? (:helpers shape)) "only the helpers its example calls (it calls none)")
     (is (= "(deftest g-test (is (= 1 (g))))" (:example shape)) "one real test of it: the shortest of its first five by name")
     (is (nil? (context/test-shape db 'nowhere-test/x)) "a namespace the branch lacks has no shape: the agent makes it first")
-    (let [h (pr-str (seon.render.ui/status-hiccup {:proofs [{:test 'demo-test/new-test :status :undefined :shape shape}]}))]
+    (let [h (pr-str (seon.render.ui/status-hiccup {} {:proofs [{:test 'demo-test/new-test :status :undefined :shape shape}]}))]
       (is (re-find #"Write " h) "it is told to write it")
       (is (re-find #"Write it like this one" h))
       (is (re-find #"deftest g-test" h)))))
