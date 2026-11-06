@@ -226,7 +226,8 @@
           head0 (when (and follow (checked-out? base)) (git-try base ["rev-parse" "--verify" "--quiet" "HEAD"]))
           gap (when follow (follow-main base follow))
           head (when (checked-out? base) (git-try base ["rev-parse" "--verify" "--quiet" "HEAD"]))
-          _ (when (and head own-branch) (own-branch-at! base own-branch head))
+          ;; a root that writes back no merges names none (:none)
+          _ (when (and head (string? own-branch)) (own-branch-at! base own-branch head))
           paths (when-not (and follow (not= head head0)) paths)
           source? (fn [^String p] (or (.endsWith p ".clj") (.endsWith p ".edn")))
           inputs (when (and binary-tree head) (inputs base))]
