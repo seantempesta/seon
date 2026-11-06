@@ -1931,12 +1931,21 @@
 
 ;; ---- the store bin/check is given ----------------------------------------------------------
 
+(defn remove-store-past!
+  "Remove the store at path when its data file is past max-bytes, answering whether it did: an LMDB file never shrinks and a store's branch roster
+  only appends, so a store seeded once and used for every run grew without bound, and the file and the roster were each run's to carry. See docs/checks.md#modes."
+  [path max-bytes]
+  (let [big? (> (.length (java.io.File. (str path "/data.mdb"))) max-bytes)]
+    (when big? (seon.fx/remove-tree! path))
+    big?))
+
 (defn seed
   "The one store bin/check is given (:seon.config.root/store-path; SEON_STORE names another),
-  opened before any step boots: created and seeded with about n datoms on :db when missing,
-  else as it is. Each step's root then works on a branch of it, its own main (seon.db/open!)."
+  opened before any step boots: created and seeded with about n datoms on :db when missing or past
+  :seon.config.proofs/check-store-max-bytes, else as it is. Each step's root then works on a branch of it, its own main (seon.db/open!)."
   [n]
   (let [path (seon.config/value :seon.config.root/store-path)
+        _ (remove-store-past! path (seon.config/value :seon.config.proofs/check-store-max-bytes))
         t0 (profile/now-ns)
         {:keys [seeded? conn]} (seon.db/open! :lmdb path n :db)
         ms (lib/r2 (profile/ms-since t0))
