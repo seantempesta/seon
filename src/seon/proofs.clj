@@ -648,6 +648,14 @@
                    tst ts]
                [tst (result tst)])))))
 
+(defn worth-shards
+  "How many shards tests' work is worth, at most jobs: one for each min-ms of it ({test ms}; a test never measured counts as the mean of those measured,
+  as `shards` deals it), so a run of a few seconds stays one process and a long one splits (docs/merging.md#a-merge-runs-what-the-change-reaches)."
+  {:malli/schema [:=> [:cat [:sequential :qualified-symbol] pos-int? [:map-of :qualified-symbol :int] pos-int?] pos-int?]}
+  [tests jobs ms min-ms]
+  (let [mean (if (seq ms) (quot (reduce + (vals ms)) (count ms)) 1)]
+    (-> (quot (reduce + (map #(get ms % mean) tests)) min-ms) (max 1) (min jobs))))
+
 (defn shards
   "tests (var symbols) dealt into at most jobs shards by their measured ms ({test ms}; a test
   never measured counts as the mean of those measured), so the shards end together (bin/test's, and an agent's test run, seon.agent/run-tests-forked: the one deal, docs/merging.md#a-merge-runs-what-the-change-reaches): a

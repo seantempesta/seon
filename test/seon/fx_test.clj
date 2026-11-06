@@ -294,3 +294,27 @@
           (is (not (.exists (java.io.File. d "a/one.edn"))))
           (is (not (.exists (java.io.File. d "b/c/two.edn"))))))
       (finally (fx/remove-tree! d)))))
+
+;; docs/merging.md#a-merge-runs-what-the-change-reaches: 17 gates in a row built one candidate to the one refusal, about 40 s each, holding the worker
+(deftest a-candidate-that-makes-no-plan-is-not-built-again
+  (let [sha (str "test-" (random-uuid))
+        calls (atom 0)
+        refused (fn [_ _] (swap! calls inc) (seon.contract/error :seon.fx/io-error 'seon.fx/run-on-checkout "the test runner made no plan: No such namespace: print" {:path "/x" :no-plan true}))
+        held @#'seon.fx/run-held
+        req {:repo "/x" :files {"src/a.clj" "(ns a)"} :tests ['a/t]}
+        first-answer (held refused sha req)
+        again (held refused sha req)]
+    (is (seon.contract/error? first-answer))
+    (is (seon.contract/error? again) "the same typed answer")
+    (is (= :seon.fx/io-error (:seon.error/type again)))
+    (is (clojure.string/includes? (:seon.error/message again) "No such namespace: print") "saying the same why")
+    (is (= 1 @calls) "and the second ask built nothing")
+    (let [other (held refused sha (assoc-in req [:files "src/a.clj"] "(ns a) ;; changed"))]
+      (is (seon.contract/error? other))
+      (is (= 2 @calls) "changed files run again"))
+    (let [other-error (fn [_ _] (swap! calls inc) (seon.contract/error :seon.fx/io-error 'seon.fx/run-on-checkout "bin/worktree --at exited 1" {:path "/x"}))
+          sha2 (str "test-" (random-uuid))]
+      (held other-error sha2 req)
+      (held other-error sha2 req)
+      (is (= 4 @calls) "another failure holds nothing: it may be the machine's"))))
+
