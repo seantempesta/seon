@@ -8,7 +8,7 @@ The owner's rulings of 2026-11-06, on one tree for the model and the page, on da
 
 ### Old work retired, not left halfway
 
-Owner, 2026-11-06, on branches stranded since October ("we are merging things and not just abandoning them halfway"): retired, each with its commit: judge second-move tooling and generated `:repl-calls` (`01ea574335`, the live-agent lab does this job); a content-keyed derivation (`a08ef67bf3`, cold first and the test reuse by digest that merged instead); a test digesting the files it read (`9fccfab234`, with Jolt's `jolt/file-reads-are-recorded`); a staged kinds deletion (`252a7fac9c`, written when runs existed; the kinds are still on main). The daily full run stays (`e5b45e24fb`, its deletion, is dropped).
+Owner, 2026-11-06, on branches stranded since October ("we are merging things and not just abandoning them halfway"): retired, each with its commit: judge second-move tooling and generated `:repl-calls` (`01ea574335`, the live-agent lab does this job); a content-keyed derivation (`a08ef67bf3`, cold first and the test reuse by digest that merged instead); a test digesting the files it read (`9fccfab234`, with Jolt's `jolt/file-reads-are-recorded`); a staged kinds deletion (`252a7fac9c`, written when runs existed; the kinds are still on main). The daily full run stays (`e5b45e24fb`, its deletion, is dropped). Loading init from units outside the boot is dropped on its new numbers (docs/machine.md). The write-time schema check lands with its bound moved from 83 to 101 calls (docs/storage.md#the-write-checks-every-datom). About 80 experiment and superseded branches are deleted; `curated` stays, the only git copy of two example sessions.
 
 ### The model's context is a render of the same tree as the page
 

@@ -576,7 +576,7 @@
          :growth :constant
          ;; measured 2026-11-06 at 100, 300, 1,000 forms: 331k, 335k, 364k ticks; 940 KB, 960 KB, 1.04 MB; 83 calls. Replacing
          ;; each form's row on every text write: 762k, 923k, 1.60M ticks; 3.10, 4.06, 7.43 MB; 65 calls (red: over and steeper)
-         :fixed {:calls 83 :bytes 1000000 :ticks 340000}
+         :fixed {:calls 101 :bytes 1000000 :ticks 340000} ; 83 until the write checked every datom (the owner, 2026-11-06)
          :sizes [100 300 1000]})
       (finally (reset! seon.agent/state was)
                (add-watch seon.agent/state :seon.ctx/ctx @#'seon.ctx/on-state)))))
