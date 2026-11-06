@@ -408,6 +408,15 @@
   {:malli/schema [:=> [:cat :any] [:set :qualified-keyword]]}
   [form] (set (filter qualified-keyword? (tree-seq coll? seq form))))
 
+(defn repl-act?
+  "Does the analyzed form l (its :nodes or :units) only change its namespace's environment at a REPL, naming what later forms may use (:as, :refer)?
+  It holds for that REPL alone (`account`'s :repl?), so its answer says so. See docs/agent.md#the-repl."
+  {:malli/schema [:=> [:cat :map :any] :boolean]}
+  [{:keys [nodes units]} form]
+  (let [a (merge-accounts (or units (map unit-account nodes)))]
+    (boolean (and (:env? a) (empty? (:defs a))
+                  (some #{:as :refer} (filter keyword? (tree-seq coll? seq form)))))))
+
 (defn account
   "The program account of one top-level form, or nil when it is none of the program's.
   opts: :nodes (each analyzed unit's node; or :units, their unit-accounts), :src (its exact text), :form
@@ -416,9 +425,11 @@
   its head resolves to clojure.core/ns), :before (readback: var -> root before; nil for an
   analysis without running: every top-level def counts), :ran? (the form returned; a form
   that threw records only the vars it set), :ns-meta (an ns form's name's metadata: Jolt's
-  ns drops it, jolt/ns-meta), :lead, :order, :k (occurrence of its text)."
+  ns drops it, jolt/ns-meta), :lead, :order, :k (occurrence of its text), :repl? (typed at a REPL: a form that only changes the
+  namespace's environment, a require or an alias, is that REPL's act and no program; a file's is the file's text, kept whole, and only an
+  ns form says what a namespace needs everywhere. See docs/agent.md#the-repl)."
   {:malli/schema [:=> [:cat [:map [:src :string] [:form :any]]] [:maybe :map]]}
-  [{:keys [nodes units src form ns ns-after ns-form? ns-meta before ran? lead order k] :or {k 0}}]
+  [{:keys [nodes units src form ns ns-after ns-form? ns-meta before ran? lead order k repl?] :or {k 0}}]
   (let [units (or units (map unit-account nodes))
         nsym (if ns-form? ns-after ns)
         nsx (find-ns nsym)
@@ -447,7 +458,7 @@
         ns-doc (when ns-form? (let [x (when (seq? form) (nth form 2 nil))]
                                 (first (filter string? [(:doc ns-meta) x (when (map? x) (:doc x))]))))]
     (when (and nsx (not (scratch-ns? nsx)) (not (:scratch ns-meta))
-               (or ns-form? (seq defs) (seq declares) (seq methods) (seq impls) (:env? a)))
+               (or ns-form? (seq defs) (seq declares) (seq methods) (seq impls) (and (:env? a) (not repl?))))
       (cond-> {:id (first ids) :src src :code (second ids) :ns nsym :ns-form? (boolean ns-form?) :ns-doc ns-doc
                :defs defs :declares declares :methods (or methods []) :impls (or impls [])
                :refs (-> (:refs a) (into (macro-uses nsx form))

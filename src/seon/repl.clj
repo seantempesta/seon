@@ -420,7 +420,7 @@
                        md (when (:ns-form? l) (not-empty (dissoc (meta (second (:repl/form m))) :line :column)))
                        _ (when md (alter-meta! (the-ns (:ns-after l)) merge md))
                        acct (when (and l (= :agent (:mode @agent/state)) (:repl/src m))
-                              (program/account (assoc l :src (:repl/src m) :lead (:lead m) :form (:repl/form m) :ns-meta md :ran? (contains? m :repl/value))))
+                              (program/account (assoc l :src (:repl/src m) :lead (:lead m) :form (:repl/form m) :ns-meta md :repl? true :ran? (contains? m :repl/value))))
                        ;; a def beside calls stays this eval (seon.program/definition-form?), and says so
                        nested? (and acct (not (program/definition-form? (:repl/form m) (the-ns (:ns l)))))
                        acct (when-not nested? acct)]
@@ -445,7 +445,9 @@
                      (cond-> m
                        l (assoc :repl/defined (program/set-vars l))
                        (or nested? (and l (= :agent (:mode @agent/state)) (program/calls-eval? l)))
-                       (assoc :not-program "A definition inside a let or through eval runs in this process and is not program, so it will not merge: define it at a form's top level (seon.program/definition-form?)."))))))))))))
+                       (assoc :not-program "A definition inside a let or through eval runs in this process and is not program, so it will not merge: define it at a form's top level (seon.program/definition-form?).")
+                       (and l (= :agent (:mode @agent/state)) (not (program/scratch-ns? (the-ns (:ns l)))) (program/repl-act? l (:repl/form m)))
+                       (assoc :not-program "This holds for your REPL and is not program: what a definition uses here it won't have on a checkout, so what it needs goes in its namespace's ns form."))))))))))))
 
 (defn- branch-registry
   "The registry this agent's evaluation binds (seon.program/schema-registry of its branch's
