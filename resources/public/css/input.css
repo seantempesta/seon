@@ -198,6 +198,8 @@ pre.seon-print-code { margin: 0; padding: 0.4rem 0.6rem; border-radius: 6px; bac
 .seon-md-inline > div, .seon-md-inline p { display: inline; margin: 0; }
 .seon-md p code, .seon-md li code { color: var(--color-text-100); background: var(--color-base-850); padding: 0 0.2rem; border-radius: 3px; }
 .seon-md a { text-decoration: underline; }
+/* a step's buttons run in the agent's REPL, so they show only where its input does */
+.seon-page:not(:has(form[data-seon-repl])) .seon-step-tools { display: none; }
 .seon-md-inline code { color: var(--color-text-100); background: var(--color-base-850); padding: 0 0.2rem; border-radius: 3px; }
 .seon-message, .seon-message p, .seon-message li { font-family: var(--font-prose); font-size: 0.9rem; line-height: 1.55; }
 .seon-turn .seon-eval > summary { padding: 0.15rem 0.3rem; }
