@@ -392,7 +392,7 @@
     (is (every? #(contains? config/schema-forms %) (config/keys-declared)))))
 
 (deftest bin-ports-writes-its-keys-under-their-current-names
-  ;; task seon.db/stored-attributes-take-the-new-words: bin/ports owns the port keys of a
+  ;; bin/ports owns the port keys of a
   ;; checkout's local layer and writes them on every run, keeping its ports and every other entry
   (let [root (config/checkout)
         f (str root "/target/ports-test-" (random-uuid) ".edn")]

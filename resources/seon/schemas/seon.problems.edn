@@ -6,6 +6,7 @@
  ;; an agent's test results not recorded as facts on its branch: its schema lacks them, or the branch refused the write (seon.agent/record-results!); the run answers it under :unrecorded
  :seon.agent/unrecorded [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/unrecorded]]]]
  ;; a commit the agent's branch refused (a value the store cannot hash): its run-ahead writes dropped, the eval ids among them named (seon.agent/commit!); an eval answers it under :unrecorded
+ :seon.agent/no-branch [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/no-branch]]]]
  :seon.agent/commit-refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/commit-refused]] [:transactions :int] [:evals [:vector :string]]]]
  :seon.agent/eval-error [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/eval-error]]
                                                 [:class :string] [:data {:optional true} :map] [:phase {:optional true} :keyword]
@@ -37,9 +38,9 @@
  ;; run records its reds at its end), a spawn or fork refused (seon.root/set-agent)
  :seon.agent/failed [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/failed]] [:agent :keyword]]]
  ;; an agent's socket to root that cannot raise SIGIO (seon.sock/signal-at-input!): the agent
- ;; ends with its root only when it next reads that socket (task seon.agent/an-agent-ends-with-its-root)
+ ;; ends with its root only when it next reads that socket
  :seon.sock/unwatched [:and :seon.error/base [:map [:seon.error/type [:= :seon.sock/unwatched]] [:errno :int]]]
- ;; the kernel refused a write for a reason other than a gone peer (task seon.sock/a-frame-is-written-whole)
+ ;; the kernel refused a write for a reason other than a gone peer
  :seon.sock/write-failed [:and :seon.error/base [:map [:seon.error/type [:= :seon.sock/write-failed]] [:errno :int] [:fd :int] [:sent :int] [:of :int]]]
  :seon.agent/stalled [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/stalled]] [:agent :keyword]
                                              [:quiet-ms :int] [:last-op {:optional true} [:maybe :seon.agent/last-op]]]]

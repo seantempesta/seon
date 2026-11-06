@@ -189,7 +189,7 @@
 (defn by-pages "The input of size n: n/10 watched pages, a commit of 100 datoms." {:malli/schema [:=> [:cat pos-int?] [:tuple :map [:vector :map]]]} [n] [(watching (quot n 10)) (commit-of 100)])
 
 (deftest a-transaction-costs-its-datoms-to-match
-  ;; task seon.render/a-view-renders-once-per-change-of-its-reads (C): the pages a commit touched
+  ;; the pages a commit touched
   ;; are found by its datoms' keys in the proc's one index (seon.render.proc/touched)
   (cost/proof
     {:of 'seon.render.proc/touched :input 'seon.render-cost-test/by-datoms
@@ -322,7 +322,7 @@
   (seon.render/flush! w nil))
 
 (deftest a-change-costs-its-components
-  ;; task seon.render/a-page-is-its-components: a change draws the components whose read paths it
+  ;; a change draws the components whose read paths it
   ;; reaches, and nothing else of the page
   (cost/proof
     {:of 'seon.render-cost-test/redraw! :input 'seon.render-cost-test/change-of

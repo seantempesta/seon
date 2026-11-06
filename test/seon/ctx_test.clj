@@ -382,7 +382,7 @@
     [c (:db-after rep) (:tx-data rep) :b]))
 
 (deftest an-agents-own-record-holds-every-message-and-turn
-  ;; task seon.agent/every-limit-fails-loudly item (2) (the owner, 2026-10-30: "deliver all messages and errors"): an
+  ;; (the owner, 2026-10-30: "deliver all messages and errors"): an
   ;; agent's own record, pulled by its schema's pattern, holds every message and every turn it has,
   ;; never the newest :seon.config.ctx/window of them (100), which only root's own record keeps for its copies
   (let [n 2400 db (seeded n nil) c (ctx/build db (aid db) :b)]

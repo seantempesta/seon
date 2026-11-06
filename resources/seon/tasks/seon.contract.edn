@@ -1,7 +1,6 @@
 [{:seon.task/name "contracts-armed-at-definition"
   :seon.task/plan "Every definition happens once (AGENTS §5). `seon.contract/arm!` wraps an agent's REPL defn after it is defined, with alter-var-root, and `seon.contract/instrument!` arms the foundation namespaces at boot the same way. Correct: a definition carrying :malli/schema is defined already checked, from its definition event; arm!, instrument! and the ::wrapper metadata go. The contract-gap rule over a branch's changes is already one, `seon.merge/uncontracted`, which the writer's merge gate and root's judge both ask; the generated vars of defrecord/defprotocol are recognised from the definition events."
   :seon.task/kind :work
-  :seon.task/needs #{"seon.program/definitions-from-the-compiler"}
   :seon.task/proofs #{seon.contract-test/a-contracted-definition-is-checked-from-its-definition
                       seon.contract-test/one-contract-gap-rule-agrees-everywhere}}
  {:seon.task/name "a-contract-is-checked-once-and-costs-nothing"

@@ -263,7 +263,7 @@ build_embed() {
 
 build_seon() {
   # each step decides by its own stamp (its sources' pin), never by its output existing: a sync
-  # to a new pin rebuilds what moved (task seon.check/a-build-rebuilds-what-its-pin-moved); a
+  # to a new pin rebuilds what moved; a
   # generation's worktree (seon.fx/build) holds its checkout's build, not a shared one
   build_jolt
   build_native
@@ -283,7 +283,7 @@ build_seon() {
   if [ -n "$key" ] && fresh seon "$key" && [ -x "$T/seon" ] && [ "$(cat "$T/seon.tree" 2>/dev/null)" = "$tree" ]; then say "seon up to date (tree $tree)"; return; fi
   rm -f "$T/seon.tree" "$T/seon.stamp"
   # the program's main: seon.main serves root and ports, and loads the check driver
-  # (seon.check, in test/, outside src; task seon.main/drivers-leave-src) from the checkout's
+  # (seon.check, in test/, outside src) from the checkout's
   # source for every other mode, so the release binary holds only the program
   say "seon: jolt build -m seon.main -> target/seon"
   ( cd "$ROOT"

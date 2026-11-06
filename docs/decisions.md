@@ -132,7 +132,7 @@ The owner's rulings of 2026-10-30 morning, after the overnight md-scan runs; the
 
 ### Errors reach the agent grouped, once (owner, 2026-10-30)
 
-"errors render grouped by signature with counts, newest first line and a handle; root records all; the context sends what changed." Stated in: seon.render.ui/problems-model, task seon.agent/every-limit-fails-loudly.
+"errors render grouped by signature with counts, newest first line and a handle; root records all; the context sends what changed." Stated in: seon.render.ui/problems-model.
 
 ### The context sends changes, cites code at preview, and counts turns on the eval line (owner, 2026-10-30)
 
@@ -152,7 +152,7 @@ An in-agent test's code strings are not in its reach, so its digest may reuse a 
 
 ### Eval budgets come from measured costs (owner, 2026-10-30)
 
-Budgets should be under 90%+ of the time and an overrun mostly a case worth intervening, as each test's tick budget comes from its own green history; :seon.config.agent/form-ticks and form-bytes are to be derived from measured eval costs, not fixed. The optimization session's; a test run an eval takes in place is not the form's work (task seon.agent/a-taken-test-run-is-not-the-forms-work).
+Budgets should be under 90%+ of the time and an overrun mostly a case worth intervening, as each test's tick budget comes from its own green history; :seon.config.agent/form-ticks and form-bytes are to be derived from measured eval costs, not fixed. The optimization session's; a test run an eval takes in place is not the form's work.
 
 ### Simplify by constraint; the test suite must be trusted (owner, 2026-10-30)
 
@@ -248,7 +248,7 @@ Chose V2b of three measured builds over `--opt` (-419 MB, but library stack line
 
 ### Agents at once: ten to twenty on a small machine, no ceiling on big iron (owner, 2026-10-29)
 
-"Yeah I think 10-20 should be fine for users with small machines and the sky is the limit for servers and big iron." `:seon.config.agent/max-running` defaults to 10 (was 4, v1's), and is sized from the machine's RAM and an agent's measured real cost (20.6 MB an agent by `bin/check scale`, 2026-10-29), never a fixed ceiling on a large machine. Stated in: resources/seon/config/default.edn (:seon.config.agent/max-running), task seon.config/agents-at-once-follow-the-machine.
+"Yeah I think 10-20 should be fine for users with small machines and the sky is the limit for servers and big iron." `:seon.config.agent/max-running` defaults to 10 (was 4, v1's), and is sized from the machine's RAM and an agent's measured real cost (20.6 MB an agent by `bin/check scale`, 2026-10-29), never a fixed ceiling on a large machine. Stated in: resources/seon/config/default.edn (:seon.config.agent/max-running).
 
 ### Fix every major optimization issue; memory is the thread to pull (owner, 2026-10-29)
 
@@ -674,7 +674,7 @@ Owner, 2026-10-24: "Beautiful naming and the render tree should tell a story and
 
 ### A prove run is keyed by the digest of what it reads
 
-Owner, 2026-10-24: "okay lets try the digest". The test service's run key (`seon.prove/run-key`) names the digest of the code and tests the run reaches, as each test's result is already keyed (AGENTS §5), not `branch@t`: a write to main that touches none of it never starts a second run. Stated in: not yet (owed docs/merging.md#the-test-service, task seon.proofs/a-prove-runs-key-does-not-move-between-two-asks).
+Owner, 2026-10-24: "okay lets try the digest". The test service's run key (`seon.prove/run-key`) names the digest of the code and tests the run reaches, as each test's result is already keyed (AGENTS §5), not `branch@t`: a write to main that touches none of it never starts a second run. Stated in: not yet (owed docs/merging.md#the-test-service).
 
 ### Root merges verified fixes as they come in
 
@@ -1087,7 +1087,7 @@ The questions waiting on the owner's ruling, the plan's blockers among them.
 - Changed-since: a Datahike tree diff by node address (port v1 fork `771a0c4b`, prototype first) or a `:seon.tx/changed` stamp against the "no stamps" ruling.
 - Proofs along `:needs`: keep `seon.task/accumulate` (2026-10-20 ruling) or never carry proofs, since an accumulated designed-red check blocks implement (DESIGN-tasks §3.4, §11 #14); possibly moot once templates become held task data.
 - No progress: is a byte-identical repeated reply a recorded fact only, or does it end the run.
-- What is a stall once an eval is bounded by its work: three tasks (`seon.root/a-stall-is-past-the-requests-own-bound`, `seon.root/one-clock`, `seon.turn/a-form-has-a-time-bound`) still plan a clock; `:seon.config.agent/stall-ms` (30000, a config key now) remains.
+- What is a stall once an eval is bounded by its work: one task (`seon.root/a-stall-is-past-the-requests-own-bound`; the other two of the three are done and removed) still plans a clock; `:seon.config.agent/stall-ms` (30000, a config key now) remains.
 - The per-run turn cap: lower `:seon.config.agent/max-turns` (40) to about 2x the measured p90 turns-to-green once 20 real tasks give one.
 - A dropped model connection (`:seon.model/transport`): retry once after a wait, or end as now.
 - File and shell roots: a config key with a permissive default, or none; and whether `:git` `:build` `:deps` `:source` effects are root-only.
