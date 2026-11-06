@@ -612,6 +612,50 @@
           (d/release conn)))
       (finally (clojure.java.shell/sh "rm" "-rf" path (str path ".compact"))))))
 
+;; docs/storage.md#collection: old snapshots go when enough commits have landed, and nothing a merge or a page reads goes with them
+(deftest a-store-keeps-what-is-read-and-sweeps-old-snapshots
+  (let [path (str (seon.config/checkout) "/target/tmp/retain-" (random-uuid))
+        {:keys [conn]} (pdb/open! :lmdb path 0 :db)
+        note! (fn [c s] (d/transact c [{:note/text s}]) (d/commit-id @c))
+        notes-of (fn [db] (sort (map :v (d/datoms db :aevt :note/text))))
+        hist (fn [db] (count (d/datoms (d/history db) :eavt)))]
+    (try
+      (is (nil? (pdb/retain! conn 3)) "too few commits: none due")
+      (note! conn "a")
+      (d/branch! conn :db :b)
+      (let [b (d/connect (assoc (:config @conn) :branch :b))
+            _ (note! b "on b")
+            base (d/merge-base conn :b :db)
+            named (note! conn "named")
+            _ (d/transact b [{:seon.agent/key "k" :seon.agent/main-commit named}])
+            old (note! conn "old")
+            _ (doseq [i (range 5)] (note! conn (str "n" i)))
+            _ (d/branch! conn :db :c)
+            c (d/connect (assoc (:config @conn) :branch :c))
+            _ (note! c "on c")
+            base-c (d/merge-base conn :c :db)
+            _ (doseq [i (range 5)] (note! conn (str "m" i)))
+            main-before (notes-of @conn) hist-before (hist @conn) tail (d/commit-id @conn)
+            r (pdb/retain! conn 3)]
+        (is (pos? (:swept r)) (pr-str r))
+        (is (= (:generation r) (:generation (:seon.root/retained (d/pull @conn [:seon.root/retained] [:seon.root/id :root])))) "and it is written on main")
+        (is (nil? (pdb/retain! conn 3)) "with nothing new landed, none is due")
+        (is (= (conj (vec main-before)) (notes-of @conn)) "main's head reads the same")
+        (is (<= hist-before (hist @conn)) "its history too")
+        (is (= base (d/merge-base conn :b :db)) "the merge base is found: a branch off a commit past the cutoff")
+        (is (= base-c (d/merge-base conn :c :db)) "and so is another's")
+        (is (some #(= "n4" %) (notes-of (d/commit-as-db conn base-c))) "and it reads whole")
+        (is (= (notes-of (d/commit-as-db conn base)) ["a"]) "and it reads whole")
+        (is (seq (notes-of (d/commit-as-db conn named))) "a commit an agent's fact names reads whole")
+        (is (nil? (d/commit-as-db conn old)) "an old one no one names is gone")
+        (is (= ["a" "on b"] (notes-of @b)) "the branch reads the same")
+        (is (= tail (d/commit-id (d/commit-as-db conn tail))) "and the newest commits stay")
+        (d/release b) (d/release c))
+      (let [cfg (:config @conn)]
+        (pdb/sync! cfg) (d/release conn)
+        (is (:bytes-after (pdb/compact-if-due! path)) "the sweep left its freed pages to compact"))
+      (finally (clojure.java.shell/sh "rm" "-rf" path (str path ".compact"))))))
+
 ;; the rule a collection keeps beside "no agent live" (docs/storage.md#collection)
 (deftest a-root-that-shares-its-store-never-collects
   ;; seon.db/collect! with sole? false (:seon.config.store/sole-writer?, false where roots share
