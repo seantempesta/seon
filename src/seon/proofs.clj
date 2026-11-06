@@ -233,13 +233,20 @@
   {:malli/schema [:=> [:cat :string] :boolean]}
   [step] (boolean (and (contains? check-steps step) (not (binary-free step)))))
 
+(defn agent-tests-sample
+  "The tests of digests ({test digest}) the agent-tests step runs: the n of lowest digest, a choice that is the same for the same tests and moves as they do (docs/checks.md#modes)."
+  {:malli/schema [:=> [:cat pos-int? [:map-of :qualified-symbol :string]] [:set :qualified-symbol]]}
+  [n digests]
+  (into #{} (map key) (take n (sort-by (juxt val (comp str key)) digests))))
+
 (defn agent-tests-digest
-  "The agent-tests step's key: dg, the digest of what the step's own code reaches, with the digest of each test of idx ({test {:digest :process?}},
-  seon.program/graph-index's) that reaches no process, the tests it runs, so it moves when one of them or the step does and no other edit reaches it
+  "The agent-tests step's key: dg, the digest of what the step's own code reaches, with the digest of each test it runs, agent-tests-sample's n of idx's
+  ({test {:digest :process?}}, seon.program/graph-index's) that reach no process, so it moves when one of them or the step does and no other edit reaches it
   (docs/checks.md#modes)."
-  {:malli/schema [:=> [:cat :string :map] :string]}
-  [dg idx]
-  (lib/digest (apply str dg (for [[t {:keys [digest process?]}] (sort-by (comp str key) idx) :when (not process?)] (str "\n" t " " digest)))))
+  {:malli/schema [:=> [:cat :string pos-int? :map] :string]}
+  [dg n idx]
+  (let [digests (into {} (for [[t {:keys [digest process?]}] idx :when (not process?)] [t digest]))]
+    (lib/digest (apply str dg (for [t (sort-by str (agent-tests-sample n digests))] (str "\n" t " " (digests t)))))))
 
 (defn step-digests
   "Of check-steps, {:digests {step digest} :missing [step ...]}: the reach digests (digests-of,
@@ -472,6 +479,7 @@
         steps (cond-> steps (get steps "agent-tests")
                 (assoc "agent-tests" (let [in (assoc inputs :tree "")]
                                        (agent-tests-digest (:digest (get (program/graph-index graph in (select-keys check-steps ["agent-tests"])) "agent-tests"))
+                                                           (cfg/value :seon.config.proofs/agent-tests-sample)
                                                            (program/graph-index graph in nil)))))
         process (into (if tests? process #{}) (keep (fn [[k v]] (when (:process? v) k))) step-idx)
         named? (or (true? all?) (seq names))
