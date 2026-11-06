@@ -77,8 +77,19 @@
 
 ;; ---- the agent's own API ------------------------------------------------------
 
-(defn db {:malli/schema [:=> [:cat] :seon.host/db]}
-  [] (:db @state))
+(defn- no-branch!
+  "Throws the typed :seon.agent/no-branch: this process is no agent (root's REPL), and what was called is an agent's API,
+  which reads and writes its branch. See docs/server.md#ops."
+  {:malli/schema [:=> [:cat] :any]}
+  []
+  (throw (ex-info "no branch" (contract/error :seon.agent/no-branch #'no-branch!
+                                              "this is root's REPL, which has no branch; my.agent, my.db, my.task and my.branch are an agent's API"
+                                              {:seon.error/fix "Read main at root: (d/q query @(:conn sys)), (d/pull @(:conn sys) pattern eid), my.root/*. Or run the form in an attached agent: seon_eval with its id."}))))
+
+(defn db
+  "This agent's branch as a db value; the typed :seon.agent/no-branch in a process that has none (`no-branch!`). See docs/server.md#ops."
+  {:malli/schema [:=> [:cat] :seon.host/db]}
+  [] (or (:db @state) (no-branch!)))
 
 (declare handle!)
 
@@ -302,7 +313,7 @@
   writes (`refused!`), never throws: no caller's loop ends on it. See docs/failure-points.md."
   {:malli/schema [:=> [:cat] :any]}
   []
-  (let [conn (:store-conn @state)
+  (let [conn (or (:store-conn @state) (no-branch!))
         c (try (dw/commit-pending! conn) (catch Throwable e e))]
     (cond
       (instance? Throwable c) (refused! conn c)

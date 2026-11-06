@@ -193,6 +193,8 @@ Reach it through the `seon` MCP server (`bin/mcp`, a stdio relay to the server, 
 - `seon_context` (what the model reads now);
 - `seon_attach` and `seon_done` (work a task as a Seon agent).
 
+**A helper in a worktree uses its own root, never the session's:** the session's `seon_*` tools reach the root of the checkout the session started in, and `bin/mcp call OP KEY=VALUE` is the same tool on this checkout's root. The whole path, env to done, with no model call: [working a task from a worktree](docs/server.md#working-a-task-from-a-worktree).
+
 Without MCP, one line works:
 ```
 printf '{:op :eval :agent "root" :code "(my.root/problems sys)"}\n' | nc -w 10 127.0.0.1 PORT

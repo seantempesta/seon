@@ -20,7 +20,7 @@
             [seon.agent :as agent] [seon.repl :as repl] [seon.task :as task] [seon.reconcile :as r]
             [seon.proofs :as proofs] [seon.context :as context] [seon.merge :as pm] [seon.problems :as problems]
             [seon.stage :as stage] [my.branch :as branch] [seon.reader :as reader] [seon.learn :as learn] [seon.config :as cfg] [seon.lib :as lib] [seon.print :as print]
-            [seon.error :as err] [datahike.api :as d] [seon.db :as pdb] [seon.render :as render]))
+            [seon.error :as err] [datahike.api :as d] [seon.db :as pdb] [seon.render :as render] [clojure.data.json :as json]))
 
 ;; The turn loop's own facts live in the agent's one state map, under :turn: whether this
 ;; process is working a task, the last turn's evals and a stop a function requested.
@@ -353,37 +353,44 @@
 
 (defn context-block
   "The request of task as a model is sent it on this branch now (the proofs run again): what an
-  outside agent working the task reads, the system prompt and its page, as one text, recorded as a turn of the run
+  outside agent working the task reads, the system prompt, its conversation and its page, as one text, recorded as a read of the agent
   (origin :outside, id \"<agent key>/read-<k>\", k the agent's own count of reads: a read moves no turn,
   docs/turn.md#the-turn-is-a-number). It also makes this process work task as run, so the my.* functions act
   on it. take?: the read is the run's turn (its
-  model is outside) and takes the messages delivered; else it is an observer's, and leaves them
-  for the model's next turn."
-  {:malli/schema [:=> [:cat :seon.task/id :boolean] :string]}
-  [task take?]
-  (let [_ (begin! task)
-        {:keys [tests-ms]} (observe task)
-        k (:key @agent/state)
-        ;; the agent's own count of reads, from the branch: a process, a run or a wake does not restart it
-        n (inc (or (d/q '[:find (max ?n) . :in $ ?a :where [?m :seon.model-call/agent ?a] [?m :seon.model-call/origin :outside] [?m :seon.model-call/n ?n]]
-                        (agent/db) (pdb/eid (agent/db) :seon.agent/key k))
-                   0))
-        t0 (profile/now-ns)
-        ;; an observer's read records nothing on the branch beyond the read and leaves the print cache
-        _ (take! take? (inc (agent/turn-now)))
-        ;; the main and merge base the read heard, decided as a model turn's are, before its request is drawn
-        _ (when take? (when-let [tx (not-empty (main-base-tx))] (agent/transact! tx) (agent/commit!)))
-        basis (assoc (basis! task n 1 :outside true) :agent k)
-        [db parts] (repl/page-hiccup)
-        {:keys [messages]} (context/render db basis {:parts parts :ctx @ctx/ctx})
-        ;; as a person reads it: the system prompt, then the page as the call Seon made and its result
-        text (str/join "\n\n" (remove str/blank? (mapcat (fn [{:keys [content tool-calls]}] (concat (map #(str (:intent %) "\n" (:code %)) tool-calls) [content])) messages)))]
-    ;; the read is a model call of this agent, as a model turn's is: what it was built from and what it cost
-    (agent/transact! [(cond-> {:seon.model-call/id (str k "/read-" n) :seon.model-call/agent {:seon.agent/key k} :seon.model-call/n n
-                               :seon.model-call/origin :outside :seon.model-call/basis basis
-                               :seon.model-call/split (cond-> {:context-ms (long (profile/ms-since t0))} tests-ms (assoc :tests-ms tests-ms))}
-                        true (assoc :seon.model-call/sent-hash (lib/digest (sedn/encode messages))))])
-    text))
+  model is outside): it takes the messages delivered and Seon shows the page as an eval, as before a model's turn; else it is an
+  observer's, and leaves both for the model's next turn. wire?: the request body as JSON, the bytes a provider is sent
+  (seon.context/wire-turn over the read's basis), for the text a person reads. See docs/server.md#working-a-task-from-a-worktree."
+  {:malli/schema [:function [:=> [:cat :seon.task/id :boolean] :string] [:=> [:cat :seon.task/id :boolean :boolean] :string]]}
+  ([task take?] (context-block task take? false))
+  ([task take? wire?]
+   (let [_ (begin! task)
+         {:keys [tests-ms]} (observe task)
+         k (:key @agent/state)
+         ;; the agent's own count of reads, from the branch: a process, a run or a wake does not restart it
+         n (inc (or (d/q '[:find (max ?n) . :in $ ?a :where [?m :seon.model-call/agent ?a] [?m :seon.model-call/origin :outside] [?m :seon.model-call/n ?n]]
+                         (agent/db) (pdb/eid (agent/db) :seon.agent/key k))
+                    0))
+         t0 (profile/now-ns)
+         turn (inc (agent/turn-now))
+         ;; an observer's read records nothing on the branch beyond the read and leaves the print cache
+         _ (take! take? turn)
+         ;; the main and merge base the read heard, decided as a model turn's are, before its request is drawn
+         _ (when take? (when-let [tx (not-empty (main-base-tx))] (agent/transact! tx) (agent/commit!)))
+         _ (when take? (show-page!))
+         ;; the turn a model would take now: every record before it is in the request
+         basis (assoc (basis! task turn 1 :outside true) :agent k)
+         [db parts] (repl/page-hiccup)
+         {:keys [messages]} (context/render db basis {:parts parts :ctx @ctx/ctx})
+         ;; as a person reads it: the system prompt, then each record as the call made and its result
+         text (if wire?
+                (json/write-str (:body (context/wire-turn db basis)))
+                (str/join "\n\n" (remove str/blank? (mapcat (fn [{:keys [content tool-calls]}] (concat (map #(str (:intent %) "\n" (:code %)) tool-calls) [content])) messages))))]
+     ;; the read is a model call of this agent, as a model turn's is: what it was built from and what it cost
+     (agent/transact! [(cond-> {:seon.model-call/id (str k "/read-" n) :seon.model-call/agent {:seon.agent/key k} :seon.model-call/n n
+                                :seon.model-call/origin :outside :seon.model-call/basis basis
+                                :seon.model-call/split (cond-> {:context-ms (long (profile/ms-since t0))} tests-ms (assoc :tests-ms tests-ms))}
+                         true (assoc :seon.model-call/sent-hash (lib/digest (sedn/encode messages))))])
+     text)))
 
 (defn hand-back-end
   "How an outside agent's run ends: [outcome reason] from the stop its agent requested

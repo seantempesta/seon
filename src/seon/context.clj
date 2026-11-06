@@ -979,7 +979,7 @@
   records in the order of their turn numbers (`records`: those of turns before the request's own, and the messages it took),
   each by its own render (eval-messages, message-messages, turn-messages, a function of that record alone), so a request is
   the one before it and the records added, byte for byte. The page is among them as evals Seon ran (`render-calls`,
-  docs/turn.md#an-eval-can-be-inserted); a request whose records hold none (a context read, the first move a judge scores) ends
+  docs/turn.md#an-eval-can-be-inserted); a request whose records hold none (an observer's context read, the first move a judge scores) ends
   with the page whole as a call of its own and its result, drawn from opts :parts, {id hiccup} of the agent's live walk
   (seon.repl/page-hiccup), else cold at db's commit. opts :ctx, its @ctx at db (else drawn cold). Answers {:messages :parts}:
   provider-neutral messages (seon.model/wire-messages makes the wire shape), and :parts, each record's [ref messages position]
@@ -992,24 +992,22 @@
   [a {:keys [db basis help help-ref parts ctx printed]}]
   (let [e (:db/id a)
         c (delay (or ctx (agent-ctx db e)))
-        model? (= :model (:origin basis))
         n (:turn basis)
         ;; a model's request holds the example sessions of the task its agent's session began with right after the system message,
         ;; then the opening of its own session, in every request of it (the agent's first model call names the task: a later stage
         ;; of the session keeps the examples the session began with). Read from the task's datoms, so a task naming none costs no
         ;; contracted call (examples-of is asked only when it names some)
-        began (when model?
-                (or (when-let [n (d/q '[:find (min ?n) . :in $ ?a :where [?m :seon.model-call/agent ?a] [?m :seon.model-call/origin :model] [?m :seon.model-call/n ?n]] db e)]
+        began (or (when-let [n (d/q '[:find (min ?n) . :in $ ?a :where [?m :seon.model-call/agent ?a] [?m :seon.model-call/origin :model] [?m :seon.model-call/n ?n]] db e)]
                       (:seon.model-call/basis (d/pull db [:seon.model-call/basis] [:seon.model-call/id (str (:seon.agent/key a) "/" n)])))
-                    basis))
-        ex (when-let [te (when model? (pdb/eid db :seon.task/id (:task began)))]
+                  basis)
+        ex (when-let [te (pdb/eid db :seon.task/id (:task began))]
              (when (seq (d/datoms db :eavt te :seon.task/examples))
                (when-let [ks (seq (examples-of db (:task began)))]
                  (let [sid (:session basis (:agent basis))]
                    (conj (mapv (fn [k] (let [t (example-t db k)] [[:example k t] (example-messages db k t) nil])) ks)
                          [[:session sid] (session-open sid) nil])))))
         ;; the turns before this one's, and the messages it took (its own evals and reply came of this request)
-        rs (if model? (filterv (fn [[pos]] (neg? (compare (subvec pos 0 2) [n 1]))) (records @c db)) [])
+        rs (filterv (fn [[pos]] (neg? (compare (subvec pos 0 2) [n 1]))) (records @c db))
         page (when-not (some (fn [[_ v]] (render-eval? v)) rs)
                (let [[intent code] (:whole render-calls)]
                  [[[:render]

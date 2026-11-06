@@ -419,7 +419,7 @@
         (reply! st o p (absent (get-in st [:view :agents id]) id))
         (let [[st rid] (pend st p op id)
               msg (case op
-                    :eval (cond-> {:op :eval :forms (:forms m)} (:ticks m) (assoc :ticks (:ticks m)) (:origin m) (assoc :origin (:origin m)))
+                    :eval (cond-> {:op :eval :forms (:forms m)} (:ticks m) (assoc :ticks (:ticks m)) (:origin m) (assoc :origin (:origin m)) (contains? m :intent) (assoc :intent (:intent m)))
                     :tests (cond-> {:op :tests} (:ticks m) (assoc :ticks (:ticks m)) (:names m) (assoc :names (:names m)) (:mode m) (assoc :mode (:mode m))
                                             (get-in st [:view :agents id :task]) (assoc :task (get-in st [:view :agents id :task])))
                     :judge {:op :judge}
@@ -1192,7 +1192,7 @@
     (case op
       spawn! {:op :spawn :opts (or args {})}
       clone! {:op :clone :parent id :opts (or args {})}
-      submit! (cond-> {:op :eval :id id :forms (:forms args)} (:ticks args) (assoc :ticks (:ticks args)) (:origin args) (assoc :origin (:origin args)))
+      submit! (cond-> {:op :eval :id id :forms (:forms args)} (:ticks args) (assoc :ticks (:ticks args)) (:origin args) (assoc :origin (:origin args)) (contains? args :intent) (assoc :intent (:intent args)))
       ;; the agent proves its branch through the test service as root's judge does (seon.agent/prove!
       ;; :judge, which keys the run by its head's digest): recorded on main, one run with any other asker's
       run-tests! {:op :judge :id id}
@@ -1239,7 +1239,7 @@
   "Send forms (a string) to the agent; a promise of the reply vector, one map per form.
   opts {:ticks n}: each form stops after n engine ticks of work (an outside or ui origin
   takes :seon.config.agent/form-ticks by default); {:origin :outside|:ui}: who asked, recorded
-  with each evaluation."
+  with each evaluation; {:intent s}: run as a model's call is (seon.repl/run-calls)."
   {:malli/schema [:function [:=> [:cat :seon.root/sys :seon.agent/id :string] :seon.host/promise] [:=> [:cat :seon.root/sys :seon.agent/id :string [:maybe :map]] :seon.host/promise]]}
   ([sys agent-id forms-string] (submit! sys agent-id forms-string nil))
   ([sys agent-id forms-string opts] (request! sys 'submit! agent-id (assoc opts :forms forms-string))))

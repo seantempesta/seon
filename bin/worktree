@@ -7,6 +7,8 @@
 # bin/worktree --at DIR COMMIT [REPO]  a detached worktree of REPO (default next/) at COMMIT in DIR, set
 #                             up as below: what a generation is built in (seon.fx/build, docs/source.md)
 # bin/worktree --remove-at DIR remove such a worktree and its submodule worktrees
+# bin/worktree --setup [DIR]  set up a worktree made by something else (the Agent tool's, default the one this
+#                             runs in) as below, with its ports: an existing checkout, built and rooted as any
 # bin/worktree --sync NAME|DIR move that worktree's submodules to the pins its branch records (after
 #                             merging main; bin/build calls it first), by `git -C` on its own submodule
 #                             checkouts only; one with uncommitted changes is named, not moved (exit 1). Never
@@ -117,11 +119,24 @@ if [[ ${1:-} == --at ]]; then
   exit 0
 fi
 
+if [[ ${1:-} == --setup ]]; then
+  WT=${${2:-$(cd "$(dirname "$0")/.." && pwd)}:A}
+  [[ $WT != ${MAIN_TREE:A} ]] || die "--setup is for a worktree; this is the main tree"
+  [[ ! -e $WT/target ]] || die "$WT/target exists: already set up"
+  setup "$WT"
+  print "worktree $WT set up; ports: $("$WT/bin/ports")"
+  print "  build: cd $WT && nice -n 15 bin/build seon; root: bin/root start; workflow: docs/server.md#working-a-task-from-a-worktree"
+  exit 0
+fi
+
 if [[ ${1:-} == --remove-at ]]; then
   WT=${2:-}; [[ -d $WT ]] || die "usage: bin/worktree --remove-at DIR (no worktree at '$WT')"
   unsub "$WT"
   C=$(git -C "$WT" rev-parse --path-format=absolute --git-common-dir)
   git --git-dir="$C" worktree remove --force "$WT"
+  # its port block (bin/ports), if it took one (--setup) is free again
+  REG=$MAIN_TREE/config/worktree-ports
+  [[ -f $REG ]] && /usr/bin/lockf -k "$REG.lock" zsh -c 'grep -v "^$2 " "$1" > "$1.new"; mv "$1.new" "$1"' _ "$REG" "${WT:t}"
   print "removed $WT"
   exit 0
 fi
