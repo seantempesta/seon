@@ -429,6 +429,11 @@
         (when (seq swept) (compact-due! conn))
         {:swept (count swept) :ms (profile/ms-since t0) :branches now :gone gone}))))
 
+(defn store-of
+  "The store db reads, of a db at a commit or of one as of a t (d/as-of keeps it on the db it wraps): what a reader of a commit by id opens it through. See docs/storage.md#collection."
+  {:malli/schema [:=> [:cat :any] :any]}
+  [db] (or (:store db) (:store (:origin-db db))))
+
 (defn retain!
   "Sweep the commit snapshots of the store under conn older than main's newest keep commits, when that many have landed since the last sweep (main's :seon.root/retained),
   counted by the commit graph's generation, never a clock. Kept whole, whatever their age: each branch's head, its merge base with main, and each commit an agent's facts

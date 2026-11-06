@@ -935,6 +935,13 @@
                                (p/view-html st' [:debug :a1])))
             h0 (page st e0) h1 (page st e1)]
         (is (= (clojure.data.json/write-str (sent 0 r0)) (wire-text h0)) "turn 0: the page's body is the bytes it sent")
+        ;; docs/storage.md#collection: a turn's commit a sweep took is drawn as of its t, from the same records
+        (let [b (:seon.model-call/basis (d/pull db [:seon.model-call/basis] e1))
+              at (d/commit-as-db (:store db) (:commit b))]
+          (is (= (:messages (seon.context/wire-turn at b)) (:messages (seon.context/wire-turn (d/as-of db (:max-tx at)) b)))
+              "as of its t, the request is the one its commit makes")
+          (is (= (:max-tx at) (:t (seon.problems/own (d/as-of db (:max-tx at)) (:e (first (d/datoms db :aevt :seon.agent/key))))))
+              "and an agent's problems read there say that t"))
         (is (= (clojure.data.json/write-str (sent 1 r1)) (wire-text h1)) "turn 1: the same")
         (is (str/includes? (page (assoc-in st [:tab [:debug :a1] :open] #{"d-turn-o0"}) e1) "the system message") "each message, opened, beside the records that made it")
         (is (str/includes? h1 "I call f.") "a call's arguments as sent, its prose in them")
