@@ -737,7 +737,7 @@
   then its tool message, the response printed now (seon.print/record-text, a function of the
   eval alone, and of the db for an eval that names its basis: opts :db, `basis-value`, the same bytes cold as live);
   an eval with intent and no call id was asked, not called (docs/turn.md#an-eval-can-be-inserted): its call is made here from its
-  own id and code, standing alone (no reply to name, so a model's message is never edited), and no reader asks who asked;
+  own id, intent (none for Seon's own) and code, standing alone (no reply to name, so a model's message is never edited), and no reader asks who asked;
   anyone else's (the user's) is one user message
   {:by :code :response}, the response spliced as printed. See docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
   {:malli/schema [:=> [:cat [:maybe :map] :map] [:vector :seon.model/message]]}
@@ -745,9 +745,9 @@
   (let [text (print/record-text (cond-> e basis (assoc-in [:seon.eval/response :value] (basis-value (:db opts) e))) render/model)
         cid (or call-id (when-not (str/blank? intent) (str "eval-" id)))]
     (if cid
-      ;; an eval nobody's reply made is its code alone, like any other call (docs/render.md#the-render-is-an-eval)
+      ;; an eval nobody's reply made has no text, and Seon's own is its code alone, like any other call (docs/render.md#the-render-is-an-eval)
       [(cond-> {:role "assistant" :content ""
-                :tool-calls [(cond-> {:id cid :code code} (and call-id intent) (assoc :intent intent))]}
+                :tool-calls [(cond-> {:id cid :code code} (and intent (not= "seon" by)) (assoc :intent intent))]}
          (and call-id (pos? (or turn 0))) (assoc :reply turn))
        {:role "tool" :tool-call-id cid :content text}]
       [{:role "user" :content (str "{:by " (pr-str by) " :code " (pr-str code) " :response " text "}")}])))

@@ -330,7 +330,7 @@
   (let [ev (fn [id by turn] {:seon.eval/id id :seon.eval/by by :seon.eval/intent "Read the pattern." :seon.eval/code "(:seon.ctx/pattern @ctx)"
                              :seon.eval/response {:handle (symbol "result" id) :value [:a]} :seon.eval/turn turn})
         ms (context/eval-messages {} (ev "e1" "root" 0))]
-    (is (= [{:role "assistant" :content "" :tool-calls [{:id "eval-e1" :code "(:seon.ctx/pattern @ctx)"}]}
+    (is (= [{:role "assistant" :content "" :tool-calls [{:id "eval-e1" :code "(:seon.ctx/pattern @ctx)" :intent "Read the pattern."}]}
             {:role "tool" :tool-call-id "eval-e1" :content "{:handle result/e1, :value [:a]}"}]
            ms)
         "a call made from the eval's own intent and code, answered by its response; turn 0 has no reply to name")
