@@ -1294,7 +1294,8 @@
      [:button (merge {:type "button" :class button :title "Run this again in its place. Its code runs for real, and the model reads the new result."} (call {})) "▶ Run"]
      [:button (merge {:type "button" :class button :title "Run the agent's steps from the start down to this one, stopping at the first that fails. Their code runs for real."} (call {:to-here true})) "⏭ To here"]
      [:button {:type "button" :class button :title "Copy its code" (keyword "data-on:click") "navigator.clipboard.writeText(el.closest('.seon-eval').querySelector('pre code').textContent)"} "⧉ Copy"]
-     [:details {:class "w-full"}
+     ;; what a person is typing is theirs, not the page's: a new eval landing morphs the list, and would close this
+     [:details {:class "w-full" :data-ignore-morph ""}
       [:summary {:class "cursor-pointer text-text-400"} "✎ Edit"]
       [:form (merge {:class "mt-1 flex flex-col gap-1"} (call {}))
        [:textarea {:name "code" :rows 6 :spellcheck "false" :class "w-full font-mono text-xs"} code]
