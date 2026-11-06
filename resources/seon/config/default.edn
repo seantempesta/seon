@@ -531,9 +531,9 @@
  ;; (4.2 s) after every shard's write, freeing only that write's room (2026-11-06, commit message). At the
  ;; bound: this share of the cache's least recently used verdicts goes at once, each running again if asked for.
  :seon.config.proofs/results-evict-percent 10
- ;; Unit: verdicts. How many of a test's newest verdicts (by file mtime) its typical ms and tick budget
- ;; read: a median of few keeps out one hung run, and a test's cost stops growing with the digests it has
- ;; had. Provenance: all of them cost 30.6 s across 1,708 tests, the newest 5 cost 4.4 s, and the same 1,524
+ ;; Unit: verdicts. How many of a test's newest greens its history holds (seon.fx/history), which its typical
+ ;; ms, tick budget and slow-test read take: a median of few keeps out one hung run, and a test's cost stops
+ ;; growing with the digests it has had. Provenance: all of them cost 30.6 s across 1,708 tests, the newest 5 cost 4.4 s, and the same 1,524
  ;; tests got a time (2026-11-06, commit message). At the bound: older verdicts are not read.
  :seon.config.proofs/recent-verdicts 5
  ;; Unit: processes. A proof run's selected tests (bin/prove, bin/test) are dealt, a namespace (with
@@ -594,6 +594,11 @@
  ;; bound: the store is removed before it is opened and starts again from the run's tree (one
  ;; import); an LMDB file never shrinks, so collecting would not bring it under.
  :seon.config.proofs/program-store-max-bytes 268435456
+ ;; Unit: bytes. The checks' seeded store on disk (bin/check's SEON_STORE, its data.mdb). A fresh one is 6 MB with one roster entry;
+ ;; left to grow it reached 8.5 GB and 30,327 entries (2026-11-06, commit message), which d/branches replays, each of a run's drops at
+ ;; 0.9 s, 17 s before any step, and which each step clones. At the bound: `seed` removes it and makes it again, about 2 s; a clone
+ ;; a run is reading is unaffected, an LMDB file never shrinks, and nothing in it is kept.
+ :seon.config.proofs/check-store-max-bytes 268435456
  ;; Unit: a salt (integer), 0 normally. Salt of every generative check's seed (seon.proofs/seed): a
  ;; seed is derived from what its check reaches (a test's reach digest, a contract's var and the
  ;; binary's tree), so the same digest draws the same cases and a result is a function of its
@@ -678,6 +683,7 @@
  ;; fix, not a cost to pay every turn. A model or task can turn it on through the resolver
  ;; (task -> model -> provider -> config); effort is :seon.config.ai/reasoning-effort.
  :seon.config.ai/thinking :disabled
+ ;; :seon.config.ai/temperature is absent, so the provider's default is used (docs/model.md#temperature).
  ;; Whether a request sends earlier turns' stored reasoning back. Unit: flag. Provenance: owner
  ;; ruling 2026-10-24 (docs/decisions.md, "A config key does what it says"). true: every earlier
  ;; reply's reasoning goes back exactly as it was returned (seon.model/request-body); false: it

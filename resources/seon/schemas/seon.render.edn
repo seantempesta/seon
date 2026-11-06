@@ -12,9 +12,9 @@
  :my.agent/lines [:vector {:seon.render/model my.agent/lines-text} :map]
  ;; my.agent/grep's [] for a string holding a regex's operators, shown with its regex form (my.agent/grep-none-text)
  :my.agent/grep-none [:vector {:seon.render/model my.agent/grep-none-text} :map]
- ;; how an agent's work on its task stands (seon.context/status), a part of its page: the page draws it by
- ;; its html render, the model is sent its data (docs/render.md#a-part-answers-data)
- :seon.context/status [:map]
+ ;; how an agent's work on its task stands (seon.context/status), a part of its page: the page and the model
+ ;; read it by one render (docs/render.md#a-part-answers-data)
+ :seon.context/status [:map {:seon.render/html seon.render.ui/status-hiccup :seon.render/model seon.render.ui/status-hiccup}]
  ;; a prove's run (my.agent/prove): its verdict, each proof's status, the reds with their first
  ;; failing assertion and the deaths, and counts (my.agent/prove-summary); the lists are the value
  :seon.test/proved [:map {:seon.render/model my.agent/prove-summary :seon.render/html seon.render.ui/proved}]
@@ -81,7 +81,6 @@
  ;; the body made again from its turn's basis, each message's records, which are new since the request before
  :seon.render/debug-turn [:map {:seon.render/html seon.render.ui/debug-turn} [:at [:or pos-int? [:= :latest]]] [:to-come? :boolean]
                           [:turn :int] [:agent :string] [:origin :seon.model-call/origin] [:raw? :boolean] [:view {:optional true} :string] [:opened {:optional true} [:set :string]]
-                          [:evals {:optional true} [:map-of :string :map]]
                           [:body :map] [:sources [:vector [:vector :any]]] [:new [:vector :boolean]]
                           [:usage [:map [:seon.model-call/tokens {:optional true} :int] [:seon.model-call/cache-hit-tokens {:optional true} :int]
                                    [:seon.model-call/cache-miss-tokens {:optional true} :int]]]

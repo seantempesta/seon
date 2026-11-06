@@ -126,6 +126,16 @@
   [st]
   (boolean (or (:static-due st) (> (lib/non-static-live!) (cfg/value :seon.config.agent/inherited-bytes)))))
 
+(defn- preload
+  "Server state st with what a first fork would otherwise wait for done now, while no one waits: main's tests loaded, the reach graph and index brought to
+  :db, what every agent's start reads warmed, and the heap made static when due. Answers [st' load errors]. A fork after it costs a fork. See docs/machine.md#an-agents-first-write."
+  {:malli/schema [:=> [:cat :map] [:tuple :map [:maybe [:sequential :any]]]]}
+  [st]
+  (let [errs (when (:tests-due st) (seq (:errors (program/load-all! (:db st)))))
+        st (-> st (dissoc :tests-due :preload-t) graph-at-fork index-at-fork (warm-start {}))]
+    (when (static-due? st) (lib/static!))
+    [(dissoc st :static-due) errs]))
+
 (defn- step-failed
   "The event for a step that threw on message m: the error, naming the op and the message's agent or
   generation, so root answers the asker it belongs to (seon.fork-server/fork-server-proc)."
@@ -163,7 +173,10 @@
                       (program/moves-program? (:tx-data m)) (assoc :graph-moved true :static-due true))
                  ;; main's program changed: load it here, so agents forked from now on inherit it compiled; while
                  ;; the tests' load is still due it loads them all at the first fork, as main has them then
-                 errs (seq (program/load-changes! db' (:tx-data m) {:tests? (not (:tests-due st))}))]
+                 errs (seq (program/load-changes! db' (:tx-data m) {:tests? (not (:tests-due st))}))
+                 ;; the commit a :preload was waiting to see
+                 [st load-errs] (if (and (:preload-t st) (>= (:max-tx db') (:preload-t st))) (preload st) [st nil])
+                 errs (seq (concat errs load-errs))]
              [st {:ev (cond-> [] errs (conj {:ev :load-errors :t (:t m) :errors (vec errs)})
                         true (conj {:ev :applied :t (:max-tx db') :writer-t (:t m) :apply-ms (profile/ms-since t0)
                                     :lag-ms (/ (- (profile/now-ns) (:ns m)) 1e6) :mismatch (:mismatch st)}))}]))
@@ -198,7 +211,13 @@
                                                                   :t (:max-tx (:db st))}]
                                                                 evs)
                                                     load-errs (conj {:ev :load-errors :t (:max-tx (:db st)) :errors (vec load-errs)}))}]))))
-     :stats [st {:ev [{:ev :stats :t (:max-tx (:db st)) :datoms (count (d/datoms (:db st) :eavt))
+     ;; root's boot asks once its import is written (:t): if that commit has not reached here, it waits for the :tx that brings it, so an imported program
+     ;; loads whole, never form by form as changes
+     :preload (if (< (:max-tx (:db st)) (:t m))
+                [(assoc st :preload-t (:t m)) {:ev [{:ev :preload}]}]
+                (let [[st errs] (preload st)]
+                  [st {:ev (cond-> [{:ev :preload}] errs (conj {:ev :load-errors :t (:max-tx (:db st)) :errors (vec errs)}))}]))
+     :stats [st {:ev [{:ev :stats :t (:max-tx (:db st)) :datoms (count (d/datoms (:db st) :eavt)) :tests-due (boolean (:tests-due st))
                        :mismatch (:mismatch st) :mem-mb (lib/r2 (lib/real-mb)) :os-threads (lib/nthreads)
                        :active-threads (lib/active-threads)}]}]
      :static (let [t0 (profile/now-ns)] (lib/static!) [st {:ev [{:ev :static :ms (profile/ms-since t0)}]}])
@@ -216,7 +235,7 @@
      [st nil]))
 
 (defn server-step
-  "The fork server's step-fn. In :cmd ({:op :tx|:fork|:stats|:static|:exit}: :exit is a child
+  "The fork server's step-fn. In :cmd ({:op :tx|:fork|:preload|:stats|:static|:exit}: :exit is a child
   that exited, by its pid); out :ev (events for root). The fork is this process's own
   effect: the child never returns from the step (it becomes the agent)."
   {:malli/schema :seon.step/step-fn}
@@ -309,8 +328,8 @@
                                (do (vreset! ready nil) (recur))
                                [:cmd {:op :exit :pid v}]))
                            (case m :eof nil [:cmd m])))))]
-    ;; root evaluates no test namespace (program/load-all! {:tests? false}); the boot server does, once, at
-    ;; its first fork (:tests-due), so a root that forks no agent never loads them, and its socket is read
+    ;; root evaluates no test namespace (program/load-all! {:tests? false}); the boot server does, once, when root's boot asks (:preload) or at
+    ;; a fork that comes first (:tests-due), and its socket is read
     ;; from boot: a stop that came while 2,020 forms were evaluated one by one waited 12-21 s for them
     (step/run-loop #'server-step {:db db0 :cfg cfg :store store :conn conn :exits exits :graph graph :index index :evals-max evals-max :tests-due (or boot? tests-due)}
                    recv! (fn [_ m] (sock/send! fd m)))
@@ -459,7 +478,7 @@
                 (sock/send! (:fd st) req)
                 [(update st :waiters conj {:rid (:rid m) :req req}) nil])))
      :ev (case (:ev m)
-           (:stats :static) (if-let [{:keys [rid]} (peek (:waiters st))]
+           (:stats :static :preload) (if-let [{:keys [rid]} (peek (:waiters st))]
                               [(update st :waiters pop) {:to-api [{:dest {:rid rid} :r m}]}]
                               [st nil])
            :standby (let [pend (:standby-pending st)]
@@ -479,7 +498,7 @@
            ;; request's asker is answered the error: a stats or static waiter by its rid, a fork or a standby as it
            ;; fails; the error goes on to root's problems
            :step-failed (case (:op m)
-                          (:stats :static) (if-let [{:keys [rid]} (peek (:waiters st))]
+                          (:stats :static :preload) (if-let [{:keys [rid]} (peek (:waiters st))]
                                              [(update st :waiters pop) {:to-api [{:dest {:rid rid} :r (:error m)} m]}]
                                              [st {:to-api [m]}])
                           :fork (do (some-> (get-in st [:in-flight (:agent m)]) sock/close!)

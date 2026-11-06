@@ -58,6 +58,7 @@
 (deftest a-render-is-opts-then-children
   ;; Reagent's form (docs/render.md): a render takes its opts first and its
   ;; children after, and a call in hiccup is written [f opts & children]
+  ;; declared renders are found from the schemas at run time, so a contract's change moves no digest of this test (status-hiccup, 2026-11-06)
   (testing "every render a schema declares takes [opts v]: its contract's first argument is :seon.render/opts"
     (let [declared (distinct (keep #(r/declared %) (keys seon.contract/forms)))
           first-arg (fn [sym] (let [s (:malli/schema (meta (requiring-resolve sym)))
@@ -896,13 +897,7 @@
                 st2 (#'p/pass (assoc-in st1 [:branches [:chat :a3] :db] branch) o)
                 page (first (filter #(= :page (:op %)) (:to-web @o)))]
             (is (str/includes? (:html page) "result/e1") "answered at once, drawn from its branch, never waiting on its process")
-            (is (str/includes? (:html page) "shown from its branch until its process answers") "and it says so")
-            (is (some #(= {:op :render :id :a3} (get-in % [:req])) (:to-api @o)) "its process is asked for its parts")
-            (let [o (volatile! {})
-                  st3 (#'p/answered st2 o [:parts :a3] (drawn-parts branch))]
-              (is (not (str/includes? (p/view-html st3 [:chat :a3]) "until its process answers")) "its own parts replace them")
-              (is (some #(= "p-caption" (first %)) (mapcat :frags (filter #(= :patch (:op %)) (:to-web @o))))
-                  "and the open tab is sent the line that said whose drawing it was"))))))
+            (is (some #(= {:op :render :id :a3} (get-in % [:req])) (:to-api @o)) "its process is asked for its parts")))))
     (testing "a view no tab watches keeps nothing: its page, its branch read, its rows"
       (let [[st2 _] (#'p/render-proc (assoc st1 :shown {[:chat :a3] 21}) :from-web {:op :views :views #{:root} :tabs 1})]
         (is (nil? (get-in st2 [:views [:chat :a3]])))
@@ -941,7 +936,7 @@
             h0 (page st e0) h1 (page st e1)]
         (is (= (clojure.data.json/write-str (sent 0 r0)) (wire-text h0)) "turn 0: the page's body is the bytes it sent")
         (is (= (clojure.data.json/write-str (sent 1 r1)) (wire-text h1)) "turn 1: the same")
-        (is (str/includes? (page (assoc-in st [:tab [:debug :a1] :open] #{"d-turn-s0"}) e1) "the help page") "each message, opened, beside the records that made it")
+        (is (str/includes? (page (assoc-in st [:tab [:debug :a1] :open] #{"d-turn-o0"}) e1) "the help page") "each message, opened, beside the records that made it")
         (is (str/includes? h1 "I call f.") "a call's arguments as sent, its prose in them")
         (is (str/includes? h1 "sent the same by the request before down to here") "where the unchanged prefix ends, with no cache count recorded")
         (is (not (str/includes? h0 "sent the same by the request before")) "the first request has no request before")
@@ -953,7 +948,7 @@
           (is (false? (:differs? in1)) "drawn again, the bytes the turn hashed")
           (let [other (d/db-with db [{:seon.model-call/id "b/a1/2" :seon.model-call/sent-hash "0000000000000000"}])]
             (is (true? (:differs? (ui/debug-input other e1 [e0 e1] false))) "a hash that is not the redraw's: said")
-            (is (str/includes? (page (assoc-in st [:branches [:debug :a1] :db] other) e1) "the bytes differ") "on the page")))
+            (is (str/includes? (page (assoc-in st [:branches [:debug :a1] :db] other) e1) "its bytes differ") "on the page")))
         (testing "a chosen turn stays as it was when the branch moves"
           (let [moved (d/db-with db [{:seon.eval/id "e9" :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key "b/a1"} :seon.eval/turn 2
                                       :seon.eval/code "(f 9)" :seon.eval/response {:handle 'result/e9 :value 9}}])]
@@ -974,7 +969,7 @@
         (testing "a turn whose call failed shows what it sent and its typed error"
           (let [db (d/db-with db [{:seon.model-call/id "b/a1/1" :seon.model-call/error {:seon.error/type :seon.model/no-provider :seon.error/operation 'seon.model/complete
                                                                                 :seon.error/message "no model provider"}}])
-                html (page (-> st (assoc :main-db db) (assoc-in [:branches [:debug :a1] :db] db) (assoc-in [:tab [:debug :a1] :open] #{"d-turn-s1"})) e0)]
+                html (page (-> st (assoc :main-db db) (assoc-in [:branches [:debug :a1] :db] db) (assoc-in [:tab [:debug :a1] :open] #{"d-turn-o1"})) e0)]
             (is (str/includes? html "no model provider") "its error, by the error's render")
             (is (str/includes? html "eval p101") "beside what it sent: the page, the first eval")))))))
 
@@ -1170,7 +1165,7 @@
   ;; owner, 2026-10-25 (the value view): a value recorded as data is drawn from its data, a map as
   ;; rows and code as code, not as its printed text; the row's id is its handle's, which links reach
   (let [src "(deftest t\n  ;; why\n  (is (= 2 (f 1))))"
-        rec {:seon.eval/code "(my.task/status)" :seon.eval/response {:handle 'result/e157 :ms 2.5 :value {:turn "29 of 30" :proofs [{:test 'demo-test/t :status :fail :source (seon.print/code src)}
+        rec {:seon.eval/code "(my.task/status)" :seon.eval/response {:handle 'result/e157 :ms 2.5 :value {:proofs [{:test 'demo-test/t :status :fail :source (seon.print/code src)}
                                                                                                                                   {:test 'demo-test/u :status :pass :source (seon.print/code "(deftest u)")}]}}}
         html (h/html (ui/evaluation {} (assoc rec :seon.eval/by "outside")))
         held (h/html (ui/evaluation {} {:seon.eval/code "(Object.)" :seon.eval/response {:handle 'result/e2 :value (seon.contract/plainly (Object.))}}))]
@@ -1286,7 +1281,7 @@
     (is (= #{1 2} (set (keys pages))) "both pages are answered: neither waits on the other's render")
     (is (str/includes? (str (pages 1)) "seon.render/view-defect") "the debug page is its error")
     (is (str/includes? (str (pages 1)) "seon.context/system-text invalid-output") "it says what threw: the system prompt the db lacks")
-    (is (str/includes? (str (pages 2)) "shown from its branch") "the agent's own page renders through the same pass")
+    (is (str/includes? (str (pages 2)) "c-rows") "the agent's own page renders through the same pass")
     (is (some #(and (= :error (:op %)) (= :seon.render/view-defect (get-in % [:data :seon.error/type]))) (:to-api @o))
         "recorded as the problem it is: the api's proc error")
     (is (empty? (:waiting st')) "nothing left waiting")
@@ -1344,41 +1339,28 @@
     (is (str/includes? h "an opening, whatever it says"))
     (is (= 1 (count (re-seq #"data-session=" h))) "the system message is no session's")))
 
-(deftest a-request-folds-by-its-records
-  ;; docs/render.md#the-debug-page-is-the-wire-request: what a section is comes from its records, never its text: the
-  ;; reply and the tool messages answering it are one fold, and a page Seon ran is told from an agent's by its record's author
+(deftest a-request-is-its-wire-messages
+  ;; docs/render.md#the-debug-page-is-the-wire-request: a row a message, typed by its wire role, and opening a row
+  ;; replaces its line; its calls' arguments are the wire's JSON read as data
   (let [ms [{:role "system" :content "# Help\n\nread this"}
-            {:role "assistant" :content "shown" :tool_calls [{:id "x" :function {:name "eval" :arguments "{}"}}]}
-            {:role "tool" :tool_call_id "x" :content "page"}
-            {:role "assistant" :tool_calls [{:id "a" :function {:name "eval" :arguments "{}"}} {:id "b" :function {:name "eval" :arguments "{}"}}]}
-            {:role "tool" :tool_call_id "a" :content (str/join " " (repeat 8000 "word"))}
-            {:role "tool" :tool_call_id "b" :content ":ok"}]
-        sources [[[:section 1 1]] [[:eval "e1"]] [[:eval "e1"]] [[:eval "e2"] [:eval "e3"]] [[:eval "e2"]] [[:eval "e3"]]]
-        evals {"e1" {:seon.eval/by "seon" :seon.eval/intent "Seon showed it" :seon.eval/code "(page)" :seon.eval/call-id "x"}
-               ;; held in the other order from its reply's calls: a call is matched by its id, never its place
-               "e2" {:seon.eval/by "a1" :seon.eval/intent "Then the other" :seon.eval/code "(second-call)" :seon.eval/call-id "b"}
-               "e3" {:seon.eval/by "a1" :seon.eval/intent "Read *the* thing" :seon.eval/code "(first-call)" :seon.eval/call-id "a"}}
-        draw (fn [opened] (h/html (ui/debug-turn {:unit "d-turn"} {:turn 1 :agent "b/a1" :view "a1" :origin :model :usage {} :evals evals :opened opened
-                                                                   :body {:messages ms} :sources sources :new [false false false false false true]})))
+            {:role "assistant" :tool_calls [{:id "a" :function {:name "eval" :arguments "{\"intent\":\"Read it\",\"code\":\"(first-call)\"}"}}]}
+            {:role "tool" :tool_call_id "a" :content (str/join " " (repeat 8000 "word"))}]
+        draw (fn [opened] (h/html (ui/debug-turn {:unit "d-turn"} {:turn 1 :agent "b/a1" :view "a1" :origin :model :usage {} :opened opened
+                                                                   :body {:messages ms} :sources [[[:section 1 1]] [[:eval "e1"]] [[:eval "e1"]]] :new [false false true]})))
         h (draw #{})]
-    (is (= [{:kind :system :is [0]} {:kind :page :is [1 2]} {:kind :eval :is [3 4 5]}]
-           (#'ui/request-sections ms sources evals)))
-    (is (= ["system" "page" "eval"] (mapv second (re-seq #"data-section=\"(\w+)\"" h))) "a fold a section, whatever many messages it holds")
-    (is (= 1 (count (re-seq #"<details[^>]*data-section=\"\w+\"[^>]* open" h))) "only the section holding what is new starts open")
-    (is (not (str/includes? h "(page)")) "a closed section's messages are not drawn: it costs its line")
-    (is (str/includes? (draw #{"d-turn-s1"}) "(page)") "turned open, they are")
-    (is (not (str/includes? (draw #{"d-turn-s3"}) "(second-call)")) "a section that starts open can be closed")
-    (is (= 1 (count (re-seq #"Then the other" h))) "a closed section says once what each of its evals set out to do, though the eval made its call and its answer")
-    (is (re-find #"call · a.*\(first-call\).*call · b.*\(second-call\)" h) "a call is the code of the record holding its id")
-    (is (str/includes? (h/html (ui/debug-turn {:unit "d-turn"} {:turn 1 :agent "b/a1" :view "a1" :origin :model :usage {} :evals {"e2" nil}
-                                                                :body {:messages [(nth ms 3)]} :sources [[[:eval "e2"]]] :new [true]}))
-                       "tool_calls · eval · a · arguments")
-        "an eval the db does not hold: its arguments as sent")
-    (is (str/includes? h "Large, ") "text past its budget offers the rest")
-    (is (str/includes? h "unit=d-turn-m4&amp;open=true") "the button opens that message's text")
-    (is (< (count h) (count (draw #{"d-turn-m4"}))) "opened, its whole text is on the page")
-    (is (str/includes? (draw #{"d-turn-m4"}) "show less"))
-    (is (str/includes? h "text-error") "a section past its limit reads red")))
+    (is (= ["system" "assistant" "tool"] (mapv second (re-seq #"data-role=\"(\w+)\"" h))) "a row a message, in the wire's order, by its role")
+    (is (not-any? #(str/includes? h %) ["tool_calls[0]" "arguments.code"]) "a closed row is its line: its fields are drawn when opened")
+    (is (str/includes? h "eval {") "an assistant's line is its calls as sent")
+    (let [o (draw #{"d-turn-o1"})]
+      (is (str/includes? o "tool_calls[0] · eval · a") "opened, the call's fields as sent")
+      (is (str/includes? o "arguments.code") "its arguments by their wire names")
+      (is (str/includes? o "(first-call)"))
+      (is (str/includes? o "group-open:hidden") "the line gives way to the fields, so nothing is shown twice"))
+    (is (< (count h) (count (draw #{"d-turn-o2"}))) "opened, a message is drawn whole, however large")
+    (is (< (count (re-seq #"word" h)) 100) "closed, its line holds no copy of it")
+    (is (<= 8000 (count (re-seq #"word" (draw #{"d-turn-o2"})))) "and nothing of it is cut")
+    (is (str/includes? h "text-error") "a message past its limit reads red")
+    (is (str/includes? (draw #{"d-turn-o0"}) "<h") "a system message's Markdown is drawn")))
 
 (deftest a-cut-with-its-whole-form-holds-no-copy
   ;; the second context audit (F7): a plan cut on the page kept its whole text in the cut's :title,
@@ -1446,7 +1428,7 @@
       ;; part; this fixture's proof has no source, so the part says what to write (seon.context/not-written)
       (is (not (str/includes? h "my.agent/prove")) "no proof's run form, which the status shows"))
     (is (str/includes? (:html (unit-of task "status-")) "Your proofs") "how the work stands is the status's")
-    (is (= [(str "chat-ask-" rid) (str "chat-start-" rid) (str "conversation-turn-" rid "-1") (str "conversation-turn-" rid "-2") (str "chat-end-" rid)]
+    (is (= [(str "chat-ask-" rid) (str "conversation-turn-" rid "-1") (str "conversation-turn-" rid "-2") (str "chat-end-" rid)]
            (mapv :id conv))
         "the conversation by turn number, each turn a component keyed by the agent and its number (turn 0 took no record: no component), then how the agent stands")
     (let [turn1 (:html (unit-of conv "conversation-turn-"))
@@ -1481,7 +1463,7 @@
       (is (str/includes? h "it doubles") "and its failing assertion")
       (is (str/includes? h "(= 4 5)") "as the assertion it got, printed as code"))
     (let [h (draw green)]
-      (is (str/includes? h "You're done") "green is the status's word")
+      (is (str/includes? h "Every proof passes and nothing blocks merging") "green is the status's word")
       (is (not (str/includes? h "it doubles")) "a green keeps no failure"))))
 
 (deftest the-status-is-drawn-from-facts-with-no-turn-of-the-reader
@@ -1495,7 +1477,7 @@
         standing (try (unit-of (r/placed-units w) "status-") (finally (r/dispose-walk! w)))
         h (:html standing)]
     (is (some? standing) "the status is drawn")
-    (is (str/includes? h "You're done") (str "the verdict the branch holds: " h))
+    (is (str/includes? h "Every proof passes") (str "the verdict the branch holds: " h))
     (is (not (str/includes? h "Turn")) "and has no turn count")))
 
 (deftest the-models-page-holds-the-plan-whole
@@ -1511,7 +1493,7 @@
 (defn data-view
   "A component that answers data, a part of a schema that declares no render of its own."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
-  [_] (with-meta {:plan "Make it" :n 3} {:seon.render/schema :seon.context/status}))
+  [_] (with-meta {:plan "Make it" :n 3} {:seon.render/schema :seon.render-test/no-render}))
 
 (deftest a-part-returns-its-data-as-a-call-of-the-printer
   ;; root, 2026-10-26 (the owner's compact renders, not stripped), moved with the parts that answer data
@@ -1729,12 +1711,12 @@
     (testing "its process ended: root's view says so, its parts are dropped, and the page says it is not running"
       (let [st2 (#'p/answered (assoc-in st1 [:parts :a3 :units] []) (volatile! {}) :state (assoc-in (:view st1) [:agents :a3 :status] :dead))]
         (is (nil? (get-in st2 [:parts :a3])))
-        (is (str/includes? (p/view-html st2 [:chat :a3]) "not running · shown from its branch"))
+        (is (not (str/includes? (p/view-html st2 [:chat :a3]) "shown from its branch")) "how it was drawn is no news to a person")
         (is (str/includes? (p/view-html st2 [:chat :a3]) "result/e1") "its parts, drawn by root from its branch")))
     (testing "its ask answered with why (gone, refused): the page says so"
       (let [gone (seon.contract/error :seon.root/no-agent 'seon.root/request "no live agent :a3" {})
             st2 (#'p/answered st1 (volatile! {}) [:parts :a3] gone)]
-        (is (str/includes? (p/view-html st2 [:chat :a3]) "shown from its branch: its process did not answer (no live agent :a3)"))))))
+        (is (str/includes? (p/view-html st2 [:chat :a3]) "Its process didn't answer, so this may be behind: no live agent :a3"))))))
 
 (deftest an-agents-turn-tile-is-its-ctxs
   ;; the owner, 2026-10-26: "any changes you want updated in the agents context and html should go
@@ -1819,12 +1801,12 @@
         (is (= (seon.merge/readiness b ours (d/commit-as-db (:store ours) main)) (:merge st))
             "the merge's readiness, as its own function answers it")
         (is (= (seon.merge/divergence ch) (:its-merge-carries st)) "and what the branch's merge carries, from the one diff")
-        (let [html (h/html (ui/status-hiccup (select-keys st [:merge :its-merge-carries :without-a-contract])))
-              merge-line (h/html (ui/status-hiccup {:merge (:merge st)}))]
+        (let [html (h/html (ui/status-hiccup {} (select-keys st [:merge :its-merge-carries :without-a-contract])))
+              merge-line (h/html (ui/status-hiccup {} {:merge (:merge st)}))]
           (is (str/includes? (pr-str (:main-moved (:merge st))) "demo/k") "what main changed since the base (the model reads it in the data)")
           (is (not (re-find #"Main has moved" html)) "main's move reaches the branch between turns: the agent is told only what conflicts")
           (is (not (str/includes? html "conflict")) "and which of those the branch changed too (none)")
-          (is (str/includes? (h/html (ui/status-hiccup {:merge {:conflicts ['demo/k] :main-moved ['demo/k]}})) "1 things conflict with main") "a conflict is said")
+          (is (str/includes? (h/html (ui/status-hiccup {} {:merge {:conflicts ['demo/k] :main-moved ['demo/k]}})) "1 things conflict with main") "a conflict is said")
           (is (str/includes? html "demo/h") "what the branch's merge carries, and a function it defined with no contract")
           (is (not (str/includes? html "demo/k")) "never main's change")
           (is (not (str/includes? html "demo/f")) "never one it did not change"))
@@ -2149,7 +2131,7 @@
     (is (not (str/includes? (html {:busy? false}) "interrupt")) "no form running: nothing to interrupt")
     (is (str/includes? (html {}) "a message, read at its next turn") "a live agent takes a message")
     (is (not (str/includes? (html {:capped? true}) "a message, read at its next turn")) "a capped task's agent does not")
-    (is (str/includes? (html {:capped? true}) "stopped at its cap") "and the page says why")
+    (is (str/includes? (html {:capped? true}) "It used all its turns") "and the page says why")
     (is (str/includes? (html {:capped? true}) "<textarea") "it still answers a form")
     (is (not-any? #(str/includes? (html {:live? false :busy? true :capped? true}) %) ["<textarea" "interrupt"]) "no process: neither")))
 
@@ -2245,7 +2227,7 @@
         (is (str/includes? t "I'll **reproduce** it first."))
         (is (str/includes? t "<details") "its thinking folded")
         (is (str/includes? t "Read select first."))
-        (is (str/includes? t "turn 1")))
+        (is (not (str/includes? t "turn 1")) "its turn and tokens are for the debug tab"))
       (is (nil? (ui/chat-turn {:seon.ctx/ctx c :seon.db/db (ts/test-db)} 1 3 [])) "a turn that said nothing draws no bubble"))
     (testing "a message is a bubble with its sender"
       (let [m (h (ui/chat-message {:seon.ctx/ctx c} 1 4))]
@@ -2341,7 +2323,7 @@
         text (get (cite-text db tree aid) "docs/agent.md#working-a-task")]
     (is (some? text) "the section is a part of the agent's context")
     (is (str/includes? text "their failures are the reproduction") (str "its text, whole: " (subs text 0 (min 300 (count text)))))
-    (is (str/includes? text "Never loosen a contract or a proof") "to its last step")))
+    (is (str/includes? text "before you prove again") "to its last step")))
 
 ;; docs/render.md#a-citation-says-why-it-is-there: each kind of cite read cold
 (deftest a-cited-thing-is-drawn-by-what-it-is
@@ -2363,14 +2345,38 @@
     (is (not (str/includes? (drawn "demo/g") "A real call")) "a function it will change is read whole: no call to copy")
     (doseq [[k t] drawn] (is (not (re-find #":depth|:symbol|:change|:read " t)) (str k " carries none of how it was fetched")))))
 
+(deftest a-chat-is-the-agent-talking-and-its-steps
+  ;; docs/render.md#the-page: a turn is what the agent said, then its evals as steps; Seon's own evals are the model's, not
+  ;; this conversation; a step opens once to its code and its value, drawn by the render its record names
+  (let [[db aid] (cited-world)
+        k (:seon.agent/key (d/pull db [:seon.agent/key] aid))
+        db (d/db-with db [{:db/id aid :seon.agent/turn 1}
+                          {:seon.model-call/id (str k "/1") :seon.model-call/agent aid :seon.model-call/n 1 :seon.model-call/origin :model :seon.model-call/reply "Found **it**."}
+                          {:seon.eval/id "e2" :seon.eval/agent aid :seon.eval/by "seon" :seon.eval/turn 1 :seon.eval/code "(my.render/render-ctx)" :seon.eval/response {:handle 'result/e2 :value 1}}
+                          {:seon.eval/id "e3" :seon.eval/agent aid :seon.eval/by "a1" :seon.eval/turn 1 :seon.eval/call-id "c1" :seon.eval/intent "Run the proofs." :seon.eval/code "(prove-it)"
+                           :seon.eval/schema :seon.test/proved :seon.eval/response {:handle 'result/e3 :value {:proofs {'a/b :green}}}}
+                          {:seon.eval/id "e4" :seon.eval/agent aid :seon.eval/by "outside" :seon.eval/turn 1 :seon.eval/code "(+ 1 2)" :seon.eval/response {:handle 'result/e4 :value 3}}])
+        opts {:seon.ctx/ctx (:tree (seon.ctx/build db aid :b)) :seon.db/db db}
+        eid #(seon.db/eid db :seon.eval/id %)
+        turn (ui/conversation-turn opts aid 1)
+        shown (set (map second (filter #(and (vector? %) (= #'ui/eval-item (first %))) (map (fn [c] (if (= #'ui/eval-item (first c)) [(first c) (nth c 2)] c)) (rest turn)))))]
+    (is (= #{(eid "e4")} shown) "an eval of another hand is a line, and Seon's is none")
+    (is (some #(and (= #'ui/chat-turn (first %)) (= [(eid "e3")] (last %))) (rest turn)) "the agent's eval is its turn's step")
+    (let [t (h/html (ui/chat-turn opts aid (seon.db/eid db :seon.model-call/id (str k "/1")) []))]
+      (is (str/includes? t "Found **it**") "what it said")
+      (is (not (str/includes? t "of context")) "its tokens are for whoever opens a step"))
+    (let [e (h/html (ui/eval-item opts (eid "e3")))]
+      (is (str/includes? e "Run the proofs.") "a step's line is what it set out to do")
+      (is (= 1 (count (re-seq #"\(prove-it\)" e))) "its code once, under the line")
+      (is (not (re-find #"<details[^>]* open" e)) "closed until opened")
+      (is (str/includes? e "prove") "its value by the render its record names"))))
+
 (deftest the-three-agree-on-the-agents-own-end
   (let [[db aid] (cited-world)
         ;; the agent has taken a turn under a cap of 7, and holds an end from a wake before this one (ended at turn 0)
         db (d/db-with db [{:db/id aid :seon.agent/max-turns 7 :seon.agent/turn 1 :seon.agent/outcome :green :seon.agent/ended-turn 0}
                           {:seon.model-call/id "b1/a1/1" :seon.model-call/agent aid :seon.model-call/n 1 :seon.model-call/origin :model}])
         opts (fn [db] {:seon.ctx/ctx (:tree (seon.ctx/build db aid :b)) :seon.db/db db})]
-    (is (str/includes? (pr-str (ui/turn (opts db) aid)) "You have 7 turns") "the turn line: the agent's own cap")
-    (is (str/includes? (pr-str (ui/chat-start (opts db) aid)) "a budget of 7 turns") "the chat's start: the same cap")
     (is (not (str/includes? (pr-str (ui/chat-end (opts db) aid)) "Done")) "the chat's end: an earlier wake's end is no end of this one")
     (let [ended (d/db-with db [{:db/id aid :seon.agent/ended-turn 1}])]
       (is (str/includes? (pr-str (ui/chat-end (opts ended) aid)) "Done in 1 turn") "the end it wrote at its turn now is"))))
@@ -2512,6 +2518,132 @@
       (finally (r/dispose-walk! w)))))
 
 
+;; ---- a component that answers a map (docs/render.md#a-part-answers-data) ----
+
+(defn dm-report "A component answering the report held in ctx's :r."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+  [{c :seon.ctx/ctx}] (with-meta (merge {:t 0 :classes {}} (seon.ratom/realize (:r c))) {:seon.render/schema :seon.problems/report}))
+(defn dm-layout "The component, in one list."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+  [_] [:div [:div {:id "parts"} [#'dm-report {}]]])
+
+(deftest a-components-revision-follows-its-map
+  ;; docs/render.md#a-part-answers-data: what allowed the stale text was a revision judged by the html alone. :t is the model's alone
+  ;; (seon.render.ui/problems-model reads it, seon.render.ui/problems does not): it moves the revision and the model's text
+  (let [a (seon.ratom/atom {:db/id 1 :r {:t 1}})
+        w (r/walker {:ref a :changes seon.ctx/changes} (constantly nil) [#'dm-layout {}])
+        k [`dm-report]
+        rev #(:rev (get @(:cache w) k))
+        text #(r/part-text (r/part-form w k))
+        html #(:html (first (r/placed-units w)))]
+    (try
+      (r/flush! w nil)
+      (let [rev0 (rev) html0 (html)]
+        (is (str/includes? (text) ":t 1"))
+        (swap! a assoc :r {:t 2})
+        (is (= :miss (get (r/flush! w nil) k)) "its map moved: a new answer, whatever its html says")
+        (is (not= rev0 (rev)) "its revision follows its map")
+        (is (str/includes? (text) ":t 2") "and the model's text, kept by that revision, is not stale")
+        (is (= html0 (html)) "its html did not change"))
+      (is (= {:t 2 :classes {}} (get (r/placed-data w ["#parts"]) :seon.problems/report)) "what a turn decides from is the map as it stands")
+      (let [rev1 (rev)]
+        (vswap! (:queue w) conj k)
+        (is (= :same (get (r/flush! w nil) k)) "run again to an equal map: the same")
+        (is (= rev1 (rev)) "and its revision stays"))
+      (finally (r/dispose-walk! w)))))
+
+(def ^:private html-got "What `recording-html` was last given." (volatile! nil))
+(defn recording-html "An html render that records what it is given."
+  {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
+  [opts v] (vreset! html-got [opts v]) [:section [:p (str "t is " (:t v))]])
+(defn dm-recorded "A component over ctx and the db drawn by `recording-html`."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
+  [{c :seon.ctx/ctx}] (with-meta {:t (:n c) :classes {}} {:seon.render/schema :seon.problems/report :seon.render/html 'seon.render-test/recording-html}))
+(defn dm-recorded-layout "That component, in one list."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+  [_] [:div [:div {:id "parts"} [#'dm-recorded {}]]])
+
+(deftest a-schemas-html-is-given-only-the-map
+  ;; docs/render.md#a-part-answers-data: the component reads ctx and the db and puts what the html needs in its map, and the html is a function of that map
+  (let [w (r/walker {:ref (seon.ratom/atom {:db/id 1 :n 7}) :changes seon.ctx/changes} (constantly (ts/test-db)) [#'dm-recorded-layout {}])]
+    (try
+      (r/flush! w nil)
+      (let [[opts v] @html-got]
+        (is (= {:t 7 :classes {}} v) "the map the component answered")
+        (is (not-any? #(contains? opts %) [:db :seon.db/db :seon.ctx/ctx]) (str "and no db or ctx: " (pr-str (keys opts)))))
+      (is (str/includes? (:html (first (r/placed-units w))) "t is 7"))
+      (finally (r/dispose-walk! w)))))
+
+(defn mv-child "A child, its text read from ctx."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int] :any]}
+  [{c :seon.ctx/ctx} id] [:li (get-in c [:items id :text])])
+(defn mv-wrap "A child's parent, itself a child."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int] :any]}
+  [_ id] [:ol [#'mv-child {} id]])
+(defn mv-parent "The members of ctx's side: an id, a child; [id], its wrapped child."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :keyword] :any]}
+  [{c :seon.ctx/ctx} side]
+  (into [:ul] (for [x (seon.ratom/realize (get c side))] (if (vector? x) [#'mv-wrap {} (first x)] [#'mv-child {} x]))))
+(defn mv-layout "Two parents."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+  [_] [:div [:div {:id "parts"} [#'mv-parent {} :a] [#'mv-parent {} :b]]])
+
+(deftest a-child-moved-between-parents-stays
+  ;; docs/render.md#components: what allowed it was a parent's rerun unmounting at once what it no longer drew, whoever else draws it. A
+  ;; component goes when, at the end of the flush, no parent holds it
+  (let [start (fn [a b] (let [at (seon.ratom/atom {:db/id 1 :a a :b b :items {1 {:db/id 11 :text "one"} 2 {:db/id 12 :text "two"}}})
+                              w (r/walker {:ref at :changes seon.ctx/changes} (constantly nil) [#'mv-layout {}])]
+                          (r/flush! w nil)
+                          [w at]))
+        shown #(pr-str (r/resolved % @(:out %)))
+        child (fn [id] [`mv-child id])]
+    (testing "to a parent drawn later"
+      (let [[w a] (start [1] [2])]
+        (try (swap! a assoc :a [] :b [2 1])
+             (r/flush! w nil)
+             (is (str/includes? (shown w) "one"))
+             (is (contains? @(:cache w) (child 1)))
+             (finally (r/dispose-walk! w)))))
+    (testing "to a parent drawn earlier: the old parent's rerun comes after the new parent's"
+      (let [[w a] (start [2] [1])]
+        (try (swap! a assoc :a [2 1] :b [])
+             (r/flush! w nil)
+             (is (str/includes? (shown w) "one") "it stays on the page")
+             (is (contains? @(:cache w) (child 1)) "and in the walk")
+             (swap! a assoc-in [:items 1 :text] "uno")
+             (is (= :miss (get (r/flush! w nil) (child 1))) "still reactive: its reaction was not disposed")
+             (is (str/includes? (shown w) "uno"))
+             (finally (r/dispose-walk! w)))))
+    (testing "a child's parent goes and the child moves"
+      (let [[w a] (start [2] [[1]])]
+        (try (swap! a assoc :a [2 1] :b [])
+             (r/flush! w nil)
+             (is (str/includes? (shown w) "one"))
+             (is (not (contains? @(:cache w) [`mv-wrap 1])) "the parent went")
+             (is (contains? @(:cache w) (child 1)) "its child did not")
+             (finally (r/dispose-walk! w)))))
+    (testing "held by two parents, dropped by one"
+      (let [[w a] (start [1] [1 2])]
+        (try (swap! a assoc :a [])
+             (r/flush! w nil)
+             (is (str/includes? (shown w) "one"))
+             (is (contains? @(:cache w) (child 1)))
+             (finally (r/dispose-walk! w)))))
+    (testing "held by none: it goes, with what it held, and does not run on its way out"
+      (let [[w a] (start [1 [2]] [])
+            running (seon.ratom/running)]
+        (try (swap! a (fn [c] (-> c (assoc :a []) (assoc-in [:items 1 :text] "uno") (assoc-in [:items 2 :text] "dos"))))
+             (let [ran (r/flush! w nil)]
+               (is (not (contains? ran (child 1))) "a change reached it, and its parent let go of it first")
+               (is (not (contains? ran (child 2))) "nor below one that went")
+               (is (not (str/includes? (shown w) "uno"))))
+             (is (not (contains? @(:cache w) (child 1))))
+             (is (not (contains? @(:cache w) [`mv-wrap 2])))
+             (is (not (contains? @(:cache w) (child 2))) "what it alone held")
+             (is (empty? @(:queue w)) "nothing left queued")
+             (is (<= (seon.ratom/running) running) "its reaction disposed")
+             (finally (r/dispose-walk! w)))))))
+
 ;; ---- a part prints as its render (docs/render.md#a-part-prints-as-its-render) ----
 
 (deftest a-fence-is-longer-than-any-backtick-run-in-its-source
@@ -2556,7 +2688,7 @@
                      {:test 'seon.program-test/b :status :undefined}]
             :attention ["seon.program/history is public and its docstring cites no docs/ section"]
             :refused [{:reason :proof-unknown :test 'seon.program-test/b :do '(my.agent/prove)}]}
-        h (ui/status-hiccup st)
+        h (ui/status-hiccup {} st)
         t (h/html h)]
     (is (= :h2 (first (second h))) "headed")
     (is (str/includes? t "Your proofs") "headed to the agent")
@@ -2569,7 +2701,7 @@
     (is (not (str/includes? t "(do ")) "separate top-level forms, never a do")
     (is (not (str/includes? t "tokens")) "no tokens sent")
     (is (not (str/includes? t "conflict")) "no merge line with nothing to merge")
-    (is (str/includes? (h/html (ui/status-hiccup (assoc st :merge {:conflicts ['a/b] :main-moved ['a/b]}))) "1 things conflict with main") "a merge line only when something conflicts")))
+    (is (str/includes? (h/html (ui/status-hiccup {} (assoc st :merge {:conflicts ['a/b] :main-moved ['a/b]}))) "1 things conflict with main") "a merge line only when something conflicts")))
 
 (deftest a-merged-task-reads-merged-everywhere
   ;; owner, 2026-11-05: the head said "merged" while the task's panel said "done": its agent's own end (:green) was read where

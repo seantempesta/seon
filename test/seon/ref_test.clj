@@ -343,6 +343,20 @@
     (is (contains? names 'demo.calc/add) "a qualified name, as before")
     (is (not (contains? names 'demo.nowhere)) "a dotted word naming nothing is prose")))
 
+;; docs/references.md#an-entity-cites: a read that runs to the end of its index is touched by every transaction, its :db/txInstant included, so
+;; whatever read the system prompt through it reran on every change
+(deftest a-pages-top-is-read-from-its-own-addresses
+  (let [db (d/db-with (ts/test-db) [{:db/id "top" :seon.doc/address "docs/a.md#top"}
+                                    {:db/id "sub" :seon.doc/address "docs/a.md#sub" :seon.doc/parent "top"}
+                                    {:db/id "other" :seon.doc/address "docs/b.md#top"}])
+        top (:db/id (d/entity db [:seon.doc/address "docs/a.md#top"]))
+        [found reads] (d/with-reads #(ref/page-top db "docs/a.md"))
+        idx (d/reads-index reads)]
+    (is (= top found) "its section with no parent")
+    (is (nil? (ref/page-top db "docs/none.md")) "a page with no sections has none, though another sorts after it")
+    (is (not (contains? idx :any)) (str "no open range: " (pr-str idx)))
+    (is (not (d/reads-touched? idx (:tx-data (d/with db [{:db/id "n" :seon.task/id "r/unrelated"}])))) "an unrelated transaction does not touch it")))
+
 (deftest a-citation-naming-no-page-names-nothing
   ;; wiki audit 2026-10-23 R1: names-something? threw (io/file of a nil path) on an anchor
   ;; link read with no page of its own; it names nothing, and an anchor names a section only

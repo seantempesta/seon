@@ -685,31 +685,6 @@
              (assoc r :unrecorded (contract/error :seon.agent/unrecorded #'record! (str "the branch refused this eval's record: " (ex-message e)) {}))))
       r)))
 
-(defn- again
-  "Response r of code, with :again, a string naming the earlier eval, when an earlier eval of this agent ran the same
-  code (compared trimmed) and answered the same (its value, error, output and forms). :again says the answer repeats
-  and nothing more: equal answers do not show what the code reads is unchanged. It is kept in the agent's state as a hash
-  of the code to the eval and a hash of its answer, one lookup an eval, and only for an agent's own evals (root's,
-  an inner eval's and one Seon ran for it, origin :insert, which it did not ask for, are not counted). See docs/agent.md#small-answers."
-  {:malli/schema [:=> [:cat :string :map :map] :map]}
-  [code r req]
-  (if (and (= :agent (:mode @agent/state)) (:handle r) (not= :insert (:origin req)))
-    (let [k (hash (clojure.string/trim code))
-          ;; its answer without what differs every eval, at the one place it nests: an edit!'s value is its inner eval's
-          ;; response, whose handle and cost differ each time (an agent swapping one line back and forth
-          ;; repeats it). Nothing else is walked: the agent's own data keeps its keys, and a value holding a db or a host
-          ;; object is hashed as it is, never rebuilt
-          v (:value r)
-          v (if (and (map? v) (not (record? v)) (contains? v :handle)) (dissoc v :handle :ms :ticks :bytes :fns :record) v)
-          answer (hash [v (:ex r) (:out r) (:err r) (:forms r)])
-          seen (get-in @agent/state [:seen k])]
-      (swap! agent/state assoc-in [:seen k] {:eval (name (:handle r)) :answer answer})
-      (cond-> r
-        (= answer (:answer seen))
-        (assoc :again (str (:eval seen) " ran this code and answered the same: "
-                           "run something else, or change what it reads first."))))
-    r))
-
 (defn- text-of
   "The text of eval fact rec as every reader reads it: the one function the model's message prints with
   (seon.print/record-text, through render/model, an @ctx eval's value rebuilt from its basis by seon.context/basis-value, as
@@ -747,13 +722,8 @@
                 ;; its forms left the agent no db (a test's cleanup, run at this REPL): the agent goes on as it was, its walk made
                 ;; again, and ctx rebuilt by the state's watch (docs/merging.md#a-test-child-is-a-fork-of-a-live-agent)
                 answered (fn [] (when (and (:db before) (nil? (:db @agent/state))) (reset! agent/state (dissoc before :walk)))
-                               (let [;; how far through its turns the agent is, on the answer it reads, once (an eval within another is that eval's): a record's
-                                     ;; bytes never move (docs/render.md#the-agents-turn)
-                                     turns (when (and (= :agent (:mode @agent/state)) (not (:within req))) (agent/turns))
-                                     r (again code (cond-> (repaired (response @answers handle) req)
-                                                      (:ns @agent/state) (assoc :ns (ns-name (:ns @agent/state)))
-                                                      turns (assoc :turn turns))
-                                           req)
+                               (let [r (cond-> (repaired (response @answers handle) req)
+                                         (:ns @agent/state) (assoc :ns (ns-name (:ns @agent/state))))
                                       rec (record-details code r req)]
                                   [r rec (when-not (#{:model :insert} (:origin req)) (text-of rec))]))
                 [r rec text] (try (@the-handler (assoc req "code" code :reply #(vswap! answers conj %)))
@@ -925,7 +895,7 @@
     (cond
       (clojure.string/blank? intent)
       (contract/error :seon.turn/invalid-call #'call-problem
-                      "this call has no intent: send intent, a little thinking (a sentence is fine: what these forms are about to do and what you expect), beside code; the form was not run" {:problem :no-intent})
+                      "this call has no intent: send intent, a sentence on what this eval is about to do, beside code; the form was not run" {:problem :no-intent})
       (and forms (empty? forms))
       (contract/error :seon.turn/invalid-call #'call-problem
                       "this call has no form: its code is empty; nothing was run" {:problem :forms :forms 0}))))
@@ -938,7 +908,7 @@
   its one result, which says why, so none builds on a change that never happened and every call has its result."
   {:malli/schema [:=> [:cat [:sequential :map] ifn? ifn?] [:vector :map]]}
   [calls req-of eval!]
-  (reduce (fn [acc {:keys [id code intent]}]
+  (reduce (fn [acc {:keys [id code intent problem]}]
             (let [;; the forgiving reader's repairs, told on this call's own result (:repaired)
                   {src :text repairs :repairs} (reader/forgive code)
                   ;; each call keeps its own intent
@@ -948,7 +918,9 @@
                   failed (some #(when (or (:ex (:response %)) (contract/error? (:value (:response %)))) (:id %)) acc)
                   why (if failed
                         (contract/error :seon.turn/not-run #'run-calls (str "not run: call " failed " of this reply failed before it (its result says why)") {:after failed})
-                        (call-problem intent src))]
+                        (if problem
+                          (contract/error :seon.turn/invalid-call #'run-calls problem {:problem :arguments})
+                          (call-problem intent src)))]
               (conj acc (if why
                           {:id id :code code :intent intent :not-run (some? failed)
                            :response (let [r (unrun src req why)] (agent/commit!) r)}

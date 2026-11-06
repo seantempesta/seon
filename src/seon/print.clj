@@ -94,8 +94,8 @@
    (let [r (cond-> r (:seon.print/full (meta (:value r))) (vary-meta assoc :seon.print/full true))
          shown (cond-> r (:handle r) (-> (dissoc :ms :ticks :bytes) (with-meta (meta r))))
          ;; an eval's cost is one line with its result, what the result costs the context among it; its numbers stay data on the
-         ;; record. An eval that recorded none was not run
-         cost (fn [tok] (str ", :cost " (pr-str (if (some r [:ms :ticks :bytes]) (emit/cost-text (assoc (select-keys r [:ms :ticks :bytes]) :tok tok)) "not run"))))
+         ;; record. :cost is there when the eval ran; a call not run says so in its :ex
+         cost (fn [tok] (if (some r [:ms :ticks :bytes]) (str ", :cost " (pr-str (emit/cost-text (assoc (select-keys r [:ms :ticks :bytes]) :tok tok)))) ""))
          p (print-value shown (cond-> {:handle (:handle r) :budget (cond-> default-budget (:handle r) (- cost-line-tokens))} render (assoc :render render)))
          text (or (:text p) (:seon.error/message p))]
      ;; spliced after the printed map's last entry: the text is the only place its own size is known

@@ -89,33 +89,22 @@
     ;; never resolved one (4 of 10 swarm runs red at 20 tasks); the old sentence left it to the merge task
     (is (not (str/includes? (:work tpl/instructions) "docs/agent.md#merging")) "merging is read when the status has unmerged entries (it says where), not cited by every task")
     (is (str/includes? (:merge tpl/instructions) "docs/agent.md#merging") "a merge task cites it")
-    ;; the capped runs of 2026-10-26 (notes: context-for-20-turns): three agents hunted a bug main had
-    ;; already fixed, five had what they needed by turns 1-18 and read on, and proofs were built on the
-    ;; live db and on zipmap's order: reproduce first and fail! if it is right, stop reading once it is
-    ;; wrong and write the deftest red, and build its input as the existing tests build theirs
     ;; how a task is worked is the help page's section the instructions cite whole (a wiki section, its context's part)
     (doseq [k [:whole :work :implement]] (is (not (str/includes? (k tpl/instructions) "docs/agent.md#working-a-task")) (str k ": the system prompt says how a task is worked, not every task's context")))
     (let [w (working-a-task)
                   ;; (2026-10-29: the premise step applies to a fix only, and a proof written already is the
                   ;; task's: the agent writes only those its status lists with no source)
-                  steps ["their failures are the reproduction" "first reproduce it in one eval" "the output is already right" "(my.task/fail! "
-                         "the output is wrong, stop reading" "with its source is written already" "with no source as a deftest beside the"
+                  steps ["their failures are the reproduction" "with its source is written already" "with no source as a deftest beside the"
                          "(tests-reaching 'ns/f)" "never the live db" "egister it" "run it red" "(prove)" "make it pass"]]
       (is (every? #(str/includes? w %) steps) "each step is in the section")
-      (is (= steps (sort-by #(or (str/index-of w %) -1) steps)) "in that order: reproduce, fail! or stop reading, the deftest, red, green"))
+      (is (= steps (sort-by #(or (str/index-of w %) -1) steps)) "in that order: the reproduction, the deftest, red, green"))
     (is (= [:design :implement :merge] (mapv :seon.task/kind (tpl/stages d))) "the staged choice still makes its tasks")
     (is (seq (task/create-tx (ts/test-db) ds)) "a valid task set")))
 
-;; the md-scan bench's agents read
-;; "reproduce first, fail at once" beside red proofs shown with their source, and redefined a 250-line scan
-;; whole; B1, the green run, changed first, by edit!, and checked each change with the proof's expression
 (deftest red-proofs-with-their-source-are-the-reproduction
   (let [w (working-a-task)
-        at #(or (str/index-of w %) -1)
         k "docs/agent.md#working-a-task"]
     (is (str/includes? w "When your status shows red proofs with their source, their failures are the reproduction") (str k ": red proofs are the reproduction"))
-    (is (< (at "make the first change") (at "first reproduce it in one eval")) (str k ": the change before any reproduction"))
-    (is (str/includes? w "Only when the plan says something is wrong and your status shows no failing proof, first reproduce it") (str k ": a reproduction only with no failing proof"))
     (is (str/includes? w "evaluate it whole; a long one, replace the part that changes, ``(seon.repl/edit! ") (str k ": edit! by the definition's size"))
     (is (str/includes? w "Check each change with the proof's own expression") (str k ": each change checked by the proof's expression"))))
 

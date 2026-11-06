@@ -674,6 +674,31 @@
            (when (pos? n) (some-> (re-find re (String. buf 0 (int n))) second parse-long))))
        (catch java.io.IOException _ nil)))
 
+(defn- history-path "Key k's history file in the cache at dir (history)." {:malli/schema [:=> [:cat :string [:or :qualified-symbol :string]] :string]}
+  [dir k] (str (key-dir dir k) "/.recent"))
+
+(defn- history
+  "Key k's newest greens, [[ms ticks] ...] newest first, at most :seon.config.proofs/recent-verdicts: one small file, written with each green
+  (write-verdicts!), so what an order of work reads costs one read however many digests the key has had. Derived data: when the file is gone or
+  unreadable it is made again from the verdict files. See docs/merging.md#verdicts-are-a-cache."
+  {:malli/schema [:=> [:cat :string [:or :qualified-symbol :string]] [:sequential :any]]}
+  [dir k]
+  (let [p (history-path dir k) v (read-verdict p)]
+    (if (and (map? v) (:recent v))
+      (:recent v)
+      (let [h (vec (map (fn [[_ _ f]] [(verdict-head-long f #":ms (\d+)") (verdict-head-long f #":ticks (\d+)")])
+                         (recent-verdict-files (filterv (fn [[_ st]] (= :pass st)) (verdict-files dir k)))))]
+        (when (seq h) (write-file {:req {:path p :text (sedn/encode {:recent h})}}))
+        h))))
+
+(defn- history-add!
+  "Green at ms and ticks added to key k's history (history), its oldest dropped past the bound; the write-file's answer."
+  {:malli/schema [:=> [:cat :string [:or :qualified-symbol :string] [:maybe :int] [:maybe :int]] :any]}
+  [dir k ms ticks]
+  (let [h (history dir k)]
+    (write-file {:req {:path (history-path dir k)
+                       :text (sedn/encode {:recent (vec (take (cfg/value :seon.config.proofs/recent-verdicts) (cons [ms ticks] h)))})}})))
+
 (defn- ledger-bytes
   "The size the cache at dir last wrote down for itself (its .size file), nil when it has none or
   cannot read it (then the next write counts the cache)."
@@ -745,14 +770,14 @@
                                          :text (sedn/encode v)}})]
                 (if (contract/error? w)
                   (reduced w)
-                  (-> acc (update :recorded inc) (update :bytes + (:bytes (:value w))) (update :kept conj (:path (:value w)))))))
+                  (-> (do (when (= :pass st) (history-add! dir k (some-> (:ms r) long) (:ticks r))) acc) (update :recorded inc) (update :bytes + (:bytes (:value w))) (update :kept conj (:path (:value w)))))))
             {:recorded 0 :bytes 0 :kept #{}}
             (filter (fn [[_ r]] (and (:digest r) (not (:flaky r)) (not (:unreported r)))) ran))]
     (when-not (contract/error? done) (when (pos? (:recorded done)) (evict! dir (:bytes done) (:kept done) max-bytes)))
     (if (contract/error? done) done (select-keys done [:recorded])))))
 
 (defn typical-ms
-  "{test ms} of tests (or of check steps' and generative-check keys, strings): the median of the ms their newest cached verdicts measured, whatever the digest: what
+  "{test ms} of tests (or of check steps' and generative-check keys, strings): the median of the ms their newest greens measured (history), whatever the digest: what
   orders a run's deal of tests into shards, never what a test proves. The median, not the largest: one
   run under load or a hang (a 17 s test once measured 625 s) must not weigh a test as that run did, which
   made one shard of a merge's run end at 62 s beside three at 640-746 (docs/merging.md#a-merge-runs-what-the-change-reaches).
@@ -762,7 +787,7 @@
   ([tests] (typical-ms (cfg/value :seon.config.proofs/results-dir) tests))
   ([dir tests]
   (into {} (for [t (distinct tests)
-                 :let [ms (sort (keep (fn [[_ _ f]] (verdict-head-long f #":ms (\d+)")) (recent-verdict-files (verdict-files dir t))))]
+                 :let [ms (sort (keep first (history dir t)))]
                  :when (seq ms)]
              [t (nth ms (quot (count ms) 2))]))))
 
@@ -770,15 +795,14 @@
   "{test ms} of the tests of digests ({test digest}) that run past bound (:seon.config.proofs/slow-test-ms): by the fastest of
   its newest greens (recent-verdict-files) and its green at its own digest, so a test made fast comes back as soon as it is
   proved and load, which only ever slows a run, leaves no test out: a test is slow when it is slow every time. A test with no
-  green is not slow. Cost: a listing per test and one small read per green used. docs/merging.md#a-slow-test-is-left-out."
+  green is not slow. Cost: two small reads a test (history). docs/merging.md#a-slow-test-is-left-out."
   {:malli/schema [:function [:=> [:cat [:map-of :qualified-symbol [:maybe :string]]] [:map-of :qualified-symbol :int]]
                   [:=> [:cat :string [:map-of :qualified-symbol [:maybe :string]] pos-int?] [:map-of :qualified-symbol :int]]]}
   ([digests] (slow-tests (cfg/value :seon.config.proofs/results-dir) digests (cfg/value :seon.config.proofs/slow-test-ms)))
   ([dir digests bound]
    (into {} (for [[t dg] digests
-                  :let [fs (filterv (fn [[_ st]] (= :pass st)) (verdict-files dir t))
-                        own (some (fn [[d _ f]] (when (= d dg) f)) fs)
-                        ms (keep #(verdict-head-long % #":ms (\d+)") (distinct (cond-> (map last (recent-verdict-files fs)) own (conj own))))]
+                  :let [own (when dg (let [f (java.io.File. ^String (verdict-path dir t dg :pass))] (when (.isFile f) (verdict-head-long f #":ms (\d+)"))))
+                        ms (cond-> (keep first (history dir t)) own (conj own))]
                   :when (and (seq ms) (>= (apply min ms) bound))]
               [t (apply min ms)]))))
 
@@ -796,7 +820,7 @@
   ([dir tests cap floor factor]
    (when (pos? cap)
      (into {} (for [t (distinct tests)
-                    :let [g (sort (keep (fn [[_ _ f]] (verdict-head-long f #":ticks (\d+)")) (recent-verdict-files (filterv (fn [[_ st]] (= :pass st)) (verdict-files dir t)))))
+                    :let [g (sort (keep second (history dir t)))
                           med (if (seq g) (nth g (quot (count g) 2)) 0)]]
                 [t (min cap (max floor (* factor med)))])))))
 

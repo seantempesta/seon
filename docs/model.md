@@ -18,11 +18,15 @@ A [curated session](decisions.md) is replayed for real through the scripted prov
 
 ## One tool, eval
 
-Every request declares one tool, `eval` (`seon.model/eval-tool`), which the model may call or not (`tool_choice` auto: a reply with no call is prose to the user): its code is the REPL's input, one form a call by the prompt's ask though several run in order (they answer `:forms` and `:value`, the vector of their values: `seon.repl/response`, [prompt](prompt.md)), so the model sees each evaluation's answer before its next call. A reply's prose is read as comments. Every request sets `temperature 0` and streams its reply with its usage (`:stream true`, `:stream_options {:include_usage true}`, `seon.model/request-body`), so no clock has to guess a reply's length. What a request holds and in which order is the context's: [render](render.md#the-models-context-a-cached-prefix-then-the-turn).
+Every request declares one tool, `eval` (`seon.model/eval-tool`), which the model may call or not (`tool_choice` auto: a reply with no call is a message to the user that pauses the agent): its code is the REPL's input, one form a call by the prompt's ask though several run in order (they answer `:forms` and `:value`, the vector of their values: `seon.repl/response`, [prompt](prompt.md)), so the model sees each evaluation's answer before its next call. A reply's prose is read as comments. Every request sets `temperature 0` and streams its reply with its usage (`:stream true`, `:stream_options {:include_usage true}`, `seon.model/request-body`), so no clock has to guess a reply's length. What a request holds and in which order is the context's: [render](render.md#the-models-context-a-cached-prefix-then-the-turn).
 
 ## One function answers a request
 
 ```seon.model/complete``` takes the provider value and the request and answers a completion or a typed failure, by the provider's kind: `:none` answers `:seon.model/no-provider`, `:scripted` the fixture's reply, `:openai-compat` posts `seon.model/request-body` to the endpoint's chat-completions path with the key read at the call. A 200 body is read by ```seon.model/parse-reply``` as a stream of server-sent events (```seon.model/sse-reply```: content and reasoning concatenated in order, each tool call's pieces joined by its index, the last finish reason, the usage the final chunk carries) or as one chat-completion JSON document, and either way becomes the one completion shape (`seon.model/reply-of`). Anything but 200 is a provider error with the response body ([failures](#failures)).
+
+## Temperature
+
+`:seon.config.ai/temperature` is absent, so a request sends none and the provider's default applies: at a hard-coded 0 an agent copied its last reply. On the 5 real requests where a loop began, replayed 3 times each with thinking off (deepseek-flash, one step each): 11 of 15 repeated at 0, 3 of 15 at 0.5, and 0 of 15 at the default. Removing Seon's system prompt, page, intents and result metadata at 0 still repeated 4 of 15, so the temperature is most of it and the context part of it. Telling the agent not to repeat did nothing: `:again` is gone, and with or without it the default gave 0 of 15.
 
 ## Thinking is off by default
 

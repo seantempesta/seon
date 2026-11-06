@@ -263,7 +263,8 @@
     (let [bdb (get-in st [:branches view :db])
           ;; in the order written: entity ids are issued so
           calls (vec (sort (d/q '[:find [?e ...] :where [?e :seon.model-call/basis _]] bdb)))
-          bases (mapv #(:seon.model-call/basis (d/pull bdb [:seon.model-call/basis] %)) calls)
+          pulled (mapv #(d/pull bdb [:seon.model-call/basis :seon.model-call/tokens :seon.model-call/cache-hit-tokens] %) calls)
+          bases (mapv :seon.model-call/basis pulled)
           chosen (get-in st [:tab view :at] :latest)
           gone (when-not (or (= :latest chosen) (some #{chosen} calls)) chosen)
           at (if gone :latest chosen)
@@ -272,7 +273,9 @@
           lb (peek bases)
           to-come? (ui/to-come? bdb lb)]
       (ui/debug (focus (:main-db st) view)
-                (cond-> {:turns (mapv (fn [e b] {:e e :turn (:turn b) :origin (:origin b)}) calls bases) :at at :to-come? to-come?} gone (assoc :gone gone))
+                (cond-> {:turns (mapv (fn [e {:seon.model-call/keys [basis tokens cache-hit-tokens]}]
+                                                  (cond-> {:e e :turn (:turn basis) :origin (:origin basis)} tokens (assoc :tokens tokens) cache-hit-tokens (assoc :cached cache-hit-tokens)))
+                                                calls pulled) :at at :to-come? to-come?} gone (assoc :gone gone))
                 (when (seq calls)
                   {:id "d-turn" :input [at (when (= :latest at) (:max-tx bdb)) opened]
                    :draw (fn [_] [(ui/debug-turn {:unit "d-turn"} (-> (ui/debug-input bdb at calls raw?) (assoc :view (ui/view-param view) :opened opened))) nil])})
@@ -426,9 +429,7 @@
     (ui/page-chrome {:units (vec (concat sides [head-unit] units)) :view (ui/view-param view) :tab (if chat? :chat :debug)
                       ;; never a wait: drawn from its branch until its process answers, the page says so
                       :caption (when (and chat? (not own?))
-                                 (cond (:error held) (str "shown from its branch: its process did not answer (" (:seon.error/message (:error held)) ")")
-                                       (live? st id) "shown from its branch until its process answers"
-                                       :else "not running · shown from its branch"))
+                                 (when (:error held) (str "Its process didn't answer, so this may be behind: " (:seon.error/message (:error held)))))
                       ;; its REPL and its messages while its process runs; its held task's release
                       :input {:schema :seon.render/agent-input
                               :value {:id (:seon.agent/id e) :live? (live? st id) :focus? chat?

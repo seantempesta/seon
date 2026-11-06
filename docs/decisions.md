@@ -2,6 +2,42 @@
 
 This file holds the owner's standing rulings, one entry each: the rule, the owner's words and date, and where the rule is stated now; current truth and mechanism live in `AGENTS.md` and the wiki (`docs/`), and superseded or done rulings are kept verbatim in git history.
 
+## 2026-11-06 rulings
+
+The owner's rulings of 2026-11-06, on one tree for the model and the page, on data the model can read precisely, and on sessions working with no fixed ceremony; they stand over earlier entries where they differ.
+
+### The model's context is a render of the same tree as the page
+
+"The context the model is getting should be a part of this render system. It should be a computational graph with react style rendering of components using our understanding of immutable data structures (ctx atom) and the db (internal read tracking) do not reinvent anything." "When we were doing separate model and user html renders they always drifted." "hiccup is also data... Data itself can self render based on it's render function." "the model context should be efficiently re-renderable just like the hiccup is. this means yes we can re-eval something and update it. Yes this will cache bust and yes that's okay if explicitly done." "I am okay with busting the cache and re-rendering from that point on so redoing the diffs." The layer between the db and what's shown: "It's a transformation layer transforming raw data to meaningful processed data. Sometimes that's passthrough sometimes it's a summary but it's always dynamic and thinking ahead for how the diffs will present updates." One render, not two: "We were intentionally basing the model context off the rendered data. So it was a dependency tree and the hiccup / intermediary state was directly renderable to html. I don't want to go back to dual renders for everything. We end up with data that the agent may not care about and I want intelligent transformation, filtering, adding in other data if enecessary from the db." The word: "I really don't like the part name"; it's a component. Real-task runs come after diffs, before the conversation moves. Being built: task `seon.context/the-models-context-is-the-walks`.
+
+### What the model reads is precise data, teaching included
+
+Freeform Markdown on the wire is "a loss of precision"; "We saw a boost in internal model performance when we focused more on returning data." "I disagree that we can't have teaching and direct word statements. I just want them presented as data and strings." "I want evals to be data and not some magical structure so we can remove them re-eval them etc." Diffs: "There must be a clear way for the model to understand where the change is happening and then we only show the changed parts so we never reprint the full data structure"; editscript, "I want the gains". Keyframes: "Buiild the system so this is easy to do", tested after the refactoring.
+
+### An eval has an intent, and an agent talks to whoever started it through `message-md`
+
+Two ideas, two fields: "theres' sa field for natural language responses to anything going to the user/agent and that's in markdown and then there are intents for each eval that forces the agent to think about what it's doing before it does it and it's just describing the eval." Who it talks to: "some agents will be sub agents so they will be talking to their parent agent and not the user, but the idea is the same. Natural language markdown describing what to the agent/user what the next evals will be doing and answering questions or otherwise commnuicating." "It's one message-md for ALL the tool calls. each tool call has an intent." The message is stored as the turn's text, `:seon.model-call/reply`, and goes back to the model on the reply's first call as it sent it: required with history kept that way, 85 of 96 replies carried one and nothing was refused, against 8% with the message moved to text, and 47% with 53% of turns lost when refusing. Stated in [prompt](prompt.md).
+
+### Design for classes of problems, and look for root causes
+
+"I want an elegant design that prevents entire classes of problems so if we find ourselves hacking things we have the wrong design." "Always look for root causes rather than solving symptoms." "Agents repeating themselves is not waste it's a bug." Data: "Data can only come from the pull which becomes ctx or the current db"; "pull friendly is king"; "There are no tables and no rows"; "Don't record shit no one cares about or heavily embed process (how something is done) with what needs to be stored." Stated in AGENTS.md section 3.
+
+### Sessions work together with no fixed ceremony
+
+"I don't want the work done twice. If you do it well merge it. If optimization does it well merge it. If you hand something off to optimization just do it. No more ceremony and mandated fixed policies." "Only give optimization work that it can work on." "Aim to get 90% of the benefit for 10% of the effort." Machine load is balanced by judgment. Stated in AGENTS.md sections 2 and 3.
+
+### A slow test is left out until it is fast, by our own data
+
+"exclude them by default until they can run fast"; "We need our own perf data... to disable the tests and mark them as broken and ideally auto create tasks to fix them". Stated in [merging](merging.md#a-slow-test-is-left-out).
+
+### A reply with no calls pauses the agent, whatever its proofs say
+
+Owner, 2026-11-06: "I think that's fine to pause the agent if they don't do any tool calls"; "No more turns even if it's red. If we tell the agent that a reply with no tool calls will pause their session that's then we pause their session." Stated: docs/prompt.md, docs/turn.md#parked, seon.turn/act!.
+
+### A parked agent stays in memory, and replay is deliberate
+
+Owner, 2026-11-06: "I think we decided not to focus on making agents cheap (highly efficient) and not taking them out of memory. If by park you mean in the flow sense where it's a blocking wait and no cpu is used that's great. If it's replaying sessions -- no we know this is deeply problematic (fire-the-missles! kind of problematic) and we want to be intentional about replay and maybe even do selective replay". This tempers the automatic replay in the 2026-10-25 entry below, which was never built. Stated: docs/turn.md#parked.
+
 ## 2026-11-05 rulings
 
 The owner's rulings of 2026-11-05, on looking before building and on what makes an agent's context; they stand over earlier entries where they differ.
@@ -144,7 +180,7 @@ Approved after the run removal: a changed part that answers data sends clojure.d
 
 ### A process test's cache gap stays; the full run catches it (owner, 2026-10-30)
 
-An in-agent test's code strings are not in its reach, so its digest may reuse a green across a change it reaches; "leave it", the heavy pre-merge run catches it. Asked next: mark such tests uncacheable, so the heavy stage always reruns them ("Can we just mark tests that we know can't be cached so if they are touched they always rerun?"). Stated in docs/plan.md#waiting-on-the-owner.
+An in-agent test's code strings are not in its reach, so its digest may reuse a green across a change it reaches; "leave it", the heavy pre-merge run catches it. Asked next: mark such tests uncacheable, so the heavy stage always reruns them ("Can we just mark tests that we know can't be cached so if they are touched they always rerun?"). Stated in docs/plan.md#now-one-step.
 
 ### Main keeps recording live data; agents react only when main's program moves (owner, 2026-10-30)
 

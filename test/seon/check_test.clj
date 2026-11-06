@@ -428,3 +428,16 @@
       (is (not (.exists (java.io.File. (str dir "/merge-log.md")))) "nothing is written beside the run")
       (finally (clojure.java.shell/sh "rm" "-rf" dir)))))
 
+;; docs/checks.md#modes: the checks' seeded store is remade past its bound, as nothing in it is kept and its file and roster only grow
+(deftest a-seeded-store-past-its-bound-is-removed
+  (let [dir (str (seon.config/checkout) "/target/tmp/seed-bound-" (random-uuid))]
+    (.mkdirs (java.io.File. dir))
+    (spit (str dir "/data.mdb") "0123456789")
+    (try
+      (is (false? (seon.check/remove-store-past! dir 10)) "at the bound it stays")
+      (is (.exists (java.io.File. (str dir "/data.mdb"))))
+      (is (true? (seon.check/remove-store-past! dir 9)) "past it, it goes")
+      (is (not (.exists (java.io.File. dir))))
+      (is (false? (seon.check/remove-store-past! dir 9)) "a store not there is nothing to remove")
+      (finally (seon.fx/remove-tree! dir)))))
+

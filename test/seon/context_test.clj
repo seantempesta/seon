@@ -88,31 +88,11 @@
     (is (not (re-find #"result/" text)) "no result handle the reader does not hold")
     (is (nil? (:seon.print/continuation (first cuts))))))
 
-(deftest a-cut-reply-is-told-to-the-agent
-  ;; the turn (seon.render.ui/turn), not the work's status: a cut reply is the conversation's. Its last reply is its
-  ;; model call that answered last: the turn's own once it did (the page's), else the turn before's (the request being made in this turn)
-  (let [k "b/a1"
-        call (fn [n & more] (apply assoc {:seon.model-call/id (str k "/" n) :seon.model-call/agent {:seon.agent/key k} :seon.model-call/n n :seon.model-call/origin :model} more))
-        head (fn [turn calls]
-               (let [db (d/db-with (ts/test-db) (into [{:seon.agent/key k :seon.agent/turn turn}] calls))]
-                 (pr-str (seon.render.ui/turn {:seon.ctx/ctx {:seon.agent/key k :seon.agent/turn turn :seon.agent/max-turns 4} :seon.db/db db} 1))))
-        told? #(boolean (re-find #"at the model's token limit" %))]
-    (is (told? (head 1 [(call 1 :seon.model-call/ms 5 :seon.model-call/truncated true)])) "this turn's reply, cut")
-    (is (told? (head 2 [(call 1 :seon.model-call/ms 5 :seon.model-call/truncated true) (call 2)])) "the request of the next turn: the turn before's reply, cut")
-    (is (not (told? (head 2 [(call 1 :seon.model-call/ms 5 :seon.model-call/truncated true) (call 2 :seon.model-call/ms 5)]))) "this turn answered whole: the cut before it is no longer news")
-    (is (not (told? (head 1 [(call 1 :seon.model-call/ms 5)]))) "a reply whole")
-    (is (not (told? (head 1 [(call 1)]))) "a call still in flight, no turn before it")))
-
-(deftest the-turn-line-is-one-line-in-the-heading-and-the-model-is-sent-only-it
-  (let [part (seon.render.ui/turn {:seon.ctx/ctx {:seon.agent/status :busy :seon.agent/max-turns 40 :seon.agent/ns 'seon.program :seon.agent/turn 1
-                                                          :task {:seon.task/id "seon.program/a-var-is-read"}}
-                                           :seon.db/db (ts/test-db)} 1)]
-    (is (= "You have 40 turns. You're in seon.program." (seon.render.ui/turn-line 12 40 'seon.program)))
-    (is (= (seon.render.ui/turn-line 12 40 'seon.program) (seon.render.ui/turn-line 13 40 'seon.program)) "a turn passing is no news")
-    (is (= "" (seon.render.ui/turn-line 12 nil nil)) "what is not known is left out")
-    (is (= "You have 40 turns. 2 turns left. You're in seon.program." (seon.render.ui/turn-line 38 40 'seon.program)) "the turns left, near the cap")
-    (is (= "You have 40 turns. You're in seon.program." (second (second part))) "the part's heading is the line")
-    (is (nil? (:data-for (second (second part)))) "the model's part holds the heading only")))
+(deftest the-turn-component-is-the-namespace-and-nothing-else
+  (let [part (seon.render.ui/turn {:seon.ctx/ctx {:seon.agent/status :busy :seon.agent/max-turns 40 :seon.agent/ns 'seon.program :seon.agent/turn 39
+                                                          :task {:seon.task/id "seon.program/a-var-is-read"}}} 1)]
+    (is (= "You're in seon.program." (second (second part))) "the heading is the namespace the REPL is in, whatever the turn and the cap")
+    (is (nil? (:data-for (second (second part)))) "the model's component holds the heading only")))
 
 (deftest a-records-text-is-the-same-whatever-came-before
   ;; task seon.context/the-context-is-the-agents-evals-and-seons: a record's printed text is a
@@ -155,14 +135,14 @@
                :do '(my.task/update! :seon.task/proofs conj (quote user/scratch-test))}]
              (:refused st)))
       (is (= [:proof-red :regression :stray-red] (mapv :reason (:reasons st))) "the done rule's own answer, beside it")
-      (is (not (re-find #":proof-red" (pr-str (seon.render.ui/status-hiccup st)))) "and the page and the model are told each as what to do, not the raw reasons"))
+      (is (not (re-find #":proof-red" (pr-str (seon.render.ui/status-hiccup {} st)))) "and the page and the model are told each as what to do, not the raw reasons"))
     (testing "a test run that failed as a whole is said, not read as tests not run"
       (let [err {:seon.error/type :seon.proofs/test-run-died :seon.error/operation 'seon.agent/test-run :seon.error/message "namespace app-test did not load: Unable to resolve symbol: g"}
             db (d/db-with db [{:seon.agent/key "b/a1" :seon.agent/task [:seon.task/id "demo/f"] :seon.agent/test-error err}])
             st (context/status db (:tree (seon.ctx/build db (pdb/eid db :seon.agent/key "b/a1") :b)) {})]
         (is (= {:failed ["namespace app-test did not load: Unable to resolve symbol: g"]} (:test-run st)))
         (is (= [{:test 'demo-test/f-test :status :not-run :source (print/code "(deftest f-test (is (= 4 (f 2))))")}] (:proofs st)) "a written proof did not run")
-        (is (re-find #"did not load" (pr-str (seon.render.ui/status-hiccup st))) "drawn, it is there"))
+        (is (re-find #"did not load" (pr-str (seon.render.ui/status-hiccup {} st))) "drawn, it is there"))
       (is (= ["namespace app-test did not load: Unable to resolve symbol: g" "test process died: 9"]
              (proofs/test-run-errors {:reports [{:type :error :message "namespace app-test did not load: Unable to resolve symbol: g"}
                                            {:type :fail :var "#'demo-test/f-test" :message "x"}
@@ -313,14 +293,14 @@
         ms (into [] (mapcat #(context/eval-messages {} %)) [(ev "e1" "E1") (ev "e2" "E2") (ev "e3" "E3")])]
     (is (= ["assistant" "tool" "assistant" "tool" "assistant" "tool"] (mapv :role ms)) "each eval its call and its response")
     (is (= {:role "assistant" :content "" :tool-calls [{:id "c-e1" :code "(e1)"}] :reply 1} (first ms)) "the call alone, naming its reply")
-    (is (= {:role "tool" :tool-call-id "c-e1" :content "{:handle result/e1, :value \"E1\", :cost \"not run\"}"} (second ms)))
+    (is (= {:role "tool" :tool-call-id "c-e1" :content "{:handle result/e1, :value \"E1\"}"} (second ms)))
     (let [wire (seon.model/wire-messages true ms)]
       (is (= ["assistant" "tool" "tool" "tool"] (mapv :role wire)) "a reply's three calls are one assistant message")
       (is (= ["c-e1" "c-e2" "c-e3"] (mapv :id (:tool_calls (nth wire 0)))))
       (is (= ["c-e1" "c-e2" "c-e3"] (mapv :tool_call_id (subvec wire 1 4))) "each call answered, in order")
       (is (not-any? #(contains? % :reply) wire) "the reply's number never reaches the wire")))
   (testing "a user's form is one user message carrying its response"
-    (is (= [{:role "user" :content "{:by \"user\" :code \"(+ 1 2)\" :response {:handle result/e4, :value 3, :cost \"not run\"}}"}]
+    (is (= [{:role "user" :content "{:by \"user\" :code \"(+ 1 2)\" :response {:handle result/e4, :value 3}}"}]
            (context/eval-messages {} {:seon.eval/by "user" :seon.eval/code "(+ 1 2)" :seon.eval/response {:handle 'result/e4 :value 3}})))))
 
 (deftest an-inserted-eval-reaches-the-model-as-a-call-of-its-own
@@ -330,8 +310,8 @@
   (let [ev (fn [id by turn] {:seon.eval/id id :seon.eval/by by :seon.eval/intent "Read the pattern." :seon.eval/code "(:seon.ctx/pattern @ctx)"
                              :seon.eval/response {:handle (symbol "result" id) :value [:a]} :seon.eval/turn turn})
         ms (context/eval-messages {} (ev "e1" "root" 0))]
-    (is (= [{:role "assistant" :content "Read the pattern." :tool-calls [{:id "eval-e1" :code "(:seon.ctx/pattern @ctx)" :intent "Read the pattern."}]}
-            {:role "tool" :tool-call-id "eval-e1" :content "{:handle result/e1, :value [:a], :cost \"not run\"}"}]
+    (is (= [{:role "assistant" :content "" :tool-calls [{:id "eval-e1" :code "(:seon.ctx/pattern @ctx)" :intent "Read the pattern."}]}
+            {:role "tool" :tool-call-id "eval-e1" :content "{:handle result/e1, :value [:a]}"}]
            ms)
         "a call made from the eval's own intent and code, answered by its response; turn 0 has no reply to name")
     (is (= ms (context/eval-messages {} (ev "e1" "anyone at all" 0))) "who asked is read by no one")
@@ -460,7 +440,8 @@
         (is (= (context/system-text @conn) (:content (first r0))) "the system message is the system prompt as main holds it")
         (is (str/starts-with? (:content (first r0)) "# You are a Seon agent\n\nYou're at a Clojure REPL") "the page, from its sections")
         (is (= ["system" "assistant" "tool"] (mapv :role r0)) "the first request: the system prompt, then the page as an eval's call and answer")
-        (is (str/includes? (get-in r0 [1 :tool-calls 0 :intent]) "Seon ran this") "its intent says who ran it")
+        (is (= {:role "assistant" :content ""} (select-keys (get r0 1) [:role :content])) "Seon's eval is an ordinary call, no text")
+        (is (nil? (get-in r0 [1 :tool-calls 0 :intent])) "its code alone")
         (is (= "(my.render/render-ctx)" (get-in r0 [1 :tool-calls 0 :code])))
         (is (every? #(re-find % (:content (peek r0))) [#"seon\.render\.ui/cited" #"Doubles\." #"seon\.render\.ui/status"]) "the page whole, each part by the function that drew it: how the work stands too")
         (is (= "(my.render/render-changes)" (get-in r1 [(- (count r1) 2) :tool-calls 0 :code])) "what moved is an eval of its own at the end, after turn 1's own eval")
@@ -627,8 +608,9 @@
     (seon.model/wire-messages true ms)))
 
 (defn- reply-shape
-  "Each assistant wire message of wire as [text reasoning [call ids]]."
-  [wire] (vec (for [m wire :when (= "assistant" (:role m))] [(:content m) (:reasoning_content m) (mapv :id (:tool_calls m))])))
+  "Each assistant wire message of wire as [its reply's message reasoning [call ids]]: the message is its text, or on its first call."
+  [wire] (vec (for [m wire :when (= "assistant" (:role m))]
+                [(or (some-> (get-in m [:tool_calls 0 :function :arguments]) (clojure.data.json/read-str) (get "message-md")) (:content m)) (:reasoning_content m) (mapv :id (:tool_calls m))])))
 
 (deftest cutting-a-replys-calls-leaves-one-assistant-message-per-reply
   ;; docs/render.md#the-models-context-a-cached-prefix-then-the-turn: a reply's text and reasoning are its model call's, never an
@@ -826,10 +808,10 @@
         (is (= ["system" "assistant" "tool" "assistant" "assistant" "tool" "assistant" "tool"] (mapv :role r1)) (pr-str (mapv :role r1)))
         (is (= {:role "assistant" :content "I call f." :reasoning "why" :reply 1} (nth r1 3)) "the reply: its text and the reasoning as returned")
         (is (= {:role "assistant" :content "" :tool-calls [{:id "call-0" :code "(f 1)"}] :reply 1} (nth r1 4)) "then its call")
-        (is (= [{:role "assistant" :content "I call f." :reasoning_content "why" :tool_calls [{:id "call-0" :type "function" :function {:name "eval" :arguments "{\"code\":\"(f 1)\"}"}}]}
-                {:role "tool" :content "{:handle result/e2, :value 1, :cost \"not run\"}" :tool_call_id "call-0"}]
+        (is (= [{:role "assistant" :content "" :reasoning_content "why" :tool_calls [{:id "call-0" :type "function" :function {:name "eval" :arguments "{\"message-md\":\"I call f.\",\"code\":\"(f 1)\"}"}}]}
+                {:role "tool" :content "{:handle result/e2, :value 1}" :tool_call_id "call-0"}]
                (subvec (seon.model/wire-messages true r1) 3 5)) "one assistant message on the wire")
-        (is (= "{:handle result/e2, :value 1, :cost \"not run\"}" (:content (nth r1 5))) "the call's response, its recorded value printed as it is sent")
+        (is (= "{:handle result/e2, :value 1}" (:content (nth r1 5))) "the call's response, its recorded value printed as it is sent")
         (is (= r0 (subvec r1 0 3)) "the whole earlier request is the prefix: its page stays, appended")
         (is (re-find #"seon\.render\.ui/status" (:content (peek r1))) "a verdict recorded after turn 0: how the work stands, told again")
         ;; (the task's data draws each proof's recorded status too, so it moves with a verdict: reported)
@@ -1606,7 +1588,7 @@
             ms (:messages r1)]
         (is (= (:messages r0) (subvec ms 0 (count (:messages r0)))) "the first request is the prefix of the next")
         (is (= [{:role "assistant" :content "" :tool-calls [{:id "c0" :code "(+ 5 1)" :intent "Add."}] :reply 1}
-                {:role "tool" :tool-call-id "c0" :content "{:handle result/e0, :value 6, :cost \"not run\"}"}
+                {:role "tool" :tool-call-id "c0" :content "{:handle result/e0, :value 6}"}
                 {:role "user" :content "{:from \"owner\", :body \"Go on.\"}"}
                 {:role "assistant" :content "Thinking." :reply 2}]
                (subvec ms (count (:messages r0)) (+ 4 (count (:messages r0)))))
@@ -1781,12 +1763,11 @@
     (is (empty? (:helpers shape)) "only the helpers its example calls (it calls none)")
     (is (= "(deftest g-test (is (= 1 (g))))" (:example shape)) "one real test of it: the shortest of its first five by name")
     (is (nil? (context/test-shape db 'nowhere-test/x)) "a namespace the branch lacks has no shape: the agent makes it first")
-    (let [h (pr-str (seon.render.ui/status-hiccup {:proofs [{:test 'demo-test/new-test :status :undefined :shape shape}]}))]
+    (let [h (pr-str (seon.render.ui/status-hiccup {} {:proofs [{:test 'demo-test/new-test :status :undefined :shape shape}]}))]
       (is (re-find #"Write " h) "it is told to write it")
-      (is (re-find #"Write it like this one" h))
       (is (re-find #"deftest g-test" h)))))
 
-(deftest a-turn-passing-adds-no-eval-and-each-eval-says-its-turn
+(deftest a-turn-passing-adds-no-eval
   ;; owner, 2026-11-05: what repeatedly changes is the render's failure, not a reason for an eval: the turn is data on each eval, whose
   ;; bytes never move, so the page says nothing new as a turn passes (docs/render.md#the-agents-turn)
   (ts/test-branch!
@@ -1796,7 +1777,7 @@
             _ (ev! "e1")
             r1 (ask! 1)
             all (pr-str (:messages r1))]
-        (is (re-find #"You have " (:content (peek (:messages r0)))) "the page says the cap")
+        (is (not (re-find #"turns" (:content (peek (:messages r0))))) "the page announces no cap")
         (is (not (re-find #"Turn \d" all)) "no message holds a turn number as a line")
         (is (= (:messages r0) (subvec (:messages r1) 0 (count (:messages r0)))) "the prefix before it is byte-identical")))))
 
