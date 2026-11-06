@@ -579,6 +579,39 @@
       (is (= #{"main's"} (notes @conn)) "main reads as before")
       (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))
 
+;; docs/storage.md#collection: a sweep frees pages, and only a compaction makes the file smaller
+(deftest a-store-a-sweep-freed-is-compacted-at-its-next-boot
+  (let [path (str (seon.config/checkout) "/target/tmp/compact-" (random-uuid))
+        {:keys [conn]} (pdb/open! :lmdb path 0 :db)
+        head #(vec (map (juxt :e :a :v :tx) (d/datoms (pdb/head % :db) :eavt)))
+        size #(.length (java.io.File. (str path "/data.mdb")))]
+    (try
+      (is (nil? (pdb/compact-if-due! path)) "nothing swept: no compaction")
+      (d/transact conn [{:seon.root/id :root :seon.root/collected (pdb/collect! conn true)}])
+      (d/branch! conn :db :gone)
+      (let [c (d/connect (assoc (:config @conn) :branch :gone))]
+        (d/transact c {:tx-data (vec (for [i (range 3000)] {:note/text (str "note " i (apply str (repeat 400 "x")))}))})
+        (d/release c))
+      (d/transact conn [{:seon.root/id :root :seon.root/collected (pdb/collect! conn true)}])
+      (d/delete-branch! conn :gone)
+      (let [r (pdb/collect! conn true)]
+        (is (pos? (:swept r)) "the gone branch swept")
+        (d/transact conn [{:seon.root/id :root :seon.root/collected r}]))
+      (let [before (head conn) big (size) cfg (:config @conn)]
+        (pdb/sync! cfg)
+        (d/release conn)
+        (let [c (pdb/compact-if-due! path)]
+          (is (< (:bytes-after c) (:bytes-before c)) (pr-str c))
+          (is (= big (:bytes-before c))))
+        (is (< (size) big) "the file is smaller")
+        (is (nil? (pdb/compact-if-due! path)) "and it is done once, until another sweep")
+        (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)]
+          (is (= before (head conn)) "and main's head reads the same")
+          (d/transact conn [{:note/text "after"}])
+          (is (some #(= "after" (:v %)) (d/datoms @conn :aevt :note/text)) "and it takes a write")
+          (d/release conn)))
+      (finally (clojure.java.shell/sh "rm" "-rf" path (str path ".compact"))))))
+
 ;; the rule a collection keeps beside "no agent live" (docs/storage.md#collection)
 (deftest a-root-that-shares-its-store-never-collects
   ;; seon.db/collect! with sole? false (:seon.config.store/sole-writer?, false where roots share

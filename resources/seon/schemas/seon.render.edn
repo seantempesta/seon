@@ -53,8 +53,6 @@
  ;; an agent's proofs as its newest turn observed them (test -> {:status :failure}), its [:proofs]
  ;; part (seon.render/render-ctx)
  :seon.render/proofs [:map-of {:seon.render/html seon.render.ui/proofs} :symbol [:map [:status :keyword] [:failure {:optional true} [:map [:assert :any] [:got :any]]]]]
- ;; root's page's tile of main's runs (seon.render.ui/runs-tile): how many by status, and each running one
- :seon.render/work [:map {:seon.render/html seon.render.ui/work} [:by-outcome [:map-of :keyword nat-int?]] [:working [:vector :map]]]
  ;; hiccup marking a role or a field the tree's reading has no message for (seon.render/wire-parts): a typo is an error, not a silent drop
  :seon.render/unknown-mark [:and :seon.error/base [:map [:seon.error/type [:= :seon.render/unknown-mark]] [:mark :string]]]
  ;; a page's location that main names no entity for (seon.render.proc/page-value): an agent's id of no agent in root's boot
