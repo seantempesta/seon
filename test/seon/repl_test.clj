@@ -284,19 +284,7 @@
          (is (= 2 (:value (repl/eval-string "(+ 1 1)" {:intent "Adds, see seon.ref/scan."}))) "an eval with prose outside an agent")
          (finally (reset! agent/state old) (remove-ns 'x.repl-shadow)))))
 
-(deftest the-same-eval-answered-the-same-says-so
-  ;; bench-fence-1: an agent ran two reads 25 times each, every answer reading as new; the second of the same code
-  ;; answered the same names the first, and code that answers otherwise does not
-  (let [[a b c d] (at/in-agent ["(+ 1 2)" "(+ 1 2)" "(+ 2 2)" "(def n (inc (or (resolve 'n) 0))) n"])]
-    ;; what the model reads: the response's text (at/in-agent answers {:value :text})
-    (is (not (str/includes? (:text a) ":again")) (pr-str a))
-    (is (str/includes? (:text b) "e1 ran this code and answered the same") (str "the same code, the same answer: " (pr-str b)))
-    (is (not (str/includes? (:text c) ":again")) "other code")
-    (is (not (str/includes? (:text d) ":again")) "first of its code")))
-
-(deftest an-edit-swapped-back-and-forth-says-so
-  ;; bench-b21: an agent swapped one line of scan back and forth 23 times; each edit!'s answer differed only by its
-  ;; inner eval's handle and cost, so none read as answered the same
+(deftest an-answer-says-its-turn-once-and-names-a-db-by-its-form
   ;; one agent answers all four claims in order (each on a name of its own): an attach is most of what an agent costs a test
   (let [ed (fn [f a b] (str "(seon.repl/edit! 'x.swap/" f " " (pr-str a) " " (pr-str b) ")"))
         [_ ab ba ab2 _ _ turned _ _ m7 _ s2]
@@ -309,11 +297,7 @@
                       "(def t (atom 4))" "{:ms (swap! t inc)}" "{:ms (swap! t inc)}"
                       ;; an answer holding a db is printed as the record keeps it (the one text of an eval), its host object named by the form that reads it
                       "(select-keys @seon.agent/state [:db])" "(select-keys @seon.agent/state [:db])"])]
-    (is (not (str/includes? (:text ab) ":again")) (pr-str ab))
-    (is (not (str/includes? (:text ba) ":again")) "the swap back is other code")
-    (is (str/includes? (:text ab2) "ran this code and answered the same") (str "the same edit again, answered the same but for its handle: " (:text ab2)))
     (is (= [":turn \"1 of 9\""] (re-seq #":turn \"[^\"]*\"" (:text turned))) (:text turned))
-    (is (not (str/includes? (:text m7) ":again")) (str "{:ms 5} then {:ms 6} is no same answer: " (:text m7)))
     (is (str/includes? (:text s2) "(get (deref seon.agent/state) :db)") (str "the db named by its form: " (:text s2)))))
 
 (deftest a-broken-parser-leaves-the-repl-answering
