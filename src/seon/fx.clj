@@ -929,16 +929,21 @@
         ;; as the full run's: the worktree's target/ is a clone of another tree's, and its binary
         ;; that tree's (measured 2026-10-27: the first daily run's process tests ran on a stale one,
         ;; red for that alone); bin/build skips it when the tree matches, else ~20 s
-        (let [slot (str (cfg/value :seon.config.source/tests-dir) "/main-build")
+        (let [slots (str (cfg/value :seon.config.source/tests-dir) "/main-build")
+              slot (str slots "/" sha)
               kept-build ["seon" "seon.stamp" "seon.tree"]
               ;; a run with no candidate is main's tree, and its build is kept by that tree (bin/build reads the stamp): a red's second run
-              ;; or the next day's reuses it, measured at 45 s against 2 s. One slot, the last tree built
+              ;; or the next day's reuses it, measured at 45 s against 2 s. By commit, and named when whole, as two workers
+              ;; run at once: a binary read beside another tree's stamp would pass for this tree's; the last tree built is kept
               _ (when (and (empty? files) (.isFile (java.io.File. (str slot "/seon"))))
                   (doseq [n kept-build] (sh/sh "cp" "-c" (str slot "/" n) (str dir "/target/" n))))
               b (apply sh/sh (concat clean ["nice" "-n" "15" "bin/build" "seon"] [:dir dir]))
-              _ (when (and (empty? files) (zero? (:exit b)))
-                  (.mkdirs (java.io.File. ^String slot))
-                  (doseq [n kept-build] (sh/sh "cp" "-cf" (str dir "/target/" n) (str slot "/" n))))]
+              _ (when (and (empty? files) (zero? (:exit b)) (not (.isFile (java.io.File. (str slot "/seon")))))
+                  (let [tmp (str slot "." (random-uuid))]
+                    (.mkdirs (java.io.File. ^String tmp))
+                    (doseq [n kept-build] (sh/sh "cp" "-c" (str dir "/target/" n) (str tmp "/" n)))
+                    (doseq [old (.listFiles (java.io.File. ^String slots)) :when (not= (.getPath ^java.io.File old) tmp)] (remove-tree! (.getPath ^java.io.File old)))
+                    (sh/sh "mv" tmp slot)))]
           (if (not (zero? (:exit b)))
             (do (spit log (str (:out b) (:err b)))
                 (error #'seon.fx/run-on-checkout :seon.fx/io-error (str (build-failure (str (:out b) (:err b)) files) "; its log: " log) {:path dir}))
@@ -1000,7 +1005,7 @@
 
 (defn- run-held
   "A named run on a checkout (run-on-checkout) of the tests with no verdict at this candidate, sha and files, so one candidate's test runs
-  once whoever asks: the owner is the one :tests worker, and the verdict cache holds each under the candidate's digest
+  once whoever asks: the verdict cache holds each under the candidate's digest
   (seon.fx/write-verdicts!, evicted as any verdict is; a run that never reached a test holds nothing). Nothing to run: no worktree and no build.
   Answers as run-on-checkout does, for every test, with each one's held digest under :digests."
   {:malli/schema [:=> [:cat :string :map] :map]}

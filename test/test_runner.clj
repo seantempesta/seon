@@ -270,7 +270,7 @@
 
 (defn- write-shards!
   "tests (var symbols) dealt into at most jobs shards (shards: :seon.config.proofs/jobs for a full run or a merge's
-  verification, 1 for what a change reaches), the generative check's keys mg
+  verification, what their work is worth for what a change reaches: seon.proofs/worth-shards), the generative check's keys mg
   ({key digest}) dealt among them (deal-mg), each written as out/shard-<i>.edn ({:tests [...] :mg {key digest}
   :digests {test digest} :tree t}, t the planned tree's id) for bin/test to run, one process each (bin/test
   removes the last run's first), and each measured test's stall bound as out/stall-bounds (\"<test> <ms>\"
@@ -403,10 +403,13 @@
         ;; tests (shard!, seon.proofs/mg-run): no binary, no process of their own
         {mg-run true run-steps false} (group-by proofs/mg-key? run-steps)
         mg-run (vec mg-run) run-steps (vec run-steps)
-        ;; an incremental run (what a change reaches) is one process: four starts cost more than the few
-        ;; seconds of work they split (the owner, 2026-10-30); the full run and a merge's verification shard
+        ;; an incremental run (what a change reaches) is one process while four starts would cost more than the few
+        ;; seconds of work they split (the owner, 2026-10-30); past that it shards, as a gate of 206 tests took 751 s on
+        ;; one; the full run and a merge's verification shard
         n (write-shards! out (if no-test [] run-tests) digests (:tree inputs) (select-keys steps mg-run)
-                         (if all? (config/value :seon.config.proofs/jobs) 1))
+                         (if all?
+                           (config/value :seon.config.proofs/jobs)
+                           (proofs/worth-shards run-tests (config/value :seon.config.proofs/jobs) (measured-ms run-tests) (config/value :seon.config.proofs/shard-min-ms))))
         ;; what runs and reaches the binary (a test that reaches binary-sh, a step that runs a seon.check
         ;; mode): bin/test builds target/seon only when this is not empty, bin/check seeds only for the steps
         step-bin (filterv proofs/step-needs-binary? run-steps)

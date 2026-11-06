@@ -640,6 +640,15 @@
     (is (= '#{a/w a/u} (proofs/agent-tests-sample 2 (assoc ds 'a/w "d0"))) "a digest that moves moves the choice")
     (is (= (set (keys ds)) (proofs/agent-tests-sample 100 ds)) "fewer tests than the sample: all of them")))
 
+;; docs/merging.md#a-merge-runs-what-the-change-reaches: a few seconds stay one process; a gate's 751 s splits
+(deftest a-run-has-the-shards-its-work-is-worth
+  (let [ts '[a/t a/u a/v a/w]]
+    (is (= 1 (proofs/worth-shards ts 4 '{a/t 1000 a/u 1000 a/v 1000 a/w 1000} 30000)) "seconds of work: one")
+    (is (= 2 (proofs/worth-shards ts 4 '{a/t 15000 a/u 15000 a/v 15000 a/w 15000} 30000)) "one for each min-ms")
+    (is (= 4 (proofs/worth-shards ts 4 '{a/t 200000 a/u 200000 a/v 200000 a/w 200000} 30000)) "never past jobs")
+    (is (= 3 (proofs/worth-shards ts 4 '{a/t 25000 a/u 25000} 30000)) "a test never measured counts as the mean")
+    (is (= 1 (proofs/worth-shards ts 4 {} 30000)) "with none measured, one: it has nothing to split by")))
+
 ;; docs/merging.md#a-slow-test-is-left-out: asked only of what would run, out of a plain and a merge's run, in a named or full one
 (deftest a-slow-test-is-left-out-unless-named-or-the-full-run
   (let [asked (atom nil)
