@@ -336,6 +336,29 @@
      :fixed {:calls 385 :bytes 150000}
      :sizes [100 300 1000 4000]}))
 
+;; See docs/render.md#a-change-is-edits-by-name
+(defn keyed-part
+  "The input of size n: a component as status draws it, n named children, then the same with one of them changed: page-edits' one argument, [[id was now]]."
+  {:malli/schema [:=> [:cat pos-int?] [:vector :any]]}
+  [n]
+  (let [was (into ['seon.render.ui/status {:ctx [:task :proved]} [:h2 "Your proofs"]]
+                  [(into [:ul {:key :proofs}] (for [i (range n)] (let [t (symbol "demo-test" (str "t-" i))] [:li {:key t} [:code (str t)] ": passes"])))])
+        now (assoc-in was [3 3] '[:li {:key demo-test/t-1} [:code "demo-test/t-1"] ": fails"])]
+    [[["status" was now]]]))
+
+(deftest edits-cost-the-component
+  ;; a diff reads the one component that moved: its children, once, never the page's
+  (cost/proof
+    {:of 'seon.render/page-edits :input 'seon.render-cost-test/keyed-part
+     :n "named children of the component that moved"
+     :work (str "the component read as a map by name, on each side (seon.render/keyed); editscript's walk of those maps; each edit named. "
+                "Linear in the children in bytes and flat in contracted calls, whatever the rest of the page holds; ticks 27k at 10 children, 326k at 100, "
+                "17.6M at 1,000, the map reads being an array map's")
+     :growth :linear
+     :per-n {:calls 0 :bytes 12500}
+     :fixed {:calls 9 :bytes 60000}
+     :sizes [10 30 100 300]}))
+
 ;; See docs/render.md#components
 (defn gone-member
   "A member of a list, its text from ctx."

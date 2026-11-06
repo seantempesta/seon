@@ -44,6 +44,8 @@
         ;; root's system declaration (resources/seon/system.edn): #env, #profile, #include
         aero/aero {:mvn/version "1.1.6"}
         fipp/fipp {:mvn/version "0.6.29"}
+        ;; a page's changes as edits (seon.render/page-edits, docs/render.md#the-render-is-an-eval; owner 2026-11-06); EPL, no deps
+        juji/editscript {:mvn/version "0.8.0"}
         org.clojure/core.cache {:mvn/version "1.0.225"}}
  :aliases {;; Datahike's own tests, for gating a merge onto reference-code/datahike
            :dhtest {:extra-paths ["reference-code/datahike/test"]}
