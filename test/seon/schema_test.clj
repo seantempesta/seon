@@ -140,3 +140,12 @@
                                 "(:seon.schema/key (my.schema/register! :x.rearm2/state [:enum :a :b]))\n"
                                 "(held :b)\n"))]
     (is (= ":b" (last printed)) (str "a function the contract macro armed checks the new form: " (pr-str printed)))))
+
+(deftest registering-another-type-says-it-cannot-change
+  ;; docs/data-modeling.md#data-modeling: an attribute's type is fixed; registering says so at once, as data, not at a later write
+  (let [db (d/db-with (main-db) [{:db/ident :x.schema-test/n :db/valueType :db.type/string :db/cardinality :db.cardinality/one}])
+        r (schema/registration db :x.schema-test/n '[:int] false)]
+    (is (= :type-change (:seon.schema/refused-because r)) (pr-str r))
+    (is (str/includes? (:seon.error/message r) ":db.type/string") "the type it has")
+    (is (str/includes? (:seon.error/message r) "new name") "and how to go on")
+    (is (:tx (schema/registration db :x.schema-test/n '[:string] false)) "the same type registers")))
