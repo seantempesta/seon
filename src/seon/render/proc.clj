@@ -267,14 +267,15 @@
           chosen (get-in st [:tab view :at] :latest)
           gone (when-not (or (= :latest chosen) (some #{chosen} calls)) chosen)
           at (if gone :latest chosen)
-          raw? (contains? (get-in st [:tab view :open] #{}) "d-turn-raw")
+          opened (get-in st [:tab view :open] #{})
+          raw? (contains? opened "d-turn-raw")
           lb (peek bases)
           to-come? (ui/to-come? bdb lb)]
       (ui/debug (focus (:main-db st) view)
                 (cond-> {:turns (mapv (fn [e b] {:e e :turn (:turn b) :origin (:origin b)}) calls bases) :at at :to-come? to-come?} gone (assoc :gone gone))
                 (when (seq calls)
-                  {:id "d-turn" :input [at (when (= :latest at) (:max-tx bdb)) raw?]
-                   :draw (fn [_] [(ui/debug-turn {:unit "d-turn"} (-> (ui/debug-input bdb at calls raw?) (assoc :view (ui/view-param view)))) nil])})
+                  {:id "d-turn" :input [at (when (= :latest at) (:max-tx bdb)) opened]
+                   :draw (fn [_] [(ui/debug-turn {:unit "d-turn"} (-> (ui/debug-input bdb at calls raw?) (assoc :view (ui/view-param view) :opened opened))) nil])})
                 nil))))
 
 (def ^:private gone "The agent statuses of an ended process (:seon.agent/status)." (:seon.status/gone (contract/properties :seon.agent/status)))
