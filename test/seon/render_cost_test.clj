@@ -336,6 +336,48 @@
      :fixed {:calls 385 :bytes 150000}
      :sizes [100 300 1000 4000]}))
 
+;; See docs/render.md#components
+(defn gone-member
+  "A member of a list, its text from ctx."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int] :any]}
+  [{c :seon.ctx/ctx} id] [:li (str id (:n c))])
+(defn gone-list
+  "A list of ctx's :ids."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+  [{c :seon.ctx/ctx}] (into [:ol] (for [id (seon.ratom/realize (:ids c))] [#'gone-member {} id])))
+
+(defn list-of
+  "The input of size n: a list of n members drawn, and the atom holding its ids."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :map :seon.host/deref]]}
+  [n]
+  (let [a (seon.ratom/atom {:db/id 1 :ids (vec (range n))})
+        w (seon.render/walker {:ref a :changes seon.ctx/changes} (constantly nil) [#'gone-list {}])]
+    (seon.render/flush! w nil)
+    [w a]))
+
+(defn member-gone-and-back!
+  "One member let go and drawn again: the list's runs and what went."
+  {:malli/schema [:=> [:cat :map :seon.host/deref] :any]}
+  [w a]
+  (let [ids (:ids @a)]
+    (swap! a assoc :ids (pop ids))
+    (seon.render/flush! w nil)
+    (swap! a assoc :ids ids)
+    (seon.render/flush! w nil)))
+
+(deftest a-member-gone-costs-the-lists-lookups
+  ;; a member the list no longer draws goes at the flush's end, by who holds it: no walk of the page and no scan of the list per member
+  (cost/proof
+    {:of 'seon.render-cost-test/member-gone-and-back! :input 'seon.render-cost-test/list-of
+     :n "members of the list"
+     :work (str "the list run twice, a lookup of each member's marker each time and one set of its children; the one member disposed and drawn "
+                "again; nothing per member of who holds it but the one that moved")
+     :growth :linear
+     ;; measured 2026-11-06: 702 calls and 431 KB at 100
+     :per-n {:calls 7 :bytes 4200}
+     :fixed {:calls 30 :bytes 40000}
+     :sizes [100 300 1000]}))
+
 (deftest a-step-costs-what-changed
   ;; task seon.render/a-step-costs-what-changed (docs/render.md#a-page-is-a-kept-walk): one more turn draws its own component of the
   ;; conversation, found by its number; the earlier turns are a lookup each (a form drawn keeps its marker) and are not drawn again
