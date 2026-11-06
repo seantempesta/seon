@@ -3,7 +3,7 @@
 
 The owner's second ruling (docs/decisions.md): \"caching isn't an excuse for writing shitty code. If the cold version ... is fuckign slow as shit it's still not okay\", and \"can we return whether there was a cache hit in repl evals?\". So:
 1. Cold first. Every derived kind's own computation carries a cost proof measured cold, with no reuse, at the work it needs. Reuse goes on top of a fast cold path, never instead of one.
-2. Before test_runner's per-file analysis becomes a kind, find out why it takes 8-15 s cold (program-db's whole re-import, test_runner.clj:36-43, 165-190). If the cold path is slow because of a defect (a whole re-import where a delta would do, an O(n²) pass, the planner's :in-scalar), that defect is fixed first at its cause, and the reuse is sized on the fixed numbers.
+2. Before test_runner's per-file analysis becomes a kind, find out why it takes 8-15 s cold (program-db's whole re-import, test_runner.clj, 165-190). If the cold path is slow because of a defect (a whole re-import where a delta would do, an O(n²) pass, the planner's :in-scalar), that defect is fixed first at its cause, and the reuse is sized on the fixed numbers.
 3. Hits are recorded where they happen. A REPL eval's reply item and its record, and a turn's record, say which results were reused and which were computed, and each miss's cost in ticks and calls. It is recording, not gating, and it renders through the one printer: the agent window shows it beside each form.
 
 The owner's third ruling (2026-10-23): \"if it's fast enough we don't need caching then don't use caching.\" So the task's first step is fixing the cold paths, measured. A kind is admitted only by its measured cost after that fix: what is still expensive cold gets reuse, and what is fast gets none. If test_runner's analysis and plan become fast cold, this task shrinks to results as facts plus the hit and miss recording, or to nothing; the task says which, with the numbers.
@@ -26,10 +26,10 @@ Net size, counted over src, test and bin together. It must replace the per-case 
 
 | what | where | lines |
 |---|---|---|
-| the test-results file store (result-path, greens, result-file, store-greens!) | proofs.clj:121-131, 142-158 | 28 |
+| the test-results file store (result-path, greens, result-file, store-greens!) | proofs.clj, 142-158 | 28 |
 | its callers | | ~12 |
-| stored-greens | proofs.clj:132-141 | 10 |
-| result-tx's digest part | prove.clj:32-56 | ~8 |
+| stored-greens | proofs.clj | 10 |
+| result-tx's digest part | prove.clj | ~8 |
 | :turn-ctx | | ~8 |
 | ordered's 1000 ms term (a reuse keyed by time, which §5 forbids) | | 3 |
 
