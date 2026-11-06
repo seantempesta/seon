@@ -1939,8 +1939,17 @@
               :html (h/html [:nav {:id "d-steps" :class "flex flex-wrap items-center gap-1 text-xs"}
                              (when (seq turns)
                                (list (btn false (if (pos? i) (nth es (dec i)) (first es)) "◀ previous")
-                                     (for [[j {:keys [e turn origin]}] (map-indexed vector turns)]
-                                       (btn (= j i) e (str turn (when (= :outside origin) " read"))))
+                                     (let [most (max 1 (reduce max 0 (keep :tokens turns)))]
+                                       (for [[j {:keys [e turn origin tokens cached]}] (map-indexed vector turns)
+                                             :let [on? (= j i) t (or tokens 0) c (min t (or cached 0))]]
+                                         ;; a turn's whole context, its height against the largest turn's: what the provider's cache served below, what it did not above
+                                         [:button {:type "button" (keyword "data-on:click") (go e) :aria-current (when on? "step")
+                                                   :title (if tokens (str "turn " turn ": " (group3 tokens) " tokens" (when cached (str ", " (group3 cached) " from cache"))) (str "turn " turn))
+                                                   :class (str "flex min-w-6 flex-col items-center gap-0.5 rounded px-1 pt-1 tabular-nums " (if on? "bg-base-700 text-text-50" "text-text-400 hover:text-text-50"))}
+                                          [:span {:class "flex h-10 w-3 flex-col justify-end"}
+                                           [:span {:class (if on? "bg-signal" "bg-text-400") :style (str "height:" (/ (* 100.0 (- t c)) most) "%")}]
+                                           [:span {:class "bg-info" :style (str "height:" (/ (* 100.0 c) most) "%")}]]
+                                          [:span (str turn (when (= :outside origin) " read"))]]))
                                      (when to-come? (btn (= :latest at) "latest" (str (inc (count es)) " to come")))
                                      (btn false (if (< (inc i) (count es)) (nth es (inc i)) "latest") "next ▶")
                                      (btn (= :latest at) "latest" "latest")))
@@ -2049,7 +2058,9 @@
                   (cond (<= n budget) (draw s)
                         open? [:div {:class "flex flex-col gap-1"} (button false (str (print/tokens-text n) ": show less")) (draw s)]
                         :else [:div {:class "flex flex-col gap-1"} (draw (:shown (print/prose s budget))) (button true (str "Large, " (print/tokens-text n) ": show all"))])))
-        row (fn [i kind {:keys [role content tool_calls tool_call_id reasoning_content]}]
+        ;; which tool message answers each call: the wire pairs them by id
+        answers (into {} (keep-indexed (fn [i {:keys [role tool_call_id]}] (when (= "tool" role) [tool_call_id i])) ms))
+        row (fn row [i kind {:keys [role content tool_calls tool_call_id reasoning_content]}]
               (let [rs (get sources i) new? (get new i)
                     example (some (fn [[k x]] (when (= :example k) x)) rs)
                     records (keep (fn [[k x]] (when (= :eval k) (get evals x))) rs)
@@ -2063,21 +2074,30 @@
                   (for [r rs] [:span (source r)])
                   [:span {:class (str "tabular-nums " (size-class (get sizes i)))} (print/tokens-text (get sizes i))]]
                  [:div {:class "flex min-w-0 flex-col gap-1"}
-                  (when tool_call_id (field "tool_call_id" (verbatim tool_call_id)))
+                  (when tool_call_id [:span {:class "seon-note"} (str "tool_call_id · " tool_call_id)])
                   (when reasoning_content [:details [:summary {:class "seon-note"} "reasoning_content"] (markdown reasoning_content)])
                   (when (seq content) (sized (str "m" i) content (if code? highlighted markdown)))
-                  ;; a call as the record holding its id holds it; none, its arguments as sent
+                  ;; a call as the record holding its id holds it; none, its arguments as sent; then the tool message that answers it
                   (map-indexed (fn [j {:keys [id function]}]
-                                 (if-let [code (:seon.eval/code (get by-call id))]
-                                   (field (str "call · " id) (sized (str "m" i "c" j) code highlighted))
-                                   (field (str "tool_calls · " (:name function) " · " id " · arguments") (verbatim (:arguments function)))))
+                                 [:div {:class "flex flex-col gap-1 rounded-sm border border-base-800 p-1.5" :data-call id}
+                                  (if-let [code (:seon.eval/code (get by-call id))]
+                                    (field (str "call · " id) (sized (str "m" i "c" j) code highlighted))
+                                    (field (str "tool_calls · " (:name function) " · " id " · arguments") (verbatim (:arguments function))))
+                                  (when-let [a (get answers id)] (row a kind (get ms a)))])
                                tool_calls)]]))
+        ;; what each eval's answer costs: the tool message that holds it
+        result-sizes (into {} (keep-indexed (fn [i {:keys [role]}] (when (= "tool" role) (when-let [[k x] (first (get sources i))] (when (= :eval k) [x (get sizes i)])))) ms))
         ;; what a closed section says: what each eval set out to do, else the message's first line
         says (fn [{:keys [is]}]
-               (let [recs (keep (fn [[k x]] (when (= :eval k) (get evals x))) (distinct (mapcat #(get sources %) is)))
-                     intents (keep :seon.eval/intent recs)]
-                 (if (seq intents)
-                   [:div {:class "seon-prose flex min-w-0 flex-col gap-1 whitespace-normal"} (for [t intents] (markdown t))]
+               (let [recs (keep (fn [[k x]] (when (= :eval k) (when-let [r (get evals x)] (assoc r ::id x)))) (distinct (mapcat #(get sources %) is)))]
+                 (if (some :seon.eval/intent recs)
+                   [:div {:class "flex min-w-0 flex-col gap-1.5 whitespace-normal"}
+                    (for [{:seon.eval/keys [intent code] id ::id} recs :let [n (get result-sizes id) lines (str/split-lines (or code ""))]]
+                      [:div {:class "flex min-w-0 items-baseline gap-2"}
+                       [:div {:class "flex min-w-0 flex-1 flex-col"}
+                        (when intent [:div {:class "seon-prose"} (markdown intent)])
+                        [:code {:class "break-words text-2xs text-text-400"} (str (first lines) (when (next lines) (str " …+" (dec (count lines)) " lines")))]]
+                       (when n [:span {:class (str "shrink-0 text-2xs tabular-nums " (size-class n))} (str "result " (print/tokens-text n))])])]
                    [:span {:class "seon-prose min-w-0 whitespace-normal break-words"} (prose (str (or (:content (get ms (first is))) "")) (config/value :seon.config.render/line-budget) {:one-line? true})])))
         sections (request-sections ms sources evals)
         size-of (fn [{:keys [is]}] (reduce + 0 (map #(get sizes %) is)))
@@ -2101,11 +2121,13 @@
        [:div {:class "flex flex-col gap-1"}
         [:div {:class "flex h-2 overflow-hidden rounded-sm bg-base-800"}
          (for [{:keys [band n]} shares] [:span {:class band :style (str "width:" (/ (* 100.0 n) (max 1 est)) "%")}])]
-        [:div {:class "flex flex-wrap gap-x-3 text-2xs text-text-400"}
-         (for [{:keys [name band n]} shares] [:span {:class "inline-flex items-center gap-1 tabular-nums"} [:span {:class (str "inline-block h-2 w-2 " band)}] (str name " " (print/tokens-text n))])]])
+        [:div {:class "flex flex-wrap gap-x-4 gap-y-1 text-text-200"}
+         (for [{:keys [name band n]} shares]
+           [:span {:class "inline-flex items-center gap-1.5 tabular-nums"} [:span {:class (str "inline-block h-2.5 w-2.5 " band)}]
+            [:b {:class "text-text-50"} (str (long (Math/round (/ (* 100.0 n) (max 1 est)))) "%")] (str name " " (print/tokens-text n))])]])
      (when error [:div {:class "rounded border border-error p-2"} (render/html {} error)])
      (when differs?
-       [:p {:class "text-warning"} "This page draws the turn again from its records with today's renders, and the bytes differ from the ones the turn sent (its hash, :seon.model-call/sent-hash): a render or a record changed since."])
+       [:p {:class "seon-note"} "Drawn again with today's renders: its bytes differ from what the turn sent, because a render or a record changed since. The turn kept one hash of the whole request (:seon.model-call/sent-hash), so this page can't say where."])
      [:details [:summary {:class "cursor-pointer text-text-400"} "the envelope: every field but the messages, as sent"]
       (verbatim (json/write-str (dissoc body :messages)))]
      (into [:div {:class "flex flex-col gap-1"}]
@@ -2124,7 +2146,8 @@
                                   [:div {:class "min-w-0 flex-1 text-text-100"} (says sec)]
                                   [:span {:class (str "shrink-0 tabular-nums " (size-class n))} (print/tokens-text n)]]
                                  ;; only what is on screen is drawn: a closed section is its line
-                                 (when open? (into [:div {:class "mt-1 flex flex-col divide-y divide-base-800"}] (map (fn [i] (row i kind (get ms i))) is)))]]
+                                 (when open? (let [called (into #{} (comp (mapcat #(:tool_calls (get ms %))) (keep (comp answers :id))) is)]
+                                                (into [:div {:class "mt-1 flex flex-col divide-y divide-base-800"}] (map (fn [i] (row i kind (get ms i)))) (remove called is))))]]
                          (and cached (<= (first is) (dec cached)) (< (dec cached) end))
                          (conj (line "text-info" (str "the provider's cache ends in the section above: " (group3 cache-hit-tokens) " tokens served from cache (placed by estimate)")))
                          (and same (pos? same) (<= (first is) (dec same)) (< (dec same) end))

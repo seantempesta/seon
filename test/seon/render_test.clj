@@ -953,7 +953,7 @@
           (is (false? (:differs? in1)) "drawn again, the bytes the turn hashed")
           (let [other (d/db-with db [{:seon.model-call/id "b/a1/2" :seon.model-call/sent-hash "0000000000000000"}])]
             (is (true? (:differs? (ui/debug-input other e1 [e0 e1] false))) "a hash that is not the redraw's: said")
-            (is (str/includes? (page (assoc-in st [:branches [:debug :a1] :db] other) e1) "the bytes differ") "on the page")))
+            (is (str/includes? (page (assoc-in st [:branches [:debug :a1] :db] other) e1) "its bytes differ") "on the page")))
         (testing "a chosen turn stays as it was when the branch moves"
           (let [moved (d/db-with db [{:seon.eval/id "e9" :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key "b/a1"} :seon.eval/turn 2
                                       :seon.eval/code "(f 9)" :seon.eval/response {:handle 'result/e9 :value 9}}])]
@@ -1365,9 +1365,9 @@
            (#'ui/request-sections ms sources evals)))
     (is (= ["system" "page" "eval"] (mapv second (re-seq #"data-section=\"(\w+)\"" h))) "a fold a section, whatever many messages it holds")
     (is (= 1 (count (re-seq #"<details[^>]*data-section=\"\w+\"[^>]* open" h))) "only the section holding what is new starts open")
-    (is (not (str/includes? h "(page)")) "a closed section's messages are not drawn: it costs its line")
-    (is (str/includes? (draw #{"d-turn-s1"}) "(page)") "turned open, they are")
-    (is (not (str/includes? (draw #{"d-turn-s3"}) "(second-call)")) "a section that starts open can be closed")
+    (is (not (str/includes? h "data-call=\"x\"")) "a closed section's messages are not drawn: it costs its line")
+    (is (str/includes? (draw #{"d-turn-s1"}) "data-call=\"x\"") "turned open, they are")
+    (is (not (str/includes? (draw #{"d-turn-s3"}) "data-call=\"b\"")) "a section that starts open can be closed")
     (is (= 1 (count (re-seq #"Then the other" h))) "a closed section says once what each of its evals set out to do, though the eval made its call and its answer")
     (is (re-find #"call · a.*\(first-call\).*call · b.*\(second-call\)" h) "a call is the code of the record holding its id")
     (is (str/includes? (h/html (ui/debug-turn {:unit "d-turn"} {:turn 1 :agent "b/a1" :view "a1" :origin :model :usage {} :evals {"e2" nil}
@@ -1375,6 +1375,9 @@
                        "tool_calls · eval · a · arguments")
         "an eval the db does not hold: its arguments as sent")
     (is (str/includes? h "Large, ") "text past its budget offers the rest")
+    (is (re-find #"data-call=\"a\".*\(first-call\).*tool_call_id · a.*data-call=\"b\".*\(second-call\).*tool_call_id · b" h) "each call beside the tool message that answers it, paired by id")
+    (is (str/includes? h "result ~") "a section says what each eval's answer costs")
+    (is (str/includes? h "%</b>") "the bar says each kind's share of the request")
     (is (str/includes? h "unit=d-turn-m4&amp;open=true") "the button opens that message's text")
     (is (< (count h) (count (draw #{"d-turn-m4"}))) "opened, its whole text is on the page")
     (is (str/includes? (draw #{"d-turn-m4"}) "show less"))
