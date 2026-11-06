@@ -1913,7 +1913,7 @@
             main (d/commit-id @conn)
             ;; the merge view is a task that merges itself's, read from main's commit as the agent heard it
             agent-on (fn [db] (d/db-with db [{:seon.task/id "demo/whole" :seon.task/kind :whole}
-                                             {:seon.agent/key "b1/a3" :seon.agent/base-commit base :seon.agent/main-commit main :seon.agent/task {:seon.task/id "demo/whole"}}]))
+                                             {:seon.agent/key "b1/a3" :seon.agent/base-commit base :seon.agent/main-program main :seon.agent/task {:seon.task/id "demo/whole"}}]))
             ours (agent-on (d/db-with (d/commit-as-db conn base) (defn-facts 'demo/h "(defn- h [] 1)")))
             a (seon.db/eid ours :seon.agent/key "b1/a3")
             st (seon.context/status ours (:tree (seon.ctx/build ours a :b)) {})
@@ -1955,7 +1955,7 @@
         (d/transact conn tx))
       (let [c0 (d/commit-id @conn)
             k (seon.task/agent-key "b1" :a3)
-            tree (assoc (:tree (seon.ctx/build @conn (seon.db/eid @conn :seon.agent/key k) :task-demo-f)) :seon.agent/main-commit c0 :seon.agent/base-commit c0)
+            tree (assoc (:tree (seon.ctx/build @conn (seon.db/eid @conn :seon.agent/key k) :task-demo-f)) :seon.agent/main-commit c0 :seon.agent/main-program c0 :seon.agent/base-commit c0)
             a (seon.ratom/atom tree)
             w (r/walker {:ref a :changes seon.ctx/changes} (fn [] @conn) [(r/declared-var :seon.render/render-ctx) {}])
             views '#{seon.render.ui/status}
@@ -1970,9 +1970,12 @@
             (d/transact conn [{:seon.task/id "demo/g" :seon.task/ns 'demo :seon.task/name "g" :seon.task/plan "Make demo/g." :seon.task/kind :work :seon.task/proofs #{}}])
             (swap! a assoc :seon.agent/main-commit (d/commit-id @conn))
             (r/flush! w nil)
+            (is (= r0 (ran)) "main's commit moving alone redraws none of them: root notes an agent's status on main at each eval")
+            (swap! a assoc :seon.agent/main-program (d/commit-id @conn))
+            (r/flush! w nil)
             (let [r1 (ran)]
               (is (= views (set (for [[f n] r1 :when (not= n (r0 f))] f)))
-                  "main moving redraws the views (a whole task merges itself: its merge section reads main)")))
+                  "main's content moving redraws the views (a whole task merges itself: its merge section reads main)")))
           (finally (r/dispose-walk! w)))))))
 
 ;; an eval's tokens are what the model reads of it, not its whole record: one read 99,303 for about 200

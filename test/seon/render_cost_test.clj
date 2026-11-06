@@ -461,7 +461,7 @@
         ours (reduce (fn [db i] (d/db-with db (defn-facts (symbol ns (str "h" i)) (str "(defn h" i " [] " i ")"))))
                      (d/db-with (d/commit-as-db conn base) [{:seon.agent/key "b/a1" :seon.agent/base-commit base}])
                      (range n))]
-    [{:seon.db/db ours :seon.ctx/ctx {:task {:seon.task/kind :whole} :seon.agent/main-commit main}}]))
+    [{:seon.db/db ours :seon.ctx/ctx {:task {:seon.task/kind :whole} :seon.agent/main-program main}}]))
 
 ;; See docs/render.md#a-component-answers-hiccup
 (deftest the-status-reads-the-branchs-diff-once

@@ -233,11 +233,14 @@
 (defn- main-base-tx
   "The transaction that records on the agent, before its request is drawn, the main and merge base it
   last heard (the commits its page's branch views read): what the page and a replay draw; none when
-  nothing moved."
+  nothing moved. :seon.agent/main-program stays at the last commit whose content differs from the main it heard, so a
+  reader of what main's program holds runs again only when that moved (docs/render.md#how-the-work-stands)."
   {:malli/schema [:=> [:cat] [:vector :map]]}
   []
   (let [db (agent/db) k (:key @agent/state) e (some->> (pdb/eid db :seon.agent/key k) (d/entity db))
-        now (into {} (remove (comp nil? val)) {:seon.agent/main-commit (some-> (:main @agent/state) d/commit-id)
+        main (:main @agent/state)
+        now (into {} (remove (comp nil? val)) {:seon.agent/main-commit (some-> main d/commit-id)
+                                                 :seon.agent/main-program (when main (pm/content-commit (some->> (:seon.agent/main-program e) (d/commit-as-db (pdb/store-of db))) main))
                                                  :seon.agent/base-commit (some-> (:base @agent/state) d/commit-id)})
         moved (into {} (remove (fn [[a v]] (= v (get e a)))) now)]
     (if (seq moved) [(assoc moved :seon.agent/key k)] [])))

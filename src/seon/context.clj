@@ -653,8 +653,9 @@
         tid (:seon.task/id t)
         {:keys [proofs plan]} (when tid (task/pulled-accumulated t))
         kind (:seon.task/kind t :work)
-        ;; main's commit, read only when the task merges itself: a move of main reaches a reader of this only then
-        main (when (task/merges? kind) (ratom/realize (:seon.agent/main-commit rec)))
+        ;; main at its last move of content, read only when the task merges itself: readiness reads main's content, so a commit that moved
+        ;; none of it, as root's note of an agent's status does, reaches no reader of this
+        main (when (task/merges? kind) (ratom/realize (:seon.agent/main-program rec)))
         ;; a test run that failed as a whole: present on its process only while it is so (the
         ;; process's other facts, written on every eval, are not read)
         test-error (:seon.agent/test-error ag)
