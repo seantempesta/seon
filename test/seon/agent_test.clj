@@ -338,6 +338,7 @@
     (is (= -1 ended) (str "the proof run outlived its agent (byte " ended " after its sleep); agent " (pr-str pid) " kill " (pr-str killed)))))
 
 (deftest a-two-child-proof-run-ends-with-its-agent
+  ;; intermittently red: task seon.agent/a-two-child-proof-run-sometimes-reads-eof-from-its-second-child
   ;; for a run dealt into two children. Child A's test holds the write end
   ;; of a fifo and sleeps; child B's test blocks for good where no signal reaches (a take from a channel nothing puts
   ;; on), so B outlives its agent's death. The agent is killed: the fifo's EOF says A is gone while B is alive. No clock
