@@ -92,7 +92,7 @@
 
 (def ^:private bare
   "Root arguments for a root whose subject is its store, not the program or the wiki: it imports no source and
-  loads no page (the checkout's 4,500 forms and 39 pages are 15-20 s of a boot on a store that holds neither,
+  loads no page: for a store of its own, which holds neither (the checkout's 4,500 forms and 39 pages are 15-20 s of its boot; on a seeded store the same arguments would retract both, 14-32 s,
   docs/testing.md#a-root-costs-what-it-boots)."
   ["--set" ":seon.config.source/dirs=[]" "--set" ":seon.config.root/wiki-dirs=[]"])
 
@@ -161,7 +161,8 @@
                                        " (cond (not= ag (:agent e)) (recur)"
                                        " (= :ready (:type e)) (:text @(seon.root/submit! sys ag \"(contains? (datahike.api/schema (seon.agent/db)) :form/keywords)\"))"
                                        " (#{:dead :ended :killed} (:type e)) (:type e)"
-                                       " :else (recur)))))")}])
+                                       " :else (recur)))))")}]
+                          {:args bare})
         answer (fn [l] (try (edn/read-string {:default tagged-literal} l) (catch Exception _ nil)))]
     (try
       (is (str/includes? (str (answer (first (str/split-lines out)))) ":value true")

@@ -56,3 +56,14 @@ REPL; you never read result files.
 `(reduce d/db-with ...)`, your own `(fn [db] ...)` fixtures, or `d/q` over any db you build all
 work. A test that must transact through a connection (the writer, a merge) uses a branch of the
 test store (`seon.test-store/test-branch!`); say why in its comment.
+
+## A root costs what it boots
+
+A test that runs a process (a root, its fork server, an agent) waits on boots, not on its own work: `bin/test --all` on 2026-11-06, at load 3-8 on 4 shards, was 1,931 s of tests serial (9.5 min wall), and the slowest tests did 2-9 M ticks of their own in 60-220 s. Measured phases of a root on the seeded process store (idle machine): process start 0.8 s, boot to `ROOT LISTENING` about 5 s (program load 0.7 s, source read 0.65 s, the rest the graph and the boot fact), the first agent fork 2.7 s (the fork server loads main's test namespaces, 1.9 s, and its index, 0.6 s), then an attach 0.1 s and an eval 0.03 s. A root is therefore about 8 s whatever the test does with it; a shared root (`seon.test-store/shared-root!`) pays it once per shard and arguments.
+
+- **A root imports the dirs `bin/test` does.** The fork server loads main's test namespaces through Jolt's AOT cache only when `:seon.config.source/dirs` holds their files (`seon.program/required!`); a root given `["src"]` evaluated 2,274 test forms one by one at its first fork, 11.6 s a root instead of 1.9 s (first attach 13.2 s instead of 2.65 s). `seon.agent-test/in-agent` therefore passes no dirs unless a test names them, and every test shares the one default root.
+- **A subject that is not the program boots without it.** A store of a test's own holds no program and no wiki, and a root on it imports the checkout (4,500 forms) and loads 39 pages (15-20 s). A test whose subject is the store (`seon.root-test/bare`) sets `source/dirs` and `root/wiki-dirs` to `[]`. Never on a seeded store: there the same arguments retract the program and the wiki (14-32 s).
+- **A main's run is every test main holds.** `main-is-proved-at-boot-with-the-config-on-nobody-asking` ran 1,152 tests (140-180 s) to read two verdicts, because main was a branch of the process store; its own store imported from `[src, patterns_test.clj]` holds two (12 s).
+- **Repeating a process is not a stronger claim.** `root-threads-are-what-root-declares` ran three cycles, each a process of its own (82 s); `bin/check lifecycle` repeats the cycle ten times, the test reads one (24 s).
+
+Floors: a test whose subject is a root's life (boot, kill, restart, a generation) takes 8-12 s per boot it makes; `source-test/a-restart-catches-up-and-a-new-generation-resumes` (three boots, two loop turns and a `bin/build seon` of the generation) takes about 100 s.
