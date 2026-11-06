@@ -1,8 +1,4 @@
-[{:seon.task/name "an-agent-reads-its-task-as-main-holds-it"
-  :seon.task/plan "What exists: `my.task/current` reads the agent's task on its own branch (`seon.agent/db`), forked before the run was written, so it reads its execution as held while main reads running. Correct: the execution an agent reads is main's at its turn's basis, or the render says which db it read."
-  :seon.task/kind :work
-  :seon.task/proofs #{seon.server-test/an-agent-reads-its-task-running}}
- {:seon.task/name "design-writes-the-implement-steps-proofs"
+[{:seon.task/name "design-writes-the-implement-steps-proofs"
   :seon.task/plan "What exists: `my.task/update!` edits only this agent's own :seon.task/plan or :seon.task/instructions, and `seon.merge/carried-platform-attrs` carries only those two, so the proofs a design step writes for implement reach main only as plan text. Reproduction: a staged request with no proofs (`seon.template/stages`); design writes red deftests and rewrites its plan; implement is refused :no-proofs by `seon.reconcile/done-explain` (docs/tasks.md). Cause: no function edits another task's members, and proofs are not carried. Correct (DESIGN-tasks §5.2, prototyped): ``my.task/edit!`` (id f & args: clojure.core/update on any authored member of any task, written on the branch), and :seon.task/proofs among what `seon.task/carry-tx` carries. Deletes: `my.task/update!`."
   :seon.task/kind :work
   :seon.task/proofs #{seon.task-test/edit-writes-another-tasks-proofs seon.reconcile-test/implement-holds-the-proofs-design-wrote}}]
