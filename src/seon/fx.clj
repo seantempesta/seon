@@ -406,7 +406,7 @@
 (defn inputs
   "The one producer of the checkout at root's inputs that have no program facts, for bin/test
   and for root's :source read (read-source, which records them for its agents):
-  {:tree (tree-id: every file and pin, for a test reading files or running the binary) :env
+  {:tree (tree-id: every file and pin, for a test reading files) :code (the digest of the program's source and the shipped config, for a check step, which runs them whatever its reach names; the wiki, the tasks and the tests are not in it) :env
   (every test's: the tree's env-input? entries of no env-class, among them the runtime's pins
   (:seon.config.source/runtime-pins: Jolt and Chez, a bump re-runs every test), and the per-test
   tick bound every verdict is a function of, :seon.config.agent/test-ticks) :config (the config in
@@ -421,7 +421,8 @@
   ;; tree: the checkout's tree-id the caller already holds (one per run: bin/test's plan computes it once)
   ([root cfg checkout tree]
    (let [runtime-pins (set (:seon.config.source/runtime-pins cfg))
-         entries (for [l (str/split-lines (git! {} root ["ls-tree" "-r" tree] nil)) :let [[m p] (str/split l #"\t" 2)] :when (or (env-input? p) (env-class p))]
+         lines (str/split-lines (git! {} root ["ls-tree" "-r" tree] nil))
+         entries (for [l lines :let [[m p] (str/split l #"\t" 2)] :when (or (env-input? p) (env-class p))]
                    ;; a submodule by its pin: its files as they are, an uncommitted edit included
                    ;; (a clean one's line is its gitlink's, as before; one not checked out has no files to read)
                    (let [d (str root "/" p)
@@ -431,6 +432,7 @@
                       (if (and pn (str/includes? pn "+")) (str l " " pn) l)]))
          by-class (group-by first entries)]
      {:tree tree
+      :code (lib/digest (str/join "\n" (filter #(let [p (second (str/split % #"\t" 2))] (or (str/starts-with? p "src/") (str/starts-with? p "resources/seon/config/"))) lines)))
       :env (lib/digest (str/join "\n" (concat (map second (get by-class nil)) [(str "test-ticks " (:seon.config.agent/test-ticks cfg) " " (:seon.config.agent/test-ticks-floor cfg) " " (:seon.config.agent/test-ticks-factor cfg))])))
       ;; the config in force, and each class of files a test may read (env-class): named inputs
       ;; a test's digest takes by what its reach reads

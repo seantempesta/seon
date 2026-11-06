@@ -25,7 +25,7 @@ In flight, each on its own branch and merged when proved:
 - **One call per reply, and the MCP tools the same (`jolt/mcp-tools`):** [one tool](model.md#one-tool-eval), [an outside agent](turn.md#an-outside-agent).
 - **Test reuse:** a test's digest takes a form's read form, not its text; config keys a `:map` lists are no edges (`jolt/reuse-wip`).
 - **Agents repeating themselves** is a bug being root-caused (`jolt/no-repeats`).
-- **Time from a proved change to main:** the Optimization session. Agents' merges on a swept store are proved ([collection](storage.md#collection)); next, what a change that touches no code still reruns.
+- **Time from a proved change to main:** the Optimization session. Agents' merges on a swept store are proved ([collection](storage.md#collection)); a merge of the wiki, tasks or tests skips the steps that run the binary ([merging](merging.md#a-merge-runs-what-the-change-reaches)); next, what a first status costs when main's content moves.
 - **The web pages:** the agent's chat, `@ctx` and raw-wire debug tabs and root's work list are on main. An opened step has Run, To here, Copy and Edit ([run again](turn.md#an-eval-can-be-run-again)). A handle names its value, so the same answer has the same handle. Next: going back to any point (`seon.agent/reset-an-agent-to-any-point`), source editing with an explicit disk sync (`seon.render/an-edit-reaches-disk-when-asked`) and a chat that sends only what it places (`seon.render/an-agents-chat-sends-only-what-it-places`).
 
 Open with the owner: erasing the store for the schema step; surfacing a red from the nightly full run.
