@@ -896,6 +896,12 @@
            (if (seq form) (str ", where your change wrote: " form) ", a place your change's files don't hold")))
     "the gate's build failed and named no exception"))
 
+(defn- runner-end
+  "The last lines of what a runner said, joined, enough to hold what stopped it: its error, where, and the verdict lines after them. Three lost the error, leaving
+  only where and the two verdicts."
+  {:malli/schema [:=> [:cat :string] :string]}
+  [text] (str/join " | " (take-last 6 (remove str/blank? (str/split-lines text)))))
+
 (defn- run-on-checkout
   "One run of the :tests effect (run-tests): tests (qualified names) on a checkout of the merge candidate: a
   detached worktree of repo at branch's head (bin/worktree --at, as a generation's), files
@@ -958,7 +964,7 @@
                 (nil? plan)
                 (error #'seon.fx/run-on-checkout :seon.fx/io-error
                        (str "the test runner made no plan in " dir " (exit " (:exit r) "); its log: " log
-                            " ends: " (str/join " | " (take-last 3 (remove str/blank? (str/split-lines (str (:err r) "\n" (:out r)))))))
+                            " ends: " (runner-end (str (:err r) "\n" (:out r))))
                        {:path dir :no-plan true})
                 (contract/error? found)
                 found
@@ -999,9 +1005,9 @@
               t)))
 
 (defn- run-held
-  "A named run on a checkout (run: run-on-checkout) of the tests with no verdict at this candidate, sha and files, so one candidate's test runs
-  once whoever asks: the owner is the one :tests worker, and the verdict cache holds each under the candidate's digest
-  (seon.fx/write-verdicts!, evicted as any verdict is). Nothing to run: no worktree and no build. A candidate with files that can make no plan
+  "A named run on a checkout (run: run-on-checkout) of the tests with no verdict at this candidate, sha and files, so one candidate's green test runs
+  once whoever asks: the owner is the one :tests worker, and the verdict cache holds each green under the candidate's digest
+  (seon.fx/write-verdicts!, evicted as any verdict is), never a red, which runs again as a test's plan runs it: a digest does not see the machine. Nothing to run: no worktree and no build. A candidate with files that can make no plan
   holds that failure the same way and answers it again: its next ask would build the same files to the same refusal, each turn; any other failed run holds nothing.
   Answers as run-on-checkout does, for every test, with each one's held digest under :digests."
   {:malli/schema [:=> [:cat :seon.host/fn :string :map] :map]}
@@ -1025,9 +1031,10 @@
               r)
           (let [{:keys [results failures] :as v} (:value r)
                 w (write-verdicts! {:id (str "gate " candidate)}
-                                   (into {} (for [[t s] results :when (not= :error s)]
-                                              [(key-of t) {:digest (digest-of t) :pass (if (= :pass s) 1 0) :fail (if (= :fail s) 1 0) :error 0}]))
-                                   (into {} (for [[t fs] failures] [(key-of t) fs])))
+                                   ;; greens only, as a test's plan reuses (seon.proofs/plan): a digest does not see the machine, so a red from outside the program would stand until one moved
+                                   (into {} (for [[t s] results :when (= :pass s)]
+                                              [(key-of t) {:digest (digest-of t) :pass 1 :fail 0 :error 0}]))
+                                   {})
                 was (fn [t] (get held (digest-of t)))]
             (if (contract/error? w)
               w

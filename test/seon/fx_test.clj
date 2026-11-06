@@ -318,3 +318,26 @@
       (held other-error sha2 req)
       (is (= 4 @calls) "another failure holds nothing: it may be the machine's"))))
 
+;; a digest does not see the machine, so a gate holds greens only, as a test's plan reuses them
+(deftest a-gates-red-runs-again-and-its-green-does-not
+  (let [sha (str "test-" (random-uuid))
+        calls (atom 0)
+        status (atom :fail)
+        run (fn [_ {:keys [tests]}] (swap! calls inc)
+              {:value {:results (zipmap tests (repeat @status)) :failures (if (= :fail @status) {(first tests) [{:type :fail :message "red"}]} {}) :ms 1}})
+        held @#'seon.fx/run-held
+        req {:repo "/x" :files {"src/a.clj" "(ns a)"} :tests ['a/t]}]
+    (is (= {'a/t :fail} (:results (:value (held run sha req)))))
+    (is (= [{:type :fail :message "red"}] (get-in (held run sha req) [:value :failures 'a/t])) "a red runs again, and says why")
+    (is (= 2 @calls))
+    (reset! status :pass)
+    (is (= {'a/t :pass} (:results (:value (held run sha req)))) "so one from outside the program does not stand")
+    (is (= {'a/t :pass} (:results (:value (held run sha req)))))
+    (is (= 3 @calls) "a green is held")))
+
+;; a gate's refusal keeps what stopped it: its last 3 lines were where and two verdicts, and the error was cut
+(deftest a-runners-end-keeps-its-error
+  (let [end (@#'seon.fx/runner-end "prove: run\nerror[analyze/unknown-namespace]: No such namespace: print\n  --> 2566:28\nTEST FAILED (the plan)\nPROVE FAILED\n\n")]
+    (is (clojure.string/includes? end "No such namespace: print"))
+    (is (clojure.string/includes? end "2566:28"))))
+
