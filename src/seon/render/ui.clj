@@ -1348,12 +1348,14 @@
   {:seon.render/style "max-w-[85%] self-end rounded-2xl rounded-tr-sm bg-base-800 px-4 py-2.5 text-text-100" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int] :any]}
   [{c :seon.ctx/ctx} _aid]
   (when-let [plan (some-> (:task c) ratom/realize :seon.task/plan)]
-    (let [{:keys [shown truncated?]} (print/prose plan (config/value :seon.config.render/line-budget))]
+    (let [{:keys [shown truncated? omitted lines]} (print/prose plan (config/value :seon.config.render/line-budget))]
       [:section
        (if truncated?
          ;; the start, or the whole in its place, never both
          [:details {:class "group seon-message"}
-          [:summary {:class "list-none"} [:span {:class "group-open:hidden"} shown " … "] [:span {:class "text-xs underline"} [:span {:class "group-open:hidden"} "Read all"] [:span {:class "hidden group-open:inline"} "Show less"]]]
+          [:summary {:class "list-none"}
+           [:div {:class "group-open:hidden"} (markdown shown)]
+           [:span {:class "text-xs"} [:span {:class "muted group-open:hidden"} (str (emit/cut-words omitted lines nil) " ")] [:span {:class "underline group-open:hidden"} "Read all"] [:span {:class "hidden underline group-open:inline"} "Show less"]]]
           (markdown plan)]
          [:div {:class "seon-message"} (markdown plan)])])))
 
@@ -1825,14 +1827,16 @@
   {:malli/schema [:=> [:cat :map :any] [:map [:seon.render/html :any] [:seon.render/units [:vector :map]]]]}
   [{:keys [units view input caption tab]} id]
   (let [in (fn [sel] (filterv #(= sel (:container %)) units))
-        unit (fn [u] {:id (:id u) :input {:rev (:rev u)} :html (:html u) :container (:container u)})]
+        unit (fn [u] {:id (:id u) :input {:rev (:rev u)} :html (:html u) :container (:container u)})
+        ;; an agent's chat is the conversation: what it reads and its blocks are its @ctx tab, with no place here
+        agent-chat? (and (= :chat tab) (not= :root id))]
     {:seon.render/html
      [:div {:id "app" :class "seon-page" :data-view view}
       (top-bar id tab)
       ;; the agents on the left, the chat large in the middle, what is rendered in blocks on the right, each scrolling on
       ;; its own (docs/render.md#where-things-go). Three columns always: a page's side parts may arrive after its first
       ;; frame (an agent's walk answers later). @ctx (tab :debug) places nothing beside its record
-      [:div {:class (if (or (= :debug tab) (and (= :chat tab) (not= :root id))) "seon-columns seon-columns-wide" "seon-columns")}
+      [:div {:class (if (or (= :debug tab) agent-chat?) "seon-columns seon-columns-wide" "seon-columns")}
        [:aside {:class "seon-agents"}
         [:h2 {:class "kicker mb-1 hidden lg:block"} "agents"]
         [:ol {:id "c-side" :class "seon-strip flex gap-2 overflow-x-auto pb-1 text-xs lg:flex-col lg:gap-0.5"} (for [u (in "#c-side")] (slot (:id u)))]]
@@ -1841,8 +1845,7 @@
         (slot "p-caption")
         [:ol {:id "c-rows" :class "seon-chat-log" :data-view view} (for [u (in "#c-rows")] (slot (:id u)))]
         (when input (slot "p-input"))]
-       ;; an agent's chat is the conversation: what it reads and its blocks are its @ctx tab
-       (when-not (or (= :debug tab) (and (= :chat tab) (not= :root id)))
+       (when-not (or (= :debug tab) agent-chat?)
          [:aside {:class "seon-context"}
           [:div {:id "p-task" :class "seon-blocks"} (for [u (in "#p-task")] (slot (:id u)))]
           [:div {:id "p-tiles" :class "seon-blocks"} (for [u (in "#p-tiles")] (slot (:id u)))]])]]
