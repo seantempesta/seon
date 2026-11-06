@@ -925,7 +925,7 @@
     (cond
       (clojure.string/blank? intent)
       (contract/error :seon.turn/invalid-call #'call-problem
-                      "this call has no intent: send intent, a little thinking (a sentence is fine: what these forms are about to do and what you expect), beside code; the form was not run" {:problem :no-intent})
+                      "this call has no intent: send intent, a sentence on what this eval is about to do, beside code; the form was not run" {:problem :no-intent})
       (and forms (empty? forms))
       (contract/error :seon.turn/invalid-call #'call-problem
                       "this call has no form: its code is empty; nothing was run" {:problem :forms :forms 0}))))
@@ -938,7 +938,7 @@
   its one result, which says why, so none builds on a change that never happened and every call has its result."
   {:malli/schema [:=> [:cat [:sequential :map] ifn? ifn?] [:vector :map]]}
   [calls req-of eval!]
-  (reduce (fn [acc {:keys [id code intent]}]
+  (reduce (fn [acc {:keys [id code intent problem]}]
             (let [;; the forgiving reader's repairs, told on this call's own result (:repaired)
                   {src :text repairs :repairs} (reader/forgive code)
                   ;; each call keeps its own intent
@@ -948,7 +948,9 @@
                   failed (some #(when (or (:ex (:response %)) (contract/error? (:value (:response %)))) (:id %)) acc)
                   why (if failed
                         (contract/error :seon.turn/not-run #'run-calls (str "not run: call " failed " of this reply failed before it (its result says why)") {:after failed})
-                        (call-problem intent src))]
+                        (if problem
+                          (contract/error :seon.turn/invalid-call #'run-calls problem {:problem :arguments})
+                          (call-problem intent src)))]
               (conj acc (if why
                           {:id id :code code :intent intent :not-run (some? failed)
                            :response (let [r (unrun src req why)] (agent/commit!) r)}

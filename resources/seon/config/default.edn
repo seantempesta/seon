@@ -531,9 +531,9 @@
  ;; (4.2 s) after every shard's write, freeing only that write's room (2026-11-06, commit message). At the
  ;; bound: this share of the cache's least recently used verdicts goes at once, each running again if asked for.
  :seon.config.proofs/results-evict-percent 10
- ;; Unit: verdicts. How many of a test's newest verdicts (by file mtime) its typical ms and tick budget
- ;; read: a median of few keeps out one hung run, and a test's cost stops growing with the digests it has
- ;; had. Provenance: all of them cost 30.6 s across 1,708 tests, the newest 5 cost 4.4 s, and the same 1,524
+ ;; Unit: verdicts. How many of a test's newest greens its history holds (seon.fx/history), which its typical
+ ;; ms, tick budget and slow-test read take: a median of few keeps out one hung run, and a test's cost stops
+ ;; growing with the digests it has had. Provenance: all of them cost 30.6 s across 1,708 tests, the newest 5 cost 4.4 s, and the same 1,524
  ;; tests got a time (2026-11-06, commit message). At the bound: older verdicts are not read.
  :seon.config.proofs/recent-verdicts 5
  ;; Unit: processes. A proof run's selected tests (bin/prove, bin/test) are dealt, a namespace (with

@@ -1728,11 +1728,13 @@
           out (str (:agents-dir (:store (c/state sys))) "/agent-tests.edn")
           _ @(c/submit! sys a (str "(do (seon.repl/page-hiccup)"
                                    " (let [r (seon.agent/run-tests-forked (seon.config/value :seon.config.agent/test-ticks) #{} :main)]"
-                                   " (spit " (pr-str out) " (pr-str (update r :reports (fn [rs] (filterv #(not= :pass (:type %)) rs)))))))"))
+                                   " (spit " (pr-str out) " (pr-str (assoc (update r :reports (fn [rs] (filterv #(not= :pass (:type %)) rs)))"
+                                   " :known (count (:digests (seon.agent/test-plan (seon.agent/db) nil #{} (seon.agent/heard-main)))))))))"))
           r (read-string (slurp out))
           reds (:reports r)]
-      {:report (assoc (select-keys r [:ran :reused :pass :fail :error]) :reds (mapv (juxt :var :message :actual) reds))
-       :checks {:tests-judged (pos? (+ (:ran r 0) (:reused r 0))) :none-red (empty? reds)}}))))
+      {:report (assoc (select-keys r [:ran :known :pass :fail :error]) :reds (mapv (juxt :var :message :actual) reds))
+       ;; no test run is an answer when every test is green here; none known is not: the plan found no program
+       :checks {:tests-known (pos? (:known r 0)) :none-red (empty? reds)}}))))
 
 (defn threads-check
   "Session RC1's physics rule: the processes that fork (the fork server; an agent, for its

@@ -53,6 +53,9 @@ if [[ -s $OUT/process-store ]]; then
   nice -n 15 "$ROOT/bin/root" seed "$(<$OUT/process-store)" > "$OUT/seed.log" 2>&1 || { tail -5 "$OUT/seed.log"; echo "TEST FAILED (bin/root seed: $OUT/seed.log)"; exit 1 }
 fi
 st=0 P=()
+# told to stop (a timeout's TERM), its shards end with it, unheard: a shard left running reads a root the stop ended, and stores those reds, which
+# turn flaky beside the next run's greens at the same digests. A shard that dies stores nothing
+trap 'kill -9 $P 2>/dev/null; exit 143' TERM INT HUP
 # each shard a process of its own; its tests' ms are in their cached verdicts (:ms, seon.fx/typical-ms)
 for f in $F; do runner --shard "$f" > "${f%.edn}.log" 2>&1 & P+=($!); done
 # bin/prove's check steps (the plan's out/steps) run beside the shards, not after them: they share no
