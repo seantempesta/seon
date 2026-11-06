@@ -634,10 +634,11 @@
   the page whole is written as (seon.task/cites-tx). See docs/references.md#an-entity-cites."
   {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe pos-int?]]}
   [db path]
-  ;; the page's sections, one seek of :seon.doc/address from its prefix (its addresses sort together)
+  ;; the page's sections, one bounded range of :seon.doc/address (its addresses sort together). Bounded, not a seek read to where it stops: a seek
+  ;; reads to the end of the index, so whatever reads through it reruns on every transaction
   (let [pre (str path "#")]
     (some #(when (empty? (d/datoms db :eavt (:e %) :seon.doc/parent)) (:e %))
-          (take-while #(and (= :seon.doc/address (:a %)) (str/starts-with? (:v %) pre)) (d/seek-datoms db :avet :seon.doc/address pre)))))
+          (d/index-range db {:attrid :seon.doc/address :start pre :end (str pre "\uffff")}))))
 
 (defn task?
   "Does sym name a task on db: is its ns/name a :seon.task/id (seon.task/task-id), and no
