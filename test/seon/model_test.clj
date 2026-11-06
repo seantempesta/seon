@@ -161,21 +161,20 @@
     (is (= "Square multiplies." (:reasoning_content (second (:messages b)))) "the earlier reply's reasoning goes back with it")
     (is (not-any? :reasoning_content [(first (:messages b)) (nth (:messages b) 2)]) "and only on the assistant's message")))
 
-(deftest a-request-lets-the-model-reply-in-prose
+(deftest a-request-lets-the-model-reply-with-no-call
   ;; docs/render.md (step 0 measured it live: four DeepSeek turns,
   ;; thinking on, all 200, cache hits 87-96% from turn 2): tool_choice auto (DeepSeek refuses
-  ;; `required` with thinking on), so a reply may be prose alone; the eval tool takes code
-  ;; only; the reasoning goes back as it was returned; no ;; reaches the model
+  ;; `required` with thinking on), so a reply may be a message with no call; the eval tool takes its message and code; the reasoning goes back as it was returned; no ;; reaches the model
   (let [b (model/request-body {:kind :openai-compat :base-url "" :model "m" :api-key-env "" :max-tokens 10 :thinking :enabled}
                               {:messages [{:role "assistant" :content "I read f." :reasoning "r" :tool-calls [{:id "c1" :code "(f)"}]}
                                           {:role "tool" :tool-call-id "c1" :content "{:handle result/e1, :value 1}"}]
                                :task "t/x" :turn 1})]
     (is (= "auto" (:tool_choice b)))
-    (is (= [:intent :code] (keys (get-in b [:tools 0 :function :parameters :properties]))) "prose first, then code: the model states its intent before the code")
+    (is (= [:message-user-md :code] (keys (get-in b [:tools 0 :function :parameters :properties]))) "the message first, then code: the user hears before the code runs")
     (is (not (str/includes? (pr-str (:tools b)) ";;")) "no ;; in the tool")
     (is (= {:role "assistant" :content "I read f." :reasoning_content "r"
             :tool_calls [{:id "c1" :type "function" :function {:name "eval" :arguments "{\"code\":\"(f)\"}"}}]}
-           (first (:messages b))) "prose, reasoning and the call, as returned")
+           (first (:messages b))) "reply text, reasoning and the call, as returned")
     (is (= "c1" (:tool_call_id (second (:messages b)))) "the response answers its call by the provider's id")))
 
 

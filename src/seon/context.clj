@@ -746,7 +746,7 @@
   (let [text (print/record-text (cond-> e basis (assoc-in [:seon.eval/response :value] (basis-value (:db opts) e))) render/model)
         cid (or call-id (when-not (str/blank? intent) (str "eval-" id)))]
     (if cid
-      ;; an eval nobody's reply made has its intent as its text: a model carries on as its history reads, and an empty assistant message at the
+      ;; an eval nobody's reply made has its message as its text: a model carries on as its history reads, and an empty assistant message at the
       ;; start of a conversation silenced 197 of 197 replies (docs/render.md#the-render-is-an-eval)
       [(cond-> {:role "assistant" :content (if call-id "" (or intent ""))
                 :tool-calls [(cond-> {:id cid :code code} intent (assoc :intent intent))]}
@@ -960,12 +960,12 @@
          (finally (render/dispose-walk! w)))))
 
 (def render-calls
-  "What Seon runs to show an agent its page, each [intent code]: :whole, the page whole (an agent's first eval, and an outside
-  read's last), and :changes, the parts that moved since it was last shown. The intent is written to the agent. See
-  docs/render.md#the-render-is-an-eval."
-  {:whole ["Seon ran this to show you your task, how its proofs stand and the rest of your page, as it reads now. Run it again any time you want to read your page whole."
+  "What Seon runs to show an agent its page, each [message code]: :whole, the page whole (an agent's first eval, and an outside
+  read's last), and :changes, the parts that moved since it was last shown. The message reads true for the model and for a person
+  on the page, so it speaks of the agent. See docs/render.md#the-render-is-an-eval."
+  {:whole ["The agent's page: its task and how its proofs stand."
            "(my.render/render-ctx)"]
-   :changes ["Seon ran this because your page changed since it last showed you: each part that moved, whole, and :gone for a part that left."
+   :changes ["What changed on the agent's page."
              "(my.render/render-changes)"]})
 
 (defn- render-eval?
