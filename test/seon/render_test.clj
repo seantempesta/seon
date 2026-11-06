@@ -941,7 +941,7 @@
             h0 (page st e0) h1 (page st e1)]
         (is (= (clojure.data.json/write-str (sent 0 r0)) (wire-text h0)) "turn 0: the page's body is the bytes it sent")
         (is (= (clojure.data.json/write-str (sent 1 r1)) (wire-text h1)) "turn 1: the same")
-        (is (str/includes? (page (assoc-in st [:tab [:debug :a1] :open] #{"d-turn-s0"}) e1) "the help page") "each message, opened, beside the records that made it")
+        (is (str/includes? (page (assoc-in st [:tab [:debug :a1] :open] #{"d-turn-o0"}) e1) "the help page") "each message, opened, beside the records that made it")
         (is (str/includes? h1 "I call f.") "a call's arguments as sent, its prose in them")
         (is (str/includes? h1 "sent the same by the request before down to here") "where the unchanged prefix ends, with no cache count recorded")
         (is (not (str/includes? h0 "sent the same by the request before")) "the first request has no request before")
@@ -974,7 +974,7 @@
         (testing "a turn whose call failed shows what it sent and its typed error"
           (let [db (d/db-with db [{:seon.model-call/id "b/a1/1" :seon.model-call/error {:seon.error/type :seon.model/no-provider :seon.error/operation 'seon.model/complete
                                                                                 :seon.error/message "no model provider"}}])
-                html (page (-> st (assoc :main-db db) (assoc-in [:branches [:debug :a1] :db] db) (assoc-in [:tab [:debug :a1] :open] #{"d-turn-s1"})) e0)]
+                html (page (-> st (assoc :main-db db) (assoc-in [:branches [:debug :a1] :db] db) (assoc-in [:tab [:debug :a1] :open] #{"d-turn-o1"})) e0)]
             (is (str/includes? html "no model provider") "its error, by the error's render")
             (is (str/includes? html "eval p101") "beside what it sent: the page, the first eval")))))))
 
@@ -1344,44 +1344,27 @@
     (is (str/includes? h "an opening, whatever it says"))
     (is (= 1 (count (re-seq #"data-session=" h))) "the system message is no session's")))
 
-(deftest a-request-folds-by-its-records
-  ;; docs/render.md#the-debug-page-is-the-wire-request: what a section is comes from its records, never its text: the
-  ;; reply and the tool messages answering it are one fold, and a page Seon ran is told from an agent's by its record's author
+(deftest a-request-is-its-wire-messages
+  ;; docs/render.md#the-debug-page-is-the-wire-request: a row a message, typed by its wire role, and opening a row
+  ;; replaces its line; its calls' arguments are the wire's JSON read as data
   (let [ms [{:role "system" :content "# Help\n\nread this"}
-            {:role "assistant" :content "shown" :tool_calls [{:id "x" :function {:name "eval" :arguments "{}"}}]}
-            {:role "tool" :tool_call_id "x" :content "page"}
-            {:role "assistant" :tool_calls [{:id "a" :function {:name "eval" :arguments "{}"}} {:id "b" :function {:name "eval" :arguments "{}"}}]}
-            {:role "tool" :tool_call_id "a" :content (str/join " " (repeat 8000 "word"))}
-            {:role "tool" :tool_call_id "b" :content ":ok"}]
-        sources [[[:section 1 1]] [[:eval "e1"]] [[:eval "e1"]] [[:eval "e2"] [:eval "e3"]] [[:eval "e2"]] [[:eval "e3"]]]
-        evals {"e1" {:seon.eval/by "seon" :seon.eval/intent "Seon showed it" :seon.eval/code "(page)" :seon.eval/call-id "x"}
-               ;; held in the other order from its reply's calls: a call is matched by its id, never its place
-               "e2" {:seon.eval/by "a1" :seon.eval/intent "Then the other" :seon.eval/code "(second-call)" :seon.eval/call-id "b"}
-               "e3" {:seon.eval/by "a1" :seon.eval/intent "Read *the* thing" :seon.eval/code "(first-call)" :seon.eval/call-id "a"}}
-        draw (fn [opened] (h/html (ui/debug-turn {:unit "d-turn"} {:turn 1 :agent "b/a1" :view "a1" :origin :model :usage {} :evals evals :opened opened
-                                                                   :body {:messages ms} :sources sources :new [false false false false false true]})))
+            {:role "assistant" :tool_calls [{:id "a" :function {:name "eval" :arguments "{\"intent\":\"Read it\",\"code\":\"(first-call)\"}"}}]}
+            {:role "tool" :tool_call_id "a" :content (str/join " " (repeat 8000 "word"))}]
+        draw (fn [opened] (h/html (ui/debug-turn {:unit "d-turn"} {:turn 1 :agent "b/a1" :view "a1" :origin :model :usage {} :opened opened
+                                                                   :body {:messages ms} :sources [[[:section 1 1]] [[:eval "e1"]] [[:eval "e1"]]] :new [false false true]})))
         h (draw #{})]
-    (is (= [{:kind :system :is [0]} {:kind :page :is [1 2]} {:kind :eval :is [3 4 5]}]
-           (#'ui/request-sections ms sources evals)))
-    (is (= ["system" "page" "eval"] (mapv second (re-seq #"data-section=\"(\w+)\"" h))) "a fold a section, whatever many messages it holds")
-    (is (= 1 (count (re-seq #"<details[^>]*data-section=\"\w+\"[^>]* open" h))) "only the section holding what is new starts open")
-    (is (not (str/includes? h "data-call=\"x\"")) "a closed section's messages are not drawn: it costs its line")
-    (is (str/includes? (draw #{"d-turn-s1"}) "data-call=\"x\"") "turned open, they are")
-    (is (not (str/includes? (draw #{"d-turn-s3"}) "data-call=\"b\"")) "a section that starts open can be closed")
-    (is (= 1 (count (re-seq #"Then the other" h))) "a closed section says once what each of its evals set out to do, though the eval made its call and its answer")
-    (is (re-find #"call · a.*\(first-call\).*call · b.*\(second-call\)" h) "a call is the code of the record holding its id")
-    (is (str/includes? (h/html (ui/debug-turn {:unit "d-turn"} {:turn 1 :agent "b/a1" :view "a1" :origin :model :usage {} :evals {"e2" nil}
-                                                                :body {:messages [(nth ms 3)]} :sources [[[:eval "e2"]]] :new [true]}))
-                       "tool_calls · eval · a · arguments")
-        "an eval the db does not hold: its arguments as sent")
-    (is (str/includes? h "Large, ") "text past its budget offers the rest")
-    (is (re-find #"data-call=\"a\".*\(first-call\).*tool_call_id · a.*data-call=\"b\".*\(second-call\).*tool_call_id · b" h) "each call beside the tool message that answers it, paired by id")
-    (is (str/includes? h "result ~") "a section says what each eval's answer costs")
-    (is (str/includes? h "%</b>") "the bar says each kind's share of the request")
-    (is (str/includes? h "unit=d-turn-m4&amp;open=true") "the button opens that message's text")
-    (is (< (count h) (count (draw #{"d-turn-m4"}))) "opened, its whole text is on the page")
-    (is (str/includes? (draw #{"d-turn-m4"}) "show less"))
-    (is (str/includes? h "text-error") "a section past its limit reads red")))
+    (is (= ["system" "assistant" "tool"] (mapv second (re-seq #"data-role=\"(\w+)\"" h))) "a row a message, in the wire's order, by its role")
+    (is (not-any? #(str/includes? h %) ["(first-call)" "tool_calls[0]"]) "a closed row is its line: its fields are drawn when opened")
+    (is (str/includes? h "Read it") "an assistant's line is what its calls say")
+    (let [o (draw #{"d-turn-o1"})]
+      (is (str/includes? o "tool_calls[0] · eval · a") "opened, the call's fields as sent")
+      (is (str/includes? o "arguments.code") "its arguments by their wire names")
+      (is (str/includes? o "(first-call)"))
+      (is (str/includes? o "group-open:invisible") "the line gives way to the fields, so nothing is shown twice"))
+    (is (< (count h) (count (draw #{"d-turn-o2"}))) "opened, a message is drawn whole, however large")
+    (is (= 8000 (count (re-seq #"word" (draw #{"d-turn-o2"})))) "and nothing of it is cut")
+    (is (str/includes? h "text-error") "a message past its limit reads red")
+    (is (str/includes? (draw #{"d-turn-o0"}) "<h") "a system message's Markdown is drawn")))
 
 (deftest a-cut-with-its-whole-form-holds-no-copy
   ;; the second context audit (F7): a plan cut on the page kept its whole text in the cut's :title,
