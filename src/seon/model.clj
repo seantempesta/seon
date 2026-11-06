@@ -168,13 +168,14 @@
   provider, streamed with its usage: its model, the messages, the one tool `eval-tool` the
   model may call or not (tool_choice auto: a reply with no call is a message to the user, and pauses the agent; DeepSeek
   refuses `required` with thinking on), its :max-tokens, earlier turns' reasoning as
-  returned unless :replay-reasoning is false, and DeepSeek's thinking mode and effort only
-  when the provider sets them (absent: the provider's own default)."
+  returned unless :replay-reasoning is false, and its temperature and DeepSeek's thinking mode and
+  effort only when the provider sets them (absent: the provider's own default)."
   {:malli/schema [:=> [:cat :seon.model/provider :seon.model/request] :map]}
-  [{:keys [model max-tokens thinking reasoning-effort replay-reasoning]} request]
+  [{:keys [model max-tokens temperature thinking reasoning-effort replay-reasoning]} request]
   (cond-> {:model model :messages (wire-messages replay-reasoning (:messages request)) :tools [eval-tool] :tool_choice "auto" :max_tokens max-tokens
            ;; streamed: the reply arrives as it is made, so no clock has to guess its length
-           :temperature 0 :stream true :stream_options {:include_usage true}}
+           :stream true :stream_options {:include_usage true}}
+    temperature (assoc :temperature temperature)
     thinking (assoc :thinking {:type (name thinking)})
     reasoning-effort (assoc :reasoning_effort (name reasoning-effort))))
 

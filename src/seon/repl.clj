@@ -685,31 +685,6 @@
              (assoc r :unrecorded (contract/error :seon.agent/unrecorded #'record! (str "the branch refused this eval's record: " (ex-message e)) {}))))
       r)))
 
-(defn- again
-  "Response r of code, with :again, a string naming the earlier eval, when an earlier eval of this agent ran the same
-  code (compared trimmed) and answered the same (its value, error, output and forms). :again says the answer repeats
-  and nothing more: equal answers do not show what the code reads is unchanged. It is kept in the agent's state as a hash
-  of the code to the eval and a hash of its answer, one lookup an eval, and only for an agent's own evals (root's,
-  an inner eval's and one Seon ran for it, origin :insert, which it did not ask for, are not counted). See docs/agent.md#small-answers."
-  {:malli/schema [:=> [:cat :string :map :map] :map]}
-  [code r req]
-  (if (and (= :agent (:mode @agent/state)) (:handle r) (not= :insert (:origin req)))
-    (let [k (hash (clojure.string/trim code))
-          ;; its answer without what differs every eval, at the one place it nests: an edit!'s value is its inner eval's
-          ;; response, whose handle and cost differ each time (an agent swapping one line back and forth
-          ;; repeats it). Nothing else is walked: the agent's own data keeps its keys, and a value holding a db or a host
-          ;; object is hashed as it is, never rebuilt
-          v (:value r)
-          v (if (and (map? v) (not (record? v)) (contains? v :handle)) (dissoc v :handle :ms :ticks :bytes :fns :record) v)
-          answer (hash [v (:ex r) (:out r) (:err r) (:forms r)])
-          seen (get-in @agent/state [:seen k])]
-      (swap! agent/state assoc-in [:seen k] {:eval (name (:handle r)) :answer answer})
-      (cond-> r
-        (= answer (:answer seen))
-        (assoc :again (str (:eval seen) " ran this code and answered the same: "
-                           "run something else, or change what it reads first."))))
-    r))
-
 (defn- text-of
   "The text of eval fact rec as every reader reads it: the one function the model's message prints with
   (seon.print/record-text, through render/model, an @ctx eval's value rebuilt from its basis by seon.context/basis-value, as
@@ -750,10 +725,9 @@
                                (let [;; how far through its turns the agent is, on the answer it reads, once (an eval within another is that eval's): a record's
                                      ;; bytes never move (docs/render.md#the-agents-turn)
                                      turns (when (and (= :agent (:mode @agent/state)) (not (:within req))) (agent/turns))
-                                     r (again code (cond-> (repaired (response @answers handle) req)
-                                                      (:ns @agent/state) (assoc :ns (ns-name (:ns @agent/state)))
-                                                      turns (assoc :turn turns))
-                                           req)
+                                     r (cond-> (repaired (response @answers handle) req)
+                                         (:ns @agent/state) (assoc :ns (ns-name (:ns @agent/state)))
+                                         turns (assoc :turn turns))
                                       rec (record-details code r req)]
                                   [r rec (when-not (#{:model :insert} (:origin req)) (text-of rec))]))
                 [r rec text] (try (@the-handler (assoc req "code" code :reply #(vswap! answers conj %)))

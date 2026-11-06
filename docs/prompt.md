@@ -23,7 +23,6 @@ Each result is a map under a handle, such as `result/e12`. Use the handle like a
 - `:recorded` the vars that became program on your branch; `:unmapped` the ones it removed; `:redefined` the functions whose contract or docstring it changed; `:edited` the lines an edit changed
 - `:warnings` problems with your definitions, each with its fix
 - `:repaired` what the reader changed of your code
-- `:again` an earlier call ran this same code and got the same answer
 - `:turn` how many of your turns you've used
 - `:cost` time, engine ticks, bytes allocated and `tok`, what this result adds to your context
 - `:unrecorded` your result wasn't recorded, and why

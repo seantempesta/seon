@@ -683,6 +683,7 @@
  ;; fix, not a cost to pay every turn. A model or task can turn it on through the resolver
  ;; (task -> model -> provider -> config); effort is :seon.config.ai/reasoning-effort.
  :seon.config.ai/thinking :disabled
+ ;; :seon.config.ai/temperature is absent, so the provider's default is used (docs/model.md#temperature).
  ;; Whether a request sends earlier turns' stored reasoning back. Unit: flag. Provenance: owner
  ;; ruling 2026-10-24 (docs/decisions.md, "A config key does what it says"). true: every earlier
  ;; reply's reasoning goes back exactly as it was returned (seon.model/request-body); false: it

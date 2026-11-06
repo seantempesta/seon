@@ -186,6 +186,8 @@
           (is (= ["{\"message-md\":\"Doing f twice.\",\"intent\":\"i\",\"code\":\"(f)\"}" "{\"intent\":\"i\",\"code\":\"(f)\"}"]
                  (mapv #(get-in % [:function :arguments]) (:tool_calls (first sent)))) "the message on its first call"))))
     (is (not (str/includes? (pr-str (:tools b)) ";;")) "no ;; in the tool")
+    (is (not (contains? b :temperature)) "absent: the provider's default")
+    (is (= 0.5 (:temperature (model/request-body {:kind :openai-compat :base-url "" :model "m" :api-key-env "" :max-tokens 10 :temperature 0.5} {:messages [] :task "t/x" :turn 1}))) "set: as configured")
     (is (= {:role "assistant" :content "" :reasoning_content "r"
             :tool_calls [{:id "c1" :type "function" :function {:name "eval" :arguments "{\"message-md\":\"I read f.\",\"code\":\"(f)\"}"}}]}
            (first (:messages b))) "reply text, reasoning and the call, as returned")
