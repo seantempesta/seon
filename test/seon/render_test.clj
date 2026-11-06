@@ -2929,8 +2929,10 @@
         attrs (keep #(when (and (vector? %) (map? (second %))) (second %)) nodes)
         calls (filter :seon/call attrs)
         request #(seon.root/request 'again! :a1 % {:status :idle})]
-    (is (= #{{:eval "e3"} {:eval "e3" :to-here true}} (set (keep :seon/args (filter #(= "button" (:type %)) calls)))) "run and run down to it")
-    (is (every? #(= ['seon.root/again! :a1] [(:seon/call %) (:seon/agent %)]) calls))
+    (is (= #{{:eval "e3"} {:eval "e3" :to-here true}} (set (keep :seon/args (filter #(and (= "button" (:type %)) (= 'seon.root/again! (:seon/call %))) calls)))) "run and run down to it")
+    (is (= {:op :back :id :a1 :eval "e3"} (seon.root/request 'back! :a1 {:eval "e3"} nil)) "back to here is root's")
+    (is (some #(and (= 'seon.root/back! (:seon/call %)) (= {:eval "e3"} (:seon/args %))) calls) "and a button")
+    (is (every? #(= :a1 (:seon/agent %)) calls))
     (is (some #(= "(+ 1 2)" %) nodes) "the edit box holds its code")
     (is (some #(contains? % :data-ignore-morph) attrs) "what a person is typing survives a new eval landing")
     (is (= :context (:origin (request {:eval "e3"}))) "the button's own call is in no conversation")

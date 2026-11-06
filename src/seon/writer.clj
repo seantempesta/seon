@@ -205,7 +205,8 @@
         ;; every branch named in a request is root's name for it, under root's main
         m (cond-> m
             (:branch m) (update :branch #(pdb/on-main main %))
-            (:from m) (update :from #(pdb/on-main main %))
+            ;; :from a branch's name, or a commit's id (a branch from a point: seon.root/back!), which no main qualifies
+            (keyword? (:from m)) (update :from #(pdb/on-main main %))
             (:branches m) (update :branches #(mapv (fn [b] (pdb/on-main main b)) %)))
         exists? (fn [b] (pdb/branch? conn b))
         reply (fn [st r] (answer o dest r) st)]

@@ -1002,6 +1002,7 @@
       (reduce (fn [acc ev]
                 (let [e (:seon.eval/id ev)
                       r (when (work? ev) (again e))
+                      _ (when (:dirty? @agent/state) (agent/commit!))
                       failed? (boolean (or (:ex r) (contract/error? (:value r))))
                       acc (cond-> acc (work? ev) (conj {:id e :failed? failed?}))]
                   (if (or failed? (= id e)) (reduced acc) acc)))

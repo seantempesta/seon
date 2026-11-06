@@ -90,7 +90,7 @@ Clock reads whose value is recorded or shown and never compared to decide anythi
 - `seon.root/state`: the writer's transactions per second over the last second, shown.
 - `seon.root/stop!`: the stop fact's `:at-ms` and the stop's own duration (`:ms`, on ROOT STOPPED), recorded; it waits on answers, none on a clock.
 - `seon.render.proc/pass`: a render pass's duration and the events' age, shown on the dashboard.
-- `seon.agent/handle!`, `seon.root/ext-op`, `seon.reconcile/advance`, `seon.reconcile/reconciler-proc`: stamps and durations.
+- `seon.agent/handle!`, `seon.root/ext-op`, `seon.root/start-spawn`, `seon.reconcile/advance`, `seon.reconcile/reconciler-proc`: stamps and durations.
 - `seon.agent/init!`, `seon.agent/hello!`: a spawn's phases (`seon.agent/spawn-phases`: the fork server's marks, then the child's, each with the bytes it allocated), sent with the agent's hello and shown on root's `:ready` event; nothing decides by them.
 - `seon.root/deliver-message`: a delivered message's send stamp (`:ns`), which the agent's receipt (`:received`) answers with its own, so the delivery's time is measured.
 

@@ -1577,6 +1577,10 @@
      ;; agent with no task (a fresh one on a kept branch) takes none
      (when-let [tx (when (and resumed task) (not-empty (task/onto-tx db0 @store-conn task)))]
        (transact! tx))
+     ;; a process continuing a session under an id its branch doesn't hold (seon.root/back!): what its page's buttons and root reach it by
+     (when (and resumed session (not= id (:seon.agent/id (d/entity @store-conn [:seon.agent/key session]))))
+       (transact! [{:seon.agent/key session :seon.agent/id id}])
+       (commit!))
      ;; forked for a task: it is this session's on the branch from the start. A label that names no task of main's (a check's
      ;; agent works "lc 0") begins none
      (when (and task (d/entity (heard-main) [:seon.task/id task])) (begin-run! task))))))

@@ -935,7 +935,7 @@
   {:malli/schema [:=> [:cat :map] :boolean]}
   [e] (boolean (some #(= (:seon.eval/code e) (second %)) (vals render-calls))))
 
-(defn- at-t
+(defn at-t
   "Branch db as of t, as a page is drawn: the earliest commit of its line that holds t, a real db value, found by walking the line back from db at the cost of the commits since; past what collection kept, the same datoms as of t, which is all a status can't do a diff of (docs/storage.md#collection). See docs/render.md#a-redo-is-an-explicit-bust."
   {:malli/schema [:=> [:cat :seon.host/db :int] :seon.host/db]}
   [db t]

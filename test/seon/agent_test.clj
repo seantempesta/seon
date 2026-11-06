@@ -1820,6 +1820,40 @@
       (is (= (:seon.eval/call before) (:seon.eval/call p)) "its place in the conversation kept")
       (is (some #{"(swap! order conj :a)"} old) "history holds what it was"))))
 
+(deftest an-agent-resets-to-a-point-and-goes-on
+  ;; docs/turn.md#an-agent-goes-back-to-an-eval: one call, a new branch from the eval's commit, the old branch as it was, the same key on both, and the agent goes on
+  (let [back (fn [{:keys [agent task]}]
+               (str "(let [conn (:conn sys) a (keyword " (pr-str agent) ") task " (pr-str task)
+                    "      b (:branch (get-in (seon.server/agents-answer sys) [:agents a]))"
+                                        "      codes (fn [db] (set (datahike.api/q '[:find [?c ...] :where [_ :seon.eval/code ?c]] db)))"
+                    "      id (datahike.api/q '[:find ?i . :where [?e :seon.eval/code \"(def here 2)\"] [?e :seon.eval/id ?i]] (seon.db/head conn b))"
+                    "      missing (seon.root/back! sys a {:eval \"no-such-eval\"})"
+                                        "      _ (clojure.core/deref (seon.root/submit! sys a (str \"(seon.agent/transact! [{:seon.eval/id \" (pr-str id) \" :seon.eval/opened true}])\")))"
+                    "      before (codes (seon.db/head conn b))"
+                    "      two [(#'seon.root/request! sys 'back! a {:eval id}) (#'seon.root/request! sys 'back! a {:eval id})]"
+                    "      second-call (clojure.core/deref (second two))"
+                    "      new (:id (clojure.core/deref (first two)))"
+                    "      nb (:branch (get-in (seon.server/agents-answer sys) [:agents new]))"
+                    "      went-on (clojure.core/deref (seon.root/submit! sys new \"(do (def there 3) (:key (clojure.core/deref seon.agent/state)))\"))]"
+                    "  {:missing (:seon.error/message missing) :second (:seon.error/message second-call) :was (name a) :new new :old-branch b :new-branch nb"
+                    "   :old-kept (= before (codes (seon.db/head conn b))) :at (codes (seon.db/head conn nb))"
+                    "   :task (let [on-main (seon.root/await-db sys #(= nb (:seon.task/branch (datahike.api/entity % [:seon.task/id task]))))] (:seon.task/execution (datahike.api/entity on-main [:seon.task/id task]))) :went-on (:value went-on) :this-boots (let [k (:value went-on) on-main (seon.root/await-db sys #(= new (seon.task/this-boots % (datahike.api/entity % [:seon.agent/key k]))))] (and (:max-tx on-main) (contains? (seon.task/agents on-main) k) (some? (seon.server/agents-answer sys))))})"))
+        r (peek (in-agent (fn [names]
+                            ["(def here 1)" "(def here 2)" "(def here 3)"
+                             {:op :eval :agent "root" :code (back names)}])))
+        v (:value r)]
+    (is (map? v) (pr-str r))
+    (is (re-find #"no eval" (str (:missing v))) "an eval it doesn't hold says so")
+    (is (re-find #"already going back" (str (:second v))) "a second press is refused, and both callers are answered")
+    (is (not= (:old-branch v) (:new-branch v)) "a new branch")
+    (is (:old-kept v) "the old branch as it was")
+    (is (contains? (:at v) "(def here 2)") "the new branch holds the point")
+    (is (not (contains? (:at v) "(def here 3)")) "and nothing after it, a reader's opening of the eval no later point")
+    (is (:this-boots v) "the session's agent is this boot's, so its page knows it is running")
+    (is (= :held (:task v)) "its task moved to the new branch, held for the person")
+    (is (not= (:was v) (name (:new v))) "a new process")
+    (is (str/ends-with? (:went-on v) (str "/" (:was v))) "under the session's key, and it goes on")))
+
 (def ^:private not-running
   "Root-REPL code: a function true of the outcomes a task's work stands at once its agent's end is judged and it waits on nothing of
   root's (not nil, :running, :ready or :gate: a merge follows those)."

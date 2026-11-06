@@ -1294,7 +1294,7 @@
 
 (defn- step-tools
   "An opened step's buttons, for a live agent (the page's stylesheet shows them only beside its REPL's input, so no step is drawn again as its status moves): run it again in its place,
-  run the agent's evals down to it, edit its code and run that, copy its code. Each is a call of root's table (seon.root/request's again!). See docs/turn.md#an-eval-can-be-run-again."
+  run the agent's evals down to it, edit its code and run that, copy its code, go back to it. Each is a call of root's table (seon.root/request's again! and back!). See docs/turn.md#an-eval-can-be-run-again."
   {:malli/schema [:=> [:cat :any :map] :any]}
   [agent {:seon.eval/keys [id code]}]
   (let [button "rounded border border-base-700 px-2 py-0.5 hover:border-text-400"
@@ -1303,12 +1303,18 @@
      [:button (merge {:type "button" :class button :title "Run this again in its place. Its code runs for real, and the model reads the new result."} (call {})) "▶ Run"]
      [:button (merge {:type "button" :class button :title "Run the agent's steps from the start down to this one, stopping at the first that fails. Their code runs for real."} (call {:to-here true})) "⏭ To here"]
      [:button {:type "button" :class button :title "Copy its code" (keyword "data-on:click") "navigator.clipboard.writeText(el.closest('.seon-eval').querySelector('pre code').textContent)"} "⧉ Copy"]
-     ;; what a person is typing is theirs, not the page's: a new eval landing morphs the list, and would close this
-     [:details {:class "w-full" :data-ignore-morph ""}
+     ;; what a person is typing is theirs, not the page's: a new eval landing morphs the list, and would close this.
+     ;; what a person is typing stays, for this process: another one (seon.root/back!) is another element, whose calls reach it
+     [:details {:id (str "step-edit-" (name agent) "-" id) :class "w-full" :data-ignore-morph ""}
       [:summary {:class "cursor-pointer text-text-400"} "✎ Edit"]
       [:form (merge {:class "mt-1 flex flex-col gap-1"} (call {}))
        [:textarea {:name "code" :rows 6 :spellcheck "false" :class "w-full font-mono text-xs"} code]
-       [:button {:class (str button " self-start")} "Run this instead"]]]]))
+       [:button {:class (str button " self-start")} "Run this instead"]]]
+     [:details {:id (str "step-back-" (name agent) "-" id) :class "w-full" :data-ignore-morph ""}
+      [:summary {:class "cursor-pointer text-text-400"} "↩ Back to here"]
+      [:div {:class "mt-1 flex flex-col gap-1 text-text-400"}
+       [:p "The agent goes back to just after this step, and everything after it leaves this chat. Nothing is lost: the later steps stay on the old branch. Values it kept in memory don't come back on their own; To here runs its steps again to rebuild them. A task it was working waits until you release it."]
+       [:button (merge {:type "button" :class (str button " self-start")} {:seon/call 'seon.root/back! :seon/agent agent :seon/args {:eval id}}) "Go back"]]]]))
 
 (defn eval-output
   "What came of an eval as the person reads it when it is opened (a component over ctx and the db; the model reads the same response as the one printer prints it, `seon.context/tool-text`): how long it ran, what it costs the context in tokens and its handle, what its forms printed, then its error, or its
