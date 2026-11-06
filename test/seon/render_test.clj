@@ -2193,8 +2193,8 @@
   (let [big (into [:ul] (for [i (range 4000)] [:li (str "row " i " of a long part")]))
         parts {"p-small" [:p "a short part"] "p-big" big}
         html {"p-small" "<p>drawn small</p>" "p-big" "<p>drawn big</p>"}
-        closed (h/html (ui/ctx-parts parts html #{}))
-        opened (h/html (ui/ctx-parts parts html #{"d-part-p-big"}))
+        closed (h/html (ui/ctx-parts parts html #{} ""))
+        opened (h/html (ui/ctx-parts parts html #{"d-part-p-big"} ""))
         pair (fn [h id] (second (re-find (re-pattern (str "(?s)(<div[^>]*data-part=\"" id "\".*?drawn)")) h)))]
     (is (str/includes? closed "a short part") "a part within budget is shown whole, as before")
     (is (not (str/includes? (pair closed "p-small") "<details")) "and not folded")

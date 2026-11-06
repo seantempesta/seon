@@ -1862,12 +1862,13 @@
   "@ctx's parts, each a pair: what the model reads of the part (its data, or the hiccup its render returned, printed as
   seon.render/part-text prints it), beside the part as the page draws it (its unit's
   html). parts, {id content} of the task's list (seon.render/placed-hiccup); html, {id html} of its units; open, the
-  units the tab opened (/open: d-part-<id>). What the model reads is shown whole, so a part may be a million characters:
+  units the tab opened (/open: d-part-<id>); rules, the html of the page's rules, for the parts they style. What the model reads is shown whole, so a part may be a million characters:
   one over the value budget (:seon.config.render/value-budget) is a closed <details> with its size in tokens, whose text
   is drawn once opened, and has the page's width where a short one shares the row with the part drawn. See docs/render.md#the-page."
-  {:malli/schema [:=> [:cat :map [:map-of :string :string] [:set :string]] :any]}
-  [parts html open]
+  {:malli/schema [:=> [:cat :map [:map-of :string :string] [:set :string] :string] :any]}
+  [parts html open rules]
   [:li {:id "d-parts" :class "seon-stack-2"}
+   (h/raw rules)
    [:h2 {:class "kicker"} "the task's parts: what the model reads, and the part drawn"]
    (for [[id content] parts
          :let [text (render/part-text content)
