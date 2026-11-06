@@ -62,6 +62,8 @@ A bound passed under another name, which the marks do not see; each is owed its 
 Names that look like clock reads but are quoted as data, so no time decides at these sites.
 
 - `seon.program-test/var-row` (the form after it records a guarded function's source, `Thread/sleep` and a timed `deref` as text), `seon.render-test/task` (the test after it names the removed `SAMPLE-MS` to show it is gone) and `seon.db-test/attr-db` (the test after it, `an-idle-store-sets-no-timer`, passes `:stale-timeout` to a supervisor and counts the timers pending, expecting none): clock reads quoted as data.
+- `seon.render/component-edits`: passes editscript `:vec-timeout nil`. Left to its default of one second, a clock would decide what a diff comes out as, by `:quick` as by `:a-star` (`editscript.util.common/with-vec-deadline`); nil reads no clock.
+- `seon.render-test/no-position?`: the test after it asserts that `:vec-timeout nil` holds no deadline.
 - `seon.check/hidden-inputs`, `seon.check/named-test-inputs`: the lists the `test-inputs` check step reads test forms against (a clock read, a sleep, a timeout among the names they hold); they name those vars as data and read no clock.
 
 ## Time orders a queue (measured workload)

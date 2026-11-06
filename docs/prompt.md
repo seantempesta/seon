@@ -66,4 +66,15 @@ You're done when every proof is green and nothing blocks merging: tell the user 
 
 This conversation is drawn from your record, `@ctx`, by render functions. Each part names the function that drew it and the path it read. `@ctx` is an atom, and changing it changes what you are sent: `(swap! ctx update :evals dissoc <id>)`.
 
-Seon runs an eval that shows you your task and your proofs at the start, `(my.render/render-ctx)`, and another when something changes, `(my.render/render-changes)`, with only the parts that moved. Each is in your conversation like your own evals. `(my.render/render-ctx)` shows you your page whole at any time.
+Seon runs an eval that shows you your task and your proofs at the start, `(my.render/render-ctx)`, and another when something changes, `(my.render/render-changes)`. Each is in your conversation like your own evals, and `(my.render/render-ctx)` shows you your page whole at any time.
+
+The first answers your page as of a point in time: `{:t 7 :components [["status" [seon.render.ui/status {:ctx [:task :proved]} ...]] ...]}`, each component under its id. The second answers only what changed, from the page at `:since` to the page at `:t`, as edits, each `[path op value]`:
+
+```clojure
+{:since 7 :t 9
+ :edits [[["status" :proofs old-test] :-]
+         [["status" :proofs b-test] :r [:li {:key b-test} [:code "b-test"] ": fails"]]
+         [["status" :proofs c-test] :+ [:li {:key c-test} [:code "c-test"] ": passes"]]]}
+```
+
+A path says where: the component's id, then the names inside it, each an element's `:key` or `:id`. `:r` replaces what is there with the value, `:+` adds it under that name, `:-` takes it away. A path ending in `:own` is what that element holds besides its named children. `[["turn"] :r [...]]` is a whole component, sent whole when that is shorter.
