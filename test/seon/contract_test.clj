@@ -161,6 +161,7 @@
     (testing "a var, a fn, a namespace and an atom each answer what they are, as data"
       (is (= ['clojure.core/inc {:seon.value/type (.getName (class inc))} 'clojure.core {:seon.value/type (.getName (class (atom 1)))}]
              (contract/plainly [#'clojure.core/inc inc (the-ns 'clojure.core) (atom 1)]))))
+      (is (= 'java.lang.String (contract/plainly (class "s"))) "a class is its name: (class x) answers the question it was asked")
     (testing "a record is a map of its fields, a sorted map and set unsorted, each member so"
       (is (= {:id 1 :name {:seon.value/type (.getName (class inc))}} (contract/plainly (->Row 1 inc))))
       (is (= {:a {:b 1}} (contract/plainly (sorted-map :a (sorted-map :b 1)))))
@@ -185,3 +186,10 @@
   (is (not (contract/within? (vec (range 100)) 10)) "a scalar is 1")
   (is (not (contract/within? (apply str (repeat 50 "x")) 10)) "a string is its length")
   (is (contract/within? nil 1)))
+
+(deftest a-refused-error-says-what-is-wrong-with-it
+  ;; docs/errors.md#errors: "the built error does not satisfy" alone sent an agent looking for which member (2026-11-06, adding a refusal reason its enum lacked)
+  (let [m (try (contract/error :seon.schema/registration-refused 'a/b "no" {:seon.schema/key :a/k :seon.schema/refused-because :no-such-reason})
+               (catch clojure.lang.ExceptionInfo e (:seon.error/message (ex-data e))))]
+    (is (clojure.string/includes? (str m) ":no-such-reason") "the value it refused")
+    (is (clojure.string/includes? (str m) ":unreadable") "and what it was held to")))

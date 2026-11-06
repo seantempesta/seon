@@ -19,8 +19,8 @@
                              [:seon.schema.usage/check {:optional true} :seon.schema.usage/check]
                              ;; the contracts reaching it that did not compile again against it (seon.program/rearm!)
                              [:seon.schema/rearm-errors {:optional true} [:vector :map]]]
- :seon.schema/refused-because [:enum {:description "Why a registration is refused: its form is no EDN data, does not compile against the population (a name resolving to nothing, or a key other schemas still name), or declares an attribute Datahike cannot store."}
-                                :unreadable :invalid :unstorable]
+ :seon.schema/refused-because [:enum {:description "Why a registration is refused: its form is no EDN data, does not compile against the population (a name resolving to nothing, or a key other schemas still name), declares an attribute Datahike cannot store, or gives a stored attribute another value type."}
+                                :unreadable :invalid :unstorable :type-change]
  :seon.schema/registration-refused [:and :seon.error/base
                                      [:map [:seon.error/type [:enum :seon.schema/registration-refused]]
                                       [:seon.schema/key :seon.schema/key] [:seon.schema/refused-because :seon.schema/refused-because]]]

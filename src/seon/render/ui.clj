@@ -830,10 +830,10 @@
   [src] [:pre [:code src]])
 
 (defn- names-line
-  "A line naming every symbol of xs, `Called by: a, b, c`; nothing for none. Which names there are is the pull's (ctx's callers window)."
+  "A line naming every symbol of xs, `Called by: a, b, c`; nothing for none, named by its label so a change of a name sends this line, not the part (docs/render.md#a-change-is-edits-by-name). Which names there are is the pull's (ctx's callers window)."
   {:malli/schema [:=> [:cat :string [:sequential :any]] :any]}
   [label xs]
-  (when (seq xs) [:p (str label ": " (str/join ", " (map str xs)))]))
+  (when (seq xs) [:p {:key label} (str label ": " (str/join ", " (map str xs)))]))
 
 (defn call-in
   "One real call of sym in source src: the first form opening `(sym ` or `(name `, as written (`seon.context/form-at`), or nil
@@ -1105,22 +1105,24 @@
                                        [(get reason-words (:reason r) (kname (:reason r))) (or (:test r) (:vars r) (:keys r) (:problems r)) (:do r)]))
                  (seq without-a-contract) (conj ["functions without a contract" without-a-contract nil])
                  (seq caused) (conj ["problems the work caused" caused nil])
-                 (seq attention) (into (for [a attention] [a nil nil])))
-        scaffold (some :do refused)]
+                 (seq attention) (into (for [a attention] [a nil nil])))]
     [:section
      [:h2 "Your proofs"]
      (when test-run [:p "The tests could not run: " (str/join "; " (:failed test-run))])
      (when (next proofs)
        (into [:ul {:key :proofs}] (for [{:keys [test status]} proofs] [:li {:key test} [:code (str test)] ": " (get state-words status (kname status))])))
      ;; not written: where it goes and a test to copy
-     (for [{:keys [test shape]} unwritten :let [{:keys [ns requires helpers example]} shape]]
+     ;; what a namespace's example shows is said once, under the first proof that goes there
+     (for [{:keys [test shape first?]} (map (fn [u prev] (assoc u :first? (not-any? #(= (:ns (:shape %)) (:ns (:shape u))) prev)))
+                                            unwritten (reductions conj [] unwritten))
+           :let [{:keys [ns requires helpers example]} (when first? shape)]]
        [:div {:key test}
-        [:p "Write " [:code (str test)] "." (when ns (list " It goes in " [:code (str ns)] (if requires ", which requires:" ".")))]
+        [:p "Write " [:code (str test)] "." (when (:ns shape) (list " It goes in " [:code (str (:ns shape))] (if requires "; the example below requires:" ".")))]
         (when requires [:pre [:code requires]])
         (when (seq helpers) [:p "Helpers a test there uses: " (str/join ", " (map #(str "`" (name %) "`") helpers)) ". Every helper there: " [:code (str "(dir " ns ")")]])
         (when example [:p "Example:"])
         (when example [:pre [:code example]])
-        (when scaffold [:div [:p "Scaffold:"] (form-hiccup scaffold)])])
+        (when first? (when-let [form (some #(when (= test (:test %)) (:do %)) refused)] [:div [:p "Scaffold:"] (form-hiccup form)]))])
      ;; red: which, what it asserted, what it got
      (for [{:keys [test failures]} red]
        [:div {:key test}

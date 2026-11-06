@@ -63,7 +63,7 @@
 (clojure.core/defn plainly
   "v as the store keeps it (`plain?`), never printed: plain data as it is; a record as a map of its fields and a sorted
   collection as an unsorted one, each member so; a map, vector, set or list, each member so; a var as its symbol, a
-  namespace as its name; a seq that is no list (lazy, a range) as a vector of its first bound members, or past the bound
+  namespace as its name, a class as its; a seq that is no list (lazy, a range) as a vector of its first bound members, or past the bound
   (default :seon.config.store/max-value-chars) the gone marker `{:seon.value/gone {:type :over}}`, never realized further;
   anything else (a fn, an atom, a db, a connection, any host object) as `{:seon.value/type <its class's name>}`, a
   throwable's message beside it as :seon.value/message when it is a string. The one place a value is made plain: every
@@ -84,6 +84,7 @@
            (list? v) (apply list (map again v))
            (var? v) (symbol v)
            (instance? clojure.lang.Namespace v) (ns-name v)
+           (class? v) (symbol (.getName ^Class v))
            (seq? v) (let [xs (into [] (take (inc bound)) v)]
                       (if (> (count xs) bound) {:seon.value/gone {:type (type-name v) :over bound}} (mapv again xs)))
            (instance? Throwable v) (cond-> {:seon.value/type (type-name v)} (string? (ex-message v)) (assoc :seon.value/message (ex-message v)))
@@ -385,7 +386,7 @@
      (when-not ((m/validator (schema type)) e)
        (throw (ex-info (str "error construction refused for " type)
                        {:seon.error/type :seon.instrument/contract-error :seon.error/operation (symbol #'seon.contract/error)
-                        :seon.error/message (str "the built error does not satisfy " type)
+                        :seon.error/message (str "the built error does not satisfy " type (first-problem (schema type) e))
                         :seon.error/member :malli.core/invalid-output})))
      e)))
 
