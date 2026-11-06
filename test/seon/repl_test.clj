@@ -23,6 +23,13 @@
     (is (= {:value 4} (select-keys (ev "(do (+ 1 1) (+ 2 2))") [:value :forms])) "a do is one form: its last form's value")
     (let [rec (repl/record-details "(atom 1)" {:handle 'result/e9 :value (atom 1)} {})]
       (is (= {:seon.value/type (.getName (class (atom 1)))} (get-in rec [:seon.eval/response :value])) "a value that is no plain data: what it was, as data"))
+    ;; the scaffold's call is (in-ns ..) (deftest ..) (my.agent/prove): a form's value is kept as it would be alone, so the
+    ;; verdict reads as its render whatever came before it, and a large one takes no other form's value with it
+    (let [proved (with-meta {:reports [] :ran 0 :fns {'a/b {:calls 1}}} {:seon.render/schema :seon.test/proved})
+          kept (fn [v] (get-in (repl/record-details "x" {:handle 'result/e9 :forms 2 :value [1 v]} {}) [:seon.eval/response :value]))]
+      (is (= [1 (:value (render/model proved))] (kept proved)) "a form's model render, as it reads alone")
+      (is (= 1 (first (kept (vec (range (inc (cfg/value :seon.config.store/max-value-chars))))))) "a form past the largest value kept costs only itself")
+      (is (:seon.value/gone (second (kept (vec (range (inc (cfg/value :seon.config.store/max-value-chars))))))) "and says it is gone"))
     (let [e (ev "(+ 1 2) (throw (ex-info \"no\" {})) 4")]
       (is (contains? e :ex) "the error stops it")
       (is (= {:forms 2 :value [3]} (select-keys e [:forms :value])) "the values of the forms before it, and the forms after it never ran"))
