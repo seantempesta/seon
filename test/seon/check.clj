@@ -1716,7 +1716,7 @@
   (dec (count (clojure.string/split-lines (:out (clojure.java.shell/sh "ps" "-M" "-p" (str pid)))))))
 
 (defn agent-tests
-  "The tests that reach no process and have no result at their digest in this step's own verdict cache, run as a Seon agent runs them: forked from one agent that has drawn its page, on a
+  "The tests that reach no process and have no green at their digest in this step's own verdict cache, run as a Seon agent runs them: forked from one agent that has drawn its page, on a
   root whose config is not bin/test's (docs/merging.md#a-test-child-is-a-fork-of-a-live-agent). Green under bin/test and
   red here is a test reading its runner, or its agent's state leaking into it, which blocks a real agent's merge. It selects
   through seon.agent/test-plan, as an agent's own run does, and judges everything it selected; bin/check gives it a verdict
