@@ -762,6 +762,12 @@
   "A tile: a value on its own, scrolled when wide."
   "rounded-md bg-base-900 p-2 min-w-0 overflow-x-auto")
 
+(defn page-rules
+  "The CSS of the renders this page has drawn (a component of the walk, its :seon.render/rules), as a style element, or nothing while none states any. It draws again only when a render is drawn or redefined. See docs/render.md#style."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.render/rules :string]]]] :any]}
+  [{r :seon.render/rules}]
+  (when-not (str/blank? r) [:style r]))
+
 (defn task
   "The task its agent works (a component over ctx alone): its name as the heading, its plan accumulated over its needs
   (seon.task/pulled-accumulated), and under it one done line (a work or whole task's; the other kinds' instructions say what
@@ -769,7 +775,9 @@
   work stands (`standing`, from the task's outcome where the task holds one, else the agent's own end). The cites are
   their own parts (`citations`); which proofs are written is the status's. It reads no db. See
   docs/render.md#a-part-answers-data."
-  {:seon.render/style (str panel-style " [&_h3]:text-xs [&_h3]:text-text-300")
+  {:seon.render/style ".task { display: flex; flex-direction: column; gap: 0.5rem; border: 1px solid var(--color-base-800); border-radius: 0.375rem; padding: 0.5rem; }
+.task > h2 { text-transform: uppercase; letter-spacing: 0.14em; font-size: 0.625rem; color: var(--color-text-400); }
+.task h3 { font-size: 0.75rem; color: var(--color-text-300); }"
    :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int] :any]}
   [{c :seon.ctx/ctx} _aid]
   (when-let [t* (:task c)]
@@ -1419,7 +1427,7 @@
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
   [{c :seon.ctx/ctx}]
   (let [aid (:db/id c)]
-    [:div {:id "render-ctx"} [#'task-list {} aid] [#'conversation-list {} aid] [#'tiles {} aid]]))
+    [:div {:id "render-ctx"} [#'task-list {} aid] [#'conversation-list {} aid] [#'tiles {} aid] [#'page-rules {}]]))
 
 (defn task-list
   "The task's list of an agent's page (p-task, the parts its model is sent: seon.context/page-lists), agent aid's, in the order
@@ -1838,6 +1846,7 @@
        [:main {:class "seon-chat"}
         [:div {:id "p-head"} (for [u (in "#p-head")] (slot (:id u)))]
         (slot "p-caption")
+        [:div {:id "render-ctx"} (for [u (in "#render-ctx")] (slot (:id u)))]
         [:ol {:id "c-rows" :class "seon-chat-log" :data-view view} (for [u (in "#c-rows")] (slot (:id u)))]
         (when input (slot "p-input"))]
        (when-not (or (= :debug tab) agent-chat?)

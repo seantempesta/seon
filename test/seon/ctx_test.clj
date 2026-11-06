@@ -662,9 +662,11 @@
     (is (string? style) "the render's var states its style")
     (is (= 'seon.render.ui/chat-ask (first (hiccup ask-id))) "the model reads the render's name as the part's head")
     (is (not (str/includes? (pr-str (hiccup ask-id)) (:seon.render/style (meta #'seon.render.ui/chat-ask)))) "the model reads no style")
-    (is (not (str/includes? (pr-str hiccup) style)) "the model reads no style")
-    (is (str/includes? (:html (some #(when (= task-id (:id %)) %) units)) (str "class=\"task " (first (str/split style #" "))))
-        "the page's html has the name, then its var's classes")))
+    (is (not (str/includes? (pr-str (dissoc hiccup (some #(when (str/starts-with? % "page-rules") %) (keys hiccup)))) style)) "no other part holds the rules")
+    (is (str/includes? (:html (some #(when (= task-id (:id %)) %) units)) "class=\"task\"")
+        "a render with CSS rules keeps its name as its one class")
+    (is (some #(and (str/starts-with? (:id %) "page-rules") (str/includes? (:html %) ".task > h2 {")) units)
+        "the page's rules component draws them, a selector's > as written")))
 
 (deftest a-cited-vars-tests-are-its-pulled-callers
   ;; build 3's self-review (D2) and docs/references.md#an-entity-cites: a cited var's tests are the tests among the
@@ -718,7 +720,7 @@
         (let [[parts page] (try (enter-agent! {:db db :key k :branch :b}) [(seon.repl/render-ctx) (seon.repl/render-ctx-hiccup)]
                                 (finally (end-agent!)))
               shown (:units parts)]
-          (is (= (remove #(str/starts-with? % "agent-state-") (map :id shown)) (keys page)) "every component, the conversation's too, in order: nothing left out but the person's own state, which the model is sent none of")
+          (is (= (remove #(or (str/starts-with? % "agent-state-") (str/starts-with? % "page-rules")) (map :id shown)) (keys page)) "every component, the conversation's too, in order: nothing left out but the person's own state, which the model is sent none of")
           ;; the one difference: the page's html adds each root's render's style after its name (seon.render/styled)
           (let [;; every element class in the page's hiccup that names a render of seon.render.ui, nested components' too
                 classes (into #{} (comp (filter string?)) (keep #(when (map? %) (:class %)) (tree-seq coll? seq (vec (vals page)))))
