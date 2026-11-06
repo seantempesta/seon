@@ -66,8 +66,8 @@
  ;; seon.context/session-tx of a key no agent holds, of a session with no request to show or with a record of a kind an
  ;; example does not hold: docs/tasks.md#a-task-names-example-sessions
  ;; a request whose tree drew no system message (seon.context/request): refused, what stood first in its place named
- ;; a redo asked for a page whose commit collection swept (seon.context/page-at)
- :seon.context/page-gone [:and :seon.error/base [:map [:seon.error/type [:= :seon.context/page-gone]] [:t :int]]]
+ ;; a definition that broke Seon's recording of it, undone (seon.repl/undo-definition!)
+ :seon.repl/definition-undone [:and :seon.error/base [:map [:seon.error/type [:= :seon.repl/definition-undone]] [:vars [:vector :any]]]]
  :seon.context/no-system-message [:and :seon.error/base [:map [:seon.error/type [:= :seon.context/no-system-message]] [:first {:optional true} [:maybe :map]]]]
  :seon.context/session-refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.context/session-refused]] [:key :string]]]
  ;; my.root/example-txs of an example file that is missing, does not read as EDN, or is not the vector of tx-data

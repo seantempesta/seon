@@ -75,7 +75,7 @@
     (is (= {} (get (ask {"id" 9 "method" "ping"}) "result")))
     (is (= (mapv #(str "seon_" (name %)) (keys seon.server/ops)) (mapv #(get % "name") tools))
         "every op is the tool seon_<op>, in the table's order")
-    (is (= ["agent" "code"] (get-in (second tools) ["inputSchema" :required])) "an op's required arguments are its tool's")
+    (is (= ["agent"] (get-in (second tools) ["inputSchema" :required])) "an op's required arguments are its tool's")
     (is (nil? (ask {"jsonrpc" "2.0" "method" "notifications/initialized"})) "a notification is not answered")
     (is (= -32601 (get-in (ask {"id" 3 "method" "resources/list"}) ["error" "code"])) "a method it does not know: method not found")
     (is (= -32602 (get-in (ask {"id" 4 "method" "tools/call" "params" {"name" "seon_nope" "arguments" {}}}) ["error" "code"])) "a tool no op names: invalid params")))
@@ -227,13 +227,15 @@
 (deftest an-outside-agent-plays-the-model
   ;; docs/server.md#working-a-task-from-a-worktree: a read holds the conversation, as JSON the body a provider is sent;
   ;; a seon_eval by the agent attached is one reply, a turn, as a model's is, and a blank intent is not run, as a model's is not
-  (let [[attach called stopped old turn-of wire text]
+  (let [[attach called stopped old turn-of moved-ns ns-after wire text]
         (at/in-agent (fn [{:keys [agent task]}]
                        [{:op :attach :task task}
                         {:op :eval :agent agent :message-md "Adding, then adding again." :evals [{:intent "add one and one" :code "(+ 1 1)"} {:intent "then two and two" :code "(+ 2 2)"}]}
                         {:op :eval :agent agent :message-md "" :evals [{:intent " " :code "(def not-run-form 1)"} {:intent "after it" :code "(def not-run-either 1)"}]}
                         {:op :eval :agent agent :intent "the old shape" :code "(def old-shape-ran 1)"}
                         "(seon.agent/turn-now)"
+                        {:op :eval :agent agent :message-md "" :evals [{:intent "move" :code "(in-ns 'seon.print)"}]}
+                        {:op :eval :agent agent :message-md "" :evals [{:intent "where" :code "(str *ns*)"}]}
                         {:op :context :agent agent :wire true}
                         {:op :context :agent agent}]))
         body (clojure.data.json/read-str (:context wire))
@@ -249,6 +251,7 @@
     (is (= :seon.root/refused (:seon.error/type old)) (pr-str old))
     (is (clojure.string/includes? (:seon.error/message old) "message-md") "the old shape is told the new one, nothing run")
     (is (= 2 (:value turn-of)) "each reply is a turn: no one growing turn 0")
+    (is (= "seon.print" (:value (first (:responses ns-after)))) (str "the namespace a reply moved to is where the next one runs: " (pr-str moved-ns)))
     (is (= ["eval"] (mapv #(get-in % ["function" "name"]) (get body "tools"))) "the body holds the tool a model is given")
     (is (= (clojure.data.json/read-str (clojure.data.json/write-str seon.model/eval-tool)) (first (get body "tools"))) "that very tool")
     (is (= "system" (get (first msgs) "role")))

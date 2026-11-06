@@ -1274,6 +1274,24 @@
     (is (nil? shown) "a render that throws does not stop the one who asked")
     (is (str/includes? (str broken-request) "broken render") "and the request reads its error")))
 
+;; docs/failure-points.md: a live agent ran (def form-of ...) in seon.program as a scratch name, every later write threw in seon.program/record-tx, and the run died
+(deftest a-definition-that-breaks-its-own-recording-is-undone
+  (let [[broke after still] (in-agent ["(in-ns 'seon.program) (def form-of (fn [v] v))"
+                                       "(def after-it 41) (inc after-it)"
+                                       "(seon.program/definition-form? '(def x 1) (the-ns 'user))"])]
+    (is (= :seon.repl/definition-undone (:seon.error/type (:ex broke))) (pr-str (:ex broke)))
+    (is (str/includes? (:seon.error/message (:ex broke)) "seon.program/form-of") "it says which")
+    (is (= 42 (second (:value after))) "the run goes on: the next eval records")
+    (is (nil? (:ex still)) "and Seon's own var is as it was")))
+
+;; docs/render.md#a-redo-is-an-explicit-bust: collection may have swept the commit a redo needs: the same datoms as of t, never a later page
+(deftest a-page-whose-commit-is-gone-is-drawn-as-of-its-t
+  (let [[at] (in-agent ["(let [db (seon.agent/db) gone (assoc-in db [:meta :datahike/parents] #{(random-uuid)}) t (:max-tx db)]
+                           [(:max-tx (#'seon.context/at-t gone t)) t (some? (:origin-db (#'seon.context/at-t gone (dec t))))])"])
+        [was t as-of?] (:value at)]
+    (is (= t was) "the commit at t itself needs no walk")
+    (is (true? as-of?) "past what collection kept, a db as of t")))
+
 ;; docs/render.md#a-redo-is-an-explicit-bust: a diff removed leaves the next one standing on a page its reader was never shown; the redo
 ;; draws what moved from the page as of each t, in place, and what still stands on what came before it is left byte for byte
 (deftest a-redo-is-drawn-from-the-page-as-of-each-t

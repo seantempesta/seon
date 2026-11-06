@@ -214,9 +214,11 @@
                          (let [[ns' how] (exec! form src lead ns (or top k))]
                            (if (= :ok how) (recur ns' end (inc k)) [ns' how])))))))
         _ (vreset! forms-ref forms!)
-        [ns how] (forms! (get req "code") (or (some-> (get req "ns") symbol find-ns) (:ns @agent/state)) nil)]
-    ;; a read error leaves the agent's namespace as it was
-    (when-not (= :read how) (swap! agent/state assoc :ns ns))
+        start (or (some-> (get req "ns") symbol find-ns) (:ns @agent/state))
+        [ns how] (forms! (get req "code") start nil)]
+    ;; a read error leaves the agent's namespace as it was, and so does an eval that did not move it: one run inside it may have (an outside agent's reply)
+    (when (and (not= :read how) (or (not= ns start) (and (get req "ns") (not (:within req)))))
+      (swap! agent/state assoc :ns ns))
     (reply {"status" ["done"]})))
 
 ;; ---- middleware -------------------------------------------------------------------
@@ -321,6 +323,19 @@
                        (assoc m :err em))
                    m))))))
 
+
+(defn- undo-definition!
+  "A definition that broke Seon's recording of it (the agent named a var of Seon's own that the recording itself calls, seon.program/form-of with another arity): its vars put back as they were before the form ran (l, the form's :before), since otherwise every later write of this agent throws and it can't be told, and that said as the eval's error. The eval path's entrant boundary (docs/failure-points.md); what the recording did not reach is the turn's (seon.turn/turn-error!). Throws."
+  {:malli/schema [:=> [:cat :map :any] :any]}
+  [l e]
+  (let [vars (vec (keys (:before l)))]
+    (doseq [[s old] (:before l) :let [v (find-var s)] :when (and v (not (keyword? old)))]
+      (alter-var-root v (constantly old)))
+    (throw (ex-info "definition undone"
+                    (contract/error :seon.repl/definition-undone #'undo-definition!
+                                    (str "your definition of " (clojure.string/join ", " vars) " was undone: Seon's own code calls that var, and recording your definition threw with it in place: " (ex-message e) ". Use a name of your own.")
+                                    {:vars vars})))))
+
 (defn wrap-cost
   "Per-form wall ms, allocated bytes, engine ticks (the work it did, the exact measure:
   seon.profile/measure!) and the
@@ -416,10 +431,12 @@
                          _ (when gone (agent/transact! (mapv (fn [[_ e f]] [:db/retract e :var/form f]) gone)))
                          m (cond-> m gone (assoc :unmapped (mapv first gone)))]
                    (if acct
-                     (let [tx (when contract/record? (program/record-tx (agent/db) acct))
-                           ;; what this form's own transaction changes of an existing var's contract or
-                           ;; docstring, read before it is applied (a form that defines nothing reads nothing)
-                           redefined (when tx (program/meaning-changes (agent/db) tx))]
+                     (let [[tx redefined] (try
+                                            (let [tx (when contract/record? (program/record-tx (agent/db) acct))]
+                                              ;; what this form's own transaction changes of an existing var's contract or
+                                              ;; docstring, read before it is applied (a form that defines nothing reads nothing)
+                                              [tx (when tx (program/meaning-changes (agent/db) tx))])
+                                            (catch Throwable e (undo-definition! l e)))]
                        (when tx (agent/transact! tx))
                        (cond-> (assoc m :recorded (vec (concat (map :var (:defs acct)) (when (:ns-form? acct) [(:ns acct)])))
                                       :repl/defined (mapv :var (:defs acct)))

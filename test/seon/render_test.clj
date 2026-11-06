@@ -1976,6 +1976,16 @@
                   "main moving redraws the views (a whole task merges itself: its merge section reads main)")))
           (finally (r/dispose-walk! w)))))))
 
+(deftest a-prove-with-no-verdict-is-not-green
+  ;; a live answer read "green: 0 of 0 passed" on a task naming one proof that was never written
+  (let [run {:pass 0 :fail 0 :error 0 :ran 0 :reused 0 :deferred [] :reports [] :proofs {'app.okt/never-written :none} :unmatched ['app.okt/never-written]}
+        line (:seon.print/code (my.agent/prove-summary {} run))]
+    (is (str/starts-with? line "not green: 1 of 1 proofs have no verdict: app.okt/never-written") line)
+    (is (str/includes? line "no test is named app.okt/never-written") "and says why"))
+  (is (= "nothing judged: no proof and no test this change reaches"
+         (:seon.print/code (my.agent/prove-summary {} {:pass 0 :fail 0 :error 0 :ran 0 :reused 0 :deferred [] :reports [] :proofs {}}))))
+  (is (str/starts-with? (:seon.print/code (my.agent/prove-summary {} {:pass 1 :fail 0 :error 0 :ran 1 :reused 0 :deferred [] :reports [{:type :pass :var "#'a/b"}] :proofs {'a/b :pass}})) "green: 1 of 1")))
+
 (deftest a-prove-is-drawn-on-its-eval-red-and-died
   ;; docs/agent.md#done: a prove answers one line (my.agent/prove-summary) and what it found is drawn on
   ;; its eval from its value (seon.render.ui/proved): a red names its test and first failing assertion,

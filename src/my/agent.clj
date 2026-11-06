@@ -306,7 +306,8 @@
        (let [results (proofs/results test-run)
              task-proofs (some->> (:task @agent/state) (task/task (agent/db)) :seon.task/accumulated :proofs)
              deferred (set (:deferred test-run))
-             unmatched (vec (sort-by str (filter #(empty? (agent/named-tests (agent/db) #{%})) proofs)))]
+             ;; a name that matches nothing, the task's own proofs too
+             unmatched (vec (sort-by str (filter #(empty? (agent/named-tests (agent/db) #{%})) (into (set proofs) task-proofs))))]
          (with-meta (cond-> (assoc test-run :results results
                            :proofs (into {}
                                          (for [p (into (set proofs) task-proofs)]
@@ -330,6 +331,8 @@
           red (pos? (+ (:fail r 0) (:error r 0)))
           fails (apply dissoc (proofs/failures r) (proofs/died r))
           n (+ (:ran r 0) (:reused r 0))
+          ;; a proof with no verdict: green can't be said of what nobody judged
+          none (sort-by str (keep (fn [[p st]] (when (= :none st) p)) (:proofs r)))
           clean (fn [x] (str/replace (str x) #"#object\[java\.util\.regex\.Pattern 0x[0-9a-f]+\]" "a regex"))
           failure (fn [t f] (let [got (str/trim (str (or (:actual f) (:got f))))
                                   m (when (str/starts-with? got "#error") (second (re-find #":message \"([^\"]*)\"" got)))]
@@ -340,6 +343,8 @@
          (concat
            [(cond red (str "red: " (count fails) " of " n " failed")
                   (pos? died) (str "died: " died " of " n " had no verdict")
+                  (seq none) (str "not green: " (count none) " of " (count (:proofs r)) " proofs have no verdict: " (str/join ", " none))
+                  (zero? n) "nothing judged: no proof and no test this change reaches"
                   :else (str "green: " n " of " n " passed"))]
            (for [[t fs] (sort-by (comp str key) fails)] (failure t (first fs)))
            [(when (pos? (:reused r 0)) (str "reused " (:reused r) ": their last result still counts, because nothing they reach has changed"))
