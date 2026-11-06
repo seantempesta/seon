@@ -34,8 +34,9 @@ fi
 if [[ -d $MERGES ]]; then
   # the standing root's boot fast-forwards jolt/merges to main (seon.fx/read-source), after the merge above
   # a submodule behind main's new pin is not a change: --sync moves it, and names one that has changes
-  # refused, it names the files, so its cause is read, not guessed (it has failed on a first try and been
-  # green on the next, with nothing in the worktree by then)
+  # refused, it names the files. The index is refreshed first: a file whose stat alone moved reads as changed to
+  # git diff, which refused the first update after a merge and passed the next, once git status had refreshed it
+  git -C "$MERGES" update-index -q --refresh --ignore-submodules || true
   git -C "$MERGES" diff --quiet --ignore-submodules || fail "$MERGES has uncommitted changes: $(git -C "$MERGES" status --short --ignore-submodules | tr '\n' ' ')"
   "$MAIN/bin/worktree" --sync "$MERGES" >/dev/null || fail "syncing $MERGES's submodules"
 fi
@@ -44,4 +45,6 @@ nice -n 15 bin/build > target/update-build.log 2>&1 || { tail -5 target/update-b
 print "built $(ls -l target/seon | awk '{print $6, $7, $8}')"
 bin/root stop >/dev/null 2>&1
 bin/root start "$@" | tail -1 || fail "the standing root did not start (runs/root.log)"
+# what the verdict cache shows slow is work: root files a held task per slow test (docs/merging.md#a-slow-test-is-left-out)
+printf '{:op :eval :agent "root" :code "(my.root/file-slow-tests! sys)"}\n' | bin/ask "${$(bin/ports)%% *}" >/dev/null || print "filing the slow tests' tasks failed: run (my.root/file-slow-tests! sys) at root"
 print "UPDATE OK"

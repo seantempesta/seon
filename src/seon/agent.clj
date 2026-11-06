@@ -77,8 +77,19 @@
 
 ;; ---- the agent's own API ------------------------------------------------------
 
-(defn db {:malli/schema [:=> [:cat] :seon.host/db]}
-  [] (:db @state))
+(defn- no-branch!
+  "Throws the typed :seon.agent/no-branch: this process is no agent (root's REPL), and what was called is an agent's API,
+  which reads and writes its branch. See docs/server.md#ops."
+  {:malli/schema [:=> [:cat] :any]}
+  []
+  (throw (ex-info "no branch" (contract/error :seon.agent/no-branch #'no-branch!
+                                              "this is root's REPL, which has no branch; my.agent, my.db, my.task and my.branch are an agent's API"
+                                              {:seon.error/fix "Read main at root: (d/q query @(:conn sys)), (d/pull @(:conn sys) pattern eid), my.root/*. Or run the form in an attached agent: seon_eval with its id."}))))
+
+(defn db
+  "This agent's branch as a db value; the typed :seon.agent/no-branch in a process that has none (`no-branch!`). See docs/server.md#ops."
+  {:malli/schema [:=> [:cat] :seon.host/db]}
+  [] (or (:db @state) (no-branch!)))
 
 (declare handle!)
 
@@ -159,8 +170,7 @@
   t, never stored, and it reads no store: a read of main's head (heard-main, seon.db/head,
   datahike.writing/read-head) on each eval held the agent's heap past its ceiling in
   seon.agent-test/an-agent-finds-no-repository (OutOfMemoryError, exit 70). So an agent that never
-  hears main (no turn) is told what it last heard; telling it main moved needs root to push the commit
-  (task seon.writer/main-notices-carry-a-commit-not-a-db)."
+  hears main (no turn) is told what it last heard; telling it main moved needs root to push the commit."
   {:malli/schema [:=> [:cat] [:maybe :string]]}
   []
   (when-let [base (:base @state)]
@@ -303,7 +313,7 @@
   writes (`refused!`), never throws: no caller's loop ends on it. See docs/failure-points.md."
   {:malli/schema [:=> [:cat] :any]}
   []
-  (let [conn (:store-conn @state)
+  (let [conn (or (:store-conn @state) (no-branch!))
         c (try (dw/commit-pending! conn) (catch Throwable e e))]
     (cond
       (instance? Throwable c) (refused! conn c)
@@ -347,7 +357,7 @@
                   tx-data)]
     (if (= :test (:mode @state))
       (let [r (d/with (db) tx-data) attrs (into #{} (map :a) (:tx-data r))]
-        (doc/carry-index! (:db-before r) (:db-after r) attrs)
+        (doc/carry-index! (:db-before r) (:db-after r) (map (juxt :e :a) (:tx-data r)))
         (swap! state #(-> % (assoc :db (:db-after r) :tx (select-keys r [:db-after :tx-data])) (schema-moved attrs)))
         {:t (:max-tx (:db-after r)) :datoms (count (:tx-data r)) :local true})
       (let [r (dw/apply! (:store-conn @state) {:tx-data tx-data :tx-meta (pdb/tx-meta (:branch @state) (cond-> {} (:eval @state) (assoc :seon.tx/eval (:eval @state))))})]
@@ -356,7 +366,7 @@
         ;; indexes and the schema registry carried past it when it wrote none of their attributes
         (let [attrs (into #{} (map :a) (:tx-data r))]
           ;; from the db the writer applied it to (its report's), whatever the state held
-          (doc/carry-index! (:db-before r) (:db-after r) attrs)
+          (doc/carry-index! (:db-before r) (:db-after r) (map (juxt :e :a) (:tx-data r)))
           (swap! state #(-> % (assoc :db (:db-after r) :tx (select-keys r [:db-after :tx-data]) :dirty? true) (schema-moved attrs))))
         (cond-> {:t (:max-tx (:db-after r)) :datoms (count (:tx-data r))}
           (seq (:tempids r)) (assoc :tempids (into {} (filter (comp string? key)) (:tempids r))))))))
@@ -502,7 +512,7 @@
             errs (program/load-changes! (:db-after rep) ops)]
         ;; the merge base is now main's head: what main changed is not this branch's change
         (let [attrs (into #{} (map (fn [op] (nth op 2 nil))) ops)]
-          (doc/carry-index! head @conn attrs)
+          (doc/carry-index! head @conn (map (fn [op] [(nth op 1) (nth op 2)]) ops))
           (swap! state #(-> % (assoc :db @conn :base (pdb/branch-base conn main-b (:branch @state))) (schema-moved attrs))))
         (send! {:op :committed :t (:max-tx @conn) :txs 1})
         (cond-> {:ok true :applied (:apply r) :conflicts (:conflicts r) :t (:max-tx @conn) :datoms (count ops)}
@@ -1033,7 +1043,9 @@
   [p names proofs]
   (let [in? #(or (contains? names %) (contains? names (symbol (namespace %))))
         p (if (seq names) (-> p (update :selected #(filterv in? %)) (update :run #(filterv in? %))) p)
-        skip? (proofs/left-out (:selected p) (:process p) false #{})]
+        ;; a slow test the run did not name and no proof holds is left out as bin/prove leaves it (docs/merging.md#a-slow-test-is-left-out)
+        slow (when-not (seq names) (fx/slow-tests (select-keys (:digests p) (remove proofs (:run p)))))
+        skip? (into (proofs/left-out (:selected p) (:process p) false #{}) (keys slow))]
     (-> p (assoc :skipped (vec (sort-by str (filter skip? (:selected p)))))
         (update :selected #(filterv (complement skip?) %)) (update :run #(filterv (complement skip?) %)))))
 
@@ -1062,7 +1074,7 @@
                (sock/clofork! w)
                ;; the run ends with its agent (a test ends by its own budget): the agent's end of this socket
                ;; pair closing raises SIGIO here and ends the child, whatever the test is
-               ;; doing (task seon.agent/a-proof-run-ends-with-its-agent; the agent's own
+               ;; doing (the agent's own
                ;; socket to root is FD_CLOFORK: not held here, so its handler is replaced)
                (when-let [unwatched (sock/signal-at-input! w)]
                  (sock/write-line! w (sedn/encode {:pass 0 :fail 0 :error 1 :reports [{:type :error :message (:seon.error/message unwatched)}]}))

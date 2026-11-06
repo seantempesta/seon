@@ -26,20 +26,23 @@
     (branch 200)
     (is (= 201 (profile/calls)))))
 
+;; docs/cost.md#counting-calls: a signal handler's work is a callee's of the call it lands in (seon.profile/aside), so a signal inside
+;; either call breaks these identities for that one measure (SIGIO reaches an agent's test child: about 1 measure in 3,000 under a
+;; flood of them). Holding interrupts is no answer, as it stops the tick counter too. A counting defect breaks every measure, so one of
+;; three exact says the counting is right.
 (deftest a-functions-own-work-is-its-work-less-its-callees
   (when contract/on?
-    (profile/begin!)
-    (branch 50)
-    (let [by (into {} (map (juxt :var identity)) (profile/touched))
-          b (by 'seon.profile-test/branch) l (by 'seon.profile-test/leaf)]
+    (let [measure (fn [] (profile/begin!) (branch 50)
+                    (let [by (into {} (map (juxt :var identity)) (profile/touched))]
+                      [(by 'seon.profile-test/branch) (by 'seon.profile-test/leaf)]))
+          exact? (fn [[b l]] (and (= (:ticks l) (:self-ticks l)) (= (:bytes l) (:self-bytes l))
+                                  (= (:ticks b) (+ (:self-ticks b) (:ticks l))) (= (:bytes b) (+ (:self-bytes b) (:bytes l)))))
+          runs (vec (repeatedly 3 measure))
+          [b l :as run] (or (first (filter exact? runs)) (peek runs))]
       (testing "every touched function did work, counted in ticks and bytes"
-        (is (every? #(pos? (:ticks %)) [b l]) (pr-str by)))
-      (testing "a leaf's own work is all of it"
-        (is (= (:ticks l) (:self-ticks l)))
-        (is (= (:bytes l) (:self-bytes l))))
-      (testing "a caller's work is its own and its callees', exactly"
-        (is (= (:ticks b) (+ (:self-ticks b) (:ticks l))) (pr-str b l))
-        (is (= (:bytes b) (+ (:self-bytes b) (:bytes l))) (pr-str b l))
+        (is (every? #(pos? (:ticks %)) [b l]) (pr-str run)))
+      (testing "a leaf's own work is all of it, and a caller's its own and its callees', exactly"
+        (is (exact? run) (pr-str runs))
         (is (< (:self-ticks b) (:ticks b)))))))
 
 (defn interrupted {:malli/schema [:=> [:cat :int] :int]} [n] (+ (branch n) (profile/aside #(branch n))))
@@ -117,7 +120,7 @@
   [] (busy-threads 1 #(dotimes [_ 1000] (vec (range 100)))))
 
 (deftest a-threads-allocation-is-its-own
-  ;; task seon.cost/a-proof-measures-only-its-own-thread: alloc-bytes counted the whole
+  ;; alloc-bytes counted the whole
   ;; process (1,712 B idle against 1.4 GB in 200 ms while another thread allocated), so a cost
   ;; proof read other threads' work as its own. Now it is the calling thread's count alone.
   (let [window #(let [a0 (profile/alloc-bytes) _ (Thread/sleep 200)] (- (profile/alloc-bytes) a0))]

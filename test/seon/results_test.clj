@@ -301,3 +301,17 @@
         a (proofs/answer {:pass 1 :fail 0 :error 1 :reports [{:type :pass :var "#'a.g-test/t0"} e]} #{})]
     (is (= [e] (:reports a)))
     (is (= [(:message e)] (proofs/test-run-errors a)))))
+
+;; docs/merging.md#a-slow-test-is-left-out: slow every time, since load only slows a run; a fast green brings a test back
+(deftest a-slow-test-is-slow-every-time
+  (with-dir
+   (fn [dir]
+     (rec! dir {'a/t {:test 'a/t :digest "s-1" :pass 1 :fail 0 :error 0 :ms 9000}
+                'a/loaded {:test 'a/loaded :digest "l-1" :pass 1 :fail 0 :error 0 :ms 9000}})
+     (rec! dir {'a/t {:test 'a/t :digest "s-2" :pass 1 :fail 0 :error 0 :ms 8000}
+                'a/loaded {:test 'a/loaded :digest "l-2" :pass 1 :fail 0 :error 0 :ms 100}
+                'a/quick {:test 'a/quick :digest "s-4" :pass 1 :fail 0 :error 0 :ms 7}})
+     (is (= '{a/t 8000} (fx/slow-tests dir '{a/t "moved" a/loaded "moved" a/quick nil a/none nil} 5000))
+         "by its fastest green: one run under load leaves no test out; a quick test and a test never run are not slow")
+     (rec! dir {'a/t {:test 'a/t :digest "s-3" :pass 1 :fail 0 :error 0 :ms 100}})
+     (is (= {} (fx/slow-tests dir '{a/t "s-3"} 5000)) "a test made fast comes back with its green at its digest"))))

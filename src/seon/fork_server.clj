@@ -103,8 +103,7 @@
     (if (= t (:warm-t st))
       st
       ;; main's search text index (seon.doc/text-index), built here once and carried by each commit
-      ;; that writes no text (the :tx step), so every agent forked inherits it and its first search
-      ;; builds nothing (an in-memory FTS5 table survives fork() as plain memory)
+      ;; (the :tx step), so every agent forked inherits it and its first search builds nothing (an in-memory FTS5 table survives fork() as plain memory)
       (do (doc/text-index db)
       ;; main's schema registry, which each agent forked holds until it writes a schema entry
       (let [k (program/schema-changes db)]
@@ -151,11 +150,11 @@
                  ;; persistent indexes), never its datoms replayed here: replaying a 42,942-datom
                  ;; import took 3.5 s, and the first fork waited behind it
                  db' (d/commit-as-db (:store st) (:commit m))
-                 ;; the search's text indexes held for main carried to it when the commit wrote no text: only
+                 ;; the search's text index held for main carried to it, the texts the commit wrote replaced: only
                  ;; from its parent (a commit between them, unseen here, could have written one; the next read
-                 ;; then checks the texts' fingerprint)
+                 ;; then builds it)
                  _ (when (contains? (set (get-in db' [:meta :datahike/parents])) (d/commit-id (:db st)))
-                     (doc/carry-index! (:db st) db' (into #{} (map #(nth % 2 nil)) (:tx-data m))))
+                     (doc/carry-index! (:db st) db' (map (fn [op] [(nth op 1) (nth op 2)]) (:tx-data m))))
                  st (cond-> (assoc st :db db' :evals-max (evals-max-after (:evals-max st) (:tx-data m)))
                       ;; a commit not the one the writer said: main is read again, its eval count included, so
                       ;; no agent forked after counts from a number a commit it never saw raised

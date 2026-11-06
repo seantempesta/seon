@@ -40,7 +40,7 @@
 (defn- ask
   "Ask the api for req under kind (seon.step/ask) unless kind is already in flight: the
   answer's pass covers what queued meanwhile (the coalescing window). No clock re-asks: the
-  api answers every request it took, a defect included (seon.root/a-proc-answers-every-request-it-took)."
+  api answers every request it took, a defect included."
   {:malli/schema [:=> [:cat :map :seon.host/volatile :any :map] :map]}
   [st o kind req]
   (if (some #{kind} (vals (:pending st)))
@@ -267,14 +267,15 @@
           chosen (get-in st [:tab view :at] :latest)
           gone (when-not (or (= :latest chosen) (some #{chosen} calls)) chosen)
           at (if gone :latest chosen)
-          raw? (contains? (get-in st [:tab view :open] #{}) "d-turn-raw")
+          opened (get-in st [:tab view :open] #{})
+          raw? (contains? opened "d-turn-raw")
           lb (peek bases)
           to-come? (ui/to-come? bdb lb)]
       (ui/debug (focus (:main-db st) view)
                 (cond-> {:turns (mapv (fn [e b] {:e e :turn (:turn b) :origin (:origin b)}) calls bases) :at at :to-come? to-come?} gone (assoc :gone gone))
                 (when (seq calls)
-                  {:id "d-turn" :input [at (when (= :latest at) (:max-tx bdb)) raw?]
-                   :draw (fn [_] [(ui/debug-turn {:unit "d-turn"} (-> (ui/debug-input bdb at calls raw?) (assoc :view (ui/view-param view)))) nil])})
+                  {:id "d-turn" :input [at (when (= :latest at) (:max-tx bdb)) opened]
+                   :draw (fn [_] [(ui/debug-turn {:unit "d-turn"} (-> (ui/debug-input bdb at calls raw?) (assoc :view (ui/view-param view) :opened opened))) nil])})
                 nil))))
 
 (def ^:private gone "The agent statuses of an ended process (:seon.agent/status)." (:seon.status/gone (contract/properties :seon.agent/status)))
@@ -608,7 +609,7 @@
 (defn touched
   "The views a transaction's datoms touched: those whose last walk read a key one of the datoms
   has (d/datom-keys; a schema datom touches every view). One lookup a key a datom, whatever
-  the views read (task seon.render/a-view-renders-once-per-change-of-its-reads)."
+  the views read."
   {:malli/schema [:=> [:cat :map [:sequential :any]] [:set :any]]}
   [st datoms]
   (let [ix (:read-index st {})]

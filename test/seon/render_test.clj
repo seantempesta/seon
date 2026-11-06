@@ -16,7 +16,7 @@
    :seon.task/accumulated {:plan "Make `app.calc/add` pass" :proofs #{'app.proofs/add-test}}})
 
 (deftest a-problems-report-is-sent-grouped-with-its-handles
-  ;; task seon.agent/every-limit-fails-loudly (the owner, 2026-10-30: errors grouped by signature with their counts, the
+  ;; (the owner, 2026-10-30: errors grouped by signature with their counts, the
   ;; newest first line and a handle): the problems report a part answers is sent the model by its declared model render,
   ;; a few fields a row, never a row's example or evidence printed whole, each recorded error with the form that reads it
   (let [big (vec (range 5000))
@@ -99,7 +99,7 @@
     (is (= [{:type :fork-server-up}] (:events (p/process-value (assoc st :events [{:type :fork-server-up}]))))
         "an event that names no agent (the fork server's) reads as it is")))
 
-;; ---- the GUARDS audit's names for the same law (seon.render/no-clip-in-renders) -------------
+;; ---- the GUARDS audit's names for the same law -------------
 
 (deftest no-render-calls-clip
   (is (nil? (resolve 'seon.render.ui/clip)))
@@ -297,7 +297,7 @@
                                      (sites forms budgeted-vars #(and (printer? %) (not (display? %))))))
                         (sort named)))))))
 
-;; ---- the agent's debug view (task seon.render/a-debug-view-of-any-agent) ----------------
+;; ---- the agent's debug view ----------------
 
 (deftest the-printer-renders-each-nested-value-by-its-own-render
   ;; owner, 2026-10-23: the default render auto-renders. A value inside the printed one whose
@@ -319,7 +319,7 @@
 
 (defn- eid-of [db ref] (:db/id (d/entity db ref)))
 
-;; ---- the page (task seon.render/page): every page is the walk of one entity ----
+;; ---- the page: every page is the walk of one entity ----
 
 (defn- paged-dbs
   "Main and a3's branch as production writes them: main holds root, the task, the agent (forked
@@ -553,7 +553,7 @@
     (is (nil? (#'p/location db2 :main/task-z)) "a branch no agent worked names none")))
 
 (deftest a-page-keeps-what-it-read
-  ;; task seon.render/a-view-renders-once-per-change-of-its-reads (B): a page's walk runs inside
+  ;; a page's walk runs inside
   ;; d/with-reads and the proc indexes its reads by key, so a transaction finds the pages it
   ;; touched by its datoms' keys (seon.render.proc/touched), never by walking them
   (let [[main branch eid] (paged-dbs)
@@ -572,7 +572,7 @@
     (is (empty? (touched main [[:db/retractEntity unread]])) "an entity the page did not read")))
 
 (deftest a-transaction-touching-no-page-walks-nothing
-  ;; task seon.render/a-view-renders-once-per-change-of-its-reads (C): main's commits come from
+  ;; main's commits come from
   ;; the writer ({:t :prev :ops :commit}, read with d/commit-as-db); the pass walks only the pages whose reads a commit's datoms touch, and
   ;; root's, which its walk marks (root-walk) when main moved
   (ts/test-branch! (fn [_ conn]
@@ -935,13 +935,13 @@
       (let [[st [r0 r1] [e0 e1]] (debug-state conn)
             db (get-in st [:branches [:debug :a1] :db])
             sent (fn [n msgs] (seon.model/request-body (seon.config/provider-at db db "demo/f") {:messages msgs :task "demo/f" :turn n}))
-            page (fn [st at] (let [st (cond-> (assoc-in st [:tab [:debug :a1] :open] #{"d-turn-raw"}) at (assoc-in [:tab [:debug :a1] :at] at))
+            page (fn [st at] (let [st (cond-> (update-in st [:tab [:debug :a1] :open] (fnil conj #{}) "d-turn-raw") at (assoc-in [:tab [:debug :a1] :at] at))
                                    [st' _] (#'p/pass-view st [:debug :a1])]
                                (p/view-html st' [:debug :a1])))
             h0 (page st e0) h1 (page st e1)]
         (is (= (clojure.data.json/write-str (sent 0 r0)) (wire-text h0)) "turn 0: the page's body is the bytes it sent")
         (is (= (clojure.data.json/write-str (sent 1 r1)) (wire-text h1)) "turn 1: the same")
-        (is (str/includes? h1 "the help page") "each message beside the records that made it")
+        (is (str/includes? (page (assoc-in st [:tab [:debug :a1] :open] #{"d-turn-s0"}) e1) "the help page") "each message, opened, beside the records that made it")
         (is (str/includes? h1 "I call f.") "a call's arguments as sent, its prose in them")
         (is (str/includes? h1 "sent the same by the request before down to here") "where the unchanged prefix ends, with no cache count recorded")
         (is (not (str/includes? h0 "sent the same by the request before")) "the first request has no request before")
@@ -974,7 +974,7 @@
         (testing "a turn whose call failed shows what it sent and its typed error"
           (let [db (d/db-with db [{:seon.model-call/id "b/a1/1" :seon.model-call/error {:seon.error/type :seon.model/no-provider :seon.error/operation 'seon.model/complete
                                                                                 :seon.error/message "no model provider"}}])
-                html (page (-> st (assoc :main-db db) (assoc-in [:branches [:debug :a1] :db] db)) e0)]
+                html (page (-> st (assoc :main-db db) (assoc-in [:branches [:debug :a1] :db] db) (assoc-in [:tab [:debug :a1] :open] #{"d-turn-s1"})) e0)]
             (is (str/includes? html "no model provider") "its error, by the error's render")
             (is (str/includes? html "eval p101") "beside what it sent: the page, the first eval")))))))
 
@@ -1344,6 +1344,42 @@
     (is (str/includes? h "an opening, whatever it says"))
     (is (= 1 (count (re-seq #"data-session=" h))) "the system message is no session's")))
 
+(deftest a-request-folds-by-its-records
+  ;; docs/render.md#the-debug-page-is-the-wire-request: what a section is comes from its records, never its text: the
+  ;; reply and the tool messages answering it are one fold, and a page Seon ran is told from an agent's by its record's author
+  (let [ms [{:role "system" :content "# Help\n\nread this"}
+            {:role "assistant" :content "shown" :tool_calls [{:id "x" :function {:name "eval" :arguments "{}"}}]}
+            {:role "tool" :tool_call_id "x" :content "page"}
+            {:role "assistant" :tool_calls [{:id "a" :function {:name "eval" :arguments "{}"}} {:id "b" :function {:name "eval" :arguments "{}"}}]}
+            {:role "tool" :tool_call_id "a" :content (str/join " " (repeat 8000 "word"))}
+            {:role "tool" :tool_call_id "b" :content ":ok"}]
+        sources [[[:section 1 1]] [[:eval "e1"]] [[:eval "e1"]] [[:eval "e2"] [:eval "e3"]] [[:eval "e2"]] [[:eval "e3"]]]
+        evals {"e1" {:seon.eval/by "seon" :seon.eval/intent "Seon showed it" :seon.eval/code "(page)" :seon.eval/call-id "x"}
+               ;; held in the other order from its reply's calls: a call is matched by its id, never its place
+               "e2" {:seon.eval/by "a1" :seon.eval/intent "Then the other" :seon.eval/code "(second-call)" :seon.eval/call-id "b"}
+               "e3" {:seon.eval/by "a1" :seon.eval/intent "Read *the* thing" :seon.eval/code "(first-call)" :seon.eval/call-id "a"}}
+        draw (fn [opened] (h/html (ui/debug-turn {:unit "d-turn"} {:turn 1 :agent "b/a1" :view "a1" :origin :model :usage {} :evals evals :opened opened
+                                                                   :body {:messages ms} :sources sources :new [false false false false false true]})))
+        h (draw #{})]
+    (is (= [{:kind :system :is [0]} {:kind :page :is [1 2]} {:kind :eval :is [3 4 5]}]
+           (#'ui/request-sections ms sources evals)))
+    (is (= ["system" "page" "eval"] (mapv second (re-seq #"data-section=\"(\w+)\"" h))) "a fold a section, whatever many messages it holds")
+    (is (= 1 (count (re-seq #"<details[^>]*data-section=\"\w+\"[^>]* open" h))) "only the section holding what is new starts open")
+    (is (not (str/includes? h "(page)")) "a closed section's messages are not drawn: it costs its line")
+    (is (str/includes? (draw #{"d-turn-s1"}) "(page)") "turned open, they are")
+    (is (not (str/includes? (draw #{"d-turn-s3"}) "(second-call)")) "a section that starts open can be closed")
+    (is (= 1 (count (re-seq #"Then the other" h))) "a closed section says once what each of its evals set out to do, though the eval made its call and its answer")
+    (is (re-find #"call · a.*\(first-call\).*call · b.*\(second-call\)" h) "a call is the code of the record holding its id")
+    (is (str/includes? (h/html (ui/debug-turn {:unit "d-turn"} {:turn 1 :agent "b/a1" :view "a1" :origin :model :usage {} :evals {"e2" nil}
+                                                                :body {:messages [(nth ms 3)]} :sources [[[:eval "e2"]]] :new [true]}))
+                       "tool_calls · eval · a · arguments")
+        "an eval the db does not hold: its arguments as sent")
+    (is (str/includes? h "Large, ") "text past its budget offers the rest")
+    (is (str/includes? h "unit=d-turn-m4&amp;open=true") "the button opens that message's text")
+    (is (< (count h) (count (draw #{"d-turn-m4"}))) "opened, its whole text is on the page")
+    (is (str/includes? (draw #{"d-turn-m4"}) "show less"))
+    (is (str/includes? h "text-error") "a section past its limit reads red")))
+
 (deftest a-cut-with-its-whole-form-holds-no-copy
   ;; the second context audit (F7): a plan cut on the page kept its whole text in the cut's :title,
   ;; which the model reads too (1.2k chars twice on two pages). A cut that names the form reading the
@@ -1374,7 +1410,7 @@
   [units prefix] (some #(when (str/starts-with? (:id %) prefix) %) units))
 
 (deftest a-page-is-its-components
-  ;; task seon.render/a-page-is-its-components: an agent's ctx drawn by the walk as components in
+  ;; an agent's ctx drawn by the walk as components in
   ;; the page's lists, each keyed by what it shows, its root element's id its key
   (let [[_ branch _] (paged-dbs)
         k (seon.task/agent-key "b1" :a3)
@@ -1449,7 +1485,7 @@
       (is (not (str/includes? h "it doubles")) "a green keeps no failure"))))
 
 (deftest the-status-is-drawn-from-facts-with-no-turn-of-the-reader
-  ;; task seon.render/the-status-before-any-model-turn: the status reads the branch's facts, never a
+  ;; the status reads the branch's facts, never a
   ;; turn's record, so it is drawn for an agent whatever turns it has taken, a proof's verdict
   ;; included; the turn count is the turn's (seon.render.ui/turn), not the status's
   (let [[_ branch _] (paged-dbs)
@@ -1900,7 +1936,7 @@
                 clojure.core/re-matcher clojure.string/split clojure.string/replace clojure.string/replace-first]]
     (is (some? src) "its source, as the process runs it")
     ;; its message names the regex functions markdown calls, never every symbol the compiler expanded it to (the
-    ;; md-scan bench's agents read about 60 clojure.core names: task seon.context/an-agent-follows-its-instructions-to-green)
+    ;; md-scan bench's agents read about 60 clojure.core names)
     (is (empty? (filter refs regex)) (str "a regex function in markdown: " (pr-str (filter refs regex))))))
 
 (deftest a-task-title-is-its-name-in-words
