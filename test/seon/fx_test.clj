@@ -7,6 +7,31 @@
 (defn- owner [workers] (fx/owner-proc {:kind :t :workers workers :work nil :back nil}))
 (defn- req [k & {:as more}] (merge {:req {:k k} :dest {:agent :a1 :op :fx-reply :k k}} more))
 
+(deftest a-worktrees-own-branch-follows-what-its-program-reads
+  ;; docs/merging.md: a gate on a worktree root checked out its own branch at an old commit: 196 tests the program db did not hold
+  (let [d (str (seon.config/checkout) "/target/tmp/own-branch-" (random-uuid))
+        git (fn [& args] (:out (apply clojure.java.shell/sh "git" "-C" d "-c" "user.name=t" "-c" "user.email=t@t" args)))
+        sha #(clojure.string/trim (git "rev-parse" %))]
+    (.mkdirs (java.io.File. (str d "/src")))
+    (spit (str d "/src/a.clj") "(ns a)")
+    (git "init" "-q") (git "add" ".") (git "commit" "-q" "-m" "one")
+    (git "branch" "stale") (git "branch" "ahead")
+    (spit (str d "/src/a.clj") "(ns a) (def x 1)")
+    (git "add" ".") (git "commit" "-q" "-m" "two")
+    (git "checkout" "-q" "stale") (spit (str d "/src/b.clj") "(ns b)") (git "add" ".") (git "commit" "-q" "-m" "old run's merge")
+    (git "checkout" "-q" "-")
+    (let [head (sha "HEAD")]
+      (git "branch" "-f" "ahead" head) (git "checkout" "-q" "ahead") (spit (str d "/src/c.clj") "(ns c)") (git "add" ".") (git "commit" "-q" "-m" "a merge on top")
+      (git "checkout" "-q" "-")
+      (let [ahead (sha "ahead")]
+        (seon.fx/read-source {:req {:root d :dirs ["src"] :own-branch "stale"}})
+        (is (= head (sha "stale")) "a branch that does not hold what the program is read from is brought to it")
+        (seon.fx/read-source {:req {:root d :dirs ["src"] :own-branch "ahead"}})
+        (is (= ahead (sha "ahead")) "one with merges on top of it keeps them")
+        (seon.fx/read-source {:req {:root d :dirs ["src"] :own-branch "none"}})
+        (is (= "" (clojure.string/trim (git "branch" "--list" "none"))) "and one not there yet is left to its first write-back")))
+    (clojure.java.shell/sh "rm" "-rf" d)))
+
 (deftest owner-admits-by-workers-and-priority
   (let [[st o] (fx/owner-proc (owner 1) :in (req 1))
         _ (is (= [1] (map #(get-in % [:req :k]) (:to-workers o))) "a free worker takes the first request")

@@ -2145,9 +2145,13 @@
                     (map-indexed (fn [j {:keys [id function] :as c}]
                                    (field (str "tool_calls[" j "] · " (:name function) " · " id)
                                           (into [:div {:class "flex flex-col gap-1"}]
-                                                (for [[k v] (args c)]
-                                                  (field (str "arguments." k)
-                                                         (if (= "code" k) (highlighted (str v)) (verbatim (str v))))))))
+                                                ;; a reply's evals, each's own fields by their wire names
+                                                (mapcat (fn [[k v]]
+                                                          (if (= "evals" k)
+                                                            (for [[i e] (map-indexed vector v) [ek ev] e]
+                                                              (field (str "arguments.evals[" i "]." ek) (if (= "code" ek) (highlighted (str ev)) (verbatim (str ev)))))
+                                                            [(field (str "arguments." k) (if (= "code" k) (highlighted (str v)) (verbatim (str v))))]))
+                                                        (args c)))))
                                  tool_calls)])]))
         shares (for [[r [_ band]] role-looks
                      :let [n (reduce + 0 (keep-indexed (fn [i m] (when (= r (:role m)) (get sizes i))) ms))]

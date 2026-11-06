@@ -75,7 +75,7 @@
     (is (= {} (get (ask {"id" 9 "method" "ping"}) "result")))
     (is (= (mapv #(str "seon_" (name %)) (keys seon.server/ops)) (mapv #(get % "name") tools))
         "every op is the tool seon_<op>, in the table's order")
-    (is (= ["agent" "code"] (get-in (second tools) ["inputSchema" :required])) "an op's required arguments are its tool's")
+    (is (= ["agent"] (get-in (second tools) ["inputSchema" :required])) "an op's required arguments are its tool's")
     (is (nil? (ask {"jsonrpc" "2.0" "method" "notifications/initialized"})) "a notification is not answered")
     (is (= -32601 (get-in (ask {"id" 3 "method" "resources/list"}) ["error" "code"])) "a method it does not know: method not found")
     (is (= -32602 (get-in (ask {"id" 4 "method" "tools/call" "params" {"name" "seon_nope" "arguments" {}}}) ["error" "code"])) "a tool no op names: invalid params")))
@@ -144,7 +144,7 @@
                                               {:op :eval :agent "root" :code (str "(:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))")}
                                               {:op :eval :agent "root" :code (in-agent-of task (str "[(some-> (find-ns '" ns ") (ns-resolve 'x)) (count (:evals @seon.ctx/ctx))]"))}
                                               ;; root's requests run in order: its kill, then this eval, which only the agent's death can answer
-                                              {:op :eval :agent agent :code "(+ 1 1)"}]))]
+                                              {:op :eval :agent agent :message-md "" :evals [{:intent "add" :code "(+ 1 1)"}]}]))]
     (is (keyword? (:agent reset)) (pr-str reset))
     (is (contract/error? old) (str "the agent on the old branch ended: " (pr-str old)))
     (is (re-find #"-r[0-9a-f-]{36}$" (name (:value branch))) "the task's branch is a new one")
@@ -170,17 +170,17 @@
   (let [[other-done other-eval other-message own named open]
         (at/in-agent (fn [{:keys [agent task]}]
                        [{:op :done :agent agent :client "c2"}
-                        {:op :eval :agent agent :code "(+ 1 2)" :client "c2"}
+                        {:op :eval :agent agent :message-md "" :evals [{:intent "add" :code "(+ 1 2)"}] :client "c2"}
                         {:op :message :agent agent :body "hi" :client "c2"}
-                        {:op :eval :agent agent :code "(+ 1 2)" :client "c1"}
-                        {:op :eval :agent agent :code "(+ 2 2)" :client "c2" :task task}
+                        {:op :eval :agent agent :message-md "" :evals [{:intent "add" :code "(+ 1 2)"}] :client "c1"}
+                        {:op :eval :agent agent :message-md "" :evals [{:intent "add" :code "(+ 2 2)"}] :client "c2" :task task}
                         {:op :eval :agent "root" :code (str "(boolean (some #(= " (pr-str task) " (:task %)) (seon.task/running @(:conn sys))))")}])
                      {:client "c1"})]
     (doseq [a [other-done other-eval other-message]]
       (is (= :seon.server/held (:seon.error/type a)) (pr-str a))
       (is (clojure.string/includes? (str (:seon.error/message a)) "c1") "naming who holds it"))
-    (is (= 3 (:value own)) "its own client's eval answers")
-    (is (= 4 (:value named)) "and so does one that names the agent's task")
+    (is (= 3 (:value (first (:responses own)))) "its own client's eval answers")
+    (is (= 4 (:value (first (:responses named)))) "and so does one that names the agent's task")
     (is (true? (:value open)) "the refused done left the task open")))
 
 (deftest a-message-reaches-the-agent
@@ -226,29 +226,39 @@
 
 (deftest an-outside-agent-plays-the-model
   ;; docs/server.md#working-a-task-from-a-worktree: a read holds the conversation, as JSON the body a provider is sent;
-  ;; an eval with intent is a call (its message a call and a tool result), without it a person's (one user message), and a
-  ;; blank intent is not run, as a model's call is not
-  (let [[attach person called blank wire text]
+  ;; a seon_eval by the agent attached is one reply, a turn, as a model's is, and a blank intent is not run, as a model's is not
+  (let [[attach called stopped old turn-of moved-ns ns-after wire text]
         (at/in-agent (fn [{:keys [agent task]}]
                        [{:op :attach :task task}
-                        "(+ 40 2)"
-                        {:op :eval :agent agent :intent "add one and one, expecting 2" :code "(+ 1 1)"}
-                        {:op :eval :agent agent :intent " " :code "(def not-run-form 1)"}
+                        {:op :eval :agent agent :message-md "Adding, then adding again." :evals [{:intent "add one and one" :code "(+ 1 1)"} {:intent "then two and two" :code "(+ 2 2)"}]}
+                        {:op :eval :agent agent :message-md "" :evals [{:intent " " :code "(def not-run-form 1)"} {:intent "after it" :code "(def not-run-either 1)"}]}
+                        {:op :eval :agent agent :intent "the old shape" :code "(def old-shape-ran 1)"}
+                        "(seon.agent/turn-now)"
+                        {:op :eval :agent agent :message-md "" :evals [{:intent "move" :code "(in-ns 'seon.print)"}]}
+                        {:op :eval :agent agent :message-md "" :evals [{:intent "where" :code "(str *ns*)"}]}
                         {:op :context :agent agent :wire true}
                         {:op :context :agent agent}]))
         body (clojure.data.json/read-str (:context wire))
         msgs (get body "messages")
         call (first (filter #(some-> (get-in % ["tool_calls" 0 "function" "arguments"]) (clojure.string/includes? "(+ 1 1)")) msgs))
-        cid (get-in call ["tool_calls" 0 "id"])]
+        cid (get-in call ["tool_calls" 0 "id"])
+        args (clojure.data.json/read-str (get-in call ["tool_calls" 0 "function" "arguments"]))]
     (is (clojure.string/includes? (:next attach) "seon_context") "an attach names the next step")
-    (is (= 42 (:value person)))
-    (is (= 2 (:value called)) "a call with an intent runs")
-    (is (= :seon.turn/invalid-call (:seon.error/type (:ex blank))) (pr-str blank))
+    (is (clojure.string/includes? (:next attach) "message-md") "and the shape of a reply")
+    (is (= [2 4] (mapv :value (:responses called))) "each eval answers, in order")
+    (is (= :seon.turn/invalid-call (:seon.error/type (:ex (first (:responses stopped))))) (pr-str stopped))
+    (is (= :seon.turn/not-run (:seon.error/type (:ex (second (:responses stopped))))) "what follows one that failed is answered not-run")
+    (is (= :seon.root/refused (:seon.error/type old)) (pr-str old))
+    (is (clojure.string/includes? (:seon.error/message old) "message-md") "the old shape is told the new one, nothing run")
+    (is (= 2 (:value turn-of)) "each reply is a turn: no one growing turn 0")
+    (is (= "seon.print" (:value (first (:responses ns-after)))) (str "the namespace a reply moved to is where the next one runs: " (pr-str moved-ns)))
     (is (= ["eval"] (mapv #(get-in % ["function" "name"]) (get body "tools"))) "the body holds the tool a model is given")
+    (is (= (clojure.data.json/read-str (clojure.data.json/write-str seon.model/eval-tool)) (first (get body "tools"))) "that very tool")
     (is (= "system" (get (first msgs) "role")))
-    (is (clojure.string/includes? (get-in call ["tool_calls" 0 "function" "arguments"]) "add one and one") "the call holds its intent")
-    (is (some #(and (= "tool" (get % "role")) (= cid (get % "tool_call_id"))) msgs) "and its result names the call")
-    (is (some #(and (= "user" (get % "role")) (clojure.string/includes? (get % "content") ":code \"(+ 40 2)\"")) msgs) "a person's eval is a user message")
+    (is (= {"message-md" "Adding, then adding again." "evals" [{"intent" "add one and one" "code" "(+ 1 1)"} {"intent" "then two and two" "code" "(+ 2 2)"}]} args) "one call, as a model's, its message on it")
+    (let [tool (first (filter #(and (= "tool" (get % "role")) (= cid (get % "tool_call_id"))) msgs))]
+      (is (re-find #"(?s):value 2.*:value 4" (get tool "content")) "one tool message holds its results in order"))
+    (is (not-any? #(clojure.string/includes? (str (get % "content")) "old-shape-ran") msgs) "the old shape ran nothing")
     (is (clojure.string/includes? (:context text) "(+ 1 1)") "the text read holds the conversation too")))
 
 (deftest roots-repl-names-what-has-no-branch
@@ -477,6 +487,18 @@
     (is (not (contract/error? (:value failed))) (str "its fail! records on its task: " (pr-str failed)))))
 
 ;; See docs/merging.md#main-moved-is-said-at-every-eval
+(deftest green-work-behind-main-is-merged-at-done
+  ;; an outside agent's green work was closed "ended green: behind 6", its agent gone, while each answer said to merge when it chose: seon.turn/hand-back! merges main first
+  (let [[_ _ _ _ done] (at/in-agent (fn [{:keys [agent ns]}]
+                                      [{:op :attach :task (str ns "/t")}
+                                       "(in-ns 'demo-test)"
+                                       "(clojure.test/deftest t (clojure.test/is true))"
+                                       {:op :eval :agent "root" :code (str "(let [db @(:conn sys)] @(c/transact-main! sys ((my.test/code '" ns ".behind \"(ns " ns ".behind) (defn f \\\"One.\\\" {:malli/schema [:=> [:cat] :int]} [] 1)\") db)))")}
+                                       {:op :done :agent agent}])
+                                    {:own-root? true})]
+    (is (not (clojure.string/includes? (str (:line done)) "behind")) (pr-str done))
+    (is (clojure.string/includes? (str (:line done)) ":merged") (pr-str done))))
+
 (deftest the-done-answer-is-a-line-and-a-handle
   ;; one-wait's real run (root, 2026-10-28): seon_done answered 73,856 characters, the whole verdict
   ;; with every red. A line, each red with its first failure, cut by the one printer, and the form

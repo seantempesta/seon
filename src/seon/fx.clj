@@ -191,6 +191,15 @@
   {:malli/schema [:=> [:cat :string] :nil]}
   [dir] (sh/sh "rm" "-rf" dir) nil)
 
+(defn- own-branch-at!
+  "The branch a root's merges are written on and its gate checks out (:seon.config.source/branch), brought to head, the commit its program is read from, when it does not hold that commit: a worktree's own branch (jolt/seon-merges-<worktree>) stays where its last run left it while the worktree moves, and a gate there ran a stale tree. The standing root's merges tree has that branch checked out, so head is its tip. The old tip stays in the branch's reflog. See docs/merging.md."
+  {:malli/schema [:=> [:cat :string :string :string] :any]}
+  [base branch head]
+  (let [ref (str "refs/heads/" branch)
+        tip (git-try base ["rev-parse" "--verify" "--quiet" ref])]
+    (when (and tip (not= tip head) (nil? (git-try base ["merge-base" "--is-ancestor" head tip])))
+      (git! {} base ["update-ref" "-m" "seon: the program moved to this commit" ref head] nil))))
+
 (defn read-source
   "The text of every .clj and .edn file under root's dirs (relative paths, e.g.
   src/seon/fx.clj, resources/seon/schemas/seon.facts.edn), sorted by path, the commit root's
@@ -208,14 +217,17 @@
   set aside, and the answer then holds no :paths). When it holds commits main lacks, or git
   refuses the fast-forward, the answer is a :seon.fx/io-error naming why that still carries the
   read (:value and the rest), so the import goes on and the gap is a recorded problem.
+  With :own-branch, that branch is brought to what it read (`own-branch-at!`).
   Answers {:value {path text} :commit sha :tree id :paths paths-when-read-by-them :pins {path sha} :inputs :binary} or :seon.fx/io-error."
   {:malli/schema [:=> [:cat :map] :map]}
-  [{{:keys [root dirs binary-tree paths follow]} :req}]
+  [{{:keys [root dirs binary-tree paths follow own-branch]} :req}]
   (try
     (let [base (.getCanonicalPath (java.io.File. ^String root))
           head0 (when (and follow (checked-out? base)) (git-try base ["rev-parse" "--verify" "--quiet" "HEAD"]))
           gap (when follow (follow-main base follow))
           head (when (checked-out? base) (git-try base ["rev-parse" "--verify" "--quiet" "HEAD"]))
+          ;; a root that writes back no merges names none (:none)
+          _ (when (and head (string? own-branch)) (own-branch-at! base own-branch head))
           paths (when-not (and follow (not= head head0)) paths)
           source? (fn [^String p] (or (.endsWith p ".clj") (.endsWith p ".edn")))
           inputs (when (and binary-tree head) (inputs base))]

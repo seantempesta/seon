@@ -110,7 +110,7 @@
                       ;; the branch refused this eval's record (seon.repl/record!, :seon.agent/unrecorded), or the commit that followed its writes (seon.agent/commit!, :seon.agent/commit-refused: the writes were dropped)
                       [:unrecorded {:optional true} :seon.error/base]
                       [:text {:optional true} :string] [:record {:optional true} :string]
-                      [:recorded {:optional true} [:vector :symbol]] [:unmapped {:optional true} [:vector :qualified-symbol]] [:fns {:optional true} [:vector :map]]
+                      [:recorded {:optional true} [:vector [:or :symbol [:vector :any]]]] [:unmapped {:optional true} [:vector :qualified-symbol]] [:fns {:optional true} [:vector :map]]
                       ;; seon.repl/edit!'s: the var it changed and the lines around the change, [line text] each
                       [:edited {:optional true} [:map [:var :symbol] [:lines [:vector [:tuple pos-int? :string]]]]]]
  ;; what an eval changed of an existing var's meaning (seon.program/meaning: its contract, its

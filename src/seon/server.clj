@@ -14,7 +14,7 @@
   printf '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}\\n' | nc -w 5 127.0.0.1 PORT"
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.step :as step] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.root :as c] [seon.task :as task] [seon.proofs :as proofs] [seon.error :as err] [seon.reconcile :as r] [datahike.api :as d]
-            [seon.lib :as lib] [seon.edn :as sedn] [seon.db :as pdb] [seon.repl :as repl] [seon.print :as print] [clojure.edn :as edn] [clojure.data.json :as json] [clojure.string :as str]))
+            [seon.lib :as lib] [seon.edn :as sedn] [seon.db :as pdb] [seon.repl :as repl] [seon.print :as print] [clojure.edn :as edn] [clojure.data.json :as json] [clojure.string :as str] [clojure.walk]))
 
 (defn- refused
   "The server refusing a request, as root's API does: the one error map."
@@ -205,7 +205,7 @@
         reds (get-in v [:held :seon.task/evidence :red])]
     {:line (print/text (cond-> (select-keys v [:outcome :reason])
                          (and (:held v) (empty? reds)) (assoc :held (get-in v [:held :seon.task/failure :reason]))
-                         (seq reds) (assoc :reds (vec (for [t reds] [t (or (some-> (get fails t) first :message) (some-> (get fails t) first :type name))])))
+                         (seq reds) (assoc :reds (vec (for [t reds] (if-let [why (or (some-> (get fails t) first :message) (some-> (get fails t) first :type name))] [t why] [t]))))
                          main (assoc :main main))
                        (:part print/budgets))
      :handle (str "(seon.server/verdict @(:conn sys) " (pr-str task) ")")}))
@@ -220,11 +220,15 @@
             :args {}
             ;; the form that answers it again at root's REPL (seon_eval root): its reply's cuts read through it
             :again '(seon.server/agents-answer sys)}
-   :eval {:doc "Evaluate Clojure in a running agent's process (recorded on its branch, origin :outside; my.agent/*, my.db/*, my.task/*, my.branch/* and (my.agent/prove) are its API) or as \"root\" in root's process (root.repl: `sys` is root, main is @(:conn sys); my.root/run!, my.root/cancel! ...), each through the one REPL path. With intent, in an agent, it runs as a model's call does: the forgiving reader, not run without a real intent, and recorded as a call in the conversation; without it, as a person's eval. Answers its response (:seon.eval/response): {:handle :value :out :err :ex}, printed under its handle, then :main when main has moved past the branch's base."
-          :args {:agent {:type "string" :description "an agent id (a3) or root"} :code {:type "string" :description "Clojure forms"}
-                 :intent {:type "string" :description "what these forms are about to do and what you expect, as a model sends it"}
+   :eval {:doc "Evaluate Clojure in an agent's process as one reply, as a model's is: its message-md and its evals, run in order, stopping at the first that throws; each is recorded on its branch and my.agent/*, my.db/*, my.task/*, my.branch/* and (my.agent/prove) are its API. For an agent you attached the reply is its turn, its message on its call. Or as \"root\" in root's process with plain code (root.repl: `sys` is root, main is @(:conn sys), my.root/* its API; root has no conversation). Answers each eval under its handle (result/e12), which later forms read."
+          :args {:agent {:type "string" :description "an agent id (a3) or root"}
+                 :message-md {:type "string" :description "This reply's one message to whoever started the agent, in Markdown, covering all of its evals. An agent's own model drives: empty, since a message to it is seon_message."}
+                 :evals {:type "array" :description "The evals this reply runs, in order."
+                         :items {:type "object" :properties (array-map :intent {:type "string" :description "What this eval is about to do. A sentence is fine."} :code {:type "string" :description "Clojure to evaluate."})
+                                 :required ["intent" "code"]}}
+                 :code {:type "string" :description "root only: Clojure forms"}
                  :task {:type "string" :description "the agent's task (ns/name): needed only for an agent another session attached"}}
-          :required ["agent" "code"]}
+          :required ["agent"]}
    :context {:doc "The request of the task an agent works as a model is sent it now: system prompt, its conversation and its page. Name the agent, or a task (ns/name): the agent working it, else one attached to it now (attach), so one request reads a task's context. wire: the request body as JSON, as a provider is sent it (roles, call ids, tools; a root with no --profile has no model or max_tokens in it). No model is called."
              :args {:agent {:type "string"} :task {:type "string" :description "ns/name, instead of an agent"}
                     :wire {:type "boolean" :description "answer the request body as JSON, not the text"}}}
@@ -266,13 +270,34 @@
 (defmethod op-answer :agents [sys _ _]
   (agents-answer sys))
 
+(defn- agent-reply
+  "An outside agent's request of agent ag as one reply (seon.turn/outside-reply!): {:responses [...]}, each eval's. The shape every eval of an agent takes, the old :code refused, saying so, with nothing run. See docs/server.md#ops."
+  {:malli/schema [:=> [:cat :seon.root/sys :keyword :map] :map]}
+  [sys ag req]
+  (let [{:keys [task env]} (work-of sys ag)
+        outside? (and task (= "outside" (:model env)))
+        msg (:message-md req)]
+    (cond
+      (and (contains? req :code) (not (contains? req :evals)))
+      (refused (str "seon_eval on an agent is one reply now: {agent, message-md, evals: [{intent, code}, ...]}; your code was not run. Only root takes plain code."))
+      (and (not outside?) (not (str/blank? msg)))
+      (refused (str (name ag) "'s own model drives it, so this reply is no message of its: send message-md empty, and seon_message to tell it something."))
+      :else
+      (let [form (list 'seon.turn/outside-reply! task msg (clojure.walk/stringify-keys (:evals req)) (boolean outside?))
+            r @(c/submit! sys ag (sedn/encode form) {:origin :context})]
+        (cond (contract/error? r) r
+              (:ex r) (:ex r)
+              :else {:responses (sedn/decode (:seon.print/code (:out r)))})))))
+
 (defmethod op-answer :eval [sys ag req]
-  (let [r (if (= :root ag) (root-eval sys (:code req)) @(c/submit! sys ag (:code req) (cond-> {:origin :outside} (contains? req :intent) (assoc :intent (:intent req)))))]
-    ;; its value as data beside its printed text when it is plain data (seon.contract/plain?: what the wire's EDN carries):
-    ;; a reader of the answer reads the value, never the text back (an eval that printed has its :out verbatim in the
-    ;; text, which is no EDN since out-verbatim). The model reads the text alone (tools/call)
-    (if (contract/error? r) r {:response (cond-> (select-keys r [:handle :text :ex :recorded :main :unrecorded])
-                                           (and (contains? r :value) (contract/plain? (:value r))) (assoc :value (:value r)))})))
+  (if (= :root ag)
+    (let [r (root-eval sys (:code req))]
+      ;; its value as data beside its printed text when it is plain data (seon.contract/plain?: what the wire's EDN carries):
+      ;; a reader of the answer reads the value, never the text back (an eval that printed has its :out verbatim in the
+      ;; text, which is no EDN since out-verbatim). The model reads the text alone (tools/call)
+      (if (contract/error? r) r {:response (cond-> (select-keys r [:handle :text :ex :recorded :main :unrecorded])
+                                             (and (contains? r :value) (contract/plain? (:value r))) (assoc :value (:value r)))}))
+    (agent-reply sys ag req)))
 
 ;; the block's text as the model reads it: printed to the agent's output, not as a
 ;; value (a value comes back as a string literal, escaped, under the reply's budget);
@@ -294,8 +319,8 @@
 (defmethod op-answer :attach [sys _ req]
   (let [a (if-let [from (:from req)] (fork! sys (keyword from) (:client req)) (attach! sys (:task req) {:fresh? (true? (:fresh req)) :client (:client req)}))]
     (cond-> a
-      (:agent a) (assoc :next (str "seon_context with agent " (name (:agent a)) " reads what its model reads (wire true: the request body). "
-                                   "seon_eval with it, intent and code, is a model's call; (my.agent/prove) there runs its proofs. seon_done hands it back.")))))
+      (and (:agent a) (not (contract/error? a))) (assoc :next (str "seon_context with agent " (name (:agent a)) " reads what its model reads (wire true: the request body). "
+                                   "seon_eval with it, message-md and evals (each an intent and code), is one reply, a model's turn; (my.agent/prove) there runs its proofs. seon_done hands it back.")))))
 
 (defmethod op-answer :prove [sys ag req]
   (let [r @(c/prove! sys ag (set (map symbol (:names req))))]
@@ -317,11 +342,11 @@
             (:ex r) (:ex r)
             (:text r) (let [t (:max-tx @(:conn sys))
                             outcome #(:seon.task/outcome (d/pull % [:seon.task/outcome] [:seon.task/id task]))
-                            ;; judged: the task left :running (the reconciler accepted, parked,
+                            ;; judged and past its merge: the task left :running and the gate (the reconciler merged, parked,
                             ;; held or refused it), or a root defect stopped the judge
                             _ (c/judge! sys {:task task :env env :agent ag})
                             db (c/await-db sys (str "the judge of " task)
-                                          #(or (not= :running (outcome %)) (c/defect % t "seon.reconcile")))]
+                                          #(or (not (#{:running :ready :gate} (outcome %))) (c/defect % t "seon.reconcile")))]
                         ;; a judge that has not moved by root's quiet never will: that, or root
                         ;; stopped, is the answer
                         (cond (contract/error? db) (assoc db :task task)
@@ -392,6 +417,7 @@
                            ;; handle, anything else whole by the printer (nothing could re-ask it)
                            (result {"content" [{"type" "text" "text" (cond (and (= :context op) (:context a)) (:context a)
                                                                            (:response a) (eval-text (:response a))
+                                                                           (:responses a) (str/join "\n\n" (map eval-text (:responses a)))
                                                                            (contract/error? a) (print/text a)
                                                                            (:again (ops op)) (let [p (print/print-value a {:handle (:again (ops op))})] (or (:text p) (:seon.error/message p)))
                                                                            :else (print/text (vary-meta a assoc :seon.print/full true)))}]}))))

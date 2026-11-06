@@ -1,7 +1,7 @@
 #!/bin/zsh
 # bin/mcp call OP [KEY=VALUE ...]   one tool call from a shell, through this checkout's relay and root,
 # printing the tool's text (seon_<OP>; exit 1 on an error from the relay or the server). VALUE - reads
-# stdin (code=- <<'EOF'), true/false and [...] are JSON. Its client is this checkout, so the agent one call
+# stdin (code=- <<'EOF'), true/false and [...] are JSON; eval's intent= and code= on an agent are a reply of that one eval. Its client is this checkout, so the agent one call
 # attaches answers the next: what a helper in a worktree uses, since the seon MCP tools of a Claude session
 # are the relay of the checkout the session started in, not the helper's (docs/server.md#working-a-task-from-a-worktree).
 # bin/mcp [PORT]   the MCP server (stdio JSON-RPC) for outside agents: a relay of each line to the
@@ -29,6 +29,8 @@ if [[ ${1:-} == call ]]; then
       if ($v eq "-") { local $/; $v = <STDIN> }
       elsif ($v =~ /\A(true|false)\z/ || $v =~ /\A\[/) { $v = JSON::PP->new->allow_nonref->decode($v) }
       $a{$k} = $v }
+    # a reply of one eval, from a shell: its intent and code as keys of their own (root takes plain code)
+    if ($op eq "eval" && ($a{agent} // "") ne "root" && exists $a{code}) { $a{evals} = [{intent => delete($a{intent}) // "", code => delete $a{code}}]; $a{"message-md"} //= "" }
     $ENV{SEON_MCP_CLIENT} = "checkout-$root";
     my $req = encode_json({jsonrpc => "2.0", id => 1, method => "tools/call", params => {name => "seon_$op", arguments => \%a}});
     open my $out, "-|", "printf \x27%s\\n\x27 \Q$req\E | \Q$mcp\E" or die "bin/mcp call: $!\n";

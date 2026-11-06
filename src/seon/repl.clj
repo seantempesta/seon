@@ -214,9 +214,11 @@
                          (let [[ns' how] (exec! form src lead ns (or top k))]
                            (if (= :ok how) (recur ns' end (inc k)) [ns' how])))))))
         _ (vreset! forms-ref forms!)
-        [ns how] (forms! (get req "code") (or (some-> (get req "ns") symbol find-ns) (:ns @agent/state)) nil)]
-    ;; a read error leaves the agent's namespace as it was
-    (when-not (= :read how) (swap! agent/state assoc :ns ns))
+        start (or (some-> (get req "ns") symbol find-ns) (:ns @agent/state))
+        [ns how] (forms! (get req "code") start nil)]
+    ;; a read error leaves the agent's namespace as it was, and so does an eval that did not move it: one run inside it may have (an outside agent's reply)
+    (when (and (not= :read how) (or (not= ns start) (and (get req "ns") (not (:within req)))))
+      (swap! agent/state assoc :ns ns))
     (reply {"status" ["done"]})))
 
 ;; ---- middleware -------------------------------------------------------------------
@@ -321,6 +323,19 @@
                        (assoc m :err em))
                    m))))))
 
+
+(defn- undo-definition!
+  "A definition that broke Seon's recording of it (the agent named a var of Seon's own that the recording itself calls, seon.program/form-of with another arity): its vars put back as they were before the form ran (l, the form's :before), since otherwise every later write of this agent throws and it can't be told, and that said as the eval's error. The eval path's entrant boundary (docs/failure-points.md); what the recording did not reach is the turn's (seon.turn/turn-error!). Throws."
+  {:malli/schema [:=> [:cat :map :any] :any]}
+  [l e]
+  (let [vars (vec (keys (:before l)))]
+    (doseq [[s old] (:before l) :let [v (find-var s)] :when (and v (not (keyword? old)))]
+      (alter-var-root v (constantly old)))
+    (throw (ex-info "definition undone"
+                    (contract/error :seon.repl/definition-undone #'undo-definition!
+                                    (str "your definition of " (clojure.string/join ", " vars) " was undone: Seon's own code calls that var, and recording your definition threw with it in place: " (ex-message e) ". Use a name of your own.")
+                                    {:vars vars})))))
+
 (defn wrap-cost
   "Per-form wall ms, allocated bytes, engine ticks (the work it did, the exact measure:
   seon.profile/measure!) and the
@@ -416,12 +431,15 @@
                          _ (when gone (agent/transact! (mapv (fn [[_ e f]] [:db/retract e :var/form f]) gone)))
                          m (cond-> m gone (assoc :unmapped (mapv first gone)))]
                    (if acct
-                     (let [tx (when contract/record? (program/record-tx (agent/db) acct))
-                           ;; what this form's own transaction changes of an existing var's contract or
-                           ;; docstring, read before it is applied (a form that defines nothing reads nothing)
-                           redefined (when tx (program/meaning-changes (agent/db) tx))]
+                     (let [[tx redefined] (try
+                                            (let [tx (when contract/record? (program/record-tx (agent/db) acct))]
+                                              ;; what this form's own transaction changes of an existing var's contract or
+                                              ;; docstring, read before it is applied (a form that defines nothing reads nothing)
+                                              [tx (when tx (program/meaning-changes (agent/db) tx))])
+                                            (catch Throwable e (undo-definition! l e)))]
                        (when tx (agent/transact! tx))
-                       (cond-> (assoc m :recorded (vec (concat (map :var (:defs acct)) (when (:ns-form? acct) [(:ns acct)])))
+                       (cond-> (assoc m :recorded (vec (concat (map :var (:defs acct)) (when (:ns-form? acct) [(:ns acct)])
+                                                                       (map (juxt :multi :dispatch) (:methods acct)) (map (juxt :protocol :type) (:impls acct))))
                                       :repl/defined (mapv :var (:defs acct)))
                          redefined (assoc :redefined redefined)))
                      (cond-> m
@@ -880,7 +898,7 @@
                                                (str "; at line " l (some->> (:clojure.error/column ex) (str ", column ")) " of the new definition: "
                                                     (pr-str (clojure.string/trim (nth (clojure.string/split-lines text) (dec l) "")))))))))
                ;; the response as data: its printed text and costliest functions are the outer eval's to print
-               (cond-> (assoc (dissoc r :text :fns :record)
+               (cond-> (assoc (dissoc r :text :fns :record :handle :ms :ticks :bytes :cost)
                               :edited {(if doc? :doc :var) sym :lines (into [] (comp (mapcat (fn [[from new]] (numbered text (- from k) (+ from (count (filter #{\newline} new)) k)))) (distinct)) starts)})
                  (seq repairs) (assoc :repaired (context/repaired text repairs))))))))))))
 
@@ -906,10 +924,10 @@
     (cond
       (clojure.string/blank? intent)
       (contract/error :seon.turn/invalid-call #'call-problem
-                      "this call has no intent: send intent, a sentence on what this eval is about to do, beside code; the form was not run" {:problem :no-intent})
+                      "this eval has no intent: send intent, a sentence on what it is about to do, beside code; the form was not run" {:problem :no-intent})
       (and forms (empty? forms))
       (contract/error :seon.turn/invalid-call #'call-problem
-                      "this call has no form: its code is empty; nothing was run" {:problem :forms :forms 0}))))
+                      "this eval has no form: its code is empty; nothing was run" {:problem :forms :forms 0}))))
 
 (defn run-calls
   "Eval calls ({:id :intent :code}, a reply's or an insert's: docs/turn.md#an-eval-can-be-inserted) through the one REPL
@@ -928,7 +946,7 @@
                         (seq repairs) (assoc :repaired (context/repaired src repairs)))
                   failed (some #(when (or (:ex (:response %)) (contract/error? (:value (:response %)))) (context/wire-id (name (:handle (:response %))))) acc)
                   why (if failed
-                        (contract/error :seon.turn/not-run #'run-calls (str "not run: call " failed " of this reply failed before it (its result says why)") {:after failed})
+                        (contract/error :seon.turn/not-run #'run-calls (str "not run: eval " failed " of this reply failed before it (its result says why)") {:after failed})
                         (if problem
                           (contract/error :seon.turn/invalid-call #'run-calls problem {:problem :arguments})
                           (call-problem intent src)))]
@@ -1088,12 +1106,7 @@
                 ;; its value goes with the reply only when it is plain data (seon.contract/plain?: what the socket and the wire carry);
                 ;; root keeps none of it (its view keeps the head: seon.root/eval-head), and the asker reads the value as data,
                 ;; never the printed text back, which is no EDN once the eval printed (its :out verbatim)
-                ;; a request with :intent is a model's call in everything but who made it (run-calls: the forgiving reader, the intent rule)
-                [{:op :reply :id (:id m) :response (let [req (select-keys m [:ticks :origin])
-                                                         r (if (contains? m :intent)
-                                                             (:response (peek (run-calls [{:id "outside" :intent (:intent m) :code (:forms m)}] (constantly req) eval-string)))
-                                                             (eval-string (:forms m) req))]
-                                                     (agent/on-the-wire r))
+                [{:op :reply :id (:id m) :response (let [r (eval-string (:forms m) (select-keys m [:ticks :origin]))] (agent/on-the-wire r))
                   :t (:max-tx (agent/db))}])
               ;; evals given at its spawn (seon.root/spawn!'s :evals) or inserted later: run on this queue, in order, answering no one
               (= :evals (:op m)) (do (intr/clear-pending!) (insert! (:by m) (:evals m)) [])

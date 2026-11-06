@@ -936,8 +936,8 @@
   {:malli/schema [:=> [:cat :map] :boolean]}
   [e] (boolean (some #(= (:seon.eval/code e) (second %)) (vals render-calls))))
 
-(defn- commit-at
-  "Branch db as of t: the earliest commit of its line that holds t, a real db value (a historical view of it answers no store, which a status reads commits through), found by walking the line back from db, at the cost of the commits since. A commit collection swept before it is found is :seon.context/page-gone, never a later page in its place. See docs/render.md#a-redo-is-an-explicit-bust."
+(defn- at-t
+  "Branch db as of t, as a page is drawn: the earliest commit of its line that holds t, a real db value, found by walking the line back from db at the cost of the commits since; past what collection kept, the same datoms as of t, which is all a status can't do a diff of (docs/storage.md#collection). See docs/render.md#a-redo-is-an-explicit-bust."
   {:malli/schema [:=> [:cat :seon.host/db :int] :seon.host/db]}
   [db t]
   (loop [at db]
@@ -946,8 +946,7 @@
         at
         (let [p (d/commit-as-db (:store db) id)]
           (cond
-            (nil? p) (throw (ex-info "the page as of t is gone"
-                                     (contract/error :seon.context/page-gone #'commit-at (str "the commit that held t " t " was collected, so the page as of it cannot be drawn: read the page whole with (my.render/render-ctx)") {:t t})))
+            (nil? p) (d/as-of db t)
             (>= (:max-tx p) t) (recur p)
             :else at))))))
 
@@ -955,7 +954,7 @@
   "Agent a's page as of t on branch db, {id form} in placed order, drawn cold with today's renders: what `redo-tx` compares. See docs/render.md#a-redo-is-an-explicit-bust."
   {:malli/schema [:=> [:cat :seon.host/db :int :int] :map]}
   [db a t]
-  (let [at (commit-at db t)
+  (let [at (at-t db t)
         w (render/draw (agent-ctx at a) ctx/changes at (render/declared-var :seon.render/render-ctx) {:model-only true :once true})]
     (try (render/placed-hiccup w (render/page-lists w)) (finally (render/dispose-walk! w)))))
 

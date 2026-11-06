@@ -96,40 +96,45 @@
         (catch Throwable e (transport-error (step/error-msg e) {:url url}))))))
 
 (def eval-tool
-  "The model's one tool (v1's): its code is the REPL's input, read as reply text is."
+  "The model's one tool (v1's): a reply is one call, its one message and its evals, each eval's code the REPL's input, read as reply text is. See docs/model.md#one-tool-eval."
   {:type "function"
    ;; the response keys are those an agent reads in its tool message and at its handle; :text (the message itself), :record
    ;; (the id of the kept record) and :fns (the costliest functions, drawn on the page) are in :seon.eval/response and are not
    ;; shown to the agent, so they are left out here and in docs/prompt.md
    :function {:name "eval"
-              :description "Run Clojure code at your REPL. Each call's code is one or more top-level forms, run in order. One form answers :value; several answer :forms, how many ran, and :value, the vector of their values. A reply can make several calls: they run in order, each with its own handle, and the first that throws or answers an error ends the run, so the calls after it are not run. Your system message says what comes back."
+              :description "Run Clojure code at your REPL. A reply makes one call: its message-md and its evals, each an intent and code. The evals run in order, each one or more top-level forms; the first that throws or answers an error ends the run, so the evals after it are not run. Your system message says what comes back."
               ;; in the order a model fills them: it talks and thinks before the code
               :parameters {:type "object"
-                           :properties (array-map :message-md {:type "string" :description "This reply's one message to whoever started you, in Markdown, covering all of its calls: what they will do, an answer to a question, anything they should know. A sentence is fine. Put it on the reply's first call, and an empty string on its other calls."}
-                                                  :intent {:type "string" :description "What this eval is about to do. A sentence is fine."}
-                                                  :code {:type "string" :description "Clojure to evaluate."})
-                           :required ["message-md" "intent" "code"]
+                           :properties (array-map :message-md {:type "string" :description "This reply's one message to whoever started you, in Markdown, covering all of its evals: what they will do, an answer to a question, anything they should know. A sentence is fine."}
+                                                  :evals {:type "array" :minItems 1
+                                                          :description "The evals this reply runs, in order."
+                                                          :items {:type "object"
+                                                                  :properties (array-map :intent {:type "string" :description "What this eval is about to do. A sentence is fine."}
+                                                                                         :code {:type "string" :description "Clojure to evaluate."})
+                                                                  :required ["intent" "code"]
+                                                                  :additionalProperties false}})
+                           :required ["message-md" "evals"]
                            :additionalProperties false}}})
 
 (defn- wire-message
-  "A conversation message as the chat API reads it: an assistant's eval calls as tool_calls
-  (their code as the JSON arguments) and its reasoning as reasoning_content (DeepSeek's
-  thinking mode with tools needs every earlier reply's reasoning back, a 400 otherwise), a
-  tool result named by its call's id."
+  "A conversation message as the chat API reads it: a reply's evals as its one tool call (its id the first eval's), whose JSON arguments are what the model sent, its text the call's message-md,
+  and its reasoning as reasoning_content (DeepSeek's thinking mode with tools needs every earlier reply's reasoning back, a 400 otherwise); a
+  tool result named by that call's id. See docs/model.md#one-tool-eval."
   {:malli/schema [:=> [:cat :seon.model/message] :map]}
   [{:keys [role content tool-calls tool-call-id reasoning]}]
-  (cond-> {:role role :content content}
+  (cond-> {:role role :content (if (seq tool-calls) "" content)}
     reasoning (assoc :reasoning_content reasoning)
-    (seq tool-calls) (assoc :tool_calls (mapv (fn [{:keys [id code intent message-md]}]
-                                                ;; the call's arguments as it sent them, in the tool's order
-                                                {:id id :type "function" :function {:name "eval" :arguments (json/write-str (cond-> (array-map) message-md (assoc :message-md message-md) intent (assoc :intent intent) true (assoc :code code)))}})
-                                              tool-calls))
+    (seq tool-calls) (assoc :tool_calls [{:id (:id (first tool-calls)) :type "function"
+                                          :function {:name "eval"
+                                                     ;; in the tool's order
+                                                     :arguments (json/write-str (array-map :message-md (or content "")
+                                                                                           :evals (mapv (fn [{:keys [code intent]}] (cond-> (array-map) intent (assoc :intent intent) true (assoc :code code))) tool-calls)))}}])
     tool-call-id (assoc :tool_call_id tool-call-id)))
 
 (defn wire-groups
   "The provider-neutral messages msgs as the wire holds them, by index: for each wire message in order, the
   indices of msgs it is made of. A reply's assistant messages (those naming one :reply) fold into one, the first
-  message's text and reasoning then each message's calls in order, and each tool message follows in order: an
+  message's text and reasoning then each message's evals in order, and the tool messages after them into one, their results in order: an
   assistant message joins the newest assistant message only when it names the same :reply and only tool messages
   lie between. One without :reply stands alone. The one fold: `wire-messages` makes its messages from these groups,
   and the debug page labels them by it. See docs/render.md#the-debug-page-is-the-wire-request."
@@ -139,9 +144,11 @@
     (reduce (fn [[acc open] [j m]]
               (let [r (:reply m)
                     ;; the newest assistant group, open while only tool messages came after it
-                    i (when (and open (= "assistant" (:role m)) r) (when (= r (:reply (nth msgs (first (nth acc open))))) open))]
+                    i (when (and open (= "assistant" (:role m)) r) (when (= r (:reply (nth msgs (first (nth acc open))))) open))
+                    results (when (seq acc) (when (= "tool" (:role (nth msgs (first (peek acc))))) (dec (count acc))))]
                 (cond i [(update acc i conj j) open]
                       (= "assistant" (:role m)) [(conj acc [j]) (count acc)]
+                      (and (= "tool" (:role m)) results) [(update acc results conj j) open]
                       (= "tool" (:role m)) [(conj acc [j]) open]
                       :else [(conj acc [j]) nil])))
             [[] nil] (map-indexed vector msgs))))
@@ -149,17 +156,18 @@
 (defn wire-messages
   "The provider-neutral messages (seon.context/request) in the OpenAI-compatible shape
   (DeepSeek's), the one provider format function: each wire message from its group (`wire-groups`), a
-  reply's calls in one assistant message, each tool message after it in order; reasoning as
+  reply as one assistant message whose one call holds its message and its evals as the model sent them, then one tool message
+  holding their results in order, each with its handle; reasoning as
   reasoning_content, left out only when replay is false (:seon.config.ai/replay-reasoning; a config
-  with thinking on refuses that at load). A message's :reply never reaches the wire."
+  with thinking on refuses that at load). A message's :reply never reaches the wire. See docs/model.md#one-tool-eval."
   {:malli/schema [:=> [:cat [:maybe :boolean] [:vector :seon.model/message]] [:vector :map]]}
   [replay msgs]
   (mapv (fn [[i & more]]
-          (let [m (reduce (fn [m j] (update m :tool-calls (fnil into []) (:tool-calls (nth msgs j)))) (nth msgs i) more)
-                ;; a reply with calls is sent back as the model sent it, its message on its first call: a model carries on as its history
-                ;; reads, and with the message as text 8% of replies kept one, against 89% (docs/render.md#the-render-is-an-eval)
-                m (cond-> m (and (seq (:tool-calls m)) (not (str/blank? (:content m))))
-                    (-> (assoc :content "") (assoc-in [:tool-calls 0 :message-md] (:content m))))]
+          (let [m (reduce (fn [m j] (let [o (nth msgs j)]
+                                      (if (= "tool" (:role o))
+                                        (update m :content str "\n\n" (:content o))
+                                        (update m :tool-calls (fnil into []) (:tool-calls o)))))
+                          (nth msgs i) more)]
             (wire-message (cond-> (dissoc m :reply) (false? replay) (dissoc :reasoning)))))
         (wire-groups msgs)))
 
@@ -179,28 +187,41 @@
     thinking (assoc :thinking {:type (name thinking)})
     reasoning-effort (assoc :reasoning_effort (name reasoning-effort))))
 
-(defn- call-code
-  "An eval call's code, intent and message from its tool name and JSON arguments, or :problem, what is wrong with them, so nothing is
-  run: another tool's name, arguments cut off or not JSON, or code that is no string. :code holds the arguments as they came for
-  the record. See docs/model.md#one-tool-eval."
-  {:malli/schema [:=> [:cat [:maybe :string] [:maybe :string]] [:map [:code :string] [:intent {:optional true} :string] [:message-md {:optional true} :string] [:problem {:optional true} :string]]]}
-  [tool arguments]
+(defn call-evals
+  "One reply's call, its arguments j as read ({\"message-md\" \"evals\"}), as its evals, each {:id :code :intent}, the first carrying the message, a model's and an outside agent's alike: no evals is one eval's :problem, what is wrong, so nothing is
+  run, and an eval with no code as a string is that eval's. :code holds what came, for the record. See docs/model.md#one-tool-eval."
+  {:malli/schema [:=> [:cat :any :string] [:vector [:map [:id :string] [:code :string] [:intent {:optional true} :string] [:message-md {:optional true} :string] [:problem {:optional true} :string]]]]}
+  [j id]
+  (let [shape "A call is {\"message-md\": <string>, \"evals\": [{\"intent\": <string>, \"code\": <string>}, ...]}."
+        es (when (map? j) (get j "evals"))
+        msg (when (map? j) (get j "message-md"))]
+    (if-not (and (sequential? es) (seq es))
+      (cond-> [{:id id :code (json/write-str j) :problem (str "this call was not run: evals is missing or empty. " shape)}]
+        (string? msg) (assoc-in [0 :message-md] msg))
+      (vec (map-indexed
+            (fn [i e]
+              (let [code (when (map? e) (get e "code"))]
+                (cond-> {:id (if (zero? i) id (str id "#" i))}
+                  (string? code) (assoc :code code)
+                  (not (string? code)) (assoc :code (json/write-str e) :problem (str "this eval was not run: its code is missing or not a string. " shape))
+                  (and (map? e) (string? (get e "intent"))) (assoc :intent (get e "intent"))
+                  (and (zero? i) (string? msg)) (assoc :message-md msg))))
+            es)))))
+
+(defn- evals-of
+  "A provider's tool call as the reply's evals (`call-evals`), from its tool name, its JSON arguments and its id; another tool's name or arguments cut off or not JSON are one eval's :problem, :code holding what came. See docs/model.md#one-tool-eval."
+  {:malli/schema [:=> [:cat [:maybe :string] [:maybe :string] :string] [:vector :map]]}
+  [tool arguments id]
   (let [a (or arguments "")
         j (try (json/read-str a) (catch Throwable _ nil))
-        problem (cond
-                  (and tool (not= "eval" tool)) (str "there is one tool, eval; " tool " is not a tool here")
-                  (not (map? j)) "the arguments are cut off or are not JSON"
-                  (not (contains? j "code")) "code is missing"
-                  (not (string? (get j "code"))) "code is not a string")]
+        problem (cond (and tool (not= "eval" tool)) (str "there is one tool, eval; " tool " is not a tool here")
+                      (not (map? j)) "the arguments are cut off or are not JSON")]
     (if problem
-      {:code a :problem (str "this call was not run: " problem ". A call is {\"message-md\": <string>, \"intent\": <string>, \"code\": <string>}.")}
-      (cond-> {:code (get j "code")}
-        (string? (get j "intent")) (assoc :intent (get j "intent"))
-        (string? (get j "message-md")) (assoc :message-md (get j "message-md"))))))
+      [{:id id :code a :problem (str "this call was not run: " problem ". A call is {\"message-md\": <string>, \"evals\": [{\"intent\": <string>, \"code\": <string>}, ...]}.")}]
+      (call-evals j id))))
 
 (defn- spoken
-  "A model's reply text and calls ks, as [text calls]: the turn's one message is its text, so a message-md joins the text and leaves the
-  call, and `wire-messages` sends it back on the first call. A reply with none still runs: it just said nothing.
+  "A model's reply text and evals ks, as [text evals]: the reply's one message is its message-md, or its text when it writes text instead, and both when it writes both (or makes two calls), since no word it wrote is dropped. `wire-messages` sends it back as the call's message-md. A reply with none still runs: it just said nothing.
   See docs/prompt.md#your-tool-and-your-user."
   {:malli/schema [:=> [:cat [:maybe :string] [:vector :map]] [:tuple [:maybe :string] [:vector :map]]]}
   [text ks]
@@ -217,7 +238,7 @@
   [j ms max-tokens]
   (let [msg (get-in j [:choices 0 :message])
         [text calls] (spoken (or (:content msg) (when (seq (:tool_calls msg)) ""))
-                             (mapv (fn [c] (assoc (call-code (get-in c [:function :name]) (get-in c [:function :arguments])) :id (str (:id c)))) (:tool_calls msg)))
+                             (into [] (mapcat (fn [c] (evals-of (get-in c [:function :name]) (get-in c [:function :arguments]) (str (:id c))))) (:tool_calls msg)))
         reasoning (:reasoning_content msg)
         u (:usage j)
         rt (get-in u [:completion_tokens_details :reasoning_tokens])

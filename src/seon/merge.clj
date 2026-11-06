@@ -321,15 +321,17 @@
 
 (defn divergence
   "What a branch's changes ch (delta-changes from its merge base, read once a turn:
-  seon.agent/branch-changes) carry to main: the vars it added, redefined and removed, and the
+  seon.agent/branch-changes) carry to main: the vars, methods and implementations it added, redefined and removed, and the
   schema keys it registered or changed; each sorted, an empty kind left out ({}: nothing). A var
   is changed when its definition's content is (its form's text, kind, contract or doc: def-content),
   and removed when no live form defines it. A schema registered with no file (a scratch one, my.schema) is no key of the program and never
   merges, so it is none of these."
-  {:malli/schema [:=> [:cat :seon.merge/changes] [:map-of [:enum :added :changed :removed :schemas] [:vector [:or :qualified-symbol :qualified-keyword]]]]}
+  {:malli/schema [:=> [:cat :seon.merge/changes] [:map-of [:enum :added :changed :removed :schemas] [:vector [:or :qualified-symbol :qualified-keyword [:vector :any]]]]]}
   [ch]
-  (let [kinds (for [[[kind x] [a b]] ch :when (#{:var :schema} kind)]
-                [(cond (= :schema kind) :schemas (nil? a) :added (nil? b) :removed :else :changed) x])]
+  (let [kinds (for [[[kind x :as k] [a b]] ch :when (#{:var :schema :method :impl} kind)]
+                [(cond (= :schema kind) :schemas (nil? a) :added (nil? b) :removed :else :changed)
+                 ;; a method or an implementation goes by what names it, [multi dispatch], [protocol type]
+                 (if (#{:method :impl} kind) (vec (rest k)) x)])]
     (into {} (for [[k xs] (group-by first kinds)] [k (vec (sort-by str (map second xs)))]))))
 
 (defn changed-vars

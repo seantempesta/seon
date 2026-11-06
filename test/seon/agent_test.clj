@@ -52,7 +52,12 @@
   ([forms opts]
    (mapv #(if (contains? % :response) (let [r (:response %)] (assoc r :value (value-of r))) %)
          (with-agent opts (fn [{:keys [names ask]}]
-                            (mapv #(ask (if (map? %) % {:op :eval :agent (:agent names) :code %})) (if (fn? forms) (forms names) forms)))))))
+                            ;; a string: a form on the agent's REPL, by root's submit!, no reply and no turn of anyone's
+                            (mapv #(if (map? %)
+                                     (ask %)
+                                     (let [a (ask {:op :eval :agent "root" :code (str "@(c/submit! sys :" (:agent names) " " (pr-str %) " {:origin :outside})")})]
+                                       (if-let [r (get-in a [:response :value])] {:response r} a)))
+                                  (if (fn? forms) (forms names) forms)))))))
 
 (defn with-agent
   "in-agent's setup and teardown around a body of the test's own: f is called with {:names {:ns :task :agent}
@@ -238,7 +243,7 @@
               [(ev (str "(deref (future @(c/prove! sys :" a " #{} :turn)) 60000 :none)"))
                (do (ev (str "(c/interrupt! sys :" a ")"))
                    (ev "(clojure.string/starts-with? (:seon.error/message (:ex @blocked)) \"interrupted by root\")"))
-               (root-value (ask {:op :eval :agent a :code "(+ 2 2)"}))])))]
+               (ev (str "(:value @(c/submit! sys :" a " \"(+ 2 2)\" {:origin :outside}))"))])))]
     (is (and (map? proved) (contains? proved :pass)) (str "the run answered while the eval blocked: " (pr-str (if (map? proved) (select-keys proved [:pass :fail :error :ran]) proved))))
     (is (true? stopped) (str "the blocked eval answers interrupted by root: " stopped))
     (is (= 4 next-answer) (pr-str next-answer))))
@@ -563,7 +568,7 @@
               (ev (began-code a "(clojure.core.async/<!! (clojure.core.async/chan))"))
               (ev (str "(c/interrupt! sys :" a ")"))
               [(ev "(clojure.string/starts-with? (:seon.error/message (:ex @blocked)) \"interrupted by root\")")
-               (root-value (ask {:op :eval :agent a :code "(+ 2 2)"}))])))]
+               (ev (str "(:value @(c/submit! sys :" a " \"(+ 2 2)\" {:origin :outside}))"))])))]
     (is (true? stopped) (str "the blocked eval answers interrupted by root: " stopped))
     (is (= 4 next-answer) (pr-str next-answer))))
 
@@ -1268,6 +1273,33 @@
     (is (every? #(= % "task") (nth (last two) 2)) (str "holding only the task's part: " (pr-str (last two))))
     (is (nil? shown) "a render that throws does not stop the one who asked")
     (is (str/includes? (str broken-request) "broken render") "and the request reads its error")))
+
+;; a defmethod merges as a var does (seon.merge's key [:method multi dispatch]), so it is said as one is
+(deftest a-method-is-listed-with-what-a-branch-carries
+  (let [[_ method changes] (in-agent (fn [{:keys [ns]}]
+                                       [(str "(ns " ns ".mm) (defmulti area \"Area.\" :k)")
+                                        "(defmethod area :square [s] 1)"
+                                        "(my.branch/changes)"]))]
+    (is (some #(= ":square" (second %)) (filter vector? (:recorded method))) (pr-str method))
+    (is (some #(and (vector? %) (= ":square" (second %))) (:added (:value changes))) (pr-str (:value changes)))))
+
+;; docs/failure-points.md: a live agent ran (def form-of ...) in seon.program as a scratch name, every later write threw in seon.program/record-tx, and the run died
+(deftest a-definition-that-breaks-its-own-recording-is-undone
+  (let [[broke after still] (in-agent ["(in-ns 'seon.program) (def form-of (fn [v] v))"
+                                       "(def after-it 41) (inc after-it)"
+                                       "(seon.program/definition-form? '(def x 1) (the-ns 'user))"])]
+    (is (= :seon.repl/definition-undone (:seon.error/type (:ex broke))) (pr-str (:ex broke)))
+    (is (str/includes? (:seon.error/message (:ex broke)) "seon.program/form-of") "it says which")
+    (is (= 42 (second (:value after))) "the run goes on: the next eval records")
+    (is (nil? (:ex still)) "and Seon's own var is as it was")))
+
+;; docs/render.md#a-redo-is-an-explicit-bust: collection may have swept the commit a redo needs: the same datoms as of t, never a later page
+(deftest a-page-whose-commit-is-gone-is-drawn-as-of-its-t
+  (let [[at] (in-agent ["(let [db (seon.agent/db) gone (assoc-in db [:meta :datahike/parents] #{(random-uuid)}) t (:max-tx db)]
+                           [(:max-tx (#'seon.context/at-t gone t)) t (some? (:origin-db (#'seon.context/at-t gone (dec t))))])"])
+        [was t as-of?] (:value at)]
+    (is (= t was) "the commit at t itself needs no walk")
+    (is (true? as-of?) "past what collection kept, a db as of t")))
 
 ;; docs/render.md#a-redo-is-an-explicit-bust: a diff removed leaves the next one standing on a page its reader was never shown; the redo
 ;; draws what moved from the page as of each t, in place, and what still stands on what came before it is left byte for byte

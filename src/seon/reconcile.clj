@@ -939,7 +939,7 @@
                              ;; why they could not run, when the gate itself failed: the effect's error, or a changed
                              ;; namespace with no file on the branch (each test then reads :error)
                              (when (seq why) (str "; the gate could not run them: " (str/join "; " why))))
-                        {:conflicts (:seon.task/conflicts (get-in st [:idx :tasks id])) :unmerged (:seon.task/unmerged (get-in st [:idx :tasks id]))}))]
+                        {:red (mapv first red) :conflicts (:seon.task/conflicts (get-in st [:idx :tasks id])) :unmerged (:seon.task/unmerged (get-in st [:idx :tasks id]))}))]
     (if err (err/asked-tx main err :seon.task/deferred-results move) move)))
 
 (defn- advance

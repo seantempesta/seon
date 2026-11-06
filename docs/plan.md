@@ -22,7 +22,7 @@ What Seon is for, where it stands, the one step being worked now, and the steps 
 **One tree of data that renders itself, read by two clients.** The model's context goes through the same ratom components as the page: a component transforms its data, filtering it and adding what it needs from the db, into hiccup: the one state, drawn to html directly and read by the model. The order, what's settled and what the research found are on task `seon.context/the-models-context-is-the-walks`. All of it gets finished, and real-task runs follow it.
 
 In flight, each on its own branch and merged when proved:
-- **Diffs and the check on the tree (steps 4 and 5 of that task):** the model reads the CSS rules, a change reaches it as edits by name ([a change is edits by name](render.md#a-change-is-edits-by-name)), and a request path outside the tree is red ([one path to the model](render.md#one-path-to-the-model)) (`jolt/tree-finish`).
+- **One call per reply, and the MCP tools the same (`jolt/mcp-tools`):** [one tool](model.md#one-tool-eval), [an outside agent](turn.md#an-outside-agent).
 - **Test reuse:** a test's digest takes a form's read form, not its text; config keys a `:map` lists are no edges (`jolt/reuse-wip`).
 - **Agents repeating themselves** is a bug being root-caused (`jolt/no-repeats`).
 - **Time from a proved change to main:** the Optimization session. Agents' merges on a swept store are proved ([collection](storage.md#collection)); next, what a change that touches no code still reruns.
