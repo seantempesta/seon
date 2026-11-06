@@ -215,6 +215,17 @@
     (is (= {:n 42} (:value r)) (pr-str r))
     (is (str/includes? (str (:text r)) "a ] b") "and its text still shows what it printed, verbatim")))
 
+(deftest a-require-at-the-repl-is-no-program
+  ;; deepseek-run3/4: an eval's (require '[seon.repl-test ...]) in seon.repl was recorded as a text form of that file, so seon.repl required a test
+  ;; namespace and the gate's build failed 6 times; another agent retracted such forms by hand. A REPL's require is its own, and says so; an ns form stays program
+  (let [[_ req held] (at/in-agent (fn [{:keys [ns]}]
+                                    [(str "(ns " ns ".here)")
+                                     "(require '[clojure.set :as s])"
+                                     (str "(mapv :form/src (filter :form/src (map #(datahike.api/entity (seon.agent/db) (:e %)) (datahike.api/datoms (seon.agent/db) :avet :form/ns (seon.db/eid (seon.agent/db) :ns/name '" ns ".here)))))")]))]
+    (is (= [:not-program] (mapv :seon.repl/finding (:warnings req))) (pr-str req))
+    (is (= 1 (count (:value held))) (pr-str held))
+    (is (clojure.string/starts-with? (first (:value held)) "(ns ") "the ns form, and no require")))
+
 (deftest an-agents-namespace-is-recorded-where-its-eval-left-it
   ;; owner, 2026-10-29: "we have to be able to expose this we own all the machinery": the namespace the
   ;; REPL is in lived only in the agent's memory; each eval's record keeps it (seon.context/current-ns). The agent

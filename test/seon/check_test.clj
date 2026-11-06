@@ -9,6 +9,16 @@
 
 (defn- notes [db] (set (d/q '[:find [?t ...] :where [_ :note/text ?t]] db)))
 
+(deftest what-a-held-command-left-running-ends-with-it
+  ;; deepseek-run4, 2026-11-07: bin/root stop left about 26 of a gate's test processes running. CMD's group ends at CMD's end, so a
+  ;; --drain holder is answered then, not when they would have finished. A token names the process this test started
+  (let [token (str "held-left-" (random-uuid))
+        r (clojure.java.shell/sh (str (seon.config/checkout) "/bin/held") "--drain" "/bin/bash" "-c"
+                                 (str "(exec -a " token " /bin/sleep 300) & exit 0"))
+        left (clojure.java.shell/sh "/bin/sh" "-c" (str "ps -axo command | grep -c '^" token "'"))]
+    (is (= 0 (:exit r)) (pr-str r))
+    (is (= "0" (clojure.string/trim (:out left))) "nothing it left is running")))
+
 (deftest steps-are-branches-of-one-store
   ;; a store on disk of this test's own, the last resort: what is proved is how bin/check
   ;; opens its LMDB store from separate roots and reopens it after a kill; removed at the end
