@@ -26,7 +26,7 @@ In flight, each on its own branch and merged when proved:
 - **Test reuse:** a test's digest takes a form's read form, not its text; config keys a `:map` lists are no edges (`jolt/reuse-wip`).
 - **Agents repeating themselves** is a bug being root-caused (`jolt/no-repeats`).
 - **Cost of an eval and of a root's boot:** the Optimization session.
-- **The web pages:** the agent's chat, `@ctx` and raw-wire debug tabs and root's work list are on main. Step buttons are in flight on `jolt/step-buttons` (task `seon.render/an-eval-run-again-replaces-itself`; not merged). Next: going back to any point (`seon.agent/reset-an-agent-to-any-point`), source editing with an explicit disk sync (`seon.render/an-edit-reaches-disk-when-asked`) and a chat that sends only what it places (`seon.render/an-agents-chat-sends-only-what-it-places`).
+- **The web pages:** the agent's chat, `@ctx` and raw-wire debug tabs and root's work list are on main. An opened step has Run, To here, Copy and Edit ([run again](turn.md#an-eval-can-be-run-again)). Next: hashed result handles (`seon.repl/a-handle-names-its-value`), going back to any point (`seon.agent/reset-an-agent-to-any-point`), source editing with an explicit disk sync (`seon.render/an-edit-reaches-disk-when-asked`) and a chat that sends only what it places (`seon.render/an-agents-chat-sends-only-what-it-places`).
 
 Open with the owner: erasing the store for the schema step; surfacing a red from the nightly full run.
 

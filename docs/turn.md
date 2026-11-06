@@ -43,7 +43,7 @@ So the conversation is its turns in the order of their numbers (```seon.context/
 
 ## An eval can be run again
 
-A person's step button runs an eval again in its own place (```seon.repl/again```, optionally as edited code): the same record by its `:seon.eval/id`, its call and author kept, its code and response replaced, its old ones in the db's history. So the next request reads the new one where the old one stood (the provider's cache breaks from that message on, once), and `result/<id>` names the new value. ```seon.repl/again-to``` runs the agent's own evals down to one, in order, stopping at the first that fails, as a person evaluates a file down to a line. Their code runs for real, so an outside effect happens again; the call is made through root's `again!` with origin `:context`, so the button's own call is no record of the conversation.
+A person's step button runs an eval again in its own place (```seon.repl/again```, optionally as edited code): the same record by its `:seon.eval/id`, its call and author kept, its code and response replaced, its old ones in the db's history. So the next request reads the new one where the old one stood (the provider's cache breaks from that message on, once), and `result/<id>` names the new value. ```seon.repl/again-to``` runs the conversation's evals down to one (those naming a call, Seon's left out), in order, stopping at the first that fails, as a person evaluates a file down to a line. Their code runs for real, so an outside effect happens again; the call is made through root's `again!` with origin `:context`, so the button's own call is no record of the conversation.
 
 ## An eval can be inserted
 
