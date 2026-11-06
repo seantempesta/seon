@@ -1307,8 +1307,8 @@
   (:deferred, which a fork of this agent cannot run) on the merge gate's checkout through root's one :gate request (seon.fx/run-tests),
   each read from the branch where the gate already judged it at its digest and never run again. Their verdicts are facts on this
   branch (seon.proofs/gate-tx), so a red reads on its status and page with a turn to fix it, and the answer counts them. Only for a task
-  that merges (the gate's own), of a root with a checkout (else :unjudged says why, and they stay :deferred, root's judge holding it
-  if it would merge), and never the test that started this root. An effect's error, or a changed namespace with no file on
+  of work, not a design's (its proofs may stay red), of a root with a checkout (else :unjudged says why, and they stay :deferred, root's judge
+  holding it if it would merge), and never the test that started this root. An effect's error, or a changed namespace with no file on
   the branch, is the answer: no verdict. See docs/merging.md#a-merge-runs-what-the-change-reaches."
   {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat [:set :symbol]] :map]]}
   ([] (judge! #{}))
@@ -1318,7 +1318,7 @@
          tk (some->> (:task @state) (task/task dbv))]
      (cond
        (or (contract/error? r) (empty? (:deferred r)) (seq (proofs/failures r))) r
-       (not (task/merges? (:seon.task/kind tk))) (assoc r :unjudged "this task does not merge, so no gate runs them")
+       (not (#{:work :merge :whole} (:seon.task/kind tk))) (assoc r :unjudged "this agent has no task whose work a gate judges")
        :else
        (let [self (:started-by (task/root dbv))
              unjudged? (fn [t] (and (not= self (str t)) (= :deferred (:seon.test/status (d/entity dbv [:var/name t])))))
