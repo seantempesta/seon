@@ -537,7 +537,7 @@
   "The :seon.db/unresolved error of operation op: the kind of thing asked for (:entity :branch :commit :t) and what was asked."
   {:malli/schema [:=> [:cat :seon.host/var [:enum :entity :branch :commit :t] :any] :seon.db/unresolved]}
   [op kind value]
-  (contract/error :seon.db/unresolved op (str "no " (name kind) " " (pr-str value) " in this store") {:kind kind :value value}))
+  (contract/error :seon.db/unresolved op (str "no such " (name kind) " in this store: :value is what was asked") {:kind kind :value value}))
 
 (defn history
   "What entity e's attributes have been, oldest first, as plain data rows {:a :v :added? :t :at} (a retraction
