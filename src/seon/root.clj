@@ -364,34 +364,45 @@
   {:malli/schema [:=> [:cat :seon.root/api-state [:maybe [:or :seon.host/promise :map]] :keyword [:maybe :seon.agent/id]] [:tuple :seon.root/api-state :int]]}
   [st p kind agent] (step/pend st (when p {:p p :kind kind :agent agent})))
 
+(defn- start-spawn
+  "Start the agent opts names: its proc and socket, then the writer's :spawn. Answered at its hello (set-agent's :ready), or the end it meets first."
+  {:malli/schema [:=> [:cat :seon.root/api-state :seon.host/volatile [:or :seon.host/promise :map] :map] :seon.root/api-state]}
+  [st o p opts]
+  (let [[st aid fd] (start-agent st opts)
+      branch (get-in st [:agents aid :branch])]
+  ;; the agent's key named here, in root's boot: the child reads none from main
+  (step/out! o :to-writer {:op :spawn :agent aid :branch branch :task (:task opts) :ns (profile/now-ns) :fd fd :dest {:spawn aid}
+                           :key (or (:key opts) (task/agent-key (:boot st) aid))})
+  ;; answered at its hello (set-agent's :ready), or the end it meets first
+  (cond-> (assoc-in st [::spawning aid] p)
+    (seq (:evals opts)) (assoc-in [::inserting aid] (:evals opts)))))
+
+(defn- no-room
+  "Why no agent can be started now, or nil: no fork server to fork it (refused before an agent proc and its socket are made: a socket the lost server closes would end that agent first, as a death), or too many live agents. n: the agents the start would leave, a Back's old one not among them."
+  {:malli/schema [:=> [:cat :seon.root/api-state :int] [:maybe :map]]}
+  [st n]
+  (cond
+    (= :lost (get-in st [:view :fork-server :status])) (fs/lost)
+    (> n (cfg/value :seon.config.root/max-agents)) (refused 'seon.root/spawn! "too many live agents" {:max (cfg/value :seon.config.root/max-agents)})))
+
 (defn- spawn-agent
   "A new agent from opts, or the refusal answered to p: its branch held by a live agent, no fork server, too many agents. Answered at its hello (set-agent's :ready), or the end it meets first."
   {:malli/schema [:=> [:cat :seon.root/api-state :seon.host/volatile [:maybe [:or :seon.host/promise :map]] [:maybe :map]] :seon.root/api-state]}
   [st o p opts]
   (let [opts (cond-> opts (:branch opts) (update :branch #(pdb/on-main (pdb/conn-main (:conn st)) %)))
-                   holder (and (:branch opts)
-                               (some (fn [[aid a]] (when (and (= (:branch opts) (:branch a)) (not (:ended-ms a))
-                                                              (not (gone-statuses (:status a))))
-                                                     aid))
-                                     (get-in st [:view :agents])))]
-               (cond
-                 holder (let [{:keys [task]} (get-in st [:view :agents holder])]
-                          (reply! st o p (refused 'seon.root/spawn! (str "branch " (:branch opts) " is held by live agent " holder
-                                                                       (when task (str " working " task))
-                                                                       ": its seon_done or an end frees it")
-                                                  (cond-> {:branch (:branch opts) :agent holder} task (assoc :task task)))))
-                 ;; no server to fork it: refused before an agent proc and its socket are made (a
-                 ;; socket the lost server closes would end that agent first, as a death)
-                 (= :lost (get-in st [:view :fork-server :status])) (reply! st o p (fs/lost))
-                 (>= (count (:agents st)) (cfg/value :seon.config.root/max-agents)) (reply! st o p (refused 'seon.root/spawn! "too many live agents" {:max (cfg/value :seon.config.root/max-agents)}))
-                 :else (let [[st aid fd] (start-agent st opts)
-                             branch (get-in st [:agents aid :branch])]
-                         ;; the agent's key named here, in root's boot: the child reads none from main
-                         (step/out! o :to-writer {:op :spawn :agent aid :branch branch :task (:task opts) :ns (profile/now-ns) :fd fd :dest {:spawn aid}
-                                                  :key (or (:key opts) (task/agent-key (:boot st) aid))})
-                         ;; answered at its hello (set-agent's :ready), or the end it meets first
-                         (cond-> (assoc-in st [::spawning aid] p)
-                           (seq (:evals opts)) (assoc-in [::inserting aid] (:evals opts)))))))
+      holder (and (:branch opts)
+                  (some (fn [[aid a]] (when (and (= (:branch opts) (:branch a)) (not (:ended-ms a))
+                                                 (not (gone-statuses (:status a))))
+                                        aid))
+                        (get-in st [:view :agents])))]
+  (cond
+    holder (let [{:keys [task]} (get-in st [:view :agents holder])]
+             (reply! st o p (refused 'seon.root/spawn! (str "branch " (:branch opts) " is held by live agent " holder
+                                                          (when task (str " working " task))
+                                                          ": its seon_done or an end frees it")
+                                     (cond-> {:branch (:branch opts) :agent holder} task (assoc :task task)))))
+    (no-room st (inc (count (:agents st)))) (reply! st o p (no-room st (inc (count (:agents st)))))
+    :else (start-spawn st o p opts))))
 
 (defn- back-point
   "Where eval id of agent a's branch stands, {:commit :branch :t}, or why it can't be gone back to: the earliest commit of the branch holding its code's and response's last write, a run again's included and a reader's opening of it not (seon.context/at-t), and a new branch's name for it, which no earlier back to it holds, as the head has moved since. See docs/turn.md#an-agent-goes-back-to-an-eval."
@@ -404,7 +415,7 @@
         commit (when (and at (= t (:max-tx at))) (d/commit-id at))]
     (cond
       (nil? e) (refused 'seon.root/back! (str "no eval " id " on this agent's branch") {:eval id})
-      (nil? commit) (refused 'seon.root/back! (str "the commit of eval " id " was swept, so its point can't be gone back to") {:eval id})
+      (nil? commit) (refused 'seon.root/back! (str "eval " id " has no commit of its own: a sweep took it, or a later eval shares it") {:eval id})
       :else {:commit commit :t t :branch (keyword (namespace (:branch a)) (str (name (:branch a)) "-back-" (:max-tx db)))})))
 
 (defn- ext-op {:malli/schema [:=> [:cat :seon.root/api-state :seon.host/volatile :seon.root/request] :seon.root/api-state]}
@@ -427,6 +438,8 @@
               (cond
                 (nil? (get-in st [:agents id])) (reply! st o p (absent a id))
                 (not= :idle (:status a)) (reply! st o p (refused 'seon.root/back! (str id " is " (name (:status a)) ": it goes back when it is idle") {:agent id :status (:status a)}))
+                (get-in st [::backing id]) (reply! st o p (refused 'seon.root/back! (str id " is already going back") {:agent id}))
+                (no-room st (count (:agents st))) (reply! st o p (no-room st (count (:agents st))))
                 :else (let [pt (back-point st a (:eval m))]
                         (if (contract/error? pt)
                           (reply! st o p pt)
@@ -529,19 +542,24 @@
         ;; the branch of a Back to here is made: this process ends (replaced: its end writes no fact over the session's), and the session goes on from there, its task held for the person
         (:back dest) (let [id (:back dest)
                            {:keys [p branch]} (get-in st [::backing id])
-                           {:keys [key task]} (get-in st [:view :agents id])
+                           {:keys [key task status]} (get-in st [:view :agents id])
                            st (update st ::backing dissoc id)]
-                       (if (contract/error? r)
-                         (reply! st o p r)
+                       (cond
+                         (contract/error? r) (reply! st o p r)
+                         ;; it died or was given work while the branch was made: the session stays as it stands, the new branch unused
+                         (not= :idle status) (reply! st o p (refused 'seon.root/back! (str id " is " (name status) ": it did not go back") {:agent id :status status}))
+                         (no-room st (count (:agents st))) (reply! st o p (no-room st (count (:agents st))))
+                         :else
                          (let [k (or key (task/agent-key (:boot st) id))
                                e (d/entity @(:conn st) [:seon.agent/key k])
                                ;; what a start records of a session's agent (seon.task/start-tx): this boot holds it under a key that isn't its id's (seon.task/this-boots)
-                               started {:seon.agent/key k :seon.agent/boot (:boot st) :seon.agent/started-ms (System/currentTimeMillis)
+                               started {:seon.agent/key k :seon.agent/boot (:boot st)
                                         :seon.agent/max-turns (or (:seon.agent/max-turns e) (cfg/value :seon.config.agent/max-turns))}]
                            (step/out! o :to-writer {:op :tx :branch :db :tx-data (cond-> [started] task (into (cons {:seon.task/id task :seon.task/branch branch} (task/execution-tx [task] :held))))
                                                     :dest {:agent-facts [id]}})
+                           ;; started before the old one is counted out of root's agents: no-room above asked for that one
                            (-> st (set-agent o id {:status :killed :replaced true}) (to-agent o id {:op :kill})
-                               (spawn-agent o p (cond-> {:branch branch :key k} task (assoc :task task)))))))
+                               (start-spawn o p (cond-> {:branch branch :key k} task (assoc :task task)))))))
         ;; the recorded errors' write was answered: the next window may write
         (:errors-flushed dest) (dissoc st ::errors-flight)
         ;; a stall's evidence was captured (stall-task): its files on the stall task's cause, on main

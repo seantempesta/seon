@@ -1830,10 +1830,12 @@
                     "      missing (seon.root/back! sys a {:eval \"no-such-eval\"})"
                                         "      _ (clojure.core/deref (seon.root/submit! sys a (str \"(seon.agent/transact! [{:seon.eval/id \" (pr-str id) \" :seon.eval/opened true}])\")))"
                     "      before (codes (seon.db/head conn b))"
-                    "      new (seon.root/back! sys a {:eval id})"
+                    "      two [(#'seon.root/request! sys 'back! a {:eval id}) (#'seon.root/request! sys 'back! a {:eval id})]"
+                    "      second-call (clojure.core/deref (second two))"
+                    "      new (:id (clojure.core/deref (first two)))"
                     "      nb (:branch (get-in (seon.server/agents-answer sys) [:agents new]))"
                     "      went-on (clojure.core/deref (seon.root/submit! sys new \"(do (def there 3) (:key (clojure.core/deref seon.agent/state)))\"))]"
-                    "  {:missing (:seon.error/message missing) :was (name a) :new new :old-branch b :new-branch nb"
+                    "  {:missing (:seon.error/message missing) :second (:seon.error/message second-call) :was (name a) :new new :old-branch b :new-branch nb"
                     "   :old-kept (= before (codes (seon.db/head conn b))) :at (codes (seon.db/head conn nb))"
                     "   :task (let [on-main (seon.root/await-db sys #(= nb (:seon.task/branch (datahike.api/entity % [:seon.task/id task]))))] (:seon.task/execution (datahike.api/entity on-main [:seon.task/id task]))) :went-on (:value went-on) :this-boots (let [k (:value went-on) on-main (seon.root/await-db sys #(= new (seon.task/this-boots % (datahike.api/entity % [:seon.agent/key k]))))] (and (:max-tx on-main) (contains? (seon.task/agents on-main) k) (some? (seon.server/agents-answer sys))))})"))
         r (peek (in-agent (fn [names]
@@ -1842,6 +1844,7 @@
         v (:value r)]
     (is (map? v) (pr-str r))
     (is (re-find #"no eval" (str (:missing v))) "an eval it doesn't hold says so")
+    (is (re-find #"already going back" (str (:second v))) "a second press is refused, and both callers are answered")
     (is (not= (:old-branch v) (:new-branch v)) "a new branch")
     (is (:old-kept v) "the old branch as it was")
     (is (contains? (:at v) "(def here 2)") "the new branch holds the point")
