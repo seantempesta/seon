@@ -26,8 +26,8 @@
  ;; one raw inline of the scan: a code span (its content and backtick width), a link's
  ;; destination, or a prose word holding a /
  :seon.ref/span [:or
-                 [:map {:closed true} [:seon.ref/code :string] [:seon.ref/width pos-int?] [:seon.ref/line :seon.ref/line]]
-                 [:map {:closed true} [:seon.ref/link :string] [:seon.ref/line :seon.ref/line]]
+                 [:map {:closed true} [:seon.ref/code :string] [:seon.ref/width pos-int?] [:seon.ref/line :seon.ref/line] [:seon.ref/from nat-int?] [:seon.ref/to nat-int?]]
+                 [:map {:closed true} [:seon.ref/link :string] [:seon.ref/line :seon.ref/line] [:seon.ref/from nat-int?] [:seon.ref/to nat-int?] [:seon.ref/text-from nat-int?] [:seon.ref/text-to nat-int?]]
                  ;; :seon.ref/quoted, a word read inside a "..." string (a reproduction's data): no citation
                  [:map {:closed true} [:seon.ref/word :string] [:seon.ref/line :seon.ref/line] [:seon.ref/quoted {:optional true} :boolean]]]
  ;; one block of the scan, by the kind its first line starts: an ATX heading (its level, its

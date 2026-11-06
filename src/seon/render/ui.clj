@@ -97,27 +97,51 @@
   (let [s (str/replace (name (symbol id)) "-" " ")]
     (str (str/upper-case (subs s 0 (min 1 (count s)))) (subs s (min 1 (count s))))))
 
+(defn- inline
+  "The hiccup of text between offsets from and to, a stretch of a Markdown block, by the one parse: spans, seon.ref/scan's, drawn as code and
+  links, and what lies between by seon.ref/emphasis. A link goes only where a page may send a person (http, https, a path, a fragment); any other keeps its text. See docs/render.md#prose-and-the-one-string-cutter."
+  {:malli/schema [:=> [:cat :string :int :int [:sequential :map]] [:sequential :any]]}
+  [text from to spans]
+  (let [plain (fn [a b] (when (< a b) (for [p (ref/emphasis (subs text a b))] (if (vector? p) [(first p) (second p)] p))))
+        inside (filter (fn [{f :seon.ref/from t :seon.ref/to}] (and f (<= from f) (<= t to))) spans)
+        ;; a link's own spans are drawn inside it
+        tops (reduce (fn [acc {f :seon.ref/from :as sp}] (if (and (seq acc) (< f (:seon.ref/to (peek acc)))) acc (conj acc sp))) [] inside)]
+    (loop [i from [sp & more] tops out []]
+      (if-not sp
+        (into out (plain i to))
+        (let [{f :seon.ref/from t :seon.ref/to :seon.ref/keys [code link text-from text-to]} sp
+              out (into out (plain i f))]
+          (recur t more
+                 (conj out (cond code [:code code]
+                                 (some #(str/starts-with? link %) ["http://" "https://" "/" "#"])
+                                 (into [:a {:href link}] (inline text text-from text-to spans))
+                                 :else (into [:span] (inline text text-from text-to spans))))))))))
+
 (defn markdown
   "Markdown text (a plan, an agent's prose, a message) as a person reads it: its blocks by the one
   parse (seon.ref/scan): a heading at its level, a paragraph, a list of the scan's items (numbered
-  when its first marker is a number), a code block highlighted (a fenced block's content as the scan gives it), a quote or a table as its lines. Each block's text
-  is kept as written, its backticks too: the model reads this page, and a plan's delimiters pick
-  what its citations pull (docs/references.md#the-delimiter-picks-the-depth). See docs/render.md#prose-and-the-one-string-cutter."
-  {:malli/schema [:=> [:cat :string] :any]}
-  [text]
-  (into [:div {:class "seon-md flex flex-col gap-2 leading-relaxed [&_p]:whitespace-pre-wrap [&_li]:whitespace-pre-wrap"}]
-        (for [{:seon.ref/keys [kind from to heading heading-level text-from text-to items ordered]} (:seon.ref/blocks (ref/scan text))
-              :let [body (subs text from to)]]
-          (cond
-            (= :heading kind) [(keyword (str "h" (min 6 (+ 2 (or heading-level 1))))) {:class "font-bold text-text-100"} heading]
-            ;; a code block: indented, or fenced, whose content the scan gives (its marks are no text of it)
-            (= :code kind) (code body (config/value :seon.config.render/value-budget))
-            (= :fence kind) (code (subs text text-from text-to) (config/value :seon.config.render/value-budget))
-            (= :list kind) (into [(if ordered :ol :ul) {:class (if ordered "list-decimal pl-5" "list-disc pl-5")}]
-                                 (for [[a b] items] [:li (subs text a b)]))
-            (#{:quote :table} kind) [:pre {:class "whitespace-pre-wrap text-text-300"} body]
-            (= :break kind) [:hr]
-            :else [:p body]))))
+  when its first marker is a number), a code block highlighted (a fenced block's content as the scan gives it), a quote or a table as its lines. Each
+  is kept as written, its backticks too, where the model reads the page: a plan's delimiters pick
+  what its citations pull (docs/references.md#the-delimiter-picks-the-depth). opts :inline? is for what only a person reads: code spans, links and
+  emphasis drawn (`inline`). See docs/render.md#prose-and-the-one-string-cutter."
+  {:malli/schema [:function [:=> [:cat :string] :any] [:=> [:cat :string [:map [:inline? {:optional true} :boolean]]] :any]]}
+  ([text] (markdown text {}))
+  ([text {:keys [inline?]}]
+   (let [{:seon.ref/keys [blocks spans]} (ref/scan text)
+         run (fn [a b] (if inline? (inline text a b spans) [(subs text a b)]))]
+     (into [:div {:class "seon-md flex flex-col gap-2 leading-relaxed [&_p]:whitespace-pre-wrap [&_li]:whitespace-pre-wrap"}]
+           (for [{:seon.ref/keys [kind from to heading heading-level text-from text-to items ordered]} blocks
+                 :let [body (subs text from to)]]
+             (cond
+               (= :heading kind) [(keyword (str "h" (min 6 (+ 2 (or heading-level 1))))) {:class "font-bold text-text-100"} heading]
+               ;; a code block: indented, or fenced, whose content the scan gives (its marks are no text of it)
+               (= :code kind) (code body (config/value :seon.config.render/value-budget))
+               (= :fence kind) (code (subs text text-from text-to) (config/value :seon.config.render/value-budget))
+               (= :list kind) (into [(if ordered :ol :ul) {:class (if ordered "list-decimal pl-5" "list-disc pl-5")}]
+                                    (for [[a b] items] (into [:li] (run a b))))
+               (#{:quote :table} kind) [:pre {:class "whitespace-pre-wrap text-text-300"} body]
+               (= :break kind) [:hr]
+               :else (into [:p] (run from to))))))))
 
 (defn slot
   "Where the part with element id goes: a marker the render proc fills with the part's
@@ -759,11 +783,9 @@
       [:section
        [:h2 "Your task"]
        [:p {:data-for "page"} (str "task · " (namespace (symbol id)) (when stands (str " · " (:text stands) (when (:detail stands) (str " · " (:detail stands))))))]
-       [:p "You have one task, and your job is to finish it. Everything else here is to help you do that."]
        (when plan (markdown plan))
-       ;; a work or whole task is done when its proofs pass; the other kinds (design, merge, test) say what they are for
-       (if (#{:work :whole} (:seon.task/kind t :work))
-         [:p "You're done when every proof under \"Your proofs\" passes on your branch. Then reply saying what you changed and how it's proved, and your branch is merged."]
+       ;; a work or whole task is done by the rule in the system prompt; the other kinds (design, merge, test) say what they are for
+       (when-not (#{:work :whole} (:seon.task/kind t :work))
          (when-let [ins (:seon.task/instructions t)] [:p ins]))
        [:p (str "Task: " id)]])))
 
@@ -850,12 +872,10 @@
     [:section
      [:h3 (str sym)]
      (if changing?
-       (list [:p (cond (= :test (:var/kind v)) "A test your plan names."
-                       src "A function your plan names, in the code you will change. Here is its source, and the tests that will judge your change."
-                       :else "A function your plan names, in the code you will change.")]
+       (list [:p (if (= :test (:var/kind v)) "A test your plan names." "A function your plan names.")]
              (if src (source-block src) (list (when m [:p (str (:arglists m))]) (when doc [:p doc]) [:p "Read it: " [:code (str "(source " sym ")")]]))
              (names-line "Tests that reach it" tests))
-       (list [:p (if (= :test (:var/kind v)) "A test your plan names." "A function your plan names. You call it; here is how.")]
+       (list [:p (if (= :test (:var/kind v)) "A test your plan names." "A function your plan names.")]
              (when src [:p [:code (str (reader/arglists src (symbol (namespace sym))))]])
              (when m [:p [:code (str (:arglists m))]])
              (when doc [:p doc])
@@ -925,8 +945,7 @@
   [{c :seon.ctx/ctx} _aid]
   (when (seq (page-cites c))
     [:section
-     [:h2 "What your plan mentions"]
-     [:p "Your plan names each of these, so here's what they are. Use what helps; you don't need to read them all."]]))
+     [:h2 "What your plan mentions"]]))
 
 (defn- cite-parts
   "The `cited` components of agent aid's page, one for each thing its task and its needs cite (`page-cites`). Each is told what
@@ -955,7 +974,6 @@
     (when (seq cites)
       [:section
        [:h2 "If you need more"]
-       [:p "You don't need these now. Here's where to look when you do."]
        (into [:ul]
              (for [{:seon.cite/keys [address name] sec :section} cites :let [x (or address name)]]
                [:li (or (:seon.doc/heading sec) (str x)) ": " (:seon.doc/lead sec) " " [:code (help-form x)]]))])))
@@ -1065,8 +1083,8 @@
 (defn status-hiccup
   "How the work stands (seon.context/status's data s), written to the agent at the moment it reads it: the page's look and the model's read of
   :seon.context/status, one render, so they cannot drift. Each proof answers the
-  question its state asks: not written, `write it here, like this`; red, what it asserted, what it got and what to try; every proof
-  green and something blocks merging, exactly what and the form that clears it; all green and nothing blocks, `you're done`.
+  question its state asks: not written, where it goes and a test to copy; red, what it asserted and what it got; every proof
+  green and something blocks merging, exactly what and the form that clears it; all green and nothing blocks, that it does not.
   Main's side only when something conflicts: both sides and the form that settles each. No table beside the same words: a list of
   the proofs' states only when there are several. See docs/render.md#how-the-work-stands."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
@@ -1085,7 +1103,6 @@
         scaffold (some :do refused)]
     [:section
      [:h2 "Your proofs"]
-     [:p "These tests decide when you're done."]
      (when test-run [:p "The tests could not run: " (str/join "; " (:failed test-run))])
      (when (next proofs)
        (into [:ul] (for [{:keys [test status]} proofs] [:li [:code (str test)] ": " (get state-words status (kname status))])))
@@ -1095,17 +1112,16 @@
         [:p "Write " [:code (str test)] "." (when ns (list " It goes in " [:code (str ns)] (if requires ", which requires:" ".")))]
         (when requires [:pre [:code requires]])
         (when (seq helpers) [:p "Helpers a test there uses: " (str/join ", " (map #(str "`" (name %) "`") helpers)) ". Every helper there: " [:code (str "(dir " ns ")")]])
-        (when example [:p "Write it like this one:"])
+        (when example [:p "Example:"])
         (when example [:pre [:code example]])
-        (when scaffold [:div [:p "Start with this, then replace the placeholder assertion with what your plan says should hold:"] (form-hiccup scaffold)])])
-     ;; red: which, what it asserted, what it got, what to try
+        (when scaffold [:div [:p "Scaffold:"] (form-hiccup scaffold)])])
+     ;; red: which, what it asserted, what it got
      (for [{:keys [test failures]} red]
        [:div
         [:p [:code (str test)] " fails."]
         (for [{a :assert as :asserts g :got m :message} (take 1 failures)]
           [:p "It asserts " [:code (str/join ", " (map #(as-text %) (or as [a])))] " and got " [:code (as-text g)] (when m (str " (" m ")")) "."
-           (when (next failures) (str " Fix this first: " (count (rest failures)) " more " (if (nnext failures) "assertions fail" "assertion fails") ", and proving again shows the next."))])
-        [:p "This is the result of your last test: it changes when you change what the test reaches. Evaluate the assertion's own expression at your REPL to see the difference, change the code, then " [:code "(prove)"] "."]])
+           (when (next failures) (str " " (count (rest failures)) " more " (if (nnext failures) "assertions fail" "assertion fails") "."))])])
      (when (seq unknown) [:p "Not run yet: " (str/join ", " (map #(str "`" (:test %) "`") unknown)) ". " [:code "(prove)"] " runs them."])
      ;; merge: nothing until something conflicts; then both sides and the form that settles each
      (when (seq unmerged)
@@ -1116,7 +1132,7 @@
            [:p "Keep yours: " [:code (str "(my.branch/resolve! '" key ")")] ". Take main's: " [:code (str "(my.branch/resolve! '" key " :theirs)")] "."]])])
      (cond
        (and green? (empty? blocks) (empty? unmerged))
-       [:p "You're done: every proof passes and nothing blocks merging. Reply saying what you changed and how it's proved."]
+       [:p "Every proof passes and nothing blocks merging."]
        (and green? (seq blocks))
        [:div [:p "Every proof passes, but your branch can't merge yet:"]
         (into [:ul] (for [[what x do] blocks]
@@ -1140,34 +1156,14 @@
 
 (declare standing)
 
-(defn turn-line
-  "What the agent's page says of its turns, the same words for the page and the model: `You have 40 turns. You're in seon.program.`, and
-  how many are left once few are. It holds no turn number, so it moves when it has news: each eval says its own turn (:turn in its
-  answer: `12 of 40`, seon.repl/eval-string). Parts that are not known are left out. See docs/render.md#the-agents-turn."
-  {:malli/schema [:=> [:cat [:maybe :int] [:maybe :int] [:maybe :symbol]] :string]}
-  [n cap in-ns]
-  (let [left (when (and cap n) (- cap n))]
-    (str/trim
-      (str (when cap (str "You have " cap " turns."))
-           (when (and left (<= 0 left 5)) (if (zero? left) " This is your last turn." (str " " left (if (= 1 left) " turn" " turns") " left.")))
-           (when in-ns (str " You're in " in-ns "."))))))
 (defn turn
-  "The agent's turn (a component over ctx and the db): its turn line as the part's heading, which is all the model is sent
-  of it, and under it, when its last reply was cut at the model's token limit (the reply of the model call that answered
-  last: this turn's, else the turn before's, which the request being made follows), what to do about that. See
+  "The namespace the agent's REPL is in (a component over ctx), as its heading, which is all the model is sent of it. See
   docs/render.md#the-agents-turn."
   {:seon.render/style tile-style
-   :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int] :any]}
-  [{c :seon.ctx/ctx db :seon.db/db} aid]
-  (let [n (or (ratom/realize (:seon.agent/turn c)) 0)
-        k (ratom/realize (:seon.agent/key c))
-        call-of (fn [i] (when k (pdb/eid db :seon.model-call/id (str k "/" i))))
-        ;; its last reply: this turn's call once it answered (:seon.model-call/ms is written with its reply), else the turn before's
-        call (let [now (call-of n)] (if (and now (seq (d/datoms db :eavt now :seon.model-call/ms))) now (call-of (dec n))))]
-    [:section
-     [:h2 (turn-line n (ratom/realize (:seon.agent/max-turns c)) (context/current-ns c))]
-     (when (and call (seq (d/datoms db :eavt call :seon.model-call/truncated)))
-       [:p "Your last reply was cut at the model's token limit: what followed the cut was lost. Answer with less: one change at a time."])]))
+   :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int] :any]}
+  [{c :seon.ctx/ctx} aid]
+  (when-let [in-ns (context/current-ns c)]
+    [:section [:h2 (str "You're in " in-ns ".")]]))
 
 (defn agent-state
   "The agent's state for the person (a component over ctx and the db), nothing of it for the model: how its work stands
@@ -1254,7 +1250,7 @@
              (if (str/blank? (:seon.eval/intent e))
                [:code {:class "seon-form min-w-0 flex-1 truncate"} (first (str/split-lines (or (:seon.eval/code e) "")))]
                ;; the agent's prose is Markdown, rendered (owner, 2026-10-29); the model reads it as written
-               [:div {:class "seon-prose seon-md-inline min-w-0 flex-1"} (markdown (:seon.eval/intent e))])])
+               [:div {:class "seon-prose seon-md-inline min-w-0 flex-1"} (markdown (:seon.eval/intent e) {:inline? true})])])
       ;; drawn once a revision, inside the closed details, so opening it shows it at once, on a live agent's
       ;; page and on one root draws from its branch (whose opened facts no process takes)
       (do
@@ -1336,8 +1332,8 @@
         [reply reasoning] (map #(ratom/realize (get t %)) [:seon.model-call/reply :seon.model-call/reasoning])]
     (when (or (not (str/blank? reply)) (not (str/blank? reasoning)) (seq evals))
       [:section
-       (when-not (str/blank? reasoning) [:details [:summary {:class "text-xs text-text-500"} "thinking"] (markdown reasoning)])
-       (when-not (str/blank? reply) [:div {:class "seon-message max-w-[85%] self-start rounded-2xl rounded-tl-sm bg-base-900 px-4 py-2.5 text-text-100"} (markdown reply)])
+       (when-not (str/blank? reasoning) [:details [:summary {:class "text-xs text-text-500"} "thinking"] (markdown reasoning {:inline? true})])
+       (when-not (str/blank? reply) [:div {:class "seon-message max-w-[85%] self-start rounded-2xl rounded-tl-sm bg-base-900 px-4 py-2.5 text-text-100"} (markdown reply {:inline? true})])
        (when (seq evals) [:ol {:class "seon-turn flex flex-col"} (for [e evals] [#'eval-item {} e])])])))
 
 (defn chat-ask
@@ -1353,10 +1349,10 @@
          ;; the start, or the whole in its place, never both
          [:details {:class "group seon-message"}
           [:summary {:class "list-none"}
-           [:div {:class "group-open:hidden"} (markdown shown)]
+           [:div {:class "group-open:hidden"} (markdown shown {:inline? true})]
            [:span {:class "text-xs"} [:span {:class "muted group-open:hidden"} (str (emit/cut-words omitted lines nil) " ")] [:span {:class "underline group-open:hidden"} "Read all"] [:span {:class "hidden underline group-open:inline"} "Show less"]]]
-          (markdown plan)]
-         [:div {:class "seon-message"} (markdown plan)])])))
+          (markdown plan {:inline? true})]
+         [:div {:class "seon-message"} (markdown plan {:inline? true})])])))
 
 (defn chat-message
   "A message to the agent as the chat shows it (a component over ctx): who sent it, its body as
@@ -1367,7 +1363,7 @@
         [from body] (map #(ratom/realize (get m %)) [:seon.message/from :seon.message/body])]
     [:section
      [:p {:class "seon-note"} (str from)]
-     (markdown (str body))]))
+     (markdown (str body) {:inline? true})]))
 
 (defn chat-end
   "How the work ended, the chat's last card (a component over ctx and the db): the end its agent wrote (:seon.agent/outcome and
@@ -2035,8 +2031,8 @@
                    [:div {:class "mt-1 flex min-w-0 flex-col gap-2"}
                     (when (seq rs) [:span {:class "seon-note"} (str/join " · " (map source rs))])
                     (when tool_call_id (field "tool_call_id" (verbatim tool_call_id)))
-                    (when reasoning_content [:details [:summary {:class "seon-note"} "reasoning_content"] (markdown reasoning_content)])
-                    (when (seq content) (field "content" ((if (= "system" role) markdown (if (= "tool" role) highlighted verbatim)) content)))
+                    (when reasoning_content [:details [:summary {:class "seon-note"} "reasoning_content"] (markdown reasoning_content {:inline? true})])
+                    (when (seq content) (field "content" ((if (= "system" role) #(markdown % {:inline? true}) (if (= "tool" role) highlighted verbatim)) content)))
                     (map-indexed (fn [j {:keys [id function] :as c}]
                                    (field (str "tool_calls[" j "] · " (:name function) " · " id)
                                           (into [:div {:class "flex flex-col gap-1"}]

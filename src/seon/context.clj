@@ -625,7 +625,7 @@
   what its merge carries, and whether it can merge now when it is given main's commit; its
   unmerged entries; a test run that failed as a whole (:seon.agent/test-error). It reads facts
   about the work only, never the conversation (its turns, evals and messages), so a turn's record
-  draws it again only when it changed the work; turns left and a cut reply are the run's
+  draws it again only when it changed the work; the turn number and a cut reply are the run's
   (seon.render.ui/agent-state). Nothing is held: each is a fact of db. :reasons is the done rule's
   own answer, the turn's check (seon.turn/work!), which the model and the page read as :refused. A design task's plan before its run (:no-design) is its run's, the run its newest model call names, so it waits for the first turn. opts :index, a function answering the reconciler's index of db (seon.reconcile/index; else
   one built cold), called only when a test outside the task's proofs is red (whether it is a

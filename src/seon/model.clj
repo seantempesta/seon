@@ -102,12 +102,12 @@
    ;; (the id of the kept record) and :fns (the costliest functions, drawn on the page) are in :seon.eval/response and are not
    ;; shown to the agent, so they are left out here and in docs/prompt.md
    :function {:name "eval"
-              :description "Run Clojure code at your REPL. Each call takes one top-level form, so each result has its own handle; you may make several calls in one reply, and they run in order, a call after one that threw or answered an error not being run. If one call holds several top-level forms they run in order and answer :forms and :value, the vector of their values. Your system message says what comes back."
+              :description "Run Clojure code at your REPL. Each call's code is one or more top-level forms, run in order. One form answers :value; several answer :forms, how many ran, and :value, the vector of their values. A reply can make several calls: they run in order, each with its own handle, and the first that throws or answers an error ends the run, so the calls after it are not run. Your system message says what comes back."
               ;; in the order a model fills them: it talks and thinks before the code
               :parameters {:type "object"
                            :properties (array-map :message-md {:type "string" :description "This reply's one message to whoever started you, in Markdown, covering all of its calls: what they will do, an answer to a question, anything they should know. A sentence is fine. Put it on the reply's first call, and an empty string on its other calls."}
                                                   :intent {:type "string" :description "What this eval is about to do. A sentence is fine."}
-                                                  :code {:type "string" :description "Clojure to evaluate. One top-level form per call."})
+                                                  :code {:type "string" :description "Clojure to evaluate."})
                            :required ["message-md" "intent" "code"]
                            :additionalProperties false}}})
 
@@ -193,7 +193,7 @@
                   (not (contains? j "code")) "code is missing"
                   (not (string? (get j "code"))) "code is not a string")]
     (if problem
-      {:code a :problem (str "this call was not run: " problem ". A call is {\"intent\": <string>, \"code\": <string>}.")}
+      {:code a :problem (str "this call was not run: " problem ". A call is {\"message-md\": <string>, \"intent\": <string>, \"code\": <string>}.")}
       (cond-> {:code (get j "code")}
         (string? (get j "intent")) (assoc :intent (get j "intent"))
         (string? (get j "message-md")) (assoc :message-md (get j "message-md"))))))

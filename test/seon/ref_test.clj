@@ -418,3 +418,12 @@
     (is (< 100 (count spans)) "the corpus holds the wiki's own spans")
     (doseq [s (distinct spans)]
       (is (= (oracle s) (#'ref/qualified-name s)) (str "span " (pr-str s))))))
+
+(deftest emphasis-is-its-delimiters-flanking-text
+  ;; docs/render.md#prose-and-the-one-string-cutter
+  (is (= ["a " [:strong "b c"] " d"] (ref/emphasis "a **b c** d")))
+  (is (= [[:em "x"] " y"] (ref/emphasis "*x* y")))
+  (is (= ["2 * 3 * 4"] (ref/emphasis "2 * 3 * 4")) "a delimiter beside a space wraps nothing")
+  (is (= ["a *b"] (ref/emphasis "a *b")) "an opener with no closer is its text")
+  (is (= ["snake_case and _x_"] (ref/emphasis "snake_case and _x_")) "names hold _")
+  (is (= [] (ref/emphasis ""))))
