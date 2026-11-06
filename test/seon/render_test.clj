@@ -1637,7 +1637,7 @@
   (let [[w a branch] (live-walk)
         e3 (seon.db/eid branch :seon.eval/id "e3")]
     (swap! a assoc-in [:evals e3 :seon.eval/opened] true)
-    (is (= {[`ui/eval-item "e3"] :miss} (r/flush! w nil)) "an eval opened: that eval's line alone runs, its pieces, its turn's and its list's layout do not")
+    (is (= {[`ui/eval-item "e3"] :miss [`ui/eval-output "e3"] :same} (r/flush! w nil)) "an eval opened: that eval's line and its output run (opened, the output is whole); its turn's and its list's layout do not")
     (swap! a assoc :t 99)
     (is (= {} (r/flush! w nil)) "a change no component read: nothing runs")
     (swap! a assoc-in [:evals e3 :seon.eval/opened] true)
@@ -2595,6 +2595,18 @@
       (is (= 1 (count (re-seq #"\(prove-it\)" e))) "its code once, under the line")
       (is (not (re-find #"<details[^>]* open" e)) "closed until opened"))
     (is (str/includes? (h/html (ui/eval-output (assoc opts :at [:evals (eid "e3")]))) "prove") "its value by the render its record names")))
+
+(deftest an-opened-step-shows-its-result-whole
+  ;; docs/render.md#the-page: expanding expands: a step closed holds a start, opened all of it, with nothing further to open
+  (let [v (mapv (fn [i] {:n i :name (str "row-" i)}) (range 800))
+        e {:seon.eval/id "e1" :seon.eval/code "(rows)" :seon.eval/response {:handle 'result/e1 :value v}}
+        draw (fn [e] (h/html (ui/eval-output {:seon.ctx/ctx {:evals {1 e}} :seon.db/db (ts/test-db) :at [:evals 1]})))
+        closed (draw e)
+        opened (draw (assoc e :seon.eval/opened true))]
+    (is (not (str/includes? closed "row-799")) "closed: its start")
+    (is (str/includes? closed "drop ") "and it says what it left")
+    (is (str/includes? opened "row-799") "opened: all of it")
+    (is (not (str/includes? opened "drop ")) "no cut is left to open")))
 
 (deftest the-three-agree-on-the-agents-own-end
   (let [[db aid] (cited-world)
