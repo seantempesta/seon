@@ -114,7 +114,7 @@ Root's REPL (`seon_eval` as root, or `printf '{:op :eval :agent "root" :code "..
 - **Green on its branch, red once merged (`:semantic`):** the held reason reads `proof-unknown`, not "merge main first". Attach, `(my.branch/merge-main!)`, rerun the proofs, fix, `:done`. The writer refuses a branch behind main, so a red merged program never reaches main.
 - **A held task:** raise the limit that held it (`@(root/transact-main! sys [{:seon.task/id "T" :seon.config.merge/max-conflicts 3}])`, flat keys on the task), then `(my.root/run! sys ["T"])`. A task stuck `:behind` has no repair yet (task `seon.root/a-behind-merge-ends-in-a-fact`); `(my.root/cancel! sys ["T"])` ends it and the branch's work is lost.
 - **A write-back that failed (`:seon.task/commit-error`, an `:effect` problem for `seon.fx/git-commit`):** remove the cause (a stale `.git/refs/heads/jolt/seon-merges.lock`), then `(my.root/write-back! sys ["T" ...])`. A worktree root writes its own `jolt/seon-merges-<worktree>`, never the main tree's.
-- After an attach, the task's model stays "outside" (task `seon.root/an-attached-run-is-taken-back-by-root`): retract `:seon.task/model` before releasing it again.
+- An attach writes no `:seon.task/model`: attach then done, run on a root 2026-11-06, left the task with none, so there is none to retract before releasing it again. What is left of root taking an attached run back is task `seon.root/an-attached-run-is-taken-back-by-root`.
 
 ## Not built: a merge queue on root
 
