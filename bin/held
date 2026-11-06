@@ -132,6 +132,8 @@ if ($out_r) {
 }
 1 while waitpid($cmd, 0) == -1 && $!{EINTR};
 my $st = $?;
+# what CMD left running ends with it: its group, a root's gate and the tests under it (AGENTS 8, a root's processes end with it)
+kill "TERM", -$cmd;
 my $code = ($st & 127) ? 128 + ($st & 127) : $st >> 8;
 print $d "$code\n" if $d;
 if ($life_r) {
