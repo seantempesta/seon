@@ -89,4 +89,8 @@ Replaces: the schema-declared render as the only way to choose one. Scoping: a r
  {:seon.task/name "an-agents-chat-sends-only-what-it-places"
   :seon.task/plan "Seen 2026-11-06 in review: an agent's chat places no side blocks since `seon.render.ui/page-chrome` dropped its aside, yet its #p-task and #p-tiles units are still drawn and sent, and `seon.repl/whole-walk` keeps drawing them for a watched live agent. `seon.render.ui/turn-tiles` and `seon.render.ui/eval-tile` render every eval value with no reader on that tab. Filtering units in page-chrome is the wrong place: seon.render-test/the-model-and-the-page-read-the-same-parts reads the same units. The view that shows a tab should ask only for the lists it places. Proof: a cost proof of a watched chat page at n evals, tiles drawn none."
   :seon.task/kind :work
-  :seon.task/proofs #{}}]
+  :seon.task/proofs #{}}
+ {:seon.task/name "an-agent-spawned-with-a-task-keeps-its-branch-on-main"
+  :seon.task/plan "Seen 2026-11-06: `(seon.root/spawn! sys {:task t :branch :b})` makes a live agent on :main/b, but main's entity of it has no :seon.agent/branch, so `seon.render.proc/ask-branches` asks for no branch and its debug tab says `no model turn yet` after a model turn its branch records. An agent spawned with only :branch is fine. Find who writes :seon.agent/branch on main, make every spawn write it, and sweep for what else reads the fact. A page that can't read an agent says so, never that nothing happened."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.web-test/a-spawned-agents-debug-shows-its-model-turn}}]
