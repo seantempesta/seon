@@ -1,6 +1,6 @@
 #!/bin/zsh
 # bin/ports [FILE]   this checkout's own ports, "SERVER WEB", as its config resolves them
-# (:seon.config.root/server-port, :seon.config.web/port; `seon ports`).
+# (:seon.config.root/server-port, :seon.config.web/port).
 # bin/ports --write   only (re)write the port keys of an existing config/local.edn, booting
 # nothing: what bin/build, bin/test and bin/check run first, since their config reads the file.
 #
@@ -67,6 +67,5 @@ NEW=$LOCAL.new.$$
 # written only when it changes (nothing changed, nothing done)
 if cmp -s "$NEW" "$LOCAL"; then rm -f "$NEW"; else mv "$NEW" "$LOCAL"; fi
 [[ -n $WRITE ]] && exit 0
-. "$ROOT/bin/env"
-# the layer is named: no process reads config/local.edn unless its command line does
-cd "$ROOT/target" && exec ./seon ports --config "$LOCAL"
+# what the layer just written resolves to (its #or [#env ...]), with no process booted to read it: bin/root runs this on every call
+print ${SEON_SERVER_PORT:-$E} ${SEON_WEB_PORT:-$W}

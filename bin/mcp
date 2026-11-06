@@ -1,4 +1,9 @@
 #!/bin/zsh
+# bin/mcp call OP [KEY=VALUE ...]   one tool call from a shell, through this checkout's relay and root,
+# printing the tool's text (seon_<OP>; exit 1 on an error from the relay or the server). VALUE - reads
+# stdin (code=- <<'EOF'), true/false and [...] are JSON. Its client is this checkout, so the agent one call
+# attaches answers the next: what a helper in a worktree uses, since the seon MCP tools of a Claude session
+# are the relay of the checkout the session started in, not the helper's (docs/server.md#working-a-task-from-a-worktree).
 # bin/mcp [PORT]   the MCP server (stdio JSON-RPC) for outside agents: a relay of each line to the
 # root's server on 127.0.0.1:PORT, which answers MCP itself (seon.server/mcp-reply). Without
 # PORT, the port this checkout's root bound: runs/root.port, which bin/root writes from the root's
@@ -14,8 +19,26 @@
 # JSON-RPC error saying why: the client never hangs on it. A line that is not JSON is relayed as
 # it is, and root answers its defect (docs/failure-points.md).
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
+if [[ ${1:-} == call ]]; then
+  shift
+  exec perl -MJSON::PP -e '
+    my ($mcp, $root, $op, @kv) = @ARGV; my %a;
+    die "usage: bin/mcp call OP [KEY=VALUE ...]\n" unless defined $op;
+    for (@kv) {
+      my ($k, $v) = /\A([^=]+)=(.*)\z/s or die "bin/mcp call: $_ is not KEY=VALUE\n";
+      if ($v eq "-") { local $/; $v = <STDIN> }
+      elsif ($v =~ /\A(true|false)\z/ || $v =~ /\A\[/) { $v = JSON::PP->new->allow_nonref->decode($v) }
+      $a{$k} = $v }
+    $ENV{SEON_MCP_CLIENT} = "checkout-$root";
+    my $req = encode_json({jsonrpc => "2.0", id => 1, method => "tools/call", params => {name => "seon_$op", arguments => \%a}});
+    open my $out, "-|", "printf \x27%s\\n\x27 \Q$req\E | \Q$mcp\E" or die "bin/mcp call: $!\n";
+    my $r = decode_json(join "", <$out>);
+    if ($r->{error}) { print STDERR $r->{error}{message}, "\n"; exit 1 }
+    binmode STDOUT, ":utf8"; print $_->{text}, "\n" for @{$r->{result}{content}};
+  ' "$0" "$ROOT" "$@"
+fi
 exec perl -MIO::Socket::INET -MJSON::PP -e '
-  $| = 1; my ($port, $portf) = @ARGV; my $client = "mcp-$$-" . time();
+  $| = 1; my ($port, $portf) = @ARGV; my $client = $ENV{SEON_MCP_CLIENT} // "mcp-$$-" . time();
   while (my $line = <STDIN>) {
     $line .= "\n" unless $line =~ /\n\z/;
     my $msg = eval { decode_json($line) };

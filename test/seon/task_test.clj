@@ -158,8 +158,7 @@
     (is (false? (task/done? db (te "demo/a"))) "a running task is not done")
     (is (true? (task/done? db (te "demo/b"))) "a merged one is")))
 
-;; ---- the links between root, an agent, its task, turns and messages are refs (task
-;; seon.render/the-agents-links-are-refs): a pull follows them ----------------------------
+;; ---- the links between root, an agent, its task, turns and messages are refs: a pull follows them ----------------------------
 
 (deftest an-agents-links-pull-from-its-root
   ;; root records its agent on main; the reconciler records the task's start, naming the agent by its key;
