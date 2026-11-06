@@ -785,9 +785,9 @@
         judged (fn [root deferred] (judgment-of (mdb [(decl "a")] :extra (concat (work "a" :done) (work "a-merge" :running) (when root [root])))
                                                 "a-merge" {:end {:outcome :green} :results {(t "a") :pass} :deferred deferred}))
         ;; ... and gated: its outcome :gate, the gate's answer in
-        gated (fn [root rs unread err]
+        gated (fn [root rs unread err & [main-red]]
                 (let [db (mdb [(decl "a")] :extra (concat (work "a" :done) (work "a-merge" :gate :members {:seon.task/deferred #{boots}}) (when root [root])))]
-                  (d/db-with db (#'r/gated (st-of db) "demo/a-merge" rs unread err))))
+                  (d/db-with db (#'r/gated (st-of db) "demo/a-merge" rs unread err main-red))))
         octopus [{:op :octopus-merge :task "demo/a-merge" :members [{:task "demo/a-merge"}]}]]
     (is (= {:outcome :gate :reasons [] :deferred [boots]} (judged gate [boots])) "unrun: gated first")
     (is (= {:outcome :ready :reasons []} (judged gate [])) "none deferred: ready")
@@ -796,6 +796,10 @@
         (is (= :ready (:seon.task/outcome (task/task db "demo/a-merge"))))
         (is (= {boots :pass} (:seon.task/deferred-results (task/task db "demo/a-merge"))))
         (is (= octopus (actions-for db)))))
+    (testing "a test red on main too is main's: the merge goes on, its status recorded for main's own problem"
+      (let [db (gated gate {boots :fail} [] nil #{boots})]
+        (is (= :ready (:seon.task/outcome (task/task db "demo/a-merge"))))
+        (is (= {boots :fail} (:seon.task/deferred-results (task/task db "demo/a-merge"))))))
     (testing "a red, or a run that could not run them (:error), is refused as a red proof is"
       (doseq [s [:fail :error]]
         (let [db (gated gate {boots s} [] nil)
@@ -818,6 +822,21 @@
       (let [j (judged nil [boots])]
         (is (= :closed (:outcome j)))
         (is (str/includes? (:hold j) "no checkout to run them on"))))))
+
+(deftest what-no-gate-runs-is-said-and-what-a-task-owes-is-its-proofs
+  ;; docs/merging.md#a-merge-runs-what-the-change-reaches: seon.task/proof? is the one reading, a test var against the accumulated proofs (a
+  ;; namespace's name is no proof); seon.task/unjudged says what the gate leaves and why, for the status and the run's end
+  (let [t 'seon.root-test/boots u 'seon.root-test/other
+        tk {:seon.task/kind :work :seon.task/accumulated {:proofs #{t}}}
+        db (fn [root] (d/db-with (ts/test-db) (when root [(merge {:seon.root/id :root :seon.root/boot "b" :seon.config.agent/max-running 1} root)])))
+        gate {:seon.config.source/gate-checkout "/the/tree"}]
+    (is (task/proof? tk t))
+    (is (not (task/proof? tk u)))
+    (is (not (task/proof? {:seon.task/accumulated {:proofs #{'seon.root-test}}} t)) "like with like: a test var, never a namespace")
+    (is (nil? (task/unjudged (db gate) tk [t u])) "the gate runs them all")
+    (is (= [t u] (:tests (task/unjudged (db nil) tk [t u]))) "no checkout: all, with why")
+    (is (= [t u] (:tests (task/unjudged (db gate) (assoc tk :seon.task/kind :design) [t u]))) "a design: all")
+    (is (= {:tests [u]} (select-keys (task/unjudged (db (assoc gate :seon.root/started-by (str u))) tk [t u]) [:tests])) "the test that started this root: itself")))
 
 (deftest a-deferred-proof-is-neither-red-nor-unknown
   ;; owner's ruling (2026-10-23): a process test never runs in an agent's turn or root's judge,
@@ -1456,12 +1475,12 @@
                (filter #(= "demo/b" (:task %)) conflicts)))))))
 
 (deftest a-refused-merge-candidate-is-the-gates-error
-  ;; the Sonnet review of gate-schema (2026-10-30): :gate-read took the candidate's :text with no check, so a
+  ;; the Sonnet review of gate-schema (2026-10-30): the gate took the candidate's :text with no check, so a
   ;; writer that refused the candidate sent the gate no files, and it would have tested main as it is
   (let [id "demo/a-merge"
         refused (contract/error :seon.root/refused #'seon.reconcile-test/a-refused-merge-candidate-is-the-gates-error "no branch demo/x")
         st {:db (ts/test-db) :boot "b1" :rid 0 :pending {} :flights {id {:act {:op :gate :task id :tests ['seon.root-test/boots]}}}}
-        [_ outs] (#'r/advance st id :gate-read refused)
+        [_ outs] (#'r/advance st id :gated refused)
         reqs (map :req outs)]
     (is (not-any? #(= :tests (:kind %)) reqs) "no tests run on a checkout with no candidate")
     (let [tx (some #(get-in % [:req :tx-data]) reqs)]

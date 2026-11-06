@@ -71,7 +71,8 @@
   (case (:op m)
     ;; an answer to this agent's ask on the api's reply route (the test service's, seon.prove; its
     ;; the render proc's)
-    nil [(to-proc! st {:op :reply :k (:tag m) :result (:r m)}) nil]
+    nil [(cond-> (to-proc! st {:op :reply :k (:tag m) :result (:r m)})
+           (contains? (:gates st) (:tag m)) (-> (update :gates disj (:tag m)) (update :fx-out (fnil dec 1)))) nil]
     :req (let [{:keys [rid msg kind]} m]
            (let [st (cond-> (to-proc! st (assoc msg (if (= kind :clone) :k :id) rid))
                       ;; a clone's socket follows in its own frame once the agent asks
@@ -216,6 +217,9 @@
                                                                 (:names m) (assoc :names (:names m)))
                                          :route [id :in] :tag (:k m)})
                  st)
+      ;; the agent asks its branch's merge gate run (seon.agent/judge!): quiet for as long as an effect it awaits, so no stall
+      :gate (do (step/out! o :to-api {:op :request :req {:op :gate :branch (:branch st) :tests (:tests m)} :route [id :in] :tag (:k m)})
+                (-> st (update :gates (fnil conj #{}) (:k m)) (update :fx-out (fnil inc 0))))
       :merged-main (let [st (answer-rid st o (:id m) (:result m))]
                      (step/out! o :events (step/event {:type :merged-main :agent id :result (:result m)}))
                      (step/out! o :to-api (status st {:status (busy st)}))
