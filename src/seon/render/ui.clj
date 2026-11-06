@@ -1063,13 +1063,14 @@
     (if (str/includes? t "\n") [:pre [:code t]] [:code t])))
 
 (defn status-hiccup
-  "How the work stands (seon.context/status's data s), written to the agent at the moment it reads it. Each proof answers the
+  "How the work stands (seon.context/status's data s), written to the agent at the moment it reads it: the page's look and the model's read of
+  :seon.context/status, one render, so they cannot drift. Each proof answers the
   question its state asks: not written, `write it here, like this`; red, what it asserted, what it got and what to try; every proof
   green and something blocks merging, exactly what and the form that clears it; all green and nothing blocks, `you're done`.
   Main's side only when something conflicts: both sides and the form that settles each. No table beside the same words: a list of
   the proofs' states only when there are several. See docs/render.md#how-the-work-stands."
-  {:malli/schema [:=> [:cat :map] :any]}
-  [{:keys [proofs refused test-run unmerged without-a-contract caused attention merge reasons]}]
+  {:malli/schema [:=> [:cat :map :map] :any]}
+  [_opts {:keys [proofs refused test-run unmerged without-a-contract caused attention merge]}]
   (let [state #(:status %)
         unwritten (filter #(= :undefined (state %)) proofs)
         red (filter #(#{:fail :error} (state %)) proofs)
@@ -1129,15 +1130,13 @@
      (when (seq (:conflicts merge)) [:p (str (count (:conflicts merge)) " things conflict with main; they are listed above.")])]))
 
 (defn status
-  "How the agent's work on its task stands (a component over ctx and the db): seon.context/status of its branch db, drawn
-  as one hiccup (`status-hiccup`) for the page and the model alike; the data it was drawn from (:seon.context/status) is its
-  answer, what the turn decides done from (seon.render/placed-data). It reads main's commit from ctx only when the task
-  merges itself (the merge view), so a move of main redraws it only then."
+  "How the agent's work on its task stands (a component over ctx and the db): it answers the map seon.context/status makes of its branch db, which the page
+  and the model read by `status-hiccup` and the turn decides done from (seon.render/placed-data). It reads main's commit from ctx only when the task
+  merges itself (the merge view), so a move of main redraws it only then. See docs/render.md#a-part-answers-data."
   {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int] :any]}
   [{c :seon.ctx/ctx db :seon.db/db} aid]
-  (let [main (when (task/merges? (:seon.task/kind (:task c))) (ratom/realize (:seon.agent/main-commit c)))
-        s (context/status db c {:main main})]
-    (with-meta (status-hiccup s) {:seon.render/answer (with-meta s {:seon.render/schema :seon.context/status})})))
+  (let [main (when (task/merges? (:seon.task/kind (:task c))) (ratom/realize (:seon.agent/main-commit c)))]
+    (with-meta (context/status db c {:main main}) {:seon.render/schema :seon.context/status})))
 
 (declare standing)
 
