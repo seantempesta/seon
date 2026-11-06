@@ -1,4 +1,4 @@
-[{:name "a-check-step-is-a-task",
+[#:seon.task{:name "a-check-step-is-a-task",
              :plan
              "What exists: bin/check's steps run as a script (`seon.check`), beside the reconciler. Correct: each step is a task in resources/seon/tasks/seon.check.edn carrying :seon.task/argv and :needs; the reconciler runs it as a child through one effect owner (`seon.fx`, an exclusive step running alone); its outcome is the run's end facts (exit, signal, output path); the run ends on the quiet fact and names the red step with what it blocks. One machinery for agents and checks; replaces the check script's own ordering. Shown in a prototype (e7_one_system): 9 steps in 1.46 s against 1.9 s serial, exclusive steps never overlapped. A first implementation on an older base is jolt/runner b4ea59d (reference only: :check tasks, an :fx/proc child owner, deftests a-red-check-step-blocks-only-its-dependents, a-check-step-passes-by-its-own-expected-exit, an-exclusive-child-runs-alone).",
              :kind :design,
