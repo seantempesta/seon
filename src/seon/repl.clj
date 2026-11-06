@@ -698,7 +698,7 @@
                                                   (let [working? (some? (:turn @agent/state))]
                                                     (cond-> rec
                                                       ;; the turn loop's own eval (the agent working a task, no model call, made by the agent) and a context read are no conversation record: they name no call
-                                                      (not (or (= :context (:origin req)) (and working? (not (:call-id req)) (not (#{:ui :outside :insert} (:origin req))))))
+                                                      (not (or (= :context (:origin req)) (:id req) (and working? (not (:call-id req)) (not (#{:ui :outside :insert} (:origin req))))))
                                                       (assoc :seon.eval/call (task/call-ref (:key @agent/state) (agent/turn-now))))))))
            (assoc r :record id)
            (catch Throwable e
@@ -728,7 +728,7 @@
   ([code] (eval-string code {:origin :model}))
   ([code req]
    (let [answers (volatile! [])
-         handle (symbol "result" (str "e" (eval-n!)))
+         handle (symbol "result" (or (:id req) (str "e" (eval-n!))))
          ;; the writes its forms make and its record name it (seon.agent/transact!'s tx-meta); an
          ;; eval inside it (a context read's) names its own, then this one's again
          outer (:eval @agent/state)
@@ -955,6 +955,37 @@
         (run-calls (vec (map-indexed (fn [i [intent code]] {:id (str "insert-" i) :intent intent :code code}) evals))
                    (fn [_] {:origin :insert :by who})
                    (fn [code req] (let [r (eval-string code req)] (agent/commit!) r)))))
+
+(defn again
+  "Run eval id again in its own place, optionally as code: the same record, its turn and author kept, its code and response replaced, history
+  holding what it was, so the model's next request reads the new one where the old one stood and `result/<id>` names the new value. It runs in the namespace the eval before it left, first written first by its entity's number. The request that asked commits it (`agent-step`). See docs/turn.md#an-eval-can-be-run-again."
+  {:malli/schema [:function [:=> [:cat :string] :map] [:=> [:cat :string [:maybe :string]] :map]]}
+  ([id] (again id nil))
+  ([id code]
+   (let [evals (map val (sort-by key (:evals @ctx/ctx)))
+         e (first (filter #(= id (:seon.eval/id %)) evals))]
+     (if-not e
+       (contract/error :seon.repl/no-eval #'again (str "no eval " id " in this agent's record") {:seon.eval/id id})
+       (let [before (last (take-while #(not= id (:seon.eval/id %)) evals))]
+         (eval-string (or code (:seon.eval/code e))
+                      (cond-> {:origin :insert :by (:seon.eval/by e) :id id}
+                        (get-in before [:seon.eval/response :ns]) (assoc "ns" (str (get-in before [:seon.eval/response :ns]))))))))))
+
+(defn again-to
+  "Run again this agent's conversation's evals down to eval id, in order, each in its place (`again`), stopping at the first that fails: what a person does evaluating a file down to a line. Seon's evals are not its work, and an eval that names no call (a context read, the agent's loop) is in no conversation. Answers each one run, {:id :failed?}. See docs/turn.md#an-eval-can-be-run-again."
+  {:malli/schema [:=> [:cat :string] [:vector [:map [:id :string] [:failed? :boolean]]]]}
+  [id]
+  (let [evals (map val (sort-by key (:evals @ctx/ctx)))
+        work? #(and (:seon.eval/call %) (not= "seon" (:seon.eval/by %)))]
+    (if (some #(= id (:seon.eval/id %)) evals)
+      (reduce (fn [acc ev]
+                (let [e (:seon.eval/id ev)
+                      r (when (work? ev) (again e))
+                      failed? (boolean (or (:ex r) (contract/error? (:value r))))
+                      acc (cond-> acc (work? ev) (conj {:id e :failed? failed?}))]
+                  (if (or failed? (= id e)) (reduced acc) acc)))
+              [] evals)
+      [])))
 
 (defn- layout
   "The layout this branch renders its ctx with: the var :seon.render/render-ctx declares, an agent's own

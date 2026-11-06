@@ -2901,6 +2901,22 @@
     (is (not (str/includes? t "conflict")) "no merge line with nothing to merge")
     (is (str/includes? (h/html (ui/status-hiccup {} (assoc st :merge {:conflicts ['a/b] :main-moved ['a/b]}))) "1 things conflict with main") "a merge line only when something conflicts")))
 
+
+(deftest a-steps-buttons-call-roots-table
+  ;; docs/turn.md#an-eval-can-be-run-again: each button is a call of root's one table, and a request the button makes is no record of the conversation
+  (let [tools (#'ui/step-tools :a1 {:seon.eval/id "e3" :seon.eval/code "(+ 1 2)"})
+        nodes (tree-seq vector? seq tools)
+        attrs (keep #(when (and (vector? %) (map? (second %))) (second %)) nodes)
+        calls (filter :seon/call attrs)
+        request #(seon.root/request 'again! :a1 % {:status :idle})]
+    (is (= #{{:eval "e3"} {:eval "e3" :to-here true}} (set (keep :seon/args (filter #(= "button" (:type %)) calls)))) "run and run down to it")
+    (is (every? #(= ['seon.root/again! :a1] [(:seon/call %) (:seon/agent %)]) calls))
+    (is (some #(= "(+ 1 2)" %) nodes) "the edit box holds its code")
+    (is (some #(contains? % :data-ignore-morph) attrs) "what a person is typing survives a new eval landing")
+    (is (= :context (:origin (request {:eval "e3"}))) "the button's own call is in no conversation")
+    (is (= "(seon.repl/again \"e3\")" (:forms (request {:eval "e3"}))))
+    (is (= "(seon.repl/again-to \"e3\")" (:forms (request {:eval "e3" :to-here true}))))
+    (is (= "(seon.repl/again \"e3\" \"(+ 2 2)\")" (:forms (request {:eval "e3" :code "(+ 2 2)"}))))))
 (deftest a-merged-task-reads-merged-everywhere
   ;; owner, 2026-11-05: the head said "merged" while the task's panel said "done": its agent's own end (:green) was read where
   ;; the task's outcome (:merged) was ignored; standing is one answer, from the task's outcome where it holds one

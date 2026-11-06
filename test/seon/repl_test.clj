@@ -1055,3 +1055,40 @@
         (is (every? #(number? (get r %)) [:ms :ticks :bytes]) (str origin " " code ": its cost is data on the response"))
         (is (re-find #":cost \"[\d.]+ ms · [\d.]+k? ticks · [\d.]+ [KM]?B · ~[\d.]+k? tok\"" t) (str origin " " code ": and one line of its text: " t))
         (is (not (str/includes? t "not run")))))))
+(deftest an-agent-reads-what-its-entities-have-been
+  ;; docs/storage.md#history: my.agent/history on a var (a symbol), a task (a lookup ref) and a name that is no var;
+  ;; my.db/at the db at a point, each shape, read in a real agent (a fork of the fork server on its own branch)
+  ;; :at stays on the agent's side: a date's pr-str does not read back (jolt.host/a-date-prints-what-reads-back)
+  (let [[_ _ rows task-rows nothing both opt-t foreign bad-branch bad-commit branch-ok commit-ok mix]
+        (at/in-agent
+         (fn [{:keys [task]}]
+           ["(defn zz-h [] 1)"
+            "(defn zz-h [] 2)"
+            "(let [rows (my.agent/history (symbol (str *ns*) \"zz-h\") {:attrs #{:var/form} :pull [:form/src]})] (assert (every? inst? (map :at rows))) (mapv #(dissoc % :at) rows))"
+            (str "(mapv #(dissoc % :at) (my.agent/history [:seon.task/id " (pr-str task) "] {:attrs #{:seon.task/outcome}}))")
+            "(my.agent/history 'seon.task/no-such-thing)"
+            ;; the var's entity by lookup ref and the symbol answer the same rows
+            "(let [s (symbol (str *ns*) \"zz-h\")] (= (map :t (my.agent/history s)) (map :t (my.agent/history [:var/name s]))))"
+            ;; history's :t fed to at reads the old definition
+            "(let [s (symbol (str *ns*) \"zz-h\") t (:t (first (my.agent/history s {:attrs #{:var/form}})))]
+               [(some? (:var/form (datahike.api/entity (my.db/at {:t t}) [:var/name s])))
+                (not= (:db/id (:var/form (datahike.api/entity (my.db/at {:t t}) [:var/name s])))
+                      (:db/id (:var/form (datahike.api/entity (my.db/at) [:var/name s]))))])"
+            "(:seon.error/type (my.db/at {:t (inc (:max-tx (my.db/at)))}))"
+            "(:seon.error/type (my.db/at {:branch :no-such-branch}))"
+            "(:seon.error/type (my.db/at {:commit (random-uuid)}))"
+            "(let [b (:branch @seon.agent/state)] (= (:seon.error/type (my.db/at {:branch b})) nil))"
+            "(let [b (:branch @seon.agent/state) c (datahike.api/commit-id (my.db/at {:branch b}))] (= (:max-tx (my.db/at {:commit c})) (:max-tx (my.db/at {:branch b}))))"
+            "(try (my.db/at {:commit (random-uuid) :t 1}) :no (catch Exception e :refused))"]))]
+    (is (= 2 (count (filter :added? (:value rows)))) (str "the var's two definitions: " (pr-str rows)))
+    (is (every? string? (map (comp :form/src :v) (filter :added? (:value rows)))) "each pulled to the text it had")
+    (is (vector? (:value task-rows)) (pr-str task-rows))
+    (is (= :my.agent/no-var (:seon.error/type (:value nothing))) (pr-str nothing))
+    (is (true? (:value both)) "a symbol and the var's lookup ref read the same entity")
+    (is (= [true true] (:value opt-t)) (pr-str opt-t))
+    (is (= :seon.db/unresolved (:value foreign)) "a t this branch never had is refused")
+    (is (= :seon.db/unresolved (:value bad-branch)))
+    (is (= :seon.db/unresolved (:value bad-commit)))
+    (is (true? (:value branch-ok)))
+    (is (true? (:value commit-ok)))
+    (is (= :refused (:value mix)) "a contradictory option is refused")))
