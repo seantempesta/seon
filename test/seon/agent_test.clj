@@ -35,7 +35,9 @@
   the task's branches are its own (the namespace is); its agent is ended and its branches
   deleted when it ends, however it ends. A shard runs its tests one at a time, so root-REPL vars
   a test defines (ready-ev, t-before-done) are its own while it runs.
-  opts: :dirs, the source dirs root imports (default [\"src\"]); :proofs, the task's proofs;
+  opts: :dirs, the source dirs root imports (default: the config's, as bin/test imports them, so the root
+  holds the program bin/test's seeded store holds and its test namespaces load through Jolt's AOT cache:
+  docs/testing.md#a-root-costs-what-it-boots); :proofs, the task's proofs;
   :sets, more --set config overrides for the root (e.g. its scripted model): a root per distinct
   :dirs and :sets; :config, the tasks' own settings (their :seon.task/config: a test's scripted
   model, :seon.config.ai/script, rides the task, so the root's arguments stay alike and the shard's
@@ -45,7 +47,7 @@
   :client, the client its attach names (seon.server: then only that client's requests, or ones
   naming the task, act on the agent)."
   ([forms] (in-agent forms {}))
-  ([forms {:keys [dirs proofs sets config decls own-root? client] :or {dirs ["src"] proofs '#{demo-test/t}}}]
+  ([forms {:keys [dirs proofs sets config decls own-root? client] :or {proofs '#{demo-test/t}}}]
   (let [checkout (seon.config/checkout)
         tns (str "t" (subs (str (random-uuid)) 0 8))
         names {:ns tns :task (str tns "/t")}
@@ -54,7 +56,8 @@
         decls (if (fn? decls) (decls names) decls)
         with-config #(cond-> % config (assoc :seon.task/config config))
         _ (spit (str tasks "/" tns ".edn") (pr-str (mapv with-config (into [{:seon.task/name "t" :seon.task/plan "Work." :seon.task/kind :work :seon.task/proofs proofs}] decls))))
-        args (into ["--set" (str ":seon.config.source/root=" (pr-str checkout)) "--set" (str ":seon.config.source/dirs=" (pr-str dirs))]
+        args (into (cond-> ["--set" (str ":seon.config.source/root=" (pr-str checkout))]
+                     dirs (into ["--set" (str ":seon.config.source/dirs=" (pr-str dirs))]))
                    (mapcat (fn [x] ["--set" x])) sets)
         ;; its store and main named (seon.test-store/start-root!), never inherited
         root (if own-root?
@@ -389,7 +392,7 @@
   ;; seon.stall-proofs read their task's cause, so on any other task they were stray reds (the control of 2026-11-05)
   (let [p 'seon.stall-proofs/the-stall-ended
         plan (fn [proofs] (str "(let [p (seon.agent/test-plan (seon.agent/db) nil " proofs ")] (contains? (set (:selected p)) '" p "))"))
-        [named not-named] (in-agent [(plan (str "'#{" p "}")) (plan "#{}")] {:dirs (seon.config/value :seon.config.source/dirs)})]
+        [named not-named] (in-agent [(plan (str "'#{" p "}")) (plan "#{}")] {})]
     (is (true? (:value named)) (str "a stall task's proof is selected: " (pr-str named)))
     (is (false? (:value not-named)) (str "and no other task's: " (pr-str not-named)))))
 
@@ -549,7 +552,7 @@
                                      " (swap! rs update (symbol (first clojure.test/*testing-vars*)) (fnil conj #{}) (:type m))))]"
                                      " (clojure.test/test-vars [#'" green " #'" red "]))"
                                      " @rs)"))
-                               {:dirs ["src" "test"]})]
+                               {})]
     (is (true? (:value held)) "the agent holds main's test namespace without requiring it")
     (is (= {green #{:pass} red #{:fail}} (:value run))
         "main's test runs green in the agent; a red one beside it reports red")))
@@ -564,7 +567,7 @@
         [agent-held root-held facts] (in-agent [(str "(boolean " t ")")
                                                 {:op :eval :agent "root" :code (str "(boolean " t ")")}
                                                 {:op :eval :agent "root" :code "(boolean (seon.db/eid @(:conn sys) :var/name 'seon.reader-test/prose-without-a-fence-is-a-comment))"}]
-                                               {:dirs ["src" "test"]})]
+                                               {})]
     (is (true? (:value agent-held)) "the agent holds main's test compiled")
     (is (false? (:value root-held)) "root does not")
     (is (true? (:value facts)) "though main's program holds it as facts")))
@@ -587,7 +590,7 @@
         also 'seon.config-test/the-profile-is-read-from-the-command-line
         [_ run] (in-agent #(vector (str "(in-ns 'seon.config) (defn without-overrides \"args with --config and --set (and their arguments) taken out: what a mode reads.\" {:malli/schema [:=> [:cat [:maybe [:sequential :string]]] [:vector :string]]} [args] (vec (:rest (overrides args)))) (in-ns 'agent." (:agent %) ")")
                            {:op :eval :agent "root" :code (statuses (str "@(seon.root/run-tests! sys :" (:agent %) ")"))})
-                          {:dirs ["src" "test"] :proofs #{proof}})]
+                          {:proofs #{proof}})]
     (is (= {proof :pass reached :pass also :pass} (:value run))
         "the proof and the tests reaching the change ran, green; nothing else ran")))
 
@@ -684,7 +687,7 @@
                   ;; and a root of its own: the shared root's main holds the greens earlier tests
                   ;; recorded, the proof's among them at the same digest (reused 1, ran 1: red
                   ;; since tests-are-facts dropped it)
-                  {:dirs (cfg/value :seon.config.source/dirs) :proofs #{proof} :own-root? true})]
+                  {:proofs #{proof} :own-root? true})]
     (is (= [#{:env :tree :config :data-refs} true] (:value inputs)) "root's boot recorded its source tree's inputs, this boot's")
     (is (= {:results {proof :pass reached :pass also :pass} :ran 3 :reused 0} (select-keys (:value first-run) [:results :ran :reused])) "the agent's own run runs the proof and the reached test")
     (is (= 2 (:value files)) "and both are cached at the agent's digests")
@@ -708,7 +711,7 @@
                    "(do (def budget (long (* 3/2 (:ticks (get (seon.proofs/run-tests! '[bound-test/a] {} (fn [_]) nil) 'bound-test/a))))) budget)"
                    "(let [r (seon.agent/run-tests-forked budget #{'bound-test/a 'bound-test/b} :turn)] [(seon.proofs/results r) (:ran r) (some? (:pid r))])"
                    "(let [r (seon.agent/run-tests-forked budget #{'bound-test/a 'bound-test/b} :judge)] [(seon.proofs/results r) (:ran r) (:reused r) (some? (:pid r))])"]
-                  {:dirs ["src" "test"] :proofs #{}})]
+                  {:proofs #{}})]
     (is (pos-int? (:value budget)) (pr-str budget))
     (is (= ['{bound-test/a :pass bound-test/b :pass} 2 true] (:value turn))
         (str "the turn runs both, each within its own budget: green " (pr-str turn)))
@@ -731,7 +734,7 @@
                    "(let [r (seon.agent/run-tests-forked 100000000 #{'leaks-test/w} :turn)] [(seon.proofs/results r) (:pid r)])"
                    "(let [cwd (get seon.config/config :seon.config.agent/cwd)]
                       {:target (.exists (java.io.File. (str cwd \"/target/leak\"))) :dirs (vec (filter #(= \"tests\" %) (.list (java.io.File. cwd))))})"]
-                  {:dirs ["src" "test"] :proofs #{}})]
+                  {:proofs #{}})]
     (is (= '{leaks-test/w :pass} (first (:value run))) (pr-str run))
     (is (false? (:target (:value after))) "the test's relative write is not in the agents' working directory")
     (is (not (.exists (java.io.File. (str "/tmp/seon-agents/tests/" (second (:value run)))))) "and its directory is removed")))
@@ -749,7 +752,7 @@
                                              {'reds-test/r [{:type :fail :message \"the recorded failure\" :expected \"1\" :actual \"2\"}]})"
                    "(let [r (seon.agent/run-tests-forked 100000000 #{'reds-test/r} :judge)]
                       [(seon.proofs/results r) (:ran r) (:reused r) (some? (:pid r)) (:fail r) (mapv (juxt :message :reused) (:reports r))])"]
-                  {:dirs ["src" "test"] :proofs #{}})]
+                  {:proofs #{}})]
     (is (string? (:value dg)) (pr-str dg))
     (is (= ['{reds-test/r :fail} 0 1 false 1 [["the recorded failure" true]]] (:value judge))
         (str "red as recorded, with its failure, nothing run and no child forked " (pr-str judge)))))
@@ -768,7 +771,7 @@
                    "(deftest r (is (= 1 1)))"
                    "(select-keys (my.agent/prove) [:results])" facts
                    "(let [t (:max-tx (seon.agent/db))] (my.agent/prove) (= t (:max-tx (seon.agent/db))))"]
-                  {:dirs ["src" "test"] :proofs #{'facts-test/r}})]
+                  {:proofs #{'facts-test/r}})]
     (is (= {:results '{facts-test/r :fail}} (:value red)))
     (let [{:keys [branch main]} (:value fact-red)]
       (is (= :red (:seon.test/status branch)) (pr-str fact-red))
@@ -799,7 +802,7 @@
         [_ r]
         (in-agent ["nil" "(select-keys (prove) [:results :ran :reused])"]
                   ;; root imports the dirs bin/test does (:seon.config.source/dirs): one program, one digest
-                  {:dirs (cfg/value :seon.config.source/dirs) :proofs #{p1 p2} :sets [(own-cache dir)]})
+                  {:proofs #{p1 p2} :sets [(own-cache dir)]})
         checkout (proofs/plan nil (select-keys digests [p2]) (fx/stored-results dir (select-keys digests [p2])) #{})]
     (is (= {:recorded 1} recorded) (str "the checkout cached its green for p1: " (pr-str recorded)))
     (is (= {:results {p1 :pass p2 :pass} :ran 1 :reused 1} (:value r)) "the agent reuses the checkout's p1 and runs p2")
@@ -1088,7 +1091,7 @@
                       :code (str "(do (seon.await/await-quiet sys (inc t-before-done))"
                                  " [" (ended-code task)
                                  "  (seon.reconcile/task-state (seon.reconcile/index @(:conn sys)) " (pr-str task) ")])")}])
-                  {:dirs ["src" "test"]})
+                  {})
         [[t end] state] (:value seen)]
     (is (str/includes? (:line done) ":outcome :closed") (str "the answer is the verdict line: " (pr-str done)))
     (is (= :red (:outcome end)) (pr-str end))
@@ -2191,7 +2194,7 @@
   (let [[_ _ r] (in-agent ["(ns fin-test (:require [clojure.test :refer [deftest is]])) (deftest r (is (= 1 1)))"
                            "(alter-var-root #'seon.agent/transact! (fn [f] (fn [tx] (if (some :seon.test/status (filter map? tx)) (throw (ex-info \"transact refused: no\" {:writer-error \"no\"})) (f tx)))))"
                            "(let [p (my.agent/prove)] (select-keys p [:pass :unrecorded]))"]
-                          {:dirs ["src" "test"] :proofs #{'fin-test/r}})]
+                          {:proofs #{'fin-test/r}})]
     (is (nil? (:ex r)) (pr-str r))
     (is (= {:pass 1} (select-keys (:value r) [:pass])) (pr-str r))
     (is (some #(str/includes? % "transact refused: no") (:unrecorded (:value r))) "named, not thrown")))
