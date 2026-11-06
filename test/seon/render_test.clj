@@ -7,7 +7,7 @@
             [clojure.string :as str] [clojure.core.async :as a]
             [seon.render :as r] [seon.fixtures] [seon.render.ui :as ui] [seon.render.proc :as p]
             [seon.web.html :as h] [clojure.walk] [clojure.set] [seon.print.select] [seon.config] [seon.doc] [seon.print] [seon.db] [seon.reconcile] [seon.task] [seon.edn] [seon.context] [seon.contract] [seon.repl] [datahike.api :as d]
-            [seon.fx] [seon.source] [seon.program] [seon.web] [seon.template] [seon.context-test] [seon.render-cost-test] [seon.turn] [seon.model] [seon.problems] [my.agent] [my.test] [seon.ctx]))
+            [seon.fx] [seon.source] [seon.reader] [seon.program] [seon.web] [seon.template] [seon.context-test] [seon.render-cost-test] [seon.turn] [seon.model] [seon.problems] [my.agent] [my.test] [seon.ctx]))
 
 (def ^:private task
   {:seon.task/id "calc/add" :seon.task/ns 'calc :seon.task/name "add" :seon.task/plan "Make `app.calc/add` pass"
@@ -2360,9 +2360,60 @@
   ;; docs/render.md#the-render-is-an-eval: past eight keys a map is hash ordered, and the live run read "task" fifth; the value is pairs, so any store, printer and reader keeps them
   (let [ids (mapv #(str "p" %) (range 12))
         v (r/parts-value (map (fn [id] [id [:li id]]) ids))]
-    (is (= ids (map first v)))
-    (is (= ids (map first (read-string (pr-str v)))) "read back")
+    (is (= ids (map first (:components v))))
+    (is (= ids (map first (:components (read-string (pr-str v))))) "read back")
     (is (= (sort-by #(str/index-of (seon.print/text v) %) ids) ids) "printed")))
+
+;; docs/render.md#a-change-is-edits-by-name: what the keyed read and its edits are, on the shape status draws
+(def ^:private proofs-a
+  '[seon.render.ui/status {:ctx [:task :proved]} [:h2 "Your proofs"]
+    [:ul {:key :proofs}
+     [:li {:key old-test} [:code "old-test"] ": fails"] [:li {:key b-test} [:code "b-test"] ": passes"] [:li {:key c-test} [:code "c-test"] ": passes"]
+     [:li {:key d-test} [:code "d-test"] ": passes"] [:li {:key e-test} [:code "e-test"] ": passes"] [:li {:key f-test} [:code "f-test"] ": passes"]]
+    [:p "Everything below this line is some text the agent has to read, long enough for a change above it to be worth saying by itself."]])
+
+(defn- no-position?
+  "Does no edit's path hold a position?"
+  {:malli/schema [:=> [:cat [:sequential :any]] :boolean]}
+  [es] (not-any? (fn [[p]] (some number? p)) es))
+
+(deftest a-change-speaks-in-names
+  (let [edits (fn [was now] (r/page-edits (r/forms-moved {"status" was} {"status" now})))
+        drop-old (assoc-in proofs-a [3] (into [:ul {:key :proofs}] (subvec (nth proofs-a 3) 3)))]
+    (testing "a named child gone is its name and :-"
+      (is (= '[[["status" :proofs old-test] :-]] (edits proofs-a drop-old))))
+    (testing "a named child changed is replaced at its name, its value the hiccup"
+      (is (= '[[["status" :proofs b-test] :r [:li {:key b-test} [:code "b-test"] ": fails"]]]
+             (edits proofs-a (assoc-in proofs-a [3 3] '[:li {:key b-test} [:code "b-test"] ": fails"])))))
+    (testing "a named child added is its name and :+"
+      (is (= '[[["status" :proofs g-test] :+ [:li {:key g-test} "new"]]]
+             (edits proofs-a (update proofs-a 3 conj '[:li {:key g-test} "new"])))))
+    (testing "what has no name is what its element holds of its own, :own, whole, never a position"
+      (let [es (edits proofs-a (assoc-in proofs-a [2] [:h2 "Your new proofs"]))]
+        (is (= [["status" :own]] (map first es)))
+        (is (= '[seon.render.ui/status {:ctx [:task :proved]} [:h2 "Your new proofs"] [:p "Everything below this line is some text the agent has to read, long enough for a change above it to be worth saying by itself."]]
+               (nth (first es) 2)))))
+    (testing "a value inside a named child never opens: its attributes and text are that child's"
+      (is (no-position? (edits proofs-a (assoc-in proofs-a [3 3 2 1] "b-renamed"))))
+      (is (= '[["status" :proofs b-test]] (map first (edits proofs-a (assoc-in proofs-a [3 3 2 1] "b-renamed"))))))
+    (testing "the whole component when that is shorter, and when nothing has a name"
+      (is (= [["status"]] (map first (edits '[f {} [:p "a"]] '[f {} [:p "b"]])))))
+    (testing "named children that changed places are no edit a name can say: the whole"
+      (let [swapped (assoc proofs-a 3 '[:ul {:key :proofs} [:li {:key b-test} [:code "b-test"] ": passes"] [:li {:key old-test} [:code "old-test"] ": fails"] [:li {:key c-test} [:code "c-test"] ": passes"]
+                                        [:li {:key d-test} [:code "d-test"] ": passes"] [:li {:key e-test} [:code "e-test"] ": passes"] [:li {:key f-test} [:code "f-test"] ": passes"]])]
+        (is (= [[["status"] :r swapped]] (edits proofs-a swapped)))))
+    (testing "names that are not distinct, or that take :own's place, are one value"
+      (is (= '[:ul [:li {:key a} "1"] [:li {:key a} "2"]] (r/keyed '[:ul [:li {:key a} "1"] [:li {:key a} "2"]])))
+      (is (= '[:ul [:li {:key :own} "1"]] (r/keyed '[:ul [:li {:key :own} "1"]]))))
+    (testing "a part's first draw and its going are the same words"
+      (is (= '[[["n"] :+ [f {}]] [["g"] :-]] (r/page-edits (r/forms-moved {"g" '[f {}]} {"n" '[f {}]})))))
+    (testing "an element's id names it where it has no :key: a component nested in a part"
+      (let [long-text (apply str (repeat 40 "word "))
+            mk (fn [t] ['f {} ['g {:id "cited-a"} [:p t] [:p {:key :x} long-text]] [:p {:key :y} long-text]])]
+        (is (= '[[["p" "cited-a" :own] :r [g {:id "cited-a"} [:p "b"]]]]
+               (r/page-edits (r/forms-moved {"p" (mk "a")} {"p" (mk "b")}))))))
+    (testing "no clock decides: with no timeout editscript holds no deadline"
+      (is (not (contains? (editscript.util.common/with-vec-deadline {:algo :quick :vec-timeout nil}) :editscript.util.common/vec-deadline))))))
 
 (defn cited-world
   "A task demo/c whose plan cites a wiki section, a defined var (with a test and a caller) and its own proof,

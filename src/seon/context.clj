@@ -935,6 +935,40 @@
   {:malli/schema [:=> [:cat :map] :boolean]}
   [e] (boolean (some #(= (:seon.eval/code e) (second %)) (vals render-calls))))
 
+(defn- commit-at
+  "Branch db as of t: the earliest commit of its line that holds t, a real db value (a historical view of it answers no store, which a status reads commits through), found by walking the line back from db, at the cost of the commits since. See docs/render.md#a-redo-is-an-explicit-bust."
+  {:malli/schema [:=> [:cat :seon.host/db :int] :seon.host/db]}
+  [db t]
+  (loop [at db]
+    (let [p (some->> (get-in at [:meta :datahike/parents]) (filter uuid?) first (d/commit-as-db (:store db)))]
+      (if (and p (>= (:max-tx p) t)) (recur p) at))))
+
+(defn page-at
+  "Agent a's page as of t on branch db, {id form} in placed order, drawn cold with today's renders: what `redo-tx` compares. See docs/render.md#a-redo-is-an-explicit-bust."
+  {:malli/schema [:=> [:cat :seon.host/db :int :int] :map]}
+  [db a t]
+  (let [at (commit-at db t)
+        w (render/draw (agent-ctx at a) ctx/changes at (render/declared-var :seon.render/render-ctx) {:model-only true :once true})]
+    (try (render/placed-hiccup w (render/page-lists w)) (finally (render/dispose-walk! w)))))
+
+(defn redo-tx
+  "The transaction that makes the page's evals of agent a's ctx c true again, in their order, on db: each is read against what the one before it showed (its :t), and one whose :since is not that, or that answers no t, is made anew from the page as of each t (`page-at`): edits (seon.render/page-edits), from nothing when none came before. Nothing broken, nothing. See docs/render.md#a-redo-is-an-explicit-bust."
+  {:malli/schema [:=> [:cat :seon.host/db :int :map] [:vector :map]]}
+  [db a c]
+  (let [evs (filter render-eval? (map (fn [e] (get-in c [:evals e])) (sort (keys (:evals c)))))]
+    (first
+     (reduce (fn [[tx t0] e]
+               (let [r (:seon.eval/response e) v (:value r) t1 (:t v)]
+                 (cond
+                   ;; an eval with no t (one that threw, or a redraw's) shows nothing the next can stand on
+                   (nil? t1) [tx t0]
+                   (or (:components v) (= t0 (:since v))) [tx t1]
+                   :else
+                   (let [edits (render/page-edits (render/forms-moved (when t0 (page-at db a t0)) (page-at db a t1)))
+                         nv (cond-> {:t t1 :edits edits} t0 (assoc :since t0))]
+                     [(conj tx {:seon.eval/id (:seon.eval/id e) :seon.eval/response (assoc r :value nv)}) t1]))))
+             [[] nil] evs))))
+
 (defn request
   "The agent's request, a reading of walk w, the one tree its page draws (docs/render.md#the-models-context-a-cached-prefix-then-the-turn): its conversation's list through the one generic conversion
   (seon.render/wire), so the request is what the tree holds, a re-eval in its own place. A request whose records hold no render of the page (an observer's context read, the first move a judge scores) ends

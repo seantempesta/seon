@@ -244,18 +244,13 @@
 
 (defn- show-page!
   "Seon shows the agent its page as an eval of its own (docs/render.md#the-render-is-an-eval), before the turn's number moves, so
-  the eval takes the turn in force and falls at the end of the turn before: the page whole (`seon.context/render-calls` :whole)
-  when this process has shown it none, else, when a part moved since (seon.render/revs against what the agent was last shown), what
-  moved (:changes); nothing moved, no eval. Recorded like any eval (origin :insert, by seon: seon.repl/insert!), so a render that
+  the eval takes the turn in force and falls at the end of the turn before: the one its walk owes (seon.render/page-call), nothing moved, no eval. Recorded like any eval (origin :insert, by seon: seon.repl/insert!), so a render that
   throws is its error value in the conversation and the turn goes on. See docs/turn.md#an-eval-can-be-inserted."
   {:malli/schema [:=> [:cat] :nil]}
   []
-  (let [seen (:render-seen @agent/state)
-        w (repl/page-walk)
-        revs (render/revs w (render/page-lists w))
+  (let [w (repl/page-walk)
         ;; a tree with no page to show (a pattern that holds none of it) is shown nothing
-        call (cond (nil? seen) (when (seq revs) (:whole context/render-calls))
-                   (not= seen revs) (:changes context/render-calls))]
+        call (some-> (render/page-call w (render/page-lists w)) context/render-calls)]
     (when call (repl/insert! "seon" [call]))
     nil))
 

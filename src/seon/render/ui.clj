@@ -1117,10 +1117,10 @@
      [:h2 "Your proofs"]
      (when test-run [:p "The tests could not run: " (str/join "; " (:failed test-run))])
      (when (next proofs)
-       (into [:ul] (for [{:keys [test status]} proofs] [:li [:code (str test)] ": " (get state-words status (kname status))])))
+       (into [:ul {:key :proofs}] (for [{:keys [test status]} proofs] [:li {:key test} [:code (str test)] ": " (get state-words status (kname status))])))
      ;; not written: where it goes and a test to copy
      (for [{:keys [test shape]} unwritten :let [{:keys [ns requires helpers example]} shape]]
-       [:div
+       [:div {:key test}
         [:p "Write " [:code (str test)] "." (when ns (list " It goes in " [:code (str ns)] (if requires ", which requires:" ".")))]
         (when requires [:pre [:code requires]])
         (when (seq helpers) [:p "Helpers a test there uses: " (str/join ", " (map #(str "`" (name %) "`") helpers)) ". Every helper there: " [:code (str "(dir " ns ")")]])
@@ -1129,29 +1129,29 @@
         (when scaffold [:div [:p "Scaffold:"] (form-hiccup scaffold)])])
      ;; red: which, what it asserted, what it got
      (for [{:keys [test failures]} red]
-       [:div
+       [:div {:key test}
         [:p [:code (str test)] " fails."]
         (for [{a :assert as :asserts g :got m :message} (take 1 failures)]
           [:p "It asserts " [:code (str/join ", " (map #(as-text %) (or as [a])))] " and got " [:code (as-text g)] (when m (str " (" m ")")) "."
            (when (next failures) (str " " (count (rest failures)) " more " (if (nnext failures) "assertions fail" "assertion fails") "."))])])
-     (when (seq unknown) [:p "Not run yet: " (str/join ", " (map #(str "`" (:test %) "`") unknown)) ". " [:code "(prove)"] " runs them."])
+     (when (seq unknown) [:p {:key :not-run} "Not run yet: " (str/join ", " (map #(str "`" (:test %) "`") unknown)) ". " [:code "(prove)"] " runs them."])
      ;; merge: nothing until something conflicts; then both sides and the form that settles each
      (when (seq unmerged)
-       [:div
+       [:div {:key :unmerged}
         [:p "Main changed these too, so they are unmerged. Settle each: keep yours, or take main's."]
         (for [{:keys [key ours theirs]} unmerged]
-          [:div [:p [:code (str key)] ". Yours:"] [:pre [:code (as-text ours)]] [:p "Main's:"] [:pre [:code (as-text theirs)]]
+          [:div {:key key} [:p [:code (str key)] ". Yours:"] [:pre [:code (as-text ours)]] [:p "Main's:"] [:pre [:code (as-text theirs)]]
            [:p "Keep yours: " [:code (str "(my.branch/resolve! '" key ")")] ". Take main's: " [:code (str "(my.branch/resolve! '" key " :theirs)")] "."]])])
      (cond
        (and green? (empty? blocks) (empty? unmerged))
-       [:p "Every proof passes and nothing blocks merging."]
+       [:p {:key :merging} "Every proof passes and nothing blocks merging."]
        (and green? (seq blocks))
-       [:div [:p "Every proof passes, but your branch can't merge yet:"]
+       [:div {:key :merging} [:p "Every proof passes, but your branch can't merge yet:"]
         (into [:ul] (for [[what x do] blocks]
                       [:li what (when (some? x) (str ": " (if (coll? x) (str/join ", " (map #(as-text (if (map? %) (or (:key %) (:symbol %) %) %)) x)) x)))
                        (when do [:span ". To clear it: " (form-hiccup do)])]))]
        (seq blocks)
-       [:div [:p "Also blocking merging:"]
+       [:div {:key :merging} [:p "Also blocking merging:"]
         (into [:ul] (for [[what x do] blocks]
                       [:li what (when (some? x) (str ": " (if (coll? x) (str/join ", " (map #(as-text (if (map? %) (or (:key %) (:symbol %) %) %)) x)) x)))
                        (when do [:span ". To clear it: " (form-hiccup do)])]))])
@@ -1205,7 +1205,7 @@
     (when (seq (:classes r))
       (into [:section [:h2 "Your open problems"]]
             (for [[c {:keys [n rows]}] (:classes (problems-model {} r))]
-              [:div [:h3 (str (kname c) " " n)]
+              [:div {:key c} [:h3 (str (kname c) " " n)]
                (into [:ul]
                      (for [{:keys [count type message read open?]} rows]
                        [:li (str count " x") (when type [:code (str type)]) (when message (str " " message)) (when (false? open?) " (closed)") (when read [:code (print/text read)])]))])))))

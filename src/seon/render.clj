@@ -24,7 +24,7 @@
   A nested value renders by a call ([render opts v] in hiccup, or render's result)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.print :as print] [seon.print.select :as select] [seon.config :as config]
-            [clojure.string :as str] [clojure.walk] [datahike.api :as d] [datahike.reads :as reads] [datahike.db.utils :as dbu] [seon.web.html :as h] [seon.ratom :as ratom] [seon.profile :as profile]))
+            [clojure.string :as str] [clojure.walk] [datahike.api :as d] [datahike.reads :as reads] [datahike.db.utils :as dbu] [seon.web.html :as h] [seon.ratom :as ratom] [seon.profile :as profile] [editscript.core :as ed]))
 
 (defn parents
   "The named schemas k's form extends ([:and p ...] or [:merge p ...])."
@@ -248,14 +248,14 @@
   one diff, seon.ctx/changes), the db its db renders read (db-fn, called when one runs) and its
   root call. Holds, in this process, the one cache: each component's reaction, args, output and
   db reads ({key entry}), an index from read key to the components that read it, the marker of each form drawn, its render queue (the keys a change reached), what a flush's runs let go of (:gone), who left out a page's piece (:skipped, a walk :model-only), mount counter and ledger
-  (calls, hits, misses and allocation by render var), and the render vars it watches: each it drew, once,
+  (calls, hits, misses and allocation by render var), what the model was last shown of it (:shown, `page-value`), and the render vars it watches: each it drew, once,
   whose redefinition (a defn at the REPL: Clojure's watch on a var's root) queues that var's components
   for the next flush!, found in the cache when it fires. A cold walk (root drawing a branch) is a
   walker drawn once."
   {:malli/schema [:=> [:cat :map :seon.host/fn [:vector :any]] :map]}
   [src db-fn root]
   {:src src :db db-fn :root root :cache (volatile! {}) :queue (volatile! #{}) :mounts (volatile! 0)
-   :ledger (volatile! {}) :out (volatile! nil) :db-keys (volatile! #{}) :readers (volatile! {}) :forms (volatile! {}) :drawn (ratom/atom {}) :watched (volatile! #{}) :inputs (volatile! {}) :gone (volatile! #{}) :skipped (volatile! #{}) :defects (volatile! [])})
+   :ledger (volatile! {}) :out (volatile! nil) :db-keys (volatile! #{}) :readers (volatile! {}) :forms (volatile! {}) :drawn (ratom/atom {}) :watched (volatile! #{}) :inputs (volatile! {}) :gone (volatile! #{}) :skipped (volatile! #{}) :defects (volatile! []) :shown (volatile! nil)})
 
 (defn- led!
   "Count k (:hit, :miss, :same) for render var f in w's ledger, with the ticks and bytes a run took."
@@ -608,7 +608,7 @@
   "The characters x holds, as the one sizer counts them: its strings and the text of its other leaves, a mark for each collection
   and nothing printed: an estimate of what is shown, not a text made."
   {:malli/schema [:=> [:cat :any] nat-int?]}
-  [x] (cond (coll? x) (reduce + 1 (map size x)) (nil? x) 0 :else (count (str x))))
+  [x0] ((fn go [x] (cond (coll? x) (reduce + 1 (map go x)) (nil? x) 0 :else (count (str x)))) x0))
 
 (defn tokens-of
   "What x costs the context in tokens: the one sizer (`seon.print.emit/chars-tokens`) over the characters x holds, the same count
@@ -683,10 +683,10 @@
   [f] (print/text (vary-meta (printable f) assoc :seon.print/full true)))
 
 (defn parts-value
-  "Parts m (a sequence of [id form], or {id form}, in placed order) as the value an eval answers: a vector of [id form], so the order they are placed in is the order they print in whatever the store does with a map, each form ready to print (`printable`), named a :seon.render/parts,
+  "Parts m (a sequence of [id form], or {id form}, in placed order) as the value an eval answers, {:components [[id form] ...]}: a vector, so the order they are placed in is the order they print in whatever the store does with a map, each form ready to print (`printable`), named a :seon.render/parts,
   which prints whole (:seon.print/full on its schema), the stored value too. See docs/render.md#the-render-is-an-eval."
   {:malli/schema [:=> [:cat [:or :map [:sequential :any]]] :seon.render/parts]}
-  [m] (with-meta (mapv (fn [[id f]] [id (printable f)]) m) {:seon.render/schema :seon.render/parts :seon.print/full true}))
+  [m] (with-meta {:components (mapv (fn [[id f]] [id (printable f)]) m)} {:seon.render/schema :seon.render/parts :seon.print/full true}))
 
 (defn placed-hiccup
   "The parts of walk w placed in the root's lists with element ids sels ([\"#p-task\"]), in order, as {id form}: what
@@ -701,25 +701,103 @@
   [w sels]
   (vec (for [[_ k] (placed w sels) :let [c (get @(:cache w) k)] :when (not= "page" (:wire/for (:opts c)))] [(:id c) k])))
 
-(defn revs
-  "The revisions of the parts of walk w placed in the lists sels, {id tree-rev}: what moves when a part's output, or one below it,
-  changed. Compared with an earlier answer it says whether anything moved, with no part made. See docs/render.md#the-render-is-an-eval."
-  {:malli/schema [:=> [:cat :map [:sequential :string]] [:map-of :string :int]]}
-  [w sels]
-  (into {} (map (fn [[id k]] [id (tree-rev w k)])) (placed-ids w sels)))
+(defn keyed
+  "Hiccup form x as a diff reads it: an element with named children (each named by its :key, Reagent's, else its id, a component's name-based id) a map in their order, each under its name and read the same way, and under :own the element without them; any other value, and an element whose names are not distinct, one value. The form it read is its metadata, ::form. Local fns: no contracted call a node. See docs/render.md#a-change-is-edits-by-name."
+  {:malli/schema [:=> [:cat :any] :any]}
+  [x0]
+  (letfn [(child-name [x] (when (and (vector? x) (map? (second x))) (let [a (second x)] (or (:key a) (:id a)))))
+          (go [x]
+            (if-not (vector? x)
+              x
+              (let [n (if (map? (second x)) 2 1)
+                    kids (subvec x n)
+                    named (filter child-name kids)]
+                (if (and (seq named) (apply distinct? :own (map child-name named)))
+                  (with-meta (apply array-map :own (into (subvec x 0 n) (remove child-name kids)) (mapcat (juxt child-name go) named)) {::form x})
+                  x))))]
+    (go x0)))
 
-(defn parts-since
-  "The parts of walk w placed in the lists sels that moved since seen ({id tree-rev} of an earlier answer): {:parts [[id form]] in placed order
-  :revs {id tree-rev} :gone [id]}. The walk already compared each part's output with its last (a revision moves only when it
-  differs, `render!`), so nothing is compared or drawn here but the revisions (`revs`), and a part's form (`part-form`) is made only for a
-  part that moved; nothing moved, nothing made. A walk new to its process has seen nothing: every part."
-  {:malli/schema [:=> [:cat :map [:sequential :string] [:maybe :map]] [:map [:parts [:vector :any]] [:revs :map] [:gone [:vector :string]]]]}
-  [w sels seen]
-  (let [ps (placed-ids w sels)
-        revs (into {} (map (fn [[id k]] [id (tree-rev w k)])) ps)]
-    {:parts (into [] (keep (fn [[id k]] (when (not= (get seen id) (get revs id)) (when-let [f (part-form w k)] [id f])))) ps)
-     :revs revs
-     :gone (vec (remove revs (keys seen)))}))
+(defn- reordered?
+  "Did named children that both reads a and b (`keyed`) hold change places, there or below? Map keys say nothing of it, so an edit could not. Local fn: no contracted call a node. See docs/render.md#a-change-is-edits-by-name."
+  {:malli/schema [:=> [:cat :any :any] :boolean]}
+  [a0 b0]
+  ((fn go [a b]
+     (boolean (and (map? a) (map? b)
+                   (let [both (filter #(contains? b %) (keys a))]
+                     (or (not= both (filter #(contains? a %) (keys b)))
+                         (some #(go (get a %) (get b %)) both))))))
+   a0 b0))
+
+(defn- named-edit
+  "Edit e of a diff whose new read is b, with no position in its path: a path that enters one value of b (`keyed`'s) replaces that value whole, at its name. See docs/render.md#a-change-is-edits-by-name."
+  {:malli/schema [:=> [:cat :any [:vector :any]] [:vector :any]]}
+  [b [p :as e]]
+  (loop [i 0 x b]
+    (cond (= i (count p)) e
+          (vector? x) [(subvec p 0 i) :r x]
+          :else (recur (inc i) (get x (nth p i))))))
+
+(defn- component-edits
+  "What moved in component id from form was to form now, as edits with their paths in names, its id first, each value hiccup; or the component whole, when that is shorter or edits could not say it: nothing to compare with, it left, or its named children changed places. See docs/render.md#a-change-is-edits-by-name."
+  {:malli/schema [:=> [:cat :string :any :any] [:vector :any]]}
+  [id was now]
+  (cond
+    (nil? was) [[[id] :+ now]]
+    (nil? now) [[[id] :-]]
+    :else
+    (let [a (keyed was) b (keyed now)
+          whole [[[id] :r now]]
+          es (when-not (reordered? a b)
+               ;; :vec-timeout nil: left to its default a clock would decide what comes out, by :quick as by :a-star (editscript.util.common/with-vec-deadline)
+               (mapv (fn [[p op v :as e]] (cond-> (assoc e 0 (into [id] p)) (= 3 (count e)) (assoc 2 (::form (meta v) v))))
+                     (distinct (map #(named-edit b %) (ed/get-edits (ed/diff a b {:algo :quick :vec-timeout nil}))))))]
+      (if (and (seq es) (< (size es) (size whole))) es whole))))
+
+(defn page-edits
+  "What moved of a page, [[id was now] ...] (`moved`, `forms-moved`), as edits (`component-edits`), in that order. See docs/render.md#a-change-is-edits-by-name."
+  {:malli/schema [:=> [:cat [:sequential :any]] [:vector :any]]}
+  [mv] (printable (into [] (mapcat (fn [[id was now]] (component-edits id was now))) mv)))
+
+(defn forms-moved
+  "What moved between two pages, {id form} before and after (`placed-hiccup`), as `moved` answers it: each component of after that differs, in its order, then each that left. See docs/render.md#a-redo-is-an-explicit-bust."
+  {:malli/schema [:=> [:cat [:maybe :map] :map] [:vector :any]]}
+  [before after]
+  (into (into [] (keep (fn [[id f]] (when (not= f (get before id)) [id (get before id) f]))) after)
+        (keep (fn [[id f]] (when-not (contains? after id) [id f nil])))
+        before))
+
+(defn moved
+  "The components of walk w placed in the lists sels whose form is not the one it last showed (:shown, `page-value`), [[id was now]] in placed order and then those that left (now nil); a walk that has shown nothing: every component, was nil. A component's form is made only when its revision moved (the walk compared its output once, `render!`), so nothing moved, nothing made; a revision that moved what the model does not read moves nothing here. See docs/render.md#the-render-is-an-eval."
+  {:malli/schema [:=> [:cat :map [:sequential :string]] [:vector :any]]}
+  [w sels]
+  (let [{:keys [revs forms]} @(:shown w)
+        ps (placed-ids w sels)
+        now (into {} (map (fn [[id k]] [id (tree-rev w k)])) ps)
+        mv (into [] (keep (fn [[id k]] (when (not= (get revs id) (get now id))
+                                         (let [f (part-form w k)] (when (not= f (get forms id)) [id (get forms id) f])))))
+                 ps)]
+    (when @(:shown w) (vswap! (:shown w) assoc :revs (reduce (fn [m [id]] (assoc m id (get revs id))) now mv)))
+    (into mv (keep (fn [[id f]] (when-not (contains? now id) [id f nil]))) forms)))
+
+(defn page-call
+  "Which of Seon's evals of the page walk w owes the model, a key of seon.context/render-calls: :whole when it has shown it nothing, :changes when a component moved since, nil when nothing did. See docs/render.md#the-render-is-an-eval."
+  {:malli/schema [:=> [:cat :map [:sequential :string]] [:maybe [:enum :whole :changes]]]}
+  [w sels] (when (seq (moved w sels)) (if @(:shown w) :changes :whole)))
+
+(defn page-value
+  "What an eval of walk w's page answers, as of t, and what it shows is now what the walk compares against: with whole? or nothing shown yet, every component, {:t :components}; else {:since :t :edits}, what moved since the t it was last shown, as edits. The walk holds the form it last showed of each component and nothing else; a new process's holds none. See docs/render.md#the-render-is-an-eval."
+  {:malli/schema [:=> [:cat :map [:sequential :string] :int :boolean] :seon.render/parts]}
+  [w sels t whole?]
+  (let [{since :t forms :forms} @(:shown w)
+        whole? (or whole? (nil? since))
+        _ (when whole? (vreset! (:shown w) nil))
+        mv (moved w sels)]
+    (vreset! (:shown w) {:t t
+                         :revs (into {} (map (fn [[id k]] [id (tree-rev w k)])) (placed-ids w sels))
+                         :forms (reduce (fn [m [id _ f]] (if f (assoc m id f) (dissoc m id))) (if whole? {} forms) mv)})
+    (if whole?
+      (assoc (parts-value (map (fn [[id _ f]] [id f]) mv)) :t t)
+      (with-meta {:since since :t t :edits (page-edits mv)} {:seon.render/schema :seon.render/parts :seon.print/full true}))))
 
 (defn draw
   "Tree t (a ctx value: seon.ctx/build's :tree) drawn once by the layout var root-var over db, its
