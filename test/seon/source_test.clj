@@ -227,7 +227,7 @@
     (is (clojure.string/includes? (str (:message e)) "boom at load"))))
 
 (deftest an-imported-namespace-the-process-does-not-hold-is-loaded
-  ;; task seon.agent/an-agent-holds-mains-tests: test/ is imported but not built into the
+  ;; test/ is imported but not built into the
   ;; binary; its forms load where main's program runs (root, the fork server, so every agent)
   (let [main (main-with-file)]
     (remove-ns 'app.pt-src)
@@ -296,7 +296,7 @@
         "a namespace required from a later file is analyzed first, and its alias reads ::z/k")))
 
 (deftest a-changed-ns-form-applies-its-requires-before-its-forms
-  ;; task seon.source/an-import-reads-a-changed-ns-form-before-its-forms: a restarted root
+  ;; a restarted root
   ;; loads main's program first (seon.program/load-all!), which runs a test namespace's old
   ;; ns form and so marks it loaded; the import of its changed file must still apply the
   ;; new ns form (a new require and alias) before analyzing the forms that use it. Seen

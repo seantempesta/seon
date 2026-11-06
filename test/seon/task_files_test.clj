@@ -87,7 +87,7 @@
         "a need that names no task")))
 
 (deftest the-shipped-task-files-load
-  ;; task seon.task/the-shipped-task-files-load: every file in the shipped task directory
+  ;; every file in the shipped task directory
   ;; reads and loads onto a test branch with no error (a task file is no input of the digest: an edit
   ;; to one is found by the full run, bin/test --all)
   (let [files (shipped-task-files)]
@@ -114,7 +114,7 @@
     (is (= [] (vec left)) "each is completed work: remove its entry from resources/seon/tasks/ in the merge that says Completes: it")))
 
 (deftest a-file-task-merges-itself
-  ;; task seon.reconcile/a-work-task-merges-itself-through-the-one-gate: a task loaded from a
+  ;; a task loaded from a
   ;; task file is one :whole task (seon.template/request), so no merge task is written and a
   ;; need on another file's task is a need on it
   (let [dir (doto (java.io.File. (str (System/getProperty "java.io.tmpdir") "/seon-task-files-" (random-uuid))) (.mkdirs))

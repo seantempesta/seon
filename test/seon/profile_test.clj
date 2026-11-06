@@ -117,7 +117,7 @@
   [] (busy-threads 1 #(dotimes [_ 1000] (vec (range 100)))))
 
 (deftest a-threads-allocation-is-its-own
-  ;; task seon.cost/a-proof-measures-only-its-own-thread: alloc-bytes counted the whole
+  ;; alloc-bytes counted the whole
   ;; process (1,712 B idle against 1.4 GB in 200 ms while another thread allocated), so a cost
   ;; proof read other threads' work as its own. Now it is the calling thread's count alone.
   (let [window #(let [a0 (profile/alloc-bytes) _ (Thread/sleep 200)] (- (profile/alloc-bytes) a0))]

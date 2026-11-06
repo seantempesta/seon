@@ -213,8 +213,7 @@
 (def ^:private starter
   "This test process's starter fifo: made once, named by its pid, and held open read-write for the
   process's life (its children do not inherit it), so its EOF says the test process is gone however
-  it ended; what a test starts runs under bin/held, which ends it then (task
-  seon.check/a-test-root-names-its-store-and-main). Removed by the next process's first use
+  it ended; what a test starts runs under bin/held, which ends it then. Removed by the next process's first use
   (bin/held --reclaim: its pid is no process) - task seon.check/a-killed-starter-leaves-no-fifo -
   never by a shutdown hook: hooks run at once, and one removing it raced the shared roots' stop
   (start-shared-root!), whose bin/held then refused to run (the roots outlived their shards).
@@ -241,8 +240,7 @@
 
 (defn- root-sh
   "bin/root COMMAND ARGS for a test's root (root): its store, main and runs named in the
-  environment it starts with, over the caller's, so nothing inherited redirects it (task
-  seon.check/a-test-root-names-its-store-and-main); its server port -1, a port the kernel
+  environment it starts with, over the caller's, so nothing inherited redirects it; its server port -1, a port the kernel
   assigns, which bin/root next carries to the next generation."
   {:malli/schema [:=> [:cat :map :string [:sequential :string]] :map]}
   [{:keys [store main runs env]} command args]

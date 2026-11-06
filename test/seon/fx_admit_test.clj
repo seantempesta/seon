@@ -40,7 +40,7 @@
     (is (= [3] (ran o)) "prio is the task's depth in the needs DAG: finishing a chain beats starting one")))
 
 (deftest a-rate-limited-model-call-waits-for-the-bucket-and-is-answered
-  ;; task seon.fx/a-transient-model-failure-parks: a 429 is the provider saying "wait", so
+  ;; a 429 is the provider saying "wait", so
   ;; the owner keeps the request (the worker hands it back as :request) until its bucket refills,
   ;; and the asker is answered only by the call that went through
   (let [r (req 1 10)

@@ -1,6 +1,5 @@
 (ns datahike.reads-test
-  "Datahike's read recording, as Seon's render cache uses it (fork branch jolt/with-reads;
-  task seon.render/a-view-renders-once-per-change-of-its-reads): what a read scanned, by
+  "Datahike's read recording, as Seon's render cache uses it (fork branch jolt/with-reads): what a read scanned, by
   entity and value, and whether a transaction touched it."
   (:require [clojure.test :refer [deftest is testing]] [datahike.api :as d] [datahike.datom :as dd] [seon.test-store :as ts] [seon.cost :as cost]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow]))

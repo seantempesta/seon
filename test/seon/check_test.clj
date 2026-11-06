@@ -86,7 +86,7 @@
       (finally (clojure.java.shell/sh "rm" "-rf" path (str path "-agents") runs)))))
 
 (deftest records-are-read-at-the-agents-commit
-  ;; task seon.check/mcp-reads-the-agents-records-once-committed: the branch is read again at
+  ;; the branch is read again at
   ;; each of the agent's commit events, never before one when its records are not there yet
   (let [ev (a/chan 8)
         reads (atom 0)
@@ -99,7 +99,7 @@
     (is (= {:type :ready :agent :a3} (a/poll! ev)) "it waited through a1's commit, not a2's or a reply")))
 
 (deftest the-probe-says-what-it-took
-  ;; task seon.check/every-wait-is-the-event-it-means: the system check awaits the probe's
+  ;; the system check awaits the probe's
   ;; own event for its third message, not a window
   (let [ev (a/chan 4)
         st (#'seon.check/probe-proc {:tag "one" :events ev})
@@ -110,7 +110,7 @@
            (map #(mapv (fn [e] (dissoc e :at-ms)) (:events %)) [o1 o2])))))
 
 (deftest every-test-root-starts-through-start-root!
-  ;; task seon.check/a-test-root-names-its-store-and-main: read from the program of test/ (the
+  ;; read from the program of test/ (the
   ;; compiler's references, not a text search over files), no test var but the helper's one
   ;; launcher runs bin/root or `./seon root` through binary-sh, so every test root names its
   ;; store and main and waits on its listening line

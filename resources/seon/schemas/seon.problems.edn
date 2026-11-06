@@ -37,9 +37,9 @@
  ;; run records its reds at its end), a spawn or fork refused (seon.root/set-agent)
  :seon.agent/failed [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/failed]] [:agent :keyword]]]
  ;; an agent's socket to root that cannot raise SIGIO (seon.sock/signal-at-input!): the agent
- ;; ends with its root only when it next reads that socket (task seon.agent/an-agent-ends-with-its-root)
+ ;; ends with its root only when it next reads that socket
  :seon.sock/unwatched [:and :seon.error/base [:map [:seon.error/type [:= :seon.sock/unwatched]] [:errno :int]]]
- ;; the kernel refused a write for a reason other than a gone peer (task seon.sock/a-frame-is-written-whole)
+ ;; the kernel refused a write for a reason other than a gone peer
  :seon.sock/write-failed [:and :seon.error/base [:map [:seon.error/type [:= :seon.sock/write-failed]] [:errno :int] [:fd :int] [:sent :int] [:of :int]]]
  :seon.agent/stalled [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/stalled]] [:agent :keyword]
                                              [:quiet-ms :int] [:last-op {:optional true} [:maybe :seon.agent/last-op]]]]
