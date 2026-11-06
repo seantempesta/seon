@@ -235,7 +235,7 @@
     [(if (seq said) (str/join "\n\n" said) text) (mapv #(dissoc % :message-md) ks)]))
 
 (def ^:private markup
-  "What DeepSeek's own tool-call markup holds, its fullwidth bars and name, when its call comes back as text (deepseek-run4, 2026-11-07: the
+  "What DeepSeek's own tool-call markup holds, its fullwidth bars and name, when its call comes back as text (deepseek-run4: the
   text ends in a closing parameter tag, and no opening one came with it, so no call can be read out of it)."
   "｜DSML｜")
 
