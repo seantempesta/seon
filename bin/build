@@ -292,6 +292,10 @@ build_seon() {
   [ -n "$tree" ] && echo "$tree" > "$T/seon.tree"
   [ -z "$key" ] || echo "$key" > "$T/seon.stamp"
   say "seon: built target/seon (tree ${tree:-unknown})"
+  # this binary's compile cache warmed with the test namespaces, here at the build, so no agent compiles them at its first fork (seon.check/warm-tests)
+  ( cd "$T" && SEON_CHECKOUT=$ROOT HOME=$T/home nice -n 15 ./seon warm-tests --profile scripted ) > "$T/warm-tests.log" 2>&1 ||
+    say "seon: warming the test namespaces failed; see target/warm-tests.log (the first agent compiles them)"
+  say "seon: $(grep -a '^WARM-TESTS' "$T/warm-tests.log" | head -1)"
 }
 
 case $STEP in

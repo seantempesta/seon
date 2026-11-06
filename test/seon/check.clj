@@ -23,6 +23,16 @@
     (out! nm (if ok " OK" " FAILED"))
     (lib/c-exit (if ok 0 1))))
 
+(defn- warm-tests
+  "Every test namespace of the checkout required once, so this binary's compile cache (JOLT_CACHE_DIR) holds them: bin/build runs it, and the first agent
+  after a build then loads them compiled rather than compiling them (seon.program/load-all!). One that does not load is named and left to whoever loads it."
+  []
+  (let [root (seon.config/checkout) prefix (str root "/test/")
+        nss (for [^java.io.File f (file-seq (java.io.File. (str root "/test"))) :let [p (.getPath f)] :when (re-find #"_test\.clj$" p)]
+              (-> p (subs (count prefix)) (clojure.string/replace #"\.clj$" "") (clojure.string/replace "/" ".") (clojure.string/replace "_" "-") symbol))
+        bad (vec (keep (fn [n] (try (require n) nil (catch Throwable e [n (ex-message e)]))) nss))]
+    (out! "WARM-TESTS " (count nss) " namespaces, " (count bad) " that do not load: " (pr-str bad))))
+
 (defn- run-check
   "One check mode's frame: root booted with opts (seon.root/start!; nil boots none), (body sys)
   answering {:checks {k truthy} :report m :then :stop|:kill}, the report printed with its
@@ -144,6 +154,8 @@
   (run-check "SMOKE" {:datoms 2000}
    (fn [sys]
     (let [_ (out! "booted: " (:main (c/state sys {:datoms true})))
+        ;; after root's boot, whose :preload is ahead of this on the fork server's queue, a first fork has nothing to load
+        preloaded (false? (:tests-due @(c/call! sys {:op :fs :req {:op :stats}})))
         tasks {:a1 "square numbers" :a2 "count the program's vars" :a3 "write a note about app.m0/f1"}
         ids (apply spawn-ready! sys (vals (sort tasks)))
         _ (out! "spawned " ids ", ready")
@@ -216,7 +228,7 @@
         st (c/state sys)]
       {:report {:state (-> st (update :agents (fn [ags] (into (sorted-map) (for [[k v] ags] [k (-> v (dissoc :evals) (update :tests #(some-> % (dissoc :reports))))])))))}
        ;; each agent's tests ran and passed; a1 and a3 merged; a2 is refused (its conflict unmerged)
-       :checks {:every-agent's-tests-pass (every? (fn [id] (let [t (tests id)] (and (not (contract/error? t)) (pos? (:pass t)) (zero? (+ (:fail t) (:error t)))))) ids)
+       :checks {:a-first-fork-has-nothing-to-load preloaded :every-agent's-tests-pass (every? (fn [id] (let [t (tests id)] (and (not (contract/error? t)) (pos? (:pass t)) (zero? (+ (:fail t) (:error t)))))) ids)
                 :a1-merged (:merged? m1)
                 :a3-merged-twice (and (:merged? m3) (:merged? m3b))
                 :a2-refused (not (:merged? m2))}}))))
@@ -1961,6 +1973,7 @@
   an unknown mode prints these names (bin/check passes its mode here)."
   (let [n-or (fn [n d] (Long/parseLong (or n d)))]
     (sorted-map
+     "warm-tests" (fn [n more] (warm-tests))
      "seed" (fn [n more] (seed (n-or n "2000")))
      "drop" (fn [n more] (drop-mains (remove nil? (cons n more))))
      ;; the store bin/check is given, its size and branch count: "PATH KB BRANCHES"
