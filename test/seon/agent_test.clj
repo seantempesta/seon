@@ -343,7 +343,7 @@
     (is (= -1 ended) (str "the proof run outlived its agent (byte " ended " after its sleep); agent " (pr-str pid) " kill " (pr-str killed)))))
 
 (deftest a-two-child-proof-run-ends-with-its-agent
-  ;; intermittently red: task seon.agent/a-two-child-proof-run-sometimes-reads-eof-from-its-second-child
+  ;; intermittently red: task seon.agent/a-proof-child-that-died-says-why. A wrong began keeps what the run answered, in the message
   ;; for a run dealt into two children. Child A's test holds the write end
   ;; of a fifo and sleeps; child B's test blocks for good where no signal reaches (a take from a channel nothing puts
   ;; on), so B outlives its agent's death. The agent is killed: the fifo's EOF says A is gone while B is alive. No clock
@@ -353,7 +353,7 @@
         fifo-a (str dir ".a.fifo")
         fifo-b (str dir ".b.fifo")
         _ (doseq [f [fifo-a fifo-b]] (sh/sh "mkfifo" f))
-        {:keys [pid began ended killed]}
+        {:keys [pid began ended killed answered]}
         (with-agent tuned
           (fn [{:keys [names eval-root]}]
             (let [a (:agent names) ev (comp root-value eval-root)
@@ -367,6 +367,8 @@
                   in-a (java.io.FileInputStream. ^String fifo-a)
                   in-b (java.io.FileInputStream. ^String fifo-b)
                   began [(.read in-a) (.read in-b)]
+                  ;; a child that never reached its write has ended, so the run ends when A wakes: what it answered says why, which killing the agent would lose
+                  answered (when (not= [49 49] began) (ev "(pr-str @blocked)"))
                   killed (sh/sh "kill" "-9" (str pid))
                   ended (.read in-a)]
               (.close in-a) (.close in-b)
