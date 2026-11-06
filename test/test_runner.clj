@@ -358,7 +358,7 @@
   :seon.proofs/unread, when the results could not be read (read-results)."
   [root what all? names store]
   (let [unread (volatile! nil)
-        p (proofs/plan-of (tests-of root names store) what all? names
+        p (proofs/plan-of (assoc (tests-of root names store) :slow-of fx/slow-tests) what all? names
                   (some->> (fx/base-commit root) (fx/tree-of root))
                   ;; the verdicts cached at the candidates' digests; a read that failed is the plan's
                   ;; :unread (prove! stops on it), never zero greens
@@ -387,7 +387,10 @@
         1)
   (let [dir (str "the verdict cache " (config/value :seon.config.proofs/results-dir))
         tests? (not= what "checks") checks? (not= what "tests")
-        {:keys [run-tests run-steps reused cand left digests steps missing inputs binary no-test process flaky]} plan
+        {:keys [run-tests run-steps reused cand left slow digests steps missing inputs binary no-test process flaky]} plan
+        _ (when (seq slow)
+            (println (str "prove: " (count slow) " slow tests left out, each a held task to make it fast (run one by name: bin/test NS/TEST, all: bin/test --all): "
+                          (str/join " " (map (fn [[t ms]] (str t " " ms "ms")) (sort-by (comp - val) slow))))))
         ;; a test namespace of the tree that its program db holds no test of: nothing it holds can
         ;; be selected, so a run would say OK of tests it never saw
         no-test (when tests? (seq no-test))
