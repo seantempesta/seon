@@ -748,25 +748,16 @@
                  :when (seq ms)]
              [t (nth ms (quot (count ms) 2))]))))
 
-(defn- green-ticks
-  "The ticks the green verdict file f measured, read from its first bytes (a verdict writes :ticks
-  before its failures, cost and per-function rows, which are most of its size: seon.fx/write-verdicts!),
-  nil when it has none or cannot be read. An order of work, never a verdict (docs/merging.md#a-tests-tick-budget)."
-  {:malli/schema [:=> [:cat :any] [:maybe :int]]}
-  [f]
+(defn- green-measure
+  "The number the green verdict file f measured under k (\"ticks\", \"ms\"), read from its first bytes (a verdict
+  writes its measures before its failures, cost and per-function rows, which are most of its size:
+  seon.fx/write-verdicts!), nil when it has none or cannot be read. A measure, never a verdict
+  (docs/merging.md#a-tests-tick-budget, docs/merging.md#a-slow-test-is-left-out)."
+  {:malli/schema [:=> [:cat :any :string] [:maybe :int]]}
+  [f k]
   (try (with-open [r (java.io.FileReader. ^java.io.File f)]
          (let [buf (char-array 768) n (.read r buf)]
-           (when (pos? n) (some-> (re-find #":ticks (\d+)" (String. buf 0 (int n))) second parse-long))))
-       (catch java.io.IOException _ nil)))
-
-(defn- green-ms
-  "The ms the green verdict file f measured, read from its first bytes as green-ticks reads :ticks, nil
-  when it has none or cannot be read. A measure, never a verdict (docs/merging.md#a-slow-test-is-left-out)."
-  {:malli/schema [:=> [:cat :any] [:maybe :int]]}
-  [f]
-  (try (with-open [r (java.io.FileReader. ^java.io.File f)]
-         (let [buf (char-array 768) n (.read r buf)]
-           (when (pos? n) (some-> (re-find #":ms (\d+)" (String. buf 0 (int n))) second parse-long))))
+           (when (pos? n) (some-> (re-find (re-pattern (str ":" k " (\\d+)")) (String. buf 0 (int n))) second parse-long))))
        (catch java.io.IOException _ nil)))
 
 (defn slow-tests
@@ -783,7 +774,8 @@
                   :let [fs (filterv #(= :pass (second %)) (verdict-files dir t))
                         own (some (fn [[d _ f]] (when (= d dg) f)) fs)
                         newest (take greens (sort-by #(- (.lastModified ^java.io.File %)) (map last fs)))
-                        ms (if own [(green-ms own)] (sort (keep green-ms newest)))
+                        ms (if own [(green-measure own "ms")] (sort (keep #(green-measure % "ms") newest)))
+                        ms (remove nil? ms)
                         ms (when (seq ms) (nth ms (quot (count ms) 2)))]
                   :when (and ms (>= ms bound))]
               [t ms]))))
@@ -802,7 +794,7 @@
   ([dir tests cap floor factor]
    (when (pos? cap)
      (into {} (for [t (distinct tests)
-                    :let [g (sort (keep (fn [[_ st f]] (when (= :pass st) (green-ticks f))) (verdict-files dir t)))
+                    :let [g (sort (keep (fn [[_ st f]] (when (= :pass st) (green-measure f "ticks"))) (verdict-files dir t)))
                           med (if (seq g) (nth g (quot (count g) 2)) 0)]]
                 [t (min cap (max floor (* factor med)))])))))
 
