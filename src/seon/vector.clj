@@ -290,13 +290,12 @@
         removed))
 
 (defn fact
-  "The vector entity of entity e (an id, tempid or lookup ref): its vector v of the text at transaction t,
-  that text's whole tokens n (past :seon.config.vector/max-tokens its first were embedded), made by
+  "The vector entity of entity e (an id, tempid or lookup ref): its vector v of the text at transaction t, made by
   model. Its identity is :seon.vector/of, so a vector written again replaces e's
   (docs/vector.md#a-vector-is-its-own-entity)."
-  {:malli/schema [:=> [:cat :seon.db/ref :int [:vector {:min 1} number?] :int :string] :map]}
-  [e t v n model]
-  (assoc (pack v) :seon.vector/of e :seon.vector/model model :seon.vector/text-t t :seon.vector/tokens n))
+  {:malli/schema [:=> [:cat :seon.db/ref :int [:vector {:min 1} number?] :string] :map]}
+  [e t v model]
+  (assoc (pack v) :seon.vector/of e :seon.vector/model model :seon.vector/text-t t))
 
 (defn orphaned
   "The retractions of the vectors on db whose entity was retracted, [[:db/retract ve a v] ...].
@@ -313,12 +312,11 @@
   ([from db] (gone-in db (first (d/datoms-diff from db :eavt [])))))
 
 (defn tx-data
-  "The vector entities of embedded texts: entity es[i]'s vector vs[i] of the text at transaction ts[i], that
-  text's whole tokens ns[i] (past :seon.config.vector/max-tokens its first were embedded), made by
+  "The vector entities of embedded texts: entity es[i]'s vector vs[i] of the text at transaction ts[i], made by
   model (`fact`)."
-  {:malli/schema [:=> [:cat [:sequential :int] [:sequential :int] [:sequential [:vector {:min 1} number?]] [:sequential :int] :string] [:vector :map]]}
-  [es ts vs ns model]
-  (mapv (fn [e t v n] (fact e t v n model)) es ts vs ns))
+  {:malli/schema [:=> [:cat [:sequential :int] [:sequential :int] [:sequential [:vector {:min 1} number?]] :string] [:vector :map]]}
+  [es ts vs model]
+  (mapv (fn [e t v] (fact e t v model)) es ts vs))
 
 ;; ---- the model (native/embed.c over llama.cpp: only the exec'd helper loads it) ------------
 ;; Bound here, resolved on the first call: the library is loaded by `open-model`, in the helper
@@ -614,9 +612,9 @@
                                           (let [[st w] (step/ask st [:vectors :answers] [:recorded nil] {:op :write :req {:op :tx :branch :db :tx-data tx}})]
                                             [st [w]])
                                           (release (assoc st :running false))))
-                                      (let [{:keys [model vectors tokens]} (:value r)
+                                      (let [{:keys [model vectors]} (:value r)
                                             [st w] (step/ask st [:vectors :answers] [:written (count es)]
-                                                             {:op :write :req {:op :tx :branch :db :tx-data (into (tx-data es ts vectors tokens model) gone)}})]
+                                                             {:op :write :req {:op :tx :branch :db :tx-data (into (tx-data es ts vectors model) gone)}})]
                                         [st [w]])))
                         :written (let [st (cond-> (assoc st :running false)
                                             (not (contract/error? r)) (-> (update :embedded + es) (assoc :written-t (:t r)))

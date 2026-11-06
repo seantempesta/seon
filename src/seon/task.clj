@@ -269,7 +269,7 @@
 (def ^:private process-attrs
   "Each member of root's view of an agent's process and the attribute recording it on the process
   entity (agent-tx)."
-  {:pid :seon.process/pid :mem-mb :seon.process/mem-mb :running :seon.process/running
+  {:pid :seon.process/pid :running :seon.process/running
    :forked-ms :seon.process/forked-ms :ended-ms :seon.process/ended-ms :stalled :seon.process/stall})
 
 (defn newest-process
@@ -285,7 +285,7 @@
   session is id and the tasks on its branch it needs, transitively (a request's stages, a work
   task and its merge: design agent-loop section 1a), and its agent is the newest started among
   the chain's tasks' agents (:seon.task/agent). Work started for the session continues it, so its
-  conversation and messages go on (seon.context/records). One process at a time holds it: a session is one
+  conversation and messages go on (seon.context/turn-members). One process at a time holds it: a session is one
   branch, and root refuses a spawn on a branch a live agent holds. Reads the chain's tasks."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/id] [:maybe :string]]}
   [db id]
@@ -317,7 +317,7 @@
   ([boot id m] (agent-tx boot id m nil))
   ([boot id m key]
   (let [k (or key (agent-key boot id))
-        v (fn [member x] (case member :running (:form x) (:mem-mb :forked-ms) (double x) x))
+        v (fn [member x] (case member :running (:form x) :forked-ms (double x) x))
         pk (some->> (:pid m) (str k "/"))]
     (-> [(into {:seon.agent/key k :seon.agent/id id :seon.agent/root [:seon.root/id :root]}
                (for [[member a] agent-attrs :let [x (some->> (get m member) (v member))] :when (some? x)] [a x]))]
@@ -339,6 +339,12 @@
   [boot max-running]
   (into [{:seon.root/id :root :seon.root/boot boot :seon.config.agent/max-running max-running}]
         (agent-tx boot :user {})))
+
+(defn call-ref
+  "The model call of turn n of the agent with key k, as a ref in a transaction: a record of that turn (an eval, a message) names it, which
+  makes it when the turn has not begun, so agent -> call -> its records is one pull. See docs/turn.md#the-turn-is-a-number."
+  {:malli/schema [:=> [:cat :string nat-int?] :map]}
+  [k n] {:seon.model-call/id (str k "/" n) :seon.model-call/agent {:seon.agent/key k} :seon.model-call/n n})
 
 (defn message-tx
   "Message mid of kind (:seon.message/kind) from from to the agent on branch br (nil: the agent writing it, on

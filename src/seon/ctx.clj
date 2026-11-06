@@ -115,11 +115,6 @@
   {:malli/schema [:=> [:cat :any] :boolean]}
   [x] (and (map? x) (= [:db/id] (keys x))))
 
-(defn- under?
-  "Is path p at or below path q?"
-  {:malli/schema [:=> [:cat [:vector :any] [:vector :any]] :boolean]}
-  [p q] (and (<= (count q) (count p)) (= q (subvec p 0 (count q)))))
-
 (defn- unwatch
   "r without join [e k]'s watch keys (:watching, the reverse of :watch)."
   {:malli/schema [:=> [:cat :seon.ctx/ix :any] :seon.ctx/ix]}
@@ -146,15 +141,17 @@
   the record anew, as that is a fresh build's placement)."
   {:malli/schema [:=> [:cat :seon.ctx/ix :any [:vector :any]] :seon.ctx/ix]}
   [r t q]
+  ;; no contracted call a path: a member's own refs are walked here too, and each id costs two of these
+  (let [nq (count q) below? (fn [p] (and (<= nq (count p)) (= q (subvec p 0 nq))))]
   (reduce (fn [r e]
-            (let [at (into #{} (remove #(under? % q)) (get-in r [:at e]))
+            (let [at (into #{} (remove below?) (get-in r [:at e]))
                   r (if (seq at) (assoc-in r [:at e] at) (update r :at dissoc e))]
-              (if (some-> (get-in r [:held e]) (under? q))
+              (if (some-> (get-in r [:held e]) below?)
                 (cond-> (-> (reduce (fn [r j] (unwatch r [e (:key j)])) r (:joins (get-in r [:spec e])))
                             (update :held dissoc e) (update :spec dissoc e))
                   (seq at) (assoc :relocate true))
                 r)))
-          r (distinct (keep #(when (map? %) (:db/id %)) (tree-seq coll? #(if (map? %) (vals %) (seq %)) t)))))
+          r (distinct (keep #(when (map? %) (:db/id %)) (tree-seq coll? #(if (map? %) (vals %) (seq %)) t))))))
 
 (declare node)
 
@@ -248,11 +245,15 @@
   (:seon.ctx/ix: :held {e path}, :at {e #{path}}, :spec {e s}, :watch {[a v] #{[e key]}} and its
   reverse :watching; during a patch :patching, and :relocate when the patch must build anew)
   gaining it. An entity is held once, at the first path the walk reaches it by (the pattern's order, a newest-
-  first collection's newest member first); any other path holds {:db/id e}. old, e's value
+  first collection's newest member first); any other path holds {:db/id e}, as a join of `[:db/id]` holds each of its members. old, e's value
   before, keeps each join no touched datom changed (identical?), its entries in r as they were,
   and each attribute equal to before; a node equal to old in every value is old."
   {:malli/schema [:=> [:cat :seon.host/db pos-int? :seon.ctx/spec [:vector :any] :seon.ctx/ix [:maybe :map] [:map-of :any [:vector :any]]] [:tuple :map :seon.ctx/ix]]}
   [db e s p r old touched]
+  (if (and (not (:star? s)) (= #{:db/id} (:attrs s)))
+    ;; a join of `[:db/id]` names its members and holds none of them (agent -> call -> its evals, which the agent's :evals join holds):
+    ;; nothing to place, so no new path moves anything (no contracted call: this runs for every member built)
+    [(if (stub? old) old {:db/id e}) r]
   (let [r (update-in r [:at e] (fnil conj #{}) p)
         h (get-in r [:held e])]
     (if (and h (not= h p))
@@ -276,7 +277,7 @@
                               [(if (or (nil? v) (and (map? v) (empty? v) (many? db j))) (dissoc n k) (assoc n k v)) r]))
                           [m r] (:joins s))]
         ;; a node holding what it held, every value the same object, is the node it was
-        [(if (same-node? old n) old n) r]))))
+        [(if (same-node? old n) old n) r])))))
 
 (def ^:private environment-keys "The map's environment: the record's basis, never written." [:t :branch :commit])
 

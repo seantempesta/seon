@@ -43,7 +43,7 @@
                              e [{:db/id (str "form " i) :form/id (str nsym "/f" i) :form/src src :form/ns "ns" :form/order i
                                  :form/defines [(str "var " i)]}
                                 {:db/id (str "var " i) :var/name (symbol (str nsym) (str "f" i)) :var/ns "ns" :var/doc (str "f" i " of module " k)
-                                 :var/form (str "form " i) :var/kind :fn :var/contract "[:=> [:cat :int] :int]" :var/arity 1}]]
+                                 :var/form (str "form " i) :var/kind :fn :var/contract "[:=> [:cat :int] :int]"}]]
                          e))
                  [{:task/name (keyword (str "app.m" k) "tidy") :task/plan (str "Tidy module " k ": name every value by its schema.")
                    :task/status :held :task/refs [[:var/name (symbol (str nsym) "f0")] [:var/name (symbol (str nsym) "f1")]]}]]))

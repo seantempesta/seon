@@ -369,19 +369,20 @@
   ;; the owner, 2026-10-27: a later turn's request build measured 94M ticks, 317 MB on Seon's own tasks, 25,000
   ;; contracted calls, two pages drawn a read (the one before's again, to diff against). Each read after
   ;; the first draws the one page it tells and costs what the read before did: ticks and bytes are the
-  ;; process's exact counts (seon.profile/measure!); its page is the agent's live walk's (seon.repl/page-hiccup),
-  ;; so seon.context/drawn-parts, the cold draw, is never called, and it equals the cold draw on the db it is drawn to
+  ;; process's exact counts (seon.profile/measure!); its page is the agent's live walk's (seon.repl/page-walk),
+  ;; so seon.render/draw, the cold draw, is never called, and it equals the cold draw on the db it is drawn to
   (let [[reads]
         (at/in-agent (fn [{:keys []}]
                        [(str "(let [t (:task @seon.agent/state)"
                              " m (fn [] (let [v (volatile! nil)]"
                              "           (seon.profile/measure! #(count (seon.turn/context-block t true)) (fn [d] (vreset! v d)))"
                              "           {:ticks (:ticks @v) :bytes (:bytes @v)"
-                             "            :main (let [db (first (seon.repl/page-hiccup))] (:seon.agent/main-commit (datahike.api/entity db (seon.db/eid db :seon.agent/key (:key @seon.agent/state)))))"
-                             "            :pages (some (fn [f] (when (= 'seon.context/drawn-parts (:var f)) (:calls f))) (seon.profile/touched))}))]"
+                             "            :main (let [_ (seon.repl/page-walk) db (seon.agent/db)] (:seon.agent/main-commit (datahike.api/entity db (seon.db/eid db :seon.agent/key (:key @seon.agent/state)))))"
+                             "            :pages (some (fn [f] (when (= 'seon.render/draw (:var f)) (:calls f))) (seon.profile/touched))}))]"
                              "  {:reads (vec (repeatedly 9 m))"
-                             "   :live=cold (let [[db page] (seon.repl/page-hiccup) a (seon.db/eid db :seon.agent/key (:key @seon.agent/state))"
-                             "                    cold (seon.context/drawn-parts db (seon.ctx/build db a (:seon.agent/branch (datahike.api/entity db a))))]"
+                             "   :live=cold (let [pw (seon.repl/page-walk) db (seon.agent/db) page (seon.render/placed-hiccup pw (seon.render/page-lists pw)) a (seon.db/eid db :seon.agent/key (:key @seon.agent/state))"
+                             "                    w (seon.render/draw (:tree (seon.ctx/build db a (:seon.agent/branch (datahike.api/entity db a)))) seon.ctx/changes db (seon.render/declared-var :seon.render/render-ctx) {:model-only true})"
+                             "                    cold (seon.render/placed-hiccup w (seon.render/page-lists w))]"
                              "                (or (= page cold) (vec (for [k (distinct (concat (keys page) (keys cold))) :when (not= (get page k) (get cold k))] k))))})")]))
         later (rest (:reads (:value reads)))]
     (is (= 9 (count (:reads (:value reads)))))

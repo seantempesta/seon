@@ -530,7 +530,7 @@
   (cond-> (case kind
             :var {:db/id (var-tid a) :var/name a :var/ns (ns-tid (symbol (namespace a)))}
             :method (let [k (method-key a b)] {:db/id (str "method " k) :method/key k :method/multi a :method/dispatch b})
-            :impl (let [k (impl-key a b)] {:db/id (str "impl " k) :impl/key k :impl/protocol a :impl/type b})
+            :impl (let [k (impl-key a b)] {:db/id (str "impl " k) :impl/key k :impl/protocol a})
             :ns {:db/id (ns-tid a) :ns/name a})
     e (assoc :db/id e)))
 

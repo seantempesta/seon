@@ -29,7 +29,7 @@
   arrives in and nothing after it. Seon's platform ops (tests, stats, clone,
   messages, writes) are {:op k} values, handled by `agent-step`."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn- defchecked]] [seon.error :as err] [jolt.nrepl :as nrepl] [seon.intr :as intr] [seon.reader :as reader] [seon.doc :as doc] [seon.agent :as agent] [seon.contract :as contract] [my.db] [my.agent] [my.schema] [malli.registry :as mr]
+  (:require [seon.contract :refer [defn defn- defchecked]] [seon.error :as err] [jolt.nrepl :as nrepl] [seon.intr :as intr] [seon.reader :as reader] [seon.doc :as doc] [seon.agent :as agent] [seon.task :as task] [seon.contract :as contract] [my.db] [my.agent] [my.schema] [malli.registry :as mr]
             [seon.program :as program] [jolt.analyzer] [seon.lib :as lib] [seon.print :as print] [seon.print.select :as select] [seon.render :as render] [seon.context :as context] [seon.ctx :as ctx] [seon.web.html :as h] [seon.profile :as profile] [seon.sock :as sock] [seon.step :as step] [clojure.core.async :as a] [clojure.core.async.flow :as flow]
             [jolt.ffi :as ffi] [seon.config :as cfg] [clojure.test] [datahike.api :as d] [seon.db :as pdb] [seon.edn :as sedn]))
 
@@ -87,7 +87,7 @@
   "The REPL helpers (clojure.repl's and pprint's of seon.agent/repl-names) namespace ns holds a var of its own for, {name its-var}:
   there the name is that var and not the REPL's, as Clojure warns when a definition replaces a
   referred var (an agent in seon.render.ui called its source with a function and read an nth
-  error four times). nil when none. It answers a move's :helper-shadowed (docs/render.md#a-part-answers-data)."
+  error four times). nil when none. It answers a move's :helper-shadowed (docs/render.md#a-component-answers-hiccup)."
   {:malli/schema [:=> [:cat :seon.host/namespace] [:maybe [:map-of :symbol :symbol]]]}
   [ns]
   (not-empty (into {} (for [[from names] agent/repl-names :when ('#{clojure.repl clojure.pprint} from)
@@ -610,10 +610,12 @@
   details, each its own attribute (`record-details`). Who is the one upsert, by its identity: an
   agent's key ({:seon.agent/key k}, seon.task/agent-key) or root's ({:seon.root/id :root}); an agent's holds the
   namespace the eval left its REPL in (:seon.agent/ns), a datom only when it moved (an unchanged value adds none),
-  which seon.context/current-ns reads. See docs/render.md#a-part-answers-data."
+  which seon.context/current-ns reads. See docs/render.md#a-component-answers-hiccup."
   {:malli/schema [:=> [:cat :map :string :string :map] :seon.db/tx-data]}
   [who id by details]
-  [(into {:seon.eval/id id :seon.eval/agent "agent" :seon.eval/by by} details)
+  ;; the agent one upsert, the model call naming it by the same tempid: two would refuse a new agent's first record
+  [(into {:seon.eval/id id :seon.eval/agent "agent" :seon.eval/by by}
+         (cond-> details (:seon.eval/call details) (assoc-in [:seon.eval/call :seon.model-call/agent] "agent")))
    (cond-> (assoc who :db/id "agent")
      (and (:seon.agent/key who) (symbol? (get-in details [:seon.eval/response :ns]))) (assoc :seon.agent/ns (get-in details [:seon.eval/response :ns])))])
 
@@ -664,7 +666,7 @@
 
 (defn- record!
   "Record response r of code, eval fact rec (`record-details`), on this branch through the agent's write path (an agent's
-  only), under the turn in force (:seon.eval/turn, seon.agent/turn-now), with the defs its forms recorded.
+  only), under the turn in force (its model call, :seon.eval/call: seon.agent/turn-now, seon.task/call-ref), with the defs its forms recorded.
   Answers r, with the id of its record (:record) when recorded."
   {:malli/schema [:=> [:cat :map :map :string :map] :map]}
   [r rec code req]
@@ -678,8 +680,9 @@
       (try (agent/transact! (into defs (record-tx {:seon.agent/key (:key @agent/state) :seon.agent/id (:id @agent/state)} id (by req)
                                                   (let [working? (some? (:turn @agent/state))]
                                                     (cond-> rec
-                                                      ;; the turn loop's own eval (the agent working a task, no model call, made by the agent) is no conversation record: it takes no turn
-                                                      (not (and working? (not (:call-id req)) (not (#{:ui :outside :context :insert} (:origin req))))) (assoc :seon.eval/turn (agent/turn-now)))))))
+                                                      ;; the turn loop's own eval (the agent working a task, no model call, made by the agent) and a context read are no conversation record: they name no call
+                                                      (not (or (= :context (:origin req)) (and working? (not (:call-id req)) (not (#{:ui :outside :insert} (:origin req))))))
+                                                      (assoc :seon.eval/call (task/call-ref (:key @agent/state) (agent/turn-now))))))))
            (assoc r :record id)
            (catch Throwable e
              (assoc r :unrecorded (contract/error :seon.agent/unrecorded #'record! (str "the branch refused this eval's record: " (ex-message e)) {}))))
@@ -687,13 +690,11 @@
 
 (defn- text-of
   "The text of eval fact rec as every reader reads it: the one function the model's message prints with
-  (seon.print/record-text, through render/model, an @ctx eval's value rebuilt from its basis by seon.context/basis-value, as
-  seon.context/eval-messages does), so the outside agent's text and the model's cannot differ; the live value stays at
+  (seon.context/tool-text), so the outside agent's text and the model's cannot differ; the live value stays at
   the handle. Made only for a reader: an eval makes and stores data, and a model's is printed where its request is
   assembled. See docs/render.md#a-render-is-a-value-printed-once."
   {:malli/schema [:=> [:cat :map] :string]}
-  [rec]
-  (print/record-text (cond-> rec (:seon.eval/basis rec) (assoc-in [:seon.eval/response :value] (context/basis-value (:db @agent/state) rec))) render/model))
+  [rec] (context/tool-text (:db @agent/state) rec))
 
 (defn eval-string
   "Evaluate code through the one REPL path (the handler and its middleware) and answer its one
@@ -705,7 +706,7 @@
   defect past a form's own (a middleware's, the printer's) ends the request with its error as
   the response's :ex. Its cost (:ms :ticks :bytes, seon.repl/wrap-cost) is taken once when the
   forms ran, so what the model reads of it never changes in a later turn. The response's :ns is the
-  namespace the REPL is in after it (docs/render.md#a-part-answers-data)."
+  namespace the REPL is in after it (docs/render.md#a-component-answers-hiccup)."
   {:malli/schema [:function [:=> [:cat :string] :seon.repl/answer] [:=> [:cat :string :map] :seon.repl/answer]]}
   ([code] (eval-string code {:origin :model}))
   ([code req]
@@ -915,7 +916,7 @@
                   req (cond-> (req-of id)
                         (not (clojure.string/blank? intent)) (assoc :intent intent)
                         (seq repairs) (assoc :repaired (context/repaired src repairs)))
-                  failed (some #(when (or (:ex (:response %)) (contract/error? (:value (:response %)))) (:id %)) acc)
+                  failed (some #(when (or (:ex (:response %)) (contract/error? (:value (:response %)))) (context/wire-id (name (:handle (:response %))))) acc)
                   why (if failed
                         (contract/error :seon.turn/not-run #'run-calls (str "not run: call " failed " of this reply failed before it (its result says why)") {:after failed})
                         (if problem
@@ -947,15 +948,15 @@
 (defn- the-walk
   "This agent's walk of its render of ctx (seon.render/walker over @ctx, its diff seon.ctx/changes, and the
   branch's db), held in its state: the one cache of its components, made again when the branch declares another
-  layout (docs/ctx.md#the-record-is-the-agents-work). It draws what its model reads (seon.context/page-lists) until a
-  person's page asks for the rest (`whole-walk`): the lists nobody reads cost nothing."
+  layout (docs/ctx.md#the-record-is-the-agents-work). It draws what its model reads until a
+  person's page asks for the rest (`whole-walk`): what nobody reads costs nothing."
   {:malli/schema [:=> [:cat] :map]}
   []
   (let [held (:walk @agent/state) l (layout)]
     (if (and held (= l (first (:root held))))
       held
       (let [w (cond-> (render/walker {:ref ctx/ctx :changes ctx/changes} agent/db [l {}])
-                (or (nil? held) (:only held)) (assoc :only (set context/page-lists)))]
+                (or (nil? held) (:model-only held)) (assoc :model-only true))]
         (some-> held render/dispose-walk!)
         (swap! agent/state assoc :walk w)
         w))))
@@ -966,14 +967,18 @@
   the last draw touched (seon.ctx/take-moved!)."
   {:malli/schema [:=> [:cat] :map]}
   []
-  (with-branch-schemas #(let [w (the-walk)] (render/flush! w (ctx/take-moved!)) w)))
+  (with-branch-schemas #(let [w (the-walk)]
+                          (render/flush! w (ctx/take-moved!))
+                          ;; a component that threw is a problem of the agent's, in its fold (docs/health.md), as well as what it draws in its place
+                          (doseq [d (render/take-defects! w)] (swap! agent/state update :errors err/note d :eval nil (System/currentTimeMillis)))
+                          w)))
 
 (defn- whole-walk
   "`page-walk` with every list drawn, for a reader of the whole page: a person's, who stays its reader from then on (a
   walk holds no count of who is watching). See docs/render.md#a-layout-places-its-lists."
   {:malli/schema [:=> [:cat] :map]}
   []
-  (with-branch-schemas #(let [w (the-walk)] (when (:only w) (swap! agent/state assoc :walk (render/draw-all w)))))
+  (with-branch-schemas #(let [w (the-walk)] (when (:model-only w) (swap! agent/state assoc :walk (render/draw-all w)))))
   (page-walk))
 
 (defn render-ctx
@@ -992,21 +997,6 @@
   from, nothing left out."
   {:malli/schema [:=> [:cat] :map]}
   [] (render/placed-hiccup (whole-walk) ["#p-task" "#c-rows" "#p-tiles"]))
-
-(defn page-hiccup
-  "This agent's parts as its model reads them now, from its live walk (seon.context/page-lists): each
-  component run again only where what it read changed, so a turn's parts cost what changed (a cold
-  draw, seon.context/drawn-parts, costs every component). [db parts]: the db it is drawn to, which the request is
-  made on, and {element-id hiccup}, in order (seon.context/request sends what changed of them)."
-  {:malli/schema [:=> [:cat] [:tuple :seon.host/db :map]]}
-  [] (let [w (page-walk)] [(agent/db) (render/placed-hiccup w context/page-lists)]))
-
-(defn page-data
-  "The data of this agent's parts now, from its live walk, as `page-hiccup` draws it: {schema-key data}
-  (seon.render/placed-data), what the turn decides from, with no model render made for it. See
-  docs/render.md#a-part-answers-data."
-  {:malli/schema [:=> [:cat] :map]}
-  [] (render/placed-data (page-walk) context/page-lists))
 
 ;; ---- the process: a Flow graph of three procs on the agent's one thread ----------------
 

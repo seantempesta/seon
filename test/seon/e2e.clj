@@ -268,17 +268,15 @@
                done? (every? #(r/done? idx %) ["calc/add-merge" "calc/twice-merge" "calc/square-merge" "calc/sum-sq-merge"])
                blocked (r/blocked-by idx "calc/abs")
                sq-db (:db @(c/branch-db sys (task/default-branch "calc/square")))
-               sq-turns (sort-by first (map (fn [[n e s]] [n (str/join "\n\n" (keep :content (:messages (context/render sq-db (:seon.model-call/basis (d/pull sq-db [:seon.model-call/basis] e)))))) s])
-                                            (d/q '[:find ?n ?e ?s :where [?e :seon.model-call/n ?n] [?e :seon.model-call/origin :model]
-                                                   [?e :seon.model-call/basis _] [?e :seon.model-call/split ?s]] sq-db)))
+               sq-turns (sort-by first (map (fn [[n e]] [n (str/join "\n\n" (keep :content (:messages (context/render sq-db (:seon.model-call/basis (d/pull sq-db [:seon.model-call/basis] e))))))])
+                                            (d/q '[:find ?n ?e :where [?e :seon.model-call/n ?n] [?e :seon.model-call/origin :model]
+                                                   [?e :seon.model-call/basis _]] sq-db)))
                read-failure? (and (= 2 (count sq-turns))
                                   (str/includes? (second (second sq-turns)) "(= 9 (app.calc/square 3))")
-                                  (str/includes? (second (second sq-turns)) "(= 9 0)")
-                                  (every? #(every? (set (keys (nth % 2))) [:tests-ms :context-ms :model-ms :eval-ms :record-ms]) sq-turns))]
+                                  (str/includes? (second (second sq-turns)) "(= 9 0)"))]
            (cond-> {:ok (and done? (= #{"calc/neg-merge"} blocked) read-failure?
                              (= [{:task "calc/neg" :cause "cancelled" :blocks ["calc/abs" "calc/abs-merge" "calc/neg-merge"]}] (:root-causes q)))
-                    :done-all? done? :abs-blocked-by blocked :square-turns (count sq-turns) :square-read-its-failure? read-failure?
-                    :square-splits (mapv #(nth % 2) sq-turns)}
+                    :done-all? done? :abs-blocked-by blocked :square-turns (count sq-turns) :square-read-its-failure? read-failure?}
              (not read-failure?) (assoc :square-second-context (second (second sq-turns))))))})
 
 (defn- held-as
