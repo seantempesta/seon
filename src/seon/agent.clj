@@ -347,7 +347,7 @@
                   tx-data)]
     (if (= :test (:mode @state))
       (let [r (d/with (db) tx-data) attrs (into #{} (map :a) (:tx-data r))]
-        (doc/carry-index! (:db-before r) (:db-after r) attrs)
+        (doc/carry-index! (:db-before r) (:db-after r) (map (juxt :e :a) (:tx-data r)))
         (swap! state #(-> % (assoc :db (:db-after r) :tx (select-keys r [:db-after :tx-data])) (schema-moved attrs)))
         {:t (:max-tx (:db-after r)) :datoms (count (:tx-data r)) :local true})
       (let [r (dw/apply! (:store-conn @state) {:tx-data tx-data :tx-meta (pdb/tx-meta (:branch @state) (cond-> {} (:eval @state) (assoc :seon.tx/eval (:eval @state))))})]
@@ -356,7 +356,7 @@
         ;; indexes and the schema registry carried past it when it wrote none of their attributes
         (let [attrs (into #{} (map :a) (:tx-data r))]
           ;; from the db the writer applied it to (its report's), whatever the state held
-          (doc/carry-index! (:db-before r) (:db-after r) attrs)
+          (doc/carry-index! (:db-before r) (:db-after r) (map (juxt :e :a) (:tx-data r)))
           (swap! state #(-> % (assoc :db (:db-after r) :tx (select-keys r [:db-after :tx-data]) :dirty? true) (schema-moved attrs))))
         (cond-> {:t (:max-tx (:db-after r)) :datoms (count (:tx-data r))}
           (seq (:tempids r)) (assoc :tempids (into {} (filter (comp string? key)) (:tempids r))))))))
@@ -502,7 +502,7 @@
             errs (program/load-changes! (:db-after rep) ops)]
         ;; the merge base is now main's head: what main changed is not this branch's change
         (let [attrs (into #{} (map (fn [op] (nth op 2 nil))) ops)]
-          (doc/carry-index! head @conn attrs)
+          (doc/carry-index! head @conn (map (fn [op] [(nth op 1) (nth op 2)]) ops))
           (swap! state #(-> % (assoc :db @conn :base (pdb/branch-base conn main-b (:branch @state))) (schema-moved attrs))))
         (send! {:op :committed :t (:max-tx @conn) :txs 1})
         (cond-> {:ok true :applied (:apply r) :conflicts (:conflicts r) :t (:max-tx @conn) :datoms (count ops)}

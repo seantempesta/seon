@@ -407,11 +407,11 @@
 
 (deftest a-text-index-is-carried-past-a-move-that-writes-no-text
   ;; docs/vector.md#search: seon.doc/carry-index! keeps the index a move left as it was (no build),
-  ;; and a move that writes a text attribute leaves it to be built again, holding the new text
+  ;; and a move that writes a text has that text's row replaced in it
   (let [db0 (mt/world)
         ix0 (seon.doc/text-index db0)
         n0 (sqlite/size ix0)
-        attrs #(into #{} (map :a) (:tx-data %))
+        attrs #(map (juxt :e :a) (:tx-data %))
         r1 (d/with db0 [{:seon.root/id :root :seon.root/boot "a-boot"}])
         _ (seon.doc/carry-index! db0 (:db-after r1) (attrs r1))
         db1 (:db-after r1)
@@ -430,16 +430,44 @@
     (is (= [(:hash (:db-after r2)) (:max-tx (:db-after r2))] (first @@#'seon.doc/indexes)) "keyed to the db it was carried to")))
 
 (deftest a-written-plan-is-brought-into-the-index-without-a-rebuild
-  ;; docs/vector.md#search: a move that writes a text attribute has that attribute's rows replaced in the held index
-  ;; (seon.doc/carry-index!), reading its texts alone: a task's plan written on main must not read every form again
+  ;; docs/vector.md#search: a move that writes a text has that text's row replaced in the held index
+  ;; (seon.doc/carry-index!), reading it alone: a task's plan written on main must not read every form again
   (let [db0 (mt/world)
         ix0 (seon.doc/text-index db0)
         r (d/with db0 [{:seon.task/id "app/zorb" :seon.task/plan "Zorblax the thing."}])
-        _ (seon.doc/carry-index! db0 (:db-after r) (into #{} (map :a) (:tx-data r)))
+        _ (seon.doc/carry-index! db0 (:db-after r) (map (juxt :e :a) (:tx-data r)))
         ix1 (seon.doc/text-index (:db-after r))
         found #(count (:value (sqlite/using ix1 (fn [ix] (sqlite/fts-match ix "\"zorblax\"" #{})))))]
     (is (identical? ix0 ix1) "the index stands")
     (is (= 1 (found)) "and holds the plan")))
+
+(deftest a-carried-index-answers-as-a-built-one
+  ;; docs/vector.md#search: a move's rows replaced one by one leave the index a build of the db after would be: a text
+  ;; changed, one retracted and one new in one move, each table and the counts, while the rest stands
+  (let [db0 (mt/with (mt/world) (mt/code 'app.ci "(ns app.ci)\n(defn stays [] :plover)\n(defn changes [] :quokka)\n(defn goes [] :wombat)\n"))
+        ix0 (seon.doc/text-index db0)
+        form (fn [v] (:db/id (:var/form (d/entity db0 [:var/name v]))))
+        r (d/with db0 [[:db/add (form 'app.ci/changes) :form/src "(defn changes [] :numbat)"]
+                       [:db/retractEntity (form 'app.ci/goes)]
+                       {:seon.task/id "app/ci" :seon.task/plan "Tell the axolotl."}])
+        db1 (:db-after r)
+        _ (seon.doc/carry-index! db0 db1 (map (juxt :e :a) (:tx-data r)))
+        carried (seon.doc/text-index db1)
+        built (#'seon.doc/build-index db1)
+        rows (fn [ix f q] (set (map (partial take 2) (:value (sqlite/using ix #(f % q #{}))))))
+        words (fn [ix w] (rows ix sqlite/fts-match (str "\"" w "\"")))
+        cuts (fn [ix w] (rows ix sqlite/fts-substring w))]
+    (is (identical? ix0 carried) "carried, not built")
+    (is (= (sqlite/counts built) (sqlite/counts carried)) "the same rows of each attribute")
+    (doseq [w ["plover" "quokka" "numbat" "wombat" "axolotl" "defn"]]
+      (is (= (words built w) (words carried w)) (str "the ranking table answers " w " as a build's does"))
+      (is (= (cuts built w) (cuts carried w)) (str "the substring table answers " w " as a build's does")))
+    (is (= 1 (count (words carried "numbat"))) "the changed text's new words are found")
+    (is (empty? (words carried "quokka")) "and its old ones are gone")
+    (is (empty? (cuts carried "wombat")) "as a retracted text's are")
+    (is (= 1 (count (words carried "axolotl"))) "a new text is found")
+    (is (= 1 (count (words carried "plover"))) "and the rest stands")
+    (sqlite/retire! built)))
 
 (deftest tokens-match-stems-and-whole-terms
   ;; docs/vector.md#search: the text ranking is FTS5's over Porter stems. The substring match it replaces found

@@ -5,7 +5,7 @@
   forms in one pass over them and their references."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is]] [seon.contract :refer [defn defn-]]
-            [datahike.api :as d] [seon.db :as pdb] [seon.cost :as cost] [seon.program :as program] [seon.merge] [seon.agent] [test-runner :as runner] [clojure.java.shell :as sh]))
+            [datahike.api :as d] [seon.db :as pdb] [seon.cost :as cost] [seon.program :as program] [seon.merge] [seon.agent] [seon.ctx] [seon.doc] [test-runner :as runner] [clojure.java.shell :as sh]))
 
 (defn- acct
   {:malli/schema [:=> [:cat :int :string] :map]}
@@ -541,3 +541,44 @@
      :per-n {:ticks 1900 :bytes 11500 :calls 0}
      :fixed {:ticks 580000 :bytes 3200000 :calls 50}
      :sizes [10 30 100]}))
+
+(defn definition-input
+  "one-definition's arguments at size n: branch-of's db of n forms, the search's text index held for it as an agent's
+  is (seon.doc/text-index), and the account of redefining its middle form."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :map]]}
+  [n]
+  (let [[db acct] (branch-of n)]
+    (seon.doc/text-index db)
+    [db acct]))
+
+(defn one-definition
+  "What an eval that defines does to its branch, on an agent state holding db (seon.repl/wrap-record): the form's facts
+  (record-tx), what they change of the var's meaning, and the write (seon.agent/transact!, which carries the text index);
+  then the index carried back, so each call of a measure starts where the last did. nil."
+  {:malli/schema [:=> [:cat :seon.host/db :map] :nil]}
+  [db acct]
+  (reset! seon.agent/state {:db db :mode :test})
+  (let [tx (program/record-tx db acct)]
+    (program/meaning-changes db tx)
+    (seon.agent/transact! tx))
+  (seon.doc/carry-index! (:db @seon.agent/state) db (map (juxt :e :a) (get-in @seon.agent/state [:tx :tx-data])))
+  nil)
+
+(deftest a-definition-costs-the-form-never-the-program
+  ;; docs/vector.md#search: a definition is one form's facts and one row of the search's index. Replacing every
+  ;; form's row at each definition cost 1.5 s on Seon's own program, nearly all of it inside SQLite, where no tick or byte
+  ;; is counted: the reading and binding of each text are what a proof can count of it
+  (let [was @seon.agent/state]
+    (remove-watch seon.agent/state :seon.ctx/ctx)   ; the record's patch has its own proof (seon.ctx-test/a-swap-costs-what-it-changed)
+    (try
+      (cost/proof
+        {:of 'seon.program-cost-test/one-definition :input 'seon.program-cost-test/definition-input
+         :n "forms on the branch, each with its text in the search's index"
+         :work "a few seeks for the form's facts, one transaction, and the rows of the texts it wrote in the index"
+         :growth :constant
+         ;; measured 2026-11-06 at 100, 300, 1,000 forms: 331k, 335k, 364k ticks; 940 KB, 960 KB, 1.04 MB; 83 calls. Replacing
+         ;; each form's row on every text write: 762k, 923k, 1.60M ticks; 3.10, 4.06, 7.43 MB; 65 calls (red: over and steeper)
+         :fixed {:calls 83 :bytes 1000000 :ticks 340000}
+         :sizes [100 300 1000]})
+      (finally (reset! seon.agent/state was)
+               (add-watch seon.agent/state :seon.ctx/ctx @#'seon.ctx/on-state)))))
