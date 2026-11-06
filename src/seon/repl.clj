@@ -959,14 +959,16 @@
   {:malli/schema [:=> [:cat :string] [:vector [:map [:id :string] [:failed? :boolean]]]]}
   [id]
   (let [evals (map val (sort-by key (:evals @ctx/ctx)))
-        upto (concat (take-while #(not= id (:seon.eval/id %)) evals) (take 1 (drop-while #(not= id (:seon.eval/id %)) evals)))
-        known? (some #(= id (:seon.eval/id %)) evals)]
-    (reduce (fn [acc ev]
-              (let [r (again (:seon.eval/id ev))
-                    failed? (boolean (or (:ex r) (contract/error? (:value r))))
-                    acc (conj acc {:id (:seon.eval/id ev) :failed? failed?})]
-                (if failed? (reduced acc) acc)))
-            [] (when known? (filter #(and (:seon.eval/call %) (not= "seon" (:seon.eval/by %))) upto)))))
+        work? #(and (:seon.eval/call %) (not= "seon" (:seon.eval/by %)))]
+    (if (some #(= id (:seon.eval/id %)) evals)
+      (reduce (fn [acc ev]
+                (let [e (:seon.eval/id ev)
+                      r (when (work? ev) (again e))
+                      failed? (boolean (or (:ex r) (contract/error? (:value r))))
+                      acc (cond-> acc (work? ev) (conj {:id e :failed? failed?}))]
+                  (if (or failed? (= id e)) (reduced acc) acc)))
+              [] evals)
+      [])))
 
 (defn- layout
   "The layout this branch renders its ctx with: the var :seon.render/render-ctx declares, an agent's own

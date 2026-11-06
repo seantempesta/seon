@@ -270,6 +270,7 @@ Everything a model is sent is read from the tree, through one conversion, and an
 - `seon.render.ui/toggle`: a fold's open and close. The model reads what is in it.
 - `seon.render.ui/evaluation`, `seon.print.emit/elided-hiccup`: a cut opened where it stands. The model has the form the cut prints, which reads the same rest.
 - `seon.render.ui/eval-hiccup`: a person's opening of an eval, recorded for root's page (`seon.root/opened!`). The model reads the eval whole.
+- `seon.render.ui/step-tools`: what a person's Run, To here and Edit do the model has as ``(seon.repl/again id)``, ``(seon.repl/again id code)`` and ``(seon.repl/again-to id)``; Copy holds what the model already reads, the eval's code ([run again](turn.md#an-eval-can-be-run-again)).
 
 ## How a value is printed
 
