@@ -193,10 +193,10 @@
       (when (vector? arity) (second (second arity))))))
 
 (defn inputs
-  "Which of :seon.ctx/ctx and :seon.db/db render var v's opts contract asks to receive: a render
-  that declares either is a component, kept in the walk's cache, those keys filled in."
+  "Which of :seon.ctx/ctx, :seon.db/db and :seon.render/drawn render var v's opts contract asks to receive: a render
+  that declares any is a component, kept in the walk's cache, those keys filled in."
   {:malli/schema [:=> [:cat :any] [:set :qualified-keyword]]}
-  [v] (into #{} (filter #{:seon.ctx/ctx :seon.db/db}) (tree-seq vector? seq (opts-form v))))
+  [v] (into #{} (filter #{:seon.ctx/ctx :seon.db/db :seon.render/drawn}) (tree-seq vector? seq (opts-form v))))
 
 (defn- inputs-in
   "The inputs render var f asks for (`inputs`), as walk w found them: kept by f with the value its root held then, so
@@ -255,7 +255,7 @@
   {:malli/schema [:=> [:cat :map :seon.host/fn [:vector :any]] :map]}
   [src db-fn root]
   {:src src :db db-fn :root root :cache (volatile! {}) :queue (volatile! #{}) :mounts (volatile! 0)
-   :ledger (volatile! {}) :out (volatile! nil) :db-keys (volatile! #{}) :readers (volatile! {}) :forms (volatile! {}) :watched (volatile! #{}) :inputs (volatile! {}) :gone (volatile! #{}) :skipped (volatile! #{})})
+   :ledger (volatile! {}) :out (volatile! nil) :db-keys (volatile! #{}) :readers (volatile! {}) :forms (volatile! {}) :drawn (ratom/atom {}) :watched (volatile! #{}) :inputs (volatile! {}) :gone (volatile! #{}) :skipped (volatile! #{})})
 
 (defn- led!
   "Count k (:hit, :miss, :same) for render var f in w's ledger, with the ticks and bytes a run took."
@@ -265,6 +265,17 @@
   nil)
 
 (declare emit unmount!)
+
+(defn- css?
+  "Whether a render's :seon.render/style is CSS rules rather than Tailwind classes. See docs/render.md#style."
+  {:malli/schema [:=> [:cat [:maybe :string]] :boolean]}
+  [style] (boolean (and style (str/includes? style "{"))))
+
+(defn rules
+  "The CSS of drawn, a walk's drawn renders (`css?`), one text in the renders' order by name. See docs/render.md#style."
+  {:malli/schema [:=> [:cat [:map-of :any :any]] :string]}
+  [drawn]
+  (str/join "\n" (keep (fn [f] (let [s (:seon.render/style (meta f))] (when (css? s) s))) (sort-by symbol (keys drawn)))))
 
 (defn- with-id
   "Hiccup hc with its root element's attributes merged with attrs: a component's key as its id and
@@ -308,11 +319,15 @@
             db? (contains? ks :seon.db/db)
             o (cond-> opts
                 (contains? ks :seon.ctx/ctx) (assoc :seon.ctx/ctx (ratom/fresh (ratom/ref-view (:ref (:src w)) (:changes (:src w)))))
-                db? (assoc :seon.db/db ((:db w))))
+                db? (assoc :seon.db/db ((:db w)))
+                (contains? ks :seon.render/drawn) (assoc :seon.render/drawn (:drawn w)))
             ;; a render drawn for the first time in this walk: watched, so its redefinition draws it again
             _ (when (and (var? f) (not (contains? @(:watched w) f)))
                 (vswap! (:watched w) conj f)
-                (add-watch f (:watched w) (fn [_ _ _ _] (vswap! (:queue w) into (keep (fn [[ck c]] (when (= f (:f c)) ck))) @(:cache w)))))
+                (swap! (:drawn w) assoc f (var-get f))
+                (add-watch f (:watched w) (fn [_ _ _ new]
+                                            (vswap! (:queue w) into (keep (fn [[ck c]] (when (= f (:f c)) ck))) @(:cache w))
+                                            (swap! (:drawn w) assoc f new))))
             order (or (:order prev) (vswap! (:mounts w) inc))
             kids (volatile! [])
             id (key-id k)
@@ -416,14 +431,14 @@
 (defn- styled
   "Component output out as the page writes it: its root's class, its render's name, followed by the
   Tailwind classes render var f states (:seon.render/style, literal text in its source, so the
-  stylesheet's scan builds them): the style of each render drawn, by reference, never in what the
+  stylesheet's scan builds them), unless that style is CSS rules, which the page's rules component draws (seon.render.ui/page-rules): the style of each render drawn, by reference, never in what the
   model reads; and the render's name as :data-render, which a block shows. See docs/render.md#where-things-go."
   {:malli/schema [:=> [:cat :any :any] :any]}
   [out f]
   (let [style (:seon.render/style (meta f))]
     (if (and (vector? out) (map? (second out)) (:class (second out)))
       (cond-> out
-        style (update-in [1 :class] str " " style)
+        (and style (not (css? style))) (update-in [1 :class] str " " style)
         (var? f) (assoc-in [1 :data-render] (str (symbol f))))
       out)))
 
@@ -715,8 +730,8 @@
   [x] (if (and (map? (second x)) (not (h/raw? (second x)))) [(second x) (drop 2 x)] [nil (rest x)]))
 
 (defn- read-role
-  "acc ({:text [strings] :fields {name text} :nested [nodes]}) with node x, inside an element that is a message, read: text as itself, a plain call as its last argument (a string as it
-  is, a value printed: the page's writer expands the call, the model reads what it was given), a value printed, an element's children; a child marked `:data-field` its
+  "acc ({:text [strings] :fields {name text} :nested [nodes]}) with node x, inside an element that is a message, read: text as itself, a plain call as the text it was given, else its last
+  argument printed (the page's writer expands the call, the model reads what it was given), a value printed, an element's children; a child marked `:data-field` its
   own field; a component or an element that is a message of its own left for after this one; what is for the page alone nothing."
   {:malli/schema [:=> [:cat :map :any] :map]}
   [acc x]
@@ -738,7 +753,7 @@
                                   (update :nested into (:nested sub))))
         :else (reduce read-role acc kids)))
     (and (vector? x) (or (var? (first x)) (fn? (first x))))
-    (let [v (peek x)] (update acc :text conj (if (string? v) v (print/text v))))
+    (update acc :text conj (or (first (filter string? (rest x))) (print/text (peek x))))
     :else (update acc :text conj (print/text x))))
 
 (defn- message-of

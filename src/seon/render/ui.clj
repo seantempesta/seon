@@ -97,27 +97,51 @@
   (let [s (str/replace (name (symbol id)) "-" " ")]
     (str (str/upper-case (subs s 0 (min 1 (count s)))) (subs s (min 1 (count s))))))
 
+(defn- inline
+  "The hiccup of text between offsets from and to, a stretch of a Markdown block, by the one parse: spans, seon.ref/scan's, drawn as code and
+  links, and what lies between by seon.ref/emphasis. A link goes only where a page may send a person (http, https, a path, a fragment); any other keeps its text. See docs/render.md#prose-and-the-one-string-cutter."
+  {:malli/schema [:=> [:cat :string :int :int [:sequential :map]] [:sequential :any]]}
+  [text from to spans]
+  (let [plain (fn [a b] (when (< a b) (for [p (ref/emphasis (subs text a b))] (if (vector? p) [(first p) (second p)] p))))
+        inside (filter (fn [{f :seon.ref/from t :seon.ref/to}] (and f (<= from f) (<= t to))) spans)
+        ;; a link's own spans are drawn inside it
+        tops (reduce (fn [acc {f :seon.ref/from :as sp}] (if (and (seq acc) (< f (:seon.ref/to (peek acc)))) acc (conj acc sp))) [] inside)]
+    (loop [i from [sp & more] tops out []]
+      (if-not sp
+        (into out (plain i to))
+        (let [{f :seon.ref/from t :seon.ref/to :seon.ref/keys [code link text-from text-to]} sp
+              out (into out (plain i f))]
+          (recur t more
+                 (conj out (cond code [:code code]
+                                 (some #(str/starts-with? link %) ["http://" "https://" "/" "#"])
+                                 (into [:a {:href link}] (inline text text-from text-to spans))
+                                 :else (into [:span] (inline text text-from text-to spans))))))))))
+
 (defn markdown
   "Markdown text (a plan, an agent's prose, a message) as a person reads it: its blocks by the one
   parse (seon.ref/scan): a heading at its level, a paragraph, a list of the scan's items (numbered
-  when its first marker is a number), a code block highlighted (a fenced block's content as the scan gives it), a quote or a table as its lines. Each block's text
-  is kept as written, its backticks too: the model reads this page, and a plan's delimiters pick
-  what its citations pull (docs/references.md#the-delimiter-picks-the-depth). See docs/render.md#prose-and-the-one-string-cutter."
-  {:malli/schema [:=> [:cat :string] :any]}
-  [text]
-  (into [:div {:class "seon-md flex flex-col gap-2 leading-relaxed [&_p]:whitespace-pre-wrap [&_li]:whitespace-pre-wrap"}]
-        (for [{:seon.ref/keys [kind from to heading heading-level text-from text-to items ordered]} (:seon.ref/blocks (ref/scan text))
-              :let [body (subs text from to)]]
-          (cond
-            (= :heading kind) [(keyword (str "h" (min 6 (+ 2 (or heading-level 1))))) {:class "font-bold text-text-100"} heading]
-            ;; a code block: indented, or fenced, whose content the scan gives (its marks are no text of it)
-            (= :code kind) (code body (config/value :seon.config.render/value-budget))
-            (= :fence kind) (code (subs text text-from text-to) (config/value :seon.config.render/value-budget))
-            (= :list kind) (into [(if ordered :ol :ul) {:class (if ordered "list-decimal pl-5" "list-disc pl-5")}]
-                                 (for [[a b] items] [:li (subs text a b)]))
-            (#{:quote :table} kind) [:pre {:class "whitespace-pre-wrap text-text-300"} body]
-            (= :break kind) [:hr]
-            :else [:p body]))))
+  when its first marker is a number), a code block highlighted (a fenced block's content as the scan gives it), a quote or a table as its lines. Each
+  is kept as written, its backticks too, where the model reads the page: a plan's delimiters pick
+  what its citations pull (docs/references.md#the-delimiter-picks-the-depth). opts :inline? is for what only a person reads: code spans, links and
+  emphasis drawn (`inline`). See docs/render.md#prose-and-the-one-string-cutter."
+  {:malli/schema [:function [:=> [:cat :string] :any] [:=> [:cat :string [:map [:inline? {:optional true} :boolean]]] :any]]}
+  ([text] (markdown text {}))
+  ([text {:keys [inline?]}]
+   (let [{:seon.ref/keys [blocks spans]} (ref/scan text)
+         run (fn [a b] (if inline? (inline text a b spans) [(subs text a b)]))]
+     (into [:div {:class "seon-md flex flex-col gap-2 leading-relaxed [&_p]:whitespace-pre-wrap [&_li]:whitespace-pre-wrap"}]
+           (for [{:seon.ref/keys [kind from to heading heading-level text-from text-to items ordered]} blocks
+                 :let [body (subs text from to)]]
+             (cond
+               (= :heading kind) [(keyword (str "h" (min 6 (+ 2 (or heading-level 1))))) {:class "font-bold text-text-100"} heading]
+               ;; a code block: indented, or fenced, whose content the scan gives (its marks are no text of it)
+               (= :code kind) (code body (config/value :seon.config.render/value-budget))
+               (= :fence kind) (code (subs text text-from text-to) (config/value :seon.config.render/value-budget))
+               (= :list kind) (into [(if ordered :ol :ul) {:class (if ordered "list-decimal pl-5" "list-disc pl-5")}]
+                                    (for [[a b] items] (into [:li] (run a b))))
+               (#{:quote :table} kind) [:pre {:class "whitespace-pre-wrap text-text-300"} body]
+               (= :break kind) [:hr]
+               :else (into [:p] (run from to))))))))
 
 (defn slot
   "Where the part with element id goes: a marker the render proc fills with the part's
@@ -738,6 +762,17 @@
   "A tile: a value on its own, scrolled when wide."
   "rounded-md bg-base-900 p-2 min-w-0 overflow-x-auto")
 
+(defn page-rules
+  "The CSS of the renders this page has drawn (a component of the walk, reading its :seon.render/drawn ratom as any tracked read), as a style element, or nothing while none states any. It draws again only when a render is drawn or redefined. See docs/render.md#style."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.render/drawn :any]]]] :any]}
+  [{d :seon.render/drawn}]
+  (let [r (render/rules @d)] (when-not (str/blank? r) [:style r])))
+
+(defn rules-list
+  "The page's rules as a list of their own (p-rules), so a draw of what the model reads does not run them. See docs/render.md#a-layout-places-its-lists."
+  {:seon.render/list "p-rules" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+  [_] [:div {:id "p-rules"} [#'page-rules {}]])
+
 (defn task
   "The task its agent works (a component over ctx alone): its name as the heading, its plan accumulated over its needs
   (seon.task/pulled-accumulated), and under it one done line (a work or whole task's; the other kinds' instructions say what
@@ -745,7 +780,9 @@
   work stands (`standing`, from the task's outcome where the task holds one, else the agent's own end). The cites are
   their own parts (`citations`); which proofs are written is the status's. It reads no db. See
   docs/render.md#a-component-answers-hiccup."
-  {:seon.render/style (str panel-style " [&_h3]:text-xs [&_h3]:text-text-300")
+  {:seon.render/style ".task { display: flex; flex-direction: column; gap: 0.5rem; border: 1px solid var(--color-base-800); border-radius: 0.375rem; padding: 0.5rem; }
+.task > h2 { text-transform: uppercase; letter-spacing: 0.14em; font-size: 0.625rem; color: var(--color-text-400); }
+.task h3 { font-size: 0.75rem; color: var(--color-text-300); }"
    :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
   [{c :seon.ctx/ctx}]
   (when-let [t* (:task c)]
@@ -1224,7 +1261,7 @@
             [(when err [:span {:class "shrink-0 text-error"} "⚠"])
              (if said?
                ;; the agent's prose is Markdown, rendered (owner, 2026-10-29); the model reads it as written
-               [:div {:class "seon-prose seon-md-inline min-w-0 flex-1" :data-field (when-not seon? "intent")} [#'markdown intent]]
+               [:div {:class "seon-prose seon-md-inline min-w-0 flex-1" :data-field (when-not seon? "intent")} [#'markdown intent {:inline? true}]]
                [:code {:class "seon-form min-w-0 flex-1 truncate"} (first (str/split-lines (or code "")))])])
       ;; inside the closed details, so opening it shows it at once, on a live agent's page and on one root draws from its branch
       [:div {:class "ml-4 flex min-w-0 max-w-full flex-col gap-1 overflow-x-auto py-1"}
@@ -1335,8 +1372,8 @@
        (if (str/blank? reasoning)
          (when (and sent? (some? reasoning)) [:span {:data-for "model" :data-field "reasoning"} reasoning])
          [:details [:summary {:class "text-xs text-text-500" :data-for "page"} "thinking"]
-          [:div {:data-field (when sent? "reasoning")} [#'markdown reasoning]]])
-       (when spoke? [:div {:class "seon-message max-w-[85%] self-start rounded-2xl rounded-tl-sm bg-base-900 px-4 py-2.5 text-text-100" :data-field (when sent? "content")} [#'markdown reply]])
+          [:div {:data-field (when sent? "reasoning")} [#'markdown reasoning {:inline? true}]]])
+       (when spoke? [:div {:class "seon-message max-w-[85%] self-start rounded-2xl rounded-tl-sm bg-base-900 px-4 py-2.5 text-text-100" :data-field (when sent? "content")} [#'markdown reply {:inline? true}]])
        (when (seq children) [:ol {:class "seon-turn flex flex-col"} (seq children)])])))
 
 (defn chat-turn
@@ -1361,10 +1398,10 @@
          ;; the start, or the whole in its place, never both
          [:details {:class "group seon-message"}
           [:summary {:class "list-none"}
-           [:div {:class "group-open:hidden"} (markdown shown)]
+           [:div {:class "group-open:hidden"} (markdown shown {:inline? true})]
            [:span {:class "text-xs"} [:span {:class "muted group-open:hidden"} (str (emit/cut-words omitted lines nil) " ")] [:span {:class "underline group-open:hidden"} "Read all"] [:span {:class "hidden underline group-open:inline"} "Show less"]]]
-          (markdown plan)]
-         [:div {:class "seon-message"} (markdown plan)])])))
+          (markdown plan {:inline? true})]
+         [:div {:class "seon-message"} (markdown plan {:inline? true})])])))
 
 (defn message-hiccup
   "A message to the agent as the chat shows it and the model reads it, one user message: who sent it and its body. See docs/render.md#the-page."
@@ -1372,7 +1409,7 @@
   [{:seon.message/keys [id from body]}]
   [:section {:data-role "user" :data-ref [:message id]}
    [:p {:class "seon-note" :data-field "from"} (str from)]
-   [:div {:data-field "body"} [#'markdown (str body)]]])
+   [:div {:data-field "body"} [#'markdown (str body) {:inline? true}]]])
 
 (defn chat-message
   "A message to the agent (a component over ctx, the message at ctx path :at), a person's on the right: `message-hiccup`. See docs/render.md#the-page."
@@ -1449,7 +1486,7 @@
   added never reruns the task's. See docs/render.md#the-page and docs/render.md#a-layout-places-its-lists."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
   [_]
-  [:div {:id "render-ctx"} [#'task-list {}] [#'conversation-list {}] [#'tiles {:data-for "page"}]])
+  [:div {:id "render-ctx"} [#'task-list {}] [#'conversation-list {}] [#'tiles {:data-for "page"}] [#'rules-list {:data-for "page"}]])
 
 (defn task-list
   "The task's list of an agent's page (p-task, read by the model as parts: seon.render/page-lists), in the order
@@ -1863,6 +1900,7 @@
        [:main {:class "seon-chat"}
         [:div {:id "p-head"} (for [u (in "#p-head")] (slot (:id u)))]
         (slot "p-caption")
+        [:div {:id "p-rules"} (for [u (in "#p-rules")] (slot (:id u)))]
         [:ol {:id "c-rows" :class "seon-chat-log" :data-view view} (for [u (in "#c-rows")] (slot (:id u)))]
         (when input (slot "p-input"))]
        (when-not (or (= :debug tab) agent-chat?)
@@ -1878,12 +1916,13 @@
   "@ctx's parts, each a pair: what the model reads of the part (its data, or the hiccup its render returned, printed as
   seon.render/part-text prints it), beside the part as the page draws it (its unit's
   html). parts, {id content} of the task's list (seon.render/placed-hiccup); html, {id html} of its units; open, the
-  units the tab opened (/open: d-part-<id>). What the model reads is shown whole, so a part may be a million characters:
+  units the tab opened (/open: d-part-<id>); rules, the html of the page's rules, for the parts they style. What the model reads is shown whole, so a part may be a million characters:
   one over the value budget (:seon.config.render/value-budget) is a closed <details> with its size in tokens, whose text
   is drawn once opened, and has the page's width where a short one shares the row with the part drawn. See docs/render.md#the-page."
-  {:malli/schema [:=> [:cat :map [:map-of :string :string] [:set :string]] :any]}
-  [parts html open]
+  {:malli/schema [:=> [:cat :map [:map-of :string :string] [:set :string] :string] :any]}
+  [parts html open rules]
   [:li {:id "d-parts" :class "seon-stack-2"}
+   (h/raw rules)
    [:h2 {:class "kicker"} "the task's parts: what the model reads, and the part drawn"]
    (for [[id content] parts
          :let [text (render/part-text content)
@@ -2056,8 +2095,8 @@
                    [:div {:class "mt-1 flex min-w-0 flex-col gap-2"}
                     (when (seq rs) [:span {:class "seon-note"} (str/join " · " (map source rs))])
                     (when tool_call_id (field "tool_call_id" (verbatim tool_call_id)))
-                    (when reasoning_content [:details [:summary {:class "seon-note"} "reasoning_content"] (markdown reasoning_content)])
-                    (when (seq content) (field "content" ((if (= "system" role) markdown (if (= "tool" role) highlighted verbatim)) content)))
+                    (when reasoning_content [:details [:summary {:class "seon-note"} "reasoning_content"] (markdown reasoning_content {:inline? true})])
+                    (when (seq content) (field "content" ((if (= "system" role) #(markdown % {:inline? true}) (if (= "tool" role) highlighted verbatim)) content)))
                     (map-indexed (fn [j {:keys [id function] :as c}]
                                    (field (str "tool_calls[" j "] · " (:name function) " · " id)
                                           (into [:div {:class "flex flex-col gap-1"}]

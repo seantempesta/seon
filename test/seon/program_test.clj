@@ -507,7 +507,10 @@
       (doseq [scan? [true false]]
         (is (= want (update-vals (rows scan?) #(select-keys % [:id :ns :defines :refs])))
             (str "the walk's rows are the whole rows' id, namespace, definitions and references (scan " scan? ")")))
-      (is (every? #(= (:id %) (:own %)) (vals (rows true))) "a form's own digest is its id"))))
+      (is (every? #(let [f (program/form-row db (pdb/eid db :form/id (:id %)))]
+                     (= (:own %) (if (:code f) (second (program/form-ids (:ns %) (:src f) 0 (read-string (:src f)))) (:id f))))
+                  (vals (rows true)))
+          "a form's own digest is its namespace's and its code text's, or its id when it was stored without (seeded)"))))
 
 (deftest a-stored-reach-gives-the-digests-a-rebuild-gives
   ;; task seon.program/reach-graph-is-stored: a plan reads the graph the last one stored (jfasl in the
@@ -1307,4 +1310,51 @@
   (let [db (ts/test-db)]
     (is (= [] (program/schema-declarations db (program/schema-registry {}))) "the built schema, all declared already")
     (is (identical? seon.contract/registry (program/schema-registry {})))))
+
+(deftest a-comment-or-whitespace-edit-moves-no-test
+  ;; owner, 2026-11-06: "make sure test reuse is working": a form's own digest was its text's, so a reflowed body or a
+  ;; comment reran every test reaching the form. It is the read text less comments and whitespace runs
+  ;; (seon.program/form-ids); a docstring is not left out (it is data some code reads: docs/source.md#what-a-test-takes-of-a-forms-text)
+  (let [src "(defn add \"Adds.\" [a b] (+ a b))"
+        db (apply record (empty-db) (concat (take 2 calc-srcs)
+                                            ['app.pt-calc src
+                                             'user "(ns app.pt-calc-test (:require [clojure.test :refer [deftest is]] [app.pt-calc :refer [add]]))"
+                                             'app.pt-calc-test "(deftest add-test (is (= 3 (add 1 2))))"]))]
+    (is (= '#{} (selected db (record db 'app.pt-calc "(defn add \"Adds.\"\n  [a b]\n  ;; commutative\n  (+ a   b))"))) "a comment and whitespace")
+    (is (= '#{} (selected db (record db 'app.pt-calc "(defn add \"Adds.\" [a b]\n  (+ a b)) ; tail"))) "a trailing comment")
+    (is (= '#{app.pt-calc-test/add-test} (selected db (record db 'app.pt-calc "(defn add \"Sums.\" [a b] (+ a b))"))) "a docstring is data some code reads")
+    (is (= '#{app.pt-calc-test/add-test} (selected db (record db 'app.pt-calc "(defn add \"Adds.\" [a b] (+ b a))"))) "a change of code")
+    (is (= '#{app.pt-calc-test/add-test} (selected db (record db 'app.pt-calc "(defn add \"Adds.\" [a b] (+ a \"x;y\"))"))) "a string literal holding a ; and spaces is code")
+    (is (= '#{app.pt-calc-test/add-test} (selected db (record db 'app.pt-calc "(defn ^:private add \"Adds.\" [a b] (+ a b))"))) "a visibility")
+    (let [code #(second (program/form-ids 'app.x % 0 (read-string %)))]
+      (is (= (code "(def x \"a;b  c\")") (code "(def x   \"a;b  c\"   ; why\n)")) "a string keeps its own ; and spaces, the rest is squeezed")
+      (is (not= (code "(def x \"a;b  c\")") (code "(def x \"a;b c\")")) "and its spaces are its own")
+      (is (= (code "(map #(inc %) [1])") (code "(map\n  #(inc %)\n  [1])")) "a #() prints as the reader made it, however it is laid out")
+      (is (= (code "`(let [x# 1] x#)") (code "`(let [x# 1] x#)")) "a syntax quote's gensyms are the reader's counter, not the form's")
+      (is (not= (code "(defn ^:private f [] 1)") (code "(defn f [] 1)")) "the name's metadata is part of the code")
+      (is (not= (code "(def x 5)") (second (program/form-ids 'app.y "(def x 5)" 0 '(def x 5)))) "a namespace is part of the digest"))))
+
+(deftest a-config-key-added-moves-no-test-that-does-not-name-it
+  ;; owner, 2026-11-06: a branch adding one config key reran 1,118 of 1,154 keys, the config map's entry (which lists
+  ;; every key) being in the reach of every reader of seon.config/value. A test takes the values of the keys it reads
+  ;; (seon.program/config-reads), so the key list is no input of its own: a key's entry is, for a test naming the key
+  (let [schema (fn [db k form] (d/db-with db [{:schema/key k :schema/form form}]))
+        db (-> (record (empty-db) 'user "(ns app.pt-ck)"
+                       'app.pt-ck "(defn cfgv {:malli/schema [:=> [:cat :int] :app.pt-ck/config]} [x] x)"
+                       'user "(ns app.pt-ck-test (:require [clojure.test :refer [deftest is]] [app.pt-ck :as c]))"
+                       'app.pt-ck-test "(deftest reads-the-map-test (is (= 1 (c/cfgv 1))))"
+                       'app.pt-ck-test "(deftest names-a-test (is (= 1 (count [:seon.config.pt/a]))))")
+               (schema :seon.config.pt/a ":int") (schema :seon.config.pt/b ":int")
+               (schema :app.pt-ck/config "[:map {:closed true} [:seon.config.pt/a :seon.config.pt/a] [:seon.config.pt/b :seon.config.pt/b]]"))
+        dg (fn [db] (ts/reach-digests db {:env "e" :tree "t" :config {}}))
+        before (dg db)
+        moved (fn [db'] (let [after (dg db')] (set (for [[t d] before :when (not= d (after t))] t))))
+        listed (fn [db ks] (schema db :app.pt-ck/config (str "[:map {:closed true}" (apply str (for [k ks] (str " [" k " " k "]"))) "]")))]
+    (is (= #{} (moved (-> db (schema :seon.config.pt/c ":int") (listed [:seon.config.pt/a :seon.config.pt/b :seon.config.pt/c]))))
+        "a key added to the map moves no test: not the one reaching the map, not the one naming another key")
+    (is (= #{} (moved (schema db :seon.config.pt/b ":string"))) "an edit to a key no test names moves none, the map's readers included")
+    (is (= '#{app.pt-ck-test/names-a-test} (moved (schema db :seon.config.pt/a ":string"))) "an edit to a key's entry moves the test naming it")
+    (is (= '#{app.pt-ck-test/names-a-test} (moved (listed db [:seon.config.pt/b]))) "a key taken out of the map moves the test naming it")
+    (is (= '#{app.pt-ck-test/reads-the-map-test} (moved (schema db :app.pt-ck/config "[:map {:closed false} [:seon.config.pt/a :seon.config.pt/a] [:seon.config.pt/b :seon.config.pt/b]]")))
+        "what the map says besides its keys still moves the tests reaching it")))
 

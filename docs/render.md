@@ -161,6 +161,8 @@ A component's root element carries one class, its render's name, and its render'
 
 The walk replaces a component's root attributes with its render's `:seon.render/style`, so a class written on the root element of the hiccup is dropped: a bubble's classes go in its style. The model reads the same hiccup the page draws, so a plan's text stays verbatim, backticks included (parsing inline code spans turned the context's tests red; only fenced blocks are detected, by their marks).
 
+A render's style may be CSS rules in place of Tailwind classes: plain CSS, scoped by its render's name and using the theme's colours, `.task > h2 { color: var(--color-text-400); }` (`seon.render/css?`). It needs no build, so an agent reads it with `source` beside what it styles, changes it with `edit!` on its branch, and it merges and writes back as the definition does. ```seon.render.ui/page-rules``` is a component of the walk, which derefs the walk's ratom of the renders it has drawn (`:seon.render/drawn`, a var to its definition, updated when one is first drawn or redefined) and answers their rules as a style element, on the page like any other unit, so it draws again only when that ratom moves. It sits in a list of its own (```seon.render.ui/rules-list```), so a draw of what the model reads doesn't run it. Renders move to rules one at a time; `seon.render/styled` leaves a render with rules alone.
+
 ## Tiles are data; the context reads the page's derivations
 
 Each fact the page and root's context both show has one producer they share:
@@ -254,6 +256,7 @@ There is one value printer, `seon.print`, and nothing is cut before it. A value 
 Text for the wire, storage, a digest, a file, a URL, a command line or code to evaluate is `seon.edn/encode` (EDN that reads back, whole: no print limits), and only that var prints beside the printer:
 
 - `seon.edn/encode`: EDN for storage and the wire, whole.
+- `seon.program/form-ids`: the text of a form's code digest (`:form/code`), the form `pr-str` writes under `seon.edn/encode`'s bindings, whole: a digest's text, not output; inline, not `seon.edn/encode`, because that is one contracted call more than the `account` proof's estimate holds ([source](source.md#what-a-test-takes-of-a-forms-text)).
 - `seon.render.ui/eval-hiccup`: the EDN envelope of a user message (`{:by .. :code .. :response ..}`) around a response the one printer already printed: the wire, not output.
 - `seon.context/search`: the call in its last hit's `:more` (`(my.agent/search q {opts})`, q and the options as `pr-str` writes them): code to evaluate that returns the hits it left out, not output.
 - `my.schema/registration`: the part of a schema form that is no EDN, and where it is, in the invalid registration's message (`pr-str` of the value and its path, whole): the message tells the agent what to quote.
@@ -283,7 +286,7 @@ Uses of take, subs and the like in display code that choose what to find or read
 - `seon.render.ui/kname`: a keyword's text without its colon.
 - `seon.render.ui/status-hiccup`: a failing test's first assertion, its line saying how many more fail and that proving again shows the next: what to do first, chosen, with what it left said.
 - `seon.context/form-at`: a form (a real call, a namespace's `:require`) is a slice (`subs`) of a test's, caller's or namespace's own source from its opening delimiter to its closing one: text the db holds, found by position; a find, not a cut of output.
-- `seon.render.ui/markdown`, `seon.render.ui/task-title`: Markdown text split into its blocks by the offsets its parse (`seon.ref/scan`) gives (a fenced block's content and a list's items too), each kept as written; a name's first letter made capital: text rearranged, nothing left out.
+- `seon.render.ui/markdown`, `seon.render.ui/inline`, `seon.render.ui/task-title`: Markdown text split into its blocks and spans by the offsets its parse (`seon.ref/scan`) gives (a fenced block's content and a list's items too), each kept as written; a name's first letter made capital: text rearranged, nothing left out.
 - `seon.context/relevance`: the first `cap` of a search's scan of each kind's nearest (`take`), the pool it scores: a score's input, never shown.
 - `seon.context/item-text`: a text for relevance's lexical feature (`seon.doc/terms`) (a schema's form printed to find its words, a token's characters `subs` out of its text): an input to a score, never shown.
 - `seon.context/search`: a search's answer, its first `:k` hits (`take`) with a count of the rest and the form that returns them, that form printed as code to evaluate (`pr-str` of the query and its options): not a cut of output.
