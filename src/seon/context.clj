@@ -936,12 +936,19 @@
   [e] (boolean (some #(= (:seon.eval/code e) (second %)) (vals render-calls))))
 
 (defn- commit-at
-  "Branch db as of t: the earliest commit of its line that holds t, a real db value (a historical view of it answers no store, which a status reads commits through), found by walking the line back from db, at the cost of the commits since. See docs/render.md#a-redo-is-an-explicit-bust."
+  "Branch db as of t: the earliest commit of its line that holds t, a real db value (a historical view of it answers no store, which a status reads commits through), found by walking the line back from db, at the cost of the commits since. A commit collection swept before it is found is :seon.context/page-gone, never a later page in its place. See docs/render.md#a-redo-is-an-explicit-bust."
   {:malli/schema [:=> [:cat :seon.host/db :int] :seon.host/db]}
   [db t]
   (loop [at db]
-    (let [p (some->> (get-in at [:meta :datahike/parents]) (filter uuid?) first (d/commit-as-db (:store db)))]
-      (if (and p (>= (:max-tx p) t)) (recur p) at))))
+    (let [id (first (filter uuid? (get-in at [:meta :datahike/parents])))]
+      (if (or (nil? id) (= t (:max-tx at)))
+        at
+        (let [p (d/commit-as-db (:store db) id)]
+          (cond
+            (nil? p) (throw (ex-info "the page as of t is gone"
+                                     (contract/error :seon.context/page-gone #'commit-at (str "the commit that held t " t " was collected, so the page as of it cannot be drawn: read the page whole with (my.render/render-ctx)") {:t t})))
+            (>= (:max-tx p) t) (recur p)
+            :else at))))))
 
 (defn page-at
   "Agent a's page as of t on branch db, {id form} in placed order, drawn cold with today's renders: what `redo-tx` compares. See docs/render.md#a-redo-is-an-explicit-bust."

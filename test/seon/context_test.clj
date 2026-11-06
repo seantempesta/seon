@@ -1853,6 +1853,14 @@
     (is (str/includes? (:content (nth after at)) "42"))
     (is (= (subvec before (inc at)) (subvec after (inc at))) "and nothing after it")))
 
+;; docs/render.md#a-redo-is-an-explicit-bust: collection may have swept the commit a redo needs
+(deftest a-page-whose-commit-is-gone-is-an-error-not-a-later-page
+  (let [[db] (tree-world)
+        gone (assoc-in db [:meta :datahike/parents] #{(random-uuid)})
+        t (:max-tx db)]
+    (is (= t (:max-tx (#'context/commit-at gone t))) "the commit at t itself needs no walk")
+    (is (= :seon.context/page-gone (try (#'context/commit-at gone (dec t)) (catch clojure.lang.ExceptionInfo e (:seon.error/type (ex-data e))))))))
+
 (deftest a-page-eval-reads-as-the-value-it-stored
   ;; docs/render.md#the-render-is-an-eval: a model's bytes for a page diff are what (my.render/render-changes) stored
   (let [v (render/parts-value {"status" '[seon.render.ui/status {:ctx [:task :proved]} [:p "moved"]]})
