@@ -73,17 +73,18 @@
     (let [c (model/parse-reply
              (apply str (map chunk-line
                              [{:choices [{:delta {:content "Two steps."}}]}
-                              {:choices [{:delta {:tool_calls [{:index 0 :id "c1" :function {:name "eval" :arguments "{\"code\":"}}]}}]}
+                              {:choices [{:delta {:tool_calls [{:index 0 :id "c1" :function {:name "eval" :arguments "{\"intent\":\"i\",\"code\":"}}]}}]}
                               {:choices [{:delta {:tool_calls [{:index 0 :function {:arguments "\"(def x 41)\"}"}}]}}]}
-                              {:choices [{:delta {:tool_calls [{:index 1 :id "c2" :function {:name "eval" :arguments "{\"code\":\"(inc x)\"}"}}]}}]}
+                              {:choices [{:delta {:tool_calls [{:index 1 :id "c2" :function {:name "eval" :arguments "{\"intent\":\"i\",\"code\":\"(inc x)\"}"}}]}}]}
                               {:choices [{:delta {} :finish_reason "tool_calls"}] :usage {:prompt_tokens 9 :completion_tokens 4}}]))
              5.0 64)]
-      (is (= [{:id "c1" :code "(def x 41)"} {:id "c2" :code "(inc x)"}] (:tool-calls c)))
+      (is (= [{:id "c1" :code "(def x 41)" :intent "i"} {:id "c2" :code "(inc x)" :intent "i"}] (:tool-calls c)))
       (is (= ["Two steps." "tool_calls"] [(:text c) (:finish-reason c)]))))
   (testing "a call with no content beside it, and a call cut mid-arguments: its arguments as they came"
     (let [c (model/parse-reply "{\"choices\":[{\"message\":{\"content\":null,\"tool_calls\":[{\"id\":\"c\",\"function\":{\"name\":\"eval\",\"arguments\":\"{\\\"code\\\":\\\"(+ 1\"}}]},\"finish_reason\":\"length\"}]}" 1.0 64)]
       (is (= "" (:text c)))
-      (is (= [{:id "c" :code "{\"code\":\"(+ 1"}] (:tool-calls c))))))
+      (is (= ["c" "{\"code\":\"(+ 1"] ((juxt :id :code) (first (:tool-calls c)))) "its arguments as they came")
+      (is (re-find #"not run: the arguments are cut off" (:problem (first (:tool-calls c)))) "and nothing runs: the agent is told why"))))
 
 (defn- usage-of
   "The completion a one-document reply with usage u reads as."
@@ -161,21 +162,33 @@
     (is (= "Square multiplies." (:reasoning_content (second (:messages b)))) "the earlier reply's reasoning goes back with it")
     (is (not-any? :reasoning_content [(first (:messages b)) (nth (:messages b) 2)]) "and only on the assistant's message")))
 
-(deftest a-request-lets-the-model-reply-in-prose
+(deftest a-request-lets-the-model-reply-with-no-call
   ;; docs/render.md (step 0 measured it live: four DeepSeek turns,
   ;; thinking on, all 200, cache hits 87-96% from turn 2): tool_choice auto (DeepSeek refuses
-  ;; `required` with thinking on), so a reply may be prose alone; the eval tool takes code
-  ;; only; the reasoning goes back as it was returned; no ;; reaches the model
+  ;; `required` with thinking on), so a reply may be a message with no call; the eval tool takes its intent and code, and optionally a message; the reasoning goes back as it was returned; no ;; reaches the model
   (let [b (model/request-body {:kind :openai-compat :base-url "" :model "m" :api-key-env "" :max-tokens 10 :thinking :enabled}
                               {:messages [{:role "assistant" :content "I read f." :reasoning "r" :tool-calls [{:id "c1" :code "(f)"}]}
                                           {:role "tool" :tool-call-id "c1" :content "{:handle result/e1, :value 1}"}]
                                :task "t/x" :turn 1})]
     (is (= "auto" (:tool_choice b)))
-    (is (= [:intent :code] (keys (get-in b [:tools 0 :function :parameters :properties]))) "prose first, then code: the model states its intent before the code")
+    (is (= [:message-md :intent :code] (keys (get-in b [:tools 0 :function :parameters :properties]))) "the message, then the intent, then code: it talks and thinks before the code")
+    (is (= ["message-md" "intent" "code"] (get-in b [:tools 0 :function :parameters :required])) "all three, the message empty on a reply's later calls")
+    (testing "a turn has one message, its text; each call has its intent"
+      (let [reply (fn [& argss] (model/parse-reply (json/write-str {:choices [{:message {:content "" :tool_calls (vec (map-indexed (fn [i a] {:id (str "c" i) :function {:name "eval" :arguments (json/write-str a)}}) argss))} :finish_reason "tool_calls"}]}) 1.0 64))
+            one {:intent "i" :code "(f)"}
+            c (reply (assoc one :message-md "Doing f twice.") one)]
+        (is (= "Doing f twice." (:text c)) "the message is the turn's text")
+        (is (= [{:id "c0" :code "(f)" :intent "i"} {:id "c1" :code "(f)" :intent "i"}] (:tool-calls c)) "and covers all of its calls")
+        (is (= [nil nil] (mapv :problem (:tool-calls (reply one one)))) "a reply with none still runs")
+        (let [sent (:messages (model/request-body {:kind :openai-compat :base-url "" :model "m" :api-key-env "" :max-tokens 10}
+                                                  {:messages [{:role "assistant" :content "Doing f twice." :reply 1} {:role "assistant" :content "" :reply 1 :tool-calls (:tool-calls c)}] :task "t/x" :turn 1}))]
+          (is (= "" (:content (first sent))) "history reads as the model sent it")
+          (is (= ["{\"message-md\":\"Doing f twice.\",\"intent\":\"i\",\"code\":\"(f)\"}" "{\"intent\":\"i\",\"code\":\"(f)\"}"]
+                 (mapv #(get-in % [:function :arguments]) (:tool_calls (first sent)))) "the message on its first call"))))
     (is (not (str/includes? (pr-str (:tools b)) ";;")) "no ;; in the tool")
-    (is (= {:role "assistant" :content "I read f." :reasoning_content "r"
-            :tool_calls [{:id "c1" :type "function" :function {:name "eval" :arguments "{\"code\":\"(f)\"}"}}]}
-           (first (:messages b))) "prose, reasoning and the call, as returned")
+    (is (= {:role "assistant" :content "" :reasoning_content "r"
+            :tool_calls [{:id "c1" :type "function" :function {:name "eval" :arguments "{\"message-md\":\"I read f.\",\"code\":\"(f)\"}"}}]}
+           (first (:messages b))) "reply text, reasoning and the call, as returned")
     (is (= "c1" (:tool_call_id (second (:messages b)))) "the response answers its call by the provider's id")))
 
 
