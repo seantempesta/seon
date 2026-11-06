@@ -60,7 +60,7 @@
                           (str "the scripted model " script " answered no :seon.model/script-reply") {:script script :seon.error/problems (contract/problems s out)})
           (let [{:keys [text calls]} out]
             ;; a reply's text is a string, empty when it gives none, as a provider's reply is read (reply-of)
-            {:text (or text "") :tool-calls (vec (map-indexed (fn [i c] (assoc c :id (str "call-" (:turn request) "-" i))) calls))
+            {:text (or text "") :tool-calls (when (seq calls) (vec (map-indexed (fn [i c] (assoc c :id (str "call-" (:turn request) "-" i))) calls)))
              :prompt-tokens (reduce + (map (comp select/estimate :content) (:messages request)))
              :completion-tokens (select/estimate (apply str text (map :code calls))) :estimated true :ms (profile/ms-since t0)}))))))
 
@@ -180,7 +180,11 @@
   effort only when the provider sets them (absent: the provider's own default)."
   {:malli/schema [:=> [:cat :seon.model/provider :seon.model/request] :map]}
   [{:keys [model max-tokens temperature thinking reasoning-effort replay-reasoning]} request]
-  (cond-> {:model model :messages (wire-messages replay-reasoning (:messages request)) :tools [eval-tool] :tool_choice "auto" :max_tokens max-tokens
+  (cond-> {:model model
+           ;; thinking on, DeepSeek refuses any assistant message without reasoning_content: an eval Seon ran for the agent has none, so it says so
+           :messages (cond->> (wire-messages replay-reasoning (:messages request))
+                       (= :enabled thinking) (mapv #(if (and (= "assistant" (:role %)) (not (contains? % :reasoning_content))) (assoc % :reasoning_content "") %)))
+           :tools [eval-tool] :tool_choice "auto" :max_tokens max-tokens
            ;; streamed: the reply arrives as it is made, so no clock has to guess its length
            :stream true :stream_options {:include_usage true}}
     temperature (assoc :temperature temperature)

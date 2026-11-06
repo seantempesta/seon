@@ -1925,6 +1925,15 @@
     (is (= {t :pass} (:results (:value judge-gate))) (pr-str judge-gate))
     (is (nil? (:log (:value judge-gate))) "the judge's gate of the same candidate runs nothing: the same owner holds its verdict")))
 
+(deftest a-test-that-waits-for-good-is-told-and-the-next-agent-goes-on
+  ;; deepseek-run3 (2026-11-06): an agent's own test deref'd a promise nobody delivers. Its test child parked for good at 0% CPU, tick budgets count no sleep,
+  ;; and it held the test service's one slot: 5 of 5 agents idle in observe for 9 minutes. A signal the child waited on (SIGIO, for its
+  ;; agent's death) counted as something that could wake it, so Jolt never told it (seon.intr/exit-at-eof!)
+  (let [t 'seon.problems-test/a-test-that-waits-for-good
+        write "(do (in-ns 'seon.problems-test) (clojure.test/deftest a-test-that-waits-for-good (let [p (promise)] (clojure.test/is (= 1 @p)))) (in-ns 'user) :ok)"
+        [_ proved] (in-agent (fn [_] [write "(let [r (my.agent/prove)] {:proofs (:proofs r) :error (:error r)})"]) {:proofs #{t}})]
+    (is (= {t :error} (:proofs (:value proved))) (pr-str proved))))
+
 (deftest a-gate-that-cant-read-its-candidate-answers
   ;; AGENTS 4 "every wait ends": a :gate's writer refusal comes back to whoever asked, no test run (seon.root/ext-op)
   (let [[r] (in-agent (fn [_] [{:op :eval :agent "root" :code "(:seon.error/type @(seon.root/call! sys {:op :gate :branch :no-such-branch :tests ['a/b]}))"}]))]

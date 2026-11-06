@@ -315,7 +315,7 @@
             ;; reasoning are the model call's own (below), never copied onto an eval
             ;; a call with no intent or no form, or after one that threw or answered an error, is not run: its one
             ;; result says why (seon.repl/unrun, docs/prompt.md)
-            calls (repl/run-calls (:tool-calls c) (fn [id] {:origin :model :call-id id}) evaluated!)
+            calls (repl/run-calls (vec (:tool-calls c)) (fn [id] {:origin :model :call-id id}) evaluated!)
             rs (mapv :response calls)
             eval-ms (long (profile/ms-since t2))
             _ (swap! agent/state assoc-in [:turn :evals] rs)]
@@ -424,7 +424,7 @@
   {:malli/schema [:=> [:cat [:or :map :seon.error/base]] [:or :map :seon.error/base]]}
   [s]
   (if (and (not (contract/error? s)) (empty? (:reasons s)))
-    (do (test-error! (agent/judge!)) (status-now))
+    (do (test-error! (agent/judge! #{} true)) (status-now))
     s))
 
 (defn hand-back!

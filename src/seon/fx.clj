@@ -883,6 +883,19 @@
   (let [f (java.io.File. (str runs "/root.port"))]
     (when (.isFile f) (parse-long (str/trim (slurp f))))))
 
+(defn build-failure
+  "What a checkout's failed build says, for whoever asked: the exception it names, where, and when the candidate's files ({path text})
+  hold that place, the form written there up to its first blank line, so an agent reads which form of its own stops the build. A build
+  that names no exception says so. See docs/merging.md#a-merge-runs-what-the-change-reaches."
+  {:malli/schema [:=> [:cat :string [:maybe :map]] :string]}
+  [out files]
+  (if-let [[_ ex msg path line] (re-find #"Unhandled exception \(([^)]*)\): (.*)\n\s*at \./([^:\n]+):(\d+)" out)]
+    (let [text (get files path)
+          form (when text (->> (str/split-lines text) (drop (dec (parse-long line))) (take-while (complement str/blank?)) (str/join "\n")))]
+      (str "the gate's build failed: " ex ": " msg ", at " path ":" line
+           (if (seq form) (str ", where your change wrote: " form) ", a place your change's files don't hold")))
+    "the gate's build failed and named no exception"))
+
 (defn- run-on-checkout
   "One run of the :tests effect (run-tests): tests (qualified names) on a checkout of the merge candidate: a
   detached worktree of repo at branch's head (bin/worktree --at, as a generation's), files
@@ -928,7 +941,7 @@
                   (doseq [n kept-build] (sh/sh "cp" "-cf" (str dir "/target/" n) (str slot "/" n))))]
           (if (not (zero? (:exit b)))
             (do (spit log (str (:out b) (:err b)))
-                (error #'seon.fx/run-on-checkout :seon.fx/io-error (str "bin/build seon exited " (:exit b) "; its log: " log) {:path dir}))
+                (error #'seon.fx/run-on-checkout :seon.fx/io-error (str (build-failure (str (:out b) (:err b)) files) "; its log: " log) {:path dir}))
             ;; the tree's shards cache their verdicts in this checkout's verdict cache, named to them,
             ;; so the verdicts read below are the ones its run wrote
             (let [out (str dir "/target/prove/run")

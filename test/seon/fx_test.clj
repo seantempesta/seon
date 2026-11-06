@@ -225,6 +225,15 @@
     (is (= #{} (fx/main-reds {:results {t :fail}} {:results {t :fail}})) "no failures kept on either side: unsure")
     (is (= #{} (fx/main-reds (run a) nil)) "main's run answered nothing: unsure")))
 
+(deftest a-failed-build-says-what-failed-and-which-form
+  ;; deepseek-run3: a REPL form recorded as program stopped the gate's build 6 times, with only a log path to the agent, which called it unrelated
+  (let [out "build: seon: jolt build\nUnhandled exception (FileNotFoundException): Could not locate seon/repl_test.jolt\n  at ./src/seon/repl.clj:3:1\n  trace:\n"
+        files {"src/seon/repl.clj" "(ns seon.repl)\n\n(intern 'seon.repl-test\n  'let 1)\n\n(def after 1)\n"}]
+    (is (= "the gate's build failed: FileNotFoundException: Could not locate seon/repl_test.jolt, at src/seon/repl.clj:3, where your change wrote: (intern 'seon.repl-test\n  'let 1)"
+           (fx/build-failure out files)))
+    (is (clojure.string/ends-with? (fx/build-failure out {}) "a place your change's files don't hold"))
+    (is (= "the gate's build failed and named no exception" (fx/build-failure "nothing" files)))))
+
 (deftest a-merges-deferred-tests-command
     ;; the gate runs the tests the change reached, not their namespaces' other tests (the restart
     ;; test's gate ran 48 tests for 1 deferred one)
