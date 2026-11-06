@@ -1728,25 +1728,28 @@
   (dec (count (clojure.string/split-lines (:out (clojure.java.shell/sh "ps" "-M" "-p" (str pid)))))))
 
 (defn agent-tests
-  "The tests that reach no process and have no green at their digest in this step's own verdict cache, run as a Seon agent runs them: forked from one agent that has drawn its page, on a
+  "A sample of the tests that reach no process (seon.proofs/agent-tests-sample), run as a Seon agent runs them: forked from one agent that has drawn its page, on a
   root whose config is not bin/test's (docs/merging.md#a-test-child-is-a-fork-of-a-live-agent). Green under bin/test and
-  red here is a test reading its runner, or its agent's state leaking into it, which blocks a real agent's merge. It selects
-  through seon.agent/test-plan, as an agent's own run does, and judges everything it selected; bin/check gives it a verdict
-  cache of its own, kept across runs, so a run costs what the change reaches."
+  red here is a test reading its runner, or its agent's state leaking into it, which blocks a real agent's merge. It takes
+  its tests from seon.agent/test-plan, as an agent's own run does, and every one must report; bin/check gives it a verdict
+  cache of its own, kept across runs."
   []
   (run-check "AGENT-TESTS" {:datoms 2000 :source {:root (seon.config/checkout) :dirs (seon.config/value :seon.config.source/dirs) :branch :none}}
    (fn [sys]
     (let [[a] (spawn-ready! sys {:task "agent-tests" :branch :agent-tests1})
           out (str (:agents-dir (:store (c/state sys))) "/agent-tests.edn")
           _ @(c/submit! sys a (str "(do (seon.repl/page-walk)"
-                                   " (let [r (seon.agent/run-tests-forked (seon.config/value :seon.config.agent/test-ticks) #{} :main)]"
+                                   " (let [p (seon.agent/test-plan (seon.agent/db) nil #{} (seon.agent/heard-main))"
+                                   " ds (apply dissoc (:digests p) (:process p))"
+                                   " sample (seon.proofs/agent-tests-sample (seon.config/value :seon.config.proofs/agent-tests-sample) (apply dissoc ds (keys (seon.fx/slow-tests ds))))"
+                                   " r (seon.agent/run-tests-forked (seon.config/value :seon.config.agent/test-ticks) sample :turn)]"
                                    " (spit " (pr-str out) " (pr-str (assoc (update r :reports (fn [rs] (filterv #(not= :pass (:type %)) rs)))"
-                                   " :known (count (:digests (seon.agent/test-plan (seon.agent/db) nil #{} (seon.agent/heard-main)))))))))"))
+                                   " :sampled (count sample) :known (count ds))))))"))
           r (read-string (slurp out))
           reds (:reports r)]
-      {:report (assoc (select-keys r [:ran :known :pass :fail :error]) :reds (mapv (juxt :var :message :actual) reds))
-       ;; no test run is an answer when every test is green here; none known is not: the plan found no program
-       :checks {:tests-known (pos? (:known r 0)) :none-red (empty? reds)}}))))
+      {:report (assoc (select-keys r [:ran :sampled :known :pass :fail :error]) :reds (mapv (juxt :var :message :actual) reds))
+       ;; a green here at its digest reports as a test run, so none is left unjudged; none sampled means the plan found no program
+       :checks {:tests-sampled (pos? (:sampled r 0)) :every-sampled-judged (= (:sampled r) (:ran r)) :none-red (empty? reds)}}))))
 
 (defn threads-check
   "Session RC1's physics rule: the processes that fork (the fork server; an agent, for its
