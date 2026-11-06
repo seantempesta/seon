@@ -2,7 +2,7 @@
   "The conversation's cost proofs: a request costs its records (seon.context/request), each a function of that record alone
   (docs/render.md#the-models-context-a-cached-prefix-then-the-turn), and what reads them. Run: bin/test seon.context-cost-test"
   (:refer-clojure :exclude [defn defn-])
-  (:require [clojure.test :refer [deftest]] [seon.contract :refer [defn defn-]] [seon.cost :as cost] [seon.context] [seon.ctx] [seon.fixtures] [seon.render]
+  (:require [clojure.test :refer [deftest]] [seon.contract :refer [defn defn-]] [seon.cost :as cost] [seon.context] [seon.ctx] [seon.doc] [seon.fixtures] [seon.render]
             [datahike.api :as d] [seon.test-store :as ts] [my.test :as t] [seon.db :as pdb] [seon.task :as task] [seon.vector :as vector]))
 
 (defn- item
@@ -23,9 +23,11 @@
   and the agent's entity id."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :int]]}
   [n]
-  (let [db (d/db-with (ts/test-db)
-                      (vec (for [i (range n) :let [[_ v] (item i)]]
-                             (assoc v :seon.eval/agent {:seon.agent/key "b/a1"}))))]
+  (let [db (d/db-with (ts/test-db) (seon.doc/load-tx (ts/test-db) "docs" {seon.context/system-page "# You are a Seon agent\n\nThe rules."}))
+        db (d/db-with db
+                      (into [{:seon.agent/key "b/a1" :seon.agent/turn n}]
+                            (for [i (range n) :let [[_ v] (item i)]]
+                              (assoc v :seon.eval/agent {:seon.agent/key "b/a1"}))))]
     [db (:db/id (d/entity db [:seon.agent/key "b/a1"]))]))
 
 (defn records-of
@@ -133,6 +135,6 @@
                :n "evals of the session before the turn"
                :work "each component's messages read as they were kept, the tree walked once; the page at the end, its forms made once"
                :growth :linear
-               :per-n {:calls 12 :bytes 15000}
+               :per-n {:calls 8 :bytes 15000}
                :fixed {:calls 900 :bytes 600000}
                :sizes [10 30 100]}))

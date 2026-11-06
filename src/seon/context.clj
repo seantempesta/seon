@@ -755,13 +755,18 @@
   [[db e]] (or (:tx (first (d/datoms db :eavt e :seon.message/agent))) 0))
 
 (defn turn-members
-  "What model call cid of agent record c holds that c holds too, in the order of the turn: {:messages [m] :evals [e]}: its messages as they were taken, its evals as they ran; one unlinked from c (a swap! on
+  "What model call cid of agent record c holds that c holds too, in the order of the turn: {:messages [[m id]] :evals [[e id]]}: its messages as they were taken, its evals as they ran, each with its own id; one unlinked from c (a swap! on
   @ctx) is none. Reads each member's id alone. See docs/turn.md#the-turn-is-a-number."
-  {:malli/schema [:=> [:cat :seon.host/db :map :int] [:map [:messages [:sequential :int]] [:evals [:sequential :int]]]]}
+  {:malli/schema [:=> [:cat :seon.host/db :map :int] [:map [:messages [:sequential [:tuple :int :string]]] [:evals [:sequential [:tuple :int :string]]]]]}
   [db c cid]
-  (let [at (fn [k attr] (filter #(get-in c [k % attr]) (keys (get-in c [:calls cid k]))))]
-    {:messages (let [ms (at :messages :seon.message/id)] (if (next ms) (map second (sort-by first-taken (map #(vector db %) ms))) ms))
-     :evals (sort (at :evals :seon.eval/id))}))
+  (let [at (fn [k attr] (keep (fn [e] (when-let [id (get-in c [k e attr])] [e id])) (keys (get-in c [:calls cid k]))))]
+    {:messages (let [ms (at :messages :seon.message/id)] (if (next ms) (sort-by (fn [[e]] (first-taken [db e])) ms) ms))
+     :evals (sort-by first (at :evals :seon.eval/id))}))
+
+(defn call-of
+  "The model call of turn n of the agent with key k on db, or nil: one seek by its id. See docs/turn.md#the-turn-is-a-number."
+  {:malli/schema [:=> [:cat :seon.host/db nat-int? :string] [:maybe :int]]}
+  [db n k] (pdb/eid db :seon.model-call/id (str k "/" n)))
 
 (defn turns
   "The model calls of agent record c that are its turns, in order: [n eid]; a context read (origin :outside) is no turn. See docs/turn.md#the-turn-is-a-number."
@@ -811,7 +816,7 @@
   docs/tasks.md#a-task-names-example-sessions."
   {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :string]]}
   [db c]
-  (let [first-turn (some (fn [[_ e]] (when (= :model (get-in c [:calls e :seon.model-call/origin])) e)) (turns c))
+  (let [first-turn (some->> (ratom/realize (:seon.agent/key c)) (call-of db 1))
         id (or (when first-turn (:task (:seon.model-call/basis (d/pull db [:seon.model-call/basis] first-turn))))
                (get-in c [:task :seon.task/id]))]
     ;; read from the task's datoms, so a task naming none costs no contracted call
@@ -857,10 +862,10 @@
   (vec (for [[n cid] (turns c)
              :let [{:keys [messages evals]} (turn-members db c cid)
                    call (get-in c [:calls cid])]
-             r (concat (for [m messages] [(assoc (select-keys (get-in c [:messages m]) [:seon.message/id :seon.message/from :seon.message/body]) :turn n) :seon.message/fact])
+             r (concat (for [[m] messages] [(assoc (select-keys (get-in c [:messages m]) [:seon.message/id :seon.message/from :seon.message/body]) :turn n) :seon.message/fact])
                        (when (= :model (:seon.model-call/origin call))
                          [[(select-keys call [:seon.model-call/id :seon.model-call/n :seon.model-call/origin :seon.model-call/reply :seon.model-call/reasoning]) :seon.model-call/fact]])
-                       (for [e evals] [(assoc (dissoc (get-in c [:evals e]) :db/id :seon.eval/agent :seon.eval/call :seon.eval/opened) :turn n) :seon.db/eval-fact]))]
+                       (for [[e] evals] [(assoc (dissoc (get-in c [:evals e]) :db/id :seon.eval/agent :seon.eval/call :seon.eval/opened) :turn n) :seon.db/eval-fact]))]
          r)))
 
 (defn- session-request
@@ -926,10 +931,15 @@
   "The agent's request, a reading of walk w, the one tree its page draws (docs/render.md#the-models-context-a-cached-prefix-then-the-turn): its conversation's list through the one generic conversion
   (seon.render/wire), so the request is what the tree holds, a re-eval in its own place. A request whose records hold no render of the page (an observer's context read, the first move a judge scores) ends
   with the page whole as a call of its own and its result, when the tree holds a page to show. Answers {:messages :parts}: provider-neutral messages (seon.model/wire-messages makes the wire shape), and :parts, each
-  [ref messages turn] in order (what the debug page labels its messages by): ref [:section address] the system message, [:example key t], [:session id], [:eval id], [:message id], [:reply id] or [:render]."
+  [ref messages turn] in order (what the debug page labels its messages by): ref [:section address] the system message, [:example key t], [:session id], [:eval id], [:message id], [:reply id] or [:render]. A tree that draws no system message is refused, :seon.context/no-system-message, never sent without one."
   {:malli/schema [:=> [:cat :map] [:map [:messages [:vector :seon.model/message]] [:parts [:vector :any]]]]}
   [w]
   (let [ps (render/wire w)
+        ;; a conversation's other defects reach the model as what threw, in their place; a request with no system message is no request
+        _ (when-not (= "system" (:role (first (second (first ps)))))
+            (throw (ex-info "the request has no system message"
+                            (contract/error :seon.context/no-system-message #'request "the request has no system message: its component drew none (a db without the prompt, or a section it links gone)"
+                                            {:first (some-> (first ps) second first (select-keys [:role :content]))}))))
         shown? (some (fn [[_ ms]] (some (fn [m] (some #(render-eval? {:seon.eval/code (:code %)}) (:tool-calls m))) ms)) ps)
         lists (render/page-lists w)
         parts (when (and (not shown?) (seq lists)) (not-empty (render/placed-hiccup w lists)))
@@ -960,7 +970,7 @@
    (if walk
      (request walk)
      (let [t (or ctx (agent-ctx db (pdb/eid db :seon.agent/key agent)))
-           w (render/draw t ctx/changes db (render/declared-var :seon.render/render-ctx) {:model-only true})]
+           w (render/draw t ctx/changes db (render/declared-var :seon.render/render-ctx) {:model-only true :once true})]
        (try (request w) (finally (render/dispose-walk! w)))))))
 
 (defn provider-of

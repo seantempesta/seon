@@ -740,7 +740,7 @@
         ran-now (fn [f] (- (get after (str f) 0) (get before (str f) 0)))]
     (is (= 1 (ran-now `ui/conversation-turn)) "the turn the eval took draws again")
     (is (= 1 (ran-now `ui/eval-item)) "and the eval, new")
-    (is (zero? (+ (ran-now `ui/conversation-list) (ran-now `ui/chat-message) (ran-now `ui/chat-turn))) "no other turn's records, nor the list, are read again")
+    (is (zero? (+ (ran-now `ui/conversation-list) (ran-now `ui/chat-message))) "no other turn's records, nor the list, are read again")
     (r/dispose-walk! (:w kw))))
 
 (deftest a-walk-made-before-its-agent-takes-the-agent
@@ -1474,11 +1474,11 @@
         "the conversation by turn number, each turn a component keyed by the agent and its number (turn 0 took no record: no component), then how the agent stands")
     (let [turn1 (:html (unit-of conv "conversation-turn-"))
           at #(str/index-of turn1 %)]
-      (is (< (at "id=\"chat-message-m-1\"") (at "id=\"chat-turn-1\"")
+      (is (< (at "id=\"chat-message-m-1\"") (at "seon-message")
              (at "id=\"eval-item-e3\""))
           "a turn: the messages it took, its model call, then the evals of other hands")
       (is (every? #(str/includes? turn1 (str "id=\"eval-item-" % "\"")) ["e1" "e2" "e3"]) "its model call's evals among its steps")
-      (is (not (str/includes? (:html (second (filter #(str/starts-with? (:id %) "conversation-turn-") conv))) "chat-turn")) "the agent's turn 2 said nothing: its component holds no bubble"))
+      (is (not (str/includes? (:html (second (filter #(str/starts-with? (:id %) "conversation-turn-") conv))) "seon-message")) "the agent's turn 2 said nothing: its component holds no bubble"))
     (is (every? #(str/starts-with? (:html %) (str "<" )) units))
     (is (every? #(str/includes? (:html %) (str "id=\"" (:id %) "\"")) units) "each component's root element carries its key as its id")
     (is (= units (draw)) "pure: the same ctx, the same page")))
@@ -2262,12 +2262,12 @@
            :messages {4 {:seon.message/from "user" :seon.message/body "Is the premise right?"}}}
         h #(h/html %)]
     (testing "a model turn is its reply, its thinking folded"
-      (let [t (h (ui/chat-turn {:seon.ctx/ctx c :at [:calls 2]} []))]
+      (let [t (h (ui/reply-hiccup (get-in c [:calls 2]) false []))]
         (is (str/includes? t "I'll <strong>reproduce</strong> it first."))
         (is (str/includes? t "<details") "its thinking folded")
         (is (str/includes? t "Read select first."))
         (is (not (str/includes? t "turn 1")) "its turn and tokens are for the debug tab"))
-      (is (nil? (ui/chat-turn {:seon.ctx/ctx c :at [:calls 3]} [])) "a turn that said nothing draws no bubble"))
+      (is (nil? (ui/reply-hiccup (get-in c [:calls 3]) false [])) "a turn that said nothing draws no bubble"))
     (testing "a message is a bubble with its sender"
       (let [m (h (ui/chat-message {:seon.ctx/ctx c :at [:messages 4]}))]
         (is (str/includes? m "user"))
@@ -2398,12 +2398,13 @@
         opts {:seon.ctx/ctx (:tree (seon.ctx/build db aid :b)) :seon.db/db db}
         eid #(seon.db/eid db :seon.eval/id %)
         call (seon.db/eid db :seon.model-call/id (str k "/1"))
-        turn (ui/conversation-turn (assoc opts :at [:calls call]))
-        shown (set (for [c (drop 2 turn) :when (= #'ui/eval-item (first c))] (:key (second c))))]
+        turn (ui/conversation-turn (assoc opts :key 1))
+        shown (set (for [c (drop 2 turn) :when (= #'ui/eval-item (first c))] (:key (second c))))
+        reply (some #(when (= :section (first %)) %) (drop 2 turn))]
     (is (= #{"e2" "e4"} shown) "an eval of another hand is a line after the reply, and Seon's its own, for the model alone")
-    (is (some #(and (= #'ui/chat-turn (first %)) (= ["e3"] (map (comp :key second) (last %)))) (rest turn)) "the agent's eval is its turn's step")
+    (is (= ["e3"] (map (comp :key second) (last (last reply)))) "the agent's eval is its reply's step")
     (is (not (str/includes? (h/html (ui/eval-item (assoc opts :at [:evals (eid "e2")]))) "render-ctx")) "Seon's own is not on the page")
-    (let [t (h/html (ui/chat-turn (assoc opts :at [:calls call]) []))]
+    (let [t (h/html (ui/reply-hiccup (d/pull db '[*] call) false []))]
       (is (str/includes? t "Found <strong>it</strong>") "what it said, its Markdown drawn")
       (is (not (str/includes? t "of context")) "its tokens are for whoever opens a step"))
     (let [e (h/html (ui/eval-item (assoc opts :at [:evals (eid "e3")])))]

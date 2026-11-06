@@ -289,7 +289,7 @@
                                               :seon.eval/response {:handle (symbol "result" id) :value {:step i}}})
                         (when (zero? (mod i 3))
                           (update (seon.task/message-tx (str "mm-" i) :message "owner" :b (str "How is step " i "?")) 0 assoc
-                                  :seon.message/agent {:seon.agent/key k} :seon.message/call (seon.task/call-ref k (inc i)))))))
+                                  :seon.message/agent {:seon.agent/key k} :seon.message/call (seon.task/call-ref k 1) :seon.message/call (seon.task/call-ref k (inc i)))))))
         base (reduce d/db-with (ts/test-db) [[{:seon.root/id :root :seon.root/boot "b1"}] (seon.task/agent-tx "b1" :a1 {:status :busy :branch :b})])
         db (reduce (fn [db i] (d/db-with db (vec (turn i)))) base (range (dec n)))
         c (seon.ctx/build db (seon.db/eid db :seon.agent/key k) :b)
@@ -457,7 +457,7 @@
 
 (def ^:dynamic *sels*
   "The draw proof's opts (bound by its deftest)."
-  {:model-only true})
+  {:model-only true :once true})
 
 (defn page-of
   "The input at n: the arguments of seon.render/draw for agent b/p<n>'s page on a branch where it
@@ -467,9 +467,9 @@
   [n]
   (let [conn *conn* k (str "b/p" n) tid (str "demo/p" n)]
     (d/transact conn (seon.task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name (str "p" n) :seon.task/plan "Make p." :seon.task/proofs #{'demo-test/p-test}}]))
-    (d/transact conn [{:seon.agent/key k :seon.agent/task {:seon.task/id tid}}])
+    (d/transact conn [{:seon.agent/key k :seon.agent/turn 1 :seon.agent/task {:seon.task/id tid}}])
     (doseq [i (range n)]
-      (d/transact conn [{:seon.eval/id (str "p" n "e" i) :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key k}
+      (d/transact conn [{:seon.eval/id (str "p" n "e" i) :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key k} :seon.eval/call (seon.task/call-ref k 1)
                          :seon.eval/code (str "(f " i ")") :seon.eval/response {:handle (symbol "result" (str "p" n "e" i)) :value (vec (range 5)) :ns 'user} :seon.eval/call-id (str "c" i) :seon.eval/intent (str "Step " i ".")}])
       (when (even? i)
         (d/transact conn (update (seon.task/message-tx (str "p" n "m" i) :message "user" (keyword (str "b-p" n)) (str "note " i)) 0 assoc :seon.message/agent {:seon.agent/key k}))))
@@ -486,8 +486,10 @@
         (binding [*conn* conn]
           (cost/proof {:of 'seon.render/draw :input 'seon.render-cost-test/page-of
                        :n "evals of the agent (and a message for every other)"
-                       :work "the task's list drawn once, a component for each turn, reply, message and eval, each eval's response printed once"
+                       :work "the task's list drawn once, a component for each turn, message and eval, each eval's response printed once"
                        :growth :linear
-                       :per-n {:calls 100 :bytes 500000}
-                       :fixed {:calls 1200 :bytes 3000000}
+                       ;; set by this proof's first measure, for the owner's word: the old proof's flat 1,050 calls drew one list, and this draws the conversation. An eval's response is printed
+                       ;; here once, under the armed printer, 197 calls: seon.context/request's old cold cost was 546 a record
+                       :per-n {:calls 200 :bytes 120000}
+                       :fixed {:calls 700 :bytes 1300000}
                        :sizes [10 40 80]}))))))

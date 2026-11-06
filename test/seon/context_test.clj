@@ -689,7 +689,7 @@
                                                :seon.task/proofs #{'demo-test/f-test}}]))
       (let [ev! (fn [id agent code turn] (d/transact conn [{:seon.eval/id id :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key agent}
                                                             :seon.eval/code code :seon.eval/response {:handle (symbol "result" id) :value 1} :seon.eval/call (seon.task/call-ref "b/a1" turn)}]))
-            _ (d/transact conn [{:seon.task/id "demo/f" :seon.task/agent {:seon.agent/key "b/a1" :seon.agent/task {:seon.task/id "demo/f"}}}])
+            _ (d/transact conn [{:seon.task/id "demo/f" :seon.task/agent {:seon.agent/key "b/a1" :seon.agent/turn 2 :seon.agent/task {:seon.task/id "demo/f"}}}])
             _ (ev! "e1" "b/a1" "(f 1)" 1)
             _ (d/transact conn (update (task/message-tx "m1" :message "user" :task-demo-f "use g") 0 assoc :seon.message/agent {:seon.agent/key "b/a1"} :seon.message/call (seon.task/call-ref "b/a1" 2)))
             _ (ev! "e2" "b/a1" "(f 2)" 2)
@@ -1318,7 +1318,7 @@
   ;; task seon.context/the-context-is-the-agents-evals-and-seons R1 (review): a turn's prose reply with
   ;; no call is its assistant message, but one cut at the token limit is no message, as the turn loop
   ;; reads it (seon.turn/act!), so the history and the stop rule agree
-  (let [db (d/db-with (ts/test-db) [{:seon.agent/key "b/a1" :seon.agent/id :a1}
+  (let [db (d/db-with (ts/test-db) [{:seon.agent/key "b/a1" :seon.agent/id :a1 :seon.agent/turn 2}
                                     {:seon.model-call/id "b/a1/1" :seon.model-call/agent [:seon.agent/key "b/a1"] :seon.model-call/n 1 :seon.model-call/origin :model :seon.model-call/forms 0 :seon.model-call/reply "Done: f0 is green."}
                                     {:seon.model-call/id "b/a1/2" :seon.model-call/agent [:seon.agent/key "b/a1"] :seon.model-call/n 2 :seon.model-call/origin :model :seon.model-call/forms 0 :seon.model-call/reply "(defn f0 [x] (let [y"
                                      :seon.model-call/truncated true}])
@@ -1442,7 +1442,7 @@
   ([conn] (source-session! conn "(+ 1 2)"))
   ([conn code]
    (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "h" :seon.task/plan "Make h." :seon.task/proofs #{'demo-test/h-test}}]))
-   (d/transact conn [{:seon.agent/key "b/src" :seon.agent/task [:seon.task/id "demo/h"]}])
+   (d/transact conn [{:seon.agent/key "b/src" :seon.agent/turn 2 :seon.agent/task [:seon.task/id "demo/h"]}])
    (d/transact conn [{:seon.eval/id "s1" :seon.eval/by "src" :seon.eval/agent [:seon.agent/key "b/src"] :seon.eval/call (seon.task/call-ref "b/src" 1)
                       :seon.eval/code code :seon.eval/response {:handle 'result/s1 :value 3} :seon.eval/call-id "call_1" :seon.eval/intent "Add."}])
    (d/transact conn [{:seon.message/id "m1" :seon.message/agent [:seon.agent/key "b/src"] :seon.message/call (seon.task/call-ref "b/src" 2) :seon.message/from "owner" :seon.message/body "Looks right."}])
@@ -1749,7 +1749,7 @@
   ;; message the doc section it links
   (let [[db a] (tree-world {:id "e1" :call-id "c"})
         section (pdb/eid db :seon.doc/address (first (filter #(str/includes? % "the-small-one") (map :v (d/datoms db :aevt :seon.doc/address)))))
-        pattern '[:seon.agent/key {[:seon.agent/system :as :system] [:db/id]}
+        pattern '[:seon.agent/key :seon.agent/turn {[:seon.agent/system :as :system] [:db/id]}
                   {[:seon.eval/_agent :as :evals] [:seon.eval/id :seon.eval/by :seon.eval/code :seon.eval/intent :seon.eval/call-id :seon.eval/response]}
                   {[:seon.model-call/_agent :as :calls] [:seon.model-call/id :seon.model-call/n :seon.model-call/origin {[:seon.eval/_call :as :evals] [:db/id]}]}]
         task (d/db-with db (into (seon.task/create-tx db [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "Make f." :seon.task/proofs #{'demo-test/f-test}}])
@@ -1763,6 +1763,13 @@
     (is (not (str/includes? (pr-str sent) "I look.")) "its pull holds no reply: none is sent")
     (is (= ["(e1)"] (keep #(get-in % [:tool-calls 0 :code]) sent)) "what it pulled, its eval, is")
     (is (< (count (pr-str sent)) (count (pr-str full))) "smaller")))
+
+(deftest a-request-with-no-system-message-is-refused
+  ;; an error is data, and a request does not silently lose its system message: a db without the prompt is refused, typed, as seon.context/system-text's contract did
+  (let [db (d/db-with (ts/test-db) (ts/turn-tx "b/a1" 1 {}))
+        e (try (wire-of-world db) nil (catch Throwable e (ex-data e)))]
+    (is (= :seon.context/no-system-message (:seon.error/type e)) (pr-str e))
+    (is (str/includes? (pr-str (:first e)) "seon.context/system-text") "what stood in its place says what threw")))
 
 (deftest a-provider-reusing-its-call-id-duplicates-no-call
   ;; a new eval reusing a call id read as one call answered twice: the wire id is the eval's own

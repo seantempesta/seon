@@ -115,11 +115,6 @@
   {:malli/schema [:=> [:cat :any] :boolean]}
   [x] (and (map? x) (= [:db/id] (keys x))))
 
-(defn- under?
-  "Is path p at or below path q?"
-  {:malli/schema [:=> [:cat [:vector :any] [:vector :any]] :boolean]}
-  [p q] (and (<= (count q) (count p)) (= q (subvec p 0 (count q)))))
-
 (defn- unwatch
   "r without join [e k]'s watch keys (:watching, the reverse of :watch)."
   {:malli/schema [:=> [:cat :seon.ctx/ix :any] :seon.ctx/ix]}
@@ -146,15 +141,17 @@
   the record anew, as that is a fresh build's placement)."
   {:malli/schema [:=> [:cat :seon.ctx/ix :any [:vector :any]] :seon.ctx/ix]}
   [r t q]
+  ;; no contracted call a path: a member's own refs are walked here too, and each id costs two of these
+  (let [nq (count q) below? (fn [p] (and (<= nq (count p)) (= q (subvec p 0 nq))))]
   (reduce (fn [r e]
-            (let [at (into #{} (remove #(under? % q)) (get-in r [:at e]))
+            (let [at (into #{} (remove below?) (get-in r [:at e]))
                   r (if (seq at) (assoc-in r [:at e] at) (update r :at dissoc e))]
-              (if (some-> (get-in r [:held e]) (under? q))
+              (if (some-> (get-in r [:held e]) below?)
                 (cond-> (-> (reduce (fn [r j] (unwatch r [e (:key j)])) r (:joins (get-in r [:spec e])))
                             (update :held dissoc e) (update :spec dissoc e))
                   (seq at) (assoc :relocate true))
                 r)))
-          r (distinct (keep #(when (map? %) (:db/id %)) (tree-seq coll? #(if (map? %) (vals %) (seq %)) t)))))
+          r (distinct (keep #(when (map? %) (:db/id %)) (tree-seq coll? #(if (map? %) (vals %) (seq %)) t))))))
 
 (declare node)
 

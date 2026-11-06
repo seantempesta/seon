@@ -2303,7 +2303,7 @@
   ;; queue before anything else, each recorded as any eval is, by whoever asked, at turn 0 and with no call id. One that
   ;; throws is recorded with its error and the rest are not run, as the calls of a reply are not. A reader of the
   ;; conversation then sees them in order and, in the request, as calls of their own.
-  (let [read (str "(let [c @seon.ctx/ctx db (seon.agent/db) es (map #(get-in c [:evals %]) (:evals (seon.context/turn-members db c (second (first (seon.context/turns c))))))] "
+  (let [read (str "(let [c @seon.ctx/ctx db (seon.agent/db) es (map #(get-in c [:evals (first %)]) (:evals (seon.context/turn-members db c (second (first (seon.context/turns c))))))] "
                   "{:turn (seon.agent/turn-now) "
                   " :records (mapv (fn [v] [(:seon.eval/by v) (:seon.eval/intent v) (:seon.eval/call-id v) (some? (get-in v [:seon.eval/response :ex])) (get-in v [:seon.eval/response :value])]) es) "
                   " :roles (mapv :role (drop 2 (:messages (seon.context/render db {:agent (:key @seon.agent/state) :commit (datahike.api/commit-id db) :task \"x\" :turn 1 :max-turns 1 :origin :outside} {:walk (seon.repl/page-walk)}))))})")

@@ -1215,8 +1215,8 @@
         whole (as #(do (seon.repl/render-ctx-hiccup) (second (seon.repl/page-hiccup))))]
     (is (unwatched 'seon.render.ui/task-list) "the model's list is drawn")
     (is (every? unwatched '[seon.render.ui/conversation-list seon.render.ui/eval-item]) "and the conversation, which it reads as messages")
-    (is (not-any? unwatched '[seon.render.ui/tiles seon.render.ui/eval-cost seon.render.ui/eval-output seon.render.ui/chat-end seon.render.ui/agent-state]) (pr-str unwatched))
-    (is (every? watched '[seon.render.ui/tiles seon.render.ui/eval-cost seon.render.ui/eval-output seon.render.ui/chat-end seon.render.ui/agent-state]) "a person's page draws what is its alone")
+    (is (not-any? unwatched '[seon.render.ui/tiles seon.render.ui/eval-output seon.render.ui/chat-end seon.render.ui/agent-state]) (pr-str unwatched))
+    (is (every? watched '[seon.render.ui/tiles seon.render.ui/eval-output seon.render.ui/chat-end seon.render.ui/agent-state]) "a person's page draws what is its alone")
     (is (some #(str/starts-with? % "conversation-turn") (keys page)) "the conversation is on the page, a component for each turn")
     (is (= parts whole) "the model reads the same whether or not a person watches")))
 
