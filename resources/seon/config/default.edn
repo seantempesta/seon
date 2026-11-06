@@ -149,7 +149,7 @@
  ;; Unit: characters. The largest value an eval's record keeps (seon.repl/record-details): a count over the value by a
  ;; walk that stops once it passes the bound (each scalar 1, a string or keyword its length; nothing is printed to
  ;; measure). At the bound: the value is not kept, its type and this bound are ({:seon.value/gone {:type :over}}),
- ;; the transcript says it is gone, and the handle (result/e<n>) still reads it in the live process.
+ ;; the transcript says it is gone, and its handle still reads it in the live process.
  ;; Provenance: the owner's ruling, 2026-11-04 ("We only need to store what we need to retrieve"); 1 MiB is a
  ;; round number above any value a reply shows, which the printer cuts to its token budget (docs/storage.md#plain-data).
  :seon.config.store/max-value-chars 1048576

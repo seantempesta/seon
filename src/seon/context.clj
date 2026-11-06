@@ -842,14 +842,11 @@
 
 (defn- example-record
   "An eval m as example ek keeps it (pre: ek's prefix for ids): its call id and
-  result handle prefixed with pre. See docs/tasks.md#a-task-names-example-sessions."
+  prefixed with pre (a handle names its answer: it stays). See docs/tasks.md#a-task-names-example-sessions."
   {:malli/schema [:=> [:cat :string :string :map] :map]}
   [ek pre m]
-  (let [h (get-in m [:seon.eval/response :handle])
-        h' (when h (symbol (namespace h) (str pre (name h))))]
-    (cond-> m
-      (:seon.eval/call-id m) (update :seon.eval/call-id #(str pre %))
-      h (assoc-in [:seon.eval/response :handle] h'))))
+  (cond-> m
+    (:seon.eval/call-id m) (update :seon.eval/call-id #(str pre %))))
 
 (defn- example-rekey
   "Record m of one of `session-kinds` (its id, agent and model call attributes id-k, agent-k and call-k) as example ek keeps it: its db
@@ -894,7 +891,7 @@
   The first transaction writes the example agent, an ended agent like any (key \"example/<id>\", id
   :example-<id>, its description the request, `session-request`, its turn the last its records carry); the model's evals
   are kept, an eval the harness made in the agent is not; each other holds one record,
-  re-keyed under the example's key (`example-rekey`: ids, call ids and result handles,
+  re-keyed under the example's key (`example-rekey`: ids and call ids,
   so none meets a live agent's, nor another example's). Pure data: written with pr-str, read back,
   `my.root/load-example!` transacts it. See docs/tasks.md#a-task-names-example-sessions."
   {:malli/schema [:=> [:cat :seon.host/db :string :string]

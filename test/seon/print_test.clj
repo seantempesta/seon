@@ -435,9 +435,11 @@
         text (:text (seon/print-value {:plan {:seon.print/prose s}} {:handle 'result/e3 :budget 200}))]
     (is (str/includes? text "(:seon.print/prose (get-in result/e3 [:plan]))") text)))
 
-(deftest a-handle-links-to-its-row
-  (let [{:keys [html]} (seon/print-value {:read 'result/e12 :name 'demo/f} {:outputs #{:hiccup}})]
-    (is (= [{:class "seon-print-symbol" :href "#eval-e12"}] (map second (elements html :a))) "result/e12 links to #eval-e12; demo/f is a symbol")))
+(deftest a-handle-is-text
+  ;; it names an answer, which more than one row of the page may hold, so no row is its anchor
+  (let [{:keys [html]} (seon/print-value {:read 'result/a3f9c1d2 :name 'demo/f} {:outputs #{:hiccup}})]
+    (is (empty? (elements html :a)) "no link")
+    (is (str/includes? (pr-str html) "result/a3f9c1d2") "and it reads as itself")))
 
 (deftest a-table-keeps-its-cuts-and-nested-cells
   ;; self-review: a cut in a table is a row of its own, a nested map is its cell, and cells are

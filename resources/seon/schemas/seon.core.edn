@@ -72,7 +72,7 @@
                             :seon.status/gone #{:ended :killed :dead}}
                      :spawning :busy :idle :ended :killed :dead]
  :seon.agent/tx-result [:map [:t :int] [:datoms nat-int?]]
- ;; an eval's response (nREPL's keys): its handle (result/e<n>, bound to it in the agent), the last
+ ;; an eval's response (nREPL's keys): its handle (result/ and a hash of its answer, bound to it in the agent), the last
  ;; form's value (kept in its record when it is plain data; :text, the response printed under its
  ;; handle for its caller), what its forms wrote, the error that stopped it (the one error map), its summed cost;
  ;; each key only when present. Beside them as answered: its record's id and the vars it recorded

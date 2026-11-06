@@ -1724,19 +1724,19 @@
          (let [r (repl/eval-string "(seon.agent/transact! [{:note/text \"an eval's\"}])" {"ns" "user" :origin :outside})
                t (:t (:value r))]
            (agent/commit!)
-           (is (= [ab (name (:handle r))] ((juxt :seon.tx/branch :seon.tx/eval) (d/entity @store-conn t))) (str "the eval that wrote it: " (:ex r)))
+           (is (= [ab "e1"] ((juxt :seon.tx/branch :seon.tx/eval) (d/entity @store-conn t))) (str "the eval that wrote it: " (:ex r)))
            (is (nil? (:eval @agent/state)) "and once the eval ends, a write names no eval"))
          (let [r (repl/eval-string "(throw (ex-info \"boom\" {}))" {"ns" "user" :origin :outside})]
            (is (:ex r) "an eval that throws")
            (is (nil? (:eval @agent/state)) "leaves no eval named"))
          (let [r (repl/eval-string "(do (seon.repl/eval-string \"1\" {\"ns\" \"user\" :origin :screen}) (:eval @seon.agent/state))" {"ns" "user" :origin :outside})]
-           (is (= (name (:handle r)) (:value r)) "an eval inside one names its own, then the outer one's again"))
+           (is (re-matches #"e\d+" (:value r)) "an eval inside one names its own, then the outer one's again"))
          ;; recorded as an agent records: the eval's own record names it too
          (swap! agent/state assoc :mode :agent :key "test/a1" :id :a1)
          (let [r (repl/eval-string "(+ 1 2)" {"ns" "user" :origin :outside})]
            (agent/commit!)
-           (is (= (name (:handle r)) (:record r)) "recorded")
-           (is (= (name (:handle r)) (:seon.tx/eval (d/entity @store-conn (:tx (first (d/datoms @store-conn :avet :seon.eval/id (:record r)))))))
+           (is (re-matches #"e\d+" (:record r)) "recorded, by its id")
+           (is (= (:record r) (:seon.tx/eval (d/entity @store-conn (:tx (first (d/datoms @store-conn :avet :seon.eval/id (:record r)))))))
                "its record's transaction names it"))
          (finally (reset! agent/state old) (reset! agent/link old-link) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
 
@@ -1766,7 +1766,7 @@
     (is (= [:edited] (:order (:value to-all))) "the edited step ran from the start, and nothing past the failure")
     (is (= (dec (count (:part (:value to-part)))) (count (remove :failed? (:part (:value to-part))))) "only the last failed")
     (let [{:keys [before id e old] :as p} (:value probe-r)]
-      (is (= id (name (:handle (:value edited)))) "its handle is its own")
+      (is (= id (:record (:value edited))) "its record is its own")
       (is (= (:e before) e) "the same record")
       (is (= "(swap! order conj :edited)" (:seon.eval/code p)) "its code is the new one")
       (is (= (:seon.eval/by before) (:seon.eval/by p)) "its author kept")
@@ -2321,7 +2321,7 @@
     (is (= :written (:value r3)) "the eval's value is still its answer")
     (is (= :seon.agent/commit-refused (:seon.error/type u)) (pr-str r3))
     (is (pos? (:transactions u)) (pr-str u))
-    (is (= [(name (:handle r3))] (:evals u)) (pr-str u))
+    (is (= [(:record r3)] (:evals u)) (pr-str u))
     (is (str/includes? (:seon.error/message u) "did not stay") (:seon.error/message u))
     (is (nil? (:ex r4)) (pr-str r4))
     (is (= 2 (:value r4)) "the next eval answers as any")

@@ -528,7 +528,46 @@
     (is (= :seon.agent/eval-error (:seon.error/type (:ex r))) "the error map itself")
     (is (str/includes? (:text r) "Divide by zero") "and printed under its handle")))
 
-(deftest a-new-process-takes-the-handle-after-the-branchs-highest
+(deftest a-handle-survives-a-cut-of-an-earlier-eval
+  ;; a handle was a counter, so a curated session that cut an eval, or a replay, shifted every handle after it and a later
+  ;; eval's code naming one read the wrong value or none. It is eight hex digits of a content hash of its answer. See docs/agent.md#your-turn
+  (let [old @agent/state
+        ev (fn [codes] (try (reset! agent/state {:n 0 :ns (the-ns 'user)})
+                            (mapv #(repl/eval-string % {}) codes)
+                            (finally (reset! agent/state old))))
+        [_ five] (ev ["(+ 1 1)" "(+ 2 3)"])
+        use (fn [h] (str "(inc (:value " h "))"))
+        whole (ev ["(+ 1 1)" "(+ 2 3)" (use (:handle five))])
+        cut (ev ["(+ 2 3)" (use (:handle five))])]
+    (is (re-matches #"result/[0-9a-f]{8}" (str (:handle five))) "eight hex digits")
+    (is (= (mapv :handle (ev ["(+ 1 1)" "(+ 2 3)" (use (:handle five))])) (mapv :handle whole)) "a replay gives the same handles")
+    (is (= [6 6] [(:value (peek whole)) (:value (peek cut))]) "a later eval's code naming it reads it, with the first eval cut")
+    (is (= (:handle (first cut)) (:handle five)) "and the cut leaves its handle where it was")
+    (is (not= (:handle (first whole)) (:handle five)) "another answer, another handle")))
+
+(deftest an-identical-answer-has-one-handle-and-every-eval-runs
+  ;; owner, 2026-11-06: "An identical result should have the same result id": a plain fact of the data. Each eval still ran and is answered whole
+  (let [old @agent/state
+        ev (fn [codes] (try (reset! agent/state {:n 0 :ns (the-ns 'user)})
+                            (mapv #(repl/eval-string % {}) codes)
+                            (finally (reset! agent/state old))))
+        [a b c] (ev ["(def runs (atom 0))" "(do (swap! runs inc) 5)" "(do (swap! runs inc) 5)"])
+        [d e f] (ev ["(+ 2 3)" "(* 1 5)" "(+ 2 4)"])]
+    (is (= (:handle b) (:handle c) (:handle d) (:handle e)) "the same value, whatever its code")
+    (is (not= (:handle e) (:handle f)) "another value, another handle")
+    (is (= 5 (:value c)) "a repeat is answered whole, as any result is")
+    (is (some? a))))
+
+(deftest a-value-the-record-cannot-keep-has-a-handle-of-its-own
+  ;; an atom is stored as what stands for it, so two answers alike in the record are two objects: each handle reads its own
+  (let [old @agent/state
+        [a b] (try (reset! agent/state {:n 0 :ns (the-ns 'user)})
+                   (mapv #(repl/eval-string % {}) ["(atom 1)" "(atom 1)"])
+                   (finally (reset! agent/state old)))]
+    (is (not= (:handle a) (:handle b)))
+    (is (not (identical? (:value a) (:value b))))))
+
+(deftest a-new-process-takes-the-id-after-the-branchs-highest
   ;; the owner's watch, 2026-10-28 (a4's branch): a root restart killed run #4's seon.turn/work!
   ;; eval (e218) before it was recorded, so the branch held one id fewer than its highest; run #5's
   ;; process counted the ids and took e222 again, and its record replaced the model's eval e222 (an
@@ -542,10 +581,10 @@
         _ (d/transact conn [{:seon.eval/id "e1"} {:seon.eval/id "e4"} {:seon.eval/id "root-outside-17"}])
         old @agent/state
         [r1 r2] (try (reset! agent/state {:n 0 :ns (create-ns 'seon.repl-test.scratch) :db @conn})
-                     [(repl/eval-string "1" {}) (repl/eval-string "2" {})]
+                     [(repl/eval-string "(:eval @seon.agent/state)" {}) (repl/eval-string "(:eval @seon.agent/state)" {})]
                      (finally (reset! agent/state old) (d/release conn)))]
-    (is (= 'result/e5 (:handle r1)) "after e4, the highest the branch holds: never e4 again")
-    (is (= 'result/e6 (:handle r2)) "then this process's own count")))
+    (is (= "e5" (:value r1)) "after e4, the highest the branch holds: never e4 again")
+    (is (= "e6" (:value r2)) "then this process's own count")))
 
 (defn- runnable
   "The forms text tells an agent to run, in order: each single-backticked code span that is a

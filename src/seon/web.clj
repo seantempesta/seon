@@ -106,7 +106,7 @@
              [(java.net.URLDecoder/decode k "UTF-8") (java.net.URLDecoder/decode (or v "") "UTF-8")])))
 
 (defn- open-form
-  "The form a toggled unit names after its row's id (\"row/(drop 1 (get-in result/e5 [:value]))\",
+  "The form a toggled unit names after its row's id (\"row/(drop 1 (get-in result/a3f9c1d2 [:value]))\",
   a cut the page opened, seon.print.emit/elided-hiccup): that form; nil for a unit with none (a
   row itself); ::unread when the text after the slash does not read as EDN (the edge: the
   browser's text)."
