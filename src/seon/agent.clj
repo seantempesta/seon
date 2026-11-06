@@ -1035,7 +1035,7 @@
   p with :selected and :run restricted to them. A test that reaches a process of its own (p's
   :process: a root, an agent, a fork, the binary) never runs here, named or a proof: a child forked
   from an agent has no process store to start one in (bin/test makes it), so it errored. It is left
-  out and listed under :skipped, and runs at the judge's merge gate on a checkout (seon.reconcile's
+  out and listed under :skipped, and runs on the merge gate's checkout (judge!, seon.reconcile's
   :gate; a deferred proof is no reason of the done rule's). proofs is kept for the contract's
   callers: bin/test's own plan, on a checkout, still runs a named or proof process test
   (seon.proofs/left-out)."
@@ -1172,7 +1172,7 @@
   base: every test with no result at its digest, main's own tests among them. names (the test service's request: a set of
   namespaces) restricts either to the tests of those namespaces, and selects every one of them (named-tests). A process test (the plan's
   :process: it reaches an agent, a fork, a root or the binary; a shell call is none) never runs here unless its namespace
-  is named; the ones the change reaches run at the judge's merge gate, on a checkout (seon.reconcile's :gate).
+  is named; the ones the change reaches run on the merge gate's checkout, this agent's verdict (judge!) and the judge's (seon.reconcile's :gate).
   The answer names those left out (:deferred), why each was (:why, {test {:uses :through}}: the
   process var it reaches and the calls to it, seon.program/process-path), and how many the judge
   runs (:at-judge)."

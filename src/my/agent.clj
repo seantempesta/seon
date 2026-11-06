@@ -518,9 +518,8 @@
       (some-> (:db @agent/state) (doc/namespace-source sym)))))
 
 (defn deferred
-  "The process tests this branch's change reaches, a proof among them: an agent's turn and
-  root's judge never run them in a fork; the judge's merge gate runs them on a checkout before
-  the merge, nobody asking (seon.reconcile's :gate). seon.agent/test-plan's :process among what it selects, each
+  "The process tests this branch's change reaches, a proof among them: never run in a fork of an agent; (prove) and a clear
+  status run them on the merge gate's checkout (seon.agent/judge!), and the judge's gate before the merge, nobody asking. seon.agent/test-plan's :process among what it selects, each
   with why: the process var it uses and the calls from the test to it (seon.program/process-path)."
   {:malli/schema [:=> [:cat] [:vector [:map [:test :qualified-symbol] [:uses [:vector :qualified-symbol]] [:through [:vector :qualified-symbol]]]]]}
   [] (let [proofs (or (some->> (:task @agent/state) (task/task (agent/db)) :seon.task/accumulated :proofs) #{})

@@ -712,7 +712,7 @@
                   ;; recorded, the proof's among them at the same digest (reused 1, ran 1: red
                   ;; since tests-are-facts dropped it)
                   {:proofs #{proof} :group :pristine})]
-    (is (= [#{:env :tree :config :data-refs} true] (:value inputs)) "root's boot recorded its source tree's inputs, this boot's")
+    (is (= [#{:env :tree :code :config :data-refs} true] (:value inputs)) "root's boot recorded its source tree's inputs, this boot's")
     (is (= {:results {proof :pass reached :pass also :pass} :ran 3 :reused 0} (select-keys (:value first-run) [:results :ran :reused])) "the agent's own run runs the proof and the reached test")
     (is (= 2 (:value files)) "and both are cached at the agent's digests")
     ;; the test service answers a key whose run ended with that run (seon.prove): nothing runs again
@@ -1894,6 +1894,36 @@
                         {:config {:seon.config.ai/provider :none}
                          :decls [{:seon.task/name "m" :seon.task/plan "Work." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]})]
     (is (= [:closed :seon.model/no-provider [:seon.model/no-provider]] (:value r)) (pr-str r))))
+
+(deftest a-process-test-gets-its-verdict-while-the-agent-can-act
+  ;; docs/merging.md#a-merge-runs-what-the-change-reaches. The shape of seon.repl/a-docstring-redefinition-is-a-change's run (2026-11-06): the agent wrote
+  ;; its proof as a process test and never ran it; deferred read as green, the run ended, and the judge found it red at the
+  ;; merge with no turn left. Now its prove runs it on the gate's checkout and the red is the agent's, on its status
+  (let [t 'seon.repl-test/a-process-proof-of-the-gate
+        write (fn [n] (str "(do (in-ns 'seon.repl-test) (clojure.test/deftest a-process-proof-of-the-gate"
+                           " (let [[r] (seon.agent-test/in-agent (fn [_] [\"(+ 1 1)\"]))] (clojure.test/is (= " n " (:value r))))) (in-ns 'user) :ok)"))
+        prove "(let [r (my.agent/prove)] {:proofs (:proofs r) :deferred (:deferred r) :ran (:ran r) :line (:seon.print/code (my.agent/prove-summary {} r))})"
+        reasons "(mapv :reason (:reasons (seon.context/status (seon.agent/db) @seon.ctx/ctx {})))"
+        [_ red red-reasons _ green green-reasons again]
+        (in-agent (fn [_] [(write 3) prove reasons (write 2) prove reasons prove]) {:proofs #{t}})]
+    (is (= {t :fail} (:proofs (:value red))) (pr-str red))
+    (is (str/starts-with? (:line (:value red)) "red: 1") "its prove says red")
+    (is (= [:proof-red] (:value red-reasons)) "a red on its status, with a turn to fix it")
+    (is (= {t :pass} (:proofs (:value green))) (pr-str green))
+    (is (= [] (:deferred (:value green))) "nothing left unjudged")
+    (is (str/starts-with? (:line (:value green)) "green: 1 of 1") (:line (:value green)))
+    (is (= [] (:value green-reasons)))
+    (is (= 0 (:ran (:value again))) "at the same digest its verdict stands, and no gate runs")
+    (is (= {t :pass} (:proofs (:value again))))))
+
+(deftest a-hand-back-with-a-red-process-test-is-no-green-end
+  ;; the same class through seon_done: an outside agent that hands back an unjudged process test gets its verdict as :done's answer
+  (let [t 'seon.repl-test/a-handed-back-proof-of-the-gate
+        write (str "(do (in-ns 'seon.repl-test) (clojure.test/deftest a-handed-back-proof-of-the-gate"
+                   " (let [[r] (seon.agent-test/in-agent (fn [_] [\"(+ 1 1)\"]))] (clojure.test/is (= 3 (:value r))))) (in-ns 'user) :ok)")
+        [_ _ done] (in-agent (fn [{:keys [agent]}] [write before-done {:op :done :agent agent}]) {:proofs #{t}})]
+    (is (not (str/includes? (:line done) ":outcome :merged")) (pr-str done))
+    (is (str/includes? (:line done) "proof-red") (pr-str done))))
 
 (deftest a-green-whole-task-merges-itself-with-no-act-beyond-done
   ;; owner, 2026-10-26: "we have the agents have live feedback so we can know if we can auto merge
