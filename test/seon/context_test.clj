@@ -508,7 +508,7 @@
   ;; shouldn't be printing thousands of items anywhere. The value printer is made to show as much
   ;; of the structure that is possible and to have ellipses for data that just continues so the
   ;; agent can know what's there and can dig into it". A cited source is whole in its data, never
-  ;; swapped for its doc by size; its part is that data (docs/render.md#a-part-answers-data), and the
+  ;; swapped for its doc by size; its part is that data (docs/render.md#a-component-answers-hiccup), and the
   ;; one printer cuts it where it is shown, for the page (cited-html) as for the model, the cut
   ;; naming the form that reads the rest
   (binding [*ns* *ns*]

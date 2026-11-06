@@ -87,7 +87,7 @@
   "The REPL helpers (clojure.repl's and pprint's of seon.agent/repl-names) namespace ns holds a var of its own for, {name its-var}:
   there the name is that var and not the REPL's, as Clojure warns when a definition replaces a
   referred var (an agent in seon.render.ui called its source with a function and read an nth
-  error four times). nil when none. It answers a move's :helper-shadowed (docs/render.md#a-part-answers-data)."
+  error four times). nil when none. It answers a move's :helper-shadowed (docs/render.md#a-component-answers-hiccup)."
   {:malli/schema [:=> [:cat :seon.host/namespace] [:maybe [:map-of :symbol :symbol]]]}
   [ns]
   (not-empty (into {} (for [[from names] agent/repl-names :when ('#{clojure.repl clojure.pprint} from)
@@ -610,7 +610,7 @@
   details, each its own attribute (`record-details`). Who is the one upsert, by its identity: an
   agent's key ({:seon.agent/key k}, seon.task/agent-key) or root's ({:seon.root/id :root}); an agent's holds the
   namespace the eval left its REPL in (:seon.agent/ns), a datom only when it moved (an unchanged value adds none),
-  which seon.context/current-ns reads. See docs/render.md#a-part-answers-data."
+  which seon.context/current-ns reads. See docs/render.md#a-component-answers-hiccup."
   {:malli/schema [:=> [:cat :map :string :string :map] :seon.db/tx-data]}
   [who id by details]
   [(into {:seon.eval/id id :seon.eval/agent "agent" :seon.eval/by by} details)
@@ -705,7 +705,7 @@
   defect past a form's own (a middleware's, the printer's) ends the request with its error as
   the response's :ex. Its cost (:ms :ticks :bytes, seon.repl/wrap-cost) is taken once when the
   forms ran, so what the model reads of it never changes in a later turn. The response's :ns is the
-  namespace the REPL is in after it (docs/render.md#a-part-answers-data)."
+  namespace the REPL is in after it (docs/render.md#a-component-answers-hiccup)."
   {:malli/schema [:function [:=> [:cat :string] :seon.repl/answer] [:=> [:cat :string :map] :seon.repl/answer]]}
   ([code] (eval-string code {:origin :model}))
   ([code req]
@@ -1000,13 +1000,6 @@
   made on, and {element-id hiccup}, in order (seon.context/request sends what changed of them)."
   {:malli/schema [:=> [:cat] [:tuple :seon.host/db :map]]}
   [] (let [w (page-walk)] [(agent/db) (render/placed-hiccup w context/page-lists)]))
-
-(defn page-data
-  "The data of this agent's parts now, from its live walk, as `page-hiccup` draws it: {schema-key data}
-  (seon.render/placed-data), what the turn decides from, with no model render made for it. See
-  docs/render.md#a-part-answers-data."
-  {:malli/schema [:=> [:cat] :map]}
-  [] (render/placed-data (page-walk) context/page-lists))
 
 ;; ---- the process: a Flow graph of three procs on the agent's one thread ----------------
 

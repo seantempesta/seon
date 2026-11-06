@@ -69,7 +69,7 @@
   and tx whoever asks, in a fork of this agent), their results facts on this branch
   (seon.agent/record-results!), a run that failed as a whole too (test-error!), and the task as the
   branch holds it. How the work stands is the status (seon.context/status), drawn from those
-  facts by the agent's walk (`status-now`): nothing here is held for it. {:test-run :tests-ms :task}."
+  facts (`status-now`): nothing here is held for it. {:test-run :tests-ms :task}."
   {:malli/schema [:=> [:cat :seon.task/id] :map]}
   [id]
   (let [;; the branch's own texts embedded first, so the plan's vector is the plan's now
@@ -81,13 +81,14 @@
     {:test-run test-run :tests-ms tests-ms :task (task/task (agent/db) id)}))
 
 (defn- status-now
-  "How the work stands now, from the agent's walk (seon.repl/page-data): the status
-  part's data (seon.context/status), which the page and the model read too, so a turn computes it
-  once. A walk that drew no status (its render threw, or the layout placed none) is the typed
-  :seon.turn/no-status, never an empty status: no reason is not done (AGENTS 9, unknown is not {})."
+  "How the work stands now (seon.context/status of the branch and @ctx), the data a turn decides from. The branch may have changed
+  what status calls, so a status that throws is its error, the turn's to give the agent (docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map), never an
+  empty status: no reason is not done (AGENTS 9, unknown is not {})."
   {:malli/schema [:=> [:cat] [:or :map :seon.error/base]]}
-  [] (or (get (repl/page-data) :seon.context/status)
-         (contract/error :seon.turn/no-status #'status-now "the agent's walk drew no status (seon.render.ui/status threw, or no layout placed it): the done rule cannot be read" {})))
+  [] (try (context/status (agent/db) @ctx/ctx {})
+          (catch Throwable e
+            (when (:interrupted (ex-data e)) (throw e))
+            (agent/error-map e 'seon.turn/status-now))))
 
 (defn agent-usage
   "What the model calls of the agent with key k spent, from their records on db (a model call is one fact, whichever way the turn
@@ -170,10 +171,9 @@
     nil))
 
 (defn- turn-error!
-  "A turn that threw, or one Seon could not draw (st, its state; em, the error map: what it threw, seon.agent/error-map,
-  or the walk's missing status, :seon.turn/no-status) given to the agent as data: em as a message
+  "A turn that threw, or one whose status threw (st, its state; em, the error map, seon.agent/error-map) given to the agent as data: em as a message
   from seon on its branch, which its
-  next turn reads as any message, counted in :threw. A walk that drew no status still makes its model
+  next turn reads as any message, counted in :threw. A turn whose status threw still makes its model
   call that turn, the message in its request; a throw counts the turn, and work! ends the agent's
   work :error on the second throw in a row with no model turn between (its request cannot be drawn,
   so no model turn could read the message). Answers st after it, :error its error map. The turn loop's entrant boundary (docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map):
@@ -470,7 +470,7 @@
                        ;; merge (the owner, 2026-10-30: "updates as often as we can")
                        (when (agent/main-moved? (:base @agent/state) (agent/heard-main)) (branch/merge-main!))
                        (let [obs (observe task)
-                             ;; how the work stands, from the walk the request is drawn from (one computation a turn)
+                             ;; how the work stands (one computation a turn, the page's component draws its own)
                              s (status-now)
                              ;; its proofs pass: the tests its change reaches run now, judged as the judge judges them
                              ;; (agent/prove! :judge, their results facts on the branch), and the status is read again
@@ -479,7 +479,7 @@
                              ;; alone left the judge to find the reds its change made
                              s (if (and (not (contract/error? s)) (empty? (:reasons s)))
                                  (do (test-error! (agent/prove! :judge))
-                                     ;; the walk drawn again, to the branch the judge's verdicts were written on
+                                     ;; read again, on the branch the judge's verdicts were written on
                                      (status-now))
                                  s)
                              no-status? (contract/error? s)
@@ -510,7 +510,7 @@
                                                        (ended st :cap (str "no status at the cap: " (:seon.error/message s)) s)
                                                        (ended st :cap (r/explain-text reasons) nil))
                            stop (ended st (:outcome stop) (:reason stop) nil)
-                           ;; the walk drew no status (the agent's program broke the layout): the agent reads why, this turn
+                           ;; its status threw (the agent's program broke it): the agent reads why, this turn
                            no-status? (next-of (act! (turn-error! st s) obs s model))
                            :else (next-of (act! st obs s model))))
                        (catch Throwable e

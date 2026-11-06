@@ -44,26 +44,13 @@
         (some declared (parents k)))))
 
 (defn model-declared
-  "The model render symbol schema k (or its nearest parent) declares, {:seon.render/model sym}: what a
-  part of that schema sends the model (docs/render.md#a-part-answers-data), or nil (the part's data,
-  printed by the one printer where the request is made)."
+  "The model render symbol schema k (or its nearest parent) declares, {:seon.render/model sym}: what the printer shows of a
+  value of that schema (docs/render.md#a-render-is-a-value-printed-once), or nil (the value itself)."
   {:malli/schema [:=> [:cat [:maybe :qualified-keyword]] [:maybe :symbol]]}
   [k]
   (when k
     (or (:seon.render/model (contract/properties k))
         (some model-declared (parents k)))))
-
-(declare html)
-
-(defn- part
-  "A component's output out as the walk draws it: a map whose metadata names its schema (:seon.render/schema), not hiccup, is kept in data,
-  walked here so a lazy read in it is a read of this run, and drawn by its schema's html render (`html`), which is given that map and
-  no ctx or db; hiccup is drawn as it is. See docs/render.md#a-part-answers-data."
-  {:malli/schema [:=> [:cat :any :any] :any]}
-  [out data]
-  (if-let [k (and (not (vector? out)) (not (seq? out)) (:seon.render/schema (meta out)))]
-    (do (hash out) (vreset! data out) (html {:schema k :as :block} out))
-    out))
 
 (defn full-declared?
   "Does schema k declare its values print whole, {:seon.print/full true}: a value that is a page (docs/render.md#a-part-prints-as-its-render)?"
@@ -75,7 +62,7 @@
   :seon.render/schema) declares a model render (`model-declared`), which makes a value
   (docs/render.md#a-render-is-a-value-printed-once) that the one printer then prints, at its budget, with its own cuts; else
   nil, for one metadata read. The render is called (f opts v), opts carrying what it reads beside its value (the db an eval
-  naming its basis rebuilds from, seon.context/eval-messages). See docs/render.md#a-part-answers-data."
+  naming its basis rebuilds from, seon.context/eval-messages). See docs/render.md#a-render-is-a-value-printed-once."
   {:malli/schema [:function [:=> [:cat :any] [:maybe [:map [:value :any]]]] [:=> [:cat :any :map] [:maybe [:map [:value :any]]]]]}
   ([v] (model v {}))
   ([v opts]
@@ -83,19 +70,6 @@
      (when (or sym full?)
        ;; a schema that declares no render shows the value itself, no longer named by it (the printer would draw it by this again)
        (cond-> {:value (if sym ((requiring-resolve sym) opts v) (vary-meta v dissoc :seon.render/schema))} full? (assoc :full true))))))
-
-(defn- part-model
-  "What the model reads of part k of walk w, a component that answered data: its data's model render (`model`), else its
-  data, made when a request asks for it and kept on its cache entry by its revision, so the page never pays for it. See
-  docs/render.md#a-part-answers-data."
-  {:malli/schema [:=> [:cat :map [:vector :any]] :any]}
-  [w k]
-  (let [c (get @(:cache w) k)]
-    (if (= (:rev c) (:model-rev c))
-      (:model c)
-      (let [r (model (:data c)) m (if r (:value r) (:data c))]
-        (vswap! (:cache w) update k assoc :model-rev (:rev c) :model m)
-        m))))
 
 (defn- identity-attr?
   "Is attribute a an upsert key ([:and {:seon.db/identity true} ...])?"
@@ -293,7 +267,7 @@
   "Hiccup hc with its root element's attributes merged with attrs: a component's key as its id and
   its render's name as its one class, in place of any class the render gave its root (its style is
   its var's :seon.render/style: `styled`). A render that drew nothing (nil) stays nothing: no element
-  to hold it, so no part is placed for it (docs/render.md#a-part-answers-data)."
+  to hold it, so no part is placed for it (docs/render.md#a-component-answers-hiccup)."
   {:malli/schema [:=> [:cat :any :map] :any]}
   [hc attrs]
   (cond
@@ -316,7 +290,7 @@
   otherwise run in its reaction (seon.ratom/run-in-reaction), opts filled with the view of ctx
   (:seon.ctx/ctx) and the db (:seon.db/db) it declares, a db render under d/with-reads, and its
   output drawn (emit) with its root element's id its key. An output = to last time's is the
-  same (:same), its map = too when it answered one, and moves its revision only when it differs. A child it no longer holds is
+  same (:same), and moves its revision only when it differs. A child it no longer holds is
   let go at the end of the flush (`flush!`), so one another parent drew stays. A render that throws draws its error's
   render in its place (docs/failure-points.md: a component's render); every other component draws."
   {:malli/schema [:=> [:cat :map :any :map [:sequential :any] :map] [:tuple [:= ::child] [:vector :any]]]}
@@ -340,21 +314,18 @@
             kids (volatile! [])
             id (key-id k)
             reads (volatile! nil)
-            data (volatile! nil)
             ;; its render and the drawing of its output in one: a lazy part of the hiccup reads (and
             ;; throws) only when it is drawn, and a db render's reads are all of what it drew
-            one #(try (with-id (emit w (part (apply f o args) data) (assoc env :children kids)) {:id (or (when (var? f) (:seon.render/list (meta f))) id) :class (name (first k))})
-                      ;; a component that throws is a part of its own: its error as data (what threw, and the
-                      ;; thrown error's own data: a contract's problems), which the page draws by the error's
-                      ;; render and the model reads as the map it is, every other component drawn
+            one #(try (with-id (emit w (apply f o args) (assoc env :children kids)) {:id (or (when (var? f) (:seon.render/list (meta f))) id) :class (name (first k))})
+                      ;; a component that throws draws its error in its place: a call of the error's render on the error as data (what
+                      ;; threw, and the thrown error's own data: a contract's problems), so the page writes that render and the model
+                      ;; reads the call, the error in it; every other component draws
                       (catch Throwable e
-                        (vreset! data nil)
-                        (with-id (part (with-meta (contract/error :seon.render/component-defect #'render!
-                                                                  (str (symbol f) " threw: " (or (ex-message e) (str e)))
-                                                                  (cond-> {:seon.error/in (symbol f)}
-                                                                    (map? (ex-data e)) (assoc :seon.render/threw (ex-data e))))
-                                                  {:seon.render/schema :seon.render/component-defect})
-                                       data)
+                        (with-id [#'html {:schema :seon.render/component-defect :as :block}
+                                  (contract/error :seon.render/component-defect #'render!
+                                                  (str (symbol f) " threw: " (or (ex-message e) (str e)))
+                                                  (cond-> {:seon.error/in (symbol f)}
+                                                    (map? (ex-data e)) (assoc :seon.render/threw (ex-data e))))]
                                  {:id id :class "err"})))
             draw #(if db? (let [[out rs] (d/with-reads one)] (vreset! reads rs) out) (one))
             a0 (profile/alloc-bytes)
@@ -363,7 +334,7 @@
                        (ratom/run-in-reaction draw k (fn [k] (vswap! (:queue w) conj k)) {}))
             bytes (- (profile/alloc-bytes) a0)
             children @kids
-            same? (and prev (= out (:out prev)) (= @data (:data prev)))
+            same? (and prev (= out (:out prev)))
             read-keys (some-> @reads seq d/reads-index)]
         (vswap! (:queue w) disj k)
         ;; who holds each child, moved only when its children did: one that lost its last parent goes at the flush's end
@@ -375,7 +346,7 @@
         (some-> (:ran env) (vswap! assoc k (if same? :same :miss)))
         ;; merged: its written html (placed-units) stays while its revision does
         (vswap! (:cache w) update k merge {:f f :opts opts :args args :rx rx :out (if same? (:out prev) out) :children children
-                                    :order order :id id :rev (if same? (:rev prev) (inc (:rev prev 0))) :data @data
+                                    :order order :id id :rev (if same? (:rev prev) (inc (:rev prev 0)))
                                     :reads read-keys})
         ;; the components that read the db: the ones a transaction's datoms are matched against
         (vswap! (:db-keys w) (if (seq @reads) conj disj) k)
@@ -475,22 +446,16 @@
       seen)))
 
 (defn- queue-moved-renders!
-  "Each component of walk w whose render, or a render its data's schema declares, moved in datoms or reaches a var that did
-  (render-reach) or whose schema was registered again queued, and its kept model render let go: a render is an input of
+  "Each component of walk w whose render moved in datoms or reaches a var that did (render-reach) queued: a render is an input of
   what it draws, as the data is. It costs what a change of a definition reaches, and nothing else. See
   docs/render.md#reactive-renders."
   {:malli/schema [:=> [:cat :map [:sequential :any]] :nil]}
   [w datoms]
   (let [db ((:db w))
         moved (into #{} (keep #(when (= :var/form (:a %)) (:var/name (d/entity db (:e %))))) datoms)
-        schemas (into #{} (keep #(when (= :schema/form (:a %)) (:schema/key (d/entity db (:e %))))) datoms)
         reach (render-reach db moved)]
-    (doseq [[k c] @(:cache w)
-            :let [sk (some-> (:data c) meta :seon.render/schema)]
-            :when (or (schemas sk)
-                      (some reach (cons (when (var? (:f c)) (symbol (:f c))) (when sk [(declared sk) (model-declared sk)]))))]
-      (vswap! (:queue w) conj k)
-      (vswap! (:cache w) update k dissoc :model-rev))
+    (doseq [[k c] @(:cache w) :when (and (var? (:f c)) (reach (symbol (:f c))))]
+      (vswap! (:queue w) conj k))
     nil))
 
 (defn flush!
@@ -511,7 +476,7 @@
             (vswap! (:queue w) into @(:db-keys w))
             (when (seq datoms)
               ;; a definition moved: what draws by it again. No contracted call on a move that moved none
-              (when (some #(#{:var/form :schema/form} (:a %)) datoms) (queue-moved-renders! w datoms))
+              (when (some #(= :var/form (:a %)) datoms) (queue-moved-renders! w datoms))
               ;; each datom's keys once, then who read them: what moved, whatever the components
               (let [ks (into #{} (mapcat reads/datom-keys) datoms)]
                 (if (contains? ks :all)
@@ -542,7 +507,7 @@
   :seon.render/list) is no
   part: its output is its list, the components in it placed there; a component that drew nothing (with-id) is
   placed nowhere. With sels, the element ids of some lists, those lists' alone, in sels' order. The one prewalk of
-  the root that placed-units, placed-hiccup and placed-data read. See docs/render.md#a-layout-places-its-lists."
+  the root that placed-units and placed-hiccup read. See docs/render.md#a-layout-places-its-lists."
   {:malli/schema [:function [:=> [:cat :map] [:vector [:tuple :string [:vector :any]]]]
                   [:=> [:cat :map [:sequential :string]] [:vector [:tuple :string [:vector :any]]]]]}
   ([w] (placed w nil))
@@ -622,12 +587,11 @@
 (defn part-form
   "Component k of walk w as the form the model reads it, `[seon.render.ui/status {:ctx [:task :proved]} [:h2 ...] ...]`:
   the render's name, the ctx path it read (its opts' :at: (get-in @ctx path) answers the data it drew), then the hiccup
-  it returned, each child component a part of its own and no presentation (class, id, style) in it; a component that answered
-  a map reads the same way, its output that map's model render. See docs/render.md#a-part-prints-as-its-render."
+  it returned, each child component a part of its own and no presentation (class, id, style) in it. See docs/render.md#a-part-prints-as-its-render."
   {:malli/schema [:=> [:cat :map [:vector :any]] :any]}
   [w k]
   (let [c (get @(:cache w) k)
-        out (if (some? (:data c)) (part-model w k) (:out c))
+        out (:out c)
         ;; a part's own root element, a plain section or div, is the part itself: its children stand under the head
         wrapper? (and (vector? out) (#{:section :div} (first out)) (nil? (strip-attrs (if (map? (second out)) (second out) {}))))
         body (if wrapper?
@@ -703,17 +667,6 @@
     {:parts (into (array-map) (keep (fn [[id k]] (when (not= (get seen id) (get revs id)) (when-let [f (part-form w k)] [id f])))) ps)
      :revs revs
      :gone (vec (remove revs (keys seen)))}))
-
-(defn placed-data
-  "The data of walk w's parts placed in the root's lists with element ids sels: {schema-key data} of each
-  component that answered data (a part: seon.render/part), by its schema (the metadata
-  :seon.render/schema its data names). What a reader that decides from a part (the turn's done check
-  reads the status) takes: the parts' data, with no model render made for it.
-  See docs/render.md#a-part-answers-data."
-  {:malli/schema [:=> [:cat :map [:sequential :string]] [:map-of :qualified-keyword :any]]}
-  [w sels]
-  (into {} (for [[_ k] (placed w sels) :let [d (:data (get @(:cache w) k))] :when (some? d)]
-             [(:seon.render/schema (meta d)) d])))
 
 (defn draw
   "Tree t (a ctx value: seon.ctx/build's :tree) drawn once by the layout var root-var over db, its

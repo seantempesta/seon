@@ -430,7 +430,7 @@
                      (range n))]
     [{:seon.db/db ours :seon.ctx/ctx {:task {:seon.task/kind :whole} :seon.agent/main-commit main}} (seon.db/eid ours :seon.agent/key "b/a1")]))
 
-;; See docs/render.md#a-part-answers-data
+;; See docs/render.md#a-component-answers-hiccup
 (deftest the-status-reads-the-branchs-diff-once
   (ts/test-branch!
     (fn [_ conn]

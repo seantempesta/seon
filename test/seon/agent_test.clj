@@ -1207,7 +1207,7 @@
         seon? (fn [m] (or (some #(str/starts-with? (:id %) "eval-") (:tool-calls m)) (str/starts-with? (str (:tool-call-id m)) "eval-")))
         [a0 r0 a1 r1 :as ms] (remove seon? (:value msgs))]
     (is (= [:cap 2] [(:outcome end) (:model-calls end)]) "two model calls (the proof stays red), then the cap")
-    (is (= 4 (count (filter seon? (:value msgs)))) "and the page Seon ran, whole then what moved, each call answered")
+    (is (= 2 (count (filter seon? (:value msgs)))) "and the page Seon ran, whole, its call answered; nothing it shows moved after")
     (is (= ["assistant" "tool" "assistant" "tool"] (mapv :role ms)) "each reply followed by its call's answer")
     (is (= [{:id "call-0-0" :code "(+ 20 21)" :intent "Add twenty and twenty-one."}] (:tool-calls a0)))
     (is (= "call-0-0" (:tool-call-id r0)) "the answer names its call")
@@ -1218,8 +1218,8 @@
 (deftest the-page-is-an-eval-in-the-conversation-and-the-prefix-holds
   ;; docs/render.md#the-render-is-an-eval (owner, 2026-11-05: "make the rendering of the hiccup a normal eval that we inject into turn
   ;; 0 and then we can just do diffs when it changes"): two real turns. The first request holds the page as the answer of
-  ;; (my.render/render-ctx), Seon's own eval at turn 0; the turn line moved with the turn, so the second holds (my.render/render-changes) after
-  ;; the first turn's own eval; and every request is the one before it, byte for byte, with the records added. The hash each turn recorded of
+  ;; (my.render/render-ctx), Seon's own eval at turn 0; these turns move nothing the page shows, so no other is run (a revision follows the
+  ;; hiccup the model reads); and every request is the one before it, byte for byte, with the records added. The hash each turn recorded of
   ;; the bytes it sent is the hash of the request made again from its records at its commit.
   (let [[end r] (in-agent (fn [{:keys [task]}]
                             [(str "(seon.turn/work! {:task " (pr-str task) " :max-turns 2})")
@@ -1240,12 +1240,12 @@
     (is (= :cap (:outcome (:value end))) (pr-str end))
     (is (some? (:value r)) (pr-str (select-keys r [:ex :text])))
     (is (= [["(my.render/render-ctx)"]
-            ["(my.render/render-ctx)" "(+ 20 21)" "(my.render/render-changes)"]
-            ["(my.render/render-ctx)" "(+ 20 21)" "(my.render/render-changes)" "(+ 1 41)"]]
+            ["(my.render/render-ctx)" "(+ 20 21)"]
+            ["(my.render/render-ctx)" "(+ 20 21)" "(+ 1 41)"]]
            calls)
-        "the page whole is the first eval; what moved is one eval after the turn's own; each request holds the one before and the records added")
+        "the page whole is the first eval; nothing it shows moved after, so no other; each request holds the one before and the records added")
     (is (= [true true] prefix) "byte for byte")
-    (is (= ["(my.render/render-changes)" "(my.render/render-ctx)"] by) "Seon ran two evals, no more: none for a turn that moved nothing")
+    (is (= ["(my.render/render-ctx)"] by) "Seon ran one eval, no more: none for a turn that moved nothing the page shows")
     (is (every? (fn [[sent redraw]] (and (string? sent) (= sent redraw))) hashes) (str "the hash a turn recorded is its redraw's: " (pr-str hashes)))
     (is (str/includes? first-page "seon.render.ui/task") "the first request's last message is the page")))
 

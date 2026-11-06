@@ -725,7 +725,7 @@
                 styles (keep #(some-> (requiring-resolve (symbol "seon.render.ui" %)) meta :seon.render/style) classes)
                 ;; a style as the html attribute holds it, escaped
                 unstyled (fn [h] (reduce #(str/replace %1 (str " " (-> %2 (str/replace "&" "&amp;") (str/replace ">" "&gt;"))) "") h styles))]
-            ;; a part that answers data (docs/render.md#a-part-answers-data) holds its data here, which the page draws by its schema's html render
+            ;; a part that answers data (docs/render.md#a-component-answers-hiccup) holds its data here, which the page draws by its schema's html render
             (let [by-id (into {} (map (juxt :id :html)) shown) hiccup (filter (comp vector? val) page)]
               (is (seq hiccup) "the components that answer hiccup")
               (is (every? (fn [[id f]] (str/starts-with? id (name (first f)))) hiccup)

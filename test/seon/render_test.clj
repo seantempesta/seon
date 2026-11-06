@@ -1495,18 +1495,14 @@
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
   [_] (with-meta {:plan "Make it" :n 3} {:seon.render/schema :seon.render-test/no-render}))
 
-(deftest a-part-returns-its-data-as-a-call-of-the-printer
-  ;; root, 2026-10-26 (the owner's compact renders, not stripped), moved with the parts that answer data
-  ;; (docs/render.md#a-part-answers-data): a part is its data; the page draws it by its schema's html render, here the printer's:
-  ;; a call of the printer, [#'seon.render/html opts value], which the page's serializer expands when it writes the page; the model
-  ;; is sent the value as data. Its opts are plain data, so an equal value draws an equal call
+(deftest a-value-in-a-components-output-draws-by-the-printer
+  ;; root, 2026-10-26 (the owner's compact renders, not stripped): a value standing in a component's output: the page's serializer
+  ;; draws it by the printer when it writes the page, the model reads the value as data
   (let [w (r/walker {:ref (seon.ratom/atom {}) :changes seon.ctx/changes} (constantly (ts/test-db)) [#'data-view {}])]
     (try (r/flush! w nil)
          (let [k @(:out w)
-               data (:data (get @(:cache w) k))
                h0 (r/resolved w k true)
                text (r/part-text (r/part-form w k))]
-           (is (map? data) "the part answers its data, not hiccup")
            (is (str/includes? (h/html h0) "Make it") "the page draws the data by its schema's html render, here the printer's")
            (is (= h0 (r/resolved w k true)) "drawn again, equal")
            (is (str/includes? text "Make it") "the model is sent the value as data")
@@ -1782,19 +1778,21 @@
 
 (deftest the-status-draws-what-the-merge-functions-answer
   ;; owner, 2026-10-27: what is derived for the reader is the hiccup's, drawn when what it reads
-  ;; moves; the status takes main's commit as an option and the agent's base commit from its fact
-  ;; (:seon.agent/base-commit), reads both from the branch's own store, and answers the merge's views
-  ;; from the one diff of the branch against its base (docs/render.md#a-part-answers-data)
+  ;; moves; the status takes main's commit and the agent's base commit from its facts
+  ;; (:seon.agent/main-commit, :seon.agent/base-commit), reads both from the branch's own store, and answers the merge's views
+  ;; from the one diff of the branch against its base (docs/render.md#a-component-answers-hiccup)
   (ts/test-branch!
     (fn [_ conn]
       (d/transact conn (defn-facts 'demo/f "(defn f [x] x)"))
       (let [base (d/commit-id @conn)
             _ (d/transact conn (defn-facts 'demo/k "(defn k [] 2)"))
             main (d/commit-id @conn)
-            agent-on (fn [db] (d/db-with db [{:seon.agent/key "b1/a3" :seon.agent/base-commit base}]))
+            ;; the merge view is a task that merges itself's, read from main's commit as the agent heard it
+            agent-on (fn [db] (d/db-with db [{:seon.task/id "demo/whole" :seon.task/kind :whole}
+                                             {:seon.agent/key "b1/a3" :seon.agent/base-commit base :seon.agent/main-commit main :seon.agent/task {:seon.task/id "demo/whole"}}]))
             ours (agent-on (d/db-with (d/commit-as-db conn base) (defn-facts 'demo/h "(defn- h [] 1)")))
             a (seon.db/eid ours :seon.agent/key "b1/a3")
-            st (seon.context/status ours (:tree (seon.ctx/build ours a :b)) {:main main})
+            st (seon.context/status ours (:tree (seon.ctx/build ours a :b)) {})
             b (d/commit-as-db (:store ours) base)
             ch (seon.merge/delta-changes b ours #{})]
         (is (not (contains? st :caused)) "nothing caused")
@@ -1811,14 +1809,14 @@
           (is (not (str/includes? html "demo/k")) "never main's change")
           (is (not (str/includes? html "demo/f")) "never one it did not change"))
         ;; a branch that changed nothing: the status holds none of them, not a header over an empty answer
-        (let [same (agent-on (d/commit-as-db conn base))
+        (let [same (d/db-with (d/commit-as-db conn base) [{:seon.agent/key "b1/a3" :seon.agent/base-commit base}])
               st0 (seon.context/status same (:tree (seon.ctx/build same (seon.db/eid same :seon.agent/key "b1/a3") :b)) {})]
           (is (not-any? #(contains? st0 %) [:caused :attention :without-a-contract :its-merge-carries :merge :unmerged])
               "a branch with no changes holds none of them"))))))
 
 (deftest an-unrelated-change-redraws-none-of-the-merge-views
   ;; task seon.turn/observe-reads-are-renders: a turn no longer computes these; their one component
-  ;; (standing, from the one diff of the branch against its base: docs/render.md#a-part-answers-data)
+  ;; (standing, from the one diff of the branch against its base: docs/render.md#a-component-answers-hiccup)
   ;; is drawn again only when what it reads moves. An unrelated change of ctx redraws it not; main
   ;; moving redraws it (its merge section reads main)
   (ts/test-branch!
@@ -2268,12 +2266,12 @@
 
 (deftest a-component-that-throws-is-a-part-holding-its-error
   ;; owner, 2026-10-29: "the UI components are all separately rendered so it's okay if some are
-  ;; errors just make sure it's visible to the agent": the error is the part's data, and the model
-  ;; reads that map, the thrown error's own data in it; every other part draws
+  ;; errors just make sure it's visible to the agent": a call of the error's render on the error as data, which the model
+  ;; reads, the thrown error's own data in it; every other part draws
   (let [w (r/walker {:ref (seon.ratom/atom {}) :changes seon.ctx/changes} (constantly (ts/test-db)) [#'two-part-layout {}])]
     (try (r/flush! w nil)
          (let [placed (r/placed-hiccup w ["#parts"])
-               [[_ [_ _ broken]] [_ [_ _ fine]]] (seq placed)]
+               [[_ [_ _ [_ _ broken]]] [_ [_ _ fine]]] (seq placed)]
            (is (= :seon.render/component-defect (:seon.error/type broken)) (str "the model reads the error as data: " (pr-str placed)))
            (is (str/includes? (:seon.error/message broken) "seon.ref/scan invalid-output") "what threw")
            (is (= [{:in [:seon.ref/blocks 3]}] (get-in broken [:seon.render/threw :problems])) "and the thrown error's own data")
@@ -2395,7 +2393,7 @@
     (is (= "nil" (get-in p [:failures 0 :got :seon.print/code])) "its failure, as the record holds it")
     (is (str/includes? (pr-str (:source p)) "deftest g-test") "its source, the pulled form's")))
 
-;; docs/render.md#a-part-answers-data: the task part is the pulled task: its heading, its plan accumulated over its joined needs and its
+;; docs/render.md#a-component-answers-hiccup: the task part is the pulled task: its heading, its plan accumulated over its joined needs and its
 ;; kind's instructions, from what @ctx holds; its render reads no db
 (deftest the-task-part-reads-only-what-ctx-holds
   (let [[db _] (cited-world)
@@ -2476,21 +2474,21 @@
 (defn rr-part "A component whose render calls a helper, by the facts of its form."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
   [_] [:p "drawn"])
-(defn rr-data "A component that answers data of a schema with a declared model render."
+(defn rr-other "A component no moved var here reaches."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
-  [_] (with-meta {:t 1 :classes {}} {:seon.render/schema :seon.problems/report}))
+  [_] [:p "other"])
 (defn rr-layout "A layout of the two."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
-  [_] [:div [:div {:id "parts"} [#'rr-part {}] [#'rr-data {}]]])
+  [_] [:div [:div {:id "parts"} [#'rr-part {}] [#'rr-other {}]]])
 
 (deftest a-render-that-changes-draws-again
   ;; docs/render.md#reactive-renders; the owner, 2026-11-04: "when data changes OR THE FUNCTION THAT RENDERS IT changes then you
-  ;; re-render". A helper a render calls and a schema's declared render are inputs of what they draw; a var nothing here reaches is not
+  ;; re-render". A helper a render calls is an input of what it draws; a var nothing here reaches is not
   (let [facts (fn [form-id src refs defines]
                 {:db/id form-id :form/id form-id :form/src src :form/refs refs :form/defines defines})
         db0 (d/db-with (ts/test-db)
                        [{:db/id "v1" :var/name 'seon.render-test/rr-part} {:db/id "v2" :var/name 'demo/rr-helper} {:db/id "v3" :var/name 'demo/rr-deep}
-                        {:db/id "v4" :var/name 'demo/unrelated} {:db/id "v5" :var/name 'seon.render.ui/problems-model}
+                        {:db/id "v4" :var/name 'demo/unrelated}
                         (facts "f1" "(defn rr-part [_] (demo/rr-helper))" '#{demo/rr-helper} ["v1"])
                         (facts "f2" "(defn rr-helper [] (demo/rr-deep))" '#{demo/rr-deep} ["v2"])
                         (facts "f3" "(defn rr-deep [] 1)" #{} ["v3"])])
@@ -2503,76 +2501,14 @@
     (try
       (r/flush! w nil)
       (r/placed-hiccup w ["#parts"])
-      (let [p (runs 'seon.render-test/rr-part) d (runs 'seon.render-test/rr-data)
-            kept (fn [] (some #(when (= #'rr-data (:f %)) (:model-rev %)) (vals @(:cache w))))]
-        (is (some? (kept)) "the model render is kept")
+      (let [p (runs 'seon.render-test/rr-part) d (runs 'seon.render-test/rr-other)]
         (move! 'demo/unrelated "(defn unrelated [] 2)")
-        (is (= [p d] [(runs 'seon.render-test/rr-part) (runs 'seon.render-test/rr-data)]) "a var nothing here reaches: nothing runs")
-        (is (some? (kept)) "and the kept model render stays")
+        (is (= [p d] [(runs 'seon.render-test/rr-part) (runs 'seon.render-test/rr-other)]) "a var nothing here reaches: nothing runs")
         (move! 'demo/rr-deep "(defn rr-deep [] 2)")
         (is (= (inc p) (runs 'seon.render-test/rr-part)) "a helper's helper moved: the render that reaches it runs")
-        (is (= d (runs 'seon.render-test/rr-data)) "the other does not")
-        (move! 'seon.render.ui/problems-model "(defn problems-model [_ v] v)")
-        (is (= (inc d) (runs 'seon.render-test/rr-data)) "a schema's declared render moved: what draws by it runs")
-        (is (nil? (kept)) "and its kept model render is let go"))
+        (is (= d (runs 'seon.render-test/rr-other)) "the other does not"))
       (finally (r/dispose-walk! w)))))
 
-
-;; ---- a component that answers a map (docs/render.md#a-part-answers-data) ----
-
-(defn dm-report "A component answering the report held in ctx's :r."
-  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
-  [{c :seon.ctx/ctx}] (with-meta (merge {:t 0 :classes {}} (seon.ratom/realize (:r c))) {:seon.render/schema :seon.problems/report}))
-(defn dm-layout "The component, in one list."
-  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
-  [_] [:div [:div {:id "parts"} [#'dm-report {}]]])
-
-(deftest a-components-revision-follows-its-map
-  ;; docs/render.md#a-part-answers-data: what allowed the stale text was a revision judged by the html alone. :t is the model's alone
-  ;; (seon.render.ui/problems-model reads it, seon.render.ui/problems does not): it moves the revision and the model's text
-  (let [a (seon.ratom/atom {:db/id 1 :r {:t 1}})
-        w (r/walker {:ref a :changes seon.ctx/changes} (constantly nil) [#'dm-layout {}])
-        k [`dm-report]
-        rev #(:rev (get @(:cache w) k))
-        text #(r/part-text (r/part-form w k))
-        html #(:html (first (r/placed-units w)))]
-    (try
-      (r/flush! w nil)
-      (let [rev0 (rev) html0 (html)]
-        (is (str/includes? (text) ":t 1"))
-        (swap! a assoc :r {:t 2})
-        (is (= :miss (get (r/flush! w nil) k)) "its map moved: a new answer, whatever its html says")
-        (is (not= rev0 (rev)) "its revision follows its map")
-        (is (str/includes? (text) ":t 2") "and the model's text, kept by that revision, is not stale")
-        (is (= html0 (html)) "its html did not change"))
-      (is (= {:t 2 :classes {}} (get (r/placed-data w ["#parts"]) :seon.problems/report)) "what a turn decides from is the map as it stands")
-      (let [rev1 (rev)]
-        (vswap! (:queue w) conj k)
-        (is (= :same (get (r/flush! w nil) k)) "run again to an equal map: the same")
-        (is (= rev1 (rev)) "and its revision stays"))
-      (finally (r/dispose-walk! w)))))
-
-(def ^:private html-got "What `recording-html` was last given." (volatile! nil))
-(defn recording-html "An html render that records what it is given."
-  {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
-  [opts v] (vreset! html-got [opts v]) [:section [:p (str "t is " (:t v))]])
-(defn dm-recorded "A component over ctx and the db drawn by `recording-html`."
-  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
-  [{c :seon.ctx/ctx}] (with-meta {:t (:n c) :classes {}} {:seon.render/schema :seon.problems/report :seon.render/html 'seon.render-test/recording-html}))
-(defn dm-recorded-layout "That component, in one list."
-  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
-  [_] [:div [:div {:id "parts"} [#'dm-recorded {}]]])
-
-(deftest a-schemas-html-is-given-only-the-map
-  ;; docs/render.md#a-part-answers-data: the component reads ctx and the db and puts what the html needs in its map, and the html is a function of that map
-  (let [w (r/walker {:ref (seon.ratom/atom {:db/id 1 :n 7}) :changes seon.ctx/changes} (constantly (ts/test-db)) [#'dm-recorded-layout {}])]
-    (try
-      (r/flush! w nil)
-      (let [[opts v] @html-got]
-        (is (= {:t 7 :classes {}} v) "the map the component answered")
-        (is (not-any? #(contains? opts %) [:db :seon.db/db :seon.ctx/ctx]) (str "and no db or ctx: " (pr-str (keys opts)))))
-      (is (str/includes? (:html (first (r/placed-units w))) "t is 7"))
-      (finally (r/dispose-walk! w)))))
 
 (defn mv-child "A child, its text read from ctx."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int] :any]}

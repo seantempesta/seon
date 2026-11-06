@@ -48,7 +48,7 @@
 (defn failures
   "A test's failing assertions as the agent reads them (`failure`), those that got the same value
   with the same message one entry, {:asserts [assertion ...] :got v}, in first-failure order: nine
-  assertions that each threw one NullPointerException are one cause, read once. See docs/render.md#a-part-answers-data."
+  assertions that each threw one NullPointerException are one cause, read once. See docs/render.md#a-component-answers-hiccup."
   {:malli/schema [:=> [:cat [:sequential :map]] [:vector :map]]}
   [fs]
   (let [ms (mapv failure fs)
@@ -496,7 +496,7 @@
   "The namespace the REPL of agent record c (its ctx) is in: its :seon.agent/ns, which its eval's record writes when the REPL
   moved (seon.repl/record-tx; one key, so what reads it redraws on a move alone, never on an eval); before its first turn, where it starts,
   its task's :seon.task/ns (seon.agent/start-ns); nil for a task that names none. Where its next eval runs
-  (docs/render.md#a-part-answers-data)."
+  (docs/render.md#a-component-answers-hiccup)."
   {:malli/schema [:=> [:cat :map] [:maybe :symbol]]}
   [c] (or (:seon.agent/ns c) (:seon.task/ns (:task c))))
 
@@ -508,7 +508,7 @@
   is not and what it should assert in the plan's words (whether it fails, and why, is the
   proofs part's: it changes each turn); the wiki sections and the tasks cites name (a task by its plan, seon.ref/task-view). cites: what the task cites, its cite entities and its needs'
   (seon.task/task-cites). What `my.task/data` answers at the agent's REPL, on demand; the page's task part is
-  the pulled task's own renders (seon.render.ui/task, docs/render.md#a-part-answers-data)."
+  the pulled task's own renders (seon.render.ui/task, docs/render.md#a-component-answers-hiccup)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/task [:sequential :map]] :map]}
   [db t cites]
   (let [{:keys [plan proofs]} (:seon.task/accumulated t)
@@ -622,7 +622,7 @@
   and each as what to do (`refused`); what the branch's work did since its merge base, from one
   diff (seon.merge/delta-changes of :seon.agent/base-commit against db): the functions without a
   contract, the problems it caused and the sections it made stale (seon.problems/caused-split),
-  what its merge carries, and whether it can merge now when it is given main's commit; its
+  what its merge carries, and whether it can merge now when the task merges itself; its
   unmerged entries; a test run that failed as a whole (:seon.agent/test-error). It reads facts
   about the work only, never the conversation (its turns, evals and messages), so a turn's record
   draws it again only when it changed the work; the turn number and a cut reply are the run's
@@ -630,10 +630,10 @@
   own answer, the turn's check (seon.turn/work!), which the model and the page read as :refused. A design task's plan before its run (:no-design) is its run's, the run its newest model call names, so it waits for the first turn. opts :index, a function answering the reconciler's index of db (seon.reconcile/index; else
   one built cold), called only when a test outside the task's proofs is red (whether it is a
   regression or a stray red is main's claims: measured cold on a demo branch, 14.8M ticks and
-  70 MB), :main, main's commit (the merge view), and :deferred, the task's proofs a run leaves to root's gate (process
+  70 MB), and :deferred, the task's proofs a run leaves to root's gate (process
   tests: none while every proof has a verdict). See docs/render.md#how-the-work-stands."
   {:malli/schema [:=> [:cat :seon.host/db :map :map] :map]}
-  [db rec {:keys [index deferred main]}]
+  [db rec {:keys [index deferred]}]
   (let [a (:db/id rec)
         ag (d/entity db a)
         ;; the task and its proofs as the record pulls them (task-of): the accumulated plan and proofs over its needs
@@ -641,6 +641,8 @@
         tid (:seon.task/id t)
         {:keys [proofs plan]} (when tid (task/pulled-accumulated t))
         kind (:seon.task/kind t :work)
+        ;; main's commit, read only when the task merges itself: a move of main reaches a reader of this only then
+        main (when (task/merges? kind) (ratom/realize (:seon.agent/main-commit rec)))
         ;; a test run that failed as a whole: present on its process only while it is so (the
         ;; process's other facts, written on every eval, are not read)
         test-error (:seon.agent/test-error ag)
@@ -710,7 +712,7 @@
       (and main base) (assoc :merge (pm/readiness base db (d/commit-as-db (:store db) main) moved)))))
 
 (def ^:private eval-keys
-  "The attributes of an eval a reader of the conversation reads (:seon.db/eval-fact less :seon.eval/agent and :seon.eval/opened). See docs/render.md#a-part-answers-data."
+  "The attributes of an eval a reader of the conversation reads (:seon.db/eval-fact less :seon.eval/agent and :seon.eval/opened). See docs/render.md#a-component-answers-hiccup."
   [:seon.eval/id :seon.eval/by :seon.eval/code :seon.eval/intent :seon.eval/call-id
    :seon.eval/schema :seon.eval/basis :seon.eval/fns :seon.eval/turn :seon.eval/response])
 

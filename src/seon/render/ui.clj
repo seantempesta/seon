@@ -528,7 +528,7 @@
   "A task (the declared html render of :seon.task/task-fact) as a person reads it, wherever the pattern joined one: inline its
   id, kind and execution; whole, its name as a title, its namespace and how its work stands above it (the task's outcome
   where it holds one: a capped task is not \"running\"), how its kind is worked and its plan accumulated over its needs
-  as Markdown. The agent's own task part is `task`. See docs/render.md#a-part-answers-data."
+  as Markdown. The agent's own task part is `task`. See docs/render.md#a-component-answers-hiccup."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
   [opts {:seon.task/keys [id kind execution instructions] :as t}]
   (if (= :inline (:as opts))
@@ -588,7 +588,7 @@
   each class with its count and its rows newest first, a row its count, type, its message's first line
   and, for a recorded error, the form that reads it whole ((my.agent/problem signature): its example and
   evidence), never the rows printed whole. So many errors are a few lines that say how many there are
-  and where to read each. See docs/render.md#a-part-answers-data."
+  and where to read each. See docs/render.md#a-component-answers-hiccup."
   {:malli/schema [:=> [:cat :map :seon.problems/report] :map]}
   [_opts {:keys [t classes]}]
   {:t t
@@ -744,7 +744,7 @@
   they are for). Not a map of keys: what the agent reads cold. For the person, beside it, the namespace and how the
   work stands (`standing`, from the task's outcome where the task holds one, else the agent's own end). The cites are
   their own parts (`citations`); which proofs are written is the status's. It reads no db. See
-  docs/render.md#a-part-answers-data."
+  docs/render.md#a-component-answers-hiccup."
   {:seon.render/style (str panel-style " [&_h3]:text-xs [&_h3]:text-text-300")
    :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int] :any]}
   [{c :seon.ctx/ctx} _aid]
@@ -1057,8 +1057,7 @@
     (if (str/includes? t "\n") [:pre [:code t]] [:code t])))
 
 (defn status-hiccup
-  "How the work stands (seon.context/status's data s), written to the agent at the moment it reads it: the page's look and the model's read of
-  :seon.context/status, one render, so they cannot drift. Each proof answers the
+  "How the work stands (seon.context/status's data s), written to the agent at the moment it reads it. Each proof answers the
   question its state asks: not written, where it goes and a test to copy; red, what it asserted and what it got; every proof
   green and something blocks merging, exactly what and the form that clears it; all green and nothing blocks, that it does not.
   Main's side only when something conflicts: both sides and the form that settles each. No table beside the same words: a list of
@@ -1122,13 +1121,12 @@
      (when (seq (:conflicts merge)) [:p (str (count (:conflicts merge)) " things conflict with main; they are listed above.")])]))
 
 (defn status
-  "How the agent's work on its task stands (a component over ctx and the db): it answers the map seon.context/status makes of its branch db, which the page
-  and the model read by `status-hiccup` and the turn decides done from (seon.render/placed-data). It reads main's commit from ctx only when the task
-  merges itself (the merge view), so a move of main redraws it only then. See docs/render.md#a-part-answers-data."
+  "How the agent's work on its task stands (a component over ctx and the db): the data seon.context/status makes of its branch db, drawn by
+  `status-hiccup`, the one hiccup the page and the model read. It reads main's commit from ctx only when the task merges itself (the merge view), so a
+  move of main redraws it only then. See docs/render.md#how-the-work-stands."
   {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int] :any]}
   [{c :seon.ctx/ctx db :seon.db/db} aid]
-  (let [main (when (task/merges? (:seon.task/kind (:task c))) (ratom/realize (:seon.agent/main-commit c)))]
-    (with-meta (context/status db c {:main main}) {:seon.render/schema :seon.context/status})))
+  (status-hiccup {} (context/status db c {})))
 
 (declare standing)
 
@@ -1162,13 +1160,18 @@
 
 (defn own-problems
   "The open problems of the agent (a component over its branch db, seon.problems/own: its newest run's,
-  its task's failure and the errors raised in its task), by the report's render, the one root's tile
-  draws; nothing when none is open."
+  its task's failure and the errors raised in its task), each class with its count and each of its rows a line, as `problems-model`
+  makes them: its count, type, first line and the form that reads it whole. Nothing when none is open. See docs/render.md#components."
   {:seon.render/style tile-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :int] :any]}
   [{db :seon.db/db} aid]
   (let [r (problems/own db aid)]
-    ;; a part: the report's own render draws it, the model is sent the report
-    (when (seq (:classes r)) (with-meta r {:seon.render/schema :seon.problems/report}))))
+    (when (seq (:classes r))
+      (into [:section [:h2 "Your open problems"]]
+            (for [[c {:keys [n rows]}] (:classes (problems-model {} r))]
+              [:div [:h3 (str (kname c) " " n)]
+               (into [:ul]
+                     (for [{:keys [count type message read open?]} rows]
+                       [:li (str count " x") (when type [:code (str type)]) (when message (str " " message)) (when (false? open?) " (closed)") (when read [:code (print/text read)])]))])))))
 
 (defn ctx-key
   "A key the agent added to its ctx (a component over ctx), named by that key, which is its schema:
