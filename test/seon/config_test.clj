@@ -120,7 +120,7 @@
   ;; environment, so it is left out of both sides
   (doseq [p [:default :scripted :deepseek]]
     (let [c (dissoc (shipped p) :seon.config.source/root)]
-      (is (= (set (keys c)) (set (remove (cond-> #{:seon.config.ai/reasoning-effort :seon.config.source/root :seon.config.source/gate-checkout :seon.config.root/profile} (not= :scripted p) (conj :seon.config.ai/script))
+      (is (= (set (keys c)) (set (remove (cond-> #{:seon.config.ai/reasoning-effort :seon.config.ai/temperature :seon.config.source/root :seon.config.source/gate-checkout :seon.config.root/profile} (not= :scripted p) (conj :seon.config.ai/script))
                                          (config/keys-declared)))) p)))
   (is (= {:kind :none} (config/provider (shipped :default))) "no profile: no provider, never the scripted model")
   (is (= {:kind :scripted :script 'seon.fixtures/reply} (config/provider (shipped :scripted))))
