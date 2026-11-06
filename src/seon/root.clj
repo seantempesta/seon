@@ -1122,6 +1122,8 @@
                                                                          started-by (conj {:seon.root/id :root :seon.root/started-by started-by}))}})]
       (when (contract/error? r) (throw (ex-info (str "root's boot fact was refused: " (:seon.error/message r)) r))))
     (when source (import-source! sys source))
+    ;; what the first agent's fork would wait for is done now, as main stands (seon.fork-server/preload); nothing waits on its answer
+    (call! sys {:op :fs :req {:op :preload :t (:max-tx @conn)}})
     sys))
 
 ;; ====================================================================================
