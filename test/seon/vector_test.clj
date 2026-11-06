@@ -104,8 +104,8 @@
     (let [db (d/db-with db [{:db/id "a" :seon.agent/key "demo/a1" :seon.agent/id :a1}
                             {:seon.eval/id "e1" :seon.eval/agent "a" :seon.eval/by "a1" :seon.eval/code "(f)" :seon.eval/response {}}])
           ev (:e (first (d/datoms db :avet :seon.eval/id "e1")))]
-      (is (= [[ev "task: search result | query: (f)"]] (mapv pop (filterv (comp #{ev} first) (vector/due db "m"))))
-          "an eval is embedded as a search asks: its code"))))
+      (is (empty? (filterv (comp #{ev} first) (vector/due db "m")))
+          "an eval is no text to embed: nothing reads its vector, and a turn would wait on the model for it"))))
 
 (defn- with!
   "conn's head after tx-data is committed on it (db, the head before, is the one the test holds):
