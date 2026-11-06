@@ -119,7 +119,7 @@ if [[ -n ${1:-} && ! ${1} =~ ^[0-9]+$ ]]; then
 fi
 N=${1:-100}
 TIMEFMT='real %E user %U sys %S'
-OUT=$ROOT/target/check/$(date +%Y%m%dT%H%M%S)
+OUT=$ROOT/target/check/$(date +%Y%m%dT%H%M%S)-$$
 mkdir -p "$OUT/stores"
 : > "$OUT/failed"; : > "$OUT/green"
 # want STEP: is STEP one this run runs? A step seon.proofs/check-steps does not name is FAILED.

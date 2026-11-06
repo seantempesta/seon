@@ -82,7 +82,7 @@ PLAN=(); (( MERGE )) && PLAN=(--merge)
 # a subshell: the pipeline's first part, its status the run's (tee keeps the log the merge reads)
 (
 nice -n 15 "$ROOT/bin/test" --prove $WHAT "$OUT" $PLAN "$@" || st=1
-if [[ $WHAT != tests && -s $OUT/steps ]]; then
+if [[ $WHAT != tests && -s $OUT/steps && ! -e $OUT/stopped ]]; then
   # bin/test built target/seon from this tree and ran the steps beside its shards (bin/check --steps);
   # a step's result is keyed by the source it reaches
   nice -n 15 "$ROOT/bin/test" --store-steps "$OUT" || st=1

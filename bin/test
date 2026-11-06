@@ -44,6 +44,16 @@ runner --plan $WHAT "$OUT" "$@" || { echo "TEST FAILED (the plan)"; exit 1 }
 # which its digest does not cover: that binary is built from this tree first (a no-op build costs
 # ~30-45 s). The plan names what it selected that reaches one (out/binary); nothing, no build
 F=($OUT/shard-*.edn(N))
+# laws and health read the tree and answer in seconds, before any build: a run of their own beside the rest, whose red ends the run, shards and
+# steps, as no later result can make that tree mergeable and a red is reported as it stands (docs/merging.md#a-merge-runs-what-the-change-reaches)
+FAST=(); if [[ ${WHAT:-} != tests && -s $OUT/steps ]]; then
+  ALL=$(<$OUT/steps); for s in laws health; do [[ " $ALL " == *" $s "* ]] && FAST+=($s); done
+  if (( ${#FAST} )); then
+    mkdir -p "$OUT/fast"; print -r -- "$FAST" > "$OUT/fast/steps"; : > "$OUT/fast/steps-binary"
+    REST=(${${=ALL}:|FAST}); print -r -- "$REST" > "$OUT/steps"
+    ( "$ROOT/bin/check" --steps "$OUT/fast" > "$OUT/fast.log" 2>&1 || { : > "$OUT/stopped"; [[ -s $OUT/shards.pid ]] && kill -9 $(<$OUT/shards.pid) 2>/dev/null; [[ -s $OUT/check.pid ]] && kill $(<$OUT/check.pid) 2>/dev/null } ) & A=$!
+  fi
+fi
 if [[ -s $OUT/binary ]]; then
   nice -n 15 "$ROOT/bin/build" seon > "$OUT/build.log" 2>&1 || { tail -5 "$OUT/build.log"; echo "TEST FAILED (bin/build seon: $OUT/build.log)"; exit 1 }
 fi
@@ -53,17 +63,21 @@ if [[ -s $OUT/process-store ]]; then
   nice -n 15 "$ROOT/bin/root" seed "$(<$OUT/process-store)" > "$OUT/seed.log" 2>&1 || { tail -5 "$OUT/seed.log"; echo "TEST FAILED (bin/root seed: $OUT/seed.log)"; exit 1 }
 fi
 st=0 P=()
+[[ -e $OUT/stopped ]] && { F=(); : > "$OUT/steps" }
 # told to stop (a timeout's TERM), its shards end with it, unheard: a shard left running reads a root the stop ended, and stores those reds, which
 # turn flaky beside the next run's greens at the same digests. A shard that dies stores nothing
 trap 'kill -9 $P 2>/dev/null; exit 143' TERM INT HUP
 # each shard a process of its own; its tests' ms are in their cached verdicts (:ms, seon.fx/typical-ms)
-for f in $F; do runner --shard "$f" > "${f%.edn}.log" 2>&1 & P+=($!); done
+# (exec: the pid is the shard's, so a kill reaches it, not a shell that leaves it running)
+for f in $F; do ( HOME=$ROOT/target/home JOLT_PWD=$ROOT exec "$JOLT" -A:test run -m test-runner --shard "$f" --profile scripted ) > "${f%.edn}.log" 2>&1 & P+=($!); done
+print -r -- "$P" > "$OUT/shards.pid"; [[ -e $OUT/stopped && -n $P ]] && kill -9 $P 2>/dev/null
 # bin/prove's check steps (the plan's out/steps) run beside the shards, not after them: they share no
 # store, port or checkout state with a test's roots (each step takes an APFS clone of the one seeded store,
 # bin/check), so the run takes as long as the longer of the two, not their sum (docs/merging.md). Their
 # output is kept in out/check.log and printed after the shards'.
 C=
 if [[ ${WHAT:-} != tests && -s $OUT/steps ]]; then "$ROOT/bin/check" --steps "$OUT" > "$OUT/check.log" 2>&1 & C=$!; fi
+print -r -- "$C" > "$OUT/check.pid"; [[ -n $C && -e $OUT/stopped ]] && kill $C 2>/dev/null
 # a stalled test is named, never ended: a running shard quiet since its last "started" line past
 # that test's bound (k times its own last run, the plan's out/stall-bounds; the floor and a test
 # with no record: :seon.config.agent/stall-ms, out/stall-ms, 0: none) is printed and recorded as
@@ -77,11 +91,17 @@ for (( i = 1; i <= ${#F}; i++ )); do
   grep -E "^RED|^SHARD" "$log"
   if (( s != 0 )); then
     st=1
-    grep -q "^SHARD" "$log" || echo "FAILED shard $f: exit $s, $(grep '^started' "$log" | tail -1) ($log)"
+    [[ -e $OUT/stopped ]] || grep -q "^SHARD" "$log" || echo "FAILED shard $f: exit $s, $(grep '^started' "$log" | tail -1) ($log)"
   fi
 done
 [[ -n $W ]] && kill $W 2>/dev/null
-if [[ -n $C ]]; then wait $C || st=1; cat "$OUT/check.log"; fi
+if [[ -n $C ]]; then wait $C || st=1; [[ -e $OUT/stopped ]] || cat "$OUT/check.log"; fi
+if (( ${#FAST} )); then
+  wait $A; cat "$OUT/fast.log"; [[ -e $OUT/stopped ]] && { st=1; echo "stopped: a red in ${FAST} ended the run's other tests and steps" }
+  # what the two runs found green, and the steps as the plan named them, for bin/prove's store of them
+  [[ -s $OUT/fast/green ]] && cat "$OUT/fast/green" >> "$OUT/green"
+  print -r -- "$ALL" > "$OUT/steps"
+fi
 # a test green and red at its digest (the plan's out/flaky) is red, though nothing ran it
 [[ -s $OUT/flaky ]] && { cat "$OUT/flaky"; st=1 }
 # a green run's logs are read by no one: the directory a plain run made is reclaimed with it (a red run's stays)
