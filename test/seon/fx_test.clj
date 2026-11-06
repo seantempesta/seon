@@ -147,7 +147,7 @@
     (is (= ["f.clj"] (vec (.list (java.io.File. d)))) "no staged file left")))
 
 (deftest a-dependency-is-resolved-through-its-owner
-  ;; task seon.fx/a-dependency-is-fetched-through-its-owner (the PKG plan, owner-approved):
+  ;; (the PKG plan, owner-approved; docs/source.md#dependencies):
   ;; the :deps performer resolves a deps map with Jolt's own jolt.deps and answers the roots
   ;; to load from, or its one typed error naming what did not resolve; no network here (a
   ;; :local/root library made in this test's scratch dir)
@@ -163,7 +163,7 @@
       (is (contains? (set (:deps bad)) 'nowhere/nothing) "naming it"))))
 
 (deftest a-missing-local-root-fails-in-jolts-resolver
-  ;; task jolt.deps/a-missing-local-root-is-unresolved: red until Jolt's own resolver refuses it
+  ;; red until Jolt's own resolver refuses it
   (let [d (scratch-dir)
         r (try (jolt.deps/resolve-deps {'nowhere/nothing {:local/root (str d "/missing")}} ".") nil
                (catch Throwable e (ex-data e)))]

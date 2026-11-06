@@ -439,7 +439,7 @@
                                                         (pm/program base #{})))))
         "a definition nested anywhere at a form's top is fine")))
 
-;; ---- tests run by reach (task seon.program/tests-run-by-reach) ---------------------------
+;; ---- tests run by reach ---------------------------
 
 (def ^:private calc-tests '#{app.pt-calc-test/add-test app.pt-calc-test/sum3-test app.pt-calc-test/neg-test})
 
@@ -1011,7 +1011,7 @@
         (is (= t1 t3) "and returns with it")
         (is (not= (k1 "k") (k2 "k")) "a contract key's digest too")))))
 
-;; ---- refs the expansion and the quote leave (task seon.program/refs-name-quoted-symbols-and-macro-uses)
+;; ---- refs the expansion and the quote leave
 
 (defn- refs-of [db sym]
   (set (d/q '[:find [?r ...] :in $ ?s :where [?v :var/name ?s] [?v :var/form ?f] [?f :form/refs ?r]] db sym)))

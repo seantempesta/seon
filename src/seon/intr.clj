@@ -91,8 +91,7 @@
   "End this process when its socket to root is closed, whatever it is doing: SIGIO (the
   socket asked for it, seon.sock/signal-at-input!) is taken at the next safe point, as
   root's SIGUSR1 is, and the process exits 0 only when (gone?) peeks EOF; input arriving is
-  the loop's to read. The second source of an interrupt here, beside root's (task
-  seon.agent/an-agent-ends-with-its-root)."
+  the loop's to read. The second source of an interrupt here, beside root's."
   {:malli/schema [:=> [:cat :seon.host/fn] :boolean]}
   [gone?]
   (install-kick* lib/SIGIO (fn [] (profile/aside (fn [] (when (gone?) (lib/c-exit 0)) false))))

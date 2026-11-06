@@ -241,7 +241,7 @@
         by (into {} (map (juxt :test identity)) (:proofs block))]
     (is (= [{:assert (print/code "(= 9 (square 3))") :got (print/code "(= 9 6)")}] (:failures (by 'ctx-calc-test/square-test)))
         "the assertion once, and what it evaluated to")
-    ;; task seon.context/an-agent-follows-its-instructions-to-green, item 4: a callee's docstring was about 2.4k
+    ;; a callee's docstring was about 2.4k
     ;; of the md-scan bench's first request's 6.6k tokens; it is named, its doc a `doc` away
     (is (= [{:var 'ctx-calc/square} {:var 'ctx-ghost/half}]
            (:calls (by 'ctx-calc-test/square-test)))
@@ -429,7 +429,7 @@
     moved))
 
 (deftest the-prefix-stays-byte-identical-across-turns
-  ;; task seon.context/a-stable-prefix-is-sent-once: a provider caches a byte-identical message
+  ;; a provider caches a byte-identical message
   ;; prefix, so each request starts with the whole of the one before, even after the program the
   ;; task cites, or the task's plan, changed: the page is an eval's answer at the session's first turn
   ;; and the parts that moved are another's after it (docs/render.md#the-render-is-an-eval), each record a function of itself
@@ -501,7 +501,7 @@
         (is (= 1 (count (re-seq #"\[:code \"demo-test/f-test\"\]" text))) "the proofs' statuses once, in the status")))))
 
 (deftest a-cited-var-shows-at-its-citations-depth
-  ;; task seon.context/a-cited-var-shows-at-its-citation-depth: the delimiter picks the depth
+  ;; the delimiter picks the depth
   ;; for a var as it does for a section (docs/references.md#the-delimiter-picks-the-depth)
   ;; the vars are the db's alone (no namespace of them in this process): what each shows is read
   ;; from its facts (seon.doc/resolve-ref)

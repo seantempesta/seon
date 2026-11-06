@@ -639,8 +639,7 @@
 
 (defn file-findings!
   "Write main's :long-form findings as held tasks (findings-tx over main and its reach graph), for root or
-  the owner to release (my.root/run!): the system's long parts become its work (task
-  seon.template/a-finding-is-a-task). Answers the task ids filed, [] when every finding has its task."
+  the owner to release (my.root/run!): the system's long parts become its work. Answers the task ids filed, [] when every finding has its task."
   {:malli/schema [:=> [:cat :seon.root/sys] [:vector :string]]}
   [sys]
   (let [db @(:conn sys)

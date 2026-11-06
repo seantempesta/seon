@@ -675,7 +675,7 @@
                  ;; sizes this proof ran before, 1.47M / 5.8 MB at 1,000: flat): 84 descents of 5-11k ticks, the change itself
                  ;; about 30k, the descents' depth a staircase in the index (a level more every so many entries), which is log work.
                  ;; On the address-less test store the same observe read 4.71M / 17.9 MB at 10 and 5.36M / 18.3 MB at 500
-                 ;; (every diff walked its attribute); the 84 descents are task seon.reconcile/one-observe-descends-once
+                 ;; (every diff walked its attribute); the 84 descents are one cached :aevt diff for each watched attribute
                  :fixed {:ticks 1050000.0 :bytes 5200000.0}
                  :per-n {:ticks 100000.0 :bytes 250000.0}
                  :sizes observed-sizes})))

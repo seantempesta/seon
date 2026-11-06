@@ -198,7 +198,7 @@
         (is (= [43] (map :main-t (pm/entries b2))))))))
 
 (deftest a-conflict-value-reads-a-pulled-entry
-  ;; task seon.merge/conflict-value-states-its-input: its input is a merge entry's members
+  ;; its input is a merge entry's members
   ;; (mg/check generated nil and 0 from its `:any` input, which state no conflict)
   (let [c (first (:conflicts (tw (with (base) (var-tx "f" "(inc x)")) (with (base) (var-tx "f" "(dec x)")))))
         db (d/db-with (base) [(pm/conflict-tx c)])

@@ -15,7 +15,7 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.agent-test/in-agent-ends-its-root}}
  {:seon.task/name "one-watch-waiter"
-  :seon.task/plan "What exists: two watch-waiters for the same job. `seon.check/await-ref` (check.clj:102, any reference) and `seon.await/await-db` (e2e.clj:20, main's connection) each add a watch, check once and deref a promise; await-ref's docstring calls itself await-db's mechanism. Audit item A17's remnant: the verdict printer and eval-records twins are gone. Correct: one waiter, `await-db` defined over await-ref (or the reverse), in the harness. It moves with `seon.main/drivers-leave-src`. Deletes: ~8 lines."
+  :seon.task/plan "What exists: two watch-waiters for the same job. `seon.check/await-ref` (check.clj:102, any reference) and `seon.await/await-db` (e2e.clj:20, main's connection) each add a watch, check once and deref a promise; await-ref's docstring calls itself await-db's mechanism. Audit item A17's remnant: the verdict printer and eval-records twins are gone. Correct: one waiter, `await-db` defined over await-ref (or the reverse), in the harness. It lives in the harness, in test/. Deletes: ~8 lines."
   :seon.task/kind :work
   :seon.task/proofs #{seon.check-test/lease-ends-with-a-verdict}}
  {:seon.task/name "attach-answers-when-its-agent-is-ready"

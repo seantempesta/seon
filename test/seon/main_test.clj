@@ -38,8 +38,7 @@
 (deftest root-boots-without-test-fixtures
   ;; the compiler's facts of the checkout (src and test imported as program facts): the
   ;; release binary compiles what src requires, so no src namespace requires one whose file is
-  ;; in test/ (the check driver, the e2e runner, the scripted model's fixtures: task
-  ;; seon.main/drivers-leave-src); a scripted root loads its fixture from the checkout by name
+  ;; in test/ (the check driver, the e2e runner, the scripted model's fixtures); a scripted root loads its fixture from the checkout by name
   (let [db (runner/program-db (seon.config/checkout) (ts/kept-program-store))
         file (into {} (d/q '[:find ?n ?f :where [?e :ns/name ?n] [?e :ns/file ?f]] db))
         in? (fn [dir n] (some-> (file n) (clojure.string/starts-with? dir)))

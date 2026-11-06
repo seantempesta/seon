@@ -184,7 +184,7 @@
                           "and a bug's defect is filed: its proofs, " (str/join ", " (sort stall-proofs)) ".")}))
 
 (defn finding
-  "The task a :long-form finding asks for (task seon.template/a-finding-is-a-task): row's var split under
+  "The task a :long-form finding asks for: row's var split under
   the bound, its behaviour unchanged, the tests reaching it its proofs; held, as every template's task
   is, until root or the owner releases it. Its name is the var's, shrink-<name>, in the var's namespace,
   one task a var. See docs/health.md#a-form-too-long."

@@ -1,5 +1,5 @@
 (ns seon.proofs-test
-  "prove (task seon.proofs/prove-runs-what-a-change-reaches): a key runs exactly when no green
+  "prove: a key runs exactly when no green
   result is stored at its reach digest, so an unchanged tree runs nothing, a change runs what
   reaches it (through macros, schemas and the inputs with no program facts), a bin/check step
   is keyed like a test by what its functions reach, and the run is shards whose greens are

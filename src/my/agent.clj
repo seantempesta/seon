@@ -616,6 +616,6 @@
 ;; are Seon's in every namespace of root, a test child and an agent alike (`seon.agent/repl-name` resolves the bare
 ;; names there). `intern` is a code smell the rule allows where no definition form exists: these are another
 ;; namespace's vars (Jolt's clojure.repl lacks source, source-fn and pst, and answers nothing for a missing name);
-;; task seon.context/the-standard-repl-tools moves them into Jolt's own clojure.repl (docs/resolution.md).
+;; Jolt's own clojure.repl should hold them (docs/resolution.md).
 (doseq [s '[source-fn source pst doc dir] :let [v (ns-resolve 'my.agent s)]]
   (intern (find-ns 'clojure.repl) (with-meta s (select-keys (meta v) [:macro :arglists :doc])) @v))

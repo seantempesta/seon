@@ -1,6 +1,5 @@
 (ns seon.merge-cost-test
-  "A merge's three-way costs what changed, never the program (task
-  seon.merge/program-cost-follows-what-changed): over branches that hold n forms and each
+  "A merge's three-way costs what changed, never the program: over branches that hold n forms and each
   changed one, seon.merge/delta-three-way reads only the keys the datoms that differ bear."
   (:refer-clojure :exclude [defn defn-])
   (:require [clojure.test :refer [deftest is use-fixtures]] [seon.contract :refer [defn defn-]]
@@ -51,7 +50,7 @@
        ;; past 1,000 forms each of the ~120 descents (59 attributes, two sides) gains a tree level: 12.2 and
        ;; 14.1 MB at 3k and 10k, a step the fit on four increments reads as n^0.83 against log's n^0.60. That
        ;; is the cost of one :aevt range an attribute and side; one walk over all their ranges (a
-       ;; multi-prefix datoms-diff in our Datahike, task seon.reconcile/one-observe-descends-once) would
+       ;; multi-prefix datoms-diff in our Datahike) would
        ;; descend once. Until then the proof judges the sizes a merge meets
        :per-n {:ns 400000 :bytes 500000}
        :fixed {:ns 4000000 :bytes 6800000}

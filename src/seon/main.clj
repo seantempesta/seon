@@ -87,7 +87,7 @@
   (lib/c-exit 0))
 
 (defn- driver!
-  "The check driver's -main (seon.check, in test/: task seon.main/drivers-leave-src), loaded
+  "The check driver's -main (seon.check, in test/), loaded
   now from the checkout's source (checkout-roots!), so the release binary holds only the
   program and a check run compiles the driver it runs."
   {:malli/schema [:=> [:cat :string] :any]}

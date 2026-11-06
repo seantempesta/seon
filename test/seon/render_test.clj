@@ -16,7 +16,7 @@
    :seon.task/accumulated {:plan "Make `app.calc/add` pass" :proofs #{'app.proofs/add-test}}})
 
 (deftest a-problems-report-is-sent-grouped-with-its-handles
-  ;; task seon.agent/every-limit-fails-loudly (the owner, 2026-10-30: errors grouped by signature with their counts, the
+  ;; (the owner, 2026-10-30: errors grouped by signature with their counts, the
   ;; newest first line and a handle): the problems report a part answers is sent the model by its declared model render,
   ;; a few fields a row, never a row's example or evidence printed whole, each recorded error with the form that reads it
   (let [big (vec (range 5000))
@@ -99,7 +99,7 @@
     (is (= [{:type :fork-server-up}] (:events (p/process-value (assoc st :events [{:type :fork-server-up}]))))
         "an event that names no agent (the fork server's) reads as it is")))
 
-;; ---- the GUARDS audit's names for the same law (seon.render/no-clip-in-renders) -------------
+;; ---- the GUARDS audit's names for the same law -------------
 
 (deftest no-render-calls-clip
   (is (nil? (resolve 'seon.render.ui/clip)))
@@ -297,7 +297,7 @@
                                      (sites forms budgeted-vars #(and (printer? %) (not (display? %))))))
                         (sort named)))))))
 
-;; ---- the agent's debug view (task seon.render/a-debug-view-of-any-agent) ----------------
+;; ---- the agent's debug view ----------------
 
 (deftest the-printer-renders-each-nested-value-by-its-own-render
   ;; owner, 2026-10-23: the default render auto-renders. A value inside the printed one whose
@@ -319,7 +319,7 @@
 
 (defn- eid-of [db ref] (:db/id (d/entity db ref)))
 
-;; ---- the page (task seon.render/page): every page is the walk of one entity ----
+;; ---- the page: every page is the walk of one entity ----
 
 (defn- paged-dbs
   "Main and a3's branch as production writes them: main holds root, the task, the agent (forked
@@ -553,7 +553,7 @@
     (is (nil? (#'p/location db2 :main/task-z)) "a branch no agent worked names none")))
 
 (deftest a-page-keeps-what-it-read
-  ;; task seon.render/a-view-renders-once-per-change-of-its-reads (B): a page's walk runs inside
+  ;; a page's walk runs inside
   ;; d/with-reads and the proc indexes its reads by key, so a transaction finds the pages it
   ;; touched by its datoms' keys (seon.render.proc/touched), never by walking them
   (let [[main branch eid] (paged-dbs)
@@ -572,7 +572,7 @@
     (is (empty? (touched main [[:db/retractEntity unread]])) "an entity the page did not read")))
 
 (deftest a-transaction-touching-no-page-walks-nothing
-  ;; task seon.render/a-view-renders-once-per-change-of-its-reads (C): main's commits come from
+  ;; main's commits come from
   ;; the writer ({:t :prev :ops :commit}, read with d/commit-as-db); the pass walks only the pages whose reads a commit's datoms touch, and
   ;; root's, which its walk marks (root-walk) when main moved
   (ts/test-branch! (fn [_ conn]
@@ -1374,7 +1374,7 @@
   [units prefix] (some #(when (str/starts-with? (:id %) prefix) %) units))
 
 (deftest a-page-is-its-components
-  ;; task seon.render/a-page-is-its-components: an agent's ctx drawn by the walk as components in
+  ;; an agent's ctx drawn by the walk as components in
   ;; the page's lists, each keyed by what it shows, its root element's id its key
   (let [[_ branch _] (paged-dbs)
         k (seon.task/agent-key "b1" :a3)
@@ -1449,7 +1449,7 @@
       (is (not (str/includes? h "it doubles")) "a green keeps no failure"))))
 
 (deftest the-status-is-drawn-from-facts-with-no-turn-of-the-reader
-  ;; task seon.render/the-status-before-any-model-turn: the status reads the branch's facts, never a
+  ;; the status reads the branch's facts, never a
   ;; turn's record, so it is drawn for an agent whatever turns it has taken, a proof's verdict
   ;; included; the turn count is the turn's (seon.render.ui/turn), not the status's
   (let [[_ branch _] (paged-dbs)
@@ -1900,7 +1900,7 @@
                 clojure.core/re-matcher clojure.string/split clojure.string/replace clojure.string/replace-first]]
     (is (some? src) "its source, as the process runs it")
     ;; its message names the regex functions markdown calls, never every symbol the compiler expanded it to (the
-    ;; md-scan bench's agents read about 60 clojure.core names: task seon.context/an-agent-follows-its-instructions-to-green)
+    ;; md-scan bench's agents read about 60 clojure.core names)
     (is (empty? (filter refs regex)) (str "a regex function in markdown: " (pr-str (filter refs regex))))))
 
 (deftest a-task-title-is-its-name-in-words

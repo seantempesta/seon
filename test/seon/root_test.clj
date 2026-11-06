@@ -297,7 +297,7 @@
       (finally (ts/drop-main! (test-store) main) (sh/sh "rm" "-f" (str path "-in") (str path ".log"))))))
 
 (deftest a-build-without-whole-program-inference-reads-with-tools-reader
-  ;; task jolt.ns/a-build-without-whole-program-inference-compiles-tools-reader: with
+  ;; with
   ;; JOLT_NO_WP_INFER=1, `jolt build` of an app requiring clojure.tools.reader fails to analyze
   ;; tools.reader.impl.utils (`<=clojure-1-7-alpha5 is not bound`), so a root cannot be built
   ;; open-world; with inference on the same app builds and reads.

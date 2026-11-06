@@ -62,7 +62,7 @@
     (is (= 3 (:value ok)) "the server goes on")))
 
 (deftest the-server-speaks-mcp
-  ;; task seon.server/the-server-answers-mcp-itself: root's server answers MCP's JSON-RPC
+  ;; root's server answers MCP's JSON-RPC
   ;; itself (bin/mcp only relays lines): initialize with a version it implements, ping,
   ;; tools/list from the one op table, nothing for a notification, and the JSON-RPC error for
   ;; a method or tool it does not know. tools/call through a real root is
@@ -81,7 +81,7 @@
     (is (= -32602 (get-in (ask {"id" 4 "method" "tools/call" "params" {"name" "seon_nope" "arguments" {}}}) ["error" "code"])) "a tool no op names: invalid params")))
 
 (deftest a-line-opening-a-string-key-is-mcps
-  ;; task seon.server/the-server-answers-mcp-itself: the protocol rule. A line opening {" is
+  ;; the protocol rule. A line opening {" is
   ;; JSON-RPC, so an EDN request with a string key is refused naming the rule (-32700), never
   ;; misread; a keyword-keyed EDN line still reads as EDN
   (let [respond #'seon.server/respond
@@ -91,7 +91,7 @@
     (is (contract/error? (clojure.edn/read-string (respond nil "{:op :nope}"))) "a keyword-keyed line is EDN in, EDN out")))
 
 (deftest a-refused-attach-writes-nothing
-  ;; task seon.server/attach-writes-nothing-when-it-is-refused: attach spawns first and
+  ;; attach spawns first and
   ;; writes the env, the release and the start in one transaction only once its agent
   ;; exists, so a refused spawn leaves the task as it was, and the reconciler never sees a
   ;; release with no agent (it would spawn a second agent for it). <ns>/u shares <ns>/t's
@@ -181,7 +181,7 @@
     (is (true? (:value open)) "the refused done left the task open")))
 
 (deftest a-message-reaches-the-agent
-  ;; task seon.render/a-debug-view-of-any-agent (parity row 73): the owner's message, sent as
+  ;; (parity row 73): the owner's message, sent as
   ;; the page's message bar sends it (seon.root/message!, here through the server's :message
   ;; op), is root's one delivery: it is in the agent's inbox when the agent next reads it,
   ;; though it arrived while the agent was not reading its socket; no agent: refused

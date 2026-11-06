@@ -73,8 +73,7 @@ S=$ROOT/target/seon
 # NEEDS: does this run use the binary? Yes, unless its plan says none: a selected run whose
 # DIR/steps-binary is there and empty (laws, lmdb-kill, lmdb-sem: bin/prove's plan writes it) seeds no store,
 # starts no root and wants no build. No steps-binary is unknown, never none: the run seeds and uses
-# the binary (a steps file written by hand ran durable on an empty store: task
-# seon.check/a-steps-run-without-its-plan-seeds)
+# the binary (a steps file written by hand ran durable on an empty store)
 NEEDS=1; [[ -n $SEL && -e $SEL/steps-binary && ! -s $SEL/steps-binary ]] && NEEDS=
 (( NEEDS )) && { [[ -x $S ]] || { echo "check: no target/seon; run bin/build seon" >&2; exit 1 } }
 # VERDICT: the line a refused run ends on, its mode's (CONFIG FAILED) or the run's (CHECK FAILED)

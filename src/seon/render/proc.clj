@@ -40,7 +40,7 @@
 (defn- ask
   "Ask the api for req under kind (seon.step/ask) unless kind is already in flight: the
   answer's pass covers what queued meanwhile (the coalescing window). No clock re-asks: the
-  api answers every request it took, a defect included (seon.root/a-proc-answers-every-request-it-took)."
+  api answers every request it took, a defect included."
   {:malli/schema [:=> [:cat :map :seon.host/volatile :any :map] :map]}
   [st o kind req]
   (if (some #{kind} (vals (:pending st)))
@@ -608,7 +608,7 @@
 (defn touched
   "The views a transaction's datoms touched: those whose last walk read a key one of the datoms
   has (d/datom-keys; a schema datom touches every view). One lookup a key a datom, whatever
-  the views read (task seon.render/a-view-renders-once-per-change-of-its-reads)."
+  the views read."
   {:malli/schema [:=> [:cat :map [:sequential :any]] [:set :any]]}
   [st datoms]
   (let [ix (:read-index st {})]

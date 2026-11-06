@@ -16,7 +16,7 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.reconcile-test/a-refused-end-write-is-reported-at-quiet}}
  {:seon.task/name "an-octopus-merge-is-proven-by-one-combined-run"
-  :seon.task/plan "What exists: octopus merges (the reconciler's :octopus-merge op) and reach selection (`seon.agent/run-tests-forked`), kept off by seon.reconcile/octopus-merges-off-as-decided until this exists. Correct: an octopus merge's members are proven together by one combined run of the tests their changes reach; on red the members are bisected (halves re-run) to name the one that broke it, and the green members merge. Replaces the off switch. Reference only: jolt/r5-port 302ce17 (parked, on an old base; the archived paper option3-R5-octopus (git history) merges.md); re-derive on main's reconciler."
+  :seon.task/plan "What exists: octopus merges (the reconciler's :octopus-merge op) and reach selection (`seon.agent/run-tests-forked`), kept off (:seon.config.merge/max-running is 1 in default.edn) until this exists. Correct: an octopus merge's members are proven together by one combined run of the tests their changes reach; on red the members are bisected (halves re-run) to name the one that broke it, and the green members merge. Replaces the off switch. Reference only: jolt/r5-port 302ce17 (parked, on an old base; the archived paper option3-R5-octopus (git history) merges.md); re-derive on main's reconciler."
   :seon.task/kind :work
   :seon.task/proofs #{seon.reconcile-test/a-red-octopus-merge-is-bisected-to-its-member}}
  {:seon.task/name "a-design-is-done-when-its-proofs-are-designed-red"

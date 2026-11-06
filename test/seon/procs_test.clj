@@ -52,7 +52,7 @@
       (is (map? (#'writer/writer-proc st ::flow/stop))))))))
 
 (deftest the-writers-transactions-name-their-runtime
-  ;; task seon.db/each-commit-names-its-runtime: main's transactions through the writer's group
+  ;; main's transactions through the writer's group
   ;; commit carry the runtime that made them, and so does the stored commit the fork server's replica reads
   (ts/test-branch! (fn [cfg conn] (let [in (a/chan 16)
         st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
@@ -63,7 +63,7 @@
       (is (= fp (:seon.tx/runtime (d/entity (d/commit-as-db conn (:commit m)) (:t m)))) "and so does the stored commit the replica reads"))))))
 
 (deftest a-writers-merge-names-its-runtime
-  ;; task seon.db/each-commit-names-its-runtime: a branch merged into main through the writer
+  ;; a branch merged into main through the writer
   ;; (:octopus-merge, d/merge-db) is a transaction like any other: it names the runtime that made it
   (ts/test-branch! (fn [cfg conn] (let [in (a/chan 16)
         st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
@@ -128,7 +128,7 @@
       (is (= [:applied] (mapv :ev (:ev fouts))))))))
 
 (deftest a-fork-at-another-commit-is-recorded-misaligned
-  ;; task seon.agent/an-agents-base-is-its-merge-base: a new agent whose branch is not at the
+  ;; a new agent whose branch is not at the
   ;; commit :spawn named (or whose image is not at its t) says so in its hello, and root
   ;; records it as the agent's problem, :seon.agent/fork-misaligned
   (ts/test-branch! (fn [cfg conn]
@@ -162,7 +162,7 @@
     (remote/close! end) (sock/close! a')))
 
 (deftest a-fork-names-the-commit-its-agent-starts-at
-  ;; task seon.agent/an-agents-base-is-its-merge-base: :spawn branches the agent from main's
+  ;; :spawn branches the agent from main's
   ;; head and asks the fork server, whose image holds main at that head (the FIFO), to fork it;
   ;; :fork names that commit and t, so the agent checks both (seon.agent/init!)
   (ts/test-branch! (fn [cfg conn] (let [in (a/chan 16)
@@ -291,7 +291,7 @@
   [conn prev ops] {:t (:max-tx @conn) :prev prev :ops ops :commit (d/commit-id @conn) :ns (profile/now-ns)})
 
 (deftest the-writers-main-notice-holds-no-db
-  ;; task seon.writer/main-notices-carry-a-commit-not-a-db: a queued notice pins its own version of
+  ;; a queued notice pins its own version of
   ;; the index (AGENTS section 4), so the notice names the commit and its consumers make the db
   ;; when they take it
   (ts/test-branch! (fn [cfg conn]
@@ -460,7 +460,7 @@
         (is (= {:ok true} @p))))))
 
 (deftest root-records-what-it-observes-of-its-agents
-  ;; task seon.render/the-agents-links-are-refs: what root observes of an agent is facts on the
+  ;; what root observes of an agent is facts on the
   ;; agent's entity, written when a member it records changes; a change it does not record
   ;; (the main t the agent reports) writes nothing
   (let [st (#'root/api-proc {:boot "b1" :ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
@@ -594,7 +594,7 @@
          (finally (remote/close! end) (sock/close! a)))))
 
 (deftest an-eval-says-it-started
-  ;; task seon.check/every-wait-is-the-event-it-means: the agent's {:op :started} is root's
+  ;; the agent's {:op :started} is root's
   ;; :started event, with the eval's text (what a kill or an interrupt meant for it awaits)
   (agent-proc-on
    (fn [st]
@@ -644,7 +644,7 @@
       (is (not-any? #{:state} (vals (:pending st))) "the answer took its request")
       (is (= 1 (count (asks o3))) "the next event asks again"))))
 
-;; ---- task seon.root/a-proc-answers-every-request-it-took (laws audit #2) ----------------------
+;; ---- a proc answers every request it took (laws audit #2) ----------------------
 
 (defn- api-state []
   (#'root/api-proc {:boot "b1" :ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)

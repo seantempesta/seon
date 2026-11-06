@@ -1,7 +1,7 @@
 (ns seon.check
   "End-to-end checks of seon.root through the same API the dashboard uses (proto/flow
   f2-final proto.smoke). bin/check runs them; target/seon <check> [args] runs one. A driver,
-  outside src (task seon.main/drivers-leave-src): the binary's -main (seon.main/-main) serves
+  outside src: the binary's -main (seon.main/-main) serves
   root and ports and loads this driver from the checkout's test/ for every other mode.
   usage: target/seon smoke        3 agents: define, test, transact; merge one; kill one mid-eval
          target/seon scale N      N agents spawned at once, each eval + transact + test

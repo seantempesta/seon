@@ -287,8 +287,7 @@
 
 (defn delta-three-way
   "`three-way` of base, ours and theirs read only where they differ (touched-keys): the
-  same answer, at the cost of what changed on each side since base, not of the program
-  (task seon.merge/program-cost-follows-what-changed). With ours-moved, the datoms that differ
+  same answer, at the cost of what changed on each side since base, not of the program. With ours-moved, the datoms that differ
   between base and ours (`content-datoms`, which a caller already read), ours is not diffed again."
   {:malli/schema [:function [:=> [:cat :seon.host/db :seon.host/db :seon.host/db :seon.merge/data-attrs] :seon.merge/result]
                   [:=> [:cat :seon.host/db :seon.host/db :seon.host/db :seon.merge/data-attrs :seon.merge/moved] :seon.merge/result]]}

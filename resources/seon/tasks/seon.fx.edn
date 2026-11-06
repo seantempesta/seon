@@ -3,7 +3,7 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.fx-test/the-merge-gate-runs-exactly-the-deferred-tests}}
  {:seon.task/name "deps-at-the-repl"
-  :seon.task/plan "What exists: the :deps effect (`seon.fx/resolve-deps`) resolves a deps map through Jolt's `jolt.deps/resolve-deps` and answers the source roots or :seon.fx/unresolved; there is no add-lib or sync-deps at the REPL and no checksum (docs/source.md#dependencies; seon.fx/a-dependency-is-fetched-through-its-owner left them out). Correct, with Clojure's names (clojure.repl.deps): add-lib, add-libs and sync-deps ask the :deps effect through `my.fx/call`, load the answered roots in the agent's process and record the coordinate on its branch; a resolved jar or git tree is checked against a sha256 recorded at its first resolve, and a mismatch is the effect's typed error."
+  :seon.task/plan "What exists: the :deps effect (`seon.fx/resolve-deps`) resolves a deps map through Jolt's `jolt.deps/resolve-deps` and answers the source roots or :seon.fx/unresolved; there is no add-lib or sync-deps at the REPL and no checksum (docs/source.md#dependencies; leaves them out). Correct, with Clojure's names (clojure.repl.deps): add-lib, add-libs and sync-deps ask the :deps effect through `my.fx/call`, load the answered roots in the agent's process and record the coordinate on its branch; a resolved jar or git tree is checked against a sha256 recorded at its first resolve, and a mismatch is the effect's typed error."
   :seon.task/kind :work
   :seon.task/proofs #{seon.fx-test/add-lib-loads-a-resolved-library seon.fx-test/a-changed-artifact-is-refused-by-its-checksum}}
  {:seon.task/name "an-effect-opens-a-receipt"

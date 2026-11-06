@@ -1,6 +1,5 @@
 (ns seon.record-cost-test
-  "A protocol call on a record costs what its method reads, not the record's width (task
-  jolt.passes.fold/a-method-reads-the-fields-it-names): Datahike's DB has 21 fields, and
+  "A protocol call on a record costs what its method reads, not the record's width: Datahike's DB has 21 fields, and
   its add path makes ~30 protocol calls on it per datom."
   (:require [clojure.test :refer [deftest]] [seon.cost :as cost]))
 

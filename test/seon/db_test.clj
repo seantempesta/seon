@@ -300,7 +300,7 @@
                            (when-let [c (:conn r)]
                              (is (= made (get-in r [:cfg :store :id])) "named by the id it was made with")
                              (is (= path (get-in r [:cfg :store :path])) "its config names where it lies now")
-                             (is (= path (get-in @c [:config :store :path])) "and so does its db (task seon.db/deref-keeps-the-connections-config)")
+                             (is (= path (get-in @c [:config :store :path])) "and so does its db")
                              (is (seq (d/datoms @c :eavt)) "and it holds its data")
                              (d/release c))))]
     (try
@@ -508,7 +508,7 @@
       (finally (clojure.java.shell/sh "rm" "-rf" path)))))
 
 (deftest a-large-value-holding-ratios-commits-and-reads-back
-  ;; task seon.db/a-ratio-at-a-commit-ends-its-agent. A value past :seon.config.store/value-out-of-line-bytes is stored
+  ;; A value past :seon.config.store/value-out-of-line-bytes is stored
   ;; under its content key, hasch's uuid of the value (docs/storage.md#values-out-of-line): hasch.platform had no
   ;; encoding for clojure.lang.Ratio, so a large value holding one threw at its commit, and a small one did not (its
   ;; datom is no key). A store on disk of this test's own, the last resort: the in-memory store has no out-of-line
@@ -744,7 +744,7 @@
 (def unique-datoms (partial identity-datoms :seon.task/id))
 
 (deftest a-datom-costs-its-index-inserts
-  ;; task datahike.transaction/a-datom-costs-its-index-inserts. The floor, measured on this store's
+  ;; The floor, measured on this store's
   ;; seed at 1,000 (the task's plan): its two inserts (:eavt and :aevt, current indexes,
   ;; transient) 5.5k ticks and 7.0 KB; the card-one check, one :eavt descent, 0.95k and 1.4 KB;
   ;; the datom 0.5 KB; its conj onto the tx-data twice 0.55 KB; five copies of the db record
@@ -758,7 +758,7 @@
      :sizes [30 100 300]}))
 
 (deftest a-value-costs-its-index-inserts
-  ;; task datahike.transaction/an-index-insert-allocates-nothing-extra: a card-many value's
+  ;; a card-many value's
   ;; comparisons all reach the value, so its floor is a plain datom's (two inserts, no card-one
   ;; descent). Before Jolt's 2-arity == and Datahike's compare-value without a try, 38 KB a
   ;; datom at 1,000 and growing with n (46 KB at 10,000), 17 KB after; the overrun below is what

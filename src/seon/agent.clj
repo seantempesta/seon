@@ -159,8 +159,7 @@
   t, never stored, and it reads no store: a read of main's head (heard-main, seon.db/head,
   datahike.writing/read-head) on each eval held the agent's heap past its ceiling in
   seon.agent-test/an-agent-finds-no-repository (OutOfMemoryError, exit 70). So an agent that never
-  hears main (no turn) is told what it last heard; telling it main moved needs root to push the commit
-  (task seon.writer/main-notices-carry-a-commit-not-a-db)."
+  hears main (no turn) is told what it last heard; telling it main moved needs root to push the commit."
   {:malli/schema [:=> [:cat] [:maybe :string]]}
   []
   (when-let [base (:base @state)]
@@ -1062,7 +1061,7 @@
                (sock/clofork! w)
                ;; the run ends with its agent (a test ends by its own budget): the agent's end of this socket
                ;; pair closing raises SIGIO here and ends the child, whatever the test is
-               ;; doing (task seon.agent/a-proof-run-ends-with-its-agent; the agent's own
+               ;; doing (the agent's own
                ;; socket to root is FD_CLOFORK: not held here, so its handler is replaced)
                (when-let [unwatched (sock/signal-at-input! w)]
                  (sock/write-line! w (sedn/encode {:pass 0 :fail 0 :error 1 :reports [{:type :error :message (:seon.error/message unwatched)}]}))

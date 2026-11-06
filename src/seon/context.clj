@@ -63,8 +63,7 @@
   the compiler's resolved references), each by its name, and for a helper of p's own namespace
   its source too (what the proof means, which an agent reads first); a var is program when db holds it (a branch's callee this process never loaded
   included). A callee's doc and contract are its source's or `doc`'s to show: a docstring
-  each was a large share of the first request (task
-  seon.context/an-agent-follows-its-instructions-to-green). See docs/agent.md#what-you-read."
+  each was a large share of the first request. See docs/agent.md#what-you-read."
   {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:vector :map]]}
   [db p]
   (vec (for [q (sort (disj (set (d/q '[:find [?r ...] :in $ ?s :where [?e :var/name ?s] [?e :var/form ?f] [?f :form/refs ?r]] db p)) p))

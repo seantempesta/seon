@@ -131,7 +131,7 @@
 (defn cpu-ns
   "The calling thread's CPU time in nanoseconds (CLOCK_THREAD_CPUTIME_ID): what a cost
   proof times, so another thread's work and the scheduler's pauses are not the measured
-  call's (task seon.cost/a-proof-measures-only-its-own-thread). Not a clock that orders
+  call's. Not a clock that orders
   events: that is now-ns."
   {:malli/schema [:=> [:cat] :int]}
   [] ((:cpu procs)))

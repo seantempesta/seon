@@ -635,8 +635,7 @@
       st)))
 
 (defn- answer-taken
-  "st with the caller of x, a message proc pid's throwing step took, answered the defect e
-  (task `seon.root/a-proc-answers-every-request-it-took`): the answer its :dest names
+  "st with the caller of x, a message proc pid's throwing step took, answered the defect e: the answer its :dest names
   (`seon.root/back-op`), its promise or reply route when it came in at the api or as a
   proc's request, the request pending under its :rid, or, for an answer the proc took
   ({:tag :r}), that answer again on the proc's :answers route. An answer that was already an
@@ -1104,7 +1103,7 @@
         {root-errors :error-chan} (flow/start g)
         ;; Flow's error channel (every proc's, agents included) piped into :back, each defect
         ;; fed to the api as data, with the message the step took (:msg), which the api
-        ;; answers (task `seon.root/a-proc-answers-every-request-it-took`); :back outlives it
+        ;; answers; :back outlives it
         _ (a/pipe (a/pipe root-errors (a/chan 1 (map flow-error))) (:back chans) false)
         sys (merge chans {:cfg store-cfg :conn conn :graph g :t0 t0
                           :store-path path :boot boot
@@ -1170,8 +1169,7 @@
 
 (defn errors
   "The api's fold of the errors it saw (seon.error/fold): the true counts, including repeats
-  of written signatures that main does not hold; the api's defect when it could not answer
-  (task `seon.root/a-proc-answers-every-request-it-took`)."
+  of written signatures that main does not hold; the api's defect when it could not answer."
   {:malli/schema [:=> [:cat :seon.root/sys] [:or :seon.error/fold :seon.error/base]]}
   [sys] @(call! sys {:op :errors}))
 

@@ -1,2 +1,2 @@
-;; What the system shrinks itself by (docs/health.md#a-form-too-long; task seon.template/a-finding-is-a-task).
+;; What the system shrinks itself by (docs/health.md#a-form-too-long).
 {:seon.config.shrink/form-tokens [:int {:min 1 :seon.config/unit "tokens" :description "The most tokens (seon.print.emit/chars-tokens) a live form's source text (:form/src) may hold, in src or in a test; a longer one is an open :long-form problem."}]}

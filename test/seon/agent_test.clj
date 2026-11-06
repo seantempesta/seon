@@ -3,7 +3,7 @@
   it, so the test boots a root of its own, as seon.root-test does, and asks the agent over
   the server what its REPL answers.
 
-  An agent's test run, read from its child's pipe (task seon.agent/one-test-bound-derived-and-named):
+  An agent's test run, read from its child's pipe:
   no clock ends it; the child's exit does, and a child that died names the test it was running.
   Run: bin/test seon.agent-test"
   (:require [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [clojure.edn :as edn]
@@ -243,7 +243,7 @@
     (is (= "0" (str (:exit stopped))) (str (pr-str (dissoc stopped :log))))))
 
 (deftest an-agent-ends-when-its-root-is-gone
-  ;; task seon.agent/an-agent-ends-with-its-root: with its fork server gone first (a pid
+  ;; with its fork server gone first (a pid
   ;; cleanup), an agent ends on EOF of its own socket to root, whatever it is doing: an idle
   ;; agent reads it; one evaluating a form with no tick budget is interrupted by it (SIGIO)
   (let [{:keys [agents left out]} (root-ended "(loop [] (recur))" true)]
@@ -252,7 +252,7 @@
     (is (not (contains? left (:a2 agents))) "the busy agent ended")))
 
 (deftest a-proof-run-ends-with-its-agent
-  ;; task seon.agent/a-proof-run-ends-with-its-agent: the agent's proof run (a fork of it) holds
+  ;; the agent's proof run (a fork of it) holds
   ;; the write end of a fifo and sleeps, a test that never writes to the agent's pipe; the
   ;; agent is killed (its task cancelled); the proof run ends with it, on the kernel's word that
   ;; the reader of its pipe is gone (SIGIO). The test reads the fifo: its first byte says the
@@ -290,7 +290,7 @@
     (is (= -1 ended) (str "the proof run outlived its agent (byte " ended " after its sleep); agent " (pr-str agent-pid) " kill " (pr-str killed)))))
 
 (deftest a-two-child-proof-run-ends-with-its-agent
-  ;; task seon.agent/a-proof-run-ends-with-its-agent, for a run dealt into two children. Child A's test holds the write end
+  ;; for a run dealt into two children. Child A's test holds the write end
   ;; of a fifo and sleeps; child B's test blocks for good where no signal reaches (a take from a channel nothing puts
   ;; on), so B outlives its agent's death. The agent is killed: the fifo's EOF says A is gone while B is alive. No clock
   ;; decides: a child that outlives its agent wakes from its sleep (a minute) and writes a second byte. (A child also
@@ -338,7 +338,7 @@
     (is (= {:children 1 :pass 5} (some-> (:value r) clojure.edn/read-string)))))
 
 (deftest a-test-child-holds-only-its-own-pipe
-  ;; task seon.agent/a-proof-run-ends-with-its-agent: a child forked after a sibling holds no copy of the sibling's pipe,
+  ;; a child forked after a sibling holds no copy of the sibling's pipe,
   ;; whose end a child must never keep (the agent's death would not reach the sibling by SIGIO while any copy is open). Each
   ;; of two children counts the descriptors open in it (fcntl F_GETFD) in its test and writes the count to a file: a child
   ;; holding a sibling's pipe end has one more than the child forked before it
@@ -441,7 +441,7 @@
     (is (= {:pass 1 :fail 0 :error 0} result) (str "and the run answered green once let go: " (pr-str result)))))
 
 (deftest a-blocked-agent-ends-with-its-root
-  ;; task seon.agent/an-agent-ends-with-its-root, an agent blocked in a wait: its thread in
+  ;; an agent blocked in a wait: its thread in
   ;; Chez's condition-wait reaches no safe point, so no signal handler runs (SIGIO, root's
   ;; SIGUSR1) until the wait returns. The fork server's group kill on root's EOF ends it
   ;; (task seon.agent/a-signal-wakes-a-blocked-wait makes the agent's own EOF end it too)
@@ -507,14 +507,14 @@
         "the reader, a main carrier, read both lines: the go came from its other fiber while the read waited")))
 
 (deftest a-blocked-agent-ends-on-its-socket-eof
-  ;; task seon.intr/a-signal-wakes-a-blocked-wait: an agent blocked in a channel take, its fork
+  ;; an agent blocked in a channel take, its fork
   ;; server gone first, ends on its own socket's EOF (SIGIO wakes its condition-wait)
   (let [{:keys [agents left out]} (root-ended "(clojure.core.async/<!! (clojure.core.async/chan))" true)]
     (is (= #{:a1 :a2} (set (keys agents))) out)
     (is (empty? left) (str "agents still alive: " left "\n" out))))
 
 (deftest root-interrupts-a-blocked-take
-  ;; task seon.intr/a-signal-wakes-a-blocked-wait: root's interrupt! stops an eval blocked in a
+  ;; root's interrupt! stops an eval blocked in a
   ;; channel take, and the agent answers its next request
   (let [checkout (seon.config/checkout)
         main (str "blocked-take-" (random-uuid))
@@ -537,7 +537,7 @@
     (is (= 4 next-answer) (pr-str next-answer))))
 
 (deftest an-agent-holds-mains-tests-and-runs-them
-  ;; task seon.agent/an-agent-holds-mains-tests: main holds the source root's test namespaces
+  ;; main holds the source root's test namespaces
   ;; (imported from test/), and an agent forked from the fork server holds them compiled:
   ;; it runs one without requiring it, and a green test reports green, a red one red
   (let [green 'seon.reader-test/prose-without-a-fence-is-a-comment
@@ -576,7 +576,7 @@
   [x] (str "(let [r " x "] (into {} (for [t (keys (:digests r))] [t (get (seon.proofs/results r) t :pass)])))"))
 
 (deftest an-agents-test-run-is-its-proofs-and-what-its-change-reaches
-  ;; task seon.agent/an-agent-holds-mains-tests: the agent holds main's whole suite, and its
+  ;; the agent holds main's whole suite, and its
   ;; test run (root's :tests request, the one the judge sends) selects what the done rule
   ;; reads: the task's proofs and the tests reaching what its branch changed since the main
   ;; it forked from. One redefined function (same behaviour, another form) reaches one test; its namespace's other tests
@@ -652,7 +652,7 @@
   [dir] (str ":seon.config.proofs/results-dir=" (pr-str dir)))
 
 (deftest a-wide-reach-reuses-unchanged-results
-  ;; task seon.proofs/prove-runs-what-a-change-reaches (and seon.agent/a-wide-reach-stays-cheap):
+  ;; a wide reach reuses what is unchanged:
   ;; root's boot records its source tree's inputs on its :seon.root/source fact (its binary is
   ;; built from that tree: bin/test built it), the agent keys its digests by them and selects
   ;; against the main it forked from, and each green is cached by its digest (a test root's cache
@@ -815,7 +815,7 @@
     (is (nil? (first (agent/test-inputs (db "b2")))) "an earlier boot's: nothing keys by them, so nothing is reused")))
 
 (deftest a-forked-agent-knows-its-task
-  ;; task seon.template/a-request-is-one-linked-transaction: root forks the agent for its
+  ;; root forks the agent for its
   ;; task, so my.task/current answers it at the agent's first form, before any turn loop
   ;; or context read begins (it was nil: root kept the task in its view only)
   (let [names (volatile! nil)
@@ -1433,7 +1433,7 @@
       (is (= 1 (count (proofs/test-run-errors run)))))))
 
 (deftest after-merge-main-the-agent-judges-against-the-new-base
-  ;; task seon.agent/an-agents-base-is-its-merge-base: an agent chooses the tests that judge
+  ;; an agent chooses the tests that judge
   ;; its branch from what it changed since :base. merge-main! left :base at the main the agent
   ;; forked from, so main's own changes, merged in, counted as the agent's. In this process,
   ;; on a branch of the test store, with a socketpair standing for root
@@ -1456,7 +1456,7 @@
          (let [r (agent/merge-main! #{})]
            (is (some #{[:var 'app.m0/f1]} (:applied r)) "main's change merges in")
            (is (= (jolt.host/runtime-fingerprint) (:seon.tx/runtime (d/entity (agent/db) (:t r))))
-               "in a merge commit that names its runtime (task seon.db/each-commit-names-its-runtime)")
+               "in a merge commit that names its runtime")
            (is (= [ab (:branch cfg)] ((juxt :seon.tx/branch :seon.tx/merged) (d/entity (agent/db) (:t r))))
                "made on the agent's branch, of what it merged from main: a caught-up fact reads as main's (task seon.ctx/a-change-names-its-eval)"))
          (is (empty? (pm/changed-vars (agent/branch-changes (:base @agent/state) (agent/db))))
@@ -1634,7 +1634,7 @@
          (finally (reset! agent/state old) (reset! agent/link old-link) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
 
 (deftest an-agents-transactions-name-their-runtime
-  ;; task seon.db/each-commit-names-its-runtime: what an agent writes on its branch
+  ;; what an agent writes on its branch
   ;; (seon.agent/transact!, the run-ahead writer) carries the runtime that made it
   (ts/test-branch!
    (fn [cfg conn]
@@ -1939,7 +1939,6 @@
     (is (= "#'spin-test/spin" test) "naming the test that was running")))
 
 (deftest an-agent-commits-after-each-eval
-  ;; task seon.render/a-view-renders-once-per-change-of-its-reads (D; design section 11, item 1):
   ;; each eval of a turn (the screen's two, then the model's) is committed as it lands, so a page
   ;; shows it then, not at the turn's end. Walked back from the branch's head, no commit adds more
   ;; than one eval record (one commit at the turn's end added the turn's evals at once: 2 -> 4)
@@ -1955,7 +1954,7 @@
     (is (every? #(<= % 1) (map - ns (rest ns))) (str "each eval its own commit: " (pr-str ns)))))
 
 (deftest a-model-turn-records-its-prose-and-the-message-it-took
-  ;; task seon.render/a-debug-view-of-any-agent: the owner's message is a fact root writes on
+  ;; the owner's message is a fact root writes on
   ;; main (from "owner", to the branch of the agent); the turn that takes it writes the same
   ;; fact on its branch before its commit, naming the agent (:seon.message/agent), so the conversation
   ;; and every later reading read its text from that commit (the basis names no message); the reply's prose (here the scripted model's)
@@ -2197,7 +2196,7 @@
     (is (some #(str/includes? % "transact refused: no") (:unrecorded (:value r))) "named, not thrown")))
 
 (deftest a-commit-the-store-refuses-leaves-the-agent-alive
-  ;; tasks seon.repl/a-commit-that-keeps-failing-ends-no-agent-silently and seon.db/a-ratio-at-a-commit-ends-its-agent;
+  ;; task seon.repl/a-commit-that-keeps-failing-ends-no-agent-silently;
   ;; AGENTS.md section 4 (nothing crashes), docs/storage.md#a-commit-the-store-refuses. A commit the store refuses used
   ;; to throw out of the agent's loop and end the process, the next commit throwing again on the same pending value.
   ;; Now the eval answers what was refused as data under :unrecorded, its writes are dropped, the branch and @ctx are as

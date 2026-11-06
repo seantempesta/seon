@@ -1,6 +1,5 @@
 (ns seon.proofs
-  "Proofs: what a change must run, and what a run proved. prove's selection (task
-  seon.proofs/prove-runs-what-a-change-reaches, docs/merging.md#a-merge-runs-what-the-change-reaches):
+  "Proofs: what a change must run, and what a run proved. prove's selection (docs/merging.md#a-merge-runs-what-the-change-reaches):
   a key (a test var, or a bin/check step of check-steps) runs only when no green verdict is
   cached at its reach digest (seon.program/graph-index), in the one cache every checkout
   shares (seon.fx/write-verdicts!, seon.fx/stored-results; docs/merging.md#verdicts-are-a-cache);

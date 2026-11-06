@@ -208,8 +208,7 @@
  ;; ==== the check harness (seon.check) =========================================================
 
  ;; Unit: ms a check's Flow ping (seon.check/ping) waits for a proc to take its control message,
- ;; which a proc takes between two steps. Provenance: task seon.check/every-wait-is-the-event-it-means
- ;; (2026-10-22); the pings it replaced waited 1000 and 2000 ms and read a miss as nil or
+ ;; which a proc takes between two steps. Provenance: 2026-10-22; the pings it replaced waited 1000 and 2000 ms and read a miss as nil or
  ;; :unknown, and a check beside a full bin/test must not mistake a slow step for a missing
  ;; proc. At the bound: the proc is recorded {:blocked pid :ping-ms ..} in the check's report
  ;; and the check that read it fails, naming it.
@@ -231,7 +230,7 @@
  ;; Unit: runs running at once. Provenance: owner, 2026-10-29 ("10-20 should be fine for users
  ;; with small machines"): an agent costs ~20.6 MB of real memory (bin/check scale, 2026-10-29), so
  ;; ten fit an 8 GB machine beside the user's work (was 4, v1's, when an agent was counted by its
- ;; footprint); task seon.config/agents-at-once-follow-the-machine sizes it from the RAM. A ready task beyond it
+ ;; footprint); the machine's RAM sizes it. A ready task beyond it
  ;; waits for an end; 0 starts nothing new while running work finishes. root's start! may
  ;; pass :max-running for one run; the fact on main says what the run used.
  :seon.config.agent/max-running 10
@@ -807,7 +806,7 @@
  ;; Unit: tokens of a form's :form/src as the model reads it (seon.print.emit/chars-tokens, the printer's
  ;; one estimate), src and test alike: about a printed page. A live form longer than this is an open
  ;; :long-form problem row (seon.problems/long-forms), shown to a branch that adds one (attention, never
- ;; refused) and closed by splitting it; its task is seon.template/a-finding-is-a-task. Provenance:
+ ;; refused) and closed by splitting it; docs/health.md#a-form-too-long. Provenance:
  ;; measured over this program (commit 3fac2a4f04): 2,082 src forms, 83 over 1,000 tokens and 20 over
  ;; 2,000 (seon.ref/scan 6,005); 2,052 test forms, 76 over 1,000.
  :seon.config.shrink/form-tokens 1000

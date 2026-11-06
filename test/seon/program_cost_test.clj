@@ -33,7 +33,7 @@
    (first (branch-of n)) (symbol "app.pc" (str "f" (quot n 2)))])
 
 (deftest a-probed-entity-is-sought-not-scanned
-  ;; task datahike.query/a-probed-entity-is-sought-not-scanned
+  ;; a probed entity is sought, not scanned: 3.24M ticks became 55k at 10,000 forms (Datahike jolt/in-scalar)
   (cost/proof
     {:of 'datahike.api/q :input 'seon.program-cost-test/probed-of
      :n "forms the db holds"
