@@ -1709,6 +1709,38 @@
          (finally (reset! agent/state old) (reset! agent/link old-link) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
 
 
+(deftest an-eval-run-again-replaces-itself
+  ;; docs/turn.md#an-eval-can-be-run-again: through a real agent's REPL, the same record under its own id, its author and call kept,
+  ;; its old code in history, and a run down to an eval goes in order and stops at the first that fails
+  (let [probe "(fn [id] (let [db (seon.agent/db) e (seon.db/eid db :seon.eval/id id) p (datahike.api/pull db '[:seon.eval/code :seon.eval/by {:seon.eval/call [:seon.model-call/id]}] e)] (assoc p :e e :old (vec (distinct (map :v (filter #(= :seon.eval/code (:a %)) (datahike.api/datoms (datahike.api/history db) :eavt e))))))))"
+        [_ a1 a2 a3 _ again-r edited missing to-all to-part probe-r]
+        (in-agent ["(def order (atom []))"
+                   "(swap! order conj :a)"
+                   "(throw (ex-info \"stop\" {}))"
+                   "(swap! order conj :never)"
+                   (str "(do (def id-of (fn [code] (:seon.eval/id (first (filter #(= code (:seon.eval/code %)) (vals (:evals @seon.ctx/ctx))))))) (def probe " probe ") (def before (probe (id-of \"(swap! order conj :a)\"))) :ok)")
+                   "(seon.repl/again (id-of \"(swap! order conj :a)\"))"
+                   "(seon.repl/again (id-of \"(swap! order conj :a)\") \"(swap! order conj :edited)\")"
+                   "(seon.repl/again \"no-such-eval\")"
+                   "(do (def all (seon.repl/again-to (id-of \"(swap! order conj :never)\"))) {:all all :order @order})"
+                   "(do (reset! order []) (def part (seon.repl/again-to (id-of \"(throw (ex-info \\\"stop\\\" {}))\"))) {:part part :order @order})"
+                   "(let [id (id-of \"(swap! order conj :edited)\")] (assoc (probe id) :id id :before before))"])]
+    (is (= :a (peek (:value a1))) "it ran first as itself")
+    (is (:ex a2) "the third eval threw") (is (some? a3))
+    (is (= [:a :never :a] (:value (:value again-r))) "run again, its code really ran")
+    (is (= [:a :never :a :edited] (:value (:value edited))) "edited, the new code ran")
+    (is (= :seon.repl/no-eval (:seon.error/type (:value missing))) "an eval it doesn't hold says so")
+    (is (true? (:failed? (peek (:all (:value to-all))))) "a run down to an eval stops at the first that fails")
+    (is (= [:edited] (:order (:value to-all))) "the edited step ran from the start, and nothing past the failure")
+    (is (= (dec (count (:part (:value to-part)))) (count (remove :failed? (:part (:value to-part))))) "only the last failed")
+    (let [{:keys [before id e old] :as p} (:value probe-r)]
+      (is (= id (name (:handle (:value edited)))) "its handle is its own")
+      (is (= (:e before) e) "the same record")
+      (is (= "(swap! order conj :edited)" (:seon.eval/code p)) "its code is the new one")
+      (is (= (:seon.eval/by before) (:seon.eval/by p)) "its author kept")
+      (is (= (:seon.eval/call before) (:seon.eval/call p)) "its place in the conversation kept")
+      (is (some #{"(swap! order conj :a)"} old) "history holds what it was"))))
+
 (def ^:private not-running
   "Root-REPL code: a function true of the outcomes a task's work stands at once its agent's end is judged and it waits on nothing of
   root's (not nil, :running, :ready or :gate: a merge follows those)."

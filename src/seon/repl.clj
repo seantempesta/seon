@@ -941,38 +941,32 @@
 
 (defn again
   "Run eval id again in its own place, optionally as code: the same record, its turn and author kept, its code and response replaced, history
-  holding what it was, so the model's next request reads the new one where the old one stood and `result/<id>` names the new value. It runs in the namespace the eval before it left. See docs/turn.md#an-eval-can-be-run-again."
+  holding what it was, so the model's next request reads the new one where the old one stood and `result/<id>` names the new value. It runs in the namespace the eval before it left, first written first by its entity's number. The request that asked commits it (`agent-step`). See docs/turn.md#an-eval-can-be-run-again."
   {:malli/schema [:function [:=> [:cat :string] :map] [:=> [:cat :string [:maybe :string]] :map]]}
   ([id] (again id nil))
   ([id code]
-   (let [evals (vals (:evals @ctx/ctx))
-         e (first (filter #(= id (:seon.eval/id %)) evals))
-         issue (fn [ev] (or (some-> (re-find #"\d+$" (:seon.eval/id ev)) parse-long) 0))]
+   (let [evals (map val (sort-by key (:evals @ctx/ctx)))
+         e (first (filter #(= id (:seon.eval/id %)) evals))]
      (if-not e
        (contract/error :seon.repl/no-eval #'again (str "no eval " id " in this agent's record") {:seon.eval/id id})
-       (let [before (last (sort-by issue (filter #(< (issue %) (issue e)) evals)))
-             r (eval-string (or code (:seon.eval/code e))
-                            (cond-> {:origin :insert :by (:seon.eval/by e) :id id}
-                              (get-in before [:seon.eval/response :ns]) (assoc "ns" (str (get-in before [:seon.eval/response :ns])))))]
-         (agent/commit!)
-         r)))))
+       (let [before (last (take-while #(not= id (:seon.eval/id %)) evals))]
+         (eval-string (or code (:seon.eval/code e))
+                      (cond-> {:origin :insert :by (:seon.eval/by e) :id id}
+                        (get-in before [:seon.eval/response :ns]) (assoc "ns" (str (get-in before [:seon.eval/response :ns]))))))))))
 
 (defn again-to
-  "Run again this agent's own evals up to eval id, in order, each in its place (`again`), stopping at the first that fails: what a person does evaluating a file down to a line. Seon's evals, context reads and the agent's loop are not its work. Answers each one run, {:id :failed?}. See docs/turn.md#an-eval-can-be-run-again."
+  "Run again this agent's conversation's evals down to eval id, in order, each in its place (`again`), stopping at the first that fails: what a person does evaluating a file down to a line. Seon's evals are not its work, and an eval that names no call (a context read, the agent's loop) is in no conversation. Answers each one run, {:id :failed?}. See docs/turn.md#an-eval-can-be-run-again."
   {:malli/schema [:=> [:cat :string] [:vector [:map [:id :string] [:failed? :boolean]]]]}
   [id]
-  (let [issue (fn [ev] (or (some-> (re-find #"\d+$" (:seon.eval/id ev)) parse-long) 0))
-        evals (vals (:evals @ctx/ctx))
-        upto (some-> (first (filter #(= id (:seon.eval/id %)) evals)) issue)
-        mine (sort-by issue (remove (fn [ev] (or (#{"seon" "context"} (:seon.eval/by ev)) (context/loop-eval? ev))) evals))]
+  (let [evals (map val (sort-by key (:evals @ctx/ctx)))
+        upto (concat (take-while #(not= id (:seon.eval/id %)) evals) (take 1 (drop-while #(not= id (:seon.eval/id %)) evals)))
+        known? (some #(= id (:seon.eval/id %)) evals)]
     (reduce (fn [acc ev]
-              (if (> (issue ev) (or upto -1))
-                (reduced acc)
-                (let [r (again (:seon.eval/id ev))
-                      failed? (boolean (or (:ex r) (contract/error? (:value r))))
-                      acc (conj acc {:id (:seon.eval/id ev) :failed? failed?})]
-                  (if failed? (reduced acc) acc))))
-            [] mine)))
+              (let [r (again (:seon.eval/id ev))
+                    failed? (boolean (or (:ex r) (contract/error? (:value r))))
+                    acc (conj acc {:id (:seon.eval/id ev) :failed? failed?})]
+                (if failed? (reduced acc) acc)))
+            [] (when known? (filter #(and (:seon.eval/call %) (not= "seon" (:seon.eval/by %))) upto)))))
 
 (defn- layout
   "The layout this branch renders its ctx with: the var :seon.render/render-ctx declares, an agent's own

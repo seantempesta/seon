@@ -891,39 +891,6 @@
     (let [[[r _] _] (step db #(swap! ctx/ctx assoc :seon.ctx/pattern '[* {[:seon.eval/_agent :newest 3] [*]}]))]
       (is (= :seon.ctx/invalid-pattern (:seon.error/type r)) "a pattern the walk cannot read: refused, nothing written"))))
 
-(defn- with-evals
-  "db with an eval record for each [id by code] of this agent's, as an agent's REPL writes them."
-  {:malli/schema [:=> [:cat :seon.host/db [:sequential :any]] :seon.host/db]}
-  [db evals]
-  (d/db-with db (vec (for [[id by code] evals]
-                       {:seon.eval/id id :seon.eval/agent (aid db) :seon.eval/by by :seon.eval/code code
-                        :seon.eval/response {:handle (symbol "result" id) :ns 'user}}))))
-
-(deftest an-eval-run-again-replaces-itself
-  ;; docs/turn.md#an-eval-can-be-run-again: it runs under its own id, and a write of that id is the same record, its author
-  ;; and call kept, its old code in history. Recording itself needs a live agent's writer: that path was checked in a browser.
-  (let [db (with-evals (seeded 0) [["e7" "a1" "(+ 1 1)"]])
-        [r] (as-agent! db (fn [] {:again (seon.repl/again "e7") :edited (seon.repl/again "e7" "(+ 2 2)") :missing (seon.repl/again "e99999")}))
-        e (seon.db/eid db :seon.eval/id "e7")
-        after (d/db-with db (seon.repl/record-tx {:seon.agent/key k} "e7" "a1" {:seon.eval/code "(+ 2 2)" :seon.eval/response {:handle 'result/e7 :value 4}}))]
-    (is (= 2 (:value (:again r))) "it really ran")
-    (is (= 'result/e7 (:handle (:again r))) "its handle is its own")
-    (is (= 4 (:value (:edited r))) "edited, the new code ran")
-    (is (= :seon.repl/no-eval (:seon.error/type (:missing r))) "an eval it doesn't hold says so")
-    (is (= e (seon.db/eid after :seon.eval/id "e7")) "the same record")
-    (is (= "(+ 2 2)" (:seon.eval/code (d/pull after [:seon.eval/code] e))))
-    (is (some #{"(+ 1 1)"} (map :v (filter #(= :seon.eval/code (:a %)) (d/datoms (d/history after) :eavt e)))) "history holds what it was")))
-
-(deftest running-again-down-to-an-eval-runs-in-order-and-stops-at-a-failure
-  ;; docs/turn.md#an-eval-can-be-run-again: the agent's own evals, in order; Seon's are not its work
-  (let [db (with-evals (seeded 0) [["e1" "a1" "(def order (atom []))"] ["e2" "seon" "(swap! order conj :seons)"] ["e3" "a1" "(swap! order conj :a)"]
-                                   ["e4" "a1" "(throw (ex-info \"stop\" {}))"] ["e5" "a1" "(swap! order conj :never)"]])
-        [r] (as-agent! db (fn [] {:all (seon.repl/again-to "e5") :part (seon.repl/again-to "e3") :order @@(resolve 'order)}))]
-    (is (= ["e1" "e3" "e4"] (mapv :id (:all r))) "in order, Seon's left out, stopping at the first that fails")
-    (is (:failed? (peek (:all r))))
-    (is (= ["e1" "e3"] (mapv :id (:part r))) "down to the one named")
-    (is (= [:a] (:order r)) "what ran, and nothing past the failure")))
-
 (deftest a-swap-writes-the-record
   ;; the owner, 2026-10-25: "they can easily update it and just add more data": swap! of @ctx is one
   ;; transaction on the branch, checked by the schemas; the record after it is the db's
