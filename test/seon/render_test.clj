@@ -1362,6 +1362,21 @@
     (is (str/includes? h "text-error") "a message past its limit reads red")
     (is (str/includes? (draw #{"d-turn-o0"}) "<h") "a system message's Markdown is drawn")))
 
+(deftest markdown-is-drawn-for-a-person-and-kept-for-the-model
+  ;; docs/references.md#the-delimiter-picks-the-depth: what the model reads keeps its delimiters; a person's page draws them
+  (let [md "Read `a/b` and **this** then *that* at [the docs](https://x.y/z), not [bad](javascript:alert).\n\n- item `c`\n"
+        kept (h/html (ui/markdown md))
+        drawn (h/html (ui/markdown md {:inline? true}))]
+    (is (str/includes? kept "Read `a/b` and **this**") "kept as written")
+    (is (not (str/includes? kept "<strong>")))
+    (is (str/includes? drawn "<code>a/b</code>"))
+    (is (str/includes? drawn "<strong>this</strong>"))
+    (is (str/includes? drawn "<em>that</em>"))
+    (is (str/includes? drawn "<a href=\"https://x.y/z\">the docs</a>"))
+    (is (not (str/includes? drawn "javascript:")) "a link goes only where a page may send a person")
+    (is (str/includes? drawn "bad") "and keeps its text")
+    (is (str/includes? drawn "<code>c</code>") "in a list item too")))
+
 (deftest a-cut-with-its-whole-form-holds-no-copy
   ;; the second context audit (F7): a plan cut on the page kept its whole text in the cut's :title,
   ;; which the model reads too (1.2k chars twice on two pages). A cut that names the form reading the
@@ -2224,7 +2239,7 @@
         h #(h/html %)]
     (testing "a model turn is its reply, its thinking folded"
       (let [t (h (ui/chat-turn {:seon.ctx/ctx c :seon.db/db (ts/test-db)} 1 2 []))]
-        (is (str/includes? t "I'll **reproduce** it first."))
+        (is (str/includes? t "I'll <strong>reproduce</strong> it first."))
         (is (str/includes? t "<details") "its thinking folded")
         (is (str/includes? t "Read select first."))
         (is (not (str/includes? t "turn 1")) "its turn and tokens are for the debug tab"))
@@ -2363,7 +2378,7 @@
     (is (= #{(eid "e4")} shown) "an eval of another hand is a line, and Seon's is none")
     (is (some #(and (= #'ui/chat-turn (first %)) (= [(eid "e3")] (last %))) (rest turn)) "the agent's eval is its turn's step")
     (let [t (h/html (ui/chat-turn opts aid (seon.db/eid db :seon.model-call/id (str k "/1")) []))]
-      (is (str/includes? t "Found **it**") "what it said")
+      (is (str/includes? t "Found <strong>it</strong>") "what it said, its Markdown drawn")
       (is (not (str/includes? t "of context")) "its tokens are for whoever opens a step"))
     (let [e (h/html (ui/eval-item opts (eid "e3")))]
       (is (str/includes? e "Run the proofs.") "a step's line is what it set out to do")
