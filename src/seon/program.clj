@@ -384,26 +384,23 @@
   (str nsym "/" (hasch/uuid [nsym src]) (when (pos? k) (str "#" k))))
 
 (defn form-ids
-  "A form's [id code] for its namespace, exact text and occurrence k: its id (form-id's: the hash of the
-  namespace and the exact text) and the digest of its namespace and code, which is its text with no comment
-  and one space for a run of whitespace outside a string (strings, regexes and character literals as
-  written: the reader reads what it reads). The code digest is stored with the form (:form/code), what a
-  test's reach digest takes of the form (docs/source.md#what-a-test-takes-of-a-forms-text); it is its id's,
-  hashed once, when the text is already that code (no comment, newline, tab, comma or run of spaces in it)."
-  {:malli/schema [:=> [:cat :symbol :string :int] [:tuple :string :string]]}
-  [nsym src k]
-  (let [h (str nsym "/" (hasch/uuid [nsym src]))
-        id (str h (when (pos? k) (str "#" k)))
-        ;; a string, a regex or a character literal as written (the alternative that comes first, so a ; or a space
-        ;; inside one is kept), else a comment gone and a run of whitespace one space: native replaces, no loop
-        squeeze (fn [^String s]
-                  (-> s
-                      (str/replace #"(\"(?:[^\"\\]+|\\.)*\"|\\.)|;[^\n]*" "$1")
-                      (str/replace #"(\"(?:[^\"\\]+|\\.)*\"|\\.)[\s,]*|[\s,]+" "$1 ")
-                      str/trim))
-        plain? (not-any? #(str/includes? src %) [";" "\n" "\t" "\r" "," "  "])
-        code (if plain? src (squeeze src))]
-    [id (if (identical? code src) h (str nsym "/" (hasch/uuid [nsym code])))]))
+  "A form's [id code] for its namespace, exact text, occurrence k and the form as the reader read it: its id
+  (form-id's: the hash of the namespace and the exact text) and the digest of its namespace and code, which is
+  the form's print: the reader has dropped its comments and whitespace, and the print leaves out its :line and
+  :column. Two things the print does not hold are made to: the numbers the reader gives a gensym (`p1__12#`,
+  `x__3__auto`, counted over the process) are renumbered by first appearance, and the name's metadata
+  (`^:private`) follows. Stored with the form (:form/code), what a test's reach digest takes of it
+  (docs/source.md#what-a-test-takes-of-a-forms-text). Across all of src and test (3,813 forms) a form read twice
+  prints alike and every form prints."
+  {:malli/schema [:=> [:cat :symbol :string :int :any] [:tuple :string :string]]}
+  [nsym src k form]
+  (let [id (str nsym "/" (hasch/uuid [nsym src]) (when (pos? k) (str "#" k)))
+        printed (binding [*print-length* nil *print-level* nil *print-meta* false] (pr-str form))
+        counts (volatile! {})
+        renumber (fn [m] (str/replace printed m (fn [[_ n sfx]] (str "__" (or (@counts n) (let [c (count @counts)] (vswap! counts assoc n c) c)) sfx))))
+        code (if (str/includes? printed "__") (renumber #"__(\d+)(#|__auto)") printed)
+        name-meta (when (and (seq? form) (symbol? (second form))) (not-empty (dissoc (meta (second form)) :line :column)))]
+    [id (str nsym "/" (hasch/uuid [nsym code name-meta]))]))
 
 (defn- names
   "The qualified keywords a schema or contract form names."
@@ -424,7 +421,7 @@
   (let [units (or units (map unit-account nodes))
         nsym (if ns-form? ns-after ns)
         nsx (find-ns nsym)
-        ids (form-ids nsym src k)
+        ids (form-ids nsym src k form)
         a (merge-accounts units)
         types? (boolean (some #(= 'clojure.core/make-deftype-ctor (:init %)) (:defs a)))
         set? (fn [{v :var :as d}] (or (nil? before) (not (identical? (get before v) (root-of v))) (:macro? d)))

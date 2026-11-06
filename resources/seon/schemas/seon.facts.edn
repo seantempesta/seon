@@ -9,8 +9,8 @@
  :form/id [:and {:seon.db/identity true :seon.db/content-id true} :string]
  ;; the exact text as written, and the whitespace and comments before it in its file
  :form/src :string
- ;; the digest of the form's namespace and its code: its text less comments, whitespace runs and a
- ;; definition's docstring (seon.program/form-ids), what a test's reach digest takes of the form;
+ ;; the digest of the form's namespace and its code: the form as the reader read it, printed, so with no
+ ;; comment or layout (seon.program/form-ids), what a test's reach digest takes of the form;
  ;; written with the form, and a form without one (an older store's) is taken by its id
  :form/code :string
  :form/lead :string

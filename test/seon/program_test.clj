@@ -508,7 +508,7 @@
         (is (= want (update-vals (rows scan?) #(select-keys % [:id :ns :defines :refs])))
             (str "the walk's rows are the whole rows' id, namespace, definitions and references (scan " scan? ")")))
       (is (every? #(let [f (program/form-row db (pdb/eid db :form/id (:id %)))]
-                     (= (:own %) (if (:code f) (second (program/form-ids (:ns %) (:src f) 0)) (:id f))))
+                     (= (:own %) (if (:code f) (second (program/form-ids (:ns %) (:src f) 0 (read-string (:src f)))) (:id f))))
                   (vals (rows true)))
           "a form's own digest is its namespace's and its code text's, or its id when it was stored without (seeded)"))))
 
@@ -1326,10 +1326,13 @@
     (is (= '#{app.pt-calc-test/add-test} (selected db (record db 'app.pt-calc "(defn add \"Adds.\" [a b] (+ b a))"))) "a change of code")
     (is (= '#{app.pt-calc-test/add-test} (selected db (record db 'app.pt-calc "(defn add \"Adds.\" [a b] (+ a \"x;y\"))"))) "a string literal holding a ; and spaces is code")
     (is (= '#{app.pt-calc-test/add-test} (selected db (record db 'app.pt-calc "(defn ^:private add \"Adds.\" [a b] (+ a b))"))) "a visibility")
-    (let [code #(second (program/form-ids 'app.x % 0))]
+    (let [code #(second (program/form-ids 'app.x % 0 (read-string %)))]
       (is (= (code "(def x \"a;b  c\")") (code "(def x   \"a;b  c\"   ; why\n)")) "a string keeps its own ; and spaces, the rest is squeezed")
       (is (not= (code "(def x \"a;b  c\")") (code "(def x \"a;b c\")")) "and its spaces are its own")
-      (is (not= (code "(def x 5)") (second (program/form-ids 'app.y "(def x 5)" 0))) "a namespace is part of the digest"))))
+      (is (= (code "(map #(inc %) [1])") (code "(map\n  #(inc %)\n  [1])")) "a #() prints as the reader made it, however it is laid out")
+      (is (= (code "`(let [x# 1] x#)") (code "`(let [x# 1] x#)")) "a syntax quote's gensyms are the reader's counter, not the form's")
+      (is (not= (code "(defn ^:private f [] 1)") (code "(defn f [] 1)")) "the name's metadata is part of the code")
+      (is (not= (code "(def x 5)") (second (program/form-ids 'app.y "(def x 5)" 0 '(def x 5)))) "a namespace is part of the digest"))))
 
 (deftest a-config-key-added-moves-no-test-that-does-not-name-it
   ;; owner, 2026-11-06: a branch adding one config key reran 1,118 of 1,154 keys, the config map's entry (which lists
