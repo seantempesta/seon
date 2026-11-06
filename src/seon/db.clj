@@ -357,6 +357,50 @@
       (when-not (and exists? existed? (empty? added)) (sync! cfg))
       {:cfg cfg :conn conn :recovered? (and exists? existed?) :seeded? (not exists?)})))
 
+(defn- remove-dir!
+  "Remove directory dir and what it holds, when it is there. nil."
+  {:malli/schema [:=> [:cat :string] :nil]}
+  [dir] (run! #(.delete ^java.io.File %) (reverse (file-seq (java.io.File. ^String dir)))) nil)
+
+(defn- compact-marker
+  "The file in the store at path that says a sweep freed pages since its last compaction (compact-if-due!)."
+  {:malli/schema [:=> [:cat :string] :string]}
+  [path] (str path "/compact-due"))
+
+(defn- compact-due!
+  "Leave the mark that the store under conn holds freed pages, for its next boot to compact (compact-if-due!). An LMDB store only; nil."
+  {:malli/schema [:=> [:cat :seon.host/conn] :nil]}
+  [conn]
+  (let [{:keys [backend path]} (get-in @conn [:config :store])]
+    (when (= :lmdb backend) (spit (compact-marker path) "")))
+  nil)
+
+(defn compact-if-due!
+  "When a sweep has freed pages since the last compaction, replace the LMDB store at path by a copy holding only its pages in use, whole or not at all: an LMDB
+  file never shrinks, as a sweep only frees pages for reuse. Root calls it at boot, before it opens the store, as the store's only process, and no other process
+  may hold the store. Answers {:bytes-before :bytes-after :ms}, nil when none is due, or the typed error of a copy that failed, leaving the store as it was.
+  See docs/storage.md#collection."
+  {:malli/schema [:=> [:cat :string] [:maybe :map]]}
+  [path]
+  (when (posix/exists? (compact-marker path))
+    (let [t0 (profile/now-ns)
+          data (str path "/data.mdb")
+          dir (str path ".compact")
+          size #(.length (java.io.File. ^String %))
+          before (size data)]
+      (remove-dir! dir)
+      (.mkdirs (java.io.File. ^String dir))
+      (let [e (try (lmdb-ffi/compact-copy! (klmdb/open-env! path nil) dir) nil
+                   (catch Throwable e e))]
+        (klmdb/close-env! path)
+        (if e
+          (do (remove-dir! dir)
+              (contract/error :seon.db/compact-failed #'seon.db/compact-if-due! (str "compacting the store at " path ": " (ex-message e)) {:path path}))
+          (do (posix/c-rename (str dir "/data.mdb") data)
+              (remove-dir! dir)
+              (.delete (java.io.File. ^String (compact-marker path)))
+              {:bytes-before before :bytes-after (size data) :ms (profile/ms-since t0)}))))))
+
 (defn collect!
   "Collect the store under conn (datahike.api/gc-storage: every key no branch reaches, nodes
   and values out of line, is swept) when a branch the last record saw is gone (main's
@@ -382,6 +426,7 @@
       :else
       (let [t0 (profile/now-ns)
             swept @(d/gc-storage conn (java.util.Date. 0))]
+        (when (seq swept) (compact-due! conn))
         {:swept (count swept) :ms (profile/ms-since t0) :branches now :gone gone}))))
 
 (defn after-fork!
