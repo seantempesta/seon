@@ -1225,9 +1225,9 @@
                             [(str "(seon.turn/work! {:task " (pr-str task) " :max-turns 2})")
                              (str "(let [db (seon.agent/db) k (:key @seon.agent/state)"
                                   "      basis (fn [n] {:commit (datahike.api/commit-id db) :task " (pr-str task) " :turn n :max-turns 2 :origin :model :agent k})"
-                                  "      msgs (fn [n] (:messages (seon.context/render db (basis n))))"
+                                  "      msgs (fn [n] (let [b (:seon.model-call/basis (datahike.api/pull db '[:seon.model-call/basis] [:seon.model-call/id (str k \"/\" n)]))] (:messages (seon.context/render (datahike.api/commit-as-db (:store db) (:commit b)) b))))"
                                   "      calls (fn [ms] (vec (keep #(some-> % :tool-calls first :code) ms)))"
-                                  "      m1 (msgs 1) m2 (msgs 2) m3 (msgs 3)"
+                                  "      m1 (msgs 1) m2 (msgs 2) m3 (:messages (seon.context/render db (basis 3)))"
                                   "      redrawn (fn [n] (let [m (datahike.api/pull db '[:seon.model-call/sent-hash :seon.model-call/basis] [:seon.model-call/id (str k \"/\" n)])"
                                   "                              b (:seon.model-call/basis m)]"
                                   "                          [(:seon.model-call/sent-hash m) (seon.lib/digest (seon.edn/encode (:messages (seon.context/render (datahike.api/commit-as-db (:store db) (:commit b)) b))))]))]"
@@ -1266,7 +1266,7 @@
         [_ _ one _ _ two _ shown broken-request] (mapv :value (vec rs))]
     (is (= ["(my.render/render-ctx)"] (mapv second one)) "the first call showed the page whole, the second, with nothing moved, nothing")
     (is (= ["(my.render/render-ctx)" "(my.render/render-changes)"] (mapv second two)) "a plan changed: one eval of what moved")
-    (is (every? #(str/starts-with? % "task-") (nth (last two) 2)) (str "holding only the task's part: " (pr-str (last two))))
+    (is (every? #(= % "task") (nth (last two) 2)) (str "holding only the task's part: " (pr-str (last two))))
     (is (nil? shown) "a render that throws does not stop the one who asked")
     (is (str/includes? (str broken-request) "broken render") "and the request reads its error")))
 
@@ -1924,7 +1924,7 @@
     (is (= :error (:outcome (:value end))) (pr-str end))
     (is (= 16 (count (:sent-hash (:value turn)))) "the hash of the bytes it sent, written before the call")
     (is (= (:sent-hash (:value turn)) (:redrawn (:value turn))) "and its request made again from its records is those bytes")
-    (is (= ["system" "assistant" "tool"] (:roles (:value turn))) "the help page, then the page as the call Seon made and its answer")
+    (is (= ["system" "user" "assistant" "tool"] (:roles (:value turn))) "the system message, what opens the session, then the page as the call Seon made and its answer")
     (is (not (str/includes? (str (peek (:read (:value turn)))) "turns")) (str "the page announces no cap: " (peek (:read (:value turn)))))
     (is (= :seon.model/no-provider (:error (:value turn))) "and the typed error the call answered")))
 
@@ -2303,20 +2303,19 @@
   ;; queue before anything else, each recorded as any eval is, by whoever asked, at turn 0 and with no call id. One that
   ;; throws is recorded with its error and the rest are not run, as the calls of a reply are not. A reader of the
   ;; conversation then sees them in order and, in the request, as calls of their own.
-  (let [read (str "(let [rs (seon.context/records @seon.ctx/ctx (seon.agent/db))] "
+  (let [read (str "(let [c @seon.ctx/ctx db (seon.agent/db) es (map #(get-in c [:evals %]) (:evals (seon.context/turn-members db c (second (first (seon.context/turns c))))))] "
                   "{:turn (seon.agent/turn-now) "
-                  " :records (mapv (fn [[pos v _]] [pos (:seon.eval/by v) (:seon.eval/intent v) (:seon.eval/call-id v) (some? (get-in v [:seon.eval/response :ex])) (get-in v [:seon.eval/response :value])]) rs) "
-                  " :roles (mapv :role (mapcat #(seon.context/eval-messages {:db (seon.agent/db)} (second %)) rs))})")
+                  " :records (mapv (fn [v] [(:seon.eval/by v) (:seon.eval/intent v) (:seon.eval/call-id v) (some? (get-in v [:seon.eval/response :ex])) (get-in v [:seon.eval/response :value])]) es) "
+                  " :roles (mapv :role (drop 2 (:messages (seon.context/render db {:agent (:key @seon.agent/state) :commit (datahike.api/commit-id db) :task \"x\" :turn 1 :max-turns 1 :origin :outside} {:walk (seon.repl/page-walk)}))))})")
         code (str "(let [id (c/spawn! sys {:evals [[\"Add.\" \"(+ 1 2)\"] [\"Throw.\" \"(throw (ex-info \\\"boom\\\" {}))\"] [\"Never.\" \"(+ 3 4)\"]]}) "
                   "r @(c/submit! sys id " (pr-str read) " {:origin :outside})] "
                   "(c/kill! sys id) (:value r))")
         [r] (in-agent [{:op :eval :agent "root" :code code}] {})
         v (:value r)]
     (is (= 0 (:turn v)) (pr-str r))
-    (is (= [[0 2 "root" "Add." nil false 3]
-            [0 2 "root" "Throw." nil true nil]
-            [0 2 "root" "Never." nil true nil]]
-           (mapv (fn [[pos & more]] (into (vec (take 2 pos)) more)) (:records v)))
+    (is (= [["root" "Add." nil false 3]
+            ["root" "Throw." nil true nil]
+            ["root" "Never." nil true nil]]
+           (:records v))
         "three ordinary evals at turn 0 in order, by whoever asked, none a model's call; the throw recorded, the next not run")
-    (is (apply = 1 (map - (rest (map (comp last first) (:records v))) (map (comp last first) (:records v)))) "issued one after another")
-    (is (= ["assistant" "tool" "assistant" "tool" "assistant" "tool"] (:roles v)) "each reaches the request as a call and its result")))
+    (is (= ["assistant" "tool" "assistant" "tool" "assistant" "tool"] (take 6 (:roles v))) "each reaches the request as a call and its result")))

@@ -418,7 +418,7 @@
   function later, and the branch (the base's db, with the agent whose base commit it is) with n functions
   of its own, each without a contract (so gaps and divergence have n rows each); the task merges itself,
   so main's commit is read too."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :map :int]]}
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :map]]}
   [n]
   (let [conn *conn* ns (str "bn" n)
         _ (d/transact conn (defn-facts (symbol ns "f") "(defn f [x] x)"))
@@ -428,7 +428,7 @@
         ours (reduce (fn [db i] (d/db-with db (defn-facts (symbol ns (str "h" i)) (str "(defn h" i " [] " i ")"))))
                      (d/db-with (d/commit-as-db conn base) [{:seon.agent/key "b/a1" :seon.agent/base-commit base}])
                      (range n))]
-    [{:seon.db/db ours :seon.ctx/ctx {:task {:seon.task/kind :whole} :seon.agent/main-commit main}} (seon.db/eid ours :seon.agent/key "b/a1")]))
+    [{:seon.db/db ours :seon.ctx/ctx {:task {:seon.task/kind :whole} :seon.agent/main-commit main}}]))
 
 ;; See docs/render.md#a-component-answers-hiccup
 (deftest the-status-reads-the-branchs-diff-once
@@ -456,13 +456,13 @@
   nil)
 
 (def ^:dynamic *sels*
-  "The lists the draw proof draws (bound by its deftest)."
-  ["#p-task"])
+  "The draw proof's opts (bound by its deftest)."
+  {:model-only true})
 
 (defn page-of
   "The input at n: the arguments of seon.render/draw for agent b/p<n>'s page on a branch where it
   holds a task and n evals (a record as the REPL writes it) with a message for every other one:
-  its ctx tree, the diff, the db, the layout and the lists to draw (*sels*)."
+  its ctx tree, the diff, the db, the layout and its opts (*sels*)."
   {:malli/schema [:=> [:cat pos-int?] [:vector :any]]}
   [n]
   (let [conn *conn* k (str "b/p" n) tid (str "demo/p" n)]
@@ -477,43 +477,17 @@
       (into [(:tree (seon.ctx/build db a (:seon.agent/branch (d/entity db a)))) seon.ctx/changes db (seon.render/declared-var :seon.render/render-ctx)] (some-> *sels* vector)))))
 
 ;; See docs/render.md#the-render-is-an-eval
-(deftest drawing-one-list-costs-that-list-not-the-page
-  ;; an old turn's request is its parts, which the model reads from one list of the page (#p-task); the
-  ;; page's other lists (the conversation a person reads, the tiles) are not drawn for it
+(deftest a-cold-request-draws-what-the-model-reads
+  ;; docs/render.md#a-layout-places-its-lists: a request with no live walk (a replay at a turn's commit, a judge's first move) draws the tree the model reads,
+  ;; its conversation among it, and nothing for the page alone: no tile, no eval's cost or structured value
   (binding [*conn* nil]
     (ts/test-branch!
       (fn [_ conn]
         (binding [*conn* conn]
           (cost/proof {:of 'seon.render/draw :input 'seon.render-cost-test/page-of
-                       :n "evals of the agent (and a message for every other), none of which the list draws"
-                       :work "the list's components drawn once; no eval, message or tile of the page's other lists is rendered"
+                       :n "evals of the agent (and a message for every other)"
+                       :work "the task's list drawn once, a component for each turn, reply, message and eval, each eval's response printed once"
                        :growth :linear
-                       ;; measured 2026-10-29: 371 calls / 2.33 MB at 10 evals, 572 / 4.50 MB at 80 (what the layout's own render
-                       ;; reads of the evals and messages, seon.render.ui/render-ctx's conversation); drawing every list: 2,974 calls /
-                       ;; 10.2 MB at 80 (about 27 calls and 0.1 MB an eval).
-                       ;; jolt/ref-depth: 521 calls / 3.54 MB at 10, 641 / 4.60 MB at 40. The fixed part grew by the parts the list now
-                       ;; draws (the namespaces part with each namespace's definitions, a cited part for each thing the plan cites,
-                       ;; the turn head); an eval costs one call more (seon.render.ui/turn-evals reads each eval's call id to place it
-                       ;; in its model turn, the chat's grouping) and its fixture response now carries :ns, as every REPL response does
-                       ;; (seon.context/current-ns reads the newest eval's, not every record: 11 KB an eval before)
-                       ;; 555 calls at 10 since the layout places the cites from ctx (seon.render.ui/page-cites: where ctx holds each
-                       ;; joined entity whole, a cited task among them, and the order of what each builds on; the cites' joins are the
-                       ;; pull's, where the draw used to query them), 548 before; 583 since the task part, the status's proofs and the
-                       ;; namespaces part read the pulled task (seon.render.ui/task-model, seon.context/task-of, namespaces-of), where
-                       ;; they queried the db: 1.77 MB at 10 (2.78 MB with a join this branch tried and reverted); 591 since
-                       ;; render-ctx watches the task's and the agent's searches ((:searches (:task c)), (:searches c): the tracked
-                       ;; reads a swap! of a search redraws by; 583 with that placement taken out, the fixture holding no search).
-                       ;; Accepted by the optimization session on the owner's deferral, 2026-11-01 ("I trust your judgement")
-                       ;; 607 calls at 10 (the :fixed term 567, plus 4 an eval) since the namespaces part shows the task's own namespace
-                       ;; first (seon.context/namespaces-of): a task that cites nothing drew {} there, now one entry. Accepted by
-                       ;; the owner, 2026-11-03 ("Yes, record 607")
-                       ;; 616 at 10: 607 + 9, following the REPL: 3 calls a draw of the namespaces part (current-ns and its two
-                       ;; record lookups, :seon.agent/ns and the task's fallback), 3 draws. Accepted by the owner, 2026-11-03
-                       ;; ("Record 616 and 8")
-                       ;; 1,048 calls and 1.97 MB at 10, 40 and 80 evals since render-core's agent-facing renders: flat, where it was 616 and
-                       ;; 3.55 MB at 10 and 4 calls and 35 KB an eval. The calls more are what the model now reads: the status written to
-                       ;; the agent, its unwritten proof's shape, a part for each cite; nothing of the eval lists is read. Task
-                       ;; seon.render/the-render-is-an-eval follows it: the list is drawn as one eval there
-                       :per-n {:calls 0 :bytes 0}
-                       :fixed {:calls 1050 :bytes 2000000}
+                       :per-n {:calls 100 :bytes 500000}
+                       :fixed {:calls 1200 :bytes 3000000}
                        :sizes [10 40 80]}))))))

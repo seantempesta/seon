@@ -137,7 +137,7 @@
   seon.agent/take-main!, the same facts root wrote on main, with what root wrote of the agent's own
   entities), then each send of the inbox (another agent's, root's request) as a message fact of its
   own. Each is :seon.message/agent's, so its presence on the branch is its delivery and the record's
-  messages read it (seon.context/records); nothing is held for the turn's basis. An effect's outcome
+  messages read it (seon.context/turn-members); nothing is held for the turn's basis. An effect's outcome
   (:from :fx) is no message: the eval that asked holds its answer. A read that is not the
   run's turn (take? false: an observer's read of an agent its model drives) takes nothing."
   {:malli/schema [:=> [:cat :boolean nat-int?] :nil]}
@@ -250,13 +250,16 @@
   {:malli/schema [:=> [:cat] :nil]}
   []
   (let [seen (:render-seen @agent/state)
-        call (cond (nil? seen) (:whole context/render-calls)
-                   (not= seen (render/revs (repl/page-walk) context/page-lists)) (:changes context/render-calls))]
+        w (repl/page-walk)
+        revs (render/revs w (render/page-lists w))
+        ;; a tree with no page to show (a pattern that holds none of it) is shown nothing
+        call (cond (nil? seen) (when (seq revs) (:whole context/render-calls))
+                   (not= seen revs) (:changes context/render-calls))]
     (when call (repl/insert! "seon" [call]))
     nil))
 
 (defn- act!
-  "One model turn: the page shown to the agent if it moved (`show-page!`), the agent's turn number moves (docs/turn.md#the-turn-is-a-number), the agent's context (its records, the page among them as evals; the status s is the page's) to the model, the reply's eval calls
+  "One model turn: the page shown to the agent if it moved (`show-page!`), the agent's turn number moves (docs/turn.md#the-turn-is-a-number), the agent's context (its one tree read by seon.context/request, the page among it as evals; the status s is the turn's own) to the model, the reply's eval calls
   through the one REPL path, each answered as its own result, the turn's facts on its model call on the branch. Answers the loop state after it, or the
   provider error. The model call is an effect (my.fx :model, session FX1): root's model owner
   admits, performs and answers it; the API key never enters this process."
@@ -286,8 +289,7 @@
         _ (agent/commit!)
         ;; the request is the agent's records, the page among them as evals (show-page!): made on the db that holds them
         db (agent/db)
-        {:keys [messages printed]} (context/render db basis {:ctx @ctx/ctx :printed (:printed @agent/state)})
-        _ (swap! agent/state assoc :printed printed)
+        {:keys [messages]} (context/render db basis {:walk (repl/page-walk)})
         ;; a hash of the bytes sent, which the debug page compares with its redraw
         _ (agent/transact! [{:seon.model-call/id id :seon.model-call/sent-hash (lib/digest (sedn/encode messages))}])
         _ (agent/commit!)
@@ -368,8 +370,9 @@
          _ (when take? (show-page!))
          ;; the turn a model would take now: every record before it is in the request
          basis (assoc (basis! task turn 1 :outside true) :agent k)
-         [db parts] (repl/page-hiccup)
-         {:keys [messages]} (context/render db basis {:parts parts :ctx @ctx/ctx})
+         walk (repl/page-walk)
+         db (agent/db)
+         {:keys [messages]} (context/render db basis {:walk walk})
          ;; as a person reads it: the system prompt, then each record as the call made and its result
          text (if wire?
                 (json/write-str (:body (context/wire-turn db basis)))

@@ -7,7 +7,7 @@
   task's agent redefines its function). The proofs namespace sorts after the subjects, so a boot that
   loads main's program in name order loads a subject before its proof."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn] [seon.template :as tpl] [seon.source :as source] [seon.reader :as reader] [seon.config :as config]))
+  (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn] [seon.template :as tpl] [seon.source :as source] [seon.reader :as reader] [seon.config :as config] [seon.render]))
 
 (def calc
   "The six-task graph: add; twice and square need add; sum-sq needs both; neg (the one the demo
@@ -431,3 +431,43 @@
   (if (and (= "calc/neg" task) (zero? turn))
     (calls "Waiting on a promise nothing delivers." "@(promise)")
     (reply request)))
+
+;; ---- what the tree reads as messages, a record at a time (docs/render.md#the-models-context-a-cached-prefix-then-the-turn) ----
+
+(defn eval-messages
+  "Eval record e as the model reads it, through the one reading of the tree: its call, naming its reply when it is a model's of turn :turn, and its result."
+  {:malli/schema [:=> [:cat [:maybe :map] :map] [:vector :map]]}
+  [opts e]
+  (let [h (@(requiring-resolve 'seon.render.ui/eval-hiccup) {:db (:db opts)} e)
+        h (if (and (:seon.eval/call-id e) (pos? (:turn e 0))) [:section {:data-role "assistant" :data-reply (:turn e)} h] h)]
+    (vec (mapcat second (seon.render/hiccup-wire h)))))
+
+(defn message-messages
+  "Message m as the model reads it."
+  {:malli/schema [:=> [:cat :any :map] [:vector :map]]}
+  [_ m] (vec (mapcat second (seon.render/hiccup-wire (@(requiring-resolve 'seon.render.ui/message-hiccup) m)))))
+
+(defn turn-messages
+  "Model call c's reply as the model reads it."
+  {:malli/schema [:=> [:cat :any :map] [:vector :map]]}
+  [_ c] (vec (mapcat second (seon.render/hiccup-wire (@(requiring-resolve 'seon.render.ui/reply-hiccup) (assoc c :seon.model-call/origin :model) true [])))))
+
+(defn tree-parts
+  "The conversation of agent record c on db as the tree reads it, cold: parts [ref messages turn], its system message and its opening left out."
+  {:malli/schema [:=> [:cat :map :seon.host/db] [:vector :any]]}
+  [c db]
+  (let [w (seon.render/draw c @(requiring-resolve 'seon.ctx/changes) db (seon.render/declared-var :seon.render/render-ctx) {:model-only true})]
+    (try (vec (remove (fn [[r]] (or (nil? r) (#{:section :session} (first r)))) (seon.render/wire w)))
+         (finally (seon.render/dispose-walk! w)))))
+
+(defn tree-messages
+  "The messages of `tree-parts`."
+  {:malli/schema [:=> [:cat :map :seon.host/db] [:vector :map]]}
+  [c db] (into [] (mapcat second) (tree-parts c db)))
+
+(defn drawn-parts
+  "The parts of agent record c ({:tree}) on db as the model reads them, drawn cold: {id form}."
+  {:malli/schema [:=> [:cat :seon.host/db [:map [:tree :map]]] :map]}
+  [db c]
+  (let [w (seon.render/draw (:tree c) @(requiring-resolve 'seon.ctx/changes) db (seon.render/declared-var :seon.render/render-ctx) {:model-only true})]
+    (try (seon.render/placed-hiccup w (seon.render/page-lists w)) (finally (seon.render/dispose-walk! w)))))

@@ -1448,7 +1448,7 @@
 
 (defn begin-run!
   "This agent begins task on its branch: the agent's record names it as its task (:seon.agent/task: the conversation finds the
-  messages it took by the agent, seon.context/records, and @ctx holds the task), the task running as main holds it. Written as
+  messages it took by the agent, seon.context/turn-members, and @ctx holds the task), the task running as main holds it. Written as
   the process starts (init!: an outside agent's branch is cut before root writes its start on main), or by the turn that begins a
   later task of the session; once, nothing written when the branch holds it. The task is running, as main holds it
   (its release, written on main after the branch was cut, read :held here: my.task/current and the

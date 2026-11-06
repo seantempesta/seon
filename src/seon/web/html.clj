@@ -95,6 +95,8 @@
     (write! sb (try (apply (first node) (rest node))
                     (catch Throwable e
                       [:span {:class "err"} (str (if (var? (first node)) (symbol (first node)) "a render") " threw: " (or (ex-message e) (str e)))])))
+    ;; an element for the model alone (docs/render.md#a-part-prints-as-its-render) is no part of the page
+    (and (vector? node) (map? (second node)) (= "model" (:data-for (second node)))) nil
     (vector? node)
     (let [[tag & more] node
           tag (name tag)

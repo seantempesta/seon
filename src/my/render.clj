@@ -4,7 +4,7 @@
     (my.render/render-ctx)      the whole render of your ctx, every part as the hiccup your request holds, whole
     (my.render/render-changes)  the parts that moved since you last asked, whole; nothing when none did"
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [seon.render :as render] [seon.repl :as repl] [seon.agent :as agent] [seon.context :as context]))
+  (:require [seon.contract :refer [defn defn-]] [seon.render :as render] [seon.repl :as repl] [seon.agent :as agent]))
 
 (defn tree
   "What draws what in this agent's live walk (the one its model's page and its person's page are drawn from, brought up to
@@ -19,7 +19,8 @@
   What you are shown is now what you were last shown. See docs/render.md#the-render-is-an-eval."
   {:malli/schema [:=> [:cat [:maybe :map]] :seon.render/parts]}
   [seen]
-  (let [{:keys [parts revs gone]} (render/parts-since (repl/page-walk) context/page-lists seen)]
+  (let [w (repl/page-walk)
+        {:keys [parts revs gone]} (render/parts-since w (render/page-lists w) seen)]
     (swap! agent/state assoc :render-seen revs)
     (render/parts-value (into parts (map (fn [id] [id :gone])) gone))))
 

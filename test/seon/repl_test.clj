@@ -1,6 +1,6 @@
 (ns seon.repl-test
   "An agent's REPL answers: asked of an agent in a root of its own (seon.agent-test/in-agent), and a form bounded by the work it does, never by a clock (seon.intr/run under a tick budget)."
-  (:require [clojure.test :refer [deftest is testing]] [clojure.string :as str] [seon.agent-test :as at]
+  (:require [clojure.test :refer [deftest is testing]] [clojure.string :as str] [seon.fixtures] [seon.agent-test :as at]
             [seon.intr :as intr] [seon.agent :as agent] [seon.contract :as contract]
             [seon.ref :as ref] [seon.template :as template] [seon.repl :as repl] [seon.context :as context] [seon.doc :as doc]
             [seon.config :as cfg] [my.agent] [seon.render :as render] [seon.print :as print] [seon.render.ui :as ui] [seon.web.html :as h] [seon.test-store :as ts] [my.test] [datahike.api :as d]))
@@ -1011,7 +1011,7 @@
     (doseq [code ["#'clojure.core/inc" "(fn [x] x)" "{:a 1 :b [1 2 3] :c \"text\"}" "(throw (ex-info \"boom\" {:k 1}))"]]
       (let [r (ev code)
             rec (assoc (repl/record-details code r {:call-id "c1"}) :seon.eval/id "e1" :seon.eval/by "a1")
-            msg (second (seon.context/eval-messages {} rec))]
+            msg (second (seon.fixtures/eval-messages {} rec))]
         (is (string? (:text r)) code)
         (is (= (:text r) (:content msg)) (str "the outside text is the model's message for " code))))
     (is (var? (:value @(resolve (:handle (ev "#'clojure.core/inc"))))) "the live value is at the handle")))

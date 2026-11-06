@@ -690,13 +690,11 @@
 
 (defn- text-of
   "The text of eval fact rec as every reader reads it: the one function the model's message prints with
-  (seon.print/record-text, through render/model, an @ctx eval's value rebuilt from its basis by seon.context/basis-value, as
-  seon.context/eval-messages does), so the outside agent's text and the model's cannot differ; the live value stays at
+  (seon.context/tool-text), so the outside agent's text and the model's cannot differ; the live value stays at
   the handle. Made only for a reader: an eval makes and stores data, and a model's is printed where its request is
   assembled. See docs/render.md#a-render-is-a-value-printed-once."
   {:malli/schema [:=> [:cat :map] :string]}
-  [rec]
-  (print/record-text (cond-> rec (:seon.eval/basis rec) (assoc-in [:seon.eval/response :value] (context/basis-value (:db @agent/state) rec))) render/model))
+  [rec] (context/tool-text (:db @agent/state) rec))
 
 (defn eval-string
   "Evaluate code through the one REPL path (the handler and its middleware) and answer its one
@@ -950,15 +948,15 @@
 (defn- the-walk
   "This agent's walk of its render of ctx (seon.render/walker over @ctx, its diff seon.ctx/changes, and the
   branch's db), held in its state: the one cache of its components, made again when the branch declares another
-  layout (docs/ctx.md#the-record-is-the-agents-work). It draws what its model reads (seon.context/page-lists) until a
-  person's page asks for the rest (`whole-walk`): the lists nobody reads cost nothing."
+  layout (docs/ctx.md#the-record-is-the-agents-work). It draws what its model reads until a
+  person's page asks for the rest (`whole-walk`): what nobody reads costs nothing."
   {:malli/schema [:=> [:cat] :map]}
   []
   (let [held (:walk @agent/state) l (layout)]
     (if (and held (= l (first (:root held))))
       held
       (let [w (cond-> (render/walker {:ref ctx/ctx :changes ctx/changes} agent/db [l {}])
-                (or (nil? held) (:only held)) (assoc :only (set context/page-lists)))]
+                (or (nil? held) (:model-only held)) (assoc :model-only true))]
         (some-> held render/dispose-walk!)
         (swap! agent/state assoc :walk w)
         w))))
@@ -976,7 +974,7 @@
   walk holds no count of who is watching). See docs/render.md#a-layout-places-its-lists."
   {:malli/schema [:=> [:cat] :map]}
   []
-  (with-branch-schemas #(let [w (the-walk)] (when (:only w) (swap! agent/state assoc :walk (render/draw-all w)))))
+  (with-branch-schemas #(let [w (the-walk)] (when (:model-only w) (swap! agent/state assoc :walk (render/draw-all w)))))
   (page-walk))
 
 (defn render-ctx
@@ -997,12 +995,11 @@
   [] (render/placed-hiccup (whole-walk) ["#p-task" "#c-rows" "#p-tiles"]))
 
 (defn page-hiccup
-  "This agent's parts as its model reads them now, from its live walk (seon.context/page-lists): each
+  "This agent's parts as its model reads them now, from its live walk (seon.render/page-lists): each
   component run again only where what it read changed, so a turn's parts cost what changed (a cold
-  draw, seon.context/drawn-parts, costs every component). [db parts]: the db it is drawn to, which the request is
-  made on, and {element-id hiccup}, in order (seon.context/request sends what changed of them)."
+  draw costs every component). [db parts]: the db it is drawn to, and {element-id hiccup}, in order."
   {:malli/schema [:=> [:cat] [:tuple :seon.host/db :map]]}
-  [] (let [w (page-walk)] [(agent/db) (render/placed-hiccup w context/page-lists)]))
+  [] (let [w (page-walk)] [(agent/db) (render/placed-hiccup w (render/page-lists w))]))
 
 ;; ---- the process: a Flow graph of three procs on the agent's one thread ----------------
 
