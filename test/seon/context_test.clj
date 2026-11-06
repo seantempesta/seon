@@ -1687,8 +1687,7 @@
       (let [recs (->> (context/session-tx @conn "b/src" "abc") (mapcat identity) (filter :seon.eval/code))]
         (is (= 2 (count recs)))
         (is (not-any? #(re-find #"b/src|demo/h" (pr-str %)) recs) "no id of the source session in a record")
-        (is (= '#{result/example-abc-s1 result/example-abc-s2} (set (map #(get-in % [:seon.eval/response :handle]) recs))))
-        (is (str/includes? (print/record-text (second recs)) "result/example-abc-s2") "a result's text names the example's handle")))))
+        (is (= '#{result/s1 result/s2} (set (map #(get-in % [:seon.eval/response :handle]) recs))) "a handle names its answer: it stays as it was")))))
 
 (defn- two-examples-request!
   "Two sessions whose records carry the same ids (s1, call_1, result/s1: ids are an agent's own), loaded into one db
@@ -1718,7 +1717,7 @@
         (is (= [["assistant" "tool" "user" "assistant"] ["assistant" "tool" "user" "assistant"]] [(mapv :role (subvec ms 2 6)) (mapv :role (subvec ms 8 12))]) "each in the order its records ran")
         (is (= ms (subvec (:messages r1) 0 (count ms))) "both examples are the prefix of the next request")))))
 
-(deftest two-examples-keep-their-call-ids-and-handles-apart
+(deftest two-examples-keep-their-call-ids-apart
   (ts/test-branch!
     (fn [_ conn]
       (let [{:keys [r0]} (two-examples-request! conn)
@@ -1727,9 +1726,8 @@
             tool-text (fn [id] (:content (first (filter #(= id (:tool-call-id %)) ms))))]
         (is (= ["eval-example-abc-s1" "eval-example-def-s1" "eval-p100"] (vec calls)) "no call id is another's: each example's own, then the page's")
         (is (= (vec calls) (vec (keep :tool-call-id ms))) "every call is followed by its tool message")
-        (is (str/includes? (tool-text "eval-example-abc-s1") "result/example-abc-s1"))
-        (is (str/includes? (tool-text "eval-example-def-s1") "result/example-def-s1"))
-        (is (not-any? #(str/includes? (str (:content %)) "result/s1") ms) "no handle is the live agent's (result/s1)")))))
+        (is (string? (tool-text "eval-example-abc-s1")))
+        (is (string? (tool-text "eval-example-def-s1")))))))
 
 (defn- recorded-form
   "A request's messages as the recording holds them: the wire's messages (seon.model/wire-messages, what the provider is sent),

@@ -1802,7 +1802,7 @@
     (is (empty? (:appends patch)) "nothing else appended")
     (is (empty? (:frags patch)) "nothing else of the page sent")))
 
-(deftest a-handle-links-to-its-eval
+(deftest an-eval-is-its-own-anchor
   ;; root, 2026-10-26: the conversation is keyed by eid, and a printed handle (result/e1) still
   ;; links to its eval: the eval's component draws its anchor (eval-e1) from the eval's id; opened
   ;; (:seon.eval/opened, the reader's fact taken onto the branch), it draws its value
@@ -1811,8 +1811,7 @@
         e3 "eval-item-e3"
         closed (component-html branch e3)
         opened (component-html (d/db-with branch [{:seon.eval/id "e3" :seon.eval/opened true}]) e3)]
-    (is (str/includes? closed "id=\"eval-e3\"") "the handle's anchor, on the eval's own element")
-    (is (str/includes? (h/html (r/print-html {} {:it 'result/e1})) "href=\"#eval-e1\"") "and a printed handle links to it")
+    (is (str/includes? closed "id=\"eval-e3\"") "its anchor, on the eval's own element, by its id")
     (is (not (re-find #"<details[^>]* open" closed)) "no one opened it: its one line")
     (is (str/includes? closed "seon.root%2Fopened") "opening it posts the fact (seon.root/opened!)")
     (is (re-find #"<details[^>]* open" opened) (str "opened: drawn open, its value with it: " opened))

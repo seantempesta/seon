@@ -732,7 +732,7 @@
         s (:seon.eval/response rec)
         v (:value s)
         v (if (and (map? v) (not (record? v)) (contains? v :handle)) (dissoc v :handle :ms :ticks :bytes :fns :record) v)
-        h (subs (clojure.string/replace (str (hasch/uuid (if (identical? (:value r) (:value s)) [v (:ex s) (:out s) (:err s) (:forms s)] [:eval id]))) "-" "") 0 8)
+        h (first (clojure.string/split (str (hasch/uuid (if (identical? (:value r) (:value s)) [v (:ex s) (:out s) (:err s) (:forms s)] [:eval id]))) #"-"))
         put #(into {:handle (symbol "result" h)} %)]
     [(put r) (update rec :seon.eval/response put)]))
 
@@ -953,7 +953,7 @@
                   req (cond-> (req-of id)
                         (not (clojure.string/blank? intent)) (assoc :intent intent)
                         (seq repairs) (assoc :repaired (context/repaired src repairs)))
-                  failed (some #(when (or (:ex (:response %)) (contract/error? (:value (:response %)))) (:handle (:response %))) acc)
+                  failed (some #(when (or (:ex (:response %)) (contract/error? (:value (:response %)))) (let [a (:response %)] (if (:record a) (context/wire-id (:record a)) (name (:handle a))))) acc)
                   why (if failed
                         (contract/error :seon.turn/not-run #'run-calls (str "not run: eval " failed " of this reply failed before it (its result says why)") {:after failed})
                         (if problem
