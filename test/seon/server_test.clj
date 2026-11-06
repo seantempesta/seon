@@ -179,8 +179,8 @@
     (doseq [a [other-done other-eval other-message]]
       (is (= :seon.server/held (:seon.error/type a)) (pr-str a))
       (is (clojure.string/includes? (str (:seon.error/message a)) "c1") "naming who holds it"))
-    (is (= 3 (:value (first (:responses own)))) "its own client's eval answers")
-    (is (= 4 (:value (first (:responses named)))) "and so does one that names the agent's task")
+    (is (some #{3} (map :value (:responses own))) "its own client's eval answers")
+    (is (some #{4} (map :value (:responses named))) "and so does one that names the agent's task")
     (is (true? (:value open)) "the refused done left the task open")))
 
 (deftest a-message-reaches-the-agent
@@ -245,13 +245,13 @@
         args (clojure.data.json/read-str (get-in call ["tool_calls" 0 "function" "arguments"]))]
     (is (clojure.string/includes? (:next attach) "seon_context") "an attach names the next step")
     (is (clojure.string/includes? (:next attach) "message-md") "and the shape of a reply")
-    (is (= [2 4] (mapv :value (:responses called))) "each eval answers, in order")
-    (is (= :seon.turn/invalid-call (:seon.error/type (:ex (first (:responses stopped))))) (pr-str stopped))
-    (is (= :seon.turn/not-run (:seon.error/type (:ex (second (:responses stopped))))) "what follows one that failed is answered not-run")
+    (is (= [2 4] (filterv number? (map :value (:responses called)))) "each eval answers, in order")
+    (let [exs (keep #(:seon.error/type (:ex %)) (:responses stopped))]
+      (is (= [:seon.turn/invalid-call :seon.turn/not-run] exs) "what follows one that failed is answered not-run"))
     (is (= :seon.root/refused (:seon.error/type old)) (pr-str old))
     (is (clojure.string/includes? (:seon.error/message old) "message-md") "the old shape is told the new one, nothing run")
     (is (= 2 (:value turn-of)) "each reply is a turn: no one growing turn 0")
-    (is (= "seon.print" (:value (first (:responses ns-after)))) (str "the namespace a reply moved to is where the next one runs: " (pr-str moved-ns)))
+    (is (= ["seon.print"] (filterv string? (map :value (:responses ns-after)))) (str "the namespace a reply moved to is where the next one runs: " (pr-str moved-ns)))
     (is (= ["eval"] (mapv #(get-in % ["function" "name"]) (get body "tools"))) "the body holds the tool a model is given")
     (is (= (clojure.data.json/read-str (clojure.data.json/write-str seon.model/eval-tool)) (first (get body "tools"))) "that very tool")
     (is (= "system" (get (first msgs) "role")))
@@ -487,6 +487,21 @@
     (is (not (contract/error? (:value failed))) (str "its fail! records on its task: " (pr-str failed)))))
 
 ;; See docs/merging.md#main-moved-is-said-at-every-eval
+;; docs/turn.md#an-outside-agent: an attached agent's answer is what a model's next request adds; asking again is answered plainly
+(deftest an-outside-reply-carries-the-page-seon-showed
+  (let [[_ first-reply moved asked]
+        (at/in-agent (fn [{:keys [agent task]}]
+                       [{:op :attach :task task}
+                        {:op :eval :agent agent :message-md "" :evals [{:intent "add" :code "(+ 1 1)"}]}
+                        {:op :eval :agent agent :message-md "Changing my plan." :evals [{:intent "change it" :code "(swap! ctx assoc-in [:task :seon.task/plan] \"A plan that moved.\")"}]}
+                        {:op :eval :agent agent :message-md "Asking." :evals [{:intent "ask" :code "(my.render/render-changes)"}]}]))
+        page (last (:responses moved))]
+    (is (some #(contains? (:value %) :components) (:responses first-reply)) "the page whole, the first time")
+    (is (clojure.string/includes? (str (:text page)) "A plan that moved.") (str "the change, with the reply that made it: " (pr-str (keys page))))
+    (is (not (clojure.string/includes? (str (:text page)) ":since")) "no t is the reader's")
+    (is (= [] (:edits (:value (first (:responses asked))))) "asked after it was shown")
+    (is (:shown-by (:value (first (:responses asked)))) "says what showed it")))
+
 (deftest green-work-behind-main-is-merged-at-done
   ;; an outside agent's green work was closed "ended green: behind 6", its agent gone, while each answer said to merge when it chose: seon.turn/hand-back! merges main first
   (let [[_ _ _ _ done] (at/in-agent (fn [{:keys [agent ns]}]

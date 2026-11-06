@@ -611,10 +611,12 @@
   [attrs] (not-empty (reduce-kv (fn [m k _] (if (and (keyword? k) (= "wire" (namespace k))) (dissoc m k) m)) (dissoc attrs :class :style) attrs)))
 
 (defn- size
-  "The characters x holds, as the one sizer counts them: its strings and the text of its other leaves, a mark for each collection
-  and nothing printed: an estimate of what is shown, not a text made."
+  "The characters x holds, as the one sizer counts them: its strings and the text of its other leaves, a mark for each collection, no wire mark
+  and nothing printed but an eval's result as the model reads it: an estimate of what is shown, not a text made."
   {:malli/schema [:=> [:cat :any] nat-int?]}
-  [x0] ((fn go [x] (cond (coll? x) (reduce + 1 (map go x)) (nil? x) 0 :else (count (str x)))) x0))
+  [x0] ((fn go [x] (cond (and (map? x) (:wire/result x)) (count (print/record-text (:record (:wire/result x)) model))
+                         (map? x) (reduce + 1 (for [[k v] x :when (not (and (keyword? k) (= "wire" (namespace k))))] (+ (go k) (go v))))
+                         (coll? x) (reduce + 1 (map go x)) (nil? x) 0 :else (count (str x)))) x0))
 
 (defn tokens-of
   "What x costs the context in tokens: the one sizer (`seon.print.emit/chars-tokens`) over the characters x holds, the same count
@@ -708,30 +710,48 @@
   (vec (for [[_ k] (placed w sels) :let [c (get @(:cache w) k)] :when (not= "page" (:wire/for (:opts c)))] [(:id c) k])))
 
 (defn keyed
-  "Hiccup form x as a diff reads it: an element with named children (each named by its :key, Reagent's, else its id, a component's name-based id) a map in their order, each under its name and read the same way, and under :own the element without them; any other value, and an element whose names are not distinct, one value. The form it read is its metadata, ::form. Local fns: no contracted call a node. See docs/render.md#a-change-is-edits-by-name."
+  "Hiccup form x as a diff reads it: an element's children in their order, each under a name and read the same way, and under :own the element without them; an element holding text directly is prose, one value, and so is an element holding a single child with no name of its own, and anything else. A child's name is what identifies it: its :key (Reagent's), else its id (a component's name-based id), else, among those with neither, its tag when no sibling shares it and its first words when one does. Names that are not distinct stay in :own. The form it read is its metadata, ::form. Local fns: no contracted call a node. See docs/render.md#a-change-is-edits-by-name."
   {:malli/schema [:=> [:cat :any] :any]}
   [x0]
-  (letfn [(child-name [x] (when (and (vector? x) (map? (second x))) (let [a (second x)] (or (:key a) (:id a)))))
+  (letfn [(el? [x] (and (vector? x) (some? (first x))))
+          (given [x] (when (and (el? x) (map? (second x))) (let [a (second x)] (or (:key a) (:id a)))))
+          (words [x]
+            (let [t (first (filter string? (tree-seq coll? seq x)))]
+              (when t (str/join " " (keep-indexed (fn [i w] (when (< i 6) w)) (str/split (str/trim t) #"\s+"))))))
+          (names [kids]
+            (let [plain (remove given (filter el? kids))
+                  tags (frequencies (map first plain))
+                  derived (fn [c] (if (= 1 (tags (first c))) (first c) (words c)))
+                  named (map (fn [c] (when (el? c) (or (given c) (derived c)))) kids)
+                  counts (frequencies (remove nil? named))]
+              (map (fn [n] (when (and (some? n) (not= :own n) (= 1 (counts n))) n)) named)))
           (go [x]
-            (if-not (vector? x)
+            (if-not (el? x)
               x
               (let [n (if (map? (second x)) 2 1)
-                    kids (subvec x n)
-                    named (filter child-name kids)]
-                (if (and (seq named) (apply distinct? :own (map child-name named)))
-                  (with-meta (apply array-map :own (into (subvec x 0 n) (remove child-name kids)) (mapcat (juxt child-name go) named)) {::form x})
-                  x))))]
+                    kids (subvec x n)]
+                (if (or (empty? kids) (some #(or (string? %) (number? %)) kids) (and (keyword? (first x)) (nil? (next kids)) (nil? (given (first kids)))))
+                  x
+                  (let [ns (names kids)]
+                    (if-not (some some? ns)
+                      x
+                      (with-meta (apply array-map :own (into (subvec x 0 n) (keep (fn [[c k]] (when (nil? k) c))) (map vector kids ns))
+                                        (mapcat (fn [[c k]] (when (some? k) [k (go c)])) (map vector kids ns)))
+                        {::form x})))))))]
     (go x0)))
 
-(defn- reordered?
-  "Did named children that both reads a and b (`keyed`) hold change places, there or below? Map keys say nothing of it, so an edit could not. Local fn: no contracted call a node. See docs/render.md#a-change-is-edits-by-name."
-  {:malli/schema [:=> [:cat :any :any] :boolean]}
+(defn- settled
+  "Reads a and b (`keyed`), with each element whose named children changed places one value on both sides: map keys say nothing of order, so an edit could not, and that element is replaced at its name, the rest of the component still said by edits. Local fn: no contracted call a node. See docs/render.md#a-change-is-edits-by-name."
+  {:malli/schema [:=> [:cat :any :any] [:tuple :any :any]]}
   [a0 b0]
   ((fn go [a b]
-     (boolean (and (map? a) (map? b)
-                   (let [both (filter #(contains? b %) (keys a))]
-                     (or (not= both (filter #(contains? a %) (keys b)))
-                         (some #(go (get a %) (get b %)) both))))))
+     (if-not (and (map? a) (map? b))
+       [a b]
+       (let [both (filter #(contains? b %) (keys a))]
+         (if (not= both (filter #(contains? a %) (keys b)))
+           [(::form (meta a)) (::form (meta b))]
+           (reduce (fn [[x y] k] (let [[p q] (go (get a k) (get b k))] [(assoc x k p) (assoc y k q)]))
+                   [a b] both)))))
    a0 b0))
 
 (defn- named-edit
@@ -744,16 +764,16 @@
           :else (recur (inc i) (get x (nth p i))))))
 
 (defn- component-edits
-  "What moved in component id from form was to form now, as edits with their paths in names, its id first, each value hiccup; or the component whole, when that is shorter or edits could not say it: nothing to compare with, it left, or its named children changed places. See docs/render.md#a-change-is-edits-by-name."
+  "What moved in component id from form was to form now, as edits with their paths in names, its id first, each value hiccup; or the component whole, when that is shorter or edits could not say it: nothing to compare with, or it left. See docs/render.md#a-change-is-edits-by-name."
   {:malli/schema [:=> [:cat :string :any :any] [:vector :any]]}
   [id was now]
   (cond
     (nil? was) [[[id] :+ now]]
     (nil? now) [[[id] :-]]
     :else
-    (let [a (keyed was) b (keyed now)
+    (let [[a b] (settled (keyed was) (keyed now))
           whole [[[id] :r now]]
-          es (when-not (reordered? a b)
+          es (do
                ;; :vec-timeout nil: left to its default a clock would decide what comes out, by :quick as by :a-star (editscript.util.common/with-vec-deadline)
                (mapv (fn [[p op v :as e]] (cond-> (assoc e 0 (into [id] p)) (= 3 (count e)) (assoc 2 (::form (meta v) v))))
                      (distinct (map #(named-edit b %) (ed/get-edits (ed/diff a b {:algo :quick :vec-timeout nil}))))))]
@@ -791,19 +811,22 @@
   [w sels] (when (seq (moved w sels)) (if @(:shown w) :changes :whole)))
 
 (defn page-value
-  "What an eval of walk w's page answers, as of t, and what it shows is now what the walk compares against: with whole? or nothing shown yet, every component, {:t :components}; else {:since :t :edits}, what moved since the t it was last shown, as edits. The walk holds the form it last showed of each component and nothing else; a new process's holds none. See docs/render.md#the-render-is-an-eval."
-  {:malli/schema [:=> [:cat :map [:sequential :string] :int :boolean] :seon.render/parts]}
-  [w sels t whole?]
-  (let [{since :t forms :forms} @(:shown w)
+  "What an eval of walk w's page answers, as of t, and what it shows is now what the walk compares against: with whole? or nothing shown yet, every component, {:components}; else what moved since it was last shown, {:edits}, and with nothing moved that said plainly: {:edits [] :shown-by handle}, the eval that showed it. The t's are the value's metadata (:seon.render/page {:since :t}), the eval's to keep for a redo (:seon.eval/page), no reader's. shown-by, the handle of this eval. The walk holds the form it last showed of each component and nothing else; a new process's holds none. See docs/render.md#the-render-is-an-eval."
+  {:malli/schema [:=> [:cat :map [:sequential :string] :int :boolean :any] :seon.render/parts]}
+  [w sels t whole? this]
+  (let [{since :t forms :forms by :by} @(:shown w)
         whole? (or whole? (nil? since))
         _ (when whole? (vreset! (:shown w) nil))
-        mv (moved w sels)]
-    (vreset! (:shown w) {:t t
+        mv (moved w sels)
+        page (cond-> {:t t} (not whole?) (assoc :since since))]
+    (vreset! (:shown w) {:t t :by (if (or whole? (seq mv)) this by)
                          :revs (into {} (map (fn [[id k]] [id (tree-rev w k)])) (placed-ids w sels))
                          :forms (reduce (fn [m [id _ f]] (if f (assoc m id f) (dissoc m id))) (if whole? {} forms) mv)})
-    (if whole?
-      (assoc (parts-value (map (fn [[id _ f]] [id f]) mv)) :t t)
-      (with-meta {:since since :t t :edits (page-edits mv)} {:seon.render/schema :seon.render/parts :seon.print/full true}))))
+    (vary-meta
+     (cond whole? (parts-value (map (fn [[id _ f]] [id f]) mv))
+           (seq mv) (with-meta {:edits (page-edits mv)} {:seon.render/schema :seon.render/parts :seon.print/full true})
+           :else (with-meta {:edits [] :shown-by by} {:seon.render/schema :seon.render/parts :seon.print/full true}))
+     assoc :seon.render/page page)))
 
 (defn draw
   "Tree t (a ctx value: seon.ctx/build's :tree) drawn once by the layout var root-var over db, its

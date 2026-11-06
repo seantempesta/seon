@@ -1263,14 +1263,18 @@
         (is (every? (fn [[_ f]] (and (symbol? (first f)) (map? (second f)))) (:components all)) "each headed by its function and its path")
         (is (= [] (:edits after-all)) "shown whole by render-ctx, nothing has moved since")
         (is (= [] (:edits again)) "nothing moved: nothing")
-        (is (= (:t all) (:since after-all)) "a diff names the t it diffs from")
+        (is (contains? after-all :shown-by) "and says what showed it")
+        (is (= #{:components} (set (keys all))) "no t in what a reader reads")
+        (is (= (:t (:seon.render/page (meta all))) (:since (:seon.render/page (meta after-all)))) "the eval keeps the t it diffs from")
         (is (= (map first (:components all)) (map first (:components restarted))) "a walk that has shown nothing (a restart) is every part, the one rule")
-        (is (= {:seon.render/schema :seon.render/parts :seon.print/full true} (meta all)) "named, so its record prints it whole")
+        (is (= {:seon.render/schema :seon.render/parts :seon.print/full true} (dissoc (meta all) :seon.render/page)) "named, so its record prints it whole")
         (is (some #(= "task" (first (first %))) (:edits moved)) "the plan moved: the task's part")
         (is (not-any? #(= "status" (first (first %))) (:edits moved)) "and not what read nothing of it")
         (is (str/includes? (pr-str (:edits moved)) "A plan that moved.") "its new text")
-        (is (< (:since moved) (:t moved)) "from a t to a later one")
-        (is (= (:t moved) (:since later)) "and the next diff from there"))
+        (is (not-any? #(contains? moved %) [:t :since]))
+        (let [pm (:seon.render/page (meta moved))]
+          (is (< (:since pm) (:t pm)) "from a t to a later one")
+          (is (= (:t pm) (:since (:seon.render/page (meta later)))) "and the next diff from there")))
       (finally (end-agent!)))))
 
 (deftest the-rules-move-only-when-a-rule-does
