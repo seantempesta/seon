@@ -1281,26 +1281,6 @@
   {:malli/schema [:=> [:cat [:maybe :map]] [:set :any]]}
   [m] (cond (nil? m) #{} (instance? java.util.Map m) (set (.keySet ^java.util.Map m)) :else (set (keys m))))
 
-(defn- conversation
-  "The conversation of ctx c's agent: its messages, its model calls and its evals, in the order of their turn numbers, the
-  one order of `seon.context/records` (docs/turn.md#the-turn-is-a-number): per turn its messages, then its model call (the
-  reply and the evals it ran, folded into one row: `turn-evals`) and the evals of other hands (an outside eval, a session's) of
-  that turn by their issue number. A context read (a call of origin :outside) is no
-  conversation. See docs/render.md#the-page."
-  {:malli/schema [:=> [:cat :map :seon.host/db] [:sequential :int]]}
-  [c db]
-  (let [num (fn [x] (or x 0))
-        es (vec (:evals c))
-        ;; an eval's issue number, as seon.context/records has it: its id's trailing digits (e9 before e10)
-        issued (map (fn [[_ v]] (or (some-> (re-find #"\d+$" (:seon.eval/id v)) parse-long) 0)) es)
-        evals (map (fn [[e v] n] [[(num (:seon.eval/turn v)) 2 n] e]) es issued)
-        msgs (for [[e v] (:messages c)] [[(num (:seon.message/turn v)) 0 (or (:tx (first (d/datoms db :eavt e :seon.message/agent))) 0)] e])
-        calls (for [[e v] (:calls c) :when (= :model (:seon.model-call/origin v))
-                    :let [n (num (:seon.model-call/n v))]]
-                ;; a reply heads its turn's evals, as seon.context/records ranks it
-                [[n 1 0] e])]
-    (map second (sort-by first (concat evals msgs calls)))))
-
 (defn chat-turn
   "A model turn as the chat shows it (a component over ctx and the db, given its evals): what the agent said, its reply as a
   message in Markdown, its thinking folded, then each eval it ran as a step (`eval-item`). Nothing to say and nothing run, nothing.
@@ -1367,8 +1347,7 @@
   "The example sessions its task names (a component over ctx and the db), or nothing when it names none. It is placed
   on every page, for the render cache runs a component once and again only when what it reads changes, so it costs
   nothing on an idle page; placing it only when there are examples would cost 3 contracted calls on every list draw,
-  because the layout builds the whole page whatever list is drawn. It draws, under a heading naming each session, its evals as one line each in the order the agent's own
-  conversation orders them (`conversation`), drawn by `evaluation` as the agent's own are. The model
+  because the layout builds the whole page whatever list is drawn. It draws, under a heading naming each session, its evals as one line each in the order they ran, drawn by `evaluation` as the agent's own are. The model
   reads the same sessions as messages (seon.context/example-messages), so this is beside its page, not in it.
   See docs/tasks.md#a-task-names-example-sessions and docs/render.md#the-page."
   {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int] :any]}
@@ -1377,7 +1356,7 @@
     [:section
      (for [[_ x] (sort-by key xs) :let [x (ratom/realize x)]]
        [:details [:summary (str "example session " (:seon.agent/key x))]
-        [:ol (for [e (conversation x db)]
+        [:ol (for [e (sort (keys (:evals x)))]
                [:li (render/html {:schema :seon.db/eval-fact :as :inline} (ratom/realize (get-in x [:evals e])))])]])]))
 
 (declare task-list conversation-list tiles)
@@ -1420,25 +1399,23 @@
 
 (defn conversation-turn
   "Turn n of agent aid as the chat shows it: the messages it took, its model call with the evals it ran, and the evals of
-  other hands, found by their turn number in the index, so a record of another turn touches nothing this read and an
-  earlier turn never runs again. Each record says which agent's it is, for a store that holds several. See
-  docs/render.md#the-page."
+  other hands, the members its model call holds in ctx (agent -> call -> its records), so a record of another turn touches nothing this read and an
+  earlier turn never runs again. See docs/render.md#the-page."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int :int] :any]}
   [{c :seon.ctx/ctx db :seon.db/db} aid n]
-  (let [mine (fn [turn-attr agent-attr] (vec (for [d (d/datoms db :avet turn-attr n) :when (seq (d/datoms db :eavt (:e d) agent-attr aid))] (:e d))))
-        msgs (mine :seon.message/turn :seon.message/agent)
-        issue (fn [e] (or (some-> (re-find #"\d+$" (:v (first (d/datoms db :eavt e :seon.eval/id)))) parse-long) 0))
-        evs (sort-by issue (mine :seon.eval/turn :seon.eval/agent))
-        model? (fn [e] (seq (d/datoms db :eavt e :seon.eval/call-id)))
-        call (when-let [k (ratom/realize (:seon.agent/key c))] (seon.db/eid db :seon.model-call/id (str k "/" n)))
-        others (if call (remove model? evs) evs)
-        ;; the agent's loop, and Seon's own evals and context reads, are for the model, not this conversation
-        loop? (fn [e] (or (context/loop-eval? (get-in c [:evals e])) (contains? #{"seon" "context"} (ratom/realize (get-in c [:evals e :seon.eval/by])))))]
-    (when (or (seq msgs) call (seq evs))
+  (let [call (when-let [k (ratom/realize (:seon.agent/key c))] (seon.db/eid db :seon.model-call/id (str k "/" n)))
+        at (fn [k] (filter #(get-in c [k % (case k :evals :seon.eval/id :seon.message/id)]) (id-set (get-in c [:calls call k]))))
+        ;; the turn's messages in the order they were taken
+        msgs (sort-by context/first-taken (map #(vector db %) (at :messages)))
+        evs (sort (at :evals))
+        model? (fn [e] (get-in c [:evals e :seon.eval/call-id]))
+        seon? (fn [e] (= "seon" (ratom/realize (get-in c [:evals e :seon.eval/by]))))]
+    (when (get-in c [:calls call])
       (into [:div {:class "seon-stack"}]
-            (concat (for [m msgs] [#'chat-message {} aid m])
-                    (when call [[#'chat-turn {} aid call (filterv model? evs)]])
-                    (for [e others :when (not (loop? e))] [#'eval-item {} e]))))))
+            (concat (for [[_ m] msgs] [#'chat-message {} aid m])
+                    [[#'chat-turn {} aid call (filterv model? evs)]]
+                    ;; Seon's own evals are for the model, not this conversation
+                    (for [e evs :when (not (or (model? e) (seon? e)))] [#'eval-item {} e]))))))
 
 (defn conversation-list
   "The conversation of an agent's page (c-rows, the chat a person reads), agent aid's: what was asked, a component for each
@@ -1462,16 +1439,16 @@
 
 (defn turn-tiles
   "The tiles of turn n of agent aid: each of its evals whose value has a render of its own, newest first, found by the turn's
-  number, so another turn's eval reads nothing this read, and decided by the value as it is drawn, so a render defined later
+  model call in ctx, so another turn's eval reads nothing this read, and decided by the value as it is drawn, so a render defined later
   counts. See docs/render.md#the-page."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int :int] :any]}
   [{c :seon.ctx/ctx db :seon.db/db} aid n]
-  (let [tiled (for [d (reverse (d/datoms db :avet :seon.eval/turn n))
-                    :when (seq (d/datoms db :eavt (:e d) :seon.eval/agent aid))
-                    :let [v (ratom/realize (get-in c [:evals (:e d) :seon.eval/response :value]))
-                          k (ratom/realize (get-in c [:evals (:e d) :seon.eval/schema]))]
+  (let [call (when-let [k (ratom/realize (:seon.agent/key c))] (seon.db/eid db :seon.model-call/id (str k "/" n)))
+        tiled (for [e (reverse (sort (id-set (get-in c [:calls call :evals]))))
+                    :let [v (ratom/realize (get-in c [:evals e :seon.eval/response :value]))
+                          k (ratom/realize (get-in c [:evals e :seon.eval/schema]))]
                     :when (and (some? v) (render/render-of v k))]
-                [#'eval-tile {} (:e d)])]
+                [#'eval-tile {} e])]
     (when (seq tiled) (into [:div] tiled))))
 
 (defn tiles

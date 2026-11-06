@@ -745,7 +745,7 @@
   ;; a definition and a task of warm!'s own, on a value never committed: boot needs no seed
   (let [db (d/db-with @conn [{:db/id "ns" :ns/name 'seon.warm :ns/doc "warm"}
                               {:db/id "f" :form/id "seon.warm/f" :form/src "(defn f [x] x)" :form/ns "ns" :form/order 0 :form/defines ["v"]}
-                              {:db/id "v" :var/name 'seon.warm/f :var/ns "ns" :var/doc "warm" :var/form "f" :var/arity 1}
+                              {:db/id "v" :var/name 'seon.warm/f :var/ns "ns" :var/doc "warm" :var/form "f"}
                               {:task/name :seon.warm/tidy :task/plan "warm" :task/status :held :task/refs ["v"]}])]
     (dotimes [_ 3]
       (d/q '[:find ?n . :in $ ?v :where [?e :var/name ?v] [?e :var/doc ?n]] db 'seon.warm/f)

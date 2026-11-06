@@ -296,7 +296,7 @@
   (docs/vector.md#a-vector-is-its-own-entity)."
   {:malli/schema [:=> [:cat :seon.db/ref :int [:vector {:min 1} number?] :int :string] :map]}
   [e t v n model]
-  (assoc (pack v) :seon.vector/of e :seon.vector/model model :seon.vector/text-t t :seon.vector/tokens n))
+  (assoc (pack v) :seon.vector/of e :seon.vector/model model :seon.vector/text-t t))
 
 (defn orphaned
   "The retractions of the vectors on db whose entity was retracted, [[:db/retract ve a v] ...].

@@ -326,17 +326,17 @@
   [old {:keys [digest status failures measure]}]
   (let [same? (= digest (:seon.test/digest old))
         status (if (and same? measure (:seon.test/status old) (not= status (:seon.test/status old))) :flaky status)
-        sums (cond (and same? measure) (merge-with + (select-keys old [:seon.test/runs :seon.test/ms :seon.test/ticks :seon.test/bytes])
-                                                   {:seon.test/runs 1 :seon.test/ms (:ms measure 0) :seon.test/ticks (:ticks measure 0) :seon.test/bytes (:bytes measure 0)})
-                   measure {:seon.test/runs 1 :seon.test/ms (:ms measure 0) :seon.test/ticks (:ticks measure 0) :seon.test/bytes (:bytes measure 0)}
-                   same? (select-keys old [:seon.test/runs :seon.test/ms :seon.test/ticks :seon.test/bytes]))
+        sums (cond (and same? measure) (merge-with + (select-keys old [:seon.test/ticks :seon.test/bytes])
+                                                   {:seon.test/ticks (:ticks measure 0) :seon.test/bytes (:bytes measure 0)})
+                   measure {:seon.test/ticks (:ticks measure 0) :seon.test/bytes (:bytes measure 0)}
+                   same? (select-keys old [:seon.test/ticks :seon.test/bytes]))
         fs (or (not-empty failures) (when same? (:seon.test/failures old)))]
     (cond-> (assoc sums :seon.test/digest digest :seon.test/status status)
       (and (not= :green status) (seq fs)) (assoc :seon.test/failures fs))))
 
 (def ^:private test-attrs
   "The :seon.test/* attributes a test's var entity holds (seon.proofs/result-tx). See docs/merging.md#verdicts-are-a-cache."
-  [:seon.test/digest :seon.test/status :seon.test/failures :seon.test/runs :seon.test/ms :seon.test/ticks :seon.test/bytes])
+  [:seon.test/digest :seon.test/status :seon.test/failures :seon.test/ticks :seon.test/bytes])
 
 (defn result-tx
   "The transaction that records a test run's results on the branch that ran it (docs/merging.md#verdicts-are-a-cache,
@@ -367,7 +367,7 @@
     (into (vec (mapcat (fn [[t n]]
                          (let [o (old t) facts (test-facts o n)
                                set-attrs (into {} (remove (fn [[k v]] (= v (k o)))) facts)
-                               gone (for [[k v] (select-keys o [:seon.test/runs :seon.test/ms :seon.test/ticks :seon.test/bytes :seon.test/failures])
+                               gone (for [[k v] (select-keys o [:seon.test/ticks :seon.test/bytes :seon.test/failures])
                                           :when (not (contains? facts k))]
                                       [:db/retract [:var/name t] k v])]
                            (cond-> (vec gone) (seq set-attrs) (conj (assoc set-attrs :var/name t)))))

@@ -222,17 +222,17 @@
 
 (defn turn-now
   "The agent's turn number in force: its :seon.agent/turn on this branch, 0 before its first model turn. Every record
-  the agent writes takes it (:seon.eval/turn, :seon.message/turn). See docs/turn.md#the-turn-is-a-number."
+  the agent writes names that turn's model call (:seon.eval/call, :seon.message/call: seon.task/call-ref). See docs/turn.md#the-turn-is-a-number."
   {:malli/schema [:=> [:cat] nat-int?]}
   [] (or (:seon.agent/turn (d/entity (db) [:seon.agent/key (:key @state)])) 0))
 
 (defn own-message-tx
   "Message mid of kind from from (to this agent) as this agent's branch records it, taken at turn n: the one message fact
-  (seon.task/message-tx) naming the agent that took it (:seon.message/agent: its record's messages) and the turn (:seon.message/turn).
+  (seon.task/message-tx) naming the agent that took it (:seon.message/agent: its record's messages) and the turn's model call (:seon.message/call).
   See docs/turn.md#the-turn-is-a-number."
   {:malli/schema [:=> [:cat :string :seon.message/kind :string [:maybe :seon.db/branch] :any nat-int?] :seon.db/tx-data]}
   [mid kind from branch body n]
-  (update (task/message-tx mid kind from branch body) 0 assoc :seon.message/agent {:seon.agent/key (:key @state)} :seon.message/turn n))
+  (update (task/message-tx mid kind from branch body) 0 assoc :seon.message/agent {:seon.agent/key (:key @state)} :seon.message/call (task/call-ref (:key @state) n)))
 
 (defn entries-tx
   "The transaction that writes entries (untaken-entries) on this branch, taken at turn n: the same facts root
@@ -1118,7 +1118,7 @@
   (let [db (db)]
    (if-not (contains? (d/schema db) :seon.test/failures)
     (contract/error :seon.agent/unrecorded #'record-results! "this branch's schema has no :seon.test/* attributes: the run's results stay in the cache only" {})
-   (let [pattern [:var/name :seon.test/digest :seon.test/status :seon.test/failures :seon.test/runs :seon.test/ms :seon.test/ticks :seon.test/bytes]
+   (let [pattern [:var/name :seon.test/digest :seon.test/status :seon.test/failures :seon.test/ticks :seon.test/bytes]
         ;; the tests this run judged, and every test the branch holds a verdict of (its digest may have moved)
         held (d/q '[:find [?e ...] :where [?e :seon.test/digest]] db)
         ran-es (keep #(pdb/eid db :var/name %) (distinct (concat (keys ran) (keys reused) deferred)))

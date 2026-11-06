@@ -33,7 +33,7 @@
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map :seon.host/db]]}
   [n] (let [[db e] (session-of n)
             ;; one eval a turn
-            db (d/db-with db (vec (for [i (range n)] [:db/add [:seon.eval/id (str "e" i)] :seon.eval/turn (inc i)])))]
+            db (d/db-with db (vec (for [i (range n)] {:seon.eval/id (str "e" i) :seon.eval/call (seon.task/call-ref "b/a1" (inc i))})))]
         [(:tree (seon.ctx/build db e :b)) db]))
 
 (deftest a-request-reads-what-the-agents-ctx-holds
@@ -140,7 +140,7 @@
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map :map]]}
   [n]
   (let [[db a] (session-of n)
-        db (d/db-with db (vec (for [i (range n)] [:db/add [:seon.eval/id (str "e" i)] :seon.eval/turn (inc i)])))
+        db (d/db-with db (vec (for [i (range n)] {:seon.eval/id (str "e" i) :seon.eval/call (seon.task/call-ref "b/a1" (inc i))})))
         part (fn [k text] [:section {:id k} text])
         opts {:db db :basis {:commit (d/commit-id db) :task "demo/f" :turn (inc n) :max-turns 9999 :origin :model :agent "b/a1"}
               :help "help" :help-ref [:section 1 1]

@@ -69,16 +69,14 @@
   and tx whoever asks, in a fork of this agent), their results facts on this branch
   (seon.agent/record-results!), a run that failed as a whole too (test-error!), and the task as the
   branch holds it. How the work stands is the status (seon.context/status), drawn from those
-  facts (`status-now`): nothing here is held for it. {:test-run :tests-ms :task}."
+  facts (`status-now`): nothing here is held for it. {:test-run :task}."
   {:malli/schema [:=> [:cat :seon.task/id] :map]}
   [id]
   (let [;; the branch's own texts embedded first, so the plan's vector is the plan's now
         _ (agent/embed-written!)
-        t0 (profile/now-ns)
-        test-run (agent/prove!)
-        tests-ms (long (profile/ms-since t0))]
+        test-run (agent/prove!)]
     (test-error! test-run)
-    {:test-run test-run :tests-ms tests-ms :task (task/task (agent/db) id)}))
+    {:test-run test-run :task (task/task (agent/db) id)}))
 
 (defn- status-now
   "How the work stands now (seon.context/status of the branch and @ctx), the data a turn decides from. The branch may have changed
@@ -97,7 +95,8 @@
   through the turn loop lost every turn that threw after its call answered, and the turns stood for the calls. See docs/turn.md#the-turn-is-a-number."
   {:malli/schema [:=> [:cat :seon.host/db :string] [:map [:model-calls nat-int?] [:tokens {:optional true} :int]]]}
   [db k]
-  (let [calls (map #(d/entity db %) (d/q '[:find [?m ...] :in $ ?k :where [?a :seon.agent/key ?k] [?m :seon.model-call/agent ?a]] db k))
+  ;; a call with no origin is a turn no request has been made for yet: a record named it (seon.task/call-ref)
+  (let [calls (map #(d/entity db %) (d/q '[:find [?m ...] :in $ ?k :where [?a :seon.agent/key ?k] [?m :seon.model-call/agent ?a] [?m :seon.model-call/origin _]] db k))
         ts (keep :seon.model-call/tokens calls)]
     (cond-> {:model-calls (count calls)} (seq ts) (assoc :tokens (reduce + ts)))))
 
@@ -262,9 +261,8 @@
   provider error. The model call is an effect (my.fx :model, session FX1): root's model owner
   admits, performs and answers it; the API key never enters this process."
   {:malli/schema [:=> [:cat :map :map :map [:maybe :string]] [:or :map :map]]}
-  [{:keys [turn max-turns merge? whole?] :as st} {:keys [tests-ms] :as obs} s model-name]
+  [{:keys [turn max-turns merge? whole?] :as st} obs s model-name]
   (let [t (:task obs)
-        t0 (profile/now-ns)
         ;; the turn this is: the agent's number, one past the one in force, which the messages taken now and every record
         ;; this turn writes take
         n (inc (agent/turn-now))
@@ -290,7 +288,6 @@
         db (agent/db)
         {:keys [messages printed]} (context/render db basis {:ctx @ctx/ctx :printed (:printed @agent/state)})
         _ (swap! agent/state assoc :printed printed)
-        context-ms (long (profile/ms-since t0))
         ;; a hash of the bytes sent, which the debug page compares with its redraw
         _ (agent/transact! [{:seon.model-call/id id :seon.model-call/sent-hash (lib/digest (sedn/encode messages))}])
         _ (agent/commit!)
@@ -302,8 +299,7 @@
         prev (:requests @agent/state)]
     (if (contract/error? r)
       ;; the call failed: its typed error on the model call (an error is data), and to the run's end
-      (do (agent/transact! [{:seon.model-call/id id :seon.model-call/error r :seon.model-call/ms model-ms
-                             :seon.model-call/split {:context-ms context-ms :model-ms model-ms}}])
+      (do (agent/transact! [{:seon.model-call/id id :seon.model-call/error r :seon.model-call/ms model-ms}])
           r)
       (let [;; a request answered is the next one's baseline (a failed call stored no prefix); a short
             ;; hit is the model call's outcome, an error this agent folds as :effect (seon.error/note)
@@ -320,15 +316,13 @@
             calls (repl/run-calls (:tool-calls c) (fn [id] {:origin :model :call-id id}) evaluated!)
             rs (mapv :response calls)
             eval-ms (long (profile/ms-since t2))
-            _ (swap! agent/state assoc-in [:turn :evals] rs)
-            t3 (profile/now-ns)]
+            _ (swap! agent/state assoc-in [:turn :evals] rs)]
         ;; a reply with text and no call pauses the agent until someone answers, whatever its proofs say
         ;; (docs/decisions.md#a-reply-with-no-calls-pauses-the-agent-whatever-its-proofs-say)
         ;; (a blank or cut reply is no message: the next turn reads the same state)
         (when (and (empty? calls) (not (str/blank? (:text c))) (not (:truncated? c))) (request-stop! :waiting (:text c)))
         ;; what it answered and how it stopped (its reply, reasoning and finish), the reply's usage, model and counts
-        ;; (seon.model-call, beside the basis it read: seon.context/render makes the text from it), and where the turn's
-        ;; time went as this agent saw it
+        ;; (seon.model-call, beside the basis it read: seon.context/render makes the text from it)
         (agent/transact! [(cond-> (merge (usage c) {:seon.model-call/id id :seon.model-call/forms (count calls)
                                                     :seon.model-call/reply (:text c)
                                                     :seon.model-call/errors (count (filter :ex (map :response (remove :not-run calls))))
@@ -337,10 +331,6 @@
                             (:finish-reason c) (assoc :seon.model-call/finish (:finish-reason c))
                             (:reasoning c) (assoc :seon.model-call/reasoning (:reasoning c))
                             (:model c) (assoc :seon.model-call/model (:model c)))])
-        (agent/transact! [{:seon.model-call/id id
-                           :seon.model-call/split (cond-> {:context-ms context-ms :model-ms model-ms :eval-ms eval-ms
-                                                           :record-ms (long (profile/ms-since t3))}
-                                                    tests-ms (assoc :tests-ms tests-ms))}])
         (cond-> (-> (assoc st :turn (inc turn))
                     ;; what this turn's parts showed, by producer, and what it evaluated (waste)
                     (update :log (fnil conj []) {:n turn
@@ -364,13 +354,12 @@
   ([task take?] (context-block task take? false))
   ([task take? wire?]
    (let [_ (begin! task)
-         {:keys [tests-ms]} (observe task)
+         _ (observe task)
          k (:key @agent/state)
          ;; the agent's own count of reads, from the branch: a process, a run or a wake does not restart it
          n (inc (or (d/q '[:find (max ?n) . :in $ ?a :where [?m :seon.model-call/agent ?a] [?m :seon.model-call/origin :outside] [?m :seon.model-call/n ?n]]
                          (agent/db) (pdb/eid (agent/db) :seon.agent/key k))
                     0))
-         t0 (profile/now-ns)
          turn (inc (agent/turn-now))
          ;; an observer's read records nothing on the branch beyond the read and leaves the print cache
          _ (take! take? turn)
@@ -387,8 +376,7 @@
                 (str/join "\n\n" (remove str/blank? (mapcat (fn [{:keys [content tool-calls]}] (concat (map #(str (:intent %) "\n" (:code %)) tool-calls) [content])) messages))))]
      ;; the read is a model call of this agent, as a model turn's is: what it was built from and what it cost
      (agent/transact! [(cond-> {:seon.model-call/id (str k "/read-" n) :seon.model-call/agent {:seon.agent/key k} :seon.model-call/n n
-                                :seon.model-call/origin :outside :seon.model-call/basis basis
-                                :seon.model-call/split (cond-> {:context-ms (long (profile/ms-since t0))} tests-ms (assoc :tests-ms tests-ms))}
+                                :seon.model-call/origin :outside :seon.model-call/basis basis}
                          true (assoc :seon.model-call/sent-hash (lib/digest (sedn/encode messages))))])
      text)))
 

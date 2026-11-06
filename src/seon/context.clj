@@ -714,7 +714,7 @@
 (def ^:private eval-keys
   "The attributes of an eval a reader of the conversation reads (:seon.db/eval-fact less :seon.eval/agent and :seon.eval/opened). See docs/render.md#a-component-answers-hiccup."
   [:seon.eval/id :seon.eval/by :seon.eval/code :seon.eval/intent :seon.eval/call-id
-   :seon.eval/schema :seon.eval/basis :seon.eval/fns :seon.eval/turn :seon.eval/response])
+   :seon.eval/schema :seon.eval/basis :seon.eval/fns :seon.eval/response])
 
 (defn basis-value
   "The value eval e names by its basis (:seon.eval/basis, @ctx's: the record of e's agent on branch db as of t,
@@ -730,6 +730,12 @@
     (with-meta (assoc (:tree (binding [datahike.index.interface/*reads* nil] (ctx/build (d/as-of db t) a branch))) :t t)
       {:seon.render/schema (:seon.eval/schema e)})))
 
+(defn wire-id
+  "The id eval id goes by on the wire: made from its own id, so two evals never share one, whatever a provider called them (a provider
+  may reuse its ids across replies, which reads as one call answered twice). See docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
+  {:malli/schema [:=> [:cat :string] :string]}
+  [id] (str "eval-" (str/replace id "/" "-")))
+
 (defn eval-messages
   "An eval's part of the conversation as
   provider-neutral messages: a model's eval (it names the provider's call id) is its
@@ -742,9 +748,9 @@
   anyone else's (the user's) is one user message
   {:by :code :response}, the response spliced as printed. See docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
   {:malli/schema [:=> [:cat [:maybe :map] :map] [:vector :seon.model/message]]}
-  [opts {:seon.eval/keys [id by code intent call-id basis turn] :as e}]
+  [opts {:seon.eval/keys [id by code intent call-id basis] :keys [turn] :as e}]
   (let [text (print/record-text (cond-> e basis (assoc-in [:seon.eval/response :value] (basis-value (:db opts) e))) render/model)
-        cid (or call-id (when-not (str/blank? intent) (str "eval-" id)))]
+        cid (when (or call-id (not (str/blank? intent))) (wire-id id))]
     (if cid
       ;; an eval nobody's reply made has no text, and Seon's own is its code alone, like any other call (docs/render.md#the-render-is-an-eval)
       [(cond-> {:role "assistant" :content ""
@@ -783,14 +789,19 @@
   [k v db] (:value (render/model (vary-meta v assoc :seon.render/schema k) {:db db})))
 
 (defn loop-eval?
-  "Is eval e (no call id, no turn) an agent's own turn loop (seon.turn/work!, answering no model's call and taking no turn:
+  "Is eval e (no call id, no model call) an agent's own turn loop (seon.turn/work!, answering no model's call and taking no turn:
   seon.repl/record!)? It holds the agent's turns; no reader of the conversation reads it as work: neither the model (`records`)
   nor the page (seon.render.ui/conversation-list). By its shape, not by who ran it: a session that moved from one agent id to
   another (a stage of a request) keeps the loop evals of the first. Reads e by its paths, never realized whole: the layout reads
   no eval's opened flag. See docs/turn.md#the-turn-is-a-number."
   {:malli/schema [:=> [:cat :any] :boolean]}
   [e]
-  (boolean (and (nil? (:seon.eval/turn e)) (not (:seon.eval/call-id e)))))
+  (boolean (and (nil? (:seon.eval/call e)) (not (:seon.eval/call-id e)))))
+
+(defn first-taken
+  "A message's order in its turn, [db e]: the transaction that named its agent (one seek). See docs/ctx.md#the-pattern."
+  {:malli/schema [:=> [:cat [:tuple :seon.host/db :int]] :int]}
+  [[db e]] (or (:tx (first (d/datoms db :eavt e :seon.message/agent))) 0))
 
 (defn records
   "The conversation of ctx value c (an agent's @ctx, or one seon.ctx/build drew) on db, as [position value schema-key]
@@ -799,26 +810,29 @@
   {:malli/schema [:=> [:cat :map :seon.host/db] [:vector [:tuple [:vector :int] :map :qualified-keyword]]]}
   [c db]
    (let [num (fn [x] (or x 0))
+         ;; the number of the turn whose model call a record names
+         call-n (fn [r] (num (get-in c [:calls (:db/id r) :seon.model-call/n])))
          ;; the agent's own loop eval is left out (a model's eval, nearly all of them, answers a call: no contracted call per record to say so)
          evals (vec (for [[_ v] (get c :evals) :when (not (and (not (:seon.eval/call-id v)) (loop-eval? v)))
                           ;; a model's eval (nearly all of them) answers a call: no contracted call per record to say so
                           :when (not= "context" (:seon.eval/by v))]
                       v))
          ;; the turns with an eval left in c
-         called (into #{} (keep #(when (:seon.eval/call-id %) (:seon.eval/turn %))) evals)
+         called (into #{} (keep #(when (:seon.eval/call-id %) (call-n (:seon.eval/call %)))) evals)
          ;; an eval's issue number: its id's trailing digits (e12 is 12; an example's example/x/e12 too), so e9 comes before e10
          issued (map #(or (some-> (re-find #"\d+$" (:seon.eval/id %)) parse-long) 0) evals)]
-     (->> (concat (map (fn [v n] [[(num (:seon.eval/turn v)) 2 n] (select-keys v eval-keys) :seon.db/eval-fact]) evals issued)
+     (->> (concat (map (fn [v n] (let [t (call-n (:seon.eval/call v))] [[t 2 n] (assoc (select-keys v eval-keys) :turn t) :seon.db/eval-fact])) evals issued)
                   (for [[e v] (get c :messages)]
-                    [[(num (:seon.message/turn v)) 0 (or (:tx (first (d/datoms db :eavt e :seon.message/agent))) 0)]
-                     (select-keys v [:seon.message/id :seon.message/from :seon.message/body :seon.message/turn]) :seon.message/fact])
+                    (let [t (call-n (:seon.message/call v))]
+                      [[t 0 (or (:tx (first (d/datoms db :eavt e :seon.message/agent))) 0)]
+                       (assoc (select-keys v [:seon.message/id :seon.message/from :seon.message/body]) :turn t) :seon.message/fact]))
                   (for [[_ v] (get c :calls)
                         ;; a reply cut at the token limit is no message (seon.turn/act!), unless its calls were kept
                         :when (and (= :model (:seon.model-call/origin v))
                                    (or (contains? called (:seon.model-call/n v))
                                        (and (not (:seon.model-call/truncated v)) (not (str/blank? (:seon.model-call/reply v)))))
                                    (or (some? (:seon.model-call/reasoning v)) (not (str/blank? (:seon.model-call/reply v)))))]
-                    [[(num (:seon.model-call/n v)) 1 0] (select-keys v [:seon.model-call/id :seon.model-call/n :seon.model-call/origin :seon.model-call/reply :seon.model-call/reasoning :seon.model-call/forms])
+                    [[(num (:seon.model-call/n v)) 1 0] (select-keys v [:seon.model-call/id :seon.model-call/n :seon.model-call/origin :seon.model-call/reply :seon.model-call/reasoning])
                      :seon.model-call/fact]))
           (sort-by first)
           vec)))
@@ -869,11 +883,11 @@
         (conj {:role "user" :content "</session>"}))))
 
 (def ^:private session-kinds
-  "The kinds of record `records` answers, each with the attributes that name it and its agent. See
+  "The kinds of record `records` answers, each with the attributes that name it, its agent and its model call. See
   docs/tasks.md#a-task-names-example-sessions."
-  {:seon.db/eval-fact [:seon.eval/id :seon.eval/agent]
-   :seon.message/fact [:seon.message/id :seon.message/agent]
-   :seon.model-call/fact [:seon.model-call/id :seon.model-call/agent]})
+  {:seon.db/eval-fact [:seon.eval/id :seon.eval/agent :seon.eval/call]
+   :seon.message/fact [:seon.message/id :seon.message/agent :seon.message/call]
+   :seon.model-call/fact [:seon.model-call/id :seon.model-call/agent nil]})
 
 (defn- example-record
   "An eval m as example ek keeps it (pre: ek's prefix for ids): its call id and
@@ -887,12 +901,13 @@
       h (assoc-in [:seon.eval/response :handle] h'))))
 
 (defn- example-rekey
-  "Record m of one of `session-kinds` (its id and agent attributes id-k and agent-k) as example ek keeps it: its db
-  attributes dropped, its id under ek (a model call's is `<ek>/<n>`), its agent ek's, an eval as `example-record` has it. See
+  "Record m of one of `session-kinds` (its id, agent and model call attributes id-k, agent-k and call-k) as example ek keeps it: its db
+  attributes dropped, its id under ek (a model call's is `<ek>/<n>`), its agent ek's, its model call ek's of its turn, an eval as `example-record` has it. See
   docs/tasks.md#a-task-names-example-sessions."
-  {:malli/schema [:=> [:cat :string :string :map [:tuple :qualified-keyword :qualified-keyword]] :map]}
-  [ek pre m [id-k agent-k]]
-  (-> (apply dissoc m (filter #(= "db" (namespace %)) (keys m)))
+  {:malli/schema [:=> [:cat :string :string :map [:tuple :qualified-keyword :qualified-keyword [:maybe :qualified-keyword]]] :map]}
+  [ek pre m [id-k agent-k call-k]]
+  (-> (apply dissoc m :turn (filter #(= "db" (namespace %)) (keys m)))
+      (cond-> call-k (assoc call-k (task/call-ref ek (:turn m 0))))
       ;; a model call is `<agent key>/<n>` (docs/turn.md#the-turn-is-a-number), the example's too: the page finds it by that
       (as-> m (if-let [n (:seon.model-call/n m)] (assoc m id-k (str ek "/" n)) (update m id-k #(str ek "/" %))))
       (assoc agent-k [:seon.agent/key ek])

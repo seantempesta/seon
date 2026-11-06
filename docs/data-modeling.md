@@ -15,14 +15,14 @@ Say what a value is by its attribute's schema in `resources/seon/schemas/`, or a
 | A name derived from content, the same on every branch | `{:seon.db/identity true :seon.db/content-id true}` | `:form/id` |
 | Several values | `[:set ...]` | `:form/refs` |
 | A link to another entity | `:seon.db/ref` | `:seon.eval/agent` |
-| A value you will look things up by | `{:seon.db/index true}` | `:seon.eval/turn` |
+| A value you will look things up by | `{:seon.db/index true}` | `:seon.message/branch` |
 | A value that is a whole map or vector | `:seon.db/plain` ([plain data](storage.md#plain-data)) | `:seon.eval/response` |
 
 ## Things relate by refs
 
 A relationship is one ref, written on the many side, and read from either end. An eval names its agent (`:seon.eval/agent`), and the agent's evals are that ref read in reverse, `{[:seon.eval/_agent :as :evals] [*]}` in a pull, so nothing on the agent needs updating when an eval is added. A many-to-many relationship is a set of refs on one side.
 
-Reach for a new entity only when a thing has facts of its own that something reads, and has a life of its own. A number or a keyword on the records it describes is often all there is: a turn is `:seon.eval/turn` and `:seon.message/turn` on each record, and no entity sits between an agent and its evals ([turn](turn.md#the-turn-is-a-number)). Never group things under an entity only so they can be listed together: a value they share lists them.
+Reach for a new entity only when a thing has facts of its own that something reads, and has a life of its own. A number or a keyword on the records it describes is often all there is. A turn's records name its model call (`:seon.eval/call`, `:seon.message/call`), an entity with facts of its own, so agent -> call -> its records is one pull ([turn](turn.md#the-turn-is-a-number)). Never group things under an entity only so they can be listed together: a value they share lists them.
 
 What happened before needs no entity either. A task's earlier states are read from the db's [history](storage.md#history), and an agent's work from its branch.
 

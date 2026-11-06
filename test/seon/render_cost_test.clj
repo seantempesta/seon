@@ -218,7 +218,7 @@
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map :any]]}
   [n]
   (let [k (seon.task/agent-key "b1" :a1)
-        ev (fn [id turn] (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a1} id "a1" {:seon.eval/code "(+ 1 2)" :seon.eval/response {:handle (symbol "result" id) :value 3} :seon.eval/turn turn :seon.eval/call-id (str "c-" id)}))
+        ev (fn [id turn] (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a1} id "a1" {:seon.eval/code "(+ 1 2)" :seon.eval/response {:handle (symbol "result" id) :value 3} :seon.eval/call (seon.task/call-ref k turn) :seon.eval/call-id (str "c-" id)}))
         db0 (reduce d/db-with (ts/test-db)
                     [[{:seon.root/id :root :seon.root/boot "b1"}]
                      (seon.task/agent-tx "b1" :a1 {:status :busy :branch :task-x})])
@@ -285,11 +285,11 @@
                          {:seon.model-call/id (str k "/" (inc i)) :seon.model-call/agent {:seon.agent/key k} :seon.model-call/n (inc i) :seon.model-call/origin :model
                           :seon.model-call/reply (str "Checking step " i ".") :seon.model-call/ms 1}]
                         (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a1} id "a1"
-                                             {:seon.eval/call-id (str "c-" id) :seon.eval/turn (inc i) :seon.eval/code (str "(inc " i ")")
+                                             {:seon.eval/call-id (str "c-" id) :seon.eval/call (seon.task/call-ref k (inc i)) :seon.eval/code (str "(inc " i ")")
                                               :seon.eval/response {:handle (symbol "result" id) :value {:step i}}})
                         (when (zero? (mod i 3))
                           (update (seon.task/message-tx (str "mm-" i) :message "owner" :b (str "How is step " i "?")) 0 assoc
-                                  :seon.message/agent {:seon.agent/key k} :seon.message/turn (inc i))))))
+                                  :seon.message/agent {:seon.agent/key k} :seon.message/call (seon.task/call-ref k (inc i)))))))
         base (reduce d/db-with (ts/test-db) [[{:seon.root/id :root :seon.root/boot "b1"}] (seon.task/agent-tx "b1" :a1 {:status :busy :branch :b})])
         db (reduce (fn [db i] (d/db-with db (vec (turn i)))) base (range (dec n)))
         c (seon.ctx/build db (seon.db/eid db :seon.agent/key k) :b)

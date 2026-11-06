@@ -29,7 +29,7 @@
   arrives in and nothing after it. Seon's platform ops (tests, stats, clone,
   messages, writes) are {:op k} values, handled by `agent-step`."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn- defchecked]] [seon.error :as err] [jolt.nrepl :as nrepl] [seon.intr :as intr] [seon.reader :as reader] [seon.doc :as doc] [seon.agent :as agent] [seon.contract :as contract] [my.db] [my.agent] [my.schema] [malli.registry :as mr]
+  (:require [seon.contract :refer [defn defn- defchecked]] [seon.error :as err] [jolt.nrepl :as nrepl] [seon.intr :as intr] [seon.reader :as reader] [seon.doc :as doc] [seon.agent :as agent] [seon.task :as task] [seon.contract :as contract] [my.db] [my.agent] [my.schema] [malli.registry :as mr]
             [seon.program :as program] [jolt.analyzer] [seon.lib :as lib] [seon.print :as print] [seon.print.select :as select] [seon.render :as render] [seon.context :as context] [seon.ctx :as ctx] [seon.web.html :as h] [seon.profile :as profile] [seon.sock :as sock] [seon.step :as step] [clojure.core.async :as a] [clojure.core.async.flow :as flow]
             [jolt.ffi :as ffi] [seon.config :as cfg] [clojure.test] [datahike.api :as d] [seon.db :as pdb] [seon.edn :as sedn]))
 
@@ -613,7 +613,9 @@
   which seon.context/current-ns reads. See docs/render.md#a-component-answers-hiccup."
   {:malli/schema [:=> [:cat :map :string :string :map] :seon.db/tx-data]}
   [who id by details]
-  [(into {:seon.eval/id id :seon.eval/agent "agent" :seon.eval/by by} details)
+  ;; the agent one upsert, the model call naming it by the same tempid: two would refuse a new agent's first record
+  [(into {:seon.eval/id id :seon.eval/agent "agent" :seon.eval/by by}
+         (cond-> details (:seon.eval/call details) (assoc-in [:seon.eval/call :seon.model-call/agent] "agent")))
    (cond-> (assoc who :db/id "agent")
      (and (:seon.agent/key who) (symbol? (get-in details [:seon.eval/response :ns]))) (assoc :seon.agent/ns (get-in details [:seon.eval/response :ns])))])
 
@@ -664,7 +666,7 @@
 
 (defn- record!
   "Record response r of code, eval fact rec (`record-details`), on this branch through the agent's write path (an agent's
-  only), under the turn in force (:seon.eval/turn, seon.agent/turn-now), with the defs its forms recorded.
+  only), under the turn in force (its model call, :seon.eval/call: seon.agent/turn-now, seon.task/call-ref), with the defs its forms recorded.
   Answers r, with the id of its record (:record) when recorded."
   {:malli/schema [:=> [:cat :map :map :string :map] :map]}
   [r rec code req]
@@ -678,8 +680,9 @@
       (try (agent/transact! (into defs (record-tx {:seon.agent/key (:key @agent/state) :seon.agent/id (:id @agent/state)} id (by req)
                                                   (let [working? (some? (:turn @agent/state))]
                                                     (cond-> rec
-                                                      ;; the turn loop's own eval (the agent working a task, no model call, made by the agent) is no conversation record: it takes no turn
-                                                      (not (and working? (not (:call-id req)) (not (#{:ui :outside :context :insert} (:origin req))))) (assoc :seon.eval/turn (agent/turn-now)))))))
+                                                      ;; the turn loop's own eval (the agent working a task, no model call, made by the agent) and a context read are no conversation record: they name no call
+                                                      (not (or (= :context (:origin req)) (and working? (not (:call-id req)) (not (#{:ui :outside :insert} (:origin req))))))
+                                                      (assoc :seon.eval/call (task/call-ref (:key @agent/state) (agent/turn-now))))))))
            (assoc r :record id)
            (catch Throwable e
              (assoc r :unrecorded (contract/error :seon.agent/unrecorded #'record! (str "the branch refused this eval's record: " (ex-message e)) {}))))
@@ -915,7 +918,7 @@
                   req (cond-> (req-of id)
                         (not (clojure.string/blank? intent)) (assoc :intent intent)
                         (seq repairs) (assoc :repaired (context/repaired src repairs)))
-                  failed (some #(when (or (:ex (:response %)) (contract/error? (:value (:response %)))) (:id %)) acc)
+                  failed (some #(when (or (:ex (:response %)) (contract/error? (:value (:response %)))) (context/wire-id (name (:handle (:response %))))) acc)
                   why (if failed
                         (contract/error :seon.turn/not-run #'run-calls (str "not run: call " failed " of this reply failed before it (its result says why)") {:after failed})
                         (if problem

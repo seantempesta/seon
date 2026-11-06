@@ -56,7 +56,6 @@
  :var/ns :seon.db/ref
  :var/form :seon.db/ref
  :var/doc :string
- :var/arity :int
  ;; what a defined var holds (:fn :test :macro :value :multi :protocol :protocol-fn :type
  ;; :ctor) and its declared contract, as text
  :var/kind :keyword
@@ -71,8 +70,6 @@
  :seon.test/digest [:and {:seon.db/no-history? true} :string]
  :seon.test/status [:and {:seon.db/no-history? true} [:enum :green :red :flaky :deferred]]
  :seon.test/failures [:and {:seon.db/no-history? true} [:vector :seon.problems/assertion]]
- :seon.test/runs [:and {:seon.db/no-history? true} :int]
- :seon.test/ms [:and {:seon.db/no-history? true} :int]
  :seon.test/ticks [:and {:seon.db/no-history? true} :int]
  :seon.test/bytes [:and {:seon.db/no-history? true} :int]
  :method/key [:and {:seon.db/identity true :seon.db/content-id true} :string]
@@ -81,7 +78,6 @@
  :method/form :seon.db/ref
  :impl/key [:and {:seon.db/identity true :seon.db/content-id true} :string]
  :impl/protocol :qualified-symbol
- :impl/type :string
  :impl/form :seon.db/ref
  ;; A SCHEMA ENTRY of a schema resource (resources/seon/schemas/*.edn) is program too
  ;; (seon.source; v1: the program is entities, schemas among them): its key, its form as
@@ -108,17 +104,17 @@
                     [:ns/form {:optional true} :ns/form] [:ns/file {:optional true} :ns/file] [:ns/tail {:optional true} :ns/tail]]
  :seon.db/var-fact [:map {:seon.db/attributes true :seon.ctx/pattern [* {[:var/form :as :form] [*]}]}
                      [:var/name :var/name] [:var/ns {:optional true} :var/ns] [:var/form {:optional true} :var/form]
-                     [:var/doc {:optional true} :var/doc] [:var/arity {:optional true} :var/arity]
+                     [:var/doc {:optional true} :var/doc]
                      [:var/kind {:optional true} :var/kind] [:var/contract {:optional true} :var/contract]
                      [:seon.test/digest {:optional true} :seon.test/digest] [:seon.test/status {:optional true} :seon.test/status]
-                     [:seon.test/failures {:optional true} :seon.test/failures] [:seon.test/runs {:optional true} :seon.test/runs]
-                     [:seon.test/ms {:optional true} :seon.test/ms] [:seon.test/ticks {:optional true} :seon.test/ticks]
+                     [:seon.test/failures {:optional true} :seon.test/failures] 
+                     [:seon.test/ticks {:optional true} :seon.test/ticks]
                      [:seon.test/bytes {:optional true} :seon.test/bytes]]
  :seon.db/method-fact [:map {:seon.db/attributes true}
                         [:method/key :method/key] [:method/multi :method/multi] [:method/dispatch :method/dispatch]
                         [:method/form {:optional true} :method/form]]
  :seon.db/impl-fact [:map {:seon.db/attributes true}
-                      [:impl/key :impl/key] [:impl/protocol :impl/protocol] [:impl/type :impl/type]
+                      [:impl/key :impl/key] [:impl/protocol :impl/protocol]
                       [:impl/form {:optional true} :impl/form]]
  ;; ---- the example program's task and note ----
  :task/name [:and {:seon.db/identity true} :keyword]
@@ -155,8 +151,8 @@
  :seon.eval/code :string
  :seon.eval/intent :string
  :seon.eval/call-id :string
- ;; the agent's turn number in force when it was written (0 before its first turn; absent on root's)
- :seon.eval/turn [:and {:seon.db/index true} :int]
+ ;; the model call of the turn in force when it was written (seon.task/call-ref; absent on root's, on an agent's own turn loop and on a context read)
+ :seon.eval/call :seon.db/ref
  :seon.eval/fns [:vector :map]
  :seon.eval/schema :qualified-keyword
  :seon.eval/basis [:map [:t :int] [:branch :seon.db/branch]]
@@ -214,11 +210,11 @@
                      [:seon.eval/code :seon.eval/code] [:seon.eval/intent {:optional true} :seon.eval/intent]
                      [:seon.eval/call-id {:optional true} :seon.eval/call-id]
                      [:seon.eval/schema {:optional true} :seon.eval/schema] [:seon.eval/basis {:optional true} :seon.eval/basis]
-                     [:seon.eval/fns {:optional true} :seon.eval/fns] [:seon.eval/turn {:optional true} :seon.eval/turn]
+                     [:seon.eval/fns {:optional true} :seon.eval/fns] [:seon.eval/call {:optional true} :seon.eval/call]
                      [:seon.eval/response :seon.eval/response] [:seon.eval/opened {:optional true} :seon.eval/opened]]
  ;; an entity's record (seon.ctx, :seon.ctx/pattern: Datahike's pull syntax as data, docs/ctx.md#the-pattern;
  ;; its joins are the page walk's units, seon.render/units), each member rendered by its own schema's render
- :seon.db/agent-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.agent/id :seon.agent/status :seon.agent/branch :seon.agent/description] :seon.ctx/pattern [* {[:seon.agent/task :as :task] :seon.task/task-fact} {[:seon.model-call/_agent :as :calls] [:seon.model-call/id :seon.model-call/n :seon.model-call/origin :seon.model-call/reply :seon.model-call/reasoning :seon.model-call/finish :seon.model-call/truncated :seon.model-call/error :seon.model-call/forms]} {[:seon.eval/_agent :as :evals] [*]} {[:seon.message/_agent :as :messages] [*]} {[:seon.cite/_of :as :cites] :seon.cite/cite-fact} {[:seon.search/_of :as :searches] :seon.search/search-fact}] :seon.render/html seon.render.ui/agent}
+ :seon.db/agent-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.agent/id :seon.agent/status :seon.agent/branch :seon.agent/description] :seon.ctx/pattern [* {[:seon.agent/task :as :task] :seon.task/task-fact} {[:seon.model-call/_agent :as :calls] [:seon.model-call/id :seon.model-call/n :seon.model-call/origin :seon.model-call/reply :seon.model-call/reasoning :seon.model-call/finish :seon.model-call/truncated :seon.model-call/error {[:seon.eval/_call :as :evals] [:db/id]} {[:seon.message/_call :as :messages] [:db/id]}]} {[:seon.eval/_agent :as :evals] [*]} {[:seon.message/_agent :as :messages] [*]} {[:seon.cite/_of :as :cites] :seon.cite/cite-fact} {[:seon.search/_of :as :searches] :seon.search/search-fact}] :seon.render/html seon.render.ui/agent}
                        [:seon.agent/key :seon.agent/key] [:seon.agent/id {:optional true} :seon.agent/id]
                        [:seon.agent/root {:optional true} :seon.agent/root] [:seon.agent/branch {:optional true} :seon.agent/branch]
                        [:seon.agent/status {:optional true} :seon.agent/status]
@@ -491,15 +487,15 @@
  :seon.message/branch [:and {:seon.db/index true} :seon.db/branch]
  ;; the agent that took it (written by the turn that takes it, seon.agent/entries-tx)
  :seon.message/agent [:and {:seon.db/index true} :seon.db/ref]
- ;; the turn that read it: the number a model turn that takes it (seon.turn/take!) or the agent's code (seon.agent/messages)
- ;; takes it under; the loop's own messages (seon.turn/tell-error!) the next turn's
- :seon.message/turn [:and {:seon.db/index true} :int]
+ ;; the model call of the turn that read it: the turn a model turn that takes it (seon.turn/take!) or the agent's code (seon.agent/messages)
+ ;; takes it under; the loop's own messages (seon.turn/tell-error!) the next turn's (docs/turn.md#the-turn-is-a-number)
+ :seon.message/call :seon.db/ref
  :seon.message/body [:string]
  ;; what an entry is (design one-derivation 4.1 section 5): a person's words (:message), root's at a
  ;; stage boundary (:stage), the judge's verdict with its reasons (:verdict); each wakes its session
  :seon.message/kind [:and {:seon.db/index true} [:enum :message :stage :verdict]]
  :seon.message/fact [:map {:seon.db/attributes true :seon.render/html seon.render.ui/message :seon.render/model seon.context/message-messages} [:seon.message/id :seon.message/id] [:seon.message/from :seon.message/from]
-                     [:seon.message/branch {:optional true} :seon.message/branch] [:seon.message/agent {:optional true} :seon.message/agent] [:seon.message/turn {:optional true} :seon.message/turn] [:seon.message/body :seon.message/body]
+                     [:seon.message/branch {:optional true} :seon.message/branch] [:seon.message/agent {:optional true} :seon.message/agent] [:seon.message/call {:optional true} :seon.message/call] [:seon.message/body :seon.message/body]
                      [:seon.message/kind {:optional true} :seon.message/kind]]
  ;; ---- written by an agent on its own branch; they reach main with its merge ----
  ;; (my.task/status) asked before any turn of this process observed its task: why, and what runs its proofs
@@ -524,7 +520,6 @@
  :seon.process/id [:and {:seon.db/identity true} :string]
  :seon.process/agent [:and {:seon.db/index true} :seon.db/ref]
  :seon.process/pid :int
- :seon.process/mem-mb :double
  ;; the form it evaluates now; retracted when it returns
  :seon.process/running :string
  :seon.process/forked-ms :double
@@ -535,7 +530,7 @@
  :seon.process/stall [:map [:quiet-ms :int] [:last-op {:optional true} [:maybe :seon.agent/last-op]]]
   :seon.process/process-fact [:map {:seon.db/attributes true}
                           [:seon.process/id :seon.process/id] [:seon.process/agent :seon.process/agent]
-                          [:seon.process/pid {:optional true} :seon.process/pid] [:seon.process/mem-mb {:optional true} :seon.process/mem-mb]
+                          [:seon.process/pid {:optional true} :seon.process/pid]
                           [:seon.process/running {:optional true} :seon.process/running]
                           [:seon.process/forked-ms {:optional true} :seon.process/forked-ms] [:seon.process/ended-ms {:optional true} :seon.process/ended-ms]
                           [:seon.process/stall {:optional true} :seon.process/stall]]
@@ -586,10 +581,6 @@
  ;; a hash of the bytes a request sent (seon.lib/digest of its messages, seon.turn/act!): the debug page draws a turn again from
  ;; its records at its commit with today's renders, and says when its redraw hashes to something else (docs/render.md#the-debug-page-is-the-wire-request)
  :seon.model-call/sent-hash [:string {:min 16 :max 16}]
- ;; where the turn's time went, as the agent saw it: the proof run, the context render, the
- ;; model round trip, the reply's evaluations, the turn's record (ms)
- :seon.model-call/split [:map [:tests-ms {:optional true} :int] [:context-ms :int]
-                   [:model-ms {:optional true} :int] [:eval-ms {:optional true} :int] [:record-ms {:optional true} :int]]
  :seon.model-call/fact [:map {:seon.db/attributes true :seon.render/html seon.render.ui/model-call-view :seon.render/model seon.context/turn-messages}
                           [:seon.model-call/id :seon.model-call/id] [:seon.model-call/agent {:optional true} :seon.model-call/agent]
                           [:seon.model-call/n {:optional true} :seon.model-call/n] [:seon.model-call/origin {:optional true} :seon.model-call/origin]
@@ -602,8 +593,7 @@
                           [:seon.model-call/cache-hit-tokens {:optional true} :seon.model-call/cache-hit-tokens]
                           [:seon.model-call/cache-miss-tokens {:optional true} :seon.model-call/cache-miss-tokens]
                           [:seon.model-call/model {:optional true} :seon.model-call/model]
-                          [:seon.model-call/basis {:optional true} :seon.model-call/basis] [:seon.model-call/sent-hash {:optional true} :seon.model-call/sent-hash]
-                          [:seon.model-call/split {:optional true} :seon.model-call/split]]
+                          [:seon.model-call/basis {:optional true} :seon.model-call/basis] [:seon.model-call/sent-hash {:optional true} :seon.model-call/sent-hash]]
  ;; ---- a first move scored (seon.judge, my.root/first-moves!) ----
  ;; the digest of the request it answers (seon.judge/digest): the same context is scored once
  :seon.judge/digest [:and {:seon.db/identity true} :string]

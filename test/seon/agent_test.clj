@@ -782,8 +782,8 @@
   ;; red with its digest and its failing assertions as data, main holding none of it; fixed and run again, green with no
   ;; failure and the sums started over at the new digest; a run that changes nothing writes nothing
   (let [facts "(let [pull (fn [db] (if-let [e (seon.db/eid db :var/name 'facts-test/r)] (datahike.api/pull db '[*] e) {}))]
-                 {:branch (select-keys (pull (seon.agent/db)) [:seon.test/digest :seon.test/status :seon.test/failures :seon.test/runs])
-                  :main (select-keys (pull (seon.agent/heard-main)) [:seon.test/digest :seon.test/status :seon.test/failures :seon.test/runs])})"
+                 {:branch (select-keys (pull (seon.agent/db)) [:seon.test/digest :seon.test/status :seon.test/failures :seon.test/ticks])
+                  :main (select-keys (pull (seon.agent/heard-main)) [:seon.test/digest :seon.test/status :seon.test/failures :seon.test/ticks])})"
         [_ red fact-red _ green fact-green again]
         (in-agent ["(ns facts-test (:require [clojure.test :refer [deftest is]])) (deftest r (is (= 1 2) \"it is one\"))"
                    "(select-keys (my.agent/prove) [:results])" facts
@@ -801,7 +801,7 @@
     (let [{:keys [branch]} (:value fact-green)]
       (is (= :green (:seon.test/status branch)))
       (is (nil? (:seon.test/failures branch)) "no failures while green")
-      (is (= 1 (:seon.test/runs branch)) "the sums start over at the new digest"))
+      (is (pos? (:seon.test/ticks branch)) "the sums start over at the new digest"))
     (is (true? (:value again)) "a run that changes nothing writes no datoms")))
 
 (deftest an-agents-greens-and-a-checkouts-are-one-store
@@ -1203,16 +1203,16 @@
                                        "      (filter #(#{\"assistant\" \"tool\"} (:role %))) (remove #(and (= \"assistant\" (:role %)) (empty? (:tool-calls %)))) (mapv #(select-keys % [:role :tool-calls :tool-call-id :content]))))")]))
                              {:config {:seon.config.ai/script 'seon.fixtures/two-calls}})
         end (:value end)
-        ;; the page Seon ran as evals (docs/render.md#the-render-is-an-eval) sits among the model's own: its calls are "eval-<id>"
-        seon? (fn [m] (or (some #(str/starts-with? (:id %) "eval-") (:tool-calls m)) (str/starts-with? (str (:tool-call-id m)) "eval-")))
+        ;; the page Seon ran as evals (docs/render.md#the-render-is-an-eval) sits among the model's own
+        seon? (fn [m] (or (some #(str/includes? (:code %) "my.render/") (:tool-calls m)) (and (= "tool" (:role m)) (str/includes? (:content m) "seon.render.ui/"))))
         [a0 r0 a1 r1 :as ms] (remove seon? (:value msgs))]
     (is (= [:cap 2] [(:outcome end) (:model-calls end)]) "two model calls (the proof stays red), then the cap")
     (is (= 2 (count (filter seon? (:value msgs)))) "and the page Seon ran, whole, its call answered; nothing it shows moved after")
     (is (= ["assistant" "tool" "assistant" "tool"] (mapv :role ms)) "each reply followed by its call's answer")
-    (is (= [{:id "call-0-0" :code "(+ 20 21)" :intent "Add twenty and twenty-one."}] (:tool-calls a0)))
-    (is (= "call-0-0" (:tool-call-id r0)) "the answer names its call")
+    (is (= [{:id (:tool-call-id r0) :code "(+ 20 21)" :intent "Add twenty and twenty-one."}] (:tool-calls a0)))
+    (is (re-matches #"eval-e\d+" (:tool-call-id r0)) "the answer names its call, by the eval's own id")
     (is (str/includes? (:content r0) "41") "the first call's answer")
-    (is (= [{:id "call-1-0" :code "(+ 1 41)" :intent "Add one to the value the last call showed."}] (:tool-calls a1)) "the second call was made after the first call's answer, from it")
+    (is (= [{:id (:tool-call-id r1) :code "(+ 1 41)" :intent "Add one to the value the last call showed."}] (:tool-calls a1)) "the second call was made after the first call's answer, from it")
     (is (str/includes? (:content r1) "42") "and both answers are in the conversation")))
 
 (deftest the-page-is-an-eval-in-the-conversation-and-the-prefix-holds
@@ -1294,13 +1294,13 @@
                                 (str "(let [db (seon.agent/db)]"
                                      " (->> (:messages (seon.context/render db {:commit (datahike.api/commit-id db) :task " (pr-str task) 
                                      "                                       :turn 2 :max-turns 1 :origin :model :agent (:key @seon.agent/state)}))"
-                                     "      (filter #(= \"tool\" (:role %))) (remove #(clojure.string/starts-with? (str (:tool-call-id %)) \"eval-\")) (mapv #(select-keys % [:tool-call-id :content]))))")]))
+                                     "      (filter #(= \"tool\" (:role %))) (remove #(clojure.string/includes? (:content %) \"seon.render.ui/\")) (mapv #(select-keys % [:tool-call-id :content]))))")]))
                            {:config {:seon.config.ai/script 'seon.fixtures/calls-one-throws}})
         [r0 r1 r2 :as rs] (:value msgs)]
-    (is (= ["call-0-0" "call-0-1" "call-0-2"] (mapv :tool-call-id rs)) (str "every call has its result, by its id: " (pr-str msgs)))
+    (is (= 3 (count (distinct (mapv :tool-call-id rs)))) (str "every call has its result, by its id: " (pr-str msgs)))
     (is (str/includes? (:content r1) "boom") "the second call's error")
     (is (str/includes? (:content r2) "not-run") "the third call was not run, and its result says so")
-    (is (str/includes? (:content r2) "call-0-1") "naming the call that threw")
+    (is (str/includes? (:content r2) (:tool-call-id r1)) "naming the call that threw")
     (is (not (str/includes? (:content r2) ":value 2")) "(inc a) never ran")))
 
 (deftest an-error-answer-stops-the-replys-later-calls
@@ -1313,10 +1313,10 @@
                                 (str "(let [db (seon.agent/db)]"
                                      " (->> (:messages (seon.context/render db {:commit (datahike.api/commit-id db) :task " (pr-str task) 
                                      "                                       :turn 2 :max-turns 1 :origin :model :agent (:key @seon.agent/state)}))"
-                                     "      (filter #(= \"tool\" (:role %))) (remove #(clojure.string/starts-with? (str (:tool-call-id %)) \"eval-\")) (mapv #(select-keys % [:tool-call-id :content]))))")]))
+                                     "      (filter #(= \"tool\" (:role %))) (remove #(clojure.string/includes? (:content %) \"seon.render.ui/\")) (mapv #(select-keys % [:tool-call-id :content]))))")]))
                            {:config {:seon.config.ai/script 'seon.fixtures/calls-one-refused}})
         [_ r1 r2 :as rs] (:value msgs)]
-    (is (= ["call-0-0" "call-0-1" "call-0-2"] (mapv :tool-call-id rs)) (str "every call has its result, by its id: " (pr-str msgs)))
+    (is (= 3 (count (distinct (mapv :tool-call-id rs)))) (str "every call has its result, by its id: " (pr-str msgs)))
     (is (str/includes? (:content r1) "edit-refused") "the second call's error value")
     (is (str/includes? (:content r2) "not-run") "the third call was not run, and its result says so")
     (is (not (str/includes? (:content r2) ":value 2")) "(inc a) never ran")))
@@ -1336,7 +1336,7 @@
                                 (str "(let [db (seon.agent/db)]"
                                      " (->> (:messages (seon.context/render db {:commit (datahike.api/commit-id db) :task " (pr-str task) 
                                      "                                       :turn 2 :max-turns 1 :origin :model :agent (:key @seon.agent/state)}))"
-                                     "      (filter #(= \"tool\" (:role %))) (remove #(clojure.string/starts-with? (str (:tool-call-id %)) \"eval-\")) (mapv :content)))")]))
+                                     "      (filter #(= \"tool\" (:role %))) (remove #(clojure.string/includes? (:content %) \"seon.render.ui/\")) (mapv :content)))")]))
                            {:config {:seon.config.ai/script 'seon.fixtures/two-forms-in-a-call}})
         [r0 r1 :as rs] (:value msgs)]
     (is (= 2 (count rs)) (str "each call its one result: " (pr-str msgs)))
@@ -1979,14 +1979,14 @@
                                         ;; an outside eval after the turn takes the number in force
                                         "(+ 1 2)"
                                         (str "(let [db (seon.agent/db) m (datahike.api/pull db '[*] [:seon.model-call/id (str (:key @seon.agent/state) \"/1\")])"
-                                             "      evals (vec (datahike.api/q '[:find ?i ?c :where [?e :seon.eval/turn 1] [?e :seon.eval/call-id _] [?e :seon.eval/id ?i] [?e :seon.eval/code ?c]] db))"
+                                             "      evals (vec (datahike.api/q '[:find ?i ?c :where [?mc :seon.model-call/n 1] [?e :seon.eval/call ?mc] [?e :seon.eval/call-id _] [?e :seon.eval/id ?i] [?e :seon.eval/code ?c]] db))"
                                              "      msgs (fn [db] (vec (datahike.api/q '[:find ?id ?f ?b ?k :where [?m :seon.message/id ?id] [?m :seon.message/from ?f] [?m :seon.message/body ?b] [?m :seon.message/agent ?a] [?a :seon.agent/key ?k]] db)))]"
                                              "  {:calls (mapv (fn [[i c]] {:eval i :code c}) evals) :reply (:seon.model-call/reply m) :basis-keys (set (keys (:seon.model-call/basis m)))"
                                              "   :agent-key (:key @seon.agent/state) :on-branch (msgs db)"
                                              "   :turn (:seon.agent/turn (datahike.api/entity db [:seon.agent/key (:key @seon.agent/state)]))"
-                                             "   :eval-turns (set (datahike.api/q '[:find ?by ?t :where [?e :seon.eval/by ?by] [?e :seon.eval/turn ?t]] db))"
+                                             "   :eval-turns (set (datahike.api/q '[:find ?by ?t :where [?e :seon.eval/by ?by] [?e :seon.eval/call ?c] [?c :seon.model-call/n ?t]] db))"
                                              "   :loop-eval-turns (vec (datahike.api/q '[:find [?t ...] :where [?e :seon.eval/by ?b] [(not= ?b \"outside\")] [(not= ?b \"seon\")] [(missing? $ ?e :seon.eval/call-id)] [?e :seon.eval/turn ?t]] db))"
-                                             "   :message-turns (vec (datahike.api/q '[:find [?t ...] :where [?m :seon.message/turn ?t]] db))"
+                                             "   :message-turns (vec (datahike.api/q '[:find [?t ...] :where [?m :seon.message/call ?c] [?c :seon.model-call/n ?t]] db))"
                                              "   :call-ids (vec (datahike.api/q '[:find [?id ...] :where [?m :seon.model-call/id ?id]] db))"
                                              "   :committed (msgs (datahike.api/commit-as-db db (get-in m [:seon.model-call/basis :commit])))"
                                              "   :intent (mapv #(datahike.api/q '[:find ?r . :in $ ?i :where [?e :seon.eval/id ?i] [?e :seon.eval/intent ?r]] db %) (map first evals))})")
@@ -2009,7 +2009,7 @@
     (is (= ["check the sum before the proof"] intent) "whose record keeps the intent beside it")
     ;; docs/turn.md#the-turn-is-a-number: the agent's number, the model call's id and the number each record took
     (is (= 1 (:turn probed)) "the agent's first turn")
-    (is (= [(str agent-key "/1")] (:call-ids probed)) "its model call is <agent key>/<n>")
+    (is (= [(str agent-key "/0") (str agent-key "/1")] (sort (:call-ids probed))) "its model call is <agent key>/<n>")
     (is (= [1] (:message-turns probed)) "the message the turn took carries its number")
     (is (= #{[(:agent @names) 1] ["outside" 1] ["seon" 0]} (:eval-turns probed)) "the model's eval carries the turn, so does an outside eval after it, the number in force, and the page Seon ran before the turn moved, the turn before")
     (is (empty? (:loop-eval-turns probed)) "the turn loop's own eval, no conversation record, takes none")))

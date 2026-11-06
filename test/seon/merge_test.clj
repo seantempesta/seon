@@ -148,7 +148,7 @@
 ;; on an entity with no :var/name, and its next test run threw on the nil test key
 (deftest a-var-main-deletes-leaves-no-facts-on-the-branch
   (let [e #(:db/id (d/entity % [:var/name 'app/g]))
-        ours (with (base) (fn [db] [{:db/id (e db) :seon.test/digest "d1" :seon.test/status :green :seon.test/runs 1}]))
+        ours (with (base) (fn [db] [{:db/id (e db) :seon.test/digest "d1" :seon.test/status :green}]))
         theirs (with (base) (fn [db] [[:db/retractEntity (e db)]]))
         r (tw (base) theirs)
         merged (d/db-with ours (pm/merge-tx ours (base) theirs (:apply r) #{}))]
