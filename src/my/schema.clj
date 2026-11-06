@@ -57,11 +57,21 @@
         entity? (:seon.db/attributes (m/properties (m/deref (m/schema k {:registry reg}))))]
     (if (or (contract/error? dcl) entity? (= dcl (select-keys (get (d/schema db) k) (keys dcl)))) [] [dcl])))
 
+(defn- type-change
+  "The refusal of decls that give an attribute db stores another value type, or nil. See docs/data-modeling.md#data-modeling."
+  {:malli/schema [:=> [:cat :seon.host/db :qualified-keyword [:sequential :map]] [:maybe :seon.schema/registration-refused]]}
+  [db k decls]
+  (some (fn [{a :db/ident t :db/valueType}]
+          (let [held (get-in (d/schema db) [a :db/valueType])]
+            (when (and held t (not= held t))
+              (refused k :type-change (str a " holds " held " and an attribute's type cannot change; register " t " under a new name")))))
+        decls))
+
 (defn registration
   "Register form v as schema k on db's program: {:tx tx-data :registration {:seon.schema/key k
   :seon.schema/definition v}}, judged against the whole population (the binary's forms with
   db's changes and this one), or :seon.schema/registration-refused: v does not read back as
-  itself, does not compile, or declares an attribute Datahike cannot store. The entry keeps
+  itself, does not compile, declares an attribute Datahike cannot store, or gives a stored attribute another type. The entry keeps
   its resource or takes new-key-file's; a scratch key (scratch?) gets none and is no
   program. A new or changed attribute's declaration comes with it (the key itself is one when
   it is storable and no entity map: own-declaration), and a registration of an
@@ -77,13 +87,15 @@
                                               " is no EDN: a predicate is its symbol, so quote the form ('[:vector nat-int?]) or the predicate ('nat-int?)"))))]
     (if (contract/error? judged)
       judged
-      (let [e (some->> (pdb/eid db :schema/key k) (d/entity db))
+      (let [decls (distinct (concat (:decls judged) (own-declaration db k (:registry judged))))
+            e (some->> (pdb/eid db :schema/key k) (d/entity db))
             file (cond scratch? nil (:schema/file e) (:schema/file e) :else (new-key-file db k))]
-        {:tx (into (cond-> [(cond-> {:schema/key k :schema/form text} file (assoc :schema/file file))]
-                     (:schema/source e) (conj [:db/retract (:db/id e) :schema/source true]))
-                   (distinct (concat (:decls judged) (own-declaration db k (:registry judged)))))
-         :registration (cond-> {:seon.schema/key k :seon.schema/definition v}
-                         (contains? (d/schema db) k) (assoc :seon.schema.usage/check (usage-check db k (:registry judged))))}))))
+        (or (type-change db k decls)
+            {:tx (into (cond-> [(cond-> {:schema/key k :schema/form text} file (assoc :schema/file file))]
+                         (:schema/source e) (conj [:db/retract (:db/id e) :schema/source true]))
+                       decls)
+             :registration (cond-> {:seon.schema/key k :seon.schema/definition v}
+                             (contains? (d/schema db) k) (assoc :seon.schema.usage/check (usage-check db k (:registry judged))))})))))
 
 (declare unknown-key)
 

@@ -635,6 +635,13 @@
           [m true]
           [{:seon.value/gone {:type (.getName (class v)) :over bound}} false])))))
 
+(defn- kept-form
+  "A form's value among a call's several, as `kept` but drawn by its model render when its schema declares one: the record holds one schema a value, so a member is its render here, as a whole value's is when it prints."
+  {:malli/schema [:=> [:cat :any] :any]}
+  [v]
+  (let [drawn (when (:seon.render/schema (meta v)) (some-> (render/model v) :value (contract/plainly (cfg/value :seon.config.store/max-value-chars))))]
+    (if (some? drawn) drawn (first (kept v)))))
+
 (defn record-details
   "What an eval records, each its own attribute of its entity (:seon.eval/code, :response, :schema, :basis, :intent,
 :call-id, :fns; each only when present): the code; the response whole with its
@@ -653,7 +660,10 @@
         ;; travels through select-keys, assoc and dissoc, so a map made of it is the data it holds, never a basis
         ctx? (and (contains? resp :value) (some? v) (identical? v @ctx/ctx))
         basis (when ctx? (select-keys v [:t :branch]))
-        [kv drawn?] (when (and (contains? resp :value) (not basis)) (kept v))
+        ;; a call of several forms answers a vector of their values, each read as it would be alone: one form's size or
+        ;; its model render is that form's, so (my.agent/prove) after a deftest reads as it does by itself
+        [kv drawn?] (when (and (contains? resp :value) (not basis))
+                      (if (:forms resp) [(mapv kept-form v) false] (kept v)))
         ;; a value its model render has already drawn prints as it is
         schema (when (and (contains? resp :value) (not drawn?)) (when-let [k (:seon.render/schema (meta v))] (when (or ctx? (not= :seon.ctx/ctx k)) k)))]
     (cond-> {:seon.eval/code code

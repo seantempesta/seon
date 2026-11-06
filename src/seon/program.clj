@@ -1042,7 +1042,7 @@
   [[kind a b]]
   (case kind
     :var (when-let [n (find-ns (symbol (namespace a)))] (ns-unmap n (symbol (name a))))
-    :method (when-let [v (find-var a)] (when (instance? clojure.lang.MultiFn @v) (remove-method @v (read-string b))))
+    :method (when-let [v (find-var a)] (when (instance? clojure.lang.MultiFn @v) (remove-method @v (sedn/decode b))))
     nil))
 
 (defn- loadable

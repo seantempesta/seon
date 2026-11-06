@@ -496,3 +496,13 @@
     (let [t (seon/response-text {:handle 'result/e1 :value (apply str (repeat 100000 "x")) :ms 5.2 :ticks 873000 :bytes 4300000})]
       (is (str/includes? t ":cost ") "the value was cut, and its cost is shown")
       (is (<= (count t) (seon.print.select/estimate-chars seon/default-budget)) (str (count t) " characters")))))
+
+(deftest a-long-string-shares-the-budget-with-its-siblings
+  ;; docs/render.md: a map's values fill breadth before depth, a long string a member like its siblings
+  (let [v {:form "(code-of 0)"
+           :out (apply str (repeat 300 "012345678901234567890123456789\n"))
+           :value (vec (range 2000))}
+        {:keys [text]} (seon/print-value v {:handle 'result/e9 :budget 545})]
+    (is (str/includes? text "0 1 2") text)
+    (is (str/includes? text "012345678901234567890123456789") "the string still shows its first part")
+    (is (str/includes? text "(get-in result/e9 [:value])") "the value's cut says how to read its rest")))

@@ -1358,6 +1358,14 @@
     (is (= '#{app.pt-ck-test/reads-the-map-test} (moved (schema db :app.pt-ck/config "[:map {:closed false} [:seon.config.pt/a :seon.config.pt/a] [:seon.config.pt/b :seon.config.pt/b]]")))
         "what the map says besides its keys still moves the tests reaching it")))
 
+(defmulti pt-by-vector first)
+
+(deftest a-removed-method-with-a-vector-dispatch-is-gone
+  ;; seon.program/remove-definition!: a method's dispatch reads back through seon.edn, as its key was written
+  (defmethod pt-by-vector [:a 1] [_] :hit)
+  (is (contains? (methods pt-by-vector) [:a 1]))
+  (#'program/remove-definition! [:method 'seon.program-test/pt-by-vector (seon.edn/encode [:a 1])])
+  (is (not (contains? (methods pt-by-vector) [:a 1])) "the method is gone"))
 
 (deftest a-vars-history-names-each-definition-it-had
   ;; task seon.program/a-vars-history-is-read-at-the-repl; docs/storage.md#history: a var's past definitions
