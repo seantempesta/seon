@@ -404,7 +404,7 @@
     (when (or first? (seq moved))
       (d/transact conn [{:seon.eval/id id :seon.eval/by "seon" :seon.eval/agent {:seon.agent/key "b/a1"} :seon.eval/call (seon.task/call-ref "b/a1" t)
                          :seon.eval/code code :seon.eval/intent intent :seon.eval/schema :seon.render/parts
-                         :seon.eval/response {:handle (symbol "result" id) :value (render/parts-value moved)}}]))
+                         :seon.eval/response {:handle (symbol "result" id) :value (if first? (render/parts-value moved) {:edits (render/page-edits (render/forms-moved @seen now))})}}]))
     (reset! seen now)
     moved))
 
@@ -816,7 +816,7 @@
                (subvec (seon.model/wire-messages true r1) 4 6)) "one assistant message on the wire")
         (is (= "{:handle result/e2, :value 1}" (:content (nth r1 6))) "the call's response, its recorded value printed as it is sent")
         (is (= r0 (subvec r1 0 4)) "the whole earlier request is the prefix: its page stays, appended")
-        (is (re-find #"seon\.render\.ui/status" (:content (peek r1))) "a verdict recorded after turn 0: how the work stands, told again")
+        (is (re-find #"\"status\"" (:content (peek r1))) "a verdict recorded after turn 0: how the work stands, told again")
         ;; (the task's data draws each proof's recorded status too, so it moves with a verdict: reported)
         (is (not (re-find #"\"related" (:content (peek r1)))) "what a verdict does not move is not told again")
         (is (str/includes? (:content (peek r1)) "fails") "the proof's new verdict")
@@ -1852,6 +1852,14 @@
     (is (= [:same-prefix "tool" "eval-e1"] [(when (= (subvec before 0 at) (subvec after 0 at)) :same-prefix) (:role (nth after at)) (:tool-call-id (nth after at))]) "its own result moved")
     (is (str/includes? (:content (nth after at)) "42"))
     (is (= (subvec before (inc at)) (subvec after (inc at))) "and nothing after it")))
+
+;; docs/render.md#a-redo-is-an-explicit-bust: collection may have swept the commit a redo needs
+(deftest a-page-whose-commit-is-gone-is-an-error-not-a-later-page
+  (let [[db] (tree-world)
+        gone (assoc-in db [:meta :datahike/parents] #{(random-uuid)})
+        t (:max-tx db)]
+    (is (= t (:max-tx (#'context/commit-at gone t))) "the commit at t itself needs no walk")
+    (is (= :seon.context/page-gone (try (#'context/commit-at gone (dec t)) (catch clojure.lang.ExceptionInfo e (:seon.error/type (ex-data e))))))))
 
 (deftest a-page-eval-reads-as-the-value-it-stored
   ;; docs/render.md#the-render-is-an-eval: a model's bytes for a page diff are what (my.render/render-changes) stored

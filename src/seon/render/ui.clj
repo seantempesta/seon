@@ -701,9 +701,10 @@
                       (let [n (inc (:turn lb)) b (assoc lb :commit (d/commit-id db) :turn n)]
                         [db b])
                       (let [b (:seon.model-call/basis m)]
-                        ;; a commit past the store's keep (seon.db/retain!) draws from the head, and the page says so
-                        (let [at-commit (if (= (:commit b) (d/commit-id db)) db (d/commit-as-db (:store db) (:commit b)))]
-                          [(or at-commit db) b (nil? at-commit)])))
+                        ;; a commit past the store's keep (seon.db/retain!) is the same records as of its t (docs/storage.md#collection); a basis with no t draws from the head, and the page says so
+                        (let [at-commit (if (= (:commit b) (d/commit-id db)) db (d/commit-as-db (:store db) (:commit b)))
+                              as-of (when (and (nil? at-commit) (:t b)) (d/as-of db (:t b)))]
+                          [(or at-commit as-of db) b (and (nil? at-commit) (nil? as-of))])))
             i (if to-come? (count calls) (.indexOf ^java.util.List calls e))
             prev-e (when (pos? i) (nth calls (dec i)))
             ;; with no request before it, nothing is marked: every message is the first request's
@@ -756,15 +757,15 @@
   "rounded-md bg-base-900 p-2 min-w-0 overflow-x-auto")
 
 (defn page-rules
-  "The CSS of the renders this page has drawn (a component of the walk, reading its :seon.render/drawn ratom as any tracked read), as a style element, or nothing while none states any. It draws again only when a render is drawn or redefined. See docs/render.md#style."
+  "The CSS of this page's renders (a component of the walk, reading its :seon.render/drawn ratom as any tracked read), one style element a render, keyed by its name, or nothing while none states any. The model reads it as the page does, so it can tell styling from what is shown and edit it. It moves only when a rule does. See docs/render.md#style."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.render/drawn :any]]]] :any]}
   [{d :seon.render/drawn}]
-  (let [r (render/rules @d)] (when-not (str/blank? r) [:style r])))
+  (when-let [rs (seq (render/rules @d))] (into [:div] (for [[r css] rs] [:style {:key r} css]))))
 
 (defn rules-list
-  "The page's rules as a list of their own (p-rules), so a draw of what the model reads does not run them. See docs/render.md#a-layout-places-its-lists."
+  "The page's rules as a list of their own (p-rules), so a change of a rule draws nothing else: a piece here, as in `task-list`, when the agent's pull holds a task. See docs/render.md#a-layout-places-its-lists."
   {:seon.render/list "p-rules" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
-  [_] [:div {:id "p-rules"} [#'page-rules {}]])
+  [{c :seon.ctx/ctx}] [:div {:id "p-rules"} (when (:task c) [#'page-rules {}])])
 
 (defn task
   "The task its agent works (a component over ctx alone): its name as the heading, its plan accumulated over its needs
@@ -1110,10 +1111,10 @@
      [:h2 "Your proofs"]
      (when test-run [:p "The tests could not run: " (str/join "; " (:failed test-run))])
      (when (next proofs)
-       (into [:ul] (for [{:keys [test status]} proofs] [:li [:code (str test)] ": " (get state-words status (kname status))])))
+       (into [:ul {:key :proofs}] (for [{:keys [test status]} proofs] [:li {:key test} [:code (str test)] ": " (get state-words status (kname status))])))
      ;; not written: where it goes and a test to copy
      (for [{:keys [test shape]} unwritten :let [{:keys [ns requires helpers example]} shape]]
-       [:div
+       [:div {:key test}
         [:p "Write " [:code (str test)] "." (when ns (list " It goes in " [:code (str ns)] (if requires ", which requires:" ".")))]
         (when requires [:pre [:code requires]])
         (when (seq helpers) [:p "Helpers a test there uses: " (str/join ", " (map #(str "`" (name %) "`") helpers)) ". Every helper there: " [:code (str "(dir " ns ")")]])
@@ -1122,29 +1123,29 @@
         (when scaffold [:div [:p "Scaffold:"] (form-hiccup scaffold)])])
      ;; red: which, what it asserted, what it got
      (for [{:keys [test failures]} red]
-       [:div
+       [:div {:key test}
         [:p [:code (str test)] " fails."]
         (for [{a :assert as :asserts g :got m :message} (take 1 failures)]
           [:p "It asserts " [:code (str/join ", " (map #(as-text %) (or as [a])))] " and got " [:code (as-text g)] (when m (str " (" m ")")) "."
            (when (next failures) (str " " (count (rest failures)) " more " (if (nnext failures) "assertions fail" "assertion fails") "."))])])
-     (when (seq unknown) [:p "Not run yet: " (str/join ", " (map #(str "`" (:test %) "`") unknown)) ". " [:code "(prove)"] " runs them."])
+     (when (seq unknown) [:p {:key :not-run} "Not run yet: " (str/join ", " (map #(str "`" (:test %) "`") unknown)) ". " [:code "(prove)"] " runs them."])
      ;; merge: nothing until something conflicts; then both sides and the form that settles each
      (when (seq unmerged)
-       [:div
+       [:div {:key :unmerged}
         [:p "Main changed these too, so they are unmerged. Settle each: keep yours, or take main's."]
         (for [{:keys [key ours theirs]} unmerged]
-          [:div [:p [:code (str key)] ". Yours:"] [:pre [:code (as-text ours)]] [:p "Main's:"] [:pre [:code (as-text theirs)]]
+          [:div {:key key} [:p [:code (str key)] ". Yours:"] [:pre [:code (as-text ours)]] [:p "Main's:"] [:pre [:code (as-text theirs)]]
            [:p "Keep yours: " [:code (str "(my.branch/resolve! '" key ")")] ". Take main's: " [:code (str "(my.branch/resolve! '" key " :theirs)")] "."]])])
      (cond
        (and green? (empty? blocks) (empty? unmerged))
-       [:p "Every proof passes and nothing blocks merging."]
+       [:p {:key :merging} "Every proof passes and nothing blocks merging."]
        (and green? (seq blocks))
-       [:div [:p "Every proof passes, but your branch can't merge yet:"]
+       [:div {:key :merging} [:p "Every proof passes, but your branch can't merge yet:"]
         (into [:ul] (for [[what x do] blocks]
                       [:li what (when (some? x) (str ": " (if (coll? x) (str/join ", " (map #(as-text (if (map? %) (or (:key %) (:symbol %) %) %)) x)) x)))
                        (when do [:span ". To clear it: " (form-hiccup do)])]))]
        (seq blocks)
-       [:div [:p "Also blocking merging:"]
+       [:div {:key :merging} [:p "Also blocking merging:"]
         (into [:ul] (for [[what x do] blocks]
                       [:li what (when (some? x) (str ": " (if (coll? x) (str/join ", " (map #(as-text (if (map? %) (or (:key %) (:symbol %) %) %)) x)) x)))
                        (when do [:span ". To clear it: " (form-hiccup do)])]))])
@@ -1198,7 +1199,7 @@
     (when (seq (:classes r))
       (into [:section [:h2 "Your open problems"]]
             (for [[c {:keys [n rows]}] (:classes (problems-model {} r))]
-              [:div [:h3 (str (kname c) " " n)]
+              [:div {:key c} [:h3 (str (kname c) " " n)]
                (into [:ul]
                      (for [{:keys [count type message read open?]} rows]
                        [:li (str count " x") (when type [:code (str type)]) (when message (str " " message)) (when (false? open?) " (closed)") (when read [:code (print/text read)])]))])))))
@@ -1483,8 +1484,7 @@
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
   [_]
   [:div {:id "render-ctx"} [#'task-list {}] [#'conversation-list {}] [#'tiles {:wire/for "page"}]
-   ;; for the model to read #p-rules as parts, drop this call's :wire/for (seon.render/page-lists reads the lists the walk drew)
-   [#'rules-list {:wire/for "page"}]])
+   [#'rules-list {}]])
 
 (defn task-list
   "The task's list of an agent's page (p-task, read by the model as parts: seon.render/page-lists), in the order

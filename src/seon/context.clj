@@ -664,7 +664,8 @@
         ;; a deferred proof is neither red nor unknown (seon.reconcile/done-explain)
         deferred (into (set deferred) (keep (fn [[t {st :status}]] (when (= :deferred st) t))) vs)
         results (into {} (keep (fn [[t {st :status}]] (when (not= :deferred st) [t st]))) vs)
-        base (some->> (:seon.agent/base-commit ag) (d/commit-as-db (:store db)))
+        ;; what the branch did since its merge base is a diff of two commits' trees, and a db as of a t (a past turn past the store's keep, docs/storage.md#collection) has none: it leaves that out
+        base (when (:store db) (some->> (:seon.agent/base-commit ag) (d/commit-as-db (:store db))))
         moved (when base (pm/content-datoms base db #{}))
         ch (if base (pm/delta-changes base db #{} moved) {})
         ;; what caused-split reads differs from the content (sections, names, plans, catches): its own
@@ -721,7 +722,7 @@
       (seq (:caused split)) (assoc :caused (:caused split))
       (seq (:attention split)) (assoc :attention (:attention split))
       (seq (pm/divergence ch)) (assoc :its-merge-carries (pm/divergence ch))
-      (and main base) (assoc :merge (pm/readiness base db (d/commit-as-db (:store db) main) moved)))))
+      (and main base) (assoc :merge (pm/readiness base db (d/commit-as-db (pdb/store-of db) main) moved)))))
 
 (defn basis-value
   "The value eval e names by its basis (:seon.eval/basis, @ctx's: the record of e's agent on branch db as of t,
@@ -935,6 +936,47 @@
   {:malli/schema [:=> [:cat :map] :boolean]}
   [e] (boolean (some #(= (:seon.eval/code e) (second %)) (vals render-calls))))
 
+(defn- commit-at
+  "Branch db as of t: the earliest commit of its line that holds t, a real db value (a historical view of it answers no store, which a status reads commits through), found by walking the line back from db, at the cost of the commits since. A commit collection swept before it is found is :seon.context/page-gone, never a later page in its place. See docs/render.md#a-redo-is-an-explicit-bust."
+  {:malli/schema [:=> [:cat :seon.host/db :int] :seon.host/db]}
+  [db t]
+  (loop [at db]
+    (let [id (first (filter uuid? (get-in at [:meta :datahike/parents])))]
+      (if (or (nil? id) (= t (:max-tx at)))
+        at
+        (let [p (d/commit-as-db (:store db) id)]
+          (cond
+            (nil? p) (throw (ex-info "the page as of t is gone"
+                                     (contract/error :seon.context/page-gone #'commit-at (str "the commit that held t " t " was collected, so the page as of it cannot be drawn: read the page whole with (my.render/render-ctx)") {:t t})))
+            (>= (:max-tx p) t) (recur p)
+            :else at))))))
+
+(defn page-at
+  "Agent a's page as of t on branch db, {id form} in placed order, drawn cold with today's renders: what `redo-tx` compares. See docs/render.md#a-redo-is-an-explicit-bust."
+  {:malli/schema [:=> [:cat :seon.host/db :int :int] :map]}
+  [db a t]
+  (let [at (commit-at db t)
+        w (render/draw (agent-ctx at a) ctx/changes at (render/declared-var :seon.render/render-ctx) {:model-only true :once true})]
+    (try (render/placed-hiccup w (render/page-lists w)) (finally (render/dispose-walk! w)))))
+
+(defn redo-tx
+  "The transaction that makes the page's evals of agent a's ctx c true again, in their order, on db: each is read against what the one before it showed (its :t), and one whose :since is not that, or that answers no t, is made anew from the page as of each t (`page-at`): edits (seon.render/page-edits), from nothing when none came before. Nothing broken, nothing. See docs/render.md#a-redo-is-an-explicit-bust."
+  {:malli/schema [:=> [:cat :seon.host/db :int :map] [:vector :map]]}
+  [db a c]
+  (let [evs (filter render-eval? (map (fn [e] (get-in c [:evals e])) (sort (keys (:evals c)))))]
+    (first
+     (reduce (fn [[tx t0] e]
+               (let [r (:seon.eval/response e) v (:value r) t1 (:t v)]
+                 (cond
+                   ;; an eval with no t (one that threw, or a redraw's) shows nothing the next can stand on
+                   (nil? t1) [tx t0]
+                   (or (:components v) (= t0 (:since v))) [tx t1]
+                   :else
+                   (let [edits (render/page-edits (render/forms-moved (when t0 (page-at db a t0)) (page-at db a t1)))
+                         nv (cond-> {:t t1 :edits edits} t0 (assoc :since t0))]
+                     [(conj tx {:seon.eval/id (:seon.eval/id e) :seon.eval/response (assoc r :value nv)}) t1]))))
+             [[] nil] evs))))
+
 (defn request
   "The agent's request, a reading of walk w, the one tree its page draws (docs/render.md#the-models-context-a-cached-prefix-then-the-turn): its conversation's list through the one generic conversion
   (seon.render/wire), so the request is what the tree holds, a re-eval in its own place. A request whose records hold no render of the page (an observer's context read, the first move a judge scores) ends
@@ -988,7 +1030,7 @@
   both name one provider. See docs/render.md#the-debug-page-is-the-wire-request."
   {:malli/schema [:=> [:cat :seon.host/db :seon.model-call/basis] :seon.model/provider]}
   [db {:keys [agent task model]}]
-  (let [main (some->> (:seon.agent/main-commit (d/entity db [:seon.agent/key agent])) (d/commit-as-db (:store db)))]
+  (let [main (some->> (:seon.agent/main-commit (d/entity db [:seon.agent/key agent])) (d/commit-as-db (pdb/store-of db)))]
     (cfg/provider-at (or main db) db task model)))
 
 (defn wire-turn

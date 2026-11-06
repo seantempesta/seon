@@ -70,7 +70,8 @@
   [^StringBuilder sb attrs]
   (doseq [[k v] (sort-by (comp attr-name key) attrs)
           ;; :wire/* is what seon.render/wire reads (docs/render.md#the-models-context-a-cached-prefix-then-the-turn): nothing of it reaches the browser, so nothing of it can name a Datastar attribute
-          :when (and (some? v) (not (false? v)) (not (and (keyword? k) (= "wire" (namespace k)))))]
+          ;; and :key is Reagent's: what a child is named by, no attribute of the element
+          :when (and (some? v) (not (false? v)) (not= :key k) (not (and (keyword? k) (= "wire" (namespace k)))))]
     (.append sb " ")
     (.append sb (attr-name k))
     (when-not (true? v)

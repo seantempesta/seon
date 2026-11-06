@@ -1252,7 +1252,7 @@
   ;; seon.turn/show-page!: a page shown whole once; nothing moved, no eval; a plan changed with swap! on @ctx, one eval holding the
   ;; task's part alone. A render that throws is that eval's error value, which the request reads, and the turn that asked goes on
   ;; (AGENTS 4: nothing crashes)
-  (let [evals "(let [db (seon.agent/db)] (vec (sort-by #(parse-long (re-find #\"\\d+$\" (first %))) (for [e (datahike.api/q '[:find [?e ...] :where [?e :seon.eval/by \"seon\"]] db) :let [m (datahike.api/pull db '[:seon.eval/id :seon.eval/code :seon.eval/response] e)] ] [(:seon.eval/id m) (:seon.eval/code m) (set (keys (get-in m [:seon.eval/response :value]))) (get-in m [:seon.eval/response :ex :seon.error/message])]))))"
+  (let [evals "(let [db (seon.agent/db)] (vec (sort-by #(parse-long (re-find #\"\\d+$\" (first %))) (for [e (datahike.api/q '[:find [?e ...] :where [?e :seon.eval/by \"seon\"]] db) :let [m (datahike.api/pull db '[:seon.eval/id :seon.eval/code :seon.eval/response] e)] ] [(:seon.eval/id m) (:seon.eval/code m) (let [v (get-in m [:seon.eval/response :value])] (set (concat (map first (:components v)) (map (comp first first) (:edits v))))) (get-in m [:seon.eval/response :ex :seon.error/message])]))))"
         rs (in-agent ["(#'seon.turn/show-page!)"
                       "(#'seon.turn/show-page!)"
                       evals
@@ -1260,7 +1260,7 @@
                       "(#'seon.turn/show-page!)"
                       evals
                       "(binding [*ns* (the-ns 'my.render)] (eval '(defn render-ctx [] (throw (ex-info \"broken render\" {})))))"
-                      "(do (swap! seon.agent/state dissoc :render-seen) (#'seon.turn/show-page!))"
+                      "(do (vreset! (:shown (:walk @seon.agent/state)) nil) (#'seon.turn/show-page!))"
                       "(let [db (seon.agent/db)] (peek (filterv #(= \"tool\" (:role %)) (:messages (seon.context/render db {:commit (datahike.api/commit-id db) :task (:task @seon.agent/state) :turn 1 :max-turns 9 :origin :model :agent (:key @seon.agent/state)})))))"])
         [_ _ one _ _ two _ shown broken-request] (mapv :value (vec rs))]
     (is (= ["(my.render/render-ctx)"] (mapv second one)) "the first call showed the page whole, the second, with nothing moved, nothing")
@@ -1268,6 +1268,35 @@
     (is (every? #(= % "task") (nth (last two) 2)) (str "holding only the task's part: " (pr-str (last two))))
     (is (nil? shown) "a render that throws does not stop the one who asked")
     (is (str/includes? (str broken-request) "broken render") "and the request reads its error")))
+
+;; docs/render.md#a-redo-is-an-explicit-bust: a diff removed leaves the next one standing on a page its reader was never shown; the redo
+;; draws what moved from the page as of each t, in place, and what still stands on what came before it is left byte for byte
+(deftest a-redo-is-drawn-from-the-page-as-of-each-t
+  (let [page-evals "(let [db (seon.agent/db)] (vec (sort-by #(parse-long (re-find #\"\\d+$\" (first %))) (for [e (datahike.api/q '[:find [?e ...] :where [?e :seon.eval/by \"seon\"]] db) :let [m (datahike.api/pull db '[:seon.eval/id :seon.eval/code :seon.eval/response] e)]] [(:seon.eval/id m) (get-in m [:seon.eval/response :value])]))))"
+        move #(str "(do (swap! ctx assoc-in [:task :seon.task/plan] \"" % "\") (#'seon.turn/show-page!))")
+        rs (in-agent ["(#'seon.turn/show-page!)" (move "A plan that moved.") (move "A plan that moved again.") (move "A plan that moved a third time.")
+                      page-evals
+                      "(my.render/redo-changes)"
+                      ;; the second diff taken out of what the agent reads, as an agent does it
+                      "(let [es @ctx ids (sort (keys (:evals es))) by (fn [e] (get-in es [:evals e :seon.eval/by])) mine (filterv #(= \"seon\" (by %)) ids)] (swap! ctx update :evals dissoc (nth mine 2)) (get-in es [:evals (nth mine 2) :seon.eval/id]))"
+                      "(my.render/redo-changes)"
+                      "(my.render/redo-changes)"
+                      page-evals])
+        [_ _ _ _ before none removed redone again after] (mapv :value (vec rs))
+        by-id (into {} after)
+        [whole first-diff second-diff third-diff] (map second before)
+        new-third (get by-id (first (nth before 3)))]
+    (is (= [:components :t] (sort (keys whole))) "the page whole first")
+    (is (= (:t whole) (:since first-diff)) "each diff stands on the one before")
+    (is (= (:t first-diff) (:since second-diff)))
+    (is (= [] none) "nothing broken: nothing redone")
+    (is (= (first (nth before 2)) removed) "the second diff is what was taken out")
+    (is (= [(first (nth before 3))] redone) "the one standing on it is redone, and only that")
+    (is (= [] again) "and then nothing is broken")
+    (is (= (:t first-diff) (:since new-third)) "it stands on what its reader was shown")
+    (is (= (:t third-diff) (:t new-third)) "and says the same page")
+    (is (str/includes? (pr-str (:edits new-third)) "a third time") "drawn from the page as of its t")
+    (is (= first-diff (get by-id (first (nth before 1)))) "what stood stays byte for byte")))
 
 ;; docs/render.md#the-render-is-an-eval: a wake is told what moved since the page it last showed, never the page again: a second whole page
 ;; costs about 4k tokens a wake
@@ -2002,6 +2031,7 @@
     (is (= [[mid "owner" "use demo/g" agent-key]] on-branch) "the turn wrote the fact root wrote, by its id, naming the agent")
     (is (= on-branch committed) "and it is in the commit the turn read")
     (is (not-any? #{:observed :taken} basis-keys) "the basis names no message: the fact is the record")
+    (is (contains? basis-keys :t) "it holds its t: a commit a sweep took is drawn as of it (docs/storage.md#collection)")
     ;; the prose comes in the eval call (docs/prompt.md); the scripted reply's text is the same prose
     (is (= "check the sum before the proof" reply) "the reply's text: the prose")
     (is (string? (:eval (first calls))) (str "the call names its one eval: " (pr-str calls)))
