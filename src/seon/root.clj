@@ -21,7 +21,7 @@
   Agents transact facts on their own branch; root reacts: the writer applies them, and
   only a merge task's octopus merge (the reconciler's, seon.writer) advances main."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.query.execute] [clojure.main] [clojure.string :as str] [seon.db :as pdb] [seon.lib :as lib]
+  (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.query.execute] [clojure.main] [clojure.string :as str] [seon.db :as pdb] [seon.context :as context] [seon.lib :as lib]
             [seon.sock :as sock] [jolt.async.remote :as remote] [konserve.jolt.fasl :as codec] [seon.fx :as fx] [seon.fork-server :as fs] [seon.agent-proc :as ap]
             [seon.writer :as writer] [seon.problems :as problems] [seon.prove] [seon.cron] [seon.vector :as vector] [seon.source :as source] [seon.reconcile :as reconcile] [seon.system :as system] [seon.program :as program] [seon.step :as step]
             [seon.config :as cfg] [seon.contract :as contract] [seon.print :as print] [seon.task :as task] [seon.template :as tpl] [seon.doc :as doc] [seon.error :as err] [seon.agent :as agent] [konserve.jolt.lmdb :as klmdb] [clojure.java.shell]
@@ -107,7 +107,7 @@
   (let [now (get-in st [:view :agents])
         changed (for [[id a] now
                       :let [b (get before id)]
-                      :when (and (not (identical? a b)) (not= (dissoc (observed a) :mem-mb) (dissoc (observed b) :mem-mb)))]
+                      :when (and (not (:replaced a)) (not (identical? a b)) (not= (dissoc (observed a) :mem-mb) (dissoc (observed b) :mem-mb)))]
                   id)]
     (if (and (seq changed) (not (:writer-closed st)))
       (do
@@ -364,21 +364,11 @@
   {:malli/schema [:=> [:cat :seon.root/api-state [:maybe [:or :seon.host/promise :map]] :keyword [:maybe :seon.agent/id]] [:tuple :seon.root/api-state :int]]}
   [st p kind agent] (step/pend st (when p {:p p :kind kind :agent agent})))
 
-(defn- ext-op {:malli/schema [:=> [:cat :seon.root/api-state :seon.host/volatile :seon.root/request] :seon.root/api-state]}
-  [st o m]
-  (let [{:keys [op p id]} m]
-    (case op
-      ;; seon.root/apply!: the declaration again; only the units whose declaration changed are
-      ;; rebuilt, and update! keeps every proc it was handed unchanged (with its queue). The
-      ;; api performs the update!, so it cannot replace itself: its own unit stays as booted
-      ;; (changing the api's declaration takes a restart)
-      :apply (let [sys (:system st)
-                   built (system/build (:decl m) (:bindings m) (:parts sys))
-                   built (-> built (assoc-in [:parts [:proc :api]] (get-in sys [:parts [:proc :api]]))
-                             (assoc-in [:procs :api] (get-in sys [:procs :api])))
-                   r (flow/update! @(:graph st) {:procs (merge (:procs built) (:agent-procs st)) :conns (:conns built)})]
-               (reply! (assoc st :system built) o p (select-keys r [:started :stopped :kept :lost :ms])))
-      :spawn (let [opts (cond-> (:opts m) (:branch (:opts m)) (update :branch #(pdb/on-main (pdb/conn-main (:conn st)) %)))
+(defn- spawn-agent
+  "A new agent from opts, or the refusal answered to p: its branch held by a live agent, no fork server, too many agents. Answered at its hello (set-agent's :ready), or the end it meets first."
+  {:malli/schema [:=> [:cat :seon.root/api-state :seon.host/volatile [:maybe [:or :seon.host/promise :map]] [:maybe :map]] :seon.root/api-state]}
+  [st o p opts]
+  (let [opts (cond-> opts (:branch opts) (update :branch #(pdb/on-main (pdb/conn-main (:conn st)) %)))
                    holder (and (:branch opts)
                                (some (fn [[aid a]] (when (and (= (:branch opts) (:branch a)) (not (:ended-ms a))
                                                               (not (gone-statuses (:status a))))
@@ -401,7 +391,47 @@
                                                   :key (or (:key opts) (task/agent-key (:boot st) aid))})
                          ;; answered at its hello (set-agent's :ready), or the end it meets first
                          (cond-> (assoc-in st [::spawning aid] p)
-                           (seq (:evals opts)) (assoc-in [::inserting aid] (:evals opts))))))
+                           (seq (:evals opts)) (assoc-in [::inserting aid] (:evals opts)))))))
+
+(defn- back-point
+  "Where eval id of agent a's branch stands, {:commit :branch :t}, or why it can't be gone back to: the earliest commit of the branch holding its code's and response's last write, a run again's included and a reader's opening of it not (seon.context/at-t), and a new branch's name for it, which no earlier back to it holds, as the head has moved since. See docs/turn.md#an-agent-goes-back-to-an-eval."
+  {:malli/schema [:=> [:cat :seon.root/api-state :map :string] :map]}
+  [st a id]
+  (let [db (pdb/head (:conn st) (:branch a))
+        e (pdb/eid db :seon.eval/id id)
+        t (when e (apply max (map :tx (mapcat #(d/datoms db :eavt e %) [:seon.eval/code :seon.eval/response]))))
+        at (when t (context/at-t db t))
+        commit (when (and at (= t (:max-tx at))) (d/commit-id at))]
+    (cond
+      (nil? e) (refused 'seon.root/back! (str "no eval " id " on this agent's branch") {:eval id})
+      (nil? commit) (refused 'seon.root/back! (str "the commit of eval " id " was swept, so its point can't be gone back to") {:eval id})
+      :else {:commit commit :t t :branch (keyword (namespace (:branch a)) (str (name (:branch a)) "-back-" (:max-tx db)))})))
+
+(defn- ext-op {:malli/schema [:=> [:cat :seon.root/api-state :seon.host/volatile :seon.root/request] :seon.root/api-state]}
+  [st o m]
+  (let [{:keys [op p id]} m]
+    (case op
+      ;; seon.root/apply!: the declaration again; only the units whose declaration changed are
+      ;; rebuilt, and update! keeps every proc it was handed unchanged (with its queue). The
+      ;; api performs the update!, so it cannot replace itself: its own unit stays as booted
+      ;; (changing the api's declaration takes a restart)
+      :apply (let [sys (:system st)
+                   built (system/build (:decl m) (:bindings m) (:parts sys))
+                   built (-> built (assoc-in [:parts [:proc :api]] (get-in sys [:parts [:proc :api]]))
+                             (assoc-in [:procs :api] (get-in sys [:procs :api])))
+                   r (flow/update! @(:graph st) {:procs (merge (:procs built) (:agent-procs st)) :conns (:conns built)})]
+               (reply! (assoc st :system built) o p (select-keys r [:started :stopped :kept :lost :ms])))
+      :spawn (spawn-agent st o p (:opts m))
+      ;; a person's Back to here: a new branch from the eval's commit, through the writer; its answer ends this process and starts the session's on it
+      :back (let [a (get-in st [:view :agents id])]
+              (cond
+                (nil? (get-in st [:agents id])) (reply! st o p (absent a id))
+                (not= :idle (:status a)) (reply! st o p (refused 'seon.root/back! (str id " is " (name (:status a)) ": it goes back when it is idle") {:agent id :status (:status a)}))
+                :else (let [pt (back-point st a (:eval m))]
+                        (if (contract/error? pt)
+                          (reply! st o p pt)
+                          (do (step/out! o :to-writer {:op :clone-branch :from (:commit pt) :branch (:branch pt) :dest {:back id}})
+                              (assoc-in st [::backing id] {:p p :branch (:branch pt)}))))))
       :clone (let [parent (:parent m)]
                (cond
                  (nil? (get-in st [:agents parent])) (reply! st o p (absent (get-in st [:view :agents parent]) parent))
@@ -496,6 +526,22 @@
                              (cond-> st
                                (:sync r) (to-agent o aid {:op :write :msg (:sync r)})
                                true (deliver-rid o (:rid dest) (dissoc r :sync))))
+        ;; the branch of a Back to here is made: this process ends (replaced: its end writes no fact over the session's), and the session goes on from there, its task held for the person
+        (:back dest) (let [id (:back dest)
+                           {:keys [p branch]} (get-in st [::backing id])
+                           {:keys [key task]} (get-in st [:view :agents id])
+                           st (update st ::backing dissoc id)]
+                       (if (contract/error? r)
+                         (reply! st o p r)
+                         (let [k (or key (task/agent-key (:boot st) id))
+                               e (d/entity @(:conn st) [:seon.agent/key k])
+                               ;; what a start records of a session's agent (seon.task/start-tx): this boot holds it under a key that isn't its id's (seon.task/this-boots)
+                               started {:seon.agent/key k :seon.agent/boot (:boot st) :seon.agent/started-ms (System/currentTimeMillis)
+                                        :seon.agent/max-turns (or (:seon.agent/max-turns e) (cfg/value :seon.config.agent/max-turns))}]
+                           (step/out! o :to-writer {:op :tx :branch :db :tx-data (cond-> [started] task (into (cons {:seon.task/id task :seon.task/branch branch} (task/execution-tx [task] :held))))
+                                                    :dest {:agent-facts [id]}})
+                           (-> st (set-agent o id {:status :killed :replaced true}) (to-agent o id {:op :kill})
+                               (spawn-agent o p (cond-> {:branch branch :key k} task (assoc :task task)))))))
         ;; the recorded errors' write was answered: the next window may write
         (:errors-flushed dest) (dissoc st ::errors-flight)
         ;; a stall's evidence was captured (stall-task): its files on the stall task's cause, on main
@@ -1191,7 +1237,7 @@
   (let [c (a/chan (a/sliding-buffer 1024))] (a/tap (:events-mult sys) c) c))
 
 (defn request
-  "The op (named as its fn below: spawn! clone! submit! again! run-tests! kill!
+  "The op (named as its fn below: spawn! clone! submit! again! back! run-tests! kill!
   merge-main! message! release! opened!) on agent id with args, as the api request it is: one table for these fns
   and the dashboard's calls (seon.web). a: the agent's entry in root's view, which
   merge-main! reads; an op the agent cannot take answers its error. A branch reaches main
@@ -1209,6 +1255,7 @@
               :forms (sedn/encode (cond (:to-here args) (list 'seon.repl/again-to (:eval args))
                                         (:code args) (list 'seon.repl/again (:eval args) (:code args))
                                         :else (list 'seon.repl/again (:eval args))))}
+      back! {:op :back :id id :eval (:eval args)}
       ;; the agent proves its branch through the test service as root's judge does (seon.agent/prove!
       ;; :judge, which keys the run by its head's digest): recorded on main, one run with any other asker's
       run-tests! {:op :judge :id id}
@@ -1445,6 +1492,12 @@
   [sys agent-id]
   (some-> (:pid (agent-entry sys agent-id)) (lib/kill! lib/SIGUSR1))
   nil)
+
+(defn back!
+  "Take agent id's session back to just after its eval (args {:eval id}): a new branch from that eval's commit, the old branch kept as it is, this process ended and one started on the new branch under the same key, its task held. Answers the new agent's id, or the refusal. See docs/turn.md#an-agent-goes-back-to-an-eval."
+  {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id [:map [:eval :string]]] :any]}
+  [sys agent-id args]
+  (let [r @(request! sys 'back! agent-id args)] (if (contract/error? r) r (:id r))))
 
 (defn kill! "SIGKILL the agent's process (through its agent proc). nil." {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id] :nil]}
   [sys agent-id] (request! sys 'kill! agent-id nil) nil)
