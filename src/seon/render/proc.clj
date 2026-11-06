@@ -429,9 +429,7 @@
     (ui/page-chrome {:units (vec (concat sides [head-unit] units)) :view (ui/view-param view) :tab (if chat? :chat :debug)
                       ;; never a wait: drawn from its branch until its process answers, the page says so
                       :caption (when (and chat? (not own?))
-                                 (cond (:error held) (str "shown from its branch: its process did not answer (" (:seon.error/message (:error held)) ")")
-                                       (live? st id) "shown from its branch until its process answers"
-                                       :else "not running · shown from its branch"))
+                                 (when (:error held) (str "Its process didn't answer, so this may be behind: " (:seon.error/message (:error held)))))
                       ;; its REPL and its messages while its process runs; its held task's release
                       :input {:schema :seon.render/agent-input
                               :value {:id (:seon.agent/id e) :live? (live? st id) :focus? chat?
