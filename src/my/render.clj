@@ -4,7 +4,7 @@
     (my.render/render-ctx)      the whole render of your ctx, every part as the hiccup your request holds, whole
     (my.render/render-changes)  the parts that moved since you last asked, whole; nothing when none did"
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [seon.render :as render] [seon.repl :as repl] [seon.agent :as agent] [seon.context :as context]))
+  (:require [seon.contract :refer [defn defn-]] [seon.render :as render] [seon.repl :as repl] [seon.agent :as agent]))
 
 (defn tree
   "What draws what in this agent's live walk (the one its model's page and its person's page are drawn from, brought up to
@@ -15,23 +15,24 @@
 
 (defn- since
   "The parts of your page that moved since seen ({id revision} of what you were last shown; nil: nothing, so every part), as the
-  value an eval answers (`seon.render/parts-value`): {id [render-name {:ctx path} hiccup...]}, each whole, a part that left {id :gone}.
+  value an eval answers (`seon.render/parts-value`): [[id [render-name {:ctx path} hiccup...]] ...], in placed order, each whole, a part that left [id :gone].
   What you are shown is now what you were last shown. See docs/render.md#the-render-is-an-eval."
   {:malli/schema [:=> [:cat [:maybe :map]] :seon.render/parts]}
   [seen]
-  (let [{:keys [parts revs gone]} (render/parts-since (repl/page-walk) context/page-lists seen)]
+  (let [w (repl/page-walk)
+        {:keys [parts revs gone]} (render/parts-since w (render/page-lists w) seen)]
     (swap! agent/state assoc :render-seen revs)
     (render/parts-value (into parts (map (fn [id] [id :gone])) gone))))
 
 (defn render-ctx
-  "Your ctx rendered: every part of your page, {id [render-name {:ctx path} hiccup...]}, the hiccup your request holds each part as
+  "Your ctx rendered: every part of your page, [[id [render-name {:ctx path} hiccup...]] ...], in placed order, the hiccup your request holds each part as
   (and the turn line). A value like any eval's, kept whole in its record and printed whole. Seon runs it as your first eval, and you can
   run it any time to read your page whole; what it showed is what `render-changes` compares against."
   {:malli/schema [:=> [:cat] :seon.render/parts]}
   [] (since nil))
 
 (defn render-changes
-  "The parts of your page that moved since you were last shown it (by `render-ctx` or by this), {id [render-name {:ctx path} hiccup...]},
-  each whole; a part that left is {id :gone}. Nothing moved: {}. Seon runs it as an eval of its own when something did."
+  "The parts of your page that moved since you were last shown it (by `render-ctx` or by this), [[id [render-name {:ctx path} hiccup...]] ...], in placed order,
+  each whole; a part that left is [id :gone]. Nothing moved: []. Seon runs it as an eval of its own when something did."
   {:malli/schema [:=> [:cat] :seon.render/parts]}
   [] (since (:render-seen @agent/state)))

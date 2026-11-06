@@ -69,7 +69,8 @@
 (defn- write-attrs! {:malli/schema [:=> [:cat :any :map] :any]}
   [^StringBuilder sb attrs]
   (doseq [[k v] (sort-by (comp attr-name key) attrs)
-          :when (and (some? v) (not (false? v)))]
+          ;; :wire/* is what seon.render/wire reads (docs/render.md#the-models-context-a-cached-prefix-then-the-turn): nothing of it reaches the browser, so nothing of it can name a Datastar attribute
+          :when (and (some? v) (not (false? v)) (not (and (keyword? k) (= "wire" (namespace k)))))]
     (.append sb " ")
     (.append sb (attr-name k))
     (when-not (true? v)
@@ -95,6 +96,8 @@
     (write! sb (try (apply (first node) (rest node))
                     (catch Throwable e
                       [:span {:class "err"} (str (if (var? (first node)) (symbol (first node)) "a render") " threw: " (or (ex-message e) (str e)))])))
+    ;; an element for the model alone (docs/render.md#a-part-prints-as-its-render) is no part of the page
+    (and (vector? node) (map? (second node)) (= "model" (:wire/for (second node)))) nil
     (vector? node)
     (let [[tag & more] node
           tag (name tag)

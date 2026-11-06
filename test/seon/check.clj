@@ -1738,7 +1738,7 @@
    (fn [sys]
     (let [[a] (spawn-ready! sys {:task "agent-tests" :branch :agent-tests1})
           out (str (:agents-dir (:store (c/state sys))) "/agent-tests.edn")
-          _ @(c/submit! sys a (str "(do (seon.repl/page-hiccup)"
+          _ @(c/submit! sys a (str "(do (seon.repl/page-walk)"
                                    " (let [r (seon.agent/run-tests-forked (seon.config/value :seon.config.agent/test-ticks) #{} :main)]"
                                    " (spit " (pr-str out) " (pr-str (assoc (update r :reports (fn [rs] (filterv #(not= :pass (:type %)) rs)))"
                                    " :known (count (:digests (seon.agent/test-plan (seon.agent/db) nil #{} (seon.agent/heard-main)))))))))"))

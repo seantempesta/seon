@@ -401,11 +401,12 @@
         ;; the part texts the tab opened (/open: a long one is drawn closed, ui/ctx-parts)
         opened-parts (into #{} (filter #(str/starts-with? % "d-part-")) (get-in st [:tab view :open] #{}))
         pairs (fn [w] (let [all (render/placed-units w)
-                            us (filterv #((set context/page-lists) (:container %)) all)
+                            lists (render/page-lists w)
+                            us (filterv #((set lists) (:container %)) all)
                             ;; the page's rules come with the parts they style
                             rules (filterv #(= "#p-rules" (:container %)) all)]
                         {:id "d-parts" :container "#c-rows" :rev (hash [(mapv (juxt :id :rev) (concat us rules)) opened-parts])
-                         :html (h/html (ui/ctx-parts (render/placed-hiccup w context/page-lists) (into {} (map (juxt :id :html)) us) opened-parts (apply str (map :html rules))))}))
+                         :html (h/html (ui/ctx-parts (render/placed-hiccup w lists) (into {} (map (juxt :id :html)) us) opened-parts (apply str (map :html rules))))}))
         ;; the debug view: @ctx, its part pairs and the agent's record as data by the one printer (its :seon.ctx/ctx render)
         ctx-units (fn [] (let [kw (walked)
                                t (if kw (:tree (:c kw)) (cold-tree))
@@ -691,7 +692,12 @@
   {:malli/schema [:=> [:cat :map :seon.host/volatile :any] [:tuple :map [:maybe :map]]]}
   [st o view-id]
   (try
-    (pass-view st view-id)
+    (let [r (pass-view st view-id)]
+      ;; a component that threw in a kept walk is a problem root records, as a view that threw is
+      (doseq [w (concat (some-> (:root-walk (first r)) :w vector) (keep #(some-> (:walk (val %)) deref :w) (:branch-reads (first r))))
+              d (render/take-defects! w)]
+        (step/out! o :to-api {:op :error :pid :render :message (:seon.error/message d) :data d}))
+      r)
     (catch Exception ex
       (let [held (get-in st [:views view-id])
             d (clojure.main/ex-triage (assoc (Throwable->map ex) :clojure.error/phase :execution))
