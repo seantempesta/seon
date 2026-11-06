@@ -178,3 +178,14 @@
     (is (= #{'app.long-test/long-test} (set (:seon.task/proofs (first (filter #(= "app.long-test/shrink-long-test" (:seon.task/id %)) tx)))))
         "a long test is its own proof (no test reaches a test)")
     (is (= [] (filterv :seon.task/id (my.root/findings-tx (datahike.core/db-with db tx) g))) "filed once")))
+
+;; docs/merging.md#a-slow-test-is-left-out: its metric known ahead of time, itself its proof, filed once
+(deftest a-slow-test-becomes-a-task-that-names-what-it-measured
+  (let [db (t/world)
+        tx (my.root/slow-tests-tx db '{app.x-test/waits 9000} 5000)
+        tk (first (filter :seon.task/id tx))]
+    (is (= "app.x-test/fast-waits" (:seon.task/id tk)))
+    (is (= '#{app.x-test/waits} (set (:seon.task/proofs tk))) "itself its proof")
+    (is (re-find #"`app.x-test/waits` measured 9000 ms, at or over the bound of 5000" (:seon.task/plan tk)) "its plan names its measure and the bound")
+    (is (= :held (:seon.task/execution tk)) "held until released")
+    (is (= [] (filterv :seon.task/id (my.root/slow-tests-tx (datahike.core/db-with db tx) '{app.x-test/waits 9000} 5000))) "filed once")))

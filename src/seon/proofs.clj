@@ -449,10 +449,11 @@
   process too, so nothing is left out and none named by hand); results-at, a function of the
   candidates ({key digest}) answering the verdicts cached at their digests ({digest result}:
   seon.fx/stored-results, the caller's read); base the tree this checkout's caused problems are read against (nil: none,
-  the health step is missing). Answers {:run-tests :run-steps :reused :cand :process :binary
-  :no-test :flaky :left :digests :steps :missing :inputs}."
+  the health step is missing). reach's :slow-of (seon.fx/slow-tests, nil: none) says which of the tests that
+  would run to leave out, unless the run names keys or is the full run. Answers {:run-tests :run-steps :reused :cand :process :binary
+  :no-test :flaky :left :slow :digests :steps :missing :inputs}."
   {:malli/schema [:=> [:cat :map [:enum "tests" "checks" "both"] [:or :boolean [:= :merge]] [:maybe [:sequential :any]] [:maybe :string] :seon.host/fn] :map]}
-  [{:keys [graph inputs digests process binary no-test]} what all? names base results-at]
+  [{:keys [graph inputs digests process binary no-test slow-of]} what all? names base results-at]
   (let [tests? (not= what "checks") checks? (not= what "tests")
         ;; the steps' functions read from the tests' graph: their digests and which boot a root or a process
         ;; each pure contracted function is a key of its own (mg-roots), indexed beside the steps
@@ -468,12 +469,18 @@
         ;; a green is reused and a flaky judged red; a red alone runs again, so a red is never
         ;; reported as if it passed (a run ends on what it ran)
         found (into {} (filter (fn [[_ r]] (or (green? r) (:flaky r)))) (results-at cand))
+        ;; of the tests that would run, a slow one is out of a merge's run too: only naming it or the
+        ;; full run runs it (docs/merging.md#a-slow-test-is-left-out)
+        slow (when (and slow-of (not named?))
+               (slow-of (into {} (filter (fn [[k dg]] (and (symbol? k) (not (found dg))))) cand)))
+        cand (apply dissoc cand (keys slow))
         {:keys [run reused]} (plan nil cand (if (true? all?) {} found) #{})
         {run-steps true run-tests false} (group-by string? run)]
     {:run-tests (vec run-tests) :run-steps (vec run-steps) :reused reused :cand cand :process process :binary binary :no-test no-test
      ;; green and red at its digest, whatever the plan runs (the full run reruns every key): red
      :flaky (into (sorted-map-by #(compare (str %1) (str %2))) (for [[k dg] cand :let [r (found dg)] :when (:flaky r)] [k r]))
-     :left (when-not (or named? merge?) (vec (sort-by str (filter all-cand process))))
+     :left (when-not (or named? merge?) (vec (sort-by str (remove #(contains? slow %) (filter all-cand process)))))
+     :slow slow
      :digests digests :steps steps :missing missing :inputs inputs}))
 
 (def ^:private report

@@ -44,4 +44,6 @@ nice -n 15 bin/build > target/update-build.log 2>&1 || { tail -5 target/update-b
 print "built $(ls -l target/seon | awk '{print $6, $7, $8}')"
 bin/root stop >/dev/null 2>&1
 bin/root start "$@" | tail -1 || fail "the standing root did not start (runs/root.log)"
+# what the verdict cache shows slow is work: root files a held task per slow test (docs/merging.md#a-slow-test-is-left-out)
+printf '{:op :eval :agent "root" :code "(my.root/file-slow-tests! sys)"}\n' | bin/ask "${$(bin/ports)%% *}" >/dev/null || print "filing the slow tests' tasks failed: run (my.root/file-slow-tests! sys) at root"
 print "UPDATE OK"

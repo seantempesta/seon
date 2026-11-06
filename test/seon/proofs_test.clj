@@ -597,3 +597,17 @@
              (set (proofs/result-tx {'app.f-test/t held1} {} {} {} {'app.f-test/t "d5"})))
           "not judged by this run and its digest moved: every fact retracted, its status unknown")
       (is (= [] (proofs/result-tx {'app.f-test/t held1} {} {} {} at)) "not judged, its digest unchanged: its verdict stands"))))
+
+;; docs/merging.md#a-slow-test-is-left-out: asked only of what would run, out of a plain and a merge's run, in a named or full one
+(deftest a-slow-test-is-left-out-unless-named-or-the-full-run
+  (let [asked (atom nil)
+        reach {:digests '{a/slow "d1" a/quick "d2" a/green "d3"} :process #{}
+               :slow-of (fn [ds] (reset! asked ds) (select-keys '{a/slow 9000 a/green 9000} (keys ds)))}
+        plan (fn [all? names] (proofs/plan-of reach "tests" all? names nil (fn [_] {"d3" {:pass 1 :fail 0 :error 0}})))
+        auto (plan false nil)]
+    (is (= '{a/slow "d1" a/quick "d2"} @asked) "only the tests that would run are asked about: a green at its digest costs nothing")
+    (is (= '[a/quick] (:run-tests auto)) "a plain run leaves it out")
+    (is (= '{a/slow 9000} (:slow auto)) "and says so, with what it measured")
+    (is (= '[a/quick] (:run-tests (plan :merge nil))) "a merge's run leaves it out too")
+    (is (some #{'a/slow} (:run-tests (plan false ["a/slow"]))) "named, it runs")
+    (is (some #{'a/slow} (:run-tests (plan true nil))) "and the full run runs it")))

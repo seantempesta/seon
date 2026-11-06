@@ -759,6 +759,35 @@
            (when (pos? n) (some-> (re-find #":ticks (\d+)" (String. buf 0 (int n))) second parse-long))))
        (catch java.io.IOException _ nil)))
 
+(defn- green-ms
+  "The ms the green verdict file f measured, read from its first bytes as green-ticks reads :ticks, nil
+  when it has none or cannot be read. A measure, never a verdict (docs/merging.md#a-slow-test-is-left-out)."
+  {:malli/schema [:=> [:cat :any] [:maybe :int]]}
+  [f]
+  (try (with-open [r (java.io.FileReader. ^java.io.File f)]
+         (let [buf (char-array 768) n (.read r buf)]
+           (when (pos? n) (some-> (re-find #":ms (\d+)" (String. buf 0 (int n))) second parse-long))))
+       (catch java.io.IOException _ nil)))
+
+(defn slow-tests
+  "{test ms} of the tests of digests ({test digest}) that run past bound (:seon.config.proofs/slow-test-ms): by
+  the green at its own digest when it has one, so a test made fast comes back as soon as it is proved, else by
+  the median of its newest greens (:seon.config.proofs/slow-test-greens). A test with no green is not slow. Cost:
+  a listing per test and one small read per green used. docs/merging.md#a-slow-test-is-left-out."
+  {:malli/schema [:function [:=> [:cat [:map-of :qualified-symbol [:maybe :string]]] [:map-of :qualified-symbol :int]]
+                  [:=> [:cat :string [:map-of :qualified-symbol [:maybe :string]] pos-int? pos-int?] [:map-of :qualified-symbol :int]]]}
+  ([digests] (slow-tests (cfg/value :seon.config.proofs/results-dir) digests
+                         (cfg/value :seon.config.proofs/slow-test-ms) (cfg/value :seon.config.proofs/slow-test-greens)))
+  ([dir digests bound greens]
+   (into {} (for [[t dg] digests
+                  :let [fs (filterv #(= :pass (second %)) (verdict-files dir t))
+                        own (some (fn [[d _ f]] (when (= d dg) f)) fs)
+                        newest (take greens (sort-by #(- (.lastModified ^java.io.File %)) (map last fs)))
+                        ms (if own [(green-ms own)] (sort (keep green-ms newest)))
+                        ms (when (seq ms) (nth ms (quot (count ms) 2)))]
+                  :when (and ms (>= ms bound))]
+              [t ms]))))
+
 (defn test-budgets
   "{test ticks} of tests: the engine ticks each may run, min(cap, max(floor, factor x the median of the
   ticks its green verdicts measured, at any digest)); a test with no green gets the floor. cap
