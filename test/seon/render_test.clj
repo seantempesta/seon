@@ -935,13 +935,13 @@
       (let [[st [r0 r1] [e0 e1]] (debug-state conn)
             db (get-in st [:branches [:debug :a1] :db])
             sent (fn [n msgs] (seon.model/request-body (seon.config/provider-at db db "demo/f") {:messages msgs :task "demo/f" :turn n}))
-            page (fn [st at] (let [st (cond-> (assoc-in st [:tab [:debug :a1] :open] #{"d-turn-raw"}) at (assoc-in [:tab [:debug :a1] :at] at))
+            page (fn [st at] (let [st (cond-> (update-in st [:tab [:debug :a1] :open] (fnil conj #{}) "d-turn-raw") at (assoc-in [:tab [:debug :a1] :at] at))
                                    [st' _] (#'p/pass-view st [:debug :a1])]
                                (p/view-html st' [:debug :a1])))
             h0 (page st e0) h1 (page st e1)]
         (is (= (clojure.data.json/write-str (sent 0 r0)) (wire-text h0)) "turn 0: the page's body is the bytes it sent")
         (is (= (clojure.data.json/write-str (sent 1 r1)) (wire-text h1)) "turn 1: the same")
-        (is (str/includes? h1 "the help page") "each message beside the records that made it")
+        (is (str/includes? (page (assoc-in st [:tab [:debug :a1] :open] #{"d-turn-s0"}) e1) "the help page") "each message, opened, beside the records that made it")
         (is (str/includes? h1 "I call f.") "a call's arguments as sent, its prose in them")
         (is (str/includes? h1 "sent the same by the request before down to here") "where the unchanged prefix ends, with no cache count recorded")
         (is (not (str/includes? h0 "sent the same by the request before")) "the first request has no request before")
@@ -974,7 +974,7 @@
         (testing "a turn whose call failed shows what it sent and its typed error"
           (let [db (d/db-with db [{:seon.model-call/id "b/a1/1" :seon.model-call/error {:seon.error/type :seon.model/no-provider :seon.error/operation 'seon.model/complete
                                                                                 :seon.error/message "no model provider"}}])
-                html (page (-> st (assoc :main-db db) (assoc-in [:branches [:debug :a1] :db] db)) e0)]
+                html (page (-> st (assoc :main-db db) (assoc-in [:branches [:debug :a1] :db] db) (assoc-in [:tab [:debug :a1] :open] #{"d-turn-s1"})) e0)]
             (is (str/includes? html "no model provider") "its error, by the error's render")
             (is (str/includes? html "eval p101") "beside what it sent: the page, the first eval")))))))
 
@@ -1365,10 +1365,13 @@
            (#'ui/request-sections ms sources evals)))
     (is (= ["system" "page" "eval"] (mapv second (re-seq #"data-section=\"(\w+)\"" h))) "a fold a section, whatever many messages it holds")
     (is (= 1 (count (re-seq #"<details[^>]*data-section=\"\w+\"[^>]* open" h))) "only the section holding what is new starts open")
+    (is (not (str/includes? h "(page)")) "a closed section's messages are not drawn: it costs its line")
+    (is (str/includes? (draw #{"d-turn-s1"}) "(page)") "turned open, they are")
+    (is (not (str/includes? (draw #{"d-turn-s3"}) "(second-call)")) "a section that starts open can be closed")
     (is (= 1 (count (re-seq #"Then the other" h))) "a closed section says once what each of its evals set out to do, though the eval made its call and its answer")
     (is (re-find #"call · a.*\(first-call\).*call · b.*\(second-call\)" h) "a call is the code of the record holding its id")
     (is (str/includes? (h/html (ui/debug-turn {:unit "d-turn"} {:turn 1 :agent "b/a1" :view "a1" :origin :model :usage {} :evals {"e2" nil}
-                                                                :body {:messages [(nth ms 3)]} :sources [[[:eval "e2"]]] :new [false]}))
+                                                                :body {:messages [(nth ms 3)]} :sources [[[:eval "e2"]]] :new [true]}))
                        "tool_calls · eval · a · arguments")
         "an eval the db does not hold: its arguments as sent")
     (is (str/includes? h "Large, ") "text past its budget offers the rest")
