@@ -83,7 +83,8 @@
   (testing "a call with no content beside it, and a call cut mid-arguments: its arguments as they came"
     (let [c (model/parse-reply "{\"choices\":[{\"message\":{\"content\":null,\"tool_calls\":[{\"id\":\"c\",\"function\":{\"name\":\"eval\",\"arguments\":\"{\\\"code\\\":\\\"(+ 1\"}}]},\"finish_reason\":\"length\"}]}" 1.0 64)]
       (is (= "" (:text c)))
-      (is (= [{:id "c" :code "{\"code\":\"(+ 1"}] (:tool-calls c))))))
+      (is (= ["c" "{\"code\":\"(+ 1"] ((juxt :id :code) (first (:tool-calls c)))) "its arguments as they came")
+      (is (re-find #"not run: the arguments are cut off" (:problem (first (:tool-calls c)))) "and nothing runs: the agent is told why"))))
 
 (defn- usage-of
   "The completion a one-document reply with usage u reads as."

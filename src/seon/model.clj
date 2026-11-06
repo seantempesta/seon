@@ -182,7 +182,7 @@
   (let [a (or arguments "")
         j (try (json/read-str a) (catch Throwable _ nil))
         problem (cond
-                  (and tool (not= "eval" tool)) (str "there is one tool, eval; " (pr-str tool) " is not a tool here")
+                  (and tool (not= "eval" tool)) (str "there is one tool, eval; " tool " is not a tool here")
                   (not (map? j)) "the arguments are cut off or are not JSON"
                   (not (contains? j "code")) "code is missing"
                   (not (string? (get j "code"))) "code is not a string")]

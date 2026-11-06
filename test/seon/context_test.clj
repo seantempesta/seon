@@ -460,7 +460,7 @@
         (is (= (context/system-text @conn) (:content (first r0))) "the system message is the system prompt as main holds it")
         (is (str/starts-with? (:content (first r0)) "# You are a Seon agent\n\nYou're at a Clojure REPL") "the page, from its sections")
         (is (= ["system" "assistant" "tool"] (mapv :role r0)) "the first request: the system prompt, then the page as an eval's call and answer")
-        (is (str/includes? (get-in r0 [1 :tool-calls 0 :intent]) "Seon ran this") "its intent says who ran it")
+        (is (str/includes? (get-in r0 [1 :tool-calls 0 :intent]) "The agent's page") "its message says what it shows")
         (is (= "(my.render/render-ctx)" (get-in r0 [1 :tool-calls 0 :code])))
         (is (every? #(re-find % (:content (peek r0))) [#"seon\.render\.ui/cited" #"Doubles\." #"seon\.render\.ui/status"]) "the page whole, each part by the function that drew it: how the work stands too")
         (is (= "(my.render/render-changes)" (get-in r1 [(- (count r1) 2) :tool-calls 0 :code])) "what moved is an eval of its own at the end, after turn 1's own eval")

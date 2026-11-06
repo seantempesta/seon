@@ -4,6 +4,8 @@ This file holds the owner's standing rulings, one entry each: the rule, the owne
 
 ## 2026-11-06 rulings
 
+The owner's rulings of 2026-11-06, on one tree for the model and the page, on data the model can read precisely, and on sessions working with no fixed ceremony; they stand over earlier entries where they differ.
+
 ### The model's context is a render of the same tree as the page
 
 "The context the model is getting should be a part of this render system. It should be a computational graph with react style rendering of components using our understanding of immutable data structures (ctx atom) and the db (internal read tracking) do not reinvent anything." "When we were doing separate model and user html renders they always drifted." "hiccup is also data... Data itself can self render based on it's render function." "the model context should be efficiently re-renderable just like the hiccup is. this means yes we can re-eval something and update it. Yes this will cache bust and yes that's okay if explicitly done." Being built: task `seon.context/the-models-context-is-the-walks`.
