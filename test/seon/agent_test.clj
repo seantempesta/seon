@@ -1270,7 +1270,7 @@
     (is (str/includes? (str broken-request) "broken render") "and the request reads its error")))
 
 ;; docs/render.md#the-render-is-an-eval: a wake is told what moved since the page it last showed, never the page again: a second whole page
-;; costs about 4k tokens a wake; and an eval Seon ran is not one the agent repeated, so it takes no :again
+;; costs about 4k tokens a wake
 (deftest a-wake-shows-what-moved-not-the-page-again
   (let [[_ _ whole again calls turn]
         (in-agent (fn [{:keys [task]}]

@@ -16,6 +16,7 @@
  :seon.config.ai/reasoning-pair [:or {:description "A model's thinking with its reasoning replay: thinking :enabled with tools needs every earlier reasoning sent back, so replay-reasoning false is refused with it."}
                                  [:map [:seon.config.ai/thinking {:optional true} [:enum :disabled]]]
                                  [:map [:seon.config.ai/replay-reasoning [:= true]]]]
+ :seon.config.ai/temperature [:double {:seon.config/unit "temperature" :description "The model's sampling temperature; absent: the provider's default (docs/model.md#temperature)."}]
  :seon.config.ai/reasoning-effort [:enum {:seon.config/unit "effort" :description "DeepSeek's reasoning effort; absent: the provider's default."} :low :medium :high]
  :seon.config.ai/max-in-flight [:int {:min 1 :seon.config/unit "calls" :description "Model calls in flight at once, cluster-wide: our admission cap (the :model owner's workers)."}]
  :seon.config.ai/judge-pass-usd [:double {:min 0.0 :seon.config/unit "USD" :description "What one first-move pass (my.root/first-moves!) may spend on model calls; at the bound it stops and records the tasks it left."}]

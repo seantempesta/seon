@@ -1069,7 +1069,7 @@
   green and something blocks merging, exactly what and the form that clears it; all green and nothing blocks, `you're done`.
   Main's side only when something conflicts: both sides and the form that settles each. No table beside the same words: a list of
   the proofs' states only when there are several. See docs/render.md#how-the-work-stands."
-  {:malli/schema [:=> [:cat :map :map] :any]}
+  {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
   [_opts {:keys [proofs refused test-run unmerged without-a-contract caused attention merge]}]
   (let [state #(:status %)
         unwritten (filter #(= :undefined (state %)) proofs)

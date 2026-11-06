@@ -58,6 +58,7 @@
 (deftest a-render-is-opts-then-children
   ;; Reagent's form (docs/render.md): a render takes its opts first and its
   ;; children after, and a call in hiccup is written [f opts & children]
+  ;; declared renders are found from the schemas at run time, so a contract's change moves no digest of this test (status-hiccup, 2026-11-06)
   (testing "every render a schema declares takes [opts v]: its contract's first argument is :seon.render/opts"
     (let [declared (distinct (keep #(r/declared %) (keys seon.contract/forms)))
           first-arg (fn [sym] (let [s (:malli/schema (meta (requiring-resolve sym)))
