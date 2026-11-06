@@ -7,7 +7,7 @@
             [clojure.string :as str] [clojure.core.async :as a]
             [seon.render :as r] [seon.fixtures] [seon.render.ui :as ui] [seon.render.proc :as p]
             [seon.web.html :as h] [clojure.walk] [clojure.set] [seon.print.select] [seon.config] [seon.doc] [seon.print] [seon.db] [seon.reconcile] [seon.task] [seon.edn] [seon.context] [seon.contract] [seon.repl] [datahike.api :as d]
-            [seon.fx] [seon.source] [seon.program] [seon.web] [seon.template] [seon.context-test] [seon.render-cost-test] [seon.turn] [seon.model] [seon.problems] [my.agent] [my.test] [seon.ctx]))
+            [seon.fx] [seon.source] [seon.reader] [seon.program] [seon.web] [seon.template] [seon.context-test] [seon.render-cost-test] [seon.turn] [seon.model] [seon.problems] [my.agent] [my.test] [seon.ctx]))
 
 (def ^:private task
   {:seon.task/id "calc/add" :seon.task/ns 'calc :seon.task/name "add" :seon.task/plan "Make `app.calc/add` pass"
@@ -297,6 +297,81 @@
       (is (= [] (remove (set (concat (sites forms printer-vars printer?) (sites forms cut-vars display?)
                                      (sites forms budgeted-vars #(and (printer? %) (not (display? %))))))
                         (sort named)))))))
+
+;; docs/render.md#one-path-to-the-model: what the compiler's facts and a form's read say of who makes what the model is sent
+(def ^:private the-path
+  "Each step of the one path to a provider, and who may reference it."
+  '{seon.render/wire #{seon.context/request}
+    seon.render/hiccup-wire #{seon.context/request}
+    seon.context/request #{seon.context/render}
+    seon.model/wire-messages #{seon.model/request-body}
+    seon.model/request-body #{seon.model/openai-compat seon.context/wire-turn}})
+
+(defn- rows-with
+  "The rows of the forms of db in namespaces nss whose source holds one of texts, each with :read, what its source reads as."
+  {:malli/schema [:=> [:cat :seon.host/db :any [:sequential :string]] [:vector :map]]}
+  [db nss texts]
+  (->> (d/datoms db :aevt :form/src)
+       (keep #(when (some (fn [t] (str/includes? (:v %) t)) texts) (:e %)))
+       (map #(seon.program/form-row db %))
+       (filter (comp nss :ns))
+       (mapv #(assoc % :read (seon.reader/read-text (:src %) (:ns %))))))
+
+(defn- holds-map?
+  "Does what form row r reads as hold a map literal with a key pred accepts?"
+  {:malli/schema [:=> [:cat :map :any] :boolean]}
+  [r pred] (boolean (some #(and (map? %) (some pred (keys %))) (tree-seq coll? seq (:read r)))))
+
+(defn- named-by
+  "The vars row r defines."
+  {:malli/schema [:=> [:cat :map] [:sequential :any]]}
+  [r] (for [[k sym] (:defines r) :when (#{:var :method} k)] sym))
+
+(defn- outside-the-path
+  "The vars of db in namespaces nss that make provider messages other than through seon.render/wire: one that references a step of `the-path` and is not named for it, or
+  whose code holds a message ({:role :content}) or a request ({:messages} of a turn or a model) and is not a step."
+  {:malli/schema [:=> [:cat :seon.host/db :any] [:set :any]]}
+  [db nss]
+  (let [refs (->> (d/datoms db :aevt :form/refs) (keep #(when (contains? the-path (:v %)) [(:v %) (:e %)])) distinct)
+        by-ref (for [[step e] refs :let [r (seon.program/form-row db e)] :when (nss (:ns r)) v (named-by r) :when (not (or (= step v) (contains? (get the-path step) v)))] v)
+        role (for [r (rows-with db nss [":role"]) :when (some #(and (map? %) (contains? % :role) (contains? % :content)) (tree-seq coll? seq (:read r))) v (named-by r)
+                   :when (not (#{'seon.render/wire-parts 'seon.model/wire-message} v))] v)
+        asks (for [r (rows-with db nss [":messages"])
+                   :when (some #(and (map? %) (contains? % :messages) (or (contains? % :turn) (contains? % :model))) (tree-seq coll? seq (:read r)))
+                   v (named-by r)
+                   :when (not (or (some #{'seon.context/render 'seon.context/request} (:refs r))
+                                  (#{'seon.model/request-body 'seon.context/request 'my.root/first-moves!} v)))] v)]
+    (set (concat by-ref role asks))))
+
+(defn- action-sites
+  "The vars of db in namespaces nss whose hiccup holds an action: a callback as data (:seon/call under a map's key), or a Datastar handler (a data-on attribute)."
+  {:malli/schema [:=> [:cat :seon.host/db :any] [:set :any]]}
+  [db nss]
+  (set (for [r (rows-with db nss [":seon/call" "data-on"])
+             :when (or (holds-map? r #{:seon/call})
+                       (holds-map? r #(str/starts-with? (str (if (keyword? %) (name %) (if (seq? %) (second %) ""))) "data-on")))
+             v (named-by r)] v)))
+
+(deftest one-path-to-the-model
+  (let [db (src-program) nss (src-nss db)]
+    (is (= #{} (outside-the-path db nss)) "everything a model is sent is read from the tree")
+    (testing "a second path is red: a function that writes messages and asks for them itself"
+      (let [w (my.test/with (my.test/world)
+                (my.test/code 'app.second (str "(ns app.second (:require [seon.model :as m]))\n"
+                                          "(defn ask \"A request made beside the tree.\" [p] (m/request-body p {:messages [{:role \"user\" :content \"hi\"}]}))\n"
+                                          "(defn told \"A message made beside the tree.\" [] {:role \"user\" :content \"hi\"})\n"
+                                          "(defn sends \"Messages asked for beside the tree.\" [ms] {:messages ms :turn 1})")))]
+        (is (= '#{app.second/ask app.second/told app.second/sends} (outside-the-path w #{'app.second})))))))
+
+(deftest an-action-on-the-page-is-the-models-too
+  ;; owner, 2026-11-06: "actions are in the data, never only in a look". Each render holding an action is named in docs/render.md#one-path-to-the-model, with what the model has for it
+  (let [db (src-program) nss (src-nss db)
+        doc (let [t (slurp (str (seon.config/checkout) "/docs/render.md"))] (subs t (str/index-of t "## One path to the model") (or (str/index-of t "\n## " (+ 3 (str/index-of t "## One path to the model"))) (count t))))
+        named (set (for [[_ head] (re-seq #"(?m)^- (.*?): " doc) [_ n] (re-seq #"`([a-z][\w.\-]*/[^`\s]+)`" head)] (symbol n)))]
+    (is (= named (action-sites db nss)) "a new one is red until the page says what the model has for it, and a name that holds none leaves it")
+    (testing "a planted one is seen"
+      (let [w (my.test/with (my.test/world) (my.test/code 'app.look "(ns app.look)\n(defn approve \"A button.\" [] [:button {:seon/call 'app.look/approve!} \"Approve\"])"))]
+        (is (= '#{app.look/approve} (action-sites w #{'app.look})))))))
 
 ;; ---- the agent's debug view ----------------
 
@@ -2258,9 +2333,9 @@
         units (:seon.render/units page)
         in (fn [sel] (filterv #(= sel (:container %)) units))
         w (a3-walk branch)
-        shown (try (r/placed-hiccup w ["#p-task"]) (finally (r/dispose-walk! w)))]
+        shown (try (r/placed-hiccup w ["#p-task" "#p-rules"]) (finally (r/dispose-walk! w)))]
     (is (seq model) "the model reads parts")
-    (is (= (keys model) (remove #(= % "agent-state") (map :id (in "#p-task")))) "the page's task list is the model's parts, by id and in order (and the person's own state beside them)")
+    (is (= (keys model) (remove #(= % "agent-state") (map :id (concat (in "#p-task") (in "#p-rules"))))) "the page's task list and its rules are the model's parts, by id and in order (and the person's own state beside them)")
     (is (= model shown) "each part's hiccup the model reads is the hiccup the page's unit of that id is written from")
     (doseq [u (in "#p-task")] (is (str/includes? (:html u) (str "id=\"" (:id u) "\"")) "and the unit is that part"))
     (let [conv (apply str (map :html (in "#c-rows")))]
@@ -2386,9 +2461,60 @@
   ;; docs/render.md#the-render-is-an-eval: past eight keys a map is hash ordered, and the live run read "task" fifth; the value is pairs, so any store, printer and reader keeps them
   (let [ids (mapv #(str "p" %) (range 12))
         v (r/parts-value (map (fn [id] [id [:li id]]) ids))]
-    (is (= ids (map first v)))
-    (is (= ids (map first (read-string (pr-str v)))) "read back")
+    (is (= ids (map first (:components v))))
+    (is (= ids (map first (:components (read-string (pr-str v))))) "read back")
     (is (= (sort-by #(str/index-of (seon.print/text v) %) ids) ids) "printed")))
+
+;; docs/render.md#a-change-is-edits-by-name: what the keyed read and its edits are, on the shape status draws
+(def ^:private proofs-a
+  '[seon.render.ui/status {:ctx [:task :proved]} [:h2 "Your proofs"]
+    [:ul {:key :proofs}
+     [:li {:key old-test} [:code "old-test"] ": fails"] [:li {:key b-test} [:code "b-test"] ": passes"] [:li {:key c-test} [:code "c-test"] ": passes"]
+     [:li {:key d-test} [:code "d-test"] ": passes"] [:li {:key e-test} [:code "e-test"] ": passes"] [:li {:key f-test} [:code "f-test"] ": passes"]]
+    [:p "Everything below this line is some text the agent has to read, long enough for a change above it to be worth saying by itself."]])
+
+(defn- no-position?
+  "Does no edit's path hold a position?"
+  {:malli/schema [:=> [:cat [:sequential :any]] :boolean]}
+  [es] (not-any? (fn [[p]] (some number? p)) es))
+
+(deftest a-change-speaks-in-names
+  (let [edits (fn [was now] (r/page-edits (r/forms-moved {"status" was} {"status" now})))
+        drop-old (assoc-in proofs-a [3] (into [:ul {:key :proofs}] (subvec (nth proofs-a 3) 3)))]
+    (testing "a named child gone is its name and :-"
+      (is (= '[[["status" :proofs old-test] :-]] (edits proofs-a drop-old))))
+    (testing "a named child changed is replaced at its name, its value the hiccup"
+      (is (= '[[["status" :proofs b-test] :r [:li {:key b-test} [:code "b-test"] ": fails"]]]
+             (edits proofs-a (assoc-in proofs-a [3 3] '[:li {:key b-test} [:code "b-test"] ": fails"])))))
+    (testing "a named child added is its name and :+"
+      (is (= '[[["status" :proofs g-test] :+ [:li {:key g-test} "new"]]]
+             (edits proofs-a (update proofs-a 3 conj '[:li {:key g-test} "new"])))))
+    (testing "what has no name is what its element holds of its own, :own, whole, never a position"
+      (let [es (edits proofs-a (assoc-in proofs-a [2] [:h2 "Your new proofs"]))]
+        (is (= [["status" :own]] (map first es)))
+        (is (= '[seon.render.ui/status {:ctx [:task :proved]} [:h2 "Your new proofs"] [:p "Everything below this line is some text the agent has to read, long enough for a change above it to be worth saying by itself."]]
+               (nth (first es) 2)))))
+    (testing "a value inside a named child never opens: its attributes and text are that child's"
+      (is (no-position? (edits proofs-a (assoc-in proofs-a [3 3 2 1] "b-renamed"))))
+      (is (= '[["status" :proofs b-test]] (map first (edits proofs-a (assoc-in proofs-a [3 3 2 1] "b-renamed"))))))
+    (testing "the whole component when that is shorter, and when nothing has a name"
+      (is (= [["status"]] (map first (edits '[f {} [:p "a"]] '[f {} [:p "b"]])))))
+    (testing "named children that changed places are no edit a name can say: the whole"
+      (let [swapped (assoc proofs-a 3 '[:ul {:key :proofs} [:li {:key b-test} [:code "b-test"] ": passes"] [:li {:key old-test} [:code "old-test"] ": fails"] [:li {:key c-test} [:code "c-test"] ": passes"]
+                                        [:li {:key d-test} [:code "d-test"] ": passes"] [:li {:key e-test} [:code "e-test"] ": passes"] [:li {:key f-test} [:code "f-test"] ": passes"]])]
+        (is (= [[["status"] :r swapped]] (edits proofs-a swapped)))))
+    (testing "names that are not distinct, or that take :own's place, are one value"
+      (is (= '[:ul [:li {:key a} "1"] [:li {:key a} "2"]] (r/keyed '[:ul [:li {:key a} "1"] [:li {:key a} "2"]])))
+      (is (= '[:ul [:li {:key :own} "1"]] (r/keyed '[:ul [:li {:key :own} "1"]]))))
+    (testing "a part's first draw and its going are the same words"
+      (is (= '[[["n"] :+ [f {}]] [["g"] :-]] (r/page-edits (r/forms-moved {"g" '[f {}]} {"n" '[f {}]})))))
+    (testing "an element's id names it where it has no :key: a component nested in a part"
+      (let [long-text (apply str (repeat 40 "word "))
+            mk (fn [t] ['f {} ['g {:id "cited-a"} [:p t] [:p {:key :x} long-text]] [:p {:key :y} long-text]])]
+        (is (= '[[["p" "cited-a" :own] :r [g {:id "cited-a"} [:p "b"]]]]
+               (r/page-edits (r/forms-moved {"p" (mk "a")} {"p" (mk "b")}))))))
+    (testing "no clock decides: with no timeout editscript holds no deadline"
+      (is (not (contains? (editscript.util.common/with-vec-deadline {:algo :quick :vec-timeout nil}) :editscript.util.common/vec-deadline))))))
 
 (defn cited-world
   "A task demo/c whose plan cites a wiki section, a defined var (with a test and a caller) and its own proof,
