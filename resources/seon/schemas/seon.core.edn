@@ -16,6 +16,15 @@
  :seon.db/t :int
  :seon.db/cfg [:map [:store :map]]
  :seon.db/tx-data [:sequential :any]
+ ;; an entity as history and at read it: its id, or a lookup ref of a unique attribute (seon.db/history)
+ :seon.db/entity [:or :int [:tuple :keyword :any]]
+ ;; one datom of an entity's history: attribute :a, value :v (a pulled map under :pull, ref attributes only), :added? false for a
+ ;; retraction, :t its transaction, :at that transaction's :db/txInstant (docs/storage.md#history)
+ :seon.db/history-row [:map [:a :keyword] [:v :any] [:added? :boolean] [:t :int] [:at inst?]]
+ :seon.db/history-opts [:map {:closed true} [:attrs {:optional true} [:set :keyword]] [:pull {:optional true} [:vector :any]]]
+ ;; where seon.db/at reads: a commit alone, or a branch and/or a t (docs/storage.md#history)
+ :seon.db/at-opts [:or [:map {:closed true} [:commit :uuid]]
+                   [:map {:closed true} [:branch {:optional true} :seon.db/branch] [:t {:optional true} :int]]]
  :seon.db/op [:tuple [:enum :db/add :db/retract] :int :keyword :any]
  :seon.db/resolved-tx [:vector :seon.db/op]
  :seon.db/tx-report [:map [:tx-data :any] [:db-after :seon.host/db]]

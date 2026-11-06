@@ -1358,3 +1358,15 @@
     (is (= '#{app.pt-ck-test/reads-the-map-test} (moved (schema db :app.pt-ck/config "[:map {:closed false} [:seon.config.pt/a :seon.config.pt/a] [:seon.config.pt/b :seon.config.pt/b]]")))
         "what the map says besides its keys still moves the tests reaching it")))
 
+
+(deftest a-vars-history-names-each-definition-it-had
+  ;; task seon.program/a-vars-history-is-read-at-the-repl; docs/storage.md#history: a var's past definitions
+  ;; are its :var/form datoms in the db's history, read by seon.db/history
+  (let [def-of #(mt/code 'app.h (str "(ns app.h)\n(defn f [x] (+ x " % "))\n"))
+        db (mt/with (mt/world {:history? true}) (def-of 1) (def-of 2) (def-of 3))
+        rows (pdb/history db [:var/name 'app.h/f] {:attrs #{:var/form} :pull [:form/src]})
+        texts (mapv (comp :form/src :v) (filter :added? rows))]
+    (is (= 3 (count texts)) (pr-str rows))
+    (is (every? true? (map #(str/includes? %1 %2) texts ["(+ x 1)" "(+ x 2)" "(+ x 3)"]))
+        (str "oldest first, each the text it had: " (pr-str texts)))
+    (is (= 2 (count (remove :added? rows))) "the two replaced forms were each retracted")))
