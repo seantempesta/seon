@@ -19,10 +19,10 @@ What Seon is for, where it stands, the one step being worked now, and the steps 
 
 ## Now: one step
 
-**One tree of data that renders itself, read by two clients.** The model's context goes through the same ratom components as the page: a component returns a map, a browser calls its `:seon.render/html`, and the model reads the map, printed. The order, what's settled and what the research found are on task `seon.context/the-models-context-is-the-walks`. Real tasks run after diffs, before the conversation moves, and what they show decides how much of the rest is worth doing.
+**One tree of data that renders itself, read by two clients.** The model's context goes through the same ratom components as the page: a component transforms its data, filtering it and adding what it needs from the db, into hiccup: the one state, drawn to html directly and read by the model. The order, what's settled and what the research found are on task `seon.context/the-models-context-is-the-walks`. Real tasks run after diffs, before the conversation moves, and what they show decides how much of the rest is worth doing.
 
 In flight, each on its own branch and merged when proved:
-- **The walk (step 1 of that task):** a component returns a map, its revision follows that map, a child moved between parents stays (`jolt/recursive-ctx`).
+- **The walk (step 1 of that task):** a component's revision follows its output, and a child moved between parents stays (`jolt/recursive-ctx`).
 - **Test reuse:** a test's digest takes a form's read form, not its text; config keys a `:map` lists are no edges (`jolt/reuse-wip`).
 - **Agents repeating themselves** is a bug being root-caused (`jolt/no-repeats`).
 - **Cost of an eval and of a root's boot:** the Optimization session.
