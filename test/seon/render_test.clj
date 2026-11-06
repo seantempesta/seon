@@ -1335,6 +1335,13 @@
     (is (str/includes? h "an opening, whatever it says"))
     (is (= 1 (count (re-seq #"data-session=" h))) "the system message is no session's")))
 
+(deftest a-turn-whose-commit-is-gone-says-so
+  ;; docs/render.md#the-debug-page-is-the-wire-request: the store's keep can sweep a turn's commit; the page draws and says what it drew
+  (let [h (h/html (ui/debug-turn {:unit "d-turn"} {:turn 1 :agent "b/a1" :view "a1" :origin :model :usage {} :swept? true :differs? true
+                                                   :body {:messages [{:role "system" :content "help"}]} :sources [[]] :new [false]}))]
+    (is (str/includes? h "gone from the store") "said plainly")
+    (is (not (str/includes? h "a render or a record changed")) "and not as something else")))
+
 (deftest a-request-is-its-wire-messages
   ;; docs/render.md#the-debug-page-is-the-wire-request: a row a message, typed by its wire role, and opening a row
   ;; replaces its line; its calls' arguments are the wire's JSON read as data
