@@ -4,6 +4,30 @@ This file holds the owner's standing rulings, one entry each: the rule, the owne
 
 ## 2026-11-06 rulings
 
+### The model's context is a render of the same tree as the page
+
+"The context the model is getting should be a part of this render system. It should be a computational graph with react style rendering of components using our understanding of immutable data structures (ctx atom) and the db (internal read tracking) do not reinvent anything." "When we were doing separate model and user html renders they always drifted." "hiccup is also data... Data itself can self render based on it's render function." "the model context should be efficiently re-renderable just like the hiccup is. this means yes we can re-eval something and update it. Yes this will cache bust and yes that's okay if explicitly done." Being built: task `seon.context/the-models-context-is-the-walks`.
+
+### What the model reads is precise data, teaching included
+
+Freeform Markdown on the wire is "a loss of precision"; "We saw a boost in internal model performance when we focused more on returning data." "I disagree that we can't have teaching and direct word statements. I just want them presented as data and strings." "I want evals to be data and not some magical structure so we can remove them re-eval them etc." Diffs: "There must be a clear way for the model to understand where the change is happening and then we only show the changed parts so we never reprint the full data structure"; editscript, "I want the gains". Keyframes: "Buiild the system so this is easy to do", tested after the refactoring.
+
+### An agent talks to whoever started it, through `message-user-md`
+
+Agents "should be messaging the user regularly if not with every turn... with the user in mind", and "we will have agents running sub agents so maybe we just explain who launched them as part of their rendered context and that's who they are talking to". Stated in [prompt](prompt.md).
+
+### Design for classes of problems, and look for root causes
+
+"I want an elegant design that prevents entire classes of problems so if we find ourselves hacking things we have the wrong design." "Always look for root causes rather than solving symptoms." "Agents repeating themselves is not waste it's a bug." Data: "Data can only come from the pull which becomes ctx or the current db"; "pull friendly is king"; "There are no tables and no rows"; "Don't record shit no one cares about or heavily embed process (how something is done) with what needs to be stored." Stated in AGENTS.md section 3.
+
+### Sessions work together with no fixed ceremony
+
+"I don't want the work done twice. If you do it well merge it. If optimization does it well merge it. If you hand something off to optimization just do it. No more ceremony and mandated fixed policies." "Only give optimization work that it can work on." "Aim to get 90% of the benefit for 10% of the effort." Machine load is balanced by judgment. Stated in AGENTS.md sections 2 and 3.
+
+### A slow test is left out until it is fast, by our own data
+
+"exclude them by default until they can run fast"; "We need our own perf data... to disable the tests and mark them as broken and ideally auto create tasks to fix them". Stated in [merging](merging.md#a-slow-test-is-left-out).
+
 ### A reply with no calls pauses the agent, whatever its proofs say
 
 Owner, 2026-11-06: "I think that's fine to pause the agent if they don't do any tool calls"; "No more turns even if it's red. If we tell the agent that a reply with no tool calls will pause their session that's then we pause their session." Stated: docs/prompt.md, docs/turn.md#parked, seon.turn/act!.
