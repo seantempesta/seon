@@ -1,6 +1,5 @@
 (ns seon.fixtures
-  "The end-to-end task graphs and the scripted model's script: test fixtures, outside src
-  (task seon.main/drivers-leave-src). A scripted root loads this namespace from the
+  "The end-to-end task graphs and the scripted model's script: test fixtures, outside src. A scripted root loads this namespace from the
   checkout's test/ (seon.main/checkout-roots!, chosen by its provider's config).
 
   The program: `app.calc` (and each scenario's namespace) holds stub functions that answer

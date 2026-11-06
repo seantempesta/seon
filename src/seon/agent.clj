@@ -77,8 +77,19 @@
 
 ;; ---- the agent's own API ------------------------------------------------------
 
-(defn db {:malli/schema [:=> [:cat] :seon.host/db]}
-  [] (:db @state))
+(defn- no-branch!
+  "Throws the typed :seon.agent/no-branch: this process is no agent (root's REPL), and what was called is an agent's API,
+  which reads and writes its branch. See docs/server.md#ops."
+  {:malli/schema [:=> [:cat] :any]}
+  []
+  (throw (ex-info "no branch" (contract/error :seon.agent/no-branch #'no-branch!
+                                              "this is root's REPL, which has no branch; my.agent, my.db, my.task and my.branch are an agent's API"
+                                              {:seon.error/fix "Read main at root: (d/q query @(:conn sys)), (d/pull @(:conn sys) pattern eid), my.root/*. Or run the form in an attached agent: seon_eval with its id."}))))
+
+(defn db
+  "This agent's branch as a db value; the typed :seon.agent/no-branch in a process that has none (`no-branch!`). See docs/server.md#ops."
+  {:malli/schema [:=> [:cat] :seon.host/db]}
+  [] (or (:db @state) (no-branch!)))
 
 (declare handle!)
 
@@ -159,8 +170,7 @@
   t, never stored, and it reads no store: a read of main's head (heard-main, seon.db/head,
   datahike.writing/read-head) on each eval held the agent's heap past its ceiling in
   seon.agent-test/an-agent-finds-no-repository (OutOfMemoryError, exit 70). So an agent that never
-  hears main (no turn) is told what it last heard; telling it main moved needs root to push the commit
-  (task seon.writer/main-notices-carry-a-commit-not-a-db)."
+  hears main (no turn) is told what it last heard; telling it main moved needs root to push the commit."
   {:malli/schema [:=> [:cat] [:maybe :string]]}
   []
   (when-let [base (:base @state)]
@@ -303,7 +313,7 @@
   writes (`refused!`), never throws: no caller's loop ends on it. See docs/failure-points.md."
   {:malli/schema [:=> [:cat] :any]}
   []
-  (let [conn (:store-conn @state)
+  (let [conn (or (:store-conn @state) (no-branch!))
         c (try (dw/commit-pending! conn) (catch Throwable e e))]
     (cond
       (instance? Throwable c) (refused! conn c)
@@ -1064,7 +1074,7 @@
                (sock/clofork! w)
                ;; the run ends with its agent (a test ends by its own budget): the agent's end of this socket
                ;; pair closing raises SIGIO here and ends the child, whatever the test is
-               ;; doing (task seon.agent/a-proof-run-ends-with-its-agent; the agent's own
+               ;; doing (the agent's own
                ;; socket to root is FD_CLOFORK: not held here, so its handler is replaced)
                (when-let [unwatched (sock/signal-at-input! w)]
                  (sock/write-line! w (sedn/encode {:pass 0 :fail 0 :error 1 :reports [{:type :error :message (:seon.error/message unwatched)}]}))

@@ -2,7 +2,7 @@
   "A request becomes its task set at once, written released in one transaction (by default one
   whole task a single agent works through and merges; the stages design -> implement -> merge on
   one branch are the experiments' choice), and the reconciler forks its first agent only from a
-  main that holds all of it (task seon.template/a-request-is-one-linked-transaction).
+  main that holds all of it.
   Run: bin/test seon.template-test"
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is]] [clojure.edn] [my.test :as t] [my.root] [seon.program :as program] [seon.agent]
             [datahike.api :as d]
@@ -106,7 +106,7 @@
     (is (= [:design :implement :merge] (mapv :seon.task/kind (tpl/stages d))) "the staged choice still makes its tasks")
     (is (seq (task/create-tx (ts/test-db) ds)) "a valid task set")))
 
-;; task seon.context/an-agent-follows-its-instructions-to-green, item 1: the md-scan bench's agents read
+;; the md-scan bench's agents read
 ;; "reproduce first, fail at once" beside red proofs shown with their source, and redefined a 250-line scan
 ;; whole; B1, the green run, changed first, by edit!, and checked each change with the proof's expression
 (deftest red-proofs-with-their-source-are-the-reproduction
@@ -158,7 +158,7 @@
           "a process of a later boot, on the session's agent"))))
 
 (deftest a-long-form-becomes-a-task-that-names-its-size-tests-and-ticks
-  ;; task seon.template/a-finding-is-a-task (docs/health.md#a-form-too-long): a function over the bound is a
+  ;; (docs/health.md#a-form-too-long): a function over the bound is a
   ;; held task from its template, its proofs the tests reaching it, its plan naming its size and how to
   ;; measure its cost; one under the bound is none, and a var whose task main holds is filed once
   (let [bound (seon.config/value :seon.config.shrink/form-tokens)

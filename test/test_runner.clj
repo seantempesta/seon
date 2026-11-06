@@ -1,5 +1,5 @@
 (ns test-runner
-  "bin/test's and bin/prove's runner (task seon.proofs/prove-runs-what-a-change-reaches):
+  "bin/test's and bin/prove's runner:
   :seon.config.source/dirs imported as program facts (program-db), as root imports them, each test keyed by its reach digest
   (seon.program/graph-index) and each bin/check step by its functions' (seon.proofs/
   check-steps); seon.proofs/plan selects what has no green result at its digest.

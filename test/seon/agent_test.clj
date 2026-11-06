@@ -3,7 +3,7 @@
   it, so the test boots a root of its own, as seon.root-test does, and asks the agent over
   the server what its REPL answers.
 
-  An agent's test run, read from its child's pipe (task seon.agent/one-test-bound-derived-and-named):
+  An agent's test run, read from its child's pipe:
   no clock ends it; the child's exit does, and a child that died names the test it was running.
   Run: bin/test seon.agent-test"
   (:require [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [clojure.edn :as edn]
@@ -23,6 +23,8 @@
 
 (def value-of "seon.test-store/value-of, as this namespace's callers name it." ts/value-of)
 
+(declare with-agent)
+
 (defn in-agent
   "One agent on a task of its own in this test process's shared root on the checkout's src (its
   source root; seon.test-store/shared-root!, booted once per shard and root arguments), each of
@@ -35,9 +37,11 @@
   the task's branches are its own (the namespace is); its agent is ended and its branches
   deleted when it ends, however it ends. A shard runs its tests one at a time, so root-REPL vars
   a test defines (ready-ev, t-before-done) are its own while it runs.
-  opts: :dirs, the source dirs root imports (default [\"src\"]); :proofs, the task's proofs;
+  opts: :dirs, the source dirs root imports (default: the config's, as bin/test imports them, so the root
+  holds the program bin/test's seeded store holds and its test namespaces load through Jolt's AOT cache:
+  docs/testing.md#a-root-costs-what-it-boots); :proofs, the task's proofs;
   :sets, more --set config overrides for the root (e.g. its scripted model): a root per distinct
-  :dirs and :sets; :config, the tasks' own settings (their :seon.task/config: a test's scripted
+  :dirs and :sets (and :group, another root of the same arguments); :config, the tasks' own settings (their :seon.task/config: a test's scripted
   model, :seon.config.ai/script, rides the task, so the root's arguments stay alike and the shard's
   tests share one root: docs/config.md#the-resolver); :decls, more task declarations in the task's file beside t (a function of
   {:ns :task}, or a vector); :own-root?, a root of its own for this test (its main dropped with
@@ -45,16 +49,30 @@
   :client, the client its attach names (seon.server: then only that client's requests, or ones
   naming the task, act on the agent)."
   ([forms] (in-agent forms {}))
-  ([forms {:keys [dirs proofs sets config decls own-root? client] :or {dirs ["src"] proofs '#{demo-test/t}}}]
+  ([forms opts]
+   (mapv #(if (contains? % :response) (let [r (:response %)] (assoc r :value (value-of r))) %)
+         (with-agent opts (fn [{:keys [names ask]}]
+                            (mapv #(ask (if (map? %) % {:op :eval :agent (:agent names) :code %})) (if (fn? forms) (forms names) forms)))))))
+
+(defn with-agent
+  "in-agent's setup and teardown around a body of the test's own: f is called with {:names {:ns :task :agent}
+  :ask (a request to the root's server, answered as data) :eval-root (root-REPL code, answered as the server does; root-value reads its value)
+  :root}, once the agent is ready, and its answer is with-agent's. A test whose steps wait on its own process
+  (a fifo, a pid) uses this instead of a root of its own; opts are in-agent's (and :group, a name for a root of its own among
+  the tests that name it: :pristine, for tests that need a main nothing merged into, :merge, for tests whose agent merges)."
+  [{:keys [dirs proofs sets config decls own-root? client group] :or {proofs '#{demo-test/t}}} f]
   (let [checkout (seon.config/checkout)
         tns (str "t" (subs (str (random-uuid)) 0 8))
         names {:ns tns :task (str tns "/t")}
+        proofs (if (set? proofs) proofs (proofs names))
+        dirs (or dirs (when group (seon.config/value :seon.config.source/dirs)))
         tasks (str checkout "/target/runs/" tns "-tasks")
         _ (.mkdirs (java.io.File. tasks))
         decls (if (fn? decls) (decls names) decls)
         with-config #(cond-> % config (assoc :seon.task/config config))
         _ (spit (str tasks "/" tns ".edn") (pr-str (mapv with-config (into [{:seon.task/name "t" :seon.task/plan "Work." :seon.task/kind :work :seon.task/proofs proofs}] decls))))
-        args (into ["--set" (str ":seon.config.source/root=" (pr-str checkout)) "--set" (str ":seon.config.source/dirs=" (pr-str dirs))]
+        args (into (cond-> ["--set" (str ":seon.config.source/root=" (pr-str checkout))]
+                     dirs (into ["--set" (str ":seon.config.source/dirs=" (pr-str dirs))]))
                    (mapcat (fn [x] ["--set" x])) sets)
         ;; its store and main named (seon.test-store/start-root!), never inherited
         root (if own-root?
@@ -96,17 +114,73 @@
                 names (assoc names :agent agent)]
             (vreset! made agent)
             (cond
-               (nil? (:port root)) [{:error :root-did-not-listen :log (:log root)}]
+               (nil? (:port root)) {::no-root {:error :root-did-not-listen :log (:log root)}}
                ;; an attach that made no agent (refused: its fork server lost) ends the test with
                ;; that answer, never a wait for a hello that cannot come
                (nil? agent) {::attach-made-no-agent attach}
                :else (do (eval-root (str "(loop [] (let [e (clojure.core.async/<!! ready-ev)] (if (and (= :ready (:type e)) (= :" agent " (:agent e))) :ready (recur))))"))
-                         (mapv #(ask (if (map? %) % {:op :eval :agent agent :code %})) (if (fn? forms) (forms names) forms)))))
+                         (f {:names names :ask ask :eval-root eval-root :root root}))))
           (finally (vreset! stopped (end!))))]
     (when-let [a (and (map? out) (::attach-made-no-agent out))]
       (throw (ex-info (str "in-agent: the attach made no agent: " (pr-str a) (when own-root? (str "\nroot's log:\n" (:log @stopped))))
                       {:attach a})))
-    (mapv #(if (contains? % :response) (let [r (:response %)] (assoc r :value (value-of r))) %) out))))
+    (when-let [e (and (map? out) (::no-root out))] (throw (ex-info (str "with-agent: the root did not listen: " (pr-str e)) e)))
+    out))
+
+(defn- root-value
+  "The value of a root-REPL answer r (an error answer stays itself)."
+  [r] (if (:error r) r (value-of (:response r))))
+
+(defn- began-code
+  "Root-REPL code: agent a begins evaluating code (submitted, its future root's var blocked); answers :began at the agent's
+  :started event, tapped before the submit (the tap let go after)."
+  {:malli/schema [:=> [:cat :string :string] :string]}
+  [a code]
+  (str "(let [ev (c/events sys)] (def blocked (c/submit! sys :" a " " (pr-str code) ")) "
+       "(loop [] (let [e (clojure.core.async/<!! ev)] (if (and (= :started (:type e)) (= :" a " (:agent e))) (do (clojure.core.async/untap (:events-mult sys) ev) :began) (recur)))))"))
+
+(defn- gone-code
+  "Root-REPL code: answers :gone once agent a's end has been heard (the in-agent root's tap of its events, ready-ev)."
+  {:malli/schema [:=> [:cat :string] :string]}
+  [a]
+  (str "(loop [] (let [e (clojure.core.async/<!! ready-ev)] (if (and (#{:ended :dead :killed} (:type e)) (= :" a " (:agent e))) :gone (recur))))"))
+
+(def ^:private tuned
+  "in-agent's options for the tests that need a root set up (test children, a heap bound, a small node cache): one
+  root among them (a root is 8 s of boot, docs/testing.md#a-root-costs-what-it-boots), two children at most, and a
+  child for any work."
+  {:sets [":seon.config.proofs/jobs=2" ":seon.config.proofs/child-min-ms=1"
+          ;; an agent past 256 MB of heap is out of memory (an-oom-carries-its-heap), and a small node cache
+          ;; is full at the history an-agents-start-costs-the-same-however-long-its-root-has-run grows
+          ":seon.config.agent/heap-extra-bytes=268435456" ":seon.config.store/node-cache-bytes=8388608"]})
+
+(def ^:private merge-cache
+  "The verdict cache directory of the root the merging tests share (a delay: one per test process)."
+  (delay (str (seon.config/checkout) "/target/tmp/verdicts-merge-" (random-uuid))))
+
+(defn- merging
+  "in-agent's options for a test whose agent merges into main (which moves the program every later test runs):
+  a root for the tests that merge, all alike, each on test names of its own, and a verdict cache the tests may
+  read and write (merge-cache)."
+  []
+  (-> tuned (update :sets conj (str ":seon.config.proofs/results-dir=" (pr-str @merge-cache))) (assoc :group :merge)))
+
+(defn- spawn-kept-code
+  "Root-REPL code: spawn an agent onto the kept branch kept (made by pre, code run with m, root's main connection, and
+  b, the branch's name) and answer (on-ready ag) at its :ready, or its end's type; the agent ended after."
+  {:malli/schema [:=> [:cat :string :string :string] :string]}
+  [kept pre on-ready]
+  (str "(let [ev (seon.root/events sys) m (seon.db/conn-main (:conn sys)) b (seon.db/on-main m " kept ")]"
+       " " pre
+       " (let [ag (seon.root/spawn! sys {:branch " kept "})"
+       "       r (loop [] (let [e (clojure.core.async/<!! ev)]"
+       "                    (cond (not= ag (:agent e)) (recur)"
+       "                          (= :ready (:type e)) " on-ready
+       "                          (#{:dead :ended :killed} (:type e)) (:type e)"
+       "                          :else (recur))))]"
+       "   (clojure.core.async/untap (:events-mult sys) ev)"
+       "   (when-not (:ended-ms (get (:agents (c/state sys)) ag)) (c/kill! sys ag))"
+       "   r))"))
 
 (defn- root-ended
   "A root with two agents: a1 idle, a2 evaluating code (sent; its :started event awaited). Then
@@ -155,64 +229,19 @@
   ;; never behind the eval the :repl proc runs (md-scan #21: a :tests waited behind a wait that held the
   ;; loop). An eval blocks on a channel take that nothing will answer; the test service proves the
   ;; agent's branch meanwhile and answers; then root's interrupt stops the eval and the agent answers on
-  (let [checkout (seon.config/checkout)
-        main (str "tests-beside-an-eval-" (random-uuid))
-        store (ts/process-store checkout)
-        runs (str checkout "/target/runs/" main "-runs")
-        root (ts/start-root! {:store store :main main :runs runs})
-        ask (fn [m] (ts/ask root m))
-        eval-root (fn [code] (let [r (ask {:op :eval :agent "root" :code code})] (if (:error r) r (value-of (:response r)))))
-        _ (eval-root "(c/spawn! sys {})")
-        _ (eval-root (str "(let [ev (c/events sys)] (def blocked (c/submit! sys :a1 \"(clojure.core.async/<!! (clojure.core.async/chan))\")) "
-                          "(loop [] (let [e (clojure.core.async/<!! ev)] (if (and (= :started (:type e)) (= :a1 (:agent e))) :began (recur)))))"))
-        ;; the run's answer, or :none if the agent did not answer it while its eval blocked
-        proved (eval-root "(deref (future @(c/prove! sys :a1 #{} :turn)) 60000 :none)")
-        _ (eval-root "(c/interrupt! sys :a1)")
-        stopped (eval-root "(clojure.string/starts-with? (:seon.error/message (:ex @blocked)) \"interrupted by root\")")
-        next-answer (let [r (ask {:op :eval :agent "a1" :code "(+ 2 2)"})] (if (:error r) r (value-of (:response r))))]
-    (ts/stop-root! root)
-    (ts/drop-main! store main)
-    (sh/sh "rm" "-rf" runs)
+  (let [[proved stopped next-answer]
+        (with-agent {}
+          (fn [{:keys [names eval-root ask]}]
+            (let [a (:agent names) ev (comp root-value eval-root)]
+              (ev (began-code a "(clojure.core.async/<!! (clojure.core.async/chan))"))
+              ;; the run's answer, or :none if the agent did not answer it while its eval blocked
+              [(ev (str "(deref (future @(c/prove! sys :" a " #{} :turn)) 60000 :none)"))
+               (do (ev (str "(c/interrupt! sys :" a ")"))
+                   (ev "(clojure.string/starts-with? (:seon.error/message (:ex @blocked)) \"interrupted by root\")"))
+               (root-value (ask {:op :eval :agent a :code "(+ 2 2)"}))])))]
     (is (and (map? proved) (contains? proved :pass)) (str "the run answered while the eval blocked: " (pr-str (if (map? proved) (select-keys proved [:pass :fail :error :ran]) proved))))
     (is (true? stopped) (str "the blocked eval answers interrupted by root: " stopped))
     (is (= 4 next-answer) (pr-str next-answer))))
-
-(deftest a-spawn-after-the-fork-server-is-lost-answers
-  ;; task seon.fork-server/every-fork-server-wait-ends-with-the-server: the fork server and its
-  ;; standby killed (as a boot death leaves root, a server with no standby), the server is lost;
-  ;; a spawn asked then is refused with the error naming it (seon.fork-server/lost), before any
-  ;; agent is made, and root stops. Unfixed, the fork was neither sent nor answered and the spawn
-  ;; (an attach's) waited for good; then a spawn made an agent whose socket the lost server closed,
-  ;; so it answered :seon.agent/died or :seon.agent/failed, whichever end reached root first
-  (let [checkout (seon.config/checkout)
-        main (str "fork-server-lost-" (random-uuid))
-        store (ts/process-store checkout)
-        runs (str checkout "/target/runs/" main "-runs")
-        root (ts/start-root! {:store store :main main :runs runs})
-        eval-root (fn [code] (let [r (ts/ask root {:op :eval :agent "root" :code code})]
-                               (if (:error r) r (value-of (:response r)))))
-        _ (eval-root "(def lost-ev (c/events sys))")
-        children (fn [pid] (->> (str/split-lines (:out (sh/sh "pgrep" "-P" (str pid)))) (remove str/blank?) (map parse-long)))
-        ;; the fork server is the one root names: root has other children (its file watcher), and
-        ;; pgrep's order is pid order, which wraps (the first child pgrep listed was the watcher,
-        ;; killed in its place, and the test waited for a loss that never came)
-        fs (eval-root "(get-in (c/state sys) [:fork-server :pid])")
-        ;; its standby is its child
-        _ (doseq [k (children fs)] (sh/sh "kill" "-9" (str k)))
-        _ (sh/sh "kill" "-9" (str fs))
-        lost (eval-root "(loop [] (let [e (clojure.core.async/<!! lost-ev)] (case (:type e) :fork-server-lost :lost :proc-defect e (recur))))")
-        spawned (eval-root "(try (c/spawn! sys {}) (catch clojure.lang.ExceptionInfo e (let [d (ex-data e)] [(:seon.error/type d) (:seon.error/message d)])))")
-        status (eval-root "(get-in (c/state sys) [:fork-server :status])")
-        agents (eval-root "(count (:agents (c/state sys)))")
-        stopped (ts/stop-root! root)]
-    (ts/drop-main! store main)
-    (sh/sh "rm" "-rf" runs)
-    (is (= :lost lost) "root heard the server is lost")
-    (is (= :seon.root/refused (first spawned)) (pr-str spawned))
-    (is (re-find #"fork server is lost" (str (second spawned))) (pr-str spawned))
-    (is (= :lost status))
-    (is (= 0 agents) "no agent was made for the refused spawn")
-    (is (= "0" (str (:exit stopped))) (str "root stops with its fork server lost: " (pr-str (dissoc stopped :log))))))
 
 (deftest a-fork-server-step-that-throws-answers-and-the-server-serves-on
   ;; task seon.fork-server/a-throwing-fork-server-step-answers-its-asker: a main commit the fork
@@ -220,19 +249,39 @@
   ;; entity in a d/with did, 2026-10-29) threw out of its step. Unfixed, the server stayed alive
   ;; at 0% CPU, root heard nothing, and the spawn asked next waited for good. Now the step's
   ;; throw is an error fact on root, the server's state is as it was, and the next spawn is served.
-  ;; No clock decides: an unfixed run waits on the spawn until the runner's budget ends it
+  ;; No clock decides: an unfixed run waits on the spawn until the runner's budget ends it.
+  ;;
+  ;; Then, on the same root (a root is 8 s of boot, docs/testing.md#a-root-costs-what-it-boots), task
+  ;; seon.fork-server/every-fork-server-wait-ends-with-the-server: the fork server and its
+  ;; standby killed (as a boot death leaves root, a server with no standby), the server is lost;
+  ;; a spawn asked then is refused with the error naming it (seon.fork-server/lost), before any
+  ;; agent is made, and root stops. Unfixed, the fork was neither sent nor answered and the spawn
+  ;; (an attach's) waited for good; then a spawn made an agent whose socket the lost server closed,
+  ;; so it answered :seon.agent/died or :seon.agent/failed, whichever end reached root first
   (let [checkout (seon.config/checkout)
-        main (str "fork-server-throw-" (random-uuid))
+        main (str "fork-server-" (random-uuid))
         store (ts/process-store checkout)
         runs (str checkout "/target/runs/" main "-runs")
         root (ts/start-root! {:store store :main main :runs runs})
-        eval-root (fn [code] (let [r (ts/ask root {:op :eval :agent "root" :code code})]
-                               (if (:error r) r (value-of (:response r)))))
+        eval-root (fn [code] (root-value (ts/ask root {:op :eval :agent "root" :code code})))
         fs (eval-root "(get-in (c/state sys) [:fork-server :pid])")
         _ (eval-root "@(clojure.core.async.flow/inject (:graph sys) [:fork-server :cmd] [{:op :tx :t 999999999999 :commit (random-uuid) :ns 0 :tx-data []}])")
         spawned (eval-root "(try (c/spawn! sys {}) :spawned (catch clojure.lang.ExceptionInfo e (let [d (ex-data e)] [(:seon.error/type d) (:seon.error/message d)])))")
         recorded (eval-root "(pr-str (my.root/problems sys))")
         alive (eval-root "(get-in (c/state sys) [:fork-server :pid])")
+        ;; the server and its standby killed
+        _ (eval-root "(def lost-ev (c/events sys))")
+        children (fn [pid] (->> (str/split-lines (:out (sh/sh "pgrep" "-P" (str pid)))) (remove str/blank?) (map parse-long)))
+        ;; its standby is its child; the fork server is the one root names, not the first child pgrep lists
+        ;; (root has other children, its file watcher, and pgrep's order is pid order, which wraps)
+        _ (doseq [k (children fs)] (sh/sh "kill" "-9" (str k)))
+        _ (sh/sh "kill" "-9" (str fs))
+        lost (eval-root "(loop [] (let [e (clojure.core.async/<!! lost-ev)] (case (:type e) :fork-server-lost :lost :proc-defect e (recur))))")
+        ids "(set (keys (:agents (c/state sys))))"
+        agents-before (eval-root ids)
+        refused (eval-root "(try (c/spawn! sys {}) (catch clojure.lang.ExceptionInfo e (let [d (ex-data e)] [(:seon.error/type d) (:seon.error/message d)])))")
+        status (eval-root "(get-in (c/state sys) [:fork-server :status])")
+        agents-after (eval-root ids)
         stopped (ts/stop-root! root)
         log (let [f (java.io.File. (str runs "/root.log"))] (if (.exists f) (slurp f) ""))]
     (ts/drop-main! store main)
@@ -240,10 +289,15 @@
     (is (= :spawned spawned) (str (pr-str spawned) log))
     (is (= fs alive) "the same server serves on")
     (is (re-find #"step-failed" recorded) "and root recorded the error")
-    (is (= "0" (str (:exit stopped))) (str (pr-str (dissoc stopped :log))))))
+    (is (= :lost lost) "root heard the server is lost")
+    (is (= :seon.root/refused (first refused)) (pr-str refused))
+    (is (re-find #"fork server is lost" (str (second refused))) (pr-str refused))
+    (is (= :lost status))
+    (is (= agents-before agents-after) "no agent was made for the refused spawn")
+    (is (= "0" (str (:exit stopped))) (str "root stops with its fork server lost: " (pr-str (dissoc stopped :log))))))
 
 (deftest an-agent-ends-when-its-root-is-gone
-  ;; task seon.agent/an-agent-ends-with-its-root: with its fork server gone first (a pid
+  ;; with its fork server gone first (a pid
   ;; cleanup), an agent ends on EOF of its own socket to root, whatever it is doing: an idle
   ;; agent reads it; one evaluating a form with no tick budget is interrupted by it (SIGIO)
   (let [{:keys [agents left out]} (root-ended "(loop [] (recur))" true)]
@@ -252,81 +306,70 @@
     (is (not (contains? left (:a2 agents))) "the busy agent ended")))
 
 (deftest a-proof-run-ends-with-its-agent
-  ;; task seon.agent/a-proof-run-ends-with-its-agent: the agent's proof run (a fork of it) holds
+  ;; the agent's proof run (a fork of it) holds
   ;; the write end of a fifo and sleeps, a test that never writes to the agent's pipe; the
   ;; agent is killed (its task cancelled); the proof run ends with it, on the kernel's word that
   ;; the reader of its pipe is gone (SIGIO). The test reads the fifo: its first byte says the
   ;; proof run is in its test, its EOF that nothing holds the fifo any more, the proof run gone.
   ;; No clock decides: a run that outlives its agent wakes from its sleep (a minute) and writes a
   ;; second byte, which fails the test.
-  (let [checkout (seon.config/checkout)
-        main (str "proof-ended-" (random-uuid))
-        store (ts/process-store checkout)
-        runs (str checkout "/target/runs/" main "-runs")
-        fifo (str checkout "/target/runs/" main ".fifo")
+  (let [fifo (str (seon.config/checkout) "/target/runs/proof-ended-" (random-uuid) ".fifo")
         _ (sh/sh "mkfifo" fifo)
-        root (ts/start-root! {:store store :main main :runs runs})
-        eval-root (fn [code] (let [r (ts/ask root {:op :eval :agent "root" :code code})]
-                               (if (:error r) r (value-of (:response r)))))
-        _ (eval-root "(c/spawn! sys {})")
-        parked (str "(do (ns parked-proof (:require [clojure.test :refer [deftest is]]))"
-                    " (deftest p (let [w (java.io.FileOutputStream. " (pr-str fifo) ")] (.write w 49) (.flush w) (Thread/sleep 60000) (.write w 50) (.flush w)) (is true))"
-                    " (seon.agent/run-tests-forked 1000000000 '#{parked-proof/p} :turn))")
-        ;; a1 begins the form (its :started event, tapped before the submit); root knows its pid by then
-        _ (eval-root (str "(let [ev (c/events sys)] (c/submit! sys :a1 " (pr-str parked) ") "
-                          "(loop [] (let [e (clojure.core.async/<!! ev)] (if (and (= :started (:type e)) (= :a1 (:agent e))) :began (recur)))))"))
-        pids (eval-root "(into {} (for [[id a] (:agents (c/state sys))] [id (:pid a)]))")
-        agent-pid (get pids :a1)
-        in (java.io.FileInputStream. ^String fifo)
-        began (.read in)
-        killed (sh/sh "kill" "-9" (str agent-pid))
-        ended (.read in)]
-    (.close in)
-    (ts/kill-root! root)
-    (ts/drop-main! store main)
-    (sh/sh "rm" "-rf" runs fifo)
-    (is (pos-int? agent-pid) (str "the agent's pid, from " (pr-str pids)))
+        {:keys [pid began ended killed]}
+        (with-agent {}
+          (fn [{:keys [names eval-root]}]
+            (let [a (:agent names) ev (comp root-value eval-root)
+                  parked (str "(do (ns parked-proof (:require [clojure.test :refer [deftest is]]))"
+                              " (deftest p (let [w (java.io.FileOutputStream. " (pr-str fifo) ")] (.write w 49) (.flush w) (Thread/sleep 60000) (.write w 50) (.flush w)) (is true))"
+                              " (seon.agent/run-tests-forked 1000000000 '#{parked-proof/p} :turn))")
+                  ;; the agent begins the form (its :started event); root knows its pid by then
+                  _ (ev (began-code a parked))
+                  pid (ev (str "(get-in (c/state sys) [:agents :" a " :pid])"))
+                  in (java.io.FileInputStream. ^String fifo)
+                  began (.read in)
+                  killed (sh/sh "kill" "-9" (str pid))
+                  ended (.read in)]
+              (.close in)
+              (ev (gone-code a))
+              {:pid pid :began began :ended ended :killed killed})))]
+    (sh/sh "rm" "-f" fifo)
+    (is (pos-int? pid) (str "the agent's pid: " (pr-str pid)))
     (is (= 49 began) "the proof run was in its test")
-    (is (= -1 ended) (str "the proof run outlived its agent (byte " ended " after its sleep); agent " (pr-str agent-pid) " kill " (pr-str killed)))))
+    (is (= -1 ended) (str "the proof run outlived its agent (byte " ended " after its sleep); agent " (pr-str pid) " kill " (pr-str killed)))))
 
 (deftest a-two-child-proof-run-ends-with-its-agent
-  ;; task seon.agent/a-proof-run-ends-with-its-agent, for a run dealt into two children. Child A's test holds the write end
+  ;; for a run dealt into two children. Child A's test holds the write end
   ;; of a fifo and sleeps; child B's test blocks for good where no signal reaches (a take from a channel nothing puts
   ;; on), so B outlives its agent's death. The agent is killed: the fifo's EOF says A is gone while B is alive. No clock
   ;; decides: a child that outlives its agent wakes from its sleep (a minute) and writes a second byte. (A child also
   ;; ends by watching its parent, so this does not alone show a sibling holds no copy of A's pipe: the next test does)
-  (let [checkout (seon.config/checkout)
-        main (str "proofs-ended-" (random-uuid))
-        store (ts/process-store checkout)
-        runs (str checkout "/target/runs/" main "-runs")
-        fifo-a (str checkout "/target/runs/" main ".a.fifo")
-        fifo-b (str checkout "/target/runs/" main ".b.fifo")
+  (let [dir (str (seon.config/checkout) "/target/runs/proofs-ended-" (random-uuid))
+        fifo-a (str dir ".a.fifo")
+        fifo-b (str dir ".b.fifo")
         _ (doseq [f [fifo-a fifo-b]] (sh/sh "mkfifo" f))
-        root (ts/start-root! {:store store :main main :runs runs :args ["--set" ":seon.config.proofs/child-min-ms=1"]})
-        eval-root (fn [code] (let [r (ts/ask root {:op :eval :agent "root" :code code})]
-                               (if (:error r) r (value-of (:response r)))))
-        _ (eval-root "(c/spawn! sys {})")
-        a (str "(ns parked0-proof (:require [clojure.test :refer [deftest is]]))"
-               " (deftest p (let [w (java.io.FileOutputStream. " (pr-str fifo-a) ")] (.write w 49) (.flush w) (Thread/sleep 60000) (.write w 50) (.flush w)) (is true))")
-        b (str "(ns parked1-proof (:require [clojure.test :refer [deftest is]]))"
-               " (deftest p (let [w (java.io.FileOutputStream. " (pr-str fifo-b) ")] (.write w 49) (.flush w) (clojure.core.async/<!! (clojure.core.async/chan))) (is true))")
-        form (str "(do " a " " b " (seon.agent/run-tests-forked 1000000000 '#{parked0-proof/p parked1-proof/p} :turn))")
-        _ (eval-root (str "(let [ev (c/events sys)] (c/submit! sys :a1 " (pr-str form) ") "
-                          "(loop [] (let [e (clojure.core.async/<!! ev)] (if (and (= :started (:type e)) (= :a1 (:agent e))) :began (recur)))))"))
-        pids (eval-root "(into {} (for [[id a] (:agents (c/state sys))] [id (:pid a)]))")
-        agent-pid (get pids :a1)
-        in-a (java.io.FileInputStream. ^String fifo-a)
-        in-b (java.io.FileInputStream. ^String fifo-b)
-        began [(.read in-a) (.read in-b)]
-        killed (sh/sh "kill" "-9" (str agent-pid))
-        ended (.read in-a)]
-    (.close in-a) (.close in-b)
-    (ts/kill-root! root)
-    (ts/drop-main! store main)
-    (sh/sh "rm" "-rf" runs fifo-a fifo-b)
-    (is (pos-int? agent-pid) (str "the agent's pid, from " (pr-str pids)))
+        {:keys [pid began ended killed]}
+        (with-agent tuned
+          (fn [{:keys [names eval-root]}]
+            (let [a (:agent names) ev (comp root-value eval-root)
+                  src-a (str "(ns parked0-proof (:require [clojure.test :refer [deftest is]]))"
+                             " (deftest p (let [w (java.io.FileOutputStream. " (pr-str fifo-a) ")] (.write w 49) (.flush w) (Thread/sleep 60000) (.write w 50) (.flush w)) (is true))")
+                  src-b (str "(ns parked1-proof (:require [clojure.test :refer [deftest is]]))"
+                             " (deftest p (let [w (java.io.FileOutputStream. " (pr-str fifo-b) ")] (.write w 49) (.flush w) (clojure.core.async/<!! (clojure.core.async/chan))) (is true))")
+                  form (str "(do " src-a " " src-b " (seon.agent/run-tests-forked 1000000000 '#{parked0-proof/p parked1-proof/p} :turn))")
+                  _ (ev (began-code a form))
+                  pid (ev (str "(get-in (c/state sys) [:agents :" a " :pid])"))
+                  in-a (java.io.FileInputStream. ^String fifo-a)
+                  in-b (java.io.FileInputStream. ^String fifo-b)
+                  began [(.read in-a) (.read in-b)]
+                  killed (sh/sh "kill" "-9" (str pid))
+                  ended (.read in-a)]
+              (.close in-a) (.close in-b)
+              (ev (gone-code a))
+              {:pid pid :began began :ended ended :killed killed})))]
+    (sh/sh "rm" "-f" fifo-a fifo-b)
+    (is (pos-int? pid) (str "the agent's pid: " (pr-str pid)))
     (is (= [49 49] began) "both children were in their tests")
-    (is (= -1 ended) (str "child A outlived its agent (byte " ended " after its sleep); agent " (pr-str agent-pid) " kill " (pr-str killed)))))
+    (is (= -1 ended) (str "child A outlived its agent (byte " ended " after its sleep); agent " (pr-str pid) " kill " (pr-str killed)))))
 
 (deftest a-handful-of-tests-runs-in-one-child
   ;; task seon.agent/a-test-run-streams-its-reports: a run forks no more children than its work needs
@@ -338,7 +381,7 @@
     (is (= {:children 1 :pass 5} (some-> (:value r) clojure.edn/read-string)))))
 
 (deftest a-test-child-holds-only-its-own-pipe
-  ;; task seon.agent/a-proof-run-ends-with-its-agent: a child forked after a sibling holds no copy of the sibling's pipe,
+  ;; a child forked after a sibling holds no copy of the sibling's pipe,
   ;; whose end a child must never keep (the agent's death would not reach the sibling by SIGIO while any copy is open). Each
   ;; of two children counts the descriptors open in it (fcntl F_GETFD) in its test and writes the count to a file: a child
   ;; holding a sibling's pipe end has one more than the child forked before it
@@ -348,7 +391,7 @@
         count-in (fn [n] (str "(ns fds" n "-proof (:require [clojure.test :refer [deftest is]]))"
                               " (deftest p (let [c (count (filter #(not (neg? (seon.sock/c-fcntl % 1 0))) (range 256)))] (spit " (pr-str (str dir "/" n)) " c)) (is true))"))
         form (str "(do " (count-in 0) " " (count-in 1) " (seon.agent/run-tests-forked 1000000000 '#{fds0-proof/p fds1-proof/p} :turn))")
-        [run] (in-agent [form] {:sets [":seon.config.proofs/child-min-ms=1"]})
+        [run] (in-agent [form] tuned)
         counts (mapv #(some-> (try (slurp (str dir "/" %)) (catch Throwable _ nil)) parse-long) [0 1])]
     (sh/sh "rm" "-rf" dir)
     (is (every? pos-int? counts) (str "both children counted: " (pr-str counts) " " (pr-str run)))
@@ -364,7 +407,7 @@
         proof (str "(ns clean-proof (:require [clojure.test :refer [deftest is]]))"
                    " (deftest p (spit " (pr-str f) " (pr-str [@@#'seon.intr/pending (count @@#'seon.intr/stack)])) (is true))")
         form (str "(do " proof " (seon.agent/run-tests-forked 1000000000 '#{clean-proof/p} :turn))")
-        [run] (in-agent [form] {:sets [":seon.config.proofs/child-min-ms=1"]})
+        [run] (in-agent [form] tuned)
         found (some-> (try (slurp f) (catch Throwable _ nil)) read-string)]
     (sh/sh "rm" "-f" f)
     (is (= [false 0] found) (str "no interrupt and no eval of its parent's: " (pr-str found) " " (pr-str run)))))
@@ -389,7 +432,7 @@
   ;; seon.stall-proofs read their task's cause, so on any other task they were stray reds (the control of 2026-11-05)
   (let [p 'seon.stall-proofs/the-stall-ended
         plan (fn [proofs] (str "(let [p (seon.agent/test-plan (seon.agent/db) nil " proofs ")] (contains? (set (:selected p)) '" p "))"))
-        [named not-named] (in-agent [(plan (str "'#{" p "}")) (plan "#{}")] {:dirs (seon.config/value :seon.config.source/dirs)})]
+        [named not-named] (in-agent [(plan (str "'#{" p "}")) (plan "#{}")] {})]
     (is (true? (:value named)) (str "a stall task's proof is selected: " (pr-str named)))
     (is (false? (:value not-named)) (str "and no other task's: " (pr-str not-named)))))
 
@@ -407,41 +450,37 @@
   ;; and a fiber reads it, so the agent's loop answers an eval while its own tests run. The test
   ;; child holds in its test until this test lets it go (a fifo, no clock): the eval is answered
   ;; while it holds, then the run answers green
-  (let [checkout (seon.config/checkout)
-        main (str "answers-" (random-uuid))
-        store (ts/process-store checkout)
-        runs (str checkout "/target/runs/" main "-runs")
-        began (str checkout "/target/runs/" main ".began")
-        gate (str checkout "/target/runs/" main ".gate")
+  (let [base (str (seon.config/checkout) "/target/runs/answers-" (random-uuid))
+        began (str base ".began")
+        gate (str base ".gate")
         _ (doseq [f [began gate]] (sh/sh "mkfifo" f))
-        root (ts/start-root! {:store store :main main :runs runs})
-        eval-root (fn [code] (let [r (ts/ask root {:op :eval :agent "root" :code code})]
-                               (if (:error r) r (value-of (:response r)))))
-        _ (eval-root "(c/spawn! sys {})")
-        ;; two forms, as an agent writes them: each recorded on its branch (a definition inside a do is not)
-        held (str "(deftest h (let [w (java.io.FileOutputStream. " (pr-str began) ")] (.write w 49) (.flush w))"
-                  " (is (= 50 (.read (java.io.FileInputStream. " (pr-str gate) ")))))")
-        _ (eval-root (str "@(c/submit! sys :a1 " (pr-str "(ns held-proof (:require [clojure.test :refer [deftest is]]))") ")"))
-        defined (eval-root (str "@(c/submit! sys :a1 " (pr-str held) ")"))
-        ;; the test service proves a1's branch as its turn does (mode :turn: the tests the branch changed,
-        ;; held-proof/h among them): it asks the idle agent for :tests
-        _ (eval-root "(def held-run (future @(c/prove! sys :a1 #{} :turn)))")
-        in (java.io.FileInputStream. ^String began)
-        in-test (.read in)
-        ;; the child holds in its test: the agent answers an eval meanwhile
-        answered (ts/ask root {:op :eval :agent "root" :code "@(c/submit! sys :a1 \"(+ 40 2)\")"})
-        out (java.io.FileOutputStream. ^String gate)
-        _ (do (.write out 50) (.flush out) (.close out) (.close in))
-        result (eval-root "(select-keys @held-run [:pass :fail :error])")]
-    (ts/kill-root! root)
-    (ts/drop-main! store main)
-    (sh/sh "rm" "-rf" runs began gate)
+        {:keys [defined in-test answered result]}
+        (with-agent {}
+          (fn [{:keys [names eval-root ask]}]
+            (let [a (:agent names) ev (comp root-value eval-root)
+                  ;; two forms, as an agent writes them: each recorded on its branch (a definition inside a do is not)
+                  held (str "(deftest h (let [w (java.io.FileOutputStream. " (pr-str began) ")] (.write w 49) (.flush w))"
+                            " (is (= 50 (.read (java.io.FileInputStream. " (pr-str gate) ")))))")
+                  _ (ev (str "@(c/submit! sys :" a " " (pr-str "(ns held-proof (:require [clojure.test :refer [deftest is]]))") ")"))
+                  defined (ev (str "@(c/submit! sys :" a " " (pr-str held) ")"))
+                  ;; the test service proves the branch as its turn does (mode :turn: the tests the branch changed,
+                  ;; held-proof/h among them): it asks the idle agent for :tests
+                  _ (ev (str "(def held-run (future @(c/prove! sys :" a " #{} :turn)))"))
+                  in (java.io.FileInputStream. ^String began)
+                  in-test (.read in)
+                  ;; the child holds in its test: the agent answers an eval meanwhile
+                  answered (ask {:op :eval :agent "root" :code (str "@(c/submit! sys :" a " \"(+ 40 2)\")")})
+                  out (java.io.FileOutputStream. ^String gate)
+                  _ (do (.write out 50) (.flush out) (.close out) (.close in))
+                  result (ev "(select-keys @held-run [:pass :fail :error])")]
+              {:defined defined :in-test in-test :answered answered :result result})))]
+    (sh/sh "rm" "-f" began gate)
     (is (= 49 in-test) (str "the test child was in its test (" (pr-str defined) ")"))
     (is (= 42 (ts/value-of (ts/value-of (:response answered)))) (str "the agent answered while its test held: " (pr-str answered)))
     (is (= {:pass 1 :fail 0 :error 0} result) (str "and the run answered green once let go: " (pr-str result)))))
 
 (deftest a-blocked-agent-ends-with-its-root
-  ;; task seon.agent/an-agent-ends-with-its-root, an agent blocked in a wait: its thread in
+  ;; an agent blocked in a wait: its thread in
   ;; Chez's condition-wait reaches no safe point, so no signal handler runs (SIGIO, root's
   ;; SIGUSR1) until the wait returns. The fork server's group kill on root's EOF ends it
   ;; (task seon.agent/a-signal-wakes-a-blocked-wait makes the agent's own EOF end it too)
@@ -507,37 +546,28 @@
         "the reader, a main carrier, read both lines: the go came from its other fiber while the read waited")))
 
 (deftest a-blocked-agent-ends-on-its-socket-eof
-  ;; task seon.intr/a-signal-wakes-a-blocked-wait: an agent blocked in a channel take, its fork
+  ;; an agent blocked in a channel take, its fork
   ;; server gone first, ends on its own socket's EOF (SIGIO wakes its condition-wait)
   (let [{:keys [agents left out]} (root-ended "(clojure.core.async/<!! (clojure.core.async/chan))" true)]
     (is (= #{:a1 :a2} (set (keys agents))) out)
     (is (empty? left) (str "agents still alive: " left "\n" out))))
 
 (deftest root-interrupts-a-blocked-take
-  ;; task seon.intr/a-signal-wakes-a-blocked-wait: root's interrupt! stops an eval blocked in a
+  ;; root's interrupt! stops an eval blocked in a
   ;; channel take, and the agent answers its next request
-  (let [checkout (seon.config/checkout)
-        main (str "blocked-take-" (random-uuid))
-        store (ts/process-store checkout)
-        runs (str checkout "/target/runs/" main "-runs")
-        root (ts/start-root! {:store store :main main :runs runs})
-        ask (fn [m] (ts/ask root m))
-        eval-root (fn [code] (let [r (ask {:op :eval :agent "root" :code code})] (if (:error r) r (value-of (:response r)))))
-        ;; spawn! answers at the agent's hello: it is ready; the eval has begun at its :started event
-        _ (eval-root "(c/spawn! sys {})")
-        _ (eval-root (str "(let [ev (c/events sys)] (def blocked (c/submit! sys :a1 \"(clojure.core.async/<!! (clojure.core.async/chan))\")) "
-                          "(loop [] (let [e (clojure.core.async/<!! ev)] (if (and (= :started (:type e)) (= :a1 (:agent e))) :began (recur)))))"))
-        _ (eval-root "(c/interrupt! sys :a1)")
-        stopped (eval-root "(clojure.string/starts-with? (:seon.error/message (:ex @blocked)) \"interrupted by root\")")
-        next-answer (let [r (ask {:op :eval :agent "a1" :code "(+ 2 2)"})] (if (:error r) r (value-of (:response r))))]
-    (ts/stop-root! root)
-    (ts/drop-main! store main)
-    (sh/sh "rm" "-rf" runs)
+  (let [[stopped next-answer]
+        (with-agent {}
+          (fn [{:keys [names eval-root ask]}]
+            (let [a (:agent names) ev (comp root-value eval-root)]
+              (ev (began-code a "(clojure.core.async/<!! (clojure.core.async/chan))"))
+              (ev (str "(c/interrupt! sys :" a ")"))
+              [(ev "(clojure.string/starts-with? (:seon.error/message (:ex @blocked)) \"interrupted by root\")")
+               (root-value (ask {:op :eval :agent a :code "(+ 2 2)"}))])))]
     (is (true? stopped) (str "the blocked eval answers interrupted by root: " stopped))
     (is (= 4 next-answer) (pr-str next-answer))))
 
 (deftest an-agent-holds-mains-tests-and-runs-them
-  ;; task seon.agent/an-agent-holds-mains-tests: main holds the source root's test namespaces
+  ;; main holds the source root's test namespaces
   ;; (imported from test/), and an agent forked from the fork server holds them compiled:
   ;; it runs one without requiring it, and a green test reports green, a red one red
   (let [green 'seon.reader-test/prose-without-a-fence-is-a-comment
@@ -549,7 +579,7 @@
                                      " (swap! rs update (symbol (first clojure.test/*testing-vars*)) (fnil conj #{}) (:type m))))]"
                                      " (clojure.test/test-vars [#'" green " #'" red "]))"
                                      " @rs)"))
-                               {:dirs ["src" "test"]})]
+                               {})]
     (is (true? (:value held)) "the agent holds main's test namespace without requiring it")
     (is (= {green #{:pass} red #{:fail}} (:value run))
         "main's test runs green in the agent; a red one beside it reports red")))
@@ -564,7 +594,7 @@
         [agent-held root-held facts] (in-agent [(str "(boolean " t ")")
                                                 {:op :eval :agent "root" :code (str "(boolean " t ")")}
                                                 {:op :eval :agent "root" :code "(boolean (seon.db/eid @(:conn sys) :var/name 'seon.reader-test/prose-without-a-fence-is-a-comment))"}]
-                                               {:dirs ["src" "test"]})]
+                                               {})]
     (is (true? (:value agent-held)) "the agent holds main's test compiled")
     (is (false? (:value root-held)) "root does not")
     (is (true? (:value facts)) "though main's program holds it as facts")))
@@ -576,7 +606,7 @@
   [x] (str "(let [r " x "] (into {} (for [t (keys (:digests r))] [t (get (seon.proofs/results r) t :pass)])))"))
 
 (deftest an-agents-test-run-is-its-proofs-and-what-its-change-reaches
-  ;; task seon.agent/an-agent-holds-mains-tests: the agent holds main's whole suite, and its
+  ;; the agent holds main's whole suite, and its
   ;; test run (root's :tests request, the one the judge sends) selects what the done rule
   ;; reads: the task's proofs and the tests reaching what its branch changed since the main
   ;; it forked from. One redefined function (same behaviour, another form) reaches one test; its namespace's other tests
@@ -587,7 +617,7 @@
         also 'seon.config-test/the-profile-is-read-from-the-command-line
         [_ run] (in-agent #(vector (str "(in-ns 'seon.config) (defn without-overrides \"args with --config and --set (and their arguments) taken out: what a mode reads.\" {:malli/schema [:=> [:cat [:maybe [:sequential :string]]] [:vector :string]]} [args] (vec (:rest (overrides args)))) (in-ns 'agent." (:agent %) ")")
                            {:op :eval :agent "root" :code (statuses (str "@(seon.root/run-tests! sys :" (:agent %) ")"))})
-                          {:dirs ["src" "test"] :proofs #{proof}})]
+                          {:proofs #{proof}})]
     (is (= {proof :pass reached :pass also :pass} (:value run))
         "the proof and the tests reaching the change ran, green; nothing else ran")))
 
@@ -627,7 +657,7 @@
                   " (pr-str {:children (count (distinct @pids)) :pass (:pass r) :error (:error r) :died (vec (map :var (filter :exit (:reports r))))"
                   "          :ran (vec (sort (map :var (filter #(= :pass (:type %)) (:reports r)))))}))")
         [_ _ _ _ two] (in-agent (conj (mapv ns-form (range 4)) (run))
-                                      {:sets [":seon.config.proofs/jobs=2" ":seon.config.proofs/child-min-ms=1"]})
+                                      tuned)
         v #(some-> (:value %) clojure.edn/read-string)]
     (is (<= 2 (:children (v two))) "at least two children forked (a death forks a new one for what its child had left)")
     (is (= [8 1 ["#'app.par3-test/dies"]] ((juxt (comp count :ran) :error :died) (v two))) "all eight passed once, and the death cost only the test it ran")))
@@ -642,17 +672,8 @@
     (is (map? (:value proved)))
     (is (re-find #":body \"while proving\"" (:text taken)) (:text taken))))
 
-(defn- cache-dir
-  "A fresh verdict cache directory under this checkout's target/tmp (seon.fx/write-verdicts!)."
-  [] (str (seon.config/checkout) "/target/tmp/verdicts-" (random-uuid)))
-
-(defn- own-cache
-  "The --set that gives a test's root (and its agents) the verdict cache dir, one this test's own
-  process reads and writes too: a root per distinct :sets (in-agent)."
-  [dir] (str ":seon.config.proofs/results-dir=" (pr-str dir)))
-
 (deftest a-wide-reach-reuses-unchanged-results
-  ;; task seon.proofs/prove-runs-what-a-change-reaches (and seon.agent/a-wide-reach-stays-cheap):
+  ;; a wide reach reuses what is unchanged:
   ;; root's boot records its source tree's inputs on its :seon.root/source fact (its binary is
   ;; built from that tree: bin/test built it), the agent keys its digests by them and selects
   ;; against the main it forked from, and each green is cached by its digest (a test root's cache
@@ -684,7 +705,7 @@
                   ;; and a root of its own: the shared root's main holds the greens earlier tests
                   ;; recorded, the proof's among them at the same digest (reused 1, ran 1: red
                   ;; since tests-are-facts dropped it)
-                  {:dirs (cfg/value :seon.config.source/dirs) :proofs #{proof} :own-root? true})]
+                  {:proofs #{proof} :group :pristine})]
     (is (= [#{:env :tree :config :data-refs} true] (:value inputs)) "root's boot recorded its source tree's inputs, this boot's")
     (is (= {:results {proof :pass reached :pass also :pass} :ran 3 :reused 0} (select-keys (:value first-run) [:results :ran :reused])) "the agent's own run runs the proof and the reached test")
     (is (= 2 (:value files)) "and both are cached at the agent's digests")
@@ -708,7 +729,7 @@
                    "(do (def budget (long (* 3/2 (:ticks (get (seon.proofs/run-tests! '[bound-test/a] {} (fn [_]) nil) 'bound-test/a))))) budget)"
                    "(let [r (seon.agent/run-tests-forked budget #{'bound-test/a 'bound-test/b} :turn)] [(seon.proofs/results r) (:ran r) (some? (:pid r))])"
                    "(let [r (seon.agent/run-tests-forked budget #{'bound-test/a 'bound-test/b} :judge)] [(seon.proofs/results r) (:ran r) (:reused r) (some? (:pid r))])"]
-                  {:dirs ["src" "test"] :proofs #{}})]
+                  {:proofs #{}})]
     (is (pos-int? (:value budget)) (pr-str budget))
     (is (= ['{bound-test/a :pass bound-test/b :pass} 2 true] (:value turn))
         (str "the turn runs both, each within its own budget: green " (pr-str turn)))
@@ -731,7 +752,7 @@
                    "(let [r (seon.agent/run-tests-forked 100000000 #{'leaks-test/w} :turn)] [(seon.proofs/results r) (:pid r)])"
                    "(let [cwd (get seon.config/config :seon.config.agent/cwd)]
                       {:target (.exists (java.io.File. (str cwd \"/target/leak\"))) :dirs (vec (filter #(= \"tests\" %) (.list (java.io.File. cwd))))})"]
-                  {:dirs ["src" "test"] :proofs #{}})]
+                  {:proofs #{}})]
     (is (= '{leaks-test/w :pass} (first (:value run))) (pr-str run))
     (is (false? (:target (:value after))) "the test's relative write is not in the agents' working directory")
     (is (not (.exists (java.io.File. (str "/tmp/seon-agents/tests/" (second (:value run)))))) "and its directory is removed")))
@@ -749,7 +770,7 @@
                                              {'reds-test/r [{:type :fail :message \"the recorded failure\" :expected \"1\" :actual \"2\"}]})"
                    "(let [r (seon.agent/run-tests-forked 100000000 #{'reds-test/r} :judge)]
                       [(seon.proofs/results r) (:ran r) (:reused r) (some? (:pid r)) (:fail r) (mapv (juxt :message :reused) (:reports r))])"]
-                  {:dirs ["src" "test"] :proofs #{}})]
+                  {:proofs #{}})]
     (is (string? (:value dg)) (pr-str dg))
     (is (= ['{reds-test/r :fail} 0 1 false 1 [["the recorded failure" true]]] (:value judge))
         (str "red as recorded, with its failure, nothing run and no child forked " (pr-str judge)))))
@@ -768,7 +789,7 @@
                    "(deftest r (is (= 1 1)))"
                    "(select-keys (my.agent/prove) [:results])" facts
                    "(let [t (:max-tx (seon.agent/db))] (my.agent/prove) (= t (:max-tx (seon.agent/db))))"]
-                  {:dirs ["src" "test"] :proofs #{'facts-test/r}})]
+                  {:proofs #{'facts-test/r}})]
     (is (= {:results '{facts-test/r :fail}} (:value red)))
     (let [{:keys [branch main]} (:value fact-red)]
       (is (= :red (:seon.test/status branch)) (pr-str fact-red))
@@ -793,13 +814,13 @@
         ;; the digests of the kept reach graph, brought to date, as bin/test's plan reads them
         inputs (fx/inputs here)
         digests (update-vals (seon.program/graph-index (seon.program-test/kept-graph here) inputs nil) :digest)
-        dir (cache-dir)
+        dir @merge-cache
         ;; the checkout's green for p1, as bin/test caches one
         recorded (fx/write-verdicts! dir {:id "agent-test"} {p1 {:test p1 :digest (digests p1) :pass 1 :fail 0 :error 0}} {})
         [_ r]
         (in-agent ["nil" "(select-keys (prove) [:results :ran :reused])"]
                   ;; root imports the dirs bin/test does (:seon.config.source/dirs): one program, one digest
-                  {:dirs (cfg/value :seon.config.source/dirs) :proofs #{p1 p2} :sets [(own-cache dir)]})
+                  (assoc (merging) :proofs #{p1 p2}))
         checkout (proofs/plan nil (select-keys digests [p2]) (fx/stored-results dir (select-keys digests [p2])) #{})]
     (is (= {:recorded 1} recorded) (str "the checkout cached its green for p1: " (pr-str recorded)))
     (is (= {:results {p1 :pass p2 :pass} :ran 1 :reused 1} (:value r)) "the agent reuses the checkout's p1 and runs p2")
@@ -815,7 +836,7 @@
     (is (nil? (first (agent/test-inputs (db "b2")))) "an earlier boot's: nothing keys by them, so nothing is reused")))
 
 (deftest a-forked-agent-knows-its-task
-  ;; task seon.template/a-request-is-one-linked-transaction: root forks the agent for its
+  ;; root forks the agent for its
   ;; task, so my.task/current answers it at the agent's first form, before any turn loop
   ;; or context read begins (it was nil: root kept the task in its view only)
   (let [names (volatile! nil)
@@ -903,7 +924,7 @@
            :work "the agent's own start: no read of main's history" :growth :constant :sizes sizes
            :fixed {:bytes 6.0e6}}
         measure "(- (seon.profile/alloc-bytes) (nth (last (:marks @seon.agent/state)) 2))"
-        opts {:sets [":seon.config.store/node-cache-bytes=8388608"]}
+        opts tuned
         ;; history as it grows: commits of 10 agents each (each rewrites the leaves it touches, as a root's starts do)
         grow (fn [{:keys [task]} from n] {:op :eval :agent "root" :code (str "(doseq [i (range " from " " (+ from n) " 10)] @(seon.root/transact-main! sys (seon.agent-test/history-tx " (pr-str task) " i 10)))")})
         ;; each agent measures, then grows main to the next size; the next agent forks after it
@@ -958,7 +979,7 @@
                             ;; a root of its own: on a shard's shared root the first grep allocates more after enough earlier tests,
                             ;; with the inherited index still current (the control of 2026-11-05; what allocates it is open), so the verdict
                             ;; was a function of what ran before it, here and on the merge gate
-                            {:own-root? true})
+                            {:group :pristine})
         [first-search second-search build rows] (:value costs)]
     (is (pos? rows) "the query of the index it inherited answers in the forked child")
     ;; that a move writing text has its rows replaced: seon.doc-test/a-carried-index-answers-as-a-built-one
@@ -970,38 +991,30 @@
   ;; store already holds (a kept branch; e2e's fresh agent on a store an earlier run left)
   ;; died in its init, giving seon.task/onto-tx a nil task, and a wait for its :ready never
   ;; ended. A kept branch takes its task from main only when the agent has one
-  (let [[r] (in-agent [{:op :eval :agent "root"
-                        :code (str "(let [ev (seon.root/events sys) m (seon.db/conn-main (:conn sys))]"
-                                   " (datahike.api/branch! (:conn sys) m (seon.db/on-main m :kept))"
-                                   " (let [ag (seon.root/spawn! sys {:branch :kept})]"
-                                   " (loop [] (let [e (clojure.core.async/<!! ev)]"
-                                   " (cond (not= ag (:agent e)) (recur)"
-                                   " (#{:ready :dead :ended :killed} (:type e)) (:type e)"
-                                   " :else (recur))))))")}]
-                      {:own-root? true})]
+  (let [[r] (in-agent (fn [{:keys [ns]}]
+                        (let [kept (str ":task-" ns "-kept")]
+                          [{:op :eval :agent "root"
+                            :code (spawn-kept-code kept (str "(datahike.api/branch! (:conn sys) m b)") ":ready")}]))
+                      (merging))]
     (is (= :ready (:value r)) (pr-str r))))
 
 (deftest a-resumed-branchs-agent-is-this-boots
   ;; page's browser round, 2026-10-23: an agent on a kept branch recorded its evaluations under an
   ;; earlier boot's agent (its key read root's boot from the branch, whose root fact is as old as
   ;; the branch). Its key is root's boot as main holds it
-  (let [[r k] (in-agent [{:op :eval :agent "root"
-                          :code (str "(let [ev (seon.root/events sys) m (seon.db/conn-main (:conn sys)) b (seon.db/on-main m :kept)]"
-                                     " (datahike.api/branch! (:conn sys) m b)"
-                                     " (let [bc (datahike.api/connect (assoc (:cfg sys) :branch b))]"
-                                     "   (datahike.api/transact bc [{:seon.root/id :root :seon.root/boot \"an-earlier-boot\"}]) (datahike.api/release bc))"
-                                     " (let [ag (seon.root/spawn! sys {:branch :kept})]"
-                                     " (loop [] (let [e (clojure.core.async/<!! ev)]"
-                                     " (cond (not= ag (:agent e)) (recur)"
-                                     " (#{:ready :dead :ended :killed} (:type e)) [(:type e) (:boot sys)]"
-                                     " :else (recur))))))")}
-                         ;; on a root of its own (it branches main), in-agent's agent is a1; the one
-                         ;; spawned onto the kept branch is a2
-                         {:op :eval :agent "a2" :code "(:key @seon.agent/state)"}]
-                        {:own-root? true})
-        [status boot] (:value r)]
+  (let [[r] (in-agent (fn [{:keys [ns]}]
+                        (let [kept (str ":task-" ns "-kept")]
+                          [{:op :eval :agent "root"
+                            :code (spawn-kept-code kept
+                                                   (str "(datahike.api/branch! (:conn sys) m b)"
+                                                        " (let [bc (datahike.api/connect (assoc (:cfg sys) :branch b))]"
+                                                        "   (datahike.api/transact bc [{:seon.root/id :root :seon.root/boot \"an-earlier-boot\"}]) (datahike.api/release bc))")
+                                                   ;; the agent's own key, asked while it is up
+                                                   "[:ready (:boot sys) (:text @(seon.root/submit! sys ag \"(:key @seon.agent/state)\"))]")}]))
+                      (merging))
+        [status boot text] (:value r)]
     (is (= :ready status) (pr-str r))
-    (is (str/starts-with? (:value k) (str boot "/")) (str "its key names this boot: " (:text k)))))
+    (is (str/includes? (str text) (str "\"" boot "/")) (str "its key names this boot: " text))))
 
 (deftest a-resumed-branch-holds-what-main-gained
   ;; step E run #11 (2026-10-23): a kept branch made before main imported test/ was resumed,
@@ -1009,19 +1022,18 @@
   ;; definition main had that the branch did not), so the design never reached its proof's
   ;; fixtures; and it ran the branch's old version of a function main had redefined since.
   ;; A resumed agent runs main with the branch's own changes since its merge base
-  (let [[r] (in-agent [{:op :eval :agent "root"
-                        :code (str "(let [ev (seon.root/events sys) m (seon.db/conn-main (:conn sys))]"
-                                   " @(seon.root/transact-main! sys (seon.source/text-tx @(:conn sys) 'demo.kept \"(ns demo.kept)\\n\\n(defn h [] 1)\\n\" nil))"
-                                   " (datahike.api/branch! (:conn sys) m (seon.db/on-main m :kept))"
-                                   " @(seon.root/transact-main! sys (seon.source/text-tx @(:conn sys) 'demo.gained \"(ns demo.gained)\\n\\n(defn g [] 7)\\n\" nil))"
-                                   " @(seon.root/transact-main! sys (seon.source/text-tx @(:conn sys) 'demo.kept \"(ns demo.kept)\\n\\n(defn h [] 2)\\n\" nil))"
-                                   " (let [ag (seon.root/spawn! sys {:branch :kept})]"
-                                   " (loop [] (let [e (clojure.core.async/<!! ev)]"
-                                   " (cond (not= ag (:agent e)) (recur)"
-                                   " (= :ready (:type e)) (:text @(seon.root/submit! sys ag \"[(demo.gained/g) (demo.kept/h)]\"))"
-                                   " (#{:dead :ended :killed} (:type e)) (:type e)"
-                                   " :else (recur))))))")}]
-                      {:own-root? true})]
+  (let [[r] (in-agent (fn [{:keys [ns]}]
+                        (let [kept (str ":task-" ns "-kept")
+                              k (str "demo." ns ".kept") g (str "demo." ns ".gained")
+                              src (fn [n body] (str "@(seon.root/transact-main! sys (seon.source/text-tx @(:conn sys) '" n " \"(ns " n ")\\n\\n" body "\\n\" nil))"))]
+                          [{:op :eval :agent "root"
+                            :code (spawn-kept-code kept
+                                                   (str (src k "(defn h [] 1)")
+                                                        " (datahike.api/branch! (:conn sys) m b)"
+                                                        " " (src g "(defn g [] 7)")
+                                                        " " (src k "(defn h [] 2)"))
+                                                   (str "(:text @(seon.root/submit! sys ag \"[(" g "/g) (" k "/h)]\"))"))}]))
+                      (merging))]
     (is (str/includes? (str (:value r)) ":value [7 2]") "a var main added, and main's redefinition of one the branch left alone")))
 
 (deftest a-failure-marked-through-the-server-holds-the-task
@@ -1088,7 +1100,7 @@
                       :code (str "(do (seon.await/await-quiet sys (inc t-before-done))"
                                  " [" (ended-code task)
                                  "  (seon.reconcile/task-state (seon.reconcile/index @(:conn sys)) " (pr-str task) ")])")}])
-                  {:dirs ["src" "test"]})
+                  {})
         [[t end] state] (:value seen)]
     (is (str/includes? (:line done) ":outcome :closed") (str "the answer is the verdict line: " (pr-str done)))
     (is (= :red (:outcome end)) (pr-str end))
@@ -1099,18 +1111,18 @@
 (deftest an-outside-agent-with-a-green-proof-finishes
   ;; root (2026-10-23): an outside agent that writes its proof green and hands its task back is
   ;; judged by the end it wrote, and its task finishes, not held
-  (let [[_ _ t _ done seen] (in-agent (fn [{:keys [agent task]}]
+  (let [[_ _ t _ done seen] (in-agent (fn [{:keys [agent task ns]}]
                                         [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")}
-                                         "(ns demo-test (:require [clojure.test :refer [deftest is]]))"
+                                         (str "(ns " ns "-test (:require [clojure.test :refer [deftest is]]))")
                                          "(deftest t (is (= 2 (inc 1))))"
                                          before-done {:op :done :agent agent}
                                          {:op :eval :agent "root"
                                           :code (str "(do (seon.await/await-quiet sys (inc t-before-done))"
                                                      " [(select-keys (seon.task/task @(:conn sys) " (pr-str task) ") [:seon.task/outcome :seon.task/reason])"
                                                      "  (seon.reconcile/task-state (seon.reconcile/index @(:conn sys)) " (pr-str task) ")])")}])
-                                      {:own-root? true})
+                                      (assoc (merging) :proofs (fn [{:keys [ns]}] #{(symbol (str ns "-test") "t")})))
         [t-end state] (:value seen)]
-    (is (str/includes? (:text t) ":value demo-test/t") (pr-str t))
+    (is (re-find #":value t[0-9a-f]+-test/t" (:text t)) (pr-str t))
     (is (re-find #":outcome :(ready|gate|done|merged)" (:line done)) (str "the answer is the verdict line: " (pr-str done)))
     (is (#{:done :merged} (:seon.task/outcome t-end)) (pr-str t-end))
     (is (#{:done :merged} state) (str "the task finishes, never held for root: " state))))
@@ -1118,17 +1130,17 @@
 (deftest the-judge-asks-the-test-service
   ;; task seon.reconcile/the-judge-asks-the-test-service: the judge at an agent's end asks the test
   ;; service (seon.prove), so its verdicts are cached by digest like any test run's
-  (let [[_ _ _ _ _ seen] (in-agent (fn [{:keys [agent task]}]
+  (let [[_ _ _ _ _ seen] (in-agent (fn [{:keys [agent task ns]}]
                                      [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")}
-                                      "(ns demo-test (:require [clojure.test :refer [deftest is]]))"
+                                      (str "(ns " ns "-test (:require [clojure.test :refer [deftest is]]))")
                                       "(deftest t (is (= 2 (inc 1))))"
                                       before-done {:op :done :agent agent}
                                       {:op :eval :agent "root"
                                        :code (str "(do (seon.await/await-quiet sys (inc t-before-done))"
                                                   " (let [db @(:conn sys)]"
-                                                  "  [(some-> (java.io.File. (str (seon.config/value :seon.config.proofs/results-dir) \"/demo-test\")) .list vec)"
+                                                  "  [(some-> (java.io.File. (str (seon.config/value :seon.config.proofs/results-dir) \"/" ns "-test\")) .list vec)"
                                                   "   (:seon.task/outcome (seon.task/task db " (pr-str task) "))]))")}])
-                                   {:own-root? true})
+                                   (assoc (merging) :proofs (fn [{:keys [ns]}] #{(symbol (str ns "-test") "t")})))
         [cached outcome] (:value seen)]
     (is (= ["t"] cached) (str "the judge's verdict is cached at the test's digest: " (pr-str seen)))
     (is (#{:done :merged} outcome))))
@@ -1147,7 +1159,7 @@
   ;; docs/machine.md#how-to-read-an-out-of-memory-error: an agent past its heap bound (:seon.config.agent/heap-extra-bytes)
   ;; gets OutOfMemoryError, and its error map keeps the heap by type (Jolt's :jolt/heap) as data
   (let [[oom after] (in-agent ["(loop [held ()] (recur (conj held (byte-array 1000000))))" "(+ 1 2)"]
-                              {:sets [":seon.config.agent/heap-extra-bytes=268435456"]})
+                              tuned)
         heap (get-in oom [:ex :jolt/heap])]
     (is (str/includes? (str (get-in oom [:ex :seon.error/message])) "heap ceiling") (pr-str (:ex oom)))
     (is (map? heap) (str "the error map keeps :jolt/heap: " (pr-str (:ex oom))))
@@ -1433,7 +1445,7 @@
       (is (= 1 (count (proofs/test-run-errors run)))))))
 
 (deftest after-merge-main-the-agent-judges-against-the-new-base
-  ;; task seon.agent/an-agents-base-is-its-merge-base: an agent chooses the tests that judge
+  ;; an agent chooses the tests that judge
   ;; its branch from what it changed since :base. merge-main! left :base at the main the agent
   ;; forked from, so main's own changes, merged in, counted as the agent's. In this process,
   ;; on a branch of the test store, with a socketpair standing for root
@@ -1456,7 +1468,7 @@
          (let [r (agent/merge-main! #{})]
            (is (some #{[:var 'app.m0/f1]} (:applied r)) "main's change merges in")
            (is (= (jolt.host/runtime-fingerprint) (:seon.tx/runtime (d/entity (agent/db) (:t r))))
-               "in a merge commit that names its runtime (task seon.db/each-commit-names-its-runtime)")
+               "in a merge commit that names its runtime")
            (is (= [ab (:branch cfg)] ((juxt :seon.tx/branch :seon.tx/merged) (d/entity (agent/db) (:t r))))
                "made on the agent's branch, of what it merged from main: a caught-up fact reads as main's (task seon.ctx/a-change-names-its-eval)"))
          (is (empty? (pm/changed-vars (agent/branch-changes (:base @agent/state) (agent/db))))
@@ -1634,7 +1646,7 @@
          (finally (reset! agent/state old) (reset! agent/link old-link) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
 
 (deftest an-agents-transactions-name-their-runtime
-  ;; task seon.db/each-commit-names-its-runtime: what an agent writes on its branch
+  ;; what an agent writes on its branch
   ;; (seon.agent/transact!, the run-ahead writer) carries the runtime that made it
   (ts/test-branch!
    (fn [cfg conn]
@@ -1722,7 +1734,7 @@
                    " db @(:conn sys) t (seon.task/task db \"" % "/wg\")]"
                    " [(:seon.task/kind t) (:seon.task/outcome t) (some? (seon.db/eid db :var/name 'app.whole-test/t))])")
         [_ r] (in-agent #(vector {:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")} {:op :eval :agent "root" :code (code (:ns %))})
-                        {:own-root? true})]
+                        (merging))]
     (is (= [:whole :merged true] (:value r)) (pr-str r))))
 
 (deftest a-task-whose-proofs-pass-is-done-only-when-what-it-reaches-is-green
@@ -1939,7 +1951,6 @@
     (is (= "#'spin-test/spin" test) "naming the test that was running")))
 
 (deftest an-agent-commits-after-each-eval
-  ;; task seon.render/a-view-renders-once-per-change-of-its-reads (D; design section 11, item 1):
   ;; each eval of a turn (the screen's two, then the model's) is committed as it lands, so a page
   ;; shows it then, not at the turn's end. Walked back from the branch's head, no commit adds more
   ;; than one eval record (one commit at the turn's end added the turn's evals at once: 2 -> 4)
@@ -1955,7 +1966,7 @@
     (is (every? #(<= % 1) (map - ns (rest ns))) (str "each eval its own commit: " (pr-str ns)))))
 
 (deftest a-model-turn-records-its-prose-and-the-message-it-took
-  ;; task seon.render/a-debug-view-of-any-agent: the owner's message is a fact root writes on
+  ;; the owner's message is a fact root writes on
   ;; main (from "owner", to the branch of the agent); the turn that takes it writes the same
   ;; fact on its branch before its commit, naming the agent (:seon.message/agent), so the conversation
   ;; and every later reading read its text from that commit (the basis names no message); the reply's prose (here the scripted model's)
@@ -2191,13 +2202,13 @@
   (let [[_ _ r] (in-agent ["(ns fin-test (:require [clojure.test :refer [deftest is]])) (deftest r (is (= 1 1)))"
                            "(alter-var-root #'seon.agent/transact! (fn [f] (fn [tx] (if (some :seon.test/status (filter map? tx)) (throw (ex-info \"transact refused: no\" {:writer-error \"no\"})) (f tx)))))"
                            "(let [p (my.agent/prove)] (select-keys p [:pass :unrecorded]))"]
-                          {:dirs ["src" "test"] :proofs #{'fin-test/r}})]
+                          {:proofs #{'fin-test/r}})]
     (is (nil? (:ex r)) (pr-str r))
     (is (= {:pass 1} (select-keys (:value r) [:pass])) (pr-str r))
     (is (some #(str/includes? % "transact refused: no") (:unrecorded (:value r))) "named, not thrown")))
 
 (deftest a-commit-the-store-refuses-leaves-the-agent-alive
-  ;; tasks seon.repl/a-commit-that-keeps-failing-ends-no-agent-silently and seon.db/a-ratio-at-a-commit-ends-its-agent;
+  ;; task seon.repl/a-commit-that-keeps-failing-ends-no-agent-silently;
   ;; AGENTS.md section 4 (nothing crashes), docs/storage.md#a-commit-the-store-refuses. A commit the store refuses used
   ;; to throw out of the agent's loop and end the process, the next commit throwing again on the same pending value.
   ;; Now the eval answers what was refused as data under :unrecorded, its writes are dropped, the branch and @ctx are as

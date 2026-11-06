@@ -11,7 +11,7 @@
             :else (recur)))))
 
 (deftest a-frame-larger-than-the-socket-buffer-reaches-a-slow-live-peer-whole
-  ;; task seon.sock/a-frame-is-written-whole (docs/failure-points.md#failure-points-met-without-a-catch-the-edge-answers-data):
+  ;; (docs/failure-points.md#failure-points-met-without-a-catch-the-edge-answers-data):
   ;; agent a2's 3 MB :tests answer failed whole in the kernel and seon.sock/write-all! read the errno as
   ;; :epipe, so root never heard it and its api held the ask forever. A write the kernel cannot take now
   ;; (EAGAIN on a non-blocking end, ENOBUFS) waits until the socket can take it, and the frame arrives
@@ -37,7 +37,7 @@
     (is (= v got) "the peer reads the whole value")))
 
 (deftest a-frame-larger-than-the-socket-buffer-carries-its-descriptor-whole
-  ;; task seon.sock/a-frame-is-written-whole: send-frame! with a descriptor sends it with the first
+  ;; send-frame! with a descriptor sends it with the first
   ;; bytes (sendmsg) and the rest as plain writes from where that stopped; a full buffer waits, as
   ;; for a frame alone. The descriptor that arrives still reaches its socket's peer.
   (let [[a b] (sock/socketpair)
@@ -62,7 +62,7 @@
     (run! lib/c-close [a b x y])))
 
 (deftest a-write-the-kernel-refuses-names-its-errno
-  ;; task seon.sock/a-frame-is-written-whole: a write that fails for any reason but a gone peer
+  ;; a write that fails for any reason but a gone peer
   ;; throws a typed error carrying the kernel's errno, never answers :epipe. Writing to -1, no
   ;; descriptor at all (a closed one's number may already be another file's), is EBADF (9).
   (let [r (try (sock/send! -1 {:op :hello}) (catch clojure.lang.ExceptionInfo e (ex-data e)))]
@@ -70,7 +70,7 @@
     (is (= 9 (:errno r)))))
 
 (deftest a-write-to-a-gone-peer-is-epipe
-  ;; task seon.sock/a-frame-is-written-whole: EPIPE (the peer closed) is :epipe, the one answer that
+  ;; EPIPE (the peer closed) is :epipe, the one answer that
   ;; means the peer is gone.
   (let [[a b] (sock/socketpair)]
     (lib/c-close b)

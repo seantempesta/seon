@@ -1085,7 +1085,12 @@
                 ;; its value goes with the reply only when it is plain data (seon.contract/plain?: what the socket and the wire carry);
                 ;; root keeps none of it (its view keeps the head: seon.root/eval-head), and the asker reads the value as data,
                 ;; never the printed text back, which is no EDN once the eval printed (its :out verbatim)
-                [{:op :reply :id (:id m) :response (let [r (eval-string (:forms m) (select-keys m [:ticks :origin]))] (agent/on-the-wire r))
+                ;; a request with :intent is a model's call in everything but who made it (run-calls: the forgiving reader, the intent rule)
+                [{:op :reply :id (:id m) :response (let [req (select-keys m [:ticks :origin])
+                                                         r (if (contains? m :intent)
+                                                             (:response (peek (run-calls [{:id "outside" :intent (:intent m) :code (:forms m)}] (constantly req) eval-string)))
+                                                             (eval-string (:forms m) req))]
+                                                     (agent/on-the-wire r))
                   :t (:max-tx (agent/db))}])
               ;; evals given at its spawn (seon.root/spawn!'s :evals) or inserted later: run on this queue, in order, answering no one
               (= :evals (:op m)) (do (intr/clear-pending!) (insert! (:by m) (:evals m)) [])
