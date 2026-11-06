@@ -403,7 +403,7 @@
         pairs (fn [w] (let [all (render/placed-units w)
                             us (filterv #((set context/page-lists) (:container %)) all)
                             ;; the page's rules come with the parts they style
-                            rules (filterv #(= "#render-ctx" (:container %)) all)]
+                            rules (filterv #(= "#p-rules" (:container %)) all)]
                         {:id "d-parts" :container "#c-rows" :rev (hash [(mapv (juxt :id :rev) (concat us rules)) opened-parts])
                          :html (h/html (ui/ctx-parts (render/placed-hiccup w context/page-lists) (into {} (map (juxt :id :html)) us) opened-parts (apply str (map :html rules))))}))
         ;; the debug view: @ctx, its part pairs and the agent's record as data by the one printer (its :seon.ctx/ctx render)

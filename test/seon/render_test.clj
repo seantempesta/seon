@@ -503,7 +503,7 @@
         input (fn [l] (first (filter #(= "p-input" (:id %)) (:seon.render/units l))))]
     (testing "root is an agent: its page and an agent's are each its lists in one chrome (seon.render.ui/page-chrome)"
       (is (= #{nil "#c-side" "#p-head" "#p-task" "#c-rows" "#p-tiles"} (set (map :container (:seon.render/units root)))) "root's task list: its agents' cards")
-      (is (= #{nil "#c-side" "#p-head" "#p-task" "#c-rows" "#render-ctx"} (set (map :container (:seon.render/units agent))))
+      (is (= #{nil "#c-side" "#p-head" "#p-task" "#c-rows" "#p-rules"} (set (map :container (:seon.render/units agent))))
           "an agent's: its task's list above its conversation; no eval of the fixture has a render of its own, so no tiles")
       (is (= 1 (count (in root "#c-rows"))) "root's list: its own evaluation"))
     (testing "root's agents list is the same on every page: root first, then its agents"
