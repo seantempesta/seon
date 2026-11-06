@@ -1242,3 +1242,20 @@
    (fn [cfg conn]
      (let [a (pdb/at conn (mt/world) {:t 536870913})]
        (is (= :seon.db/no-history (:seon.error/type a)) (pr-str a))))))
+(deftest a-datom-its-attribute-refuses-is-invalid-and-names-it
+  ;; docs/storage.md#the-write-checks-every-datom: the store checks a value's type, and a data attribute's only that it is
+  ;; plain, so a declared schema was not enforced; the write holds each value to its attribute's schema
+  (let [db (ts/test-db)
+        e (pdb/invalid-datom db [{:seon.eval/id "x" :seon.eval/response {:handle "not a symbol"}}])]
+    (is (= :seon.db/invalid-datom (:seon.error/type e)) (pr-str e))
+    (is (= :seon.eval/response (:attribute e)) "it names the attribute")
+    (is (some #(= [:handle] (:in %)) (:seon.error/problems e)) (str "and where in the value: " (pr-str (:seon.error/problems e))))
+    (testing "every way a transaction holds a value"
+      (is (= :seon.task/execution (:attribute (pdb/invalid-datom db [{:seon.task/id "t" :seon.task/execution :no-such}]))) "a scalar's narrower schema")
+      (is (= :seon.task/execution (:attribute (pdb/invalid-datom db [[:db/add "t" :seon.task/execution :no-such]]))) ":db/add")
+      (is (= :seon.model-call/sent-hash (:attribute (pdb/invalid-datom db [{:seon.eval/id "x" :seon.eval/call {:seon.model-call/id "c" :seon.model-call/sent-hash "short"}}]))) "a nested entity"))
+    (testing "what it does not ask"
+      (is (nil? (pdb/invalid-datom db [{:seon.eval/id "x" :seon.eval/response {:handle 'result/e1 :value 1}}])) "a valid value")
+      (is (nil? (pdb/invalid-datom db [{:seon.eval/id "x" :seon.eval/call [:seon.model-call/id "c"]} [:db/retract 1 :seon.task/execution :held] [:db.fn/retractAttribute 1 :seon.task/execution]])) "a ref's lookup, a retraction, a function")
+      (is (nil? (pdb/invalid-datom db [{:lab.own/thing (Object.)}])) "an attribute no schema declares: the store's to judge"))))
+
