@@ -2003,6 +2003,12 @@
     (is (str/includes? line "no test is named app.okt/never-written") "and says why"))
   (is (= "nothing judged: no proof and no test this change reaches"
          (:seon.print/code (my.agent/prove-summary {} {:pass 0 :fail 0 :error 0 :ran 0 :reused 0 :deferred [] :reports [] :proofs {}}))))
+  (testing "a process test with no verdict: never green; red on main too: said, and no red of this run's"
+    (let [one {:pass 1 :fail 0 :error 0 :ran 1 :reused 0 :reports [{:type :pass :var "#'a/t"}] :proofs {}}]
+      (is (str/starts-with? (:seon.print/code (my.agent/prove-summary {} (assoc one :deferred ['a/p] :unjudged "no checkout")))
+                            "not green: 1 of 1 passed, and 1 process tests have no verdict: a/p; no checkout"))
+      (is (str/includes? (:seon.print/code (my.agent/prove-summary {} (assoc one :deferred [] :main-red {'a/q [{:type :fail}]})))
+                         "green: 1 of 1 passed\nred on main too, so not this change's: a/q"))))
   (is (str/starts-with? (:seon.print/code (my.agent/prove-summary {} {:pass 1 :fail 0 :error 0 :ran 1 :reused 0 :deferred [] :reports [{:type :pass :var "#'a/b"}] :proofs {'a/b :pass}})) "green: 1 of 1")))
 
 (deftest a-prove-is-drawn-on-its-eval-red-and-died

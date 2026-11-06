@@ -565,6 +565,27 @@
     (is (= '{a.b-test/ok :pass a.b-test/red :fail} (proofs/results run)))))
 
 
+(deftest a-gates-verdict-is-a-fact-at-the-digest-it-deferred
+  ;; docs/merging.md#a-merge-runs-what-the-change-reaches: a process test the gate judged holds that verdict at its digest; a later run that defers it
+  ;; there leaves it, one whose digest moved defers it again; a red main shares says so on each failure; one the run never reached is no pass
+  (let [t 'app.f-test/t u 'app.f-test/u
+        old {t {:seon.test/digest "d1" :seon.test/status :deferred} u {:seon.test/digest "d2" :seon.test/status :deferred}}
+        tx (proofs/gate-tx old {:results {t :pass u :fail} :failures {u [{:type :fail :message "no"}]} :main-red #{u} :log "/l"})
+        by (into {} (map (juxt :var/name identity)) tx)]
+    (is (= :green (:seon.test/status (by t))))
+    (is (= "d1" (:seon.test/digest (by t))))
+    (is (= [{:type :fail :message "no" :main-red true}] (:seon.test/failures (by u))))
+    (is (= :red (:seon.test/status (by u))))
+    (let [[f] (proofs/gate-tx old {:results {t :error} :failures {} :log "/l"})]
+      (is (= :red (:seon.test/status f)))
+      (is (str/includes? (:message (first (:seon.test/failures f))) "/l") "never reached says where to read why"))
+    (is (= [] (proofs/gate-tx {} {:results {t :pass}})) "a test with no digest either side has no fact to hold")
+    (is (= "g" (:seon.test/digest (first (proofs/gate-tx {} {:results {t :pass} :digests {t "g"}})))) "no row on the branch: judged at the gate's")
+    (testing "a run that defers it again"
+      (let [held {t {:seon.test/digest "d1" :seon.test/status :green}}]
+        (is (= [] (proofs/result-tx held {} {} {} {t "d1"} #{t})) "at the same digest its verdict stands")
+        (is (= :deferred (:seon.test/status (first (proofs/result-tx held {} {} {} {t "d2"} #{t})))) "a moved digest is unjudged")))))
+
 (deftest a-run-records-a-few-facts-and-a-run-that-changes-nothing-records-none
   ;; task seon.proofs/test-results-are-a-few-facts (R2a): seon.proofs/result-tx, what an agent's run
   ;; writes on its branch beside the cache: the digest, status, failing assertions (as data) and running

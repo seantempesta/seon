@@ -780,10 +780,9 @@
       :octopus-merge (let [bs (mapv #(:branch (:seon.agent/env (task-agent (:idx st) (:task %)))) (:members act))]
                        (one (request (assoc-in st [:flights id :branches] bs) id :octopus-merged
                                      {:op :write :req {:op :octopus-merge :branches bs :data-attrs #{}}})))
-      ;; the merge gate (a change reaching process tests): the candidate's files read from its
+      ;; the merge gate (a change reaching process tests): root's one :gate request, the candidate's files read from its
       ;; branch, then its deferred tests run on a checkout of the merges head with them (seon.fx/run-tests)
-      :gate (one (request st id :gate-read
-                          {:op :write :req {:op :merge-candidate :branch (:branch (:seon.agent/env (task-agent (:idx st) id))) :data-attrs #{}}}))
+      :gate (one (request st id :gated {:op :gate :branch (:branch (:seon.agent/env (task-agent (:idx st) id))) :tests (:tests act)}))
       ;; an action the reconciler cannot start keeps no flight
       (throw (ex-info "no such action" {:op op})))))
 
@@ -921,12 +920,15 @@
 (defn- gated
   "Task id's gate answered: rs, each deferred test's status (the gate's run of them, or :error for each when it
   could not run: unread, or err the effect's error), written on the task with the decision `judgment` leaves to it: all
-  passing, the merge is ready; else the task is held for root with the tests not green and why they could not run. A failed
+  passing but main's own, the merge is ready; else the task is held for root with the tests not green and why they could not run.
+  main-red (seon.fx/run-tests: red on main too, without this candidate's files) is no verdict on this work, a proof of the task's
+  excepted, which it owes green: still recorded in the results, and open on main as the :unrun problem. A failed
   :tests effect is recorded here, with the results, in one transaction."
-  {:malli/schema [:=> [:cat :seon.reconcile/state :seon.task/id :map [:vector :map] [:maybe :map]] [:vector :any]]}
-  [st id rs unread err]
+  {:malli/schema [:=> [:cat :seon.reconcile/state :seon.task/id :map [:vector :map] [:maybe :map] [:maybe [:set :qualified-symbol]]] [:vector :any]]}
+  [st id rs unread err main-red]
   (let [main (:db st)
-        red (for [[tt s] (sort-by (comp str key) rs) :when (not= :pass s)] [tt s])
+        tk (task/task main id)
+        red (for [[tt s] (sort-by (comp str key) rs) :when (and (not= :pass s) (or (task/proof? tk tt) (not (contains? main-red tt))))] [tt s])
         why (concat (some-> err :seon.error/message vector) (for [u unread] (str (:ns u) ": " (:reason u))))
         want (cond-> {:seon.task/deferred-results rs}
                (seq unread) (assoc :seon.task/gate-unread unread)
@@ -1057,25 +1059,13 @@
                                                        :else (hold-tx (:db st) task (task/move-tx task :ready :closed {:seon.task/reason problem :seon.task/error r})
                                                                       problem {:conflicts (:seon.task/conflicts t) :unmerged (:seon.task/unmerged t)}))))
                                                  (:members act) (:results r))))))
-      ;; the gate's candidate is the writer's: the files the octopus merge would write (seon.writer's :merge-candidate),
-      ;; forms', tests' and schema resources' alike (a :seon.ref/block change left out would meet its new
-      ;; seon.ref/scan in the checkout, and the seed would throw on scan's contract). A refused candidate is the gate's
-      ;; answer, each deferred test :error with why it was refused: no files would test main as it is and vouch for nothing
-      :gate-read (if (contract/error? r)
-                   (one (write st id :done (gated st id (zipmap (:tests act) (repeat :error)) [] r)))
-                   (let [files (:text r)
-                         ;; a changed namespace with no file on the branch (made at the REPL, never
-                         ;; written) cannot be put over the checkout: named, never dropped
-                         unread (vec (for [n (sort (keys (:unfiled r)))]
-                                       {:ns n :reason "no :ns/file on the branch: its forms were never written to a file"}))]
-                     (one (request (assoc-in st [:flights id :gate-unread] unread) id :gated
-                                   {:op :fx :kind :tests :req {:repo (get-in st [:idx :root :gate-checkout]) :branch (:branch (:source st))
-                                                               :files files :tests (:tests act)}}))))
-      ;; each deferred test's status on the task; a task over a tree missing a changed namespace (gate-unread)
-      ;; vouches for none: each :error
-      :gated (let [unread (:gate-unread f)
+      ;; each deferred test's status on the task. The candidate is the writer's: the files the octopus merge would write
+      ;; (seon.writer's :merge-candidate), forms', tests' and schema resources' alike (a :seon.ref/block change left out would
+      ;; meet its new seon.ref/scan in the checkout, and the seed would throw on scan's contract). A refused candidate (an
+      ;; error), or one over a tree missing a changed namespace (:unread), vouches for none: each :error, and no test ran
+      :gated (let [unread (:unread r)
                    rs (if (or (contract/error? r) (seq unread)) (zipmap (:tests act) (repeat :error)) (get-in r [:value :results]))]
-               (one (write st id :done (gated st id rs unread (when (contract/error? r) r)))))
+               (one (write st id :done (gated st id rs (vec unread) (when (contract/error? r) r) (get-in r [:value :main-red])))))
       :write-back (one (request st id :main-read {:op :write :req {:op :branch-db :branch :db}}))
       :main-read (let [{:keys [members] paths :files} (:writeback f)
                        files (doc/files (:db r) paths)]
