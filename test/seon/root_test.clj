@@ -9,23 +9,25 @@
   (ts/process-store))
 
 (deftest root-threads-are-what-root-declares
-  ;; three start!/stop! cycles, each in a process of its own (a process boots root once: a
+  ;; one start!/stop! cycle, in a process of its own (a process boots root once: a
   ;; second-boot-in-one-process-is-refused): while running (three agents just
-  ;; evaluated) and after each stop!, every thread is one seon.check/declared-threads
+  ;; evaluated) and after stop!, every thread is one seon.check/declared-threads
   ;; names, by name stem, the GC's sweepers are the declared number, and the OS counts
-  ;; nothing else. A diff of {} is exact; anything else names what differs. No web
+  ;; nothing else. A cycle is a process of its own, so a second one starts from the same
+  ;; nothing and reads the same thing: this was three (82 s) and bin/check lifecycle still
+  ;; repeats it (docs/testing.md#a-root-costs-what-it-boots). A diff of {} is exact; anything else names what differs. No web
   ;; listener (SEON_WEB_PORT=0): its adapter's threads outlive stop! (task
   ;; web-server-threads-are-joined-at-stop).
   ;; On a main of its own on the test store, deleted at the end.
   (let [main (str "root-test-" (random-uuid))
         {:keys [exit out err]} (ts/binary-sh "env" "SEON_WEB_PORT=0" (str "SEON_STORE=" (test-store)) (str "SEON_MAIN=" main)
-                                      "./seon" "threads-declared" "3" "--profile" (name (config/profile)) :dir "target")
+                                      "./seon" "threads-declared" "1" "--profile" (name (config/profile)) :dir "target")
         _ (ts/drop-main! (test-store) main)
         res (edn/read-string (last (str/split-lines out)))]
     (is (= 0 exit) (str out err))
-    (is (= 3 (count (:running res)) (count (:stopped res))))
-    (is (= [{} {} {}] (:running res)))
-    (is (= [{} {} {}] (:stopped res)))))
+    (is (= 1 (count (:running res)) (count (:stopped res))))
+    (is (= [{}] (:running res)))
+    (is (= [{}] (:stopped res)))))
 
 (deftest a-second-boot-in-one-process-is-refused
   ;; root boots on its main carrier, before any thread, and forks its fork server there while it
@@ -88,6 +90,12 @@
      ;; each answer as the data it is (an error value among them), one per line
      (str (str/join "\n" (map pr-str answers)) (when (seq answers) "\n") "EXIT " (or (:exit stopped) (pr-str stopped)) "\n" (:log stopped)))))
 
+(def ^:private bare
+  "Root arguments for a root whose subject is its store, not the program or the wiki: it imports no source and
+  loads no page (the checkout's 4,500 forms and 39 pages are 15-20 s of a boot on a store that holds neither,
+  docs/testing.md#a-root-costs-what-it-boots)."
+  ["--set" ":seon.config.source/dirs=[]" "--set" ":seon.config.root/wiki-dirs=[]"])
+
 (deftest a-root-resumes-a-store-an-earlier-build-wrote
   ;; task seon.root/a-root-resumes-a-store-an-earlier-build-wrote: the store as builds of
   ;; 2026-10-21 before CONFIG merged left it (next/runs/store-full-20261021, read 17:35): its
@@ -112,7 +120,8 @@
         _ (do (d/release c2) (d/release c))
         out (root-answers path "old-run"
                           [{:op :eval :agent "root" :code "(+ 1 2)"} {:op :agents}
-                           {:op :eval :agent "root" :code "(get-in (my.root/problems sys) [:classes :platform :n])"}])
+                           {:op :eval :agent "root" :code "(get-in (my.root/problems sys) [:classes :platform :n])"}]
+                          {:args bare})
         [eval-line agents-line problems-line] (str/split-lines out)
         answer (fn [l] (try (edn/read-string {:default tagged-literal} l) (catch Exception _ nil)))]
     (try
@@ -174,8 +183,9 @@
         ;; and root's watch fact: a task count off names the batch that loaded the task files (:last-load)
         held {:op :eval :agent "root" :code "[(count (seon.task/tasks @(:conn sys))) (set (keys (seon.task/agents @(:conn sys)))) (dissoc (:seon.root/watch (d/pull @(:conn sys) [:seon.root/watch] [:seon.root/id :root])) :roots :boot)]"}
         first-boot (str/split-lines (root-answers path "main" [main {:op :eval :agent "root" :code (str "(my.root/load-tasks! sys " (pr-str tasks) ")")}
-                                                           {:op :attach :task "demo/t"} held]))
-        second-boot (str/split-lines (root-answers path "main" [main held]))
+                                                           {:op :attach :task "demo/t"} held]
+                                                  {:args bare}))
+        second-boot (str/split-lines (root-answers path "main" [main held] {:args bare}))
         printed (fn [l] (ts/value-of (:response (try (edn/read-string {:default tagged-literal} l) (catch Exception _ nil)))))]
     (try
       (is (= "main" (printed (first first-boot))) "a boot with no main named works on the config's main")

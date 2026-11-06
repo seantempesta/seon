@@ -4,7 +4,7 @@
   store (its agent caches its verdicts by digest: seon.results-test).
   Run: bin/test seon.prove-test"
   (:require [clojure.test :refer [deftest is testing]] [datahike.api :as d]
-            [seon.test-store :as ts] [seon.agent-test :as at] [clojure.edn] [seon.prove :as prove] [seon.agent] [seon.cost] [seon.proofs :as proofs] [seon.program] [seon.config]))
+            [seon.test-store :as ts] [clojure.java.shell :as sh] [seon.agent-test :as at] [clojure.edn] [seon.prove :as prove] [seon.agent] [seon.cost] [seon.proofs :as proofs] [seon.program] [seon.config]))
 
 (defn- feed
   "State st after the messages ([in m] ...) in order, with every output it made (the :to-api messages)."
@@ -200,12 +200,23 @@
   ;; for main's key after joins that run or reads its answer. Open (task seon.proofs/an-agent-forked-after-finds-mains-results): an agent
   ;; forked after does not find them at its digests, and a named run after a program commit does not
   ;; reuse them (measured: [false false], :reused 0)
-  (let [booted (str "(let [r @(c/prove! sys nil) ts '[seon.patterns-test/a-backlog-is-the-unread-queue seon.patterns-test/workers-compete-for-one-shared-in-port]]"
+  ;; A store of this test's own, the last resort (docs/testing.md#a-root-costs-what-it-boots): a main's run is
+  ;; every test main holds, and a branch of the process store holds the suite's (1,152 of them ran here, 140-180
+  ;; s, to give two their verdicts). Imported from [src, patterns_test.clj] alone, main holds the two this test reads.
+  (let [checkout (seon.config/checkout)
+        main (str "prove-boot-" (random-uuid))
+        store (str checkout "/target/runs/" main "-store")
+        runs (str checkout "/target/runs/" main "-runs")
+        root (ts/start-root! {:store store :main main :runs runs
+                              :args ["--set" (str ":seon.config.source/root=" (pr-str checkout))
+                                     "--set" ":seon.config.source/dirs=[\"src\" \"test/seon/patterns_test.clj\"]"
+                                     "--set" ":seon.config.proofs/prove-main-on-commit=true"]})
+        booted (str "(let [r @(c/prove! sys nil) ts '[seon.patterns-test/a-backlog-is-the-unread-queue seon.patterns-test/workers-compete-for-one-shared-in-port]]"
                     ;; its verdicts are cached by digest (the answer carries only proofs and reds: seon.proofs/answer)
                     "  (pr-str {:key (:key r) :facts (vec (for [t ts :let [v (get (seon.fx/stored-results (select-keys (:digests r) ts)) (get (:digests r) t))] :when v] [t (if (seon.proofs/green? v) :pass :red)]))}))")
-        [a] (at/in-agent [{:op :eval :agent "root" :code booted}]
-                         {:dirs ["src" "test/seon/patterns_test.clj"] :own-root? true :sets [":seon.config.proofs/prove-main-on-commit=true"]})
-        a' (some-> (:value a) clojure.edn/read-string)]
+        a (try (ts/ask root {:op :eval :agent "root" :code booted})
+               (finally (ts/stop-root! root) (sh/sh "rm" "-rf" store runs)))
+        a' (some-> (ts/value-of (:response a)) clojure.edn/read-string)]
     (is (= '[[seon.patterns-test/a-backlog-is-the-unread-queue :pass] [seon.patterns-test/workers-compete-for-one-shared-in-port :pass]]
            (:facts a'))
         (str "main proved at its boot, nobody asking: " (pr-str a)))))
