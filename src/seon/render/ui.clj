@@ -696,20 +696,22 @@
         e (cond to-come? nil (= :latest at) last-e :else at)
         m (some-> e pull)]
     (when (or to-come? (:seon.model-call/basis m))
-      (let [[tdb b] (if to-come?
+      (let [[tdb b swept?] (if to-come?
                       ;; as seon.turn/act! draws it: the turn's number first, then the request at the head
                       (let [n (inc (:turn lb)) b (assoc lb :commit (d/commit-id db) :turn n)]
                         [db b])
                       (let [b (:seon.model-call/basis m)]
-                        ;; a commit past the store's keep (seon.db/retain!) is the same datoms as of its t (docs/storage.md#collection)
-                        [(if (= (:commit b) (d/commit-id db)) db (or (d/commit-as-db (:store db) (:commit b)) (when (:t b) (d/as-of db (:t b))) db)) b]))
+                        ;; a commit past the store's keep (seon.db/retain!) is the same records as of its t (docs/storage.md#collection); a basis with no t draws from the head, and the page says so
+                        (let [at-commit (if (= (:commit b) (d/commit-id db)) db (d/commit-as-db (:store db) (:commit b)))
+                              as-of (when (and (nil? at-commit) (:t b)) (d/as-of db (:t b)))]
+                          [(or at-commit as-of db) b (and (nil? at-commit) (nil? as-of))])))
             i (if to-come? (count calls) (.indexOf ^java.util.List calls e))
             prev-e (when (pos? i) (nth calls (dec i)))
             ;; with no request before it, nothing is marked: every message is the first request's
             since (some-> prev-e pull :seon.model-call/basis :turn)
             w (context/wire-turn tdb b since)
             sent-hash (:seon.model-call/sent-hash m)]
-        {:at at :to-come? to-come? :turn (:turn b) :agent (:agent b) :origin (:origin b) :raw? raw?
+        {:at at :to-come? to-come? :turn (:turn b) :agent (:agent b) :origin (:origin b) :raw? raw? :swept? (boolean swept?)
          :body (:body w) :sources (:sources w) :new (:new w)
          :differs? (boolean (and sent-hash (not= sent-hash (lib/digest (sedn/encode (:messages w))))))
          :usage (select-keys m [:seon.model-call/tokens :seon.model-call/cache-hit-tokens :seon.model-call/cache-miss-tokens])
@@ -2067,7 +2069,7 @@
   the messages the request before sent the same way end; the envelope (every field but the messages) and,
   while opened, the whole body's JSON as sent. input as `debug-input` answers it. See docs/render.md#the-debug-page-is-the-wire-request."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
-  [opts {:keys [view to-come? turn agent origin body sources new raw? error differs? opened]
+  [opts {:keys [view to-come? turn agent origin body sources new raw? error differs? opened swept?]
          {:seon.model-call/keys [tokens cache-hit-tokens cache-miss-tokens]} :usage}]
   (let [unit (:unit opts)
         ms (:messages body)
@@ -2152,7 +2154,9 @@
            [:span {:class "inline-flex items-center gap-1.5 tabular-nums"} [:span {:class (str "inline-block h-2.5 w-2.5 " band)}]
             (str role " " (long (Math/round (/ (* 100.0 n) (max 1 est)))) "% " (print/tokens-text n))])]])
      (when error [:div {:class "rounded border border-error p-2"} (render/html {} error)])
-     (when differs?
+     (when swept?
+       [:p {:class "text-warning"} "This turn's commit is gone from the store (seon.db/retain!), so this is drawn from the branch as it is now, not as it was sent."])
+     (when (and differs? (not swept?))
        [:p {:class "seon-note"} "Drawn again with today's renders: its bytes differ from what the turn sent, because a render or a record changed since. The turn kept one hash of the whole request (:seon.model-call/sent-hash), so this page can't say where."])
      [:details [:summary {:class "cursor-pointer text-text-400"} "the envelope: every field but the messages, as sent"]
       (verbatim (json/write-str (dissoc body :messages)))]
