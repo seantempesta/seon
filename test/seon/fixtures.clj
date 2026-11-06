@@ -346,6 +346,13 @@
                             "(my.task/update! :seon.task/plan str \" Implement makes app.stages-test/t pass.\")")
         :else (says "The proof is written and red, and the plan says what implement changes.")))
 
+(defn reads-its-own-reply
+  "The scripted model of a reply whose eval reads this very model call's record (seon.agent-test): its reply, written before its evals run, ends the work as its reason."
+  {:malli/schema [:=> [:cat :seon.model/request] :seon.model/script-reply]}
+  [_]
+  (calls "The reply itself."
+         "(my.task/fail! (str \"read: \" (datahike.api/q '[:find ?r . :where [?m :seon.model-call/reply ?r] [?m :seon.model-call/reply \"The reply itself.\"]] (my.db/db))) '(= 1 2))"))
+
 (defn whole-green
   "The scripted model of a whole task that goes green (seon.agent-test): it writes a proof that
   passes and registers it; the done rule then passes and the run ends, for root to merge."
