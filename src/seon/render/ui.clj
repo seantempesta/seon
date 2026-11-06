@@ -2024,12 +2024,11 @@
         field (fn [k v] [:div {:class "flex flex-col"} [:span {:class "seon-note"} k] v])
         verbatim (fn [s] [:pre {:class "whitespace-pre-wrap break-words font-mono text-text-100"} s])
         highlighted (fn [s] (emit/marked-hiccup :seon.print/code s))
-        ;; a tool call's arguments are JSON the wire holds: read as the data they are
+        ;; a tool call's arguments as the opened row reads them: seon.model/wire-message writes them from a map, always JSON
         args (fn [{:keys [function]}] (json/read-str (:arguments function)))
-        ;; a row's one line: its text, else what its calls say
+        ;; a row's one line: its text, else its calls as sent
         says (fn [{:keys [content tool_calls]}]
-               (str (if (seq content) content
-                        (str/join " · " (map (fn [c] (or (get (args c) "intent") (get-in c [:function :name]))) tool_calls)))))
+               (if (seq content) content (str/join " " (map (fn [{{:keys [name arguments]} :function}] (str name " " arguments)) tool_calls))))
         row (fn [i {:keys [role content tool_calls tool_call_id reasoning_content] :as m}]
               (let [rs (get sources i) new? (get new i) u (str unit "-o" i) open? (contains? opened u)
                     example (some (fn [[k x]] (when (= :example k) x)) rs)
@@ -2040,12 +2039,12 @@
                             open? (assoc :open true))
                  [:summary {:class "flex cursor-pointer items-baseline gap-2"}
                   [:b {:class "w-20 shrink-0 text-2xs text-text-200"} role]
-                  [:span {:class "seon-prose min-w-0 flex-1 break-words text-text-100 group-open:invisible"} (let [{:keys [shown truncated? omitted lines]} (print/prose (says m) line-budget {:one-line? true})]
+                  [:span {:class "seon-prose min-w-0 flex-1 break-words text-text-100 group-open:hidden"} (let [{:keys [shown truncated? omitted lines]} (print/prose (says m) line-budget {:one-line? true})]
                                      ;; the cut says what it left; the rest is the row, opened, so no copy is kept on its line
                                      (if truncated? [:span shown " " [:span {:class "seon-print-elision"} (emit/cut-words omitted lines nil)]] shown))]
                   (when new? [:span {:class "shrink-0 text-2xs text-signal"} "new"])
                   (when example [:span {:class "shrink-0 text-2xs text-info"} (str "example session " example)])
-                  [:span {:class (str "shrink-0 tabular-nums " (size-class (get sizes i)))} (print/tokens-text (get sizes i))]]
+                  [:span {:class (str "ml-auto shrink-0 tabular-nums " (size-class (get sizes i)))} (print/tokens-text (get sizes i))]]
                  (when open?
                    [:div {:class "mt-1 flex min-w-0 flex-col gap-2"}
                     (when (seq rs) [:span {:class "seon-note"} (str/join " · " (map source rs))])
