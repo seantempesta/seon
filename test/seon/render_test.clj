@@ -1998,7 +1998,7 @@
         html (h/html (ui/proved {} run))]
     (is (= (str "red: 1 of 4 failed\n✗ app.okt/bad-test: the sum\n    asserted (= 3 (+ 1 1))\n    and got  (not (= 3 2))\nreused 1: their last result still counts, because nothing they reach has changed")
            (:seon.print/code (my.agent/prove-summary {} run))) "what failed, first failure, and only what is true of this run")
-    (is (= "green: 0 of 0 passed\nno test is named app.okt/typo-test"
+    (is (= "nothing judged: no proof and no test this change reaches\nno test is named app.okt/typo-test"
            (:seon.print/code (my.agent/prove-summary {} {:pass 0 :fail 0 :error 0 :ran 0 :reused 0 :deferred [] :reports [] :unmatched ['app.okt/typo-test]})))
         "a name that is no test is said, never a silent ran 0 (bench-scope-5)")
     (is (= #{'app.okt/gone-test} (seon.proofs/died run)))

@@ -644,7 +644,7 @@
     (is (seq (:value aliased)) (str "an alias reads as the var it resolves to, whose callers are recorded by its full name: " (pr-str aliased)))
     (is (seq (:value referred)) (str "a referred name is the var, not a namespace: " (pr-str referred)))
     (is (= :my.agent/no-var (:seon.error/type (:value ns-typo))) (str "a bare name that is no namespace says so, nearest namespaces named: " (pr-str ns-typo)))
-    (is (= '[seon.task-test/no-such-test] (:value unmatched)) (str "a prove naming no test says which: " (pr-str unmatched)))))
+    (is (= '[demo-test/t seon.task-test/no-such-test] (:value unmatched)) (str "a prove naming no test says which: " (pr-str unmatched)))))
 
 (deftest grep-refuses-what-it-does-not-take
   ;; docs/vector.md#search: an option grep does not take, ignored, reads as what it asked for, and so does []

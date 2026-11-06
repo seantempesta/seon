@@ -243,7 +243,7 @@
               [(ev (str "(deref (future @(c/prove! sys :" a " #{} :turn)) 60000 :none)"))
                (do (ev (str "(c/interrupt! sys :" a ")"))
                    (ev "(clojure.string/starts-with? (:seon.error/message (:ex @blocked)) \"interrupted by root\")"))
-               (root-value (ask {:op :eval :agent a :code "(+ 2 2)"}))])))]
+               (ev (str "(:value @(c/submit! sys :" a " \"(+ 2 2)\" {:origin :outside}))"))])))]
     (is (and (map? proved) (contains? proved :pass)) (str "the run answered while the eval blocked: " (pr-str (if (map? proved) (select-keys proved [:pass :fail :error :ran]) proved))))
     (is (true? stopped) (str "the blocked eval answers interrupted by root: " stopped))
     (is (= 4 next-answer) (pr-str next-answer))))
@@ -568,7 +568,7 @@
               (ev (began-code a "(clojure.core.async/<!! (clojure.core.async/chan))"))
               (ev (str "(c/interrupt! sys :" a ")"))
               [(ev "(clojure.string/starts-with? (:seon.error/message (:ex @blocked)) \"interrupted by root\")")
-               (root-value (ask {:op :eval :agent a :code "(+ 2 2)"}))])))]
+               (ev (str "(:value @(c/submit! sys :" a " \"(+ 2 2)\" {:origin :outside}))"))])))]
     (is (true? stopped) (str "the blocked eval answers interrupted by root: " stopped))
     (is (= 4 next-answer) (pr-str next-answer))))
 

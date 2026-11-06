@@ -388,7 +388,7 @@
   (let [n (when turn? (begin! task) (inc (agent/turn-now)))
         id (when turn? (first (open-turn! task n 1 false nil)))
         _ (when turn? (agent/commit!))
-        calls (model/call-evals {"message-md" message "evals" evals} (str "outside-" (or n (profile/now-ns))))
+        calls (model/call-evals {"message-md" message "evals" evals} (str "outside-" (or n "repl")))
         rs (repl/run-calls (mapv #(dissoc % :message-md) calls) (fn [cid] {:origin :outside :call-id cid}) evaluated!)]
     (when turn?
       (agent/transact! [{:seon.model-call/id id :seon.model-call/forms (count rs) :seon.model-call/model "outside"

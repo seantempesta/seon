@@ -1680,7 +1680,7 @@
               {"jsonrpc" "2.0" "method" "notifications/initialized"}
               {"jsonrpc" "2.0" "id" 2 "method" "tools/list"}
               {"jsonrpc" "2.0" "id" 3 "method" "tools/call" "params" {"name" "seon_agents" "arguments" {}}}
-              {"jsonrpc" "2.0" "id" 4 "method" "tools/call" "params" {"name" "seon_eval" "arguments" {"agent" (name a) "code" "(def outside-x 41) (inc outside-x)"}}}
+              {"jsonrpc" "2.0" "id" 4 "method" "tools/call" "params" {"name" "seon_eval" "arguments" {"agent" (name a) "message-md" "" "evals" [{"intent" "define and add" "code" "(def outside-x 41) (inc outside-x)"}]}}}
               {"jsonrpc" "2.0" "id" 5 "method" "tools/call" "params" {"name" "seon_eval" "arguments" {"agent" "root" "code" "(count (:agents (c/state sys)))"}}}]
         ;; the client's stdin is a file, so its EOF is a fact of the file: a pipe's write end
         ;; held open anywhere (bin/check mcp hung two hours on one) leaves the client waiting

@@ -1095,7 +1095,7 @@
                 ;; its value goes with the reply only when it is plain data (seon.contract/plain?: what the socket and the wire carry);
                 ;; root keeps none of it (its view keeps the head: seon.root/eval-head), and the asker reads the value as data,
                 ;; never the printed text back, which is no EDN once the eval printed (its :out verbatim)
-                [{:op :reply :id (:id m) :response (agent/on-the-wire (eval-string (:forms m) (select-keys m [:ticks :origin])))
+                [{:op :reply :id (:id m) :response (let [r (eval-string (:forms m) (select-keys m [:ticks :origin]))] (agent/on-the-wire r))
                   :t (:max-tx (agent/db))}])
               ;; evals given at its spawn (seon.root/spawn!'s :evals) or inserted later: run on this queue, in order, answering no one
               (= :evals (:op m)) (do (intr/clear-pending!) (insert! (:by m) (:evals m)) [])

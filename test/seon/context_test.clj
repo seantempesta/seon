@@ -295,9 +295,11 @@
     (is (= {:role "assistant" :content "" :tool-calls [{:id "eval-e1" :code "(e1)"}] :reply 1} (first ms)) "the call alone, naming its reply")
     (is (= {:role "tool" :tool-call-id "eval-e1" :content "{:handle result/e1, :value \"E1\"}"} (second ms)))
     (let [wire (seon.model/wire-messages true ms)]
-      (is (= ["assistant" "tool" "tool" "tool"] (mapv :role wire)) "a reply's three calls are one assistant message")
-      (is (= ["eval-e1" "eval-e2" "eval-e3"] (mapv :id (:tool_calls (nth wire 0)))))
-      (is (= ["eval-e1" "eval-e2" "eval-e3"] (mapv :tool_call_id (subvec wire 1 4))) "each call answered, in order")
+      (is (= ["assistant" "tool"] (mapv :role wire)) "a reply's three evals are one assistant message, and their results one tool message")
+      (is (= ["eval-e1"] (mapv :id (:tool_calls (nth wire 0)))))
+      (is (= ["(e1)" "(e2)" "(e3)"] (mapv #(get % "code") (get (clojure.data.json/read-str (get-in wire [0 :tool_calls 0 :function :arguments])) "evals"))))
+      (is (= "eval-e1" (:tool_call_id (nth wire 1))))
+      (is (re-find #"(?s)result/e1.*result/e2.*result/e3" (:content (nth wire 1))) "each with its handle, in order")
       (is (not-any? #(contains? % :reply) wire) "the reply's number never reaches the wire")))
   (testing "a user's form is one user message carrying its response"
     (is (= [{:role "user" :content "{:by \"user\" :code \"(+ 1 2)\" :response {:handle result/e4, :value 3}}"}]
@@ -608,30 +610,31 @@
     (seon.model/wire-messages true ms)))
 
 (defn- reply-shape
-  "Each assistant wire message of wire as [its reply's message reasoning [call ids]]: the message is its text, or on its first call."
+  "Each assistant wire message of wire as [its reply's message reasoning [its evals' code]]: the message on its one call, or its text."
   [wire] (vec (for [m wire :when (= "assistant" (:role m))]
-                [(or (some-> (get-in m [:tool_calls 0 :function :arguments]) (clojure.data.json/read-str) (get "message-md")) (:content m)) (:reasoning_content m) (mapv :id (:tool_calls m))])))
+                (let [args (some-> (get-in m [:tool_calls 0 :function :arguments]) (clojure.data.json/read-str))]
+                  [(or (get args "message-md") (:content m)) (:reasoning_content m) (mapv #(get % "code") (get args "evals"))]))))
 
 (deftest cutting-a-replys-calls-leaves-one-assistant-message-per-reply
   ;; docs/render.md#the-models-context-a-cached-prefix-then-the-turn: a reply's text and reasoning are its model call's, never an
   ;; eval's, and evals fold by the reply they belong to: unlinking one (swap! on @ctx) cannot attach another to an earlier reply
   (testing "nothing cut: one assistant message per reply, its calls in order, each answered after it"
     (let [wire (wire-without [])]
-      (is (= [["I look." "think" ["eval-e1" "eval-e2" "eval-e3"]] ["Then." "more" ["eval-e4" "eval-e5"]] ["" "quiet" ["eval-e6"]]] (reply-shape wire)))
-      (is (= ["assistant" "tool" "tool" "tool" "assistant" "tool" "tool" "assistant" "tool"] (mapv :role wire)))
-      (is (= ["eval-e1" "eval-e2" "eval-e3" "eval-e4" "eval-e5" "eval-e6"] (keep :tool_call_id wire)) "answered in order")))
+      (is (= [["I look." "think" ["(f 1)" "(f 2)" "(f 3)"]] ["Then." "more" ["(f 4)" "(f 5)"]] ["" "quiet" ["(f 6)"]]] (reply-shape wire)))
+      (is (= ["assistant" "tool" "assistant" "tool" "assistant" "tool"] (mapv :role wire)))
+      (is (= ["eval-e1" "eval-e4" "eval-e6"] (keep :tool_call_id wire)) "each reply's results in one message")))
   (testing "a reply's first call cut: its other calls stay on it, with its text and reasoning"
-    (is (= [["I look." "think" ["eval-e2" "eval-e3"]] ["Then." "more" ["eval-e4" "eval-e5"]] ["" "quiet" ["eval-e6"]]] (reply-shape (wire-without ["e1"])))))
+    (is (= [["I look." "think" ["(f 2)" "(f 3)"]] ["Then." "more" ["(f 4)" "(f 5)"]] ["" "quiet" ["(f 6)"]]] (reply-shape (wire-without ["e1"])))))
   (testing "a middle call cut"
-    (is (= [["I look." "think" ["eval-e1" "eval-e3"]] ["Then." "more" ["eval-e4" "eval-e5"]] ["" "quiet" ["eval-e6"]]] (reply-shape (wire-without ["e2"])))))
+    (is (= [["I look." "think" ["(f 1)" "(f 3)"]] ["Then." "more" ["(f 4)" "(f 5)"]] ["" "quiet" ["(f 6)"]]] (reply-shape (wire-without ["e2"])))))
   (testing "the calls of the second reply cut: the first is untouched, the second keeps its text"
     (let [wire (wire-without ["e4" "e5"])]
-      (is (= [["I look." "think" ["eval-e1" "eval-e2" "eval-e3"]] ["Then." "more" []] ["" "quiet" ["eval-e6"]]] (reply-shape wire)))
+      (is (= [["I look." "think" ["(f 1)" "(f 2)" "(f 3)"]] ["Then." "more" []] ["" "quiet" ["(f 6)"]]] (reply-shape wire)))
       (is (not-any? #(contains? % :tool_calls) (filter #(= "Then." (:content %)) wire)))))
   (testing "all the calls of a reply cut: its text stays as a plain assistant message, with its reasoning"
-    (is (= [["I look." "think" []] ["Then." "more" ["eval-e4" "eval-e5"]] ["" "quiet" ["eval-e6"]]] (reply-shape (wire-without ["e1" "e2" "e3"])))))
+    (is (= [["I look." "think" []] ["Then." "more" ["(f 4)" "(f 5)"]] ["" "quiet" ["(f 6)"]]] (reply-shape (wire-without ["e1" "e2" "e3"])))))
   (testing "a reply with no text, all its calls cut: nothing stays of it"
-    (is (= [["I look." "think" ["eval-e1" "eval-e2" "eval-e3"]] ["Then." "more" ["eval-e4" "eval-e5"]]] (reply-shape (wire-without ["e6"])))))
+    (is (= [["I look." "think" ["(f 1)" "(f 2)" "(f 3)"]] ["Then." "more" ["(f 4)" "(f 5)"]]] (reply-shape (wire-without ["e6"])))))
   (testing "the reasoning survives a cut of call 0 and goes only when replay is off"
     (let [[db c] (reply-world)
           ms (seon.fixtures/tree-messages (update c :evals dissoc (pdb/eid db :seon.eval/id "e1")) db)]
@@ -811,7 +814,7 @@
         (is (= ["system" "user" "assistant" "tool" "assistant" "assistant" "tool" "assistant" "tool"] (mapv :role r1)) (pr-str (mapv :role r1)))
         (is (= {:role "assistant" :content "I call f." :reasoning "why" :reply 1} (nth r1 4)) "the reply: its text and the reasoning as returned")
         (is (= {:role "assistant" :content "" :tool-calls [{:id "eval-e2" :code "(f 1)"}] :reply 1} (nth r1 5)) "then its call")
-        (is (= [{:role "assistant" :content "" :reasoning_content "why" :tool_calls [{:id "eval-e2" :type "function" :function {:name "eval" :arguments "{\"message-md\":\"I call f.\",\"code\":\"(f 1)\"}"}}]}
+        (is (= [{:role "assistant" :content "" :reasoning_content "why" :tool_calls [{:id "eval-e2" :type "function" :function {:name "eval" :arguments "{\"message-md\":\"I call f.\",\"evals\":[{\"code\":\"(f 1)\"}]}"}}]}
                 {:role "tool" :content "{:handle result/e2, :value 1}" :tool_call_id "eval-e2"}]
                (subvec (seon.model/wire-messages true r1) 4 6)) "one assistant message on the wire")
         (is (= "{:handle result/e2, :value 1}" (:content (nth r1 6))) "the call's response, its recorded value printed as it is sent")
@@ -1838,7 +1841,8 @@
   (let [[db] (tree-world {:id "e1" :call-id "c1"} {:id "e2" :by "outside"} {:id "e3" :call-id "c3"})
         wire (seon.model/wire-messages true (wire-of-world db))
         reply (first (filter #(seq (:tool_calls %)) wire))]
-    (is (= ["eval-e1" "eval-e3"] (mapv :id (:tool_calls reply))) "one assistant message, its message-md on its first call")
+    (is (= ["eval-e1"] (mapv :id (:tool_calls reply))) "one assistant call")
+    (is (= ["(e1)" "(e3)"] (mapv #(get % "code") (get (clojure.data.json/read-str (:arguments (:function (first (:tool_calls reply))))) "evals"))) "both its evals in it")
     (is (str/includes? (:arguments (:function (first (:tool_calls reply)))) "I look."))
     (is (str/includes? (:content (last wire)) "{:by \"outside\" :code \"(e2)\"") "the other hand's after it")))
 
