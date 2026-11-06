@@ -19,16 +19,14 @@ What Seon is for, where it stands, the one step being worked now, and the steps 
 
 ## Now: one step
 
-**One tree of data that renders itself, read by two clients.** The model's context goes through the same ratom components as the page: a component transforms its data, filtering it and adding what it needs from the db, into hiccup: the one state, drawn to html directly and read by the model. The order, what's settled and what the research found are on task `seon.context/the-models-context-is-the-walks`. All of it gets finished, and real-task runs follow it.
+**One tree of data that renders itself, read by two clients.** The model's context goes through the same ratom components as the page: a component transforms its data, filtering it and adding what it needs from the db, into hiccup: the one state, drawn to html directly and read by the model. The order, what's settled and what the research found are on task `seon.context/the-models-context-is-the-walks`.
 
 In flight, each on its own branch and merged when proved:
-- **One call per reply, and the MCP tools the same (`jolt/mcp-tools`):** [one tool](model.md#one-tool-eval), [an outside agent](turn.md#an-outside-agent).
-- **Test reuse:** a test's digest takes a form's read form, not its text; config keys a `:map` lists are no edges (`jolt/reuse-wip`).
-- **Agents repeating themselves** is a bug being root-caused (`jolt/no-repeats`).
+- **Agents merging real tasks, the first priority (this session).** The tree, the one-call tool, edits and true plans are on main. DeepSeek on main (deepseek-flash, thinking off, default temperature, 40 turns, 5 tasks, one run each, $0.0875): 0 green, 0 merged; a message on 98% of replies, an intent on 97% of evals, 1 repeat in 144, first own proof median turn 10, 0 whole-page re-reads. Order: (1) `jolt/deferred-proofs`: an agent's deferred process tests get a verdict while it can act, since 2 of 5 closed at merge with no turn left; (2) rerun the same 5 tasks and read them; (3) stray `def` probes that become program, about 9 turns across agents; (4) keep checking plans at a REPL: 67 of 302 done, about 217 left, the commonest fault is code that moved under a task.
 - **Time from a proved change to main:** the Optimization session. Agents' merges on a swept store are proved ([collection](storage.md#collection)); a merge of the wiki, tasks or tests skips the steps that run the binary ([merging](merging.md#a-merge-runs-what-the-change-reaches)); next, what a first status costs when main's content moves.
 - **The web pages:** the agent's chat, `@ctx` and raw-wire debug tabs and root's work list are on main. An opened step has Run, To here, Copy, Edit ([run again](turn.md#an-eval-can-be-run-again)) and Back to here ([going back](turn.md#an-agent-goes-back-to-an-eval)). A handle names its value, so the same answer has the same handle. Next: source editing with an explicit disk sync (`seon.render/an-edit-reaches-disk-when-asked`) and a chat that sends only what it places (`seon.render/an-agents-chat-sends-only-what-it-places`).
 
-Open with the owner: erasing the store for the schema step; surfacing a red from the nightly full run.
+Open with the owner: whether a stronger model or thinking helps on harder tasks (3 of 5 hit the cap with their proofs red, plans understood); a problem class for bare names and `path:line` in plans, and for tasks whose proofs are all green already; the print budget; `seon.reader/forgive`; `:seon.error/fix` hints; what happens when a chat render breaks; `jolt.host/a-date-prints-its-milliseconds`'s pin bump; `seon.repl/type-findings-are-an-evals-warnings`' go; surfacing a red from the nightly full run.
 
 ## After that
 
