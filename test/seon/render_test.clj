@@ -1362,7 +1362,8 @@
       (is (str/includes? o "(first-call)"))
       (is (str/includes? o "group-open:invisible") "the line gives way to the fields, so nothing is shown twice"))
     (is (< (count h) (count (draw #{"d-turn-o2"}))) "opened, a message is drawn whole, however large")
-    (is (= 8000 (count (re-seq #"word" (draw #{"d-turn-o2"})))) "and nothing of it is cut")
+    (is (< (count (re-seq #"word" h)) 100) "closed, its line holds no copy of it")
+    (is (<= 8000 (count (re-seq #"word" (draw #{"d-turn-o2"})))) "and nothing of it is cut")
     (is (str/includes? h "text-error") "a message past its limit reads red")
     (is (str/includes? (draw #{"d-turn-o0"}) "<h") "a system message's Markdown is drawn")))
 

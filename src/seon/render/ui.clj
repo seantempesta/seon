@@ -2040,7 +2040,9 @@
                             open? (assoc :open true))
                  [:summary {:class "flex cursor-pointer items-baseline gap-2"}
                   [:b {:class "w-20 shrink-0 text-2xs text-text-200"} role]
-                  [:span {:class "seon-prose min-w-0 flex-1 break-words text-text-100 group-open:invisible"} (prose (says m) line-budget {:one-line? true})]
+                  [:span {:class "seon-prose min-w-0 flex-1 break-words text-text-100 group-open:invisible"} (let [{:keys [shown truncated? omitted lines]} (print/prose (says m) line-budget {:one-line? true})]
+                                     ;; the cut says what it left; the rest is the row, opened, so no copy is kept on its line
+                                     (if truncated? [:span shown " " [:span {:class "seon-print-elision"} (emit/cut-words omitted lines nil)]] shown))]
                   (when new? [:span {:class "shrink-0 text-2xs text-signal"} "new"])
                   (when example [:span {:class "shrink-0 text-2xs text-info"} (str "example session " example)])
                   [:span {:class (str "shrink-0 tabular-nums " (size-class (get sizes i)))} (print/tokens-text (get sizes i))]]
