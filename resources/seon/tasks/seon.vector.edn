@@ -1,1 +1,5 @@
-[]
+[
+ {:seon.task/name "the-helper-stays-while-agents-work"
+  :seon.task/plan "For the owner's review: it changes the ruling that the embedding model spins down when idle, docs/decisions.md (2026-10-29, \"if it's cheap\"). The helper ends when its queue empties (seon.vector/close), so every :embed starts a process and loads the model: 950 to 1,000 ms measured 2026-11-06 at load 5, against 0.45 s when the ruling was made and 5 to 15 ms for one text with the model up. A turn that writes a form pays it (seon.agent/embed-written!, on the agent's thread). Option: root keeps the helper up while any agent is live and closes it when none is, its workload rather than a clock. Cost: about 0.86 GB RSS held for as long as agents run, against the 16 GB target (:seon.config.machine/memory-mb, bin/check scale). Measure first how many turns of a real run still embed now eval code is no text: if few, leave it. Proofs: a second :embed with an agent live starts no process."
+  :seon.task/kind :work
+  :seon.task/proofs #{}}]
