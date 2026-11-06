@@ -1747,9 +1747,9 @@
                                    " :sampled (count sample) :known (count ds))))))"))
           r (read-string (slurp out))
           reds (:reports r)]
-      {:report (assoc (select-keys r [:ran :sampled :known :pass :fail :error]) :reds (mapv (juxt :var :message :actual) reds))
-       ;; a green here at its digest reports as a test run, so none is left unjudged; none sampled means the plan found no program
-       :checks {:tests-sampled (pos? (:sampled r 0)) :every-sampled-judged (= (:sampled r) (:ran r)) :none-red (empty? reds)}}))))
+      {:report (assoc (select-keys r [:ran :reused :sampled :known :pass :fail :error]) :reds (mapv (juxt :var :message :actual) reds))
+       ;; each sampled test ran or was reused at its digest, so none is left unjudged; none sampled means the plan found no program
+       :checks {:tests-sampled (pos? (:sampled r 0)) :every-sampled-judged (= (:sampled r) (+ (:ran r 0) (:reused r 0))) :none-red (empty? reds)}}))))
 
 (defn threads-check
   "Session RC1's physics rule: the processes that fork (the fork server; an agent, for its
