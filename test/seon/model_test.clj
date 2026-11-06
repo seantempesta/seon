@@ -172,18 +172,22 @@
                                :task "t/x" :turn 1})]
     (is (= "auto" (:tool_choice b)))
     (is (= [:message-md :intent :code] (keys (get-in b [:tools 0 :function :parameters :properties]))) "the message, then the intent, then code: it talks and thinks before the code")
-    (is (= ["intent" "code"] (get-in b [:tools 0 :function :parameters :required])) "each call has its intent; the message is the reply's")
+    (is (= ["message-md" "intent" "code"] (get-in b [:tools 0 :function :parameters :required])) "all three, the message empty on a reply's later calls")
     (testing "a turn has one message, its text; each call has its intent"
       (let [reply (fn [& argss] (model/parse-reply (json/write-str {:choices [{:message {:content "" :tool_calls (vec (map-indexed (fn [i a] {:id (str "c" i) :function {:name "eval" :arguments (json/write-str a)}}) argss))} :finish_reason "tool_calls"}]}) 1.0 64))
             one {:intent "i" :code "(f)"}
             c (reply (assoc one :message-md "Doing f twice.") one)]
         (is (= "Doing f twice." (:text c)) "the message is the turn's text")
         (is (= [{:id "c0" :code "(f)" :intent "i"} {:id "c1" :code "(f)" :intent "i"}] (:tool-calls c)) "and covers all of its calls")
-        (is (re-find #"has no message" (:problem (first (:tool-calls (reply one one))))) "a reply with none is refused at its first call")
-        (is (nil? (:problem (first (:tool-calls (model/parse-reply (json/write-str {:choices [{:message {:content "Said it." :tool_calls [{:id "c" :function {:name "eval" :arguments (json/write-str one)}}]} :finish_reason "tool_calls"}]}) 1.0 64))))) "its text is a message too")))
+        (is (= [nil nil] (mapv :problem (:tool-calls (reply one one)))) "a reply with none still runs")
+        (let [sent (:messages (model/request-body {:kind :openai-compat :base-url "" :model "m" :api-key-env "" :max-tokens 10}
+                                                  {:messages [{:role "assistant" :content "Doing f twice." :reply 1} {:role "assistant" :content "" :reply 1 :tool-calls (:tool-calls c)}] :task "t/x" :turn 1}))]
+          (is (= "" (:content (first sent))) "history reads as the model sent it")
+          (is (= ["{\"message-md\":\"Doing f twice.\",\"intent\":\"i\",\"code\":\"(f)\"}" "{\"intent\":\"i\",\"code\":\"(f)\"}"]
+                 (mapv #(get-in % [:function :arguments]) (:tool_calls (first sent)))) "the message on its first call"))))
     (is (not (str/includes? (pr-str (:tools b)) ";;")) "no ;; in the tool")
-    (is (= {:role "assistant" :content "I read f." :reasoning_content "r"
-            :tool_calls [{:id "c1" :type "function" :function {:name "eval" :arguments "{\"code\":\"(f)\"}"}}]}
+    (is (= {:role "assistant" :content "" :reasoning_content "r"
+            :tool_calls [{:id "c1" :type "function" :function {:name "eval" :arguments "{\"message-md\":\"I read f.\",\"code\":\"(f)\"}"}}]}
            (first (:messages b))) "reply text, reasoning and the call, as returned")
     (is (= "c1" (:tool_call_id (second (:messages b)))) "the response answers its call by the provider's id")))
 

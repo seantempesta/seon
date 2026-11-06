@@ -105,10 +105,10 @@
               :description "Run Clojure code at your REPL. Each call takes one top-level form, so each result has its own handle; you may make several calls in one reply, and they run in order, a call after one that threw or answered an error not being run. If one call holds several top-level forms they run in order and answer :forms and :value, the vector of their values. Your system message says what comes back."
               ;; in the order a model fills them: it talks and thinks before the code
               :parameters {:type "object"
-                           :properties (array-map :message-md {:type "string" :description "One per reply, on its first call: your message to whoever started you, in Markdown, covering all of this reply's calls: what they will do, an answer to a question, anything they should know. A sentence is fine."}
+                           :properties (array-map :message-md {:type "string" :description "This reply's one message to whoever started you, in Markdown, covering all of its calls: what they will do, an answer to a question, anything they should know. A sentence is fine. Put it on the reply's first call, and an empty string on its other calls."}
                                                   :intent {:type "string" :description "What this eval is about to do. A sentence is fine."}
                                                   :code {:type "string" :description "Clojure to evaluate. One top-level form per call."})
-                           :required ["intent" "code"]
+                           :required ["message-md" "intent" "code"]
                            :additionalProperties false}}})
 
 (defn- wire-message
@@ -120,9 +120,9 @@
   [{:keys [role content tool-calls tool-call-id reasoning]}]
   (cond-> {:role role :content content}
     reasoning (assoc :reasoning_content reasoning)
-    (seq tool-calls) (assoc :tool_calls (mapv (fn [{:keys [id code intent]}]
-                                                ;; a call's intent and code, in the tool's order; its reply's message is the message's text
-                                                {:id id :type "function" :function {:name "eval" :arguments (json/write-str (if intent (array-map :intent intent :code code) {:code code}))}})
+    (seq tool-calls) (assoc :tool_calls (mapv (fn [{:keys [id code intent message-md]}]
+                                                ;; the call's arguments as it sent them, in the tool's order
+                                                {:id id :type "function" :function {:name "eval" :arguments (json/write-str (cond-> (array-map) message-md (assoc :message-md message-md) intent (assoc :intent intent) true (assoc :code code)))}})
                                               tool-calls))
     tool-call-id (assoc :tool_call_id tool-call-id)))
 
@@ -155,7 +155,11 @@
   {:malli/schema [:=> [:cat [:maybe :boolean] [:vector :seon.model/message]] [:vector :map]]}
   [replay msgs]
   (mapv (fn [[i & more]]
-          (let [m (reduce (fn [m j] (update m :tool-calls (fnil into []) (:tool-calls (nth msgs j)))) (nth msgs i) more)]
+          (let [m (reduce (fn [m j] (update m :tool-calls (fnil into []) (:tool-calls (nth msgs j)))) (nth msgs i) more)
+                ;; a reply with calls is sent back as the model sent it, its message on its first call: a model carries on as its history
+                ;; reads, and with the message as text 8% of replies kept one, against 89% (docs/render.md#the-render-is-an-eval)
+                m (cond-> m (and (seq (:tool-calls m)) (not (str/blank? (:content m))))
+                    (-> (assoc :content "") (assoc-in [:tool-calls 0 :message-md] (:content m))))]
             (wire-message (cond-> (dissoc m :reply) (false? replay) (dissoc :reasoning)))))
         (wire-groups msgs)))
 
@@ -194,17 +198,13 @@
         (string? (get j "message-md")) (assoc :message-md (get j "message-md"))))))
 
 (defn- spoken
-  "A model's reply text and calls ks, as [text calls]: the turn's one message is its text, so a message-md (on the reply's first call, where
-  a model that leaves its text blank fills it) joins the text and leaves the call. A reply that says nothing has its first call refused, and
-  the rest, not run after a refused one, wait for it too. Only a model's reply comes through here, so an inserted eval owes no message.
+  "A model's reply text and calls ks, as [text calls]: the turn's one message is its text, so a message-md joins the text and leaves the
+  call, and `wire-messages` sends it back on the first call. A reply with none still runs: it just said nothing.
   See docs/prompt.md#your-tool-and-your-user."
   {:malli/schema [:=> [:cat [:maybe :string] [:vector :map]] [:tuple [:maybe :string] [:vector :map]]]}
   [text ks]
-  (let [said (remove str/blank? (cons text (map :message-md ks)))
-        ks (mapv #(dissoc % :message-md) ks)]
-    (cond (seq said) [(str/join "\n\n" said) ks]
-          (or (empty? ks) (:problem (first ks))) [text ks]
-          :else [text (assoc-in ks [0 :problem] "this reply was not run: it has no message. Send message-md on its first call: one message to whoever started you, covering all of this reply's calls, beside each call's intent and code.")])))
+  (let [said (remove str/blank? (cons text (map :message-md ks)))]
+    [(if (seq said) (str/join "\n\n" said) text) (mapv #(dissoc % :message-md) ks)]))
 
 (defn reply-of
   "A 200 reply (its chat-completion JSON as data) as the completion: its text, its eval calls

@@ -628,8 +628,9 @@
     (seon.model/wire-messages true ms)))
 
 (defn- reply-shape
-  "Each assistant wire message of wire as [text reasoning [call ids]]."
-  [wire] (vec (for [m wire :when (= "assistant" (:role m))] [(:content m) (:reasoning_content m) (mapv :id (:tool_calls m))])))
+  "Each assistant wire message of wire as [its reply's message reasoning [call ids]]: the message is its text, or on its first call."
+  [wire] (vec (for [m wire :when (= "assistant" (:role m))]
+                [(or (some-> (get-in m [:tool_calls 0 :function :arguments]) (clojure.data.json/read-str) (get "message-md")) (:content m)) (:reasoning_content m) (mapv :id (:tool_calls m))])))
 
 (deftest cutting-a-replys-calls-leaves-one-assistant-message-per-reply
   ;; docs/render.md#the-models-context-a-cached-prefix-then-the-turn: a reply's text and reasoning are its model call's, never an
@@ -827,7 +828,7 @@
         (is (= ["system" "assistant" "tool" "assistant" "assistant" "tool" "assistant" "tool"] (mapv :role r1)) (pr-str (mapv :role r1)))
         (is (= {:role "assistant" :content "I call f." :reasoning "why" :reply 1} (nth r1 3)) "the reply: its text and the reasoning as returned")
         (is (= {:role "assistant" :content "" :tool-calls [{:id "call-0" :code "(f 1)"}] :reply 1} (nth r1 4)) "then its call")
-        (is (= [{:role "assistant" :content "I call f." :reasoning_content "why" :tool_calls [{:id "call-0" :type "function" :function {:name "eval" :arguments "{\"code\":\"(f 1)\"}"}}]}
+        (is (= [{:role "assistant" :content "" :reasoning_content "why" :tool_calls [{:id "call-0" :type "function" :function {:name "eval" :arguments "{\"message-md\":\"I call f.\",\"code\":\"(f 1)\"}"}}]}
                 {:role "tool" :content "{:handle result/e2, :value 1}" :tool_call_id "call-0"}]
                (subvec (seon.model/wire-messages true r1) 3 5)) "one assistant message on the wire")
         (is (= "{:handle result/e2, :value 1}" (:content (nth r1 5))) "the call's response, its recorded value printed as it is sent")
