@@ -272,10 +272,11 @@
   [style] (boolean (and style (str/includes? style "{"))))
 
 (defn rules
-  "The CSS of drawn, a walk's drawn renders (`css?`), one text in the renders' order by name. See docs/render.md#style."
-  {:malli/schema [:=> [:cat [:map-of :any :any]] :string]}
+  "The CSS rules of drawn, a walk's drawn renders, and of every other render of their namespaces (`css?`), [[render-name text] ...] by name: what is drawn decides which namespaces, not which rules, so a render's first draw, or a person's page asking for what only it draws, moves no rule. See docs/render.md#style."
+  {:malli/schema [:=> [:cat [:map-of :any :any]] [:vector [:tuple :symbol :string]]]}
   [drawn]
-  (str/join "\n" (keep (fn [f] (let [s (:seon.render/style (meta f))] (when (css? s) s))) (sort-by symbol (keys drawn)))))
+  (let [vs (into (set (filter var? (keys drawn))) (comp (filter var?) (map (comp ns-name :ns meta)) (distinct) (mapcat (comp vals ns-publics))) (keys drawn))]
+    (vec (keep (fn [f] (let [s (:seon.render/style (meta f))] (when (css? s) [(symbol f) s]))) (sort-by symbol vs)))))
 
 (defn- with-id
   "Hiccup hc with its root element's attributes merged with attrs: a component's key as its id and

@@ -763,15 +763,15 @@
   "rounded-md bg-base-900 p-2 min-w-0 overflow-x-auto")
 
 (defn page-rules
-  "The CSS of the renders this page has drawn (a component of the walk, reading its :seon.render/drawn ratom as any tracked read), as a style element, or nothing while none states any. It draws again only when a render is drawn or redefined. See docs/render.md#style."
+  "The CSS of this page's renders (a component of the walk, reading its :seon.render/drawn ratom as any tracked read), one style element a render, keyed by its name, or nothing while none states any. The model reads it as the page does, so it can tell styling from what is shown and edit it. It moves only when a rule does. See docs/render.md#style."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.render/drawn :any]]]] :any]}
   [{d :seon.render/drawn}]
-  (let [r (render/rules @d)] (when-not (str/blank? r) [:style r])))
+  (when-let [rs (seq (render/rules @d))] (into [:div] (for [[r css] rs] [:style {:key r} css]))))
 
 (defn rules-list
-  "The page's rules as a list of their own (p-rules), so a draw of what the model reads does not run them. See docs/render.md#a-layout-places-its-lists."
+  "The page's rules as a list of their own (p-rules), so a change of a rule draws nothing else: a piece here, as in `task-list`, when the agent's pull holds a task. See docs/render.md#a-layout-places-its-lists."
   {:seon.render/list "p-rules" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
-  [_] [:div {:id "p-rules"} [#'page-rules {}]])
+  [{c :seon.ctx/ctx}] [:div {:id "p-rules"} (when (:task c) [#'page-rules {}])])
 
 (defn task
   "The task its agent works (a component over ctx alone): its name as the heading, its plan accumulated over its needs
@@ -1467,8 +1467,7 @@
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
   [_]
   [:div {:id "render-ctx"} [#'task-list {}] [#'conversation-list {}] [#'tiles {:wire/for "page"}]
-   ;; for the model to read #p-rules as parts, drop this call's :wire/for (seon.render/page-lists reads the lists the walk drew)
-   [#'rules-list {:wire/for "page"}]])
+   [#'rules-list {}]])
 
 (defn task-list
   "The task's list of an agent's page (p-task, read by the model as parts: seon.render/page-lists), in the order
