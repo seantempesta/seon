@@ -1314,7 +1314,7 @@
      [:details {:id (str "step-back-" (name agent) "-" id) :class "w-full" :data-ignore-morph ""}
       [:summary {:class "cursor-pointer text-text-400"} "↩ Back to here"]
       [:div {:class "mt-1 flex flex-col gap-1 text-text-400"}
-       [:p "The agent goes back to just after this step, and everything after it leaves this chat. Nothing is lost: the later steps stay on the old branch. Values it kept in memory don't come back on their own; To here runs its steps again to rebuild them. A task it was working waits until you release it."]
+       [:p "The agent goes back to just after this step, and everything after it leaves this chat. Nothing is lost: the later steps stay on the old branch. Values it kept in memory don't come back on their own; To here runs its steps again to rebuild them. If it was working on a task, it waits here until you send it a message."]
        [:button (merge {:type "button" :class (str button " self-start")} {:seon/call 'seon.root/back! :seon/agent agent :seon/args {:eval id}}) "Go back"]]]]))
 
 (defn eval-output

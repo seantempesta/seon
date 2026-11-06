@@ -297,6 +297,11 @@
   "One launcher for every agent's proc (its step is the Var #'agent-proc)."
   (flow/process #'ap/agent-proc))
 
+(defn- next-agent-id
+  "The id the next agent started on st takes (`start-agent`)."
+  {:malli/schema [:=> [:cat :seon.root/api-state] :seon.agent/id]}
+  [st] (keyword (str "a" (inc (:next-id st)))))
+
 (defn- start-agent
   "Register a new agent: its socket (root keeps one end; the other goes to whoever forks
   it), its proc definition (added to the graph by update! at the end of the step). Root's
@@ -305,7 +310,7 @@
   {:malli/schema [:=> [:cat :seon.root/api-state :map] [:tuple :seon.root/api-state :seon.agent/id :seon.lib/fd]]}
   [st {:keys [branch task cloned-from key]}]
   (let [n (inc (:next-id st))
-        id (keyword (str "a" n))
+        id (next-agent-id st)
         ;; named under root's main, so roots sharing a store never share a branch (seon.db/on-main)
         branch (pdb/on-main (pdb/conn-main (:conn st)) (or branch (keyword (str "agent-" n))))
         [r a] (sock/socketpair)
@@ -547,7 +552,7 @@
                              (cond-> st
                                (:sync r) (to-agent o aid {:op :write :msg (:sync r)})
                                true (deliver-rid o (:rid dest) (dissoc r :sync))))
-        ;; the branch of a Back to here is made: this process ends (replaced: its end writes no fact over the session's), and the session goes on from there, its task held for the person
+        ;; the branch of a Back to here is made: this process ends (replaced: its end writes no fact over the session's), and the session goes on from there, its task parked on the new process, which a message wakes (docs/turn.md#parked; the messages it took were counted on the old branch)
         (:back dest) (let [id (:back dest)
                            {:keys [p branch]} (get-in st [::backing id])
                            {:keys [key task status]} (get-in st [:view :agents id])
@@ -561,9 +566,12 @@
                          (let [k (or key (task/agent-key (:boot st) id))
                                e (d/entity @(:conn st) [:seon.agent/key k])
                                ;; what a start records of a session's agent (seon.task/start-tx): this boot holds it under a key that isn't its id's (seon.task/this-boots)
-                               started {:seon.agent/key k :seon.agent/boot (:boot st)
-                                        :seon.agent/max-turns (or (:seon.agent/max-turns e) (cfg/value :seon.config.agent/max-turns))}]
-                           (step/out! o :to-writer {:op :tx :branch :db :tx-data (cond-> [started] task (into (cons {:seon.task/id task :seon.task/branch branch} (task/execution-tx [task] :held))))
+                               ;; named in main's facts as a start names it; an agent on a task has its branch from its start alone (`observed`), so this is that write
+                               named (pdb/off-main (pdb/conn-main (:conn st)) branch)
+                               started (cond-> {:seon.agent/key k :seon.agent/id (next-agent-id st) :seon.agent/boot (:boot st) :seon.agent/started-ms (System/currentTimeMillis)
+                                                :seon.agent/max-turns (or (:seon.agent/max-turns e) (cfg/value :seon.config.agent/max-turns))}
+                                         task (assoc :seon.agent/branch named :seon.agent/taken 0))]
+                           (step/out! o :to-writer {:op :tx :branch :db :tx-data (cond-> [started] task (into (cons {:seon.task/id task :seon.task/branch named} (task/move-tx task (:seon.task/outcome (d/entity @(:conn st) [:seon.task/id task])) :parked {}))))
                                                     :dest {:agent-facts [id]}})
                            ;; started before the old one is counted out of root's agents: no-room above asked for that one
                            (-> st (set-agent o id {:status :killed :replaced true}) (to-agent o id {:op :kill})
@@ -1531,7 +1539,7 @@
   nil)
 
 (defn back!
-  "Take agent id's session back to just after its eval (args {:eval id}): a new branch from that eval's commit, the old branch kept as it is, this process ended and one started on the new branch under the same key, its task held. Answers the new agent's id, or the refusal. See docs/turn.md#an-agent-goes-back-to-an-eval."
+  "Take agent id's session back to just after its eval (args {:eval id}): a new branch from that eval's commit, the old branch kept as it is, this process ended and one started on the new branch under the same key, its task parked on it. Answers the new agent's id, or the refusal. See docs/turn.md#an-agent-goes-back-to-an-eval."
   {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id [:map [:eval :string]]] :any]}
   [sys agent-id args]
   (let [r @(request! sys 'back! agent-id args)] (if (contract/error? r) r (:id r))))
