@@ -1,7 +1,7 @@
 (ns seon.profile-test
   "seon.profile: every contracted call counted exactly, with its ticks and bytes, in all and its own, read per epoch."
   (:refer-clojure :exclude [defn defn-])
-  (:require [clojure.test :refer [deftest is testing]] [seon.contract :as contract :refer [defn defn-]]
+  (:require [clojure.test :refer [deftest is testing]] [jolt.scheme :as scm] [seon.contract :as contract :refer [defn defn-]]
             [seon.profile :as profile] [seon.cost] [seon.lib] [seon.repl :as repl] [seon.agent :as agent] [jolt.ffi :as ffi]))
 
 (defn- leaf {:malli/schema [:=> [:cat :int] :int]} [x] (* x x))
@@ -26,10 +26,16 @@
     (branch 200)
     (is (= 201 (profile/calls)))))
 
+(def ^:private held
+  "(f) run with this process's interrupts held: no signal handler runs inside it."
+  (scm/eval-string "(lambda (f) (with-interrupts-disabled (f)))"))
+
+;; docs/cost.md#counting-calls: interrupts are held, because a signal handler's work is a callee's of the call it lands in
+;; (seon.profile/aside), so a signal inside a leaf makes its self less than its total; SIGIO reaches an agent's test child
 (deftest a-functions-own-work-is-its-work-less-its-callees
   (when contract/on?
     (profile/begin!)
-    (branch 50)
+    (held #(branch 50))
     (let [by (into {} (map (juxt :var identity)) (profile/touched))
           b (by 'seon.profile-test/branch) l (by 'seon.profile-test/leaf)]
       (testing "every touched function did work, counted in ticks and bytes"
