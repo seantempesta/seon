@@ -949,7 +949,7 @@
 
 (deftest an-agents-first-search-reads-the-index-it-inherited
   ;; docs/vector.md#search: an agent's first grep built the search's text index from nothing (seon.doc/text-index).
-  ;; The fork server builds main's once and each move that writes no text carries it (seon.doc/carry-index!): the
+  ;; The fork server builds main's once and each move carries it (seon.doc/carry-index!): the
   ;; first search allocates what a second does, not a build more, and its FTS5 table, an in-memory SQLite database,
   ;; answers in the forked child.
   (let [m "(fn [f] (let [b (seon.profile/alloc-bytes)] (f) (- (seon.profile/alloc-bytes) b)))"
@@ -961,7 +961,7 @@
                             {:own-root? true})
         [first-search second-search build rows] (:value costs)]
     (is (pos? rows) "the query of the index it inherited answers in the forked child")
-    ;; that a move writing text builds the index again: seon.doc-test/a-text-index-is-carried-past-a-move-that-writes-no-text
+    ;; that a move writing text has its rows replaced: seon.doc-test/a-carried-index-answers-as-a-built-one
     (is (< (- first-search second-search) (quot build 2))
         (str "an agent's first grep allocated " first-search " bytes, a second " second-search "; building the index " build))))
 
