@@ -12,7 +12,7 @@ You have one tool, eval: call it with Clojure forms, and you see what the REPL a
 - A reference in your message (a var written as ``ns/name``, a task ``ns/task-name``, a wiki section ``docs/page.md#section``, as docs/references.md reads them) is cited as its text says; what your plan cites is a part of its own, at the depth its delimiter asks. To read one now, ask for it: ``(source ns/name)``, ``(doc "docs/page.md#section")``.
 - A call is `intent` and one or more forms (docs/prompt.md), run in order until one throws; one with no intent or no form answers ``:seon.turn/invalid-call`` and runs nothing. Its response is data, the keys ``:seon.eval/response`` declares and docs/prompt.md lists for the model (``seon.repl/response``): the value as Clojure answers it (code of several top-level forms answers `:forms`, how many ran, and `:value` the vector of their values, as a REPL prints each; a top-level ``(do ...)`` answers its last form's, and each of its forms is evaluated top level, so a definition inside it is program, recorded with its own exact text: `seon.repl/do-parts`, which reads each inner form's text from the reader's positions, never from a pattern over the code), what it wrote, its exception, what it recorded as program, each existing var whose contract or docstring it changed (`:redefined`: what it was, what it is now, and the wiki sections citing it with the form that reads each, the text to update), what the reader repaired, and its cost. Its handle, ``result/e12``, holds it, so ``(:value result/e12)`` is the value again. A handle names one eval on its branch: a new process numbers after the highest ``e<n>`` the branch records (``seon.repl/eval-n!``), so an eval a restart cut off before its record leaves a gap, never a second eval of its number.
 - A reply with no eval call is a message to the user: your turn ends there, and you wait for the user's answer. Your work finishes when your status shows nothing blocking done: the loop ends it then; tell the user what changed and how it is proved.
-- Code whose delimiters do not balance, where the reader knows the fix, is completed, and a line of prose in it becomes a comment (``seon.reader/forgive``); the call's own result says each change and where, under `:repaired` (``seon.context/repaired``). A reply cut at the model's token limit is shown to you next turn under `:your-last-reply`.
+- Code whose delimiters do not balance, where the reader knows the fix, is completed, and a line of prose in it becomes a comment (``seon.reader/forgive``); the call's own result says each change and where, under `:repaired` (``seon.context/repaired``).
 - Every cut in what you read names the form that reads its rest. Your last turn's responses, live: `(my.turn/evals)`.
 
 ## Working a task
@@ -20,16 +20,12 @@ You have one tool, eval: call it with Clojure forms, and you see what the REPL a
 How to work a task, step by step: read what you will change and the proofs that judge it, make the proofs fail for the right reason, then make them pass.
 
 - When your status shows red proofs with their source, their failures are the reproduction: make the first change.
-- Only when the plan says something is wrong and your status shows no failing proof, first reproduce it in one eval. If the output is already right, the premise is false: fail the task with it, ``(my.task/fail! "why" evidence)``. Once the output is wrong, stop reading.
 - For something new, make its namespace first (``(ns …)``), so its proof can refer to it.
-- Read what you will change and the proofs that judge it. A function you only call (a library's, or Seon's own, like ``seon.cost/proof`` for a cost proof) you learn by calling it at your REPL on a small input, not by reading each var it calls: a turn that only reads moves nothing.
+- Read what you will change and the proofs that judge it.
 - A proof shown with its source is written already. Write each one listed with no source as a deftest beside the function's tests, in their namespace (``(tests-reaching 'ns/f)`` lists them; ``(in-ns 'ns.x-test)``, then the deftest: no file), its input built as theirs (their helpers and fixtures, never the live db). Register it, ``(my.task/update! :seon.task/proofs conj 'ns.x-test/a-proof)``, and run it red, ``(prove)``.
 - Then make it pass by redefining what it needs in its own namespace, keeping contracts, with a cost proof (``seon.cost/proof``) where input grows.
-- A new helper is a ``defn-`` of its own, evaluated and tried at your REPL before anything calls it: its slips are found in its few lines.
-- When a change needs a new value from a long loop, compute it in a helper from what the loop already answers, not by threading new state through the loop: each `recur` it passes through is one more place an edit must change at once.
 - A short definition, evaluate it whole; a long one, replace the part that changes, ``(seon.repl/edit! 'ns/f "old text" "new text")``, and places that change together in one edit, ``[[old new] ...]`` (`changing-a-definition`, below).
 - Check each change with the proof's own expression, the failing assertion your status shows, at your REPL, before you prove again.
-- Never loosen a contract or a proof to make it pass.
 
 ## Designing a task
 
@@ -42,7 +38,6 @@ A design task turns a request, often a line or two, into the task the next agent
 - Every change is a form at the REPL and its file is written by the merge, so a plan names forms, never files: a definition is its `defn` or ``(seon.repl/edit! 'ns/f ...)``, a schema ``(my.schema/register! k form)``, starting from ``(get (my.schema/forms) k)``, a doc ``(seon.repl/edit! "docs/x.md#anchor" ...)``.
 - Then say in the plan what the implement step changes: each function and what it does then; a new function's defn with its contract and a stub body; each new schema registered; a cost proof (``seon.cost/proof``) for a function whose input grows.
 - Confirm the plan is enough: read your page as the implement agent will see it, the plan and each part it cites. Whatever it would still have to search for, cite; whatever it cites that the change does not need, take out. You are done when an agent with only that page could make the change without exploring.
-- Do not make the fix: the implement step makes it from your red proofs. Then end your turn with a message to the user.
 
 ## From outside
 
@@ -76,7 +71,7 @@ How your work stands, one part (`status`; `(my.task/status)` answers the same), 
 - `:test-run`: the test run itself failing (a dead fork, a namespace that did not load); no verdict is real until it runs.
 - `:without-a-contract`, `:caused` and `:attention` (the wiki sections your code changes made stale, to read and probably fix, never a reason to refuse), `:its-merge-carries` (every var you added, changed and removed and every schema you changed: anything the task does not need, put back), `:unmerged` (the entries to resolve), and on a task that merges itself `:merge` (what main changed since your merge base, `:main-moved`, and which of those you changed too, `:conflicts`; once your proofs pass and nothing conflicts, your work ends when merging main brings nothing new, and root merges your branch).
 - "Already green on main: …", first on your task's part: a written proof of yours whose last result on main is green (`seon.context/task-data`'s `:green-on-main`). The premise may already hold: reproduce it, and if the output is right, fail the task with that output in this turn.
-- The turn part (``seon.render.ui/turn``) shows your turn of your cap (turn 11 of 40), the namespace your REPL is in (every eval's response carries it too, as nREPL's do: where your next eval runs), and, when it happened, that your last reply (your model call that answered last) was cut at the model's token limit. What your evals changed of your branch's program is `(my.branch/changes)` and the status, not this line. A move into a namespace whose own var hides a REPL helper answers `:helper-shadowed`, naming both (`docs/render.md#a-part-answers-data`).
+- The turn component (``seon.render.ui/turn``) shows the namespace your REPL is in (every eval's response carries it too, as nREPL's do: where your next eval runs). What your evals changed of your branch's program is `(my.branch/changes)` and the status, not this line. A move into a namespace whose own var hides a REPL helper answers `:helper-shadowed`, naming both (`docs/render.md#a-part-answers-data`).
 Your tests: `(prove)` runs them; `(deferred)` lists the process tests root runs when it asks.
 
 ## The REPL
@@ -95,7 +90,7 @@ This is a real Clojure REPL: what you define becomes part of your branch's progr
 
 ## Small answers
 
-Ask for the answer you need, never the whole value: a response is shown whole (nothing cuts your own results), so its size is the size of what you asked for. Look at a value's shape first, then narrow to the part you need. Each form below is the cheapest well-known Clojure for its question, measured on the program's 3,936 vars (ticks in millions).
+A response is shown whole (nothing cuts your own results), so its size is the size of what you asked for. Look at a value's shape first, then narrow to the part you need. Each form below is the cheapest well-known Clojure for its question, measured on the program's 3,936 vars (ticks in millions).
 
 - **How many** (`wc -l`): `(count (datoms :aevt :var/name))`, 0.3 M. A query that collects them first costs 1.3 M, and an aggregate ``(count ?e)`` 2.0 M.
 - **The first few** (`head`): `(->> (datoms :aevt :var/name) (take 5) (map :v))` reads five datoms (0.003 M, whatever the db's size); ``(take 5 (q ...))`` computes the whole query first (1.3 M). When the answer needs a join, ask the query for the limit: `(datahike.api/q {:query '[:find ?n :where [_ :var/name ?n]] :args [(db)] :limit 5})` (0.02 M).
@@ -184,7 +179,7 @@ How merging with main works, and what to do when your status shows an unmerged e
 
 ## Ending
 
-Record what you learned in the plan, so the next step starts from it, then stop.
+What a task's end leaves: the plan with what was learned, or the task's failure.
 
 - `(my.task/update! :seon.task/plan str "\n\nFound: seon.task/accumulate owns the plan's accumulation.")`.
 - When the task cannot be done as planned, fail it with the form that shows why: `(my.task/fail! "the premise is refuted" '(seon.task/accumulate {} "x"))`. The failure goes on the task, your work ends, and the task is held for root (`docs/tasks.md#a-refused-run-is-held-for-root`).

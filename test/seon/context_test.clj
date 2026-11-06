@@ -88,31 +88,11 @@
     (is (not (re-find #"result/" text)) "no result handle the reader does not hold")
     (is (nil? (:seon.print/continuation (first cuts))))))
 
-(deftest a-cut-reply-is-told-to-the-agent
-  ;; the turn (seon.render.ui/turn), not the work's status: a cut reply is the conversation's. Its last reply is its
-  ;; model call that answered last: the turn's own once it did (the page's), else the turn before's (the request being made in this turn)
-  (let [k "b/a1"
-        call (fn [n & more] (apply assoc {:seon.model-call/id (str k "/" n) :seon.model-call/agent {:seon.agent/key k} :seon.model-call/n n :seon.model-call/origin :model} more))
-        head (fn [turn calls]
-               (let [db (d/db-with (ts/test-db) (into [{:seon.agent/key k :seon.agent/turn turn}] calls))]
-                 (pr-str (seon.render.ui/turn {:seon.ctx/ctx {:seon.agent/key k :seon.agent/turn turn :seon.agent/max-turns 4} :seon.db/db db} 1))))
-        told? #(boolean (re-find #"at the model's token limit" %))]
-    (is (told? (head 1 [(call 1 :seon.model-call/ms 5 :seon.model-call/truncated true)])) "this turn's reply, cut")
-    (is (told? (head 2 [(call 1 :seon.model-call/ms 5 :seon.model-call/truncated true) (call 2)])) "the request of the next turn: the turn before's reply, cut")
-    (is (not (told? (head 2 [(call 1 :seon.model-call/ms 5 :seon.model-call/truncated true) (call 2 :seon.model-call/ms 5)]))) "this turn answered whole: the cut before it is no longer news")
-    (is (not (told? (head 1 [(call 1 :seon.model-call/ms 5)]))) "a reply whole")
-    (is (not (told? (head 1 [(call 1)]))) "a call still in flight, no turn before it")))
-
-(deftest the-turn-line-is-one-line-in-the-heading-and-the-model-is-sent-only-it
-  (let [part (seon.render.ui/turn {:seon.ctx/ctx {:seon.agent/status :busy :seon.agent/max-turns 40 :seon.agent/ns 'seon.program :seon.agent/turn 1
-                                                          :task {:seon.task/id "seon.program/a-var-is-read"}}
-                                           :seon.db/db (ts/test-db)} 1)]
-    (is (= "You have 40 turns. You're in seon.program." (seon.render.ui/turn-line 12 40 'seon.program)))
-    (is (= (seon.render.ui/turn-line 12 40 'seon.program) (seon.render.ui/turn-line 13 40 'seon.program)) "a turn passing is no news")
-    (is (= "" (seon.render.ui/turn-line 12 nil nil)) "what is not known is left out")
-    (is (= "You have 40 turns. 2 turns left. You're in seon.program." (seon.render.ui/turn-line 38 40 'seon.program)) "the turns left, near the cap")
-    (is (= "You have 40 turns. You're in seon.program." (second (second part))) "the part's heading is the line")
-    (is (nil? (:data-for (second (second part)))) "the model's part holds the heading only")))
+(deftest the-turn-component-is-the-namespace-and-nothing-else
+  (let [part (seon.render.ui/turn {:seon.ctx/ctx {:seon.agent/status :busy :seon.agent/max-turns 40 :seon.agent/ns 'seon.program :seon.agent/turn 39
+                                                          :task {:seon.task/id "seon.program/a-var-is-read"}}} 1)]
+    (is (= "You're in seon.program." (second (second part))) "the heading is the namespace the REPL is in, whatever the turn and the cap")
+    (is (nil? (:data-for (second (second part)))) "the model's component holds the heading only")))
 
 (deftest a-records-text-is-the-same-whatever-came-before
   ;; task seon.context/the-context-is-the-agents-evals-and-seons: a record's printed text is a
@@ -1785,10 +1765,9 @@
     (is (nil? (context/test-shape db 'nowhere-test/x)) "a namespace the branch lacks has no shape: the agent makes it first")
     (let [h (pr-str (seon.render.ui/status-hiccup {} {:proofs [{:test 'demo-test/new-test :status :undefined :shape shape}]}))]
       (is (re-find #"Write " h) "it is told to write it")
-      (is (re-find #"Write it like this one" h))
       (is (re-find #"deftest g-test" h)))))
 
-(deftest a-turn-passing-adds-no-eval-and-each-eval-says-its-turn
+(deftest a-turn-passing-adds-no-eval
   ;; owner, 2026-11-05: what repeatedly changes is the render's failure, not a reason for an eval: the turn is data on each eval, whose
   ;; bytes never move, so the page says nothing new as a turn passes (docs/render.md#the-agents-turn)
   (ts/test-branch!
@@ -1798,7 +1777,7 @@
             _ (ev! "e1")
             r1 (ask! 1)
             all (pr-str (:messages r1))]
-        (is (re-find #"You have " (:content (peek (:messages r0)))) "the page says the cap")
+        (is (not (re-find #"turns" (:content (peek (:messages r0))))) "the page announces no cap")
         (is (not (re-find #"Turn \d" all)) "no message holds a turn number as a line")
         (is (= (:messages r0) (subvec (:messages r1) 0 (count (:messages r0)))) "the prefix before it is byte-identical")))))
 

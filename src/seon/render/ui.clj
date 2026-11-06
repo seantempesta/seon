@@ -759,7 +759,6 @@
       [:section
        [:h2 "Your task"]
        [:p {:data-for "page"} (str "task · " (namespace (symbol id)) (when stands (str " · " (:text stands) (when (:detail stands) (str " · " (:detail stands))))))]
-       [:p "You have one task, and your job is to finish it. Everything else here is to help you do that."]
        (when plan (markdown plan))
        ;; a work or whole task is done when its proofs pass; the other kinds (design, merge, test) say what they are for
        (if (#{:work :whole} (:seon.task/kind t :work))
@@ -850,12 +849,10 @@
     [:section
      [:h3 (str sym)]
      (if changing?
-       (list [:p (cond (= :test (:var/kind v)) "A test your plan names."
-                       src "A function your plan names, in the code you will change. Here is its source, and the tests that will judge your change."
-                       :else "A function your plan names, in the code you will change.")]
+       (list [:p (if (= :test (:var/kind v)) "A test your plan names." "A function your plan names.")]
              (if src (source-block src) (list (when m [:p (str (:arglists m))]) (when doc [:p doc]) [:p "Read it: " [:code (str "(source " sym ")")]]))
              (names-line "Tests that reach it" tests))
-       (list [:p (if (= :test (:var/kind v)) "A test your plan names." "A function your plan names. You call it; here is how.")]
+       (list [:p (if (= :test (:var/kind v)) "A test your plan names." "A function your plan names.")]
              (when src [:p [:code (str (reader/arglists src (symbol (namespace sym))))]])
              (when m [:p [:code (str (:arglists m))]])
              (when doc [:p doc])
@@ -925,8 +922,7 @@
   [{c :seon.ctx/ctx} _aid]
   (when (seq (page-cites c))
     [:section
-     [:h2 "What your plan mentions"]
-     [:p "Your plan names each of these, so here's what they are. Use what helps; you don't need to read them all."]]))
+     [:h2 "What your plan mentions"]]))
 
 (defn- cite-parts
   "The `cited` components of agent aid's page, one for each thing its task and its needs cite (`page-cites`). Each is told what
@@ -955,7 +951,6 @@
     (when (seq cites)
       [:section
        [:h2 "If you need more"]
-       [:p "You don't need these now. Here's where to look when you do."]
        (into [:ul]
              (for [{:seon.cite/keys [address name] sec :section} cites :let [x (or address name)]]
                [:li (or (:seon.doc/heading sec) (str x)) ": " (:seon.doc/lead sec) " " [:code (help-form x)]]))])))
@@ -1065,8 +1060,8 @@
 (defn status-hiccup
   "How the work stands (seon.context/status's data s), written to the agent at the moment it reads it: the page's look and the model's read of
   :seon.context/status, one render, so they cannot drift. Each proof answers the
-  question its state asks: not written, `write it here, like this`; red, what it asserted, what it got and what to try; every proof
-  green and something blocks merging, exactly what and the form that clears it; all green and nothing blocks, `you're done`.
+  question its state asks: not written, where it goes and a test to copy; red, what it asserted and what it got; every proof
+  green and something blocks merging, exactly what and the form that clears it; all green and nothing blocks, that it does not.
   Main's side only when something conflicts: both sides and the form that settles each. No table beside the same words: a list of
   the proofs' states only when there are several. See docs/render.md#how-the-work-stands."
   {:malli/schema [:=> [:cat :map :map] :any]}
@@ -1085,7 +1080,6 @@
         scaffold (some :do refused)]
     [:section
      [:h2 "Your proofs"]
-     [:p "These tests decide when you're done."]
      (when test-run [:p "The tests could not run: " (str/join "; " (:failed test-run))])
      (when (next proofs)
        (into [:ul] (for [{:keys [test status]} proofs] [:li [:code (str test)] ": " (get state-words status (kname status))])))
@@ -1095,17 +1089,16 @@
         [:p "Write " [:code (str test)] "." (when ns (list " It goes in " [:code (str ns)] (if requires ", which requires:" ".")))]
         (when requires [:pre [:code requires]])
         (when (seq helpers) [:p "Helpers a test there uses: " (str/join ", " (map #(str "`" (name %) "`") helpers)) ". Every helper there: " [:code (str "(dir " ns ")")]])
-        (when example [:p "Write it like this one:"])
+        (when example [:p "Example:"])
         (when example [:pre [:code example]])
-        (when scaffold [:div [:p "Start with this, then replace the placeholder assertion with what your plan says should hold:"] (form-hiccup scaffold)])])
-     ;; red: which, what it asserted, what it got, what to try
+        (when scaffold [:div [:p "Scaffold:"] (form-hiccup scaffold)])])
+     ;; red: which, what it asserted, what it got
      (for [{:keys [test failures]} red]
        [:div
         [:p [:code (str test)] " fails."]
         (for [{a :assert as :asserts g :got m :message} (take 1 failures)]
           [:p "It asserts " [:code (str/join ", " (map #(as-text %) (or as [a])))] " and got " [:code (as-text g)] (when m (str " (" m ")")) "."
-           (when (next failures) (str " Fix this first: " (count (rest failures)) " more " (if (nnext failures) "assertions fail" "assertion fails") ", and proving again shows the next."))])
-        [:p "This is the result of your last test: it changes when you change what the test reaches. Evaluate the assertion's own expression at your REPL to see the difference, change the code, then " [:code "(prove)"] "."]])
+           (when (next failures) (str " " (count (rest failures)) " more " (if (nnext failures) "assertions fail" "assertion fails") "."))])])
      (when (seq unknown) [:p "Not run yet: " (str/join ", " (map #(str "`" (:test %) "`") unknown)) ". " [:code "(prove)"] " runs them."])
      ;; merge: nothing until something conflicts; then both sides and the form that settles each
      (when (seq unmerged)
@@ -1116,7 +1109,7 @@
            [:p "Keep yours: " [:code (str "(my.branch/resolve! '" key ")")] ". Take main's: " [:code (str "(my.branch/resolve! '" key " :theirs)")] "."]])])
      (cond
        (and green? (empty? blocks) (empty? unmerged))
-       [:p "You're done: every proof passes and nothing blocks merging. Reply saying what you changed and how it's proved."]
+       [:p "Every proof passes and nothing blocks merging."]
        (and green? (seq blocks))
        [:div [:p "Every proof passes, but your branch can't merge yet:"]
         (into [:ul] (for [[what x do] blocks]
@@ -1140,34 +1133,14 @@
 
 (declare standing)
 
-(defn turn-line
-  "What the agent's page says of its turns, the same words for the page and the model: `You have 40 turns. You're in seon.program.`, and
-  how many are left once few are. It holds no turn number, so it moves when it has news: each eval says its own turn (:turn in its
-  answer: `12 of 40`, seon.repl/eval-string). Parts that are not known are left out. See docs/render.md#the-agents-turn."
-  {:malli/schema [:=> [:cat [:maybe :int] [:maybe :int] [:maybe :symbol]] :string]}
-  [n cap in-ns]
-  (let [left (when (and cap n) (- cap n))]
-    (str/trim
-      (str (when cap (str "You have " cap " turns."))
-           (when (and left (<= 0 left 5)) (if (zero? left) " This is your last turn." (str " " left (if (= 1 left) " turn" " turns") " left.")))
-           (when in-ns (str " You're in " in-ns "."))))))
 (defn turn
-  "The agent's turn (a component over ctx and the db): its turn line as the part's heading, which is all the model is sent
-  of it, and under it, when its last reply was cut at the model's token limit (the reply of the model call that answered
-  last: this turn's, else the turn before's, which the request being made follows), what to do about that. See
+  "The namespace the agent's REPL is in (a component over ctx), as its heading, which is all the model is sent of it. See
   docs/render.md#the-agents-turn."
   {:seon.render/style tile-style
-   :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int] :any]}
-  [{c :seon.ctx/ctx db :seon.db/db} aid]
-  (let [n (or (ratom/realize (:seon.agent/turn c)) 0)
-        k (ratom/realize (:seon.agent/key c))
-        call-of (fn [i] (when k (pdb/eid db :seon.model-call/id (str k "/" i))))
-        ;; its last reply: this turn's call once it answered (:seon.model-call/ms is written with its reply), else the turn before's
-        call (let [now (call-of n)] (if (and now (seq (d/datoms db :eavt now :seon.model-call/ms))) now (call-of (dec n))))]
-    [:section
-     [:h2 (turn-line n (ratom/realize (:seon.agent/max-turns c)) (context/current-ns c))]
-     (when (and call (seq (d/datoms db :eavt call :seon.model-call/truncated)))
-       [:p "Your last reply was cut at the model's token limit: what followed the cut was lost. Answer with less: one change at a time."])]))
+   :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int] :any]}
+  [{c :seon.ctx/ctx} aid]
+  (when-let [in-ns (context/current-ns c)]
+    [:section [:h2 (str "You're in " in-ns ".")]]))
 
 (defn agent-state
   "The agent's state for the person (a component over ctx and the db), nothing of it for the model: how its work stands

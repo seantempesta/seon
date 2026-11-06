@@ -1272,19 +1272,17 @@
 ;; docs/render.md#the-render-is-an-eval: a wake is told what moved since the page it last showed, never the page again: a second whole page
 ;; costs about 4k tokens a wake
 (deftest a-wake-shows-what-moved-not-the-page-again
-  (let [[_ _ whole again calls turn]
+  (let [[_ _ whole again calls]
         (in-agent (fn [{:keys [task]}]
                     [(str "(seon.turn/work! {:task " (pr-str task) " :max-turns 1})")
                      (str "(seon.turn/work! {:task " (pr-str task) " :max-turns 2})")
                      "(count (datahike.api/q '[:find [?e ...] :where [?e :seon.eval/code \"(my.render/render-ctx)\"]] (seon.agent/db)))"
                      "(let [db (seon.agent/db)] (vec (keep #(:again (:seon.eval/response (datahike.api/pull db [:seon.eval/response] %))) (datahike.api/q '[:find [?e ...] :where [?e :seon.eval/by \"seon\"]] db))))"
-                     "(count (datahike.api/q '[:find [?m ...] :where [?m :seon.model-call/origin :model]] (seon.agent/db)))"
-                     "(let [db (seon.agent/db)] (:turn (:seon.eval/response (datahike.api/pull db [:seon.eval/response] (datahike.api/q '[:find ?e . :where [?e :seon.eval/call-id _] [?e :seon.eval/turn 1]] db)))))"])
+                     "(count (datahike.api/q '[:find [?m ...] :where [?m :seon.model-call/origin :model]] (seon.agent/db)))"])
                   {:config {:seon.config.ai/script 'seon.fixtures/two-calls}})]
     (is (= 2 (:value calls)) "the second wake took a turn, so it had the chance to show the page")
     (is (= 1 (:value whole)) "the page whole once, across both wakes")
-    (is (= [] (:value again)) "no eval Seon ran says it was repeated")
-    (is (= "1 of 1" (:value turn)) "an answer says how far through its turns the agent is, as it was then, though the cap was raised since")))
+    (is (= [] (:value again)) "no eval Seon ran says it was repeated")))
 
 (deftest a-call-after-one-that-threw-is-not-run
   ;; docs/prompt.md: a reply's calls run in order; a call after one that threw is not run, and
@@ -1926,7 +1924,7 @@
     (is (= 16 (count (:sent-hash (:value turn)))) "the hash of the bytes it sent, written before the call")
     (is (= (:sent-hash (:value turn)) (:redrawn (:value turn))) "and its request made again from its records is those bytes")
     (is (= ["system" "assistant" "tool"] (:roles (:value turn))) "the help page, then the page as the call Seon made and its answer")
-    (is (str/includes? (str (peek (:read (:value turn)))) "You have 1 turns") (str "the page's turn line: " (peek (:read (:value turn)))))
+    (is (not (str/includes? (str (peek (:read (:value turn)))) "turns")) (str "the page announces no cap: " (peek (:read (:value turn)))))
     (is (= :seon.model/no-provider (:error (:value turn))) "and the typed error the call answered")))
 
 (deftest a-whole-tasks-work-turns-are-no-merge-turns
