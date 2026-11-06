@@ -1,7 +1,7 @@
 (ns seon.profile-test
   "seon.profile: every contracted call counted exactly, with its ticks and bytes, in all and its own, read per epoch."
   (:refer-clojure :exclude [defn defn-])
-  (:require [clojure.test :refer [deftest is testing]] [jolt.scheme :as scm] [seon.contract :as contract :refer [defn defn-]]
+  (:require [clojure.test :refer [deftest is testing]] [seon.contract :as contract :refer [defn defn-]]
             [seon.profile :as profile] [seon.cost] [seon.lib] [seon.repl :as repl] [seon.agent :as agent] [jolt.ffi :as ffi]))
 
 (defn- leaf {:malli/schema [:=> [:cat :int] :int]} [x] (* x x))
@@ -26,26 +26,23 @@
     (branch 200)
     (is (= 201 (profile/calls)))))
 
-(def ^:private held
-  "(f) run with this process's interrupts held: no signal handler runs inside it."
-  (scm/eval-string "(lambda (f) (with-interrupts-disabled (f)))"))
-
-;; docs/cost.md#counting-calls: interrupts are held, because a signal handler's work is a callee's of the call it lands in
-;; (seon.profile/aside), so a signal inside a leaf makes its self less than its total; SIGIO reaches an agent's test child
+;; docs/cost.md#counting-calls: a signal handler's work is a callee's of the call it lands in (seon.profile/aside), so a signal inside
+;; either call breaks these identities for that one measure (SIGIO reaches an agent's test child: about 1 measure in 3,000 under a
+;; flood of them). Holding interrupts is no answer, as it stops the tick counter too. A counting defect breaks every measure, so one of
+;; three exact says the counting is right.
 (deftest a-functions-own-work-is-its-work-less-its-callees
   (when contract/on?
-    (profile/begin!)
-    (held #(branch 50))
-    (let [by (into {} (map (juxt :var identity)) (profile/touched))
-          b (by 'seon.profile-test/branch) l (by 'seon.profile-test/leaf)]
+    (let [measure (fn [] (profile/begin!) (branch 50)
+                    (let [by (into {} (map (juxt :var identity)) (profile/touched))]
+                      [(by 'seon.profile-test/branch) (by 'seon.profile-test/leaf)]))
+          exact? (fn [[b l]] (and (= (:ticks l) (:self-ticks l)) (= (:bytes l) (:self-bytes l))
+                                  (= (:ticks b) (+ (:self-ticks b) (:ticks l))) (= (:bytes b) (+ (:self-bytes b) (:bytes l)))))
+          runs (vec (repeatedly 3 measure))
+          [b l :as run] (or (first (filter exact? runs)) (peek runs))]
       (testing "every touched function did work, counted in ticks and bytes"
-        (is (every? #(pos? (:ticks %)) [b l]) (pr-str by)))
-      (testing "a leaf's own work is all of it"
-        (is (= (:ticks l) (:self-ticks l)))
-        (is (= (:bytes l) (:self-bytes l))))
-      (testing "a caller's work is its own and its callees', exactly"
-        (is (= (:ticks b) (+ (:self-ticks b) (:ticks l))) (pr-str b l))
-        (is (= (:bytes b) (+ (:self-bytes b) (:bytes l))) (pr-str b l))
+        (is (every? #(pos? (:ticks %)) [b l]) (pr-str run)))
+      (testing "a leaf's own work is all of it, and a caller's its own and its callees', exactly"
+        (is (exact? run) (pr-str runs))
         (is (< (:self-ticks b) (:ticks b)))))))
 
 (defn interrupted {:malli/schema [:=> [:cat :int] :int]} [n] (+ (branch n) (profile/aside #(branch n))))
