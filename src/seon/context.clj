@@ -686,7 +686,8 @@
         ;; a test red outside the proofs that main was red on too, at the branch's merge base: main's, not a stray
         ;; red of the work (one scan of the base's verdicts, only while such a red exists)
         main-red (when (and claims base)
-                   (into #{} (keep (fn [[t {st :status}]] (when (and (= :fail st) (= :fail (get results t))) t))) (verdicts base)))
+                   (into (into #{} (keep (fn [[t {fs :failures}]] (when (some :main-red fs) t))) vs)
+                         (keep (fn [[t {st :status}]] (when (and (= :fail st) (= :fail (get results t))) t))) (verdicts base)))
         input (cond-> (if claims
                         (r/done-input claims tid results (set gaps) (mapv #(sedn/encode (:key %)) unmerged) nil plan-before (set deferred))
                         (cond-> {:proofs (set proofs) :kind kind :results results :main-green #{} :allowed-red #{}

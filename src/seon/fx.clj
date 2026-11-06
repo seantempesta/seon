@@ -883,18 +883,18 @@
   (let [f (java.io.File. (str runs "/root.port"))]
     (when (.isFile f) (parse-long (str/trim (slurp f))))))
 
-(defn run-tests
-  "The :tests effect: tests (qualified names) run on a checkout of the merge candidate: a
+(defn- run-on-checkout
+  "One run of the :tests effect (run-tests): tests (qualified names) on a checkout of the merge candidate: a
   detached worktree of repo at branch's head (bin/worktree --at, as a generation's), files
   ({relative path text}, the candidate's changed files) written over it, then the runner
   (test-command) over exactly the tests named there, niced, in that tree's own environment;
   the worktree removed after (its run's logs kept beside its log when it is not all green). The tree's
   binary is built first (bin/build seon), so its process tests run this candidate. Answers {:value {:results {test status} :ms :log}}, or
-  :seon.fx/io-error naming the step and its log. With :all? (the daily full run, seon.prove's
-  :full mode) the runner is full-run-command, tests are every test the plan names, and the answer
-  also holds :digests {test digest} and :failures {test [failure ...]} of its reds (the
-  failures their results recorded, which the run's shard logs, removed with the worktree, also
-  held); repo defaults to this checkout and branch to git's main (:seon.config.source/main)."
+  :seon.fx/io-error naming the step and its log. The answer also holds :digests {test digest} and
+  :failures {test [failure ...]} of its reds (the failures their results recorded, which the run's
+  shard logs, removed with the worktree, also held). With :all? (the daily full run, seon.prove's
+  :full mode) the runner is full-run-command, tests are every test the plan names; repo defaults
+  to this checkout and branch to git's main (:seon.config.source/main)."
   {:malli/schema [:=> [:cat :map] :map]}
   [{{:keys [repo branch files tests all?]} :req}]
   (let [t0 (profile/now-ns)
@@ -902,8 +902,8 @@
         branch (or branch (when all? (cfg/value :seon.config.source/main)))
         ;; the branch's commit, or the error the asker gets: no such branch is never a run at an empty sha
         sha (try (or (branch-head repo branch)
-                     (error #'seon.fx/run-tests :seon.fx/io-error (str "no commit of branch " branch " in " repo) {:path repo}))
-                 (catch Throwable e (error #'seon.fx/run-tests :seon.fx/io-error (step/error-msg e) {:path repo})))
+                     (error #'seon.fx/run-on-checkout :seon.fx/io-error (str "no commit of branch " branch " in " repo) {:path repo}))
+                 (catch Throwable e (error #'seon.fx/run-on-checkout :seon.fx/io-error (step/error-msg e) {:path repo})))
         dir (str (cfg/value :seon.config.source/tests-dir) "/" sha "-" (random-uuid))
         log (str dir ".tests.log")
         clean child-env-scrub
@@ -915,7 +915,7 @@
         at (when-not (contract/error? sha) (sh/sh (str (cfg/checkout) "/bin/worktree") "--at" dir sha repo))]
     (cond
       (contract/error? sha) sha
-      (not (zero? (:exit at))) (error #'seon.fx/run-tests :seon.fx/io-error (str "bin/worktree --at exited " (:exit at) ": " (:err at)) {:path dir})
+      (not (zero? (:exit at))) (error #'seon.fx/run-on-checkout :seon.fx/io-error (str "bin/worktree --at exited " (:exit at) ": " (:err at)) {:path dir})
       :else
       (try
         (doseq [[p text] files] (let [f (java.io.File. dir p)] (.mkdirs (.getParentFile f)) (spit f text)))
@@ -926,7 +926,7 @@
         (let [b (apply sh/sh (concat clean ["nice" "-n" "15" "bin/build" "seon"] [:dir dir]))]
           (if (not (zero? (:exit b)))
             (do (spit log (str (:out b) (:err b)))
-                (error #'seon.fx/run-tests :seon.fx/io-error (str "bin/build seon exited " (:exit b) "; its log: " log) {:path dir}))
+                (error #'seon.fx/run-on-checkout :seon.fx/io-error (str "bin/build seon exited " (:exit b) "; its log: " log) {:path dir}))
             ;; the tree's shards cache their verdicts in this checkout's verdict cache, named to them,
             ;; so the verdicts read below are the ones its run wrote
             (let [out (str dir "/target/prove/run")
@@ -941,7 +941,7 @@
                 ;; no plan (out/tests.edn): the runner never got to its tests (its build, its plan or its start failed): that is the
                 ;; answer, with the end of what it said, never a run whose tests all read :error with no reason
                 (nil? plan)
-                (error #'seon.fx/run-tests :seon.fx/io-error
+                (error #'seon.fx/run-on-checkout :seon.fx/io-error
                        (str "the test runner made no plan in " dir " (exit " (:exit r) "); its log: " log
                             " ends: " (str/join " | " (take-last 3 (remove str/blank? (str/split-lines (str (:err r) "\n" (:out r)))))))
                        {:path dir})
@@ -950,20 +950,36 @@
                 :else
                 (let [rs (test-results plan found tests)]
                   (vreset! green? (every? #{:pass} (vals rs)))
-                  {:value (cond-> {:results rs :ms (profile/ms-since t0) :log log}
-                            (not @green?) (assoc :kept kept)
-                            all? (assoc :digests (select-keys (:digests plan) tests)
-                                        ;; why each red is red: the failures its result recorded
-                                        :failures (into {} (for [[t s] rs :when (not= :pass s)
-                                                                 :let [fs (some->> (get-in plan [:digests t]) found :failures not-empty vec)]
-                                                                 :when fs]
-                                                             [t fs]))))})))))
+                  {:value (cond-> {:results rs :ms (profile/ms-since t0) :log log
+                                   :digests (select-keys (:digests plan) tests)
+                                   ;; why each red is red: the failures its result recorded
+                                   :failures (into {} (for [[t s] rs :when (not= :pass s)
+                                                            :let [fs (some->> (get-in plan [:digests t]) found :failures not-empty vec)]
+                                                            :when fs]
+                                                        [t fs]))}
+                            (not @green?) (assoc :kept kept))})))))
         ;; the worktree's removal is recorded in the run's log: a failed one names what it left
         (finally (let [run (java.io.File. (str dir "/target/prove/run"))
                        mv (when (and (not @green?) (.isDirectory run)) (sh/sh "mv" (.getPath run) kept))
                        rm (sh/sh (str (cfg/checkout) "/bin/worktree") "--remove-at" dir)]
                    (spit log (str (when mv (str "\nkept the run's logs (not all green): " kept ": exit " (:exit mv) (:err mv)))
                                   "\nremove-at " dir ": exit " (:exit rm) "\n" (:out rm) (:err rm)) :append true)))))))
+
+(defn run-tests
+  "The :tests effect (run-on-checkout): tests on a checkout of the merge candidate, its answer {:value {:results :ms :log
+  :digests :failures :kept}} or its declared error. A candidate's red is asked of the same checkout without
+  the candidate's files, only when there is one: :main-red names the reds that run also reads
+  :fail, main's and not this change's, so a task is never judged on another's red. A red that run can't say anything
+  of (no such test on main: its plan refuses the whole run) stays the candidate's. See docs/merging.md#a-merge-runs-what-the-change-reaches."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [{{:keys [files] :as req} :req :as m}]
+  (let [r (run-on-checkout m)
+        reds (for [[t s] (get-in r [:value :results]) :when (not= :pass s)] t)]
+    (if (and (seq files) (seq reds))
+      (let [on-main (run-on-checkout {:req (-> req (dissoc :files) (assoc :tests (vec reds)))})
+            red (for [[t s] (get-in on-main [:value :results]) :when (= :fail s)] t)]
+        (cond-> r (seq red) (assoc-in [:value :main-red] (set red))))
+      r)))
 
 ;; ---- the owner -----------------------------------------------------------------------
 

@@ -74,7 +74,7 @@
   (reduce (fn [acc {:keys [type var] :as r}]
             (let [t (test-symbol var)]
               (if (and t (#{:fail :error} type))
-                (update acc t (fnil conj []) (select-keys r [:type :message :expected :actual :got :flaky :seon.error/type]))
+                (update acc t (fnil conj []) (select-keys r [:type :message :expected :actual :got :flaky :main-red :seon.error/type]))
                 acc)))
           {} (:reports test-run)))
 
@@ -367,7 +367,9 @@
                          [t {:digest (:digest r) :status (cond (:flaky r) :flaky (green? r) :green :else :red)
                              :failures (when-not (green? r) (:failures r))}]))
                  ;; a process test the run left to root's gate: that verdict at its digest
-                 (into (for [t deferred :let [dg (digests t)] :when (and dg (not (contains? ran t)) (not (contains? reused t)))]
+                 ;; a verdict held at the same digest (the gate's run of it, seon.agent/judge!) stands
+                 (into (for [t deferred :let [dg (digests t) o (old t)]
+                             :when (and dg (not (contains? ran t)) (not (contains? reused t)) (not= dg (:seon.test/digest o)))]
                          [t {:digest dg :status :deferred}])))
         stale (for [[t o] old :when (and (:seon.test/digest o) (not (contains? news t)) (not= (:seon.test/digest o) (digests t)))]
                 t)]
@@ -380,6 +382,19 @@
                            (cond-> (vec gone) (seq set-attrs) (conj (assoc set-attrs :var/name t)))))
                        (sort-by (comp str key) news)))
           (for [t (sort-by str stale) [k v] (select-keys (old t) test-attrs)] [:db/retract [:var/name t] k v])))))
+
+(defn gate-tx
+  "The merge gate's run (seon.fx/run-tests, its :results :failures :main-red, of the deferred tests this branch holds at their
+  digests in old, {test entity}) as this branch's facts on each, at the digest its run deferred it at: its status, and why it is
+  red, each failure of a test that is main's red too saying so (:main-red, as a flaky one says :flaky; seon.context/status reads it);
+  one the run never reached says that, never a pass. See docs/merging.md#a-merge-runs-what-the-change-reaches."
+  {:malli/schema [:=> [:cat [:map-of :qualified-symbol [:maybe :map]] :map] [:vector :map]]}
+  [old {:keys [results failures main-red log]}]
+  (vec (for [[t st] (sort-by (comp str key) results) :let [o (old t) dg (:seon.test/digest o)] :when dg]
+         (let [fs (or (not-empty (get failures t)) [{:type :error :message (str "the gate's run never reached it; its log: " log)}])
+               fs (cond->> fs (contains? main-red t) (mapv #(assoc % :main-red true)))]
+           (assoc (test-facts o {:digest dg :status (if (= :pass st) :green :red) :failures (when-not (= :pass st) fs)})
+                  :var/name t)))))
 
 (defn answer
   "Test run r as its asker is answered (docs/merging.md#verdicts-are-a-cache): its counts, :deferred

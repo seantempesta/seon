@@ -410,6 +410,17 @@
         (empty? reasons) [:green nil]
         :else [:red (r/explain-text reasons)]))
 
+(defn- judged
+  "Status s, the tests its change reaches judged when s is clear: its proofs pass, so the tests its change reaches run now, as the
+  judge judges them, the process tests among them on the gate's checkout (agent/judge!, their results facts on the branch), and the
+  status is read again from the branch, before it is done or merges (the owner's ruling: a turn runs the proofs, the reach runs once
+  they are green). A run that ended green on its proofs alone left the judge to find the reds its change made, with no turn left to fix them."
+  {:malli/schema [:=> [:cat [:or :map :seon.error/base]] [:or :map :seon.error/base]]}
+  [s]
+  (if (and (not (contract/error? s)) (empty? (:reasons s)))
+    (do (test-error! (agent/judge!)) (status-now))
+    s))
+
 (defn hand-back!
   "End run of task as an outside agent hands it back (seon.server's :done): the proofs run
   again, and the run's end written as the turn loop writes its own (end!: the live runtime
@@ -425,7 +436,7 @@
         ;; main moved since its last merge: merged now, as a green turn's is, so green work is never judged for being behind; a conflict is an unmerged entry, a reason the status says
         _ (when (agent/main-moved? (:base @agent/state) (agent/heard-main)) (branch/merge-main!))
         _ (observe task)
-        s (status-now)
+        s (judged (status-now))
         [outcome reason] (if (contract/error? s) [:error (:seon.error/message s)] (hand-back-end stop (:reasons s)))]
     (end! {} outcome reason (when (contract/error? s) s))))
 
@@ -481,16 +492,7 @@
                        (let [obs (observe task)
                              ;; how the work stands (one computation a turn, the page's component draws its own)
                              s (status-now)
-                             ;; its proofs pass: the tests its change reaches run now, judged as the judge judges them
-                             ;; (agent/prove! :judge, their results facts on the branch), and the status is read again
-                             ;; from the branch, before it is done or merges (the owner's ruling: a turn runs the
-                             ;; proofs, the reach runs once they are green). a run that ended green on its proofs
-                             ;; alone left the judge to find the reds its change made
-                             s (if (and (not (contract/error? s)) (empty? (:reasons s)))
-                                 (do (test-error! (agent/prove! :judge))
-                                     ;; read again, on the branch the judge's verdicts were written on
-                                     (status-now))
-                                 s)
+                             s (judged s)
                              no-status? (contract/error? s)
                              reasons (:reasons s)
                              stop (get-in @agent/state [:turn :stop])
