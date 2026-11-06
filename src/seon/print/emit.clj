@@ -272,12 +272,8 @@
     (case (:seon.print/face node)
       ;; the common rows build their op here (text-op's shape), one call fewer per leaf
       :seon.print/nil {:op :text :text "nil" :seon.print/class :seon.print/nil}
-      ;; a handle (result/e12) links to its eval's row on the page (the eval-e12 id of seon.render.ui/eval-item's row)
-      :seon.print/symbol
-      (let [text (or (:seon.print/text node) (literal value))]
-        (if (= "result" (namespace value))
-          (text-op :seon.print/symbol text [:a {:class (css-class :seon.print/symbol) :href (str "#eval-" (name value))} text])
-          {:op :text :text text :seon.print/class :seon.print/symbol}))
+      ;; a handle is text: it names an answer, which more than one row of the page may hold (no row is its anchor)
+      :seon.print/symbol {:op :text :text (or (:seon.print/text node) (literal value)) :seon.print/class :seon.print/symbol}
       ;; a float on the page three decimals, its whole text its title: the text a model reads is whole
       :seon.print/number
       (let [text (or (:seon.print/text node) (literal value))]

@@ -668,10 +668,10 @@
 (defn- grow-values
   "`entries` at their least grown into `extra` characters: each cut one whole when its growth
   fits, else filled to its room. A map's (map? true: its entries' values) strings before
-  collections, smallest first. A sequence's members in their order, breadth before depth: the
-  extra is split in equal shares, one for each member that does not fit whole in it and one more
-  for layout order, and each member's room keeps back a share for every later such member, so
-  each shows its first part and the first grows most. One allot a member, at every depth."
+  collections, smallest first; a sequence's members in their order. Breadth before depth, a map's
+  as a sequence's: the extra is split in equal shares, one for each member that does not fit whole
+  in it and one more for layout order, and each member's room keeps back a share for every later
+  such member, so each shows its first part and the first grows most. One allot a member, at every depth."
   {:malli/schema [:=> [:cat :seon.print/context [:vector :seon.print/alloc] number? :boolean] [:vector :seon.print/alloc]]}
   [context entries extra map?]
   (let [value-of (if map? #(second (:kids (nth entries %))) #(nth entries %))
@@ -684,7 +684,7 @@
         order (vec (if map? (sort-by (juxt :string-rank :width :i) grown) grown))
         ;; the members that will show less than they hold: no whole form fits the extra
         cut? (fn [g] (nil? (:grown g)))
-        share (if map? 0 (quot extra (inc (count (filter cut? order)))))
+        share (quot extra (inc (count (filter cut? order))))
         with-value (if map?
                      (fn [entries i v] (update entries i #(sized context (assoc-in % [:kids 1] v))))
                      (fn [entries i v] (assoc entries i v)))]

@@ -50,7 +50,7 @@
   printer prints it verbatim at its place, as in its file (comments, line breaks and quotes as
   written, every later line indented to where it stands), never as a string literal; cut, it is
   cut by the one string cutter and its cut reads the rest, `(subs (:seon.print/code (get-in
-  result/e3 [...])) 1200)`. Plain data, {:seon.print/code s}: a record stores it and reads it
+  result/a3f9c1d2 [...])) 1200)`. Plain data, {:seon.print/code s}: a record stores it and reads it
   back as it is. The producer says it is code; the printer never guesses from a string's text.
   Prose (a docstring, a plan, a section's lead) is marked the same way, {:seon.print/prose s}:
   printed as code is, and on the page a paragraph."
@@ -84,7 +84,7 @@
 (defn response-text
   "Eval response r as every reader reads it (the model's tool message, the page, an outside
   agent): printed by the one printer under its handle, so a cut names the form that reads its
-  rest, `(get-in result/e43 [:value ..])`. Made when r is
+  rest, `(get-in result/a3f9c1d2 [:value ..])`. Made when r is
   sent or shown, never stored (seon.repl/record-details keeps the value). render (seon.render/model):
   a value whose schema declares a model render prints as that render's value, the printer's own values."
   {:malli/schema [:function [:=> [:cat :map] :string] [:=> [:cat :map [:maybe :seon.host/fn]] :string]]}

@@ -1,7 +1,7 @@
 (ns my.agent
   "An agent's own functions (from proto/flow f2-final proto.agent's agent API). Referred into
   every agent namespace.
-    ($ handle)                an earlier eval's response, its live value under :value (also result/e3)
+    ($ handle)                an earlier eval's response, its live value under :value (also result/a3f9c1d2)
     (whoami)                  {:id :branch :pid}
     (messages)                the messages delivered and not yet taken, taken
     (problem "signature")     one open problem of this agent's run whole, as its problems part names it
@@ -43,7 +43,7 @@
             [seon.config :as cfg] [seon.proofs :as proofs] [seon.fx :as fx] [seon.program :as program] [seon.task :as task] [seon.vector :as vector] [seon.contract :as contract] [seon.ctx]
             [seon.db :as pdb] [seon.print :as print] [seon.print.select :as select] [seon.render :as render] [seon.problems :as problems] [seon.render.ui :as ui] [my.schema :as schema] [jolt.analyzer] [clojure.java.io :as io] [clojure.string :as str] [clojure.main] [datahike.api :as d]))
 
-(defn $ "An earlier eval's response (its live value under :value), by handle (:e3)." {:malli/schema [:=> [:cat :keyword] :any]}
+(defn $ "An earlier eval's response (its live value under :value), by handle (:a3f9c1d2)." {:malli/schema [:=> [:cat :keyword] :any]}
   [h] (get-in @agent/state [:results h]))
 (defn whoami "This agent: {:id :branch :pid}." {:malli/schema [:=> [:cat] [:map [:id :seon.agent/id] [:branch :seon.db/branch] [:pid :seon.lib/pid]]]}
   [] {:id (:id @agent/state) :branch (:branch @agent/state) :pid (lib/c-getpid)})
@@ -188,21 +188,20 @@
         (doc/callers db x))))
 
 (defn tests-reaching
-  "The tests whose reach includes var x on this branch, nearest first, each {:test}: the tests a change to
+  "The tests whose reach includes var x on this branch, nearest first: the tests a change to
   x selects, read from the reach graph the test plan reads (seon.agent/branch-graph) by the same
   reverse walk (seon.program/tests-reaching). A cited var's page lists only its direct tests; run
   this on the function you will change, before writing its proof, to find the test that goes red
   first. A test of a scratch namespace is left out, as the plan leaves it (seon.agent/judges?); a
   library's var, which the reach graph holds no form of, answers []. A symbol that names no var
   answers so (:my.agent/no-var)."
-  {:malli/schema [:=> [:cat [:or :qualified-symbol :seon.host/var]] [:or [:vector [:map [:test :qualified-symbol]]] :my.agent/no-var]]}
+  {:malli/schema [:=> [:cat [:or :qualified-symbol :seon.host/var]] [:or [:vector :qualified-symbol] :my.agent/no-var]]}
   [x]
   (let [db (agent/db) x (if (var? x) (named x) (asked x))]
     (or (no-var db x)
         (let [[_ in] (agent/test-inputs db)
               g (agent/branch-graph db (:base @agent/state) in)]
-          (into [] (comp (filter agent/judges?) (map (fn [t] {:test t})))
-                (program/tests-reaching g x))))))
+          (filterv agent/judges? (program/tests-reaching g x))))))
 
 (defn cost
   "What contracted function x costs, measured by the test runs, never estimated: :per-call, its
@@ -326,7 +325,8 @@
        (let [results (proofs/results test-run)
              task-proofs (some->> (:task @agent/state) (task/task (agent/db)) :seon.task/accumulated :proofs)
              deferred (set (:deferred test-run))
-             unmatched (vec (sort-by str (filter #(empty? (agent/named-tests (agent/db) #{%})) proofs)))]
+             ;; a name that matches nothing, the task's own proofs too
+             unmatched (vec (sort-by str (filter #(empty? (agent/named-tests (agent/db) #{%})) (into (set proofs) task-proofs))))]
          (with-meta (cond-> (assoc test-run :results results
                            :proofs (into {}
                                          (for [p (into (set proofs) task-proofs)]
@@ -347,9 +347,12 @@
   (if-not (:reports r)
     (with-meta r nil)
     (let [died (count (proofs/died r))
-          red (pos? (+ (:fail r 0) (:error r 0)))
           fails (apply dissoc (proofs/failures r) (proofs/died r))
+          ;; a death is no verdict: it counts among the errors, and is said as what it is
+          red (or (seq fails) (and (zero? died) (pos? (+ (:fail r 0) (:error r 0)))))
           n (+ (:ran r 0) (:reused r 0))
+          ;; a proof with no verdict: green can't be said of what nobody judged
+          none (sort-by str (keep (fn [[p st]] (when (= :none st) p)) (:proofs r)))
           clean (fn [x] (str/replace (str x) #"#object\[java\.util\.regex\.Pattern 0x[0-9a-f]+\]" "a regex"))
           failure (fn [t f] (let [got (str/trim (str (or (:actual f) (:got f))))
                                   m (when (str/starts-with? got "#error") (second (re-find #":message \"([^\"]*)\"" got)))]
@@ -360,6 +363,8 @@
          (concat
            [(cond red (str "red: " (count fails) " of " n " failed")
                   (pos? died) (str "died: " died " of " n " had no verdict")
+                  (seq none) (str "not green: " (count none) " of " (count (:proofs r)) " proofs have no verdict: " (str/join ", " none))
+                  (zero? n) "nothing judged: no proof and no test this change reaches"
                   :else (str "green: " n " of " n " passed"))]
            (for [[t fs] (sort-by (comp str key) fails)] (failure t (first fs)))
            [(when (pos? (:reused r 0)) (str "reused " (:reused r) ": their last result still counts, because nothing they reach has changed"))

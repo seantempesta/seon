@@ -52,7 +52,12 @@
   ([forms opts]
    (mapv #(if (contains? % :response) (let [r (:response %)] (assoc r :value (value-of r))) %)
          (with-agent opts (fn [{:keys [names ask]}]
-                            (mapv #(ask (if (map? %) % {:op :eval :agent (:agent names) :code %})) (if (fn? forms) (forms names) forms)))))))
+                            ;; a string: a form on the agent's REPL, by root's submit!, no reply and no turn of anyone's
+                            (mapv #(if (map? %)
+                                     (ask %)
+                                     (let [a (ask {:op :eval :agent "root" :code (str "@(c/submit! sys :" (:agent names) " " (pr-str %) " {:origin :outside})")})]
+                                       (if-let [r (get-in a [:response :value])] {:response r} a)))
+                                  (if (fn? forms) (forms names) forms)))))))
 
 (defn with-agent
   "in-agent's setup and teardown around a body of the test's own: f is called with {:names {:ns :task :agent}
@@ -238,7 +243,7 @@
               [(ev (str "(deref (future @(c/prove! sys :" a " #{} :turn)) 60000 :none)"))
                (do (ev (str "(c/interrupt! sys :" a ")"))
                    (ev "(clojure.string/starts-with? (:seon.error/message (:ex @blocked)) \"interrupted by root\")"))
-               (root-value (ask {:op :eval :agent a :code "(+ 2 2)"}))])))]
+               (ev (str "(:value @(c/submit! sys :" a " \"(+ 2 2)\" {:origin :outside}))"))])))]
     (is (and (map? proved) (contains? proved :pass)) (str "the run answered while the eval blocked: " (pr-str (if (map? proved) (select-keys proved [:pass :fail :error :ran]) proved))))
     (is (true? stopped) (str "the blocked eval answers interrupted by root: " stopped))
     (is (= 4 next-answer) (pr-str next-answer))))
@@ -563,7 +568,7 @@
               (ev (began-code a "(clojure.core.async/<!! (clojure.core.async/chan))"))
               (ev (str "(c/interrupt! sys :" a ")"))
               [(ev "(clojure.string/starts-with? (:seon.error/message (:ex @blocked)) \"interrupted by root\")")
-               (root-value (ask {:op :eval :agent a :code "(+ 2 2)"}))])))]
+               (ev (str "(:value @(c/submit! sys :" a " \"(+ 2 2)\" {:origin :outside}))"))])))]
     (is (true? stopped) (str "the blocked eval answers interrupted by root: " stopped))
     (is (= 4 next-answer) (pr-str next-answer))))
 
@@ -1266,13 +1271,84 @@
     (is (= ["(my.render/render-ctx)"] (mapv second one)) "the first call showed the page whole, the second, with nothing moved, nothing")
     (is (= ["(my.render/render-ctx)" "(my.render/render-changes)"] (mapv second two)) "a plan changed: one eval of what moved")
     (is (every? #(= % "task") (nth (last two) 2)) (str "holding only the task's part: " (pr-str (last two))))
-    (is (nil? shown) "a render that throws does not stop the one who asked")
+    (is (= "broken render" (:seon.error/message (:ex (first shown)))) "a render that throws does not stop the one who asked: its response is its error")
     (is (str/includes? (str broken-request) "broken render") "and the request reads its error")))
+
+;; AGENTS.md section 5: the chain holds vars, so what a program defines is what it calls; a delay of fn values kept the old ones, and an edit of wrap-record reached nothing
+(deftest an-edit-of-a-middleware-runs-next
+  (let [[_ _ marked vars] (in-agent ["(def marks (atom 0)) (in-ns 'seon.repl)"
+                                     "(let [old wrap-registry] (alter-var-root #'wrap-registry (fn [_] (fn [h] (let [n (old h)] (fn [req] (swap! @(find-var (symbol (str (ns-name (first (filter #(ns-resolve % 'marks) (all-ns)))) \"/marks\"))) inc) (n req)))))))"
+                                     "@@(find-var (symbol (str (ns-name (first (filter #(ns-resolve % 'marks) (all-ns)))) \"/marks\")))"
+                                     "(every? var? seon.repl/middleware)"])]
+    (is (pos? (:value marked)) (pr-str marked))
+    (is (true? (:value vars)))))
+
+(deftest edit-says-what-it-did
+  (let [[_ many same fine] (in-agent (fn [{:keys [ns]}]
+                                       [(str "(ns " ns ".ed) (defn f \"One.\" {:malli/schema [:=> [:cat] :int]} [] (+ 1 1 1))")
+                                        (str "(seon.repl/edit! '" ns ".ed/f \"1\" \"2\")")
+                                        (str "(seon.repl/edit! '" ns ".ed/f \"(+ 1\" \"(+ 1\")")
+                                        (str "(seon.repl/edit! '" ns ".ed/f \"(+ 1 1 1)\" \"(+ 1 1 2)\")")]))]
+    (is (= :seon.repl/edit-refused (:seon.error/type (:value many))) (str "three places: refused, saying so: " (pr-str many)))
+    (is (str/includes? (:seon.error/message (:value many)) "occurs 3 times"))
+    (is (contains? (:value same) :unchanged) (pr-str same))
+    (is (not (contains? (:value same) :edited)) "nothing changed is not an edit")
+    (is (:edited (:value fine)) (pr-str fine))))
+
+;; a read waits on no one: an agent in an eval that never ends is read by root from its branch, and an interrupt takes a test child with it
+(deftest a-read-does-not-wait-on-a-hung-test
+  (let [pidf (str (seon.config/checkout) "/target/tmp/hung-" (random-uuid))
+        [read stopped gone]
+        (with-agent {}
+          (fn [{:keys [names eval-root ask]}]
+            (let [a (:agent names) ev (comp root-value eval-root)
+                  run (fn [code] (ev (str "(:value @(c/submit! sys :" a " " (pr-str code) " {:origin :outside}))")))]
+              (run (str "(ns tt-hang-test (:require [clojure.test :refer [deftest is]])) (deftest hangs (spit " (pr-str pidf) " (str (seon.lib/c-getpid))) (is @(promise)))"))
+              (ev (began-code a "(my.agent/prove '#{tt-hang-test/hangs})"))
+              ;; the child has started: its pid is on file
+              (ev (str "(loop [] (when-not (.exists (java.io.File. " (pr-str pidf) ")) (recur)))")) 
+              (let [r (ask {:op :context :agent a})]
+                [r
+                 (do (ev (str "(c/interrupt! sys :" a ")"))
+                     (ev "(some? (:ex @blocked))"))
+                 ;; it goes when its reader reaps it: asked a bounded number of times, by work, not by a clock
+                 (ev (str "(boolean (some false? (take 500 (repeatedly #(zero? (:exit (clojure.java.shell/sh \"ps\" \"-p\" " (pr-str (slurp pidf)) ")))))))"))]))))]
+    (is (clojure.string/includes? (str (:context read)) "still running") (subs (pr-str read) 0 300))
+    (is (true? stopped) "the interrupt ends the prove")
+    (is (true? gone) "and the test child goes with it")
+    (clojure.java.shell/sh "rm" "-f" pidf)))
+
+;; a defmethod merges as a var does (seon.merge's key [:method multi dispatch]), so it is said as one is
+(deftest a-method-is-listed-with-what-a-branch-carries
+  (let [[_ method changes] (in-agent (fn [{:keys [ns]}]
+                                       [(str "(ns " ns ".mm) (defmulti area \"Area.\" :k)")
+                                        "(defmethod area :square [s] 1)"
+                                        "(my.branch/changes)"]))]
+    (is (some #(= ":square" (second %)) (filter vector? (:recorded method))) (pr-str method))
+    (is (some #(and (vector? %) (= ":square" (second %))) (:added (:value changes))) (pr-str (:value changes)))))
+
+;; docs/failure-points.md: a live agent ran (def form-of ...) in seon.program as a scratch name, every later write threw in seon.program/record-tx, and the run died
+(deftest a-definition-that-breaks-its-own-recording-is-undone
+  (let [[broke after still] (in-agent ["(in-ns 'seon.program) (def form-of (fn [v] v))"
+                                       "(def after-it 41) (inc after-it)"
+                                       "(seon.program/definition-form? '(def x 1) (the-ns 'user))"])]
+    (is (= :seon.repl/definition-undone (:seon.error/type (:ex broke))) (pr-str (:ex broke)))
+    (is (str/includes? (:seon.error/message (:ex broke)) "seon.program/form-of") "it says which")
+    (is (= 42 (second (:value after))) "the run goes on: the next eval records")
+    (is (nil? (:ex still)) "and Seon's own var is as it was")))
+
+;; docs/render.md#a-redo-is-an-explicit-bust: collection may have swept the commit a redo needs: the same datoms as of t, never a later page
+(deftest a-page-whose-commit-is-gone-is-drawn-as-of-its-t
+  (let [[at] (in-agent ["(let [db (seon.agent/db) gone (assoc-in db [:meta :datahike/parents] #{(random-uuid)}) t (:max-tx db)]
+                           [(:max-tx (#'seon.context/at-t gone t)) t (some? (:origin-db (#'seon.context/at-t gone (dec t))))])"])
+        [was t as-of?] (:value at)]
+    (is (= t was) "the commit at t itself needs no walk")
+    (is (true? as-of?) "past what collection kept, a db as of t")))
 
 ;; docs/render.md#a-redo-is-an-explicit-bust: a diff removed leaves the next one standing on a page its reader was never shown; the redo
 ;; draws what moved from the page as of each t, in place, and what still stands on what came before it is left byte for byte
 (deftest a-redo-is-drawn-from-the-page-as-of-each-t
-  (let [page-evals "(let [db (seon.agent/db)] (vec (sort-by #(parse-long (re-find #\"\\d+$\" (first %))) (for [e (datahike.api/q '[:find [?e ...] :where [?e :seon.eval/by \"seon\"]] db) :let [m (datahike.api/pull db '[:seon.eval/id :seon.eval/code :seon.eval/response] e)]] [(:seon.eval/id m) (get-in m [:seon.eval/response :value])]))))"
+  (let [page-evals "(let [db (seon.agent/db)] (vec (sort-by #(parse-long (re-find #\"\\d+$\" (first %))) (for [e (datahike.api/q '[:find [?e ...] :where [?e :seon.eval/by \"seon\"]] db) :let [m (datahike.api/pull db '[:seon.eval/id :seon.eval/code :seon.eval/page :seon.eval/response] e)]] [(:seon.eval/id m) (:seon.eval/page m) (get-in m [:seon.eval/response :value])]))))"
         move #(str "(do (swap! ctx assoc-in [:task :seon.task/plan] \"" % "\") (#'seon.turn/show-page!))")
         rs (in-agent ["(#'seon.turn/show-page!)" (move "A plan that moved.") (move "A plan that moved again.") (move "A plan that moved a third time.")
                       page-evals
@@ -1283,18 +1359,21 @@
                       "(my.render/redo-changes)"
                       page-evals])
         [_ _ _ _ before none removed redone again after] (mapv :value (vec rs))
-        by-id (into {} after)
-        [whole first-diff second-diff third-diff] (map second before)
-        new-third (get by-id (first (nth before 3)))]
-    (is (= [:components :t] (sort (keys whole))) "the page whole first")
-    (is (= (:t whole) (:since first-diff)) "each diff stands on the one before")
-    (is (= (:t first-diff) (:since second-diff)))
+        page-of (into {} (map (juxt first second)) after)
+        by-id (into {} (map (juxt first last)) after)
+        [whole first-diff] (map last before)
+        [p0 p1 p2 p3] (map second before)
+        new-third (get by-id (first (nth before 3)))
+        new-p3 (get page-of (first (nth before 3)))]
+    (is (= [:components] (keys whole)) "the page whole first")
+    (is (= (:t p0) (:since p1)) "each diff stands on the one before")
+    (is (= (:t p1) (:since p2)))
     (is (= [] none) "nothing broken: nothing redone")
     (is (= (first (nth before 2)) removed) "the second diff is what was taken out")
     (is (= [(first (nth before 3))] redone) "the one standing on it is redone, and only that")
     (is (= [] again) "and then nothing is broken")
-    (is (= (:t first-diff) (:since new-third)) "it stands on what its reader was shown")
-    (is (= (:t third-diff) (:t new-third)) "and says the same page")
+    (is (= (:t p1) (:since new-p3)) "it stands on what its reader was shown")
+    (is (= (:t p3) (:t new-p3)) "and says the same page")
     (is (str/includes? (pr-str (:edits new-third)) "a third time") "drawn from the page as of its t")
     (is (= first-diff (get by-id (first (nth before 1)))) "what stood stays byte for byte")))
 
@@ -1692,19 +1771,19 @@
          (let [r (repl/eval-string "(seon.agent/transact! [{:note/text \"an eval's\"}])" {"ns" "user" :origin :outside})
                t (:t (:value r))]
            (agent/commit!)
-           (is (= [ab (name (:handle r))] ((juxt :seon.tx/branch :seon.tx/eval) (d/entity @store-conn t))) (str "the eval that wrote it: " (:ex r)))
+           (is (= [ab "e1"] ((juxt :seon.tx/branch :seon.tx/eval) (d/entity @store-conn t))) (str "the eval that wrote it: " (:ex r)))
            (is (nil? (:eval @agent/state)) "and once the eval ends, a write names no eval"))
          (let [r (repl/eval-string "(throw (ex-info \"boom\" {}))" {"ns" "user" :origin :outside})]
            (is (:ex r) "an eval that throws")
            (is (nil? (:eval @agent/state)) "leaves no eval named"))
          (let [r (repl/eval-string "(do (seon.repl/eval-string \"1\" {\"ns\" \"user\" :origin :screen}) (:eval @seon.agent/state))" {"ns" "user" :origin :outside})]
-           (is (= (name (:handle r)) (:value r)) "an eval inside one names its own, then the outer one's again"))
+           (is (re-matches #"e\d+" (:value r)) "an eval inside one names its own, then the outer one's again"))
          ;; recorded as an agent records: the eval's own record names it too
          (swap! agent/state assoc :mode :agent :key "test/a1" :id :a1)
          (let [r (repl/eval-string "(+ 1 2)" {"ns" "user" :origin :outside})]
            (agent/commit!)
-           (is (= (name (:handle r)) (:record r)) "recorded")
-           (is (= (name (:handle r)) (:seon.tx/eval (d/entity @store-conn (:tx (first (d/datoms @store-conn :avet :seon.eval/id (:record r)))))))
+           (is (re-matches #"e\d+" (:record r)) "recorded, by its id")
+           (is (= (:record r) (:seon.tx/eval (d/entity @store-conn (:tx (first (d/datoms @store-conn :avet :seon.eval/id (:record r)))))))
                "its record's transaction names it"))
          (finally (reset! agent/state old) (reset! agent/link old-link) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
 
@@ -1734,7 +1813,7 @@
     (is (= [:edited] (:order (:value to-all))) "the edited step ran from the start, and nothing past the failure")
     (is (= (dec (count (:part (:value to-part)))) (count (remove :failed? (:part (:value to-part))))) "only the last failed")
     (let [{:keys [before id e old] :as p} (:value probe-r)]
-      (is (= id (name (:handle (:value edited)))) "its handle is its own")
+      (is (= id (:record (:value edited))) "its record is its own")
       (is (= (:e before) e) "the same record")
       (is (= "(swap! order conj :edited)" (:seon.eval/code p)) "its code is the new one")
       (is (= (:seon.eval/by before) (:seon.eval/by p)) "its author kept")
@@ -2289,7 +2368,7 @@
     (is (= :written (:value r3)) "the eval's value is still its answer")
     (is (= :seon.agent/commit-refused (:seon.error/type u)) (pr-str r3))
     (is (pos? (:transactions u)) (pr-str u))
-    (is (= [(name (:handle r3))] (:evals u)) (pr-str u))
+    (is (= [(:record r3)] (:evals u)) (pr-str u))
     (is (str/includes? (:seon.error/message u) "did not stay") (:seon.error/message u))
     (is (nil? (:ex r4)) (pr-str r4))
     (is (= 2 (:value r4)) "the next eval answers as any")

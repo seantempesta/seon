@@ -419,7 +419,7 @@
         (reply! st o p (absent (get-in st [:view :agents id]) id))
         (let [[st rid] (pend st p op id)
               msg (case op
-                    :eval (cond-> {:op :eval :forms (:forms m)} (:ticks m) (assoc :ticks (:ticks m)) (:origin m) (assoc :origin (:origin m)) (contains? m :intent) (assoc :intent (:intent m)))
+                    :eval (cond-> {:op :eval :forms (:forms m)} (:ticks m) (assoc :ticks (:ticks m)) (:origin m) (assoc :origin (:origin m)))
                     :tests (cond-> {:op :tests} (:ticks m) (assoc :ticks (:ticks m)) (:names m) (assoc :names (:names m)) (:mode m) (assoc :mode (:mode m))
                                             (get-in st [:view :agents id :task]) (assoc :task (get-in st [:view :agents id :task])))
                     :judge {:op :judge}
@@ -815,9 +815,9 @@
   files are asked for; the files read and the forms written are the changes'."
   {:malli/schema [:function [:=> [:cat :map :map] :map] [:=> [:cat :map :map [:maybe [:set :string]]] :map]]}
   ([sys source] (import-source! sys source nil))
-  ([sys {:keys [root dirs]} changed]
+  ([sys {:keys [root dirs branch]} changed]
   (let [t0 (profile/now-ns)
-        ask (fn [paths] @(call! sys {:op :fx :kind :source :req {:root root :dirs dirs :paths paths :follow (cfg/checkout) :binary-tree (str (cfg/checkout) "/target/seon.tree")}}))
+        ask (fn [paths] @(call! sys {:op :fx :kind :source :req {:root root :dirs dirs :paths paths :follow (cfg/checkout) :own-branch branch :binary-tree (str (cfg/checkout) "/target/seon.tree")}}))
         held (:seon.root/source (d/pull @(:conn sys) [:seon.root/source] [:seon.root/id :root]))
         changed (when (:digest held) changed)
         r (let [r (ask changed)] (if (and changed (not (:tree r))) (ask nil) r))
@@ -1203,7 +1203,7 @@
     (case op
       spawn! {:op :spawn :opts (or args {})}
       clone! {:op :clone :parent id :opts (or args {})}
-      submit! (cond-> {:op :eval :id id :forms (:forms args)} (:ticks args) (assoc :ticks (:ticks args)) (:origin args) (assoc :origin (:origin args)) (contains? args :intent) (assoc :intent (:intent args)))
+      submit! (cond-> {:op :eval :id id :forms (:forms args)} (:ticks args) (assoc :ticks (:ticks args)) (:origin args) (assoc :origin (:origin args)))
       ;; a person's step button: the agent runs its eval again in place, the call itself no record of the conversation (origin :context)
       again! {:op :eval :id id :origin :context
               :forms (sedn/encode (cond (:to-here args) (list 'seon.repl/again-to (:eval args))
@@ -1255,7 +1255,7 @@
   "Send forms (a string) to the agent; a promise of the reply vector, one map per form.
   opts {:ticks n}: each form stops after n engine ticks of work (an outside or ui origin
   takes :seon.config.agent/form-ticks by default); {:origin :outside|:ui}: who asked, recorded
-  with each evaluation; {:intent s}: run as a model's call is (seon.repl/run-calls)."
+  with each evaluation."
   {:malli/schema [:function [:=> [:cat :seon.root/sys :seon.agent/id :string] :seon.host/promise] [:=> [:cat :seon.root/sys :seon.agent/id :string [:maybe :map]] :seon.host/promise]]}
   ([sys agent-id forms-string] (submit! sys agent-id forms-string nil))
   ([sys agent-id forms-string opts] (request! sys 'submit! agent-id (assoc opts :forms forms-string))))

@@ -31,6 +31,23 @@
      :fixed {:calls 2 :bytes 5000}
      :sizes [10 40 160]}))
 
+(defn answer-of
+  "The input of size n: an eval's arguments to seon.repl/handled, an answer of n plain rows."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :string :string :map :map]]}
+  [n]
+  ["e1" "(rows)" {:value (vec (for [i (range n)] {:id i :name (str "row " i) :tags [:a :b] :text "some text of a plain answer"}))} {:origin :model}])
+
+(deftest a-handle-costs-its-answer
+  ;; docs/agent.md#your-turn
+  (cost/proof
+    {:of 'seon.repl/handled :input 'seon.task-cost-test/answer-of
+     :n "rows in the answer"
+     :work "one walk of the answer to record it and one to hash it, a row at a time"
+     :growth :linear
+     :per-n {:calls 0 :bytes 50000}
+     :fixed {:calls 9 :bytes 50000}
+     :sizes [10 40 160]}))
+
 (deftest finding-a-task-by-its-id-is-one-index-seek
   (cost/proof
     {:of 'seon.db/eid :input 'seon.task-cost-test/tasks-db

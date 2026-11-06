@@ -72,7 +72,7 @@
                             :seon.status/gone #{:ended :killed :dead}}
                      :spawning :busy :idle :ended :killed :dead]
  :seon.agent/tx-result [:map [:t :int] [:datoms nat-int?]]
- ;; an eval's response (nREPL's keys): its handle (result/e<n>, bound to it in the agent), the last
+ ;; an eval's response (nREPL's keys): its handle (result/ and a hash of its answer, bound to it in the agent), the last
  ;; form's value (kept in its record when it is plain data; :text, the response printed under its
  ;; handle for its caller), what its forms wrote, the error that stopped it (the one error map), its summed cost;
  ;; each key only when present. Beside them as answered: its record's id and the vars it recorded
@@ -110,7 +110,7 @@
                       ;; the branch refused this eval's record (seon.repl/record!, :seon.agent/unrecorded), or the commit that followed its writes (seon.agent/commit!, :seon.agent/commit-refused: the writes were dropped)
                       [:unrecorded {:optional true} :seon.error/base]
                       [:text {:optional true} :string] [:record {:optional true} :string]
-                      [:recorded {:optional true} [:vector :symbol]] [:unmapped {:optional true} [:vector :qualified-symbol]] [:fns {:optional true} [:vector :map]]
+                      [:recorded {:optional true} [:vector [:or :symbol [:vector :any]]]] [:unmapped {:optional true} [:vector :qualified-symbol]] [:fns {:optional true} [:vector :map]]
                       ;; seon.repl/edit!'s: the var it changed and the lines around the change, [line text] each
                       [:edited {:optional true} [:map [:var :symbol] [:lines [:vector [:tuple pos-int? :string]]]]]]
  ;; what an eval changed of an existing var's meaning (seon.program/meaning: its contract, its

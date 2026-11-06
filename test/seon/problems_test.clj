@@ -90,7 +90,7 @@
       (is (= r e))))
   (testing "the response carries the map as :ex, and the stored eval record holds it as data"
     (let [em (agent/error-map (ArithmeticException. "Divide by zero"))
-          r (repl/response [{"status" ["eval-error"] :tag :err :err em :id 0 :form "(/ 1 0)"}] 'result/e1)
+          r (repl/response [{"status" ["eval-error"] :tag :err :err em :id 0 :form "(/ 1 0)"}])
           rec (some :seon.eval/response (repl/record-tx {:seon.agent/key "b/a1" :seon.agent/id :a1} "e1" "a1"
                                                           {:seon.eval/code "(/ 1 0)" :seon.eval/response r}))]
       (is (= em (:ex r)))

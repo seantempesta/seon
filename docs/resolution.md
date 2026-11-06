@@ -24,6 +24,7 @@ The sites that resolve a name held in data to a var by design, each with its rea
 - `seon.render/render-of`: a schema's declared render is a symbol in data, resolved when the value is shown.
 - `seon.contract/function-var?`: a type's positional factory (`->T`) is known by its type `T` beside it in its namespace, looked up by name.
 - `seon.render/declared-var`: the same, as its var: a layout drawn by the walk is a component, whose var's contract says what it reads.
+- `seon.repl/undo-definition!`: a var an agent's definition just changed, put back as it was when recording that definition threw with it in place: the agent's own eval undone, in the process that ran it.
 - `seon.cost/run`: a cost estimate names its function and its input as symbols in data.
 - `seon.cost/bound`, `seon.cost/cases`: a generated estimate names its function (whose contract carries its bound) and its generator as symbols in data.
 - `seon.proofs/mg-run`: a generative check's key names its function as a symbol in data ("mg/seon.merge/f"), resolved to its Var to run.
@@ -38,7 +39,7 @@ The sites that resolve a name held in data to a var by design, each with its rea
 - `seon.main/driver!`: the check driver (`seon.check`, in `test/`, outside the release binary) is loaded from the checkout's source when a check mode runs, so its `-main` is resolved by name then; the program never names it.
 - `my.agent/asked`, `my.agent/no-var`, `my.agent/ns-named?`: a name an agent asks its navigation functions about (`callers`, `callees`, `source`) is read as its REPL reads it, in the agent's namespace (an alias resolved to the var's full name), and one that resolves to nothing is said so (`:my.agent/no-var`, the one answer for a missing name), never answered as no callers. A bare name is a namespace only when one of that name exists here or on the branch and no var of the agent's namespace resolves from it (`ns-named?`): `'seon.task` answers the namespaces requiring it, `'map` stays `clojure.core/map`.
 - `my.agent/help`: reads its own namespace's docstring, the map of what is there, by the namespace's name.
-- `seon.repl/eval-string`: each response's handle (``result/eN``, named by its eval), the agent REPL's own `*1`, defined by the REPL as it answers.
+- `seon.repl/eval-string`: each response's handle (``result/a3f9c1d2``, named by its answer), the agent REPL's own `*1`, defined by the REPL as it answers.
 
 ## Owed its owner's fix
 

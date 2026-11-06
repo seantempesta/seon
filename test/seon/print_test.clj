@@ -435,9 +435,11 @@
         text (:text (seon/print-value {:plan {:seon.print/prose s}} {:handle 'result/e3 :budget 200}))]
     (is (str/includes? text "(:seon.print/prose (get-in result/e3 [:plan]))") text)))
 
-(deftest a-handle-links-to-its-row
-  (let [{:keys [html]} (seon/print-value {:read 'result/e12 :name 'demo/f} {:outputs #{:hiccup}})]
-    (is (= [{:class "seon-print-symbol" :href "#eval-e12"}] (map second (elements html :a))) "result/e12 links to #eval-e12; demo/f is a symbol")))
+(deftest a-handle-is-text
+  ;; it names an answer, which more than one row of the page may hold, so no row is its anchor
+  (let [{:keys [html]} (seon/print-value {:read 'result/a3f9c1d2 :name 'demo/f} {:outputs #{:hiccup}})]
+    (is (empty? (elements html :a)) "no link")
+    (is (str/includes? (pr-str html) "result/a3f9c1d2") "and it reads as itself")))
 
 (deftest a-table-keeps-its-cuts-and-nested-cells
   ;; self-review: a cut in a table is a row of its own, a nested map is its cell, and cells are
@@ -496,3 +498,13 @@
     (let [t (seon/response-text {:handle 'result/e1 :value (apply str (repeat 100000 "x")) :ms 5.2 :ticks 873000 :bytes 4300000})]
       (is (str/includes? t ":cost ") "the value was cut, and its cost is shown")
       (is (<= (count t) (seon.print.select/estimate-chars seon/default-budget)) (str (count t) " characters")))))
+
+(deftest a-long-string-shares-the-budget-with-its-siblings
+  ;; docs/render.md: a map's values fill breadth before depth, a long string a member like its siblings
+  (let [v {:form "(code-of 0)"
+           :out (apply str (repeat 300 "012345678901234567890123456789\n"))
+           :value (vec (range 2000))}
+        {:keys [text]} (seon/print-value v {:handle 'result/e9 :budget 545})]
+    (is (str/includes? text "0 1 2") text)
+    (is (str/includes? text "012345678901234567890123456789") "the string still shows its first part")
+    (is (str/includes? text "(get-in result/e9 [:value])") "the value's cut says how to read its rest")))

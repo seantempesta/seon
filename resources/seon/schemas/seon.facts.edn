@@ -155,6 +155,8 @@
  :seon.eval/code :string
  :seon.eval/intent :string
  :seon.eval/call-id :string
+ ;; the points in time a page eval's value stands between, a t each: what a redo reads (docs/render.md#a-redo-is-an-explicit-bust), no reader's
+ :seon.eval/page [:map [:t :int] [:since {:optional true} :int]]
  ;; the model call of the turn in force when it was written (seon.task/call-ref; absent on root's, on an agent's own turn loop and on a context read)
  :seon.eval/call :seon.db/ref
  :seon.eval/fns [:vector :map]
@@ -214,7 +216,7 @@
  :seon.db/eval-fact [:map {:seon.db/attributes true :seon.render/html seon.render.ui/evaluation}
                      [:seon.eval/id :seon.eval/id] [:seon.eval/agent :seon.eval/agent] [:seon.eval/by {:optional true} :seon.eval/by]
                      [:seon.eval/code :seon.eval/code] [:seon.eval/intent {:optional true} :seon.eval/intent]
-                     [:seon.eval/call-id {:optional true} :seon.eval/call-id]
+                     [:seon.eval/call-id {:optional true} :seon.eval/call-id] [:seon.eval/page {:optional true} :seon.eval/page]
                      [:seon.eval/schema {:optional true} :seon.eval/schema] [:seon.eval/basis {:optional true} :seon.eval/basis]
                      [:seon.eval/fns {:optional true} :seon.eval/fns] [:seon.eval/call {:optional true} :seon.eval/call]
                      [:seon.eval/response :seon.eval/response] [:seon.eval/opened {:optional true} :seon.eval/opened]]

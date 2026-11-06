@@ -1802,7 +1802,7 @@
     (is (empty? (:appends patch)) "nothing else appended")
     (is (empty? (:frags patch)) "nothing else of the page sent")))
 
-(deftest a-handle-links-to-its-eval
+(deftest an-eval-is-its-own-anchor
   ;; root, 2026-10-26: the conversation is keyed by eid, and a printed handle (result/e1) still
   ;; links to its eval: the eval's component draws its anchor (eval-e1) from the eval's id; opened
   ;; (:seon.eval/opened, the reader's fact taken onto the branch), it draws its value
@@ -1811,8 +1811,7 @@
         e3 "eval-item-e3"
         closed (component-html branch e3)
         opened (component-html (d/db-with branch [{:seon.eval/id "e3" :seon.eval/opened true}]) e3)]
-    (is (str/includes? closed "id=\"eval-e3\"") "the handle's anchor, on the eval's own element")
-    (is (str/includes? (h/html (r/print-html {} {:it 'result/e1})) "href=\"#eval-e1\"") "and a printed handle links to it")
+    (is (str/includes? closed "id=\"eval-e3\"") "its anchor, on the eval's own element, by its id")
     (is (not (re-find #"<details[^>]* open" closed)) "no one opened it: its one line")
     (is (str/includes? closed "seon.root%2Fopened") "opening it posts the fact (seon.root/opened!)")
     (is (re-find #"<details[^>]* open" opened) (str "opened: drawn open, its value with it: " opened))
@@ -1976,6 +1975,33 @@
                   "main moving redraws the views (a whole task merges itself: its merge section reads main)")))
           (finally (r/dispose-walk! w)))))))
 
+;; an eval's tokens are what the model reads of it, not its whole record: one read 99,303 for about 200
+(deftest a-size-counts-what-is-read
+  (let [record {:seon.eval/fns (vec (repeat 2000 {:var 'a/b :ticks 1})) :seon.eval/response {:handle 'result/e1 :value 1}}]
+    (is (< (r/tokens-of [:li {:wire/result {:record record}} [:pre "(f)"]]) 200))
+    (is (< 3000 (r/tokens-of [:li {:x record} [:pre "(f)"]])) "and a plain value's is counted")))
+
+;; a live update resent 23.5 KB when about 100 lines joined what blocks a merge; each is its own name, and a reason said twice is said once
+(deftest what-blocks-a-merge-is-named-and-said-once
+  (let [names (fn [n] (mapv #(symbol "app.m" (str "problem-" %)) (range n)))
+        st (fn [n] {:proofs [{:test 'a/t :status :pass}] :caused (names n) :without-a-contract '[app.m/f]
+                    :refused [{:reason :contract-gap :vars '[app.m/f]}]})
+        form (fn [n] (into ['seon.render.ui/status {}] (filter some?) (next (seon.render.ui/status-hiccup {} (st n)))))
+        es (r/page-edits (r/forms-moved {"status" (form 100)} {"status" (form 101)}))]
+    (is (= 1 (count es)) (pr-str es))
+    (is (= "app.m/problem-100" (peek (first (first es)))) "the one that came, by its name")
+    (is (= 1 (count (re-seq #":key \"functions without a contract" (pr-str (form 1))))) "and a reason two facts hold is said once")))
+
+(deftest a-prove-with-no-verdict-is-not-green
+  ;; a live answer read "green: 0 of 0 passed" on a task naming one proof that was never written
+  (let [run {:pass 0 :fail 0 :error 0 :ran 0 :reused 0 :deferred [] :reports [] :proofs {'app.okt/never-written :none} :unmatched ['app.okt/never-written]}
+        line (:seon.print/code (my.agent/prove-summary {} run))]
+    (is (str/starts-with? line "not green: 1 of 1 proofs have no verdict: app.okt/never-written") line)
+    (is (str/includes? line "no test is named app.okt/never-written") "and says why"))
+  (is (= "nothing judged: no proof and no test this change reaches"
+         (:seon.print/code (my.agent/prove-summary {} {:pass 0 :fail 0 :error 0 :ran 0 :reused 0 :deferred [] :reports [] :proofs {}}))))
+  (is (str/starts-with? (:seon.print/code (my.agent/prove-summary {} {:pass 1 :fail 0 :error 0 :ran 1 :reused 0 :deferred [] :reports [{:type :pass :var "#'a/b"}] :proofs {'a/b :pass}})) "green: 1 of 1")))
+
 (deftest a-prove-is-drawn-on-its-eval-red-and-died
   ;; docs/agent.md#done: a prove answers one line (my.agent/prove-summary) and what it found is drawn on
   ;; its eval from its value (seon.render.ui/proved): a red names its test and first failing assertion,
@@ -1988,7 +2014,7 @@
         html (h/html (ui/proved {} run))]
     (is (= (str "red: 1 of 4 failed\n✗ app.okt/bad-test: the sum\n    asserted (= 3 (+ 1 1))\n    and got  (not (= 3 2))\nreused 1: their last result still counts, because nothing they reach has changed")
            (:seon.print/code (my.agent/prove-summary {} run))) "what failed, first failure, and only what is true of this run")
-    (is (= "green: 0 of 0 passed\nno test is named app.okt/typo-test"
+    (is (= "nothing judged: no proof and no test this change reaches\nno test is named app.okt/typo-test"
            (:seon.print/code (my.agent/prove-summary {} {:pass 0 :fail 0 :error 0 :ran 0 :reused 0 :deferred [] :reports [] :unmatched ['app.okt/typo-test]})))
         "a name that is no test is said, never a silent ran 0 (bench-scope-5)")
     (is (= #{'app.okt/gone-test} (seon.proofs/died run)))
@@ -2474,7 +2500,7 @@
     [:p "Everything below this line is some text the agent has to read, long enough for a change above it to be worth saying by itself."]])
 
 (defn- no-position?
-  "Does no edit's path hold a position?"
+"Does no edit's path hold a position?"
   {:malli/schema [:=> [:cat [:sequential :any]] :boolean]}
   [es] (not-any? (fn [[p]] (some number? p)) es))
 
@@ -2489,29 +2515,30 @@
     (testing "a named child added is its name and :+"
       (is (= '[[["status" :proofs g-test] :+ [:li {:key g-test} "new"]]]
              (edits proofs-a (update proofs-a 3 conj '[:li {:key g-test} "new"])))))
-    (testing "what has no name is what its element holds of its own, :own, whole, never a position"
-      (let [es (edits proofs-a (assoc-in proofs-a [2] [:h2 "Your new proofs"]))]
-        (is (= [["status" :own]] (map first es)))
-        (is (= '[seon.render.ui/status {:ctx [:task :proved]} [:h2 "Your new proofs"] [:p "Everything below this line is some text the agent has to read, long enough for a change above it to be worth saying by itself."]]
-               (nth (first es) 2)))))
-    (testing "a value inside a named child never opens: its attributes and text are that child's"
+    (testing "what has no :key goes by its tag when no sibling shares it"
+      (is (= '[[["status" :h2] :r [:h2 "Your new proofs"]]] (edits proofs-a (assoc-in proofs-a [2] [:h2 "Your new proofs"])))))
+    (testing "and by its first words when one does"
+      (let [form (fn [x] ['f {} [:p "One thing the agent reads, long enough for it to count."] [:p "Another thing the agent reads, long enough for it to count."] [:pre [:code x]]])]
+        (is (= '[["status" :pre]] (map first (edits (form "a") (form "b")))))
+        (is (= '[[["status" "Another thing the agent reads, long"] :r [:p "Another thing the agent reads, long enough for it to count, now."]]]
+               (edits (form "a") (assoc (form "a") 3 [:p "Another thing the agent reads, long enough for it to count, now."]))))))
+    (testing "an element holding text is prose, one value, and what is identical among siblings stays in :own"
       (is (no-position? (edits proofs-a (assoc-in proofs-a [3 3 2 1] "b-renamed"))))
-      (is (= '[["status" :proofs b-test]] (map first (edits proofs-a (assoc-in proofs-a [3 3 2 1] "b-renamed"))))))
-    (testing "the whole component when that is shorter, and when nothing has a name"
-      (is (= [["status"]] (map first (edits '[f {} [:p "a"]] '[f {} [:p "b"]])))))
-    (testing "named children that changed places are no edit a name can say: the whole"
-      (let [swapped (assoc proofs-a 3 '[:ul {:key :proofs} [:li {:key b-test} [:code "b-test"] ": passes"] [:li {:key old-test} [:code "old-test"] ": fails"] [:li {:key c-test} [:code "c-test"] ": passes"]
-                                        [:li {:key d-test} [:code "d-test"] ": passes"] [:li {:key e-test} [:code "e-test"] ": passes"] [:li {:key f-test} [:code "f-test"] ": passes"]])]
-        (is (= [[["status"] :r swapped]] (edits proofs-a swapped)))))
-    (testing "names that are not distinct, or that take :own's place, are one value"
-      (is (= '[:ul [:li {:key a} "1"] [:li {:key a} "2"]] (r/keyed '[:ul [:li {:key a} "1"] [:li {:key a} "2"]])))
-      (is (= '[:ul [:li {:key :own} "1"]] (r/keyed '[:ul [:li {:key :own} "1"]]))))
+      (is (= '[["status" :proofs b-test]] (map first (edits proofs-a (assoc-in proofs-a [3 3 2 1] "b-renamed")))))
+      (is (= '[:ul {:x 1} [:li "1"] [:li "1"]] (r/keyed '[:ul {:x 1} [:li "1"] [:li "1"]])) "nothing to tell them apart")
+      (is (= '[:ul [:li {:key :own} "1"]] (:own (r/keyed '[:ul [:li {:key :own} "1"] [:li {:key a} "2"]]))) "a name that takes :own's place stays in :own"))
+    (testing "the whole component when that is shorter"
+      (is (= [["status"]] (map first (edits '[f {} [:ul {:key :l} [:li {:key a} "1"]]] '[f {} [:h3 "other"]])))))
+    (testing "named children that changed places are no edit a name can say: that element whole, at its name"
+      (let [swapped-ul '[:ul {:key :proofs} [:li {:key b-test} [:code "b-test"] ": passes"] [:li {:key old-test} [:code "old-test"] ": fails"] [:li {:key c-test} [:code "c-test"] ": passes"]
+                         [:li {:key d-test} [:code "d-test"] ": passes"] [:li {:key e-test} [:code "e-test"] ": passes"] [:li {:key f-test} [:code "f-test"] ": passes"]]]
+        (is (= [[["status" :proofs] :r swapped-ul]] (edits proofs-a (assoc proofs-a 3 swapped-ul))))))
     (testing "a part's first draw and its going are the same words"
       (is (= '[[["n"] :+ [f {}]] [["g"] :-]] (r/page-edits (r/forms-moved {"g" '[f {}]} {"n" '[f {}]})))))
     (testing "an element's id names it where it has no :key: a component nested in a part"
       (let [long-text (apply str (repeat 40 "word "))
             mk (fn [t] ['f {} ['g {:id "cited-a"} [:p t] [:p {:key :x} long-text]] [:p {:key :y} long-text]])]
-        (is (= '[[["p" "cited-a" :own] :r [g {:id "cited-a"} [:p "b"]]]]
+        (is (= '[[["p" "cited-a" :p] :r [:p "b"]]]
                (r/page-edits (r/forms-moved {"p" (mk "a")} {"p" (mk "b")}))))))
     (testing "no clock decides: with no timeout editscript holds no deadline"
       (is (not (contains? (editscript.util.common/with-vec-deadline {:algo :quick :vec-timeout nil}) :editscript.util.common/vec-deadline))))))

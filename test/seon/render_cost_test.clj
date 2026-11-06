@@ -272,6 +272,15 @@
           [st2 _] (#'seon.render.proc/pass-view (assoc st1 :main-db (:db-after r)) :a1)]
       (clojure.test/is (= 1 (- (get-in st2 [:counts :rendered]) (get-in st1 [:counts :rendered]))) (str n " rows: the agent's head rendered, nothing else")))))
 
+(def ^:private kept-walks
+  "The walks `step-of` made for the proof in hand, which cost/proof holds no end for: let go by `with-kept-walks`."
+  (atom []))
+
+(defn- with-kept-walks
+  "f, then every walk `step-of` made for it disposed: one left behind runs at every later redefinition of a render in this process."
+  {:malli/schema [:=> [:cat :seon.host/fn] :any]}
+  [f] (try (f) (finally (run! seon.render/dispose-walk! @kept-walks) (reset! kept-walks []))))
+
 (defn step-of
   "The input of size n: a kept walk of an agent's page (as seon.render.proc/kept-walk holds one) drawn over n-1 of its turns, each
   as production writes it (docs/turn.md#the-turn-is-a-number: its model call and reply, an eval the call ran, and every third turn a message
@@ -297,6 +306,7 @@
         a (seon.ratom/atom (:tree c))
         w (seon.render/walker {:ref a :changes seon.ctx/changes} (fn [] @at) [(requiring-resolve (seon.render/declared :seon.render/render-ctx)) {}])]
     (seon.render/flush! w nil)
+    (swap! kept-walks conj w)
     [{:w w :a a :c c :at at} db (d/db-with db (vec (turn (dec n))))]))
 
 (defn step!
@@ -324,7 +334,7 @@
 (deftest a-change-costs-its-components
   ;; a change draws the components whose read paths it
   ;; reaches, and nothing else of the page
-  (cost/proof
+  (with-kept-walks #(cost/proof
     {:of 'seon.render-cost-test/redraw! :input 'seon.render-cost-test/change-of
      :n "evals in the agent's ctx"
      :work (str "the one eval's component and the turn holding it, drawn again, on real records, and nothing else: no other turn's "
@@ -334,7 +344,7 @@
      :growth :linear
      :per-n {:calls 0 :bytes 3400}
      :fixed {:calls 385 :bytes 150000}
-     :sizes [100 300 1000 4000]}))
+     :sizes [100 300 1000 4000]})))
 
 ;; See docs/render.md#a-change-is-edits-by-name
 (defn keyed-part
@@ -404,7 +414,7 @@
 (deftest a-step-costs-what-changed
   ;; task seon.render/a-step-costs-what-changed (docs/render.md#a-page-is-a-kept-walk): one more turn draws its own component of the
   ;; conversation, found by its number; the earlier turns are a lookup each (a form drawn keeps its marker) and are not drawn again
-  (cost/proof
+  (with-kept-walks #(cost/proof
     {:of 'seon.render-cost-test/step! :input 'seon.render-cost-test/step-of
      :n "turns the agent took before the one stepped to and back from"
      :work (str "the turn's records read through the index by its number and drawn (its message, its reply and its eval), ctx patched "
@@ -421,7 +431,7 @@
      ;; (seon.print/response-text); the owner approved 250 for a change's 379, and said cull later
      :per-n {:calls 8.2 :bytes 37000}
      :fixed {:calls 1285 :bytes 11250000}
-     :sizes [10 40 160 640]}))
+     :sizes [10 40 160 640]})))
 
 (def ^:dynamic *conn*
   "The branch's connection the status's proof writes its base, main and branch on (bound by its deftest)."
