@@ -1931,3 +1931,17 @@
     (is (str/includes? t ":form/src") "a ref followed: what the form entity holds")
     (is (str/includes? (text :var/name) "A real value:") "an attribute that is no ref: a real value")))
 
+(deftest proofs-of-one-namespace-show-its-example-once
+  ;; docs/render.md#how-the-work-stands: seen 2026-11-06 on a task with four unwritten proofs: its namespace's example four times,
+  ;; and every scaffold naming the first proof
+  (let [shape {:ns 'demo-test :requires "(:require [x])" :example "(deftest an-example (is true))"}
+        proof (fn [t] {:test t :status :undefined :shape shape})
+        do-of (fn [t] {:reason :proof-unknown :test t :do (list 'scaffold t)})
+        h (pr-str (seon.render.ui/status-hiccup {} {:proofs [(proof 'demo-test/a) (proof 'demo-test/b) {:test 'other-test/c :status :undefined :shape (assoc shape :ns 'other-test)}]
+                                                    :refused [(do-of 'demo-test/a) (do-of 'demo-test/b) (do-of 'other-test/c)]}))
+        n (fn [s] (count (re-seq (re-pattern (java.util.regex.Pattern/quote s)) h)))]
+    (is (= 2 (n "an-example")) "once a namespace")
+    (is (= 1 (n "(scaffold demo-test/a)")) "the first proof's scaffold names the first proof")
+    (is (= 1 (n "(scaffold other-test/c)")) "the next namespace's its own")
+    (is (zero? (n "(scaffold demo-test/b)")) "a later proof of a namespace repeats none of it")
+    (is (str/includes? h "demo-test/b") "but says to write it")))
