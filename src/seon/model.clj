@@ -60,9 +60,11 @@
                           (str "the scripted model " script " answered no :seon.model/script-reply") {:script script :seon.error/problems (contract/problems s out)})
           (let [{:keys [text calls]} out]
             ;; a reply's text is a string, empty when it gives none, as a provider's reply is read (reply-of)
-            {:text (or text "") :tool-calls (when (seq calls) (vec (map-indexed (fn [i c] (assoc c :id (str "call-" (:turn request) "-" i))) calls)))
-             :prompt-tokens (reduce + (map (comp select/estimate :content) (:messages request)))
-             :completion-tokens (select/estimate (apply str text (map :code calls))) :estimated true :ms (profile/ms-since t0)}))))))
+            ;; no call: no :tool-calls, as a provider's reply is read
+            (cond-> {:text (or text "")
+                     :prompt-tokens (reduce + (map (comp select/estimate :content) (:messages request)))
+                     :completion-tokens (select/estimate (apply str text (map :code calls))) :estimated true :ms (profile/ms-since t0)}
+              (seq calls) (assoc :tool-calls (vec (map-indexed (fn [i c] (assoc c :id (str "call-" (:turn request) "-" i))) calls))))))))))
 
 (defn- body-text
   "A read response's whole body as text: its buffered bytes, or every piece its pull yields

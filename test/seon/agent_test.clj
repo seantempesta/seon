@@ -1305,7 +1305,7 @@
           (fn [{:keys [names eval-root ask]}]
             (let [a (:agent names) ev (comp root-value eval-root)
                   run (fn [code] (ev (str "(:value @(c/submit! sys :" a " " (pr-str code) " {:origin :outside}))")))]
-              (run (str "(ns tt-hang-test (:require [clojure.test :refer [deftest is]])) (deftest hangs (spit " (pr-str pidf) " (str (seon.lib/c-getpid))) (is @(promise)))"))
+              (run (str "(ns tt-hang-test (:require [clojure.test :refer [deftest is]])) (deftest hangs (spit " (pr-str pidf) " (str (seon.lib/c-getpid))) (let [[r w] (seon.sock/socketpair)] (is ((seon.sock/line-reader r)))))"))
               (ev (began-code a "(my.agent/prove '#{tt-hang-test/hangs})"))
               ;; the child has started: its pid is on file
               (ev (str "(loop [] (when-not (.exists (java.io.File. " (pr-str pidf) ")) (recur)))")) 
