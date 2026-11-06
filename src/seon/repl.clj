@@ -926,7 +926,7 @@
     (cond
       (clojure.string/blank? intent)
       (contract/error :seon.turn/invalid-call #'call-problem
-                      "this call has no intent: send intent, a sentence on what this eval is about to do and what you expect it to show, beside code; the form was not run" {:problem :no-intent})
+                      "this call has no intent: send intent, a sentence on what this eval is about to do, beside code; the form was not run" {:problem :no-intent})
       (and forms (empty? forms))
       (contract/error :seon.turn/invalid-call #'call-problem
                       "this call has no form: its code is empty; nothing was run" {:problem :forms :forms 0}))))

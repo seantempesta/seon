@@ -16,7 +16,7 @@ Freeform Markdown on the wire is "a loss of precision"; "We saw a boost in inter
 
 ### An eval has an intent, and an agent talks to whoever started it through `message-md`
 
-Two ideas, two fields: "theres' sa field for natural language responses to anything going to the user/agent and that's in markdown and then there are intents for each eval that forces the agent to think about what it's doing before it does it and it's just describing the eval." Who it talks to: "some agents will be sub agents so they will be talking to their parent agent and not the user, but the idea is the same. Natural language markdown describing what to the agent/user what the next evals will be doing and answering questions or otherwise commnuicating." `intent` is required on every call, `message-md` optional. Stated in [prompt](prompt.md).
+Two ideas, two fields: "theres' sa field for natural language responses to anything going to the user/agent and that's in markdown and then there are intents for each eval that forces the agent to think about what it's doing before it does it and it's just describing the eval." Who it talks to: "some agents will be sub agents so they will be talking to their parent agent and not the user, but the idea is the same. Natural language markdown describing what to the agent/user what the next evals will be doing and answering questions or otherwise commnuicating." Both are required on every call of a model: optional, no agent wrote one in 288 first replies or 96 turns. Stated in [prompt](prompt.md).
 
 ### Design for classes of problems, and look for root causes
 
