@@ -1924,7 +1924,7 @@
        [:h1 {:class "text-base font-semibold text-text-50"} (if context (str "What " label " reads") (str "What " label "'s model is sent"))]
        [:p {:class "text-text-400"} (if context
                                       "Its page as it reads it: the render of its ctx, each component's hiccup by its id, the text /context.txt serves, drawn again when its ctx changes."
-                                      "Each request as it went on the wire, made again from its turn's records; latest follows the branch live, a turn chosen stays as it was.")]]
+                                      "A bar is one request to the model: its height the tokens sent, blue what the provider's cache served. Below, the request chosen, as it went on the wire, each message by its role; open one to read its fields as sent.")]]
       (when context (slot (:id context)))
       ;; an agent's: its strip and its turn are units, so its layout never moves: a step, a turn added or the first
       ;; turn patches them in place (a patch reaches only the elements the tab holds)
