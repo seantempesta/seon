@@ -92,7 +92,7 @@
   seon.check mode functions its body runs, whose reach is the step's (seon.program/
   graph-index with roots), with the checkout's :env (bin/, native/, resources/, the pins:
   the binary's other inputs) in every digest. laws (bin/laws) reads the whole tree and has no
-  functions: its key is the tree's digest (step-digests), as agent-tests' is, which runs every test (docs/merging.md#a-test-child-is-a-fork-of-a-live-agent). health (what the checkout caused since its
+  functions: its key is the tree's digest (step-digests). agent-tests' is what it reaches and the digests of the tests it runs (agent-tests-digest), so an edit that reaches none of them boots nothing (docs/merging.md#a-test-child-is-a-fork-of-a-live-agent); it names as roots the functions its eval names in a string. health (what the checkout caused since its
   base, seon.problems/caused-split over the program and the wiki, booted on the checkout's source)
   is keyed by the tree and its base's tree (:caused): a moved var leaves the citations of docs/
   dead, which no function's reach shows, and the same tree against another base is another answer.
@@ -102,7 +102,7 @@
   its own: its keys are one per pure contracted function (mg-roots) and the schema registry (mg-registry),
   each digested by what it reaches and run in bin/test's shards beside the tests (mg-run); the step runs
   them all, in the binary, for bin/check mg-check and the full run (docs/checks.md#the-generative-check-is-per-function)."
-  '{"laws" :tree "agent-tests" :tree "health" :caused "lmdb-kill" :pins "lmdb-sem" :pins "forks" :pins "contracts" [seon.check/contracts] "test-inputs" [seon.check/test-inputs] "mg-check" :mg "fx" [seon.check/fx]
+  '{"laws" :tree "agent-tests" [seon.check/agent-tests seon.agent/run-tests-forked seon.repl/page-hiccup] "health" :caused "lmdb-kill" :pins "lmdb-sem" :pins "forks" :pins "contracts" [seon.check/contracts] "test-inputs" [seon.check/test-inputs] "mg-check" :mg "fx" [seon.check/fx]
     "config" [seon.check/config-check] "system" [seon.check/system-check] "mcp" [seon.check/mcp-proof]
     "threads" [seon.check/threads-check] "instrument" [seon.check/instrument] "record" [seon.check/record]
     "problems" [seon.check/problems-check] "smoke" [seon.check/smoke] "robust" [seon.check/robust]
@@ -232,6 +232,14 @@
   does but binary-free's, so a run of only those builds nothing and seeds nothing."
   {:malli/schema [:=> [:cat :string] :boolean]}
   [step] (boolean (and (contains? check-steps step) (not (binary-free step)))))
+
+(defn agent-tests-digest
+  "The agent-tests step's key: dg, the digest of what the step's own code reaches, with the digest of each test of idx ({test {:digest :process?}},
+  seon.program/graph-index's) that reaches no process, the tests it runs, so it moves when one of them or the step does and no other edit reaches it
+  (docs/checks.md#modes)."
+  {:malli/schema [:=> [:cat :string :map] :string]}
+  [dg idx]
+  (lib/digest (apply str dg (for [[t {:keys [digest process?]}] (sort-by (comp str key) idx) :when (not process?)] (str "\n" t " " digest)))))
 
 (defn step-digests
   "Of check-steps, {:digests {step digest} :missing [step ...]}: the reach digests (digests-of,
@@ -460,6 +468,11 @@
         step-idx (when checks? (program/graph-index graph inputs (merge mg (into {} (filter (comp vector? val)) check-steps))))
         {steps :digests missing :missing} (when checks? (step-digests #(update-vals (select-keys step-idx (keys %)) :digest) (assoc inputs :base base)))
         steps (when checks? (assoc (merge steps (update-vals (select-keys step-idx (keys mg)) :digest)) mg-registry (mg-registry-digest graph (:env inputs))))
+        ;; both its own code's digest and its tests' without the tree: it runs each in a fork of an agent, which an edit to a file a test scans does not change
+        steps (cond-> steps (get steps "agent-tests")
+                (assoc "agent-tests" (let [in (assoc inputs :tree "")]
+                                       (agent-tests-digest (:digest (get (program/graph-index graph in (select-keys check-steps ["agent-tests"])) "agent-tests"))
+                                                           (program/graph-index graph in nil)))))
         process (into (if tests? process #{}) (keep (fn [[k v]] (when (:process? v) k))) step-idx)
         named? (or (true? all?) (seq names))
         merge? (= :merge all?)
