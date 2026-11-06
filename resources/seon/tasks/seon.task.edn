@@ -1,19 +1,8 @@
-[{:seon.task/name "the-shipped-task-files-load"
-  :seon.task/plan "What exists (merged): `seon.task-files-test/the-shipped-task-files-load` loads resources/seon/tasks into a test branch with `seon.task/load-tx` and expects no error. Before, an unescaped double quote inside one plan string made `(my.root/load-tasks! sys dir)` answer :seon.task/refused (\"not readable EDN: Map literal must contain an even number of forms\") and no task file loaded, unseen because no test read the shipped directory. An error names the file; its line (from the reader's ex-data) would help."
-  :seon.task/kind :work
-  :seon.task/proofs #{seon.task-files-test/the-shipped-task-files-load}}
- {:seon.task/name "a-file-task-reaches-main"
-  :seon.task/plan "What exists (merged): `my.root/task-files` applies `seon.template/with-merge` over all the files' declarations, so each work task loaded from a file gets its merge task (derived at load, never written in the file) and a need on a work task, in any file, is a need on its merge; the merge task is declared, changed and cancelled with its work task. `seon.task/load-tx` is unchanged (the task writer does not depend on step templates) and stays incremental: an unchanged file writes nothing. Before, a done file task's change never reached main. v1: a single task is followed by a merge task when it should reach main."
-  :seon.task/kind :work
-  :seon.task/proofs #{seon.task-files-test/a-file-task-reaches-main-through-its-merge-task}}
- {:seon.task/name "an-agent-reads-its-task-as-main-holds-it"
+[{:seon.task/name "an-agent-reads-its-task-as-main-holds-it"
   :seon.task/plan "What exists: `my.task/current` reads the agent's task on its own branch (`seon.agent/db`), forked before the run was written, so it reads its execution as held while main reads running. Correct: the execution an agent reads is main's at its turn's basis, or the render says which db it read."
   :seon.task/kind :work
   :seon.task/proofs #{seon.server-test/an-agent-reads-its-task-running}}
  {:seon.task/name "design-writes-the-implement-steps-proofs"
   :seon.task/plan "What exists: `my.task/update!` edits only this agent's own :seon.task/plan or :seon.task/instructions, and `seon.merge/carried-platform-attrs` carries only those two, so the proofs a design step writes for implement reach main only as plan text. Reproduction: a staged request with no proofs (`seon.template/stages`); design writes red deftests and rewrites its plan; implement is refused :no-proofs by `seon.reconcile/done-explain` (recorded in task seon.template/a-request-is-one-linked-transaction). Cause: no function edits another task's members, and proofs are not carried. Correct (DESIGN-tasks §5.2, prototyped): ``my.task/edit!`` (id f & args: clojure.core/update on any authored member of any task, written on the branch), and :seon.task/proofs among what `seon.task/carry-tx` carries. Deletes: `my.task/update!`."
   :seon.task/kind :work
-  :seon.task/proofs #{seon.task-test/edit-writes-another-tasks-proofs seon.reconcile-test/implement-holds-the-proofs-design-wrote}}
- {:seon.task/name "an-agent-of-this-boot-is-one-equality"
-  :seon.task/plan "Found by the guard audit of 2026-10-25 (docs/failure-points.md, S15; still true in src/seon/task.clj:168-178). What exists: seon.task/this-boots tests an agent entity against this boot by its key, or by any run of this boot that used it (:seon.run/_agent), an O(runs of the session) patch so a session continuation counts. Correct: when a run starts on a continuing agent, agent-tx writes that agent key under this boot (it already takes a key), and this-boots is the one equality on :seon.agent/key. Replaces the runs walk. Proof to write: a resumed session agent is this boot's after its first run, with no run walk (cost proof: no :seon.run/_agent read)."
-  :seon.task/kind :work}]
+  :seon.task/proofs #{seon.task-test/edit-writes-another-tasks-proofs seon.reconcile-test/implement-holds-the-proofs-design-wrote}}]
