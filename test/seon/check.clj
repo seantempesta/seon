@@ -1716,11 +1716,11 @@
   (dec (count (clojure.string/split-lines (:out (clojure.java.shell/sh "ps" "-M" "-p" (str pid)))))))
 
 (defn agent-tests
-  "Every test that reaches no process, run as a Seon agent runs them: forked from one agent that has drawn its page, on a
+  "The tests that reach no process and have no result at their digest in this step's own verdict cache, run as a Seon agent runs them: forked from one agent that has drawn its page, on a
   root whose config is not bin/test's (docs/merging.md#a-test-child-is-a-fork-of-a-live-agent). Green under bin/test and
   red here is a test reading its runner, or its agent's state leaking into it, which blocks a real agent's merge. It selects
   through seon.agent/test-plan, as an agent's own run does, and judges everything it selected; bin/check gives it a verdict
-  cache of its own, so nothing is reused."
+  cache of its own, kept across runs, so a run costs what the change reaches."
   []
   (run-check "AGENT-TESTS" {:datoms 2000 :source {:root (seon.config/checkout) :dirs (seon.config/value :seon.config.source/dirs) :branch :none}}
    (fn [sys]
@@ -1731,8 +1731,8 @@
                                    " (spit " (pr-str out) " (pr-str (update r :reports (fn [rs] (filterv #(not= :pass (:type %)) rs)))))))"))
           r (read-string (slurp out))
           reds (:reports r)]
-      {:report (assoc (select-keys r [:ran :pass :fail :error]) :reds (mapv (juxt :var :message :actual) reds))
-       :checks {:tests-ran (pos? (:ran r 0)) :none-red (empty? reds)}}))))
+      {:report (assoc (select-keys r [:ran :reused :pass :fail :error]) :reds (mapv (juxt :var :message :actual) reds))
+       :checks {:tests-judged (pos? (+ (:ran r 0) (:reused r 0))) :none-red (empty? reds)}}))))
 
 (defn threads-check
   "Session RC1's physics rule: the processes that fork (the fork server; an agent, for its
@@ -1778,14 +1778,14 @@
                 :tx-ids-issued-once (not-any? (txs ia) (txs ib))}}))))
 
 (defn vectors
-  "Semantic search on Seon's own text (docs/vector.md): a root booted on this checkout's source,
-  task files and wiki embeds every form, section and plan through its :vectors proc and :embed
+  "Semantic search on Seon's own text (docs/vector.md): a root booted on this checkout's schemas and wiki (1,760 vectors, enough that
+  the default shortlist of 400 is a real cut) embeds them through its :vectors proc and :embed
   effect (the model in process), awaited on main (seon.root/await-db: nothing due), no clock;
   then 200 of those vectors, each a query, have their top 10 by the pyramid's default levels
   compared with an exact search of every vector (seon.vector/near with a shortlist of all).
   Red below a recall of 0.99, or when the model is missing."
   []
-  (run-check "VECTORS" {:datoms 0 :source {:root (seon.config/checkout) :dirs ["src" "resources/seon/schemas"]}}
+  (run-check "VECTORS" {:datoms 0 :source {:root (seon.config/checkout) :dirs ["resources/seon/schemas"]}}
    (fn [sys]
      (let [path (seon.config/value :seon.config.vector/model)
            model (seon.vector/model-id path)]
@@ -1793,8 +1793,6 @@
          {:report {:model path :texts (seon.config/value :seon.config.vector/texts)}
           :checks {:model-present (.exists (java.io.File. path)) :embedding-on (pos? (seon.config/value :seon.config.vector/texts))}}
          (let [t0 (System/currentTimeMillis)
-               _ (my.root/load-tasks! sys)
-               _ (my.root/load-docs! sys)
                db (seon.root/await-db sys #(empty? (seon.vector/due % model)))
                embed-ms (- (System/currentTimeMillis) t0)
                es (sort (map :v (d/datoms db :aevt :seon.vector/of)))
@@ -1805,7 +1803,7 @@
                recall (recall-of {})]
            {:report {:vectors (count es) :queries (count qs) :recall10 recall :embed-ms embed-ms
                      ;; what each shortlist would give: the default's evidence, measured here every run
-                     :by-shortlist (into (sorted-map) (for [k [50 100 200 400]] [k (recall-of {:shortlist k})]))
+                     :by-shortlist (into (sorted-map) (for [k [10 25 50 100 200 400]] [k (recall-of {:shortlist k})]))
                      :forms (count (d/datoms db :aevt :form/id)) :sections (count (d/datoms db :aevt :seon.doc/address))}
             :checks {:model-present true :every-text-embedded (empty? (seon.vector/due db model))
                      :pyramid-recall-at-least-0.99 (>= recall 0.99)}}))))))
