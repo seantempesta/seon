@@ -2,7 +2,7 @@
   "The test store's own rules: the process tests' store is made once, before any shard, and a
   test process's agent tests share one root of it."
   (:require [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [datahike.api :as d]
-            [seon.db :as pdb] [seon.test-store :as ts] [seon.agent-test :as at])
+            [seon.db :as pdb] [seon.lib] [seon.test-store :as ts] [seon.agent-test :as at])
   (:import [clojure.lang ExceptionInfo]))
 
 (deftest the-process-store-is-made-before-any-shard
@@ -28,16 +28,18 @@
   ;; still runs only reports that root, so under parallel load one test asked another test's
   ;; root (main-follows-its-source-tree-across-restarts read the whole Seon program, :removed-forms 71).
   ;; A second root asked for in a runs directory a live root holds is refused, never answered
+  ;; The live root is the one bin/root's status reads: runs/root.pids names a running process. This
+  ;; process stands in for it (a root booted for it was all of this test's time; that a started root
+  ;; listens is every process test's claim, and n-roots-open-the-process-store-at-once's)
   (let [store (ts/process-store)
         runs (str (.getParent (java.io.File. ^String store)) "/own-root-" (random-uuid) "-runs")
-        main (str "own-a-" (random-uuid))
-        a (ts/start-root! {:store store :main main :runs runs})]
+        pid (seon.lib/c-getpid)]
     (try
-      (is (some? (:port a)) "the first root listens")
+      (.mkdirs (java.io.File. ^String runs))
+      (spit (str runs "/root.pids") (str pid " " pid "\n"))
       (let [e (is (thrown? ExceptionInfo (ts/start-root! {:store store :main (str "own-b-" (random-uuid)) :runs runs})))]
         (is (= :seon.test-store/runs-in-use (:seon.error/type (ex-data e)))))
-      (finally (ts/stop-root! a) (sh/sh "rm" "-rf" runs)
-               (ts/drop-main! store main)))))
+      (finally (sh/sh "rm" "-rf" runs)))))
 
 (deftest a-kept-store-is-keyed-by-its-schema
   ;; task seon.test-store/a-kept-store-is-keyed-by-its-schema: the page merge changed three
