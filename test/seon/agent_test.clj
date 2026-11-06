@@ -1766,7 +1766,7 @@
     (is (= [:edited] (:order (:value to-all))) "the edited step ran from the start, and nothing past the failure")
     (is (= (dec (count (:part (:value to-part)))) (count (remove :failed? (:part (:value to-part))))) "only the last failed")
     (let [{:keys [before id e old] :as p} (:value probe-r)]
-      (is (= id (name (:handle (:value edited)))) "its handle is its own")
+      (is (= id (:record (:value edited))) "its record is its own")
       (is (= (:e before) e) "the same record")
       (is (= "(swap! order conj :edited)" (:seon.eval/code p)) "its code is the new one")
       (is (= (:seon.eval/by before) (:seon.eval/by p)) "its author kept")

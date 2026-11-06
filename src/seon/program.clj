@@ -677,7 +677,7 @@
   A name is the program's when db holds its namespace with a file under
   :seon.config.source/program-dirs, as program-nss reads them, reading only these names'
   namespaces (a page's reads stay what it cites). A test's or a test helper's, a library's, and a
-  name of no namespace the program holds (a reproduction's handle, result/e1) are not: they are a
+  name of no namespace the program holds (a reproduction's handle, result/a3f9c1d2) are not: they are a
   reproduction's entry and data, not its subject."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :qualified-symbol]] [:vector :qualified-symbol]]}
   [db ns]

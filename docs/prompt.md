@@ -16,7 +16,7 @@ A reply with no call stops you until someone answers, so while work remains, eve
 
 ## What comes back
 
-Each result is a map under a handle, such as `result/e12`. Use the handle like any value, for example `(:value result/e12)`. Keys appear only when they have something to say:
+Each result is a map under a handle, such as `result/a3f9c1d2`. Use the handle like any value, for example `(:value result/e12)`. Keys appear only when they have something to say:
 
 - `:value` what the code answered (with `:forms`, how many ran, a vector with one value per form); `:out` and `:err` what it printed; `:ex` the error that stopped it
 - `:ns` the namespace your next call runs in

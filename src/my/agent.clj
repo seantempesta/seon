@@ -1,7 +1,7 @@
 (ns my.agent
   "An agent's own functions (from proto/flow f2-final proto.agent's agent API). Referred into
   every agent namespace.
-    ($ handle)                an earlier eval's response, its live value under :value (also result/e3)
+    ($ handle)                an earlier eval's response, its live value under :value (also result/a3f9c1d2)
     (whoami)                  {:id :branch :pid}
     (messages)                the messages delivered and not yet taken, taken
     (problem "signature")     one open problem of this agent's run whole, as its problems part names it
@@ -43,7 +43,7 @@
             [seon.config :as cfg] [seon.proofs :as proofs] [seon.fx :as fx] [seon.program :as program] [seon.task :as task] [seon.vector :as vector] [seon.contract :as contract] [seon.ctx]
             [seon.db :as pdb] [seon.print :as print] [seon.print.select :as select] [seon.render :as render] [seon.problems :as problems] [seon.render.ui :as ui] [my.schema :as schema] [jolt.analyzer] [clojure.java.io :as io] [clojure.string :as str] [clojure.main] [datahike.api :as d]))
 
-(defn $ "An earlier eval's response (its live value under :value), by handle (:e3)." {:malli/schema [:=> [:cat :keyword] :any]}
+(defn $ "An earlier eval's response (its live value under :value), by handle (:a3f9c1d2)." {:malli/schema [:=> [:cat :keyword] :any]}
   [h] (get-in @agent/state [:results h]))
 (defn whoami "This agent: {:id :branch :pid}." {:malli/schema [:=> [:cat] [:map [:id :seon.agent/id] [:branch :seon.db/branch] [:pid :seon.lib/pid]]]}
   [] {:id (:id @agent/state) :branch (:branch @agent/state) :pid (lib/c-getpid)})

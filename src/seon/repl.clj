@@ -10,7 +10,7 @@
   code once, form by form, and answers each form (eval-error or interrupted in its status),
   with what it printed, stopping at the first error; then one `done`. `eval-string` folds a
   request's answers into its one response (`:seon.eval/response`, `response`), printed by the
-  one printer under its handle, result/e<n>.
+  one printer under its handle, result/<a hash of its answer>.
 
   Seon's additions are middleware over nREPL's own seams (a plain stack: G1's contract
   admission and arming plug in as one more `wrap-…`):
@@ -29,7 +29,7 @@
   arrives in and nothing after it. Seon's platform ops (tests, stats, clone,
   messages, writes) are {:op k} values, handled by `agent-step`."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn- defchecked]] [seon.error :as err] [jolt.nrepl :as nrepl] [seon.intr :as intr] [seon.reader :as reader] [seon.doc :as doc] [seon.agent :as agent] [seon.task :as task] [seon.contract :as contract] [my.db] [my.agent] [my.schema] [malli.registry :as mr]
+  (:require [seon.contract :refer [defn defn- defchecked]] [hasch.core :as hasch] [seon.error :as err] [jolt.nrepl :as nrepl] [seon.intr :as intr] [seon.reader :as reader] [seon.doc :as doc] [seon.agent :as agent] [seon.task :as task] [seon.contract :as contract] [my.db] [my.agent] [my.schema] [malli.registry :as mr]
             [seon.program :as program] [jolt.analyzer] [seon.lib :as lib] [seon.print :as print] [seon.print.select :as select] [seon.render :as render] [seon.context :as context] [seon.ctx :as ctx] [seon.web.html :as h] [seon.profile :as profile] [seon.sock :as sock] [seon.step :as step] [clojure.core.async :as a] [clojure.core.async.flow :as flow]
             [jolt.ffi :as ffi] [seon.config :as cfg] [clojure.test] [datahike.api :as d] [seon.db :as pdb] [seon.edn :as sedn]))
 
@@ -551,7 +551,7 @@
     (:eval-n (swap! agent/state update :eval-n #(inc (or % from))))))
 
 (defn response
-  "A request's answers (in order) as its one response (:seon.eval/response): its handle, its
+  "A request's answers (in order) as its one response (:seon.eval/response): its
   value (:value: one top-level form's value as Clojure answers it, so (do (+ 1 1) (+ 2 2)) answers
   4; code of several top-level forms answers each one's value in order, as a REPL prints them, a
   vector beside :forms, how many ran, so (+ 1 1) (+ 2 2) answers :forms 2 :value [2 4]; docs/prompt.md),
@@ -564,8 +564,8 @@
   and its cost summed over its forms (ms, ticks, bytes allocated);
   each key only when present (DECISIONS Dogfood rulings; a change to a schema
   is an explicit fact the eval shows)."
-  {:malli/schema [:=> [:cat [:sequential :seon.wire/msg] :qualified-symbol] :seon.repl/answer]}
-  [answers handle]
+  {:malli/schema [:=> [:cat [:sequential :seon.wire/msg]] :seon.repl/answer]}
+  [answers]
   (let [fs (filterv :tag answers)
         lst (peek fs)
         ;; the top-level forms that ran, each its answers (a do's forms are one form's)
@@ -591,7 +591,7 @@
                            {:seon.repl/finding :helper-shadowed :shadowed sh
                             :seon.repl/fix (str "In this namespace " (clojure.string/join ", " (map (fn [[k v]] (str k " is " v)) sh))
                                                 ", not the REPL's: call " (clojure.string/join " or " (map #(str "clojure.repl/" (key %)) sh)) " qualified")})))]
-    (cond-> {:handle handle}
+    (cond-> {}
       (next tops) (assoc :forms (count tops)
                          :value (into [] (comp (map last) (filter #(contains? % :repl/value)) (map :repl/value)) tops))
       (and (not (next tops)) (contains? lst :repl/value)) (assoc :value (:repl/value lst))
@@ -699,7 +699,7 @@
   {:malli/schema [:=> [:cat :map :map :string :map] :map]}
   [r rec code req]
   (let [defs (into [] (mapcat val) (:defs @agent/state))
-        id (name (:handle r))]
+        id (:seon.eval/id rec)]
     (swap! agent/state dissoc :defs)
     ;; an eval within another (seon.repl/edit!'s) is that eval's: its definitions are program, its record the outer one
     (if (and contract/record? (= :agent (:mode @agent/state)) (not (:within req)))
@@ -724,10 +724,22 @@
   {:malli/schema [:=> [:cat :map] :string]}
   [rec] (context/tool-text (:db @agent/state) rec))
 
+(defn- handled
+  "Response r of code, as eval id answers it, with its handle, and its record: [r rec]. A plain answer's handle is result/ and the first eight hex digits of a content hash (hasch, the same in every process) of what the record keeps of it (value, error, output, error output, forms; not its cost), so a cut or a replay leaves every handle where it was, a run again names its new answer while the old handle still reads the old one, and two evals with one answer have one. An answer not kept as it is (a host object, a value past :seon.config.store/max-value-chars: the record holds what stands for it) is named by its id, so it never shares a handle. An edit!'s value is its inner eval's response, whose cost differs each time: nothing else is walked. See docs/agent.md#your-turn."
+  {:malli/schema [:=> [:cat :string :string :map :map] [:tuple :map :map]]}
+  [id code r req]
+  (let [rec (assoc (record-details code r req) :seon.eval/id id)
+        s (:seon.eval/response rec)
+        v (:value s)
+        v (if (and (map? v) (not (record? v)) (contains? v :handle)) (dissoc v :handle :ms :ticks :bytes :fns :record) v)
+        h (subs (clojure.string/replace (str (hasch/uuid (if (identical? (:value r) (:value s)) [v (:ex s) (:out s) (:err s) (:forms s)] [:eval id]))) "-" "") 0 8)
+        put #(into {:handle (symbol "result" h)} %)]
+    [(put r) (update rec :seon.eval/response put)]))
+
 (defn eval-string
   "Evaluate code through the one REPL path (the handler and its middleware) and answer its one
   response (`response`) with the text its caller reads (:text, `text-of`) and what its forms
-  recorded, its handle result/e<n> bound to it (the live value inside), and recorded (an
+  recorded, its handle (`handled`) bound to it (the live value inside), and recorded (an
   agent's, on its branch). From inside an agent, the turn loop's calls; req adds to the request
   (root's: seon.server's namespace, origin, budget and eval fn; root's requests to an agent:
   agent-step's; a model's call: its :intent and :call-id). The request's entrant boundary: a
@@ -739,21 +751,20 @@
   ([code] (eval-string code {:origin :model}))
   ([code req]
    (let [answers (volatile! [])
-         handle (symbol "result" (or (:id req) (str "e" (eval-n!))))
+         id (or (:id req) (str "e" (eval-n!)))
          ;; the writes its forms make and its record name it (seon.agent/transact!'s tx-meta); an
          ;; eval inside it (a context read's) names its own, then this one's again
          outer (:eval @agent/state)
          before @agent/state]
-     (swap! agent/state assoc :eval (name handle))
+     (swap! agent/state assoc :eval id)
      (try (let [;; with the namespace the REPL is in after it (:ns, as every nREPL response carries): the prompt
                 ;; an eval makes data: its value made plain here, inside the boundary, so a value that throws as it is
                 ;; realized is the error; text only for a reader who is not a model (whose message is printed at its request)
                 ;; its forms left the agent no db (a test's cleanup, run at this REPL): the agent goes on as it was, its walk made
                 ;; again, and ctx rebuilt by the state's watch (docs/merging.md#a-test-child-is-a-fork-of-a-live-agent)
                 answered (fn [] (when (and (:db before) (nil? (:db @agent/state))) (reset! agent/state (dissoc before :walk)))
-                               (let [r (cond-> (repaired (response @answers handle) req)
-                                         (:ns @agent/state) (assoc :ns (ns-name (:ns @agent/state))))
-                                      rec (record-details code r req)]
+                               (let [[r rec] (handled id code (cond-> (repaired (response @answers) req)
+                                                                (:ns @agent/state) (assoc :ns (ns-name (:ns @agent/state)))) req)]
                                   [r rec (when-not (#{:model :insert} (:origin req)) (text-of rec))]))
                 [r rec text] (try (@the-handler (assoc req "code" code :reply #(vswap! answers conj %)))
                               (answered)
@@ -761,9 +772,9 @@
                                 (let [em (agent/error-map e)]
                                   (vswap! answers conj {:tag :err :err em :err-text (nrepl/err->msg e)})
                                   (answered))))]
-            (swap! agent/state assoc-in [:results (keyword (name handle))] r)
+            (swap! agent/state assoc-in [:results (keyword (name (:handle r)))] r)
             ;; the handle a printed cut reads through, as the REPL's *1 is read
-            (intern (create-ns 'result) (symbol (name handle)) r)
+            (intern (create-ns 'result) (symbol (name (:handle r))) r)
             ;; how main differs from the branch, said with the answer an outside agent's seon_eval gets, and never recorded
             ;; (seon.agent/main-difference): computed at t, so the agent is never surprised at done
             (let [fns (when (some :fns @answers) (into [] (mapcat :fns) @answers))
@@ -908,10 +919,8 @@
   every call of a reply has its one result. See docs/prompt.md."
   {:malli/schema [:=> [:cat :string :map :seon.error/base] :seon.repl/answer]}
   [code req e]
-  (let [handle (symbol "result" (str "e" (eval-n!)))
-        r (repaired (response [{:tag :err :err e}] handle) req)
-        rec (record-details code r req)]
-    (swap! agent/state assoc-in [:results (keyword (name handle))] r)
+  (let [[r rec] (handled (str "e" (eval-n!)) code (repaired (response [{:tag :err :err e}]) req) req)]
+    (swap! agent/state assoc-in [:results (keyword (name (:handle r)))] r)
     (record! (cond-> r (not (#{:model :insert} (:origin req))) (assoc :text (text-of rec))) rec code req)))
 
 (defn- call-problem
@@ -944,7 +953,7 @@
                   req (cond-> (req-of id)
                         (not (clojure.string/blank? intent)) (assoc :intent intent)
                         (seq repairs) (assoc :repaired (context/repaired src repairs)))
-                  failed (some #(when (or (:ex (:response %)) (contract/error? (:value (:response %)))) (context/wire-id (name (:handle (:response %))))) acc)
+                  failed (some #(when (or (:ex (:response %)) (contract/error? (:value (:response %)))) (:handle (:response %))) acc)
                   why (if failed
                         (contract/error :seon.turn/not-run #'run-calls (str "not run: eval " failed " of this reply failed before it (its result says why)") {:after failed})
                         (if problem
@@ -969,7 +978,7 @@
 
 (defn again
   "Run eval id again in its own place, optionally as code: the same record, its turn and author kept, its code and response replaced, history
-  holding what it was, so the model's next request reads the new one where the old one stood and `result/<id>` names the new value. It runs in the namespace the eval before it left, first written first by its entity's number. The request that asked commits it (`agent-step`). See docs/turn.md#an-eval-can-be-run-again."
+  holding what it was, so the model's next request reads the new one where the old one stood; its handle is the new answer's, and the old handle still reads the old one. It runs in the namespace the eval before it left, first written first by its entity's number. The request that asked commits it (`agent-step`). See docs/turn.md#an-eval-can-be-run-again."
   {:malli/schema [:function [:=> [:cat :string] :map] [:=> [:cat :string [:maybe :string]] :map]]}
   ([id] (again id nil))
   ([id code]
