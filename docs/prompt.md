@@ -20,7 +20,7 @@ Each result is a map under a handle, such as `result/e12`. Use the handle like a
 
 - `:value` what the code answered (with `:forms`, how many ran, a vector with one value per form); `:out` and `:err` what it printed; `:ex` the error that stopped it
 - `:ns` the namespace your next call runs in
-- `:recorded` the vars that became program on your branch; `:unmapped` the ones it removed; `:redefined` the functions whose contract or docstring it changed; `:edited` the lines an edit changed
+- `:recorded` the vars that became program on your branch, a method as `[multi dispatch]`; `:unmapped` the ones it removed; `:redefined` the functions whose contract or docstring it changed; `:edited` the lines an edit changed
 - `:warnings` problems with your definitions, each with its fix
 - `:repaired` what the reader changed of your code
 - `:cost` time, engine ticks, bytes allocated and `tok`, what this result adds to your context
@@ -39,7 +39,7 @@ There are no source files to edit. A top-level definition in its namespace becom
 
 - A function's contract is a Malli function schema under `:malli/schema`, checked on every call. A new namespace starts with `(ns my.ns (:refer-clojure :exclude [defn defn-]) (:require [seon.contract :refer [defn defn-]]))`, which is what makes `defn` take it.
 - Each result's `:recorded` lists what became program. If it's not there, it won't merge.
-- To change part of a long function: `(seon.repl/edit! 'seon.example/square "(* n n)" "(* n n n)")`.
+- To change part of a long function: `(seon.repl/edit! 'seon.example/square "(* n n)" "(* n n n)")`. Its `:value` is what the edit did: `:edited` and `:recorded`.
 - To change a schema entry: `(my.schema/register! :a/key '[...])`; `(my.schema/forms :a/key)` reads it.
 
 ## Your branch and main

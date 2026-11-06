@@ -438,7 +438,8 @@
                                               [tx (when tx (program/meaning-changes (agent/db) tx))])
                                             (catch Throwable e (undo-definition! l e)))]
                        (when tx (agent/transact! tx))
-                       (cond-> (assoc m :recorded (vec (concat (map :var (:defs acct)) (when (:ns-form? acct) [(:ns acct)])))
+                       (cond-> (assoc m :recorded (vec (concat (map :var (:defs acct)) (when (:ns-form? acct) [(:ns acct)])
+                                                                       (map (juxt :multi :dispatch) (:methods acct)) (map (juxt :protocol :type) (:impls acct))))
                                       :repl/defined (mapv :var (:defs acct)))
                          redefined (assoc :redefined redefined)))
                      (cond-> m
@@ -887,7 +888,7 @@
                                                (str "; at line " l (some->> (:clojure.error/column ex) (str ", column ")) " of the new definition: "
                                                     (pr-str (clojure.string/trim (nth (clojure.string/split-lines text) (dec l) "")))))))))
                ;; the response as data: its printed text and costliest functions are the outer eval's to print
-               (cond-> (assoc (dissoc r :text :fns :record)
+               (cond-> (assoc (dissoc r :text :fns :record :handle :ms :ticks :bytes :cost)
                               :edited {(if doc? :doc :var) sym :lines (into [] (comp (mapcat (fn [[from new]] (numbered text (- from k) (+ from (count (filter #{\newline} new)) k)))) (distinct)) starts)})
                  (seq repairs) (assoc :repaired (context/repaired text repairs))))))))))))
 

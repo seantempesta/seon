@@ -1274,6 +1274,15 @@
     (is (nil? shown) "a render that throws does not stop the one who asked")
     (is (str/includes? (str broken-request) "broken render") "and the request reads its error")))
 
+;; a defmethod merges as a var does (seon.merge's key [:method multi dispatch]), so it is said as one is
+(deftest a-method-is-listed-with-what-a-branch-carries
+  (let [[_ method changes] (in-agent (fn [{:keys [ns]}]
+                                       [(str "(ns " ns ".mm) (defmulti area \"Area.\" :k)")
+                                        "(defmethod area :square [s] 1)"
+                                        "(my.branch/changes)"]))]
+    (is (some #(= ":square" (second %)) (filter vector? (:recorded method))) (pr-str method))
+    (is (some #(and (vector? %) (= ":square" (second %))) (:added (:value changes))) (pr-str (:value changes)))))
+
 ;; docs/failure-points.md: a live agent ran (def form-of ...) in seon.program as a scratch name, every later write threw in seon.program/record-tx, and the run died
 (deftest a-definition-that-breaks-its-own-recording-is-undone
   (let [[broke after still] (in-agent ["(in-ns 'seon.program) (def form-of (fn [v] v))"

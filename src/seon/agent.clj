@@ -812,7 +812,7 @@
         ;; that reaches a process of its own (base's index says) stays a process test
         removed (into (sorted-map-by #(compare (str %1) (str %2)))
                       (when base
-                        (for [v (:removed (pm/divergence (branch-changes base db)))
+                        (for [v (filter symbol? (:removed (pm/divergence (branch-changes base db))))
                               :let [e (some->> (pdb/eid base :var/name v) (d/entity base))
                                     nsym (symbol (namespace v))
                                     head (when-not (find-ns nsym)

@@ -163,8 +163,10 @@
                                         {:op :eval :agent "root"
                                          :code (str "(let [b (:db @(seon.root/branch-db sys (:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))))]"
                                                     " [(:form/src (:var/form (datahike.api/entity b [:var/name '" ns ".ed/f])))"
-                                                    "  (count (filter #(clojure.string/includes? % \"[] 2)\") (datahike.api/q '[:find [?c ...] :where [_ :seon.eval/code ?c]] b)))])")}]))]
+                                                    "  (count (filter #(clojure.string/includes? % \"[] 2)\") (datahike.api/q '[:find [?c ...] :where [?e :seon.eval/code ?c] [?e :seon.eval/agent ?a] [?a :seon.agent/key _]] b)))])")}]))]
     (is (get-in edit [:value :edited]) (pr-str edit))
+    (is (get-in edit [:value :recorded]) "what it recorded is in what it answers")
+    (is (not-any? #(contains? (:value edit) %) [:handle :ms :ticks :bytes]) "and the outer eval's handle and cost are the outer eval's")
     (is (clojure.string/includes? (str (first (:value branch))) "[] 2") "the branch's program holds the new source")
     (is (= 0 (second (:value branch))) "its inner eval records no eval of its own: the edit's call is the one kept")))
 

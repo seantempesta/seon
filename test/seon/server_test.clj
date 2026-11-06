@@ -487,6 +487,18 @@
     (is (not (contract/error? (:value failed))) (str "its fail! records on its task: " (pr-str failed)))))
 
 ;; See docs/merging.md#main-moved-is-said-at-every-eval
+(deftest green-work-behind-main-is-merged-at-done
+  ;; an outside agent's green work was closed "ended green: behind 6", its agent gone, while each answer said to merge when it chose: seon.turn/hand-back! merges main first
+  (let [[_ _ _ _ done] (at/in-agent (fn [{:keys [agent ns]}]
+                                      [{:op :attach :task (str ns "/t")}
+                                       "(in-ns 'demo-test)"
+                                       "(clojure.test/deftest t (clojure.test/is true))"
+                                       {:op :eval :agent "root" :code (str "(let [db @(:conn sys)] @(c/transact-main! sys ((my.test/code '" ns ".behind \"(ns " ns ".behind) (defn f \\\"One.\\\" {:malli/schema [:=> [:cat] :int]} [] 1)\") db)))")}
+                                       {:op :done :agent agent}])
+                                    {:own-root? true})]
+    (is (not (clojure.string/includes? (str (:line done)) "behind")) (pr-str done))
+    (is (clojure.string/includes? (str (:line done)) ":merged") (pr-str done))))
+
 (deftest the-done-answer-is-a-line-and-a-handle
   ;; one-wait's real run (root, 2026-10-28): seon_done answered 73,856 characters, the whole verdict
   ;; with every red. A line, each red with its first failure, cut by the one printer, and the form

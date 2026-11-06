@@ -815,9 +815,9 @@
   files are asked for; the files read and the forms written are the changes'."
   {:malli/schema [:function [:=> [:cat :map :map] :map] [:=> [:cat :map :map [:maybe [:set :string]]] :map]]}
   ([sys source] (import-source! sys source nil))
-  ([sys {:keys [root dirs]} changed]
+  ([sys {:keys [root dirs branch]} changed]
   (let [t0 (profile/now-ns)
-        ask (fn [paths] @(call! sys {:op :fx :kind :source :req {:root root :dirs dirs :paths paths :follow (cfg/checkout) :binary-tree (str (cfg/checkout) "/target/seon.tree")}}))
+        ask (fn [paths] @(call! sys {:op :fx :kind :source :req {:root root :dirs dirs :paths paths :follow (cfg/checkout) :own-branch branch :binary-tree (str (cfg/checkout) "/target/seon.tree")}}))
         held (:seon.root/source (d/pull @(:conn sys) [:seon.root/source] [:seon.root/id :root]))
         changed (when (:digest held) changed)
         r (let [r (ask changed)] (if (and changed (not (:tree r))) (ask nil) r))

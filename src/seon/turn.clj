@@ -421,6 +421,8 @@
   (let [;; read before begin!, which starts the turn state anew when it has none yet
         stop (get-in @agent/state [:turn :stop])
         _ (begin! task)
+        ;; main moved since its last merge: merged now, as a green turn's is, so green work is never judged for being behind; a conflict is an unmerged entry, a reason the status says
+        _ (when (agent/main-moved? (:base @agent/state) (agent/heard-main)) (branch/merge-main!))
         _ (observe task)
         s (status-now)
         [outcome reason] (if (contract/error? s) [:error (:seon.error/message s)] (hand-back-end stop (:reasons s)))]

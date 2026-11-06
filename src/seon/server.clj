@@ -205,7 +205,7 @@
         reds (get-in v [:held :seon.task/evidence :red])]
     {:line (print/text (cond-> (select-keys v [:outcome :reason])
                          (and (:held v) (empty? reds)) (assoc :held (get-in v [:held :seon.task/failure :reason]))
-                         (seq reds) (assoc :reds (vec (for [t reds] [t (or (some-> (get fails t) first :message) (some-> (get fails t) first :type name))])))
+                         (seq reds) (assoc :reds (vec (for [t reds] (if-let [why (or (some-> (get fails t) first :message) (some-> (get fails t) first :type name))] [t why] [t]))))
                          main (assoc :main main))
                        (:part print/budgets))
      :handle (str "(seon.server/verdict @(:conn sys) " (pr-str task) ")")}))
@@ -342,11 +342,11 @@
             (:ex r) (:ex r)
             (:text r) (let [t (:max-tx @(:conn sys))
                             outcome #(:seon.task/outcome (d/pull % [:seon.task/outcome] [:seon.task/id task]))
-                            ;; judged: the task left :running (the reconciler accepted, parked,
+                            ;; judged and past its merge: the task left :running and the gate (the reconciler merged, parked,
                             ;; held or refused it), or a root defect stopped the judge
                             _ (c/judge! sys {:task task :env env :agent ag})
                             db (c/await-db sys (str "the judge of " task)
-                                          #(or (not= :running (outcome %)) (c/defect % t "seon.reconcile")))]
+                                          #(or (not (#{:running :ready :gate} (outcome %))) (c/defect % t "seon.reconcile")))]
                         ;; a judge that has not moved by root's quiet never will: that, or root
                         ;; stopped, is the answer
                         (cond (contract/error? db) (assoc db :task task)
