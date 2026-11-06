@@ -594,6 +594,11 @@
  ;; bound: the store is removed before it is opened and starts again from the run's tree (one
  ;; import); an LMDB file never shrinks, so collecting would not bring it under.
  :seon.config.proofs/program-store-max-bytes 268435456
+ ;; Unit: bytes. The checks' seeded store on disk (bin/check's SEON_STORE, its data.mdb). A fresh one is 6 MB with one roster entry;
+ ;; left to grow it reached 8.5 GB and 30,327 entries (2026-11-06, commit message), which d/branches replays, each of a run's drops at
+ ;; 0.9 s, 17 s before any step, and which each step clones. At the bound: `seed` removes it and makes it again, about 2 s; a clone
+ ;; a run is reading is unaffected, an LMDB file never shrinks, and nothing in it is kept.
+ :seon.config.proofs/check-store-max-bytes 268435456
  ;; Unit: a salt (integer), 0 normally. Salt of every generative check's seed (seon.proofs/seed): a
  ;; seed is derived from what its check reaches (a test's reach digest, a contract's var and the
  ;; binary's tree), so the same digest draws the same cases and a result is a function of its
