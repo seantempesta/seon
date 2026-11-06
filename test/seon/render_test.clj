@@ -1469,16 +1469,15 @@
       ;; part; this fixture's proof has no source, so the part says what to write (seon.context/not-written)
       (is (not (str/includes? h "my.agent/prove")) "no proof's run form, which the status shows"))
     (is (str/includes? (:html (unit-of task "status")) "Your proofs") "how the work stands is the status's")
-    (is (= ["system-message" "chat-ask" "conversation-turn-1" "conversation-turn-2" "chat-end"]
+    (is (= ["system-message" "chat-ask" "conversation-turn-1" "chat-end"]
            (mapv :id conv))
-        "the conversation by turn number, each turn a component keyed by the agent and its number (turn 0 took no record: no component), then how the agent stands")
+        "the conversation by turn number, each turn a component keyed by the agent and its number (turn 0 took no record, and the agent's turn 2 said and ran nothing: no element), then how the agent stands")
     (let [turn1 (:html (unit-of conv "conversation-turn-"))
           at #(str/index-of turn1 %)]
       (is (< (at "id=\"chat-message-m-1\"") (at "seon-message")
              (at "id=\"eval-item-e3\""))
           "a turn: the messages it took, its model call, then the evals of other hands")
-      (is (every? #(str/includes? turn1 (str "id=\"eval-item-" % "\"")) ["e1" "e2" "e3"]) "its model call's evals among its steps")
-      (is (not (str/includes? (:html (second (filter #(str/starts-with? (:id %) "conversation-turn-") conv))) "seon-message")) "the agent's turn 2 said nothing: its component holds no bubble"))
+      (is (every? #(str/includes? turn1 (str "id=\"eval-item-" % "\"")) ["e1" "e2" "e3"]) "its model call's evals among its steps"))
     (is (every? #(str/starts-with? (:html %) (str "<" )) units))
     (is (every? #(str/includes? (:html %) (str "id=\"" (:id %) "\"")) units) "each component's root element carries its key as its id")
     (is (= units (draw)) "pure: the same ctx, the same page")))
@@ -2305,6 +2304,16 @@
   ;; its list inside its root element, as render-ctx's #p-task is (the walk gives a component's root its own id)
   [:div [:div {:id "parts"} [#'throwing-view {}] [#'fine-view {}]]])
 
+(defn interrupted-view
+  "A component whose run is interrupted."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]]] :any]}
+  [_] (throw (ex-info "interrupted" {:interrupted true})))
+
+(defn interrupted-layout
+  "A layout whose only component is interrupted while it draws."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]]] :any]}
+  [_] [:div [:div {:id "parts"} [#'interrupted-view {}]]])
+
 (deftest a-component-that-throws-is-a-part-holding-its-error
   ;; owner, 2026-10-29: "the UI components are all separately rendered so it's okay if some are
   ;; errors just make sure it's visible to the agent": a call of the error's render on the error as data, which the model
@@ -2312,12 +2321,48 @@
   (let [w (r/walker {:ref (seon.ratom/atom {}) :changes seon.ctx/changes} (constantly (ts/test-db)) [#'two-part-layout {}])]
     (try (r/flush! w nil)
          (let [placed (r/placed-hiccup w ["#parts"])
-               [[_ [_ _ [_ _ [_ _ broken]]]] [_ [_ _ fine]]] (seq placed)]
+               [[_ [_ _ [_ _ broken]]] [_ [_ _ fine]]] (seq placed)]
            (is (= :seon.render/component-defect (:seon.error/type broken)) (str "the model reads the error as data: " (pr-str placed)))
            (is (str/includes? (:seon.error/message broken) "seon.ref/scan invalid-output") "what threw")
            (is (= [{:in [:seon.ref/blocks 3]}] (get-in broken [:seon.render/threw :problems])) "and the thrown error's own data")
            (is (= "drawn" (last fine)) "the other part draws"))
          (finally (r/dispose-walk! w)))))
+
+(deftest a-component-that-throws-is-a-problem-health-reads
+  ;; docs/health.md: a defect a person alone would see is a fact too: the walk answers it once to whoever records problems. An interrupt is nobody's defect: it passes
+  (let [w (r/walker {:ref (seon.ratom/atom {}) :changes seon.ctx/changes} (constantly (ts/test-db)) [#'two-part-layout {}])]
+    (try (r/flush! w nil)
+         (is (= [:seon.render/component-defect] (map :seon.error/type (r/take-defects! w))))
+         (is (= [] (r/take-defects! w)) "taken once")
+         (finally (r/dispose-walk! w))))
+  (let [w (r/walker {:ref (seon.ratom/atom {}) :changes seon.ctx/changes} (constantly (ts/test-db)) [#'interrupted-layout {}])]
+    (try (is (:interrupted (try (r/flush! w nil) nil (catch Throwable e (ex-data e)))))
+         (is (= [] (r/take-defects! w)))
+         (finally (r/dispose-walk! w)))))
+
+(deftest a-mark-no-message-has-is-an-error
+  ;; docs/render.md#the-models-context-a-cached-prefix-then-the-turn: a typo in a role or a field would lose the model a message without a word
+  (let [type-of #(try (r/hiccup-wire %) nil (catch Throwable e (:seon.error/type (ex-data e))))]
+    (is (= :seon.render/unknown-mark (type-of [:li {:wire/role "sytem"} "x"])))
+    (is (= :seon.render/unknown-mark (type-of [:li {:wire/role "assistant"} [:pre {:wire/field "cod"} "(f)"]])))
+    (is (nil? (type-of [:li {:wire/role "assistant" :wire/call-id "c"} [:pre {:wire/field "code"} "(f)"]])) "and the marks it knows read")))
+
+(deftest a-wire-mark-never-reaches-the-browser
+  ;; docs/render.md#the-models-context-a-cached-prefix-then-the-turn: :wire/* is for the reading alone, so nothing in it can name a Datastar attribute (`ref` made a signal per element, posted back by @post); what Datastar reads stays :data-*
+  (let [e {:seon.eval/id "e1" :seon.eval/code "(f)" :seon.eval/response {:value 1 :handle 'result/e1} :seon.eval/call-id "c"}
+        html (h/html (seon.render.ui/eval-hiccup {} e))]
+    (is (not (str/includes? html "wire")) html)
+    (is (not (str/includes? html "data-role")) "no marker under its old name")
+    (is (str/includes? html "id=\"eval-e1\"") "an element's id stays: a patch lands by it")
+    (is (= "<li data-x=\"1\"></li>" (h/html [:li {:wire/role "user" :data-x "1"}])))))
+
+(deftest parts-print-in-the-order-they-are-placed
+  ;; docs/render.md#the-render-is-an-eval: past eight keys a map is hash ordered, and the live run read "task" fifth; the value is pairs, so any store, printer and reader keeps them
+  (let [ids (mapv #(str "p" %) (range 12))
+        v (r/parts-value (map (fn [id] [id [:li id]]) ids))]
+    (is (= ids (map first v)))
+    (is (= ids (map first (read-string (pr-str v)))) "read back")
+    (is (= (sort-by #(str/index-of (seon.print/text v) %) ids) ids) "printed")))
 
 (defn cited-world
   "A task demo/c whose plan cites a wiki section, a defined var (with a test and a caller) and its own proof,
@@ -2493,10 +2538,10 @@
   [{c :seon.ctx/ctx}] [:p (:v c)])
 (defn some-lists-layout "A layout of two lists."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
-  [_] [:div [:div {:id "parts"} [#'some-lists-part {}]] [:div {:id "others"} [#'some-lists-other {:data-for "page"}]]])
+  [_] [:div [:div {:id "parts"} [#'some-lists-part {}]] [:div {:id "others"} [#'some-lists-other {:wire/for "page"}]]])
 
 (deftest a-walk-only-the-model-reads-draws-the-page-s-pieces-when-a-person-comes
-  ;; docs/render.md#a-layout-places-its-lists: a call or an element :data-for "page" is the person's: a walk :model-only draws none of it, a
+  ;; docs/render.md#a-layout-places-its-lists: a call or an element :wire/for "page" is the person's: a walk :model-only draws none of it, a
   ;; change draws what the model reads, and the rest is drawn when a person comes
   (let [a (seon.ratom/atom {:v 1})
         w (assoc (r/walker {:ref a :changes seon.ctx/changes} (constantly (ts/test-db)) [#'some-lists-layout {}]) :model-only true)

@@ -79,11 +79,12 @@
     {:test-run test-run :task (task/task (agent/db) id)}))
 
 (defn- status-now
-  "How the work stands now (seon.context/status of the branch and @ctx), the data a turn decides from. The branch may have changed
+  "How the work stands now, the data a turn decides from: what the page's status component kept (seon.render/kept-of), one reaction for both, so a status nothing moved costs nothing; with none (it threw, or a layout places none) seon.context/status of the branch and @ctx. The branch may have changed
   what status calls, so a status that throws is its error, the turn's to give the agent (docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map), never an
   empty status: no reason is not done (AGENTS 9, unknown is not {})."
   {:malli/schema [:=> [:cat] [:or :map :seon.error/base]]}
-  [] (try (context/status (agent/db) @ctx/ctx {})
+  [] (try (or (render/kept-of (repl/page-walk) '[seon.render.ui/status])
+              (context/status (agent/db) @ctx/ctx {}))
           (catch Throwable e
             (when (:interrupted (ex-data e)) (throw e))
             (agent/error-map e 'seon.turn/status-now))))

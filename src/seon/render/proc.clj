@@ -692,7 +692,12 @@
   {:malli/schema [:=> [:cat :map :seon.host/volatile :any] [:tuple :map [:maybe :map]]]}
   [st o view-id]
   (try
-    (pass-view st view-id)
+    (let [r (pass-view st view-id)]
+      ;; a component that threw in a kept walk is a problem root records, as a view that threw is
+      (doseq [w (concat (some-> (:root-walk (first r)) :w vector) (keep #(some-> (:walk (val %)) deref :w) (:branch-reads (first r))))
+              d (render/take-defects! w)]
+        (step/out! o :to-api {:op :error :pid :render :message (:seon.error/message d) :data d}))
+      r)
     (catch Exception ex
       (let [held (get-in st [:views view-id])
             d (clojure.main/ex-triage (assoc (Throwable->map ex) :clojure.error/phase :execution))

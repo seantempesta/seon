@@ -30,12 +30,19 @@
                               (assoc v :seon.eval/agent {:seon.agent/key "b/a1"}))))]
     [db (:db/id (d/entity db [:seon.agent/key "b/a1"]))]))
 
+(defn- turn-tx
+  "Turn t of session-of's agent as production writes it: its eval i's model call with the reply that holds it, and a message taken at every other turn, naming that call."
+  {:malli/schema [:=> [:cat nat-int?] [:vector :map]]}
+  [i]
+  (let [t (inc i) call #(seon.task/call-ref "b/a1" t)]
+    (cond-> [{:seon.eval/id (str "e" i) :seon.eval/call (assoc (call) :seon.model-call/origin :model :seon.model-call/reply (str "Reading the rows of part " i "."))}]
+      (even? i) (conj {:seon.message/id (str "m" i) :seon.message/agent {:seon.agent/key "b/a1"} :seon.message/call (call) :seon.message/from "owner" :seon.message/body (str "How is part " i "?")}))))
+
 (defn records-of
-  "The input at n of seon.context/records: the agent's ctx value over session-of's db, as a request reads it."
+  "The input at n of seon.context/request: the agent's ctx value over session-of's db, as a request reads it, each turn production-shaped (`turn-tx`)."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map :seon.host/db]]}
   [n] (let [[db e] (session-of n)
-            ;; one eval a turn
-            db (d/db-with db (vec (for [i (range n)] {:seon.eval/id (str "e" i) :seon.eval/call (seon.task/call-ref "b/a1" (inc i))})))]
+            db (reduce (fn [db i] (d/db-with db (turn-tx i))) db (range n))]
         [(:tree (seon.ctx/build db e :b)) db]))
 
 (deftest a-request-reads-what-the-agents-ctx-holds
@@ -101,7 +108,7 @@
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "r" :seon.task/plan "Say it."}]))
         te (pdb/eid db :seon.task/id "demo/r")
         es (into [te] (for [i (range n)] (pdb/eid db :seon.doc/address (str "docs/p.md#s" i))))]
-    [(d/db-with db (vector/tx-data es (repeat (count es) 1) (mapv unit (range (count es))) (repeat (count es) 10) "m")) te]))
+    [(d/db-with db (vector/tx-data es (repeat (count es) 1) (mapv unit (range (count es))) "m")) te]))
 
 (defn task-data-of
   "seon.context/task-data's arguments at n wiki sections with vectors: the task demo/r as of the db and
@@ -120,12 +127,22 @@
                :sizes [10 100 1000]}))
 
 (defn request-of
-  "The input at n: the walk of the agent's tree after n earlier evals, one a turn, each production-shaped (item), drawn and read once by a request, so a request reads what did not move as it was read."
+  "The input at n: the live walk of the agent's tree after n earlier turns, each production-shaped (`turn-tx`), read once by a request, then one new turn written, ctx patched by its datoms and the walk flushed:
+  so the proof's request prints that one new record against the n read before, as a turn's does."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map]]}
   [n]
-  (let [[c db] (records-of n)
-        w (seon.render/draw c seon.ctx/changes db (seon.render/declared-var :seon.render/render-ctx) {:model-only true})]
+  (let [[db0 a] (session-of (inc n))
+        db (reduce (fn [db i] (d/db-with db (turn-tx i))) db0 (range n))
+        cell (volatile! db)
+        c (seon.ctx/build db a :b)
+        src (seon.ratom/atom (:tree c))
+        w (assoc (seon.render/walker {:ref src :changes seon.ctx/changes} #(deref cell) [(seon.render/declared-var :seon.render/render-ctx) {}]) :model-only true)]
+    (seon.render/flush! w nil)
     (seon.context/request w)
+    (let [r (d/with db (conj (turn-tx n) {:seon.agent/key "b/a1" :seon.agent/turn (inc n)}))]
+      (vreset! cell (:db-after r))
+      (reset! src (:tree (seon.ctx/patch c (:db-after r) (:tx-data r) :b)))
+      (seon.render/flush! w (:tx-data r)))
     [w]))
 
 (deftest a-requests-cost-is-its-records
@@ -133,7 +150,7 @@
   ;; revision, so a turn reads what moved and walks the rest. Linear, not flat: the wire body holds n messages anyway
   (cost/proof {:of 'seon.context/request :input 'seon.context-cost-test/request-of
                :n "evals of the session before the turn"
-               :work "each component's messages read as they were kept, the tree walked once; the page at the end, its forms made once"
+               :work "the new turn's messages read, each earlier component's as they were kept, the tree walked once; the page at the end, its forms made once"
                :growth :linear
                :per-n {:calls 8 :bytes 15000}
                :fixed {:calls 900 :bytes 600000}

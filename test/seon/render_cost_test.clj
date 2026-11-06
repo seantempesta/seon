@@ -289,7 +289,7 @@
                                               :seon.eval/response {:handle (symbol "result" id) :value {:step i}}})
                         (when (zero? (mod i 3))
                           (update (seon.task/message-tx (str "mm-" i) :message "owner" :b (str "How is step " i "?")) 0 assoc
-                                  :seon.message/agent {:seon.agent/key k} :seon.message/call (seon.task/call-ref k 1) :seon.message/call (seon.task/call-ref k (inc i)))))))
+                                  :seon.message/agent {:seon.agent/key k} :seon.message/call (seon.task/call-ref k (inc i)))))))
         base (reduce d/db-with (ts/test-db) [[{:seon.root/id :root :seon.root/boot "b1"}] (seon.task/agent-tx "b1" :a1 {:status :busy :branch :b})])
         db (reduce (fn [db i] (d/db-with db (vec (turn i)))) base (range (dec n)))
         c (seon.ctx/build db (seon.db/eid db :seon.agent/key k) :b)
@@ -459,20 +459,39 @@
   "The draw proof's opts (bound by its deftest)."
   {:model-only true :once true})
 
+(deftest printing-a-result-is-the-models-reading-of-it
+  ;; docs/render.md#the-models-context-a-cached-prefix-then-the-turn: an eval's printed result is computed the first time the model reads that eval and is a lookup after: a person's walk prints no model text at all
+  (let [k "b/a1" n 5
+        db (d/db-with (ts/test-db) (seon.doc/load-tx (ts/test-db) "docs" {seon.context/system-page "# You are\n\nRules."}))
+        db (reduce (fn [db i] (d/db-with db [{:seon.agent/key k :seon.agent/turn (inc i)}
+                                             {:seon.eval/id (str "e" i) :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key k} :seon.eval/call (seon.task/call-ref k (inc i))
+                                              :seon.eval/code (str "(f " i ")") :seon.eval/call-id (str "c" i) :seon.eval/response {:handle (symbol "result" (str "e" i)) :value i}}]))
+                   db (range n))
+        a (:db/id (d/entity db [:seon.agent/key k]))
+        src (seon.ratom/atom (:tree (seon.ctx/build db a :b)))
+        w (seon.render/walker {:ref src :changes seon.ctx/changes} (constantly db) [(seon.render/declared-var :seon.render/render-ctx) {}])
+        prints (fn [f] (seon.profile/measure! f (fn [_])) (or (some (fn [x] (when (= 'seon.print/record-text (:var x)) (:calls x))) (seon.profile/touched)) 0))]
+    (try
+      (clojure.test/is (zero? (prints #(do (seon.render/flush! w nil) (seon.render/placed-units w)))) "a page drawn and written prints none")
+      (clojure.test/is (<= n (prints #(seon.render/wire w))) "the first reading prints each")
+      (clojure.test/is (zero? (prints #(seon.render/wire w))) "the next finds each where the walk keeps it")
+      (finally (seon.render/dispose-walk! w)))))
+
 (defn page-of
   "The input at n: the arguments of seon.render/draw for agent b/p<n>'s page on a branch where it
-  holds a task and n evals (a record as the REPL writes it) with a message for every other one:
+  holds a task and n turns, each production-shaped: its eval (a record as the REPL writes it), the reply that holds it and, every other turn, a message taken at it:
   its ctx tree, the diff, the db, the layout and its opts (*sels*)."
   {:malli/schema [:=> [:cat pos-int?] [:vector :any]]}
   [n]
   (let [conn *conn* k (str "b/p" n) tid (str "demo/p" n)]
     (d/transact conn (seon.task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name (str "p" n) :seon.task/plan "Make p." :seon.task/proofs #{'demo-test/p-test}}]))
-    (d/transact conn [{:seon.agent/key k :seon.agent/turn 1 :seon.agent/task {:seon.task/id tid}}])
+    (d/transact conn [{:seon.agent/key k :seon.agent/turn n :seon.agent/task {:seon.task/id tid}}])
     (doseq [i (range n)]
-      (d/transact conn [{:seon.eval/id (str "p" n "e" i) :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key k} :seon.eval/call (seon.task/call-ref k 1)
+      (d/transact conn [{:seon.eval/id (str "p" n "e" i) :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key k}
+                         :seon.eval/call (assoc (seon.task/call-ref k (inc i)) :seon.model-call/origin :model :seon.model-call/reply (str "Trying " i "."))
                          :seon.eval/code (str "(f " i ")") :seon.eval/response {:handle (symbol "result" (str "p" n "e" i)) :value (vec (range 5)) :ns 'user} :seon.eval/call-id (str "c" i) :seon.eval/intent (str "Step " i ".")}])
       (when (even? i)
-        (d/transact conn (update (seon.task/message-tx (str "p" n "m" i) :message "user" (keyword (str "b-p" n)) (str "note " i)) 0 assoc :seon.message/agent {:seon.agent/key k}))))
+        (d/transact conn (update (seon.task/message-tx (str "p" n "m" i) :message "user" (keyword (str "b-p" n)) (str "note " i)) 0 assoc :seon.message/agent {:seon.agent/key k} :seon.message/call (seon.task/call-ref k (inc i))))))
     (let [db @conn a (:db/id (d/entity db [:seon.agent/key k]))]
       (into [(:tree (seon.ctx/build db a (:seon.agent/branch (d/entity db a)))) seon.ctx/changes db (seon.render/declared-var :seon.render/render-ctx)] (some-> *sels* vector)))))
 

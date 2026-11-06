@@ -967,7 +967,11 @@
   the last draw touched (seon.ctx/take-moved!)."
   {:malli/schema [:=> [:cat] :map]}
   []
-  (with-branch-schemas #(let [w (the-walk)] (render/flush! w (ctx/take-moved!)) w)))
+  (with-branch-schemas #(let [w (the-walk)]
+                          (render/flush! w (ctx/take-moved!))
+                          ;; a component that threw is a problem of the agent's, in its fold (docs/health.md), as well as what it draws in its place
+                          (doseq [d (render/take-defects! w)] (swap! agent/state update :errors err/note d :eval nil (System/currentTimeMillis)))
+                          w)))
 
 (defn- whole-walk
   "`page-walk` with every list drawn, for a reader of the whole page: a person's, who stays its reader from then on (a
@@ -993,13 +997,6 @@
   from, nothing left out."
   {:malli/schema [:=> [:cat] :map]}
   [] (render/placed-hiccup (whole-walk) ["#p-task" "#c-rows" "#p-tiles"]))
-
-(defn page-hiccup
-  "This agent's parts as its model reads them now, from its live walk (seon.render/page-lists): each
-  component run again only where what it read changed, so a turn's parts cost what changed (a cold
-  draw costs every component). [db parts]: the db it is drawn to, and {element-id hiccup}, in order."
-  {:malli/schema [:=> [:cat] [:tuple :seon.host/db :map]]}
-  [] (let [w (page-walk)] [(agent/db) (render/placed-hiccup w (render/page-lists w))]))
 
 ;; ---- the process: a Flow graph of three procs on the agent's one thread ----------------
 

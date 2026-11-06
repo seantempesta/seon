@@ -17,8 +17,8 @@
  :seon.test/proved [:map {:seon.render/model my.agent/prove-summary :seon.render/html seon.render.ui/proved}]
  ;; what draws what in a walk (seon.render/tree, my.render/tree): a component and those it drew, each with its own output's
  ;; tokens
- ;; every part of an agent's page as the hiccup its request holds it, whole (my.render/render-ctx, render-changes): a value that is a page prints whole, the stored one too
- :seon.render/parts [:map-of {:seon.print/full true} :string :any]
+ ;; every part of an agent's page, [id form] in placed order, as the hiccup its request holds it, whole (my.render/render-ctx, render-changes): a value that is a page prints whole, the stored one too
+ :seon.render/parts [:vector {:seon.print/full true} :any]
  :seon.render/tree [:map [:render :symbol] [:args [:vector :any]] [:id :string] [:tokens nat-int?]
                     [:reads? {:optional true} :boolean]
                     ;; each child is a tree too; a recursive schema cannot be built by the registry (a [:ref] overflows its eager parse)
@@ -55,6 +55,8 @@
  :seon.render/proofs [:map-of {:seon.render/html seon.render.ui/proofs} :symbol [:map [:status :keyword] [:failure {:optional true} [:map [:assert :any] [:got :any]]]]]
  ;; root's page's tile of main's runs (seon.render.ui/runs-tile): how many by status, and each running one
  :seon.render/work [:map {:seon.render/html seon.render.ui/work} [:by-outcome [:map-of :keyword nat-int?]] [:working [:vector :map]]]
+ ;; hiccup marking a role or a field the tree's reading has no message for (seon.render/wire-parts): a typo is an error, not a silent drop
+ :seon.render/unknown-mark [:and :seon.error/base [:map [:seon.error/type [:= :seon.render/unknown-mark]] [:mark :string]]]
  ;; a page's location that main names no entity for (seon.render.proc/page-value): an agent's id of no agent in root's boot
  :seon.render/no-location [:and :seon.error/base [:map [:seon.error/type [:= :seon.render/no-location]] [:view :string]]]
  ;; a component whose render threw (seon.render/render!, a failure point: renders are code, and agents write

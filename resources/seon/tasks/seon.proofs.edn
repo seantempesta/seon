@@ -44,7 +44,7 @@ What is stored (all `:db/noHistory` via `:seon.db/no-history?`, overwritten in p
 - On the test's var entity (`:var/name`, kind `:test`, resources/seon/schemas/seon.facts.edn ~57-66):
   `:seon.test/digest` (the reach digest it was last judged at), `:seon.test/status` (`:green` `:red` `:flaky`: green
   and red at one digest), `:seon.test/failure` (the first failing assertion, bounded by the printer; present only while
-  red, retracted on green), and running sums `:seon.test/runs` `:seon.test/ms` `:seon.test/ticks` `:seon.test/bytes`.
+  red, retracted on green), and running sums `:seon.test/ticks` `:seon.test/bytes`.
   A run at a new digest resets the sums to that run; at the same digest it adds. Mean = sum / runs, computed on read.
 - On each contracted function's var entity: running sums `:seon.fn/calls` `:seon.fn/ticks` `:seon.fn/bytes` (from the
   test's `seon.profile` epoch, seon.fx/details' 5-number entries), plus `:seon.fn/form-digest`; a changed form resets them.

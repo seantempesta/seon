@@ -469,8 +469,8 @@
          (cond
            (= :seon.vector/encode-failed (:seon.error/type r)) (do (swap! state update :unembeddable (fnil into #{}) (map first ask)) r)
            (contract/error? r) r
-           :else (let [{:keys [model vectors tokens]} (:value r)
-                       _ (transact! (vector/tx-data (map first ask) (map peek ask) vectors tokens model))]
+           :else (let [{:keys [model vectors]} (:value r)
+                       _ (transact! (vector/tx-data (map first ask) (map peek ask) vectors model))]
                    (when (= (count ask) (count due)) (swap! state assoc :embedded-from (db)))
                    (count ask))))))))
 

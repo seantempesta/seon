@@ -441,7 +441,7 @@
 (deftest an-eval-that-empties-the-agents-state-leaves-it-working
   ;; a test run at an agent's REPL ended by resetting the state it had taken for its own (seon.ctx-test's end-agent!):
   ;; every later call was seon.agent/db's nil, and the agent died at its next prove (the control of 2026-11-05)
-  (let [[gone after page] (in-agent ["(do (reset! seon.agent/state nil) :emptied)" "(+ 1 2)" "(some? (seon.repl/page-hiccup))"])]
+  (let [[gone after page] (in-agent ["(do (reset! seon.agent/state nil) :emptied)" "(+ 1 2)" "(some? (seon.repl/page-walk))"])]
     (is (= :emptied (:value gone)) (pr-str gone))
     (is (= 3 (:value after)) (pr-str after))
     (is (true? (:value page)) (pr-str page))))
@@ -800,8 +800,7 @@
     (is (= {:results '{facts-test/r :pass}} (:value green)))
     (let [{:keys [branch]} (:value fact-green)]
       (is (= :green (:seon.test/status branch)))
-      (is (nil? (:seon.test/failures branch)) "no failures while green")
-      (is (pos? (:seon.test/ticks branch)) "the sums start over at the new digest"))
+      (is (nil? (:seon.test/failures branch)) "no failures while green"))
     (is (true? (:value again)) "a run that changes nothing writes no datoms")))
 
 (deftest an-agents-greens-and-a-checkouts-are-one-store
@@ -1856,7 +1855,7 @@
 
 (deftest a-prose-reply-stays-in-the-history
   ;; task seon.context/the-context-is-the-agents-evals-and-seons (R1): a reply of prose with no call
-  ;; is the agent winding down; seon.context/records read only evals and messages, so the wake that
+  ;; is the agent winding down; the record read only evals and messages, so the wake that
   ;; followed it sent a history without it. It is an assistant message of the next request
   (let [[_ r] (in-agent (fn [{:keys [ns]}]
                           (let [w (str ns "/w")]

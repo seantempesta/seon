@@ -39,8 +39,9 @@
   {:malli/schema [:=> [:cat :seon.host/db :map] :string]}
   [db c]
   (if-let [es (seq (keys (:system c)))]
-    (->> (map #(d/pull db [:seon.doc/heading :seon.doc/level :seon.doc/text :seon.doc/position] %) es)
-         (sort-by :seon.doc/position)
+    (->> (map #(d/pull db [:seon.doc/address :seon.doc/heading :seon.doc/level :seon.doc/text :seon.doc/position] %) es)
+         ;; page by page, each as the wiki wrote it: a position is its page's
+         (sort-by (juxt #(first (str/split (:seon.doc/address %) #"#")) :seon.doc/position))
          (map (fn [{:seon.doc/keys [heading level text]}] (cond-> (str (apply str (repeat level "#")) " " heading) text (str "\n\n" text))))
          (str/join "\n\n"))
     (system-text db)))
@@ -742,12 +743,16 @@
   {:malli/schema [:=> [:cat :string] :string]}
   [id] (str "eval-" (str/replace id "/" "-")))
 
+(defn result-mark
+  "Eval e's mark as the tree carries it (:wire/result): the record itself, printed only when the model's reading reaches it (seon.render/result-text), and, for an eval that names its basis, how its value is rebuilt (`basis-value`). See
+  docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [e] (cond-> {:record e} (:seon.eval/basis e) (assoc :value-of #'basis-value)))
+
 (defn tool-text
-  "What came of eval e as the model reads it: its response printed now (seon.print/record-text, a function of the eval alone, and of db for an eval that names its basis, `basis-value`, the
-  same bytes cold as live). See docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
+  "What came of eval e as the model reads it, the same printing a request's reading does (seon.render/result-text): for a reader of its text outside the tree. See docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] :map] :string]}
-  [db e]
-  (print/record-text (cond-> e (:seon.eval/basis e) (assoc-in [:seon.eval/response :value] (basis-value db e))) render/model))
+  [db e] (render/result-text db (result-mark e)))
 
 (defn first-taken
   "A message's order in its turn, [db e]: the transaction that named its agent (one seek). See docs/ctx.md#the-pattern."
@@ -759,7 +764,10 @@
   @ctx) is none. Reads each member's id alone. See docs/turn.md#the-turn-is-a-number."
   {:malli/schema [:=> [:cat :seon.host/db :map :int] [:map [:messages [:sequential [:tuple :int :string]]] [:evals [:sequential [:tuple :int :string]]]]]}
   [db c cid]
-  (let [at (fn [k attr] (keep (fn [e] (when-let [id (get-in c [k e attr])] [e id])) (keys (get-in c [:calls cid k]))))]
+  ;; the turn's reads: its member set, and a member its ctx does not hold yet. A member's id is written once, so an outside agent's one growing turn reads no more for each it holds
+  (let [plain (ratom/untracked c)
+        at (fn [k attr] (keep (fn [e] (when-let [id (or (get-in plain [k e attr]) (get-in c [k e attr]))] [e id]))
+                              (when (seq (get-in c [:calls cid k])) (keys (get-in plain [:calls cid k])))))]
     {:messages (let [ms (at :messages :seon.message/id)] (if (next ms) (sort-by (fn [[e]] (first-taken [db e])) ms) ms))
      :evals (sort-by first (at :evals :seon.eval/id))}))
 
@@ -864,7 +872,7 @@
                    call (get-in c [:calls cid])]
              r (concat (for [[m] messages] [(assoc (select-keys (get-in c [:messages m]) [:seon.message/id :seon.message/from :seon.message/body]) :turn n) :seon.message/fact])
                        (when (= :model (:seon.model-call/origin call))
-                         [[(select-keys call [:seon.model-call/id :seon.model-call/n :seon.model-call/origin :seon.model-call/reply :seon.model-call/reasoning]) :seon.model-call/fact]])
+                         [[(select-keys call [:seon.model-call/id :seon.model-call/n :seon.model-call/origin :seon.model-call/reply :seon.model-call/reasoning :seon.model-call/truncated]) :seon.model-call/fact]])
                        (for [[e] evals] [(assoc (dissoc (get-in c [:evals e]) :db/id :seon.eval/agent :seon.eval/call :seon.eval/opened) :turn n) :seon.db/eval-fact]))]
          r)))
 
@@ -940,15 +948,15 @@
             (throw (ex-info "the request has no system message"
                             (contract/error :seon.context/no-system-message #'request "the request has no system message: its component drew none (a db without the prompt, or a section it links gone)"
                                             {:first (some-> (first ps) second first (select-keys [:role :content]))}))))
-        shown? (some (fn [[_ ms]] (some (fn [m] (some #(render-eval? {:seon.eval/code (:code %)}) (:tool-calls m))) ms)) ps)
+        ;; its own: an example session's render of its page shows the agent nothing of its own
+        shown? (some (fn [[r ms]] (when-not (= :example (first r)) (some (fn [m] (some #(render-eval? {:seon.eval/code (:code %)}) (:tool-calls m))) ms))) ps)
         lists (render/page-lists w)
         parts (when (and (not shown?) (seq lists)) (not-empty (render/placed-hiccup w lists)))
         ps (cond-> ps
              parts (into (let [[_ code] (:whole render-calls) id (wire-id "render")
-                               text (print/record-text {:seon.eval/schema :seon.render/parts :seon.eval/response {:value (render/parts-value parts)}} render/model)]
-                           (render/hiccup-wire [:li {:data-role "assistant" :data-call-id id :data-ref [:render]}
-                                                [:pre {:data-field "code"} code]
-                                                [:output {:data-role "tool" :data-call-id id :data-ref [:render]} text]]))))]
+                               record {:seon.eval/schema :seon.render/parts :seon.eval/response {:value (render/parts-value parts)}}]
+                           (render/hiccup-wire [:li {:wire/role "assistant" :wire/call-id id :wire/ref [:render] :wire/result {:record record}}
+                                                [:pre {:wire/field "code"} code]]))))]
     {:messages (into [] (mapcat second) ps) :parts ps}))
 
 (defn messages-tokens

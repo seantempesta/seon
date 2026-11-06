@@ -149,7 +149,7 @@
            :seon.task/kind :work :seon.task/execution :held :seon.task/branch (keyword "main" (str "lab-other" i))}
           [:db/add [:seon.agent/key k] :seon.agent/task [:seon.task/id (str "lab/other" i)]]]
       ;; what the task's derived members read: the plan's vector written, a program form written
-      13 (vector/tx-data [(:db/id (d/entity db [:seon.task/id "lab/ctx"]))] [i] [(mapv #(Math/sin (* (inc i) (inc %) 0.37)) (range 768))] [10] "m")
+      13 (vector/tx-data [(:db/id (d/entity db [:seon.task/id "lab/ctx"]))] [i] [(mapv #(Math/sin (* (inc i) (inc %) 0.37)) (range 768))] "m")
       14 [{:db/id "f" :form/id (str "app.x/g" i) :form/src (str "(defn g" i " [])")} {:var/name (symbol "app.x" (str "g" i)) :var/form "f"}]
       ;; what a task's lookups read: a cited var redefined, a new caller, the var not written yet
       ;; defined (or gone again), a reference added or dropped
@@ -776,7 +776,7 @@
   ;; and saw only the last transaction's datoms: a plan's new citation drew nothing until a commit)
   (let [db (d/db-with (seeded 20 nil) [{:seon.doc/address "docs/x.md#the-z" :seon.doc/heading "The z"
                                          :seon.doc/lead "What z does." :seon.doc/text "What z does."}])
-        page #(pr-str (second (seon.repl/page-hiccup)))
+        page #(pr-str (let [w (seon.repl/page-walk)] (seon.render/placed-hiccup w (seon.render/page-lists w))))
         [[before after] db'] (as-agent! db #(let [before (page)]
                                                (swap! ctx/ctx assoc-in [:task :seon.task/plan] "Make `app.x/f0` pass; see [the z](docs/x.md#the-z).")
                                                (seon.agent/transact! [{:seon.agent/key k :seon.agent/description "another write after it"}])
@@ -1210,9 +1210,9 @@
   (let [db (seeded 3 nil)
         ledger #(set (keys (seon.render/ledger (:walk @seon.agent/state))))
         as (fn [f] (try (enter-agent! {:db db :key k :branch :b}) (f) (finally (end-agent!))))
-        [parts unwatched watched page] (as #(let [p (second (seon.repl/page-hiccup)) u (ledger) pg (seon.repl/render-ctx-hiccup)]
+        [parts unwatched watched page] (as #(let [p (let [w (seon.repl/page-walk)] (seon.render/placed-hiccup w (seon.render/page-lists w))) u (ledger) pg (seon.repl/render-ctx-hiccup)]
                                               [p u (ledger) pg]))
-        whole (as #(do (seon.repl/render-ctx-hiccup) (second (seon.repl/page-hiccup))))]
+        whole (as #(do (seon.repl/render-ctx-hiccup) (let [w (seon.repl/page-walk)] (seon.render/placed-hiccup w (seon.render/page-lists w)))))]
     (is (unwatched 'seon.render.ui/task-list) "the model's list is drawn")
     (is (every? unwatched '[seon.render.ui/conversation-list seon.render.ui/eval-item]) "and the conversation, which it reads as messages")
     (is (not-any? unwatched '[seon.render.ui/tiles seon.render.ui/eval-output seon.render.ui/chat-end seon.render.ui/agent-state]) (pr-str unwatched))
@@ -1259,10 +1259,10 @@
         (is (every? (fn [[_ f]] (and (symbol? (first f)) (map? (second f)))) all) "each headed by its function and its path")
         (is (= {} (into {} after-all)) "shown whole by render-ctx, nothing has moved since")
         (is (= {} (into {} again)) "nothing moved: nothing")
-        (is (= (set (keys all)) (set (keys restarted))) "a process that has shown nothing (a restart) is every part")
+        (is (= (set (map first all)) (set (map first restarted))) "a process that has shown nothing (a restart) is every part")
         (is (= {:seon.render/schema :seon.render/parts :seon.print/full true} (meta all)) "named, so its record prints it whole")
-        (is (some #(= % "task") (keys moved)) "the plan moved: the task's part")
-        (is (not-any? #(= % "status") (keys moved)) "and not what read nothing of it")
+        (is (some #(= % "task") (map first moved)) "the plan moved: the task's part")
+        (is (not-any? #(= % "status") (map first moved)) "and not what read nothing of it")
         (is (str/includes? (pr-str (some (fn [[i f]] (when (= i "task") f)) moved)) "A plan that moved.") "whole"))
       (finally (end-agent!)))))
 

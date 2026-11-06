@@ -92,7 +92,7 @@
   (let [part (seon.render.ui/turn {:seon.ctx/ctx {:seon.agent/status :busy :seon.agent/max-turns 40 :seon.agent/ns 'seon.program :seon.agent/turn 39
                                                           :task {:seon.task/id "seon.program/a-var-is-read"}}})]
     (is (= "You're in seon.program." (second (second part))) "the heading is the namespace the REPL is in, whatever the turn and the cap")
-    (is (nil? (:data-for (second (second part)))) "the model's component holds the heading only")))
+    (is (nil? (:wire/for (second (second part)))) "the model's component holds the heading only")))
 
 (deftest a-records-text-is-the-same-whatever-came-before
   ;; task seon.context/the-context-is-the-agents-evals-and-seons: a record's printed text is a
@@ -545,7 +545,7 @@
 (deftest an-owners-message-reaches-the-next-turn
   ;; owner, 2026-10-23 (parity row 73): the page's message bar sends the owner's words through
   ;; root's delivery; the turn that takes them writes the message fact on its branch, so the
-  ;; conversation holds it in tx order (seon.context/records), rendered by the message fact's
+  ;; conversation holds it in tx order (seon.context/turn-members), rendered by the message fact's
   ;; own messages (seon.seon.fixtures/eval-messages; docs/render.md)
   (let [[m] (seon.fixtures/message-messages {} {:seon.message/from "owner" :seon.message/body "use demo/g, not a new helper"})]
     (is (= "user" (:role m)))
@@ -985,12 +985,12 @@
                                               :seon.task/config {:seon.config.render/relevance-summary 0.0}}]))
         te (pdb/eid db :seon.task/id "demo/r")
         es (into [te] (for [i (range 5)] (pdb/eid db :seon.doc/address (anchors i))))
-        db (d/db-with db (vector/tx-data es (repeat 6 1) (into [(dir 1.0)] (for [i (range 5)] (dir 1.0 (* 0.1 (inc i))))) (repeat 6 10) "m"))
+        db (d/db-with db (vector/tx-data es (repeat 6 1) (into [(dir 1.0)] (for [i (range 5)] (dir 1.0 (* 0.1 (inc i))))) "m"))
         ;; a function beside the plan by meaning, and a schema key its plan names
         db (d/db-with db [{:db/id "f" :form/id "demo/g" :form/src "(defn g [])" :form/keywords #{:demo/thing :demo/not-a-schema}} {:var/name 'demo/g :var/form "f" :var/doc "Gets it. More."}
                           {:schema/key :demo/thing :schema/form "[:map]"}])
         f (pdb/eid db :form/id "demo/g")]
-    [(d/db-with db (vector/tx-data [f] [1] [(dir 1.0 0.05)] [10] "m")) te dir]))
+    [(d/db-with db (vector/tx-data [f] [1] [(dir 1.0 0.05)] "m")) te dir]))
 
 (deftest relevance-is-a-chance-that-follows-the-context
   ;; seon.context/relevance (docs/vector.md#relevance): each item near a context scored as a chance,
@@ -1073,6 +1073,43 @@
         before (runs)]
     (step! walk [{:seon.model-call/id "demo/a1/1" :seon.model-call/agent [:seon.agent/key "demo/a1"] :seon.model-call/n 1 :seon.model-call/origin :model}])
     (is (= before (runs)) "a design task's first turn moved nothing of how its work stands either")))
+
+(deftest the-status-is-one-reaction-the-page-and-the-turn-read
+  ;; docs/render.md#how-the-work-stands: the turn decides from what the component kept, so a status nothing moved costs nothing, and a move reaches both at once
+  (let [[db te] (sections-near "Make ```demo/g``` say one thing.")
+        [w :as walk] (walked db)
+        kept #(render/kept-of w '[seon.render.ui/status])
+        c (:tree (ctx/build db (pdb/eid db :seon.agent/key "demo/a1") :b))
+        before (kept)]
+    (is (map? before))
+    (is (= (select-keys before [:phase :next]) (select-keys (context/status db (ctx/build (d/db-with db [{:seon.agent/key "demo/a1" :seon.agent/task {:seon.task/id "demo/r"}}]) (pdb/eid db :seon.agent/key "demo/a1") :b) {}) [:phase :next])))
+    (step! walk [{:seon.model-call/id "demo/a1/1" :seon.model-call/agent [:seon.agent/key "demo/a1"] :seon.model-call/n 1 :seon.model-call/origin :model}])
+    (is (identical? before (kept)) "nothing of how the work stands moved: the same value, nothing ran")))
+
+(deftest what-is-taken-for-the-next-turn-is-read-before-that-turn-begins
+  ;; docs/turn.md#the-turn-is-a-number: a message is the next turn's, and an outside agent's turn never moves, so the conversation draws one past the turn in force: an agent never
+  ;; loses what it was sent, on the page or in its request
+  (let [[db _] (sections-near "Make ```demo/g``` say one thing.")
+        [w :as walk] (walked db)
+        says #(pr-str (into [] (mapcat second) (render/wire w)))
+        take! (fn [id n body] (update (seon.task/message-tx id :message "owner" :b body) 0 assoc :seon.message/agent {:seon.agent/key "demo/a1"} :seon.message/call (seon.task/call-ref "demo/a1" n)))]
+    (is (not (str/includes? (says) "Before the turn.")))
+    (step! walk (take! "m1" 1 "Before the turn."))
+    (is (str/includes? (says) "Before the turn.") "taken under turn 1, the turn in force 0")
+    (step! walk [{:seon.agent/key "demo/a1" :seon.agent/turn 1}])
+    (step! walk (take! "m2" 2 "One past it again."))
+    (is (str/includes? (says) "One past it again.") "and past each turn after")))
+
+(deftest opening-a-page-does-not-change-what-the-model-reads
+  ;; docs/render.md#the-models-context-a-cached-prefix-then-the-turn: the walk a person has opened draws more, and the model reads the same bytes as the cold walk that drew none of it
+  (let [[db _] (sections-near "Make ```demo/g``` say one thing.")
+        db (d/db-with db (conj (ts/turn-tx "demo/a1" 1 {:seon.model-call/reply "Reading."})
+                               {:seon.agent/key "demo/a1" :seon.agent/task {:seon.task/id "demo/r"}}))
+        c (:tree (ctx/build db (pdb/eid db :seon.agent/key "demo/a1") :b))
+        root (render/declared-var :seon.render/render-ctx)
+        wire #(try (render/wire %) (finally (render/dispose-walk! %)))]
+    (is (= (wire (render/draw c ctx/changes db root {:model-only true :once true}))
+           (wire (render/draw c ctx/changes db root {}))))))
 
 (deftest a-cited-var-redefined-shows-in-the-next-view
   ;; the task's data is a render, never held: a var the plan cites redefined (the agent's defn, or main
@@ -1224,7 +1261,7 @@
     (mapv #(/ % n) raw)))
 
 (deftest search-ranks-meaning-across-kinds-by-score
-  (let [with-vec (fn [m i] [m (vector/fact (:db/id m) 0 (unit-vec i) 4 "m")])
+  (let [with-vec (fn [m i] [m (vector/fact (:db/id m) 0 (unit-vec i) "m")])
         db (d/db-with (ts/test-db)
                       (into [] cat
                             [(with-vec {:db/id "s0" :seon.doc/address "m.md#a" :seon.doc/heading "a" :seon.doc/text "about a"} 0)
@@ -1451,15 +1488,16 @@
 (defn- example-world!
   "A branch with task demo/g, its agent b/a1 and its session, the system prompt, and example session abc made from b/src
   (`source-session!`, `context/session-tx`) named by the task; answers the session-tx."
-  [conn]
+  ([conn] (example-world! conn "(+ 1 2)"))
+  ([conn code]
   (d/transact conn (doc/load-tx @conn "docs" {context/system-page (slurp (str (seon.config/checkout) "/" context/system-page))}))
-  (source-session! conn)
+  (source-session! conn code)
   (let [tx (context/session-tx @conn "b/src" "abc")]
     (doseq [t tx] (d/transact conn t))
     (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "g" :seon.task/plan "Make g." :seon.task/proofs #{'demo-test/g-test}
                                              :seon.task/examples #{[:seon.agent/key "example/abc"]}}]))
     (d/transact conn [{:seon.task/id "demo/g" :seon.task/agent {:seon.agent/key "b/a1" :seon.agent/task {:seon.task/id "demo/g"}}}])
-    tx))
+    tx)))
 
 (def ^:private seen-of
   "The page a branch's agent was last shown (`page!`): one atom a connection."
@@ -1501,6 +1539,23 @@
         (is (str/includes? (:content (peek (:messages r0))) "Make g.") "then the page, as the call Seon made and its answer")
         (is (= ms (subvec (:messages r1) 0 (count ms))) "the second request starts with the first, examples included")
         (is (= [:example "example/abc"] (vec (take 2 (first (second (:parts r0)))))) "the example is a ref of the request")))))
+
+(deftest an-example-that-rendered-its-page-does-not-hide-the-agents
+  ;; docs/render.md#the-render-is-an-eval: a request shows the page when the agent's own session has not: another session's render of its page shows this agent nothing
+  (ts/test-branch!
+    (fn [_ conn]
+      (example-world! conn "(my.render/render-ctx)")
+      (let [{:keys [messages]} (turn! conn 0)]
+        (is (str/includes? (:content (peek messages)) "Make g.") (pr-str (peek messages)))))))
+
+(deftest an-example-sends-a-cut-reply-as-cut
+  ;; docs/tasks.md#a-task-names-example-sessions: a reply the provider cut at its limit reads so in the session and in its example alike
+  (ts/test-branch!
+    (fn [_ conn]
+      (source-session! conn)
+      (d/transact conn [{:seon.model-call/id "b/src/2" :seon.model-call/truncated true}])
+      (let [replies (->> (context/session-tx @conn "b/src" "abc") (mapcat identity) (filter :seon.model-call/reply))]
+        (is (= [true] (map :seon.model-call/truncated replies)))))))
 
 (deftest a-task-with-no-examples-reads-what-it-read-before
   ;; the same task with no :seon.task/examples and with an empty one: the same messages

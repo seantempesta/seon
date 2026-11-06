@@ -255,7 +255,7 @@
   {:malli/schema [:=> [:cat :map :seon.host/fn [:vector :any]] :map]}
   [src db-fn root]
   {:src src :db db-fn :root root :cache (volatile! {}) :queue (volatile! #{}) :mounts (volatile! 0)
-   :ledger (volatile! {}) :out (volatile! nil) :db-keys (volatile! #{}) :readers (volatile! {}) :forms (volatile! {}) :drawn (ratom/atom {}) :watched (volatile! #{}) :inputs (volatile! {}) :gone (volatile! #{}) :skipped (volatile! #{})})
+   :ledger (volatile! {}) :out (volatile! nil) :db-keys (volatile! #{}) :readers (volatile! {}) :forms (volatile! {}) :drawn (ratom/atom {}) :watched (volatile! #{}) :inputs (volatile! {}) :gone (volatile! #{}) :skipped (volatile! #{}) :defects (volatile! [])})
 
 (defn- led!
   "Count k (:hit, :miss, :same) for render var f in w's ledger, with the ticks and bytes a run took."
@@ -332,19 +332,25 @@
             kids (volatile! [])
             id (key-id k)
             reads (volatile! nil)
+            kept (volatile! nil)
             ;; its render and the drawing of its output in one: a lazy part of the hiccup reads (and
             ;; throws) only when it is drawn, and a db render's reads are all of what it drew
-            one #(try (with-id (emit w (apply f o args) (assoc env :children kids :self k)) {:id (or (when (var? f) (:seon.render/list (meta f))) id) :class (name (first k))})
+            one #(try (with-id (emit w (let [raw (apply f o args)] (vreset! kept (:seon.render/kept (meta raw))) raw) (assoc env :children kids :self k)) {:id (or (when (var? f) (:seon.render/list (meta f))) id) :class (name (first k))})
                       ;; a component that throws draws its error in its place: a call of the error's render on the error as data (what
                       ;; threw, and the thrown error's own data: a contract's problems), so the page writes that render and the model
                       ;; reads the call, the error in it, in the conversation a user message at its place; every other component draws
                       (catch Throwable e
-                        (with-id [#'html {:schema :seon.render/component-defect :as :block}
-                                  (contract/error :seon.render/component-defect #'render!
-                                                  (str (symbol f) " threw: " (or (ex-message e) (str e)))
-                                                  (cond-> {:seon.error/in (symbol f)}
-                                                    (map? (ex-data e)) (assoc :seon.render/threw (ex-data e))))]
-                                 {:id id :class "err" :data-role "user"})))
+                        ;; an interrupt is no defect of this render: it passes
+                        (when (:interrupted (ex-data e)) (throw e))
+                        (let [defect (contract/error :seon.render/component-defect #'render!
+                                                     (str (symbol f) " threw: " (or (ex-message e) (str e)))
+                                                     (cond-> {:seon.error/in (symbol f)}
+                                                       (map? (ex-data e)) (assoc :seon.render/threw (ex-data e))))]
+                          (vreset! kept nil)
+                          ;; health sees it (`take-defects!`)
+                          (vswap! (:defects w) conj defect)
+                          (with-id [#'html {:schema :seon.render/component-defect :as :block} defect]
+                                   {:id id :class "err" :wire/role "user"}))))
             draw #(if (and db? (not (:once w))) (let [[out rs] (d/with-reads one)] (vreset! reads rs) out) (one))
             a0 (profile/alloc-bytes)
             [out rx] (cond
@@ -375,13 +381,24 @@
         (some-> (:ran env) (vswap! assoc k (if same? :same :miss)))
         ;; merged: its written html (placed-units) stays while its revision does
         (vswap! (:cache w) update k merge {:f f :opts opts :args args :rx rx :out (if same? (:out prev) out) :children children
-                                    :order order :id id :rev (if same? (:rev prev) (inc (:rev prev 0)))
+                                    :order order :id id :rev (if same? (:rev prev) (inc (:rev prev 0))) :kept @kept
                                     :reads read-keys})
         ;; the components that read the db: the ones a transaction's datoms are matched against
         (vswap! (:db-keys w) (if (seq @reads) conj disj) k)
         (when (:reads prev) (forget-readers! w k (:reads prev)))
         (doseq [rk read-keys] (vswap! (:readers w) update rk (fnil conj #{}) k))
         [::child k]))))
+
+(defn kept-of
+  "What component k of walk w kept as of its last run, its output's metadata :seon.render/kept: the data its hiccup was made of, for a reader that decides from it (a turn, the status), so one reaction serves both and an unchanged one
+  costs nothing. Nil when it did not draw or threw. See docs/render.md#how-the-work-stands."
+  {:malli/schema [:=> [:cat :map [:vector :any]] :any]}
+  [w k] (:kept (get @(:cache w) k)))
+
+(defn take-defects!
+  "The components of walk w that threw since the last take, each its :seon.render/component-defect, for whoever records a problem (the agent's fold, root's api). See docs/health.md."
+  {:malli/schema [:=> [:cat :map] [:vector :map]]}
+  [w] (let [ds @(:defects w)] (when (seq ds) (vreset! (:defects w) [])) ds))
 
 (defn unmount!
   "Component k gone from walk w: its reaction disposed, and each child it alone held with it. See docs/render.md#components."
@@ -399,10 +416,10 @@
   nil)
 
 (defn- page-only?
-  "Is x, an element or a component call, for the page alone (its attributes or opts :data-for \"page\": what the model does not read)? See
+  "Is x, an element or a component call, for the page alone (its attributes or opts :wire/for \"page\": what the model does not read)? See
   docs/render.md#a-part-prints-as-its-render."
   {:malli/schema [:=> [:cat :any] :boolean]}
-  [x] (and (vector? x) (map? (second x)) (= "page" (:data-for (second x)))))
+  [x] (and (vector? x) (map? (second x)) (= "page" (:wire/for (second x)))))
 
 (defn emit
   "Hiccup hc drawn in walk w: an element's children drawn; a component call rendered (render!) to
@@ -418,7 +435,7 @@
        (vector? x)
        (let [head (first x) o (second x)]
          (cond
-           (and (:model-only w) (map? o) (= "page" (:data-for o))) (do (vswap! (:skipped w) conj (:self env)) nil)
+           (and (:model-only w) (map? o) (= "page" (:wire/for o))) (do (vswap! (:skipped w) conj (:self env)) nil)
            (keyword? head)
            (let [attrs (when (map? o) o) kids (if attrs (nnext x) (next x))]
              (into (if attrs [head attrs] [head]) (map #(go % env)) kids))
@@ -463,8 +480,12 @@
   ([w k] (resolved w k false))
   ([w k html?]
    (let [c (get @(:cache w) k)]
-     (clojure.walk/postwalk (fn [x] (if (and (vector? x) (= ::child (first x))) (resolved w (second x) html?) x))
-                            (cond-> (:out c) html? (styled (:f c)))))))
+     ;; through elements and lists, never into an element's attributes: a :wire/result holds a whole record, and no marker sits there
+     ((fn go [x] (cond (and (vector? x) (= ::child (first x))) (resolved w (second x) html?)
+                       (vector? x) (mapv go x)
+                       (seq? x) (map go x)
+                       :else x))
+      (cond-> (:out c) html? (styled (:f c)))))))
 
 (defn- render-reach
   "The vars whose work reaches any of vars names on db, names among them: each form naming one (:form/refs), and what
@@ -578,9 +599,9 @@
            {:id (:id c) :container sel :rev r :html html}))))
 
 (defn- strip-attrs
-  "An element's attributes as the model reads them: its presentation (class, style) is the page's; an id names it, so the model need not guess it."
+  "An element's attributes as a reader of its hiccup reads them: its presentation (class, style) is the page's and its marks (:wire/*) the reading's; an id names it, so the model need not guess it."
   {:malli/schema [:=> [:cat :map] [:maybe :map]]}
-  [attrs] (not-empty (dissoc attrs :class :style)))
+  [attrs] (not-empty (reduce-kv (fn [m k _] (if (and (keyword? k) (= "wire" (namespace k))) (dissoc m k) m)) (dissoc attrs :class :style) attrs)))
 
 (defn- size
   "The characters x holds, as the one sizer counts them: its strings and the text of its other leaves, a mark for each collection
@@ -588,7 +609,7 @@
   {:malli/schema [:=> [:cat :any] nat-int?]}
   [x] (cond (coll? x) (reduce + 1 (map size x)) (nil? x) 0 :else (count (str x))))
 
-(defn- tokens-of
+(defn tokens-of
   "What x costs the context in tokens: the one sizer (`seon.print.emit/chars-tokens`) over the characters x holds, the same count
   a part's head (`part-form`) and the tree (`tree`) give."
   {:malli/schema [:=> [:cat :any] nat-int?]}
@@ -628,7 +649,7 @@
         body (if wrapper?
                (mapcat #(body-forms w %) (if (map? (second out)) (drop 2 out) (rest out)))
                (body-forms w out))]
-    (when (and (seq body) (not= "page" (:data-for (:opts c))))
+    (when (and (seq body) (not= "page" (:wire/for (:opts c))))
       (into [(symbol (:f c)) (if-let [at (:at (:opts c))] {:ctx at} {})] body))))
 
 (defn fence
@@ -661,10 +682,10 @@
   [f] (print/text (vary-meta (printable f) assoc :seon.print/full true)))
 
 (defn parts-value
-  "Parts m ({id form}) as the value an eval answers: each form ready to print (`printable`), the map named a :seon.render/parts,
+  "Parts m (a sequence of [id form], or {id form}, in placed order) as the value an eval answers: a vector of [id form], so the order they are placed in is the order they print in whatever the store does with a map, each form ready to print (`printable`), named a :seon.render/parts,
   which prints whole (:seon.print/full on its schema), the stored value too. See docs/render.md#the-render-is-an-eval."
-  {:malli/schema [:=> [:cat :map] :seon.render/parts]}
-  [m] (with-meta (into (array-map) (map (fn [[id f]] [id (printable f)])) m) {:seon.render/schema :seon.render/parts :seon.print/full true}))
+  {:malli/schema [:=> [:cat [:or :map [:sequential :any]]] :seon.render/parts]}
+  [m] (with-meta (mapv (fn [[id f]] [id (printable f)]) m) {:seon.render/schema :seon.render/parts :seon.print/full true}))
 
 (defn placed-hiccup
   "The parts of walk w placed in the root's lists with element ids sels ([\"#p-task\"]), in order, as {id form}: what
@@ -677,7 +698,7 @@
   "The parts of walk w placed in the lists sels that the model reads, [[id k]] in order: the element id and the cache key of each."
   {:malli/schema [:=> [:cat :map [:sequential :string]] [:vector [:tuple :string [:vector :any]]]]}
   [w sels]
-  (vec (for [[_ k] (placed w sels) :let [c (get @(:cache w) k)] :when (not= "page" (:data-for (:opts c)))] [(:id c) k])))
+  (vec (for [[_ k] (placed w sels) :let [c (get @(:cache w) k)] :when (not= "page" (:wire/for (:opts c)))] [(:id c) k])))
 
 (defn revs
   "The revisions of the parts of walk w placed in the lists sels, {id tree-rev}: what moves when a part's output, or one below it,
@@ -687,15 +708,15 @@
   (into {} (map (fn [[id k]] [id (tree-rev w k)])) (placed-ids w sels)))
 
 (defn parts-since
-  "The parts of walk w placed in the lists sels that moved since seen ({id tree-rev} of an earlier answer): {:parts {id form}
+  "The parts of walk w placed in the lists sels that moved since seen ({id tree-rev} of an earlier answer): {:parts [[id form]] in placed order
   :revs {id tree-rev} :gone [id]}. The walk already compared each part's output with its last (a revision moves only when it
   differs, `render!`), so nothing is compared or drawn here but the revisions (`revs`), and a part's form (`part-form`) is made only for a
   part that moved; nothing moved, nothing made. A walk new to its process has seen nothing: every part."
-  {:malli/schema [:=> [:cat :map [:sequential :string] [:maybe :map]] [:map [:parts :map] [:revs :map] [:gone [:vector :string]]]]}
+  {:malli/schema [:=> [:cat :map [:sequential :string] [:maybe :map]] [:map [:parts [:vector :any]] [:revs :map] [:gone [:vector :string]]]]}
   [w sels seen]
   (let [ps (placed-ids w sels)
         revs (into {} (map (fn [[id k]] [id (tree-rev w k)])) ps)]
-    {:parts (into (array-map) (keep (fn [[id k]] (when (not= (get seen id) (get revs id)) (when-let [f (part-form w k)] [id f])))) ps)
+    {:parts (into [] (keep (fn [[id k]] (when (not= (get seen id) (get revs id)) (when-let [f (part-form w k)] [id f])))) ps)
      :revs revs
      :gone (vec (remove revs (keys seen)))}))
 
@@ -731,21 +752,32 @@
   (let [cache @(:cache w)]
     (vec (for [k (:children (get cache @(:out w)))
                :let [{:keys [f opts]} (get cache k) m (when (var? f) (meta f))]
-               :when (and (:seon.render/list m) (not (:seon.render/messages m)) (not= "page" (:data-for opts)))]
+               :when (and (:seon.render/list m) (not (:seon.render/messages m)) (not= "page" (:wire/for opts)))]
            (str "#" (:seon.render/list m))))))
 
 ;;; --- the model's reading of the tree: one generic conversion to provider-neutral messages ---------
 
+(defn result-text
+  "What came of an eval as the model reads it, printed now by the one printer (seon.print/record-text, through `model`), from its mark :wire/result {:record e}: :value-of, a function of db and e, when the value is rebuilt rather than kept, and
+  :with, what a message that is not a call's answer says around it as {.. :response text}. A function of the record alone and of db at the t it names, so the same bytes cold as live. See docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] :map] :string]}
+  [db {:keys [record value-of with]}]
+  (let [text (print/record-text (cond-> record value-of (assoc-in [:seon.eval/response :value] (value-of db record))) model)]
+    (if with
+      (str "{" (str/join " " (map (fn [[k v]] (str k " " (pr-str v))) with)) " :response " text "}")
+      text)))
+
 (defn- wire-parts
-  "Node x0 of walk w (nil: a hiccup alone) as parts [ref message turn], in order, the one reading of the tree. An element marked :data-role is a message and then what it left for after: inside one, text is itself, a plain
-  call the text it was given, else its last argument printed (the page's writer expands the call, the model reads what it was given), a value printed, a child marked `:data-field` its own field, a component or an element that is a message
+  "Node x0 of walk w (nil: a hiccup alone) as parts [ref message turn], in order, the one reading of the tree. An element marked :wire/role is a message and then what it left for after: inside one, text is itself, a plain
+  call the text it was given, else its last argument printed (the page's writer expands the call, the model reads what it was given), a value printed, a child marked `:wire/field` its own field, a component or an element that is a message
   of its own left for after this one, what is for the page alone nothing. A message is an assistant's call from its id and its fields code and intent, an assistant's words from its fields content and reasoning (no words, no message), a tool's result
-  its text, any other its text, or its fields as the one printer prints a map. Its :data-ref is that message's ref, a :data-ref on an element that is no message the ref of all within it (an example session), a :data-turn the turn of all within it, a :data-reply
+  its text, a system's or a user's its text, or its fields as the one printer prints a map; a :wire/result is printed when read (`result-text`), a call's the tool message after it and a user's its text; a role or a field none of these names is :seon.render/unknown-mark. Its :wire/ref is that message's ref, one on an element that is no message the ref of all within it (an example session), a :wire/turn the turn of all within it, a :wire/reply
   the reply of the calls within it. A component's parts are kept on its cache entry by its revision and let go when one below it moves (`render!`), so a request reads what moved and what holds it, and takes the rest as it was read. Local fns: no contracted call a node. See
   docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
   {:malli/schema [:=> [:cat [:maybe :map] :any :map] [:vector :any]]}
   [w x0 env0]
-  (letfn [(page? [x] (and (map? (second x)) (= "page" (:data-for (second x)))))
+  (letfn [(page? [x] (and (map? (second x)) (= "page" (:wire/for (second x)))))
+          (refuse [why x] (throw (ex-info why (contract/error :seon.render/unknown-mark #'wire-parts why {:mark (str x)}))))
           (split [x] (if (and (map? (second x)) (not (h/raw? (second x)))) [(second x) (drop 2 x)] [nil (rest x)]))
           (read-node [acc x]
             (cond
@@ -758,29 +790,33 @@
               (and (vector? x) (keyword? (first x)))
               (let [[attrs kids] (split x)]
                 (cond
-                  (:data-role attrs) (update acc :nested conj x)
-                  (:data-field attrs) (let [sub (reduce read-node {:text [] :nested []} kids)]
+                  (:wire/role attrs) (update acc :nested conj x)
+                  (:wire/field attrs) (let [sub (reduce read-node {:text [] :nested []} kids)
+                                            _ (when-not (#{"code" "intent" "content" "reasoning" "from" "body"} (:wire/field attrs))
+                                                (refuse "an element marks a field no message has" (:wire/field attrs)))]
                                         (-> acc
-                                            (update :fields (fnil assoc (array-map)) (keyword (:data-field attrs)) (apply str (:text sub)))
+                                            (update :fields (fnil assoc (array-map)) (keyword (:wire/field attrs)) (apply str (:text sub)))
                                             (update :nested into (:nested sub))))
                   :else (reduce read-node acc kids)))
               (and (map? x) (h/raw? x)) (update acc :text conj (str x))
               (and (vector? x) (or (var? (first x)) (fn? (first x))))
               (update acc :text conj (or (first (filter string? (rest x))) (print/text (peek x))))
               :else (update acc :text conj (print/text x))))
-          (message [attrs {:keys [text fields]} env]
-            (let [role (:data-role attrs) reply (or (:data-reply attrs) (:reply env))]
+          (message [attrs {:keys [text fields]} result env]
+            (let [role (:wire/role attrs) reply (or (:wire/reply attrs) (:reply env))]
               (case role
                 "assistant" (cond
-                              (:data-call-id attrs)
-                              (cond-> {:role role :content "" :tool-calls [(cond-> {:id (:data-call-id attrs) :code (:code fields)} (:intent fields) (assoc :intent (:intent fields)))]}
+                              (:wire/call-id attrs)
+                              (cond-> {:role role :content "" :tool-calls [(cond-> {:id (:wire/call-id attrs) :code (:code fields)} (:intent fields) (assoc :intent (:intent fields)))]}
                                 reply (assoc :reply reply))
                               (or (contains? fields :content) (contains? fields :reasoning))
                               (cond-> {:role role :content (:content fields "")}
                                 (contains? fields :reasoning) (assoc :reasoning (:reasoning fields))
                                 reply (assoc :reply reply)))
-                "tool" {:role role :tool-call-id (:data-call-id attrs) :content (apply str text)}
-                {:role role :content (if (seq fields) (print/text fields (:context print/budgets)) (apply str text))})))
+                ("system" "user") {:role role :content (cond result result
+                                                             (seq fields) (print/text fields (:context print/budgets))
+                                                             :else (apply str text))}
+                (refuse "an element marks a role no message has" role))))
           (walk [x env]
             (cond
               (and (vector? x) (= ::child (first x))) (component (second x) env)
@@ -788,31 +824,39 @@
               (and (vector? x) (page? x)) []
               (and (vector? x) (keyword? (first x)))
               (let [[attrs kids] (split x)
-                    env (cond-> env (:data-turn attrs) (assoc :turn (:data-turn attrs)))]
-                (if (:data-role attrs)
+                    env (cond-> env (:wire/turn attrs) (assoc :turn (:wire/turn attrs)))]
+                (if (:wire/role attrs)
                   (let [acc (reduce read-node {:text [] :nested []} kids)
-                        m (message attrs acc env)
-                        inner (cond-> env (:data-reply attrs) (assoc :reply (:data-reply attrs)))]
-                    (into (if m [[(or (:ref env) (:data-ref attrs)) m (:turn env)]] [])
+                        result (when-let [r (:wire/result attrs)] (result-text (if w ((:db w)) (:db env0)) r))
+                        m (message attrs acc result env)
+                        at (or (:ref env) (:wire/ref attrs))
+                        inner (cond-> env (:wire/reply attrs) (assoc :reply (:wire/reply attrs)))]
+                    (into (cond-> []
+                            m (conj [at m (:turn env)])
+                            ;; a call's result is the tool message that answers it
+                            (and result (:wire/call-id attrs)) (conj [at {:role "tool" :tool-call-id (:wire/call-id attrs) :content result} (:turn env)]))
                           (mapcat #(walk % inner)) (:nested acc)))
-                  (let [env (cond-> env (:data-ref attrs) (assoc :ref (:data-ref attrs)))]
+                  (let [env (cond-> env (:wire/ref attrs) (assoc :ref (:wire/ref attrs)))]
                     (into [] (mapcat #(walk % env)) kids))))
               :else []))
           (component [k env]
-            (let [{:keys [rev wire-at wire out]} (get @(:cache w) k)
+            (let [{:keys [rev wire-at wire out opts]} (get @(:cache w) k)
                   at [rev env]]
-              (if (= at wire-at)
-                wire
-                (let [ps (walk out env)]
-                  (vswap! (:cache w) update k assoc :wire-at at :wire ps)
-                  ps))))]
-    (walk x0 env0)))
+              (cond
+                ;; a person's page drawn or not, the model reads the same
+                (= "page" (:wire/for opts)) []
+                (= at wire-at) wire
+                :else (let [ps (walk out env)]
+                        (vswap! (:cache w) update k assoc :wire-at at :wire ps)
+                        ps))))]
+    (walk x0 (dissoc env0 :db))))
 
 (defn hiccup-wire
-  "Hiccup x with no walk behind it as parts [ref messages turn], the same reading (`wire`): a piece a request adds to the tree. See
+  "Hiccup x with no walk behind it as parts [ref messages turn], the same reading (`wire`), a result printed against db: a piece a request adds to the tree. See
   docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
-  {:malli/schema [:=> [:cat :any] [:vector :any]]}
-  [x] (mapv (fn [[r m t]] [r [m] t]) (wire-parts nil x {})))
+  {:malli/schema [:function [:=> [:cat :any] [:vector :any]] [:=> [:cat :any [:maybe :seon.host/db]] [:vector :any]]]}
+  ([x] (hiccup-wire x nil))
+  ([x db] (mapv (fn [[r m t]] [r [m] t]) (wire-parts nil x {:db db}))))
 
 (defn wire
   "What the model reads of walk w: its lists that hold messages (a list var's :seon.render/messages) through one generic reading, in order, as parts [ref messages turn], the messages of one ref together. The one way
