@@ -696,7 +696,6 @@
                                       calls (when (and src (not= :pass st)) (callees db p))
                                       shape (when (= :undefined st) (test-shape db p))]]
                             (cond-> {:test p :status st}
-                              (or (:seon.test/ticks v) (:seon.test/bytes v)) (assoc :cost (cond-> {} (:seon.test/ticks v) (assoc :ticks (:seon.test/ticks v)) (:seon.test/bytes v) (assoc :bytes (:seon.test/bytes v))))
                               (and src (not= :pass st)) (assoc :source (print/code src))
                               shape (assoc :shape shape)
                               (seq fs) (assoc :failures (failures fs))
