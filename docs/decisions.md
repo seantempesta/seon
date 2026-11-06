@@ -38,6 +38,26 @@ Owner, 2026-11-06: "I think that's fine to pause the agent if they don't do any 
 
 Owner, 2026-11-06: "I think we decided not to focus on making agents cheap (highly efficient) and not taking them out of memory. If by park you mean in the flow sense where it's a blocking wait and no cpu is used that's great. If it's replaying sessions -- no we know this is deeply problematic (fire-the-missles! kind of problematic) and we want to be intentional about replay and maybe even do selective replay". This tempers the automatic replay in the 2026-10-25 entry below, which was never built. Stated: docs/turn.md#parked.
 
+### Edits go to the database, then to disk when asked
+
+Owner, 2026-11-06: "I want edits to go into the database (which is the source of truth) and then to be explicitly synced to disk"; "don't reinvent the wheel. improve the existing systems our agents are using not creating new systems". An edit saves to a branch, merges to main with its proofs, then an explicit sync commits to the merges branch (the owner's choice in a round of questions). Task `seon.render/an-edit-reaches-disk-when-asked`.
+
+### No regex or text parsing; function composition
+
+Owner, 2026-11-06: "I don't want anything hacky here. No regex or parsing text. I want function composition." Stated in AGENTS.md §9 (regex over code) and task `seon.render/an-eval-run-again-replaces-itself`.
+
+### An eval run again replaces itself
+
+Owner, 2026-11-06: "Evals I run again should replace (upsert) the existing eval and yes that's the point is for the model to see the updated version if I'm intentionally re-running it." Task `seon.render/an-eval-run-again-replaces-itself`.
+
+### The debug page is the wire; the agent's page is where it is friendly
+
+Owner, 2026-11-06: "I want the wire format types as they are. This is a debug page and there's too much magic going on. The agents rendered html page is where we make it user friendly."; "expand should expand not repeat". Stated in docs/render.md#the-debug-page-is-the-wire-request and seon.render.ui/debug-turn.
+
+### Styling is a render the agent can read and change
+
+Owner, 2026-11-06: "I want to keep the parts that allow the model to fix problems without guessing what the ids are ... pull in the relevant CSS as one of the render functions so the agent can separate styling with context and they can update it too". Stated in docs/render.md#style (`:seon.render/style` as plain CSS rules, seon.render.ui/page-rules).
+
 ## 2026-11-05 rulings
 
 The owner's rulings of 2026-11-05, on looking before building and on what makes an agent's context; they stand over earlier entries where they differ.
@@ -200,7 +220,7 @@ The owner's rulings of 2026-10-29, each with where it is now stated; they stand 
 
 ### The page is a friendly chat; what the model was sent is shown whole (owner, 2026-10-29)
 
-"I want the chat to look like a nice chat screen with just prose unless I dig into it. The subtle ticks, ms metadata is nice"; "Does that look like a friendly chat window that my mom could use?"; "have the step expansions open up the details directly so it's not two clicks"; "I want to understand what the agent was sent cleanly so you can format it nicely but I don't want anything hidden"; "Also the cache points". A turn is one message with its steps folded under it, opened in one click; the run's start and end are cards; the model's requests are shown whole with the provider's cache point. Stated in: docs/render.md#the-page, seon.render.ui/chat-turn, seon.render.ui/sent-request.
+"I want the chat to look like a nice chat screen with just prose unless I dig into it. The subtle ticks, ms metadata is nice"; "Does that look like a friendly chat window that my mom could use?"; "have the step expansions open up the details directly so it's not two clicks"; "I want to understand what the agent was sent cleanly so you can format it nicely but I don't want anything hidden"; "Also the cache points". A turn is one message with each eval a step under it, opened in one click to its code and value; the chat's start and end are cards; what the model was sent is the debug tab, the raw wire with the provider's cache point. Stated in: docs/render.md#the-page, docs/render.md#the-debug-page-is-the-wire-request, seon.render.ui/conversation-turn, seon.render.ui/debug-turn.
 
 ### Counts are tokens; what an agent writes is Markdown (owner, 2026-10-29)
 

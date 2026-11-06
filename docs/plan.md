@@ -13,7 +13,7 @@ What Seon is for, where it stands, the one step being worked now, and the steps 
    - main's difference from its branch is in that line every time, so nothing at the end is a surprise;
    - the tests its change reaches run by themselves, by digest; a failure comes back as data it can fix.
 3. **Done means green and merged**: the done rule checks the proofs at the branch's commit; the branch merges into main; main runs the result next.
-4. **The user watches it live**: the agent's page is a chat (the task, the agent's prose, each eval with a one-line outcome), and the agent sees what the user sees.
+4. **The user watches it live**: the agent's page is a chat (the task, the agent's reply, each eval with a one-line outcome), and the agent sees what the user sees.
 
 **Measured as** turns to green and tasks merged. **Held to:** nothing crashes or hangs (every failure is data to the agent); everything shown is derived from the db at t; one mechanism per job; every change earns its place; a v1 capability is present or dropped on purpose ([parity](parity.md)).
 
@@ -26,7 +26,7 @@ In flight, each on its own branch and merged when proved:
 - **Test reuse:** a test's digest takes a form's read form, not its text; config keys a `:map` lists are no edges (`jolt/reuse-wip`).
 - **Agents repeating themselves** is a bug being root-caused (`jolt/no-repeats`).
 - **Cost of an eval and of a root's boot:** the Optimization session.
-- **The agent's chat page and the raw debug tab:** the Web session.
+- **The web pages:** the agent's chat, `@ctx` and raw-wire debug tabs and root's work list are on main. Step buttons are in flight on `jolt/step-buttons` (`seon.repl/again`, `seon.repl/again-to`; task `seon.render/an-eval-run-again-replaces-itself`; not merged). Next: going back to any point (`seon.agent/reset-an-agent-to-any-point`), source editing with an explicit disk sync (`seon.render/an-edit-reaches-disk-when-asked`) and a chat that sends only what it places (`seon.render/an-agents-chat-sends-only-what-it-places`).
 
 Open with the owner: erasing the store for the schema step; surfacing a red from the nightly full run.
 
