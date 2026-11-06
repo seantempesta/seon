@@ -419,7 +419,7 @@
         (reply! st o p (absent (get-in st [:view :agents id]) id))
         (let [[st rid] (pend st p op id)
               msg (case op
-                    :eval (cond-> {:op :eval :forms (:forms m)} (:ticks m) (assoc :ticks (:ticks m)) (:origin m) (assoc :origin (:origin m)))
+                    :eval (cond-> {:op :eval :forms (:forms m)} (:ticks m) (assoc :ticks (:ticks m)) (:origin m) (assoc :origin (:origin m)) (contains? m :intent) (assoc :intent (:intent m)))
                     :tests (cond-> {:op :tests} (:ticks m) (assoc :ticks (:ticks m)) (:names m) (assoc :names (:names m)) (:mode m) (assoc :mode (:mode m))
                                             (get-in st [:view :agents id :task]) (assoc :task (get-in st [:view :agents id :task])))
                     :judge {:op :judge}
@@ -635,8 +635,7 @@
       st)))
 
 (defn- answer-taken
-  "st with the caller of x, a message proc pid's throwing step took, answered the defect e
-  (task `seon.root/a-proc-answers-every-request-it-took`): the answer its :dest names
+  "st with the caller of x, a message proc pid's throwing step took, answered the defect e: the answer its :dest names
   (`seon.root/back-op`), its promise or reply route when it came in at the api or as a
   proc's request, the request pending under its :rid, or, for an answer the proc took
   ({:tag :r}), that answer again on the proc's :answers route. An answer that was already an
@@ -1104,7 +1103,7 @@
         {root-errors :error-chan} (flow/start g)
         ;; Flow's error channel (every proc's, agents included) piped into :back, each defect
         ;; fed to the api as data, with the message the step took (:msg), which the api
-        ;; answers (task `seon.root/a-proc-answers-every-request-it-took`); :back outlives it
+        ;; answers; :back outlives it
         _ (a/pipe (a/pipe root-errors (a/chan 1 (map flow-error))) (:back chans) false)
         sys (merge chans {:cfg store-cfg :conn conn :graph g :t0 t0
                           :store-path path :boot boot
@@ -1170,8 +1169,7 @@
 
 (defn errors
   "The api's fold of the errors it saw (seon.error/fold): the true counts, including repeats
-  of written signatures that main does not hold; the api's defect when it could not answer
-  (task `seon.root/a-proc-answers-every-request-it-took`)."
+  of written signatures that main does not hold; the api's defect when it could not answer."
   {:malli/schema [:=> [:cat :seon.root/sys] [:or :seon.error/fold :seon.error/base]]}
   [sys] @(call! sys {:op :errors}))
 
@@ -1194,7 +1192,7 @@
     (case op
       spawn! {:op :spawn :opts (or args {})}
       clone! {:op :clone :parent id :opts (or args {})}
-      submit! (cond-> {:op :eval :id id :forms (:forms args)} (:ticks args) (assoc :ticks (:ticks args)) (:origin args) (assoc :origin (:origin args)))
+      submit! (cond-> {:op :eval :id id :forms (:forms args)} (:ticks args) (assoc :ticks (:ticks args)) (:origin args) (assoc :origin (:origin args)) (contains? args :intent) (assoc :intent (:intent args)))
       ;; the agent proves its branch through the test service as root's judge does (seon.agent/prove!
       ;; :judge, which keys the run by its head's digest): recorded on main, one run with any other asker's
       run-tests! {:op :judge :id id}
@@ -1241,7 +1239,7 @@
   "Send forms (a string) to the agent; a promise of the reply vector, one map per form.
   opts {:ticks n}: each form stops after n engine ticks of work (an outside or ui origin
   takes :seon.config.agent/form-ticks by default); {:origin :outside|:ui}: who asked, recorded
-  with each evaluation."
+  with each evaluation; {:intent s}: run as a model's call is (seon.repl/run-calls)."
   {:malli/schema [:function [:=> [:cat :seon.root/sys :seon.agent/id :string] :seon.host/promise] [:=> [:cat :seon.root/sys :seon.agent/id :string [:maybe :map]] :seon.host/promise]]}
   ([sys agent-id forms-string] (submit! sys agent-id forms-string nil))
   ([sys agent-id forms-string opts] (request! sys 'submit! agent-id (assoc opts :forms forms-string))))
