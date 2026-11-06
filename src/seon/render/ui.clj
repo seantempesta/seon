@@ -1444,11 +1444,51 @@
       (let [turns (ratom/realize (:seon.agent/ended-turn c))
             reason (ratom/realize (:seon.agent/reason c))]
         [:p {:class (if (= :green outcome) "text-success" "text-text-100")}
-         (str (case outcome :green "✓ Done" :waiting "Waiting for you" (str "Ended: " (kname outcome)))
-              (when (pos? turns) (str " in " turns (if (= 1 turns) " turn" " turns")))
+         (str (case outcome :green "✓ It finished its work" :waiting "Waiting for you" :cap "Stopped at its turn limit" (str "Ended: " (kname outcome)))
+              (when (pos? turns) (str (if (= :cap outcome) " after " " in ") turns (if (= 1 turns) " turn" " turns")))
               (when (and reason (not= :green outcome)) (str " · " reason)))])
       (when-let [status (ratom/realize (:seon.agent/status c))]
         [:p {:class "muted"} (case status :busy "working…" :idle "waiting for you" (kname status))]))))
+
+(defn story-rows
+  "Each turn's reading of a proof, [n status failures first-failure] in order (status nil: not run yet; :gone: its commit was swept), as the runs of equal readings: {:from :to :status :failures :first}, so a change is a row and a stretch of the same is one. See docs/render.md#the-page."
+  {:malli/schema [:=> [:cat [:sequential [:tuple :int :any :int :any]]] [:vector :map]]}
+  [turns]
+  (reduce (fn [acc [n status failures fst]]
+            (let [p (peek acc)]
+              (if (and p (= [status failures fst] [(:status p) (:failures p) (:first p)]))
+                (conj (pop acc) (assoc p :to n))
+                (conj acc {:from n :to n :status status :failures failures :first fst}))))
+          [] turns))
+
+(defn proof-story
+  "How each proof of an agent's task went across its turns (a component over ctx and the db), once its work has ended: read from the commit each turn's basis names, where the test's status and failures stood, so it is what the agent read then and nothing is recorded for it. A row for each change. The person's: the model read each as it came. See docs/render.md#the-page."
+  {:seon.render/style "text-xs" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
+  [{c :seon.ctx/ctx db :seon.db/db}]
+  (let [proofs (ratom/realize (get (:task c) :seon.task/proofs))
+        outcome (ratom/realize (:seon.agent/outcome c))
+        turn (or (ratom/realize (:seon.agent/turn c)) 0)]
+    (when (and (seq proofs) outcome (= (ratom/realize (:seon.agent/ended-turn c)) turn))
+      (let [calls (sort-by first (d/q '[:find ?n ?b :in $ ?a :where [?c :seon.model-call/agent ?a] [?c :seon.model-call/n ?n] [?c :seon.model-call/basis ?b]] db (:db/id c)))
+            commits (for [[n b] calls] [n (d/commit-as-db (:store db) (:commit b))])]
+        [:details {:class "self-stretch"}
+         [:summary {:class "muted"} "How the proof went"]
+         (for [p (sort-by str proofs) :let [e (:db/id (d/entity db [:var/name p]))]]
+           [:div {:class "mt-1"}
+            [:code p]
+            [:ul {:class "ml-2"}
+             (for [{:keys [from to status failures first]} (story-rows (vec (for [[n at] commits
+                                                                                   :let [t (when (and at e) (d/entity at e))
+                                                                                         fs (:seon.test/failures t)]]
+                                                                               [n (if at (:seon.test/status t) :gone) (count fs) (some-> (clojure.core/first fs) (select-keys [:message :expected :actual]))])))]
+               (let [line (str (if (= from to) (str "turn " from) (str "turns " from "–" to)) " · "
+                               (case status nil "not run yet" :gone "its commit was swept" (kname status))
+                               (when (pos? failures) (str " · " failures (if (= 1 failures) " failure" " failures"))))]
+                 [:li
+                  (if first
+                    [:details [:summary {:class "cursor-pointer text-text-400"} line " " [:code (print/line (or (:actual first) (:message first)) (config/value :seon.config.render/line-budget) nil)]]
+                     (render/html {} first)]
+                    [:span {:class "text-text-400"} line])]))]])]))))
 
 (defn system-message
   "The agent's system message (a component over ctx and the db): the doc sections it links (:seon.agent/system), else the system prompt (seon.context/agent-system-text), for the person a fold. See
@@ -1559,7 +1599,8 @@
      (when (:task c) [#'chat-ask {:wire/for "page"}])
      ;; one past the turn in force: what was taken for the turn that reads it comes before that turn begins (seon.turn/take!, tell-error!); a turn no record names draws nothing
      (for [n (range 0 (+ 2 (or (ratom/realize (:seon.agent/turn c)) 0)))] [#'conversation-turn {:key n}])
-     [#'chat-end {:wire/for "page"}]]))
+     [#'chat-end {:wire/for "page"}]
+     [#'proof-story {:wire/for "page"}]]))
 
 (defn eval-tile
   "An eval whose value has a render of its own (a component over ctx), the eval at ctx path :at: that value, by it (its own,
@@ -1635,7 +1676,7 @@
                        :else [status-stands status])
         [text tone] (get from k [(kname k) :quiet])
         turns (when (= "stopped at its cap" text) (or (:seon.agent/ended-turn a) (:seon.agent/max-turns a)))
-        reason (some #(when-not (str/blank? %) %) [(:seon.task/reason t) (when end (:seon.agent/reason a))])]
+        reason (some #(when-not (str/blank? %) %) [(:seon.task/reason t) (:reason (:seon.task/failure t)) (when end (:seon.agent/reason a))])]
     (cond-> {:state (keyword (cond (= from task-stands) "task" (= from end-stands) "end" :else "status") (name (or k :none)))
              :text text :tone tone :lit? (= :live tone)}
       turns (assoc :detail (str turns (if (= 1 turns) " turn" " turns")))
@@ -1663,11 +1704,10 @@
       ;; is taken, stopped at its cap, merged; the reason it stands so beside it
       [:span {:class (str "shrink-0 " (tone-class (:tone stands)))}
        (str "● " (:text stands) (when (:detail stands) (str " · " (:detail stands))))]
-      (when-let [r (:reason stands)]
-        [:span {:class "min-w-0 truncate text-text-400" :title r} r])
       ;; what it evaluates now, while its process runs one: the newest thing it does, live
       (when-let [r (and pid (:seon.process/running proc))]
         [:code {:class "min-w-0 truncate text-text-300"} r])]
+     (when-let [r (:reason stands)] [:p {:class "min-w-0 break-words text-text-300"} r])
      (when-not (str/blank? description) [:p {:class "text-text-300"} (prose description (part))])]))
 
 (defn root
@@ -1725,7 +1765,7 @@
 (def ^:private session-attrs
   "What an entry of the agents list reads of an agent on main: its identity, its process's status, its branch and turns, and its task."
   [:seon.agent/key :seon.agent/id :seon.agent/status :seon.agent/branch :seon.agent/max-turns
-   {:seon.agent/task [:seon.task/id :seon.task/outcome :seon.task/reason]}])
+   {:seon.agent/task [:seon.task/id :seon.task/outcome :seon.task/reason :seon.task/failure]}])
 
 (defn session-address
   "The name of an agent's page: its key (:seon.agent/key, boot/id), the one name of a session that survives a root's restart,

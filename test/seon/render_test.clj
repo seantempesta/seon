@@ -2664,9 +2664,9 @@
         db (d/db-with db [{:db/id aid :seon.agent/max-turns 7 :seon.agent/turn 1 :seon.agent/outcome :green :seon.agent/ended-turn 0}
                           {:seon.model-call/id "b1/a1/1" :seon.model-call/agent aid :seon.model-call/n 1 :seon.model-call/origin :model}])
         opts (fn [db] {:seon.ctx/ctx (:tree (seon.ctx/build db aid :b)) :seon.db/db db})]
-    (is (not (str/includes? (pr-str (ui/chat-end (opts db))) "Done")) "the chat's end: an earlier wake's end is no end of this one")
+    (is (not (str/includes? (pr-str (ui/chat-end (opts db))) "finished")) "the chat's end: an earlier wake's end is no end of this one")
     (let [ended (d/db-with db [{:db/id aid :seon.agent/ended-turn 1}])]
-      (is (str/includes? (pr-str (ui/chat-end (opts ended))) "Done in 1 turn") "the end it wrote at its turn now is"))))
+      (is (str/includes? (pr-str (ui/chat-end (opts ended))) "It finished its work in 1 turn") "the end it wrote at its turn now is"))))
 
 ;; docs/render.md#how-the-work-stands: the status's proofs are the task's :proved as the record pulls them (each
 ;; var's verdict, failures and form), never read again from the db; the done rule's verdict scan and the diff read it
@@ -2927,6 +2927,22 @@
     (is (not (str/includes? t "conflict")) "no merge line with nothing to merge")
     (is (str/includes? (h/html (ui/status-hiccup {} (assoc st :merge {:conflicts ['a/b] :main-moved ['a/b]}))) "1 things conflict with main") "a merge line only when something conflicts")))
 
+
+(deftest a-proofs-story-is-a-row-for-each-change
+  ;; docs/render.md#the-page: a stretch of the same reading is one row, and a change of status, count or first failure is a new one
+  (is (= [{:from 1 :to 2 :status nil :failures 0 :first nil}
+          {:from 3 :to 4 :status :red :failures 2 :first {:message "a"}}
+          {:from 5 :to 5 :status :red :failures 2 :first {:message "b"}}
+          {:from 6 :to 6 :status :green :failures 0 :first nil}]
+         (ui/story-rows [[1 nil 0 nil] [2 nil 0 nil] [3 :red 2 {:message "a"}] [4 :red 2 {:message "a"}] [5 :red 2 {:message "b"}] [6 :green 0 nil]])))
+  (is (= [] (ui/story-rows []))))
+
+(deftest a-closed-tasks-standing-gives-the-gates-reason
+  (let [why "its deferred tests, run on a checkout at its merge, are not green: a/b fail"
+        s (#'ui/standing {:seon.agent/outcome :green :seon.agent/ended-turn 7 :seon.agent/turn 7}
+                         {:seon.task/outcome :closed :seon.task/failure {:reason why}})]
+    (is (= :task/closed (:state s)) "what root decided wins over the agent's own end")
+    (is (= why (:reason s)))))
 
 (deftest a-steps-buttons-call-roots-table
   ;; docs/turn.md#an-eval-can-be-run-again: each button is a call of root's one table, and a request the button makes is no record of the conversation
