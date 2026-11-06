@@ -1925,7 +1925,7 @@
 (deftest a-gate-that-cant-read-its-candidate-answers
   ;; AGENTS 4 "every wait ends": a :gate's writer refusal comes back to whoever asked, no test run (seon.root/ext-op)
   (let [[r] (in-agent (fn [_] [{:op :eval :agent "root" :code "(:seon.error/type @(seon.root/call! sys {:op :gate :branch :no-such-branch :tests ['a/b]}))"}]))]
-    (is (= :seon.root/refused (:value r)) (pr-str r))))
+    (is (= :seon.writer/refused (:value r)) (pr-str r))))
 
 (deftest a-hand-back-with-a-red-process-test-is-no-green-end
   ;; the same class through seon_done: an outside agent that hands back an unjudged process test gets its verdict as :done's answer

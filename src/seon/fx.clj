@@ -992,7 +992,7 @@
   Answers as run-on-checkout does, for every test, with each one's held digest under :digests."
   {:malli/schema [:=> [:cat :string :map] :map]}
   [sha {:keys [files tests] :as req}]
-  (let [candidate (lib/digest (pr-str [sha (into (sorted-map) files)]))
+  (let [candidate (lib/digest (sedn/encode [sha (into (sorted-map) files)]))
         key-of #(str "gate-" (str/replace (str %) "/" "-"))
         digest-of #(lib/digest (str candidate " " %))
         held (stored-results (into {} (for [t tests] [(key-of t) (digest-of t)])))]
