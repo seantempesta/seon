@@ -297,7 +297,7 @@
             ;; on a page (opened!) is a reader's view of it, never root's work, so it is no eval of root's
             (doseq [[req target] reqs
                     :let [{f :var :keys [agent args forms]} c
-                          form (when (and (= "seon.root" (namespace f)) (not= 'seon.root/opened! f))
+                          form (when (and (= "seon.root" (namespace f)) (not (#{'seon.root/opened! 'seon.root/again!} f)))
                                  (sedn/encode (cond-> (list f) agent (concat [agent]) (seq args) (concat [args]) forms (concat [forms]))))]]
               (let [tag (cond-> [:web f target] form (conj form))]
                 (if (contract/error? req)

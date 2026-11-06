@@ -44,11 +44,11 @@ Owner, 2026-11-06: "I want edits to go into the database (which is the source of
 
 ### No regex or text parsing; function composition
 
-Owner, 2026-11-06: "I don't want anything hacky here. No regex or parsing text. I want function composition." Stated in AGENTS.md §9 (regex over code) and task `seon.render/an-eval-run-again-replaces-itself`.
+Owner, 2026-11-06: "I don't want anything hacky here. No regex or parsing text. I want function composition." Stated in AGENTS.md §9 (regex over code) and docs/turn.md#an-eval-can-be-run-again.
 
 ### An eval run again replaces itself
 
-Owner, 2026-11-06: "Evals I run again should replace (upsert) the existing eval and yes that's the point is for the model to see the updated version if I'm intentionally re-running it." Task `seon.render/an-eval-run-again-replaces-itself`.
+Owner, 2026-11-06: "Evals I run again should replace (upsert) the existing eval and yes that's the point is for the model to see the updated version if I'm intentionally re-running it." Stated: docs/turn.md#an-eval-can-be-run-again.
 
 ### The debug page is the wire; the agent's page is where it is friendly
 

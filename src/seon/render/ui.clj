@@ -396,7 +396,7 @@
   [opts {:keys [id live? held focus? busy? capped?]}]
   [:section {:id (:unit opts) :class "seon-stack-2"}
    (if live?
-     [:form {:class "seon-row" :seon/call 'seon.root/submit! :seon/agent id}
+     [:form {:class "seon-row" :data-seon-repl "" :seon/call 'seon.root/submit! :seon/agent id}
       [:span {:class "text-signal"} (str (kname id) "=>")]
       ;; Enter sends, Shift+Enter is a new line: a form may span lines
       [:textarea (cond-> {:name "forms" :class "flex-1 min-w-0" :rows 3 :autocomplete "off" :spellcheck "false"
@@ -1262,7 +1262,7 @@
       [:div {:class "ml-4 flex min-w-0 max-w-full flex-col gap-1 overflow-x-auto py-1"}
        ;; the code as the agent wrote it, whole, highlighted
        [:div {:class "min-w-0" :wire/field "code"} [#'emit/marked-hiccup :seon.print/code (or code "")]]
-       (when at [#'eval-output {:key id :at at :wire/for "page"}])]]]))
+       (when at [#'eval-output {:key id :at at :agent agent :wire/for "page"}])]]]))
 
 (defn eval-item
   "An eval of the conversation (a component over ctx and the db), its one hiccup (`eval-hiccup`) (owner: \"I
@@ -1283,11 +1283,29 @@
     (into {} (for [k [:seon.eval/id :seon.eval/code :seon.eval/response :seon.eval/schema :seon.eval/basis]
                    :let [v (ratom/realize (get-in c (conj at k)))] :when (some? v)] [k v]))))
 
+(defn- step-tools
+  "An opened step's buttons, for a live agent (the page's stylesheet shows them only beside its REPL's input, so no step is drawn again as its status moves): run it again in its place,
+  run the agent's evals down to it, edit its code and run that, copy its code. Each is a call of root's table (seon.root/request's again!). See docs/turn.md#an-eval-can-be-run-again."
+  {:malli/schema [:=> [:cat :any :map] :any]}
+  [agent {:seon.eval/keys [id code]}]
+  (let [button "rounded border border-base-700 px-2 py-0.5 hover:border-text-400"
+        call (fn [args] {:seon/call 'seon.root/again! :seon/agent agent :seon/args (assoc args :eval id)})]
+    [:div {:class "seon-step-tools flex flex-wrap items-baseline gap-1 text-2xs"}
+     [:button (merge {:type "button" :class button :title "Run this again in its place. Its code runs for real, and the model reads the new result."} (call {})) "▶ Run"]
+     [:button (merge {:type "button" :class button :title "Run the agent's steps from the start down to this one, stopping at the first that fails. Their code runs for real."} (call {:to-here true})) "⏭ To here"]
+     [:button {:type "button" :class button :title "Copy its code" (keyword "data-on:click") "navigator.clipboard.writeText(el.closest('.seon-eval').querySelector('pre code').textContent)"} "⧉ Copy"]
+     ;; what a person is typing is theirs, not the page's: a new eval landing morphs the list, and would close this
+     [:details {:class "w-full" :data-ignore-morph ""}
+      [:summary {:class "cursor-pointer text-text-400"} "✎ Edit"]
+      [:form (merge {:class "mt-1 flex flex-col gap-1"} (call {}))
+       [:textarea {:name "code" :rows 6 :spellcheck "false" :class "w-full font-mono text-xs"} code]
+       [:button {:class (str button " self-start")} "Run this instead"]]]]))
+
 (defn eval-output
   "What came of an eval as the person reads it when it is opened (a component over ctx and the db; the model reads the same response as the one printer prints it, `seon.context/tool-text`): how long it ran, what it costs the context in tokens and its handle, what its forms printed, then its error, or its
   value by the render its record names. See docs/render.md#cost-is-shown-one-way."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db] [:at [:vector :any]]]]] :any]}
-  [{c :seon.ctx/ctx db :seon.db/db at :at}]
+  [{c :seon.ctx/ctx db :seon.db/db at :at agent :agent}]
   (when-let [e (eval-shown c at)]
     (let [{:keys [ex value handle out warnings ms] errout :err} (:seon.eval/response e)
           v (ratom/realize value)
@@ -1303,6 +1321,7 @@
           ;; a value prints whole by the printer's own mark
           whole (fn [x] (cond-> x (and opened? (instance? clojure.lang.IObj x)) (vary-meta assoc :seon.print/full true)))]
       [:div
+       (when agent (step-tools agent e))
        [:div {:class "flex items-baseline justify-end gap-2 text-2xs text-text-500"}
         (when ms [:span {:class "seon-ms"} (ms-str ms)])
         [:span (print/tokens-text (+ (render/tokens-of (:seon.eval/code e)) (render/tokens-of (:seon.eval/response e))))]

@@ -1191,7 +1191,7 @@
   (let [c (a/chan (a/sliding-buffer 1024))] (a/tap (:events-mult sys) c) c))
 
 (defn request
-  "The op (named as its fn below: spawn! clone! submit! run-tests! kill!
+  "The op (named as its fn below: spawn! clone! submit! again! run-tests! kill!
   merge-main! message! release! opened!) on agent id with args, as the api request it is: one table for these fns
   and the dashboard's calls (seon.web). a: the agent's entry in root's view, which
   merge-main! reads; an op the agent cannot take answers its error. A branch reaches main
@@ -1204,6 +1204,11 @@
       spawn! {:op :spawn :opts (or args {})}
       clone! {:op :clone :parent id :opts (or args {})}
       submit! (cond-> {:op :eval :id id :forms (:forms args)} (:ticks args) (assoc :ticks (:ticks args)) (:origin args) (assoc :origin (:origin args)) (contains? args :intent) (assoc :intent (:intent args)))
+      ;; a person's step button: the agent runs its eval again in place, the call itself no record of the conversation (origin :context)
+      again! {:op :eval :id id :origin :context
+              :forms (sedn/encode (cond (:to-here args) (list 'seon.repl/again-to (:eval args))
+                                        (:code args) (list 'seon.repl/again (:eval args) (:code args))
+                                        :else (list 'seon.repl/again (:eval args))))}
       ;; the agent proves its branch through the test service as root's judge does (seon.agent/prove!
       ;; :judge, which keys the run by its head's digest): recorded on main, one run with any other asker's
       run-tests! {:op :judge :id id}
