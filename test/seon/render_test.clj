@@ -1354,7 +1354,7 @@
                                                                    :body {:messages ms} :sources [[[:section 1 1]] [[:eval "e1"]] [[:eval "e1"]]] :new [false false true]})))
         h (draw #{})]
     (is (= ["system" "assistant" "tool"] (mapv second (re-seq #"data-role=\"(\w+)\"" h))) "a row a message, in the wire's order, by its role")
-    (is (not-any? #(str/includes? h %) ["(first-call)" "tool_calls[0]"]) "a closed row is its line: its fields are drawn when opened")
+    (is (not-any? #(str/includes? h %) ["tool_calls[0]" "arguments.code"]) "a closed row is its line: its fields are drawn when opened")
     (is (str/includes? h "eval {") "an assistant's line is its calls as sent")
     (let [o (draw #{"d-turn-o1"})]
       (is (str/includes? o "tool_calls[0] · eval · a") "opened, the call's fields as sent")
