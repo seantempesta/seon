@@ -148,12 +148,13 @@
                     \` (let [k (run-end i to \`) n (- k i) e (closer k to n)]
                          (if e
                            (recur (+ e n) (+ line (newlines k e)) (+ e n) false q q
-                                  (conj! (word out slash? wq wstart i line) {:seon.ref/code (code-content k e) :seon.ref/width n :seon.ref/line line}))
+                                  (conj! (word out slash? wq wstart i line) {:seon.ref/code (code-content k e) :seon.ref/width n :seon.ref/line line :seon.ref/from i :seon.ref/to (+ e n)}))
                            (recur k line wstart slash? q wq out)))
                     \[ (if-let [[close df dt after] (link-at i to)]
                          (let [image? (and (> i from) (= \! (.charAt text (dec i))))
                                out (cond-> (word out slash? wq wstart i line)
-                                     (not image?) (conj! {:seon.ref/link (unescape (subs text df dt)) :seon.ref/line (+ line (newlines i df))}))]
+                                     (not image?) (conj! {:seon.ref/link (unescape (subs text df dt)) :seon.ref/line (+ line (newlines i df))
+                                                          :seon.ref/from i :seon.ref/to after :seon.ref/text-from (inc i) :seon.ref/text-to close}))]
                            (recur after (+ line (newlines i after)) after false q q (reduce conj! out (inlines (inc i) close line))))
                          (recur (inc i) line wstart slash? q wq out))
                     (recur (inc i) line wstart slash? q wq out))))))
@@ -312,6 +313,30 @@
                                       (mapcat (fn [{:seon.ref/keys [kind from to line text-from text-to]}]
                                                 (if (= :heading kind) (inlines text-from text-to line) (inlines from to line)))))
                              bs)})))
+
+(defn emphasis
+  "Plain Markdown text, one stretch holding no code span or link, as its pieces in order: a string, or [:strong s] or [:em s] for what
+  ** or * wrap. CommonMark's flanking rule, its common case: an opener is followed by no space and a closer has none before it;
+  an opener with no closer is its text. _ is left as text, since names hold it. See docs/render.md#prose-and-the-one-string-cutter."
+  {:malli/schema [:=> [:cat :string] [:vector [:or :string [:tuple [:enum :strong :em] :string]]]]}
+  [text]
+  (let [n (count text)
+        space? (fn [i] (or (>= i n) (Character/isWhitespace (.charAt ^String text (int i)))))
+        ;; the offset of the delimiter that closes one opened with text starting at from, or nil
+        closes (fn [d from]
+                 (loop [i from]
+                   (when-let [j (str/index-of text d i)]
+                     (if (and (> j from) (not (space? (dec j)))) j (recur (inc j))))))]
+    (loop [i 0 start 0 out []]
+      (let [flush (fn [end] (cond-> out (< start end) (conj (subs text start end))))]
+        (if-let [j (str/index-of text "*" i)]
+          (let [d (if (str/starts-with? (subs text j) "**") "**" "*")
+                k (count d)
+                c (when-not (space? (+ j k)) (closes d (+ j k)))]
+            (if c
+              (recur (+ c k) (+ c k) (conj (flush j) [(if (= "**" d) :strong :em) (subs text (+ j k) c)]))
+              (recur (+ j k) start out)))
+          (flush n))))))
 
 (defn- slug
   "A heading's anchor before deduplication, as GitHub writes it: lower case, each space a -,
