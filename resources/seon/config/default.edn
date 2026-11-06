@@ -576,6 +576,11 @@
  ;; quiet 31-32 s while a root booted or an agent ran, then green); 3x its own time names a hang and
  ;; leaves a slow test. Past it the test is named, never ended.
  :seon.config.proofs/stall-factor 3
+ ;; Unit: ms. A test measured at this or over is left out of bin/prove and a merge until it is fast
+ ;; (seon.fx/slow-tests, docs/merging.md#a-slow-test-is-left-out); naming it or the full run still runs it.
+ ;; Provenance: owner, 2026-11-06. Over the verdict cache that day, 5 s left out 70 of 1,466 tests and
+ ;; kept about 96 s of work on 4 shards; 2 s left out 123 for 55 s, 15 s left out 31 for 189 s.
+ :seon.config.proofs/slow-test-ms 5000
  ;; Unit: path. The plan's store of kept program dbs (test-runner/program-db): one LMDB store
  ;; per checkout, a branch per git tree id holding that tree's program as facts. A tree never
  ;; seen is branched from the kept tree with the fewest changed files and brought current by
