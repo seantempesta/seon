@@ -356,19 +356,21 @@
 (deftest an-outside-agents-process-test-goes-to-the-judge-and-a-red-says-why
   ;; THE PLAN 0.7's first run (root, 2026-10-27): a deftest an agent defined at its REPL that
   ;; reached a process var ran in the agent's fork and errored ("no process store"), its proof or not;
-  ;; seon_prove answered only counts and red names. A process test is deferred to the judge (named, with
+  ;; seon_prove answered only counts and red names. A process test is deferred from the fork (named, with
   ;; why), (my.agent/process-test?) says so, and each red comes with its first failing assertion
   (let [[defined deferred why answer status]
         (at/in-agent (fn [{:keys [agent]}]
                        [(str "(ns app.ptest (:require [clojure.test :refer [deftest is]]))"
                              " (deftest p-test (is (fn? seon.lib/fork!)))"
                              " (deftest r-test (is (= 1 2) \"one is two\"))")
-                        "(select-keys (my.agent/prove #{'app.ptest/p-test}) [:deferred :ran])"
+                        "(select-keys (my.agent/prove #{'app.ptest/p-test}) [:seon.error/type :seon.error/message])"
                         "(my.agent/process-test? 'app.ptest/p-test)"
                         {:op :prove :agent agent :names ["app.ptest"]}
                         "(my.agent/process-test? 'app.ptest/r-test)"]))]
     (is (nil? (:ex defined)) (pr-str defined))
-    (is (some #{'app.ptest/p-test} (:deferred (:value deferred))) (str "the process test is left to the judge: " (pr-str deferred)))
+    ;; its namespace was made at the REPL, with no file to put over the gate's checkout: its prove says so, never green
+    (is (= :seon.agent/gate-unread (:seon.error/type (:value deferred))) (str "the process test can't be judged, and why: " (pr-str deferred)))
+    (is (str/includes? (:seon.error/message (:value deferred)) "app.ptest") (pr-str deferred))
     (is (some #{'seon.lib/fork!} (:uses (:value why))) (str "and it says why: " (pr-str why)))
     (let [r (or (:result answer) answer)]
       (is (= "one is two" (get-in r [:failures 'app.ptest/r-test :message])) (str "a red's first failing assertion: " (pr-str answer)))
