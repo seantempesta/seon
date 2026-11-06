@@ -2084,9 +2084,10 @@
   ;; task seon.context/the-context-is-the-agents-evals-and-seons (R1): a reply of prose with no call
   ;; is the agent winding down; the record read only evals and messages, so the wake that
   ;; followed it sent a history without it. It is an assistant message of the next request
-  ;; (its script is named in config, as data: a fix in seon.model/scripted moves no reach digest of this test, so its red and
-  ;; green there read as flaky at one digest, 2026-11-07, which is the digest's gap, not this test's)
-  (let [[_ r] (in-agent (fn [{:keys [ns]}]
+  ;; its script is named in config, as data, so seon.model/scripted is named here for the reach digest: a fix there moved no digest of
+  ;; this test, and its red and green read as flaky at one (2026-11-07)
+  (let [_ #'seon.model/scripted
+        [_ r] (in-agent (fn [{:keys [ns]}]
                           (let [w (str ns "/w")]
                             [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")}
                              {:op :eval :agent "root"
