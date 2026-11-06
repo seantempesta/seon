@@ -1904,8 +1904,12 @@
                            " (let [[r] (seon.agent-test/in-agent (fn [_] [\"(+ 1 1)\"]))] (clojure.test/is (= " n " (:value r))))) (in-ns 'user) :ok)"))
         prove "(let [r (my.agent/prove)] {:proofs (:proofs r) :deferred (:deferred r) :ran (:ran r) :line (:seon.print/code (my.agent/prove-summary {} r))})"
         reasons "(mapv :reason (:reasons (seon.context/status (seon.agent/db) @seon.ctx/ctx {})))"
-        [_ red red-reasons _ green green-reasons again]
-        (in-agent (fn [_] [(write 3) prove reasons (write 2) prove reasons prove]) {:proofs #{t}})]
+        [_ red red-reasons _ green green-reasons again judge-gate]
+        (in-agent (fn [{:keys [task]}]
+                    [(write 3) prove reasons (write 2) prove reasons prove
+                     {:op :eval :agent "root"
+                      :code (str "(select-keys (:value @(seon.root/call! sys {:op :gate :branch (seon.task/default-branch " (pr-str task) ") :tests ['" t "]})) [:results :log])")}])
+                  {:proofs #{t}})]
     (is (= {t :fail} (:proofs (:value red))) (pr-str red))
     (is (str/starts-with? (:line (:value red)) "red: 1") "its prove says red")
     (is (= [:proof-red] (:value red-reasons)) "a red on its status, with a turn to fix it")
@@ -1914,7 +1918,14 @@
     (is (str/starts-with? (:line (:value green)) "green: 1 of 1") (:line (:value green)))
     (is (= [] (:value green-reasons)))
     (is (= 0 (:ran (:value again))) "at the same digest its verdict stands, and no gate runs")
-    (is (= {t :pass} (:proofs (:value again))))))
+    (is (= {t :pass} (:proofs (:value again))))
+    (is (= {t :pass} (:results (:value judge-gate))) (pr-str judge-gate))
+    (is (nil? (:log (:value judge-gate))) "the judge's gate of the same candidate runs nothing: the same owner holds its verdict")))
+
+(deftest a-gate-that-cant-read-its-candidate-answers
+  ;; AGENTS 4 "every wait ends": a :gate's writer refusal comes back to whoever asked, no test run (seon.root/ext-op)
+  (let [[r] (in-agent (fn [_] [{:op :eval :agent "root" :code "(:seon.error/type @(seon.root/call! sys {:op :gate :branch :no-such-branch :tests ['a/b]}))"}]))]
+    (is (= :seon.root/refused (:value r)) (pr-str r))))
 
 (deftest a-hand-back-with-a-red-process-test-is-no-green-end
   ;; the same class through seon_done: an outside agent that hands back an unjudged process test gets its verdict as :done's answer

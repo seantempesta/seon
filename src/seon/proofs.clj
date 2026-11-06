@@ -384,13 +384,13 @@
           (for [t (sort-by str stale) [k v] (select-keys (old t) test-attrs)] [:db/retract [:var/name t] k v])))))
 
 (defn gate-tx
-  "The merge gate's run (seon.fx/run-tests, its :results :failures :main-red, of the deferred tests this branch holds at their
-  digests in old, {test entity}) as this branch's facts on each, at the digest its run deferred it at: its status, and why it is
+  "The merge gate's run (seon.fx/run-tests, its :results :failures :main-red :digests, of the deferred tests this branch holds at their
+  digests in old, {test entity}) as this branch's facts on each, at the digest its run deferred it at (one the branch holds no row of, the gate's): its status, and why it is
   red, each failure of a test that is main's red too saying so (:main-red, as a flaky one says :flaky; seon.context/status reads it);
   one the run never reached says that, never a pass. See docs/merging.md#a-merge-runs-what-the-change-reaches."
   {:malli/schema [:=> [:cat [:map-of :qualified-symbol [:maybe :map]] :map] [:vector :map]]}
-  [old {:keys [results failures main-red log]}]
-  (vec (for [[t st] (sort-by (comp str key) results) :let [o (old t) dg (:seon.test/digest o)] :when dg]
+  [old {:keys [results failures main-red log digests]}]
+  (vec (for [[t st] (sort-by (comp str key) results) :let [o (old t) dg (or (:seon.test/digest o) (get digests t))] :when dg]
          (let [fs (or (not-empty (get failures t)) [{:type :error :message (str "the gate's run never reached it; its log: " log)}])
                fs (cond->> fs (contains? main-red t) (mapv #(assoc % :main-red true)))]
            (assoc (test-facts o {:digest dg :status (if (= :pass st) :green :red) :failures (when-not (= :pass st) fs)})

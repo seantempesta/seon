@@ -410,6 +410,12 @@
         (empty? reasons) [:green nil]
         :else [:red (r/explain-text reasons)]))
 
+(defn- unjudged-reason
+  "What a green end of status s leaves unjudged, in words, or nil (seon.task/unjudged): the end says it, and the judge decides as before."
+  {:malli/schema [:=> [:cat :map] [:maybe :string]]}
+  [{:keys [unjudged]}]
+  (when unjudged (str "process tests not judged: " (str/join ", " (:tests unjudged)) ": " (:why unjudged))))
+
 (defn- judged
   "Status s, the tests its change reaches judged when s is clear: its proofs pass, so the tests its change reaches run now, as the
   judge judges them, the process tests among them on the gate's checkout (agent/judge!, their results facts on the branch), and the
@@ -437,7 +443,7 @@
         _ (when (agent/main-moved? (:base @agent/state) (agent/heard-main)) (branch/merge-main!))
         _ (observe task)
         s (judged (status-now))
-        [outcome reason] (if (contract/error? s) [:error (:seon.error/message s)] (hand-back-end stop (:reasons s)))]
+        [outcome reason] (if (contract/error? s) [:error (:seon.error/message s)] (let [[o why] (hand-back-end stop (:reasons s))] [o (or why (unjudged-reason s))]))]
     (end! {} outcome reason (when (contract/error? s) s))))
 
 (defn work!
@@ -509,7 +515,7 @@
                            ;; (a green run that ended behind main's newer merges was judged behind: swarm's s9)
                            (and (not no-status?) (empty? reasons))
                            (let [m (branch/merge-main!)]
-                             (if (and (empty? (:applied m)) (empty? (:conflicts m))) (ended st :green nil nil) [::next st]))
+                             (if (and (empty? (:applied m)) (empty? (:conflicts m))) (ended st :green (unjudged-reason s) nil) [::next st]))
                            ;; the agent's own fail! is its verdict, at the cap too; a wait on the last turn is
                            ;; the budget spent, so the run is :cap, never :waiting (its session parks either way)
                            (= :failed (:outcome stop)) (ended st :failed (:reason stop) nil)

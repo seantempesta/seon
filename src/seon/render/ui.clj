@@ -1094,7 +1094,7 @@
   Main's side only when something conflicts: both sides and the form that settles each. No table beside the same words: a list of
   the proofs' states only when there are several. See docs/render.md#how-the-work-stands."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
-  [_opts {:keys [proofs refused test-run unmerged without-a-contract caused attention merge]}]
+  [_opts {:keys [proofs refused test-run unmerged without-a-contract caused attention merge unjudged]}]
   (let [state #(:status %)
         unwritten (filter #(= :undefined (state %)) proofs)
         red (filter #(#{:fail :error} (state %)) proofs)
@@ -1158,6 +1158,7 @@
        (into [:div {:key :merging} [:p "Every proof passes, but your branch can't merge yet:"]] (map block) blocks)
        (seq blocks)
        (into [:div {:key :merging} [:p "Also blocking merging:"]] (map block) blocks))
+     (when unjudged [:p {:key :unjudged} (str "Not judged, so these say nothing about your change: " (str/join ", " (:tests unjudged)) ". " (:why unjudged) ".")])
      (when (seq (:conflicts merge)) [:p (str (count (:conflicts merge)) " things conflict with main; they are listed above.")])]))
 
 (defn status

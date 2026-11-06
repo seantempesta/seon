@@ -823,6 +823,21 @@
         (is (= :closed (:outcome j)))
         (is (str/includes? (:hold j) "no checkout to run them on"))))))
 
+(deftest what-no-gate-runs-is-said-and-what-a-task-owes-is-its-proofs
+  ;; docs/merging.md#a-merge-runs-what-the-change-reaches: seon.task/proof? is the one reading, a test var against the accumulated proofs (a
+  ;; namespace's name is no proof); seon.task/unjudged says what the gate leaves and why, for the status and the run's end
+  (let [t 'seon.root-test/boots u 'seon.root-test/other
+        tk {:seon.task/kind :work :seon.task/accumulated {:proofs #{t}}}
+        db (fn [root] (d/db-with (ts/test-db) (when root [(merge {:seon.root/id :root :seon.root/boot "b" :seon.config.agent/max-running 1} root)])))
+        gate {:seon.config.source/gate-checkout "/the/tree"}]
+    (is (task/proof? tk t))
+    (is (not (task/proof? tk u)))
+    (is (not (task/proof? {:seon.task/accumulated {:proofs #{'seon.root-test}}} t)) "like with like: a test var, never a namespace")
+    (is (nil? (task/unjudged (db gate) tk [t u])) "the gate runs them all")
+    (is (= [t u] (:tests (task/unjudged (db nil) tk [t u]))) "no checkout: all, with why")
+    (is (= [t u] (:tests (task/unjudged (db gate) (assoc tk :seon.task/kind :design) [t u]))) "a design: all")
+    (is (= {:tests [u]} (select-keys (task/unjudged (db (assoc gate :seon.root/started-by (str u))) tk [t u]) [:tests])) "the test that started this root: itself")))
+
 (deftest a-deferred-proof-is-neither-red-nor-unknown
   ;; owner's ruling (2026-10-23): a process test never runs in an agent's turn or root's judge,
   ;; a proof among them; the done rule reads it as deferred to root's gate, and still refuses a

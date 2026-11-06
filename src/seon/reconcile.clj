@@ -927,8 +927,8 @@
   {:malli/schema [:=> [:cat :seon.reconcile/state :seon.task/id :map [:vector :map] [:maybe :map] [:maybe [:set :qualified-symbol]]] [:vector :any]]}
   [st id rs unread err main-red]
   (let [main (:db st)
-        proof? (set (:proofs (:seon.task/accumulated (task/task main id))))
-        red (for [[tt s] (sort-by (comp str key) rs) :when (and (not= :pass s) (or (proof? tt) (not (contains? main-red tt))))] [tt s])
+        tk (task/task main id)
+        red (for [[tt s] (sort-by (comp str key) rs) :when (and (not= :pass s) (or (task/proof? tk tt) (not (contains? main-red tt))))] [tt s])
         why (concat (some-> err :seon.error/message vector) (for [u unread] (str (:ns u) ": " (:reason u))))
         want (cond-> {:seon.task/deferred-results rs}
                (seq unread) (assoc :seon.task/gate-unread unread)

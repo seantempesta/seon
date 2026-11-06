@@ -895,15 +895,9 @@
   shard logs, removed with the worktree, also held). With :all? (the daily full run, seon.prove's
   :full mode) the runner is full-run-command, tests are every test the plan names; repo defaults
   to this checkout and branch to git's main (:seon.config.source/main)."
-  {:malli/schema [:=> [:cat :map] :map]}
-  [{{:keys [repo branch files tests all?]} :req}]
+  {:malli/schema [:=> [:cat :string :map] :map]}
+  [sha {:keys [repo files tests all?]}]
   (let [t0 (profile/now-ns)
-        repo (or repo (when all? (str (cfg/checkout))))
-        branch (or branch (when all? (cfg/value :seon.config.source/main)))
-        ;; the branch's commit, or the error the asker gets: no such branch is never a run at an empty sha
-        sha (try (or (branch-head repo branch)
-                     (error #'seon.fx/run-on-checkout :seon.fx/io-error (str "no commit of branch " branch " in " repo) {:path repo}))
-                 (catch Throwable e (error #'seon.fx/run-on-checkout :seon.fx/io-error (step/error-msg e) {:path repo})))
         dir (str (cfg/value :seon.config.source/tests-dir) "/" sha "-" (random-uuid))
         log (str dir ".tests.log")
         clean child-env-scrub
@@ -912,9 +906,8 @@
         ;; seed threw, and its seed.log went with the worktree)
         kept (str dir ".run")
         green? (volatile! false)
-        at (when-not (contract/error? sha) (sh/sh (str (cfg/checkout) "/bin/worktree") "--at" dir sha repo))]
+        at (sh/sh (str (cfg/checkout) "/bin/worktree") "--at" dir sha repo)]
     (cond
-      (contract/error? sha) sha
       (not (zero? (:exit at))) (error #'seon.fx/run-on-checkout :seon.fx/io-error (str "bin/worktree --at exited " (:exit at) ": " (:err at)) {:path dir})
       :else
       (try
@@ -923,7 +916,16 @@
         ;; as the full run's: the worktree's target/ is a clone of another tree's, and its binary
         ;; that tree's (measured 2026-10-27: the first daily run's process tests ran on a stale one,
         ;; red for that alone); bin/build skips it when the tree matches, else ~20 s
-        (let [b (apply sh/sh (concat clean ["nice" "-n" "15" "bin/build" "seon"] [:dir dir]))]
+        (let [slot (str (cfg/value :seon.config.source/tests-dir) "/main-build")
+              kept-build ["seon" "seon.stamp" "seon.tree"]
+              ;; a run with no candidate is main's tree, and its build is kept by that tree (bin/build reads the stamp): a red's second run
+              ;; or the next day's reuses it, measured at 45 s against 2 s. One slot, the last tree built
+              _ (when (and (empty? files) (.isFile (java.io.File. (str slot "/seon"))))
+                  (doseq [n kept-build] (sh/sh "cp" "-c" (str slot "/" n) (str dir "/target/" n))))
+              b (apply sh/sh (concat clean ["nice" "-n" "15" "bin/build" "seon"] [:dir dir]))
+              _ (when (and (empty? files) (zero? (:exit b)))
+                  (.mkdirs (java.io.File. ^String slot))
+                  (doseq [n kept-build] (sh/sh "cp" "-cf" (str dir "/target/" n) (str slot "/" n))))]
           (if (not (zero? (:exit b)))
             (do (spit log (str (:out b) (:err b)))
                 (error #'seon.fx/run-on-checkout :seon.fx/io-error (str "bin/build seon exited " (:exit b) "; its log: " log) {:path dir}))
@@ -965,21 +967,80 @@
                    (spit log (str (when mv (str "\nkept the run's logs (not all green): " kept ": exit " (:exit mv) (:err mv)))
                                   "\nremove-at " dir ": exit " (:exit rm) "\n" (:out rm) (:err rm)) :append true)))))))
 
+(defn same-failures?
+  "Do a and b, one test's failures on two trees, say the same thing: the same assertions, messages and values, none of them
+  flaky, by the data. Unsure is no: a failure of neither side, or a value that printed differently, is not the same."
+  {:malli/schema [:=> [:cat [:maybe [:sequential :map]] [:maybe [:sequential :map]]] :boolean]}
+  [a b]
+  (let [said #(set (map (fn [f] (select-keys f [:type :message :expected :actual :got :seon.error/type])) %))]
+    (boolean (and (seq a) (seq b) (not-any? :flaky (concat a b)) (= (said a) (said b))))))
+
+(defn main-reds
+  "The tests of a candidate's run that main's run fails the same way (same-failures?): each answer {:results :failures}. A
+  test red on main for another reason, or one that errored either side, is the candidate's."
+  {:malli/schema [:=> [:cat :map [:maybe :map]] [:set :qualified-symbol]]}
+  [candidate on-main]
+  (into #{} (for [[t s] (:results candidate)
+                  :when (and (= :fail s) (= :fail (get-in on-main [:results t]))
+                             (same-failures? (get-in candidate [:failures t]) (get-in on-main [:failures t])))]
+              t)))
+
+(defn- run-held
+  "A named run on a checkout (run-on-checkout) of the tests with no verdict at this candidate, sha and files, so one candidate's test runs
+  once whoever asks: the owner is the one :tests worker, and the verdict cache holds each under the candidate's digest
+  (seon.fx/write-verdicts!, evicted as any verdict is; a run that never reached a test holds nothing). Nothing to run: no worktree and no build.
+  Answers as run-on-checkout does, for every test, with each one's held digest under :digests."
+  {:malli/schema [:=> [:cat :string :map] :map]}
+  [sha {:keys [files tests] :as req}]
+  (let [candidate (lib/digest (pr-str [sha (into (sorted-map) files)]))
+        key-of #(str "gate-" (str/replace (str %) "/" "-"))
+        digest-of #(lib/digest (str candidate " " %))
+        held (stored-results (into {} (for [t tests] [(key-of t) (digest-of t)])))]
+    (if (contract/error? held)
+      held
+      (let [todo (vec (remove #(get held (digest-of %)) tests))
+            r (when (seq todo) (run-on-checkout sha (assoc req :tests todo)))]
+        (if (contract/error? r)
+          r
+          (let [{:keys [results failures] :as v} (:value r)
+                w (write-verdicts! {:id (str "gate " candidate)}
+                                   (into {} (for [[t s] results :when (not= :error s)]
+                                              [(key-of t) {:digest (digest-of t) :pass (if (= :pass s) 1 0) :fail (if (= :fail s) 1 0) :error 0}]))
+                                   (into {} (for [[t fs] failures] [(key-of t) fs])))
+                was (fn [t] (get held (digest-of t)))]
+            (if (contract/error? w)
+              w
+              {:value (assoc v
+                             :results (into {} (for [t tests] [t (or (get results t) (if (proofs/green? (was t)) :pass :fail))]))
+                             :failures (into (or failures {}) (for [t tests :let [fs (:failures (was t))] :when fs] [t (vec fs)]))
+                             :digests (into {} (for [t tests] [t (digest-of t)]))
+                             :ms (:ms v 0))})))))))
+
 (defn run-tests
-  "The :tests effect (run-on-checkout): tests on a checkout of the merge candidate, its answer {:value {:results :ms :log
-  :digests :failures :kept}} or its declared error. A candidate's red is asked of the same checkout without
-  the candidate's files, only when there is one: :main-red names the reds that run also reads
-  :fail, main's and not this change's, so a task is never judged on another's red. A red that run can't say anything
-  of (no such test on main: its plan refuses the whole run) stays the candidate's. See docs/merging.md#a-merge-runs-what-the-change-reaches."
+  "The :tests effect: tests on a checkout of the merge candidate (run-on-checkout), its answer {:value {:results :ms :log
+  :digests :failures :kept}} or its declared error; a named run reuses what this candidate already answered (run-held). A candidate's
+  red is asked of the same checkout without the candidate's files: :main-red names the reds main fails the same way
+  (main-reds), main's and not this change's, so a task is never judged on another's red; a red with no such test on main (its
+  plan refuses the whole run) stays the candidate's. See docs/merging.md#a-merge-runs-what-the-change-reaches."
   {:malli/schema [:=> [:cat :map] :map]}
-  [{{:keys [files] :as req} :req :as m}]
-  (let [r (run-on-checkout m)
-        reds (for [[t s] (get-in r [:value :results]) :when (not= :pass s)] t)]
-    (if (and (seq files) (seq reds))
-      (let [on-main (run-on-checkout {:req (-> req (dissoc :files) (assoc :tests (vec reds)))})
-            red (for [[t s] (get-in on-main [:value :results]) :when (= :fail s)] t)]
-        (cond-> r (seq red) (assoc-in [:value :main-red] (set red))))
-      r)))
+  [{{:keys [repo branch files all?] :as req} :req}]
+  (let [repo (or repo (when all? (str (cfg/checkout))))
+        branch (or branch (when all? (cfg/value :seon.config.source/main)))
+        req (assoc req :repo repo :branch branch)
+        ;; the branch's commit, or the error the asker gets: no such branch is never a run at an empty sha
+        sha (try (or (branch-head repo branch)
+                     (error #'seon.fx/run-tests :seon.fx/io-error (str "no commit of branch " branch " in " repo) {:path repo}))
+                 (catch Throwable e (error #'seon.fx/run-tests :seon.fx/io-error (step/error-msg e) {:path repo})))]
+    (cond
+      (contract/error? sha) sha
+      all? (run-on-checkout sha req)
+      :else
+      (let [r (run-held sha req)
+            reds (for [[t s] (get-in r [:value :results]) :when (= :fail s)] t)]
+        (if (and (seq files) (seq reds))
+          (let [mr (main-reds (:value r) (:value (run-held sha (-> req (dissoc :files) (assoc :tests (vec reds))))))]
+            (cond-> r (seq mr) (assoc-in [:value :main-red] mr)))
+          r)))))
 
 ;; ---- the owner -----------------------------------------------------------------------
 

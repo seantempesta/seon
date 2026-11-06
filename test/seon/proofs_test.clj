@@ -579,7 +579,8 @@
     (let [[f] (proofs/gate-tx old {:results {t :error} :failures {} :log "/l"})]
       (is (= :red (:seon.test/status f)))
       (is (str/includes? (:message (first (:seon.test/failures f))) "/l") "never reached says where to read why"))
-    (is (= [] (proofs/gate-tx {} {:results {t :pass}})) "a test the branch holds no digest of has no fact to hold")
+    (is (= [] (proofs/gate-tx {} {:results {t :pass}})) "a test with no digest either side has no fact to hold")
+    (is (= "g" (:seon.test/digest (first (proofs/gate-tx {} {:results {t :pass} :digests {t "g"}})))) "no row on the branch: judged at the gate's")
     (testing "a run that defers it again"
       (let [held {t {:seon.test/digest "d1" :seon.test/status :green}}]
         (is (= [] (proofs/result-tx held {} {} {} {t "d1"} #{t})) "at the same digest its verdict stands")

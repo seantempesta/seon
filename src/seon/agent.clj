@@ -1283,15 +1283,15 @@
 
 (defn- with-gate-verdicts
   "Test run r with what this branch holds of its :deferred tests (the gate's facts, gate-tx): each with a verdict counted in the
-  run as a reused result is, so its reds and greens read as the rest do, a red on main (a failure saying :main-red, a proof's
-  excepted, which its task owes green) under :main-red {test [failure]} and no red of this run's; those with none stay :deferred."
-  {:malli/schema [:=> [:cat :map [:set :qualified-symbol]] :map]}
-  [r proofs]
+  run as a reused result is, so its reds and greens read as the rest do, a red on main (a failure saying :main-red, a proof of task tk
+  excepted, seon.task/proof?) under :main-red {test [failure]} and no red of this run's; those with none stay :deferred."
+  {:malli/schema [:=> [:cat :map [:maybe :map]] :map]}
+  [r tk]
   (let [dbv (db)
         verdict (fn [t] (d/entity dbv [:var/name t]))
         by (group-by (fn [t] (let [v (verdict t) st (:seon.test/status v)]
                                (cond (or (nil? st) (= :deferred st)) :deferred
-                                     (and (not (proofs t)) (some :main-red (:seon.test/failures v))) :main-red
+                                     (and (not (task/proof? tk t)) (some :main-red (:seon.test/failures v))) :main-red
                                      :else :judged)))
                      (:deferred r))
         reports (vec (for [t (:judged by) :let [v (verdict t)]
@@ -1305,36 +1305,33 @@
 (defn judge!
   "A run's whole verdict: prove! :judge (names as it takes them), and once what it ran is green, the process tests it left
   (:deferred, which a fork of this agent cannot run) on the merge gate's checkout through root's one :gate request (seon.fx/run-tests),
-  each read from the branch where the gate already judged it at its digest and never run again. Their verdicts are facts on this
-  branch (seon.proofs/gate-tx), so a red reads on its status and page with a turn to fix it, and the answer counts them. Only for a task
-  of work, not a design's (its proofs may stay red), of a root with a checkout (else :unjudged says why, and they stay :deferred, root's judge
-  holding it if it would merge), and never the test that started this root. An effect's error, or a changed namespace with no file on
-  the branch, is the answer: no verdict. See docs/merging.md#a-merge-runs-what-the-change-reaches."
+  each read from the branch where the gate already judged it at its digest and never asked again. Their verdicts are facts on this
+  branch (seon.proofs/gate-tx), so a red reads on its status and page with a turn to fix it, and the answer counts them. What no gate will run
+  (seon.task/unjudged) stays :deferred, said under :unjudged and on the status. A failed gate, or a changed namespace with no file on
+  the branch, is the answer: no verdict. Committed first: the gate reads the committed head, and the verdicts are held at its digests. See
+  docs/merging.md#a-merge-runs-what-the-change-reaches."
   {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat [:set :symbol]] :map]]}
   ([] (judge! #{}))
   ([names]
-   (let [r (prove! :judge names)
-         dbv (db)
-         tk (some->> (:task @state) (task/task dbv))]
-     (cond
-       (or (contract/error? r) (empty? (:deferred r)) (seq (proofs/failures r))) r
-       (not (#{:work :merge :whole} (:seon.task/kind tk))) (assoc r :unjudged "this agent has no task whose work a gate judges")
-       :else
-       (let [self (:started-by (task/root dbv))
-             unjudged? (fn [t] (and (not= self (str t)) (= :deferred (:seon.test/status (d/entity dbv [:var/name t])))))
-             todo (filterv unjudged? (:deferred r))
+   (let [r (prove! :judge names)]
+     (if (or (contract/error? r) (empty? (:deferred r)) (seq (proofs/failures r)))
+       r
+       (let [_ (commit!)
+             dbv (db)
+             tk (some->> (:task @state) (task/task dbv))
+             closed (task/unjudged dbv tk (:deferred r))
+             r (cond-> r closed (assoc :unjudged (:why closed)))
+             pull-of (fn [t] (d/pull dbv [:seon.test/digest :seon.test/status :seon.test/failures :seon.test/ticks :seon.test/bytes] [:var/name t]))
+             todo (filterv #(#{nil :deferred} (:seon.test/status (pull-of %))) (remove (set (:tests closed)) (:deferred r)))
              k (:tx-seq (swap! state update :tx-seq inc))
-             g (when (seq todo) (:result (await-reply k {:op :gate :k k :tests todo})))
-             proof? (into (set names) (:proofs (:seon.task/accumulated tk)))]
+             g (when (seq todo) (:result (await-reply k {:op :gate :k k :tests todo})))]
          (cond
-           (= :seon.root/no-gate-checkout (:seon.error/type g)) (assoc r :unjudged (:seon.error/message g))
            (contract/error? g) g
            (seq (:unread g)) (contract/error :seon.agent/gate-unread #'judge! (str "the gate can't run your process tests: " (str/join "; " (for [u (:unread g)] (str (:ns u) ": " (:reason u))))) {:unread (:unread g)})
-           (:value g) (do (transact! (proofs/gate-tx (into {} (for [t todo] [t (d/pull dbv [:seon.test/digest :seon.test/status :seon.test/failures :seon.test/ticks :seon.test/bytes] [:var/name t])]))
-                                                     (:value g)))
-                          (commit!)
-                          (with-gate-verdicts r proof?))
-           :else (with-gate-verdicts r proof?)))))))
+           :else (do (when (:value g)
+                       (transact! (proofs/gate-tx (into {} (map (juxt identity pull-of)) todo) (:value g)))
+                       (commit!))
+                     (with-gate-verdicts r tk))))))))
 
 ;; ---- the loop ----------------------------------------------------------------------
 
