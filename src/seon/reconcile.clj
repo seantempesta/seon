@@ -204,7 +204,7 @@
         t (get-in idx [:tasks id])
         d {:any? (boolean (finished (:seon.task/outcome t)))
            :merged-t (when (= :merged (:seon.task/outcome t)) (:seon.task/merged-t t 0))}]
-    [(assoc-in idx [:done id] d) (not= old (:any? d))]))
+    [(if t (assoc-in idx [:done id] d) (update idx :done dissoc id)) (not= old (:any? d))]))
 
 (defn- refresh-ready
   "Move task id's key in the ready set to what its values say now."
@@ -226,8 +226,10 @@
         claims (as-> (:claims idx) c
                  (reduce (fn [c p] (let [s (disj (get c p) id)] (if (seq s) (assoc c p s) (dissoc c p)))) c (remove acc old))
                  (reduce (fn [c p] (update c p (fnil conj #{}) id)) c (remove old acc)))]
-    (assoc idx :acc (assoc (:acc idx) id acc) :claims claims
-           :depth (assoc (:depth idx) id (if (seq ns) (inc (apply max (map #(get-in idx [:depth %] 0) ns))) 0)))))
+    (if t
+      (assoc idx :acc (assoc (:acc idx) id acc) :claims claims
+             :depth (assoc (:depth idx) id (if (seq ns) (inc (apply max (map #(get-in idx [:depth %] 0) ns))) 0)))
+      (assoc idx :acc (dissoc (:acc idx) id) :claims claims :depth (dissoc (:depth idx) id)))))
 
 (defn- put-task
   "Task value t (nil: gone) under id, with the reverse needs index moved."
@@ -236,7 +238,7 @@
   (let [old (get-in idx [:tasks id :seon.task/needs] #{})
         new (:seon.task/needs t #{})
         nb (as-> (:needed-by idx) nb
-             (reduce (fn [nb n] (update nb n disj id)) nb (remove new old))
+             (reduce (fn [nb n] (let [s (disj (get nb n #{}) id)] (if (seq s) (assoc nb n s) (dissoc nb n)))) nb (remove new old))
              (reduce (fn [nb n] (update nb n (fnil conj #{}) id)) nb (remove old new)))]
     (assoc idx :needed-by nb :tasks (if t (assoc (:tasks idx) id t) (dissoc (:tasks idx) id)))))
 
