@@ -741,7 +741,7 @@
   {:by :code :response}, the response spliced as printed. See docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
   {:malli/schema [:=> [:cat [:maybe :map] :map] [:vector :seon.model/message]]}
   [opts {:seon.eval/keys [id by code intent call-id basis turn] :as e}]
-  (let [text (print/record-text (cond-> e basis (assoc-in [:seon.eval/response :value] (basis-value (:db opts) e))) render/model)
+  (let [text (print/record-text (cond-> e basis (assoc-in [:seon.eval/response :value] (basis-value (:db opts) e))) render/stored-model)
         cid (or call-id (when-not (str/blank? intent) (str "eval-" id)))]
     (if cid
       ;; an eval nobody's reply made has no text, and Seon's own is its code alone, like any other call (docs/render.md#the-render-is-an-eval)

@@ -134,16 +134,16 @@
   "The view a path names, each a location the render proc resolves to an entity on main: :root, an
   entity's id (a number), or an agent by an address, `<agent>` ([:chat agent], its chat), which names it by its key (boot/id: a session,
   stable across a root's restarts, so what a link or a bookmark holds), its id in this boot, its task's id or its branch
-  (seon.render.proc/session-of resolves it; the suffix is cut first, so a key's slash is no matter); `<agent>/debug` the agent itself, every render of its ctx;
-  `<agent>/context` [:debug agent], what its model was sent; `root/debug` what root reads. The
+  (seon.render.proc/session-of resolves it; the suffix is cut first, so a key's slash is no matter); `<agent>/ctx` the agent itself, every render of its ctx;
+  `<agent>/debug` [:debug agent], what its model was sent; `root/debug` what root reads. The
   inverse of seon.render.ui/view-param. See docs/render.md#the-page."
   {:malli/schema [:=> [:cat [:maybe :string]] :any]}
   [s]
   (cond (= "root/debug" s) [:debug :root]
         ;; what agent v's model was sent
-        (some->> s (re-matches #".+/context")) [:debug (keyword (subs s 0 (- (count s) 8)))]
+        (some->> s (re-matches #".+/debug")) [:debug (keyword (subs s 0 (- (count s) 6)))]
         ;; agent v's debug view: every render of its ctx
-        (some->> s (re-matches #".+/debug")) (keyword (subs s 0 (- (count s) 6)))
+        (some->> s (re-matches #".+/ctx")) (keyword (subs s 0 (- (count s) 4)))
         (or (str/blank? s) (= "root" s)) :root
         (re-matches #"\d+" s) (parse-long s)
         ;; an agent by its id in this boot or its branch (main/task-x): its chat, the page a person reads

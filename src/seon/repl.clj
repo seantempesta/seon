@@ -693,7 +693,7 @@
   assembled. See docs/render.md#a-render-is-a-value-printed-once."
   {:malli/schema [:=> [:cat :map] :string]}
   [rec]
-  (print/record-text (cond-> rec (:seon.eval/basis rec) (assoc-in [:seon.eval/response :value] (context/basis-value (:db @agent/state) rec))) render/model))
+  (print/record-text (cond-> rec (:seon.eval/basis rec) (assoc-in [:seon.eval/response :value] (context/basis-value (:db @agent/state) rec))) render/stored-model))
 
 (defn eval-string
   "Evaluate code through the one REPL path (the handler and its middleware) and answer its one

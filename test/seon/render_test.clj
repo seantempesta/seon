@@ -502,20 +502,20 @@
         in (fn [l c] (filter #(= c (:container %)) (:seon.render/units l)))
         input (fn [l] (first (filter #(= "p-input" (:id %)) (:seon.render/units l))))]
     (testing "root is an agent: its page and an agent's are each its lists in one chrome (seon.render.ui/page-chrome)"
-      (is (= #{nil "#c-side" "#p-head" "#p-task" "#c-rows" "#p-tiles"} (set (map :container (:seon.render/units root)))) "root's task list: its agents' cards")
+      (is (= #{nil "#c-side" "#p-head" "#c-rows" "#p-tiles"} (set (map :container (:seon.render/units root)))) "root's lists: its agents' cards")
       (is (= #{nil "#c-side" "#p-head" "#p-task" "#c-rows" "#p-rules"} (set (map :container (:seon.render/units agent))))
           "an agent's: its task's list above its conversation; no eval of the fixture has a render of its own, so no tiles")
-      (is (= 1 (count (in root "#c-rows"))) "root's list: its own evaluation"))
+      (is (= 2 (count (in root "#c-rows"))) "root's list: its work, then its evals, folded")
+      (is (str/includes? (:html (second (in root "#c-rows"))) "sent to root")))
     (testing "root's agents list is the same on every page: root first, then its agents"
       (is (= 2 (count (in root "#c-side")) (count (in agent "#c-side"))))
       (is (= (map :html (in root "#c-side")) (map :html (in agent "#c-side"))))
       (is (str/includes? (:html (first (in root "#c-side"))) "href=\"/\"") "root's line links to its page")
       (is (str/includes? (:html (second (in root "#c-side"))) "href=\"/agent/b1/a3\"") "a link to its page, by its key"))
-    (testing "root's focus: its process, main's open problems and work by their own renders, its input spawns"
-      (is (= 3 (count (in root "#p-tiles"))))
+    (testing "root's focus: its process and main's open problems by their own renders, its input spawns"
+      (is (= 2 (count (in root "#p-tiles"))))
       (is (str/includes? (:html (first (in root "#p-tiles"))) "process"))
       (is (str/includes? (:html (second (in root "#p-tiles"))) "problems"))
-      (is (str/includes? (:html (nth (in root "#p-tiles") 2)) "work"))
       (is (= :seon.render/root-input (:schema (input root)))))
     (testing "an agent's focus: its REPL and messages at the top, live while root's view holds it in this boot"
       (is (= [:seon.render/agent-input {:id :a3 :live? true :held nil :focus? true :busy? true :capped? false}] [(:schema (input agent)) (:input (input agent))]))
@@ -538,7 +538,7 @@
     (r/dispose-walk! (get-in st [:root-walk :w]))))
 
 (deftest a-location-names-root-an-agent-or-an-entity
-  (is (= [:root :root [:chat :a3] :a3 474] (mapv #'seon.web/view-of ["" "root" "a3" "a3/debug" "474"])) "an agent's path is its chat; /debug every render of its ctx"))
+  (is (= [:root :root [:chat :a3] :a3 474] (mapv #'seon.web/view-of ["" "root" "a3" "a3/ctx" "474"])) "an agent's path is its chat; /debug every render of its ctx"))
 
 (deftest a-branch-names-its-newest-agent
   ;; docs/render.md#the-page: a branch is an agent's durable name: its newest agent, of any boot, ended or
@@ -965,7 +965,7 @@
               (is (not (:to-come? in)) "an agent that ended: nothing to come")
               (is (= 2 (:turn in)) "latest is its newest turn"))))
         (is (= [:debug :a1] (#'seon.web/view-of (java.net.URLDecoder/decode (ui/view-param [:debug :a1]) "UTF-8"))) "its feed names it, and reads it back")
-        (is (= [:debug :a1] (#'seon.web/view-of "a1/context")) "/agent/a1/context")
+        (is (= [:debug :a1] (#'seon.web/view-of "a1/debug")) "/agent/a1/debug")
         (testing "a turn whose call failed shows what it sent and its typed error"
           (let [db (d/db-with db [{:seon.model-call/id "b/a1/1" :seon.model-call/error {:seon.error/type :seon.model/no-provider :seon.error/operation 'seon.model/complete
                                                                                 :seon.error/message "no model provider"}}])
@@ -1150,13 +1150,9 @@
         (is (not (str/includes? (h/html (ui/problems {} (assoc r :open #{}))) "boom")))
         (is (str/includes? (h/html (ui/problems {} (assoc r :open #{"pc-error"}))) "boom"))
         (is (str/includes? (h/html (ui/problems {} (assoc r :open #{}))) "unit=pc-error") "its toggle"))))
-  (let [html (h/html (ui/work {} {:by-outcome {:running 1 :done 2} :working [{:seon.task/id "demo/f" :seon.task/reason "waiting on tests"}]}))]
-    (is (str/includes? html "2 done · 1 running"))
-    (is (str/includes? html "demo/f · running · waiting on tests") "each task being worked, a line"))
   (let [html (h/html (ui/root {}
                              {:seon.root/id :root :seon.root/boot "b1" :seon.root/generation {:commit "abc" :ms 1}
                               :seon.root/quiescent {:t 9 :root-causes [{:task "demo/f" :cause "red proof" :blocks ["demo/g"]}]}}))]
-    (is (str/includes? html "boot b1 · generation abc"))
     (is (str/includes? html "1 root causes when it went quiet at t 9"))
     (is (str/includes? html "demo/f: red proof · blocks 1") "each cause one line")
     (is (not (str/includes? html "#:seon")) "nothing printed raw")))
@@ -1967,20 +1963,36 @@
   (is (= "A long string" (ui/task-title "seon.print/a-long-string")))
   (is (= "REPL reads" (ui/task-title "seon.repl/REPL-reads")) "capitals kept"))
 
-(deftest an-agents-card-says-what-it-works-on
-  ;; docs/render.md#the-page: root's card of an agent: its task in words, its cap of turns, how its work stands
-  ;; (the task's outcome and reason); an agent with no task says so
-  (let [c {:agents {1 {:seon.agent/id :a3 :seon.agent/status :running :seon.agent/max-turns 10 :seon.agent/model "deepseek-flash"
-                       :task {:seon.task/id "seon.print/a-long-string" :seon.task/outcome :running :seon.task/reason "waiting on its tests"}}
-                    2 {:seon.agent/id :a4 :seon.agent/status :idle}}}
-        card (fn [eid] (h/html (ui/agent-card {:seon.ctx/ctx c} eid)))
-        a3 (card 1)]
-    (is (str/includes? a3 "A long string") "its task, in words")
-    (is (str/includes? a3 "up to 10 turns · working") "its cap of turns, and how its work stands: the task's outcome")
-    (is (str/includes? a3 "waiting on its tests") "and its reason")
-    (is (str/includes? a3 "deepseek-flash") "its model")
-    (is (str/includes? a3 "href=\"/agent/a3\"") "its page")
-    (is (str/includes? (card 2) "no task yet"))))
+(declare sessions-db)
+
+(deftest a-session-card-says-what-it-works-on
+  ;; docs/render.md#the-page: root's card of a session: its task in words, how it stands, a link to its page
+  (let [db (sessions-db "b2" [["b2/a3" :a3 :running "seon.print/a-long-string" :running :task-a]])
+        card (h/html (ui/session-card {:seon.db/db db} "b2/a3"))]
+    (is (str/includes? card "A long string") "its task, in words")
+    (is (str/includes? card "working") "how its work stands")
+    (is (str/includes? card "href=\"/agent/b2/a3\"") "its page")))
+
+(deftest a-record-that-no-longer-fits-its-schema-is-its-data
+  ;; docs/render.md#the-page: a stored value outlives the schema it was written under; the page and the model read its data
+  (let [old {:t 1 :classes {:a-class-since-removed {:n 1 :rows []}}}]
+    (is (false? (seon.contract/fits? :seon.problems/report old)))
+    (is (nil? (r/stored-model (with-meta old {:seon.render/schema :seon.problems/report}))) "the model reads it by the printer")
+    (is (str/includes? (h/html (r/html {:schema :seon.problems/report} old)) "a-class-since-removed") "the page draws it as data")
+    (is (not (str/includes? (h/html (r/html {:schema :seon.problems/report} old)) "threw")))))
+
+(deftest root-reads-what-is-going-on
+  ;; docs/render.md#the-page: root's head and its work say what is going on, in words
+  (let [db (sessions-db "b2" [["b2/a1" :a1 :idle "x/asks" :parked :t1] ["b2/a2" :a2 :running "x/works" :running :t2] ["b2/a3" :a3 :ended "x/done" :merged :t3]])
+        c (:tree (seon.ctx/build db (seon.db/eid db :seon.root/id :root) :db))
+        keys-in (fn [hc] (keep #(when (and (vector? %) (= #'ui/session-card (first %))) (nth % 2)) (tree-seq coll? seq hc)))
+        work (ui/work-list {:seon.db/db db})
+        text (pr-str work)]
+    (is (= #{"b2/a1" "b2/a2" "b2/a3"} (set (keys-in work))) "every session with a task")
+    (is (< (.indexOf text "Needs you") (.indexOf text "Working") (.indexOf text "Finished")))
+    (is (< (.indexOf text "b2/a1") (.indexOf text "Working")) "what waits on a person comes first")
+    (is (str/includes? text "Finished · 1"))
+    (is (str/includes? (pr-str (ui/root-head {:seon.ctx/ctx (or c {}) :seon.db/db db})) "needs you") "the head says so")))
 
 (deftest how-an-agents-work-stands-is-said-from-its-data
   ;; owner, 2026-11-05: an agent whose task hit its turn cap read "waiting" and "idle", though a capped task is not woken
@@ -2047,9 +2059,8 @@
         t {:seon.task/id "seon.ref/an-alias" :seon.task/outcome :cap :seon.task/reason "proof-red seon.ref-test/an-alias"}
         head (h/html (ui/agent {} (assoc a :seon.agent/task t)))
         db (sessions-db "b2" [["b2/a6" :a6 :idle "seon.ref/an-alias" :cap :task-b] ["b2/a7" :a7 :idle "x/y" :parked :task-y]])
-        c {:agents {1 (assoc a :task t)}}
         side (h/html (ui/agent-side {:seon.db/db db} (session-eid db "b2/a6")))
-        card (h/html (ui/agent-card {:seon.ctx/ctx c} 1))]
+        card (h/html (ui/session-card {:seon.db/db db} "b2/a6"))]
     (is (str/includes? head "● stopped at its cap · 40 turns") head)
     (is (str/includes? head "proof-red seon.ref-test/an-alias") "its reason, in the header line")
     (is (not (str/includes? head "waiting")))
@@ -2083,7 +2094,7 @@
     (is (str/includes? (second (re-find #"<a [^>]*>(.*)</a>" a8)) "task-demo-f") "no task: its branch")
     (testing "root's entry and the board's card are one link too"
       (let [root (h/html (ui/root-side {:seon.ctx/ctx c}))
-            card (h/html (ui/agent-card {:seon.ctx/ctx c} 1))]
+            card (h/html (ui/session-card {:seon.db/db db} "b2/a6"))]
         (is (str/includes? (second (re-find #"<a [^>]*href=\"/\"[^>]*>(.*)</a>" root)) "main"))
         (is (str/includes? (second (re-find #"<a [^>]*href=\"/agent/b2/a6\"[^>]*>(.*)</a>" card)) "stopped at its cap"))))))
 
@@ -2103,17 +2114,16 @@
         side (fn [st] (apply str (map :html (filter #(= "#c-side" (:container %)) (:seon.render/units (#'p/page-value st :root))))))
         html (side st)]
     (is (= ["b2" "b1" "b0"] (mapv first groups)) "this boot's first, then the others, newest first")
-    (is (= [#{"b2/user" "b2/a1"} #{"b1/a1" "b1/a2"} #{"b0/a1"}] (mapv (comp keys-of second) groups)) "every agent on main")
+    (is (= [#{"b2/user" "b2/a1"} #{"b1/a1" "b1/a2"} #{"b0/a1"}] (mapv (comp keys-of second) groups)) "a boot with anything to open, every agent of it")
     (is (every? #(= (vec (sort %)) %) (map second groups)) "oldest first in its boot")
     (testing "an agent with no status and no task reads nothing, and draws"
       (is (= :status/none (:state (ui/standing {:seon.agent/id :user} nil))))
       (is (str/includes? (h/html (ui/agent-side {:seon.db/db db} (session-eid db "b2/user"))) "href=\"/agent/b2/user\"")))
-    (testing "this boot's sessions are in the list; an earlier boot's are folded under its id and its count, each linked by its key"
+    (testing "this boot's sessions are in the list; earlier boots' under one fold, each linked by its key; a session with no task and no process is none"
       (is (not (str/includes? html "defect")) html)
       (is (str/includes? html "href=\"/agent/b2/a1\""))
-      (is (< (.indexOf ^String html "boot b1") (.indexOf ^String html "boot b0")) "newest boot first")
-      (is (= 2 (count (re-seq #"<details" html))) "the two earlier boots are folded")
-      (is (str/includes? html "boot b1 · 2 sessions"))
+      (is (= 1 (count (re-seq #"<details" html))) "the earlier boots are one fold")
+      (is (not (str/includes? html "href=\"/agent/b2/user\"")) "a person's session with nothing in it is not listed")
       (is (and (str/includes? html "href=\"/agent/b1/a1\"") (str/includes? html "href=\"/agent/b1/a2\"") (str/includes? html "href=\"/agent/b0/a1\"")))
       (is (str/includes? html "stopped at its cap") "each with its standing, no process needed")
       (is (str/includes? html "merged"))
@@ -2137,9 +2147,9 @@
     (is (nil? (loc :task-nobody)))
     (testing "the path: the suffix is cut first, so a key's slash is no matter"
       (is (= [[:chat (keyword "b1/a4")] (keyword "b1/a4") [:debug (keyword "b1/a4")]]
-             (mapv #'seon.web/view-of ["b1/a4" "b1/a4/debug" "b1/a4/context"])))
+             (mapv #'seon.web/view-of ["b1/a4" "b1/a4/ctx" "b1/a4/debug"])))
       (is (= [(keyword "seon.program/vars-history") [:chat :task-seon-program-vars-history]]
-             [(#'seon.web/view-of "seon.program/vars-history/debug") (#'seon.web/view-of "task-seon-program-vars-history")])))
+             [(#'seon.web/view-of "seon.program/vars-history/ctx") (#'seon.web/view-of "task-seon-program-vars-history")])))
     (testing "every page of a session with no process reads from its branch, by its key, and its tabs link by it"
       (let [st {:rid 1 :pending {} :watch #{} :waiting {} :views {} :branches {} :main-db db :view {:agents {}}}
             chat (#'p/page-value st [:chat (keyword "b1/a4")])
@@ -2148,7 +2158,7 @@
         (is (not (:seon.error/type chat)) (pr-str (:seon.error/message chat)))
         (is (not (:seon.error/type ctx)))
         (is (str/includes? html "href=\"/agent/b1/a4/debug\"") "its @ctx tab, by its key")
-        (is (str/includes? html "href=\"/agent/b1/a4/context\""))
+        (is (str/includes? html "href=\"/agent/b1/a4/debug\""))
         (is (str/includes? html "stopped at its cap") "and how it stands")
         (is (not (str/includes? html "<textarea")) "no process: no REPL box")
         (is (not (str/includes? html "interrupt")))
@@ -2279,8 +2289,8 @@
 
 (deftest a-page-path-names-its-view-and-back
   ;; docs/render.md#the-page: an agent's chat, debug view and model context, by its id or its branch, and back
-  (doseq [[path view] [["a4" [:chat :a4]] ["a4/debug" :a4] ["a4/context" [:debug :a4]]
-                       ["main/task-x" [:chat :main/task-x]] ["main/task-x/debug" :main/task-x] ["root" :root] ["root/debug" [:debug :root]]]]
+  (doseq [[path view] [["a4" [:chat :a4]] ["a4/ctx" :a4] ["a4/debug" [:debug :a4]]
+                       ["main/task-x" [:chat :main/task-x]] ["main/task-x/ctx" :main/task-x] ["root" :root] ["root/debug" [:debug :root]]]]
     (is (= view (#'seon.web/view-of path)) path)
     (is (= path (java.net.URLDecoder/decode (ui/view-param view) "UTF-8")) path)))
 

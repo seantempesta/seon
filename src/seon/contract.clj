@@ -335,6 +335,11 @@
   {:malli/schema [:=> [:cat :any :any] :boolean]}
   [s v] ((m/validator (schema s)) v))
 
+(defn fits?
+  "Does v satisfy schema key k, one this process holds? A stored value outlives the schema it was written under, and a branch's own key is unknown elsewhere: such a value is data, for the printer. See docs/render.md#the-page."
+  {:malli/schema [:=> [:cat :qualified-keyword :any] :boolean]}
+  [k v] (boolean (and (or (some-> (mr/registry mr/*registry*) (mr/schema k)) (contains? forms k)) (valid? k v))))
+
 ;; ---- the error map ---------------------------------------------------------------------
 ;; One shape (Seon's errors-cut target: :seon.error/base without :at and :layer): a flat
 ;; map of :seon.error/type (the variant's registered schema key), :seon.error/operation,

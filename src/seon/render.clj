@@ -84,6 +84,11 @@
        ;; a schema that declares no render shows the value itself, no longer named by it (the printer would draw it by this again)
        (cond-> {:value (if sym ((requiring-resolve sym) opts v) (vary-meta v dissoc :seon.render/schema))} full? (assoc :full true))))))
 
+(defn stored-model
+  "`model` of a stored value, an eval's record: nil when it no longer fits the schema it kept, so an old record prints as the data it is. See docs/render.md#the-page."
+  {:malli/schema [:=> [:cat :any] [:maybe [:map [:value :any]]]]}
+  [v] (when (some-> (:seon.render/schema (meta v)) (contract/fits? v)) (model v)))
+
 (defn- part-model
   "What the model reads of part k of walk w, a component that answered data: its data's model render (`model`), else its
   data, made when a request asks for it and kept on its cache entry by its revision, so the page never pays for it. See
@@ -207,7 +212,8 @@
   (let [own (own-key v :seon.render/html)]
     (if (and (some? own) (not (symbol? own)))
       own
-      ((or (render-of v (:schema opts)) print-html) opts v))))
+      ;; a producer's schema a stored value no longer fits: it is drawn as the data it is
+      ((or (when (or (nil? (:schema opts)) (contract/fits? (:schema opts) v)) (render-of v (:schema opts))) print-html) opts v))))
 
 ;;; --- the walk: a render of components (docs/render.md#components) -------------------------------
 
