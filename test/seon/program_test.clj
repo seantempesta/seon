@@ -747,7 +747,8 @@
     ;; bin/check contracts judges every var of src (seon.contract/uncontracted): batch 18 added one uncontracted with
     ;; the step green at its digest, which only its own code made (2026-10-30)
     (let [step (fn [in] (:digest (get (program/graph-index g in {"contracts" '[app.fc/contracts-step]}) "contracts")))]
-      (is (not= (step in) (step (assoc-in in [:config :seon.env/src] "other"))) "the contracts step takes the src class"))
+      (is (not= (step in) (step (assoc in :code "other"))) "the contracts step takes the code, so a new function in src moves it")
+      (is (= (step in) (step (assoc-in in [:config :seon.env/src] "other"))) "and not the src class, which test/'s files move too"))
     ;; a-move-of-main-costs-what-moved went red when 14 attributes joined the schema, its digest unmoved:
     ;; seon.reconcile/index filters every attribute the schema declares by namespace (docs/source.md#tests-run-by-reach)
     (is (schemas 'reads-schemas) "a test reaching seon.reconcile/index takes the schema class")
