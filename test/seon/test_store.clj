@@ -238,6 +238,14 @@
              (apply sh/sh "env" (str "SEON_STARTER_FIFO=" (first @starter)) (str (seon.config/checkout) "/bin/held")
                     (concat cmd (apply concat (assoc (apply hash-map opts) :dir dir))))))
 
+(def root-profile
+  "The profile a test's root runs under, whatever profile runs the process that starts it: the
+  scripted provider's, a test fixture, so no test helper starts a paid provider (a DeepSeek agent's
+  start-root! inherited --profile deepseek, a root with six idle processes that outlived its eval).
+  A test naming another gives its own --profile in start-root!'s args (the last one given wins,
+  docs/config.md#layers)."
+  "scripted")
+
 (defn- root-sh
   "bin/root COMMAND ARGS for a test's root (root): its store, main and runs named in the
   environment it starts with, over the caller's, so nothing inherited redirects it; its server port -1, a port the kernel
@@ -255,7 +263,22 @@
   store with the test."
   {:malli/schema [:=> [:cat :string :string] :map]}
   [store main]
-  (binary-sh "./seon" "drop" main "--profile" (name (config/profile)) "--set" (str ":seon.config.root/store-path=" (pr-str store)) :dir "target"))
+  (binary-sh "./seon" "drop" main "--profile" root-profile "--set" (str ":seon.config.root/store-path=" (pr-str store)) :dir "target"))
+
+(defn start-args
+  "bin/root start's arguments for a test's root in runs (start-root!): root-profile, its task files
+  and verdict cache its own, the test running it as --started-by, then args, whose --profile wins."
+  {:malli/schema [:=> [:cat [:map [:runs :string] [:args {:optional true} [:sequential :string]]]] [:vector :string]]}
+  [{:keys [runs args]}]
+  (-> ["--profile" root-profile
+       "--set" (str ":seon.config.root/tasks-dir=" (pr-str (str runs "/tasks")))
+       ;; its verdict cache is its own too, so no verdict an earlier test run cached is
+       ;; reused (the store's results were per main; the cache outlives a run)
+       "--set" (str ":seon.config.proofs/results-dir=" (pr-str (str runs "/results")))]
+      ;; the test running now started this root: its merge gate leaves it out (:seon.root/started-by)
+      (into (when-let [{:keys [ns name]} (meta (first clojure.test/*testing-vars*))]
+              ["--started-by" (str (ns-name ns) "/" name)]))
+      (into args)))
 
 (defn start-root!
   "A built root (bin/root start, this checkout's binary) on store and main, both named and never
@@ -275,24 +298,17 @@
   verdict cache (:seon.config.proofs/results-dir under runs, docs/merging.md#verdicts-are-a-cache). The test
   running it (clojure.test/*testing-vars*) is the root's --started-by, so its merge gate never
   runs the test that started it (docs/merging.md#a-merge-runs-what-the-change-reaches); called
-  outside a test, it names none, and every deferred test is gated."
+  outside a test, it names none, and every deferred test is gated. Its profile is root-profile unless
+  args name another (start-args)."
   {:malli/schema [:=> [:cat [:map [:store :string] [:main :string] [:runs :string]
                              [:env {:optional true} [:map-of :string :string]] [:args {:optional true} [:sequential :string]]]]
                   :map]}
-  [{:keys [runs args] :as root}]
+  [{:keys [runs] :as root}]
   (.mkdirs (java.io.File. ^String runs))
   (when (zero? (:exit (root-sh root "status" [])))
     (throw (ex-info (str "a root is already running in " runs ": a test's root takes a runs directory of its own")
                     {:seon.error/type :seon.test-store/runs-in-use :runs runs})))
-  (root-sh root "start" (-> ["--profile" (name (config/profile)) ; this process's own profile (--profile scripted under bin/test): a root's agents answer as the test's do
-                             "--set" (str ":seon.config.root/tasks-dir=" (pr-str (str runs "/tasks")))
-                             ;; its verdict cache is its own too, so no verdict an earlier test run cached is
-                             ;; reused (the store's results were per main; the cache outlives a run)
-                             "--set" (str ":seon.config.proofs/results-dir=" (pr-str (str runs "/results")))]
-                            ;; the test running now started this root: its merge gate leaves it out (:seon.root/started-by)
-                            (into (when-let [{:keys [ns name]} (meta (first clojure.test/*testing-vars*))]
-                                    ["--started-by" (str (ns-name ns) "/" name)]))
-                            (into args)))
+  (root-sh root "start" (start-args root))
   (let [port (fx/bound-port runs) log (java.io.File. (str runs "/root.log"))]
     (cond-> (assoc root :port port)
       ;; it died before listening: its log says why, kept with it for the test's error (ask)

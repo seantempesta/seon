@@ -2,7 +2,7 @@
   "The test store's own rules: the process tests' store is made once, before any shard, and a
   test process's agent tests share one root of it."
   (:require [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [datahike.api :as d]
-            [seon.db :as pdb] [seon.lib] [seon.test-store :as ts] [seon.agent-test :as at])
+            [seon.config] [seon.db :as pdb] [seon.lib] [seon.test-store :as ts] [seon.agent-test :as at])
   (:import [clojure.lang ExceptionInfo]))
 
 (deftest the-process-store-is-made-before-any-shard
@@ -40,6 +40,14 @@
       (let [e (is (thrown? ExceptionInfo (ts/start-root! {:store store :main (str "own-b-" (random-uuid)) :runs runs})))]
         (is (= :seon.test-store/runs-in-use (:seon.error/type (ex-data e)))))
       (finally (sh/sh "rm" "-rf" runs)))))
+
+(deftest a-test-root-runs-scripted-unless-its-test-names-another
+  ;; seon.test-store/root-profile: start-root! gave a root the starting process's own profile, so a
+  ;; DeepSeek agent's call started a --profile deepseek root. This asks the args, not a booted root:
+  ;; the process under bin/test is itself scripted, so a booted root could not tell the two apart
+  (let [profile-of #(:profile (seon.config/overrides (ts/start-args %)))]
+    (is (= "scripted" ts/root-profile (profile-of {:runs "r"})))
+    (is (= "other" (profile-of {:runs "r" :args ["--set" ":a/b=1" "--profile" "other"]})))))
 
 (deftest a-kept-store-is-keyed-by-its-schema
   ;; task seon.test-store/a-kept-store-is-keyed-by-its-schema: the page merge changed three
