@@ -582,20 +582,22 @@
   (loop [] (if-let [r (sqlite/using (text-index db) f)] (:value r) (recur))))
 
 (defn carry-index!
-  "The text index held for db before (`text-index`) as the index of db after: the move's writes brought into it. A move
-  that wrote none of the text attributes (attrs, the attributes of its datoms) leaves the index as it was; one that
-  wrote some has those attributes' rows replaced from db after (seon.sqlite/replace-attrs!), reading those attributes'
-  texts alone, so a task's plan written on main does not read every form's text again (which evicted the node cache
-  the next agent's start was warmed in). Its callers know what a move wrote: an agent's transaction and its merge
-  of main (seon.agent), the fork server's commit of main (seon.fork-server). nil. See docs/vector.md#search."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:set :any]] :nil]}
-  [before after attrs]
+  "The text index held for db before (`text-index`) as the index of db after: the move's writes brought into it.
+  written, the [e a] each of its datoms wrote: a move that wrote no text attribute leaves the index as it was; one
+  that wrote some has those texts' rows replaced from db after (seon.sqlite/replace-rows!), reading those texts alone, so
+  a definition costs its form, never the program's, and a task's plan written on main reads no form (which evicted
+  the node cache the next agent's start was warmed in). Its callers know what a move wrote: an agent's transaction and
+  its merge of main (seon.agent), the fork server's commit of main (seon.fork-server). nil. See docs/vector.md#search."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:sequential [:tuple :int :any]]] :nil]}
+  [before after written]
   (let [at0 [(:hash before) (:max-tx before)] at1 [(:hash after) (:max-tx after)] [was ix] @indexes]
     (when (and (not= at0 at1) (= at0 was))
       (let [number (zipmap index-attrs (range))
-            written (filter attrs index-attrs)]
-        (when (seq written)
-          (sqlite/using ix #(sqlite/replace-attrs! % (into {} (for [a written] [(number a) (for [{:keys [e v]} (d/datoms after :aevt a)] [e (str v)])])))))
+            texts (into [] (comp (filter (fn [[_ a]] (number a))) (distinct)) written)]
+        (when (seq texts)
+          (sqlite/using ix #(sqlite/replace-rows! %
+                              (for [[e a] texts :when (seq (d/datoms before :eavt e a))] [e (number a)])
+                              (for [[e a] texts :let [dt (first (d/datoms after :eavt e a))] :when dt] [e (number a) (str (:v dt))]))))
         (vreset! indexes [at1 ix])))
     nil))
 
