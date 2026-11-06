@@ -1302,6 +1302,16 @@
                 (as-> x (merge-with + x (select-keys (frequencies (map :type reports)) [:pass :fail :error]))))
       (:main-red by) (assoc :main-red (into {} (for [t (:main-red by)] [t (:seon.test/failures (verdict t))]))))))
 
+(defn gate-plan-failure
+  "What a gate's log (text) says stopped its plan before any test ran, and the namespaces whose ns form this branch rewrote (forms), a form's cause
+  as often as not: its message, or nil when the log names none, for the failure to say rather than mark every test an error. See
+  docs/merging.md#a-merge-runs-what-the-change-reaches."
+  {:malli/schema [:=> [:cat :string [:sequential :symbol]] [:maybe :string]]}
+  [text forms]
+  (when-let [[_ what at] (re-find #"error\[[^\]]*\]: (.*)\n\s*--> (\S+)" text)]
+    (str "the gate could analyze none of your tests: " what ", at " at
+         (when (seq forms) (str "; your branch rewrote the ns form of " (str/join ", " forms) ", which may have lost a require")))))
+
 (defn ask-gate
   "Root's :gate request for tests of this branch, at prio, answered here (seon.root/ext-op, seon.fx/run-tests): the seam a test answers at, since a
   real gate is a worktree, a build and a run. See docs/merging.md#a-merge-runs-what-the-change-reaches."
@@ -1340,6 +1350,11 @@
                         (cond
                           (contract/error? g) g
                           (seq (:unread g)) (contract/error :seon.agent/gate-unread #'judge! (str "the gate can't run your process tests: " (str/join "; " (for [u (:unread g)] (str (:ns u) ": " (:reason u))))) {:unread (:unread g)})
+                          ;; every test :error, none reached: why is in its log, and the verdict is no verdict
+                          (and (seq (get-in g [:value :results])) (every? #{:error} (vals (get-in g [:value :results]))) (:log (:value g))
+                               (gate-plan-failure (slurp (:log (:value g))) (sort (for [[k n] (keys (branch-changes (:base @state) (db))) :when (= :ns k)] n))))
+                          (contract/error :seon.agent/gate-unread #'judge!
+                                          (gate-plan-failure (slurp (:log (:value g))) (sort (for [[k n] (keys (branch-changes (:base @state) (db))) :when (= :ns k)] n))) {:tests tests})
                           :else (do (transact! (proofs/gate-tx (into {} (map (juxt identity pull-of)) tests) (:value g)))
                                     (commit!)
                                     nil)))))

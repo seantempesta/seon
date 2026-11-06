@@ -1883,6 +1883,19 @@
   "Root-REPL function source: the db of task w's branch."
   "(fn [w] (:db @(seon.root/call! sys {:op :write :req {:op :branch-db :branch (seon.task/default-branch w)}})))")
 
+(deftest a-reply-is-recorded-before-its-evals-run
+  ;; deepseek-run6: records' call 28 read as a model call nobody answered, and its cost as none: the model had answered, and an eval of that
+  ;; reply ran a test that deref'd a promise nobody delivers, at its own REPL. The record is written before the evals, so it says what happened
+  (let [[_ r] (in-agent (fn [{:keys [ns]}]
+                          (let [w (str ns "/w")]
+                            [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")}
+                             {:op :eval :agent "root"
+                              :code (str "(do (my.root/run! sys [" (pr-str w) "]) " (parked-code w 1)
+                                         " (:reason (first (filter #(= " (pr-str w) " (:task %)) (get-in (my.root/problems sys) [:classes :failed :rows])))))")}]))
+                        {:config {:seon.config.ai/script 'seon.fixtures/reads-its-own-reply}
+                         :decls [{:seon.task/name "w" :seon.task/plan "Wait." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]})]
+    (is (= "read: The reply itself." (:value r)) (pr-str r))))
+
 (deftest a-root-with-no-provider-ends-the-work-on-its-typed-error
   ;; root's ruling 2026-10-22: a root with no model provider (no --profile) answers the
   ;; first turn with :seon.model/no-provider; the error reaches whoever can act on it: the

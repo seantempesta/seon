@@ -225,6 +225,12 @@
     (is (= #{} (fx/main-reds {:results {t :fail}} {:results {t :fail}})) "no failures kept on either side: unsure")
     (is (= #{} (fx/main-reds (run a) nil)) "main's run answered nothing: unsure")))
 
+(deftest a-gate-that-cant-analyze-says-so
+  ;; deepseek-run6: every one of 209 tests read :error, the cause only in the log
+  (is (= "the gate could analyze none of your tests: No such namespace: agent, at 278:13; your branch rewrote the ns form of seon.cost-test, which may have lost a require"
+         (seon.agent/gate-plan-failure "prove: run\nerror[analyze/unknown-namespace]: No such namespace: agent\n  --> 278:13\nTEST FAILED (the plan)\n" ['seon.cost-test])))
+  (is (nil? (seon.agent/gate-plan-failure "SHARD 3 tests, 2 green\n" []))))
+
 (deftest a-failed-build-says-what-failed-and-which-form
   ;; deepseek-run3: a REPL form recorded as program stopped the gate's build 6 times, with only a log path to the agent, which called it unrelated
   (let [out "build: seon: jolt build\nUnhandled exception (FileNotFoundException): Could not locate seon/repl_test.jolt\n  at ./src/seon/repl.clj:3:1\n  trace:\n"
