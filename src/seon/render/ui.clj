@@ -710,7 +710,8 @@
                       (let [n (inc (:turn lb)) b (assoc lb :commit (d/commit-id db) :turn n)]
                         [db b])
                       (let [b (:seon.model-call/basis m)]
-                        [(if (= (:commit b) (d/commit-id db)) db (d/commit-as-db (:store db) (:commit b))) b]))
+                        ;; a commit past the store's keep (seon.db/retain!) draws from the head; the page says when that differs from what the turn sent (:sent-hash)
+                        [(if (= (:commit b) (d/commit-id db)) db (or (d/commit-as-db (:store db) (:commit b)) db)) b]))
             i (if to-come? (count calls) (.indexOf ^java.util.List calls e))
             prev-e (when (pos? i) (nth calls (dec i)))
             ;; with no request before it, nothing is marked: every message is the first request's

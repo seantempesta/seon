@@ -134,6 +134,11 @@
  ;; ruling 23 (2026-08-03) and Datahike's default; next had it false, hardcoded, until 2026-10-22.
  ;; Cost measured on seon.db-test/a-commit-costs-what-it-writes (docs/storage.md).
  :seon.config.store/keep-history? true
+ ;; Unit: commits. How many of main's newest commit snapshots a store keeps readable by id (seon.db/retain!), and how many must land between its sweeps,
+ ;; at boot. Each commit rewrites about 18 nodes, about 41 KB on a kept store (2026-11-06, commit message), so this bounds that part at about 40 MB; every datom,
+ ;; a branch's history and as-of reads stay whatever it is. Provenance: the owner's go, 2026-11-06, on a default estimated, not tuned. At the bound: a sweep at the
+ ;; next boot, 3-10 s measured on a 221 MB store, then a compaction; reading an older commit by id, one no branch or agent names, answers nil.
+ :seon.config.store/keep-commits 1000
  ;; Unit: bytes, or :never. A datom value at least this large (a string's characters, a
  ;; collection's elements) is stored once under its own content key in Datahike's store, and
  ;; the index nodes hold a reference to it (datahike.index.persistent-set's out-of-line), so a
