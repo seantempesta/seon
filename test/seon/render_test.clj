@@ -1165,7 +1165,7 @@
   ;; owner, 2026-10-25 (the value view): a value recorded as data is drawn from its data, a map as
   ;; rows and code as code, not as its printed text; the row's id is its handle's, which links reach
   (let [src "(deftest t\n  ;; why\n  (is (= 2 (f 1))))"
-        rec {:seon.eval/code "(my.task/status)" :seon.eval/response {:handle 'result/e157 :ms 2.5 :value {:turn "29 of 30" :proofs [{:test 'demo-test/t :status :fail :source (seon.print/code src)}
+        rec {:seon.eval/code "(my.task/status)" :seon.eval/response {:handle 'result/e157 :ms 2.5 :value {:proofs [{:test 'demo-test/t :status :fail :source (seon.print/code src)}
                                                                                                                                   {:test 'demo-test/u :status :pass :source (seon.print/code "(deftest u)")}]}}}
         html (h/html (ui/evaluation {} (assoc rec :seon.eval/by "outside")))
         held (h/html (ui/evaluation {} {:seon.eval/code "(Object.)" :seon.eval/response {:handle 'result/e2 :value (seon.contract/plainly (Object.))}}))]
@@ -1478,7 +1478,7 @@
       (is (str/includes? h "it doubles") "and its failing assertion")
       (is (str/includes? h "(= 4 5)") "as the assertion it got, printed as code"))
     (let [h (draw green)]
-      (is (str/includes? h "You're done") "green is the status's word")
+      (is (str/includes? h "Every proof passes and nothing blocks merging") "green is the status's word")
       (is (not (str/includes? h "it doubles")) "a green keeps no failure"))))
 
 (deftest the-status-is-drawn-from-facts-with-no-turn-of-the-reader
@@ -1492,7 +1492,7 @@
         standing (try (unit-of (r/placed-units w) "status-") (finally (r/dispose-walk! w)))
         h (:html standing)]
     (is (some? standing) "the status is drawn")
-    (is (str/includes? h "You're done") (str "the verdict the branch holds: " h))
+    (is (str/includes? h "Every proof passes") (str "the verdict the branch holds: " h))
     (is (not (str/includes? h "Turn")) "and has no turn count")))
 
 (deftest the-models-page-holds-the-plan-whole
@@ -2338,7 +2338,7 @@
         text (get (cite-text db tree aid) "docs/agent.md#working-a-task")]
     (is (some? text) "the section is a part of the agent's context")
     (is (str/includes? text "their failures are the reproduction") (str "its text, whole: " (subs text 0 (min 300 (count text)))))
-    (is (str/includes? text "Never loosen a contract or a proof") "to its last step")))
+    (is (str/includes? text "before you prove again") "to its last step")))
 
 ;; docs/render.md#a-citation-says-why-it-is-there: each kind of cite read cold
 (deftest a-cited-thing-is-drawn-by-what-it-is
@@ -2392,7 +2392,6 @@
         db (d/db-with db [{:db/id aid :seon.agent/max-turns 7 :seon.agent/turn 1 :seon.agent/outcome :green :seon.agent/ended-turn 0}
                           {:seon.model-call/id "b1/a1/1" :seon.model-call/agent aid :seon.model-call/n 1 :seon.model-call/origin :model}])
         opts (fn [db] {:seon.ctx/ctx (:tree (seon.ctx/build db aid :b)) :seon.db/db db})]
-    (is (str/includes? (pr-str (ui/turn (opts db) aid)) "You have 7 turns") "the turn line: the agent's own cap")
     (is (not (str/includes? (pr-str (ui/chat-end (opts db) aid)) "Done")) "the chat's end: an earlier wake's end is no end of this one")
     (let [ended (d/db-with db [{:db/id aid :seon.agent/ended-turn 1}])]
       (is (str/includes? (pr-str (ui/chat-end (opts ended) aid)) "Done in 1 turn") "the end it wrote at its turn now is"))))
