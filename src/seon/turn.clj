@@ -191,7 +191,7 @@
   {:malli/schema [:=> [:cat :seon.task/id :int :int :seon.model-call/origin :boolean] :seon.model-call/basis]}
   [task turn max-turns origin merge?]
   (agent/commit!)
-  (cond-> {:commit (d/commit-id (agent/db)) :task task :turn turn :max-turns max-turns :origin origin}
+  (cond-> {:commit (d/commit-id (agent/db)) :t (:max-tx (agent/db)) :task task :turn turn :max-turns max-turns :origin origin}
     merge? (assoc :merge? true)))
 
 (defn- evaluated!

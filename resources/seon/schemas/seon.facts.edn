@@ -576,7 +576,7 @@
  ;; holds (the proofs' results, red assertions, reasons, the run's errors), whether the
  ;; branch's unmerged entries show, and the last evaluations' transcript while no earlier turn
  ;; shows them. seon.context/render makes the exact user message from it on that commit.
- :seon.model-call/basis [:map [:commit :uuid] [:task :seon.task/id]
+ :seon.model-call/basis [:map [:commit :uuid] [:t {:optional true} :int] [:task :seon.task/id]
                    [:turn :int] [:max-turns :int] [:origin :seon.model-call/origin]
                    [:merge? {:optional true} :boolean]
                    ;; the agent whose record the request renders (its key)
