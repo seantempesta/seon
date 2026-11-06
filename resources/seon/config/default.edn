@@ -937,6 +937,13 @@
  ;; Unit: ranks. Reciprocal rank fusion's k (Cormack et al. 2009 use 60; v1 used 10): measured on
  ;; the 283 pairs, 10 gave recall@10 0.451 and 60 0.448. Read by seon.vector/rrf.
  :seon.config.vector/rrf-k 10
+ ;; Unit: tokens. How a section or message of a request reads on the debug page; only its colour changes at either bound,
+ ;; nothing is cut or refused. Provenance: the commit adding these keys, from a kept 22k request.
+ :seon.config.render/tokens-warn 2000
+ :seon.config.render/tokens-over 5000
+ ;; Unit: tokens. The same for a whole request. Provenance: the commit adding these keys.
+ :seon.config.render/request-tokens-warn 50000
+ :seon.config.render/request-tokens-over 150000
  ;; Unit: tokens a rendered value spends when its env names no budget (seon.render/print-html,
  ;; an agent's history row). Provenance: the literal 600 render.clj and
  ;; render.ui carried (2026-10-22), kept as it was.

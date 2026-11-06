@@ -695,6 +695,9 @@
             sent-hash (:seon.model-call/sent-hash m)]
         {:at at :to-come? to-come? :turn (:turn b) :agent (:agent b) :origin (:origin b) :raw? raw?
          :body (:body w) :sources (:sources w) :new (:new w)
+         ;; what each record of the request is and did, read from the record: the page says it, never reading the wire's text
+         :evals (into {} (for [[k x] (mapcat identity (:sources w)) :when (= :eval k)]
+                           [x (some->> (pdb/eid tdb :seon.eval/id x) (d/pull tdb [:seon.eval/by :seon.eval/intent :seon.eval/code :seon.eval/call-id]))]))
          :differs? (boolean (and sent-hash (not= sent-hash (lib/digest (sedn/encode (:messages w))))))
          :usage (select-keys m [:seon.model-call/tokens :seon.model-call/cache-hit-tokens :seon.model-call/cache-miss-tokens])
          :error (:seon.model-call/error m)}))))
@@ -1970,19 +1973,60 @@
     :example (str "example session " x " as of t " t)
     :session (str "the opening of session " x)))
 
+;; each section's band (its left border and its share of the request's bar) and its name: docs/render.md#the-debug-page-is-the-wire-request
+(def ^:private section-looks
+  "What a section of a request is, in the order the bar lists them: {kind [name border band]}."
+  (array-map :system ["System prompt" "border-info" "bg-info"]
+             :example ["Example session" "border-success" "bg-success"]
+             :session ["Session" "border-base-700" "bg-base-700"]
+             :page ["Page Seon ran" "border-eval" "bg-eval"]
+             :message ["Message" "border-signal" "bg-signal"]
+             :eval ["Agent's turn" "border-text-500" "bg-text-500"]))
+
+(defn- tokens-class
+  "How a size reads against its limits, n the tokens, warn and over the keys that bound it (seon.config.render): quiet, amber or red. See docs/render.md#the-debug-page-is-the-wire-request."
+  {:malli/schema [:=> [:cat :int :qualified-keyword :qualified-keyword] :string]}
+  [n warn over]
+  (cond (>= n (config/value over)) "font-semibold text-error"
+        (>= n (config/value warn)) "font-semibold text-warning"
+        :else "text-text-400"))
+
+(defn- section-kind
+  "What the wire message at refs (its records' refs, seon.context/wire-turn's :sources) of role is, from its records: never read from its text. evals, {id record} as `debug-input` answers them. See docs/render.md#the-debug-page-is-the-wire-request."
+  {:malli/schema [:=> [:cat :any [:maybe [:sequential :any]] [:maybe :map]] :keyword]}
+  [role refs evals]
+  (let [[kind x] (first refs)]
+    (cond (= "system" role) :system
+          (= :example kind) :example
+          (= :session kind) :session
+          (= :render kind) :page
+          (and (= :eval kind) (= "seon" (:seon.eval/by (get evals x)))) :page
+          (#{:eval :reply} kind) :eval
+          :else :message)))
+
+(defn- request-sections
+  "The sections of a request's messages ms, in order, {:kind :is}: what a person folds as one. A message and the tool messages that answer it are one; sources, each message's refs. See docs/render.md#the-debug-page-is-the-wire-request."
+  {:malli/schema [:=> [:cat [:sequential :map] [:sequential :any] [:maybe :map]] [:vector [:map [:kind :keyword] [:is [:vector :int]]]]]}
+  [ms sources evals]
+  (reduce (fn [acc [i {:keys [role]}]]
+            (if (and (= "tool" role) (seq acc))
+              (update-in acc [(dec (count acc)) :is] conj i)
+              (conj acc {:kind (section-kind role (get sources i) evals) :is [i]})))
+          [] (map-indexed vector ms)))
+
 (defn debug-turn
   "One request of the debug timeline as it went on the wire (the declared html render of
   :seon.render/debug-turn), nothing re-rendered or summarized (owner: \"I don't want to find out later
-  that the envelope was different and you just made a fake page for me\"): each message of the body in
-  order, its JSON fields as sent (content, tool_calls' arguments, tool_call_id, reasoning_content) beside
-  a gutter of its role, the records that made it (their refs, `source`) and its size (the one sizer over
-  its JSON); a message new since the request before it marked; the line where the provider's cached
+  that the envelope was different and you just made a fake page for me\"): a bar of where its tokens go, then its
+  sections (`request-sections`), each one fold whose band says what it is, whose line says what it did and its size against
+  the limits (`tokens-class`), closed unless new since the request before. Open, each message beside a gutter of its role, the records
+  that made it and its size: Markdown drawn as Markdown, code highlighted, a call as its record's code; text past
+  :seon.config.render/value-budget is its start and a button that shows the rest. The line where the provider's cached
   prefix ends (placed by its cache-hit count over the sizes, an estimate, said so), or, with none recorded, where
-  the messages the request before sent the same way end; the envelope (every
-  field but the messages) and, while opened, the whole body's JSON as sent. input as `debug-input`
-  answers it. See docs/render.md#the-debug-page-is-the-wire-request."
+  the messages the request before sent the same way end; the envelope (every field but the messages) and,
+  while opened, the whole body's JSON as sent. input as `debug-input` answers it. See docs/render.md#the-debug-page-is-the-wire-request."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
-  [opts {:keys [view to-come? turn agent origin body sources new raw? error differs?]
+  [opts {:keys [view to-come? turn agent origin body sources new raw? error differs? evals opened]
          {:seon.model-call/keys [tokens cache-hit-tokens cache-miss-tokens]} :usage}]
   (let [unit (:unit opts)
         ms (:messages body)
@@ -1996,51 +2040,98 @@
         ;; request before sent the same way end, the prefix a provider's cache can serve
         same (when (nil? cached) (first (keep-indexed (fn [i n?] (when n? i)) new)))
         upto (vec (reductions + 0 sizes))
+        budget (config/value :seon.config.render/value-budget)
         line (fn [cls text] [:div {:class (str "my-1 flex items-center gap-2 text-2xs " cls)}
                              [:span {:class "h-px flex-1 bg-current opacity-40"}] text [:span {:class "h-px flex-1 bg-current opacity-40"}]])
-        field (fn [k v] [:div {:class "flex flex-col"} [:span {:class "seon-note"} k]
-                         [:pre {:class "whitespace-pre-wrap break-words font-mono text-text-100"} v]])
-        row (fn [i {:keys [role content tool_calls tool_call_id reasoning_content]}]
+        field (fn [k v] [:div {:class "flex flex-col"} [:span {:class "seon-note"} k] v])
+        verbatim (fn [s] [:pre {:class "whitespace-pre-wrap break-words font-mono text-text-100"} s])
+        highlighted (fn [s] (emit/marked-hiccup :seon.print/code s))
+        ;; text past its budget: its start and the button that shows the rest, whose size says how far past it is
+        sized (fn [k s draw]
+                (let [n (select/estimate s) u (str unit "-" k) open? (contains? (or opened #{}) u)
+                      button (fn [show? words]
+                               [:button {:type "button" (keyword "data-on:click") (str "@post('/open?view=" view "&unit=" u "&open=" show? "')")
+                                         :class (str "self-start rounded border border-base-700 px-2 py-0.5 text-2xs tabular-nums hover:border-text-400 " (tokens-class n :seon.config.render/tokens-warn :seon.config.render/tokens-over))}
+                                words])]
+                  (cond (<= n budget) (draw s)
+                        open? [:div {:class "flex flex-col gap-1"} (button false (str (print/tokens-text n) ": show less")) (draw s)]
+                        :else [:div {:class "flex flex-col gap-1"} (draw (:shown (print/prose s budget))) (button true (str "Large, " (print/tokens-text n) ": show all"))])))
+        row (fn [i kind {:keys [role content tool_calls tool_call_id reasoning_content]}]
               (let [rs (get sources i) new? (get new i)
-                    example (some (fn [[kind x]] (when (= :example kind) x)) rs)]
-                [:div {:class (str "grid grid-cols-[minmax(0,11rem)_minmax(0,1fr)] gap-3 rounded-md border-l-2 px-2 py-1 "
-                                   (if new? "border-signal bg-signal/10" "border-base-700 bg-base-950"))
+                    example (some (fn [[k x]] (when (= :example k) x)) rs)
+                    records (keep (fn [[k x]] (when (= :eval k) (get evals x))) rs)
+                    by-call (into {} (map (fn [r] [(:seon.eval/call-id r) r])) records)
+                    code? (or (= "tool" role) (and (= "user" role) (some (fn [[k]] (= :eval k)) rs)))]
+                [:div {:class "grid grid-cols-1 gap-x-3 gap-y-1 py-1 sm:grid-cols-[minmax(0,11rem)_minmax(0,1fr)]"
                        :data-new (str new?) :data-session (when example example)}
                  [:div {:class "flex flex-col gap-0.5 text-2xs text-text-400"}
                   [:b {:class "text-text-200"} role] (when new? [:span {:class "text-signal"} "new since the turn before"])
                   (when example [:span {:class "text-info"} (str "example session " example)])
                   (for [r rs] [:span (source r)])
-                  [:span {:class "tabular-nums"} (print/tokens-text (get sizes i))]]
+                  [:span {:class (str "tabular-nums " (tokens-class (get sizes i) :seon.config.render/tokens-warn :seon.config.render/tokens-over))} (print/tokens-text (get sizes i))]]
                  [:div {:class "flex min-w-0 flex-col gap-1"}
-                  (when tool_call_id (field "tool_call_id" tool_call_id))
-                  (when reasoning_content [:details [:summary {:class "seon-note"} "reasoning_content"]
-                                           [:pre {:class "whitespace-pre-wrap break-words font-mono"} reasoning_content]])
-                  (when (seq content) (field "content" content))
-                  (for [{:keys [id function]} tool_calls]
-                    (field (str "tool_calls · " (:name function) " · " id " · arguments") (:arguments function)))]]))]
+                  (when tool_call_id (field "tool_call_id" (verbatim tool_call_id)))
+                  (when reasoning_content [:details [:summary {:class "seon-note"} "reasoning_content"] (markdown reasoning_content)])
+                  (when (seq content) (sized (str "m" i) content (if code? highlighted markdown)))
+                  ;; a call as the record holding its id holds it; none, its arguments as sent
+                  (map-indexed (fn [j {:keys [id function]}]
+                                 (if-let [code (:seon.eval/code (get by-call id))]
+                                   (field (str "call · " id) (sized (str "m" i "c" j) code highlighted))
+                                   (field (str "tool_calls · " (:name function) " · " id " · arguments") (verbatim (:arguments function)))))
+                               tool_calls)]]))
+        ;; what a closed section says: what each eval set out to do, else the message's first line
+        says (fn [{:keys [is]}]
+               (let [recs (keep (fn [[k x]] (when (= :eval k) (get evals x))) (distinct (mapcat #(get sources %) is)))
+                     intents (keep :seon.eval/intent recs)]
+                 (if (seq intents)
+                   [:div {:class "seon-prose flex min-w-0 flex-col gap-1 whitespace-normal"} (for [t intents] (markdown t))]
+                   [:span {:class "seon-prose min-w-0 whitespace-normal break-words"} (prose (str (or (:content (get ms (first is))) "")) (config/value :seon.config.render/line-budget) {:one-line? true})])))
+        sections (request-sections ms sources evals)
+        size-of (fn [{:keys [is]}] (reduce + 0 (map #(get sizes %) is)))
+        shares (for [[k [nm _ band]] section-looks
+                     :let [n (reduce + 0 (map size-of (filter #(= k (:kind %)) sections)))]
+                     :when (pos? n)]
+                 {:name nm :band band :n n})]
     [:section {:id unit :class "flex flex-col gap-2 rounded-md bg-base-900 p-3 text-xs"}
      [:div {:class "flex flex-wrap items-baseline gap-3"}
       [:b {:class "text-signal"} (if to-come? (str "turn " (inc turn) ", to come: what it would send now") (str "turn " (inc turn)))]
       [:span {:class "text-text-400"} agent]
-      (when tokens [:span {:class "tabular-nums text-text-300"} (str (group3 tokens) " tokens")])
+      [:span {:class (str "tabular-nums " (tokens-class (or tokens est) :seon.config.render/request-tokens-warn :seon.config.render/request-tokens-over))}
+       (if tokens (str (group3 tokens) " tokens") (print/tokens-text est))]
       (when (and prompt (pos? prompt))
         [:span {:class "tabular-nums text-text-400"} (str (group3 cache-hit-tokens) " of " (group3 prompt) " prompt tokens from cache (" (long (* 100 (/ cache-hit-tokens prompt))) "%)")])
       [:span {:class "muted"} (str (count ms) " messages · " (count (filter true? new)) " new")]
       (cond (= :outside origin) [:span {:class "muted"} "an outside read: no model call"]
             to-come? [:span {:class "muted"} "redrawn as the branch moves"]
             (not (or tokens error)) [:span {:class "muted"} "the call is in flight"])]
+     (when (seq shares)
+       [:div {:class "flex flex-col gap-1"}
+        [:div {:class "flex h-2 overflow-hidden rounded-sm bg-base-800"}
+         (for [{:keys [band n]} shares] [:span {:class band :style (str "width:" (/ (* 100.0 n) (max 1 est)) "%")}])]
+        [:div {:class "flex flex-wrap gap-x-3 text-2xs text-text-400"}
+         (for [{:keys [name band n]} shares] [:span {:class "inline-flex items-center gap-1 tabular-nums"} [:span {:class (str "inline-block h-2 w-2 " band)}] (str name " " (print/tokens-text n))])]])
      (when error [:div {:class "rounded border border-error p-2"} (render/html {} error)])
      (when differs?
        [:p {:class "text-warning"} "This page draws the turn again from its records with today's renders, and the bytes differ from the ones the turn sent (its hash, :seon.model-call/sent-hash): a render or a record changed since."])
      [:details [:summary {:class "cursor-pointer text-text-400"} "the envelope: every field but the messages, as sent"]
-      [:pre {:class "whitespace-pre-wrap break-words font-mono text-text-100"} (json/write-str (dissoc body :messages))]]
-     (into [:div {:class "seon-stack"}]
-           (mapcat (fn [i m] (cond-> [(row i m)]
-                               (= (inc i) cached) (conj (line "text-info" (str "the provider's cache ends here: " (group3 cache-hit-tokens) " tokens served from cache (placed by estimate)")))
-                               (and same (pos? same) (= (inc i) same))
-                               (conj (line "text-info" (str "sent the same by the request before down to here: " (group3 (long (nth upto same)))
-                                                            " tokens a provider's prefix cache can serve (none recorded for this request)")))))
-                   (range) ms))
+      (verbatim (json/write-str (dissoc body :messages)))]
+     (into [:div {:class "flex flex-col gap-1"}]
+           (mapcat (fn [{:keys [kind is] :as sec}]
+                     (let [[nm border] (get section-looks kind)
+                           end (inc (peek is)) n (size-of sec)
+                           new? (some #(get new %) is)]
+                       (cond-> [[:details (cond-> {:class (str "rounded-sm border-l-4 bg-base-950 px-2 py-1 " border) :data-section (name kind) :data-preserve-attr "open"} new? (assoc :open true))
+                                 [:summary {:class "flex cursor-pointer items-baseline gap-2"}
+                                  [:span {:class "w-28 shrink-0 text-2xs text-text-300"} nm]
+                                  [:div {:class "min-w-0 flex-1 text-text-100"} (says sec)]
+                                  [:span {:class (str "shrink-0 tabular-nums " (tokens-class n :seon.config.render/tokens-warn :seon.config.render/tokens-over))} (print/tokens-text n)]]
+                                 (into [:div {:class "mt-1 flex flex-col divide-y divide-base-800"}] (map (fn [i] (row i kind (get ms i))) is))]]
+                         (and cached (<= (first is) (dec cached)) (< (dec cached) end))
+                         (conj (line "text-info" (str "the provider's cache ends in the section above: " (group3 cache-hit-tokens) " tokens served from cache (placed by estimate)")))
+                         (and same (pos? same) (<= (first is) (dec same)) (< (dec same) end))
+                         (conj (line "text-info" (str "sent the same by the request before down to here: " (group3 (long (nth upto same)))
+                                                      " tokens a provider's prefix cache can serve (none recorded for this request)"))))))
+                   sections))
      [:details (cond-> {(keyword "data-on:toggle") (str "@post('/open?view=" view "&unit=" unit "-raw&open=' + el.open)")} raw? (assoc :open true))
       [:summary {:class "cursor-pointer text-text-400"} "the body's JSON, whole, as sent"]
       (when raw? [:pre {:class "whitespace-pre-wrap break-all font-mono text-text-100" :data-wire "body"} (json/write-str body)])]]))

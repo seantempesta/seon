@@ -1344,6 +1344,39 @@
     (is (str/includes? h "an opening, whatever it says"))
     (is (= 1 (count (re-seq #"data-session=" h))) "the system message is no session's")))
 
+(deftest a-request-folds-by-its-records
+  ;; docs/render.md#the-debug-page-is-the-wire-request: what a section is comes from its records, never its text: the
+  ;; reply and the tool messages answering it are one fold, and a page Seon ran is told from an agent's by its record's author
+  (let [ms [{:role "system" :content "# Help\n\nread this"}
+            {:role "assistant" :content "shown" :tool_calls [{:id "x" :function {:name "eval" :arguments "{}"}}]}
+            {:role "tool" :tool_call_id "x" :content "page"}
+            {:role "assistant" :tool_calls [{:id "a" :function {:name "eval" :arguments "{}"}} {:id "b" :function {:name "eval" :arguments "{}"}}]}
+            {:role "tool" :tool_call_id "a" :content (str/join " " (repeat 8000 "word"))}
+            {:role "tool" :tool_call_id "b" :content ":ok"}]
+        sources [[[:section 1 1]] [[:eval "e1"]] [[:eval "e1"]] [[:eval "e2"] [:eval "e3"]] [[:eval "e2"]] [[:eval "e3"]]]
+        evals {"e1" {:seon.eval/by "seon" :seon.eval/intent "Seon showed it" :seon.eval/code "(page)" :seon.eval/call-id "x"}
+               ;; held in the other order from its reply's calls: a call is matched by its id, never its place
+               "e2" {:seon.eval/by "a1" :seon.eval/intent "Then the other" :seon.eval/code "(second-call)" :seon.eval/call-id "b"}
+               "e3" {:seon.eval/by "a1" :seon.eval/intent "Read *the* thing" :seon.eval/code "(first-call)" :seon.eval/call-id "a"}}
+        draw (fn [opened] (h/html (ui/debug-turn {:unit "d-turn"} {:turn 1 :agent "b/a1" :view "a1" :origin :model :usage {} :evals evals :opened opened
+                                                                   :body {:messages ms} :sources sources :new [false false false false false true]})))
+        h (draw #{})]
+    (is (= [{:kind :system :is [0]} {:kind :page :is [1 2]} {:kind :eval :is [3 4 5]}]
+           (#'ui/request-sections ms sources evals)))
+    (is (= ["system" "page" "eval"] (mapv second (re-seq #"data-section=\"(\w+)\"" h))) "a fold a section, whatever many messages it holds")
+    (is (= 1 (count (re-seq #"<details[^>]*data-section=\"\w+\"[^>]* open" h))) "only the section holding what is new starts open")
+    (is (= 1 (count (re-seq #"Then the other" h))) "a closed section says once what each of its evals set out to do, though the eval made its call and its answer")
+    (is (re-find #"call · a.*\(first-call\).*call · b.*\(second-call\)" h) "a call is the code of the record holding its id")
+    (is (str/includes? (h/html (ui/debug-turn {:unit "d-turn"} {:turn 1 :agent "b/a1" :view "a1" :origin :model :usage {} :evals {"e2" nil}
+                                                                :body {:messages [(nth ms 3)]} :sources [[[:eval "e2"]]] :new [false]}))
+                       "tool_calls · eval · a · arguments")
+        "an eval the db does not hold: its arguments as sent")
+    (is (str/includes? h "Large, ") "text past its budget offers the rest")
+    (is (str/includes? h "unit=d-turn-m4&amp;open=true") "the button opens that message's text")
+    (is (< (count h) (count (draw #{"d-turn-m4"}))) "opened, its whole text is on the page")
+    (is (str/includes? (draw #{"d-turn-m4"}) "show less"))
+    (is (str/includes? h "text-error") "a section past its limit reads red")))
+
 (deftest a-cut-with-its-whole-form-holds-no-copy
   ;; the second context audit (F7): a plan cut on the page kept its whole text in the cut's :title,
   ;; which the model reads too (1.2k chars twice on two pages). A cut that names the form reading the
