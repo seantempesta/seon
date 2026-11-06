@@ -386,15 +386,16 @@
 (defn form-ids
   "A form's [id code] for its namespace, exact text, occurrence k and the form as the reader read it: its id
   (form-id's: the hash of the namespace and the exact text) and the digest of its namespace and code, which is
-  the form's print: the reader has dropped its comments and whitespace, and the print leaves out its :line and
-  :column. Two things the print does not hold are made to: the numbers the reader gives a gensym (`p1__12#`,
+  the form's EDN as seon.edn/encode makes it (printed here, named in docs/render.md#printing-beside-the-printer-the-wire):
+  the reader has dropped its comments and whitespace, and the encoding leaves out its :line and :column. Two things the print does not hold are made to: the numbers the reader gives a gensym (`p1__12#`,
   `x__3__auto`, counted over the process) are renumbered by first appearance, and the name's metadata
   (`^:private`) follows. Stored with the form (:form/code), what a test's reach digest takes of it
-  (docs/source.md#what-a-test-takes-of-a-forms-text). Across all of src and test (3,813 forms) a form read twice
-  prints alike and every form prints."
+  (docs/source.md#what-a-test-takes-of-a-forms-text). Across all of src and test (3,831 forms) a form read twice
+  encodes alike and every form encodes."
   {:malli/schema [:=> [:cat :symbol :string :int :any] [:tuple :string :string]]}
   [nsym src k form]
   (let [id (str nsym "/" (hasch/uuid [nsym src]) (when (pos? k) (str "#" k)))
+        ;; seon.edn/encode's own print, inline: a contracted call more is the account proof's call count
         printed (binding [*print-length* nil *print-level* nil *print-meta* false] (pr-str form))
         counts (volatile! {})
         renumber (fn [m] (str/replace printed m (fn [[_ n sfx]] (str "__" (or (@counts n) (let [c (count @counts)] (vswap! counts assoc n c) c)) sfx))))
