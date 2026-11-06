@@ -1224,7 +1224,7 @@
 
 (defn eval-item
   "An eval of the conversation (a component over ctx), a step as a chat reads it (owner: \"I
-  want the chat to look like a nice chat screen with just prose unless I dig into it\"; 2026-11-06: \"show the eval intent markdown
+  want the chat to look like a nice chat screen with just prose unless I dig into it\"; \"show the eval intent markdown
   descriptions and collapse the eval statement and the output by default\"): one quiet line, a mark only when it threw, what it set out
   to do (its intent as Markdown, else its code's first line). Opened, in the line's place below it: its code, how long it ran, the tokens it puts
   in the model's context and its handle, then what came of it, its value by the render its record names. Opened (:seon.eval/opened: a reader opened it, a fact the
