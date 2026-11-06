@@ -103,6 +103,7 @@
   [:seon.config.proofs/recent-verdicts :seon.config.proofs/recent-verdicts]
   [:seon.config.proofs/program-store :seon.config.proofs/program-store]
   [:seon.config.proofs/program-store-max-bytes :seon.config.proofs/program-store-max-bytes]
+  [:seon.config.proofs/check-store-max-bytes :seon.config.proofs/check-store-max-bytes]
   [:seon.config.proofs/seed-salt :seon.config.proofs/seed-salt]
   [:seon.config.proofs/case-sizes :seon.config.proofs/case-sizes]
   [:seon.config.proofs/cost-max-n :seon.config.proofs/cost-max-n]

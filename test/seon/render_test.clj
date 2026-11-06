@@ -897,13 +897,7 @@
                 st2 (#'p/pass (assoc-in st1 [:branches [:chat :a3] :db] branch) o)
                 page (first (filter #(= :page (:op %)) (:to-web @o)))]
             (is (str/includes? (:html page) "result/e1") "answered at once, drawn from its branch, never waiting on its process")
-            (is (str/includes? (:html page) "shown from its branch until its process answers") "and it says so")
-            (is (some #(= {:op :render :id :a3} (get-in % [:req])) (:to-api @o)) "its process is asked for its parts")
-            (let [o (volatile! {})
-                  st3 (#'p/answered st2 o [:parts :a3] (drawn-parts branch))]
-              (is (not (str/includes? (p/view-html st3 [:chat :a3]) "until its process answers")) "its own parts replace them")
-              (is (some #(= "p-caption" (first %)) (mapcat :frags (filter #(= :patch (:op %)) (:to-web @o))))
-                  "and the open tab is sent the line that said whose drawing it was"))))))
+            (is (some #(= {:op :render :id :a3} (get-in % [:req])) (:to-api @o)) "its process is asked for its parts")))))
     (testing "a view no tab watches keeps nothing: its page, its branch read, its rows"
       (let [[st2 _] (#'p/render-proc (assoc st1 :shown {[:chat :a3] 21}) :from-web {:op :views :views #{:root} :tabs 1})]
         (is (nil? (get-in st2 [:views [:chat :a3]])))
@@ -1287,7 +1281,7 @@
     (is (= #{1 2} (set (keys pages))) "both pages are answered: neither waits on the other's render")
     (is (str/includes? (str (pages 1)) "seon.render/view-defect") "the debug page is its error")
     (is (str/includes? (str (pages 1)) "seon.context/system-text invalid-output") "it says what threw: the system prompt the db lacks")
-    (is (str/includes? (str (pages 2)) "shown from its branch") "the agent's own page renders through the same pass")
+    (is (str/includes? (str (pages 2)) "c-rows") "the agent's own page renders through the same pass")
     (is (some #(and (= :error (:op %)) (= :seon.render/view-defect (get-in % [:data :seon.error/type]))) (:to-api @o))
         "recorded as the problem it is: the api's proc error")
     (is (empty? (:waiting st')) "nothing left waiting")
@@ -1434,7 +1428,7 @@
       ;; part; this fixture's proof has no source, so the part says what to write (seon.context/not-written)
       (is (not (str/includes? h "my.agent/prove")) "no proof's run form, which the status shows"))
     (is (str/includes? (:html (unit-of task "status-")) "Your proofs") "how the work stands is the status's")
-    (is (= [(str "chat-ask-" rid) (str "chat-start-" rid) (str "conversation-turn-" rid "-1") (str "conversation-turn-" rid "-2") (str "chat-end-" rid)]
+    (is (= [(str "chat-ask-" rid) (str "conversation-turn-" rid "-1") (str "conversation-turn-" rid "-2") (str "chat-end-" rid)]
            (mapv :id conv))
         "the conversation by turn number, each turn a component keyed by the agent and its number (turn 0 took no record: no component), then how the agent stands")
     (let [turn1 (:html (unit-of conv "conversation-turn-"))
@@ -1717,12 +1711,12 @@
     (testing "its process ended: root's view says so, its parts are dropped, and the page says it is not running"
       (let [st2 (#'p/answered (assoc-in st1 [:parts :a3 :units] []) (volatile! {}) :state (assoc-in (:view st1) [:agents :a3 :status] :dead))]
         (is (nil? (get-in st2 [:parts :a3])))
-        (is (str/includes? (p/view-html st2 [:chat :a3]) "not running · shown from its branch"))
+        (is (not (str/includes? (p/view-html st2 [:chat :a3]) "shown from its branch")) "how it was drawn is no news to a person")
         (is (str/includes? (p/view-html st2 [:chat :a3]) "result/e1") "its parts, drawn by root from its branch")))
     (testing "its ask answered with why (gone, refused): the page says so"
       (let [gone (seon.contract/error :seon.root/no-agent 'seon.root/request "no live agent :a3" {})
             st2 (#'p/answered st1 (volatile! {}) [:parts :a3] gone)]
-        (is (str/includes? (p/view-html st2 [:chat :a3]) "shown from its branch: its process did not answer (no live agent :a3)"))))))
+        (is (str/includes? (p/view-html st2 [:chat :a3]) "Its process didn't answer, so this may be behind: no live agent :a3"))))))
 
 (deftest an-agents-turn-tile-is-its-ctxs
   ;; the owner, 2026-10-26: "any changes you want updated in the agents context and html should go
@@ -2137,7 +2131,7 @@
     (is (not (str/includes? (html {:busy? false}) "interrupt")) "no form running: nothing to interrupt")
     (is (str/includes? (html {}) "a message, read at its next turn") "a live agent takes a message")
     (is (not (str/includes? (html {:capped? true}) "a message, read at its next turn")) "a capped task's agent does not")
-    (is (str/includes? (html {:capped? true}) "stopped at its cap") "and the page says why")
+    (is (str/includes? (html {:capped? true}) "It used all its turns") "and the page says why")
     (is (str/includes? (html {:capped? true}) "<textarea") "it still answers a form")
     (is (not-any? #(str/includes? (html {:live? false :busy? true :capped? true}) %) ["<textarea" "interrupt"]) "no process: neither")))
 
@@ -2233,7 +2227,7 @@
         (is (str/includes? t "I'll **reproduce** it first."))
         (is (str/includes? t "<details") "its thinking folded")
         (is (str/includes? t "Read select first."))
-        (is (str/includes? t "turn 1")))
+        (is (not (str/includes? t "turn 1")) "its turn and tokens are for the debug tab"))
       (is (nil? (ui/chat-turn {:seon.ctx/ctx c :seon.db/db (ts/test-db)} 1 3 [])) "a turn that said nothing draws no bubble"))
     (testing "a message is a bubble with its sender"
       (let [m (h (ui/chat-message {:seon.ctx/ctx c} 1 4))]
@@ -2351,13 +2345,38 @@
     (is (not (str/includes? (drawn "demo/g") "A real call")) "a function it will change is read whole: no call to copy")
     (doseq [[k t] drawn] (is (not (re-find #":depth|:symbol|:change|:read " t)) (str k " carries none of how it was fetched")))))
 
+(deftest a-chat-is-the-agent-talking-and-its-steps
+  ;; docs/render.md#the-page: a turn is what the agent said, then its evals as steps; Seon's own evals are the model's, not
+  ;; this conversation; a step opens once to its code and its value, drawn by the render its record names
+  (let [[db aid] (cited-world)
+        k (:seon.agent/key (d/pull db [:seon.agent/key] aid))
+        db (d/db-with db [{:db/id aid :seon.agent/turn 1}
+                          {:seon.model-call/id (str k "/1") :seon.model-call/agent aid :seon.model-call/n 1 :seon.model-call/origin :model :seon.model-call/reply "Found **it**."}
+                          {:seon.eval/id "e2" :seon.eval/agent aid :seon.eval/by "seon" :seon.eval/turn 1 :seon.eval/code "(my.render/render-ctx)" :seon.eval/response {:handle 'result/e2 :value 1}}
+                          {:seon.eval/id "e3" :seon.eval/agent aid :seon.eval/by "a1" :seon.eval/turn 1 :seon.eval/call-id "c1" :seon.eval/intent "Run the proofs." :seon.eval/code "(prove-it)"
+                           :seon.eval/schema :seon.test/proved :seon.eval/response {:handle 'result/e3 :value {:proofs {'a/b :green}}}}
+                          {:seon.eval/id "e4" :seon.eval/agent aid :seon.eval/by "outside" :seon.eval/turn 1 :seon.eval/code "(+ 1 2)" :seon.eval/response {:handle 'result/e4 :value 3}}])
+        opts {:seon.ctx/ctx (:tree (seon.ctx/build db aid :b)) :seon.db/db db}
+        eid #(seon.db/eid db :seon.eval/id %)
+        turn (ui/conversation-turn opts aid 1)
+        shown (set (map second (filter #(and (vector? %) (= #'ui/eval-item (first %))) (map (fn [c] (if (= #'ui/eval-item (first c)) [(first c) (nth c 2)] c)) (rest turn)))))]
+    (is (= #{(eid "e4")} shown) "an eval of another hand is a line, and Seon's is none")
+    (is (some #(and (= #'ui/chat-turn (first %)) (= [(eid "e3")] (last %))) (rest turn)) "the agent's eval is its turn's step")
+    (let [t (h/html (ui/chat-turn opts aid (seon.db/eid db :seon.model-call/id (str k "/1")) []))]
+      (is (str/includes? t "Found **it**") "what it said")
+      (is (not (str/includes? t "of context")) "its tokens are for whoever opens a step"))
+    (let [e (h/html (ui/eval-item opts (eid "e3")))]
+      (is (str/includes? e "Run the proofs.") "a step's line is what it set out to do")
+      (is (= 1 (count (re-seq #"\(prove-it\)" e))) "its code once, under the line")
+      (is (not (re-find #"<details[^>]* open" e)) "closed until opened")
+      (is (str/includes? e "prove") "its value by the render its record names"))))
+
 (deftest the-three-agree-on-the-agents-own-end
   (let [[db aid] (cited-world)
         ;; the agent has taken a turn under a cap of 7, and holds an end from a wake before this one (ended at turn 0)
         db (d/db-with db [{:db/id aid :seon.agent/max-turns 7 :seon.agent/turn 1 :seon.agent/outcome :green :seon.agent/ended-turn 0}
                           {:seon.model-call/id "b1/a1/1" :seon.model-call/agent aid :seon.model-call/n 1 :seon.model-call/origin :model}])
         opts (fn [db] {:seon.ctx/ctx (:tree (seon.ctx/build db aid :b)) :seon.db/db db})]
-    (is (str/includes? (pr-str (ui/chat-start (opts db) aid)) "a budget of 7 turns") "the chat's start: the same cap")
     (is (not (str/includes? (pr-str (ui/chat-end (opts db) aid)) "Done")) "the chat's end: an earlier wake's end is no end of this one")
     (let [ended (d/db-with db [{:db/id aid :seon.agent/ended-turn 1}])]
       (is (str/includes? (pr-str (ui/chat-end (opts ended) aid)) "Done in 1 turn") "the end it wrote at its turn now is"))))
