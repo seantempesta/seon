@@ -373,10 +373,10 @@
                   ended (.read in-a)]
               (.close in-a) (.close in-b)
               (ev (gone-code a))
-              {:pid pid :began began :ended ended :killed killed})))]
+              {:pid pid :began began :ended ended :killed killed :answered answered})))]
     (sh/sh "rm" "-f" fifo-a fifo-b)
     (is (pos-int? pid) (str "the agent's pid: " (pr-str pid)))
-    (is (= [49 49] began) "both children were in their tests")
+    (is (= [49 49] began) (str "both children were in their tests; the run answered: " answered))
     (is (= -1 ended) (str "child A outlived its agent (byte " ended " after its sleep); agent " (pr-str pid) " kill " (pr-str killed)))))
 
 (deftest a-handful-of-tests-runs-in-one-child
