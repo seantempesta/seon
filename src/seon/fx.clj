@@ -767,10 +767,10 @@
              [t (nth ms (quot (count ms) 2))]))))
 
 (defn slow-tests
-  "{test ms} of the tests of digests ({test digest}) that run past bound (:seon.config.proofs/slow-test-ms): by
-  the green at its own digest when it has one, so a test made fast comes back as soon as it is proved, else by
-  the median of its newest greens (recent-verdict-files). A test with no green is not slow. Cost: a listing per test
-  and one small read per green used. docs/merging.md#a-slow-test-is-left-out."
+  "{test ms} of the tests of digests ({test digest}) that run past bound (:seon.config.proofs/slow-test-ms): by the fastest of
+  its newest greens (recent-verdict-files) and its green at its own digest, so a test made fast comes back as soon as it is
+  proved and load, which only ever slows a run, leaves no test out: a test is slow when it is slow every time. A test with no
+  green is not slow. Cost: a listing per test and one small read per green used. docs/merging.md#a-slow-test-is-left-out."
   {:malli/schema [:function [:=> [:cat [:map-of :qualified-symbol [:maybe :string]]] [:map-of :qualified-symbol :int]]
                   [:=> [:cat :string [:map-of :qualified-symbol [:maybe :string]] pos-int?] [:map-of :qualified-symbol :int]]]}
   ([digests] (slow-tests (cfg/value :seon.config.proofs/results-dir) digests (cfg/value :seon.config.proofs/slow-test-ms)))
@@ -778,10 +778,9 @@
    (into {} (for [[t dg] digests
                   :let [fs (filterv (fn [[_ st]] (= :pass st)) (verdict-files dir t))
                         own (some (fn [[d _ f]] (when (= d dg) f)) fs)
-                        ms (sort (keep #(verdict-head-long % #":ms (\d+)") (if own [own] (map last (recent-verdict-files fs)))))
-                        ms (when (seq ms) (nth ms (quot (count ms) 2)))]
-                  :when (and ms (>= ms bound))]
-              [t ms]))))
+                        ms (keep #(verdict-head-long % #":ms (\d+)") (distinct (cond-> (map last (recent-verdict-files fs)) own (conj own))))]
+                  :when (and (seq ms) (>= (apply min ms) bound))]
+              [t (apply min ms)]))))
 
 (defn test-budgets
   "{test ticks} of tests: the engine ticks each may run, min(cap, max(floor, factor x the median of the
