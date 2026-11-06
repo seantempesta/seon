@@ -598,6 +598,16 @@
           "not judged by this run and its digest moved: every fact retracted, its status unknown")
       (is (= [] (proofs/result-tx {'app.f-test/t held1} {} {} {} at)) "not judged, its digest unchanged: its verdict stands"))))
 
+;; docs/checks.md#modes: an edit that reaches no test the agent-tests step runs boots nothing, so its key moves with them and with its own code only
+(deftest the-agent-tests-step-is-keyed-by-what-it-runs
+  (let [t (fn [d] {:digest d :process? false}) p (fn [d] {:digest d :process? true})
+        base (proofs/agent-tests-digest "step" {'a/t (t "d1") 'a/u (t "d2") 'a/process (p "p1")})]
+    (is (= base (proofs/agent-tests-digest "step" {'a/u (t "d2") 'a/t (t "d1") 'a/process (p "p1")})) "in any order, the same key")
+    (is (= base (proofs/agent-tests-digest "step" {'a/t (t "d1") 'a/u (t "d2") 'a/process (p "p2")})) "a process test it does not run does not move it")
+    (is (not= base (proofs/agent-tests-digest "step" {'a/t (t "d9") 'a/u (t "d2") 'a/process (p "p1")})) "a test it runs does")
+    (is (not= base (proofs/agent-tests-digest "step" {'a/t (t "d1") 'a/process (p "p1")})) "so does one removed")
+    (is (not= base (proofs/agent-tests-digest "other" {'a/t (t "d1") 'a/u (t "d2") 'a/process (p "p1")})) "and so does the step's own code")))
+
 ;; docs/merging.md#a-slow-test-is-left-out: asked only of what would run, out of a plain and a merge's run, in a named or full one
 (deftest a-slow-test-is-left-out-unless-named-or-the-full-run
   (let [asked (atom nil)

@@ -157,9 +157,10 @@
 (deftest a-write-under-capacity-costs-nothing-of-the-cache
   (try (cost/proof {:of 'seon.fx/write-verdicts! :input 'seon.results-test/cache-write-under
                     :n "verdicts already in the cache"
-                    :work "the one verdict written, and the size file read and rewritten; no verdict already there is looked at"
+                    :work "the one verdict written, its key's history read and rewritten, and the size file read and rewritten; no verdict already there is looked at"
                     :growth :constant
-                    :fixed {:calls 16 :bytes 60000}
+                    ;; raised from 16 calls and 60 KB by the owner, 2026-11-06, for seon.fx/history: measured 30 and 97 KB
+                    :fixed {:calls 31 :bytes 100000}
                     :sizes [10 100 1000]})
        (finally (clean-costs!))))
 
@@ -167,10 +168,11 @@
 (deftest a-write-past-capacity-counts-the-cache-once
   (try (cost/proof {:of 'seon.fx/write-verdicts! :input 'seon.results-test/cache-write-over
                     :n "verdicts in the cache"
-                    :work "one count of the verdict files by metadata, one removal of the least recently used"
+                    :work "one count of the verdict files by metadata, one removal of the least recently used, and the key's history"
                     :growth :linear
                     :per-n {:bytes 11500}
-                    :fixed {:calls 20 :bytes 60000}
+                    ;; raised from 20 calls by the owner, 2026-11-06, for seon.fx/history
+                    :fixed {:calls 34 :bytes 60000}
                     :sizes [10 100 1000]})
        (finally (clean-costs!))))
 
@@ -214,6 +216,20 @@
        (doseq [i (range keep-n)] (rec-at (str "new-" i) 40 2000000 (inc i)))
        (is (= '{a/t 40} (fx/typical-ms dir '[a/t])) "its typical ms is its newest verdicts'")
        (is (= '{a/t 6000000} (fx/test-budgets dir '[a/t] 100000000 1 3)) "and so is its tick budget")))))
+
+;; See docs/merging.md#verdicts-are-a-cache
+(deftest a-test-history-costs-one-file-and-is-made-again-when-gone
+  (with-dir
+   (fn [dir]
+     (doseq [i (range 3)] (rec! dir {'a/t {:test 'a/t :digest (str "h" i) :pass 1 :fail 0 :error 0 :ms (* 10 (inc i)) :ticks 100}}))
+     (let [held (fn [] (fx/typical-ms dir '[a/t]))
+           edn (filter #(.endsWith (.getName ^java.io.File %) ".edn") (file-seq (java.io.File. ^String dir)))]
+       (is (= '{a/t 20} (held)))
+       (run! #(.delete ^java.io.File %) (doall edn))
+       (is (= '{a/t 20} (held)) "the verdict files gone, one file answers: nothing lists them")
+       (rec! dir {'a/t {:test 'a/t :digest "h3" :pass 1 :fail 0 :error 0 :ms 40 :ticks 100}})
+       (.delete (java.io.File. (str dir "/a/t/.recent")))
+       (is (= '{a/t 40} (held)) "the history gone, it is made again from the verdicts there are")))))
 
 (deftest a-write-past-capacity-leaves-room-for-the-next
   (with-dir
