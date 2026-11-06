@@ -298,6 +298,81 @@
                                      (sites forms budgeted-vars #(and (printer? %) (not (display? %))))))
                         (sort named)))))))
 
+;; docs/render.md#one-path-to-the-model: what the compiler's facts and a form's read say of who makes what the model is sent
+(def ^:private the-path
+  "Each step of the one path to a provider, and who may reference it."
+  '{seon.render/wire #{seon.context/request}
+    seon.render/hiccup-wire #{seon.context/request}
+    seon.context/request #{seon.context/render}
+    seon.model/wire-messages #{seon.model/request-body}
+    seon.model/request-body #{seon.model/openai-compat seon.context/wire-turn}})
+
+(defn- rows-with
+  "The rows of the forms of db in namespaces nss whose source holds one of texts, each with :read, what its source reads as."
+  {:malli/schema [:=> [:cat :seon.host/db :any [:sequential :string]] [:vector :map]]}
+  [db nss texts]
+  (->> (d/datoms db :aevt :form/src)
+       (keep #(when (some (fn [t] (str/includes? (:v %) t)) texts) (:e %)))
+       (map #(seon.program/form-row db %))
+       (filter (comp nss :ns))
+       (mapv #(assoc % :read (seon.reader/read-text (:src %) (:ns %))))))
+
+(defn- holds-map?
+  "Does what form row r reads as hold a map literal with a key pred accepts?"
+  {:malli/schema [:=> [:cat :map :any] :boolean]}
+  [r pred] (boolean (some #(and (map? %) (some pred (keys %))) (tree-seq coll? seq (:read r)))))
+
+(defn- named-by
+  "The vars row r defines."
+  {:malli/schema [:=> [:cat :map] [:sequential :any]]}
+  [r] (for [[k sym] (:defines r) :when (#{:var :method} k)] sym))
+
+(defn- outside-the-path
+  "The vars of db in namespaces nss that make provider messages other than through seon.render/wire: one that references a step of `the-path` and is not named for it, or
+  whose code holds a message ({:role :content}) or a request ({:messages} of a turn or a model) and is not a step."
+  {:malli/schema [:=> [:cat :seon.host/db :any] [:set :any]]}
+  [db nss]
+  (let [refs (->> (d/datoms db :aevt :form/refs) (keep #(when (contains? the-path (:v %)) [(:v %) (:e %)])) distinct)
+        by-ref (for [[step e] refs :let [r (seon.program/form-row db e)] :when (nss (:ns r)) v (named-by r) :when (not (or (= step v) (contains? (get the-path step) v)))] v)
+        role (for [r (rows-with db nss [":role"]) :when (some #(and (map? %) (contains? % :role) (contains? % :content)) (tree-seq coll? seq (:read r))) v (named-by r)
+                   :when (not (#{'seon.render/wire-parts 'seon.model/wire-message} v))] v)
+        asks (for [r (rows-with db nss [":messages"])
+                   :when (some #(and (map? %) (contains? % :messages) (or (contains? % :turn) (contains? % :model))) (tree-seq coll? seq (:read r)))
+                   v (named-by r)
+                   :when (not (or (some #{'seon.context/render 'seon.context/request} (:refs r))
+                                  (#{'seon.model/request-body 'seon.context/request 'my.root/first-moves!} v)))] v)]
+    (set (concat by-ref role asks))))
+
+(defn- action-sites
+  "The vars of db in namespaces nss whose hiccup holds an action: a callback as data (:seon/call under a map's key), or a Datastar handler (a data-on attribute)."
+  {:malli/schema [:=> [:cat :seon.host/db :any] [:set :any]]}
+  [db nss]
+  (set (for [r (rows-with db nss [":seon/call" "data-on"])
+             :when (or (holds-map? r #{:seon/call})
+                       (holds-map? r #(str/starts-with? (str (if (keyword? %) (name %) (if (seq? %) (second %) ""))) "data-on")))
+             v (named-by r)] v)))
+
+(deftest one-path-to-the-model
+  (let [db (src-program) nss (src-nss db)]
+    (is (= #{} (outside-the-path db nss)) "everything a model is sent is read from the tree")
+    (testing "a second path is red: a function that writes messages and asks for them itself"
+      (let [w (my.test/with (my.test/world)
+                (my.test/code 'app.second (str "(ns app.second (:require [seon.model :as m]))\n"
+                                          "(defn ask \"A request made beside the tree.\" [p] (m/request-body p {:messages [{:role \"user\" :content \"hi\"}]}))\n"
+                                          "(defn told \"A message made beside the tree.\" [] {:role \"user\" :content \"hi\"})\n"
+                                          "(defn sends \"Messages asked for beside the tree.\" [ms] {:messages ms :turn 1})")))]
+        (is (= '#{app.second/ask app.second/told app.second/sends} (outside-the-path w #{'app.second})))))))
+
+(deftest an-action-on-the-page-is-the-models-too
+  ;; owner, 2026-11-06: "actions are in the data, never only in a look". Each render holding an action is named in docs/render.md#one-path-to-the-model, with what the model has for it
+  (let [db (src-program) nss (src-nss db)
+        doc (let [t (slurp (str (seon.config/checkout) "/docs/render.md"))] (subs t (str/index-of t "## One path to the model") (or (str/index-of t "\n## " (+ 3 (str/index-of t "## One path to the model"))) (count t))))
+        named (set (for [[_ head] (re-seq #"(?m)^- (.*?): " doc) [_ n] (re-seq #"`([a-z][\w.\-]*/[^`\s]+)`" head)] (symbol n)))]
+    (is (= named (action-sites db nss)) "a new one is red until the page says what the model has for it, and a name that holds none leaves it")
+    (testing "a planted one is seen"
+      (let [w (my.test/with (my.test/world) (my.test/code 'app.look "(ns app.look)\n(defn approve \"A button.\" [] [:button {:seon/call 'app.look/approve!} \"Approve\"])"))]
+        (is (= '#{app.look/approve} (action-sites w #{'app.look})))))))
+
 ;; ---- the agent's debug view ----------------
 
 (deftest the-printer-renders-each-nested-value-by-its-own-render
