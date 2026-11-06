@@ -760,9 +760,8 @@
        [:h2 "Your task"]
        [:p {:data-for "page"} (str "task · " (namespace (symbol id)) (when stands (str " · " (:text stands) (when (:detail stands) (str " · " (:detail stands))))))]
        (when plan (markdown plan))
-       ;; a work or whole task is done when its proofs pass; the other kinds (design, merge, test) say what they are for
-       (if (#{:work :whole} (:seon.task/kind t :work))
-         [:p "You're done when every proof under \"Your proofs\" passes on your branch. Then reply saying what you changed and how it's proved, and your branch is merged."]
+       ;; a work or whole task is done by the rule in the system prompt; the other kinds (design, merge, test) say what they are for
+       (when-not (#{:work :whole} (:seon.task/kind t :work))
          (when-let [ins (:seon.task/instructions t)] [:p ins]))
        [:p (str "Task: " id)]])))
 
