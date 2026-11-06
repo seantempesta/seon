@@ -317,6 +317,7 @@
       :openai-compat (cond-> {:kind :openai-compat :base-url (v :seon.config.ai/base-url) :model (:seon.config.ai/model c)
                               :api-key-env (v :seon.config.ai/api-key-variable) :max-tokens (v :seon.config.ai/max-tokens)
                               :replay-reasoning (v :seon.config.ai/replay-reasoning)}
+                       (:seon.config.ai/temperature c) (assoc :temperature (:seon.config.ai/temperature c))
                        (:seon.config.ai/thinking c) (assoc :thinking (:seon.config.ai/thinking c))
                        (:seon.config.ai/reasoning-effort c) (assoc :reasoning-effort (:seon.config.ai/reasoning-effort c))))))
 
@@ -328,7 +329,7 @@
   [c p]
   (let [top {:seon.config.ai/provider (:kind p) :seon.config.ai/script (:script p) :seon.config.ai/model (:model p)
              :seon.config.ai/max-tokens (:max-tokens p)
-             :seon.config.ai/thinking (:thinking p) :seon.config.ai/reasoning-effort (:reasoning-effort p)}
+             :seon.config.ai/temperature (:temperature p) :seon.config.ai/thinking (:thinking p) :seon.config.ai/reasoning-effort (:reasoning-effort p)}
         c (into c (filter (comp some? val)) top)
         prov (get-in c [:seon.config.ai/models (:seon.config.ai/model c) :seon.ai.model/provider])
         wire (into {} (filter (comp some? val)) {:seon.config.ai/base-url (:base-url p) :seon.config.ai/api-key-variable (:api-key-env p)})]

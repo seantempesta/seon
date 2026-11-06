@@ -24,6 +24,10 @@ Every request declares one tool, `eval` (`seon.model/eval-tool`), which the mode
 
 ```seon.model/complete``` takes the provider value and the request and answers a completion or a typed failure, by the provider's kind: `:none` answers `:seon.model/no-provider`, `:scripted` the fixture's reply, `:openai-compat` posts `seon.model/request-body` to the endpoint's chat-completions path with the key read at the call. A 200 body is read by ```seon.model/parse-reply``` as a stream of server-sent events (```seon.model/sse-reply```: content and reasoning concatenated in order, each tool call's pieces joined by its index, the last finish reason, the usage the final chunk carries) or as one chat-completion JSON document, and either way becomes the one completion shape (`seon.model/reply-of`). Anything but 200 is a provider error with the response body ([failures](#failures)).
 
+## Temperature
+
+`:seon.config.ai/temperature` is absent, so a request sends none and the provider's default applies: at a hard-coded 0 an agent copied its last reply. On the 5 real requests where a loop began, replayed 3 times each with thinking off (deepseek-flash, one step each): 11 of 15 repeated at 0, 3 of 15 at 0.5, and 0 of 15 at the default. Removing Seon's system prompt, page, intents and result metadata at 0 still repeated 4 of 15, so the temperature is most of it and the context part of it. Telling the agent not to repeat did nothing: `:again` is gone, and with or without it the default gave 0 of 15.
+
 ## Thinking is off by default
 
 `:seon.config.ai/thinking` is `:disabled`: a task whose next step needs long reasoning is a context or instruction defect to fix, not a cost to pay every turn (owner: "if we can't have intuitive function calling based on the context our context is bad and instructions need help"). A model or a task turns it on through the resolver ([config](config.md#the-resolver)), with `:seon.config.ai/reasoning-effort`.

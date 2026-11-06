@@ -116,6 +116,7 @@
   [:seon.config.ai/script {:optional true} :seon.config.ai/script]
   [:seon.config.ai/model :seon.config.ai/model]
   [:seon.config.ai/max-tokens :seon.config.ai/max-tokens]
+  [:seon.config.ai/temperature {:optional true} :seon.config.ai/temperature]
   [:seon.config.ai/thinking {:optional true} :seon.config.ai/thinking]
   [:seon.config.ai/replay-reasoning :seon.config.ai/replay-reasoning]
   [:seon.config.ai/reasoning-effort {:optional true} :seon.config.ai/reasoning-effort]
