@@ -1302,6 +1302,14 @@
                 (as-> x (merge-with + x (select-keys (frequencies (map :type reports)) [:pass :fail :error]))))
       (:main-red by) (assoc :main-red (into {} (for [t (:main-red by)] [t (:seon.test/failures (verdict t))]))))))
 
+(defn ask-gate
+  "Root's :gate request for tests of this branch, at prio, answered here (seon.root/ext-op, seon.fx/run-tests): the seam a test answers at, since a
+  real gate is a worktree, a build and a run. See docs/merging.md#a-merge-runs-what-the-change-reaches."
+  {:malli/schema [:=> [:cat [:vector :qualified-symbol] :int] :any]}
+  [tests prio]
+  (let [k (:tx-seq (swap! state update :tx-seq inc))]
+    (:result (await-reply k {:op :gate :k k :tests tests :prio prio}))))
+
 (defn judge!
   "A run's whole verdict: prove! :judge (names as it takes them), and once what it ran is green, the process tests it left
   (:deferred, which a fork of this agent cannot run) on the merge gate's checkout through root's one :gate request (seon.fx/run-tests),
@@ -1328,8 +1336,7 @@
             ;; one stage's tests through the gate, written where the status reads them; its error or nil
             gate! (fn [tests prio]
                     (when (seq tests)
-                      (let [k (:tx-seq (swap! state update :tx-seq inc))
-                            g (:result (await-reply k {:op :gate :k k :tests tests :prio prio}))]
+                      (let [g (ask-gate tests prio)]
                         (cond
                           (contract/error? g) g
                           (seq (:unread g)) (contract/error :seon.agent/gate-unread #'judge! (str "the gate can't run your process tests: " (str/join "; " (for [u (:unread g)] (str (:ns u) ": " (:reason u))))) {:unread (:unread g)})

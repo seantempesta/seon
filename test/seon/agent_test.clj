@@ -1898,20 +1898,34 @@
                          :decls [{:seon.task/name "m" :seon.task/plan "Work." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]})]
     (is (= [:closed :seon.model/no-provider [:seon.model/no-provider]] (:value r)) (pr-str r))))
 
+(defn- answers-gate
+  "Agent code that answers this agent's gate at its seam (seon.agent/ask-gate), each ask counted in user/gate-asks, with what user/gate-answer holds: a real
+  gate is a worktree, a build and a run, and the claim here is what the agent does with its answer."
+  {:malli/schema [:=> [:cat :qualified-symbol] :string]}
+  [t]
+  (str "(do (in-ns 'user) (def gate-asks (atom 0)) (def gate-answer (atom :fail))"
+       " (alter-var-root #'seon.agent/ask-gate (constantly (fn [tests _] (swap! gate-asks inc)"
+       "   {:value {:results (zipmap tests (repeat @gate-answer)) :digests (zipmap tests (repeat \"gate\"))"
+       "            :failures (if (= :fail @gate-answer) {'" t " [{:type :fail :message \"the gate's red\"}]} {})}})))"
+       " :ok)"))
+
+(defn- process-proof
+  "Agent code writing test var seon.repl-test/name, a process test (it reaches an agent), asserting (+ 1 1) is n."
+  {:malli/schema [:=> [:cat :string :int] :string]}
+  [nm n]
+  (str "(do (in-ns 'seon.repl-test) (clojure.test/deftest " nm
+       " (let [[r] (seon.agent-test/in-agent (fn [_] [\"(+ 1 1)\"]))] (clojure.test/is (= " n " (:value r))))) (in-ns 'user) :ok)"))
+
 (deftest a-process-test-gets-its-verdict-while-the-agent-can-act
   ;; docs/merging.md#a-merge-runs-what-the-change-reaches. The shape of seon.repl/a-docstring-redefinition-is-a-change's run (2026-11-06): the agent wrote
   ;; its proof as a process test and never ran it; deferred read as green, the run ended, and the judge found it red at the
-  ;; merge with no turn left. Now its prove runs it on the gate's checkout and the red is the agent's, on its status
+  ;; merge with no turn left. Now its prove takes the gate's answer and the red is the agent's, on its status (the gate answered at its seam)
   (let [t 'seon.repl-test/a-process-proof-of-the-gate
-        write (fn [n] (str "(do (in-ns 'seon.repl-test) (clojure.test/deftest a-process-proof-of-the-gate"
-                           " (let [[r] (seon.agent-test/in-agent (fn [_] [\"(+ 1 1)\"]))] (clojure.test/is (= " n " (:value r))))) (in-ns 'user) :ok)"))
         prove "(let [r (my.agent/prove)] {:proofs (:proofs r) :deferred (:deferred r) :ran (:ran r) :line (:seon.print/code (my.agent/prove-summary {} r))})"
         reasons "(mapv :reason (:reasons (seon.context/status (seon.agent/db) @seon.ctx/ctx {})))"
-        [_ red red-reasons _ green green-reasons again judge-gate]
-        (in-agent (fn [{:keys [task]}]
-                    [(write 3) prove reasons (write 2) prove reasons prove
-                     {:op :eval :agent "root"
-                      :code (str "(select-keys (:value @(seon.root/call! sys {:op :gate :branch (seon.task/default-branch " (pr-str task) ") :tests ['" t "]})) [:results :log])")}])
+        [_ _ red red-reasons _ _ green green-reasons again asks]
+        (in-agent (fn [_] [(answers-gate t) (process-proof "a-process-proof-of-the-gate" 3) prove reasons
+                           "(reset! user/gate-answer :pass)" (process-proof "a-process-proof-of-the-gate" 2) prove reasons prove "@user/gate-asks"])
                   {:proofs #{t}})]
     (is (= {t :fail} (:proofs (:value red))) (pr-str red))
     (is (str/starts-with? (:line (:value red)) "red: 1") "its prove says red")
@@ -1920,10 +1934,24 @@
     (is (= [] (:deferred (:value green))) "nothing left unjudged")
     (is (str/starts-with? (:line (:value green)) "green: 1 of 1") (:line (:value green)))
     (is (= [] (:value green-reasons)))
-    (is (= 0 (:ran (:value again))) "at the same digest its verdict stands, and no gate runs")
     (is (= {t :pass} (:proofs (:value again))))
+    (is (= 2 (:value asks)) "one ask for each change: at the same digest its verdict stands, and no gate is asked")))
+
+(deftest a-real-gate-judges-a-candidate-once
+  ;; the one real gate: a process test run on a checkout of the candidate, its verdict reaching the branch, and the judge's gate of the same
+  ;; candidate running nothing, since the same owner holds its verdict (seon.fx/run-tests)
+  (let [t 'seon.repl-test/a-really-gated-proof
+        prove "(let [r (my.agent/prove)] {:proofs (:proofs r) :deferred (:deferred r)})"
+        [_ green judge-gate]
+        (in-agent (fn [{:keys [task]}]
+                    [(process-proof "a-really-gated-proof" 2) prove
+                     {:op :eval :agent "root"
+                      :code (str "(select-keys (:value @(seon.root/call! sys {:op :gate :branch (seon.task/default-branch " (pr-str task) ") :tests ['" t "]})) [:results :log])")}])
+                  {:proofs #{t}})]
+    (is (= {t :pass} (:proofs (:value green))) (pr-str green))
+    (is (= [] (:deferred (:value green))) "nothing left unjudged")
     (is (= {t :pass} (:results (:value judge-gate))) (pr-str judge-gate))
-    (is (nil? (:log (:value judge-gate))) "the judge's gate of the same candidate runs nothing: the same owner holds its verdict")))
+    (is (nil? (:log (:value judge-gate))) "the judge's gate of the same candidate runs nothing")))
 
 (deftest a-test-that-waits-for-good-is-told-and-the-next-agent-goes-on
   ;; deepseek-run3 (2026-11-06): an agent's own test deref'd a promise nobody delivers. Its test child parked for good at 0% CPU, tick budgets count no sleep,
@@ -1940,13 +1968,14 @@
     (is (= :seon.writer/refused (:value r)) (pr-str r))))
 
 (deftest a-hand-back-with-a-red-process-test-is-no-green-end
-  ;; the same class through seon_done: an outside agent that hands back an unjudged process test gets its verdict as :done's answer
+  ;; the same class through seon_done: an outside agent that hands back an unjudged process test ends on its verdict. The hand-back itself, in the agent, the gate
+  ;; answered at its seam: :done goes on to the judge, whose own gate is a real one (a-real-gate-judges-a-candidate-once)
   (let [t 'seon.repl-test/a-handed-back-proof-of-the-gate
-        write (str "(do (in-ns 'seon.repl-test) (clojure.test/deftest a-handed-back-proof-of-the-gate"
-                   " (let [[r] (seon.agent-test/in-agent (fn [_] [\"(+ 1 1)\"]))] (clojure.test/is (= 3 (:value r))))) (in-ns 'user) :ok)")
-        [_ _ done] (in-agent (fn [{:keys [agent]}] [write before-done {:op :done :agent agent}]) {:proofs #{t}})]
-    (is (not (str/includes? (:line done) ":outcome :merged")) (pr-str done))
-    (is (str/includes? (:line done) "proof-red") (pr-str done))))
+        [_ _ end] (in-agent (fn [_] [(answers-gate t) (process-proof "a-handed-back-proof-of-the-gate" 2)
+                                     "(select-keys (seon.turn/hand-back! (:task @seon.agent/state)) [:outcome :reason])"])
+                            {:proofs #{t}})]
+    (is (= :red (:outcome (:value end))) (pr-str end))
+    (is (str/includes? (:reason (:value end)) "proof-red") (pr-str end))))
 
 (deftest a-green-whole-task-merges-itself-with-no-act-beyond-done
   ;; owner, 2026-10-26: "we have the agents have live feedback so we can know if we can auto merge
