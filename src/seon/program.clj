@@ -1724,9 +1724,12 @@
             ;; a reader of files or a process (the tree, a root, the binary) can read any class of
             ;; files (:seon.env/*); a pin it takes by its reach, as any test does: Jolt's runtime
             ;; core and Chez, which every process runs on, are the forks' suites' and the daily full run's
-            ks (if (some #(let [f (flags %)] (or (:reads f) (:proc f) (:bin f))) cs) (into ks env-keys) ks)]
+            ks (if (some #(let [f (flags %)] (or (:reads f) (:proc f) (:bin f))) cs) (into ks env-keys) ks)
+            ;; a step's src is :code; the src class is test/'s too, which a step does not run (every step reaches seon.contract/uncontracted)
+            src? (and roots? (some #(contains? (:config (flags %)) :seon.env/src) cs))
+            ks (if roots? (disj ks :seon.env/src) ks)]
         {:digest (lib/digest (apply str k "\n" env "\n" (when (some #(:scans (flags %)) cs) tree)
-                                      (when (and roots? (some #(:reads (flags %)) cs)) code)
+                                      (when (and roots? (or src? (some #(:reads (flags %)) cs))) code)
                                       (concat (sort (map cd cs)) (map line (sort ks)))))
          :process? (boolean (some #(:proc (flags %)) cs)) :binary? (boolean (some #(:bin (flags %)) cs))}))))
 
