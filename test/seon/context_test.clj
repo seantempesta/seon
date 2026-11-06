@@ -448,7 +448,7 @@
         (is (= "(my.render/render-ctx)" (get-in r0 [2 :tool-calls 0 :code])))
         (is (every? #(re-find % (:content (peek r0))) [#"seon\.render\.ui/cited" #"Doubles\." #"seon\.render\.ui/status"]) "the page whole, each part by the function that drew it: how the work stands too")
         (is (= "(my.render/render-changes)" (get-in r1 [(- (count r1) 2) :tool-calls 0 :code])) "what moved is an eval of its own at the end, after turn 1's own eval")
-        (is (re-find #"seon\.render\.ui/cited" (:content (peek r1))) "the cited var's edit: its part, by its function")
+        (is (re-find #"\"cited-" (:content (peek r1))) "the cited var's edit: its part, by its function")
         (is (str/includes? (:content (peek r1)) "Triples."))
         (is (not (re-find #"seon\.render\.ui/task\b" (:content (peek r1)))) "a component that did not change is not told again")
         (is (not (re-find #"\"status\"" (:content (peek r1)))) "a turn taken moved nothing of how the work stands: not told again")

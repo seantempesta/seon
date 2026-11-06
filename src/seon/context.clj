@@ -5,7 +5,7 @@
   moved after. Nothing is stored: a turn records its basis (the commit it read and what it took that no fact holds), and `render`
   makes the text from it, for the model and again for anyone who reads it later."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str] [datahike.api :as d] [seon.render :as render]
+  (:require [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str] [datahike.api :as d] [seon.render :as render] [clojure.data.json :as json]
             [seon.task :as task] [seon.db :as pdb] [seon.merge :as pm]
             [seon.print :as print] [seon.print.select :as select] [seon.ref :as ref] [seon.doc :as doc] [seon.config :as cfg] [seon.model :as model] [seon.vector :as vector] [seon.ctx :as ctx] [seon.ratom :as ratom] [seon.agent :as agent] [seon.program :as program] [seon.proofs :as proofs] [seon.problems :as problems] [seon.reconcile :as r] [seon.edn :as sedn] [clojure.edn]))
 
@@ -709,7 +709,8 @@
                                                (nil? src) :undefined (some? test-error) :not-run :else :unknown)
                                       fs (when-not test-error (:seon.test/failures v))
                                       calls (when (and src (not= :pass st)) (callees db p))
-                                      shape (when (= :undefined st) (test-shape db p))]]
+                                      ;; its example from the merge base, so it doesn't move with what the agent writes, nor quote its own test back
+                                      shape (when (= :undefined st) (or (some-> (:seon.agent/base-commit ag) (->> (d/commit-as-db (pdb/store-of db))) (test-shape p)) (test-shape db p)))]]
                             (cond-> {:test p :status st}
                               (and src (not= :pass st)) (assoc :source (print/code src))
                               shape (assoc :shape shape)
@@ -956,21 +957,22 @@
     (try (render/placed-hiccup w (render/page-lists w)) (finally (render/dispose-walk! w)))))
 
 (defn redo-tx
-  "The transaction that makes the page's evals of agent a's ctx c true again, in their order, on db: each is read against what the one before it showed (its :t), and one whose :since is not that, or that answers no t, is made anew from the page as of each t (`page-at`): edits (seon.render/page-edits), from nothing when none came before. Nothing broken, nothing. See docs/render.md#a-redo-is-an-explicit-bust."
+  "The transaction that makes the page's evals of agent a's ctx c true again, in their order, on db: each is read against what the one before it showed (its :seon.eval/page :t), and one whose :since is not that is made anew from the page as of each t (`page-at`): edits (seon.render/page-edits), from nothing when none came before. Nothing broken, nothing. See docs/render.md#a-redo-is-an-explicit-bust."
   {:malli/schema [:=> [:cat :seon.host/db :int :map] [:vector :map]]}
   [db a c]
   (let [evs (filter render-eval? (map (fn [e] (get-in c [:evals e])) (sort (keys (:evals c)))))]
     (first
      (reduce (fn [[tx t0] e]
-               (let [r (:seon.eval/response e) v (:value r) t1 (:t v)]
+               (let [{t1 :t since :since} (:seon.eval/page e) r (:seon.eval/response e)]
                  (cond
-                   ;; an eval with no t (one that threw, or a redraw's) shows nothing the next can stand on
+                   ;; an eval with no t (one that threw) shows nothing the next can stand on
                    (nil? t1) [tx t0]
-                   (or (:components v) (= t0 (:since v))) [tx t1]
+                   (or (:components (:value r)) (= t0 since)) [tx t1]
                    :else
-                   (let [edits (render/page-edits (render/forms-moved (when t0 (page-at db a t0)) (page-at db a t1)))
-                         nv (cond-> {:t t1 :edits edits} t0 (assoc :since t0))]
-                     [(conj tx {:seon.eval/id (:seon.eval/id e) :seon.eval/response (assoc r :value nv)}) t1]))))
+                   (let [edits (render/page-edits (render/forms-moved (when t0 (page-at db a t0)) (page-at db a t1)))]
+                     [(conj tx {:seon.eval/id (:seon.eval/id e) :seon.eval/response (assoc r :value {:edits edits})
+                                :seon.eval/page (cond-> {:t t1} t0 (assoc :since t0))})
+                      t1]))))
              [[] nil] evs))))
 
 (defn request
@@ -1053,3 +1055,10 @@
       :sources (mapv (fn [is] (vec (distinct (map #(first (nth per %)) is)))) groups)
       :new (mapv (fn [is] (boolean (some #(second (nth per %)) is))) groups)})))
 
+(defn read-text
+  "A read of messages, the request basis b makes on db, as an outside agent is answered it: the system prompt, then each record as the call made and its result; wire?: the request body as JSON, the bytes a provider is sent (`wire-turn`). See docs/server.md#ops."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.model-call/basis [:vector :seon.model/message] :boolean] :string]}
+  [db basis messages wire?]
+  (if wire?
+    (json/write-str (:body (wire-turn db basis)))
+    (str/join "\n\n" (remove str/blank? (mapcat (fn [{:keys [content tool-calls]}] (concat (map #(str (:intent %) "\n" (:code %)) tool-calls) [content])) messages)))))

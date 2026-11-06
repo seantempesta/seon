@@ -27,7 +27,7 @@ if [[ ${1:-} == call ]]; then
     for (@kv) {
       my ($k, $v) = /\A([^=]+)=(.*)\z/s or die "bin/mcp call: $_ is not KEY=VALUE\n";
       if ($v eq "-") { local $/; $v = <STDIN> }
-      elsif ($v =~ /\A(true|false)\z/ || $v =~ /\A\[/) { $v = JSON::PP->new->allow_nonref->decode($v) }
+      elsif ($k ne "code" && ($v =~ /\A(true|false)\z/ || $v =~ /\A\[/)) { $v = JSON::PP->new->allow_nonref->decode($v) }
       $a{$k} = $v }
     # a reply of one eval, from a shell: its intent and code as keys of their own (root takes plain code)
     if ($op eq "eval" && ($a{agent} // "") ne "root" && exists $a{code}) { $a{evals} = [{intent => delete($a{intent}) // "", code => delete $a{code}}]; $a{"message-md"} //= "" }

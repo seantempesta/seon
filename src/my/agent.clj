@@ -347,8 +347,9 @@
   (if-not (:reports r)
     (with-meta r nil)
     (let [died (count (proofs/died r))
-          red (pos? (+ (:fail r 0) (:error r 0)))
           fails (apply dissoc (proofs/failures r) (proofs/died r))
+          ;; a death is no verdict: it counts among the errors, and is said as what it is
+          red (or (seq fails) (and (zero? died) (pos? (+ (:fail r 0) (:error r 0)))))
           n (+ (:ran r 0) (:reused r 0))
           ;; a proof with no verdict: green can't be said of what nobody judged
           none (sort-by str (keep (fn [[p st]] (when (= :none st) p)) (:proofs r)))

@@ -1274,6 +1274,50 @@
     (is (nil? shown) "a render that throws does not stop the one who asked")
     (is (str/includes? (str broken-request) "broken render") "and the request reads its error")))
 
+;; AGENTS.md section 5: the chain holds vars, so what a program defines is what it calls; a delay of fn values kept the old ones, and an edit of wrap-record reached nothing
+(deftest an-edit-of-a-middleware-runs-next
+  (let [[_ _ marked vars] (in-agent ["(def marks (atom 0)) (in-ns 'seon.repl)"
+                                     "(let [old wrap-registry] (alter-var-root #'wrap-registry (fn [_] (fn [h] (let [n (old h)] (fn [req] (swap! @(find-var (symbol (str (ns-name (first (filter #(ns-resolve % 'marks) (all-ns)))) \"/marks\"))) inc) (n req)))))))"
+                                     "@@(find-var (symbol (str (ns-name (first (filter #(ns-resolve % 'marks) (all-ns)))) \"/marks\")))"
+                                     "(every? var? seon.repl/middleware)"])]
+    (is (pos? (:value marked)) (pr-str marked))
+    (is (true? (:value vars)))))
+
+(deftest edit-says-what-it-did
+  (let [[_ many same fine] (in-agent (fn [{:keys [ns]}]
+                                       [(str "(ns " ns ".ed) (defn f \"One.\" {:malli/schema [:=> [:cat] :int]} [] (+ 1 1 1))")
+                                        (str "(seon.repl/edit! '" ns ".ed/f \"1\" \"2\")")
+                                        (str "(seon.repl/edit! '" ns ".ed/f \"(+ 1\" \"(+ 1\")")
+                                        (str "(seon.repl/edit! '" ns ".ed/f \"(+ 1 1 1)\" \"(+ 1 1 2)\")")]))]
+    (is (= :seon.repl/edit-refused (:seon.error/type (:value many))) (str "three places: refused, saying so: " (pr-str many)))
+    (is (str/includes? (:seon.error/message (:value many)) "occurs 3 times"))
+    (is (contains? (:value same) :unchanged) (pr-str same))
+    (is (not (contains? (:value same) :edited)) "nothing changed is not an edit")
+    (is (:edited (:value fine)) (pr-str fine))))
+
+;; a read waits on no one: an agent in an eval that never ends is read by root from its branch, and an interrupt takes a test child with it
+(deftest a-read-does-not-wait-on-a-hung-test
+  (let [pidf (str (seon.config/checkout) "/target/tmp/hung-" (random-uuid))
+        [read stopped gone]
+        (with-agent {}
+          (fn [{:keys [names eval-root ask]}]
+            (let [a (:agent names) ev (comp root-value eval-root)
+                  run (fn [code] (ev (str "(:value @(c/submit! sys :" a " " (pr-str code) " {:origin :outside}))")))]
+              (run (str "(ns tt-hang-test (:require [clojure.test :refer [deftest is]])) (deftest hangs (spit " (pr-str pidf) " (str (seon.lib/c-getpid))) (is @(promise)))"))
+              (ev (began-code a "(my.agent/prove '#{tt-hang-test/hangs})"))
+              ;; the child has started: its pid is on file
+              (ev (str "(loop [] (when-not (.exists (java.io.File. " (pr-str pidf) ")) (recur)))")) 
+              (let [r (ask {:op :context :agent a})]
+                [r
+                 (do (ev (str "(c/interrupt! sys :" a ")"))
+                     (ev "(some? (:ex @blocked))"))
+                 ;; it goes when its reader reaps it: asked a bounded number of times, by work, not by a clock
+                 (ev (str "(boolean (some false? (take 500 (repeatedly #(zero? (:exit (clojure.java.shell/sh \"ps\" \"-p\" " (pr-str (slurp pidf)) ")))))))"))]))))]
+    (is (clojure.string/includes? (str (:context read)) "still running") (subs (pr-str read) 0 300))
+    (is (true? stopped) "the interrupt ends the prove")
+    (is (true? gone) "and the test child goes with it")
+    (clojure.java.shell/sh "rm" "-f" pidf)))
+
 ;; a defmethod merges as a var does (seon.merge's key [:method multi dispatch]), so it is said as one is
 (deftest a-method-is-listed-with-what-a-branch-carries
   (let [[_ method changes] (in-agent (fn [{:keys [ns]}]
@@ -1304,7 +1348,7 @@
 ;; docs/render.md#a-redo-is-an-explicit-bust: a diff removed leaves the next one standing on a page its reader was never shown; the redo
 ;; draws what moved from the page as of each t, in place, and what still stands on what came before it is left byte for byte
 (deftest a-redo-is-drawn-from-the-page-as-of-each-t
-  (let [page-evals "(let [db (seon.agent/db)] (vec (sort-by #(parse-long (re-find #\"\\d+$\" (first %))) (for [e (datahike.api/q '[:find [?e ...] :where [?e :seon.eval/by \"seon\"]] db) :let [m (datahike.api/pull db '[:seon.eval/id :seon.eval/code :seon.eval/response] e)]] [(:seon.eval/id m) (get-in m [:seon.eval/response :value])]))))"
+  (let [page-evals "(let [db (seon.agent/db)] (vec (sort-by #(parse-long (re-find #\"\\d+$\" (first %))) (for [e (datahike.api/q '[:find [?e ...] :where [?e :seon.eval/by \"seon\"]] db) :let [m (datahike.api/pull db '[:seon.eval/id :seon.eval/code :seon.eval/page :seon.eval/response] e)]] [(:seon.eval/id m) (:seon.eval/page m) (get-in m [:seon.eval/response :value])]))))"
         move #(str "(do (swap! ctx assoc-in [:task :seon.task/plan] \"" % "\") (#'seon.turn/show-page!))")
         rs (in-agent ["(#'seon.turn/show-page!)" (move "A plan that moved.") (move "A plan that moved again.") (move "A plan that moved a third time.")
                       page-evals
@@ -1315,18 +1359,21 @@
                       "(my.render/redo-changes)"
                       page-evals])
         [_ _ _ _ before none removed redone again after] (mapv :value (vec rs))
-        by-id (into {} after)
-        [whole first-diff second-diff third-diff] (map second before)
-        new-third (get by-id (first (nth before 3)))]
-    (is (= [:components :t] (sort (keys whole))) "the page whole first")
-    (is (= (:t whole) (:since first-diff)) "each diff stands on the one before")
-    (is (= (:t first-diff) (:since second-diff)))
+        page-of (into {} (map (juxt first second)) after)
+        by-id (into {} (map (juxt first last)) after)
+        [whole first-diff] (map last before)
+        [p0 p1 p2 p3] (map second before)
+        new-third (get by-id (first (nth before 3)))
+        new-p3 (get page-of (first (nth before 3)))]
+    (is (= [:components] (keys whole)) "the page whole first")
+    (is (= (:t p0) (:since p1)) "each diff stands on the one before")
+    (is (= (:t p1) (:since p2)))
     (is (= [] none) "nothing broken: nothing redone")
     (is (= (first (nth before 2)) removed) "the second diff is what was taken out")
     (is (= [(first (nth before 3))] redone) "the one standing on it is redone, and only that")
     (is (= [] again) "and then nothing is broken")
-    (is (= (:t first-diff) (:since new-third)) "it stands on what its reader was shown")
-    (is (= (:t third-diff) (:t new-third)) "and says the same page")
+    (is (= (:t p1) (:since new-p3)) "it stands on what its reader was shown")
+    (is (= (:t p3) (:t new-p3)) "and says the same page")
     (is (str/includes? (pr-str (:edits new-third)) "a third time") "drawn from the page as of its t")
     (is (= first-diff (get by-id (first (nth before 1)))) "what stood stays byte for byte")))
 

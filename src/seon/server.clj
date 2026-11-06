@@ -14,7 +14,7 @@
   printf '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}\\n' | nc -w 5 127.0.0.1 PORT"
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.step :as step] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.root :as c] [seon.task :as task] [seon.proofs :as proofs] [seon.error :as err] [seon.reconcile :as r] [datahike.api :as d]
-            [seon.lib :as lib] [seon.edn :as sedn] [seon.db :as pdb] [seon.repl :as repl] [seon.print :as print] [clojure.edn :as edn] [clojure.data.json :as json] [clojure.string :as str] [clojure.walk]))
+            [seon.lib :as lib] [seon.edn :as sedn] [seon.db :as pdb] [seon.repl :as repl] [seon.print :as print] [seon.context :as context] [clojure.edn :as edn] [clojure.data.json :as json] [clojure.string :as str] [clojure.walk]))
 
 (defn- refused
   "The server refusing a request, as root's API does: the one error map."
@@ -173,10 +173,10 @@
         a))))
 
 (defn- work-of
-  "The task the live agent ag works, from main: {:task :env}, or nil."
+  "The task the live agent ag works, from main: {:task :env :key}, or nil."
   {:malli/schema [:=> [:cat :seon.root/sys :keyword] [:maybe :map]]}
   [sys ag]
-  (some (fn [a] (when (= ag (:agent a)) (select-keys a [:task :env])))
+  (some (fn [a] (when (= ag (:agent a)) (select-keys a [:task :env :key])))
         (task/running @(:conn sys))))
 
 (defn verdict
@@ -306,11 +306,19 @@
   (let [ag (or ag (when-let [t (:task req)]
                     (or (:agent (first (live-run sys @(:conn sys) t)))
                         (:agent (attach! sys t {:client (:client req)})))))]
-    (if-let [{:keys [task env]} (when ag (work-of sys ag))]
-      ;; an outside model's read is its turn, and takes its messages; anyone
-      ;; else's read of an agent its model drives only looks
-      (let [r @(c/submit! sys ag (sedn/encode (list 'print (list 'seon.turn/context-block task (= "outside" (:model env)) (true? (:wire req))))) {:origin :context})]
-        (cond (contract/error? r) r (:ex r) (:ex r) :else {:context (:seon.print/code (:out r))}))
+    (if-let [{:keys [task env key]} (when ag (work-of sys ag))]
+      (let [a (get-in (c/state sys) [:agents ag])]
+        (if (= :busy (:status a))
+          ;; its one REPL is in an eval, which may never end (a test blocked on nothing): a read waits on no one, so root reads its branch
+          (let [db (:db @(c/branch-db sys (:branch a)))
+                basis {:commit (d/commit-id db) :task task :turn (inc (or (:seon.agent/turn (d/pull db [:seon.agent/turn] [:seon.agent/key key])) 0)) :max-turns 1 :origin :outside :agent key}
+                {:keys [messages]} (context/render db basis)]
+            {:context (str (name ag) " is still running an eval" (when-let [t (:form (:last-op a))] (str ", at " t)) ": this is its branch as last committed, and nothing was taken.\n\n"
+                           (context/read-text db basis messages (true? (:wire req))))})
+          ;; an outside model's read is its turn, and takes its messages; anyone
+          ;; else's read of an agent its model drives only looks
+          (let [r @(c/submit! sys ag (sedn/encode (list 'print (list 'seon.turn/context-block task (= "outside" (:model env)) (true? (:wire req))))) {:origin :context})]
+            (cond (contract/error? r) r (:ex r) (:ex r) :else {:context (:seon.print/code (:out r))}))))
       (refused (if ag (str ag " works no task: attach one first") (str "no task " (:task req) ", and no agent named"))))))
 
 (defmethod op-answer :message [sys ag req]

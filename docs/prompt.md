@@ -68,13 +68,14 @@ This conversation is drawn from your record, `@ctx`, by render functions. Each p
 
 Seon runs an eval that shows you your task and your proofs at the start, `(my.render/render-ctx)`, and another when something changes, `(my.render/render-changes)`. Each is in your conversation like your own evals, and `(my.render/render-ctx)` shows you your page whole at any time.
 
-The first answers your page as of a point in time: `{:t 7 :components [["status" [seon.render.ui/status {:ctx [:task :proved]} ...]] ...]}`, each component under its id. The second answers only what changed, from the page at `:since` to the page at `:t`, as edits, each `[path op value]`:
+The first answers your page: `{:components [["status" [seon.render.ui/status {:ctx [:task :proved]} ...]] ...]}`, each component under its id. The second answers only what changed since you were last shown it, as edits, each `[path op value]`:
 
 ```clojure
-{:since 7 :t 9
- :edits [[["status" :proofs old-test] :-]
+{:edits [[["status" :proofs old-test] :-]
          [["status" :proofs b-test] :r [:li {:key b-test} [:code "b-test"] ": fails"]]
          [["status" :proofs c-test] :+ [:li {:key c-test} [:code "c-test"] ": passes"]]]}
 ```
 
-A path says where: the component's id, then the names inside it, each an element's `:key` or `:id`. `:r` replaces what is there with the value, `:+` adds it under that name, `:-` takes it away. A path ending in `:own` is what that element holds besides its named children. `[["turn"] :r [...]]` is a whole component, sent whole when that is shorter.
+A path says where: the component's id, then the names inside it, each an element's `:key` or `:id`, else its tag or its first words. `:r` replaces what is there with the value, `:+` adds it under that name, `:-` takes it away. A path ending in `:own` is what that element holds besides its named children. `[["turn"] :r [...]]` is a whole component, sent whole when that is shorter.
+
+Asking when nothing has moved answers `{:edits [] :shown-by result/ab12}`: the page is as that eval showed it.

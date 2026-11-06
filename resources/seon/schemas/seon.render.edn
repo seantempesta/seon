@@ -17,8 +17,8 @@
  :seon.test/proved [:map {:seon.render/model my.agent/prove-summary :seon.render/html seon.render.ui/proved}]
  ;; what draws what in a walk (seon.render/tree, my.render/tree): a component and those it drew, each with its own output's
  ;; tokens
- ;; an agent's page as an eval answers it: every component, [id form] in placed order, as the hiccup its request holds it, whole, as of :t (my.render/render-ctx), or what moved between the page at :since and at :t as edits (my.render/render-changes, docs/render.md#a-change-is-edits-by-name): a value that is a page prints whole, the stored one too
- :seon.render/parts [:map {:seon.print/full true} [:t {:optional true} :int] [:since {:optional true} :int] [:components {:optional true} [:vector :any]] [:edits {:optional true} [:vector :any]]]
+ ;; an agent's page as an eval answers it: every component, [id form] in placed order, as the hiccup its request holds it, whole, (my.render/render-ctx), or what moved as edits (my.render/render-changes, docs/render.md#a-change-is-edits-by-name): a value that is a page prints whole, the stored one too
+ :seon.render/parts [:map {:seon.print/full true} [:components {:optional true} [:vector :any]] [:edits {:optional true} [:vector :any]] [:shown-by {:optional true} :any]]
  :seon.render/tree [:map [:render :symbol] [:args [:vector :any]] [:id :string] [:tokens nat-int?]
                     [:reads? {:optional true} :boolean]
                     ;; each child is a tree too; a recursive schema cannot be built by the registry (a [:ref] overflows its eager parse)

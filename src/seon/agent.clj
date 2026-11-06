@@ -862,9 +862,15 @@
   ;; the turn's one diff, read here at the committed db, so the test child forked for this run
   ;; inherits it and the turn's other readers find it held (branch-changes)
   (branch-changes (:base @state) (db))
-  (let [k (:tx-seq (swap! state update :tx-seq inc))]
-    (:result (await-reply k (cond-> {:op :prove :k k :t (:max-tx (db)) :digest (program/run-digest (db)) :mode mode}
-                              (seq names) (assoc :names names)))))))
+  (let [k (:tx-seq (swap! state update :tx-seq inc))
+        answered (volatile! false)]
+    (try
+      (let [r (:result (await-reply k (cond-> {:op :prove :k k :t (:max-tx (db)) :digest (program/run-digest (db)) :mode mode}
+                                        (seq names) (assoc :names names))))]
+        (vreset! answered true)
+        r)
+      ;; an interrupt ended this wait, the only way one ends before its answer: the test child it was for goes too, so its run answers as a death (no verdict) and nothing is left running
+      (finally (when-not @answered (some-> (:test-child @state) (lib/kill! (jolt.host/signal-number "KILL")))))))))
 
 (defn- load-removed!
   "In a test child, define each of main's tests the branch removed (test-plan's :removed, {test
@@ -1094,8 +1100,10 @@
       :parent (fn [pid]
                 (lib/c-close w) (swap! fds disj w)
                 (forked pid)
+                (swap! state assoc :test-child pid)
                 (let [read (read-to-exit r pid #(when-let [t (:start (swap! lines take-line %))] (say {:op :testing :test t})))
                       st (:status read)]
+                  (swap! state dissoc :test-child)
                   (lib/c-close r) (swap! fds disj r)
                   (fx/remove-tree! (fx/run-dir pid))
                   (if (contract/error? read)

@@ -511,18 +511,16 @@
              (reduce (fn [m s] (if-let [i (some-> (find-var s) instrument)] (update m :instrumented (fnil conj []) i) m)) m (:repl/defined m))))))))
 
 (def middleware
-  "Outermost first. Answers pass innermost first: record, cost, instrument, caught. The
+  "Outermost first, as vars: what a program calls is what it now defines (`handler` composes them at each request, so an edit of one runs next). Answers pass innermost first: record, cost, instrument, caught. The
   eval fn is the registry's binding around record's around cost's around eval, so an eval's
   cost is the eval's (with the compiler's tap in it, as part of compiling); keying the
   branch's registry, read before each form, is not the form's (0.7 ms measured)."
-  [wrap-caught wrap-instrument wrap-cost wrap-record wrap-registry])
+  [#'wrap-caught #'wrap-instrument #'wrap-cost #'wrap-record #'wrap-registry])
 
 (defn handler
   "eval-code with the middleware composed over it, outermost first."
   {:malli/schema [:=> [:cat] :seon.host/fn]}
-  [] (reduce (fn [h m] (m h)) eval-code (reverse middleware)))
-
-(def ^:private the-handler (delay (handler)))
+  [] (reduce (fn [h m] (m h)) (fn [req] (eval-code req)) (reverse middleware)))
 
 ;; ---- a request's response and its record: one per eval request (a tool call, a typed form) ----
 
@@ -688,6 +686,7 @@
              :seon.eval/response (cond basis (dissoc resp :value) (contains? resp :value) (assoc resp :value kv) :else resp)}
       schema (assoc :seon.eval/schema schema)
       basis (assoc :seon.eval/basis basis)
+      (:seon.render/page (meta v)) (assoc :seon.eval/page (:seon.render/page (meta v)))
       (:intent req) (assoc :seon.eval/intent (:intent req))
       (:call-id req) (assoc :seon.eval/call-id (:call-id req))
       (seq (:fns r)) (assoc :seon.eval/fns (:fns r)))))
@@ -766,7 +765,7 @@
                                (let [[r rec] (handled id code (cond-> (repaired (response @answers) req)
                                                                 (:ns @agent/state) (assoc :ns (ns-name (:ns @agent/state)))) req)]
                                   [r rec (when-not (#{:model :insert} (:origin req)) (text-of rec))]))
-                [r rec text] (try (@the-handler (assoc req "code" code :reply #(vswap! answers conj %)))
+                [r rec text] (try ((handler) (assoc req "code" code :reply #(vswap! answers conj %)))
                               (answered)
                               (catch Throwable e
                                 (let [em (agent/error-map e)]
@@ -842,8 +841,8 @@
   on this branch with the new text in its place (seon.doc/edit-tx), so a doc changes as a definition does;
   no delimiter is counted in prose. Answers {:edited {:doc address :lines ...}} (docs/agent.md#changing-a-doc)."
   {:malli/schema [:function
-                  [:=> [:cat [:or :qualified-symbol :string] :string :string] [:or :seon.repl/edit-refused :my.agent/no-var :seon.repl/answer :seon.repl/doc-edited]]
-                  [:=> [:cat [:or :qualified-symbol :string] [:vector {:min 1} [:tuple :string :string]]] [:or :seon.repl/edit-refused :my.agent/no-var :seon.repl/answer :seon.repl/doc-edited]]]}
+                  [:=> [:cat [:or :qualified-symbol :string] :string :string] [:or :seon.repl/edit-refused :my.agent/no-var :seon.repl/answer :seon.repl/doc-edited [:map [:unchanged :any]]]]
+                  [:=> [:cat [:or :qualified-symbol :string] [:vector {:min 1} [:tuple :string :string]]] [:or :seon.repl/edit-refused :my.agent/no-var :seon.repl/answer :seon.repl/doc-edited [:map [:unchanged :any]]]]]}
   ([sym old new] (edit! sym [[old new]]))
   ([sym changes]
    (let [doc? (string? sym)
@@ -890,6 +889,8 @@
                  text (reduce (fn [t {:keys [at old new]}] (str (subs t 0 at) new (subs t (+ at (count old))))) src (reverse ordered))
                  ;; the forgiving reader's repairs (a delimiter closed at its end, a stray one made a comma), said as a call's are
                  {text :text repairs :repairs} (if doc? {:text text} (reader/forgive text))]
+           (if (= text src)
+             {:unchanged sym}
            (let [;; a doc's page is loaded again with the new text in its place; a definition is evaluated
                  r (if doc?
                      (do (agent/transact! (doc/edit-tx (agent/db) sym text)) {})
@@ -911,7 +912,7 @@
                ;; the response as data: its printed text and costliest functions are the outer eval's to print
                (cond-> (assoc (dissoc r :text :fns :record :handle :ms :ticks :bytes :cost)
                               :edited {(if doc? :doc :var) sym :lines (into [] (comp (mapcat (fn [[from new]] (numbered text (- from k) (+ from (count (filter #{\newline} new)) k)))) (distinct)) starts)})
-                 (seq repairs) (assoc :repaired (context/repaired text repairs))))))))))))
+                 (seq repairs) (assoc :repaired (context/repaired text repairs)))))))))))))
 
 (defn unrun
   "A model's eval call that never ran, recorded as an eval whose response is error e, why
