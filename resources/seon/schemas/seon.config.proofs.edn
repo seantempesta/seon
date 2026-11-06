@@ -5,6 +5,7 @@
  :seon.config.proofs/results-dir [:string {:seon.config/place true :min 1 :seon.config/unit "path" :description "Where every checkout's test and check verdicts are kept, one file per (key, digest, status): the main tree's target/results under bin/env."}]
  :seon.config.proofs/results-max-bytes [:int {:min 1 :seon.config/unit "bytes" :description "The verdict cache's capacity; a write past it removes the least recently used verdicts (oldest mtime, greens and reds alike) until it is under, never the one just written."}]
  :seon.config.proofs/results-evict-percent [:int {:min 0 :max 100 :seon.config/unit "percent" :description "How far under results-max-bytes a write past it takes the cache."}]
+ :seon.config.proofs/shard-min-ms [:int {:min 1 :seon.config/unit "ms" :description "The least work a shard of an incremental run is worth."}]
  :seon.config.proofs/agent-tests-sample [:int {:min 1 :seon.config/unit "tests" :description "How many tests the agent-tests check runs through an agent."}]
  :seon.config.proofs/recent-verdicts [:int {:min 1 :seon.config/unit "verdicts" :description "How many of a test's newest greens its history holds."}]
  :seon.config.proofs/program-store [:string {:seon.config/place true :min 1 :seon.config/unit "path" :description "The plan's store of kept program dbs, a branch per git tree id (test-runner/program-db)."}]

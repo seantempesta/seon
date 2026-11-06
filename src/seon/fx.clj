@@ -959,7 +959,7 @@
                 (error #'seon.fx/run-on-checkout :seon.fx/io-error
                        (str "the test runner made no plan in " dir " (exit " (:exit r) "); its log: " log
                             " ends: " (str/join " | " (take-last 3 (remove str/blank? (str/split-lines (str (:err r) "\n" (:out r)))))))
-                       {:path dir})
+                       {:path dir :no-plan true})
                 (contract/error? found)
                 found
                 :else
@@ -999,22 +999,30 @@
               t)))
 
 (defn- run-held
-  "A named run on a checkout (run-on-checkout) of the tests with no verdict at this candidate, sha and files, so one candidate's test runs
+  "A named run on a checkout (run: run-on-checkout) of the tests with no verdict at this candidate, sha and files, so one candidate's test runs
   once whoever asks: the owner is the one :tests worker, and the verdict cache holds each under the candidate's digest
-  (seon.fx/write-verdicts!, evicted as any verdict is; a run that never reached a test holds nothing). Nothing to run: no worktree and no build.
+  (seon.fx/write-verdicts!, evicted as any verdict is). Nothing to run: no worktree and no build. A candidate with files that can make no plan
+  holds that failure the same way and answers it again: its next ask would build the same files to the same refusal, each turn; any other failed run holds nothing.
   Answers as run-on-checkout does, for every test, with each one's held digest under :digests."
-  {:malli/schema [:=> [:cat :string :map] :map]}
-  [sha {:keys [files tests] :as req}]
+  {:malli/schema [:=> [:cat :seon.host/fn :string :map] :map]}
+  [run sha {:keys [files tests] :as req}]
   (let [candidate (lib/digest (sedn/encode [sha (into (sorted-map) files)]))
         key-of #(str "gate-" (str/replace (str %) "/" "-"))
         digest-of #(lib/digest (str candidate " " %))
-        held (stored-results (into {} (for [t tests] [(key-of t) (digest-of t)])))]
-    (if (contract/error? held)
-      held
+        no-plan (lib/digest (str candidate " no-plan"))
+        held (stored-results (into {"gate-no-plan" no-plan} (for [t tests] [(key-of t) (digest-of t)])))]
+    (cond
+      (contract/error? held) held
+      (get held no-plan) (error #'seon.fx/run-held :seon.fx/io-error (str "held from this candidate's last run: " (:message (first (:failures (get held no-plan))))) {:path (:repo req) :no-plan true})
+      :else
       (let [todo (vec (remove #(get held (digest-of %)) tests))
-            r (when (seq todo) (run-on-checkout sha (assoc req :tests todo)))]
+            r (when (seq todo) (run sha (assoc req :tests todo)))]
         (if (contract/error? r)
-          r
+          (do (when (and (seq files) (:no-plan r))
+                ;; derived data: a refused write leaves it to run again
+                (write-verdicts! {:id (str "gate " candidate)} {"gate-no-plan" {:digest no-plan :pass 0 :fail 0 :error 1}}
+                                 {"gate-no-plan" [{:type :error :message (:seon.error/message r)}]}))
+              r)
           (let [{:keys [results failures] :as v} (:value r)
                 w (write-verdicts! {:id (str "gate " candidate)}
                                    (into {} (for [[t s] results :when (not= :error s)]
@@ -1048,10 +1056,10 @@
       (contract/error? sha) sha
       all? (run-on-checkout sha req)
       :else
-      (let [r (run-held sha req)
+      (let [r (run-held run-on-checkout sha req)
             reds (for [[t s] (get-in r [:value :results]) :when (= :fail s)] t)]
         (if (and (seq files) (seq reds))
-          (let [mr (main-reds (:value r) (:value (run-held sha (-> req (dissoc :files) (assoc :tests (vec reds))))))]
+          (let [mr (main-reds (:value r) (:value (run-held run-on-checkout sha (-> req (dissoc :files) (assoc :tests (vec reds))))))]
             (cond-> r (seq mr) (assoc-in [:value :main-red] mr)))
           r)))))
 

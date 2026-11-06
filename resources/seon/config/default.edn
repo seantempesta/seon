@@ -553,6 +553,10 @@
  ;; At the bound: a run never has more shards; fewer when fewer namespaces are selected. bin/check
  ;; runs this many steps at once too, and mg-check in this many shards (pure-tests 2026-10-23).
  :seon.config.proofs/jobs 4
+ ;; Unit: ms. The least work a shard of an incremental run is worth (seon.proofs/worth-shards). Provenance: a shard's start
+ ;; costs about 5 s, and 8 s more for its process tests' root (docs/testing.md#a-root-costs-what-it-boots), so it saves its cost past
+ ;; about twice that on each side. At the bound: a run of less work than this runs in one shard, as the owner ruled 2026-10-30.
+ :seon.config.proofs/shard-min-ms 30000
  ;; Unit: ms. The least work a test child of an agent's test run is worth (seon.agent/run-tests-forked): the run forks
  ;; no more children than its tests' typical ms (seon.fx/typical-ms) divided by this, so a handful of quick tests run in
  ;; one. Provenance: measured 2026-10-29 (load ~10): a run of one trivial test in a fresh child took 36-42 ms (fork,
