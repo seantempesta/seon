@@ -92,8 +92,9 @@
            _ (doseq [dg ["g1" "g2" "g3"]] (one dg))
            [r g1 g2 g3] [(size-of dir 'a/r "old-red" :red) (size-of dir 'a/t "g1" :pass) (size-of dir 'a/t "g2" :pass) (size-of dir 'a/t "g3" :pass)]
            _ (doseq [[k dg st s] [['a/r "old-red" :red 400] ['a/t "g1" :pass 300] ['a/t "g2" :pass 100] ['a/t "g3" :pass 200]]] (age! dir k dg st s))
-           ;; a bound the new green (about g3's size) fits under only once two are evicted: the red (oldest), then g1
-           cap (+ g2 g3 g3 4)
+           ;; a bound whose low water (results-evict-percent under it) the new green (about g3's size) fits under only once two are
+           ;; evicted: the red (oldest), then g1
+           cap (inc (quot (* 100 (+ g2 g3 g3 4)) (- 100 (cfg/value :seon.config.proofs/results-evict-percent))))
            _ (is (= (+ r g1 g2 g3) (bytes-in dir)) "the four files are all the cache holds")
            w (fx/write-verdicts! dir {:id "w" :tree "t"} {'a/t {:test 'a/t :digest "new" :pass 1 :fail 0 :error 0}} {} cap)
            held (present dir ['a/t 'a/r] ["old-red" "g1" "g2" "g3" "new"])]
@@ -200,6 +201,32 @@
          (is (= {:calls 12 :ticks 108 :self-ticks 83 :bytes 6 :self-bytes 6} (get (proofs/per-call details) 'a/f))))))))
 
 ;; See docs/merging.md#verdicts-are-a-cache
+;; See docs/merging.md#verdicts-are-a-cache
+(deftest a-test-history-is-read-from-its-newest-verdicts
+  (with-dir
+   (fn [dir]
+     (let [keep-n (cfg/value :seon.config.proofs/recent-verdicts)
+           rec-at (fn [dg ms ticks age]
+                    (rec! dir {'a/t {:test 'a/t :digest dg :pass 1 :fail 0 :error 0 :ms ms :ticks ticks}})
+                    (age! dir 'a/t dg :pass age))]
+       ;; older verdicts of a slower test: read, they would move the median
+       (doseq [i (range (inc keep-n))] (rec-at (str "old-" i) 9000 9000000 (+ 1000 i)))
+       (doseq [i (range keep-n)] (rec-at (str "new-" i) 40 2000000 (inc i)))
+       (is (= '{a/t 40} (fx/typical-ms dir '[a/t])) "its typical ms is its newest verdicts'")
+       (is (= '{a/t 6000000} (fx/test-budgets dir '[a/t] 100000000 1 3)) "and so is its tick budget")))))
+
+(deftest a-write-past-capacity-leaves-room-for-the-next
+  (with-dir
+   (fn [dir]
+     (doseq [i (range 20)] (rec! dir {'a/t {:test 'a/t :digest (str "r" i) :pass 1 :fail 0 :error 0}}))
+     (let [before (bytes-in dir)
+           _ (fx/write-verdicts! dir {:id "w"} {'a/t {:test 'a/t :digest "over" :pass 1 :fail 0 :error 0}} {} before)
+           after (bytes-in dir)
+           ledger (parse-long (clojure.string/trim (slurp (str dir "/.size"))))
+           low (- before (quot (* before (cfg/value :seon.config.proofs/results-evict-percent)) 100))]
+       (is (<= after low) "the cache ends the eviction's percent under its bound")
+       (is (= after ledger) "and the ledger holds the true size, so the next write counts nothing")))))
+
 (deftest a-tests-typical-ms-is-the-median-of-its-digests
   (with-dir
    (fn [dir]
@@ -283,7 +310,7 @@
      (rec! dir {'a/t {:test 'a/t :digest "s-2" :pass 1 :fail 0 :error 0 :ms 8000}
                 'a/quick {:test 'a/quick :digest "s-4" :pass 1 :fail 0 :error 0 :ms 7}})
      (rec! dir {'a/t {:test 'a/t :digest "s-3" :pass 1 :fail 0 :error 0 :ms 100}})
-     (is (= '{a/t 8000} (fx/slow-tests dir '{a/t "moved" a/quick nil a/none nil} 5000 3))
+     (is (= '{a/t 8000} (fx/slow-tests dir '{a/t "moved" a/quick nil a/none nil} 5000))
          "the median of its newest greens; a quick test and a test never run are not slow")
-     (is (= {} (fx/slow-tests dir '{a/t "s-3"} 5000 3)) "a test made fast comes back with its green at its digest")
-     (is (= '{a/t 9000} (fx/slow-tests dir '{a/t "s-1"} 5000 3)) "and its own digest's green decides however the others ran"))))
+     (is (= {} (fx/slow-tests dir '{a/t "s-3"} 5000)) "a test made fast comes back with its green at its digest")
+     (is (= '{a/t 9000} (fx/slow-tests dir '{a/t "s-1"} 5000)) "and its own digest's green decides however the others ran"))))

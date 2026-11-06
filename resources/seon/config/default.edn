@@ -527,6 +527,16 @@
  ;; removed. Provenance: the owner, 2026-10-29 (docs/decisions.md); the main tree's cache held 121 MB
  ;; in 27,079 files that day. At the bound: an evicted verdict's test runs again once.
  :seon.config.proofs/results-max-bytes 536870912
+ ;; Unit: percent. How far under results-max-bytes a write past it takes the cache, so the writes after
+ ;; it read one size file and count nothing. Provenance: a cache at its bound counted its 148,164 files
+ ;; (4.2 s) after every shard's write, freeing only that write's room (2026-11-06, commit message). At the
+ ;; bound: this share of the cache's least recently used verdicts goes at once, each running again if asked for.
+ :seon.config.proofs/results-evict-percent 10
+ ;; Unit: verdicts. How many of a test's newest verdicts (by file mtime) its typical ms and tick budget
+ ;; read: a median of few keeps out one hung run, and a test's cost stops growing with the digests it has
+ ;; had. Provenance: all of them cost 30.6 s across 1,708 tests, the newest 5 cost 4.4 s, and the same 1,524
+ ;; tests got a time (2026-11-06, commit message). At the bound: older verdicts are not read.
+ :seon.config.proofs/recent-verdicts 5
  ;; Unit: processes. A proof run's selected tests (bin/prove, bin/test) are dealt, a namespace (with
  ;; its fixtures) at a time, into this many shards, each a runner process of its own that bin/test
  ;; starts at once (seon.proofs/shards), its greens stored by digest when it has run. Provenance:
@@ -571,9 +581,6 @@
  ;; Provenance: owner, 2026-11-06. Over the verdict cache that day, 5 s left out 70 of 1,466 tests and
  ;; kept about 96 s of work on 4 shards; 2 s left out 123 for 55 s, 15 s left out 31 for 189 s.
  :seon.config.proofs/slow-test-ms 5000
- ;; Unit: verdicts. A test with no green at its digest is judged by the median of this many of its newest
- ;; greens, so one run under load does not leave it out.
- :seon.config.proofs/slow-test-greens 3
  ;; Unit: path. The plan's store of kept program dbs (test-runner/program-db): one LMDB store
  ;; per checkout, a branch per git tree id holding that tree's program as facts. A tree never
  ;; seen is branched from the kept tree with the fewest changed files and brought current by
