@@ -324,6 +324,14 @@
                    m))))))
 
 
+(defn- ns-form-drops
+  "The libraries namespace nsym's recorded ns form requires and new, the ns form just evaluated, doesn't: this process still holds them, the file won't. nil when none.
+  See docs/agent.md#the-repl."
+  {:malli/schema [:=> [:cat :seon.host/db :symbol :any] [:maybe [:vector :symbol]]]}
+  [db nsym new]
+  (when-let [src (some-> (d/entity db [:ns/name nsym]) :ns/form :form/src)]
+    (not-empty (vec (sort (clojure.set/difference (program/ns-requires (read-string src)) (program/ns-requires new)))))))
+
 (defn- undo-definition!
   "A definition that broke Seon's recording of it (the agent named a var of Seon's own that the recording itself calls, seon.program/form-of with another arity): its vars put back as they were before the form ran (l, the form's :before), since otherwise every later write of this agent throws and it can't be told, and that said as the eval's error. The eval path's entrant boundary (docs/failure-points.md); what the recording did not reach is the turn's (seon.turn/turn-error!). Throws."
   {:malli/schema [:=> [:cat :map :any] :any]}
@@ -431,7 +439,10 @@
                          _ (when gone (agent/transact! (mapv (fn [[_ e f]] [:db/retract e :var/form f]) gone)))
                          m (cond-> m gone (assoc :unmapped (mapv first gone)))]
                    (if acct
-                     (let [[tx redefined] (try
+                     (let [;; a REPL's ns form replaces the file's whole form on the branch, though it adds to this process, as Clojure's does: what it
+                           ;; leaves out is gone from the file, and said here, while the agent can act; read before its write
+                           drops (when (and (:ns-form? acct) contract/record?) (ns-form-drops (agent/db) (:ns acct) (:repl/form m)))
+                           [tx redefined] (try
                                             (let [tx (when contract/record? (program/record-tx (agent/db) acct))]
                                               ;; what this form's own transaction changes of an existing var's contract or
                                               ;; docstring, read before it is applied (a form that defines nothing reads nothing)
@@ -441,7 +452,8 @@
                        (cond-> (assoc m :recorded (vec (concat (map :var (:defs acct)) (when (:ns-form? acct) [(:ns acct)])
                                                                        (map (juxt :multi :dispatch) (:methods acct)) (map (juxt :protocol :type) (:impls acct))))
                                       :repl/defined (mapv :var (:defs acct)))
-                         redefined (assoc :redefined redefined)))
+                         redefined (assoc :redefined redefined)
+                         drops (assoc :ns-drops drops)))
                      (cond-> m
                        l (assoc :repl/defined (program/set-vars l))
                        (or nested? (and l (= :agent (:mode @agent/state)) (program/calls-eval? l)))
@@ -586,6 +598,10 @@
                    ;; a def beside calls (wrap-record): it stays this eval, not program
                    (some :not-program fs)
                    (conj {:seon.repl/finding :not-program :seon.repl/fix (some :not-program fs)})
+                   (some :ns-drops fs)
+                   (conj {:seon.repl/finding :ns-form-drops :dropped (some :ns-drops fs)
+                          :seon.repl/fix (str "Your ns form replaces this namespace's whole form on your branch, and it doesn't require " (clojure.string/join ", " (some :ns-drops fs))
+                                              ". They still work in this process, but the file loses them, so what uses them won't load on a checkout. Evaluate the whole ns form with what you add.")})
                    (some :shadowed fs)
                    (conj (let [sh (some :shadowed fs)]
                            {:seon.repl/finding :helper-shadowed :shadowed sh

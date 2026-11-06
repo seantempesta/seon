@@ -408,6 +408,16 @@
   {:malli/schema [:=> [:cat :any] [:set :qualified-keyword]]}
   [form] (set (filter qualified-keyword? (tree-seq coll? seq form))))
 
+(defn ns-requires
+  "The libraries an ns form's :require clauses name, the form as read. See docs/agent.md#the-repl."
+  {:malli/schema [:=> [:cat :any] [:set :symbol]]}
+  [form]
+  (into #{} (comp (filter #(and (seq? %) (= :require (first %))))
+                  (mapcat rest)
+                  (map #(if (sequential? %) (first %) %))
+                  (filter symbol?))
+        (when (seq? form) form)))
+
 (defn repl-act?
   "Does the analyzed form l (its :nodes or :units) only change its namespace's environment at a REPL, naming what later forms may use (:as, :refer)?
   It holds for that REPL alone (`account`'s :repl?), so its answer says so. See docs/agent.md#the-repl."
