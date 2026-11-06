@@ -370,7 +370,7 @@
     (is (nil? (:ex defined)) (pr-str defined))
     ;; its namespace was made at the REPL, with no file to put over the gate's checkout: its prove says so, never green
     (is (= :seon.agent/gate-unread (:seon.error/type (:value deferred))) (str "the process test can't be judged, and why: " (pr-str deferred)))
-    (is (str/includes? (:seon.error/message (:value deferred)) "app.ptest") (pr-str deferred))
+    (is (clojure.string/includes? (:seon.error/message (:value deferred)) "app.ptest") (pr-str deferred))
     (is (some #{'seon.lib/fork!} (:uses (:value why))) (str "and it says why: " (pr-str why)))
     (let [r (or (:result answer) answer)]
       (is (= "one is two" (get-in r [:failures 'app.ptest/r-test :message])) (str "a red's first failing assertion: " (pr-str answer)))
