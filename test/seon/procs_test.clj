@@ -232,9 +232,10 @@
            (is (some-> (:error (held)) (clojure.string/includes? "refused")) (pr-str (held)))
            (is (some? (:message (cause))) "the refused fact is a :platform cause on root, with the writer's reason")
            (is (not= false (:open? (cause))) "open while no import has written the fact")
-           (testing "the same inputs as a plain map store, and close the cause"
-             (let [fact (import! {:tree "t" :env (into {} env)} "b2")]
-               (is (= {:tree "t" :env (into {} env)} (:inputs (held))) (pr-str fact))
+           (testing "inputs of their declared shape store, and close the cause"
+             (let [good {:tree "t" :env "e" :config {}}
+                   fact (import! good "b2")]
+               (is (= good (:inputs (held))) (pr-str fact))
                (is (nil? (:error (held))))
                (is (false? (:open? (cause))) (pr-str (cause))))))
          (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))
