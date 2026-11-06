@@ -955,7 +955,10 @@
               ;; a commit on main: the pages its datoms touched walk in the pass
               ;; a commit on main (a sliding buffer of one: the newest, its datoms since the main held
               ;; found by their diff, so a lagging proc never parks the writer)
-              :main (pass (advance-main st (seon.db/at-commit (:conn st) (:commit m))) o)
+              :main (pass (if (some-> (:main-db st) :max-tx (>= (:t m)))
+                            st ; a notice no newer than the main held reads nothing from the store
+                            (advance-main st (seon.db/at-commit (:conn st) (:commit m))))
+                          o)
               :answers (let [[st' kind] (step/answered st (:tag m))
                              r (:r m)
                              err (:seon.error/message r)]
