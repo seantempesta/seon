@@ -86,8 +86,6 @@
                       [:handle {:optional true} :qualified-symbol] [:value {:optional true} :any]
                       ;; the namespace the REPL is in after it, as every nREPL response carries: where the next eval runs
                       [:ns {:optional true} :symbol]
-                                            ;; how far through its turns the agent was when it answered, `12 of 40` (seon.agent/turns)
-                      [:turn {:optional true} :string]
                       ;; code of several top-level forms: how many ran, its :value each one's in order (seon.repl/response)
                       [:forms {:optional true} [:int {:min 2}]]
                       ;; what the forgiving reader changed of the call's code before it ran (seon.context/repaired)

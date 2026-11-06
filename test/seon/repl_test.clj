@@ -176,15 +176,15 @@
         lead (fn [db] (str "(:seon.doc/lead (datahike.api/entity " db " [:seon.doc/address " (pr-str a) "]))"))
         [edit missing branch main]
         (at/in-agent (fn [{:keys [task]}]
-                       [(str "(seon.repl/edit! " (pr-str a) " \"then stop.\" \"then stop (as the turn ends.\")")
+                       [(str "(seon.repl/edit! " (pr-str a) " \"the task's failure.\" \"the task's failure (as the turn ends.\")")
                         (str "(seon.repl/edit! " (pr-str a) " \"no such text\" \"x\")")
                         {:op :eval :agent "root"
                          :code (lead (str "(:db @(seon.root/branch-db sys (:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))))"))}
                         {:op :eval :agent "root" :code (lead "@(:conn sys)")}]))]
     (is (= a (get-in edit [:value :edited :doc])) (pr-str edit))
     (is (= :not-found (get-in missing [:value :seon.repl/refused-because])) (pr-str missing))
-    (is (str/ends-with? (str (:value branch)) "then stop (as the turn ends.") (str "the branch's doc derives its new lead: " (pr-str branch)))
-    (is (str/ends-with? (str (:value main)) "then stop.") (str "main's is its own: " (pr-str main)))))
+    (is (str/ends-with? (str (:value branch)) "the task's failure (as the turn ends.") (str "the branch's doc derives its new lead: " (pr-str branch)))
+    (is (str/ends-with? (str (:value main)) "the task's failure.") (str "main's is its own: " (pr-str main)))))
 
 (deftest an-unmapped-definition-is-no-longer-the-branchs-program
   ;; docs/source.md#an-agent-changes-code-at-its-repl: md-scan #19 unmapped a scratch helper and its branch kept it,
@@ -284,12 +284,11 @@
          (is (= 2 (:value (repl/eval-string "(+ 1 1)" {:intent "Adds, see seon.ref/scan."}))) "an eval with prose outside an agent")
          (finally (reset! agent/state old) (remove-ns 'x.repl-shadow)))))
 
-(deftest an-answer-says-its-turn-once-and-names-a-db-by-its-form
+(deftest an-answer-carries-no-turn-count-and-names-a-db-by-its-form
   ;; one agent answers all four claims in order (each on a name of its own): an attach is most of what an agent costs a test
   (let [ed (fn [f a b] (str "(seon.repl/edit! 'x.swap/" f " " (pr-str a) " " (pr-str b) ")"))
         [_ ab ba ab2 _ _ turned _ _ m7 _ s2]
         (at/in-agent ["(ns x.swap) (defn f [] 1)" (ed "f" "[] 1" "[] 2") (ed "f" "[] 2" "[] 1") (ed "f" "[] 1" "[] 2")
-                      ;; an answer says its turn once: the inner eval of an edit is the edit's, and a turn inside its value would differ every turn
                       "(ns x.swap) (defn g [] 1)"
                       "(seon.agent/transact! [{:seon.agent/key (:key @seon.agent/state) :seon.agent/turn 1 :seon.agent/max-turns 9}])"
                       (ed "g" "[] 1" "[] 2")
@@ -297,7 +296,7 @@
                       "(def t (atom 4))" "{:ms (swap! t inc)}" "{:ms (swap! t inc)}"
                       ;; an answer holding a db is printed as the record keeps it (the one text of an eval), its host object named by the form that reads it
                       "(select-keys @seon.agent/state [:db])" "(select-keys @seon.agent/state [:db])"])]
-    (is (= [":turn \"1 of 9\""] (re-seq #":turn \"[^\"]*\"" (:text turned))) (:text turned))
+    (is (not (str/includes? (:text turned) ":turn")) (str "an agent under a cap is told no count: " (:text turned)))
     (is (str/includes? (:text s2) "(get (deref seon.agent/state) :db)") (str "the db named by its form: " (:text s2)))))
 
 (deftest a-broken-parser-leaves-the-repl-answering
