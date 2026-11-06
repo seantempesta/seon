@@ -98,6 +98,8 @@
   [:seon.config.build/jolt-compiler-options :seon.config.build/jolt-compiler-options]
   [:seon.config.proofs/results-dir :seon.config.proofs/results-dir]
   [:seon.config.proofs/results-max-bytes :seon.config.proofs/results-max-bytes]
+  [:seon.config.proofs/results-evict-percent :seon.config.proofs/results-evict-percent]
+  [:seon.config.proofs/recent-verdicts :seon.config.proofs/recent-verdicts]
   [:seon.config.proofs/program-store :seon.config.proofs/program-store]
   [:seon.config.proofs/program-store-max-bytes :seon.config.proofs/program-store-max-bytes]
   [:seon.config.proofs/seed-salt :seon.config.proofs/seed-salt]

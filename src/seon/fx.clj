@@ -657,6 +657,23 @@
              :let [[_ dg st] (re-matches #"([^.]+)\.(pass|red)\.edn" (.getName f))] :when dg]
          [dg (keyword st) f])))
 
+(defn- recent-verdict-files
+  "The newest of verdict files vs (verdict-files'), at most :seon.config.proofs/recent-verdicts: what an order of work reads of a test's
+  history, so its cost is the test's and not the digests it has had. See docs/merging.md#verdicts-are-a-cache."
+  {:malli/schema [:=> [:cat [:vector [:tuple :string :keyword :any]]] [:sequential [:tuple :string :keyword :any]]]}
+  [vs]
+  (take (cfg/value :seon.config.proofs/recent-verdicts) (sort-by (fn [[_ _ ^java.io.File f]] (- (.lastModified f))) vs)))
+
+(defn- verdict-head-long
+  "The number re finds in verdict file f's first bytes (a verdict writes :ms and :ticks before its failures, cost and per-function rows, which
+  are most of its size: seon.fx/write-verdicts!), nil when it has none or cannot be read. An order of work, never a verdict (docs/merging.md#verdicts-are-a-cache)."
+  {:malli/schema [:=> [:cat :any :any] [:maybe :int]]}
+  [f re]
+  (try (with-open [r (java.io.FileReader. ^java.io.File f)]
+         (let [buf (char-array 768) n (.read r buf)]
+           (when (pos? n) (some-> (re-find re (String. buf 0 (int n))) second parse-long))))
+       (catch java.io.IOException _ nil)))
+
 (defn- ledger-bytes
   "The size the cache at dir last wrote down for itself (its .size file), nil when it has none or
   cannot read it (then the next write counts the cache)."
@@ -678,8 +695,8 @@
   removed). The size is kept in the cache's .size ledger, so a write that leaves the cache under the
   bound reads and rewrites one small file and counts nothing; past it (or with no ledger) the
   verdict files are counted once, and the least recently used (the oldest mtime: seon.fx/stored-results
-  touches a verdict it reads) go first, greens and reds alike, until the cache is under the bound, and
-  the ledger is set to the true size. Other writers' additions and removals make the ledger a lower or
+  touches a verdict it reads) go first, greens and reds alike, until the cache is :seon.config.proofs/results-evict-percent
+  under the bound, so the writes after it count nothing, and the ledger is set to the true size. Other writers' additions and removals make the ledger a lower or
   higher guess, corrected by the next count. A file that would not delete stays (a cache a little
   over, never an error). Answers nil."
   {:malli/schema [:=> [:cat :string :int [:set :string] :int] :nil]}
@@ -690,9 +707,10 @@
     (if (and total (<= total max-bytes))
       (ledger! total)
       (let [files (verdict-listing dir)
-            size (reduce + (map second files))]
-        (ledger! (loop [[[^java.io.File f n] & more] (sort-by #(nth % 2) (remove #(kept (str (first %))) files)) size size]
-                   (if (and f (> size max-bytes))
+            size (reduce + (map second files))
+            low (- max-bytes (quot (* max-bytes (cfg/value :seon.config.proofs/results-evict-percent)) 100))]
+        (ledger! (loop [[[^java.io.File f n] & more] (if (> size max-bytes) (sort-by #(nth % 2) (remove #(kept (str (first %))) files)) []) size size]
+                   (if (and f (> size low))
                      (recur more (if (.delete f) (- size n) size))
                      size)))))))
 
@@ -734,7 +752,7 @@
     (if (contract/error? done) done (select-keys done [:recorded])))))
 
 (defn typical-ms
-  "{test ms} of tests (or of check steps' and generative-check keys, strings): the median of the ms their cached verdicts measured, whatever the digest: what
+  "{test ms} of tests (or of check steps' and generative-check keys, strings): the median of the ms their newest cached verdicts measured, whatever the digest: what
   orders a run's deal of tests into shards, never what a test proves. The median, not the largest: one
   run under load or a hang (a 17 s test once measured 625 s) must not weigh a test as that run did, which
   made one shard of a merge's run end at 62 s beside three at 640-746 (docs/merging.md#a-merge-runs-what-the-change-reaches).
@@ -744,20 +762,9 @@
   ([tests] (typical-ms (cfg/value :seon.config.proofs/results-dir) tests))
   ([dir tests]
   (into {} (for [t (distinct tests)
-                 :let [ms (sort (keep (fn [[_ _ f]] (let [v (read-verdict (str f))] (when-not (contract/error? v) (:ms v)))) (verdict-files dir t)))]
+                 :let [ms (sort (keep (fn [[_ _ f]] (verdict-head-long f #":ms (\d+)")) (recent-verdict-files (verdict-files dir t))))]
                  :when (seq ms)]
              [t (nth ms (quot (count ms) 2))]))))
-
-(defn- green-ticks
-  "The ticks the green verdict file f measured, read from its first bytes (a verdict writes :ticks
-  before its failures, cost and per-function rows, which are most of its size: seon.fx/write-verdicts!),
-  nil when it has none or cannot be read. An order of work, never a verdict (docs/merging.md#a-tests-tick-budget)."
-  {:malli/schema [:=> [:cat :any] [:maybe :int]]}
-  [f]
-  (try (with-open [r (java.io.FileReader. ^java.io.File f)]
-         (let [buf (char-array 768) n (.read r buf)]
-           (when (pos? n) (some-> (re-find #":ticks (\d+)" (String. buf 0 (int n))) second parse-long))))
-       (catch java.io.IOException _ nil)))
 
 (defn test-budgets
   "{test ticks} of tests: the engine ticks each may run, min(cap, max(floor, factor x the median of the
@@ -773,7 +780,7 @@
   ([dir tests cap floor factor]
    (when (pos? cap)
      (into {} (for [t (distinct tests)
-                    :let [g (sort (keep (fn [[_ st f]] (when (= :pass st) (green-ticks f))) (verdict-files dir t)))
+                    :let [g (sort (keep (fn [[_ _ f]] (verdict-head-long f #":ticks (\d+)")) (recent-verdict-files (filterv (fn [[_ st]] (= :pass st)) (verdict-files dir t)))))
                           med (if (seq g) (nth g (quot (count g) 2)) 0)]]
                 [t (min cap (max floor (* factor med)))])))))
 
