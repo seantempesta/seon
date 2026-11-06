@@ -527,6 +527,16 @@
  ;; removed. Provenance: the owner, 2026-10-29 (docs/decisions.md); the main tree's cache held 121 MB
  ;; in 27,079 files that day. At the bound: an evicted verdict's test runs again once.
  :seon.config.proofs/results-max-bytes 536870912
+ ;; Unit: percent. How far under results-max-bytes a write past it takes the cache, so the writes after
+ ;; it read one size file and count nothing. Provenance: a cache at its bound counted its 148,164 files
+ ;; (4.2 s) after every shard's write, freeing only that write's room (2026-11-06, commit message). At the
+ ;; bound: this share of the cache's least recently used verdicts goes at once, each running again if asked for.
+ :seon.config.proofs/results-evict-percent 10
+ ;; Unit: verdicts. How many of a test's newest verdicts (by file mtime) its typical ms and tick budget
+ ;; read: a median of few keeps out one hung run, and a test's cost stops growing with the digests it has
+ ;; had. Provenance: all of them cost 30.6 s across 1,708 tests, the newest 5 cost 4.4 s, and the same 1,524
+ ;; tests got a time (2026-11-06, commit message). At the bound: older verdicts are not read.
+ :seon.config.proofs/recent-verdicts 5
  ;; Unit: processes. A proof run's selected tests (bin/prove, bin/test) are dealt, a namespace (with
  ;; its fixtures) at a time, into this many shards, each a runner process of its own that bin/test
  ;; starts at once (seon.proofs/shards), its greens stored by digest when it has run. Provenance:
