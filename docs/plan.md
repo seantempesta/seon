@@ -19,7 +19,7 @@ What Seon is for, where it stands, the one step being worked now, and the steps 
 
 ## Now: one step
 
-**One tree of data that renders itself, read by two clients.** The model's context goes through the same ratom components as the page: a component transforms its data, filtering it and adding what it needs from the db, into hiccup: the one state, drawn to html directly and read by the model. The order, what's settled and what the research found are on task `seon.context/the-models-context-is-the-walks`. Real tasks run after diffs, before the conversation moves, and what they show decides how much of the rest is worth doing.
+**One tree of data that renders itself, read by two clients.** The model's context goes through the same ratom components as the page: a component transforms its data, filtering it and adding what it needs from the db, into hiccup: the one state, drawn to html directly and read by the model. The order, what's settled and what the research found are on task `seon.context/the-models-context-is-the-walks`. All of it gets finished, and real-task runs follow it.
 
 In flight, each on its own branch and merged when proved:
 - **The walk (step 1 of that task):** a component's revision follows its output, and a child moved between parents stays (`jolt/recursive-ctx`).
