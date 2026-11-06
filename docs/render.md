@@ -161,6 +161,8 @@ A component's root element carries one class, its render's name, and its render'
 
 The walk replaces a component's root attributes with its render's `:seon.render/style`, so a class written on the root element of the hiccup is dropped: a bubble's classes go in its style. The model reads the same hiccup the page draws, so a plan's text stays verbatim, backticks included (parsing inline code spans turned the context's tests red; only fenced blocks are detected, by their marks).
 
+A render's style may be CSS rules in place of Tailwind classes: plain CSS, scoped by its render's name and using the theme's colours, `.task > h2 { color: var(--color-text-400); }` (`seon.render/css?`). It needs no build, so an agent reads it with `source` beside what it styles, changes it with `edit!` on its branch, and it merges and writes back as the definition does. ```seon.render.ui/page-rules``` is a component of the walk, which derefs the walk's ratom of the renders it has drawn (`:seon.render/drawn`, a var to its definition, updated when one is first drawn or redefined) and answers their rules as a style element, on the page like any other unit, so it draws again only when that ratom moves. It sits in a list of its own (```seon.render.ui/rules-list```), so a draw of what the model reads doesn't run it. Renders move to rules one at a time; `seon.render/styled` leaves a render with rules alone.
+
 ## Tiles are data; the context reads the page's derivations
 
 Each fact the page and root's context both show has one producer they share:

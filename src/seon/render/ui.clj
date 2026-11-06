@@ -762,6 +762,17 @@
   "A tile: a value on its own, scrolled when wide."
   "rounded-md bg-base-900 p-2 min-w-0 overflow-x-auto")
 
+(defn page-rules
+  "The CSS of the renders this page has drawn (a component of the walk, reading its :seon.render/drawn ratom as any tracked read), as a style element, or nothing while none states any. It draws again only when a render is drawn or redefined. See docs/render.md#style."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.render/drawn :any]]]] :any]}
+  [{d :seon.render/drawn}]
+  (let [r (render/rules @d)] (when-not (str/blank? r) [:style r])))
+
+(defn rules-list
+  "The page's rules as a list of their own (p-rules), so a draw of what the model reads does not run them. See docs/render.md#a-layout-places-its-lists."
+  {:seon.render/list "p-rules" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+  [_] [:div {:id "p-rules"} [#'page-rules {}]])
+
 (defn task
   "The task its agent works (a component over ctx alone): its name as the heading, its plan accumulated over its needs
   (seon.task/pulled-accumulated), and under it one done line (a work or whole task's; the other kinds' instructions say what
@@ -769,7 +780,9 @@
   work stands (`standing`, from the task's outcome where the task holds one, else the agent's own end). The cites are
   their own parts (`citations`); which proofs are written is the status's. It reads no db. See
   docs/render.md#a-part-answers-data."
-  {:seon.render/style (str panel-style " [&_h3]:text-xs [&_h3]:text-text-300")
+  {:seon.render/style ".task { display: flex; flex-direction: column; gap: 0.5rem; border: 1px solid var(--color-base-800); border-radius: 0.375rem; padding: 0.5rem; }
+.task > h2 { text-transform: uppercase; letter-spacing: 0.14em; font-size: 0.625rem; color: var(--color-text-400); }
+.task h3 { font-size: 0.75rem; color: var(--color-text-300); }"
    :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int] :any]}
   [{c :seon.ctx/ctx} _aid]
   (when-let [t* (:task c)]
@@ -1419,7 +1432,7 @@
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
   [{c :seon.ctx/ctx}]
   (let [aid (:db/id c)]
-    [:div {:id "render-ctx"} [#'task-list {} aid] [#'conversation-list {} aid] [#'tiles {} aid]]))
+    [:div {:id "render-ctx"} [#'task-list {} aid] [#'conversation-list {} aid] [#'tiles {} aid] [#'rules-list {}]]))
 
 (defn task-list
   "The task's list of an agent's page (p-task, the parts its model is sent: seon.context/page-lists), agent aid's, in the order
@@ -1838,6 +1851,7 @@
        [:main {:class "seon-chat"}
         [:div {:id "p-head"} (for [u (in "#p-head")] (slot (:id u)))]
         (slot "p-caption")
+        [:div {:id "p-rules"} (for [u (in "#p-rules")] (slot (:id u)))]
         [:ol {:id "c-rows" :class "seon-chat-log" :data-view view} (for [u (in "#c-rows")] (slot (:id u)))]
         (when input (slot "p-input"))]
        (when-not (or (= :debug tab) agent-chat?)
@@ -1853,12 +1867,13 @@
   "@ctx's parts, each a pair: what the model reads of the part (its data, or the hiccup its render returned, printed as
   seon.render/part-text prints it), beside the part as the page draws it (its unit's
   html). parts, {id content} of the task's list (seon.render/placed-hiccup); html, {id html} of its units; open, the
-  units the tab opened (/open: d-part-<id>). What the model reads is shown whole, so a part may be a million characters:
+  units the tab opened (/open: d-part-<id>); rules, the html of the page's rules, for the parts they style. What the model reads is shown whole, so a part may be a million characters:
   one over the value budget (:seon.config.render/value-budget) is a closed <details> with its size in tokens, whose text
   is drawn once opened, and has the page's width where a short one shares the row with the part drawn. See docs/render.md#the-page."
-  {:malli/schema [:=> [:cat :map [:map-of :string :string] [:set :string]] :any]}
-  [parts html open]
+  {:malli/schema [:=> [:cat :map [:map-of :string :string] [:set :string] :string] :any]}
+  [parts html open rules]
   [:li {:id "d-parts" :class "seon-stack-2"}
+   (h/raw rules)
    [:h2 {:class "kicker"} "the task's parts: what the model reads, and the part drawn"]
    (for [[id content] parts
          :let [text (render/part-text content)

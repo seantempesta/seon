@@ -503,7 +503,7 @@
         input (fn [l] (first (filter #(= "p-input" (:id %)) (:seon.render/units l))))]
     (testing "root is an agent: its page and an agent's are each its lists in one chrome (seon.render.ui/page-chrome)"
       (is (= #{nil "#c-side" "#p-head" "#p-task" "#c-rows" "#p-tiles"} (set (map :container (:seon.render/units root)))) "root's task list: its agents' cards")
-      (is (= #{nil "#c-side" "#p-head" "#p-task" "#c-rows"} (set (map :container (:seon.render/units agent))))
+      (is (= #{nil "#c-side" "#p-head" "#p-task" "#c-rows" "#p-rules"} (set (map :container (:seon.render/units agent))))
           "an agent's: its task's list above its conversation; no eval of the fixture has a render of its own, so no tiles")
       (is (= 1 (count (in root "#c-rows"))) "root's list: its own evaluation"))
     (testing "root's agents list is the same on every page: root first, then its agents"
@@ -1377,6 +1377,32 @@
     (is (str/includes? drawn "bad") "and keeps its text")
     (is (str/includes? drawn "<code>c</code>") "in a list item too")))
 
+(defn styled-a "A render with CSS rules." {:seon.render/style ".styled-a { color: red; }" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+  [{c :seon.ctx/ctx}] [:p (str (:x c))])
+(defn rules-shown "The rules as a component answers them." {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.render/drawn :any]]]] :any]}
+  [{d :seon.render/drawn}] [:style (r/rules @d)])
+(defn styled-layout "A layout: a styled render, then its rules." {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+  [_] [:div {:id "x"} [#'styled-a {}] [#'rules-shown {}]])
+
+(deftest the-page-draws-the-rules-of-its-renders
+  ;; docs/render.md#style: a component of the walk, run again when a render is drawn or redefined and no other time
+  (let [c (seon.ratom/atom {:db/id 1 :x 1})
+        w (r/walker {:ref c :changes seon.ctx/changes} (constantly nil) [#'seon.render-test/styled-layout {}])]
+    (r/flush! w nil)
+    (is (str/includes? (h/html (r/resolved w @(:out w))) ".styled-a { color: red; }") "the rules of what it drew")
+    (let [rules-key (some (fn [[k e]] (when (= #'seon.render-test/rules-shown (:f e)) k)) @(:cache w))
+          rev (:rev (get @(:cache w) rules-key))]
+      (is (some? rules-key))
+      (swap! c assoc :x 2)
+      (is (not (contains? (r/flush! w nil) rules-key)) "a change of data does not run them")
+      (is (= rev (:rev (get @(:cache w) rules-key))))
+      ;; as a defn at the REPL: its new metadata and its new root
+      (alter-meta! #'styled-a assoc :seon.render/style ".styled-a { color: blue; }")
+      (alter-var-root #'styled-a (fn [f] (fn [o] (f o))))
+      (is (contains? (r/flush! w nil) rules-key) "a render redefined does")
+      (is (str/includes? (h/html (r/resolved w @(:out w))) ".styled-a { color: blue; }") "and shows its new rules")
+      (r/dispose-walk! w))))
+
 (deftest a-cut-with-its-whole-form-holds-no-copy
   ;; the second context audit (F7): a plan cut on the page kept its whole text in the cut's :title,
   ;; which the model reads too (1.2k chars twice on two pages). A cut that names the form reading the
@@ -2171,8 +2197,8 @@
   (let [big (into [:ul] (for [i (range 4000)] [:li (str "row " i " of a long part")]))
         parts {"p-small" [:p "a short part"] "p-big" big}
         html {"p-small" "<p>drawn small</p>" "p-big" "<p>drawn big</p>"}
-        closed (h/html (ui/ctx-parts parts html #{}))
-        opened (h/html (ui/ctx-parts parts html #{"d-part-p-big"}))
+        closed (h/html (ui/ctx-parts parts html #{} ""))
+        opened (h/html (ui/ctx-parts parts html #{"d-part-p-big"} ""))
         pair (fn [h id] (second (re-find (re-pattern (str "(?s)(<div[^>]*data-part=\"" id "\".*?drawn)")) h)))]
     (is (str/includes? closed "a short part") "a part within budget is shown whole, as before")
     (is (not (str/includes? (pair closed "p-small") "<details")) "and not folded")

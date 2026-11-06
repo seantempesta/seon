@@ -104,7 +104,10 @@
       (when attrs (write-attrs! sb attrs))
       (.append sb ">")
       (when-not (contains? void-tags tag)
-        (doseq [c children] (write! sb c))
+        ;; a style element's text is CSS, HTML's raw text: a selector's > is no markup
+        (if (= "style" tag)
+          (doseq [c children] (.append sb (str c)))
+          (doseq [c children] (write! sb c)))
         (.append sb "</") (.append sb tag) (.append sb ">")))
     (seq? node) (doseq [c node] (write! sb c))
     ;; a value that is not text is shown by the one value printer
