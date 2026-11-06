@@ -383,6 +383,28 @@
   [nsym src k]
   (str nsym "/" (hasch/uuid [nsym src]) (when (pos? k) (str "#" k))))
 
+(defn form-ids
+  "A form's [id code] for its namespace, exact text and occurrence k: its id (form-id's: the hash of the
+  namespace and the exact text) and the digest of its namespace and code, which is its text with no comment
+  and one space for a run of whitespace outside a string (strings, regexes and character literals as
+  written: the reader reads what it reads). The code digest is stored with the form (:form/code), what a
+  test's reach digest takes of the form (docs/source.md#what-a-test-takes-of-a-forms-text); it is its id's,
+  hashed once, when the text is already that code (no comment, newline, tab, comma or run of spaces in it)."
+  {:malli/schema [:=> [:cat :symbol :string :int] [:tuple :string :string]]}
+  [nsym src k]
+  (let [h (str nsym "/" (hasch/uuid [nsym src]))
+        id (str h (when (pos? k) (str "#" k)))
+        ;; a string, a regex or a character literal as written (the alternative that comes first, so a ; or a space
+        ;; inside one is kept), else a comment gone and a run of whitespace one space: native replaces, no loop
+        squeeze (fn [^String s]
+                  (-> s
+                      (str/replace #"(\"(?:[^\"\\]+|\\.)*\"|\\.)|;[^\n]*" "$1")
+                      (str/replace #"(\"(?:[^\"\\]+|\\.)*\"|\\.)[\s,]*|[\s,]+" "$1 ")
+                      str/trim))
+        plain? (not-any? #(str/includes? src %) [";" "\n" "\t" "\r" "," "  "])
+        code (if plain? src (squeeze src))]
+    [id (if (identical? code src) h (str nsym "/" (hasch/uuid [nsym code])))]))
+
 (defn- names
   "The qualified keywords a schema or contract form names."
   {:malli/schema [:=> [:cat :any] [:set :qualified-keyword]]}
@@ -402,6 +424,7 @@
   (let [units (or units (map unit-account nodes))
         nsym (if ns-form? ns-after ns)
         nsx (find-ns nsym)
+        ids (form-ids nsym src k)
         a (merge-accounts units)
         types? (boolean (some #(= 'clojure.core/make-deftype-ctor (:init %)) (:defs a)))
         set? (fn [{v :var :as d}] (or (nil? before) (not (identical? (get before v) (root-of v))) (:macro? d)))
@@ -427,7 +450,7 @@
                                 (first (filter string? [(:doc ns-meta) x (when (map? x) (:doc x))]))))]
     (when (and nsx (not (scratch-ns? nsx)) (not (:scratch ns-meta))
                (or ns-form? (seq defs) (seq declares) (seq methods) (seq impls) (:env? a)))
-      (cond-> {:id (form-id nsym src k) :src src :ns nsym :ns-form? (boolean ns-form?) :ns-doc ns-doc
+      (cond-> {:id (first ids) :src src :code (second ids) :ns nsym :ns-form? (boolean ns-form?) :ns-doc ns-doc
                :defs defs :declares declares :methods (or methods []) :impls (or impls [])
                :refs (-> (:refs a) (into (macro-uses nsx form))
                          ;; a ctor reaches its type's methods: ns.T, or a bare T (analyzed, not run, the type is in no
@@ -518,8 +541,9 @@
   text, namespace, order and lead, the definitions and declarations it names (def-ref's ids,
   each definition's entity read from eid-of: a map, or def-eid on the db) and its form-sets."
   {:malli/schema [:=> [:cat :string :map ifn?] :map]}
-  [id {:keys [ns src order lead defines declares] :as row} eid-of]
+  [id {:keys [ns src code order lead defines declares] :as row} eid-of]
   (into (cond-> {:db/id (form-tid id) :form/id id :form/src src :form/ns (ns-tid ns) :form/order order}
+          code (assoc :form/code code)
           lead (assoc :form/lead lead)
           (seq defines) (assoc :form/defines (mapv #(:db/id (def-ref % (eid-of %))) defines))
           (seq declares) (assoc :form/declares (mapv #(:db/id (def-ref [:var %] (eid-of [:var %]))) declares)))
@@ -696,6 +720,7 @@
             (case a
               :form/id (assoc row :id v)
               :form/src (assoc row :src v)
+              :form/code (assoc row :code v)
               :form/ns (assoc row :ns (:v (first (d/datoms db :eavt v :ns/name))))
               :form/order (assoc row :order v)
               :form/defines (update row :defines conj (definition-key db v))
@@ -1267,19 +1292,40 @@
   references a resolver (config-resolvers), is not seon.config's own, and its keywords name no
   seon.config.* key (seon.render/pattern reads a join's :limit, a key a schema entry's
   :seon.ctx/pattern names). Such a form takes every config key a schema entry names
-  (schema-config-keys). A form that names one key and computes another is the daily full run's."
+  (:schema-config). A form that names one key and computes another is the daily full run's."
   {:malli/schema [:=> [:cat :map] :boolean]}
   [f]
   (boolean (and (some config-resolvers (:refs f)) (not= 'seon.config (:ns f))
                 (not-any? #(some-> (namespace %) (str/starts-with? "seon.config.")) (:keywords f)))))
 
-(defn- schema-config-keys
-  "The config keys schema entries' forms (schemas: {key text}) name as data, the entries
-  declaring config keys (seon.config.*) left out: what a config-key-reader can read."
-  {:malli/schema [:=> [:cat :map] [:set :qualified-keyword]]}
+(defn- config-key?
+  "Is k a config key: a keyword of a seon.config.* namespace?"
+  {:malli/schema [:=> [:cat :any] :boolean]}
+  [k] (boolean (and (keyword? k) (some-> (namespace k) (str/starts-with? "seon.config.")))))
+
+(defn- less-config-fields
+  "Schema form f less the config keys a :map lists as its fields ([key key], [key {props} key]): the config map
+  (:seon.config/config) names every key, and a key is an input by the entry it names and the value it reads
+  (config-reads), never by being listed (docs/source.md#tests-run-by-reach). Any other form as it is."
+  {:malli/schema [:=> [:cat :any] :any]}
+  [f]
+  (if (and (vector? f) (= :map (first f))) (into [] (remove #(and (vector? %) (config-key? (first %)))) f) f))
+
+(defn- config-facts
+  "What the schema entries (schemas: {key text}) say of the config keys, from one read of each entry that is
+  not itself a config key's: {:keys the keys their forms name as data, a map's fields (less-config-fields)
+  left out: what a config-key-reader can read (:schema-config), :listed the keys a :map lists as its
+  fields: the config map's}."
+  {:malli/schema [:=> [:cat :map] [:map [:keys [:set :qualified-keyword]] [:listed [:set :qualified-keyword]]]]}
   [schemas]
-  (let [config? #(some-> (namespace %) (str/starts-with? "seon.config."))]
-    (into #{} (comp (remove (comp config? key)) (mapcat #(names (sedn/decode (val %)))) (filter config?)) schemas)))
+  (reduce-kv (fn [acc k text]
+               (if (config-key? k)
+                 acc
+                 (let [f (sedn/decode text)]
+                   (-> acc
+                       (update :keys into (filter config-key?) (names (less-config-fields f)))
+                       (update :listed into (keep #(when (and (vector? %) (config-key? (first %))) (first %))) (when (and (vector? f) (= :map (first f))) f))))))
+             {:keys #{} :listed #{}} schemas))
 
 (defn- tree-reading?
   "Does form f read the tree (a tree-reader referenced, by a form defining no env-reader)?"
@@ -1342,9 +1388,10 @@
       (into classes (filter #(str/starts-with? (namespace %) "seon.config.")) keywords))))
 
 (defn- reach-rows
-  "Form entities es as the reach walk reads them (reach-step): each one's :id, :own (its
-  :form/id with its occurrence (form-id's #k) left off: the hash of its namespace and text, which
-  is not read again), :ns, :defines, :refs, :quoted (the names its quoted data holds: an edge
+  "Form entities es as the reach walk reads them (reach-step): each one's :id, :own (its :form/code,
+  form-ids': the digest of its namespace and code, comments and whitespace runs left out;
+  a form stored without one is taken by its :form/id with its occurrence (form-id's #k) left off: the hash of
+  its namespace and exact text), :ns, :defines, :refs, :quoted (the names its quoted data holds: an edge
   in a test's namespace, reach-step) and the config keys it reads (config-reads), and none of
   the other facts, which no edge, digest or flag reads. Each attribute is read once, for all of es together: one pass over its index when scan?
   (es is most of the db's forms), else a seek per entity."
@@ -1356,6 +1403,7 @@
                                              (transient {}) (d/datoms db :aevt a)))
                         (into {} (for [e es :let [vs (mapv :v (d/datoms db :eavt e a))] :when (seq vs)] [e vs]))))
         id (at :form/id es) nsv (at :form/ns es) dv (at :form/defines es) rv (at :form/refs es) kv (at :form/keywords es) qv (at :form/quoted es) ov (at :form/ops es)
+        cv (at :form/code es)
         ds (set (mapcat val dv))
         nn (at :ns/name (set (mapcat val nsv)))
         key-of (merge ;; definition-key's order: the earlier kind wins
@@ -1363,9 +1411,12 @@
                  (update-vals (at :impl/key ds) (fn [[v]] (into [:impl] (sedn/decode v))))
                  (update-vals (at :method/key ds) (fn [[v]] (into [:method] (sedn/decode v))))
                  (update-vals (at :var/name ds) (fn [[v]] [:var v])))]
-    (vec (for [e es :let [[i] (id e) nsym (first (nn (first (nsv e)))) refs (set (rv e))]]
-           {:id i :own (str/replace i #"#\d+$" "") :ns nsym :refs refs :quoted (set (qv e)) :ops (set (ov e))
-            :defines (into #{} (keep key-of) (dv e))
+    (vec (for [e es :let [[i] (id e) nsym (first (nn (first (nsv e)))) refs (set (rv e))
+                          full (str/replace i #"#\d+$" "")
+                          defines (into #{} (keep key-of) (dv e))]]
+           {:id i :own (or (first (cv e)) full)
+            :ns nsym :refs refs :quoted (set (qv e)) :ops (set (ov e))
+            :defines defines
             :keywords (set (kv e))
             :config (config-reads (set (kv e)) refs nsym pins)}))))
 
@@ -1561,11 +1612,15 @@
   and every var its form names (a render its properties declare, :seon.render/html, :seon.render/model): a
   test reaching the entry reaches the render, so a change to the render's body moves it (a red recorded
   while a render was unfinished was marked flaky at the same digest: step (c) of
-  seon.context/the-page-is-the-render-of-what-ctx-pulls)."
-  {:malli/schema [:=> [:cat :any :string] :map]}
-  [k text]
-  (let [form (sedn/decode text)]
-    {:id (str "schema " k) :own (lib/digest (str k "\n" text)) :ns k :defines #{}
+  seon.context/the-page-is-the-render-of-what-ctx-pulls). A config map's fields (less-config-fields) are
+  neither its edges nor its digest's: a config key's own row says whether a map lists it (listed?), so
+  a key added, or taken out of the map, moves the tests naming that key and no other."
+  {:malli/schema [:=> [:cat :any :string :boolean] :map]}
+  [k text listed?]
+  (let [raw (sedn/decode text)
+        form (less-config-fields raw)
+        own (lib/digest (str k "\n" (if (config-key? k) (str (boolean listed?) "\n" text) (if (= raw form) text (sedn/encode form)))))]
+    {:id (str "schema " k) :own own :ns k :defines #{}
      :refs (into #{} (filter qualified-symbol?) (tree-seq coll? seq form))
      :schema (mapv #(str "schema " %) (names form))}))
 
@@ -1579,12 +1634,13 @@
   {:malli/schema [:=> [:cat :seon.host/db [:maybe :map]] :map]}
   [db data-refs]
   (let [schemas (schema-texts db)
-        live (live-ids db)]
+        live (live-ids db)
+        {config :keys listed :listed} (config-facts schemas)]
     (reach-step {:rows {} :defs {} :methods {} :impls {} :contract {} :tests #{} :refd {} :adj {} :rev {}
                  :reads #{} :scans #{} :proc #{} :bin #{} :plain {} :own {} :comp-of {} :cd {} :flags {} :next 0 :computed #{}
-                 :data-refs data-refs :schemas schemas :schema-config (schema-config-keys schemas) :live live}
+                 :data-refs data-refs :schemas schemas :schema-config config :listed listed :live live}
                 db []
-                (into (reach-rows db (set (vals live)) true) (for [[k text] schemas] (schema-row k text)))
+                (into (reach-rows db (set (vals live)) true) (for [[k text] schemas] (schema-row k text (contains? listed k))))
                 #{})))
 
 (defn- schema-moves
@@ -1602,9 +1658,11 @@
         sid #(str "schema " %)
         gone (remove schemas (keys old))
         fresh (remove old (keys schemas))
-        changed (filter #(and (contains? old %) (not= (old %) (schemas %))) (keys schemas))
+        {config :keys listed :listed} (config-facts schemas)
+        was-listed (:listed g)
+        ;; an entry whose text moved, or a config key a map began or ceased to list (its own digest says)
+        changed (filter #(and (contains? old %) (or (not= (old %) (schemas %)) (not= (contains? listed %) (contains? was-listed %)))) (keys schemas))
         exist (into #{} (map sid) (concat gone fresh))
-        config (schema-config-keys schemas)
         rows (:rows g)
         ;; the forms naming an entry that came or went as a keyword: live in both values, no change of theirs
         namers (for [[k now] (concat (map vector gone (repeat false)) (map vector fresh (repeat true)))
@@ -1613,10 +1671,10 @@
                      :when (and (= (:e dt) (live id)) (contains? (:live g) id) (not ((:refs (rows id)) 'seon.config/baked-schema-forms)))]
                  [id (sid k) now])
         rows (reduce (fn [rs [id k now]] (update-in rs [id :sedges] #(vec (if now (distinct (conj % k)) (remove #{k} %))))) rows namers)
-        g' (assoc g :schemas schemas :schema-config config :rows rows)]
+        g' (assoc g :schemas schemas :schema-config config :listed listed :rows rows)]
     [g'
      (mapv sid (concat gone changed))
-     (mapv #(schema-row % (schemas %)) (concat fresh changed))
+     (mapv #(schema-row % (schemas %) (contains? listed %)) (concat fresh changed))
      (cond-> (-> (into #{} (comp (keep #(when (some exist (:schema (rows (sid %)))) (sid %)))) (keys schemas))
                  (into (map first) namers)
                  (into (for [[v ks] (:contract g) :when (some exist ks) :let [id (peek (get (:defs g) v))] :when id] id)))

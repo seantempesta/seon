@@ -433,11 +433,13 @@
      :sizes [100 300 1000 10000]}))
 
 (defn account-of
-  "account's argument: calls-form n in app.acct as read, its text and its unit's account."
+  "account's argument: calls-form n in app.acct as read, its text as a file holds it (a step to a line, a
+  comment above each, as source is written; owner, 2026-11-06: real forms are multi-line) and its unit's account."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map]]}
   [n]
-  (let [[node] (calls-node-of n) form (calls-form n)]
-    [{:units [(program/unit-account node)] :src (pr-str form) :form form :ns 'app.acct :ns-after 'app.acct :order 0 :k 0}]))
+  (let [[node] (calls-node-of n) form (calls-form n)
+        src (str "(defn g [m]" (apply str (for [s (drop 3 form)] (str "\n  ;; a step\n  " (pr-str s)))) ")")]
+    [{:units [(program/unit-account node)] :src src :form form :ns 'app.acct :ns-after 'app.acct :order 0 :k 0}]))
 
 (deftest an-account-reads-its-form-once
   ;; task seon.program/an-import-reads-each-form-once
