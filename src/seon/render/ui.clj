@@ -763,10 +763,10 @@
   "rounded-md bg-base-900 p-2 min-w-0 overflow-x-auto")
 
 (defn page-rules
-  "The CSS of the renders this page has drawn (a component of the walk, its :seon.render/rules), as a style element, or nothing while none states any. It draws again only when a render is drawn or redefined. See docs/render.md#style."
-  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.render/rules :string]]]] :any]}
-  [{r :seon.render/rules}]
-  (when-not (str/blank? r) [:style r]))
+  "The CSS of the renders this page has drawn (a component of the walk, reading its :seon.render/drawn ratom as any tracked read), as a style element, or nothing while none states any. It draws again only when a render is drawn or redefined. See docs/render.md#style."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.render/drawn :any]]]] :any]}
+  [{d :seon.render/drawn}]
+  (let [r (render/rules @d)] (when-not (str/blank? r) [:style r])))
 
 (defn task
   "The task its agent works (a component over ctx alone): its name as the heading, its plan accumulated over its needs

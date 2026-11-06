@@ -1379,8 +1379,8 @@
 
 (defn styled-a "A render with CSS rules." {:seon.render/style ".styled-a { color: red; }" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
   [{c :seon.ctx/ctx}] [:p (str (:x c))])
-(defn rules-shown "The rules as a component answers them." {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.render/rules :string]]]] :any]}
-  [{r :seon.render/rules}] [:style r])
+(defn rules-shown "The rules as a component answers them." {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.render/drawn :any]]]] :any]}
+  [{d :seon.render/drawn}] [:style (r/rules @d)])
 (defn styled-layout "A layout: a styled render, then its rules." {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
   [_] [:div {:id "x"} [#'styled-a {}] [#'rules-shown {}]])
 
@@ -1396,8 +1396,12 @@
       (swap! c assoc :x 2)
       (is (not (contains? (r/flush! w nil) rules-key)) "a change of data does not run them")
       (is (= rev (:rev (get @(:cache w) rules-key))))
-      (alter-var-root #'seon.render-test/styled-a identity)
-      (is (contains? (r/flush! w nil) rules-key) "a render redefined does"))))
+      ;; as a defn at the REPL: its new metadata and its new root
+      (alter-meta! #'styled-a assoc :seon.render/style ".styled-a { color: blue; }")
+      (alter-var-root #'styled-a (fn [f] (fn [o] (f o))))
+      (is (contains? (r/flush! w nil) rules-key) "a render redefined does")
+      (is (str/includes? (h/html (r/resolved w @(:out w))) ".styled-a { color: blue; }") "and shows its new rules")
+      (r/dispose-walk! w))))
 
 (deftest a-cut-with-its-whole-form-holds-no-copy
   ;; the second context audit (F7): a plan cut on the page kept its whole text in the cut's :title,
