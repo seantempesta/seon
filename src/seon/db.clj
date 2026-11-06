@@ -429,6 +429,43 @@
         (when (seq swept) (compact-due! conn))
         {:swept (count swept) :ms (profile/ms-since t0) :branches now :gone gone}))))
 
+(defn retain!
+  "Sweep the commit snapshots of the store under conn older than main's newest keep commits, when that many have landed since the last sweep (main's :seon.root/retained),
+  counted by the commit graph's generation, never a clock. Kept whole, whatever their age: each branch's head, its merge base with main, and each commit an agent's facts
+  name (:seon.agent/base-commit, :seon.agent/main-commit), which is what a merge and a page read by id. Every datom, a branch's history and as-of reads stay: only reading
+  another old commit by its id goes. Root calls it at boot, before any other process exists, so nothing live holds a swept commit, and as its sole writer. Answers
+  {:swept :ms :generation}, written on main, or nil when none is due. See docs/storage.md#collection."
+  {:malli/schema [:=> [:cat :seon.host/conn pos-int?] [:maybe :map]]}
+  [conn keep]
+  (let [store (:store @conn)
+        main (get-in @conn [:config :branch])
+        record #(d/commit-graph-record store %)
+        generation (:datahike/generation (record (d/commit-id @conn)))
+        last-g (:generation (:seon.root/retained (d/pull @conn [:seon.root/retained] [:seon.root/id :root])) 0)]
+    (when (and generation (> generation keep) (>= (- generation last-g) keep))
+      (let [t0 (profile/now-ns)
+            ;; a commit older than the graph has no record, and one is derived from the commit record the sweep deletes: every commit gets its record first
+            _ (d/backfill-commit-graph! conn)
+            ;; main's chain, newest first: at a merge, the parent of highest generation; the commit keep back names the cutoff
+            oldest (loop [c (d/commit-id @conn) n keep]
+                     (if (zero? n) c
+                         (let [ps (:datahike/parents (record c))]
+                           (if-let [p (when (seq ps) (apply max-key #(:datahike/generation (record %) 0) ps))] (recur p (dec n)) c))))
+            cutoff (let [{:keys [datahike/updated-at datahike/created-at]} (:meta (k/get store oldest nil {:sync? true}))] (or updated-at created-at))
+            bs (d/branches conn)
+            ;; a branch with more than one best ancestor has each kept; its data says which (d/merge-base's refusal)
+            bases (mapcat (fn [b] (try [(d/merge-base conn b main)]
+                                       (catch clojure.lang.ExceptionInfo e (or (:merge-bases (ex-data e)) []))))
+                          (remove #{main} bs))
+            named (mapcat (fn [b] (let [h (d/branch-as-db store b)]
+                                    (concat (map :v (d/datoms h :aevt :seon.agent/base-commit)) (map :v (d/datoms h :aevt :seon.agent/main-commit)))))
+                          bs)
+            swept @(d/gc-storage conn cutoff {:datahike.gc/keep-commits (into #{} (remove nil?) (concat bases named))})
+            r {:swept (count swept) :ms (profile/ms-since t0) :generation generation}]
+        (when (seq swept) (compact-due! conn))
+        (d/transact conn [{:seon.root/id :root :seon.root/retained r}])
+        r))))
+
 (defn after-fork!
   "Make this forked process (an agent, a clone) open the store itself: an LMDB env and the
   connections inherited from its parent must not be used across fork(), so they are

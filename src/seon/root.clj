@@ -987,7 +987,14 @@
     (fn []
       (let [;; first of all: no process holds the store yet (docs/storage.md#collection)
             compacted (when (and (= :lmdb backend) (cfg/value :seon.config.store/sole-writer?)) (pdb/compact-if-due! path))
-            {store-cfg :cfg conn :conn :as opened} (pdb/open! backend path datoms main)
+            sole? (and (= :lmdb backend) (cfg/value :seon.config.store/sole-writer?))
+            opened (pdb/open! backend path datoms main)
+            ;; still the only process: old snapshots swept when enough commits have landed, and the freed pages compacted at once
+            retained (when sole? (pdb/retain! (:conn opened) (cfg/value :seon.config.store/keep-commits)))
+            compacted (if (pos? (:swept retained 0))
+                        (do (d/release (:conn opened)) (pdb/compact-if-due! path))
+                        compacted)
+            {store-cfg :cfg conn :conn :as opened} (if (pos? (:swept retained 0)) (pdb/open! backend path datoms main) opened)
             ;; each agent's stderr goes to a file here (seon.agent/stderr-path), read at its death
             agents-dir (pdb/agents-dir store-cfg)
             _ (.mkdirs (java.io.File. agents-dir))
@@ -1002,7 +1009,7 @@
         (lib/static!)
         (let [db @conn]
           (merge opened (fs/fork-server db store-cfg)
-                 {:db db :agents-dir agents-dir :open-ms open-ms :load-ms load-ms :compacted compacted
+                 {:db db :agents-dir agents-dir :open-ms open-ms :load-ms load-ms :compacted compacted :retained retained
                   :program program :program-ms program-ms :contracts contracts}))))))
 
 (defn- flow-error
@@ -1046,7 +1053,7 @@
         main (or main (keyword (cfg/value :seon.config.root/main)))
         backend (or backend (cfg/value :seon.config.store/backend))
         max-running (or max-running (cfg/value :seon.config.agent/max-running))
-        {store-cfg :cfg conn :conn recovered? :recovered? :keys [db agents-dir open-ms load-ms program program-ms contracts pid fd compacted]}
+        {store-cfg :cfg conn :conn recovered? :recovered? :keys [db agents-dir open-ms load-ms program program-ms contracts pid fd compacted retained]}
         (boot! backend path datoms main t0)
         recovered (if recovered? (pdb/of-main main (d/branches conn)) [])
         ;; this root's boot id (runs of an earlier boot are reaped); its fact is written
@@ -1078,7 +1085,7 @@
               :fork-server {:agents-forked 0 :pid pid :status :up :restarts 0}
               :store {:backend backend :path path :main main :agents-dir agents-dir :recovered? (boolean recovered?)
                       :recovered-branches recovered :open-ms (lib/r2 open-ms)}
-              :boot {:gc-sweepers sweepers :compacted compacted :load-ms (lib/r2 load-ms) :program (assoc program :ms (lib/r2 program-ms))
+              :boot {:gc-sweepers sweepers :compacted compacted :retained retained :load-ms (lib/r2 load-ms) :program (assoc program :ms (lib/r2 program-ms))
                      :contracts (select-keys contracts [:armed :unchanged :invalid :ms]) :instrument (if contract/on? :on :off)}}
         graph-p (promise)
         root-procs-p (promise)

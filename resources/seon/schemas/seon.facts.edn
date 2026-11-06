@@ -424,6 +424,7 @@
  ;; root's last collection of the store (seon.db/collect!, run by the writer when no agent is
  ;; live): how many keys it swept, how long it took, the branches it saw (a later collection
  ;; runs only once one of them is gone) and how many were gone since the one before
+ :seon.root/retained [:map [:swept :int] [:ms number?] [:generation :int]]
  :seon.root/collected [:map [:swept :int] [:ms number?] [:branches [:set :keyword]] [:gone :int]]
  ;; how a root ended: its boot, why (:stop! a caller's stop, :stdin-eof its owner closed its
  ;; stdin (bin/root stop), :signal SIGTERM, SIGINT or SIGHUP (Jolt's shutdown hooks), :unclean
@@ -460,7 +461,7 @@
                           [:seon.root/watch {:optional true} :seon.root/watch]
                           [:seon.root/tasks {:optional true} :seon.root/tasks]
                           [:seon.root/generation {:optional true} :seon.root/generation]
-                          [:seon.root/collected {:optional true} :seon.root/collected]
+                          [:seon.root/collected {:optional true} :seon.root/collected] [:seon.root/retained {:optional true} :seon.root/retained]
                           [:seon.config.agent/max-running {:optional true} :seon.config.agent/max-running]
                           [:seon.config.merge/max-running {:optional true} :seon.config.merge/max-running]]
  ;; ---- on every transaction Seon makes, in its tx-meta (seon.db/tx-meta) ----

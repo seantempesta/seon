@@ -35,6 +35,7 @@
   [:seon.config.store/lmdb-map-bytes :seon.config.store/lmdb-map-bytes]
   [:seon.config.store/branching-factor :seon.config.store/branching-factor]
   [:seon.config.store/keep-history? :seon.config.store/keep-history?]
+  [:seon.config.store/keep-commits :seon.config.store/keep-commits]
   [:seon.config.store/value-out-of-line-bytes :seon.config.store/value-out-of-line-bytes]
   [:seon.config.store/max-value-chars :seon.config.store/max-value-chars]
   [:seon.config.store/compressor :seon.config.store/compressor]
