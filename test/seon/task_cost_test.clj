@@ -25,10 +25,10 @@
   (cost/proof
     {:of 'seon.db/history :input 'seon.task-cost-test/replaced-db
      :n "times the entity's attribute was replaced"
-     :work "one seek of the entity in the history index, then a row per datom, each with one seek of its transaction's time"
+     :work "one seek of the entity in the history index, then a row per datom, each with one seek of its transaction's time: about 20 KB a row"
      :growth :linear
-     :per-n {:calls 1 :bytes 1}
-     :fixed {:calls 1 :bytes 1}
+     :per-n {:calls 0 :bytes 20000}
+     :fixed {:calls 2 :bytes 5000}
      :sizes [10 40 160]}))
 
 (deftest finding-a-task-by-its-id-is-one-index-seek
