@@ -1368,10 +1368,13 @@
   (is (not (contains? (methods pt-by-vector) [:a 1])) "the method is gone"))
 
 (deftest a-vars-history-names-each-definition-it-had
-  ;; docs/storage.md#history: my.agent/history reads a var's past definitions from the db's history
-  (let [db (record (empty-db) 'app.pt-h "(defn f [] 1)" 'app.pt-h "(defn f [] 2)")
-        rows (program/var-history db 'app.pt-h/f)]
-    (is (= ["(defn f [] 1)" "(defn f [] 2)"] (map :src rows)) "each definition, oldest first")
-    (is (apply < (map :t rows)) "each with its transaction")
-    (is (every? inst? (map :at rows)) "and its time")
-    (is (= [] (program/var-history db 'app.pt-h/no-such)) "a var it never had")))
+  ;; task seon.program/a-vars-history-is-read-at-the-repl; docs/storage.md#history: a var's past definitions
+  ;; are its :var/form datoms in the db's history, read by seon.db/history
+  (let [def-of #(mt/code 'app.h (str "(ns app.h)\n(defn f [x] (+ x " % "))\n"))
+        db (mt/with (mt/world {:history? true}) (def-of 1) (def-of 2) (def-of 3))
+        rows (pdb/history db [:var/name 'app.h/f] {:attrs #{:var/form} :pull [:form/src]})
+        texts (mapv (comp :form/src :v) (filter :added? rows))]
+    (is (= 3 (count texts)) (pr-str rows))
+    (is (every? true? (map #(str/includes? %1 %2) texts ["(+ x 1)" "(+ x 2)" "(+ x 3)"]))
+        (str "oldest first, each the text it had: " (pr-str texts)))
+    (is (= 2 (count (remove :added? rows))) "the two replaced forms were each retracted")))
