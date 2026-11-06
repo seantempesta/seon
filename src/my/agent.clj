@@ -365,8 +365,12 @@
                   (pos? died) (str "died: " died " of " n " had no verdict")
                   (seq none) (str "not green: " (count none) " of " (count (:proofs r)) " proofs have no verdict: " (str/join ", " none))
                   ;; a process test nobody ran has no verdict, a proof or not: green can't be said of it
-                  (seq (:deferred r)) (str "not green: " n " of " n " passed, and " (count (:deferred r)) " process tests have no verdict: "
-                                           (str/join ", " (sort-by str (:deferred r))) (some->> (:unjudged r) (str "; ")))
+                  (seq (:deferred r)) (let [ps (vals (:proofs r))
+                                            waiting (sort-by str (keep (fn [[p st]] (when (= :deferred st) p)) (:proofs r)))]
+                                        (str "not green: " n " of " n " in-process tests passed" (when (seq ps) (str ", " (count (filter #{:pass} ps)) " of your " (count ps) " proofs among what passed"))
+                                             ", and " (count (:deferred r)) " process tests have no verdict"
+                                             (when (seq waiting) (str ", your proofs " (str/join ", " waiting) " among them"))
+                                             (some->> (:unjudged r) (str ": ")) ". (deferred) lists them."))
                   (zero? n) "nothing judged: no proof and no test this change reaches"
                   :else (str "green: " n " of " n " passed"))]
            (for [[t fs] (sort-by (comp str key) fails)] (failure t (first fs)))
