@@ -277,6 +277,13 @@
      (let [das-b (data-attr? base data-attrs) das-d (data-attr? db data-attrs)]
        (into [] (filter (comp (content-attr das-b das-d) :a)) diff)))))
 
+(defn content-commit
+  "The commit that stands for main's content at db main: held's, a db of an earlier commit, when no content differs (`content-datoms`), else main's. A commit that moved
+  only records then changes no answer a reader of the content gives, nor its key (docs/render.md#how-the-work-stands). Cost: one descent per content attribute, shared subtrees skipped."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] :seon.host/db] :uuid]}
+  [held main]
+  (d/commit-id (if (and held (empty? (content-datoms held main #{}))) held main)))
+
 (defn touched-keys
   "Every program key whose content may differ between base and any of dbs (`touched-by`, over
   the datoms that differ in the attributes a key's content reads: `content-datoms`). Cost: those

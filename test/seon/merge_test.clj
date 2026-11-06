@@ -436,3 +436,17 @@
            (is (= 1 (count (d/datoms after :avet :ns/name 'app.z))) "one entity for the namespace")
            (is (= 'app.z (:ns (val (first (filter #(= :form (first (key %))) (pm/program-of after ks #{})))))) "the carried form reads it"))
          (finally (d/release bc) (d/delete-branch! conn b)))))))
+
+;; docs/render.md#how-the-work-stands: what a reader of main's content keys on moves when the content does, never on a commit of records
+(deftest a-commit-of-records-leaves-mains-content-commit
+  (ts/test-branch!
+    (fn [_ conn]
+      (d/transact conn ((var-tx "f" "x") @conn))
+      (let [held @conn
+            c0 (d/commit-id held)]
+        (is (= c0 (pm/content-commit nil held)) "none held: main's own")
+        (d/transact conn [{:seon.agent/key "b1/a1" :seon.agent/status :running}])
+        (is (not= c0 (d/commit-id @conn)) "the record moved main's commit")
+        (is (= c0 (pm/content-commit held @conn)) "and no content, so the commit held stands")
+        (d/transact conn ((var-tx "g" "x") @conn))
+        (is (= (d/commit-id @conn) (pm/content-commit held @conn)) "a definition moves it")))))

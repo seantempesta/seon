@@ -1162,7 +1162,7 @@
 
 (defn status
   "How the agent's work on its task stands (a component over ctx and the db): the data seon.context/status makes of its branch db, drawn by
-  `status-hiccup`, the one hiccup the page and the model read, the data kept with it for the turn that decides from it (seon.render/kept-of). It reads main's commit from ctx only when the task merges itself (the merge view), so a
+  `status-hiccup`, the one hiccup the page and the model read, the data kept with it for the turn that decides from it (seon.render/kept-of). It reads main's last content move from ctx only when the task merges itself (the merge view), so a
   move of main redraws it only then. See docs/render.md#how-the-work-stands."
   {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
   [{c :seon.ctx/ctx db :seon.db/db}]

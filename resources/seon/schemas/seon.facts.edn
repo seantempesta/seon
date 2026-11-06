@@ -209,6 +209,9 @@
  ;; main's head and its branch's merge base as it last heard them (seon.agent's state :main, :base), the commits the
  ;; page's branch views read, written by its turn, so a cold build draws what the live page does
  :seon.agent/main-commit :uuid
+ ;; of those mains, the newest whose content (seon.merge/content-datoms) moved: what seon.context/status reads, as a commit that moved
+ ;; none of it, root's note of an agent's status on each eval, changes no answer it gives (docs/render.md#how-the-work-stands)
+ :seon.agent/main-program :uuid
  :seon.agent/base-commit :uuid
  ;; the namespace its REPL is in, as its newest eval left it (seon.repl/record-tx: a datom when it moved), so a cold
  ;; build draws what the live page does; before any, where the REPL starts (seon.context/current-ns)
@@ -236,7 +239,7 @@
                        [:seon.agent/ended-turn {:optional true} :seon.agent/ended-turn]
                        [:seon.agent/error {:optional true} :seon.agent/error] [:seon.agent/waste {:optional true} :seon.agent/waste]
                        [:seon.ctx/pattern {:optional true} :seon.ctx/pattern] [:seon.agent/opened {:optional true} :seon.agent/opened]
-                       [:seon.agent/main-commit {:optional true} :seon.agent/main-commit] [:seon.agent/base-commit {:optional true} :seon.agent/base-commit]
+                       [:seon.agent/main-commit {:optional true} :seon.agent/main-commit] [:seon.agent/main-program {:optional true} :seon.agent/main-program] [:seon.agent/base-commit {:optional true} :seon.agent/base-commit]
                        [:seon.agent/ns {:optional true} :seon.agent/ns]]
  ;; ---- a citation: what an entity cites, an entity of its own (docs/references.md#an-entity-cites) ----
  ;; its content id, "<of> <target>": the citing entity's identity value (a task's :seon.task/id, an agent's

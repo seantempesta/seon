@@ -466,7 +466,7 @@
 (defn retain!
   "Sweep the commit snapshots of the store under conn older than main's newest keep commits, when that many have landed since the last sweep (main's :seon.root/retained),
   counted by the commit graph's generation, never a clock. Kept whole, whatever their age: each branch's head, its merge base with main, and each commit an agent's facts
-  name (:seon.agent/base-commit, :seon.agent/main-commit), which is what a merge and a page read by id. Every datom, a branch's history and as-of reads stay: only reading
+  name (:seon.agent/base-commit, :seon.agent/main-commit, :seon.agent/main-program), which is what a merge and a page read by id. Every datom, a branch's history and as-of reads stay: only reading
   another old commit by its id goes. Root calls it at boot, before any other process exists, so nothing live holds a swept commit, and as its sole writer. Answers
   {:swept :ms :generation}, written on main, or nil when none is due. See docs/storage.md#collection."
   {:malli/schema [:=> [:cat :seon.host/conn pos-int?] [:maybe :map]]}
@@ -492,7 +492,7 @@
                                        (catch clojure.lang.ExceptionInfo e (or (:merge-bases (ex-data e)) []))))
                           (remove #{main} bs))
             named (mapcat (fn [b] (let [h (d/branch-as-db store b)]
-                                    (concat (map :v (d/datoms h :aevt :seon.agent/base-commit)) (map :v (d/datoms h :aevt :seon.agent/main-commit)))))
+                                    (mapcat #(map :v (d/datoms h :aevt %)) [:seon.agent/base-commit :seon.agent/main-commit :seon.agent/main-program])))
                           bs)
             swept @(d/gc-storage conn cutoff {:datahike.gc/keep-commits (into #{} (remove nil?) (concat bases named))})
             r {:swept (count swept) :ms (profile/ms-since t0) :generation generation}]
