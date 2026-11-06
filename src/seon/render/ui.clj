@@ -1293,7 +1293,12 @@
                                                                                                            ;; what its definitions warn (seon.repl's :warnings), in the words the model read
                                                                                                            ["note" :warnings (not-empty (str/join " " (keep :seon.repl/fix (ratom/realize warnings))))]])
           ;; an error answered as a value (a function that returns its error) is a failure too
-          err (or ex (when (contract/error? v) v))]
+          err (or ex (when (contract/error? v) v))
+          ;; opened, it is whole, so there is nothing further to open: the budget is what the text costs
+          opened? (ratom/realize (get-in c (conj at :seon.eval/opened)))
+          budget (fn [x] (if opened? (inc (render/tokens-of x)) (config/value :seon.config.render/value-budget)))
+          ;; a value prints whole by the printer's own mark
+          whole (fn [x] (cond-> x (and opened? (instance? clojure.lang.IObj x)) (vary-meta assoc :seon.print/full true)))]
       [:div
        [:div {:class "flex items-baseline justify-end gap-2 text-2xs text-text-500"}
         (when ms [:span {:class "seon-ms"} (ms-str ms)])
@@ -1302,16 +1307,16 @@
        ;; each by the one render under the value's budget; a cut reads the rest through its key of the handle
        (for [[label k s] printed]
          [:div {:class "seon-row"} [:span {:class (if (#{:err :warnings} k) "text-warning" "muted")} label]
-          (render/html {:budget (config/value :seon.config.render/value-budget) :handle (when handle (list k handle))} s)])
+          (render/html {:budget (budget s) :handle (when handle (list k handle))} (whole s))])
        (if err
          [:div {:class "text-error"} "✗ " (:seon.error/message err)
-          (render/html {:budget (config/value :seon.config.render/value-budget) :handle handle} (dissoc err :seon.error/message))]
+          (render/html {:budget (budget err) :handle handle} (whole (dissoc err :seon.error/message)))]
          ;; a nil beside output is the output's whole answer (clojure.repl/source prints and answers nil)
          (when (and (contains? (:seon.eval/response e) :value) (not (and (nil? v) (seq printed))))
            [:div {:class "seon-row"} [:span {:class "muted"} "→"]
             ;; by the render its record names, when it names one: a value draws as itself (docs/render.md#the-page)
-            (render/html (cond-> {:budget (config/value :seon.config.render/value-budget) :handle handle :db db}
-                           (:seon.eval/schema e) (assoc :as :block :schema (:seon.eval/schema e))) v)]))])))
+            (render/html (cond-> {:budget (budget v) :handle handle :db db}
+                           (:seon.eval/schema e) (assoc :as :block :schema (:seon.eval/schema e))) (whole v))]))])))
 
 (defn proved
   "A prove's run as its eval's tile draws it (the declared html render of :seon.test/proved, from
@@ -1401,7 +1406,7 @@
       (let [turns (ratom/realize (:seon.agent/ended-turn c))
             reason (ratom/realize (:seon.agent/reason c))]
         [:p {:class (if (= :green outcome) "text-success" "text-text-100")}
-         (str (if (= :green outcome) "✓ Done" (str "Ended: " (kname outcome)))
+         (str (case outcome :green "✓ Done" :waiting "Waiting for you" (str "Ended: " (kname outcome)))
               (when (pos? turns) (str " in " turns (if (= 1 turns) " turn" " turns")))
               (when (and reason (not= :green outcome)) (str " · " reason)))])
       (when-let [status (ratom/realize (:seon.agent/status c))]
