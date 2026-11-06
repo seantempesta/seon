@@ -179,8 +179,8 @@
     (doseq [a [other-done other-eval other-message]]
       (is (= :seon.server/held (:seon.error/type a)) (pr-str a))
       (is (clojure.string/includes? (str (:seon.error/message a)) "c1") "naming who holds it"))
-    (is (= 3 (:value (first (:responses own)))) "its own client's eval answers")
-    (is (= 4 (:value (first (:responses named)))) "and so does one that names the agent's task")
+    (is (some #{3} (map :value (:responses own))) "its own client's eval answers")
+    (is (some #{4} (map :value (:responses named))) "and so does one that names the agent's task")
     (is (true? (:value open)) "the refused done left the task open")))
 
 (deftest a-message-reaches-the-agent

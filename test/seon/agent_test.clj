@@ -1271,7 +1271,7 @@
     (is (= ["(my.render/render-ctx)"] (mapv second one)) "the first call showed the page whole, the second, with nothing moved, nothing")
     (is (= ["(my.render/render-ctx)" "(my.render/render-changes)"] (mapv second two)) "a plan changed: one eval of what moved")
     (is (every? #(= % "task") (nth (last two) 2)) (str "holding only the task's part: " (pr-str (last two))))
-    (is (nil? shown) "a render that throws does not stop the one who asked")
+    (is (= "broken render" (:seon.error/message (:ex (first shown)))) "a render that throws does not stop the one who asked: its response is its error")
     (is (str/includes? (str broken-request) "broken render") "and the request reads its error")))
 
 ;; AGENTS.md section 5: the chain holds vars, so what a program defines is what it calls; a delay of fn values kept the old ones, and an edit of wrap-record reached nothing
