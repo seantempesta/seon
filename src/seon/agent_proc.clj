@@ -218,7 +218,7 @@
                                          :route [id :in] :tag (:k m)})
                  st)
       ;; the agent asks its branch's merge gate run (seon.agent/judge!): quiet for as long as an effect it awaits, so no stall
-      :gate (do (step/out! o :to-api {:op :request :req {:op :gate :branch (:branch st) :tests (:tests m)} :route [id :in] :tag (:k m)})
+      :gate (do (step/out! o :to-api {:op :request :req {:op :gate :branch (:branch st) :tests (:tests m) :prio (:prio m 0)} :route [id :in] :tag (:k m)})
                 (-> st (update :gates (fnil conj #{}) (:k m)) (update :fx-out (fnil inc 0))))
       :merged-main (let [st (answer-rid st o (:id m) (:result m))]
                      (step/out! o :events (step/event {:type :merged-main :agent id :result (:result m)}))

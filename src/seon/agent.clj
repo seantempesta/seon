@@ -1079,7 +1079,7 @@
                (when-let [unwatched (sock/signal-at-input! w)]
                  (sock/write-line! w (sedn/encode {:pass 0 :fail 0 :error 1 :reports [{:type :error :message (:seon.error/message unwatched)}]}))
                  (lib/c-exit 0))
-               (intr/exit-at-eof! #(sock/peer-gone? w))
+               (intr/exit-at-eof! #(sock/peer-gone? w) false)
                ;; the test child's own ceiling, from its own heap at its fork: the agent's absolute ceiling
                ;; left a child of a grown agent less room than any test needs (docs/machine.md#what-a-process-owns-in-memory)
                (lib/heap-cap! (+ (lib/bytes-in-heap) (cfg/value :seon.config.agent/heap-extra-bytes)) (cfg/value :seon.config.agent/trip-bytes))
@@ -1306,32 +1306,45 @@
   "A run's whole verdict: prove! :judge (names as it takes them), and once what it ran is green, the process tests it left
   (:deferred, which a fork of this agent cannot run) on the merge gate's checkout through root's one :gate request (seon.fx/run-tests),
   each read from the branch where the gate already judged it at its digest and never asked again. Their verdicts are facts on this
-  branch (seon.proofs/gate-tx), so a red reads on its status and page with a turn to fix it, and the answer counts them. What no gate will run
+  branch (seon.proofs/gate-tx), so a red reads on its status and page with a turn to fix it, and the answer counts them. The task's own
+  proofs and the tests named come first, ahead of other agents' longer runs (:prio); a red among them answers now. The rest, the tests
+  its change only reaches, run when reach? is true, which is when its status is clear and it has nothing else to do (seon.turn/judged);
+  (my.agent/prove), reach? false, leaves them :deferred and says so, so an eval never sits behind them. What no gate will run
   (seon.task/unjudged) stays :deferred, said under :unjudged and on the status. A failed gate, or a changed namespace with no file on
   the branch, is the answer: no verdict. Committed first: the gate reads the committed head, and the verdicts are held at its digests. See
   docs/merging.md#a-merge-runs-what-the-change-reaches."
-  {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat [:set :symbol]] :map]]}
-  ([] (judge! #{}))
-  ([names]
-   (let [r (prove! :judge names)]
-     (if (or (contract/error? r) (empty? (:deferred r)) (seq (proofs/failures r)))
-       r
-       (let [_ (commit!)
-             dbv (db)
-             tk (some->> (:task @state) (task/task dbv))
-             closed (task/unjudged dbv tk (:deferred r))
-             r (cond-> r closed (assoc :unjudged (:why closed)))
-             pull-of (fn [t] (d/pull dbv [:seon.test/digest :seon.test/status :seon.test/failures :seon.test/ticks :seon.test/bytes] [:var/name t]))
-             todo (filterv #(#{nil :deferred} (:seon.test/status (pull-of %))) (remove (set (:tests closed)) (:deferred r)))
-             k (:tx-seq (swap! state update :tx-seq inc))
-             g (when (seq todo) (:result (await-reply k {:op :gate :k k :tests todo})))]
-         (cond
-           (contract/error? g) g
-           (seq (:unread g)) (contract/error :seon.agent/gate-unread #'judge! (str "the gate can't run your process tests: " (str/join "; " (for [u (:unread g)] (str (:ns u) ": " (:reason u))))) {:unread (:unread g)})
-           :else (do (when (:value g)
-                       (transact! (proofs/gate-tx (into {} (map (juxt identity pull-of)) todo) (:value g)))
-                       (commit!))
-                     (with-gate-verdicts r tk))))))))
+  {:malli/schema [:=> [:cat [:set :symbol] :boolean] :map]}
+  [names reach?]
+  (let [r (prove! :judge names)]
+    (if (or (contract/error? r) (empty? (:deferred r)) (seq (proofs/failures r)))
+      r
+      (let [_ (commit!)
+            dbv (db)
+            tk (some->> (:task @state) (task/task dbv))
+            closed (task/unjudged dbv tk (:deferred r))
+            named? (fn [t] (or (task/proof? tk t) (contains? names t) (contains? names (symbol (namespace t)))))
+            pull-of (fn [t] (d/pull (db) [:seon.test/digest :seon.test/status :seon.test/failures :seon.test/ticks :seon.test/bytes] [:var/name t]))
+            open (filterv #(#{nil :deferred} (:seon.test/status (pull-of %))) (remove (set (:tests closed)) (:deferred r)))
+            ;; one stage's tests through the gate, written where the status reads them; its error or nil
+            gate! (fn [tests prio]
+                    (when (seq tests)
+                      (let [k (:tx-seq (swap! state update :tx-seq inc))
+                            g (:result (await-reply k {:op :gate :k k :tests tests :prio prio}))]
+                        (cond
+                          (contract/error? g) g
+                          (seq (:unread g)) (contract/error :seon.agent/gate-unread #'judge! (str "the gate can't run your process tests: " (str/join "; " (for [u (:unread g)] (str (:ns u) ": " (:reason u))))) {:unread (:unread g)})
+                          :else (do (transact! (proofs/gate-tx (into {} (map (juxt identity pull-of)) tests) (:value g)))
+                                    (commit!)
+                                    nil)))))
+            first-err (gate! (filterv named? open) 1)
+            red? (some (fn [t] (= :red (:seon.test/status (pull-of t)))) (filter named? open))
+            rest-tests (when-not (or first-err red?) (filterv (complement named?) open))
+            err (or first-err (when reach? (gate! rest-tests 0)))
+            unjudged (cond closed (:why closed)
+                           (and (seq rest-tests) (not reach?)) "the tests your change reaches run when your status is clear")]
+        (if err
+          err
+          (cond-> (with-gate-verdicts r tk) unjudged (assoc :unjudged unjudged)))))))
 
 ;; ---- the loop ----------------------------------------------------------------------
 

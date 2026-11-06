@@ -91,12 +91,16 @@
   "End this process when its socket to root is closed, whatever it is doing: SIGIO (the
   socket asked for it, seon.sock/signal-at-input!) is taken at the next safe point, as
   root's SIGUSR1 is, and the process exits 0 only when (gone?) peeks EOF; input arriving is
-  the loop's to read. The second source of an interrupt here, beside root's."
-  {:malli/schema [:=> [:cat :seon.host/fn] :boolean]}
-  [gone?]
-  (install-kick* lib/SIGIO (fn [] (profile/aside (fn [] (when (gone?) (lib/c-exit 0)) false))))
-  (when (jolt.host/main-carrier?) (poller/wake-on-signals! [lib/SIGIO]))
-  true)
+  the loop's to read. The second source of an interrupt here, beside root's. wake? (default true): a main carrier's idle loop also
+  waits on the signal. A test child says false: a signal waited on counts as something that can wake the process
+  (jolt.io-poller/awaited?), so the loop stays in kevent and Jolt never tells a test that waits for good; left out, a wait nothing
+  can end throws its typed deadlock in the test. See docs/merging.md#a-test-child-is-a-fork-of-a-live-agent."
+  {:malli/schema [:function [:=> [:cat :seon.host/fn] :boolean] [:=> [:cat :seon.host/fn :boolean] :boolean]]}
+  ([gone?] (exit-at-eof! gone? true))
+  ([gone? wake?]
+   (install-kick* lib/SIGIO (fn [] (profile/aside (fn [] (when (gone?) (lib/c-exit 0)) false))))
+   (when (and wake? (jolt.host/main-carrier?)) (poller/wake-on-signals! [lib/SIGIO]))
+   true))
 
 (defn run
   "(thunk) under its own token, stopped by root's SIGUSR1, once it has run ticks engine ticks, or

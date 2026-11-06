@@ -1305,7 +1305,7 @@
           (fn [{:keys [names eval-root ask]}]
             (let [a (:agent names) ev (comp root-value eval-root)
                   run (fn [code] (ev (str "(:value @(c/submit! sys :" a " " (pr-str code) " {:origin :outside}))")))]
-              (run (str "(ns tt-hang-test (:require [clojure.test :refer [deftest is]])) (deftest hangs (spit " (pr-str pidf) " (str (seon.lib/c-getpid))) (is @(promise)))"))
+              (run (str "(ns tt-hang-test (:require [clojure.test :refer [deftest is]])) (deftest hangs (spit " (pr-str pidf) " (str (seon.lib/c-getpid))) (let [[r w] (seon.sock/socketpair)] (is ((seon.sock/line-reader r)))))"))
               (ev (began-code a "(my.agent/prove '#{tt-hang-test/hangs})"))
               ;; the child has started: its pid is on file
               (ev (str "(loop [] (when-not (.exists (java.io.File. " (pr-str pidf) ")) (recur)))")) 
@@ -1925,6 +1925,15 @@
     (is (= {t :pass} (:results (:value judge-gate))) (pr-str judge-gate))
     (is (nil? (:log (:value judge-gate))) "the judge's gate of the same candidate runs nothing: the same owner holds its verdict")))
 
+(deftest a-test-that-waits-for-good-is-told-and-the-next-agent-goes-on
+  ;; deepseek-run3 (2026-11-06): an agent's own test deref'd a promise nobody delivers. Its test child parked for good at 0% CPU, tick budgets count no sleep,
+  ;; and it held the test service's one slot: 5 of 5 agents idle in observe for 9 minutes. A signal the child waited on (SIGIO, for its
+  ;; agent's death) counted as something that could wake it, so Jolt never told it (seon.intr/exit-at-eof!)
+  (let [t 'seon.problems-test/a-test-that-waits-for-good
+        write "(do (in-ns 'seon.problems-test) (clojure.test/deftest a-test-that-waits-for-good (let [p (promise)] (clojure.test/is (= 1 @p)))) (in-ns 'user) :ok)"
+        [_ proved] (in-agent (fn [_] [write "(let [r (my.agent/prove)] {:proofs (:proofs r) :error (:error r)})"]) {:proofs #{t}})]
+    (is (= {t :error} (:proofs (:value proved))) (pr-str proved))))
+
 (deftest a-gate-that-cant-read-its-candidate-answers
   ;; AGENTS 4 "every wait ends": a :gate's writer refusal comes back to whoever asked, no test run (seon.root/ext-op)
   (let [[r] (in-agent (fn [_] [{:op :eval :agent "root" :code "(:seon.error/type @(seon.root/call! sys {:op :gate :branch :no-such-branch :tests ['a/b]}))"}]))]
@@ -2075,7 +2084,10 @@
   ;; task seon.context/the-context-is-the-agents-evals-and-seons (R1): a reply of prose with no call
   ;; is the agent winding down; the record read only evals and messages, so the wake that
   ;; followed it sent a history without it. It is an assistant message of the next request
-  (let [[_ r] (in-agent (fn [{:keys [ns]}]
+  ;; its script is named in config, as data, so seon.model/scripted is named here for the reach digest: a fix there moved no digest of
+  ;; this test, and its red and green read as flaky at one (2026-11-07)
+  (let [_ #'seon.model/scripted
+        [_ r] (in-agent (fn [{:keys [ns]}]
                           (let [w (str ns "/w")]
                             [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")}
                              {:op :eval :agent "root"

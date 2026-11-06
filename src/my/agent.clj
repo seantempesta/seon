@@ -306,9 +306,9 @@
   run is recorded on main and is one run with any other asker's of this head):
   the task's proofs and every in-process test reaching what the branch changed since the main it
   forked from, each test with a result at its reach digest reused (a red as recorded), not run;
-  given proofs, those tests (a namespace's name, its tests). Once those are green, the process tests it reaches, a proof
-  among them, run on the merge gate's checkout, slower, and the verdict counts them; any that couldn't stay :deferred
-  (with :why each: the process it reaches through which calls, and :unjudged, why they stay), and the verdict says not green. Answers that test run ({:pass :fail :error :reports :ran :reused :ms ...}) with
+  given proofs, those tests (a namespace's name, its tests). Once those are green, the process tests among its proofs and
+  the tests given run on the merge gate's checkout, slower, and the verdict counts them; the process tests it only reaches run when
+  your status is clear, and stay :deferred here (with :why each: the process it reaches through which calls, and :unjudged, why they stay), so the verdict says not green. Answers that test run ({:pass :fail :error :reports :ran :reused :ms ...}) with
   :results {test :pass|:fail|:error} and :proofs (each proof's status: the task's and the given ones,
   :deferred or :none when it has no result), and :unmatched, the given names that name no test (a var that
   is none, a namespace with none: a name that matches nothing must not run silently as 0), printed as its verdict (prove-summary: the schema
@@ -319,7 +319,7 @@
   {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat [:set :qualified-symbol]] :map]]}
   ([] (prove #{}))
   ([proofs]
-   (let [test-run (agent/judge! proofs)]
+   (let [test-run (agent/judge! proofs false)]
      (if (contract/error? test-run)
        test-run
        (let [results (proofs/results test-run)

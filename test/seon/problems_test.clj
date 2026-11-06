@@ -584,6 +584,19 @@
   (is (= ["high" 512] ((juxt :reasoning_effort :max_tokens) (model/request-body (assoc deepseek :reasoning-effort :high :max-tokens 512) req))))
   (is (contract/valid? :seon.model/provider (assoc deepseek :thinking :enabled :reasoning-effort :low))))
 
+(deftest thinking-on-every-assistant-message-says-its-reasoning
+  ;; docs/model.md#thinking-is-off-by-default: DeepSeek answers 400 at the first request otherwise, whose first
+  ;; message after the system's is the page eval Seon ran, which no reasoning made
+  (let [inserted {:role "assistant" :content "Seon ran this." :tool-calls [{:id "eval-e1" :code "(my.render/render-ctx)"}]}
+        answered {:role "tool" :tool-call-id "eval-e1" :content "{}"}
+        own {:role "assistant" :content "" :reasoning "Square it." :reply 1 :tool-calls [{:id "c1" :code "(+ 1 2)"}]}
+        r (assoc req :messages [{:role "system" :content "s"} inserted answered own])
+        reasoning (fn [p] (mapv #(find % :reasoning_content) (:messages (model/request-body p r))))]
+    (is (= [nil [:reasoning_content ""] nil [:reasoning_content "Square it."]]
+           (reasoning (assoc deepseek :thinking :enabled :replay-reasoning true))))
+    (is (= [nil nil nil [:reasoning_content "Square it."]]
+           (reasoning (assoc deepseek :thinking :disabled :replay-reasoning true))) "off, a request stays as it was: nothing added to its bytes")))
+
 (deftest a-reply-carries-what-it-cost-and-an-eaten-reply-is-a-problem
   (testing "content, with the usage DeepSeek reports"
     (let [c (model/parse-reply (clojure.data.json/write-str
