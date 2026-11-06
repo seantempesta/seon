@@ -93,9 +93,11 @@
 (def ^:private divergence-sizes "The sizes divergence's proof measures." [10 30 100])
 
 (defn- on-disk-path
-  "Where divergence's proof keeps its store of size n, named by this process's pid, read at the call: two shards, or two children an agent's test run forked with one image, built and removed one store at one path while both ran, and one read the other's branch (\"Branch already exists\"); a token made at load is the same in every fork."
+  "Where divergence's proof keeps its store of size n, in this process's own directory: two shards' proofs (divergence's here, diff-plan's in
+  seon.program-diff-test) built and removed one store at one path while both ran, and one read the other's branch (\"Branch already exists\").
+  The pid is read here, not at load: an agent's test children are forks of a process that loaded this namespace, so a value made at load is all of theirs."
   {:malli/schema [:=> [:cat pos-int?] :string]}
-  [n] (str (seon.config/checkout) "/target/tmp/divergence-" (seon.lib/c-getpid) "-" n))
+  [n] (str (seon.config/checkout) "/target/tmp/divergence-" (.pid (java.lang.ProcessHandle/current)) "-" n))
 
 (defn on-disk-diverged-of
   "A branch diff's arguments (base, head) on a store on disk of its own (the last resort: Datahike's

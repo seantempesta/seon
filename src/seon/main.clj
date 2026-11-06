@@ -1,6 +1,6 @@
 (ns seon.main
-  "The production entry points of the binary: a root serving its checkout (bin/root's `root`
-  mode) and the checkout's ports (`ports`); every other mode loads the check driver (seon.check,
+  "The production entry point of the binary: a root serving its checkout (bin/root's `root`
+  mode); every other mode loads the check driver (seon.check,
   in test/) from the checkout's source. The binary holds what this namespace requires, so it
   requires every namespace system.edn names a proc in (seon.system resolves them by name at boot)."
   (:refer-clojure :exclude [defn defn-])
@@ -79,13 +79,6 @@
       (end! :stdin-eof))
     (lib/c-exit 0)))
 
-(defn ports
-  "The checkout's ports, server then dashboard, on one line (bin/ports and bin/root read it)."
-  {:malli/schema [:=> [:cat] :any]}
-  []
-  (println (seon.config/value :seon.config.root/server-port) (seon.config/value :seon.config.web/port))
-  (lib/c-exit 0))
-
 (defn- driver!
   "The check driver's -main (seon.check, in test/), loaded
   now from the checkout's source (checkout-roots!), so the release binary holds only the
@@ -96,7 +89,7 @@
   (requiring-resolve 'seon.check/-main))
 
 (defn -main
-  "The binary's modes: `root` (root-serve) and `ports` here, every other one the check
+  "The binary's modes: `root` (root-serve) here, every other one the check
   driver's (driver!), with the checkout's root the parent of the working directory (bin/check
   and bin/root run the binary in target/)."
   {:malli/schema [:=> [:cat [:* :string]] :any]}
@@ -112,7 +105,6 @@
   (let [pp (lib/c-getppid)] (when (> pp 1) (lib/end-with! pp true)))
   (case (first (seon.config/without-overrides args))
     "root" (root-serve (seon.config/without-overrides args))
-    "ports" (ports)
     "seed-program" (let [r (c/seed-program! (second (seon.config/without-overrides args)))]
              (out! (if (seon.contract/error? r) "SEED FAILED " "SEED OK ") (shown r))
              (lib/c-exit (if (seon.contract/error? r) 1 0)))
