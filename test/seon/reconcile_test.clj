@@ -116,6 +116,23 @@
                 (d/db-with (task/boot-tx "boot-1" max-running)))
       (seq extra) (d/db-with extra))))
 
+(deftest who-launched-a-task-hears-how-it-ends
+  ;; docs/agent.md#working-for-a-person: every end tells them, since a launched agent that died can't say so itself
+  (let [db (ts/test-db)
+        id "demo/child"
+        db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "child" :seon.task/kind :whole :seon.task/plan "p"}]))
+        asked (d/db-with db [[:db/add [:seon.task/id id] :seon.task/asked-by :task-parent]])
+        told (fn [db to & more] (r/tell-tx db id (into [[:db/cas [:seon.task/id id] :seon.task/outcome :running to]] more)))]
+    (is (= :task-parent (:seon.message/branch (first (told asked :merged)))) "the message goes to whoever launched it")
+    (is (re-find #"merged to main" (:seon.message/body (first (told asked :merged)))))
+    (is (re-find #"its proof went red" (:seon.message/body (first (told asked :closed {:seon.task/failure {:reason "its proof went red"}})))) "a stop says why")
+    (is (re-find #"waiting" (:seon.message/body (first (told asked :parked {:seon.task/reason "which colour?"})))))
+    (is (empty? (told asked :running)) "a task still working tells nobody")
+    (is (empty? (told db :merged)) "and one no agent launched tells nobody")
+    (is (not= (:seon.message/id (first (told asked :parked)))
+              (:seon.message/id (first (told (d/db-with asked [{:seon.task/id id :seon.task/plan "q"}]) :parked))))
+        "parking again is a new message, which wakes it again")))
+
 (deftest task-state-is-what-happened
   ;; the one derivation of a task's observed state, from the index
   (let [db (db-of diamond :extra (into (merged "a") (concat (work "b" :done) (work "c" :running))))

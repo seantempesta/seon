@@ -4,7 +4,15 @@ This file holds the owner's standing rulings, one entry each: the rule, the owne
 
 ## 2026-11-07 rulings
 
-The owner's rulings of 2026-11-07, on what a merge does by itself and on how proofs grow.
+The owner's rulings of 2026-11-07, on what an agent starts from, on what a merge does by itself and on how proofs grow.
+
+### The default agent chats, and more comes by threads it pulls
+
+Owner, 2026-11-07: "The agent can have a directive to chat with the user and the only tests are to keep responding to their latest message"; "Not giant data dumps, but progressively over time they get the data when they need it". Stated in: [working for a person](agent.md#working-for-a-person).
+
+### No kinds; a keyword may name a template
+
+Owner, 2026-11-07: "in general there are no \"kinds\" and those are generally code smells"; of keywords that map to templates, "that's fine". A template is a map, and choosing one is a merge. Stated in: [a request is one transaction](tasks.md#a-request-is-one-transaction).
 
 ### A merge writes itself out while its tests pass, and approval comes later
 
