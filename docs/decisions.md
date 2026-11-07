@@ -58,6 +58,10 @@ Owner, 2026-11-07, through the question tool: index `default.edn` and `bin/*` no
 
 Owner, 2026-11-07: "I imagined a users branch tracking main just like the agent branches we are launching. It's just a fact that different users will want to keep differetn data in the system, but we could always be merging the functions, schemas, tests, etc to keep everyone at least speaking the same language." Agents' branches merge to the user's branch and then to main, every user branch merges main by itself, and a conflict launches an agent to resolve it. Stated with the users design in [the plan](plan.md).
 
+### A proof is focused
+
+Owner, 2026-11-07: "make sure that all proofs are well written and appropriate for what they are doing. More is not always better. Focused and good at heping determine correctness and the state being done are the focus". Stated in: [testing](testing.md#a-proof-is-focused).
+
 ### A proof starts simple and evolves
 
 Owner, 2026-11-07: "I generally want to start with a simple proof like respond to the user and build up or merge with templates to get more correct testing conditions for what success looks like. It should always be evolving." So a proof that passes without the task's change does not hold a merge; proofs get better as the work teaches what success looks like.
