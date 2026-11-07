@@ -149,6 +149,22 @@
         ;; an agent by its id in this boot or its branch (main/task-x): its chat, the page a person reads
         :else [:chat (keyword s)]))
 
+(defn same-origin?
+  "Whether a request is the dashboard's own page's: true unless its Origin header is present and
+  is not this dashboard's (scheme, host and port are `http://127.0.0.1:<:seon.config.web/port>`,
+  as the listener binds), or its Sec-Fetch-Site says cross-site. A browser always names one of the
+  two on a cross-origin POST; a client that sends neither (nc, a test, an older client) is not a
+  page of another origin and is served as before. See
+  docs/failure-points.md#failure-points-met-without-a-catch-the-edge-answers-data."
+  {:malli/schema [:=> [:cat :map] :boolean]}
+  [req]
+  (let [h (:headers req)
+        origin (some-> (get h "origin") str/lower-case str/trim not-empty)
+        site (some-> (get h "sec-fetch-site") str/lower-case str/trim)]
+    (and (not= "cross-site" site)
+         (or (nil? origin)
+             (= origin (str "http://127.0.0.1:" (config/value :seon.config.web/port)))))))
+
 (defn handler
   "The routes, as an edge in front of the proc's :http in-port."
   {:malli/schema [:=> [:cat :seon.host/chan] :seon.host/fn]}
@@ -193,6 +209,8 @@
           {:status 200 :headers {"Content-Type" "application/edn" "Cache-Control" "no-store"} :body (str (ask! ch {:op :render-stats}))}
           (and (= m :get) (= uri "/web.edn"))
           {:status 200 :headers {"Content-Type" "application/edn"} :body (sedn/encode (ask! ch {:op :stats}))}
+          (and (= m :post) (= uri "/call") (not (same-origin? req)))
+          {:status 403 :headers {"Content-Type" "text/plain"} :body (str "a call is this dashboard's own page's: " (get-in req [:headers "origin"] (get-in req [:headers "sec-fetch-site"])) " is not")}
           (and (= m :post) (= uri "/call"))
           (let [fields (into {} (for [[k v] (form-params (some-> (:body req) slurp))] [(keyword k) v]))
                 args (some-> (get q "args") edn/read-string)
