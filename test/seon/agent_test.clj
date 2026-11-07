@@ -1804,12 +1804,12 @@
            (is (= (jolt.host/runtime-fingerprint) (:seon.tx/runtime (d/entity @store-conn t))))
            (is (nil? (:seon.tx/eval (d/entity @store-conn t))) "written outside any eval: it names none"))
          ;; task seon.ctx/a-change-names-its-eval: a write an eval's code makes names that eval
-         (let [r (repl/eval-string "(seon.agent/transact! [{:note/text \"an eval's\"}])" {"ns" "user" :origin :outside})
+         (let [r (repl/eval-string "(assoc (seon.agent/transact! [{:note/text \"an eval's\"}]) :running (:eval @seon.agent/state))" {"ns" "user" :origin :outside})
                t (:t (:value r))]
            (agent/commit!)
            (is (= ab (:seon.tx/branch (d/entity @store-conn t))) (str "the eval that wrote it: " (:ex r)))
-           (is (some? (:record r)))
-           (is (= (:record r) (:seon.tx/eval (d/entity @store-conn t))) "the eval that wrote it, by its id")
+           (is (some? (:running (:value r))))
+           (is (= (:running (:value r)) (:seon.tx/eval (d/entity @store-conn t))) "the eval that wrote it, by its id")
            (is (nil? (:eval @agent/state)) "and once the eval ends, a write names no eval"))
          (let [r (repl/eval-string "(throw (ex-info \"boom\" {}))" {"ns" "user" :origin :outside})]
            (is (:ex r) "an eval that throws")
