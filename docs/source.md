@@ -154,6 +154,8 @@ The reconciler asks for the write-back after an octopus merge: it reads the chan
 
 ## What isn't in the program yet
 
+This is being moved (task `seon.source/seon-files-move-by-branch`, not on main yet): `default.edn` and `bin/*` become file entities on the mechanism schema resources use, and a running process reads config from its own branch. Until then an edit on disk acts at once on every process that reads the file, and no merge or digest sees it.
+
 Only what `:seon.config.source/dirs` names moves by branch today: `src`, `test` and `resources/seon/schemas`, with the wiki beside them. A script such as `bin/root` or the config file is a plain file: an agent can write it, but a write reaches no branch and no merge, and `(my.branch/changes)` won't list it. Task `seon.source/seon-files-move-by-branch` brings them in, as kinds named for what they're for and not as a filesystem.
 
 ## The next generation
