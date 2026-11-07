@@ -54,7 +54,7 @@
                                  "(:seon.schema/key (my.schema/register! :seon.agent/invalid :string))\n"
                                  "(:seon.schema/key (my.schema/register! :user/qty :int))\n"
                                  "(seon.contract/valid? :user/qty 3)\n"))
-        entity (fn [k] (d/q '[:find (pull ?e [:schema/form :schema/file :schema/source]) . :in $ ?k :where [?e :schema/key ?k]] db k))]
+        entity (fn [k] (d/q '[:find (pull ?e [:schema/form :schema/file]) . :in $ ?k :where [?e :schema/key ?k]] db k))]
     (is (= ["false" ":seon.task/outcome" "true"] (subvec printed 0 3))
         "before: the binary's schema refuses :paused; register! answers its registration; after: the agent's registry accepts it")
     (is (= ":paused" (nth printed 4)) "a function the agent defines next is checked against the registered schema")
