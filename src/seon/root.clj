@@ -571,7 +571,9 @@
       ;; main's health (my.root/problems): the render proc's, kept by what each move of main changed
       ;; (seon.render.proc/health!), brought to (:db m) there and answered by rid at the fold's counts
       :health (let [[st rid] (pend st p :health nil)]
-                (step/out! o [:render :from-web] {:op :health :rid rid :db (:db m)})
+                ;; the fold goes with it: the render proc answers at these counts (seon.problems/with-fold), and keeps
+                ;; it, so the banner, root's context and this answer are one count
+                (step/out! o [:render :from-web] {:op :health :rid rid :db (:db m) :fold (::errors st)})
                 st)
       :shutdown (assoc st :shutdown-p p)
       (cond-> st p (reply! o p (refused 'seon.root/request (str op " is not one of root's requests") {}))))))
@@ -702,8 +704,9 @@
     (case (:op m)
       ;; the test service answered a waiter (seon.prove)
       :prove-answer (deliver-rid st o (:rid m) (:r m))
-      ;; the render proc's health of main (:health), at the counts this api's fold holds
-      :health-answer (deliver-rid st o (:rid m) (if (contract/error? (:r m)) (:r m) (problems/with-fold (:r m) (:db m) (::errors st))))
+      ;; the render proc's health of main (:health): its value, held at the counts this api's fold put it at
+      ;; (the fold it was asked with, and which it keeps), so it is the same count as root's page's
+      :health-answer (deliver-rid st o (:rid m) (:r m))
       ;; what the test service holds, kept as it changes: a stall's evidence names it (stall-task)
       :prove-state (assoc st ::prove (:r m))
       :status (set-agent st o (:agent m) (:set m))
