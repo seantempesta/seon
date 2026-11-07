@@ -1115,6 +1115,24 @@
     (is (str/includes? (str (:reason end)) (str main-test)) "its end names main's failing test")
     (is (str/includes? (str (:seon.task/reason t)) (str main-test)) "and so does the task's reason")))
 
+;; docs/merging.md#main-moved-is-said-at-every-eval, the owner 2026-11-07: an agent never runs old code. A model's turn merged main when it moved; an
+;; outside agent was told and went on running what it had, until it chose to merge. Its reply merges as a turn does
+(deftest an-outside-agents-reply-takes-mains-program
+  (let [has "(some? (resolve 'app.moved-on-main/f))"
+        reply (fn [agent] {:op :eval :agent agent :message-md "" :evals [{:intent "has main's new function?" :code has}]})
+;; a reply's responses hold the page Seon shows it too: the probe's is the one boolean
+        last-value (fn [r] (first (filter boolean? (map :value (:responses r)))))
+        [_ before _ after] (in-agent (fn [{:keys [agent task]}]
+                                     [{:op :attach :task task}
+                                      (reply agent)
+                                      {:op :eval :agent "root"
+                                       :code (str "(let [db @(:conn sys)] @(seon.root/transact-main! sys (seon.program/record-tx db {:id \"app.moved-on-main/(defn f [] 1)\" :src \"(defn f [] 1)\" :ns 'app.moved-on-main :ns-form? false"
+                                                  " :defs [{:var 'app.moved-on-main/f :kind :fn :contract nil}] :declares #{} :methods [] :impls [] :refs #{} :requires #{} :banned #{} :inline-defs #{}})))")}
+                                      (reply agent)])
+                                   (merging))]
+    (is (false? (last-value before)) (pr-str before))
+    (is (true? (last-value after)) (str "the reply after main moved holds main's program: " (pr-str after)))))
+
 (deftest an-outside-agent-with-a-green-proof-finishes
   ;; root (2026-10-23): an outside agent that writes its proof green and hands its task back is
   ;; judged by the end it wrote, and its task finishes, not held

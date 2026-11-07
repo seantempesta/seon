@@ -122,7 +122,7 @@ Root's merges of worktree branches are git merges, batched by hand as above. Seo
 
 ## Main moved is said at every eval
 
-Every `seon_eval` answer an outside agent gets carries one line saying how main differs from its branch, or none when main's head is still its merge base (owner, 2026-10-28: "there are never any surprises"). ```seon.agent/main-line``` makes it from the merge base, the branch and main as the agent last heard it:
+An outside agent's reply, as a model's turn does, merges main in first when main has moved, so an agent never runs old code (owner, 2026-11-07); a conflict is an unmerged entry on its status. A process forked before a pin keeps its binary until root restarts (`bin/update`), when every agent resumes on the new one. Every `seon_eval` answer an outside agent gets carries one line saying how main differs from its branch, or none when main's head is still its merge base (owner, 2026-10-28: "there are never any surprises"), which is what moved since that merge. ```seon.agent/main-line``` makes it from the merge base, the branch and main as the agent last heard it:
 - how many names main changed since the base (```seon.merge/readiness```, the three-way a merge of main runs, so it costs what changed on each side);
 - those of them the branch changed too;
 - those its changed functions call;
