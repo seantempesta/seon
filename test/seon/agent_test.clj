@@ -2476,7 +2476,9 @@
 (deftest a-capped-agent-that-is-messaged-runs-its-allowance
   ;; docs/users.md#messages, docs/turn.md#the-cap: a message wakes an agent whose turns are spent, and the write that starts it raises its
   ;; budget by the wake allowance, so it runs that many turns more and stands at its cap again
-  (let [[_ r] (in-agent (fn [{:keys [ns]}]
+  (let [;; the behaviour is root's, reached across a message (seon.agent-test/a-process-proof-already-green)
+        _ '[seon.reconcile/step]
+        [_ r] (in-agent (fn [{:keys [ns]}]
                           (let [w (str ns "/w")]
                             [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")}
                              {:op :eval :agent "root"
