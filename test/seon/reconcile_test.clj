@@ -515,9 +515,6 @@
     {:proofs #{'p/a} :results {'p/a :pass 'p/m :fail} :main-green #{'p/m} :allowed-red #{} :uncontracted #{}} [[:regression 'p/m]]
     {:proofs #{'p/a} :results {'p/a :pass 'p/o :fail} :main-green #{} :allowed-red #{'p/o} :uncontracted #{}} []
     {:proofs #{'p/a} :results {'p/a :pass 'p/s :fail} :main-green #{} :allowed-red #{} :uncontracted #{}} [[:stray-red 'p/s]]
-    ;; red on main too, at the branch's merge base: main's red, not the work's
-    {:proofs #{'p/a} :results {'p/a :pass 'p/s :fail} :main-green #{} :allowed-red #{} :main-red #{'p/s} :uncontracted #{}} []
-    {:proofs #{'p/a} :results {'p/a :pass 'p/m :fail} :main-green #{'p/m} :allowed-red #{} :main-red #{'p/m} :uncontracted #{}} []
     {:proofs #{'p/a} :results {'p/a :pass} :main-green #{} :allowed-red #{} :uncontracted #{'app/f}} [[:contract-gap 'app/f]]
     {:proofs #{'p/a} :results {'p/a :pass} :main-green #{} :allowed-red #{} :uncontracted #{} :unmerged ["[:var app/f]"]} [[:unmerged nil]]))
 
@@ -785,9 +782,9 @@
         judged (fn [root deferred] (judgment-of (mdb [(decl "a")] :extra (concat (work "a" :done) (work "a-merge" :running) (when root [root])))
                                                 "a-merge" {:end {:outcome :green} :results {(t "a") :pass} :deferred deferred}))
         ;; ... and gated: its outcome :gate, the gate's answer in
-        gated (fn [root rs unread err & [main-red]]
+        gated (fn [root rs unread err]
                 (let [db (mdb [(decl "a")] :extra (concat (work "a" :done) (work "a-merge" :gate :members {:seon.task/deferred #{boots}}) (when root [root])))]
-                  (d/db-with db (#'r/gated (st-of db) "demo/a-merge" rs unread err main-red))))
+                  (d/db-with db (#'r/gated (st-of db) "demo/a-merge" rs unread err))))
         octopus [{:op :octopus-merge :task "demo/a-merge" :members [{:task "demo/a-merge"}]}]]
     (is (= {:outcome :gate :reasons [] :deferred [boots]} (judged gate [boots])) "unrun: gated first")
     (is (= {:outcome :ready :reasons []} (judged gate [])) "none deferred: ready")
@@ -796,10 +793,6 @@
         (is (= :ready (:seon.task/outcome (task/task db "demo/a-merge"))))
         (is (= {boots :pass} (:seon.task/deferred-results (task/task db "demo/a-merge"))))
         (is (= octopus (actions-for db)))))
-    (testing "a test red on main too is main's: the merge goes on, its status recorded for main's own problem"
-      (let [db (gated gate {boots :fail} [] nil #{boots})]
-        (is (= :ready (:seon.task/outcome (task/task db "demo/a-merge"))))
-        (is (= {boots :fail} (:seon.task/deferred-results (task/task db "demo/a-merge"))))))
     (testing "a red, or a run that could not run them (:error), is refused as a red proof is"
       (doseq [s [:fail :error]]
         (let [db (gated gate {boots s} [] nil)

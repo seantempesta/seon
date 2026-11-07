@@ -210,21 +210,6 @@
     (is (= {'seon.root-test/boots :error} (fx/test-results nil found ['seon.root-test/boots]))
         "a run whose plan never ran says nothing of any test")))
 
-(deftest a-red-is-mains-only-when-it-fails-the-same-way
-  ;; docs/merging.md#a-merge-runs-what-the-change-reaches: "also red on main" isn't enough: a change that adds a reason to a test
-  ;; main fails, a flaky repeat, or a :fail against an :error is the candidate's red. Unsure is the agent's
-  (let [t 'seon.root-test/boots
-        a {:type :fail :message "boots" :expected "(= 1 2)" :actual "(not (= 1 2))"}
-        run (fn [& fs] {:results {t :fail} :failures {t (vec fs)}})]
-    (is (= #{t} (fx/main-reds (run a) (run a))) "the same failure, by its data")
-    (is (= #{} (fx/main-reds (run a (assoc a :message "another")) (run a))) "the same test, and the change adds a reason")
-    (is (= #{} (fx/main-reds (run (assoc a :actual "(not (= 1 3))")) (run a))) "the same assertion got another value")
-    (is (= #{} (fx/main-reds (run (assoc a :type :error)) (run a))) "an error is no failure")
-    (is (= #{} (fx/main-reds (run (assoc a :flaky true)) (run a))) "a flaky repeat says nothing")
-    (is (= #{} (fx/main-reds (run a) {:results {t :pass}})) "green on main")
-    (is (= #{} (fx/main-reds {:results {t :fail}} {:results {t :fail}})) "no failures kept on either side: unsure")
-    (is (= #{} (fx/main-reds (run a) nil)) "main's run answered nothing: unsure")))
-
 (deftest a-gate-that-cant-analyze-says-so
   ;; deepseek-run6: every one of 209 tests read :error, the cause only in the log
   (is (= "the gate could analyze none of your tests: No such namespace: agent, at 278:13; your branch rewrote the ns form of seon.cost-test, which may have lost a require"

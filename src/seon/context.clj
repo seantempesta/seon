@@ -683,19 +683,16 @@
                        ;; in an agent's process its index, advanced by what differs; else one built cold
                        (= :agent (:mode @agent/state)) (agent/reconcile-index db)
                        :else (r/index db)))
-        ;; a test red outside the proofs that main was red on too, at the branch's merge base: main's, not a stray
-        ;; red of the work (one scan of the base's verdicts, only while such a red exists)
-        main-red (when (and claims base)
-                   (into (into #{} (keep (fn [[t {fs :failures}]] (when (some :main-red fs) t))) vs)
-                         (keep (fn [[t {st :status}]] (when (and (= :fail st) (= :fail (get results t))) t))) (verdicts base)))
+        ;; a red here that main was red on too, at the branch's merge base: said as a fact, and the agent's to clear all the same (the owner, 2026-11-07)
+        also-on-main (when (and base (some (fn [[_ st]] (= :fail st)) results))
+                       (vec (sort-by str (keep (fn [[t {st :status}]] (when (and (= :fail st) (= :fail (get results t))) t)) (verdicts base)))))
         input (cond-> (if claims
                         (r/done-input claims tid results (set gaps) (mapv #(sedn/encode (:key %)) unmerged) nil plan-before (set deferred))
                         (cond-> {:proofs (set proofs) :kind kind :results results :main-green #{} :allowed-red #{}
                                  :uncontracted (set gaps) :unmerged (mapv #(sedn/encode (:key %)) unmerged) :deferred (set deferred)}
                           (= :design kind) (assoc :plan plan)
                           (and (= :design kind) plan-before) (assoc :plan-before plan-before)))
-                (seq (:caused split)) (assoc :caused (set (:caused split)))
-                (seq main-red) (assoc :main-red main-red))
+                (seq (:caused split)) (assoc :caused (set (:caused split))))
         reasons (r/done-explain input)
         unjudged (when-let [ds (seq (sort-by str (keep (fn [[t {st :status}]] (when (= :deferred st) t)) vs)))]
                    (task/unjudged db t (vec ds)))
@@ -721,6 +718,7 @@
                               (seq fs) (assoc :failures (failures fs))
                               (seq calls) (assoc :calls calls))))}
       (seq blockers) (assoc :refused blockers)
+      (seq also-on-main) (assoc :also-red-on-main also-on-main)
       ;; what no gate will run stays unjudged, said here because it ends no run (seon.task/unjudged)
       unjudged (assoc :unjudged unjudged)
       test-error (assoc :test-run {:failed [(:seon.error/message test-error)]})
