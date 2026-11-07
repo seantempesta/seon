@@ -91,7 +91,7 @@ A commit is one transaction, so a branch is never half-merged, and one behind ma
 The steps below merge one at a time, each usable alone, with today's agents unchanged by proof; each has its task entry, or gets one once its shape has been tried at the REPL.
 
 1. Done: the write check holds a value to its branch's schema, and a merged schema entry brings its attribute's declaration.
-2. Done: an eval's result is its own entity, by content id; old evals read as they are (``seon.db/response-of``). Next: ``seon.repl/an-evals-id-is-its-eid``.
+2. Done: an eval's result is its own entity, by content id; old evals read as they are (``seon.db/response-of``). An eval's id is issued by the store.
 3. Merge bases as two facts, and merge options: ``seon.merge/a-branch-holds-its-merge-bases-as-facts``, ``seon.merge/a-merge-takes-options``. Tell Optimization before changing ``merge-main!``.
 4. A durable mailbox: a message is a fact on main, a channel only wakes, an agent's first act is to merge, and an agent with untaken messages wants a process. ``seon.agent/a-message-is-a-durable-mailbox-and-a-channel-only-wakes``, owned by Web, reviewed by Optimization; ``seon.reconcile/an-agent-with-untaken-messages-wants-a-process`` folds into it.
 5. Users, and input through ``forgive``.

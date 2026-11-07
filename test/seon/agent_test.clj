@@ -939,7 +939,7 @@
   ;; agent repeated cold: the leaves main's commits wrote and the fork server never read (each agent
   ;; decoded them, ~300 KB a leaf), the leaves of what every agent reads (its cited sections, the
   ;; schema entries) evicted from the fork server's full node cache because an agent's reads never
-  ;; reach it, and seon.repl/eval-n! reading every eval main records. The baseline is :fixed; a
+  ;; reach it, and numbering an eval by reading every eval main records. The baseline is :fixed; a
   ;; change that lowers it lowers :fixed (an under past seon.cost/loose is a finding). The node
   ;; cache is small here, so a full cache is reached at this history.
   (let [sizes [10 100 1000]

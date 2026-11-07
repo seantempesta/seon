@@ -1297,3 +1297,59 @@
         (is (= 2 (:seon.result/value two)) "evaluating again moves the ref to the new result")
         (is (not= (:db/id one) (:db/id two)))
         (is (= 1 (:seon.result/value old)) "and the old result stays readable by its hash")))))
+
+(def ^:private eval-facts
+  "An agent's form, a function: evaluates code as a model's call, recorded on its branch, and answers its record's id, its entity and that entity's datoms but its model call, which is on that agent's branch alone."
+  "(fn [code] (let [id (:record (seon.repl/eval-string code {:origin :model})) db (seon.agent/db) e (seon.db/eid db :seon.eval/id id)] {:id id :e e :datoms (vec (for [d (datahike.api/datoms db :eavt e) :when (not= :seon.eval/call (:a d))] [:db/add (:e d) (:a d) (:v d)]))}))")
+
+(deftest two-sessions-evals-merge-whole
+  ;; docs/users.md#what-each-thing-is: an eval's id is its eid, which the store issues once across forks, so two agents forked from one main
+  ;; never name two evals alike, and one's eval written onto the other's branch is one more eval. One value is one result.
+  (let [a (:value (first (at/in-agent [(str "(" eval-facts " \"(+ 40 2)\")")])))
+        [b both] (at/in-agent [(str "(do (def mine (" eval-facts " \"(+ 40 2)\")) mine)")
+                               (str "(do (seon.agent/transact! (quote " (pr-str (:datoms a)) ")) "
+                                    "(mapv #(datahike.api/pull (seon.agent/db) '[:db/id :seon.eval/id :seon.eval/code {:seon.eval/result [:db/id :seon.result/value]}] [:seon.eval/id %]) [" (pr-str (:id a)) " (:id mine)]))")])
+        b (:value b)
+        [x y :as evals] (:value both)]
+    (is (= (str "e" (:e a)) (:id a)) "an eval's id is its eid")
+    (is (= (str "e" (:e b)) (:id b)))
+    (is (not= (:id a) (:id b)) "two agents forked from one main issue two ids")
+    (is (= [(:e a) (:e b)] (mapv :db/id evals)) (pr-str both))
+    (is (= ["(+ 40 2)" "(+ 40 2)"] (mapv :seon.eval/code evals)))
+    (is (= 42 (get-in x [:seon.eval/result :seon.result/value])) (pr-str a x))
+    (is (= (:seon.eval/result x) (:seon.eval/result y)) "the one value is the one result on both")))
+
+(deftest an-evals-id-is-known-before-its-record
+  ;; docs/users.md#what-each-thing-is: the id is issued before the eval runs, so its forms can name it, and an eval started inside another comes after it
+  (let [answers (at/in-agent ["(def running (:eval @seon.agent/state))" "running" "(seon.db/eid (seon.agent/db) :seon.eval/id running)"])
+        [_ id e] (mapv :value answers)
+        [_ eids] (at/in-agent ["(do (def inner (:record (seon.repl/eval-string \"(+ 1 2)\" {:origin :model}))) (def running (:eval @seon.agent/state)) nil)"
+                               "(mapv #(seon.db/eid (seon.agent/db) :seon.eval/id %) [running inner])"])
+        [o i] (:value eids)]
+    (is (= (:record (first answers)) id) "the id its forms read is the id it is recorded by")
+    (is (= (str "e" e) id) "and it is its eid")
+    (is (< o i) "the eval that started first has the lower eid, though the one inside it recorded first")))
+
+(deftest an-eval-evaluated-again-keeps-its-eid
+  ;; docs/users.md#what-each-thing-is: evaluating again keeps the entity and moves its result; an eval recorded before ids were eids, whose number is not its entity's, runs again the same way
+  (let [[_ one two old] (at/in-agent ["(do (def tick (atom 0))
+                                           (def eid-of #(seon.db/eid (seon.agent/db) :seon.eval/id %))
+                                           (def code-of #(:seon.eval/code (datahike.api/entity (seon.agent/db) [:seon.eval/id %])))
+                                           (def id (:record (seon.repl/eval-string \"(swap! tick inc)\" {:origin :outside})))
+                                           (def before (eid-of id))
+                                           nil)"
+                                      "[id before]"
+                                      "(do (seon.repl/again id \"(swap! tick + 10)\") (seon.agent/commit!) [(eid-of id) (code-of id)])"
+                                      "(do (seon.agent/transact! [{:seon.eval/id \"e1\" :seon.eval/agent [:seon.agent/key (:key @seon.agent/state)] :seon.eval/by \"agent\" :seon.eval/code \"(+ 5 5)\" :seon.eval/response {:value 10}}])
+                                           (def was (eid-of \"e1\"))
+                                           (seon.repl/again \"e1\" \"(+ 5 6)\")
+                                           (seon.agent/commit!)
+                                           [was (eid-of \"e1\") (code-of \"e1\")])"])
+        [id before] (:value one)
+        [after code] (:value two)
+        [was still old-code] (:value old)]
+    (is (= (str "e" before) id) "its id is its eid")
+    (is (= before after) "the same entity")
+    (is (= "(swap! tick + 10)" code))
+    (is (= was still) (pr-str old))
+    (is (= "(+ 5 6)" old-code))))
