@@ -518,7 +518,7 @@
   "The namespaces of the attributes that hold the program (its forms, their definitions, the
   schema and the db's own schema): what a merge carries as program, and what a commit must
   touch to move the reach graph (seon.fork-server's :fork)."
-  #{"form" "var" "ns" "method" "impl" "schema" "schema.file" "db" "db.install" "db.type" "db.cardinality" "db.unique"})
+  #{"form" "var" "ns" "method" "impl" "schema" "file" "db" "db.install" "db.type" "db.cardinality" "db.unique"})
 
 (defn moves-program?
   "Whether a commit's resolved ops change the program (an attribute of attr-namespaces): what

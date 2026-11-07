@@ -29,7 +29,7 @@
   arrives in and nothing after it. Seon's platform ops (tests, stats, clone,
   messages, writes) are {:op k} values, handled by `agent-step`."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn- defchecked]] [hasch.core :as hasch] [seon.error :as err] [jolt.nrepl :as nrepl] [seon.intr :as intr] [seon.reader :as reader] [seon.doc :as doc] [seon.agent :as agent] [seon.task :as task] [seon.contract :as contract] [my.db] [my.agent] [my.schema] [malli.registry :as mr]
+  (:require [seon.contract :refer [defn defn- defchecked]] [hasch.core :as hasch] [seon.error :as err] [jolt.nrepl :as nrepl] [seon.intr :as intr] [seon.reader :as reader] [seon.doc :as doc] [seon.fx :as fx] [seon.source :as source] [seon.agent :as agent] [seon.task :as task] [seon.contract :as contract] [my.db] [my.agent] [my.schema] [malli.registry :as mr]
             [seon.source :as source] [seon.program :as program] [jolt.analyzer] [seon.lib :as lib] [seon.print :as print] [seon.print.select :as select] [seon.render :as render] [seon.context :as context] [seon.ctx :as ctx] [seon.web.html :as h] [seon.profile :as profile] [seon.sock :as sock] [seon.step :as step] [clojure.core.async :as a] [clojure.core.async.flow :as flow]
             [jolt.ffi :as ffi] [seon.config :as cfg] [clojure.test] [datahike.api :as d] [seon.db :as pdb] [seon.edn :as sedn]))
 
@@ -836,64 +836,160 @@
                   (assoc :indent [(lead o) (lead s)])))))
           (range n))))
 
+(declare edit!)
+
+(defn- edit-refused
+  "edit! refusing at, nothing changed: the one error map, why and the lines it names (docs/agent.md#changing-a-definition)."
+  {:malli/schema [:=> [:cat [:or :symbol :string] :keyword :string [:maybe [:vector :any]]] :seon.repl/edit-refused]}
+  [at why msg lines]
+  (contract/error :seon.repl/edit-refused #'seon.repl/edit! (str at ": " msg)
+                  (cond-> {:seon.repl/var at :seon.repl/refused-because why} (seq lines) (assoc :seon.repl/lines lines))))
+
+(defn- file-name
+  "The name a path has among the program's files: relative to this checkout or the source root when it is under either, else as given. See docs/agent.md#changing-a-file."
+  {:malli/schema [:=> [:cat :string] :string]}
+  [at]
+  (if (clojure.string/starts-with? at "/")
+    (let [abs (.getCanonicalPath (java.io.File. ^String at))]
+      (or (some (fn [root] (when root
+                             (let [r (str (.getCanonicalPath (java.io.File. ^String root)) "/")]
+                               (when (clojure.string/starts-with? abs r) (subs abs (count r))))))
+                [(cfg/checkout) (get cfg/config :seon.config.source/root)])
+          at))
+    at))
+
+(declare place)
+
+(def ^:private path-note
+  "What the answer to an edit of a plain path adds, by the file's kind: how a file the program holds in parts changes on a branch. See docs/agent.md#changing-a-file."
+  {:schema " To change a schema entry on this branch: (my.schema/register! k form)."})
+
+(defn place-kind
+  "Which kind of place at names: a symbol a :var, a string holding a page's anchor (x.md#heading) a :doc, a file this branch holds whose kind has a place of its own that kind, any other string a :path. See docs/agent.md#changing-a-file."
+  {:malli/schema [:=> [:cat [:or :qualified-symbol :string]] :keyword]}
+  [at]
+  (cond (symbol? at) :var
+        (clojure.string/includes? at ".md#") :doc
+        :else (let [n (file-name at) k (cfg/file-kind n)]
+                (if (and (get-method place k) (some-> (:db @agent/state) (pdb/eid :file/path n))) k :path))))
+
+(defmulti place
+  "The one edge of a text's place, by place-kind: (place at) reads it, as :seon.text/place or the refusal saying why none, and (place p new) writes new over p, answering
+  what the write did under :edited ({kind at}), :seon.text/text when the text it took differs from new, or {:unchanged at}. See docs/agent.md#changing-a-file."
+  {:malli/schema [:function [:=> [:cat [:or :qualified-symbol :string]] [:or :seon.text/place :seon.repl/edit-refused :my.agent/no-var]]
+                  [:=> [:cat :seon.text/place :string] :map]]}
+  (fn ([at] (place-kind at)) ([p _] (place-kind (:seon.text/at p)))))
+
+(defmethod place :var
+  ;; a definition: its recorded source; the new text read by the forgiving reader and evaluated in its namespace through the one REPL path
+  ([at] (if-let [src (my.agent/source-fn at)]
+          {:seon.text/at at :seon.text/text src}
+          (or (some-> (:db @agent/state) (my.agent/no-var at)) (edit-refused at :no-source "no recorded source: define it whole first" nil))))
+  ([{at :seon.text/at src :seon.text/text} new]
+   ;; the forgiving reader's repairs (a delimiter closed at its end, a stray one made a comma), said as a call's are
+   (let [{text :text repairs :repairs} (reader/forgive new)]
+     (if (= text src)
+       {:unchanged at}
+       (let [r (eval-string text {"ns" (namespace at) :origin :model :within (:eval @agent/state)})]
+         (if-let [ex (:ex r)]
+           (throw (ex-info (str (:seon.error/message ex))
+                           (update ex :seon.error/message
+                                   #(str at ": the edited definition does not compile or load, so nothing changed: " %
+                                         ;; the line it names, in the definition as the edit made it
+                                         (when-let [l (:clojure.error/line ex)]
+                                           (str "; at line " l (some->> (:clojure.error/column ex) (str ", column ")) " of the new definition: "
+                                                (pr-str (clojure.string/trim (nth (clojure.string/split-lines text) (dec l) "")))))))))
+           ;; the response as data: its printed text and costliest functions are the outer eval's to print
+           (cond-> (assoc (dissoc r :text :fns :record :handle :ms :ticks :bytes :cost)
+                          :edited {:var at} :seon.text/text text)
+             (seq repairs) (assoc :repaired (context/repaired text repairs)))))))))
+
+(defmethod place :doc
+  ;; a doc: its own block; its page loaded again on this branch with the new text in its place (seon.doc/edit-tx)
+  ([at] (if-let [src (doc/doc-source (agent/db) at)]
+          {:seon.text/at at :seon.text/text src}
+          (edit-refused at :no-source "no doc at this address: (doc address) names the nearest" nil)))
+  ([{at :seon.text/at src :seon.text/text} new]
+   (if (= new src)
+     {:unchanged at}
+     (do (agent/transact! (doc/edit-tx (agent/db) at new)) {:edited {:doc at}}))))
+
+(defmethod place :path
+  ;; any other path: the disk, through the one write of a file (seon.fx/write-file, which keeps its mode); no branch holds it, and the answer says so
+  ([at] (let [f (java.io.File. ^String at) abs (.getCanonicalPath f)]
+          (if (.isFile f)
+            {:seon.text/at at :seon.text/text (slurp abs)}
+            (edit-refused at :no-source (str "no file at " abs ": write it whole first") nil))))
+  ([{at :seon.text/at src :seon.text/text} new]
+   (if (= new src)
+     {:unchanged at}
+     (let [abs (.getCanonicalPath (java.io.File. ^String at))
+           w (fx/write-file {:req {:path abs :text new}})]
+       (if (contract/error? w)
+         w
+         {:edited {:path abs}
+          :seon.text/said (str "Wrote to disk at " abs ": no branch holds this, and no merge carries it."
+                               (path-note (cfg/file-kind (file-name at))))})))))
+
+(defmethod place :script
+  ;; a script this branch holds: its text is the file's fact; a write checked as its interpreter reads it (seon.fx/unreadable), and transacted on the branch
+  ([at] (let [n (file-name at)] {:seon.text/at n :seon.text/text (:file/text (d/entity (agent/db) [:file/path n]))}))
+  ([{at :seon.text/at src :seon.text/text} new]
+   (cond
+     (= new src) {:unchanged at}
+     (fx/unreadable at new) (edit-refused at :unreadable (str "the new text does not read, so nothing changed: " (fx/unreadable at new)) nil)
+     :else (do (agent/transact! (source/file-tx at new))
+               {:edited {:script at}
+                :seon.text/said (str "Changed " at " on this branch: a merge carries it, and the write-back after it writes the file. Nothing on disk moved.")}))))
+
 (defn edit!
-  "Change the definition var sym names by replacing old, exact text that occurs once in its
-  recorded source (`(source sym)`), with new, then evaluating the whole new definition in its
-  namespace through the one REPL path (`eval-string`): it is recorded as program, its contract
-  armed, as a typed defn would be. Given changes, a vector of [old new] pairs, every pair is checked
-  so and all are applied together, then evaluated once: a change that must reach several places at
+  "Change the text at a place by replacing old, exact text that occurs once in it, with new: a
+  definition var sym names (`(source sym)`), a doc's address (its own block) or any other path (the file on disk), place being the one edge
+  where they differ. Given changes, a vector of [old new] pairs, every pair is checked
+  so and all are applied together, then written once: a change that must reach several places at
   once (a loop's bindings and each of its recurs) is one edit, since any of them alone does not
-  compile. The new definition is read by the forgiving reader (seon.reader/forgive) as a call's code is:
-  a delimiter it leaves open is closed at the definition's end, a stray one made a comma, and each repair is the
-  answer's :repaired. Answers that eval's response with :edited, the var and the lines
-  around each change; throws the evaluation's error when the new definition does not compile or load,
+  compile. Answers what the place's write answered with :edited, the place and the lines
+  around each change; throws the evaluation's error when a new definition does not compile or load,
   its message saying nothing changed, so the eval it is called in answers it as its own :ex (an error nested in an edit's value
   could be cut from sight and read as a change that held; a caller
   outside an eval catches it, its ex-data the error map); or
-  :seon.repl/edit-refused, nothing changed: no recorded source, an old not in it (with the lines that
+  :seon.repl/edit-refused, nothing changed: no such place, an old not in it (with the lines that
   hold its first line, ignoring indentation), an old there more than once (each candidate's line), two olds that overlap (:overlap), or an empty old (:empty). Exact text and one occurrence, as file editors converged
-  on (docs/agent.md#changing-a-definition). Given a doc's address (docs/x.md#heading) for sym, the same
-  edit of the doc's own block (seon.doc/doc-source: its heading line and its text), its page loaded again
-  on this branch with the new text in its place (seon.doc/edit-tx), so a doc changes as a definition does;
-  no delimiter is counted in text. Answers {:edited {:doc address :lines ...}} (docs/agent.md#changing-a-doc)."
+  on (docs/agent.md#changing-a-definition, docs/agent.md#changing-a-doc, docs/agent.md#changing-a-file)."
   {:malli/schema [:function
-                  [:=> [:cat [:or :qualified-symbol :string] :string :string] [:or :seon.repl/edit-refused :my.agent/no-var :seon.repl/answer :seon.repl/doc-edited [:map [:unchanged :any]]]]
-                  [:=> [:cat [:or :qualified-symbol :string] [:vector {:min 1} [:tuple :string :string]]] [:or :seon.repl/edit-refused :my.agent/no-var :seon.repl/answer :seon.repl/doc-edited [:map [:unchanged :any]]]]]}
+                  [:=> [:cat [:or :qualified-symbol :string] :string :string] [:or :seon.repl/edit-refused :my.agent/no-var :seon.repl/answer :seon.text/edited :seon.fx/io-error [:map [:unchanged :any]]]]
+                  [:=> [:cat [:or :qualified-symbol :string] [:vector {:min 1} [:tuple :string :string]]] [:or :seon.repl/edit-refused :my.agent/no-var :seon.repl/answer :seon.text/edited :seon.fx/io-error [:map [:unchanged :any]]]]]}
   ([sym old new] (edit! sym [[old new]]))
   ([sym changes]
-   (let [doc? (string? sym)
-         src (if doc? (doc/doc-source (agent/db) sym) (my.agent/source-fn sym))
-         n (count changes)
-         ;; which change a refused edit names, when there are several
-         which (fn [k] (if (< 1 n) (str "change " (inc k) " of " n ": ") ""))
-         refuse (fn [why msg lines] (contract/error :seon.repl/edit-refused #'edit! (str sym ": " msg)
-                                                    (cond-> {:seon.repl/var sym :seon.repl/refused-because why} (seq lines) (assoc :seon.repl/lines lines))))
-         line-of (fn [i] (:at (doc/line-at src i)))
-         lines-at (fn [at] (mapv (fn [i] (let [l (line-of i)] [l (nth (clojure.string/split-lines src) (dec l))])) at))
-         ;; each change checked against the recorded source: its one offset, or why it is refused
-         check (fn [k [old new]]
-                 (let [at (when (seq old) (offsets src old))]
-                   (cond
-                     (empty? old) {:refused (refuse :empty (str (which k) "the old text is empty: give the exact text to replace") nil)}
-                     (empty? at) (let [first-line (clojure.string/trim (first (clojure.string/split-lines (str old " "))))
-                                       cands (vec (for [[i l] (numbered src 1 Long/MAX_VALUE) :when (and (seq first-line) (clojure.string/includes? (clojure.string/trim l) first-line))] [i l]))
-                                       ;; at each line that holds its first line, the one line where old stops matching, and how
-                                       diffs (vec (keep (fn [[i _]] (differs (clojure.string/split-lines src) i (clojure.string/split-lines old))) cands))
-                                       d (first diffs)]
-                                   {:refused (cond-> (refuse :not-found (str (which k) "the old text is not in its source exactly (whitespace counts)"
-                                                                             (if d (str ": at line " (:line d) " old has " (pr-str (:old d)) " and the source " (pr-str (:source d))
-                                                                                        (when-let [[a b] (:indent d)] (str " (" a " leading spaces, the source " b ")")))
-                                                                                 "; (source f) shows it as recorded"))
-                                                             cands)
-                                               (seq diffs) (assoc :seon.repl/differs diffs))})
-                     (next at) {:refused (refuse :ambiguous (str (which k) "the old text occurs " (count at) " times: give more of it, so it is one") (lines-at at))}
-                     :else {:at (first at) :old old :new new})))]
-     (if (nil? src)
-       ;; a name that is no var: the nearest names, as source and callers answer (my.agent/no-var)
-       (if doc?
-         (refuse :no-source "no doc at this address: (doc address) names the nearest" nil)
-         (or (some-> (:db @agent/state) (my.agent/no-var sym)) (refuse :no-source "no recorded source: define it whole first" nil)))
-       (let [cs (map-indexed check changes)
+   (let [p (place sym)]
+     (if-not (:seon.text/at p)
+       p
+       (let [src (:seon.text/text p)
+             n (count changes)
+             ;; which change a refused edit names, when there are several
+             which (fn [k] (if (< 1 n) (str "change " (inc k) " of " n ": ") ""))
+             refuse (partial edit-refused sym)
+             line-of (fn [i] (:at (doc/line-at src i)))
+             lines-at (fn [at] (mapv (fn [i] (let [l (line-of i)] [l (nth (clojure.string/split-lines src) (dec l))])) at))
+             ;; each change checked against the place's text: its one offset, or why it is refused
+             check (fn [k [old new]]
+                     (let [at (when (seq old) (offsets src old))]
+                       (cond
+                         (empty? old) {:refused (refuse :empty (str (which k) "the old text is empty: give the exact text to replace") nil)}
+                         (empty? at) (let [first-line (clojure.string/trim (first (clojure.string/split-lines (str old " "))))
+                                           cands (vec (for [[i l] (numbered src 1 Long/MAX_VALUE) :when (and (seq first-line) (clojure.string/includes? (clojure.string/trim l) first-line))] [i l]))
+                                           ;; at each line that holds its first line, the one line where old stops matching, and how
+                                           diffs (vec (keep (fn [[i _]] (differs (clojure.string/split-lines src) i (clojure.string/split-lines old))) cands))
+                                           d (first diffs)]
+                                       {:refused (cond-> (refuse :not-found (str (which k) "the old text is not in its source exactly (whitespace counts)"
+                                                                                 (if d (str ": at line " (:line d) " old has " (pr-str (:old d)) " and the source " (pr-str (:source d))
+                                                                                            (when-let [[a b] (:indent d)] (str " (" a " leading spaces, the source " b ")")))
+                                                                                     "; read it as it stands"))
+                                                                 cands)
+                                                   (seq diffs) (assoc :seon.repl/differs diffs))})
+                         (next at) {:refused (refuse :ambiguous (str (which k) "the old text occurs " (count at) " times: give more of it, so it is one") (lines-at at))}
+                         :else {:at (first at) :old old :new new})))
+             cs (map-indexed check changes)
              ;; the changes in source order, and two whose old texts overlap
              ordered (sort-by :at (remove :refused cs))
              overlap (first (filter (fn [[x y]] (< (:at y) (+ (:at x) (count (:old x))))) (partition 2 1 ordered)))]
@@ -902,33 +998,19 @@
            overlap (refuse :overlap "two changes' old texts overlap: make them one change, or give each its own text" (lines-at (map :at overlap)))
            :else
            (let [;; applied from the last, so each earlier offset still holds
-                 text (reduce (fn [t {:keys [at old new]}] (str (subs t 0 at) new (subs t (+ at (count old))))) src (reverse ordered))
-                 ;; the forgiving reader's repairs (a delimiter closed at its end, a stray one made a comma), said as a call's are
-                 {text :text repairs :repairs} (if doc? {:text text} (reader/forgive text))]
-           (if (= text src)
-             {:unchanged sym}
-           (let [;; a doc's page is loaded again with the new text in its place; a definition is evaluated
-                 r (if doc?
-                     (do (agent/transact! (doc/edit-tx (agent/db) sym text)) {})
-                     (eval-string text {"ns" (namespace sym) :origin :model :within (:eval @agent/state)}))
-                 k (cfg/value :seon.config.agent/edit-context-lines)
-                 ;; each change's first line in the new text: the lines before it in the source, moved by the earlier changes
-                 starts (second (reduce (fn [[shift acc] {:keys [at old new]}]
-                                          [(+ shift (- (count (filter #{\newline} new)) (count (filter #{\newline} old))))
-                                           (conj acc [(+ (line-of at) shift) new])])
-                                        [0 []] ordered))]
-             (if-let [ex (:ex r)]
-               (throw (ex-info (str (:seon.error/message ex))
-                               (update ex :seon.error/message
-                                       #(str sym ": the edited definition does not compile or load, so nothing changed: " %
-                                             ;; the line it names, in the definition as the edit made it
-                                             (when-let [l (:clojure.error/line ex)]
-                                               (str "; at line " l (some->> (:clojure.error/column ex) (str ", column ")) " of the new definition: "
-                                                    (pr-str (clojure.string/trim (nth (clojure.string/split-lines text) (dec l) "")))))))))
-               ;; the response as data: its printed text and costliest functions are the outer eval's to print
-               (cond-> (assoc (dissoc r :text :fns :record :handle :ms :ticks :bytes :cost)
-                              :edited {(if doc? :doc :var) sym :lines (into [] (comp (mapcat (fn [[from new]] (numbered text (- from k) (+ from (count (filter #{\newline} new)) k)))) (distinct)) starts)})
-                 (seq repairs) (assoc :repaired (context/repaired text repairs)))))))))))))
+                 new-text (reduce (fn [t {:keys [at old new]}] (str (subs t 0 at) new (subs t (+ at (count old))))) src (reverse ordered))
+                 r (place p new-text)]
+             (if-not (:edited r)
+               r
+               (let [text (:seon.text/text r new-text)
+                     k (cfg/value :seon.config.agent/edit-context-lines)
+                     ;; each change's first line in the new text: the lines before it in the source, moved by the earlier changes
+                     starts (second (reduce (fn [[shift acc] {:keys [at old new]}]
+                                              [(+ shift (- (count (filter #{\newline} new)) (count (filter #{\newline} old))))
+                                               (conj acc [(+ (line-of at) shift) new])])
+                                            [0 []] ordered))]
+                 (-> (dissoc r :seon.text/text)
+                     (assoc-in [:edited :lines] (into [] (comp (mapcat (fn [[from new]] (numbered text (- from k) (+ from (count (filter #{\newline} new)) k)))) (distinct)) starts))))))))))))
 
 (defn unrun
   "A model's eval call that never ran, recorded as an eval whose response is error e, why

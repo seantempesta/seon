@@ -57,10 +57,10 @@
 
 (defn- program-file?
   "Is relative path p one of the program's files: what root's import reads of
-  :seon.config.source/dirs (a .clj, or a schema resource: seon.source/schema-resource?), so the
+  :seon.config.source/dirs (a .clj, or a schema resource: seon.config/file-kind), so the
   program a plan reads here is root's, and a test's digest is the same on both sides?"
   [p] (and (some #(str/starts-with? p (str % "/")) (config/value :seon.config.source/dirs))
-           (or (str/ends-with? p ".clj") (source/schema-resource? p))))
+           (or (str/ends-with? p ".clj") (config/file-kind p))))
 
 (defn- changed-paths
   "The program files that differ between git trees a and b of root's repository (git diff

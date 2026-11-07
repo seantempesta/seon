@@ -206,20 +206,61 @@
   {:malli/schema [:=> [:cat :string] [:maybe :symbol]]}
   [text] (second (ns-form text)))
 
-(defn schema-resource?
-  "Is the relative path a schema resource: an .edn file under seon.config/schemas-dir?"
-  {:malli/schema [:=> [:cat :string] :boolean]}
-  [path] (and (str/starts-with? path (str config/schemas-dir "/")) (str/ends-with? path ".edn")))
-
 (defn schema-tx
   "The facts of one schema resource's text at path: the file with its text (write-back's
   base), and each entry as a :schema/key entity with its form, its file, and :schema/source
   (the binary holds it)."
   {:malli/schema [:=> [:cat :string :string] :seon.db/tx-data]}
   [path text]
-  (into [{:schema.file/path path :schema.file/text text}]
+  (into [{:file/path path :file/text text}]
         (for [[k v] (sort-by (comp str key) (sedn/decode text))]
           {:schema/key k :schema/form (binding [*print-namespace-maps* false] (sedn/encode v)) :schema/file path :schema/source true})))
+
+(defn- lead-comment
+  "The lines of text's comment before its first other line, each without its #, the #! line left out: a script's own words on itself. See docs/source.md#a-program-file."
+  {:malli/schema [:=> [:cat :string] [:vector :string]]}
+  [text]
+  (let [ls (take-while #(str/starts-with? % "#") (str/split-lines text))
+        ls (if (some-> (first ls) (str/starts-with? "#!")) (rest ls) ls)]
+    (mapv #(str/trim (subs % 1)) ls)))
+
+(defn- script-tx
+  "The facts of the script at path holding text: the file, and what its lead comment says of it, for reading (docs/source.md#a-program-file)."
+  {:malli/schema [:=> [:cat :string :string] :seon.db/tx-data]}
+  [path text]
+  (let [ls (lead-comment text)]
+    [{:file/path path :file/text text :seon.script/says (str/join "\n" ls)
+      :seon.script/usage (str/join "\n" (filter #(str/starts-with? % path) ls))}]))
+
+(defn- held-text
+  "The text the file at path holds on db: a file of one entry, as a db holds it (docs/source.md#a-program-file)."
+  {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe :string]]}
+  [db path] (:file/text (d/entity db [:file/path path])))
+
+(declare schema-resource-text)
+
+(def ^:private file-kinds
+  "What a kind of file (seon.config/file-kind) differs by, as data: :tx, the facts of its text, and :text, its text as a db holds it. Nothing else in the import, the merge or the write-back
+  asks a file's kind. See docs/source.md#a-program-file."
+  {:schema {:tx #'schema-tx :text #'schema-resource-text}
+   :script {:tx #'script-tx :text #'held-text}})
+
+(defn modes-tx
+  "The facts of modes ({relative path git mode}, the files as the import read them), only where they differ from db. See docs/source.md#a-program-file."
+  {:malli/schema [:=> [:cat :seon.host/db [:map-of :string :string]] :seon.db/tx-data]}
+  [db modes]
+  (vec (for [[p m] (sort modes) :when (not= m (:file/mode (d/entity db [:file/path p])))] {:file/path p :file/mode m})))
+
+(defn modes
+  "{relative path git mode} of the files at paths whose mode db holds, what a write-back commits with its text. See docs/source.md#a-program-file."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :string]] [:map-of :string :string]]}
+  [db paths]
+  (into {} (for [p paths :let [m (:file/mode (d/entity db [:file/path p]))] :when m] [p m])))
+
+(defn file-tx
+  "The facts of the file at path, of a kind the allow-list names, holding text (file-kinds). See docs/source.md#a-program-file."
+  {:malli/schema [:=> [:cat :string :string] :seon.db/tx-data]}
+  [path text] ((:tx (file-kinds (config/file-kind path))) path text))
 
 (defn load-order
   "The Clojure files ({relative path text}) with an ns form, as [ns path text] in the order loading
@@ -238,16 +279,16 @@
 (defn import-tx
   "The facts of files ({relative path text}) as program on db: each namespace's file's forms
   with their exact text and the compiler's account (text-tx), its namespace carrying the
-  file, and each schema resource's entries (schema-tx). Files are analyzed in the order
+  file, and each file the allow-list names (file-tx). Files are analyzed in the order
   loading them would take, each after the files it requires (ties by path), so a namespace
   the process never loaded is set up before a file that requires it. Any other file (no ns
-  form, not a schema resource) is left out."
+  form, not on the allow-list) is left out."
   {:malli/schema [:=> [:cat :seon.host/db [:map-of :string :string]] :seon.db/tx-data]}
   [db files]
   (vec (concat (for [[nsym path text] (load-order files)
                      op (text-tx db nsym text path)]
                  op)
-               (for [[path text] (sort-by key files) :when (schema-resource? path) op (schema-tx path text)] op))))
+               (for [[path text] (sort-by key files) :when (config/file-kind path) op (file-tx path text)] op))))
 
 (defn source-files
   "The files db holds as program: each imported namespace's file (:ns/file) and each schema
@@ -255,12 +296,12 @@
   {:malli/schema [:=> [:cat :seon.host/db] [:vector :string]]}
   [db]
   (vec (sort (into #{} (concat (map :v (d/datoms db :aevt :ns/file))
-                               (map :v (d/datoms db :aevt :schema.file/path))
+                               (map :v (d/datoms db :aevt :file/path))
                                (map :v (d/datoms db :aevt :schema/file)))))))
 
 (def ^:private identities
   "The attributes that name a program entity (seon.facts.edn)."
-  [:form/id :var/name :ns/name :method/key :impl/key :schema/key :schema.file/path])
+  [:form/id :var/name :ns/name :method/key :impl/key :schema/key :file/path])
 
 (def ^:private mark-loaded!
   "Jolt's loader's mark (ldr-mark-loaded!, by namespace name): a require of the namespace answers it loaded."
@@ -315,21 +356,21 @@
                               (for [{:keys [protocol type]} impls] [:impl/key (program/impl-key protocol type)]))))
         accts))
 
-(defn- schema-paths-tx
-  "The facts that make schema resources paths db's as files ({relative path text}) hold
-  them: each file's entries (schema-tx; an entry db holds that no binary does keeps its
+(defn- file-paths-tx
+  "The facts that make the files at paths db's as files ({relative path text}) hold
+  them: each file's facts (file-tx; an entry db holds that no binary does keeps its
   :schema/source as it is), and every entry or file of them no file makes retracted."
   {:malli/schema [:=> [:cat :seon.host/db [:map-of :string [:maybe :string]] [:set :string]] :seon.db/tx-data]}
   [db files paths]
-  (let [ents (concat (for [p paths dt (d/datoms db :avet :schema/file p)] (:e dt)) (keep #(pdb/eid db :schema.file/path %) paths))
+  (let [ents (concat (for [p paths dt (d/datoms db :avet :schema/file p)] (:e dt)) (keep #(pdb/eid db :file/path %) paths))
         bare (into {} (for [e ents :let [x (d/entity db e)] :when (and (:schema/key x) (not (:schema/source x)))]
                         [(:schema/key x) (:schema/form x)]))
         new (vec (for [p (sort paths) :let [t (get files p)] :when t
-                       op (schema-tx p t)]
+                       op (file-tx p t)]
                    (if (and (:schema/key op) (= (:schema/form op) (bare (:schema/key op)))) (dissoc op :schema/source) op)))
-        mk (set (for [op new k [:schema/key :schema.file/path] :let [v (get op k)] :when (some? v)] [k v]))]
+        mk (set (for [op new k [:schema/key :file/path] :let [v (get op k)] :when (some? v)] [k v]))]
     (into (vec (for [e (distinct ents) :let [x (d/entity db e)
-                                             k (if (:schema/key x) [:schema/key (:schema/key x)] [:schema.file/path (:schema.file/path x)])]
+                                             k (if (:schema/key x) [:schema/key (:schema/key x)] [:file/path (:file/path x)])]
                      :when (not (mk k))]
                  [:db/retractEntity e]))
           new)))
@@ -356,7 +397,7 @@
                                  :let [x (d/entity db e) k (some #(when-some [v (get x %)] [% v]) identities)]
                                  :when (not (mk k))]
                              [:db/retractEntity e])
-                           (schema-paths-tx db files paths)
+                           (file-paths-tx db files paths)
                            new)))))
 
 (defn replace-tx
@@ -371,8 +412,8 @@
   (let [read (read-nss files)
         gone (for [dt (d/datoms db :aevt :ns/file) :let [n (:ns/name (d/entity db (:e dt)))] :when (not (contains? read n))] [n nil])]
     (program-tx db (into read gone) files
-                (into (set (filter schema-resource? (keys files)))
-                      (concat (map :v (d/datoms db :aevt :schema/file)) (map :v (d/datoms db :aevt :schema.file/path)))))))
+                (into (set (filter config/file-kind (keys files)))
+                      (concat (map :v (d/datoms db :aevt :schema/file)) (map :v (d/datoms db :aevt :file/path)))))))
 
 (defn file-text
   "Namespace nsym's file as db holds it: its live forms in the order the image loads them
@@ -452,7 +493,7 @@
   {:malli/schema [:=> [:cat :seon.host/db [:map-of :string :string] ifn?] [:map-of :string :string]]}
   [db files loaded?]
   (let [libs (fn [f] (for [c (rest f) :when (and (seq? c) (= :require (first c))) x (rest c)] (if (sequential? x) (first x) x)))]
-    (loop [out files todo (vec (vals files))]
+    (loop [out files todo (vec (for [[p t] files :when (str/ends-with? p ".clj")] t))]
       (if-let [t (peek todo)]
         (let [more (into {} (for [r (some-> (ns-form t) libs) :when (and (symbol? r) (not (loaded? r)))
                                   :let [p (:ns/file (d/entity db [:ns/name r]))] :when (and p (not (contains? out p)))]
@@ -490,7 +531,7 @@
                                          :let [p (:ns/file (d/entity db [:ns/name d]))] :when (and p (not (and (contains? changed p) (nil? (changed p)))))]
                                      [p (or (texts p) (file-text db d))]))
                           [] read))))]
-    (program-tx db read changed (set (filter schema-resource? (keys changed))))))
+    (program-tx db read changed (set (filter config/file-kind (keys changed))))))
 
 (defn tx-of
   "The facts that bring db's program up to date with files ({relative path text}): refresh-tx of them
@@ -598,8 +639,8 @@
   the text holds that db no longer does removed, and new keys added (schema-file-text)."
   {:malli/schema [:=> [:cat :seon.host/db :string] :string]}
   [db path]
-  (let [fe (pdb/eid db :schema.file/path path)
-        base (if fe (:schema.file/text (d/entity db fe)) "{}\n")
+  (let [fe (pdb/eid db :file/path path)
+        base (if fe (:file/text (d/entity db fe)) "{}\n")
         held (sedn/decode base)
         now (into {} (for [dt (d/datoms db :avet :schema/file path) :let [x (d/entity db (:e dt))]]
                        [(:schema/key x) (:schema/form x)]))
@@ -616,13 +657,14 @@
 
 (defn files
   "{relative path text} of the files at paths that db holds as program: a namespace's file
-  (file-text) or a schema resource (schema-resource-text)."
+  (file-text) or a file the allow-list names, by its kind's :text (file-kinds)."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :string]] [:map-of :string :string]]}
   [db paths]
   (into (sorted-map)
         (for [p paths
-              :let [text (if (schema-resource? p)
-                           (schema-resource-text db p)
+              :let [kind (config/file-kind p)
+                    text (if kind
+                           ((:text (file-kinds kind)) db p)
                            (some->> (ns-of-file db p) (file-text db)))]
               :when text]
           [p text])))
@@ -636,14 +678,14 @@
 (defn changed-files
   "The files a merge's changes (seon.merge/three-way's :ours) touch, as db (after them) holds
   them: the file of each namespace whose forms they add, change or remove, the resource of
-  each schema entry they change, and the page of each doc they change (its address's path,
+  each schema entry they change, each script they change, and the page of each doc they change (its address's path,
   drawn by seon.doc/files); sorted relative paths."
   {:malli/schema [:=> [:cat :seon.host/db :seon.merge/changes] [:vector :string]]}
   [db changes]
   (vec (sort (distinct (for [[[k x] [a b]] changes
                              :let [p (case k
                                        :form (ns-file db (:ns (or b a)))
-                                       :schema (:file (or b a))
+                                       (:schema :script) (:file (or b a))
                                        :section (first (str/split x #"#" 2))
                                        nil)]
                              :when p]
