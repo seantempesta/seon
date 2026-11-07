@@ -190,16 +190,11 @@
   "The config in force (the declared HTML render of :seon.config/config), as root wrote it
   on main: every key grouped by its area, its value whole, its unit, the schema's description
   on hover, and the layer it came from (:seon.config/sources, docs/config.md#layers) as text
-  beside it. The layers are opts' (:seon.config/sources), or, for a key holding the value this process's layers resolve to, the layer this process names it (seon.config/in-force)."
+  beside it, when opts names it (:seon.config/sources, root's fact on main)."
   {:malli/schema [:=> [:cat :seon.render/opts :seon.config/config] :any]}
   [opts c]
   (let [prop (fn [k p] (get (contract/properties k) p))
-        in-force (:sources (config/in-force))
-        sources (or (get opts :seon.config/sources)
-                    (into {} (for [[k v] c
-                                   :let [s (get in-force k)]
-                                   :when (and s (= v (get (config/in-force) k v)))]
-                               [k s])))
+        sources (:seon.config/sources opts)
         groups (group-by (comp namespace key) (sort-by (comp str key) c))]
     [:section {:id "t-config" :class "tile wide config"}
      (kicker "config" (str (count c) " keys in force on main · resources/seon/config/default.edn · profile " (name (config/profile))))

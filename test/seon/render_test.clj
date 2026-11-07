@@ -3069,11 +3069,11 @@
       (r/dispose-walk! (get-in st [:root-walk :w]))))))
 
 (clojure.test/deftest the-config-panel-names-each-source
-  ;; task seon.render/config-shows-where-each-value-came-from (docs/config.md#layers): beside each value, the layer it came from: this process's, or the ones it's handed.
-  ;; Reads the process's own layers rather than assuming one, since a test's process may have set any key any way (the agent's first proof went green only where --set had)
-  (let [{:keys [config sources]} (seon.config/in-force)
-        [k layer] (first (filter #(contains? config (key %)) sources))
-        html (h/html (ui/config-panel {} config))]
-    (is (some? k) "this process knows a key's layer")
-    (is (str/includes? html (str "from " layer)) "the panel names this process's layer")
-    (is (str/includes? (h/html (ui/config-panel {:seon.config/sources {:seon.config.agent/max-running "a-handed-layer"}} config)) "from a-handed-layer") "and the layers it's handed")))
+  ;; task seon.render/config-shows-where-each-value-came-from (docs/config.md#layers): beside a value, the layer root recorded for it on main, a fact, so no test depends on the process it runs in
+  (ts/test-branch! (fn [_ conn]
+    (d/transact conn {:tx-data (seon.config/facts (assoc seon.config/config :seon.config.agent/max-running 6) {:seon.config.agent/max-running "--set"})})
+    (let [db @conn
+          sources (:seon.config/sources (d/pull db [:seon.config/sources] [:seon.root/id :root]))
+          html (h/html (ui/config-panel {:seon.config/sources sources} (seon.config/from-db db)))]
+      (is (= "--set" (:seon.config.agent/max-running sources)))
+      (is (str/includes? html "from --set") "the panel draws the layer main records")))))
