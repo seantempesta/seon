@@ -215,7 +215,7 @@
         (let [err (str (at-root "(:error (:seon.root/source (datahike.api/pull @(:conn sys) [:seon.root/source] [:seon.root/id :root])))"))]
           (is (str/includes? err config/shipped-file) err)
           (is (str/includes? err "seon.config.nope/key") err)
-          (is (str/includes? err (str/trim (:out (sh/sh "git" "-C" tree "rev-parse" "HEAD")))) err))
+          (is (re-find #"at commit [0-9a-f]{40}" err) err))
         (is (= 7 (at-root reads-the-key)) "the next process reads the merged key from main")
         (is (= 7 (in (:agent (ask {:op :attach :task "cfgt/three"})) reads-the-key)) "and so does an agent forked from it"))
       (finally

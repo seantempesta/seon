@@ -175,10 +175,10 @@
        (let [bc (d/connect (assoc cfg :branch b))]
          (try
            (d/transact conn (task/start-tx @conn "demo/f" "b1" :a3 {:branch b :model "m" :max-turns 8} 0))
-           (d/transact conn (task/message-tx "m-1" :message "owner" b "check g"))
+           (d/transact conn (task/message-tx "m-1" "owner" [k] "check g" 1000))
            ;; on the branch, which forked before main held the task's start or the message
            (d/transact bc (ts/turn-tx k 1 {}))
-           (d/transact bc (task/message-tx "m-1" :message "owner" b "check g"))
+           (d/transact bc (task/message-tx "m-1" "owner" [k] "check g" 1000))
            (d/transact bc (repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e1" "a3" {:seon.eval/code "(f 2)" :seon.eval/response {:handle 'result/e1 :value 4}}))
            (testing "from root on main: its agents, each agent's task"
              (is (= [{:seon.agent/id :a3 :seon.agent/status :idle :seon.process/_agent [{:seon.process/pid 77 :seon.process/running "(f 2)"}]
@@ -187,12 +187,12 @@
                                                                            {:seon.process/_agent [:seon.process/pid :seon.process/running]}
                                                                            {:seon.task/_agent [:seon.task/id]}]}]
                                                [:seon.root/id :root])))))
-           (testing "the message is to the agent by its branch, on main"
-             (is (= ["check g"] (d/q (quote [:find [?b ...] :in $ ?br :where [?m :seon.message/branch ?br] [?m :seon.message/body ?b]]) @conn b))))
+           (testing "the message is to the agent by its key, on main"
+             (is (= ["check g"] (d/q (quote [:find [?b ...] :in $ ?k :where [?a :seon.agent/key ?k] [?m :seon.message/to ?a] [?m :seon.message/body ?b]]) @conn k))))
            (testing "on the branch: the agent's model calls and the message it took, the agent's evaluations"
              (let [agent (d/pull @bc '[{:seon.model-call/_agent [:seon.model-call/id]} ] [:seon.agent/key k])]
                (is (= [{:seon.model-call/id (str k "/1")}] (:seon.model-call/_agent agent)))
-               (is (= ["m-1"] (d/q (quote [:find [?id ...] :in $ ?br :where [?m :seon.message/branch ?br] [?m :seon.message/id ?id]]) @bc b))))
+               (is (= ["m-1"] (d/q (quote [:find [?id ...] :in $ ?k :where [?a :seon.agent/key ?k] [?m :seon.message/to ?a] [?m :seon.message/id ?id]]) @bc k))))
              (is (= ["e1"] (mapv :seon.eval/id (:seon.eval/_agent (d/pull @bc '[{:seon.eval/_agent [:seon.eval/id]}] [:seon.agent/key k]))))))
            (testing "the message and the agent are one entity on the branch and on main (content ids)"
              (doseq [ref [[:seon.message/id "m-1"] [:seon.agent/key k]]]
@@ -263,3 +263,14 @@
     (let [booted (d/db-with db [{:seon.root/id :root :seon.root/boot "b1" :seon.config.agent/max-running 2}])]
       (is (= :root (first (task/entity-value booted e))))
       (is (= "b1" (:boot (second (task/entity-value booted e))))))))
+
+(deftest a-message-a-fork-inherited-is-still-delivered
+  ;; docs/users.md#messages: a message sent before its agent's branch forked is on the branch with no turn holding it: it still arrives; one a turn holds, removed or not, doesn't again
+  (let [main (d/db-with (ts/test-db) (into [{:seon.agent/key "a"}] (task/message-tx "m1" "sean" ["a"] "first" 1)))
+        forked main
+        placed (d/db-with forked [{:seon.message/id "m1" :seon.message/call {:seon.model-call/id "a/1"}}])
+        removed (d/db-with placed [[:db/retract (:db/id (d/entity placed [:seon.message/id "m1"])) :seon.message/to (:db/id (d/entity placed [:seon.agent/key "a"]))]])]
+    (is (= ["m1"] (map :id (task/undelivered main forked "a"))) "inherited, and no turn has it")
+    (is (= [] (task/undelivered main placed "a")) "a turn has it")
+    (is (= [] (task/undelivered main removed "a")) "removed after, it stays gone")))
+

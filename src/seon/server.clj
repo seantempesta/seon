@@ -235,7 +235,7 @@
    :context {:doc "The request of the task an agent works as a model is sent it now: system prompt, its conversation and its page. Name the agent, or a task (ns/name): the agent working it, else one attached to it now (attach), so one request reads a task's context. wire: the request body as JSON, as a provider is sent it (roles, call ids, tools; a root with no --profile has no model or max_tokens in it). No model is called."
              :args {:agent {:type "string"} :task {:type "string" :description "ns/name, instead of an agent"}
                     :wire {:type "boolean" :description "answer the request body as JSON, not the text"}}}
-   :message {:doc "Send an agent a message (the owner's words): a message on main to the task it works (refused when it works none), which its next turn takes onto its branch and reads, and which wakes a parked session. The page's message bar sends the same request (seon.root/message!)."
+   :message {:doc "Send an agent a message (the owner's words): a message on main to the agent (whether or not its process lives), which its next turn delivers onto its branch and reads, and which wakes a session that waits, with its allowance of turns more. The page's message bar sends the same request (seon.root/message!)."
              :args {:agent {:type "string"} :body {:type "string" :description "what to tell the agent"}
                     :task {:type "string" :description "the agent's task (ns/name): needed only for an agent another session attached"}} :required ["agent" "body"]}
    :write_back {:doc "Sync main's changed files to disk and commit them on the merges branch: every merged task whose files no commit holds. Answers the tasks, the paths and the commit, or what it couldn't."

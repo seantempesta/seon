@@ -95,17 +95,10 @@
 
 (defn inbox
   "The effect outcomes delivered to this agent and not yet taken ({:from :fx :k :kind :body}), left in the inbox as each
-  arrives (handle!'s :fx-reply). Every word to the agent, a person's or another agent's, is a fact on main, which its turn
-  takes (seon.turn/take!), never the inbox. See docs/users.md#messages."
+  arrives (handle!'s :fx-reply). Every message to the agent, a person's or another agent's, is an entity on main, which its turn
+  delivers (seon.turn/deliver!), never the inbox. See docs/users.md#messages."
   {:malli/schema [:=> [:cat] [:vector :map]]}
   [] (:inbox @state))
-
-(defn- session-branch
-  "The branch main names this agent's session by: its agent's :seon.agent/branch, which the store
-  qualifies on a main that is not :db (seon.db/on-main), so (:branch @state) is not it. nil
-  before root recorded its start: then no message is to it."
-  {:malli/schema [:=> [:cat :seon.host/db] [:maybe :seon.agent/branch]]}
-  [main] (some->> (:key @state) (vector :seon.agent/key) (d/entity main) :seon.agent/branch))
 
 (defn heard-main
   "Main's head as the store holds it now, held on the state as what this agent last heard of main
@@ -183,26 +176,12 @@
   [base main]
   (boolean (and base main (not= (d/commit-id base) (d/commit-id main)))))
 
-(defn untaken-entries
-  "The entries main holds to this agent (to its branch) that its branch does not hold yet, in main's order
-  (by transaction, then id): each {:id :kind :from :branch :body}.
-  Delivery is the fact, read here, not the frame root pushes to a live process: a session whose
-  process is gone (parked in an earlier boot, a lost wake, a red verdict on a run whose process
-  ended) is spawned again, and its run takes them from main (design one-derivation 4.1 section 5;
-  the frame alone left such a run with nothing, parked short of main's count, and spawned again).
-  O(the entries to the session's runs)."
-  {:malli/schema [:=> [:cat] [:vector [:map [:id :string] [:kind :seon.message/kind] [:from :string] [:branch :seon.db/branch] [:body :string]]]]}
-  []
-  (let [main (heard-main)
-        b (db)
-        br (session-branch main)]
-    (->> (when br (d/q '[:find ?tx ?id ?kind ?from ?br ?body :in $ ?br
-                          :where [?m :seon.message/branch ?br ?tx] [?m :seon.message/id ?id] [?m :seon.message/from ?from] [?m :seon.message/body ?body]
-                          [(get-else $ ?m :seon.message/kind :message) ?kind]]
-                        main br))
-         (remove (fn [[_ id]] (d/entity b [:seon.message/id id])))
-         (sort-by (juxt first second))
-         (mapv (fn [[_ id kind from br body]] {:id id :kind kind :from from :branch br :body body})))))
+(defn undelivered
+  "The messages main holds to this agent that its branch does not hold yet (seon.task/undelivered, which says how). Main is read only
+  here, through `heard-main`: where messages live is this one read. Delivery is the fact, read here, not a frame root pushes to a
+  live process: a process spawned again reads what came while none lived. See docs/users.md#messages."
+  {:malli/schema [:=> [:cat] [:vector [:map [:id :string] [:from :string] [:body :string] [:sent-ms :int]]]]}
+  [] (task/undelivered (heard-main) (db) (:key @state)))
 
 (defn untaken-facts
   "The transaction that copies onto this branch what main holds and its branch does not, of its
@@ -225,18 +204,17 @@
   [] (or (:seon.agent/turn (d/entity (db) [:seon.agent/key (:key @state)])) 0))
 
 (defn own-message-tx
-  "Message mid of kind from from (to this agent) as this agent's branch records it, taken at turn n: the one message fact
-  (seon.task/message-tx) naming the agent that took it (:seon.message/agent: its record's messages) and the turn's model call (:seon.message/call).
-  See docs/turn.md#the-turn-is-a-number."
-  {:malli/schema [:=> [:cat :string :seon.message/kind :string [:maybe :seon.db/branch] :any nat-int?] :seon.db/tx-data]}
-  [mid kind from branch body n]
-  (update (task/message-tx mid kind from branch body) 0 assoc :seon.message/agent {:seon.agent/key (:key @state)} :seon.message/call (task/call-ref (:key @state) n)))
+  "Message mid from from, sent at sent-ms, delivered to this agent at turn n: the one message entity (seon.task/message-tx) as this agent's branch holds it, `to` its own ref only, and
+  the turn's model call (:seon.message/call). See docs/turn.md#the-turn-is-a-number."
+  {:malli/schema [:=> [:cat :string :string :any :int nat-int?] :seon.db/tx-data]}
+  [mid from body sent-ms n]
+  (update (task/message-tx mid from [(:key @state)] body sent-ms) 0 assoc :seon.message/call (task/call-ref (:key @state) n)))
 
 (defn entries-tx
-  "The transaction that writes entries (untaken-entries) on this branch, taken at turn n: the same facts root
-  wrote on main, which their reader takes by writing them (own-message-tx)."
+  "The transaction that writes entries (undelivered) on this branch, delivered at turn n: the entity root wrote on main, with this agent's ref
+  and the turn (own-message-tx)."
   {:malli/schema [:=> [:cat [:sequential :map] nat-int?] :seon.db/tx-data]}
-  [entries n] (into [] (mapcat (fn [{:keys [id kind from branch body]}] (own-message-tx id kind from branch body n))) entries))
+  [entries n] (into [] (mapcat (fn [{:keys [id from body sent-ms]}] (own-message-tx id from body sent-ms n))) entries))
 
 (defn taken!
   "The first n entries of the inbox (effect outcomes, which no model turn reads) leave it at a turn's take (seon.turn/take!). nil."
@@ -414,24 +392,25 @@
 
 ;; ---- effects (seon.fx, worktree session FX1): root's owner procs, through the agent's proc ---
 
-(defn take-main!
-  "Take what main holds for this agent onto its branch, committed, as turn n's: its entries
-  (untaken-entries) and the facts of its own entities (untaken-facts). The one take, a turn's
-  (seon.turn/take!) and its code's (messages). Answers the entries taken."
+(defn deliver!
+  "Bring what main holds for this agent onto its branch, committed, as turn n's: its messages (undelivered) and the facts of
+  its own entities (untaken-facts). The one delivery, a turn's (seon.turn/deliver!) and its code's (messages). Answers the
+  messages delivered. See docs/users.md#messages."
   {:malli/schema [:=> [:cat nat-int?] [:vector :map]]}
   [n]
-  (let [es (untaken-entries)
+  (let [es (undelivered)
         tx (into (untaken-facts) (entries-tx es n))]
     (when (seq tx) (transact! tx))
     (commit!)
     es))
 
 (defn messages
-  "The words to this agent not yet taken, taken (take-main!, as a turn takes them, at the turn in force: `turn-now`: the facts on
-  main to its branch, another agent's sends included), then the effect outcomes of the inbox. Its reader is the code that read them."
+  "The messages to this agent not yet delivered, delivered (deliver!, as a turn delivers them, at the turn in force: `turn-now`: the entities on
+  main to it, another agent's sends included), then the effect outcomes of the inbox. Delivered, a message stays in `@ctx` until the agent
+  removes it (`(swap! ctx update :messages dissoc e)`), and is not delivered again. See docs/users.md#messages."
   {:malli/schema [:=> [:cat] [:vector :map]]}
   []
-  (let [es (take-main! (turn-now))]
+  (let [es (deliver! (turn-now))]
     (let [[old _] (swap-vals! state assoc :inbox [])] (into es (:inbox old)))))
 
 (def ^:dynamic *fx-stub*

@@ -227,8 +227,6 @@
  :seon.agent/boot :string
  :seon.agent/started-ms :int
  :seon.agent/ended-ms :int
- ;; the messages to its branch it had taken when root last judged it (seon.reconcile/judge-tx): main holding more wakes it once parked
- :seon.agent/taken :int
  ;; a test run that failed as a whole (its fork refused, a namespace did not load): the error as data (its type, message and
  ;; data keys), written on the agent's branch by its turn (seon.turn/observe) and retracted when a run answers;
  ;; present only while it is so (seon.context/status)
@@ -267,7 +265,7 @@
                      [:seon.eval/response :seon.eval/response] [:seon.eval/result {:optional true} :seon.eval/result] [:seon.eval/opened {:optional true} :seon.eval/opened]]
  ;; an entity's record (seon.ctx, :seon.ctx/pattern: Datahike's pull syntax as data, docs/ctx.md#the-pattern;
  ;; its joins are the page walk's units, seon.render/units), each member rendered by its own schema's render
- :seon.db/agent-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.agent/id :seon.agent/status :seon.agent/branch :seon.agent/description] :seon.ctx/pattern [* {[:seon.agent/agents :as :started] [:db/id]} {[:seon.agent/task :as :task] :seon.task/task-fact} {[:seon.agent/system :as :system] [:db/id]} {[:seon.model-call/_agent :as :calls] [:seon.model-call/id :seon.model-call/n :seon.model-call/origin :seon.model-call/reply :seon.model-call/reasoning :seon.model-call/finish :seon.model-call/truncated :seon.model-call/error {[:seon.eval/_call :as :evals] [:db/id]} {[:seon.message/_call :as :messages] [:db/id]}]} {[:seon.eval/_agent :as :evals] [*]} {[:seon.message/_agent :as :messages] [*]} {[:seon.cite/_of :as :cites] :seon.cite/cite-fact} {[:seon.search/_of :as :searches] :seon.search/search-fact}] :seon.render/html seon.render.ui/agent}
+ :seon.db/agent-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.agent/id :seon.agent/status :seon.agent/branch :seon.agent/description] :seon.ctx/pattern [* {[:seon.agent/agents :as :started] [:db/id]} {[:seon.agent/task :as :task] :seon.task/task-fact} {[:seon.agent/system :as :system] [:db/id]} {[:seon.model-call/_agent :as :calls] [:seon.model-call/id :seon.model-call/n :seon.model-call/origin :seon.model-call/reply :seon.model-call/reasoning :seon.model-call/finish :seon.model-call/truncated :seon.model-call/error {[:seon.eval/_call :as :evals] [:db/id]} {[:seon.message/_call :as :messages] [:db/id]}]} {[:seon.eval/_agent :as :evals] [*]} {[:seon.message/_to :as :messages] [*]} {[:seon.cite/_of :as :cites] :seon.cite/cite-fact} {[:seon.search/_of :as :searches] :seon.search/search-fact}] :seon.render/html seon.render.ui/agent}
                        [:seon.agent/key :seon.agent/key] [:seon.user/name {:optional true} :seon.user/name] [:seon.agent/agents {:optional true} :seon.agent/agents] [:seon.agent/id {:optional true} :seon.agent/id] [:seon.agent/system {:optional true} :seon.agent/system]
                        [:seon.agent/root {:optional true} :seon.agent/root] [:seon.agent/branch {:optional true} :seon.agent/branch]
                        [:seon.agent/status {:optional true} :seon.agent/status]
@@ -275,7 +273,7 @@
                        [:seon.agent/task {:optional true} :seon.agent/task] [:seon.agent/max-turns {:optional true} :seon.agent/max-turns] [:seon.agent/turn {:optional true} :seon.agent/turn]
                        [:seon.agent/model {:optional true} :seon.agent/model] [:seon.agent/holder {:optional true} :seon.agent/holder]
                        [:seon.agent/boot {:optional true} :seon.agent/boot] [:seon.agent/started-ms {:optional true} :seon.agent/started-ms]
-                       [:seon.agent/ended-ms {:optional true} :seon.agent/ended-ms] [:seon.agent/taken {:optional true} :seon.agent/taken]
+                       [:seon.agent/ended-ms {:optional true} :seon.agent/ended-ms]
                        [:seon.agent/test-error {:optional true} :seon.agent/test-error]
                        [:seon.agent/outcome {:optional true} :seon.agent/outcome] [:seon.agent/reason {:optional true} :seon.agent/reason]
                        [:seon.agent/ended-turn {:optional true} :seon.agent/ended-turn]
@@ -530,29 +528,22 @@
                 [:seon.tx/branch {:optional true} :seon.tx/branch]
                 [:seon.tx/eval {:optional true} :seon.tx/eval]
                 [:seon.tx/merged {:optional true} :seon.tx/merged]]
- ;; a message between root and an agent, as a fact on the sender's branch: root's on main, an
- ;; agent's reply on its own; the union of every branch's history joins a conversation in one
- ;; query (seon.union). from and to name a task's agent (its branch),
- ;; "root", or "owner" (the page's message bar and the server's :message op, written by root):
- ;; an agent id starts again every boot, a run's names one worker for good. The agent that
- ;; takes a message writes the same fact on its own branch, and its turn's basis names it by id.
+ ;; a message, one entity read by everyone it is to (docs/users.md#messages): written on main by root's writer at the send,
+ ;; and on each recipient's branch whole when its next act delivers it (seon.agent/deliver!). from names a sender: an agent's
+ ;; key, "root" or "owner"; to names its recipients by agent entity, a ref each, and a recipient's branch holds its own ref
+ ;; only: removing the message from a ctx retracts that ref (the entity stays, so it is not delivered again)
  :seon.message/id [:and {:seon.db/identity true :seon.db/content-id true} :string]
  :seon.message/from [:and {:seon.db/index true} :string]
- ;; the agent it is to, by its branch: the agent's identity across boots and wakes (task
- ;; seon.agent/the-agent-is-the-unit-not-the-run, A2)
- :seon.message/branch [:and {:seon.db/index true} :seon.db/branch]
- ;; the agent that took it (written by the turn that takes it, seon.agent/entries-tx)
- :seon.message/agent [:and {:seon.db/index true} :seon.db/ref]
- ;; the model call of the turn that read it: the turn a model turn that takes it (seon.turn/take!) or the agent's code (seon.agent/messages)
+ :seon.message/to [:set {:seon.db/index true} :seon.db/ref]
+ ;; when root's writer recorded it (ms): it orders and decides nothing (docs/clocks.md)
+ :seon.message/sent-ms :int
+ ;; the model call of the turn that read it: the turn a model turn that takes it (seon.turn/deliver!) or the agent's code (seon.agent/messages)
  ;; takes it under; the loop's own messages (seon.turn/tell-error!) the next turn's (docs/turn.md#the-turn-is-a-number)
  :seon.message/call :seon.db/ref
  :seon.message/body [:string]
- ;; what an entry is (design one-derivation 4.1 section 5): a person's words (:message), root's at a
- ;; stage boundary (:stage), the judge's verdict with its reasons (:verdict); each wakes its session
- :seon.message/kind [:and {:seon.db/index true} [:enum :message :stage :verdict]]
  :seon.message/fact [:map {:seon.db/attributes true :seon.render/html seon.render.ui/message} [:seon.message/id :seon.message/id] [:seon.message/from :seon.message/from]
-                     [:seon.message/branch {:optional true} :seon.message/branch] [:seon.message/agent {:optional true} :seon.message/agent] [:seon.message/call {:optional true} :seon.message/call] [:seon.message/body :seon.message/body]
-                     [:seon.message/kind {:optional true} :seon.message/kind]]
+                     [:seon.message/to {:optional true} :seon.message/to] [:seon.message/sent-ms {:optional true} :seon.message/sent-ms]
+                     [:seon.message/call {:optional true} :seon.message/call] [:seon.message/body :seon.message/body]]
  ;; ---- written by an agent on its own branch; they reach main with its merge ----
  ;; (my.task/status) asked before any turn of this process observed its task: why, and what runs its proofs
  :seon.turn/not-observed [:and :seon.error/base [:map [:seon.error/type [:= :seon.turn/not-observed]]]]

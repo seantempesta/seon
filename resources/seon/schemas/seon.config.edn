@@ -53,6 +53,8 @@
   [:seon.config.agent/max-running :seon.config.agent/max-running]
   [:seon.config.agent/cites :seon.config.agent/cites]
   [:seon.config.agent/max-turns :seon.config.agent/max-turns]
+  ;; optional while a root can boot on a store whose config entries were stated before this key (docs/config.md#a-process-holds-its-branchs-config)
+  [:seon.config.agent/wake-turns {:optional true} :seon.config.agent/wake-turns]
   [:seon.config.agent/cwd :seon.config.agent/cwd]
   [:seon.config.agent/inbox-size :seon.config.agent/inbox-size]
   [:seon.config.agent/trip-bytes :seon.config.agent/trip-bytes]

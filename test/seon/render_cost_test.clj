@@ -297,8 +297,8 @@
                                              {:seon.eval/call-id (str "c-" id) :seon.eval/call (seon.task/call-ref k (inc i)) :seon.eval/code (str "(inc " i ")")
                                               :seon.eval/response {:handle (symbol "result" id) :value {:step i}}})
                         (when (zero? (mod i 3))
-                          (update (seon.task/message-tx (str "mm-" i) :message "owner" :b (str "How is step " i "?")) 0 assoc
-                                  :seon.message/agent {:seon.agent/key k} :seon.message/call (seon.task/call-ref k (inc i)))))))
+                          (update (seon.task/message-tx (str "mm-" i) "owner" [k] (str "How is step " i "?") 1000) 0 assoc
+                                  :seon.message/call (seon.task/call-ref k (inc i)))))))
         base (reduce d/db-with (ts/test-db) [[{:seon.root/id :root :seon.root/boot "b1"}] (seon.task/agent-tx "b1" :a1 {:status :busy :branch :b})])
         db (reduce (fn [db i] (d/db-with db (vec (turn i)))) base (range (dec n)))
         c (seon.ctx/build db (seon.db/eid db :seon.agent/key k) :b)
@@ -520,7 +520,7 @@
                          :seon.eval/call (assoc (seon.task/call-ref k (inc i)) :seon.model-call/origin :model :seon.model-call/reply (str "Trying " i "."))
                          :seon.eval/code (str "(f " i ")") :seon.eval/response {:handle (symbol "result" (str "p" n "e" i)) :value (vec (range 5)) :ns 'user} :seon.eval/call-id (str "c" i) :seon.eval/intent (str "Step " i ".")}])
       (when (even? i)
-        (d/transact conn (update (seon.task/message-tx (str "p" n "m" i) :message "user" (keyword (str "b-p" n)) (str "note " i)) 0 assoc :seon.message/agent {:seon.agent/key k} :seon.message/call (seon.task/call-ref k (inc i))))))
+        (d/transact conn (update (seon.task/message-tx (str "p" n "m" i) "user" [k] (str "note " i) 1000) 0 assoc :seon.message/call (seon.task/call-ref k (inc i))))))
     (let [db @conn a (:db/id (d/entity db [:seon.agent/key k]))]
       (into [(:tree (seon.ctx/build db a (:seon.agent/branch (d/entity db a)))) seon.ctx/changes db (seon.render/declared-var :seon.render/render-ctx)] (some-> *sels* vector)))))
 

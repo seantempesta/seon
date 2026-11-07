@@ -36,7 +36,7 @@
   [i]
   (let [t (inc i) call #(seon.task/call-ref "b/a1" t)]
     (cond-> [{:seon.eval/id (str "e" i) :seon.eval/call (assoc (call) :seon.model-call/origin :model :seon.model-call/reply (str "Reading the rows of part " i "."))}]
-      (even? i) (conj {:seon.message/id (str "m" i) :seon.message/agent {:seon.agent/key "b/a1"} :seon.message/call (call) :seon.message/from "owner" :seon.message/body (str "How is part " i "?")}))))
+      (even? i) (conj {:seon.message/id (str "m" i) :seon.message/to [{:seon.agent/key "b/a1"}] :seon.message/call (call) :seon.message/from "owner" :seon.message/body (str "How is part " i "?")}))))
 
 (defn records-of
   "The input at n of seon.context/request: the agent's ctx value over session-of's db, as a request reads it, each turn production-shaped (`turn-tx`)."

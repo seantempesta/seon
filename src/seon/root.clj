@@ -276,38 +276,39 @@
     (-> st (to-agent o id {:op :write :msg {:op :evals :by "root" :evals es}}) (update ::inserting dissoc id))
     st))
 
-(defn- agent-branch
-  "The branch agent id's messages are to, as a live agent holds it, else as main records it for the newest agent of that id in
-  this boot (seon.task/this-boots): its process is not needed. nil when neither names one. See docs/users.md#messages."
-  {:malli/schema [:=> [:cat :seon.root/api-state :seon.agent/id] [:maybe :seon.db/branch]]}
+(defn- agent-key-of
+  "The key of agent id, whom messages are to: a live agent's, else the newest agent of that id in this boot that main records
+  (seon.task/this-boots): its process is not needed. nil when neither names one. See docs/users.md#messages."
+  {:malli/schema [:=> [:cat :seon.root/api-state :seon.agent/id] [:maybe :string]]}
   [st id]
-  (or (get-in st [:agents id :branch])
+  (or (when (get-in st [:agents id]) (or (get-in st [:view :agents id :key]) (task/agent-key (:boot st) id)))
       (let [db @(:conn st)]
         (->> (d/datoms db :avet :seon.agent/id id)
              (map #(d/entity db (:e %)))
-             (filter #(and (:seon.agent/branch %) (task/this-boots db %)))
-             (sort-by :db/id) last :seon.agent/branch))))
+             (filter #(task/this-boots db %))
+             (sort-by :db/id) last :seon.agent/key))))
 
 (defn- message-write
-  "The writer's request for one message: from `from` (a keyword or string), of kind, to the agent on branch br, its body, a fact
-  on main (seon.task/message-tx) that the writer syncs before it answers dest. The one write of a person's message and an
-  agent's send. See docs/users.md#messages."
-  {:malli/schema [:=> [:cat :seon.root/api-state :any :seon.message/kind :seon.db/branch :any :map] :map]}
-  [st from kind br body dest]
-  {:op :tx :branch :db :flush? true :dest dest
-   :tx-data (task/message-tx (str "m-" (random-uuid)) kind (name from) (pdb/off-main (pdb/conn-main (:conn st)) br) body)})
+  "The writer's request for one message: from `from` (a keyword or string) to the agents with keys tos, its body: the one message entity
+  on main (seon.task/message-tx, sent now), which the writer syncs before it answers dest; each recipient is then woken (back-op: the
+  writer's answer is what wakes, never a commit). The one write of a person's message and an agent's send. See docs/users.md#messages."
+  {:malli/schema [:=> [:cat :seon.root/api-state :any [:sequential :string] :any :map] :map]}
+  [st from tos body dest]
+  {:op :tx :branch :db :flush? true :dest (assoc dest :wake (vec tos))
+   :tx-data (task/message-tx (str "m-" (random-uuid)) (name from) tos body (System/currentTimeMillis))})
 
 (defn- deliver-message
-  "An agent's send m ({:from :to [id ...] :body}) written as a fact on main for each agent it names, to the branch main
-  records for that agent, live or not (message-write). An id no agent of this boot has is a problem against the sender,
-  as a refused write is (an agent's send has no answer to carry it)."
+  "An agent's send m ({:from :to [id ...] :body}) written as one message entity on main to every agent it names, live or not
+  (message-write). An id no agent of this boot has is a problem against the sender, as a refused write is (an agent's send has no
+  answer to carry it); the others still get it."
   {:malli/schema [:=> [:cat :seon.root/api-state :seon.host/volatile :map] :seon.root/api-state]}
   [st o m]
-  (reduce (fn [st id]
-            (if-let [br (agent-branch st id)]
-              (do (step/out! o :to-writer (message-write st (:from m) :message br (:body m) {:agent-facts [(:from m)]})) st)
-              (problem st (err/occurrence (gone id (str "no agent " id " on main: the send is not written")) :agent {:agent (:from m)} (System/currentTimeMillis)))))
-          st (:to m)))
+  (let [keys+ids (for [id (:to m)] [id (agent-key-of st id)])
+        ks (vec (keep second keys+ids))]
+    (when (seq ks) (step/out! o :to-writer (message-write st (:from m) ks (:body m) {:agent-facts [(:from m)]})))
+    (reduce (fn [st [id k]]
+              (if k st (problem st (err/occurrence (gone id (str "no agent " id " on main: the send is not written")) :agent {:agent (:from m)} (System/currentTimeMillis)))))
+            st keys+ids)))
 
 (defn- spawn-failed
   "Agent id's spawn or fork refused (why, and its cause when another proc refused it): the
@@ -518,19 +519,15 @@
                     ;; its page's parts drawn by its own renders (the render proc's, seon.render.proc/ask-parts)
                     :render {:op :render})]
           (to-agent st o id {:op :req :rid rid :kind op :msg msg})))
-      ;; an entry to a live agent's run (the owner's message from the page or the server, root's
-      ;; :stage at a boundary): a fact on main (root's branch: :seon.message/*,
-      ;; seon.task/message-tx), synced before it is answered, so what follows (the turn that
-      ;; takes it, a wake) finds it in the store; the agent's turn reads it from main and writes
-      ;; the same fact on its branch (seon.turn/take!, seon.agent/untaken-entries). No frame
-      ;; carries it: delivery is the fact
-      ;; it is to the agent by its branch, so a parked agent's message is the fact that wakes it
-      :message (cond
-                 (nil? (get-in st [:agents id])) (reply! st o p (gone id (str "no live agent " id)))
-                 :else
+      ;; a message to an agent, live or not (the owner's from the page or the server, root's at a stage boundary): one entity on main
+      ;; (seon.task/message-tx), synced before it is answered, so what follows (the turn that delivers it) finds it in the
+      ;; store; the agent's turn reads it from main and writes the same entity on its branch (seon.turn/deliver!,
+      ;; seon.agent/undelivered). No frame carries it: delivery is the fact. Its writer's answer wakes the agent (back-op)
+      :message (if-let [k (agent-key-of st id)]
                  (let [[st rid] (pend st p :tx nil)]
-                   (step/out! o :to-writer (message-write st (:from m) (:kind m :message) (get-in st [:agents id :branch]) (:body m) {:rid rid}))
-                   (update st :writes (fnil conj #{}) rid)))
+                   (step/out! o :to-writer (message-write st (:from m) [k] (:body m) {:rid rid}))
+                   (update st :writes (fnil conj #{}) rid))
+                 (reply! st o p (gone id (str "no agent " id " on main"))))
       ;; requests for the writer: answered by rid; a collection only while no agent is live,
       ;; the store's only writer then being root's writer (seon.db/collect!)
       :write (if (and (= :collect (get-in m [:req :op])) (seq (:agents st)))
@@ -585,7 +582,9 @@
   [st o m]
   (cond
     (:dest m)
-    (let [{:keys [dest r]} m]
+    (let [{:keys [dest r]} m
+          ;; a message committed: each recipient is woken, over the reconciler's :wake port (a commit notice wakes nothing)
+          _ (when (and (:wake dest) (not (contract/error? r))) (doseq [k (:wake dest)] (step/out! o :to-reconciler {:agent k})))]
       (cond
         (:merge-main dest) (let [aid (:merge-main dest)]
                              (step/out! o :events (step/event {:type :merged-main :agent aid :result (dissoc r :sync)}))
@@ -610,7 +609,7 @@
                                named (pdb/off-main (pdb/conn-main (:conn st)) branch)
                                started (cond-> {:seon.agent/key k :seon.agent/id (next-agent-id st) :seon.agent/boot (:boot st) :seon.agent/started-ms (System/currentTimeMillis)
                                                 :seon.agent/max-turns (or (:seon.agent/max-turns e) (cfg/value :seon.config.agent/max-turns))}
-                                         task (assoc :seon.agent/branch named :seon.agent/taken 0))]
+                                         task (assoc :seon.agent/branch named))]
                            (step/out! o :to-writer {:op :tx :branch :db :tx-data (cond-> [started] task (into (cons {:seon.task/id task :seon.task/branch named} (task/move-tx task (:seon.task/outcome (d/entity @(:conn st) [:seon.task/id task])) :parked {}))))
                                                     :dest {:agent-facts [id]}})
                            ;; started before the old one is counted out of root's agents: no-room above asked for that one
@@ -809,7 +808,7 @@
   starts the flowing shutdown."
   {:malli/schema :seon.step/step-fn}
   ([] {:params {:graph "a promise of this graph" :system "a promise of the built system (seon.system/build)"}
-       :ins {:from-writer "writer answers and stats" :from-fs "fork-server events"} :outs {:to-fs "fork-server requests"}
+       :ins {:from-writer "writer answers and stats" :from-fs "fork-server events"} :outs {:to-fs "fork-server requests" :to-reconciler "a wake per recipient of a committed message, {:agent key}"}
        :workload :io
        :ping-map-fn (fn [st] {:agents (count (:agents st)) :closing (boolean (:closing st))
                               ;; every ask it holds unanswered, rid -> [kind agent]: what a waiter waits on

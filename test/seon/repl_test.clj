@@ -587,7 +587,7 @@
               ["(clojure.repl/source seon.reconcile)" :text "(ns seon.reconcile"]
               ;; then every definition, privates included, a line each (pipeline 1's F4: a design took
               ;; the ns form alone for all that was recorded and spent five turns finding the privates)
-              ["(let [s (clojure.repl/source-fn 'seon.reconcile)] (mapv #(clojure.string/includes? s %) [\";; branch-messages\" \";; hairy\"]))" :text "[true true]"]
+              ["(let [s (clojure.repl/source-fn 'seon.reconcile)] (mapv #(clojure.string/includes? s %) [\";; idx-ready?\" \";; hairy\"]))" :text "[true true]"]
               ["(clojure.repl/source seon.reconcile/ns)" :text "(source seon.reconcile)"]
               ["(clojure.repl/source seon.reconcile/not-yet)" :text "names no var on this branch"]
               ["(clojure.repl/source seon.reconcile/not-yet-either)" :text "every definition of seon.reconcile, a line each: (source seon.reconcile)"]

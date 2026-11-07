@@ -130,22 +130,21 @@
     cache-hit-tokens (assoc :seon.model-call/cache-hit-tokens cache-hit-tokens)
     cache-miss-tokens (assoc :seon.model-call/cache-miss-tokens cache-miss-tokens)))
 
-(defn- take!
-  "Take what was delivered since the last turn onto this branch as turn n's (the turn that reads it: the next one,
+(defn- deliver!
+  "Deliver what was sent since the last turn onto this branch as turn n's (the turn that reads it: the next one,
   docs/turn.md#the-turn-is-a-number), before the turn's request is made, so
-  each sits in the conversation before the page that shows what came after it: the entries main holds
-  to the session's runs (a person's message, root's at a stage boundary, a refused verdict:
-  seon.agent/take-main!, the same facts root wrote on main, with what root wrote of the agent's own
-  entities): a send of another agent's is one of them, written on main by root as a person's is. Each is
-  :seon.message/agent's, so its presence on the branch is its delivery and the record's
+  each sits in the conversation before the page that shows what came after it: the messages main holds
+  to this agent (a person's, root's at a stage boundary or a refused verdict, another agent's:
+  seon.agent/deliver!, the entity root's writer wrote on main, with what root wrote of the agent's own
+  entities). Its entity on the branch is its delivery, and the record's
   messages read it (seon.context/turn-members); nothing is held for the turn's basis. An effect's outcome
   (:from :fx, in the inbox) is no message: the eval that asked holds its answer. A read that is not the
-  run's turn (take? false: an observer's read of an agent its model drives) takes nothing."
+  run's turn (take? false: an observer's read of an agent its model drives) delivers nothing."
   {:malli/schema [:=> [:cat :boolean nat-int?] :nil]}
   [take? n]
   (when take?
     (let [fx (count (agent/inbox))]
-      (agent/take-main! n)
+      (agent/deliver! n)
       ;; the outcomes seen are let go
       (agent/taken! fx)))
   nil)
@@ -158,7 +157,7 @@
   (let [k (:key @agent/state)
         body (print/text (vary-meta {:seon-threw what :error em} assoc :seon.print/full true))]
     ;; the next turn's: the turn that reads it, so it sits after everything this turn wrote
-    (agent/transact! (agent/own-message-tx (str k "/turn-error/" (random-uuid)) :message "seon" nil body (inc (agent/turn-now))))
+    (agent/transact! (agent/own-message-tx (str k "/turn-error/" (random-uuid)) "seon" body (System/currentTimeMillis) (inc (agent/turn-now))))
     (agent/commit!)
     nil))
 
@@ -179,7 +178,7 @@
   "What a turn's context is built from, recorded instead of its text (a model call stores its
   basis, not its prompt): the commit it reads (the run-ahead writes committed now, as the
   model call's wait would), the task and turn (its number: docs/turn.md#the-turn-is-a-number). Everything the request shows is a fact of that
-  commit: how the work stands (seon.context/status), what the turn took (take!)."
+  commit: how the work stands (seon.context/status), what the turn was delivered (deliver!)."
   {:malli/schema [:=> [:cat :seon.task/id :int :int :seon.model-call/origin :boolean] :seon.model-call/basis]}
   [task turn max-turns origin merge?]
   (agent/commit!)
@@ -255,7 +254,7 @@
   {:malli/schema [:=> [:cat :seon.task/id :int [:maybe :int] :boolean [:maybe :string]] [:tuple :string :map [:vector :map]]]}
   [task n max-turns merge? model-name]
   (let [k (:key @agent/state) id (str k "/" n)]
-    (take! true n)
+    (deliver! true n)
     (let [shown (show-page!)]
       (agent/transact! (into [{:seon.agent/key k :seon.agent/turn n}
                               {:seon.model-call/id id :seon.model-call/agent {:seon.agent/key k} :seon.model-call/n n :seon.model-call/origin :model}]
@@ -357,7 +356,7 @@
                     0))
          turn (inc (agent/turn-now))
          ;; an observer's read records nothing on the branch beyond the read and leaves the print cache
-         _ (take! take? turn)
+         _ (deliver! take? turn)
          ;; the main and merge base the read heard, decided as a model turn's are, before its request is drawn
          _ (when take? (when-let [tx (not-empty (main-base-tx))] (agent/transact! tx) (agent/commit!)))
          _ (when take? (show-page!))
