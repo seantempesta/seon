@@ -154,3 +154,25 @@
     (is (nil? (open-form "c12-chat")) "a row's own toggle names no form")
     (is (= '(drop 1 (get-in result/e5 [:value :proofs])) (open-form "c12-chat/(drop 1 (get-in result/e5 [:value :proofs]))")) "a form's symbols hold a slash")
     (is (= :seon.web/unread (open-form "c12-chat/(drop 1")) "unreadable text")))
+
+(clojure.test/deftest a-cross-origin-call-is-refused
+  ;; seon.web/handler's edge: a page of another origin is refused before the call reaches the proc
+  (let [ch (a/chan 8)
+        handle (w/handler ch)
+        post (fn [headers]
+               (handle {:request-method :post :uri "/call" :query-string "fn=seon.root%2Fsubmit%21"
+                        :headers headers :body (java.io.StringReader. "")}))
+        own (str "http://127.0.0.1:" (seon.config/value :seon.config.web/port))]
+    (clojure.test/testing "another site's page is refused, and the call never reaches the proc"
+      (let [r (post {"origin" "https://evil.example"})]
+        (clojure.test/is (= 403 (:status r)) "403, not 204: the call is refused")
+        (clojure.test/is (str/includes? (str (:body r)) "evil.example") "naming the origin it refused")
+        (clojure.test/is (nil? (a/poll! ch)) "nothing was put on the web proc's channel"))
+      (let [r (post {"sec-fetch-site" "cross-site"})]
+        (clojure.test/is (= 403 (:status r)) "no Origin, cross-site: refused")
+        (clojure.test/is (nil? (a/poll! ch)) "and nothing sent")))
+    (clojure.test/testing "the dashboard's own page, and a request with no Origin at all, are served"
+      (doseq [headers [{:x 1} {"origin" own} {"sec-fetch-site" "same-origin"} {"origin" own "sec-fetch-site" "same-origin"}]]
+        (let [r (post headers)]
+          (clojure.test/is (= 204 (:status r)) (str "served: " (pr-str headers)))
+          (clojure.test/is (= :call (:op (a/poll! ch))) (str "the call reached the proc: " (pr-str headers))))))))

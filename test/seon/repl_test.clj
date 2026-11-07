@@ -1170,3 +1170,11 @@
     (is (true? (:value branch-ok)))
     (is (true? (:value commit-ok)))
     (is (= :refused (:value mix)) "a contradictory option is refused")))
+
+(clojure.test/deftest an-evals-answer-has-one-error-render
+  ;; a request's error is its answer's :ex, the one error map, rendered by seon.render.ui/error-box;
+  ;; what the form wrote to *err* is its own key (:err), the error stream, never a second render
+  (let [r (eval-in "(binding [*out* *err*] (println \"to err\"))\n(/ 1 0)")]
+    (clojure.test/is (= :seon.agent/eval-error (:seon.error/type (:ex r))) (pr-str r))
+    (clojure.test/is (= "to err\n" (:seon.print/code (:err r))) "the form's *err* output is the error stream")
+    (clojure.test/is (not (contains? r :err-text)) "no second render of the error")))
