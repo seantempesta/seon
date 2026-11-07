@@ -1,1 +1,4 @@
-[]
+[
+ {:seon.task/name "a-passing-test-reads-as-passed"
+  :seon.task/plan "What exists: `my.agent/prove` of a test that passes answers its count and no status. Reproduce at an agent: (select-keys (my.agent/prove 'seon.print-test/a-handle-is-text) [:ran :pass :proofs]) answers {:ran 1 :pass 2 :proofs {seon.print-test/a-handle-is-text :none}}; it should say :pass. (:reports (seon.agent/prove! :judge #{...})) is empty with :pass 2, though `seon.agent/run-tests-forked` counts its passes from its reports, so they go missing between there and the answer; where isn't found. `my.agent/prove-summary` then says not green: 1 of 1 proofs have no verdict, beside its reused line. Correct: a proof that passed reads :pass."
+  :seon.task/proofs #{my.agent-test/a-passing-test-reads-as-passed}}]
