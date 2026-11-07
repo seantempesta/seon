@@ -535,6 +535,20 @@
     (is (= 2 (some-> (resolve (symbol (str nsym) "b")) deref (apply []))) "the imported form is loaded where main's program runs")
     (is (= [] (stage/stage-tx (:db-after rep))) "so staging this runtime unmaps nothing")))
 
+;; docs/source.md#a-process-holds-the-tests-only-when-it-runs-them: agents forked before an import ran the previous main's tests against the new program,
+;; red with nothing to see: their records said the new text, their vars the old
+(deftest a-form-an-import-replaces-runs-its-new-text
+  (let [nsym (symbol (str "app.replaced-" (random-uuid)))
+        path (str "test/app/" (str/replace (name nsym) "-" "_") ".clj")
+        text (fn [n] (str "(ns " nsym ")\n\n(defn a [] " n ")\n"))
+        db (d/db-with (empty-db) (source/import-tx (empty-db) {path (text 1)}))
+        _ (program/load-all! db)
+        run #(some-> (resolve (symbol (str nsym) "a")) deref (apply []))
+        _ (is (= 1 (run)))
+        rep (d/with db (source/replace-tx db {path (text 2)}))]
+    (is (= [] (program/load-changes! (:db-after rep) (pdb/report->tx rep))))
+    (is (= 2 (run)) "the process runs what main now holds")))
+
 (deftest the-source-read-carries-each-reference-code-pin
   ;; land6 review, must-fix 4: a cited reference-code file shows the revision main's source
   ;; pins it at; the :source effect reads each gitlink once, at import, so no render runs git
