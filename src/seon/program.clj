@@ -1243,7 +1243,9 @@
   ([db ops] (load-changes! db ops {}))
   ([db ops {:keys [tests?] :or {tests? true}}]
   (let [ptr (set (vals pointer))
-        added (set (for [[op e a] ops :when (and (= op :db/add) (ptr a))] e))]
+        added (set (for [[op e a] ops :when (and (= op :db/add) (ptr a))] e))
+        ;; a definition these ops moved to another form: what this process bound is the old form, so being bound says nothing (held?)
+        replaced (set (for [[op e a] ops :when (and (= op :db/retract) (ptr a) (added e))] e))]
     (doseq [[op e a] ops
             :when (and (= op :db/retract) (ptr a) (not (added e)))
             :let [x (d/entity db e)]]
@@ -1251,7 +1253,8 @@
             (:method/key x) (remove-definition! (into [:method] (sedn/decode (:method/key x))))))
     (load! db (vec (for [[op e a] ops
                          :when (and (= op :db/add) (= a :form/src) (live? db e))
-                         :let [f (form-row db e)] :when (not (held? db f))]
+                         :let [f (form-row db e)]
+                         :when (or (not (held? db f)) (some #(replaced (:v %)) (d/datoms db :eavt e :form/defines)))]
                      f))
            (set (for [[op e a] ops :when (and (= op :db/add) (= a :schema/form))
                       :let [x (d/entity db e)] :when (not (:schema/source x))]
