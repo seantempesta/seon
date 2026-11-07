@@ -183,6 +183,22 @@
       11 (or (not-empty (vec (for [m (d/q '[:find [?m ...] :where [?m :seon.message/branch :lab-ctx]] db)] [:db/retractEntity m])))
              (eval-tx (+ 50000 i))))))
 
+;; docs/ctx.md: an entity's own attributes read by its datoms are what a pull of them answers, and cost a seek, not the pull engine
+(deftest an-entitys-own-reads-what-a-pull-reads
+  (let [own @#'seon.ctx/own
+        db (my.test/with (my.test/world) [{:seon.task/id "demo/own" :seon.task/plan "p" :seon.task/proofs '#{a.b/c a.b/d}}
+                              {:seon.agent/key "b/own" :seon.agent/id :own :seon.agent/task [:seon.task/id "demo/own"]}])
+        pulled (fn [e] (let [many (get (:rschema db) :db.cardinality/many #{})
+                             m (d/pull db '[*] e)]
+                         (reduce-kv (fn [m a v] (if (and (contains? many a) (sequential? v)) (assoc m a (set v)) m)) m m)))
+        task (pdb/eid db :seon.task/id "demo/own")
+        agent (pdb/eid db :seon.agent/key "b/own")]
+    (is (= #{'a.b/c 'a.b/d} (:seon.task/proofs (own db task))) "a cardinality-many attribute is a set")
+    (is (= {:db/id task} (:seon.agent/task (own db agent))) "a ref is its {:db/id}")
+    (is (= {:db/id 99999999} (own db 99999999)) "an entity the db holds nothing of is its id alone")
+    (doseq [e (concat [task agent] (take 200 (map :e (d/datoms db :aevt :form/id))) (take 200 (map :e (d/datoms db :aevt :var/name))))]
+      (is (= (pulled e) (own db e)) (str "entity " e)))))
+
 (deftest an-agents-record-holds-its-task-and-every-turn-and-eval
   ;; the owner, 2026-10-29: "get rid of runs ... by default show everything: get rid of the limits for evals and
   ;; turns; messages at the newest 100 is fine" (seon.agent/the-agent-is-the-unit-not-the-run, cut 1): the agent's

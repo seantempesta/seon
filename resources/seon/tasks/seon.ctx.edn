@@ -1,6 +1,2 @@
 [
- {:seon.task/name "a-ctx-read-pulls-what-a-datom-seek-reads"
-  :seon.task/plan "Measured 2026-11-07, one entity of 6 attributes: pull [*] 9.6k ticks and 41 KB, its eavt datoms 2.2k and 5.8 KB. seon.ctx/own pulls, 867,777 calls across the day's verdicts, 1.4 percent of ticks. Read its datoms and fold cardinality-many as it already does. Proof: its answers unchanged, a cost proof on calls and bytes."
-  :seon.task/kind :work
-  :seon.task/proofs #{}}
 ]
