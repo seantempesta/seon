@@ -1011,7 +1011,7 @@
 (defn wiki-digest
   "The digest of what the boot's wiki load reads: the pages of the checkout's wiki dirs, the program db
   holds (seon.program/program-digest: the vars a section's names and references resolve to, and the forms
-  its read ids come from), its task ids (a prose word may name a task) and the form of the doc fact the
+  its read ids come from), its task ids (a text word may name a task) and the form of the doc fact the
   load writes (:seon.doc/fact: a store written under other attributes, as a rename of them leaves it,
   loads again). docs/root.md#boot."
   {:malli/schema [:=> [:cat :seon.host/db :string] :string]}

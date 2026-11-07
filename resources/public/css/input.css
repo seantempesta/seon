@@ -22,7 +22,7 @@
 @source inline("{,sm:,md:,lg:}{flex-row,flex-col,flex-wrap,flex-1,flex-none,grow,shrink-0,items-{start,center,end,baseline,stretch},justify-{start,center,end,between,around},self-{start,center,end,stretch},content-start,place-items-center}");
 @source inline("{,sm:,md:,lg:}grid-cols-{1,2,3,4,5,6,12} {,sm:,md:,lg:}col-span-{1,2,3,4,6,12,full} grid-rows-{1,2,3}");
 @source inline("{,sm:,md:,lg:}{p,px,py,pt,pb,pl,pr,m,mx,my,mt,mb,ml,mr,gap,gap-x,gap-y,space-y,space-x}-{0,0.5,1,1.5,2,3,4,5,6,8,10,12}");
-@source inline("{w,h,min-w,max-w,min-h,max-h}-{0,full,screen,fit,min,max,auto,1/2,1/3,2/3,1/4,3/4,4,6,8,12,16,24,32,48,64,96,xs,sm,md,lg,xl,2xl,prose}");
+@source inline("{w,h,min-w,max-w,min-h,max-h}-{0,full,screen,fit,min,max,auto,1/2,1/3,2/3,1/4,3/4,4,6,8,12,16,24,32,48,64,96,xs,sm,md,lg,xl,2xl,text}");
 @source inline("text-{2xs,xs,sm,base,lg,xl,2xl,3xl} text-{left,center,right,justify} font-{mono,sans,normal,medium,semibold,bold} {italic,not-italic,underline,line-through,no-underline,uppercase,lowercase,capitalize}");
 @source inline("leading-{none,tight,snug,normal,relaxed,loose} tracking-{tight,normal,wide,wider,widest} {tabular-nums,truncate,whitespace-{normal,nowrap,pre,pre-wrap,pre-line},break-{words,all},text-ellipsis}");
 @source inline("list-{none,disc,decimal,inside,outside} {,hover:}{text,bg,border}-{base-{700,800,850,900,950},text-{50,100,200,300,400,500},signal,success,error,warning,info,eval,transparent}");
@@ -34,8 +34,8 @@
 @theme {
   --font-mono: 'JetBrains Mono', 'SF Mono', ui-monospace, Menlo, Monaco, 'Cascadia Mono', monospace;
   --font-sans: var(--font-mono);
-  /* prose (what a model or a person wrote) reads in the system's text face; code and data stay mono */
-  --font-prose: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  /* text (what a model or a person wrote) reads in the system's text face; code and data stay mono */
+  --font-text: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
   /* the dense label size: Tailwind v4 has no 2xs */
   --text-2xs: 0.625rem;
   --text-2xs--line-height: 0.9rem;
@@ -166,7 +166,7 @@
 .seon-print-table td:hover { white-space: normal; overflow: visible; }
 .seon-print-table td .seon-print-grid { display: inline; }
 .seon-print-table th { font-weight: normal; }
-.seon-print-prose { white-space: pre-wrap; font-family: var(--font-prose); color: var(--color-text-200); margin: 0; }
+.seon-print-plain { white-space: pre-wrap; font-family: var(--font-text); color: var(--color-text-200); margin: 0; }
 /* highlight.js's Clojure tokens in the page's palette */
 .hljs-comment { color: var(--color-text-500); font-style: italic; }
 .hljs-string { color: var(--color-success); }
@@ -175,9 +175,9 @@
 .hljs-name, .hljs-title { color: var(--color-text-100); }
 pre.seon-print-code { margin: 0; padding: 0.4rem 0.6rem; border-radius: 6px; background: var(--color-base-850); overflow-x: auto; }
 .seon-data-panel { display: inline; }
-/* the conversation (seon.render.ui/eval-item): prose as prose, each eval a block that opens to
+/* the conversation (seon.render.ui/eval-item): messages as written, each eval a block that opens to
    its code and its value */
-.seon-prose { white-space: pre-wrap; font-family: var(--font-prose); font-size: 0.875rem; line-height: 1.6; color: var(--color-text-100); margin: 0; }
+.seon-text { white-space: pre-wrap; font-family: var(--font-text); font-size: 0.875rem; line-height: 1.6; color: var(--color-text-100); margin: 0; }
 .seon-eval { border: 1px solid var(--color-base-800); border-radius: 8px; background: var(--color-base-900); min-width: 0; }
 .seon-eval > summary { list-style: none; padding: 0.4rem 0.7rem; border-radius: 8px; }
 .seon-eval > summary::-webkit-details-marker { display: none; }
@@ -186,7 +186,7 @@ pre.seon-print-code { margin: 0; padding: 0.4rem 0.6rem; border-radius: 6px; bac
 .seon-eval > :not(summary) { margin: 0.6rem 0.7rem; }
 .seon-eval > div { border-left: 0; padding-left: 0; }
 /* an eval's collapsed line (seon.render.ui/eval-item; the 2026-10-24 mockup's "▸ (form) · 12 ms"):
-   the prose above, then its code's first line, its time and its handle */
+   the text above, then its code's first line, its time and its handle */
 .seon-eval > summary::before { content: "▸"; color: var(--color-text-500); }
 .seon-eval[open] > summary::before { content: "▾"; color: var(--color-signal); }
 .seon-form { min-width: 0; flex: 1 1 0; overflow-wrap: anywhere; color: var(--color-text-200); }
@@ -201,7 +201,7 @@ pre.seon-print-code { margin: 0; padding: 0.4rem 0.6rem; border-radius: 6px; bac
 /* opened, a step shows its code once, whole: its line was only a stand-in for it */
 .seon-eval[open] > summary > .seon-form { display: none; }
 .seon-md-inline code { color: var(--color-text-100); background: var(--color-base-850); padding: 0 0.2rem; border-radius: 3px; }
-.seon-message, .seon-message p, .seon-message li { font-family: var(--font-prose); font-size: 0.9rem; line-height: 1.55; }
+.seon-message, .seon-message p, .seon-message li { font-family: var(--font-text); font-size: 0.9rem; line-height: 1.55; }
 .seon-turn .seon-eval > summary { padding: 0.15rem 0.3rem; }
 .seon-turn .seon-eval[open] > summary { border-bottom: 0; }
 .seon-eval-error { border-color: color-mix(in srgb, var(--color-error) 45%, var(--color-base-800)); }

@@ -61,7 +61,7 @@
 (defn- text-citations
   "What a declaration's text cites, read on db: its plan and instructions parsed once (seon.ref/parse),
   each target once at its strongest depth (seon.ref/cited), those db keeps as references (seon.ref/kept: a
-  prose word only when it names something, no alias form), a line reference and an anchor with no page
+  text word only when it names something, no alias form), a line reference and an anchor with no page
   left out (they name nothing to pull)."
   {:malli/schema [:=> [:cat :seon.host/db [:map [:seon.task/plan {:optional true} [:maybe :string]] [:seon.task/instructions {:optional true} [:maybe :string]]]] [:vector :seon.ref/citation]]}
   [db decl]

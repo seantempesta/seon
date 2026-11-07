@@ -905,7 +905,7 @@
  ;; words) only when its score is this many standard deviations above the mean of every text's score for
  ;; that query. Provenance: embeddings lab, 2026-10-27 (20 hand-checked queries; scratchpad
  ;; embeddings-design.md): tokens kept at z >= 2 lifted R@10 from 0.68 to 0.71 without hurting the
- ;; paraphrase queries; unfiltered they are noise on prose. At the bound: a text scoring below it is not a hit.
+ ;; paraphrase queries; unfiltered they are noise on text. At the bound: a text scoring below it is not a hit.
  :seon.config.render/search-token-z 2.0
  ;; Unit: candidates per hit shown. How many of the nearest by meaning my.agent/search reads for each hit
  ;; it may show (seon.vector/near takes this times :seon.config.render/search), before the

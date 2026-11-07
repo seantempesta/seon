@@ -332,7 +332,7 @@
                                            {:form/id (str "fill/" i) :form/src (str "(defn v" i " [] (inc " i "))") :form/defines [(str "fv" i)]}])
                                   (range 40))
                           (for [i (range 20)] {:seon.doc/address (str "fill.md#s" i) :seon.doc/heading (str "Filler " i)
-                                               :seon.doc/text (str "Plain prose number " i ".")})))))
+                                               :seon.doc/text (str "Plain text number " i ".")})))))
 
 (deftest tokens-keep-the-texts-that-stand-out-by-the-words-of-a-query
   (let [db (corpus-db) hit (fn [h] [(:kind h) (:name h)])

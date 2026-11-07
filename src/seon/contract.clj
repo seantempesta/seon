@@ -350,7 +350,7 @@
   "v as an error may keep it past its moment: itself when it is small plain data (nil, booleans,
   numbers, keywords, symbols, uuids, instants, strings of at most four characters a token of the
   form budget (a captured stderr tail is one), and maps, vectors, sets and lists of those, within the part budget's count of
-  nodes). Else a string is the printer's cut of it (`seon.print/prose`: it says what it omitted)
+  nodes). Else a string is the printer's cut of it (`seon.print/plain`: it says what it omitted)
   and any other value is the one printer's print of it under the part budget, marked code
   (print/code): a db value, conn, atom, Throwable or lazy seq is always its print, so what an
   error holds does not depend on the value's size. See docs/errors.md#an-error-keeps-data."
@@ -359,7 +359,7 @@
   (let [budget (:part print/budgets) room (* 4 (:form print/budgets))]
     (cond
       (or (nil? v) (boolean? v) (number? v) (keyword? v) (symbol? v) (uuid? v) (inst? v)) v
-      (string? v) (if (<= (count v) room) v (:text (print/prose v budget)))
+      (string? v) (if (<= (count v) room) v (:text (print/plain v budget)))
       :else (let [left (volatile! budget)]
               (if (plain? v (fn [x] (and (pos? (vswap! left dec)) (or (not (string? x)) (<= (count x) room)))))
                 v

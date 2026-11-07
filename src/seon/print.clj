@@ -52,7 +52,7 @@
   cut by the one string cutter and its cut reads the rest, `(subs (:seon.print/code (get-in
   result/a3f9c1d2 [...])) 1200)`. Plain data, {:seon.print/code s}: a record stores it and reads it
   back as it is. The producer says it is code; the printer never guesses from a string's text.
-  Prose (a docstring, a plan, a section's lead) is marked the same way, {:seon.print/prose s}:
+  Text (a docstring, a plan, a section's lead) is marked the same way, {:seon.print/plain s}:
   printed as code is, and on the page a paragraph."
   {:malli/schema [:=> [:cat :string] [:map [:seon.print/code :string]]]}
   [s] {:seon.print/code s})
@@ -117,7 +117,7 @@
                 (case op
                   get-in (get-in x y) nth (nth x y nil) seq (seq x) key (key x) val (val x)
                   ;; a marked text's rest keeps its mark: code reads on as code
-                  subs (let [k (first (first args))] (if (and (seq? (first args)) (#{:seon.print/code :seon.print/prose} k)) {k (subs x y)} (subs x y)))
+                  subs (let [k (first (first args))] (if (and (seq? (first args)) (#{:seon.print/code :seon.print/plain} k)) {k (subs x y)} (subs x y)))
                   drop (vec (drop x y))
                   (when (keyword? op) (get x op))))))
 
@@ -140,7 +140,7 @@
          (response-text (assoc r :value v) render))
        (response-text r)))))
 
-;;; Prose: text read as itself (a message, a form's source, a plan, a printed value), not as
+;;; Text: text read as itself (a message, a form's source, a plan, a printed value), not as
 ;;; a string literal. The one string cutter's (seon.print.select/break-at, its words
 ;;; seon.print.emit/cut-words), on the printer's sizer.
 
@@ -156,8 +156,8 @@
             (ws? i) (recur (loop [j i] (if (and (< j n) (ws? j)) (recur (inc j)) j)) (inc c))
             :else (recur (inc i) (inc c))))))
 
-(defn prose
-  "s as prose under budget tokens, shown as itself (unquoted). It fits: s whole. It does
+(defn plain
+  "s as text under budget tokens, shown as itself (unquoted). It fits: s whole. It does
   not: the longest prefix the budget holds with room for the cut, ended where the one string
   cutter ends a cut (`seon.print.select/break-at`: a line break in its second half, else a
   space in its final quarter), then the cut (`seon.print.emit/cut-words`): how many characters it
@@ -167,9 +167,9 @@
   table cell, a stream row); its cut's :offset and :omitted are then the source's (what
   the form reads), and :shown the one line's.
   Answers {:text :shown :truncated?}, and a cut's :omitted :lines :offset and :continuation."
-  {:malli/schema [:function [:=> [:cat [:maybe :string] pos-int?] :seon.print/prose]
-                  [:=> [:cat [:maybe :string] pos-int? :seon.print/prose-opts] :seon.print/prose]]}
-  ([s budget] (prose s budget {}))
+  {:malli/schema [:function [:=> [:cat [:maybe :string] pos-int?] :seon.print/plain]
+                  [:=> [:cat [:maybe :string] pos-int? :seon.print/plain-opts] :seon.print/plain]]}
+  ([s budget] (plain s budget {}))
   ([s budget {:keys [source one-line?]}]
    (let [whole (or s "")
          ^String s (cond-> whole one-line? (-> (str/replace #"\s+" " ") str/trim))
@@ -193,18 +193,18 @@
                   :shown shown :truncated? true :omitted omitted :lines lines :offset at}
            cont (assoc :continuation cont)))))))
 
-(defn line-prose
-  "`line`'s prose ({:text :shown :truncated?} and a cut's members, `prose`): what a reader that
+(defn line-plain
+  "`line`'s text ({:text :shown :truncated?} and a cut's members, `text`): what a reader that
   says whether the line was cut takes."
-  {:malli/schema [:=> [:cat :any pos-int? :any] :seon.print/prose]}
-  [s budget source] (prose (cond-> s (and (some? s) (not (string? s))) (text budget)) budget (cond-> {:one-line? true} source (assoc :source source))))
+  {:malli/schema [:=> [:cat :any pos-int? :any] :seon.print/plain]}
+  [s budget source] (plain (cond-> s (and (some? s) (not (string? s))) (text budget)) budget (cond-> {:one-line? true} source (assoc :source source))))
 
 (defn line
-  "Text in one line under budget tokens (a value that is not text printed first): `prose`
+  "Text in one line under budget tokens (a value that is not text printed first): `text`
   with every whitespace run as one space;
   its cut says what it omitted and, with source (a form that answers the whole text), the
   form that reads the rest. Root's context and the page's one-line rows (the stream)."
   {:malli/schema [:function [:=> [:cat :any pos-int?] :string] [:=> [:cat :any pos-int? :any] :string]]}
   ([s budget] (line s budget nil))
-  ([s budget source] (:text (line-prose s budget source))))
+  ([s budget source] (:text (line-plain s budget source))))
 

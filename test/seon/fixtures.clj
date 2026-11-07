@@ -26,11 +26,11 @@
     :proof "(deftest abs-test (is (= 5 (app.calc/abs -5))) (is (= 5 (app.calc/abs 5))))"}])
 
 (defn- calls
-  "A scripted reply of eval calls: the text is prose, and each code string (its forms)
-  is a call that carries the same prose (docs/prompt.md)."
+  "A scripted reply of eval calls: the text is text, and each code string (its forms)
+  is a call that carries the same text (docs/prompt.md)."
   {:malli/schema [:=> [:cat :string [:* :string]] :seon.model/script-reply]}
-  [prose & codes]
-  {:text prose :calls (mapv (fn [c] {:intent prose :code c}) codes)})
+  [text & codes]
+  {:text text :calls (mapv (fn [c] {:intent text :code c}) codes)})
 
 (defn- says
   "A scripted reply of text and no call: a message, which ends the turn (docs/prompt.md)."
@@ -252,7 +252,7 @@
    {:seon.task/ns 'seon.print.emit :seon.task/name "a-cut-of-one-character-says-char"
     :seon.task/plan "A cut that left one character says …+1 chars; it should say …+1 char, as the line count already says 1 more line. Reproduce: [(seon.print.emit/cut-words 1 0 nil) (seon.print.emit/cut-words 1 1 nil)] answers [\"…+1 chars\" \"…+1 chars in 1 more line\"]; it should answer [\"…+1 char\" \"…+1 char in 1 more line\"]."}
    {:seon.task/ns 'seon.ref :seon.task/name "a-name-ending-in-a-star-is-not-cited-as-another"
-    :seon.task/plan "A name ending in * is never a reference, but in prose its trailing star is trimmed as if it were emphasis, so ns.x/f* is cited as ns.x/f, another var. Reproduce: (seon.ref/names \"Callers of seon.print.emit/foo* are listed.\") answers [seon.print.emit/foo]; it should answer []."}])
+    :seon.task/plan "A name ending in * is never a reference, but in text its trailing star is trimmed as if it were emphasis, so ns.x/f* is cited as ns.x/f, another var. Reproduce: (seon.ref/names \"Callers of seon.print.emit/foo* are listed.\") answers [seon.print.emit/foo]; it should answer []."}])
 
 (def ^:private all-replies
   "Scripted replies by task name (calc) and by task id (a scenario's tasks live in a task
@@ -300,8 +300,8 @@
                {:intent "Add five and six." :code "(+ 5 6)"}]})
 
 (defn thinking-call
-  "The scripted model that proves a reply's prose is recorded with its call (seon.agent-test):
-  one form, and the prose beside it."
+  "The scripted model that proves a reply's message is recorded with its call (seon.agent-test):
+  one form, and the text beside it."
   {:malli/schema [:=> [:cat :seon.model/request] :seon.model/script-reply]}
   [_] (calls "check the sum before the proof" "(+ 1 2)"))
 
@@ -311,8 +311,8 @@
   {:malli/schema [:=> [:cat :seon.model/request] :seon.model/script-reply]}
   [_] (calls "Wait for a message." "(my.turn/wait)"))
 
-(defn prose-reply
-  "The scripted model of a session that answers in prose (seon.agent-test): its first reply is text
+(defn text-reply
+  "The scripted model of a session that answers in text (seon.agent-test): its first reply is text
   with no call (the agent winding down); a request that holds that reply as its assistant message
   is answered by a call that says so, one that lost it by a call that says that."
   {:malli/schema [:=> [:cat :seon.model/request] :seon.model/script-reply]}

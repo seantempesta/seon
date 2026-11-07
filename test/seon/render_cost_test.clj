@@ -71,9 +71,9 @@
                 "message is done twice and no message is printed as data")
      :growth :linear
      ;; contracted calls a message, along the path above: seon.render's nested, render-of with
-     ;; own-key, schema-of and declared (its parents) each, print/line and its prose. The input was runs (a table row with no
-     ;; prose: 143 a run and 209 once, 2026-11-03) until they went; messages are the entity whose render is as light that is left,
-     ;; and its inline line holds its body as prose. Measured 2026-11-04 on sizes 20 to 180: 3,615 calls at 20, 10,375 at 60,
+     ;; own-key, schema-of and declared (its parents) each, print/line and its message. The input was runs (a table row with no
+     ;; text: 143 a run and 209 once, 2026-11-03) until they went; messages are the entity whose render is as light that is left,
+     ;; and its inline line holds its body as text. Measured 2026-11-04 on sizes 20 to 180: 3,615 calls at 20, 10,375 at 60,
      ;; 30,495 at 180 (168 a message and 255 once)
      :per-n {:calls 170}
      :fixed {:calls 260}

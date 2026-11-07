@@ -588,7 +588,7 @@
   ;; main holds the source root's test namespaces
   ;; (imported from test/), and an agent forked from the fork server holds them compiled:
   ;; it runs one without requiring it, and a green test reports green, a red one red
-  (let [green 'seon.reader-test/prose-without-a-fence-is-a-comment
+  (let [green 'seon.reader-test/text-without-a-fence-is-a-comment
         red 'seon.reader-test/an-agent-made-this-red
         [held _ run] (in-agent #(vector "(boolean (find-ns 'seon.reader-test))"
                                 (str "(in-ns 'seon.reader-test) (clojure.test/deftest an-agent-made-this-red (clojure.test/is (= 1 2))) (in-ns 'agent." (:agent %) ")")
@@ -608,10 +608,10 @@
   ;; compiled (and a test child it forks runs them: an-agent-holds-mains-tests above)
   (let [;; the code this proves, named so its reach digest moves with it: root's boot and writer, the fork server's load
         _ [#'seon.root/boot! #'seon.writer/main-commit #'seon.fork-server/main]
-        t "(some-> (resolve 'seon.reader-test/prose-without-a-fence-is-a-comment) bound?)"
+        t "(some-> (resolve 'seon.reader-test/text-without-a-fence-is-a-comment) bound?)"
         [agent-held root-held facts] (in-agent [(str "(boolean " t ")")
                                                 {:op :eval :agent "root" :code (str "(boolean " t ")")}
-                                                {:op :eval :agent "root" :code "(boolean (seon.db/eid @(:conn sys) :var/name 'seon.reader-test/prose-without-a-fence-is-a-comment))"}]
+                                                {:op :eval :agent "root" :code "(boolean (seon.db/eid @(:conn sys) :var/name 'seon.reader-test/text-without-a-fence-is-a-comment))"}]
                                                {})]
     (is (true? (:value agent-held)) "the agent holds main's test compiled")
     (is (false? (:value root-held)) "root does not")
@@ -629,7 +629,7 @@
   ;; reads: the task's proofs and the tests reaching what its branch changed since the main
   ;; it forked from. One redefined function (same behaviour, another form) reaches one test; its namespace's other tests
   ;; and every other namespace's do not run
-  (let [proof 'seon.reader-test/prose-without-a-fence-is-a-comment
+  (let [proof 'seon.reader-test/text-without-a-fence-is-a-comment
         reached 'seon.config-test/the-command-line-s-overrides-are-taken-out-of-a-mode-s-args
         ;; the other test that reaches without-overrides (it reads the profile from the command line, 4a34eb9227)
         also 'seon.config-test/the-profile-is-read-from-the-command-line
@@ -699,7 +699,7 @@
   ;; so the next run (the next turn's observe, the judge's :tests, the merge gate) of an
   ;; unchanged branch reruns nothing and answers the same results
   (let [here (seon.config/checkout)
-        proof 'seon.reader-test/prose-without-a-fence-is-a-comment
+        proof 'seon.reader-test/text-without-a-fence-is-a-comment
         reached 'seon.config-test/the-command-line-s-overrides-are-taken-out-of-a-mode-s-args
         ;; the other test that reaches without-overrides (it reads the profile from the command line, 4a34eb9227)
         also 'seon.config-test/the-profile-is-read-from-the-command-line
@@ -832,7 +832,7 @@
   ;; the same digests. The checkout caches p1 green there; an agent on the same tree reuses it and
   ;; runs p2, which is then cached too, so the checkout's plan reuses the agent's p2
   (let [here (seon.config/checkout)
-        p1 'seon.reader-test/prose-without-a-fence-is-a-comment
+        p1 'seon.reader-test/text-without-a-fence-is-a-comment
         p2 'seon.reader-test/a-fenced-reply-reads-only-its-code
         ;; the digests of the kept reach graph, brought to date, as bin/test's plan reads them
         inputs (fx/inputs here)
@@ -1116,7 +1116,7 @@
                     [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")}
                      "(ns demo-test (:require [clojure.test :refer [deftest is]]))"
                      "(deftest t (is (= 2 (inc 1))))"
-                     "(in-ns 'seon.ref) (defn- first-sentence \"Every sentence of flat prose.\" {:malli/schema [:=> [:cat :string] :string]} [flat] flat)"
+                     "(in-ns 'seon.ref) (defn- first-sentence \"Every sentence of flat text.\" {:malli/schema [:=> [:cat :string] :string]} [flat] flat)"
                      (str "(ns-unmap 'seon.ref-test '" (name main-test) ") (seon.stage/stage!) (in-ns 'agent." agent ")")
                      before-done {:op :done :agent agent}
                      {:op :eval :agent "root"
@@ -1464,11 +1464,11 @@
     (is (str/includes? (:content r2) "not-run") "the third call was not run, and its result says so")
     (is (not (str/includes? (:content r2) ":value 2")) "(inc a) never ran")))
 
-(deftest a-call-is-prose-and-its-forms
-  ;; owner, 2026-10-29: a call is prose and one or more forms, run in order; one with no prose or
+(deftest a-call-is-text-and-its-forms
+  ;; owner, 2026-10-29: a call is text and one or more forms, run in order; one with no text or
   ;; no form answers a typed error as its one result and runs nothing (docs/prompt.md)
   (let [problem #'seon.repl/call-problem]
-    (is (nil? (problem "Add them." "(+ 1 2)")) "prose and one form")
+    (is (nil? (problem "Add them." "(+ 1 2)")) "text and one form")
     (is (= :no-intent (:problem (problem " " "(+ 1 2)"))) "no intent")
     (is (nil? (problem "Two." "(def a 1) (inc a)")) "two forms")
     (is (= [:forms 0] ((juxt :problem :forms) (problem "None." "  "))) "no form")
@@ -1525,7 +1525,7 @@
   ;; gave seon.ref/scan's emit step a new arity its calls did not pass, so scan threw on every call; the turn's merge check,
   ;; seon.reconcile/hairy, parsed the task's plan with it (seon.ref/names) before every model call, so two turns
   ;; in a row threw and the work ended :error before the model read its own error. Seon's own decision reads the
-  ;; plan's cites, the facts its write derived, and the agent's broken parser costs only the parts that draw prose:
+  ;; plan's cites, the facts its write derived, and the agent's broken parser costs only the parts that draw text:
   ;; the model is called each turn, with the error in what it is sent (the attached task is :whole, so the check runs)
   (let [[_ end msgs] (in-agent (fn [{:keys [task ns]}]
                                       ["(in-ns 'seon.ref) (clojure.core/defn scan [& _] (throw (ex-info \"Wrong number of args (6) passed to: fn\" {})))"
@@ -2228,8 +2228,8 @@
         "the wake's turns go on from the parked one's: the agent's one sequence, none restarting and none over a recorded one")
     (is (and pid1 (= pid1 pid2)) (str "one process for both wakes: " pid1 " " pid2))))
 
-(deftest a-prose-reply-stays-in-the-history
-  ;; task seon.context/the-context-is-the-agents-evals-and-seons (R1): a reply of prose with no call
+(deftest a-text-reply-stays-in-the-history
+  ;; task seon.context/the-context-is-the-agents-evals-and-seons (R1): a reply of text with no call
   ;; is the agent winding down; the record read only evals and messages, so the wake that
   ;; followed it sent a history without it. It is an assistant message of the next request
   ;; its script is named in config, as data, so seon.model/scripted is named here for the reach digest: a fix there moved no digest of
@@ -2244,7 +2244,7 @@
                                          "   @(seon.root/message! sys ag \"carry on\") " (parked-code w 2)
                                          "   (let [db (:db @(seon.root/call! sys {:op :write :req {:op :branch-db :branch (seon.task/default-branch " (pr-str w) ")}}))]"
                                          "     {:intent (sort (datahike.api/q '[:find [?p ...] :where [?e :seon.eval/intent ?p] (not [?e :seon.eval/by \"seon\"])] db))})))")}]))
-                        {:config {:seon.config.ai/script 'seon.fixtures/prose-reply}
+                        {:config {:seon.config.ai/script 'seon.fixtures/text-reply}
                          :decls [{:seon.task/name "w" :seon.task/plan "Wait." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]})]
     (is (= ["Saw my own reply."] (:intent (:value r))) (pr-str r))))
 
@@ -2341,12 +2341,12 @@
     (is (< 3 (count ns)) (pr-str ns))
     (is (every? #(<= % 1) (map - ns (rest ns))) (str "each eval its own commit: " (pr-str ns)))))
 
-(deftest a-model-turn-records-its-prose-and-the-message-it-took
+(deftest a-model-turn-records-its-text-and-the-message-it-took
   ;; the owner's message is a fact root writes on
   ;; main (from "owner", to the branch of the agent); the turn that takes it writes the same
   ;; fact on its branch before its commit, naming the agent (:seon.message/agent), so the conversation
-  ;; and every later reading read its text from that commit (the basis names no message); the reply's prose (here the scripted model's)
-  ;; is the turn's reply and its call's eval's prose, and the call names its one eval
+  ;; and every later reading read its text from that commit (the basis names no message); the reply's message (here the scripted model's)
+  ;; is the turn's reply and its call's eval's text, and the call names its one eval
   ;; (docs/render.md)
   (let [names (volatile! nil)
         [_ end _ turn on-main] (in-agent (fn [{:keys [agent task ns] :as n}]
@@ -2381,8 +2381,8 @@
     (is (= on-branch committed) "and it is in the commit the turn read")
     (is (not-any? #{:observed :taken} basis-keys) "the basis names no message: the fact is the record")
     (is (contains? basis-keys :t) "it holds its t: a commit a sweep took is drawn as of it (docs/storage.md#collection)")
-    ;; the prose comes in the eval call (docs/prompt.md); the scripted reply's text is the same prose
-    (is (= "check the sum before the proof" reply) "the reply's text: the prose")
+    ;; the text comes in the eval call (docs/prompt.md); the scripted reply's text is the same text
+    (is (= "check the sum before the proof" reply) "the reply's text: the text")
     (is (string? (:eval (first calls))) (str "the call names its one eval: " (pr-str calls)))
     (is (= ["check the sum before the proof"] intent) "whose record keeps the intent beside it")
     ;; docs/turn.md#the-turn-is-a-number: the agent's number, the model call's id and the number each record took
@@ -2677,7 +2677,7 @@
 
 
 (deftest evals-given-at-spawn-run-first-as-ordinary-evals
-  ;; docs/turn.md#an-eval-can-be-inserted: an agent spawned with :evals (pairs of prose and code) runs them on its one REPL
+  ;; docs/turn.md#an-eval-can-be-inserted: an agent spawned with :evals (pairs of text and code) runs them on its one REPL
   ;; queue before anything else, each recorded as any eval is, by whoever asked, at turn 0 and with no call id. One that
   ;; throws is recorded with its error and the rest are not run, as the calls of a reply are not. A reader of the
   ;; conversation then sees them in order and, in the request, as calls of their own.
