@@ -278,7 +278,7 @@
 
 (defn off-main
   "Branch b as the root whose main is `main` names it in its facts (an agent's :seon.agent/branch, a task's
-  :seon.task/asked-by): on-main undone, b with main's qualifier taken off (:smoke-x/agent-1 is :agent-1 on
+  :seon.task/started-by): on-main undone, b with main's qualifier taken off (:smoke-x/agent-1 is :agent-1 on
   main :smoke-x); b itself on :db or when it carries no qualifier of main's. See docs/storage.md#a-roots-main-and-its-branch-names."
   {:malli/schema [:=> [:cat :seon.db/branch :seon.db/branch] :seon.db/branch]}
   [main b]

@@ -121,10 +121,10 @@
   (let [db (ts/test-db)
         id "demo/child"
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "child" :seon.task/kind :whole :seon.task/plan "p"}]))
-        asked (d/db-with db [[:db/add [:seon.task/id id] :seon.task/asked-by :task-parent]
-                             {:seon.agent/key "boot-1/p" :seon.agent/id :p :seon.agent/branch :task-parent}])
+        asked (d/db-with db [{:seon.agent/key "boot-1/p" :seon.agent/id :p :seon.agent/branch :task-parent}
+                             {:seon.task/id id :seon.task/started-by [:seon.agent/key "boot-1/p"]}])
         told (fn [db to & more] (r/tell-tx db id (into [[:db/cas [:seon.task/id id] :seon.task/outcome :running to]] more) 1000))]
-    (is (= [[:seon.agent/key "boot-1/p"]] (:seon.message/to (first (told asked :merged)))) "the message goes to the agent whose branch launched it")
+    (is (= [[:seon.agent/key "boot-1/p"]] (:seon.message/to (first (told asked :merged)))) "the message goes to the agent that launched it")
     (is (re-find #"merged to main" (:seon.message/body (first (told asked :merged)))))
     (is (re-find #"its proof went red" (:seon.message/body (first (told asked :closed {:seon.task/failure {:reason "its proof went red"}})))) "a stop says why")
     (is (re-find #"waiting" (:seon.message/body (first (told asked :parked {:seon.task/reason "which colour?"})))))

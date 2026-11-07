@@ -406,7 +406,7 @@
   "Agent `agent` (its id; nil: root refused the spawn, and no agent exists) begins task id in root's boot, its turn budget raised by raise (a wake's allowance) turns: the task's
   outcome :running from what it was, naming the agent (key: the session's agent it continues, seon.task/session-key; nil, its own in
   this boot), the judged attributes cleared; the agent's entity (key, id, task, branch and the rest of its environment,
-  its boot and when it started), its turn budget set when it is new (a raised budget stays, docs/turn.md#the-cap) and raised by raise in the same write.
+  its boot and when it started, and who started the task now holding it, :seon.agent/agents), its turn budget set when it is new (a raised budget stays, docs/turn.md#the-cap) and raised by raise in the same write.
   A refused spawn is the task's outcome :refused with root's reason and error, and no agent."
   {:malli/schema [:function [:=> [:cat :seon.host/db :seon.task/id :string [:maybe :keyword] :seon.task/env :int] [:vector :any]]
                   [:=> [:cat :seon.host/db :seon.task/id :string [:maybe :keyword] :seon.task/env :int [:maybe :string]] [:vector :any]]
@@ -420,6 +420,7 @@
      (into (outcome-tx db id from :running {})
            (filterv some?
                     [(when k {:seon.task/id id :seon.task/agent k})
+                     (when-let [by (when k (:db/id (:seon.task/started-by (d/entity db [:seon.task/id id]))))] [:db/add by :seon.agent/agents k])
                      (when k (cond-> {:db/id k :seon.agent/key k :seon.agent/id agent :seon.agent/task [:seon.task/id id]
                                       :seon.agent/branch branch :seon.agent/boot boot :seon.agent/started-ms start-ms}
                                model (assoc :seon.agent/model model)

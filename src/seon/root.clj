@@ -276,6 +276,11 @@
     (-> st (to-agent o id {:op :write :msg {:op :evals :by "root" :evals es}}) (update ::inserting dissoc id))
     st))
 
+(defn- person
+  "The name of the user this root serves until there is a login: the OS account running it. See docs/users.md#what-each-thing-is."
+  {:malli/schema [:=> [:cat] :string]}
+  [] (System/getProperty "user.name"))
+
 (defn- agent-key-of
   "The key of agent id, whom messages are to: a live agent's, else the newest agent of that id in this boot that main records
   (seon.task/this-boots): its process is not needed. nil when neither names one. See docs/users.md#messages."
@@ -482,8 +487,8 @@
                  ;; its first sentence's words are its name and title; the same words asked again take the one number that tells them apart
                  nm (if (pdb/eid db :seon.task/id (task/task-id 'request said)) (str said "-" (:max-tx db)) said)
                  template (get tpl/templates (:template m :user))
-                 ;; an agent that launched it, whom the reconciler tells how it ends (seon.reconcile/tell-tx)
-                 by (when-let [b (get-in st [:agents (:agent m) :branch])] (pdb/off-main (pdb/conn-main (:conn st)) b))]
+                 ;; who started it, the agent that launched it or the person asking: its agent is linked to them when it starts (seon.task/start-tx), and the reconciler tells them how it ends (seon.reconcile/tell-tx)
+                 by (or (when (:agent m) (agent-key-of st (:agent m))) (person))]
              (if-not template
                (reply! st o p (refused 'seon.root/ask! (str "no template " (:template m)) {:templates (vec (sort (keys tpl/templates)))}))
                (let [id (task/task-id 'request nm)
@@ -491,7 +496,7 @@
                  (if (contract/error? tx)
                    (reply! st o p tx)
                    (let [[st rid] (pend st p :tx nil)]
-                     (step/out! o :to-writer {:op :tx :branch :db :tx-data (cond-> tx by (conj [:db/add [:seon.task/id id] :seon.task/asked-by by])) :dest {:asked id :rid rid}})
+                     (step/out! o :to-writer {:op :tx :branch :db :tx-data (conj (vec tx) [:db/add [:seon.task/id id] :seon.task/started-by [:seon.agent/key by]]) :dest {:asked id :rid rid}})
                      (update st :writes (fnil conj #{}) rid))))))
       :clone (let [parent (:parent m)]
                (cond
@@ -1280,7 +1285,7 @@
     ;; whose boot fact was refused cannot start anything, so its error ends the boot
     ;; with it, how the root before it on main ended (its stop fact, or :unclean)
     (let [prev (previous-end db)
-          r @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (cond-> (-> (task/boot-tx boot max-running (System/getProperty "user.name")) (into (task/earlier-agents-tx db)) (into (cfg/facts config in-force-sources))
+          r @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (cond-> (-> (task/boot-tx boot max-running (person)) (into (task/earlier-agents-tx db)) (into (cfg/facts config in-force-sources))
                                                                                   (into (wiki-boot-tx db (cfg/checkout) #(wiki-baseline sys (cfg/checkout) "docs"))))
                                                                          prev (conj {:seon.root/id :root :seon.root/previous-end prev})
                                                                          ;; the test that started this boot (a test's main is its own: no other boot resumes it)
@@ -1371,7 +1376,7 @@
       ;; :judge, which keys the run by its head's digest): recorded on main, one run with any other asker's
       run-tests! {:op :judge :id id}
       kill! {:op :kill :id id}
-      message! {:op :message :id id :from :owner :body (:body args)}
+      message! {:op :message :id id :from (person) :body (:body args)}
       ;; my.root/run!'s one transaction: the held task (:task) released, its next run the reconciler's
       release! {:op :write :req {:op :tx :branch :db :tx-data (task/execution-tx [(:task args)] :running)}}
       ;; a reader opened an eval of agent key's page: the fact on the agent's entity on main (opened!)

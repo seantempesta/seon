@@ -274,3 +274,15 @@
     (is (= [] (task/undelivered main placed "a")) "a turn has it")
     (is (= [] (task/undelivered main removed "a")) "removed after, it stays gone")))
 
+(deftest a-started-agent-is-linked-to-who-started-it
+  ;; docs/users.md#what-each-thing-is: a task names who started it; its agent, when it starts, is in that one's :seon.agent/agents, a user or an agent alike
+  (let [db (d/db-with (ts/test-db) (into [{:seon.root/id :root :seon.root/boot "b1"} {:seon.agent/key "sean" :seon.user/name "sean"}]
+                                         (task/create-tx (ts/test-db) [{:seon.task/ns 'demo :seon.task/name "a" :seon.task/plan "A." :seon.task/kind :work}])))
+        db (d/db-with db [{:seon.task/id "demo/a" :seon.task/started-by [:seon.agent/key "sean"]}])
+        started (d/db-with db (task/start-tx db "demo/a" "b1" :a1 {:branch :task-demo-a :model nil :max-turns 40} 1000))
+        agents (fn [db] (set (map :seon.agent/key (:seon.agent/agents (d/entity db [:seon.user/name "sean"])))))]
+    (is (= #{} (agents db)) "no agent yet")
+    (is (= #{"b1/a1"} (agents started)) "its agent, once it starts")
+    (let [none (d/db-with db [[:db/retract [:seon.task/id "demo/a"] :seon.task/started-by [:seon.agent/key "sean"]]])]
+      (is (= #{} (agents (d/db-with none (task/start-tx none "demo/a" "b1" :a1 {:branch :task-demo-a :model nil :max-turns 40} 1000)))) "a task nobody started links nothing"))))
+

@@ -1448,7 +1448,7 @@
   {:malli/schema [:=> [:cat :map] :any]}
   [{:seon.message/keys [id from body]}]
   [:section {:wire/role "user" :wire/ref [:message id]}
-   [:p {:class (str "seon-note" (when (= "owner" (str from)) " hidden")) :wire/field "from"} (str from)]
+   [:p {:class "seon-note" :wire/field "from"} (str from)]
    [:div {:wire/field "body"} [#'markdown (str body) {:inline? true}]]])
 
 (defn chat-message
@@ -1978,13 +1978,23 @@
      (for [e es :let [k (:seon.agent/key (d/entity db e))] :when k] [#'session-card {} k])]
     [:p {:class "muted"} "No agents yet."]))
 
+(defn user-messages
+  "What this user holds (a component over ctx, its pull's :messages), newest first, each `chat-message`: what its agents told it. See docs/users.md#messages."
+  {:seon.render/for "page" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+  [{c :seon.ctx/ctx}]
+  (when-let [ms (seq (:messages c))]
+    [:section {:class "seon-stack"}
+     [:h2 {:class "kicker"} "Messages"]
+     (for [[e m] (sort-by (fn [[e m]] [(- (or (:seon.message/sent-ms m) 0)) e]) (ratom/untracked ms))]
+       [#'chat-message {:key (:seon.message/id m) :at [:messages e]}])]))
+
 (defn user-ctx
   "A user's page, the render of its ctx (the declared html render of :seon.render/user-ctx, which a branch overrides like any render): root and its agents in the agents list, its agents as cards. See docs/users.md#whats-on-screen."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
   [_]
   [:div {:id "user-ctx"}
    [:ol {:id "c-side"} [#'root-side {}] [#'started-side {}]]
-   [:ol {:id "c-rows"} [#'started-cards {}]]
+   [:ol {:id "c-rows"} [#'user-messages {}] [#'started-cards {}]]
    [#'rules-list {}]])
 
 (defn root-ctx
