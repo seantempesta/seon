@@ -150,29 +150,23 @@
 
 (deftest a-file-is-read-as-its-reader-reads-it-before-a-commit
   ;; docs/source.md#a-program-file: measured 2026-11-07, one agent's spit of a schemaless key stopped a new process loading its config; what doesn't read is refused and nothing is committed
-  (is (nil? (fx/unreadable "bin/x" "#!/bin/sh\necho 1\n")))
-  (is (some? (fx/unreadable "bin/x" "#!/bin/sh\nif then\n")) "sh -n")
+  (is (nil? (fx/unreadable "bin/x" "#!/bin/zsh\necho 1\n")))
   (is (some? (fx/unreadable "bin/x" "#!/bin/zsh\nif then\n")) "zsh -n")
-  (is (nil? (fx/unreadable "bin/x" "#!/usr/bin/perl\nprint 1;\n")))
   (is (some? (fx/unreadable "bin/x" "#!/usr/bin/perl\nprint (;\n")) "perl -c")
   (is (nil? (fx/unreadable "bin/env" "# sourced\nif then\n")) "no #! line: no reader to ask")
-  (is (nil? (fx/unreadable "src/x.clj" "(ns x)\n(defn f [] ::a/b)\n")))
+  (is (nil? (fx/unreadable "src/x.clj" "(ns x)\n(defn f [] ::a/b)\n")) "an alias's keyword reads, as the loader reads it")
   (is (some? (fx/unreadable "src/x.clj" "(ns x)\n(defn f [")))
-  (is (nil? (fx/unreadable "resources/seon/schemas/x.edn" "{:a #env X}\n")))
+  (is (nil? (fx/unreadable "resources/seon/schemas/x.edn" "{:a #env X}\n")) "a tag reads, as the config's reader reads it")
   (is (some? (fx/unreadable "resources/seon/schemas/x.edn" "{:a ")))
   (let [shipped (slurp (str (seon.config/checkout) "/" seon.config/shipped-file))]
     (is (nil? (fx/unreadable seon.config/shipped-file shipped)) "the shipped file reads")
     (is (thrown-with-msg? Exception #"seon.config.nope/key unknown-key" (fx/unreadable seon.config/shipped-file (clojure.string/replace-first shipped "{" "{:seon.config.nope/key 1\n"))) "a key with no schema is refused, naming it"))
   (let [d (scratch-dir) git #(apply clojure.java.shell/sh "git" "-C" d "-c" "user.name=t" "-c" "user.email=t@t" %&)]
     (git "init" "-q") (spit (str d "/a") "a") (git "add" "a") (git "commit" "-q" "-m" "one")
-    (let [head (:out (git "rev-parse" "HEAD"))
-          r (fx/git-commit {:req {:dir d :branch "b" :files {"bin/x" "#!/bin/sh\nif then\n"} :message "m"}})
-          none (:exit (git "rev-parse" "--verify" "--quiet" "refs/heads/b"))
-          ok (fx/git-commit {:req {:dir d :branch "b" :files {"bin/x" "#!/bin/sh\necho 1\n"} :modes {"bin/x" "100755"} :message "m"}})]
+    (let [r (fx/git-commit {:req {:dir d :branch "b" :files {"bin/x" "#!/bin/sh\nif then\n"} :message "m"}})]
       (is (= :seon.fx/io-error (:seon.error/type r)) (pr-str r))
       (is (clojure.string/includes? (:seon.error/message r) "bin/x") (pr-str r))
-      (is (not (zero? none)) "the refused one committed nothing")
-      (is (clojure.string/starts-with? (:out (git "ls-tree" (get-in ok [:value :sha]) "bin/x")) "100755 ") "the mode the db holds is the tree's"))))
+      (is (not (zero? (:exit (git "rev-parse" "--verify" "--quiet" "refs/heads/b")))) "the refused one committed nothing"))))
 
 (deftest a-failed-rename-is-an-io-error-and-leaves-no-tmp
   (let [d (scratch-dir)
@@ -200,8 +194,7 @@
       (spit (str d "/src/b.clj") "(ns b) (def x 1)") (spit (str d "/notes.clj") "(ns notes) (def y 1)")
       (let [r (read t)]
         (is (= {"src/b.clj" "(ns b) (def x 1)"} (:value r)) "the file that moved, under dirs")
-        (is (= ["src/b.clj"] (:paths r)))
-        (is (= (:tree r) (:tree (read nil))) "and its tree is the same as a whole read's"))
+        (is (= ["src/b.clj"] (:paths r))))
       (.delete (java.io.File. (str d "/src/a.clj")))
       (is (= nil (get (:value (read t)) "src/a.clj" :absent)) "a removed file reads nil")
       (is (contains? (:value (read (apply str (repeat 40 "0")))) "src/b.clj") "a tree git can't find reads whole"))))

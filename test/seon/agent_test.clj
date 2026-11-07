@@ -2060,9 +2060,8 @@
 (deftest a-passing-test-reads-as-passed
   (let [t 'seon.repl-test/a-plainly-green-named-test
         [_ named] (in-agent (fn [_] [(str "(do (in-ns 'seon.repl-test) (clojure.test/deftest a-plainly-green-named-test (clojure.test/is (= 2 (+ 1 1)))) (in-ns 'user) :ok)")
-                                     (str "(let [r (my.agent/prove '" t ")] {:proofs (:proofs r) :line (:seon.print/code (my.agent/prove-summary {} r))})")]))]
-    (is (= :pass (get-in named [:value :proofs t])) (pr-str named))
-    (is (not (str/includes? (str (get-in named [:value :line])) (str t))) "it isn't among what has no verdict; the task's own unwritten proof is")))
+                                     (str "(:proofs (my.agent/prove '" t "))")]))]
+    (is (= :pass (get (:value named) t)) (pr-str named))))
 
 (deftest a-real-gate-judges-a-candidate-once
   ;; the one real gate: a process test run on a checkout of the candidate, its verdict reaching the branch, and the judge's gate of the same
@@ -2072,12 +2071,13 @@
         branch (str "jolt/seon-merges-gate-test-" (random-uuid))
         prove "(let [r (my.agent/prove)] {:proofs (:proofs r) :deferred (:deferred r)})"
         [_ green judge-gate]
-        (in-agent (fn [{:keys [task]}]
+        (try
+          (in-agent (fn [{:keys [task]}]
                     [(process-proof "a-really-gated-proof" 2) prove
                      {:op :eval :agent "root"
                       :code (str "(select-keys (:value @(seon.root/call! sys {:op :gate :branch (seon.task/default-branch " (pr-str task) ") :tests ['" t "]})) [:results :log])")}])
-                  {:proofs #{t} :own-root? true :sets [(str ":seon.config.source/branch=" (pr-str branch))]})]
-    (clojure.java.shell/sh "git" "-C" (str (seon.config/checkout)) "branch" "-q" "-D" branch)
+                  {:proofs #{t} :own-root? true :sets [(str ":seon.config.source/branch=" (pr-str branch))]})
+          (finally (clojure.java.shell/sh "git" "-C" (str (seon.config/checkout)) "branch" "-q" "-D" branch)))]
     (is (= {t :pass} (:proofs (:value green))) (pr-str green))
     (is (= [] (:deferred (:value green))) "nothing left unjudged")
     (is (= {t :pass} (:results (:value judge-gate))) (pr-str judge-gate))

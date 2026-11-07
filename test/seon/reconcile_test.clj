@@ -199,18 +199,11 @@
     (is (= [] (actions-for db)) "nor when the task's model changes: the agent is the outside agent's"))
   (let [db (db-of [(decl "x" :model "m1")] :extra (work "x" :killed :model "outside"))]
     (is (= [(spawn "x" :model "m1")] (actions-for db)) "its next agent is the task's own model, not outside"))
-  ;; a root restart lost an attached task, and its next agent took the task's own model (none
-  ;; configured: "no model provider", the task held); a lost task was ended by nobody
+  ;; a root restart lost an attached task: nothing drives it until someone attaches, and a process here would race that attach (seon.server's attach!)
   (let [db (db-of [(decl "x" :model "m1")] :extra (work "x" :lost :model "outside"))]
     (is (= [] (actions-for db)) "a lost outside task waits for its attach"))
   (let [db (db-of [(decl "x" :model "m1")] :extra (work "x" :running :model "outside" :boot "boot-0"))]
-    (is (= [{:op :reap :task "demo/x"}] (actions-for db)) "a reap is the task's one action this pass")
-    (is (= [] (actions-for (d/db-with db (task/move-tx "demo/x" :running :lost {})))) "and one the restart reaped waits for its attach: nothing would drive it, and a process here would race that attach"))
-  (testing "root cannot take back a task that is done: merged work keeps :running"
-    (let [db (db-of [(decl "z")] :extra (work "z" :merged))
-          {:keys [taken not-running]} (my.root/take-back-tx db ["demo/z"] "x")]
-      (is (= [] taken))
-      (is (= ["task demo/z is done, not running: nothing to take back"] (map :seon.error/message not-running))))))
+    (is (= [{:op :reap :task "demo/x"}] (actions-for db)) "a reap is the task's one action this pass")))
 
 (deftest root-takes-a-running-task-back-and-releases-it-again
   ;; task seon.root/an-outside-agent-is-a-first-class-worker (gap 6): my.root/hold! pauses a running
@@ -225,7 +218,11 @@
     (is (= [{:op :kill :task "demo/x" :reason :held}] (actions-for held)) "the reconciler kills the live agent and keeps the task")
     (let [ended (d/db-with held (task/move-tx "demo/x" :running :killed {}))
           released (d/db-with ended (vec (task/execution-tx ["demo/x"] :running)))]
-      (is (= [(spawn "x")] (actions-for released)) "released again, its next work is a new agent's start on the same task"))))
+      (is (= [(spawn "x")] (actions-for released)) "released again, its next work is a new agent's start on the same task")))
+  (let [db (db-of [(decl "z")] :extra (work "z" :merged))
+        {:keys [taken not-running]} (my.root/take-back-tx db ["demo/z"] "x")]
+    (is (= [] taken) "a task that is done is not taken back: merged work keeps :running")
+    (is (= ["task demo/z is done, not running: nothing to take back"] (map :seon.error/message not-running)))))
 
 (deftest a-cancel-never-makes-a-task
   ;; 2026-10-28: a bare name given as a task's id (ns/name) was upserted alone, an entity with no

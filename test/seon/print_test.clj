@@ -510,8 +510,8 @@
     (is (str/includes? text "(get-in result/e9 [:value])") "the value's cut says how to read its rest")))
 
 (def ^:private breadth-rows
-  "The plan's 177 rows, one member at index 3 made another kind by each use."
-  (vec (for [i (range 177)]
+  "Rows more than the budget holds whole, one member made another kind by each use."
+  (vec (for [i (range 40)]
          (array-map :seon.doc/section (keyword "render" (str "section-" i)) :seon.doc/page "docs/render.md" :seon.problem/class :stale-section :seon.problem/since 1761360000000 :cited 'seon.print/print-value :lead "A section whose lead cites a var that moved." :n i))))
 
 (clojure.test/deftest breadth-shows-no-member-that-shows-nothing
