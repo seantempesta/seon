@@ -3,19 +3,27 @@
   unmerged, resolve an entry. The writer does the merge (seon.merge/three-way, the one
   derivation); this branch sees main's changes only through these functions."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.repl :as repl] [seon.merge :as pm] [seon.stage :as stage] [seon.program :as program]))
+  (:require [seon.contract :as contract :refer [defn defn-]] [seon.fx :as fx] [seon.config :as cfg] [seon.agent :as agent] [seon.repl :as repl] [seon.merge :as pm] [seon.stage :as stage] [seon.program :as program]))
+
+(defn merged-summary
+  "A merge of main as its eval answers it (seon.render/model, the schema :seon.branch/merged): how many keys it applied, and all the rest as it is, since a
+  main far ahead applies hundreds and the agent asks for them when it wants them: `(:applied result/...)` reads them under the eval's handle."
+  {:malli/schema [:=> [:cat :seon.render/opts :map] :map]}
+  [_ r]
+  (-> (with-meta r nil) (assoc :applied (count (:applied r)))))
 
 (defn merge-main!
   "git merge main: stage this runtime onto the branch, then merge main's changes since
   the merge base. What does not conflict is applied and loaded here; each conflict stays
   on the branch as an unmerged entry (base, ours, theirs). Answers {:ok :applied
-  :conflicts :unmerged} (unmerged: every entry still open, earlier ones included)."
+  :conflicts :unmerged} (unmerged: every entry still open, earlier ones included), printed by `merged-summary`: the whole
+  value stays under the eval's handle."
   {:malli/schema [:=> [:cat] [:map [:ok :boolean]]]}
   []
   (stage/stage!)
   (let [r (agent/merge-main! #{})
         db (agent/db)]
-    (assoc r :unmerged (pm/unmerged db))))
+    (with-meta (assoc r :unmerged (pm/unmerged db)) {:seon.render/schema :seon.branch/merged})))
 
 (defn unmerged
   "The entries of this branch still unmerged: the conflicts no re-defn or resolve! has
@@ -48,7 +56,10 @@
 (defn changes
   "git diff main...: what this branch's merge will carry to main, the vars it added, changed
   and removed and the schemas it registered or changed, each sorted (seon.merge/divergence of
-  the turn's one diff since its merge base, seon.agent/branch-changes); {} when nothing.
+  the turn's one diff since its merge base, seon.agent/branch-changes); {} when nothing, and under :checkout the files git sees
+  changed in your checkout (seon.fx/uncommitted), which no merge carries.
   Anything listed that the task does not need, put back."
   {:malli/schema [:=> [:cat] :map]}
-  [] (pm/divergence (agent/branch-changes (:base @agent/state) (agent/db))))
+  [] (let [files (fx/uncommitted (str (cfg/checkout)))]
+       (cond-> (pm/divergence (agent/branch-changes (:base @agent/state) (agent/db)))
+         (seq files) (assoc :checkout (if (contract/error? files) (:seon.error/message files) files)))))

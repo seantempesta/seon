@@ -902,6 +902,16 @@
   {:malli/schema [:=> [:cat :string] :string]}
   [text] (str/join " | " (take-last 6 (remove str/blank? (str/split-lines text)))))
 
+(defn uncommitted
+  "The files git sees changed in the checkout at dir, `git status --porcelain`'s lines, which no merge of the program carries: [] when none, or
+  the error when git can't read it. See docs/source.md#commit-the-merges-branch."
+  {:malli/schema [:=> [:cat :string] [:or [:vector :string] :seon.error/base]]}
+  [dir]
+  (let [r (sh/sh "git" "-C" dir "status" "--porcelain" "--ignore-submodules")]
+    (if (zero? (:exit r))
+      (vec (remove str/blank? (str/split-lines (:out r))))
+      (error #'seon.fx/uncommitted :seon.fx/io-error (str "git status in " dir ": " (:err r)) {:path dir}))))
+
 (defn- run-on-checkout
   "One run of the :tests effect (run-tests): tests (qualified names) on a checkout of the merge candidate: a
   detached worktree of repo at branch's head (bin/worktree --at, as a generation's), files

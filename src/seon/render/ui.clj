@@ -881,7 +881,7 @@
      (if changing?
        (list [:p (if (= :test (:var/kind v)) "A test your plan names." "A function your plan names.")]
              (if src (source-block src) (list (when m [:p (str (:arglists m))]) (when doc [:p doc]) [:p "Read it: " [:code (str "(source " sym ")")]]))
-             (names-line "Tests that reach it" tests))
+             (when (seq tests) [:p {:key "tests that reach it"} (str (count tests) " tests reach it: " "(callers '" sym ") lists them.")]))
        (list [:p (if (= :test (:var/kind v)) "A test your plan names." "A function your plan names.")]
              (when src [:p [:code (str (reader/arglists src (symbol (namespace sym))))]])
              (when m [:p [:code (str (:arglists m))]])
@@ -1094,7 +1094,7 @@
   Main's side only when something conflicts: both sides and the form that settles each. No table beside the same words: a list of
   the proofs' states only when there are several. See docs/render.md#how-the-work-stands."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
-  [_opts {:keys [proofs refused test-run unmerged without-a-contract caused attention merge unjudged also-red-on-main]}]
+  [_opts {:keys [proofs refused test-run unmerged without-a-contract caused attention merge unjudged also-red-on-main main-moved]}]
   (let [state #(:status %)
         unwritten (filter #(= :undefined (state %)) proofs)
         red (filter #(#{:fail :error} (state %)) proofs)
@@ -1158,6 +1158,7 @@
        (into [:div {:key :merging} [:p "Every proof passes, but your branch can't merge yet:"]] (map block) blocks)
        (seq blocks)
        (into [:div {:key :merging} [:p "Also blocking merging:"]] (map block) blocks))
+     (when main-moved [:p {:key :main-moved} main-moved])
      (when (seq also-red-on-main) [:p {:key :also-red-on-main} (str "Also red on main at your merge base: " (str/join ", " also-red-on-main) ".")])
      (when unjudged [:p {:key :unjudged} (str "Not judged, so these say nothing about your change: " (str/join ", " (:tests unjudged)) ". " (:why unjudged) ".")])
      (when (seq (:conflicts merge)) [:p (str (count (:conflicts merge)) " things conflict with main; they are listed above.")])]))

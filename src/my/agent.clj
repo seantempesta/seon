@@ -39,7 +39,7 @@
     clojure.repl as at any Clojure REPL (source, doc, dir, apropos, find-doc, pst), with *1 *2 *3 *e:
     source reads this branch's own definitions first, then a library's file"
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.lib :as lib] [seon.context :as context] [seon.ref :as ref] [seon.doc :as doc] [seon.source :as source]
+  (:require [clojure.walk] [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.lib :as lib] [seon.context :as context] [seon.ref :as ref] [seon.doc :as doc] [seon.source :as source]
             [seon.config :as cfg] [seon.proofs :as proofs] [seon.fx :as fx] [seon.program :as program] [seon.task :as task] [seon.vector :as vector] [seon.contract :as contract] [seon.ctx]
             [seon.db :as pdb] [seon.print :as print] [seon.print.select :as select] [seon.render :as render] [seon.problems :as problems] [seon.render.ui :as ui] [my.schema :as schema] [jolt.analyzer] [clojure.java.io :as io] [clojure.string :as str] [clojure.main] [datahike.api :as d]))
 
@@ -306,7 +306,7 @@
   run is recorded on main and is one run with any other asker's of this head):
   the task's proofs and every in-process test reaching what the branch changed since the main it
   forked from, each test with a result at its reach digest reused (a red as recorded), not run;
-  given proofs, those tests (a namespace's name, its tests). Once those are green, the process tests among its proofs and
+  given proofs (one name, or a set or vector of them), those tests (a namespace's name, its tests), each asked now: a red held at its digest runs again. Once those are green, the process tests among its proofs and
   the tests given run on the merge gate's checkout, slower, and the verdict counts them; the process tests it only reaches run when
   your status is clear, and stay :deferred here (with :why each: the process it reaches through which calls, and :unjudged, why they stay), so the verdict says not green. Answers that test run ({:pass :fail :error :reports :ran :reused :ms ...}) with
   :results {test :pass|:fail|:error} and :proofs (each proof's status: the task's and the given ones,
@@ -316,10 +316,11 @@
   is the run's part of the page. Its results are kept at each test's reach digest (the test service
   records them), so (my.task/status) and the judge read a proof's status at its digest whichever call
   measured it."
-  {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat [:set :qualified-symbol]] :map]]}
+  {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat [:or :symbol [:set :symbol] [:sequential :symbol]]] :map]]}
   ([] (prove #{}))
-  ([proofs]
-   (let [test-run (agent/judge! proofs false)]
+  ([given]
+   (let [proofs (if (symbol? given) #{given} (set given))
+         test-run (agent/judge! proofs false)]
      (if (contract/error? test-run)
        test-run
        (let [results (proofs/results test-run)
@@ -339,7 +340,7 @@
   "A prove's run r as the eval answers it (seon.render/model, the schema :seon.test/proved): its verdict as counts of the
   proofs it judged (`red: 1 of 3 failed`), each failing test with its first failure in a line, and only what is true of this
   run: the tests it reused (their last result still counts, because nothing they reach changed), the process tests with no
-  verdict (then it is not green), those red on main too (not this change's), the ones that died (no verdict) and a name that matched no test. The run whole is the value under the eval's
+  verdict (then it is not green), the ones that died (no verdict) and a name that matched no test. The run whole is the value under the eval's
   handle (the proofs' statuses, every failure, the deaths). A part of the run (a select-keys of it keeps its metadata) is that
   part, as data. See docs/agent.md#done."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
@@ -367,15 +368,16 @@
                   ;; a process test nobody ran has no verdict, a proof or not: green can't be said of it
                   (seq (:deferred r)) (let [ps (vals (:proofs r))
                                             waiting (sort-by str (keep (fn [[p st]] (when (= :deferred st) p)) (:proofs r)))]
-                                        (str "not green: " n " of " n " in-process tests passed" (when (seq ps) (str ", " (count (filter #{:pass} ps)) " of your " (count ps) " proofs among what passed"))
-                                             ", and " (count (:deferred r)) " process tests have no verdict"
+                                        (str n " of " n " in-process tests passed" (when (seq ps) (str ", " (count (filter #{:pass} ps)) " of your " (count ps) " proofs among what passed"))
+                                             "; outstanding: " (count (:deferred r)) " process tests with no verdict"
                                              (when (seq waiting) (str ", your proofs " (str/join ", " waiting) " among them"))
-                                             (some->> (:unjudged r) (str ": ")) ". (deferred) lists them."))
+                                             (some->> (:unjudged r) (str ": ")) ". (my.agent/deferred) lists them."))
                   (zero? n) "nothing judged: no proof and no test this change reaches"
                   :else (str "green: " n " of " n " passed"))]
            (for [[t fs] (sort-by (comp str key) fails)] (failure t (first fs)))
-           [(when (pos? (:reused r 0)) (str "reused " (:reused r) ": their last result still counts, because nothing they reach has changed"))
-            (when (seq (:main-red r)) (str "red on main too, so not this change's: " (str/join ", " (sort-by str (keys (:main-red r))))))
+           [(when (pos? (:reused r 0)) (str "reused " (:reused r) ": their last result still counts, because nothing they reach has changed"
+                                            (let [held (filter :reused (:reports r)) reds (sort-by str (distinct (keep #(when (#{:fail :error} (:type %)) (proofs/test-symbol (:var %))) held)))]
+                                              (when (seq reds) (str "; of them red: " (str/join ", " reds) ". (my.agent/prove '#{a-name}) runs one again")))))
             (when (seq (:unmatched r)) (str "no test is named " (str/join ", " (:unmatched r))))])))))))
 
 (defn process-test?
@@ -588,6 +590,22 @@
         db' (:db-after r)]
     (ui/cite-hiccup db' (:tree (seon.ctx/build db' (pdb/eid db' :seon.cite/id (str "help " n)) nil)))))
 
+(defn- doc-view
+  "A section or page view v as `doc` prints it: each edge its address, since (doc address) reads what it says, and no lead when the text below says the same; the
+  sections' own text is left whole. See docs/references.md#a-section-read-at-a-depth-with-its-edges."
+  {:malli/schema [:=> [:cat :any] :any]}
+  [v]
+  (clojure.walk/postwalk
+   (fn [x]
+     (if (and (map? x) (:seon.ref/address x))
+       (let [addresses (fn [es] (vec (distinct (map :seon.ref/address es))))]
+         (cond-> x
+           (:seon.ref/references x) (update :seon.ref/references addresses)
+           (:seon.ref/cited-by x) (update :seon.ref/cited-by addresses)
+           (= (:seon.ref/lead x) (:seon.ref/text x)) (dissoc :seon.ref/lead)))
+       x))
+   v))
+
 (defn doc-of
   "The thing x names as data, for `doc`: a schema key (:var/form, its form and what cites it), a wiki address
   (\"docs/vector.md#the-model\" a section whole, \"docs/vector.md\" a page's sections, an anchor of the help page
@@ -600,14 +618,14 @@
       (map? x) (let [{:keys [kind name]} x]
                  (case kind
                    :task (select-keys (task/task db name) [:seon.task/id :seon.task/plan :seon.task/proofs :seon.task/needs])
-                   :section (doc/view db name :code)
+                   :section (doc-view (doc/view db name :code))
                    :more x
                    (cited db name)))
       (symbol? x) (cited db x)
       (keyword? x) (let [f (schema/forms x)] (if (contract/error? f) f (cited db x)))
       :else (let [a (if (str/includes? x "#") x (str context/help-page "#" x))]
-              (or (doc/view db a :code)
-                  (doc/page db x :summary)
+              (or (some-> (doc/view db a :code) doc-view)
+                  (some-> (doc/page db x :summary) doc-view)
                   {:no-section x
                    :nearest (help-nearest db x)
                    :read-one "(doc \"docs/<page>.md\") lists a page's sections; (doc \"docs/<page>.md#<section>\") reads one; (doc 'ns.name) a namespace, every definition a line; (doc :ns/key) a schema key"})))))

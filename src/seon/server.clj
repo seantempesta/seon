@@ -13,7 +13,7 @@
   printf '{:op :agents}\\n' | nc -w 5 127.0.0.1 PORT
   printf '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}\\n' | nc -w 5 127.0.0.1 PORT"
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.step :as step] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.root :as c] [seon.task :as task] [seon.proofs :as proofs] [seon.error :as err] [seon.reconcile :as r] [datahike.api :as d]
+  (:require [seon.step :as step] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.root :as c] [seon.fx :as fx] [seon.config :as cfg] [seon.task :as task] [seon.proofs :as proofs] [seon.error :as err] [seon.reconcile :as r] [datahike.api :as d]
             [seon.lib :as lib] [seon.edn :as sedn] [seon.db :as pdb] [seon.repl :as repl] [seon.print :as print] [seon.context :as context] [clojure.edn :as edn] [clojure.data.json :as json] [clojure.string :as str] [clojure.walk]))
 
 (defn- refused
@@ -194,20 +194,22 @@
 
 (defn verdict-line
   "The done answer (owner: a line and a handle): the task's verdict as one line, its outcome and
-  reason, and for each red test its first failing assertion's message, all cut by the one printer
-  (:part print/budgets, the cut saying what it left), with how main differs from the branch when
+  reason, and for each red test its first failing assertion's message, whole, what merged and never reached a file (:not-on-disk, seon.reconcile/unfiled-error), with how main differs from the branch when
   the agent said so (main, seon.agent/main-difference's line), and the form that reads the whole
   verdict at root (`verdict`)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/id [:maybe :string]] [:map [:line :string] [:handle :string]]]}
   [db task main]
   (let [v (verdict db task)
         fails (:seon.task/failures (d/pull db [:seon.task/failures] [:seon.task/id task]))
-        reds (get-in v [:held :seon.task/evidence :red])]
+        reds (get-in v [:held :seon.task/evidence :red])
+        commit-error (:seon.task/commit-error (d/pull db [:seon.task/commit-error] [:seon.task/id task]))]
     {:line (print/text (cond-> (select-keys v [:outcome :reason])
                          (and (:held v) (empty? reds)) (assoc :held (get-in v [:held :seon.task/failure :reason]))
                          (seq reds) (assoc :reds (vec (for [t reds] (if-let [why (or (some-> (get fails t) first :message) (some-> (get fails t) first :type name))] [t why] [t]))))
-                         main (assoc :main main))
-                       (:part print/budgets))
+                         main (assoc :main main)
+                         commit-error (assoc :not-on-disk commit-error))
+                       ;; the answer that says why a task closed, whole
+                       Integer/MAX_VALUE)
      :handle (str "(seon.server/verdict @(:conn sys) " (pr-str task) ")")}))
 
 (def ops
@@ -235,6 +237,10 @@
    :message {:doc "Send an agent a message (the owner's words): a message on main to the task it works (refused when it works none), which its next turn takes onto its branch and reads, and which wakes a parked session. The page's message bar sends the same request (seon.root/message!)."
              :args {:agent {:type "string"} :body {:type "string" :description "what to tell the agent"}
                     :task {:type "string" :description "the agent's task (ns/name): needed only for an agent another session attached"}} :required ["agent" "body"]}
+   :create {:doc "Declare a task, held: nothing starts and nothing is paid. Answers its id, which seon_attach works. Its proofs may be named later."
+            :args {:ns {:type "string" :description "the task's namespace"} :name {:type "string" :description "its name"} :plan {:type "string" :description "what to do"}
+                   :proofs {:type "array" :items {:type "string"} :description "qualified test names; optional"}}
+            :required ["ns" "name" "plan"]}
    :attach {:doc "Work a task as a Seon agent: root starts an agent on the task's branch (model outside) and answers its id and the next step. fresh: reset it, a new branch from main and an empty conversation (the old branch kept). from: fork that agent, a clone of it on a branch of its head working a sibling task."
             :args {:task {:type "string" :description "ns/name"} :fresh {:type "boolean" :description "reset: start the task again from main"}
                    :from {:type "string" :description "fork: an agent id (a3) whose program, live values and branch the new agent goes on from, on a sibling of its task"}}}
@@ -280,6 +286,8 @@
     (cond
       (and (contains? req :code) (not (contains? req :evals)))
       (refused (str "seon_eval on an agent is one reply now: {agent, message-md, evals: [{intent, code}, ...]}; your code was not run. Only root takes plain code."))
+      (nil? task)
+      (refused (str (name ag) " works no task now (its last has ended): seon_attach task=ns/name works one again, on its branch."))
       (and (not outside?) (not (str/blank? msg)))
       (refused (str (name ag) "'s own model drives it, so this reply is no message of its: send message-md empty, and seon_message to tell it something."))
       :else
@@ -313,19 +321,28 @@
           (let [db (:db @(c/branch-db sys (:branch a)))
                 basis {:commit (d/commit-id db) :task task :turn (inc (or (:seon.agent/turn (d/pull db [:seon.agent/turn] [:seon.agent/key key])) 0)) :max-turns 1 :origin :outside :agent key}
                 {:keys [messages]} (context/render db basis)]
-            {:context (str (name ag) " is still running an eval" (when-let [t (:form (:last-op a))] (str ", at " t)) ": this is its branch as last committed, and nothing was taken.\n\n"
+            {:agent ag :task task :context (str (name ag) " is still running an eval" (when-let [t (:form (:last-op a))] (str ", at " t)) ": this is its branch as last committed, and nothing was taken.\n\n"
                            (context/read-text db basis messages (true? (:wire req))))})
           ;; an outside model's read is its turn, and takes its messages; anyone
           ;; else's read of an agent its model drives only looks
           (let [r @(c/submit! sys ag (sedn/encode (list 'print (list 'seon.turn/context-block task (= "outside" (:model env)) (true? (:wire req))))) {:origin :context})]
-            (cond (contract/error? r) r (:ex r) (:ex r) :else {:context (:seon.print/code (:out r))}))))
+            (cond (contract/error? r) r (:ex r) (:ex r) :else {:agent ag :task task :context (:seon.print/code (:out r))}))))
       (refused (if ag (str ag " works no task: attach one first") (str "no task " (:task req) ", and no agent named"))))))
 
 (defmethod op-answer :message [sys ag req]
   @(c/message! sys ag (:body req)))
 
+(defmethod op-answer :create [sys _ {:keys [ns name plan proofs]}]
+  (let [decl (cond-> {:seon.task/ns (symbol ns) :seon.task/name name :seon.task/plan plan :seon.task/kind :whole}
+               (seq proofs) (assoc :seon.task/proofs (set (map symbol proofs))))
+        tx (task/create-tx @(:conn sys) [decl])
+        r (if (contract/error? tx) tx @(c/transact-main! sys tx))]
+    (if (contract/error? r) r {:task (task/task-id (symbol ns) name)})))
+
 (defmethod op-answer :attach [sys _ req]
-  (let [a (if-let [from (:from req)] (fork! sys (keyword from) (:client req)) (attach! sys (:task req) {:fresh? (true? (:fresh req)) :client (:client req)}))]
+  (let [a (cond (:from req) (fork! sys (keyword (:from req)) (:client req))
+                (:task req) (attach! sys (:task req) {:fresh? (true? (:fresh req)) :client (:client req)})
+                :else (refused "seon_attach needs task=ns/name, the task to work (or from=an-agent-id, to fork one)"))]
     (cond-> a
       (and (:agent a) (not (contract/error? a))) (assoc :next (str "seon_context with agent " (name (:agent a)) " reads what its model reads (wire true: the request body). "
                                    "seon_eval with it, message-md and evals (each an intent and code), is one reply, a model's turn; (my.agent/prove) there runs its proofs. seon_done hands it back.")))))
@@ -360,7 +377,9 @@
                         (cond (contract/error? db) (assoc db :task task)
                               :else (if-let [p (and (= :running (outcome db)) (c/defect db t "seon.reconcile"))]
                                       {:task task :defect (select-keys p [:seon.error/type :seon.error/message])}
-                                      (verdict-line db task (:main r)))))
+                                      (let [files (fx/uncommitted (str (cfg/checkout)))]
+                                        (cond-> (verdict-line db task (:main r))
+                                          (and (seq files) (not (contract/error? files))) (assoc :checkout-not-merged files))))))
             :else (refused (str ag " answered no end for " task))))
     (refused (str ag " works no task"))))
 
@@ -372,8 +391,10 @@
   "One request's answer: its op's (op-answer), or held's refusal for an op on an agent another client holds."
   {:malli/schema [:=> [:cat :seon.root/sys :map] :map]}
   [sys req]
-  (let [ag (some-> (:agent req) (#(if (= "root" %) :root (keyword %))))]
-    (or (when (and (held-ops (:op req)) (keyword? ag) (not= :root ag)) (held sys ag req))
+  (let [ag (some-> (:agent req) (#(if (= "root" %) :root (keyword %))))
+        missing (remove #(contains? req (keyword %)) (:required (get ops (:op req))))]
+    (or (when (seq missing) (refused (str "seon_" (name (:op req)) " needs " (str/join ", " missing) ": " (str/join "; " (for [m missing] (str m " is " (get-in ops [(:op req) :args (keyword m) :description] "required")))))))
+        (when (and (held-ops (:op req)) (keyword? ag) (not= :root ag)) (held sys ag req))
         (op-answer sys ag req))))
 
 (def protocol-versions

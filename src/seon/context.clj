@@ -719,6 +719,8 @@
                               (seq calls) (assoc :calls calls))))}
       (seq blockers) (assoc :refused blockers)
       (seq also-on-main) (assoc :also-red-on-main also-on-main)
+      ;; a real field, on every page from the first, not only the line an eval's answer carries: its base is behind main
+      (and main base (= :agent (:mode @agent/state))) (assoc :main-moved (agent/main-line base db (d/commit-as-db (pdb/store-of db) main)))
       ;; what no gate will run stays unjudged, said here because it ends no run (seon.task/unjudged)
       unjudged (assoc :unjudged unjudged)
       test-error (assoc :test-run {:failed [(:seon.error/message test-error)]})

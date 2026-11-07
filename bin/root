@@ -37,6 +37,11 @@ if [[ ${1:-} == run ]]; then
   # starter (SEON_STARTER_FIFO: a test's or a check step's) takes only the config it is given
   L=${SEON_RUN_CHECKOUT:-$G}/config/local.edn
   [[ -z ${SEON_STARTER_FIFO:-} && -f $L ]] && set -- --config "$L" "$@"
+  # HOME is redirected below, so an agent's git has no identity of its own: the owner's, read once
+  O=$(perl -e 'print((getpwuid($<))[7])')
+  N=$(HOME=$O git config --global user.name 2>/dev/null); E=$(HOME=$O git config --global user.email 2>/dev/null)
+  [[ -n $N ]] && export GIT_AUTHOR_NAME=${GIT_AUTHOR_NAME:-$N} GIT_COMMITTER_NAME=${GIT_COMMITTER_NAME:-$N}
+  [[ -n $E ]] && export GIT_AUTHOR_EMAIL=${GIT_AUTHOR_EMAIL:-$E} GIT_COMMITTER_EMAIL=${GIT_COMMITTER_EMAIL:-$E}
   cd "$G/target" && SEON_CHECKOUT=${SEON_RUN_CHECKOUT:-$G} HOME=$G/target/home JOLT_LMDB_LIB=$G/target/lib/liblmdb.dylib \
     JOLT_LZ4_LIB=$G/target/lib/liblz4.dylib JOLT_ZSTD_LIB=$G/target/lib/libzstd.dylib \
     SEON_SERVER_PORT=$P SEON_WEB_PORT=$W exec ./seon root "$@"

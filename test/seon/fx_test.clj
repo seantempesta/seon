@@ -210,6 +210,17 @@
     (is (= {'seon.root-test/boots :error} (fx/test-results nil found ['seon.root-test/boots]))
         "a run whose plan never ran says nothing of any test")))
 
+(deftest a-checkout-says-what-no-merge-carries
+  ;; repl-audit B F26: an edit of bin/ports was invisible: (my.branch/changes) read {} and nothing warned
+  (let [dir (str (System/getProperty "java.io.tmpdir") "/uncommitted-" (random-uuid))]
+    (.mkdirs (java.io.File. dir))
+    (clojure.java.shell/sh "git" "init" "-q" dir)
+    (is (= [] (fx/uncommitted dir)))
+    (spit (str dir "/ports") "x")
+    (is (= ["?? ports"] (fx/uncommitted dir)))
+    (is (contract/error? (fx/uncommitted (str dir "/none"))) "git can't read it: said, never no files")
+    (clojure.java.shell/sh "rm" "-rf" dir)))
+
 (deftest a-gate-that-cant-analyze-says-so
   ;; deepseek-run6: every one of 209 tests read :error, the cause only in the log
   (is (= "the gate could analyze none of your tests: No such namespace: agent, at 278:13; your branch rewrote the ns form of seon.cost-test, which may have lost a require"

@@ -1992,14 +1992,12 @@
     (is (str/includes? line "no test is named app.okt/never-written") "and says why"))
   (is (= "nothing judged: no proof and no test this change reaches"
          (:seon.print/code (my.agent/prove-summary {} {:pass 0 :fail 0 :error 0 :ran 0 :reused 0 :deferred [] :reports [] :proofs {}}))))
-  (testing "a process test with no verdict: never green; red on main too: said, and no red of this run's"
+  (testing "a process test with no verdict: never green"
     (let [one {:pass 1 :fail 0 :error 0 :ran 1 :reused 0 :reports [{:type :pass :var "#'a/t"}] :proofs {}}]
       (is (str/starts-with? (:seon.print/code (my.agent/prove-summary {} (assoc one :deferred ['a/p] :unjudged "no checkout")))
-                            "not green: 1 of 1 in-process tests passed, and 1 process tests have no verdict: no checkout. (deferred) lists them."))
-      (is (= "not green: 1 of 1 in-process tests passed, 1 of your 2 proofs among what passed, and 3 process tests have no verdict, your proofs a/p among them: later. (deferred) lists them."
-             (:seon.print/code (my.agent/prove-summary {} (assoc one :deferred ['a/p 'a/q 'a/r] :unjudged "later" :proofs {'a/t :pass 'a/p :deferred})))))
-      (is (str/includes? (:seon.print/code (my.agent/prove-summary {} (assoc one :deferred [] :main-red {'a/q [{:type :fail}]})))
-                         "green: 1 of 1 passed\nred on main too, so not this change's: a/q"))))
+                            "1 of 1 in-process tests passed; outstanding: 1 process tests with no verdict: no checkout. (my.agent/deferred) lists them."))
+      (is (= "1 of 1 in-process tests passed, 1 of your 2 proofs among what passed; outstanding: 3 process tests with no verdict, your proofs a/p among them: later. (my.agent/deferred) lists them."
+             (:seon.print/code (my.agent/prove-summary {} (assoc one :deferred ['a/p 'a/q 'a/r] :unjudged "later" :proofs {'a/t :pass 'a/p :deferred})))))))
   (is (str/starts-with? (:seon.print/code (my.agent/prove-summary {} {:pass 1 :fail 0 :error 0 :ran 1 :reused 0 :deferred [] :reports [{:type :pass :var "#'a/b"}] :proofs {'a/b :pass}})) "green: 1 of 1")))
 
 (deftest a-prove-is-drawn-on-its-eval-red-and-died
@@ -2603,7 +2601,7 @@
                                                                                     :below {1 {:seon.doc/address "docs/testing.md#testing-in-the-world" :seon.doc/heading "Testing in the world"}}}})])]
       (is (str/includes? sec "Testing in the world (docs/testing.md#testing-in-the-world)") "a page cited whole: its top section, the headings below it joined"))
     (is (str/includes? (drawn "demo/g") "(defn g \"Gets it.\" [x] x)") "a function at doc depth: its whole source, in a fence")
-    (is (str/includes? (drawn "demo/g") "Tests that reach it: demo-test/g-test") "the tests that will judge the change")
+    (is (str/includes? (drawn "demo/g") "1 tests reach it: (callers 'demo/g) lists them.") "the tests that will judge the change")
     (is (not (str/includes? (drawn "demo/g") "Called by")) "and nothing of who calls it")
     (is (not (str/includes? (drawn "demo/g") "A real call")) "a function it will change is read whole: no call to copy")
     (doseq [[k t] drawn] (is (not (re-find #":depth|:symbol|:change|:read " t)) (str k " carries none of how it was fetched")))))

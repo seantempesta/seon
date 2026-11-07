@@ -353,6 +353,20 @@
     (is (clojure.string/includes? (:context next-turn) (pr-str plan)) "the next read tells the plan as it is now")
     (is (not (clojure.string/includes? (:context next-turn) ":seon.model-call/basis")) "and the read before it by its id, never its record")))
 
+(deftest a-task-is-declared-held-and-a-missing-argument-is-named
+  ;; repl-audit B F3, F1: no op made a task, and an attach with no task printed root's whole system map. A plain op answers the id and starts nothing;
+  ;; what a request needs is said from the ops table, for every op
+  (let [[no-task _ made held no-args] (at/in-agent (fn [{:keys [ns]}]
+                                        [{:op :attach}
+                                         "(+ 1 1)"
+                                         {:op :create :ns (str ns) :name "made" :plan "Do it."}
+                                         {:op :eval :agent "root" :code (str "(:seon.task/execution (datahike.api/pull @(:conn sys) '[:seon.task/execution] [:seon.task/id " (pr-str (str ns "/made")) "]))")}
+                                         {:op :create}]))]
+    (is (clojure.string/includes? (:seon.error/message no-task) "task=") (pr-str no-task))
+    (is (clojure.string/ends-with? (:task made) "/made") (pr-str made))
+    (is (= :held (:value held)) "nothing starts" )
+    (is (clojure.string/includes? (:seon.error/message no-args) "seon_create needs ns, name, plan") (pr-str no-args))))
+
 (deftest an-outside-agents-process-test-goes-to-the-judge-and-a-red-says-why
   ;; THE PLAN 0.7's first run (root, 2026-10-27): a deftest an agent defined at its REPL that
   ;; reached a process var ran in the agent's fork and errored ("no process store"), its proof or not;
