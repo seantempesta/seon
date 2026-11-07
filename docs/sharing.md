@@ -19,3 +19,16 @@ A test's result is keyed by what its run read: a fixed seed, the functions it ca
 ## A message waits in a mailbox
 
 Planned. A message is a fact on main, whoever sends it. The agent holds how far it has read, like a consumer offset. Behind wants a process. A channel only wakes: a dropped wake costs delay, never the message.
+
+## A metric accretes
+
+Planned; the numbers are from a scratch store. What a fact already records is a query, never stored again. What only a process knows, such as what each function cost, stays in that process's counters until a test or a turn ends, then is written as values that add up: count, sum, min, max and a fixed log-scale histogram. Two writers or two branches then combine exactly. A running average does not combine, so it is sum over count; a median or mode comes from the histogram, to within one bucket. Each writer holds its own entity per subject, like a grow-only counter, so a merge has nothing to conflict on. `:db/noHistory` is what keeps it cheap: updating 1,000 functions as one value each costs 10.6 M ticks and 4.7 MB over 20 updates, against 32.0 M and 58 MB with history. The price is no trend, unless a rollup per day or commit is written. Task ``seon.program/a-metric-accretes``.
+
+## What is not decided
+
+Each of these has a measured alternative and a real cost, and none is final:
+
+- **Tree merge or rebase.** A tree merge rewrites no history and moves no head, but it is a change to the Datahike fork. Rebase needs no fork change, but it takes main's platform records and moves a live branch's head. Both wait on the mailbox for messages.
+- **Reads or reach for a result's key.** Reads reran about a tenth as many tests in a replay, as an estimate. They miss what a run could not record: an addition to a registry, a process test's children, a definition with no record. So they stand only with a regular fresh full run, and reach stays for what they cannot see.
+- **What keys a kept derivation.** Text is always safe and throws away too much: one comment in `src/seon/program.clj` costs a plan 5,271 M ticks against 165 M. Keying by the forms that derive the facts is cheap but rests on that reach being right (task ``seon.program/a-kept-tree-is-keyed-by-the-text-of-two-files``).
+- **History.** Kept everywhere by ruling, and about 3 times the write and 12 times the store on an updated value. Regenerable stores and metrics are the candidates to go without; records stay.
