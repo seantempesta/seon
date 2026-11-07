@@ -35,6 +35,11 @@
 ;; ---- aero under Jolt, tag by tag ---------------------------------------------------------
 
 ;; tags.edn reads PATH, a variable every process has (JOLT_PWD is bin/test's own; an agent's test child has none)
+;; docs/config.md: which layer a key came from differs by process while a digest takes no place, so a process doesn't hand it to a reader: a test reading it would be green in one process and red in another at one digest
+(deftest the-config-in-force-names-no-layer
+  (is (= #{:config} (set (keys (config/in-force)))))
+  (is (map? (config/boot-sources)) "root's boot takes them, to write on main"))
+
 (deftest env-reads-a-set-variable-and-nil-for-an-unset-one
   (is (= (System/getenv "PATH") (:env (tags))))
   (is (nil? (:env-unset (tags)))))
