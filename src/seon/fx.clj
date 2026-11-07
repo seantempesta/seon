@@ -458,14 +458,27 @@
       :data-refs (declared-refs (str root "/resources/seon/system.edn"))})))
 
 (defn unread-text
-  "Why text does not read as the file at relative path is read, or nil, its meaning left to its owner: EDN and Clojure read, a script
-  passes its interpreter's own syntax check (zsh, sh and bash -n, perl -c, its text on stdin; any other file, or a script with no #! line, has no reader here to ask). See docs/source.md#a-program-file."
+  "Why text does not read as the file at relative path is read, or nil, its meaning left to its owner: EDN reads as the EDN reader reads it (a tag stays a tagged literal), Clojure as Jolt's own reader loads it (no #=, every form of the text, each `::alias` of its ns form's requires resolving, in a namespace made for the read and removed after), a script passes its interpreter's own syntax check (zsh, sh and bash -n, perl -c, its text on stdin; any other file, or a script with no #! line, has no reader here to ask). See docs/source.md#a-program-file."
   {:malli/schema [:=> [:cat :string :string] [:maybe :string]]}
   [path text]
   (let [interp (when (str/starts-with? text "#!") (last (str/split (first (str/split (subs text 2) #"\s" 2)) #"/")))
         flag ({"zsh" "-n" "sh" "-n" "bash" "-n" "perl" "-c"} interp)]
-    (cond (or (str/ends-with? path ".clj") (str/ends-with? path ".edn"))
-          (when-not (reader/read-text text 'user) "it does not read")
+    (cond (str/ends-with? path ".edn")
+          (let [r (java.io.PushbackReader. (java.io.StringReader. text))]
+            (try (loop [] (when-not (= ::end (edn/read {:eof ::end :default tagged-literal} r)) (recur)))
+                 (catch Throwable e (ex-message e))))
+          (str/ends-with? path ".clj")
+          (let [scratch (create-ns (gensym "seon.fx.unread-")) made (atom [scratch])
+                r (clojure.lang.LineNumberingPushbackReader. (java.io.StringReader. text))
+                declare-aliases! (fn [form]
+                                   (doseq [[ns-sym as a] (filter #(and (vector? %) (= 3 (count %)) (symbol? (first %)) (= :as (second %)) (symbol? (nth % 2))) (tree-seq coll? seq form))
+                                           :when (not (get (ns-aliases scratch) a))]
+                                     (when-not (find-ns ns-sym) (swap! made conj (create-ns ns-sym)))
+                                     (binding [*ns* scratch] (alias a ns-sym))))]
+            (try (binding [*ns* scratch *read-eval* false]
+                   (loop [] (let [form (read {:eof ::end} r)] (when-not (= ::end form) (declare-aliases! form) (recur)))))
+                 (catch Throwable e (ex-message e))
+                 (finally (run! remove-ns (map ns-name @made)))))
           flag (let [r (sh/sh interp flag :in text)]
                  (when-not (zero? (:exit r)) (str/trim (str (:err r) (:out r))))))))
 

@@ -1,8 +1,4 @@
-[{:seon.task/name "the-write-back-check-refuses-valid-files"
-  :seon.task/plan "Seen 2026-11-07 on main's seon.fx/unreadable (a43333982f): `seon.reader/read-text` answers nil, read as \"it does not read\", for three files the program holds and loads: test/seon/check.clj, test/seon/ctx_test.clj and test/forks/baseline.edn (run over all 190 .clj and .edn files of src, test and the schemas). So seon.fx/git-commit refuses a write-back naming either .clj as unreadable, and a merge touching one stays on main with its task's :seon.git/commit-failed. Find what edamame or seon.reader/read-all refuses in them (read-text swallows the throw); the one reader of program text is task seon.source/seon-reader-is-the-one-program-reader, so the fix belongs there. What allowed it: the check reads with a reader the file's own loader doesn't use."
-  :seon.task/kind :work
-  :seon.task/proofs #{seon.fx-test/a-file-the-program-loads-reads}}
- {:seon.task/name "the-merge-gate-runs-through-prove"
+[{:seon.task/name "the-merge-gate-runs-through-prove"
   :seon.task/plan "Done in part (worktree dry-run, 2026-10-23): the merge gate runs a merge's deferred process tests, only when root asks (`my.root/gate!`), through the `:tests` effect, `seon.fx/run-tests`, whose `seon.fx/test-command` is prove's entry (`bin/prove --tests` of exactly those tests); `seon.fx/test-results` reads its RED lines, and a run that exits non-zero without naming a test says :error for it, never :pass. Also open: the candidate's files are its changed namespaces' only; a changed schema resource is not written over the checkout. Proof: the gate's run names exactly the deferred tests to prove's entry."
   :seon.task/kind :work
   :seon.task/proofs #{seon.fx-test/the-merge-gate-runs-exactly-the-deferred-tests}}

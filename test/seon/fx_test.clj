@@ -148,13 +148,21 @@
     (.mkdirs (java.io.File. d))
     d))
 
+(deftest a-file-the-program-loads-reads
+  ;; docs/source.md#a-program-file: seen 2026-11-07, edamame refused three files Jolt loads (a #() inside a #(), a symbol with two slashes in EDN), so a write-back naming them was refused; the check reads as the loader does
+  (is (nil? (fx/unread-text "src/x.clj" "(ns x)\n(def f #(do (g #(h %)) %))\n")) "a fn literal inside one reads, as Jolt's reader loads it")
+  (is (nil? (fx/unread-text "src/x.clj" "(ns x (:require [clojure.string :as s]))\n(def k ::s/k)\n")) "an alias the ns form declares resolves")
+  (is (nil? (fx/unread-text "x.edn" "{a/b/c.jolt {:test 1} :t #env X}\n")) "EDN reads as the EDN reader reads it")
+  (is (some? (fx/unread-text "src/x.clj" "(ns x)\n(def f #(do (g %)")) "a form left open is still refused")
+  (is (some? (fx/unread-text "x.edn" "{:a 1} ]")) "so is EDN with a stray close"))
+
 (deftest a-file-is-read-as-its-reader-reads-it-before-a-commit
   ;; docs/source.md#a-program-file: measured 2026-11-07, one agent's spit of a schemaless key stopped a new process loading its config; what doesn't read is refused and nothing is committed
   (is (nil? (fx/unreadable "bin/x" "#!/bin/zsh\necho 1\n")))
   (is (some? (fx/unreadable "bin/x" "#!/bin/zsh\nif then\n")) "zsh -n")
   (is (some? (fx/unreadable "bin/x" "#!/usr/bin/perl\nprint (;\n")) "perl -c")
   (is (nil? (fx/unreadable "bin/env" "# sourced\nif then\n")) "no #! line: no reader to ask")
-  (is (nil? (fx/unreadable "src/x.clj" "(ns x)\n(defn f [] ::a/b)\n")) "an alias's keyword reads, as the loader reads it")
+  (is (some? (fx/unreadable "src/x.clj" "(ns x)\n(defn f [] ::a/b)\n")) "an alias no ns form declares does not load, so it does not read")
   (is (some? (fx/unreadable "src/x.clj" "(ns x)\n(defn f [")))
   (is (nil? (fx/unreadable "resources/seon/schemas/x.edn" "{:a #env X}\n")) "a tag reads, as the config's reader reads it")
   (is (some? (fx/unreadable "resources/seon/schemas/x.edn" "{:a ")))
