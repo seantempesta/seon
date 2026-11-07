@@ -919,11 +919,13 @@
   ([sys source] (import-source! sys source nil))
   ([sys {:keys [root dirs branch]} changed]
   (let [t0 (profile/now-ns)
-        ask (fn [paths] @(call! sys {:op :fx :kind :source :req {:root root :dirs dirs :paths paths :follow (cfg/checkout) :own-branch branch :binary-tree (str (cfg/checkout) "/target/seon.tree")}}))
         held (:seon.root/source (d/pull @(:conn sys) [:seon.root/source] [:seon.root/id :root]))
+        ask (fn [paths] @(call! sys {:op :fx :kind :source :req (cond-> {:root root :dirs dirs :paths paths :follow (cfg/checkout) :own-branch branch :binary-tree (str (cfg/checkout) "/target/seon.tree")}
+                                                                  ;; only what the tree changed since its last import: what main merged and the tree never held stays main's
+                                                                  (and (nil? paths) (:digest held) (:tree held)) (assoc :since (:tree held)))}))
         changed (when (:digest held) changed)
         r (let [r (ask changed)] (if (and changed (not (:tree r))) (ask nil) r))
-        changed (when (:paths r) changed)
+        changed (when (:paths r) (or changed (set (:paths r))))
         files (:value r)
         digest (when files (source-digest r))
         built? (and (:inputs r) (= (:binary r) (:tree (:inputs r))))
@@ -937,6 +939,7 @@
                (let [w (when (and tx (not (contract/error? tx))) @(call! sys {:op :write :req {:op :tx :branch :db :tx-data tx}}))]
                  (this-boot (cond-> {:root root :files (if changed (+ (count (d/datoms @(:conn sys) :aevt :ns/file)) (count (d/datoms @(:conn sys) :aevt :schema/file))) (count files)) :forms (count (d/datoms @(:conn sys) :aevt :form/id)) :ms (profile/ms-since t0)}
                               (:commit r) (assoc :commit (:commit r))
+                              (:tree r) (assoc :tree (:tree r))
                               (seq (:pins r)) (assoc :pins (:pins r))
                               (and w (not (contract/error? w))) (assoc :digest digest :retracted (count (filter #(and (vector? %) (= :db/retractEntity (first %))) tx)))
                               (contract/error? r) (assoc :error (:seon.error/message r))
