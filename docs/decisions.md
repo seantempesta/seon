@@ -4,7 +4,35 @@ This file holds the owner's standing rulings, one entry each: the rule, the owne
 
 ## 2026-11-07 rulings
 
-The owner's rulings of 2026-11-07, on what an agent starts from, on what a merge does by itself and on how proofs grow.
+The owner's rulings of 2026-11-07, on what an agent starts from, on what a merge does by itself, on how proofs grow, on state and data structures, and on users.
+
+### The system is a function of state in the database
+
+Owner, 2026-11-07: "there is no 'run' there is an agent's valid schema which has evals and other data attached to it and we can change it and the context regenerates from it. ... This is not OO programming. State is always in the database and the system is a function of that state." Stated in: [users](users.md).
+
+### Think in data structures, and never pass a database
+
+Owner, 2026-11-07: "We need to think of things in terms of data structures. If we have this set of data with refs it's a valid eval and this allows us to control how we store and link data." "don't pass around databases ever. We have a data format and schema for it." Also: "There are no tables in the database please don't use any table or row references when doing these designs." Stated in: [users](users.md#what-each-thing-is).
+
+### Immutable first: same value, same id
+
+Owner, 2026-11-07: "We can reuse data structures. Think immutable data whenever possible ... Everything is a fork of a shared base that we can point to." Stated in: [users](users.md#where-each-fact-lives).
+
+### Fences mean the design is off
+
+Owner, 2026-11-07: "Fences are always signs a design is off. What do we need to simplify to remove the need for guards and fences." Stated in: [users](users.md#four-interfaces).
+
+### Lazy, and dead branches cost nothing
+
+Owner, 2026-11-07: "In general I want hte system to run lazily and only realize and do work that needs to be done at the time it is needed." "The next time an agent is running on their branch the first thing they do is merge. So we only deal iwth it if theres an active agent running and dead branches don't require any merging." Stated in: [users](users.md#lazy).
+
+### Git's words
+
+Owner, 2026-11-07: "I think we should stick to git terms whenever possible so agents have an intuitive understanding." Stated in: [vocabulary](vocabulary.md).
+
+### A user is an agent, in worlds within worlds
+
+Owner, 2026-11-07: "It's just a unique user id and users can reserve a user id lookup ref like 'sean'." "a user has refs to all the agents that they have started by default". Sessions merge everything back to the user's branch by a person's decision, and main pushes "schemas, functions, tests docs, all essentials of the sytem to the users branch so they stay the same from a 'program binary' point of view and their databases can hold different data". Merges "can be custom and curated it can be hard fisted". "merges can fail if main moves under them and that's fine, the error allows the agent to fix it". Stated in: [users](users.md).
 
 ### A contract checks a collection whole
 

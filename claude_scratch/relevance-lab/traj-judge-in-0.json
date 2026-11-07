@@ -186,7 +186,7 @@
    "sections": [
     "docs/parity.md#context-printing-the-page 36%: Each v1 capability for building and printing the model's context, and where it stands here.",
     "docs/agent.md#what-you-read 21%: Your context comes in two parts: the run's, sent once and unchanged while you work, then the turn's, measured again after each of your replies.",
-    "docs/turn.md#what-a-turn-takes-from-main 16%: Words to the agent and what root decided of its runs are facts on main, and a turn takes them onto its branch before it observes, so its context and page read them from the branch like any other fact: `seon.turn/take!`, the one way outside facts reach the branch.",
+    "docs/turn.md#what-a-turn-merges-from-main 16%: Words to the agent and what root decided of its runs are facts on main, and a turn takes them onto its branch before it observes, so its context and page read them from the branch like any other fact: `seon.turn/take!`, the one way outside facts reach the branch.",
     "docs/prompt.md#you-are-a-seon-agent 14%: You work at a Clojure REPL inside Seon's running program, on your own branch of it.",
     "docs/render.md#the-models-context-a-cached-prefix-then-the-turn 12%: A model request sends what does not change first, so the provider serves it from its prefix cache, and sends nothing twice."
    ],
