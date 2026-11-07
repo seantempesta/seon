@@ -39,19 +39,18 @@
   {:user "Chat with the user: reply to their latest message. Nothing you define here merges: for work that should reach main, start an agent with `(my.task/launch! \"what's wanted\")`. More when you want it: docs/agent.md#working-for-a-person"
    :design (str "Your task: turn the request below into the task the implement step works from: its plan, what the "
                 "plan cites and its red proofs. You are done when an agent with only that page could make the change without "
-                "exploring, and its proofs are written, registered and red for the reason the plan gives. How a task is "
-                "designed, step by step: ```docs/agent.md#designing-a-task```. Then end your turn with a message to the user.")
+                "exploring, and its proofs are written, registered and red for the reason the plan gives. How: "
+                "docs/agent.md#designing-a-task. Then end your turn with a message to the user.")
    :implement (str "Your task: make the change the plan describes. You are done when every proof passes, the cost proofs "
                    "included. Then end your turn with a message to the user.")
    :merge (str "Your task: bring main's work into this branch and keep the proofs green. Main has been merged in "
                "(`my.branch/merge-main!`). You are done when nothing is unmerged and every proof passes on the combined program. "
-               "How: ```docs/agent.md#merging```. Then end your turn with a message to the user.")
+               "How: docs/agent.md#merging. Then end your turn with a message to the user.")
    :work (str "Your task: do what the plan below asks: design it and build it. You are done when its proofs pass on your "
               "branch.")
-   :whole (str "Your task: do what the plan below asks, whole. If it names no proofs, write the test that says it is done, reading files if that's what proves it, and register it. You are done when its proofs pass on your branch with main's "
-               "work merged in. Your status says "
-               "what main changed under you and what merging would conflict on: redefine each such var for both sides. "
-               "Once it says nothing is left, your run ends and root merges your branch.")
+   :whole (str "Your task: do what the plan below asks, whole. If it names no proofs, write the test that says it is done, reading files if that's what proves it, and register it. "
+               "You are done when its proofs pass on your branch with main's work merged in. Your status says what stands in the way; "
+               "once nothing does, your run then ends and root merges your branch.")
    :test (str "Your task: test what the plan changed. You are done when the proofs and the tests of what changed pass, and "
               "each behaviour that broke has a deftest of its own. You do it by running them (`(my.agent/prove)`), writing a "
               "deftest in the proofs' namespace for each break, and fixing the code until all pass. Then end your turn with a message to the user.")})
@@ -96,28 +95,26 @@
   [decl]
   (with-merge [(assoc decl :seon.task/kind :work :seon.task/instructions (instructions :work))]))
 
+(def templates
+  "The templates a task can be made from, by name: each the attributes it merges onto what was asked (`from`), so an agent reads its options by evaluating this and a template is plain data. See docs/tasks.md#a-request-is-one-transaction."
+  {:user {:seon.task/kind :user :seon.task/instructions (instructions :user)}
+   :whole {:seon.task/kind :whole :seon.task/instructions (instructions :whole)}})
+
+(defn from
+  "What was asked (decl) as the one task template makes of it: template merged onto it, on its own branch. See docs/tasks.md#a-request-is-one-transaction."
+  {:malli/schema [:=> [:cat :map :seon.task/declaration] [:vector :seon.task/declaration]]}
+  [template decl]
+  [(update (merge decl template) :seon.task/branch #(or % (task/default-branch (task/task-id (:seon.task/ns decl) (:seon.task/name decl)))))])
+
 (defn request
   "Request decl (what the user asked: its plan, perhaps one line, and any proofs) as the task
   that works it, the default (my.root/request!; owner: \"keep experimenting with having the agent
-  do everything in one task\"): one task of kind :whole on its own branch, which one agent works
+  do everything in one task\"): the :whole template, which one agent works
   through: it writes the red proof, makes it green, merges main and keeps it green, and its green
   branch merges into main itself (seon.task/merges?). `design-build` and `stages` are the
   experiments' choices."
   {:malli/schema [:=> [:cat :seon.task/declaration] [:vector :seon.task/declaration]]}
-  [decl]
-  [(-> decl (assoc :seon.task/kind :whole :seon.task/instructions (instructions :whole))
-       (update :seon.task/branch #(or % (task/default-branch (task/task-id (:seon.task/ns decl) (:seon.task/name decl))))))])
-
-(defn user
-  "What a person said (decl's plan) as the task of the agent that works for them, the default for a sentence (seon.root/ask!): it chats with them, its one directive to reply to their latest message. No rule finishes it. See docs/agent.md#working-for-a-person."
-  {:malli/schema [:=> [:cat :seon.task/declaration] [:vector :seon.task/declaration]]}
-  [decl]
-  [(-> decl (assoc :seon.task/kind :user :seon.task/instructions (instructions :user))
-       (update :seon.task/branch #(or % (task/default-branch (task/task-id (:seon.task/ns decl) (:seon.task/name decl))))))])
-
-(def templates
-  "The templates a task can be made from, by name: what an agent names to launch one (my.task/launch!). See docs/tasks.md."
-  {:user user :whole request})
+  [decl] (from (templates :whole) decl))
 
 (defn stages
   "Request decl as staged tasks, for experiments, each stage an agent of its own.

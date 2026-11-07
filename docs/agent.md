@@ -35,7 +35,7 @@ The rest is there when you want it:
 - Keep what you learn on your task: `(my.task/update! :seon.task/plan (constantly "..."))`, or on your record, docs/agent.md#ctx.
 - Show a value rather than describe it: docs/render.md#a-value-draws-itself.
 - Find what's here: docs/agent.md#finding-your-way.
-- Start an agent on work that can go on alone: `(my.task/launch! "what's wanted, why, and what would show it's done")` answers `{:task id}`, and it tells you when it finishes or gets stuck, which wakes you. By default it builds, proves and merges by itself (`seon.template/templates`). How tasks work: docs/tasks.md#the-done-rule.
+- Start an agent on work that can go on alone: `(my.task/launch! "what's wanted, why, and what would show it's done")` answers `{:task id}`, and you're told when it stops, whether it finished, needs an answer or died, which wakes you. By default it builds, proves and merges by itself (`seon.template/templates`). How tasks work: docs/tasks.md#the-done-rule.
 
 ## Designing a task
 

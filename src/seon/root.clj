@@ -456,15 +456,17 @@
                  said (str/join "-" (or (seq words) ["work"]))
                  ;; its first sentence's words are its name and title; the same words asked again take the one number that tells them apart
                  nm (if (pdb/eid db :seon.task/id (task/task-id 'request said)) (str said "-" (:max-tx db)) said)
-                 template (get tpl/templates (:template m :user))]
+                 template (get tpl/templates (:template m :user))
+                 ;; an agent that launched it, whom the reconciler tells how it ends (seon.reconcile/tell-tx)
+                 by (when-let [b (get-in st [:agents (:agent m) :branch])] (pdb/off-main (pdb/conn-main (:conn st)) b))]
              (if-not template
                (reply! st o p (refused 'seon.root/ask! (str "no template " (:template m)) {:templates (vec (sort (keys tpl/templates)))}))
-               (let [ds (template {:seon.task/ns 'request :seon.task/name nm :seon.task/plan (:text m)})
-                     tx (tpl/request-tx db ds)]
+               (let [id (task/task-id 'request nm)
+                     tx (tpl/request-tx db (tpl/from template {:seon.task/ns 'request :seon.task/name nm :seon.task/plan (:text m)}))]
                  (if (contract/error? tx)
                    (reply! st o p tx)
                    (let [[st rid] (pend st p :tx nil)]
-                     (step/out! o :to-writer {:op :tx :branch :db :tx-data tx :dest {:asked (task/task-id 'request nm) :rid rid}})
+                     (step/out! o :to-writer {:op :tx :branch :db :tx-data (cond-> tx by (conj [:db/add [:seon.task/id id] :seon.task/asked-by by])) :dest {:asked id :rid rid}})
                      (update st :writes (fnil conj #{}) rid))))))
       :clone (let [parent (:parent m)]
                (cond

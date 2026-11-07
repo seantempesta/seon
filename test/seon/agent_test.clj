@@ -1917,13 +1917,13 @@
                          "(my.task/launch! \"No such template.\" :nope)"])
         id (:task (:value a))
         probe (peek (in-agent [{:op :eval :agent "root"
-                                :code (str "(let [t (datahike.api/entity (clojure.core/deref (:conn sys)) [:seon.task/id " (pr-str id) "])] [(:seon.task/kind t) (:seon.task/execution t) (:seon.task/plan t)])")}]))
-        [kind execution plan] (:value probe)]
+                                :code (str "(let [t (datahike.api/entity (clojure.core/deref (:conn sys)) [:seon.task/id " (pr-str id) "])] [(:seon.task/kind t) (:seon.task/execution t) (:seon.task/plan t) (:seon.task/asked-by t)])")}]))
+        [kind execution plan asked-by] (:value probe)]
     (is (string? id) (pr-str a))
     (is (= :whole kind) "by default the template that builds, proves and merges")
     (is (= :running execution) "released: the reconciler gives it an agent")
     (is (str/includes? plan "Build the thing") "its plan what was asked")
-    (is (str/includes? plan "send-message") "and how to report back")
+    (is (keyword? asked-by) "and who to tell how it ends")
     (is (re-find #"no template" (str (:seon.error/message (:value b)))) "a template that isn't one says so")))
 
 (def ^:private not-running
