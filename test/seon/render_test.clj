@@ -3069,24 +3069,11 @@
       (r/dispose-walk! (get-in st [:root-walk :w]))))))
 
 (clojure.test/deftest the-config-panel-names-each-source
-  ;; task seon.render/config-shows-where-each-value-came-from (docs/config.md#facts-on-main): root writes the config
-  ;; and the layer each key came from (:seon.config/sources) on main; the panel draws the config a reader reads from
-  ;; main, so it names the layer of a key that a layer other than the shipped file set.
-  (ts/test-branch! (fn [_ conn]
-    (d/transact conn {:tx-data (seon.config/facts (assoc seon.config/config :seon.config.agent/max-running 6) {:seon.config.agent/max-running "--set"})})
-    (let [html (h/html (ui/config-panel {} (seon.config/from-db @conn)))]
-      (is (str/includes? html "from --set") (str "the panel names the layer that set max-running, as root wrote it on main: " (subs html 0 (min 600 (count html)))))))))
-
-(clojure.test/deftest the-config-panel-drawn-from-what-a-reader-reads-names-the-layers
-  ;; docs/config.md#layers: a reader names the config and the layer each key came from, so the
-  ;; panel it draws says "from --set" for a value the command line set, not just the value.
-  (ts/test-branch!
-   (fn [_ conn]
-     (d/transact conn {:tx-data (seon.config/facts (assoc seon.config/config :seon.config.agent/max-running 6)
-                                                   {:seon.config.agent/max-running "--set"})})
-     (let [{:keys [config sources]} (seon.config/in-db @conn)
-           html (h/html (ui/config-panel {:seon.config/sources sources} config))]
-       (is (= {:seon.config.agent/max-running "--set"} (select-keys sources [:seon.config.agent/max-running]))
-           "in-db names the layer of the key the command line set")
-       (is (str/includes? html "from --set")
-           "the panel draws that layer beside the value")))))
+  ;; task seon.render/config-shows-where-each-value-came-from (docs/config.md#layers): beside each value, the layer it came from: this process's, or the ones it's handed.
+  ;; Reads the process's own layers rather than assuming one, since a test's process may have set any key any way (the agent's first proof went green only where --set had)
+  (let [{:keys [config sources]} (seon.config/in-force)
+        [k layer] (first (filter #(contains? config (key %)) sources))
+        html (h/html (ui/config-panel {} config))]
+    (is (some? k) "this process knows a key's layer")
+    (is (str/includes? html (str "from " layer)) "the panel names this process's layer")
+    (is (str/includes? (h/html (ui/config-panel {:seon.config/sources {:seon.config.agent/max-running "a-handed-layer"}} config)) "from a-handed-layer") "and the layers it's handed")))

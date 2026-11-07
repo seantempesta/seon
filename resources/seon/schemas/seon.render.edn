@@ -115,5 +115,4 @@
                      [:removes {:optional true} [:vector :string]]
                      [:appends {:optional true} [:vector [:tuple :string :string]]]
                      [:prepends {:optional true} [:vector [:tuple :string :string]]]
-                     [:afters {:optional true} [:vector [:tuple :string :string]]]]
- :seon.render/config-view [:map {:closed true} [:config :seon.config/config] [:sources :seon.config/sources]]}
+                     [:afters {:optional true} [:vector [:tuple :string :string]]]]}
