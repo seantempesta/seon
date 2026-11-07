@@ -206,7 +206,7 @@
   (let [ev (h/html (ui/evaluation {} {:seon.eval/code "(f 2)" :seon.eval/intent "f doubles?" :seon.eval/response {:handle 'result/e1 :value 4 :ms 1.5 :bytes 2048 :ticks 120}
                                       :seon.eval/by "a3"}))
         turn (h/html (ui/model-call-view {} {:seon.model-call/n 1 :seon.model-call/tokens 1200 :seon.model-call/basis {:max-turns 8}}))]
-    (is (str/includes? ev "f doubles?") "the prose beside the call")
+    (is (str/includes? ev "f doubles?") "the text beside the call")
     (is (str/includes? ev "1.5 ms · 120 ticks · 2.0 KB") "its cost as recorded, in the one wording")
     (is (str/includes? (h/html (#'ui/cost-line {:ticks 1200 :ms 1.5})) "1.5 ms · 1.2k ticks") "ticks too, when recorded; nothing not recorded")
     (is (str/includes? (h/html (#'ui/cost-line {})) "not run") "an eval never run says so")
@@ -223,7 +223,7 @@
 
 (def ^:private budgeted-vars
   "The printer's calls that cut to a budget: a cut where a value is made, outside a render."
-  '#{seon.print/text seon.print/line seon.print/prose})
+  '#{seon.print/text seon.print/line seon.print/plain})
 
 (def ^:private cut-vars
   "The vars that shorten what is shown, where output is made for a person or a model."
@@ -851,18 +851,18 @@
 
 (deftest the-agent-page-is-its-conversation
   ;; task seon.render/a-page-is-its-entitys-view (4b; design section 5): an agent's page is its
-  ;; conversation, oldest first: a turn's header, an eval's prose then its one collapsed line,
+  ;; conversation, oldest first: a turn's header, an eval's text then its one collapsed line,
   ;; a message; the input under it
   (let [[main branch _] (paged-dbs)
         st (branch-state main branch)
         [st1 _] (#'p/pass-view st [:chat :a3])
         html (p/view-html st1 [:chat :a3])
         at #(str/index-of html %)]
-    (is (< (at "check g") (at "it doubles") (at "f doubles?") (at "result/e3")) "in the order of the turn's number: the message, the reply, its eval's prose, then the owner's eval")
+    (is (< (at "check g") (at "it doubles") (at "f doubles?") (at "result/e3")) "in the order of the turn's number: the message, the reply, its eval's text, then the owner's eval")
     (is (< (at "id=\"c-rows\"") (at "id=\"p-input\"")) "the input under the conversation")
     (is (re-find #"<details [^>]*class=\"seon-eval\"" html) "an eval is a block that opens")
     (is (re-find #"<details [^>]*id=\"eval-e1\"" html) "the row is its handle's anchor, open or not")
-    (is (re-find #"<summary[^>]*>.*f doubles\?.*result/e1" html) "folded: its prose and its handle, never a copy of the eval")))
+    (is (re-find #"<summary[^>]*>.*f doubles\?.*result/e1" html) "folded: its message and its handle, never a copy of the eval")))
 
 (deftest an-unchanged-unit-never-re-renders
   ;; each unit of a page is drawn only when its input changes (seon.render.proc/step-units): a commit on
@@ -1019,7 +1019,7 @@
               "and an agent's problems read there say that t"))
         (is (= (clojure.data.json/write-str (sent 1 r1)) (wire-text h1)) "turn 1: the same")
         (is (str/includes? (page (assoc-in st [:tab [:debug :a1] :open] #{"d-turn-o0"}) e1) "the system message") "each message, opened, beside the records that made it")
-        (is (str/includes? h1 "I call f.") "a call's arguments as sent, its prose in them")
+        (is (str/includes? h1 "I call f.") "a call's arguments as sent, its message in them")
         (is (str/includes? h1 "sent the same by the request before down to here") "where the unchanged prefix ends, with no cache count recorded")
         (is (not (str/includes? h0 "sent the same by the request before")) "the first request has no request before")
         (let [in1 (ui/debug-input db e1 [e0 e1] false)
@@ -1481,8 +1481,8 @@
   ;; which the model reads too (1.2k chars twice on two pages). A cut that names the form reading the
   ;; whole holds no copy; with no form, the title is a person's way to the rest
   (let [long (str/join " " (repeat 400 "word"))
-        with (ui/prose long 20 {:whole '(:plan (my.task/data))})
-        without (ui/prose long 20)
+        with (ui/plain long 20 {:whole '(:plan (my.task/data))})
+        without (ui/plain long 20)
         titles (fn [h] (keep #(when (map? %) (:title %)) (tree-seq coll? seq h)))]
     (is (empty? (titles with)) (pr-str with))
     (is (str/includes? (pr-str with) "(:plan (my.task/data))") "the cut names the form that reads the whole")
@@ -2026,7 +2026,7 @@
       (is (str/includes? (h/html (r/html {} picked)) "app.okt/bad-test") "a picked prove draws what it holds"))))
 
 (deftest markdown-draws-each-block
-  ;; docs/render.md#prose-and-the-one-string-cutter: a plan or a reply drawn by its blocks, none dropped,
+  ;; docs/render.md#text-and-the-one-string-cutter: a plan or a reply drawn by its blocks, none dropped,
   ;; each block's text as written (its backticks pick what a citation pulls, and the model reads it)
   (let [h (h/html (ui/markdown "# Title\n\nA `code` and **bold** line\ncontinued.\n\n- one\n  more\n- two\n\n1. first\n2. second\n\n```clojure\n(+ 1 2)\n```\n\n---\n\ntail"))]
     (is (str/includes? h "<h3") "a heading at its level")
@@ -2041,7 +2041,7 @@
     (is (str/includes? h "tail") "nothing after the fence is lost")))
 
 (deftest markdown-draws-fenced-code-and-a-numbered-list-from-the-scan
-  ;; docs/render.md#prose-and-the-one-string-cutter: a fenced block's content and a list's items are the scan's
+  ;; docs/render.md#text-and-the-one-string-cutter: a fenced block's content and a list's items are the scan's
   ;; offsets, so no regex reads the text again
   (let [fenced (ui/markdown "~~~clojure\n(+ 1 2)\n  (inc 3)\n~~~")
         open (ui/markdown "```\nnever closed")
@@ -2054,7 +2054,7 @@
         "a numbered list is an ol of its items, a nested line inside its parent item")))
 
 (deftest markdown-reads-no-text-again
-  ;; docs/render.md#prose-and-the-one-string-cutter: markdown draws what the scan found, and no regex reads the text
+  ;; docs/render.md#text-and-the-one-string-cutter: markdown draws what the scan found, and no regex reads the text
   ;; again (task seon.ref/markdown-reads-the-scan: md-scan #17 went green on the scan's proofs alone, its markdown
   ;; still splitting and replacing by regex). What the definition calls, as the compiler's facts say
   ;; (seon.source/accounts: its :refs), never a pattern over its text
@@ -2520,7 +2520,7 @@
         (is (= '[["status" :pre]] (map first (edits (form "a") (form "b")))))
         (is (= '[[["status" "Another thing the agent reads, long"] :r [:p "Another thing the agent reads, long enough for it to count, now."]]]
                (edits (form "a") (assoc (form "a") 3 [:p "Another thing the agent reads, long enough for it to count, now."]))))))
-    (testing "an element holding text is prose, one value, and what is identical among siblings stays in :own"
+    (testing "an element holding text is text, one value, and what is identical among siblings stays in :own"
       (is (no-position? (edits proofs-a (assoc-in proofs-a [3 3 2 1] "b-renamed"))))
       (is (= '[["status" :proofs b-test]] (map first (edits proofs-a (assoc-in proofs-a [3 3 2 1] "b-renamed")))))
       (is (= '[:ul {:x 1} [:li "1"] [:li "1"]] (r/keyed '[:ul {:x 1} [:li "1"] [:li "1"]])) "nothing to tell them apart")
@@ -2978,7 +2978,7 @@
     (is (= [] (ops "  " on-task)))))
 
 (deftest a-quote-in-a-message-reads-as-a-quote
-  ;; docs/render.md#prose-and-the-one-string-cutter: what a person reads has its marks drawn; what the model reads stays as written
+  ;; docs/render.md#text-and-the-one-string-cutter: what a person reads has its marks drawn; what the model reads stays as written
   (let [text "Here:\n\n> **Blue** is `rare`.\n  > and lazy\nstill\n\nDone."
         page (h/html (seon.render.ui/markdown text {:inline? true}))
         model (h/html (seon.render.ui/markdown text))]

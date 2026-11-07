@@ -134,7 +134,7 @@
                                              [?f :form/refs seon.test-store/binary-sh] [?f :form/src ?s]] db)
                              ;; binary-sh is the primitive the one launcher calls; this test names both in its query
                              :when (not (#{'seon.test-store/binary-sh 'seon.check-test/every-test-root-starts-through-start-root!} v))
-                             ;; the launch is a literal argument ("bin/root", or "./seon" "root"), never prose that
+                             ;; the launch is a literal argument ("bin/root", or "./seon" "root"), never text that
                              ;; names the script (a test that writes a config file mentioning bin/root)
                              :when (some #(clojure.string/includes? src %) ["\"bin/root\"" "\"./seon\" \"root\""])]
                          v))]

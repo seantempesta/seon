@@ -56,7 +56,7 @@
   unknown (each written and run), and it is refused :no-design until its plan differs from
   the one its branch began with (its merge base's; or that one is unknown), and :no-proofs, as every task is, until
   it registers one (a design that only rewrote its plan was green at its first plan edit, its
-  proofs named in prose and never written: the live agents' rounds). A deferred proof (a process test, run
+  proofs named in text and never written: the live agents' rounds). A deferred proof (a process test, run
   at the merge gate on a checkout, seon.reconcile's :gate) is neither red nor unknown
   here; while unrun it is the merge's open :unrun problem."
   {:malli/schema [:=> [:cat :seon.reconcile/done-input] [:vector :seon.reconcile/not-done]]}

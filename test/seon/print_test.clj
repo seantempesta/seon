@@ -191,13 +191,13 @@
     (is (= "a\nb" (layout (vec (fipp/serialize [:group "a" :line (reduce (fn [d _] [:group d]) "b" (range 8))])) 5))
         "the pruned group breaks")))
 
-;; ---- prose: text read as itself, cut the printer's way -----------------------------------
+;; ---- text: text read as itself, cut the printer's way -----------------------------------
 
-(deftest prose-says-what-it-omitted
+(deftest plain-says-what-it-omitted
   (let [msg (str/join "\n" (for [i (range 40)] (str "line " i " of a long message that says what went wrong")))
-        {:keys [text shown truncated? omitted lines offset continuation]} (seon/prose msg 60 {:source '(:message e)})]
-    (is (= "a short message" (:text (seon/prose "a short message" 60))) "text that fits is itself, unquoted")
-    (is (not (:truncated? (seon/prose "a short message" 60))))
+        {:keys [text shown truncated? omitted lines offset continuation]} (seon/plain msg 60 {:source '(:message e)})]
+    (is (= "a short message" (:text (seon/plain "a short message" 60))) "text that fits is itself, unquoted")
+    (is (not (:truncated? (seon/plain "a short message" 60))))
     (is truncated?)
     (is (<= (select/estimate text) 60) "the text with its cut stays inside the budget")
     (is (str/starts-with? msg shown) "what is shown is the text's own beginning")
@@ -210,21 +210,21 @@
     (is (= msg (str shown (subs msg offset))) "the form reads exactly the rest"))
   (testing "one line: cut after a word, no form without a source"
     (let [s (str/join " " (repeat 60 "word"))
-          {:keys [text shown omitted]} (seon/prose s 20)]
+          {:keys [text shown omitted]} (seon/plain s 20)]
       (is (str/ends-with? shown " ") "cut at a space, not mid-word")
       (is (= (str shown "…+~" (max 1 (emit/chars-tokens omitted)) " tokens") text) "no lines left: tokens only, and no form")))
   (testing "one-line reads whitespace runs as one space"
-    (is (= "a b c" (:text (seon/prose "a\n  b\t\tc" 20 {:one-line? true}))))))
+    (is (= "a b c" (:text (seon/plain "a\n  b\t\tc" 20 {:one-line? true}))))))
 
 (deftest a-one-line-cut-reads-the-source-rest
   (let [s (str "  first   line\n\n" (str/join "\n" (repeat 40 "a line of  the message")) " ")
-        {:keys [offset omitted continuation]} (seon/prose s 20 {:one-line? true :source 'msg})]
+        {:keys [offset omitted continuation]} (seon/plain s 20 {:one-line? true :source 'msg})]
     (is (= (list 'subs 'msg offset) continuation))
     (is (= (count s) (+ offset omitted)) "omitted counts what the form reads")
     (is (str/starts-with? (str/replace (subs s offset) #"\s+" " ") (str/trim (str/replace (subs s offset) #"\s+" " ")))
         "the form reads from a word, not the middle of one")
     (is (= (str/replace (str/trim s) #"\s+" " ")
-           (str/trim (str (:shown (seon/prose s 20 {:one-line? true :source 'msg})) (str/replace (str/trim (subs s offset)) #"\s+" " "))))
+           (str/trim (str (:shown (seon/plain s 20 {:one-line? true :source 'msg})) (str/replace (str/trim (subs s offset)) #"\s+" " "))))
         "shown, then the rest the form reads, is the whole line")))
 
 (deftest members-fill-breadth-before-depth
@@ -341,8 +341,8 @@
     (is (every? #(str/includes? text (str (first %) "\n" (second %))) (partition 2 1 lines)) "every pair of lines as written")
     (is (not (str/includes? text "\\n")) "no newline escaped, in the docstring or a string")
     (is (= (edn/read-string src) (get-in (edn/read-string text) [:context :cites 0 :source])) "and it reads back as the form")
-    (testing "prose still lines up at its place"
-      (let [{:keys [text]} (seon/print-value {:a {:doc {:seon.print/prose "One.\nTwo."}}} {:handle 'result/e1})]
+    (testing "text still lines up at its place"
+      (let [{:keys [text]} (seon/print-value {:a {:doc {:seon.print/plain "One.\nTwo."}}} {:handle 'result/e1})]
         (is (re-find #"\n +Two\." text) text)))
     (testing "a cut keeps the width estimate honest"
       (let [big (seon/code (str/join "\n" (repeat 30 src)))
@@ -420,20 +420,20 @@
     (is (= 6 (count (elements table :td))) "a cell per key per row, the missing :n empty")
     (is (nil? (first (elements (seon/print-value [{:a 1} {:a 2}] {:outputs #{:hiccup}}) :table))) "one shared key: no table")))
 
-(deftest code-and-prose-read-as-themselves
+(deftest code-and-text-read-as-themselves
   (let [src "(defn f\n  \"doc\"\n  [x] ; a comment\n  x)"
         code (seon/print-value {:source (seon/code src)} {:outputs #{:text :hiccup}})
-        prose (seon/print-value {:doc {:seon.print/prose "Says one thing.\nThen another."}} {:outputs #{:text :hiccup}})]
+        text (seon/print-value {:doc {:seon.print/plain "Says one thing.\nThen another."}} {:outputs #{:text :hiccup}})]
     (is (str/includes? (:text code) "; a comment") "code prints verbatim")
     (is (= [src] (map last (elements (:html code) :code "language-clojure"))) "on the page, verbatim in <pre><code>, highlighted as Clojure")
-    (is (str/includes? (:text prose) "Says one thing.\n") "prose prints unquoted, its line breaks kept")
-    (is (not (str/includes? (:text prose) "\"Says")))
-    (is (= ["Says one thing.\nThen another."] (map last (elements (:html prose) :p "seon-print-prose"))) "on the page, a paragraph")))
+    (is (str/includes? (:text text) "Says one thing.\n") "text prints unquoted, its line breaks kept")
+    (is (not (str/includes? (:text text) "\"Says")))
+    (is (= ["Says one thing.\nThen another."] (map last (elements (:html text) :p "seon-print-plain"))) "on the page, a paragraph")))
 
-(deftest a-cut-of-prose-reads-its-rest-as-prose
+(deftest a-cut-of-text-reads-its-rest-as-text
   (let [s (str/join "\n" (repeat 400 "a line of the plan"))
-        text (:text (seon/print-value {:plan {:seon.print/prose s}} {:handle 'result/e3 :budget 200}))]
-    (is (str/includes? text "(:seon.print/prose (get-in result/e3 [:plan]))") text)))
+        text (:text (seon/print-value {:plan {:seon.print/plain s}} {:handle 'result/e3 :budget 200}))]
+    (is (str/includes? text "(:seon.print/plain (get-in result/e3 [:plan]))") text)))
 
 (deftest a-handle-is-text
   ;; it names an answer, which more than one row of the page may hold, so no row is its anchor

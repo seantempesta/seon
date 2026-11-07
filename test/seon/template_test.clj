@@ -120,10 +120,10 @@
     ;; owner, 2026-10-26: the agent reads its merge readiness on its page and is done when it can merge
     (is (str/includes? (:whole tpl/instructions) "Your status says") "it reads whether it can merge on its page")
     (is (str/includes? (:whole tpl/instructions) "your run then ends and root merges your branch"))
-    ;; agent loop's park findings: a green run ends before its closing prose, so "end your turn
-    ;; with prose" left the next turn parked :waiting; a false premise was reported in prose
+    ;; agent loop's park findings: a green run ends before its closing text, so "end your turn
+    ;; with text" left the next turn parked :waiting; a false premise was reported in text
     (doseq [k [:whole :work]]
-      (is (not (str/includes? (k tpl/instructions) "end your turn")) (str k ": no closing-prose step"))
+      (is (not (str/includes? (k tpl/instructions) "end your turn")) (str k ": no closing-text step"))
       ;; a false premise is a failed task: the system prompt says so (my.task/fail!), and the wiki section has the steps
       (is (not (str/includes? (k tpl/instructions) "docs/agent.md#working-a-task")) (str k ": does not cite the steps into every context")))
     (is (seq (task/create-tx (ts/test-db) ws)) "a valid task")))

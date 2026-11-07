@@ -1,7 +1,7 @@
 (ns seon.ref
   "References in Markdown text (a plan, a doc page, a docstring), found by one parse and read
   by one rule (v1's seon.ref, TASK-CHAIN §3a; docs/wiki.md#references): a code span is a
-  candidate name or path, a link a path, a prose word holding a / a name when it names
+  candidate name or path, a link a path, a text word holding a / a name when it names
   something, and the delimiter picks the depth shown. The scanner reads the CommonMark subset
   the rule needs (ATX headings, fenced and indented code, code spans, inline links,
   paragraph boundaries) in one pass over the text."
@@ -16,7 +16,7 @@
   checkouts: runs/, .jolt/) would key it, and its dependents, per checkout."
   (delay (into #{} (remove #(str/starts-with? % ".")) (.list (io/file (cfg/checkout))))))
 
-;; ---- the scan: blocks, then the inlines of the blocks that hold prose ---------------------
+;; ---- the scan: blocks, then the inlines of the blocks that hold text ---------------------
 
 (defn- punct?
   "Is c ASCII punctuation (what a backslash escapes)?"
@@ -40,9 +40,9 @@
 
 (defn scan
   "Markdown text read once: its blocks, in order, and the inlines of every block that holds
-  prose (code spans with their backtick width, link destinations, prose words holding a /),
+  text (code spans with their backtick width, link destinations, text words holding a /),
   in document order; fenced and indented code hold none. One pass: index-of finds each line,
-  its first non-space character picks its block, and each prose character is read once,
+  its first non-space character picks its block, and each text character is read once,
   jumping over a code span or a link. A heading block carries its text, and the block after
   a heading its own text (the section's lead or opening).
 
@@ -127,11 +127,11 @@
                     (when (and t (< t end) (= \) (.charAt text t)))
                       [close df dt (inc t)]))))))
           (word [out slash? quoted? from to line]
-            ;; out with the prose word between from and to when it holds a /, marked when it was read
+            ;; out with the text word between from and to when it holds a /, marked when it was read
             ;; inside a "..." string (a reproduction's data, as quoted output is)
             (cond-> out (and slash? (< from to)) (conj! (cond-> {:seon.ref/word (subs text from to) :seon.ref/line line} quoted? (assoc :seon.ref/quoted true)))))
           (inlines [from to line]
-            ;; each code span, link destination (then its text's inlines) and prose word holding a /, in
+            ;; each code span, link destination (then its text's inlines) and text word holding a /, in
             ;; order; q, inside a "..." string; wq, the word being read was inside one or holds a quote
             (loop [i from line line wstart from slash? false q false wq false out (transient [])]
               (if (>= i to)
@@ -317,7 +317,7 @@
 (defn emphasis
   "Plain Markdown text, one stretch holding no code span or link, as its pieces in order: a string, or [:strong s] or [:em s] for what
   ** or * wrap. CommonMark's flanking rule, its common case: an opener is followed by no space and a closer has none before it;
-  an opener with no closer is its text. _ is left as text, since names hold it. See docs/render.md#prose-and-the-one-string-cutter."
+  an opener with no closer is its text. _ is left as text, since names hold it. See docs/render.md#text-and-the-one-string-cutter."
   {:malli/schema [:=> [:cat :string] [:vector [:or :string [:tuple [:enum :strong :em] :string]]]]}
   [text]
   (let [n (count text)
@@ -424,10 +424,10 @@
       (if kw? (keyword body) (symbol body)))))
 
 (defn- span-candidate
-  "A code span or prose word read as a based path (its first segment one of the checkout's
+  "A code span or text word read as a based path (its first segment one of the checkout's
   top-level entries), a line citation, a name (exactly one qualified symbol or keyword, as
   written, not ending in *), a namespace (one dotted simple symbol, resolve-only: a reference
-  only when it names a namespace, v1's rule), or nil: prose or code."
+  only when it names a namespace, v1's rule), or nil: text or code."
   {:malli/schema [:=> [:cat :string] [:maybe :map]]}
   [span]
   (let [cut (reduce (fn [m s] (if-let [i (str/index-of span s)] (min m i) m)) (count span) ["/" "#" ":" "?"])]
@@ -467,7 +467,7 @@
           (assoc c :seon.ref/path (str (when (str/starts-with? joined "/") "/") (str/join "/" parts))))))))
 
 (defn- trim-word
-  "A prose word without the punctuation around it (a var's #' before it), or nil when nothing is left."
+  "A text word without the punctuation around it (a var's #' before it), or nil when nothing is left."
   {:malli/schema [:=> [:cat :string] [:maybe :string]]}
   [^String word]
   (let [n (count word)
@@ -478,9 +478,9 @@
     (when (< from to) (subs word from to))))
 
 (defn- candidate
-  "One inline as a citation at the depth its delimiter asks for (a prose word its summary,
+  "One inline as a citation at the depth its delimiter asks for (a text word its summary,
   one backtick or a link its doc, three or more backticks its code; two backticks wrap a
-  literal), or nil. A prose word is resolve-only; one read inside a string literal cites nothing."
+  literal), or nil. A text word is resolve-only; one read inside a string literal cites nothing."
   {:malli/schema [:=> [:cat [:maybe :string] :seon.ref/span] [:maybe :seon.ref/citation]]}
   [doc-path {:seon.ref/keys [code width link word quoted line]}]
   (let [[c depth] (cond link [(link-candidate doc-path link) :doc]
@@ -521,7 +521,7 @@
 ;; ---- sections -----------------------------------------------------------------------------
 
 (defn- first-sentence
-  "The first sentence of flat prose; a period after an abbreviation ends no sentence."
+  "The first sentence of flat text; a period after an abbreviation ends no sentence."
   {:malli/schema [:=> [:cat :string] :string]}
   [flat]
   (let [abbreviations ["e.g." "i.e." "etc." "vs."]
@@ -727,7 +727,7 @@
 
 (defn kept
   "Of citations (each once, at its strongest depth: `cited`), the references on db: a
-  resolve-only one (a prose word) kept only when it names something, an alias form left out."
+  resolve-only one (a text word) kept only when it names something, an alias form left out."
   {:malli/schema [:=> [:cat :seon.host/db [:vector :seon.ref/citation]] [:vector :seon.ref/citation]]}
   [db citations]
   (into [] (remove #(or (alias-form? db %) (and (:seon.ref/resolve-only %) (not (names-something? db %))))) citations))

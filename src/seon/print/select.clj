@@ -64,13 +64,13 @@
 
 (defn code?
   "Is x marked text, read as itself: code (seon.print/code), a map of the one key
-  :seon.print/code to its text, or prose (seon.print/prose), of :seon.print/prose; plain data
+  :seon.print/code to its text, or text (seon.print/plain), of :seon.print/plain; plain data
   that stores and reads back as it is. Its mark's key, else nil."
-  {:malli/schema [:=> [:cat :any] [:maybe [:enum :seon.print/code :seon.print/prose]]]}
+  {:malli/schema [:=> [:cat :any] [:maybe [:enum :seon.print/code :seon.print/plain]]]}
   [x]
   (when (and (map? x) (== 1 (count x)) (keyword-lookup? x))
     (cond (string? (:seon.print/code x)) :seon.print/code
-          (string? (:seon.print/prose x)) :seon.print/prose)))
+          (string? (:seon.print/plain x)) :seon.print/plain)))
 
 (defn- escaped-width
   "Characters the string literal spends on chars [from, to) of `s`; a newline stays a line break."
@@ -299,8 +299,8 @@
                                             text? (:shown node)
                                             :else (:n node))}))))
 
-;;; The one string cutter: a string in a value (a literal) and prose (text shown as itself,
-;;; seon.print/prose) end their cut at the same place and say the same words (emit/cut-words).
+;;; The one string cutter: a string in a value (a literal) and text (text shown as itself,
+;;; seon.print/plain) end their cut at the same place and say the same words (emit/cut-words).
 
 (defn break-at
   "Where a cut of s that may keep `room` characters ends: after the last line break in the
@@ -379,7 +379,7 @@
         to (loop [i (long (:shown node)) width 0]
              (if (< i limit)
                (let [c (.charAt text i)
-                     ;; as code-width counts: code each character once (printed as written), prose a
+                     ;; as code-width counts: code each character once (printed as written), text a
                      ;; newline its indentation more
                      width (+ width (cond (= :seon.print/code (:code? node)) 1
                                           (:code? node) (if (= \newline c) (inc (max 1 (:indent node))) 1)
@@ -462,7 +462,7 @@
 
 (defn- code-width
   "Characters marked text `node`'s first `to` characters spend: code each itself, as written
-  (emit/code-text); prose each itself and each line break its indentation more (every later line
+  (emit/code-text); text each itself and each line break its indentation more (every later line
   starts at the node's place), or one more where that is less (a newline inside a string literal
   prints as two characters), which this does not read the text to tell."
   {:malli/schema [:=> [:cat :seon.print/alloc :int] :int]}

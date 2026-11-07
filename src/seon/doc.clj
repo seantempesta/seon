@@ -640,7 +640,7 @@
   "Every line of the texts of kinds on db that pattern matches, as grep answers them, one row each
   {:at \"name:line\" :kind :text}: :at the thing holding it (a var or test, a section's address, a task's
   id, a schema key) and the number of the line holding the match within its text (the number lines reads it
-  at), :text that line, trimmed; in prose (a section's, a task's), where a paragraph is one line, :text is each
+  at), :text that line, trimmed; in text (a section's, a task's), where a paragraph is one line, :text is each
   sentence of that line that matches, its :at the paragraph's line, so (lines x n n) reads the paragraph whole. pattern is a string,
   matched as it is written, or a regex. A string of three characters or more narrows the texts
   read to those the index's trigram table holds it in (anywhere, inside a term or across a separator); a
@@ -664,7 +664,7 @@
                :when (or (nil? ns) (named-under? (str (:name h)) ns))
                [i line] (map-indexed vector (str/split-lines v))
                :when (re-find re line)
-               ;; prose (a section's, a plan's) holds a paragraph on one line: its row is each sentence that
+               ;; text (a section's, a plan's) holds a paragraph on one line: its row is each sentence that
                ;; matches, as grep -o selects the match, so a hit costs its sentence and not its paragraph
                part (if (#{:seon.doc/text :seon.task/plan} a) (filter #(re-find re %) (str/split line #"(?<=[.!?])\s+")) [line])]
            [(str (:name h)) i {:at (str (:name h) ":" (inc i)) :kind (:kind h) :text (str/trim part)}])
@@ -740,8 +740,8 @@
             (some-> (find-ns (symbol (namespace sym))) ns-interns (get (symbol (name sym))) meta))
         doc (cond-> {:symbol sym}
               (:arglists m) (assoc :arglists (:arglists m))
-              ;; prose, read as itself: unquoted, no escaped quotes (seon.print's prose mark)
-              (:doc m) (assoc :doc {:seon.print/prose (:doc m)})
+              ;; text, read as itself: unquoted, no escaped quotes (seon.print's text mark)
+              (:doc m) (assoc :doc {:seon.print/plain (:doc m)})
               (:malli/schema m) (assoc :contract (:malli/schema m)))]
     (cond
       (and (nil? v) (nil? m)) {:symbol sym :unresolved true :problem (:unresolved ref/problem-messages)}

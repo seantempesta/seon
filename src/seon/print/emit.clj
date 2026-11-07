@@ -63,8 +63,8 @@
                     (= j sc) (recur (inc j) :comment nl q sc bs)
                     :else (recur (if (and (< (inc j) n) (not= (inc j) nl)) (+ j 2) (inc j)) mode nl q sc bs)))))))))
 
-(defn- prose-text
-  "Prose `s` at its place: verbatim, every line after the first indented `indent` columns; a newline
+(defn- plain-text
+  "Text `s` at its place: verbatim, every line after the first indented `indent` columns; a newline
   inside a string literal is printed escaped (backslash-n), never indented."
   {:malli/schema [:=> [:cat :string nat-int?] :string]}
   [^String s indent]
@@ -76,14 +76,14 @@
     (str (.append sb s (int @at) (.length s)))))
 
 (defn code-text
-  "Marked text `s` (code or prose, seon.print/code) at its place: code exactly as written, every
+  "Marked text `s` (code or text, seon.print/code) at its place: code exactly as written, every
   line where it stands in its file, so its reader can copy any slice of it (an edit!'s old text) and
-  it reads back as written; prose verbatim, every line after the first indented `indent` columns,
+  it reads back as written; text verbatim, every line after the first indented `indent` columns,
   a newline inside a string literal printed escaped (backslash-n), never indented.
   See docs/render.md#cut-where-a-value-is-made."
-  {:malli/schema [:=> [:cat [:enum :seon.print/code :seon.print/prose] :string nat-int?] :string]}
+  {:malli/schema [:=> [:cat [:enum :seon.print/code :seon.print/plain] :string nat-int?] :string]}
   [kind ^String s indent]
-  (if (= :seon.print/code kind) s (prose-text s indent)))
+  (if (= :seon.print/code kind) s (plain-text s indent)))
 
 (defn path-form
   "The plain clojure.core form that reads `path` from `source`: runs of keys and indices as one
@@ -172,7 +172,7 @@
   (str/join " · " (cond-> [] ms (conj (ms-text ms)) ticks (conj (str (short-num ticks) " ticks")) bytes (conj (bytes-text bytes)) tok (conj (tokens-text tok)))))
 
 (defn cut-words
-  "The words of a text's cut, the same in a value (after its string's shown prefix) and in prose:
+  "The words of a text's cut, the same in a value (after its string's shown prefix) and in text:
   `…+~N tokens` of what it omitted (omitted, its characters, sized by `chars-tokens`, at least one)
   and, when lines begin in it, `in M more lines`, then the form that reads the rest when there is one."
   {:malli/schema [:=> [:cat nat-int? nat-int? :any] :string]}
@@ -230,12 +230,12 @@
   {:class "language-clojure"})
 
 (defn marked-hiccup
-  "Marked text as HTML: prose (seon.print/prose) a paragraph, its line breaks kept; code
+  "Marked text as HTML: text (seon.print/plain) a paragraph, its line breaks kept; code
   (seon.print/code) verbatim in <pre><code>, highlighted as Clojure when the page inserts it."
   {:malli/schema [:=> [:cat [:maybe :keyword] :string] :seon.print/hiccup]}
   [mark text]
-  (if (= :seon.print/prose mark)
-    [:p {:class (css-class :seon.print/prose)} text]
+  (if (= :seon.print/plain mark)
+    [:p {:class (css-class :seon.print/plain)} text]
     [:pre {:class (css-class :seon.print/code)}
      [:code highlight text]]))
 
@@ -285,7 +285,7 @@
       :seon.print/string (text-op :seon.print/string (or (:seon.print/text node) (string-literal value))
                                   [:span {:class (css-class :seon.print/string)} (or (:seon.print/text node) value)])
       ;; code (seon.print/code) verbatim at its place, as in its file
-      ;; on the page code is highlighted (highlight.js, as each patch inserts it) and prose is a paragraph
+      ;; on the page code is highlighted (highlight.js, as each patch inserts it) and text is a paragraph
       :seon.print/code (text-op :seon.print/code (code-text (:seon.print/code? node) value (:seon.print/indent node 0)) (marked-hiccup (:seon.print/code? node) value))
       (:seon.print/inst :seon.print/uuid) (text-op :seon.print/tag (or (:seon.print/text node) (literal value)))
       :seon.print/var (text-op :seon.print/symbol (str "#'" (:seon.print/name node)))

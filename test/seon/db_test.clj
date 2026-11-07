@@ -413,13 +413,13 @@
 
 (defn- corpus
   "The text of the checkout's files under dir ending in ext, sorted by path and joined: real
-  prose (docs/*.md) or real code (src/**/*.clj) for turn text that compresses as a turn's does."
+  text (docs/*.md) or real code (src/**/*.clj) for turn text that compresses as a turn's does."
   [dir ext]
   ;; the checkout's, not the working directory's: an agent's test child runs in a run directory of its own
   (->> (file-seq (clojure.java.io/file (seon.config/checkout) dir)) (map str) (filter #(clojure.string/ends-with? % ext)) sort
        (map slurp) (apply str)))
 
-(def ^:private prose (delay (corpus "docs" ".md")))
+(def ^:private text (delay (corpus "docs" ".md")))
 (def ^:private code (delay (corpus "src" ".clj")))
 
 (defn- slice
@@ -431,13 +431,13 @@
   "Turn k of an agent as seon.turn/act! records it: the basis its context was built from
   (the commit, its red assertion; the text is made again from it, seon.context/render), its
   reply (1,500 bytes) and its eval call, whose eval's record holds what it evaluated to as the
-  next turn shows it (2,000). The reply is real prose and the evaluated value real source, each turn its own
-  (a real turn's reply is the model's prose and code; its evals are mostly source and
+  next turn shows it (2,000). The reply is real text and the evaluated value real source, each turn its own
+  (a real turn's reply is the model's message and code; its evals are mostly source and
   printed data: a slurp, a source, a test's report): a repeated letter compressed ~3x better
   than real turn text and made LZ4 look like the fix (2026-10-22)."
   [k]
   [{:seon.model-call/id (str "att/" k) :seon.model-call/agent {:seon.agent/key "att"} :seon.model-call/n k :seon.model-call/origin :model
-    :seon.model-call/reply (slice @prose k 1500) :seon.model-call/forms 1
+    :seon.model-call/reply (slice @text k 1500) :seon.model-call/forms 1
     :seon.model-call/basis {:commit (java.util.UUID. 0 k) :task "t/x" :turn k :max-turns 8 :origin :model}}
    ;; the call's eval, whose record holds its response as the next turn reads it
    {:seon.eval/id (str "e" k) :seon.eval/by "a1" :seon.eval/code "(f 2)" :seon.eval/response {:handle (symbol "result" (str "e" k)) :value (slice @code k 2000)}}])
@@ -463,7 +463,7 @@
   ;; liblz4 bin/build makes from their pinned sources (reference-code/zstd; Chez's vendored
   ;; lz4), target/lib, bin/env's JOLT_ZSTD_LIB and JOLT_LZ4_LIB, never a system library; a
   ;; frame round-trips, and real text (the checkout's docs) compresses
-  (let [text (.getBytes ^String (slice @prose 0 65536) "UTF-8")]
+  (let [text (.getBytes ^String (slice @text 0 65536) "UTF-8")]
     (doseq [[lib compress decompress] [[konserve.jolt.zstd/lib-path konserve.jolt.zstd/compress konserve.jolt.zstd/decompress]
                                        [konserve.jolt.lz4/lib-path konserve.jolt.lz4/compress konserve.jolt.lz4/decompress]]]
       (is (str/starts-with? lib (str (cfg/checkout) "/target/lib/")) lib)
@@ -483,7 +483,7 @@
   (let [path (str (seon.config/checkout) "/target/db-test-ool-" (random-uuid))
         {:keys [cfg conn]} (pdb/open! :lmdb path 0 :db)
         _ (d/release conn)
-        reply (slice @prose 7 3000)
+        reply (slice @text 7 3000)
         vk (hasch.core/uuid reply)
         on (fn [b f] (let [c (d/connect (assoc cfg :branch b))] (try (f c) (finally (d/release c)))))
         cold-read (fn [] (on :turns (fn [c] [(d/q '[:find ?r . :where [_ :seon.model-call/reply ?r]] @c)
@@ -550,7 +550,7 @@
   ;; the in-memory store has no nodes to collect; removed at the end
   (let [path (str (seon.config/checkout) "/target/db-test-collect-" (random-uuid))
         {:keys [conn]} (pdb/open! :lmdb path 0 :db)
-        reply (slice @prose 11 3000)
+        reply (slice @text 11 3000)
         vk (hasch.core/uuid reply)
         on (fn [b f] (let [c (d/connect (assoc (:config @conn) :branch b))] (try (f c) (finally (d/release c)))))
         record! (fn [r] (when-not (:skipped r) (d/transact conn [{:seon.root/id :root :seon.root/collected r}])) r)]
@@ -558,7 +558,7 @@
       (d/transact conn [{:note/text "main's"}])
       ;; garbage before the first collection: a branch made and deleted
       (d/branch! conn :db :early)
-      (on :early #(d/transact % {:tx-data [{:seon.model-call/id "att/e" :seon.model-call/reply (slice @prose 3 3000)}]}))
+      (on :early #(d/transact % {:tx-data [{:seon.model-call/id "att/e" :seon.model-call/reply (slice @text 3 3000)}]}))
       (d/delete-branch! conn :early)
       (let [r1 (record! (pdb/collect! conn true))]
         (is (= #{:db} (:branches r1)) "the first collection records the branches it saw")
@@ -665,7 +665,7 @@
   ;; last resort: the in-memory store has no nodes to collect; removed at the end
   (let [path (str (seon.config/checkout) "/target/db-test-shared-" (random-uuid))
         {:keys [conn]} (pdb/open! :lmdb path 0 :db)
-        reply (slice @prose 11 3000)
+        reply (slice @text 11 3000)
         vk (hasch.core/uuid reply)]
     (try
       (d/branch! conn :db :gone)

@@ -69,13 +69,13 @@
     ;; a form is code, not the names in it
     "Add `(+ 1 2)` and `(my.task/current)`.")
   (is (= [['seon.ref/names nil nil nil :doc]] (kinds nil "```\nseon.ref/parse\n```\nthen `seon.ref/names`"))
-      "prose after a closed fence is read again")
+      "text after a closed fence is read again")
   (is (= [] (kinds nil "```\nnever closed\n`seon.ref/parse`\n")) "an unclosed fence runs to the end"))
 
 (deftest a-bare-word-is-a-reference-only-when-it-names-something
   (let [db (program-db)]
     (is (= ['app.m0/f1] (names-on db "Then app.m0/f1 calls app.m0/nope and seon.nope/x; :seon.nope/y too."))
-        "a bare word naming a var on the branch is a reference; one naming nothing is prose")
+        "a bare word naming a var on the branch is a reference; one naming nothing is text")
     (is (= [:seon.task/plan] (names-on db "Write :seon.task/plan, not :seon.nope/key."))
         "a bare keyword counts when it is a registered schema")
     (is (= ['app.m0/nope] (names-on db "Write `app.m0/nope`.")) "an explicit name that resolves to nothing stays a reference")
@@ -99,7 +99,7 @@
     "`src/seon/writer.clj:263`" [[nil "src/seon/writer.clj" nil :line-reference :doc]]
     "`src/seon/writer.clj:263-270`" [[nil "src/seon/writer.clj" nil :line-reference :doc]]
     "See src/seon/writer.clj:263." [[nil "src/seon/writer.clj" nil :line-reference :summary]]
-    ;; not based at the checkout: prose
+    ;; not based at the checkout: text
     "`async.ss:525-541`" []
     ;; the file cited plainly is its own reference beside the line citation
     "`src/seon/writer.clj` and `src/seon/writer.clj:9`" [[nil "src/seon/writer.clj" nil nil :doc]
@@ -121,10 +121,10 @@
     "(unbalanced" [])
   (is (= '[app.calc/add] (ref/names "`:seon.task/plan` `docs/failure-points.md` `(my.task/current)` `app.calc/add`"))
       "the review's reproduction: one var, the form is code")
-  (is (= '[app.calc/twice] (ref/names "Use `app.calc/twice`.\n```clojure\n(app.calc/add `x` 1)\n```\nnot `prose with/slash`")))
+  (is (= '[app.calc/twice] (ref/names "Use `app.calc/twice`.\n```clojure\n(app.calc/add `x` 1)\n```\nnot `text with/slash`")))
   (is (= [] (ref/names ""))))
 
-(deftest a-span-of-a-name-and-more-words-is-prose
+(deftest a-span-of-a-name-and-more-words-is-text
   (is (= [['seon.ref/parse nil nil nil :doc]]
          (kinds nil "Use `seon.ref/parse`, not `seon.ref/view docs/flow.md` or `foo/bar baz` or `docs/flow.md and more`."))))
 
@@ -134,7 +134,7 @@
   (is (= '[seon.context/printed-run] (ref/names "Reproduce: (#'seon.context/printed-run db run) answers one.")))
   (is (= [['seon.context/printed-run nil nil nil :summary]] (kinds nil "Reproduce: (#'seon.context/printed-run db run)."))))
 
-(deftest a-string-literal-in-prose-cites-nothing
+(deftest a-string-literal-in-text-cites-nothing
   ;; audit item 2c: a reproduction's string literals are its data, as quoted output is: a path or a
   ;; name inside "..." is no citation, while the call around it is; a code span inside quotes is
   ;; still the code span it is (the wiki's own citations)
@@ -142,13 +142,13 @@
   (is (= [] (kinds nil "It answers \"docs/flow.md\" and \"seon.ref/parse\".")) "a quoted path or name, as data")
   (is (= '[seon.ref/names] (ref/names "Reproduce: (seon.ref/names \"Callers of seon.print.emit/foo are listed.\") answers [].")) "nor any word of a quoted sentence")
   (is (= '[seon.ref/parse] (ref/names "The owner: \"use `seon.ref/parse` for it\".")) "a code span between quotes is a citation still")
-  (is (= '[seon.ref/parse] (ref/names "Quotes \"closed\" then seon.ref/parse.")) "and a word after the string closes is prose again")
+  (is (= '[seon.ref/parse] (ref/names "Quotes \"closed\" then seon.ref/parse.")) "and a word after the string closes is text again")
   (is (= '[seon.ref/parse seon.ref/names] (ref/names "- seon.ref/parse, then a 5\" stray quote\n- the next item, seon.ref/names"))
       "an unbalanced quote silences no more than the rest of its line")
   (is (= '[seon.ref/parse] (ref/names "It answers \"an \\\"escaped\\\" seon.ref/names\" and seon.ref/parse.")) "an escaped quote keeps the string open")
   (is (= '[seon.ref/parse] (ref/names "Call seon.ref/parse (\"x\") and see.")) "a call is no string, its argument is"))
 
-(deftest a-citation-ending-in-a-wildcard-is-prose
+(deftest a-citation-ending-in-a-wildcard-is-text
   (is (= [['seon.ref/parse nil nil nil :doc]]
          (kinds nil "`seon.ref/parse`, not `:seon.render.unknown/*` and `seon.task.run/*` and seon.task.run/*"))))
 
@@ -307,7 +307,7 @@
       "-\n- x" [false ["" "x"]])))
 
 (defn markdown
-  "The input of size n: Markdown of about n bytes, a doc page's mix of headings, prose with
+  "The input of size n: Markdown of about n bytes, a doc page's mix of headings, text with
   code spans, links and bare names, lists and fenced code, every block a few lines."
   {:malli/schema [:=> [:cat pos-int?] [:tuple [:maybe :string] :string]]}
   [n]
@@ -321,7 +321,7 @@
     {:of 'seon.ref/parse :input 'seon.ref-test/markdown
      :n "bytes of Markdown text"
      :work (str "one pass over the text: index-of finds each line's end, a few chars of each line pick its block, and "
-                "each prose char is read once by charAt (~15 ns, nothing allocated); per block a map (~0.5 us, ~0.5 KB); "
+                "each text char is read once by charAt (~15 ns, nothing allocated); per block a map (~0.5 us, ~0.5 KB); "
                 "per inline (a code span, link or word holding a /) its string, its span and citation maps and ~3 "
                 "contracted calls (~2 us, ~3 KB); per candidate name one seon.ref/qualified-name (its characters: "
                 "1 call, a few hundred bytes; the reader's ~13 us, ~18 KB, 3 calls only for the corpus test); per section its heading, anchor (1 call) and lead copy (~3 us, ~3 KB). The unit here, 226 "
@@ -337,11 +337,11 @@
 (deftest a-namespace-is-read-as-a-namespace
   ;; task seon.ref/files-namespaces-and-symbols-are-plain-markdown (owner, 2026-10-21): a
   ;; backticked dotted name that names a namespace is a reference to it (v1's rule); one
-  ;; that names nothing stays prose
+  ;; that names nothing stays text
   (let [names (set (map :seon.ref/name (ref/references (program-db) "Read `demo.calc` and `demo.nowhere` and `demo.calc/add`.")))]
     (is (contains? names 'demo.calc) "a namespace main holds")
     (is (contains? names 'demo.calc/add) "a qualified name, as before")
-    (is (not (contains? names 'demo.nowhere)) "a dotted word naming nothing is prose")))
+    (is (not (contains? names 'demo.nowhere)) "a dotted word naming nothing is text")))
 
 ;; docs/references.md#an-entity-cites: a read that runs to the end of its index is touched by every transaction, its :db/txInstant included, so
 ;; whatever read the system prompt through it reran on every change
@@ -420,7 +420,7 @@
       (is (= (oracle s) (#'ref/qualified-name s)) (str "span " (pr-str s))))))
 
 (deftest emphasis-is-its-delimiters-flanking-text
-  ;; docs/render.md#prose-and-the-one-string-cutter
+  ;; docs/render.md#text-and-the-one-string-cutter
   (is (= ["a " [:strong "b c"] " d"] (ref/emphasis "a **b c** d")))
   (is (= [[:em "x"] " y"] (ref/emphasis "*x* y")))
   (is (= ["2 * 3 * 4"] (ref/emphasis "2 * 3 * 4")) "a delimiter beside a space wraps nothing")

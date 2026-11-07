@@ -61,7 +61,7 @@
 
 (defn read-text
   "Every form of text written in namespace nsym, or nil when text does not read as Clojure
-  (prose, an unbalanced span). The text is a model's or a plan's, so not reading is an
+  (text, an unbalanced span). The text is a model's or a plan's, so not reading is an
   answer, not a failure; nothing is evaluated (no #=), so whatever the read throws means
   that. edamame 1.4.32 on Jolt throws a bare IllegalArgumentException for a meta prefix at
   the end (\"a^\"), not its :edamame/error (docs/failure-points.md)."
@@ -108,7 +108,7 @@
 
 ;; ---- the forgiving reader: a model's reply as source (idea 8) ----------------------------
 ;;
-;; A model's reply mixes prose and code. `forgive` makes it source a REPL reads: prose
+;; A model's reply mixes text and code. `forgive` makes it source a REPL reads: text
 ;; becomes comments, and unbalanced delimiters are repaired, each change a repair
 ;; {:at :dropped :inserted}: at offset :at of the text as the changes before it left it,
 ;; :dropped was replaced by :inserted. Two laws hold (Seon's spec, T5's forgive tasks):
@@ -160,12 +160,12 @@
   character literals and comments; a backslash anywhere in a token starts a character literal,
   which takes the next character whatever it is, so `\\( is one form). A line is:
   - a fence line (``` first): it becomes a comment (`;; `), and is still known as a fence
-    when read again. A clojure/clj/cljc/edn fence's body is code; another tag's is prose;
-    an untagged one's (models fence prose too) goes by the rule below, as outside fences;
+    when read again. A clojure/clj/cljc/edn fence's body is code; another tag's is text;
+    an untagged one's (models fence text too) goes by the rule below, as outside fences;
   - code: inside an open string; in a code fence; indented or starting with a closer
     inside an open form; or starting a form, or being one literal or qualified symbol;
   - blank or a comment: it stays;
-  - else prose: it becomes a comment (`;; ` inserted at its start).
+  - else text: it becomes a comment (`;; ` inserted at its start).
   In code, a closer that matches no open delimiter becomes a comma (whitespace to the
   reader, so \"a]a\" never joins into \"aa\", and never the start of a fence line); a closer
   that matches a deeper open delimiter first closes the ones above it. With col0?, a code
@@ -249,18 +249,18 @@
                          (:in-str st) :code
                          (or (str/blank? t) (str/starts-with? t ";")) :keep
                          (= :code (:fenced st)) :code
-                         (= :prose (:fenced st)) :prose
+                         (= :text (:fenced st)) :text
                          (and (seq (:stack st)) (or indented? (contains? closers (first t)))) :code
                          (or (starts-form? t) (literal-line? t)) :code
-                         :else :prose)
+                         :else :text)
               comment! (fn [st] (let [p (.length out)]
                                   (.append out ";; ") (.append out line)
                                   (update st :repairs conj {:at p :dropped "" :inserted ";; "})))
               st (case kind
                    :fence (-> (if (str/starts-with? line ";; ") (do (.append out line) st) (comment! st))
-                              (assoc :fenced (if (:fenced st) nil (cond (code-tags tag) :code (= "" tag) :lines :else :prose))))
+                              (assoc :fenced (if (:fenced st) nil (cond (code-tags tag) :code (= "" tag) :lines :else :text))))
                    :keep (do (.append out line) st)
-                   :prose (comment! st)
+                   :text (comment! st)
                    :code (code (if (and col0? (not (:in-str st)) (seq (:stack st)) (not indented?) (not (closers (first t))))
                                  (close-all st)
                                  st)
@@ -268,7 +268,7 @@
           (recur (inc k) st))))))
 
 (defn forgive
-  "A model's reply as source a REPL reads, and every change made to it (scan): prose
+  "A model's reply as source a REPL reads, and every change made to it (scan): text
   becomes comments and delimiters are repaired; a reply whose delimiters balance gets no
   column-zero closes. Answers {:text :repairs}."
   {:malli/schema [:=> [:cat :string] [:map [:text :string] [:repairs [:vector [:map [:at :int] [:dropped :string] [:inserted :string]]]]]]}

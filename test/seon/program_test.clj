@@ -689,7 +689,7 @@
     (is (= [] (:run (run-plan (select-keys (ts/reach-digests db (fx/inputs b)) calc-tests) conn)))
         "checkout b reuses every result checkout a recorded")
     (spit (str b "/docs/a.md") "# a, edited")
-    (is (= (:env in-a) (:env (fx/inputs b))) "prose is no input of a test that reads no files")
+    (is (= (:env in-a) (:env (fx/inputs b))) "text is no input of a test that reads no files")
     (is (= (:code in-a) (:code (fx/inputs b))) "nor of a check step")
     ;; the shipped config is no input of every test (root, 2026-10-27: a batch's greens were reused
     ;; by none, because :env moved in 8 of 12 batches): its values are :config's, taken by the keys
@@ -863,7 +863,7 @@
     (is (every? reaching process) "every test that starts a process reaches the code the agent it starts runs")
     (is (every? #(get (:defs g) %) (cfg/value :seon.config.source/process-entry)) "and every configured entry var is in the program: a renamed one drops its edge in silence")
     (is (every? reaching '[seon.server-test/the-context-op-answers-what-a-model-is-sent seon.server-test/done-answers-the-judges-reasons]))
-    (is (not (reaching 'seon.reader-test/prose-without-a-fence-is-a-comment)) "a pure test does not")
+    (is (not (reaching 'seon.reader-test/text-without-a-fence-is-a-comment)) "a pure test does not")
     ;; owner, 2026-10-27 ("no tests should include all of src"): the entry was seon.main/-main, a
     ;; root's whole boot (1,512 vars), so a change anywhere in it deferred every process test to the
     ;; merge. The entry is what the process runs for the test: the agent's turn, and of the server's
@@ -956,7 +956,7 @@
     (is (= #{} (moved :seon.pin/crypto)) "a library no reached namespace names is no test's (src calls no jolt.crypto)")
     (doseq [c [:seon.pin/datahike :seon.pin/lmdb :seon.pin/zstd]]
       (is (< 0 (count (moved c)) (count all-tests)) (str (count (moved c)) " of " (count all-tests) " tests take " c ": some, not every test"))
-      (is (not ((moved c) 'seon.reader-test/prose-without-a-fence-is-a-comment)) (str "a pure test takes no " c)))
+      (is (not ((moved c) 'seon.reader-test/text-without-a-fence-is-a-comment)) (str "a pure test takes no " c)))
     (is (< (count (moved :seon.pin/lmdb)) (* 0.5 (count all-tests))) "an lmdb bump moves under half the tests")
     (is (< (count (moved :seon.pin/crypto)) (count (moved :seon.pin/datahike))) "fewer tests run on the crypto library than on datahike")))
 
@@ -1012,7 +1012,7 @@
         (is (not= after-jolt (env)) "and a Chez bump")
         (let [e (env)]
           (spit (str p "/docs/a.md") "# c")
-          (is (= e (env)) "an unrelated file (prose) moves no :env"))))
+          (is (= e (env)) "an unrelated file (text) moves no :env"))))
     (testing "the digest of every test and every contract key takes :env"
       (let [here (seon.config/checkout)
             in (fx/inputs here)
@@ -1177,7 +1177,7 @@
         window (moved :seon.config.ctx/window "7")
         readers (program/tests-reaching g 'seon.render/pattern)]
     (is (< 0 (count window) (quot (count a) 2)) (str (count window) " of " (count a) " tests read :seon.config.ctx/window: some, fewer than half"))
-    (is (not (window 'seon.reader-test/prose-without-a-fence-is-a-comment)) "a test that reaches no reader of the key keeps its digest")
+    (is (not (window 'seon.reader-test/text-without-a-fence-is-a-comment)) "a test that reaches no reader of the key keeps its digest")
     ;; root, 2026-10-27: a form taking the whole config map (root's boot, from-db) took every key,
     ;; so each new key moved the 57 tests that boot a root; it reads the keys it names
     (is (= #{} (moved (keyword "seon.config.no" "such-key") "1")) "a key no form names moves no test, a root-booting one included")

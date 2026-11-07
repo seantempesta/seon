@@ -271,7 +271,7 @@
 (defn- env-input?
   "Is the file at relative path p an input of every test: everything git tracks or would
   track but the source program facts carry (.clj under src and test), task files (data
-  root loads, no test's code), prose (.md) and the shipped config (resources/seon/config/: its
+  root loads, no test's code), text (.md) and the shipped config (resources/seon/config/: its
   values are :config's, which a test's digest takes by the keys it reads)? The schema resources
   are in: their entries are program facts, which a test's digest takes by the entries its reach
   names, and their class (env-class) for a reach that reads a db's whole schema.

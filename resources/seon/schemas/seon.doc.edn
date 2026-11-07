@@ -17,7 +17,7 @@
  :seon.doc/parent :seon.db/ref
  ;; what its own text cites and resolves to: a section (a link) or a var (a name)
  :seon.doc/references [:set :seon.db/ref]
- ;; the names its own text cites as references (seon.ref/kept: a prose word only when it named
+ ;; the names its own text cites as references (seon.ref/kept: a text word only when it named
  ;; something at load), kept as names: a var deleted later leaves its name here, and a name that
  ;; no longer names something is a dead citation (seon.problems, class :dead-citation)
  ;; indexed (AVET): the sections that cite a name are sought by it, when a var or task of that name appears or

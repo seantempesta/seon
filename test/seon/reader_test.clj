@@ -1,6 +1,6 @@
 (ns seon.reader-test
-  "The forgiving reader (next-review #4, idea 8): a model's reply with prose and no fence is
-  source whose prose is comments; delimiters are repaired; and its two laws hold (T5's
+  "The forgiving reader (next-review #4, idea 8): a model's reply with text and no fence is
+  source whose text is comments; delimiters are repaired; and its two laws hold (T5's
   forgive tasks, Seon's spec): forgiving forgiven text changes nothing, and the repairs
   account for every change."
   (:require [clojure.test :refer [deftest is are testing]] [seon.proofs :as proofs]
@@ -18,8 +18,8 @@
   (let [r (java.io.PushbackReader. (java.io.StringReader. s))]
     (loop [acc []] (let [f (read {:eof ::eof} r)] (if (= ::eof f) acc (recur (conj acc f)))))))
 
-(deftest prose-without-a-fence-is-a-comment
-  ;; the review's reproduction: the prose went to the REPL as code
+(deftest text-without-a-fence-is-a-comment
+  ;; the review's reproduction: the text went to the REPL as code
   (is (= ";; I'll fix add now.\n(defn add [a b] (+ a b))" (src "I'll fix add now.\n(defn add [a b] (+ a b))")))
   (is (= '[(defn add [a b] (+ a b))] (forms (src "I'll fix add now.\n(defn add [a b] (+ a b))\nThat should do it.")))))
 
@@ -27,7 +27,7 @@
   (let [reply "Squaring doubles?\n```clojure\n(in-ns 'app.calc)\n(defn square [x]\n  x)\n```\nDone, I think.\n"]
     (is (= '[(in-ns 'app.calc) (defn square [x] x)] (forms (src reply))))
     (is (str/includes? (src reply) "(defn square [x]\n  x)") "the code as written"))
-  (testing "another tag's body is prose; an untagged fence's body goes by the line rule"
+  (testing "another tag's body is text; an untagged fence's body goes by the line rule"
     (is (= [] (forms (src "```text\n(not code)\n```"))))
     (is (= '[(+ 1 2)] (forms (src "```\nRun this:\n(+ 1 2)\n```")))))
   (testing "a line that is one literal or qualified symbol is code; a list item is not"
@@ -49,7 +49,7 @@
           text (rseq repairs)))
 
 (def texts
-  "Replies the laws are checked over: prose, fences, strings, characters, comments and
+  "Replies the laws are checked over: text, fences, strings, characters, comments and
   every way a delimiter goes wrong."
   ["" "a]a" "(+ 1 2)" "(+ 1 2))" "((" "))" "(let [x 1) x" "(a ; note\nb" "('" "(str \"a" "\"\\" "(\\) \\]"
    "I'll fix add now.\n(defn add [a b] (+ a b))"

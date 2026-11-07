@@ -166,7 +166,7 @@
         (is (= [] (:reasons b)))))))
 
 (deftest a-repair-is-told-on-its-call
-  ;; owner, 2026-10-28: the forgiving reader may complete a form or make prose a comment, and
+  ;; owner, 2026-10-28: the forgiving reader may complete a form or make text a comment, and
   ;; says exactly what it did on that call's own result (:repaired, docs/prompt.md)
   (let [code "Here is f.\n(defn f {:malli/schema [:=> [:cat :int] :int]} [x] (* 2 x)))"
         {:keys [text repairs]} (reader/forgive code)
@@ -174,7 +174,7 @@
     (is (some #{{:near {:line 2 :column 60 :text "(defn f {:malli/schema [:=> [:cat :int] :int]} [x] (* 2 x)),"} :dropped ")" :inserted ","}} r)
         "the extra close: what was dropped, what replaced it, and where")
     (is (some #{{:near {:line 1 :column 1 :text ";; Here is f."} :inserted ";; "}} r)
-        "and the prose made a comment, told too")
+        "and the text made a comment, told too")
     (is (= [] (context/repaired "(+ 1 2)" (:repairs (reader/forgive "(+ 1 2)")))) "code that reads is not repaired")))
 
 (deftest only-program-tests-judge
@@ -326,7 +326,7 @@
         (is (= ["assistant" "tool" "assistant" "tool"] (mapv :role wire)) "two calls of two messages, not one folded into the other")
         (is (= ["eval-e4"] (mapv :id (:tool_calls (nth wire 0)))) "the reply's message holds only its own call")
         (is (= ["eval-e5"] (mapv :id (:tool_calls (nth wire 2)))))))
-    (testing "an eval with no prose is still one user message, as an outside agent's always was"
+    (testing "an eval with no text is still one user message, as an outside agent's always was"
       (is (= 1 (count (seon.fixtures/eval-messages {} (dissoc (ev "e6" "outside" 3) :seon.eval/intent))))))))
 
 ;; ---- context v2: a stable prefix, each var at its citation's depth, the helpers -----------
@@ -501,7 +501,7 @@
         by (into {} (for [r (seon.ref/references db (:seon.task/plan (task/task db "demo/d")))]
                       [(:seon.ref/name r) (seon.doc/resolve-ref db (:seon.ref/name r) (:seon.ref/depth r))]))]
     (is (= {:symbol 'ctx-depth/sq :arglists '([x]) :summary "Squares x."} (by 'ctx-depth/sq)) "bare: arglists and the first sentence")
-    (is (= {:symbol 'ctx-depth/cube :arglists '([x]) :doc {:seon.print/prose "Cubes x."} :contract [:=> [:cat :int] :int]} (by 'ctx-depth/cube))
+    (is (= {:symbol 'ctx-depth/cube :arglists '([x]) :doc {:seon.print/plain "Cubes x."} :contract [:=> [:cat :int] :int]} (by 'ctx-depth/cube))
         "one backtick: arglists, doc and contract")
     (is (= {:symbol 'ctx-depth/tri :source (print/code "(defn tri \"Triples x.\" {:malli/schema [:=> [:cat :int] :int]} [x] (* 3 x))")
             :change (print/code "(seon.repl/edit! 'ctx-depth/tri \"old text, exactly once\" \"new text\")")} (by 'ctx-depth/tri))
@@ -781,7 +781,7 @@
               (str "turn " (:turn b) ": made again at its basis, the bytes it sent")))))))
 
 (deftest the-request-is-a-conversation-of-evals-and-the-page
-  ;; docs/render.md: each turn's prose and eval calls with their responses
+  ;; docs/render.md: each turn's message and eval calls with their responses
   ;; as tool messages (read from the eval records), the reasoning as returned, and the page among them as evals Seon ran:
   ;; whole at the first, the parts that moved after (a verdict moves the status alone); the prefix stays byte-identical
   (ts/test-branch!
@@ -920,23 +920,23 @@
     (is (< (count sent) 500) "and carries no part of the value")))
 
 (deftest an-evals-facts-are-attributes-a-query-finds
-  ;; docs/storage.md#plain-data: an eval's code, call id, prose and response are attributes of its entity, so a
+  ;; docs/storage.md#plain-data: an eval's code, call id, text and response are attributes of its entity, so a
   ;; query finds a model's evals by the call they answered, with no record to unpack
   (let [db (d/db-with (db-with-program)
                       (for [[id call] [["e1" "c1"] ["e2" nil] ["e3" "c3"]]]
                         (into {:seon.eval/id id :seon.eval/by "a1"}
                               (repl/record-details (str "(" id ")") {:handle (symbol "result" id) :value 1} (cond-> {} call (assoc :call-id call :intent (str "ask " call)))))))]
     (is (= #{"e1" "e3"} (set (d/q '[:find [?id ...] :where [?e :seon.eval/call-id _] [?e :seon.eval/id ?id]] db))) "the model's evals, by the call id they answered")
-    (is (= "ask c3" (d/q '[:find ?p . :in $ ?c :where [?e :seon.eval/call-id ?c] [?e :seon.eval/intent ?p]] db "c3")) "and the prose beside one call")
+    (is (= "ask c3" (d/q '[:find ?p . :in $ ?c :where [?e :seon.eval/call-id ?c] [?e :seon.eval/intent ?p]] db "c3")) "and the text beside one call")
     (is (= 1 (:value (d/q '[:find ?r . :in $ ?id :where [?e :seon.eval/id ?id] [?e :seon.eval/response ?r]] db "e2"))) "the response is the map, its value data")))
 
-(deftest an-evals-record-keeps-its-prose-as-written
+(deftest an-evals-record-keeps-its-text-as-written
   ;; docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map: an eval's record keeps its
-  ;; prose and parses none of it (the parser is program the agent may break: md-scan's broken seon.ref/scan
-  ;; made every eval throw while the record parsed the prose's citations); a reader parses the kept prose
-  (let [prose "Reading `demo/f` before I change it."
-        rec (repl/record-details "(f 1)" {:text "2"} {:intent prose})]
-    (is (= prose (:seon.eval/intent rec)) "the prose, kept as written")
+  ;; text and parses none of it (the parser is program the agent may break: md-scan's broken seon.ref/scan
+  ;; made every eval throw while the record parsed the text's citations); a reader parses the kept text
+  (let [text "Reading `demo/f` before I change it."
+        rec (repl/record-details "(f 1)" {:text "2"} {:intent text})]
+    (is (= text (:seon.eval/intent rec)) "the text, kept as written")
     (is (not (contains? rec :cites)) "and nothing parsed from it")
     (let [row #(seon.web.html/html (seon.render.ui/evaluation {:as :inline} (assoc (repl/record-details "(x)" {:text "x" :value %} {}) :seon.eval/by "a1")))]
       (is (str/includes? (row {:a 1}) "{:a 1}") "its value in one line, printed now, for the collapsed eval")
@@ -1356,7 +1356,7 @@
         (is (not-any? #(str/includes? (str (:content %)) "e1") (rest (:messages r2))) "nothing of it is read")))))
 
 (deftest a-cut-reply-is-no-message-in-the-history
-  ;; task seon.context/the-context-is-the-agents-evals-and-seons R1 (review): a turn's prose reply with
+  ;; task seon.context/the-context-is-the-agents-evals-and-seons R1 (review): a turn's message reply with
   ;; no call is its assistant message, but one cut at the token limit is no message, as the turn loop
   ;; reads it (seon.turn/act!), so the history and the stop rule agree
   (let [db (d/db-with (ts/test-db) [{:seon.agent/key "b/a1" :seon.agent/id :a1 :seon.agent/turn 2}
@@ -1370,7 +1370,7 @@
   ;; docs/turn.md#the-turn-is-a-number (owner, 2026-11-04): the conversation is ordered by the numbers its records carry, not by
   ;; when they were written. One session of two turns on the world: a message, the model's reply that called something and its two evals, an outside eval (issue
   ;; number 10, which a text sort puts before 9), then a
-  ;; message taken by the second turn, an outside eval made during it and its prose reply (a record, after what else the turn holds)
+  ;; message taken by the second turn, an outside eval made during it and its message reply (a record, after what else the turn holds)
   (let [ev (fn [id by turn & [more]] (merge {:seon.eval/id id :seon.eval/by by :seon.eval/agent [:seon.agent/key "b/a1"] :seon.eval/call (seon.task/call-ref "b/a1" turn)
                                               :seon.eval/code (str "(" id ")") :seon.eval/response {:handle (symbol "result" id) :value 1}} more))
         msg (fn [id turn] {:seon.message/id id :seon.message/agent [:seon.agent/key "b/a1"] :seon.message/call (seon.task/call-ref "b/a1" turn) :seon.message/from "owner" :seon.message/body id})
@@ -1611,7 +1611,7 @@
 
 (defn- no-example-requests!
   "Two requests of the fixed fixture of task demo/g, named by no example: its session of one eval, one message and one
-  prose reply, on conn (a branch with the system prompt loaded); answers {:r0 :r1}."
+  text reply, on conn (a branch with the system prompt loaded); answers {:r0 :r1}."
   [conn]
   (d/transact conn (doc/load-tx @conn "docs" {context/system-page (slurp (str (seon.config/checkout) "/" context/system-page))}))
   (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "g" :seon.task/plan "Make g." :seon.task/proofs #{'demo-test/g-test}}]))
