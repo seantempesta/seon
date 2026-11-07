@@ -1219,7 +1219,8 @@
         boot (str (random-uuid))
         source (or source (when-let [r (get cfg/config :seon.config.source/root)]
                             {:root r :dirs (cfg/value :seon.config.source/dirs) :branch (cfg/value :seon.config.source/branch)}))
-        {in-force :config in-force-sources :sources} (cfg/in-force)
+        {in-force :config} (cfg/in-force)
+        in-force-sources (cfg/boot-sources)
         provider (or provider (cfg/provider in-force))
         ;; the config in force, written on main's root entity with the boot fact; the merge gate's
         ;; checkout, when none is declared, is this root's own source root
