@@ -6,6 +6,18 @@ This file holds the owner's standing rulings, one entry each: the rule, the owne
 
 The owner's rulings of 2026-11-07, on what an agent starts from, on what a merge does by itself, on how proofs grow, on state and data structures, and on users.
 
+### No magic: maintenance is Clojure data on ctx
+
+Owner, 2026-11-07: "I want less special functions and more clojure data manipulation on the ctx atom for maintenance. In the rendering of the mesaages we can include instructions for how they can manage their messages and archive them so they don't just pile up. I don't want any magic in the system." Stated in: [users](users.md#messages).
+
+### What's on screen is a reflection of the database
+
+Owner, 2026-11-07: "I want the UI state to be a reflection of the DB so we need to update thte db and that causes the re-render." And: "I really want the render function @ctx to be driving everything ... we stop writing process data and instead write data that reflects the state of the system". Stated in: [users](users.md#whats-on-screen).
+
+### Only Clojure's, our libraries' and agreed words
+
+Owner, 2026-11-07: "We don't have cursors. Please only use clojure terms or the libraries we are integrating with or the concepts that we agree on like using git terms for datahike branching". Stated in: [vocabulary](vocabulary.md).
+
 ### The system is a function of state in the database
 
 Owner, 2026-11-07: "there is no 'run' there is an agent's valid schema which has evals and other data attached to it and we can change it and the context regenerates from it. ... This is not OO programming. State is always in the database and the system is a function of that state." Stated in: [users](users.md).

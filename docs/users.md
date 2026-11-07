@@ -14,6 +14,8 @@ A thing is its data structure: any entity holding the shape is that thing, howev
 - **Eval:** an entity attached to its agent: code, intent, and ``:seon.eval/response``, what is about that evaluation (its handle, ``:ms``, ``:ticks``, ``:bytes``, ``:ns``, ``:warnings``), and ``:seon.eval/result``, a ref. Built: ``seon.db/response-of`` answers the whole response as every reader has always had it. Its id is its eid, which the store issues uniquely across branches (lab, read; not built). Evaluating again (``seon.repl/again``) moves the ref, and the old result stays (``seon.repl-test/an-eval-evaluated-again-moves-its-result-ref``).
 - **Result:** one immutable entity per value, the same on every branch (built, ``:seon.result/result-fact``): ``:seon.result/hash``, the full hash as identity and content id, the lookup ref; ``:seon.result/value``, ``:ex``, ``:out``, ``:err``, ``:forms``, written by ``seon.db/with-response``. The wire keeps the short handle, its first eight digits: the identity must be the full hash, or two values sharing a prefix would become one entity. An answer not kept as it is (a host object, a value past the bound, several forms) is hashed with its eval's id, as its handle always was, so its result is its eval's own. A nil value is a result with no value and no error; an eval that threw holds a result with ``:ex`` and no ``:value``. Proof: ``seon.repl-test/two-evals-of-one-value-hold-one-result``; what the model reads is unchanged: ``seon.context-test/what-the-model-reads-is-the-same-with-result-entities``.
   A content-id result has the same eid on two branches, and two sessions producing one value merge into one entity with no conflict, each eval pointing at it (lab). A new small result costs 50% more datoms than inline and about 38% more time; re-using one costs the same as inline (lab, 300 evals, one run). Whether the small case is worth an entity is open: a value below the out-of-line size could stay on the eval, at the cost of two shapes.
+- **Message:** one entity, read by everyone it's to: ``:seon.message/from``, ``:seon.message/to``, a set of refs, ``:seon.message/body``, at an issued eid. Not built: see [Messages](#messages).
+- **Tab:** one entity per browser tab, holding what that tab shows. Not built: see [What's on screen](#whats-on-screen).
 - **Layout:** a data structure naming existing components, on its own key, as root's already is. Functions remain for what data can't express.
 
 ## Where each fact lives
@@ -69,6 +71,28 @@ A branch should be main plus its own changes, so everything is a fork of a share
 - Rebase keeps a branch's own nodes flat, tracking its data: about 885 to 930 at 5,000 entities, about 6.2 s each, flat in how far behind; a retraction, an own function and an old commit all survived (lab). As a lazy step on a count, checked at an agent's start, a branch nobody uses never pays.
 - Rebase isn't proved safe: it sits on main's whole head, so it takes main's platform records too, and a message's presence on a branch is its delivery, so a message could read as delivered before it's taken (read). Optimization's tree merge has the same question. Optimization owns the choice: see task ``seon.db/a-branch-is-main-plus-its-own-changes``.
 
+## Messages
+
+A message is attached to an agent by its ref, the agent's pull and renders show it, and the agent manages it by changing `ctx`, so no special function reads or removes one. Modeled on real branches of a scratch root's store (lab, one run each, under load); not built.
+
+- **Attached:** a send writes one entity on main, ``:seon.message/to`` naming each recipient, and an agent's messages are the reverse join, which ``seon.ctx`` already handles. A forward set on the agent was rejected: every `*` pull of that agent then carries them all (43 ms and 158 KB of text at 10,000, lab).
+- **Read:** the turn that reads a message writes its body at the same eid on the agent's branch and names it on that turn's model call. A program pull brings no message, and it still reads as unread after one (lab).
+- **Unread:** to this agent on main, and on no model call on its branch. Nothing is written by two sides, so nothing conflicts, and a merge that brings another agent's reads changes nothing (lab). A full look costs about 14 ms at 1,000 messages and 70-160 ms at 10,000, at a turn or a wake (lab). Seeking newest first is 0.4 ms but misses a message attached late, and needs eids to rise, so it stays an optimization if a real agent ever needs it.
+- **Archive:** ``(swap! ctx update :messages dissoc e)``: it retracts this agent's own ref, and the entity, its read and other recipients' refs stay. It isn't delivered again and the model no longer reads it (lab, a real agent's ctx, with the attribute as a set). The message's render carries the instruction.
+- **An archive stays on the reader's branch:** a merge compares against the merge base, and the base never held the ref, so main still lists it (lab). Readers of an agent's own view are on its branch; a page reading main must count unread, not list what's held.
+- **Going Back** to an earlier point shows messages read since then as unread (lab). That's today's behaviour too.
+- **Chat:** text that isn't code is a message, a reply included, so one render covers both sides: from me is role `assistant`, anything else `user`. Order is by the turn that read each message, never by eid: a person's message sent while a reply is being made has the lower eid but is read a turn later (lab, modeled as data, not through the real render). A reply with a `to` goes to main; one with none stays on the branch (untested on a real run).
+- **Turns:** a wake is only that a message's transaction committed. If a message adds turns, it does so in that transaction, never on a wake, since a wake can be dropped. Bumping on every wake would remove the bound on two agents waking each other; whether only a person's message adds turns is the owner's open decision.
+
+## What's on screen
+
+What a person sees is a reflection of the database: a click or a URL writes a fact, the commit causes the re-render, and the patch sets the address bar too, so no UI state is held in a process. Today's isn't: the open sections, the turn in view and "more" are in ``seon.render.proc``'s memory and go on a restart, and the URL is the only thing that survives.
+
+- **Each tab is an entity,** ``:seon.tab/user``, ``:seon.tab/view``, ``:seon.tab/open``. With one current view on the user, tab A would flip when tab B navigated. A tab reconnecting with its id gets everything back, and `/` opens the user's newest. Which tabs to ignore as they pile up is open.
+- **It already works for a user-shaped page:** an agent with no branch is read from main with its reads tracked (``seon.render.proc``). A fact on main redrew that page 29 times of 30, median 34 ms, max 52 ms, about 430 bytes a patch, with no code added (lab, one run, under load of about 7, the tag built at runtime so no eval's code could hold it). What a view with a user's parts around an agent's branch does is untested.
+- **It isn't automatic everywhere:** a live agent's page draws itself, so a fact on main like ``:seon.agent/opened`` shows only at its next turn, and no patch came in 5 s (lab, 30 tries). Root's page sent nothing per fact (lab, 20 sends of an attribute it doesn't draw).
+- **A click costs main a commit:** about 24 ms of CPU across a root's processes (lab: 150 facts, 3.58 s against 0.09 s idle over 30 s, with no agent working), and no bytes on another agent's stream. A running agent reads main as moved after one, and its turn's merge check stays about 3 ms up to 5,000 unmerged facts, since they aren't program (lab, three runs each). Nothing like a hover should write. Not measured: many agents working at once.
+
 ## When a definition changes under data
 
 A definition's change and the data it leaves behind are one merge result, so a branch either fits or says what doesn't, and it can't merge up until it does.
@@ -92,10 +116,10 @@ The steps below merge one at a time, each usable alone, with today's agents unch
 
 1. Done: the write check holds a value to its branch's schema, and a merged schema entry brings its attribute's declaration.
 2. Done: an eval's result is one entity per value on every branch, and an eval's id is issued by the store. Two shapes remain, a whole old response that ``seon.db/response-of`` still reads and ``:seon.eval/id`` repeating the eid; how they go is Optimization's call, with how results are stored (owner, 2026-11-07).
-3. A durable mailbox, Web's next, reviewed by Optimization: one send, ``:seon.agent/taken`` as a t, a wake rule; task ``seon.agent/every-send-is-one-fact-on-main`` and the two after it.
+3. Messages, Web's next: one send, unread and archive by data, a wake rule; task ``seon.agent/every-send-is-one-fact-on-main`` and the two after it. Functions that mutate behind a read-looking name go with them, by the owner's ruling: task ``my.agent/no-function-does-what-ctx-can``.
 4. Users, and input through ``forgive``.
 5. Sessions and merging them.
-6. The home page from the user's ``@ctx``, with layouts as data.
+6. The home page from the user's ``@ctx``, with layouts as data and tabs as entities.
 
 Merges are Optimization's, because its tree merge may change them (owner, 2026-11-07): ``seon.merge/a-branch-holds-its-merge-bases-as-facts`` and ``seon.merge/a-merge-takes-options`` wait on it. As written they'd add a function and facts beside what exists, three merge entry points (``seon.agent/merge-main!``, ``seon.writer/branch-merge``, ``:merge-candidate``), ``:seon.agent/base-commit`` and six walks of the commit graph; whatever lands replaces those. Sharing goes with it, on ``seon.db/a-branch-is-main-plus-its-own-changes``. So far the tree merge shares about as well as a rebase, costs far less at a large delta, and rewrites no history (Optimization, prototype). Steps 4 and 5 need the two merge cases above, so they build on today's merge only where that's one small change.
 
