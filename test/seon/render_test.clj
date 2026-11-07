@@ -3091,3 +3091,13 @@
       (is (= 4 (count-of (seon.problems/health main1 fold))) "root counts the signature four times")
       (is (str/includes? banner "eval ×4") (str "the banner names root's count: " banner))
       (r/dispose-walk! (get-in st [:root-walk :w]))))))
+
+(clojure.test/deftest the-config-panel-names-each-source
+  ;; task seon.render/config-shows-where-each-value-came-from (docs/config.md#layers): beside a value, the layer root recorded for it on main, a fact, so no test depends on the process it runs in
+  (ts/test-branch! (fn [_ conn]
+    (d/transact conn {:tx-data (seon.config/facts (assoc seon.config/config :seon.config.agent/max-running 6) {:seon.config.agent/max-running "--set"})})
+    (let [db @conn
+          sources (:seon.config/sources (d/pull db [:seon.config/sources] [:seon.root/id :root]))
+          html (h/html (ui/config-panel {:seon.config/sources sources} (seon.config/from-db db)))]
+      (is (= "--set" (:seon.config.agent/max-running sources)))
+      (is (str/includes? html "from --set") "the panel draws the layer main records")))))

@@ -188,25 +188,29 @@
 
 (defn config-panel
   "The config in force (the declared HTML render of :seon.config/config), as root wrote it
-  on main: every key grouped by its area, its value whole, its unit, and its schema's
-  description on hover. Where each value comes from (unit, provenance, its bound) is
-  written beside it in resources/seon/config/default.edn."
+  on main: every key grouped by its area, its value whole, its unit, the schema's description
+  on hover, and the layer it came from (:seon.config/sources, docs/config.md#layers) as text
+  beside it, when opts names it (:seon.config/sources, root's fact on main)."
   {:malli/schema [:=> [:cat :seon.render/opts :seon.config/config] :any]}
-  [_ c]
+  [opts c]
   (let [prop (fn [k p] (get (contract/properties k) p))
+        sources (:seon.config/sources opts)
         groups (group-by (comp namespace key) (sort-by (comp str key) c))]
-         [:section {:id "t-config" :class "tile wide config"}
-      (kicker "config" (str (count c) " keys in force on main · resources/seon/config/default.edn · profile " (name (config/profile))))
-      (when-let [w (not-empty (config/waiting))]
-        [:p {:class "muted"} (str "main states these and this process waits for a rebuild: " (str/join ", " (map str (sort (keys w)))))])
-      [:div {:class "cfg-groups"}
-       (for [[g kvs] (sort-by key groups)]
-         [:dl {:class "cfg"}
-          [:dt {:class "cfg-area"} (str/replace g #"^seon\.config\.?" "")]
-          (for [[k v] kvs]
-            [:div {:title (str (prop k :description))}
-             [:dt (name k)]
-             [:dd (render/html {:budget (part)} v) (when-let [u (prop k :seon.config/unit)] [:span {:class "muted"} " " u])]])])]]))
+    [:section {:id "t-config" :class "tile wide config"}
+     (kicker "config" (str (count c) " keys in force on main · resources/seon/config/default.edn · profile " (name (config/profile))))
+     (when-let [w (not-empty (config/waiting))]
+       [:p {:class "muted"} (str "main states these and this process waits for a rebuild: " (str/join ", " (map str (sort (keys w)))))])
+     [:div {:class "cfg-groups"}
+      (for [[g kvs] (sort-by key groups)]
+        [:dl {:class "cfg"}
+         [:dt {:class "cfg-area"} (str/replace g #"^seon\.config\.?" "")]
+         (for [[k v] kvs]
+           (let [src (get sources k)]
+             [:div {:title (str (prop k :description))}
+              [:dt (name k)]
+              [:dd (render/html {:budget (part)} v)
+               (when-let [u (prop k :seon.config/unit)] [:span {:class "muted"} " " u])
+               (when src [:span {:class "cfg-source muted"} (str " from " src)])]]))])]]))
 
 ;;; --- agent cards --------------------------------------------------------------
 
