@@ -282,6 +282,15 @@
     (is (= :db.type/long (:db/valueType (get (d/schema onto) :app.shape/size))) "the merge carries its declaration")
     (is (= 3 (:app.shape/size (d/entity (d/db-with onto [{:db/id 900 :app.shape/size 3}]) 900))) "and the target can store it")))
 
+(deftest a-merged-entry-imported-from-a-file-compiles-on-a-binary-without-it
+  ;; docs/source.md#an-agent-changes-a-schema: real run 9, 3 of 5 agents closed. A key the running binary doesn't hold, imported onto main
+  ;; from a file, has to compile when a branch merges it, as a registered key does; red when an imported entry was taken for the binary's
+  (let [base (empty-db)
+        src (d/db-with base (source/file-tx "resources/seon/schemas/app.shape.edn" "{:app.shape/size :int}"))
+        onto (d/db-with base (pm/merge-tx base base src [[:schema :app.shape/size]] #{}))]
+    (is (= :db.type/long (:db/valueType (get (d/schema onto) :app.shape/size))) "the merge compiled it and carries its declaration")
+    (is (= #{:app.shape/size} (set (keys (program/schema-changes onto)))) "and the branch says the binary lacks it")))
+
 (deftest a-merge-declares-the-attributes-its-datoms-use-before-them
   ;; found 2026-10-27 through 0.7 (agent a1, (my.branch/merge-main!) on the standing root): main had
   ;; gained datoms of :form/ops, and the agent's branch was cut before the attribute: Datahike refused

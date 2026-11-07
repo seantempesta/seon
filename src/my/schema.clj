@@ -81,9 +81,7 @@
             e (some->> (pdb/eid db :schema/key k) (d/entity db))
             file (cond scratch? nil (:schema/file e) (:schema/file e) :else (new-key-file db k))]
         (or (type-change db k decls)
-            {:tx (into (cond-> [(cond-> {:schema/key k :schema/form text} file (assoc :schema/file file))]
-                         (:schema/source e) (conj [:db/retract (:db/id e) :schema/source true]))
-                       decls)
+            {:tx (into [(cond-> {:schema/key k :schema/form text} file (assoc :schema/file file))] decls)
              :registration (cond-> {:seon.schema/key k :seon.schema/definition v}
                              (contains? (d/schema db) k) (assoc :seon.schema.usage/check (usage-check db k (:registry judged))))})))))
 
