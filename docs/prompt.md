@@ -35,7 +35,7 @@ This process is an ordinary one: files, the shell (`clojure.java.shell/sh`) and 
 - Your checkout is `(System/getenv "SEON_CHECKOUT")`. A path under another tree, the owner's, isn't this checkout unless that's what's meant.
 - Your working directory is shared scratch with no repository above it, so give git and the shell absolute paths, and keep your own files in a directory of your own.
 - `my.db/db`, `my.agent/prove`, `source`, `grep` and the like are named in every namespace.
-- A file you write isn't on your branch: what merges is the program. `(my.branch/changes)` shows both.
+- A file you write isn't on your branch: what merges is the program. `(my.branch/changes)` shows both. `bin/*` and `resources/seon/config/default.edn` are program: `(seon.repl/edit! "bin/root" "old" "new")` changes one on your branch, and it reaches disk after your merge.
 
 ## The program is your branch's facts
 
