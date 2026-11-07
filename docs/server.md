@@ -56,4 +56,6 @@ bin/root stop                                         # leave nothing running
 
 A restart leaves an attached task `:lost`, with no process, until someone attaches it again: nothing drives it before then, and a process started at boot would race that attach (the owner's `seon_attach` then answered an agent working no task). The agent's session and branch continue.
 
+A file edited on disk in the worktree acts on nothing in that root until it is imported: root's watcher loads the wiki and the task files, never the source (owner, 2026-11-07), so after editing, `bin/mcp call eval agent=root code='(my.root/import! sys #{"src/seon/x.clj"})'` brings those paths onto this root's main (without the set, the whole tree), and answers what the import answered.
+
 The fix a task needs is what the agent evaluates on its branch. A fix found in Seon itself is made in the worktree's source and proved with `bin/prove` ([AGENTS.md](../AGENTS.md)), and what hurt on this path goes in the merge's report. `bin/worktree --remove NAME` (`--remove-at DIR` for one made elsewhere) ends it.

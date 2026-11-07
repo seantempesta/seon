@@ -1100,8 +1100,8 @@
   ;; task seon.fx/the-source-tree-follows-main, end to end through bin/root: a root whose checkout is
   ;; a clone of this one (main) and whose source root is a worktree of that clone on its own
   ;; branch (the write-back tree). A commit to the clone's main that defines a var reaches main's
-  ;; program through the :source load's own function (seon.root/import-source!, which the watch
-  ;; calls on the ref's move: that the watch fires is seon.watch-test's proof), with no step of the
+  ;; program through the :source load's own function (seon.root/import-source!, which my.root/import!
+  ;; calls; the watcher no longer does: seon.watch-test), with no step of the
   ;; owner's between: the write-back branch is fast-forwarded and the var's entity is there. A root
   ;; killed and started again on the same store holds it too (the boot's import), and a commit the
   ;; write-back tree holds that main lacks is a recorded :effect problem naming both shas.
@@ -1144,6 +1144,19 @@
         (is (= theirs (git wb "rev-parse" "HEAD")) "a tree holding a commit main lacks is not moved")
         (is (re-find (re-pattern (str theirs ".*" ours)) (str (:error r))) (str "the gap names both shas: " (pr-str r)))
         (is (true? (has-var? 3)) "and is imported as it is"))
+      ;; a disk edit acts on nothing until someone imports (my.root/import!, owner 2026-11-07): a form
+      ;; written under the source tree, then a wiki page whose load is observed (the watcher reads
+      ;; FSEvents in order, so the page loaded means the form's batch has been read); main's program
+      ;; lacks the form until import! is called
+      (testing "a disk write under the source tree loads nothing; import! brings it onto main"
+        (spit (str wb "/src/seon/follow_probe_5.clj") "(ns seon.follow-probe-5)\n\n(defn probe [] 5)\n")
+        (spit (str main "/docs/follow-marker.md") "# Follow marker\n\nA batch the watcher reads.\n")
+        ;; asked again until the page is there (an eval that blocks on it would hold the api the watcher loads through)
+        (is (loop [] (or (ask "(some? (datahike.api/entity @(:conn sys) [:seon.doc/address \"docs/follow-marker.md#follow-marker\"]))") (recur)))
+            "the marker page loaded: the watcher has read the batches before it")
+        (is (false? (has-var? 5)) "the edit is on disk, and main's program lacks it")
+        (is (string? (ask "(:commit (my.root/import! sys))")) "import! answers what the import answered (the commit it read; the gap of the step above is its :error)")
+        (is (true? (has-var? 5)) "after import! main's program holds it"))
       (finally
         (when @root (ts/stop-root! @root))
         (sh/sh "rm" "-rf" dir)))))
@@ -1159,7 +1172,7 @@
     [{:req {:root d :dirs ["src"] :paths #{"src/f0.clj"}}}]))
 
 (deftest a-batch-of-edits-reads-the-changed-files-not-the-tree
-  ;; the watcher's source batch (my.root/source-changes) names its files, and the :source read takes
+  ;; my.root/import! with paths names its files, and the :source read takes
   ;; them (seon.fx/read-source :paths) in place of walking and reading every file, so an edit costs
   ;; the same in a tree of any size (task seon.source/an-import-reads-only-changed-files)
   (cost/proof {:of 'seon.fx/read-source :input 'seon.source-test/tree-of
