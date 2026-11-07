@@ -84,5 +84,5 @@ The fix is at the producer that pulls the whole store: it reads what its view ne
   :seon.task/kind :work
   :seon.task/proofs #{}}
  {:seon.task/name "a-nested-map-takes-its-content-id"
-  :seon.task/plan "`datahike.db.transaction/content-tempids` gives a content eid only to a top-level map, so a nested map holding a `:db/contentId` attribute takes a counter eid, a different one on each branch. `seon.db/with-response` names its nested result's eid by hand for this. Correct: `d/db-with` of `{:seon.eval/code \"x\" :seon.eval/result {:seon.result/hash \"h\"}}` puts the result at `(content-eid :seon.result/hash \"h\")`, and with-response stops naming it. A change to Datahike, so it waits for the owner's go. See docs/storage.md#content-ids."
+  :seon.task/plan "`datahike.db.transaction/content-tempids` gives a content eid only to a top-level map, so a nested map holding a `:db/contentId` attribute takes a counter eid, a different one on each branch. `seon.db/with-response` names its nested result's eid by hand for this. Correct: `d/db-with` of `{:seon.eval/code \"x\" :seon.eval/result {:seon.result/hash \"h\"}}` puts the result at `(content-eid :seon.result/hash \"h\")`, and with-response stops naming it. A change to Datahike, so it waits for the owner's go. See docs/storage.md#ids."
   :seon.task/kind :work}]
