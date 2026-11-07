@@ -2,7 +2,7 @@
 # bin/update [ARGS]   bring the standing root up to date with main, from the main tree, in one go:
 #   1. merge Seon's own merges (jolt/merges: what the standing root's merges committed in
 #      the write-back tree that config/local.edn's :seon.config.source/root names) into main;
-#   2. move both trees' submodules to main's pins (bin/worktree --sync for the write-back tree);
+#   2. bring the write-back tree to main and move both trees' submodules to main's pins (bin/worktree --sync for it);
 #   3. build (bin/build: each step skips what is up to date);
 #   4. restart the standing root on its store (bin/root stop, start): it boots on main's build and
 #      imports its source tree (docs/source.md), first fast-forwarding it to main (seon.fx/read-source).
@@ -38,6 +38,9 @@ if [[ -d $MERGES ]]; then
   # git diff, which refused the first update after a merge and passed the next, once git status had refreshed it
   git -C "$MERGES" update-index -q --refresh --ignore-submodules || true
   git -C "$MERGES" diff --quiet --ignore-submodules || fail "$MERGES has uncommitted changes: $(git -C "$MERGES" status --short --ignore-submodules | tr '\n' ' ')"
+  # --sync moves to the pins its HEAD records, and a boot fast-forwards that HEAD only after this: at a pin merge it read the old pin, left the
+  # submodule behind, and the root's source tree was not its binary's, so that boot's agents shared no greens (:unshared). Its branch holds no commit main lacks: step 1 merged them
+  git -C "$MERGES" merge --ff-only -q main || fail "fast-forwarding $MERGES to main"
   "$MAIN/bin/worktree" --sync "$MERGES" >/dev/null || fail "syncing $MERGES's submodules"
 fi
 git -c protocol.file.allow=always submodule update --init -q || fail "main's submodules"
