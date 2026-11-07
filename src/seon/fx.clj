@@ -296,7 +296,7 @@
   --config layers its command line names, the #env values, the profile), as {key text}: each
   value with the checkout's own path written as <checkout>, and the keys that say where a
   process runs left out (their schemas' :seon.config/place: its ports, main, store, runs,
-  source tree and results directory: each checkout's and each root's own by design, while
+  source tree and results directory, and the profile it runs under and what that picks, its provider, script and whether it is its store's sole writer: each checkout's and each root's own by design, as a test reads nothing of its runner, while
   :tree covers the source's content). What a result depends on that git does not see: a
   test's digest takes the keys its reach reads (seon.program/config-reads), so an agent's
   root and a checkout on one tree key their results alike, and a key no test reads moves
