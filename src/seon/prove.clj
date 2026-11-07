@@ -98,10 +98,11 @@
       (contract/error? r) [(dissoc st :full) [{:op :problem :class :platform :error r}]]
       :else (let [reds (vec (sort-by str (keep (fn [[t st]] (when-not (= :pass st) t)) (get-in r [:value :results]))))]
               [(-> st (dissoc :full) (assoc :full-done (:key run)))
-               (when (seq reds)
+               (if (empty? reds)
+                 []
                  [{:op :problem :class :platform
                    :error (contract/error :seon.prove/full-run-red #'seon.prove/full-answered
-                                          (str "the full run " (:key run) " found " (count reds) " red on main: " (str/join " " reds)) {:tests reds})}])])))
+                                          (str "the full run " (:key run) " found " (count reds) " red on main: " (str/join " " reds)) {:tests reds})}])]))))
 
 (defn- take-next
   "After a run of branch b: the pending run whose branch is the next in name order after b (then
