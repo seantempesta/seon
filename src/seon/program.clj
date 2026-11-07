@@ -1833,8 +1833,8 @@
 
 (defn program-digest
   "The digest of db's program as a whole: its live forms (:form/id, hasch of a form's namespace
-  and text, docs/storage.md#ids: a replaced form is retracted), its schema entries (:schema/form)
-  and its namespaces' tails, each by its entity, a content id of its identity (docs/storage.md#ids),
+  and text, docs/storage.md#ids: a replaced form is retracted), its schema entries (:schema/form),
+  its files' texts (:file/text) and its namespaces' tails, each by its entity, a content id of its identity (docs/storage.md#ids),
   so the index's order is the same on every branch and nothing is sorted. It moves when a form, schema entry or
   ns tail is added, replaced or removed, and not on a write of data. What a main run of the test
   service reads of main's program (seon.root/prove!): per-test digests (graph-index) need the
@@ -1845,7 +1845,7 @@
   [db]
   (let [b (StringBuilder.)]
     (doseq [dt (d/datoms db :aevt :form/id)] (.append b (:e dt)) (.append b "\n"))
-    (doseq [a [:schema/form :ns/tail] dt (d/datoms db :aevt a)] (.append b (:e dt)) (.append b " ") (.append b (:v dt)) (.append b "\n"))
+    (doseq [a [:schema/form :ns/tail :file/text] dt (d/datoms db :aevt a)] (.append b (:e dt)) (.append b " ") (.append b (:v dt)) (.append b "\n"))
     (lib/digest (.toString b))))
 
 
