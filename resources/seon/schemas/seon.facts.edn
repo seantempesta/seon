@@ -447,7 +447,7 @@
  ;; the files and pins read (a boot whose tree
  ;; reads the same imports nothing), its files and forms, the program entities the import
  ;; retracted, how long reading, analysing and transacting took, or why it was refused
- :seon.root/source [:map [:root :string] [:commit {:optional true} :string] [:tree {:optional true} :string]
+ :seon.root/source [:map [:root :string] [:commit {:optional true} :string] [:tree {:optional true} :string] [:dirs {:optional true} [:vector :string]]
                     [:pins {:optional true} [:map-of :string :string]] [:digest {:optional true} :string]
                     [:files :int] [:forms :int] [:retracted {:optional true} :int] [:ms number?]
                     [:error {:optional true} :string]

@@ -197,7 +197,14 @@
         (is (= ["src/b.clj"] (:paths r))))
       (.delete (java.io.File. (str d "/src/a.clj")))
       (is (= nil (get (:value (read t)) "src/a.clj" :absent)) "a removed file reads nil")
-      (is (contains? (:value (read (apply str (repeat 40 "0")))) "src/b.clj") "a tree git can't find reads whole"))))
+      (is (contains? (:value (read (apply str (repeat 40 "0")))) "src/b.clj") "a tree git can't find reads whole")
+      (testing "a dir the last import didn't read is read whole, though nothing in it moved"
+        (let [t2 (:tree (read nil))]
+          (.mkdirs (java.io.File. (str d "/bin"))) (spit (str d "/bin/x.clj") "(ns x)") (git "add" ".") (git "commit" "-q" "-m" "two")
+          (let [t3 (:tree (read nil))
+                r (seon.fx/read-source {:req {:root d :dirs ["src" "bin"] :since t3 :since-dirs ["src"]}})]
+            (is (not= t2 t3))
+            (is (= {"bin/x.clj" "(ns x)"} (:value r)))))))))
 
 (deftest a-write-back-answers-the-bytes-on-disk
   (let [d (scratch-dir)

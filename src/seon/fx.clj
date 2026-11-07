@@ -221,11 +221,11 @@
   set aside, and the answer then holds no :paths). When it holds commits main lacks, or git
   refuses the fast-forward, the answer is a :seon.fx/io-error naming why that still carries the
   read (:value and the rest), so the import goes on and the gap is a recorded problem.
-  With :since (the tree id of the last import, and no :paths), only the files under dirs that differ from it are read, so what main merged and the tree never held stays main's. A tree git can no longer find reads whole. See docs/source.md#mains-program-follows-the-tree.
+  With :since (the tree id of the last import, and no :paths; :since-dirs, the dirs that import read), only the files under dirs that differ from it, and every file of a dir it didn't read, are read, so what main merged and the tree never held stays main's. A tree git can no longer find reads whole. See docs/source.md#mains-program-follows-the-tree.
   With :own-branch, that branch is brought to what it read (`own-branch-at!`).
   Answers {:value {path text} :modes {path git mode, of each file the allow-list names} :commit sha :tree id :paths paths-when-read-by-them :pins {path sha} :inputs :binary} or :seon.fx/io-error."
   {:malli/schema [:=> [:cat :map] :map]}
-  [{{:keys [root dirs binary-tree paths follow own-branch since]} :req}]
+  [{{:keys [root dirs binary-tree paths follow own-branch since since-dirs]} :req}]
   (try
     (let [base (.getCanonicalPath (java.io.File. ^String root))
           head0 (when (and follow (checked-out? base)) (git-try base ["rev-parse" "--verify" "--quiet" "HEAD"]))
@@ -239,7 +239,11 @@
           paths (or paths
                     (when (and since now)
                       (let [d (git-run {} base (into ["diff" "--name-only" since now "--"] dirs) nil)]
-                        (when (zero? (:exit d)) (vec (remove str/blank? (str/split-lines (:out d))))))))
+                        (when (zero? (:exit d))
+                          ;; a dir added since that import has never been read, though nothing in it moved
+                          (into (vec (remove str/blank? (str/split-lines (:out d))))
+                                (for [nd dirs :when (and since-dirs (not (some #{nd} since-dirs))) f (files-under (str base "/" nd))]
+                                  (subs (.getCanonicalPath ^java.io.File f) (inc (count base)))))))))
           source? (fn [^String p] (or (.endsWith p ".clj") (.endsWith p ".edn") (cfg/file-kind p)))]
       (let [src-read (cond-> {:value (if paths
                         (into (sorted-map)

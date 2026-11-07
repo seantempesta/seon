@@ -891,11 +891,11 @@
   [db e ms] (second (err/flush-tx (err/fold {} (err/occurrence e :platform {} ms)) db)))
 
 (defn- source-digest
-  "The digest of what read-source's answer r read: its git tree id (or, with none, the files) and the pins, the
-  same whether the tree was read whole or by its changes, so a result keyed by the inputs stays shared."
-  {:malli/schema [:=> [:cat :map] :string]}
-  [r]
-  (lib/digest (sedn/encode [(or (:tree r) (:value r)) (:pins r)])))
+  "The digest of what read-source's answer r read of dirs: its git tree id (or, with none, the files), the pins and dirs, the
+  same whether the tree was read whole or by its changes, so a result keyed by the inputs stays shared. A dir added moves it, though the tree didn't."
+  {:malli/schema [:=> [:cat :map [:sequential :string]] :string]}
+  [r dirs]
+  (lib/digest (sedn/encode [(or (:tree r) (:value r)) (:pins r) (vec dirs)])))
 
 (defn- unimportable
   "Why files ({relative path text}), read at the source root, can't become main's as tx-of would make them, or nil: each of a kind on the allow-list that does not read, by name, or the config its entries would state on db refused (seon.program/config-refused), each with the commit main last imported, which stays. So a boot says which file and which commit last worked, and goes on with that. See docs/source.md#a-file-that-does-not-load."
@@ -944,12 +944,12 @@
         held (:seon.root/source (d/pull @(:conn sys) [:seon.root/source] [:seon.root/id :root]))
         ask (fn [paths] @(call! sys {:op :fx :kind :source :req (cond-> {:root root :dirs dirs :paths paths :follow (cfg/checkout) :own-branch branch :binary-tree (str (cfg/checkout) "/target/seon.tree")}
                                                                   ;; only what the tree changed since its last import: what main merged and the tree never held stays main's
-                                                                  (and (nil? paths) (:digest held) (:tree held)) (assoc :since (:tree held)))}))
+                                                                  (and (nil? paths) (:digest held) (:tree held)) (assoc :since (:tree held) :since-dirs (:dirs held [])))}))
         changed (when (:digest held) changed)
         r (let [r (ask changed)] (if (and changed (not (:tree r))) (ask nil) r))
         changed (when (:paths r) (or changed (set (:paths r))))
         files (:value r)
-        digest (when files (source-digest r))
+        digest (when files (source-digest r dirs))
         built? (and (:inputs r) (= (:binary r) (:tree (:inputs r))))
         this-boot (fn [fact] (cond-> (assoc (dissoc fact :inputs :unshared) :boot (:boot sys))
                                built? (assoc :inputs (:inputs r))
@@ -962,7 +962,7 @@
                (let [w (when (and tx (not (contract/error? tx))) @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (into tx (source/modes-tx @(:conn sys) (:modes r)))}}))]
                  (this-boot (cond-> {:root root :files (if changed (+ (count (d/datoms @(:conn sys) :aevt :ns/file)) (count (d/datoms @(:conn sys) :aevt :schema/file))) (count files)) :forms (count (d/datoms @(:conn sys) :aevt :form/id)) :ms (profile/ms-since t0)}
                               (:commit r) (assoc :commit (:commit r))
-                              (:tree r) (assoc :tree (:tree r))
+                              (:tree r) (assoc :tree (:tree r) :dirs (vec dirs))
                               (seq (:pins r)) (assoc :pins (:pins r))
                               (and w (not (contract/error? w))) (assoc :digest digest :retracted (count (filter #(and (vector? %) (= :db/retractEntity (first %))) tx)))
                               (contract/error? r) (assoc :error (:seon.error/message r))
@@ -1062,7 +1062,7 @@
         root (get cfg/config :seon.config.source/root)
         r (fx/read-source {:req {:root root :dirs (cfg/value :seon.config.source/dirs) :binary-tree (str (cfg/checkout) "/target/seon.tree")}})
         files (:value r)
-        digest (when files (source-digest r))
+        digest (when files (source-digest r (cfg/value :seon.config.source/dirs)))
         held (:seon.root/source (d/pull @conn [:seon.root/source] [:seon.root/id :root]))
         out (cond
               (nil? files) (assoc (if (contract/error? r) r (contract/error :seon.root/seed-unread #'seon.root/seed-program! "the source could not be read" {:path root})) :imported? false)
