@@ -627,7 +627,10 @@
         "a green proof is kept, a green that is no proof is not")
     (is (= #{'a/red} (set (keys (proofs/facts-worth-keeping {} #{} {'a/red red 'a/other green})))) "a red is kept")
     (is (= #{'a/turned} (set (keys (proofs/facts-worth-keeping {'a/turned {:seon.test/status :red}} #{} {'a/turned green 'a/other green}))))
-        "one the branch holds a fact of is kept, so a red gone green never reads as red")))
+        "one the branch holds a fact of is kept, so a red gone green never reads as red")
+    ;; with no green's fact held, a run going red at one digest writes :red, not :flaky: it fails the done rule alike, and the cache's two files say flaky
+    (is (= :red (:seon.test/status (first (proofs/result-tx {} {'a/t (assoc red :ms 1 :ticks 1 :bytes 1)} {} {} {'a/t "d"})))))
+    (is (:flaky (proofs/verdict "d" green (assoc red :failures []))) "green and red at one digest are flaky in the cache")))
 
 ;; docs/checks.md#modes: an edit that reaches no test the agent-tests step runs boots nothing, so its key moves with them and with its own code only
 (deftest the-agent-tests-step-is-keyed-by-what-it-runs
