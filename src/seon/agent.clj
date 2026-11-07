@@ -528,7 +528,7 @@
                                                (into (pm/unmerged-tx head (:conflicts r) (:max-tx main)))
                                                (into (:tx carried)))
                              (pdb/tx-meta (:branch @state) {:seon.tx/merged main-b}))
-            ops (pdb/report->tx rep)
+            ops (pdb/ops-between head (:db-after rep))
             errs (program/load-changes! (:db-after rep) ops)]
         ;; the merge base is now main's head, the value just merged, so no walk of the commit graph finds it: what main changed is not this branch's change
         (let [attrs (into #{} (map (fn [op] (nth op 2 nil))) ops)]
