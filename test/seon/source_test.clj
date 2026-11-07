@@ -62,11 +62,6 @@
   (doseq [[path text] files :when (.exists (java.io.File. (str here "/" path)))] (require (source/file-ns text)))
   (let [db (empty-db)] (d/db-with db (source/import-tx db files))))
 
-(deftest a-new-namespace-takes-a-file-by-its-name
-  ;; the owner, 2026-11-07: "these changed forms name no source file to write back" stops being an outcome: a namespace made at a REPL reaches disk as any other
-  (is (= "src/app/my_lib/core.clj" (source/namespace-path 'app.my-lib.core)))
-  (is (= "test/app/core_test.clj" (source/namespace-path 'app.core-test))))
-
 (deftest importing-src-records-every-form-exactly
   (let [files (src-files)
         db (imported files)
@@ -1082,3 +1077,13 @@
     (is (some? (seon.db/eid back :var/name 'ra.old-lib/f)) "and back: a namespace on no root answers its requirer")
     (is (nil? (seon.db/eid back :var/name 'ra.new-lib/f)))))
 
+(deftest a-comment-typed-at-a-repl-keeps-its-line
+  ;; found checking a real sync, 2026-11-07: a REPL form's lead is its comment alone, so "(ns x);; c(deftest t ...)" read the deftest as part of the comment
+  (let [main (d/db-with (main-with-file) [{:db/id "f" :form/id "repl-f" :form/ns [:ns/name 'app.pt-src] :form/src "(def lead-kept 1)" :form/lead ";; why" :form/order 100000}])
+        text (source/file-text main 'app.pt-src)]
+    (is (clojure.string/includes? text "\n\n;; why\n(def lead-kept 1)") text)))
+
+(deftest a-new-namespace-takes-a-file-by-its-name
+  ;; the owner, 2026-11-07: "these changed forms name no source file to write back" stops being an outcome: a namespace made at a REPL reaches disk as any other
+  (is (= "src/app/my_lib/core.clj" (source/namespace-path 'app.my-lib.core)))
+  (is (= "test/app/core_test.clj" (source/namespace-path 'app.core-test))))

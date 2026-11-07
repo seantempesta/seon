@@ -484,7 +484,7 @@
   notification is answered nothing. Every other connection is its own thread."
   {:malli/schema [:=> [:cat :seon.root/sys :any] :any]}
   [sys sock]
-  (let [r (java.io.BufferedReader. (java.io.InputStreamReader. (.getInputStream sock)))
+  (let [r (java.io.BufferedReader. (java.io.InputStreamReader. (.getInputStream sock) "UTF-8"))
         out (.getOutputStream sock)]
     (loop []
       (when-let [line (.readLine r)]
