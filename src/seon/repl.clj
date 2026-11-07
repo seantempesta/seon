@@ -418,7 +418,7 @@
                        ;; a REPL's ns form adds to the namespace, as Clojure's does, so the record stays what this process holds; one that adds nothing records nothing
                        held-ns (when (and (:ns-form? l) (= :agent (:mode @agent/state)) (:repl/src m))
                                  (some-> (d/entity (agent/db) [:ns/name (:ns-after l)]) :ns/form :form/src))
-                       ns-src (when held-ns (source/ns-text-adding held-ns (:repl/form m)))
+                       ns-src (when (and held-ns (not (:ns-stated req))) (source/ns-text-adding held-ns (:repl/form m)))
                        acct (when (and l (= :agent (:mode @agent/state)) (:repl/src m) (or (not held-ns) (not= ns-src held-ns)))
                               (program/account (assoc l :src (or ns-src (:repl/src m)) :lead (:lead m) :form (if ns-src (read-string ns-src) (:repl/form m)) :ns-meta md :repl? true :ran? (contains? m :repl/value))))
                        ;; a def beside calls stays this eval (seon.program/definition-form?), and says so
@@ -842,17 +842,28 @@
 
 (defn place-kind
   "Which kind of place at names: a symbol a :var, a string holding a page's anchor (x.md#heading) a :doc, a file this branch holds whose kind has a place of its own that kind, any other string a :path. See docs/agent.md#changing-a-file."
-  {:malli/schema [:=> [:cat [:or :qualified-symbol :string]] :keyword]}
+  {:malli/schema [:=> [:cat [:or :symbol :string]] :keyword]}
   [at]
-  (cond (symbol? at) :var
+  (cond (symbol? at) (if (namespace at) :var :ns)
         (clojure.string/includes? at ".md#") :doc
         :else (let [n (file-name at) k (cfg/file-kind n)]
                 (if (and (get-method place k) (some-> (:db @agent/state) (pdb/eid :file/path n))) k :path))))
 
+(defn- namespace-file-note
+  "What a file at path says when it's a namespace of the program: its text moves by its forms, through the branch, and how. Otherwise empty. See docs/agent.md#changing-a-file."
+  {:malli/schema [:=> [:cat :string] :string]}
+  [at]
+  (let [n (file-name at)
+        db (:db @agent/state)
+        ns-sym (when db (some #(when (= n (:v %)) (:ns/name (d/entity db (:e %)))) (d/datoms db :aevt :ns/file)))]
+    (if ns-sym
+      (str " That's namespace " ns-sym "'s file, and its forms move by your branch: (seon.repl/edit! '" ns-sym " old new) changes its ns form, (seon.repl/edit! '" ns-sym "/a-var old new) a definition.")
+      "")))
+
 (defmulti place
   "The one edge of a text's place, by place-kind: (place at) reads it, as :seon.text/place or the refusal saying why none, and (place p new) writes new over p, answering
   what the write did under :edited ({kind at}), :seon.text/text when the text it took differs from new, or {:unchanged at}. See docs/agent.md#changing-a-file."
-  {:malli/schema [:function [:=> [:cat [:or :qualified-symbol :string]] [:or :seon.text/place :seon.repl/edit-refused :my.agent/no-var]]
+  {:malli/schema [:function [:=> [:cat [:or :symbol :string]] [:or :seon.text/place :seon.repl/edit-refused :my.agent/no-var]]
                   [:=> [:cat :seon.text/place :string] :map]]}
   (fn ([at] (place-kind at)) ([p _] (place-kind (:seon.text/at p)))))
 
@@ -880,6 +891,19 @@
                           :edited {:var at} :seon.text/text text)
              (seq repairs) (assoc :repaired (context/repaired text repairs)))))))))
 
+(defmethod place :ns
+  ;; a namespace's ns form: its recorded text; the new text evaluated through the one REPL path, and recorded as stated, since an edit says the whole form (an evaluated ns form only adds)
+  ([at] (if-let [src (some-> (:db @agent/state) (d/entity [:ns/name at]) :ns/form :form/src)]
+          {:seon.text/at at :seon.text/text src}
+          (edit-refused at :no-source "no recorded ns form: evaluate one first, (ns name ...)" nil)))
+  ([{at :seon.text/at src :seon.text/text} new]
+   (if (= new src)
+     {:unchanged at}
+     (let [r (eval-string new {"ns" (str at) :origin :model :within (:eval @agent/state) :ns-stated true})]
+       (if-let [ex (:ex r)]
+         (throw (ex-info (str (:seon.error/message ex)) (update ex :seon.error/message #(str at ": the edited ns form does not load, so nothing changed: " %))))
+         (assoc (dissoc r :text :fns :record :handle :ms :ticks :bytes :cost) :edited {:var at} :seon.text/text new))))))
+
 (defmethod place :doc
   ;; a doc: its own block; its page loaded again on this branch with the new text in its place (seon.doc/edit-tx)
   ([at] (if-let [src (doc/doc-source (agent/db) at)]
@@ -895,7 +919,7 @@
   ([at] (let [f (java.io.File. ^String at) abs (.getCanonicalPath f)]
           (if (.isFile f)
             {:seon.text/at at :seon.text/text (slurp abs)}
-            (edit-refused at :no-source (str "no file at " abs ": write it whole first") nil))))
+            (edit-refused at :no-source (str "no file at " abs ": write it whole first." (namespace-file-note at)) nil))))
   ([{at :seon.text/at src :seon.text/text} new]
    (if (= new src)
      {:unchanged at}
@@ -905,7 +929,8 @@
          w
          {:edited {:path abs}
           :seon.text/said (str "Wrote to disk at " abs ": no branch holds this, and no merge carries it."
-                               (path-note (cfg/file-kind (file-name at))))})))))
+                               (path-note (cfg/file-kind (file-name at)))
+                               (namespace-file-note at))})))))
 
 (defn- held-file
   "A file this branch holds as a kind on the allow-list: its text as the branch states it. See docs/agent.md#changing-a-file."
@@ -950,8 +975,8 @@
   hold its first line, ignoring indentation), an old there more than once (each candidate's line), two olds that overlap (:overlap), or an empty old (:empty). Exact text and one occurrence, as file editors converged
   on (docs/agent.md#changing-a-definition, docs/agent.md#changing-a-doc, docs/agent.md#changing-a-file)."
   {:malli/schema [:function
-                  [:=> [:cat [:or :qualified-symbol :string] :string :string] [:or :seon.repl/edit-refused :my.agent/no-var :seon.repl/answer :seon.text/edited :seon.fx/io-error [:map [:unchanged :any]]]]
-                  [:=> [:cat [:or :qualified-symbol :string] [:vector {:min 1} [:tuple :string :string]]] [:or :seon.repl/edit-refused :my.agent/no-var :seon.repl/answer :seon.text/edited :seon.fx/io-error [:map [:unchanged :any]]]]]}
+                  [:=> [:cat [:or :symbol :string] :string :string] [:or :seon.repl/edit-refused :my.agent/no-var :seon.repl/answer :seon.text/edited :seon.fx/io-error [:map [:unchanged :any]]]]
+                  [:=> [:cat [:or :symbol :string] [:vector {:min 1} [:tuple :string :string]]] [:or :seon.repl/edit-refused :my.agent/no-var :seon.repl/answer :seon.text/edited :seon.fx/io-error [:map [:unchanged :any]]]]]}
   ([sym old new] (edit! sym [[old new]]))
   ([sym changes]
    (let [p (place sym)]

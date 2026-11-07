@@ -1,6 +1,6 @@
 (ns seon.turn-test
   "seon.turn's pure parts, on the world (docs/testing.md#testing-in-the-world). Run: bin/test seon.turn-test"
-  (:require [clojure.test :refer [deftest is]] [my.test :as t] [seon.turn :as turn]))
+  (:require [clojure.test :refer [deftest is]] [my.test :as t] [seon.turn :as turn] [seon.agent-test :as at]))
 
 (deftest an-agents-tokens-are-its-model-calls-sum
   ;; seon.turn/agent-usage: an agent's model calls and tokens are what its calls recorded, every turn's, a turn that
