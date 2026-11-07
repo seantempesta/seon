@@ -307,9 +307,16 @@
   (atom (assoc loaded :schema config-schema :text built-text :waiting {})))
 
 (defn in-force
-  "This process's config as its branch states it, {:config :sources}: built once at its start, refreshed only when a transaction touches an entry. See docs/config.md#a-process-holds-its-branchs-config."
-  {:malli/schema [:=> [:cat] [:map [:config :map] [:sources :seon.config/sources]]]}
-  [] (select-keys @held [:config :sources]))
+  "This process's config as its branch states it, {:config}: built once at its start, refreshed only when a transaction touches an entry. Not which layer each key came
+  from: that differs by process while a digest takes no place, so a reader of it could be green in one process and red in another at one digest. Root's boot writes them on
+  main (boot-sources), and every reader reads them there. See docs/config.md#a-process-holds-its-branchs-config."
+  {:malli/schema [:=> [:cat] [:map [:config :map]]]}
+  [] (select-keys @held [:config]))
+
+(defn boot-sources
+  "The layer each config key came from in this process, for root's boot alone, to write on main (:seon.config/sources). See in-force."
+  {:malli/schema [:=> [:cat] :seon.config/sources]}
+  [] (:sources @held))
 
 (defn shipped-text
   "The shipped file's text as this process's branch states it: built-text, or its entries, one a line. What a reader of the file as the program holds it reads, never the disk. See docs/config.md#a-process-holds-its-branchs-config."
