@@ -414,6 +414,11 @@
            (is (= {} (:ours (pm/delta-three-way head after main #{}))) "and nothing differs between the two programs any more"))
          (finally (d/release bc) (d/delete-branch! conn b)))))))
 
+;; docs/merging.md: an agent's first prove asks for its merge candidate before it has changed anything
+(deftest a-branch-with-nothing-of-its-own-merges-nothing
+  (let [db (my.test/world)]
+    (is (empty? (pm/merge-tx db db db nil #{})))))
+
 (deftest a-namespace-both-sides-made-is-one-entity-after-the-merge
   ;; the branch and main each made app.z without an (ns) form: one entity after the merge, its id being its content (docs/storage.md)
   (ts/test-branch!

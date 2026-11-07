@@ -412,7 +412,9 @@
   on a nameless entity (docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db [:maybe [:sequential :seon.merge/program-key]] :seon.merge/data-attrs] :seon.db/tx-data]}
   [onto base src ks data-attrs]
-  (let [carried (carried-tx base src ks data-attrs)
+  ;; a branch with nothing of its own has no keys: (keys {}) is nil
+  (let [ks (vec ks)
+        carried (carried-tx base src ks data-attrs)
         unique? #(= :db.unique/identity (get-in (d/schema src) [% :db/unique]))
         named (into #{} (keep #(when (and (:added %) (unique? (:a %))) (:e %))) carried)
         gone (into [] (comp (keep #(when (and (not (:added %)) (unique? (:a %)) (not (named (:e %)))) (:e %))) (distinct)
