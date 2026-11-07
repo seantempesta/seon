@@ -693,9 +693,9 @@
    :closed "was stopped and held" :killed "was stopped"})
 
 (defn after-work
-  "The step after an agent's turn loop answered r: an end that parks it (park-outcomes: it waits, or spent its turns) claimed nothing, so its branch is read for its verdict with no test run; anything else is judged by its tests. See docs/turn.md#parked."
-  {:malli/schema [:=> [:cat :map] [:enum :diffed :tested]]}
-  [r] (if (and (not (:ex r)) (park-outcomes (:outcome (:value r)))) :diffed :tested))
+  "The step after an agent's turn loop answered r, on a task holding proofs: an end that parks it (park-outcomes: it waits, or spent its turns) on a task with no proofs claimed nothing and has nothing of its own to prove, so its branch is read for its verdict with no test run; anything else is judged by its tests. See docs/turn.md#parked."
+  {:malli/schema [:=> [:cat :map [:maybe [:set :any]]] [:enum :diffed :tested]]}
+  [r proofs] (if (and (not (:ex r)) (empty? proofs) (park-outcomes (:outcome (:value r)))) :diffed :tested))
 
 (defn tell-tx
   "The message that tells who started task id (:seon.task/started-by, a user or an agent) how it stands, when write tx moves its outcome to one of `ends-told`: what it reads next, which wakes it (`write` wakes it). A launched agent that died could not say so itself. Sent at now (ms). See docs/agent.md#working-for-a-person."
@@ -1005,7 +1005,7 @@
                                               (ended-ms-tx (:db st) id now))))
                 (contract/error? r) (dead st r)
                 :else
-                (if (= :diffed (after-work r))
+                (if (= :diffed (after-work r (:seon.task/proofs (d/entity (:db st) [:seon.task/id id]))))
                   (one (request (assoc-in st [:flights id :results] {}) id :diffed {:op :write :req {:op :branch-diff :branch (get-in act [:env :branch])}}))
                   (one (request (cond-> st (:ex r) (assoc-in [:flights id :worked-error] (:ex r)))
                                 id :tested {:op :judge :id agent}))))

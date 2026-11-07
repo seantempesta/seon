@@ -1575,10 +1575,10 @@
      (is (every? seq (vals (:needed-by obs))) "no empty needed-by set"))))
 
 (deftest an-end-that-parks-runs-no-tests
-  ;; docs/turn.md#parked: an agent that says something and waits, or spends its turns, has claimed nothing, so nothing is judged by tests: a chat reply isn't "working" through a test run
-  (is (= :diffed (r/after-work {:value {:outcome :waiting}})))
-  (is (= :diffed (r/after-work {:value {:outcome :cap}})))
-  (is (= :tested (r/after-work {:value {:outcome :green}})) "a claim of done is judged")
-  (is (= :tested (r/after-work {:value {:outcome :failed}})))
-  (is (= :tested (r/after-work {:ex {:seon.error/message "threw"}})) "and so is a loop that threw"))
-
+  ;; docs/turn.md#parked: an agent with no proofs that says something and waits, or spends its turns, has claimed nothing, so nothing is judged by tests: a chat reply isn't "working" through a test run
+  (is (= :diffed (r/after-work {:value {:outcome :waiting}} nil)))
+  (is (= :diffed (r/after-work {:value {:outcome :cap}} #{})))
+  (is (= :tested (r/after-work {:value {:outcome :waiting}} #{'demo-test/t})) "a task with proofs has them judged, parked or not")
+  (is (= :tested (r/after-work {:value {:outcome :green}} nil)) "a claim of done is judged")
+  (is (= :tested (r/after-work {:value {:outcome :failed}} nil)))
+  (is (= :tested (r/after-work {:ex {:seon.error/message "threw"}} nil)) "and so is a loop that threw"))

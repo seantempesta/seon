@@ -2513,7 +2513,7 @@
                                          "         t3 (turn-of)]"
                                          "     {:turns [t2 t3] :outcome (:seon.task/outcome (datahike.api/entity @(:conn sys) [:seon.task/id " (pr-str w) "]))})))")}]))
                         {:config {:seon.config.ai/script 'seon.fixtures/wait-call}
-                         :decls [{:seon.task/name "w" :seon.task/plan "Wait." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]})
+                         :decls [{:seon.task/name "w" :seon.task/plan "Wait." :seon.task/kind :user}]})
         {:keys [turns outcome]} (:value r)]
     (is (= :parked outcome) (pr-str r))
     (is (apply = turns) (str "no more turns while nothing arrives: " (pr-str turns)))))
@@ -2628,7 +2628,7 @@
 
 (deftest a-model-turn-records-its-text-and-the-message-it-took
   ;; the owner's message is a fact root writes on
-  ;; main (from "owner", to the agent); the turn that delivers it writes the same
+  ;; main (from the user, to the agent); the turn that delivers it writes the same
   ;; entity on its branch before its commit, with the agent's own ref (:seon.message/to), so the conversation
   ;; and every later reading read its text from that commit (the basis names no message); the reply's message (here the scripted model's)
   ;; is the turn's reply and its call's eval's text, and the call names its one eval
@@ -2661,8 +2661,8 @@
         ;; the shared root's main holds every earlier test's messages: this agent's are the ones to its id
         [[mid from to body] :as facts] (filterv #(= (keyword (:agent @names)) (nth % 2)) (:value on-main))]
     (is (= 1 (:model-calls end)) (pr-str end))
-    (is (= [["owner" (keyword (:agent @names)) "use demo/g"]] (mapv #(subvec % 1) facts)) "one entity on main: from the owner, to the agent")
-    (is (= [[mid "owner" "use demo/g" agent-key]] on-branch) "the turn wrote the entity root wrote, by its id, with the agent's ref")
+    (is (= [[(System/getProperty "user.name") (keyword (:agent @names)) "use demo/g"]] (mapv #(subvec % 1) facts)) "one entity on main: from the user, to the agent")
+    (is (= [[mid (System/getProperty "user.name") "use demo/g" agent-key]] on-branch) "the turn wrote the entity root wrote, by its id, with the agent's ref")
     (is (= on-branch committed) "and it is in the commit the turn read")
     (is (not-any? #{:observed :taken} basis-keys) "the basis names no message: the fact is the record")
     (is (contains? basis-keys :t) "it holds its t: a commit a sweep took is drawn as of it (docs/storage.md#collection)")
