@@ -1959,7 +1959,7 @@
   {:malli/schema [:=> [:cat :map :any] [:map [:seon.render/html :any] [:seon.render/units [:vector :map]]]]}
   [{:keys [units view input caption tab]} id]
   (let [in (fn [sel] (filterv #(= sel (:container %)) units))
-        unit (fn [u] {:id (:id u) :input {:rev (:rev u)} :html (:html u) :container (:container u)})
+        unit (fn [u] {:id (:id u) :input (cond-> {:rev (:rev u)} (:own? u) (assoc :own? true)) :html (:html u) :container (:container u)})
         ;; an agent's chat is the conversation: what it reads and its blocks are its @ctx tab, with no place here
         agent-chat? (and (= :chat tab) (not= :root id))]
     {:seon.render/html
