@@ -3065,3 +3065,29 @@
       (is (not (str/includes? h "· done")) "not the agent's own end"))
     (is (str/includes? (pr-str (ui/agent-state opts)) "● merged") "the agent state")
     (is (not (str/includes? (pr-str (ui/agent-state opts)) "● done")))))
+
+(clojure.test/deftest the-banner-counts-what-root-counts
+  ;; task seon.render/the-banner-counts-what-root-counts (docs/health.md#cost): a repeat of a signature main already
+  ;; holds is counted in the api's fold, not on main. The api asks the render proc for main's health (:health), as
+  ;; my.root/problems does, and the problems banner is what root's walk then draws: it names the count the api names.
+  (ts/test-branch! (fn [_ conn]
+    (let [[_ branch _] (paged-dbs conn)
+          main0 (:db-after (d/transact conn {:tx-data [{:seon.root/id :root :seon.config.agent/max-running 4}]}))
+          e (seon.contract/error :seon.instrument/contract-error 'app/f "app/f invalid-input: its arguments do not satisfy its contract"
+                                 {:seon.error/member :malli.core/invalid-input :seon.error/problems [{:path [0] :in [0] :expected :int :value {:seon.print/code "nil"}}]})
+          occ (fn [i] (seon.error/occurrence e :eval {:agent :a1 :task "t/a" :form "(f 1)"} (+ 1000 i)))
+          [f1 tx] (seon.error/flush-tx (seon.error/fold {} (occ 0)) main0)
+          main1 (:db-after (d/transact conn {:tx-data tx}))
+          fold (reduce seon.error/fold f1 (map occ (range 1 4)))
+          ;; main holds the signature once; the api's fold has seen it four times
+          api (assoc (#'seon.root/api-proc {:boot "b1" :ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 64) :view {:agents {}} :graph (promise)
+                                            :system (doto (promise) (deliver {:procs {} :conns [] :parts {[:proc :api] [{:proc 'seon.root/api-proc} nil]}}))})
+                     :seon.root/errors fold)
+          [_ asked] (#'seon.root/api-proc api :ext {:op :health :db main1 :p (promise)})
+          st (assoc (#'p/advance-main (dissoc (proc-state main0 branch) :main-db) main0) :conn conn)
+          [st _] (reduce (fn [[st _] m] (#'p/render-proc st :from-web m)) [st nil] (get asked [:render :from-web]))
+          count-of (fn [h] (get-in h [:classes :eval :rows 0 :count]))
+          banner (:html (second (filter #(= "#p-tiles" (:container %)) (:seon.render/units (#'p/page-value st :root)))))]
+      (is (= 4 (count-of (seon.problems/health main1 fold))) "root counts the signature four times")
+      (is (str/includes? banner "eval ×4") (str "the banner names root's count: " banner))
+      (r/dispose-walk! (get-in st [:root-walk :w]))))))
