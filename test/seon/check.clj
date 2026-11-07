@@ -966,8 +966,7 @@
 
 (defn- main-data-datoms
   "Main's datoms (a seq) but root's own facts (:seon.root/*: its boot, its quiescence report, its
-  collection record), each boot's user (an agent of the boot with no process, seon.task/boot-tx:
-  a new boot writes its own), root's link to the agents it started (:seon.agent/root: a new boot
+  collection record), the user (an agent with no process, seon.task/boot-tx: a new boot writes it again), root's link to the agents it started (:seon.agent/root: a new boot
   retracts an earlier boot's, seon.task/earlier-agents-tx, one per agent) and every transaction
   entity's own datoms (:db/txInstant, e = tx): a restarted root writes its facts anew in
   transactions of its own (boot, quiescent, collected: three :db/txInstant datoms more), so what
@@ -1009,7 +1008,7 @@
         _ @(c/transact-main! sys [] {:flush? true})
         st (c/state sys {:datoms true})
         md (main-data-datoms sys)
-        expect {:main-datoms (count md) :by-attr (by-attr md) :main-t (get-in st [:main :t]) :user (seon.task/agent-key (:boot sys) :user)}]
+        expect {:main-datoms (count md) :by-attr (by-attr md) :main-t (get-in st [:main :t]) :user (System/getProperty "user.name")}]
       (spit (str path ".expect.edn") (sedn/encode expect))
       {:report {:store (:store st) :a ra :merge (dissoc m :ops) :b rb :clone [(:id cl) rc] :expect expect :store-bytes (dir-bytes (:store-path sys))}
        :checks {:merged (:merged? m)} :then :kill}))))
@@ -1034,7 +1033,7 @@
         md (count data)
         ba (by-attr data)
         ;; this boot has started no agent yet: every earlier boot's link to its agents is
-        ;; retracted, and the one agent linked is this boot's user (seon.task/boot-tx)
+        ;; retracted, and the one agent linked is the user (seon.task/boot-tx)
         linked (vec (for [dt (d/datoms @(:conn sys) :aevt :seon.agent/root)] (:seon.agent/key (d/pull @(:conn sys) [:seon.agent/key] (:e dt)))))
         [n rb rc] (spawn-ready! sys "born after the restart" {:task "resume b" :branch :dur-b} {:task "resume the clone" :branch :dur-clone})
         ;; each request's response is its last form's value: one vector of what each check reads
@@ -1056,9 +1055,9 @@
                 :merge-b [(select-keys mmb [:ok :applied]) (dissoc mb :ops)] :after-merging-b r-n2}
        :checks {:main-recovered (and (= (:main-datoms expect) md) (:recovered? (:store st)))
                 ;; what main-data-datoms leaves out, asserted: the boot retracted phase 1's links
-                :earlier-agents-are-not-this-roots (= [(seon.task/agent-key (:boot sys) :user)] linked)
+                :earlier-agents-are-not-this-roots (= [(System/getProperty "user.name")] linked)
                 ;; phase 1's root was SIGKILLed: it left no stop fact, so this boot found its end :unclean
-                ;; main-data-datoms leaves each boot's user out: phase 1's is still main's
+                ;; main-data-datoms leaves the user out: it is still main's
                 :phase-1s-user-recovered (= :user (:seon.agent/id (d/pull @(:conn sys) [:seon.agent/id] [:seon.agent/key (:user expect)])))
                 :the-killed-root-ended-unclean (= :unclean (:cause (:seon.root/previous-end (d/pull @(:conn sys) [:seon.root/previous-end] [:seon.root/id :root]))))
                 :branches-recovered (= #{:dur-a :dur-b :dur-c :dur-clone} (set (get-in st [:store :recovered-branches])))

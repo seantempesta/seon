@@ -2083,6 +2083,21 @@
     (is (str/includes? card "working") "how its work stands")
     (is (str/includes? card "href=\"/agent/b2/a3\"") "its page")))
 
+(deftest a-users-page-draws-the-agents-it-started
+  ;; docs/users.md#whats-on-screen: a user is an agent found by its name; its pull joins the agents it started, and the one list's and card's renders draw them
+  (let [db (sessions-db "b2" [["b2/a1" :a1 :running "seon.print/a-long-string" :running :task-a] ["b2/a2" :a2 :idle "x/asks" :parked :task-b] ["b2/a3" :a3 :idle "x/other" :parked :task-c]])
+        started (mapv #(:db/id (d/entity db [:seon.agent/key %])) ["b2/a1" "b2/a2"])
+        db (d/db-with db [{:seon.agent/key "sean" :seon.user/name "sean" :seon.agent/agents started}])
+        sean (d/entity db [:seon.user/name "sean"])
+        c {:started (into {} (for [e started] [e {:db/id e}]))}
+        cards (nth (ui/started-cards {:seon.ctx/ctx c :seon.db/db db}) 2)
+        hrefs (fn [html] (set (map second (re-seq #"href=\"([^\"]+)\"" html))))]
+    (is (= (:db/id sean) (#'p/session-of db "sean")) "its name finds it, as an address")
+    (is (= [#'ui/session-card] (distinct (map first cards))) "each drawn by the one card's render")
+    (is (= ["b2/a1" "b2/a2"] (sort (map last cards))) "a card for each it started, and not another's")
+    (is (= #{"/user/sean"} (hrefs (h/html (ui/users-side {:seon.db/db db})))) "it is listed by its name")
+    (is (nil? (ui/users-side {:seon.db/db (d/db-with db [[:db/retract (:db/id sean) :seon.user/name "sean"]])})) "no name, no user")))
+
 (deftest a-record-that-no-longer-fits-its-schema-is-its-data
   ;; docs/render.md#the-page: a stored value outlives the schema it was written under; the page and the model read its data
   (let [old {:t 1 :classes {:a-class-since-removed {:n 1 :rows []}}}]

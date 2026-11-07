@@ -224,7 +224,7 @@
   (ts/test-branch! (fn [cfg conn] (let [child (keyword (str (name (:branch cfg)) "-a1"))
         c (assoc config/config :seon.config.agent/max-running 6)]
     (is (nil? (config/from-db @conn)))
-    (d/transact conn {:tx-data (into (task/boot-tx "boot-1" 6) (config/facts c {:seon.config.web/port "--set"}))})
+    (d/transact conn {:tx-data (into (task/boot-tx "boot-1" 6 "sean") (config/facts c {:seon.config.web/port "--set"}))})
     (is (= c (config/from-db @conn)))
     (is (= {:seon.config.web/port "--set"} (d/q '[:find ?s . :where [?e :seon.root/id :root] [?e :seon.config/sources ?s]] @conn)))
     ;; the reconciler's root read sees the same config keys
@@ -239,7 +239,7 @@
   (ts/test-branch! (fn [cfg conn]
     (let [c (merge config/config {:seon.config.ai/provider :none})
           tick! (fn [m] (d/transact conn {:tx-data [(assoc m :seon.root/id :root)]}))]
-      (d/transact conn {:tx-data (into (task/boot-tx "boot-1" 6) (config/facts c {}))})
+      (d/transact conn {:tx-data (into (task/boot-tx "boot-1" 6 "sean") (config/facts c {}))})
       (is (= {:kind :none} (config/provider-at @conn @conn nil)) "main's config at the first turn")
       (testing "a change to main's config applies at the next call, with no restart"
         (tick! {:seon.config.ai/provider :scripted :seon.config.ai/script 'seon.fixtures/reply})
@@ -256,7 +256,7 @@
   (ts/test-branch! (fn [_ conn]
     (let [vs '#{app.a/one app.b/two app.c/three}
           c (assoc config/config :seon.config.source/process-vars vs)]
-      (d/transact conn {:tx-data (into (task/boot-tx "boot-1" 6) (config/facts c {}))})
+      (d/transact conn {:tx-data (into (task/boot-tx "boot-1" 6 "sean") (config/facts c {}))})
       (is (= vs (:seon.config.source/process-vars (config/from-db @conn))))
       (is (set? (:seon.config.source/process-vars (config/from-db @conn))))
       (is (= c (config/from-db @conn)) "and the whole config is its db copy")))))

@@ -179,6 +179,8 @@
           (and (= m :get) (= uri "/root/debug")) (html-response (ask! ch {:op :page :view [:debug :root]}))
           ;; an agent's page, the render of its ctx, by its id in root's boot
           (and (= m :get) (str/starts-with? uri "/agent/")) (html-response (ask! ch {:op :page :view (view-of (java.net.URLDecoder/decode (str/replace (subs uri 7) "+" "%2B") "UTF-8"))}))
+          ;; a user's page: an agent found by its :seon.user/name, by the same walk (seon.render.proc/session-of)
+          (and (= m :get) (str/starts-with? uri "/user/")) (html-response (ask! ch {:op :page :view (view-of (java.net.URLDecoder/decode (str/replace (subs uri 6) "+" "%2B") "UTF-8"))}))
           ;; a page's list end scrolled into view: its next rows
           (and (= m :post) (= uri "/more")) (do (a/>!! ch {:op :more :view (view-of (get q "view"))}) {:status 204 :headers {}})
           ;; a row's <details> toggled (the debug page): its unit renders its whole content while open
