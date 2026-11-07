@@ -50,7 +50,7 @@
   {:malli/schema [:=> [:cat [:maybe :keyword] :symbol [:maybe :map]] :string]}
   [agent f args]
   (str "/call?fn=" (url-enc (str f))
-       (when agent (str "&agent=" (url-enc (subs (str agent) 1))))
+       (when agent (str "&agent=" (url-enc (str (symbol agent)))))
        (when (seq args) (str "&args=" (url-enc (sedn/encode args))))))
 
 (defn- callback
