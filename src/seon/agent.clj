@@ -1170,16 +1170,19 @@
   Answers the datoms written, or the typed :seon.agent/unrecorded when the branch's schema
   lacks the facts' attributes (a branch cut before they existed), or when the branch refuses the write
   (docs/failure-points.md, a refused write in a test run's results): the run still answers, with it."
-  {:malli/schema [:=> [:cat :map :map :map [:map-of :qualified-symbol :string] [:set :qualified-symbol] [:map-of :qualified-symbol :keyword]] [:or nat-int? :seon.error/base]]}
-  [ran failures reused digests deferred removed]
+  {:malli/schema [:=> [:cat :map :map :map [:map-of :qualified-symbol :string] [:set :qualified-symbol] [:map-of :qualified-symbol :keyword] [:set :symbol]] [:or nat-int? :seon.error/base]]}
+  [ran failures reused digests deferred removed proofs]
   (let [db (db)]
    (if-not (contains? (d/schema db) :seon.test/failures)
     (contract/error :seon.agent/unrecorded #'record-results! "this branch's schema has no :seon.test/* attributes: the run's results stay in the cache only" {})
    (let [pattern [:var/name :seon.test/digest :seon.test/status :seon.test/failures :seon.test/ticks :seon.test/bytes]
-        ;; the tests this run judged, and every test the branch holds a verdict of (its digest may have moved)
-        held (d/q '[:find [?e ...] :where [?e :seon.test/digest]] db)
+        pulled #(into {} (map (fn [m] [(:var/name m) (dissoc m :var/name)])) (d/pull-many db pattern (vec %)))
+        ;; every test the branch holds a verdict of (its digest may have moved), then those of this run's worth a fact
+        held (pulled (d/q '[:find [?e ...] :where [?e :seon.test/digest]] db))
+        ran (proofs/facts-worth-keeping held proofs ran)
+        reused (proofs/facts-worth-keeping held proofs reused)
         ran-es (keep #(pdb/eid db :var/name %) (distinct (concat (keys ran) (keys reused) deferred)))
-        old (into {} (map (fn [m] [(:var/name m) (dissoc m :var/name)])) (d/pull-many db pattern (vec (distinct (concat held ran-es)))))
+        old (into held (pulled (distinct ran-es)))
         ;; a test with no var entity here (loaded, never recorded) has no fact to hold
         ;; main's tests the branch removed judge from main's definition each run, with no reach digest of the
         ;; branch's (never cached): their verdict is this run's, on their name
@@ -1317,7 +1320,7 @@
                   ;; beside the cache, the same run's results as facts on this branch (the record shows them)
                   ;; not main's run: it judges main's tree (no :base), whose facts are main's prove's to write
                   (let [rec (when-not (= :main mode) (record-results! ran failures (select-keys reused selected) digests (set deferred)
-                                                                     (select-keys (proofs/results r) (keys (:removed plan)))))]
+                                                                     (select-keys (proofs/results r) (keys (:removed plan))) proofs))]
                   (-> (cond-> r (contract/error? w) (assoc :unstored [(:seon.error/message w)])
                         (contract/error? rec) (assoc :unrecorded [(:seon.error/message rec)]))
                       (dissoc :measured)))))

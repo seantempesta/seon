@@ -208,13 +208,12 @@
 
 (defn schema-tx
   "The facts of one schema resource's text at path: the file with its text (write-back's
-  base), and each entry as a :schema/key entity with its form, its file, and :schema/source
-  (the binary holds it)."
+  base), and each entry as a :schema/key entity with its form and its file."
   {:malli/schema [:=> [:cat :string :string] :seon.db/tx-data]}
   [path text]
   (into [{:file/path path :file/text text}]
         (for [[k v] (sort-by (comp str key) (sedn/decode text))]
-          {:schema/key k :schema/form (binding [*print-namespace-maps* false] (sedn/encode v)) :schema/file path :schema/source true})))
+          {:schema/key k :schema/form (binding [*print-namespace-maps* false] (sedn/encode v)) :schema/file path})))
 
 (defn- lead-comment
   "The lines of text's comment before its first other line, each without its #, the #! line left out: a script's own words on itself. See docs/source.md#a-program-file."
@@ -360,16 +359,13 @@
 
 (defn- file-paths-tx
   "The facts that make the files at paths db's as files ({relative path text}) hold
-  them: each file's facts (file-tx; an entry db holds that no binary does keeps its
-  :schema/source as it is), and every entry or file of them no file makes retracted."
+  them: each file's facts (file-tx), and every entry or file of them no file makes retracted."
   {:malli/schema [:=> [:cat :seon.host/db [:map-of :string [:maybe :string]] [:set :string]] :seon.db/tx-data]}
   [db files paths]
   (let [ents (concat (for [p paths a [:schema/file :config/file] dt (d/datoms db :avet a p)] (:e dt)) (keep #(pdb/eid db :file/path %) paths))
-        bare (into {} (for [e ents :let [x (d/entity db e)] :when (and (:schema/key x) (not (:schema/source x)))]
-                        [(:schema/key x) (:schema/form x)]))
         new (vec (for [p (sort paths) :let [t (get files p)] :when t
                        op (file-tx p t)]
-                   (if (and (:schema/key op) (= (:schema/form op) (bare (:schema/key op)))) (dissoc op :schema/source) op)))
+                   op))
         names [:schema/key :config/key :file/path]
         mk (set (for [op new k names :let [v (get op k)] :when (some? v)] [k v]))]
     (into (vec (for [e (distinct ents) :let [x (d/entity db e)
