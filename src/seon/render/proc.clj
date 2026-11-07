@@ -417,8 +417,9 @@
                            [part-unit
                             {:id "d-ctx" :container "#c-rows" :rev (:t t)
                              :html (h/html [:li {:id "d-ctx"} (quiet #(render/html {:db bdb} (with-meta t {:seon.render/schema :seon.ctx/ctx})))])}]))
+        ;; its process's draw and root's each count revisions of their own: a unit says whose it is, so its process's answer replaces root's first draw at the same number
         units (if own?
-                (:units held)
+                (mapv #(assoc % :own? true) (:units held))
                 (cond (and bdb (not chat?)) (ctx-units)
                       bdb (branch-units)
                       ;; a branch that could not be read: its error, by the error's render
