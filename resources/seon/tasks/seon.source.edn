@@ -60,4 +60,8 @@ Won't do: worktrees, isolated trees, refused writes, a virtual filesystem, a dir
   :seon.task/plan "Seen 2026-11-07: test/seon/render_cost_test.clj defined *conn* twice, and a root's whole import and the runner's refresh of a kept tree (seon.source/refresh-tx) each kept a different one as the live form, so one tree gave two programs and two tests different digests. The graph holds one form per var (seon.program/reach-graph's :defs had none twice), so nothing says so. A text sweep of src and test found this one, removed; no law holds it (AGENTS section 5: every definition happens once). To do: the import answers which forms define a var another form of that file defines, as a seon.problems class, keeping the last by file order on both paths. Proof: a file with two defs of one var gives one live form whichever path imports it, and a problem names it."
   :seon.task/kind :work
   :seon.task/proofs #{}}
+ {:seon.task/name "a-schema-write-back-parses-the-whole-file"
+  :seon.task/plan "Measured 2026-11-07: seon.source/schema-file-text costs 17.7 M ticks and 181 MB a call (377 calls), rewrite-clj parsing a whole schema resource to edit one entry, against an estimate of 0.5 M and 2 MB. Find the entry's form by its key and replace that span. Proof: a cost proof at a file's size, and every other byte of the file kept."
+  :seon.task/kind :work
+  :seon.task/proofs #{}}
 ]

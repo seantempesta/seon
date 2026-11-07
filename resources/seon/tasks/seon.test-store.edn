@@ -3,4 +3,9 @@
   :seon.task/kind :work}
  {:seon.task/name "a-process-test-costs-its-boots-not-its-work"
   :seon.task/plan "Measured 2026-11-06 (docs/testing.md#a-root-costs-what-it-boots): bin/test --all was 1,931 s of tests serial, 9.5 min on 4 shards, 42 tests of 15 s or more being 73 percent of it; they did 2-9 M ticks and waited on root boots. Causes found: in-agent gave its shared root source dirs [\"src\"], so seon.program/required! could not load main's test namespaces through the AOT cache and the fork server evaluated 2,274 forms at its first fork (11.6 s a root, 1.9 s with the config's dirs), and one root per distinct dirs; main-is-proved-at-boot ran all 1,152 tests main held for two verdicts (183 s to 12 s on a store of its own); root-threads-are-what-root-declares ran three process cycles bin/check lifecycle repeats (82 s to 24 s); stores of a test's own imported the checkout and the wiki to prove a store resumes (27 s to 11 s). Done: those four (commits 752525deb9, 39fbccb1fb). Open: one shared root per distinct :sets in agent-test (a tuned root for child-min-ms, jobs, node-cache-bytes, heap-extra-bytes serves them all: 7 s a variant a shard); own-root agent tests whose subject is not the root's life can use the shared root; the root's boot (5 s, about 3 s of it not yet attributed) and the fork server's first fork (2.7 s) are the floor of every process test."
-  :seon.task/kind :work}]
+  :seon.task/kind :work}
+ {:seon.task/name "a-test-store-is-seeded-each-time"
+  :seon.task/plan "Measured 2026-11-07: seon.db/seed! is 10 percent of the self ticks in the day's verdicts and 10 percent of bytes, about 32 seeds a pass of the tests (2,952 calls over about 92 passes), each store 92 M ticks and 317 MB at 830 attributes. Reuse one seeded store by the digest of its schema and seed, cloned as the checks already do (343a286d9e). seon.check-test/a-check-leaves-its-store-as-it-found-it went from 63 to 426 M ticks there: shrink it to its claim. Proof: the same tests green, and seed! called once per schema digest."
+  :seon.task/kind :work
+  :seon.task/proofs #{}}
+]
