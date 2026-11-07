@@ -702,8 +702,9 @@
                   id (:eval-id req)
                   ;; an answer not kept as it is (a host object, a value past the bound, a ctx, several forms) is named by its eval, so its handle is its own
                   own (when (and id (not (identical? (:value resp) (:value kept-resp)))) [:eval id])
-                  d (pdb/with-response {:seon.eval/code code} kept-resp own)
-                  h (or (get-in d [:seon.eval/result :seon.result/hash]) (str (hasch/uuid (or own [nil nil nil nil nil]))))]
+                  d (pdb/with-response {:seon.eval/code code} kept-resp)
+                  ;; the handle names what the agent can read back: its own for an answer not kept as it is, whose stored marker other evals may share
+                  h (str (or (some-> own hasch/uuid) (get-in d [:seon.eval/result :seon.result/hash]) (hasch/uuid [nil nil nil nil nil])))]
               (cond-> d
                 id (update :seon.eval/response #(into {:handle (symbol "result" (first (clojure.string/split h #"-")))} %))))
       schema (assoc :seon.eval/schema schema)

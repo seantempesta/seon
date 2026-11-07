@@ -72,16 +72,15 @@
 (defn with-response
   "Eval e holding whole response r as it is kept: its value, error, output and forms in its result (:seon.eval/result, a nested map
   whose identity is :seon.result/hash, the full hash as text of [value ex out err forms] by hasch's uuid, the same in every process;
-  the value of an eval's own response, an edit!'s, is hashed without its cost), the rest of r on :seon.eval/response. own, when
-  given, is what the hash is of instead (an answer not kept as it is is named by its eval). No result when r answers none of
-  them. The first eight digits of the hash are the handle. See docs/users.md#what-each-thing-is."
-  {:malli/schema [:=> [:cat :map :map :any] :map]}
-  [e r own]
+  the value of an eval's own response, an edit!'s, is hashed without its cost), the rest of r on :seon.eval/response. The hash is always of what's stored, so one hash is one value on every branch. No result when r answers none of
+  them. See docs/users.md#what-each-thing-is."
+  {:malli/schema [:=> [:cat :map :map] :map]}
+  [e r]
   (let [parts (select-keys r (keys result-parts))
         v (:value r)
         v (if (and (map? v) (not (record? v)) (contains? v :handle)) (dissoc v :handle :ms :ticks :bytes :fns :record) v)]
     (cond-> (assoc e :seon.eval/response (apply dissoc r (keys result-parts)))
-      (seq parts) (assoc :seon.eval/result (into {:seon.result/hash (str (hasch/uuid (or own [v (:ex r) (:out r) (:err r) (:forms r)])))}
+      (seq parts) (assoc :seon.eval/result (into {:seon.result/hash (str (hasch/uuid [v (:ex r) (:out r) (:err r) (:forms r)]))}
                                                  (keep (fn [[k a]] (when (some? (get parts k)) [a (get parts k)])))
                                                  result-parts)))))
 
