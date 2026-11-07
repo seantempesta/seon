@@ -55,4 +55,9 @@ Later, each when something asks: system.edn as ``:seon.proc``, input.css as ``:s
 
 Won't do: worktrees, isolated trees, refused writes, a virtual filesystem, a directory entity, importing anything not on the allow-list, automatic sync. Stop and tell the owner if a kind needs a special case in `edit!`, the merge or the sync: a special case means the wrong design."
   :seon.task/kind :work
-  :seon.task/proofs #{}}]
+  :seon.task/proofs #{}}
+ {:seon.task/name "a-var-defined-twice-in-a-file-is-said"
+  :seon.task/plan "Seen 2026-11-07: test/seon/render_cost_test.clj defined *conn* twice, and a root's whole import and the runner's refresh of a kept tree (seon.source/refresh-tx) each kept a different one as the live form, so one tree gave two programs and two tests different digests. The graph holds one form per var (seon.program/reach-graph's :defs had none twice), so nothing says so. A text sweep of src and test found this one, removed; no law holds it (AGENTS section 5: every definition happens once). To do: the import answers which forms define a var another form of that file defines, as a seon.problems class, keeping the last by file order on both paths. Proof: a file with two defs of one var gives one live form whichever path imports it, and a problem names it."
+  :seon.task/kind :work
+  :seon.task/proofs #{}}
+]
