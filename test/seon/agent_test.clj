@@ -2234,6 +2234,21 @@
     (is (not= (:value after) (:value after-script)) "and so does a script the branch writes")))
 
 ;; docs/sharing.md#what-a-real-branch-spends-its-nodes-on: a process test that is no proof keeps its :deferred fact and takes the gate's green over it,
+;; docs/sharing.md#a-metric-accretes: what a function cost is queryable on the branch, and adds up across commits, written only with a commit going out anyway
+(deftest what-a-function-cost-is-a-fact-on-the-branch
+  (let [stats "(:seon.fn/stats (datahike.api/pull (seon.agent/db) [:seon.fn/stats] [:seon.fn/var 'seon.lib/digest]))"
+        called "(do (seon.lib/digest \"x\") (seon.lib/digest \"y\") (seon.agent/transact! [{:seon.eval/id \"probe\" :seon.eval/by \"probe\"}]) (seon.agent/commit!) :ok)"
+        [_ first-stats _ second-stats q]
+        (in-agent [called stats called stats
+                   "(datahike.api/q '[:find ?v :where [?f :seon.fn/var ?v] [?f :seon.fn/stats ?s] [(get ?s :calls) ?c] [(>= ?c 2)]] (seon.agent/db))"])
+        a (:value first-stats) b (:value second-stats)]
+    (is (<= 2 (:calls a)) (pr-str first-stats))
+    (is (= 4 (- (:calls b) (- (:calls a) 2))) (pr-str [a b]))
+    (is (pos? (:bytes b)) "bytes are counted")
+    (is (pos? (reduce + (vals (:hist b)))) "calls by size")
+    (is (string? (get-in b [:worst :eval])) "the worst eval, to find it again")
+    (is (contains? (set (map first (:value q))) 'seon.lib/digest) (str "and a plain query reaches it: " (pr-str q)))))
+
 ;; so it never reads as unjudged after it passed and the gate is not asked again; one green in the cache was never deferred, so it needs no fact
 (deftest a-deferred-test-that-is-no-proof-is-judged-once
   (let [t 'seon.repl-test/a-deferred-non-proof u 'seon.repl-test/a-cached-non-proof p 'seon.repl-test/the-in-process-proof

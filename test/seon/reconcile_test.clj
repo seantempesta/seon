@@ -81,7 +81,7 @@
         ds (tpl/with-merge decls)
         db (d/db-with db (task/create-tx db ds))
         db (-> db (d/db-with (task/execution-tx (mapv #(task/task-id 'demo (:seon.task/name %)) ds) :running))
-               (d/db-with (task/boot-tx "boot-1" max-running)))]
+               (d/db-with (task/boot-tx "boot-1" max-running "sean")))]
     (cond-> db (seq extra) (d/db-with extra))))
 
 (defn- note
@@ -113,7 +113,7 @@
         db (d/db-with db (task/create-tx db decls))
         ids (if (= :all released) (map #(task/task-id 'demo (:seon.task/name %)) decls) released)]
     (cond-> (-> db (d/db-with (task/execution-tx (vec ids) :running))
-                (d/db-with (task/boot-tx "boot-1" max-running)))
+                (d/db-with (task/boot-tx "boot-1" max-running "sean")))
       (seq extra) (d/db-with extra))))
 
 (deftest who-launched-a-task-hears-how-it-ends
@@ -580,7 +580,7 @@
                    ["a task merged" [{:seon.task/id "demo/a" :seon.task/outcome :merged :seon.task/merged-t 7}]]
                    ["a need added" [{:seon.task/id "demo/c" :seon.task/needs #{"demo/a" "demo/b"}}]]
                    ["a proof added" [{:seon.task/id "demo/a" :seon.task/proofs #{(t "a") 'demo-test/more}}]]
-                   ["a new boot" (task/boot-tx "boot-2" 4)]]))
+                   ["a new boot" (task/boot-tx "boot-2" 4 "sean")]]))
 
 (deftest an-agents-boot-moving-re-derives-every-task-that-names-it
   ;; on a stage two tasks hold one agent (:seon.task/agent on both): the agent's boot moving moves what the index
@@ -740,7 +740,7 @@
         decls (mapv #(decl (str "u" %)) (range n))]
     (d/transact conn (task/create-tx @conn decls))
     (d/transact conn (task/execution-tx (mapv #(task/task-id 'demo (:seon.task/name %)) decls) :running))
-    (d/transact conn (task/boot-tx "boot-1" 4))
+    (d/transact conn (task/boot-tx "boot-1" 4 "sean"))
     (let [db0 @conn]
       (d/transact conn [{:seon.task/id "demo/u0" :seon.task/plan "Make u0 truer."}])
       [(r/index db0) db0 @conn])))
@@ -780,7 +780,7 @@
                     (range n))]
     (d/transact conn (task/create-tx @conn decls))
     (d/transact conn (task/execution-tx (mapv #(task/task-id 'demo (:seon.task/name %)) decls) :running))
-    (d/transact conn (task/boot-tx "boot-1" 4))
+    (d/transact conn (task/boot-tx "boot-1" 4 "sean"))
     [@conn]))
 
 (deftest an-index-is-listed-at-the-cost-of-its-tasks
@@ -844,7 +844,7 @@
   ;; owner, 2026-10-26: "design-build and merge" (seon.template/design-build, an experiment's choice): the green design-build task is done, not merged
   ;; by itself; its merge task then runs on the branch, and its green end is the octopus merge
   (let [db-req (fn [extra] (let [db (empty-db) ds (tpl/design-build (decl "a"))]
-                             (-> db (d/db-with (tpl/request-tx db ds)) (d/db-with (task/boot-tx "boot-1" 4)) (d/db-with extra))))]
+                             (-> db (d/db-with (tpl/request-tx db ds)) (d/db-with (task/boot-tx "boot-1" 4 "sean")) (d/db-with extra))))]
     (is (= [(spawn "a")] (actions-for (db-req []))) "the work task forks first, alone")
     (is (= {:outcome :done :reasons []} (judgment-of (db-req (work "a" :running)) "a" {:end {:outcome :green} :results {(t "a") :pass}}))
         "its green end is accepted, and merges nothing")
@@ -874,7 +874,7 @@
                   (d/db-with db (#'r/gated (st-of db) "demo/a-merge" rs unread err))))
         octopus [{:op :octopus-merge :task "demo/a-merge" :members [{:task "demo/a-merge"}]}]]
     (is (= {:outcome :gate :reasons [] :deferred [boots]} (judged gate [boots])) "unrun: gated first")
-    (is (= {:outcome :gate :reasons [] :deferred []} (judged gate [])) "none deferred: its tree is still analyzed, with no checkout (docs/merging.md#a-merge-analyzes-its-tree)")
+    (is (= {:outcome :gate :reasons [] :deferred []} (judged gate [])) "none deferred: its tree is still analyzed, with no checkout (docs/merging.md#a-merge-runs-what-the-change-reaches)")
     (is (= :ready (:outcome (judged nil []))) "a root with no source has no candidate to analyze")
     (testing "all passing, it is ready and merges"
       (let [db (gated gate {boots :pass} [] nil)]
@@ -952,7 +952,7 @@
   ;; DECISIONS: octopus merges stay off (one merge at a time) until the octopus merge's combined test run
   ;; and the par-200 hang are fixed; the config value in force is a fact on main a person can read
   (let [n (cfg/value :seon.config.agent/max-running)
-        db (d/db-with (empty-db) (into (task/boot-tx "boot-1" n) (cfg/facts cfg/config {})))]
+        db (d/db-with (empty-db) (into (task/boot-tx "boot-1" n "sean") (cfg/facts cfg/config {})))]
     (is (= 1 (cfg/value :seon.config.merge/max-running)))
     (is (= {:boot "boot-1" :max-running n :max-merging 1} (task/root db)) "both config keys are recorded at boot")))
 
@@ -1055,7 +1055,7 @@
   (let [db (empty-db)
         d [(assoc (decl "a") :seon.task/kind :design)]
         db (d/db-with db (task/create-tx db d))]
-    (-> db (d/db-with (task/execution-tx ["demo/a"] :running)) (d/db-with (task/boot-tx "boot-1" 4)) (d/db-with extra))))
+    (-> db (d/db-with (task/execution-tx ["demo/a"] :running)) (d/db-with (task/boot-tx "boot-1" 4 "sean")) (d/db-with extra))))
 
 (deftest a-design-step-is-not-done-at-its-start
   ;; measured 2026-10-21: a design ended :done :green with 0 turns; its proofs may stay

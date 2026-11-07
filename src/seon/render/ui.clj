@@ -1697,11 +1697,12 @@
     [:div {:class "seon-stack"}
      [:div {:class "flex items-baseline gap-3"}
       [:h1 {:class "text-base font-bold text-signal" :title (str/join " · " (remove nil? [(kname id) (when branch (str "on branch " (kname branch))) (when pid (str "pid " pid))]))}
-       (if-let [t (some-> (ratom/realize (or (:task v) (:seon.agent/task v))) :seon.task/id)] (task-title t) (kname id))]
+       (if-let [t (some-> (ratom/realize (or (:task v) (:seon.agent/task v))) :seon.task/id)] (task-title t) (or (:seon.user/name v) (kname id)))]
       ;; how its work stands, at a glance and in a person's words (standing): working, waiting for you only where a message
       ;; is taken, stopped at its cap, merged; the reason it stands so beside it
-      [:span {:class (str "shrink-0 " (tone-class (:tone stands)))}
-       (str "● " (:text stands) (when (:detail stands) (str " · " (:detail stands))))]
+      (when-not (:seon.user/name v)
+        [:span {:class (str "shrink-0 " (tone-class (:tone stands)))}
+         (str "● " (:text stands) (when (:detail stands) (str " · " (:detail stands))))])
       ;; what it evaluates now, while its process runs one: the newest thing it does, live
       (when-let [r (and pid (:seon.process/running proc))]
         [:code {:class "min-w-0 truncate text-text-300"} r])]
@@ -1923,7 +1924,7 @@
                    [(:seon.agent/key a) (standing a (:seon.agent/task a))])
         where (fn [[_ {:keys [state lit?]}]] (cond (#{:task/parked :task/told :status/idle} state) :needs lit? :working :else :finished))
         {:keys [needs working finished]} (group-by where sessions)
-        cards (fn [ss] (for [[k _] ss] [#'session-card {} k]))
+        cards (fn [ss] (into [:div {:class "grid grid-cols-1 gap-2 lg:grid-cols-2"}] (for [[k _] ss] [#'session-card {} k])))
         heading (fn [text] [:h2 {:class "kicker"} text])]
     [:section {:class "seon-stack-2"}
      (when (seq needs) (list (heading "Needs you") (cards needs)))
@@ -1953,6 +1954,39 @@
     [:summary {:class "px-1 text-2xs text-text-500"} "Earlier"]
     (into [:ul {:class "flex gap-2 lg:flex-col lg:gap-0.5"}] (for [boot boots] [#'boot-side {} boot]))]])
 
+(defn users-side
+  "The users in the agents list (a component over the db): each a link to its page by its :seon.user/name. See docs/users.md#whats-on-screen."
+  {:seon.render/style ".users-side { display: contents; }" :seon.render/for "page" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]]] :any]}
+  [{db :seon.db/db}]
+  (when-let [names (seq (map :v (d/datoms db :aevt :seon.user/name)))]
+    [:li {:class "contents"} [:ul {:class "contents"}
+     (for [n names] [:li [:a {:href (str "/user/" n) :class pill-link :title (str "user: " n)}
+                          [:span {:class "flex items-baseline gap-2"} [:span {:class "text-signal"} "◆"] [:span {:class "font-semibold text-text-100"} n]]]])]]))
+
+(defn started-side
+  "The agents this user started in its agents list (a component over ctx, by the pull's :started join): each `agent-side`. See docs/users.md#whats-on-screen."
+  {:seon.render/style ".started-side { display: contents; }" :seon.render/for "page" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+  [{c :seon.ctx/ctx}]
+  [:li {:class "contents"} [:ul {:class "contents"} (for [eid (sort (keys (:started c)))] [#'agent-side {} eid])]])
+
+(defn started-cards
+  "A card for each agent this user started, in a grid (a component over ctx and the db, `session-card` by each one's key). See docs/users.md#whats-on-screen."
+  {:seon.render/for "page" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
+  [{c :seon.ctx/ctx db :seon.db/db}]
+  (if-let [es (seq (sort (keys (:started c))))]
+    [:section {:class "grid grid-cols-1 gap-3 lg:grid-cols-2"}
+     (for [e es :let [k (:seon.agent/key (d/entity db e))] :when k] [#'session-card {} k])]
+    [:p {:class "muted"} "No agents yet."]))
+
+(defn user-ctx
+  "A user's page, the render of its ctx (the declared html render of :seon.render/user-ctx, which a branch overrides like any render): root and its agents in the agents list, its agents as cards. See docs/users.md#whats-on-screen."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+  [_]
+  [:div {:id "user-ctx"}
+   [:ol {:id "c-side"} [#'root-side {}] [#'started-side {}]]
+   [:ol {:id "c-rows"} [#'started-cards {}]]
+   [#'rules-list {}]])
+
 (defn root-ctx
   "Root's page, the render of root's ctx (the declared html render of :seon.render/root-ctx, which a
   branch overrides like any render), drawn by the walk as components in its lists: its agents list
@@ -1966,7 +2000,7 @@
    (let [now (task/boot-of db)
          boots (map first (sessions-by-boot db))
          earlier (vec (remove #{now} boots))]
-     [:ol {:id "c-side"} [#'root-side {}]
+     [:ol {:id "c-side"} [#'root-side {}] [#'users-side {}]
       (when (some #{now} boots) [#'boot-side {} now])
       (when (seq earlier) [#'earlier-sessions {} earlier])])
    [:div {:id "p-head"} [#'root-head {}]]

@@ -286,6 +286,22 @@
   (let [k (:tx-seq (swap! state update :tx-seq inc))]
     (:result (await-reply k {:op :launch :k k :text text :template template}))))
 
+(defn note-costs!
+  "fns (seon.profile/touched of an eval) added to what this agent has measured since its last commit; nothing in a process that is no agent's. See docs/sharing.md#a-metric-accretes."
+  {:malli/schema [:=> [:cat [:vector :seon.profile/fn-cost]] :any]}
+  [fns]
+  (when (:store-conn @state)
+    (swap! state #(assoc % :fn-costs (profile/accrue (:fn-costs % {}) fns (:eval %))))))
+
+(declare transact!)
+
+(defn- costs-tx
+  "held ({var stats}) added to each function's :seon.fn/stats as db holds it: one value a function that moved, written on what is being committed anyway. Costs held."
+  {:malli/schema [:=> [:cat :seon.host/db :map] :seon.db/tx-data]}
+  [db held]
+  (vec (for [[v st] held]
+         {:seon.fn/var v :seon.fn/stats (profile/stats-sum (:seon.fn/stats (d/entity db [:seon.fn/var v])) st)})))
+
 (defn commit!
   "Commit the writes this agent applied (run-ahead) to its branch, once, through its own
   store handle, and tell root (its flush makes the commit durable). nil when nothing waits. A
@@ -294,6 +310,10 @@
   {:malli/schema [:=> [:cat] :any]}
   []
   (let [conn (or (:store-conn @state) (no-branch!))
+        ;; what was measured rides on a commit going out anyway, and never makes one
+        _ (when-let [held (and (:dirty? @state) (contains? (d/schema (:db @state)) :seon.fn/stats) (not-empty (:fn-costs @state)))]
+            (swap! state dissoc :fn-costs)
+            (transact! (costs-tx (:db @state) held)))
         c (try (dw/commit-pending! conn) (catch Throwable e e))]
     (cond
       (instance? Throwable c) (refused! conn c)

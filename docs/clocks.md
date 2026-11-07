@@ -94,6 +94,6 @@ Clock reads whose value is recorded or shown and never compared to decide anythi
 - `seon.agent/handle!`, `seon.root/ext-op`, `seon.root/start-spawn`, `seon.root/back-op` (a Back to here's `:seon.agent/started-ms`, which moves the reconciler's index), `seon.reconcile/advance`, `seon.reconcile/reconciler-proc`: stamps and durations.
 - `seon.agent/init!`, `seon.agent/hello!`: a spawn's phases (`seon.agent/spawn-phases`: the fork server's marks, then the child's, each with the bytes it allocated), sent with the agent's hello and shown on root's `:ready` event; nothing decides by them.
 - `seon.root/deliver-message`: the occurrence stamp of the problem it records for a send to an agent main does not have; nothing decides by it.
-- `seon.root/message-write` and `seon.reconcile/write` (the message `tell-tx` writes): `:seon.message/sent-ms`, when the message was written; it orders and nothing decides by it.
+- `seon.root/message-write`, `seon.reconcile/write` (the message `tell-tx` writes) and `seon.turn/tell-error!`: `:seon.message/sent-ms`, when the message was written; it orders and nothing decides by it.
 
 The thread CPU clock (`seon.profile/cpu-ns`, what a cost proof's `seon.cost/measure` times through `seon.profile/measure!`) orders nothing and carries no mark; [cost](cost.md) says what it measures.
