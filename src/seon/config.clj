@@ -17,11 +17,12 @@
     and bin/ports pass it with --config, so a check's or a test's process reads only what its
     command line gives it.
 
-  The file is read once, when this namespace loads (root's boot: every process of the
-  platform is root or forked from it, so agents and the fork server hold the same value and
-  read no environment). A value resolving to nil (an unset `#env`) is
+  The shipped file's text is baked when this namespace compiles (`built-text`), so what a process
+  loads with moves only at a rebuild and no file on disk can stop it starting. A process then holds
+  the config of its own branch's db (`hold!`, docs/config.md#a-process-holds-its-branchs-config):
+  every read takes that map, and a fork inherits it. A value resolving to nil (an unset `#env`) is
   absent; the result must satisfy `:seon.config/config` (a closed map: an unknown key, an
-  invalid value or a missing required key refuses boot with `:seon.config/refused`). Root
+  invalid value or a missing required key refuses with `:seon.config/refused`). Root
   writes the resolved config as facts on main's root entity (`facts`), platform records a
   merge never carries, where agents, the dashboard and the context read it.
 
@@ -99,21 +100,25 @@
   {:malli/schema [:=> [:cat] [:vector :qualified-keyword]]}
   [] (mapv first (m/entries config-schema)))
 
+(declare held)
+
 ;; ---- resolving -------------------------------------------------------------------------------
 
 (defn invalid
   "The thrown error for a config value m that does not satisfy :seon.config/config: one
-  problem per refused key (unknown, invalid, missing), each naming the key."
-  {:malli/schema [:=> [:cat :map] :seon.config/refused]}
-  [m]
-  (let [ps (vec (for [{:keys [path in type value]} (:errors (m/explain config-schema m))]
+  problem per refused key (unknown, invalid, missing), each naming the key. schema is the
+  compiled config map it is held to (default this process's branch's)."
+  {:malli/schema [:function [:=> [:cat :map] :seon.config/refused] [:=> [:cat :map :any] :seon.config/refused]]}
+  ([m] (invalid m (:schema @held)))
+  ([m schema]
+  (let [ps (vec (for [{:keys [path in type value]} (:errors (m/explain schema m))]
                   {:key (or (first in) (first path))
                    :problem (case type :malli.core/extra-key :unknown-key :malli.core/missing-key :missing-key :invalid)
                    :value (sedn/encode value)}))]
     {:seon.error/type :seon.config/refused :seon.error/operation (symbol #'seon.config/invalid)
      :seon.error/message (str "the config does not satisfy :seon.config/config: "
                               (str/join ", " (for [{:keys [key problem]} ps] (str key " " (name problem)))))
-     :seon.config/problems ps}))
+     :seon.config/problems ps})))
 
 (defn- refuse!
   "Throw what raiser op (by its var: the compile resolves it) refuses, with msg."
@@ -163,18 +168,20 @@
 (defn resolved
   "Raw (what aero read) as the config: nil values dropped (absent), then validated against
   :seon.config/config, and each model's thinking with its reasoning replay against
-  :seon.config.ai/reasoning-pair (invalid-pairs). Answers the map, or throws the error."
-  {:malli/schema [:=> [:cat :map] :seon.config/config]}
-  [raw]
-  (let [m (into {} (remove (comp nil? val)) raw)]
-    (if-not (m/validate config-schema m)
-      (let [r (invalid m)] (throw (ex-info (:seon.error/message r) r)))
-      (let [ps (invalid-pairs m)]
-        (if (empty? ps)
-          m
-          (let [msg (str "the config does not satisfy :seon.config.ai/reasoning-pair: " (str/join ", " (map (comp pr-str :key) ps)))]
-            (throw (ex-info msg {:seon.error/type :seon.config/refused :seon.error/operation (symbol #'seon.config/resolved)
-                                 :seon.error/message msg :seon.config/problems ps}))))))))
+  :seon.config.ai/reasoning-pair (invalid-pairs). schema is the compiled config map it is held
+  to (default this process's branch's). Answers the map, or throws the error."
+  {:malli/schema [:function [:=> [:cat :map] :map] [:=> [:cat :map :any] :map]]}
+  ([raw] (resolved raw (:schema @held)))
+  ([raw schema]
+   (let [m (into {} (remove (comp nil? val)) raw)]
+     (if-not (m/validate schema m)
+       (let [r (invalid m schema)] (throw (ex-info (:seon.error/message r) r)))
+       (let [ps (invalid-pairs m)]
+         (if (empty? ps)
+           m
+           (let [msg (str "the config does not satisfy :seon.config.ai/reasoning-pair: " (str/join ", " (map (comp pr-str :key) ps)))]
+             (throw (ex-info msg {:seon.error/type :seon.config/refused :seon.error/operation (symbol #'seon.config/resolved)
+                                  :seon.error/message msg :seon.config/problems ps})))))))))
 
 ;; ---- the layers: the shipped file, the checkout's own file, the command line ------------------
 ;; Owner: "Hand out different edn config files that each agent can load and control
@@ -239,50 +246,153 @@
   (into {} (remove (comp nil? val)) (aero/read-config p {:profile prof ::checkout dir})))
 
 (defn layered
-  "The config of the layers [[source map] ...] (later wins, key by key), validated once:
-  {:config :sources}, :sources naming the layer each key came from."
-  {:malli/schema [:=> [:cat [:sequential [:tuple :string :map]]] [:map [:config :seon.config/config] [:sources :seon.config/sources]]]}
-  [layers]
-  (let [m (reduce (fn [m [_ l]] (merge m l)) {} layers)
-        c (resolved m)]
-    {:config c
-     :sources (into {} (for [[src l] layers [k v] l :when (some? v)] [k src]))}))
+  "The config of the layers [[source map] ...] (later wins, key by key), validated once against
+  schema (default this process's branch's): {:config :sources}, :sources naming the layer each key came from."
+  {:malli/schema [:function [:=> [:cat [:sequential [:tuple :string :map]]] [:map [:config :map] [:sources :seon.config/sources]]]
+                  [:=> [:cat [:sequential [:tuple :string :map]] :any] [:map [:config :map] [:sources :seon.config/sources]]]]}
+  ([layers] (layered layers (:schema @held)))
+  ([layers schema]
+   (let [m (reduce (fn [m [_ l]] (merge m l)) {} layers)
+         c (resolved m schema)]
+     {:config c
+      :sources (into {} (for [[src l] layers [k v] l :when (some? v)] [k src]))})))
 
 (def shipped-file "The shipped config, relative to the checkout." "resources/seon/config/default.edn")
 
-(defn load-layers
-  "The layers this process reads: the shipped file under the command line's --profile, the
-  profile's own record (:seon.config.root/profile), then its --config files and --set keys,
-  in order. The checkout's config/local.edn is a layer only when a
-  --config names it (bin/root, bin/ports): read implicitly, it gave a check's root in the
-  main tree the standing root's source tree (task seon.check/a-checks-roots-take-explicit-config)."
-  {:malli/schema [:=> [:cat :string [:sequential :string]] [:vector [:tuple :string :map]]]}
-  [dir args]
+(defn- layers-over
+  "The layers this process reads over base, read by base-of under the command line's --profile: the shipped layer, the
+  profile's own record (:seon.config.root/profile), then its --config files and --set keys, in order."
+  {:malli/schema [:=> [:cat ifn? :string [:sequential :string]] [:vector [:tuple :string :map]]]}
+  [base-of dir args]
   (let [{:keys [layers profile]} (overrides args)
         prof (if profile (keyword profile) :default)]
-    (into [[shipped-file (read-layer (path dir) prof dir)]
+    (into [[shipped-file (base-of prof)]
            [(if profile (str "--profile " profile) "no --profile") {:seon.config.root/profile prof}]]
           (for [[src x] layers]
             [src (if (string? x) (read-layer x prof dir) x)]))))
 
-(defn text-config
-  "text as the shipped config would read at this checkout, validated as a boot validates it with no profile: the config, or the refusal thrown, naming each key. What a write of the file checks first (seon.fx/unreadable). See docs/source.md#a-program-file."
-  {:malli/schema [:=> [:cat :string] :seon.config/config]}
-  [text]
-  (:config (layered [[shipped-file (read-layer (java.io.StringReader. text) :default (checkout))]
-                     ["no --profile" {:seon.config.root/profile :default}]])))
+(defn load-layers
+  "The layers a process of checkout dir would read, args its command line: dir's shipped file, as this process's branch states it when dir is this checkout. The checkout's config/local.edn is a layer only when a
+  --config names it (bin/root, bin/ports): read implicitly, it gave a check's root in the
+  main tree the standing root's source tree (task seon.check/a-checks-roots-take-explicit-config)."
+  {:malli/schema [:=> [:cat :string [:sequential :string]] [:vector [:tuple :string :map]]]}
+  [dir args]
+  (layers-over #(read-layer (if (= dir (checkout)) (java.io.StringReader. (:text @held)) (path dir)) % dir) dir args))
 
-(def ^:private loaded
-  (let [dir (checkout)] (layered (load-layers dir (argv)))))
+(defmacro ^:private baked-shipped-text
+  "The shipped config file's text, read when this namespace compiles, as baked-schema-forms reads the schemas. See docs/config.md#a-process-holds-its-branchs-config."
+  [] (slurp (path (checkout))))
+
+(def built-text
+  "The shipped config file as this binary was built: what a process loads with, whatever the file on disk says now. See docs/config.md#a-process-holds-its-branchs-config."
+  (baked-shipped-text))
+
+(def ^:private built-layers
+  "This process's layers as it loaded: built-text, then its command line's, each read once. See docs/config.md#layers."
+  (let [dir (checkout)]
+    (layers-over #(read-layer (java.io.StringReader. built-text) % dir) dir (argv))))
+
+(def ^:private loaded (layered built-layers config-schema))
 
 (def config
-  "This process's config: every layer, read once at load (root's boot; agents are forked
-  holding it)."
+  "This process's config as it loaded, built-text under its layers: what a read at load takes, and the value a branch's differs from. A read of a setting takes the held map (in-force)."
   (:config loaded))
 
 (def sources
-  "Which layer each key of the config came from."
+  "Which layer each key of the config as it loaded came from."
   (:sources loaded))
+
+(def ^:private held
+  "The config this process reads: :config and :sources, its branch's (hold!) or as it loaded; :schema, the config map compiled as its branch states it; :text, the shipped file as its branch states it; :entries and :changes, what they were built from; :waiting, the keys it does not act on (waiting). See docs/config.md#a-process-holds-its-branchs-config."
+  (atom (assoc loaded :schema config-schema :text built-text :waiting {})))
+
+(defn in-force
+  "This process's config as its branch states it, {:config :sources}: built once at its start, refreshed only when a transaction touches an entry. See docs/config.md#a-process-holds-its-branchs-config."
+  {:malli/schema [:=> [:cat] [:map [:config :map] [:sources :seon.config/sources]]]}
+  [] (select-keys @held [:config :sources]))
+
+(defn shipped-text
+  "The shipped file's text as this process's branch states it: built-text, or its entries, one a line. What a reader of the file as the program holds it reads, never the disk. See docs/config.md#a-process-holds-its-branchs-config."
+  {:malli/schema [:=> [:cat] :string]}
+  [] (:text @held))
+
+(defn waiting
+  "The keys whose value this process's branch states and this process does not act on, {k {:running :stated}}: a place, read before any db, and a key read at load (:seon.config/at-load), until a rebuild. See docs/config.md#what-waits-for-a-rebuild."
+  {:malli/schema [:=> [:cat] [:map-of :qualified-keyword :map]]}
+  [] (:waiting @held))
+
+(defn- schema-of
+  "The config map compiled with changes ({k form}, the schema entries a branch holds beyond the binary's) over the binary's forms: the binary's own when there are none."
+  {:malli/schema [:=> [:cat [:map-of :qualified-keyword :any]] :any]}
+  [changes]
+  (if (empty? changes)
+    config-schema
+    (m/deref (m/schema :seon.config/config {:registry (mr/composite-registry (m/default-schemas) (mr/simple-registry (merge schema-forms changes)))}))))
+
+(defn- entries-text
+  "The file's text of entries {k form}: a map, one entry a line, each form as stated. See docs/config.md#a-process-holds-its-branchs-config."
+  {:malli/schema [:=> [:cat [:map-of :qualified-keyword :string]] :string]}
+  [entries]
+  (str "{\n " (str/join "\n " (for [[k form] (sort-by (comp str key) entries)] (str k " " form))) "}\n"))
+
+(defn- of-key
+  "Whether a key's schema form among forms says prop."
+  {:malli/schema [:=> [:cat :map :any :keyword] :any]}
+  [forms k prop]
+  (let [f (get forms k)] (and (vector? f) (map? (second f)) (get (second f) prop))))
+
+(defn of-entries
+  "The config entries ({k form}, each form its text, read here as aero reads the file: its tags resolved for this process) state, as this process's layers over them: {:config :sources :schema :text :waiting}, or the :seon.config/refused error. A place keeps the value this process loaded with, since it is read before any db. changes: the branch's schema entries beyond the binary's. See docs/config.md#a-process-holds-its-branchs-config."
+  {:malli/schema [:=> [:cat [:map-of :qualified-keyword :string] [:map-of :qualified-keyword :any]] :map]}
+  [entries changes]
+  (let [forms (merge schema-forms changes)
+        text (entries-text entries)
+        built (second (first built-layers))
+        place? #(of-key forms % :seon.config/place)
+        prof (get config :seon.config.root/profile)
+        schema (schema-of changes)]
+    ;; docs/failure-points.md: an entry's text that aero can't read, or a map that doesn't validate, is this answer
+    (try
+      (let [stated (read-layer (java.io.StringReader. text) prof (checkout))
+            base (merge (into {} (remove (comp place? key)) stated) (into {} (filter (comp place? key)) built))
+            r (layered (assoc-in built-layers [0 1] base) schema)]
+        (assoc r :schema schema :text text
+               :waiting (into {} (for [k (distinct (concat (keys stated) (keys built)))
+                                       :when (and (or (place? k) (of-key forms k :seon.config/at-load))
+                                                  (not= (get stated k) (get built k)))]
+                                   [k {:running (get built k) :stated (get stated k)}]))))
+      (catch Throwable e
+        (or (when (= :seon.config/refused (:seon.error/type (ex-data e))) (ex-data e))
+            {:seon.error/type :seon.config/refused :seon.error/operation (symbol #'seon.config/of-entries)
+             :seon.error/message (str "the config's entries do not read: " (ex-message e))})))))
+
+(defn entries
+  "The config entries db holds, {k form}, or nil when it holds none (a store imported before them, a test's world). See docs/config.md#a-process-holds-its-branchs-config."
+  {:malli/schema [:=> [:cat :seon.host/db] [:maybe [:map-of :qualified-keyword :string]]]}
+  [db]
+  (not-empty (into {} (for [dt (d/datoms db :aevt :config/form)] [(:config/key (d/entity db (:e dt))) (:v dt)]))))
+
+(defn hold!
+  "Make this process's config what es and changes state (of-entries), when they differ from what it holds. Its :schema follows changes even when the entries are refused, so a branch can name a key before it states it; what it reads stays as it was. Answers nil, or the refusal. es nil (nothing stated) holds nothing. See docs/config.md#a-process-holds-its-branchs-config."
+  {:malli/schema [:=> [:cat [:maybe [:map-of :qualified-keyword :string]] [:map-of :qualified-keyword :any]] [:maybe :seon.config/refused]]}
+  [es changes]
+  (when (and es (not (and (= es (:entries @held)) (= changes (:changes @held)))))
+    (let [r (of-entries es changes)]
+      (if (:seon.error/type r)
+        (do (swap! held assoc :schema (schema-of changes)) r)
+        (do (reset! held (assoc r :entries es :changes changes)) nil)))))
+
+(defn text-refusal
+  "Why text can't be the shipped config on this process's branch, as a boot reads it with no profile, or nil: its message names each key. What a write of the file checks first (seon.fx/unreadable). See docs/source.md#a-program-file."
+  {:malli/schema [:=> [:cat :string] [:maybe :string]]}
+  [text]
+  ;; docs/failure-points.md: text that aero can't read, or a map that doesn't validate, is this answer
+  (try
+    (layered [[shipped-file (read-layer (java.io.StringReader. text) :default (checkout))]
+              ["no --profile" {:seon.config.root/profile :default}]]
+             (:schema @held))
+    nil
+    (catch Throwable e (ex-message e))))
 
 ;; ---- reading a setting: the one resolver ------------------------------------------------------
 ;; Owner: settings are per model, per provider and per task; "a principle and not just
@@ -290,12 +400,12 @@
 ;; config's own key), and the server shows each value with where it came from.
 
 (defn resolve
-  "Setting k for ctx ({:task m :model id}; default {}) in this process's config: {:value
+  "Setting k for ctx ({:task m :model id}; default {}) in the config this process holds (in-force): {:value
   :source} (resolve-in)."
   {:malli/schema [:function [:=> [:cat :qualified-keyword] :seon.config/resolved]
                   [:=> [:cat :qualified-keyword :seon.config/context] :seon.config/resolved]]}
   ([k] (resolve k {}))
-  ([k ctx] (resolve-in config sources k ctx)))
+  ([k ctx] (let [{c :config srcs :sources} @held] (resolve-in c srcs k ctx))))
 
 (defn value
   "Setting k's value for ctx (resolve), the read every reader makes."
@@ -372,6 +482,15 @@
                 (for [[id m] (:seon.config.ai/models c)]
                   (-> (dissoc m :seon.config.ai/max-in-flight :seon.config.ai/max-tokens) (assoc :seon.ai.model/id id))))))
 
+(defn moved-facts
+  "The facts main's root entity takes when ops (resolved tx-data, read against db after them) touch config entries, as this process now holds them: each touched key and each provider and model, nil when none is touched. A place, which this process doesn't act on, stays. See docs/config.md#facts-on-main."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :any]] [:maybe [:vector :map]]]}
+  [db ops]
+  (when-let [ks (seq (for [[_ e a] ops :when (= a :config/form) :let [k (:config/key (d/entity db e))] :when k] k))]
+    (let [{c :config srcs :sources} @held
+          [root & more] (facts c srcs)]
+      (into [(select-keys root (conj (remove #(of-key (merge schema-forms (:changes @held)) % :seon.config/place) ks) :seon.root/id))] more))))
+
 (defn secret
   "The value of the environment variable named var-name (a credential, e.g. the model's key,
   named by :seon.config.ai/api-key-variable): read at its one use, never stored, never
@@ -403,6 +522,6 @@
                   [:=> [:cat :seon.host/db :seon.host/db [:maybe :seon.task/id] [:maybe :string]] :seon.model/provider]]}
   ([main task-db id] (provider-at main task-db id nil))
   ([main task-db id model]
-   (let [p (provider (merge config (from-db main)
+   (let [p (provider (merge (:config @held) (from-db main)
                             (when id (d/pull task-db (keys-declared) [:seon.task/id id]))))]
      (cond-> p (and model (= :openai-compat (:kind p))) (assoc :model model)))))

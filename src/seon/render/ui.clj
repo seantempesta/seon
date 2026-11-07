@@ -197,6 +197,8 @@
         groups (group-by (comp namespace key) (sort-by (comp str key) c))]
          [:section {:id "t-config" :class "tile wide config"}
       (kicker "config" (str (count c) " keys in force on main · resources/seon/config/default.edn · profile " (name (config/profile))))
+      (when-let [w (not-empty (config/waiting))]
+        [:p {:class "muted"} (str "main states these and this process waits for a rebuild: " (str/join ", " (map str (sort (keys w)))))])
       [:div {:class "cfg-groups"}
        (for [[g kvs] (sort-by key groups)]
          [:dl {:class "cfg"}

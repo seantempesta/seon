@@ -118,6 +118,92 @@
       (is (= [] (:errors (program/load-all! db))))
       (is (true? (bound? 'x.rnt-thing-test/helper))))))
 
+(deftest a-config-entry-writes-back-only-its-own-bytes
+  ;; docs/source.md#a-program-file: the config file is one entity per entry, each form its exact text with its tags unread, and a write-back changes only what an entry changed
+  (let [p config/shipped-file
+        text ";; the file's own words\n{;; a's words\n :x/a 1 ;; beside a\n ;; b's words\n :x/b #or [#env NOPE 2]\n :x/c #ref [:x/a]}\n"
+        db (let [db (empty-db)] (d/db-with db (source/import-tx db {p text})))
+        forms (fn [db] (into {} (for [dt (d/datoms db :aevt :config/form)] [(:config/key (d/entity db (:e dt))) (:v dt)])))
+        out (fn [db] (get (source/files db [p]) p))]
+    (is (= {:x/a "1" :x/b "#or [#env NOPE 2]" :x/c "#ref [:x/a]"} (forms db)))
+    (is (= text (out db)) "as imported, byte for byte")
+    (is (= (str/replace text " :x/a 1 " " :x/a 5 ") (out (d/db-with db [{:config/key :x/a :config/form "5"}]))) "a changed value")
+    (is (= (str/replace text "#ref [:x/a]}" "#ref [:x/a]\n :x/d 9}")
+           (out (d/db-with db [{:config/key :x/d :config/form "9" :config/file p}]))) "a new key")
+    (let [gone (d/db-with db (source/edit-tx db p (str/replace text " ;; b's words\n :x/b #or [#env NOPE 2]\n" "")))]
+      (is (= [:x/a :x/c] (sort (keys (forms gone)))) "an edit that takes a key out retracts its entry"))))
+
+(defn- config-root!
+  "A root on a clone of this checkout, its three tasks its own, and how a test speaks to it: :at-root, :in (an agent's REPL), :ask, :restart!. See docs/config.md#a-process-holds-its-branchs-config."
+  []
+  (let [dir (scratch-dir "config")
+        tree (str dir "/tree")
+        runs (str dir "/runs")
+        _ (.mkdirs (java.io.File. (str runs "/tasks")))
+        cloned (sh/sh "git" "clone" "-q" "--local" here tree)
+        _ (spit (str runs "/tasks/cfgt.edn") (pr-str (vec (for [n ["one" "two" "three"]] {:seon.task/name n :seon.task/plan "Work." :seon.task/kind :work}))))
+        options {:store (ts/clone-process-store! (str runs "/store")) :main "main" :runs runs
+                 :args ["--set" (str ":seon.config.source/root=" (pr-str tree))]}
+        root (atom (ts/start-root! options))
+        ask (fn [m] (ts/ask @root m))]
+    {:tree tree :cloned cloned :root root :ask ask
+     :restart! (fn [] (ts/stop-root! @root) (reset! root (ts/start-root! options)))
+     :at-root (fn [code] (ts/value-of (:response (ask {:op :eval :agent "root" :code code}))))
+     :in (fn [a code] (:value (ts/value-of (:response (ask {:op :eval :agent "root" :code (str "@(c/submit! sys " a " " (pr-str code) " {:origin :outside})")})))))}))
+
+(def ^:private a-branchs-key :seon.config.root/a-branchs-own-key)
+
+(def ^:private reads-the-key (str "(try (seon.config/value " a-branchs-key ") (catch Exception _ :nowhere))"))
+
+(def ^:private adds-the-key
+  (let [k a-branchs-key]
+    (str "(do (my.schema/register! " k " [:int {:min 0 :seon.config/unit \"bytes\" :description \"How much.\"}])"
+         " (my.schema/register! :seon.config/config (conj (my.schema/forms :seon.config/config) [" k " {:optional true} " k "]))"
+         " (seon.repl/edit! seon.config/shipped-file \" :seon.config.root/death-stderr-bytes\" \" " k " 7\\n :seon.config.root/death-stderr-bytes\"))")))
+
+(deftest a-branchs-config-is-its-own-and-reaches-the-next-process
+  ;; docs/config.md#a-process-holds-its-branchs-config, reproducing 2026-11-07: one agent's unmerged spit of a key with no schema into the config file reached a second agent's live test
+  ;; and stopped a new process. Here it acts on nothing, the boot that meets it says which file and which commit, and a key a branch adds merges, writes back byte-preserved and reads at the next process.
+  (let [{:keys [tree cloned root ask restart! at-root in]} (config-root!)
+        k a-branchs-key
+        file (str tree "/" config/shipped-file)
+        held (slurp file)
+        bad (str/replace-first held "{;; ==== root" "{:seon.config.nope/key 1\n ;; ==== root")]
+    (try
+      (is (zero? (:exit cloned)) (:err cloned))
+      (is (:port @root) (:log @root))
+      (let [one (:agent (ask {:op :attach :task "cfgt/one"}))
+            two (:agent (ask {:op :attach :task "cfgt/two"}))]
+        (in one (str "(spit " (pr-str file) " " (pr-str bad) ")"))
+        (is (not= held (slurp file)) "the write reached the disk: an agent keeps it")
+        (is (= :reads (in two "(or (seon.fx/unreadable seon.config/shipped-file (seon.config/shipped-text)) :reads)")) "the other agent's reader of the shipped file sees what its branch states")
+        (is (= :nowhere (in two "(try (seon.config/value :seon.config.nope/key) (catch Exception _ :nowhere))")))
+        (spit file held)
+        (testing "a key added on a branch reads at that branch's REPL, and no other's"
+          (is (= :nowhere (in one reads-the-key)))
+          (in one adds-the-key)
+          (is (= 7 (in one reads-the-key)))
+          (is (= [k] (in one "(:config (my.branch/changes))")))
+          (is (= :nowhere (in two reads-the-key))))
+        (testing "it merges, and writes back byte-preserved"
+          (is (true? (at-root "(-> @(seon.root/call! sys {:op :write :req {:op :octopus-merge :branches [:task-cfgt-one] :data-attrs #{}}}) :results first :merged?)")))
+          (is (= 7 (at-root reads-the-key)) "root holds main's")
+          (is (= 7 (at-root (str "(" k " (datahike.api/pull @(:conn sys) [" k "] [:seon.root/id :root]))"))) "and main's root entity says so")
+          (is (= (let [end (str/last-index-of held "}")] (str (subs held 0 end) "\n " k " 7" (subs held end)))
+                 (at-root "(get (seon.source/files @(:conn sys) [seon.config/shipped-file]) seon.config/shipped-file)")))))
+      (testing "a boot on a file that doesn't load comes up, says which file and which commit, and keeps main's"
+        (spit file bad)
+        (restart!)
+        (is (:port @root) (:log @root))
+        (let [err (str (at-root "(:error (:seon.root/source (datahike.api/pull @(:conn sys) [:seon.root/source] [:seon.root/id :root])))"))]
+          (is (str/includes? err config/shipped-file) err)
+          (is (str/includes? err "seon.config.nope/key") err)
+          (is (str/includes? err (str/trim (:out (sh/sh "git" "-C" tree "rev-parse" "HEAD")))) err))
+        (is (= 7 (at-root reads-the-key)) "the next process reads the merged key from main")
+        (is (= 7 (in (:agent (ask {:op :attach :task "cfgt/three"})) reads-the-key)) "and so does an agent forked from it"))
+      (finally
+        (when @root (ts/stop-root! @root))))))
+
 (deftest import-then-write-back-is-a-zero-diff
   (let [files (src-files)
         db (imported files)
