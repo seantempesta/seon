@@ -442,7 +442,7 @@
                 ;; a test cannot be its own gate (:seon.root/started-by): left out, with no result recorded
                 deferred (vec (sort-by str (remove #(= self (str %)) deferred)))]
             (cond (and (empty? deferred) (nil? (get-in idx [:root :gate-checkout]))) {:outcome :ready :reasons rs}
-                  ;; no process test reached: :gate analyzes the candidate's files and runs nothing (docs/merging.md#a-merge-analyzes-its-tree)
+                  ;; no process test reached: :gate analyzes the candidate's files and runs nothing (docs/merging.md#a-merge-runs-what-the-change-reaches)
                   (empty? deferred) {:outcome :gate :reasons rs :deferred []}
                   ;; with no checkout to run them on (a root with no source), the merge is held with that reason, never merged with them unrun
                   (nil? (get-in idx [:root :gate-checkout]))
