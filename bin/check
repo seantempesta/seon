@@ -95,8 +95,7 @@ rm -f "$STARTER"; mkfifo "$STARTER"; exec 7<>"$STARTER"
 export SEON_STARTER_FIFO=$STARTER
 # gone with this run, however it ends but SIGKILL (which no handler sees: bin/held --reclaim removes it)
 trap 'rm -f "$STARTER"; rm -rf "$CHECK_RESULTS"' EXIT
-# told to stop (a timeout's TERM) with steps still running: what they are doing goes in the run's directory first, or a stuck step's evidence goes with it
-trap '[[ -n ${OUT:-} ]] && "$ROOT/bin/evidence" "$OUT/at-stop" $$; exit 143' TERM INT HUP
+trap 'exit 143' TERM INT HUP
 # (fd 7, the fifo's write end, stays bin/check's own: a child holding it would keep the fifo open)
 run() { (cd "$ROOT/target" && "$ROOT/bin/held" ./seon "$@" --profile scripted 2>&1 7>&- 3>&-) }
 run-embedding() { SEON_EMBED_TEXTS=64 run "$@" }
@@ -295,8 +294,12 @@ unit() {
 }
 mkfifo "$OUT/pool"; exec 3<>"$OUT/pool"; rm "$OUT/pool"
 for i in $(seq 1 $JOBS); do print -u 3 x; done
-for u in $UNITS; do read -u 3 tok; { unit $u; print -u 3 x } & done
-wait
+# what the run's steps are doing at the owner's checkpoint, once ("10m is my main wtf is going on checkpoint", 2026-11-06), while they live: a limit's stop
+# signals the whole group, so nothing can be read of a stuck step after it. An observation of time, never an end (docs/clocks.md)
+( sleep ${SEON_CHECK_EVIDENCE_AFTER_S:-600}; "$ROOT/bin/evidence" "$OUT/at-checkpoint" $$ ) & W=$!
+P=(); for u in $UNITS; do read -u 3 tok; { unit $u; print -u 3 x } & P+=($!); done
+wait $P
+kill $W 2>/dev/null; wait $W 2>/dev/null
 exec 3>&-
 (( NEEDS )) && { echo "== scale $N"; step scale ":all-ok|:spawn->all|:end-to-end|:control-real-mb|:all-killed|^SCALE " run scale $N }
 

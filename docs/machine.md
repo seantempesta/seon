@@ -8,7 +8,7 @@ The machine Seon is built on and for, and the rules that keep builds, disk and p
 
 Native profiling of our own processes needs no root: `sample PID SECS -file F` and `xcrun xctrace record --template 'Time Profiler' --attach PID`. Native frames resolve (liblmdb to `mdb.c` lines through ``target/lib/liblmdb.dylib.dSYM``, and the probe library), while Chez and Jolt code shows as `???`, since its code objects carry no Mach-O symbols; Clojure-level counts and times are `seon.profile`'s. `vmmap` and `vm_stat` need no root, but `vmmap` walks pages and is slow on the store's 64 GiB map; `dtrace`, `fs_usage` and `spindump` need root and SIP is on, so do not plan on them. Root reads it when worktree sessions run in parallel and before a session ends; a worktree session reads it before it reports that nothing of its own is running.
 
-A check run told to stop leaves `at-stop/` in its directory (`bin/evidence`): the process tree, each Jolt process's sample and files, and a fiber dump on its stderr, as a stuck run ended at its limit would otherwise take its evidence with it.
+A check run still going at 10 minutes leaves `at-checkpoint/` in its directory (`bin/evidence`): the process tree, each Jolt process's sample and files, and a fiber dump on its stderr. A limit's stop signals the whole group, so nothing can be read of a stuck step after it.
 
 ### Reading a number
 
