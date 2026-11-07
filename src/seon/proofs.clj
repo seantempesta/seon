@@ -576,7 +576,10 @@
                        (throw e)))))
         ;; a test whose run threw past its budget is not done: it stays unreported (run-tests!)
         ;; read before the next test's measure opens its epoch: the test's own contracted calls
-        measured (fn [v] (let [m (volatile! nil)] (profile/measure! #(one v) #(vreset! m %)) (done v (assoc @m :fns (profile/touched) :budget (budget v)))))
+        measured (fn [v] (let [m (volatile! nil)]
+                           (profile/reads-begin!)
+                           (profile/measure! #(one v) #(vreset! m %))
+                           (done v (assoc @m :fns (profile/with-reads (profile/touched)) :budget (budget v)))))
         body #((t/join-fixtures (get @t/once-fixtures n []))
                (fn [] (doseq [v vars :when (:test (meta v))] (each (fn [] (measured v))))))]
     (if ticks
