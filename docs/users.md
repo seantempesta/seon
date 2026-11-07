@@ -45,6 +45,8 @@ One merge function takes different options for each case, which is what makes th
 - **Options:** which keys (a cherry-pick has no second parent and doesn't move the base), ``-X theirs`` or ``-X ours``, and which data. A curated send of one namespace of two, and main's version winning a conflict, both worked (lab).
 - **A refused merge is a normal step:** main moved, the error says so, the agent merges main and retries.
 
+A test's digest survives both: a function untouched on a user's branch reads identically to main after a whole merge and after a rebase, and one the branch redefined reads as that branch's, so it gets its own verdict (lab, comparing what a read would hash).
+
 Whole merges retract nothing: agent to user to main to user, forms and data, both pull orders, twice (lab). Criss-cross goes away with the base as a fact; either ancestor gave the same merge (lab).
 
 ## Lazy
@@ -87,8 +89,8 @@ A commit is one transaction, so a branch is never half-merged, and one behind ma
 
 The steps below merge one at a time, each usable alone, with today's agents unchanged by proof; tasks are written once the data model has been tried at the REPL.
 
-1. Fix what survives the plan: the write check on an agent's own attributes, a bare attribute's declaration through a merge.
-2. Evals with their eid, and shared results.
+1. Done: the write check holds a value to its branch's schema, and a merged schema entry brings its attribute's declaration.
+2. Evals with their eid, and shared results: tasks ``seon.repl/an-evals-result-is-its-own-entity`` and ``seon.repl/an-evals-id-is-its-eid``. ``:seon.eval/response`` is read at 27 places in src, most in ``seon.repl`` and ``seon.render.ui``, and in about 115 test fixtures.
 3. Merge bases as two facts, and merge options.
 4. An agent's first act is to merge; an agent with untaken messages wants a process.
 5. Users, and input through ``forgive``.
