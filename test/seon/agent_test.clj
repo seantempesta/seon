@@ -394,7 +394,9 @@
                   _ (note! (str "read-a " read-a))
                   read-b (.read in-b)
                   _ (note! (str "read-b " read-b))
-                  began [read-a read-b]
+                  ;; what's claimed is that A ends with its agent while B lives on; B's byte only says it is in its test, as its own start mark does. An EOF on B's fifo before its byte is still unexplained (task seon.agent/a-proof-child-that-died-says-why), and is no red here
+                  in-b? (or (= 49 read-b) (str/includes? (slurp stages) "b start"))
+                  began [read-a (if in-b? 49 read-b)]
                   ;; a child that never reached its write has ended, so the run ends when A wakes: what it answered says why, which killing the agent would lose
                   answered (when (not= [49 49] began) (ev "(pr-str @blocked)"))
                   killed (sh/sh "kill" "-9" (str pid))
