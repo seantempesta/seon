@@ -266,15 +266,23 @@
     (is (= {:n 42} (:value r)) (pr-str r))
     (is (str/includes? (str (:text r)) "a ] b") "and its text still shows what it printed, verbatim")))
 
-(deftest an-ns-form-that-drops-a-require-says-so
-  ;; deepseek-run6: an agent evaluated seon.cost-test's ns form with one require to add, which replaced the file's and lost the alias its line 278 used; the gate
-  ;; failed all 209 tests with the cause only in its log. The form's own answer says what it leaves out, while the agent can act
-  (let [[_ same fewer] (at/in-agent (fn [{:keys [ns]}]
-                                      [(str "(ns " ns ".drops (:require [clojure.set :as s] [clojure.string :as str]))")
-                                       (str "(ns " ns ".drops (:require [clojure.set :as s] [clojure.string :as str] [clojure.walk :as w]))")
-                                       (str "(ns " ns ".drops (:require [clojure.set :as s]))")]))]
-    (is (empty? (:warnings same)) (pr-str same))
-    (is (= [['clojure.string 'clojure.walk]] (keep :dropped (:warnings fewer))) (pr-str fewer))))
+(deftest an-ns-form-at-the-repl-adds-to-the-namespace
+  ;; docs/agent.md#the-repl: Clojure's ns adds to a namespace, so what's recorded does too. Real run 10: `(ns seon.render)`, to switch to it, replaced the file's whole form,
+  ;; and a merge landed a tree that didn't compile; deepseek-run6 lost an alias the same way
+  (let [[_ bare fewer more src] (at/in-agent (fn [{:keys [ns]}]
+                                               (let [n (str ns ".adds")]
+                                                 [(str "(ns " n " \"The doc.\" (:require [clojure.set :as s] [clojure.string :as str]))")
+                                                  (str "(ns " n ")")
+                                                  (str "(ns " n " (:require [clojure.set :as s]))")
+                                                  (str "(ns " n " (:require [clojure.walk :as w]))")
+                                                  (str "(:form/src (:ns/form (datahike.api/entity (seon.agent/db) [:ns/name '" n "])))")])))
+        form (read-string (:value src))]
+    (is (nil? (:ex bare)) (pr-str bare))
+    (is (nil? (:ex fewer)) (pr-str fewer))
+    (is (nil? (:ex more)) (pr-str more))
+    (is (= "The doc." (nth form 2)) (pr-str form))
+    (is (= #{'clojure.set 'clojure.string 'clojure.walk} (seon.program/ns-requires form)) (pr-str form))
+    (is (not-any? #(= :ns-form-drops (:seon.repl/finding %)) (:warnings fewer)) "nothing was lost, so nothing to warn of")))
 
 (deftest a-require-at-the-repl-is-no-program
   ;; deepseek-run3/4: an eval's (require '[seon.repl-test ...]) in seon.repl was recorded as a text form of that file, so seon.repl required a test

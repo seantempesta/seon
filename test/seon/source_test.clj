@@ -1199,6 +1199,30 @@
                :fixed {:bytes 500000 :calls 20}
                :sizes [10 100 1000]}))
 
+(deftest an-ns-form-adds-to-a-recorded-form
+  ;; docs/agent.md#the-repl: the recorded text as a REPL's ns form leaves the namespace: what it adds, every other byte kept
+  (let [old "(ns a.b\n  \"Doc.\"\n  (:refer-clojure :exclude [defn])\n  ;; why\n  (:require [x.y :as y]\n            [z.w]))"]
+    (is (= old (source/ns-text-adding old '(ns a.b))) "a bare ns switches and adds nothing")
+    (is (= old (source/ns-text-adding old '(ns a.b (:require [x.y :as y])))) "a require it holds adds nothing")
+    (let [t (source/ns-text-adding old '(ns a.b (:require [q.r :as r])))]
+      (is (= #{'x.y 'z.w 'q.r} (seon.program/ns-requires (read-string t))) t)
+      (is (clojure.string/includes? t ";; why") "a comment stays")
+      (is (clojure.string/includes? t "(:refer-clojure :exclude [defn])")))
+    (is (= "New." (nth (read-string (source/ns-text-adding old '(ns a.b "New."))) 2)) "a docstring it states")
+    (is (= #{'q.r} (seon.program/ns-requires (read-string (source/ns-text-adding "(ns a.b)" '(ns a.b (:require q.r)))))) "a form with no :require takes one")
+    (is (some #(= '(:import [java.io File]) %) (read-string (source/ns-text-adding old '(ns a.b (:import [java.io File]))))) "another clause is added whole")))
+
+(deftest an-alias-only-the-process-holds-is-refused
+  ;; docs/source.md#main-s-program-follows-the-tree: real run 10: a file whose ns form had lost its requires passed analysis in a process that still held them, and merged.
+  ;; What a file's forms name must be what its own ns form declares, in any process
+  (binding [*ns* *ns*]
+    (eval '(ns app.held-alias (:require [clojure.string :as held]))))
+  (let [said (try (source/accounts 'app.held-alias "(ns app.held-alias)\n\n(defn f [] (held/join []))\n") nil
+                  (catch Exception e (ex-message e)))]
+    (is (some-> said (clojure.string/includes? "held")) (str "refused, naming the alias: " (pr-str said))))
+  (is (map? (source/accounts 'app.held-alias "(ns app.held-alias (:require [clojure.string :as held]))\n\n(defn f [] (held/join []))\n")) "declared: read")
+  (is (map? (source/accounts 'app.held-alias "(ns app.held-alias)\n\n(defn g [] (clojure.string/join []) (Math/abs 1) '(held/x))\n")) "a full name, a class's static and quoted data are not aliases"))
+
 (deftest a-var-the-import-makes-public-may-be-named-by-a-later-file
   ;; the standing root's main held test-runner/tree-branch private (defn-) while the tree made it
   ;; public and seon.proofs-test named it: every import of main failed "is not public" and root's

@@ -920,7 +920,10 @@
   that names no exception says so. See docs/merging.md#a-merge-runs-what-the-change-reaches."
   {:malli/schema [:=> [:cat :string [:maybe :map]] :string]}
   [out files]
-  (if-let [[_ ex msg path line] (re-find #"Unhandled exception \(([^)]*)\): (.*)\n\s*at \./([^:\n]+):(\d+)" out)]
+  (if-let [[_ ex msg path line] (or (re-find #"Unhandled exception \(([^)]*)\): (.*)\n\s*at \./([^:\n]+):(\d+)" out)
+                                    ;; Jolt's analyzer names a place by its absolute path in the gate's own worktree
+                                    (when-let [[m k msg abs line] (re-find #"error\[([^\]]+)\]: (.*)\n\s*--> ([^:\n]+):(\d+)" out)]
+                                      [m k msg (or (some #(when (str/ends-with? abs (str "/" %)) %) (keys files)) abs) line]))]
     (let [text (get files path)
           form (when text (->> (str/split-lines text) (drop (dec (parse-long line))) (take-while (complement str/blank?)) (str/join "\n")))]
       (str "the gate's build failed: " ex ": " msg ", at " path ":" line

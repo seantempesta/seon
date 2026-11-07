@@ -99,6 +99,19 @@
           (alter-meta! v assoc :private private?))))
     {:units [(program/unit-account (analyze nsym form))] :ns-form? ns-form?}))
 
+(defn- alias-held-not-declared
+  "An alias form names that namespace nsx holds and its file's ns form, ns-form, doesn't declare, or nil: what only this process would resolve. A full name, a class's static and quoted data are no alias. See docs/source.md#main-s-program-follows-the-tree."
+  {:malli/schema [:=> [:cat :any :any :any] [:maybe :symbol]]}
+  [nsx ns-form form]
+  (let [declared (into #{} (for [c (filter seq? ns-form) :when (= :require (first c)) spec (rest c) :when (vector? spec)
+                                 :let [as (:as (apply hash-map (rest spec)))] :when as] as))
+        held (set (keys (ns-aliases nsx)))
+        walk (fn walk [x]
+               (cond (and (seq? x) (= 'quote (first x))) nil
+                     (symbol? x) (when-let [n (namespace x)] (let [a (symbol n)] (when (and (held a) (not (declared a))) a)))
+                     (coll? x) (some walk x)))]
+    (walk form)))
+
 (defn accounts
   "The program accounts of text's forms in namespace nsym, in file order: each form's
   account with its exact text, lead and order (its index), and a form that is none of the
@@ -106,9 +119,14 @@
   Answers {:accounts [...] :tail}."
   {:malli/schema [:=> [:cat :symbol :string] [:map [:accounts [:vector :map]] [:tail :string]]]}
   [nsym text]
-  (let [{:keys [forms tail]} (read-forms nsym text
+  (let [ns-form (volatile! nil)
+        {:keys [forms tail]} (read-forms nsym text
                                          (fn [{:keys [form ns] :as f}]
-                                           (merge f (analyze-form (if (and (seq? form) (= 'ns (first form))) nsym ns) form))))
+                                           (let [n (if (and (seq? form) (= 'ns (first form))) nsym ns)]
+                                             (when (and (seq? form) (= 'ns (first form))) (vreset! ns-form form))
+                                             (when-let [a (and @ns-form (find-ns n) (alias-held-not-declared (find-ns n) @ns-form form))]
+                                               (throw (ex-info (str "the form names alias " a " and this file's ns form doesn't require it: it resolves only in a process that already holds it") {:ns n :alias a})))
+                                             (merge f (analyze-form n form)))))
         seen (volatile! {})]
     {:tail tail
      :accounts (vec (map-indexed
@@ -192,6 +210,28 @@
       ;; a file's tail is kept even when empty: no newline at its end is part of the file
       (or file (seq tail)) (conj (cond-> {:db/id (str "ns " nsym) :ns/name nsym :ns/tail tail}
                                    file (assoc :ns/file file))))))
+
+(defn ns-text-adding
+  "The recorded text old of a namespace's ns form, as new, an ns form evaluated at a REPL, leaves that namespace: Clojure's ns adds, so old with the libraries new requires that it doesn't, new's other clauses it lacks, and new's docstring, every other byte kept. old itself when new adds nothing. See docs/agent.md#the-repl."
+  {:malli/schema [:=> [:cat :string :any] :string]}
+  [old new]
+  (let [o (read-string old)
+        have (program/ns-requires o)
+        clauses (filter seq? new)
+        reqs (for [c clauses :when (= :require (first c)) spec (rest c)
+                   :let [lib (if (sequential? spec) (first spec) spec)] :when (not (have lib))] spec)
+        others (remove #(or (= :require (first %)) (some #{%} o)) clauses)
+        doc (let [x (nth new 2 nil)] (when (and (string? x) (not= x (nth o 2 nil))) x))
+        with-doc (fn [f] (if-not doc f
+                           (let [nm (-> f z/down z/right) nx (z/right nm)]
+                             (z/up (if (and nx (string? (z/sexpr nx))) (z/replace nx doc) (z/insert-right nm doc))))))
+        with-reqs (fn [f] (if-not (seq reqs) f
+                            (if-let [r (z/find (z/down f) z/right #(and (z/list? %) (= :require (z/sexpr (z/down %)))))]
+                              (z/up (reduce z/append-child r reqs))
+                              (z/append-child f (list* :require reqs)))))]
+    (if (and (empty? reqs) (empty? others) (not doc))
+      old
+      (z/root-string (reduce z/append-child (-> (z/of-string old) with-doc with-reqs) others)))))
 
 (defn- ns-form
   "A file's first form when it is an ns form naming its namespace, read once (not run), or nil."
