@@ -593,7 +593,7 @@
       (is (str/includes? (:html (second (in root "#p-tiles"))) "problems"))
       (is (= :seon.render/root-input (:schema (input root)))))
     (testing "an agent's focus: its REPL and messages at the top, live while root's view holds it in this boot"
-      (is (= [:seon.render/agent-input {:id :a3 :live? true :held nil :focus? true :busy? true :capped? false}] [(:schema (input agent)) (:input (input agent))]))
+      (is (= [:seon.render/agent-input {:id :a3 :live? true :held nil :focus? true :busy? true :capped? false :talks? true}] [(:schema (input agent)) (:input (input agent))]))
       (let [ctx-page (#'p/page-value st :a3)]
         (is (false? (:focus? (:input (input ctx-page)))) "@ctx's input takes no focus: a focused field at the page's end scrolls the page to its bottom")))
     (testing "a location naming no entity is that error, never an empty page; a branch that could not be read is shown as its error"
