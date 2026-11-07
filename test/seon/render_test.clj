@@ -1235,7 +1235,7 @@
   (let [html (h/html (ui/root {}
                              {:seon.root/id :root :seon.root/boot "b1" :seon.root/generation {:commit "abc" :ms 1}
                               :seon.root/quiescent {:t 9 :root-causes [{:task "demo/f" :cause "red proof" :blocks ["demo/g"]}]}}))]
-    (is (str/includes? html "1 root causes when it went quiet at t 9"))
+    (is (str/includes? html "1 root cause when it went quiet"))
     (is (str/includes? html "demo/f: red proof · blocks 1") "each cause one line")
     (is (not (str/includes? html "#:seon")) "nothing printed raw")))
 

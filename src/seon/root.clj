@@ -452,7 +452,7 @@
                               (assoc-in st [::backing id] {:p p :branch (:branch pt)}))))))
       ;; a sentence typed on root's page: the request it says, released (my.root/request!'s default, seon.template/request)
       :ask (let [db @(:conn st)
-                 words (take 6 (re-seq #"[a-z0-9]+" (str/lower-case (:text m))))
+                 words (re-seq #"[a-z0-9]+" (str/lower-case (:text m)))
                  said (str/join "-" (or (seq words) ["work"]))
                  ;; its words are its name and title; the same words asked again take the one number that tells them apart
                  nm (if (pdb/eid db :seon.task/id (task/task-id 'request said)) (str said "-" (:max-tx db)) said)
