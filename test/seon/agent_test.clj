@@ -352,32 +352,42 @@
   (let [dir (str (seon.config/checkout) "/target/runs/proofs-ended-" (random-uuid))
         fifo-a (str dir ".a.fifo")
         fifo-b (str dir ".b.fifo")
+        ;; who did what, in order, for a red's message: each child's stages and the reader's, its pid and time (task seon.agent/a-proof-child-that-died-says-why)
+        stages (str dir ".stages")
+        mark (fn [who] (str "(fn [s] (spit " (pr-str stages) " (str " (pr-str who) " \" \" s \" \" (seon.lib/c-getpid) \" \" (System/nanoTime) \"\\n\") :append true))"))
+        note! (fn [s] (spit stages (str "reader " s " " (System/nanoTime) "\n") :append true))
         _ (doseq [f [fifo-a fifo-b]] (sh/sh "mkfifo" f))
-        {:keys [pid began ended killed answered]}
+        {:keys [pid began ended killed answered] seen :stages}
         (with-agent tuned
           (fn [{:keys [names eval-root]}]
             (let [a (:agent names) ev (comp root-value eval-root)
                   src-a (str "(ns parked0-proof (:require [clojure.test :refer [deftest is]]))"
-                             " (deftest p (let [w (java.io.FileOutputStream. " (pr-str fifo-a) ")] (.write w 49) (.flush w) (Thread/sleep 60000) (.write w 50) (.flush w)) (is true))")
+                             " (deftest p (let [mk " (mark "a") " _ (mk \"start\") w (java.io.FileOutputStream. " (pr-str fifo-a) ")] (mk \"opened\") (.write w 49) (.flush w) (mk \"flushed\") (Thread/sleep 60000) (.write w 50) (.flush w)) (is true))")
                   src-b (str "(ns parked1-proof (:require [clojure.test :refer [deftest is]]))"
-                             " (deftest p (let [w (java.io.FileOutputStream. " (pr-str fifo-b) ")] (.write w 49) (.flush w) (clojure.core.async/<!! (clojure.core.async/chan))) (is true))")
+                             " (deftest p (let [mk " (mark "b") " _ (mk \"start\") w (java.io.FileOutputStream. " (pr-str fifo-b) ")] (mk \"opened\") (.write w 49) (.flush w) (mk \"flushed\") (clojure.core.async/<!! (clojure.core.async/chan))) (is true))")
                   form (str "(do " src-a " " src-b " (seon.agent/run-tests-forked 1000000000 '#{parked0-proof/p parked1-proof/p} :turn))")
                   _ (ev (began-code a form))
                   pid (ev (str "(get-in (c/state sys) [:agents :" a " :pid])"))
                   in-a (java.io.FileInputStream. ^String fifo-a)
+                  _ (note! "opened-a")
                   in-b (java.io.FileInputStream. ^String fifo-b)
-                  began [(.read in-a) (.read in-b)]
+                  _ (note! "opened-b")
+                  read-a (.read in-a)
+                  _ (note! (str "read-a " read-a))
+                  read-b (.read in-b)
+                  _ (note! (str "read-b " read-b))
+                  began [read-a read-b]
                   ;; a child that never reached its write has ended, so the run ends when A wakes: what it answered says why, which killing the agent would lose
                   answered (when (not= [49 49] began) (ev "(pr-str @blocked)"))
                   killed (sh/sh "kill" "-9" (str pid))
                   ended (.read in-a)]
               (.close in-a) (.close in-b)
               (ev (gone-code a))
-              {:pid pid :began began :ended ended :killed killed :answered answered})))]
-    (sh/sh "rm" "-f" fifo-a fifo-b)
+              {:pid pid :began began :ended ended :killed killed :answered answered :stages (when (not= [49 49] began) (slurp stages))})))]
+    (sh/sh "rm" "-f" fifo-a fifo-b stages)
     (is (pos-int? pid) (str "the agent's pid: " (pr-str pid)))
-    (is (= [49 49] began) (str "both children were in their tests; the run answered: " answered))
-    (is (= -1 ended) (str "child A outlived its agent (byte " ended " after its sleep); agent " (pr-str pid) " kill " (pr-str killed)))))
+    (is (= [49 49] began) (str "both children were in their tests; in order:\n" seen "\nthe run answered: " answered))
+    (when (= [49 49] began) (is (= -1 ended) (str "child A outlived its agent (byte " ended " after its sleep); agent " (pr-str pid) " kill " (pr-str killed))))))
 
 (deftest a-handful-of-tests-runs-in-one-child
   ;; task seon.agent/a-test-run-streams-its-reports: a run forks no more children than its work needs
