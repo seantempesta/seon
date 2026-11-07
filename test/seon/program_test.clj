@@ -1395,3 +1395,10 @@
     (is (not= (key-at in) (key-at (assoc in :code "c2"))) "a move of the code does")
     (is (not= (key-at in) (key-at (assoc in :env "e2"))) "and so does the rest of what the binary is built from")))
 
+;; docs/merging.md#verdicts-are-a-cache: on one tree, 46 of 1,452 of an agent's digests matched a checkout's and no process test's, as nearly every test
+;; reaches a key its root's profile sets. A verdict reused across agents and checkouts takes no key that says who is running it
+(deftest the-profile-a-root-runs-under-moves-no-digest
+  (let [in (fn [m] (fx/config-input (merge {:seon.config.proofs/jobs 4} m) "/x"))]
+    (is (= (in {}) (in {:seon.config.ai/provider :openai-compat :seon.config.ai/script 'a/b :seon.config.root/profile :deepseek :seon.config.store/sole-writer? true})))
+    (is (not= (in {}) (in {:seon.config.proofs/jobs 5})) "a key that is no one's place still does")))
+

@@ -823,7 +823,10 @@
         removed-process (program/process-tests (select-keys (:index b) (keys removed)))]
     ;; the verdicts cached at the digests (every run's, whoever ran it: seon.fx/stored-results); a
     ;; cache that could not be read is the plan's :unread, which a run answers (never zero greens)
-    (let [found (fx/stored-results cd) unread (when (contract/error? found) found)]
+    (let [stored (fx/stored-results cd) unread (when (contract/error? stored) stored)
+          ;; a green is anyone's. A red is this agent's own, so its judge need not run what its turn just recorded, never another's: a digest does not
+          ;; see the machine, so another's red, under load, would be told to this agent as its work
+          found (when-not unread (into {} (remove (fn [[_ r]] (and (proofs/red? r) (not (:flaky r)) (not= (:key @state) (get-in r [:writer :key]))))) stored))]
       (cond-> (-> (proofs/plan (some-> b :index (update-vals :digest)) cd (if unread {} found) proofs)
                   (update :selected into (keys removed))
                   (update :run into (keys removed))
@@ -1262,7 +1265,7 @@
       (-> res
         (as-> r (let [{:keys [ran failures]} (proofs/answer-ran (assoc r :digests digests))
                       ran (into {} (for [[t x] ran] [t (merge x (get-in r [:measured t]))]))
-                      w (fx/write-verdicts! {:id (str (name (:id @state)) " " (random-uuid)) :branch (:branch @state) :agent (:id @state)} ran failures)]
+                      w (fx/write-verdicts! {:id (str (name (:id @state)) " " (random-uuid)) :branch (:branch @state) :agent (:id @state) :key (:key @state)} ran failures)]
                   ;; beside the cache, the same run's results as facts on this branch (the record shows them)
                   ;; not main's run: it judges main's tree (no :base), whose facts are main's prove's to write
                   (let [rec (when-not (= :main mode) (record-results! ran failures (select-keys reused selected) digests (set deferred)

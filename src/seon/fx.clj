@@ -296,7 +296,7 @@
   --config layers its command line names, the #env values, the profile), as {key text}: each
   value with the checkout's own path written as <checkout>, and the keys that say where a
   process runs left out (their schemas' :seon.config/place: its ports, main, store, runs,
-  source tree and results directory: each checkout's and each root's own by design, while
+  source tree and results directory, and the profile it runs under and what that picks, its provider, script and whether it is its store's sole writer: each checkout's and each root's own by design, as a test reads nothing of its runner, while
   :tree covers the source's content). What a result depends on that git does not see: a
   test's digest takes the keys its reach reads (seon.program/config-reads), so an agent's
   root and a checkout on one tree key their results alike, and a key no test reads moves
@@ -657,7 +657,7 @@
               (cond (contract/error? r) (reduced r)
                     :else (if-let [v (proofs/verdict dg (when g {:digest dg :pass 1 :fail 0 :error 0})
                                                      (when r (cond-> {:digest dg :pass 0 :fail (if (= :fail (:status r)) 1 0) :error (if (= :error (:status r)) 1 0)
-                                                                      :failures (vec (:failures r))}
+                                                                      :failures (vec (:failures r)) :writer (:writer r)}
                                                                (:cost r) (assoc :cost (:cost r)))))]
                             (assoc acc dg v)
                             acc))))
@@ -769,7 +769,7 @@
   ([run ran failures] (write-verdicts! (cfg/value :seon.config.proofs/results-dir) run ran failures))
   ([dir run ran failures] (write-verdicts! dir run ran failures (cfg/value :seon.config.proofs/results-max-bytes)))
   ([dir run ran failures max-bytes]
-  (let [writer (select-keys run [:id :tree :branch :t :agent])
+  (let [writer (select-keys run [:id :tree :branch :t :agent :key])
         done (reduce (fn [acc [k r]]
               (let [st (proofs/status-of r)
                     v (cond-> {:key k :digest (:digest r) :status st :writer writer}
