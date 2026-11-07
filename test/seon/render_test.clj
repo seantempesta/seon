@@ -593,7 +593,7 @@
       (is (str/includes? (:html (second (in root "#p-tiles"))) "problems"))
       (is (= :seon.render/root-input (:schema (input root)))))
     (testing "an agent's focus: its REPL and messages at the top, live while root's view holds it in this boot"
-      (is (= [:seon.render/agent-input {:id :a3 :live? true :held nil :focus? true :busy? true :capped? false}] [(:schema (input agent)) (:input (input agent))]))
+      (is (= [:seon.render/agent-input {:id :a3 :live? true :held nil :focus? true :busy? true :capped? false :talks? true}] [(:schema (input agent)) (:input (input agent))]))
       (let [ctx-page (#'p/page-value st :a3)]
         (is (false? (:focus? (:input (input ctx-page)))) "@ctx's input takes no focus: a focused field at the page's end scrolls the page to its bottom")))
     (testing "a location naming no entity is that error, never an empty page; a branch that could not be read is shown as its error"
@@ -2291,8 +2291,9 @@
   (let [html (fn [m] (h/html (ui/agent-input {:unit "p-input"} (merge {:id :a3 :live? true :held nil} m))))]
     (is (str/includes? (html {:busy? true}) "interrupt"))
     (is (not (str/includes? (html {:busy? false}) "interrupt")) "no form running: nothing to interrupt")
-    (is (str/includes? (html {}) "a message, read at its next turn") "a live agent takes a message")
-    (is (not (str/includes? (html {:capped? true}) "a message, read at its next turn")) "a capped task's agent does not")
+    (is (str/includes? (html {:talks? true}) "Say something") "an agent on a task takes a message")
+    (is (not (str/includes? (html {:talks? true :capped? true}) "Say something")) "a capped task's agent does not")
+    (is (not (str/includes? (html {}) "Say something")) "nor one with no task: its input is its REPL")
     (is (str/includes? (html {:capped? true}) "It used all its turns") "and the page says why")
     (is (str/includes? (html {:capped? true}) "<textarea") "it still answers a form")
     (is (not-any? #(str/includes? (html {:live? false :busy? true :capped? true}) %) ["<textarea" "interrupt"]) "no process: neither")))
@@ -2956,6 +2957,44 @@
     (let [v {:n 1 :seon.render/html 'agent.nobody/chart}]
       (is (nil? (r/render-of v nil)))
       (is (str/includes? (pr-str (r/html {} v)) ":n")))))
+
+(deftest an-agents-own-draw-replaces-roots-at-the-same-revision
+  ;; docs/render.md#a-value-draws-itself: root draws a live agent's page first, from its branch, and root holds no render the agent defined; the agent's answer must reach the page though each process counts revisions of its own
+  (let [page (fn [u] (filter #(= "x" (:id %)) (:seon.render/units (ui/page-chrome {:units [u] :view "a1" :tab :chat} :a1))))
+        roots (first (page {:id "x" :container "#c-rows" :rev 1 :html "<p>data</p>"}))
+        agents (first (page {:id "x" :container "#c-rows" :rev 1 :html "<svg></svg>" :own? true}))]
+    (is (some? roots))
+    (is (not= (:input roots) (:input agents)) "the page's diff sees a new unit")))
+
+(deftest words-to-a-task-agent-are-a-message-and-a-paren-is-code
+  ;; docs/render.md#the-page: the chat's input
+  (let [ops (fn [forms a] (mapv (comp :op first) (seon.web/requests {:var 'seon.root/submit! :agent :a1 :forms forms} {:a1 a})))
+        on-task {:status :idle :task "x/y"}]
+    (is (= [:message] (ops "hello there" on-task)) "words")
+    (is (= [:eval] (ops "(+ 1 2)" on-task)) "code")
+    (is (= [:eval] (ops "  (+ 1 2)" on-task)) "code, with room before it")
+    (is (= [:eval] (ops "(+ 1 2)" {:status :idle})) "and an agent with no task has only its REPL")
+    (is (= [:eval] (ops "hello" {:status :idle})))
+    (is (= [] (ops "  " on-task)))))
+
+(deftest a-quote-in-a-message-reads-as-a-quote
+  ;; docs/render.md#prose-and-the-one-string-cutter: what a person reads has its marks drawn; what the model reads stays as written
+  (let [text "Here:\n\n> **Blue** is `rare`.\n  > and lazy\nstill\n\nDone."
+        page (h/html (seon.render.ui/markdown text {:inline? true}))
+        model (h/html (seon.render.ui/markdown text))]
+    (is (str/includes? page "<blockquote"))
+    (is (str/includes? page "<strong>Blue</strong>") "emphasis drawn")
+    (is (str/includes? page "<code>rare</code>"))
+    (is (not (str/includes? page "&gt;")) "no mark left")
+    (is (str/includes? page "still"))
+    (is (str/includes? model "&gt; **Blue**") "as written for the model")))
+
+(deftest a-persons-agent-stays-open-and-is-asked-for-no-proof
+  ;; docs/agent.md#working-for-a-person: no rule finishes a conversation, and being told to name a proof made an agent invent code to answer a question
+  (let [base {:proofs #{} :results {} :main-green #{} :allowed-red #{} :uncontracted #{} :unmerged [] :caused #{} :plan "p" :plan-before "p" :deferred #{}}
+        reasons #(set (map :reason (seon.reconcile/done-explain (assoc base :kind %))))]
+    (is (= #{:open} (reasons :user)) "not done, and nothing asked of it")
+    (is (contains? (reasons :whole) :no-proofs) "work that merges still is")))
 
 (deftest a-steps-buttons-call-roots-table
   ;; docs/turn.md#an-eval-can-be-run-again: each button is a call of root's one table, and a request the button makes is no record of the conversation

@@ -1243,7 +1243,9 @@
   ([db ops] (load-changes! db ops {}))
   ([db ops {:keys [tests?] :or {tests? true}}]
   (let [ptr (set (vals pointer))
-        added (set (for [[op e a] ops :when (and (= op :db/add) (ptr a))] e))]
+        added (set (for [[op e a] ops :when (and (= op :db/add) (ptr a))] e))
+        ;; a definition these ops moved to another form: what this process bound is the old form, so being bound says nothing (held?)
+        replaced (set (for [[op e a] ops :when (and (= op :db/retract) (ptr a) (added e))] e))]
     (doseq [[op e a] ops
             :when (and (= op :db/retract) (ptr a) (not (added e)))
             :let [x (d/entity db e)]]
@@ -1251,7 +1253,8 @@
             (:method/key x) (remove-definition! (into [:method] (sedn/decode (:method/key x))))))
     (load! db (vec (for [[op e a] ops
                          :when (and (= op :db/add) (= a :form/src) (live? db e))
-                         :let [f (form-row db e)] :when (not (held? db f))]
+                         :let [f (form-row db e)]
+                         :when (or (not (held? db f)) (some #(replaced (:v %)) (d/datoms db :eavt e :form/defines)))]
                      f))
            (set (for [[op e a] ops :when (and (= op :db/add) (= a :schema/form))
                       :let [x (d/entity db e)] :when (not (:schema/source x))]
@@ -1299,6 +1302,13 @@
     ;; src changes its answer, though no test names it (batch 18's scan-code went uncontracted with
     ;; the contracts step green at its digest, 2026-10-30)
     seon.contract/uncontracted :seon.env/src})
+
+(def registry-walkers
+  "The vars that hold every schema entry: a form of a test's namespace naming one reads every entry, a
+  key's unit or description included, which no digest holds for it (less-config-fields; a key's entry moves only
+  the tests naming the key), so it takes :seon.env/schemas. A form of src naming one does not: 1,426 of
+  1,469 tests reach them through the contracts and the renders. See docs/source.md#tests-run-by-reach."
+  '#{seon.config/keys-declared seon.config/schema-forms seon.contract/forms})
 
 (def env-readers
   "The platform vars whose file reads are of a class of inputs a digest holds apart from the
@@ -1545,6 +1555,7 @@
         pvars (cfg/value :seon.config.source/process-vars)
         bvars (cfg/value :seon.config.source/binary-vars)
         reads (flag :reads tree-reading?) proc (flag :proc #(uses? pvars %)) bin (flag :bin #(uses? bvars %))
+        walks (flag :walks #(and (test-nss (:ns %)) (some registry-walkers (:refs %))))
         ;; a form that starts a process (a process var, the binary) reaches what that process runs
         ;; for it, over a socket and as a quoted form it is sent, edges no reference shows: the
         ;; entry vars' forms (the agent's turn) and, of an entry multimethod (the server's
@@ -1618,7 +1629,9 @@
                                        (assoc! fl n {:reads (any :reads reads) :scans (any :scans scans) :proc (any :proc proc) :bin (any :bin bin)
                                                     ;; the config keys it and what it reaches read, its largest
                                                     ;; kid's set grown by the rest
-                                                    :config (let [own (map #(let [cf (:config (rows %))] (if (computed %) (into (or cf #{}) (:schema-config g)) cf)) c)
+                                                    :config (let [own (map #(let [cf (cond-> (:config (rows %)) (walks %) (-> (or #{}) (conj :seon.env/schemas)))]
+                                                                         (if (computed %) (into (or cf #{}) (:schema-config g)) cf))
+                                                                     c)
                                                                   ks (keep #(get-in fl [% :config]) kids)]
                                                               (let [[k & more] (sort-by (comp - count) ks)]
                                                                 (-> (or k #{}) (into cat own) (into cat more))))})
@@ -1629,7 +1642,7 @@
                                    (:next g)]
                                   (components (vec affected) (fn [id] (filter affected (adj id)))))]
     (cond-> (assoc g :rows rows :defs defs :methods methods :impls impls :contract contract :tests tests :test-nss test-nss :refd refd :adj adj :rev rev
-           :reads reads :scans scans :proc proc :bin bin :plain plain :own own :computed computed
+           :reads reads :scans scans :proc proc :bin bin :walks walks :plain plain :own own :computed computed
            :comp-of (persistent! comp-of) :cd (persistent! cd) :flags (persistent! fl) :next n :affected (count affected))
       held (assoc :tests-by-ns tests-by-ns
                   :index (update held :answers #(apply dissoc % (concat stale dead)))
@@ -1666,7 +1679,7 @@
         live (live-ids db)
         {config :keys listed :listed} (config-facts schemas)]
     (reach-step {:rows {} :defs {} :methods {} :impls {} :contract {} :tests #{} :refd {} :adj {} :rev {}
-                 :reads #{} :scans #{} :proc #{} :bin #{} :plain {} :own {} :comp-of {} :cd {} :flags {} :next 0 :computed #{}
+                 :reads #{} :scans #{} :proc #{} :bin #{} :walks #{} :plain {} :own {} :comp-of {} :cd {} :flags {} :next 0 :computed #{}
                  :data-refs data-refs :schemas schemas :schema-config config :listed listed :live live}
                 db []
                 (into (reach-rows db (set (vals live)) true) (for [[k text] schemas] (schema-row k text (contains? listed k))))

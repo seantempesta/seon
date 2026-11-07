@@ -133,6 +133,17 @@
     (is (string? (:description props)) (str k " has no :description"))
     (is (string? (:seon.config/unit props)) (str k " has no :seon.config/unit"))))
 
+;; docs/merging.md#a-result-is-a-function-of-its-digest: 231 of 1,469 digests differed between a root and a
+;; checkout on one tree, all by :seon.config.vector/texts, 64 in a root and 0 under bin/test
+(deftest what-bin-test-sets-for-itself-moves-no-digest
+  (let [checkout (config/checkout)
+        set-by-test (set (map second (re-seq #"(?m)^export (SEON_\w+)=\$\{\1:-" (slurp (str checkout "/bin/test")))))
+        read-by (into {} (for [[_ k v] (re-seq #"(?m)^ *:(seon\.config[\w./-]+) [^\n]*#env (SEON_\w+)" (slurp (config/path checkout)))] [v (keyword k)]))
+        keys-set (keep read-by set-by-test)]
+    (is (= #{:seon.config.web/port :seon.config.root/wiki-baseline :seon.config.vector/texts} (set keys-set)))
+    (doseq [k keys-set]
+      (is (get-in config/schema-forms [k 1 :seon.config/place]) (str k " is set by bin/test, so a root and a test run differ in it: it must be :seon.config/place")))))
+
 (deftest machine-dependent-values-are-derived-at-load
   (let [c (shipped :scripted)]
     (is (= (str (config/checkout) "/resources/seon/tasks") (:seon.config.root/tasks-dir c)))

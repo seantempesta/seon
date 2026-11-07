@@ -45,7 +45,7 @@
 
 (defn done-explain
   "Why the facts measured at a task's end do not make it done; empty means done. Refused:
-  no proofs (never proven); a proof not passing (red), or with no result (unknown: it
+  no proofs (never proven); open (an agent working for a person, whom no rule finishes: it parks between their messages, docs/agent.md#working-for-a-person); a proof not passing (red), or with no result (unknown: it
   never ran); a regression (a test green on main, the
   proofs of merged tasks, red here); a stray red (a red test that is no task's open
   proof);
@@ -67,7 +67,7 @@
            ;; judged before it has merged main: its proofs ran on a program main has moved from, so the
            ;; reasons below may be only that (a proof unknown, a regression); the fix comes first
            (when (some-> behind pos?) [{:reason :behind :behind behind}])
-           (when (empty? proofs) [{:reason :no-proofs}])
+           (if (= :user kind) [{:reason :open}] (when (empty? proofs) [{:reason :no-proofs}]))
            (when (and design? (or (nil? plan-before) (= plan plan-before))) [{:reason :no-design}])
            ;; a proof with no result never ran: unknown, not red (v1's reading); a design
            ;; leaves its proofs red, never unknown (the implement step needs them written)
@@ -511,9 +511,11 @@
                                        (recur more n m taken acc)))
                        :else (recur more (inc n) m taken (conj acc id))))
         spawns (for [id starts :let [t (get-in idx [:tasks id]) p (idle idx id) prior (task-agent idx id)
-                                     ;; work a root restart lost was ended by nobody: an outside agent stays outside
+                                     ;; work a root restart lost was ended by nobody: a model's goes on
                                      lost? (= :lost (:seon.task/outcome t))
-                                     env (desired-env t (when lost? (:seon.agent/env prior)))]]
+                                     env (desired-env t (when lost? (:seon.agent/env prior)))]
+                     ;; nothing drives an outside agent until someone attaches, and that attach starts it (seon.server's attach!): a process here would only race it
+                     :when (not (and lost? (outside? env)))]
                  ;; its process is idle (parked in this boot, on its branch): its next work is a wake on it, no fork
                  (if (and p (not (get-in idx [:kill id])))
                    {:op :wake :task id :env env :agent (:seon.agent/id p)}

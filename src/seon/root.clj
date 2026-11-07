@@ -450,17 +450,22 @@
                           (reply! st o p pt)
                           (do (step/out! o :to-writer {:op :clone-branch :from (:commit pt) :branch (:branch pt) :dest {:back id}})
                               (assoc-in st [::backing id] {:p p :branch (:branch pt)}))))))
-      ;; a sentence typed on root's page: the request it says, released (my.root/request!'s default, seon.template/request)
+      ;; what a sentence says, or an agent's launch: a task from a template, released, answered with its id (:dest's :asked)
       :ask (let [db @(:conn st)
-                 words (re-seq #"[a-z0-9]+" (str/lower-case (:text m)))
+                 words (re-seq #"[a-z0-9]+" (str/lower-case (re-find #"[^.!?\n]*" (str/triml (:text m)))))
                  said (str/join "-" (or (seq words) ["work"]))
-                 ;; its words are its name and title; the same words asked again take the one number that tells them apart
+                 ;; its first sentence's words are its name and title; the same words asked again take the one number that tells them apart
                  nm (if (pdb/eid db :seon.task/id (task/task-id 'request said)) (str said "-" (:max-tx db)) said)
-                 ds (tpl/request {:seon.task/ns 'request :seon.task/name nm :seon.task/plan (:text m)})
-                 tx (tpl/request-tx db ds)]
-             (if (contract/error? tx)
-               (reply! st o p tx)
-               (ext-op st o {:op :write :p p :req {:op :tx :branch :db :tx-data tx}})))
+                 template (get tpl/templates (:template m :user))]
+             (if-not template
+               (reply! st o p (refused 'seon.root/ask! (str "no template " (:template m)) {:templates (vec (sort (keys tpl/templates)))}))
+               (let [ds (template {:seon.task/ns 'request :seon.task/name nm :seon.task/plan (:text m)})
+                     tx (tpl/request-tx db ds)]
+                 (if (contract/error? tx)
+                   (reply! st o p tx)
+                   (let [[st rid] (pend st p :tx nil)]
+                     (step/out! o :to-writer {:op :tx :branch :db :tx-data tx :dest {:asked (task/task-id 'request nm) :rid rid}})
+                     (update st :writes (fnil conj #{}) rid))))))
       :clone (let [parent (:parent m)]
                (cond
                  (nil? (get-in st [:agents parent])) (reply! st o p (absent (get-in st [:view :agents parent]) parent))
@@ -598,6 +603,7 @@
                              :else (do (step/out! o [:fx/tests :in] {:req {:repo (:repo dest) :branch (:branch (:source st)) :files (:text r) :tests (:tests dest)}
                                                                      :prio (:prio dest 0) :dest {:rid rid}})
                                        st)))
+        (:asked dest) (deliver-rid st o (:rid dest) (if (contract/error? r) r {:task (:asked dest)}))
         ;; the recorded errors' write was answered: the next window may write
         (:errors-flushed dest) (dissoc st ::errors-flight)
         ;; a stall's evidence was captured (stall-task): its files on the stall task's cause, on main
@@ -1312,7 +1318,7 @@
                                         (:code args) (list 'seon.repl/again (:eval args) (:code args))
                                         :else (list 'seon.repl/again (:eval args))))}
       back! {:op :back :id id :eval (:eval args)}
-      ask! (if (str/blank? (:task args)) (refused 'seon.root/ask! "say what you would like done" {}) {:op :ask :text (str/trim (:task args))})
+      ask! (if (str/blank? (:task args)) (refused 'seon.root/ask! "say what you would like done" {}) (cond-> {:op :ask :text (str/trim (:task args))} (:template args) (assoc :template (:template args))))
       ;; the agent proves its branch through the test service as root's judge does (seon.agent/prove!
       ;; :judge, which keys the run by its head's digest): recorded on main, one run with any other asker's
       run-tests! {:op :judge :id id}
@@ -1551,8 +1557,8 @@
   nil)
 
 (defn ask!
-  "Ask for what a sentence says (args {:task text}): one released task on its own branch, as my.root/request! writes it, which the reconciler gives an agent. A promise of the writer's answer. See docs/tasks.md."
-  {:malli/schema [:=> [:cat :seon.root/sys [:map [:task :string]]] :seon.host/promise]}
+  "Ask for what a sentence says (args {:task text :template name}): one released task on its own branch from that template (seon.template/templates, by default the one that works for a person), which the reconciler gives an agent. A promise of {:task id}, or the refusal. See docs/tasks.md."
+  {:malli/schema [:=> [:cat :seon.root/sys [:map [:task :string] [:template {:optional true} :keyword]]] :seon.host/promise]}
   [sys args] (request! sys 'ask! nil args))
 
 (defn back!

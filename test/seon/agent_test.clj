@@ -1900,16 +1900,31 @@
                                        "      m (clojure.core/deref (:conn sys))"
                                        "      ids (datahike.api/q '[:find [?i ...] :where [?e :seon.task/plan \"Make the Dashboard greet people!\"] [?e :seon.task/id ?i]] m)"
                                        "      t (datahike.api/entity m [:seon.task/id (first ids)])]"
-                                       "  {:blank (:seon.error/message blank) :ok (:ok a) :ids (vec ids) :kind (:seon.task/kind t) :execution (:seon.task/execution t) :branch (:seon.task/branch t)})")}]))
+                                       "  {:blank (:seon.error/message blank) :ok (some? (:task a)) :answered (:task a) :ids (vec ids) :kind (:seon.task/kind t) :execution (:seon.task/execution t) :branch (:seon.task/branch t)})")}]))
         v (:value r)]
     (is (map? v) (pr-str r))
     (is (re-find #"say what" (str (:blank v))) "an empty box asks nothing")
     (is (:ok v))
     (is (= 1 (count (:ids v))) "one task")
     (is (re-matches #"request/make-the-dashboard-greet-people(-\d+)?" (first (:ids v))) "named by its words")
-    (is (= :whole (:kind v)) "one agent designs, builds and merges it")
+    (is (= :user (:kind v)) "an agent that works for the person, not a build")
     (is (= :running (:execution v)) "released, so the reconciler gives it an agent")
     (is (some? (:branch v)))))
+
+(deftest an-agent-launches-an-agent-on-a-task-of-its-own
+  ;; docs/agent.md#working-for-a-person: root makes the task and answers its id; it reaches its parent by a message
+  (let [[a b] (in-agent ["(my.task/launch! \"Build the thing that greets people.\")"
+                         "(my.task/launch! \"No such template.\" :nope)"])
+        id (:task (:value a))
+        probe (peek (in-agent [{:op :eval :agent "root"
+                                :code (str "(let [t (datahike.api/entity (clojure.core/deref (:conn sys)) [:seon.task/id " (pr-str id) "])] [(:seon.task/kind t) (:seon.task/execution t) (:seon.task/plan t)])")}]))
+        [kind execution plan] (:value probe)]
+    (is (string? id) (pr-str a))
+    (is (= :whole kind) "by default the template that builds, proves and merges")
+    (is (= :running execution) "released: the reconciler gives it an agent")
+    (is (str/includes? plan "Build the thing") "its plan what was asked")
+    (is (str/includes? plan "send-message") "and how to report back")
+    (is (re-find #"no template" (str (:seon.error/message (:value b)))) "a template that isn't one says so")))
 
 (def ^:private not-running
   "Root-REPL code: a function true of the outcomes a task's work stands at once its agent's end is judged and it waits on nothing of
@@ -2018,6 +2033,28 @@
     (is (= [] (:value green-reasons)))
     (is (= {t :pass} (:proofs (:value again))))
     (is (= 2 (:value asks)) "one ask for each change: at the same digest its verdict stands, and no gate is asked")))
+
+;; "if another agent has already run the same exact test we remove those" (owner, 2026-11-07)
+(deftest a-process-test-green-at-its-digest-asks-no-gate
+  ;; docs/merging.md#verdicts-are-a-cache. Another's green at this digest answers; another's red does not, and a schema the branch registers moves the
+  ;; digest, since a process test takes the schema class and an agent's inputs are its root's boot's (seon.agent/test-plan)
+  (let [t 'seon.repl-test/a-process-proof-already-green
+        ;; an edge each (seon.program/reach-step): what this judges runs across prove!'s message, which no reference shows, so a fix to it moved no digest here
+        _ '[seon.agent/run-selection seon.agent/test-plan seon.agent/run-tests-forked]
+        digest (str "(get (:digests (seon.agent/test-plan (seon.agent/db) (:base @seon.agent/state) #{'" t "})) '" t ")")
+        hold (fn [verdict] (str "(seon.fx/write-verdicts! {:id \"another\" :key \"another\"} {'" t " (assoc " (pr-str verdict) " :digest " digest ")} {})"))
+        prove "(let [r (my.agent/prove)] {:proofs (:proofs r) :deferred (:deferred r)})"
+        [_ _ _ red asked-on-red _ _ green asks before _ after]
+        (in-agent (fn [_] [(answers-gate t) (process-proof "a-process-proof-already-green" 2)
+                           (hold {:pass 0 :fail 1 :error 0}) prove "(let [n @user/gate-asks] (reset! user/gate-asks 0) n)"
+                           (process-proof "a-process-proof-already-green" 3) (hold {:pass 1 :fail 0 :error 0}) prove "@user/gate-asks"
+                           digest "(my.schema/register! :seon.gate-test/k :string)" digest])
+                  {:proofs #{t}})]
+    (is (= 1 (:value asked-on-red)) (str "another's red is not this agent's verdict: the gate is asked. " (pr-str red)))
+    (is (= {t :pass} (:proofs (:value green))) (pr-str green))
+    (is (= [] (:deferred (:value green))) "nothing left unjudged")
+    (is (= 0 (:value asks)) "a green at its digest asks no gate")
+    (is (not= (:value before) (:value after)) "a schema the branch registers moves a process test's digest")))
 
 (deftest a-real-gate-judges-a-candidate-once
   ;; the one real gate: a process test run on a checkout of the candidate, its verdict reaching the branch, and the judge's gate of the same

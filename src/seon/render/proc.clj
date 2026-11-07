@@ -417,8 +417,9 @@
                            [part-unit
                             {:id "d-ctx" :container "#c-rows" :rev (:t t)
                              :html (h/html [:li {:id "d-ctx"} (quiet #(render/html {:db bdb} (with-meta t {:seon.render/schema :seon.ctx/ctx})))])}]))
+        ;; its process's draw and root's each count revisions of their own: a unit says whose it is, so its process's answer replaces root's first draw at the same number
         units (if own?
-                (:units held)
+                (mapv #(assoc % :own? true) (:units held))
                 (cond (and bdb (not chat?)) (ctx-units)
                       bdb (branch-units)
                       ;; a branch that could not be read: its error, by the error's render
@@ -438,7 +439,7 @@
                       :input {:schema :seon.render/agent-input
                               :value {:id (:seon.agent/id e) :live? (live? st id) :focus? chat?
                               ;; what its process can answer: a form running is interrupted (busy); a capped task's agent takes no message (docs/turn.md#the-cap)
-                              :busy? (= :busy (:seon.agent/status e)) :capped? (= :cap (:seon.task/outcome (:seon.agent/task e)))
+                              :busy? (= :busy (:seon.agent/status e)) :capped? (= :cap (:seon.task/outcome (:seon.agent/task e))) :talks? (some? (:seon.agent/task e))
                                       :held (d/q '[:find ?id . :in $ ?a :where [?a :seon.agent/task ?t] [?t :seon.task/execution :held] [?t :seon.task/id ?id]] db eid)}}}
                      ;; its tabs name it by its id in this boot, else by its branch (an earlier boot's agent)
                      (focus db view))))
