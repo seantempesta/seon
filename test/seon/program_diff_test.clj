@@ -43,7 +43,7 @@
         (is (= (whole-plan to db) (program/diff-plan to db)) "and back")))
     (let [db1 (d/db-with db [{:schema/key :app.pc/s :schema/form ":int"}])]
       (doseq [[what to] {"a schema entry changed in place" (d/db-with db1 [{:schema/key :app.pc/s :schema/form ":string"}])
-                         "a schema entry made the binary's" (d/db-with db1 [{:schema/key :app.pc/s :schema/source true}])}]
+                         "a schema entry removed" (d/db-with db1 [[:db/retractEntity (:db/id (d/entity db1 [:schema/key :app.pc/s]))]])}]
         (testing what
           (is (= (whole-plan db1 to) (program/diff-plan db1 to)) "from the entry to this")
           (is (= (whole-plan to db1) (program/diff-plan to db1)) "and back")))

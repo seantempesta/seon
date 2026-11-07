@@ -1030,14 +1030,26 @@
 ;; ---- schema entries: the program's schemas (seon.source imports them, my.schema/register!
 ;; changes them, seon.merge carries them per key) ----------------------------------------
 
+(def ^:private baked-text
+  "Each of the binary's schema forms as an entry's text holds it, so an entry the binary holds costs one string compare and no decode. See docs/source.md#a-program-file."
+  (delay (into {} (for [[k v] contract/forms] [k (binding [*print-namespace-maps* false] (sedn/encode v))]))))
+
+(defn- differing-form
+  "Schema key k's form as text states it when that differs from the binary's, else nil. See docs/source.md#a-program-file."
+  {:malli/schema [:=> [:cat :qualified-keyword :string] :any]}
+  [k text]
+  (when (not= text (get @baked-text k))
+    (let [v (sedn/decode text)] (when (not= v (get contract/forms k)) v))))
+
 (defn schema-changes
-  "{k form} of db's schema entries the binary does not hold (no :schema/source: registered
-  or merged), against seon.contract/forms. Two passes over the entries' datoms."
+  "{k form} of db's schema entries that differ from this binary's forms (seon.contract/forms), by value: registered, merged, or imported from a tree ahead of the binary. Two passes over the entries' datoms. See docs/source.md#a-program-file."
   {:malli/schema [:=> [:cat :seon.host/db] [:map-of :qualified-keyword :any]]}
   [db]
-  (let [src (into #{} (map :e) (d/datoms db :aevt :schema/source))]
-    (into {} (for [dt (d/datoms db :aevt :schema/key) :when (not (src (:e dt)))]
-               [(:v dt) (sedn/decode (:schema/form (d/entity db (:e dt))))]))))
+  (let [text (into {} (map (juxt :e :v)) (d/datoms db :aevt :schema/form))]
+    (into {} (for [dt (d/datoms db :aevt :schema/key)
+                   :let [v (some->> (text (:e dt)) (differing-form (:v dt)))]
+                   :when (some? v)]
+               [(:v dt) v]))))
 
 (defn schema-registry
   "The registry an evaluation on db binds as malli.registry/*registry*: the binary's forms
@@ -1199,12 +1211,12 @@
                   (or (empty? ds) (some (fn [x] (some #(seq (d/datoms db :eavt x % e)) (vals pointer))) ds))))))
 
 (defn- schema-value
-  "Schema entry entity e's value as schema-changes reads it on db: its decoded form when the
-  binary does not hold it (no :schema/source), else nil."
+  "Schema entry entity e's value as schema-changes reads it on db: its decoded form when it
+  differs from the binary's, else nil."
   {:malli/schema [:=> [:cat :seon.host/db :int] :any]}
   [db e]
-  (when (and (seq (d/datoms db :eavt e :schema/key)) (empty? (d/datoms db :eavt e :schema/source)))
-    (some-> (first (d/datoms db :eavt e :schema/form)) :v sedn/decode)))
+  (when-let [k (:v (first (d/datoms db :eavt e :schema/key)))]
+    (some->> (first (d/datoms db :eavt e :schema/form)) :v (differing-form k))))
 
 (defn diff-plan
   "What making a process run db-to's program where it holds db-from's takes: {:remove the
@@ -1222,26 +1234,17 @@
                                          (definition-key db-from x))))
         forms (into (sorted-set) cat [(mapcat (fn [[p q]] (map :e (concat p q))) [(diff :form/id) (diff :form/defines)])
                                       (map :v ptr-from) (map :v ptr-to)])
-        schema-es (into #{} (mapcat (fn [a] (let [[p q] (diff a)] (map :e (concat p q))))) [:schema/key :schema/form :schema/source])
+        schema-es (into #{} (mapcat (fn [a] (let [[p q] (diff a)] (map :e (concat p q))))) [:schema/key :schema/form])
         key-of (fn [e] (some #(some-> (first (d/datoms % :eavt e :schema/key)) :v) [db-to db-from]))]
     {:remove (vec removed)
      :load (vec (for [e forms :when (and (live-in? db-to e) (not (live-in? db-from e)))] (form-row db-to e)))
      :schemas (into #{} (for [e schema-es :let [v (schema-value db-to e)] :when (and (some? v) (not= v (schema-value db-from e)))] (key-of e)))}))
 
-(defn- schema-differing
-  "{k form} of db's schema entries that differ from what this binary was built with, whatever says who holds them: a tree can move ahead of the binary, so the config its import states is read against the schema it states. Reads every entry, and runs only when a config entry moved. See docs/config.md#a-process-holds-its-branchs-config."
-  {:malli/schema [:=> [:cat :seon.host/db] [:map-of :qualified-keyword :any]]}
-  [db]
-  (into {} (for [dt (d/datoms db :aevt :schema/form)
-                 :let [v (sedn/decode (:v dt)) k (:schema/key (d/entity db (:e dt)))]
-                 :when (not= v (get cfg/schema-forms k))]
-             [k v])))
-
 (defn hold-config!
   "Make this process hold the config db states (seon.config/hold!: db is its own branch, what it stands on), against db's schema entries beyond the binary's. Answers the refusal, as a load error's list (empty when held), so a config that doesn't hold says so where a form that doesn't load does, and the process goes on with what it held. See docs/config.md#a-process-holds-its-branchs-config."
   {:malli/schema [:=> [:cat :seon.host/db] [:vector :seon.program/error]]}
   [db]
-  (if-let [e (cfg/hold! (cfg/entries db) (schema-differing db))]
+  (if-let [e (cfg/hold! (cfg/entries db) (schema-changes db))]
     [{:ns 'seon.config :form cfg/shipped-file :message (:seon.error/message e)}]
     []))
 
@@ -1257,7 +1260,7 @@
     ;; no entries left is nothing stated, as a tree with no config file states nothing (hold!)
     (let [after (d/db-with db tx-data)]
       (when-let [es (cfg/entries after)]
-        (let [r (cfg/of-entries es (schema-differing after))]
+        (let [r (cfg/of-entries es (schema-changes after))]
           (when (:seon.error/type r) r))))))
 
 (defn load-diff!
@@ -1297,8 +1300,8 @@
                                     :when (or (not (held? db f)) (some #(replaced (:v %)) (d/datoms db :eavt e :form/defines)))]
                                 f))
                       (set (for [[op e a] ops :when (and (= op :db/add) (= a :schema/form))
-                                 :let [x (d/entity db e)] :when (not (:schema/source x))]
-                             (:schema/key x)))
+                                 :when (schema-value db e)]
+                             (:schema/key (d/entity db e))))
                       tests?))
           (when (some (fn [[_ _ a]] (= a :config/form)) ops) (hold-config! db))))))
 
