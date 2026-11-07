@@ -535,7 +535,9 @@
           (swap! state #(-> % (assoc :db @conn :base main) (schema-moved attrs)))
           ;; the same on the branch's fact, or the status, which reads the fact, takes what main changed for this branch's work until a next turn writes it
           (let [merged-t (:max-tx @conn)]
-            (d/transact conn [{:seon.agent/key (:key @state) :seon.agent/base-commit (d/commit-id (:base @state))}])
+            ;; carried like any write: skipped, the next search rebuilt the index after every merge
+            (let [r (d/transact conn [{:seon.agent/key (:key @state) :seon.agent/base-commit (d/commit-id (:base @state))}])]
+              (doc/carry-index! (:db-before r) (:db-after r) (map (juxt :e :a) (:tx-data r))))
             (swap! state assoc :db @conn :merged-t merged-t)))
         (send! {:op :committed :t (:max-tx @conn) :txs 1})
         (cond-> {:ok true :applied (:apply r) :conflicts (:conflicts r) :t (:merged-t @state) :datoms (count ops)}

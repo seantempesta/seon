@@ -1043,6 +1043,19 @@
     (is (< (- first-search second-search) (quot build 2))
         (str "an agent's first grep allocated " first-search " bytes, a second " second-search "; building the index " build))))
 
+(deftest a-merge-of-main-keeps-the-search-index-current
+  ;; docs/vector.md#search: an agent's writes carry the text index (seon.doc/carry-index!), so a search after one rebuilds nothing; the merge's own record of its base was a write that skipped it, so the next search after any merge rebuilt the index, about 20 MB, seen as a flake
+  (let [current "(let [d (:db @seon.agent/state) [was _] @@#'seon.doc/indexes] (= was [(:hash d) (:max-tx d)]))"
+        [_ before _ merged after] (in-agent [(str "(do (my.agent/grep \"accumulated\") nil)")
+                                             current
+                                             {:op :eval :agent "root" :code "@(seon.root/transact-main! sys (vec ((my.test/code 'app.idx \"(ns app.idx (:refer-clojure :exclude [defn defn-]) (:require [seon.contract :refer [defn defn-]]))\\n(defn f \\\"A var.\\\" {:malli/schema [:=> [:cat] :int]} [] 1)\\n\") @(:conn sys))))"}
+                                             "(seon.agent/merge-main! #{})"
+                                             current]
+                                            {:group :pristine})]
+    (is (true? (:value before)) (pr-str before))
+    (is (seq (:applied (:value merged))) (str "the merge brought something: " (pr-str merged)))
+    (is (true? (:value after)) "the index is at the db the merge left")))
+
 (deftest an-agent-with-no-task-resumes-a-kept-branch
   ;; found by session global-ids, 2026-10-23: an agent spawned with no task onto a branch the
   ;; store already holds (a kept branch; e2e's fresh agent on a store an earlier run left)
