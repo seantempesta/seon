@@ -99,6 +99,19 @@
           (alter-meta! v assoc :private private?))))
     {:units [(program/unit-account (analyze nsym form))] :ns-form? ns-form?}))
 
+(defn- alias-held-not-declared
+  "An alias form names that namespace nsx holds and its file's ns form, ns-form, doesn't declare, or nil: what only this process would resolve. A full name, a class's static and quoted data are no alias. See docs/source.md#main-s-program-follows-the-tree."
+  {:malli/schema [:=> [:cat :any :any :any] [:maybe :symbol]]}
+  [nsx ns-form form]
+  (let [declared (into #{} (for [c (filter seq? ns-form) :when (= :require (first c)) spec (rest c) :when (vector? spec)
+                                 :let [as (:as (apply hash-map (rest spec)))] :when as] as))
+        held (set (keys (ns-aliases nsx)))
+        walk (fn walk [x]
+               (cond (and (seq? x) (= 'quote (first x))) nil
+                     (symbol? x) (when-let [n (namespace x)] (let [a (symbol n)] (when (and (held a) (not (declared a))) a)))
+                     (coll? x) (some walk x)))]
+    (walk form)))
+
 (defn accounts
   "The program accounts of text's forms in namespace nsym, in file order: each form's
   account with its exact text, lead and order (its index), and a form that is none of the
@@ -106,9 +119,14 @@
   Answers {:accounts [...] :tail}."
   {:malli/schema [:=> [:cat :symbol :string] [:map [:accounts [:vector :map]] [:tail :string]]]}
   [nsym text]
-  (let [{:keys [forms tail]} (read-forms nsym text
+  (let [ns-form (volatile! nil)
+        {:keys [forms tail]} (read-forms nsym text
                                          (fn [{:keys [form ns] :as f}]
-                                           (merge f (analyze-form (if (and (seq? form) (= 'ns (first form))) nsym ns) form))))
+                                           (let [n (if (and (seq? form) (= 'ns (first form))) nsym ns)]
+                                             (when (and (seq? form) (= 'ns (first form))) (vreset! ns-form form))
+                                             (when-let [a (and @ns-form (find-ns n) (alias-held-not-declared (find-ns n) @ns-form form))]
+                                               (throw (ex-info (str "the form names alias " a " and this file's ns form doesn't require it: it resolves only in a process that already holds it") {:ns n :alias a})))
+                                             (merge f (analyze-form n form)))))
         seen (volatile! {})]
     {:tail tail
      :accounts (vec (map-indexed

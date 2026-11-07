@@ -801,7 +801,8 @@
                   (d/db-with db (#'r/gated (st-of db) "demo/a-merge" rs unread err))))
         octopus [{:op :octopus-merge :task "demo/a-merge" :members [{:task "demo/a-merge"}]}]]
     (is (= {:outcome :gate :reasons [] :deferred [boots]} (judged gate [boots])) "unrun: gated first")
-    (is (= {:outcome :ready :reasons []} (judged gate [])) "none deferred: ready")
+    (is (= {:outcome :gate :reasons [] :deferred []} (judged gate [])) "none deferred: its tree is still analyzed, with no checkout (docs/merging.md#a-merge-analyzes-its-tree)")
+    (is (= :ready (:outcome (judged nil []))) "a root with no source has no candidate to analyze")
     (testing "all passing, it is ready and merges"
       (let [db (gated gate {boots :pass} [] nil)]
         (is (= :ready (:seon.task/outcome (task/task db "demo/a-merge"))))
