@@ -88,18 +88,18 @@ A commit is one transaction, so a branch is never half-merged, and one behind ma
 
 ## The steps
 
-The steps below merge one at a time, each usable alone, with today's agents unchanged by proof; tasks are written once the data model has been tried at the REPL.
+The steps below merge one at a time, each usable alone, with today's agents unchanged by proof; each has its task entry, or gets one once its shape has been tried at the REPL.
 
 1. Done: the write check holds a value to its branch's schema, and a merged schema entry brings its attribute's declaration.
-2. Evals with their eid, and shared results: tasks ``seon.repl/an-evals-result-is-its-own-entity`` and ``seon.repl/an-evals-id-is-its-eid``. ``:seon.eval/response`` was read at 27 places in src; each now reads it through ``seon.db/response-of``, and about 115 test fixtures still write a whole response, which it reads as it is.
-3. Merge bases as two facts, and merge options.
-4. An agent's first act is to merge; an agent with untaken messages wants a process.
+2. Done: an eval's result is its own entity, by content id; old evals read as they are (``seon.db/response-of``). Next: ``seon.repl/an-evals-id-is-its-eid``.
+3. Merge bases as two facts, and merge options: ``seon.merge/a-branch-holds-its-merge-bases-as-facts``, ``seon.merge/a-merge-takes-options``. Tell Optimization before changing ``merge-main!``.
+4. A durable mailbox: a message is a fact on main, a channel only wakes, an agent's first act is to merge, and an agent with untaken messages wants a process. ``seon.agent/a-message-is-a-durable-mailbox-and-a-channel-only-wakes``, owned by Web, reviewed by Optimization; ``seon.reconcile/an-agent-with-untaken-messages-wants-a-process`` folds into it.
 5. Users, and input through ``forgive``.
 6. Sessions and merging them.
-7. Rebase or the tree merge, whichever Optimization's comparison picks.
+7. Sharing: Optimization's tree merge or rebase, its decision, on ``seon.db/a-branch-is-main-plus-its-own-changes``; hold nothing on rebase. So far the tree merge shares about as well, costs far less at a large delta, and rewrites no history (Optimization, prototype).
 8. The home page from the user's ``@ctx``, with layouts as data.
 
-Out for now: one user's renders drawing another's agents, login, teams. Depends on Context's ``seon.source/seon-files-move-by-branch``, since branches don't isolate behaviour until a running process reads its config from the db, and on Optimization's digest work for what's reused across branches.
+Out for now: one user's renders drawing another's agents, login, teams. Depends on Context's ``seon.source/seon-files-move-by-branch`` (scripts landed, config not yet), and on Optimization's digest work for what's reused across branches. There's no hard boundary between data and forms: one db, one tree; what changes on its own schedule is its own entity, by ref (owner, 2026-11-07).
 
 ## Tasks and proofs
 
