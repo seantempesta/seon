@@ -657,7 +657,7 @@
             f)))
 
 (defn filing-tx
-  "Each namespace a merge's changes add forms to that has no file yet, given its by name (`namespace-path`), for the merge's own transaction: a namespace made at a REPL reaches disk as any other."
+  "Each namespace a merge's changes add forms to that has no file yet, given its by name (`namespace-path`), for the merge's own transaction: a namespace made at a REPL reaches disk as any other. See docs/source.md#commit-the-merges-branch."
   {:malli/schema [:=> [:cat :seon.host/db :seon.merge/changes] [:vector :map]]}
   [db changes]
   (vec (for [n (keys (unfiled-forms db changes))] {:ns/name n :ns/file (namespace-path n)})))

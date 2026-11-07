@@ -7,7 +7,7 @@
 
 (defn merged-summary
   "A merge of main as its eval answers it (seon.render/model, the schema :seon.branch/merged): how many keys it applied, and all the rest as it is, since a
-  main far ahead applies hundreds and the agent asks for them when it wants them: `(:applied result/...)` reads them under the eval's handle."
+  main far ahead applies hundreds and the agent asks for them when it wants them: `(:applied result/...)` reads them under the eval's handle. See docs/merging.md#main-moved-is-said-at-every-eval."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :map]}
   [_ r]
   (-> (with-meta r nil) (assoc :applied (count (:applied r)))))
