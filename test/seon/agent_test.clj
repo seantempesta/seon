@@ -844,6 +844,20 @@
       (is (nil? (:seon.test/failures branch)) "no failures while green"))
     (is (true? (:value again)) "a run that changes nothing writes no datoms")))
 
+(deftest a-green-that-is-no-proof-writes-no-fact
+  ;; docs/sharing.md#what-a-real-branch-spends-its-nodes-on: a green that is no proof of the task is read by nothing
+  ;; on this branch (seon.reconcile/done-explain reads proofs and reds), and its facts on its var rewrite a leaf
+  ;; among the program's. A red is held, and stays held when it goes green, so it never reads as still red
+  (let [facts "(into {} (for [t '[green-test/proof green-test/other green-test/turned]] [t (:seon.test/status (datahike.api/pull (seon.agent/db) [:seon.test/status] [:var/name t]))]))"
+        [_ _ first-facts _ _ second-facts]
+        (in-agent ["(ns green-test (:require [clojure.test :refer [deftest is]])) (deftest proof (is (= 1 1))) (deftest other (is (= 1 1))) (deftest turned (is (= 1 2)))"
+                   "(select-keys (my.agent/prove) [:results])" facts
+                   "(deftest turned (is (= 1 1)))"
+                   "(select-keys (my.agent/prove) [:results])" facts]
+                  {:proofs #{'green-test/proof}})]
+    (is (= '{green-test/proof :green green-test/other nil green-test/turned :red} (:value first-facts)) (pr-str first-facts))
+    (is (= '{green-test/proof :green green-test/other nil green-test/turned :green} (:value second-facts)) (pr-str second-facts))))
+
 (deftest an-agents-greens-and-a-checkouts-are-one-store
   ;; owner, 2026-10-23: a test that is the same is not run again once green, "especially when
   ;; freshly branched": an agent's greens and a checkout's (bin/test's) are one cache, keyed by
@@ -2077,6 +2091,28 @@
     (is (= 0 (:value asks)) "a green at its digest asks no gate")
     (is (not= (:value before) (:value after)) "a schema the branch registers moves a process test's digest")
     (is (not= (:value after) (:value after-script)) "and so does a script the branch writes")))
+
+;; docs/sharing.md#what-a-real-branch-spends-its-nodes-on: a process test that is no proof keeps its :deferred fact and takes the gate's green over it,
+;; so it never reads as unjudged after it passed and the gate is not asked again; one green in the cache was never deferred, so it needs no fact
+(deftest a-deferred-test-that-is-no-proof-is-judged-once
+  (let [t 'seon.repl-test/a-deferred-non-proof u 'seon.repl-test/a-cached-non-proof p 'seon.repl-test/the-in-process-proof
+        _ '[seon.agent/judge! seon.agent/run-selection seon.proofs/facts-worth-keeping seon.proofs/gate-tx]
+        digest (str "(get (:digests (seon.agent/test-plan (seon.agent/db) (:base @seon.agent/state) #{'" u "})) '" u ")")
+        judge "(let [r (seon.agent/judge! #{} true)] {:deferred (:deferred r) :asks @user/gate-asks})"
+        status (fn [x] (str "(:seon.test/status (datahike.api/pull (seon.agent/db) [:seon.test/status] [:var/name '" x "]))"))
+        [_ _ _ _ _ _ _ first-judge t-status u-status second-judge]
+        (in-agent (fn [_] [(answers-gate t) "(reset! user/gate-answer :pass)"
+                           (process-proof "a-deferred-non-proof" 2) (process-proof "a-cached-non-proof" 2)
+                           "(do (in-ns 'seon.repl-test) (clojure.test/deftest the-in-process-proof (clojure.test/is true)) (in-ns 'user) :ok)"
+                           "(seon.agent/commit!)"
+                           (str "(seon.fx/write-verdicts! {:id \"another\" :key \"another\"} {'" u " {:pass 1 :fail 0 :error 0 :digest " digest "}} {})")
+                           judge (status t) (status u) judge])
+                  {:proofs #{p}})]
+    (is (= [] (:deferred (:value first-judge))) (pr-str first-judge))
+    (is (= 1 (:asks (:value first-judge))) "the gate is asked for what no green holds")
+    (is (= :green (:value t-status)) "the gate's green is held, over its :deferred fact")
+    (is (nil? (:value u-status)) "a green the cache held is no fact")
+    (is (= {:deferred [] :asks 1} (:value second-judge)) "judged again: nothing left unjudged, and no second ask")))
 
 ;; docs/merging.md#verdicts-are-a-cache: the answer keeps a pass only for what its asker reads; a test named was read as no verdict, "not green: 1 of 1"
 (deftest a-passing-test-reads-as-passed
