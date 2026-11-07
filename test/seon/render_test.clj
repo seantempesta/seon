@@ -2091,11 +2091,15 @@
         sean (d/entity db [:seon.user/name "sean"])
         c {:started (into {} (for [e started] [e {:db/id e}]))}
         cards (nth (ui/started-cards {:seon.ctx/ctx c :seon.db/db db}) 2)
-        hrefs (fn [html] (set (map second (re-seq #"href=\"([^\"]+)\"" html))))]
+        hrefs-in-order (fn [html] (map second (re-seq #"href=\"([^\"]+)\"" html)))]
     (is (= (:db/id sean) (#'p/session-of db "sean")) "its name finds it, as an address")
     (is (= [#'ui/session-card] (distinct (map first cards))) "each drawn by the one card's render")
     (is (= ["b2/a1" "b2/a2"] (sort (map last cards))) "a card for each it started, and not another's")
-    (is (= #{"/user/sean"} (hrefs (h/html (ui/users-side {:seon.db/db db})))) "it is listed by its name")
+    (is (= "/user/sean" (first (hrefs-in-order (h/html (ui/users-side {:seon.db/db db}))))) "it is listed by its name")
+    (let [later (d/db-with db [{:seon.root/id :root :seon.root/boot "b3"}])]
+      (is (= ["b2/a1" "b2/a2"] (sort (map #(:seon.agent/key (d/entity later (last %))) (filter #(and (vector? %) (= #'ui/agent-side (first %))) (tree-seq coll? seq (ui/users-side {:seon.db/db later}))))))
+          "its agents of an earlier boot under it, so a restart doesn't hide them")
+      (is (empty? (filter #(and (vector? %) (= #'ui/agent-side (first %))) (tree-seq coll? seq (ui/users-side {:seon.db/db db})))) "this boot's are in the list already"))
     (is (nil? (ui/users-side {:seon.db/db (d/db-with db [[:db/retract (:db/id sean) :seon.user/name "sean"]])})) "no name, no user")))
 
 (deftest a-users-page-moves-with-main
@@ -2164,8 +2168,8 @@
     (testing "waiting for you only where a message would be taken"
       (is (= "waiting for you" (text (st :idle :parked))))
       (is (= "waiting for you" (text (st :idle :told))))
-      (is (not= "waiting for you" (text (st :ended :parked))) "its process is gone: nothing answers")
-      (is (not= "waiting for you" (text (st :dead :parked)))))
+      (is (= "waiting for you" (text (st :ended :parked))) "its process is gone, and a message starts it again")
+      (is (= "waiting for you" (text (st :dead :parked)))))
     (testing "a capped task is stopped, however idle its process looks"
       (is (= "stopped at its cap · 40 turns" (text (st :idle :cap :seon.agent/max-turns 40))))
       (is (= "stopped at its cap · 38 turns" (text (st :idle :cap :seon.agent/max-turns 40 :seon.agent/ended-turn 38))) "the turns it took when it recorded them")
@@ -2175,7 +2179,8 @@
     (testing "a task's end"
       (is (= ["done" "ready to merge" "at the merge gate" "merged" "behind main"]
              (mapv #(text (st :ended %)) [:done :ready :gate :merged :behind])))
-      (is (= ["died" "lost" "killed" "refused" "closed"] (mapv #(text (st :dead %)) [:dead :lost :killed :refused :closed])))
+      (is (= ["died" "stopped by a restart" "killed" "refused" "closed"] (mapv #(text (st :dead %)) [:dead :lost :killed :refused :closed])))
+      (is (= :quiet (:tone (st :dead :lost))) "a restart is no failure of its work")
       (is (= :done (:tone (st :ended :merged))))
       (is (= :failed (:tone (st :dead :dead)))))
     (testing "its reason, the task's else the agent's own"

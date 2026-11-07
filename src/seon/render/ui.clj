@@ -1638,7 +1638,7 @@
   :cap is not: it waits for its agent's turns to be raised and the task released."
   {:running ["working" :live] :parked ["waiting for you" :ask] :told ["waiting for you" :ask] :cap ["stopped at its cap" :stopped]
    :done ["done" :done] :merged ["merged" :done] :ready ["ready to merge" :quiet] :gate ["at the merge gate" :quiet] :behind ["behind main" :stopped]
-   :dead ["died" :failed] :lost ["lost" :failed] :killed ["killed" :failed] :refused ["refused" :failed] :closed ["closed" :quiet]})
+   :dead ["died" :failed] :lost ["stopped by a restart" :quiet] :killed ["killed" :failed] :refused ["refused" :failed] :closed ["closed" :quiet]})
 
 (def ^:private end-stands
   "How the agent's own end (:seon.agent/outcome) reads where its task holds none: [words tone]."
@@ -1659,7 +1659,7 @@
   The task's outcome says it where a judge has written one (a capped task is stopped, a parked one waits for a
   message); else the agent's own end (:seon.agent/outcome, counted while the agent is at the turn it ended on); else its
   process's status (an agent with none of them, a person's like the user, reads nothing: its state is :status/none). A process that is
-  gone is never working or waiting. {:state :text :detail :reason :tone :lit?}: the state (:task/cap, :end/green, :status/idle), the words, the
+  gone is never working, and a message starts one that waits. {:state :text :detail :reason :tone :lit?}: the state (:task/cap, :end/green, :status/idle), the words, the
   turns a cap spent, the reason (the task's, else the agent's end's) and the tone (tone-class); lit while it works. See docs/render.md#a-sessions-address-and-the-agents-list."
   {:malli/schema [:=> [:cat [:maybe :map] [:maybe :map]] [:map [:state :keyword] [:text :string] [:tone :keyword] [:lit? :boolean]
                                                            [:detail {:optional true} :string] [:reason {:optional true} :string]]]}
@@ -1669,7 +1669,7 @@
         turn (:seon.agent/turn a)
         end (when (and (:seon.agent/outcome a) (or (nil? turn) (= turn (:seon.agent/ended-turn a)))) (:seon.agent/outcome a))
         gone? (contains? gone status)
-        [from k] (cond (and gone? (#{:running :parked :told} o)) [status-stands status]
+        [from k] (cond (and gone? (= :running o)) [status-stands status]
                        (and o (not= :running o)) [task-stands o]
                        end [end-stands end]
                        (and (= :running o) (= :spawning status)) [status-stands :spawning]
@@ -1850,8 +1850,8 @@
     [:section
      [:h1 {:class "text-base font-semibold text-text-50"}
       (str/join " " (remove nil? [(if (pos? running) (str running " running.") "Nothing running.")
-                                  (when (pos? held) (str held (if (= 1 held) " task" " tasks") " held."))
                                   (if (pos? needs) (str needs " " (if (= 1 needs) "needs" "need") " you.") "Nothing needs you.")]))]
+     (when (pos? held) [:p {:class "seon-note"} (str held (if (= 1 held) " task" " tasks") " not released yet.")])
      (render/html {:schema :seon.root/root-fact} (relevant :seon.root/root-fact c))]))
 
 (defn problems-tile
@@ -1964,13 +1964,20 @@
   [db c] (sort-by (fn [e] [(- (or (:seon.agent/started-ms (d/entity db e)) 0)) e]) (keys (:started c))))
 
 (defn users-side
-  "The users in the agents list (a component over the db): each a link to its page by its :seon.user/name. See docs/users.md#whats-on-screen."
+  "The users in the agents list (a component over the db): each a link to its page by its :seon.user/name, then its agents of earlier boots, which the list's own boot leaves out, so a restart doesn't hide them. See docs/users.md#whats-on-screen."
   {:seon.render/style ".users-side { display: contents; }" :seon.render/for "page" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]]] :any]}
   [{db :seon.db/db}]
   (when-let [names (seq (map :v (d/datoms db :aevt :seon.user/name)))]
-    [:li {:class "contents"} [:ul {:class "contents"}
-     (for [n names] [:li [:a {:href (str "/user/" n) :class pill-link :title (str "user: " n)}
-                          [:span {:class "flex items-baseline gap-2"} [:span {:class "text-signal"} "◆"] [:span {:class "font-semibold text-text-100"} n]]]])]]))
+    (let [now (str (task/boot-of db) "/")
+          earlier (fn [n] (->> (:seon.agent/agents (d/entity db [:seon.user/name n]))
+                               (remove #(str/starts-with? (str (:seon.agent/key %)) now))
+                               (sort-by (fn [a] (- (or (:seon.agent/started-ms a) 0))))
+                               (map :seon.agent/key)))]
+      [:li {:class "contents"} [:ul {:class "contents"}
+       (for [n names]
+         (list [:li [:a {:href (str "/user/" n) :class pill-link :title (str "user: " n)}
+                     [:span {:class "flex items-baseline gap-2"} [:span {:class "text-signal"} "◆"] [:span {:class "font-semibold text-text-100"} n]]]]
+               (for [k (earlier n)] [#'agent-side {} (:db/id (d/entity db [:seon.agent/key k]))])))]])))
 
 (defn started-side
   "The agents this user started in its agents list (a component over ctx, by the pull's :started join): each `agent-side`. See docs/users.md#whats-on-screen."
