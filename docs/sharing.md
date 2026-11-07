@@ -8,6 +8,8 @@ There is no boundary between program and data (owner, 2026-11-07: "I want everyt
 
 ## The data model
 
+**A later finding changes this proposal: a merge is a link.** Real merges through main to a user's branch to an agent's, 100 merges, one experiment each: with content-hashed nodes 6 to 14 percent of each branch's nodes are private per index and the store grew 36 MB; with random keys 67 to 82 percent and 68 MB. The same datoms make the same nodes, so a merge of what another branch holds writes almost nothing, and a plain `d/pull` reads it. So the question below is open: messages may need no ref across branches and no `:shared` body, only a merge of the ones addressed to an agent. A ref across branches works too (tested: 12 k ticks a ref, though a deleted branch leaves it unreadable), but `d/pull`, `d/entity`, `d/q` and `d/with-reads` all read one db value, so following one touches each.
+
 A proposal for the owner's ruling, built from what the Web and Context sessions need; not built. It takes its shape from git, which already does this: one object store, a branch is a pointer, and a branch sees only what its tree links.
 
 **Entities and refs.** A thing is an entity. Its id is issued once per store, or is a content id, so the same thing has the same id on every branch. A ref is valid on any branch.
