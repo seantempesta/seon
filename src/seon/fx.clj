@@ -290,7 +290,7 @@
            (str/starts-with? p "resources/seon/config/")
            (and (str/ends-with? p ".clj") (or (str/starts-with? p "src/") (str/starts-with? p "test/"))))))
 
-(defn- env-class
+(defn env-class
   "The class of the file at relative path p: :seon.env/system, /web, /deps, /bin, /schemas or /src (the .clj
   files, which env-input? leaves to the program facts: a class only for a reach that reads the program's text), each a part of the checkout one kind of test reads (seon.program/env-class-readers),
   or nil (every test's: native/, the pins, the fixtures, everything else)."
