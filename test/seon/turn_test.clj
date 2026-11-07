@@ -1,6 +1,6 @@
 (ns seon.turn-test
   "seon.turn's pure parts, on the world (docs/testing.md#testing-in-the-world). Run: bin/test seon.turn-test"
-  (:require [clojure.test :refer [deftest is]] [my.test :as t] [seon.turn :as turn] [seon.agent-test :as at]))
+  (:require [clojure.test :refer [deftest is]] [my.test :as t] [seon.turn :as turn] [seon.agent-test :as at] [seon.config :as config] [seon.agent :as agent] [datahike.api :as d]))
 
 (deftest an-agents-tokens-are-its-model-calls-sum
   ;; seon.turn/agent-usage: an agent's model calls and tokens are what its calls recorded, every turn's, a turn that
@@ -17,3 +17,12 @@
         "every call of the agent, the tokens of those that reported, and no other agent's")
     (is (= {:model-calls 1} (turn/agent-usage (t/with (t/world) (call-of "b1/a3" 1 nil)) "b1/a3"))
         "no call reported: its tokens unknown, never 0")))
+
+(clojure.test/deftest
+ an-outside-context-names-only-the-branchs-own-gaps
+ (let [[_ bases max-turns] (at/in-agent (fn [{:keys [agent]}]
+                                          [{:op :context :agent agent}
+                                           "(mapv (fn [m] (:seon.model-call/basis (datahike.api/pull (seon.agent/db) [:seon.model-call/basis] m))) (map first (datahike.api/q '[:find ?m :where [?m :seon.model-call/origin :outside]] (seon.agent/db))))"
+                                           "(seon.config/value :seon.config.agent/max-turns)"]))]
+   (is (= [(:value max-turns)] (mapv :max-turns (:value bases)))
+       (str "the read's basis names the run's max-turns, not 1: " (pr-str (:value bases))))))
