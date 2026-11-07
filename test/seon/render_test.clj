@@ -565,8 +565,8 @@
     ;; which seon.web.html writes as nothing, so the whole layout holds no element or id for it
     (let [w (a3-walk branch)]
       (try (let [root @(:out w)]
-             (is (not (str/includes? (h/html (r/resolved w root true)) "own-problems")) "the page's layout: no element, no id")
-             (is (not (str/includes? (pr-str (r/resolved w root)) "own-problems")) "the model's resolved layout: a bare nil where it stood, no id and no element"))
+             (is (not (str/includes? (h/html (r/resolved w root true)) "id=\"own-problems")) "the page's layout: no element, no id")
+             (is (not (str/includes? (pr-str (r/resolved w root)) "\"own-problems\"")) "the model's resolved layout: a bare nil where it stood, no id and no element"))
            (finally (r/dispose-walk! w))))))
 
 (deftest root-and-an-agent-are-one-chrome
@@ -577,7 +577,7 @@
         in (fn [l c] (filter #(= c (:container %)) (:seon.render/units l)))
         input (fn [l] (first (filter #(= "p-input" (:id %)) (:seon.render/units l))))]
     (testing "root is an agent: its page and an agent's are each its lists in one chrome (seon.render.ui/page-chrome)"
-      (is (= #{nil "#c-side" "#p-head" "#c-rows" "#p-tiles"} (set (map :container (:seon.render/units root)))) "root's lists: its agents' cards")
+      (is (= #{nil "#c-side" "#p-head" "#c-rows" "#p-rules" "#p-tiles"} (set (map :container (:seon.render/units root)))) "root's lists: its agents' cards")
       (is (= #{nil "#c-side" "#p-head" "#p-task" "#c-rows" "#p-rules"} (set (map :container (:seon.render/units agent))))
           "an agent's: its task's list above its conversation; no eval of the fixture has a render of its own, so no tiles")
       (is (= 2 (count (in root "#c-rows"))) "root's list: its work, then its evals, folded")

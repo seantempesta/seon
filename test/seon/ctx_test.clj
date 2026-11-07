@@ -663,7 +663,7 @@
     (is (not (str/includes? (pr-str hiccup) style)) "no part the model reads holds the rules")
     (is (str/includes? (:html (some #(when (= task-id (:id %)) %) units)) "class=\"task\"")
         "a render with CSS rules keeps its name as its one class")
-    (is (some #(and (str/starts-with? (:id %) "page-rules") (str/includes? (:html %) ".task > h2 {")) units)
+    (is (some #(and (str/starts-with? (:id %) "page-rules") (str/includes? (:html %) "> h2 {")) units)
         "the page's rules component draws them, a selector's > as written")))
 
 (deftest a-cited-vars-tests-are-its-pulled-callers
@@ -1287,13 +1287,15 @@
       (enter-agent! {:db db :key k :branch :b})
       (let [all (my.render/render-ctx)
             rules (some (fn [[id f]] (when (= "page-rules" id) f)) (:components all))
-            _ (seon.repl/render-ctx)
+            page (seon.repl/render-ctx)
             after-person (my.render/render-changes)
             _ (alter-meta! v assoc :seon.render/style ".task { color: red; }")
             _ (alter-var-root v (fn [f] (fn [& args] (apply f args))))
             edited (my.render/render-changes)]
         (is (str/includes? (pr-str rules) ".task") "the first page holds the rules")
-        (is (= 'seon.render.ui/task (:key (second (some #(when (and (vector? %) (= :style (first %))) %) rules)))) "one a render, by its name")
+        (is (not (str/includes? (pr-str rules) ".chat-ask")) "the model reads no rule of a render for the page alone")
+        (is (some #(and (str/starts-with? (:id %) "page-rules") (str/includes? (:html %) ".chat-ask")) (:units page)) "the page does")
+        (is (some #(and (vector? %) (= :style (first %)) (= 'seon.render.ui/task (:key (second %)))) rules) "one a render, by its name")
         (is (not-any? #(= "page-rules" (first (first %))) (:edits after-person)) "a person's page moved no rule")
         (is (some #(= "page-rules" (first (first %))) (:edits edited)) "a rule edited did")
         (is (str/includes? (pr-str (:edits edited)) "color: red") "and says the rule"))

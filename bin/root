@@ -59,6 +59,9 @@ read PORT WEB <<< "$("$ROOT/bin/ports")"
 running() { [[ -f $PIDS ]] && read T R < "$PIDS" && kill -0 $R 2>/dev/null }
 # launch CHECKOUT [ARGS]: `run` detached (double fork), until its listening line or its death
 launch() {
+  # a binary older than this tree runs its own code under this tree's program: say so, as nothing else does (bin/check refuses it; a root goes on)
+  local built=$(cat "$ROOT/target/seon.tree" 2>/dev/null) here=$("$ROOT/bin/tree" "$ROOT" 2>/dev/null)
+  [[ -n $built && -n $here && $built != $here ]] && echo "root: target/seon was built from tree $built, this checkout is $here: its agents run that build; bin/build seon first to run this one" >&2
   : > "$LOG"
   rm -f "$PIDS" "$PORTF" "$READY" "$DONE"; mkfifo "$READY" "$DONE"
   # the one holder (bin/held, detached) owns the root's stdin and output and waits on it: it

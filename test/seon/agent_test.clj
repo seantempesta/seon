@@ -766,22 +766,28 @@
     (is (not (.exists (java.io.File. (str "/tmp/seon-agents/tests/" (second (:value run)))))) "and its directory is removed")))
 
 (deftest a-red-at-its-digest-is-reused-with-its-failures
-  ;; task seon.proofs/a-red-at-its-digest-is-reused: a run cached r red at its digest; r is green
+  ;; task seon.proofs/a-red-at-its-digest-is-reused: this agent's run cached r red at its digest; r is green
   ;; if it runs, so a run would say :pass. The judge reuses the red, with the failure its run
-  ;; cached, and forks nothing
-  (let [[_ dg _ judge]
+  ;; cached, and forks nothing. Another's red is not reused: a digest does not see the machine, and it runs
+  (let [[_ dg _ judge _ other]
         (in-agent ["(ns reds-test (:require [clojure.test :refer [deftest is]]))
                    (deftest r (is true))"
                    "(get (:digests (seon.agent/test-plan (seon.agent/db) nil #{'reds-test/r})) 'reds-test/r)"
-                   "(seon.fx/write-verdicts! {:id \"main@1\"}
+                   "(seon.fx/write-verdicts! {:id \"main@1\" :key (:key @seon.agent/state)}
                                              {'reds-test/r {:test 'reds-test/r :digest (get (:digests (seon.agent/test-plan (seon.agent/db) nil #{'reds-test/r})) 'reds-test/r) :pass 0 :fail 1 :error 0}}
                                              {'reds-test/r [{:type :fail :message \"the recorded failure\" :expected \"1\" :actual \"2\"}]})"
                    "(let [r (seon.agent/run-tests-forked 100000000 #{'reds-test/r} :judge)]
-                      [(seon.proofs/results r) (:ran r) (:reused r) (some? (:pid r)) (:fail r) (mapv (juxt :message :reused) (:reports r))])"]
+                      [(seon.proofs/results r) (:ran r) (:reused r) (some? (:pid r)) (:fail r) (mapv (juxt :message :reused) (:reports r))])"
+                   "(do (deftest other-red (is true))
+                        (let [dg (get (:digests (seon.agent/test-plan (seon.agent/db) nil #{'reds-test/other-red})) 'reds-test/other-red)]
+                          (seon.fx/write-verdicts! {:id \"another\" :key \"another/a9\"} {'reds-test/other-red {:test 'reds-test/other-red :digest dg :pass 0 :fail 1 :error 0}}
+                                                   {'reds-test/other-red [{:type :fail :message \"another's failure\" :expected \"1\" :actual \"2\"}]})))"
+                   "(let [r (seon.agent/run-tests-forked 100000000 #{'reds-test/other-red} :judge)] [(get (seon.proofs/results r) 'reds-test/other-red) (:ran r)])"]
                   {:proofs #{}})]
     (is (string? (:value dg)) (pr-str dg))
     (is (= ['{reds-test/r :fail} 0 1 false 1 [["the recorded failure" true]]] (:value judge))
-        (str "red as recorded, with its failure, nothing run and no child forked " (pr-str judge)))))
+        (str "red as recorded, with its failure, nothing run and no child forked " (pr-str judge)))
+    (is (= [:pass 1] (:value other)) (str "another's red runs, and is green: " (pr-str other)))))
 
 (deftest a-test-run-writes-its-results-on-the-branch
   ;; task seon.proofs/test-results-are-a-few-facts (R2a): an agent's run of its proofs records each
