@@ -36,11 +36,22 @@
   carried, so main writing one never puts a branch behind."
   #{:seon.task/plan :seon.task/instructions :seon.task/proofs :seon.task/cause})
 
-(def ^:private section-stated
-  "The attributes a page's text states of a section: its address, heading, own text and parent. The rest of a
-  section (lead, references, names, dead links, what it read) the load derives from these, so a change shows
-  in these four and a merge reads only them (docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program)."
-  #{:seon.doc/address :seon.doc/heading :seon.doc/text :seon.doc/parent})
+(def ^:private stated-keys
+  "The program keys one entity's stated attributes hold, by key kind, as data: :id the identity naming the entity, :stated each attribute its content
+  reads and the content key it takes, :needs a content key without which the entity is no program (a scratch schema entry has no file), :carries the attribute
+  namespace outside the program's that rides with it. A section's stated attributes are what a page's text states; the rest (lead, references, names, dead links,
+  what it read) the load derives from these, so a change shows in these and a merge reads only them (docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program)."
+  {:section {:id :seon.doc/address :carries "seon.doc"
+             :stated {:seon.doc/address :seon.doc/address :seon.doc/heading :seon.doc/heading :seon.doc/text :seon.doc/text :seon.doc/parent :seon.doc/parent}}
+   :schema {:id :schema/key :stated {:schema/form :form :schema/file :file} :needs :file}})
+
+(def ^:private stated-attr?
+  "The attributes stated-keys' contents read (docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program)."
+  (into #{} (mapcat (comp keys :stated)) (vals stated-keys)))
+
+(def ^:private carried-namespace?
+  "The attribute namespaces outside the program's that stated-keys carry (docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program)."
+  (into #{} (keep :carries) (vals stated-keys)))
 
 (defn- platform-record? {:malli/schema [:=> [:cat :keyword] :boolean]} [k]
   (let [n (namespace k)]
@@ -57,7 +68,7 @@
   (if (= :all data-attrs)
     (let [schema (:schema db)]
       (fn [a] (boolean (and (keyword? a) (:db/valueType (get schema a))
-                            (not (or (program/attr-namespaces (namespace a)) (section-stated a))) (not (platform-record? a))))))
+                            (not (or (program/attr-namespaces (namespace a)) (stated-attr? a))) (not (platform-record? a))))))
     data-attrs))
 
 (defn- data-attr-set
@@ -83,17 +94,18 @@
       :ns (cond-> c (:ns/file x) (assoc :file (:ns/file x)) (:ns/doc x) (assoc :doc (:ns/doc x)))
       c)))
 
-(defn- section-content
-  "Section entity e's content on db: what its page states of it (section-stated), refs as entity ids (issued
-  once across the store, so they name the same sections on every branch). See
+(defn- stated-content
+  "Entity e's content on db under row of stated-keys: what its attributes state, refs as entity ids (issued
+  once across the store, so they name the same entities on every branch), or nil when it lacks what the row needs. See
   docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program."
-  {:malli/schema [:=> [:cat :seon.host/db :int] :map]}
-  [db e]
-  (let [many (get-in db [:rschema :db.cardinality/many] #{})]
-    (reduce (fn [m dt] (if (section-stated (:a dt))
-                         (if (many (:a dt)) (update m (:a dt) (fnil conj #{}) (:v dt)) (assoc m (:a dt) (:v dt)))
-                         m))
-            (sorted-map) (d/datoms db :eavt e))))
+  {:malli/schema [:=> [:cat :seon.host/db :map :int] [:maybe :map]]}
+  [db {:keys [stated needs]} e]
+  (let [many (get-in db [:rschema :db.cardinality/many] #{})
+        c (reduce (fn [m dt] (if-let [k (stated (:a dt))]
+                               (if (many (:a dt)) (update m k (fnil conj #{}) (:v dt)) (assoc m k (:v dt)))
+                               m))
+                  {} (d/datoms db :eavt e))]
+    (when (or (nil? needs) (contains? c needs)) c)))
 
 (defn program
   "The program of db as {key content}: its live forms, the definitions pointing to them,
@@ -111,10 +123,8 @@
                (if (= :db.cardinality/many (get-in schema [a :db/cardinality]))
                  [[:datum (:e dt) a (:v dt)] true]
                  [[:datum (:e dt) a] (:v dt)]))
-        schemas (for [dt (d/datoms db :aevt :schema/file) :let [x (d/entity db (:e dt))]]
-                  [[:schema (:schema/key x)] {:form (:schema/form x) :file (:v dt)}])
-        sections (for [dt (d/datoms db :aevt :seon.doc/address)] [[:section (:v dt)] (section-content db (:e dt))])]
-    (into {} (concat (for [f forms] [[:form (:id f)] (dissoc f :e :id)]) defs schemas sections data))))
+        stated (for [[kind row] stated-keys dt (d/datoms db :aevt (:id row)) :let [c (stated-content db row (:e dt))] :when c] [[kind (:v dt)] c])]
+    (into {} (concat (for [f forms] [[:form (:id f)] (dissoc f :e :id)]) defs stated data))))
 
 (defn- same?
   "Is content a the same as b for key k: a form's place does not make it another form."
@@ -186,8 +196,7 @@
     (into #{}
           (concat (when-let [k (form-key x)] (cons k def-key))
                   (when own-def (remove nil? [own-def (pointed (program/pointer (first own-def)))]))
-                  (when-let [k (:schema/key x)] [[:schema k]])
-                  (when-let [a (:seon.doc/address x)] [[:section a]])
+                  (for [[kind {:keys [id]}] stated-keys :let [v (get x id)] :when (some? v)] [kind v])
                   (for [dt (when-not (= #{} data-attrs) ds) :when (data-attrs (:a dt))]
                     (if (many (:a dt))
                       [:datum e (:a dt) (:v dt)]
@@ -199,21 +208,20 @@
   branch and recorded at a REPL on another, the same text)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.merge/program-key ifn?] :any]}
   [db [kind a b c :as k] data-attrs]
-  (case kind
-    :form (when-let [e (pdb/eid db :form/id a)]
-            (when (program/live? db e) (dissoc (program/form-row db e) :e :id :source)))
-    (:var :method :impl :ns)
-    (when-let [e (program/def-eid db k)]
-      (when-let [f (:db/id (get (d/entity db e) (program/pointer kind)))]
-        (let [row (program/form-row db f)]
-          (when (and (program/live? db f) (contains? (:defines row) k)) (def-content db k e row)))))
-    :schema (when-let [e (pdb/eid db :schema/key a)]
-              (let [x (d/entity db e)] (when (:schema/file x) {:form (:schema/form x) :file (:schema/file x)})))
-    :section (some->> (pdb/eid db :seon.doc/address a) (section-content db))
-    :datum (when (data-attrs b)
-             (if (= 4 (count k))
-               (when (seq (d/datoms db :eavt a b c)) true)
-               (:v (first (d/datoms db :eavt a b)))))))
+  (if-let [stated (stated-keys kind)]
+    (some->> (pdb/eid db (:id stated) a) (stated-content db stated))
+    (case kind
+      :form (when-let [e (pdb/eid db :form/id a)]
+              (when (program/live? db e) (dissoc (program/form-row db e) :e :id :source)))
+      (:var :method :impl :ns)
+      (when-let [e (program/def-eid db k)]
+        (when-let [f (:db/id (get (d/entity db e) (program/pointer kind)))]
+          (let [row (program/form-row db f)]
+            (when (and (program/live? db f) (contains? (:defines row) k)) (def-content db k e row)))))
+      :datum (when (data-attrs b)
+               (if (= 4 (count k))
+                 (when (seq (d/datoms db :eavt a b c)) true)
+                 (:v (first (d/datoms db :eavt a b))))))))
 
 (defn program-of
   "The part of db's program at keys ks: `program` restricted to them, read key by key."
@@ -230,7 +238,7 @@
   only embedded) with no contract of its own."
   {:malli/schema [:=> [:cat ifn? ifn?] :seon.host/fn]}
   [das-b das-d]
-  (fn [a] (and (keyword? a) (boolean (or (and (not= :db/txInstant a) (or (program/attr-namespaces (namespace a)) (section-stated a))) (das-b a) (das-d a))))))
+  (fn [a] (and (keyword? a) (boolean (or (and (not= :db/txInstant a) (or (program/attr-namespaces (namespace a)) (stated-attr? a))) (das-b a) (das-d a))))))
 
 (defn touched-by
   "The program keys whose content may differ between base and db, given moved, the datoms that differ
@@ -242,7 +250,7 @@
   [base db data-attrs moved]
   (let [read (fn [db] (let [das (data-attr? db data-attrs)]
                         [db (get-in db [:rschema :db.cardinality/many] #{}) das
-                         (fn [a] (or (program/attr-namespaces (namespace a)) (section-stated a) (das a)))]))
+                         (fn [a] (or (program/attr-namespaces (namespace a)) (stated-attr? a) (das a)))]))
         b (read base) d (read db)
         content-attr? (content-attr (nth b 2) (nth d 2))
         content? (fn [{:keys [a]}] (content-attr? a))]
@@ -352,12 +360,12 @@
   "The entity bearing program key k on db, or nil."
   {:malli/schema [:=> [:cat :seon.host/db :seon.merge/program-key] [:maybe :int]]}
   [db [kind a :as k]]
-  (case kind
-    :form (pdb/eid db :form/id a)
-    (:var :method :impl :ns) (program/def-eid db k)
-    :schema (pdb/eid db :schema/key a)
-    :section (pdb/eid db :seon.doc/address a)
-    :datum a))
+  (if-let [stated (stated-keys kind)]
+    (pdb/eid db (:id stated) a)
+    (case kind
+      :form (pdb/eid db :form/id a)
+      (:var :method :impl :ns) (program/def-eid db k)
+      :datum a)))
 
 (defn carried-tx
   "The datoms src's changes since base carry for program keys ks, as they are (e, a, v and
@@ -375,7 +383,7 @@
         ;; without an (ns) form is no key of its own), or the form reads :ns nil where it lands
         es (into es (for [e es :let [n (:db/id (:form/ns (d/entity src e)))] :when n] n))
         das (data-attr? src data-attrs)
-        carry? (fn [d] (and (es (:e d)) (let [a (:a d)] (or (das a) (program/attr-namespaces (namespace a)) (= "seon.doc" (namespace a))))))
+        carry? (fn [d] (and (es (:e d)) (let [a (:a d)] (or (das a) (program/attr-namespaces (namespace a)) (carried-namespace? (namespace a))))))
         [gone added] (d/datoms-diff base src :eavt [])
         added (filterv carry? added)
         retracted (vec (for [d gone :when (carry? d)

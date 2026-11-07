@@ -294,6 +294,18 @@
   ([k] (value k {}))
   ([k ctx] (:value (resolve k ctx))))
 
+(defn file-kind
+  "The kind :seon.config.source/things gives the file at relative path, or nil: a pattern is a path whose one * stands for any name in that directory. See docs/source.md#a-program-file."
+  {:malli/schema [:=> [:cat :string] [:maybe :keyword]]}
+  [path]
+  (some (fn [[pattern kind]]
+          (let [[before after] (str/split pattern #"\*" 2)]
+            (when (and (str/starts-with? path before) (str/ends-with? path (or after ""))
+                       (<= (+ (count before) (count after)) (count path))
+                       (not (str/includes? (subs path (count before) (- (count path) (count after))) "/")))
+              kind)))
+        (value :seon.config.source/things)))
+
 (defn pin-class
   "The :seon.pin class of submodule path p: its path under reference-code/ with / as .
   (reference-code/datahike is :seon.pin/datahike). seon.fx/inputs digests each one, and a test's reach
