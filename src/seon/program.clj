@@ -25,7 +25,7 @@
     platform's own source has the same facts (seon.source)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.step :as step] [seon.contract :refer [defn defn-] :as contract] [datahike.api :as d] [jolt.ir :as ir] [jolt.analyzer]
-            [seon.schema.datahike :as sd] [seon.edn :as sedn] [malli.registry :as mr] [seon.error :as error] [seon.lib :as lib] [seon.db :as pdb] [seon.config :as cfg] [clojure.string :as str] [hasch.core :as hasch] [seon.reader :as reader]))
+            [seon.schema.datahike :as sd] [seon.edn :as sedn] [malli.registry :as mr] [malli.core :as m] [seon.error :as error] [seon.lib :as lib] [seon.db :as pdb] [seon.config :as cfg] [clojure.string :as str] [hasch.core :as hasch] [seon.reader :as reader]))
 
 (defn scratch-ns?
   "Is namespace nsx scratch (never program): `user`, or declared ^:scratch."
@@ -1054,6 +1054,14 @@
   [db reg]
   (let [have (d/schema db)]
     (filterv (fn [dcl] (not= dcl (select-keys (get have (:db/ident dcl)) (keys dcl)))) (sd/declarations reg))))
+
+(defn own-declaration
+  "The attribute registered key k is, when no entity map lists it and its value is storable (an attribute is a registered key whose schema is its stored value: an agent's own datum, written on its own entity): [its declaration], when db does not hold it so; else []. A registration and a merge of the entry read it here, so the attribute travels with it. See docs/storage.md#the-write-checks-every-datom."
+  {:malli/schema [:=> [:cat :seon.host/db :qualified-keyword :seon.host/registry] [:vector :seon.schema/declaration]]}
+  [db k reg]
+  (let [dcl (sd/declaration reg k)
+        entity? (:seon.db/attributes (m/properties (m/deref (m/schema k {:registry reg}))))]
+    (if (or (contract/error? dcl) entity? (= dcl (select-keys (get (d/schema db) k) (keys dcl)))) [] [dcl])))
 
 (defn- load-forms!
   "Load form rows of db in load order, compiling against db's schemas (malli's dynamic

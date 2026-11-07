@@ -1242,6 +1242,20 @@
    (fn [cfg conn]
      (let [a (pdb/at conn (mt/world) {:t 536870913})]
        (is (= :seon.db/no-history (:seon.error/type a)) (pr-str a))))))
+(deftest a-write-holds-a-value-to-the-schema-its-branch-registered
+  ;; docs/storage.md#the-write-checks-every-datom: the check read the binary's forms alone, so an agent's own attribute and a key its branch
+  ;; changed were not held to the schema the branch states
+  (let [db (ts/test-db)
+        changes {:app.shape/size [:int {:min 100}] :seon.task/execution [:enum :held]}
+        registry (seon.program/schema-registry changes)
+        check #(pdb/invalid-datom db % {:forms changes :registry registry})]
+    (is (= :app.shape/size (:attribute (check [{:app.shape/size 3}]))) "a value the branch's own schema refuses")
+    (is (nil? (check [{:app.shape/size 500}])) "a value it admits")
+    (is (= :seon.task/execution (:attribute (check [{:seon.task/id "t" :seon.task/execution :running}]))) "a shared key is held to the branch's form of it")
+    (is (nil? (check [{:seon.task/id "t" :seon.task/execution :held}])))
+    (is (nil? (check [{:app.other/thing 1}])) "a key no schema names is still the store's to judge")
+    (is (= :seon.task/execution (:attribute (pdb/invalid-datom db [{:seon.task/id "t" :seon.task/execution :no-such}]))) "with no branch's forms, the binary's")))
+
 (deftest a-datom-its-attribute-refuses-is-invalid-and-names-it
   ;; docs/storage.md#the-write-checks-every-datom: the store checks a value's type, and a data attribute's only that it is
   ;; plain, so a declared schema was not enforced; the write holds each value to its attribute's schema
