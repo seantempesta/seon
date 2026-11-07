@@ -862,7 +862,7 @@
   on (docs/agent.md#changing-a-definition). Given a doc's address (docs/x.md#heading) for sym, the same
   edit of the doc's own block (seon.doc/doc-source: its heading line and its text), its page loaded again
   on this branch with the new text in its place (seon.doc/edit-tx), so a doc changes as a definition does;
-  no delimiter is counted in prose. Answers {:edited {:doc address :lines ...}} (docs/agent.md#changing-a-doc)."
+  no delimiter is counted in text. Answers {:edited {:doc address :lines ...}} (docs/agent.md#changing-a-doc)."
   {:malli/schema [:function
                   [:=> [:cat [:or :qualified-symbol :string] :string :string] [:or :seon.repl/edit-refused :my.agent/no-var :seon.repl/answer :seon.repl/doc-edited [:map [:unchanged :any]]]]
                   [:=> [:cat [:or :qualified-symbol :string] [:vector {:min 1} [:tuple :string :string]]] [:or :seon.repl/edit-refused :my.agent/no-var :seon.repl/answer :seon.repl/doc-edited [:map [:unchanged :any]]]]]}

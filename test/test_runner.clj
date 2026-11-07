@@ -501,7 +501,7 @@
 
 (defn- with-wiki
   "Program db db with the tasks and the wiki of the checkout at dir, by root's own loaders
-  (seon.task/load-tx, then seon.doc/load-dir-tx: a prose word is a citation when it names a task
+  (seon.task/load-tx, then seon.doc/load-dir-tx: a text word is a citation when it names a task
   too). A task file that does not read throws its error: no tasks is no answer."
   [db dir]
   ;; the program store is keyed by the program's attributes alone (seon.test-store/program-schema-digest),

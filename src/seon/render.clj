@@ -675,7 +675,7 @@
 
 (defn printable
   "Form x ready to print: an element [:pre [:code s]] its source in a fence (the code marker, verbatim, later lines at
-  column 0), a string with a line break or a quote the prose marker (verbatim, not escaped), the rest as it is."
+  column 0), a string with a line break or a quote the text marker (verbatim, not escaped), the rest as it is."
   {:malli/schema [:=> [:cat :any] :any]}
   [x]
   (cond
@@ -683,7 +683,7 @@
     [:pre {:seon.print/code (fence (last (second x)))}]
     ;; a vector's children without the nils a (when ..) leaves and with the lists a (for ..) makes spliced in, as the page's writer reads them
     (vector? x) (with-meta (into [] (comp (mapcat (fn [c] (if (seq? c) c [c]))) (remove nil?) (map printable)) x) (meta x))
-    (and (string? x) (or (str/includes? x "\n") (str/includes? x "\""))) {:seon.print/prose x}
+    (and (string? x) (or (str/includes? x "\n") (str/includes? x "\""))) {:seon.print/plain x}
     (map? x) (if (:seon.print/code x) x (into (empty x) (map (fn [[k v]] [k (printable v)])) x))
     :else x))
 
@@ -713,7 +713,7 @@
   (vec (for [[_ k] (placed w sels) :let [c (get @(:cache w) k)] :when (not= "page" (:wire/for (:opts c)))] [(:id c) k])))
 
 (defn keyed
-  "Hiccup form x as a diff reads it: an element's children in their order, each under a name and read the same way, and under :own the element without them; an element holding text directly is prose, one value, and so is an element holding a single child with no name of its own, and anything else. A child's name is what identifies it: its :key (Reagent's), else its id (a component's name-based id), else, among those with neither, its tag when no sibling shares it and its first words when one does. Names that are not distinct stay in :own. The form it read is its metadata, ::form. Local fns: no contracted call a node. See docs/render.md#a-change-is-edits-by-name."
+  "Hiccup form x as a diff reads it: an element's children in their order, each under a name and read the same way, and under :own the element without them; an element holding text directly is text, one value, and so is an element holding a single child with no name of its own, and anything else. A child's name is what identifies it: its :key (Reagent's), else its id (a component's name-based id), else, among those with neither, its tag when no sibling shares it and its first words when one does. Names that are not distinct stay in :own. The form it read is its metadata, ::form. Local fns: no contracted call a node. See docs/render.md#a-change-is-edits-by-name."
   {:malli/schema [:=> [:cat :any] :any]}
   [x0]
   (letfn [(el? [x] (and (vector? x) (some? (first x))))

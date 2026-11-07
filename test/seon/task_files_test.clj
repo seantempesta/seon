@@ -99,7 +99,7 @@
   ;; docs/merging.md#a-merge-says-what-it-completes: the merge
   ;; that completes a task's work says so in its message, a `Completes: ns/name` line, and removes its entry in
   ;; the same commit (git keeps the plan, test/ keeps the proofs). Each such line on main's first-parent history
-  ;; names no entry left in the files. Nothing is guessed from the message's prose: a merge that names a task it
+  ;; names no entry left in the files. Nothing is guessed from the message's text: a merge that names a task it
   ;; filed, or one it moved without finishing, completes nothing (twice on 2026-10-31 a merge naming a filed task
   ;; read as merged work left behind, and a list of exceptions had grown to thirteen).
   ;; It reads main as this repository holds it: the next branch's run names an entry a merge left behind

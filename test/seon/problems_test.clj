@@ -577,7 +577,7 @@
 (def ^:private req {:messages [{:role "user" :content "hi"}] :task "t/a" :turn 0})
 
 (deftest the-request-sets-thinking-only-when-the-provider-does
-  ;; tool_choice auto: the model may reply in prose alone, which ends the turn (design, owner 2026-10-24)
+  ;; tool_choice auto: the model may reply in text alone, which ends the turn (design, owner 2026-10-24)
   (is (= {:model "deepseek-flash" :messages (:messages req) :tools [model/eval-tool] :tool_choice "auto" :max_tokens 2048 :stream true :stream_options {:include_usage true}}
          (model/request-body deepseek req)) "thinking absent: the provider's default; max-tokens the provider's; the model chooses whether to call; streamed with its usage")
   (is (= {:type "disabled"} (:thinking (model/request-body (assoc deepseek :thinking :disabled) req))))
@@ -672,10 +672,10 @@
         v 'app.calc/inc2
         e (pdb/eid db :var/name 'app.calc/inc2)
         none (symbol (namespace v) "no-such-var")
-        page (str "# Health\n\nThe check reads `" v "` and `" none "`; a prose word " (namespace v) "/nor-this is no citation.\n")
+        page (str "# Health\n\nThe check reads `" v "` and `" none "`; a text word " (namespace v) "/nor-this is no citation.\n")
         db (d/db-with db (seon.doc/load-tx db "demo" {"demo/h.md" page}))
         dead #(get-in (problems/health %) [:classes :dead-citation])]
-    (testing "the loader keeps the names the text cites as references: a backticked name, never a prose word naming nothing"
+    (testing "the loader keeps the names the text cites as references: a backticked name, never a text word naming nothing"
       (is (= #{v none} (set (:seon.doc/names (d/pull db [:seon.doc/names] [:seon.doc/address "demo/h.md#health"]))))))
     (testing "a backticked name that never named anything is dead from its load"
       (is (= [[none "demo/h.md#health"]] (mapv (juxt :name :section) (:rows (dead db))))))
@@ -1199,20 +1199,20 @@
 (deftest a-ready-implement-task-that-cites-nothing-is-a-problem
   ;; the context is only as good as the plan it is built from: an implement step whose accumulated
   ;; plan (its design step's) cites no var, attribute or section reaches no reference, so the walk
-  ;; pulls nothing (task seon.render/spend-has-a-render, 2026-10-23). A design step's prose plan is
+  ;; pulls nothing (task seon.render/spend-has-a-render, 2026-10-23). A design step's text plan is
   ;; its input, never red.
   (let [v 'app.calc/inc2
         cited (str "It changes `" v "`.")
-        pairs [["cites" cited] ["prose" "Something should be shown somewhere."]
+        pairs [["cites" cited] ["text" "Something should be shown somewhere."]
                ["stubbed" cited :seon.task/proofs #{'app-test/stub}] ["bare" cited :seon.task/proofs #{}]
-               ["waits" "Prose, but its design step is not done."] ["real" cited :seon.task/proofs #{'app-test/real}]]
+               ["waits" "Text, but its design step is not done."] ["real" cited :seon.task/proofs #{'app-test/real}]]
         db (uncited-fixture pairs #{"waits"})
         rows #(into #{} (map (juxt (comp :task :evidence) (comp :reason :evidence))) (get-in (problems/health %) [:classes :uncited-task :rows]))]
-    (is (= #{["app/prose-impl" :no-references] ["app/stubbed-impl" :placeholder-proof] ["app/bare-impl" :no-proofs]} (rows db))
-        "an implement step citing nothing, one whose proof is the stub, one with no proof; design steps' prose plans and an implement step whose design is not done are not judged; a real proof is fine")
+    (is (= #{["app/text-impl" :no-references] ["app/stubbed-impl" :placeholder-proof] ["app/bare-impl" :no-proofs]} (rows db))
+        "an implement step citing nothing, one whose proof is the stub, one with no proof; design steps' text plans and an implement step whose design is not done are not judged; a real proof is fine")
     (testing "each closes with nothing written to close it"
-      (let [fixed [["cites" cited] ["prose" (str "Show `" v "` somewhere.")] ["stubbed" cited :seon.task/proofs #{'app-test/real}]
-                   ["bare" cited :seon.task/proofs #{'app-test/real}] ["waits" "Prose, but its design step is not done."] ["real" cited :seon.task/proofs #{'app-test/real}]]]
+      (let [fixed [["cites" cited] ["text" (str "Show `" v "` somewhere.")] ["stubbed" cited :seon.task/proofs #{'app-test/real}]
+                   ["bare" cited :seon.task/proofs #{'app-test/real}] ["waits" "Text, but its design step is not done."] ["real" cited :seon.task/proofs #{'app-test/real}]]]
         (is (= #{} (rows (uncited-fixture fixed #{"waits"}))))))
     (is (contains? (:seon.problems/derived (contract/properties :seon.problems/class)) :uncited-task))))
 

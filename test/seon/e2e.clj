@@ -191,10 +191,10 @@
   subtraction (inv1's repro: add always wrong, with twice needing it)."
   {:malli/schema [:=> [:cat :seon.model/request] :seon.model/script-reply]}
   [_]
-  (let [prose "add is subtraction, surely."]
-    {:text prose
-     :calls [{:intent prose :code "(in-ns 'app.calc)"}
-             {:intent prose :code "(defn add {:malli/schema [:=> [:cat :int :int] :int]} [a b] (- a b))"}]}))
+  (let [text "add is subtraction, surely."]
+    {:text text
+     :calls [{:intent text :code "(in-ns 'app.calc)"}
+             {:intent text :code "(defn add {:malli/schema [:=> [:cat :int :int] :int]} [a b] (- a b))"}]}))
 
 (defn expectation
   "Scenario k's {:check :expect} (seon.fixtures/scenarios); model? is a real model's run."

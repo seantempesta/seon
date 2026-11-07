@@ -157,7 +157,7 @@
 (defn repaired
   "Each repair the forgiving reader (seon.reader/forgive) made to an eval call's code, as that
   call's result tells it (:repaired, docs/prompt.md): what it dropped or inserted (a delimiter
-  it closed or removed, a ;; that made a line of prose a comment), and where, the line and
+  it closed or removed, a ;; that made a line of text a comment), and where, the line and
   column in source (the code as the REPL ran it) and that whole line."
   {:malli/schema [:=> [:cat :string [:vector :map]] :seon.eval/repairs]}
   [source repairs]

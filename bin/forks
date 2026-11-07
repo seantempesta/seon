@@ -8,7 +8,7 @@
 #
 # Its key is the pins (seon.proofs/check-steps "forks" :pins: the checkout's :env (bin/, test/forks/,
 # the config files) and every submodule's :seon.pin class), so a bump of datahike, konserve,
-# persistent-sorted-set or jolt runs it, and a change to Seon's .clj program or its prose does not. A unit's counts moving is a change to the fork's
+# persistent-sorted-set or jolt runs it, and a change to Seon's .clj program or its message does not. A unit's counts moving is a change to the fork's
 # semantics or to its tests: the commit that moves them records the new counts here, with why.
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 [[ -x $ROOT/target/jolt/jolt ]] || { echo "FORKS FAILED (no target/jolt/jolt; run bin/build jolt first)"; exit 1 }

@@ -58,18 +58,18 @@
 (defn ms-str {:malli/schema [:=> [:cat :any] :string]}
   [ms] (emit/ms-text ms))
 
-(defn prose
-  "Text on the page as the one printer's prose (seon.print/prose) under budget tokens: whole,
+(defn plain
+  "Text on the page as the one printer's text (seon.print/plain) under budget tokens: whole,
   or its shown part and the cut, which says what it omitted and where the rest is: a link
   to opts :href (the page that shows it whole); with opts :whole (a form that answers the whole
   value, e.g. its result handle) the cut names that form; with neither, the cut's title holds the
   whole text (a person's way to the rest; with a form, a copy the model would read twice). opts
   :one-line? as the printer's (a table cell, a stream row)."
   {:malli/schema [:function [:=> [:cat :any pos-int?] :any] [:=> [:cat :any pos-int? :map] :any]]}
-  ([s budget] (prose s budget {}))
+  ([s budget] (plain s budget {}))
   ([s budget {:keys [href one-line? whole]}]
    (let [s (if (string? s) s (print/text s budget))
-         {:keys [shown truncated? omitted lines]} (print/prose s budget {:one-line? (boolean one-line?)})]
+         {:keys [shown truncated? omitted lines]} (print/plain s budget {:one-line? (boolean one-line?)})]
      (if-not truncated?
        shown
        (let [words (str (emit/cut-words omitted lines nil) (when whole (str " · the whole value: " (print/text whole (form-budget)) " at its REPL")))
@@ -82,10 +82,10 @@
 
 (defn code
   "Code on the page under budget tokens: whole, the printer's code block (seon.print.emit/marked-hiccup,
-  highlighted as Clojure); cut, the prose cut (`prose`), whose marker names what it left."
+  highlighted as Clojure); cut, the text cut (`text`), whose marker names what it left."
   {:malli/schema [:=> [:cat :string pos-int?] :any]}
   [s budget]
-  (let [p (prose s budget)]
+  (let [p (plain s budget)]
     ;; a cut holds its marker element, which highlighting (it rewrites the code's text) would remove
     (if (string? p) (emit/marked-hiccup :seon.print/code p) [:pre {:class "text-text-100"} [:code p]])))
 
@@ -99,7 +99,7 @@
 
 (defn- inline
   "The hiccup of text between offsets from and to, a stretch of a Markdown block, by the one parse: spans, seon.ref/scan's, drawn as code and
-  links, and what lies between by seon.ref/emphasis. A link goes only where a page may send a person (http, https, a path, a fragment); any other keeps its text. See docs/render.md#prose-and-the-one-string-cutter."
+  links, and what lies between by seon.ref/emphasis. A link goes only where a page may send a person (http, https, a path, a fragment); any other keeps its text. See docs/render.md#text-and-the-one-string-cutter."
   {:malli/schema [:=> [:cat :string :int :int [:sequential :map]] [:sequential :any]]}
   [text from to spans]
   (let [plain (fn [a b] (when (< a b) (for [p (ref/emphasis (subs text a b))] (if (vector? p) [(first p) (second p)] p))))
@@ -118,7 +118,7 @@
                                  :else (into [:span] (inline text text-from text-to spans))))))))))
 
 (defn- quote-lines
-  "The offsets of what each line of the quote at from..to says, past its > mark (a lazy line has none). See docs/render.md#prose-and-the-one-string-cutter."
+  "The offsets of what each line of the quote at from..to says, past its > mark (a lazy line has none). See docs/render.md#text-and-the-one-string-cutter."
   {:malli/schema [:=> [:cat :string :int :int] [:vector [:tuple :int :int]]]}
   [text from to]
   (loop [a from out []]
@@ -130,12 +130,12 @@
       (if (< nl to) (recur (inc nl) out) out))))
 
 (defn markdown
-  "Markdown text (a plan, an agent's prose, a message) as a person reads it: its blocks by the one
+  "Markdown text (a plan, an agent's message, a message) as a person reads it: its blocks by the one
   parse (seon.ref/scan): a heading at its level, a paragraph, a list of the scan's items (numbered
   when its first marker is a number), a code block highlighted (a fenced block's content as the scan gives it), a quote or a table as its lines. Each
   is kept as written, its backticks too, where the model reads the page: a plan's delimiters pick
   what its citations pull (docs/references.md#the-delimiter-picks-the-depth). opts :inline? is for what only a person reads: code spans, links and
-  emphasis drawn (`inline`), and a quote as one. See docs/render.md#prose-and-the-one-string-cutter."
+  emphasis drawn (`inline`), and a quote as one. See docs/render.md#text-and-the-one-string-cutter."
   {:malli/schema [:function [:=> [:cat :string] :any] [:=> [:cat :string [:map [:inline? {:optional true} :boolean]]] :any]]}
   ([text] (markdown text {}))
   ([text {:keys [inline?]}]
@@ -241,11 +241,11 @@
   (let [own (apply dissoc e (error-hidden e))
         budget (config/value :seon.config.render/part-budget)]
          [:div {:class "err"}
-      [:b (prose (:seon.error/message e) budget)]
+      [:b (plain (:seon.error/message e) budget)]
       [:span {:class "muted"} (str " · " (kname (:seon.error/type e)) " in " (:seon.error/operation e))]
       (when-let [{:keys [line column]} (:seon.error/at e)]
         [:p {:class "muted"} (str "at line " line (when column (str ":" column)) (when-let [in (:seon.error/in e)] (str " of " in)))])
-      (when (:seon.error/fix e) [:p {:class "fix"} "fix: " (prose (:seon.error/fix e) budget)])
+      (when (:seon.error/fix e) [:p {:class "fix"} "fix: " (plain (:seon.error/fix e) budget)])
       (for [{:keys [in expected value]} (:seon.error/problems e)]
         [:p {:class "muted"} "at " [:code (print/text in budget)] " expected " [:code (print/text expected budget)] ", got " [:code (:seon.print/code value)]])
       (when (seq own) [:code {:class "muted"} " " (let [p (print/print-value own {:handle handle :budget budget})] (or (:text p) (:seon.error/message p)))])]))
@@ -453,7 +453,7 @@
 
 (defn evaluation
   "One eval (the declared html render of :seon.db/eval-fact, its attributes, and of a response), as
-  it ran: the prose beside it, its code, its response printed under its handle as it is shown
+  it ran: the text beside it, its code, its response printed under its handle as it is shown
   (seon.print/record-text of the eval, through the model render of the schema it kept; a value in a row by that schema's
   html render; a live response's own :text; an error's by its error
   map's render; a value recorded as its basis, @ctx's, rendered from the branch at it, seon.context/basis-value), and its cost and who evaluated it as recorded; :as :inline, its code and
@@ -468,14 +468,14 @@
                     (:seon.eval/fns e) (assoc :fns (:seon.eval/fns e)))
             e)
         ;; a value recorded as data: inline, printed as its reply reads under its handle; in a row,
-        ;; rendered as structure (the printer's hiccup). A live reply's :text is prose
+        ;; rendered as structure (the printer's hiccup). A live reply's :text is text
         data? (and recorded? (nil? (:text r)) (nil? basis))
         r (cond-> r (and recorded? (nil? (:text r)) data? (= :inline (:as opts))) (assoc :text (print/record-text e render/stored-model)))
         by (or (:seon.eval/by e) (:by r))
         err? (some? (:ex r))]
     (if (= :inline (:as opts))
       ;; its code's first line ⇒ its value's line, printed now by the one printer under the line budget, else its
-      ;; text; in the chat (:chat true), the agent's prose first: the chat is prose and a line an arrow opens
+      ;; text; in the chat (:chat true), the agent's message first: the chat is text and a line an arrow opens
       (let [shown (when (and recorded? (or (contains? resp :value) (:ex resp) basis))
                     (let [v (:value resp) k (:seon.eval/schema e)
                           m (when (and k (instance? clojure.lang.IObj v)) (render/model (vary-meta v assoc :seon.render/schema k)))]
@@ -483,14 +483,14 @@
                                         basis (when (:db opts) (context/basis-value (:db opts) e))
                                         (nil? v) "nil" m (:value m) :else v)
                                   (config/value :seon.config.render/line-budget) nil)))
-            line [:span {:class "font-mono"} [:code (merge-with #(str %1 " " %2) emit/highlight {:class "text-text-100"}) (prose (or (first (str/split-lines (or (:code r) ""))) "") (cell) {:one-line? true})]
+            line [:span {:class "font-mono"} [:code (merge-with #(str %1 " " %2) emit/highlight {:class "text-text-100"}) (plain (or (first (str/split-lines (or (:code r) ""))) "") (cell) {:one-line? true})]
                   [:span {:class (if err? "text-error" "muted")} (if err? " ✕ " " ⇒ ")]
-                  [:code {:class "text-text-400"} (prose (or shown (:text r) "") (cell) {:one-line? true})]]]
+                  [:code {:class "text-text-400"} (plain (or shown (:text r) "") (cell) {:one-line? true})]]]
         (if (and (:chat opts) (not (str/blank? (:intent r))))
-          [:span {:class "flex flex-col"} [:span {:class "whitespace-pre-wrap text-text-300 italic"} (prose (:intent r) (form-budget))] line]
+          [:span {:class "flex flex-col"} [:span {:class "whitespace-pre-wrap text-text-300 italic"} (plain (:intent r) (form-budget))] line]
           line))
       [:div {:class (str "flex flex-col gap-1 border-l-2 pl-3 py-1 " (if err? "border-error" "border-base-700"))}
-       (when-not (str/blank? (:intent r)) [:p {:class "whitespace-pre-wrap text-text-300 italic"} (prose (:intent r) (form-budget))])
+       (when-not (str/blank? (:intent r)) [:p {:class "whitespace-pre-wrap text-text-300 italic"} (plain (:intent r) (form-budget))])
        (when (:code r) (code (:code r) (form-budget)))
        (if (map? (:ex r))
          (render/html (cond-> {} (:handle r) (assoc :handle (list :ex (:handle r)))) (:ex r))
@@ -514,7 +514,7 @@
              ;; a value recorded as its basis (@ctx): rendered from what the branch holds at it
              [:div {:class "flex gap-2 text-text-200"} [:span {:class "muted"} "⇒"]
               (render/html {:as :block :schema (:seon.eval/schema e) :handle (:handle r) :db (:db opts)} v)]
-             [:pre {:class "text-text-200"} [:span {:class "muted"} "⇒ "] (prose (or (:text r) "") (part))])))
+             [:pre {:class "text-text-200"} [:span {:class "muted"} "⇒ "] (plain (or (:text r) "") (part))])))
        [:div {:class "flex flex-wrap gap-3 text-2xs text-text-500"}
         (cost-line r)
         [:span (get asked-by by "its own turn")]
@@ -528,7 +528,7 @@
 (defn model-call-view
   "A model turn's header (the declared html render of :seon.model-call/fact), above the evaluations
   it ran: which turn of how many, its tokens and the share its provider served from cache, how
-  its reply stopped and its model; its reply and reasoning as prose, all of its model call
+  its reply stopped and its model; its reply and reasoning as text, all of its model call
   (:seon.model-call/*). Nothing it did not record is shown."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
   [opts {:seon.model-call/keys [n origin reply reasoning finish truncated tokens cache-hit-tokens cache-miss-tokens model errors forms basis]}]
@@ -546,19 +546,19 @@
         (when model [:span {:class "muted"} model])
         (when truncated [:span {:class "text-error"} "cut at the token limit"])
         (when (and errors (pos? errors)) [:span {:class "text-error"} (str errors " of " forms " forms failed")])]
-       (when-not (str/blank? reply) [:p {:class "seon-prose"} (prose reply (part))])
+       (when-not (str/blank? reply) [:p {:class "seon-text"} (plain reply (part))])
        (when-not (str/blank? reasoning)
-         [:details [:summary {:class "seon-note"} "its reasoning"] [:p {:class "seon-prose text-text-300"} (prose reasoning (part))]])])))
+         [:details [:summary {:class "seon-note"} "its reasoning"] [:p {:class "seon-text text-text-300"} (plain reasoning (part))]])])))
 
 (defn message
-  "A message to a run (the declared html render of :seon.message/fact): who sent it and its body as prose."
+  "A message to a run (the declared html render of :seon.message/fact): who sent it and its body as text."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
   [opts {:seon.message/keys [from body]}]
   (if (= :inline (:as opts))
-    [:span (str from ": ") (prose body (cell) {:one-line? true})]
+    [:span (str from ": ") (plain body (cell) {:one-line? true})]
     [:div {:class "border-l-2 border-info pl-3 py-1"}
      [:span {:class "seon-note"} (str "message from " from)]
-     [:p {:class "seon-prose"} (prose body (part))]]))
+     [:p {:class "seon-text"} (plain body (part))]]))
 
 (declare standing)
 
@@ -578,7 +578,7 @@
              (cond (:seon.task/outcome t) (str " · " (:text (standing nil {:seon.task/outcome (:seon.task/outcome t)})))
                    execution (str " · " (kname execution))))]
        [:p {:class "text-lg font-bold text-text-100"} (task-title id)]
-       (when instructions [:details [:summary "how the agent works it"] [:p {:class "seon-prose"} instructions]])
+       (when instructions [:details [:summary "how the agent works it"] [:p {:class "seon-text"} instructions]])
        (when plan (markdown plan))])))
 
 (defn- toggle
@@ -602,7 +602,7 @@
   (let [why (or (:message r) (get-in r [:error :seon.error/message]) (:reason r) (some-> (:outcome r) kname))]
     [:p {:class "text-xs"}
      (str (kname (:class r)) (some->> (:count r) (str " ×")) (when-let [w (seq (problem-about r))] (str " " (str/join " " w))))
-     (when why (list ": " (prose why (cell) {:one-line? true})))
+     (when why (list ": " (plain why (cell) {:one-line? true})))
      (when-let [ts (seq (:answered-by r))] (str " (answered by " (str/join ", " ts) ")"))]))
 
 (defn problems
@@ -1269,8 +1269,8 @@
             (remove nil?)
             [(when err [:span {:class "shrink-0 text-error"} "⚠"])
              (if said?
-               ;; the agent's prose is Markdown, rendered (owner, 2026-10-29); the model reads it as written
-               [:div {:class "seon-prose seon-md-inline min-w-0 flex-1" :wire/field (when-not seon? "intent")} [#'markdown intent {:inline? true}]]
+               ;; the agent's message is Markdown, rendered (owner, 2026-10-29); the model reads it as written
+               [:div {:class "seon-text seon-md-inline min-w-0 flex-1" :wire/field (when-not seon? "intent")} [#'markdown intent {:inline? true}]]
                [:code {:class "seon-form min-w-0 flex-1 truncate"} (first (str/split-lines (or code "")))])])
       ;; inside the closed details, so opening it shows it at once, on a live agent's page and on one root draws from its branch
       [:div {:class "ml-4 flex min-w-0 max-w-full flex-col gap-1 overflow-x-auto py-1"}
@@ -1281,7 +1281,7 @@
 
 (defn eval-item
   "An eval of the conversation (a component over ctx and the db), its one hiccup (`eval-hiccup`) (owner: \"I
-  want the chat to look like a nice chat screen with just prose unless I dig into it\"; \"show the eval intent markdown
+  want the chat to look like a nice chat screen with just text unless I dig into it\"; \"show the eval intent markdown
   descriptions and collapse the eval statement and the output by default\"), the eval at ctx path :at; drawn open when a reader opened it
   (:seon.eval/opened, a fact the agent takes before it draws its page). See docs/render.md#the-page."
   {:seon.render/style ".eval-item > details > summary { display: flex; min-width: 0; align-items: baseline; column-gap: 0.5rem; }" :seon.render/for "page" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:at [:vector :any]]]]] :any]}
@@ -1422,7 +1422,7 @@
   {:seon.render/style ".chat-ask { max-width: 85%; align-self: flex-end; border-radius: 1rem; border-top-right-radius: 0.125rem; background: var(--color-base-800); padding: 0.625rem 1rem; color: var(--color-text-100); }" :seon.render/for "page" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
   [{c :seon.ctx/ctx}]
   (when-let [plan (some-> (:task c) ratom/realize :seon.task/plan)]
-    (let [{:keys [shown truncated? omitted lines]} (print/prose plan (config/value :seon.config.render/line-budget))]
+    (let [{:keys [shown truncated? omitted lines]} (print/plain plan (config/value :seon.config.render/line-budget))]
       [:section
        (if truncated?
          ;; the start, or the whole in its place, never both
@@ -1696,7 +1696,7 @@
       (when-let [r (and pid (:seon.process/running proc))]
         [:code {:class "min-w-0 truncate text-text-300"} r])]
      (when-let [r (:reason stands)] [:p {:class "min-w-0 break-words text-text-300"} r])
-     (when-not (str/blank? description) [:p {:class "text-text-300"} (prose description (part))])]))
+     (when-not (str/blank? description) [:p {:class "text-text-300"} (plain description (part))])]))
 
 (defn root
   "What root's head adds (the declared html render of :seon.root/root-fact): when it last went quiet, its root causes a line each."
@@ -1900,7 +1900,7 @@
       [:span {:class (if (:lit? stands) "text-signal" "muted")} (if (:lit? stands) "●" "○")]
       [:span {:class "text-sm text-text-100"} (task-name a t)]
       [:span {:class (str "ml-auto shrink-0 text-2xs " (tone-class (:tone stands)))} (:text stands)]]
-     (when-let [r (:reason stands)] [:p {:class "text-xs text-text-400"} (prose r (cell) {:one-line? true})])]))
+     (when-let [r (:reason stands)] [:p {:class "text-xs text-text-400"} (plain r (cell) {:one-line? true})])]))
 
 (defn work-list
   "The work of root's page (a component over the db): every session on main with a task, by how it stands: what needs a person,
@@ -2175,7 +2175,7 @@
                             open? (assoc :open true))
                  [:summary {:class "flex cursor-pointer items-baseline gap-2"}
                   [:b {:class "w-20 shrink-0 text-2xs text-text-200"} role]
-                  [:span {:class "seon-prose min-w-0 flex-1 break-words text-text-100 group-open:hidden"} (let [{:keys [shown truncated? omitted lines]} (print/prose (says m) line-budget {:one-line? true})]
+                  [:span {:class "seon-text min-w-0 flex-1 break-words text-text-100 group-open:hidden"} (let [{:keys [shown truncated? omitted lines]} (print/plain (says m) line-budget {:one-line? true})]
                                      ;; the cut says what it left; the rest is the row, opened, so no copy is kept on its line
                                      (if truncated? [:span shown " " [:span {:class "seon-print-elision"} (emit/cut-words omitted lines nil)]] shown))]
                   (when new? [:span {:class "shrink-0 text-2xs text-signal"} "new"])
