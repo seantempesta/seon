@@ -508,3 +508,14 @@
     (is (str/includes? text "0 1 2") text)
     (is (str/includes? text "012345678901234567890123456789") "the string still shows its first part")
     (is (str/includes? text "(get-in result/e9 [:value])") "the value's cut says how to read its rest")))
+
+(def ^:private breadth-rows
+  "The plan's 177 rows, one member at index 3 made another kind by each use."
+  (vec (for [i (range 177)]
+         (array-map :seon.doc/section (keyword "render" (str "section-" i)) :seon.doc/page "docs/render.md" :seon.problem/class :stale-section :seon.problem/since 1761360000000 :cited 'seon.print/print-value :lead "A section whose lead cites a var that moved." :n i))))
+
+(clojure.test/deftest breadth-shows-no-member-that-shows-nothing
+  ;; docs/render.md#render-what-a-person-or-a-model-reads: a member whose least form shows nothing holds no line
+  (let [text (:text (seon/print-value (assoc breadth-rows 3 :odd) {:handle 'result/e1 :budget 1000}))]
+    (clojure.test/is (= 0 (count (re-seq #"\{…" text))))
+    (clojure.test/is (= 1 (count (re-seq #"…\d+ \(drop" text))) "one cut past the rows shown")))
