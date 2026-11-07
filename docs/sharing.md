@@ -22,7 +22,7 @@ A test's result is keyed by what its run read: a fixed seed, the functions it ca
 
 ## A message waits in a mailbox
 
-Planned. A message is a fact on main, whoever sends it. ``:seon.agent/taken`` holds the main t of the last message the agent took, and it is behind when a message to its branch has a tx past that t. Behind wants a process. A channel only wakes: a dropped wake costs delay, never the message.
+Planned. A message is a fact on main, whoever sends it. A message is unread when it's to the agent on main and on no model call on its branch ([users](users.md#messages)). Unread wants a process. A channel only wakes: a dropped wake costs delay, never the message.
 
 ## A metric accretes
 
