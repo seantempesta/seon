@@ -361,11 +361,16 @@
          ;; the main and merge base the read heard, decided as a model turn's are, before its request is drawn
          _ (when take? (when-let [tx (not-empty (main-base-tx))] (agent/transact! tx) (agent/commit!)))
          _ (when take? (show-page!))
+         ;; the run's own max-turns, as a model turn's basis holds it (the agent's on main, else the config's: root passes them alike)
+         max-turns (or (:seon.agent/max-turns (d/entity (agent/db) [:seon.agent/key k]))
+                       (cfg/value :seon.config.agent/max-turns))
          ;; the turn a model would take now: every record before it is in the request
-         basis (assoc (basis! task turn 1 :outside true) :agent k)
+         basis (assoc (basis! task turn max-turns :outside true) :agent k)
          walk (repl/page-walk)
          db (agent/db)
-         {:keys [messages]} (context/render db basis {:walk walk})
+         ;; how the work stands, as a turn's own: the done rule's reasons over the branch's gaps since its merge base
+         s (context/status db @ctx/ctx {})
+         {:keys [messages]} (context/render db basis {:walk walk :status s})
          ;; as a person reads it: the system prompt, then each record as the call made and its result
          text (context/read-text db basis messages wire?)]
      ;; the read is a model call of this agent, as a model turn's is: what it was built from and what it cost

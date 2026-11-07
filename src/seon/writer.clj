@@ -83,7 +83,7 @@
   [why members] (contract/error :seon.writer/refused #'seon.writer/refused why members))
 
 (defn- unanalyzable
-  "The refusal when a merge candidate's Clojure files, text ({path text}), don't analyze on db, the merged value, or nil: the import's own analysis, in this process, at the cost of the files that changed. See docs/merging.md#a-merge-analyzes-its-tree."
+  "The refusal when a merge candidate's Clojure files, text ({path text}), don't analyze on db, the merged value, or nil: the import's own analysis, in this process, at the cost of the files that changed. See docs/merging.md#a-merge-runs-what-the-change-reaches."
   {:malli/schema [:=> [:cat :seon.host/db [:map-of :string [:maybe :string]]] [:maybe :seon.writer/refused]]}
   [db text]
   ;; docs/failure-points.md: a form of the candidate that can't be analyzed is this answer, and the merge doesn't happen
