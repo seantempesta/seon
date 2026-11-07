@@ -155,7 +155,8 @@
       [st {:results (mapv #(or (:refused %) {:merged? true :tx (:max-tx main) :datoms 0 :keys 0}) (:members judged))}]
       ;; git: each member's head becomes a parent, so its merge base moves to it; each
       ;; member's own datoms for the keys it changed, as they are (seon.merge/merge-tx)
-      (let [rep (d/merge-db conn (set (map :branch ok))
+      ;; each member's parent is the commit its merge was computed from, not its head when this commits
+      (let [rep (d/merge-db conn (set (map (comp d/commit-id :head) ok))
                             (vec (mapcat (fn [{:keys [r head base]}] (pm/merge-tx main base head (keys (:ours r)) data-attrs)) ok))
                             (pdb/tx-meta (pdb/conn-main conn)))
             t (:max-tx (:db-after rep))

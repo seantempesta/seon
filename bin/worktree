@@ -90,7 +90,11 @@ setup() {
       done
     done
     # the plan's kept program store, regenerable and keyed by its importer and tree, so a new checkout's first plan reads what changed, not every form (22 s against 3 s)
-    for e in "$MAIN"/target/program-store-*(N/); do cp -cR "$e" "$WT/target/"; done
+    # copied by mdb_copy, LMDB's own consistent copy (a file clone of a store being written can be torn); none when it isn't there, and the first plan imports
+    if command -v mdb_copy >/dev/null; then
+      for e in "$MAIN"/target/program-store-*(N/); do mkdir -p "$WT/target/${e:t}" && mdb_copy "$e" "$WT/target/${e:t}" 2>/dev/null || rm -rf "$WT/target/${e:t}"
+        for f in "$e"/*.fasl(N); do cp -c "$f" "$WT/target/${e:t}/"; done; done
+    fi
     for n in lib watch lmdb-kill lmdb-sem tailwind src; do
       if [[ -e $MAIN/target/$n ]]; then cp -cR "$MAIN/target/$n" "$WT/target/"; fi
     done

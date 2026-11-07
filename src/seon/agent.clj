@@ -310,11 +310,11 @@
   {:malli/schema [:=> [:cat] :any]}
   []
   (let [conn (or (:store-conn @state) (no-branch!))
-        ;; what was measured rides on a commit going out anyway, and never makes one
-        _ (when-let [held (and (:dirty? @state) (contains? (d/schema (:db @state)) :seon.fn/stats) (not-empty (:fn-costs @state)))]
-            (swap! state dissoc :fn-costs)
-            (transact! (costs-tx (:db @state) held)))
-        c (try (dw/commit-pending! conn) (catch Throwable e e))]
+        ;; what was measured rides on a commit going out anyway, and never makes one; a write the store refuses is this
+        ;; commit's refusal (refused!), as any other write in it
+        held (when (and (:dirty? @state) (contains? (:schema (:db @state)) :seon.fn/stats)) (not-empty (:fn-costs @state)))
+        _ (when held (swap! state dissoc :fn-costs))
+        c (try (when held (transact! (costs-tx (:db @state) held))) (dw/commit-pending! conn) (catch Throwable e e))]
     (cond
       (instance? Throwable c) (refused! conn c)
       c (do
@@ -523,7 +523,8 @@
     (if (empty? (:theirs r))
       {:ok true :applied [] :conflicts [] :t (:max-tx head)}
       (let [carried (task/carry-tx (:base @state) main head)
-            rep (d/merge-db conn #{main-b} (-> (pm/merge-tx head (:base @state) main (:apply r) data-attrs)
+            ;; the parent is the commit merged: a branch name would name main's head when this commits, which can be newer than what was merged
+            rep (d/merge-db conn #{(d/commit-id main)} (-> (pm/merge-tx head (:base @state) main (:apply r) data-attrs)
                                                (into (pm/unmerged-tx head (:conflicts r) (:max-tx main)))
                                                (into (:tx carried)))
                              (pdb/tx-meta (:branch @state) {:seon.tx/merged main-b}))
