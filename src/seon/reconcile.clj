@@ -710,10 +710,31 @@
   {:malli/schema [:=> [:cat :seon.reconcile/state :seon.task/id :seon.reconcile/step :map] [:tuple :seon.reconcile/state :map]]}
   [st id step req] (step/ask st [:reconciler :answers] [id step] req))
 
+(def ^:private ends-told
+  "The outcomes an agent that launched a task hears of, each in words: where its work has stopped, for now or for good."
+  {:parked "is waiting for an answer" :cap "used all its turns" :done "is done" :merged "is merged to main" :dead "died" :lost "was lost"
+   :closed "was stopped and held" :killed "was stopped"})
+
+(defn tell-tx
+  "The message that tells the agent which launched task id (:seon.task/asked-by) how it stands, when write tx moves its outcome to one of `ends-told`: what it reads next, which wakes it. A launched agent that died could not say so itself. See docs/agent.md#working-for-a-person."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id [:sequential :any]] [:vector :map]]}
+  [db id tx]
+  (let [to (some (fn [x] (when (and (vector? x) (= :db/cas (first x)) (= :seon.task/outcome (nth x 2 nil))) (nth x 4 nil))) tx)
+        by (when (ends-told to) (:seon.task/asked-by (d/entity db [:seon.task/id id])))
+        said (some (fn [x] (cond (map? x) (or (:seon.task/reason x) (:reason (:seon.task/failure x)))
+                                 (and (vector? x) (= :seon.task/reason (nth x 2 nil))) (nth x 3 nil)))
+                   tx)
+        from (some-> (:seon.agent/id (:seon.task/agent (d/entity db [:seon.task/id id]))) name)]
+    (if by
+      (task/message-tx (str "asked-" id "-" (:max-tx db)) :message (or from "root") by
+                       (str "Task " id " " (ends-told to) (when said (str ": " said))
+                            (when (and from (#{:parked :cap} to)) (str "\nTo answer it: (send-message [:" from "] \"...\")"))))
+      [])))
+
 (defn- write
-  "A write on main through the writer, as step of task id's flight."
+  "A write on main through the writer, as step of task id's flight, with what it tells who launched the task. See `tell-tx`."
   {:malli/schema [:=> [:cat :seon.reconcile/state :seon.task/id :seon.reconcile/step [:sequential :any]] [:tuple :seon.reconcile/state :map]]}
-  [st id step tx] (request st id step {:op :write :req {:op :tx :branch :db :tx-data (vec tx)}}))
+  [st id step tx] (request st id step {:op :write :req {:op :tx :branch :db :tx-data (into (vec tx) (tell-tx (:db st) id tx))}}))
 
 (defn- agent-of
   "Task id's agent on db: {:key :id :branch}, or nil before one started it."

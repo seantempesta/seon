@@ -2,6 +2,26 @@
 
 This file holds the owner's standing rulings, one entry each: the rule, the owner's words and date, and where the rule is stated now; current truth and mechanism live in `AGENTS.md` and the wiki (`docs/`), and superseded or done rulings are kept verbatim in git history.
 
+## 2026-11-07 rulings
+
+The owner's rulings of 2026-11-07, on what an agent starts from, on what a merge does by itself and on how proofs grow.
+
+### The default agent chats, and more comes by threads it pulls
+
+Owner, 2026-11-07: "The agent can have a directive to chat with the user and the only tests are to keep responding to their latest message"; "Not giant data dumps, but progressively over time they get the data when they need it". Stated in: [working for a person](agent.md#working-for-a-person).
+
+### No kinds; a keyword may name a template
+
+Owner, 2026-11-07: "in general there are no \"kinds\" and those are generally code smells"; of keywords that map to templates, "that's fine". A template is a map, and choosing one is a merge. Stated in: [a request is one transaction](tasks.md#a-request-is-one-transaction).
+
+### A merge writes itself out while its tests pass, and approval comes later
+
+Owner, 2026-11-07: "If we are essentially creating a merged with main version of the codebase and all tests pass then I'm okay with auto merged, but yes this behavior should be configurable and the user or root should be approving it. What helps us speed up our development right now and what can we later add to handle future ideas?" It stays on (`:seon.config.source/write-back-on-merge`, `my.root/write-back!` by hand when off); an approval by the user or root is later work. Stated in [source](source.md#commit-the-merges-branch).
+
+### A proof starts simple and evolves
+
+Owner, 2026-11-07: "I generally want to start with a simple proof like respond to the user and build up or merge with templates to get more correct testing conditions for what success looks like. It should always be evolving." So a proof that passes without the task's change does not hold a merge; proofs get better as the work teaches what success looks like.
+
 ## 2026-11-06 rulings
 
 The owner's rulings of 2026-11-06, on one tree for the model and the page, on data the model can read precisely, and on sessions working with no fixed ceremony; they stand over earlier entries where they differ.

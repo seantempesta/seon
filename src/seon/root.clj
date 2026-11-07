@@ -456,15 +456,17 @@
                  said (str/join "-" (or (seq words) ["work"]))
                  ;; its first sentence's words are its name and title; the same words asked again take the one number that tells them apart
                  nm (if (pdb/eid db :seon.task/id (task/task-id 'request said)) (str said "-" (:max-tx db)) said)
-                 template (get tpl/templates (:template m :user))]
+                 template (get tpl/templates (:template m :user))
+                 ;; an agent that launched it, whom the reconciler tells how it ends (seon.reconcile/tell-tx)
+                 by (when-let [b (get-in st [:agents (:agent m) :branch])] (pdb/off-main (pdb/conn-main (:conn st)) b))]
              (if-not template
                (reply! st o p (refused 'seon.root/ask! (str "no template " (:template m)) {:templates (vec (sort (keys tpl/templates)))}))
-               (let [ds (template {:seon.task/ns 'request :seon.task/name nm :seon.task/plan (:text m)})
-                     tx (tpl/request-tx db ds)]
+               (let [id (task/task-id 'request nm)
+                     tx (tpl/request-tx db (tpl/from template {:seon.task/ns 'request :seon.task/name nm :seon.task/plan (:text m)}))]
                  (if (contract/error? tx)
                    (reply! st o p tx)
                    (let [[st rid] (pend st p :tx nil)]
-                     (step/out! o :to-writer {:op :tx :branch :db :tx-data tx :dest {:asked (task/task-id 'request nm) :rid rid}})
+                     (step/out! o :to-writer {:op :tx :branch :db :tx-data (cond-> tx by (conj [:db/add [:seon.task/id id] :seon.task/asked-by by])) :dest {:asked id :rid rid}})
                      (update st :writes (fnil conj #{}) rid))))))
       :clone (let [parent (:parent m)]
                (cond
@@ -925,11 +927,13 @@
   ([sys source] (import-source! sys source nil))
   ([sys {:keys [root dirs branch]} changed]
   (let [t0 (profile/now-ns)
-        ask (fn [paths] @(call! sys {:op :fx :kind :source :req {:root root :dirs dirs :paths paths :follow (cfg/checkout) :own-branch branch :binary-tree (str (cfg/checkout) "/target/seon.tree")}}))
         held (:seon.root/source (d/pull @(:conn sys) [:seon.root/source] [:seon.root/id :root]))
+        ask (fn [paths] @(call! sys {:op :fx :kind :source :req (cond-> {:root root :dirs dirs :paths paths :follow (cfg/checkout) :own-branch branch :binary-tree (str (cfg/checkout) "/target/seon.tree")}
+                                                                  ;; only what the tree changed since its last import: what main merged and the tree never held stays main's
+                                                                  (and (nil? paths) (:digest held) (:tree held)) (assoc :since (:tree held)))}))
         changed (when (:digest held) changed)
         r (let [r (ask changed)] (if (and changed (not (:tree r))) (ask nil) r))
-        changed (when (:paths r) changed)
+        changed (when (:paths r) (or changed (set (:paths r))))
         files (:value r)
         digest (when files (source-digest r))
         built? (and (:inputs r) (= (:binary r) (:tree (:inputs r))))
@@ -943,6 +947,7 @@
                (let [w (when (and tx (not (contract/error? tx))) @(call! sys {:op :write :req {:op :tx :branch :db :tx-data tx}}))]
                  (this-boot (cond-> {:root root :files (if changed (+ (count (d/datoms @(:conn sys) :aevt :ns/file)) (count (d/datoms @(:conn sys) :aevt :schema/file))) (count files)) :forms (count (d/datoms @(:conn sys) :aevt :form/id)) :ms (profile/ms-since t0)}
                               (:commit r) (assoc :commit (:commit r))
+                              (:tree r) (assoc :tree (:tree r))
                               (seq (:pins r)) (assoc :pins (:pins r))
                               (and w (not (contract/error? w))) (assoc :digest digest :retracted (count (filter #(and (vector? %) (= :db/retractEntity (first %))) tx)))
                               (contract/error? r) (assoc :error (:seon.error/message r))

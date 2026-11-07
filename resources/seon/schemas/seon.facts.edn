@@ -345,7 +345,7 @@
                           [:seon.task/failure {:optional true} :seon.task/failure]
                           [:seon.task/cause {:optional true} :seon.task/cause]
                           [:seon.task/agent {:optional true} :seon.task/agent] [:seon.task/outcome {:optional true} :seon.task/outcome]
-                          [:seon.task/reason {:optional true} :seon.task/reason] [:seon.task/reasons {:optional true} :seon.task/reasons]
+                          [:seon.task/asked-by {:optional true} :seon.task/asked-by] [:seon.task/reason {:optional true} :seon.task/reason] [:seon.task/reasons {:optional true} :seon.task/reasons]
                           [:seon.task/commit {:optional true} :seon.task/commit] [:seon.task/commit-error {:optional true} :seon.task/commit-error]
                           [:seon.task/merged-t {:optional true} :seon.task/merged-t] [:seon.task/error {:optional true} :seon.task/error]
                           [:seon.task/deferred {:optional true} :seon.task/deferred] [:seon.task/deferred-results {:optional true} :seon.task/deferred-results]
@@ -372,6 +372,8 @@
  :seon.task/outcome [:and {:seon.db/index true :seon.status/finished #{:done :merged} :seon.status/judged #{:ready :gate} :seon.status/failed #{:dead :lost}}
                      [:enum :running :parked :told :cap :done :ready :gate :merged :behind :dead :lost :killed :refused :closed]]
  ;; why it stands so: the agent's own words, or root's (the death, a refused start)
+ ;; the branch of the agent that launched this task (my.task/launch!), told how it ends (seon.reconcile/tell-tx)
+ :seon.task/asked-by :seon.db/branch
  :seon.task/reason :string
  ;; what the done rule said was not done when root judged it (seon.reconcile/done-explain); the same again holds the task
  ;; (seon.reconcile/judgment); retracted when a person continues the task
@@ -412,7 +414,7 @@
  ;; the files and pins read (a boot whose tree
  ;; reads the same imports nothing), its files and forms, the program entities the import
  ;; retracted, how long reading, analysing and transacting took, or why it was refused
- :seon.root/source [:map [:root :string] [:commit {:optional true} :string]
+ :seon.root/source [:map [:root :string] [:commit {:optional true} :string] [:tree {:optional true} :string]
                     [:pins {:optional true} [:map-of :string :string]] [:digest {:optional true} :string]
                     [:files :int] [:forms :int] [:retracted {:optional true} :int] [:ms number?]
                     [:error {:optional true} :string]

@@ -1498,7 +1498,7 @@
         ;; the task as its record pulls it, drawn by its html render
         h (h/html (ui/task-view {} (:tree (seon.ctx/build db (seon.db/eid db :seon.task/id "demo/w") nil))))]
     (is (str/includes? h "Your task: do what the plan below asks") "the whole instructions are on the page")
-    (is (str/includes? h "your run ends and root merges your branch") "whole: their last sentence too, nothing cut")
+    (is (str/includes? h "your run then ends and root merges your branch") "whole: their last sentence too, nothing cut")
     (is (< (str/index-of h "Your task: do what the plan below asks") (str/index-of h "Make w true.")) "above the plan")))
 
 (defn- unit-of
