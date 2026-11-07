@@ -597,7 +597,7 @@
  ;; leaves a slow test. Past it the test is named, never ended.
  :seon.config.proofs/stall-factor 3
  ;; Unit: ms. A test measured at this or over is left out of bin/prove and a merge until it is fast
- ;; (seon.fx/slow-tests, docs/merging.md#a-slow-test-is-left-out); naming it or the full run still runs it.
+ ;; (seon.fx/slow-tests, docs/merging.md#a-slow-test-runs-last); naming it or the full run still runs it.
  ;; Provenance: owner, 2026-11-06. Over the verdict cache that day, 5 s left out 70 of 1,466 tests and
  ;; kept about 96 s of work on 4 shards; 2 s left out 123 for 55 s, 15 s left out 31 for 189 s.
  :seon.config.proofs/slow-test-ms 5000

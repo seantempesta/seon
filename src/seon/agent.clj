@@ -1092,7 +1092,7 @@
   [p names proofs]
   (let [in? #(or (contains? names %) (contains? names (symbol (namespace %))))
         p (if (seq names) (-> p (update :selected #(filterv in? %)) (update :run #(filterv in? %))) p)
-        ;; a slow test the run did not name and no proof holds is left out as bin/prove leaves it (docs/merging.md#a-slow-test-is-left-out)
+        ;; a slow test the run did not name and no proof holds is left out as bin/prove leaves it (docs/merging.md#a-slow-test-runs-last)
         slow (when-not (seq names) (fx/slow-tests (select-keys (:digests p) (remove proofs (:run p)))))
         skip? (into (set (remove #(proofs/green? (get-in p [:reused %])) (proofs/left-out (:selected p) (:process p) false #{}))) (keys slow))]
     (-> p (assoc :skipped (vec (sort-by str (filter skip? (:selected p)))))
