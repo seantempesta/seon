@@ -276,13 +276,37 @@
     (-> st (to-agent o id {:op :write :msg {:op :evals :by "root" :evals es}}) (update ::inserting dissoc id))
     st))
 
+(defn- agent-branch
+  "The branch agent id's messages are to, as a live agent holds it, else as main records it for the newest agent of that id in
+  this boot (seon.task/this-boots): its process is not needed. nil when neither names one. See docs/users.md#messages."
+  {:malli/schema [:=> [:cat :seon.root/api-state :seon.agent/id] [:maybe :seon.db/branch]]}
+  [st id]
+  (or (get-in st [:agents id :branch])
+      (let [db @(:conn st)]
+        (->> (d/datoms db :avet :seon.agent/id id)
+             (map #(d/entity db (:e %)))
+             (filter #(and (:seon.agent/branch %) (task/this-boots db %)))
+             (sort-by :db/id) last :seon.agent/branch))))
+
+(defn- message-write
+  "The writer's request for one message: from `from` (a keyword or string), of kind, to the agent on branch br, its body, a fact
+  on main (seon.task/message-tx) that the writer syncs before it answers dest. The one write of a person's message and an
+  agent's send. See docs/users.md#messages."
+  {:malli/schema [:=> [:cat :seon.root/api-state :any :seon.message/kind :seon.db/branch :any :map] :map]}
+  [st from kind br body dest]
+  {:op :tx :branch :db :flush? true :dest dest
+   :tx-data (task/message-tx (str "m-" (random-uuid)) kind (name from) (pdb/off-main (pdb/conn-main (:conn st)) br) body)})
+
 (defn- deliver-message
-  "Send an agent's message m ({:from :to [id ...] :body}) to each agent it names, as a frame:
-  a send no fact holds. An entry (a fact on main to a run) is not sent: its run reads it from
-  main (seon.agent/untaken-entries)."
+  "An agent's send m ({:from :to [id ...] :body}) written as a fact on main for each agent it names, to the branch main
+  records for that agent, live or not (message-write). An id no agent of this boot has is a problem against the sender,
+  as a refused write is (an agent's send has no answer to carry it)."
   {:malli/schema [:=> [:cat :seon.root/api-state :seon.host/volatile :map] :seon.root/api-state]}
   [st o m]
-  (reduce (fn [st id] (to-agent st o id {:op :write :msg {:op :message :from (:from m) :body (:body m) :ns (profile/now-ns)}}))
+  (reduce (fn [st id]
+            (if-let [br (agent-branch st id)]
+              (do (step/out! o :to-writer (message-write st (:from m) :message br (:body m) {:agent-facts [(:from m)]})) st)
+              (problem st (err/occurrence (gone id (str "no agent " id " on main: the send is not written")) :agent {:agent (:from m)} (System/currentTimeMillis)))))
           st (:to m)))
 
 (defn- spawn-failed
@@ -505,9 +529,7 @@
                  (nil? (get-in st [:agents id])) (reply! st o p (gone id (str "no live agent " id)))
                  :else
                  (let [[st rid] (pend st p :tx nil)]
-                   (step/out! o :to-writer {:op :tx :branch :db :flush? true
-                                            :tx-data (task/message-tx (str "m-" (random-uuid)) (:kind m :message) (name (:from m)) (pdb/off-main (pdb/conn-main (:conn st)) (get-in st [:agents id :branch])) (:body m))
-                                            :dest {:rid rid}})
+                   (step/out! o :to-writer (message-write st (:from m) (:kind m :message) (get-in st [:agents id :branch]) (:body m) {:rid rid}))
                    (update st :writes (fnil conj #{}) rid)))
       ;; requests for the writer: answered by rid; a collection only while no agent is live,
       ;; the store's only writer then being root's writer (seon.db/collect!)
