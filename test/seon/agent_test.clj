@@ -2056,6 +2056,14 @@
     (is (= 0 (:value asks)) "a green at its digest asks no gate")
     (is (not= (:value before) (:value after)) "a schema the branch registers moves a process test's digest")))
 
+;; docs/merging.md#verdicts-are-a-cache: the answer keeps a pass only for what its asker reads; a test named was read as no verdict, "not green: 1 of 1"
+(deftest a-passing-test-reads-as-passed
+  (let [t 'seon.repl-test/a-plainly-green-named-test
+        [_ named] (in-agent (fn [_] [(str "(do (in-ns 'seon.repl-test) (clojure.test/deftest a-plainly-green-named-test (clojure.test/is (= 2 (+ 1 1)))) (in-ns 'user) :ok)")
+                                     (str "(let [r (my.agent/prove '" t ")] {:proofs (:proofs r) :line (:seon.print/code (my.agent/prove-summary {} r))})")]))]
+    (is (= :pass (get-in named [:value :proofs t])) (pr-str named))
+    (is (not (str/includes? (str (get-in named [:value :line])) "no verdict")) (pr-str named))))
+
 (deftest a-real-gate-judges-a-candidate-once
   ;; the one real gate: a process test run on a checkout of the candidate, its verdict reaching the branch, and the judge's gate of the same
   ;; candidate running nothing, since the same owner holds its verdict (seon.fx/run-tests). A root of its own on a merges branch of its own: a candidate is its branch's
