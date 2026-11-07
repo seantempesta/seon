@@ -844,6 +844,20 @@
       (is (nil? (:seon.test/failures branch)) "no failures while green"))
     (is (true? (:value again)) "a run that changes nothing writes no datoms")))
 
+(deftest a-green-that-is-no-proof-writes-no-fact
+  ;; docs/sharing.md#what-a-real-branch-spends-its-nodes-on: a green that is no proof of the task is read by nothing
+  ;; on this branch (seon.reconcile/done-explain reads proofs and reds), and its facts on its var rewrite a leaf
+  ;; among the program's. A red is held, and stays held when it goes green, so it never reads as still red
+  (let [facts "(into {} (for [t '[green-test/proof green-test/other green-test/turned]] [t (:seon.test/status (datahike.api/pull (seon.agent/db) [:seon.test/status] [:var/name t]))]))"
+        [_ _ first-facts _ _ second-facts]
+        (in-agent ["(ns green-test (:require [clojure.test :refer [deftest is]])) (deftest proof (is (= 1 1))) (deftest other (is (= 1 1))) (deftest turned (is (= 1 2)))"
+                   "(select-keys (my.agent/prove) [:results])" facts
+                   "(deftest turned (is (= 1 1)))"
+                   "(select-keys (my.agent/prove) [:results])" facts]
+                  {:proofs #{'green-test/proof}})]
+    (is (= '{green-test/proof :green green-test/other nil green-test/turned :red} (:value first-facts)) (pr-str first-facts))
+    (is (= '{green-test/proof :green green-test/other nil green-test/turned :green} (:value second-facts)) (pr-str second-facts))))
+
 (deftest an-agents-greens-and-a-checkouts-are-one-store
   ;; owner, 2026-10-23: a test that is the same is not run again once green, "especially when
   ;; freshly branched": an agent's greens and a checkout's (bin/test's) are one cache, keyed by
