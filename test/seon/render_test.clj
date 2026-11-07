@@ -2113,6 +2113,19 @@
     (is (contains? (:dirty st') [:chat :sean]) "and its view is dirty")
     (is (not (contains? (:dirty st') [:chat :a1])) "another's isn't")))
 
+(deftest what-a-person-types-is-words-and-forms-by-the-one-reader
+  ;; docs/users.md#four-interfaces: text that isn't Clojure is a message, whatever the agent is doing, and a form evaluates; seon.reader/forgive tells them apart
+  (let [reqs (fn [forms a] (mapv first (seon.web/requests {:var 'seon.root/submit! :agent :a1 :forms forms} {:a1 a})))
+        say (fn [r] (select-keys r [:op :body])) ]
+    (is (= [{:op :message :body "An otter."}] (map say (reqs "An otter." {}))) "words, to an agent the page knows no task for")
+    (is (= [{:op :message :body "An otter."}] (map say (reqs "An otter." {:task "x/y"}))))
+    (is (= [:eval] (map :op (reqs "(+ 1 2)" {:task "x/y"}))) "a form evaluates")
+    (is (= "(+ 1 2)" (:forms (first (reqs "(+ 1 2)" {:task "x/y"})))))
+    (let [mixed (reqs "Try this.\n(+ 1 2)\nand tell me." {:task "x/y"})]
+      (is (= [:message :eval] (map :op mixed)) "both, the words first")
+      (is (= "Try this.\nand tell me." (:body (first mixed))))
+      (is (= "(+ 1 2)" (str/trim (:forms (second mixed))))))))
+
 (deftest a-record-that-no-longer-fits-its-schema-is-its-data
   ;; docs/render.md#the-page: a stored value outlives the schema it was written under; the page and the model read its data
   (let [old {:t 1 :classes {:a-class-since-removed {:n 1 :rows []}}}]
@@ -2997,15 +3010,15 @@
     (is (some? roots))
     (is (not= (:input roots) (:input agents)) "the page's diff sees a new unit")))
 
-(deftest words-to-a-task-agent-are-a-message-and-a-paren-is-code
+(deftest words-to-an-agent-are-a-message-and-a-paren-is-code
   ;; docs/render.md#the-page: the chat's input
   (let [ops (fn [forms a] (mapv (comp :op first) (seon.web/requests {:var 'seon.root/submit! :agent :a1 :forms forms} {:a1 a})))
         on-task {:status :idle :task "x/y"}]
     (is (= [:message] (ops "hello there" on-task)) "words")
     (is (= [:eval] (ops "(+ 1 2)" on-task)) "code")
     (is (= [:eval] (ops "  (+ 1 2)" on-task)) "code, with room before it")
-    (is (= [:eval] (ops "(+ 1 2)" {:status :idle})) "and an agent with no task has only its REPL")
-    (is (= [:eval] (ops "hello" {:status :idle})))
+    (is (= [:eval] (ops "(+ 1 2)" {:status :idle})) "code, to an agent with no task")
+    (is (= [:message] (ops "hello" {:status :idle})) "and words are a message to it")
     (is (= [] (ops "  " on-task)))))
 
 (deftest a-quote-in-a-message-reads-as-a-quote

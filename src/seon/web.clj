@@ -22,7 +22,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [ring-chez.adapter :as adapter]
-            [seon.lib :as lib] [seon.contract :as contract] [seon.config :as config] [seon.render.ui :as ui] [seon.web.html :as h] [seon.step :as step] [seon.root :as c]))
+            [seon.lib :as lib] [seon.contract :as contract] [seon.config :as config] [seon.render.ui :as ui] [seon.web.html :as h] [seon.step :as step] [seon.root :as c] [seon.reader :as reader]))
 
 ;;; --- the files it serves ------------------------------------------------------------
 
@@ -84,12 +84,13 @@
   (let [one (fn [op id args] [[(c/request op id args (get index id)) id]])]
     (case f
       seon.root/spawn! (vec (repeat (min 100 (max 1 (or (:n args) 1))) [(c/request 'spawn! nil (cond-> {} (not (str/blank? (:task args))) (assoc :task (:task args))) nil) nil]))
-      ;; to an agent on a task, words are a message its next turn reads, and a line starting ( is code; an agent with no task has no turn to read one, so its input is its REPL
+      ;; what a person types: its words a message the agent reads, its forms its REPL's, told apart by the one reader (seon.reader/words-and-forms); to every agent, forms alone
       seon.root/submit! (cond (str/blank? forms) []
-                              (and (not= :all agent) (:task (get index agent)) (not (str/starts-with? (str/triml forms) "(")))
-                              (one 'message! agent {:body (str/trim forms)})
                               (= :all agent) (vec (for [[id a] (sort-by (comp str key) index) :when (not (c/gone-statuses (:status a)))] [(c/request 'submit! id {:forms forms :origin :ui} a) id]))
-                              :else (one 'submit! agent {:forms forms :origin :ui}))
+                              :else (let [{:keys [words] code :forms} (reader/words-and-forms forms)]
+                                      (cond-> []
+                                        (not (str/blank? words)) (into (one 'message! agent {:body words}))
+                                        (not (str/blank? code)) (into (one 'submit! agent {:forms code :origin :ui})))))
       ;; seon.root/interrupt! is no request: an effect on a process, performed by this proc
       seon.root/interrupt! []
       (if (= "seon.root" (namespace f))

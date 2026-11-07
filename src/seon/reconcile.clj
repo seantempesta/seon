@@ -705,7 +705,7 @@
     (if k
       (task/message-tx (str "asked-" id "-" (:max-tx db)) (or from "root") [k]
                        (str "Task " id " " (ends-told to) (when said (str ": " said))
-                            (when (and from (#{:parked :cap} to)) (str "\nTo answer it: (send-message [:" from "] \"...\")")))
+                            (when (and from (#{:parked :cap} to) (not (:seon.user/name (:seon.task/started-by (d/entity db [:seon.task/id id]))))) (str "\nTo answer it: (send-message [:" from "] \"...\")")))
                        now)
       [])))
 

@@ -1954,6 +1954,11 @@
     [:summary {:class "px-1 text-2xs text-text-500"} "Earlier"]
     (into [:ul {:class "flex gap-2 lg:flex-col lg:gap-0.5"}] (for [boot boots] [#'boot-side {} boot]))]])
 
+(defn- newest-started
+  "The agents this user started (ctx c's :started join), newest first by when each started. See docs/users.md#whats-on-screen."
+  {:malli/schema [:=> [:cat :seon.host/db :map] [:sequential :int]]}
+  [db c] (sort-by (fn [e] [(- (or (:seon.agent/started-ms (d/entity db e)) 0)) e]) (keys (:started c))))
+
 (defn users-side
   "The users in the agents list (a component over the db): each a link to its page by its :seon.user/name. See docs/users.md#whats-on-screen."
   {:seon.render/style ".users-side { display: contents; }" :seon.render/for "page" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]]] :any]}
@@ -1965,15 +1970,15 @@
 
 (defn started-side
   "The agents this user started in its agents list (a component over ctx, by the pull's :started join): each `agent-side`. See docs/users.md#whats-on-screen."
-  {:seon.render/style ".started-side { display: contents; }" :seon.render/for "page" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
-  [{c :seon.ctx/ctx}]
-  [:li {:class "contents"} [:ul {:class "contents"} (for [eid (sort (keys (:started c)))] [#'agent-side {} eid])]])
+  {:seon.render/style ".started-side { display: contents; }" :seon.render/for "page" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
+  [{c :seon.ctx/ctx db :seon.db/db}]
+  [:li {:class "contents"} [:ul {:class "contents"} (for [eid (newest-started db c)] [#'agent-side {} eid])]])
 
 (defn started-cards
   "A card for each agent this user started, in a grid (a component over ctx and the db, `session-card` by each one's key). See docs/users.md#whats-on-screen."
   {:seon.render/for "page" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
   [{c :seon.ctx/ctx db :seon.db/db}]
-  (if-let [es (seq (sort (keys (:started c))))]
+  (if-let [es (seq (newest-started db c))]
     [:section {:class "grid grid-cols-1 gap-3 lg:grid-cols-2"}
      (for [e es :let [k (:seon.agent/key (d/entity db e))] :when k] [#'session-card {} k])]
     [:p {:class "muted"} "No agents yet."]))
