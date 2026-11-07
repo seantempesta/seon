@@ -100,25 +100,6 @@
   {:malli/schema [:=> [:cat :string] :boolean]}
   [d] (.exists (java.io.File. ^String d ".git")))
 
-(defn git-refs
-  "The refs directory of the git repository the checkout at co belongs to (its common dir, so a
-  worktree's commits and merges move refs there too), canonical as the watcher reports paths; nil
-  when co is no checkout of its own (checked-out?). git's failure throws its stderr (git!)."
-  {:malli/schema [:=> [:cat :string] [:maybe :string]]}
-  [co]
-  (when (checked-out? co)
-    (str (.getCanonicalPath (java.io.File. ^String (git! {} co ["rev-parse" "--path-format=absolute" "--git-common-dir"] nil))) "/refs")))
-
-(defn head-ref
-  "The ref file the checkout at co's HEAD names (its branch's: the common dir's refs/heads/...),
-  canonical as the watcher reports paths: the one ref under git-refs whose move is this
-  checkout's commit or merge; nil on a detached HEAD or when co is no checkout of its own."
-  {:malli/schema [:=> [:cat :string] [:maybe :string]]}
-  [co]
-  (when-let [refs (git-refs co)]
-    (when-let [ref (git-try co ["symbolic-ref" "-q" "HEAD"])]
-      (str refs (subs ref (count "refs"))))))
-
 (defn- same-repository?
   "Are the checkouts a and b of one git repository (the same common dir: a worktree and its main
   tree are, a clone or a test's own repository is not)?"
@@ -209,7 +190,7 @@
   src/seon/fx.clj, resources/seon/schemas/seon.facts.edn), sorted by path, the commit root's
   HEAD names and the revision it pins each reference-code submodule at (its gitlink), both
   absent when root is no git repository (git answers none).
-  With :paths (relative paths, the files a watcher saw change) only those files, each nil when
+  With :paths (relative paths, the files my.root/import! names) only those files, each nil when
   it is gone, and none of the others read: the cost of what changed.
   With :binary-tree (the file bin/build wrote beside the running binary), also :inputs (the
   tree's, inputs) and :binary (the tree id that file holds, or none), so root records the

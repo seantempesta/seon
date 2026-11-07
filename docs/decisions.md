@@ -4,7 +4,11 @@ This file holds the owner's standing rulings, one entry each: the rule, the owne
 
 ## 2026-11-07 rulings
 
-The owner's rulings of 2026-11-07, on what an agent starts from, on what a merge does by itself, on how proofs grow, on state and data structures, and on users.
+The owner's rulings of 2026-11-07, on the disk and the db, on what an agent starts from, on what a merge does by itself, on how proofs grow, on state and data structures, and on users.
+
+### The db is the source of truth; a disk edit imports only when asked
+
+Owner, 2026-11-07: "the db is the source of truth and we should be syncing to the disk from within seon (this is the focus for the system is seon agents working within seon). However, claude agents are working from the outside so we need a mechanism to index and update the db that you and your agents will manually control." Root's watcher loads the wiki and the task files, never the source; `my.root/import!` is the manual call. Stated in [health](health.md#every-writer-root-loads-what-changed) and [source](source.md#mains-program-follows-the-tree).
 
 ### No magic: maintenance is Clojure data on ctx
 
