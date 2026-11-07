@@ -395,7 +395,7 @@
 (defn deliver!
   "Bring what main holds for this agent onto its branch, committed, as turn n's: its messages (undelivered) and the facts of
   its own entities (untaken-facts). The one delivery, a turn's (seon.turn/deliver!) and its code's (messages). Answers the
-  messages delivered."
+  messages delivered. See docs/users.md#messages."
   {:malli/schema [:=> [:cat nat-int?] [:vector :map]]}
   [n]
   (let [es (undelivered)

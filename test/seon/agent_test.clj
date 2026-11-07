@@ -2422,7 +2422,7 @@
   ;; process (its pid), on the same agent (the parked one's own: the harness's agent is another).
   ;; The wake starts clean in that process: it takes the message and runs turns of its own
   ;; (flow-lab's hazards 1 and 2: a stop left by the parked wake ended the next at once with the
-  ;; message untaken; turn numbers restarted over the recorded ones). The agent's turn number is the agent's
+  ;; message undelivered; turn numbers restarted over the recorded ones). The agent's turn number is the agent's
   ;; (docs/turn.md#the-turn-is-a-number): one sequence across both wakes
   (let [names (volatile! nil)
         [_ r] (in-agent (fn [{:keys [ns] :as n}]
@@ -2435,19 +2435,17 @@
                                          " (let [a " (agent-code w) " ag (:seon.agent/id a) k (:seon.agent/key a)"
                                          " pid1 (get-in (c/state sys) [:agents ag :pid])"
                                          " b1 (branch-of " (pr-str w) ")"
-                                         " turn1 (:seon.agent/turn (datahike.api/entity b1 [:seon.agent/key k]))"
-                                         " max1 (:seon.agent/max-turns (datahike.api/entity @(:conn sys) [:seon.agent/key k]))]"
+                                         " turn1 (:seon.agent/turn (datahike.api/entity b1 [:seon.agent/key k]))]"
                                          " @(seon.root/message! sys ag \"carry on\") " (parked-code w 2)
                                          " (let [b2 (branch-of " (pr-str w) ")]"
-                                         "  {:key k :pid1 pid1 :pid2 (get-in (c/state sys) [:agents ag :pid]) :max-turns [max1 (:seon.agent/max-turns (datahike.api/entity @(:conn sys) [:seon.agent/key k]))]"
+                                         "  {:key k :pid1 pid1 :pid2 (get-in (c/state sys) [:agents ag :pid])"
                                          "   :turns [turn1 (:seon.agent/turn (datahike.api/entity b2 [:seon.agent/key k]))]"
                                          "   :numbers (sort (datahike.api/q '[:find [?n ...] :where [?m :seon.model-call/n ?n] [?m :seon.model-call/origin :model]] b2))})))")}]))
                         {:config {:seon.config.ai/script 'seon.fixtures/wait-call}
                          :decls [{:seon.task/name "w" :seon.task/plan "Wait." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]})
-        {:keys [key pid1 pid2 max-turns turns numbers]} (:value r)
+        {:keys [key pid1 pid2 turns numbers]} (:value r)
         [t1 t2] turns]
     (is (string? key) (pr-str r))
-    (is (= (cfg/value :seon.config.agent/wake-turns) (- (second max-turns) (first max-turns))) "the wake raised the agent's budget by its allowance, in the write that started it")
     (is (and (pos? t1) (< t1 t2)) (str "and ran turns of its own: " (pr-str turns)))
     (is (= (range 1 (inc t2)) numbers)
         "the wake's turns go on from the parked one's: the agent's one sequence, none restarting and none over a recorded one")

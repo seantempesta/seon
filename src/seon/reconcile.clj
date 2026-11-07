@@ -1140,7 +1140,7 @@
   {:malli/schema [:=> [:cat :map :map] :boolean]}
   [st m] (let [{:keys [ok t]} (:r m)] (boolean (or (nil? (:t st)) (and ok (int? t) (< (:t st) t))))))
 
-(def ^:private waiting-outcomes "The outcomes a task stands at while its agent waits for a message: parked, told, or at its cap." #{:parked :told :cap})
+(def ^:private waiting-outcomes "The outcomes a task stands at while its agent waits for a message: parked, told, or at its cap. See docs/users.md#messages." #{:parked :told :cap})
 
 (defn- tasks-of-key
   "The ids of the tasks the agent with key k is on, on db."
