@@ -21,7 +21,7 @@
  ;; keeps the order between two such forms (the file already loads)
  :form/source :boolean
  :form/ns [:and {:seon.db/index true} :seon.db/ref]
- ;; its place among its namespace's forms (a file's order; a new form after all others)
+ ;; its place among its namespace's forms: a sort key, not an index (seon.program/stable-places), so an inserted form moves no other; a new form after all others
  :form/order :int
  :form/defines [:set :seon.db/ref]
  :form/declares [:set :seon.db/ref]
