@@ -421,8 +421,11 @@
                             (map #(vector :db/retractEntity %)))
                    carried)
         tx (-> (attribute-declarations onto carried) (into carried) (into gone))]
-    (if (some #(= :schema (first %)) ks)
-      (into tx (program/schema-declarations onto (program/schema-registry (program/schema-changes (d/db-with onto tx)))))
+    (if-let [own (seq (keep #(when (= :schema (first %)) (second %)) ks))]
+      (let [merged (d/db-with onto tx)
+            reg (program/schema-registry (program/schema-changes merged))]
+        (-> tx (into (program/schema-declarations onto reg))
+            (into (mapcat #(program/own-declaration onto % reg)) own)))
       tx)))
 
 ;; ---- what program code does not do ----------------------------------------------------

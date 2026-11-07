@@ -39,7 +39,7 @@ Plain data is what the store keeps as data and EDN carries, and one predicate sa
 
 ## The write checks every datom
 
-A write holds each value to its attribute's declared schema, so a value the schema refuses is never stored. The store itself checks only a value's type, and for a data attribute only that it is plain. ```seon.db/invalid-datom``` runs at the two points every write passes (```seon.agent/transact!``` and the writer's `:tx` op) and answers the declared `:seon.db/invalid-datom`, naming the attribute and where in the value. It reads a map's attributes and `:db/add`'s, walks a nested entity, takes a ref's id or lookup as it is, and leaves alone an attribute no schema declares (an agent's own, whose registry is its branch's), a retraction and a transaction function. It costs one validation per datom: one definition's contracted calls went from 83 to 101 (the owner's yes, 2026-11-06).
+A write holds each value to its attribute's declared schema, its branch's form where the branch registered one, so a value the schema refuses is never stored. The store itself checks only a value's type, and for a data attribute only that it is plain. ```seon.db/invalid-datom``` runs at the two points every write passes (```seon.agent/transact!``` and the writer's `:tx` op) and answers the declared `:seon.db/invalid-datom`, naming the attribute and where in the value. It reads a map's attributes and `:db/add`'s, walks a nested entity, takes a ref's id or lookup as it is, and leaves alone an attribute no schema declares (an agent's own, whose registry is its branch's), a retraction and a transaction function. It costs one validation per datom: one definition's contracted calls went from 83 to 101 (the owner's yes, 2026-11-06).
 
 ## Entity ids
 

@@ -342,6 +342,15 @@
   {:malli/schema [:=> [:cat :map [:set :any]] :map]}
   [st attrs] (cond-> st (some #(and (keyword? %) (= "schema" (namespace %))) attrs) (dissoc :schema-registry)))
 
+(defn branch-schemas
+  "This agent's branch's schema changes and their registry, {:key changes :registry r}: held until a write moves a schema entry (`schema-moved`), a new agent holding main's from its fork (seon.fork-server/warm-start). Reading the changes is two passes over every schema entry, so no eval or write reads them while none moved. See docs/machine.md#an-agents-first-write."
+  {:malli/schema [:=> [:cat] :map]}
+  []
+  (or (:schema-registry @state)
+      (let [k (program/schema-changes (:db @state)) v {:key k :registry (program/schema-registry k)}]
+        (swap! state assoc :schema-registry v)
+        v)))
+
 (defn transact!
   "Write tx-data to this agent's branch: applied at once to the value ahead of the
   committed one (its answer does not wait for a commit), committed when the agent is idle
@@ -355,7 +364,7 @@
         tx-data (if (some #(if (map? %) (some text? (keys %)) (and (vector? %) (text? (nth % 2 nil)))) tx-data)
                   (with-citations (db) tx-data)
                   tx-data)]
-    (when-let [e (pdb/invalid-datom (db) tx-data)] (throw (ex-info (:seon.error/message e) e)))
+    (when-let [e (pdb/invalid-datom (db) tx-data (let [{:keys [key registry]} (branch-schemas)] (when (seq key) {:forms key :registry registry})))] (throw (ex-info (:seon.error/message e) e)))
     (if (= :test (:mode @state))
       (let [r (d/with (db) tx-data) attrs (into #{} (map :a) (:tx-data r))]
         (doc/carry-index! (:db-before r) (:db-after r) (map (juxt :e :a) (:tx-data r)))
