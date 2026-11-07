@@ -2044,17 +2044,19 @@
         digest (str "(get (:digests (seon.agent/test-plan (seon.agent/db) (:base @seon.agent/state) #{'" t "})) '" t ")")
         hold (fn [verdict] (str "(seon.fx/write-verdicts! {:id \"another\" :key \"another\"} {'" t " (assoc " (pr-str verdict) " :digest " digest ")} {})"))
         prove "(let [r (my.agent/prove)] {:proofs (:proofs r) :deferred (:deferred r)})"
-        [_ _ _ red asked-on-red _ _ green asks before _ after]
+        [_ _ _ red asked-on-red _ _ green asks before _ after _ after-script]
         (in-agent (fn [_] [(answers-gate t) (process-proof "a-process-proof-already-green" 2)
                            (hold {:pass 0 :fail 1 :error 0}) prove "(let [n @user/gate-asks] (reset! user/gate-asks 0) n)"
                            (process-proof "a-process-proof-already-green" 3) (hold {:pass 1 :fail 0 :error 0}) prove "@user/gate-asks"
-                           digest "(my.schema/register! :seon.gate-test/k :string)" digest])
+                           digest "(my.schema/register! :seon.gate-test/k :string)" digest
+                           "(do (seon.agent/transact! [{:file/path \"bin/gate-test\" :file/text \"#!/bin/sh\\n\"}]) :ok)" digest])
                   {:proofs #{t}})]
     (is (= 1 (:value asked-on-red)) (str "another's red is not this agent's verdict: the gate is asked. " (pr-str red)))
     (is (= {t :pass} (:proofs (:value green))) (pr-str green))
     (is (= [] (:deferred (:value green))) "nothing left unjudged")
     (is (= 0 (:value asks)) "a green at its digest asks no gate")
-    (is (not= (:value before) (:value after)) "a schema the branch registers moves a process test's digest")))
+    (is (not= (:value before) (:value after)) "a schema the branch registers moves a process test's digest")
+    (is (not= (:value after) (:value after-script)) "and so does a script the branch writes")))
 
 ;; docs/merging.md#verdicts-are-a-cache: the answer keeps a pass only for what its asker reads; a test named was read as no verdict, "not green: 1 of 1"
 (deftest a-passing-test-reads-as-passed
