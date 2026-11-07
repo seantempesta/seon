@@ -388,8 +388,10 @@
   (let [dir (str "the verdict cache " (config/value :seon.config.proofs/results-dir))
         tests? (not= what "checks") checks? (not= what "tests")
         {:keys [run-tests run-steps reused cand left slow digests steps missing inputs binary no-test process flaky]} plan
+        ;; a merge runs these last, once all else is green (bin/prove): out/slow, names, one line
+        _ (write! (str out "/slow") (str (str/join " " (sort (map str (keys slow)))) (when (seq slow) "\n")))
         _ (when (seq slow)
-            (println (str "prove: " (count slow) " slow tests left out, each a held task to make it fast (run one by name: bin/test NS/TEST, all: bin/test --all): "
+            (println (str "prove: " (count slow) " slow tests left for last (a merge runs them once all else is green; a plain prove leaves them out; run one by name: bin/test NS/TEST, all: bin/test --all): "
                           (str/join " " (map (fn [[t ms]] (str t " " ms "ms")) (sort-by (comp - val) slow))))))
         ;; a test namespace of the tree that its program db holds no test of: nothing it holds can
         ;; be selected, so a run would say OK of tests it never saw

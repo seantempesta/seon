@@ -514,7 +514,7 @@
         ;; reported as if it passed (a run ends on what it ran)
         found (into {} (filter (fn [[_ r]] (or (green? r) (:flaky r)))) (results-at cand))
         ;; of the tests that would run, a slow one is out of a merge's run too: only naming it or the
-        ;; full run runs it (docs/merging.md#a-slow-test-is-left-out)
+        ;; full run runs it (docs/merging.md#a-slow-test-runs-last)
         slow (when (and slow-of (not named?))
                (slow-of (into {} (filter (fn [[k dg]] (and (symbol? k) (not (found dg))))) cand)))
         cand (apply dissoc cand (keys slow))
