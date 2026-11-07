@@ -125,8 +125,9 @@
       (is (= "I wrote text." (:text (reply {:evals [{:intent "f" :code "(f)"}]} "I wrote text."))))
       (is (= "Text.\n\nMessage." (:text (reply {:message-md "Message." :evals [{:intent "f" :code "(f)"}]} "Text.")))))
     (testing "a call that is not this shape is a typed answer to that reply, nothing run"
-      (is (re-find #"evals is missing or empty" (:problem (first (:tool-calls (reply {:message-md "Hi" :intent "old" :code "(f)"}))))))
-      (is (re-find #"evals is missing or empty" (:problem (first (:tool-calls (reply {:message-md "Hi" :evals []}))))))
+      (is (re-find #"evals is missing, and the call names code, intent beside message-md" (:problem (first (:tool-calls (reply {:message-md "Hi" :intent "old" :code "(f)"}))))) "an old shape's code is not run, nor taken for a message alone")
+      (is (nil? (:tool-calls (reply {:message-md "Hi" :evals []}))) "no evals is a reply of its message alone: no call")
+      (is (= "Hi" (:text (reply {:message-md "Hi" :evals []}))))
       (is (re-find #"its code is missing" (:problem (second (:tool-calls (reply {:message-md "Hi" :evals [{:intent "f" :code "(f)"} {:intent "g"}]})))))))))
 
 (deftest a-request-lets-the-model-reply-with-no-call
@@ -140,7 +141,7 @@
     (is (= "auto" (:tool_choice b)))
     (is (= [:message-md :evals] (keys (get-in b [:tools 0 :function :parameters :properties]))) "the message, then the evals: it talks and thinks before the code")
     (is (= [:intent :code] (keys (get-in b [:tools 0 :function :parameters :properties :evals :items :properties]))))
-    (is (= ["message-md" "evals"] (get-in b [:tools 0 :function :parameters :required])) "both")
+    (is (= ["message-md"] (get-in b [:tools 0 :function :parameters :required])) "only the message: the evals may be none")
     (is (not (str/includes? (pr-str (:tools b)) ";;")) "no ;; in the tool")
     (is (not (contains? b :temperature)) "absent: the provider's default")
     (is (= 0.5 (:temperature (model/request-body {:kind :openai-compat :base-url "" :model "m" :api-key-env "" :max-tokens 10 :temperature 0.5} {:messages [] :task "t/x" :turn 1}))) "set: as configured")

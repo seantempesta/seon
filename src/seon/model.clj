@@ -200,9 +200,14 @@
   [j id]
   (let [shape "A call is {\"message-md\": <string>, \"evals\": [{\"intent\": <string>, \"code\": <string>}, ...]}."
         es (when (map? j) (get j "evals"))
-        msg (when (map? j) (get j "message-md"))]
+        msg (when (map? j) (get j "message-md"))
+        stray (when (map? j) (sort (remove #{"message-md" "evals"} (keys j))))]
     (cond
-      (or (nil? es) (and (sequential? es) (empty? es))) []
+      ;; no evals: a reply of its message alone, unless the call names something else (an old shape's code and intent are not run silently)
+      (and (or (nil? es) (and (sequential? es) (empty? es))) (empty? stray)) []
+      (or (nil? es) (and (sequential? es) (empty? es)))
+      (cond-> [{:id id :code (json/write-str j) :problem (str "this call was not run: evals is missing, and the call names " (str/join ", " stray) " beside message-md. " shape)}]
+        (string? msg) (assoc-in [0 :message-md] msg))
       (not (sequential? es))
       (cond-> [{:id id :code (json/write-str j) :problem (str "this call was not run: evals is not a list. " shape)}]
         (string? msg) (assoc-in [0 :message-md] msg))

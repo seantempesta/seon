@@ -662,7 +662,7 @@
    (fn [cfg conn]
      (let [k (akey "a") br (task/default-branch "demo/a") sb (pdb/on-main (:branch cfg) br)
            _ (d/transact conn (task/create-tx @conn [(decl "a")]))
-           _ (d/transact conn (into (task/execution-tx ["demo/a"] :running) (task/boot-tx "boot-1" 4)))
+           _ (d/transact conn (into (task/execution-tx ["demo/a"] :running) (task/boot-tx "boot-1" 4 "sean")))
            _ (d/transact conn (work "a" :running))
            _ (d/branch! conn (:branch cfg) sb)
            _ (d/transact conn (task/message-tx "m1" "owner" [k] "carry on" 1000))
