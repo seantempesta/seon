@@ -1293,7 +1293,7 @@
   ;; seon.turn/show-page!: a page shown whole once; nothing moved, no eval; a plan changed with swap! on @ctx, one eval holding the
   ;; task's part alone. A render that throws is that eval's error value, which the request reads, and the turn that asked goes on
   ;; (AGENTS 4: nothing crashes)
-  (let [evals "(let [db (seon.agent/db)] (vec (sort-by #(parse-long (re-find #\"\\d+$\" (first %))) (for [e (datahike.api/q '[:find [?e ...] :where [?e :seon.eval/by \"seon\"]] db) :let [m (datahike.api/pull db '[:seon.eval/id :seon.eval/code :seon.eval/response] e)] ] [(:seon.eval/id m) (:seon.eval/code m) (let [v (get-in m [:seon.eval/response :value])] (set (concat (map first (:components v)) (map (comp first first) (:edits v))))) (get-in m [:seon.eval/response :ex :seon.error/message])]))))"
+  (let [evals "(let [db (seon.agent/db)] (vec (sort-by #(parse-long (re-find #\"\\d+$\" (first %))) (for [e (datahike.api/q '[:find [?e ...] :where [?e :seon.eval/by \"seon\"]] db) :let [m (datahike.api/pull db '[:seon.eval/id :seon.eval/code :seon.eval/response :seon.eval/result] e)] ] [(:seon.eval/id m) (:seon.eval/code m) (let [v (:value (seon.db/response-of db m))] (set (concat (map first (:components v)) (map (comp first first) (:edits v))))) (get-in (seon.db/response-of db m) [:ex :seon.error/message])]))))"
         rs (in-agent ["(#'seon.turn/show-page!)"
                       "(#'seon.turn/show-page!)"
                       evals
@@ -1384,7 +1384,7 @@
 ;; docs/render.md#a-redo-is-an-explicit-bust: a diff removed leaves the next one standing on a page its reader was never shown; the redo
 ;; draws what moved from the page as of each t, in place, and what still stands on what came before it is left byte for byte
 (deftest a-redo-is-drawn-from-the-page-as-of-each-t
-  (let [page-evals "(let [db (seon.agent/db)] (vec (sort-by #(parse-long (re-find #\"\\d+$\" (first %))) (for [e (datahike.api/q '[:find [?e ...] :where [?e :seon.eval/by \"seon\"]] db) :let [m (datahike.api/pull db '[:seon.eval/id :seon.eval/code :seon.eval/page :seon.eval/response] e)]] [(:seon.eval/id m) (:seon.eval/page m) (get-in m [:seon.eval/response :value])]))))"
+  (let [page-evals "(let [db (seon.agent/db)] (vec (sort-by #(parse-long (re-find #\"\\d+$\" (first %))) (for [e (datahike.api/q '[:find [?e ...] :where [?e :seon.eval/by \"seon\"]] db) :let [m (datahike.api/pull db '[:seon.eval/id :seon.eval/code :seon.eval/page :seon.eval/response :seon.eval/result] e)]] [(:seon.eval/id m) (:seon.eval/page m) (:value (seon.db/response-of db m))]))))"
         move #(str "(do (swap! ctx assoc-in [:task :seon.task/plan] \"" % "\") (#'seon.turn/show-page!))")
         rs (in-agent ["(#'seon.turn/show-page!)" (move "A plan that moved.") (move "A plan that moved again.") (move "A plan that moved a third time.")
                       page-evals
@@ -2680,7 +2680,7 @@
         (in-agent (fn [_] ["(dissoc (seon.repl/eval-string \"(+ 1 2)\" {:origin :model}) :ms :ticks :bytes)"
                            "(let [r (seon.repl/eval-string \"(map (fn [_] (throw (ex-info \\\"late\\\" {}))) [1])\" {:origin :model})] (select-keys r [:ex :record]))"
                            "(let [r (seon.repl/eval-string \"(atom 1)\" {:origin :model})] (:record r))"
-                           "(let [id (:record (seon.repl/eval-string \"(atom 1)\" {:origin :model}))] (:value (:seon.eval/response (datahike.api/entity (seon.agent/db) [:seon.eval/id id]))))"])
+                           "(let [id (:record (seon.repl/eval-string \"(atom 1)\" {:origin :model}))] (:value (seon.db/response-of (seon.agent/db) (datahike.api/pull (seon.agent/db) '[:seon.eval/response :seon.eval/result] [:seon.eval/id id]))))"])
                   {})]
     (is (not (contains? (:value model) :text)) (pr-str model))
     (is (some? (get-in thrown [:value :ex])) (str "a value throwing as it is realized is the eval's error: " (pr-str thrown)))
@@ -2696,7 +2696,7 @@
   ;; conversation then sees them in order and, in the request, as calls of their own.
   (let [read (str "(let [c @seon.ctx/ctx db (seon.agent/db) es (map #(get-in c [:evals (first %)]) (:evals (seon.context/turn-members db c (second (first (seon.context/turns c))))))] "
                   "{:turn (seon.agent/turn-now) "
-                  " :records (mapv (fn [v] [(:seon.eval/by v) (:seon.eval/intent v) (:seon.eval/call-id v) (some? (get-in v [:seon.eval/response :ex])) (get-in v [:seon.eval/response :value])]) es) "
+                  " :records (mapv (fn [v] [(:seon.eval/by v) (:seon.eval/intent v) (:seon.eval/call-id v) (some? (:ex (seon.db/response-of db v))) (:value (seon.db/response-of db v))]) es) "
                   " :roles (mapv :role (drop 2 (:messages (seon.context/render db {:agent (:key @seon.agent/state) :commit (datahike.api/commit-id db) :task \"x\" :turn 1 :max-turns 1 :origin :outside} {:walk (seon.repl/page-walk)}))))})")
         code (str "(let [id (c/spawn! sys {:evals [[\"Add.\" \"(+ 1 2)\"] [\"Throw.\" \"(throw (ex-info \\\"boom\\\" {}))\"] [\"Never.\" \"(+ 3 4)\"]]}) "
                   "r @(c/submit! sys id " (pr-str read) " {:origin :outside})] "
