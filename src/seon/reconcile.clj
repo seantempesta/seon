@@ -1006,7 +1006,7 @@
                 (contract/error? r) (dead st r)
                 :else
                 (if (= :diffed (after-work r))
-                  (one (request st id :diffed {:op :write :req {:op :branch-diff :branch (get-in act [:env :branch])}}))
+                  (one (request (assoc-in st [:flights id :results] {}) id :diffed {:op :write :req {:op :branch-diff :branch (get-in act [:env :branch])}}))
                   (one (request (cond-> st (:ex r) (assoc-in [:flights id :worked-error] (:ex r)))
                                 id :tested {:op :judge :id agent}))))
       :tested (if (contract/error? r)

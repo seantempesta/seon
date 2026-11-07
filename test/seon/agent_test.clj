@@ -2496,6 +2496,28 @@
     (is (= {:turns [1 (inc allowance)] :max-turns [1 (inc allowance)]} (:value r))
         "one turn to its cap; the wake raised the budget by the allowance and it ran those turns, to its cap again")))
 
+(deftest a-woken-agent-that-replies-stays-parked
+  ;; docs/turn.md#parked: a wake gives one conversation turn and its reply parks the agent: it isn't woken again by nothing, or it would spend its budget talking to itself (seen 2026-11-07 on a real model)
+  (let [_ '[seon.reconcile/advance seon.reconcile/start seon.reconcile/settle-late]
+        [_ r] (in-agent (fn [{:keys [ns]}]
+                          (let [w (str ns "/w")]
+                            [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")}
+                             {:op :eval :agent "root"
+                              :code (str "(let [branch-of " branch-of-code "]"
+                                         " (my.root/run! sys [" (pr-str w) "]) " (parked-code w 1)
+                                         " (let [a " (agent-code w) " ag (:seon.agent/id a) k (:seon.agent/key a)"
+                                         "       turn-of (fn [] (:seon.agent/turn (datahike.api/entity (branch-of " (pr-str w) ") [:seon.agent/key k])))]"
+                                         "   @(seon.root/message! sys ag \"carry on\") " (parked-code w 2)
+                                         "   (let [t2 (turn-of) m2 (:db (deref (seon.root/call! sys {:op :write :req {:op :branch-db :branch :db}})))"
+                                         "         _ (dotimes [_ 5] (deref (seon.root/call! sys {:op :write :req {:op :tx :branch :db :tx-data [{:seon.agent/key k :seon.agent/description \"a move of main\"}]}})))"
+                                         "         t3 (turn-of)]"
+                                         "     {:turns [t2 t3] :outcome (:seon.task/outcome (datahike.api/entity @(:conn sys) [:seon.task/id " (pr-str w) "]))})))")}]))
+                        {:config {:seon.config.ai/script 'seon.fixtures/wait-call}
+                         :decls [{:seon.task/name "w" :seon.task/plan "Wait." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]})
+        {:keys [turns outcome]} (:value r)]
+    (is (= :parked outcome) (pr-str r))
+    (is (apply = turns) (str "no more turns while nothing arrives: " (pr-str turns)))))
+
 (deftest a-reply-with-no-evals-stops-with-turns-left
   ;; docs/model.md#one-tool-eval: a call whose evals are empty is a reply of its message alone, as text with no call is: nothing runs and the
   ;; agent waits, with turns left
