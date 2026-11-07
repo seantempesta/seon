@@ -1283,25 +1283,24 @@
     (into {} (for [k [:seon.eval/id :seon.eval/code :seon.eval/response :seon.eval/schema :seon.eval/basis]
                    :let [v (ratom/realize (get-in c (conj at k)))] :when (some? v)] [k v]))))
 
-(defn- renders-itself?
-  "Does value v have a render of its own: hiccup it holds under :seon.render/html (a chart, an image), a render function named there, or the render of its schema k (the one its record names), so an agent's value draws itself by a render it just defined? See docs/render.md#a-value-draws-itself."
-  {:malli/schema [:=> [:cat :any :any] :boolean]}
-  [v k] (boolean (and (some? v) (or (and (map? v) (some? (:seon.render/html v))) (render/render-of v k)))))
-
 (defn eval-glance
-  "What came of an eval, in the chat with no click (a component over ctx, for the page alone): a value with a render of its own drawn by it (`renders-itself?`), else what went wrong, else the value on one line, which opening the step replaces. See docs/render.md#a-value-draws-itself."
-  {:seon.render/style ".eval-glance { margin: 0.25rem 0 0.25rem 1rem; min-width: 0; overflow-x: auto; font-size: 0.75rem; }\n.eval-item:has(> details[open]) .eval-glance-line { display: none; }" :seon.render/for "page" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:at [:vector :any]]]]] :any]}
-  [{c :seon.ctx/ctx at :at}]
+  "What came of an eval, in the chat with no click (a component over ctx and the db, for the page alone): its value through the one render (render/html: the render it has, else the value printer), whole once its step is opened; or, closed, what went wrong on a line, the opened step having the rest. See docs/render.md#a-value-draws-itself."
+  {:seon.render/style ".eval-glance { margin: 0.25rem 0 0.25rem 1rem; min-width: 0; overflow-x: auto; font-size: 0.75rem; }\n.eval-item:has(> details[open]) .eval-glance-line { display: none; }" :seon.render/for "page" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db] [:at [:vector :any]]]]] :any]}
+  [{c :seon.ctx/ctx db :seon.db/db at :at}]
   (when-let [e (eval-shown c at)]
-    (let [{:keys [ex value]} (:seon.eval/response e)
+    (let [{:keys [ex value handle out err warnings]} (:seon.eval/response e)
+          r (:seon.eval/response e)
           v (ratom/realize value)
           k (:seon.eval/schema e)
-          err (or (ratom/realize ex) (when (contract/error? v) v))
-          line (fn [x] (print/line x (config/value :seon.config.render/line-budget) nil))]
+          failed (or (ratom/realize ex) (when (contract/error? v) v))
+          opened? (ratom/realize (get-in c (conj at :seon.eval/opened)))
+          budget (if opened? (inc (render/tokens-of v)) (config/value :seon.config.render/value-budget))
+          whole (cond-> v (and opened? (instance? clojure.lang.IObj v)) (vary-meta assoc :seon.print/full true))]
       (cond
-        err [:div [:span {:class "eval-glance-line text-error"} (line (or (:seon.error/message err) err))]]
-        (renders-itself? v k) [:div (render/html (cond-> {:as :block} k (assoc :schema k)) v)]
-        (some? v) [:div [:code {:class "eval-glance-line text-text-400"} (line v)]]))))
+        failed [:div [:span {:class "eval-glance-line text-error"} (print/line (or (:seon.error/message failed) failed) (config/value :seon.config.render/line-budget) nil)]]
+        ;; a nil beside output is the output's whole answer (clojure.repl/source prints and answers nil)
+        (and (contains? r :value) (not (and (nil? v) (or (ratom/realize out) (ratom/realize err) (seq (ratom/realize warnings))))))
+        [:div (render/html (cond-> {:budget budget :handle handle :db db} k (assoc :as :block :schema k)) whole)]))))
 
 (defn- step-tools
   "An opened step's buttons, for a live agent (the page's stylesheet shows them only beside its REPL's input, so no step is drawn again as its status moves): run it again in its place,
@@ -1356,17 +1355,9 @@
        (for [[label k s] printed]
          [:div {:class "seon-row"} [:span {:class (if (#{:err :warnings} k) "text-warning" "muted")} label]
           (render/html {:budget (budget s) :handle (when handle (list k handle))} (whole s))])
-       (if err
+       (when err
          [:div {:class "text-error"} "✗ " (:seon.error/message err)
-          (render/html {:budget (budget err) :handle handle} (whole (dissoc err :seon.error/message)))]
-         ;; a nil beside output is the output's whole answer (clojure.repl/source prints and answers nil)
-         (when (and (contains? (:seon.eval/response e) :value) (not (and (nil? v) (seq printed)))
-                    ;; one that draws itself is already in the chat (`eval-glance`): opening never draws it twice
-                    (not (renders-itself? v (:seon.eval/schema e))))
-           [:div {:class "seon-row"} [:span {:class "muted"} "→"]
-            ;; by the render its record names, when it names one: a value draws as itself (docs/render.md#the-page)
-            (render/html (cond-> {:budget (budget v) :handle handle :db db}
-                           (:seon.eval/schema e) (assoc :as :block :schema (:seon.eval/schema e))) (whole v))]))])))
+          (render/html {:budget (budget err) :handle handle} (whole (dissoc err :seon.error/message)))])])))
 
 (defn proved
   "A prove's run as its eval's tile draws it (the declared html render of :seon.test/proved, from

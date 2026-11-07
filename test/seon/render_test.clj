@@ -1185,11 +1185,10 @@
     (is (str/includes? printed "(* 2 x)"))
     (is (not (str/includes? printed "→")) "a nil value beside output draws no arrow")
     (is (not (str/includes? printed "nil")) printed)
-    (is (str/includes? silent "→") "a real nil with no output is still shown")
-    (is (str/includes? silent "nil"))
+    (is (str/includes? silent "nil") "a real nil with no output is still shown")
     (is (str/includes? both "printed-out") "output beside a value")
     (is (str/includes? both "warned-err") "and its stderr, under :err")
-    (is (str/includes? both "→") "the value is still drawn when it is not nil")
+    (is (str/includes? both ">7<") "the value is still drawn when it is not nil")
     (is (and (str/includes? cut "line-0") (not (str/includes? cut "line-2999"))) "output over the value budget is cut")
     (is (< (count cut) 6000) (str "cut by the value's budget: " (count cut) " chars"))
     (is (str/includes? cut "(subs (:seon.print/code (:out result/e23))") "and the cut says how to read the rest")))
@@ -1640,7 +1639,7 @@
   (let [[w a branch] (live-walk)
         e3 (seon.db/eid branch :seon.eval/id "e3")]
     (swap! a assoc-in [:evals e3 :seon.eval/opened] true)
-    (is (= {[`ui/eval-item "e3"] :miss [`ui/eval-output "e3"] :same} (r/flush! w nil)) "an eval opened: that eval's line and its output run (opened, the output is whole); its turn's and its list's layout do not")
+    (is (= {[`ui/eval-item "e3"] :miss [`ui/eval-output "e3"] :same, [`ui/eval-glance "e3"] :same} (r/flush! w nil)) "an eval opened: that eval's line and its output run (opened, the output is whole); its turn's and its list's layout do not")
     (swap! a assoc :t 99)
     (is (= {} (r/flush! w nil)) "a change no component read: nothing runs")
     (swap! a assoc-in [:evals e3 :seon.eval/opened] true)
@@ -2633,13 +2632,13 @@
       (is (str/includes? e "Run the proofs.") "a step's line is what it set out to do")
       (is (= 1 (count (re-seq #"\(prove-it\)" e))) "its code once, under the line")
       (is (not (re-find #"<details[^>]* open" e)) "closed until opened"))
-    (is (str/includes? (h/html (ui/eval-output (assoc opts :at [:evals (eid "e3")]))) "prove") "its value by the render its record names")))
+    (is (str/includes? (h/html (ui/eval-glance (assoc opts :at [:evals (eid "e3")]))) "prove") "its value by the render its record names")))
 
 (deftest an-opened-step-shows-its-result-whole
   ;; docs/render.md#the-page: expanding expands: a step closed holds a start, opened all of it, with nothing further to open
   (let [v (mapv (fn [i] {:n i :name (str "row-" i)}) (range 800))
         e {:seon.eval/id "e1" :seon.eval/code "(rows)" :seon.eval/response {:handle 'result/e1 :value v}}
-        draw (fn [e] (h/html (ui/eval-output {:seon.ctx/ctx {:evals {1 e}} :seon.db/db (ts/test-db) :at [:evals 1]})))
+        draw (fn [e] (h/html (ui/eval-glance {:seon.ctx/ctx {:evals {1 e}} :seon.db/db (ts/test-db) :at [:evals 1]})))
         closed (draw e)
         opened (draw (assoc e :seon.eval/opened true))]
     (is (not (str/includes? closed "row-799")) "closed: its start")
@@ -2948,8 +2947,8 @@
             g1 (str/index-of html "eval-glance-g1")
             wire (pr-str (r/placed-hiccup w ["#c-rows"]))]
         (is (str/includes? html "<svg") "the chart is drawn, closed step and all")
-        (is (str/includes? html "eval-glance-line") "a plain value is one line")
-        (is (str/includes? html "plain-value"))
+        (is (not (str/includes? html "<svg height=\"0")) "drawn as it is")
+        (is (str/includes? html "plain-value") "a value with no render: the value printer")
         (is (some? g1))
         (is (not (str/includes? wire "eval-glance")) "the model reads no glance"))
       (finally (r/dispose-walk! w))))
