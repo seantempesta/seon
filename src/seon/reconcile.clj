@@ -687,32 +687,30 @@
   {:malli/schema [:=> [:cat :seon.reconcile/state :seon.task/id :seon.reconcile/step :map] [:tuple :seon.reconcile/state :map]]}
   [st id step req] (step/ask st [:reconciler :answers] [id step] req))
 
-(defn- agent-on
-  "The key of the newest agent whose branch main names b (a session's agent: its key is the same across boots), or nil. O(the agents)."
-  {:malli/schema [:=> [:cat :seon.host/db :keyword] [:maybe :string]]}
-  [db b]
-  (some->> (d/datoms db :aevt :seon.agent/branch) (filter #(= b (:v %))) (map :e) sort last (d/entity db) :seon.agent/key))
-
 (def ^:private ends-told
   "The outcomes an agent that launched a task hears of, each in words: where its work has stopped, for now or for good."
   {:parked "is waiting for an answer" :cap "used all its turns" :done "is done" :merged "is merged to main" :dead "died" :lost "was lost"
    :closed "was stopped and held" :killed "was stopped"})
 
+(defn after-work
+  "The step after an agent's turn loop answered r, on a task holding proofs: an end that parks it (park-outcomes: it waits, or spent its turns) on a task with no proofs claimed nothing and has nothing of its own to prove, so its branch is read for its verdict with no test run; anything else is judged by its tests. See docs/turn.md#parked."
+  {:malli/schema [:=> [:cat :map [:maybe [:set :any]]] [:enum :diffed :tested]]}
+  [r proofs] (if (and (not (:ex r)) (empty? proofs) (park-outcomes (:outcome (:value r)))) :diffed :tested))
+
 (defn tell-tx
-  "The message that tells the agent which launched task id (:seon.task/asked-by, a branch: the session's agent, as `agent-on` finds it) how it stands, when write tx moves its outcome to one of `ends-told`: what it reads next, which wakes it (`write` wakes it). A launched agent that died could not say so itself. Sent at now (ms). See docs/agent.md#working-for-a-person."
+  "The message that tells who started task id (:seon.task/started-by, a user or an agent) how it stands, when write tx moves its outcome to one of `ends-told`: what it reads next, which wakes it (`write` wakes it). A launched agent that died could not say so itself. Sent at now (ms). See docs/agent.md#working-for-a-person."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/id [:sequential :any] :int] [:vector :map]]}
   [db id tx now]
   (let [to (some (fn [x] (when (and (vector? x) (= :db/cas (first x)) (= :seon.task/outcome (nth x 2 nil))) (nth x 4 nil))) tx)
-        by (when (ends-told to) (:seon.task/asked-by (d/entity db [:seon.task/id id])))
+        k (when (ends-told to) (:seon.agent/key (:seon.task/started-by (d/entity db [:seon.task/id id]))))
         said (some (fn [x] (cond (map? x) (or (:seon.task/reason x) (:reason (:seon.task/failure x)))
                                  (and (vector? x) (= :seon.task/reason (nth x 2 nil))) (nth x 3 nil)))
                    tx)
-        from (some-> (:seon.agent/id (:seon.task/agent (d/entity db [:seon.task/id id]))) name)
-        k (when by (agent-on db by))]
+        from (some-> (:seon.agent/id (:seon.task/agent (d/entity db [:seon.task/id id]))) name)]
     (if k
       (task/message-tx (str "asked-" id "-" (:max-tx db)) (or from "root") [k]
                        (str "Task " id " " (ends-told to) (when said (str ": " said))
-                            (when (and from (#{:parked :cap} to)) (str "\nTo answer it: (send-message [:" from "] \"...\")")))
+                            (when (and from (#{:parked :cap} to) (not (:seon.user/name (:seon.task/started-by (d/entity db [:seon.task/id id]))))) (str "\nTo answer it: (send-message [:" from "] \"...\")")))
                        now)
       [])))
 
@@ -721,7 +719,9 @@
   {:malli/schema [:=> [:cat :seon.reconcile/state :seon.task/id :seon.reconcile/step [:sequential :any]] [:tuple :seon.reconcile/state :map]]}
   [st id step tx]
   (let [tell (tell-tx (:db st) id tx (System/currentTimeMillis))
-        k (some-> (first tell) :seon.message/to first second)]
+        to (some-> (first tell) :seon.message/to first second)
+        ;; a user with no branch reads main: nothing is owed to a branch
+        k (when (and to (:seon.agent/branch (d/entity (:db st) [:seon.agent/key to]))) to)]
     (request (cond-> st k (update-in [:idx :late] (fnil conj #{}) k)) id step {:op :write :req {:op :tx :branch :db :tx-data (into (vec tx) tell)}})))
 
 (defn- agent-of
@@ -1005,8 +1005,10 @@
                                               (ended-ms-tx (:db st) id now))))
                 (contract/error? r) (dead st r)
                 :else
-                (one (request (cond-> st (:ex r) (assoc-in [:flights id :worked-error] (:ex r)))
-                              id :tested {:op :judge :id agent})))
+                (if (= :diffed (after-work r (:seon.task/proofs (d/entity (:db st) [:seon.task/id id]))))
+                  (one (request (assoc-in st [:flights id :results] {}) id :diffed {:op :write :req {:op :branch-diff :branch (get-in act [:env :branch])}}))
+                  (one (request (cond-> st (:ex r) (assoc-in [:flights id :worked-error] (:ex r)))
+                                id :tested {:op :judge :id agent}))))
       :tested (if (contract/error? r)
                 (dead st r)
                 (one (request (-> st (assoc-in [:flights id :results] (proofs/results r))

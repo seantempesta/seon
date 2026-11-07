@@ -276,3 +276,16 @@
   (let [r (scan reply false)
         r (if (pos? (:delimiters r)) (scan reply true) r)]
     (select-keys r [:text :repairs])))
+
+(defn words-and-forms
+  "What a person typed, as its text and its code, by `forgive`: the lines it made comments are words, the rest forms. {:words :forms}, each a string, blank when there is none. See docs/users.md#four-interfaces."
+  {:malli/schema [:=> [:cat :string] [:map [:words :string] [:forms :string]]]}
+  [input]
+  (let [{:keys [text repairs]} (forgive input)
+        word-at (into #{} (keep (fn [{:keys [at inserted]}] (when (= ";; " inserted) at))) repairs)
+        [words forms] (reduce (fn [[ws fs at] line]
+                                (let [next-at (+ at (count line) 1)]
+                                  (if (word-at at) [(conj ws (subs line 3)) fs next-at] [ws (conj fs line) next-at])))
+                              [[] [] 0] (clojure.string/split text #"\n" -1))]
+    {:words (clojure.string/trim (clojure.string/join "\n" words))
+     :forms (clojure.string/trim (clojure.string/join "\n" forms))}))

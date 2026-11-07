@@ -409,28 +409,28 @@
   the same): words are a message its next turn reads (seon.root/message!), and a line that starts with
   ( evaluates in its REPL (seon.root/submit!, origin :ui), as every line does on an agent with no task; interrupt stops its running form;
   release runs its task's next run when the task is held (seon.root/release!). input {:id
-  :live? :held :focus? :busy? :capped? :talks?}: talks?, it has a task, whose next turn reads what's said; live, root's view holds its process in this boot; busy?, it runs a form (what interrupt stops); capped?, its task is
-  at its cap (no message wakes it); focus?, its field takes focus as the page loads (the chat's:
+  :address :live? :held :focus? :busy? :talks?}: address, its key, whom a word goes to in any boot; talks?, it has a task, so what's said wakes it, process or none; live, root's view holds its process in this boot; busy?, it runs a form (what interrupt stops); capped?, its task is
+  focus?, its field takes focus as the page loads (the chat's:
   @ctx's page is long and the field ends it)."
   {:malli/schema [:=> [:cat :seon.render/opts :seon.render/agent-input] :any]}
-  [opts {:keys [id live? held focus? busy? capped? talks?]}]
+  [opts {:keys [id address live? held focus? busy? talks?]}]
   [:section {:id (:unit opts) :class "seon-stack-2"}
-   (if live?
-     [:form {:class "seon-row" :data-seon-repl "" :seon/call 'seon.root/submit! :seon/agent id}
+   (if (or live? talks?)
+     [:form {:class "seon-row" :data-seon-repl "" :seon/call 'seon.root/submit! :seon/agent (or address id)}
       [:span {:class "text-signal"} (str (kname id) "=>")]
       ;; Enter sends, Shift+Enter is a new line: a form may span lines
       [:textarea (cond-> {:name "forms" :class "flex-1 min-w-0" :rows 3 :autocomplete "off" :spellcheck "false"
                           (keyword "data-on:keydown") "if (evt.key==='Enter' && !evt.shiftKey) { evt.preventDefault(); el.form.requestSubmit() }"
-                          :placeholder (if (and talks? (not capped?)) "Say something (Enter; Shift+Enter: a new line)\n(+ 1 2) runs in its REPL" "(+ 1 2) evaluates in its REPL (Enter; Shift+Enter: a new line)")}
+                          :placeholder (cond (and talks? live?) "Say something (Enter; Shift+Enter: a new line)\n(+ 1 2) runs in its REPL"
+                                       talks? "Say something and it starts again (Enter; Shift+Enter: a new line)"
+                                       :else "(+ 1 2) evaluates in its REPL (Enter; Shift+Enter: a new line)")}
                    ;; the chat takes focus (it follows its tail); a browser scrolls a focused field into view, and this one ends the page
                    focus? (assoc :autofocus true))]
-      ;; a form to interrupt only while its process runs one (status :busy); a capped task's agent answers forms but takes no message
+      ;; a form to interrupt only while its process runs one (status :busy)
       (when busy?
         [:button {:type "button" :class "rounded border border-base-700 px-2" :title "interrupt the running form; the agent keeps its state"
                   :seon/call 'seon.root/interrupt! :seon/agent id} "⏹ interrupt"])]
      [:p {:class "muted"} "This agent isn't running, so it can't answer. What it did is above."])
-   (when (and live? capped?)
-     [:p {:class "seon-note"} "It used all its turns, so it won't read messages. Raise its turns and release its task to go on."])
    (when held
      [:button {:class "self-start rounded border border-base-700 px-2" :title (str "release " held ": the reconciler runs its next run (my.root/run!)")
                :seon/call 'seon.root/release! :seon/agent id :seon/args {:task held}}
@@ -1452,7 +1452,7 @@
   {:malli/schema [:=> [:cat :map] :any]}
   [{:seon.message/keys [id from body]}]
   [:section {:wire/role "user" :wire/ref [:message id]}
-   [:p {:class (str "seon-note" (when (= "owner" (str from)) " hidden")) :wire/field "from"} (str from)]
+   [:p {:class "seon-note" :wire/field "from"} (str from)]
    [:div {:wire/field "body"} [#'markdown (str body) {:inline? true}]]])
 
 (defn chat-message
@@ -1958,6 +1958,11 @@
     [:summary {:class "px-1 text-2xs text-text-500"} "Earlier"]
     (into [:ul {:class "flex gap-2 lg:flex-col lg:gap-0.5"}] (for [boot boots] [#'boot-side {} boot]))]])
 
+(defn- newest-started
+  "The agents this user started (ctx c's :started join), newest first by when each started. See docs/users.md#whats-on-screen."
+  {:malli/schema [:=> [:cat :seon.host/db :map] [:sequential :int]]}
+  [db c] (sort-by (fn [e] [(- (or (:seon.agent/started-ms (d/entity db e)) 0)) e]) (keys (:started c))))
+
 (defn users-side
   "The users in the agents list (a component over the db): each a link to its page by its :seon.user/name. See docs/users.md#whats-on-screen."
   {:seon.render/style ".users-side { display: contents; }" :seon.render/for "page" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]]] :any]}
@@ -1969,18 +1974,28 @@
 
 (defn started-side
   "The agents this user started in its agents list (a component over ctx, by the pull's :started join): each `agent-side`. See docs/users.md#whats-on-screen."
-  {:seon.render/style ".started-side { display: contents; }" :seon.render/for "page" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
-  [{c :seon.ctx/ctx}]
-  [:li {:class "contents"} [:ul {:class "contents"} (for [eid (sort (keys (:started c)))] [#'agent-side {} eid])]])
+  {:seon.render/style ".started-side { display: contents; }" :seon.render/for "page" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
+  [{c :seon.ctx/ctx db :seon.db/db}]
+  [:li {:class "contents"} [:ul {:class "contents"} (for [eid (newest-started db c)] [#'agent-side {} eid])]])
 
 (defn started-cards
   "A card for each agent this user started, in a grid (a component over ctx and the db, `session-card` by each one's key). See docs/users.md#whats-on-screen."
   {:seon.render/for "page" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
   [{c :seon.ctx/ctx db :seon.db/db}]
-  (if-let [es (seq (sort (keys (:started c))))]
+  (if-let [es (seq (newest-started db c))]
     [:section {:class "grid grid-cols-1 gap-3 lg:grid-cols-2"}
      (for [e es :let [k (:seon.agent/key (d/entity db e))] :when k] [#'session-card {} k])]
     [:p {:class "muted"} "No agents yet."]))
+
+(defn user-messages
+  "What this user holds (a component over ctx, its pull's :messages), newest first, each `chat-message`: what its agents told it. See docs/users.md#messages."
+  {:seon.render/for "page" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+  [{c :seon.ctx/ctx}]
+  (when-let [ms (seq (:messages c))]
+    [:section {:class "seon-stack"}
+     [:h2 {:class "kicker"} "Messages"]
+     (for [[e m] (sort-by (fn [[e m]] [(- (or (:seon.message/sent-ms m) 0)) e]) (ratom/untracked ms))]
+       [#'chat-message {:key (:seon.message/id m) :at [:messages e]}])]))
 
 (defn user-ctx
   "A user's page, the render of its ctx (the declared html render of :seon.render/user-ctx, which a branch overrides like any render): root and its agents in the agents list, its agents as cards. See docs/users.md#whats-on-screen."
@@ -1988,7 +2003,7 @@
   [_]
   [:div {:id "user-ctx"}
    [:ol {:id "c-side"} [#'root-side {}] [#'started-side {}]]
-   [:ol {:id "c-rows"} [#'started-cards {}]]
+   [:ol {:id "c-rows"} [#'user-messages {}] [#'started-cards {}]]
    [#'rules-list {}]])
 
 (defn root-ctx

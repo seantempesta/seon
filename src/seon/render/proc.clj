@@ -296,7 +296,7 @@
 (defn- kept-walk
   "A walk kept across moves: entity e's ctx on db (seon.ctx/build, its tree as mark makes it) in a reactive
   atom, drawn once by layout var root-var over the db it holds: {:w :a :c :at}, :at a volatile of that db.
-  Root's own page (root-walk) and each watched agent's branch (`branch-walk!`) keep one; `advance-walk!`
+  Root's own page (root-walk), each user's (`user-walk`) and each watched agent's branch (`branch-walk!`) keep one; `advance-walk!`
   moves it. See docs/render.md#a-page-is-a-kept-walk."
   {:malli/schema [:=> [:cat :seon.host/db [:maybe pos-int?] :any :any :seon.host/fn] :map]}
   [db e branch root-var mark]
@@ -364,6 +364,28 @@
                 st)))
           st (into (:watch st #{}) (concat (vals (:waiting st)) (:kf-wanted st)))))
 
+(defn- user-walk
+  "The kept walk of user e's page on main db, by its declared layout, made at its first draw and held in the proc's cell (:user-walks, one a user), or nil when e is no user. `user-walks` advances it as main moves. See docs/render.md#a-page-is-a-kept-walk."
+  {:malli/schema [:=> [:cat :map :seon.host/db :any] [:maybe :map]]}
+  [st db e]
+  (when-let [cell (when (:seon.user/name e) (:user-walks st))]
+    (let [n (:seon.user/name e)]
+      (or (get @cell n)
+          (let [kw (kept-walk db (:db/id e) :main (render/declared-var :seon.render/user-ctx) identity)]
+            (vswap! cell assoc n kw)
+            kw)))))
+
+(defn- user-walks
+  "St with each user's kept walk advanced to main db, and the views that show one dirty, as root's own is (`root-walk`): the components the move reached are drawn, nothing else. See docs/render.md#a-page-is-a-kept-walk."
+  {:malli/schema [:=> [:cat :map :seon.host/db] :map]}
+  [st db]
+  (let [cell (or (:user-walks st) (volatile! {}))]
+    (doseq [[n kw] @cell] (vswap! cell assoc n (advance-walk! kw db :main identity)))
+    (cond-> st
+      (seq @cell) (update :dirty (fnil into #{})
+                          (filter (fn [v] (let [x (if (vector? v) (second v) v)]
+                                            (when (keyword? x) (when (not= :root x) (some->> (location db x) (d/entity db) :seon.user/name))))) (keys (:views st)))))))
+
 (defn- agent-view
   "View's page when it names an agent (entity eid on main db): its components as its process drew
   them (ask-parts, seon.repl/render-ctx: the units of its walk), else, with no process to ask or none
@@ -392,7 +414,7 @@
         cell (get-in st [:branch-reads (get-in st [:branches view :branch]) :walk])
         walked #(when (and cell (not branchless?)) (branch-walk! cell bdb e))
         cold-tree #(quiet (fn [] (:tree (ctx/build bdb (seon.db/eid bdb :seon.agent/key (:seon.agent/key e)) (or (:seon.agent/branch e) :db)))))
-        branch-units (fn [] (if-let [kw (walked)]
+        branch-units (fn [] (if-let [kw (or (walked) (user-walk st db e))]
                               (quiet #(render/placed-units (:w kw)))
                               (let [t (cond-> (cold-tree) (seq opened) (update :evals #(reduce-kv (fn [m k ev] (if (opened (:seon.eval/id ev)) (assoc m k (assoc ev :seon.eval/opened true)) m)) % %)))
                                     w (quiet #(render/draw t ctx/changes bdb (render/declared-var (if (:seon.user/name e) :seon.render/user-ctx :seon.render/render-ctx))))]
@@ -438,9 +460,9 @@
                                  (when (:error held) (str "Its process didn't answer, so this may be behind: " (:seon.error/message (:error held)))))
                       ;; its REPL and its messages while its process runs; its held task's release
                       :input (if (:seon.user/name e) {:schema :seon.render/root-input :value {}} {:schema :seon.render/agent-input
-                              :value {:id (:seon.agent/id e) :live? (live? st id) :focus? chat?
-                              ;; what its process can answer: a form running is interrupted (busy); a capped task's agent takes no message (docs/turn.md#the-cap)
-                              :busy? (= :busy (:seon.agent/status e)) :capped? (= :cap (:seon.task/outcome (:seon.agent/task e))) :talks? (some? (:seon.agent/task e))
+                              :value {:id (:seon.agent/id e) :address (keyword (:seon.agent/key e)) :live? (live? st id) :focus? chat?
+                              ;; what its process can answer: a form running is interrupted (busy)
+                              :busy? (= :busy (:seon.agent/status e)) :talks? (some? (:seon.agent/task e))
                                       :held (d/q '[:find ?id . :in $ ?a :where [?a :seon.agent/task ?t] [?t :seon.task/execution :held] [?t :seon.task/id ?id]] db eid)}})}
                      ;; its tabs name it by its id in this boot, else by its branch (an earlier boot's agent)
                      (focus db view))))
@@ -639,7 +661,7 @@
     (if (and held (<= (:max-tx db) (:max-tx held)))
       st
       (let [moved (when held (apply concat (d/datoms-diff held db :eavt [])))]
-        (cond-> (root-walk (main-info st db moved) db held)
+        (cond-> (user-walks (root-walk (main-info st db moved) db held) db)
           (seq moved) (update :dirty (fnil into #{}) (touched st moved)))))))
 
 (defn- error-page
@@ -702,7 +724,7 @@
   (try
     (let [r (pass-view st view-id)]
       ;; a component that threw in a kept walk is a problem root records, as a view that threw is
-      (doseq [w (concat (some-> (:root-walk (first r)) :w vector) (keep #(some-> (:walk (val %)) deref :w) (:branch-reads (first r))))
+      (doseq [w (concat (some-> (:root-walk (first r)) :w vector) (keep #(some-> (:walk (val %)) deref :w) (:branch-reads (first r))) (map :w (some-> (:user-walks (first r)) deref vals)))
               d (render/take-defects! w)]
         (step/out! o :to-api {:op :error :pid :render :message (:seon.error/message d) :data d}))
       r)
@@ -948,7 +970,7 @@
    ;; no beat: a pass happens on an event, an api answer or a tab's request, never on a clock
    (let [events (a/chan (a/sliding-buffer 4096))]
      (a/tap (:events-mult args) events)
-     {:events-ch events :mult (:events-mult args) :system-p (:system args) :conn (:conn args) :rid 0 :pending {} :watch #{} :waiting {} :kf-wanted #{}
+     {:user-walks (volatile! {}) :events-ch events :mult (:events-mult args) :system-p (:system args) :conn (:conn args) :rid 0 :pending {} :watch #{} :waiting {} :kf-wanted #{}
       :new-events [] :events [] :views {} :branches {}
       ::flow/in-ports {:events events}}))
   ([st tr]

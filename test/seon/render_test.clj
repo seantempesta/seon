@@ -594,7 +594,7 @@
       (is (str/includes? (:html (second (in root "#p-tiles"))) "problems"))
       (is (= :seon.render/root-input (:schema (input root)))))
     (testing "an agent's focus: its REPL and messages at the top, live while root's view holds it in this boot"
-      (is (= [:seon.render/agent-input {:id :a3 :live? true :held nil :focus? true :busy? true :capped? false :talks? true}] [(:schema (input agent)) (:input (input agent))]))
+      (is (= [:seon.render/agent-input {:id :a3 :live? true :held nil :focus? true :busy? true :talks? true :address :b1/a3}] [(:schema (input agent)) (:input (input agent))]))
       (let [ctx-page (#'p/page-value st :a3)]
         (is (false? (:focus? (:input (input ctx-page)))) "@ctx's input takes no focus: a focused field at the page's end scrolls the page to its bottom")))
     (testing "a location naming no entity is that error, never an empty page; a branch that could not be read is shown as its error"
@@ -2098,6 +2098,34 @@
     (is (= #{"/user/sean"} (hrefs (h/html (ui/users-side {:seon.db/db db})))) "it is listed by its name")
     (is (nil? (ui/users-side {:seon.db/db (d/db-with db [[:db/retract (:db/id sean) :seon.user/name "sean"]])})) "no name, no user")))
 
+(deftest a-users-page-moves-with-main
+  ;; docs/render.md#a-page-is-a-kept-walk: a user's page is a kept walk, as root's is: a move of main draws what it reached, so an agent it starts appears on a page already open
+  (let [db0 (sessions-db "b2" [["b2/a1" :a1 :running "seon.print/a-long-string" :running :task-a]])
+        db1 (d/db-with db0 [{:seon.agent/key "sean" :seon.user/name "sean"}])
+        st {:user-walks (volatile! {}) :views {[:chat :sean] {} [:chat :a1] {}}}
+        kw (#'p/user-walk st db1 (d/entity db1 [:seon.user/name "sean"]))
+        side (fn [w] (apply str (map :html (filter #(= "#c-side" (:container %)) (r/placed-units w)))))
+        before (side (:w kw))
+        db2 (d/db-with db1 [{:seon.agent/key "sean" :seon.agent/agents [(:db/id (d/entity db1 [:seon.agent/key "b2/a1"]))]}])
+        st' (#'p/user-walks st db2)]
+    (is (not (str/includes? before "/agent/b2/a1")) "nothing started yet")
+    (is (str/includes? (side (:w (get @(:user-walks st') "sean"))) "/agent/b2/a1") "the agent it started is on the page, with no new draw")
+    (is (contains? (:dirty st') [:chat :sean]) "and its view is dirty")
+    (is (not (contains? (:dirty st') [:chat :a1])) "another's isn't")))
+
+(deftest what-a-person-types-is-words-and-forms-by-the-one-reader
+  ;; docs/users.md#four-interfaces: text that isn't Clojure is a message, whatever the agent is doing, and a form evaluates; seon.reader/forgive tells them apart
+  (let [reqs (fn [forms a] (mapv first (seon.web/requests {:var 'seon.root/submit! :agent :a1 :forms forms} {:a1 a})))
+        say (fn [r] (select-keys r [:op :body])) ]
+    (is (= [{:op :message :body "An otter."}] (map say (reqs "An otter." {}))) "words, to an agent the page knows no task for")
+    (is (= [{:op :message :body "An otter."}] (map say (reqs "An otter." {:task "x/y"}))))
+    (is (= [:eval] (map :op (reqs "(+ 1 2)" {:task "x/y"}))) "a form evaluates")
+    (is (= "(+ 1 2)" (:forms (first (reqs "(+ 1 2)" {:task "x/y"})))))
+    (let [mixed (reqs "Try this.\n(+ 1 2)\nand tell me." {:task "x/y"})]
+      (is (= [:message :eval] (map :op mixed)) "both, the words first")
+      (is (= "Try this.\nand tell me." (:body (first mixed))))
+      (is (= "(+ 1 2)" (str/trim (:forms (second mixed))))))))
+
 (deftest a-record-that-no-longer-fits-its-schema-is-its-data
   ;; docs/render.md#the-page: a stored value outlives the schema it was written under; the page and the model read its data
   (let [old {:t 1 :classes {:a-class-since-removed {:n 1 :rows []}}}]
@@ -2301,18 +2329,14 @@
         (is (str/includes? (:html (get pages 9)) "b9/a1") "the message names the address")
         (is (nil? (:status (get pages 10))) "a session's page has no status: 200")))))
 
-(deftest a-capped-or-process-less-agent-offers-only-what-it-can-answer
-  ;; the REPL answers forms while a process is held (a capped task's agent keeps its process, parked), but takes no message; a form
-  ;; to interrupt only while one runs (status :busy)
-  (let [html (fn [m] (h/html (ui/agent-input {:unit "p-input"} (merge {:id :a3 :live? true :held nil} m))))]
-    (is (str/includes? (html {:busy? true}) "interrupt"))
-    (is (not (str/includes? (html {:busy? false}) "interrupt")) "no form running: nothing to interrupt")
-    (is (str/includes? (html {:talks? true}) "Say something") "an agent on a task takes a message")
-    (is (not (str/includes? (html {:talks? true :capped? true}) "Say something")) "a capped task's agent does not")
-    (is (not (str/includes? (html {}) "Say something")) "nor one with no task: its input is its REPL")
-    (is (str/includes? (html {:capped? true}) "It used all its turns") "and the page says why")
-    (is (str/includes? (html {:capped? true}) "<textarea") "it still answers a form")
-    (is (not-any? #(str/includes? (html {:live? false :busy? true :capped? true}) %) ["<textarea" "interrupt"]) "no process: neither")))
+(deftest an-agent-with-a-task-can-be-spoken-to-with-no-process
+  ;; docs/users.md#messages: a recipient needs no process: words wake it, whatever its state, addressed by its key; only an agent with no task and no process has nothing to take them
+  (let [draw (fn [v] (h/html (ui/agent-input {:unit "p-input"} v)))
+        has-form? #(str/includes? % "<textarea")]
+    (is (has-form? (draw {:id :a1 :address :b1/a1 :live? false :focus? true :busy? false :talks? true})) "no process, a task: it can be spoken to")
+    (is (str/includes? (draw {:id :a1 :address :b1/a1 :live? false :focus? true :busy? false :talks? true}) "agent=b1%2Fa1") "by its key, which any boot resolves")
+    (is (has-form? (draw {:id :a1 :address :b1/a1 :live? true :focus? true :busy? false :talks? false})) "a live agent's REPL")
+    (is (not (has-form? (draw {:id :a1 :address :b1/a1 :live? false :focus? true :busy? false :talks? false}))) "neither: nothing would take it")))
 
 (deftest the-task-line-of-the-side-panel-reads-through-standing
   ;; the chat's side panel said "task · seon.program · running" of a capped task: running is the task's execution, not how it stands
@@ -2982,15 +3006,15 @@
     (is (some? roots))
     (is (not= (:input roots) (:input agents)) "the page's diff sees a new unit")))
 
-(deftest words-to-a-task-agent-are-a-message-and-a-paren-is-code
+(deftest words-to-an-agent-are-a-message-and-a-paren-is-code
   ;; docs/render.md#the-page: the chat's input
   (let [ops (fn [forms a] (mapv (comp :op first) (seon.web/requests {:var 'seon.root/submit! :agent :a1 :forms forms} {:a1 a})))
         on-task {:status :idle :task "x/y"}]
     (is (= [:message] (ops "hello there" on-task)) "words")
     (is (= [:eval] (ops "(+ 1 2)" on-task)) "code")
     (is (= [:eval] (ops "  (+ 1 2)" on-task)) "code, with room before it")
-    (is (= [:eval] (ops "(+ 1 2)" {:status :idle})) "and an agent with no task has only its REPL")
-    (is (= [:eval] (ops "hello" {:status :idle})))
+    (is (= [:eval] (ops "(+ 1 2)" {:status :idle})) "code, to an agent with no task")
+    (is (= [:message] (ops "hello" {:status :idle})) "and words are a message to it")
     (is (= [] (ops "  " on-task)))))
 
 (deftest a-quote-in-a-message-reads-as-a-quote

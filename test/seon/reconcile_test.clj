@@ -121,10 +121,10 @@
   (let [db (ts/test-db)
         id "demo/child"
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "child" :seon.task/kind :whole :seon.task/plan "p"}]))
-        asked (d/db-with db [[:db/add [:seon.task/id id] :seon.task/asked-by :task-parent]
-                             {:seon.agent/key "boot-1/p" :seon.agent/id :p :seon.agent/branch :task-parent}])
+        asked (d/db-with db [{:seon.agent/key "boot-1/p" :seon.agent/id :p :seon.agent/branch :task-parent}
+                             {:seon.task/id id :seon.task/started-by [:seon.agent/key "boot-1/p"]}])
         told (fn [db to & more] (r/tell-tx db id (into [[:db/cas [:seon.task/id id] :seon.task/outcome :running to]] more) 1000))]
-    (is (= [[:seon.agent/key "boot-1/p"]] (:seon.message/to (first (told asked :merged)))) "the message goes to the agent whose branch launched it")
+    (is (= [[:seon.agent/key "boot-1/p"]] (:seon.message/to (first (told asked :merged)))) "the message goes to the agent that launched it")
     (is (re-find #"merged to main" (:seon.message/body (first (told asked :merged)))))
     (is (re-find #"its proof went red" (:seon.message/body (first (told asked :closed {:seon.task/failure {:reason "its proof went red"}})))) "a stop says why")
     (is (re-find #"waiting" (:seon.message/body (first (told asked :parked {:seon.task/reason "which colour?"})))))
@@ -1573,3 +1573,12 @@
      (is (not (contains? (:done obs) "demo/d")))
      (is (not (contains? (:needed-by obs) "demo/d")))
      (is (every? seq (vals (:needed-by obs))) "no empty needed-by set"))))
+
+(deftest an-end-that-parks-runs-no-tests
+  ;; docs/turn.md#parked: an agent with no proofs that says something and waits, or spends its turns, has claimed nothing, so nothing is judged by tests: a chat reply isn't "working" through a test run
+  (is (= :diffed (r/after-work {:value {:outcome :waiting}} nil)))
+  (is (= :diffed (r/after-work {:value {:outcome :cap}} #{})))
+  (is (= :tested (r/after-work {:value {:outcome :waiting}} #{'demo-test/t})) "a task with proofs has them judged, parked or not")
+  (is (= :tested (r/after-work {:value {:outcome :green}} nil)) "a claim of done is judged")
+  (is (= :tested (r/after-work {:value {:outcome :failed}} nil)))
+  (is (= :tested (r/after-work {:ex {:seon.error/message "threw"}} nil)) "and so is a loop that threw"))

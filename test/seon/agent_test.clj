@@ -1043,6 +1043,19 @@
     (is (< (- first-search second-search) (quot build 2))
         (str "an agent's first grep allocated " first-search " bytes, a second " second-search "; building the index " build))))
 
+(deftest a-merge-of-main-keeps-the-search-index-current
+  ;; docs/vector.md#search: an agent's writes carry the text index (seon.doc/carry-index!), so a search after one rebuilds nothing; the merge's own record of its base was a write that skipped it, so the next search after any merge rebuilt the index, about 20 MB, seen as a flake
+  (let [current "(let [d (:db @seon.agent/state) [was _] @@#'seon.doc/indexes] (= was [(:hash d) (:max-tx d)]))"
+        [_ before _ merged after] (in-agent [(str "(do (my.agent/grep \"accumulated\") nil)")
+                                             current
+                                             {:op :eval :agent "root" :code "@(seon.root/transact-main! sys (vec ((my.test/code 'app.idx \"(ns app.idx (:refer-clojure :exclude [defn defn-]) (:require [seon.contract :refer [defn defn-]]))\\n(defn f \\\"A var.\\\" {:malli/schema [:=> [:cat] :int]} [] 1)\\n\") @(:conn sys))))"}
+                                             "(seon.agent/merge-main! #{})"
+                                             current]
+                                            {:group :pristine})]
+    (is (true? (:value before)) (pr-str before))
+    (is (seq (:applied (:value merged))) (str "the merge brought something: " (pr-str merged)))
+    (is (true? (:value after)) "the index is at the db the merge left")))
+
 (deftest an-agent-with-no-task-resumes-a-kept-branch
   ;; found by session global-ids, 2026-10-23: an agent spawned with no task onto a branch the
   ;; store already holds (a kept branch; e2e's fresh agent on a store an earlier run left)
@@ -2044,13 +2057,13 @@
                          "(my.task/launch! \"No such template.\" :nope)"])
         id (:task (:value a))
         probe (peek (in-agent [{:op :eval :agent "root"
-                                :code (str "(let [t (datahike.api/entity (clojure.core/deref (:conn sys)) [:seon.task/id " (pr-str id) "])] [(:seon.task/kind t) (:seon.task/execution t) (:seon.task/plan t) (:seon.task/asked-by t)])")}]))
-        [kind execution plan asked-by] (:value probe)]
+                                :code (str "(let [t (datahike.api/entity (clojure.core/deref (:conn sys)) [:seon.task/id " (pr-str id) "])] [(:seon.task/kind t) (:seon.task/execution t) (:seon.task/plan t) (:seon.agent/key (:seon.task/started-by t))])")}]))
+        [kind execution plan started-by] (:value probe)]
     (is (string? id) (pr-str a))
     (is (= :whole kind) "by default the template that builds, proves and merges")
     (is (= :running execution) "released: the reconciler gives it an agent")
     (is (str/includes? plan "Build the thing") "its plan what was asked")
-    (is (keyword? asked-by) "and who to tell how it ends")
+    (is (string? started-by) "and who to tell how it ends")
     (is (re-find #"no template" (str (:seon.error/message (:value b)))) "a template that isn't one says so")))
 
 (def ^:private not-running
@@ -2496,6 +2509,28 @@
     (is (= {:turns [1 (inc allowance)] :max-turns [1 (inc allowance)]} (:value r))
         "one turn to its cap; the wake raised the budget by the allowance and it ran those turns, to its cap again")))
 
+(deftest a-woken-agent-that-replies-stays-parked
+  ;; docs/turn.md#parked: a wake gives one conversation turn and its reply parks the agent: it isn't woken again by nothing, or it would spend its budget talking to itself (seen 2026-11-07 on a real model)
+  (let [_ '[seon.reconcile/advance seon.reconcile/start seon.reconcile/settle-late]
+        [_ r] (in-agent (fn [{:keys [ns]}]
+                          (let [w (str ns "/w")]
+                            [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")}
+                             {:op :eval :agent "root"
+                              :code (str "(let [branch-of " branch-of-code "]"
+                                         " (my.root/run! sys [" (pr-str w) "]) " (parked-code w 1)
+                                         " (let [a " (agent-code w) " ag (:seon.agent/id a) k (:seon.agent/key a)"
+                                         "       turn-of (fn [] (:seon.agent/turn (datahike.api/entity (branch-of " (pr-str w) ") [:seon.agent/key k])))]"
+                                         "   @(seon.root/message! sys ag \"carry on\") " (parked-code w 2)
+                                         "   (let [t2 (turn-of) m2 (:db (deref (seon.root/call! sys {:op :write :req {:op :branch-db :branch :db}})))"
+                                         "         _ (dotimes [_ 5] (deref (seon.root/call! sys {:op :write :req {:op :tx :branch :db :tx-data [{:seon.agent/key k :seon.agent/description \"a move of main\"}]}})))"
+                                         "         t3 (turn-of)]"
+                                         "     {:turns [t2 t3] :outcome (:seon.task/outcome (datahike.api/entity @(:conn sys) [:seon.task/id " (pr-str w) "]))})))")}]))
+                        {:config {:seon.config.ai/script 'seon.fixtures/wait-call}
+                         :decls [{:seon.task/name "w" :seon.task/plan "Wait." :seon.task/kind :user}]})
+        {:keys [turns outcome]} (:value r)]
+    (is (= :parked outcome) (pr-str r))
+    (is (apply = turns) (str "no more turns while nothing arrives: " (pr-str turns)))))
+
 (deftest a-reply-with-no-evals-stops-with-turns-left
   ;; docs/model.md#one-tool-eval: a call whose evals are empty is a reply of its message alone, as text with no call is: nothing runs and the
   ;; agent waits, with turns left
@@ -2606,7 +2641,7 @@
 
 (deftest a-model-turn-records-its-text-and-the-message-it-took
   ;; the owner's message is a fact root writes on
-  ;; main (from "owner", to the agent); the turn that delivers it writes the same
+  ;; main (from the user, to the agent); the turn that delivers it writes the same
   ;; entity on its branch before its commit, with the agent's own ref (:seon.message/to), so the conversation
   ;; and every later reading read its text from that commit (the basis names no message); the reply's message (here the scripted model's)
   ;; is the turn's reply and its call's eval's text, and the call names its one eval
@@ -2639,8 +2674,8 @@
         ;; the shared root's main holds every earlier test's messages: this agent's are the ones to its id
         [[mid from to body] :as facts] (filterv #(= (keyword (:agent @names)) (nth % 2)) (:value on-main))]
     (is (= 1 (:model-calls end)) (pr-str end))
-    (is (= [["owner" (keyword (:agent @names)) "use demo/g"]] (mapv #(subvec % 1) facts)) "one entity on main: from the owner, to the agent")
-    (is (= [[mid "owner" "use demo/g" agent-key]] on-branch) "the turn wrote the entity root wrote, by its id, with the agent's ref")
+    (is (= [[(System/getProperty "user.name") (keyword (:agent @names)) "use demo/g"]] (mapv #(subvec % 1) facts)) "one entity on main: from the user, to the agent")
+    (is (= [[mid (System/getProperty "user.name") "use demo/g" agent-key]] on-branch) "the turn wrote the entity root wrote, by its id, with the agent's ref")
     (is (= on-branch committed) "and it is in the commit the turn read")
     (is (not-any? #{:observed :taken} basis-keys) "the basis names no message: the fact is the record")
     (is (contains? basis-keys :t) "it holds its t: a commit a sweep took is drawn as of it (docs/storage.md#collection)")
