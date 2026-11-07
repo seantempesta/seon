@@ -95,6 +95,11 @@
  :file/path [:and {:seon.db/identity true :seon.db/content-id true} :string]
  :file/text :string
  :file/mode :string
+ ;; An ENTRY of the config file (docs/source.md#a-program-file): its key, its value's exact text with its tags unread, and its file. The config a process reads is built from these (seon.config/of-entries).
+ :config/key [:and {:seon.db/identity true :seon.db/content-id true} :qualified-keyword]
+ :config/form :string
+ :config/file [:and {:seon.db/index true} :string]
+ :seon.db/config-fact [:map {:seon.db/attributes true} [:config/key :config/key] [:config/form :config/form] [:config/file :config/file]]
  :seon.db/schema-fact [:map {:seon.db/attributes true} [:schema/key :schema/key] [:schema/form :schema/form]
                         [:schema/file :schema/file] [:schema/source {:optional true} :schema/source]]
  :seon.db/file-fact [:map {:seon.db/attributes true} [:file/path :file/path] [:file/text :file/text] [:file/mode {:optional true} :file/mode]]

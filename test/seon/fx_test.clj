@@ -158,9 +158,9 @@
   (is (some? (fx/unreadable "src/x.clj" "(ns x)\n(defn f [")))
   (is (nil? (fx/unreadable "resources/seon/schemas/x.edn" "{:a #env X}\n")) "a tag reads, as the config's reader reads it")
   (is (some? (fx/unreadable "resources/seon/schemas/x.edn" "{:a ")))
-  (let [shipped (slurp (str (seon.config/checkout) "/" seon.config/shipped-file))]
+  (let [shipped (seon.config/shipped-text)]
     (is (nil? (fx/unreadable seon.config/shipped-file shipped)) "the shipped file reads")
-    (is (thrown-with-msg? Exception #"seon.config.nope/key unknown-key" (fx/unreadable seon.config/shipped-file (clojure.string/replace-first shipped "{" "{:seon.config.nope/key 1\n"))) "a key with no schema is refused, naming it"))
+    (is (re-find #"seon.config.nope/key unknown-key" (fx/unreadable seon.config/shipped-file (clojure.string/replace-first shipped "{" "{:seon.config.nope/key 1\n"))) "a key with no schema is refused, naming it"))
   (let [d (scratch-dir) git #(apply clojure.java.shell/sh "git" "-C" d "-c" "user.name=t" "-c" "user.email=t@t" %&)]
     (git "init" "-q") (spit (str d "/a") "a") (git "add" "a") (git "commit" "-q" "-m" "one")
     (let [r (fx/git-commit {:req {:dir d :branch "b" :files {"bin/x" "#!/bin/sh\nif then\n"} :message "m"}})]

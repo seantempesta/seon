@@ -44,7 +44,9 @@
   (step/out! o :main {:t t :prev prev :ops ops :commit (d/commit-id @(:conn st)) :ns (profile/now-ns)})
   (when-let [errs (seq (program/load-changes! db ops {:tests? false}))]
     (step/out! o :events (step/event {:type :load-errors :errors (vec errs)})))
-  (union-caught-up st (pdb/conn-main (:conn st)) db))
+  ;; a config entry moved: main's root entity says so with the next commit (docs/config.md#facts-on-main)
+  (let [st (union-caught-up st (pdb/conn-main (:conn st)) db)]
+    (if-let [tx (cfg/moved-facts db ops)] (update st :pend (fnil conj []) {:tx-data tx}) st)))
 
 (defn- stored!
   "Main's stored commit, made of ops (its transactions' resolved datoms, in order): the fork
@@ -189,8 +191,10 @@
                            (-> st (dissoc :pend) (update :commits inc))
                            (map vector ms reps))]
             (if (seq ok)
-              (main-commit st o (:max-tx (:db-before (second (first ok)))) (:max-tx (:db-after (second (last ok))))
-                           (vec (mapcat (comp pdb/report->tx second) ok)) (:db-after (second (last ok))))
+              ;; what main-commit queued (a moved config's facts) is this batch's next commit
+              (commit-batch (main-commit st o (:max-tx (:db-before (second (first ok)))) (:max-tx (:db-after (second (last ok))))
+                                         (vec (mapcat (comp pdb/report->tx second) ok)) (:db-after (second (last ok))))
+                            o)
               st)))
         (next ms) (reduce (fn [st m] (commit-batch (assoc st :pend [m]) o)) (dissoc st :pend) ms)
         :else (do (answer o (:dest (first ms)) (refused (step/error-msg reps) {})) (dissoc st :pend))))

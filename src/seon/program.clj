@@ -1228,23 +1228,55 @@
      :load (vec (for [e forms :when (and (live-in? db-to e) (not (live-in? db-from e)))] (form-row db-to e)))
      :schemas (into #{} (for [e schema-es :let [v (schema-value db-to e)] :when (and (some? v) (not= v (schema-value db-from e)))] (key-of e)))}))
 
+(defn- schema-differing
+  "{k form} of db's schema entries that differ from what this binary was built with, whatever says who holds them: a tree can move ahead of the binary, so the config its import states is read against the schema it states. Reads every entry, and runs only when a config entry moved. See docs/config.md#a-process-holds-its-branchs-config."
+  {:malli/schema [:=> [:cat :seon.host/db] [:map-of :qualified-keyword :any]]}
+  [db]
+  (into {} (for [dt (d/datoms db :aevt :schema/form)
+                 :let [v (sedn/decode (:v dt)) k (:schema/key (d/entity db (:e dt)))]
+                 :when (not= v (get cfg/schema-forms k))]
+             [k v])))
+
+(defn hold-config!
+  "Make this process hold the config db states (seon.config/hold!: db is its own branch, what it stands on), against db's schema entries beyond the binary's. Answers the refusal, as a load error's list (empty when held), so a config that doesn't hold says so where a form that doesn't load does, and the process goes on with what it held. See docs/config.md#a-process-holds-its-branchs-config."
+  {:malli/schema [:=> [:cat :seon.host/db] [:vector :seon.program/error]]}
+  [db]
+  (if-let [e (cfg/hold! (cfg/entries db) (schema-differing db))]
+    [{:ns 'seon.config :form cfg/shipped-file :message (:seon.error/message e)}]
+    []))
+
+(defn config-refused
+  "The refusal, when tx-data touches a config entry on db and the entries it leaves don't make a config db's schema after it allows; nil otherwise, at the cost of one scan of tx-data. Asked before a branch's write or an import commits. See docs/config.md#a-process-holds-its-branchs-config."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.db/tx-data] [:maybe :map]]}
+  [db tx-data]
+  (when (some #(if (map? %)
+                 (contains? % :config/form)
+                 (or (= :config/form (nth % 2 nil))
+                     (and (= :db/retractEntity (first %)) (:config/key (d/entity db (second %))))))
+              tx-data)
+    ;; no entries left is nothing stated, as a tree with no config file states nothing (hold!)
+    (let [after (d/db-with db tx-data)]
+      (when-let [es (cfg/entries after)]
+        (let [r (cfg/of-entries es (schema-differing after))]
+          (when (:seon.error/type r) r))))))
+
 (defn load-diff!
   "Make this process run db-to's program where it holds db-from's (diff-plan): each
   definition db-from had that db-to has none of is removed, and each live form db-to has
   that db-from had not is loaded (but the binary's own), with what it reaches (load!), and
-  what the changed schema keys reach. Answers the load errors. Costs the diff (diff-plan);
+  what the changed schema keys reach, and it holds db-to's config (hold-config!). Answers the load errors. Costs the diff (diff-plan);
   it read both programs whole before: 400-450 ms a spawn on an existing branch, measured."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:vector :seon.program/error]]}
   [db-from db-to]
   (let [{:keys [remove load schemas]} (diff-plan db-from db-to)]
     (run! remove-definition! remove)
-    (load! db-to (filterv #(not (held? db-to %)) load) schemas true)))
+    (into (vec (load! db-to (filterv #(not (held? db-to %)) load) schemas true)) (hold-config! db-to))))
 
 (defn load-changes!
   "Load what resolved tx-data ops change, read against db (after them): each definition
   they leave pointing to no form is removed, and each live form they assert (but the
   binary's own) is loaded, with what it reaches (load!: where a changed macro expanded, and
-  the contracts a changed schema entry reaches). With {:tests? false} (root's) the test
+  the contracts a changed schema entry reaches), and when they touch a config entry the config is held again (hold-config!: no op else reads it). With {:tests? false} (root's) the test
   namespaces' forms are left unevaluated (load-all!). Answers the error maps (empty when all loaded)."
   {:malli/schema [:function [:=> [:cat :seon.host/db [:sequential :seon.db/op]] [:vector :seon.program/error]]
                   [:=> [:cat :seon.host/db [:sequential :seon.db/op] [:map [:tests? {:optional true} :boolean]]] [:vector :seon.program/error]]]}
@@ -1259,15 +1291,16 @@
             :let [x (d/entity db e)]]
       (cond (:var/name x) (remove-definition! [:var (:var/name x)])
             (:method/key x) (remove-definition! (into [:method] (sedn/decode (:method/key x))))))
-    (load! db (vec (for [[op e a] ops
-                         :when (and (= op :db/add) (= a :form/src) (live? db e))
-                         :let [f (form-row db e)]
-                         :when (or (not (held? db f)) (some #(replaced (:v %)) (d/datoms db :eavt e :form/defines)))]
-                     f))
-           (set (for [[op e a] ops :when (and (= op :db/add) (= a :schema/form))
-                      :let [x (d/entity db e)] :when (not (:schema/source x))]
-                  (:schema/key x)))
-           tests?))))
+    (into (vec (load! db (vec (for [[op e a] ops
+                                    :when (and (= op :db/add) (= a :form/src) (live? db e))
+                                    :let [f (form-row db e)]
+                                    :when (or (not (held? db f)) (some #(replaced (:v %)) (d/datoms db :eavt e :form/defines)))]
+                                f))
+                      (set (for [[op e a] ops :when (and (= op :db/add) (= a :schema/form))
+                                 :let [x (d/entity db e)] :when (not (:schema/source x))]
+                             (:schema/key x)))
+                      tests?))
+          (when (some (fn [[_ _ a]] (= a :config/form)) ops) (hold-config! db))))))
 
 ;; ---- reach: which tests a change reaches ----------------------------------------------
 

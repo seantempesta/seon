@@ -95,6 +95,20 @@
                                              (read-string {:read-cond :allow :features #{:clj}} src)))))]
     (is (= #{'seon.task} (into #{} (keep (fn [[nsn src]] (when (reads? nsn src) nsn))) forms)))))
 
+(deftest a-key-read-at-load-says-so
+  ;; docs/config.md#what-waits-for-a-rebuild: a top-level def of src that reads a config key keeps the value it loaded with whatever a branch states, so its key carries :seon.config/at-load, and seon.config/waiting can say so
+  (let [db (runner/program-db (seon.config/checkout) (ts/kept-program-store))
+        forms (d/q '[:find ?src :where [?f :form/src ?src] [?f :form/ns ?ns] [?ns :ns/file ?file]
+                     [(clojure.string/starts-with? ?file "src/")]] db)
+        read-at-load (into (sorted-set)
+                           (for [[src] forms
+                                 :when (re-find #"^\(def(once)?\s" src)
+                                 :when (re-find #"(config|cfg)/(value|resolve) " src)
+                                 [_ k] (re-seq #"\(\S*/(?:value|resolve) (:seon\.config\.[\w./-]+)" src)]
+                             (keyword (subs k 1))))]
+    (is (seq read-at-load))
+    (is (= [] (vec (remove #(get-in seon.config/schema-forms [% 1 :seon.config/at-load]) read-at-load))))))
+
 (deftest a-bound-is-a-config-key
   ;; task seon.config/a-bound-is-a-config-key (AGENTS §5, only documented config): every limit,
   ;; bound or default is a config key. Read from the compiler's facts (each src form's recorded

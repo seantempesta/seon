@@ -453,18 +453,23 @@
                     (for [[c es] by-class :when c] [c (lib/digest (str/join "\n" (map second es)))]))
       :data-refs (declared-refs (str root "/resources/seon/system.edn"))})))
 
-(defn unreadable
-  "Why text can't be read as the file at relative path is read, or nil: the shipped config validates (a refusal throws, naming each key), EDN and Clojure read, a script
+(defn unread-text
+  "Why text does not read as the file at relative path is read, or nil, its meaning left to its owner: EDN and Clojure read, a script
   passes its interpreter's own syntax check (zsh, sh and bash -n, perl -c, its text on stdin; any other file, or a script with no #! line, has no reader here to ask). See docs/source.md#a-program-file."
   {:malli/schema [:=> [:cat :string :string] [:maybe :string]]}
   [path text]
   (let [interp (when (str/starts-with? text "#!") (last (str/split (first (str/split (subs text 2) #"\s" 2)) #"/")))
         flag ({"zsh" "-n" "sh" "-n" "bash" "-n" "perl" "-c"} interp)]
-    (cond (= path cfg/shipped-file) (do (cfg/text-config text) nil)
-          (or (str/ends-with? path ".clj") (str/ends-with? path ".edn"))
+    (cond (or (str/ends-with? path ".clj") (str/ends-with? path ".edn"))
           (when-not (reader/read-text text 'user) "it does not read")
           flag (let [r (sh/sh interp flag :in text)]
                  (when-not (zero? (:exit r)) (str/trim (str (:err r) (:out r))))))))
+
+(defn unreadable
+  "Why text can't be read as the file at relative path is read, or nil: the shipped config validates (its refusal names each key), and any other file reads (unread-text). See docs/source.md#a-program-file."
+  {:malli/schema [:=> [:cat :string :string] [:maybe :string]]}
+  [path text]
+  (if (= path cfg/shipped-file) (cfg/text-refusal text) (unread-text path text)))
 
 (defn git-commit
   "Commit files ({relative path text}) on branch of the repository at dir, with message,

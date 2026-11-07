@@ -9,7 +9,7 @@
   (:require [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [clojure.edn :as edn]
             [clojure.string :as str] [seon.agent :as agent] [seon.proofs :as proofs] [seon.contract :as contract]
             [datahike.api :as d] [seon.db :as pdb] [seon.test-store :as ts] [seon.program-test] [seon.lib :as lib] [seon.program :as program] [seon.sock :as sock]
-            [seon.fx :as fx] [seon.cost :as cost] [seon.config :as cfg] [seon.merge :as pm] [seon.profile :as profile] [seon.task :as task] [seon.repl :as repl] [seon.ctx] [seon.turn] [test-runner :as runner] [seon.context-test] [my.task] [my.agent] [seon.template :as tpl] [seon.stall-proofs] [clojure.core.async]))
+            [seon.fx :as fx] [seon.cost :as cost] [seon.config :as cfg] [seon.merge :as pm] [seon.profile :as profile] [seon.task :as task] [seon.repl :as repl] [seon.ctx] [seon.turn] [my.test :as mt] [test-runner :as runner] [seon.context-test] [my.task] [my.agent] [seon.template :as tpl] [seon.stall-proofs] [clojure.core.async]))
 
 (def ^:private await-file
   "seon.await, which a root (importing src only) loads by this path."
@@ -58,6 +58,24 @@
                                      (let [a (ask {:op :eval :agent "root" :code (str "@(c/submit! sys :" (:agent names) " " (pr-str %) " {:origin :outside})")})]
                                        (if-let [r (get-in a [:response :value])] {:response r} a)))
                                   (if (fn? forms) (forms names) forms)))))))
+
+(deftest a-branchs-config-key-moves-the-tests-reading-it-and-no-other
+  ;; docs/merging.md#verdicts-are-a-cache: a test takes each key's value, so what a branch states of one key moves the tests reading it, and leaves the rest and the place keys alone
+  (let [form (fn [nm k]
+               (fn [db] (program/record-tx db {:id (str "app.k-test/" nm) :src (str "(deftest " nm " (seon.config/value " k "))") :ns 'app.k-test :ns-form? false
+                                               :defs [{:var (symbol "app.k-test" nm) :kind :test}] :keywords #{k}
+                                               :declares #{} :methods [] :impls [] :refs '#{seon.config/value} :requires #{} :banned #{} :inline-defs #{}})))
+        db (mt/with (mt/world)
+             (form "reads-a" :seon.config.root/view-window)
+             (form "reads-b" :seon.config.root/flow-stop-ms))
+        g (program/reach-graph db nil)
+        in {:env "e" :tree "t" :config (fx/config-input cfg/config (cfg/checkout))}
+        digests (fn [held] (update-vals (program/graph-index g (#'agent/branch-inputs in db db held) nil) :digest))
+        before (digests cfg/config)
+        after (digests (update cfg/config :seon.config.root/view-window inc))]
+    (is (not= (before 'app.k-test/reads-a) (after 'app.k-test/reads-a)) "the key's reader moves")
+    (is (= (before 'app.k-test/reads-b) (after 'app.k-test/reads-b)) "a reader of another key doesn't")
+    (is (= before (digests (assoc cfg/config :seon.config.root/main "elsewhere"))) "and a place moves nothing")))
 
 (defn with-agent
   "in-agent's setup and teardown around a body of the test's own: f is called with {:names {:ns :task :agent}

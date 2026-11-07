@@ -9,6 +9,7 @@
                    [:tuple [:= :form] :string]
                    [:tuple [:= :schema] :qualified-keyword]
                    [:tuple [:= :section] :string]
+                   [:tuple [:= :config] :qualified-keyword]
                    [:tuple [:= :script] :string]
                    [:tuple [:= :datum] :int :keyword]
                    [:tuple [:= :datum] :int :keyword :any]]
