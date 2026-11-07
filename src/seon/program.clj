@@ -427,6 +427,16 @@
     (boolean (and (:env? a) (empty? (:defs a))
                   (some #{:as :refer} (filter keyword? (tree-seq coll? seq form)))))))
 
+(defn unknown-refs
+  "The names a form's account uses, in a namespace that is loaded, that hold no var: Jolt compiles such a name and fails only when
+  its line runs. A class's static has no namespace to ask. Sorted. See docs/resolution.md#a-name-with-no-var."
+  {:malli/schema [:=> [:cat [:map [:refs [:set :symbol]]]] [:vector :symbol]]}
+  [{:keys [refs]}]
+  (vec (sort-by str (for [r refs
+                          :let [n (some-> (namespace r) symbol find-ns)]
+                          :when (and n (nil? (ns-resolve n (symbol (name r)))))]
+                      r))))
+
 (defn account
   "The program account of one top-level form, or nil when it is none of the program's.
   opts: :nodes (each analyzed unit's node; or :units, their unit-accounts), :src (its exact text), :form

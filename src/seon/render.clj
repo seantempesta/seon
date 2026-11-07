@@ -168,8 +168,11 @@
   {:malli/schema [:=> [:cat :any [:maybe :qualified-keyword]] [:maybe :seon.host/fn]]}
   [v hint]
   (let [own (own-key v :seon.render/html)]
-    (when-let [sym (if (symbol? own) own (when (nil? own) (declared (schema-of v hint))))]
-      @(requiring-resolve sym))))
+    (if (symbol? own)
+      ;; a value's own says what it was drawn by where it was made: an agent's definition no other process holds, drawn as the data it is there (nil, the printer)
+      (some-> (when-let [n (some-> (namespace own) symbol find-ns)] (ns-resolve n (symbol (name own)))) deref)
+      (when-let [sym (when (nil? own) (declared (schema-of v hint)))]
+        @(requiring-resolve sym)))))
 
 (defn declared-var
   "The var of the render schema k declares (its nearest parent's), or nil: a layout the walk draws

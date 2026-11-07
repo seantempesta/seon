@@ -3,7 +3,7 @@
   opens it by default, holds the schema and nothing else; root's warm-up needs no seed."
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.java.shell] [datahike.api :as d]
-            [seon.db :as pdb] [seon.root :as root] [seon.test-store :as ts] [test-runner :as runner]))
+            [seon.db :as pdb] [seon.program] [seon.root :as root] [seon.test-store :as ts] [test-runner :as runner]))
 
 (defn- program-datoms [db]
   (vec (mapcat #(d/datoms db :aevt %) [:ns/name :form/id :var/name :task/name])))
@@ -128,6 +128,14 @@
     (is (some? section) "docs/config.md has its Constants section")
     (is (= #{} (apply disj sites named)) "every bound left in src is named in docs/config.md#constants with its reason")
     (is (= #{} (apply disj named sites)) "and every name there is still such a site")))
+
+;; docs/resolution.md: Jolt compiles a qualified name with no var and fails only when the line runs, so a path no test runs ships it
+(deftest every-name-a-form-uses-is-a-var
+  (let [db (runner/program-db (seon.config/checkout) (ts/kept-program-store))
+        ;; the program's own: a test names what's gone to say it's gone
+        acct {:refs (set (d/q '[:find [?r ...] :where [?f :form/refs ?r] [?f :form/ns ?ns] [?ns :ns/file ?file] [(clojure.string/starts-with? ?file "src/")]] db))}]
+    (run! #(require (symbol (namespace %))) (filter #(and (namespace %) (re-find #"^(seon|my)\." (namespace %))) (:refs acct)))
+    (is (= [] (seon.program/unknown-refs acct)))))
 
 (deftest an-edge-asks-one-way
   ;; task seon.step/an-edge-asks-one-way: an edge asks a proc one way, seon.step/ask-edge, which

@@ -454,7 +454,8 @@
                                                                        (map (juxt :multi :dispatch) (:methods acct)) (map (juxt :protocol :type) (:impls acct))))
                                       :repl/defined (mapv :var (:defs acct)))
                          redefined (assoc :redefined redefined)
-                         drops (assoc :ns-drops drops)))
+                         drops (assoc :ns-drops drops)
+                         (seq (program/unknown-refs acct)) (assoc :unknown-vars (program/unknown-refs acct))))
                      (cond-> m
                        l (assoc :repl/defined (program/set-vars l))
                        (or nested? (and l (= :agent (:mode @agent/state)) (program/calls-eval? l)))
@@ -603,6 +604,9 @@
                    (conj {:seon.repl/finding :ns-form-drops :dropped (some :ns-drops fs)
                           :seon.repl/fix (str "Your ns form replaces this namespace's whole form on your branch, and it doesn't require " (clojure.string/join ", " (some :ns-drops fs))
                                               ". They still work in this process, but the file loses them, so what uses them won't load on a checkout. Evaluate the whole ns form with what you add.")})
+                   (some :unknown-vars fs)
+                   (conj {:seon.repl/finding :unknown-var :unknown (vec (distinct (mapcat :unknown-vars fs)))
+                          :seon.repl/fix "No var has this name yet, so the definition fails when that line runs: fix the name, or define it."})
                    (some :shadowed fs)
                    (conj (let [sh (some :shadowed fs)]
                            {:seon.repl/finding :helper-shadowed :shadowed sh

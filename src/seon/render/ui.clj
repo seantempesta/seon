@@ -1103,10 +1103,10 @@
                 (let [items (when (coll? x) (map #(as-text (if (map? %) (or (:key %) (:symbol %) %) %)) x))]
                   (if items
                     ;; each named on its own, so a change of one says that one (docs/render.md#a-change-is-edits-by-name)
-                    [:div {:key what} [:p (str what ":")]
-                     (into [:ul {:key :items}] (for [i (distinct items)] [:li {:key i} i]))
+                    [:div [:p (str what ":")]
+                     (into [:ul {:key :items}] (for [i (distinct items)] [:li i]))
                      (when do [:p "To clear it: " (form-hiccup do)])]
-                    [:p {:key what} what (when (some? x) (str ": " x)) (when do [:span ". To clear it: " (form-hiccup do)])])))]
+                    [:p what (when (some? x) (str ": " x)) (when do [:span ". To clear it: " (form-hiccup do)])])))]
     [:section
      [:h2 "Your proofs"]
      (when test-run [:p "The tests could not run: " (str/join "; " (:failed test-run))])
@@ -1228,7 +1228,7 @@
   [:div
    (for [k (added-keys c)] [#'ctx-key {} k])])
 
-(declare eval-output)
+(declare eval-output eval-glance)
 
 (defn eval-hiccup
   "Eval e of the conversation as a step of the chat and a call of the model's, one hiccup (docs/render.md#the-models-context-a-cached-prefix-then-the-turn): one quiet line, a mark only when it threw, what it set out
@@ -1262,7 +1262,8 @@
       [:div {:class "ml-4 flex min-w-0 max-w-full flex-col gap-1 overflow-x-auto py-1"}
        ;; the code as the agent wrote it, whole, highlighted
        [:div {:class "min-w-0" :wire/field "code"} [#'emit/marked-hiccup :seon.print/code (or code "")]]
-       (when at [#'eval-output {:key id :at at :agent agent :wire/for "page"}])]]]))
+       (when at [#'eval-output {:key id :at at :agent agent :wire/for "page"}])]]
+     (when at [#'eval-glance {:key id :at at :wire/for "page"}])]))
 
 (defn eval-item
   "An eval of the conversation (a component over ctx and the db), its one hiccup (`eval-hiccup`) (owner: \"I
@@ -1281,6 +1282,25 @@
   (when (get-in c (conj at :seon.eval/id))
     (into {} (for [k [:seon.eval/id :seon.eval/code :seon.eval/response :seon.eval/schema :seon.eval/basis]
                    :let [v (ratom/realize (get-in c (conj at k)))] :when (some? v)] [k v]))))
+
+(defn eval-glance
+  "What came of an eval, in the chat with no click (a component over ctx and the db, for the page alone): its value through the one render (render/html: the render it has, else the value printer), whole once its step is opened; or, closed, what went wrong on a line, the opened step having the rest. See docs/render.md#a-value-draws-itself."
+  {:seon.render/style ".eval-glance { margin: 0.25rem 0 0.25rem 1rem; min-width: 0; overflow-x: auto; font-size: 0.75rem; }\n.eval-item:has(> details[open]) .eval-glance-line { display: none; }" :seon.render/for "page" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db] [:at [:vector :any]]]]] :any]}
+  [{c :seon.ctx/ctx db :seon.db/db at :at}]
+  (when-let [e (eval-shown c at)]
+    (let [{:keys [ex value handle out err warnings]} (:seon.eval/response e)
+          r (:seon.eval/response e)
+          v (ratom/realize value)
+          k (:seon.eval/schema e)
+          failed (or (ratom/realize ex) (when (contract/error? v) v))
+          opened? (ratom/realize (get-in c (conj at :seon.eval/opened)))
+          budget (if opened? (inc (render/tokens-of v)) (config/value :seon.config.render/value-budget))
+          whole (cond-> v (and opened? (instance? clojure.lang.IObj v)) (vary-meta assoc :seon.print/full true))]
+      (cond
+        failed [:div [:span {:class "eval-glance-line text-error"} (print/line (or (:seon.error/message failed) failed) (config/value :seon.config.render/line-budget) nil)]]
+        ;; a nil beside output is the output's whole answer (clojure.repl/source prints and answers nil)
+        (and (contains? r :value) (not (and (nil? v) (or (ratom/realize out) (ratom/realize err) (seq (ratom/realize warnings))))))
+        [:div (render/html (cond-> {:budget budget :handle handle :db db} k (assoc :as :block :schema k)) whole)]))))
 
 (defn- step-tools
   "An opened step's buttons, for a live agent (the page's stylesheet shows them only beside its REPL's input, so no step is drawn again as its status moves): run it again in its place,
@@ -1335,15 +1355,9 @@
        (for [[label k s] printed]
          [:div {:class "seon-row"} [:span {:class (if (#{:err :warnings} k) "text-warning" "muted")} label]
           (render/html {:budget (budget s) :handle (when handle (list k handle))} (whole s))])
-       (if err
+       (when err
          [:div {:class "text-error"} "✗ " (:seon.error/message err)
-          (render/html {:budget (budget err) :handle handle} (whole (dissoc err :seon.error/message)))]
-         ;; a nil beside output is the output's whole answer (clojure.repl/source prints and answers nil)
-         (when (and (contains? (:seon.eval/response e) :value) (not (and (nil? v) (seq printed))))
-           [:div {:class "seon-row"} [:span {:class "muted"} "→"]
-            ;; by the render its record names, when it names one: a value draws as itself (docs/render.md#the-page)
-            (render/html (cond-> {:budget (budget v) :handle handle :db db}
-                           (:seon.eval/schema e) (assoc :as :block :schema (:seon.eval/schema e))) (whole v))]))])))
+          (render/html {:budget (budget err) :handle handle} (whole (dissoc err :seon.error/message)))])])))
 
 (defn proved
   "A prove's run as its eval's tile draws it (the declared html render of :seon.test/proved, from
