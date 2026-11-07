@@ -944,7 +944,7 @@
         tx (when (and files (not= digest (:digest held))) (source/tx-of @(:conn sys) files (boolean changed)))
         fact (if (and digest (= digest (:digest held)))
                (this-boot held)
-               (let [w (when (and tx (not (contract/error? tx))) @(call! sys {:op :write :req {:op :tx :branch :db :tx-data tx}}))]
+               (let [w (when (and tx (not (contract/error? tx))) @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (into tx (source/modes-tx @(:conn sys) (:modes r)))}}))]
                  (this-boot (cond-> {:root root :files (if changed (+ (count (d/datoms @(:conn sys) :aevt :ns/file)) (count (d/datoms @(:conn sys) :aevt :schema/file))) (count files)) :forms (count (d/datoms @(:conn sys) :aevt :form/id)) :ms (profile/ms-since t0)}
                               (:commit r) (assoc :commit (:commit r))
                               (:tree r) (assoc :tree (:tree r))

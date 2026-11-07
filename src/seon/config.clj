@@ -234,7 +234,7 @@
 (defn- read-layer
   "One file layer read with aero under prof, #seon/checkout resolving under dir; nil values
   are not stated (absent at this layer)."
-  {:malli/schema [:=> [:cat :string :keyword :string] :map]}
+  {:malli/schema [:=> [:cat :any :keyword :string] :map]}
   [p prof dir]
   (into {} (remove (comp nil? val)) (aero/read-config p {:profile prof ::checkout dir})))
 
@@ -248,6 +248,8 @@
     {:config c
      :sources (into {} (for [[src l] layers [k v] l :when (some? v)] [k src]))}))
 
+(def shipped-file "The shipped config, relative to the checkout." "resources/seon/config/default.edn")
+
 (defn load-layers
   "The layers this process reads: the shipped file under the command line's --profile, the
   profile's own record (:seon.config.root/profile), then its --config files and --set keys,
@@ -258,10 +260,17 @@
   [dir args]
   (let [{:keys [layers profile]} (overrides args)
         prof (if profile (keyword profile) :default)]
-    (into [["resources/seon/config/default.edn" (read-layer (path dir) prof dir)]
+    (into [[shipped-file (read-layer (path dir) prof dir)]
            [(if profile (str "--profile " profile) "no --profile") {:seon.config.root/profile prof}]]
           (for [[src x] layers]
             [src (if (string? x) (read-layer x prof dir) x)]))))
+
+(defn text-config
+  "text as the shipped config would read at this checkout, validated as a boot validates it with no profile: the config, or the refusal thrown, naming each key. What a write of the file checks first (seon.fx/unreadable). See docs/source.md#a-program-file."
+  {:malli/schema [:=> [:cat :string] :seon.config/config]}
+  [text]
+  (:config (layered [[shipped-file (read-layer (java.io.StringReader. text) :default (checkout))]
+                     ["no --profile" {:seon.config.root/profile :default}]])))
 
 (def ^:private loaded
   (let [dir (checkout)] (layered (load-layers dir (argv)))))
@@ -293,6 +302,18 @@
   {:malli/schema [:function [:=> [:cat :qualified-keyword] :any] [:=> [:cat :qualified-keyword :seon.config/context] :any]]}
   ([k] (value k {}))
   ([k ctx] (:value (resolve k ctx))))
+
+(defn file-kind
+  "The kind :seon.config.source/things gives the file at relative path, or nil: a pattern is a path whose one * stands for any name in that directory. See docs/source.md#a-program-file."
+  {:malli/schema [:=> [:cat :string] [:maybe :keyword]]}
+  [path]
+  (some (fn [[pattern kind]]
+          (let [[before after] (str/split pattern #"\*" 2)]
+            (when (and (str/starts-with? path before) (str/ends-with? path (or after ""))
+                       (<= (+ (count before) (count after)) (count path))
+                       (not (str/includes? (subs path (count before) (- (count path) (count after))) "/")))
+              kind)))
+        (value :seon.config.source/things)))
 
 (defn pin-class
   "The :seon.pin class of submodule path p: its path under reference-code/ with / as .

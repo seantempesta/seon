@@ -240,6 +240,32 @@
     (is (zero? (:exit r)) (str args " " (:err r)))
     (str/trim (:out r))))
 
+(deftest a-script-merged-is-written-back-with-its-mode
+  ;; docs/source.md#a-program-file: read from the tree with its mode, edited on a branch, merged, committed: the tree's text is main's and the execute bit is kept (the roots-log agent's spit took it off)
+  (let [tree (scratch-dir "script")
+        p (str tree "/bin/x")
+        text "#!/bin/sh\n# bin/x says hello\necho 1\n"
+        _ (do (git tree "init" "-q" "-b" "main")
+              (.mkdirs (java.io.File. (str tree "/bin")))
+              (spit p text) (.setExecutable (java.io.File. ^String p) true)
+              (git tree "add" "bin") (git tree "-c" "user.name=test" "-c" "user.email=test@localhost" "commit" "-q" "-m" "base"))
+        r (fx/read-source {:req {:root tree :dirs ["bin"]}})
+        _ (is (= {"bin/x" text} (:value r)) "a file on the allow-list is read whatever its name")
+        _ (is (= {"bin/x" "100755"} (:modes r)))
+        main (let [db (empty-db) db (d/db-with db (source/import-tx db (:value r)))] (d/db-with db (source/modes-tx db (:modes r))))
+        _ (is (= [] (source/modes-tx main (:modes r))) "read again, nothing to write")
+        edited "#!/bin/sh\n# bin/x says hello\necho 2\n"
+        ours (d/db-with main (source/file-tx "bin/x" edited))
+        ch (:ours (seon.merge/delta-three-way main ours main #{}))
+        merged (d/db-with main (seon.merge/merge-tx main main ours (keys ch) #{}))
+        paths (source/changed-files merged ch)
+        c (fx/git-commit {:req {:dir tree :branch "jolt/seon-merges" :files (source/files merged paths) :modes (source/modes merged paths) :message "m"}})]
+    (is (some? (get-in c [:value :sha])) (pr-str c))
+    (is (= (str/trim edited) (git tree "show" "jolt/seon-merges:bin/x")) "the tree's text is main's")
+    (is (str/starts-with? (git tree "ls-tree" "jolt/seon-merges" "bin/x") "100755 ") "the execute bit is kept")
+    (is (nil? (:seon.error/type (fx/write-file {:req {:path p :text edited}}))))
+    (is (= "" (git tree "diff" "jolt/seon-merges" "--" "bin/x")) "the same edit on disk: git diff empty against what merged")))
+
 (deftest a-merge-is-committed-on-the-merges-branch
   (let [tree (scratch-dir "git")
         ;; the base commit is the test's own; the tree holds no identity of its own, as a

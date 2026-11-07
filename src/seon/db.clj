@@ -172,6 +172,10 @@
   {:malli/schema [:=> [:cat :seon.host/conn] :seon.db/branch]}
   [conn] (main-branch (:config @conn)))
 
+(def retired-names
+  "Stored names a rename retired, {old new}: a stored keyword is renamed by erasing the store, never by a migration, so a store holding one is refused at open (install-missing!). See docs/storage.md#a-renamed-attribute."
+  {:schema.file/path :file/path :schema.file/text :file/text})
+
 (defn install-missing!
   "Transact the attributes of `schema` the db under conn lacks, or holds without their
   declared :db/contentId, and answer the idents it added: first
@@ -182,7 +186,8 @@
   gains it): a kept store seeded before an attribute existed gains it when a root
   opens it, and a branch cut before one existed when its agent resumes it (seon.agent's
   resume: a branch keeps the schema it was cut with; Datahike accepts new attribute
-  definitions at any time). Nothing missing writes nothing."
+  definitions at any time). A store holding a name a rename retired (retired-names) is refused, :seon.db/name-retired: it would gain the
+  new name and hold nothing under it. Nothing missing writes nothing."
   {:malli/schema [:=> [:cat :seon.host/conn] [:set :keyword]]}
   [conn]
   (let [have (:schema @conn)
@@ -195,6 +200,13 @@
                                     (str "the store holds " (count differ) " attributes as another value type than the schema declares (each in :seon.db/attributes)")
                                     {:seon.db/attributes differ
                                      :seon.error/fix "An attribute's value type is fixed once installed: open a store made with this schema (a fresh one), or keep running the build that made this store."})]
+              (throw (ex-info (:seon.error/message e) e))))
+        retired (into {} (filter (comp #(contains? have %) key)) retired-names)
+        _ (when (seq retired)
+            (let [e (contract/error :seon.db/name-retired #'seon.db/install-missing!
+                                    (str "the store holds " (count retired) " attributes under names a rename retired (each in :seon.db/retired): it was made by an older build, and nothing in it was changed")
+                                    {:seon.db/retired retired
+                                     :seon.error/fix "A stored keyword is renamed by erasing the store, never by a migration: erase this store and start fresh, or keep running the build that made it."})]
               (throw (ex-info (:seon.error/message e) e))))
         ;; an identity a kept store holds without its content id gains it (Datahike admits
         ;; adding :db/contentId: its entities keep their ids, new ones mint at content ids), and an

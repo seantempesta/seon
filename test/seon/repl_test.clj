@@ -177,6 +177,76 @@
     (is (clojure.string/includes? (str (first (:value branch))) "[] 2") "the branch's program holds the new source")
     (is (= 0 (second (:value branch))) "its inner eval records no eval of its own: the edit's call is the one kept")))
 
+(deftest an-edit-of-a-path-keeps-its-mode
+  ;; docs/agent.md#changing-a-file: the roots-log agent's `spit` to bin/root took the execute bit off; a file's mode is its own
+  (let [d (str (seon.config/checkout) "/target/tmp/repl-path-" (random-uuid))
+        p (str d "/run.sh")
+        mode #(str (java.nio.file.Files/getPosixFilePermissions (.toPath (java.io.File. ^String p)) (into-array java.nio.file.LinkOption [])))]
+    (.mkdirs (java.io.File. ^String d))
+    (spit p "#!/bin/sh\necho one\n")
+    (.setExecutable (java.io.File. ^String p) true)
+    (let [before (mode)]
+      (is (str/includes? before "OWNER_EXECUTE") before)
+      (let [r (repl/edit! p "echo one" "echo two")]
+        (is (= "#!/bin/sh\necho two\n" (slurp p)) (pr-str r))
+        (is (= before (mode)) "the same mode after the edit")))))
+
+(deftest an-edit-of-a-path-says-where-it-wrote
+  ;; docs/agent.md#changing-a-file: an edit of a plain path names the absolute path and that no branch carries it, and refuses as a definition's edit does
+  (let [d (str (seon.config/checkout) "/target/tmp/repl-path-" (random-uuid))
+        p (str d "/notes#1.txt")]
+    (.mkdirs (java.io.File. ^String d))
+    (spit p "a\nb\na\n")
+    (let [abs (.getCanonicalPath (java.io.File. ^String p))
+          r (repl/edit! p "b" "c")]
+      (is (= "a\nc\na\n" (slurp p)) (pr-str r))
+      (is (= abs (get-in r [:edited :path])) (pr-str r))
+      (is (= [[1 "a"] [2 "c"] [3 "a"]] (get-in r [:edited :lines])) (pr-str r))
+      (is (str/includes? (:seon.text/said r) abs) "it names the absolute path")
+      (is (str/includes? (:seon.text/said r) "no branch") "and that no branch carries it"))
+    (is (= :ambiguous (:seon.repl/refused-because (repl/edit! p "a" "x"))) "exact text, once")
+    (is (= :not-found (:seon.repl/refused-because (repl/edit! p "zz" "x"))))
+    (is (= "a\nc\na\n" (slurp p)) "nothing changed")
+    (is (= {:unchanged p} (repl/edit! p "c" "c")))
+    (let [r (repl/edit! p [["a\nc" "A\nC"] ["c\na\n" "x"]])]
+      (is (= :overlap (:seon.repl/refused-because r)) (pr-str r)))
+    (let [r (repl/edit! (str d "/absent") "a" "b")]
+      (is (= :no-source (:seon.repl/refused-because r)) (pr-str r))
+      (is (str/includes? (:seon.error/message r) d) "it names where it looked"))))
+
+(deftest a-schema-resources-path-stays-on-disk-and-says-how-it-changes
+  ;; docs/agent.md#changing-a-file: its entries are what merges; the plain write answers so
+  (let [d (str (seon.config/checkout) "/resources/seon/schemas/repl-path-" (random-uuid) ".tmp.edn")]
+    (spit d "{:x/a :int}\n")
+    (try (let [r (repl/edit! d ":int" ":string")]
+           (is (= "{:x/a :string}\n" (slurp d)) (pr-str r))
+           (is (str/includes? (:seon.text/said r) "no branch"))
+           (is (str/includes? (:seon.text/said r) "my.schema/register!") (pr-str r)))
+         (finally (.delete (java.io.File. ^String d))))))
+
+(deftest a-script-is-edited-on-the-branch
+  ;; docs/agent.md#changing-a-file: a script this branch holds changes as a fact of the branch, at its name or its absolute path, and the disk doesn't move
+  (let [f (str (seon.config/checkout) "/bin/ports")
+        on-disk (slurp f)
+        at (fn [db] (str "(:file/text (datahike.api/entity " db " [:file/path \"bin/ports\"]))"))
+        [edit by-path bad branch main changes]
+        (at/in-agent (fn [_]
+                       ["(seon.repl/edit! \"bin/ports\" \"#!/bin/zsh\" \"#!/bin/zsh\\n# one\")"
+                        (str "(seon.repl/edit! " (pr-str f) " \"# one\" \"# two\")")
+                        "(seon.repl/edit! \"bin/ports\" \"# two\" \"if then\")"
+                        (at "(seon.agent/db)")
+                        {:op :eval :agent "root" :code (at "@(:conn sys)")}
+                        "(:scripts (seon.merge/divergence (seon.agent/branch-changes (:base @seon.agent/state) (seon.agent/db))))"])
+                     {:dirs ["bin"]})]
+    (is (= "bin/ports" (get-in edit [:value :edited :script])) (pr-str edit))
+    (is (str/includes? (get-in edit [:value :seon.text/said]) "this branch") (pr-str edit))
+    (is (= "bin/ports" (get-in by-path [:value :edited :script])) (str "its absolute path is the same place: " (pr-str by-path)))
+    (is (= :unreadable (get-in bad [:value :seon.repl/refused-because])) (pr-str bad))
+    (is (str/starts-with? (str (:value branch)) "#!/bin/zsh\n# two\n") (pr-str branch))
+    (is (= on-disk (:value main)) (str "main holds what it held: " (pr-str main)))
+    (is (= ["bin/ports"] (:value changes)) (pr-str changes))
+    (is (= on-disk (slurp f)) "nothing on disk moved")))
+
 (deftest a-doc-is-edited-as-a-definition-is
   ;; docs as code (task seon.doc/any-markdown-file-is-docs-it-writes-back): edit! of a doc's address replaces exact
   ;; text once in its block, as of a definition, and loads its page again on the agent's branch, so what its text

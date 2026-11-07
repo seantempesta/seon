@@ -920,6 +920,12 @@
            (list [:p "Each entity points to another with it, which holds:"]
                  (into [:ul] (for [[tk tv] (remove (comp #{:db/id} key) target)] [:li [:code (str tk " " (print/text tv))]]))))]))))
 
+(defn script
+  "A script, as hiccup: what it's for and how to call it, in its own words (docs/source.md#a-program-file)."
+  {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
+  [_ {:file/keys [path] :seon.script/keys [says usage]}]
+  [:section [:h3 path] (when (seq says) [:p says]) (when (seq usage) [:pre usage])])
+
 (defn cite-hiccup
   "A cite as pulled (and filled) with its joins, as one hiccup by what it cites: a wiki section (`section-hiccup`), a function
   (`var-hiccup`), a schema key or setting (`key-hiccup`), a namespace (its doc and how to read it), a task (its plan), or what
