@@ -134,6 +134,20 @@
     (is (= [1 2] (waiters-answered all)))
     (is (every? seon.contract/error? (map :r (filter #(= :prove-answer (:op %)) all))))))
 
+
+;; docs/merging.md#verdicts-are-a-cache: the daily run is what catches what a digest can't see, so what it finds is told, not only cached
+(deftest a-red-in-the-full-run-is-a-problem
+  (let [request [:req {:branch :main :digest "full-2026-11-07" :mode :full}]
+        [st outs] (feed (prove/prove-proc {}) [request])
+        fx (first (filter #(= :fx (get-in % [:req :op])) outs))
+        told (fn [answer] (let [[st2 o] (feed st [(answer-of fx answer)])] [st2 (filter #(= :problem (:op %)) o)]))
+        [st-r reds] (told {:value {:results '{a/green :pass a/red :fail a/died :error}}})
+        [_ none] (told {:value {:results '{a/green :pass}}})]
+    (is (= [:seon.prove/full-run-red] (map #(get-in % [:error :seon.error/type]) reds)))
+    (is (= '[a/died a/red] (get-in (first reds) [:error :tests])) "it names each, and a green is none of them")
+    (is (nil? (:full st-r)) "the run has ended")
+    (is (empty? none) "all green tells nothing")))
+
 ;; ---- the daily full run (the cron proc's request, :full mode) -----------------------------------
 
 (def ^:private full-answer
@@ -158,13 +172,13 @@
       (let [[_ o] (feed st [[:req {:branch :main :digest "full-2026-10-29" :mode :full}]])]
         (is (empty? (filter :req o)))
         (is (= [:seon.prove/full-run-running] (map #(get-in % [:error :seon.error/type]) (filter #(= :problem (:op %)) o))))))
-    (testing "the same day's request while it runs joins it; the effect answered, the full run is free and nothing is written"
+    (testing "the same day's request while it runs joins it; the effect answered, the full run is free and no fact is written for the verdicts"
       (let [[st2 o2] (feed st [request])
             [st3 o3] (feed st2 [(answer-of fx full-answer)])]
         (is (empty? (filter :req o2)) "no second run")
         (is (nil? (:full st3)) "the full run is free")
         (is (empty? (filter :req o3)) "no write: its shards cached their verdicts")
-        (is (empty? (filter #(= :problem (:op %)) o3)) "a red test is not a platform defect")
+        (is (= ['a.c-test/u] (mapcat #(get-in % [:error :tests]) (filter #(= :problem (:op %)) o3))) "a red it found is told: a-red-in-the-full-run-is-a-problem")
         (testing "the day again: answered by its run, nothing runs"
           (is (empty? (filter :req (second (feed st3 [request]))))))))
     (testing "an effect that failed is a platform problem, and the full run is free for the next day"
