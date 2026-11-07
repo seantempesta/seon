@@ -56,8 +56,8 @@ A number far off its line here means something is wrong: stop and find out why. 
 | Merge of k carried datoms | O(k) | 7.3 k ticks a datom in `merge-tx`, 25 M for its diff | right since the fix above |
 | An insert in a file | O(1) places | 1 place, once 5 or more | right since the fix above |
 | A process catching up by k datoms | O(k) | 13 k ticks a datom whole | right, not built |
-| A merge base | O(commits since it) | 15 k ticks for every commit: 29.7 M at 2,000 | **off**: it walks the whole graph |
-| Analyzing a merged tree, one file changed | O(forms of that file) | 31 M ticks for that alone; a gate's worktree and whole import, 28 s | **off, about 100 times** |
+| A merge base | O(commits since it) | `seon.agent/merge-main!` needs none now; other callers walk at 15 k ticks a commit | right where it runs each turn |
+| Analyzing a merged tree, one file changed | O(forms of that file) | under 0.1 s a file, about 1 s at `done`, with no worktree | right since `jolt/analyze-merge` |
 | Selection after an edit to `seon/source.clj` or `seon/program.clj` | O(changed forms) | 5,271 M ticks, every form | **off**, task ``seon.program/a-kept-tree-is-keyed-by-the-text-of-two-files`` |
 | Selection after a body edit | O(changed forms) plus a lookup a test | 165 M ticks, 1.5 s | right |
 

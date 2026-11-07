@@ -88,14 +88,21 @@
               [(assoc st :full req) [m]]))))
 
 (defn- full-answered
-  "The full run's chain: the effect's answer (its shards cached their verdicts), its slot free. A failed
-  effect is a :platform problem."
+  "The full run's chain: the effect's answer (its shards cached their verdicts), its slot free. A failed effect is a
+  :platform problem, and so is a red: this run is what catches what a digest can't see (docs/merging.md#verdicts-are-a-cache), so
+  a red it finds is told, naming each test."
   {:malli/schema [:=> [:cat :map :keyword :any] [:tuple :map [:vector :map]]]}
   [st step r]
   (let [run (:full st)]
     (cond
       (contract/error? r) [(dissoc st :full) [{:op :problem :class :platform :error r}]]
-      :else [(-> st (dissoc :full) (assoc :full-done (:key run))) []])))
+      :else (let [reds (vec (sort-by str (keep (fn [[t st]] (when-not (= :pass st) t)) (get-in r [:value :results]))))]
+              [(-> st (dissoc :full) (assoc :full-done (:key run)))
+               (if (empty? reds)
+                 []
+                 [{:op :problem :class :platform
+                   :error (contract/error :seon.prove/full-run-red #'seon.prove/full-answered
+                                          (str "the full run " (:key run) " found " (count reds) " red on main: " (str/join " " reds)) {:tests reds})}])]))))
 
 (defn- take-next
   "After a run of branch b: the pending run whose branch is the next in name order after b (then
