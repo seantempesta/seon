@@ -22,7 +22,15 @@ Check that a check ran what it claims:
 - A submodule checked out at a new commit and not yet committed as the pin goes back to the old pin on the next build: commit the pin before measuring.
 - A digest does not see a form with no var (seon.program/a-top-level-form-with-no-var-is-in-a-digest), and a mutation there runs nothing.
 - Under load a killed prove's reds name `root stopped`, not the code. `with-interrupts-disabled` stops the tick counter, and a bare script counts no ticks at all.
+- `du` counts a file clone (`cp -c`) in full: three check runs read 114 GB and freed 9. Free space is `df` before and after. Summed RSS counts forked pages once each: 72 GB where physical memory rose 23.
+- The two sides of a claim that a cache is shared may not share a key: compare the digests themselves on one tree (46 of 1,452 matched, where the wiki said one cache). A green can mean a key that never matches anything.
+- A task's stated cause is a hypothesis until it is measured: two tasks' causes here were wrong, and the fix each named would have changed the wrong code. So is a helper's or a peer's report, and your own theory, however well it fits: three fitted here and were ruled out by one probe each.
+- Never make load to reproduce something: it takes the owner's machine and repeats a run, which is no new evidence. Read the code, find the deterministic form (hold a monitor, notify, read the state before letting go), or record what the next real run did.
 - Measuring what a process holds: a local in scope keeps its value alive, so build and return from a function, and start with a control that keeps nothing. A walk not disposed (seon.render/dispose-walk!) stays alive through its watches on the render vars.
+
+### Reading a hang
+
+A hang's evidence is gone once it is killed, and `timeout` signals the whole process group, so a trap at the stop reads nothing of its steps. Sample first, since a signal can free it: `kill -INFO` asks a Jolt process for its fiber dump on stderr, and a run that goes on after it was stuck on a lost wake. A check run still going at 10 minutes keeps its own (`at-checkpoint/`). What to read: a process at 0% CPU with every thread in a condition wait, and a fiber dump's parked fibers less the idle Flow procs on alts. A `:jolt/deadlock` or `jolt-main-carrier: stuck` is the detector's verdict and may be wrong: it cannot see what a woken thread is about to do.
 
 ## The target: a 16 GB MacBook M1
 
