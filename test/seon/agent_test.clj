@@ -1940,6 +1940,21 @@
                          :decls [{:seon.task/name "w" :seon.task/plan "Wait." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]})]
     (is (= "read: The reply itself." (:value r)) (pr-str r))))
 
+(deftest a-merge-of-main-moves-the-base-the-status-reads
+  ;; repl-audit A F45, F43: after (my.branch/merge-main!) the status named main's own problems as the work's, since the fact it reads stayed at the old base
+  ;; until a next turn; and hundreds of applied keys were 12.5k tokens: their count, with the keys under the eval's handle
+  (let [[_ merged moved keys-read]
+        (in-agent (fn [{:keys [ns]}]
+                    (let [m (str "demo." ns ".moved")]
+                      [{:op :eval :agent "root" :code (str "@(seon.root/transact-main! sys (seon.source/text-tx @(:conn sys) '" m " \"(ns " m ")\\n\\n(defn g [] 7)\\n\" nil))")}
+                       "(my.branch/merge-main!)"
+                       "(= (:seon.agent/base-commit (datahike.api/entity (my.db/db) [:seon.agent/key (:key @seon.agent/state)])) (datahike.api/commit-id (:base @seon.agent/state)))"
+                       "(pos? (count (:applied *2)))"]))
+                  (merging))]
+    (is (re-find #":applied \d+[,}\s]" (:text merged)) (pr-str merged))
+    (is (true? (:value moved)) (pr-str moved))
+    (is (true? (:value keys-read)) "the keys stay under the value")))
+
 (deftest a-root-with-no-provider-ends-the-work-on-its-typed-error
   ;; root's ruling 2026-10-22: a root with no model provider (no --profile) answers the
   ;; first turn with :seon.model/no-provider; the error reaches whoever can act on it: the

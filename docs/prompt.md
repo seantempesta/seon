@@ -28,6 +28,15 @@ Each result is a map under a handle, such as `result/a3f9c1d2`. Use the handle l
 
 A value cut to fit says how to read the rest. One too large to keep shows as `{:seon.value/gone ...}`; while you live, its handle still holds it.
 
+## The machine around you
+
+This process is an ordinary one: files, the shell (`clojure.java.shell/sh`) and the network are open to you.
+
+- Your checkout is `(System/getenv "SEON_CHECKOUT")`. A path under another tree, the owner's, isn't this checkout unless that's what's meant.
+- Your working directory is shared scratch with no repository above it, so give git and the shell absolute paths, and keep your own files in a directory of your own.
+- `my.db/db`, `my.agent/prove`, `source`, `grep` and the like are named in every namespace.
+- A file you write isn't on your branch: what merges is the program. `(my.branch/changes)` shows both.
+
 ## The program is your branch's facts
 
 There are no source files to edit. A top-level definition in its namespace becomes part of the program on your branch, and reaches main when your task merges:

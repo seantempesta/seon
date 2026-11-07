@@ -48,7 +48,7 @@
   no proofs (never proven); a proof not passing (red), or with no result (unknown: it
   never ran); a regression (a test green on main, the
   proofs of merged tasks, red here); a stray red (a red test that is no task's open
-  proof); a test red on main too at the branch's merge base (main-red) is main's red, neither a regression
+  proof);
   nor a stray red: red before and red after, whatever the work did to it (docs/render.md#how-the-work-stands); a contract gap (a function its branch defined without a contract); an
   unmerged entry on the branch (a merge conflict not resolved); an open problem the
   branch's work made true (seon.problems/caused: a citation of a var it deleted). A :design task readies
@@ -60,7 +60,7 @@
   at the merge gate on a checkout, seon.reconcile's :gate) is neither red nor unknown
   here; while unrun it is the merge's open :unrun problem."
   {:malli/schema [:=> [:cat :seon.reconcile/done-input] [:vector :seon.reconcile/not-done]]}
-  [{:keys [proofs results main-green allowed-red main-red uncontracted unmerged caused kind plan plan-before deferred behind]}]
+  [{:keys [proofs results main-green allowed-red uncontracted unmerged caused kind plan plan-before deferred behind]}]
   (let [red? (fn [t] (#{:fail :error} (get results t)))
         design? (= :design kind)]
     (vec (concat
@@ -73,9 +73,9 @@
            ;; leaves its proofs red, never unknown (the implement step needs them written)
            (for [p (sort-by str proofs) :let [s (get results p)] :when (and (not (contains? deferred p)) (if design? (nil? s) (not= :pass s)))]
              {:reason (if s :proof-red :proof-unknown) :symbol p})
-           (for [t (sort-by str main-green) :when (and (not (proofs t)) (red? t) (not (contains? main-red t)))] {:reason :regression :symbol t})
+           (for [t (sort-by str main-green) :when (and (not (proofs t)) (red? t))] {:reason :regression :symbol t})
            (for [t (sort-by str (keys results))
-                 :when (and (red? t) (not (proofs t)) (not (main-green t)) (not (allowed-red t)) (not (contains? main-red t)))]
+                 :when (and (red? t) (not (proofs t)) (not (main-green t)) (not (allowed-red t)))]
              {:reason :stray-red :symbol t})
            (for [s (sort-by str uncontracted)] {:reason :contract-gap :symbol s})
            (for [k (sort unmerged)] {:reason :unmerged :key k})
@@ -107,7 +107,9 @@
 (defn explain-text
   "One line naming each reason."
   {:malli/schema [:=> [:cat [:vector :seon.reconcile/not-done]] :string]}
-  [rs] (str/join "; " (map #(str (name (:reason %)) (some->> (or (:symbol %) (:key %) (:behind %)) (str " "))) rs)))
+  [rs] (str/join "; " (map #(str (name (:reason %))
+                                 (when (= :no-proofs (:reason %)) ": the task names no proof; a test that says it is done, registered, would have ended it")
+                                 (some->> (or (:symbol %) (:key %) (:behind %)) (str " "))) rs)))
 
 ;; ---- the incremental reconciler: an index watched through main's tx reports --------------
 ;; k8s's informer + W1's engine: list once (index), then each commit's resolved datoms name the
@@ -594,14 +596,6 @@
                                        error (conj {:seon.task/id task :seon.task/error error}))))
                                  members))))))
 
-(defn- unfiled-error
-  "The commit-error of a merged member r (seon.writer/octopus-merge's result) for its changed forms
-  that name no source file (:unfiled): each namespace and the definitions it changed."
-  {:malli/schema [:=> [:cat [:map [:tx :int] [:unfiled [:map-of {:gen/max 3} :symbol [:vector {:gen/max 3} :seon.merge/def-key]]]]] :string]}
-  [r]
-  (str "merged at t " (:tx r) "; these changed forms name no source file to write back: "
-       (str/join "; " (for [[n ds] (:unfiled r)] (str n " " (str/join ", " (map sedn/encode ds)))))))
-
 (defn evidence
   "The measured evidence of task id held for root: its conflicts and unmerged keys (from its judging; none for a death), the
   proofs not passing in root's own test run (red), and the problem the reconciler stated (nil: none)."
@@ -920,15 +914,12 @@
 (defn- gated
   "Task id's gate answered: rs, each deferred test's status (the gate's run of them, or :error for each when it
   could not run: unread, or err the effect's error), written on the task with the decision `judgment` leaves to it: all
-  passing but main's own, the merge is ready; else the task is held for root with the tests not green and why they could not run.
-  main-red (seon.fx/run-tests: red on main too, without this candidate's files) is no verdict on this work, a proof of the task's
-  excepted, which it owes green: still recorded in the results, and open on main as the :unrun problem. A failed
+  passing, the merge is ready; else the task is held for root with the tests not green and why they could not run. A failed
   :tests effect is recorded here, with the results, in one transaction."
-  {:malli/schema [:=> [:cat :seon.reconcile/state :seon.task/id :map [:vector :map] [:maybe :map] [:maybe [:set :qualified-symbol]]] [:vector :any]]}
-  [st id rs unread err main-red]
+  {:malli/schema [:=> [:cat :seon.reconcile/state :seon.task/id :map [:vector :map] [:maybe :map]] [:vector :any]]}
+  [st id rs unread err]
   (let [main (:db st)
-        tk (task/task main id)
-        red (for [[tt s] (sort-by (comp str key) rs) :when (and (not= :pass s) (or (task/proof? tk tt) (not (contains? main-red tt))))] [tt s])
+        red (for [[tt s] (sort-by (comp str key) rs) :when (not= :pass s)] [tt s])
         why (concat (some-> err :seon.error/message vector) (for [u unread] (str (:ns u) ": " (:reason u))))
         want (cond-> {:seon.task/deferred-results rs}
                (seq unread) (assoc :seon.task/gate-unread unread)
@@ -1036,7 +1027,7 @@
       ;; each merged task (the self-improvement loop: the next generation builds it)
       :octopus-merged (let [merged (keep (fn [[m x]] (when (:merged? x) [m x])) (map vector (:members act) (:results r)))
                             paths (vec (sort (distinct (mapcat (comp :files second) merged))))
-                            back? (and (:source st) (seq paths))]
+                            back? (and (:source st) (seq paths) (cfg/value :seon.config.source/write-back-on-merge))]
                         (one (write (cond-> st back? (assoc-in [:flights id :writeback] {:files paths :members (vec (for [[m x] merged :when (seq (:files x))] m))}))
                                     id (if back? :write-back :done)
                                     (vec (mapcat (fn [{:keys [task]} r]
@@ -1048,10 +1039,9 @@
                                                      (cond
                                                        (:merged? r) (task/move-tx task :ready :merged
                                                                                   (cond-> {:seon.task/merged-t (long (:tx r))}
-                                                                                    ;; source it changed that names no file: no write-back writes it, so this
-                                                                                    ;; names it (beside the sha of what one wrote, when it wrote some)
-                                                                                    (and (:source st) (seq (:unfiled r)))
-                                                                                    (assoc :seon.task/commit-error (unfiled-error r))))
+                                                                                    ;; its files wait for the hand that syncs them (my.root/write-back!): named here until a commit holds them
+                                                                                    (and (:source st) (seq (:files r)) (not (cfg/value :seon.config.source/write-back-on-merge)))
+                                                                                    (assoc :seon.task/error (contract/error :seon.git/commit-failed #'seon.reconcile/commit-tx "not on disk yet: (my.root/write-back! sys) syncs it" {:seon.git/files (vec (:files r))}))))
                                                        ;; behind again and again: a merge that main moves under every time it runs is root's
                                                        ;; (:seon.config.merge/max-behind), never a rerun without end
                                                        (and (= :seon.merge/behind (:seon.error/type r)) (< n (cfg/value :seon.config.merge/max-behind)))
@@ -1065,7 +1055,7 @@
       ;; error), or one over a tree missing a changed namespace (:unread), vouches for none: each :error, and no test ran
       :gated (let [unread (:unread r)
                    rs (if (or (contract/error? r) (seq unread)) (zipmap (:tests act) (repeat :error)) (get-in r [:value :results]))]
-               (one (write st id :done (gated st id rs (vec unread) (when (contract/error? r) r) (get-in r [:value :main-red])))))
+               (one (write st id :done (gated st id rs (vec unread) (when (contract/error? r) r)))))
       :write-back (one (request st id :main-read {:op :write :req {:op :branch-db :branch :db}}))
       :main-read (let [{:keys [members] paths :files} (:writeback f)
                        files (doc/files (:db r) paths)]
