@@ -6,19 +6,28 @@ A branch is main plus its own changes: an index is a tree of immutable nodes, so
 
 There is no boundary between program and data (owner, 2026-11-07: "I want everything that is linked to be linked"). One db, one tree. Sharing comes from sort order: datoms that change together sort together. A fact that changes on its own schedule is its own entity with a ref to what it is about, as `git notes` attach to a commit, so it links without rewriting the leaf of what it is about. An eval's result is one entity per distinct value, by content id, and each eval refs it.
 
-## Where data is
+## The data model
 
-A branch's db value reads only the datoms on that branch. Ids are issued once per store, so a ref to an entity only main holds is accepted, but `d/pull` and `d/entity` on the branch read nothing through it (tested). A proposal, not agreed and not built: what a pull from main does is a property of each attribute in the schema, in three kinds.
+A proposal for the owner's ruling, built from what the Web and Context sessions need; not built. It takes its shape from git, which already does this: one object store, a branch is a pointer, and a branch sees only what its tree links.
 
-- **Versioned** (forms, vars, files, config, a user's data, tasks, evals, the refs an agent holds): a three-way merge, as `git merge`. Isolated until merged. What a side removed stays removed.
-- **Immutable** (messages, results, embeddings): every pull carries them, and they never conflict, since an entity never changes. With content-hashed nodes the same datoms are the same node, so this costs little.
-- **Main's** (UI state, a budget, root's records): no merge carries them. Whoever wants them reads main's db value.
+**Entities and refs.** A thing is an entity. Its id is issued once per store, or is a content id, so the same thing has the same id on every branch. A ref is valid on any branch.
 
-So a message is one immutable entity. A pull brings it, and the addressee's process adds a ref to it on its own entity on its own branch. The agent removes a ref with one plain write on its own branch, and the merge base has moved, so it never comes back: no read state and no stored `t`. A plain `d/pull` on the branch reads the body. A Flow channel wakes the process; a commit never does.
+**One question decides where a fact lives: can two branches legitimately hold different values of it?**
 
-Tested on one scratch store: 3 agents, 120 turns, a message to each and 5 evals on each branch every turn, on content-hashed nodes. Removing a ref held after the next pull, the body read on the branch, a UI fact stayed off the branch. A pull cost a median 1.5 M ticks. Private nodes on a branch reached 21 percent in EAVT, 18 in AEVT and 3 in AVET; an agent's own 1,800 eval datoms account for part of that, and the rest is its evals' ids falling among the messages' ids.
+- **Yes: on a branch, and a merge moves it.** Forms, vars, files, config, tasks, a user's data, evals and their results, and the refs an agent holds. Isolated until merged. One merge function, `git merge`'s, with two options: everything that does not conflict, or the program only.
+- **No: once, on the branch `:shared`, which no merge touches.** Messages, UI state, embeddings, and what the system records about an agent. Written through root's writer. Main stays the program and what was decided, and a click never moves it.
 
-What it costs: every agent can read every message, since each branch holds them all. That is no boundary today, as an agent has the whole disk. What it may delete, not yet checked: the merge's lists of what to carry (`data-attrs`, carried platform attributes, the never-carried list) and the delivery path, in favour of the schema. Open: which kind each attribute of an agent's entity is, and whether a page can find what a branch holds cheaply.
+Each attribute has one home, stated on its schema, so it has one writer and a merge has nothing to conflict on. An entity can hold attributes in both places: an agent's turn on its branch, its budget on `:shared`.
+
+**Reading.** A db value reads only its own datoms: `d/pull` through a ref to an entity it does not hold answers `[]`, and `d/datoms` lists the ref itself. A reader that wants both reads each from its own db value, or a `d/q` over `$branch $shared`. A shared entity that never changes reads the same at any later point, so a past request still rebuilds as it was sent. What changes on `:shared` needs the point it was read at.
+
+**A message.** An entity on `:shared` with `:seon.message/from`, `:seon.message/to`, `:seon.message/body` and `:seon.message/sent-ms`. At its next act an agent does a `git pull` from `:shared`: the `:seon.message/to` datoms addressed to it since its merge base with `:shared` come onto its branch. That is what it holds. Removing one is one plain retract on its own branch, and the merge base has moved past it, so it never returns: no read state and no stored `t`. A dropped wake costs delay only, since the commit graph says what is new. A Flow channel wakes the process.
+
+**What was tested,** on one scratch store with content-hashed nodes, one experiment each. 3 agents, 120 turns, a message to each and 5 evals on each branch every turn: EAVT 9.3 percent private against 21.5 with messages carried onto every branch, AEVT 10.0 against 18.4, AVET 3.1 against 3.0; a branch holds no other agent's message; main does not move. A ref followed costs 12 k ticks. Pull, with no state of its own: an unlinked message stayed gone through a later pull, a merge of main and a restart; a fork and its parent each kept their own; both merge bases held. A pull costs under 1 M ticks plus `d/merge-base`, which walks the commit graph, 15 k ticks a commit: 29.7 M at 2,000 commits. Datahike's docstring says it may be cached forever, and after a pull the base is the head just merged, so a process holds it in memory and walks only after a restart. That cache is not yet tried.
+
+**What it costs.** A reader has to name `:shared`, and a `d/q` on a branch alone finds no message text. A message no ref reaches stays on `:shared` until a rule reclaims it, and collection must keep whatever any branch refs. Not tested: the writer's load on `:shared`, what a page reads to list what many branches hold, and how `seon.ctx` takes a second db value.
+
+**The words,** from the Web session's survey, to fix when this is built: `:branch :db` meaning main; session for an agent, a branch or a chain of tasks; four ids of one eval; five names for how something stands, which become facts of what happened plus one function that reads them, with process state in Flow; `:seon.task/kind` as an enum, which become templates as maps; take and carry for what git calls pull and merge; and "user", in four senses.
 
 ## What a real branch spends its nodes on
 
