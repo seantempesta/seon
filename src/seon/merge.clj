@@ -433,7 +433,8 @@
   ;; a branch with nothing of its own has no keys: (keys {}) is nil
   (let [ks (vec ks)
         carried (carried-tx base src ks data-attrs)
-        unique? #(= :db.unique/identity (get-in (d/schema src) [% :db/unique]))
+        schema (:schema src)
+        unique? #(= :db.unique/identity (get-in schema [% :db/unique]))
         named (into #{} (keep #(when (and (:added %) (unique? (:a %))) (:e %))) carried)
         gone (into [] (comp (keep #(when (and (not (:added %)) (unique? (:a %)) (not (named (:e %)))) (:e %))) (distinct)
                             (map #(vector :db/retractEntity %)))
