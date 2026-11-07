@@ -754,13 +754,13 @@
 (defn result-mark
   "Eval e's mark as the tree carries it (:wire/result): the record itself, printed only when the model's reading reaches it (seon.render/result-text), and, for an eval that names its basis, how its value is rebuilt (`basis-value`). See
   docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
-  {:malli/schema [:=> [:cat :map] :map]}
-  [e] (cond-> {:record e} (:seon.eval/basis e) (assoc :value-of #'basis-value)))
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] :map] :map]}
+  [db e] (cond-> {:record (-> e (assoc :seon.eval/response (pdb/response-of db e)) (dissoc :seon.eval/result))} (:seon.eval/basis e) (assoc :value-of #'basis-value)))
 
 (defn tool-text
   "What came of eval e as the model reads it, the same printing a request's reading does (seon.render/result-text): for a reader of its text outside the tree. See docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] :map] :string]}
-  [db e] (render/result-text db (result-mark e)))
+  [db e] (render/result-text db (result-mark db e)))
 
 (defn first-taken
   "A message's order in its turn, [db e]: the transaction that named its agent (one seek). See docs/ctx.md#the-pattern."
@@ -868,6 +868,13 @@
       (assoc agent-k [:seon.agent/key ek])
       (cond-> (:seon.eval/code m) (->> (example-record ek pre)))))
 
+(defn- revalued
+  "Eval record e on db with value as its value: its result another entity, the content hash of what it now answers, the rest of its response as it was. See docs/users.md#what-each-thing-is."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] :map :any] :map]}
+  [db e value]
+  (let [r (assoc (pdb/response-of db e) :value value)]
+    (pdb/with-response (dissoc e :seon.eval/result) r)))
+
 (defn- session-records
   "The conversation of agent record c on db, [record kind] in its order (turn by turn: its messages, its reply, its evals). A record keeps the turn it names as :turn. See docs/tasks.md#a-task-names-example-sessions."
   {:malli/schema [:=> [:cat :map :seon.host/db] [:vector [:tuple :map :qualified-keyword]]]}
@@ -878,7 +885,8 @@
              r (concat (for [[m] messages] [(assoc (select-keys (get-in c [:messages m]) [:seon.message/id :seon.message/from :seon.message/body]) :turn n) :seon.message/fact])
                        (when (= :model (:seon.model-call/origin call))
                          [[(select-keys call [:seon.model-call/id :seon.model-call/n :seon.model-call/origin :seon.model-call/reply :seon.model-call/reasoning :seon.model-call/truncated]) :seon.model-call/fact]])
-                       (for [[e] evals] [(assoc (dissoc (get-in c [:evals e]) :db/id :seon.eval/agent :seon.eval/call :seon.eval/opened) :turn n) :seon.db/eval-fact]))]
+                       (for [[e] evals :let [ev (get-in c [:evals e]) whole (pdb/response-of db ev)]]
+                         [(assoc (pdb/with-response (dissoc ev :db/id :seon.eval/agent :seon.eval/call :seon.eval/opened :seon.eval/result) whole) :turn n) :seon.db/eval-fact]))]
          r)))
 
 (defn- session-request
@@ -912,7 +920,7 @@
         ;; an eval of @ctx keeps its code, and its value as the marker of what it was: its basis is a commit of the original branch, which a copy on another cannot rebuild
         cannot (fn [[v k]] (if (and (= :seon.db/eval-fact k) (:seon.eval/basis v))
                              [(-> v (dissoc :seon.eval/basis :seon.eval/schema)
-                                  (assoc-in [:seon.eval/response :value] {:seon.value/gone {:type "the agent's record at a basis a copy cannot rebuild"}}))
+                                  (as-> v' (revalued nil v' {:seon.value/gone {:type "the agent's record at a basis a copy cannot rebuild"}})))
                               k]
                              [v k]))
         rs (when a (map cannot (remove (fn [[v k]] (and (= :seon.db/eval-fact k) (not (:seon.eval/call-id v)))) (session-records (agent-ctx db a) db))))
@@ -969,15 +977,15 @@
   (let [evs (filter render-eval? (map (fn [e] (get-in c [:evals e])) (sort (keys (:evals c)))))]
     (first
      (reduce (fn [[tx t0] e]
-               (let [{t1 :t since :since} (:seon.eval/page e) r (:seon.eval/response e)]
+               (let [{t1 :t since :since} (:seon.eval/page e) r (pdb/response-of db e)]
                  (cond
                    ;; an eval with no t (one that threw) shows nothing the next can stand on
                    (nil? t1) [tx t0]
                    (or (:components (:value r)) (= t0 since)) [tx t1]
                    :else
                    (let [edits (render/page-edits (render/forms-moved (when t0 (page-at db a t0)) (page-at db a t1)))]
-                     [(conj tx {:seon.eval/id (:seon.eval/id e) :seon.eval/response (assoc r :value {:edits edits})
-                                :seon.eval/page (cond-> {:t t1} t0 (assoc :since t0))})
+                     [(conj tx (assoc (select-keys (revalued db e {:edits edits}) [:seon.eval/response :seon.eval/result]) :seon.eval/id (:seon.eval/id e)
+                                :seon.eval/page (cond-> {:t t1} t0 (assoc :since t0))))
                       t1]))))
              [[] nil] evs))))
 

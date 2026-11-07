@@ -60,6 +60,45 @@
   {:malli/schema [:=> [:cat :seon.host/db :keyword :any] [:maybe :int]]}
   [db a v] (:e (first (d/datoms db :avet a v))))
 
+(def ^:private result-parts
+  "The keys of an eval's response that are its result (:seon.result/*): what an answer is, and what the handle hashes."
+  {:value :seon.result/value :ex :seon.result/ex :out :seon.result/out :err :seon.result/err :forms :seon.result/forms})
+
+(def ^:private response-rank
+  "The order an eval's response keys have always been held in (seon.repl/response), so what a reader prints of it does not move
+  when its result is kept apart; any other key follows."
+  {:handle 0 :forms 1 :value 2 :recorded 3 :redefined 4 :unmapped 5 :warnings 6 :out 7 :err 8 :ex 9 :ms 10 :ticks 11 :bytes 12})
+
+(defn with-response
+  "Eval e holding whole response r as it is kept: its value, error, output and forms in its result (:seon.eval/result, a nested map
+  whose identity is :seon.result/hash, the full hash as text of [value ex out err forms] by hasch's uuid, the same in every process;
+  the value of an eval's own response, an edit!'s, is hashed without its cost), the rest of r on :seon.eval/response. The hash is always of what's stored, so one hash is one value on every branch. No result when r answers none of
+  them. See docs/users.md#what-each-thing-is."
+  {:malli/schema [:=> [:cat :map :map] :map]}
+  [e r]
+  (let [parts (select-keys r (keys result-parts))
+        v (:value r)
+        v (if (and (map? v) (not (record? v)) (contains? v :handle)) (dissoc v :handle :ms :ticks :bytes :fns :record) v)]
+    (cond-> (assoc e :seon.eval/response (apply dissoc r (keys result-parts)))
+      (seq parts) (assoc :seon.eval/result (into {:seon.result/hash (str (hasch/uuid [v (:ex r) (:out r) (:err r) (:forms r)]))}
+                                                 (keep (fn [[k a]] (when (some? (get parts k)) [a (get parts k)])))
+                                                 result-parts)))))
+
+(defn response-of
+  "Eval e's whole response, as an eval has always answered it: what it keeps itself (:seon.eval/response) with its result's value,
+  error, output and forms (:seon.eval/result, read from db when e holds only its ref); a result with no value and no error answers
+  :value nil. An eval holding no result answers its response as it is. See docs/users.md#what-each-thing-is."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] :map] [:maybe :map]]}
+  [db e]
+  (let [resp (:seon.eval/response e)
+        x (:seon.eval/result e)
+        r (cond (nil? x) nil (contains? x :seon.result/hash) x :else (d/pull db '[*] (:db/id x)))]
+    (if (nil? r)
+      resp
+      (let [parts (into {} (keep (fn [[k a]] (when (contains? r a) [k (get r a)]))) result-parts)
+            parts (cond-> parts (not (or (contains? parts :value) (contains? parts :ex))) (assoc :value nil))]
+        (into (array-map) (sort-by (fn [[k]] (get response-rank k 99)) (concat resp parts)))))))
+
 (defn seed-tx
   "Transactions of an example program sized by n (the test store's and the check store's
   seed, never a root's own): n/110 namespaces (none below 110), each one tx of the

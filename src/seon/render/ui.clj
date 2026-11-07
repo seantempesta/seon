@@ -461,7 +461,7 @@
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
   [opts e]
   (let [recorded? (contains? e :seon.eval/response)
-        resp (:seon.eval/response e)
+        resp (pdb/response-of (:seon.db/db opts) e)
         basis (:seon.eval/basis e)
         r (if recorded?
             (cond-> resp (:seon.eval/code e) (assoc :code (:seon.eval/code e)) (:seon.eval/intent e) (assoc :intent (:seon.eval/intent e))
@@ -470,7 +470,7 @@
         ;; a value recorded as data: inline, printed as its reply reads under its handle; in a row,
         ;; rendered as structure (the printer's hiccup). A live reply's :text is text
         data? (and recorded? (nil? (:text r)) (nil? basis))
-        r (cond-> r (and recorded? (nil? (:text r)) data? (= :inline (:as opts))) (assoc :text (print/record-text e render/stored-model)))
+        r (cond-> r (and recorded? (nil? (:text r)) data? (= :inline (:as opts))) (assoc :text (print/record-text (assoc e :seon.eval/response resp) render/stored-model)))
         by (or (:seon.eval/by e) (:by r))
         err? (some? (:ex r))]
     (if (= :inline (:as opts))
@@ -1257,13 +1257,13 @@
   {:by :code :response}. Seon's own is the model's alone, its code and no intent. opts :at, its path in ctx, for the person's components (an example's has none: its line and its code); :key and :agent, the agent's, whose page posts that
   it was opened (root's posts nothing). Its <details> carries its handle's anchor (eval-<id>). See docs/render.md#the-page."
   {:malli/schema [:=> [:cat :map :map] :any]}
-  [{:keys [at key agent]} {:seon.eval/keys [id by code intent call-id opened] :as e}]
-  (let [{:keys [ex value]} (:seon.eval/response e)
+  [{:keys [at key agent db]} {:seon.eval/keys [id by code intent call-id opened] :as e}]
+  (let [mark (context/result-mark db e)
+        {:keys [ex value]} (:seon.eval/response (:record mark))
         err (or ex (when (contract/error? (ratom/realize value)) value))
         seon? (= "seon" by)
         said? (not (str/blank? intent))
-        called? (or call-id said?)
-        mark (context/result-mark e)]
+        called? (or call-id said?)]
     [:li (cond-> (if called?
                    {:wire/role "assistant" :wire/call-id (context/wire-id id) :wire/result mark}
                    {:wire/role "user" :wire/result (assoc mark :with (array-map :by by :code code))})
@@ -1290,24 +1290,26 @@
   want the chat to look like a nice chat screen with just text unless I dig into it\"; \"show the eval intent markdown
   descriptions and collapse the eval statement and the output by default\"), the eval at ctx path :at; drawn open when a reader opened it
   (:seon.eval/opened, a fact the agent takes before it draws its page). See docs/render.md#the-page."
-  {:seon.render/style ".eval-item > details > summary { display: flex; min-width: 0; align-items: baseline; column-gap: 0.5rem; }" :seon.render/for "page" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:at [:vector :any]]]]] :any]}
-  [{c :seon.ctx/ctx at :at :as opts}]
+  {:seon.render/style ".eval-item > details > summary { display: flex; min-width: 0; align-items: baseline; column-gap: 0.5rem; }" :seon.render/for "page" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db] [:at [:vector :any]]]]] :any]}
+  [{c :seon.ctx/ctx db :seon.db/db at :at :as opts}]
   (when-let [e (ratom/realize (get-in c at))]
-    (eval-hiccup {:at at :key (:agent-key opts) :agent (:agent-id opts)} e)))
+    (eval-hiccup {:at at :key (:agent-key opts) :agent (:agent-id opts) :db db} e)))
 
 (defn- eval-shown
-  "Of the eval at ctx path at, what the person's pieces read: not whether it is open, so opening it runs the line alone."
-  {:malli/schema [:=> [:cat :map [:vector :any]] [:maybe :map]]}
-  [c at]
+  "Of the eval at ctx path at, what the person's pieces read: not whether it is open, so opening it runs the line alone. Its response
+  whole (seon.db/response-of), its result read from db."
+  {:malli/schema [:=> [:cat :map :seon.host/db [:vector :any]] [:maybe :map]]}
+  [c db at]
   (when (get-in c (conj at :seon.eval/id))
-    (into {} (for [k [:seon.eval/id :seon.eval/code :seon.eval/response :seon.eval/schema :seon.eval/basis]
-                   :let [v (ratom/realize (get-in c (conj at k)))] :when (some? v)] [k v]))))
+    (let [e (into {} (for [k [:seon.eval/id :seon.eval/code :seon.eval/response :seon.eval/result :seon.eval/schema :seon.eval/basis]
+                            :let [v (ratom/realize (get-in c (conj at k)))] :when (some? v)] [k v]))]
+      (-> e (assoc :seon.eval/response (pdb/response-of db e)) (dissoc :seon.eval/result)))))
 
 (defn eval-glance
   "What came of an eval, in the chat with no click (a component over ctx and the db, for the page alone): its value through the one render (render/html: the render it has, else the value printer), whole once its step is opened; or, closed, what went wrong on a line, the opened step having the rest. See docs/render.md#a-value-draws-itself."
   {:seon.render/style ".eval-glance { margin: 0.25rem 0 0.25rem 1rem; min-width: 0; overflow-x: auto; font-size: 0.75rem; }\n.eval-item:has(> details[open]) .eval-glance-line { display: none; }" :seon.render/for "page" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db] [:at [:vector :any]]]]] :any]}
   [{c :seon.ctx/ctx db :seon.db/db at :at}]
-  (when-let [e (eval-shown c at)]
+  (when-let [e (eval-shown c db at)]
     (let [{:keys [ex value handle out err warnings]} (:seon.eval/response e)
           r (:seon.eval/response e)
           v (ratom/realize value)
@@ -1351,7 +1353,7 @@
   value by the render its record names. See docs/render.md#cost-is-shown-one-way."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db] [:at [:vector :any]]]]] :any]}
   [{c :seon.ctx/ctx db :seon.db/db at :at agent :agent}]
-  (when-let [e (eval-shown c at)]
+  (when-let [e (eval-shown c db at)]
     (let [{:keys [ex value handle out warnings ms] errout :err} (:seon.eval/response e)
           v (ratom/realize value)
           ;; what its forms printed (*out*, *err*: seon.repl/response keeps each as seon.print/code), drawn before its value as a REPL shows it
@@ -1538,7 +1540,7 @@
                   :let [{:keys [messages evals]} (context/turn-members db c cid)
                         evals (map first evals)
                         model? #(get-in c [:evals % :seon.eval/call-id])
-                        step #(eval-hiccup {} (get-in c [:evals %]))]]
+                        step #(eval-hiccup {:db db} (get-in c [:evals %]))]]
               (into [:div {:wire/turn (get-in c [:calls cid :seon.model-call/n])}]
                     (concat (for [[m] messages] (message-hiccup (get-in c [:messages m])))
                             [(reply-hiccup (get-in c [:calls cid]) (boolean (seq (filter model? evals))) (map step (filter model? evals)))]

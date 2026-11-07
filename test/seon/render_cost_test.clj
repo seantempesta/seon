@@ -340,10 +340,10 @@
      :work (str "the one eval's component and the turn holding it, drawn again, on real records, and nothing else: no other turn's "
                 "reads are reached by an eval opened. The reset! runs ctx's diff once (seon.ctx/changes) and looks up the components its "
                 "changed paths reach by index; the diff walks every key of the changed collection, which is linear. 379 contracted calls "
-                "at 100 turns, the owner's 2026-11-05: cull the calls later if the perf is bad")
+                "at 100 turns, the owner's 2026-11-05: cull the calls later if the perf is bad; 394 and a bound of 400 by the owner's yes, 2026-11-07, reading an eval's result by its ref (seon.db/response-of)")
      :growth :linear
      :per-n {:calls 0 :bytes 3400}
-     :fixed {:calls 385 :bytes 150000}
+     :fixed {:calls 400 :bytes 150000}
      :sizes [100 300 1000 4000]})))
 
 ;; See docs/render.md#a-change-is-edits-by-name

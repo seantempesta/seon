@@ -876,9 +876,9 @@
         r {:handle 'result/e7 :value v}
         live (seon.print/response-text r seon.render/model)
         rec (repl/record-details "(my.agent/prove)" r {})
-        stored (d/pull (d/db-with (db-with-program) [(into {:seon.eval/id "e7" :seon.eval/by "a1"} rec)])
-                       '[:seon.eval/code :seon.eval/response :seon.eval/schema] [:seon.eval/id "e7"])
-        sent (:content (second (seon.fixtures/eval-messages nil (assoc stored :seon.eval/id "e7" :seon.eval/by "a1" :seon.eval/call-id "c1"))))]
+        db (d/db-with (db-with-program) [(into {:seon.eval/id "e7" :seon.eval/by "a1"} rec)])
+        stored (d/pull db '[:seon.eval/code :seon.eval/response :seon.eval/result :seon.eval/schema] [:seon.eval/id "e7"])
+        sent (:content (second (seon.fixtures/eval-messages {:db db} (assoc stored :seon.eval/id "e7" :seon.eval/by "a1" :seon.eval/call-id "c1"))))]
     (is (= :seon.test/proved (:seon.eval/schema stored)) "the eval keeps the value's schema")
     (is (str/includes? live "green: 5 of 5 passed") "the live response is its one line")
     (is (= live sent) (str "the record's tool message reads as the live response did: " sent))
@@ -892,16 +892,17 @@
         r {:handle 'result/e5 :value (vec (for [i (range 300)] {:i i :name (str "row-" i)})) :ms 1.0}
         rec (repl/record-details "(rows)" r {})
         stored (d/db-with db [(into {:seon.eval/id "e5" :seon.eval/by "a1"} rec)])]
-    (is (= (:value r) (get-in rec [:seon.eval/response :value])) "the whole value, not a printout of it")
-    (is (not (contains? (:seon.eval/response rec) :text)) "no text made for a reader")
-    (is (= rec (d/pull stored [:seon.eval/code :seon.eval/response] [:seon.eval/id "e5"])) "it round-trips through the store")
-    (is (str/includes? (print/record-text rec) "row-0") "printed when it is shown")
+    (is (= (:value r) (:value (seon.db/response-of nil rec))) "the whole value, not a printout of it")
+    (is (not (contains? (seon.db/response-of nil rec) :text)) "no text made for a reader")
+    (is (= (select-keys rec [:seon.eval/code :seon.eval/response]) (select-keys (d/pull stored '[:seon.eval/code :seon.eval/response] [:seon.eval/id "e5"]) [:seon.eval/code :seon.eval/response])) "what the eval keeps round-trips through the store")
+    (is (= (seon.db/response-of nil rec) (seon.db/response-of stored (d/pull stored '[:seon.eval/code :seon.eval/response :seon.eval/result] [:seon.eval/id "e5"]))) "and so does its response, whole")
+    (is (str/includes? (print/record-text (assoc rec :seon.eval/response (seon.db/response-of nil rec))) "row-0") "printed when it is shown")
     (is (= rec (repl/record-details "(rows)" r {})) "the same whatever came before it")
     (testing "a value that is not plain data is kept as data: its members, its symbol, or what it was"
       (doseq [[v want] [[(atom 1) {:seon.value/type (.getName (class (atom 1)))}] [(map inc (range 3)) [1 2 3]] [#'clojure.core/inc 'clojure.core/inc]]]
         (let [rec (repl/record-details "(x)" {:handle 'result/e6 :value v} {})]
-          (is (= want (get-in rec [:seon.eval/response :value])) (str (type v)))
-          (is (seon.contract/plain? (:seon.eval/response rec)) "and the store keeps it"))))))
+          (is (= want (:value (seon.db/response-of nil rec))) (str (type v)))
+          (is (seon.contract/plain? (seon.db/response-of nil rec)) "and the store keeps it"))))))
 
 (deftest a-value-past-the-largest-kept-is-gone-and-the-transcript-says-so
   ;; docs/storage.md#plain-data: :seon.config.store/max-value-chars bounds what an eval's record keeps; past it the
@@ -910,7 +911,7 @@
         big (apply str (repeat (inc bound) "x"))
         at (apply str (repeat bound "x"))
         details (fn [v] (repl/record-details "(read-it)" {:handle 'result/e1 :value v} {:call-id "c1"}))
-        value-of #(get-in % [:seon.eval/response :value])
+        value-of #(:value (seon.db/response-of nil %))
         sent (:content (second (seon.fixtures/eval-messages nil (assoc (details big) :seon.eval/id "e1" :seon.eval/by "a1"))))]
     (is (= {:seon.value/gone {:type (.getName (class big)) :over bound}} (value-of (details big))) "a string past the bound")
     (is (= at (value-of (details at))) "and at the bound it is kept whole")
@@ -928,7 +929,7 @@
                               (repl/record-details (str "(" id ")") {:handle (symbol "result" id) :value 1} (cond-> {} call (assoc :call-id call :intent (str "ask " call)))))))]
     (is (= #{"e1" "e3"} (set (d/q '[:find [?id ...] :where [?e :seon.eval/call-id _] [?e :seon.eval/id ?id]] db))) "the model's evals, by the call id they answered")
     (is (= "ask c3" (d/q '[:find ?p . :in $ ?c :where [?e :seon.eval/call-id ?c] [?e :seon.eval/intent ?p]] db "c3")) "and the text beside one call")
-    (is (= 1 (:value (d/q '[:find ?r . :in $ ?id :where [?e :seon.eval/id ?id] [?e :seon.eval/response ?r]] db "e2"))) "the response is the map, its value data")))
+    (is (= 1 (:value (seon.db/response-of db (d/pull db '[:seon.eval/response :seon.eval/result] [:seon.eval/id "e2"])))) "the response is the map, its value data")))
 
 (deftest an-evals-record-keeps-its-text-as-written
   ;; docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map: an eval's record keeps its
@@ -1674,8 +1675,8 @@
             r3 (first (filter #(= "(swap! ctx assoc :x 1)" (:seon.eval/code %)) recs))]
         (is (= 2 (count recs)) "both evals are in the example")
         (is (nil? (:seon.eval/basis r3)) "no basis a copy cannot rebuild")
-        (is (string? (get-in r3 [:seon.value/gone :type] (get-in r3 [:seon.eval/response :value :seon.value/gone :type]))) "its value, the marker of what it was")
-        (is (str/includes? (print/record-text r3) "seon.value/gone") "which the transcript prints like any map")))))
+        (is (string? (get-in (seon.db/response-of nil r3) [:value :seon.value/gone :type])) "its value, the marker of what it was")
+        (is (str/includes? (print/record-text (assoc r3 :seon.eval/response (seon.db/response-of nil r3))) "seon.value/gone") "which the transcript prints like any map")))))
 
 (deftest an-example-keeps-no-id-of-the-session-it-was-made-from
   ;; the result handle its response and printed text name is the example's (nothing reads an example's evals by the
@@ -1940,3 +1941,32 @@
     (is (= 1 (n "(scaffold other-test/c)")) "the next namespace's its own")
     (is (zero? (n "(scaffold demo-test/b)")) "a later proof of a namespace repeats none of it")
     (is (str/includes? h "demo-test/b") "but says to write it")))
+
+(deftest what-the-model-reads-is-the-same-with-result-entities
+  ;; docs/users.md#what-each-thing-is: an eval's value, error and output are its result's, a ref the eval holds; what the model reads of
+  ;; it (seon.context/tool-text, the text of the request's tool message, and the message itself) is what it read when the response held them
+  (let [answers {"e1" {:handle 'result/e1 :value 3 :ms 1.5 :ticks 120 :bytes 2048}
+                 "e2" {:handle 'result/e2 :value nil :out (print/code "hi\n") :ns 'user}
+                 "e3" {:handle 'result/e3 :ex {:seon.error/type :seon.agent/eval-error :seon.error/operation 'seon.repl/eval-code :seon.error/message "boom"} :ms 0.4}
+                 "e4" {:handle 'result/e4 :forms 2 :value [1 {:a "b"}]}}
+        expected {"e1" "{:handle result/e1, :value 3, :cost \"1.5 ms · 120 ticks · 2.0 KB · ~9 tok\"}"
+                  "e2" "{:handle result/e2, :value nil, :out hi\n, :ns user}"
+                  "e3" "{:handle result/e3,\n :ex\n   #:seon.error{:type :seon.agent/eval-error,\n                :operation seon.repl/eval-code,\n                :message \"boom\"}, :cost \"0.40 ms · ~47 tok\"}"
+                  "e4" "{:handle result/e4, :forms 2, :value [1 {:a \"b\"}]}"}]
+    (ts/test-branch!
+      (fn [_ conn]
+        (d/transact conn [{:seon.agent/key "b/a1" :seon.agent/id :a1}])
+        (doseq [[id r] answers]
+          (d/transact conn [(into {:seon.eval/id id :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key "b/a1"} :seon.eval/call-id (str "c-" id)}
+                                  (repl/record-details (str "(" id ")") r {}))]))
+        (let [db @conn]
+          (doseq [[id r] answers
+                  :let [e (d/pull db '[*] [:seon.eval/id id])
+                        sent (context/tool-text db e)]]
+            (is (some? (:seon.eval/result e)) (str id " holds a result entity"))
+            (is (= (when (contains? r :value) (:value r)) (:seon.result/value (d/pull db '[*] (get-in e [:seon.eval/result :db/id])))) (str id " its value is the result's"))
+            (is (not-any? #(contains? (:seon.eval/response e) %) [:value :ex :out :err :forms]) "and not the response's")
+            (is (= (expected id) sent) (str id " reads as it always did"))
+            (is (= sent (print/response-text r)) (str id " as its live response prints"))
+            (is (= {:role "tool" :tool-call-id (str "eval-" id) :content sent}
+                   (second (seon.fixtures/eval-messages {:db db} (assoc e :turn 1)))) (str id " and its tool message is that text"))))))))

@@ -151,8 +151,27 @@
  ;; opened by a reader of the agent's page: true once, never retracted; root writes it on main as the
  ;; agent's :seon.agent/opened (an eval's id names it only within its agent), its turn on its branch
  :seon.eval/opened :boolean
- ;; what is stored of an eval's answer (:seon.repl/answer): its value made plain (seon.repl/record-details)
+ ;; what is stored of an eval's answer (:seon.repl/answer) beside its result: its handle, cost, namespace and warnings, each as the
+ ;; answer has them (seon.repl/record-details, seon.db/with-response); its value, error and output are its result's, and
+ ;; seon.db/response-of answers the whole (docs/users.md#what-each-thing-is)
  :seon.eval/response [:and :seon.repl/answer :seon.db/plain]
+ ;; the eval's result, one entity per answer: evaluating one value twice points both evals at it. Evaluating again moves the ref
+ ;; and the old result stays. Never pull its reverse: every eval with no value points at the same nil
+ :seon.eval/result :seon.db/ref
+ ;; a result: the full hash (hasch's uuid, as text) of what an answer is, [value ex out err forms], is its identity and its content
+ ;; id, so two sessions that produce one value produce one entity; the handle result/<8 hex> is its short form and no identity
+ ;; (two values sharing eight digits stay two entities). Its value made plain (seon.contract/plainly), its error the one error
+ ;; map, what its forms wrote to *out* and *err* as seon.print/code, and how many forms ran when there were several
+ :seon.result/hash [:and {:seon.db/identity true :seon.db/content-id true} :string]
+ :seon.result/value :any
+ :seon.result/ex :seon.error/base
+ :seon.result/out [:map [:seon.print/code :string]]
+ :seon.result/err [:map [:seon.print/code :string]]
+ :seon.result/forms [:int {:min 2}]
+ :seon.result/result-fact [:map {:seon.db/attributes true}
+                           [:seon.result/hash :seon.result/hash] [:seon.result/value {:optional true} :seon.result/value]
+                           [:seon.result/ex {:optional true} :seon.result/ex] [:seon.result/out {:optional true} :seon.result/out]
+                           [:seon.result/err {:optional true} :seon.result/err] [:seon.result/forms {:optional true} :seon.result/forms]]
  ;; an eval's details, each its own attribute, each only when present (seon.repl/record-details): the code; the
  ;; model's intent beside the call; the provider's call id (the reply's text and reasoning are its model call's,
  ;; :seon.model-call/reply, which an eval's turn number names); its run (until runs go); its 10 costliest contracted functions
@@ -231,7 +250,7 @@
                      [:seon.eval/call-id {:optional true} :seon.eval/call-id] [:seon.eval/page {:optional true} :seon.eval/page]
                      [:seon.eval/schema {:optional true} :seon.eval/schema] [:seon.eval/basis {:optional true} :seon.eval/basis]
                      [:seon.eval/fns {:optional true} :seon.eval/fns] [:seon.eval/call {:optional true} :seon.eval/call]
-                     [:seon.eval/response :seon.eval/response] [:seon.eval/opened {:optional true} :seon.eval/opened]]
+                     [:seon.eval/response :seon.eval/response] [:seon.eval/result {:optional true} :seon.eval/result] [:seon.eval/opened {:optional true} :seon.eval/opened]]
  ;; an entity's record (seon.ctx, :seon.ctx/pattern: Datahike's pull syntax as data, docs/ctx.md#the-pattern;
  ;; its joins are the page walk's units, seon.render/units), each member rendered by its own schema's render
  :seon.db/agent-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.agent/id :seon.agent/status :seon.agent/branch :seon.agent/description] :seon.ctx/pattern [* {[:seon.agent/task :as :task] :seon.task/task-fact} {[:seon.agent/system :as :system] [:db/id]} {[:seon.model-call/_agent :as :calls] [:seon.model-call/id :seon.model-call/n :seon.model-call/origin :seon.model-call/reply :seon.model-call/reasoning :seon.model-call/finish :seon.model-call/truncated :seon.model-call/error {[:seon.eval/_call :as :evals] [:db/id]} {[:seon.message/_call :as :messages] [:db/id]}]} {[:seon.eval/_agent :as :evals] [*]} {[:seon.message/_agent :as :messages] [*]} {[:seon.cite/_of :as :cites] :seon.cite/cite-fact} {[:seon.search/_of :as :searches] :seon.search/search-fact}] :seon.render/html seon.render.ui/agent}

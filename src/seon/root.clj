@@ -415,7 +415,7 @@
   [st a id]
   (let [db (pdb/head (:conn st) (:branch a))
         e (pdb/eid db :seon.eval/id id)
-        t (when e (apply max (map :tx (mapcat #(d/datoms db :eavt e %) [:seon.eval/code :seon.eval/response]))))
+        t (when e (apply max (map :tx (mapcat #(d/datoms db :eavt e %) [:seon.eval/code :seon.eval/response :seon.eval/result]))))
         at (when t (context/at-t db t))
         commit (when (and at (= t (:max-tx at))) (d/commit-id at))]
     (cond
