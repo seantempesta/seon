@@ -1088,7 +1088,7 @@
                                                                                  (str "main holds no text for " (str/join ", " paths)) {:paths (vec paths)})
                                                         members paths [])))
                      (one (request (assoc-in st [:flights id :writeback :written] (vec (keys files))) id :committed
-                                   {:op :fx :kind :git :req {:dir (:root (:source st)) :branch (:branch (:source st)) :files files
+                                   {:op :fx :kind :git :req {:dir (:root (:source st)) :branch (:branch (:source st)) :files files :modes (source/modes (:db r) (keys files))
                                                              :message (source/commit-message members)}}))))
       ;; the sha on each merged task; the merge already runs where main's program runs
       ;; (seon.program/load-changes!), so nothing is built (BUILD plan P4)

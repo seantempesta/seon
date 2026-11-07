@@ -9,7 +9,7 @@
             [datahike.api :as d]
             [seon.db :as pdb]
             [seon.merge :as pm]
-            [seon.program :as program] [seon.doc] [seon.config]
+            [seon.program :as program] [seon.doc] [seon.config] [seon.render.ui] [seon.source]
             [seon.edn :as sedn] [seon.contract :as contract] [malli.core :as m] [malli.generator :as mg]
             [my.schema :as schema]
             [seon.source :as source] [seon.writer]
@@ -134,6 +134,34 @@
     (is (= ["demo/p.md"] paths) "the merge writes the page its doc changed, and only it")
     (is (= {"demo/p.md" "# P\n\nTwo.\n"} (seon.doc/files merged paths)) "as the merged store draws it: the next load reads it back unchanged")
     (is (= [] (seon.doc/load-tx merged "demo" (seon.doc/files merged paths))) "loading what was written writes nothing")))
+
+(deftest a-script-merges-per-key
+  ;; docs/source.md#a-program-file: a script is a file of one entry, [:script path], merged like a var and written back with its text and mode; a schema resource's file bears no such key
+  (let [text "#!/bin/sh\n# bin/x NAME says hello to NAME\n# and nothing else\necho 1\n"
+        main (let [db (empty-db)] (d/db-with db (seon.source/import-tx db {"bin/x" text})))
+        main (d/db-with main (seon.source/modes-tx main {"bin/x" "100755"}))
+        edit (fn [db t] (d/db-with db (seon.source/file-tx "bin/x" t)))
+        ours (edit main "#!/bin/sh\necho 2\n")
+        theirs (edit main "#!/bin/sh\necho 3\n")
+        r (pm/delta-three-way main ours main #{})]
+    (is (= "bin/x NAME says hello to NAME\nand nothing else" (:seon.script/says (d/entity main [:file/path "bin/x"]))))
+    (is (= "bin/x NAME says hello to NAME" (:seon.script/usage (d/entity main [:file/path "bin/x"]))))
+    (is (= {[:script "bin/x"] [{:file "bin/x" :text text :mode "100755"} {:file "bin/x" :text "#!/bin/sh\necho 2\n" :mode "100755"}]} (:ours r)) (pr-str r))
+    (is (= {:scripts ["bin/x"]} (pm/divergence (:ours r))))
+    (is (= [:section [:h3 "bin/x"] [:p "bin/x NAME says hello to NAME\nand nothing else"] [:pre "bin/x NAME says hello to NAME"]]
+           (seon.render.ui/script {} (d/pull main [:file/path :seon.script/says :seon.script/usage] [:file/path "bin/x"]))) "its render says what it's for and how to call it")
+    (is (= [[:script "bin/x"] :both-modified] ((juxt :key :kind) (first (:conflicts (pm/delta-three-way main ours theirs #{}))))) "both sides changing it is an unmerged entry")
+    (let [merged (d/db-with main (pm/merge-tx main main ours (keys (:ours r)) #{}))
+          paths (seon.source/changed-files merged (:ours r))]
+      (is (= ["bin/x"] paths))
+      (is (= {"bin/x" "#!/bin/sh\necho 2\n"} (seon.source/files merged paths)))
+      (is (= {"bin/x" "100755"} (seon.source/modes merged paths)))
+      (is (= "" (:seon.script/says (d/entity merged [:file/path "bin/x"]))) "what it derives rides with it"))
+    (testing "a schema resource's file bears no key: its entries do"
+      (let [p "resources/seon/schemas/x.edn"
+            db (let [db (empty-db)] (d/db-with db (seon.source/import-tx db {p "{:x/a :int}\n"})))
+            moved (d/db-with db [{:file/path p :file/text "{:x/a :int} \n"}])]
+        (is (= {} (:ours (pm/delta-three-way db moved db #{}))))))))
 
 (deftest unmap-merges-as-delete
   (let [ours (with (base) (unmap "g"))

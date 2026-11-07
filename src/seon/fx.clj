@@ -14,7 +14,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.lib :as lib] [seon.step :as step] [seon.config :as cfg] [seon.model :as model]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [clojure.java.shell :as sh] [clojure.string :as str] [jolt.ffi :as ffi] [jolt.deps :as deps]
-            [seon.edn :as sedn] [clojure.edn :as edn] [seon.proofs :as proofs]))
+            [seon.edn :as sedn] [clojure.edn :as edn] [seon.proofs :as proofs] [seon.reader :as reader]))
 
 (defn- error
   "An effect's declared failure, as the one error map (its variant registered in
@@ -223,7 +223,7 @@
   read (:value and the rest), so the import goes on and the gap is a recorded problem.
   With :since (the tree id of the last import, and no :paths), only the files under dirs that differ from it are read, so what main merged and the tree never held stays main's. A tree git can no longer find reads whole. See docs/source.md#mains-program-follows-the-tree.
   With :own-branch, that branch is brought to what it read (`own-branch-at!`).
-  Answers {:value {path text} :commit sha :tree id :paths paths-when-read-by-them :pins {path sha} :inputs :binary} or :seon.fx/io-error."
+  Answers {:value {path text} :modes {path git mode, of each file the allow-list names} :commit sha :tree id :paths paths-when-read-by-them :pins {path sha} :inputs :binary} or :seon.fx/io-error."
   {:malli/schema [:=> [:cat :map] :map]}
   [{{:keys [root dirs binary-tree paths follow own-branch since]} :req}]
   (try
@@ -240,7 +240,7 @@
                     (when (and since now)
                       (let [d (git-run {} base (into ["diff" "--name-only" since now "--"] dirs) nil)]
                         (when (zero? (:exit d)) (vec (remove str/blank? (str/split-lines (:out d))))))))
-          source? (fn [^String p] (or (.endsWith p ".clj") (.endsWith p ".edn")))]
+          source? (fn [^String p] (or (.endsWith p ".clj") (.endsWith p ".edn") (cfg/file-kind p)))]
       (let [src-read (cond-> {:value (if paths
                         (into (sorted-map)
                               (for [p paths :when (source? p) :let [f (java.io.File. (str base "/" p))]]
@@ -248,9 +248,9 @@
                         (into (sorted-map)
                               (for [d dirs
                                     f (files-under (str base "/" d))
-                                    :let [p (.getCanonicalPath ^java.io.File f)]
+                                    :let [p (subs (.getCanonicalPath ^java.io.File f) (inc (count base)))]
                                     :when (source? p)]
-                                [(subs p (inc (count base))) (slurp f)])))}
+                                [p (slurp f)])))}
         head (assoc :commit head
                     :tree now
                     :pins (into {}
@@ -259,7 +259,10 @@
                                   [p sha])))
         inputs (assoc :inputs inputs
                       :binary (let [f (java.io.File. ^String binary-tree)] (when (.isFile f) (str/trim (slurp f)))))
-                       paths (assoc :paths paths))]
+                       paths (assoc :paths paths))
+        ;; each file the allow-list names, as git records its mode
+        src-read (assoc src-read :modes (into {} (for [[p t] (:value src-read) :when (and t (cfg/file-kind p))]
+                                                   [p (if (.canExecute (java.io.File. (str base "/" p))) "100755" "100644")])))]
         (if gap
           (merge (error #'seon.fx/read-source :seon.fx/io-error
                         (if (:refused gap)
@@ -450,6 +453,19 @@
                     (for [[c es] by-class :when c] [c (lib/digest (str/join "\n" (map second es)))]))
       :data-refs (declared-refs (str root "/resources/seon/system.edn"))})))
 
+(defn unreadable
+  "Why text can't be read as the file at relative path is read, or nil: the shipped config validates (a refusal throws, naming each key), EDN and Clojure read, a script
+  passes its interpreter's own syntax check (zsh, sh and bash -n, perl -c, its text on stdin; any other file, or a script with no #! line, has no reader here to ask). See docs/source.md#a-program-file."
+  {:malli/schema [:=> [:cat :string :string] [:maybe :string]]}
+  [path text]
+  (let [interp (when (str/starts-with? text "#!") (last (str/split (first (str/split (subs text 2) #"\s" 2)) #"/")))
+        flag ({"zsh" "-n" "sh" "-n" "bash" "-n" "perl" "-c"} interp)]
+    (cond (= path cfg/shipped-file) (do (cfg/text-config text) nil)
+          (or (str/ends-with? path ".clj") (str/ends-with? path ".edn"))
+          (when-not (reader/read-text text 'user) "it does not read")
+          flag (let [r (sh/sh interp flag :in text)]
+                 (when-not (zero? (:exit r)) (str/trim (str (:err r) (:out r))))))))
+
 (defn git-commit
   "Commit files ({relative path text}) on branch of the repository at dir, with message,
   through git's plumbing: blobs, a tree from the branch's own with the files replaced, a
@@ -457,14 +473,16 @@
   commit the running generation's tree checks out), and the ref moved only from that head. No
   working tree or checkout is touched, so main and every worktree's files stay as they are.
   With :allow-empty? and no files it commits the branch's own tree again (an empty commit: a review,
-  seon.doc/review-message). Answers {:value {:sha :files n}} ({:sha nil :files 0} when there is nothing
+  seon.doc/review-message). Each file is first read as its reader reads it (unreadable), and one that doesn't refuses the commit. :modes ({path git mode}) gives a file's mode, 100644 otherwise. Answers {:value {:sha :files n}} ({:sha nil :files 0} when there is nothing
   to write), or :seon.fx/io-error."
   {:malli/schema [:=> [:cat :map] :map]}
-  [{{:keys [dir branch files message allow-empty?]} :req}]
+  [{{:keys [dir branch files message allow-empty? modes]} :req}]
   (if (and (empty? files) (not allow-empty?))
     {:value {:sha nil :files 0}}
     (try
-      (let [ref (str "refs/heads/" branch)
+      (if-let [bad (seq (for [[p t] (sort files) :let [why (unreadable p t)] :when why] (str p ": " why)))]
+       (error #'seon.fx/git-commit :seon.fx/io-error (str "refused, nothing committed: " (str/join "; " bad)) {:path dir})
+       (let [ref (str "refs/heads/" branch)
             have? (some? (git-try dir ["rev-parse" "--verify" "--quiet" ref]))
             parent (git! {} dir ["rev-parse" "--verify" (if have? ref "HEAD")] nil)
             gp (git! {} dir ["rev-parse" "--git-path" (str "seon-index-" (lib/c-getpid))] nil)
@@ -472,7 +490,7 @@
         (try
           (git! {"GIT_INDEX_FILE" index} dir ["read-tree" parent] nil)
           (doseq [[path text] (sort files)]
-            (git! {"GIT_INDEX_FILE" index} dir ["update-index" "--add" "--cacheinfo" (str "100644," (git! {} dir ["hash-object" "-w" "--stdin"] text) "," path)] nil))
+            (git! {"GIT_INDEX_FILE" index} dir ["update-index" "--add" "--cacheinfo" (str (get modes path "100644") "," (git! {} dir ["hash-object" "-w" "--stdin"] text) "," path)] nil))
           ;; Seon is the committer and author of its merges (the config's identity): a
           ;; root's HOME is its checkout's target/home, which holds no git identity
           (let [who (cfg/value :seon.config.source/committer-name) mail (cfg/value :seon.config.source/committer-email)
@@ -481,7 +499,7 @@
             ;; only from the head read above; a new branch only if none appeared meanwhile
             (git! {} dir ["update-ref" ref sha (if have? parent "0000000000000000000000000000000000000000")] nil)
             {:value {:sha sha :files (count files)}})
-          (finally (.delete (java.io.File. ^String index)))))
+          (finally (.delete (java.io.File. ^String index))))))
       (catch Throwable e (error #'seon.fx/git-commit :seon.fx/io-error (step/error-msg e) {:path dir})))))
 
 ;; ---- the wiki's history: what each section was last written against -----------------------
@@ -950,7 +968,9 @@
       (not (zero? (:exit at))) (error #'seon.fx/run-on-checkout :seon.fx/io-error (str "bin/worktree --at exited " (:exit at) ": " (:err at)) {:path dir})
       :else
       (try
-        (doseq [[p text] files] (let [f (java.io.File. dir p)] (.mkdirs (.getParentFile f)) (spit f text)))
+        (doseq [[p text] files]
+          (let [w (write-file {:req {:path (str dir "/" p) :text text}})]
+            (when (contract/error? w) (throw (ex-info (:seon.error/message w) w)))))
         ;; process tests run this tree's binary, so it is built from this tree first, the gate's
         ;; as the full run's: the worktree's target/ is a clone of another tree's, and its binary
         ;; that tree's (measured 2026-10-27: the first daily run's process tests ran on a stale one,

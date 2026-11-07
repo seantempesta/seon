@@ -334,6 +334,7 @@ Uses of take, subs and the like in display code that choose what to find or read
 - `seon.repl/do-parts`: a top-level form written `(do ...)` (its text opens with `(` and the token `do`, so a reader macro that expands to do is not one) as its inner forms, each the form the reader already returned, with its exact text and leading comments from the reader's own positions in the do's text (no pattern, no cut by text), each then evaluated as a top-level form as Clojure's compiler takes them: code read, not output.
 - `seon.repl/edit!`, `seon.repl/place`: the offsets of the old text in a place's recorded text (`subs` rebuilds the source around the change, `line-of` counts the lines before an offset): text rearranged, nothing left out; a refused edit names every line that could be meant.
 - `my.root/task-files`: a task file's owning namespace from its file name (`subs` off the `.edn`).
+- `seon.repl/file-name`: a path relative to a root it is under (`subs` off the root).
 - `seon.web/handler`, `seon.web/view-of`, `seon.server/mcp-reply`: parsing a request's path and a tool's name.
 - `seon.context/near`: the whole line a repaired delimiter is on, the printer budgets it.
 - `seon.render.proc/pass`: root's process keeps the newest `:seon.config.render.list/stream` events, and its tile (`seon.render.ui/process-tile`) draws the newest `:seon.config.render.list/history` of them: a window of data, as ctx's are.

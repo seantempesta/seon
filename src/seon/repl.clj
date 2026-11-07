@@ -29,7 +29,7 @@
   arrives in and nothing after it. Seon's platform ops (tests, stats, clone,
   messages, writes) are {:op k} values, handled by `agent-step`."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn- defchecked]] [hasch.core :as hasch] [seon.error :as err] [jolt.nrepl :as nrepl] [seon.intr :as intr] [seon.reader :as reader] [seon.doc :as doc] [seon.fx :as fx] [seon.agent :as agent] [seon.task :as task] [seon.contract :as contract] [my.db] [my.agent] [my.schema] [malli.registry :as mr]
+  (:require [seon.contract :refer [defn defn- defchecked]] [hasch.core :as hasch] [seon.error :as err] [jolt.nrepl :as nrepl] [seon.intr :as intr] [seon.reader :as reader] [seon.doc :as doc] [seon.fx :as fx] [seon.source :as source] [seon.agent :as agent] [seon.task :as task] [seon.contract :as contract] [my.db] [my.agent] [my.schema] [malli.registry :as mr]
             [seon.source :as source] [seon.program :as program] [jolt.analyzer] [seon.lib :as lib] [seon.print :as print] [seon.print.select :as select] [seon.render :as render] [seon.context :as context] [seon.ctx :as ctx] [seon.web.html :as h] [seon.profile :as profile] [seon.sock :as sock] [seon.step :as step] [clojure.core.async :as a] [clojure.core.async.flow :as flow]
             [jolt.ffi :as ffi] [seon.config :as cfg] [clojure.test] [datahike.api :as d] [seon.db :as pdb] [seon.edn :as sedn]))
 
@@ -848,13 +848,33 @@
   (contract/error :seon.repl/edit-refused #'seon.repl/edit! (str at ": " msg)
                   (cond-> {:seon.repl/var at :seon.repl/refused-because why} (seq lines) (assoc :seon.repl/lines lines))))
 
+(defn- file-name
+  "The name a path has among the program's files: relative to this checkout or the source root when it is under either, else as given. See docs/agent.md#changing-a-file."
+  {:malli/schema [:=> [:cat :string] :string]}
+  [at]
+  (if (clojure.string/starts-with? at "/")
+    (let [abs (.getCanonicalPath (java.io.File. ^String at))]
+      (or (some (fn [root] (when root
+                             (let [r (str (.getCanonicalPath (java.io.File. ^String root)) "/")]
+                               (when (clojure.string/starts-with? abs r) (subs abs (count r))))))
+                [(cfg/checkout) (get cfg/config :seon.config.source/root)])
+          at))
+    at))
+
+(declare place)
+
+(def ^:private path-note
+  "What the answer to an edit of a plain path adds, by the file's kind: how a file the program holds in parts changes on a branch. See docs/agent.md#changing-a-file."
+  {:schema " To change a schema entry on this branch: (my.schema/register! k form)."})
+
 (defn place-kind
-  "Which kind of place at names: a symbol a :var, a string holding a page's anchor (x.md#heading) a :doc, any other string a :path. See docs/agent.md#changing-a-file."
-  {:malli/schema [:=> [:cat [:or :qualified-symbol :string]] [:enum :var :doc :path]]}
+  "Which kind of place at names: a symbol a :var, a string holding a page's anchor (x.md#heading) a :doc, a file this branch holds whose kind has a place of its own that kind, any other string a :path. See docs/agent.md#changing-a-file."
+  {:malli/schema [:=> [:cat [:or :qualified-symbol :string]] :keyword]}
   [at]
   (cond (symbol? at) :var
         (clojure.string/includes? at ".md#") :doc
-        :else :path))
+        :else (let [n (file-name at) k (cfg/file-kind n)]
+                (if (and (get-method place k) (some-> (:db @agent/state) (pdb/eid :file/path n))) k :path))))
 
 (defmulti place
   "The one edge of a text's place, by place-kind: (place at) reads it, as :seon.text/place or the refusal saying why none, and (place p new) writes new over p, answering
@@ -911,7 +931,19 @@
        (if (contract/error? w)
          w
          {:edited {:path abs}
-          :seon.text/said (str "Wrote to disk at " abs ": no branch holds this, and no merge carries it.")})))))
+          :seon.text/said (str "Wrote to disk at " abs ": no branch holds this, and no merge carries it."
+                               (path-note (cfg/file-kind (file-name at))))})))))
+
+(defmethod place :script
+  ;; a script this branch holds: its text is the file's fact; a write checked as its interpreter reads it (seon.fx/unreadable), and transacted on the branch
+  ([at] (let [n (file-name at)] {:seon.text/at n :seon.text/text (:file/text (d/entity (agent/db) [:file/path n]))}))
+  ([{at :seon.text/at src :seon.text/text} new]
+   (cond
+     (= new src) {:unchanged at}
+     (fx/unreadable at new) (edit-refused at :unreadable (str "the new text does not read, so nothing changed: " (fx/unreadable at new)) nil)
+     :else (do (agent/transact! (source/file-tx at new))
+               {:edited {:script at}
+                :seon.text/said (str "Changed " at " on this branch: a merge carries it, and the write-back after it writes the file. Nothing on disk moved.")}))))
 
 (defn edit!
   "Change the text at a place by replacing old, exact text that occurs once in it, with new: a

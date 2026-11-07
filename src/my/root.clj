@@ -145,7 +145,7 @@
                                             "no source root declared (:seon.config.source/root): nothing is written back here" {:tasks lost})
                 (empty? files) (contract/error :seon.root/no-source-text #'my.root/write-back!
                                                (str "main holds no text for " (str/join ", " paths) ": nothing to write back") {:paths paths})
-                :else @(root/effect! sys :git {:dir root :branch (config/value :seon.config.source/branch) :files files
+                :else @(root/effect! sys :git {:dir root :branch (config/value :seon.config.source/branch) :files files :modes (source/modes db (keys files))
                                                :message (source/commit-message members)}))
         tx (when (seq files) (reconcile/commit-tx db r members paths (keys files)))]
     (when (seq tx) @(root/transact-main! sys tx))

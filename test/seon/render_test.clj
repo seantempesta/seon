@@ -65,6 +65,7 @@
                                     arity (if (= :function (first s)) (second s) s)]
                                 (second (second arity))))]
       (is (seq declared))
+      (is (some #{'seon.render.ui/script} declared) "a render only a schema names is found: named here, its contract's change moves this test's digest")
       ;; :seon.render/opts, or opts it narrows ([:and :seon.render/opts [:map ...]]: render-ctx's renders)
       (is (= [] (vec (remove #(let [a (first-arg %)] (or (= :seon.render/opts a) (and (vector? a) (= [:and :seon.render/opts] (subvec a 0 2))))) declared)))
           "none takes its value first")))

@@ -214,6 +214,39 @@
       (is (= :no-source (:seon.repl/refused-because r)) (pr-str r))
       (is (str/includes? (:seon.error/message r) d) "it names where it looked"))))
 
+(deftest a-schema-resources-path-stays-on-disk-and-says-how-it-changes
+  ;; docs/agent.md#changing-a-file: its entries are what merges; the plain write answers so
+  (let [d (str (seon.config/checkout) "/resources/seon/schemas/repl-path-" (random-uuid) ".tmp.edn")]
+    (spit d "{:x/a :int}\n")
+    (try (let [r (repl/edit! d ":int" ":string")]
+           (is (= "{:x/a :string}\n" (slurp d)) (pr-str r))
+           (is (str/includes? (:seon.text/said r) "no branch"))
+           (is (str/includes? (:seon.text/said r) "my.schema/register!") (pr-str r)))
+         (finally (.delete (java.io.File. ^String d))))))
+
+(deftest a-script-is-edited-on-the-branch
+  ;; docs/agent.md#changing-a-file: a script this branch holds changes as a fact of the branch, at its name or its absolute path, and the disk doesn't move
+  (let [f (str (seon.config/checkout) "/bin/ports")
+        on-disk (slurp f)
+        at (fn [db] (str "(:file/text (datahike.api/entity " db " [:file/path \"bin/ports\"]))"))
+        [edit by-path bad branch main changes]
+        (at/in-agent (fn [_]
+                       ["(seon.repl/edit! \"bin/ports\" \"#!/bin/zsh\" \"#!/bin/zsh\\n# one\")"
+                        (str "(seon.repl/edit! " (pr-str f) " \"# one\" \"# two\")")
+                        "(seon.repl/edit! \"bin/ports\" \"# two\" \"if then\")"
+                        (at "(seon.agent/db)")
+                        {:op :eval :agent "root" :code (at "@(:conn sys)")}
+                        "(:scripts (seon.merge/divergence (seon.agent/branch-changes (:base @seon.agent/state) (seon.agent/db))))"])
+                     {:dirs ["bin"]})]
+    (is (= "bin/ports" (get-in edit [:value :edited :script])) (pr-str edit))
+    (is (str/includes? (get-in edit [:value :seon.text/said]) "this branch") (pr-str edit))
+    (is (= "bin/ports" (get-in by-path [:value :edited :script])) (str "its absolute path is the same place: " (pr-str by-path)))
+    (is (= :unreadable (get-in bad [:value :seon.repl/refused-because])) (pr-str bad))
+    (is (str/starts-with? (str (:value branch)) "#!/bin/zsh\n# two\n") (pr-str branch))
+    (is (= on-disk (:value main)) (str "main holds what it held: " (pr-str main)))
+    (is (= ["bin/ports"] (:value changes)) (pr-str changes))
+    (is (= on-disk (slurp f)) "nothing on disk moved")))
+
 (deftest a-doc-is-edited-as-a-definition-is
   ;; docs as code (task seon.doc/any-markdown-file-is-docs-it-writes-back): edit! of a doc's address replaces exact
   ;; text once in its block, as of a definition, and loads its page again on the agent's branch, so what its text

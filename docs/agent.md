@@ -132,7 +132,9 @@ A doc (a heading of a page and its text, named by its address: the page's path, 
 
 ## Changing a file
 
-``(seon.repl/edit! "/abs/path" "old" "new")`` edits a file on disk the way a definition is edited: exact text, once, or the refusal naming the lines. The file keeps its mode (```seon.fx/write-file```), and the answer's `:edited` and `:seon.text/said` name the absolute path it wrote and say no branch holds it: no merge carries it. A write of a plain path is never refused. What differs between a definition, a doc and a path is only where the text is read from and what a write does: one multimethod at the edge, ```seon.repl/place```, over the plain data ``:seon.text/place``, its kind told by ```seon.repl/place-kind```.
+``(seon.repl/edit! "/abs/path" "old" "new")`` edits a file on disk the way a definition is edited: exact text, once, or the refusal naming the lines. The file keeps its mode (```seon.fx/write-file```), and the answer's `:edited` and `:seon.text/said` name the absolute path it wrote and say no branch holds it: no merge carries it. A write of a plain path is never refused. A schema resource's path is one, and the answer says how an entry changes on the branch: ``(my.schema/register! k form)``.
+
+A script this branch holds (``bin/root``, at that name or its absolute path) changes on the branch: ``(seon.repl/edit! "bin/root" "old" "new")`` transacts its new text, unless it does not pass its interpreter's syntax check (`:unreadable`), and says so. Nothing on disk moves until its merge is written back ([source](source.md#a-program-file)). What differs between a definition, a doc and a path is only where the text is read from and what a write does: one multimethod at the edge, ```seon.repl/place```, over the plain data ``:seon.text/place``, its kind told by ```seon.repl/place-kind```.
 
 ## ctx
 

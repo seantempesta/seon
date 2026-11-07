@@ -216,12 +216,46 @@
         (for [[k v] (sort-by (comp str key) (sedn/decode text))]
           {:schema/key k :schema/form (binding [*print-namespace-maps* false] (sedn/encode v)) :schema/file path :schema/source true})))
 
+(defn- lead-comment
+  "The lines of text's comment before its first other line, each without its #, the #! line left out: a script's own words on itself. See docs/source.md#a-program-file."
+  {:malli/schema [:=> [:cat :string] [:vector :string]]}
+  [text]
+  (let [ls (take-while #(str/starts-with? % "#") (str/split-lines text))
+        ls (if (some-> (first ls) (str/starts-with? "#!")) (rest ls) ls)]
+    (mapv #(str/trim (subs % 1)) ls)))
+
+(defn- script-tx
+  "The facts of the script at path holding text: the file, and what its lead comment says of it, for reading (docs/source.md#a-program-file)."
+  {:malli/schema [:=> [:cat :string :string] :seon.db/tx-data]}
+  [path text]
+  (let [ls (lead-comment text)]
+    [{:file/path path :file/text text :seon.script/says (str/join "\n" ls)
+      :seon.script/usage (str/join "\n" (filter #(str/starts-with? % path) ls))}]))
+
+(defn- held-text
+  "The text the file at path holds on db: a file of one entry, as a db holds it (docs/source.md#a-program-file)."
+  {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe :string]]}
+  [db path] (:file/text (d/entity db [:file/path path])))
+
 (declare schema-resource-text)
 
 (def ^:private file-kinds
   "What a kind of file (seon.config/file-kind) differs by, as data: :tx, the facts of its text, and :text, its text as a db holds it. Nothing else in the import, the merge or the write-back
   asks a file's kind. See docs/source.md#a-program-file."
-  {:schema {:tx #'schema-tx :text #'schema-resource-text}})
+  {:schema {:tx #'schema-tx :text #'schema-resource-text}
+   :script {:tx #'script-tx :text #'held-text}})
+
+(defn modes-tx
+  "The facts of modes ({relative path git mode}, the files as the import read them), only where they differ from db. See docs/source.md#a-program-file."
+  {:malli/schema [:=> [:cat :seon.host/db [:map-of :string :string]] :seon.db/tx-data]}
+  [db modes]
+  (vec (for [[p m] (sort modes) :when (not= m (:file/mode (d/entity db [:file/path p])))] {:file/path p :file/mode m})))
+
+(defn modes
+  "{relative path git mode} of the files at paths whose mode db holds, what a write-back commits with its text. See docs/source.md#a-program-file."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :string]] [:map-of :string :string]]}
+  [db paths]
+  (into {} (for [p paths :let [m (:file/mode (d/entity db [:file/path p]))] :when m] [p m])))
 
 (defn file-tx
   "The facts of the file at path, of a kind the allow-list names, holding text (file-kinds). See docs/source.md#a-program-file."
@@ -459,7 +493,7 @@
   {:malli/schema [:=> [:cat :seon.host/db [:map-of :string :string] ifn?] [:map-of :string :string]]}
   [db files loaded?]
   (let [libs (fn [f] (for [c (rest f) :when (and (seq? c) (= :require (first c))) x (rest c)] (if (sequential? x) (first x) x)))]
-    (loop [out files todo (vec (vals files))]
+    (loop [out files todo (vec (for [[p t] files :when (str/ends-with? p ".clj")] t))]
       (if-let [t (peek todo)]
         (let [more (into {} (for [r (some-> (ns-form t) libs) :when (and (symbol? r) (not (loaded? r)))
                                   :let [p (:ns/file (d/entity db [:ns/name r]))] :when (and p (not (contains? out p)))]
@@ -644,14 +678,14 @@
 (defn changed-files
   "The files a merge's changes (seon.merge/three-way's :ours) touch, as db (after them) holds
   them: the file of each namespace whose forms they add, change or remove, the resource of
-  each schema entry they change, and the page of each doc they change (its address's path,
+  each schema entry they change, each script they change, and the page of each doc they change (its address's path,
   drawn by seon.doc/files); sorted relative paths."
   {:malli/schema [:=> [:cat :seon.host/db :seon.merge/changes] [:vector :string]]}
   [db changes]
   (vec (sort (distinct (for [[[k x] [a b]] changes
                              :let [p (case k
                                        :form (ns-file db (:ns (or b a)))
-                                       :schema (:file (or b a))
+                                       (:schema :script) (:file (or b a))
                                        :section (first (str/split x #"#" 2))
                                        nil)]
                              :when p]

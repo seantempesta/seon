@@ -15,6 +15,8 @@
   - `[:schema k]` -> a schema entry of a resource ({:form text :file path}; seon.source
     imports them, my.schema/register! changes them); an entry with no resource (a scratch
     key) is no program;
+  - `[:script path]` -> a script, a file of the program with one entry, its whole text
+    ({:file path :text text :mode mode}; seon.source);
   - `[:datum e a]` (cardinality one) / `[:datum e a v]` (many) -> a value of a data
     attribute the caller declares (`data-attrs`: a set, or :all for every attribute that
     is neither program, observation nor merge bookkeeping). Entity ids are store-wide
@@ -26,7 +28,7 @@
   ours and theirs as data, until the branch's content for its key changes or it is
   resolved (`resolve-tx`). Every function here is pure over db values."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [clojure.string :as str] [seon.db :as pdb] [seon.program :as program] [seon.edn :as sedn]))
+  (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [clojure.string :as str] [seon.db :as pdb] [seon.program :as program] [seon.edn :as sedn] [seon.config :as cfg]))
 
 (def carried-platform-attrs
   "The platform attributes (seon.*) a branch carries: the task content an agent may improve
@@ -43,7 +45,13 @@
   what it read) the load derives from these, so a change shows in these and a merge reads only them (docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program)."
   {:section {:id :seon.doc/address :carries "seon.doc"
              :stated {:seon.doc/address :seon.doc/address :seon.doc/heading :seon.doc/heading :seon.doc/text :seon.doc/text :seon.doc/parent :seon.doc/parent}}
-   :schema {:id :schema/key :stated {:schema/form :form :schema/file :file} :needs :file}})
+   :schema {:id :schema/key :stated {:schema/form :form :schema/file :file} :needs :file}
+   :script {:id :file/path :kind-of #'cfg/file-kind :carries "seon.script" :stated {:file/path :file :file/text :text :file/mode :mode}}})
+
+(defn- bears?
+  "Whether the entity named v bears key kind, under its row of stated-keys: an identity several kinds share (a file's path) names the kind by the row's :kind-of. See docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program."
+  {:malli/schema [:=> [:cat :keyword :map :any] :boolean]}
+  [kind {:keys [kind-of]} v] (or (nil? kind-of) (= kind (kind-of v))))
 
 (def ^:private stated-attr?
   "The attributes stated-keys' contents read (docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program)."
@@ -123,7 +131,7 @@
                (if (= :db.cardinality/many (get-in schema [a :db/cardinality]))
                  [[:datum (:e dt) a (:v dt)] true]
                  [[:datum (:e dt) a] (:v dt)]))
-        stated (for [[kind row] stated-keys dt (d/datoms db :aevt (:id row)) :let [c (stated-content db row (:e dt))] :when c] [[kind (:v dt)] c])]
+        stated (for [[kind row] stated-keys dt (d/datoms db :aevt (:id row)) :when (bears? kind row (:v dt)) :let [c (stated-content db row (:e dt))] :when c] [[kind (:v dt)] c])]
     (into {} (concat (for [f forms] [[:form (:id f)] (dissoc f :e :id)]) defs stated data))))
 
 (defn- same?
@@ -196,7 +204,7 @@
     (into #{}
           (concat (when-let [k (form-key x)] (cons k def-key))
                   (when own-def (remove nil? [own-def (pointed (program/pointer (first own-def)))]))
-                  (for [[kind {:keys [id]}] stated-keys :let [v (get x id)] :when (some? v)] [kind v])
+                  (for [[kind {:keys [id] :as row}] stated-keys :let [v (get x id)] :when (and (some? v) (bears? kind row v))] [kind v])
                   (for [dt (when-not (= #{} data-attrs) ds) :when (data-attrs (:a dt))]
                     (if (many (:a dt))
                       [:datum e (:a dt) (:v dt)]
@@ -337,14 +345,14 @@
 (defn divergence
   "What a branch's changes ch (delta-changes from its merge base, read once a turn:
   seon.agent/branch-changes) carry to main: the vars, methods and implementations it added, redefined and removed, and the
-  schema keys it registered or changed; each sorted, an empty kind left out ({}: nothing). A var
+  schema keys it registered or changed and the scripts it changed; each sorted, an empty kind left out ({}: nothing). A var
   is changed when its definition's content is (its form's text, kind, contract or doc: def-content),
   and removed when no live form defines it. A schema registered with no file (a scratch one, my.schema) is no key of the program and never
   merges, so it is none of these."
-  {:malli/schema [:=> [:cat :seon.merge/changes] [:map-of [:enum :added :changed :removed :schemas] [:vector [:or :qualified-symbol :qualified-keyword [:vector :any]]]]]}
+  {:malli/schema [:=> [:cat :seon.merge/changes] [:map-of [:enum :added :changed :removed :schemas :scripts] [:vector [:or :qualified-symbol :qualified-keyword :string [:vector :any]]]]]}
   [ch]
-  (let [kinds (for [[[kind x :as k] [a b]] ch :when (#{:var :schema :method :impl} kind)]
-                [(cond (= :schema kind) :schemas (nil? a) :added (nil? b) :removed :else :changed)
+  (let [kinds (for [[[kind x :as k] [a b]] ch :when (#{:var :schema :method :impl :script} kind)]
+                [(cond (= :schema kind) :schemas (= :script kind) :scripts (nil? a) :added (nil? b) :removed :else :changed)
                  ;; a method or an implementation goes by what names it, [multi dispatch], [protocol type]
                  (if (#{:method :impl} kind) (vec (rest k)) x)])]
     (into {} (for [[k xs] (group-by first kinds)] [k (vec (sort-by str (map second xs)))]))))
