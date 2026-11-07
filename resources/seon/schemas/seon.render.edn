@@ -94,7 +94,7 @@
  ;; what root reads (seon.render.proc/debug-value): the system's value printed, as the render proc holds it
  :seon.render/root-context [:map {:seon.render/html seon.render.ui/root-context} [:text :string] [:tokens nat-int?]]
  ;; the input at the top of an agent's page: its REPL, its messages, its held task's release
- :seon.render/agent-input [:map {:seon.render/html seon.render.ui/agent-input} [:id :keyword] [:live? :boolean]]
+ :seon.render/agent-input [:map {:seon.render/html seon.render.ui/agent-input} [:id :keyword] [:address {:optional true} :keyword] [:live? :boolean]]
  ;; a cost proof's report as the agent's test run holds it: the estimate's function, the
  ;; rows measured and the verdict (seon.cost/proof's :actual)
  :seon.render/cost-report [:map {:seon.render/html seon.render.ui/cost-report}

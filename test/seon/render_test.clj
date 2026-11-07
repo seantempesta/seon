@@ -594,7 +594,7 @@
       (is (str/includes? (:html (second (in root "#p-tiles"))) "problems"))
       (is (= :seon.render/root-input (:schema (input root)))))
     (testing "an agent's focus: its REPL and messages at the top, live while root's view holds it in this boot"
-      (is (= [:seon.render/agent-input {:id :a3 :live? true :held nil :focus? true :busy? true :capped? false :talks? true}] [(:schema (input agent)) (:input (input agent))]))
+      (is (= [:seon.render/agent-input {:id :a3 :live? true :held nil :focus? true :busy? true :talks? true :address :b1/a3}] [(:schema (input agent)) (:input (input agent))]))
       (let [ctx-page (#'p/page-value st :a3)]
         (is (false? (:focus? (:input (input ctx-page)))) "@ctx's input takes no focus: a focused field at the page's end scrolls the page to its bottom")))
     (testing "a location naming no entity is that error, never an empty page; a branch that could not be read is shown as its error"
@@ -2329,18 +2329,14 @@
         (is (str/includes? (:html (get pages 9)) "b9/a1") "the message names the address")
         (is (nil? (:status (get pages 10))) "a session's page has no status: 200")))))
 
-(deftest a-capped-or-process-less-agent-offers-only-what-it-can-answer
-  ;; the REPL answers forms while a process is held (a capped task's agent keeps its process, parked), but takes no message; a form
-  ;; to interrupt only while one runs (status :busy)
-  (let [html (fn [m] (h/html (ui/agent-input {:unit "p-input"} (merge {:id :a3 :live? true :held nil} m))))]
-    (is (str/includes? (html {:busy? true}) "interrupt"))
-    (is (not (str/includes? (html {:busy? false}) "interrupt")) "no form running: nothing to interrupt")
-    (is (str/includes? (html {:talks? true}) "Say something") "an agent on a task takes a message")
-    (is (not (str/includes? (html {:talks? true :capped? true}) "Say something")) "a capped task's agent does not")
-    (is (not (str/includes? (html {}) "Say something")) "nor one with no task: its input is its REPL")
-    (is (str/includes? (html {:capped? true}) "It used all its turns") "and the page says why")
-    (is (str/includes? (html {:capped? true}) "<textarea") "it still answers a form")
-    (is (not-any? #(str/includes? (html {:live? false :busy? true :capped? true}) %) ["<textarea" "interrupt"]) "no process: neither")))
+(deftest an-agent-with-a-task-can-be-spoken-to-with-no-process
+  ;; docs/users.md#messages: a recipient needs no process: words wake it, whatever its state, addressed by its key; only an agent with no task and no process has nothing to take them
+  (let [draw (fn [v] (h/html (ui/agent-input {:unit "p-input"} v)))
+        has-form? #(str/includes? % "<textarea")]
+    (is (has-form? (draw {:id :a1 :address :b1/a1 :live? false :focus? true :busy? false :talks? true})) "no process, a task: it can be spoken to")
+    (is (str/includes? (draw {:id :a1 :address :b1/a1 :live? false :focus? true :busy? false :talks? true}) "agent=b1%2Fa1") "by its key, which any boot resolves")
+    (is (has-form? (draw {:id :a1 :address :b1/a1 :live? true :focus? true :busy? false :talks? false})) "a live agent's REPL")
+    (is (not (has-form? (draw {:id :a1 :address :b1/a1 :live? false :focus? true :busy? false :talks? false}))) "neither: nothing would take it")))
 
 (deftest the-task-line-of-the-side-panel-reads-through-standing
   ;; the chat's side panel said "task · seon.program · running" of a capped task: running is the task's execution, not how it stands

@@ -405,28 +405,28 @@
   the same): words are a message its next turn reads (seon.root/message!), and a line that starts with
   ( evaluates in its REPL (seon.root/submit!, origin :ui), as every line does on an agent with no task; interrupt stops its running form;
   release runs its task's next run when the task is held (seon.root/release!). input {:id
-  :live? :held :focus? :busy? :capped? :talks?}: talks?, it has a task, whose next turn reads what's said; live, root's view holds its process in this boot; busy?, it runs a form (what interrupt stops); capped?, its task is
-  at its cap (no message wakes it); focus?, its field takes focus as the page loads (the chat's:
+  :address :live? :held :focus? :busy? :talks?}: address, its key, whom a word goes to in any boot; talks?, it has a task, so what's said wakes it, process or none; live, root's view holds its process in this boot; busy?, it runs a form (what interrupt stops); capped?, its task is
+  focus?, its field takes focus as the page loads (the chat's:
   @ctx's page is long and the field ends it)."
   {:malli/schema [:=> [:cat :seon.render/opts :seon.render/agent-input] :any]}
-  [opts {:keys [id live? held focus? busy? capped? talks?]}]
+  [opts {:keys [id address live? held focus? busy? talks?]}]
   [:section {:id (:unit opts) :class "seon-stack-2"}
-   (if live?
-     [:form {:class "seon-row" :data-seon-repl "" :seon/call 'seon.root/submit! :seon/agent id}
+   (if (or live? talks?)
+     [:form {:class "seon-row" :data-seon-repl "" :seon/call 'seon.root/submit! :seon/agent (or address id)}
       [:span {:class "text-signal"} (str (kname id) "=>")]
       ;; Enter sends, Shift+Enter is a new line: a form may span lines
       [:textarea (cond-> {:name "forms" :class "flex-1 min-w-0" :rows 3 :autocomplete "off" :spellcheck "false"
                           (keyword "data-on:keydown") "if (evt.key==='Enter' && !evt.shiftKey) { evt.preventDefault(); el.form.requestSubmit() }"
-                          :placeholder (if (and talks? (not capped?)) "Say something (Enter; Shift+Enter: a new line)\n(+ 1 2) runs in its REPL" "(+ 1 2) evaluates in its REPL (Enter; Shift+Enter: a new line)")}
+                          :placeholder (cond (and talks? live?) "Say something (Enter; Shift+Enter: a new line)\n(+ 1 2) runs in its REPL"
+                                       talks? "Say something and it starts again (Enter; Shift+Enter: a new line)"
+                                       :else "(+ 1 2) evaluates in its REPL (Enter; Shift+Enter: a new line)")}
                    ;; the chat takes focus (it follows its tail); a browser scrolls a focused field into view, and this one ends the page
                    focus? (assoc :autofocus true))]
-      ;; a form to interrupt only while its process runs one (status :busy); a capped task's agent answers forms but takes no message
+      ;; a form to interrupt only while its process runs one (status :busy)
       (when busy?
         [:button {:type "button" :class "rounded border border-base-700 px-2" :title "interrupt the running form; the agent keeps its state"
                   :seon/call 'seon.root/interrupt! :seon/agent id} "⏹ interrupt"])]
      [:p {:class "muted"} "This agent isn't running, so it can't answer. What it did is above."])
-   (when (and live? capped?)
-     [:p {:class "seon-note"} "It used all its turns, so it won't read messages. Raise its turns and release its task to go on."])
    (when held
      [:button {:class "self-start rounded border border-base-700 px-2" :title (str "release " held ": the reconciler runs its next run (my.root/run!)")
                :seon/call 'seon.root/release! :seon/agent id :seon/args {:task held}}

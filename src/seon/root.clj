@@ -287,6 +287,8 @@
   {:malli/schema [:=> [:cat :seon.root/api-state :seon.agent/id] [:maybe :string]]}
   [st id]
   (or (when (get-in st [:agents id]) (or (get-in st [:view :agents id :key]) (task/agent-key (:boot st) id)))
+      ;; its key, the name a page holds for it, of any boot
+      (let [k (subs (str id) 1)] (when (pdb/eid @(:conn st) :seon.agent/key k) k))
       (let [db @(:conn st)]
         (->> (d/datoms db :avet :seon.agent/id id)
              (map #(d/entity db (:e %)))
