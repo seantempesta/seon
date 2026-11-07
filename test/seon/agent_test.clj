@@ -1807,7 +1807,9 @@
          (let [r (repl/eval-string "(seon.agent/transact! [{:note/text \"an eval's\"}])" {"ns" "user" :origin :outside})
                t (:t (:value r))]
            (agent/commit!)
-           (is (= [ab "e1"] ((juxt :seon.tx/branch :seon.tx/eval) (d/entity @store-conn t))) (str "the eval that wrote it: " (:ex r)))
+           (is (= ab (:seon.tx/branch (d/entity @store-conn t))) (str "the eval that wrote it: " (:ex r)))
+           (is (some? (:record r)))
+           (is (= (:record r) (:seon.tx/eval (d/entity @store-conn t))) "the eval that wrote it, by its id")
            (is (nil? (:eval @agent/state)) "and once the eval ends, a write names no eval"))
          (let [r (repl/eval-string "(throw (ex-info \"boom\" {}))" {"ns" "user" :origin :outside})]
            (is (:ex r) "an eval that throws")
