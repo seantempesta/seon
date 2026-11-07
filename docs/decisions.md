@@ -10,6 +10,10 @@ The owner's rulings of 2026-11-07, on what an agent starts from, on what a merge
 
 Owner, 2026-11-07: "I want less special functions and more clojure data manipulation on the ctx atom for maintenance. In the rendering of the mesaages we can include instructions for how they can manage their messages and archive them so they don't just pile up. I don't want any magic in the system." Stated in: [users](users.md#messages).
 
+### Messages have no read state
+
+Owner, 2026-11-07: "I don't want a concept of 'read and unread' this is buggy as shit. Messages are delivered to the agents entity and they can remove them". And: "Shouldn't messages be sorted by time not entity id? ... we have to choose attributes that allow us to understand ordreing and anything else the agent might want to do to search, sort, filter etc." Stated in: [users](users.md#messages).
+
 ### What's on screen is a reflection of the database
 
 Owner, 2026-11-07: "I want the UI state to be a reflection of the DB so we need to update thte db and that causes the re-render." And: "I really want the render function @ctx to be driving everything ... we stop writing process data and instead write data that reflects the state of the system". Stated in: [users](users.md#whats-on-screen).

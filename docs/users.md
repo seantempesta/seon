@@ -73,16 +73,15 @@ A branch should be main plus its own changes, so everything is a fork of a share
 
 ## Messages
 
-A message is attached to an agent by its ref, the agent's pull and renders show it, and the agent manages it by changing `ctx`, so no special function reads or removes one. Modeled on real branches of a scratch root's store (lab, one run each, under load); not built.
+A message is delivered to an agent's entity and stays there until the agent removes it, and the agent's pull and renders show what it holds, so there is no read or unread state and no special function (owner, 2026-11-07). The shape below is partly modeled; what ran says so. Not built.
 
-- **Attached:** a send writes one entity on main, ``:seon.message/to`` naming each recipient, and an agent's messages are the reverse join, which ``seon.ctx`` already handles. A forward set on the agent was rejected: every `*` pull of that agent then carries them all (43 ms and 158 KB of text at 10,000, lab).
-- **Read:** the turn that reads a message writes its body at the same eid on the agent's branch and names it on that turn's model call. A program pull brings no message, and it still reads as unread after one (lab).
-- **Unread:** to this agent on main, and on no model call on its branch. Nothing is written by two sides, so nothing conflicts, and a merge that brings another agent's reads changes nothing (lab). A full look costs about 14 ms at 1,000 messages and 70-160 ms at 10,000, at a turn or a wake (lab). Seeking newest first is 0.4 ms but misses a message attached late, and needs eids to rise, so it stays an optimization if a real agent ever needs it.
-- **Archive:** ``(swap! ctx update :messages dissoc e)``: it retracts this agent's own ref, and the entity, its read and other recipients' refs stay. It isn't delivered again and the model no longer reads it (lab, a real agent's ctx, with the attribute as a set). The message's render carries the instruction.
-- **An archive stays on the reader's branch:** a merge compares against the merge base, and the base never held the ref, so main still lists it (lab). Readers of an agent's own view are on its branch; a page reading main must count unread, not list what's held.
-- **Going Back** to an earlier point shows messages read since then as unread (lab). That's today's behaviour too.
-- **Chat:** text that isn't code is a message, a reply included, so one render covers both sides: from me is role `assistant`, anything else `user`. Order is by the turn that read each message, never by eid: a person's message sent while a reply is being made has the lower eid but is read a turn later (lab, modeled as data, not through the real render). A reply with a `to` goes to main; one with none stays on the branch (untested on a real run).
-- **Turns:** a wake is only that a message's transaction committed. If a message adds turns, it does so in that transaction, never on a wake, since a wake can be dropped. Bumping on every wake would remove the bound on two agents waking each other; whether only a person's message adds turns is the owner's open decision.
+- **One entity:** ``:seon.message/from``, ``:seon.message/to``, a set of refs, ``:seon.message/at-ms``, recorded by root's writer at the send, ``:seon.message/kind`` and ``:seon.message/body``, at an issued eid. Its attributes are what an agent sorts and filters on at a REPL: ``(sort-by (juxt :seon.message/at-ms :db/id) (vals (:messages @ctx)))``. Time is recorded and only orders; nothing decides by it. A forward set on the agent was rejected: every `*` pull of that agent then carries them all (43 ms and 158 KB of text at 10,000, lab).
+- **Delivered:** a send writes the message on main. An agent's next act brings messages to it onto its branch, and from then on it holds them. No fact says it read one, and a model call names none.
+- **Removed:** ``(swap! ctx update :messages dissoc e)`` retracts this agent's own ref. The entity and other recipients' refs stay. It isn't delivered again, because the entity is on the branch, and the model no longer sees it (lab, a real agent's ctx). The message's render carries that form.
+- **A removal stays on the agent's branch:** a merge compares against the merge base, which never held the ref, so main still names it (lab). Going Back to an earlier point delivers what came since again (lab), as today.
+- **Waking:** a message's commit wakes its recipient. A message an agent keeps doesn't wake it again. At a boot, a message on main that isn't on its recipient's branch wakes it, so a lost wake costs delay, never a message.
+- **Chat:** text that isn't code is a message, a reply included, so one render covers both sides: from me is role `assistant`, anything else `user`. A reply names the model call that made it, which is what it came from and says nothing of reading. Order for the model is the order messages reached the branch, so its history only grows; ``seon.ctx`` already orders a reverse join by the transaction that wrote each ref. Not yet run through the real render; a reply with no `to` stays on the branch (untested on a real run).
+- **Turns:** if a message adds turns, it does so in its transaction, never on a wake, since a wake can be dropped. Bumping on every wake would remove the bound on two agents waking each other; whether only a person's message adds turns is the owner's open decision.
 
 ## What's on screen
 
@@ -116,7 +115,7 @@ The steps below merge one at a time, each usable alone, with today's agents unch
 
 1. Done: the write check holds a value to its branch's schema, and a merged schema entry brings its attribute's declaration.
 2. Done: an eval's result is one entity per value on every branch, and an eval's id is issued by the store. Two shapes remain, a whole old response that ``seon.db/response-of`` still reads and ``:seon.eval/id`` repeating the eid; how they go is Optimization's call, with how results are stored (owner, 2026-11-07).
-3. Messages, Web's next: one send, unread and archive by data, a wake rule; task ``seon.agent/every-send-is-one-fact-on-main`` and the two after it. Functions that mutate behind a read-looking name go with them, by the owner's ruling: task ``my.agent/no-function-does-what-ctx-can``.
+3. Messages, Web's next: one send, delivery and removal by data, a wake rule; task ``seon.agent/every-send-is-one-fact-on-main`` and the two after it. Functions that mutate behind a read-looking name go with them, by the owner's ruling: task ``my.agent/no-function-does-what-ctx-can``.
 4. Users, and input through ``forgive``.
 5. Sessions and merging them.
 6. The home page from the user's ``@ctx``, with layouts as data and tabs as entities.

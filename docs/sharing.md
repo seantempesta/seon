@@ -22,7 +22,7 @@ A test's result is keyed by what its run read: a fixed seed, the functions it ca
 
 ## A message waits in a mailbox
 
-Planned. A message is a fact on main, whoever sends it. A message is unread when it's to the agent on main and on no model call on its branch ([users](users.md#messages)). Unread wants a process. A channel only wakes: a dropped wake costs delay, never the message.
+Planned. A message is a fact on main, whoever sends it. It reaches the agent's entity and stays until the agent removes it ([users](users.md#messages)). Its commit wakes the agent. A channel only wakes: a dropped wake costs delay, never the message.
 
 ## A metric accretes
 
