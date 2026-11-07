@@ -6,6 +6,10 @@ This file holds the owner's standing rulings, one entry each: the rule, the owne
 
 The owner's rulings of 2026-11-07, on what an agent starts from, on what a merge does by itself and on how proofs grow.
 
+### A contract checks a collection whole
+
+Owner, 2026-11-07: "Keep full checks". Asked whether a contract should check at most a bound of a collection's members, with the cost measured: `seon.doc/citation-target`'s body is 82 ticks, and with its `:map-of` arguments checked 9,107 at maps of 1,000 and 43,273 at 5,000, 4.1 percent of a day's self ticks. Contracts stay whole. What a contract costs per call is stated in [cost](cost.md#what-a-contract-costs).
+
 ### The default agent chats, and more comes by threads it pulls
 
 Owner, 2026-11-07: "The agent can have a directive to chat with the user and the only tests are to keep responding to their latest message"; "Not giant data dumps, but progressively over time they get the data when they need it". Stated in: [working for a person](agent.md#working-for-a-person).
