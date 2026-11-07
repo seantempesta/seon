@@ -49,4 +49,8 @@
  {:seon.task/name "a-swarm-task-is-closed-on-a-regression-it-did-not-cause"
   :seon.task/plan "Seen once, 2026-11-06, in bin/check swarm 10 10: 9 of 10 tasks merged; sw/s9 was held, its agent closed, with \"the same verdict again: regression app.proofs/s1-test\", so sw/s9-merge stayed blocked. Inferred, not shown: another task's merge moved s1-test under s9's judge, which would be the order of merges deciding a verdict. Not reproduced, and the run's store was not kept. To find: whether s9 could regress s1-test at all, or read a verdict at a digest it did not change. What should be true: a task is only closed on a regression its own branch caused. A red here is a defect in the judge or the step, not a reason to re-run."
   :seon.task/kind :work
+  :seon.task/proofs #{}}
+ {:seon.task/name "a-check-step-sits-idle-until-its-limit"
+  :seon.task/plan "Seen twice: Context's bin/prove --merge hit its 1,200 s limit with all tests green and a rerun green in 3 minutes (2026-11-06), and on 2026-11-07 a prove of .worktrees/value-draws at 18 minutes: all shards done, bin/check's robust step idle from its start, robust.log empty. Its root at 0% CPU, main thread in a condition wait, 20 Flow procs idle on alts, 2 fibers in jolt.async.remote/rd-fill! on their sockets; its fork server and agents at 0%, one agent at 1.17 GB, which fits seon.check/robust's (count (vec (range 300000000))), the root waiting on that agent's answer. Not shown: what that agent was doing; the limit ended it seconds before it was sampled. bin/check now leaves at-stop/ (bin/evidence), so the next one holds its sample and fiber dump. Read those first. Correct: every wait ends, with its value or a typed error (AGENTS section 4)."
+  :seon.task/kind :work
   :seon.task/proofs #{}}]

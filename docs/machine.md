@@ -8,6 +8,8 @@ The machine Seon is built on and for, and the rules that keep builds, disk and p
 
 Native profiling of our own processes needs no root: `sample PID SECS -file F` and `xcrun xctrace record --template 'Time Profiler' --attach PID`. Native frames resolve (liblmdb to `mdb.c` lines through ``target/lib/liblmdb.dylib.dSYM``, and the probe library), while Chez and Jolt code shows as `???`, since its code objects carry no Mach-O symbols; Clojure-level counts and times are `seon.profile`'s. `vmmap` and `vm_stat` need no root, but `vmmap` walks pages and is slow on the store's 64 GiB map; `dtrace`, `fs_usage` and `spindump` need root and SIP is on, so do not plan on them. Root reads it when worktree sessions run in parallel and before a session ends; a worktree session reads it before it reports that nothing of its own is running.
 
+A check run told to stop leaves `at-stop/` in its directory (`bin/evidence`): the process tree, each Jolt process's sample and files, and a fiber dump on its stderr, as a stuck run ended at its limit would otherwise take its evidence with it.
+
 ### Reading a number
 
 A wall time on this machine is only as good as what else ran: the same binary and store gave a first spawn of 0.51 s and then 12.7 s, two runs in a row, at load 15-20. Compare ticks, bytes and calls; before believing a time, read `uptime` and the top of `ps -axo rss,pcpu,command -r` (a Backblaze complete sync took a core and 6.7 GB, a game two more). One `bin/prove --merge` at a time took 7 minutes where three at load 20-29 each reached the 20-minute limit.
