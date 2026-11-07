@@ -310,7 +310,7 @@
          [:div {:class "ml-auto flex items-baseline gap-1 text-xs"}
           (when (or (= :root focus) (not= :chat tab)) [:span {:class "mr-1 font-semibold text-text-100"} label])
           (if (= :root focus)
-            (list (link (= :chat tab) base "conversation") (link (= :context tab) "/root/debug" "context"))
+            (list (link (= :chat tab) base "chat") (link (= :context tab) "/root/debug" "debug"))
             (list (link (= :chat tab) base "chat") (link (= :debug tab) (str base "/ctx") "@ctx") (link (= :context tab) (str base "/debug") "debug")))]))]))
 
 (defn shell
@@ -1535,12 +1535,12 @@
   "The render of an agent's ctx, the one tree the model and the person read (the declared html
   render of :seon.render/render-ctx, which an agent overrides on its branch like any render): components placed in its
   lists, each keyed by what it shows, each holding what the agent's pull holds, so a smaller pattern is a smaller tree. The task's list (p-task, `task-list`), which the model reads as
-  parts; the conversation (c-rows, `conversation-list`), which it reads as messages; the tiles (p-tiles, `tiles`), for the page alone. Each
+  parts; and the conversation (c-rows, `conversation-list`), which it reads as messages. Each
   list is a component of its own, and the layout reads nothing, so a change of one list's members reruns that list alone: an eval
   added never reruns the task's. See docs/render.md#the-page and docs/render.md#a-layout-places-its-lists."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
   [_]
-  [:div {:id "render-ctx"} [#'task-list {}] [#'conversation-list {}] [#'tiles {:wire/for "page"}]
+  [:div {:id "render-ctx"} [#'task-list {}] [#'conversation-list {}]
    [#'rules-list {}]])
 
 (defn task-list
@@ -1601,36 +1601,6 @@
      (for [n (range 0 (+ 2 (or (ratom/realize (:seon.agent/turn c)) 0)))] [#'conversation-turn {:key n}])
      [#'chat-end {:wire/for "page"}]
      [#'proof-story {:wire/for "page"}]]))
-
-(defn eval-tile
-  "An eval whose value has a render of its own (a component over ctx), the eval at ctx path :at: that value, by it (its own,
-  or the schema its record names: seon.repl/record-details)."
-  {:seon.render/style tile-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:at [:vector :any]]]]] :any]}
-  [{c :seon.ctx/ctx at :at}]
-  (let [k (ratom/realize (get-in c (conj at :seon.eval/schema)))]
-    [:section
-     (render/html (if k {:schema k} {}) (ratom/realize (get-in c (conj at :seon.eval/response :value))))]))
-
-(defn turn-tiles
-  "The tiles of turn :key: each of its evals whose value has a render of its own, newest first, so another turn's eval reads nothing this read, and decided by the value as it is drawn, so a render defined later
-  counts. See docs/render.md#the-page."
-  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db] [:key :int]]]] :any]}
-  [{c :seon.ctx/ctx db :seon.db/db n :key}]
-  (let [cid (some->> (ratom/realize (:seon.agent/key c)) (context/call-of db n))
-        tiled (for [e (reverse (sort (id-set (get-in c [:calls cid :evals]))))
-                    :let [v (ratom/realize (get-in c [:evals e :seon.eval/response :value]))
-                          k (ratom/realize (get-in c [:evals e :seon.eval/schema]))]
-                    :when (and (some? v) (render/render-of v k))]
-                [#'eval-tile {:key (get-in c [:evals e :seon.eval/id]) :at [:evals e]}])]
-    (when (seq tiled) (into [:div] tiled))))
-
-(defn tiles
-  "The tiles of an agent's page (p-tiles), for the page alone: each turn's, newest turn first
-  (`turn-tiles`, `render-ctx`). See docs/render.md#the-page."
-  {:seon.render/list "p-tiles" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
-  [{c :seon.ctx/ctx}]
-  [:aside {:id "p-tiles"}
-   (for [n (range (or (ratom/realize (:seon.agent/turn c)) 0) -1 -1)] [#'turn-tiles {:key n}])])
 
 (def ^:private task-stands
   "How a task's :seon.task/outcome reads to a person: [words tone]. :parked and :told are woken by a message (seon.reconcile/park-outcomes);
@@ -1716,18 +1686,19 @@
   [_ v]
   (let [{:seon.root/keys [quiescent]} v]
     (when-let [cs (seq (:root-causes quiescent))]
-      [:details [:summary {:class "cursor-pointer text-text-300"} (str (count cs) " root causes when it went quiet at t " (:t quiescent))]
+      [:details [:summary {:class "cursor-pointer text-text-300"} (str (count cs) (if (= 1 (count cs)) " root cause" " root causes") " when it went quiet")]
        (for [{:keys [task cause run blocks]} cs]
          [:p (str task ": " cause (when run (str " (" run ")")) (when (seq blocks) (str " · blocks " (count blocks))))])])))
 
 (defn root-input
-  "Root's input at the top of its page: spawn agents (seon.root/spawn!), or evaluate forms in
+  "Root's input on its page: a sentence asking for something (seon.root/ask!); under More, spawn agents (seon.root/spawn!) or evaluate forms in
   every live agent (seon.root/submit! to :all)."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
   [opts _]
   [:section {:id (:unit opts) :class "flex flex-col gap-2 xl:flex-row"}
-   [:form {:class "flex min-w-0 flex-1 gap-2" :seon/call 'seon.root/spawn! :seon/agent :root}
-    [:input {:name "task" :class "flex-1 min-w-0" :autocomplete "off" :placeholder "A task for a new agent"}]]
+   ;; a sentence is a request: a task an agent starts on (seon.root/ask!)
+   [:form {:class "flex min-w-0 flex-1 gap-2" :seon/call 'seon.root/ask! :seon/agent :root}
+    [:input {:name "task" :class "flex-1 min-w-0" :autocomplete "off" :placeholder "What would you like done?"}]]
    ;; for whoever is working on Seon itself
    [:details {:data-preserve-attr "open" :class "text-xs"}
     [:summary {:class "seon-note cursor-pointer"} "More"]
@@ -1891,10 +1862,12 @@
                                  [:li [:span {:class "text-error"} (str (kname pid) " ✕" defects)] " " [:span {:class "text-text-300"} (some-> newest (print/line (cell)))]])])
      (when (seq events)
        ;; every event the proc keeps, newest first (its window, :seon.config.render.list/stream)
-       [:ol {:class "text-xs"} (for [ev events]
-                                 [:li {:class "seon-row"} [:span {:class "text-eval w-14 shrink-0"} (event-kind ev)]
-                                  [:span {:class "text-text-400 shrink-0"} (some-> (:agent ev) kname)]
-                                  [:span {:class "min-w-0 break-all text-text-300"} (event-detail ev)]])])]))
+       [:details {:data-preserve-attr "open"}
+        [:summary {:class "cursor-pointer text-xs text-text-400"} "What it just did"]
+        [:ol {:class "text-xs"} (for [ev events]
+                                  [:li {:class "seon-row"} [:span {:class "text-eval w-14 shrink-0"} (event-kind ev)]
+                                   [:span {:class "text-text-400 shrink-0"} (some-> (:agent ev) kname)]
+                                   [:span {:class "min-w-0 break-all text-text-300"} (event-detail ev)]])]])]))
 
 (defn session-card
   "A session of main in root's list of work (a component over the db, by its agent's key): what it works on in words, then how it

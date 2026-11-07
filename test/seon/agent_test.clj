@@ -1875,6 +1875,26 @@
     (is (not= (:was v) (name (:new v))) "a new process")
     (is (str/ends-with? (:went-on v) (str "/" (:was v))) "under the session's key, and it goes on")))
 
+(deftest a-sentence-on-roots-page-is-a-task-an-agent-works
+  ;; docs/tasks.md: the box on root's page asks for work; it no longer starts an agent with no task
+  (let [r (peek (in-agent ["(+ 1 1)"
+                           {:op :eval :agent "root"
+                            :code (str "(let [blank (clojure.core/deref (seon.root/ask! sys {:task \"  \"}))"
+                                       "      a (clojure.core/deref (seon.root/ask! sys {:task \"Make the Dashboard greet people!\"}))"
+                                       "      m (clojure.core/deref (:conn sys))"
+                                       "      ids (datahike.api/q '[:find [?i ...] :where [?e :seon.task/plan \"Make the Dashboard greet people!\"] [?e :seon.task/id ?i]] m)"
+                                       "      t (datahike.api/entity m [:seon.task/id (first ids)])]"
+                                       "  {:blank (:seon.error/message blank) :ok (:ok a) :ids (vec ids) :kind (:seon.task/kind t) :execution (:seon.task/execution t) :branch (:seon.task/branch t)})")}]))
+        v (:value r)]
+    (is (map? v) (pr-str r))
+    (is (re-find #"say what" (str (:blank v))) "an empty box asks nothing")
+    (is (:ok v))
+    (is (= 1 (count (:ids v))) "one task")
+    (is (re-matches #"request/make-the-dashboard-greet-people(-\d+)?" (first (:ids v))) "named by its words")
+    (is (= :whole (:kind v)) "one agent designs, builds and merges it")
+    (is (= :running (:execution v)) "released, so the reconciler gives it an agent")
+    (is (some? (:branch v)))))
+
 (def ^:private not-running
   "Root-REPL code: a function true of the outcomes a task's work stands at once its agent's end is judged and it waits on nothing of
   root's (not nil, :running, :ready or :gate: a merge follows those)."
