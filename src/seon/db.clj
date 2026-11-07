@@ -684,6 +684,17 @@
 ;; of main reads each commit from the store (seon.fork-server, d/commit-as-db); these name
 ;; a commit's datoms for the program's loader and main's readers.
 
+(defn ops-between
+  "What changed from db value before to db value after, as report->tx states a report: the same ops for one transaction, and for
+  several, what they came to, so a reader that missed a commit misses nothing. Its work follows what differs (d/datoms-diff skips what
+  both share). See docs/sharing.md#a-process-catches-up-to-a-db-value."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] :seon.db/resolved-tx]}
+  [before after]
+  (let [[gone added] (d/datoms-diff before after :eavt [])
+        own? (fn [dt] (not= (:e dt) (:tx dt)))]
+    (into (vec (for [dt gone :when (own? dt)] [:db/retract (:e dt) (:a dt) (:v dt)]))
+          (for [dt added :when (own? dt)] [:db/add (:e dt) (:a dt) (:v dt)]))))
+
 (defn report->tx
   "The writer's tx-report as explicit-id tx-data (the transaction entity's own datoms left
   out)."
