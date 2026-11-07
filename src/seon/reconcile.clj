@@ -440,7 +440,12 @@
           (and (empty? rs) merge?)
           (let [self (get-in idx [:root :started-by])
                 ;; a test cannot be its own gate (:seon.root/started-by): left out, with no result recorded
-                deferred (vec (sort-by str (remove #(= self (str %)) deferred)))]
+                deferred (vec (sort-by str (remove #(= self (str %)) deferred)))
+                ;; a test forked from a live agent runs with what that process holds, which a file may not: so a merge always compiles its tree on a
+                ;; checkout, its proofs named when its change reaches no process test (a plan that can't load the tree answers no results: docs/merging.md#a-merge-compiles-its-tree)
+                deferred (if (and (empty? deferred) (get-in idx [:root :gate-checkout]))
+                           (vec (sort-by str (remove #(= self (str %)) (:seon.task/proofs (get-in idx [:tasks id])))))
+                           deferred)]
             (cond (empty? deferred) {:outcome :ready :reasons rs}
                   ;; with no checkout to run them on (a root with no source), the merge is held with that reason, never merged with them unrun
                   (nil? (get-in idx [:root :gate-checkout]))

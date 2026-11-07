@@ -87,6 +87,8 @@ Your tests: `(prove)` runs them, and once those are green the process tests amon
 
 ## The REPL
 
+An `ns` form adds to its namespace, as Clojure's does, so `(ns x)` only switches to it and `(ns x (:require [y]))` adds that require on your branch, keeping the rest of the recorded form.
+
 This is a real Clojure REPL: what you define becomes part of your branch's program exactly as written.
 
 - Your work is Clojure forms evaluated here. Your reply's text is recorded with the call's eval, and the owner reads it beside the code and its response.
