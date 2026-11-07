@@ -193,6 +193,28 @@
       (or file (seq tail)) (conj (cond-> {:db/id (str "ns " nsym) :ns/name nsym :ns/tail tail}
                                    file (assoc :ns/file file))))))
 
+(defn ns-text-adding
+  "The recorded text old of a namespace's ns form, as new, an ns form evaluated at a REPL, leaves that namespace: Clojure's ns adds, so old with the libraries new requires that it doesn't, new's other clauses it lacks, and new's docstring, every other byte kept. old itself when new adds nothing. See docs/agent.md#the-repl."
+  {:malli/schema [:=> [:cat :string :any] :string]}
+  [old new]
+  (let [o (read-string old)
+        have (program/ns-requires o)
+        clauses (filter seq? new)
+        reqs (for [c clauses :when (= :require (first c)) spec (rest c)
+                   :let [lib (if (sequential? spec) (first spec) spec)] :when (not (have lib))] spec)
+        others (remove #(or (= :require (first %)) (some #{%} o)) clauses)
+        doc (let [x (nth new 2 nil)] (when (and (string? x) (not= x (nth o 2 nil))) x))
+        with-doc (fn [f] (if-not doc f
+                           (let [nm (-> f z/down z/right) nx (z/right nm)]
+                             (z/up (if (and nx (string? (z/sexpr nx))) (z/replace nx doc) (z/insert-right nm doc))))))
+        with-reqs (fn [f] (if-not (seq reqs) f
+                            (if-let [r (z/find (z/down f) z/right #(and (z/list? %) (= :require (z/sexpr (z/down %)))))]
+                              (z/up (reduce z/append-child r reqs))
+                              (z/append-child f (list* :require reqs)))))]
+    (if (and (empty? reqs) (empty? others) (not doc))
+      old
+      (z/root-string (reduce z/append-child (-> (z/of-string old) with-doc with-reqs) others)))))
+
 (defn- ns-form
   "A file's first form when it is an ns form naming its namespace, read once (not run), or nil."
   {:malli/schema [:=> [:cat :string] [:maybe [:sequential :any]]]}

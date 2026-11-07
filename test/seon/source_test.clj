@@ -1199,6 +1199,19 @@
                :fixed {:bytes 500000 :calls 20}
                :sizes [10 100 1000]}))
 
+(deftest an-ns-form-adds-to-a-recorded-form
+  ;; docs/agent.md#the-repl: the recorded text as a REPL's ns form leaves the namespace: what it adds, every other byte kept
+  (let [old "(ns a.b\n  \"Doc.\"\n  (:refer-clojure :exclude [defn])\n  ;; why\n  (:require [x.y :as y]\n            [z.w]))"]
+    (is (= old (source/ns-text-adding old '(ns a.b))) "a bare ns switches and adds nothing")
+    (is (= old (source/ns-text-adding old '(ns a.b (:require [x.y :as y])))) "a require it holds adds nothing")
+    (let [t (source/ns-text-adding old '(ns a.b (:require [q.r :as r])))]
+      (is (= #{'x.y 'z.w 'q.r} (seon.program/ns-requires (read-string t))) t)
+      (is (clojure.string/includes? t ";; why") "a comment stays")
+      (is (clojure.string/includes? t "(:refer-clojure :exclude [defn])")))
+    (is (= "New." (nth (read-string (source/ns-text-adding old '(ns a.b "New."))) 2)) "a docstring it states")
+    (is (= #{'q.r} (seon.program/ns-requires (read-string (source/ns-text-adding "(ns a.b)" '(ns a.b (:require q.r)))))) "a form with no :require takes one")
+    (is (some #(= '(:import [java.io File]) %) (read-string (source/ns-text-adding old '(ns a.b (:import [java.io File]))))) "another clause is added whole")))
+
 (deftest a-var-the-import-makes-public-may-be-named-by-a-later-file
   ;; the standing root's main held test-runner/tree-branch private (defn-) while the tree made it
   ;; public and seon.proofs-test named it: every import of main failed "is not public" and root's
