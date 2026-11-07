@@ -4,6 +4,8 @@ This file holds the owner's standing rulings, one entry each: the rule, the owne
 
 ## 2026-11-07 rulings
 
+The owner's rulings of 2026-11-07, on what a merge does by itself and on how proofs grow.
+
 ### A merge writes itself out while its tests pass, and approval comes later
 
 Owner, 2026-11-07: "If we are essentially creating a merged with main version of the codebase and all tests pass then I'm okay with auto merged, but yes this behavior should be configurable and the user or root should be approving it. What helps us speed up our development right now and what can we later add to handle future ideas?" It stays on (`:seon.config.source/write-back-on-merge`, `my.root/write-back!` by hand when off); an approval by the user or root is later work. Stated in [source](source.md#commit-the-merges-branch).
