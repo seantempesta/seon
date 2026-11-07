@@ -5,7 +5,7 @@
     (whoami)                  {:id :branch :pid}
     (messages)                the messages delivered and not yet taken, taken
     (problem "signature")     one open problem of this agent's run whole, as its problems part names it
-    (send-message tos body)   body to the agents tos (ids), delivered by root
+    (send-message tos body)   body to the agents tos (ids), a fact on main for each
     (callers 'ns/f)           the program vars whose recorded definition names ns/f
     (callers :ns/key)         the functions whose code or contract names the key (an attribute, config, schema)
     (callers 'a.ns)           the namespaces that require a.ns
@@ -47,7 +47,7 @@
   [h] (get-in @agent/state [:results h]))
 (defn whoami "This agent: {:id :branch :pid}." {:malli/schema [:=> [:cat] [:map [:id :seon.agent/id] [:branch :seon.db/branch] [:pid :seon.lib/pid]]]}
   [] {:id (:id @agent/state) :branch (:branch @agent/state) :pid (lib/c-getpid)})
-(defn messages "The words to this agent not yet taken, taken: entries to its session's runs ({:id :kind :from :to :body}), then other agents' sends ({:from :body})." {:malli/schema [:=> [:cat] [:vector :map]]}
+(defn messages "The words to this agent not yet taken, taken: entries to its session's runs ({:id :kind :from :to :body}), an agent's send among them (one fact on main to its branch, however it was sent); then effect outcomes ({:from :fx :k :kind :body})." {:malli/schema [:=> [:cat] [:vector :map]]}
   [] (agent/messages))
 (defn- own-cites
   "What this agent cites now, its cite entities on its branch (seon.task/cites-of), each as {:cites target
@@ -97,7 +97,7 @@
     (when aid
       (some #(when (= signature (:signature %)) %) (mapcat :rows (vals (:classes (problems/own db aid))))))))
 
-(defn send-message "Send body to the agents tos (ids); root delivers it by id. nil." {:malli/schema [:=> [:cat [:sequential :seon.agent/id] :any] :nil]}
+(defn send-message "Send body to the agents tos (ids): root writes it as a message fact on main to each one's branch, whether or not its process lives; text, or a value printed whole. nil. See docs/users.md#messages." {:malli/schema [:=> [:cat [:sequential :seon.agent/id] :any] :nil]}
   [tos body] (agent/send-message tos body))
 
 (defn named

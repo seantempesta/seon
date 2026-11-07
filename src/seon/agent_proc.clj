@@ -170,7 +170,6 @@
                    bad (or (:noise-bad st) (when-not ok [(:i m) (:noise st)]))]
                (step/out! o :to-api {:op :stat :k :noise :v (inc (:noise st)) :ordered ordered :bad bad})
                (assoc st :noise (inc (:noise st)) :noise-ordered ordered :noise-bad bad))
-      :received (do (step/out! o :to-api {:op :stat :k :msg-us :v (/ (- (:recv-ns m) (:sent-ns m)) 1000.0)}) st)
       :send (do (step/out! o :to-api {:op :message :from id :to (:to m) :body (:body m)}) st)
       ;; the agent began request rid's eval, or forked rid's test child: root's events say so
       :started (do (step/out! o :events (step/event (cond-> {:type :started :agent id :rid (:id m)}
