@@ -530,10 +530,10 @@
                              (pdb/tx-meta (:branch @state) {:seon.tx/merged main-b}))
             ops (pdb/report->tx rep)
             errs (program/load-changes! (:db-after rep) ops)]
-        ;; the merge base is now main's head: what main changed is not this branch's change
+        ;; the merge base is now main's head, the value just merged, so no walk of the commit graph finds it: what main changed is not this branch's change
         (let [attrs (into #{} (map (fn [op] (nth op 2 nil))) ops)]
           (doc/carry-index! head @conn (map (fn [op] [(nth op 1) (nth op 2)]) ops))
-          (swap! state #(-> % (assoc :db @conn :base (pdb/branch-base conn main-b (:branch @state))) (schema-moved attrs)))
+          (swap! state #(-> % (assoc :db @conn :base main) (schema-moved attrs)))
           ;; the same on the branch's fact, or the status, which reads the fact, takes what main changed for this branch's work until a next turn writes it
           (let [merged-t (:max-tx @conn)]
             (d/transact conn [{:seon.agent/key (:key @state) :seon.agent/base-commit (d/commit-id (:base @state))}])
