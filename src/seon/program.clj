@@ -777,6 +777,46 @@
   [db]
   (mapv #(form-row db %) (sort (vals (live-ids db)))))
 
+(def ^:private place-gap
+  "The space a file's forms are placed apart (`stable-places`), so a form inserted takes a place between its neighbours and moves none."
+  1024)
+
+(defn- kept-places
+  "The indexes of held ([place or nil], in file order) forming a longest increasing run: the forms that need not move. O(n log n)."
+  {:malli/schema [:=> [:cat [:vector [:maybe :int]]] [:set :int]]}
+  [held]
+  (let [{:keys [tails prev]}
+        (reduce (fn [{:keys [tails prev]} i]
+                  (if-let [v (held i)]
+                    (let [at (loop [lo 0 hi (count tails)]
+                               (if (< lo hi)
+                                 (let [mid (quot (+ lo hi) 2)]
+                                   (if (< (held (tails mid)) v) (recur (inc mid) hi) (recur lo mid)))
+                                 lo))]
+                      {:tails (assoc tails at i) :prev (assoc prev i (when (pos? at) (tails (dec at))))})
+                    {:tails tails :prev prev}))
+                {:tails [] :prev {}} (range (count held)))]
+    (loop [i (peek tails) out #{}] (if i (recur (prev i) (conj out i)) out))))
+
+(defn stable-places
+  "The places of a file's forms, in file order, from held, each form's place on the db or nil for one it lacks: the most forms keep
+  theirs, and each other takes one between its kept neighbours, so an inserted form writes one place and moves none. When a gap has
+  no room, every form is placed anew, place-gap apart. See docs/sharing.md#a-branch-and-a-merge."
+  {:malli/schema [:=> [:cat [:vector [:maybe :int]]] [:vector :int]]}
+  [held]
+  (let [n (count held) kept (kept-places held) anew (mapv #(* place-gap %) (range n))]
+    (loop [i 0 left nil out []]
+      (cond
+        (= i n) out
+        (kept i) (recur (inc i) (held i) (conj out (held i)))
+        :else (let [end (or (first (filter kept (range i n))) n)
+                    k (- end i) right (when (< end n) (held end))
+                    step (cond (and left right) (quot (- right left) (inc k)) :else place-gap)]
+                (if (< step 1)
+                  anew
+                  (let [start (cond left left right (- right (* step (inc k))) :else (* place-gap (dec i)))]
+                    (recur end left (into out (map #(+ start (* step (inc %)))) (range k))))))))))
+
 (defn account-diff-tx
   "account-tx of acct at its own order and lead (a file's), less what db holds already:
   nothing for a form db holds with the same facts (its text, what it defines, declares and
