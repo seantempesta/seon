@@ -939,7 +939,7 @@
   ;; agent repeated cold: the leaves main's commits wrote and the fork server never read (each agent
   ;; decoded them, ~300 KB a leaf), the leaves of what every agent reads (its cited sections, the
   ;; schema entries) evicted from the fork server's full node cache because an agent's reads never
-  ;; reach it, and seon.repl/eval-n! reading every eval main records. The baseline is :fixed; a
+  ;; reach it, and numbering an eval by reading every eval main records. The baseline is :fixed; a
   ;; change that lowers it lowers :fixed (an under past seon.cost/loose is a finding). The node
   ;; cache is small here, so a full cache is reached at this history.
   (let [sizes [10 100 1000]
@@ -1804,10 +1804,12 @@
            (is (= (jolt.host/runtime-fingerprint) (:seon.tx/runtime (d/entity @store-conn t))))
            (is (nil? (:seon.tx/eval (d/entity @store-conn t))) "written outside any eval: it names none"))
          ;; task seon.ctx/a-change-names-its-eval: a write an eval's code makes names that eval
-         (let [r (repl/eval-string "(seon.agent/transact! [{:note/text \"an eval's\"}])" {"ns" "user" :origin :outside})
+         (let [r (repl/eval-string "(assoc (seon.agent/transact! [{:note/text \"an eval's\"}]) :running (:eval @seon.agent/state))" {"ns" "user" :origin :outside})
                t (:t (:value r))]
            (agent/commit!)
-           (is (= [ab "e1"] ((juxt :seon.tx/branch :seon.tx/eval) (d/entity @store-conn t))) (str "the eval that wrote it: " (:ex r)))
+           (is (= ab (:seon.tx/branch (d/entity @store-conn t))) (str "the eval that wrote it: " (:ex r)))
+           (is (some? (:running (:value r))))
+           (is (= (:running (:value r)) (:seon.tx/eval (d/entity @store-conn t))) "the eval that wrote it, by its id")
            (is (nil? (:eval @agent/state)) "and once the eval ends, a write names no eval"))
          (let [r (repl/eval-string "(throw (ex-info \"boom\" {}))" {"ns" "user" :origin :outside})]
            (is (:ex r) "an eval that throws")

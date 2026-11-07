@@ -533,29 +533,13 @@
 
 ;; ---- a request's response and its record: one per eval request (a tool call, a typed form) ----
 
-(defn eval-number
-  "The n of an eval's id \"e<n>\" (:seon.eval/id), or nil for any other value."
-  {:malli/schema [:=> [:cat :any] [:maybe nat-int?]]}
-  [id] (when (string? id) (some->> id (re-matches #"e(\d+)") second parse-long)))
-
-(defn evals-max
-  "The highest eval number db records, 0 for none: what an agent on db counts on from (eval-n!).
-  One pass over every eval's id; the fork server keeps main's (seon.fork-server/evals-max-after),
-  so a new agent never reads it. See docs/agent.md#your-turn."
-  {:malli/schema [:=> [:cat :seon.host/db] nat-int?]}
-  [db] (transduce (keep #(eval-number (:v %))) max 0 (d/datoms db :aevt :seon.eval/id)))
-
-(defn- eval-n!
-  "The next eval's number: one more than the highest e<n> this agent's branch records (a new
-  agent is handed main's, as its branch is main at its fork: seon.agent/init!; a resumed one reads
-  its branch's once, evals-max), so a handle is unique across restarts of the branch's agents, an
-  eval cut off before its record included; then this process's count. A process holding no branch
-  (root) counts from 0. See docs/agent.md#your-turn."
-  {:malli/schema [:=> [:cat] pos-int?]}
-  []
-  (let [from (when-not (:eval-n @agent/state)
-               (if-let [db (:db @agent/state)] (evals-max db) 0))]
-    (:eval-n (swap! agent/state update :eval-n #(inc (or % from))))))
+(defn- issued
+  "Req with the id a new eval goes by: :issued, the eid its record will have, from the store its branch is on, and :eval-id, that eid as the id; in a process with no branch, nothing records it and a gensym names it. A run again (:id) has its own. See docs/users.md#what-each-thing-is."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [req]
+  (cond (:id req) (assoc req :eval-id (:id req))
+        (:db @agent/state) (let [n (pdb/take-eid (:db @agent/state))] (assoc req :issued n :eval-id (str "e" n)))
+        :else (assoc req :eval-id (str (gensym "e")))))
 
 (defn response
   "A request's answers (in order) as its one response (:seon.eval/response): its
@@ -710,6 +694,7 @@
       schema (assoc :seon.eval/schema schema)
       basis (assoc :seon.eval/basis basis)
       (:seon.render/page (meta v)) (assoc :seon.eval/page (:seon.render/page (meta v)))
+      (:issued req) (assoc :db/id (:issued req))
       (:intent req) (assoc :seon.eval/intent (:intent req))
       (:call-id req) (assoc :seon.eval/call-id (:call-id req))
       (seq (:fns r)) (assoc :seon.eval/fns (:fns r)))))
@@ -768,7 +753,8 @@
   ([code] (eval-string code {:origin :model}))
   ([code req]
    (let [answers (volatile! [])
-         id (or (:id req) (str "e" (eval-n!)))
+         req (issued req)
+         id (:eval-id req)
          ;; the writes its forms make and its record name it (seon.agent/transact!'s tx-meta); an
          ;; eval inside it (a context read's) names its own, then this one's again
          outer (:eval @agent/state)
@@ -1020,7 +1006,8 @@
   every call of a reply has its one result. See docs/prompt.md."
   {:malli/schema [:=> [:cat :string :map :seon.error/base] :seon.repl/answer]}
   [code req e]
-  (let [[r rec] (handled (str "e" (eval-n!)) code (repaired (response [{:tag :err :err e}]) req) req)]
+  (let [req (issued req)
+        [r rec] (handled (:eval-id req) code (repaired (response [{:tag :err :err e}]) req) req)]
     (swap! agent/state assoc-in [:results (keyword (name (:handle r)))] r)
     (record! (cond-> r (not (#{:model :insert} (:origin req))) (assoc :text (text-of rec))) rec code req)))
 
