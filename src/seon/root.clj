@@ -897,6 +897,20 @@
   [r]
   (lib/digest (sedn/encode [(or (:tree r) (:value r)) (:pins r)])))
 
+(defn- unimportable
+  "Why files ({relative path text}), read at the source root, can't become main's as tx-of would make them, or nil: each of a kind on the allow-list that does not read, by name, or the config its entries would state on db refused (seon.program/config-refused), each with the commit main last imported, which stays. So a boot says which file and which commit last worked, and goes on with that. See docs/source.md#a-file-that-does-not-load."
+  {:malli/schema [:=> [:cat :seon.host/db [:map-of :string [:maybe :string]] :any :any] [:maybe :map]]}
+  [db files tx commit]
+  (let [bad (for [[p t] (sort files) :when (and t (cfg/file-kind p)) :let [why (fx/unread-text p t)] :when why] (str p ": " why))
+        bad (if (seq bad)
+              bad
+              (when-let [e (when (and tx (not (contract/error? tx))) (program/config-refused db tx))]
+                [(str cfg/shipped-file ": " (:seon.error/message e))]))]
+    (when (seq bad)
+      (contract/error :seon.source/unanalyzable #'seon.root/unimportable
+                      (str (str/join "; " bad) "; main stays as imported at commit " (or commit "none yet"))
+                      {:files (vec (sort (keys files)))}))))
+
 (defn import-source!
   "Main's program follows Seon's own source (seon.source): root's dirs read through the
   :source effect (first brought to the main checkout's branch, seon.fx/read-source: fast-forwarded
@@ -942,6 +956,7 @@
                                (and (:inputs r) (not built?)) (assoc :unshared (str "the binary was built from tree " (or (:binary r) "unknown")
                                                                                        ", the source is tree " (:tree (:inputs r))))))
         tx (when (and files (not= digest (:digest held))) (source/tx-of @(:conn sys) files (boolean changed)))
+        tx (or (when (and files (not= digest (:digest held))) (unimportable @(:conn sys) files tx (:commit held))) tx)
         fact (if (and digest (= digest (:digest held)))
                (this-boot held)
                (let [w (when (and tx (not (contract/error? tx))) @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (into tx (source/modes-tx @(:conn sys) (:modes r)))}}))]
@@ -1064,6 +1079,8 @@
                                                                                   :seon.root/source (cond-> {:root root :files (count files) :forms (count (d/datoms (d/db-with db1 tx) :aevt :form/id))
                                                                                                              :digest digest :ms (lib/r2 (profile/ms-since t0))}
                                                                                                       (:commit r) (assoc :commit (:commit r))
+                                                                                                      ;; the tree it read: a boot taking this fact as its last import reads only what differs from it, and what main merged stays main's
+                                                                                                      (:tree r) (assoc :tree (:tree r))
                                                                                                       (seq (:pins r)) (assoc :pins (:pins r)))})}))
                         ;; the wiki's citations now resolve to the program: loaded again until it states nothing more (its fixpoint,
                         ;; which a root's second boot reached by itself, 41 s of git history at the first)
@@ -1115,6 +1132,8 @@
             load-ms (profile/ms-since t0)
             t1 (profile/now-ns)
             program (program/load-all! @conn {:tests? false})
+            ;; main's own config, before anything below reads one and before the fork server inherits it
+            program (update program :errors into (program/hold-config! @conn))
             program-ms (profile/ms-since t1)
             contracts (contract/instrument! contract/boot-nss)]
         (warm! conn)
@@ -1174,11 +1193,12 @@
         boot (str (random-uuid))
         source (or source (when-let [r (get cfg/config :seon.config.source/root)]
                             {:root r :dirs (cfg/value :seon.config.source/dirs) :branch (cfg/value :seon.config.source/branch)}))
-        provider (or provider (cfg/provider cfg/config))
+        {in-force :config in-force-sources :sources} (cfg/in-force)
+        provider (or provider (cfg/provider in-force))
         ;; the config in force, written on main's root entity with the boot fact; the merge gate's
         ;; checkout, when none is declared, is this root's own source root
-        config (cond-> (-> (cfg/with-provider cfg/config provider) (assoc :seon.config.agent/max-running max-running))
-                 (and (nil? (get cfg/config :seon.config.source/gate-checkout)) (:root source))
+        config (cond-> (-> (cfg/with-provider in-force provider) (assoc :seon.config.agent/max-running max-running))
+                 (and (nil? (get in-force :seon.config.source/gate-checkout)) (:root source))
                  (assoc :seon.config.source/gate-checkout (:root source)))
         ;; then the GC's sweeper threads, a declared number (Chez would grow them by timing)
         sweepers (lib/gc-sweepers! (cfg/value :seon.config.root/gc-sweepers))
@@ -1237,7 +1257,7 @@
     ;; whose boot fact was refused cannot start anything, so its error ends the boot
     ;; with it, how the root before it on main ended (its stop fact, or :unclean)
     (let [prev (previous-end db)
-          r @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (cond-> (-> (task/boot-tx boot max-running) (into (task/earlier-agents-tx db)) (into (cfg/facts config cfg/sources))
+          r @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (cond-> (-> (task/boot-tx boot max-running) (into (task/earlier-agents-tx db)) (into (cfg/facts config in-force-sources))
                                                                                   (into (wiki-boot-tx db (cfg/checkout) #(wiki-baseline sys (cfg/checkout) "docs"))))
                                                                          prev (conj {:seon.root/id :root :seon.root/previous-end prev})
                                                                          ;; the test that started this boot (a test's main is its own: no other boot resumes it)

@@ -919,16 +919,33 @@
           :seon.text/said (str "Wrote to disk at " abs ": no branch holds this, and no merge carries it."
                                (path-note (cfg/file-kind (file-name at))))})))))
 
+(defn- held-file
+  "A file this branch holds as a kind on the allow-list: its text as the branch states it. See docs/agent.md#changing-a-file."
+  {:malli/schema [:=> [:cat :string] :seon.text/place]}
+  [at] (let [n (file-name at)] {:seon.text/at n :seon.text/text (get (source/files (agent/db) [n]) n)}))
+
+(defn- held-file-write
+  "new over p, a file this branch holds: checked as its reader reads it (seon.fx/unreadable), transacted on the branch, and the answer saying what it did, under kind. See docs/agent.md#changing-a-file."
+  {:malli/schema [:=> [:cat :seon.text/place :string :keyword] :map]}
+  [{at :seon.text/at src :seon.text/text} new kind]
+  (cond
+    (= new src) {:unchanged at}
+    (fx/unreadable at new) (edit-refused at :unreadable (str "the new text does not read, so nothing changed: " (fx/unreadable at new)) nil)
+    :else (do (agent/transact! (source/edit-tx (agent/db) at new))
+              {:edited {kind at}
+               :seon.text/said (str "Changed " at " on this branch: a merge carries it, and the write-back after it writes the file. Nothing on disk moved."
+                                    (when-let [w (not-empty (cfg/waiting))]
+                                      (str " This process does not act on " (vec (sort (keys w))) " until a rebuild: (seon.config/waiting) says each.")))})))
+
 (defmethod place :script
-  ;; a script this branch holds: its text is the file's fact; a write checked as its interpreter reads it (seon.fx/unreadable), and transacted on the branch
-  ([at] (let [n (file-name at)] {:seon.text/at n :seon.text/text (:file/text (d/entity (agent/db) [:file/path n]))}))
-  ([{at :seon.text/at src :seon.text/text} new]
-   (cond
-     (= new src) {:unchanged at}
-     (fx/unreadable at new) (edit-refused at :unreadable (str "the new text does not read, so nothing changed: " (fx/unreadable at new)) nil)
-     :else (do (agent/transact! (source/file-tx at new))
-               {:edited {:script at}
-                :seon.text/said (str "Changed " at " on this branch: a merge carries it, and the write-back after it writes the file. Nothing on disk moved.")}))))
+  ;; a script this branch holds: its text is the file's fact
+  ([at] (held-file at))
+  ([p new] (held-file-write p new :script)))
+
+(defmethod place :config
+  ;; the config file this branch holds: its entries are its facts, and a comment or layout the new text adds to a key stays on this branch's base only (docs/agent.md#changing-a-file)
+  ([at] (held-file at))
+  ([p new] (held-file-write p new :config)))
 
 (defn edit!
   "Change the text at a place by replacing old, exact text that occurs once in it, with new: a

@@ -1,15 +1,15 @@
 ;; The one value printer (v1: seon.config.render.agent.edn, ported: token-budget, max-depth,
 ;; whole-width, max-name, max-number-digits, sort-bound; seon.config.render/* are new in next).
-{:seon.config.render.agent/token-budget [:int {:min 1 :seon.config/unit "tokens" :description "A reply value's printed budget."}]
+{:seon.config.render.agent/token-budget [:int {:seon.config/at-load true :min 1 :seon.config/unit "tokens" :description "A reply value's printed budget."}]
  :seon.config.render.agent/max-depth [:int {:min 1 :seon.config/unit "levels" :description "Nested levels a printed value shows."}]
- :seon.config.render.agent/whole-width [:int {:min 1 :seon.config/unit "chars" :description "A value at most this wide is never cut."}]
- :seon.config.render.agent/max-name [:int {:min 1 :seon.config/unit "chars" :description "A keyword or symbol is whole up to this length."}]
- :seon.config.render.agent/max-number-digits [:int {:min 1 :seon.config/unit "digits" :description "A big number past this prints its digit count."}]
- :seon.config.render.agent/sort-bound [:int {:min 1 :seon.config/unit "keys" :description "A keyword map or set of at most this many is shown sorted."}]
+ :seon.config.render.agent/whole-width [:int {:seon.config/at-load true :min 1 :seon.config/unit "chars" :description "A value at most this wide is never cut."}]
+ :seon.config.render.agent/max-name [:int {:seon.config/at-load true :min 1 :seon.config/unit "chars" :description "A keyword or symbol is whole up to this length."}]
+ :seon.config.render.agent/max-number-digits [:int {:seon.config/at-load true :min 1 :seon.config/unit "digits" :description "A big number past this prints its digit count."}]
+ :seon.config.render.agent/sort-bound [:int {:seon.config/at-load true :min 1 :seon.config/unit "keys" :description "A keyword map or set of at most this many is shown sorted."}]
  :seon.config.render/width [:int {:min 16 :seon.config/unit "chars" :description "The printed line width."}]
- :seon.config.render/part-budget [:int {:min 1 :seon.config/unit "tokens" :description "A value shown inside another (a refused argument, a test's expected and actual)."}]
- :seon.config.render/form-budget [:int {:min 1 :seon.config/unit "tokens" :description "A form echoed back."}]
- :seon.config.render/context-budget [:int {:min 1 :seon.config/unit "tokens" :description "The whole context block the model reads."}]
+ :seon.config.render/part-budget [:int {:seon.config/at-load true :min 1 :seon.config/unit "tokens" :description "A value shown inside another (a refused argument, a test's expected and actual)."}]
+ :seon.config.render/form-budget [:int {:seon.config/at-load true :min 1 :seon.config/unit "tokens" :description "A form echoed back."}]
+ :seon.config.render/context-budget [:int {:seon.config/at-load true :min 1 :seon.config/unit "tokens" :description "The whole context block the model reads."}]
  :seon.config.render/relevance-weights [:map {:seon.config/unit "logit per feature" :description "Each kind's logistic weights over relevance's five features, and its intercept."}
                                        [:var [:map [:zc number?] [:zb number?] [:zt number?] [:g1 number?] [:ppr number?] [:intercept number?]]] [:section [:map [:zc number?] [:zb number?] [:zt number?] [:g1 number?] [:ppr number?] [:intercept number?]]] [:schema [:map [:zc number?] [:zb number?] [:zt number?] [:g1 number?] [:ppr number?] [:intercept number?]]]]
  :seon.config.render/relevance-features [:map {:seon.config/unit "the features' constants" :description "The constants relevance's features were fitted with: :alpha, :bm25-k1, :bm25-b, :rarity-cap, :ppr-scale, :hub."}

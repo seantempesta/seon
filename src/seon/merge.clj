@@ -15,6 +15,7 @@
   - `[:schema k]` -> a schema entry of a resource ({:form text :file path}; seon.source
     imports them, my.schema/register! changes them); an entry with no resource (a scratch
     key) is no program;
+  - `[:config k]` -> an entry of the config file ({:form text :file path}, its value's exact text; seon.source);
   - `[:script path]` -> a script, a file of the program with one entry, its whole text
     ({:file path :text text :mode mode}; seon.source);
   - `[:datum e a]` (cardinality one) / `[:datum e a v]` (many) -> a value of a data
@@ -46,6 +47,7 @@
   {:section {:id :seon.doc/address :carries "seon.doc"
              :stated {:seon.doc/address :seon.doc/address :seon.doc/heading :seon.doc/heading :seon.doc/text :seon.doc/text :seon.doc/parent :seon.doc/parent}}
    :schema {:id :schema/key :stated {:schema/form :form :schema/file :file} :needs :file}
+   :config {:id :config/key :carries "config" :stated {:config/form :form :config/file :file} :needs :file}
    :script {:id :file/path :kind-of #'cfg/file-kind :carries "seon.script" :stated {:file/path :file :file/text :text :file/mode :mode}}})
 
 (defn- bears?
@@ -349,10 +351,10 @@
   is changed when its definition's content is (its form's text, kind, contract or doc: def-content),
   and removed when no live form defines it. A schema registered with no file (a scratch one, my.schema) is no key of the program and never
   merges, so it is none of these."
-  {:malli/schema [:=> [:cat :seon.merge/changes] [:map-of [:enum :added :changed :removed :schemas :scripts] [:vector [:or :qualified-symbol :qualified-keyword :string [:vector :any]]]]]}
+  {:malli/schema [:=> [:cat :seon.merge/changes] [:map-of [:enum :added :changed :removed :schemas :config :scripts] [:vector [:or :qualified-symbol :qualified-keyword :string [:vector :any]]]]]}
   [ch]
-  (let [kinds (for [[[kind x :as k] [a b]] ch :when (#{:var :schema :method :impl :script} kind)]
-                [(cond (= :schema kind) :schemas (= :script kind) :scripts (nil? a) :added (nil? b) :removed :else :changed)
+  (let [kinds (for [[[kind x :as k] [a b]] ch :when (#{:var :schema :method :impl :config :script} kind)]
+                [(cond (= :schema kind) :schemas (= :config kind) :config (= :script kind) :scripts (nil? a) :added (nil? b) :removed :else :changed)
                  ;; a method or an implementation goes by what names it, [multi dispatch], [protocol type]
                  (if (#{:method :impl} kind) (vec (rest k)) x)])]
     (into {} (for [[k xs] (group-by first kinds)] [k (vec (sort-by str (map second xs)))]))))

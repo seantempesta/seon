@@ -4,8 +4,8 @@
 ;; beside each key, its unit, its provenance (an owner ruling, a measurement, the worktree session that set
 ;; it) and what happens at its bound.
 ;;
-;; - Read once with aero when seon.config loads (root's boot; agents and the fork server are
-;;   forked from root and read no environment). Validated against :seon.config/config
+;; - Baked when seon.config compiles and read with aero when it loads; a running process then holds what its own branch's
+;;   db states, built from this file's entries at the import (docs/config.md#a-process-holds-its-branchs-config). Validated against :seon.config/config
 ;;   (resources/seon/schemas/seon.config*.edn): an unknown key, an invalid value or a missing
 ;;   required key refuses boot with :seon.config/refused, naming each key.
 ;; - Root writes the resolved config as facts on main's root entity (platform records, never
@@ -410,12 +410,12 @@
  ;; a root with a source root imports (bin/root's: SEON_SOURCE_ROOT); a test's root states its
  ;; own dirs. It costs each boot the test forms' evaluation (+5 s a restart, measured
  ;; 2026-10-22; task seon.source/test-namespaces-built-into-the-binary).
- :seon.config.source/dirs ["src" "test" "resources/seon/schemas" "bin"]
+ :seon.config.source/dirs ["src" "test" "resources/seon/schemas" "resources/seon/config" "bin"]
  ;; Unit: {path pattern, kind}. The allow-list of the files under the dirs above that are facts of the program and not namespaces: a kind is how seon.source
  ;; reads and draws the file, a pattern a path whose one * stands for any name in that directory. Read by the import, the merge and the write-back
  ;; (seon.config/file-kind). Provenance: the owner, 2026-11-07: "an allow list with patterns seems like a good idea". At the bound: a file no pattern
  ;; names, under the dirs or not, is an ordinary file: no branch holds it and no merge carries it.
- :seon.config.source/things {"resources/seon/schemas/*.edn" :schema "bin/*" :script}
+ :seon.config.source/things {"resources/seon/schemas/*.edn" :schema "resources/seon/config/default.edn" :config "bin/*" :script}
  ;; Unit: paths under the root, of those above. The program proper: a namespace whose file is under
  ;; one is the program's, one under test/ (a test's, a fixture's, a helper's like seon.check or
  ;; seon.fixtures, whose names do not end in -test) is not (seon.program/program-nss). Read where

@@ -135,6 +135,23 @@
     (is (= {"demo/p.md" "# P\n\nTwo.\n"} (seon.doc/files merged paths)) "as the merged store draws it: the next load reads it back unchanged")
     (is (= [] (seon.doc/load-tx merged "demo" (seon.doc/files merged paths))) "loading what was written writes nothing")))
 
+(deftest a-config-entry-merges-per-key
+  ;; docs/source.md#a-program-file: an entry of the config file is a key of its own: two branches changing two keys merge clean, one key changed two ways conflicts at it
+  (let [p seon.config/shipped-file
+        main (let [db (empty-db)] (d/db-with db (seon.source/import-tx db {p "{:x/a 1\n :x/b 2}\n"})))
+        set-k (fn [db k v] (d/db-with db [{:config/key k :config/form v :config/file p}]))
+        ours (set-k main :x/a "5")
+        r (pm/delta-three-way main ours (set-k main :x/b "6") #{})]
+    (is (= [[:config :x/a]] (keys (:ours r))) (pr-str r))
+    (is (= [[:config :x/b]] (:apply r)))
+    (is (empty? (:conflicts r)))
+    (is (= {:config [:x/a]} (pm/divergence (:ours r))))
+    (is (= [[:config :x/a] :both-modified] ((juxt :key :kind) (first (:conflicts (pm/delta-three-way main ours (set-k main :x/a "7") #{}))))))
+    (let [merged (d/db-with main (pm/merge-tx main main ours (keys (:ours r)) #{}))
+          paths (seon.source/changed-files merged (:ours r))]
+      (is (= [p] paths))
+      (is (= {p "{:x/a 5\n :x/b 2}\n"} (seon.source/files merged paths)) "a merged entry is what the write-back writes"))))
+
 (deftest a-script-merges-per-key
   ;; docs/source.md#a-program-file: a script is a file of one entry, [:script path], merged like a var with its text and mode; a schema resource's file bears no such key
   (let [text "#!/bin/sh\n# bin/x says hello\necho 1\n"

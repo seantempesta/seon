@@ -351,6 +351,12 @@
         (swap! state assoc :schema-registry v)
         v)))
 
+(defn- config-moved!
+  "This process's config held again when a transaction of its own branch wrote attrs naming an entry or a schema entry (a schema its config is read against): one set lookup otherwise. See docs/config.md#a-process-holds-its-branchs-config."
+  {:malli/schema [:=> [:cat :seon.host/db [:set :any]] :any]}
+  [db attrs]
+  (when (or (attrs :config/form) (attrs :schema/form)) (program/hold-config! db)))
+
 (defn transact!
   "Write tx-data to this agent's branch: applied at once to the value ahead of the
   committed one (its answer does not wait for a commit), committed when the agent is idle
@@ -365,10 +371,12 @@
                   (with-citations (db) tx-data)
                   tx-data)]
     (when-let [e (pdb/invalid-datom (db) tx-data (let [{:keys [key registry]} (branch-schemas)] (when (seq key) {:forms key :registry registry})))] (throw (ex-info (:seon.error/message e) e)))
+    (when-let [e (program/config-refused (db) tx-data)] (throw (ex-info (:seon.error/message e) e)))
     (if (= :test (:mode @state))
       (let [r (d/with (db) tx-data) attrs (into #{} (map :a) (:tx-data r))]
         (doc/carry-index! (:db-before r) (:db-after r) (map (juxt :e :a) (:tx-data r)))
         (swap! state #(-> % (assoc :db (:db-after r) :tx (select-keys r [:db-after :tx-data])) (schema-moved attrs)))
+        (config-moved! (:db-after r) attrs)
         {:t (:max-tx (:db-after r)) :datoms (count (:tx-data r)) :local true})
       (let [r (dw/apply! (:store-conn @state) {:tx-data tx-data :tx-meta (pdb/tx-meta (:branch @state) (cond-> {} (:eval @state) (assoc :seon.tx/eval (:eval @state))))})]
         (when-not (map? r) (throw (ex-info (str "transact refused: " (ex-message r)) {:writer-error (ex-message r)})))
@@ -377,7 +385,8 @@
         (let [attrs (into #{} (map :a) (:tx-data r))]
           ;; from the db the writer applied it to (its report's), whatever the state held
           (doc/carry-index! (:db-before r) (:db-after r) (map (juxt :e :a) (:tx-data r)))
-          (swap! state #(-> % (assoc :db (:db-after r) :tx (select-keys r [:db-after :tx-data]) :dirty? true) (schema-moved attrs))))
+          (swap! state #(-> % (assoc :db (:db-after r) :tx (select-keys r [:db-after :tx-data]) :dirty? true) (schema-moved attrs)))
+          (config-moved! (:db-after r) attrs))
         (cond-> {:t (:max-tx (:db-after r)) :datoms (count (:tx-data r))}
           (seq (:tempids r)) (assoc :tempids (into {} (filter (comp string? key)) (:tempids r))))))))
 
@@ -784,14 +793,15 @@
 (defn- branch-inputs
   "Inputs in, a root's boot's, as branch db's tests read them: the schema class moved by the entries db holds beyond the binary's, which a
   branch can register (program/schema-changes), and, for the files a branch changed since base (:file/text, a script), each one's class and the tree a
-  test reading files takes. A digest no gate's checkout shares only runs more. See docs/merging.md#verdicts-are-a-cache."
-  {:malli/schema [:=> [:cat :seon.program/inputs :seon.host/db [:maybe :seon.host/db]] :seon.program/inputs]}
-  [in db base]
+  test reading files takes; and held, the config this process's branch states, key by key, when it differs from what the process loaded with, so a branch's edit of a key moves the tests reading that key and no other. A digest no gate's checkout shares only runs more. See docs/merging.md#verdicts-are-a-cache."
+  {:malli/schema [:=> [:cat :seon.program/inputs :seon.host/db [:maybe :seon.host/db] :map] :seon.program/inputs]}
+  [in db base held]
   (let [changes (program/schema-changes db)
         moved (when base (mapcat identity (d/datoms-diff base db :aevt [:file/text])))
         files (into (sorted-map) (for [dt moved :let [p (:file/path (d/entity db (:e dt)))] :when p] [p (:file/text (d/entity db (:e dt)))]))
         mix (fn [old x] (lib/digest (str old (sedn/encode x))))]
     (cond-> in
+      (not= held cfg/config) (update :config merge (fx/config-input held (cfg/checkout)))
       (seq changes) (update-in [:config :seon.env/schemas] mix (vec (sort-by key changes)))
       (seq files) (update :tree mix (vec files))
       (seq files) (update :config (fn [c] (reduce-kv (fn [c p text] (if-let [k (fx/env-class p)] (update c k mix [p text]) c)) c files))))))
@@ -839,7 +849,7 @@
         ;; built from nothing it cost 853 MB of a 1 GiB eval budget where an update costs 290 (a plan of main's
         ;; run, mode :main, selects with no base; measured 2026-10-30, 1,169 tests)
         g (branch-graph db (or base (:base @state)) in)
-        g (program/reach-indexed g (branch-inputs in db (or base (:base @state))))
+        g (program/reach-indexed g (branch-inputs in db (or base (:base @state)) (:config (cfg/in-force))))
         ;; a stall task's proofs read that task's cause, so they judge only a task that names them
         idx (into {} (filter (fn [[t _]] (and (judges? t) (or (contains? proofs t) (not (template/stall-proofs t)))))) (program/index-of g))
         cd (update-vals idx :digest)

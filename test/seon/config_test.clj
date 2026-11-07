@@ -8,7 +8,7 @@
             [clojure.java.io :as io] [clojure.string :as str] [clojure.edn :as edn] [clojure.java.shell]
             [aero.core :as aero] [datahike.api :as d] [seon.model]
             [jolt.scheme :as scm] [jolt.analyzer :as an] [jolt.ir :as ir]
-            [seon.config :as config] [seon.contract :as contract] [seon.db :as pdb] [seon.task :as task]))
+            [seon.config :as config] [seon.contract :as contract] [seon.db :as pdb] [seon.task :as task] [seon.source :as source] [my.test :as mt]))
 
 (def ^:private dir (str (config/checkout) "/test/seon/config"))
 
@@ -16,12 +16,16 @@
   "A config file at p read with aero under profile prof, resolved and validated (or the error, thrown).
   Its #include is read relative to p (aero/relative-resolver): aero's default looks the path up as a
   classpath resource first, and from a worktree's test/ root ../../../ climbs into the main tree."
-  [p prof dir] (config/resolved (aero/read-config p {:profile prof ::config/checkout dir :resolver aero/relative-resolver})))
+  [p prof dir] (config/resolved (aero/read-config p {:profile prof ::config/checkout dir
+                                     ;; a fixture's #include of the shipped file reads what this branch states, never the disk
+                                     :resolver (fn [source include]
+                                                 (if (clojure.string/ends-with? (str include) "default.edn")
+                                                   (java.io.StringReader. (config/shipped-text))
+                                                   (aero/relative-resolver source include)))})))
 
 (defn- shipped
-  "The shipped config file read under profile p (resolved and validated), whatever process asks: its
-  checkout's, never the running config (a root's overrides: its tasks directory, ports and provider)."
-  [p] (read-file (config/path (config/checkout)) p (config/checkout)))
+  "The shipped config file read under profile p (resolved and validated), as this process's branch states it, never the disk (one agent's unmerged write stays its own) and never the running config (a root's overrides: its tasks directory, ports and provider)."
+  [p] (read-file (java.io.StringReader. (config/shipped-text)) p (config/checkout)))
 
 (defn- tags
   "test/seon/config/tags.edn read with aero under profile p (default :default)."
@@ -95,9 +99,29 @@
   #{"SEON_AI_MODEL" "SEON_INSTRUMENT"})
 
 ;; docs/config.md#layers: `#env` appears only where a script sets one
+(deftest entries-are-a-config-over-this-processs-layers
+  ;; docs/config.md#a-process-holds-its-branchs-config: what a branch's entries state is what a process reads: tags read as aero reads them, a place stays where the process loaded, and a key needs its schema
+  (let [es (into {} (for [{k :config/key f :config/form} (source/config-tx config/shipped-file config/built-text) :when k] [k f]))
+        k :seon.config.root/view-window
+        over (fn [m] (config/of-entries (merge es m) {}))]
+    (is (= (config/value :seon.config.root/max-agents) (get-in (over {}) [:config :seon.config.root/max-agents])))
+    (is (= 21 (get-in (over {k "21"}) [:config k])) "an entry's value is read")
+    (is (= (get-in (over {:seon.config.root/max-agents "4"}) [:config :seon.config.root/writer-buf]) 4) "a tag in an entry resolves, here #ref over the entry it names")
+    (let [p (over {:seon.config.root/main "\"elsewhere\""})]
+      (is (= (:seon.config.root/main config/config) (get-in p [:config :seon.config.root/main])) "a place stays where this process loaded")
+      (is (= "elsewhere" (get-in p [:waiting :seon.config.root/main :stated])) "and says so"))
+    (is (= 1234567 (get-in (over {:seon.config.agent/sock-buf-bytes "1234567"}) [:waiting :seon.config.agent/sock-buf-bytes :stated])) "a key read at load says it waits for a rebuild")
+    (is (= :unknown-key (:problem (first (:seon.config/problems (over {:seon.config.nope/key "1"}))))))
+    (is (= 1 (get-in (config/of-entries (assoc es :seon.config.nope/key "1")
+                                        {:seon.config/config (conj (get config/schema-forms :seon.config/config) [:seon.config.nope/key :int])})
+                     [:config :seon.config.nope/key]))
+        "a key this branch's schema allows reads")
+    (is (= (config/in-force) (do (mt/with (mt/world) [{:config/key k :config/form "21" :config/file config/shipped-file}]) (config/in-force)))
+        "a db around, a test's world, changes nothing a key reads")))
+
 (deftest no-env-tag-names-a-variable-nothing-sets
   (let [root (config/checkout)
-        names (env-tags (slurp (config/path root)))
+        names (env-tags (config/shipped-text))
         sources (concat (filter #(.isFile %) (file-seq (java.io.File. (str root "/bin"))))
                         (filter #(.isFile %) (file-seq (java.io.File. (str root "/src"))))
                         (filter #(and (.isFile %) (not (str/ends-with? (.getName %) "config_test.clj"))) (file-seq (java.io.File. (str root "/test"))))
@@ -120,8 +144,9 @@
   ;; environment, so it is left out of both sides
   (doseq [p [:default :scripted :deepseek]]
     (let [c (dissoc (shipped p) :seon.config.source/root)]
-      (is (= (set (keys c)) (set (remove (cond-> #{:seon.config.ai/reasoning-effort :seon.config.ai/temperature :seon.config.source/root :seon.config.source/gate-checkout :seon.config.root/profile} (not= :scripted p) (conj :seon.config.ai/script))
-                                         (config/keys-declared)))) p)))
+      ;; every declared key is shipped; a key no schema declares is already refused by reading it (a branch's own key is declared by its schema: seon.config/of-entries)
+      (is (= [] (remove (set (keys c)) (remove (cond-> #{:seon.config.ai/reasoning-effort :seon.config.ai/temperature :seon.config.source/root :seon.config.source/gate-checkout :seon.config.root/profile} (not= :scripted p) (conj :seon.config.ai/script))
+                                               (config/keys-declared)))) p)))
   (is (= {:kind :none} (config/provider (shipped :default))) "no profile: no provider, never the scripted model")
   (is (= {:kind :scripted :script 'seon.fixtures/reply} (config/provider (shipped :scripted))))
   (is (= :openai-compat (:seon.config.ai/provider (shipped :deepseek)))))
@@ -138,7 +163,7 @@
 (deftest what-bin-test-sets-for-itself-moves-no-digest
   (let [checkout (config/checkout)
         set-by-test (set (map second (re-seq #"(?m)^export (SEON_\w+)=\$\{\1:-" (slurp (str checkout "/bin/test")))))
-        read-by (into {} (for [[_ k v] (re-seq #"(?m)^ *:(seon\.config[\w./-]+) [^\n]*#env (SEON_\w+)" (slurp (config/path checkout)))] [v (keyword k)]))
+        read-by (into {} (for [[_ k v] (re-seq #"(?m)^ *:(seon\.config[\w./-]+) [^\n]*#env (SEON_\w+)" (config/shipped-text))] [v (keyword k)]))
         keys-set (keep read-by set-by-test)]
     (is (= #{:seon.config.web/port :seon.config.root/wiki-baseline :seon.config.vector/texts} (set keys-set)))
     (doseq [k keys-set]
@@ -350,7 +375,7 @@
   its `#or`, read from the file's text (edn tagged literals, as env-tags does), since the resolved value
   is the process's environment's (a root's SEON_SERVER_PORT) when one is set."
   [k]
-  (let [f (get (edn/read-string {:default tagged-literal} (slurp (config/path (config/checkout)))) k)
+  (let [f (get (edn/read-string {:default tagged-literal} (config/shipped-text)) k)
         alts (-> f :form :form)]
     (assert (= 'long (:tag f)))
     (assert (= 'or (:tag (:form f))))
