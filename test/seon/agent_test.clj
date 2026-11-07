@@ -2024,6 +2024,8 @@
   ;; docs/merging.md#verdicts-are-a-cache. Another's green at this digest answers; another's red does not, and a schema the branch registers moves the
   ;; digest, since a process test takes the schema class and an agent's inputs are its root's boot's (seon.agent/test-plan)
   (let [t 'seon.repl-test/a-process-proof-already-green
+        ;; an edge each (seon.program/reach-step): what this judges runs across prove!'s message, which no reference shows, so a fix to it moved no digest here
+        _ '[seon.agent/run-selection seon.agent/test-plan seon.agent/run-tests-forked]
         digest (str "(get (:digests (seon.agent/test-plan (seon.agent/db) (:base @seon.agent/state) #{'" t "})) '" t ")")
         hold (fn [verdict] (str "(seon.fx/write-verdicts! {:id \"another\" :key \"another\"} {'" t " (assoc " (pr-str verdict) " :digest " digest ")} {})"))
         prove "(let [r (my.agent/prove)] {:proofs (:proofs r) :deferred (:deferred r)})"
