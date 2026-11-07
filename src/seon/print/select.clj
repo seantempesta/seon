@@ -725,6 +725,12 @@
             (= c (row-class node (first members))) (recur (next members) (inc k))
             :else false))))
 
+(defn- shows-nothing?
+  "Is alloc `a` a collection cut to no member at all, so its line says only that it holds something? See docs/render.md#render-what-a-person-or-a-model-reads."
+  {:malli/schema [:=> [:cat :seon.print/alloc] :boolean]}
+  [a]
+  (boolean (and (#{:map :coll} (:kind a)) (empty? (:kids a)) (more? a))))
+
 (defn- fill-members
   "Collection `node` within `budget`, breadth before depth: every member at its least while they
   fit (a map's key with its value at its least), then one cut; the budget left grows the members
@@ -746,7 +752,14 @@
         first-only (when (and (empty? entries) (seq members)) (first-at-least context node))]
     (if (and first-only (<= (:ub first-only) budget))
       first-only
-      (sized context (assoc skeleton :kids (grow-values context entries (- budget (:ub skeleton)) (= :map (:kind node))))))))
+      (loop [entries entries skeleton skeleton]
+        (let [kids (grow-values context entries (- budget (:ub skeleton)) (= :map (:kind node)))
+              ;; a run at the tail that shows nothing is the collection's one cut, and the room it held goes to the members before it
+              shown (max 1 (- (count kids) (count (take-while shows-nothing? (rseq kids)))))]
+          (if (< shown (count kids))
+            (let [kept (subvec entries 0 shown)]
+              (recur kept (sized context (assoc node :kids kept :pending (seq (drop shown (:pending node)))))))
+            (sized context (assoc skeleton :kids kids))))))))
 
 (defn- fill-rows
   "Collection `node` within `budget`, its first member a row (`row-class`): each member whole in
