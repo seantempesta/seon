@@ -1472,8 +1472,11 @@
                                      proofs
                                      (or (:mode m) :judge)
                                      #(send! {:op :tests-started :id (:id m) :pid %})
-                                     (some-> (:names m) set))]
-             [{:op :tests :id (:id m) :result (if (and (map? r) (not (contract/error? r))) (proofs/answer r proofs) r) :mem-mb (mem-mb)}])
+                                     (some-> (:names m) set))
+                 ;; a test its asker named is one it reads, as a proof is: seon.proofs/answer keeps its pass
+                 names (set (:names m))
+                 named (filter #(or (names %) (names (symbol (namespace %)))) (:selected r))]
+             [{:op :tests :id (:id m) :result (if (and (map? r) (not (contract/error? r))) (proofs/answer r (into proofs named)) r) :mem-mb (mem-mb)}])
     ;; an async effect's outcome (fx-send!): a message to this agent, recorded
     :fx-reply (let [r (dissoc m :op :k)]
                 (swap! state update :inbox (fnil conj []) {:from :fx :k (:k m) :kind (fx-done! (:k m)) :body r})

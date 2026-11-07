@@ -12,6 +12,21 @@
   "Each touched function's calls, by symbol, after running thunk in a fresh epoch."
   [thunk] (profile/begin!) (thunk) (into {} (map (juxt :var :calls)) (profile/touched)))
 
+;; docs/cost.md#counting-calls: what a test read is what its verdict's digest will be made of, so a nested measure (an eval, a cost proof) must not lose it
+(deftest a-nested-measure-keeps-what-ran
+  (let [before (profile/counted 'seon.profile-test/before-the-nested (fn [] 1))
+        inside (profile/counted 'seon.profile-test/inside-the-nested (fn [] 2))]
+    (profile/reads-begin!)
+    (profile/begin!)
+    (before)
+    (profile/measure! inside (fn [_] nil))
+    (is (= #{'seon.profile-test/inside-the-nested} (into #{} (map :var) (profile/touched))) "an epoch holds only what ran since it opened")
+    (is (every? (profile/reads) ['seon.profile-test/before-the-nested 'seon.profile-test/inside-the-nested]) "the reads hold both")
+    (let [by (into {} (map (juxt :var :calls)) (profile/with-reads (profile/touched)))]
+      (is (= [0 1] [(by 'seon.profile-test/before-the-nested) (by 'seon.profile-test/inside-the-nested)]) "and with-reads names the first at no counts"))
+    (profile/reads-begin!)
+    (is (not (contains? (profile/reads) 'seon.profile-test/before-the-nested)) "a new record starts over")))
+
 (deftest every-call-of-a-contracted-function-is-counted
   (when contract/on?
     (is (= {'seon.profile-test/branch 1 'seon.profile-test/leaf 1000} (cost-of #(branch 1000))))
