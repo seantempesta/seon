@@ -504,7 +504,8 @@
   context read. A [:set T] key is a cardinality-many attribute (seon.schema.datahike/
   declaration), which a pull answers as a vector: it is read back as the set it was (the
   first set-valued key, :seon.config.source/process-vars, came back a vector, so the config
-  in force and main's copy of it differed)."
+  in force and main's copy of it differed). Where each value came from is main's
+  :seon.config/sources (sources-from-db)."
   {:malli/schema [:=> [:cat :seon.host/db] [:maybe :map]]}
   [db]
   (not-empty (into {} (for [[k v] (d/pull db (keys-declared) [:seon.root/id :root])]
@@ -525,3 +526,17 @@
    (let [p (provider (merge (:config @held) (from-db main)
                             (when id (d/pull task-db (keys-declared) [:seon.task/id id]))))]
      (cond-> p (and model (= :openai-compat (:kind p))) (assoc :model model)))))
+
+(defn- sources-from-db
+  "The layer each config key on db came from, as root wrote it on main (:seon.config/sources),
+  or nil where the root holds none (docs/config.md#layers)."
+  {:malli/schema [:=> [:cat :seon.host/db] [:maybe :seon.config/sources]]}
+  [db]
+  (not-empty (:seon.config/sources (d/pull db [:seon.config/sources] [:seon.root/id :root]))))
+
+(defn in-db
+  "What a reader that draws the config on main names: the config (from-db) and the layer each
+  key came from (sources-from-db), as root wrote them on main (docs/config.md#layers)."
+  {:malli/schema [:=> [:cat :seon.host/db] [:map [:config :seon.config/config] [:sources :seon.config/sources]]]}
+  [db]
+  {:config (from-db db) :sources (sources-from-db db)})

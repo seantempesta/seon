@@ -3067,3 +3067,26 @@
       (is (= 4 (count-of (seon.problems/health main1 fold))) "root counts the signature four times")
       (is (str/includes? banner "eval ×4") (str "the banner names root's count: " banner))
       (r/dispose-walk! (get-in st [:root-walk :w]))))))
+
+(clojure.test/deftest the-config-panel-names-each-source
+  ;; task seon.render/config-shows-where-each-value-came-from (docs/config.md#facts-on-main): root writes the config
+  ;; and the layer each key came from (:seon.config/sources) on main; the panel draws the config a reader reads from
+  ;; main, so it names the layer of a key that a layer other than the shipped file set.
+  (ts/test-branch! (fn [_ conn]
+    (d/transact conn {:tx-data (seon.config/facts (assoc seon.config/config :seon.config.agent/max-running 6) {:seon.config.agent/max-running "--set"})})
+    (let [html (h/html (ui/config-panel {} (seon.config/from-db @conn)))]
+      (is (str/includes? html "from --set") (str "the panel names the layer that set max-running, as root wrote it on main: " (subs html 0 (min 600 (count html)))))))))
+
+(clojure.test/deftest the-config-panel-drawn-from-what-a-reader-reads-names-the-layers
+  ;; docs/config.md#layers: a reader names the config and the layer each key came from, so the
+  ;; panel it draws says "from --set" for a value the command line set, not just the value.
+  (ts/test-branch!
+   (fn [_ conn]
+     (d/transact conn {:tx-data (seon.config/facts (assoc seon.config/config :seon.config.agent/max-running 6)
+                                                   {:seon.config.agent/max-running "--set"})})
+     (let [{:keys [config sources]} (seon.config/in-db @conn)
+           html (h/html (ui/config-panel {:seon.config/sources sources} config))]
+       (is (= {:seon.config.agent/max-running "--set"} (select-keys sources [:seon.config.agent/max-running]))
+           "in-db names the layer of the key the command line set")
+       (is (str/includes? html "from --set")
+           "the panel draws that layer beside the value")))))
