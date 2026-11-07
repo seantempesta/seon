@@ -805,7 +805,7 @@
     (testing "a merge whose change reaches no process test still compiles its tree on a checkout: its proofs are named (real run 10: a tree that didn't compile merged)"
       (let [p 'seon.x-test/its-proof
             at (fn [root] (judgment-of (mdb [(decl "a")] :extra (concat (work "a" :done) (work "a-merge" :running :members {:seon.task/proofs #{p}}) (when root [root])))
-                                       "a-merge" {:end {:outcome :green} :results {p :pass} :deferred []}))]
+                                       "a-merge" {:end {:outcome :green} :results {p :pass (t "a") :pass} :deferred []}))]
         (is (= {:outcome :gate :reasons [] :deferred [p]} (at gate)) "with a checkout: gated on its proofs")
         (is (= :ready (:outcome (at nil))) "a root with no checkout can't, and goes on as before")))
     (testing "all passing, it is ready and merges"
