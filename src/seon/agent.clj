@@ -528,7 +528,7 @@
                                                (into (pm/unmerged-tx head (:conflicts r) (:max-tx main)))
                                                (into (:tx carried)))
                              (pdb/tx-meta (:branch @state) {:seon.tx/merged main-b}))
-            ops (pdb/report->tx rep)
+            ops (pdb/ops-between head (:db-after rep))
             errs (program/load-changes! (:db-after rep) ops)]
         ;; the merge base is now main's head, the value just merged, so no walk of the commit graph finds it: what main changed is not this branch's change
         (let [attrs (into #{} (map (fn [op] (nth op 2 nil))) ops)]
@@ -1092,7 +1092,7 @@
   [p names proofs]
   (let [in? #(or (contains? names %) (contains? names (symbol (namespace %))))
         p (if (seq names) (-> p (update :selected #(filterv in? %)) (update :run #(filterv in? %))) p)
-        ;; a slow test the run did not name and no proof holds is left out as bin/prove leaves it (docs/merging.md#a-slow-test-is-left-out)
+        ;; a slow test the run did not name and no proof holds is left out as bin/prove leaves it (docs/merging.md#a-slow-test-runs-last)
         slow (when-not (seq names) (fx/slow-tests (select-keys (:digests p) (remove proofs (:run p)))))
         skip? (into (set (remove #(proofs/green? (get-in p [:reused %])) (proofs/left-out (:selected p) (:process p) false #{}))) (keys slow))]
     (-> p (assoc :skipped (vec (sort-by str (filter skip? (:selected p)))))

@@ -89,6 +89,8 @@ setup() {
         if [[ -e $p ]]; then cp -cR "$p" "$WT/target/"; fi
       done
     done
+    # the plan's kept program store, regenerable and keyed by its importer and tree, so a new checkout's first plan reads what changed, not every form (22 s against 3 s)
+    for e in "$MAIN"/target/program-store-*(N/); do cp -cR "$e" "$WT/target/"; done
     for n in lib watch lmdb-kill lmdb-sem tailwind src; do
       if [[ -e $MAIN/target/$n ]]; then cp -cR "$MAIN/target/$n" "$WT/target/"; fi
     done

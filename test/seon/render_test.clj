@@ -7,7 +7,7 @@
             [clojure.string :as str] [clojure.core.async :as a]
             [seon.render :as r] [seon.fixtures] [seon.render.ui :as ui] [seon.render.proc :as p]
             [seon.web.html :as h] [clojure.walk] [clojure.set] [seon.print.select] [seon.config] [seon.doc] [seon.print] [seon.db] [seon.reconcile] [seon.task] [seon.edn] [seon.context] [seon.contract] [seon.repl] [datahike.api :as d]
-            [seon.fx] [seon.source] [seon.reader] [seon.program] [seon.web] [seon.template] [seon.context-test] [seon.render-cost-test] [seon.turn] [seon.model] [seon.problems] [my.agent] [my.test] [seon.ctx]))
+            [seon.fx] [seon.source] [seon.reader] [seon.program] [seon.web] [seon.template] [seon.context-test] [seon.render-cost-test] [seon.turn] [seon.model] [seon.problems] [seon.root] [seon.error] [my.agent] [my.test] [seon.ctx]))
 
 (def ^:private task
   {:seon.task/id "calc/add" :seon.task/ns 'calc :seon.task/name "add" :seon.task/plan "Make `app.calc/add` pass"

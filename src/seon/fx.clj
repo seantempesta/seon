@@ -840,7 +840,7 @@
   "{test ms} of the tests of digests ({test digest}) that run past bound (:seon.config.proofs/slow-test-ms): by the fastest of
   its newest greens (recent-verdict-files) and its green at its own digest, so a test made fast comes back as soon as it is
   proved and load, which only ever slows a run, leaves no test out: a test is slow when it is slow every time. A test with no
-  green is not slow. Cost: two small reads a test (history). docs/merging.md#a-slow-test-is-left-out."
+  green is not slow. Cost: two small reads a test (history). docs/merging.md#a-slow-test-runs-last."
   {:malli/schema [:function [:=> [:cat [:map-of :qualified-symbol [:maybe :string]]] [:map-of :qualified-symbol :int]]
                   [:=> [:cat :string [:map-of :qualified-symbol [:maybe :string]] pos-int?] [:map-of :qualified-symbol :int]]]}
   ([digests] (slow-tests (cfg/value :seon.config.proofs/results-dir) digests (cfg/value :seon.config.proofs/slow-test-ms)))
