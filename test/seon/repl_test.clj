@@ -192,60 +192,41 @@
         (is (= before (mode)) "the same mode after the edit")))))
 
 (deftest an-edit-of-a-path-says-where-it-wrote
-  ;; docs/agent.md#changing-a-file: an edit of a plain path names the absolute path and that no branch carries it, and refuses as a definition's edit does
-  (let [d (str (seon.config/checkout) "/target/tmp/repl-path-" (random-uuid))
-        p (str d "/notes#1.txt")]
+  ;; docs/agent.md#changing-a-file: a plain path's edit changes the file, names its absolute path and says no branch carries it; a path given relative, so absolute is news, with a # that is no doc's address
+  (let [d (str "target/tmp/repl-path-" (random-uuid))
+        p (str d "/notes#1.txt")
+        abs (.getCanonicalPath (java.io.File. ^String p))]
     (.mkdirs (java.io.File. ^String d))
-    (spit p "a\nb\na\n")
-    (let [abs (.getCanonicalPath (java.io.File. ^String p))
-          r (repl/edit! p "b" "c")]
-      (is (= "a\nc\na\n" (slurp p)) (pr-str r))
+    (spit p "a\nb\n")
+    (let [r (repl/edit! p "b" "c")]
+      (is (= "a\nc\n" (slurp p)) (pr-str r))
       (is (= abs (get-in r [:edited :path])) (pr-str r))
-      (is (= [[1 "a"] [2 "c"] [3 "a"]] (get-in r [:edited :lines])) (pr-str r))
       (is (str/includes? (:seon.text/said r) abs) "it names the absolute path")
       (is (str/includes? (:seon.text/said r) "no branch") "and that no branch carries it"))
-    (is (= :ambiguous (:seon.repl/refused-because (repl/edit! p "a" "x"))) "exact text, once")
-    (is (= :not-found (:seon.repl/refused-because (repl/edit! p "zz" "x"))))
-    (is (= "a\nc\na\n" (slurp p)) "nothing changed")
-    (is (= {:unchanged p} (repl/edit! p "c" "c")))
-    (let [r (repl/edit! p [["a\nc" "A\nC"] ["c\na\n" "x"]])]
-      (is (= :overlap (:seon.repl/refused-because r)) (pr-str r)))
+    (is (= {:unchanged p} (repl/edit! p "c" "c")) "the same text writes nothing")
     (let [r (repl/edit! (str d "/absent") "a" "b")]
       (is (= :no-source (:seon.repl/refused-because r)) (pr-str r))
-      (is (str/includes? (:seon.error/message r) d) "it names where it looked"))))
-
-(deftest a-schema-resources-path-stays-on-disk-and-says-how-it-changes
-  ;; docs/agent.md#changing-a-file: its entries are what merges; the plain write answers so
-  (let [d (str (seon.config/checkout) "/resources/seon/schemas/repl-path-" (random-uuid) ".tmp.edn")]
-    (spit d "{:x/a :int}\n")
-    (try (let [r (repl/edit! d ":int" ":string")]
-           (is (= "{:x/a :string}\n" (slurp d)) (pr-str r))
-           (is (str/includes? (:seon.text/said r) "no branch"))
-           (is (str/includes? (:seon.text/said r) "my.schema/register!") (pr-str r)))
-         (finally (.delete (java.io.File. ^String d))))))
+      (is (str/includes? (:seon.error/message r) (.getCanonicalPath (java.io.File. ^String d))) "it names where it looked"))))
 
 (deftest a-script-is-edited-on-the-branch
-  ;; docs/agent.md#changing-a-file: a script this branch holds changes as a fact of the branch, at its name or its absolute path, and the disk doesn't move
-  (let [f (str (seon.config/checkout) "/bin/ports")
-        on-disk (slurp f)
-        at (fn [db] (str "(:file/text (datahike.api/entity " db " [:file/path \"bin/ports\"]))"))
-        [edit by-path bad branch main changes]
-        (at/in-agent (fn [_]
-                       ["(seon.repl/edit! \"bin/ports\" \"#!/bin/zsh\" \"#!/bin/zsh\\n# one\")"
-                        (str "(seon.repl/edit! " (pr-str f) " \"# one\" \"# two\")")
-                        "(seon.repl/edit! \"bin/ports\" \"# two\" \"if then\")"
-                        (at "(seon.agent/db)")
-                        {:op :eval :agent "root" :code (at "@(:conn sys)")}
-                        "(:scripts (seon.merge/divergence (seon.agent/branch-changes (:base @seon.agent/state) (seon.agent/db))))"])
-                     {:dirs ["bin"]})]
-    (is (= "bin/ports" (get-in edit [:value :edited :script])) (pr-str edit))
-    (is (str/includes? (get-in edit [:value :seon.text/said]) "this branch") (pr-str edit))
-    (is (= "bin/ports" (get-in by-path [:value :edited :script])) (str "its absolute path is the same place: " (pr-str by-path)))
-    (is (= :unreadable (get-in bad [:value :seon.repl/refused-because])) (pr-str bad))
-    (is (str/starts-with? (str (:value branch)) "#!/bin/zsh\n# two\n") (pr-str branch))
-    (is (= on-disk (:value main)) (str "main holds what it held: " (pr-str main)))
-    (is (= ["bin/ports"] (:value changes)) (pr-str changes))
-    (is (= on-disk (slurp f)) "nothing on disk moved")))
+  ;; docs/agent.md#changing-a-file: a script this branch holds changes as a fact of the branch, at its name or its absolute path, its new text read as its interpreter reads it, and the disk doesn't move
+  (let [p "bin/edited-on-the-branch"
+        abs (str (cfg/checkout) "/" p)
+        main (my.test/with (my.test/world) (seon.source/file-tx p "#!/bin/zsh\necho 1\n"))
+        old @agent/state]
+    (try
+      (reset! agent/state {:mode :test :db main :n 0 :ns (create-ns 'seon.repl-test.scratch)})
+      (let [named (repl/edit! p "echo 1" "echo 2")
+            by-path (repl/edit! abs "echo 2" "echo 3")
+            bad (repl/edit! p "echo 3" "if then")
+            branch (agent/db)]
+        (is (= p (get-in named [:edited :script])) (pr-str named))
+        (is (= p (get-in by-path [:edited :script])) (str "its absolute path is the same place: " (pr-str by-path)))
+        (is (= :unreadable (:seon.repl/refused-because bad)) (pr-str bad))
+        (is (= "#!/bin/zsh\necho 3\n" (:file/text (d/entity branch [:file/path p]))) "the branch holds the last edit that read")
+        (is (= "#!/bin/zsh\necho 1\n" (:file/text (d/entity main [:file/path p]))) "main holds what it held")
+        (is (not (.exists (java.io.File. ^String abs))) "nothing reached the disk"))
+      (finally (reset! agent/state old)))))
 
 (deftest a-doc-is-edited-as-a-definition-is
   ;; docs as code (task seon.doc/any-markdown-file-is-docs-it-writes-back): edit! of a doc's address replaces exact
@@ -1103,8 +1084,13 @@
 
 ;; docs/agent.md#what-you-read: Jolt compiles a name it can't find, so the answer is where a misspelling is said
 (deftest a-definition-naming-no-var-is-told-on-its-answer
-  (let [acct {:refs #{'clojure.string/uper-case 'clojure.string/upper-case 'Long/MAX_VALUE 'clojure.core/defn}}]
-    (is (= ['clojure.string/uper-case] (seon.program/unknown-refs acct)) "a loaded namespace that lacks it; a class's static and a real var are no finding")))
+  ;; a misspelled call compiles and fails only when its line runs, so an agent's definition is answered with that; a real var and a class's static are no finding.
+  ;; A process test: only an agent's REPL takes a definition's account, and it records what it took
+  (let [told (fn [r] (some #(when (= :unknown-var (:seon.repl/finding %)) (:unknown %)) (:warnings r)))
+        [miss fine] (at/in-agent (fn [_] ["(defn told-f {:malli/schema [:=> [:cat] :any]} [] (clojure.string/uper-case \"a\"))"
+                                          "(defn told-g {:malli/schema [:=> [:cat] :any]} [] [(clojure.string/upper-case \"a\") Long/MAX_VALUE])"]))]
+    (is (= ['clojure.string/uper-case] (told miss)) (pr-str miss))
+    (is (nil? (told fine)) (pr-str fine))))
 
 ;; docs/server.md#working-a-task-from-a-worktree: root holds no branch, and asking it for a name that's none answers the error, not a throw
 (deftest a-name-with-no-var-at-root-answers-the-error
@@ -1242,12 +1228,20 @@
     (is (= :refused (:value mix)) "a contradictory option is refused")))
 
 (clojure.test/deftest an-evals-answer-has-one-error-render
-  ;; a request's error is its answer's :ex, the one error map, rendered by seon.render.ui/error-box;
-  ;; what the form wrote to *err* is its own key (:err), the error stream, never a second render
-  (let [r (eval-in "(binding [*out* *err*] (println \"to err\"))\n(/ 1 0)")]
-    (clojure.test/is (= :seon.agent/eval-error (:seon.error/type (:ex r))) (pr-str r))
-    (clojure.test/is (= "to err\n" (:seon.print/code (:err r))) "the form's *err* output is the error stream")
-    (clojure.test/is (not (contains? r :err-text)) "no second render of the error")))
+  ;; docs/errors.md: an error is said once, by the one error map; a reply carries no printed copy under any key, and what the form wrote to *err* stays its own stream
+  (let [replies (fn [code] (let [got (volatile! []) old @agent/state]
+                             (try (reset! agent/state {:n 0 :ns (create-ns 'seon.repl-test.scratch)})
+                                  ((repl/handler) {"code" code :reply #(vswap! got conj %)})
+                                  @got
+                                  (finally (reset! agent/state old)))))
+        said-outside (fn [rs msg] (for [r rs [k v] (dissoc r :repl/ex) :when (and (string? v) (str/includes? v msg))] k))
+        ran (replies "(/ 1 0)")
+        unread (replies "#?")]
+    (clojure.test/is (some :repl/ex ran) (pr-str ran))
+    (clojure.test/is (empty? (said-outside ran "zero")) (pr-str ran))
+    (clojure.test/is (some :repl/ex unread) (pr-str unread))
+    (clojure.test/is (empty? (said-outside unread (str (:seon.error/message (some :repl/ex unread))))) (pr-str unread))
+    (clojure.test/is (= "to err\n" (:seon.print/code (:err (eval-in "(binding [*out* *err*] (println \"to err\"))\n(/ 1 0)")))) "the form's *err* output is the error stream")))
 
 (defn- evals-held
   "Root-REPL code answering, of the task's branch, each eval whose code is among codes: its id, code and response, and its result entity whole

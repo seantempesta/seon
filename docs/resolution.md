@@ -16,7 +16,7 @@ is judged from the compiler's facts at merge (the vars of `seon.program/banned` 
 
 ## A name with no var
 
-Jolt compiles a qualified name that holds no var and fails only when its line runs (a var may be named before it exists), where Clojure refuses it at compile. So a misspelling reaches a branch, and on a path no test runs, main: `my.agent/no-var` called `d/empty-db`, which `datahike.api` lacks, so `(source x)` at root threw on every name, until a sweep of the compiler's facts found it. Two things now say it. An eval's answer warns (``:seon.repl/finding`` `:unknown-var`, from `seon.program/unknown-refs` over what the compiler recorded), while the agent can act, and `seon.main-test/every-name-a-form-uses-is-a-var` holds the program to it.
+Jolt compiles a qualified name that holds no var and fails only when its line runs (a var may be named before it exists), where Clojure refuses it at compile. So a misspelling reaches a branch, and on a path no test runs, main: `my.agent/no-var` called `d/empty-db`, which `datahike.api` lacks, so `(source x)` at root threw on every name, until a sweep of the compiler's facts found it. Two things now say it. An eval's answer warns (``:seon.repl/finding`` `:unknown-var`, from `seon.program/unknown-refs` over what the compiler recorded), while the agent can act, and `seon.main-test/every-name-a-form-uses-is-a-var` holds the program to it. A call with no arguments is not yet seen: `(ns/x)` compiles as a class's static, so its name isn't recorded (task `seon.program/a-call-with-no-arguments-to-no-var-is-told`).
 
 ## Sanctioned
 
