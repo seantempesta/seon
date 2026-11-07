@@ -450,6 +450,17 @@
                           (reply! st o p pt)
                           (do (step/out! o :to-writer {:op :clone-branch :from (:commit pt) :branch (:branch pt) :dest {:back id}})
                               (assoc-in st [::backing id] {:p p :branch (:branch pt)}))))))
+      ;; a sentence typed on root's page: the request it says, released (my.root/request!'s default, seon.template/request)
+      :ask (let [db @(:conn st)
+                 words (take 6 (re-seq #"[a-z0-9]+" (str/lower-case (:text m))))
+                 said (str/join "-" (or (seq words) ["work"]))
+                 ;; its words are its name and title; the same words asked again take the one number that tells them apart
+                 nm (if (pdb/eid db :seon.task/id (task/task-id 'request said)) (str said "-" (:max-tx db)) said)
+                 ds (tpl/request {:seon.task/ns 'request :seon.task/name nm :seon.task/plan (:text m)})
+                 tx (tpl/request-tx db ds)]
+             (if (contract/error? tx)
+               (reply! st o p tx)
+               (ext-op st o {:op :write :p p :req {:op :tx :branch :db :tx-data tx}})))
       :clone (let [parent (:parent m)]
                (cond
                  (nil? (get-in st [:agents parent])) (reply! st o p (absent (get-in st [:view :agents parent]) parent))
@@ -1282,7 +1293,7 @@
   (let [c (a/chan (a/sliding-buffer 1024))] (a/tap (:events-mult sys) c) c))
 
 (defn request
-  "The op (named as its fn below: spawn! clone! submit! again! back! run-tests! kill!
+  "The op (named as its fn below: spawn! clone! submit! again! back! ask! run-tests! kill!
   merge-main! message! release! opened!) on agent id with args, as the api request it is: one table for these fns
   and the dashboard's calls (seon.web). a: the agent's entry in root's view, which
   merge-main! reads; an op the agent cannot take answers its error. A branch reaches main
@@ -1301,6 +1312,7 @@
                                         (:code args) (list 'seon.repl/again (:eval args) (:code args))
                                         :else (list 'seon.repl/again (:eval args))))}
       back! {:op :back :id id :eval (:eval args)}
+      ask! (if (str/blank? (:task args)) (refused 'seon.root/ask! "say what you would like done" {}) {:op :ask :text (str/trim (:task args))})
       ;; the agent proves its branch through the test service as root's judge does (seon.agent/prove!
       ;; :judge, which keys the run by its head's digest): recorded on main, one run with any other asker's
       run-tests! {:op :judge :id id}
@@ -1537,6 +1549,11 @@
   [sys agent-id]
   (some-> (:pid (agent-entry sys agent-id)) (lib/kill! lib/SIGUSR1))
   nil)
+
+(defn ask!
+  "Ask for what a sentence says (args {:task text}): one released task on its own branch, as my.root/request! writes it, which the reconciler gives an agent. A promise of the writer's answer. See docs/tasks.md."
+  {:malli/schema [:=> [:cat :seon.root/sys [:map [:task :string]]] :seon.host/promise]}
+  [sys args] (request! sys 'ask! nil args))
 
 (defn back!
   "Take agent id's session back to just after its eval (args {:eval id}): a new branch from that eval's commit, the old branch kept as it is, this process ended and one started on the new branch under the same key, its task parked on it. Answers the new agent's id, or the refusal. See docs/turn.md#an-agent-goes-back-to-an-eval."

@@ -1084,7 +1084,7 @@
   as its render returned it, by its element id, in order: the hiccup render-ctx's html is written
   from, nothing left out."
   {:malli/schema [:=> [:cat] :map]}
-  [] (render/placed-hiccup (whole-walk) ["#p-task" "#c-rows" "#p-tiles"]))
+  [] (render/placed-hiccup (whole-walk) ["#p-task" "#c-rows"]))
 
 ;; ---- the process: a Flow graph of three procs on the agent's one thread ----------------
 
