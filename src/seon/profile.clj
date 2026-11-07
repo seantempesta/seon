@@ -41,19 +41,24 @@
   (scm/eval-string
     "(define seon-profile-epoch 0)
      (define seon-profile-touched '())
+     (define seon-profile-reads-mark 0)
+     (define seon-profile-reads '())
      ;; jolt.host/monotonic-ns: the platform's monotonic clock, Jolt's to name
      (define seon-profile-now (lambda () (jolt-monotonic-ns)))
      ;; the calling thread's own allocation, never another thread's or the collector's copying
      ;; (Chez jolt/thread-bytes: S_thread_bytes_allocated)
      (define seon-profile-alloc (foreign-procedure \"(cs)thread_bytes_allocated\" () uptr))
-     ;; a cell: #(calls epoch ticks self-ticks bytes self-bytes symbol)
-     (define (seon-profile-cell sym) (vector 0 -1 0 0 0 0 sym))
+     ;; a cell: #(calls epoch ticks self-ticks bytes self-bytes symbol reads-mark)
+     (define (seon-profile-cell sym) (vector 0 -1 0 0 0 0 sym -1))
      ;; the ticks and bytes the calls running inside the current one have done so far: saved
      ;; and zeroed as a call starts, so its self is what it did less what they did
      (define seon-profile-kid-ticks 0)
      (define seon-profile-kid-bytes 0)
      ;; count one call (a cell first touched in this epoch starts from zero)
      (define (seon-profile-hit! c)
+       (unless (fx= (vector-ref c 7) seon-profile-reads-mark)
+         (vector-set! c 7 seon-profile-reads-mark)
+         (set! seon-profile-reads (cons c seon-profile-reads)))
        (if (fx= (vector-ref c 1) seon-profile-epoch)
            (vector-set! c 0 (fx+ 1 (vector-ref c 0)))
            (begin (vector-set! c 0 1) (vector-set! c 1 seon-profile-epoch)
@@ -96,6 +101,13 @@
          [(a b d) (seon-profile-call c (f a b d))]
          [(a b d e) (seon-profile-call c (f a b d e))]
          [args (seon-profile-call c (apply f args))]))
+     ;; what ran since the last reads-begin!, which no nested epoch resets (an eval or a cost measurement inside a test)
+     (define (seon-profile-reads-begin!)
+       (set! seon-profile-reads-mark (fx+ 1 seon-profile-reads-mark))
+       (set! seon-profile-reads '()))
+     (define (seon-profile-reads-fold f init)
+       (let loop ([cs seon-profile-reads] [acc init])
+         (if (null? cs) acc (loop (cdr cs) (f acc (vector-ref (car cs) 6))))))
      (define (seon-profile-begin!)
        (set! seon-profile-epoch (fx+ 1 seon-profile-epoch))
        (set! seon-profile-touched '())
@@ -114,7 +126,7 @@
 
 (def ^:private procs
   "The Scheme procedures above, by name (host procedures, resolved once)."
-  (into {} (for [k [:cell :counted :begin! :fold :calls :now :alloc :cpu :aside]]
+  (into {} (for [k [:cell :counted :begin! :fold :calls :now :alloc :cpu :aside :reads-begin! :reads-fold]]
              [k (scm/proc (str "seon-profile-" (name k)))])))
 
 (defn now-ns
@@ -161,6 +173,23 @@
   "Open a new epoch: counts start again from zero for every function. Answers its number."
   {:malli/schema [:=> [:cat] :int]}
   [] ((:begin! procs)))
+
+(defn reads-begin!
+  "Start the record of what ran (reads), which no nested epoch (begin!: an eval or a cost measurement inside the caller) resets. nil."
+  {:malli/schema [:=> [:cat] :any]}
+  [] ((:reads-begin! procs)) nil)
+
+(defn reads
+  "The contracted functions called since reads-begin!, each once, nested epochs included: what a test read of the program. See docs/cost.md#counting-calls."
+  {:malli/schema [:=> [:cat] [:set :qualified-symbol]]}
+  [] (persistent! ((:reads-fold procs) conj! (transient #{}))))
+
+(defn with-reads
+  "fns (touched's), with each function reads holds that they don't at zero counts: a nested epoch (an eval, a cost measurement) took its counts, not the fact that it ran. So a test's verdict names all it ran. See docs/cost.md#counting-calls."
+  {:malli/schema [:=> [:cat [:vector :seon.profile/fn-cost]] [:vector :seon.profile/fn-cost]]}
+  [fns]
+  (let [held (into #{} (map :var) fns)]
+    (into fns (for [v (sort-by str (remove held (reads)))] {:var v :calls 0 :ticks 0 :self-ticks 0 :bytes 0 :self-bytes 0}))))
 
 (defn calls
   "Calls of contracted functions since the epoch began, all functions together."
