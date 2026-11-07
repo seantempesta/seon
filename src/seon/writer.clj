@@ -146,7 +146,7 @@
       ;; git: each member's head becomes a parent, so its merge base moves to it; each
       ;; member's own datoms for the keys it changed, as they are (seon.merge/merge-tx)
       (let [rep (d/merge-db conn (set (map :branch ok))
-                            (vec (mapcat (fn [{:keys [r head base]}] (into (pm/merge-tx main base head (keys (:ours r)) data-attrs) (source/filing-tx head (:ours r)))) ok))
+                            (vec (mapcat (fn [{:keys [r head base]}] (pm/merge-tx main base head (keys (:ours r)) data-attrs)) ok))
                             (pdb/tx-meta (pdb/conn-main conn)))
             t (:max-tx (:db-after rep))
             ops (pdb/report->tx rep)
@@ -245,7 +245,7 @@
       :merge-candidate (reply st (if (exists? (:branch m))
                                    (let [data-attrs (:data-attrs m #{})
                                          [head r base] (branch-merge st (:branch m) data-attrs)
-                                         db (d/db-with @conn (into (pm/merge-tx @conn base head (keys (:ours r)) data-attrs) (source/filing-tx head (:ours r))))
+                                         db (d/db-with @conn (pm/merge-tx @conn base head (keys (:ours r)) data-attrs))
                                          w (written db (:ours r))]
                                      (assoc w :ok true :text (doc/files db (:files w))))
                                    (refused (str "no branch " (:branch m)) {})))
