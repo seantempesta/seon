@@ -188,25 +188,37 @@
 
 (defn config-panel
   "The config in force (the declared HTML render of :seon.config/config), as root wrote it
-  on main: every key grouped by its area, its value whole, its unit, and its schema's
-  description on hover. Where each value comes from (unit, provenance, its bound) is
-  written beside it in resources/seon/config/default.edn."
+  on main: every key grouped by its area, its value whole, its unit, the schema's description
+  on hover, and the layer it came from (:seon.config/sources, docs/config.md#layers) as text
+  beside it. The layers are opts' (:seon.config/sources, as seon.config/in-db answers them) or
+  the config's own, and for a key main holds the value this process's layers resolve to, the
+  layer this process names it (seon.config/in-force)."
   {:malli/schema [:=> [:cat :seon.render/opts :seon.config/config] :any]}
-  [_ c]
+  [opts c]
   (let [prop (fn [k p] (get (contract/properties k) p))
+        c (dissoc c :seon.config/sources)
+        in-force (:sources (config/in-force))
+        sources (or (get opts :seon.config/sources)
+                    (into {} (for [[k v] c
+                                   :let [s (get in-force k)]
+                                   :when (and s (= v (get (config/in-force) k v)))]
+                               [k s])))
         groups (group-by (comp namespace key) (sort-by (comp str key) c))]
-         [:section {:id "t-config" :class "tile wide config"}
-      (kicker "config" (str (count c) " keys in force on main · resources/seon/config/default.edn · profile " (name (config/profile))))
-      (when-let [w (not-empty (config/waiting))]
-        [:p {:class "muted"} (str "main states these and this process waits for a rebuild: " (str/join ", " (map str (sort (keys w)))))])
-      [:div {:class "cfg-groups"}
-       (for [[g kvs] (sort-by key groups)]
-         [:dl {:class "cfg"}
-          [:dt {:class "cfg-area"} (str/replace g #"^seon\.config\.?" "")]
-          (for [[k v] kvs]
-            [:div {:title (str (prop k :description))}
-             [:dt (name k)]
-             [:dd (render/html {:budget (part)} v) (when-let [u (prop k :seon.config/unit)] [:span {:class "muted"} " " u])]])])]]))
+    [:section {:id "t-config" :class "tile wide config"}
+     (kicker "config" (str (count c) " keys in force on main · resources/seon/config/default.edn · profile " (name (config/profile))))
+     (when-let [w (not-empty (config/waiting))]
+       [:p {:class "muted"} (str "main states these and this process waits for a rebuild: " (str/join ", " (map str (sort (keys w)))))])
+     [:div {:class "cfg-groups"}
+      (for [[g kvs] (sort-by key groups)]
+        [:dl {:class "cfg"}
+         [:dt {:class "cfg-area"} (str/replace g #"^seon\.config\.?" "")]
+         (for [[k v] kvs]
+           (let [src (get sources k)]
+             [:div {:title (str (prop k :description))}
+              [:dt (name k)]
+              [:dd (render/html {:budget (part)} v)
+               (when-let [u (prop k :seon.config/unit)] [:span {:class "muted"} " " u])
+               (when src [:span {:class "cfg-source muted"} (str " from " src)])]]))])]]))
 
 ;;; --- agent cards --------------------------------------------------------------
 
@@ -2284,3 +2296,11 @@
      [:details (cond-> {(keyword "data-on:toggle") (str "@post('/open?view=" view "&unit=" unit "-raw&open=' + el.open)")} raw? (assoc :open true))
       [:summary {:class "cursor-pointer text-text-400"} "the body's JSON, whole, as sent"]
       (when raw? [:pre {:class "whitespace-pre-wrap break-all font-mono text-text-100" :data-wire "body"} (json/write-str body)])]]))
+
+(defn config-view
+  "The tile that draws the config on main and the layer each key came from, side by side
+  (seon.config/in-db, docs/config.md#layers): a view, so a reader of the dashboard sees where
+  each value came from, not only what it is."
+  {:malli/schema [:=> [:cat :seon.render/opts :seon.render/config-view] :any]}
+  [opts v]
+  (config-panel {:seon.config/sources (:sources v)} (:config v)))
