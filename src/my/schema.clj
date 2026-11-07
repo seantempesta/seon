@@ -47,16 +47,6 @@
     (reduce (fn [acc dt] (cond-> (update acc :checked inc) (not (valid? (:v dt))) (update :refused inc)))
             {:checked 0 :refused 0} (d/datoms db :aevt k))))
 
-(defn- own-declaration
-  "The attribute registered key k is, when no entity map lists it and its value is storable (an
-  attribute is a registered key whose schema is its stored value: an agent's own datum, written
-  on its own entity): [its declaration], when db does not hold it so; else []."
-  {:malli/schema [:=> [:cat :seon.host/db :qualified-keyword :seon.host/registry] [:vector :seon.schema/declaration]]}
-  [db k reg]
-  (let [dcl (sd/declaration reg k)
-        entity? (:seon.db/attributes (m/properties (m/deref (m/schema k {:registry reg}))))]
-    (if (or (contract/error? dcl) entity? (= dcl (select-keys (get (d/schema db) k) (keys dcl)))) [] [dcl])))
-
 (defn- type-change
   "The refusal of decls that give an attribute db stores another value type, or nil. See docs/data-modeling.md#data-modeling."
   {:malli/schema [:=> [:cat :seon.host/db :qualified-keyword [:sequential :map]] [:maybe :seon.schema/registration-refused]]}
@@ -87,7 +77,7 @@
                                               " is no EDN: a predicate is its symbol, so quote the form ('[:vector nat-int?]) or the predicate ('nat-int?)"))))]
     (if (contract/error? judged)
       judged
-      (let [decls (distinct (concat (:decls judged) (own-declaration db k (:registry judged))))
+      (let [decls (distinct (concat (:decls judged) (program/own-declaration db k (:registry judged))))
             e (some->> (pdb/eid db :schema/key k) (d/entity db))
             file (cond scratch? nil (:schema/file e) (:schema/file e) :else (new-key-file db k))]
         (or (type-change db k decls)

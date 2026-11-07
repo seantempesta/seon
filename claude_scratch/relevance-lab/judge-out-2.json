@@ -245,7 +245,7 @@
    },
    {
     "kind": "section",
-    "name": "docs/turn.md#what-a-turn-takes-from-main",
+    "name": "docs/turn.md#what-a-turn-merges-from-main",
     "pct": 21,
     "label": "noise",
     "why": "different subsystem or generic"

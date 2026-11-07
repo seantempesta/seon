@@ -469,11 +469,8 @@
   none moved. See docs/machine.md#an-agents-first-write."
   {:malli/schema [:=> [:cat] :any]}
   []
-  (if-let [db (:db @agent/state)]
-    (or (:registry (:schema-registry @agent/state))
-        (let [k (program/schema-changes db) r (program/schema-registry k)]
-          (swap! agent/state assoc :schema-registry {:key k :registry r})
-          r))
+  (if (:db @agent/state)
+    (:registry (agent/branch-schemas))
     {}))
 
 (defn with-branch-schemas

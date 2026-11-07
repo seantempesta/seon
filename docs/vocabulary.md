@@ -66,11 +66,12 @@ The words for data and branches, in Datahike's and git's terms, and the namespac
 | word | meaning | owner |
 |---|---|---|
 | **main**, **branch**, **merge base**, **merge main**, **conflict** | git's words over Datahike branches | `seon.writer`, `seon.db` |
+| **merge**, **pull**, **rebase**, **cherry-pick**, **upstream**, **head**, **behind**, **unmerged**, **gc** | git's words for what a branch does, used rather than our own (owner, 2026-11-07). A merge compares by function, schema key and doc section, not by line. A pull from main takes program only, since a commit here holds data too. A rebase keeps each commit's facts and their tx. | `seon.merge`, `seon.writer` |
 | **program** | the forms held as facts (`:form/src`, each definition pointing to the form that last made it, from the compiler), loaded where main or a branch changes them | `seon.program` |
 | **store** | konserve under Datahike (LMDB, or the filestore), jfasl node codec | `seon.db` |
 | **entity schema** | a Malli map with `{:seon.db/attributes true}`; its members are Datahike attributes | `seon.schema.datahike/declarations` |
 | **recording** | an eval request's evaluations (on its agent entity, each eval's attributes: `:seon.eval/code`, `:seon.eval/response` and the rest) and its defs, written by the agent on its own branch | `seon.repl/record-tx` |
-| **observation** | data on the branch that observed it (evaluations, answered t), never carried by a merge: every `seon.*` attribute but the carried task content is a platform record | `seon.merge/carried-platform-attrs` |
+| **observation** | data on the branch that observed it (evaluations, answered t), never merged: every `seon.*` attribute but the carried task content is a platform record | `seon.merge/carried-platform-attrs` |
 | **generation** | a build of Seon's own source: the running binary is one, and the next is the merges commit built by the `:build` effect, recorded on main (`:seon.root/generation`) and started on the same store by `bin/root next` ([source](source.md#the-next-generation)) | `seon.fx/build`, `my.root/generation`, `my.root/next-generation` |
 | **prove** | run what a change reaches and reuse every test and check step green at its reach digest: `bin/prove` in a checkout, ``(my.agent/prove)`` in an agent (the process tests it reaches run at the judge's merge gate, on a checkout, or when they are a proof; [merging](merging.md#a-merge-runs-what-the-change-reaches)) | `seon.proofs/plan`, `my.agent/prove` |
 
@@ -94,7 +95,7 @@ The words for tasks and their prerequisites, and the namespace that owns each.
 | **done rule** | why an end's measured facts do not make its task done; empty means done | `seon.reconcile/done-explain` |
 | **reconciler** | the pure function of main's db to actions, and the proc that carries them out | `seon.reconcile/index` then `seon.reconcile/actions`, and `reconciler-proc` |
 | **flight** | one action carried out as a chain of requests and answers in the reconciler proc | `seon.reconcile/advance` |
-| **turn loop** | inside an agent: observe, then end (green, or stopped with the outcome and reason) or act (context to the model, forms through the REPL path); every work merges main first, and a merge task again at each green until main brings nothing new | `seon.turn/work!` |
+| **turn loop** | inside an agent: observe, then end (green, or stopped with the outcome and reason) or act (context to the model, forms through the REPL path); every work merges main first, and a merge task again at each green until there is nothing new on main to merge | `seon.turn/work!` |
 | **three-way** | git's merge of program maps (base, ours, theirs) keyed `[:var sym]`, `[:form id]`, `[:schema k]` (a schema entry), read only where the dbs differ ([storage](storage.md#merges-read-what-changed)) | `seon.merge/three-way`, `seon.merge/delta-three-way` |
 | **unmerged entry** | a conflict kept on the branch (base, ours, theirs) until re-defn or `resolve!` | `seon.merge/unmerged` |
 | **stage** (was harvest) | staging the live runtime onto the branch (unmaps, plain defs as values, aliases) | `seon.stage/stage!` |

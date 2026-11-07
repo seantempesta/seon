@@ -5,7 +5,7 @@
   (konserve.jolt.fasl-store, FaslSerializer), and the JVM-written-store reader stays behind
   (BAGGAGE.md)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.profile :as profile] [seon.contract :refer [defn defn-] :as contract] [clojure.string] [seon.schema.datahike :as sd] [seon.config :as cfg]
+  (:require [seon.profile :as profile] [seon.contract :refer [defn defn-] :as contract] [clojure.string] [malli.core :as m] [seon.schema.datahike :as sd] [seon.config :as cfg]
             [datahike.connections] [datahike.writing] [datahike.config] [datahike.store] [konserve.store] [hasch.core :as hasch] [datahike.api :as d] [konserve.core :as k] [konserve.jolt.store] [konserve.jolt.lmdb :as klmdb]
             [konserve.jolt.lmdb-ffi :as lmdb-ffi] [konserve.jolt.posix :as posix] [seon.lib :as lib] [jolt.ffi :as ffi] [datahike.ids] [datahike.core]))
 
@@ -25,13 +25,17 @@
   attribute and where in the value, or nil: an attribute's schema is what the store holds it to, at the write, where
   the store itself checks only a value's type. A map's attributes and :db/add's are read; a ref is its entity's own
   (a nested map is walked, an id or lookup names one); an attribute no schema declares (an agent's own, its registry
-  its branch's) and a transaction function are not asked. See docs/storage.md#the-write-checks-every-datom."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.db/tx-data] [:maybe :seon.error/base]]}
-  [db tx-data]
-  (let [schema (:schema db)]
+  its branch's, when own, {:forms the branch's schema changes :registry their registry}, does not name it) and a transaction function are not asked. See docs/storage.md#the-write-checks-every-datom."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.db/tx-data] [:maybe :seon.error/base]]
+                  [:=> [:cat :seon.host/db :seon.db/tx-data [:maybe [:map [:forms :map] [:registry :any]]]] [:maybe :seon.error/base]]]}
+  ([db tx-data] (invalid-datom db tx-data nil))
+  ([db tx-data {:keys [forms registry]}]
+  (let [schema (:schema db)
+        known? (fn [a] (or (contains? contract/forms a) (contains? forms a)))
+        schema-of (fn [a] (if (contains? forms a) (m/schema a {:registry registry}) (contract/schema a)))]
     (letfn [(refused [a v]
-              (when-not (contract/valid? a v)
-                (let [ps (contract/problems (contract/schema a) v)]
+              (when-not (m/validate (schema-of a) v)
+                (let [ps (contract/problems (schema-of a) v)]
                   (contract/error :seon.db/invalid-datom #'invalid-datom (let [{:keys [in value]} (first ps)] (str a " refuses this value at " in ": " (:seon.print/code value)))
                                   {:attribute a :seon.error/problems ps}))))
             (value [a v]
@@ -43,11 +47,11 @@
                   ;; a many attribute's schema is of its set, each value one member of it
                   (refused a (if many? (set vs) v)))))
             (entity [m]
-              (some (fn [[a v]] (when (and (qualified-keyword? a) (contains? contract/forms a) (some? v)) (value a v))) m))]
+              (some (fn [[a v]] (when (and (qualified-keyword? a) (known? a) (some? v)) (value a v))) m))]
       (some (fn [op]
               (cond (map? op) (when-not (record? op) (entity op))
-                    (and (vector? op) (= :db/add (first op)) (contains? contract/forms (nth op 2 nil))) (value (nth op 2) (nth op 3 nil))))
-            tx-data))))
+                    (and (vector? op) (= :db/add (first op)) (known? (nth op 2 nil))) (value (nth op 2) (nth op 3 nil))))
+            tx-data)))))
 
 (defn eid
   "The entity id of the entity whose unique attribute a has value v on db, or nil: one seek

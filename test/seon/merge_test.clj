@@ -266,6 +266,15 @@
   "db after registering form v as schema k on it, as my.schema/register! does."
   [db k v] (d/db-with db (:tx (schema/registration db k v (= "user" (namespace k))))))
 
+(deftest a-merged-schema-entry-declares-its-own-attribute
+  ;; docs/storage.md#the-write-checks-every-datom: a key registered bare (an agent's own datum, no entity map lists it) is an attribute on the
+  ;; branch that registers it; merged, its entry arrived without its declaration, so main could not store what the branch could
+  (let [base (empty-db)
+        src (registered base :app.shape/size :int)
+        onto (d/db-with base (pm/merge-tx base base src [[:schema :app.shape/size]] #{}))]
+    (is (= :db.type/long (:db/valueType (get (d/schema onto) :app.shape/size))) "the merge carries its declaration")
+    (is (= 3 (:app.shape/size (d/entity (d/db-with onto [{:db/id 900 :app.shape/size 3}]) 900))) "and the target can store it")))
+
 (deftest a-merge-declares-the-attributes-its-datoms-use-before-them
   ;; found 2026-10-27 through 0.7 (agent a1, (my.branch/merge-main!) on the standing root): main had
   ;; gained datoms of :form/ops, and the agent's branch was cut before the attribute: Datahike refused

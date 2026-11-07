@@ -69,7 +69,7 @@ Tests run three times in a task's work, each on what it needs:
 
 Every work's agent first merges main into its branch with no model call (a kept branch made before main moved holds main's program, its tests and their digests included; one at main's head brings nothing). A merge task's agent merges main again each time all is green, until a merge brings nothing new; it stops early when the merge is too hairy (`seon.reconcile/hairy`, over the task's facts: the conflicts, the turns, and the names the task's proofs and plan's cites hold, never the plan re-parsed). Its unmerged entries are in its context, and it resolves them at the REPL ([agent](agent.md#merging)).
 
-## What a turn takes from main
+## What a turn merges from main
 
 Words to the agent and what root decided of its task are facts on main, and a turn takes them onto its branch before it observes, so its context and page read them from the branch like any other fact: `seon.turn/take!`, the one way outside facts reach the branch. Root writes nothing to a live process for them, so a session whose process is gone (parked in an earlier boot, a lost wake) takes them when it is spawned again.
 - **Entries** (```seon.agent/untaken-entries```): the `:seon.message/*` facts main holds to the agent's session (its branch, `:seon.agent/branch`, as main names it), of each kind (`:seon.message/kind`): a person's `:message` (`seon.root/message!`, refused for an agent working no task), root's `:stage` boundary, and root's `:verdict` (below). Each is written on the branch with the same id, in main's order.
