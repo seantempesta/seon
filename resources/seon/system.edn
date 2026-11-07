@@ -81,6 +81,7 @@
  [[[:writer :to-fork-server] [:fork-server :cmd]]
   [[:writer :to-api] [:api :from-writer]]
   [[:reconciler :to-api] [:api :from-writer]]
+  [[:api :to-reconciler] [:reconciler :wake]]
   [[:writer :main] [:reconciler :main]]
   [[:writer :main] [:prove :main]]
   [[:writer :main] [:vectors :main]]

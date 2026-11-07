@@ -121,14 +121,14 @@
 ;; ready set, so a pass costs what changed plus what is in flight, never the number of tasks.
 
 (def ^:private watched-ns
-  #{"seon.task" "seon.root" "seon.config.agent" "seon.config.merge" "seon.message"})
+  #{"seon.task" "seon.root" "seon.config.agent" "seon.config.merge"})
 
 (def ^:private watched-attrs
-  "The agent attributes the index reads: when its root started it, when (a start writes both, and the environment with
-  them: a session's next task has a boot unchanged but a start time that moved), and the messages it had taken. Not its
+  "The agent attributes the index reads: when its root started it, and when (a start writes both, and the environment with
+  them: a session's next task has a boot unchanged but a start time that moved). Not its
   :seon.agent/branch as root observes it (seon.task/agent-tx writes that too, under the store's name for the branch). Asked inline, once per
   datom of a move: a contracted call each would make a move cost its datoms in calls (seon.render-cost-test/a-move-of-main-costs-what-moved). See docs/reconcile.md#the-reconcilers-index."
-  #{:seon.agent/boot :seon.agent/started-ms :seon.agent/taken})
+  #{:seon.agent/boot :seon.agent/started-ms})
 
 (def park-outcomes
   "An agent's own ends that park its session instead of ending it (docs/turn.md#parked): a
@@ -137,18 +137,11 @@
   task with its cause, as any failed end does."
   #{:waiting :cap})
 
-(defn- branch-messages
-  "How many messages main holds to the agent on branch br: what a parked agent on br is woken
-  by when it has taken fewer (:seon.agent/taken). O(the messages to br)."
-  {:malli/schema [:=> [:cat :seon.host/db :keyword] :int]}
-  [db br]
-  (or (d/q '[:find (count ?m) . :in $ ?b :where [?m :seon.message/branch ?b]] db br) 0))
-
 (def empty-index
   "The index of a db with no tasks."
   {:root nil :tasks {} :keys {} :needed-by {} :acc {} :depth {} :claims {}
    :agents {} :done {} :ready (sorted-set) :ready-key {}
-   :live #{} :reap #{} :kill {} :judge #{} :merging #{} :msgs {}})
+   :live #{} :reap #{} :kill {} :judge #{} :merging #{} :woken #{} :late #{}})
 
 (def ^:private finished task/finished)
 (def ^:private judged-outcomes "The outcomes that wait for root's next step on a merge (task/judged). See docs/reconcile.md#a-task-holds-how-its-work-ended."
@@ -189,14 +182,9 @@
                   ;; not live: working in this boot's root
                   (not (and (= :running o) (= (:boot (:root idx)) (:seon.agent/boot (get-in idx [:agents (:seon.task/agent t)])))))
                   (not (judged-outcomes o))
-                  ;; at its cap an agent waits for its budget to be raised and its task released (my.root/run!), whatever comes
-                  (not= :cap o)
-                  ;; parked or told: ready again only when main holds more messages to its agent than it had taken
-                  ;; (docs/turn.md#parked); judge-tx writes :seon.agent/taken at every judging, both count the messages
-                  ;; to the agent's branch
-                  (or (not (#{:parked :told} o))
-                      (let [a (get-in idx [:agents (:seon.task/agent t)])]
-                        (> (get-in idx [:msgs (:branch (:seon.agent/env a))] 0) (:seon.agent/taken a 0))))))))
+                  ;; parked, told or at its cap: ready again only when woken, a wake being a message that reached its agent (`wake`)
+                  (or (not (#{:parked :told :cap} o))
+                      (contains? (:woken idx) (:seon.agent/key (get-in idx [:agents (:seon.task/agent t)]))))))))
 
 (defn- refresh-done
   "Re-derive task id's done state from its outcome; answers [idx flipped?]."
@@ -313,19 +301,7 @@
   db after it. Re-reads only the entities the commit touched."
   {:malli/schema [:=> [:cat :seon.reconcile/index :seon.host/db [:sequential :any]] :seon.reconcile/index]}
   [idx db ops]
-  (let [es (into #{} (keep (fn [[_ e a]] (when (and (keyword? a) (or (watched-attrs a) (watched-ns (namespace a)))) e))) ops)
-        ;; a message to a branch's agent: its count moves by one (a commit's op names the branch;
-        ;; a diff's op may name only the message, so its branch is counted again), and the tasks
-        ;; on that branch are re-derived (the session its agent works)
-        msgs (keep (fn [[op e a v]] (when (= :seon.message/branch a)
-                                      {:br (or v (:seon.message/branch (d/entity db e))) :d (when v (if (= :db/retract op) -1 1))}))
-                   ops)
-        idx (reduce (fn [idx {:keys [br d]}] (if d (update-in idx [:msgs br] (fnil + 0) d) (assoc-in idx [:msgs br] (branch-messages db br))))
-                    idx (filter :br msgs))
-        es (into es (for [br (into #{} (keep :br) msgs), [id t] (:tasks idx)
-                          :when (= br (:seon.task/branch t))
-                          :let [e (:db/id (d/entity db [:seon.task/id id]))] :when e]
-                      e))]
+  (let [es (into #{} (keep (fn [[_ e a]] (when (and (keyword? a) (or (watched-attrs a) (watched-ns (namespace a)))) e))) ops)]
     (if (empty? es)
       idx
       (let [step (fn [[idx nc dirty all?] e]
@@ -337,7 +313,7 @@
                                [(-> idx (put-task id v) (update :keys #(if v (assoc % e [:task id]) (dissoc % e))))
                                 (cond-> nc (or needs? (nil? (get-in idx [:acc id])) (not= (get-in idx [:tasks id :seon.task/proofs]) (:seon.task/proofs v))) (conj id))
                                 (conj dirty id) all?])
-                       ;; an agent's boot or taken count moved: the tasks that name it (an agent on a stage holds two) are re-derived
+                       ;; an agent's boot moved: the tasks that name it (an agent on a stage holds two) are re-derived
                        :agent (let [k (or (:seon.agent/key v) oid)]
                                 [(-> idx (put-agent k v) (update :keys #(if v (assoc % e [:agent k]) (dissoc % e))))
                                  nc (into dirty (keep #(:seon.task/id (d/entity db %))) (task/tasks-of-agent db e)) all?])
@@ -360,8 +336,7 @@
   {:malli/schema [:function [:=> [:cat :seon.host/db] :map]
                   [:=> [:cat :seon.reconcile/index :seon.host/db :seon.host/db] :map]
                   [:=> [:cat :seon.reconcile/index :seon.host/db :seon.host/db [:sequential :seon.host/datom]] :map]]}
-  ([db] (observe empty-index db (concat (for [e (task/entity-ids db)] [:db/add e :seon.task/id nil])
-                                        (for [dt (d/datoms db :aevt :seon.message/branch)] [:db/add (:e dt) :seon.message/branch (:v dt)]))))
+  ([db] (observe empty-index db (for [e (task/entity-ids db)] [:db/add e :seon.task/id nil])))
   ([idx from db]
    (index idx from db (for [a (sort (into #{} (filter #(and (keyword? %) (or (watched-attrs %) (watched-ns (namespace %))))) (concat (keys (:schema from)) (keys (:schema db)))))
                             dt (apply concat (d/datoms-diff from db :aevt [a]))]
@@ -712,31 +687,42 @@
   {:malli/schema [:=> [:cat :seon.reconcile/state :seon.task/id :seon.reconcile/step :map] [:tuple :seon.reconcile/state :map]]}
   [st id step req] (step/ask st [:reconciler :answers] [id step] req))
 
+(defn- agent-on
+  "The key of the newest agent whose branch main names b (a session's agent: its key is the same across boots), or nil. O(the agents)."
+  {:malli/schema [:=> [:cat :seon.host/db :keyword] [:maybe :string]]}
+  [db b]
+  (some->> (d/datoms db :aevt :seon.agent/branch) (filter #(= b (:v %))) (map :e) sort last (d/entity db) :seon.agent/key))
+
 (def ^:private ends-told
   "The outcomes an agent that launched a task hears of, each in words: where its work has stopped, for now or for good."
   {:parked "is waiting for an answer" :cap "used all its turns" :done "is done" :merged "is merged to main" :dead "died" :lost "was lost"
    :closed "was stopped and held" :killed "was stopped"})
 
 (defn tell-tx
-  "The message that tells the agent which launched task id (:seon.task/asked-by) how it stands, when write tx moves its outcome to one of `ends-told`: what it reads next, which wakes it. A launched agent that died could not say so itself. See docs/agent.md#working-for-a-person."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id [:sequential :any]] [:vector :map]]}
-  [db id tx]
+  "The message that tells the agent which launched task id (:seon.task/asked-by, a branch: the session's agent, as `agent-on` finds it) how it stands, when write tx moves its outcome to one of `ends-told`: what it reads next, which wakes it (`write` wakes it). A launched agent that died could not say so itself. Sent at now (ms). See docs/agent.md#working-for-a-person."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id [:sequential :any] :int] [:vector :map]]}
+  [db id tx now]
   (let [to (some (fn [x] (when (and (vector? x) (= :db/cas (first x)) (= :seon.task/outcome (nth x 2 nil))) (nth x 4 nil))) tx)
         by (when (ends-told to) (:seon.task/asked-by (d/entity db [:seon.task/id id])))
         said (some (fn [x] (cond (map? x) (or (:seon.task/reason x) (:reason (:seon.task/failure x)))
                                  (and (vector? x) (= :seon.task/reason (nth x 2 nil))) (nth x 3 nil)))
                    tx)
-        from (some-> (:seon.agent/id (:seon.task/agent (d/entity db [:seon.task/id id]))) name)]
-    (if by
-      (task/message-tx (str "asked-" id "-" (:max-tx db)) :message (or from "root") by
+        from (some-> (:seon.agent/id (:seon.task/agent (d/entity db [:seon.task/id id]))) name)
+        k (when by (agent-on db by))]
+    (if k
+      (task/message-tx (str "asked-" id "-" (:max-tx db)) (or from "root") [k]
                        (str "Task " id " " (ends-told to) (when said (str ": " said))
-                            (when (and from (#{:parked :cap} to)) (str "\nTo answer it: (send-message [:" from "] \"...\")"))))
+                            (when (and from (#{:parked :cap} to)) (str "\nTo answer it: (send-message [:" from "] \"...\")")))
+                       now)
       [])))
 
 (defn- write
-  "A write on main through the writer, as step of task id's flight, with what it tells who launched the task. See `tell-tx`."
+  "A write on main through the writer, as step of task id's flight, with what it tells who launched the task (`tell-tx`), whom it wakes (`wake`: a message root writes itself needs no channel). Answers [st request]."
   {:malli/schema [:=> [:cat :seon.reconcile/state :seon.task/id :seon.reconcile/step [:sequential :any]] [:tuple :seon.reconcile/state :map]]}
-  [st id step tx] (request st id step {:op :write :req {:op :tx :branch :db :tx-data (into (vec tx) (tell-tx (:db st) id tx))}}))
+  [st id step tx]
+  (let [tell (tell-tx (:db st) id tx (System/currentTimeMillis))
+        k (some-> (first tell) :seon.message/to first second)]
+    (request (cond-> st k (update-in [:idx :late] (fnil conj #{}) k)) id step {:op :write :req {:op :tx :branch :db :tx-data (into (vec tx) tell)}})))
 
 (defn- agent-of
   "Task id's agent on db: {:key :id :branch}, or nil before one started it."
@@ -770,15 +756,19 @@
         from (get-in st [:idx :tasks id :seon.task/outcome])
         agent (:seon.agent/id (task-agent (:idx st) id))
         now (System/currentTimeMillis)
-        one (fn [[st o]] [st [o]])]
+        one (fn [[st o]] [st [o]])
+        ;; a woken agent starts with its allowance of turns more, whoever sent the message (`wake`), and is no longer woken
+        k (:seon.agent/key (task-agent (:idx st) id))
+        raise (if (and k (contains? (get-in st [:idx :woken]) k)) (cfg/value :seon.config.agent/wake-turns {:task (get-in st [:idx :tasks id])}) 0)
+        st (cond-> st k (update-in [:idx :woken] disj k) (pos? raise) (assoc-in [:flights id :raise] raise))]
     (case op
       :wake (let [ag (:agent act)]
               ;; the parked process's next work: written running, then work! (the :started step); synced
               ;; first, as a write an outside effect follows is (AGENTS section 5): work!'s first turn
-              ;; reads the messages that woke it from the store (seon.agent/untaken-entries)
+              ;; reads the messages that woke it from the store (seon.agent/undelivered)
               (one (request (assoc-in st [:flights id :agent] ag) id :started
                             {:op :write :req {:op :tx :branch :db :flush? true
-                                              :tx-data (task/start-tx db id (:boot st) ag (:env act) now (task/session-key db id))}})))
+                                              :tx-data (task/start-tx db id (:boot st) ag (:env act) now (task/session-key db id) raise)}})))
       :spawn (let [k (task/session-key db id)]
                ;; the session's agent continues (docs/turn.md#parked); kept on the flight for its start
                (one (request (cond-> st k (assoc-in [:flights id :key] k)) id :spawned
@@ -840,13 +830,6 @@
              "Its plan: " plan "\n\nIts proofs: " (str/join " " (sort (map str proofs)))
              "\n\nIts whole task as data (what it cites, its write set): (my.task/data)")))))
 
-(defn- taken-messages
-  "How many messages to the agent on branch br branch db holds: those its turns took (each written on the branch by the
-  turn that took it). The other side of branch-messages' count: one seek for the branch's messages."
-  {:malli/schema [:=> [:cat :seon.host/db :keyword] :int]}
-  [db br]
-  (or (d/q '[:find (count ?m) . :in $ ?b :where [?m :seon.message/branch ?b]] db br) 0))
-
 (defn- behinds
   "How many times task id was judged behind main (its outcome was written :behind: d/history), what max-behind bounds."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/id] :int]}
@@ -906,13 +889,12 @@
                (hold-tx main id (task/outcome-tx main id :running outcome want) (:hold j) facts)
                (task/outcome-tx main id :running outcome want))
         tx (-> move
-               ;; the messages to its agent's branch its turns had taken: main holding more wakes it once parked (idx-ready?),
-               ;; whatever came between its last turn and now
-               (into [{:seon.agent/key k :seon.agent/taken (taken-messages db branch) :seon.agent/ended-ms now}])
+               (into [{:seon.agent/key k :seon.agent/ended-ms now}])
                (into (when (and (:verdict j) (not marked?))
-                       (task/message-tx (str "v-" id "-" turn) :verdict "root" branch
+                       (task/message-tx (str "v-" id "-" turn) "root" [k]
                                         (verdict-body (:verdict j) {:results results :deferred deferred :unmerged unmerged :caused (:caused diff)
-                                                                    :basis (or base-t (:max-tx main))}))))
+                                                                    :basis (or base-t (:max-tx main))})
+                                        now)))
                (into (:tx carried))
                ;; marked failed (my.task/fail!): the failure on main and the task held for root (a compare-and-swap from :running),
                ;; so the judge closes it (no retry); one root already cancelled or held keeps root's
@@ -993,7 +975,7 @@
                                (:seon.error/type r) (assoc-in [:flights id :died-at-spawn]
                                                               (select-keys r [:seon.error/type :seon.error/operation :seon.error/message :exit :agent])))
                              id :started
-                             (task/start-tx (:db st) id (:boot st) ag (:env act) now (:key f))))
+                             (task/start-tx (:db st) id (:boot st) ag (:env act) now (:key f) (:raise f 0))))
                  ;; root refused it (the branch is held, or too many live agents): the refused answer
                  ;; is the task's outcome, with root's reason; the task starts again
                  ;; once main moves for another reason (:refused, pass)
@@ -1008,7 +990,7 @@
                  ;; agent (written before it is pushed), taken by its first turn like any other (the
                  ;; conversation above it unchanged, its prefix cached; docs/turn.md#parked)
                  (if-let [body (stage-boundary (:db st) id)]
-                   (one (request st id :briefed {:op :message :id agent :from :root :kind :stage :body body}))
+                   (one (request st id :briefed {:op :message :id agent :from :root :body body}))
                    (work st id act agent)))
       :briefed (if (contract/error? r) (dead st r) (work st id act agent))
       ;; the turn loop answered: died (no live agent), or judge it from measured facts
@@ -1158,6 +1140,62 @@
   {:malli/schema [:=> [:cat :map :map] :boolean]}
   [st m] (let [{:keys [ok t]} (:r m)] (boolean (or (nil? (:t st)) (and ok (int? t) (< (:t st) t))))))
 
+(def ^:private waiting-outcomes "The outcomes a task stands at while its agent waits for a message: parked, told, or at its cap." #{:parked :told :cap})
+
+(defn- tasks-of-key
+  "The ids of the tasks the agent with key k is on, on db."
+  {:malli/schema [:=> [:cat :seon.host/db :string] [:set :seon.task/id]]}
+  [db k]
+  (if-let [e (pdb/eid db :seon.agent/key k)]
+    (into #{} (keep #(:seon.task/id (d/entity db %))) (task/tasks-of-agent db e))
+    #{}))
+
+(defn wake
+  "The index after a message reached the agent with key k (a wake on the reconciler's :wake port, docs/users.md#messages): woken
+  when a task of it waits (parked, told or at its cap), which makes that task ready; else held in :late, for `settle-late` to
+  look at when the agent parks, since a running agent reads the message at its next turn and is not woken for it."
+  {:malli/schema [:=> [:cat :seon.reconcile/index :seon.host/db :string] :seon.reconcile/index]}
+  [idx db k]
+  (let [ids (tasks-of-key db k)]
+    (if (some #(waiting-outcomes (get-in idx [:tasks % :seon.task/outcome])) ids)
+      (settle (-> idx (update :woken conj k) (update :late disj k)) #{} ids)
+      (update idx :late conj k))))
+
+(defn- owed?
+  "Does main (db) hold a message to agent k that its branch br does not? One seek of main's messages to it and a lookup of each on the branch."
+  {:malli/schema [:=> [:cat :seon.host/conn :seon.host/db :string :keyword] :boolean]}
+  [conn db k br]
+  (boolean (seq (task/undelivered db (pdb/head conn (pdb/on-main (pdb/conn-main conn) br)) k))))
+
+(defn- settle-late
+  "st with the wakes held for agents that were running (:late) looked at: an agent now waiting that is owed a message is woken
+  (`wake`), one still running keeps its entry, any other is let go. O(the late agents), each a read of its messages."
+  {:malli/schema [:=> [:cat :seon.reconcile/state] :seon.reconcile/state]}
+  [st]
+  (reduce (fn [st k]
+            (let [{:keys [idx db conn]} st
+                  ids (tasks-of-key db k)
+                  os (map #(get-in idx [:tasks % :seon.task/outcome]) ids)]
+              (cond (some waiting-outcomes os)
+                    (assoc st :idx (if (owed? conn db k (:branch (:seon.agent/env (get-in idx [:agents k]))))
+                                     (wake idx db k)
+                                     (update idx :late disj k)))
+                    (some #{:running} os) st
+                    :else (assoc st :idx (update idx :late disj k)))))
+          st (get-in st [:idx :late])))
+
+(defn- boot-wakes
+  "The index with every agent that waits (parked, told or at its cap) and is owed a message woken: a root restart has no pending wakes, so
+  this reads, once, each such agent's branch against main. O(the waiting agents x the messages to each)."
+  {:malli/schema [:=> [:cat :seon.reconcile/state] :seon.reconcile/state]}
+  [st]
+  (let [{:keys [idx db conn]} st]
+    (assoc st :idx (reduce (fn [idx k] (wake idx db k))
+                           idx (for [[_ t] (:tasks idx) :when (waiting-outcomes (:seon.task/outcome t))
+                                     :let [k (:seon.task/agent t) br (:branch (:seon.agent/env (get-in idx [:agents k])))]
+                                     :when (and k br (owed? conn db k br))]
+                                 k)))))
+
 (defn- take-answer
   "[st requests] with answer m taken by the flight step that asked it (advance), and the next
   pass when that ended its flight."
@@ -1171,14 +1209,15 @@
     [st (into outs more)]))
 
 (defn reconciler-proc
-  "The reconciler. In :main (main's commit notices {:t :prev :ops :commit}, in order, a blocking buffer; it makes the db of the commit when it takes the notice) and :answers (the
-  api's answers to its requests). Out :to-api (its requests, as {:op :request ...}).
+  "The reconciler. In :main (main's commit notices {:t :prev :ops :commit}, in order, a blocking buffer; it makes the db of the commit when it takes the notice), :answers (the
+  api's answers to its requests) and :wake ({:agent key}: a message reached that agent, written by root's writer and answered; the api puts one
+  per recipient, docs/users.md#messages). Out :to-api (its requests, as {:op :request ...}).
   Args: :boot (this root's boot id), :conn (the store the commits are read from); in :judge (outside agents' runs handed back).
   Starts deepest-first (finish chains under way)."
   {:malli/schema :seon.step/step-fn}
   ([] {:params {:boot "root's boot id"
                 :judge "outside agents' tasks to judge {:op :judge :task :env :agent}, and waits on main {:op :quiet :after t :p promise}, each answered at the first quiet at or after t (external; seon.root/await-db)"}
-       :ins {:main "main's commits" :answers "the api's answers"} :outs {:to-api "requests"}
+       :ins {:main "main's commits" :answers "the api's answers" :wake "an agent a message reached, {:agent key}"} :outs {:to-api "requests"}
        :workload :io
        :ping-map-fn (fn [st] {:seen (:seen st 0) :lists (:lists st 0) :t (:t st) :flights (count (:flights st)) :pending (count (:pending st)) :behind (count (:behind st))
                               :quiet (boolean (:quiet st)) :root-causes (count (:root-causes (:quiescent st)))})})
@@ -1195,7 +1234,10 @@
      ;; (main's t is not the next one) lists main again (index), k8s's relist after a gap
      :main (let [db (pdb/at-commit (:conn st) (:commit m)) t (:max-tx db)
                  next? (and (:idx st) (= (:prev m) (:t st)))
-                 idx (if next? (observe (:idx st) db (:ops m)) (index db))
+                 idx (if next?
+                       (observe (:idx st) db (:ops m))
+                       ;; a relisting after a gap keeps the wakes it held
+                       (reduce #(wake %1 db %2) (index db) (into (:woken (:idx st)) (:late (:idx st)))))
                  ;; a commit touching tasks, runs or config keys ends a quiet spell (root's own
                  ;; quiescent fact does not)
                  work? (or (not next?) (some (fn [[_ _ a]] (and (keyword? a) (watched-ns (namespace a)) (not= "seon.root" (namespace a)))) (:ops m)))
@@ -1208,6 +1250,9 @@
                  st (assoc st :db db :t t :idx idx :seen (inc (:seen st)) :lists (cond-> (:lists st 0) (not= (:prev m) (:t st -2)) inc)
                            :quiet (boolean (and (:quiet st) (not work?)))
                            :refused (if (and work? (not only-refused?)) #{} (:refused st #{})))
+                 ;; a root's first listing: its restart has no pending wakes, so each waiting agent owed a message is woken; then the wakes
+                 ;; held for agents that were running, which are waiting now
+                 st (cond-> st (not (:idx0 st)) boot-wakes true settle-late true (assoc :idx0 true))
                  [st outs] (pass st)
                  ;; the answers this commit's t reaches, held for it, taken in the order they came
                  [st outs] (reduce (fn [[st outs] a] (let [[st more] (take-answer st a)] [st (into outs more)]))
@@ -1223,6 +1268,14 @@
                   st (-> st (assoc-in [:flights task] {:act {:op :spawn :task task :env env} :agent agent}) (assoc :quiet false))
                   [st o] (request st task :tested {:op :judge :id agent})]
               [st {:to-api [o]}]))
+     ;; a message reached an agent (the api, once the writer answered its commit): woken if it waits, else held until it parks (wake).
+     ;; Before the first listing there is no index: that listing reads what is owed
+     :wake (if (:idx st)
+             (let [idx (wake (:idx st) (:db st) (:agent m))
+                   st (cond-> (assoc st :idx idx) (not= (:woken idx) (:woken (:idx st))) (assoc :quiet false))
+                   [st outs] (pass st)]
+               [(answer-waits st) {:to-api outs}])
+             [st {}])
      ;; an answer to a write main has not reached waits for main's commit of it (taken by :main)
      :answers (if (behind? st m)
                 [(update st :behind conj m) {}]

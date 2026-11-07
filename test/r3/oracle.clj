@@ -75,7 +75,7 @@
 
 (defn- ready?
   "Should task t have an agent working: released, not done, every need done, none live or awaiting its merge,
-  and, parked, more messages for it (none here: the generated histories write none) than it had taken."
+  and, parked, told or at its cap, woken (none here: the generated histories wake none)."
   {:malli/schema [:=> [:cat :map :seon.task/task] :boolean]}
   [v t]
   (let [id (:seon.task/id t) o (:seon.task/outcome t)]
@@ -83,8 +83,8 @@
          (not (done-in? v id))
          (empty? (blocked-in v id))
          (not (live? v id))
-         (not (#{:ready :gate :cap} o))
-         (or (not (#{:parked :told} o)) (> 0 (:seon.agent/taken (agent-of v id) 0))))))
+         (not (#{:ready :gate} o))
+         (not (#{:parked :told :cap} o)))))
 
 (defn- should-run-in
   {:malli/schema [:=> [:cat :map] [:vector :seon.task/id]]}

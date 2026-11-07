@@ -9,7 +9,7 @@
   (:require [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [clojure.edn :as edn]
             [clojure.string :as str] [seon.agent :as agent] [seon.proofs :as proofs] [seon.contract :as contract]
             [datahike.api :as d] [seon.db :as pdb] [seon.test-store :as ts] [seon.program-test] [seon.lib :as lib] [seon.program :as program] [seon.sock :as sock]
-            [seon.fx :as fx] [seon.cost :as cost] [seon.config :as cfg] [seon.merge :as pm] [seon.profile :as profile] [seon.task :as task] [seon.repl :as repl] [seon.ctx] [seon.turn] [my.test :as mt] [test-runner :as runner] [seon.context-test] [my.task] [my.agent] [seon.template :as tpl] [seon.stall-proofs] [clojure.core.async]))
+            [seon.fx :as fx] [seon.cost :as cost] [seon.config :as cfg] [seon.merge :as pm] [seon.profile :as profile] [seon.task :as task] [seon.repl :as repl] [seon.ctx] [seon.render] [seon.turn] [my.test :as mt] [test-runner :as runner] [seon.context-test] [my.task] [my.agent] [seon.template :as tpl] [seon.stall-proofs] [clojure.core.async]))
 
 (def ^:private await-file
   "seon.await, which a root (importing src only) loads by this path."
@@ -1723,36 +1723,127 @@
              "so the agent's end carries nothing of it back onto main")
          (finally (reset! agent/state old) (reset! agent/link old-link) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
 
-(deftest an-agent-takes-its-sessions-entries-from-main
-  ;; design one-derivation 4.1 section 5: delivery is the fact. A session whose process is gone
-  ;; is spawned again, and its agent (the session's key) must take the entries main holds to its branch; a frame
-  ;; pushed only to a live process left such a wake with nothing, parked short of main's count, and spawned again
+(defn- delivery-world
+  "(f {:conn :as :ka :kb :cfg :heads}) in a test store with two agents on parked tasks, each on a branch of its own forked from main
+  (demo/w's a1 and demo/x's a2): (as k thunk) runs thunk as agent k, this process's state held for it (its branch's connection, as
+  its process holds it), `heads` answers each branch's db. See docs/users.md#messages."
+  [f]
   (ts/test-branch!
    (fn [cfg conn]
      (let [_ (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "w" :seon.task/plan "Wait." :seon.task/proofs #{}}
                                                      {:seon.task/ns 'demo :seon.task/name "x" :seon.task/plan "Wait." :seon.task/proofs #{}}]))
-           ab (pdb/on-main (:branch cfg) :agent-entries)
-           k (task/agent-key "boot-1" :a1)
-           ;; main names an agent's branch as it is; the store qualifies it on a test's main
-           _ (d/transact conn (into (ts/work-tx "demo/w" :parked {:agent :a1 :branch :agent-entries})
-                                    (ts/work-tx "demo/x" :running {:agent :a3 :branch :elsewhere})))
-           ;; the session's branch, then on main: a verdict to its agent's branch, a message to another session's
-           _ (d/branch! conn (:branch cfg) ab)
-           br (:seon.agent/branch (d/entity @conn [:seon.agent/key k]))
-           _ (d/transact conn (task/message-tx "m-v" :verdict "root" br "red: demo-test/w is red"))
-           _ (d/transact conn (task/message-tx "m-x" :message "user" (:seon.agent/branch (d/entity @conn [:seon.agent/key (task/agent-key "boot-1" :a3)])) "not yours"))
-           store-conn (d/connect (assoc cfg :branch ab))
+           ba (pdb/on-main (:branch cfg) :msg-a) bb (pdb/on-main (:branch cfg) :msg-b)
+           ka (task/agent-key "boot-1" :a1) kb (task/agent-key "boot-1" :a2)
+           _ (d/transact conn (into (ts/work-tx "demo/w" :parked {:agent :a1 :branch :msg-a}) (ts/work-tx "demo/x" :parked {:agent :a2 :branch :msg-b})))
+           _ (d/branch! conn (:branch cfg) ba)
+           _ (d/branch! conn (:branch cfg) bb)
+           conns {ka (d/connect (assoc cfg :branch ba)) kb (d/connect (assoc cfg :branch bb))}
+           branches {ka ba kb bb}
            [a b] (sock/socketpair)
-           old @agent/state old-link @agent/link]
-       (try
-         (reset! agent/link {:fd a}) (reset! agent/state {:store-conn store-conn :cfg cfg :branch ab :key k :db @store-conn})
-         (is (= [{:id "m-v" :kind :verdict :from "root" :branch br :body "red: demo-test/w is red"}]
-                (agent/untaken-entries))
-             "the session takes what main holds to its branch, and nothing of another session's")
-         (agent/transact! (task/message-tx "m-v" :verdict "root" br "red: demo-test/w is red"))
-         (agent/commit!)
-         (is (= [] (agent/untaken-entries)) "once its branch holds it, it is taken")
-         (finally (reset! agent/state old) (reset! agent/link old-link) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
+           old @agent/state old-link @agent/link
+           as (fn [k thunk]
+                (reset! agent/link {:fd a})
+                (reset! agent/state {:store-conn (conns k) :cfg cfg :branch (branches k) :key k :db @(conns k) :base @conn})
+                (thunk))]
+       (try (f {:conn conn :as as :ka ka :kb kb :cfg cfg :heads (fn [k] @(conns k))})
+            (finally (reset! agent/state old) (reset! agent/link old-link) (doseq [c (vals conns)] (d/release c)) (lib/c-close a) (lib/c-close b)))))))
+
+(defn- messages-held
+  "The bodies of the messages this agent's @ctx holds, in the order they reached the branch."
+  [] (mapv :seon.message/body (sort-by :db/id (vals (:messages @seon.ctx/ctx)))))
+
+(defn- remove-held!
+  "The agent removes the one message its @ctx holds, as `(swap! ctx update :messages dissoc e)` does, and its branch commits."
+  [] (swap! seon.ctx/ctx update :messages dissoc (first (keys (:messages @seon.ctx/ctx)))) (agent/commit!))
+
+(deftest one-message-reaches-two-agents
+  ;; docs/users.md#messages: one entity to two agents; each holds it; a removal retracts that agent's own ref only
+  (delivery-world
+   (fn [{:keys [conn as ka kb heads]}]
+     (let [body (str "to both " (random-uuid))
+           _ (d/transact conn (task/message-tx "m-both" "owner" [ka kb] body 1000))
+           ref-of (fn [db k] (set (map :seon.agent/key (:seon.message/to (d/entity db [:seon.message/id "m-both"])))))]
+       (is (= #{ka kb} (ref-of @conn nil)) "main holds the one entity, to both")
+       (as ka #(agent/deliver! 1))
+       (as kb #(agent/deliver! 1))
+       (as ka #(is (= [body] (messages-held)) "a holds it"))
+       (as kb #(is (= [body] (messages-held)) "b holds it"))
+       (is (= #{ka} (ref-of (heads ka) nil)) "a's branch has its own ref only")
+       (as ka remove-held!)
+       (as ka #(is (= [] (messages-held)) "a removed it"))
+       (is (= #{} (ref-of (heads ka) nil)) "a's ref is retracted")
+       (as kb #(is (= [body] (messages-held)) "b still holds it"))
+       (is (= #{ka kb} (ref-of @conn nil)) "and main still names both")))))
+
+(deftest a-removed-message-is-not-delivered-again
+  ;; docs/users.md#messages: the entity stays on the branch, so it is delivered once; the model's request no longer holds it
+  (delivery-world
+   (fn [{:keys [conn as ka cfg]}]
+     (let [body (str "once " (random-uuid))
+           _ (d/transact conn (task/message-tx "m-once" "owner" [ka] body 1000))
+           says (fn [] (let [db (agent/db) a (pdb/eid db :seon.agent/key ka)
+                             w (seon.render/draw (:tree (seon.ctx/build db a (:branch @agent/state))) seon.ctx/changes db (seon.render/declared-var :seon.render/render-ctx) {:model-only true :once true})]
+                         (try (pr-str (into [] (mapcat second) (seon.render/wire w))) (finally (seon.render/dispose-walk! w)))))]
+       (as ka #(do (is (= [{:id "m-once" :from "owner" :body body :sent-ms 1000}] (agent/undelivered)) "main holds it for this agent")
+                   (is (= 1 (count (agent/deliver! 1))))
+                   (is (str/includes? (says) body) "the request holds it")
+                   (remove-held!)
+                   (is (= [] (agent/undelivered)) "its entity is on the branch: nothing to deliver")
+                   (is (= [] (agent/deliver! 2)) "a later turn brings nothing")
+                   (is (= [] (messages-held)))
+                   (is (not (str/includes? (says) body)) "and the request no longer holds it")))))))
+
+(deftest a-program-pull-leaves-messages-alone
+  ;; docs/users.md#messages: merge-main! brings the program, never another agent's messages
+  (delivery-world
+   (fn [{:keys [conn as ka kb heads]}]
+     (let [body (str "for b " (random-uuid))
+           _ (d/transact conn (task/message-tx "m-b" "owner" [kb] body 1000))
+           [v nsx] (d/q '[:find [?v ?n] :where [?v :var/name app.m0/f1] [?v :var/form ?f] [?f :form/ns ?n]] @conn)
+           _ (d/transact conn [{:db/id "f1'" :form/id "app.m0/f1-moved" :form/ns nsx :form/order 100 :form/defines [v]
+                                :form/src "(defn f1 {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 100))"}
+                               [:db/add v :var/form "f1'"]])
+           on-branch (fn [k] (d/q '[:find [?id ...] :where [_ :seon.message/id ?id]] (heads k)))]
+       (as ka #(is (true? (:ok (agent/merge-main! #{}))) "the pull applied main's program change"))
+       (is (= [] (on-branch ka)) "and no message of b's came with it")
+       (is (= [] (on-branch kb)) "b's branch holds none until b's own delivery")
+       (as ka #(is (= [] (agent/deliver! 1)) "a is sent none"))
+       (as kb #(do (agent/deliver! 1) (is (= [body] (messages-held))) (is (= ["m-b"] (on-branch kb)))))))))
+
+(deftest a-message-through-removal-merge-and-restart
+  ;; docs/users.md#messages, context's break test, on the branches of a store (a restart is a process holding the branch anew:
+  ;; a root restarting is not set up here): a message arrives after a turn's reply and evals, lands in the next turn after them,
+  ;; leaves the request's earlier bytes as they were, is removed, the branch merges up, and the agent held anew is not sent it again
+  (delivery-world
+   (fn [{:keys [conn as ka kb cfg heads]}]
+     (let [body (str "late " (random-uuid))
+           says (fn [] (let [db (agent/db) a (pdb/eid db :seon.agent/key ka)
+                             w (seon.render/draw (:tree (seon.ctx/build db a (:branch @agent/state))) seon.ctx/changes db (seon.render/declared-var :seon.render/render-ctx) {:model-only true :once true})]
+                         (try (vec (mapcat second (seon.render/wire w))) (finally (seon.render/dispose-walk! w)))))
+           texts (fn [ms] (mapv #(pr-str (select-keys % [:role :content :tool-calls])) ms))]
+       (as ka #(agent/transact! (into (ts/turn-tx ka 1 {:seon.model-call/reply "Looking."})
+                                      [{:seon.eval/id "e1" :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key ka} :seon.eval/code "(+ 1 2)" :seon.eval/call (task/call-ref ka 1)
+                                        :seon.eval/response {:handle 'result/e1 :value 3}}])))
+       (let [before (as ka #(texts (says)))
+             _ (d/transact conn (task/message-tx "m-late" "owner" [ka kb] body 1000))
+             _ (as ka #(agent/deliver! 2))
+             after (as ka #(texts (says)))
+             at (fn [ms] (first (keep-indexed (fn [i m] (when (str/includes? m body) i)) ms)))]
+         (is (some? (at after)) "the message is in the request")
+         (is (= before (subvec after 0 (count before))) "every earlier byte of the request is as it was")
+         (is (< (dec (count before)) (at after)) "and it comes after the turn's reply and evals")
+         (as ka remove-held!)
+         (let [base (pdb/branch-base conn (:branch cfg) (pdb/on-main (:branch cfg) :msg-a)) head (heads ka) main @conn
+               r (pm/delta-three-way base head main #{})]
+           (is (empty? (:ours r)) "merged up, the branch has no change of its own from the message")
+           (d/merge-db conn #{(pdb/on-main (:branch cfg) :msg-a)} (pm/merge-tx main base head (keys (:ours r)) #{}) (pdb/tx-meta (:branch cfg))))
+         (as ka #(do (is (= [] (agent/undelivered)) "after the merge, held anew: not delivered again")
+                     (is (= [] (agent/deliver! 3)))
+                     (is (= [] (messages-held)))))
+         (as kb #(do (is (= 1 (count (agent/undelivered))) "another recipient is still owed it")
+                     (agent/deliver! 2)
+                     (is (= [body] (messages-held)))))
+         (is (= #{ka kb} (set (map :seon.agent/key (:seon.message/to (d/entity @conn [:seon.message/id "m-late"]))))) "main still names both"))))))
 
 (deftest an-opened-eval-on-main-reaches-the-agents-ctx-at-its-next-take
   ;; owner, 2026-10-26: take! is the one way outside facts reach the agent's branch, and so its
@@ -1784,9 +1875,9 @@
          (is (= [{:seon.eval/id "e1" :seon.eval/opened true}]
                 (agent/untaken-facts))
              "what main holds of its evals that the branch does not; e9 is no eval of its branch")
-         (is (= [] (agent/take-main! 1)) "the take a turn makes (seon.turn/take!): no entries here, the facts written")
+         (is (= [] (agent/deliver! 1)) "the delivery a turn makes (seon.turn/deliver!): no messages here, the facts written")
          (is (true? (:seon.eval/opened (member :evals :seon.eval/id "e1"))) "the opened eval")
-         (is (= [] (agent/untaken-facts)) "taken: nothing more to copy")
+         (is (= [] (agent/untaken-facts)) "delivered: nothing more to copy")
          (finally (reset! agent/state old) (reset! agent/link old-link) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
 
 (deftest a-stall-task-closes-when-its-conditions-hold
@@ -1965,22 +2056,27 @@
   root's (not nil, :running, :ready or :gate: a merge follows those)."
   "(fn [o] (contains? #{:parked :cap :told :behind :done :merged :dead :lost :closed :refused} o))")
 
+(defn- settled-code
+  "Root-REPL code that waits on root for task w's agent to stand its task at outcome n times (the task's outcome written o n times, by
+  its history), or for the task to stand at another outcome; answers the task as pulled, with its agent's key and id."
+  {:malli/schema [:=> [:cat :seon.task/id :seon.task/outcome pos-int?] :string]}
+  [w o n]
+  (str "(seon.root/await-db sys \"the agent stood at " o ", or its task stood otherwise\""
+       " #(let [t (datahike.api/pull % '[:seon.task/outcome {:seon.task/agent [:seon.agent/key :seon.agent/id]}] [:seon.task/id " (pr-str w) "])"
+       "       n (or (datahike.api/q '[:find (count ?tx) . :in $ ?id :where [?t :seon.task/id ?id] [?t :seon.task/outcome " o " ?tx true]] (datahike.api/history %) " (pr-str w) ") 0)]"
+       "    (or (and (= " o " (:seon.task/outcome t)) (>= n " n "))"
+       "        (not (contains? #{nil :running " o "} (:seon.task/outcome t))))))"))
+
 (defn- parked-code
-  "Root-REPL code that waits on root for task w's agent to park its session n times (its judgings written: the messages it
-  had taken, :seon.agent/taken, is n - 1 at the nth), or for the task to stand at another outcome; answers the task as pulled,
-  with its agent's key, id and taken."
+  "Root-REPL code that waits on root for task w's agent to park its session n times (`settled-code` at :parked)."
   {:malli/schema [:=> [:cat :seon.task/id pos-int?] :string]}
-  [w n]
-  (str "(seon.root/await-db sys \"the agent parked, or its task stood otherwise\""
-       " #(let [t (datahike.api/pull % '[:seon.task/outcome {:seon.task/agent [:seon.agent/key :seon.agent/id :seon.agent/taken]}] [:seon.task/id " (pr-str w) "])]"
-       "    (or (and (= :parked (:seon.task/outcome t)) (= " (dec n) " (get-in t [:seon.task/agent :seon.agent/taken] 0)))"
-       "        (not (contains? #{nil :running :parked} (:seon.task/outcome t))))))"))
+  [w n] (settled-code w :parked n))
 
 (defn- agent-code
-  "Root-REPL code answering task w's agent on main: {:seon.agent/key :seon.agent/id :seon.agent/taken}."
+  "Root-REPL code answering task w's agent on main: {:seon.agent/key :seon.agent/id}."
   {:malli/schema [:=> [:cat :seon.task/id] :string]}
   [w]
-  (str "(:seon.task/agent (datahike.api/pull @(:conn sys) '[{:seon.task/agent [:seon.agent/key :seon.agent/id :seon.agent/taken]}] [:seon.task/id " (pr-str w) "]))"))
+  (str "(:seon.task/agent (datahike.api/pull @(:conn sys) '[{:seon.task/agent [:seon.agent/key :seon.agent/id]}] [:seon.task/id " (pr-str w) "]))"))
 
 (def ^:private branch-of-code
   "Root-REPL function source: the db of task w's branch."
@@ -1990,18 +2086,17 @@
   "Root-REPL code for the send tests: task w's agent B parks (it waits for a message), agent a (the harness's) sends B a body made here
   (seon.agent/send-message, evaluated at a), B's process ends (before-send? false: after the send; true: before it), and the writer is
   asked for main's db (its queue holds the send's write before this ask, so the send is in the db it answers). Answers
-  {:body :b :branch :found :sender}: the body, B's id, the branch of B that main names it by, and the [branch from] of every message fact
-  on main with that body."
+  {:body :b :bkey :found :sender}: the body, B's id, B's key, and the [recipient key, from] of every message on main with that body."
   {:malli/schema [:=> [:cat :string :string :boolean] :string]}
   [w a before-send?]
   (str "(let [bid (:seon.agent/id " (agent-code w) ")"
-       "      branch (seon.db/off-main (seon.db/conn-main (:conn sys)) (get-in (c/state sys) [:agents bid :branch]))"
+       "      bkey " (str "(:seon.agent/key " (agent-code w) ")")
        "      body (str \"msg-\" (random-uuid))"
        "      end! (fn [] (c/kill! sys bid) (loop [] (let [e (clojure.core.async/<!! ready-ev)] (if (and (#{:ended :dead :killed} (:type e)) (= bid (:agent e))) :gone (recur)))))"
        "      send! (fn [] @(c/submit! sys :" a " (str \"(my.agent/send-message [\" (pr-str bid) \"] \" (pr-str body) \")\") {:origin :outside}))]"
        "  (if " before-send? " (do (end!) (send!)) (do (send!) (end!)))"
-       "  {:body body :b bid :branch branch :sender " (pr-str a)
-       "   :found (datahike.api/q '[:find ?br ?from :in $ ?body :where [?m :seon.message/body ?body] [?m :seon.message/branch ?br] [?m :seon.message/from ?from]]"
+       "  {:body body :b bid :bkey bkey :sender " (pr-str a)
+       "   :found (datahike.api/q '[:find ?k ?from :in $ ?body :where [?m :seon.message/body ?body] [?m :seon.message/to ?a] [?a :seon.agent/key ?k] [?m :seon.message/from ?from]]"
        "                          (:db @(seon.root/call! sys {:op :write :req {:op :branch-db :branch :db}})) body)}"
        ")"))
 
@@ -2019,18 +2114,18 @@
    :decls [{:seon.task/name "w" :seon.task/plan "Wait." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]})
 
 (deftest a-send-survives-its-receiver-dying
-  ;; docs/users.md#messages: an agent's send is one fact on main, to the recipient's branch, so it is there however the recipient ends
+  ;; docs/users.md#messages: an agent's send is one entity on main, to the recipient's agent, so it is there however the recipient ends
   (let [[_ r] (in-agent #(send-test-forms % false) waiting-b)
-        {:keys [body branch found sender]} (:value r)]
+        {:keys [body bkey found sender]} (:value r)]
     (is (string? body) (pr-str r))
-    (is (= #{[branch sender]} found) "the one message fact on main, to B's branch, from A")))
+    (is (= #{[bkey sender]} found) "the one message entity on main, to B, from A")))
 
 (deftest a-send-to-an-agent-with-no-process-waits-on-main
   ;; docs/users.md#messages: the recipient has no process (it ended), yet its entity is on main with its branch, so the send is the same fact
   (let [[_ r] (in-agent #(send-test-forms % true) waiting-b)
-        {:keys [body branch found sender]} (:value r)]
+        {:keys [body bkey found sender]} (:value r)]
     (is (string? body) (pr-str r))
-    (is (= #{[branch sender]} found) "the send is not refused: the fact is on main, to B's branch, from A")))
+    (is (= #{[bkey sender]} found) "the send is not refused: the entity is on main, to B, from A")))
 
 (deftest a-reply-is-recorded-before-its-evals-run
   ;; deepseek-run6: records' call 28 read as a model call nobody answered, and its cost as none: the model had answered, and an eval of that
@@ -2288,7 +2383,7 @@
                   ;; a stage's turns: the model calls whose basis names the stage's task (the one agent works both, its turns one sequence)
                   " sent (fn [id] (mapv second (sort-by first (for [[n bs] (datahike.api/q '[:find ?n ?bs :where [?m :seon.model-call/n ?n] [?m :seon.model-call/origin :model] [?m :seon.model-call/basis ?bs]] b) :when (= id (:task bs))]"
                   "                                              [n (:messages (seon.context/render (datahike.api/commit-as-db (:store b) (:commit bs)) bs))]))))"
-                  " boundary (datahike.api/q '[:find ?mid . :in $ ?br :where [?m :seon.message/branch ?br] [?m :seon.message/kind :stage] [?m :seon.message/from \"root\"] [?m :seon.message/id ?mid]] b (seon.task/default-branch \"" % "/st\"))]"
+                  " boundary (datahike.api/q '[:find ?mid . :in $ ?k :where [?a :seon.agent/key ?k] [?m :seon.message/to ?a] [?m :seon.message/from \"root\"] [?m :seon.message/id ?mid]] b (:seon.agent/key (:seon.task/agent (datahike.api/pull @(:conn sys) '[{:seon.task/agent [:seon.agent/key]}] [:seon.task/id \"" % "/st\"]))))]"
                   " {:ended ended :design (sent \"" % "/st\") :implement (sent \"" % "/st-implement\") :boundary boundary})")
         names (volatile! nil)
         [_ r] (in-agent #(do (vreset! names %) [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")} {:op :eval :agent "root" :code (code (:ns %))}])
@@ -2326,18 +2421,18 @@
                                          " pid1 (get-in (c/state sys) [:agents ag :pid])"
                                          " b1 (branch-of " (pr-str w) ")"
                                          " turn1 (:seon.agent/turn (datahike.api/entity b1 [:seon.agent/key k]))"
-                                         " taken1 (:seon.agent/taken " (agent-code w) ")]"
+                                         " max1 (:seon.agent/max-turns (datahike.api/entity @(:conn sys) [:seon.agent/key k]))]"
                                          " @(seon.root/message! sys ag \"carry on\") " (parked-code w 2)
                                          " (let [b2 (branch-of " (pr-str w) ")]"
-                                         "  {:key k :pid1 pid1 :pid2 (get-in (c/state sys) [:agents ag :pid]) :taken [taken1 (:seon.agent/taken " (agent-code w) ")]"
+                                         "  {:key k :pid1 pid1 :pid2 (get-in (c/state sys) [:agents ag :pid]) :max-turns [max1 (:seon.agent/max-turns (datahike.api/entity @(:conn sys) [:seon.agent/key k]))]"
                                          "   :turns [turn1 (:seon.agent/turn (datahike.api/entity b2 [:seon.agent/key k]))]"
                                          "   :numbers (sort (datahike.api/q '[:find [?n ...] :where [?m :seon.model-call/n ?n] [?m :seon.model-call/origin :model]] b2))})))")}]))
                         {:config {:seon.config.ai/script 'seon.fixtures/wait-call}
                          :decls [{:seon.task/name "w" :seon.task/plan "Wait." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]})
-        {:keys [key pid1 pid2 taken turns numbers]} (:value r)
+        {:keys [key pid1 pid2 max-turns turns numbers]} (:value r)
         [t1 t2] turns]
     (is (string? key) (pr-str r))
-    (is (= [0 1] taken) "the wake took the message the parked one had not")
+    (is (= (cfg/value :seon.config.agent/wake-turns) (- (second max-turns) (first max-turns))) "the wake raised the agent's budget by its allowance, in the write that started it")
     (is (and (pos? t1) (< t1 t2)) (str "and ran turns of its own: " (pr-str turns)))
     (is (= (range 1 (inc t2)) numbers)
         "the wake's turns go on from the parked one's: the agent's one sequence, none restarting and none over a recorded one")
@@ -2362,6 +2457,42 @@
                         {:config {:seon.config.ai/script 'seon.fixtures/text-reply}
                          :decls [{:seon.task/name "w" :seon.task/plan "Wait." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]})]
     (is (= ["Saw my own reply."] (:intent (:value r))) (pr-str r))))
+
+(deftest a-capped-agent-that-is-messaged-runs-its-allowance
+  ;; docs/users.md#messages, docs/turn.md#the-cap: a message wakes an agent whose turns are spent, and the write that starts it raises its
+  ;; budget by the wake allowance, so it runs that many turns more and stands at its cap again
+  (let [[_ r] (in-agent (fn [{:keys [ns]}]
+                          (let [w (str ns "/w")]
+                            [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")}
+                             {:op :eval :agent "root"
+                              :code (str "(let [branch-of " branch-of-code "]"
+                                         " (my.root/run! sys [" (pr-str w) "]) " (settled-code w :cap 1)
+                                         " (let [a " (agent-code w) " ag (:seon.agent/id a) k (:seon.agent/key a)"
+                                         "       turn-of (fn [] (:seon.agent/turn (datahike.api/entity (branch-of " (pr-str w) ") [:seon.agent/key k])))"
+                                         "       max-of (fn [] (:seon.agent/max-turns (datahike.api/entity @(:conn sys) [:seon.agent/key k])))"
+                                         "       t1 (turn-of) m1 (max-of)]"
+                                         "   @(seon.root/message! sys ag \"carry on\") " (settled-code w :cap 2)
+                                         "   {:turns [t1 (turn-of)] :max-turns [m1 (max-of)]}))")}]))
+                        {:config {:seon.config.ai/script 'seon.fixtures/same-call :seon.config.agent/max-turns 1}
+                         :decls [{:seon.task/name "w" :seon.task/plan "Work." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]})
+        allowance (cfg/value :seon.config.agent/wake-turns)]
+    (is (= {:turns [1 (inc allowance)] :max-turns [1 (inc allowance)]} (:value r))
+        "one turn to its cap; the wake raised the budget by the allowance and it ran those turns, to its cap again")))
+
+(deftest a-reply-with-no-evals-stops-with-turns-left
+  ;; docs/model.md#one-tool-eval: a call whose evals are empty is a reply of its message alone, as text with no call is: nothing runs and the
+  ;; agent waits, with turns left
+  (let [call (fn [args] {:usage {:prompt_tokens 10 :completion_tokens 2}
+                         :choices [{:finish_reason "tool_calls" :message {:content nil :tool_calls [{:id "c1" :function {:name "eval" :arguments args}}]}}]})
+        empty-evals (seon.model/reply-of (call "{\"message-md\":\"Nothing to run; I wait for you.\",\"evals\":[]}") 1 100)
+        no-evals (seon.model/reply-of (call "{\"message-md\":\"Done.\"}") 1 100)
+        one-eval (seon.model/reply-of (call "{\"message-md\":\"Reading.\",\"evals\":[{\"intent\":\"read\",\"code\":\"(+ 1 2)\"}]}") 1 100)
+        [end] (in-agent #(vector (str "(seon.turn/work! {:task " (pr-str (:task %)) " :max-turns 5})"))
+                          {:config {:seon.config.ai/script 'seon.fixtures/text-reply}})]
+    (is (= ["Nothing to run; I wait for you." nil] [(:text empty-evals) (:tool-calls empty-evals)]) "evals empty: its message, no call")
+    (is (= ["Done." nil] [(:text no-evals) (:tool-calls no-evals)]) "evals missing: the same")
+    (is (= ["Reading." ["c1"]] [(:text one-eval) (mapv :id (:tool-calls one-eval))]) "an eval is a call as before")
+    (is (= [:waiting 1] ((juxt :outcome :model-calls) (:value end))) (str "the agent waits after one turn of five: " (pr-str end)))))
 
 (deftest a-woken-agent-is-not-sent-its-own-loop
   ;; task seon.render/one-way-to-make-what-an-agent-is-sent, step 2: the eval that ran the parked work (seon.turn/work!) is
@@ -2458,8 +2589,8 @@
 
 (deftest a-model-turn-records-its-text-and-the-message-it-took
   ;; the owner's message is a fact root writes on
-  ;; main (from "owner", to the branch of the agent); the turn that takes it writes the same
-  ;; fact on its branch before its commit, naming the agent (:seon.message/agent), so the conversation
+  ;; main (from "owner", to the agent); the turn that delivers it writes the same
+  ;; entity on its branch before its commit, with the agent's own ref (:seon.message/to), so the conversation
   ;; and every later reading read its text from that commit (the basis names no message); the reply's message (here the scripted model's)
   ;; is the turn's reply and its call's eval's text, and the call names its one eval
   ;; (docs/render.md)
@@ -2472,7 +2603,7 @@
                                         "(+ 1 2)"
                                         (str "(let [db (seon.agent/db) m (datahike.api/pull db '[*] [:seon.model-call/id (str (:key @seon.agent/state) \"/1\")])"
                                              "      evals (vec (datahike.api/q '[:find ?i ?c :where [?mc :seon.model-call/n 1] [?e :seon.eval/call ?mc] [?e :seon.eval/call-id _] [?e :seon.eval/id ?i] [?e :seon.eval/code ?c]] db))"
-                                             "      msgs (fn [db] (vec (datahike.api/q '[:find ?id ?f ?b ?k :where [?m :seon.message/id ?id] [?m :seon.message/from ?f] [?m :seon.message/body ?b] [?m :seon.message/agent ?a] [?a :seon.agent/key ?k]] db)))]"
+                                             "      msgs (fn [db] (vec (datahike.api/q '[:find ?id ?f ?b ?k :in $ ?k :where [?m :seon.message/id ?id] [?m :seon.message/from ?f] [?m :seon.message/body ?b] [?m :seon.message/to ?a] [?a :seon.agent/key ?k]] db (:key @seon.agent/state))))]"
                                              "  {:calls (mapv (fn [[i c]] {:eval i :code c}) evals) :reply (:seon.model-call/reply m) :basis-keys (set (keys (:seon.model-call/basis m)))"
                                              "   :agent-key (:key @seon.agent/state) :on-branch (msgs db)"
                                              "   :turn (:seon.agent/turn (datahike.api/entity db [:seon.agent/key (:key @seon.agent/state)]))"
@@ -2484,15 +2615,15 @@
                                              "   :intent (mapv #(datahike.api/q '[:find ?r . :in $ ?i :where [?e :seon.eval/id ?i] [?e :seon.eval/intent ?r]] db %) (map first evals))})")
                                         {:op :eval :agent "root"
                                          :code (str "(datahike.api/q '[:find ?id ?f ?to ?b :where [?m :seon.message/id ?id] [?m :seon.message/from ?f]"
-                                                    " [?m :seon.message/branch ?br] [?a :seon.agent/branch ?br] [?a :seon.agent/id ?to] [?m :seon.message/body ?b]] @(:conn sys))")}])
+                                                    " [?m :seon.message/to ?a] [?a :seon.agent/id ?to] [?m :seon.message/body ?b]] @(:conn sys))")}])
                                        {:config {:seon.config.ai/script 'seon.fixtures/thinking-call}})
         end (:value end)
         {:keys [calls on-branch committed intent reply agent-key basis-keys] :as probed} (:value turn)
         ;; the shared root's main holds every earlier test's messages: this agent's are the ones to its id
         [[mid from to body] :as facts] (filterv #(= (keyword (:agent @names)) (nth % 2)) (:value on-main))]
     (is (= 1 (:model-calls end)) (pr-str end))
-    (is (= [["owner" (keyword (:agent @names)) "use demo/g"]] (mapv #(subvec % 1) facts)) "one fact on main: from the owner, to the branch of the agent")
-    (is (= [[mid "owner" "use demo/g" agent-key]] on-branch) "the turn wrote the fact root wrote, by its id, naming the agent")
+    (is (= [["owner" (keyword (:agent @names)) "use demo/g"]] (mapv #(subvec % 1) facts)) "one entity on main: from the owner, to the agent")
+    (is (= [[mid "owner" "use demo/g" agent-key]] on-branch) "the turn wrote the entity root wrote, by its id, with the agent's ref")
     (is (= on-branch committed) "and it is in the commit the turn read")
     (is (not-any? #{:observed :taken} basis-keys) "the basis names no message: the fact is the record")
     (is (contains? basis-keys :t) "it holds its t: a commit a sweep took is drawn as of it (docs/storage.md#collection)")
@@ -2503,7 +2634,7 @@
     ;; docs/turn.md#the-turn-is-a-number: the agent's number, the model call's id and the number each record took
     (is (= 1 (:turn probed)) "the agent's first turn")
     (is (= [(str agent-key "/0") (str agent-key "/1")] (sort (:call-ids probed))) "its model call is <agent key>/<n>")
-    (is (= [1] (:message-turns probed)) "the message the turn took carries its number")
+    (is (= [1] (:message-turns probed)) "the message the turn delivered carries its number")
     (is (= #{[(:agent @names) 1] ["outside" 1] ["seon" 0]} (:eval-turns probed)) "the model's eval carries the turn, so does an outside eval after it, the number in force, and the page Seon ran before the turn moved, the turn before")
     (is (empty? (:loop-eval-turns probed)) "the turn loop's own eval, no conversation record, takes none")))
 

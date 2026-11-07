@@ -108,14 +108,14 @@
               ;; in the order a model fills them: it talks and thinks before the code
               :parameters {:type "object"
                            :properties (array-map :message-md {:type "string" :description "This reply's one message to whoever started you, in Markdown, covering all of its evals: what they will do, an answer to a question, anything they should know. A sentence is fine."}
-                                                  :evals {:type "array" :minItems 1
-                                                          :description "The evals this reply runs, in order."
+                                                  :evals {:type "array"
+                                                          :description "The evals this reply runs, in order. None: the reply is just its message, and you wait until someone answers."
                                                           :items {:type "object"
                                                                   :properties (array-map :intent {:type "string" :description "What this eval is about to do. A sentence is fine."}
                                                                                          :code {:type "string" :description "Clojure to evaluate."})
                                                                   :required ["intent" "code"]
                                                                   :additionalProperties false}})
-                           :required ["message-md" "evals"]
+                           :required ["message-md"]
                            :additionalProperties false}}})
 
 (defn- wire-message
@@ -194,16 +194,19 @@
     reasoning-effort (assoc :reasoning_effort (name reasoning-effort))))
 
 (defn call-evals
-  "One reply's call, its arguments j as read ({\"message-md\" \"evals\"}), as its evals, each {:id :code :intent}, the first carrying the message, a model's and an outside agent's alike: no evals is one eval's :problem, what is wrong, so nothing is
+  "One reply's call, its arguments j as read ({\"message-md\" \"evals\"}), as its evals, each {:id :code :intent}, the first carrying the message, a model's and an outside agent's alike: no evals is a reply of its message alone (none are run, and the agent waits, as it does for a reply of plain text), evals that are not a list one eval's :problem, what is wrong, so nothing is
   run, and an eval with no code as a string is that eval's. :code holds what came, for the record. See docs/model.md#one-tool-eval."
   {:malli/schema [:=> [:cat :any :string] [:vector [:map [:id :string] [:code :string] [:intent {:optional true} :string] [:message-md {:optional true} :string] [:problem {:optional true} :string]]]]}
   [j id]
   (let [shape "A call is {\"message-md\": <string>, \"evals\": [{\"intent\": <string>, \"code\": <string>}, ...]}."
         es (when (map? j) (get j "evals"))
         msg (when (map? j) (get j "message-md"))]
-    (if-not (and (sequential? es) (seq es))
-      (cond-> [{:id id :code (json/write-str j) :problem (str "this call was not run: evals is missing or empty. " shape)}]
+    (cond
+      (or (nil? es) (and (sequential? es) (empty? es))) []
+      (not (sequential? es))
+      (cond-> [{:id id :code (json/write-str j) :problem (str "this call was not run: evals is not a list. " shape)}]
         (string? msg) (assoc-in [0 :message-md] msg))
+      :else
       (vec (map-indexed
             (fn [i e]
               (let [code (when (map? e) (get e "code"))]
@@ -215,23 +218,24 @@
             es)))))
 
 (defn- evals-of
-  "A provider's tool call as the reply's evals (`call-evals`), from its tool name, its JSON arguments and its id; another tool's name or arguments cut off or not JSON are one eval's :problem, :code holding what came. See docs/model.md#one-tool-eval."
-  {:malli/schema [:=> [:cat [:maybe :string] [:maybe :string] :string] [:vector :map]]}
+  "A provider's tool call as [evals said]: the reply's evals (`call-evals`), from its tool name, its JSON arguments and its id, and the message of a call with no evals (it is that call's whole reply); another tool's name or arguments cut off or not JSON are one eval's :problem, :code holding what came. See docs/model.md#one-tool-eval."
+  {:malli/schema [:=> [:cat [:maybe :string] [:maybe :string] :string] [:tuple [:vector :map] [:maybe :string]]]}
   [tool arguments id]
   (let [a (or arguments "")
         j (try (json/read-str a) (catch Throwable _ nil))
         problem (cond (and tool (not= "eval" tool)) (str "there is one tool, eval; " tool " is not a tool here")
                       (not (map? j)) "the arguments are cut off or are not JSON")]
     (if problem
-      [{:id id :code a :problem (str "this call was not run: " problem ". A call is {\"message-md\": <string>, \"evals\": [{\"intent\": <string>, \"code\": <string>}, ...]}.")}]
-      (call-evals j id))))
+      [[{:id id :code a :problem (str "this call was not run: " problem ". A call is {\"message-md\": <string>, \"evals\": [{\"intent\": <string>, \"code\": <string>}, ...]}.")}] nil]
+      (let [es (call-evals j id)]
+        [es (when (empty? es) (let [m (get j "message-md")] (when (string? m) m)))]))))
 
 (defn- spoken
   "A model's reply text and evals ks, as [text evals]: the reply's one message is its message-md, or its text when it writes text instead, and both when it writes both (or makes two calls), since no word it wrote is dropped. `wire-messages` sends it back as the call's message-md. A reply with none still runs: it just said nothing.
   See docs/prompt.md#your-tool-and-your-user."
-  {:malli/schema [:=> [:cat [:maybe :string] [:vector :map]] [:tuple [:maybe :string] [:vector :map]]]}
-  [text ks]
-  (let [said (remove str/blank? (cons text (map :message-md ks)))]
+  {:malli/schema [:=> [:cat [:maybe :string] [:vector :map] [:sequential :string]] [:tuple [:maybe :string] [:vector :map]]]}
+  [text ks alone]
+  (let [said (remove str/blank? (concat [text] (map :message-md ks) alone))]
     [(if (seq said) (str/join "\n\n" said) text) (mapv #(dissoc % :message-md) ks)]))
 
 (def ^:private markup
@@ -258,8 +262,9 @@
   {:malli/schema [:=> [:cat :map number? [:maybe :int]] [:or :seon.model/completion :seon.model/failure]]}
   [j ms max-tokens]
   (let [msg (get-in j [:choices 0 :message])
+        parsed (mapv (fn [c] (evals-of (get-in c [:function :name]) (get-in c [:function :arguments]) (str (:id c)))) (:tool_calls msg))
         [text calls] (spoken (or (:content msg) (when (seq (:tool_calls msg)) ""))
-                             (into [] (mapcat (fn [c] (evals-of (get-in c [:function :name]) (get-in c [:function :arguments]) (str (:id c))))) (:tool_calls msg)))
+                             (into [] (mapcat first) parsed) (keep second parsed))
         calls (text-as-call text calls)
         reasoning (:reasoning_content msg)
         u (:usage j)

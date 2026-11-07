@@ -247,6 +247,12 @@
  ;; sits above the measured p90. Tokens are the paid resource; task
  ;; seon.model/budgets-are-data-and-spend-is-measured makes them the budget.
  :seon.config.agent/max-turns 40
+ ;; Unit: turns. What a wake adds to an agent's own budget (:seon.agent/max-turns), in the write that starts it, whoever sent the message
+ ;; that woke it (owner, 2026-11-07: "lets configure a wake allowance that increases the max turns and that is the main mechanism that
+ ;; controls the agentic loop"). At the bound the agent ends :cap as before and waits for the next wake. Provenance: a first value,
+ ;; a quarter of max-turns, from no measurement yet; the turns a woken agent spends answering are recorded per wake
+ ;; (:seon.agent/turn against its budget), and this moves with them. Two agents that answer each other spend this per wake each.
+ :seon.config.agent/wake-turns 10
  ;; Unit: addresses. Where every agent is told to look for more, beside its task's citations (the owner, 2026-11-05: "include some
  ;; references they can use to get more information about completing tasks or merging or whatever else is secondary and we aren't
  ;; showing right away"). Each is one line in the agent's "If you need more" part (seon.render.ui/references): the section's heading, a
