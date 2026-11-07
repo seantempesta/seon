@@ -783,13 +783,18 @@
 
 (defn- branch-inputs
   "Inputs in, a root's boot's, as branch db's tests read them: the schema class moved by the entries db holds beyond the binary's, which a
-  branch can register (program/schema-changes). A digest no gate's checkout shares only runs more. See docs/merging.md#verdicts-are-a-cache."
-  {:malli/schema [:=> [:cat :seon.program/inputs :seon.host/db] :seon.program/inputs]}
-  [in db]
-  (let [changes (program/schema-changes db)]
-    (if (empty? changes)
-      in
-      (update-in in [:config :seon.env/schemas] #(lib/digest (str % (sedn/encode (vec (sort-by key changes)))))))))
+  branch can register (program/schema-changes), and, for the files a branch changed since base (:file/text, a script), each one's class and the tree a
+  test reading files takes. A digest no gate's checkout shares only runs more. See docs/merging.md#verdicts-are-a-cache."
+  {:malli/schema [:=> [:cat :seon.program/inputs :seon.host/db [:maybe :seon.host/db]] :seon.program/inputs]}
+  [in db base]
+  (let [changes (program/schema-changes db)
+        moved (when base (mapcat identity (d/datoms-diff base db :aevt [:file/text])))
+        files (into (sorted-map) (for [dt moved :let [p (:file/path (d/entity db (:e dt)))] :when p] [p (:file/text (d/entity db (:e dt)))]))
+        mix (fn [old x] (lib/digest (str old (sedn/encode x))))]
+    (cond-> in
+      (seq changes) (update-in [:config :seon.env/schemas] mix (vec (sort-by key changes)))
+      (seq files) (update :tree mix (vec files))
+      (seq files) (update :config (fn [c] (reduce-kv (fn [c p text] (if-let [k (fx/env-class p)] (update c k mix [p text]) c)) c files))))))
 
 (defn test-plan
   "What judges branch db, as this process holds it: seon.proofs/plan of its tests' reach digests
@@ -834,7 +839,7 @@
         ;; built from nothing it cost 853 MB of a 1 GiB eval budget where an update costs 290 (a plan of main's
         ;; run, mode :main, selects with no base; measured 2026-10-30, 1,169 tests)
         g (branch-graph db (or base (:base @state)) in)
-        g (program/reach-indexed g (branch-inputs in db))
+        g (program/reach-indexed g (branch-inputs in db (or base (:base @state))))
         ;; a stall task's proofs read that task's cause, so they judge only a task that names them
         idx (into {} (filter (fn [[t _]] (and (judges? t) (or (contains? proofs t) (not (template/stall-proofs t)))))) (program/index-of g))
         cd (update-vals idx :digest)
