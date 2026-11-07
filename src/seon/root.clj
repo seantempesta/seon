@@ -624,6 +624,8 @@
                                          {:ns n :reason "no :ns/file on the branch: its forms were never written to a file"}))]
                        (cond (contract/error? r) (deliver-rid st o rid r)
                              (seq unread) (deliver-rid st o rid {:unread unread})
+                             ;; no process test reached: the writer's analysis of the candidate was the check
+                             (empty? (:tests dest)) (deliver-rid st o rid {:value {:results {}}})
                              :else (do (step/out! o [:fx/tests :in] {:req {:repo (:repo dest) :branch (:branch (:source st)) :files (:text r) :tests (:tests dest)}
                                                                      :prio (:prio dest 0) :dest {:rid rid}})
                                        st)))

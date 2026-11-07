@@ -662,8 +662,8 @@
     (is (= 3 (proofs/worth-shards ts 4 '{a/t 25000 a/u 25000} 30000)) "a test never measured counts as the mean")
     (is (= 1 (proofs/worth-shards ts 4 {} 30000)) "with none measured, one: it has nothing to split by")))
 
-;; docs/merging.md#a-slow-test-is-left-out: asked only of what would run, out of a plain and a merge's run, in a named or full one
-(deftest a-slow-test-is-left-out-unless-named-or-the-full-run
+;; docs/merging.md#a-slow-test-runs-last: asked only of what would run, out of a plain and a merge's run, in a named or full one
+(deftest a-slow-test-runs-last-unless-named-or-the-full-run
   (let [asked (atom nil)
         reach {:digests '{a/slow "d1" a/quick "d2" a/green "d3"} :process #{}
                :slow-of (fn [ds] (reset! asked ds) (select-keys '{a/slow 9000 a/green 9000} (keys ds)))}

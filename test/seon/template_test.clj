@@ -168,7 +168,7 @@
         "a long test is its own proof (no test reaches a test)")
     (is (= [] (filterv :seon.task/id (my.root/findings-tx (datahike.core/db-with db tx) g))) "filed once")))
 
-;; docs/merging.md#a-slow-test-is-left-out: its metric known ahead of time, itself its proof, filed once
+;; docs/merging.md#a-slow-test-runs-last: its metric known ahead of time, itself its proof, filed once
 (deftest a-slow-test-becomes-a-task-that-names-what-it-measured
   (let [db (t/world)
         tx (my.root/slow-tests-tx db '{app.x-test/waits 9000} 5000)

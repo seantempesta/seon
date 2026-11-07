@@ -195,7 +195,7 @@
 (defn slow-test
   "The task a slow test asks for: test var made fast, its claim unchanged, itself its proof; held, as every
   template's task is, until root or the owner releases it. Its name is fast-<name>, in the test's namespace, one
-  task a test. See docs/merging.md#a-slow-test-is-left-out."
+  task a test. See docs/merging.md#a-slow-test-runs-last."
   {:malli/schema [:=> [:cat :qualified-symbol :int :int] :seon.task/declaration]}
   [var ms bound]
   {:seon.task/ns (symbol (namespace var))
@@ -203,7 +203,7 @@
    :seon.task/kind :work
    :seon.task/proofs #{var}
    :seon.task/plan (str "`" var "` measured " ms " ms, at or over the bound of " bound " (:seon.config.proofs/slow-test-ms), so bin/prove "
-                        "and merges leave it out (docs/merging.md#a-slow-test-is-left-out). Find what it waits on, most often a process it "
+                        "and merges leave it out (docs/merging.md#a-slow-test-runs-last). Find what it waits on, most often a process it "
                         "starts, and make it test its claim without that wait: never a raised bound, never a weaker claim. Done when "
                         "bin/test " var " is green under the bound, its claim unchanged, which brings it back into the run. "
                         "If its claim cannot be tested under the bound, say what its floor is and why.")})

@@ -126,9 +126,11 @@ Two ideas, two fields: "theres' sa field for natural language responses to anyth
 
 "I don't want the work done twice. If you do it well merge it. If optimization does it well merge it. If you hand something off to optimization just do it. No more ceremony and mandated fixed policies." "Only give optimization work that it can work on." "Aim to get 90% of the benefit for 10% of the effort." Machine load is balanced by judgment. Stated in AGENTS.md sections 2 and 3.
 
-### A slow test is left out until it is fast, by our own data
+### A slow test runs last in a merge, and is left out of a plain run until it is fast
 
-"exclude them by default until they can run fast"; "We need our own perf data... to disable the tests and mark them as broken and ideally auto create tasks to fix them". Stated in [merging](merging.md#a-slow-test-is-left-out).
+Owner, 2026-11-07: "The slow ones are just the last ones to run and again we focus on short circuit not writing out full reports." A slow red had stayed on main through every merge.
+
+"exclude them by default until they can run fast"; "We need our own perf data... to disable the tests and mark them as broken and ideally auto create tasks to fix them". Stated in [merging](merging.md#a-slow-test-runs-last).
 
 ### A reply with no calls pauses the agent, whatever its proofs say
 

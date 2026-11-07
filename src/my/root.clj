@@ -618,7 +618,7 @@
 (defn slow-tests-tx
   "The held tasks the slow tests of slow ({test ms}: seon.fx/slow-tests) ask for, each from its template
   (seon.template/slow-test), none for a test whose task db holds: tx-data, [] when there is nothing to file.
-  See docs/merging.md#a-slow-test-is-left-out."
+  See docs/merging.md#a-slow-test-runs-last."
   {:malli/schema [:=> [:cat :seon.host/db [:map-of :qualified-symbol :int] :int] [:sequential :any]]}
   [db slow bound]
   (let [decls (vec (for [[t ms] (sort-by key slow)
@@ -630,7 +630,7 @@
 (defn file-slow-tests!
   "Write main's slow tests as held tasks (slow-tests-tx over the test vars of main, by the verdict cache), so a
   test the cache shows slow is work with its metric known ahead of time; bin/update calls it once root is up.
-  Answers the task ids filed, [] when every slow test has its task. See docs/merging.md#a-slow-test-is-left-out."
+  Answers the task ids filed, [] when every slow test has its task. See docs/merging.md#a-slow-test-runs-last."
   {:malli/schema [:=> [:cat :seon.root/sys] [:vector :string]]}
   [sys]
   (let [db @(:conn sys)

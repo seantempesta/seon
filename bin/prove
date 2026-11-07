@@ -87,6 +87,11 @@ if [[ $WHAT != tests && -s $OUT/steps && ! -e $OUT/stopped ]]; then
   # a step's result is keyed by the source it reaches
   nice -n 15 "$ROOT/bin/test" --store-steps "$OUT" || st=1
 fi
+# a merge's last tier: the slow tests with no green at their digest (the plan's out/slow), only once all else is green, so a fast red answers first and no red waits unseen behind a merge
+if (( MERGE && st == 0 )) && [[ -s $OUT/slow ]]; then
+  echo "prove: the slow tests, last: $(<$OUT/slow)"
+  nice -n 15 "$ROOT/bin/test" ${=$(<$OUT/slow)} || st=1
+fi
 if (( st == 0 )); then echo "PROVE OK"; else echo "PROVE FAILED"; fi
 exit $st
 ) 2>&1 | tee "$OUT/prove.log"
