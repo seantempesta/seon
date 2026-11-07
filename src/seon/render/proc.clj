@@ -495,19 +495,25 @@
   index); it is changed by the datoms that moved between that main (made again with
   `seon.db/at-commit`) and this one (`seon.problems/health-moved`, which reads the runs and sections
   they touched and not the closed history, however many commits the gap holds), or read whole when
-  none is held or the held one was read from a db ahead of its commit. When no class changed, the held report stays and nothing is flushed.
+  none is held or the held one was read from a db ahead of its commit. Its counts are the ones the
+  fold it holds puts it at (`seon.problems/with-fold`): a repeat of a written signature, which main
+  does not hold yet, is counted there, so the banner, root's context and the api's answer are one
+  count. When no class changed, the held report stays and nothing is flushed.
   See docs/render.md#health-is-what-flows."
   {:malli/schema [:=> [:cat :map] :map]}
   [st]
   (if-let [{:keys [w a]} (:root-walk st)]
-    (let [db (:main-db st) pt (seon.db/point db) from (:health-at st) prev (:health @a)]
+    (let [db (:main-db st) pt (seon.db/point db) from (:health-at st) prev (:health @a) fold (:fold st)]
       (if (= pt from)
         st
         (let [base (when (and prev from) (seon.db/at-commit (:conn st) (first from)))
               ;; the commit's own value, as the held health was read from it; a db ahead of its commit is read whole
-              h (if (and base (= (:max-tx base) (second from)))
+              ;; (`base` nil: what main holds now was never written before the held health was read, so the move from it
+              ;; answers nothing about the fold's repeats, and the read is whole)
+              h (if base
                   (problems/health-moved prev base db (apply concat (d/datoms-diff base db :eavt [])))
                   (problems/health db))
+              h (if (seq fold) (problems/with-fold h db fold) h)
               st (assoc st :health-at pt)]
           (if (= (:classes h) (:classes prev))
             st
@@ -984,8 +990,10 @@
                                       (do (step/out! o :to-web {:op :keyframe :view (:view m) :html (view-html st (:view m))}) st)
                                       (ask-state (update st :kf-wanted conj (:view m)) o))
                           ;; main's health for the api (seon.root's :health, my.root/problems): this proc's,
-                          ;; brought to the main the asker read (advance-main, health!), never read whole again
-                          :health (let [st (-> st (advance-main (:db m)) health!)
+                          ;; brought to the main the asker read (advance-main, health!), never read whole again, and
+                          ;; at the counts the api's fold holds (with-fold: a repeat of a written signature is counted
+                          ;; there, not yet on main), which it keeps to bring its next move of main from what it held
+                          :health (let [st (-> st (advance-main (:db m)) (assoc :fold (:fold m)) health!)
                                         h (some-> (:root-walk st) :a deref :health)]
                                     ;; none held (no root walk yet): read whole, as health! does when it holds none
                                     (step/out! o :to-api {:op :health-answer :rid (:rid m) :db (:main-db st)
