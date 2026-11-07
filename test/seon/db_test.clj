@@ -325,6 +325,22 @@
         (is (= {:seon.model-call/basis {:stored :db.type/string :declared :db.type/data}} (:seon.db/attributes r))))
       (finally (clojure.java.shell/sh "rm" "-rf" path)))))
 
+(deftest a-kept-store-on-a-retired-name-is-refused
+  ;; a stored keyword is renamed by erasing the store, never by a migration (AGENTS 7a): a store holding a retired name (here :schema.file/path, before
+  ;; :file/path) would open, gain the new name and hold no text under it, and its next write-back would rewrite each resource from nothing. Refused at open, saying what to do.
+  ;; A store on disk of this test's own, the last resort: what is proved is a root's open of a kept store
+  (let [path (str (seon.config/checkout) "/target/db-test-retired-" (random-uuid))
+        made (pdb/made-cfg (pdb/store-cfg :lmdb path))
+        old (conj (vec pdb/schema) {:db/ident :schema.file/path :db/valueType :db.type/string :db/cardinality :db.cardinality/one :db/unique :db.unique/identity})]
+    (try
+      (d/create-database made)
+      (let [c0 (d/connect made)] (d/transact c0 {:tx-data old}) (d/release c0))
+      (let [r (try (pdb/open! :lmdb path 0 :db) (catch Exception e (ex-data e)))]
+        (is (= :seon.db/name-retired (:seon.error/type r)) (pr-str r))
+        (is (= {:schema.file/path :file/path} (:seon.db/retired r)))
+        (is (str/includes? (:seon.error/fix r) "erase") (pr-str r)))
+      (finally (clojure.java.shell/sh "rm" "-rf" path)))))
+
 (deftest a-value-with-no-one-type-is-plain-data-by-its-shape
   ;; a schema says plain data by its shape, with no mark (owner, 2026-10-25: "support vectors and
   ;; then under the hood serialize them"): a vector, tuple, map or mixed union is :db.type/data, a

@@ -217,7 +217,7 @@
   (the binary holds it)."
   {:malli/schema [:=> [:cat :string :string] :seon.db/tx-data]}
   [path text]
-  (into [{:schema.file/path path :schema.file/text text}]
+  (into [{:file/path path :file/text text}]
         (for [[k v] (sort-by (comp str key) (sedn/decode text))]
           {:schema/key k :schema/form (binding [*print-namespace-maps* false] (sedn/encode v)) :schema/file path :schema/source true})))
 
@@ -255,12 +255,12 @@
   {:malli/schema [:=> [:cat :seon.host/db] [:vector :string]]}
   [db]
   (vec (sort (into #{} (concat (map :v (d/datoms db :aevt :ns/file))
-                               (map :v (d/datoms db :aevt :schema.file/path))
+                               (map :v (d/datoms db :aevt :file/path))
                                (map :v (d/datoms db :aevt :schema/file)))))))
 
 (def ^:private identities
   "The attributes that name a program entity (seon.facts.edn)."
-  [:form/id :var/name :ns/name :method/key :impl/key :schema/key :schema.file/path])
+  [:form/id :var/name :ns/name :method/key :impl/key :schema/key :file/path])
 
 (def ^:private mark-loaded!
   "Jolt's loader's mark (ldr-mark-loaded!, by namespace name): a require of the namespace answers it loaded."
@@ -321,15 +321,15 @@
   :schema/source as it is), and every entry or file of them no file makes retracted."
   {:malli/schema [:=> [:cat :seon.host/db [:map-of :string [:maybe :string]] [:set :string]] :seon.db/tx-data]}
   [db files paths]
-  (let [ents (concat (for [p paths dt (d/datoms db :avet :schema/file p)] (:e dt)) (keep #(pdb/eid db :schema.file/path %) paths))
+  (let [ents (concat (for [p paths dt (d/datoms db :avet :schema/file p)] (:e dt)) (keep #(pdb/eid db :file/path %) paths))
         bare (into {} (for [e ents :let [x (d/entity db e)] :when (and (:schema/key x) (not (:schema/source x)))]
                         [(:schema/key x) (:schema/form x)]))
         new (vec (for [p (sort paths) :let [t (get files p)] :when t
                        op (schema-tx p t)]
                    (if (and (:schema/key op) (= (:schema/form op) (bare (:schema/key op)))) (dissoc op :schema/source) op)))
-        mk (set (for [op new k [:schema/key :schema.file/path] :let [v (get op k)] :when (some? v)] [k v]))]
+        mk (set (for [op new k [:schema/key :file/path] :let [v (get op k)] :when (some? v)] [k v]))]
     (into (vec (for [e (distinct ents) :let [x (d/entity db e)
-                                             k (if (:schema/key x) [:schema/key (:schema/key x)] [:schema.file/path (:schema.file/path x)])]
+                                             k (if (:schema/key x) [:schema/key (:schema/key x)] [:file/path (:file/path x)])]
                      :when (not (mk k))]
                  [:db/retractEntity e]))
           new)))
@@ -372,7 +372,7 @@
         gone (for [dt (d/datoms db :aevt :ns/file) :let [n (:ns/name (d/entity db (:e dt)))] :when (not (contains? read n))] [n nil])]
     (program-tx db (into read gone) files
                 (into (set (filter schema-resource? (keys files)))
-                      (concat (map :v (d/datoms db :aevt :schema/file)) (map :v (d/datoms db :aevt :schema.file/path)))))))
+                      (concat (map :v (d/datoms db :aevt :schema/file)) (map :v (d/datoms db :aevt :file/path)))))))
 
 (defn file-text
   "Namespace nsym's file as db holds it: its live forms in the order the image loads them
@@ -598,8 +598,8 @@
   the text holds that db no longer does removed, and new keys added (schema-file-text)."
   {:malli/schema [:=> [:cat :seon.host/db :string] :string]}
   [db path]
-  (let [fe (pdb/eid db :schema.file/path path)
-        base (if fe (:schema.file/text (d/entity db fe)) "{}\n")
+  (let [fe (pdb/eid db :file/path path)
+        base (if fe (:file/text (d/entity db fe)) "{}\n")
         held (sedn/decode base)
         now (into {} (for [dt (d/datoms db :avet :schema/file path) :let [x (d/entity db (:e dt))]]
                        [(:schema/key x) (:schema/form x)]))

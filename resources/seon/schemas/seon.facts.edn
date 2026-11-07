@@ -87,16 +87,16 @@
  ;; (seon.source; v1: the program is entities, schemas among them): its key, its form as
  ;; EDN text, the resource it is written back to, and whether the binary holds it (imported
  ;; from the tree a generation was built from; an entry an agent registers or a merge
- ;; carries never does). The resource's text as imported is the base write-back edits.
+ ;; carries never does). A FILE of the program (:file/path) holds its text as imported: for a resource of entries, the base write-back edits.
  :schema/key [:and {:seon.db/identity true :seon.db/content-id true} :qualified-keyword]
  :schema/form :string
  :schema/file [:and {:seon.db/index true} :string]
  :schema/source :boolean
- :schema.file/path [:and {:seon.db/identity true :seon.db/content-id true} :string]
- :schema.file/text :string
+ :file/path [:and {:seon.db/identity true :seon.db/content-id true} :string]
+ :file/text :string
  :seon.db/schema-fact [:map {:seon.db/attributes true} [:schema/key :schema/key] [:schema/form :schema/form]
                         [:schema/file :schema/file] [:schema/source {:optional true} :schema/source]]
- :seon.db/schema-file-fact [:map {:seon.db/attributes true} [:schema.file/path :schema.file/path] [:schema.file/text :schema.file/text]]
+ :seon.db/file-fact [:map {:seon.db/attributes true} [:file/path :file/path] [:file/text :file/text]]
  :seon.db/form-fact [:map {:seon.db/attributes true}
                       [:form/id :form/id] [:form/src :form/src] [:form/ns :form/ns] [:form/order :form/order]
                       [:form/code {:optional true} :form/code] [:form/lead {:optional true} :form/lead] [:form/defines {:optional true} :form/defines]
