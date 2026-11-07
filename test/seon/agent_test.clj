@@ -1997,12 +1997,12 @@
   (str "(let [bid (:seon.agent/id " (agent-code w) ")"
        "      branch (seon.db/off-main (seon.db/conn-main (:conn sys)) (get-in (c/state sys) [:agents bid :branch]))"
        "      body (str \"msg-\" (random-uuid))"
-       "      end! (fn [] (c/kill! sys bid) " (gone-code "(name bid)") ")"
+       "      end! (fn [] (c/kill! sys bid) (loop [] (let [e (clojure.core.async/<!! ready-ev)] (if (and (#{:ended :dead :killed} (:type e)) (= bid (:agent e))) :gone (recur)))))"
        "      send! (fn [] @(c/submit! sys :" a " (str \"(my.agent/send-message [\" (pr-str bid) \"] \" (pr-str body) \")\") {:origin :outside}))]"
        "  (if " before-send? " (do (end!) (send!)) (do (send!) (end!)))"
        "  {:body body :b bid :branch branch :sender " (pr-str a)
        "   :found (datahike.api/q '[:find ?br ?from :in $ ?body :where [?m :seon.message/body ?body] [?m :seon.message/branch ?br] [?m :seon.message/from ?from]]"
-       "                          (:db @(seon.root/call! sys {:op :write :req {:op :branch-db :branch :db}})) body)})"
+       "                          (:db @(seon.root/call! sys {:op :write :req {:op :branch-db :branch :db}})) body)}"
        ")"))
 
 (defn- send-test-forms
