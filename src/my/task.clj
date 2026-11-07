@@ -35,6 +35,13 @@
           (agent/transact! tx)
           (get (current) member)))))
 
+(defn launch!
+  "Start an agent on work of its own: a released task whose plan is text, from a template by name (seon.template/templates; :whole by default: it designs, builds, proves and merges by itself), told to report back to this agent. Answers {:task id}, or the refusal. See docs/agent.md#working-for-a-person."
+  {:malli/schema [:function [:=> [:cat :string] :map] [:=> [:cat :string :keyword] :map]]}
+  ([text] (launch! text :whole))
+  ([text template]
+   (agent/launch! (str text "\n\nWhen it is finished, or you are stuck, tell the agent that asked: `(send-message [" (:id @agent/state) "] \"what happened\")`.") template)))
+
 (defn fail!
   "Mark this agent's task failed: reason, and a counterexample (a form or value showing
   it), written on the task on this branch (:seon.task/failure, with this run). A turn

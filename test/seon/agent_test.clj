@@ -1900,16 +1900,31 @@
                                        "      m (clojure.core/deref (:conn sys))"
                                        "      ids (datahike.api/q '[:find [?i ...] :where [?e :seon.task/plan \"Make the Dashboard greet people!\"] [?e :seon.task/id ?i]] m)"
                                        "      t (datahike.api/entity m [:seon.task/id (first ids)])]"
-                                       "  {:blank (:seon.error/message blank) :ok (:ok a) :ids (vec ids) :kind (:seon.task/kind t) :execution (:seon.task/execution t) :branch (:seon.task/branch t)})")}]))
+                                       "  {:blank (:seon.error/message blank) :ok (some? (:task a)) :answered (:task a) :ids (vec ids) :kind (:seon.task/kind t) :execution (:seon.task/execution t) :branch (:seon.task/branch t)})")}]))
         v (:value r)]
     (is (map? v) (pr-str r))
     (is (re-find #"say what" (str (:blank v))) "an empty box asks nothing")
     (is (:ok v))
     (is (= 1 (count (:ids v))) "one task")
     (is (re-matches #"request/make-the-dashboard-greet-people(-\d+)?" (first (:ids v))) "named by its words")
-    (is (= :whole (:kind v)) "one agent designs, builds and merges it")
+    (is (= :user (:kind v)) "an agent that works for the person, not a build")
     (is (= :running (:execution v)) "released, so the reconciler gives it an agent")
     (is (some? (:branch v)))))
+
+(deftest an-agent-launches-an-agent-on-a-task-of-its-own
+  ;; docs/agent.md#working-for-a-person: root makes the task and answers its id; it reaches its parent by a message
+  (let [[a b] (in-agent ["(my.task/launch! \"Build the thing that greets people.\")"
+                         "(my.task/launch! \"No such template.\" :nope)"])
+        id (:task (:value a))
+        probe (peek (in-agent [{:op :eval :agent "root"
+                                :code (str "(let [t (datahike.api/entity (clojure.core/deref (:conn sys)) [:seon.task/id " (pr-str id) "])] [(:seon.task/kind t) (:seon.task/execution t) (:seon.task/plan t)])")}]))
+        [kind execution plan] (:value probe)]
+    (is (string? id) (pr-str a))
+    (is (= :whole kind) "by default the template that builds, proves and merges")
+    (is (= :running execution) "released: the reconciler gives it an agent")
+    (is (str/includes? plan "Build the thing") "its plan what was asked")
+    (is (str/includes? plan "send-message") "and how to report back")
+    (is (re-find #"no template" (str (:seon.error/message (:value b)))) "a template that isn't one says so")))
 
 (def ^:private not-running
   "Root-REPL code: a function true of the outcomes a task's work stands at once its agent's end is judged and it waits on nothing of

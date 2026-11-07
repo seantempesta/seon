@@ -117,13 +117,25 @@
                                  (into [:a {:href link}] (inline text text-from text-to spans))
                                  :else (into [:span] (inline text text-from text-to spans))))))))))
 
+(defn- quote-lines
+  "The offsets of what each line of the quote at from..to says, past its > mark (a lazy line has none). See docs/render.md#prose-and-the-one-string-cutter."
+  {:malli/schema [:=> [:cat :string :int :int] [:vector [:tuple :int :int]]]}
+  [text from to]
+  (loop [a from out []]
+    (let [nl (or (some-> (str/index-of text "\n" a) (min to)) to)
+          sp (loop [i a] (if (and (< i nl) (= \space (nth text i))) (recur (inc i)) i))
+          past (if (and (< sp nl) (= \> (nth text sp))) (inc sp) a)
+          start (if (and (< past nl) (> past a) (= \space (nth text past))) (inc past) past)
+          out (conj out [start nl])]
+      (if (< nl to) (recur (inc nl) out) out))))
+
 (defn markdown
   "Markdown text (a plan, an agent's prose, a message) as a person reads it: its blocks by the one
   parse (seon.ref/scan): a heading at its level, a paragraph, a list of the scan's items (numbered
   when its first marker is a number), a code block highlighted (a fenced block's content as the scan gives it), a quote or a table as its lines. Each
   is kept as written, its backticks too, where the model reads the page: a plan's delimiters pick
   what its citations pull (docs/references.md#the-delimiter-picks-the-depth). opts :inline? is for what only a person reads: code spans, links and
-  emphasis drawn (`inline`). See docs/render.md#prose-and-the-one-string-cutter."
+  emphasis drawn (`inline`), and a quote as one. See docs/render.md#prose-and-the-one-string-cutter."
   {:malli/schema [:function [:=> [:cat :string] :any] [:=> [:cat :string [:map [:inline? {:optional true} :boolean]]] :any]]}
   ([text] (markdown text {}))
   ([text {:keys [inline?]}]
@@ -139,6 +151,8 @@
                (= :fence kind) (code (subs text text-from text-to) (config/value :seon.config.render/value-budget))
                (= :list kind) (into [(if ordered :ol :ul) {:class (if ordered "list-decimal pl-5" "list-disc pl-5")}]
                                     (for [[a b] items] (into [:li] (run a b))))
+               (and inline? (= :quote kind)) (into [:blockquote {:class "border-l-2 border-base-700 pl-3 text-text-300"}]
+                                                  (for [[a b] (quote-lines text from to)] (into [:p] (run a b))))
                (#{:quote :table} kind) [:pre {:class "whitespace-pre-wrap text-text-300"} body]
                (= :break kind) [:hr]
                :else (into [:p] (run from to))))))))
@@ -386,14 +400,14 @@
 
 (defn agent-input
   "The input at the top of an agent's page, each through root's requests (the server's ops send
-  the same): a line evaluates in its REPL (seon.root/submit!, origin :ui); a line that starts with
-  > is a message its next turn reads (seon.root/message!); interrupt stops its running form;
+  the same): words are a message its next turn reads (seon.root/message!), and a line that starts with
+  ( evaluates in its REPL (seon.root/submit!, origin :ui), as every line does on an agent with no task; interrupt stops its running form;
   release runs its task's next run when the task is held (seon.root/release!). input {:id
-  :live? :held :focus? :busy? :capped?}: live, root's view holds its process in this boot; busy?, it runs a form (what interrupt stops); capped?, its task is
+  :live? :held :focus? :busy? :capped? :talks?}: talks?, it has a task, whose next turn reads what's said; live, root's view holds its process in this boot; busy?, it runs a form (what interrupt stops); capped?, its task is
   at its cap (no message wakes it); focus?, its field takes focus as the page loads (the chat's:
   @ctx's page is long and the field ends it)."
   {:malli/schema [:=> [:cat :seon.render/opts :seon.render/agent-input] :any]}
-  [opts {:keys [id live? held focus? busy? capped?]}]
+  [opts {:keys [id live? held focus? busy? capped? talks?]}]
   [:section {:id (:unit opts) :class "seon-stack-2"}
    (if live?
      [:form {:class "seon-row" :data-seon-repl "" :seon/call 'seon.root/submit! :seon/agent id}
@@ -401,7 +415,7 @@
       ;; Enter sends, Shift+Enter is a new line: a form may span lines
       [:textarea (cond-> {:name "forms" :class "flex-1 min-w-0" :rows 3 :autocomplete "off" :spellcheck "false"
                           (keyword "data-on:keydown") "if (evt.key==='Enter' && !evt.shiftKey) { evt.preventDefault(); el.form.requestSubmit() }"
-                          :placeholder (str "(+ 1 2) evaluates in its REPL (Enter; Shift+Enter: a new line)" (when-not capped? "\n> a message, read at its next turn"))}
+                          :placeholder (if (and talks? (not capped?)) "Say something (Enter; Shift+Enter: a new line)\n(+ 1 2) runs in its REPL" "(+ 1 2) evaluates in its REPL (Enter; Shift+Enter: a new line)")}
                    ;; the chat takes focus (it follows its tail); a browser scrolls a focused field into view, and this one ends the page
                    focus? (assoc :autofocus true))]
       ;; a form to interrupt only while its process runs one (status :busy); a capped task's agent answers forms but takes no message
@@ -1424,12 +1438,12 @@
   {:malli/schema [:=> [:cat :map] :any]}
   [{:seon.message/keys [id from body]}]
   [:section {:wire/role "user" :wire/ref [:message id]}
-   [:p {:class "seon-note" :wire/field "from"} (str from)]
+   [:p {:class (str "seon-note" (when (= "owner" (str from)) " hidden")) :wire/field "from"} (str from)]
    [:div {:wire/field "body"} [#'markdown (str body) {:inline? true}]]])
 
 (defn chat-message
   "A message to the agent (a component over ctx, the message at ctx path :at), a person's on the right: `message-hiccup`. See docs/render.md#the-page."
-  {:seon.render/style ".chat-message { max-width: 85%; align-self: flex-end; border-radius: 0.5rem; background: var(--color-base-800); padding: 0.5rem 0.75rem; font-size: 0.875rem; line-height: 1.25rem; color: var(--color-text-100); }" :seon.render/for "page" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:at [:vector :any]]]]] :any]}
+  {:seon.render/style ".chat-message { max-width: 85%; width: fit-content; margin-left: auto; border-radius: 0.5rem; background: var(--color-base-800); padding: 0.5rem 0.75rem; font-size: 0.875rem; line-height: 1.25rem; color: var(--color-text-100); }" :seon.render/for "page" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:at [:vector :any]]]]] :any]}
   [{c :seon.ctx/ctx at :at}]
   (let [m (get-in c at)]
     (message-hiccup {:seon.message/id (ratom/realize (:seon.message/id m)) :seon.message/from (ratom/realize (:seon.message/from m)) :seon.message/body (ratom/realize (:seon.message/body m))})))
@@ -1449,7 +1463,7 @@
         [:p {:class (if (= :green outcome) "text-success" "text-text-100")}
          (str (case outcome :green "✓ It finished its work" :waiting "Waiting for you" :cap "Stopped at its turn limit" (str "Ended: " (kname outcome)))
               (when (pos? turns) (str (if (= :green outcome) " in " " after ") turns (if (= 1 turns) " turn" " turns")))
-              (when (and reason (not= :green outcome)) (str " · " reason)))])
+              (when (and reason (not (#{:green :waiting} outcome))) (str " · " reason)))])
       (when-let [status (ratom/realize (:seon.agent/status c))]
         [:p {:class "muted"} (case status :busy "working…" :idle "waiting for you" (kname status))]))))
 
@@ -1649,7 +1663,8 @@
                        :else [status-stands status])
         [text tone] (get from k [(kname k) :quiet])
         turns (when (= "stopped at its cap" text) (or (:seon.agent/ended-turn a) (:seon.agent/max-turns a)))
-        reason (some #(when-not (str/blank? %) %) [(:seon.task/reason t) (:reason (:seon.task/failure t)) (when end (:seon.agent/reason a))])]
+        waiting? (or (= :waiting end) (#{:parked :told} o))
+        reason (when-not waiting? (some #(when-not (str/blank? %) %) [(:seon.task/reason t) (:reason (:seon.task/failure t)) (when end (:seon.agent/reason a))]))]
     (cond-> {:state (keyword (cond (= from task-stands) "task" (= from end-stands) "end" :else "status") (name (or k :none)))
              :text text :tone tone :lit? (= :live tone)}
       turns (assoc :detail (str turns (if (= 1 turns) " turn" " turns")))
