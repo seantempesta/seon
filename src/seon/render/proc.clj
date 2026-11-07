@@ -223,6 +223,8 @@
   [db view]
   (cond (vector? view) (location db (second view))
         (= :root view) (:db/id (d/entity db [:seon.root/id :root]))
+        ;; home: whoever is signed in (docs/users.md#whats-on-screen)
+        (= :home view) (:db/id (:seon.root/signed-in (d/entity db [:seon.root/id :root])))
         (keyword? view) (session-of db (address-of view))
         :else view))
 
@@ -571,6 +573,11 @@
   (when-let [{:keys [w]} (:root-walk st)]
     (ui/page-chrome {:units (render/placed-units w) :view (ui/view-param :root) :tab :chat :input {:schema :seon.render/root-input :value {}}} :root)))
 
+(defn- second-of
+  "The name inside a view, [:chat v]'s v, else nil."
+  {:malli/schema [:=> [:cat :any] :any]}
+  [view] (when (vector? view) (second view)))
+
 (defn- page-value
   "View's page: root's (root-page), an agent's debug page (debug-value) or an agent's
   (agent-view); nil when main is not read yet, :seon.render/no-location when main names no agent
@@ -584,6 +591,7 @@
      (and eid (= :debug (first-of view))) (debug-value st view)
      (and eid (= :chat (first-of view)) (agent-of db (second view))) (agent-view st view db eid)
      (and eid (agent-of db view)) (agent-view st view db eid)
+     (= :home (second-of view)) (ui/page-chrome {:units [{:id "p-sign-in" :container "#p-head" :rev 0 :html (h/html (ui/sign-in {:seon.db/db db}))}] :view (ui/view-param view) :tab :chat} :root)
      db (contract/error :seon.render/no-location #'seon.render.proc/page-value
                         (str "no " (let [v (if (vector? view) (second view) view)] (if (keyword? v) (str "agent " (address-of v)) (ui/kname v)))
                              " on main: an address names an agent by its key (boot/id), its id in this boot, its task or its branch; the home page lists every session")
@@ -671,7 +679,7 @@
   [e] [:div {:id "app" :class "mx-auto flex max-w-screen-xl flex-col gap-3 p-3 sm:p-4"}
        (render/html {} e)
        ;; the nearest way to look: every session, from the home page
-       (when (= :seon.render/no-location (:seon.error/type e)) [:p [:a {:href "/"} "◆ seon: every session on main"]])])
+       (when (= :seon.render/no-location (:seon.error/type e)) [:p [:a {:href "/root"} "◆ seon: every session on main"]])])
 
 (defn- pass-view
   "One view rendered: [st' patch-message-or-nil]; a view whose entity main does not hold yet renders
