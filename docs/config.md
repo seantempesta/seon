@@ -22,6 +22,8 @@ Later layers win, key by key, and the merged map is validated once (```seon.conf
 
 ## A process holds its branch's config
 
+Which layer a key came from is not part of what a process reads (```seon.config/in-force```): it differs by process while a digest takes no place, so a reader of it could be green in one process and red in another at one digest. Root's boot writes it on main (```seon.config/boot-sources```, `:seon.config/sources`), and readers read it there.
+
 A running process reads config from its own branch's db, never from the file: an agent keeps the whole disk, and a file it writes acts on nothing until an import (owner, 2026-11-07). The class this ends: one agent's unmerged `spit` of a key with no schema into the file turned a second agent's live test red and stopped a new process, and no merge or digest saw it.
 
 - **At load** a process has no db, so ```seon.config/built-text``` is the file's text, baked when `seon.config` compiles, as the schema forms are; a file on disk can't stop a process starting. It is read under this process's profile, `#env` and checkout, under its `--config` and `--set` layers (```seon.config/config```). `config/local.edn` and the command line stay layers of the checkout and the process, over whatever base.
