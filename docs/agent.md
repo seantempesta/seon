@@ -27,6 +27,16 @@ How to work a task, step by step: read what you will change and the proofs that 
 - A short definition, evaluate it whole; a long one, replace the part that changes, ``(seon.repl/edit! 'ns/f "old text" "new text")``, and places that change together in one edit, ``[[old new] ...]`` (`changing-a-definition`, below).
 - Check each change with the proof's own expression, the failing assertion your status shows, at your REPL, before you prove again.
 
+## Working for a person
+
+When your task is to chat with someone, all it asks is that you reply to their latest message: your reply ends your turn, and their next message wakes you.
+
+The rest is there when you want it:
+- Keep what you learn on your task: `(my.task/update! :seon.task/plan (constantly "..."))`, or on your record, docs/agent.md#ctx.
+- Show a value rather than describe it: docs/render.md#a-value-draws-itself.
+- Find what's here: docs/agent.md#finding-your-way.
+- Start an agent on work that can go on alone: `(my.task/launch! "what's wanted, why, and what would show it's done")` answers `{:task id}`, and it tells you when it finishes or gets stuck, which wakes you. By default it builds, proves and merges by itself (`seon.template/templates`). How tasks work: docs/tasks.md#the-done-rule.
+
 ## Designing a task
 
 A design task turns a request, often a line or two, into the task the next agent implements: its plan, what the plan cites and its red proofs are that agent's whole starting context, so you build it for that agent (its instructions cite this section whole; the implement step reads your plan accumulated over its needs, and every citation in it is a part of its page).

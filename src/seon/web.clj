@@ -84,10 +84,10 @@
   (let [one (fn [op id args] [[(c/request op id args (get index id)) id]])]
     (case f
       seon.root/spawn! (vec (repeat (min 100 (max 1 (or (:n args) 1))) [(c/request 'spawn! nil (cond-> {} (not (str/blank? (:task args))) (assoc :task (:task args))) nil) nil]))
-      ;; a line that starts with > is a message to the agent (read at its next turn), not a form
+      ;; to an agent on a task, words are a message its next turn reads, and a line starting ( is code; an agent with no task has no turn to read one, so its input is its REPL
       seon.root/submit! (cond (str/blank? forms) []
-                              (and (not= :all agent) (str/starts-with? (str/triml forms) ">"))
-                              (one 'message! agent {:body (str/trim (str/replace-first (str/triml forms) #"^>" ""))})
+                              (and (not= :all agent) (:task (get index agent)) (not (str/starts-with? (str/triml forms) "(")))
+                              (one 'message! agent {:body (str/trim forms)})
                               (= :all agent) (vec (for [[id a] (sort-by (comp str key) index) :when (not (c/gone-statuses (:status a)))] [(c/request 'submit! id {:forms forms :origin :ui} a) id]))
                               :else (one 'submit! agent {:forms forms :origin :ui}))
       ;; seon.root/interrupt! is no request: an effect on a process, performed by this proc
