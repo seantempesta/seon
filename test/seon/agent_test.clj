@@ -708,6 +708,52 @@
     (is (map? (:value proved)))
     (is (re-find #":body \"while proving\"" (:text taken)) (:text taken))))
 
+(defn- send-to-parked-code
+  "Root-REPL code for the send tests: task w's agent B parks (it waits for a message), agent a (the harness's) sends B a body made here
+  (seon.agent/send-message, evaluated at a), B's process ends (before-send? false: after the send; true: before it), and the writer is
+  asked for main's db (its queue holds the send's write before this ask, so the send is in the db it answers). Answers
+  {:body :b :branch :found :sender}: the body, B's id, the branch of B that main names it by, and the [branch from] of every message fact
+  on main with that body."
+  {:malli/schema [:=> [:cat :string :string :boolean] :string]}
+  [w a before-send?]
+  (str "(let [bid (:seon.agent/id " (agent-code w) ")"
+       "      branch (seon.db/off-main (seon.db/conn-main (:conn sys)) (get-in (c/state sys) [:agents bid :branch]))"
+       "      body (str \"msg-\" (random-uuid))"
+       "      end! (fn [] (c/kill! sys bid) " (gone-code "(name bid)") ")"
+       "      send! (fn [] @(c/submit! sys :" a " (str \"(my.agent/send-message [\" (pr-str bid) \"] \" (pr-str body) \")\") {:origin :outside}))]"
+       "  (if " before-send? " (do (end!) (send!)) (do (send!) (end!)))"
+       "  {:body body :b bid :branch branch :sender " (pr-str a)
+       "   :found (datahike.api/q '[:find ?br ?from :in $ ?body :where [?m :seon.message/body ?body] [?m :seon.message/branch ?br] [?m :seon.message/from ?from]]"
+       "                          (:db @(seon.root/call! sys {:op :write :req {:op :branch-db :branch :db}})) body)})"
+       ")"))
+
+(defn- send-test-forms
+  "in-agent's forms for the send tests: the await namespace, B on task w parked, then send-to-parked-code."
+  {:malli/schema [:=> [:cat :map :boolean] [:vector :map]]}
+  [{:keys [ns agent]} before-send?]
+  (let [w (str ns "/w")]
+    [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")}
+     {:op :eval :agent "root" :code (str "(do (my.root/run! sys [" (pr-str w) "]) " (parked-code w 1) " " (send-to-parked-code w agent before-send?) ")")}]))
+
+(def ^:private waiting-b
+  "in-agent's options for the send tests: a task w whose agent waits for a message (the scripted model of fixtures/wait-call)."
+  {:config {:seon.config.ai/script 'seon.fixtures/wait-call}
+   :decls [{:seon.task/name "w" :seon.task/plan "Wait." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]})
+
+(deftest a-send-survives-its-receiver-dying
+  ;; docs/users.md#messages: an agent's send is one fact on main, to the recipient's branch, so it is there however the recipient ends
+  (let [[_ r] (in-agent #(send-test-forms % false) waiting-b)
+        {:keys [body branch found sender]} (:value r)]
+    (is (string? body) (pr-str r))
+    (is (= #{[branch sender]} found) "the one message fact on main, to B's branch, from A")))
+
+(deftest a-send-to-an-agent-with-no-process-waits-on-main
+  ;; docs/users.md#messages: the recipient has no process (it ended), yet its entity is on main with its branch, so the send is the same fact
+  (let [[_ r] (in-agent #(send-test-forms % true) waiting-b)
+        {:keys [body branch found sender]} (:value r)]
+    (is (string? body) (pr-str r))
+    (is (= #{[branch sender]} found) "the send is not refused: the fact is on main, to B's branch, from A")))
+
 (deftest a-wide-reach-reuses-unchanged-results
   ;; a wide reach reuses what is unchanged:
   ;; root's boot records its source tree's inputs on its :seon.root/source fact (its binary is
