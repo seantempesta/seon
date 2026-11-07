@@ -227,6 +227,7 @@
     (is (= #{"b1/a1"} (agents db)))
     (is (= #{"sean"} (agents db2)) "the new boot holds none of the earlier boot's: only its user, an agent with no process")
     (is (= #{"sean" "b2/a1"} (agents db3)) "and its own as they start")
+    (is (= #{"sean"} (agents (d/db-with db3 (into (task/boot-tx "b3" 4 "sean") (task/earlier-agents-tx db3))))) "a later boot keeps the one user, and unlinks the rest")
     (is (some? (d/entity db3 [:seon.agent/key "b1/a1"])) "the earlier agent is kept, not deleted")))
 
 (deftest a-design-adds-a-proof-with-update
