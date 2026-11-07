@@ -13,7 +13,7 @@
   printf '{:op :agents}\\n' | nc -w 5 127.0.0.1 PORT
   printf '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}\\n' | nc -w 5 127.0.0.1 PORT"
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.step :as step] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.root :as c] [seon.fx :as fx] [seon.config :as cfg] [seon.task :as task] [seon.proofs :as proofs] [seon.error :as err] [seon.reconcile :as r] [datahike.api :as d]
+  (:require [seon.step :as step] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.root :as c] [my.root :as root] [seon.fx :as fx] [seon.config :as cfg] [seon.task :as task] [seon.proofs :as proofs] [seon.error :as err] [seon.reconcile :as r] [datahike.api :as d]
             [seon.lib :as lib] [seon.edn :as sedn] [seon.db :as pdb] [seon.repl :as repl] [seon.print :as print] [seon.context :as context] [clojure.edn :as edn] [clojure.data.json :as json] [clojure.string :as str] [clojure.walk]))
 
 (defn- refused
@@ -334,7 +334,7 @@
 (defmethod op-answer :message [sys ag req]
   @(c/message! sys ag (:body req)))
 
-(defmethod op-answer :write_back [sys _ _] ((requiring-resolve 'my.root/write-back!) sys))
+(defmethod op-answer :write_back [sys _ _] (root/write-back! sys))
 
 (defmethod op-answer :create [sys _ {:keys [ns name plan proofs]}]
   (let [decl (cond-> {:seon.task/ns (symbol ns) :seon.task/name name :seon.task/plan plan :seon.task/kind :whole}
