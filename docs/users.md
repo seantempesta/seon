@@ -92,7 +92,7 @@ The steps below merge one at a time, each usable alone, with today's agents unch
 
 1. Done: the write check holds a value to its branch's schema, and a merged schema entry brings its attribute's declaration.
 2. Done: an eval's result is one entity per value on every branch, and an eval's id is issued by the store. Two shapes remain, a whole old response that ``seon.db/response-of`` still reads and ``:seon.eval/id`` repeating the eid; how they go is Optimization's call, with how results are stored (owner, 2026-11-07).
-3. A durable mailbox, Web's next, reviewed by Optimization: one send, a cursor, a wake rule; task ``seon.agent/every-send-is-one-fact-on-main`` and the two after it.
+3. A durable mailbox, Web's next, reviewed by Optimization: one send, ``:seon.agent/taken`` as a t, a wake rule; task ``seon.agent/every-send-is-one-fact-on-main`` and the two after it.
 4. Users, and input through ``forgive``.
 5. Sessions and merging them.
 6. The home page from the user's ``@ctx``, with layouts as data.
