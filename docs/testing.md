@@ -57,6 +57,10 @@ REPL; you never read result files.
 work. A test that must transact through a connection (the writer, a merge) uses a branch of the
 test store (`seon.test-store/test-branch!`); say why in its comment.
 
+## A proof is focused
+
+A proof decides one thing: whether a behaviour is correct, and with it whether the work is done; more proofs are not better ones. It makes one claim, statable in a sentence, about what the behaviour does and not how it is done. It fails when the behaviour is broken, which you have seen by breaking the source it guards with no green result to reuse, and its failure says what is wrong. An assertion that decides neither correctness nor done is removed; a proof another already makes is merged into it; a process test whose claim a world can show moves to the world.
+
 ## A root costs what it boots
 
 A test that runs a process (a root, its fork server, an agent) waits on boots, not on its own work: `bin/test --all` on 2026-11-06, at load 3-8 on 4 shards, was 1,931 s of tests serial (9.5 min wall), and the slowest tests did 2-9 M ticks of their own in 60-220 s. Measured phases of a root on the seeded process store (idle machine): process start 0.8 s, boot to `ROOT LISTENING` about 5 s (program load 0.7 s, source read 0.65 s, the rest the graph and the boot fact), the first agent fork 2.7 s (the fork server loads main's test namespaces, 1.9 s, and its index, 0.6 s), then an attach 0.1 s and an eval 0.03 s. Since then `bin/ports` no longer boots the binary (0.84 s on every `bin/root` call), and the fork server does the first fork's work as root's boot ends (```seon.fork-server/preload```), so a spawn after it takes 0.1-0.3 s and one that comes first waits for what is left: about 2 s on a quiet machine, 6-25 s at load 15-20. `bin/build seon` warms the binary's compile cache with the tests (```seon.check/warm-tests```), which a first fork otherwise compiled cold, 6-18 s. A shared root (`seon.test-store/shared-root!`) pays its boot once per shard and arguments.

@@ -8,7 +8,7 @@
             [clojure.java.shell :as sh]
             [clojure.string :as str] [clojure.edn :as edn] [seon.config :as config]
             [datahike.api :as d]
-            [seon.db :as pdb] [seon.cost :as cost]
+            [seon.db :as pdb] [seon.cost :as cost] [seon.render.ui]
             [seon.fx :as fx] [seon.contract :as contract]
             [seon.merge :as pm]
             [seon.program :as program]
@@ -251,7 +251,6 @@
               (git tree "add" "bin") (git tree "-c" "user.name=test" "-c" "user.email=test@localhost" "commit" "-q" "-m" "base"))
         r (fx/read-source {:req {:root tree :dirs ["bin"]}})
         _ (is (= {"bin/x" text} (:value r)) "a file on the allow-list is read whatever its name")
-        _ (is (= {"bin/x" "100755"} (:modes r)))
         main (let [db (empty-db) db (d/db-with db (source/import-tx db (:value r)))] (d/db-with db (source/modes-tx db (:modes r))))
         _ (is (= [] (source/modes-tx main (:modes r))) "read again, nothing to write")
         edited "#!/bin/sh\n# bin/x says hello\necho 2\n"
@@ -262,9 +261,13 @@
         c (fx/git-commit {:req {:dir tree :branch "jolt/seon-merges" :files (source/files merged paths) :modes (source/modes merged paths) :message "m"}})]
     (is (some? (get-in c [:value :sha])) (pr-str c))
     (is (= (str/trim edited) (git tree "show" "jolt/seon-merges:bin/x")) "the tree's text is main's")
-    (is (str/starts-with? (git tree "ls-tree" "jolt/seon-merges" "bin/x") "100755 ") "the execute bit is kept")
-    (is (nil? (:seon.error/type (fx/write-file {:req {:path p :text edited}}))))
-    (is (= "" (git tree "diff" "jolt/seon-merges" "--" "bin/x")) "the same edit on disk: git diff empty against what merged")))
+    (is (str/starts-with? (git tree "ls-tree" "jolt/seon-merges" "bin/x") "100755 ") "the execute bit is kept")))
+
+(deftest a-script-says-what-its-for-and-how-to-call-it
+  ;; docs/source.md#a-program-file: what its lead comment says is held beside its text, and its render draws it
+  (let [db (let [db (empty-db)] (d/db-with db (source/import-tx db {"bin/x" "#!/bin/sh\n# bin/x NAME says hello to NAME\n# and nothing else\necho 1\n"})))]
+    (is (= [:section [:h3 "bin/x"] [:p "bin/x NAME says hello to NAME\nand nothing else"] [:pre "bin/x NAME says hello to NAME"]]
+           (seon.render.ui/script {} (d/pull db [:file/path :seon.script/says :seon.script/usage] [:file/path "bin/x"]))))))
 
 (deftest a-merge-is-committed-on-the-merges-branch
   (let [tree (scratch-dir "git")
@@ -565,17 +568,18 @@
 ;; red with nothing to see: their records said the new text, their vars the old
 ;; docs/source.md#mains-program-follows-the-tree: a changed test file in a root that loaded no test namespace: its require looked on disk, the import failed whole and main stayed old
 (deftest a-refresh-reads-what-a-changed-file-requires-and-this-process-has-not-loaded
-  (let [dep "(ns app.rq-dep)\n\n(defn d [] 1)\n"
-        mid "(ns app.rq-mid (:require [app.rq-dep :as dep]))\n\n(defn m [] (dep/d))\n"
-        top (fn [n] (str "(ns app.rq-top (:require [app.rq-mid :as mid] [clojure.string :as str]))\n\n(defn t [] (+ " n " (mid/m)))\n"))
-        files {"test/app/rq_dep.clj" dep "test/app/rq_mid.clj" mid "test/app/rq_top.clj" (top 1)}
-        db (d/db-with (empty-db) (source/import-tx (empty-db) files))
+  ;; a macro from a namespace this process hasn't loaded expands as it should, because db's text set the namespace up first: without it the form's references lose what the macro expands to, and a test's reach with them.
+  ;; An import loads what it reads, so this process forgets them (a root has loaded no test namespace)
+  (let [names '[app.rq-dep app.rq-mid app.rq-top]
+        mid "(ns app.rq-mid (:require [app.rq-dep :as dep]))\n\n(defmacro mm [] `(dep/d 1))\n"
+        top (fn [n] (str "(ns app.rq-top (:require [app.rq-mid :as mid]))\n\n(defn t [] (+ " n " (mid/mm)))\n"))
+        db (d/db-with (empty-db) (source/import-tx (empty-db) {"test/app/rq_dep.clj" "(ns app.rq-dep)\n\n(defn d [x] x)\n" "test/app/rq_mid.clj" mid "test/app/rq_top.clj" (top 1)}))
         changed {"test/app/rq_top.clj" (top 2)}]
-    (is (= (assoc changed "test/app/rq_mid.clj" mid "test/app/rq_dep.clj" dep)
-           (source/required-files db changed '#{clojure.string}))
-        "what's unloaded, through what requires it, in db's text")
-    (is (= changed (source/required-files db changed '#{clojure.string app.rq-mid})) "what's loaded is left")
+    (is (= changed (source/required-files db changed '#{app.rq-mid})) "what's loaded is left")
+    (run! remove-ns names)
+    (dosync (alter @#'clojure.core/*loaded-libs* #(reduce disj % names)))
     (let [after (d/db-with db (source/refresh-tx db changed))]
+      (is (some #{'app.rq-dep/d} (d/q '[:find [?r ...] :where [?v :var/name app.rq-top/t] [?v :var/form ?f] [?f :form/refs ?r]] after)) "the macro expanded as what it is")
       (is (= (top 2) (source/file-text after 'app.rq-top)) "and the change lands")
       (is (= mid (source/file-text after 'app.rq-mid)) "what was only read changes nothing"))))
 

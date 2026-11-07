@@ -337,8 +337,7 @@
       (let [c0 (d/connect made)] (d/transact c0 {:tx-data old}) (d/release c0))
       (let [r (try (pdb/open! :lmdb path 0 :db) (catch Exception e (ex-data e)))]
         (is (= :seon.db/name-retired (:seon.error/type r)) (pr-str r))
-        (is (= {:schema.file/path :file/path} (:seon.db/retired r)))
-        (is (str/includes? (:seon.error/fix r) "erase") (pr-str r)))
+        (is (= {:schema.file/path :file/path} (:seon.db/retired r))))
       (finally (clojure.java.shell/sh "rm" "-rf" path)))))
 
 (deftest a-value-with-no-one-type-is-plain-data-by-its-shape

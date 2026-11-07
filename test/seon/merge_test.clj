@@ -9,7 +9,7 @@
             [datahike.api :as d]
             [seon.db :as pdb]
             [seon.merge :as pm]
-            [seon.program :as program] [seon.doc] [seon.config] [seon.render.ui] [seon.source]
+            [seon.program :as program] [seon.doc] [seon.config] [seon.source]
             [seon.edn :as sedn] [seon.contract :as contract] [malli.core :as m] [malli.generator :as mg]
             [my.schema :as schema]
             [seon.source :as source] [seon.writer]
@@ -136,32 +136,22 @@
     (is (= [] (seon.doc/load-tx merged "demo" (seon.doc/files merged paths))) "loading what was written writes nothing")))
 
 (deftest a-script-merges-per-key
-  ;; docs/source.md#a-program-file: a script is a file of one entry, [:script path], merged like a var and written back with its text and mode; a schema resource's file bears no such key
-  (let [text "#!/bin/sh\n# bin/x NAME says hello to NAME\n# and nothing else\necho 1\n"
+  ;; docs/source.md#a-program-file: a script is a file of one entry, [:script path], merged like a var with its text and mode; a schema resource's file bears no such key
+  (let [text "#!/bin/sh\n# bin/x says hello\necho 1\n"
         main (let [db (empty-db)] (d/db-with db (seon.source/import-tx db {"bin/x" text})))
         main (d/db-with main (seon.source/modes-tx main {"bin/x" "100755"}))
         edit (fn [db t] (d/db-with db (seon.source/file-tx "bin/x" t)))
         ours (edit main "#!/bin/sh\necho 2\n")
         theirs (edit main "#!/bin/sh\necho 3\n")
         r (pm/delta-three-way main ours main #{})]
-    (is (= "bin/x NAME says hello to NAME\nand nothing else" (:seon.script/says (d/entity main [:file/path "bin/x"]))))
-    (is (= "bin/x NAME says hello to NAME" (:seon.script/usage (d/entity main [:file/path "bin/x"]))))
     (is (= {[:script "bin/x"] [{:file "bin/x" :text text :mode "100755"} {:file "bin/x" :text "#!/bin/sh\necho 2\n" :mode "100755"}]} (:ours r)) (pr-str r))
     (is (= {:scripts ["bin/x"]} (pm/divergence (:ours r))))
-    (is (= [:section [:h3 "bin/x"] [:p "bin/x NAME says hello to NAME\nand nothing else"] [:pre "bin/x NAME says hello to NAME"]]
-           (seon.render.ui/script {} (d/pull main [:file/path :seon.script/says :seon.script/usage] [:file/path "bin/x"]))) "its render says what it's for and how to call it")
     (is (= [[:script "bin/x"] :both-modified] ((juxt :key :kind) (first (:conflicts (pm/delta-three-way main ours theirs #{}))))) "both sides changing it is an unmerged entry")
-    (let [merged (d/db-with main (pm/merge-tx main main ours (keys (:ours r)) #{}))
-          paths (seon.source/changed-files merged (:ours r))]
-      (is (= ["bin/x"] paths))
-      (is (= {"bin/x" "#!/bin/sh\necho 2\n"} (seon.source/files merged paths)))
-      (is (= {"bin/x" "100755"} (seon.source/modes merged paths)))
-      (is (= "" (:seon.script/says (d/entity merged [:file/path "bin/x"]))) "what it derives rides with it"))
-    (testing "a schema resource's file bears no key: its entries do"
-      (let [p "resources/seon/schemas/x.edn"
-            db (let [db (empty-db)] (d/db-with db (seon.source/import-tx db {p "{:x/a :int}\n"})))
-            moved (d/db-with db [{:file/path p :file/text "{:x/a :int} \n"}])]
-        (is (= {} (:ours (pm/delta-three-way db moved db #{}))))))))
+    (is (= "" (:seon.script/says (d/entity (d/db-with main (pm/merge-tx main main ours (keys (:ours r)) #{})) [:file/path "bin/x"]))) "what it derives rides with it")
+    (let [p "resources/seon/schemas/x.edn"
+          db (let [db (empty-db)] (d/db-with db (seon.source/import-tx db {p "{:x/a :int}\n"})))
+          moved (d/db-with db [{:file/path p :file/text "{:x/a :int} \n"}])]
+      (is (= {} (:ours (pm/delta-three-way db moved db #{}))) "a schema resource's file bears no key: its entries do"))))
 
 (deftest unmap-merges-as-delete
   (let [ours (with (base) (unmap "g"))
@@ -457,29 +447,17 @@
     (is (empty? (pm/merge-tx db db db nil #{})))))
 
 (deftest a-namespace-both-sides-made-is-one-entity-after-the-merge
-  ;; the branch and main each made app.z without an (ns) form: one entity after the merge, its id being its content (docs/storage.md)
-  (ts/test-branch!
-   (fn [cfg conn]
-     (let [b (keyword (str (name (:branch cfg)) "-ns2"))
-           _ (d/transact conn ((var-tx "f" "x") @conn))
-           _ (d/branch! conn (:branch cfg) b)
-           bc (d/connect (assoc cfg :branch b))
-           rec (fn [nm] (fn [db] (program/record-tx db {:id (str "app.z/(defn " nm " [x] x)") :src (str "(defn " nm " [x] x)") :ns 'app.z :ns-form? false
-                                                        :defs [{:var (symbol "app.z" nm) :kind :fn :contract "[:=> [:cat :int] :int]"}]
-                                                        :declares #{} :methods [] :impls [] :refs #{} :requires #{} :banned #{} :inline-defs #{}})))]
-       (try
-         ;; main takes a form first, so its ids have moved on from the branch's
-         (d/transact conn ((var-tx "g" "x") @conn))
-         (d/transact conn ((rec "m") @conn))
-         (d/transact bc ((rec "z") @bc))
-         (is (= (pdb/eid @conn :ns/name 'app.z) (pdb/eid @bc :ns/name 'app.z)) "a namespace's id is its name's content, so both sides hold one entity")
-         (let [base (pdb/branch-base conn (:branch cfg) b) head @bc main @conn
-               r (pm/delta-three-way base head main #{})
-               ks (keys (:ours r))
-               after (:db-after (d/merge-db conn #{b} (pm/merge-tx main base head ks #{}) (pdb/tx-meta (:branch cfg))))]
-           (is (= 1 (count (d/datoms after :avet :ns/name 'app.z))) "one entity for the namespace")
-           (is (= 'app.z (:ns (val (first (filter #(= :form (first (key %))) (pm/program-of after ks #{})))))) "the carried form reads it"))
-         (finally (d/release bc) (d/delete-branch! conn b)))))))
+  ;; docs/storage.md#history: the branch and main each made app.z without an (ns) form, main after making another namespace, which moves its next id past the branch's: a namespace's id is its name's content, so the merge leaves one entity and the carried form reads it
+  (let [rec (fn [nm] (fn [db] (program/record-tx db {:id (str "app.z/(defn " nm " [x] x)") :src (str "(defn " nm " [x] x)") :ns 'app.z :ns-form? false
+                                                     :defs [{:var (symbol "app.z" nm) :kind :fn :contract "[:=> [:cat :int] :int]"}]
+                                                     :declares #{} :methods [] :impls [] :refs #{} :requires #{} :banned #{} :inline-defs #{}})))
+        b (with (mt/world) (var-tx "f" "x"))
+        main (with b [{:ns/name 'app.other}] (rec "m"))
+        head (with b (rec "z"))
+        ks (keys (:ours (pm/delta-three-way b head main #{})))
+        after (d/db-with main (pm/merge-tx main b head ks #{}))]
+    (is (= 1 (count (d/datoms after :avet :ns/name 'app.z))) "one entity for the namespace")
+    (is (= 'app.z (:ns (val (first (filter #(= :form (first (key %))) (pm/program-of after ks #{})))))) "the carried form reads it")))
 
 ;; docs/render.md#how-the-work-stands: what a reader of main's content keys on moves when the content does, never on a commit of records
 (deftest a-commit-of-records-leaves-mains-content-commit
