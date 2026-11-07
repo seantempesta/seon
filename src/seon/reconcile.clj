@@ -897,7 +897,7 @@
                (seq conflicts) (assoc :seon.task/conflicts conflicts)
                (seq unmerged) (assoc :seon.task/unmerged (set unmerged))
                (seq (:ours diff)) (assoc :seon.task/changed (into #{} (map sedn/encode) (:ours diff)))
-               (seq deferred) (assoc :seon.task/deferred (set deferred))
+               (seq (or (:deferred j) deferred)) (assoc :seon.task/deferred (set (or (:deferred j) deferred)))
                (seq (:failures run-problems)) (assoc :seon.task/failures (:failures run-problems))
                (seq (:costs run-problems)) (assoc :seon.task/costs (:costs run-problems))
                error (assoc :seon.task/error error)
