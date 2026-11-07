@@ -1226,7 +1226,7 @@
   [:div
    (for [k (added-keys c)] [#'ctx-key {} k])])
 
-(declare eval-output)
+(declare eval-output eval-glance)
 
 (defn eval-hiccup
   "Eval e of the conversation as a step of the chat and a call of the model's, one hiccup (docs/render.md#the-models-context-a-cached-prefix-then-the-turn): one quiet line, a mark only when it threw, what it set out
@@ -1260,7 +1260,8 @@
       [:div {:class "ml-4 flex min-w-0 max-w-full flex-col gap-1 overflow-x-auto py-1"}
        ;; the code as the agent wrote it, whole, highlighted
        [:div {:class "min-w-0" :wire/field "code"} [#'emit/marked-hiccup :seon.print/code (or code "")]]
-       (when at [#'eval-output {:key id :at at :agent agent :wire/for "page"}])]]]))
+       (when at [#'eval-output {:key id :at at :agent agent :wire/for "page"}])]]
+     (when at [#'eval-glance {:key id :at at :wire/for "page"}])]))
 
 (defn eval-item
   "An eval of the conversation (a component over ctx and the db), its one hiccup (`eval-hiccup`) (owner: \"I
@@ -1279,6 +1280,26 @@
   (when (get-in c (conj at :seon.eval/id))
     (into {} (for [k [:seon.eval/id :seon.eval/code :seon.eval/response :seon.eval/schema :seon.eval/basis]
                    :let [v (ratom/realize (get-in c (conj at k)))] :when (some? v)] [k v]))))
+
+(defn- renders-itself?
+  "Does value v have a render of its own: hiccup it holds under :seon.render/html (a chart, an image), a render function named there, or the render of its schema k (the one its record names), so an agent's value draws itself by a render it just defined? See docs/render.md#a-value-draws-itself."
+  {:malli/schema [:=> [:cat :any :any] :boolean]}
+  [v k] (boolean (and (some? v) (or (and (map? v) (some? (:seon.render/html v))) (render/render-of v k)))))
+
+(defn eval-glance
+  "What came of an eval, in the chat with no click (a component over ctx, for the page alone): a value with a render of its own drawn by it (`renders-itself?`), else what went wrong, else the value on one line, which opening the step replaces. See docs/render.md#a-value-draws-itself."
+  {:seon.render/style ".eval-glance { margin: 0.25rem 0 0.25rem 1rem; min-width: 0; overflow-x: auto; font-size: 0.75rem; }\n.eval-item:has(> details[open]) .eval-glance-line { display: none; }" :seon.render/for "page" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:at [:vector :any]]]]] :any]}
+  [{c :seon.ctx/ctx at :at}]
+  (when-let [e (eval-shown c at)]
+    (let [{:keys [ex value]} (:seon.eval/response e)
+          v (ratom/realize value)
+          k (:seon.eval/schema e)
+          err (or (ratom/realize ex) (when (contract/error? v) v))
+          line (fn [x] (print/line x (config/value :seon.config.render/line-budget) nil))]
+      (cond
+        err [:div [:span {:class "eval-glance-line text-error"} (line (or (:seon.error/message err) err))]]
+        (renders-itself? v k) [:div (render/html (cond-> {:as :block} k (assoc :schema k)) v)]
+        (some? v) [:div [:code {:class "eval-glance-line text-text-400"} (line v)]]))))
 
 (defn- step-tools
   "An opened step's buttons, for a live agent (the page's stylesheet shows them only beside its REPL's input, so no step is drawn again as its status moves): run it again in its place,
@@ -1337,7 +1358,9 @@
          [:div {:class "text-error"} "✗ " (:seon.error/message err)
           (render/html {:budget (budget err) :handle handle} (whole (dissoc err :seon.error/message)))]
          ;; a nil beside output is the output's whole answer (clojure.repl/source prints and answers nil)
-         (when (and (contains? (:seon.eval/response e) :value) (not (and (nil? v) (seq printed))))
+         (when (and (contains? (:seon.eval/response e) :value) (not (and (nil? v) (seq printed)))
+                    ;; one that draws itself is already in the chat (`eval-glance`): opening never draws it twice
+                    (not (renders-itself? v (:seon.eval/schema e))))
            [:div {:class "seon-row"} [:span {:class "muted"} "→"]
             ;; by the render its record names, when it names one: a value draws as itself (docs/render.md#the-page)
             (render/html (cond-> {:budget (budget v) :handle handle :db db}

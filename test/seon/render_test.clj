@@ -2935,6 +2935,31 @@
     (is (= :task/closed (:state s)) "what root decided wins over the agent's own end")
     (is (= why (:reason s)))))
 
+(deftest a-value-draws-itself-in-the-chat
+  ;; docs/render.md#a-value-draws-itself: no click; the model reads the value as data
+  (let [[_ branch _] (paged-dbs)
+        k (seon.task/agent-key "b1" :a3)
+        ev (fn [id value] (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} id "a3"
+                                               {:seon.eval/call (seon.task/call-ref k 5) :seon.eval/code "(page)" :seon.eval/response {:handle (symbol "result" id) :value value}}))
+        db (d/db-with branch (vec (concat [{:seon.agent/key k :seon.agent/turn 6}]
+                                          (ev "g1" {:points [1 2] :seon.render/html [:svg {:width 10} [:circle {:r 3}]]})
+                                          (ev "g2" {:plain-value 41}))))
+        w (a3-walk db)]
+    (try
+      (let [html (apply str (map :html (filter #(= "#c-rows" (:container %)) (r/placed-units w))))
+            g1 (str/index-of html "eval-glance-g1")
+            wire (pr-str (r/placed-hiccup w ["#c-rows"]))]
+        (is (str/includes? html "<svg") "the chart is drawn, closed step and all")
+        (is (str/includes? html "eval-glance-line") "a plain value is one line")
+        (is (str/includes? html "plain-value"))
+        (is (some? g1))
+        (is (not (str/includes? wire "eval-glance")) "the model reads no glance"))
+      (finally (r/dispose-walk! w))))
+  (testing "a render no process here holds: the data, never a throw"
+    (let [v {:n 1 :seon.render/html 'agent.nobody/chart}]
+      (is (nil? (r/render-of v nil)))
+      (is (str/includes? (pr-str (r/html {} v)) ":n")))))
+
 (deftest a-steps-buttons-call-roots-table
   ;; docs/turn.md#an-eval-can-be-run-again: each button is a call of root's one table, and a request the button makes is no record of the conversation
   (let [tools (#'ui/step-tools :a1 {:seon.eval/id "e3" :seon.eval/code "(+ 1 2)"})
