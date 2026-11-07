@@ -362,10 +362,10 @@
         (is (= ['demo/helper] (:without-a-contract st)))
         (is (= [{:reason :contract-gap :vars ['demo/helper]}] (:refused st)))))))
 
-(deftest a-red-main-was-red-on-too-is-mains
-  ;; docs/render.md#how-the-work-stands: a session ended refused over a test red on main as on its branch,
-  ;; and was told to register that test, one it never wrote, as its own proof. A test red at the branch's merge base
-  ;; is main's red; only a test the branch wrote or changed is offered the form that makes it a proof
+(deftest a-red-main-was-red-on-too-is-the-agents-and-is-said
+  ;; the owner, 2026-11-07: "I don't care who fixes the problems on main, if an agent needs to fix the problem to get all the tests to pass then that's fine".
+  ;; A test red at the branch's merge base still has to clear, and the status says it's also red on main; only a test the branch
+  ;; wrote or changed is offered the form that makes it a proof
   (ts/test-branch!
     (fn [_ conn]
       (d/transact conn (program-facts '[[demo-test/env-test "(deftest env-test (is (pinned?)))" []]
@@ -380,7 +380,8 @@
             st (context/status db (:tree (seon.ctx/build db (pdb/eid db :seon.agent/key "b/a1") :b))
                                {:index (fn [] (index-of {"demo/f" #{'demo-test/f-test}} {} {}))})
             by (into {} (map (juxt :test identity)) (:refused st))]
-        (is (= #{'demo-test/own-test 'demo-test/kept-test} (set (keys by))) (str "main's own red is no reason: " (pr-str (:refused st))))
+        (is (= #{'demo-test/own-test 'demo-test/kept-test 'demo-test/env-test} (set (keys by))) (str "main's own red is a reason too: " (pr-str (:refused st))))
+        (is (= ['demo-test/env-test] (:also-red-on-main st)) "and said as a fact")
         (is (= '(my.task/update! :seon.task/proofs conj (quote demo-test/own-test)) (:do (by 'demo-test/own-test)))
             "a red test the branch wrote is offered the form that makes it a proof")
         (is (not (contains? (by 'demo-test/kept-test) :do)) "main's test the work turned red is not")))))

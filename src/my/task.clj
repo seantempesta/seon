@@ -51,7 +51,7 @@
   "How this agent's work on its task stands now, as its page and its model read it
   (seon.context/status, drawn by seon.render.ui/status): each proof by the verdict its branch holds (a red one
   with its failures), what else the done rule refuses with the form that does
-  it, the functions without a contract, the problems its work caused, what its merge carries, its
+  it, the functions without a contract, the problems to clear, what its merge carries, its
   unmerged entries, a test run that failed as a whole. A verdict is what the branch's last run
   recorded, reused greens included: (my.agent/prove) runs what changed since."
   {:malli/schema [:=> [:cat] :any]}

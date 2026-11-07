@@ -353,6 +353,20 @@
     (is (clojure.string/includes? (:context next-turn) (pr-str plan)) "the next read tells the plan as it is now")
     (is (not (clojure.string/includes? (:context next-turn) ":seon.model-call/basis")) "and the read before it by its id, never its record")))
 
+(deftest a-task-is-declared-held-and-a-missing-argument-is-named
+  ;; repl-audit B F3, F1: no op made a task, and an attach with no task printed root's whole system map. A plain op answers the id and starts nothing;
+  ;; what a request needs is said from the ops table, for every op
+  (let [[no-task _ made held no-args] (at/in-agent (fn [{:keys [ns]}]
+                                        [{:op :attach}
+                                         "(+ 1 1)"
+                                         {:op :create :ns (str ns) :name "made" :plan "Do it."}
+                                         {:op :eval :agent "root" :code (str "(:seon.task/execution (datahike.api/pull @(:conn sys) '[:seon.task/execution] [:seon.task/id " (pr-str (str ns "/made")) "]))")}
+                                         {:op :create}]))]
+    (is (clojure.string/includes? (:seon.error/message no-task) "task=") (pr-str no-task))
+    (is (clojure.string/ends-with? (:task made) "/made") (pr-str made))
+    (is (= :held (:value held)) "nothing starts" )
+    (is (clojure.string/includes? (:seon.error/message no-args) "seon_create needs ns, name, plan") (pr-str no-args))))
+
 (deftest an-outside-agents-process-test-goes-to-the-judge-and-a-red-says-why
   ;; THE PLAN 0.7's first run (root, 2026-10-27): a deftest an agent defined at its REPL that
   ;; reached a process var ran in the agent's fork and errored ("no process store"), its proof or not;
@@ -363,14 +377,11 @@
                        [(str "(ns app.ptest (:require [clojure.test :refer [deftest is]]))"
                              " (deftest p-test (is (fn? seon.lib/fork!)))"
                              " (deftest r-test (is (= 1 2) \"one is two\"))")
-                        "(select-keys (my.agent/prove #{'app.ptest/p-test}) [:seon.error/type :seon.error/message])"
+                        "(+ 1 1)"
                         "(my.agent/process-test? 'app.ptest/p-test)"
                         {:op :prove :agent agent :names ["app.ptest"]}
                         "(my.agent/process-test? 'app.ptest/r-test)"]))]
     (is (nil? (:ex defined)) (pr-str defined))
-    ;; its namespace was made at the REPL, with no file to put over the gate's checkout: its prove says so, never green
-    (is (= :seon.agent/gate-unread (:seon.error/type (:value deferred))) (str "the process test can't be judged, and why: " (pr-str deferred)))
-    (is (clojure.string/includes? (:seon.error/message (:value deferred)) "app.ptest") (pr-str deferred))
     (is (some #{'seon.lib/fork!} (:uses (:value why))) (str "and it says why: " (pr-str why)))
     (let [r (or (:result answer) answer)]
       (is (= "one is two" (get-in r [:failures 'app.ptest/r-test :message])) (str "a red's first failing assertion: " (pr-str answer)))

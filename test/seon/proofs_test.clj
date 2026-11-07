@@ -567,14 +567,14 @@
 
 (deftest a-gates-verdict-is-a-fact-at-the-digest-it-deferred
   ;; docs/merging.md#a-merge-runs-what-the-change-reaches: a process test the gate judged holds that verdict at its digest; a later run that defers it
-  ;; there leaves it, one whose digest moved defers it again; a red main shares says so on each failure; one the run never reached is no pass
+  ;; there leaves it, one whose digest moved defers it again; one the run never reached is no pass
   (let [t 'app.f-test/t u 'app.f-test/u
         old {t {:seon.test/digest "d1" :seon.test/status :deferred} u {:seon.test/digest "d2" :seon.test/status :deferred}}
-        tx (proofs/gate-tx old {:results {t :pass u :fail} :failures {u [{:type :fail :message "no"}]} :main-red #{u} :log "/l"})
+        tx (proofs/gate-tx old {:results {t :pass u :fail} :failures {u [{:type :fail :message "no"}]} :log "/l"})
         by (into {} (map (juxt :var/name identity)) tx)]
     (is (= :green (:seon.test/status (by t))))
     (is (= "d1" (:seon.test/digest (by t))))
-    (is (= [{:type :fail :message "no" :main-red true}] (:seon.test/failures (by u))))
+    (is (= [{:type :fail :message "no"}] (:seon.test/failures (by u))))
     (is (= :red (:seon.test/status (by u))))
     (let [[f] (proofs/gate-tx old {:results {t :error} :failures {} :log "/l"})]
       (is (= :red (:seon.test/status f)))

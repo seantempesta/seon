@@ -872,7 +872,7 @@
      (if changing?
        (list [:p (if (= :test (:var/kind v)) "A test your plan names." "A function your plan names.")]
              (if src (source-block src) (list (when m [:p (str (:arglists m))]) (when doc [:p doc]) [:p "Read it: " [:code (str "(source " sym ")")]]))
-             (names-line "Tests that reach it" tests))
+             (when (seq tests) [:p {:key "tests that reach it"} (str (count tests) " tests reach it: " "(callers '" sym ") lists them.")]))
        (list [:p (if (= :test (:var/kind v)) "A test your plan names." "A function your plan names.")]
              (when src [:p [:code (str (reader/arglists src (symbol (namespace sym))))]])
              (when m [:p [:code (str (:arglists m))]])
@@ -1049,7 +1049,7 @@
   "What each of the done rule's reasons (seon.reconcile/done-explain) says to a person reading the page (docs/agent.md#what-you-read: `:refused`)."
   {:proof-red "proof red" :proof-unknown "proof has no verdict" :regression "green on main, red here"
    :stray-red "red test that is no proof" :contract-gap "functions without a contract" :unmerged "unmerged entries"
-   :open-problem "problems the work caused" :no-proofs "no proof registered" :no-design "plan unchanged since the run began"
+   :open-problem "problems to clear" :no-proofs "no proof registered" :no-design "plan unchanged since the run began"
    :behind "judged before main moved"})
 
 (def ^:private state-words
@@ -1084,7 +1084,7 @@
   Main's side only when something conflicts: both sides and the form that settles each. No table beside the same words: a list of
   the proofs' states only when there are several. See docs/render.md#how-the-work-stands."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
-  [_opts {:keys [proofs refused test-run unmerged without-a-contract caused attention merge unjudged]}]
+  [_opts {:keys [proofs refused test-run unmerged without-a-contract caused attention merge unjudged also-red-on-main main-moved]}]
   (let [state #(:status %)
         unwritten (filter #(= :undefined (state %)) proofs)
         red (filter #(#{:fail :error} (state %)) proofs)
@@ -1094,7 +1094,7 @@
                  (seq refused) (into (for [r refused :when (not (and (= :proof-unknown (:reason r)) (some #(= (:test r) (:test %)) unwritten)))]
                                        [(get reason-words (:reason r) (kname (:reason r))) (or (:test r) (:vars r) (:keys r) (:problems r)) (:do r)]))
                  (seq without-a-contract) (conj ["functions without a contract" without-a-contract nil])
-                 (seq caused) (conj ["problems the work caused" caused nil])
+                 (seq caused) (conj ["problems to clear" caused nil])
                  (seq attention) (into (for [a attention] [a nil nil])))
         ;; two reasons can say one thing (a refusal and the status's own): said once, with what clears it if either has it
         blocks (vals (reduce (fn [m [what x do :as b]] (let [o (get m [what x])] (if (and o (or (nth o 2) (not do))) m (assoc m [what x] b))))
@@ -1148,6 +1148,8 @@
        (into [:div {:key :merging} [:p "Every proof passes, but your branch can't merge yet:"]] (map block) blocks)
        (seq blocks)
        (into [:div {:key :merging} [:p "Also blocking merging:"]] (map block) blocks))
+     (when main-moved [:p {:key :main-moved} main-moved])
+     (when (seq also-red-on-main) [:p {:key :also-red-on-main} (str "Also red on main at your merge base: " (str/join ", " also-red-on-main) ".")])
      (when unjudged [:p {:key :unjudged} (str "Not judged, so these say nothing about your change: " (str/join ", " (:tests unjudged)) ". " (:why unjudged) ".")])
      (when (seq (:conflicts merge)) [:p (str (count (:conflicts merge)) " things conflict with main; they are listed above.")])]))
 

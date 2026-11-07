@@ -14,6 +14,7 @@
  :my.agent/grep-none [:vector {:seon.render/model my.agent/grep-none-text} :map]
  ;; a prove's run (my.agent/prove): its verdict, each proof's status, the reds with their first
  ;; failing assertion and the deaths, and counts (my.agent/prove-summary); the lists are the value
+ :seon.branch/merged [:map {:seon.render/model my.branch/merged-summary}]
  :seon.test/proved [:map {:seon.render/model my.agent/prove-summary :seon.render/html seon.render.ui/proved}]
  ;; what draws what in a walk (seon.render/tree, my.render/tree): a component and those it drew, each with its own output's
  ;; tokens
