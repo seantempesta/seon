@@ -318,7 +318,7 @@
     (is (= [e] (:reports a)))
     (is (= [(:message e)] (proofs/test-run-errors a)))))
 
-;; docs/merging.md#a-slow-test-is-left-out: slow every time, since load only slows a run; a fast green brings a test back
+;; docs/merging.md#a-slow-test-runs-last: slow every time, since load only slows a run; a fast green brings a test back
 (deftest a-slow-test-is-slow-every-time
   (with-dir
    (fn [dir]
