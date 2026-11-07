@@ -341,7 +341,7 @@
         local (str co "/config/local.edn")]
     (.mkdirs (java.io.File. (str co "/resources/seon/config")))
     (.mkdirs (java.io.File. (str co "/config")))
-    (spit (str co "/resources/seon/config/default.edn") (slurp (str (config/checkout) "/resources/seon/config/default.edn")))
+    (spit (str co "/resources/seon/config/default.edn") (config/shipped-text))
     (spit local "{:seon.config.source/root \"/elsewhere/write-back\" :seon.config.web/port 4242}")
     (try
       (let [{c :config srcs :sources} (config/layered (config/load-layers co []))]
