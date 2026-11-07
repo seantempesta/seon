@@ -907,7 +907,7 @@
   the error when git can't read it. See docs/source.md#commit-the-merges-branch."
   {:malli/schema [:=> [:cat :string] [:or [:vector :string] :seon.error/base]]}
   [dir]
-  (let [r (sh/sh "git" "-C" dir "status" "--porcelain" "--ignore-submodules")]
+  (let [r (git-run {} dir ["status" "--porcelain" "--ignore-submodules"] nil)]
     (if (zero? (:exit r))
       (vec (remove str/blank? (str/split-lines (:out r))))
       (error #'seon.fx/uncommitted :seon.fx/io-error (str "git status in " dir ": " (:err r)) {:path dir}))))

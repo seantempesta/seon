@@ -509,10 +509,11 @@
           (doc/carry-index! head @conn (map (fn [op] [(nth op 1) (nth op 2)]) ops))
           (swap! state #(-> % (assoc :db @conn :base (pdb/branch-base conn main-b (:branch @state))) (schema-moved attrs)))
           ;; the same on the branch's fact, or the status, which reads the fact, takes what main changed for this branch's work until a next turn writes it
-          (d/transact conn [{:seon.agent/key (:key @state) :seon.agent/base-commit (d/commit-id (:base @state))}])
-          (swap! state assoc :db @conn))
+          (let [merged-t (:max-tx @conn)]
+            (d/transact conn [{:seon.agent/key (:key @state) :seon.agent/base-commit (d/commit-id (:base @state))}])
+            (swap! state assoc :db @conn :merged-t merged-t)))
         (send! {:op :committed :t (:max-tx @conn) :txs 1})
-        (cond-> {:ok true :applied (:apply r) :conflicts (:conflicts r) :t (:max-tx @conn) :datoms (count ops)}
+        (cond-> {:ok true :applied (:apply r) :conflicts (:conflicts r) :t (:merged-t @state) :datoms (count ops)}
           (seq (:conflicts carried)) (assoc :task-conflicts (:conflicts carried))
           (seq errs) (assoc :load-errors errs))))))
 

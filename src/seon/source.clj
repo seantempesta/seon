@@ -388,7 +388,7 @@
         fs (program/load-order (for [dt (d/datoms db :avet :form/ns ne) :when (program/live? db (:e dt))] (program/form-row db (:e dt))))]
     (str (apply str (map-indexed (fn [i f] (let [sep (if (zero? i) "" "\n\n") lead (:lead f)]
                                                   ;; a file's lead is what stood between its forms, ending at the form; a REPL's is its comment alone, which needs its line
-                                                  (str (cond (nil? lead) sep (re-find #"\s\z" lead) lead :else (str sep lead "\n")) (:src f)))) fs))
+                                                  (str (cond (nil? lead) sep (or (= "" lead) (re-find #"\s\z" lead)) lead :else (str sep lead "\n")) (:src f)))) fs))
          (or (:ns/tail (d/entity db ne)) "\n"))))
 
 (defn- interface

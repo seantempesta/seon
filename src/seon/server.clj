@@ -205,7 +205,8 @@
         waiting (r/lost-write-back (d/pull db [:seon.task/outcome :seon.task/error] [:seon.task/id task]))]
     {:line (print/text (cond-> (select-keys v [:outcome :reason])
                          (and (:held v) (empty? reds)) (assoc :held (get-in v [:held :seon.task/failure :reason]))
-                         (seq reds) (assoc :reds (vec (for [t reds] (if-let [why (or (some-> (get fails t) first :message) (some-> (get fails t) first :type name))] [t why] [t]))))
+                         (seq reds) (assoc :reds (vec (for [t (take 10 reds)] (if-let [why (or (some-> (get fails t) first :message) (some-> (get fails t) first :type name))] [t why] [t]))))
+                         (< 10 (count reds)) (assoc :reds-more (str (- (count reds) 10) " more: the form under :handle reads them"))
                          main (assoc :main main)
                          waiting (assoc :not-on-disk (str (:seon.error/message waiting) ": " (str/join ", " (:seon.git/files waiting)))))
                        ;; the answer that says why a task closed, whole
@@ -288,7 +289,7 @@
     (cond
       (and (contains? req :code) (not (contains? req :evals)))
       (refused (str "seon_eval on an agent is one reply now: {agent, message-md, evals: [{intent, code}, ...]}; your code was not run. Only root takes plain code."))
-      (nil? task)
+      (and (nil? task) (not (str/blank? msg)))
       (refused (str (name ag) " works no task now (its last has ended): seon_attach task=ns/name works one again, on its branch."))
       (and (not outside?) (not (str/blank? msg)))
       (refused (str (name ag) "'s own model drives it, so this reply is no message of its: send message-md empty, and seon_message to tell it something."))
