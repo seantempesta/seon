@@ -949,11 +949,13 @@
         want (cond-> {:seon.task/deferred-results rs}
                (seq unread) (assoc :seon.task/gate-unread unread)
                err (assoc :seon.task/error err))
-        move (if (empty? red)
+        ;; an answer that isn't results is no pass, though it names no test to be red: real run 10's replay, a refused candidate with no process test merged
+        move (if (and (empty? red) (not err) (empty? unread))
                (task/move-tx id :gate :ready want)
                (hold-tx main id (task/move-tx id :gate :closed want)
-                        (str "its deferred tests, run on a checkout at its merge, are not green: "
-                             (str/join ", " (for [[tt s] red] (str tt " " (name s))))
+                        (str (when (seq red)
+                               (str "its deferred tests, run on a checkout at its merge, are not green: "
+                                    (str/join ", " (for [[tt s] red] (str tt " " (name s))))))
                              ;; why they could not run, when the gate itself failed: the effect's error, or a changed
                              ;; namespace with no file on the branch (each test then reads :error)
                              (when (seq why) (str "; the gate could not run them: " (str/join "; " why))))

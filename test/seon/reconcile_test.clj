@@ -808,6 +808,10 @@
         (is (= :ready (:seon.task/outcome (task/task db "demo/a-merge"))))
         (is (= {boots :pass} (:seon.task/deferred-results (task/task db "demo/a-merge"))))
         (is (= octopus (actions-for db)))))
+    (testing "a gate that answers an error with no test named is no pass: its candidate didn't analyze"
+      (let [db (gated gate {} [] {:seon.error/type :seon.writer/refused :seon.error/message "the merged tree doesn't analyze: x"})]
+        (is (= :closed (:seon.task/outcome (task/task db "demo/a-merge"))))
+        (is (clojure.string/includes? (str (:seon.task/reason (task/task db "demo/a-merge"))) "doesn't analyze"))))
     (testing "a red, or a run that could not run them (:error), is refused as a red proof is"
       (doseq [s [:fail :error]]
         (let [db (gated gate {boots s} [] nil)
