@@ -801,12 +801,17 @@
                   (d/db-with db (#'r/gated (st-of db) "demo/a-merge" rs unread err))))
         octopus [{:op :octopus-merge :task "demo/a-merge" :members [{:task "demo/a-merge"}]}]]
     (is (= {:outcome :gate :reasons [] :deferred [boots]} (judged gate [boots])) "unrun: gated first")
-    (is (= {:outcome :ready :reasons []} (judged gate [])) "none deferred: ready")
+    (is (= {:outcome :gate :reasons [] :deferred []} (judged gate [])) "none deferred: its tree is still analyzed, with no checkout (docs/merging.md#a-merge-analyzes-its-tree)")
+    (is (= :ready (:outcome (judged nil []))) "a root with no source has no candidate to analyze")
     (testing "all passing, it is ready and merges"
       (let [db (gated gate {boots :pass} [] nil)]
         (is (= :ready (:seon.task/outcome (task/task db "demo/a-merge"))))
         (is (= {boots :pass} (:seon.task/deferred-results (task/task db "demo/a-merge"))))
         (is (= octopus (actions-for db)))))
+    (testing "a gate that answers an error with no test named is no pass: its candidate didn't analyze"
+      (let [db (gated gate {} [] {:seon.error/type :seon.writer/refused :seon.error/message "the merged tree doesn't analyze: x"})]
+        (is (= :closed (:seon.task/outcome (task/task db "demo/a-merge"))))
+        (is (clojure.string/includes? (str (:seon.error/message (:seon.task/error (task/task db "demo/a-merge")))) "doesn't analyze"))))
     (testing "a red, or a run that could not run them (:error), is refused as a red proof is"
       (doseq [s [:fail :error]]
         (let [db (gated gate {boots s} [] nil)
@@ -821,7 +826,7 @@
                            "the gate could not run them: bin/worktree --at exited 1: no such branch; seon.generation: no :ns/file on the branch")
             (get-in tk [:seon.task/failure :reason]))))
     (testing "the test whose process started this root is left out: a test cannot be its own gate (:seon.root/started-by)"
-      (is (= {:outcome :ready :reasons []} (judged self [boots])) "the only deferred test is the root's own: merged, nothing run")
+      (is (= {:outcome :gate :reasons [] :deferred []} (judged self [boots])) "the only deferred test is the root's own: merged, nothing run")
       (is (= {:outcome :gate :reasons [] :deferred [other]} (judged self [boots other])) "another test beside it is still gated, itself not named")
       (let [db (mdb [(decl "a")] :extra (concat (work "a" :done) [self] (work "a-merge" :gate :members {:seon.task/deferred #{boots other}})))]
         (is (= [{:op :gate :task "demo/a-merge" :tests [other]}] (actions-for db)))))

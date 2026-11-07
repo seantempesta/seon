@@ -441,7 +441,9 @@
           (let [self (get-in idx [:root :started-by])
                 ;; a test cannot be its own gate (:seon.root/started-by): left out, with no result recorded
                 deferred (vec (sort-by str (remove #(= self (str %)) deferred)))]
-            (cond (empty? deferred) {:outcome :ready :reasons rs}
+            (cond (and (empty? deferred) (nil? (get-in idx [:root :gate-checkout]))) {:outcome :ready :reasons rs}
+                  ;; no process test reached: :gate analyzes the candidate's files and runs nothing (docs/merging.md#a-merge-analyzes-its-tree)
+                  (empty? deferred) {:outcome :gate :reasons rs :deferred []}
                   ;; with no checkout to run them on (a root with no source), the merge is held with that reason, never merged with them unrun
                   (nil? (get-in idx [:root :gate-checkout]))
                   {:outcome :closed :reasons rs :deferred deferred
@@ -947,11 +949,13 @@
         want (cond-> {:seon.task/deferred-results rs}
                (seq unread) (assoc :seon.task/gate-unread unread)
                err (assoc :seon.task/error err))
-        move (if (empty? red)
+        ;; an answer that isn't results is no pass, though it names no test to be red: real run 10's replay, a refused candidate with no process test merged
+        move (if (and (empty? red) (not err) (empty? unread))
                (task/move-tx id :gate :ready want)
                (hold-tx main id (task/move-tx id :gate :closed want)
-                        (str "its deferred tests, run on a checkout at its merge, are not green: "
-                             (str/join ", " (for [[tt s] red] (str tt " " (name s))))
+                        (str (when (seq red)
+                               (str "its deferred tests, run on a checkout at its merge, are not green: "
+                                    (str/join ", " (for [[tt s] red] (str tt " " (name s))))))
                              ;; why they could not run, when the gate itself failed: the effect's error, or a changed
                              ;; namespace with no file on the branch (each test then reads :error)
                              (when (seq why) (str "; the gate could not run them: " (str/join "; " why))))
