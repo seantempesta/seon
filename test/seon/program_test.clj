@@ -733,7 +733,14 @@
              (form 'app.fc-test "serves" :test '#{seon.web/handler})
              (form 'app.fc-test "reads-system" :test '#{seon.system/read-decl})
              (form 'app.fc-test "reads-deps" :test '#{seon.fork-server/dev-classpath!})
-             (form 'app.fc "contracts-step" :fn '#{seon.contract/uncontracted}))
+             (form 'app.fc "contracts-step" :fn '#{seon.contract/uncontracted})
+             ;; every-key-is-documented-by-its-schema stayed green over a key with no unit: it walks the
+             ;; registry, and a config map's fields are in no digest (seon.program/registry-walkers)
+             (form 'app.fc-test "walks-the-keys" :test '#{seon.config/keys-declared})
+             (form 'app.fc-test "walk-helper" :fn '#{seon.contract/forms})
+             (form 'app.fc-test "walks-by-a-helper" :test '#{app.fc-test/walk-helper})
+             (form 'app.fc "boots" :fn '#{seon.config/keys-declared seon.config/schema-forms})
+             (form 'app.fc-test "boots-a-root" :test '#{app.fc/boots}))
         g (program/reach-graph db nil)
         in {:env "e" :tree "t" :config {}}
         a (update-vals (program/graph-index g in nil) :digest)
@@ -753,6 +760,9 @@
     ;; seon.reconcile/index filters every attribute the schema declares by namespace (docs/source.md#tests-run-by-reach)
     (is (schemas 'reads-schemas) "a test reaching seon.reconcile/index takes the schema class")
     (is (not (schemas 'pure)) "a pure test takes no schema class")
+    (is (schemas 'walks-the-keys) "a test walking the registry takes the schema class: every entry is its input")
+    (is (schemas 'walks-by-a-helper) "and so does one walking it by a helper of its namespace")
+    (is (not (schemas 'boots-a-root)) "a test reaching src's use of the registry does not: 1,426 of 1,469 tests do")
     (doseq [[c m] [[:bin bin] [:web web] [:system system] [:deps deps]]]
       (is (m 'starts-a-process) (str "a test starting processes takes the " c " class"))
       (is (not (m 'pure)) (str "a pure test takes no " c " class")))
