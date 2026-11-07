@@ -13,6 +13,7 @@ A thing is its data structure: any entity holding the shape is that thing, howev
 - **Session:** an agent on a temp branch of its user's branch.
 - **Eval:** an entity attached to its agent: code, intent, cost, namespace, and ``:seon.eval/result``, a ref. Its id is its eid, which the store issues uniquely across branches (lab, read). Evaluating again moves the ref, and the context regenerates.
 - **Result:** one immutable entity per value, the same on every branch: ``:seon.result/hash``, the full hash as identity and content id, the lookup ref; ``:seon.result/value``, ``:ex``, ``:out``, ``:err``. The wire keeps the short handle, resolved by a seek: the identity must be the full hash, or two values sharing a prefix would become one entity.
+  A content-id result has the same eid on two branches, and two sessions producing one value merge into one entity with no conflict, each eval pointing at it (lab). A new small result costs 50% more datoms than inline and about 38% more time; re-using one costs the same as inline (lab, 300 evals, one run). Whether the small case is worth an entity is open: a value below the out-of-line size could stay on the eval, at the cost of two shapes.
 - **Layout:** a data structure naming existing components, on its own key, as root's already is. Functions remain for what data can't express.
 
 ## Where each fact lives
