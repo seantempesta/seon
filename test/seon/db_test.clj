@@ -10,6 +10,21 @@
 
 (defn- notes [db] (set (d/q '[:find [?t ...] :where [_ :note/text ?t]] db)))
 
+;; docs/sharing.md#a-process-catches-up-to-a-db-value: a reader takes what moved from the value it last applied, so a commit it missed is no gap
+(deftest what-moved-between-two-values-is-what-their-reports-say
+  (let [db0 (d/db-with (ts/test-db) [{:db/ident :note/id :db/valueType :db.type/string :db/cardinality :db.cardinality/one :db/unique :db.unique/identity}
+                                     {:db/ident :note/text :db/valueType :db.type/string :db/cardinality :db.cardinality/one}])
+        r1 (d/with db0 [{:note/id "a" :note/text "one"} {:note/id "b" :note/text "kept"}])
+        r2 (d/with (:db-after r1) [{:note/id "a" :note/text "two"} [:db/retract [:note/id "b"] :note/text "kept"]])
+        r3 (d/with (:db-after r2) [{:note/id "c" :note/text "three"}])
+        vs (fn [ops] (set (map (fn [[op _ a v]] [op a v]) ops)))]
+    (doseq [r [r1 r2 r3]]
+      (is (= (set (pdb/report->tx r)) (set (pdb/ops-between (:db-before r) (:db-after r)))) "one transaction: what its report says"))
+    (is (= #{[:db/add :note/id "a"] [:db/add :note/text "two"] [:db/add :note/id "b"] [:db/add :note/id "c"] [:db/add :note/text "three"]}
+           (vs (pdb/ops-between db0 (:db-after r3))))
+        "commits missed: what they came to, with no value that came and went")
+    (is (= [] (pdb/ops-between (:db-after r3) (:db-after r3))) "nothing moved, nothing to do")))
+
 (deftest eid-is-the-entity-of-a-unique-value
   (let [db (ts/test-db)]
     (testing "a unique attribute's value names its entity: the one a query finds"

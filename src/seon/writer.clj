@@ -49,15 +49,13 @@
     (if-let [tx (cfg/moved-facts db ops)] (update st :pend (fnil conj []) {:tx-data tx}) st)))
 
 (defn- stored!
-  "Main's stored commit, made of ops (its transactions' resolved datoms, in order): the fork
-  server's replica reads that commit from the store (d/commit-as-db; FIFO with fork
-  requests) and loads the program they change, never replaying the datoms. A group commit
-  is one stored commit, so one notice covers its batch. The env is MDB_NOSYNC: a committed
-  write is readable by another process before the flusher's sync."
-  {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile :seon.db/resolved-tx] :nil]}
-  [st o ops]
+  "Main's stored commit: the fork server's replica reads it from the store (d/commit-as-db; FIFO with fork requests) and takes what
+  moved since the value it last applied (seon.db/ops-between), never replaying datoms. A group commit is one stored commit, so one
+  notice covers its batch. The env is MDB_NOSYNC: a committed write is readable by another process before the flusher's sync."
+  {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile] :nil]}
+  [st o]
   (let [db @(:conn st)]
-    (step/out! o :to-fork-server {:op :tx :t (:max-tx db) :commit (d/commit-id db) :ns (profile/now-ns) :tx-data ops})
+    (step/out! o :to-fork-server {:op :tx :t (:max-tx db) :commit (d/commit-id db) :ns (profile/now-ns)})
     nil))
 
 (defn- branch-merge
@@ -152,7 +150,7 @@
                             (pdb/tx-meta (pdb/conn-main conn)))
             t (:max-tx (:db-after rep))
             ops (pdb/report->tx rep)
-            _ (stored! st o ops)]
+            _ (stored! st o)]
         [(main-commit st o (:max-tx (:db-before rep)) t ops (:db-after rep))
          {:tx t :datoms (count ops)
           ;; :files, the source files (namespaces' and schema resources') its changes touch: what a write-back rewrites;
@@ -180,7 +178,7 @@
       (cond
         (sequential? reps)
         (let [ok (filter (comp map? second) (map vector ms reps))]
-          (when (seq ok) (stored! st o (vec (mapcat (comp pdb/report->tx second) ok))))
+          (when (seq ok) (stored! st o))
           ;; one stored commit, one notice: the last report's t, every report's ops in order
           (let [st (reduce (fn [st [m rep]]
                              (if-not (map? rep)
