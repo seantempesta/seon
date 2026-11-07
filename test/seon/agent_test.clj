@@ -2062,7 +2062,7 @@
         [_ named] (in-agent (fn [_] [(str "(do (in-ns 'seon.repl-test) (clojure.test/deftest a-plainly-green-named-test (clojure.test/is (= 2 (+ 1 1)))) (in-ns 'user) :ok)")
                                      (str "(let [r (my.agent/prove '" t ")] {:proofs (:proofs r) :line (:seon.print/code (my.agent/prove-summary {} r))})")]))]
     (is (= :pass (get-in named [:value :proofs t])) (pr-str named))
-    (is (not (str/includes? (str (get-in named [:value :line])) "no verdict")) (pr-str named))))
+    (is (not (str/includes? (str (get-in named [:value :line])) (str t))) "it isn't among what has no verdict; the task's own unwritten proof is")))
 
 (deftest a-real-gate-judges-a-candidate-once
   ;; the one real gate: a process test run on a checkout of the candidate, its verdict reaching the branch, and the judge's gate of the same
