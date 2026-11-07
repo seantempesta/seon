@@ -1185,11 +1185,10 @@
     (is (str/includes? printed "(* 2 x)"))
     (is (not (str/includes? printed "→")) "a nil value beside output draws no arrow")
     (is (not (str/includes? printed "nil")) printed)
-    (is (str/includes? silent "→") "a real nil with no output is still shown")
-    (is (str/includes? silent "nil"))
+    (is (str/includes? silent "nil") "a real nil with no output is still shown")
     (is (str/includes? both "printed-out") "output beside a value")
     (is (str/includes? both "warned-err") "and its stderr, under :err")
-    (is (str/includes? both "→") "the value is still drawn when it is not nil")
+    (is (str/includes? both ">7<") "the value is still drawn when it is not nil")
     (is (and (str/includes? cut "line-0") (not (str/includes? cut "line-2999"))) "output over the value budget is cut")
     (is (< (count cut) 6000) (str "cut by the value's budget: " (count cut) " chars"))
     (is (str/includes? cut "(subs (:seon.print/code (:out result/e23))") "and the cut says how to read the rest")))
@@ -1640,7 +1639,7 @@
   (let [[w a branch] (live-walk)
         e3 (seon.db/eid branch :seon.eval/id "e3")]
     (swap! a assoc-in [:evals e3 :seon.eval/opened] true)
-    (is (= {[`ui/eval-item "e3"] :miss [`ui/eval-output "e3"] :same} (r/flush! w nil)) "an eval opened: that eval's line and its output run (opened, the output is whole); its turn's and its list's layout do not")
+    (is (= {[`ui/eval-item "e3"] :miss [`ui/eval-output "e3"] :same, [`ui/eval-glance "e3"] :same} (r/flush! w nil)) "an eval opened: that eval's line and its output run (opened, the output is whole); its turn's and its list's layout do not")
     (swap! a assoc :t 99)
     (is (= {} (r/flush! w nil)) "a change no component read: nothing runs")
     (swap! a assoc-in [:evals e3 :seon.eval/opened] true)
@@ -2633,13 +2632,13 @@
       (is (str/includes? e "Run the proofs.") "a step's line is what it set out to do")
       (is (= 1 (count (re-seq #"\(prove-it\)" e))) "its code once, under the line")
       (is (not (re-find #"<details[^>]* open" e)) "closed until opened"))
-    (is (str/includes? (h/html (ui/eval-output (assoc opts :at [:evals (eid "e3")]))) "prove") "its value by the render its record names")))
+    (is (str/includes? (h/html (ui/eval-glance (assoc opts :at [:evals (eid "e3")]))) "prove") "its value by the render its record names")))
 
 (deftest an-opened-step-shows-its-result-whole
   ;; docs/render.md#the-page: expanding expands: a step closed holds a start, opened all of it, with nothing further to open
   (let [v (mapv (fn [i] {:n i :name (str "row-" i)}) (range 800))
         e {:seon.eval/id "e1" :seon.eval/code "(rows)" :seon.eval/response {:handle 'result/e1 :value v}}
-        draw (fn [e] (h/html (ui/eval-output {:seon.ctx/ctx {:evals {1 e}} :seon.db/db (ts/test-db) :at [:evals 1]})))
+        draw (fn [e] (h/html (ui/eval-glance {:seon.ctx/ctx {:evals {1 e}} :seon.db/db (ts/test-db) :at [:evals 1]})))
         closed (draw e)
         opened (draw (assoc e :seon.eval/opened true))]
     (is (not (str/includes? closed "row-799")) "closed: its start")
@@ -2932,6 +2931,31 @@
                          {:seon.task/outcome :closed :seon.task/failure {:reason why}})]
     (is (= :task/closed (:state s)) "what root decided wins over the agent's own end")
     (is (= why (:reason s)))))
+
+(deftest a-value-draws-itself-in-the-chat
+  ;; docs/render.md#a-value-draws-itself: no click; the model reads the value as data
+  (let [[_ branch _] (paged-dbs)
+        k (seon.task/agent-key "b1" :a3)
+        ev (fn [id value] (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} id "a3"
+                                               {:seon.eval/call (seon.task/call-ref k 5) :seon.eval/code "(page)" :seon.eval/response {:handle (symbol "result" id) :value value}}))
+        db (d/db-with branch (vec (concat [{:seon.agent/key k :seon.agent/turn 6}]
+                                          (ev "g1" {:points [1 2] :seon.render/html [:svg {:width 10} [:circle {:r 3}]]})
+                                          (ev "g2" {:plain-value 41}))))
+        w (a3-walk db)]
+    (try
+      (let [html (apply str (map :html (filter #(= "#c-rows" (:container %)) (r/placed-units w))))
+            g1 (str/index-of html "eval-glance-g1")
+            wire (pr-str (r/placed-hiccup w ["#c-rows"]))]
+        (is (str/includes? html "<svg") "the chart is drawn, closed step and all")
+        (is (not (str/includes? html "<svg height=\"0")) "drawn as it is")
+        (is (str/includes? html "plain-value") "a value with no render: the value printer")
+        (is (some? g1))
+        (is (not (str/includes? wire "eval-glance")) "the model reads no glance"))
+      (finally (r/dispose-walk! w))))
+  (testing "a render no process here holds: the data, never a throw"
+    (let [v {:n 1 :seon.render/html 'agent.nobody/chart}]
+      (is (nil? (r/render-of v nil)))
+      (is (str/includes? (pr-str (r/html {} v)) ":n")))))
 
 (deftest a-steps-buttons-call-roots-table
   ;; docs/turn.md#an-eval-can-be-run-again: each button is a call of root's one table, and a request the button makes is no record of the conversation
