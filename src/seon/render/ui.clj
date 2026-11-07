@@ -403,11 +403,11 @@
   the same): words are a message its next turn reads (seon.root/message!), and a line that starts with
   ( evaluates in its REPL (seon.root/submit!, origin :ui), as every line does on an agent with no task; interrupt stops its running form;
   release runs its task's next run when the task is held (seon.root/release!). input {:id
-  :live? :held :focus? :busy? :capped?}: live, root's view holds its process in this boot; busy?, it runs a form (what interrupt stops); capped?, its task is
+  :live? :held :focus? :busy? :capped? :talks?}: talks?, it has a task, whose next turn reads what's said; live, root's view holds its process in this boot; busy?, it runs a form (what interrupt stops); capped?, its task is
   at its cap (no message wakes it); focus?, its field takes focus as the page loads (the chat's:
   @ctx's page is long and the field ends it)."
   {:malli/schema [:=> [:cat :seon.render/opts :seon.render/agent-input] :any]}
-  [opts {:keys [id live? held focus? busy? capped?]}]
+  [opts {:keys [id live? held focus? busy? capped? talks?]}]
   [:section {:id (:unit opts) :class "seon-stack-2"}
    (if live?
      [:form {:class "seon-row" :data-seon-repl "" :seon/call 'seon.root/submit! :seon/agent id}
@@ -415,7 +415,7 @@
       ;; Enter sends, Shift+Enter is a new line: a form may span lines
       [:textarea (cond-> {:name "forms" :class "flex-1 min-w-0" :rows 3 :autocomplete "off" :spellcheck "false"
                           (keyword "data-on:keydown") "if (evt.key==='Enter' && !evt.shiftKey) { evt.preventDefault(); el.form.requestSubmit() }"
-                          :placeholder (str (if capped? "(+ 1 2) evaluates in its REPL (Enter; Shift+Enter: a new line)" "Say something (Enter; Shift+Enter: a new line)\n(+ 1 2) runs in its REPL"))}
+                          :placeholder (if (and talks? (not capped?)) "Say something (Enter; Shift+Enter: a new line)\n(+ 1 2) runs in its REPL" "(+ 1 2) evaluates in its REPL (Enter; Shift+Enter: a new line)")}
                    ;; the chat takes focus (it follows its tail); a browser scrolls a focused field into view, and this one ends the page
                    focus? (assoc :autofocus true))]
       ;; a form to interrupt only while its process runs one (status :busy); a capped task's agent answers forms but takes no message

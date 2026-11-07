@@ -2291,8 +2291,9 @@
   (let [html (fn [m] (h/html (ui/agent-input {:unit "p-input"} (merge {:id :a3 :live? true :held nil} m))))]
     (is (str/includes? (html {:busy? true}) "interrupt"))
     (is (not (str/includes? (html {:busy? false}) "interrupt")) "no form running: nothing to interrupt")
-    (is (str/includes? (html {}) "a message, read at its next turn") "a live agent takes a message")
-    (is (not (str/includes? (html {:capped? true}) "a message, read at its next turn")) "a capped task's agent does not")
+    (is (str/includes? (html {:talks? true}) "Say something") "an agent on a task takes a message")
+    (is (not (str/includes? (html {:talks? true :capped? true}) "Say something")) "a capped task's agent does not")
+    (is (not (str/includes? (html {}) "Say something")) "nor one with no task: its input is its REPL")
     (is (str/includes? (html {:capped? true}) "It used all its turns") "and the page says why")
     (is (str/includes? (html {:capped? true}) "<textarea") "it still answers a form")
     (is (not-any? #(str/includes? (html {:live? false :busy? true :capped? true}) %) ["<textarea" "interrupt"]) "no process: neither")))
