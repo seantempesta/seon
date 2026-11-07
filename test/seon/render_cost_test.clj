@@ -434,7 +434,7 @@
      :sizes [10 40 160 640]})))
 
 (def ^:dynamic *conn*
-  "The branch's connection the status's proof writes its base, main and branch on (bound by its deftest)."
+  "The branch's connection these proofs read and write: the status's its base, main and branch, the draw's its parts (bound by each deftest)."
   nil)
 
 (defn- defn-facts
@@ -483,10 +483,6 @@
 ;; +10 calls: caused asks the :long-form class (seon.problems/long-forms) of the changed vars, its bound read once
                      :fixed {:bytes 27000000 :calls 136}
                      :sizes [1 10 30]})))))
-
-(def ^:dynamic *conn*
-  "The branch's connection the draw proof reads and writes (bound by its deftest)."
-  nil)
 
 (def ^:dynamic *sels*
   "The draw proof's opts (bound by its deftest)."

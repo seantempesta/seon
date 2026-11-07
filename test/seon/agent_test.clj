@@ -2019,6 +2019,26 @@
     (is (= {t :pass} (:proofs (:value again))))
     (is (= 2 (:value asks)) "one ask for each change: at the same digest its verdict stands, and no gate is asked")))
 
+;; "if another agent has already run the same exact test we remove those" (owner, 2026-11-07)
+(deftest a-process-test-green-at-its-digest-asks-no-gate
+  ;; docs/merging.md#verdicts-are-a-cache. Another's green at this digest answers; another's red does not, and a schema the branch registers moves the
+  ;; digest, since a process test takes the schema class and an agent's inputs are its root's boot's (seon.agent/test-plan)
+  (let [t 'seon.repl-test/a-process-proof-already-green
+        digest (str "(get (:digests (seon.agent/test-plan (seon.agent/db) (:base @seon.agent/state) #{'" t "})) '" t ")")
+        hold (fn [verdict] (str "(seon.fx/write-verdicts! {:id \"another\" :key \"another\"} {'" t " (assoc " (pr-str verdict) " :digest " digest ")} {})"))
+        prove "(let [r (my.agent/prove)] {:proofs (:proofs r) :deferred (:deferred r)})"
+        [_ _ _ red asked-on-red _ _ green asks before _ after]
+        (in-agent (fn [_] [(answers-gate t) (process-proof "a-process-proof-already-green" 2)
+                           (hold {:pass 0 :fail 1 :error 0}) prove "(let [n @user/gate-asks] (reset! user/gate-asks 0) n)"
+                           (process-proof "a-process-proof-already-green" 3) (hold {:pass 1 :fail 0 :error 0}) prove "@user/gate-asks"
+                           digest "(my.schema/register! :seon.gate-test/k :string)" digest])
+                  {:proofs #{t}})]
+    (is (= 1 (:value asked-on-red)) (str "another's red is not this agent's verdict: the gate is asked. " (pr-str red)))
+    (is (= {t :pass} (:proofs (:value green))) (pr-str green))
+    (is (= [] (:deferred (:value green))) "nothing left unjudged")
+    (is (= 0 (:value asks)) "a green at its digest asks no gate")
+    (is (not= (:value before) (:value after)) "a schema the branch registers moves a process test's digest")))
+
 (deftest a-real-gate-judges-a-candidate-once
   ;; the one real gate: a process test run on a checkout of the candidate, its verdict reaching the branch, and the judge's gate of the same
   ;; candidate running nothing, since the same owner holds its verdict (seon.fx/run-tests)

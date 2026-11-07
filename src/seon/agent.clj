@@ -765,6 +765,16 @@
                   (swap! state assoc :branch-changes {:base (pdb/point base) :point (pdb/point db) :changes ch})
                   ch))))
 
+(defn- branch-inputs
+  "Inputs in, a root's boot's, as branch db's tests read them: the schema class moved by the entries db holds beyond the binary's, which a
+  branch can register (program/schema-changes). A digest no gate's checkout shares only runs more. See docs/merging.md#verdicts-are-a-cache."
+  {:malli/schema [:=> [:cat :seon.program/inputs :seon.host/db] :seon.program/inputs]}
+  [in db]
+  (let [changes (program/schema-changes db)]
+    (if (empty? changes)
+      in
+      (update-in in [:config :seon.env/schemas] #(lib/digest (str % (sedn/encode (vec (sort-by key changes)))))))))
+
 (defn test-plan
   "What judges branch db, as this process holds it: seon.proofs/plan of its tests' reach digests
   (seon.program/graph-index) against base's (main at its merge base), the greens stored at
@@ -808,7 +818,7 @@
         ;; built from nothing it cost 853 MB of a 1 GiB eval budget where an update costs 290 (a plan of main's
         ;; run, mode :main, selects with no base; measured 2026-10-30, 1,169 tests)
         g (branch-graph db (or base (:base @state)) in)
-        g (program/reach-indexed g in)
+        g (program/reach-indexed g (branch-inputs in db))
         ;; a stall task's proofs read that task's cause, so they judge only a task that names them
         idx (into {} (filter (fn [[t _]] (and (judges? t) (or (contains? proofs t) (not (template/stall-proofs t)))))) (program/index-of g))
         cd (update-vals idx :digest)
@@ -1043,7 +1053,7 @@
   :process: a root, an agent, a fork, the binary) never runs here, named or a proof: a child forked
   from an agent has no process store to start one in (bin/test makes it), so it errored. It is left
   out and listed under :skipped, and runs on the merge gate's checkout (judge!, seon.reconcile's
-  :gate; a deferred proof is no reason of the done rule's). proofs is kept for the contract's
+  :gate; a deferred proof is no reason of the done rule's), unless it is green at its digest (p's :reused, whoever ran it), which needs no gate. proofs is kept for the contract's
   callers: bin/test's own plan, on a checkout, still runs a named or proof process test
   (seon.proofs/left-out)."
   {:malli/schema [:=> [:cat :map [:maybe [:set :symbol]] [:set :qualified-symbol]] :map]}
@@ -1052,7 +1062,7 @@
         p (if (seq names) (-> p (update :selected #(filterv in? %)) (update :run #(filterv in? %))) p)
         ;; a slow test the run did not name and no proof holds is left out as bin/prove leaves it (docs/merging.md#a-slow-test-is-left-out)
         slow (when-not (seq names) (fx/slow-tests (select-keys (:digests p) (remove proofs (:run p)))))
-        skip? (into (proofs/left-out (:selected p) (:process p) false #{}) (keys slow))]
+        skip? (into (set (remove #(proofs/green? (get-in p [:reused %])) (proofs/left-out (:selected p) (:process p) false #{}))) (keys slow))]
     (-> p (assoc :skipped (vec (sort-by str (filter skip? (:selected p)))))
         (update :selected #(filterv (complement skip?) %)) (update :run #(filterv (complement skip?) %)))))
 
