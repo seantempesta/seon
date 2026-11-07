@@ -117,9 +117,7 @@
   .seon-chat-log { @apply flex flex-col gap-1; overflow-wrap: anywhere; }
   .seon-context { @apply flex flex-col gap-2; }
   .seon-blocks { @apply flex flex-col gap-2; }
-  /* each thing rendered is a block saying which render drew it (seon.render/styled) */
   .seon-blocks > * { @apply rounded-md border border-base-800 bg-base-900 p-2; min-width: 0; overflow-wrap: anywhere; }
-  .seon-blocks > [data-render]::before { content: attr(data-render); @apply mb-1 block text-2xs text-text-500; }
   /* common styling, named once */
   .seon-note { @apply text-2xs text-text-500; }
   .seon-stack { @apply flex flex-col gap-1; }
