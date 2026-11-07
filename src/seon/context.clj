@@ -762,10 +762,10 @@
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] :map] :string]}
   [db e] (render/result-text db (result-mark db e)))
 
-(defn first-taken
-  "A message's order in its turn, [db e]: the transaction that named its agent (one seek). See docs/ctx.md#the-pattern."
-  {:malli/schema [:=> [:cat [:tuple :seon.host/db :int]] :int]}
-  [[db e]] (or (:tx (first (d/datoms db :eavt e :seon.message/agent))) 0))
+(defn first-delivered
+  "A message's order in its turn, [db a e]: the transaction that put agent a's ref on message e, one seek (its tx on the branch, when it was delivered). See docs/ctx.md#the-pattern."
+  {:malli/schema [:=> [:cat [:tuple :seon.host/db :int :int]] :int]}
+  [[db a e]] (or (:tx (first (d/datoms db :eavt e :seon.message/to a))) 0))
 
 (defn turn-members
   "What model call cid of agent record c holds that c holds too, in the order of the turn: {:messages [[m id]] :evals [[e id]]}: its messages as they were taken, its evals as they ran, each with its own id; one unlinked from c (a swap! on
@@ -776,7 +776,7 @@
   (let [plain (ratom/untracked c)
         at (fn [k attr] (keep (fn [e] (when-let [id (or (get-in plain [k e attr]) (get-in c [k e attr]))] [e id]))
                               (when (seq (get-in c [:calls cid k])) (keys (get-in plain [:calls cid k])))))]
-    {:messages (let [ms (at :messages :seon.message/id)] (if (next ms) (sort-by (fn [[e]] (first-taken [db e])) ms) ms))
+    {:messages (let [ms (at :messages :seon.message/id)] (if (next ms) (sort-by (fn [[e]] (first-delivered [db (:db/id c) e])) ms) ms))
      :evals (sort-by first (at :evals :seon.eval/id))}))
 
 (defn call-of
@@ -813,7 +813,7 @@
   (let [a (pdb/eid db :seon.agent/key k)]
     (reduce max 0 (keep #(d/q % db a) '[[:find (max ?tx) . :in $ ?a :where [?a :seon.agent/key _ ?tx]]
                                          [:find (max ?tx) . :in $ ?a :where [_ :seon.eval/agent ?a ?tx]]
-                                         [:find (max ?tx) . :in $ ?a :where [_ :seon.message/agent ?a ?tx]]
+                                         [:find (max ?tx) . :in $ ?a :where [_ :seon.message/to ?a ?tx]]
                                          [:find (max ?tx) . :in $ ?a :where [?m :seon.model-call/agent ?a] [?m :seon.model-call/reply _ ?tx]]]))))
 
 (defn session-open
@@ -844,7 +844,7 @@
   "The kinds of record `session-records` answers, each with the attributes that name it, its agent and its model call. See
   docs/tasks.md#a-task-names-example-sessions."
   {:seon.db/eval-fact [:seon.eval/id :seon.eval/agent :seon.eval/call]
-   :seon.message/fact [:seon.message/id :seon.message/agent :seon.message/call]
+   :seon.message/fact [:seon.message/id :seon.message/to :seon.message/call]
    :seon.model-call/fact [:seon.model-call/id :seon.model-call/agent nil]})
 
 (defn- example-record
@@ -865,7 +865,7 @@
       (cond-> call-k (assoc call-k (task/call-ref ek (:turn m 0))))
       ;; a model call is `<agent key>/<n>` (docs/turn.md#the-turn-is-a-number), the example's too: the page finds it by that
       (as-> m (if-let [n (:seon.model-call/n m)] (assoc m id-k (str ek "/" n)) (update m id-k #(str ek "/" %))))
-      (assoc agent-k [:seon.agent/key ek])
+      (assoc agent-k (cond-> [:seon.agent/key ek] (= :seon.message/to agent-k) vector))
       (cond-> (:seon.eval/code m) (->> (example-record ek pre)))))
 
 (defn- revalued

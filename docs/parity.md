@@ -41,7 +41,7 @@ Each v1 function of the agent's REPL and where it stands here.
 | `my.program/search`, `similar` (embeddings) | `my.agent/similar` ('ns/f or text); `seon.vector/near` in any query; fused with the call graph ([vectors](vector.md)); EmbeddingGemma-2 in process (llama.cpp) where v1 ran MLX over HTTP | present, better |
 | `my.program/diff`, `sizes`, `breaks` | `seon.root/branch-diff` (root only) | partial |
 | `my.program/write-branch!` | write-back at merge (`seon.source`, the `:git` effect) | present, better |
-| `my.message/inbox`, `send` (stored facts) | `my.agent/messages`, `send-message`: the owner's message a fact on main and on the taking agent's branch (`:seon.message/*`); another agent's send the same fact, written by root to the recipient's branch whether or not its process lives | partial |
+| `my.message/inbox`, `send` (stored facts) | `my.agent/messages`, `send-message`: the owner's message one entity on main, to the agent (`:seon.message/to`), and on the delivering agent's branch (`:seon.message/*`); another agent's send the same entity, written by root whether or not the recipient's process lives, which wakes it if it waits | partial |
 | ``my.test/run``, ``check`` (v1's) | proofs run by themselves after each evaluation, and `my.agent/prove` runs the same selection at the REPL ([turn](turn.md#who-runs-which-tests)) | present |
 | removal that refuses while a referrer remains (`my.program/unmap-subject!`) | plain `ns-unmap`, observed and recorded on the branch (`seon.repl/unmapped`); a referrer is not refused (it fails where it loads and in its tests) | partial |
 | `my.web/fetch`, `search` | none (no `:web` effect) | missing |

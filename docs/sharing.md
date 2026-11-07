@@ -75,7 +75,7 @@ Why a merge costs sharing at all: konserve is a key to a value and knows nothing
 
 No choice of boundary helps writes that land everywhere: 150 entities placed by hash touch about 23 percent of leaves under every scheme. Only sort order helps, or holding writes back as Datomic's live index and a hitchhiker tree's node buffers do.
 
-What may not be adopted: main's platform records. A message a branch holds reads as taken (```seon.agent/untaken-entries```), and root and a branch both write an agent's facts. The mailbox removes the first.
+What may not be adopted: main's platform records. A message a branch holds reads as delivered (```seon.agent/undelivered```), and root and a branch both write an agent's facts. The mailbox removes the first.
 
 ## A result stands until what it read changes
 

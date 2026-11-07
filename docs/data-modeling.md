@@ -15,7 +15,7 @@ Say what a value is by its attribute's schema in `resources/seon/schemas/`, or a
 | A name derived from content, the same on every branch | `{:seon.db/identity true :seon.db/content-id true}` | `:form/id` |
 | Several values | `[:set ...]` | `:form/refs` |
 | A link to another entity | `:seon.db/ref` | `:seon.eval/agent` |
-| A value you will look things up by | `{:seon.db/index true}` | `:seon.message/branch` |
+| A value you will look things up by | `{:seon.db/index true}` | `:seon.message/from` |
 | A value that is a whole map or vector | `:seon.db/plain` ([plain data](storage.md#plain-data)) | `:seon.eval/response`, `:seon.result/value` |
 
 ## Things relate by refs

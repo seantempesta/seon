@@ -65,7 +65,7 @@
  :seon.proof/results [:map-of :qualified-symbol :seon.proof/status]
  ;; an agent as the reconciler's index holds it: what root decides on of its process and environment (the entity's attributes,
  ;; seon.task/agent-value)
- :seon.reconcile/agent [:map [:seon.agent/key :string] [:seon.agent/boot {:optional true} :string] [:seon.agent/taken {:optional true} :int]
+ :seon.reconcile/agent [:map [:seon.agent/key :string] [:seon.agent/boot {:optional true} :string]
                         [:seon.agent/env :seon.task/env] [:seon.agent/id {:optional true} :keyword]]
  ;; ---- the done rule and the reconciler's answer ----
  :seon.reconcile/merge-limits [:map [:max-conflicts nat-int?] [:max-merge-turns nat-int?]]
@@ -97,15 +97,16 @@
  ;; :seon.task/own, put-run's :seon.run/run, the ids of derive-needs and refresh-ready)
  :seon.reconcile/index [:map {:gen/elements [{:root nil :tasks {} :keys {} :needed-by {} :acc {} :depth {} :claims {}
                                               :agents {} :done {} :ready #{} :ready-key {}
-                                              :live #{} :reap #{} :kill {} :judge #{} :merging #{} :msgs {}}]}
+                                              :live #{} :reap #{} :kill {} :judge #{} :merging #{} :woken #{} :late #{}}]}
                         [:root [:maybe :map]] [:tasks :map] [:keys :map] [:needed-by :map]
                         [:acc :map] [:depth :map] [:claims :map]
                         [:agents :map] [:done :map]
                         [:ready set?] [:ready-key :map]
                         [:live set?] [:reap set?] [:kill :map]
                         [:judge set?] [:merging set?]
-                        ;; messages main holds to each branch's agent (seon.reconcile/branch-messages): a parked session's wake
-                        [:msgs {:optional true} :map]]
+                        ;; the agents a message woke and a start has not taken yet, and the wakes held for agents that were running
+                        ;; (seon.reconcile/wake): a waiting agent's task is ready when its agent is woken
+                        [:woken {:optional true} set?] [:late {:optional true} set?]]
  :seon.reconcile/step [:enum :ignored :done :dead-read :spawned :started :briefed :worked :tested :read :diffed :merged :octopus-merged :write-back :main-read :committed :commit-recorded :built :gate-read :gated]
  ;; a task as Datahike pulls it (the readers' input)
  :seon.task/pulled [:map [:seon.task/id :seon.task/id] [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name]

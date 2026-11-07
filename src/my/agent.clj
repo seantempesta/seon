@@ -3,9 +3,9 @@
   every agent namespace.
     ($ handle)                an earlier eval's response, its live value under :value (also result/a3f9c1d2)
     (whoami)                  {:id :branch :pid}
-    (messages)                the messages delivered and not yet taken, taken
+    (messages)                the messages sent to you and not yet delivered, delivered; they stay in @ctx until you remove one
     (problem "signature")     one open problem of this agent's run whole, as its problems part names it
-    (send-message tos body)   body to the agents tos (ids), a fact on main for each
+    (send-message tos body)   body to the agents tos (ids), one message to all of them, which wakes each that waits
     (callers 'ns/f)           the program vars whose recorded definition names ns/f
     (callers :ns/key)         the functions whose code or contract names the key (an attribute, config, schema)
     (callers 'a.ns)           the namespaces that require a.ns
@@ -47,7 +47,7 @@
   [h] (get-in @agent/state [:results h]))
 (defn whoami "This agent: {:id :branch :pid}." {:malli/schema [:=> [:cat] [:map [:id :seon.agent/id] [:branch :seon.db/branch] [:pid :seon.lib/pid]]]}
   [] {:id (:id @agent/state) :branch (:branch @agent/state) :pid (lib/c-getpid)})
-(defn messages "The words to this agent not yet taken, taken: entries to its session's runs ({:id :kind :from :to :body}), an agent's send among them (one fact on main to its branch, however it was sent); then effect outcomes ({:from :fx :k :kind :body})." {:malli/schema [:=> [:cat] [:vector :map]]}
+(defn messages "The messages to this agent not yet delivered, delivered ({:id :from :body :sent-ms}: the entities on main that name this agent, another agent's send among them, however it was sent); they stay in @ctx, and its model reads them, until you remove one with (swap! seon.ctx/ctx update :messages dissoc e). Then effect outcomes ({:from :fx :k :kind :body}). See docs/users.md#messages." {:malli/schema [:=> [:cat] [:vector :map]]}
   [] (agent/messages))
 (defn- own-cites
   "What this agent cites now, its cite entities on its branch (seon.task/cites-of), each as {:cites target

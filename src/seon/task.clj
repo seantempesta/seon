@@ -347,13 +347,29 @@
   [k n] {:seon.model-call/id (str k "/" n) :seon.model-call/agent {:seon.agent/key k} :seon.model-call/n n})
 
 (defn message-tx
-  "Message mid of kind (:seon.message/kind) from from to the agent on branch br (nil: the agent writing it, on
-  its own branch), its body: the one message fact, written by root on main and by the turn that takes it on
-  its branch (one entity: its id is a content id). See docs/processes.md#a-parked-process."
-  {:malli/schema [:=> [:cat :string :seon.message/kind :string [:maybe :seon.db/branch] :any] [:vector :map]]}
-  [mid kind from br body]
-  [(cond-> {:seon.message/id mid :seon.message/kind kind :seon.message/from from :seon.message/body body}
-     br (assoc :seon.message/branch br))])
+  "Message mid from from to the agents with keys tos, its body, sent at sent-ms: the one message entity (its id is a content id), `to` naming each
+  recipient's agent entity by key. Written by root's writer on main at the send, and by the recipient on its branch, with its own ref only,
+  when its next act delivers it (seon.agent/deliver!). See docs/users.md#messages."
+  {:malli/schema [:=> [:cat :string :string [:sequential :string] :any :int] [:vector :map]]}
+  [mid from tos body sent-ms]
+  [{:seon.message/id mid :seon.message/from from :seon.message/body body :seon.message/sent-ms sent-ms
+    :seon.message/to (mapv #(vector :seon.agent/key %) tos)}])
+
+(defn undelivered
+  "The messages main holds to the agent with key k that branch-db, its branch, does not hold: each {:id :from :body :sent-ms}, in main's
+  order (by transaction, then id). The agent's ref on main is the fact (a seek of :seon.message/to on its entity, never a scan of the
+  messages), and the branch holding the message's entity is its delivery, so a message the agent removed (its ref retracted, the
+  entity kept) is not brought again. The one reading of it: the agent's next act (seon.agent/undelivered) and root's check that a
+  parked agent is owed one. O(the messages to the agent). See docs/users.md#messages."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :string] [:vector [:map [:id :string] [:from :string] [:body :string] [:sent-ms :int]]]]}
+  [main branch-db k]
+  (if-let [me (pdb/eid main :seon.agent/key k)]
+    (->> (d/datoms main :avet :seon.message/to me)
+         (map (fn [dt] [(:tx dt) (d/entity main (:e dt))]))
+         (remove (fn [[_ m]] (d/entity branch-db [:seon.message/id (:seon.message/id m)])))
+         (sort-by (fn [[tx m]] [tx (:seon.message/id m)]))
+         (mapv (fn [[_ m]] {:id (:seon.message/id m) :from (:seon.message/from m) :body (:seon.message/body m) :sent-ms (:seon.message/sent-ms m)})))
+    []))
 
 (def judged-attrs
   "The attributes root sets on a task when they happen (its judging, seon.reconcile/judge-tx; a refused start), and so
@@ -386,15 +402,17 @@
     (seq m) (conj (assoc m :seon.task/id id))))
 
 (defn start-tx
-  "Agent `agent` (its id; nil: root refused the spawn, and no agent exists) begins task id in root's boot: the task's
+  "Agent `agent` (its id; nil: root refused the spawn, and no agent exists) begins task id in root's boot, its turn budget raised by raise (a wake's allowance) turns: the task's
   outcome :running from what it was, naming the agent (key: the session's agent it continues, seon.task/session-key; nil, its own in
   this boot), the judged attributes cleared; the agent's entity (key, id, task, branch and the rest of its environment,
-  its boot and when it started), its turn budget set only when it is new (a raised budget stays, docs/turn.md#the-cap).
+  its boot and when it started), its turn budget set when it is new (a raised budget stays, docs/turn.md#the-cap) and raised by raise in the same write.
   A refused spawn is the task's outcome :refused with root's reason and error, and no agent."
   {:malli/schema [:function [:=> [:cat :seon.host/db :seon.task/id :string [:maybe :keyword] :seon.task/env :int] [:vector :any]]
-                  [:=> [:cat :seon.host/db :seon.task/id :string [:maybe :keyword] :seon.task/env :int [:maybe :string]] [:vector :any]]]}
-  ([db id boot agent env start-ms] (start-tx db id boot agent env start-ms nil))
-  ([db id boot agent {:keys [branch model max-turns holder]} start-ms key]
+                  [:=> [:cat :seon.host/db :seon.task/id :string [:maybe :keyword] :seon.task/env :int [:maybe :string]] [:vector :any]]
+                  [:=> [:cat :seon.host/db :seon.task/id :string [:maybe :keyword] :seon.task/env :int [:maybe :string] nat-int?] [:vector :any]]]}
+  ([db id boot agent env start-ms] (start-tx db id boot agent env start-ms nil 0))
+  ([db id boot agent env start-ms key] (start-tx db id boot agent env start-ms key 0))
+  ([db id boot agent {:keys [branch model max-turns holder]} start-ms key raise]
    (let [k (when agent (or key (agent-key boot agent)))
          ae (when k (d/entity db [:seon.agent/key k]))
          from (:seon.task/outcome (d/entity db [:seon.task/id id]))]
@@ -405,7 +423,8 @@
                                       :seon.agent/branch branch :seon.agent/boot boot :seon.agent/started-ms start-ms}
                                model (assoc :seon.agent/model model)
                                holder (assoc :seon.agent/holder holder)
-                               (not (:seon.agent/max-turns ae)) (assoc :seon.agent/max-turns max-turns)))
+                               (not (:seon.agent/max-turns ae)) (assoc :seon.agent/max-turns max-turns)
+                               (and (:seon.agent/max-turns ae) (pos? raise)) (assoc :seon.agent/max-turns (+ (:seon.agent/max-turns ae) raise))))
                      (when (and ae (not model) (:seon.agent/model ae)) [:db.fn/retractAttribute [:seon.agent/key k] :seon.agent/model])
                      (when (and ae (not holder) (:seon.agent/holder ae)) [:db.fn/retractAttribute [:seon.agent/key k] :seon.agent/holder])
                      (when (and ae (:seon.agent/ended-ms ae)) [:db.fn/retractAttribute [:seon.agent/key k] :seon.agent/ended-ms])])))))
@@ -570,17 +589,17 @@
 
 (def ^:private agent-pull "The attributes of an agent the reconciler's index reads. See docs/reconcile.md#a-task-holds-how-its-work-ended."
   '[:seon.agent/key :seon.agent/id :seon.agent/branch :seon.agent/model :seon.agent/holder :seon.agent/max-turns
-                           :seon.agent/boot :seon.agent/taken :seon.agent/started-ms])
+                           :seon.agent/boot :seon.agent/started-ms])
 
 (defn- agent-value
   "A pulled agent as :seon.reconcile/agent: what root decides on of it, its environment (the one desired-env compares)
-  beside its boot and the messages it had taken."
+  beside its boot."
   {:malli/schema [:=> [:cat [:map [:seon.agent/key :string] [:seon.agent/branch :keyword] [:seon.agent/model {:optional true} [:maybe :string]]
                                [:seon.agent/max-turns pos-int?] [:seon.agent/holder {:optional true} :string]]]
                    :seon.reconcile/agent]}
   [a]
   (let [{:seon.agent/keys [branch model max-turns holder]} a]
-    (-> (select-keys a [:seon.agent/key :seon.agent/id :seon.agent/boot :seon.agent/taken])
+    (-> (select-keys a [:seon.agent/key :seon.agent/id :seon.agent/boot])
         (assoc :seon.agent/env (cond-> {:branch branch :model model :max-turns max-turns} holder (assoc :holder holder))))))
 
 (defn agents
@@ -665,7 +684,7 @@
           (:seon.root/id k) (some->> (root db) (vector :root)))))
 
 (defn tasks-of-agent
-  "The task entities db names agent entity e as their agent (:seon.task/agent): the tasks whose state an agent's boot or taken count moves.
+  "The task entities db names agent entity e as their agent (:seon.task/agent): the tasks whose state an agent's boot moves.
   An agent holds two on a stage. See docs/reconcile.md#the-reconcilers-index."
   {:malli/schema [:=> [:cat :seon.host/db :int] [:vector :int]]}
   [db e]

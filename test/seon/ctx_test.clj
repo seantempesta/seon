@@ -16,7 +16,7 @@
   '[* {[:seon.agent/task :as :task] :seon.task/task-fact}
     {[:seon.model-call/_agent :as :calls :limit :seon.config.ctx/window :reverse true] [:seon.model-call/id :seon.model-call/n :seon.model-call/origin :seon.model-call/reply]}
     {[:seon.eval/_agent :as :evals :limit :seon.config.ctx/window :reverse true] [*]}
-    {[:seon.message/_agent :as :messages :reverse true] [*]}])
+    {[:seon.message/_to :as :messages :reverse true] [*]}])
 
 (def ^:private small-window-pattern
   "session-pattern with a window of 10, not :seon.config.ctx/window's 100, so a short session moves its windows."
@@ -111,7 +111,7 @@
               (:db-after (d/with db (vec (mapcat (fn [i] (cond-> (eval-tx i)
                                                             (zero? (mod i 3)) (conj {:seon.model-call/id (str k "/" i) :seon.model-call/agent [:seon.agent/key k] :seon.model-call/n i})
                                                             (zero? (mod i 20)) (conj {:seon.message/id (str "m" i) :seon.message/from "user"
-                                                                                      :seon.message/branch :lab-ctx :seon.message/agent [:seon.agent/key k] :seon.message/call (seon.task/call-ref k (max 3 (* 3 (quot i 3)))) :seon.message/body "How is it going?"})))
+                                                                                      :seon.message/to [[:seon.agent/key k]] :seon.message/call (seon.task/call-ref k (max 3 (* 3 (quot i 3)))) :seon.message/body "How is it going?"})))
                                                  part)))))
             db (partition-all 100 (range 1 (inc n)))))))
 
@@ -136,7 +136,7 @@
       0 (eval-tx (+ 10000 i))
       1 (calls-tx (str "lab/ctx/n" i) 2)
       2 [{:seon.model-call/id (str "lab/ctx/x" i) :seon.model-call/agent [:seon.agent/key k] :seon.model-call/n i}]
-      3 [{:seon.message/id (str "mx" i) :seon.message/from "user" :seon.message/branch :lab-ctx :seon.message/agent [:seon.agent/key k] :seon.message/body (str "note " i)}]
+      3 [{:seon.message/id (str "mx" i) :seon.message/from "user" :seon.message/to [[:seon.agent/key k]] :seon.message/body (str "note " i)}]
       4 [[:db/add [:seon.task/id "lab/ctx"] :seon.task/outcome (nth [:running :parked :done] (.nextInt r 3))]]
       5 [[:db/add [:seon.task/id "lab/ctx"] :seon.task/plan (str "plan " i)]]
       6 [[(if (.nextBoolean r) :db/add :db/retract) [:seon.task/id "lab/ctx"] :seon.task/proofs (symbol "app.x-test" (str "t" (.nextInt r 3)))]]
@@ -180,7 +180,7 @@
            (let [e (nth evals (.nextInt r (count evals)))]
              [[:db/retract [:seon.eval/id e] :seon.eval/agent [:seon.agent/key k]] [:db/add [:seon.eval/id e] :seon.eval/agent [:seon.agent/key k]]])
            (eval-tx (+ 80000 i)))
-      11 (or (not-empty (vec (for [m (d/q '[:find [?m ...] :where [?m :seon.message/branch :lab-ctx]] db)] [:db/retractEntity m])))
+      11 (or (not-empty (vec (for [m (d/q '[:find [?m ...] :where [?m :seon.message/id]] db)] [:db/retractEntity m])))
              (eval-tx (+ 50000 i))))))
 
 ;; docs/ctx.md: an entity's own attributes read by its datoms are what a pull of them answers, and cost a seek, not the pull engine
@@ -212,13 +212,13 @@
                                     (concat (mapcat eval-tx (range 1 6))
                                             (for [t (range 3)] {:seon.model-call/id (str "lab/ctx#1/" t) :seon.model-call/agent [:seon.agent/key k] :seon.model-call/n t})
                                             [{:seon.message/id "m1" :seon.message/from "user" :seon.message/body "How is it going?"
-                                              :seon.message/agent [:seon.agent/key k]}]))))
+                                              :seon.message/to [[:seon.agent/key k]]}]))))
         t (:tree (ctx/build db (aid db) :b))]
     (is (= "lab/ctx" (get-in t [:task :seon.task/id])) "the task, pulled whole by the agent's own ref")
     (is (= "Make app.x/f0 pass." (get-in t [:task :seon.task/plan])))
     (is (= 4 (count (:calls t))) "every model call, those its records name among them")
     (is (= 5 (count (:evals t))) "every eval")
-    (is (= ["m1"] (names (:messages t) :seon.message/id)) "the messages it took")
+    (is (= ["m1"] (names (:messages t) :seon.message/id)) "the messages it holds")
     (is (= [] (for [[j _] joins :when (some #{:limit} j)] (first j))) "no window on its own record: every turn, eval and message (the owner: deliver all messages and errors)")
     (is (not (contains? t :catch-ups)) "no catch-ups")))
 
@@ -940,7 +940,7 @@
                                                                 (assoc-in [:messages "m-new"]
                                                                           {:seon.message/id "m-new" :seon.message/from "agent" :seon.message/body "a note to myself"})))))]
         (is (= "waiting for you" (:seon.task/reason (d/entity db' [:seon.task/id "lab/ctx"]))))
-        (is (= (aid db) (:db/id (:seon.message/agent (d/entity db' [:seon.message/id "m-new"])))) "the new message is the agent's")
+        (is (= #{(aid db)} (set (map :db/id (:seon.message/to (d/entity db' [:seon.message/id "m-new"]))))) "the new message is the agent's")
         (is same)
         (is (= "a note to myself" (get-in @ctx/ctx [:messages (id db' [:seon.message/id "m-new"]) :seon.message/body])) "the swap!'s map gave way to the db's: the new member under its id")))
     (testing "a cardinality-many attribute of a forward unit, member by member"

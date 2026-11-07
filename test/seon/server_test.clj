@@ -194,11 +194,11 @@
                                          [{:op :message :agent agent :body "use demo/g"}
                                           "(my.agent/messages)"
                                           {:op :message :agent "a0" :body "hello?"}]))]
-    (is (true? (:ok sent)) "answered when its fact is on main")
+    (is (true? (:ok sent)) "answered when its entity is on main")
     (is (re-find #":from \"owner\"" (:text taken)) (:text taken))
     (is (re-find #":body \"use demo/g\"" (:text taken)))
-    (is (clojure.string/includes? (:text taken) (str ":branch " (pr-str (seon.task/default-branch (:task @names))))) "to the agent, by its branch")
-    (is (re-find #":id \"m-" (:text taken)) "the fact's id, which the agent writes on its branch")
+    (is (re-find #":sent-ms \d+" (:text taken)) "when root's writer recorded it")
+    (is (re-find #":id \"m-" (:text taken)) "the entity's id, which the agent writes on its branch")
     (is (contract/error? none) "no live agent a0: refused, as root refuses")))
 
 (deftest the-context-op-answers-what-a-model-is-sent

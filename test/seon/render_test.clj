@@ -183,7 +183,7 @@
 (deftest every-identity-attribute-is-named-by-one-entity-schema
   ;; the schema of an entity is the one its identity attribute names (seon.render/entity-schema)
   (let [attrs #{:seon.agent/key :seon.task/id :seon.root/id :seon.model-call/id :seon.message/id
-                :seon.message/branch :seon.agent/root :seon.eval/agent}
+                :seon.agent/root :seon.eval/agent}
         named (frequencies (for [[k form] seon.contract/forms :when (:seon.db/attributes (seon.contract/properties k))
                                  [a] (filter vector? (rest form)) :when (attrs a)]
                              a))]
@@ -416,7 +416,7 @@
                              (seon.task/cites-tx (ts/test-db) "demo/f" "demo/f" (seon.ref/cited (:seon.ref/citations (seon.ref/parse nil walked-plan)))))
                        (seon.task/agent-tx "b1" :a3 {:status :idle :pid 77 :branch :task-demo-f})
                        (seon.test-store/work-tx "demo/f" :running {:boot "b1" :agent :a3 :branch :task-demo-f :model "m" :max-turns 8 :start-ms 0})
-                       (update (seon.task/message-tx "m-1" :message "owner" :task-demo-f "check g") 0 assoc :seon.message/agent {:seon.agent/key k} :seon.message/call (seon.task/call-ref k 1))
+                       (update (seon.task/message-tx "m-1" "owner" [k] "check g" 1000) 0 assoc :seon.message/call (seon.task/call-ref k 1))
                        ;; the agent's task, which its record pulls (seon.agent/the-agent-is-the-unit-not-the-run)
                        [{:seon.agent/key k :seon.agent/task {:seon.task/id "demo/f"}}]
                        ;; root's own evaluation, from its REPL
@@ -756,8 +756,8 @@
                           {:seon.eval/call-id (str "c-" id) :seon.eval/call (seon.task/call-ref k n) :seon.eval/code (str "(inc " i ")")
                            :seon.eval/response {:handle (symbol "result" id) :value {:step i}}})
      (when (zero? (mod i 3))
-       (update (seon.task/message-tx (str "mm-" i) :message "owner" :task-demo-f (str "How is step " i "?")) 0 assoc
-               :seon.message/agent {:seon.agent/key k} :seon.message/call (seon.task/call-ref k n))))))
+       (update (seon.task/message-tx (str "mm-" i) "owner" [k] (str "How is step " i "?") 1000) 0 assoc
+               :seon.message/call (seon.task/call-ref k n))))))
 
 (defn- step-dbs
   "a3's branch as of each of n further turns: [before turn 0, after turn 0, ... after turn n-1]."

@@ -100,10 +100,10 @@ Root's writer keeps it: built when first asked (`:union`; main's history, then e
 The owner's example, root's message on main and the agent's reply on its branch, is one query (`seon.union-test/conversation`):
 
 ```clojure
-(d/q '[:find ?body ?reply ?branch :in $ ?agent
-       :where [?m :seon.message/branch ?agent] [?m :seon.message/body ?body]
+(d/q '[:find ?body ?reply ?branch :in $
+       :where [?m :seon.message/from "root"] [?m :seon.message/body ?body]
               [?r :seon.message/from "demo/f#1" ?tx] [?r :seon.message/body ?reply] [?tx :seon.tx/branch ?branch]]
-     (my.root/union sys) :task-demo-f)
+     (my.root/union sys))
 ```
 
 Measured 2026-10-23 (REPL, LMDB, main 46,708 datoms, each branch one turn of ~15 datoms; docs/storage.md):
