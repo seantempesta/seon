@@ -1,6 +1,6 @@
 # Storage
 
-One durable store holds every branch as Datahike index trees in konserve, one content-addressed node per key, on LMDB. A commit costs the nodes it rewrites, so what it writes depends on how values are laid out, whether history is kept, and how nodes are encoded. The store is opened in `seon.db`: `seon.db/open!` makes and seeds a store that does not exist (```seon.db/store-cfg```, ```seon.db/made-cfg```), makes root's main branch from `:db`'s head when the store lacks it, shares the id page ([ids](#ids)), installs the attributes the store lacks and syncs when any of these wrote. Its failure points are in [failure points](failure-points.md), and its config keys (`:seon.config.store/*`) in [config](config.md).
+One durable store holds every branch as Datahike index trees in konserve, one node per key, at a random id unless `:crypto-hash?` is set, which Seon does not set,, on LMDB. A commit costs the nodes it rewrites, so what it writes depends on how values are laid out, whether history is kept, and how nodes are encoded. The store is opened in `seon.db`: `seon.db/open!` makes and seeds a store that does not exist (```seon.db/store-cfg```, ```seon.db/made-cfg```), makes root's main branch from `:db`'s head when the store lacks it, shares the id page ([ids](#ids)), installs the attributes the store lacks and syncs when any of these wrote. Its failure points are in [failure points](failure-points.md), and its config keys (`:seon.config.store/*`) in [config](config.md).
 
 ## Identity
 
