@@ -195,6 +195,12 @@
       (let [db (record (empty-db) 'app.pt-re2 "(do (def a 1) (def b 2))" 'app.pt-re2 "(def a 3)")]
         (is (= ["(do (def a 1) (def b 2))" "(def a 3)"] (map :src (program/load-order (in-ns-forms db 'app.pt-re2)))))))))
 
+;; docs/source.md#tests-run-by-reach: a config entry is what a run reads, so a branch's edit of one is a new run, never answered from the one before
+(deftest a-config-entry-moves-the-program-digest
+  (let [db (my.test/world)
+        with (fn [form] (d/db-with db [{:config/key :seon.config.agent/test-ticks :config/form form :config/file "resources/seon/config/default.edn"}]))]
+    (is (not= (program/program-digest (with "1")) (program/program-digest (with "2"))))))
+
 (deftest the-program-digest-moves-with-the-program-and-not-with-data
   (let [db (record (empty-db) 'app.pt-pd "(defn f [x] x)")
         dg (program/program-digest db)]
