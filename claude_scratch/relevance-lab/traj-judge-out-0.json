@@ -568,7 +568,7 @@
    },
    {
     "kind": "section",
-    "name": "docs/turn.md#what-a-turn-takes-from-main",
+    "name": "docs/turn.md#what-a-turn-merges-from-main",
     "pct": 16,
     "label": "noise",
     "why": "not needed now"

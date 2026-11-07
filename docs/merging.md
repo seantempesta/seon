@@ -85,7 +85,7 @@ Owner, 2026-10-27: "Why are we reverifying on main? Don't do unnecessary work if
 
 Root reads every merge's `src` diff stat before merging, against the goal of about 10k lines of our own code. Every function a merge adds names the existing system it extends, or why none could carry it; a new namespace or mechanism where an existing one could be extended is sent back, not merged; the merge's commit message states its net `src` lines (`bin/laws growth` prints them and the definitions the branch adds), and a merge that grows `src` says what it deletes or plans to delete.
 
-A work task is judged on its branch and never told it is behind main: its merge task merges main into the branch and the gate tests what that writes, so main moving under a green work task is the merge task's, not the work agent's ([turn](turn.md#what-a-turn-takes-from-main), `seon.reconcile-test/a-green-work-task-judged-behind-is-done-and-its-merge-runs`).
+A work task is judged on its branch and never told it is behind main: its merge task merges main into the branch and the gate tests what that writes, so main moving under a green work task is the merge task's, not the work agent's ([turn](turn.md#what-a-turn-merges-from-main), `seon.reconcile-test/a-green-work-task-judged-behind-is-done-and-its-merge-runs`).
 
 ## A merge says what it completes
 
