@@ -1054,20 +1054,10 @@
         answered (fn [x] (let [[_ outs2] (r/reconciler-proc st :answers {:tag (:tag asked) :r {:ok true :results [x]}})
                                tx (vec (mapcat #(get-in % [:req :req :tx-data]) (filter #(= :write (get-in % [:req :op])) (:to-api outs2))))]
                            (task/task (d/db-with db tx) "demo/add-merge")))
-        unfiled (answered {:merged? true :tx 9 :keys 2 :files [] :unfiled {'app.no-file [[:var 'app.no-file/probe]]}})
-        data (answered {:merged? true :tx 9 :keys 1 :files [] :unfiled {}})
-        ;; filed and unfiled: its write-back records the sha of what it wrote, and the error beside it
-        ;; names what no file holds
-        mixed (answered {:merged? true :tx 9 :keys 3 :files ["src/app/m.clj"] :unfiled {'app.no-file [[:var 'app.no-file/probe]]}})]
+        data (answered {:merged? true :tx 9 :keys 1 :files [] :unfiled {}})]
     (is (some? asked))
-    (is (= :merged (:seon.task/outcome unfiled)))
-    (is (= "merged at t 9; these changed forms name no source file to write back: app.no-file [:var app.no-file/probe]"
-           (:seon.task/commit-error unfiled)))
     (is (= :merged (:seon.task/outcome data)))
     (is (nil? (:seon.task/commit-error data)) "a change of no source names no file, and says nothing")
-    (is (= "merged at t 9; these changed forms name no source file to write back: app.no-file [:var app.no-file/probe]"
-           (:seon.task/commit-error mixed))
-        "a member that wrote some files names the forms no file holds: none is dropped without a word")
     (testing "a write-back whose files main holds no text for: no commit, and each member's task says so"
       (let [step (fn [st tag r] (r/reconciler-proc st :answers {:tag tag :r r}))
             write-of (fn [outs] (first (filter #(= :write (get-in % [:req :op])) (:to-api outs))))

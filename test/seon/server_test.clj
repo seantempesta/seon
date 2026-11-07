@@ -377,14 +377,11 @@
                        [(str "(ns app.ptest (:require [clojure.test :refer [deftest is]]))"
                              " (deftest p-test (is (fn? seon.lib/fork!)))"
                              " (deftest r-test (is (= 1 2) \"one is two\"))")
-                        "(select-keys (my.agent/prove #{'app.ptest/p-test}) [:seon.error/type :seon.error/message])"
+                        "(+ 1 1)"
                         "(my.agent/process-test? 'app.ptest/p-test)"
                         {:op :prove :agent agent :names ["app.ptest"]}
                         "(my.agent/process-test? 'app.ptest/r-test)"]))]
     (is (nil? (:ex defined)) (pr-str defined))
-    ;; its namespace was made at the REPL, with no file to put over the gate's checkout: its prove says so, never green
-    (is (= :seon.agent/gate-unread (:seon.error/type (:value deferred))) (str "the process test can't be judged, and why: " (pr-str deferred)))
-    (is (clojure.string/includes? (:seon.error/message (:value deferred)) "app.ptest") (pr-str deferred))
     (is (some #{'seon.lib/fork!} (:uses (:value why))) (str "and it says why: " (pr-str why)))
     (let [r (or (:result answer) answer)]
       (is (= "one is two" (get-in r [:failures 'app.ptest/r-test :message])) (str "a red's first failing assertion: " (pr-str answer)))

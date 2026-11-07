@@ -47,7 +47,7 @@
                "How: ```docs/agent.md#merging```. Then end your turn with a message to the user.")
    :work (str "Your task: do what the plan below asks: design it and build it. You are done when its proofs pass on your "
               "branch.")
-   :whole (str "Your task: do what the plan below asks, whole. You are done when its proofs pass on your branch with main's "
+   :whole (str "Your task: do what the plan below asks, whole. If it names no proofs, write the test that says it is done, reading files if that's what proves it, and register it. You are done when its proofs pass on your branch with main's "
                "work merged in. Your status says "
                "what main changed under you and what merging would conflict on: redefine each such var for both sides. "
                "Once it says nothing is left, your run ends and root merges your branch.")

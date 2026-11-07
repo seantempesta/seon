@@ -633,6 +633,14 @@
                              :when p]
                          p)))))
 
+(defn namespace-path
+  "The file namespace n takes when it has none, by its name as Clojure's load path reads it: a test namespace's under test/, any other's under src/. See docs/source.md#commit-the-merges-branch."
+  {:malli/schema [:=> [:cat :symbol] :string]}
+  [n]
+  (str (if (str/ends-with? (str n) "-test") "test/" "src/")
+       (-> (str n) (str/replace "-" "_") (str/replace "." "/"))
+       ".clj"))
+
 (defn unfiled-forms
   "The definitions of the forms a merge's changes (seon.merge/three-way's :ours) add, change
   or remove whose namespace has no :ns/file on db (after them), by namespace: source a
@@ -645,6 +653,12 @@
                 :let [f (or b a)]
                 :when (and (= :form k) (nil? (ns-file db (:ns f))))]
             f)))
+
+(defn filing-tx
+  "Each namespace a merge's changes add forms to that has no file yet, given its by name (`namespace-path`), for the merge's own transaction: a namespace made at a REPL reaches disk as any other."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.merge/changes] [:vector :map]]}
+  [db changes]
+  (vec (for [n (keys (unfiled-forms db changes))] {:ns/name n :ns/file (namespace-path n)})))
 
 (defn commit-message
   "The merges commit's message, from the facts of what merged: each member's task."

@@ -194,7 +194,7 @@
 
 (defn verdict-line
   "The done answer (owner: a line and a handle): the task's verdict as one line, its outcome and
-  reason, and for each red test its first failing assertion's message, whole, what merged and never reached a file (:not-on-disk, seon.reconcile/unfiled-error), with how main differs from the branch when
+  reason, and for each red test its first failing assertion's message, whole, what merged and no commit holds yet (:not-on-disk, seon.reconcile/lost-write-back), with how main differs from the branch when
   the agent said so (main, seon.agent/main-difference's line), and the form that reads the whole
   verdict at root (`verdict`)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/id [:maybe :string]] [:map [:line :string] [:handle :string]]]}
@@ -202,12 +202,12 @@
   (let [v (verdict db task)
         fails (:seon.task/failures (d/pull db [:seon.task/failures] [:seon.task/id task]))
         reds (get-in v [:held :seon.task/evidence :red])
-        commit-error (:seon.task/commit-error (d/pull db [:seon.task/commit-error] [:seon.task/id task]))]
+        waiting (r/lost-write-back (d/pull db [:seon.task/outcome :seon.task/error] [:seon.task/id task]))]
     {:line (print/text (cond-> (select-keys v [:outcome :reason])
                          (and (:held v) (empty? reds)) (assoc :held (get-in v [:held :seon.task/failure :reason]))
                          (seq reds) (assoc :reds (vec (for [t reds] (if-let [why (or (some-> (get fails t) first :message) (some-> (get fails t) first :type name))] [t why] [t]))))
                          main (assoc :main main)
-                         commit-error (assoc :not-on-disk commit-error))
+                         waiting (assoc :not-on-disk (str (:seon.error/message waiting) ": " (str/join ", " (:seon.git/files waiting)))))
                        ;; the answer that says why a task closed, whole
                        Integer/MAX_VALUE)
      :handle (str "(seon.server/verdict @(:conn sys) " (pr-str task) ")")}))
@@ -237,6 +237,8 @@
    :message {:doc "Send an agent a message (the owner's words): a message on main to the task it works (refused when it works none), which its next turn takes onto its branch and reads, and which wakes a parked session. The page's message bar sends the same request (seon.root/message!)."
              :args {:agent {:type "string"} :body {:type "string" :description "what to tell the agent"}
                     :task {:type "string" :description "the agent's task (ns/name): needed only for an agent another session attached"}} :required ["agent" "body"]}
+   :write_back {:doc "Sync main's changed files to disk and commit them on the merges branch: every merged task whose files no commit holds. Answers the tasks, the paths and the commit, or what it couldn't."
+                :args {}}
    :create {:doc "Declare a task, held: nothing starts and nothing is paid. Answers its id, which seon_attach works. Its proofs may be named later."
             :args {:ns {:type "string" :description "the task's namespace"} :name {:type "string" :description "its name"} :plan {:type "string" :description "what to do"}
                    :proofs {:type "array" :items {:type "string"} :description "qualified test names; optional"}}
@@ -331,6 +333,8 @@
 
 (defmethod op-answer :message [sys ag req]
   @(c/message! sys ag (:body req)))
+
+(defmethod op-answer :write_back [sys _ _] ((requiring-resolve 'my.root/write-back!) sys))
 
 (defmethod op-answer :create [sys _ {:keys [ns name plan proofs]}]
   (let [decl (cond-> {:seon.task/ns (symbol ns) :seon.task/name name :seon.task/plan plan :seon.task/kind :whole}

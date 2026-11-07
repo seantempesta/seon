@@ -107,7 +107,9 @@
 (defn explain-text
   "One line naming each reason."
   {:malli/schema [:=> [:cat [:vector :seon.reconcile/not-done]] :string]}
-  [rs] (str/join "; " (map #(str (name (:reason %)) (some->> (or (:symbol %) (:key %) (:behind %)) (str " "))) rs)))
+  [rs] (str/join "; " (map #(str (name (:reason %))
+                                 (when (= :no-proofs (:reason %)) ": the task names no proof; a test that says it is done, registered, would have ended it")
+                                 (some->> (or (:symbol %) (:key %) (:behind %)) (str " "))) rs)))
 
 ;; ---- the incremental reconciler: an index watched through main's tx reports --------------
 ;; k8s's informer + W1's engine: list once (index), then each commit's resolved datoms name the
@@ -594,14 +596,6 @@
                                        error (conj {:seon.task/id task :seon.task/error error}))))
                                  members))))))
 
-(defn- unfiled-error
-  "The commit-error of a merged member r (seon.writer/octopus-merge's result) for its changed forms
-  that name no source file (:unfiled): each namespace and the definitions it changed."
-  {:malli/schema [:=> [:cat [:map [:tx :int] [:unfiled [:map-of {:gen/max 3} :symbol [:vector {:gen/max 3} :seon.merge/def-key]]]]] :string]}
-  [r]
-  (str "merged at t " (:tx r) "; these changed forms name no source file to write back: "
-       (str/join "; " (for [[n ds] (:unfiled r)] (str n " " (str/join ", " (map sedn/encode ds)))))))
-
 (defn evidence
   "The measured evidence of task id held for root: its conflicts and unmerged keys (from its judging; none for a death), the
   proofs not passing in root's own test run (red), and the problem the reconciler stated (nil: none)."
@@ -1033,7 +1027,7 @@
       ;; each merged task (the self-improvement loop: the next generation builds it)
       :octopus-merged (let [merged (keep (fn [[m x]] (when (:merged? x) [m x])) (map vector (:members act) (:results r)))
                             paths (vec (sort (distinct (mapcat (comp :files second) merged))))
-                            back? (and (:source st) (seq paths))]
+                            back? (and (:source st) (seq paths) (cfg/value :seon.config.source/write-back-on-merge))]
                         (one (write (cond-> st back? (assoc-in [:flights id :writeback] {:files paths :members (vec (for [[m x] merged :when (seq (:files x))] m))}))
                                     id (if back? :write-back :done)
                                     (vec (mapcat (fn [{:keys [task]} r]
@@ -1045,10 +1039,9 @@
                                                      (cond
                                                        (:merged? r) (task/move-tx task :ready :merged
                                                                                   (cond-> {:seon.task/merged-t (long (:tx r))}
-                                                                                    ;; source it changed that names no file: no write-back writes it, so this
-                                                                                    ;; names it (beside the sha of what one wrote, when it wrote some)
-                                                                                    (and (:source st) (seq (:unfiled r)))
-                                                                                    (assoc :seon.task/commit-error (unfiled-error r))))
+                                                                                    ;; its files wait for the hand that syncs them (my.root/write-back!): named here until a commit holds them
+                                                                                    (and (:source st) (seq (:files r)) (not (cfg/value :seon.config.source/write-back-on-merge)))
+                                                                                    (assoc :seon.task/error (contract/error :seon.git/commit-failed #'seon.reconcile/commit-tx "not on disk yet: (my.root/write-back! sys) syncs it" {:seon.git/files (vec (:files r))}))))
                                                        ;; behind again and again: a merge that main moves under every time it runs is root's
                                                        ;; (:seon.config.merge/max-behind), never a rerun without end
                                                        (and (= :seon.merge/behind (:seon.error/type r)) (< n (cfg/value :seon.config.merge/max-behind)))

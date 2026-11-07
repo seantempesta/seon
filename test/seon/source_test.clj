@@ -62,6 +62,11 @@
   (doseq [[path text] files :when (.exists (java.io.File. (str here "/" path)))] (require (source/file-ns text)))
   (let [db (empty-db)] (d/db-with db (source/import-tx db files))))
 
+(deftest a-new-namespace-takes-a-file-by-its-name
+  ;; the owner, 2026-11-07: "these changed forms name no source file to write back" stops being an outcome: a namespace made at a REPL reaches disk as any other
+  (is (= "src/app/my_lib/core.clj" (source/namespace-path 'app.my-lib.core)))
+  (is (= "test/app/core_test.clj" (source/namespace-path 'app.core-test))))
+
 (deftest importing-src-records-every-form-exactly
   (let [files (src-files)
         db (imported files)

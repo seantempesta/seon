@@ -119,17 +119,17 @@
       (seq unknown) (assoc :unknown unknown))))
 
 (defn write-back!
-  "Write the source files of the merged runs ids (run ids) onto the merges branch again: those a
-  failed write-back left (the :seon.git/commit-failed error on the run, naming them), read from
-  main as it is now and committed in one :git effect like the reconciler's. What the git effect
-  answers is recorded by seon.reconcile/commit-tx: the sha on each run, which clears the error (and
-  holds a new one for any file main has no text for), or the error again. A task with no lost
-  write-back is answered :seon.root/nothing-lost under :not-lost and left out; no source root, or no
-  text on main for any of the files, is answered at once and recorded nowhere (the tasks keep their
-  error). Answers {:written ids :sha}, the git effect's error, or the precondition's, with :not-lost
-  when any."
-  {:malli/schema [:=> [:cat :seon.root/sys [:sequential :seon.task/id]] :map]}
-  [sys ids]
+  "Sync main's changed files to disk: the files the merged tasks ids (none: every merged task whose files no commit holds) wait on, read from main as
+  it is now and committed on the merges branch in one :git effect. What the git effect answers is recorded by seon.reconcile/commit-tx: the sha on each task, which
+  clears the wait (and holds a new one for any file main has no text for), or the error again. A task with no such files is answered :seon.root/nothing-lost under
+  :not-lost and left out; no source root, or no text on main for any of the files, is answered at once and recorded nowhere (the tasks keep their
+  error). Answers {:written ids :paths paths :sha}, the git effect's error, or the precondition's, with :not-lost when any. See docs/source.md#commit-the-merges-branch."
+  {:malli/schema [:function [:=> [:cat :seon.root/sys] :map] [:=> [:cat :seon.root/sys [:sequential :seon.task/id]] :map]]}
+  ([sys] (write-back! sys (vec (for [e (d/q '[:find [?e ...] :where [?e :seon.task/error]] @(:conn sys))
+                                     :let [t (d/pull @(:conn sys) [:seon.task/id :seon.task/outcome :seon.task/error] e)]
+                                     :when (reconcile/lost-write-back t)]
+                                 (:seon.task/id t)))))
+  ([sys ids]
   (let [db @(:conn sys)
         tasks (into {} (for [id ids] [id (d/pull db [:seon.task/outcome :seon.task/error] [:seon.task/id id])]))
         lost (filterv #(some? (reconcile/lost-write-back (tasks %))) ids)
@@ -149,8 +149,8 @@
                                                :message (source/commit-message members)}))
         tx (when (seq files) (reconcile/commit-tx db r members paths (keys files)))]
     (when (seq tx) @(root/transact-main! sys tx))
-    (cond-> (if (contract/error? r) r {:written lost :sha (get-in r [:value :sha])})
-      (seq not-lost) (assoc :not-lost not-lost))))
+    (cond-> (if (contract/error? r) r {:written lost :paths (vec (keys files)) :sha (get-in r [:value :sha])})
+      (seq not-lost) (assoc :not-lost not-lost)))))
 
 (defn gate!
   "The process tests each of tasks ids' change reaches (a fork, a root, the binary) run on the
