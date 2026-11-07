@@ -263,3 +263,14 @@
     (let [booted (d/db-with db [{:seon.root/id :root :seon.root/boot "b1" :seon.config.agent/max-running 2}])]
       (is (= :root (first (task/entity-value booted e))))
       (is (= "b1" (:boot (second (task/entity-value booted e))))))))
+
+(deftest a-message-a-fork-inherited-is-still-delivered
+  ;; docs/users.md#messages: a message sent before its agent's branch forked is on the branch with no turn holding it: it still arrives; one a turn holds, removed or not, doesn't again
+  (let [main (d/db-with (ts/test-db) (into [{:seon.agent/key "a"}] (task/message-tx "m1" "sean" ["a"] "first" 1)))
+        forked main
+        placed (d/db-with forked [{:seon.message/id "m1" :seon.message/call {:seon.model-call/id "a/1"}}])
+        removed (d/db-with placed [[:db/retract (:db/id (d/entity placed [:seon.message/id "m1"])) :seon.message/to (:db/id (d/entity placed [:seon.agent/key "a"]))]])]
+    (is (= ["m1"] (map :id (task/undelivered main forked "a"))) "inherited, and no turn has it")
+    (is (= [] (task/undelivered main placed "a")) "a turn has it")
+    (is (= [] (task/undelivered main removed "a")) "removed after, it stays gone")))
+
