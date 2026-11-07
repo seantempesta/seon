@@ -13,6 +13,15 @@
   [thunk] (profile/begin!) (thunk) (into {} (map (juxt :var :calls)) (profile/touched)))
 
 ;; docs/cost.md#counting-calls: what a test read is what its verdict's digest will be made of, so a nested measure (an eval, a cost proof) must not lose it
+;; docs/sharing.md#a-metric-accretes: stats add exactly, however they were split
+(deftest stats-add-the-same-however-they-were-split
+  (let [f (fn [c t] {:var 'a/f :calls c :ticks t :self-ticks t :bytes t :self-bytes t})
+        once (profile/accrue {} [(f 2 100) (f 1 1000)] "e1")
+        apart (profile/stats-sum (get (profile/accrue {} [(f 2 100)] "e1") 'a/f) (get (profile/accrue {} [(f 1 1000)] "e1") 'a/f))]
+    (is (= (get once 'a/f) apart))
+    (is (= {:self-ticks 1000 :eval "e1"} (:worst apart)) "the worst is the one with the most self-ticks")
+    (is (= {5 2 9 1} (:hist apart)) "calls by the log2 of their self-ticks a call")))
+
 (deftest a-nested-measure-keeps-what-ran
   (let [before (profile/counted 'seon.profile-test/before-the-nested (fn [] 1))
         inside (profile/counted 'seon.profile-test/inside-the-nested (fn [] 2))]

@@ -351,8 +351,10 @@
              (assoc :repl/eval-fn (fn [form]
                                     (profile/measure! #(ef form)
                                                       (fn [{:keys [ticks bytes wall-ns]}]
-                                                        (vreset! last {:ms (/ (quot wall-ns 1000) 1000.0) :alloc-bytes bytes :ticks ticks
-                                                                       :fns (profile/top (profile/touched) (cfg/value :seon.config.agent/form-top-fns))})))))
+                                                        (let [fns (profile/touched)]
+                                                          (agent/note-costs! fns)
+                                                          (vreset! last {:ms (/ (quot wall-ns 1000) 1000.0) :alloc-bytes bytes :ticks ticks
+                                                                         :fns (profile/top fns (cfg/value :seon.config.agent/form-top-fns))}))))))
              (around-reply (fn [m]
                              (if-let [{:keys [fns] :as c} (when (or (contains? m :repl/value) (contains? m :repl/ex)) @last)]
                                (do (vreset! last nil)

@@ -207,6 +207,32 @@
                      (conj! acc {:var sym :calls calls :ticks ticks :self-ticks self-ticks :bytes bytes :self-bytes self-bytes}))
                    (transient []))))
 
+(defn accrue
+  "held ({var stats}) with fns (touched's) added, each function's stats {:calls :ticks :self-ticks :bytes :self-bytes :hist :worst}: sums, which any
+  two add exactly; :hist, calls by the log2 of their self-ticks a call, a median and mode to within one bucket; :worst, the eval whose self-ticks
+  were the most, {:self-ticks :eval}. Costs fns. See docs/sharing.md#a-metric-accretes."
+  {:malli/schema [:=> [:cat :map [:vector :seon.profile/fn-cost] [:maybe :string]] :map]}
+  [held fns eval-id]
+  (reduce (fn [m {:keys [var calls ticks self-ticks bytes self-bytes]}]
+            (let [per (quot self-ticks (max 1 calls))
+                  bucket (loop [b 0 x per] (if (< x 2) b (recur (inc b) (quot x 2))))
+                  o (get m var)]
+              (assoc m var {:calls (+ calls (:calls o 0)) :ticks (+ ticks (:ticks o 0)) :self-ticks (+ self-ticks (:self-ticks o 0))
+                            :bytes (+ bytes (:bytes o 0)) :self-bytes (+ self-bytes (:self-bytes o 0))
+                            :hist (update (:hist o {}) bucket (fnil + 0) calls)
+                            :worst (if (and o (>= (:self-ticks (:worst o) 0) self-ticks)) (:worst o) {:self-ticks self-ticks :eval eval-id})})))
+          held fns))
+
+(defn stats-sum
+  "Stats a and b as one, as accrue would have made them: what two flushes of a function, or two writers, come to. See docs/sharing.md#a-metric-accretes."
+  {:malli/schema [:=> [:cat [:maybe :map] :map] :map]}
+  [a b]
+  (if-not a
+    b
+    (-> (merge-with + (select-keys a [:calls :ticks :self-ticks :bytes :self-bytes]) (select-keys b [:calls :ticks :self-ticks :bytes :self-bytes]))
+        (assoc :hist (merge-with + (:hist a) (:hist b))
+               :worst (if (>= (:self-ticks (:worst a) 0) (:self-ticks (:worst b) 0)) (:worst a) (:worst b))))))
+
 (defn measure!
   "f called and measured, its value answered: the engine ticks it ran (the work it did, the exact
   measure: jolt.host/ticks-of arms the tick timer, and the count is read in a finally inside it,
