@@ -125,7 +125,7 @@
                              ;; the process tests the work left to root's gate (neither red nor unknown)
                              [:deferred {:optional true} [:set :qualified-symbol]]]
  :seon.reconcile/not-done [:map {:closed true}
-                          [:reason [:enum :no-proofs :proof-red :proof-unknown :regression :stray-red :contract-gap :unmerged :no-design :open-problem :behind]]
+                          [:reason [:enum :open :no-proofs :proof-red :proof-unknown :regression :stray-red :contract-gap :unmerged :no-design :open-problem :behind]]
                           [:symbol {:optional true} :qualified-symbol] [:key {:optional true} :string] [:behind {:optional true} pos-int?]]
  :seon.reconcile/action [:multi {:dispatch :op}
                          [:reap [:map {:closed true} [:op [:= :reap]] [:task :seon.task/id]]]

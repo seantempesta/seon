@@ -36,7 +36,8 @@
   "What each step's agent does, by task kind (its own work: instructions never flow): its goal,
   when it is done and by what means, short, the standard format's stage descriptions (seon.judge's). How every agent works at the REPL is the system prompt every agent reads first
   (seon.context/system-page), and the help page it reads on demand (seon.context/help-page). How a task is worked is the system prompt's, and the wiki section docs/agent.md#working-a-task, which an agent reads when it wants it (the instructions no longer cite it into every context): the instructions say only the goal."
-  {:design (str "Your task: turn the request below into the task the implement step works from: its plan, what the "
+  {:user "Chat with the user: reply to their latest message. Nothing you define here merges: for work that should reach main, start an agent with `(my.task/launch! \"what's wanted\")`. More when you want it: docs/agent.md#working-for-a-person"
+   :design (str "Your task: turn the request below into the task the implement step works from: its plan, what the "
                 "plan cites and its red proofs. You are done when an agent with only that page could make the change without "
                 "exploring, and its proofs are written, registered and red for the reason the plan gives. How a task is "
                 "designed, step by step: ```docs/agent.md#designing-a-task```. Then end your turn with a message to the user.")
@@ -106,6 +107,17 @@
   [decl]
   [(-> decl (assoc :seon.task/kind :whole :seon.task/instructions (instructions :whole))
        (update :seon.task/branch #(or % (task/default-branch (task/task-id (:seon.task/ns decl) (:seon.task/name decl))))))])
+
+(defn user
+  "What a person said (decl's plan) as the task of the agent that works for them, the default for a sentence (seon.root/ask!): it chats with them, its one directive to reply to their latest message. No rule finishes it. See docs/agent.md#working-for-a-person."
+  {:malli/schema [:=> [:cat :seon.task/declaration] [:vector :seon.task/declaration]]}
+  [decl]
+  [(-> decl (assoc :seon.task/kind :user :seon.task/instructions (instructions :user))
+       (update :seon.task/branch #(or % (task/default-branch (task/task-id (:seon.task/ns decl) (:seon.task/name decl))))))])
+
+(def templates
+  "The templates a task can be made from, by name: what an agent names to launch one (my.task/launch!). See docs/tasks.md."
+  {:user user :whole request})
 
 (defn stages
   "Request decl as staged tasks, for experiments, each stage an agent of its own.
