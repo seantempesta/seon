@@ -39,13 +39,13 @@
   {:user "Chat with the user: reply to their latest message. Nothing you define here merges: for work that should reach main, start an agent with `(my.task/launch! \"what's wanted\")`. More when you want it: docs/agent.md#working-for-a-person"
    :design (str "Your task: turn the request below into the task the implement step works from: its plan, what the "
                 "plan cites and its red proofs. You are done when an agent with only that page could make the change without "
-                "exploring, and its proofs are written, registered and red for the reason the plan gives. How: "
-                "docs/agent.md#designing-a-task. Then end your turn with a message to the user.")
+                "exploring, and its proofs are written, registered and red for the reason the plan gives. How a task is "
+                "designed, step by step: ```docs/agent.md#designing-a-task```. Then end your turn with a message to the user.")
    :implement (str "Your task: make the change the plan describes. You are done when every proof passes, the cost proofs "
                    "included. Then end your turn with a message to the user.")
    :merge (str "Your task: bring main's work into this branch and keep the proofs green. Main has been merged in "
                "(`my.branch/merge-main!`). You are done when nothing is unmerged and every proof passes on the combined program. "
-               "How: docs/agent.md#merging. Then end your turn with a message to the user.")
+               "How: ```docs/agent.md#merging```. Then end your turn with a message to the user.")
    :work (str "Your task: do what the plan below asks: design it and build it. You are done when its proofs pass on your "
               "branch.")
    :whole (str "Your task: do what the plan below asks, whole. If it names no proofs, write the test that says it is done, reading files if that's what proves it, and register it. "
