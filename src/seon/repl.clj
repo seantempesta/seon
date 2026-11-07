@@ -30,7 +30,7 @@
   messages, writes) are {:op k} values, handled by `agent-step`."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn- defchecked]] [hasch.core :as hasch] [seon.error :as err] [jolt.nrepl :as nrepl] [seon.intr :as intr] [seon.reader :as reader] [seon.doc :as doc] [seon.agent :as agent] [seon.task :as task] [seon.contract :as contract] [my.db] [my.agent] [my.schema] [malli.registry :as mr]
-            [seon.program :as program] [jolt.analyzer] [seon.lib :as lib] [seon.print :as print] [seon.print.select :as select] [seon.render :as render] [seon.context :as context] [seon.ctx :as ctx] [seon.web.html :as h] [seon.profile :as profile] [seon.sock :as sock] [seon.step :as step] [clojure.core.async :as a] [clojure.core.async.flow :as flow]
+            [seon.source :as source] [seon.program :as program] [jolt.analyzer] [seon.lib :as lib] [seon.print :as print] [seon.print.select :as select] [seon.render :as render] [seon.context :as context] [seon.ctx :as ctx] [seon.web.html :as h] [seon.profile :as profile] [seon.sock :as sock] [seon.step :as step] [clojure.core.async :as a] [clojure.core.async.flow :as flow]
             [jolt.ffi :as ffi] [seon.config :as cfg] [clojure.test] [datahike.api :as d] [seon.db :as pdb] [seon.edn :as sedn]))
 
 (defchecked ^:private outer-frames [:=> [:cat] :any] @#'jolt.nrepl/outer-frames)
@@ -448,7 +448,8 @@
                                               ;; docstring, read before it is applied (a form that defines nothing reads nothing)
                                               [tx (when tx (program/meaning-changes (agent/db) tx))])
                                             (catch Throwable e (undo-definition! l e)))]
-                       (when tx (agent/transact! tx))
+                       ;; a namespace made at this REPL takes its file by its name with its first form, on the branch, so it merges as any other's and reaches disk
+                       (when tx (agent/transact! (cond-> tx (nil? (source/ns-file (agent/db) (:ns acct))) (conj {:ns/name (:ns acct) :ns/file (source/namespace-path (:ns acct))}))))
                        (cond-> (assoc m :recorded (vec (concat (map :var (:defs acct)) (when (:ns-form? acct) [(:ns acct)])
                                                                        (map (juxt :multi :dispatch) (:methods acct)) (map (juxt :protocol :type) (:impls acct))))
                                       :repl/defined (mapv :var (:defs acct)))

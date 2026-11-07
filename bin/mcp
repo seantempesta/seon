@@ -21,22 +21,23 @@
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 if [[ ${1:-} == call ]]; then
   shift
-  exec perl -MJSON::PP -e '
-    my ($mcp, $root, $op, @kv) = @ARGV; my %a;
+  exec perl -MJSON::PP -MEncode -e '
+    my ($mcp, $root, $op, @kv) = @ARGV; @kv = map { decode_utf8($_) } @kv; my %a;
     die "usage: bin/mcp call OP [KEY=VALUE ...]\n" unless defined $op;
     for (@kv) {
       my ($k, $v) = /\A([^=]+)=(.*)\z/s or die "bin/mcp call: $_ is not KEY=VALUE\n";
-      if ($v eq "-") { local $/; $v = <STDIN> }
+      if ($v eq "-") { local $/; $v = decode_utf8(scalar <STDIN>) }
       elsif ($k ne "code" && ($v =~ /\A(true|false)\z/ || $v =~ /\A\[/)) { $v = JSON::PP->new->allow_nonref->decode($v) }
       $a{$k} = $v }
     # a reply of one eval, from a shell: its intent and code as keys of their own (root takes plain code)
     if ($op eq "eval" && ($a{agent} // "") ne "root" && exists $a{code}) { $a{evals} = [{intent => delete($a{intent}) // "", code => delete $a{code}}]; $a{"message-md"} //= "" }
     $ENV{SEON_MCP_CLIENT} = "checkout-$root";
+    binmode STDOUT, ":utf8"; binmode STDERR, ":utf8";
     my $req = encode_json({jsonrpc => "2.0", id => 1, method => "tools/call", params => {name => "seon_$op", arguments => \%a}});
     open my $out, "-|", "printf \x27%s\\n\x27 \Q$req\E | \Q$mcp\E" or die "bin/mcp call: $!\n";
     my $r = decode_json(join "", <$out>);
     if ($r->{error}) { print STDERR $r->{error}{message}, "\n"; exit 1 }
-    binmode STDOUT, ":utf8"; print $_->{text}, "\n" for @{$r->{result}{content}};
+    print $_->{text}, "\n" for @{$r->{result}{content}};
   ' "$0" "$ROOT" "$@"
 fi
 exec perl -MIO::Socket::INET -MJSON::PP -e '

@@ -99,7 +99,7 @@
   ([checkout]
    (let [path (str checkout "/target/runs/test-store-" pdb/schema-digest)]
      (when-not (pdb/store? path)
-       (throw (ex-info (str "no process store at " path ": bin/test makes it (its plan: make-process-store!) before any shard starts; run the test through bin/test")
+       (throw (ex-info (str "no process store at " path ": bin/test makes it (its plan: make-process-store!) before any shard starts; run the test through bin/test, or as an agent through (my.agent/prove '#{its-name}), which runs it on the gate's checkout")
                        {:seon.error/type :seon.test-store/no-process-store :path path})))
      path)))
 

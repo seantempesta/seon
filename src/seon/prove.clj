@@ -127,7 +127,7 @@
         ended? (= :seon.root/ended (:seon.error/type r))
         died? (and (not err?) (some :exit (:reports r)))
         st (cond-> (-> st (dissoc :running) (assoc :last branch))
-             (not (or err? died?)) (assoc-in [:done (slot run)] {:key key :r r}))
+             (not (or err? died? (seq (proofs/failures r)))) (assoc-in [:done (slot run)] {:key key :r r}))
         [st more] (take-next st branch)]
     [st (cond-> (into (reply [] waiters r) more) (and err? (not ended?)) (conj {:op :problem :class :platform :error r}))]))
 

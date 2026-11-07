@@ -75,6 +75,7 @@
   [:seon.config.merge/max-merge-turns :seon.config.merge/max-merge-turns]
   ;; Seon's own source
   [:seon.config.source/root {:optional true} :seon.config.source/root]
+  [:seon.config.source/write-back-on-merge :seon.config.source/write-back-on-merge]
   [:seon.config.source/gate-checkout {:optional true} :seon.config.source/gate-checkout]
   [:seon.config.source/dirs :seon.config.source/dirs]
   [:seon.config.source/program-dirs :seon.config.source/program-dirs]

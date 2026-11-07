@@ -507,9 +507,13 @@
         ;; the merge base is now main's head: what main changed is not this branch's change
         (let [attrs (into #{} (map (fn [op] (nth op 2 nil))) ops)]
           (doc/carry-index! head @conn (map (fn [op] [(nth op 1) (nth op 2)]) ops))
-          (swap! state #(-> % (assoc :db @conn :base (pdb/branch-base conn main-b (:branch @state))) (schema-moved attrs))))
+          (swap! state #(-> % (assoc :db @conn :base (pdb/branch-base conn main-b (:branch @state))) (schema-moved attrs)))
+          ;; the same on the branch's fact, or the status, which reads the fact, takes what main changed for this branch's work until a next turn writes it
+          (let [merged-t (:max-tx @conn)]
+            (d/transact conn [{:seon.agent/key (:key @state) :seon.agent/base-commit (d/commit-id (:base @state))}])
+            (swap! state assoc :db @conn :merged-t merged-t)))
         (send! {:op :committed :t (:max-tx @conn) :txs 1})
-        (cond-> {:ok true :applied (:apply r) :conflicts (:conflicts r) :t (:max-tx @conn) :datoms (count ops)}
+        (cond-> {:ok true :applied (:apply r) :conflicts (:conflicts r) :t (:merged-t @state) :datoms (count ops)}
           (seq (:conflicts carried)) (assoc :task-conflicts (:conflicts carried))
           (seq errs) (assoc :load-errors errs))))))
 
@@ -1186,8 +1190,11 @@
   ([ticks proofs mode forked] (run-tests-forked ticks proofs mode forked nil))
   ([ticks proofs mode forked names]
   ;; the tests of the namespaces a request names are selected as proofs are: named, they run whatever the branch changed
-  (let [proofs (cond-> proofs (seq names) (into (named-tests (db) names)))
-        plan (test-plan (db) (when-not (= :main mode) (:base @state)) proofs (heard-main))]
+  (let [named (when (seq names) (named-tests (db) names))
+        proofs (cond-> proofs (seq names) (into named))
+        plan (test-plan (db) (when-not (= :main mode) (:base @state)) proofs (heard-main))
+        ;; a test named is asked now: a red held at its digest runs again, so a red whose cause no digest sees (a rebuilt binary, a repaired checkout) can be asked
+        plan (cond-> plan (seq named) (update :reused (fn [held] (into {} (remove (fn [[t r]] (and (named t) (not (proofs/green? r))))) held))))]
   (if-let [unread (:unread plan)]
     unread
   (let [{judge :selected deferred :skipped} (run-selection plan names proofs)
@@ -1286,24 +1293,18 @@
 
 (defn- with-gate-verdicts
   "Test run r with what this branch holds of its :deferred tests (the gate's facts, gate-tx): each with a verdict counted in the
-  run as a reused result is, so its reds and greens read as the rest do, a red on main (a failure saying :main-red, a proof of task tk
-  excepted, seon.task/proof?) under :main-red {test [failure]} and no red of this run's; those with none stay :deferred."
-  {:malli/schema [:=> [:cat :map [:maybe :map]] :map]}
-  [r tk]
+  run as a reused result is, so its reds and greens read as the rest do; those with none stay :deferred."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [r]
   (let [dbv (db)
         verdict (fn [t] (d/entity dbv [:var/name t]))
-        by (group-by (fn [t] (let [v (verdict t) st (:seon.test/status v)]
-                               (cond (or (nil? st) (= :deferred st)) :deferred
-                                     (and (not (task/proof? tk t)) (some :main-red (:seon.test/failures v))) :main-red
-                                     :else :judged)))
-                     (:deferred r))
+        by (group-by (fn [t] (if (#{nil :deferred} (:seon.test/status (verdict t))) :deferred :judged)) (:deferred r))
         reports (vec (for [t (:judged by) :let [v (verdict t)]
                            f (if (= :green (:seon.test/status v)) [{:type :pass}] (:seon.test/failures v))]
                        (assoc f :var (str "#'" t) :reused true)))]
-    (cond-> (-> r (update :reports (fnil into []) reports)
-                (assoc :deferred (vec (:deferred by)) :reused (+ (:reused r 0) (count (:judged by))))
-                (as-> x (merge-with + x (select-keys (frequencies (map :type reports)) [:pass :fail :error]))))
-      (:main-red by) (assoc :main-red (into {} (for [t (:main-red by)] [t (:seon.test/failures (verdict t))]))))))
+    (-> r (update :reports (fnil into []) reports)
+        (assoc :deferred (vec (:deferred by)) :reused (+ (:reused r 0) (count (:judged by))))
+        (as-> x (merge-with + x (select-keys (frequencies (map :type reports)) [:pass :fail :error]))))))
 
 (defn gate-plan-failure
   "What a gate's log (text) says stopped its plan before any test ran, and the namespaces whose ns form this branch rewrote (forms), a form's cause
@@ -1369,7 +1370,7 @@
                            (and (seq rest-tests) (not reach?)) "the tests your change reaches run when your status is clear")]
         (if err
           err
-          (cond-> (with-gate-verdicts r tk) unjudged (assoc :unjudged unjudged)))))))
+          (cond-> (with-gate-verdicts r) unjudged (assoc :unjudged unjudged)))))))
 
 ;; ---- the loop ----------------------------------------------------------------------
 

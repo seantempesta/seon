@@ -376,8 +376,8 @@
 
 (defn file-text
   "Namespace nsym's file as db holds it: its live forms in the order the image loads them
-  (seon.program/load-order), each after its lead (a form recorded at a REPL has none: a
-  blank line, or nothing before the first), then the text after its last form (a newline
+  (seon.program/load-order), each after its lead (a form recorded at a REPL has none, or only its comment: a
+  blank line, or nothing before the first, and the comment on its own line), then the text after its last form (a newline
   when it has none). So a helper recorded at a REPL after the function that now calls it is
   written before that function, and the file loads fresh as the image ran (step E run #10's
   merge wrote form-of after summary-of, its user); a file already in that order is written
@@ -386,7 +386,9 @@
   [db nsym]
   (let [ne (pdb/eid db :ns/name nsym)
         fs (program/load-order (for [dt (d/datoms db :avet :form/ns ne) :when (program/live? db (:e dt))] (program/form-row db (:e dt))))]
-    (str (apply str (map-indexed (fn [i f] (str (or (:lead f) (if (zero? i) "" "\n\n")) (:src f))) fs))
+    (str (apply str (map-indexed (fn [i f] (let [sep (if (zero? i) "" "\n\n") lead (:lead f)]
+                                                  ;; a file's lead is what stood between its forms, ending at the form; a REPL's is its comment alone, which needs its line
+                                                  (str (cond (nil? lead) sep (or (= "" lead) (re-find #"\s\z" lead)) lead :else (str sep lead "\n")) (:src f)))) fs))
          (or (:ns/tail (d/entity db ne)) "\n"))))
 
 (defn- interface
@@ -632,6 +634,14 @@
                                        nil)]
                              :when p]
                          p)))))
+
+(defn namespace-path
+  "The file namespace n takes when it has none, by its name as Clojure's load path reads it: a test namespace's under test/, any other's under src/. See docs/source.md#commit-the-merges-branch."
+  {:malli/schema [:=> [:cat :symbol] :string]}
+  [n]
+  (str (if (str/ends-with? (str n) "-test") "test/" "src/")
+       (-> (str n) (str/replace "-" "_") (str/replace "." "/"))
+       ".clj"))
 
 (defn unfiled-forms
   "The definitions of the forms a merge's changes (seon.merge/three-way's :ours) add, change

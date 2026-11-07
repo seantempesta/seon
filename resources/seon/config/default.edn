@@ -388,6 +388,9 @@
  ;; another tree: the main tree's names its merges worktree (bin/worktree --path merges), so
  ;; write-back never edits main's files.
  :seon.config.source/root #env SEON_SOURCE_ROOT
+ ;; Unit: boolean. Whether a merge writes its files and commits :seon.config.source/branch by itself. False: main is the source of truth, and
+ ;; my.root/write-back! (seon_write_back) syncs main's changed files and commits, called by hand (owner, 2026-11-07). At the bound: n/a.
+ :seon.config.source/write-back-on-merge true
  ;; Unit: path. The checkout the merge gate runs a merge's deferred process tests on
  ;; (seon.fx/run-tests: a worktree of it at the merges head, the candidate's files over it,
  ;; prove's entry there). Provenance: root's ruling (a), 2026-10-23, from step E's dry run (a test

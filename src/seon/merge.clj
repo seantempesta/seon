@@ -425,7 +425,7 @@
   entry's population needs on onto (as a registration installs them). An entity whose identity
   src retracted is retracted whole on onto, so no fact onto wrote of it (a test's results) stays
   on a nameless entity (docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program)."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db [:sequential :seon.merge/program-key] :seon.merge/data-attrs] :seon.db/tx-data]}
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db [:maybe [:sequential :seon.merge/program-key]] :seon.merge/data-attrs] :seon.db/tx-data]}
   [onto base src ks data-attrs]
   (let [carried (own-namespaces onto src (carried-tx base src ks data-attrs))
         unique? #(= :db.unique/identity (get-in (d/schema src) [% :db/unique]))
