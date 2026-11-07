@@ -2098,6 +2098,21 @@
     (is (= #{"/user/sean"} (hrefs (h/html (ui/users-side {:seon.db/db db})))) "it is listed by its name")
     (is (nil? (ui/users-side {:seon.db/db (d/db-with db [[:db/retract (:db/id sean) :seon.user/name "sean"]])})) "no name, no user")))
 
+(deftest a-users-page-moves-with-main
+  ;; docs/render.md#a-page-is-a-kept-walk: a user's page is a kept walk, as root's is: a move of main draws what it reached, so an agent it starts appears on a page already open
+  (let [db0 (sessions-db "b2" [["b2/a1" :a1 :running "seon.print/a-long-string" :running :task-a]])
+        db1 (d/db-with db0 [{:seon.agent/key "sean" :seon.user/name "sean"}])
+        st {:user-walks (volatile! {}) :views {[:chat :sean] {} [:chat :a1] {}}}
+        kw (#'p/user-walk st db1 (d/entity db1 [:seon.user/name "sean"]))
+        side (fn [w] (apply str (map :html (filter #(= "#c-side" (:container %)) (r/placed-units w)))))
+        before (side (:w kw))
+        db2 (d/db-with db1 [{:seon.agent/key "sean" :seon.agent/agents [(:db/id (d/entity db1 [:seon.agent/key "b2/a1"]))]}])
+        st' (#'p/user-walks st db2)]
+    (is (not (str/includes? before "/agent/b2/a1")) "nothing started yet")
+    (is (str/includes? (side (:w (get @(:user-walks st') "sean"))) "/agent/b2/a1") "the agent it started is on the page, with no new draw")
+    (is (contains? (:dirty st') [:chat :sean]) "and its view is dirty")
+    (is (not (contains? (:dirty st') [:chat :a1])) "another's isn't")))
+
 (deftest a-record-that-no-longer-fits-its-schema-is-its-data
   ;; docs/render.md#the-page: a stored value outlives the schema it was written under; the page and the model read its data
   (let [old {:t 1 :classes {:a-class-since-removed {:n 1 :rows []}}}]
