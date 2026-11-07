@@ -186,7 +186,7 @@
   {:malli/schema [:=> [:cat :seon.host/db :symbol :string [:maybe :string]] :seon.db/tx-data]}
   [db nsym text file]
   (let [{:keys [accounts tail]} (accounts nsym text)
-        tx (vec (concat (mapcat #(program/account-tx db % (:order %)) accounts)
+        tx (vec (concat (mapcat #(program/account-tx db (assoc %1 :order %2) %2) accounts (program/stable-places (vec (repeat (count accounts) nil))))
                         (when file (for [a accounts] {:db/id (str "form " (:id a)) :form/source true}))))]
     (cond-> tx
       ;; a file's tail is kept even when empty: no newline at its end is part of the file
@@ -338,8 +338,10 @@
   changed."
   {:malli/schema [:=> [:cat :seon.host/db :symbol :map] :seon.db/tx-data]}
   [db nsym {:keys [accounts tail file]}]
-  (let [x (some->> (pdb/eid db :ns/name nsym) (d/entity db))]
-    (vec (concat (mapcat #(program/account-diff-tx db %) accounts)
+  (let [x (some->> (pdb/eid db :ns/name nsym) (d/entity db))
+        ;; a form keeps its place while the file keeps its order, so an edit writes what it changed
+        places (program/stable-places (mapv #(some->> (pdb/eid db :form/id (:id %)) (d/entity db) :form/order) accounts))]
+    (vec (concat (mapcat #(program/account-diff-tx db (assoc %1 :order %2)) accounts places)
                  (for [a accounts :when (not (pdb/eid db :form/id (:id a)))] {:db/id (program/form-tid (:id a)) :form/source true})
                  (when (or (not= tail (:ns/tail x)) (not= file (:ns/file x)))
                    [{:db/id (program/ns-tid nsym) :ns/name nsym :ns/tail tail :ns/file file}])))))
