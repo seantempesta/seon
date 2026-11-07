@@ -822,7 +822,7 @@
                            "the gate could not run them: bin/worktree --at exited 1: no such branch; seon.generation: no :ns/file on the branch")
             (get-in tk [:seon.task/failure :reason]))))
     (testing "the test whose process started this root is left out: a test cannot be its own gate (:seon.root/started-by)"
-      (is (= {:outcome :ready :reasons []} (judged self [boots])) "the only deferred test is the root's own: merged, nothing run")
+      (is (= {:outcome :gate :reasons [] :deferred []} (judged self [boots])) "the only deferred test is the root's own: merged, nothing run")
       (is (= {:outcome :gate :reasons [] :deferred [other]} (judged self [boots other])) "another test beside it is still gated, itself not named")
       (let [db (mdb [(decl "a")] :extra (concat (work "a" :done) [self] (work "a-merge" :gate :members {:seon.task/deferred #{boots other}})))]
         (is (= [{:op :gate :task "demo/a-merge" :tests [other]}] (actions-for db)))))
