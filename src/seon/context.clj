@@ -873,7 +873,7 @@
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] :map :any] :map]}
   [db e value]
   (let [r (assoc (pdb/response-of db e) :value value)]
-    (pdb/with-response (dissoc e :seon.eval/result) r nil)))
+    (pdb/with-response (dissoc e :seon.eval/result) r)))
 
 (defn- session-records
   "The conversation of agent record c on db, [record kind] in its order (turn by turn: its messages, its reply, its evals). A record keeps the turn it names as :turn. See docs/tasks.md#a-task-names-example-sessions."
@@ -886,7 +886,7 @@
                        (when (= :model (:seon.model-call/origin call))
                          [[(select-keys call [:seon.model-call/id :seon.model-call/n :seon.model-call/origin :seon.model-call/reply :seon.model-call/reasoning :seon.model-call/truncated]) :seon.model-call/fact]])
                        (for [[e] evals :let [ev (get-in c [:evals e]) whole (pdb/response-of db ev)]]
-                         [(assoc (pdb/with-response (dissoc ev :db/id :seon.eval/agent :seon.eval/call :seon.eval/opened :seon.eval/result) whole nil) :turn n) :seon.db/eval-fact]))]
+                         [(assoc (pdb/with-response (dissoc ev :db/id :seon.eval/agent :seon.eval/call :seon.eval/opened :seon.eval/result) whole) :turn n) :seon.db/eval-fact]))]
          r)))
 
 (defn- session-request
