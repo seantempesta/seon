@@ -2957,6 +2957,14 @@
       (is (nil? (r/render-of v nil)))
       (is (str/includes? (pr-str (r/html {} v)) ":n")))))
 
+(deftest an-agents-own-draw-replaces-roots-at-the-same-revision
+  ;; docs/render.md#a-value-draws-itself: root draws a live agent's page first, from its branch, and root holds no render the agent defined; the agent's answer must reach the page though each process counts revisions of its own
+  (let [page (fn [u] (filter #(= "x" (:id %)) (:seon.render/units (ui/page-chrome {:units [u] :view "a1" :tab :chat} :a1))))
+        roots (first (page {:id "x" :container "#c-rows" :rev 1 :html "<p>data</p>"}))
+        agents (first (page {:id "x" :container "#c-rows" :rev 1 :html "<svg></svg>" :own? true}))]
+    (is (some? roots))
+    (is (not= (:input roots) (:input agents)) "the page's diff sees a new unit")))
+
 (deftest a-steps-buttons-call-roots-table
   ;; docs/turn.md#an-eval-can-be-run-again: each button is a call of root's one table, and a request the button makes is no record of the conversation
   (let [tools (#'ui/step-tools :a1 {:seon.eval/id "e3" :seon.eval/code "(+ 1 2)"})
