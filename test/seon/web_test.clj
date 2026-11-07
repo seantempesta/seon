@@ -102,7 +102,7 @@
           e (some #(when (:seon.eval/response %) %) (get-in w [:req :req :tx-data]))]
       (is (= "(seon.root/kill! :a1)" (:seon.eval/code e)))
       (is (= "user" (:seon.eval/by e)))
-      (is (str/includes? (seon.print/record-text e) ":killed :a1") "what root answered"))))
+      (is (str/includes? (seon.print/record-text (assoc e :seon.eval/response (seon.db/response-of nil e))) ":killed :a1") "what root answered"))))
 
 (deftest an-eval-opened-on-a-page-is-no-eval-of-roots
   ;; the browser pass (3b-root): opening an agent's eval on its page called seon.root/opened!, and each
@@ -130,7 +130,7 @@
           w (first (filter #(= :write (get-in % [:req :op])) (:to-api o)))
           e (some #(when (:seon.eval/response %) %) (get-in w [:req :req :tx-data]))]
       (is (= "(seon.root/nope! :a2)" (:seon.eval/code e)))
-      (is (str/includes? (seon.print/record-text e) "not one of root's requests") "what root refused, and why"))))
+      (is (str/includes? (seon.print/record-text (assoc e :seon.eval/response (seon.db/response-of nil e))) "not one of root's requests") "what root refused, and why"))))
 
 (deftest a-listener-that-cannot-bind-is-the-one-error-map
   ;; task seon.render/one-owner-per-view-path (B2): a port taken is data, the one error map

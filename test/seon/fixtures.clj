@@ -443,7 +443,7 @@
   "Eval record e as the model reads it, through the one reading of the tree: its call, naming its reply when it is a model's of turn :turn, and its result."
   {:malli/schema [:=> [:cat [:maybe :map] :map] [:vector :map]]}
   [opts e]
-  (let [h (@(requiring-resolve 'seon.render.ui/eval-hiccup) {} e)
+  (let [h (@(requiring-resolve 'seon.render.ui/eval-hiccup) {:db (:db opts)} e)
         h (if (and (:seon.eval/call-id e) (pos? (:turn e 0))) [:section {:wire/role "assistant" :wire/reply (:turn e)} h] h)]
     (vec (mapcat second (seon.render/hiccup-wire h (:db opts))))))
 

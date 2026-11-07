@@ -22,11 +22,11 @@
     (is (contains? r :ms) "the evaluation's facts: its cost")
     (is (= {:value 4} (select-keys (ev "(do (+ 1 1) (+ 2 2))") [:value :forms])) "a do is one form: its last form's value")
     (let [rec (repl/record-details "(atom 1)" {:handle 'result/e9 :value (atom 1)} {})]
-      (is (= {:seon.value/type (.getName (class (atom 1)))} (get-in rec [:seon.eval/response :value])) "a value that is no plain data: what it was, as data"))
+      (is (= {:seon.value/type (.getName (class (atom 1)))} (:value (seon.db/response-of nil rec))) "a value that is no plain data: what it was, as data"))
     ;; the scaffold's call is (in-ns ..) (deftest ..) (my.agent/prove): a form's value is kept as it would be alone, so the
     ;; verdict reads as its render whatever came before it, and a large one takes no other form's value with it
     (let [proved (with-meta {:reports [] :ran 0 :fns {'a/b {:calls 1}}} {:seon.render/schema :seon.test/proved})
-          kept (fn [v] (get-in (repl/record-details "x" {:handle 'result/e9 :forms 2 :value [1 v]} {}) [:seon.eval/response :value]))]
+          kept (fn [v] (:value (seon.db/response-of nil (repl/record-details "x" {:handle 'result/e9 :forms 2 :value [1 v]} {}))))]
       (is (= [1 (:value (render/model proved))] (kept proved)) "a form's model render, as it reads alone")
       (is (= 1 (first (kept (vec (range (inc (cfg/value :seon.config.store/max-value-chars))))))) "a form past the largest value kept costs only itself")
       (is (:seon.value/gone (second (kept (vec (range (inc (cfg/value :seon.config.store/max-value-chars))))))) "and says it is gone"))
@@ -1003,7 +1003,7 @@
                                     ["(datahike.api/q '[:find ?y :where [?e :var/name _]] (my.db/db))"
                                      {:op :eval :agent "root"
                                       :code (str "(let [b (:db @(seon.root/branch-db sys (:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))))]"
-                                                 " (vec (for [[rec] (datahike.api/q '[:find ?r :where [_ :seon.eval/response ?r]] b) :when (:ex rec)]"
+                                                 " (vec (for [e (datahike.api/q '[:find [?e ...] :where [?e :seon.eval/response _]] b) :let [rec (seon.db/response-of b (datahike.api/pull b '[:seon.eval/response :seon.eval/result] e))] :when (:ex rec)]"
                                                  " (get-in rec [:ex :seon.error/message]))))")}]))]
     (is (:ex r) (pr-str r))
     (is (some #(clojure.string/includes? (str %) "unknown vars") (:value recorded)) (str "the eval is recorded with its error: " (pr-str recorded)))))
@@ -1263,12 +1263,13 @@
   ;; docs/users.md#what-each-thing-is: a result is its own entity, so evaluating one value twice stores it once
   ;; and each eval keeps its own cost; a different value is another entity; an error is a result with :ex and no :value
   (let [same "(mapv inc (range 50))" other "(mapv dec (range 50))" boom "(/ 1 0)"
-        [_ _ _ _ held] (at/in-agent (fn [{:keys [task]}]
+        all (at/in-agent (fn [{:keys [task]}]
                                       [same same other boom {:op :eval :agent "root" :code (evals-held task [same other boom])}]))
+        held (peek all)
         evals (:value held)
         of (fn [code] (filterv #(= code (:seon.eval/code %)) evals))
         [a b] (of same) [c] (of other) [d] (of boom)]
-    (is (= 2 (count (of same))) (pr-str evals))
+    (is (= 2 (count (of same))) (pr-str all))
     (is (not= (:seon.eval/id a) (:seon.eval/id b)) "two evals")
     (is (some? (get-in a [:seon.eval/result :db/id])) (pr-str a))
     (is (= (get-in a [:seon.eval/result :db/id]) (get-in b [:seon.eval/result :db/id])) "of one result entity")
@@ -1284,21 +1285,21 @@
     (is (not (contains? (:seon.eval/result d) :seon.result/value)) "an eval that threw holds a result with :ex and no :value")))
 
 (deftest an-eval-evaluated-again-moves-its-result-ref
-  ;; docs/users.md#what-each-thing-is: evaluating again (the same id) moves the ref; the result it held stays readable
+  ;; docs/users.md#what-each-thing-is: evaluating again (seon.repl/again, the same id) moves the ref; the result it held stays readable
   (at/with-agent {}
     (fn [{:keys [names ask]}]
       (let [{:keys [task agent]} names
             root (fn [code] (ts/value-of (:response (ask {:op :eval :agent "root" :code code}))))
             branch (str "(:db @(seon.root/branch-db sys (:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))))")
-            run (fn [code] (root (str "@(c/submit! sys :" agent " " (pr-str code) " {:origin :outside :id \"again\"})")))
-            held (fn [] (root (str "(datahike.api/pull " branch " '[:seon.eval/id {:seon.eval/result [*]}] [:seon.eval/id \"again\"])")))
-            _ (root (str "@(c/submit! sys :" agent " \"(def tick (atom 0))\" {:origin :outside})"))
-            _ (run "(swap! tick inc)")
-            one (:seon.eval/result (held))
-            _ (run "(swap! tick inc)")
-            two (:seon.eval/result (held))
+            run (fn [code] (root (str "@(c/submit! sys :" agent " " (pr-str code) " {:origin :outside})")))
+            held (fn [id] (root (str "(datahike.api/pull " branch " '[:seon.eval/id {:seon.eval/result [*]}] [:seon.eval/id " (pr-str id) "])")))
+            _ (run "(def tick (atom 0))")
+            id (:record (run "(swap! tick inc)"))
+            one (:seon.eval/result (held id))
+            _ (run (str "(seon.repl/again " (pr-str id) ")"))
+            two (:seon.eval/result (held id))
             old (root (str "(datahike.api/pull " branch " '[*] [:seon.result/hash " (pr-str (:seon.result/hash one)) "])"))]
-        (is (= 1 (:seon.result/value one)) (pr-str one))
+        (is (= 1 (:seon.result/value one)) (pr-str id one))
         (is (= 2 (:seon.result/value two)) "evaluating again moves the ref to the new result")
         (is (not= (:db/id one) (:db/id two)))
         (is (= 1 (:seon.result/value old)) "and the old result stays readable by its hash")))))

@@ -1255,7 +1255,7 @@
     (is (contains? (rec c) :seon.eval/basis) "the ctx value itself: its basis")
     (is (not (contains? (rec part) :seon.eval/basis)) "(select-keys @ctx [:seon.agent/key]) is a map of what it holds, no basis")
     (is (not (contains? (rec more) :seon.eval/basis)) "(assoc @ctx :x 1) is not the record at a t either")
-    (is (= #{:seon.agent/key} (set (keys (get-in (rec part) [:seon.eval/response :value])))) (str "kept as the data it was: " (pr-str (select-keys (:seon.eval/response (rec part)) [:value]))))
+    (is (= #{:seon.agent/key} (set (keys (:value (seon.db/response-of nil (rec part)))))) (str "kept as the data it was: " (pr-str (select-keys (seon.db/response-of nil (rec part)) [:value]))))
     (is (not (str/includes? (text (rec part)) ":evals")) "the model reads what the value was, not the whole record")))
 
 (deftest render-ctx-and-render-changes-answer-the-render-as-evals

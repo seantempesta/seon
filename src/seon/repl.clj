@@ -698,8 +698,14 @@
                       (if (:forms resp) [(mapv kept-form v) false] (kept v)))
         ;; a value its model render has already drawn prints as it is
         schema (when (and (contains? resp :value) (not drawn?)) (when-let [k (:seon.render/schema (meta v))] (when (or ctx? (not= :seon.ctx/ctx k)) k)))]
-    (cond-> {:seon.eval/code code
-             :seon.eval/response (cond basis (dissoc resp :value) (contains? resp :value) (assoc resp :value kv) :else resp)}
+    (cond-> (let [kept-resp (cond basis (dissoc resp :value) (contains? resp :value) (assoc resp :value kv) :else resp)
+                  id (:eval-id req)
+                  ;; an answer not kept as it is (a host object, a value past the bound, a ctx, several forms) is named by its eval, so its handle is its own
+                  own (when (and id (not (identical? (:value resp) (:value kept-resp)))) [:eval id])
+                  d (pdb/with-response {:seon.eval/code code} kept-resp own)
+                  h (or (get-in d [:seon.eval/result :seon.result/hash]) (str (hasch/uuid (or own [nil nil nil nil nil]))))]
+              (cond-> d
+                id (update :seon.eval/response #(into {:handle (symbol "result" (first (clojure.string/split h #"-")))} %))))
       schema (assoc :seon.eval/schema schema)
       basis (assoc :seon.eval/basis basis)
       (:seon.render/page (meta v)) (assoc :seon.eval/page (:seon.render/page (meta v)))
@@ -740,16 +746,11 @@
   [rec] (context/tool-text (:db @agent/state) rec))
 
 (defn- handled
-  "Response r of code, as eval id answers it, with its handle, and its record: [r rec]. A plain answer's handle is result/ and the first eight hex digits of a content hash (hasch, the same in every process) of what the record keeps of it (value, error, output, error output, forms; not its cost), so a cut or a replay leaves every handle where it was, a run again names its new answer while the old handle still reads the old one, and two evals with one answer have one. An answer not kept as it is (a host object, a value past :seon.config.store/max-value-chars: the record holds what stands for it) is named by its id, so it never shares a handle. An edit!'s value is its inner eval's response, whose cost differs each time: nothing else is walked. See docs/agent.md#your-turn."
+  "Response r of code, as eval id answers it, with its handle, and its record: [r rec]. A plain answer's handle is result/ and the first eight hex digits of its result's hash (seon.db/with-response, the same in every process) of what the record keeps of it (value, error, output, error output, forms; not its cost), so a cut or a replay leaves every handle where it was, a run again names its new answer while the old handle still reads the old one, and two evals with one answer have one. An answer not kept as it is (a host object, a value past :seon.config.store/max-value-chars: the record holds what stands for it) is named by its id, so it never shares a handle. An edit!'s value is its inner eval's response, whose cost differs each time: nothing else is walked. See docs/agent.md#your-turn."
   {:malli/schema [:=> [:cat :string :string :map :map] [:tuple :map :map]]}
   [id code r req]
-  (let [rec (assoc (record-details code r req) :seon.eval/id id)
-        s (:seon.eval/response rec)
-        v (:value s)
-        v (if (and (map? v) (not (record? v)) (contains? v :handle)) (dissoc v :handle :ms :ticks :bytes :fns :record) v)
-        h (first (clojure.string/split (str (hasch/uuid (if (identical? (:value r) (:value s)) [v (:ex s) (:out s) (:err s) (:forms s)] [:eval id]))) #"-"))
-        put #(into {:handle (symbol "result" h)} %)]
-    [(put r) (update rec :seon.eval/response put)]))
+  (let [rec (assoc (record-details code r (assoc req :eval-id id)) :seon.eval/id id)]
+    [(into {:handle (get-in rec [:seon.eval/response :handle])} r) rec]))
 
 (defn eval-string
   "Evaluate code through the one REPL path (the handler and its middleware) and answer its one
