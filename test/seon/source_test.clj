@@ -62,6 +62,23 @@
   (doseq [[path text] files :when (.exists (java.io.File. (str here "/" path)))] (require (source/file-ns text)))
   (let [db (empty-db)] (d/db-with db (source/import-tx db files))))
 
+;; docs/sharing.md: an inserted form renumbered every later form in its file, on entities spread through EAVT by content id, and a merge ignores a form's place, so branches held it stale
+(deftest a-form-inserted-writes-one-place
+  (let [text (fn [& fs] (str "(ns app.pl)\n\n" (str/join "\n\n" fs) "\n"))
+        fs (mapv #(str "(defn f" % " [] " % ")") (range 8))
+        db (d/db-with (ts/test-db) (source/import-tx (ts/test-db) {"src/app/pl.clj" (apply text fs)}))
+        places (fn [tx] (filter #(and (map? %) (:form/order %)) tx))
+        tx (source/refresh-tx db {"src/app/pl.clj" (apply text (concat (subvec fs 0 3) ["(defn new-one [] 9)"] (subvec fs 3)))})
+        after (d/db-with db tx)
+        order (fn [db] (map :form/src (sort-by :form/order (d/q '[:find [(pull ?f [:form/src :form/order]) ...] :where [?n :ns/name app.pl] [?f :form/ns ?n] [?f :form/order]] db))))]
+    (is (= 1 (count (places tx))) (str "one place written, the new form's: " (pr-str (places tx))))
+    (is (= (concat ["(ns app.pl)"] (subvec fs 0 3) ["(defn new-one [] 9)"] (subvec fs 3)) (order after)) "and it sorts where the file has it")
+    (is (= (apply text (concat (subvec fs 0 3) ["(defn new-one [] 9)"] (subvec fs 3))) (source/file-text after 'app.pl)) "the file reads back whole")
+    (let [moved (apply text (concat ["(defn f7 [] 7)"] (subvec fs 0 7)))
+          tx2 (source/refresh-tx after {"src/app/pl.clj" moved})
+          a2 (d/db-with after tx2)]
+      (is (= moved (source/file-text a2 'app.pl)) "a form moved reads back where the file has it"))))
+
 (deftest importing-src-records-every-form-exactly
   (let [files (src-files)
         db (imported files)
