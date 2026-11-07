@@ -22,7 +22,7 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 if [[ ${1:-} == call ]]; then
   shift
   exec perl -MJSON::PP -MEncode -e '
-    my ($mcp, $root, $op, @kv) = map { decode_utf8($_) } @ARGV; my %a;
+    my ($mcp, $root, $op, @kv) = @ARGV; @kv = map { decode_utf8($_) } @kv; my %a;
     die "usage: bin/mcp call OP [KEY=VALUE ...]\n" unless defined $op;
     for (@kv) {
       my ($k, $v) = /\A([^=]+)=(.*)\z/s or die "bin/mcp call: $_ is not KEY=VALUE\n";
