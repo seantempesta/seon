@@ -94,11 +94,9 @@
 (declare handle!)
 
 (defn inbox
-  "The messages delivered to this agent and not yet taken ({:from :body}), left in the inbox:
-  root's requests (e.g. :catch-up, \"main moved, merge main\") and other agents' sends, put
-  here by the :transport proc as each arrives (handle!'s :message), whatever the agent is
-  running. Words to its session's runs (the owner's, root's at a stage, a verdict) are entries on
-  main, which its turn takes (seon.turn/take!), never the inbox."
+  "The effect outcomes delivered to this agent and not yet taken ({:from :fx :k :kind :body}), left in the inbox as each
+  arrives (handle!'s :fx-reply). Every word to the agent, a person's or another agent's, is a fact on main, which its turn
+  takes (seon.turn/take!), never the inbox. See docs/users.md#messages."
   {:malli/schema [:=> [:cat] [:vector :map]]}
   [] (:inbox @state))
 
@@ -241,14 +239,18 @@
   [entries n] (into [] (mapcat (fn [{:keys [id kind from branch body]}] (own-message-tx id kind from branch body n))) entries))
 
 (defn taken!
-  "The first n messages of the inbox leave it: their reader recorded them (seon.turn/basis!
-  takes them once their facts are committed on this branch). nil."
+  "The first n entries of the inbox (effect outcomes, which no model turn reads) leave it at a turn's take (seon.turn/take!). nil."
   {:malli/schema [:=> [:cat nat-int?] :nil]}
   [n] (swap! state update :inbox #(vec (drop n %))) nil)
 (defn send-message
-  "Send body to the agents tos (ids); root delivers it by id. nil."
+  "Send body to the agents tos (ids): root writes it as a message fact on main, to each one's branch, whether or not its
+  process lives (seon.root/deliver-message). A body that is not text is its text by the one printer, whole, as the message
+  is. nil. See docs/users.md#messages."
   {:malli/schema [:=> [:cat [:sequential :seon.agent/id] :any] :nil]}
-  [tos body] (send! {:op :send :to (vec tos) :body body}) nil)
+  [tos body]
+  (send! {:op :send :to (vec tos)
+          :body (if (string? body) body (print/text (cond-> body (instance? clojure.lang.IObj body) (vary-meta assoc :seon.print/full true))))})
+  nil)
 
 (defn await-reply
   "Send root m, a request of this process's own key k ({:op .. :k k}), and wait for root's
@@ -405,12 +407,11 @@
     es))
 
 (defn messages
-  "The words to this agent not yet taken, taken (take-main!, as a turn takes them, at the turn in force: `turn-now`), then the
-  inbox's sends (inbox). Its reader is the code that read them."
+  "The words to this agent not yet taken, taken (take-main!, as a turn takes them, at the turn in force: `turn-now`: the facts on
+  main to its branch, another agent's sends included), then the effect outcomes of the inbox. Its reader is the code that read them."
   {:malli/schema [:=> [:cat] [:vector :map]]}
   []
   (let [es (take-main! (turn-now))]
-    (inbox)
     (let [[old _] (swap-vals! state assoc :inbox [])] (into es (:inbox old)))))
 
 (def ^:dynamic *fx-stub*
@@ -1505,10 +1506,6 @@
     :stats [{:op :stats :id (:id m) :result {:mem-mb (mem-mb) :t (:max-tx (db)) :pid (lib/c-getpid)
                                               :results (count (:results @state)) :evals (:n @state)
                                               :heap-mb (lib/r2 (/ (lib/bytes-in-heap) 1048576.0))}}]
-    ;; a message (session F2): it waits in :inbox until the agent's code takes it ((messages));
-    ;; root hears that it arrived
-    :message (do (swap! state update :inbox (fnil conj []) (select-keys m [:from :body]))
-                 [{:op :received :sent-ns (:ns m) :recv-ns (profile/now-ns)}])
     nil))
 
 (defn spawn-phases

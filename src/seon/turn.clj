@@ -136,26 +136,18 @@
   each sits in the conversation before the page that shows what came after it: the entries main holds
   to the session's runs (a person's message, root's at a stage boundary, a refused verdict:
   seon.agent/take-main!, the same facts root wrote on main, with what root wrote of the agent's own
-  entities), then each send of the inbox (another agent's, root's request) as a message fact of its
-  own. Each is :seon.message/agent's, so its presence on the branch is its delivery and the record's
+  entities): a send of another agent's is one of them, written on main by root as a person's is. Each is
+  :seon.message/agent's, so its presence on the branch is its delivery and the record's
   messages read it (seon.context/turn-members); nothing is held for the turn's basis. An effect's outcome
-  (:from :fx) is no message: the eval that asked holds its answer. A read that is not the
+  (:from :fx, in the inbox) is no message: the eval that asked holds its answer. A read that is not the
   run's turn (take? false: an observer's read of an agent its model drives) takes nothing."
   {:malli/schema [:=> [:cat :boolean nat-int?] :nil]}
   [take? n]
   (when take?
-    (let [sends (agent/inbox)
-          k (:key @agent/state)
-          tx (into [] (mapcat (fn [{:keys [from body]}]
-                                ;; a send's body is the sender's value: its text, by the one printer, whole, is the message
-                                (agent/own-message-tx (str k "/send/" (random-uuid)) :message (name from) nil
-                                                      (if (string? body) body (print/text (cond-> body (instance? clojure.lang.IObj body) (vary-meta assoc :seon.print/full true))))
-                                                      n)))
-                   (remove #(= :fx (:from %)) sends))]
+    (let [fx (count (agent/inbox))]
       (agent/take-main! n)
-      (when (seq tx) (agent/transact! tx) (agent/commit!))
-      ;; taken once their facts are committed: a refused write leaves them for the next turn
-      (agent/taken! (count sends))))
+      ;; the outcomes seen are let go
+      (agent/taken! fx)))
   nil)
 
 (defn- tell-error!

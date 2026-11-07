@@ -73,7 +73,7 @@ A branch should be main plus its own changes, so everything is a fork of a share
 
 ## Messages
 
-A message is delivered to an agent's entity and stays there until the agent removes it, and the agent's pull and renders show what it holds, so there is no read or unread state and no special function (owner, 2026-11-07). The shape below is partly modeled; what ran says so. Not built.
+A message is delivered to an agent's entity and stays there until the agent removes it, and the agent's pull and renders show what it holds, so there is no read or unread state and no special function (owner, 2026-11-07). The shape below is partly modeled; what ran says so. Built: a send is one fact on main, to the recipient's branch, whether or not its process lives (``seon.root/deliver-message``); the rest is not.
 
 - **One entity:** ``:seon.message/from``, ``:seon.message/to``, a set of refs, ``:seon.message/sent-ms``, recorded by root's writer at the send, and ``:seon.message/body``, with no kind, at an issued eid. Its attributes are what an agent sorts and filters on at a REPL: ``(sort-by (juxt :seon.message/sent-ms :db/id) (vals (:messages @ctx)))``. Time is recorded and only orders; nothing decides by it. A forward set on the agent was rejected: every `*` pull of that agent then carries them all (43 ms and 158 KB of text at 10,000, lab).
 - **Delivered:** a send writes the message on main. An agent's next act brings messages to it onto its branch, and from then on it holds them. No fact says it read one, and a model call names none.
@@ -116,7 +116,7 @@ The steps below merge one at a time, each usable alone, with today's agents unch
 
 1. Done: the write check holds a value to its branch's schema, and a merged schema entry brings its attribute's declaration.
 2. Done: an eval's result is one entity per value on every branch, and an eval's id is issued by the store. Two shapes remain, a whole old response that ``seon.db/response-of`` still reads and ``:seon.eval/id`` repeating the eid; how they go is Optimization's call, with how results are stored (owner, 2026-11-07).
-3. Messages, Web's next: one send, delivery and removal by data, a wake rule; task ``seon.agent/every-send-is-one-fact-on-main`` and the two after it. Functions that mutate behind a read-looking name go with them, by the owner's ruling: task ``my.agent/no-function-does-what-ctx-can``.
+3. Messages, Web's next: one send, delivery and removal by data, a wake rule; the first, one send as one fact on main, is done, and the two tasks after it remain. Functions that mutate behind a read-looking name go with them, by the owner's ruling: task ``my.agent/no-function-does-what-ctx-can``.
 4. Users, and input through ``forgive``.
 5. Sessions and merging them.
 6. The home page from the user's ``@ctx``, with layouts as data and tabs as entities.
