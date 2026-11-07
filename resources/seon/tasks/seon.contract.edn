@@ -12,8 +12,4 @@
   :seon.task/kind :work
   :seon.task/needs #{"seon.render/a-render-tag-is-a-checked-schema" "seon.contract/a-contract-is-checked-once-and-costs-nothing"}
   :seon.task/proofs #{seon.contract-test/a-loose-boundary-is-counted}}
- {:seon.task/name "a-contract-check-costs-the-size-of-its-arguments"
-  :seon.task/plan "Measured 2026-11-07: seon.doc/citation-target's own body is 82 ticks with contracts off at any size; with them on, 577 ticks at maps of 10, 9,107 at 1,000, 43,273 at 5,000, because its contract's [:map-of ..] arguments are walked on every call. A hot function called in a loop goes quadratic through its check alone. It is 4.1 percent of all self ticks in a day's verdicts (8.7 M calls), and instrumentation is :on in production. 261 contracts take a collection whole, 18.9 percent of self ticks between them (an upper bound: that includes their bodies). A cost proof misses it: the check allocates nothing that grows, and its sizes are small. Field's way: clojure.spec's every and every-kv check at most *coll-check-limit* (101) members, against coll-of's whole walk. Options, the owner's to rule on since it narrows a law: (1) one place, seon.contract/wrap: a contract checks at most a bound of a collection's members, by a config key, generators unchanged; (2) mark only the hot ones shallow (:map), site by site, which is the patch; (3) leave it. Recommended (1). Proof: citation-target's ticks flat from 10 to 5,000; a bad member within the bound is still refused; mg/check draws as before."
-  :seon.task/kind :work
-  :seon.task/proofs #{}}
 ]

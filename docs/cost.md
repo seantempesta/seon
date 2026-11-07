@@ -78,7 +78,7 @@ A function that takes a db has no generated input yet: `:seon.host/db` is a pred
 
 ## What a contract costs
 
-A contract is checked on every call, so the schema of a value that many calls take costs that value's size on each of them. A large value passed among helpers is checked shallowly (its keys and their types, never each entry), and each entry is checked once, where it enters: `:seon.reconcile/index` (every reconciler helper takes it; put-task checks a task as `:seon.task/own`, put-agent an agent as `:seon.reconcile/agent`) and `:seon.ctx/ix` (the ctx walk's state). Checked deeply, the index's listing cost tasks x tasks; its proof is `seon.reconcile-test/an-index-is-listed-at-the-cost-of-its-tasks`.
+A contract is checked on every call, so the schema of a value that many calls take costs that value's size on each of them. Measured on `seon.doc/citation-target`: 82 ticks with contracts off at any size, 43,273 at maps of 5,000, and a cost proof at small sizes does not see it. Contracts stay whole ([the ruling](decisions.md#a-contract-checks-a-collection-whole)). A large value passed among helpers is checked shallowly (its keys and their types, never each entry), and each entry is checked once, where it enters: `:seon.reconcile/index` (every reconciler helper takes it; put-task checks a task as `:seon.task/own`, put-agent an agent as `:seon.reconcile/agent`) and `:seon.ctx/ix` (the ctx walk's state). Checked deeply, the index's listing cost tasks x tasks; its proof is `seon.reconcile-test/an-index-is-listed-at-the-cost-of-its-tasks`.
 
 ## What a test run measures
 
