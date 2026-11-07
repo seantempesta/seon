@@ -31,13 +31,17 @@
 
 (defn write-file
   "Write-back: the text to path (its directory made when missing), staged beside it and
-  renamed over it (rename(2)), so a reader sees the old or the new file. Answers {:value {:bytes n :path path}}, n the path's
+  renamed over it (rename(2)), so a reader sees the old or the new file, and a file already there keeps its mode. Answers {:value {:bytes n :path path}}, n the path's
   size on disk after the rename, or :seon.fx/io-error {:path :tmp :errno :message} (errno
   absent when the stage itself failed) with the staged file removed."
   {:malli/schema [:=> [:cat :map] :map]}
   [{{:keys [path text]} :req}]
   (let [tmp (str path ".fx-" (lib/c-getpid))
-        staged (try (.mkdirs (.getParentFile (java.io.File. ^String tmp))) (spit tmp text) nil
+        staged (try (.mkdirs (.getParentFile (java.io.File. ^String tmp))) (spit tmp text)
+                    (when (.exists (java.io.File. ^String path))
+                      (java.nio.file.Files/setPosixFilePermissions (.toPath (java.io.File. ^String tmp))
+                                                                   (java.nio.file.Files/getPosixFilePermissions (.toPath (java.io.File. ^String path)) (into-array java.nio.file.LinkOption []))))
+                    nil
                     (catch Throwable e
                       (.delete (java.io.File. tmp))
                       (error #'seon.fx/write-file :seon.fx/io-error (str "staging " tmp ": " (step/error-msg e)) {:path path :tmp tmp})))]

@@ -177,6 +177,43 @@
     (is (clojure.string/includes? (str (first (:value branch))) "[] 2") "the branch's program holds the new source")
     (is (= 0 (second (:value branch))) "its inner eval records no eval of its own: the edit's call is the one kept")))
 
+(deftest an-edit-of-a-path-keeps-its-mode
+  ;; docs/agent.md#changing-a-file: the roots-log agent's `spit` to bin/root took the execute bit off; a file's mode is its own
+  (let [d (str (seon.config/checkout) "/target/tmp/repl-path-" (random-uuid))
+        p (str d "/run.sh")
+        mode #(str (java.nio.file.Files/getPosixFilePermissions (.toPath (java.io.File. ^String p)) (into-array java.nio.file.LinkOption [])))]
+    (.mkdirs (java.io.File. ^String d))
+    (spit p "#!/bin/sh\necho one\n")
+    (.setExecutable (java.io.File. ^String p) true)
+    (let [before (mode)]
+      (is (str/includes? before "OWNER_EXECUTE") before)
+      (let [r (repl/edit! p "echo one" "echo two")]
+        (is (= "#!/bin/sh\necho two\n" (slurp p)) (pr-str r))
+        (is (= before (mode)) "the same mode after the edit")))))
+
+(deftest an-edit-of-a-path-says-where-it-wrote
+  ;; docs/agent.md#changing-a-file: an edit of a plain path names the absolute path and that no branch carries it, and refuses as a definition's edit does
+  (let [d (str (seon.config/checkout) "/target/tmp/repl-path-" (random-uuid))
+        p (str d "/notes#1.txt")]
+    (.mkdirs (java.io.File. ^String d))
+    (spit p "a\nb\na\n")
+    (let [abs (.getCanonicalPath (java.io.File. ^String p))
+          r (repl/edit! p "b" "c")]
+      (is (= "a\nc\na\n" (slurp p)) (pr-str r))
+      (is (= abs (get-in r [:edited :path])) (pr-str r))
+      (is (= [[1 "a"] [2 "c"] [3 "a"]] (get-in r [:edited :lines])) (pr-str r))
+      (is (str/includes? (:seon.text/said r) abs) "it names the absolute path")
+      (is (str/includes? (:seon.text/said r) "no branch") "and that no branch carries it"))
+    (is (= :ambiguous (:seon.repl/refused-because (repl/edit! p "a" "x"))) "exact text, once")
+    (is (= :not-found (:seon.repl/refused-because (repl/edit! p "zz" "x"))))
+    (is (= "a\nc\na\n" (slurp p)) "nothing changed")
+    (is (= {:unchanged p} (repl/edit! p "c" "c")))
+    (let [r (repl/edit! p [["a\nc" "A\nC"] ["c\na\n" "x"]])]
+      (is (= :overlap (:seon.repl/refused-because r)) (pr-str r)))
+    (let [r (repl/edit! (str d "/absent") "a" "b")]
+      (is (= :no-source (:seon.repl/refused-because r)) (pr-str r))
+      (is (str/includes? (:seon.error/message r) d) "it names where it looked"))))
+
 (deftest a-doc-is-edited-as-a-definition-is
   ;; docs as code (task seon.doc/any-markdown-file-is-docs-it-writes-back): edit! of a doc's address replaces exact
   ;; text once in its block, as of a definition, and loads its page again on the agent's branch, so what its text

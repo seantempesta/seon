@@ -87,8 +87,12 @@
                            [:seon.repl/lines {:optional true} [:vector [:tuple pos-int? :string]]]
                            ;; :not-found: at each candidate, the line where old stops matching (seon.repl/differs)
                            [:seon.repl/differs {:optional true} [:vector :map]]]]
- ;; seon.repl/edit! of a doc's address, written: the doc and the lines around each change in its new block
- :seon.repl/doc-edited [:map [:edited [:map [:doc :string] [:lines [:vector :any]]]]]
+ ;; where a text is and what it holds, plain data any function working on text takes (docs/agent.md#changing-a-file): at, a var or a path or a doc's address
+ :seon.text/at [:or :qualified-symbol :string]
+ :seon.text/text :string
+ :seon.text/place [:map [:seon.text/at :seon.text/at] [:seon.text/text :seon.text/text]]
+ ;; seon.repl/edit! of a place that is no definition, written: the place and the lines around each change; for a plain path, what it wrote where
+ :seon.text/edited [:map [:edited [:map [:lines [:vector :any]]]] [:seon.text/said {:optional true} :string]]
  ;; an eval's answer while it is live: its value is whatever the form answered, a var or a fn among them (seon.repl/response).
  ;; What is stored of it is :seon.eval/response, plain data
  :seon.repl/answer [:map {:seon.render/html seon.render.ui/evaluation}
