@@ -90,6 +90,8 @@
  ;; carries never does). A FILE of the program (:file/path) holds its text as imported: for a resource of entries, the base write-back edits.
  :schema/key [:and {:seon.db/identity true :seon.db/content-id true} :qualified-keyword]
  :schema/form :string
+ ;; Nothing reads or writes this; a stored attribute leaves at the next store erase (AGENTS section 7a).
+ :schema/source :boolean
  :schema/file [:and {:seon.db/index true} :string]
  :file/path [:and {:seon.db/identity true :seon.db/content-id true} :string]
  :file/text :string
@@ -100,7 +102,7 @@
  :config/file [:and {:seon.db/index true} :string]
  :seon.db/config-fact [:map {:seon.db/attributes true} [:config/key :config/key] [:config/form :config/form] [:config/file :config/file]]
  :seon.db/schema-fact [:map {:seon.db/attributes true} [:schema/key :schema/key] [:schema/form :schema/form]
-                        [:schema/file :schema/file]]
+                        [:schema/file :schema/file] [:schema/source {:optional true} :schema/source]]
  :seon.db/file-fact [:map {:seon.db/attributes true} [:file/path :file/path] [:file/text :file/text] [:file/mode {:optional true} :file/mode]]
  ;; A file's mode as git records it: executable or not, all a tree holds of it. Written by the import from the file on disk, committed by the write-back
  ;; (seon.source/modes). A script (:script on the allow-list, docs/source.md#a-program-file): its text is the file's, and what follows is derived from it, for reading.
