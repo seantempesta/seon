@@ -1981,7 +1981,7 @@
         es (r/page-edits (r/forms-moved {"status" (form 100)} {"status" (form 101)}))]
     (is (= 1 (count es)) (pr-str es))
     (is (= "app.m/problem-100" (peek (first (first es)))) "the one that came, by its name")
-    (is (= 1 (count (re-seq #":key \"functions without a contract" (pr-str (form 1))))) "and a reason two facts hold is said once")))
+    (is (= 1 (count (re-seq #"functions without a contract:" (pr-str (form 1))))) "and a reason two facts hold is said once")))
 
 (deftest a-prove-with-no-verdict-is-not-green
   ;; a live answer read "green: 0 of 0 passed" on a task naming one proof that was never written

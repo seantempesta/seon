@@ -3,7 +3,7 @@
   (:require [clojure.test :refer [deftest is testing]] [clojure.string :as str] [seon.fixtures] [seon.agent-test :as at]
             [seon.intr :as intr] [seon.agent :as agent] [seon.contract :as contract]
             [seon.ref :as ref] [seon.template :as template] [seon.repl :as repl] [seon.context :as context] [seon.doc :as doc]
-            [seon.config :as cfg] [my.agent] [seon.render :as render] [seon.print :as print] [seon.render.ui :as ui] [seon.web.html :as h] [seon.test-store :as ts] [my.test] [datahike.api :as d]))
+            [seon.config :as cfg] [my.agent] [seon.program] [seon.render :as render] [seon.print :as print] [seon.render.ui :as ui] [seon.web.html :as h] [seon.test-store :as ts] [my.test] [datahike.api :as d]))
 
 (deftest an-eval-answers-its-value-as-clojure-does
   ;; owner, 2026-10-28 and 2026-10-29: match Clojure for the eval's output: top-level forms run in
@@ -1030,6 +1030,15 @@
     (is (= "Divide by zero" (:seon.error/message (:ex r))) (pr-str r))
     (is (= {:forms 2 :value [3]} (select-keys r [:forms :value])) "the value of the form before the exception, and the exception")
     (is (nil? (resolve 'user/a-call-is-one-response-never)) "a form after the exception never ran")))
+
+;; docs/agent.md#what-you-read: Jolt compiles a name it can't find, so the answer is where a misspelling is said
+(deftest a-definition-naming-no-var-is-told-on-its-answer
+  (let [acct {:refs #{'clojure.string/uper-case 'clojure.string/upper-case 'Long/MAX_VALUE 'clojure.core/defn}}]
+    (is (= ['clojure.string/uper-case] (seon.program/unknown-refs acct)) "a loaded namespace that lacks it; a class's static and a real var are no finding")))
+
+;; docs/server.md#working-a-task-from-a-worktree: root holds no branch, and asking it for a name that's none answers the error, not a throw
+(deftest a-name-with-no-var-at-root-answers-the-error
+  (is (= :my.agent/no-var (:seon.error/type (my.agent/no-var nil 'no.such.place/thing)))))
 
 (deftest an-uncontracted-definition-is-told-on-its-answer
   ;; the one derivation's review (2026-10-26): instrument computed the uncontracted-definition

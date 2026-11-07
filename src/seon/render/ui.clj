@@ -1103,10 +1103,10 @@
                 (let [items (when (coll? x) (map #(as-text (if (map? %) (or (:key %) (:symbol %) %) %)) x))]
                   (if items
                     ;; each named on its own, so a change of one says that one (docs/render.md#a-change-is-edits-by-name)
-                    [:div {:key what} [:p (str what ":")]
-                     (into [:ul {:key :items}] (for [i (distinct items)] [:li {:key i} i]))
+                    [:div [:p (str what ":")]
+                     (into [:ul {:key :items}] (for [i (distinct items)] [:li i]))
                      (when do [:p "To clear it: " (form-hiccup do)])]
-                    [:p {:key what} what (when (some? x) (str ": " x)) (when do [:span ". To clear it: " (form-hiccup do)])])))]
+                    [:p what (when (some? x) (str ": " x)) (when do [:span ". To clear it: " (form-hiccup do)])])))]
     [:section
      [:h2 "Your proofs"]
      (when test-run [:p "The tests could not run: " (str/join "; " (:failed test-run))])
