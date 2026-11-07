@@ -20,6 +20,10 @@ Tested on one scratch store: 3 agents, 120 turns, a message to each and 5 evals 
 
 What it costs: every agent can read every message, since each branch holds them all. That is no boundary today, as an agent has the whole disk. What it may delete, not yet checked: the merge's lists of what to carry (`data-attrs`, carried platform attributes, the never-carried list) and the delivery path, in favour of the schema. Open: which kind each attribute of an agent's entity is, and whether a page can find what a branch holds cheaply.
 
+## What a real branch spends its nodes on
+
+Read from a copy of a real store of 5 agents' branches (about 225,000 datoms, one model's work on one main that moved little, no writes), comparing each branch's leaves with main's. By address, 4 to 27 percent of EAVT's nodes are private, and by content 2 to 25: these branches are young, so content-hashed keys barely change them, and drift is what those keys fix on a long-lived branch. What costs them is what they write: on the branch writing most, `seon.test` datoms were 5,416 of its 7,557 own, on 1,467 var entities, touching 1,278 of the 1,366 stretches of EAVT it touched at all; without them, 123. A test's facts sit on its var, which sorts by a content id among the forms, so one prove rewrites leaves all over the program. They are a fact that changes on its own schedule, and belong on their own entity with a ref to the var (task ``seon.proofs/a-tests-facts-are-their-own-entity``). A result placed by hash is small beside this: 42 to 66 entities, and 44 to 69 stretches.
+
 ## A branch and a merge
 
 Think of `git branch` and `git merge`. A branch starts as a pointer to main's nodes. Its own writes make new nodes. Merging main today (```seon.agent/merge-main!```) writes main's changes into the branch's own tree, like applying a patch: right content, new addresses, shared never again. A tree-level merge, prototyped and not landed, compares base, ours and main, and where the branch left a subtree unchanged and every change in it is program, points at main's node. After 200 merges on a scratch store: 21 percent private nodes against 89, correct by datoms.
