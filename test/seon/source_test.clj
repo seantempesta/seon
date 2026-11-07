@@ -537,6 +537,22 @@
 
 ;; docs/source.md#a-process-holds-the-tests-only-when-it-runs-them: agents forked before an import ran the previous main's tests against the new program,
 ;; red with nothing to see: their records said the new text, their vars the old
+;; docs/source.md#mains-program-follows-the-tree: a changed test file in a root that loaded no test namespace: its require looked on disk, the import failed whole and main stayed old
+(deftest a-refresh-reads-what-a-changed-file-requires-and-this-process-has-not-loaded
+  (let [dep "(ns app.rq-dep)\n\n(defn d [] 1)\n"
+        mid "(ns app.rq-mid (:require [app.rq-dep :as dep]))\n\n(defn m [] (dep/d))\n"
+        top (fn [n] (str "(ns app.rq-top (:require [app.rq-mid :as mid] [clojure.string :as str]))\n\n(defn t [] (+ " n " (mid/m)))\n"))
+        files {"test/app/rq_dep.clj" dep "test/app/rq_mid.clj" mid "test/app/rq_top.clj" (top 1)}
+        db (d/db-with (empty-db) (source/import-tx (empty-db) files))
+        changed {"test/app/rq_top.clj" (top 2)}]
+    (is (= (assoc changed "test/app/rq_mid.clj" mid "test/app/rq_dep.clj" dep)
+           (source/required-files db changed '#{clojure.string}))
+        "what's unloaded, through what requires it, in db's text")
+    (is (= changed (source/required-files db changed '#{clojure.string app.rq-mid})) "what's loaded is left")
+    (let [after (d/db-with db (source/refresh-tx db changed))]
+      (is (= (top 2) (source/file-text after 'app.rq-top)) "and the change lands")
+      (is (= mid (source/file-text after 'app.rq-mid)) "what was only read changes nothing"))))
+
 (deftest a-form-an-import-replaces-runs-its-new-text
   (let [nsym (symbol (str "app.replaced-" (random-uuid)))
         path (str "test/app/" (str/replace (name nsym) "-" "_") ".clj")

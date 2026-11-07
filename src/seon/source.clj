@@ -446,6 +446,20 @@
                       (filter requirers))
             lost))))
 
+(defn required-files
+  "Files ({relative path text}) with the files db holds of what they require, and so on, for each namespace loaded? says this process hasn't: analyzing a file runs its ns form, and a
+  namespace no source root reaches (test/'s, in a root) is set up only by reading it first, as a whole tree's read does. Their text is db's, so reading them writes nothing. See docs/source.md#mains-program-follows-the-tree."
+  {:malli/schema [:=> [:cat :seon.host/db [:map-of :string :string] ifn?] [:map-of :string :string]]}
+  [db files loaded?]
+  (let [libs (fn [f] (for [c (rest f) :when (and (seq? c) (= :require (first c))) x (rest c)] (if (sequential? x) (first x) x)))]
+    (loop [out files todo (vec (vals files))]
+      (if-let [t (peek todo)]
+        (let [more (into {} (for [r (some-> (ns-form t) libs) :when (and (symbol? r) (not (loaded? r)))
+                                  :let [p (:ns/file (d/entity db [:ns/name r]))] :when (and p (not (contains? out p)))]
+                              [p (file-text db r)]))]
+          (recur (into out more) (into (pop todo) (vals more))))
+        out))))
+
 (defn refresh-tx
   "The facts that bring db's program up to date with the files that changed ({relative path
   text}, a removed file's text nil), and only those: each changed file's namespace read
@@ -465,7 +479,7 @@
         read (loop [round texts check (keys gone) read gone]
                (if (and (empty? round) (empty? check))
                  read
-                 (let [now (read-nss round)
+                 (let [now (read-nss (required-files db round #(contains? (loaded-libs) %)))
                        read (into read now)
                        ;; what the namespace had that it no longer has: a name removed or of another kind, a
                        ;; macro, protocol, type or inline function changed (what was added breaks no form)
