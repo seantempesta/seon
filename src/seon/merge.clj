@@ -389,21 +389,6 @@
         (into added)
         (into (for [t txs d (d/datoms src :eavt t)] d)))))
 
-(defn- own-namespaces
-  "tx, with a namespace the target already has under its own entity read there: the datoms of the
-  source's entity for it are dropped and the carried forms' :form/ns refs name the target's (two
-  branches that each made a namespace without an (ns) form hold it under two ids, and carrying
-  both would give one :ns/name two entities)."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.db/tx-data] :seon.db/tx-data]}
-  [onto src tx]
-  (let [mine (into {} (for [d tx :when (= :ns/name (:a d))
-                            :let [t (pdb/eid onto :ns/name (:v d))] :when (and t (not= t (:e d)))]
-                        [(:e d) t]))]
-    (if (empty? mine)
-      tx
-      (vec (for [d tx :when (not (and (mine (:e d)) (not= :form/ns (:a d))))]
-             (if (and (= :form/ns (:a d)) (:added d) (mine (:v d))) (d/datom (:e d) :form/ns (mine (:v d)) (:tx d)) d))))))
-
 (defn attribute-declarations
   "The Datahike declarations, from the built registry, of the attributes the datoms of tx use
   that onto's schema lacks: what a branch cut before an attribute needs before main's datoms of it
@@ -427,7 +412,7 @@
   on a nameless entity (docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db [:maybe [:sequential :seon.merge/program-key]] :seon.merge/data-attrs] :seon.db/tx-data]}
   [onto base src ks data-attrs]
-  (let [carried (own-namespaces onto src (carried-tx base src ks data-attrs))
+  (let [carried (carried-tx base src ks data-attrs)
         unique? #(= :db.unique/identity (get-in (d/schema src) [% :db/unique]))
         named (into #{} (keep #(when (and (:added %) (unique? (:a %))) (:e %))) carried)
         gone (into [] (comp (keep #(when (and (not (:added %)) (unique? (:a %)) (not (named (:e %)))) (:e %))) (distinct)

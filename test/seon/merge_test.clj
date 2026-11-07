@@ -415,8 +415,7 @@
          (finally (d/release bc) (d/delete-branch! conn b)))))))
 
 (deftest a-namespace-both-sides-made-is-one-entity-after-the-merge
-  ;; the branch and main each made app.z without an (ns) form, so they hold it under two entity ids: carrying the
-  ;; branch's would give :ns/name two entities; the merge keeps main's and points the carried form at it
+  ;; the branch and main each made app.z without an (ns) form: one entity after the merge, its id being its content (docs/storage.md)
   (ts/test-branch!
    (fn [cfg conn]
      (let [b (keyword (str (name (:branch cfg)) "-ns2"))
@@ -427,8 +426,11 @@
                                                         :defs [{:var (symbol "app.z" nm) :kind :fn :contract "[:=> [:cat :int] :int]"}]
                                                         :declares #{} :methods [] :impls [] :refs #{} :requires #{} :banned #{} :inline-defs #{}})))]
        (try
+         ;; main takes a form first, so its ids have moved on from the branch's
+         (d/transact conn ((var-tx "g" "x") @conn))
          (d/transact conn ((rec "m") @conn))
          (d/transact bc ((rec "z") @bc))
+         (is (= (pdb/eid @conn :ns/name 'app.z) (pdb/eid @bc :ns/name 'app.z)) "a namespace's id is its name's content, so both sides hold one entity")
          (let [base (pdb/branch-base conn (:branch cfg) b) head @bc main @conn
                r (pm/delta-three-way base head main #{})
                ks (keys (:ours r))

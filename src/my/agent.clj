@@ -39,7 +39,7 @@
     clojure.repl as at any Clojure REPL (source, doc, dir, apropos, find-doc, pst), with *1 *2 *3 *e:
     source reads this branch's own definitions first, then a library's file"
   (:refer-clojure :exclude [defn defn-])
-  (:require [clojure.walk] [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.lib :as lib] [seon.context :as context] [seon.ref :as ref] [seon.doc :as doc] [seon.source :as source]
+  (:require [clojure.walk] [datahike.core] [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.lib :as lib] [seon.context :as context] [seon.ref :as ref] [seon.doc :as doc] [seon.source :as source]
             [seon.config :as cfg] [seon.proofs :as proofs] [seon.fx :as fx] [seon.program :as program] [seon.task :as task] [seon.vector :as vector] [seon.contract :as contract] [seon.ctx]
             [seon.db :as pdb] [seon.print :as print] [seon.print.select :as select] [seon.render :as render] [seon.problems :as problems] [seon.render.ui :as ui] [my.schema :as schema] [jolt.analyzer] [clojure.java.io :as io] [clojure.string :as str] [clojure.main] [datahike.api :as d]))
 
@@ -143,7 +143,7 @@
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] :symbol] [:maybe :my.agent/no-var]]}
   [db0 sym]
   ;; root holds no branch: its names are the process's alone (an empty db has no vars)
-  (let [db (or db0 (d/empty-db))]
+  (let [db (or db0 (datahike.core/empty-db))]
   (when-not (or (pdb/eid db :var/name sym) (var? (ns-resolve *ns* sym))
                 (and (not (namespace sym)) (or (find-ns sym) (pdb/eid db :ns/name sym))))
     (let [nsym (some-> (namespace sym) symbol)
