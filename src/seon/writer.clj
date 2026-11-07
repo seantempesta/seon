@@ -84,6 +84,14 @@
   {:malli/schema [:=> [:cat :string :map] :seon.writer/refused]}
   [why members] (contract/error :seon.writer/refused #'seon.writer/refused why members))
 
+(defn- unanalyzable
+  "The refusal when a merge candidate's Clojure files, text ({path text}), don't analyze on db, the merged value, or nil: the import's own analysis, in this process, at the cost of the files that changed. See docs/merging.md#a-merge-analyzes-its-tree."
+  {:malli/schema [:=> [:cat :seon.host/db [:map-of :string [:maybe :string]]] [:maybe :seon.writer/refused]]}
+  [db text]
+  ;; docs/failure-points.md: a form of the candidate that can't be analyzed is this answer, and the merge doesn't happen
+  (try (source/refresh-tx db (into {} (filter #(clojure.string/ends-with? (key %) ".clj")) text)) nil
+       (catch Throwable e (refused (str "the merged tree doesn't analyze: " (ex-message e)) {}))))
+
 (defn- merge-refused
   "Why branch head (its three-way r against main) cannot merge into main now (session M1), or
   nil: main's program (and declared data) changed since the branch's merge base
@@ -250,8 +258,10 @@
                                    (let [data-attrs (:data-attrs m #{})
                                          [head r base] (branch-merge st (:branch m) data-attrs)
                                          db (d/db-with @conn (pm/merge-tx @conn base head (keys (:ours r)) data-attrs))
-                                         w (written db (:ours r))]
-                                     (assoc w :ok true :text (doc/files db (:files w))))
+                                         w (written db (:ours r))
+                                         text (doc/files db (:files w))]
+                                     (or (unanalyzable db text)
+                                         (assoc w :ok true :text text)))
                                    (refused (str "no branch " (:branch m)) {})))
       ;; one derivation (seon.merge/three-way) for the dashboard, the done rule and merges
       :branch-diff (reply st (if (exists? (:branch m))
