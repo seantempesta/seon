@@ -291,6 +291,15 @@
     (is (= :db.type/long (:db/valueType (get (d/schema onto) :app.shape/size))) "the merge compiled it and carries its declaration")
     (is (= #{:app.shape/size} (set (keys (program/schema-changes onto)))) "and the branch says the binary lacks it")))
 
+(deftest a-tree-the-binary-was-built-from-states-no-schema-change
+  ;; docs/source.md#a-program-file: every shipped resource imported as it is, compared with the binary built from it, is no change, so a root and a
+  ;; checkout on one tree key a test alike (seon.agent/branch-inputs mixes changes into :seon.env/schemas). Red on any entry whose text doesn't read back to its baked form
+  (let [db (reduce (fn [db [k v]] (d/db-with db [{:schema/key k :schema/file facts-path :schema/form (binding [*print-namespace-maps* false] (sedn/encode v))}]))
+                   (empty-db) (select-keys contract/forms (take 50 (sort (keys contract/forms)))))
+        all (reduce (fn [m [k v]] (assoc m k (binding [*print-namespace-maps* false] (sedn/encode v)))) {} contract/forms)]
+    (is (= {} (program/schema-changes db)))
+    (is (every? (fn [[k text]] (= (get contract/forms k) (sedn/decode text))) all) "every baked form reads back from its text")))
+
 (deftest a-merge-declares-the-attributes-its-datoms-use-before-them
   ;; found 2026-10-27 through 0.7 (agent a1, (my.branch/merge-main!) on the standing root): main had
   ;; gained datoms of :form/ops, and the agent's branch was cut before the attribute: Datahike refused
