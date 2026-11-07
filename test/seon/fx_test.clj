@@ -161,6 +161,25 @@
   (let [r (fx/write-file {:req {:path "/nonexistent-dir/x.clj" :text "text"}})]
     (is (= :seon.fx/io-error (:seon.error/type r)) "a missing directory: the stage itself fails")))
 
+;; docs/source.md#mains-program-follows-the-tree: an import brings what the tree changed, so a merge the tree never held stays on main
+(deftest a-source-read-since-its-last-tree-reads-only-what-moved
+  (let [d (str (doto (java.io.File/createTempFile "seon-since" "") (.delete) (.mkdirs)))
+        git (fn [& args] (:out (apply clojure.java.shell/sh "git" "-C" d args)))
+        read (fn [since] (seon.fx/read-source {:req (cond-> {:root d :dirs ["src"]} since (assoc :since since))}))]
+    (.mkdirs (java.io.File. (str d "/src")))
+    (git "init" "-q") (git "config" "user.email" "t@t") (git "config" "user.name" "t")
+    (spit (str d "/src/a.clj") "(ns a)") (spit (str d "/src/b.clj") "(ns b)") (spit (str d "/notes.clj") "(ns notes)")
+    (git "add" ".") (git "commit" "-q" "-m" "one")
+    (let [t (:tree (read nil))]
+      (spit (str d "/src/b.clj") "(ns b) (def x 1)") (spit (str d "/notes.clj") "(ns notes) (def y 1)")
+      (let [r (read t)]
+        (is (= {"src/b.clj" "(ns b) (def x 1)"} (:value r)) "the file that moved, under dirs")
+        (is (= ["src/b.clj"] (:paths r)))
+        (is (= (:tree r) (:tree (read nil))) "and its tree is the same as a whole read's"))
+      (.delete (java.io.File. (str d "/src/a.clj")))
+      (is (= nil (get (:value (read t)) "src/a.clj" :absent)) "a removed file reads nil")
+      (is (contains? (:value (read (apply str (repeat 40 "0")))) "src/b.clj") "a tree git can't find reads whole"))))
+
 (deftest a-write-back-answers-the-bytes-on-disk
   (let [d (scratch-dir)
         p (str d "/f.clj")

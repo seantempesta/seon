@@ -217,20 +217,26 @@
   set aside, and the answer then holds no :paths). When it holds commits main lacks, or git
   refuses the fast-forward, the answer is a :seon.fx/io-error naming why that still carries the
   read (:value and the rest), so the import goes on and the gap is a recorded problem.
+  With :since (the tree id of the last import, and no :paths), only the files under dirs that differ from it are read, so what main merged and the tree never held stays main's. A tree git can no longer find reads whole. See docs/source.md#mains-program-follows-the-tree.
   With :own-branch, that branch is brought to what it read (`own-branch-at!`).
   Answers {:value {path text} :commit sha :tree id :paths paths-when-read-by-them :pins {path sha} :inputs :binary} or :seon.fx/io-error."
   {:malli/schema [:=> [:cat :map] :map]}
-  [{{:keys [root dirs binary-tree paths follow own-branch]} :req}]
+  [{{:keys [root dirs binary-tree paths follow own-branch since]} :req}]
   (try
     (let [base (.getCanonicalPath (java.io.File. ^String root))
           head0 (when (and follow (checked-out? base)) (git-try base ["rev-parse" "--verify" "--quiet" "HEAD"]))
           gap (when follow (follow-main base follow))
           head (when (checked-out? base) (git-try base ["rev-parse" "--verify" "--quiet" "HEAD"]))
+          inputs (when (and binary-tree head) (inputs base))
           ;; a root that writes back no merges names none (:none)
           _ (when (and head (string? own-branch)) (own-branch-at! base own-branch head))
           paths (when-not (and follow (not= head head0)) paths)
-          source? (fn [^String p] (or (.endsWith p ".clj") (.endsWith p ".edn")))
-          inputs (when (and binary-tree head) (inputs base))]
+          now (when head (or (:tree inputs) (tree-id base)))
+          paths (or paths
+                    (when (and since now)
+                      (let [d (git-run {} base (into ["diff" "--name-only" since now "--"] dirs) nil)]
+                        (when (zero? (:exit d)) (vec (remove str/blank? (str/split-lines (:out d))))))))
+          source? (fn [^String p] (or (.endsWith p ".clj") (.endsWith p ".edn")))]
       (let [src-read (cond-> {:value (if paths
                         (into (sorted-map)
                               (for [p paths :when (source? p) :let [f (java.io.File. (str base "/" p))]]
@@ -242,7 +248,7 @@
                                     :when (source? p)]
                                 [(subs p (inc (count base))) (slurp f)])))}
         head (assoc :commit head
-                    :tree (or (:tree inputs) (tree-id base))
+                    :tree now
                     :pins (into {}
                                 (for [[_ sha p] (re-seq #"(?m)^160000 ([0-9a-f]{40}) \d+\t(\S+)$"
                                                         (git! {} base ["ls-files" "-s" "--" "reference-code"] nil))]
