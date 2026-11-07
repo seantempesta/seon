@@ -400,7 +400,7 @@
   ;; docs/merging.md#a-merge-compiles-its-tree: a gate on a tree that doesn't compile says what stopped it and the agent's form, not "named no exception"
   (let [out "error[analyze/unresolved-symbol]: Unable to resolve symbol: h in this context\n  --> /x/runs/merge-tests/abc/src/app/a.clj:2:3\n"
         said (seon.fx/build-failure out {"src/app/a.clj" "(ns app.a)\n(defn f [] (h))\n"})]
-    (is (str/includes? said "Unable to resolve symbol: h") said)
-    (is (str/includes? said "src/app/a.clj:2") said)
-    (is (str/includes? said "(defn f [] (h))") said))
+    (is (clojure.string/includes? said "Unable to resolve symbol: h") said)
+    (is (clojure.string/includes? said "src/app/a.clj:2") said)
+    (is (clojure.string/includes? said "(defn f [] (h))") said))
   (is (= "the gate's build failed and named no exception" (seon.fx/build-failure "nothing" {}))))
