@@ -74,14 +74,6 @@
     (cond-> st (not= from (d/commit-id (:db st)))
             (assoc :index {:commit (d/commit-id (:db st)) :index (r/index idx (d/commit-as-db (:store st) from) (:db st))}))))
 
-(defn evals-max-after
-  "Main's highest eval number (seon.repl/evals-max) after a commit's ops (resolved [op e a v]), from
-  n, its highest before: what each agent forked from here counts its evals on from, kept at the
-  cost of the commit, never by reading main's evals; a commit the writer's notice does not match
-  reads them again (the :tx step). See docs/machine.md#an-agents-first-write."
-  {:malli/schema [:=> [:cat nat-int? [:sequential :any]] nat-int?]}
-  [n ops] (reduce (fn [n [_ _ a v]] (if (= :seon.eval/id a) (max n (or (repl/eval-number v) 0)) n)) n ops))
-
 (defn warm-start
   "Server state st with the index nodes the start of the agent m forks reads read into this process's
   node cache: its first write (seon.agent/begin-run-tx on its own task and key, then the cites
@@ -165,10 +157,9 @@
                  ;; then builds it)
                  _ (when (contains? (set (get-in db' [:meta :datahike/parents])) (d/commit-id (:db st)))
                      (doc/carry-index! (:db st) db' (map (fn [op] [(nth op 1) (nth op 2)]) (:tx-data m))))
-                 st (cond-> (assoc st :db db' :evals-max (evals-max-after (:evals-max st) (:tx-data m)))
-                      ;; a commit not the one the writer said: main is read again, its eval count included, so
-                      ;; no agent forked after counts from a number a commit it never saw raised
-                      (not= (:max-tx db') (:t m)) (-> (update :mismatch inc) (assoc :evals-max (repl/evals-max db')))
+                 st (cond-> (assoc st :db db')
+                      ;; a commit not the one the writer said
+                      (not= (:max-tx db') (:t m)) (update :mismatch inc)
                       ;; the program moved: the reach graph is brought to it at the next fork
                       (program/moves-program? (:tx-data m)) (assoc :graph-moved true :static-due true))
                  ;; main's program changed: load it here, so agents forked from now on inherit it compiled; while
@@ -202,7 +193,7 @@
                  static-ms (profile/ms-since t1)
                  ;; the spawn's phases here, on the one clock (seon.agent/spawn-phases)
                  marks [[:fork-server-in t0 nil] [:reach-graph tg nil] [:index t1 nil] [:static (profile/now-ns) nil]]]
-             (fork-carrying! st fd open #(repl/run! % (assoc m :graph (:graph st) :index (index-for-agent st) :evals-max (:evals-max st) :schema-registry (:schema-registry st) :marks marks) (:db st) (:ns m))
+             (fork-carrying! st fd open #(repl/run! % (assoc m :graph (:graph st) :index (index-for-agent st) :schema-registry (:schema-registry st) :marks marks) (:db st) (:ns m))
                              (fn [n] [st {:ev (cond-> [{:ev :fork-failed :agent (:agent m) :active-threads n}]
                                             load-errs (conj {:ev :load-errors :t (:max-tx (:db st)) :errors (vec load-errs)}))}])
                              (fn [pid] (let [[st evs] (adopt st pid)]
@@ -227,7 +218,7 @@
      ;; its graph and index brought to :db first, so a standby never holds one a commit has passed
      :standby (let [fd (sock/take-fd! (:conn st)) _ (vreset! open fd)
                     st (-> st graph-at-fork index-at-fork)]
-               (fork-carrying! st fd open #(main (:db st) (:cfg st) % false (select-keys st [:graph :index :evals-max :tests-due]))
+               (fork-carrying! st fd open #(main (:db st) (:cfg st) % false (select-keys st [:graph :index :tests-due]))
                               (fn [n] [st {:ev [{:ev :standby-failed :gen (:gen m) :active-threads n}]}])
                               (fn [pid] (when-let [old (:standby-pid st)] (lib/kill! old 9))
                                 (let [[st evs] (adopt (assoc st :standby-pid pid) pid)]
@@ -247,16 +238,14 @@
   ;; observed forward the same way (index-at-fork) and handed to every agent forked (seon.agent/reconcile-index starts from it)
   ;; the reach graph is built here when the server starts (a standby inherits its server's), so no
   ;; spawn waits for it (the first fork built it: 0.8-3.8 s measured)
-  ([{:keys [db cfg store conn graph index evals-max exits tests-due]}]
+  ([{:keys [db cfg store conn graph index exits tests-due]}]
    {:db db :cfg cfg :store store :mismatch 0 :conn conn :exits exits :status-buf (ffi/alloc 4) :children #{} :tests-due (boolean tests-due)
     ;; the first fork freezes the heap: nothing is static yet (seon.fork-server/static-due?)
     :static-due true
     :graph (or graph (program/reach-indexed (program/reach-graph db (fx/declared-refs (cfg/value :seon.config.root/system-path)))
                                             (second (agent/test-inputs db))))
     ;; listed here when the server boots; a standby inherits its server's
-    :index (or index {:commit (d/commit-id db) :index (r/index db)})
-    ;; main's highest eval number, read once here and kept from each commit (evals-max-after)
-    :evals-max (or evals-max (repl/evals-max db))})
+    :index (or index {:commit (d/commit-id db) :index (r/index db)})})
   ;; stop (root closed its end, or died): every child (agents, the standby) killed and reaped
   ;; before this process exits, so root's waitpid of this server is the end of every one of
   ;; them. An agent that had closed its socket but not yet exited was handed to launchd when
@@ -296,7 +285,7 @@
   returns."
   {:malli/schema [:function [:=> [:cat :seon.host/db :seon.db/cfg :seon.lib/fd :boolean] :any] [:=> [:cat :seon.host/db :seon.db/cfg :seon.lib/fd :boolean [:maybe :map]] :any]]}
   ([db0 cfg fd boot?] (main db0 cfg fd boot? nil))
-  ([db0 cfg fd boot? {:keys [graph index evals-max tests-due]}]
+  ([db0 cfg fd boot? {:keys [graph index tests-due]}]
   ;; every agent forked from here works in the scratch dir, with no repository above it: an
   ;; agent changes code through its REPL and git finds nothing (DECISIONS, Agents work at
   ;; the REPL through tool calls: no git, no source-file editing)
@@ -331,7 +320,7 @@
     ;; root evaluates no test namespace (program/load-all! {:tests? false}); the boot server does, once, when root's boot asks (:preload) or at
     ;; a fork that comes first (:tests-due), and its socket is read
     ;; from boot: a stop that came while 2,020 forms were evaluated one by one waited 12-21 s for them
-    (step/run-loop #'server-step {:db db0 :cfg cfg :store store :conn conn :exits exits :graph graph :index index :evals-max evals-max :tests-due (or boot? tests-due)}
+    (step/run-loop #'server-step {:db db0 :cfg cfg :store store :conn conn :exits exits :graph graph :index index :tests-due (or boot? tests-due)}
                    recv! (fn [_ m] (sock/send! fd m)))
     (lib/kill! 0 9)
     (lib/c-exit 0))))

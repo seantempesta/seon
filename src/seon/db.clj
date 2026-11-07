@@ -7,7 +7,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.profile :as profile] [seon.contract :refer [defn defn-] :as contract] [clojure.string] [malli.core :as m] [seon.schema.datahike :as sd] [seon.config :as cfg]
             [datahike.connections] [datahike.writing] [datahike.config] [datahike.store] [konserve.store] [hasch.core :as hasch] [datahike.api :as d] [konserve.core :as k] [konserve.jolt.store] [konserve.jolt.lmdb :as klmdb]
-            [konserve.jolt.lmdb-ffi :as lmdb-ffi] [konserve.jolt.posix :as posix] [seon.lib :as lib] [jolt.ffi :as ffi] [datahike.ids] [datahike.core]))
+            [konserve.jolt.lmdb-ffi :as lmdb-ffi] [konserve.jolt.posix :as posix] [seon.lib :as lib] [jolt.ffi :as ffi] [datahike.ids] [datahike.core] [datahike.db.transaction]))
 
 (def schema
   "The Datahike schema, derived from the registry's entity schemas (resources/seon/schemas,
@@ -80,7 +80,9 @@
         v (:value r)
         v (if (and (map? v) (not (record? v)) (contains? v :handle)) (dissoc v :handle :ms :ticks :bytes :fns :record) v)]
     (cond-> (assoc e :seon.eval/response (apply dissoc r (keys result-parts)))
-      (seq parts) (assoc :seon.eval/result (into {:seon.result/hash (str (hasch/uuid [v (:ex r) (:out r) (:err r) (:forms r)]))}
+      (seq parts) (assoc :seon.eval/result (into (let [h (str (hasch/uuid [v (:ex r) (:out r) (:err r) (:forms r)]))]
+                                                   ;; its content eid by name: a transaction gives one only to a top-level map, so a nested one would be another entity on each branch
+                                                   {:db/id (datahike.db.transaction/content-eid :seon.result/hash h) :seon.result/hash h})
                                                  (keep (fn [[k a]] (when (some? (get parts k)) [a (get parts k)])))
                                                  result-parts)))))
 
@@ -669,6 +671,11 @@
               base
               (or (no-history base #'seon.db/at)
                   (if (and (pos? t) (seq (d/datoms base :eavt t :db/txInstant))) (d/as-of base t) (unresolved #'seon.db/at :t t)))))))
+
+(defn take-eid
+  "A fresh entity id from the store db reads (`ids!`), issued once across every branch and process: what a record names itself by before it is written. Taken and never written, it is a gap. See docs/users.md#what-each-thing-is."
+  {:malli/schema [:=> [:cat :seon.host/db] nat-int?]}
+  [db] (datahike.ids/-take! (datahike.writing/ids db) :eid))
 
 ;; ---- tx-data with explicit ids ----------------------------------------------------
 ;; The store issues every entity id and transaction id once (ids!), so ids are unique
