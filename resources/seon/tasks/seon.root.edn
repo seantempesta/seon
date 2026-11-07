@@ -82,4 +82,8 @@
   :seon.task/kind :work}
  {:seon.task/name "shutdown-and-death-are-dataflow"
   :seon.task/plan "What exists: root's stop parks on the drain and an agent's end on its socket's close, with no bound (`seon.root/stop!`, `seon.agent-proc/stop!`); a child's exit is an event (`seon.fork-server`'s :exits channel, jolt.io-poller's exit-chan). What is left is one clock, which docs/clocks.md#time-decides-owed-its-owners-fix names here: `seon.root/start!` passes Flow's :stop-timeout-ms, :seon.config.root/flow-stop-ms, what flow/stop waits for a proc's exit; a proc still running is named in stop!'s :graph, printed on ROOT STOPPED. Correct: a proc that does not exit is a recorded problem with no time deciding. Whether Flow can stop with no bound is not checked; it is Flow's mechanism (docs/flow.md). Deletes :seon.config.root/flow-stop-ms. No proof is written for it."
-  :seon.task/kind :work}]
+  :seon.task/kind :work}
+ {:seon.task/name "a-launched-agent-that-dies-tells-who-launched-it"
+  :seon.task/plan "What exists: `my.task/launch!` tells the child, in its plan's last line, to `send-message` its parent when it finishes or gets stuck, so the link is only words. A child that dies never sends it: on 2026-11-07 a real child ended held (two turns threw), and its parent, parked, had told the person it would report back and heard nothing, which is a wait with no end (AGENTS.md, nothing hangs). Correct: the task holds who launched it as a fact, and root tells that agent the task's end (done, merged, held, with the reason) by `seon.root/message!`, which wakes it; the plan's line goes. Needs the owner's yes on the attribute (the gate, AGENTS.md section 3)."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.agent-test/a-launched-agent-that-dies-tells-who-launched-it}}]

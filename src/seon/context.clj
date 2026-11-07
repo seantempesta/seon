@@ -105,7 +105,7 @@
     ;; a contract gap and an unmerged entry say one thing about many names: one entry each,
     ;; its names a list the printer budgets
     (vec (concat
-           (for [{:keys [reason symbol behind]} rs :when (not (#{:contract-gap :unmerged :open-problem} reason))]
+           (for [{:keys [reason symbol behind]} rs :when (not (#{:open :contract-gap :unmerged :open-problem} reason))]
              (case reason
                (:regression :stray-red) (let [src (src-of symbol) calls (when src (calls-of symbol))]
                                           (cond-> {:reason reason :test symbol}
