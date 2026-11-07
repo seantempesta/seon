@@ -6,6 +6,16 @@ A branch is main plus its own changes: an index is a tree of immutable nodes, so
 
 There is no boundary between program and data (owner, 2026-11-07: "I want everything that is linked to be linked"). One db, one tree. Sharing comes from sort order: datoms that change together sort together. A fact that changes on its own schedule is its own entity with a ref to what it is about, as `git notes` attach to a commit, so it links without rewriting the leaf of what it is about. An eval's result is one entity per distinct value, by content id, and each eval refs it.
 
+## Where data is
+
+A branch's db value holds only the datoms on that branch. Ids are issued once per store, so a ref on a branch to an entity only main holds is valid, but `d/pull` and `d/entity` on the branch read nothing through it: tested, a pull answers `:inbox []` and `(:m/body (d/entity branch-db e))` nil. The same `d/pull` on main's db value reads it, a `d/q` over `$branch $main` joins the two, and retracting the ref on the branch leaves the entity on main. Datahike has no read-through from a branch to main, and none is needed. A proposal, not yet agreed:
+
+- **What a branch changes and a merge carries (forms, vars, files, config, its own tasks' work, its evals and their results):** on the branch, read from the branch's db value. Content ids make the same value one entity everywhere, and [content-hashed nodes](#a-branch-and-a-merge) make the same datoms one node, so a branch holding them costs little.
+- **What no branch changes and every reader wants at its newest (messages, an agent's entity as the system sees it, what root records):** on main only, written through root's writer, read from main's db value, which the reader takes as `{:branch :commit :t}`. A render that wants both reads each from its own db value. No branch holds a copy, so a merge has nothing to carry and nothing can conflict.
+- **What it costs:** one seek on main per entity read, against the db value the agent already holds.
+
+So a message is an entity on main with `:seon.message/from`, `:seon.message/to`, `:seon.message/body` and `:seon.message/sent-ms`; the agent's entity on main refs it; the agent's render pulls those refs from main; removing one retracts the ref through root's writer, and the message stays. A Flow channel wakes the process; the message never does.
+
 ## A branch and a merge
 
 Think of `git branch` and `git merge`. A branch starts as a pointer to main's nodes. Its own writes make new nodes. Merging main today (```seon.agent/merge-main!```) writes main's changes into the branch's own tree, like applying a patch: right content, new addresses, shared never again. A tree-level merge, prototyped and not landed, compares base, ours and main, and where the branch left a subtree unchanged and every change in it is program, points at main's node. After 200 merges on a scratch store: 21 percent private nodes against 89, correct by datoms.
