@@ -22,6 +22,14 @@ Owner, 2026-11-07: "in general there are no \"kinds\" and those are generally co
 
 Owner, 2026-11-07: "If we are essentially creating a merged with main version of the codebase and all tests pass then I'm okay with auto merged, but yes this behavior should be configurable and the user or root should be approving it. What helps us speed up our development right now and what can we later add to handle future ideas?" It stays on (`:seon.config.source/write-back-on-merge`, `my.root/write-back!` by hand when off); an approval by the user or root is later work. Stated in [source](source.md#commit-the-merges-branch).
 
+### Seon's key files are facts, on one mechanism
+
+Owner, 2026-11-07, through the question tool: index `default.edn` and `bin/*` now, and other files stay ordinary until something needs them; a running process reads config from the db, while agents keep the whole disk; write back after each merge that passed its gate, always from main; a file is checked as its reader reads it before it's written, and a boot that can't load a file says which and which commit last worked. "is the indexing a shared system or are we building another parallel system": schema resources' file entity and merge are generalised, not copied, and `:schema.file/*` becomes `:file/*`, chosen by the owner with the store erase that takes. Plan and seams: task `seon.source/seon-files-move-by-branch`.
+
+### A user's branch tracks main like an agent's
+
+Owner, 2026-11-07: "I imagined a users branch tracking main just like the agent branches we are launching. It's just a fact that different users will want to keep differetn data in the system, but we could always be merging the functions, schemas, tests, etc to keep everyone at least speaking the same language." Agents' branches merge to the user's branch and then to main, every user branch merges main by itself, and a conflict launches an agent to resolve it. Stated with the users design in [the plan](plan.md).
+
 ### A proof starts simple and evolves
 
 Owner, 2026-11-07: "I generally want to start with a simple proof like respond to the user and build up or merge with templates to get more correct testing conditions for what success looks like. It should always be evolving." So a proof that passes without the task's change does not hold a merge; proofs get better as the work teaches what success looks like.
