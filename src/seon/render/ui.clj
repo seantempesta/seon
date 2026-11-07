@@ -326,7 +326,7 @@
     [:nav {:class "seon-bar"}
      [:a {:href "/" :class "font-bold text-signal"} "◆ seon"] [:span {:class "hidden text-text-500 sm:inline"} "on jolt"]
      (when focus
-       (let [base (if (= :root focus) "/" (str "/agent/" address))]
+       (let [base (if (= :root focus) "/root" (str "/agent/" address))]
          [:div {:class "ml-auto flex items-baseline gap-1 text-xs"}
           (when (or (= :root focus) (not= :chat tab)) [:span {:class "mr-1 font-semibold text-text-100"} label])
           (if (= :root focus)
@@ -1754,7 +1754,7 @@
 @media (min-width: 64rem) { .root-side, .agent-side { max-width: none; background: transparent; } }
 .root-side:hover, .agent-side:hover { background: var(--color-base-850); }" :seon.render/for "page" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
   [_]
-  [:li [:a {:href "/" :class pill-link :title "root: main"}
+  [:li [:a {:href "/root" :class pill-link :title "root: main"}
         [:span {:class "flex items-baseline gap-2"} [:span {:class "text-signal"} "●"] [:span {:class "font-semibold text-text-100"} "root"] [:span {:class "seon-note"} "main"]]]])
 
 (defn- task-name
@@ -1962,6 +1962,16 @@
   "The agents this user started (ctx c's :started join), newest first by when each started. See docs/users.md#whats-on-screen."
   {:malli/schema [:=> [:cat :seon.host/db :map] [:sequential :int]]}
   [db c] (sort-by (fn [e] [(- (or (:seon.agent/started-ms (d/entity db e)) 0)) e]) (keys (:started c))))
+
+(defn sign-in
+  "The page / is when no one is signed in (a render over the db): who could be, each a link to their page, and root's. Until there is a login, root signs in the OS account running it. See docs/users.md#whats-on-screen."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]]] :any]}
+  [{db :seon.db/db}]
+  [:section {:id "p-sign-in" :class "seon-stack"}
+   [:h1 {:class "text-base font-semibold text-text-50"} "No one is signed in, so sign in to see your work."]
+   [:p {:class "seon-note"} "Until there is a login, a root signs in the account that runs it."]
+   (into [:ul {:class "seon-stack"}] (for [d (d/datoms db :aevt :seon.user/name)] [:li [:a {:href (str "/user/" (:v d))} (:v d)]]))
+   [:p [:a {:href "/root"} "Root's page: every session on main"]]])
 
 (defn users-side
   "The users in the agents list (a component over the db): each a link to its page by its :seon.user/name, then its agents of earlier boots, which the list's own boot leaves out, so a restart doesn't hide them. See docs/users.md#whats-on-screen."

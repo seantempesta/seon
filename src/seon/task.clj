@@ -334,11 +334,11 @@
   "Root's boot: its id for this process lifetime and its max-running config key (merges at once,
   :seon.config.merge/max-running, is written with the config in force, seon.config/facts), and
   the user, name, an agent with no process, one entity across boots (:seon.user/name, its lookup ref): the evals and messages it
-  makes name it (:seon.eval/by its id), and root's page lists it with its agents. See docs/users.md#what-each-thing-is."
+  makes name it (:seon.eval/by its id), and root's page lists it with its agents; until there is a login, it is who is signed in (:seon.root/signed-in). See docs/users.md#what-each-thing-is."
   {:malli/schema [:=> [:cat :string pos-int? :string] [:vector :any]]}
   [boot max-running name]
-  (into [{:seon.root/id :root :seon.root/boot boot :seon.config.agent/max-running max-running}
-         {:seon.agent/key name :seon.user/name name}]
+  (into [{:db/id "user" :seon.agent/key name :seon.user/name name}
+         {:seon.root/id :root :seon.root/boot boot :seon.config.agent/max-running max-running :seon.root/signed-in "user"}]
         (agent-tx boot :user {} name)))
 
 (defn call-ref

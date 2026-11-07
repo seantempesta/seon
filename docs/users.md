@@ -89,6 +89,7 @@ A message is delivered to an agent's entity and stays there until the agent remo
 What a person sees is a reflection of the database: a click or a URL writes a fact, the commit causes the re-render, and the patch sets the address bar too, so no UI state is held in a process. Today's isn't: the open sections, the turn in view and "more" are in ``seon.render.proc``'s memory and go on a restart, and the URL is the only thing that survives.
 
 - **Each tab is an entity,** ``:seon.tab/user``, ``:seon.tab/view``, ``:seon.tab/open``. With one current view on the user, tab A would flip when tab B navigated. A tab reconnecting with its id gets everything back, and `/` opens the user's newest. Which tabs to ignore as they pile up is open.
+- **`/` is whoever is signed in** (``:seon.root/signed-in`` on root, which boot sets to the OS account until there is a login), drawn as that user's page; with no one, a sign-in page (``seon.render.ui/sign-in``). Root's own page is `/root`; `/user/<name>` is a user's page by name.
 - **A user's page is a kept walk,** as root's is: a move of main draws what it reached, so an agent started from it appears with no reload (``seon.render.proc/user-walk``).
 - **What a person types** is its words and its forms, told apart by the one reader (``seon.reader/words-and-forms``): words a message, forms its REPL's. An agent with a task can be spoken to with no process, by its key.
 - **It already works for a user-shaped page:** an agent with no branch is read from main with its reads tracked (``seon.render.proc``). A fact on main redrew that page 29 times of 30, median 34 ms, max 52 ms, about 430 bytes a patch, with no code added (lab, one run, under load of about 7, the tag built at runtime so no eval's code could hold it). What a view with a user's parts around an agent's branch does is untested.
@@ -135,3 +136,15 @@ Tasks are small and their proofs are ours, written and watched red before releas
 - The agent may add proofs: ours is the floor. Proofs stated on data with exact values, on small worlds, with no process where the claim allows.
 - One process test per mechanism, written last. What changes what's running splits into a pure part and a live part in a worktree.
 - A generative suite comes after the first merge tasks: random merge, pull, rebase, cherry-pick and schema-change sequences checked against invariants, shrinking to the op sequence that broke. A "no problems" check is an extra assertion, never the only proof.
+
+## Known gaps, from an independent audit (2026-11-08)
+
+Read from the code, not run; each has a task.
+- A verdict a root writes doesn't wake its agent: only the api's sends wake, so `:told` waits for a restart. Root's own message writes need the same wake (``seon.agent/every-message-root-writes-wakes``).
+- ``seon.reader/words-and-forms`` reads repairs' offsets, which closers inserted earlier shift: `"(foo\nhello"` loses the words. `scan` knows each line's kind and should answer it (``seon.reader/words-and-forms-reads-the-scans-kinds``).
+- The user has gained special cases in six places (`earlier-agents-tx`, `write`, `tell-tx`, `agent-view`'s input, `users-side`, `user-walk`), which says the model isn't finished. `user-walk` is a third walk keeper beside `root-walk` and `branch-walk!` (``seon.render/a-users-walk-is-a-branch-walk``).
+- ``seon.root/person`` reads the OS account outside the config loader, and `ask!` falls back to it when an agent's key isn't found: a fake default.
+- `:lost` reads "stopped by a restart" also when its parked process died; the task's reason should give the words.
+- ``seon.reconcile/after-work`` skips tests only for tasks with no proofs; if a park claims nothing, it never should.
+- ``seon.db/response-of`` glues a result back onto its eval for every reader; a pull pattern joining `:seon.eval/result` would replace it.
+- Tests whose names claim more than they assert: the break test sets up no restart, and its merge check can't fail on messages, since a merge never carries them (that, not the merge base, is why a removal stays on a branch); `two-agents-answering-each-other-end` ends because the test stops sending.

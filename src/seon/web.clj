@@ -175,7 +175,9 @@
     (fn [req]
       (let [uri (:uri req) m (:request-method req) q (form-params (:query-string req))]
         (cond
-          (and (= m :get) (= uri "/")) (html-response (ask! ch {:op :page :view :root}))
+          (and (= m :get) (= uri "/")) (html-response (ask! ch {:op :page :view [:chat :home]}))
+          ;; root's own page: every session on main, its process and its problems
+          (and (= m :get) (= uri "/root")) (html-response (ask! ch {:op :page :view :root}))
           ;; what root reads: its page's other face, as an agent's /debug is
           (and (= m :get) (= uri "/root/debug")) (html-response (ask! ch {:op :page :view [:debug :root]}))
           ;; an agent's page, the render of its ctx, by its id in root's boot
