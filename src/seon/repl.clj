@@ -33,8 +33,6 @@
             [seon.source :as source] [seon.program :as program] [jolt.analyzer] [seon.lib :as lib] [seon.print :as print] [seon.print.select :as select] [seon.render :as render] [seon.context :as context] [seon.ctx :as ctx] [seon.web.html :as h] [seon.profile :as profile] [seon.sock :as sock] [seon.step :as step] [clojure.core.async :as a] [clojure.core.async.flow :as flow]
             [jolt.ffi :as ffi] [seon.config :as cfg] [clojure.test] [datahike.api :as d] [seon.db :as pdb] [seon.edn :as sedn]))
 
-(defchecked ^:private outer-frames [:=> [:cat] :any] @#'jolt.nrepl/outer-frames)
-
 (def ^:private budgeted
   "The origins whose forms run under the config's budgets of ticks and bytes (an agent's model, an
   outside agent, the page, an inserted eval): root's own platform requests and the agent's loop run unbounded. See
@@ -167,12 +165,12 @@
                        ;; *1 *2 *3 *e as clojure.main/repl keeps them; clojure.test reports to
                        ;; *test-out*, bound to the form's output as nREPL does
                        {v1 :v1 v2 :v2 v3 :v3 e1 :e} (:repl-vars @agent/state)
-                       [tag v ns' outer] (try (binding [*ns* ns *out* out *err* err clojure.test/*test-out* out *1 v1 *2 v2 *3 v3 *e e1
+                       [tag v ns'] (try (binding [*ns* ns *out* out *err* err clojure.test/*test-out* out *1 v1 *2 v2 *3 v3 *e e1
                                                          ;; the REPL's names in every namespace (seon.agent/repl-name), but for a
                                                          ;; definition of the program, which resolves as written
                                                          jolt.host/*resolve-unresolved* (when-not (defines-program? form ns) agent/repl-name)]
                                                 (let [v (intr/run ticks alloc #(eval-fn form))] [:ret v *ns*]))
-                                              (catch Throwable e [:err e ns (outer-frames)]))
+                                              (catch Throwable e [:err e ns]))
                        ;; the form as the wire carries it, whole: its own text, else its EDN (a symbol, a number)
                        common (cond-> {:id n :out (not-empty (str out)) :err-out (not-empty (str err)) :form (or src (sedn/encode form)) :repl/form form
                                        :repl/src src :top top}
@@ -184,8 +182,7 @@
                                   ;; a move into a namespace whose own vars hide a helper says so, once, as it moves
                                   (not= ns ns') (merge (some->> (shadowed ns') (hash-map :shadowed)))))
                          [ns' :ok])
-                     (do (reply (let [m (merge common {:tag :err :err-text (str err (nrepl/err->msg v {:outer outer}))
-                                                        "status" (if (:interrupted (ex-data v)) ["interrupted"] ["eval-error"])})]
+                     (do (reply (let [m (merge common {:tag :err "status" (if (:interrupted (ex-data v)) ["interrupted"] ["eval-error"])})]
                                  (assoc m :repl/ex (error-data v m))))
                          [ns :err])))))
         ;; code's forms in order, from ns: [ns' how], how :eof, :read (a read error) or :err; each
@@ -205,8 +202,7 @@
 
                          (instance? Throwable form)
                          (let [n (:n (swap! agent/state update :n (fnil inc 0)))]
-                           (reply (let [m {:tag :err "status" ["eval-error"] :repl/phase :read :id (dec n)
-                                           :err-text (nrepl/err->msg form {:phase :read-source})}]
+                           (reply (let [m {:tag :err "status" ["eval-error"] :repl/phase :read :id (dec n)}]
                                    (assoc m :repl/ex (error-data form m))))
                            [ns :read])
 
@@ -626,7 +622,7 @@
       ;; copied back as code double every \\( and break case constants)
       (joined :out) (assoc :out (print/code (joined :out)))
       (joined :err-out) (assoc :err (print/code (joined :err-out)))
-      (= :err (:tag lst)) (assoc :ex (or (:err lst) (contract/error :seon.agent/eval-error #'response (str (:err-text lst)) {:class "unknown: the eval answered text, no error"})))
+      (= :err (:tag lst)) (assoc :ex (or (:err lst) (contract/error :seon.agent/eval-error #'response "the eval answered no error map" {:class "unknown: the eval answered text, no error"})))
       (sum :ms) (assoc :ms (/ (Math/round (* 1000.0 (sum :ms))) 1000.0))
       (sum :ticks) (assoc :ticks (sum :ticks))
       (sum :alloc-bytes) (assoc :bytes (sum :alloc-bytes)))))
@@ -792,7 +788,7 @@
                               (answered)
                               (catch Throwable e
                                 (let [em (agent/error-map e)]
-                                  (vswap! answers conj {:tag :err :err em :err-text (nrepl/err->msg e)})
+                                  (vswap! answers conj {:tag :err :err em})
                                   (answered))))]
             (swap! agent/state assoc-in [:results (keyword (name (:handle r)))] r)
             ;; the handle a printed cut reads through, as the REPL's *1 is read
