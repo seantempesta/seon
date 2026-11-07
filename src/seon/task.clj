@@ -333,12 +333,13 @@
 (defn boot-tx
   "Root's boot: its id for this process lifetime and its max-running config key (merges at once,
   :seon.config.merge/max-running, is written with the config in force, seon.config/facts), and
-  the user, an agent of the boot with no process (design section 2): the evals and messages it
-  makes name it (:seon.eval/by its id), and root's page lists it with its agents."
-  {:malli/schema [:=> [:cat :string pos-int?] [:vector :any]]}
-  [boot max-running]
-  (into [{:seon.root/id :root :seon.root/boot boot :seon.config.agent/max-running max-running}]
-        (agent-tx boot :user {})))
+  the user, name, an agent with no process, one entity across boots (:seon.user/name, its lookup ref): the evals and messages it
+  makes name it (:seon.eval/by its id), and root's page lists it with its agents. See docs/users.md#what-each-thing-is."
+  {:malli/schema [:=> [:cat :string pos-int? :string] [:vector :any]]}
+  [boot max-running name]
+  (into [{:seon.root/id :root :seon.root/boot boot :seon.config.agent/max-running max-running}
+         {:seon.agent/key name :seon.user/name name}]
+        (agent-tx boot :user {} name)))
 
 (defn call-ref
   "The model call of turn n of the agent with key k, as a ref in a transaction: a record of that turn (an eval, a message) names it, which

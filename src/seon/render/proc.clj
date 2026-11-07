@@ -205,6 +205,7 @@
         boot (task/boot-of db)
         branch (keyword (str/replace address #"^main/" ""))]
     (or (eid [:seon.agent/key address])
+        (eid [:seon.user/name address])
         (when boot
           (or (eid [:seon.agent/key (task/agent-key boot id)])
               (some (fn [dt] (when (= id (task/this-boots db (d/entity db (:e dt)))) (:e dt))) (d/datoms db :avet :seon.agent/id id))))
@@ -394,7 +395,7 @@
         branch-units (fn [] (if-let [kw (walked)]
                               (quiet #(render/placed-units (:w kw)))
                               (let [t (cond-> (cold-tree) (seq opened) (update :evals #(reduce-kv (fn [m k ev] (if (opened (:seon.eval/id ev)) (assoc m k (assoc ev :seon.eval/opened true)) m)) % %)))
-                                    w (quiet #(render/draw t ctx/changes bdb (render/declared-var :seon.render/render-ctx)))]
+                                    w (quiet #(render/draw t ctx/changes bdb (render/declared-var (if (:seon.user/name e) :seon.render/user-ctx :seon.render/render-ctx))))]
                                 (try (render/placed-units w) (finally (render/dispose-walk! w))))))
         ;; @ctx's part pairs (seon.render.ui/ctx-parts): what the model reads of each part of the task's list, beside
         ;; its unit as the page draws it, from one walk of the page
@@ -425,8 +426,8 @@
                       ;; a branch that could not be read: its error, by the error's render
                       berr [{:id "p-branch-error" :container "#p-task" :rev 0 :html (h/html [:section {:id "p-branch-error"} (render/html {} berr)])}]))
         ;; root's agents list, as root's walk drew it, and the agent's head from its facts on main
-        sides (filterv #(= "#c-side" (:container %)) (some-> (:root-walk st) :w render/placed-units))
-        head (cond-> (d/pull db [:seon.agent/id :seon.agent/status :seon.agent/branch :seon.agent/description :seon.agent/max-turns {:seon.agent/task [:seon.task/id :seon.task/outcome :seon.task/reason :seon.task/failure]} {[:seon.process/_agent :as :processes] [:seon.process/pid :seon.process/forked-ms]}] eid)
+        sides (when-not (some #(= "#c-side" (:container %)) units) (filterv #(= "#c-side" (:container %)) (some-> (:root-walk st) :w render/placed-units)))
+        head (cond-> (d/pull db [:seon.user/name :seon.agent/id :seon.agent/status :seon.agent/branch :seon.agent/description :seon.agent/max-turns {:seon.agent/task [:seon.task/id :seon.task/outcome :seon.task/reason :seon.task/failure]} {[:seon.process/_agent :as :processes] [:seon.process/pid :seon.process/forked-ms]}] eid)
                ;; an earlier boot's process recorded no end (its root went away): its pid names nothing now
                (not (task/this-boots db e)) (dissoc :processes))
         head-unit {:id "p-agent-head" :container "#p-head" :rev (hash head)
@@ -436,11 +437,11 @@
                       :caption (when (and chat? (not own?))
                                  (when (:error held) (str "Its process didn't answer, so this may be behind: " (:seon.error/message (:error held)))))
                       ;; its REPL and its messages while its process runs; its held task's release
-                      :input {:schema :seon.render/agent-input
+                      :input (if (:seon.user/name e) {:schema :seon.render/root-input :value {}} {:schema :seon.render/agent-input
                               :value {:id (:seon.agent/id e) :live? (live? st id) :focus? chat?
                               ;; what its process can answer: a form running is interrupted (busy); a capped task's agent takes no message (docs/turn.md#the-cap)
                               :busy? (= :busy (:seon.agent/status e)) :capped? (= :cap (:seon.task/outcome (:seon.agent/task e))) :talks? (some? (:seon.agent/task e))
-                                      :held (d/q '[:find ?id . :in $ ?a :where [?a :seon.agent/task ?t] [?t :seon.task/execution :held] [?t :seon.task/id ?id]] db eid)}}}
+                                      :held (d/q '[:find ?id . :in $ ?a :where [?a :seon.agent/task ?t] [?t :seon.task/execution :held] [?t :seon.task/id ?id]] db eid)}})}
                      ;; its tabs name it by its id in this boot, else by its branch (an earlier boot's agent)
                      (focus db view))))
 
