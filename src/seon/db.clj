@@ -687,7 +687,7 @@
 (defn ops-between
   "What changed from db value before to db value after, as report->tx states a report: the same ops for one transaction, and for
   several, what they came to, so a reader that missed a commit misses nothing. Its work follows what differs (d/datoms-diff skips what
-  both share). See docs/sharing.md#a-process-catches-up-to-a-db-value."
+  both share). See docs/sharing.md#catching-up-to-a-db-value."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] :seon.db/resolved-tx]}
   [before after]
   (let [[gone added] (d/datoms-diff before after :eavt [])

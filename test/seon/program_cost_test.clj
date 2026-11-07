@@ -486,7 +486,7 @@
         ks (keys (:ours (seon.merge/delta-three-way base src base #{})))]
     [base base src (vec ks) #{}]))
 
-;; docs/sharing.md#the-data-model: a merge reads the schema once. It read (d/schema src) per carried datom, which rebuilds the whole schema map:
+;; docs/sharing.md#where-a-fact-lives: a merge reads the schema once. It read (d/schema src) per carried datom, which rebuilds the whole schema map:
 ;; 418 M ticks a real merge of about 60 keys, 24 M since
 (deftest a-merge-costs-what-it-carries
   (cost/proof

@@ -10,7 +10,7 @@
 
 (defn- notes [db] (set (d/q '[:find [?t ...] :where [_ :note/text ?t]] db)))
 
-;; docs/sharing.md#a-process-catches-up-to-a-db-value: a reader takes what moved from the value it last applied, so a commit it missed is no gap
+;; docs/sharing.md#catching-up-to-a-db-value: a reader takes what moved from the value it last applied, so a commit it missed is no gap
 (deftest what-moved-between-two-values-is-what-their-reports-say
   (let [db0 (d/db-with (ts/test-db) [{:db/ident :note/id :db/valueType :db.type/string :db/cardinality :db.cardinality/one :db/unique :db.unique/identity}
                                      {:db/ident :note/text :db/valueType :db.type/string :db/cardinality :db.cardinality/one}])

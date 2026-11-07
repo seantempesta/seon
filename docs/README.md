@@ -37,7 +37,7 @@ The pages on the processes that run: root, each agent's fork and the server that
 - [vectors](vector.md): semantic search native to the store: each form, section and plan embedded once in root (llama.cpp), `seon.vector/near` a Datalog function over a two-level C search, fused with the call graph into the context's helpers.
 - [data modeling](data-modeling.md): a thing is an entity with attributes, things relate by refs, and every read is a seek in an index: how to design data and read it cheaply.
 - [storage](storage.md): one store of Datahike index trees on LMDB; what a commit writes, history, node compression, large values out of line, and collection.
-- [sharing](sharing.md): a branch is main plus its own changes; a result stands until what it read changes; a message waits in a mailbox.
+- [sharing](sharing.md): where a fact lives, how a merge works, what a branch's nodes are, and what each operation should cost.
 - [failure points](failure-points.md): every place the outside world can fail, its one catching edge and its declared error; nothing else catches.
 - [health](health.md): the open problems, recorded or derived from the program's facts, read when looked at and never polled; what a branch caused refuses its done.
 - [clocks](clocks.md): where time decides (only the owner's exceptions) and where it is only measured; `bin/laws clocks` and `measures` name every site.

@@ -20,7 +20,7 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.merge-test/a-cherry-pick-leaves-the-rest-to-merge-later seon.merge-test/x-theirs-takes-the-upstreams-value}}
  {:seon.task/name "what-a-side-never-held-is-no-change"
-  :seon.task/plan "Found 2026-11-07 on a scratch store through the real seon.merge (docs/sharing.md#the-data-model): s2 takes a program-only merge from U with U as a parent, so its merge base holds a datom D it never held; D then changes on U; s2's whole merge reports [:datum e a] :deleted-by-them, though s2 never had or deleted it. No data changes, but a person or agent is asked to settle nothing. Correct: a key the side lacks with no retraction in its history is no change of that side, as seon.merge/carried-tx already reads retractions. Proof, red first: that sequence reports no conflict; a real retraction on a session against a change on U still does. Needed when user branches take whole merges: no path today merges whole in that order."
+  :seon.task/plan "Found 2026-11-07 on a scratch store through the real seon.merge (docs/sharing.md#where-a-fact-lives): s2 takes a program-only merge from U with U as a parent, so its merge base holds a datom D it never held; D then changes on U; s2's whole merge reports [:datum e a] :deleted-by-them, though s2 never had or deleted it. No data changes, but a person or agent is asked to settle nothing. Correct: a key the side lacks with no retraction in its history is no change of that side, as seon.merge/carried-tx already reads retractions. Proof, red first: that sequence reports no conflict; a real retraction on a session against a change on U still does. Needed when user branches take whole merges: no path today merges whole in that order."
   :seon.task/kind :work
   :seon.task/proofs #{}}
 ]
