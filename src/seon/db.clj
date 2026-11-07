@@ -646,7 +646,8 @@
            (unresolved #'seon.db/history :entity e)
            (let [ds (sort-by (juxt :tx :added) (if attrs (mapcat #(d/datoms h :eavt id %) (sort attrs)) (d/datoms h :eavt id)))
                  at (into {} (map (fn [t] [t (:v (first (d/datoms db :eavt t :db/txInstant)))])) (distinct (map :tx ds)))
-                 ref? #(= :db.type/ref (get-in (d/schema db) [% :db/valueType]))]
+                 schema (:schema db)
+                 ref? #(= :db.type/ref (get-in schema [% :db/valueType]))]
              (mapv (fn [{:keys [a v tx added]}]
                      {:a a :added? added :t tx :at (at tx)
                       :v (if (and pull (ref? a)) (d/pull (d/as-of db tx) pull v) v)})
