@@ -185,10 +185,10 @@
   ;; a root restart lost an attached task, and its next agent took the task's own model (none
   ;; configured: "no model provider", the task held); a lost task was ended by nobody
   (let [db (db-of [(decl "x" :model "m1")] :extra (work "x" :lost :model "outside"))]
-    (is (= [(spawn "x" :model "outside")] (actions-for db)) "a lost outside task's next agent is outside"))
+    (is (= [] (actions-for db)) "a lost outside task waits for its attach"))
   (let [db (db-of [(decl "x" :model "m1")] :extra (work "x" :running :model "outside" :boot "boot-0"))]
     (is (= [{:op :reap :task "demo/x"}] (actions-for db)) "a reap is the task's one action this pass")
-    (is (= [(spawn "x" :model "outside")] (actions-for (d/db-with db (task/move-tx "demo/x" :running :lost {})))) "and the next agent of one the restart reaped stays outside"))
+    (is (= [] (actions-for (d/db-with db (task/move-tx "demo/x" :running :lost {})))) "and one the restart reaped waits for its attach: nothing would drive it, and a process here would race that attach"))
   (testing "root cannot take back a task that is done: merged work keeps :running"
     (let [db (db-of [(decl "z")] :extra (work "z" :merged))
           {:keys [taken not-running]} (my.root/take-back-tx db ["demo/z"] "x")]
