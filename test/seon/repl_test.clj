@@ -284,6 +284,28 @@
     (is (= #{'clojure.set 'clojure.string 'clojure.walk} (seon.program/ns-requires form)) (pr-str form))
     (is (not-any? #(= :ns-form-drops (:seon.repl/finding %)) (:warnings fewer)) "nothing was lost, so nothing to warn of")))
 
+(deftest an-edit-changes-a-namespaces-ns-form
+  ;; docs/agent.md#changing-a-definition: real run 11: an agent's proof needed a require, and (edit! 'its-test-ns ...) was a contract error, so it spent turns 15-22 on it, ending with an edit on disk that nothing reads.
+  ;; An explicit edit states the whole form, so it can remove a require, which an evaluated ns form can't
+  (let [[_ more fewer src plain] (at/in-agent (fn [{:keys [ns]}]
+                                                (let [n (str ns ".edited")]
+                                                  [(str "(ns " n " (:require [clojure.set :as s]))")
+                                                   (str "(seon.repl/edit! '" n " \"[clojure.set :as s]\" \"[clojure.set :as s] [clojure.walk :as w]\")")
+                                                   (str "(seon.repl/edit! '" n " \"[clojure.set :as s] \" \"\")")
+                                                   (str "(:form/src (:ns/form (datahike.api/entity (seon.agent/db) [:ns/name '" n "])))")
+                                                   "(seon.repl/edit! 'no.such-namespace \"a\" \"b\")"])))]
+    (is (nil? (:ex more)) (pr-str more))
+    (is (nil? (:ex fewer)) (pr-str fewer))
+    (is (= #{'clojure.walk} (seon.program/ns-requires (read-string (:value src)))) (pr-str src))
+    (is (= :seon.repl/edit-refused (:seon.error/type (:value plain))) (pr-str plain))))
+
+(deftest an-edit-of-a-namespaces-file-says-how-it-changes
+  ;; docs/agent.md#changing-a-file: real run 11: the path of a test file, relative, said only that no file was there; absolute, it wrote the checkout, which no branch reads. Either way the answer names the route
+  (let [[said] (at/in-agent (fn [_] ["(seon.repl/edit! \"src/seon/repl.clj\" \"zz-not-there\" \"x\")"]))
+        r (pr-str said)]
+    (is (clojure.string/includes? r "seon.repl") r)
+    (is (clojure.string/includes? r "(seon.repl/edit! 'seon.repl") r)))
+
 (deftest a-require-at-the-repl-is-no-program
   ;; deepseek-run3/4: an eval's (require '[seon.repl-test ...]) in seon.repl was recorded as a text form of that file, so seon.repl required a test
   ;; namespace and the gate's build failed 6 times; another agent retracted such forms by hand. A REPL's require is its own, and says so; an ns form stays program
