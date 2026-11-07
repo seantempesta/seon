@@ -1178,3 +1178,57 @@
     (clojure.test/is (= :seon.agent/eval-error (:seon.error/type (:ex r))) (pr-str r))
     (clojure.test/is (= "to err\n" (:seon.print/code (:err r))) "the form's *err* output is the error stream")
     (clojure.test/is (not (contains? r :err-text)) "no second render of the error")))
+
+(defn- evals-held
+  "Root-REPL code answering, of the task's branch, each eval whose code is among codes: its id, code and response, and its result entity whole
+  (a pull of :seon.eval/result)."
+  {:malli/schema [:=> [:cat :string [:vector :string]] :string]}
+  [task codes]
+  (str "(let [b (:db @(seon.root/branch-db sys (:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))))]"
+       " (vec (for [e (datahike.api/q '[:find [?e ...] :where [?e :seon.eval/code _]] b)"
+       "            :let [p (datahike.api/pull b '[:seon.eval/id :seon.eval/code :seon.eval/response {:seon.eval/result [*]}] e)]"
+       "            :when (contains? " (pr-str (set codes)) " (:seon.eval/code p))] p)))"))
+
+(deftest two-evals-of-one-value-hold-one-result
+  ;; docs/users.md#what-each-thing-is: a result is its own entity, so evaluating one value twice stores it once
+  ;; and each eval keeps its own cost; a different value is another entity; an error is a result with :ex and no :value
+  (let [same "(mapv inc (range 50))" other "(mapv dec (range 50))" boom "(/ 1 0)"
+        [_ _ _ _ held] (at/in-agent (fn [{:keys [task]}]
+                                      [same same other boom {:op :eval :agent "root" :code (evals-held task [same other boom])}]))
+        evals (:value held)
+        of (fn [code] (filterv #(= code (:seon.eval/code %)) evals))
+        [a b] (of same) [c] (of other) [d] (of boom)]
+    (is (= 2 (count (of same))) (pr-str evals))
+    (is (not= (:seon.eval/id a) (:seon.eval/id b)) "two evals")
+    (is (some? (get-in a [:seon.eval/result :db/id])) (pr-str a))
+    (is (= (get-in a [:seon.eval/result :db/id]) (get-in b [:seon.eval/result :db/id])) "of one result entity")
+    (is (= (get-in a [:seon.eval/result :seon.result/hash]) (get-in b [:seon.eval/result :seon.result/hash])))
+    (is (= 36 (count (get-in a [:seon.eval/result :seon.result/hash]))) "its identity is the full hash, not the handle's eight digits")
+    (is (str/starts-with? (get-in a [:seon.eval/result :seon.result/hash]) (subs (str (get-in a [:seon.eval/response :handle])) (count "result/"))) "and the handle is its short form")
+    (is (= (vec (map inc (range 50))) (get-in a [:seon.eval/result :seon.result/value])) "the value lives on the result")
+    (is (every? #(number? (get-in % [:seon.eval/response :ms])) [a b]) "each eval keeps its own cost")
+    (is (every? #(and (not (contains? (:seon.eval/response %) :value)) (contains? (:seon.eval/response %) :handle)) [a b]) "and no copy of the value")
+    (is (not= (get-in a [:seon.eval/result :db/id]) (get-in c [:seon.eval/result :db/id])) "a different value is another entity")
+    (is (= (vec (map dec (range 50))) (get-in c [:seon.eval/result :seon.result/value])))
+    (is (= :seon.agent/eval-error (get-in d [:seon.eval/result :seon.result/ex :seon.error/type])) (pr-str d))
+    (is (not (contains? (:seon.eval/result d) :seon.result/value)) "an eval that threw holds a result with :ex and no :value")))
+
+(deftest an-eval-evaluated-again-moves-its-result-ref
+  ;; docs/users.md#what-each-thing-is: evaluating again (the same id) moves the ref; the result it held stays readable
+  (at/with-agent {}
+    (fn [{:keys [names ask]}]
+      (let [{:keys [task agent]} names
+            root (fn [code] (ts/value-of (:response (ask {:op :eval :agent "root" :code code}))))
+            branch (str "(:db @(seon.root/branch-db sys (:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))))")
+            run (fn [code] (root (str "@(c/submit! sys :" agent " " (pr-str code) " {:origin :outside :id \"again\"})")))
+            held (fn [] (root (str "(datahike.api/pull " branch " '[:seon.eval/id {:seon.eval/result [*]}] [:seon.eval/id \"again\"])")))
+            _ (root (str "@(c/submit! sys :" agent " \"(def tick (atom 0))\" {:origin :outside})"))
+            _ (run "(swap! tick inc)")
+            one (:seon.eval/result (held))
+            _ (run "(swap! tick inc)")
+            two (:seon.eval/result (held))
+            old (root (str "(datahike.api/pull " branch " '[*] [:seon.result/hash " (pr-str (:seon.result/hash one)) "])"))]
+        (is (= 1 (:seon.result/value one)) (pr-str one))
+        (is (= 2 (:seon.result/value two)) "evaluating again moves the ref to the new result")
+        (is (not= (:db/id one) (:db/id two)))
+        (is (= 1 (:seon.result/value old)) "and the old result stays readable by its hash")))))
