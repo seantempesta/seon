@@ -338,11 +338,14 @@
   changed."
   {:malli/schema [:=> [:cat :seon.host/db :symbol :map] :seon.db/tx-data]}
   [db nsym {:keys [accounts tail file]}]
-  (let [x (some->> (pdb/eid db :ns/name nsym) (d/entity db))
+  (let [ne (pdb/eid db :ns/name nsym)
+        x (some->> ne (d/entity db))
+        ;; {form id, its place}: one read of the namespace's forms
+        held (when ne (into {} (for [dt (d/datoms db :avet :form/ns ne) :let [f (d/entity db (:e dt))]] [(:form/id f) (:form/order f)])))
         ;; a form keeps its place while the file keeps its order, so an edit writes what it changed
-        places (program/stable-places (mapv #(some->> (pdb/eid db :form/id (:id %)) (d/entity db) :form/order) accounts))]
+        places (program/stable-places (mapv #(get held (:id %)) accounts))]
     (vec (concat (mapcat #(program/account-diff-tx db (assoc %1 :order %2)) accounts places)
-                 (for [a accounts :when (not (pdb/eid db :form/id (:id a)))] {:db/id (program/form-tid (:id a)) :form/source true})
+                 (for [a accounts :when (not (contains? held (:id a)))] {:db/id (program/form-tid (:id a)) :form/source true})
                  (when (or (not= tail (:ns/tail x)) (not= file (:ns/file x)))
                    [{:db/id (program/ns-tid nsym) :ns/name nsym :ns/tail tail :ns/file file}])))))
 
