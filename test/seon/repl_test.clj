@@ -281,7 +281,7 @@
     (is (nil? (:ex fewer)) (pr-str fewer))
     (is (nil? (:ex more)) (pr-str more))
     (is (= "The doc." (nth form 2)) (pr-str form))
-    (is (= #{'clojure.set 'clojure.string 'clojure.walk} (program/ns-requires form)) (pr-str form))
+    (is (= #{'clojure.set 'clojure.string 'clojure.walk} (seon.program/ns-requires form)) (pr-str form))
     (is (not-any? #(= :ns-form-drops (:seon.repl/finding %)) (:warnings fewer)) "nothing was lost, so nothing to warn of")))
 
 (deftest a-require-at-the-repl-is-no-program
