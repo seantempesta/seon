@@ -147,7 +147,6 @@ Tasks are small and their proofs are ours, written and watched red before releas
 ## Known gaps, from an independent audit (2026-11-08)
 
 Read from the code, not run; each has a task.
-- A verdict a root writes doesn't wake its agent: only the api's sends wake, so `:told` waits for a restart. Root's own message writes need the same wake (``seon.agent/every-message-root-writes-wakes``).
 - The user has gained special cases in six places (`earlier-agents-tx`, `write`, `tell-tx`, `agent-view`'s input, `users-side`, `user-walk`), which says the model isn't finished. `user-walk` is a third walk keeper beside `root-walk` and `branch-walk!` (``seon.render/a-users-walk-is-a-branch-walk``).
 - ``seon.root/person`` reads the OS account outside the config loader, and `ask!` falls back to it when an agent's key isn't found: a fake default.
 - `:lost` reads "stopped by a restart" also when its parked process died; the task's reason should give the words.
