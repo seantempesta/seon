@@ -21,11 +21,14 @@
 setopt pipefail
 fail() { print -u2 "land: $*"; print "LAND FAILED"; exit 1 }
 # tidy: remove the landed worktree $HERE and its branch $B, or say what keeps it. A process works there when its
-# working directory is in it; this landing's own ancestors (the shell that ran it) are not counted.
+# working directory is in it; this landing's own are not counted: its ancestors (the shell that ran it) and the
+# members of its prove's process group ($PJ is that group's id), whose last processes (test roots, a sleep) can
+# still be ending when the wait returns.
 tidy() {
   cd "$MAIN"  # out of $HERE first, so the scan's own children are not counted as working there
   local d=$(git -C "$HERE" status --porcelain --ignore-submodules | head -3) p q mine=" $$ " others=()
   q=$$; while (( q > 1 )); do q=$(ps -o ppid= -p $q | tr -d ' '); [[ -n $q ]] || break; mine+="$q "; done
+  [[ -n ${PJ:-} ]] && mine+="$(ps -axo pid=,pgid= | awk -v g=$PJ '$2 == g {printf "%s ", $1}')"
   lsof -d cwd -Fpn 2>/dev/null | while read -r l; do
     case $l in p*) p=${l#p} ;; n$HERE|n$HERE/*) [[ $mine == *" $p "* ]] || others+=$p ;; esac; done
   if [[ $HERE != $MAIN/.worktrees/* ]]; then print "worktree kept: $HERE is not one bin/worktree made"
