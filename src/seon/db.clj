@@ -156,16 +156,39 @@
   {:malli/schema [:=> [:cat :map] :nil]}
   [e] (throw (ex-info (:seon.error/message e) e)))
 
+(defn- ends-with
+  "tx-data with each entity retracted whole followed by the entities whose identity is a ref to it: such an entity (a
+  vector, :seon.vector/of) is named by its target and has no identity without it, so it ends with it, as Datahike ends a
+  component with its parent. Derived from the schema (an identity attribute that is a ref), so no writer retracts it by
+  hand and none is left holding the rest of itself. One AVET seek per identity ref a retraction names.
+  See docs/storage.md#the-write-checks-every-entity-it-touches."
+  {:malli/schema [:=> [:cat :any :any] :any]}
+  [db tx-data]
+  (let [refs (filterv #(= :db.type/ref (get-in (:schema db) [% :db/valueType])) (keys identity-schemas))
+        whole? (fn [op] (and (vector? op) (#{:db.fn/retractEntity :db/retractEntity} (first op))))]
+    (if (or (empty? refs) (not (some whole? tx-data)))
+      tx-data
+      (loop [todo (keep #(when (whole? %) (:db/id (d/entity db (second %)))) tx-data) seen #{} out (vec tx-data)]
+        (if-let [e (first todo)]
+          (if (seen e)
+            (recur (rest todo) seen out)
+            (let [dependents (for [a refs d (d/datoms db :avet a e)] (:e d))]
+              (recur (concat (rest todo) dependents) (conj seen e)
+                     (into out (for [x dependents :when (not (seen x))] [:db.fn/retractEntity x])))))
+          out)))))
+
 (defn- checked
-  "Transaction tx-data applied to db by apply-fn (Datahike's: its report), held to both checks: each datom's value
-  (`invalid-datom`, with schemas {:forms :registry}, a branch's own) before, each entity it touched
-  (`invalid-entity`) after. A refusal throws its typed error, and the value is as it was."
+  "Transaction tx-data applied to db by apply-fn (Datahike's, given the tx-data: its report), held to both checks: each
+  datom's value (`invalid-datom`, with schemas {:forms :registry}, a branch's own) before, each entity it touched
+  (`invalid-entity`) after; an entity retracted whole takes the entities named by it with it (`ends-with`). A refusal
+  throws its typed error, and the value is as it was."
   {:malli/schema [:=> [:cat :any :any [:maybe :map] ifn?] :map]}
   [db tx-data schemas apply-fn]
-  (when-let [e (invalid-datom db tx-data schemas)] (refuse! e))
-  (let [r (apply-fn)]
-    (when-let [e (invalid-entity r)] (refuse! e))
-    r))
+  (let [tx-data (ends-with db tx-data)]
+    (when-let [e (invalid-datom db tx-data schemas)] (refuse! e))
+    (let [r (apply-fn tx-data)]
+      (when-let [e (invalid-entity r)] (refuse! e))
+      r)))
 
 (defn transact-checked
   "The writer's transact (`datahike.writing/transact!`) through both checks (`checked`): the connection's 'transact!
@@ -174,7 +197,7 @@
   docs/storage.md#the-write-checks-every-entity-it-touches."
   {:malli/schema [:=> [:cat :any :map] :map]}
   [db arg-map]
-  (checked db (:tx-data arg-map) (:seon.db/schemas arg-map) #(datahike.writing/transact! db (dissoc arg-map :seon.db/schemas))))
+  (checked db (:tx-data arg-map) (:seon.db/schemas arg-map) #(datahike.writing/transact! db (-> arg-map (dissoc :seon.db/schemas) (assoc :tx-data %)))))
 
 (defn with
   "The one transaction on a database value (Datahike's `d/with`) through both checks (`checked`): every speculation, an
@@ -183,7 +206,7 @@
   (bin/laws transactions). See docs/storage.md#the-write-checks-every-entity-it-touches."
   {:malli/schema [:function [:=> [:cat :any :any] :map] [:=> [:cat :any :any [:maybe :map]] :map]]}
   ([db tx-data] (with db tx-data nil))
-  ([db tx-data schemas] (checked db tx-data schemas #(d/with db tx-data))))
+  ([db tx-data schemas] (checked db tx-data schemas #(d/with db %))))
 
 (defn db-with
   "The db after tx-data (`with`'s :db-after)."

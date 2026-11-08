@@ -107,7 +107,8 @@
  :seon.db/fn-fact [:map {:seon.db/attributes true} [:seon.fn/var :seon.fn/var] [:seon.fn/stats {:optional true} :seon.fn/stats]]
  :seon.db/config-fact [:map {:seon.db/attributes true} [:config/key :config/key] [:config/form :config/form] [:config/file :config/file]]
  :seon.db/schema-fact [:map {:seon.db/attributes true} [:schema/key :schema/key] [:schema/form :schema/form]
-                        [:schema/file :schema/file] [:schema/source {:optional true} :schema/source]]
+                        ;; a schema registered at the REPL (my.schema/register!) has no file until a sync writes it to disk
+                        [:schema/file {:optional true} :schema/file] [:schema/source {:optional true} :schema/source]]
  :seon.db/file-fact [:map {:seon.db/attributes true} [:file/path :file/path] [:file/text :file/text] [:file/mode {:optional true} :file/mode]]
  ;; A file's mode as git records it: executable or not, all a tree holds of it. Written by the import from the file on disk, committed by the write-back
  ;; (seon.source/modes). A script (:script on the allow-list, docs/source.md#a-program-file): its text is the file's, and what follows is derived from it, for reading.
@@ -257,8 +258,11 @@
  ;; the namespace its REPL is in, as its newest eval left it (seon.repl/record-tx: a datom when it moved), so a cold
  ;; build draws what the live page does; before any, where the REPL starts (seon.ctx/current-ns)
  :seon.agent/ns :symbol
+ ;; a member of an agent's record (an eval, a cite, a search, a process) is linked by a ref seon.ctx retracts to remove it from the
+ ;; record while the entity stays, so a swap! can bring it back (docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together:
+ ;; a membership ref is never required); each still means something alone: the code that ran, what was cited, the query, the process
  :seon.db/eval-fact [:map {:seon.db/attributes true :seon.render/hiccup seon.render.ui/evaluation}
-                     [:seon.eval/id :seon.eval/id] [:seon.eval/agent :seon.eval/agent] [:seon.eval/by {:optional true} :seon.eval/by]
+                     [:seon.eval/id :seon.eval/id] [:seon.eval/agent {:optional true} :seon.eval/agent] [:seon.eval/by {:optional true} :seon.eval/by]
                      [:seon.eval/code :seon.eval/code] [:seon.eval/intent {:optional true} :seon.eval/intent]
                      [:seon.eval/call-id {:optional true} :seon.eval/call-id] [:seon.eval/page {:optional true} :seon.eval/page]
                      [:seon.eval/schema {:optional true} :seon.eval/schema] [:seon.eval/basis {:optional true} :seon.eval/basis]
@@ -320,7 +324,7 @@
  ;; how many hits are shown, when the search asks other than :seon.config.render/search
  :seon.search/k pos-int?
  :seon.search/search-fact [:map {:seon.db/attributes true :seon.ctx/pattern [*]}
-                           [:seon.search/id :seon.search/id] [:seon.search/of :seon.search/of] [:seon.search/query :seon.search/query]
+                           [:seon.search/id :seon.search/id] [:seon.search/of {:optional true} :seon.search/of] [:seon.search/query :seon.search/query]
                            [:seon.search/k {:optional true} :seon.search/k]]
  :seon.cite/cite-fact [:map {:seon.db/attributes true
                              :seon.ctx/pattern [* {[:seon.cite/address :by :seon.doc/address :as :section]
@@ -334,7 +338,7 @@
                                                 {[:seon.cite/name :by :schema/key :as :schema] [*]}
                                                 {[:seon.cite/name :by :ns/name :as :ns] [:ns/name :ns/doc]}]
                             }
-                       [:seon.cite/id :seon.cite/id] [:seon.cite/of :seon.cite/of] [:seon.cite/depth :seon.cite/depth] [:seon.cite/order :seon.cite/order]
+                       [:seon.cite/id :seon.cite/id] [:seon.cite/of {:optional true} :seon.cite/of] [:seon.cite/depth :seon.cite/depth] [:seon.cite/order :seon.cite/order]
                        [:seon.cite/address {:optional true} :seon.cite/address] [:seon.cite/name {:optional true} :seon.cite/name] [:seon.cite/task {:optional true} :seon.cite/task]]
  ;; ---- tasks, runs, proof results, root's boot, turns and ends (session D1's proto.agents.facts.edn) ----
 ;; ---- the task ----
@@ -379,7 +383,8 @@
  :seon.task/failure [:map [:reason :string] [:counterexample {:optional true} :string] [:agent {:optional true} :string] [:turn {:optional true} :int]]
  ;; the declaration a task file last stated for this task (seon.task/load-tx), as EDN
  :seon.task/declared :string
- ;; config keys are attributes of the task, by their own names (schemas: seon.config.agent.edn, seon.config.merge.edn)
+ ;; a task may hold config keys as its overrides, by their own names; each key is defined once, by its own schema
+ ;; (seon.config.agent.edn, seon.config.merge.edn), never listed here (an attribute is named by one entity schema)
  :seon.task/task-fact [:map {:seon.db/attributes true :seon.ctx/pattern [* {[:seon.task/proofs :by :var/name :as :proved] :seon.db/var-fact} {[:seon.task/needs :as :needs] [* {[:seon.task/proofs :by :var/name :as :proved] :seon.db/var-fact} {[:seon.cite/_of :as :cites] :seon.cite/cite-fact}]} {[:seon.cite/_of :as :cites] :seon.cite/cite-fact} {[:seon.search/_of :as :searches] :seon.search/search-fact} {[:seon.task/examples :as :examples] [:seon.agent/key :seon.agent/description {[:seon.eval/_agent :as :evals] [*]}]}] :seon.render/hiccup seon.render.ui/task-view}
                           [:seon.task/id :seon.task/id] [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name]
                           [:seon.task/plan :seon.task/plan] [:seon.task/execution :seon.task/execution]
@@ -401,10 +406,7 @@
                           [:seon.task/conflicts {:optional true} :seon.task/conflicts] [:seon.task/unmerged {:optional true} :seon.task/unmerged]
                           [:seon.task/task-conflicts {:optional true} :seon.task/task-conflicts] [:seon.task/failures {:optional true} :seon.task/failures]
                           [:seon.task/costs {:optional true} :seon.task/costs] [:seon.task/waste {:optional true} :seon.task/waste]
-                          [:seon.task/declared {:optional true} :seon.task/declared]
-                          [:seon.config.agent/max-turns {:optional true} :seon.config.agent/max-turns]
-                          [:seon.config.merge/max-conflicts {:optional true} :seon.config.merge/max-conflicts]
-                          [:seon.config.merge/max-merge-turns {:optional true} :seon.config.merge/max-merge-turns]]
+                          [:seon.task/declared {:optional true} :seon.task/declared]]
  ;; ---- how a task's work stands and ended: attributes of the task, on main, written when root starts and judges it ----
  ;; (docs/reconcile.md#a-task-holds-how-its-work-ended). A task's history is its attributes' previous values (d/history).
  ;; the agent that works it now (an agent moves between a session's tasks, seon.reconcile/stage-boundary)
@@ -521,9 +523,7 @@
                           [:seon.root/watch {:optional true} :seon.root/watch]
                           [:seon.root/tasks {:optional true} :seon.root/tasks]
                           [:seon.root/generation {:optional true} :seon.root/generation]
-                          [:seon.root/collected {:optional true} :seon.root/collected] [:seon.root/retained {:optional true} :seon.root/retained]
-                          [:seon.config.agent/max-running {:optional true} :seon.config.agent/max-running]
-                          [:seon.config.merge/max-running {:optional true} :seon.config.merge/max-running]]
+                          [:seon.root/collected {:optional true} :seon.root/collected] [:seon.root/retained {:optional true} :seon.root/retained]]
  ;; ---- on every transaction Seon makes, in its tx-meta (seon.db/tx-meta) ----
  ;; the runtime that made it, as its compiled units are keyed (jolt.host/runtime-fingerprint:
  ;; Jolt's version, its runtime fingerprint, its trace tag; docs/storage.md#history)
@@ -588,7 +588,7 @@
  ;; next frame arrives or it ends. An open :stalled problem while it holds (seon.problems/stalled-agents)
  :seon.process/stall [:map [:quiet-ms :int] [:last-op {:optional true} [:maybe :seon.agent/last-op]]]
   :seon.process/process-fact [:map {:seon.db/attributes true}
-                          [:seon.process/id :seon.process/id] [:seon.process/agent :seon.process/agent]
+                          [:seon.process/id :seon.process/id] [:seon.process/agent {:optional true} :seon.process/agent]
                           [:seon.process/pid {:optional true} :seon.process/pid]
                           [:seon.process/running {:optional true} :seon.process/running]
                           [:seon.process/forked-ms {:optional true} :seon.process/forked-ms] [:seon.process/ended-ms {:optional true} :seon.process/ended-ms]
@@ -666,10 +666,9 @@
  :seon.judge/stopped [:map [:usd number?] [:bound number?] [:left [:vector :seon.task/id]]]
  :seon.judge/judge-fact [:map {:seon.db/attributes true}
                          [:seon.judge/digest :seon.judge/digest] [:seon.judge/task {:optional true} :seon.judge/task]
-                         [:seon.judge/score {:optional true} :seon.judge/score] [:seon.judge/stopped {:optional true} :seon.judge/stopped]
-                         [:seon.model-call/tokens {:optional true} :seon.model-call/tokens]
-                         [:seon.model-call/cache-hit-tokens {:optional true} :seon.model-call/cache-hit-tokens]
-                         [:seon.model-call/cache-miss-tokens {:optional true} :seon.model-call/cache-miss-tokens]]
+                         [:seon.judge/score {:optional true} :seon.judge/score] [:seon.judge/stopped {:optional true} :seon.judge/stopped]]
+ ;; a judge's record may hold a model call's token counts by their own names (:seon.model-call/tokens ...): defined once, by
+ ;; :seon.model-call/fact, never listed here (an attribute is named by one entity schema)
  ;; ---- the program merge's facts (session D1's proto.merge.facts.edn) ----
  :seon.merge/key [:and {:seon.db/index true} :seon.db/plain]
  :seon.merge/base :seon.db/plain

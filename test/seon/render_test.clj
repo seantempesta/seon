@@ -2168,8 +2168,8 @@
   (is (= :seon.db/user-fact (r/schema-of (array-map :seon.agent/key "sean" :seon.user/name "sean") nil)) "and a value's schema the same way")
   (is (= (r/schema-property :seon.db/agent-fact :seon.ctx/pattern) (r/schema-property :seon.db/user-fact :seon.ctx/pattern))
       "a user's pattern is the agent's it extends")
-  (is (= :seon.agent/key (some #{:seon.agent/key} (keys r/entity-schemas))) "an attribute an extended schema names")
-  (is (= :seon.db/agent-fact (r/entity-schemas :seon.agent/key)) "is named by that schema alone"))
+  (is (= :seon.agent/key (some #{:seon.agent/key} (keys seon.db/entity-schemas))) "an attribute an extended schema names")
+  (is (= :seon.db/agent-fact (seon.db/entity-schemas :seon.agent/key)) "is named by that schema alone"))
 
 (deftest two-unrelated-identity-schemas-are-an-error
   ;; docs/ctx.md#the-pattern: a record whose identities name schemas neither extends is no one thing: an error naming them, never the

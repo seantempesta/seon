@@ -262,29 +262,12 @@
   ([db model ds]
    (due-among (filter (comp texts :a) ds) #(stored-of db % :seon.vector/text-t) #(stored-of db % :seon.vector/model) #(title db %) model)))
 
-(defn- retract-vector
-  "The retractions of every :seon.vector/* fact entity ve holds on db. Only the vector's own attributes: a
-  vector an earlier version wrote on a form or section is dropped the same way, never the entity."
-  {:malli/schema [:=> [:cat :seon.host/db :int] [:vector :any]]}
-  [db ve]
-  (into [] (comp (filter #(= "seon.vector" (namespace (:a %)))) (map (fn [d] [:db/retract (:e d) (:a d) (:v d)]))) (d/datoms db :eavt ve)))
-
 (defn written
   "The text datoms db holds that db from does not (datahike.api/datoms-diff, which skips the
   subtrees they share): the forms, sections and plans a branch wrote since from. Cost: the
   datoms that differ."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:vector :any]]}
   [from db] (filterv (comp texts :a) (second (d/datoms-diff from db :eavt []))))
-
-(defn- gone-in
-  "The retractions of the vectors whose :seon.vector/of datom is among the datoms removed, which db lacks
-  (see `orphaned`)."
-  {:malli/schema [:=> [:cat :seon.host/db [:sequential :any]] [:vector :any]]}
-  [db removed]
-  (into [] (comp (filter #(= :seon.vector/of (:a %))) (map :e) (distinct)
-                 (remove #(seq (d/datoms db :eavt % :seon.vector/of)))
-                 (mapcat #(retract-vector db %)))
-        removed))
 
 (defn fact
   "The vector entity of entity e (an id, tempid or lookup ref): its vector v of the text at transaction t, made by
@@ -293,20 +276,6 @@
   {:malli/schema [:=> [:cat :seon.db/ref :int [:vector {:min 1} number?] :string] :map]}
   [e t v model]
   (assoc (pack v) :seon.vector/of e :seon.vector/model model :seon.vector/text-t t))
-
-(defn orphaned
-  "The retractions of the vectors on db whose entity was retracted, [[:db/retract ve a v] ...].
-  Retracting an embedded entity drops the :seon.vector/of datom that pointed at it, and leaves its vector
-  (about 1.6 KB) behind. With from, those whose :seon.vector/of datom db lacks and from held (datoms-diff:
-  the cost of the commits between); without, every coarse row with no :seon.vector/of (one pass over the two
-  scans, as `near` joins them), for the round that has no commit to diff from
-  (docs/vector.md#a-vector-is-its-own-entity)."
-  {:malli/schema [:function [:=> [:cat :seon.host/db] [:vector :any]]
-                  [:=> [:cat :seon.host/db :seon.host/db] [:vector :any]]]}
-  ([db]
-   (let [of (into #{} (map :e) (d/datoms db :aevt :seon.vector/of))]
-     (into [] (comp (map :e) (remove of) (mapcat #(retract-vector db %))) (d/datoms db :aevt :seon.vector/coarse))))
-  ([from db] (gone-in db (first (d/datoms-diff from db :eavt [])))))
 
 (defn tx-data
   "The vector entities of embedded texts: entity es[i]'s vector vs[i] of the text at transaction ts[i], made by
@@ -537,36 +506,29 @@
   answer, all of them (`due`). A round that asks for all that is due leaves the proc caught up at the
   commit. Both dbs are made from their commits here (seon.db/at-commit) and let go with the round: the
   proc keeps references, never db values (AGENTS section 4).
-  The vectors of entities retracted since go in the same write (`orphaned`), or alone when no text is due.
-  Answers [st outputs]; nothing due and nothing retracted, nothing asked."
+  A vector ends with the entity it embeds in that entity's own retraction (seon.db/ends-with), so a round has none to sweep.
+  Answers [st outputs]; nothing due, nothing asked."
   {:malli/schema [:=> [:cat :map :map] [:tuple :map [:vector :map]]]}
   [st m]
   (let [db (pdb/at-commit (:conn st) (:commit m))
         clean (:clean st)
-        ;; one diff from the previous round's commit (:seen) serves both: the texts it added and the vectors whose entity it
-        ;; removed. Not from :clean, which is the commit before this proc's own write of a vector: a vector written and
-        ;; orphaned after :clean has no datom in a diff from it
+        ;; one diff from the previous round's commit (:seen): the texts it added
         from (when (and clean (:seen st)) (pdb/at-commit (:conn st) (:seen st)))
-        [removed added] (when from (d/datoms-diff from db :eavt []))
+        [_ added] (when from (d/datoms-diff from db :eavt []))
         base (when clean (if (= (:commit clean) (:seen st)) from (pdb/at-commit (:conn st) (:commit clean))))
         todo (remove (comp (:unembeddable st) first)
                      (cond (not clean) (due db (:model st))
                            (identical? base from) (due db (:model st) (filterv (comp texts :a) added))
                            :else (due db (:model st) (written base db))))
-        ;; the vectors of retracted entities go in the write of the embeddings, or alone when none is due
-        gone (if from (gone-in db removed) (orphaned db))
         due (take (:texts st) todo)
         st (assoc st :seen (:commit m))
         st (assoc st :clean (when (= (count due) (count todo)) (select-keys m [:t :commit])))]
     (cond
       (seq due)
       (let [more? (< (count due) (count todo))
-            [st m] (step/ask st [:vectors :answers] [:embedded [(mapv first due) (mapv peek due) (select-keys m [:t :commit]) gone]]
+            [st m] (step/ask st [:vectors :answers] [:embedded [(mapv first due) (mapv peek due) (select-keys m [:t :commit])]]
                              {:op :fx :kind :embed :req (cond-> {:texts (mapv second due)} more? (assoc :more true))})]
         [(assoc st :running true :more more?) [m]])
-      (and (seq gone) (pos? (:texts st)))
-      (let [[st m] (step/ask st [:vectors :answers] [:written 0] {:op :write :req {:op :tx :branch :db :tx-data gone}})]
-        [(assoc st :running true) [m]])
       :else (release (assoc st :running false)))))
 
 (defn vectors-proc
@@ -598,7 +560,7 @@
                    (round (dissoc st :latest) m))
            :answers (let [[st [step es]] (step/answered st (:tag m)) r (:r m)]
                       (case step
-                        :embedded (let [[es ts asked gone] es]
+                        :embedded (let [[es ts asked] es]
                                     (if (contract/error? r)
                                       ;; the failure is recorded here (seon.error/asked-tx), closed by the next
                                       ;; vectors written (:seon.vector/model)
@@ -611,7 +573,7 @@
                                           (release (assoc st :running false))))
                                       (let [{:keys [model vectors]} (:value r)
                                             [st w] (step/ask st [:vectors :answers] [:written (count es)]
-                                                             {:op :write :req {:op :tx :branch :db :tx-data (into (tx-data es ts vectors model) gone)}})]
+                                                             {:op :write :req {:op :tx :branch :db :tx-data (tx-data es ts vectors model)}})]
                                         [st [w]])))
                         :written (let [st (cond-> (assoc st :running false)
                                             (not (contract/error? r)) (-> (update :embedded + es) (assoc :written-t (:t r)))

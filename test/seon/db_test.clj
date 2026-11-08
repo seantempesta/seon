@@ -1,7 +1,7 @@
 (ns seon.db-test
   "One store, many branches, as in production (owner, 2026-10-21): bin/test seeds one test
   store and each test takes a branch of it through one helper (seon.test-store/test-branch!)."
-  (:require [seon.task :as task] [seon.test-store :as ts] [my.test :as mt] [seon.profile :as profile] [clojure.test :refer [deftest is testing]]
+  (:require [seon.task :as task] [seon.vector] [seon.test-store :as ts] [my.test :as mt] [seon.profile :as profile] [clojure.test :refer [deftest is testing]]
             [clojure.java.shell] [clojure.java.io] [datahike.api :as d] [datahike.writer :as dw] [datahike.db.transaction :as dbt]
             [seon.db :as pdb] [seon.schema.datahike] [malli.core] [malli.registry] [seon.config :as cfg] [seon.contract :as contract] [seon.edn] [seon.repl] [seon.print] [datahike.schema]
             [konserve.jolt.lmdb :as klmdb] [konserve.jolt.lmdb-ffi :as lmdb] [konserve.jolt.lz4] [konserve.jolt.zstd] [clojure.string :as str] [konserve.core :as k] [hasch.core] [datahike.gc] [seon.cost :as cost] [seon.lib :as lib] [seon.intr :as intr]
@@ -1298,6 +1298,27 @@
               "an entity retracted whole has stopped being that thing")))
       (testing "an upsert of an unknown identity is no stub (seon.root's release! of a task id main does not hold)"
         (is (= :seon.task/task-fact (:schema (pdb/invalid-entity (d/with @conn (task/execution-tx ["no/such"] :running))))))))))
+
+(deftest an-entity-named-by-a-ref-ends-with-its-target
+  ;; docs/storage.md#the-write-checks-every-entity-it-touches: a vector's identity is a ref to the entity it embeds
+  ;; (:seon.vector/of), so retracting that entity used to drop the ref and leave the rest of the vector behind, an
+  ;; orphan swept a round later; the one path ends it with its target, so no writer retracts it by hand
+  (ts/test-branch!
+    (fn [_ conn]
+      (d/transact conn [{:form/id "f/1" :form/src "(defn f [])" :form/ns [:ns/name 'app.m0] :form/order 0}])
+      (d/transact conn [(seon.vector/fact [:form/id "f/1"] 1 [0.5 0.25 0.125] "m")])
+      (let [ve (pdb/eid @conn :seon.vector/of (pdb/eid @conn :form/id "f/1"))]
+        (is (some? ve) "the form has its vector")
+        (is (map? (d/transact conn [[:db.fn/retractEntity [:form/id "f/1"]]])) "retracting the form is not refused")
+        (is (empty? (d/datoms @conn :eavt ve)) "and its vector is gone with it, nothing of it left")))))
+
+(deftest each-attribute-is-named-by-one-entity-schema
+  ;; docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together: what an entity is comes from the attributes it holds
+  ;; (seon.db/entity-schemas), so an attribute two schemas name has two definitions and one of them decides by accident
+  ;; (2026-11-08: the task's and root's schemas listed config keys, so root's config read as a task missing its keys)
+  (let [named (for [[k f] seon.contract/forms :when (:seon.db/attributes (seon.contract/properties k)) a (pdb/own-keys f)] [a k])
+        twice (into (sorted-map) (keep (fn [[a ks]] (when (next ks) [a (mapv second ks)]))) (group-by first named))]
+    (is (= {} twice) "each attribute's one entity schema")))
 
 (deftest a-datom-its-attribute-refuses-is-invalid-and-names-it
   ;; docs/storage.md#the-write-checks-every-datom: the store checks a value's type, and a data attribute's only that it is
