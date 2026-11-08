@@ -2278,7 +2278,7 @@
       (d/transact conn (seon.root/root-session-message-tx @conn (seon.task/message-tx "m-first" "sean" ["root"] "Hi root." 1)))
       (let [fork (d/commit-id @conn)
             _ (d/transact conn [{:seon.task/id "request/later" :seon.task/ns 'request :seon.task/name "later" :seon.task/plan "Asked after root's session forked."
-                                 :seon.task/kind :user :seon.task/branch :task-request-later :seon.task/outcome :parked}
+                                 :seon.task/kind :user :seon.task/branch :task-request-later :seon.task/execution :running :seon.task/outcome :parked}
                                 {:seon.agent/key "b1/a7" :seon.agent/task [:seon.task/id "request/later"]}])
             main (d/commit-id @conn)
             ;; the session's branch: main as it forked, and the main its last turn heard
