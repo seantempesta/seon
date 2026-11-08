@@ -433,7 +433,7 @@
   (if *fx-stub*
     (*fx-stub* kind req)
     (contract/error :seon.fx/in-test #'seon.agent/fx-test "an effect inside a test does not leave the test's process: bind seon.agent/*fx-stub*"
-                    {:seon.fx/kind kind})))
+                    {})))
 
 (defn fx-send!
   "The effect kind with req, started: answers its key k at once. The outcome arrives as a

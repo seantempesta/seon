@@ -71,7 +71,7 @@
   {:op :spawn :task (str "demo/" nm)
    :env {:branch (task/default-branch (str "demo/" nm)) :model model :max-turns (cfg/value :seon.config.agent/max-turns)}})
 (defn- t [nm] (symbol "demo-test" (str nm "-test")))
-(def conflict-f {:key [:var 'app/f] :kind :both-modified :base {:src "(defn f [x] x)"}
+(def conflict-f {:key [:var 'app/f] :base {:src "(defn f [x] x)"}
                  :ours {:src "(defn f [x] (inc x))"} :theirs {:src "(defn f [x] (dec x))"}})
 
 (defn- mdb
@@ -1301,17 +1301,17 @@
 (deftest hairy-rule
   ;; refs: the task's proofs and the names its plan's cites hold (the facts its write derived, never its text re-parsed)
   (let [refs '#{app/g app/f app.proofs/a-test}
-        c (fn [k kind] {:key [:var k] :kind kind})
+        c (fn [k sides] (into {:key [:var k]} (for [s sides] [s {:src "x"}])))
         merge-cfg {:max-conflicts 3 :max-merge-turns 2}]
     (are [conflicts merge-turns rule] (= rule (:rule (r/hairy (merge merge-cfg {:conflicts conflicts :refs refs :merge-turns merge-turns}))))
       [] 0 nil
-      [(c 'app/f :both-modified)] 0 nil
-      [(c 'app/f :both-modified) (c 'app/h :both-modified) (c 'app/i :both-added)] 0 nil
-      [(c 'app/f :both-modified) (c 'app/h :both-modified) (c 'app/i :both-added) (c 'app/j :both-added)] 0 :too-many-conflicts
-      [(c 'app/g :deleted-by-them)] 0 :deleted-by-them-referenced
-      [(c 'app/z :deleted-by-them)] 0 nil
-      [(c 'app.proofs/a-test :deleted-by-them)] 0 :deleted-by-them-referenced
-      [(c 'app/f :both-modified)] 3 :merge-turns)))
+      [(c 'app/f [:base :ours :theirs])] 0 nil
+      [(c 'app/f [:base :ours :theirs]) (c 'app/h [:base :ours :theirs]) (c 'app/i [:ours :theirs])] 0 nil
+      [(c 'app/f [:base :ours :theirs]) (c 'app/h [:base :ours :theirs]) (c 'app/i [:ours :theirs]) (c 'app/j [:ours :theirs])] 0 :too-many-conflicts
+      [(c 'app/g [:base :ours])] 0 :deleted-by-them-referenced
+      [(c 'app/z [:base :ours])] 0 nil
+      [(c 'app.proofs/a-test [:base :ours])] 0 :deleted-by-them-referenced
+      [(c 'app/f [:base :ours :theirs])] 3 :merge-turns)))
 
 (deftest quiescence-is-reported-when-nothing-can-move
   (ts/test-branch! (fn [_ conn]
