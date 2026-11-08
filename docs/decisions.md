@@ -286,7 +286,7 @@ The owner's rulings of 2026-11-01, after the audit of what agents read; they sta
 
 ### Context is data a render draws from the db (owner, 2026-11-01)
 
-"Do not create parallel systems to the context generation and rendering." What an agent is shown is data in the db (a task's citations, a search as a citation) drawn by the one render (`seon.context/render`); an evaluation arm differs from another by its data, never by code that builds a second context.
+"Do not create parallel systems to the context generation and rendering." What an agent is shown is data in the db (a task's citations, a search as a citation) drawn by the one render (`seon.ctx.wire/render`); an evaluation arm differs from another by its data, never by code that builds a second context.
 
 ## 2026-10-31 rulings
 
@@ -314,7 +314,7 @@ The owner's rulings of 2026-10-30 morning, after the overnight md-scan runs; the
 
 ### The context sends changes, cites code at preview, and counts turns on the eval line (owner, 2026-10-30)
 
-Approved after the run removal: a changed part that answers data sends clojure.data/diff of its value; a cited var at preview depth, its source on request; the turn counter on each eval's one-line outcome, not a part. Stated in: task seon.context/the-context-is-the-agents-evals-and-seons (when built).
+Approved after the run removal: a changed part that answers data sends clojure.data/diff of its value; a cited var at preview depth, its source on request; the turn counter on each eval's one-line outcome, not a part. Stated in: task seon.ctx/the-context-is-the-agents-evals-and-seons (when built).
 
 ### Light tests while an agent develops, the full suite near merge (owner, 2026-10-30)
 
@@ -350,11 +350,11 @@ The owner's rulings of 2026-10-29, each with where it is now stated; they stand 
 
 ### References at their depth, previews first (owner, 2026-10-29)
 
-"The old reference system needs to be adapted for the context rendering system. The backticks were meant to have an easy way to indicate more info should be shown here ... different levels of detail for different references (functions have args right?)"; "think critically about the references and make sure it's helpful and not noise. We control what we are showing and we can still just do previews and the agent can dig in for full details". One part per citation at its delimiter's depth, by the reference system's own views, a preview the agent digs into. Stated in: seon.context/citations, seon.doc/cited (task seon.context/the-context-is-the-agents-evals-and-seons).
+"The old reference system needs to be adapted for the context rendering system. The backticks were meant to have an easy way to indicate more info should be shown here ... different levels of detail for different references (functions have args right?)"; "think critically about the references and make sure it's helpful and not noise. We control what we are showing and we can still just do previews and the agent can dig in for full details". One part per citation at its delimiter's depth, by the reference system's own views, a preview the agent digs into. Stated in: seon.ctx/citations, seon.doc/cited (task seon.ctx/the-context-is-the-agents-evals-and-seons).
 
 ### Parts answer data: an html render and a model render, the value named status (owner, 2026-10-29)
 
-"I want the hiccup render to make the data we need to render the web ui and I similarly want the ai render to make the data we send to the model ... different models could have different renders ... make sure we are not doing shit multiple times"; "keep everything as data until it's at a print boundary ... only use the one value printer"; "Store information we need and it's presence means something" (on the model call basis's :observed: "wtf does observed mean?"). A page part may answer a value of a schema; the page draws its :seon.render/html, the model is sent its :seon.render/model, each a function of the one value the walk computed once. How an agent's work stands is that value, named status ("status": git's word, what my.task/status answers; over "standing"), computed from facts of the branch, never held. Stated in: docs/render.md#a-component-answers-hiccup, docs/render.md#how-the-work-stands, seon.context/status, seon.render/part.
+"I want the hiccup render to make the data we need to render the web ui and I similarly want the ai render to make the data we send to the model ... different models could have different renders ... make sure we are not doing shit multiple times"; "keep everything as data until it's at a print boundary ... only use the one value printer"; "Store information we need and it's presence means something" (on the model call basis's :observed: "wtf does observed mean?"). A page part may answer a value of a schema; the page draws its :seon.render/html, the model is sent its :seon.render/model, each a function of the one value the walk computed once. How an agent's work stands is that value, named status ("status": git's word, what my.task/status answers; over "standing"), computed from facts of the branch, never held. Stated in: docs/render.md#a-component-answers-hiccup, docs/render.md#how-the-work-stands, seon.ctx.status/status, seon.render/part.
 
 ### The standing store is test data: wipe it when a change needs it (owner, 2026-10-29)
 
@@ -370,11 +370,11 @@ The owner's rulings of 2026-10-29, each with where it is now stated; they stand 
 
 ### The model's context is the render of the agent's record, by the one walk (owner, 2026-10-29)
 
-"I'm down with the whole db -> pull into ctx representation and then rendering that"; "This really feels like we are conflating the data with the render"; "build with both the context render and the web ui render in mind so we don't let one get out of sync with the other". A request is the agent's records in order (its evals, its replies, its messages) and the parts of its render of @ctx: whole at the first request, then only the parts whose drawing changed, each sent once a change. The model and the person read one layout (render-ctx), so they cannot drift. Removing evals from @ctx with swap! draws the request whole: the one compaction. Stated in: docs/render.md#the-models-context-a-cached-prefix-then-the-turn, docs/render.md#the-render-is-an-eval, docs/agent.md, task seon.context/the-context-is-the-agents-evals-and-seons.
+"I'm down with the whole db -> pull into ctx representation and then rendering that"; "This really feels like we are conflating the data with the render"; "build with both the context render and the web ui render in mind so we don't let one get out of sync with the other". A request is the agent's records in order (its evals, its replies, its messages) and the parts of its render of @ctx: whole at the first request, then only the parts whose drawing changed, each sent once a change. The model and the person read one layout (render-ctx), so they cannot drift. Removing evals from @ctx with swap! draws the request whole: the one compaction. Stated in: docs/render.md#the-models-context-a-cached-prefix-then-the-turn, docs/render.md#the-render-is-an-eval, docs/agent.md, task seon.ctx/the-context-is-the-agents-evals-and-seons.
 
 ### Nothing derived is held; everything is derived from the db at t (owner, 2026-10-29)
 
-"Don't fear deletion make the system work with the data that's there. Period. Don't try and hold random derived state in the system. Derive it from the current state." What a request sent is a fact on its model call; a cache is keyed by its inputs and may be dropped. Removed under it: the fold and :same-as (a record's printed text depends only on that record), seon.context/world and its page caches. Stated in: AGENTS section 4 (a kept db value is a reference), docs/ctx.md, docs/render.md.
+"Don't fear deletion make the system work with the data that's there. Period. Don't try and hold random derived state in the system. Derive it from the current state." What a request sent is a fact on its model call; a cache is keyed by its inputs and may be dropped. Removed under it: the fold and :same-as (a record's printed text depends only on that record), seon.ctx/world and its page caches. Stated in: AGENTS section 4 (a kept db value is a reference), docs/ctx.md, docs/render.md.
 
 ### The agent's record is facts about its work (owner, 2026-10-29)
 
@@ -458,7 +458,7 @@ The owner's rulings of 2026-10-28, each with where it is now stated; they stand 
 
 ### The model is sent the whole conversation; no history budget (owner, 2026-10-28)
 
-"who made a 32k history budget? Remove it I never approved that". A session chose 32,000 tokens on 2026-10-21; it dropped the agent's own evals while page re-renders filled the request. Every request now sends every record whole. Stated in: `seon.context/request`, docs/render.md.
+"who made a 32k history budget? Remove it I never approved that". A session chose 32,000 tokens on 2026-10-21; it dropped the agent's own evals while page re-renders filled the request. Every request now sends every record whole. Stated in: `seon.ctx.wire/request`, docs/render.md.
 
 ### The eval protocol: tool calls by id; one form per call; a top-level do is its forms, as in Clojure (owner, 2026-10-28; one form superseded 2026-10-29)
 
@@ -490,7 +490,7 @@ A reply's text heads its block of evals; each eval is one tool call with `intent
 
 ### No surprises from main (owner, 2026-10-28)
 
-"we are supposed to be telling the agent always at every eval reply what is different with main so as main moves they are aware they need to fix things. They can ignore it and work and then merge at the end, but there are never any surprises." Every eval answer carries main's difference from the branch, computed from the db at t, never stored. Stated: task seon.context/the-turn-shows-how-main-diverged.
+"we are supposed to be telling the agent always at every eval reply what is different with main so as main moves they are aware they need to fix things. They can ignore it and work and then merge at the end, but there are never any surprises." Every eval answer carries main's difference from the branch, computed from the db at t, never stored. Stated: task seon.ctx/the-turn-shows-how-main-diverged.
 
 ### Context is structure first; ranking is judged by turns to green (owner, 2026-10-28)
 
@@ -554,7 +554,7 @@ Worktrees run plain `bin/prove` and report ready; the merge session merges a bat
 
 ### A relevance % means "worth reading" (owner, 2026-10-27)
 
-"I really need a ranking ideally with relevancy % that we can do cutoffs for … showing everything isn't working"; "I want accuracy more than speed." seon.context/relevance is calibrated on judged useful/noise labels; search cuts on it. Stated: docs/vector.md.
+"I really need a ranking ideally with relevancy % that we can do cutoffs for … showing everything isn't working"; "I want accuracy more than speed." seon.ctx.search/relevance is calibrated on judged useful/noise labels; search cuts on it. Stated: docs/vector.md.
 
 ### What a Claude session sees through MCP is what a model is sent (owner, 2026-10-27)
 
@@ -900,7 +900,7 @@ Owner, 2026-10-23: "don't hyper fixate on LoC. I want some resitance to growth m
 
 ### The context is data, made relevant at its producer; renders do not turn it into prose
 
-Owner, 2026-10-23: "don't just port. We moved away from text output too since the renders kept doing weird shit and it's out of context. Data is better so just improve the data so relveant info is there and you can also calculate additional info from it or rewrite it completely". What a model reads is Clojure data: each value carries what is relevant, derived values computed from it are added as data, and a value that isn't fit is reshaped or rewritten at its producer. v1's renders are a reference, not a template. Owner, same day: "The one value printer is still printing it so render functions need to think about how to properly frame their output so it isn't clipped. The value printer needs to remain general so improve it for the general case not one offs". A render shapes its data so that what matters survives the printer's budget (the important keys first, long parts as their own values); the printer improves only for the general case, never with a special case for one kind of value. Stated in: not yet (owed docs/render.md and seon.context/evaluations' task).
+Owner, 2026-10-23: "don't just port. We moved away from text output too since the renders kept doing weird shit and it's out of context. Data is better so just improve the data so relveant info is there and you can also calculate additional info from it or rewrite it completely". What a model reads is Clojure data: each value carries what is relevant, derived values computed from it are added as data, and a value that isn't fit is reshaped or rewritten at its producer. v1's renders are a reference, not a template. Owner, same day: "The one value printer is still printing it so render functions need to think about how to properly frame their output so it isn't clipped. The value printer needs to remain general so improve it for the general case not one offs". A render shapes its data so that what matters survives the printer's budget (the important keys first, long parts as their own values); the printer improves only for the general case, never with a special case for one kind of value. Stated in: not yet (owed docs/render.md and seon.ctx/evaluations' task).
 
 ### Sessions research on their own; a new session needs root's approval, unless the owner says otherwise
 
@@ -908,7 +908,7 @@ Owner, 2026-10-23: "sessions can do web research with haiku I think on their own
 
 ### The embedding work goes ahead, the model download included
 
-Owner, 2026-10-23: "yeah I approved the embedding work" (in agent-view's thread; relayed by root). Settles the open EMBED question: the embedding model is downloaded and run in-process for `similar`, keyed by each form's content id. Stated in: not yet (owed docs/parity.md and the task seon.context/similar-finds-helpers-by-embedding, on its branch).
+Owner, 2026-10-23: "yeah I approved the embedding work" (in agent-view's thread; relayed by root). Settles the open EMBED question: the embedding model is downloaded and run in-process for `similar`, keyed by each form's content id. Stated in: not yet (owed docs/parity.md and the task seon.ctx/similar-finds-helpers-by-embedding, on its branch).
 
 ### No live agent runs until the context has a format agents respond well to
 

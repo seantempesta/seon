@@ -14,7 +14,7 @@
   printf '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}\\n' | nc -w 5 127.0.0.1 PORT"
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.step :as step] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.root :as c] [my.root :as root] [seon.fx :as fx] [seon.config :as cfg] [seon.task :as task] [seon.proofs :as proofs] [seon.error :as err] [seon.reconcile :as r] [datahike.api :as d]
-            [seon.lib :as lib] [seon.edn :as sedn] [seon.db :as pdb] [seon.repl :as repl] [seon.print :as print] [seon.context :as context] [clojure.edn :as edn] [clojure.data.json :as json] [clojure.string :as str] [clojure.walk]))
+            [seon.lib :as lib] [seon.edn :as sedn] [seon.db :as pdb] [seon.repl :as repl] [seon.print :as print] [seon.ctx.wire :as wire] [clojure.edn :as edn] [clojure.data.json :as json] [clojure.string :as str] [clojure.walk]))
 
 (defn- refused
   "The server refusing a request, as root's API does: the one error map."
@@ -323,9 +323,9 @@
           ;; its one REPL is in an eval, which may never end (a test blocked on nothing): a read waits on no one, so root reads its branch
           (let [db (:db @(c/branch-db sys (:branch a)))
                 basis {:commit (d/commit-id db) :task task :turn (inc (or (:seon.agent/turn (d/pull db [:seon.agent/turn] [:seon.agent/key key])) 0)) :max-turns 1 :origin :outside :agent key}
-                {:keys [messages]} (context/render db basis)]
+                {:keys [messages]} (wire/render db basis)]
             {:agent ag :task task :context (str (name ag) " is still running an eval" (when-let [t (:form (:last-op a))] (str ", at " t)) ": this is its branch as last committed, and nothing was taken.\n\n"
-                           (context/read-text db basis messages (true? (:wire req))))})
+                           (wire/read-text db basis messages (true? (:wire req))))})
           ;; an outside model's read is its turn, and takes its messages; anyone
           ;; else's read of an agent its model drives only looks
           (let [r @(c/submit! sys ag (sedn/encode (list 'print (list 'seon.turn/context-block task (= "outside" (:model env)) (true? (:wire req))))) {:origin :context})]

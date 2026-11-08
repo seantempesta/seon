@@ -30,7 +30,7 @@
   messages, writes) are {:op k} values, handled by `agent-step`."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn- defchecked]] [hasch.core :as hasch] [seon.error :as err] [jolt.nrepl :as nrepl] [seon.intr :as intr] [seon.reader :as reader] [seon.doc :as doc] [seon.fx :as fx] [seon.source :as source] [seon.agent :as agent] [seon.task :as task] [seon.contract :as contract] [my.db] [my.agent] [my.schema] [malli.registry :as mr]
-            [seon.source :as source] [seon.program :as program] [jolt.analyzer] [seon.lib :as lib] [seon.print :as print] [seon.print.select :as select] [seon.render :as render] [seon.context :as context] [seon.ctx :as ctx] [seon.web.html :as h] [seon.profile :as profile] [seon.sock :as sock] [seon.step :as step] [clojure.core.async :as a] [clojure.core.async.flow :as flow]
+            [seon.source :as source] [seon.program :as program] [jolt.analyzer] [seon.lib :as lib] [seon.print :as print] [seon.print.select :as select] [seon.render :as render] [seon.ctx.search :as search] [seon.ctx.wire :as wire] [seon.ctx :as ctx] [seon.web.html :as h] [seon.profile :as profile] [seon.sock :as sock] [seon.step :as step] [clojure.core.async :as a] [clojure.core.async.flow :as flow]
             [jolt.ffi :as ffi] [seon.config :as cfg] [clojure.test] [datahike.api :as d] [seon.db :as pdb] [seon.edn :as sedn]))
 
 (def ^:private budgeted
@@ -600,7 +600,7 @@
 
 (defn- repaired
   "Response r with what the forgiving reader changed of its code before it ran (req's :repaired,
-  seon.context/repaired), so every call's own result tells it, a call not run included."
+  seon.ctx.search/repaired), so every call's own result tells it, a call not run included."
   {:malli/schema [:=> [:cat :seon.repl/answer :map] :seon.repl/answer]}
   [r req] (cond-> r (seq (:repaired req)) (assoc :repaired (:repaired req))))
 
@@ -616,7 +616,7 @@
   details, each its own attribute (`record-details`). Who is the one upsert, by its identity: an
   agent's key ({:seon.agent/key k}, seon.task/agent-key) or root's ({:seon.root/id :root}); an agent's holds the
   namespace the eval left its REPL in (:seon.agent/ns), a datom only when it moved (an unchanged value adds none),
-  which seon.context/current-ns reads. See docs/render.md#a-component-answers-hiccup."
+  which seon.ctx/current-ns reads. See docs/render.md#a-component-answers-hiccup."
   {:malli/schema [:=> [:cat :map :string :string :map] :seon.db/tx-data]}
   [who id by details]
   ;; the agent one upsert, the model call naming it by the same tempid: two would refuse a new agent's first record
@@ -715,11 +715,11 @@
 
 (defn- text-of
   "The text of eval fact rec as every reader reads it: the one function the model's message prints with
-  (seon.context/tool-text), so the outside agent's text and the model's cannot differ; the live value stays at
+  (seon.ctx.wire/tool-text), so the outside agent's text and the model's cannot differ; the live value stays at
   the handle. Made only for a reader: an eval makes and stores data, and a model's is printed where its request is
   assembled. See docs/render.md#a-render-is-a-value-printed-once."
   {:malli/schema [:=> [:cat :map] :string]}
-  [rec] (context/tool-text (:db @agent/state) rec))
+  [rec] (wire/tool-text (:db @agent/state) rec))
 
 (defn- handled
   "Response r of code, as eval id answers it, with its handle, and its record: [r rec]. A plain answer's handle is result/ and the first eight hex digits of its result's hash (seon.db/with-response, the same in every process) of what the record keeps of it (value, error, output, error output, forms; not its cost), so a cut or a replay leaves every handle where it was, a run again names its new answer while the old handle still reads the old one, and two evals with one answer have one. An answer not kept as it is (a host object, a value past :seon.config.store/max-value-chars: the record holds what stands for it) is named by its id, so it never shares a handle. An edit!'s value is its inner eval's response, whose cost differs each time: nothing else is walked. See docs/agent.md#your-turn."
@@ -891,7 +891,7 @@
            ;; the response as data: its printed text and costliest functions are the outer eval's to print
            (cond-> (assoc (dissoc r :text :fns :record :handle :ms :ticks :bytes :cost)
                           :edited {:var at} :seon.text/text text)
-             (seq repairs) (assoc :repaired (context/repaired text repairs)))))))))
+             (seq repairs) (assoc :repaired (search/repaired text repairs)))))))))
 
 (defmethod place :ns
   ;; a namespace's ns form: its recorded text; the new text evaluated through the one REPL path, and recorded as stated, since an edit says the whole form (an evaluated ns form only adds)
@@ -1073,7 +1073,7 @@
                   ;; each call keeps its own intent
                   req (cond-> (req-of id)
                         (not (clojure.string/blank? intent)) (assoc :intent intent)
-                        (seq repairs) (assoc :repaired (context/repaired src repairs)))
+                        (seq repairs) (assoc :repaired (search/repaired src repairs)))
                   why (if problem
                         (contract/error :seon.turn/invalid-call #'run-calls problem {:problem :arguments})
                         (call-problem intent src))]

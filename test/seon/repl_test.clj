@@ -2,7 +2,7 @@
   "An agent's REPL answers: asked of an agent in a root of its own (seon.agent-test/in-agent), and a form bounded by the work it does, never by a clock (seon.intr/run under a tick budget)."
   (:require [clojure.test :refer [deftest is testing]] [clojure.string :as str] [seon.fixtures] [seon.agent-test :as at]
             [seon.intr :as intr] [seon.agent :as agent] [seon.contract :as contract]
-            [seon.ref :as ref] [seon.template :as template] [seon.repl :as repl] [seon.context :as context] [seon.doc :as doc]
+            [seon.ref :as ref] [seon.template :as template] [seon.repl :as repl] [seon.ctx.wire :as wire] [seon.doc :as doc]
             [seon.config :as cfg] [my.agent] [seon.program] [seon.render :as render] [seon.print :as print] [seon.render.ui :as ui] [seon.web.html :as h] [seon.test-store :as ts] [my.test] [datahike.api :as d]))
 
 (deftest an-eval-answers-its-value-as-clojure-does
@@ -318,7 +318,7 @@
 
 (deftest an-agents-namespace-is-recorded-where-its-eval-left-it
   ;; owner, 2026-10-29: "we have to be able to expose this we own all the machinery": the namespace the
-  ;; REPL is in lived only in the agent's memory; each eval's record keeps it (seon.context/current-ns). The agent
+  ;; REPL is in lived only in the agent's memory; each eval's record keeps it (seon.ctx/current-ns). The agent
   ;; is the one with a key: main's evals, root's, are on the branch too (any one agent was root's by chance)
   (let [[_ _ where] (at/in-agent (fn [{:keys [ns task]}]
                                    [(str "(ns " ns ".here)")
@@ -326,7 +326,7 @@
                                     {:op :eval :agent "root"
                                      :code (str "(let [b (:db @(seon.root/branch-db sys (:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))))"
                                                 " a (datahike.api/q '[:find ?a . :in $ ?id :where [?t :seon.task/id ?id] [?a :seon.agent/task ?t] [_ :seon.eval/agent ?a]] b " (pr-str task) ")]"
-                                                " (seon.context/current-ns (:tree (seon.ctx/build b a :b))))")}]))]
+                                                " (seon.ctx/current-ns (:tree (seon.ctx/build b a :b))))")}]))]
     (is (str/ends-with? (str (:value where)) ".here") (pr-str where))))
 
 ;; docs/agent.md#the-repl (owner, 2026-11-03: "fix the commands so they work intuitively everywhere"): one table the
@@ -683,7 +683,7 @@
   ;; reading its context first (as a model's turn does, which makes the my.* functions act on
   ;; its task), runs every kind's forms in order; the ending functions come last
   (let [;; what an agent is sent: the instructions and the help page's sections they cite whole (```docs/agent.md#a```)
-        page (slurp (str (cfg/checkout) "/" context/help-page))
+        page (slurp (str (cfg/checkout) "/" wire/help-page))
         section (fn [anchor] (some (fn [[_ h body]] (when (= anchor (-> h str/lower-case (str/replace #"[^a-z0-9 -]" "") (str/replace " " "-"))) body))
                                    (re-seq #"(?m)^## (.+)\n([\s\S]*?)(?=^## |\z)" page)))
         sent (fn [text] (apply str text (for [[_ a] (re-seq #"```docs/agent\.md#([a-z0-9-]+)```" text)] (str "\n" (section a)))))
@@ -712,16 +712,16 @@
     (is (= "  no number" (:seon.print/code (my.agent/lines-text {} [{:text "  no number"}]))) "a row without :at shows its text alone")))
 
 (deftest the-help-page-runs
-  ;; task seon.context/help-is-a-checked-docs-page (v1's help was tested data, its most-proven
+  ;; task seon.ctx/help-is-a-checked-docs-page (v1's help was tested data, its most-proven
   ;; turn saver): every form the help page tells an agent to run works in a real agent, in
   ;; order, the ending functions last, and every name it cites resolves in the program
   (let [forms (runnable (doc/page-text (my.test/with (my.test/world)
                                                     ;; the help page alone: the forms it tells an agent to run (the agent under test reads the rest)
-                                                    (my.test/page context/help-page (slurp (str (cfg/checkout) "/" context/help-page))))
-                                       context/help-page))
+                                                    (my.test/page wire/help-page (slurp (str (cfg/checkout) "/" wire/help-page))))
+                                       wire/help-page))
         end? #(or (= "(my.turn/wait)" %) (str/starts-with? % "(my.task/fail!"))
         forms (concat (remove end? forms) (sort-by #(= "(my.turn/wait)" %) (filter end? forms)))
-        cited (str "(seon.task/citation-problems (my.db/db) [{:seon.task/ns 'demo :seon.task/name \"help\" :seon.task/plan (seon.context/help-text (my.db/db))}])")
+        cited (str "(seon.task/citation-problems (my.db/db) [{:seon.task/ns 'demo :seon.task/name \"help\" :seon.task/plan (seon.ctx.wire/help-text (my.db/db))}])")
         [problems & items] (rest (at/in-agent (fn [{:keys [agent]}] (into [{:op :context :agent agent} cited] forms))))]
     (is (= [] (:value problems)) (str "every name the help page cites resolves in the program: " (pr-str problems)))
     (is (< 20 (count forms)) "the page shows the agent how to work")
@@ -837,14 +837,14 @@
   ;; the commit a turn read, through seon.doc's one reader
   (let [db0 (ts/test-db)
         db (d/db-with db0 (doc/load-tx db0 "docs" (doc/pages (cfg/checkout) "docs")))
-        toc (doc/page db context/help-page)]
+        toc (doc/page db wire/help-page)]
     (is (= ["docs/agent.md#the-agent" 1] ((juxt :seon.ref/address :seon.ref/level) (first toc))) "the page's sections, the first its title")
     (is (every? :seon.ref/lead toc) "each section leads with a sentence that stands alone")
     (is (some #(= "docs/agent.md#done" (:seon.ref/address %)) toc))
     (is (str/includes? (:seon.ref/text (doc/view db "docs/agent.md#done" :code)) "The judge counts exactly") "one section, whole")
     (is (nil? (doc/view db "docs/agent.md#nowhere" :code)) "no such section")
-    (is (str/starts-with? (context/help-text db) "# The agent\n\nYou are a Seon agent") "the page, made from its sections")
-    (is (nil? (doc/page db0 context/help-page)) "a db without the wiki holds no help page")))
+    (is (str/starts-with? (wire/help-text db) "# The agent\n\nYou are a Seon agent") "the page, made from its sections")
+    (is (nil? (doc/page db0 wire/help-page)) "a db without the wiki holds no help page")))
 
 (deftest doc-reads-any-address-and-lists-on-a-miss
   ;; dogfood 2026-10-25: (my.agent/help "references") answered nil, three evals lost. Doc is the

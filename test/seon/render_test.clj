@@ -6,8 +6,8 @@
   (:require [clojure.edn] [seon.test-store :as ts] [test-runner :as runner] [clojure.test :refer [deftest is testing]] [clojure.data.json]
             [clojure.string :as str] [clojure.core.async :as a]
             [seon.render :as r] [seon.fixtures] [seon.render.ui :as ui] [seon.render.proc :as p]
-            [seon.web.html :as h] [clojure.walk] [clojure.set] [seon.print.select] [seon.config] [seon.doc] [seon.print] [seon.db] [seon.reconcile] [seon.task] [seon.edn] [seon.context] [seon.contract] [seon.repl] [datahike.api :as d]
-            [seon.fx] [seon.source] [seon.reader] [seon.program] [seon.web] [seon.template] [seon.context-test] [seon.render-cost-test] [seon.turn] [seon.model] [seon.problems] [seon.root] [seon.error] [my.agent] [my.test] [seon.ctx]))
+            [seon.web.html :as h] [clojure.walk] [clojure.set] [seon.print.select] [seon.config] [seon.doc] [seon.print] [seon.db] [seon.reconcile] [seon.task] [seon.edn] [seon.ctx] [seon.contract] [seon.repl] [datahike.api :as d]
+            [seon.fx] [seon.source] [seon.reader] [seon.program] [seon.web] [seon.template] [seon.ctx.wire-test] [seon.render-cost-test] [seon.turn] [seon.model] [seon.problems] [seon.root] [seon.error] [my.agent] [my.test] [seon.ctx]))
 
 (def ^:private task
   {:seon.task/id "calc/add" :seon.task/ns 'calc :seon.task/name "add" :seon.task/plan "Make `app.calc/add` pass"
@@ -284,7 +284,7 @@
         ;; a site is named by a list item, before its reason (`- `ns/f`, `ns/g`: why`)
         named (set (for [[_ head] (re-seq #"(?m)^- (.*?): " doc) [_ n] (re-seq #"`([a-z][\w.\-]*/[^`\s]+)`" head)] (symbol n)))
         printer? #(not (str/starts-with? (str %) "seon.print"))
-        display? #(re-find #"^(my\.|seon\.(render|web|context|mcp|server|cost|repl|agent|problems)($|\.))" (str %))]
+        display? #(re-find #"^(my\.|seon\.(render|web|ctx\.(search|status|wire|session)|mcp|server|cost|repl|agent|problems)($|\.))" (str %))]
     (testing "src is imported: the check reads facts, not nothing"
       (is (< 40 (count nss)))
       (is (< 100 (count forms))))
@@ -302,11 +302,11 @@
 ;; docs/render.md#one-path-to-the-model: what the compiler's facts and a form's read say of who makes what the model is sent
 (def ^:private the-path
   "Each step of the one path to a provider, and who may reference it."
-  '{seon.render/wire #{seon.context/request}
-    seon.render/hiccup-wire #{seon.context/request}
-    seon.context/request #{seon.context/render}
+  '{seon.render/wire #{seon.ctx.wire/request}
+    seon.render/hiccup-wire #{seon.ctx.wire/request}
+    seon.ctx.wire/request #{seon.ctx.wire/render}
     seon.model/wire-messages #{seon.model/request-body}
-    seon.model/request-body #{seon.model/openai-compat seon.context/wire-turn}})
+    seon.model/request-body #{seon.model/openai-compat seon.ctx.wire/wire-turn}})
 
 (defn- rows-with
   "The rows of the forms of db in namespaces nss whose source holds one of texts, each with :read, what its source reads as."
@@ -340,8 +340,8 @@
         asks (for [r (rows-with db nss [":messages"])
                    :when (some #(and (map? %) (contains? % :messages) (or (contains? % :turn) (contains? % :model))) (tree-seq coll? seq (:read r)))
                    v (named-by r)
-                   :when (not (or (some #{'seon.context/render 'seon.context/request} (:refs r))
-                                  (#{'seon.model/request-body 'seon.context/request 'my.root/first-moves!} v)))] v)]
+                   :when (not (or (some #{'seon.ctx.wire/render 'seon.ctx.wire/request} (:refs r))
+                                  (#{'seon.model/request-body 'seon.ctx.wire/request 'my.root/first-moves!} v)))] v)]
     (set (concat by-ref role asks))))
 
 (defn- action-sites
@@ -995,7 +995,7 @@
   "The render proc's state holding agent a1's debug page: context-test's two model turns (each
   recorded the hash of what it sent), root's boot b whose agent a1 is, main and the branch the same db."
   [conn]
-  (let [[db sent [e0 e1]] (#'seon.context-test/sent-turns conn)
+  (let [[db sent [e0 e1]] (#'seon.ctx.wire-test/sent-turns conn)
         db (d/db-with db [{:seon.root/id :root :seon.root/boot "b"} {:seon.agent/key "b/a1" :seon.agent/id :a1}])]
     [{:rid 1 :pending {} :watch #{[:debug :a1]} :waiting {} :kf-wanted #{} :views {} :main-db db
       :branches {[:debug :a1] {:db db}} :view {:agents {}}}
@@ -1024,7 +1024,7 @@
         ;; docs/storage.md#collection: a turn's commit a sweep took is drawn as of its t, from the same records
         (let [b (:seon.model-call/basis (d/pull db [:seon.model-call/basis] e1))
               at (d/commit-as-db (:store db) (:commit b))]
-          (is (= (:messages (seon.context/wire-turn at b)) (:messages (seon.context/wire-turn (d/as-of db (:max-tx at)) b)))
+          (is (= (:messages (seon.ctx.wire/wire-turn at b)) (:messages (seon.ctx.wire/wire-turn (d/as-of db (:max-tx at)) b)))
               "as of its t, the request is the one its commit makes")
           (is (= (:max-tx at) (:t (seon.problems/own (d/as-of db (:max-tx at)) (:e (first (d/datoms db :aevt :seon.agent/key))))))
               "and an agent's problems read there say that t"))
@@ -1315,7 +1315,7 @@
 
 (deftest every-sent-part-names-its-record
   ;; root, 2026-10-26: a part kind with no clause in the debug page's source line made every pass
-  ;; of the render proc throw, so no page answered; each ref kind seon.context/request documents names its record
+  ;; of the render proc throw, so no page answered; each ref kind seon.ctx.wire/request documents names its record
   (doseq [ref [[:section 397 536870918] [:reply "b/a1/3"] [:eval "e3"] [:message "m1"] [:example "example/abc" 12] [:session "demo/g#1"] [:render]]]
     (is (string? (#'ui/source ref)) (pr-str ref))))
 
@@ -1357,7 +1357,7 @@
         pages (into {} (for [m (:to-web @o) :when (= :page (:op m))] [(:k m) (:html m)]))]
     (is (= #{1 2} (set (keys pages))) "both pages are answered: neither waits on the other's render")
     (is (str/includes? (str (pages 1)) "seon.render/view-defect") "the debug page is its error")
-    (is (str/includes? (str (pages 1)) "seon.context/agent-ctx invalid-input") "it says what threw: a turn whose agent the db lacks")
+    (is (str/includes? (str (pages 1)) "seon.ctx/agent-ctx invalid-input") "it says what threw: a turn whose agent the db lacks")
     (is (str/includes? (str (pages 2)) "c-rows") "the agent's own page renders through the same pass")
     (is (some #(and (= :error (:op %)) (= :seon.render/view-defect (get-in % [:data :seon.error/type]))) (:to-api @o))
         "recorded as the problem it is: the api's proc error")
@@ -1538,7 +1538,7 @@
         conv (filterv #(= "#c-rows" (:container %)) units)
         eid #(seon.db/eid branch %1 %2)]
     ;; a cited var is a component of its own when the db holds it (ctx joins the task's references by
-    ;; :var/name: seon.context-test/a-cited-var-redefined-shows-in-the-next-view); this db holds none
+    ;; :var/name: seon.ctx.wire-test/a-cited-var-redefined-shows-in-the-next-view); this db holds none
     (is (= ["task" "status" "citations"] (vec (take 3 (mapv :id task))))
         "the task, how its work stands, what its plan mentions (open problems and added keys only when there are some)")
     (is (= ["turn" "agent-state"] (vec (take-last 2 (mapv :id task)))) "the turn and the agent's state are placed last")
@@ -1550,7 +1550,7 @@
     (let [h (:html (unit-of task "task"))]
       (is (str/includes? h "task · demo") "the task's part, its namespace above its plan")
       ;; how a proof runs is the status's (its verdict, its source, the form that runs it), not repeated in the task's
-      ;; part; this fixture's proof has no source, so the part says what to write (seon.context/not-written)
+      ;; part; this fixture's proof has no source, so the part says what to write (seon.ctx/not-written)
       (is (not (str/includes? h "my.agent/prove")) "no proof's run form, which the status shows"))
     (is (str/includes? (:html (unit-of task "status")) "Your proofs") "how the work stands is the status's")
     (is (= ["system-message" "chat-ask" "conversation-turn-1" "chat-end"]
@@ -1941,7 +1941,7 @@
                                              {:seon.agent/key "b1/a3" :seon.agent/base-commit base :seon.agent/main-program main :seon.agent/task {:seon.task/id "demo/whole"}}]))
             ours (agent-on (d/db-with (d/commit-as-db conn base) (defn-facts 'demo/h "(defn- h [] 1)")))
             a (seon.db/eid ours :seon.agent/key "b1/a3")
-            st (seon.context/status ours (:tree (seon.ctx/build ours a :b)) {})
+            st (seon.ctx.status/status ours (:tree (seon.ctx/build ours a :b)) {})
             b (d/commit-as-db (:store ours) base)
             ch (seon.merge/delta-changes b ours #{})]
         (is (not (contains? st :caused)) "nothing caused")
@@ -1959,7 +1959,7 @@
           (is (not (str/includes? html "demo/f")) "never one it did not change"))
         ;; a branch that changed nothing: the status holds none of them, not a header over an empty answer
         (let [same (d/db-with (d/commit-as-db conn base) [{:seon.agent/key "b1/a3" :seon.agent/base-commit base}])
-              st0 (seon.context/status same (:tree (seon.ctx/build same (seon.db/eid same :seon.agent/key "b1/a3") :b)) {})]
+              st0 (seon.ctx.status/status same (:tree (seon.ctx/build same (seon.db/eid same :seon.agent/key "b1/a3") :b)) {})]
           (is (not-any? #(contains? st0 %) [:caused :attention :without-a-contract :its-merge-carries :merge :unmerged])
               "a branch with no changes holds none of them"))))))
 
@@ -2436,9 +2436,9 @@
         (is (= (rev st) (rev (assoc-in st [:tab :a3 :open] #{"pc-error"}))) "a toggle of another unit does not")))))
 
 (deftest the-model-and-the-page-read-the-same-parts
-  ;; task seon.context/the-context-is-the-agents-evals-and-seons (2026-10-29: "build with both the context
+  ;; task seon.ctx/the-context-is-the-agents-evals-and-seons (2026-10-29: "build with both the context
   ;; render and the web ui render in mind so we don't let one get out of sync with the other"): the
-  ;; parts the model's request holds (seon.context/drawn-parts, the #p-task list of render-ctx) are, by
+  ;; parts the model's request holds (seon.ctx/drawn-parts, the #p-task list of render-ctx) are, by
   ;; element id, the hiccup of the page's units of that id (the page /agent/{name} draws, render-ctx);
   ;; the conversation beside them holds the reply and the evals
   (let [[main branch _] (paged-dbs)
@@ -2757,7 +2757,7 @@
         red (d/db-with db [{:var/name 'demo-test/g-test :seon.test/status :red
                             :seon.test/failures [{:type :fail :expected "(g 1)" :actual "nil" :got "nil"}]}])
         ;; the record pulled where the proof is red, the status read over a db that holds no verdict of it
-        st (seon.context/status db (:tree (seon.ctx/build red aid :b)) {})
+        st (seon.ctx.status/status db (:tree (seon.ctx/build red aid :b)) {})
         [p :as ps] (:proofs st)]
     (is (= 1 (count ps)) (pr-str ps))
     (is (= ['demo-test/g-test :fail] [(:test p) (:status p)]) "the verdict the record holds")

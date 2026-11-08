@@ -1730,7 +1730,7 @@
   and every var its form names (a render its properties declare, :seon.render/hiccup, :seon.render/model): a
   test reaching the entry reaches the render, so a change to the render's body moves it (a red recorded
   while a render was unfinished was marked flaky at the same digest: step (c) of
-  seon.context/the-page-is-the-render-of-what-ctx-pulls). A config map's fields (less-config-fields) are
+  seon.ctx/the-page-is-the-render-of-what-ctx-pulls). A config map's fields (less-config-fields) are
   neither its edges nor its digest's: a config key's own row says whether a map lists it (listed?), so
   a key added, or taken out of the map, moves the tests naming that key and no other."
   {:malli/schema [:=> [:cat :any :string :boolean] :map]}

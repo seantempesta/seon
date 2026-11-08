@@ -5,7 +5,7 @@
   The model edge as data: a provider's reply body read into the completion (task
   seon.model/budgets-are-data-and-spend-is-measured). Run: bin/test seon.model-test"
   (:require [clojure.test :refer [deftest is testing]] [clojure.core.async :as a] [clojure.data.json :as json]
-            [ring-chez.adapter :as adapter] [seon.model :as model] [seon.fx :as fx] [seon.turn :as turn] [seon.contract] [clojure.string :as str] [seon.context] [seon.error] [seon.cost] [seon.fixtures :as fixtures]))
+            [ring-chez.adapter :as adapter] [seon.model :as model] [seon.fx :as fx] [seon.turn :as turn] [seon.contract] [clojure.string :as str] [seon.ctx] [seon.error] [seon.cost] [seon.fixtures :as fixtures]))
 
 (defn- chunk-line [m] (str "data: " (json/write-str m) "\n\n"))
 
@@ -161,7 +161,7 @@
         t1 [system page e1 e2 (m "screen-a")]
         t2 [system page e1 e2 e3 (m "screen-b")]
         miss? (fn [prev cur prompt hit] (turn/cache-miss prev cur {:prompt-tokens prompt :cache-hit-tokens hit} 128))]
-    (is (= 1000 (seon.context/messages-tokens [system])) "the fixture's unit: a message is 1,000 tokens")
+    (is (= 1000 (seon.ctx.wire/messages-tokens [system])) "the fixture's unit: a message is 1,000 tokens")
     (testing "t2 shares four of its six messages: 4,000 of 6,000 tokens, 3,968 in whole blocks"
       (is (nil? (miss? t1 t2 6000 3968)) "a hit of the shared prefix is no miss")
       (is (nil? (miss? t1 t2 6000 3840)) "one block short is the sizer's error, not a miss")
@@ -198,7 +198,7 @@
     {:of 'seon.turn/cache-miss :input 'seon.model-test/requests
      :n "characters of the request"
      :work (str "the messages compared in order until one differs (= on two equal strings reads both: ~0.8 ticks a "
-                "character of the shared prefix); each message's parts sized by their lengths (seon.context/messages-tokens: "
+                "character of the shared prefix); each message's parts sized by their lengths (seon.ctx.wire/messages-tokens: "
                 "no text copied, so no bytes per character); the error map made once")
      :growth :linear
      :per-n {:ticks 0.8 :bytes 0.0}

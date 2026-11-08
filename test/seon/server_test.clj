@@ -329,7 +329,7 @@
   ;; pulling and they can do easy ops there on the atom rather than learning datalog". An agent
   ;; attached from outside reads its task in @ctx, changes the plan by swap! (no query, no my.*
   ;; function), and the change is on its branch, in its next @ctx, on its page, and told as its
-  ;; next read, which holds the page whole (seon.context/request: an outside read ends with the render as the call Seon made)
+  ;; next read, which holds the page whole (seon.ctx.wire/request: an outside read ends with the render as the call Seon made)
   (let [plan "Work: f0 returns its input."
         [first-turn _ swapped page elsewhere on-branch next-turn]
         (at/in-agent (fn [{:keys [agent task]}]

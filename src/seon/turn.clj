@@ -18,7 +18,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.ctx :as ctx] [seon.edn :as sedn] [seon.profile :as profile] [seon.intr :as intr] [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str]
             [seon.agent :as agent] [seon.repl :as repl] [seon.task :as task] [seon.reconcile :as r]
-            [seon.proofs :as proofs] [seon.context :as context] [seon.merge :as pm] [seon.problems :as problems]
+            [seon.proofs :as proofs] [seon.ctx.status :as status] [seon.ctx.wire :as wire] [seon.merge :as pm] [seon.problems :as problems]
             [seon.stage :as stage] [my.branch :as branch] [seon.reader :as reader] [seon.learn :as learn] [seon.config :as cfg] [seon.lib :as lib] [seon.print :as print]
             [seon.error :as err] [datahike.api :as d] [seon.db :as pdb] [seon.render :as render] [seon.model :as model] [clojure.data.json :as json]))
 
@@ -55,7 +55,7 @@
 (defn- test-error!
   "Record on this agent's branch whether its test run test-run failed as a whole: the error as data on
   the agent (:seon.agent/test-error), retracted when a run answers;
-  nothing written when it already says so (seon.context/status reads it)."
+  nothing written when it already says so (seon.ctx.status/status reads it)."
   {:malli/schema [:=> [:cat :any] :any]}
   [test-run]
   (let [k (:key @agent/state)
@@ -68,7 +68,7 @@
   "What a turn starts from: the proofs run now by the test service (seon.prove: one run per branch
   and tx whoever asks, in a fork of this agent), their results facts on this branch
   (seon.agent/record-results!), a run that failed as a whole too (test-error!), and the task as the
-  branch holds it. How the work stands is the status (seon.context/status), drawn from those
+  branch holds it. How the work stands is the status (seon.ctx.status/status), drawn from those
   facts (`status-now`): nothing here is held for it. {:test-run :task}."
   {:malli/schema [:=> [:cat :seon.task/id] :map]}
   [id]
@@ -79,12 +79,12 @@
     {:test-run test-run :task (task/task (agent/db) id)}))
 
 (defn- status-now
-  "How the work stands now, the data a turn decides from: what the page's status component kept (seon.render/kept-of), one reaction for both, so a status nothing moved costs nothing; with none (it threw, or a layout places none) seon.context/status of the branch and @ctx. The branch may have changed
+  "How the work stands now, the data a turn decides from: what the page's status component kept (seon.render/kept-of), one reaction for both, so a status nothing moved costs nothing; with none (it threw, or a layout places none) seon.ctx.status/status of the branch and @ctx. The branch may have changed
   what status calls, so a status that throws is its error, the turn's to give the agent (docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map), never an
   empty status: no reason is not done (AGENTS 9, unknown is not {})."
   {:malli/schema [:=> [:cat] [:or :map :seon.error/base]]}
   [] (try (or (render/kept-of (repl/page-walk) '[seon.render.ui/status])
-              (context/status (agent/db) @ctx/ctx {}))
+              (status/status (agent/db) @ctx/ctx {}))
           (catch Throwable e
             (when (:interrupted (ex-data e)) (throw e))
             (agent/error-map e 'seon.turn/status-now))))
@@ -137,7 +137,7 @@
   to this agent (a person's, root's at a stage boundary or a refused verdict, another agent's:
   seon.agent/deliver!, the entity root's writer wrote on main, with what root wrote of the agent's own
   entities). Its entity on the branch is its delivery, and the record's
-  messages read it (seon.context/turn-members); nothing is held for the turn's basis. An effect's outcome
+  messages read it (seon.ctx/turn-members); nothing is held for the turn's basis. An effect's outcome
   (:from :fx, in the inbox) is no message: the eval that asked holds its answer. A read that is not the
   run's turn (take? false: an observer's read of an agent its model drives) delivers nothing."
   {:malli/schema [:=> [:cat :boolean nat-int?] :nil]}
@@ -178,7 +178,7 @@
   "What a turn's context is built from, recorded instead of its text (a model call stores its
   basis, not its prompt): the commit it reads (the run-ahead writes committed now, as the
   model call's wait would), the task and turn (its number: docs/turn.md#the-turn-is-a-number). Everything the request shows is a fact of that
-  commit: how the work stands (seon.context/status), what the turn was delivered (deliver!)."
+  commit: how the work stands (seon.ctx.status/status), what the turn was delivered (deliver!)."
   {:malli/schema [:=> [:cat :seon.task/id :int :int :seon.model-call/origin :boolean] :seon.model-call/basis]}
   [task turn max-turns origin merge?]
   (agent/commit!)
@@ -203,7 +203,7 @@
   "A :seon.turn/cache-miss when a request's prompt cache hit falls more than one block short of
   the prefix it shares with the request before it in its run, else nil. The prefix is the leading
   messages both requests hold equal; its tokens are the provider's own prompt count (usage),
-  apportioned by the one sizer's share of them (seon.context/messages-tokens) and rounded down to
+  apportioned by the one sizer's share of them (seon.ctx.wire/messages-tokens) and rounded down to
   the provider's block (:seon.config.ai/cache-block-tokens, 0: no check). Measured on 94 recorded
   turn pairs: a hit is 0.87-1.12 of the shared prefix so sized, and none is short."
   {:malli/schema [:=> [:cat [:maybe [:sequential :map]] [:sequential :map] :map nat-int?] [:maybe :map]]}
@@ -213,8 +213,8 @@
           shared (count (take-while true? (map = prev ms)))]
       ;; nothing shared (the first message differs): no prefix the cache could serve
       (when (pos? shared)
-        (let [expected (long (* prompt-tokens (/ (double (context/messages-tokens (subvec ms 0 shared)))
-                                                 (context/messages-tokens ms))))
+        (let [expected (long (* prompt-tokens (/ (double (wire/messages-tokens (subvec ms 0 shared)))
+                                                 (wire/messages-tokens ms))))
               floor (* block (quot expected block))]
           (when (< cache-hit-tokens (- floor block))
         (contract/error :seon.turn/cache-miss #'seon.turn/cache-miss
@@ -244,13 +244,13 @@
   []
   (let [w (repl/page-walk)
         ;; a tree with no page to show (a pattern that holds none of it) is shown nothing
-        call (some-> (render/page-call w (render/page-lists w)) context/render-calls)]
+        call (some-> (render/page-call w (render/page-lists w)) wire/render-calls)]
     (if call (repl/insert! "seon" [call]) [])))
 
 (defn- open-turn!
   "Turn n of task opens: what it takes, the page shown if it moved, then the turn (the agent's number and its model call's first facts, with the main and merge base it heard), then its
   basis: the commit that holds them, so everything its request and its provider are made from is a fact of that commit
-  (seon.context/wire-turn makes them again there). A model's turn and an outside agent's reply open alike. Answers [its model call's id, its basis, the page eval it ran]. See docs/turn.md#the-turn-is-a-number."
+  (seon.ctx.wire/wire-turn makes them again there). A model's turn and an outside agent's reply open alike. Answers [its model call's id, its basis, the page eval it ran]. See docs/turn.md#the-turn-is-a-number."
   {:malli/schema [:=> [:cat :seon.task/id :int [:maybe :int] :boolean [:maybe :string]] [:tuple :string :map [:vector :map]]]}
   [task n max-turns merge? model-name]
   (let [k (:key @agent/state) id (str k "/" n)]
@@ -262,7 +262,7 @@
       [id (cond-> (assoc (basis! task n max-turns :model merge?) :agent k) model-name (assoc :model model-name)) shown])))
 
 (defn- act!
-  "One model turn: the page shown to the agent if it moved (`show-page!`), the agent's turn number moves (docs/turn.md#the-turn-is-a-number), the agent's context (its one tree read by seon.context/request, the page among it as evals; the status s is the turn's own) to the model, the reply's eval calls
+  "One model turn: the page shown to the agent if it moved (`show-page!`), the agent's turn number moves (docs/turn.md#the-turn-is-a-number), the agent's context (its one tree read by seon.ctx.wire/request, the page among it as evals; the status s is the turn's own) to the model, the reply's eval calls
   through the one REPL path, each answered as its own result, the turn's facts on its model call on the branch. Answers the loop state after it, or the
   provider error. The model call is an effect (my.fx :model, session FX1): root's model owner
   admits, performs and answers it; the API key never enters this process."
@@ -275,12 +275,12 @@
         k (:key @agent/state)
         [id basis _] (open-turn! (:seon.task/id t) n max-turns (boolean merge?) model-name)
         ;; the provider as the config stands at the basis (main's as the turn heard it, over the task's own), never one copied at boot
-        provider (context/provider-of (agent/db) basis)
+        provider (wire/provider-of (agent/db) basis)
         _ (agent/transact! [{:seon.model-call/id id :seon.model-call/basis basis}])
         _ (agent/commit!)
         ;; the request is the agent's records, the page among them as evals (show-page!): made on the db that holds them
         db (agent/db)
-        {:keys [messages]} (context/render db basis {:walk (repl/page-walk)})
+        {:keys [messages]} (wire/render db basis {:walk (repl/page-walk)})
         ;; a hash of the bytes sent, which the debug page compares with its redraw
         _ (agent/transact! [{:seon.model-call/id id :seon.model-call/sent-hash (lib/digest (sedn/encode messages))}])
         _ (agent/commit!)
@@ -300,7 +300,7 @@
             _ (when-let [miss (cache-miss prev messages c (cfg/value :seon.config.ai/cache-block-tokens {:task t :model model-name}))]
                 (swap! agent/state update :errors err/note miss :effect id (System/currentTimeMillis)))
             ;; what it answered and how it stopped (its reply, reasoning and finish), the reply's usage and model (seon.model-call, beside the basis it
-            ;; read: seon.context/render makes the text from it), as soon as it answered: an eval of this reply that never ends leaves the call
+            ;; read: seon.ctx.wire/render makes the text from it), as soon as it answered: an eval of this reply that never ends leaves the call
             ;; recorded and its cost counted, never reading as a call nobody answered (deepseek-run6's records agent)
             _ (agent/transact! [(cond-> (merge (usage c) {:seon.model-call/id id :seon.model-call/reply (:text c) :seon.model-call/ms model-ms})
                                   (:truncated? c) (assoc :seon.model-call/truncated true)
@@ -330,7 +330,7 @@
                     ;; what this turn's parts showed, by producer, and what it evaluated (waste)
                     (update :log (fnil conj []) {:n turn
                                                  :shown {'seon.render.ui/cited (set (keep :seon.cite/name (task/task-cites db (:seon.task/id t))))
-                                                         'seon.context/status (set (map :test (:proofs s)))}
+                                                         'seon.ctx.status/status (set (map :test (:proofs s)))}
                                                  :items (mapv (fn [{:keys [code response]}] {:form code :error (:ex response)}) calls)}))
           ;; a merge turn: each turn of a merge task; a whole task's own work comes first, so
           ;; only a turn with what both sides changed still to resolve
@@ -344,7 +344,7 @@
   on it. take?: the read is the run's turn (its
   model is outside): it takes the messages delivered and Seon shows the page as an eval, as before a model's turn; else it is an
   observer's, and leaves both for the model's next turn. wire?: the request body as JSON, the bytes a provider is sent
-  (seon.context/wire-turn over the read's basis), for the text a person reads. See docs/server.md#working-a-task-from-a-worktree."
+  (seon.ctx.wire/wire-turn over the read's basis), for the text a person reads. See docs/server.md#working-a-task-from-a-worktree."
   {:malli/schema [:function [:=> [:cat :seon.task/id :boolean] :string] [:=> [:cat :seon.task/id :boolean :boolean] :string]]}
   ([task take?] (context-block task take? false))
   ([task take? wire?]
@@ -367,9 +367,9 @@
          basis (assoc (basis! task turn max-turns :outside true) :agent k)
          walk (repl/page-walk)
          db (agent/db)
-         {:keys [messages]} (context/render db basis {:walk walk})
+         {:keys [messages]} (wire/render db basis {:walk walk})
          ;; as a person reads it: the system prompt, then each record as the call made and its result
-         text (context/read-text db basis messages wire?)]
+         text (wire/read-text db basis messages wire?)]
      ;; the read is a model call of this agent, as a model turn's is: what it was built from and what it cost
      (agent/transact! [(cond-> {:seon.model-call/id (str k "/read-" n) :seon.model-call/agent {:seon.agent/key k} :seon.model-call/n n
                                 :seon.model-call/origin :outside :seon.model-call/basis basis}

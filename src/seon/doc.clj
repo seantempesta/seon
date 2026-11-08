@@ -488,7 +488,7 @@
 (defn terms
   "Text s's terms, its identifier tokens, lower case: s split at every character that is no letter or digit
   and between a lower and an upper case letter, those of two characters or more. What search and relevance
-  match (`words`, seon.context/relevance's lexical feature), so `seon.vector/near` and `near-of` match the words near and of. One
+  match (`words`, seon.ctx.search/relevance's lexical feature), so `seon.vector/near` and `near-of` match the words near and of. One
   pass over the characters: on 150 of the program's forms a third of the time of a regex split
   and a sixteenth of its bytes, the same tokens."
   {:malli/schema [:=> [:cat [:maybe :string]] [:vector :string]]}
@@ -533,7 +533,7 @@
   "Each text's BM25 score (Robertson and Zaragoza 2009; k1 and b :seon.config.render/relevance-features's
   :bm25-k1 and :bm25-b) for query words qs, fs each text's word counts and lens its length (in whatever
   unit, the same for every text); its idf counted over fs, so the texts scored are their own corpus and no
-  index is read. In fs's order. Relevance's (seon.context/relevance) pool scorer, whose weights are fitted to it;
+  index is read. In fs's order. Relevance's (seon.ctx.search/relevance) pool scorer, whose weights are fitted to it;
   the store's own texts are ranked by FTS5 (`tokens`, `text-index`). See docs/vector.md#search."
   {:malli/schema [:=> [:cat [:set :string] [:sequential [:map-of :string :int]] [:sequential number?]] [:vector number?]]}
   [qs fs lens]

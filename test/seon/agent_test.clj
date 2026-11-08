@@ -9,7 +9,7 @@
   (:require [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [clojure.edn :as edn]
             [clojure.string :as str] [seon.agent :as agent] [seon.proofs :as proofs] [seon.contract :as contract]
             [datahike.api :as d] [seon.db :as pdb] [seon.test-store :as ts] [seon.program-test] [seon.lib :as lib] [seon.program :as program] [seon.sock :as sock]
-            [seon.fx :as fx] [seon.cost :as cost] [seon.config :as cfg] [seon.merge :as pm] [seon.profile :as profile] [seon.task :as task] [seon.writer :as writer] [seon.repl :as repl] [seon.ctx] [seon.render] [seon.turn] [my.test :as mt] [test-runner :as runner] [seon.context-test] [my.task] [my.agent] [seon.template :as tpl] [seon.stall-proofs] [clojure.core.async]))
+            [seon.fx :as fx] [seon.cost :as cost] [seon.config :as cfg] [seon.merge :as pm] [seon.profile :as profile] [seon.task :as task] [seon.writer :as writer] [seon.repl :as repl] [seon.ctx] [seon.render] [seon.turn] [my.test :as mt] [test-runner :as runner] [seon.ctx.wire-test] [my.task] [my.agent] [seon.template :as tpl] [seon.stall-proofs] [clojure.core.async]))
 
 (def ^:private await-file
   "seon.await, which a root (importing src only) loads by this path."
@@ -1086,7 +1086,7 @@
 
 (deftest a-resumed-branch-holds-what-main-gained
   ;; step E run #11 (2026-10-23): a kept branch made before main imported test/ was resumed,
-  ;; and its agent held seon.context-test with no vars (seon.agent/init! unmapped every
+  ;; and its agent held seon.ctx.wire-test with no vars (seon.agent/init! unmapped every
   ;; definition main had that the branch did not), so the design never reached its proof's
   ;; fixtures; and it ran the branch's old version of a function main had redefined since.
   ;; A resumed agent runs main with the branch's own changes since its merge base
@@ -1278,12 +1278,12 @@
   ;; repetition loops asking for answers the model could not see. Now each call of the one
   ;; tool, eval, is answered as its own tool message before the next model call: the scripted model
   ;; (seon.fixtures/two-calls) writes its second call from the answer its first call got. (A reply's text and reasoning are
-  ;; an assistant message of their own before its calls, left out here: seon.context-test has them.)
+  ;; an assistant message of their own before its calls, left out here: seon.ctx.wire-test has them.)
   (let [[end msgs] (in-agent (fn [{:keys [task ns]}]
                                (let [run (str ns "/t#calls")]
                                  [(str "(seon.turn/work! {:task " (pr-str task) " :max-turns 2})")
                                   (str "(let [db (seon.agent/db)]"
-                                       " (->> (:messages (seon.context/render db {:commit (datahike.api/commit-id db) :task " (pr-str task) 
+                                       " (->> (:messages (seon.ctx.wire/render db {:commit (datahike.api/commit-id db) :task " (pr-str task) 
                                        "                                       :turn 3 :max-turns 2 :origin :model :agent (:key @seon.agent/state)}))"
                                        "      (filter #(#{\"assistant\" \"tool\"} (:role %))) (remove #(and (= \"assistant\" (:role %)) (empty? (:tool-calls %)))) (mapv #(select-keys % [:role :tool-calls :tool-call-id :content]))))")]))
                              {:config {:seon.config.ai/script 'seon.fixtures/two-calls}})
@@ -1310,12 +1310,12 @@
                             [(str "(seon.turn/work! {:task " (pr-str task) " :max-turns 2})")
                              (str "(let [db (seon.agent/db) k (:key @seon.agent/state)"
                                   "      basis (fn [n] {:commit (datahike.api/commit-id db) :task " (pr-str task) " :turn n :max-turns 2 :origin :model :agent k})"
-                                  "      msgs (fn [n] (let [b (:seon.model-call/basis (datahike.api/pull db '[:seon.model-call/basis] [:seon.model-call/id (str k \"/\" n)]))] (:messages (seon.context/render (datahike.api/commit-as-db (:store db) (:commit b)) b))))"
+                                  "      msgs (fn [n] (let [b (:seon.model-call/basis (datahike.api/pull db '[:seon.model-call/basis] [:seon.model-call/id (str k \"/\" n)]))] (:messages (seon.ctx.wire/render (datahike.api/commit-as-db (:store db) (:commit b)) b))))"
                                   "      calls (fn [ms] (vec (keep #(some-> % :tool-calls first :code) ms)))"
-                                  "      m1 (msgs 1) m2 (msgs 2) m3 (:messages (seon.context/render db (basis 3)))"
+                                  "      m1 (msgs 1) m2 (msgs 2) m3 (:messages (seon.ctx.wire/render db (basis 3)))"
                                   "      redrawn (fn [n] (let [m (datahike.api/pull db '[:seon.model-call/sent-hash :seon.model-call/basis] [:seon.model-call/id (str k \"/\" n)])"
                                   "                              b (:seon.model-call/basis m)]"
-                                  "                          [(:seon.model-call/sent-hash m) (seon.lib/digest (seon.edn/encode (:messages (seon.context/render (datahike.api/commit-as-db (:store db) (:commit b)) b))))]))]"
+                                  "                          [(:seon.model-call/sent-hash m) (seon.lib/digest (seon.edn/encode (:messages (seon.ctx.wire/render (datahike.api/commit-as-db (:store db) (:commit b)) b))))]))]"
                                   "  {:calls [(calls m1) (calls m2) (calls m3)] :prefix [(= m1 (subvec m2 0 (count m1))) (= m2 (subvec m3 0 (count m2)))]"
                                   "   :by (vec (sort (datahike.api/q '[:find [?c ...] :where [?e :seon.eval/by \"seon\"] [?e :seon.eval/code ?c]] db)))"
                                   "   :hashes [(redrawn 1) (redrawn 2)]"
@@ -1347,7 +1347,7 @@
                       evals
                       "(binding [*ns* (the-ns 'my.render)] (eval '(defn render-ctx [] (throw (ex-info \"broken render\" {})))))"
                       "(do (vreset! (:shown (:walk @seon.agent/state)) nil) (#'seon.turn/show-page!))"
-                      "(let [db (seon.agent/db)] (peek (filterv #(= \"tool\" (:role %)) (:messages (seon.context/render db {:commit (datahike.api/commit-id db) :task (:task @seon.agent/state) :turn 1 :max-turns 9 :origin :model :agent (:key @seon.agent/state)})))))"])
+                      "(let [db (seon.agent/db)] (peek (filterv #(= \"tool\" (:role %)) (:messages (seon.ctx.wire/render db {:commit (datahike.api/commit-id db) :task (:task @seon.agent/state) :turn 1 :max-turns 9 :origin :model :agent (:key @seon.agent/state)})))))"])
         [_ _ one _ _ two _ shown broken-request] (mapv :value (vec rs))]
     (is (= ["(my.render/render-ctx)"] (mapv second one)) "the first call showed the page whole, the second, with nothing moved, nothing")
     (is (= ["(my.render/render-ctx)" "(my.render/render-changes)"] (mapv second two)) "a plan changed: one eval of what moved")
@@ -1421,7 +1421,7 @@
 ;; docs/render.md#a-redo-is-an-explicit-bust: collection may have swept the commit a redo needs: the same datoms as of t, never a later page
 (deftest a-page-whose-commit-is-gone-is-drawn-as-of-its-t
   (let [[at] (in-agent ["(let [db (seon.agent/db) gone (assoc-in db [:meta :datahike/parents] #{(random-uuid)}) t (:max-tx db)]
-                           [(:max-tx (#'seon.context/at-t gone t)) t (some? (:origin-db (#'seon.context/at-t gone (dec t))))])"])
+                           [(:max-tx (#'seon.ctx.wire/at-t gone t)) t (some? (:origin-db (#'seon.ctx.wire/at-t gone (dec t))))])"])
         [was t as-of?] (:value at)]
     (is (= t was) "the commit at t itself needs no walk")
     (is (true? as-of?) "past what collection kept, a db as of t")))
@@ -1480,7 +1480,7 @@
                              (let [run (str ns "/t#throws")]
                                [(str "(seon.turn/work! {:task " (pr-str task) " :max-turns 1})")
                                 (str "(let [db (seon.agent/db)]"
-                                     " (->> (:messages (seon.context/render db {:commit (datahike.api/commit-id db) :task " (pr-str task) 
+                                     " (->> (:messages (seon.ctx.wire/render db {:commit (datahike.api/commit-id db) :task " (pr-str task) 
                                      "                                       :turn 2 :max-turns 1 :origin :model :agent (:key @seon.agent/state)}))"
                                      "      (filter #(= \"tool\" (:role %))) (remove #(clojure.string/includes? (:content %) \"seon.render.ui/\")) (mapv #(select-keys % [:tool-call-id :content]))))")]))
                            {:config {:seon.config.ai/script 'seon.fixtures/calls-one-throws}})
@@ -1495,7 +1495,7 @@
                              (let [run (str ns "/t#refused")]
                                [(str "(seon.turn/work! {:task " (pr-str task) " :max-turns 1})")
                                 (str "(let [db (seon.agent/db)]"
-                                     " (->> (:messages (seon.context/render db {:commit (datahike.api/commit-id db) :task " (pr-str task) 
+                                     " (->> (:messages (seon.ctx.wire/render db {:commit (datahike.api/commit-id db) :task " (pr-str task) 
                                      "                                       :turn 2 :max-turns 1 :origin :model :agent (:key @seon.agent/state)}))"
                                      "      (filter #(= \"tool\" (:role %))) (remove #(clojure.string/includes? (:content %) \"seon.render.ui/\")) (mapv #(select-keys % [:tool-call-id :content]))))")]))
                            {:config {:seon.config.ai/script 'seon.fixtures/calls-one-refused}})
@@ -1517,7 +1517,7 @@
                              (let [run (str ns "/t#forms")]
                                [(str "(seon.turn/work! {:task " (pr-str task) " :max-turns 1})")
                                 (str "(let [db (seon.agent/db)]"
-                                     " (->> (:messages (seon.context/render db {:commit (datahike.api/commit-id db) :task " (pr-str task) 
+                                     " (->> (:messages (seon.ctx.wire/render db {:commit (datahike.api/commit-id db) :task " (pr-str task) 
                                      "                                       :turn 2 :max-turns 1 :origin :model :agent (:key @seon.agent/state)}))"
                                      "      (filter #(= \"tool\" (:role %))) (remove #(clojure.string/includes? (:content %) \"seon.render.ui/\")) (mapv :content)))")]))
                            {:config {:seon.config.ai/script 'seon.fixtures/two-forms-in-a-call}})
@@ -1531,11 +1531,11 @@
 (deftest a-turn-that-throws-is-the-agents-to-read-and-the-second-ends-its-work
   ;; docs/failure-points.md (a turn of the agent's loop): md-scan #16 registered :seon.ref/block with list keys its
   ;; scan did not make yet, the registration re-armed seon.ref/scan, and the request's own scan threw after the
-  ;; turn's draw, out of work! (outcome :no-end). Here the agent breaks Seon's own seon.context/render, which a turn
+  ;; turn's draw, out of work! (outcome :no-end). Here the agent breaks Seon's own seon.ctx.wire/render, which a turn
   ;; calls after its draw: the throw is told to the agent and the loop goes on; the second in a row, with no model
   ;; turn between, ends the work :error, and work! answers its end
   (let [[_ end] (in-agent (fn [{:keys [task ns]}]
-                            ["(in-ns 'seon.context) (clojure.core/defn render [& _] (throw (ex-info \"boom: Seon's own render, changed\" {})))"
+                            ["(in-ns 'seon.ctx.wire) (clojure.core/defn render [& _] (throw (ex-info \"boom: Seon's own render, changed\" {})))"
                              (str "(seon.turn/work! {:task " (pr-str task) " :max-turns 3})")])
                           {:config {:seon.config.ai/script 'seon.fixtures/two-calls}})
         end (:value end)]
@@ -1553,7 +1553,7 @@
   ;; md-scan #27: the agent's change broke the status, every turn drew none, and the agent made 156 model calls past its
   ;; cap of 40: a turn with no status ends at the cap as every turn does
   (let [[_ end] (in-agent (fn [{:keys [task ns]}]
-                            ["(in-ns 'seon.context) (clojure.core/defn status [& _] (throw (ex-info \"boom: the status, broken\" {})))"
+                            ["(in-ns 'seon.ctx.status) (clojure.core/defn status [& _] (throw (ex-info \"boom: the status, broken\" {})))"
                              (str "(seon.turn/work! {:task " (pr-str task) " :max-turns 3})")])
                           {:config {:seon.config.ai/script 'seon.fixtures/two-calls}})
         end (:value end)]
@@ -2235,7 +2235,7 @@
   ;; merge with no turn left. Now its prove takes the gate's answer and the red is the agent's, on its status (the gate answered at its seam)
   (let [t 'seon.repl-test/a-process-proof-of-the-gate
         prove "(let [r (my.agent/prove)] {:proofs (:proofs r) :deferred (:deferred r) :ran (:ran r) :line (:seon.print/code (my.agent/prove-summary {} r))})"
-        reasons "(mapv :reason (:reasons (seon.context/status (seon.agent/db) @seon.ctx/ctx {})))"
+        reasons "(mapv :reason (:reasons (seon.ctx.status/status (seon.agent/db) @seon.ctx/ctx {})))"
         [_ _ red red-reasons _ _ green green-reasons again asks]
         (in-agent (fn [_] [(answers-gate t) (process-proof "a-process-proof-of-the-gate" 3) prove reasons
                            "(reset! user/gate-answer :pass)" (process-proof "a-process-proof-of-the-gate" 2) prove reasons prove "@user/gate-asks"])
@@ -2388,7 +2388,7 @@
                    " db @(:conn sys) t (seon.task/task db \"" % "/ws\")"
                    " b (:db @(seon.root/call! sys {:op :write :req {:op :branch-db :branch (seon.task/default-branch \"" % "/ws\")}}))"
                    " a (seon.db/eid b :seon.agent/key (:seon.task/agent t))]"
-                   " [(:seon.task/outcome t) (seon.reconcile/task-state (seon.reconcile/index db) \"" % "/ws\") (mapv (juxt :reason :symbol) (:reasons (seon.context/status b (:tree (seon.ctx/build b a :b)) {})))])")
+                   " [(:seon.task/outcome t) (seon.reconcile/task-state (seon.reconcile/index db) \"" % "/ws\") (mapv (juxt :reason :symbol) (:reasons (seon.ctx.status/status b (:tree (seon.ctx/build b a :b)) {})))])")
         [_ r] (in-agent #(vector {:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")} {:op :eval :agent "root" :code (code (:ns %))})
                         {})
         [outcome state reasons] (:value r)]
@@ -2408,7 +2408,7 @@
                    " db @(:conn sys) t (seon.task/task db \"" % "/wr\")"
                    " b (:db @(seon.root/call! sys {:op :write :req {:op :branch-db :branch (seon.task/default-branch \"" % "/wr\")}}))"
                    " a (seon.db/eid b :seon.agent/key (:seon.task/agent t))]"
-                   " [(:seon.task/outcome t) (seon.reconcile/task-state (seon.reconcile/index db) \"" % "/wr\") (mapv :reason (:reasons (seon.context/status b (:tree (seon.ctx/build b a :b)) {})))])")
+                   " [(:seon.task/outcome t) (seon.reconcile/task-state (seon.reconcile/index db) \"" % "/wr\") (mapv :reason (:reasons (seon.ctx.status/status b (:tree (seon.ctx/build b a :b)) {})))])")
         [_ r] (in-agent #(vector {:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")} {:op :eval :agent "root" :code (code (:ns %))})
                         {})
         [outcome state reasons] (:value r)]
@@ -2440,7 +2440,7 @@
                   " b (:db @(seon.root/call! sys {:op :write :req {:op :branch-db :branch (seon.task/default-branch \"" % "/st\")}}))"
                   ;; a stage's turns: the model calls whose basis names the stage's task (the one agent works both, its turns one sequence)
                   " sent (fn [id] (mapv second (sort-by first (for [[n bs] (datahike.api/q '[:find ?n ?bs :where [?m :seon.model-call/n ?n] [?m :seon.model-call/origin :model] [?m :seon.model-call/basis ?bs]] b) :when (= id (:task bs))]"
-                  "                                              [n (:messages (seon.context/render (datahike.api/commit-as-db (:store b) (:commit bs)) bs))]))))"
+                  "                                              [n (:messages (seon.ctx.wire/render (datahike.api/commit-as-db (:store b) (:commit bs)) bs))]))))"
                   " boundary (datahike.api/q '[:find ?mid . :in $ ?k :where [?a :seon.agent/key ?k] [?m :seon.message/to ?a] [?m :seon.message/from \"root\"] [?m :seon.message/id ?mid]] b (:seon.agent/key (:seon.task/agent (datahike.api/pull @(:conn sys) '[{:seon.task/agent [:seon.agent/key]}] [:seon.task/id \"" % "/st\"]))))]"
                   " {:ended ended :design (sent \"" % "/st\") :implement (sent \"" % "/st-implement\") :boundary boundary})")
         names (volatile! nil)
@@ -2495,7 +2495,7 @@
     (is (and pid1 (= pid1 pid2)) (str "one process for both wakes: " pid1 " " pid2))))
 
 (deftest a-text-reply-stays-in-the-history
-  ;; task seon.context/the-context-is-the-agents-evals-and-seons (R1): a reply of text with no call
+  ;; task seon.ctx/the-context-is-the-agents-evals-and-seons (R1): a reply of text with no call
   ;; is the agent winding down; the record read only evals and messages, so the wake that
   ;; followed it sent a history without it. It is an assistant message of the next request
   ;; its script is named in config, as data, so seon.model/scripted is named here for the reach digest: a fix there moved no digest of
@@ -2587,7 +2587,7 @@
                                          "   (let [db (:db @(seon.root/call! sys {:op :write :req {:op :branch-db :branch (seon.task/default-branch " (pr-str w) ")}}))]"
                                          "     {:evals (mapv #(datahike.api/pull db '[:seon.eval/id :seon.eval/by :seon.eval/code] %) (datahike.api/q '[:find [?e ...] :in $ ?k :where [?a :seon.agent/key ?k] [?e :seon.eval/agent ?a]] db k))"
                                          "      :woken (let [[_ bs] (last (sort-by first (datahike.api/q '[:find ?n ?bs :in $ ?k :where [?a :seon.agent/key ?k] [?c :seon.model-call/agent ?a] [?c :seon.model-call/n ?n] [?c :seon.model-call/basis ?bs]] db k)))"
-                                         "                   ms (:messages (seon.context/render (datahike.api/commit-as-db (:store db) (:commit bs)) bs))]"
+                                         "                   ms (:messages (seon.ctx.wire/render (datahike.api/commit-as-db (:store db) (:commit bs)) bs))]"
                                          "               {:codes (vec (keep #(some-> % :tool-calls first :code) ms)) :users (vec (keep #(when (= \"user\" (:role %)) (:content %)) ms))})})))")}]))
                         {:config {:seon.config.ai/script 'seon.fixtures/wait-call}
                          :decls [{:seon.task/name "w" :seon.task/plan "Wait." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]})
@@ -2619,7 +2619,7 @@
                               (str "(let [db (seon.agent/db) id (str (:key @seon.agent/state) \"/1\")"
                                    "      m (datahike.api/pull db '[:seon.model-call/sent-hash :seon.model-call/basis :seon.model-call/error] [:seon.model-call/id id])"
                                    "      b (:seon.model-call/basis m)"
-                                   "      ms (:messages (seon.context/render (datahike.api/commit-as-db (:store db) (:commit b)) b))]"
+                                   "      ms (:messages (seon.ctx.wire/render (datahike.api/commit-as-db (:store db) (:commit b)) b))]"
                                    "  {:sent-hash (:seon.model-call/sent-hash m) :error (:seon.error/type (:seon.model-call/error m))"
                                    "   :redrawn (seon.lib/digest (seon.edn/encode ms)) :roles (mapv :role ms)"
                                    "   :read (mapv :content ms)})")])
@@ -3007,10 +3007,10 @@
   ;; queue before anything else, each recorded as any eval is, by whoever asked, at turn 0 and with no call id. One that
   ;; throws is recorded with its error and the rest run, as a reply's calls do (owner, 2026-11-08). A reader of the
   ;; conversation then sees them in order and, in the request, as calls of their own.
-  (let [read (str "(let [c @seon.ctx/ctx db (seon.agent/db) es (map #(get-in c [:evals (first %)]) (:evals (seon.context/turn-members db c (second (first (seon.context/turns c))))))] "
+  (let [read (str "(let [c @seon.ctx/ctx db (seon.agent/db) es (map #(get-in c [:evals (first %)]) (:evals (seon.ctx/turn-members db c (second (first (seon.ctx/turns c))))))] "
                   "{:turn (seon.agent/turn-now) "
                   " :records (mapv (fn [v] [(:seon.eval/by v) (:seon.eval/intent v) (:seon.eval/call-id v) (some? (:ex (seon.db/response-of db v))) (:value (seon.db/response-of db v))]) es) "
-                  " :roles (mapv :role (drop 2 (:messages (seon.context/render db {:agent (:key @seon.agent/state) :commit (datahike.api/commit-id db) :task \"x\" :turn 1 :max-turns 1 :origin :outside} {:walk (seon.repl/page-walk)}))))})")
+                  " :roles (mapv :role (drop 2 (:messages (seon.ctx.wire/render db {:agent (:key @seon.agent/state) :commit (datahike.api/commit-id db) :task \"x\" :turn 1 :max-turns 1 :origin :outside} {:walk (seon.repl/page-walk)}))))})")
         code (str "(let [id (c/spawn! sys {:evals [[\"Add.\" \"(+ 1 2)\"] [\"Throw.\" \"(throw (ex-info \\\"boom\\\" {}))\"] [\"Never.\" \"(+ 3 4)\"]]}) "
                   "r @(c/submit! sys id " (pr-str read) " {:origin :outside})] "
                   "(c/kill! sys id) (:value r))")

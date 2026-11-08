@@ -769,7 +769,7 @@
 (defn reconcile-index
   "The reconciler's index of db (seon.reconcile/index), advanced from the one this process held for
   the db it last asked about by what differs, at first from main's as the fork server handed it
-  (seon.fork-server/index-at-fork); listed whole only when it holds none. What seon.context/status
+  (seon.fork-server/index-at-fork); listed whole only when it holds none. What seon.ctx.status/status
   asks for main's claims. It keeps the commit it is of, never the db. See docs/render.md#how-the-work-stands."
   {:malli/schema [:=> [:cat :seon.host/db] :map]}
   [db]
@@ -1427,7 +1427,7 @@
 (defn- start-ns
   "The namespace agent's REPL starts in: its task's :seon.task/ns on db (task its :seon.task/id), made as an ns form
   would make it when the program has none (clojure.core referred), else its own scratch namespace nsx (a task that
-  names no namespace). Its first eval runs there and its context pulls it (seon.context/current-ns); the REPL's
+  names no namespace). Its first eval runs there and its context pulls it (seon.ctx/current-ns); the REPL's
   names resolve there as anywhere (`repl-name`). See docs/agent.md#the-repl."
   {:malli/schema [:=> [:cat :seon.host/db [:maybe :string] :seon.host/namespace] :seon.host/namespace]}
   [db task nsx]
@@ -1599,7 +1599,7 @@
 
 (defn begin-run!
   "This agent begins task on its branch: the agent's record names it as its task (:seon.agent/task: the conversation finds the
-  messages it took by the agent, seon.context/turn-members, and @ctx holds the task), the task running as main holds it. Written as
+  messages it took by the agent, seon.ctx/turn-members, and @ctx holds the task), the task running as main holds it. Written as
   the process starts (init!: an outside agent's branch is cut before root writes its start on main), or by the turn that begins a
   later task of the session; once, nothing written when the branch holds it. The task is running, as main holds it
   (its release, written on main after the branch was cut, read :held here: my.task/current and the
