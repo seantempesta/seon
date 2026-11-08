@@ -541,3 +541,36 @@
                        :per-n {:calls 200 :bytes 120000}
                        :fixed {:calls 700 :bytes 1300000}
                        :sizes [10 40 80]}))))))
+
+;; See docs/render.md#a-change-is-edits-by-name
+(defn asks-changes
+  "A component that asks the walk for what changed between the points in its opts (the :seon.render/changes input), and draws the edits."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:from :map] [:to :map] [:seon.render/changes :seon.host/fn]]]] :any]}
+  [{:keys [from to] changes :seon.render/changes}]
+  [:p (pr-str (changes from to))])
+
+(defn two-askers
+  "A page whose two components, each its own key, ask for the same pair (two views of one point)."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:from :map] [:to :map]]]] :any]}
+  [{:keys [from to]}]
+  [:div [#'asks-changes {:key :a :from from :to to}] [#'asks-changes {:key :b :from from :to to}]])
+
+(deftest a-pair-of-points-is-computed-once
+  ;; rule 6: the input is one function of two points, memoized on the walk: two components, a second draw and the next pair
+  ;; (which starts where the first ended) cost one computation each, and the next pair starts from the page the walk kept
+  (let [calls (atom []) p0 {:branch :b :commit #uuid "00000000-0000-0000-0000-000000000000" :t 1}
+        p1 (assoc p0 :commit #uuid "00000000-0000-0000-0000-000000000001" :t 2) p2 (assoc p0 :commit #uuid "00000000-0000-0000-0000-000000000002" :t 3)
+        pages {p0 {"status" '[f {} "was"]} p1 {"status" '[f {} "now"]} p2 {"status" '[f {} "later"]}}
+        between (fn [a b held] (swap! calls conj [a b (some? held)]) [(or held (pages a)) (pages b)])
+        w (seon.render/walker {:ref (seon.ratom/atom {}) :changes seon.ctx/changes :forms-between between} (constantly nil)
+                              [#'two-askers {:from p0 :to p1}])]
+    (seon.render/flush! w nil)
+    (clojure.test/is (= [[p0 p1 false]] @calls) "two components, one pair: one computation, the page at p0 drawn since none was kept")
+    (let [again ((seon.render/changes-of w) p0 p1)]
+      (clojure.test/is (= [[p0 p1 false]] @calls) "asked again: the answer kept")
+      (clojure.test/is (= (seon.render/page-edits (seon.render/forms-moved (pages p0) (pages p1))) again) "the edits of the two pages"))
+    ((seon.render/changes-of w) p1 p2)
+    (clojure.test/is (= [[p0 p1 false] [p1 p2 true]] @calls) "the next pair starts from the page kept at p1: only p2 drawn")
+    ((seon.render/changes-of w) p0 p2)
+    (clojure.test/is (= [false] (map last (take-last 1 @calls))) "a pair that does not start at the kept point draws its own p0")
+    (seon.render/dispose-walk! w)))

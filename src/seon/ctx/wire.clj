@@ -12,7 +12,8 @@
             [seon.config :as cfg]
             [seon.model :as model]
             [seon.agent :as agent]
-            [seon.ctx :as ctx]))
+            [seon.ctx :as ctx]
+            [seon.ratom :as ratom]))
 
 (declare render)
 
@@ -111,6 +112,40 @@
             (nil? p) (d/as-of db t)
             (>= (:max-tx p) t) (recur p)
             :else at))))))
+
+(defn- page-forms
+  "The page walk w draws, {id form} in placed order (seon.render/placed-hiccup over its page-lists)."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [w] (render/placed-hiccup w (render/page-lists w)))
+
+(defn- db-at
+  "The db of point p ({:branch :commit :t}) on db's store: its commit, else (a commit past what collection kept, docs/storage.md#collection) db as of its t."
+  {:malli/schema [:=> [:cat :seon.host/db :map] :seon.host/db]}
+  [db p] (or (d/commit-as-db (pdb/store-of db) (:commit p)) (d/as-of db (:t p))))
+
+(defn forms-between
+  "Agent a's page (seon.render/placed-hiccup, {id form}) at points p0 and p1 ({:branch :commit :t}, p1 later on one branch) of db's store, [at-p0 at-p1], drawn with today's renders. forms0, the page already known at p0 (the walk kept it, seon.render/changes-of), is not drawn again: p1 is drawn cold alone. With none, p0 is drawn cold and advanced to p1 (seon.ctx/advance's patch of the datoms between, the moved components flushed), so the second page costs what moved. Pure in its arguments, and the one place a page is drawn at a point. See docs/render.md#a-change-is-edits-by-name."
+  {:malli/schema [:=> [:cat :seon.host/db :int :map :map [:maybe :map]] [:tuple :map :map]]}
+  [db a p0 p1 forms0]
+  (let [layout (render/declared-var :seon.render/render-ctx)
+        db1 (db-at db p1) branch (:branch p1)]
+    (if forms0
+      (let [w (render/draw (:tree (ctx/build db1 a branch)) ctx/changes db1 layout {:model-only true :once true})]
+        [forms0 (try (page-forms w) (finally (render/dispose-walk! w)))])
+      (let [db0 (db-at db p0)
+            c0 (ctx/build db0 a branch)
+            at (volatile! db0) r (ratom/atom (:tree c0))
+            w (assoc (render/walker {:ref r :changes ctx/changes} (fn [] @at) [layout {}]) :model-only true)]
+        (try
+          (render/flush! w nil)
+          (let [f0 (page-forms w)
+                moved (ctx/moved db0 db1 nil)
+                c1 (ctx/patch c0 db1 moved branch)]
+            (vreset! at db1)
+            (reset! r (:tree c1))
+            (render/flush! w moved)
+            [f0 (page-forms w)])
+          (finally (render/dispose-walk! w)))))))
 
 (defn request
   "The agent's request, a reading of walk w, the one tree its page draws (docs/render.md#the-models-context-a-cached-prefix-then-the-turn): its conversation's list through the one generic conversion

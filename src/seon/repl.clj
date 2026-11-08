@@ -1187,7 +1187,9 @@
   (let [held (:walk @agent/state) l (layout)]
     (if (and held (= l (first (:root held))))
       held
-      (let [w (cond-> (render/walker {:ref ctx/ctx :changes ctx/changes} agent/db [l {}])
+      (let [w (cond-> (render/walker {:ref ctx/ctx :changes ctx/changes
+                              :forms-between (fn [p0 p1 forms0] (wire/forms-between (agent/db) (:db/id @ctx/ctx) p0 p1 forms0))}
+                             agent/db [l {}])
                 (or (nil? held) (:model-only held)) (assoc :model-only true))]
         (some-> held render/dispose-walk!)
         (swap! agent/state assoc :walk w)
