@@ -156,35 +156,32 @@
   {:malli/schema [:=> [:cat :map] :nil]}
   [e] (throw (ex-info (:seon.error/message e) e)))
 
-(defn- ends-with
-  "tx-data with each entity retracted whole followed by the entities whose identity is a ref to it: such an entity (a
-  vector, :seon.vector/of) is named by its target and has no identity without it, so it ends with it, as Datahike ends a
-  component with its parent. Derived from the schema (an identity attribute that is a ref), so no writer retracts it by
-  hand and none is left holding the rest of itself. One AVET seek per identity ref a retraction names.
-  See docs/storage.md#the-write-checks-every-entity-it-touches."
-  {:malli/schema [:=> [:cat :any :any] :any]}
-  [db tx-data]
-  (let [refs (filterv #(= :db.type/ref (get-in (:schema db) [% :db/valueType])) (keys identity-schemas))
-        whole? (fn [op] (and (vector? op) (#{:db.fn/retractEntity :db/retractEntity} (first op))))]
-    (if (or (empty? refs) (not (some whole? tx-data)))
-      tx-data
-      (loop [todo (keep #(when (whole? %) (:db/id (d/entity db (second %)))) tx-data) seen #{} out (vec tx-data)]
-        (if-let [e (first todo)]
-          (if (seen e)
-            (recur (rest todo) seen out)
-            (let [dependents (for [a refs d (d/datoms db :avet a e)] (:e d))]
-              (recur (concat (rest todo) dependents) (conj seen e)
-                     (into out (for [x dependents :when (not (seen x))] [:db.fn/retractEntity x])))))
-          out)))))
-
 (defn- checked
   "Transaction tx-data applied to db by apply-fn (Datahike's, given the tx-data: its report), held to both checks: each
   datom's value (`invalid-datom`, with schemas {:forms :registry}, a branch's own) before, each entity it touched
-  (`invalid-entity`) after; an entity retracted whole takes the entities named by it with it (`ends-with`). A refusal
+  (`invalid-entity`) after; an entity retracted whole takes the entities named by it with it. A refusal
   throws its typed error, and the value is as it was."
   {:malli/schema [:=> [:cat :any :any [:maybe :map] ifn?] :map]}
   [db tx-data schemas apply-fn]
-  (let [tx-data (ends-with db tx-data)]
+  ;; ends-with: tx-data with each entity retracted whole followed by the entities whose identity is a ref to it (a vector,
+  ;; :seon.vector/of): such an entity is named by its target and has no identity without it, so it ends with it, as
+  ;; Datahike ends a component with its parent; derived from the schema (an identity attribute that is a ref), so no
+  ;; writer retracts it by hand. One AVET seek per identity ref a retraction names; local, so a transaction that
+  ;; retracts nothing whole pays one scan of its ops and no call
+  (let [ends-with (fn [tx-data]
+                    (let [whole? (fn [op] (and (vector? op) (#{:db.fn/retractEntity :db/retractEntity} (first op))))]
+                      (if-not (some whole? tx-data)
+                        tx-data
+                        (let [refs (filterv #(= :db.type/ref (get-in (:schema db) [% :db/valueType])) (keys identity-schemas))]
+                          (loop [todo (keep #(when (whole? %) (:db/id (d/entity db (second %)))) tx-data) seen #{} out (vec tx-data)]
+                            (if-let [e (first todo)]
+                              (if (seen e)
+                                (recur (rest todo) seen out)
+                                (let [dependents (for [a refs d (d/datoms db :avet a e)] (:e d))]
+                                  (recur (concat (rest todo) dependents) (conj seen e)
+                                         (into out (for [x dependents :when (not (seen x))] [:db.fn/retractEntity x])))))
+                              out))))))
+        tx-data (ends-with tx-data)]
     (when-let [e (invalid-datom db tx-data schemas)] (refuse! e))
     (let [r (apply-fn tx-data)]
       (when-let [e (invalid-entity r)] (refuse! e))

@@ -506,7 +506,7 @@
   answer, all of them (`due`). A round that asks for all that is due leaves the proc caught up at the
   commit. Both dbs are made from their commits here (seon.db/at-commit) and let go with the round: the
   proc keeps references, never db values (AGENTS section 4).
-  A vector ends with the entity it embeds in that entity's own retraction (seon.db/ends-with), so a round has none to sweep.
+  A vector ends with the entity it embeds in that entity's own retraction (docs/storage.md#the-write-checks-every-entity-it-touches), so a round has none to sweep.
   Answers [st outputs]; nothing due, nothing asked."
   {:malli/schema [:=> [:cat :map :map] [:tuple :map [:vector :map]]]}
   [st m]
