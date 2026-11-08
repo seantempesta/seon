@@ -1113,7 +1113,9 @@
 
 (deftest an-outside-agent-with-a-green-proof-finishes
   ;; root (2026-10-23): an outside agent that writes its proof green and hands its task back is
-  ;; judged by the end it wrote, and its task finishes, not held
+  ;; judged by the end it wrote, and its task finishes, not held.
+  ;; task seon.reconcile/the-judge-asks-the-test-service: the judge at an agent's end asks the test
+  ;; service (seon.prove), so its verdicts are cached by digest like any test run's
   (let [[_ _ t _ done seen] (in-agent (fn [{:keys [agent task ns]}]
                                         [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")}
                                          (str "(ns " ns "-test (:require [clojure.test :refer [deftest is]]))")
@@ -1122,31 +1124,15 @@
                                          {:op :eval :agent "root"
                                           :code (str "(do (seon.await/await-quiet sys (inc t-before-done))"
                                                      " [(select-keys (seon.task/task @(:conn sys) " (pr-str task) ") [:seon.task/outcome :seon.task/reason])"
-                                                     "  (seon.reconcile/task-state (seon.reconcile/index @(:conn sys)) " (pr-str task) ")])")}])
+                                                     "  (seon.reconcile/task-state (seon.reconcile/index @(:conn sys)) " (pr-str task) ")"
+                                                     "  (some-> (java.io.File. (str (seon.config/value :seon.config.proofs/results-dir) \"/" ns "-test\")) .list vec)])")}])
                                       (assoc (merging) :proofs (fn [{:keys [ns]}] #{(symbol (str ns "-test") "t")})))
-        [t-end state] (:value seen)]
+        [t-end state cached] (:value seen)]
     (is (re-find #":value t[0-9a-f]+-test/t" (:text t)) (pr-str t))
     (is (re-find #":outcome :(ready|gate|done|merged)" (:line done)) (str "the answer is the verdict line: " (pr-str done)))
     (is (#{:done :merged} (:seon.task/outcome t-end)) (pr-str t-end))
-    (is (#{:done :merged} state) (str "the task finishes, never held for root: " state))))
-
-(deftest the-judge-asks-the-test-service
-  ;; task seon.reconcile/the-judge-asks-the-test-service: the judge at an agent's end asks the test
-  ;; service (seon.prove), so its verdicts are cached by digest like any test run's
-  (let [[_ _ _ _ _ seen] (in-agent (fn [{:keys [agent task ns]}]
-                                     [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")}
-                                      (str "(ns " ns "-test (:require [clojure.test :refer [deftest is]]))")
-                                      "(deftest t (is (= 2 (inc 1))))"
-                                      before-done {:op :done :agent agent}
-                                      {:op :eval :agent "root"
-                                       :code (str "(do (seon.await/await-quiet sys (inc t-before-done))"
-                                                  " (let [db @(:conn sys)]"
-                                                  "  [(some-> (java.io.File. (str (seon.config/value :seon.config.proofs/results-dir) \"/" ns "-test\")) .list vec)"
-                                                  "   (:seon.task/outcome (seon.task/task db " (pr-str task) "))]))")}])
-                                   (assoc (merging) :proofs (fn [{:keys [ns]}] #{(symbol (str ns "-test") "t")})))
-        [cached outcome] (:value seen)]
-    (is (= ["t"] cached) (str "the judge's verdict is cached at the test's digest: " (pr-str seen)))
-    (is (#{:done :merged} outcome))))
+    (is (#{:done :merged} state) (str "the task finishes, never held for root: " state))
+    (is (= ["t"] cached) (str "the judge's verdict is cached at the test's digest: " (pr-str seen)))))
 
 (deftest an-agent-finds-no-repository
   ;; owner, 2026-10-22: no git in agents, and no source-file editing as the way to develop
