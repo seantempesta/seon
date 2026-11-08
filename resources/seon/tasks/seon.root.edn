@@ -82,4 +82,19 @@
   :seon.task/kind :work}
  {:seon.task/name "shutdown-and-death-are-dataflow"
   :seon.task/plan "What exists: root's stop parks on the drain and an agent's end on its socket's close, with no bound (`seon.root/stop!`, `seon.agent-proc/stop!`); a child's exit is an event (`seon.fork-server`'s :exits channel, jolt.io-poller's exit-chan). What is left is one clock, which docs/clocks.md#time-decides-owed-its-owners-fix names here: `seon.root/start!` passes Flow's :stop-timeout-ms, :seon.config.root/flow-stop-ms, what flow/stop waits for a proc's exit; a proc still running is named in stop!'s :graph, printed on ROOT STOPPED. Correct: a proc that does not exit is a recorded problem with no time deciding. Whether Flow can stop with no bound is not checked; it is Flow's mechanism (docs/flow.md). Deletes :seon.config.root/flow-stop-ms. No proof is written for it."
-  :seon.task/kind :work}]
+  :seon.task/kind :work} {:seon.task/name "an-agent-is-named-by-its-key"
+  :seon.task/plan "Owner, 2026-11-08: \"please tell me we aren't doing incremental agent ids as keywords?\" We are: seon.root/next-agent-id mints :a1, :a2… from root's in-memory :next-id, which restarts each boot (resources/seon/schemas/seon.facts.edn: \"an id like :a3 starts again each boot\"); in the lab a restart turned the agent working app.e/t from :a2 into :a1. A name that is a counter in a process's memory is the eid-order class again: not data, and not stable across a restart.
+
+The stable name exists: :seon.agent/key (seon.task/agent-key, \"<boot>/<id>\", a content id and identity, unique in the db), and the page already addresses an agent by it (seon.render.ui/session-address: \"the one name of a session that survives a root's restart\").
+
+Where the per-boot id still names an agent, on main b44fe06940:
+- root's live view, keyed by it ((get-in st [:view :agents id]), seon.root), and the fork server's and writer's messages about an agent;
+- :seon.agent/id, an indexed attribute with 73 uses in src/seon/{root,problems,repl,template,agent,server,reconcile,task}.clj, render/{proc,ui}.clj, ctx/session.clj and src/my/{root,agent}.clj;
+- the MCP tools and bin/mcp (agent=a1, docs/server.md), seon_agents' listing, and the server's ops;
+- the render proc's views of a tab and the stream messages (one-walk-per-view rule 10 carries :seon.agent/key from the start).
+
+The change: the key is an agent's one name in every interface: root's view keyed by key, the MCP and server ops taking a key (or the agent's branch), the render proc's views, messages between procs. :seon.agent/id stops being written and read; its stored datoms stay readable, and nothing reads them, so no erase is needed (Optimization, 2026-11-08). next-agent-id and :next-id go, and the key is minted at spawn. Open for the owner: keep the key's form \"<boot>/<n>\" (n unique within its boot, never reused, so not a name that moves) or mint it as a UUID or content id of the spawn's facts.
+
+Proofs, red first: a root restart leaves every live interface naming the same agents by the same names (an MCP eval addressed before a restart reaches the same agent's record after it); no src form reads :seon.agent/id (a check over the program's refs); next-agent-id is gone."
+  :seon.task/proofs #{}}
+]
