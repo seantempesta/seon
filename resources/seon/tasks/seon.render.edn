@@ -229,4 +229,29 @@ Retires seon.render/a-users-walk-is-a-branch-walk (a user's kept walk beside bra
                       seon.model-test/a-split-escape-across-fragments-streams-whole
                       seon.render-test/a-streamed-part-and-its-committed-part-share-an-id
                       seon.web-test/an-ended-agent-leaves-no-stream-entries
-                      seon.repl-test/an-evals-output-streams-before-it-ends}}]
+                      seon.repl-test/an-evals-output-streams-before-it-ends}}
+ {:seon.task/name "a-turn-is-a-list"
+  :seon.task/plan "Build order step 2 of seon.render/one-walk-per-view (rule 4, the cost proof \"One new eval\"). What's wrong (the audit, 2026-11-08): a turn is one unit of the page, so a new eval reruns its turn and the patch resends the whole turn's html; one eval sent 36,308 bytes for 24,821 chars of turn.
+
+What exists, reused, nothing beside it: a page is units placed in the layout's lists (seon.render/placed walks through a component whose var carries :seon.render/list to its members, each a unit {:id :container :rev :html}, seon.render/placed-units); seon.render.proc/step-units turns a new unit with a container into an append, after or prepend, and a changed one into a frag. Lists today have fixed ids (\"c-rows\", \"p-task\"), and a unit's html and revision include all its children (seon.render/tree-rev, seon.render/resolved).
+
+The change, in those functions only:
+1. A list component may take its own key as its list id: :seon.render/list true on its var means its container id is its element id (seon.render/key-id), so each turn's steps get one list of their own. seon.render/placed and the list-ids of the model's reading (seon.render's list selectors) read that id.
+2. A unit's html and revision stop at a member placed as a unit itself: resolved draws a placed member's place as its element with no content beyond its id (as the layout's lists are drawn empty and filled by their units), and tree-rev leaves out a placed member's revision. So an eval added to a turn changes the eval's own unit (a new unit in the turn's list: one append) and not the turn's.
+3. seon.render.ui: the reply's steps (reply-hiccup's :ol of eval-items, and the turn's evals of other hands) are a component, seon.render.ui/turn-steps, carrying :seon.render/list true, keyed by the turn's call.
+The model's reading is unchanged: placed-hiccup walks the same lists and reads each member as before, in order (proof below).
+
+Cost (Optimization, 2026-11-08): one new eval in a turn of e evals renders that eval's hiccup once (O(its size)), hashes it for its unit's :rev, and sends one append of its html plus a frame of about 100 B; nothing of the other e evals is read, rendered or hashed, and the turn's unit does not redraw. Measured cold, no render cache helping. STOP, three lines: ticks at e=100 > 2x e=10; bytes sent > 2x the new eval's own html (frame included); the turn's unit :rev moved by an added eval.
+
+Readers of a unit's :rev to keep right (Optimization): seon.render.proc's debug view d-parts unit hashes the units of seon.render/page-lists' containers, so a turn's steps list must be among page-lists or @ctx's parts view goes stale; the side units by #c-side, which turn steps never join; seon.render.ui's unit :input {:rev}, the morph key, right when each member is its own unit.
+
+Proofs, red first: a new eval in a turn of 10 and of 100 evals is one append of its own html, the turn not resent (cost proof, bytes flat); the model's messages for a turn are the same before and after (the wire, each eval in order); a page opened cold shows each turn with its evals in order; a turn's list member that changes (an eval opened) is one frag of that eval."
+  :seon.task/proofs #{seon.render-cost-test/a-new-eval-sends-one-append-and-one-edit
+                      seon.render-test/a-turns-evals-are-its-list
+                      seon.ctx.wire-test/a-turn-as-a-list-reads-the-same}}
+ {:seon.task/name "a-pages-first-agent-shows-live"
+  :seon.task/plan "Seen twice on demo roots (2026-11-08, once with the feed plain on 13391, once deflated on 13461): on a fresh root, the home page a person sends their first message from does not show the agent it starts until the page is reloaded; a second message's agent and reply show live (5 patch events applied, no reload). So the feed works and the first agent's arrival is not patched onto a page that had no agents: likely the home view's agents list is drawn as 'No agents yet' text, not as an empty list a new agent's unit is appended into (seon.render.proc/step-units appends only into a container the page has). What correct looks like: the first agent appears live like every later one. Find the cause before fixing: read the home view's units before and after the first agent (seon.render.proc), and whether an append targets a container the page lacks.
+
+Proofs, red first: a home page with no agents, patched by the first agent's arrival, shows it (the patch places it in a container the page holds)."
+  :seon.task/proofs #{seon.render-test/a-home-pages-first-agent-is-patched-in}}
+]

@@ -5,7 +5,7 @@
   The model edge as data: a provider's reply body read into the completion (task
   seon.model/budgets-are-data-and-spend-is-measured). Run: bin/test seon.model-test"
   (:require [clojure.test :refer [deftest is testing]] [clojure.core.async :as a] [clojure.data.json :as json]
-            [ring-chez.adapter :as adapter] [seon.model :as model] [seon.fx :as fx] [seon.turn :as turn] [seon.contract] [clojure.string :as str] [seon.ctx] [seon.error] [seon.cost :as cost] [seon.fixtures :as fixtures]))
+            [ring-chez.adapter :as adapter] [seon.model :as model] [seon.repl :as repl] [seon.fx :as fx] [seon.turn :as turn] [seon.contract] [clojure.string :as str] [seon.ctx] [seon.error] [seon.cost :as cost] [seon.fixtures :as fixtures]))
 
 (defn- stop-now!
   "Stops a test's local HTTP server at once: no drain wait, so no time decides. See docs/clocks.md#time-decides-nothing-here-clock-reads-named-as-data."
@@ -23,6 +23,18 @@
    (chunk-line {:model "deepseek-flash" :choices [{:delta {} :finish_reason "stop"}]})
    (chunk-line {:model "deepseek-flash" :choices [] :usage {:prompt_tokens 120 :completion_tokens 30 :prompt_cache_hit_tokens 64}})
    "data: [DONE]\n\n"])
+
+(deftest each-eval-carries-its-place-in-the-reply
+  ;; task seon.fx/an-effect-streams-what-it-reads: the stream reader files an eval's code under <call>/<k>/eval-<i> (k the tool call's :index,
+  ;; i its position among that call's evals), so its output must file under the same: reply-of puts [k i] on each eval, as data, and the
+  ;; stream id is made from it, never from the eval's id
+  (let [tc (fn [index id evals] {:index index :id id :function {:name "eval" :arguments (json/write-str {"evals" (mapv (fn [c] {"intent" "i" "code" c}) evals)})}})
+        r (model/reply-of {:usage {:prompt_tokens 1 :completion_tokens 1}
+                           :choices [{:finish_reason "tool_calls" :message {:content "" :tool_calls [(tc 0 "ta" ["(+ 1 1)" "(+ 2 2)"]) (tc 1 "tb" ["(+ 3 3)"])]}}]} 1 100)
+        calls (:tool-calls r)
+        ids (mapv #(#'repl/stream-id {:stream {:call "c" :k (first (:seon.model/at %)) :i (second (:seon.model/at %))}} "out") calls)]
+    (is (= [[0 0] [0 1] [1 0]] (mapv :seon.model/at calls)))
+    (is (= ["c/0/eval-0/out" "c/0/eval-1/out" "c/1/eval-0/out"] ids) "two tool calls: each eval's output under its own call and position")))
 
 (deftest a-call-that-came-back-as-text-is-answered-not-parked
   ;; deepseek-run4, 2026-11-07: v4-pro's reply was text ending in its own closing tag, finish stop, no call and no opening tag to read one
@@ -93,7 +105,7 @@
                               {:choices [{:delta {:tool_calls [{:index 0 :function {:arguments "\"(def x 41)\"},{\"intent\":\"j\",\"code\":\"(inc x)\"}]}"}}]}}]}
                               {:choices [{:delta {} :finish_reason "tool_calls"}] :usage {:prompt_tokens 9 :completion_tokens 4}}]))
              5.0 64)]
-      (is (= [{:id "c1" :code "(def x 41)" :intent "i"} {:id "c1#1" :code "(inc x)" :intent "j"}] (:tool-calls c)))
+      (is (= [{:id "c1" :code "(def x 41)" :intent "i" :seon.model/at [0 0]} {:id "c1#1" :code "(inc x)" :intent "j" :seon.model/at [0 1]}] (:tool-calls c)))
       (is (= ["Two steps." "tool_calls"] [(:text c) (:finish-reason c)]))))
   (testing "a call with no content beside it, and a call cut mid-arguments: its arguments as they came"
     (let [c (model/parse-reply "{\"choices\":[{\"message\":{\"content\":null,\"tool_calls\":[{\"id\":\"c\",\"function\":{\"name\":\"eval\",\"arguments\":\"{\\\"evals\\\":[{\\\"code\\\":\\\"(+ 1\"}}]},\"finish_reason\":\"length\"}]}" 1.0 64)]
@@ -109,7 +121,7 @@
         c (reply args)]
     (testing "stored shape: each eval its own, the message the reply's text"
       (is (= "Doing f, then g." (:text c)))
-      (is (= [{:id "c" :code "(f)" :intent "f"} {:id "c#1" :code "(g)" :intent "g"}] (:tool-calls c))))
+      (is (= [{:id "c" :code "(f)" :intent "f" :seon.model/at [0 0]} {:id "c#1" :code "(g)" :intent "g" :seon.model/at [0 1]}] (:tool-calls c))))
     (testing "the wire: one assistant call, its arguments as the model sent them; one tool message, its results in order"
       (let [neutral [{:role "assistant" :content "Doing f, then g." :reply 1 :tool-calls [{:id "eval-e1" :code "(f)" :intent "f"}]}
                      {:role "tool" :tool-call-id "eval-e1" :content "{:handle result/e1, :value 1}"}
@@ -281,7 +293,8 @@
         whole (model/parse-reply deepseek-stream 1.0 2048)
         args (json/read-str call-args)
         by-id (group-by :stream out)
-        text (fn [id] (apply str (map :text (sort-by :offset (filter :text (by-id id))))))]
+        ;; a message holds its part's whole text so far (the vector of its pieces): the last one is all of it
+        text (fn [id] (apply str (:text (last (filter :text (by-id id))))))]
     (is (= (:reasoning whole) (text "c1/reasoning")))
     (is (= (str "Caf\u00e9 " emoji " ok") (text "c1/content")))
     (is (= (get args "message-md") (text "c1/0/message")))
@@ -292,7 +305,7 @@
     (is (= (get-in args ["evals" 0 "code"]) (:code (first (:tool-calls whole)))) "the committed code is the one streamed")
     (doseq [[id ms] by-id]
       (let [ts (filter :text ms)]
-        (is (= (reductions + 0 (map (comp count :text) (butlast ts))) (map :offset ts)) (str id ": offsets are the chars sent before"))
+        (is (every? (fn [[a b]] (= a (subvec b 0 (count a)))) (partition 2 1 (map :text ts))) (str id ": each message holds the one before it and more, so a dropped one loses nothing"))
         (is (every? #(= "boot/1" (:agent %)) ms))))
     (is (every? #(<= (count (filter :end %)) 1) (vals by-id)) "an id ends once")
     (is (= #{"c1/0/message" "c1/0/eval-0/intent" "c1/0/eval-0/code" "c1/0/eval-1/intent" "c1/0/eval-1/code" "c1/1/message"}
@@ -358,6 +371,6 @@
             r (final st)]
         (is (some? s) "the call is answered at the start of its reply")
         (is (= (:text (model/complete provider req)) (:text r)) "and its last state is the reply the whole read makes")
-        (is (= ["Square " "multiplies."] (map :text (filter (comp #{"c1/reasoning"} :stream) out))))
+        (is (= [["Square "] ["Square " "multiplies."]] (map :text (filter (comp #{"c1/reasoning"} :stream) out))))
         (is (nil? (shut)) "the connection is closed already, and closing again is nothing"))
       (finally (stop-now! server)))))

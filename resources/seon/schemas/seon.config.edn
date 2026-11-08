@@ -189,6 +189,8 @@
   [:seon.config.web/public-dir :seon.config.web/public-dir]
   [:seon.config.web/stylesheet :seon.config.web/stylesheet]
   [:seon.config.web/streams-buf :seon.config.web/streams-buf]
+  [:seon.config.web/feed-encoding :seon.config.web/feed-encoding]
+  [:seon.config.web/feed-deflate-level :seon.config.web/feed-deflate-level]
   [:seon.config.contract/instrument :seon.config.contract/instrument]
   [:seon.config.native/probe-lib :seon.config.native/probe-lib]
   [:seon.config.native/sqlite-lib :seon.config.native/sqlite-lib]]

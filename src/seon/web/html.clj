@@ -24,13 +24,26 @@
 (def ^:private void-tags #{"area" "base" "br" "col" "embed" "hr" "img" "input" "link" "meta" "source" "wbr"})
 
 (defn escape
-  "s with & < > \" escaped (no copy when there is nothing to escape)."
+  "s with & < > \" escaped (no copy when there is nothing to escape): one pass over its characters, each escaped as it is
+  copied, from the first that needs it (streamed text is escaped whole at each message, docs/render.md#in-flight-output-streams)."
   {:malli/schema [:=> [:cat :any] :string]}
   [s]
-  (let [s (str s)]
-    (if (some #(contains? #{\& \< \> \"} %) s)
-      (-> s (str/replace "&" "&amp;") (str/replace "<" "&lt;") (str/replace ">" "&gt;") (str/replace "\"" "&quot;"))
-      s)))
+  (let [^String s (str s) n (.length s)
+        first-at (loop [i 0] (cond (= i n) -1
+                                   (let [c (.charAt s i)] (or (= c \&) (= c \<) (= c \>) (= c \"))) i
+                                   :else (recur (inc i))))]
+    (if (neg? first-at)
+      s
+      (let [sb (StringBuilder. (+ n 16))]
+        (.append sb s 0 first-at)
+        (loop [i first-at]
+          (if (= i n)
+            (.toString sb)
+            (let [c (.charAt s i)]
+              (case c
+                \& (.append sb "&amp;") \< (.append sb "&lt;") \> (.append sb "&gt;") \" (.append sb "&quot;")
+                (.append sb c))
+              (recur (inc i)))))))))
 
 (defn- attr-name {:malli/schema [:=> [:cat :any] :string]}
   [k] (if (keyword? k) (if (namespace k) (str (namespace k) ":" (name k)) (name k)) (str k)))

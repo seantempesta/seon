@@ -117,6 +117,44 @@
                   end (pos)]
               (recur end (dec k) (conj acc [(subs src (reader/lead-end src prev end) end) (reader/lead src prev end)])))))))))
 
+(defn- stream-id
+  "The id of the output stream part of the eval req asks, \"<call>/<k>/eval-<i>/<part>\", from the call, tool call and eval index
+  the turn put on the request as data (:stream {:call :k :i}), or nil for an eval of no model call. See docs/render.md#in-flight-output-streams."
+  {:malli/schema [:=> [:cat :map :string] [:maybe :string]]}
+  [req part]
+  (when-let [{:keys [call k i]} (:stream req)] (str call "/" k "/eval-" i "/" part)))
+
+(defn- streaming
+  "Writer kept, or for an eval of a model call (the request's :stream) a java.io.Writer that writes to kept (the StringWriter the
+  eval's record reads, so the record is what it was) and also sends each write to root as {:op :stream :stream (`stream-id`) :in <call
+  id> :part part :agent <key> :text s} with s this write's piece; seon.agent-proc/agent-frame appends it to the part's whole text so far and puts that on the web proc's :streams (the socket drops nothing, so pieces are enough here, and a frame stays the size of its write). Display only: the
+  record holds the text. Only the REPL's own thread sends (the thread that made the writer): seon.sock/send! writes a frame whole
+  against another fiber of this thread but can interleave frames across OS threads, so a write from an eval's future or a/thread
+  goes to kept alone and is never sent. See docs/render.md#in-flight-output-streams."
+  {:malli/schema [:=> [:cat :seon.host/writer :map :string] :seon.host/writer]}
+  [kept req part]
+  (if-let [id (stream-id req part)]
+    (let [home (Thread/currentThread) sent (get-in req [:stream/sent part])
+          put (fn [^String s]
+                (.write ^java.io.Writer kept s)
+                (when (and (pos? (count s)) (identical? home (Thread/currentThread)))
+                  (agent/send! {:op :stream :stream id :in (get-in req [:stream :call]) :part part :agent (:key @agent/state) :text s})
+                  (vswap! sent + (count s))))]
+      (proxy [java.io.Writer] []
+        (write ([x] (put (if (string? x) x (str (char x)))))
+               ([b o n] (put (if (string? b) (subs b o (+ o n)) (String. ^chars b (int o) (int n))))))
+        (flush [])
+        (close [])))
+    kept))
+
+(defn- ended
+  "The end of each output stream req's eval opened, sent to root: \"out\" always, \"err\" when anything was sent to it. One
+  {:op :stream ... :end true} a stream. See docs/render.md#in-flight-output-streams."
+  {:malli/schema [:=> [:cat :map] :nil]}
+  [req]
+  (doseq [part ["out" "err"] :let [at (get-in req [:stream/sent part])] :when (and at (or (= "out" part) (pos? @at)))]
+    (agent/send! {:op :stream :stream (stream-id req part) :in (get-in req [:stream :call]) :part part :agent (:key @agent/state) :end true})))
+
 (defn- eval-code
   "Read the request's code once, form by form, and evaluate each with (:repl/eval-fn req)
   under seon.intr/run, in the request's \"ns\", else the agent's own. Answers each form,
@@ -162,10 +200,14 @@
                  (let [n (dec (:n (swap! agent/state update :n (fnil inc 0))))
                        out (java.io.StringWriter.)
                        err (java.io.StringWriter.)
+                       ;; what the eval prints is kept in these for its record and, for a model's eval, also streamed to the
+                       ;; page as it is written (`streaming`)
+                       sout (streaming out req "out")
+                       serr (streaming err req "err")
                        ;; *1 *2 *3 *e as clojure.main/repl keeps them; clojure.test reports to
                        ;; *test-out*, bound to the form's output as nREPL does
                        {v1 :v1 v2 :v2 v3 :v3 e1 :e} (:repl-vars @agent/state)
-                       [tag v ns'] (try (binding [*ns* ns *out* out *err* err clojure.test/*test-out* out *1 v1 *2 v2 *3 v3 *e e1
+                       [tag v ns'] (try (binding [*ns* ns *out* sout *err* serr clojure.test/*test-out* sout *1 v1 *2 v2 *3 v3 *e e1
                                                          ;; the REPL's names in every namespace (seon.agent/repl-name), but for a
                                                          ;; definition of the program, which resolves as written
                                                          jolt.host/*resolve-unresolved* (when-not (defines-program? form ns) agent/repl-name)]
@@ -748,7 +790,9 @@
          ;; the writes its forms make and its record name it (seon.agent/transact!'s tx-meta); an
          ;; eval inside it (a context read's) names its own, then this one's again
          outer (:eval @agent/state)
-         before @agent/state]
+         before @agent/state
+         ;; a model's eval streams its output (`streaming`): the characters sent so far of each part
+         req (cond-> req (:stream req) (assoc :stream/sent {"out" (volatile! 0) "err" (volatile! 0)}))]
      (swap! agent/state assoc :eval id)
      (try (let [;; with the namespace the REPL is in after it (:ns, as every nREPL response carries): the prompt
                 ;; an eval makes data: its value made plain here, inside the boundary, so a value that throws as it is
@@ -776,7 +820,8 @@
                                code req)
                   m (when (= :agent (:mode @agent/state)) (agent/main-difference))]
               (cond-> res m (assoc :main m))))
-          (finally (swap! agent/state assoc :eval outer))))))
+          ;; every way it ends: its value, its error, an interrupt
+          (finally (ended req) (swap! agent/state assoc :eval outer))))))
 
 (defn- numbered
   "Lines from to (1-based, inclusive, clamped to text) of text, as [line text] each: a refused edit's error names its candidates by them (docs/agent.md#changing-a-definition)."
