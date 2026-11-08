@@ -12,23 +12,5 @@
   :seon.task/proofs #{seon.model-test/a-request-with-thinking-off-carries-the-reply-bound}}
  {:seon.task/name "a-silent-provider-ends-on-the-kernels-keepalive"
   :seon.task/plan "Found by the stability sweep of 2026-10-25 (docs/failure-points.md; the owner: platform stability first). src/seon/model.clj reads the provider's HTTP response with no end: no read timeout (right: no clock decides) but also no SO_KEEPALIVE anywhere in src, so a provider whose connection went silent (a dropped NAT entry, a dead peer) hangs the model worker forever. AGENTS section 4 names the kernel's TCP keepalive as the one end for a silent network peer. Correct: the provider's socket sets SO_KEEPALIVE with its idle, interval and count as config keys (seon.config.ai/keepalive-*: units, provenance, what happens at the bound: the read fails with the kernel's ETIMEDOUT, recorded as the call's typed error). Proof: a provider stub that accepts and then goes silent (its peer's packets dropped) ends the call with the typed error once the kernel's probes fail."
-  :seon.task/kind :work} {:seon.task/name "a-reply-is-flat-calls"
-  :seon.task/plan "Owner, 2026-11-08: \"I'm confused in one eval tool call there are multiple evals? I do want a message in markdown but couldn't that just be the agents normal response and the tool calls are separate tool calls each with an intent and the forms? Is that easier to parse?\"; \"can't we have separate tools and require the user message as one tool call and then the evals are separate\"; \"agreed A/B test and see if we can do the simpler version if not fix the format so it's not so hard to parse\".
-
-What exists: one tool, eval (seon.model/eval-tool, docs/model.md#one-tool-eval): a reply is one call whose arguments are {\"message-md\": s, \"evals\": [{\"intent\": s, \"code\": s}, ...]}, the message required inside it because, measured, a message written as the reply's text came on 8% of replies against 85 of 96 and 118 of 120 as a required field (docs/decisions.md, \"An eval has an intent…\"). The cost of that shape: a streamed reply's arguments are one nested JSON document, so showing code live needs seon.model/json-feed, a general JSON reader (a 55-line loop of 11 variables), and seon.model/reply-of flattens several calls' evals and must carry each eval's place (:seon.model/at [k i]).
-
-The shapes, each an arm built on its own branch and A/B'd against main (builds compared, as scratchpad ab/ did; no config switch):
-- 0, main: as above.
-- 1, the owner's first: the message is the reply's text (content), each eval its own call of the tool eval with {\"intent\": s, \"code\": s}.
-- 2, two tools: a call of the tool message with {\"message-md\": s} (required in it), then each eval its own call of eval with {\"intent\": s, \"code\": s}. The schema can require a field inside a tool, not that a tool is called (DeepSeek refuses tool_choice required with thinking on), so whether the model makes the message call is what the A/B measures.
-In 1 and 2 an eval's place is its call's index (the provider's field), the arguments are flat (one or two string keys, no array), and live reading is one string field's escapes per call; history goes back to the model in the arm's own shape (seon.model/wire-message).
-
-PREREG, written before any paid run: flash (deepseek profile), thinking as main has it, fresh lab store per run, 3 tasks (a greet function with a proof, a one-function change with a red proof to fix, a two-eval exploration), 2 runs per task per arm, cap 40 turns, all runs stop at $1. Scored per reply: a message present (non-blank); every eval has an intent; and per run: turns to green, merged, tokens. Read as direction: 6 runs an arm claims no rate.
-
-Decision rule (owner): if 1 or 2 keeps a message on at least main's rate (within the noise of 6 runs, read by hand reply by hand), take the simpler that does (1 over 2), and delete json-feed's general reader for a flat one; else keep one call per eval but flat: each eval call carries {\"message-md\" (required, the reply's message, on the first call), \"intent\", \"code\"}, so reading stays flat whatever the model does.
-
-Live runs go through Web (it owns roots and demos, owner 2026-11-08).
-
-Proofs, for the shape chosen: a reply's message and every eval's intent and code read the same streamed or whole; the stream reader holds no nested-document state (one call's flat object); history round-trips in the shape; docs/model.md#one-tool-eval and docs/prompt.md say the shape."
-  :seon.task/proofs #{}}
+  :seon.task/kind :work}
 ]

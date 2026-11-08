@@ -253,7 +253,9 @@
   {:malli/schema [:=> [:cat :map :string [:sequential :string]] :map]}
   [{:keys [store main runs env]} command args]
   (apply binary-sh (concat ["env" (str "SEON_RUNS=" runs) (str "SEON_STORE=" store) (str "SEON_MAIN=" main)
-                            "SEON_SERVER_PORT=-1" "SEON_WEB_PORT=0"]
+                            "SEON_SERVER_PORT=-1" "SEON_WEB_PORT=0"
+                            ;; the root ends with this test process, however it ends (:seon.config.root/end-with)
+                            (str "SEON_END_WITH=" (seon.lib/c-getpid))]
                            (for [[k v] env] (str k "=" v))
                            ["bin/root" command] args)))
 

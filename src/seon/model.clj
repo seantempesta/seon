@@ -64,7 +64,7 @@
             (cond-> {:text (or text "")
                      :prompt-tokens (reduce + (map (comp select/estimate :content) (:messages request)))
                      :completion-tokens (select/estimate (apply str text (map :code calls))) :estimated true :ms (profile/ms-since t0)}
-              (seq calls) (assoc :tool-calls (vec (map-indexed (fn [i c] (assoc c :id (str "call-" (:turn request) "-" i) :seon.model/at [0 i])) calls))))))))))
+              (seq calls) (assoc :tool-calls (vec (map-indexed (fn [i c] (assoc c :id (str "call-" (:turn request) "-" i) :seon.model/at [i 0])) calls))))))))))
 
 (defn- body-text
   "A read response's whole body as text: its buffered bytes, or every piece its pull yields
@@ -111,47 +111,41 @@
         (catch Throwable e (transport-error (step/error-msg e) {:url url}))))))
 
 (def eval-tool
-  "The model's one tool (v1's): a reply is one call, its one message and its evals, each eval's code the REPL's input, read as reply text is. See docs/model.md#one-tool-eval."
+  "The model's one tool (v1's): a call is one eval, its intent and its code, read as reply text is; a reply's message is its text, and each of its evals is a call of its own. See docs/model.md#one-tool-eval."
   {:type "function"
    ;; the response keys are those an agent reads in its tool message and at its handle; :text (the message itself), :record
    ;; (the id of the kept record) and :fns (the costliest functions, drawn on the page) are in :seon.eval/response and are not
    ;; shown to the agent, so they are left out here and in docs/prompt.md
    :function {:name "eval"
-              :description "Run Clojure code at your REPL. A reply makes one call: its message-md and its evals, each an intent and code. The evals run in order, each one or more top-level forms; the first that throws or answers an error ends the run, so the evals after it are not run. Your system message says what comes back."
-              ;; in the order a model fills them: it talks and thinks before the code
+              :description "Run Clojure code at your REPL: one eval, one call. Write your message to your user as the text of your reply, then make a call for each eval you want run. The calls run in order, each one or more top-level forms; the first that throws or answers an error ends the run, so the calls after it are not run. Your system message says what comes back."
+              ;; in the order a model fills them: it thinks before the code
               :parameters {:type "object"
-                           :properties (array-map :message-md {:type "string" :description "This reply's one message to whoever started you, in Markdown, covering all of its evals: what they will do, an answer to a question, anything they should know. A sentence is fine."}
-                                                  :evals {:type "array"
-                                                          :description "The evals this reply runs, in order. None: the reply is just its message, and you wait until someone answers."
-                                                          :items {:type "object"
-                                                                  :properties (array-map :intent {:type "string" :description "What this eval is about to do. A sentence is fine."}
-                                                                                         :code {:type "string" :description "Clojure to evaluate."})
-                                                                  :required ["intent" "code"]
-                                                                  :additionalProperties false}})
-                           :required ["message-md"]
+                           :properties (array-map :intent {:type "string" :description "What this eval is about to do. A sentence is fine."}
+                                                  :code {:type "string" :description "Clojure to evaluate."})
+                           :required ["intent" "code"]
                            :additionalProperties false}}})
 
 (defn- wire-message
-  "A conversation message as the chat API reads it: a reply's evals as its one tool call (its id the first eval's), whose JSON arguments are what the model sent, its text the call's message-md,
-  and its reasoning as reasoning_content (DeepSeek's thinking mode with tools needs every earlier reply's reasoning back, a 400 otherwise); a
-  tool result named by that call's id. See docs/model.md#one-tool-eval."
+  "A conversation message as the chat API reads it: a reply's text as its content and each of its evals as a call of its own (its id, its intent and code as its JSON arguments), and its reasoning as reasoning_content (DeepSeek's thinking mode with tools needs every earlier reply's reasoning back, a 400 otherwise); a
+  tool result named by its call's id. See docs/model.md#one-tool-eval."
   {:malli/schema [:=> [:cat :seon.model/message] :map]}
   [{:keys [role content tool-calls tool-call-id reasoning]}]
-  (cond-> {:role role :content (if (seq tool-calls) "" content)}
+  (cond-> {:role role :content content}
     reasoning (assoc :reasoning_content reasoning)
-    (seq tool-calls) (assoc :tool_calls [{:id (:id (first tool-calls)) :type "function"
-                                          :function {:name "eval"
-                                                     ;; in the tool's order
-                                                     :arguments (json/write-str (array-map :message-md (or content "")
-                                                                                           :evals (mapv (fn [{:keys [code intent]}] (cond-> (array-map) intent (assoc :intent intent) true (assoc :code code))) tool-calls)))}}])
+    (seq tool-calls) (assoc :tool_calls (mapv (fn [{:keys [id code intent]}]
+                                                {:id id :type "function"
+                                                 :function {:name "eval"
+                                                            ;; in the tool's order
+                                                            :arguments (json/write-str (cond-> (array-map) intent (assoc :intent intent) true (assoc :code code)))}})
+                                              tool-calls))
     tool-call-id (assoc :tool_call_id tool-call-id)))
 
 (defn wire-groups
   "The provider-neutral messages msgs as the wire holds them, by index: for each wire message in order, the
   indices of msgs it is made of. A reply's assistant messages (those naming one :reply) fold into one, the first
-  message's text and reasoning then each message's evals in order, and the tool messages after them into one, their results in order: an
-  assistant message joins the newest assistant message only when it names the same :reply and only tool messages
-  lie between. One without :reply stands alone. The one fold: `wire-messages` makes its messages from these groups,
+  message's text and reasoning then each message's evals in order: an assistant message joins the newest assistant message
+  only when it names the same :reply and only tool messages lie between. One without :reply stands alone, and so does each
+  tool message (each call has its own result). The one fold: `wire-messages` makes its messages from these groups,
   and the debug page labels them by it. See docs/render.md#the-debug-page-is-the-wire-request."
   {:malli/schema [:=> [:cat [:vector :seon.model/message]] [:vector [:vector nat-int?]]]}
   [msgs]
@@ -159,11 +153,9 @@
     (reduce (fn [[acc open] [j m]]
               (let [r (:reply m)
                     ;; the newest assistant group, open while only tool messages came after it
-                    i (when (and open (= "assistant" (:role m)) r) (when (= r (:reply (nth msgs (first (nth acc open))))) open))
-                    results (when (seq acc) (when (= "tool" (:role (nth msgs (first (peek acc))))) (dec (count acc))))]
+                    i (when (and open (= "assistant" (:role m)) r) (when (= r (:reply (nth msgs (first (nth acc open))))) open))]
                 (cond i [(update acc i conj j) open]
                       (= "assistant" (:role m)) [(conj acc [j]) (count acc)]
-                      (and (= "tool" (:role m)) results) [(update acc results conj j) open]
                       (= "tool" (:role m)) [(conj acc [j]) open]
                       :else [(conj acc [j]) nil])))
             [[] nil] (map-indexed vector msgs))))
@@ -171,19 +163,14 @@
 (defn wire-messages
   "The provider-neutral messages (seon.ctx.wire/request) in the OpenAI-compatible shape
   (DeepSeek's), the one provider format function: each wire message from its group (`wire-groups`), a
-  reply as one assistant message whose one call holds its message and its evals as the model sent them, then one tool message
-  holding their results in order, each with its handle; reasoning as
+  reply as one assistant message whose text is its message and whose calls are its evals, then one tool message for each, its result with its handle; reasoning as
   reasoning_content, left out only when replay is false (:seon.config.ai/replay-reasoning; a config
   with thinking on refuses that at load). A message's :reply never reaches the wire. See docs/model.md#one-tool-eval."
   {:malli/schema [:=> [:cat [:maybe :boolean] [:vector :seon.model/message]] [:vector :map]]}
   [replay msgs]
   (mapv (fn [[i & more]]
-          (let [m (reduce (fn [m j] (let [o (nth msgs j)]
-                                      (if (= "tool" (:role o))
-                                        (update m :content str "\n\n" (:content o))
-                                        (update m :tool-calls (fnil into []) (:tool-calls o)))))
-                          (nth msgs i) more)]
-            (wire-message (cond-> (dissoc m :reply) (false? replay) (dissoc :reasoning)))))
+          (wire-message (cond-> (reduce (fn [m j] (update m :tool-calls (fnil into []) (:tool-calls (nth msgs j)))) (dissoc (nth msgs i) :reply) more)
+                          (false? replay) (dissoc :reasoning))))
         (wire-groups msgs)))
 
 (defn request-body
@@ -206,9 +193,19 @@
     thinking (assoc :thinking {:type (name thinking)})
     reasoning-effort (assoc :reasoning_effort (name reasoning-effort))))
 
+(defn- eval-call
+  "One eval e as read ({\"intent\" \"code\"}) under id: {:id :code} with its :intent when it is a string; an eval whose code is missing or not a string is that eval's :problem, shape saying what is right, and :code holds what came, for the record. See docs/model.md#one-tool-eval."
+  {:malli/schema [:=> [:cat :any :string :string] [:map [:id :string] [:code :string] [:intent {:optional true} :string] [:problem {:optional true} :string]]]}
+  [e id shape]
+  (let [code (when (map? e) (get e "code"))]
+    (cond-> {:id id}
+      (string? code) (assoc :code code)
+      (not (string? code)) (assoc :code (json/write-str e) :problem (str "this eval was not run: its code is missing or not a string. " shape))
+      (and (map? e) (string? (get e "intent"))) (assoc :intent (get e "intent")))))
+
 (defn call-evals
-  "One reply's call, its arguments j as read ({\"message-md\" \"evals\"}), as its evals, each {:id :code :intent}, the first carrying the message, a model's and an outside agent's alike: no evals is a reply of its message alone (none are run, and the agent waits, as it does for a reply of plain text), evals that are not a list one eval's :problem, what is wrong, so nothing is
-  run, and an eval with no code as a string is that eval's. :code holds what came, for the record. See docs/model.md#one-tool-eval."
+  "An outside agent's reply, its arguments j as read ({\"message-md\" \"evals\"}), as its evals, each {:id :code :intent}, the first carrying the message: no evals is a reply of its message alone (none are run, and the agent waits, as it does for a reply of plain text), evals that are not a list one eval's :problem, what is wrong, so nothing is
+  run, and an eval with no code as a string is that eval's. (A model's reply is its text and a call for each eval: `reply-of`.) See docs/server.md#ops."
   {:malli/schema [:=> [:cat :any :string] [:vector [:map [:id :string] [:code :string] [:intent {:optional true} :string] [:message-md {:optional true} :string] [:problem {:optional true} :string]]]]}
   [j id]
   (let [shape "A call is {\"message-md\": <string>, \"evals\": [{\"intent\": <string>, \"code\": <string>}, ...]}."
@@ -227,34 +224,25 @@
       :else
       (vec (map-indexed
             (fn [i e]
-              (let [code (when (map? e) (get e "code"))]
-                (cond-> {:id (if (zero? i) id (str id "#" i))}
-                  (string? code) (assoc :code code)
-                  (not (string? code)) (assoc :code (json/write-str e) :problem (str "this eval was not run: its code is missing or not a string. " shape))
-                  (and (map? e) (string? (get e "intent"))) (assoc :intent (get e "intent"))
-                  (and (zero? i) (string? msg)) (assoc :message-md msg))))
+              (cond-> (eval-call e (if (zero? i) id (str id "#" i)) shape)
+                (and (zero? i) (string? msg)) (assoc :message-md msg)))
             es)))))
 
-(defn- evals-of
-  "A provider's tool call as [evals said]: the reply's evals (`call-evals`), from its tool name, its JSON arguments and its id, and the message of a call with no evals (it is that call's whole reply); another tool's name or arguments cut off or not JSON are one eval's :problem, :code holding what came. See docs/model.md#one-tool-eval."
-  {:malli/schema [:=> [:cat [:maybe :string] [:maybe :string] :string] [:tuple [:vector :map] [:maybe :string]]]}
+(def ^:private call-shape
+  "What a model's call of the tool is, said in the answer to one that is not."
+  "A call of eval is {\"intent\": <string>, \"code\": <string>}; write your message as the text of your reply and make one call for each eval.")
+
+(defn- eval-of
+  "A provider's tool call as the eval it is ({:id :code :intent}), from its tool name, its JSON arguments and its id; another tool's name or arguments cut off or not JSON are its :problem, :code holding what came. See docs/model.md#one-tool-eval."
+  {:malli/schema [:=> [:cat [:maybe :string] [:maybe :string] :string] :map]}
   [tool arguments id]
   (let [a (or arguments "")
         j (try (json/read-str a) (catch Throwable _ nil))
         problem (cond (and tool (not= "eval" tool)) (str "there is one tool, eval; " tool " is not a tool here")
                       (not (map? j)) "the arguments are cut off or are not JSON")]
     (if problem
-      [[{:id id :code a :problem (str "this call was not run: " problem ". A call is {\"message-md\": <string>, \"evals\": [{\"intent\": <string>, \"code\": <string>}, ...]}.")}] nil]
-      (let [es (call-evals j id)]
-        [es (when (empty? es) (let [m (get j "message-md")] (when (string? m) m)))]))))
-
-(defn- spoken
-  "A model's reply text and evals ks, as [text evals]: the reply's one message is its message-md, or its text when it writes text instead, and both when it writes both (or makes two calls), since no word it wrote is dropped. `wire-messages` sends it back as the call's message-md. A reply with none still runs: it just said nothing.
-  See docs/prompt.md#your-tool-and-your-user."
-  {:malli/schema [:=> [:cat [:maybe :string] [:vector :map] [:sequential :string]] [:tuple [:maybe :string] [:vector :map]]]}
-  [text ks alone]
-  (let [said (remove str/blank? (concat [text] (map :message-md ks) alone))]
-    [(if (seq said) (str/join "\n\n" said) text) (mapv #(dissoc % :message-md) ks)]))
+      {:id id :code a :problem (str "this call was not run: " problem ". " call-shape)}
+      (eval-call j id call-shape))))
 
 (def ^:private markup
   "What DeepSeek's own tool-call markup holds, its fullwidth bars and name, when its call comes back as text (deepseek-run4: the
@@ -268,7 +256,7 @@
   [text calls]
   (if (and (empty? calls) text (str/includes? text markup))
     [{:id "text-as-call" :code text
-      :problem "your call came back as text, with the tool-call markup in it, so nothing ran. Send it again as a call of the eval tool: {\"message-md\": <string>, \"evals\": [{\"intent\": <string>, \"code\": <string>}, ...]}."}]
+      :problem (str "your call came back as text, with the tool-call markup in it, so nothing ran. Send it again as a call of the eval tool. " call-shape)}]
     calls))
 
 (defn reply-of
@@ -280,16 +268,14 @@
   {:malli/schema [:=> [:cat :map number? [:maybe :int]] [:or :seon.model/completion :seon.model/failure]]}
   [j ms max-tokens]
   (let [msg (get-in j [:choices 0 :message])
-        ;; each eval carries its place in the reply, [k i]: its tool call's index (the provider's :index, else its position) and its own
-        ;; position within that call's evals, which names its parts of the stream (<call>/<k>/eval-<i>/...)
-        parsed (vec (map-indexed (fn [pos c]
-                                   (let [[es said] (evals-of (get-in c [:function :name]) (get-in c [:function :arguments]) (str (:id c)))
-                                         k (or (:index c) pos)]
-                                     [(vec (map-indexed (fn [i e] (assoc e :seon.model/at [k i])) es)) said]))
-                                 (:tool_calls msg)))
-        [text calls] (spoken (or (:content msg) (when (seq (:tool_calls msg)) ""))
-                             (into [] (mapcat first) parsed) (keep second parsed))
-        calls (text-as-call text calls)
+        ;; each call is one eval and carries its place in the reply, [k 0]: its index (the provider's :index, else its position) and its
+        ;; position within the call, which names its parts of the stream (<call>/<k>/eval-0/...)
+        evals (vec (map-indexed (fn [pos c] (assoc (eval-of (get-in c [:function :name]) (get-in c [:function :arguments]) (str (:id c)))
+                                                   :seon.model/at [(or (:index c) pos) 0]))
+                                (:tool_calls msg)))
+        ;; the reply's message is its text
+        text (or (:content msg) (when (seq evals) ""))
+        calls (text-as-call text evals)
         reasoning (:reasoning_content msg)
         u (:usage j)
         rt (get-in u [:completion_tokens_details :reasoning_tokens])
@@ -322,40 +308,29 @@
       :else (provider-error "the reply carries no message content" 200 {}))))
 
 (defn json-feed
-  "A JSON document's next fragment fed to a reader that keeps its place between fragments (the stack of open
-  objects and arrays, whether it is inside a string, an escape or a unicode escape cut short): answers [state' events],
-  an event [path :open] when a string value starts, [path text] for the decoded text it holds so far in this fragment
-  (never a key's), and [path :end] when it closes; a path is the keys and indexes down to the string. The state
-  starts as nil. What streams is display only: the committed reply is read from the whole arguments (`evals-of`).
-  See docs/flow.md#effects-one-owner-and-its-workers-per-kind."
+  "A tool call's arguments, one flat JSON object of strings, fed to a reader a fragment at a time: answers [state' events] for the
+  next fragment frag, an event [key :open] when a string value starts, [key text] for the decoded text it holds so far in this fragment
+  (never a key's), and [key :end] when it closes. The state (nil to start) is the mode (between strings, in a key, in a value), the
+  key waiting for its value, the key being read and any escape or unicode escape cut short at the fragment's end. What streams is display
+  only: the committed reply is read from the whole arguments (`eval-of`). See docs/flow.md#effects-one-owner-and-its-workers-per-kind."
   {:malli/schema [:=> [:cat [:maybe :map] :string] [:tuple :map [:vector :any]]]}
   [st frag]
   (let [n (count frag)
-        {:keys [stack mode path kbuf esc hi] :or {stack [] mode :out kbuf [] hi nil}} st
+        {:keys [mode k kbuf esc hi] :or {mode :out kbuf [] hi nil}} st
         esc-char {\n "\n" \t "\t" \r "\r" \b "\b" \f "\f"}]
-    (loop [i 0 stack stack mode mode path path kbuf kbuf esc esc hi hi sb [] ev []]
+    (loop [i 0 mode mode k k kbuf kbuf esc esc hi hi sb [] ev []]
       (if (= i n)
-        [{:stack stack :mode mode :path path :kbuf kbuf :esc esc :hi hi}
-         (if (and (= mode :val) (seq sb)) (conj ev [path (apply str sb)]) ev)]
+        [{:mode mode :k k :kbuf kbuf :esc esc :hi hi}
+         (if (and (= mode :val) (seq sb)) (conj ev [k (apply str sb)]) ev)]
         (let [c (nth frag i)
               i' (inc i)]
           (if (= mode :out)
-            (case c
-              \" (let [top (peek stack)]
-                   (if (and (= :obj (:t top)) (nil? (:k top)))
-                     (recur i' stack :key path [] nil nil sb ev)
-                     (let [p (mapv #(if (= :obj (:t %)) (:k %) (:i %)) stack)]
-                       (recur i' stack :val p kbuf nil nil [] (conj ev [p :open])))))
-              \{ (recur i' (conj stack {:t :obj :k nil}) mode path kbuf esc hi sb ev)
-              \[ (recur i' (conj stack {:t :arr :i 0}) mode path kbuf esc hi sb ev)
-              \} (recur i' (cond-> stack (seq stack) pop) mode path kbuf esc hi sb ev)
-              \] (recur i' (cond-> stack (seq stack) pop) mode path kbuf esc hi sb ev)
-              \, (recur i' (let [top (peek stack)]
-                             (cond (= :obj (:t top)) (conj (pop stack) (assoc top :k nil))
-                                   (= :arr (:t top)) (conj (pop stack) (update top :i inc))
-                                   :else stack))
-                        mode path kbuf esc hi sb ev)
-              (recur i' stack mode path kbuf esc hi sb ev))
+            ;; a quote opens the key when no key is waiting for its value, else the value; an object's other characters are no string
+            (if (= c \")
+              (if k
+                (recur i' :val k kbuf nil nil [] (conj ev [k :open]))
+                (recur i' :key nil [] nil nil sb ev))
+              (recur i' mode (if (= c \,) nil k) kbuf esc hi sb ev))
             ;; inside a string, a key or a value: one decoded piece or none
             (let [[done? piece esc' hi']
                   (cond
@@ -365,7 +340,7 @@
                                       (let [cp (Integer/parseInt e 16)]
                                         (cond (<= 0xD800 cp 0xDBFF) [false nil nil cp]
                                               (and hi (<= 0xDC00 cp 0xDFFF)) [false (str (char (+ 0x10000 (bit-shift-left (- hi 0xD800) 10) (- cp 0xDC00)))) nil nil]
-                                              (<= 0xD800 cp 0xDFFF) [false "�" nil nil]
+                                              (<= 0xD800 cp 0xDFFF) [false "\uFFFD" nil nil]
                                               :else [false (str (char cp)) nil nil]))))
                     (= esc :bs) (if (= (str c) "u") [false nil "" hi] [false (get esc-char c (str c)) nil hi])
                     (= c \\) [false nil :bs hi]
@@ -373,10 +348,10 @@
                     :else [false (str c) nil hi])]
               (cond
                 done? (if (= mode :key)
-                        (recur i' (conj (pop stack) (assoc (peek stack) :k (apply str kbuf))) :out path [] nil nil sb ev)
-                        (recur i' stack :out path kbuf nil nil [] (cond-> ev (seq sb) (conj [path (apply str sb)]) true (conj [path :end]))))
-                (= mode :key) (recur i' stack mode path (cond-> kbuf piece (conj piece)) esc' hi' sb ev)
-                :else (recur i' stack mode path kbuf esc' hi' (cond-> sb piece (conj piece)) ev)))))))))
+                        (recur i' :out (apply str kbuf) [] nil nil sb ev)
+                        (recur i' :out nil kbuf nil nil [] (cond-> ev (seq sb) (conj [k (apply str sb)]) true (conj [k :end]))))
+                (= mode :key) (recur i' mode k (cond-> kbuf piece (conj piece)) esc' hi' sb ev)
+                :else (recur i' mode k kbuf esc' hi' (cond-> sb piece (conj piece)) ev)))))))))
 
 (defn sse-init
   "The state a streamed reply's lines fold into (`sse-step`): the reply's pieces so far, and, when call (the model call's id)
@@ -388,16 +363,13 @@
    :texts {} :open [] :parts {}})
 
 (defn- stream-id
-  "The stream id of a string in a tool call's arguments at path and the part it is, [id part], or nil for a string no one shows live. See docs/flow.md#effects-one-owner-and-its-workers-per-kind."
-  {:malli/schema [:=> [:cat :string :int [:vector :any]] [:maybe [:tuple :string :string]]]}
-  [call k path]
-  (case (count path)
-    1 (when (= "message-md" (first path)) [(str call "/" k "/message") "message"])
-    3 (when (and (= "evals" (first path)) (#{"intent" "code"} (nth path 2))) [(str call "/" k "/eval-" (nth path 1) "/" (nth path 2)) (nth path 2)])
-    nil))
+  "The stream id of a string in tool call k's arguments, [id part], or nil for a string no one shows live: the eval's intent and code, under <call>/<k>/eval-0/. See docs/flow.md#effects-one-owner-and-its-workers-per-kind."
+  {:malli/schema [:=> [:cat :string :int :string] [:maybe [:tuple :string :string]]]}
+  [call k field]
+  (when (#{"intent" "code"} field) [(str call "/" k "/eval-0/" field) field]))
 
 (defn- say
-  "st with a stream message appended to msgs for id, part part of call (:in, :part, as data, so no reader splits an id): text (offset the chars sent before it), :open (id starts, empty) or
+  "st with a stream message appended to msgs for id, part part of call (:in, :part, as data, so no reader splits an id): text (sent as the part's whole text so far, the vector of its pieces), :open (id starts, empty) or
   :end. Answers [st' msgs'] (st, msgs when the state streams nothing). See docs/flow.md#effects-one-owner-and-its-workers-per-kind."
   {:malli/schema [:=> [:cat [:tuple :map [:vector :map]] :string :string [:or :string [:enum :open :end]]] [:tuple :map [:vector :map]]]}
   [[st msgs] id part what]
@@ -430,8 +402,8 @@
                     [jst evs] (if (and frag call) (json-feed (:json c) frag) [(:json c) []])
                     c (cond-> (assoc c :json jst) frag (update-in [:function :arguments] conj frag))
                     st (assoc-in st [:calls index] c)]
-                (reduce (fn [acc [path what]]
-                          (if-let [[sid part] (stream-id call index path)] (say acc sid part what) acc))
+                (reduce (fn [acc [field what]]
+                          (if-let [[sid part] (stream-id call index field)] (say acc sid part what) acc))
                         [st msgs] evs)))
             acc (:tool_calls delta))))
 
