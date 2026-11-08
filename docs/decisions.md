@@ -4,11 +4,15 @@ This file holds the owner's standing rulings, one entry each: the rule, the owne
 
 ## 2026-11-08 rulings
 
-The owner's rulings of 2026-11-08, on what the model knows and how a reply's evals run.
+The owner's rulings of 2026-11-08, on what the model knows, erasing the store, and how a reply's evals run.
 
 ### What the model knows is its record (owner, 2026-11-08)
 
 Owner, 2026-11-08: "I want to be able to compact an agent by removing data on their record and for us to UNDERSTAND what data is known at which point and the diffs should recalculate. I don't want manual TURN 0 = full and diffs from that point." "Don't invent a new system. We already know exactly what has changed in both the ctx atom and the db." "We should have arguments that can make regenerating a changed data (like removing evals or refs that were pulling in other data) a pure function and not magic." "Don't invent words. Use clojure terms or the library interfaces." On storing the hiccup as evals: "This seems like a detail for the mode/wire render rather than actual evals that we want to be saving as data on the agent." On render code: "Okay don't depend on the cache. I want it to work correctly always the cache is an optimization. If the render functions change yes I want the data re-rendered I don't want to keep using the old render functions. That's the whole point of having an agent dynamically adjust their context and the users html. If we are doing time travel debugging I want to be able to restore to that exact point in time and to see the old renders rendering that data." Stated in: task seon.render/what-the-model-knows-is-its-record.
+
+### In active development, the store is erased whenever a change needs it (owner, 2026-11-08)
+
+Owner, 2026-11-08: "I don't give a shit about the existing store data. Erase it and cleanup whenever you need to." "Erase whenever you want. Just warn the other agents." "I mean we are in active development. In production of course you don't just drop the whole store." Stated in: AGENTS.md section 9, [machine](machine.md#disk-stays-bounded).
 
 ### Every eval of a reply runs (owner, 2026-11-08)
 
