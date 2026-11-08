@@ -2058,16 +2058,18 @@
   {:malli/schema [:=> [:cat :map :any] [:map [:seon.render/html :any] [:seon.render/units [:vector :map]]]]}
   [{:keys [units view input caption tab]} id]
   (let [in (fn [sel] (filterv #(= sel (:container %)) units))
-        unit (fn [u] {:id (:id u) :input (cond-> {:rev (:rev u)} (:own? u) (assoc :own? true)) :html (:html u) :container (:container u)})]
+        unit (fn [u] {:id (:id u) :input (cond-> {:rev (:rev u)} (:own? u) (assoc :own? true)) :html (:html u) :container (:container u)})
+        side? (and (not= :debug tab) (boolean (some #(#{"#p-task" "#p-tiles"} (:container %)) units)))]
     {:seon.render/html
      [:div {:id "app" :class "seon-page" :data-view view}
       (top-bar id tab)
       ;; the agents on the left, the chat large in the middle, what is rendered in blocks on the right, each scrolling on
-      ;; its own (docs/render.md#where-things-go). Three columns always: a page's side parts may arrive after its first
-      ;; frame (an agent's walk answers later). An agent's chat places its task's list there, what its model reads as
-      ;; parts (owner, 2026-11-08: "What happened to the sidebar on the right with all the rendered context parts?").
-      ;; @ctx (tab :debug) places nothing beside its record
-      [:div {:class (if (= :debug tab) "seon-columns seon-columns-wide" "seon-columns")}
+      ;; its own (docs/render.md#where-things-go). The right column is there when the page has parts for it: an agent's
+      ;; chat its task's list, what its model reads as parts (owner, 2026-11-08: "What happened to the sidebar on the right
+      ;; with all the rendered context parts?"), root's its tiles; a user's page has none. Root draws an agent's page from
+      ;; its branch until its process answers, so the parts come with the first frame, and a page that gains its first is
+      ;; sent whole (seon.render.proc/pass-view). @ctx (tab :debug) places nothing beside its record
+      [:div {:class (if side? "seon-columns" "seon-columns seon-columns-wide")}
        [:aside {:class "seon-agents"}
         [:h2 {:class "kicker mb-1 hidden lg:block"} "agents"]
         [:ol {:id "c-side" :class "seon-strip flex gap-2 overflow-x-auto pb-1 text-xs lg:flex-col lg:gap-0.5"} (for [u (in "#c-side")] (slot (:id u)))]]
@@ -2077,7 +2079,7 @@
         [:div {:id "p-rules"} (for [u (in "#p-rules")] (slot (:id u)))]
         [:ol {:id "c-rows" :class "seon-chat-log" :data-view view} (for [u (in "#c-rows")] (slot (:id u)))]
         (when input (slot "p-input"))]
-       (when-not (= :debug tab)
+       (when side?
          [:aside {:class "seon-context"}
           [:div {:id "p-task" :class "seon-blocks"} (for [u (in "#p-task")] (slot (:id u)))]
           [:div {:id "p-tiles" :class "seon-blocks"} (for [u (in "#p-tiles")] (slot (:id u)))]])]]
