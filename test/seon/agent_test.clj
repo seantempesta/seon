@@ -373,23 +373,6 @@
         [_ _ _ _ _ r] (in-agent (conj (mapv form (range 5)) run))]
     (is (= {:children 1 :pass 5} (some-> (:value r) clojure.edn/read-string)))))
 
-(deftest a-test-child-holds-only-its-own-pipe
-  ;; a child forked after a sibling holds no copy of the sibling's pipe,
-  ;; whose end a child must never keep (the agent's death would not reach the sibling by SIGIO while any copy is open). Each
-  ;; of two children counts the descriptors open in it (fcntl F_GETFD) in its test and writes the count to a file: a child
-  ;; holding a sibling's pipe end has one more than the child forked before it
-  (let [checkout (seon.config/checkout)
-        dir (str checkout "/target/runs/fds-" (random-uuid))
-        _ (.mkdirs (java.io.File. ^String dir))
-        count-in (fn [n] (str "(ns fds" n "-proof (:require [clojure.test :refer [deftest is]]))"
-                              " (deftest p (let [c (count (filter #(not (neg? (seon.sock/c-fcntl % 1 0))) (range 256)))] (spit " (pr-str (str dir "/" n)) " c)) (is true))"))
-        form (str "(do " (count-in 0) " " (count-in 1) " (seon.agent/run-tests-forked 1000000000 '#{fds0-proof/p fds1-proof/p} :turn))")
-        [run] (in-agent [form] tuned)
-        counts (mapv #(parse-long (ts/output (str dir "/" %))) [0 1])]
-    (sh/sh "rm" "-rf" dir)
-    (is (every? pos-int? counts) (str "both children counted: " (pr-str counts) " " (pr-str run)))
-    (is (apply = counts) (str "the two children hold the same descriptors: " (pr-str counts)))))
-
 ;; See docs/reconcile.md#a-task-holds-how-its-work-ended
 (deftest a-wake-that-ran-no-turn-has-no-end
   ;; task seon.reconcile/a-wake-that-ran-no-turn-has-no-end: a turn moves only inside a turn, so a wake whose work! threw before
@@ -621,15 +604,26 @@
 (deftest a-test-run-is-dealt-across-children-and-loses-none
   ;; task seon.agent/a-test-run-streams-its-reports (the deal): the selected tests are dealt by seon.proofs/shards into
   ;; :seon.config.proofs/jobs test children, each its own fork; every test reports once, and a death in one child costs
-  ;; only the test it ran. Eight tests of four namespaces and one that dies, jobs 2
-  (let [ns-form (fn [n] (str "(ns app.par" n "-test (:require [clojure.test :refer [deftest is]])) (deftest a (is (= 1 1))) (deftest b (is (= 2 2)))"
+  ;; only the test it ran. Eight tests of four namespaces and one that dies, jobs 2.
+  ;; And a child forked after a sibling holds no copy of the sibling's pipe,
+  ;; whose end a child must never keep (the agent's death would not reach the sibling by SIGIO while any copy is open). Each
+  ;; namespace's first test counts the descriptors open in its child (fcntl F_GETFD) and writes the count to a file: a child
+  ;; holding a sibling's pipe end has one more than the child forked before it
+  (let [dir (str (seon.config/checkout) "/target/runs/fds-" (random-uuid))
+        _ (.mkdirs (java.io.File. ^String dir))
+        ns-form (fn [n] (str "(ns app.par" n "-test (:require [clojure.test :refer [deftest is]])) (deftest a (spit " (pr-str (str dir "/" n))
+                             " (count (filter #(not (neg? (seon.sock/c-fcntl % 1 0))) (range 256)))) (is (= 1 1))) (deftest b (is (= 2 2)))"
                              (when (= n 3) " (deftest dies (seon.lib/c-exit 7))")))
         run #(str "(let [pids (atom []) r (seon.agent/run-tests-forked 100000000 #{} :main (fn [p] (swap! pids conj p)) '#{app.par0-test app.par1-test app.par2-test app.par3-test})]"
                   " (pr-str {:children (count (distinct @pids)) :pass (:pass r) :error (:error r) :died (vec (map :var (filter :exit (:reports r))))"
                   "          :ran (vec (sort (map :var (filter #(= :pass (:type %)) (:reports r)))))}))")
         [_ _ _ _ two] (in-agent (conj (mapv ns-form (range 4)) (run))
                                       tuned)
-        v #(some-> (:value %) clojure.edn/read-string)]
+        v #(some-> (:value %) clojure.edn/read-string)
+        counts (mapv #(parse-long (ts/output (str dir "/" %))) (range 4))]
+    (sh/sh "rm" "-rf" dir)
+    (is (every? pos-int? counts) (str "every child counted: " (pr-str counts) " " (pr-str two)))
+    (is (apply = counts) (str "the children hold the same descriptors: " (pr-str counts)))
     (is (<= 2 (:children (v two))) "at least two children forked (a death forks a new one for what its child had left)")
     (is (= [8 1 ["#'app.par3-test/dies"]] ((juxt (comp count :ran) :error :died) (v two))) "all eight passed once, and the death cost only the test it ran")))
 
