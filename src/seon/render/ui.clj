@@ -1863,7 +1863,11 @@
   [{c :seon.ctx/ctx}]
   (let [h (some-> (:health c) ratom/realize)
         upkeep (:seon.problems/attention (contract/properties :seon.problems/class))
-        of (fn [pred] (cond-> h (:classes h) (update :classes #(into {} (filter (comp pred key)) %))))
+        ;; a class's rows that still hold: a row whose cause has since passed (:open? false, seon.problems/closed?) is no problem,
+        ;; and its class counts what remains (health is the absence of open problem facts)
+        open-class (fn [{:keys [rows] :as cl}] (let [rows (vec (remove #(false? (:open? %)) rows))]
+                                                 (cond-> (assoc cl :rows rows) (not= rows (:rows cl)) (assoc :n (reduce + 0 (map #(:count % 1) rows))))))
+        of (fn [pred] (cond-> h (:classes h) (update :classes #(into {} (comp (filter (comp pred key)) (map (fn [[k v]] [k (open-class v)])) (filter (comp pos? :n second))) %))))
         total (fn [r] (reduce + 0 (map :n (vals (:classes r)))))]
     [:section [:h2 "problems"]
      (when h
@@ -2054,16 +2058,16 @@
   {:malli/schema [:=> [:cat :map :any] [:map [:seon.render/html :any] [:seon.render/units [:vector :map]]]]}
   [{:keys [units view input caption tab]} id]
   (let [in (fn [sel] (filterv #(= sel (:container %)) units))
-        unit (fn [u] {:id (:id u) :input (cond-> {:rev (:rev u)} (:own? u) (assoc :own? true)) :html (:html u) :container (:container u)})
-        ;; an agent's chat is the conversation: what it reads and its blocks are its @ctx tab, with no place here
-        agent-chat? (and (= :chat tab) (not= :root id))]
+        unit (fn [u] {:id (:id u) :input (cond-> {:rev (:rev u)} (:own? u) (assoc :own? true)) :html (:html u) :container (:container u)})]
     {:seon.render/html
      [:div {:id "app" :class "seon-page" :data-view view}
       (top-bar id tab)
       ;; the agents on the left, the chat large in the middle, what is rendered in blocks on the right, each scrolling on
       ;; its own (docs/render.md#where-things-go). Three columns always: a page's side parts may arrive after its first
-      ;; frame (an agent's walk answers later). @ctx (tab :debug) places nothing beside its record
-      [:div {:class (if (or (= :debug tab) agent-chat?) "seon-columns seon-columns-wide" "seon-columns")}
+      ;; frame (an agent's walk answers later). An agent's chat places its task's list there, what its model reads as
+      ;; parts (owner, 2026-11-08: "What happened to the sidebar on the right with all the rendered context parts?").
+      ;; @ctx (tab :debug) places nothing beside its record
+      [:div {:class (if (= :debug tab) "seon-columns seon-columns-wide" "seon-columns")}
        [:aside {:class "seon-agents"}
         [:h2 {:class "kicker mb-1 hidden lg:block"} "agents"]
         [:ol {:id "c-side" :class "seon-strip flex gap-2 overflow-x-auto pb-1 text-xs lg:flex-col lg:gap-0.5"} (for [u (in "#c-side")] (slot (:id u)))]]
@@ -2073,7 +2077,7 @@
         [:div {:id "p-rules"} (for [u (in "#p-rules")] (slot (:id u)))]
         [:ol {:id "c-rows" :class "seon-chat-log" :data-view view} (for [u (in "#c-rows")] (slot (:id u)))]
         (when input (slot "p-input"))]
-       (when-not (or (= :debug tab) agent-chat?)
+       (when-not (= :debug tab)
          [:aside {:class "seon-context"}
           [:div {:id "p-task" :class "seon-blocks"} (for [u (in "#p-task")] (slot (:id u)))]
           [:div {:id "p-tiles" :class "seon-blocks"} (for [u (in "#p-tiles")] (slot (:id u)))]])]]
