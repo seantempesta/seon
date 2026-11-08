@@ -35,7 +35,7 @@ One parse is linear in the text, about 70 bytes allocated per byte of it (the 37
 
 ## Task references
 
-A task's cites are what its plan and instructions cite, written as cite entities by the write of the text and never authored.
+A task's cites are what its plan and instructions cite, written as cite entities by the write of the text and never authored. A plan naming its own task's id names what the task makes (a function of that name), never the task, whose page already shows it: that cite is the name alone, never joined as a task (```seon.task/cite-target```).
 
 ```seon.task/create-tx```, ```seon.task/load-tx``` (a declaration changed) and ```seon.task/rederive-tx``` (any write an agent makes of its plan or instructions: a `swap!` of ctx, `my.task/update!`, its own `transact!`, all through `seon.agent/transact!`) parse the text once (```seon.ref/parse```), keep each target once at its strongest depth (```seon.ref/cited```) and the references the db holds (```seon.ref/kept```: a text word only when it names something; a line reference and an anchor with no page name nothing to pull), and write them with ```seon.task/cites-tx```, the one writer, in the same transaction as the text: so no db holds the new text with the old cites, and no draw parses the plan with the program the agent may be changing (a parser the agent redefined, run by the layout each frame, would leave the page with no status). `seon.task-test/the-writer-writes-a-tasks-cites`, `a-rewritten-text-leaves-exactly-its-cites`; `seon.ctx.wire-test/a-draw-reads-the-cites-its-plan-write-derived`.
 

@@ -682,13 +682,25 @@
                       {:at address :level level :text heading}))
             (walk top)))))
 
+(defn line-of
+  "The line of the text at in ([e a], a hit's :in from `tokens`) on db holding a word of query s first, {:line :at}, or nil
+  when it holds only a stem of each (\"watch\" for \"watching\"): read for a hit that is shown, one text, never for every hit
+  ranked (one search measured 29 MB of 32 lower-casing 280 hits' texts to show 10). See docs/vector.md#search."
+  {:malli/schema [:=> [:cat :seon.host/db :string [:tuple :int :qualified-keyword]] [:maybe [:map [:at pos-int?] [:line :string]]]]}
+  [db s [e a]]
+  (let [ws (words s)
+        v (:v (first (d/datoms db :eavt e a)))
+        low (some-> v str/lower-case)
+        i (when low (some->> ws (keep #(str/index-of low %)) seq (apply min)))]
+    (when (and i (= (count low) (count v))) (line-at v i))))
+
 (defn tokens
-  "The texts on db that hold the words of query s, of kinds, best first, each {:kind :name :z :line :at}: FTS5's
+  "The texts on db that hold the words of query s, of kinds, best first, each {:kind :name :z :in}: FTS5's
   bm25 (`text-index`: Porter stems over unicode61 terms, one corpus of every text attribute) of each text against
   the OR of `words`, z its score in standard deviations above the mean of every text of those kinds (those holding no
-  word scoring 0). Only the texts with z >= z-min are answered. The line is the first holding a word as it is
-  written (a text that holds only a stem of it, \"watch\" for \"watching\", has none). Cost: the index (built once
-  a change of the store, not a query), one FTS5 query, and per hit its text and names; the one text ranking of
+  word scoring 0). Only the texts with z >= z-min are answered, each with :in, where its text is, from which `line-of`
+  reads its line for a hit that is shown. Cost: the index (built once a change of the store, not a query), one FTS5
+  query, and per hit its names; the one text ranking of
   my.agent/search (relevance's pool is `bm25`). See docs/vector.md#search."
   {:malli/schema [:=> [:cat :seon.host/db :string [:set :keyword] :double] [:vector :map]]}
   [db s kinds z-min]
@@ -707,12 +719,9 @@
         (if (zero? sd)
           []
           (let [hits (for [d scored :let [z (/ (- (:score d) mean) sd)] :when (>= z z-min)
-                           h (named-hits db (:e d) (:a d) kinds (fn [t] (some #(str/includes? (str/lower-case t) %) ws)))
-                           :let [v (:v (first (d/datoms db :eavt (:e d) (:a d)))) low (str/lower-case v)
-                                 i (some->> ws (keep #(str/index-of low %)) seq (apply min))]]
-                       (cond-> (assoc h :z z :bm25 (:score d))
-                         (and i (= (count low) (count v)))
-                         (merge (line-at v i))))]
+                           h (named-hits db (:e d) (:a d) kinds (fn [t] (some #(str/includes? (str/lower-case t) %) ws)))]
+                       ;; where its text is, [e a]: its line is read for the hits a caller shows (`line-of`), never for every hit
+                       (assoc h :z z :bm25 (:score d) :in [(:e d) (:a d)]))]
             (->> hits (sort-by (juxt (comp - :z) (comp str :name)))
                  (reduce (fn [[seen out :as acc] h] (let [k ((juxt :kind :name) h)] (if (seen k) acc [(conj seen k) (conj out (dissoc h :rank))])))
                          [#{} []])

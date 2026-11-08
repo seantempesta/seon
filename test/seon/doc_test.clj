@@ -345,8 +345,10 @@
     (is (= [] (seon.doc/tokens db "nowhere" all 2.0)) "no word of it in any text")
     (is (= [] (seon.doc/tokens db "" all 2.0)))
     (is (= ["datoms" "diff" "seon" "task" "outcome" "nearof" "ab"] (seon.doc/words "datoms-diff seon.task/outcome nearOf aB x")) "an identifier is its parts at separators, as the index tokenizes a text; a one-letter part is no word")
-    (testing "the first line holding a word, and its number"
-      (is (= {:line "(fusing 1))" :at 2} (select-keys (first (filter #(= 'app/g (:name %)) (seon.doc/tokens db "fusing" all 2.0))) [:line :at]))))))
+    (testing "the first line holding a word, and its number: read for a hit shown, by where its text is"
+      (let [g (first (filter #(= 'app/g (:name %)) (seon.doc/tokens db "fusing" all 2.0)))]
+        (is (not (contains? g :line)) "a ranked hit carries no line: ranking reads no text")
+        (is (= {:line "(fusing 1))" :at 2} (seon.doc/line-of db "fusing" (:in g))))))))
 
 (defn- with-checkout
   "(f dir) where dir is a checkout of a few pages, as the files the wiki loads are read (docs/ and the top level, the

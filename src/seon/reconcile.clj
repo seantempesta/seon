@@ -9,7 +9,7 @@
   by the writer."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.sock :as sock] [seon.step :as step]
-            [seon.task :as task] [seon.proofs :as proofs] [seon.merge :as pm] [seon.program :as program] [seon.source :as source] [seon.doc :as doc]
+            [seon.task :as task] [seon.lib :as lib] [seon.proofs :as proofs] [seon.merge :as pm] [seon.program :as program] [seon.source :as source] [seon.doc :as doc]
             [datahike.api :as d] [seon.db :as pdb] [clojure.string :as str] [clojure.core.async.flow :as flow]
             [seon.config :as cfg] [seon.error :as err]))
 
@@ -711,7 +711,7 @@
                    tx)
         from (:seon.agent/key (:seon.task/agent (d/entity db [:seon.task/id id])))]
     (if k
-      (task/message-tx (str "asked-" id "-" (:max-tx db)) (or from "root") [k]
+      (task/message-tx (lib/id (lib/digest (str "asked/" id "/" (:max-tx db)))) (or from "root") [k]
                        (str "Task " id " " (ends-told to) (when said (str ": " said))
                             (when (and from (#{:parked :cap} to) (not (:seon.user/name (:seon.task/started-by (d/entity db [:seon.task/id id]))))) (str "\nTo answer it: (send-message [:" from "] \"...\")")))
                        now)

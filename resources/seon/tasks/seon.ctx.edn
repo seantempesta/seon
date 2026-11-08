@@ -53,11 +53,4 @@ Owner: the context session (the ctx pull and its render); the optimization sessi
   :seon.task/kind :work
   :seon.task/needs #{"seon.problems/the-names-change"}
   :seon.task/proofs #{}}
- {:seon.task/ns seon.ctx.search
-  :seon.task/name "a-search-costs-what-it-ranks"
-  :seon.task/plan "Measured 2026-11-08 (Context, on 7888's root, seon.cost/measure, warm): one seon.ctx.search/search of a request's words, :kinds #{:var :section :schema}, k 10, no query vector, costs 10.5M to 16.8M ticks, 37 to 57 MB and 762 to 1,036 contracted calls. On a lab agent it was 35.1 MB of the 50.5 MB of a page drawn cold (seon.render.ui/searched), the largest part of every restart and outside read. Find where it spends (the text ranking seon.doc/tokens, the reference ranking, seon.ctx.search/relevance over its pool, the :more count that scores every candidate) and make it cost what it answers: k hits ranked, not the candidate set. The page now draws a search only once its query has a vector (owner, 2026-11-08), so measure with a vector too.
-
-Proofs, red first: a cost proof of seon.ctx.search/search over a program of n vars at 10, 100 and 1,000, growing no faster than the hits it answers plus the matches it ranks (seon.cost/proof)."
-  :seon.task/kind :work
-  :seon.task/proofs #{}}
 ]
