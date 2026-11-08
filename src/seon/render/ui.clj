@@ -1509,7 +1509,7 @@
               (when (pos? turns) (str (if (= :green outcome) " in " " after ") turns (if (= 1 turns) " turn" " turns")))
               (when (and reason (not (#{:green :waiting} outcome))) (str " · " reason)))])
       (when-let [status (ratom/realize (:seon.agent/status c))]
-        [:p {:class "muted"} (case status :busy "working…" :idle "waiting for you" (kname status))]))))
+        [:p {:class "muted"} (case status :busy "working…" (kname status))]))))
 
 (defn story-rows
   "Each turn's reading of a proof, [n status failures first-failure] in order (status nil: not run yet; :gone: its commit was swept), as the runs of equal readings: {:from :to :status :failures :first}, so a change is a row and a stretch of the same is one. See docs/render.md#the-page."
@@ -1678,13 +1678,13 @@
 (def ^:private task-stands
   "How a task's :seon.task/outcome reads to a person: [words tone]. :parked and :told are woken by a message (seon.reconcile/park-outcomes);
   :cap is not: it waits for its agent's turns to be raised and the task released."
-  {:running ["working" :live] :parked ["waiting for you" :ask] :told ["waiting for you" :ask] :cap ["stopped at its cap" :stopped]
+  {:running ["working" :live] :parked ["parked" :ask] :told ["told" :ask] :cap ["stopped at its cap" :stopped]
    :done ["done" :done] :merged ["merged" :done] :ready ["ready to merge" :quiet] :gate ["at the merge gate" :quiet] :behind ["behind main" :stopped]
    :dead ["died" :failed] :lost ["stopped by a restart" :quiet] :killed ["killed" :failed] :refused ["refused" :failed] :closed ["closed" :quiet]})
 
 (def ^:private end-stands
   "How the agent's own end (:seon.agent/outcome) reads where its task holds none: [words tone]."
-  {:green ["done" :done] :waiting ["waiting for you" :ask] :cap ["stopped at its cap" :stopped] :red ["ended red" :failed]
+  {:green ["done" :done] :waiting ["parked" :ask] :cap ["stopped at its cap" :stopped] :red ["ended red" :failed]
    :failed ["failed" :failed] :merge-failed ["merge failed" :failed] :error ["ended in error" :failed]})
 
 (def ^:private status-stands
@@ -1904,11 +1904,13 @@
   ;; what an agent is doing is its task's outcome; :seon.task/execution stays :running once it has finished
   (let [held (count (d/datoms db :avet :seon.task/execution :held))
         running (count (d/datoms db :avet :seon.task/outcome :running))
-        needs (count (d/datoms db :avet :seon.task/outcome :parked))]
+        parked (count (d/datoms db :avet :seon.task/outcome :parked))]
     [:section
+     ;; the tasks by their state, in plain words (owner, 2026-11-08: "Just show the status as parked"): a parked one wakes on a message
      [:h1 {:class "text-base font-semibold text-text-50"}
-      (str/join " " (remove nil? [(if (pos? running) (str running " running.") "Nothing running.")
-                                  (if (pos? needs) (str needs " " (if (= 1 needs) "needs" "need") " you.") "Nothing needs you.")]))]
+      (if (pos? (+ running parked))
+        (str (str/join ", " (remove nil? [(when (pos? parked) (str parked " parked")) (when (pos? running) (str running " running"))])) ".")
+        "Nothing running.")]
      (when (pos? held) [:p {:class "seon-note"} (str held (if (= 1 held) " task" " tasks") " not released yet.")])
      (render/hiccup {:schema :seon.root/root-fact} (relevant :seon.root/root-fact c))]))
 
@@ -2007,17 +2009,17 @@
        (when reply [#'markdown reply {:inline? true}])]]]))
 
 (defn- sessions-by-standing
-  "Sessions ks (agent keys, newest first) as tiles grouped by how each stands: what needs a person, what is working, then what
-  finished, folded; empty as none. Root's work and a user's page both draw this. See docs/users.md#whats-on-screen."
+  "Sessions ks (agent keys, newest first) as tiles grouped by how each stands, in its state's plain word: parked (a message wakes it),
+  working, then finished, folded; empty as none. Root's work and a user's page both draw this. See docs/users.md#whats-on-screen."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :string]] :any]}
   [db ks]
   (let [sessions (for [k ks :let [a (d/pull db session-attrs [:seon.agent/key k])]] [k (standing a (:seon.agent/task a))])
-        where (fn [[_ {:keys [state lit?]}]] (cond (#{:task/parked :task/told :status/idle} state) :needs lit? :working :else :finished))
-        {:keys [needs working finished]} (group-by where sessions)
+        where (fn [[_ {:keys [state lit?]}]] (cond (#{:task/parked :task/told :status/idle} state) :parked lit? :working :else :finished))
+        {:keys [parked working finished]} (group-by where sessions)
         tiles (fn [ss] (into [:div {:class "session-tiles"}] (for [[k _] ss] [#'session-card {} k])))
         heading (fn [text] [:h2 {:class "kicker"} text])]
     [:div {:class "seon-stack-2"}
-     (when (seq needs) (list (heading "Needs you") (tiles needs)))
+     (when (seq parked) (list (heading "Parked") (tiles parked)))
      (when (seq working) (list (heading "Working") (tiles working)))
      (when (seq finished)
        [:details {:data-preserve-attr "open"}

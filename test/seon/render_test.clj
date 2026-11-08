@@ -2335,11 +2335,11 @@
         work (ui/work-list {:seon.db/db db})
         text (pr-str work)]
     (is (= #{"b2/a1" "b2/a2" "b2/a3"} (set (keys-in work))) "every session with a task")
-    (is (< (.indexOf text "Needs you") (.indexOf text "Working") (.indexOf text "Finished")))
+    (is (< (.indexOf text "Parked") (.indexOf text "Working") (.indexOf text "Finished")))
     (is (< (.indexOf text "b2/a1") (.indexOf text "Working")) "what waits on a person comes first")
     (is (str/includes? text "Finished · 1"))
     (let [head (pr-str (ui/root-head {:seon.ctx/ctx (or c {}) :seon.db/db db}))]
-      (is (str/includes? head "1 needs you") "the head says so")
+      (is (str/includes? head "1 parked") "the head says so, in the state's plain word")
       (is (str/includes? head "1 running") "a finished task is not running, whatever its execution still says"))))
 
 (deftest how-an-agents-work-stands-is-said-from-its-data
@@ -2354,11 +2354,11 @@
       (is (= "working" (text (st :idle :running))) "between two forms it still works")
       (is (= "starting" (text (st :spawning :running))))
       (is (= :live (:tone (st :busy :running)))))
-    (testing "waiting for you only where a message would be taken"
-      (is (= "waiting for you" (text (st :idle :parked))))
-      (is (= "waiting for you" (text (st :idle :told))))
-      (is (= "waiting for you" (text (st :ended :parked))) "its process is gone, and a message starts it again")
-      (is (= "waiting for you" (text (st :dead :parked)))))
+    (testing "parked, or told, only where a message would be taken"
+      (is (= "parked" (text (st :idle :parked))))
+      (is (= "told" (text (st :idle :told))))
+      (is (= "parked" (text (st :ended :parked))) "its process is gone, and a message starts it again")
+      (is (= "parked" (text (st :dead :parked)))))
     (testing "a capped task is stopped, however idle its process looks"
       (is (= "stopped at its cap · 40 turns" (text (st :idle :cap :seon.agent/max-turns 40))))
       (is (= "stopped at its cap · 38 turns" (text (st :idle :cap :seon.agent/max-turns 40 :seon.agent/ended-turn 38))) "the turns it took when it recorded them")
@@ -2417,8 +2417,8 @@
     (is (not-any? #(str/includes? side %) ["idle" "waiting"]))
     (is (str/includes? card "stopped at its cap") card)
     (is (not (str/includes? card "idle")))
-    (is (str/includes? (h/html (ui/agent-side {:seon.db/db db} (session-eid db "b2/a7"))) "waiting for you") "a parked task can be answered")
-    (is (str/includes? (h/html (ui/agent {} {:seon.agent/id :a7 :seon.agent/status :idle :seon.agent/task {:seon.task/outcome :parked}})) "● waiting for you"))))
+    (is (str/includes? (h/html (ui/agent-side {:seon.db/db db} (session-eid db "b2/a7"))) "parked") "a parked task can be answered")
+    (is (str/includes? (h/html (ui/agent {} {:seon.agent/id :a7 :seon.agent/status :idle :seon.agent/task {:seon.task/outcome :parked}})) "● parked"))))
 
 (deftest an-agents-pill-is-one-link-that-names-its-task
   ;; owner, 2026-11-05: the agents list read "a6 idle" and only the name was a link, though the pill looks like a button.
@@ -2632,7 +2632,7 @@
         (is (str/includes? m "user"))
         (is (str/includes? m "Is the premise right?"))))
     (testing "the agent's status is the last line"
-      (is (= "waiting for you" (last (ui/chat-end {:seon.ctx/ctx c :seon.db/db (ts/test-db)}))) "an idle agent waits for the user"))))
+      (is (= "idle" (last (ui/chat-end {:seon.ctx/ctx c :seon.db/db (ts/test-db)}))) "an idle agent says so, in its state's plain word"))))
 
 (deftest a-page-path-names-its-view-and-back
   ;; docs/render.md#the-page: an agent's chat, debug view and model context, by its id or its branch, and back
@@ -3374,7 +3374,7 @@
         hc (ui/started-cards {:seon.ctx/ctx c :seon.db/db db})
         text (pr-str hc)
         tiles (keep #(when (and (vector? %) (= #'ui/session-card (first %))) (nth % 2)) (tree-seq coll? seq hc))]
-    (is (< (str/index-of text "Needs you") (str/index-of text "Working")) "what needs the person comes first")
+    (is (< (str/index-of text "Parked") (str/index-of text "Working")) "what is parked comes first")
     (is (= ["b2/a2" "b2/a1"] tiles) "its tile first")
     (let [tile (h/html (ui/session-card {:seon.db/db db} "b2/a2"))]
       (is (str/includes? tile "Which of the two names should the function take?") (str "the tile says what its agent asked, while it waits: " tile))
