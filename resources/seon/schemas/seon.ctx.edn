@@ -21,6 +21,9 @@
  ;; a record whose identity attributes name entity schemas none of which extends the others (seon.render/entity-schema):
  ;; no one schema names it, so no pattern, render or layout does; the schemas it named
  :seon.render/no-one-schema [:and :seon.error/base [:map [:seon.error/type [:= :seon.render/no-one-schema]] [:schemas [:vector :qualified-keyword]]]]
+ ;; a record no layout draws (seon.render/layout-of): its schema, nil when none names it, names no :seon.render/layout and extends none
+ ;; that does; its schema and its identity attributes
+ :seon.render/no-layout [:and :seon.error/base [:map [:seon.error/type [:= :seon.render/no-layout]] [:schema [:maybe :qualified-keyword]] [:identity [:vector :qualified-keyword]]]]
  ;; a pattern as the walk takes it (seon.render/pattern): '* or the attributes it names, and its joins,
  ;; each with its own pattern under :sub
  :seon.ctx/spec [:map [:star? :boolean] [:attrs [:set :keyword]]

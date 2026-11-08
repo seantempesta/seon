@@ -2185,7 +2185,10 @@
   (is (= #'ui/render-ctx (r/layout-of {:seon.agent/key "b2/a1"})))
   (is (= #'ui/user-ctx (r/layout-of (array-map :seon.user/name "sean" :seon.agent/key "sean"))))
   (is (= #'ui/root-ctx (r/layout-of {:seon.root/id :root})))
-  (is (nil? (r/layout-of {:seon.eval/code "x"})) "a record whose schema names no layout has none"))
+  (let [e (is (thrown? clojure.lang.ExceptionInfo (r/layout-of {:seon.eval/id "e1" :seon.eval/code "x"})) "a record no layout draws is an error, never a nil walk")]
+    (is (= :seon.render/no-layout (:seon.error/type (ex-data e))))
+    (is (= [:seon.eval/id] (:identity (ex-data e))) "naming what it is"))
+  (is (= :seon.render/no-layout (:seon.error/type (ex-data (is (thrown? clojure.lang.ExceptionInfo (r/layout-of {})))))) "and one with no identity at all"))
 
 (deftest each-page-draws-its-entitys-layout
   ;; docs/render.md#a-page-is-a-kept-walk: root's, a user's and an agent's kept walks each draw the layout their entity names, no

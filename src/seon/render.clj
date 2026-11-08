@@ -1074,9 +1074,15 @@
   "The layout var that draws record e (a ctx's tree, an entity pulled by its pattern): the render schema its entity schema
   names as :seon.render/layout, or the one a schema it extends names (an agent's :seon.render/render-ctx, a user's
   :seon.render/user-ctx, root's :seon.render/root-ctx), through declared-var, so a branch that redefines that var draws its
-  own. See docs/render.md#the-page."
+  own. A record no schema names a layout for throws :seon.render/no-layout naming its identity attributes, since every
+  walk draws from it. See docs/render.md#the-page."
   {:malli/schema [:=> [:cat :map] :any]}
-  [e] (some-> (entity-schema e nil) (schema-property :seon.render/layout) declared-var))
+  [e]
+  (let [s (entity-schema e nil)]
+    (or (some-> s (schema-property :seon.render/layout) declared-var)
+        (throw (ex-info (str "no layout draws this record: its schema " s " names none")
+                        (contract/error :seon.render/no-layout #'layout-of "no entity schema of this record names a layout (:seon.render/layout)"
+                                        {:schema s :identity (vec (filter identity-schemas (keys e)))}))))))
 
 (defn forward
   "Attribute a read forward: a reverse ref (:ns/_name, pull's syntax) as its own attribute (:ns/name)."
