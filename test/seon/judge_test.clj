@@ -76,12 +76,17 @@
     (is (= [:seon.judge/cost-unknown [false] true [true] 0.0 1] (:value r)) (pr-str r))))
 
 (deftest a-pass-stops-at-its-bound
-  ;; at :seon.config.ai/judge-pass-usd the pass makes no further call and writes what it left
+  ;; at :seon.config.ai/judge-pass-usd the pass makes no further call and writes what it left.
+  ;; The bound is 0.0 in the shared root's process for this pass alone: it holds main's config with that
+  ;; entry changed (seon.program/hold-config! of a db-with, docs/config.md#a-process-holds-its-branchs-config),
+  ;; and main's again after; a root of its own (--set) was a boot a shard for this one test
   (let [names (volatile! nil)
         [r] (at/in-agent (fn [{:keys [task] :as n}]
                            (vreset! names n)
                            [{:op :eval :agent "root"
-                             :code (str "(let [n0 (count (datahike.api/datoms @(:conn sys) :aevt :seon.judge/stopped)) a (my.root/first-moves! sys [" (pr-str task) "])]"
-                                        " [(:rows a) (:stopped a) (- (count (datahike.api/datoms @(:conn sys) :aevt :seon.judge/stopped)) n0)])")}])
-                         {:sets [":seon.config.ai/judge-pass-usd=0.0"]})]
-    (is (= [[] {:usd 0.0 :bound 0.0 :left [(:task @names)]} 1] (:value r)) (pr-str r))))
+                             :code (str "(let [n0 (count (datahike.api/datoms @(:conn sys) :aevt :seon.judge/stopped))"
+                                        " _ (seon.program/hold-config! (datahike.api/db-with @(:conn sys) [{:config/key :seon.config.ai/judge-pass-usd :config/form \"0.0\"}]))"
+                                        " a (try (my.root/first-moves! sys [" (pr-str task) "]) (finally (seon.program/hold-config! @(:conn sys))))]"
+                                        " [(:rows a) (:stopped a) (- (count (datahike.api/datoms @(:conn sys) :aevt :seon.judge/stopped)) n0) (seon.config/value :seon.config.ai/judge-pass-usd)])")}]))]
+    (is (= [[] {:usd 0.0 :bound 0.0 :left [(:task @names)]} 1] (pop (:value r))) (pr-str r))
+    (is (not= 0.0 (peek (:value r))) "and root holds main's bound again")))
