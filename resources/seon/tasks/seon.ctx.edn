@@ -1,6 +1,6 @@
 [
  {:seon.task/name "a-context-is-ordered-by-a-sort-key"
-  :seon.task/plan "Approved by the owner, 2026-11-08: \"put it in everywhere we need them and remove all the fragile hacks\"; and \"why can't we use the sort by attributes location in the data to imply what you are sorting?\" Agreed by Context, Web and Optimization. No schema-layer or Datahike change; items a store holds from before carry no key, so the first merge either waits for the erase content-hashed nodes takes or gives old items keys in their current order.
+  :seon.task/plan "Approved by the owner, 2026-11-08: \"put it in everywhere we need them and remove all the fragile hacks\"; and \"why can't we use the sort by attributes location in the data to imply what you are sorting?\" Agreed by Context, Web and Optimization. No schema-layer or Datahike change. Items a store holds from before carry no key, so the schema entry lands with the single erase content-hashed nodes takes, and no old item is given a key (Optimization's choice: erase, never migrate).
 
 What's wrong: the order of a context's items rests on Datahike issuing ids and transactions in order on one branch. Nothing states it, so a merge, a copy or content-hashed ids break it silently, and a window (`:limit` with `:reverse`) takes the newest n by eid. Neither Datahike nor Datomic orders a many-ref result (Web's reading of our fork's pull_api and Datomic's grammar).
 
