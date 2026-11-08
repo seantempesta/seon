@@ -16,11 +16,11 @@ A worktree session is a separate instance of the whole system: `bin/worktree NAM
 
 Every session, Claude's or Seon's, works its branch in a worktree of its own (`bin/worktree NAME`) and lands it itself with `bin/land [-F MSGFILE]` run in that worktree; the main tree (`~/src/seon-next`) stays on main and clean, and nobody works or checks out a branch there (owner, 2026-11-08: a branch checked out there had stopped every other session's merge and `bin/update`). `bin/land`:
 1. merges main into the branch (a conflict stops it: resolve, commit, run it again);
-2. runs `bin/prove --merge` on that tip, niced, beside any other run: no run waits on another, since each writes under its own `target/prove/<id>` and every verdict goes to the one cache all checkouts share (`target/results` of the main tree, [verdicts are a cache](#verdicts-are-a-cache)), so a test green at its digest in any worktree is reused in every other and only what this branch and the new main moved runs;
+2. runs `bin/prove --merge` on that tip, niced, beside any other run. A bare `bin/prove` and a `--merge` run leave the same nothing out and share one green marker per tree, so a branch that held main when its session proved it is answered at once and merges with nothing run; when main moved, only the tests main's new commits reach run, every other green reused from the one cache all checkouts share (`target/results` of the main tree, [verdicts are a cache](#verdicts-are-a-cache));
 3. moves main to a merge commit whose tree is the proved tip's (`git commit-tree`, then `git update-ref` with main's old value): no checkout of main, and a main that moved during the proof is refused, never overwritten, so it goes back to 1 and proves only what the new main moved;
 4. runs `bin/update`, which first brings the main tree's files to main, then restarts the standing root on it.
 
-It ends on `LANDED` or `LAND FAILED`. The message file says what the merge completes and its numbers (AGENTS §3, [a merge says what it completes](#a-merge-says-what-it-completes)); `bin/prove`'s line is added. Branches live hours: land small and often. Iterate at the REPL and with `bin/prove` (or `bin/test NS`); `bin/land` is the merge proof, run once the work is done.
+It ends on `LANDED` or `LAND FAILED`. The message file says what the merge completes and its numbers (AGENTS §3, [a merge says what it completes](#a-merge-says-what-it-completes)); `bin/prove`'s line is added. Branches live hours: land small and often. The recipe (AGENTS §3): iterate with `bin/test NS`, prove once with a bare `bin/prove` when done, then `bin/land`; nothing is run twice.
 
 ## A branch that grows src or adds a mechanism is reviewed
 
