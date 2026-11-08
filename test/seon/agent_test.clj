@@ -1685,7 +1685,7 @@
          (agent/commit!)
          (let [w (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false
                                         :to-writer (clojure.core.async/chan 4) :events (clojure.core.async/chan 4)})
-               up (first (:results (:r (first (:to-api (second (#'writer/writer-proc w :in {:op :octopus-merge :branches [ab] :dest {:rid 1}}))))))))]
+               up (first (:results (:r (first (:to-api (second (#'writer/writer-proc w :in {:op :octopus-merge :branches [ab] :dest {:rid 1}})))))))]
            (is (:merged? up) (str "root merges the agent's branch up: " (pr-str up))))
          (redefine "app.m0/f1-second" "(+ x 2)")
          (agent/heard-main)
