@@ -1272,7 +1272,7 @@
     (is (= (get-in a [:seon.eval/result :db/id]) (get-in b [:seon.eval/result :db/id])) "of one result entity")
     (is (= (get-in a [:seon.eval/result :seon.result/hash]) (get-in b [:seon.eval/result :seon.result/hash])))
     (is (= 36 (count (get-in a [:seon.eval/result :seon.result/hash]))) "its identity is the full hash, not the handle's eight digits")
-    (is (str/starts-with? (get-in a [:seon.eval/result :seon.result/hash]) (subs (str (get-in a [:seon.eval/response :handle])) (count "result/"))) "and the handle is its short form")
+    (is (= (str "result/" (seon.lib/id (subs (get-in a [:seon.eval/result :seon.result/hash]) 0 8))) (str (get-in a [:seon.eval/response :handle]))) "and the handle is its short form, in seon.lib/id's form")
     (is (= (vec (map inc (range 50))) (get-in a [:seon.eval/result :seon.result/value])) "the value lives on the result")
     (is (every? #(number? (get-in % [:seon.eval/response :ms])) [a b]) "each eval keeps its own cost")
     (is (every? #(and (not (contains? (:seon.eval/response %) :value)) (contains? (:seon.eval/response %) :handle)) [a b]) "and no copy of the value")
