@@ -294,7 +294,8 @@
         whole (model/parse-reply deepseek-stream 1.0 2048)
         args (json/read-str call-args)
         by-id (group-by :stream out)
-        text (fn [id] (apply str (map :text (sort-by :offset (filter :text (by-id id))))))]
+        ;; a message holds its part's whole text so far (the vector of its pieces): the last one is all of it
+        text (fn [id] (apply str (:text (last (filter :text (by-id id))))))]
     (is (= (:reasoning whole) (text "c1/reasoning")))
     (is (= (str "Caf\u00e9 " emoji " ok") (text "c1/content")))
     (is (= "then" (text "c1/1/eval-0/intent")))
@@ -304,7 +305,7 @@
     (is (= (get args "code") (:code (first (:tool-calls whole)))) "the committed code is the one streamed")
     (doseq [[id ms] by-id]
       (let [ts (filter :text ms)]
-        (is (= (reductions + 0 (map (comp count :text) (butlast ts))) (map :offset ts)) (str id ": offsets are the chars sent before"))
+        (is (every? (fn [[a b]] (= a (subvec b 0 (count a)))) (partition 2 1 (map :text ts))) (str id ": each message holds the one before it and more, so a dropped one loses nothing"))
         (is (every? #(= "boot/1" (:agent %)) ms))))
     (is (every? #(<= (count (filter :end %)) 1) (vals by-id)) "an id ends once")
     (is (= #{"c1/0/eval-0/intent" "c1/0/eval-0/code" "c1/1/eval-0/intent" "c1/1/eval-0/code"}
@@ -370,6 +371,6 @@
             r (final st)]
         (is (some? s) "the call is answered at the start of its reply")
         (is (= (:text (model/complete provider req)) (:text r)) "and its last state is the reply the whole read makes")
-        (is (= ["Square " "multiplies."] (map :text (filter (comp #{"c1/reasoning"} :stream) out))))
+        (is (= [["Square "] ["Square " "multiplies."]] (map :text (filter (comp #{"c1/reasoning"} :stream) out))))
         (is (nil? (shut)) "the connection is closed already, and closing again is nothing"))
       (finally (stop-now! server)))))

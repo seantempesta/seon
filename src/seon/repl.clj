@@ -127,20 +127,19 @@
 (defn- streaming
   "Writer kept, or for an eval of a model call (the request's :stream) a java.io.Writer that writes to kept (the StringWriter the
   eval's record reads, so the record is what it was) and also sends each write to root as {:op :stream :stream (`stream-id`) :in <call
-  id> :part part :agent <key> :offset n :text s}, which seon.agent-proc/agent-frame puts on the web proc's :streams. Display only: the
+  id> :part part :agent <key> :text s} with s this write's piece; seon.agent-proc/agent-frame appends it to the part's whole text so far and puts that on the web proc's :streams (the socket drops nothing, so pieces are enough here, and a frame stays the size of its write). Display only: the
   record holds the text. Only the REPL's own thread sends (the thread that made the writer): seon.sock/send! writes a frame whole
   against another fiber of this thread but can interleave frames across OS threads, so a write from an eval's future or a/thread
   goes to kept alone and is never sent. See docs/render.md#in-flight-output-streams."
   {:malli/schema [:=> [:cat :seon.host/writer :map :string] :seon.host/writer]}
   [kept req part]
   (if-let [id (stream-id req part)]
-    (let [home (Thread/currentThread) at (get-in req [:stream/offsets part])
+    (let [home (Thread/currentThread) sent (get-in req [:stream/sent part])
           put (fn [^String s]
                 (.write ^java.io.Writer kept s)
                 (when (and (pos? (count s)) (identical? home (Thread/currentThread)))
-                  (agent/send! {:op :stream :stream id :in (get-in req [:stream :call]) :part part :agent (:key @agent/state)
-                                :offset @at :text s})
-                  (vswap! at + (count s))))]
+                  (agent/send! {:op :stream :stream id :in (get-in req [:stream :call]) :part part :agent (:key @agent/state) :text s})
+                  (vswap! sent + (count s))))]
       (proxy [java.io.Writer] []
         (write ([x] (put (if (string? x) x (str (char x)))))
                ([b o n] (put (if (string? b) (subs b o (+ o n)) (String. ^chars b (int o) (int n))))))
@@ -153,7 +152,7 @@
   {:op :stream ... :end true} a stream. See docs/render.md#in-flight-output-streams."
   {:malli/schema [:=> [:cat :map] :nil]}
   [req]
-  (doseq [part ["out" "err"] :let [at (get-in req [:stream/offsets part])] :when (and at (or (= "out" part) (pos? @at)))]
+  (doseq [part ["out" "err"] :let [at (get-in req [:stream/sent part])] :when (and at (or (= "out" part) (pos? @at)))]
     (agent/send! {:op :stream :stream (stream-id req part) :in (get-in req [:stream :call]) :part part :agent (:key @agent/state) :end true})))
 
 (defn- eval-code
@@ -793,7 +792,7 @@
          outer (:eval @agent/state)
          before @agent/state
          ;; a model's eval streams its output (`streaming`): the characters sent so far of each part
-         req (cond-> req (:stream req) (assoc :stream/offsets {"out" (volatile! 0) "err" (volatile! 0)}))]
+         req (cond-> req (:stream req) (assoc :stream/sent {"out" (volatile! 0) "err" (volatile! 0)}))]
      (swap! agent/state assoc :eval id)
      (try (let [;; with the namespace the REPL is in after it (:ns, as every nREPL response carries): the prompt
                 ;; an eval makes data: its value made plain here, inside the boundary, so a value that throws as it is
