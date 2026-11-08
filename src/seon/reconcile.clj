@@ -498,7 +498,7 @@
                      :when (not (and lost? (outside? env)))]
                  ;; its process is idle (parked in this boot, on its branch): its next work is a wake on it, no fork
                  (if (and p (not (get-in idx [:kill id])))
-                   {:op :wake :task id :env env :agent (:seon.agent/id p)}
+                   {:op :wake :task id :env env :agent (some-> (:seon.agent/key p) keyword)}
                    {:op :spawn :task id :env env}))]
     ;; a task has one flight, so one action a pass: the first in root's order; what follows it waits for the pass its write moves main to
     (first (reduce (fn [[acc seen] act] (if (contains? seen (:task act)) [acc seen] [(conj acc act) (conj seen (:task act))]))
@@ -709,7 +709,7 @@
         said (some (fn [x] (cond (map? x) (or (:seon.task/reason x) (:reason (:seon.task/failure x)))
                                  (and (vector? x) (= :seon.task/reason (nth x 2 nil))) (nth x 3 nil)))
                    tx)
-        from (some-> (:seon.agent/id (:seon.task/agent (d/entity db [:seon.task/id id]))) name)]
+        from (:seon.agent/key (:seon.task/agent (d/entity db [:seon.task/id id])))]
     (if k
       (task/message-tx (str "asked-" id "-" (:max-tx db)) (or from "root") [k]
                        (str "Task " id " " (ends-told to) (when said (str ": " said))
@@ -732,7 +732,7 @@
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/id] [:maybe [:map [:key :string] [:id {:optional true} :keyword] [:branch {:optional true} :keyword]]]]}
   [db id]
   (when-let [a (:seon.task/agent (d/entity db [:seon.task/id id]))]
-    {:key (:seon.agent/key a) :id (:seon.agent/id a) :branch (:seon.agent/branch a)}))
+    {:key (:seon.agent/key a) :id (keyword (:seon.agent/key a)) :branch (:seon.agent/branch a)}))
 
 (defn- ended-ms-tx
   "The write that records task id's agent ended at ms (:seon.agent/ended-ms), or none when it has no agent."
@@ -757,7 +757,7 @@
         st (if killing? (assoc-in st [:flights id :killing] true) (assoc-in st [:flights id] {:act act}))
         db (:db st)
         from (get-in st [:idx :tasks id :seon.task/outcome])
-        agent (:seon.agent/id (task-agent (:idx st) id))
+        agent (some-> (:seon.agent/key (task-agent (:idx st) id)) keyword)
         now (System/currentTimeMillis)
         one (fn [[st o]] [st [o]])
         ;; a woken agent starts with its allowance of turns more, whoever sent the message (`wake`), and is no longer woken
@@ -771,7 +771,7 @@
               ;; reads the messages that woke it from the store (seon.agent/undelivered)
               (one (request (assoc-in st [:flights id :agent] ag) id :started
                             {:op :write :req {:op :tx :branch :db :flush? true
-                                              :tx-data (task/start-tx db id (:boot st) ag (:env act) now (task/session-key db id) raise)}})))
+                                              :tx-data (task/start-tx db id (:boot st) ag (:env act) now raise)}})))
       :spawn (let [k (task/session-key db id)]
                ;; the session's agent continues (docs/turn.md#parked); kept on the flight for its start
                (one (request (cond-> st k (assoc-in [:flights id :key] k)) id :spawned
@@ -978,7 +978,7 @@
                                (:seon.error/type r) (assoc-in [:flights id :died-at-spawn]
                                                               (select-keys r [:seon.error/type :seon.error/operation :seon.error/message :exit :agent])))
                              id :started
-                             (task/start-tx (:db st) id (:boot st) ag (:env act) now (:key f) (:raise f 0))))
+                             (task/start-tx (:db st) id (:boot st) ag (:env act) now (:raise f 0))))
                  ;; root refused it (the branch is held, or too many live agents): the refused answer
                  ;; is the task's outcome, with root's reason; the task starts again
                  ;; once main moves for another reason (:refused, pass)

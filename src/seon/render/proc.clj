@@ -80,8 +80,8 @@
      :events (let [evs (:events st []) ids (into #{} (keep :agent) evs)
                    idx (:idx st)
                    outcome (if (seq ids)
-                             (into {} (for [[_ t] (:tasks idx) :let [a (get (:agents idx) (:seon.task/agent t))] :when (and a (ids (:seon.agent/id a)))]
-                                        [(:seon.agent/id a) (:seon.task/outcome t)]))
+                             (into {} (for [[_ t] (:tasks idx) :let [a (get (:agents idx) (:seon.task/agent t))] :when (and a (ids (keyword (:seon.agent/key a))))]
+                                        [(keyword (:seon.agent/key a)) (:seon.task/outcome t)]))
                              {})]
                (mapv #(ui/ended-as % (:agent %) outcome) evs))}))
 
@@ -202,19 +202,14 @@
   (let [newest (fn [q & args] (apply d/q q db args))
         eid (fn [lookup] (:db/id (d/entity db lookup)))
         id (keyword address)
-        boot (task/boot-of db)
         branch (keyword (str/replace address #"^main/" ""))]
     (or (eid [:seon.agent/key address])
         (eid [:seon.user/name address])
-        (when boot
-          (or (eid [:seon.agent/key (task/agent-key boot id)])
-              (some (fn [dt] (when (= id (task/this-boots db (d/entity db (:e dt)))) (:e dt))) (d/datoms db :avet :seon.agent/id id))))
         (when-let [t (eid [:seon.task/id address])]
           (newest '[:find (max ?a) . :in $ ?t :where [?a :seon.agent/task ?t]] t))
         (some #(newest '[:find (max ?e) . :in $ ?b :where [?e :seon.agent/branch ?b]] %) [id branch])
         (when-let [[_ n] (re-matches #"main/(.+)" address)]
-          (some (fn [dt] (when (nil? (:seon.agent/branch (d/entity db (:e dt)))) (:e dt)))
-                (d/datoms db :avet :seon.agent/id (keyword n)))))))
+          (when-let [e (eid [:seon.agent/key n])] (when (nil? (:seon.agent/branch (d/entity db e))) e))))))
 
 (defn- location
   "The entity view names on main db: root's for :root, the agent a keyword address names for an agent's page (session-of), else the entity
@@ -238,8 +233,7 @@
         e (when (and db (keyword? v) (not= :root v)) (some->> (location db v) (d/entity db)))]
     (cond (= :root v) :root
           (:seon.agent/key e) {:address (:seon.agent/key e)
-                               :label (str (ui/kname (:seon.agent/id e))
-                                           (when-not (task/this-boots db e) (str " · boot " (ui/boot-short (:seon.agent/key e)))))
+                               :label (:seon.agent/key e)
                                :view v}
           :else v)))
 
@@ -455,7 +449,7 @@
                       berr [{:id "p-branch-error" :container "#p-task" :rev 0 :html (h/html [:section {:id "p-branch-error"} (render/hiccup {} berr)])}]))
         ;; root's agents list, as root's walk drew it, and the agent's head from its facts on main
         sides (when-not (some #(= "#c-side" (:container %)) units) (filterv #(= "#c-side" (:container %)) (some-> (:root-walk st) :w render/placed-units)))
-        head (cond-> (d/pull db [:seon.user/name :seon.agent/id :seon.agent/status :seon.agent/branch :seon.agent/description :seon.agent/max-turns {:seon.agent/task [:seon.task/id :seon.task/outcome :seon.task/reason :seon.task/failure]} {[:seon.process/_agent :as :processes] [:seon.process/pid :seon.process/forked-ms]}] eid)
+        head (cond-> (d/pull db [:seon.user/name :seon.agent/status :seon.agent/branch :seon.agent/description :seon.agent/max-turns {:seon.agent/task [:seon.task/id :seon.task/outcome :seon.task/reason :seon.task/failure]} {[:seon.process/_agent :as :processes] [:seon.process/pid :seon.process/forked-ms]}] eid)
                ;; an earlier boot's process recorded no end (its root went away): its pid names nothing now
                (not (task/this-boots db e)) (dissoc :processes))
         head-unit {:id "p-agent-head" :container "#p-head" :rev (hash head)
@@ -466,7 +460,7 @@
                                  (when (:error held) (str "Its process didn't answer, so this may be behind: " (:seon.error/message (:error held)))))
                       ;; its REPL and its messages while its process runs; its held task's release
                       :input (if (:seon.user/name e) {:schema :seon.render/root-input :value {}} {:schema :seon.render/agent-input
-                              :value {:id (:seon.agent/id e) :address (keyword (:seon.agent/key e)) :live? (live? st id) :focus? chat?
+                              :value {:id (keyword (:seon.agent/key e)) :address (keyword (:seon.agent/key e)) :live? (live? st id) :focus? chat?
                               ;; what its process can answer: a form running is interrupted (busy)
                               :busy? (= :busy (:seon.agent/status e)) :talks? (some? (:seon.agent/task e))
                                       :held (d/q '[:find ?id . :in $ ?a :where [?a :seon.agent/task ?t] [?t :seon.task/execution :held] [?t :seon.task/id ?id]] db eid)}})}
@@ -784,14 +778,12 @@
 
 (defn- index-of
   "What the web proc needs to turn a UI call into root's request (each agent's pid, branch
-  and status) and to find an agent's tabs by its stable key (:key, seon.task/agent-key in root's
-  boot, or the session's it continues: an id like :a1 starts again each boot). See
+  and status) and to find an agent's tabs by its stable key (:key, its id's name). See
   docs/render.md#in-flight-output-streams."
-  {:malli/schema [:=> [:cat :map [:maybe :string]] :map]}
-  [agents boot]
+  {:malli/schema [:=> [:cat :map] :map]}
+  [agents]
   (into {} (for [[id a] agents]
-             [id (cond-> (select-keys a [:pid :branch :status])
-                   (or (:key a) boot) (assoc :key (or (:key a) (task/agent-key boot id))))])))
+             [id (assoc (select-keys a [:pid :branch :status]) :key (name id))])))
 
 (defn- pass
   "Render every view a tab watches (or a page or keyframe waits for), and answer the
@@ -819,7 +811,7 @@
                                  (let [[st p] (view-pass st o v)]
                                    [st (cond-> ps p (conj p))]))
                                [st []] (filter #(walk? st %) (sort-by str views)))
-          idx (index-of (get-in st [:view :agents] {}) (some-> (:main-db st) task/boot-of))
+          idx (index-of (get-in st [:view :agents] {}))
           ms (profile/ms-since t0)]
       (doseq [p patches] (step/out! o :to-web p))
       (when (not= idx (:index st)) (step/out! o :to-web {:op :index :agents idx}))
