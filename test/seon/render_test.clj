@@ -2203,10 +2203,11 @@
     (is (= #'ui/render-ctx (walk-layout nil :task-a {:seon.agent/key "b2/a1"})) "a branch that holds no entity yet: the agent's key names it")))
 
 (defn- booted
-  "The test world as a root's boot leaves it: the boot fact, then root's session (seon.root/root-session-tx), as seon.root/start! writes them."
+  "The test world after a root's boot and the person's first message to root, which makes root's session (seon.root/root-session-message-tx,
+  as root's api writes it)."
   []
   (let [db (d/db-with (my.test/world) (seon.task/boot-tx "b1" 1 "sean"))]
-    (d/db-with db (seon.root/root-session-tx db))))
+    (d/db-with db (seon.root/root-session-message-tx db (seon.task/message-tx "m-first" "sean" ["root"] "Hi root." 1)))))
 
 (deftest roots-session-is-an-agent-of-its-own
   ;; docs/users.md#roots-session: root's session is an ordinary agent keyed "root", linked to root, working request/root, parked until a message
@@ -2221,9 +2222,13 @@
     (is (= "root" (seon.task/session-key db "request/root")) "and the ordinary spawn continues it by its key")
     (is (= :seon.db/agent-fact (r/entity-schema (d/pull db '[*] (:db/id s)) nil)) "an agent like any other")
     (is (= #'ui/render-ctx (r/layout-of (d/pull db '[*] (:db/id s)))) "drawn by the agent's layout")
-    (let [db2 (d/db-with db (seon.root/root-session-tx db))
+    (is (= ["Hi root."] (mapv #(:seon.message/body (d/entity db (:e %))) (d/datoms db :avet :seon.message/to (:db/id s)))) "made by the first message, which it holds")
+    (let [db2 (d/db-with db (seon.root/root-session-refresh-tx db))
           same (fn [d] [(dissoc (d/pull d '[*] [:seon.agent/key "root"]) :db/id) (dissoc (d/pull d '[*] [:seon.task/id "request/root"]) :db/id)])]
-      (is (= (same db) (same db2)) "a second boot writes the same facts: the session, its pattern and its task"))))
+      (is (= (same db) (same db2)) "a boot after writes its pattern again and nothing else"))
+    (let [fresh (d/db-with (my.test/world) (seon.task/boot-tx "b1" 1 "sean"))]
+      (is (nil? (d/entity fresh [:seon.agent/key "root"])) "a root no one has messaged has no session")
+      (is (= [] (seon.root/root-session-refresh-tx fresh)) "and its boot writes none"))))
 
 (deftest roots-session-reads-its-sessions
   ;; docs/users.md#roots-session: root's session's record holds root's sessions (its pattern's :root join), and its task list shows each
@@ -2260,7 +2265,7 @@
   (ts/test-branch!
     (fn [_ conn]
       (d/transact conn (seon.task/boot-tx "b1" 1 "sean"))
-      (d/transact conn (seon.root/root-session-tx @conn))
+      (d/transact conn (seon.root/root-session-message-tx @conn (seon.task/message-tx "m-first" "sean" ["root"] "Hi root." 1)))
       (let [fork (d/commit-id @conn)
             _ (d/transact conn [{:seon.task/id "request/later" :seon.task/ns 'request :seon.task/name "later" :seon.task/plan "Asked after root's session forked."
                                  :seon.task/kind :user :seon.task/branch :task-request-later :seon.task/outcome :parked}
