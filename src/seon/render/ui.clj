@@ -2053,7 +2053,7 @@
 (defn started-cards
   "A tile for each agent this user started, grouped by what needs them (sessions-by-standing: `session-card` by each one's key), the
   home page's one list: an agent's latest words to them are on its tile, its whole conversation in its chat. See docs/users.md#whats-on-screen."
-  {:seon.render/style ".started-cards .session-tiles, .work-list .session-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(18rem, 1fr)); gap: 0.75rem; }"
+  {:seon.render/style ".started-cards .session-tiles, .work-list .session-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(18rem, 100%), 1fr)); gap: 0.75rem; }"
    :seon.render/for "page" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
   [{c :seon.ctx/ctx db :seon.db/db}]
   (if-let [ks (seq (keep #(:seon.agent/key (d/entity db %)) (newest-started db c)))]
