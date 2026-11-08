@@ -1026,6 +1026,11 @@
  ;; resources/public/css/input.css, docs/render.md#tailwind); read per request, so a build's
  ;; new stylesheet shows on reload. Missing (no build yet): the page is served unstyled.
  :seon.config.web/stylesheet #seon/checkout "target/css/app.css"
+ ;; Unit: messages of in-flight text (docs/render.md#in-flight-output-streams) the web proc's
+ ;; :streams in-port holds while it is busy. A sliding buffer: past the bound the oldest is
+ ;; dropped, never the producer made to wait, and the drop shows in the tab as … in that
+ ;; stream until its committed value replaces it. 64: the model reader's own in-port's size.
+ :seon.config.web/streams-buf 64
 
  ;; Contracts and their recording (session G1): :on, :contracts (wrappers, no recording
  ;; transaction: the two measured apart), :off (no wrapper, no recording: the same binary
