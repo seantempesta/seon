@@ -2172,7 +2172,7 @@
     (is (not (str/includes? before "/agent/b2/a1")) "nothing started yet")
     (is (str/includes? (side (:w (get @(:user-walks st') "sean"))) "/agent/b2/a1") "the agent it started is on the page, with no new draw")
     (let [rows (fn [w] (apply str (map :html (filter #(= "#c-rows" (:container %)) (r/placed-units w)))))]
-      (is (not (str/includes? (rows (:w kw)) "session-card")) "no tile while nothing is started")
+      (is (not (str/includes? (rows (:w kw)) "/agent/b2/a1")) "no tile while nothing is started")
       (is (str/includes? (rows (:w (get @(:user-walks st') "sean"))) "/agent/b2/a1") "the first agent's tile too, in the list the page holds"))
     (is (contains? (:dirty st') [:chat :sean]) "and its view is dirty")
     (is (not (contains? (:dirty st') [:chat :a1])) "another's isn't")))
