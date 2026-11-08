@@ -1947,42 +1947,51 @@
                                    [:span {:class "min-w-0 break-all text-text-300"} (event-detail ev)]])]])]))
 
 (defn session-card
-  "A session of main in root's list of work (a component over the db, by its agent's key): what it works on in words, then how it
-  stands (standing) and why, one link to its page by its stable address. See docs/render.md#the-page."
-  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :string] :any]}
+  "A session as a tile (a component over the db, by its agent's key), the whole tile one link to its page by its stable address:
+  what it works on in words and how it stands (standing), then what it last told whoever started it, a few lines of it (the
+  task's reason, which root's message to them carries: seon.reconcile/tell-tx), so a person can tell which to open. See
+  docs/users.md#whats-on-screen."
+  {:seon.render/style ".session-card > a { display: flex; flex-direction: column; gap: 0.5rem; height: 100%; min-height: 7rem; border: 1px solid var(--color-base-800); border-radius: 0.5rem; background: var(--color-base-900); padding: 0.75rem 0.875rem; color: inherit; text-decoration: none; } .session-card > a:hover { border-color: var(--color-base-600); } .session-card .said { max-height: 7.5rem; overflow: hidden; font-size: 0.8125rem; line-height: 1.25rem; color: var(--color-text-300); -webkit-mask-image: linear-gradient(to bottom, black 70%, transparent); mask-image: linear-gradient(to bottom, black 70%, transparent); } .session-card .said p { margin: 0 0 0.375rem; }"
+   :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :string] :any]}
   [{db :seon.db/db} k]
   (let [a (d/pull db session-attrs [:seon.agent/key k])
         t (:seon.agent/task a)
         stands (standing a t)]
     [:section
-     [:a {:href (str "/agent/" (session-address a)) :class "flex items-baseline gap-2 no-underline hover:no-underline"
+     [:a {:href (str "/agent/" (session-address a))
           :title (str/join " · " (remove nil? [(kname (:seon.agent/id a)) (:seon.task/id t)]))}
-      [:span {:class (if (:lit? stands) "text-signal" "muted")} (if (:lit? stands) "●" "○")]
-      [:span {:class "text-sm text-text-100"} (task-name a t)]
-      [:span {:class (str "ml-auto shrink-0 text-2xs " (tone-class (:tone stands)))} (:text stands)]]
-     (when-let [r (:reason stands)] [:p {:class "text-xs text-text-400"} (plain r (cell) {:one-line? true})])]))
+      [:span {:class "flex items-baseline gap-2"}
+       [:span {:class (if (:lit? stands) "text-signal" "muted")} (if (:lit? stands) "●" "○")]
+       [:span {:class "min-w-0 flex-1 truncate font-semibold text-text-100"} (task-name a t)]
+       [:span {:class (str "shrink-0 text-2xs " (tone-class (:tone stands)))} (:text stands)]]
+      ;; the task's reason even while it waits (standing leaves it out then, for the agents list): what the agent asked is the point
+      (when-let [r (or (when-not (str/blank? (:seon.task/reason t)) (:seon.task/reason t)) (:reason stands))] [:div {:class "said"} [#'markdown r {:inline? true}]])]]))
+
+(defn- sessions-by-standing
+  "Sessions ks (agent keys, newest first) as tiles grouped by how each stands: what needs a person, what is working, then what
+  finished, folded; empty as none. Root's work and a user's page both draw this. See docs/users.md#whats-on-screen."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :string]] :any]}
+  [db ks]
+  (let [sessions (for [k ks :let [a (d/pull db session-attrs [:seon.agent/key k])]] [k (standing a (:seon.agent/task a))])
+        where (fn [[_ {:keys [state lit?]}]] (cond (#{:task/parked :task/told :status/idle} state) :needs lit? :working :else :finished))
+        {:keys [needs working finished]} (group-by where sessions)
+        tiles (fn [ss] (into [:div {:class "session-tiles"}] (for [[k _] ss] [#'session-card {} k])))
+        heading (fn [text] [:h2 {:class "kicker"} text])]
+    [:div {:class "seon-stack-2"}
+     (when (seq needs) (list (heading "Needs you") (tiles needs)))
+     (when (seq working) (list (heading "Working") (tiles working)))
+     (when (seq finished)
+       [:details {:data-preserve-attr "open"}
+        [:summary {:class "kicker cursor-pointer"} (str "Finished · " (count finished))]
+        (into [:div {:class "mt-2"}] [(tiles finished)])])]))
 
 (defn work-list
   "The work of root's page (a component over the db): every session on main with a task, by how it stands: what needs a person,
   what is working, then what finished, folded; newest first. See docs/render.md#the-page."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]]] :any]}
   [{db :seon.db/db}]
-  (let [sessions (for [dt (sort-by (comp - :tx) (d/datoms db :aevt :seon.agent/task))
-                       :let [a (d/pull db session-attrs (:e dt))]
-                       :when (:seon.agent/key a)]
-                   [(:seon.agent/key a) (standing a (:seon.agent/task a))])
-        where (fn [[_ {:keys [state lit?]}]] (cond (#{:task/parked :task/told :status/idle} state) :needs lit? :working :else :finished))
-        {:keys [needs working finished]} (group-by where sessions)
-        cards (fn [ss] (into [:div {:class "grid grid-cols-1 gap-2 lg:grid-cols-2"}] (for [[k _] ss] [#'session-card {} k])))
-        heading (fn [text] [:h2 {:class "kicker"} text])]
-    [:section {:class "seon-stack-2"}
-     (when (seq needs) (list (heading "Needs you") (cards needs)))
-     (when (seq working) (list (heading "Working") (cards working)))
-     (when (seq finished)
-       [:details {:data-preserve-attr "open"}
-        [:summary {:class "kicker cursor-pointer"} (str "Finished · " (count finished))]
-        (into [:div {:class "seon-stack-2 mt-2"}] (cards finished))])
-     (when (empty? sessions) [:p {:class "muted"} "No work yet."])]))
+  (let [ks (keep #(:seon.agent/key (d/entity db (:e %))) (sort-by (comp - :tx) (d/datoms db :aevt :seon.agent/task)))]
+    [:section (if (seq ks) (sessions-by-standing db ks) [:p {:class "muted"} "No work yet."])]))
 
 (defn root-evals
   "The evals sent to root (a component over its ctx): one closed line that opens to them, in the order written. They are how sessions debug root, not its work. See docs/render.md#the-page."
@@ -2041,23 +2050,14 @@
   [:li {:class "contents"} [:ul {:class "contents"} (for [eid (newest-started db c)] [#'agent-side {} eid])]])
 
 (defn started-cards
-  "A card for each agent this user started, in a grid (a component over ctx and the db, `session-card` by each one's key). See docs/users.md#whats-on-screen."
-  {:seon.render/for "page" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
+  "A tile for each agent this user started, grouped by what needs them (sessions-by-standing: `session-card` by each one's key), the
+  home page's one list: an agent's latest words to them are on its tile, its whole conversation in its chat. See docs/users.md#whats-on-screen."
+  {:seon.render/style ".started-cards .session-tiles, .work-list .session-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(18rem, 1fr)); gap: 0.75rem; }"
+   :seon.render/for "page" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
   [{c :seon.ctx/ctx db :seon.db/db}]
-  (if-let [es (seq (newest-started db c))]
-    [:section {:class "grid grid-cols-1 gap-3 lg:grid-cols-2"}
-     (for [e es :let [k (:seon.agent/key (d/entity db e))] :when k] [#'session-card {} k])]
-    [:p {:class "muted"} "No agents yet."]))
-
-(defn user-messages
-  "What this user holds (a component over ctx, its pull's :messages), newest first, each `chat-message`: what its agents told it. See docs/users.md#messages."
-  {:seon.render/for "page" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
-  [{c :seon.ctx/ctx}]
-  (when-let [ms (seq (:messages c))]
-    [:section {:class "seon-stack"}
-     [:h2 {:class "kicker"} "Messages"]
-     (for [[e m] (sort-by (fn [[e m]] [(- (or (:seon.message/sent-ms m) 0)) e]) (ratom/untracked ms))]
-       [#'chat-message {:key (:seon.message/id m) :at [:messages e]}])]))
+  (if-let [ks (seq (keep #(:seon.agent/key (d/entity db %)) (newest-started db c)))]
+    [:section (sessions-by-standing db ks)]
+    [:p {:class "muted"} "No agents yet: ask for something below."]))
 
 (defn user-ctx
   "A user's page, the render of its ctx (the declared html render of :seon.render/user-ctx, which a branch overrides like any render): root and its agents in the agents list, its agents as cards. See docs/users.md#whats-on-screen."
@@ -2065,7 +2065,7 @@
   [_]
   [:div {:id "user-ctx"}
    [:ol {:id "c-side"} [#'root-side {}] [#'started-side {}]]
-   [:ol {:id "c-rows"} [#'user-messages {}] [#'started-cards {}]]
+   [:ol {:id "c-rows"} [#'started-cards {}]]
    [#'rules-list {}]])
 
 (defn root-ctx

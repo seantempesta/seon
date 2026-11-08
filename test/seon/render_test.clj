@@ -2129,7 +2129,7 @@
         db (d/db-with db [{:seon.agent/key "sean" :seon.user/name "sean" :seon.agent/agents started}])
         sean (d/entity db [:seon.user/name "sean"])
         c {:started (into {} (for [e started] [e {:db/id e}]))}
-        cards (nth (ui/started-cards {:seon.ctx/ctx c :seon.db/db db}) 2)
+        cards (filter #(and (vector? %) (var? (first %))) (tree-seq coll? seq (ui/started-cards {:seon.ctx/ctx c :seon.db/db db})))
         hrefs-in-order (fn [html] (map second (re-seq #"href=\"([^\"]+)\"" html)))]
     (is (= (:db/id sean) (#'p/session-of db "sean")) "its name finds it, as an address")
     (is (= [#'ui/session-card] (distinct (map first cards))) "each drawn by the one card's render")
@@ -3217,3 +3217,22 @@
   (is (= [:section {:class "user-messages seon-stack" :id "k"} "x"] (#'r/with-id [:section {:class "seon-stack"} "x"] {:class "user-messages" :id "k"})))
   (is (= [:section {:class "chat-message" :id "k"} "x"] (#'r/with-id [:section {} "x"] {:class "chat-message" :id "k"})) "no class of its own: the name alone")
   (is (nil? (:class (#'r/strip-attrs {:class "user-messages seon-stack" :id "k"}))) "the model's reading carries no class"))
+
+(deftest a-users-home-is-tiles-by-what-needs-them
+  ;; owner, 2026-11-08: the home page is a tile per session, those that need the person first, each saying what its agent last told
+  ;; them, not a feed of every message
+  (let [db (sessions-db "b2" [["b2/a1" :a1 :running "seon.print/a-long-string" :running :task-a] ["b2/a2" :a2 :idle "x/asks" :parked :task-b]])
+        started (mapv #(:db/id (d/entity db [:seon.agent/key %])) ["b2/a1" "b2/a2"])
+        db (d/db-with db [{:seon.agent/key "sean" :seon.user/name "sean" :seon.agent/agents started}
+                          {:seon.task/id "x/asks" :seon.task/reason "Which of the two names should the function take?"}])
+        c {:started (into {} (for [e started] [e {:db/id e}]))}
+        hc (ui/started-cards {:seon.ctx/ctx c :seon.db/db db})
+        text (pr-str hc)
+        tiles (keep #(when (and (vector? %) (= #'ui/session-card (first %))) (nth % 2)) (tree-seq coll? seq hc))]
+    (is (< (str/index-of text "Needs you") (str/index-of text "Working")) "what needs the person comes first")
+    (is (= ["b2/a2" "b2/a1"] tiles) "its tile first")
+    (let [tile (h/html (ui/session-card {:seon.db/db db} "b2/a2"))]
+      (is (str/includes? tile "Which of the two names should the function take?") (str "the tile says what its agent asked, while it waits: " tile))
+      (is (str/includes? tile "class=\"said\"") "in the tile's own text"))
+    (is (not-any? #(= "user-messages" %) (map #(when (var? %) (name (symbol %))) (tree-seq coll? seq (ui/user-ctx {:seon.ctx/ctx {}}))))
+        "and the page has no feed of every message")))
