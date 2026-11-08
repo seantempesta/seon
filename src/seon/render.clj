@@ -107,6 +107,10 @@
   "{identity-attribute schema}: the entity schemas by the upsert keys they name."
   (into {} (filter (comp identity-attr? key)) entity-schemas))
 
+(def ^:private drawn-schemas
+  "The entity schemas a render draws (declared, theirs or a parent's): what schema-of names a pulled entity by. Derived once."
+  (into #{} (filter declared) (vals identity-schemas)))
+
 (defn- extends?
   "Does schema a extend schema b, itself or through the schemas it extends (`parents`)?"
   {:malli/schema [:=> [:cat :qualified-keyword :qualified-keyword] :boolean]}
@@ -136,8 +140,11 @@
       (when (map? v)
         (if-let [t (when (every? #(contains? v %) error-keys) (:seon.error/type v))]
           (if (contains? contract/forms t) t :seon.error/base)
-          ;; a map whose identity attributes name no one schema is drawn as the data it is
-          (let [s (most-specific v)] (when (and (keyword? s) (declared s)) s))))))
+          ;; a map whose identity attributes name no one schema is drawn as the data it is; one identity, the common
+          ;; case, is a lookup and no call
+          (let [ss (into #{} (keep identity-schemas) (keys v))
+                s (if (next ss) (most-specific v) (first ss))]
+            (when (contains? drawn-schemas s) s))))))
 
 (declare render-of own-key)
 
