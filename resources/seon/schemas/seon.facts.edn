@@ -266,8 +266,8 @@
                      [:seon.eval/response :seon.eval/response] [:seon.eval/result {:optional true} :seon.eval/result] [:seon.eval/opened {:optional true} :seon.eval/opened]]
  ;; an entity's record (seon.ctx, :seon.ctx/pattern: Datahike's pull syntax as data, docs/ctx.md#the-pattern;
  ;; its joins are the page walk's units, seon.render/units), each member rendered by its own schema's render
- :seon.db/agent-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.agent/id :seon.agent/status :seon.agent/branch :seon.agent/description] :seon.ctx/pattern [* {[:seon.agent/agents :as :started] [:db/id]} {[:seon.agent/task :as :task] :seon.task/task-fact} {[:seon.agent/system :as :system] [:db/id]} {[:seon.model-call/_agent :as :calls] [:seon.model-call/id :seon.model-call/n :seon.model-call/origin :seon.model-call/reply :seon.model-call/reasoning :seon.model-call/finish :seon.model-call/truncated :seon.model-call/error :seon.model-call/forms {[:seon.eval/_call :as :evals] [:db/id]} {[:seon.message/_call :as :messages] [:db/id]}]} {[:seon.eval/_agent :as :evals] [*]} {[:seon.message/_to :as :messages] [*]} {[:seon.cite/_of :as :cites] :seon.cite/cite-fact} {[:seon.search/_of :as :searches] :seon.search/search-fact}] :seon.render/hiccup seon.render.ui/agent}
-                       [:seon.agent/key :seon.agent/key] [:seon.user/name {:optional true} :seon.user/name] [:seon.agent/agents {:optional true} :seon.agent/agents] [:seon.agent/id {:optional true} :seon.agent/id] [:seon.agent/system {:optional true} :seon.agent/system]
+ :seon.db/agent-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.agent/id :seon.agent/status :seon.agent/branch :seon.agent/description] :seon.ctx/pattern [* {[:seon.agent/agents :as :started] [:db/id]} {[:seon.agent/task :as :task] :seon.task/task-fact} {[:seon.agent/system :as :system] [:db/id]} {[:seon.model-call/_agent :as :calls] [:seon.model-call/id :seon.model-call/n :seon.model-call/origin :seon.model-call/reply :seon.model-call/reasoning :seon.model-call/finish :seon.model-call/truncated :seon.model-call/error :seon.model-call/forms {[:seon.eval/_call :as :evals] [:db/id]} {[:seon.message/_call :as :messages] [:db/id]}]} {[:seon.eval/_agent :as :evals] [*]} {[:seon.message/_to :as :messages] [*]} {[:seon.cite/_of :as :cites] :seon.cite/cite-fact} {[:seon.search/_of :as :searches] :seon.search/search-fact}] :seon.render/hiccup seon.render.ui/agent :seon.render/layout :seon.render/render-ctx}
+                       [:seon.agent/key :seon.agent/key] [:seon.agent/agents {:optional true} :seon.agent/agents] [:seon.agent/id {:optional true} :seon.agent/id] [:seon.agent/system {:optional true} :seon.agent/system]
                        [:seon.agent/root {:optional true} :seon.agent/root] [:seon.agent/branch {:optional true} :seon.agent/branch]
                        [:seon.agent/status {:optional true} :seon.agent/status]
                        [:seon.agent/description {:optional true} :seon.agent/description]
@@ -282,6 +282,9 @@
                        [:seon.ctx/pattern {:optional true} :seon.ctx/pattern] [:seon.agent/opened {:optional true} :seon.agent/opened]
                        [:seon.agent/main-commit {:optional true} :seon.agent/main-commit] [:seon.agent/main-program {:optional true} :seon.agent/main-program] [:seon.agent/base-commit {:optional true} :seon.agent/base-commit]
                        [:seon.agent/ns {:optional true} :seon.agent/ns]]
+ ;; a user: an agent with a person's name (docs/users.md#what-each-thing-is), its own schema by extending the agent's, so its
+ ;; layout is its own and an entity holding both identities is a user whatever its keys' order (seon.render/entity-schema)
+ :seon.db/user-fact [:and {:seon.db/attributes true :seon.render/layout :seon.render/user-ctx} :seon.db/agent-fact [:map [:seon.user/name :seon.user/name]]]
  ;; ---- a citation: what an entity cites, an entity of its own (docs/references.md#an-entity-cites) ----
  ;; its content id, "<of> <target>": the citing entity's identity value (a task's :seon.task/id, an agent's
  ;; :seon.agent/key) and its target as text (the address it is written with, or the name)
@@ -501,7 +504,7 @@
  :seon.root/stopped :seon.root/end
  ;; what this boot found of the root before it on this main: its stop fact, or :unclean
  :seon.root/previous-end :seon.root/end
- :seon.root/root-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.root/id :seon.root/boot :seon.root/generation :seon.root/quiescent] :seon.ctx/pattern [* {[:seon.agent/_root :as :agents :limit :seon.config.ctx/window :reverse true] [* {[:seon.agent/task :as :task] [:seon.task/id :seon.task/outcome :seon.task/reason]} {[:seon.process/_agent :as :processes] [*]} {[:seon.eval/_agent :as :evals :limit :seon.config.ctx/window :reverse true] [*]}]} {[:seon.eval/_agent :as :evals :limit :seon.config.ctx/window :reverse true] [*]}] :seon.render/hiccup seon.render.ui/root}
+ :seon.root/root-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.root/id :seon.root/boot :seon.root/generation :seon.root/quiescent] :seon.ctx/pattern [* {[:seon.agent/_root :as :agents :limit :seon.config.ctx/window :reverse true] [* {[:seon.agent/task :as :task] [:seon.task/id :seon.task/outcome :seon.task/reason]} {[:seon.process/_agent :as :processes] [*]} {[:seon.eval/_agent :as :evals :limit :seon.config.ctx/window :reverse true] [*]}]} {[:seon.eval/_agent :as :evals :limit :seon.config.ctx/window :reverse true] [*]}] :seon.render/hiccup seon.render.ui/root :seon.render/layout :seon.render/root-ctx}
                           [:seon.root/id :seon.root/id] [:seon.root/boot :seon.root/boot] [:seon.root/signed-in {:optional true} :seon.root/signed-in]
                           [:seon.root/started-by {:optional true} :seon.root/started-by]
                           [:seon.root/wiki {:optional true} :seon.root/wiki]

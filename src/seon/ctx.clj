@@ -28,9 +28,9 @@
 
 (defn- pattern-of
   "The pattern ctx holds of entity m (pulled, on db): its own :seon.ctx/pattern (the agent's
-  edit), else the one its entity schema declares (:seon.ctx/pattern), else its own attributes."
+  edit), else the one its entity schema declares or a schema it extends does (render/schema-property), else its own attributes."
   {:malli/schema [:=> [:cat :map] [:vector :any]]}
-  [m] (or (:seon.ctx/pattern m) (some-> (render/entity-schema m nil) contract/properties :seon.ctx/pattern) '[*]))
+  [m] (or (:seon.ctx/pattern m) (some-> (render/entity-schema m nil) (render/schema-property :seon.ctx/pattern)) '[*]))
 
 ;; ---- db -> map ---------------------------------------------------------------------------
 

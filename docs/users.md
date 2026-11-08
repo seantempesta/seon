@@ -123,7 +123,7 @@ The steps below merge one at a time, each usable alone, with today's agents unch
 3. Messages, Web's next: one send, delivery and removal by data, a wake rule; the first, one send as one fact on main, is done, and the two tasks after it remain. Functions that mutate behind a read-looking name go with them, by the owner's ruling: task ``my.agent/no-function-does-what-ctx-can``.
 4. Users, and input through ``forgive``.
 5. Sessions and merging them.
-6. The home page from the user's ``@ctx``, with layouts as data and tabs as entities.
+6. The home page from the user's ``@ctx``, with layouts as data: done, each entity schema names its layout (`docs/render.md#the-page`). Tabs as entities were dropped (owner, 2026-11-08: "Why are we solving tabs right now?"): every page of a view is sent the same patches.
 
 Merges are Optimization's, because its tree merge may change them (owner, 2026-11-07): ``seon.merge/a-branch-holds-its-merge-bases-as-facts`` and ``seon.merge/a-merge-takes-options`` wait on it. As written they'd add a function and facts beside what exists, three merge entry points (``seon.agent/merge-main!``, ``seon.writer/branch-merge``, ``:merge-candidate``), ``:seon.agent/base-commit`` and six walks of the commit graph; whatever lands replaces those. Sharing goes with it, on ``seon.db/a-branch-is-main-plus-its-own-changes``. So far the tree merge shares about as well as a rebase, costs far less at a large delta, and rewrites no history (Optimization, prototype). Steps 4 and 5 need the two merge cases above, so they build on today's merge only where that's one small change.
 
