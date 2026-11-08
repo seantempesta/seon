@@ -2,10 +2,10 @@
   "The effect owner and worker step-fns as plain functions (no graph): admission by workers,
   priority order, budget refused, the queue bound, and a worker answering a defect."
   (:require [clojure.test :refer [deftest is testing]] [jolt.deps] [seon.fx :as fx] [seon.config :as cfg] [seon.contract :as contract] [seon.proofs :as proofs]
-            [clojure.core.async.flow :as flow]))
+            [clojure.core.async.flow :as flow] [clojure.core.async :as a] [seon.model :as model]))
 
 (defn- owner [workers] (fx/owner-proc {:kind :t :workers workers :work nil :back nil}))
-(defn- req [k & {:as more}] (merge {:req {:k k} :dest {:agent :a1 :op :fx-reply :k k}} more))
+(defn- req [k & {:as more}] (merge {:req {:k k} :dest {:agent "boot/1" :op :fx-reply :k k}} more))
 
 (deftest a-worktrees-own-branch-follows-what-its-program-reads
   ;; docs/merging.md: a gate on a worktree root checked out its own branch at an old commit: 196 tests the program db did not hold
@@ -38,14 +38,14 @@
         [st o] (fx/owner-proc st :in (req 2))
         _ (is (empty? (:to-workers o)) "no free worker: queued")
         [st _] (fx/owner-proc st :in (req 3 :prio 5))
-        [st o] (fx/owner-proc st :done {:dest {:agent :a1 :op :fx-reply :k 1} :outcome {:value 1}})]
-    (is (= [{:dest {:agent :a1 :op :fx-reply :k 1} :r {:value 1}}] (:out o)) "the outcome goes to its asker")
+        [st o] (fx/owner-proc st :done {:dest {:agent "boot/1" :op :fx-reply :k 1} :outcome {:value 1}})]
+    (is (= [{:dest {:agent "boot/1" :op :fx-reply :k 1} :r {:value 1}}] (:out o)) "the outcome goes to its asker")
     (is (= [3] (map #(get-in % [:req :k]) (:to-workers o))) "the higher priority runs next")
     (is (= 1 (:busy st)))))
 
 (deftest owner-refuses-a-spent-budget
   (let [[st _] (fx/owner-proc (owner 1) :in (req 1 :budget 10 :budget-key :task-a))
-        [st _] (fx/owner-proc st :done {:dest {:agent :a1 :op :fx-reply :k 1} :outcome {:value 1} :budget-key :task-a :cost 10})
+        [st _] (fx/owner-proc st :done {:dest {:agent "boot/1" :op :fx-reply :k 1} :outcome {:value 1} :budget-key :task-a :cost 10})
         [_ o] (fx/owner-proc st :in (req 2 :budget 10 :budget-key :task-a))]
     (is (= :seon.fx/budget-spent (get-in (first (:out o)) [:r :seon.error/type])))))
 
@@ -59,7 +59,7 @@
         [_ o] (fx/worker-proc st :work (assoc (req 1) :in-ns 0 :taken-ns 0))
         out (first (get o [:fx/t :done]))]
     (is (= :seon.fx/defect (get-in out [:outcome :seon.error/type])))
-    (is (= {:agent :a1 :op :fx-reply :k 1} (:dest out)))))
+    (is (= {:agent "boot/1" :op :fx-reply :k 1} (:dest out)))))
 
 (deftest a-failure-is-roots-problem-only-when-an-agent-asked
   ;; the asker records its outcome once (root, 2026-10-26): root code records its own failed effect
@@ -73,9 +73,9 @@
         problems #(filter :op (:out %))]
     (is (int? (:seon.fx/at-ms failed)) "a failed outcome carries when it failed, as its asker records it")
     (is (nil? (:seon.fx/at-ms (:outcome (first (get ok [:fx/t :done]))))) "a good one carries no such time")
-    (let [o (done {:agent :a1 :op :fx-reply :k 1})]
+    (let [o (done {:agent "boot/1" :op :fx-reply :k 1})]
       (is (= [:effect] (map :class (problems o))) "an agent asked: root's problem, of class :effect")
-      (is (= [{:dest {:agent :a1 :op :fx-reply :k 1} :r failed}] (remove :op (:out o))) "and the agent is answered"))
+      (is (= [{:dest {:agent "boot/1" :op :fx-reply :k 1} :r failed}] (remove :op (:out o))) "and the agent is answered"))
     (let [o (done {:rid 7})]
       (is (empty? (problems o)) "root code asked: not root's count, the asker records it")
       (is (= [{:dest {:rid 7} :r failed}] (:out o)) "it is answered the error"))))
@@ -404,3 +404,94 @@
     (is (clojure.string/includes? said "src/app/a.clj:2") said)
     (is (clojure.string/includes? said "(defn f [] (h))") said))
   (is (= "the gate's build failed and named no exception" (seon.fx/build-failure "nothing" {}))))
+
+
+;; ---- a streaming perform (docs/flow.md#effects-one-owner-and-its-workers-per-kind) ----
+
+(defn- streaming-perform
+  "A perform that answers a stream over pull: the model's line step and final for call c1 of agent :a1."
+  [pull]
+  (fn [_] {:stream {:pull pull :init (model/sse-init "c1" "boot/1") :step model/sse-step :close model/sse-close
+                    :final (fn [st] {:value (model/stream-reply st 1.0 2048)})}}))
+
+(defn- data-line [m] (str "data: " (clojure.data.json/write-str m) "\n\n"))
+(defn- delta [k s] (data-line {:choices [{:delta {k s}}]}))
+(defn- piece [s] (.getBytes ^String s "UTF-8"))
+(defn- drain
+  "Steps the worker on its lines until it gives :done: [final-state stream-messages done-items]."
+  [st]
+  (loop [s st streams []]
+    (let [[s' o] (fx/worker-proc s :lines (a/<!! (:lines s)))
+          streams (into streams (get o [:web :streams]))]
+      (if (get o [:fx/t :done]) [s' streams (get o [:fx/t :done])] (recur s' streams)))))
+
+(deftest a-streaming-perform-sends-its-first-message-before-its-second-piece-is-read
+  (let [gate (promise)
+        n (atom 0)
+        pull (fn [] (case (swap! n inc) 1 (piece (delta :reasoning_content "Think")) 2 (do @gate (piece (delta :content "Done"))) nil))
+        st0 (fx/worker-proc {:kind :t :owner :fx/t :perform (streaming-perform pull)})
+        [st o0] (fx/worker-proc st0 :work (assoc (req 1) :in-ns 0 :taken-ns 0))]
+    (is (some? (:call st)) "the worker holds the call, its outcome not given")
+    (is (nil? o0) "and gives nothing yet")
+    (when (:call st)
+      (let [[st1 o1] (fx/worker-proc st :lines (a/<!! (:lines st)))]
+        (is (not (realized? gate)) "the first line was folded and sent while the second piece is still being read")
+        (is (= [{:stream "c1/reasoning" :in "c1" :part "reasoning" :agent "boot/1" :offset 0 :text "Think"}] (get o1 [:web :streams])))
+        (is (nil? (get o1 [:fx/t :done])))
+        (deliver gate true)
+        (let [[fin streams done] (drain st1)]
+          (is (= [{:stream "c1/content" :in "c1" :part "content" :agent "boot/1" :offset 0 :text "Done"} {:stream "c1/reasoning" :in "c1" :part "reasoning" :agent "boot/1" :end true} {:stream "c1/content" :in "c1" :part "content" :agent "boot/1" :end true}]
+                 streams))
+          (is (= 1 (count done)) "the owner is given :done once, with every id still open ended")
+          (is (= "Done" (get-in (first done) [:outcome :value :text])))
+          (is (nil? (:call fin)))
+          (is (true? ((::flow/input-filter fin) :work)) "and the worker takes work again"))))))
+
+(deftest a-streaming-worker-keeps-its-slot-until-its-done
+  (let [pull (let [ps (atom [(piece (delta :content "a")) nil])] (fn [] (let [p (first @ps)] (swap! ps rest) p)))
+        st0 (fx/worker-proc {:kind :t :owner :fx/t :perform (streaming-perform pull)})
+        [o0 _] (fx/owner-proc (owner 1) :in (req 1))
+        [st _] (fx/worker-proc st0 :work (assoc (req 1) :in-ns 0 :taken-ns 0))]
+    (is (= 1 (:busy o0)))
+    (is (false? ((::flow/input-filter st) :work)) "a worker mid-call reads no work")
+    (is (true? ((::flow/input-filter st) :lines)) "only its lines")
+    (let [[fin _ done] (drain st)
+          [o1 oo] (fx/owner-proc o0 :done (first done))]
+      (is (= 1 (count done)))
+      (is (= 0 (:busy o1)) "the owner counts the call in flight until its one :done, as for a call not streamed")
+      (is (= "a" (get-in (first (:out oo)) [:r :value :text])) "and answers its asker the completion")
+      (is (true? ((::flow/input-filter fin) :work))))))
+
+(deftest a-socket-failure-mid-stream-is-a-transport-error-and-ends-every-id
+  (let [ps (atom [(piece (delta :reasoning_content "Thin")) (contract/error :seon.model/transport 'seon.model/http-post "transport: reset" {})])
+        pull (fn [] (let [p (first @ps)] (swap! ps rest) p))
+        st0 (fx/worker-proc {:kind :t :owner :fx/t :perform (streaming-perform pull)})
+        [st _] (fx/worker-proc st0 :work (assoc (req 1) :in-ns 0 :taken-ns 0))
+        [fin streams done] (drain st)]
+    (is (= :seon.model/transport (get-in (first done) [:outcome :seon.error/type])) "the asker is answered the transport error")
+    (is (= [{:stream "c1/reasoning" :in "c1" :part "reasoning" :agent "boot/1" :offset 0 :text "Thin"} {:stream "c1/reasoning" :in "c1" :part "reasoning" :agent "boot/1" :end true}] streams))
+    (is (true? ((::flow/input-filter fin) :work)))))
+
+(deftest a-reader-whose-lines-are-closed-lets-go-of-its-connection
+  ;; the worker stopped reading (its chan closed mid-stream): the reader ends and the connection is closed, not left to the OS
+  (let [shut (promise)
+        lines (a/chan)
+        ps (atom [(piece (str (delta :content "a") (delta :content "b"))) (piece (delta :content "c")) (piece (delta :content "d"))])
+        t (#'fx/read-lines! (fn [] (let [p (first @ps)] (swap! ps rest) p)) lines #(deliver shut :closed))]
+    (is (:line (a/<!! lines)) "one line was taken")
+    (a/close! lines)
+    (a/<!! lines) ; a put pending when a chan closes is still taken (core.async): the one after it finds it closed
+    (is (= :closed @shut) "the reader stopped and closed the connection")
+    (.join ^Thread t)
+    (is (< (count @ps) 3) "and the rest of the body was not all read" )))
+
+(deftest a-worker-stopped-mid-call-closes-its-connection
+  (let [shut (promise)
+        pull (let [ps (atom [(piece (str (delta :content "a") (delta :content "b")))])]
+               (fn [] (if-let [p (first @ps)] (do (swap! ps rest) p) (do @shut (contract/error :seon.model/transport 'x "closed" {})))))
+        perform (fn [_] (assoc-in ((streaming-perform pull) nil) [:stream :shut] #(deliver shut :closed)))
+        [st _] (fx/worker-proc (fx/worker-proc {:kind :t :owner :fx/t :perform perform}) :work (assoc (req 1) :in-ns 0 :taken-ns 0))]
+    (is (:call st))
+    (fx/worker-proc st ::flow/stop)
+    (is (= :closed @shut) "stopping the worker closes the call's connection, which ends the reader")
+    (let [idle (fx/worker-proc {:kind :t :owner :fx/t :perform identity})] (is (= idle (fx/worker-proc idle ::flow/stop)) "a worker with no call stops as before"))))

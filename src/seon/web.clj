@@ -257,25 +257,28 @@
       (some (fn [[id a]] (when (or (= v id) (= v (:branch a)) (= (ui/kname v) (:key a))) (:key a))) index))))
 
 (defn- stream-in
-  "An effect's in-flight text, {:stream :agent :offset :text} (:agent its stable key), appended to the element its render drew with that
-  id in each tab of the agent's chat, a gap in :offset and a tab's missed start marked with …; {:stream :agent :end
-  true} forgets the stream. See docs/render.md#in-flight-output-streams."
+  "An effect's in-flight text, {:stream :in :part :agent :offset :text} (:agent its stable key, :in the entity whose
+  in-flight element the render drew, :part what kind of text), appended in each tab of the agent's chat: a tab's first
+  message of a part first appends the part's element (seon.render.ui/stream-part) into #in, then each message appends its
+  text into the part; a gap in :offset, and a tab's missed start, is marked with …. {:stream :agent :end true} forgets the
+  stream. See docs/render.md#in-flight-output-streams."
   {:malli/schema [:=> [:cat :map [:map [:stream :string] [:agent :string]]] :map]}
-  [st {:keys [stream agent offset text end]}]
+  [st {:keys [stream in part agent offset text end]}]
   (let [k [agent stream]]
     (if end
       (-> st (update :streams dissoc k) (update :tabs update-vals #(update % :seen disj k)))
       (let [held (get-in st [:streams k] 0)
-            sel (str "#" (render/key-id [stream]))
-            ev (fn [t] (patch-event (h/escape t) sel "append"))
-            ;; a gap: text dropped before this proc (its sliding in-port); a tab's first append past 0: a start it missed
+            ev (fn [t] (patch-event (h/escape t) (str "#" (render/key-id [stream])) "append"))
+            ;; a gap: text dropped before this proc (its sliding in-port); a tab's first message past 0: a start it missed
             gap? (> offset held)
             plain (ev (cond->> text gap? (str "…")))
-            marked (delay (ev (str "…" text)))
+            ;; a tab's first sight of the part: its element into the in-flight one (drawn empty by its keyframe), then the text
+            first-sight (delay (str (when in (patch-event (h/html (ui/stream-part stream (or part "content"))) (str "#" (render/key-id [in])) "append"))
+                                    (ev (cond->> text (pos? offset) (str "…")))))
             st (reduce-kv (fn [st t {:keys [ch view seen]}]
                             (if (or (contains? (:stale st) t) (not= agent (chat-agent (:index st) view)))
                               st
-                              (let [chunk (if (or gap? (zero? offset) (contains? seen k)) plain @marked)
+                              (let [chunk (if (contains? seen k) plain @first-sight)
                                     ok (a/offer! ch chunk)]
                                 (cond (true? ok) (-> st (update-in [:tabs t :seen] (fnil conj #{}) k) (update :bytes + (count chunk)))
                                       (false? ok) (update st :tabs dissoc t)
