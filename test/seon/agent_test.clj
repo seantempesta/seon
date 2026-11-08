@@ -987,37 +987,15 @@
     (is (seq (:applied (:value merged))) (str "the merge brought something: " (pr-str merged)))
     (is (true? (:value after)) "the index is at the db the merge left")))
 
-(deftest an-agent-with-no-task-resumes-a-kept-branch
+(deftest a-resumed-branchs-agent-is-this-boots
+  ;; one kept branch, one spawn, three claims about an agent resumed onto it.
   ;; found by session global-ids, 2026-10-23: an agent spawned with no task onto a branch the
   ;; store already holds (a kept branch; e2e's fresh agent on a store an earlier run left)
   ;; died in its init, giving seon.task/onto-tx a nil task, and a wait for its :ready never
-  ;; ended. A kept branch takes its task from main only when the agent has one
-  (let [[r] (in-agent (fn [{:keys [ns]}]
-                        (let [kept (str ":task-" ns "-kept")]
-                          [{:op :eval :agent "root"
-                            :code (spawn-kept-code kept (str "(datahike.api/branch! (:conn sys) m b)") ":ready")}]))
-                      (merging))]
-    (is (= :ready (:value r)) (pr-str r))))
-
-(deftest a-resumed-branchs-agent-is-this-boots
+  ;; ended. A kept branch takes its task from main only when the agent has one.
   ;; page's browser round, 2026-10-23: an agent on a kept branch recorded its evaluations under an
   ;; earlier boot's agent (its key read root's boot from the branch, whose root fact is as old as
-  ;; the branch). Its key is root's boot as main holds it
-  (let [[r] (in-agent (fn [{:keys [ns]}]
-                        (let [kept (str ":task-" ns "-kept")]
-                          [{:op :eval :agent "root"
-                            :code (spawn-kept-code kept
-                                                   (str "(datahike.api/branch! (:conn sys) m b)"
-                                                        " (let [bc (datahike.api/connect (assoc (:cfg sys) :branch b))]"
-                                                        "   (datahike.api/transact bc [{:seon.root/id :root :seon.root/boot \"an-earlier-boot\"}]) (datahike.api/release bc))")
-                                                   ;; the agent's own key, asked while it is up
-                                                   "[:ready (:boot sys) (:text @(seon.root/submit! sys ag \"(:key @seon.agent/state)\"))]")}]))
-                      (merging))
-        [status boot text] (:value r)]
-    (is (= :ready status) (pr-str r))
-    (is (str/includes? (str text) (str "\"" boot "/")) (str "its key names this boot: " text))))
-
-(deftest a-resumed-branch-holds-what-main-gained
+  ;; the branch). Its key is root's boot as main holds it.
   ;; step E run #11 (2026-10-23): a kept branch made before main imported test/ was resumed,
   ;; and its agent held seon.ctx.wire-test with no vars (seon.agent/init! unmapped every
   ;; definition main had that the branch did not), so the design never reached its proof's
@@ -1031,11 +1009,17 @@
                             :code (spawn-kept-code kept
                                                    (str (src k "(defn h [] 1)")
                                                         " (datahike.api/branch! (:conn sys) m b)"
+                                                        " (let [bc (datahike.api/connect (assoc (:cfg sys) :branch b))]"
+                                                        "   (datahike.api/transact bc [{:seon.root/id :root :seon.root/boot \"an-earlier-boot\"}]) (datahike.api/release bc))"
                                                         " " (src g "(defn g [] 7)")
                                                         " " (src k "(defn h [] 2)"))
-                                                   (str "(:text @(seon.root/submit! sys ag \"[(" g "/g) (" k "/h)]\"))"))}]))
-                      (merging))]
-    (is (str/includes? (str (:value r)) ":value [7 2]") "a var main added, and main's redefinition of one the branch left alone")))
+                                                   (str "[:ready (:boot sys) (:text @(seon.root/submit! sys ag \"(:key @seon.agent/state)\"))"
+                                                        " (:text @(seon.root/submit! sys ag \"[(" g "/g) (" k "/h)]\"))]"))}]))
+                      (merging))
+        [status boot text gained] (:value r)]
+    (is (= :ready status) (pr-str r))
+    (is (str/includes? (str text) (str "\"" boot "/")) (str "its key names this boot: " text))
+    (is (str/includes? (str gained) ":value [7 2]") "a var main added, and main's redefinition of one the branch left alone")))
 
 (deftest a-failure-marked-through-the-server-holds-the-task
   ;; owner, 2026-10-22: a failure is task data and root reacts to it. The agent marks its
