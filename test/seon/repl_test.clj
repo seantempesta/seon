@@ -677,54 +677,36 @@
              :when (and (= 1 width) (str/starts-with? code "("))]
          code)))
 
-(deftest the-template-instructions-run
-  ;; each form an instruction tells an agent to run must work in a real agent (how every
-  ;; agent moves around the system is the help page's: the-help-page-runs). One agent,
-  ;; reading its context first (as a model's turn does, which makes the my.* functions act on
-  ;; its task), runs every kind's forms in order; the ending functions come last
+(deftest the-template-instructions-and-the-help-page-run
+  ;; task seon.ctx/help-is-a-checked-docs-page (v1's help was tested data, its most-proven turn saver):
+  ;; every form the help page tells an agent to run works in a real agent, and every name it cites resolves
+  ;; in the program. And each form an instruction tells an agent to run must work in a real agent (how every
+  ;; agent moves around the system is the help page's). One agent, reading its context first (as a model's
+  ;; turn does, which makes the my.* functions act on its task), runs the help page's forms and then every
+  ;; kind's forms in order; the ending functions come last
   (let [;; what an agent is sent: the instructions and the help page's sections they cite whole (```docs/agent.md#a```)
         page (slurp (str (cfg/checkout) "/" wire/help-page))
         section (fn [anchor] (some (fn [[_ h body]] (when (= anchor (-> h str/lower-case (str/replace #"[^a-z0-9 -]" "") (str/replace " " "-"))) body))
                                    (re-seq #"(?m)^## (.+)\n([\s\S]*?)(?=^## |\z)" page)))
         sent (fn [text] (apply str text (for [[_ a] (re-seq #"```docs/agent\.md#([a-z0-9-]+)```" text)] (str "\n" (section a)))))
-        forms (into [] (comp (mapcat (comp runnable sent val)) (distinct)) (sort-by key template/instructions))
+        help-forms (runnable (doc/page-text (my.test/with (my.test/world)
+                                                          ;; the help page alone: the forms it tells an agent to run (the agent under test reads the rest)
+                                                          (my.test/page wire/help-page page))
+                                             wire/help-page))
+        template-forms (into [] (comp (mapcat (comp runnable sent val)) (distinct)) (sort-by key template/instructions))
         ends #{"(my.turn/wait)"}
-        forms (concat (remove #(or (ends %) (str/starts-with? % "(my.task/fail!")) forms)
-                      (filter #(str/starts-with? % "(my.task/fail!") forms)
-                      (filter ends forms))
+        end? #(or (ends %) (str/starts-with? % "(my.task/fail!"))
+        all (distinct (concat help-forms template-forms))
+        forms (concat (remove end? all)
+                      (filter #(str/starts-with? % "(my.task/fail!") all)
+                      (filter ends all))
         cited "(seon.task/citation-problems (my.db/db) (vec (for [[k v] seon.template/instructions] {:seon.task/ns 'demo :seon.task/name (name k) :seon.task/plan \"\" :seon.task/instructions v})))"
-        [problems & items] (rest (at/in-agent (fn [{:keys [agent]}] (into [{:op :context :agent agent} cited] forms))))]
+        cited-help (str "(seon.task/citation-problems (my.db/db) [{:seon.task/ns 'demo :seon.task/name \"help\" :seon.task/plan (seon.ctx.wire/help-text (my.db/db))}])")
+        [problems help-problems & items] (rest (at/in-agent (fn [{:keys [agent]}] (into [{:op :context :agent agent} cited cited-help] forms))))]
     (is (= [] (:value problems)) (str "every name the instructions cite resolves in the program: " (pr-str problems)))
+    (is (= [] (:value help-problems)) (str "every name the help page cites resolves in the program: " (pr-str help-problems)))
     (is (some #{"(my.branch/unmerged)"} forms) "merge's own: the entries it resolves, in the section its instructions cite")
-    (doseq [[form item] (map vector forms items)]
-      (is (not (:ex item)) (str form " -> " (pr-str item))))
-    (is (= (count forms) (count items)) "every form answered")))
-
-(deftest lines-show-as-numbered-lines
-  ;; docs/agent.md#small-answers: lines' rows are shown as one block of numbered lines (my.agent/lines-text), and
-  ;; wc counts what is shown: 50 lines as a map a line cost 2.4k tokens
-  (let [rs (with-meta (vec (for [i (range 8 13)] {:at (str "docs/x.md#a:" i) :text (str "  line " i " of the section")}))
-             {:seon.render/schema :my.agent/lines})
-        shown (:seon.print/code (my.agent/lines-text {} rs))]
-    (is (= " 8    line 8 of the section" (first (str/split-lines shown))) "a number right-aligned to the widest, then the line as written")
-    (is (= "12    line 12 of the section" (last (str/split-lines shown))))
-    (is (< (my.agent/wc rs) (my.agent/wc (with-meta rs nil))) "wc counts the numbered lines, fewer tokens than the maps")
-    (is (= "  no number" (:seon.print/code (my.agent/lines-text {} [{:text "  no number"}]))) "a row without :at shows its text alone")))
-
-(deftest the-help-page-runs
-  ;; task seon.ctx/help-is-a-checked-docs-page (v1's help was tested data, its most-proven
-  ;; turn saver): every form the help page tells an agent to run works in a real agent, in
-  ;; order, the ending functions last, and every name it cites resolves in the program
-  (let [forms (runnable (doc/page-text (my.test/with (my.test/world)
-                                                    ;; the help page alone: the forms it tells an agent to run (the agent under test reads the rest)
-                                                    (my.test/page wire/help-page (slurp (str (cfg/checkout) "/" wire/help-page))))
-                                       wire/help-page))
-        end? #(or (= "(my.turn/wait)" %) (str/starts-with? % "(my.task/fail!"))
-        forms (concat (remove end? forms) (sort-by #(= "(my.turn/wait)" %) (filter end? forms)))
-        cited (str "(seon.task/citation-problems (my.db/db) [{:seon.task/ns 'demo :seon.task/name \"help\" :seon.task/plan (seon.ctx.wire/help-text (my.db/db))}])")
-        [problems & items] (rest (at/in-agent (fn [{:keys [agent]}] (into [{:op :context :agent agent} cited] forms))))]
-    (is (= [] (:value problems)) (str "every name the help page cites resolves in the program: " (pr-str problems)))
-    (is (< 20 (count forms)) "the page shows the agent how to work")
+    (is (< 20 (count help-forms)) "the page shows the agent how to work")
     (doseq [[form item] (map vector forms items)]
       (is (not (:ex item)) (str form " -> " (pr-str item))))
     (is (= (count forms) (count items)) "every form answered")
@@ -746,6 +728,17 @@
       (is (str/includes? (printed "(my.schema/register! :app.workout/set [:map [:reps :int] [:kg :double]])") ":app.workout/set") "a new schema registers")
       (is (str/includes? (printed "(help)") "You are a Seon agent") "help is the system prompt, from the branch's db")
       (is (str/includes? (printed "(doc \"done\")") "The judge counts exactly") "and of an anchor of it, the section's text"))))
+
+(deftest lines-show-as-numbered-lines
+  ;; docs/agent.md#small-answers: lines' rows are shown as one block of numbered lines (my.agent/lines-text), and
+  ;; wc counts what is shown: 50 lines as a map a line cost 2.4k tokens
+  (let [rs (with-meta (vec (for [i (range 8 13)] {:at (str "docs/x.md#a:" i) :text (str "  line " i " of the section")}))
+             {:seon.render/schema :my.agent/lines})
+        shown (:seon.print/code (my.agent/lines-text {} rs))]
+    (is (= " 8    line 8 of the section" (first (str/split-lines shown))) "a number right-aligned to the widest, then the line as written")
+    (is (= "12    line 12 of the section" (last (str/split-lines shown))))
+    (is (< (my.agent/wc rs) (my.agent/wc (with-meta rs nil))) "wc counts the numbered lines, fewer tokens than the maps")
+    (is (= "  no number" (:seon.print/code (my.agent/lines-text {} [{:text "  no number"}]))) "a row without :at shows its text alone")))
 
 (deftest a-name-that-is-no-var-says-so
   ;; the live rounds (the archived paper live-2026-10-25.md (git history)): (my.agent/callers 'seon.proof/status) answered [],

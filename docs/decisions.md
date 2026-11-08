@@ -966,6 +966,10 @@ Owner, 2026-10-23: quote not recorded; relayed by root. The root is a fresh clon
 
 Owner, 2026-10-23: quote not recorded; relayed by root. Stated in: docs/cost.md (ticks, bytes and calls are exact; wall time is not a measure).
 
+### A session's own prove runs the process and slow tests its change reaches (owner, 2026-11-08)
+
+"Yes, run them early", to: should a plain `bin/prove` run the process tests its change reaches, so landing stops rerunning them. A bare `bin/prove` leaves nothing out, as `--merge` does, the slow tests last; a bare run and a `--merge` run of one tree share one green marker, so `bin/land` answers at once from a session's own green prove. An agent's turn still leaves process tests to its gate. Stated in: bin/prove; docs/merging.md#a-slow-test-runs-last.
+
 ### Process tests are not automatic: the reach walk classifies them
 
 Owner, 2026-10-23: quote not recorded; relayed by root. A test that launches a binary is deferred by what the reach walk finds, not run on every change. Stated in: docs/turn.md#who-runs-which-tests; docs/merging.md#a-merge-runs-what-the-change-reaches.
