@@ -26,6 +26,10 @@ Owner, 2026-11-08: "I want to be able to compact an agent by removing data on th
 
 Owner, 2026-11-08: "I don't give a shit about the existing store data. Erase it and cleanup whenever you need to." "Erase whenever you want. Just warn the other agents." "I mean we are in active development. In production of course you don't just drop the whole store." Stated in: AGENTS.md section 9, [machine](machine.md#disk-stays-bounded).
 
+### An id is the content of the facts that make it (owner, 2026-11-08)
+
+Owner, 2026-11-08: "Don't we have an ID generator that's better than a UUID and we are just prepending characters to differentiate?" "context based IDs seems better than random unless it costs too much to hash?" "Yes, content ids." An agent, a model call and an eval are named by seon.lib/digest of the facts that make them (an agent: its task and the commit that recorded its spawn), never a random UUID or a counter with characters prepended. Stated in: task seon.root/an-agent-is-named-by-its-key.
+
 ### Every eval of a reply runs (owner, 2026-11-08)
 
 Owner, 2026-11-08: "I want us to run every eval. Turns are precious and one fuckup shouldn't punish the other evals. Yes I understand this could cause issues if the next eval is dependent on the previous. I still want to try turning this on". Stated in: ```seon.repl/run-calls```, [the prompt](prompt.md).
