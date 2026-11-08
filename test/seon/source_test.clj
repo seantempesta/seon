@@ -1021,13 +1021,16 @@
 
 (deftest main-s-program-follows-the-checkout-while-root-runs-and-across-a-restart
   ;; task seon.fx/the-source-tree-follows-main, end to end through bin/root: a root whose checkout is
-  ;; a clone of this one (main) and whose source root is a worktree of that clone on its own
-  ;; branch (the write-back tree). A commit to the clone's main that defines a var reaches main's
+  ;; a scratch repository (main) and whose source root is a worktree of it on its own
+  ;; branch (the write-back tree). A commit to main that defines a var reaches main's
   ;; program through the :source load's own function (seon.root/import-source!, which my.root/import!
   ;; calls; the watcher no longer does: seon.watch-test), with no step of the
   ;; owner's between: the write-back branch is fast-forwarded and the var's entity is there. A root
   ;; killed and started again on the same store holds it too (the boot's import), and a commit the
   ;; write-back tree holds that main lacks is a recorded :effect problem naming both shas.
+  ;; The checkout is a scratch repository of one file and one page on a store of its own, empty: a clone
+  ;; of this checkout on a clone of the seeded store analysed the whole tree at each import (81 s), which
+  ;; none of the claims reads (as seon.root-test/main-follows-its-source-tree-across-restarts)
   (let [dir (scratch-dir "follow")
         main (str dir "/main") wb (str dir "/wb")
         git (fn [d & args] (let [r (apply sh/sh "git" "-C" d "-c" "user.name=t" "-c" "user.email=t@t" args)]
@@ -1035,21 +1038,27 @@
         probe! (fn [d n] (let [f (str d "/src/seon/follow_probe_" n ".clj")]
                            (spit f (str "(ns seon.follow-probe-" n ")\n\n(defn probe [] " n ")\n"))
                            (git d "add" "src") (git d "commit" "-q" "-m" (str "probe " n)) (git d "rev-parse" "HEAD")))
-        root0 {:store (ts/clone-process-store! (str dir "/runs/store")) :main "main" :runs (str dir "/runs")
+        root0 {:store (str dir "/runs/store") :main "main" :runs (str dir "/runs")
                :env {"SEON_RUN_CHECKOUT" main "SEON_RESULTS_PORT" "0"}}
         args ["--set" (str ":seon.config.source/root=" (pr-str wb))
-              "--set" ":seon.config.source/dirs=[\"src\" \"test\" \"resources/seon/schemas\"]"]
+              "--set" ":seon.config.source/dirs=[\"src\"]"]
         root (atom nil)
         ask (fn [code] (let [a (ts/ask @root {:op :eval :agent "root" :code code})]
                          (if (:error a) a (ts/value-of (:response a)))))
         has-var? (fn [n] (ask (str "(some? (seon.db/eid @(:conn sys) :var/name 'seon.follow-probe-" n "/probe))")))
         import "(select-keys (seon.root/import-source! sys (get-in sys [:bindings :source])) [:commit :error])"]
     (try
-      (is (zero? (:exit (sh/sh "git" "clone" "-q" "--local" here main))))
-      (git main "checkout" "-q" "-B" "main") ; the clone's branch main (a worktree's branch is not named main)
-      ;; the built libraries, probe library and binary are this checkout's: the clone's target/ is its
-      (is (zero? (:exit (sh/sh "ln" "-s" (str here "/target") (str main "/target")))))
+      (.mkdirs (java.io.File. (str main "/src/seon")))
+      (.mkdirs (java.io.File. (str main "/docs")))
+      (spit (str main "/docs/follow.md") "# Follow\n\nA scratch checkout's one page.\n")
+      (git main "init" "-q" "-b" "main")
+      (probe! main 0)
       (git main "worktree" "add" "-q" "-b" "write-back" wb)
+      ;; the rest of either tree is this checkout's, linked and untracked (system.edn, deps.edn, the pins, bin/): the
+      ;; built libraries, probe library and binary are this checkout's target/; git leaves the links out (info/exclude)
+      (let [linked (for [f (.listFiles (java.io.File. ^String here)) :let [n (.getName f)] :when (not (or (str/starts-with? n ".") (#{"src" "docs" "test" "runs"} n)))] f)]
+        (spit (str main "/.git/info/exclude") (str/join "\n" (map #(str "/" (.getName %)) linked)) :append true)
+        (doseq [d [main wb] f linked] (is (zero? (:exit (sh/sh "ln" "-s" (.getPath f) (str d "/" (.getName f))))))))
       (reset! root (ts/start-root! (assoc root0 :args args)))
       (is (some? (:port @root)) (str "the root started: " (ts/output (str dir "/runs/root.log"))))
       (is (false? (has-var? 1)) "before the commit main's program lacks the probe")

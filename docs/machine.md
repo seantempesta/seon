@@ -177,7 +177,7 @@ The tests whose subject is a restart or a resume keep a store of their own, and 
 | test | before | after | what moved |
 |---|---|---|---|
 | `seon.source-test/main-s-program-follows-the-checkout-while-root-runs-and-across-a-restart` | 72 s | 39 s | its store is a clone of the process store: the first boot imports nothing |
-| `seon.root-test/every-end-of-a-root-is-a-fact` | 84 s | 48 s (shard) | the same |
+| ``seon.root-test/every-end-of-a-root-is-a-fact`` (gone) | 84 s | 0 (2026-11-08) | folded into `seon.root-test/a-second-boot-resumes-the-same-main`, whose two boots it reads |
 | `seon.root-test/a-second-boot-resumes-the-same-main` | 80 s | not changed | a clone gave 67 s `:ms` against 81-94 s, inside the noise, so it keeps its empty store: its attach forks an agent, which waits behind the fork server's compile of the program the clone now holds |
 | `seon.root-test/main-follows-its-source-tree-across-restarts` | 26 s | not changed | already three resumes on a branch of the process store (nothing seeds twice) |
 | `seon.agent-test/a-branch-that-deletes-mains-test-it-breaks-is-not-merged` | 100 s | not changed (130 s solo) | not a restart: the shared root's boot with `src` and `test` imported (~one boot per shard) and the judge's run of `seon.ref-test`; a task of its own |
