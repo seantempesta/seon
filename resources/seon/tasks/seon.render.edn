@@ -249,11 +249,6 @@ Proofs, red first: a new eval in a turn of 10 and of 100 evals is one append of 
   :seon.task/proofs #{seon.render-cost-test/a-new-eval-sends-one-append-and-one-edit
                       seon.render-test/a-turns-evals-are-its-list
                       seon.ctx.wire-test/a-turn-as-a-list-reads-the-same}}
- {:seon.task/name "a-pages-first-agent-shows-live"
-  :seon.task/plan "Seen twice on demo roots (2026-11-08, once with the feed plain on 13391, once deflated on 13461): on a fresh root, the home page a person sends their first message from does not show the agent it starts until the page is reloaded; a second message's agent and reply show live (5 patch events applied, no reload). So the feed works and the first agent's arrival is not patched onto a page that had no agents: likely the home view's agents list is drawn as 'No agents yet' text, not as an empty list a new agent's unit is appended into (seon.render.proc/step-units appends only into a container the page has). What correct looks like: the first agent appears live like every later one. Find the cause before fixing: read the home view's units before and after the first agent (seon.render.proc), and whether an append targets a container the page lacks.
-
-Proofs, red first: a home page with no agents, patched by the first agent's arrival, shows it (the patch places it in a container the page holds)."
-  :seon.task/proofs #{seon.render-test/a-home-pages-first-agent-is-patched-in}}
  {:seon.task/name "a-layout-is-its-entitys"
   :seon.task/plan "Step 6 of docs/users.md#the-steps, layouts as data: the first piece of root as a session (owner, 2026-11-08: \"fork and treat it just like every other agent. I just want different render functions, a differnt pull pattern and different data\"; \"The layout does come from the entity\").
 
@@ -274,10 +269,9 @@ Proofs, red first: an entity holding root's and an agent's identity attributes i
 
 What exists: the home box calls seon.root/ask!, which makes a task and starts a new agent each time; the page never moves; the person waited 26 s for \"hi\" with nothing shown; a tile's title is the first message and its body the last reply (an atom tile showed a paragraph on agents, the reply to a later follow-up).
 
-Change: the home box sends a message to [:seon.agent/key \"root\"] (seon.root/message!, as a chat's box does); the home page draws root's session's chat beside the person's session tiles (sessions-by-standing); a tile shows the person's last message to it and its reply; tiles at most two across, about twelve lines; the agents list groups by who started each agent (root's spawns and what its session launches, then each user's), never by boot (agent keys no longer begin with the boot: Context's jolt/content-ids), so every agent has a place. When root's session starts or names a session, every page showing root's chat is sent the same patch that moves it there (one Datastar patch to the pages of that view, as every update is sent; no per-tab state).
+Change: the home box sends a message to [:seon.agent/key \"root\"] (seon.root/message!, as a chat's box does); the home page draws root's session's chat beside the person's session tiles (sessions-by-standing); the agents list groups by who started each agent (root's spawns and what its session launches, then each user's), never by boot (agent keys no longer begin with the boot: Context's jolt/content-ids), so every agent has a place. When root's session starts or names a session, every page showing root's chat is sent the same patch that moves it there (one Datastar patch to the pages of that view, as every update is sent; no per-tab state).
 
-Proofs, red first: a line typed in the home box is a message to root's session (no task made); the home page holds root's chat and the person's tiles; a tile shows the last message and its reply."
+Proofs, red first: a line typed in the home box is a message to root's session (no task made); the home page holds root's chat and the person's tiles."
   :seon.task/proofs #{seon.render-test/the-home-box-messages-root
-                      seon.render-test/the-home-page-is-roots-chat-and-your-sessions
-                      seon.render-test/a-tile-shows-the-last-exchange}}
+                      seon.render-test/the-home-page-is-roots-chat-and-your-sessions}}
 ]
