@@ -60,7 +60,14 @@
                 :var/form {:form/src "(defn twice {:malli/schema [:=> [:cat :int] :int]} [x]  (s/join [(* 2 x)]))"}}
                (-> (var-row db 'app.pt-new/twice) (update :var/form dissoc :form/order) (update :var/meta set))))
         (is (= '#{clojure.string/join clojure.core/* clojure.core/defn} (set (d/q '[:find [?r ...] :where [?v :var/name app.pt-new/twice] [?v :var/form ?f] [?f :form/refs ?r]] db)))
-            "s/join resolved through the alias, * to clojure.core's, and the macro it expanded")))
+            "s/join resolved through the alias, * to clojure.core's, and the macro it expanded")
+        ;; 2026-11-08: :var/meta held instrumentation's keys when the importing process had armed the var's contract,
+        ;; so 491 of 2,431 contracted vars' facts differed by which process imported them
+        (let [db (record db 'app.pt-new "(seon.contract/defn thrice {:malli/schema [:=> [:cat :int] :int]} [x] (* 3 x))")]
+          (is (seq (select-keys (meta (resolve 'app.pt-new/thrice)) [:seon.contract/wrapper :seon.contract/checked-at]))
+              "contracts are on here: the live var carries instrumentation's keys")
+          (is (= #{:arglists :malli/schema} (set (:var/meta (var-row db 'app.pt-new/thrice))))
+              "the keys instrumentation adds as a process runs are no part of what the definition says"))))
     (testing "a contract holding a function is recorded as written, so it reads back as data"
       ;; a live agent's (defn ... {:malli/schema [:=> [:cat [:fn pos?]] :int]} ...) was recorded
       ;; from the evaluated value, #object[...], and every later agent on that branch died
