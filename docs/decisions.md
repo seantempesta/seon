@@ -4,7 +4,15 @@ This file holds the owner's standing rulings, one entry each: the rule, the owne
 
 ## 2026-11-08 rulings
 
-The owner's rulings of 2026-11-08, on how a reply's evals run.
+The owner's rulings of 2026-11-08, on what the model knows, erasing the store, and how a reply's evals run.
+
+### What the model knows is its record (owner, 2026-11-08)
+
+Owner, 2026-11-08: "I want to be able to compact an agent by removing data on their record and for us to UNDERSTAND what data is known at which point and the diffs should recalculate. I don't want manual TURN 0 = full and diffs from that point." "Don't invent a new system. We already know exactly what has changed in both the ctx atom and the db." "We should have arguments that can make regenerating a changed data (like removing evals or refs that were pulling in other data) a pure function and not magic." "Don't invent words. Use clojure terms or the library interfaces." On storing the hiccup as evals: "This seems like a detail for the mode/wire render rather than actual evals that we want to be saving as data on the agent." On render code: "Okay don't depend on the cache. I want it to work correctly always the cache is an optimization. If the render functions change yes I want the data re-rendered I don't want to keep using the old render functions. That's the whole point of having an agent dynamically adjust their context and the users html. If we are doing time travel debugging I want to be able to restore to that exact point in time and to see the old renders rendering that data." Stated in: task seon.render/what-the-model-knows-is-its-record.
+
+### In active development, the store is erased whenever a change needs it (owner, 2026-11-08)
+
+Owner, 2026-11-08: "I don't give a shit about the existing store data. Erase it and cleanup whenever you need to." "Erase whenever you want. Just warn the other agents." "I mean we are in active development. In production of course you don't just drop the whole store." Stated in: AGENTS.md section 9, [machine](machine.md#disk-stays-bounded).
 
 ### Every eval of a reply runs (owner, 2026-11-08)
 
@@ -112,7 +120,7 @@ The person keeps an html view of an eval's result, from the one value printer, a
 
 ### The model's context is a render of the same tree as the page
 
-"The context the model is getting should be a part of this render system. It should be a computational graph with react style rendering of components using our understanding of immutable data structures (ctx atom) and the db (internal read tracking) do not reinvent anything." "When we were doing separate model and user html renders they always drifted." "hiccup is also data... Data itself can self render based on it's render function." "the model context should be efficiently re-renderable just like the hiccup is. this means yes we can re-eval something and update it. Yes this will cache bust and yes that's okay if explicitly done." "I am okay with busting the cache and re-rendering from that point on so redoing the diffs." The layer between the db and what's shown: "It's a transformation layer transforming raw data to meaningful processed data. Sometimes that's passthrough sometimes it's a summary but it's always dynamic and thinking ahead for how the diffs will present updates." One render, not two: "We were intentionally basing the model context off the rendered data. So it was a dependency tree and the hiccup / intermediary state was directly renderable to html. I don't want to go back to dual renders for everything. We end up with data that the agent may not care about and I want intelligent transformation, filtering, adding in other data if enecessary from the db." The word: "I really don't like the part name"; it's a component. Real-task runs come after diffs, before the conversation moves. Being built: task `seon.context/the-models-context-is-the-walks`.
+"The context the model is getting should be a part of this render system. It should be a computational graph with react style rendering of components using our understanding of immutable data structures (ctx atom) and the db (internal read tracking) do not reinvent anything." "When we were doing separate model and user html renders they always drifted." "hiccup is also data... Data itself can self render based on it's render function." "the model context should be efficiently re-renderable just like the hiccup is. this means yes we can re-eval something and update it. Yes this will cache bust and yes that's okay if explicitly done." "I am okay with busting the cache and re-rendering from that point on so redoing the diffs." The layer between the db and what's shown: "It's a transformation layer transforming raw data to meaningful processed data. Sometimes that's passthrough sometimes it's a summary but it's always dynamic and thinking ahead for how the diffs will present updates." One render, not two: "We were intentionally basing the model context off the rendered data. So it was a dependency tree and the hiccup / intermediary state was directly renderable to html. I don't want to go back to dual renders for everything. We end up with data that the agent may not care about and I want intelligent transformation, filtering, adding in other data if enecessary from the db." The word: "I really don't like the part name"; it's a component. Real-task runs come after diffs, before the conversation moves. Stated in: [the model's context](render.md#the-models-context-a-cached-prefix-then-the-turn).
 
 ### What the model reads is precise data, teaching included
 
@@ -182,15 +190,15 @@ The owner's rulings of 2026-11-05, on looking before building and on what makes 
 
 ### An agent's entity, pull and renders make most of its context (owner, 2026-11-05)
 
-"Design the agents entity with useful information and make it so the pull pattern and the render functions generate the majority of the agents context. It teaches them about the system, it explain what task they are working on, how messaging works when they get a message, evertyhing. It's all data driven." And: "NO SPECIAL CASE FOR CITING. That's just data and a render function". And: "Definitely got rid of \"runs\" (that concept doesn't exist) agents have turns, evals, max turns, etc." The work is task seon.context/the-agents-data-makes-its-context.
+"Design the agents entity with useful information and make it so the pull pattern and the render functions generate the majority of the agents context. It teaches them about the system, it explain what task they are working on, how messaging works when they get a message, evertyhing. It's all data driven." And: "NO SPECIAL CASE FOR CITING. That's just data and a render function". And: "Definitely got rid of \"runs\" (that concept doesn't exist) agents have turns, evals, max turns, etc." Stated in: [ctx](ctx.md#what-the-model-reads-and-what-the-page-draws).
 
 ### The debug page draws history with today's renders, and says when that differs (owner, 2026-11-05)
 
-Asked whether the debug page should draw history with today's renders plus a hash that flags any difference: "Yes, and try it". It stands over AGENTS.md §3's "as recorded" for a request. The work is task seon.context/the-agents-data-makes-its-context.
+Asked whether the debug page should draw history with today's renders plus a hash that flags any difference: "Yes, and try it". It stands over AGENTS.md §3's "as recorded" for a request. Stated in: [the debug page](render.md#the-debug-page-is-the-wire-request).
 
 ### The render is an eval, and what changed is another (owner, 2026-11-05)
 
-"We can just make the rendering of the hiccup a normal eval that we inject into turn 0 and then we can just do diffs when it changes. That way the context is accumulating and each step you can see the updates". And: "If we detect a change in the @ctx and/or the hiccup we add another eval that gets the diffs and the agent on their next turn sees what's changed". It stands over the page being latest only. The work is task seon.context/the-agents-data-makes-its-context.
+"We can just make the rendering of the hiccup a normal eval that we inject into turn 0 and then we can just do diffs when it changes. That way the context is accumulating and each step you can see the updates". And: "If we detect a change in the @ctx and/or the hiccup we add another eval that gets the diffs and the agent on their next turn sees what's changed". It stands over the page being latest only. Stated in: [the render is an eval](render.md#the-render-is-an-eval). The 2026-11-08 ruling, what the model knows is its record, stands over its turn-0 render and its explicit redo.
 
 ### Large or changing output is the render's bug (owner, 2026-11-05)
 
@@ -478,11 +486,11 @@ A reply's text heads its block of evals; each eval is one tool call with `intent
 
 ### No surprises from main (owner, 2026-10-28)
 
-"we are supposed to be telling the agent always at every eval reply what is different with main so as main moves they are aware they need to fix things. They can ignore it and work and then merge at the end, but there are never any surprises." Every eval answer carries main's difference from the branch, computed from the db at t, never stored. Stated: task seon.context/the-agent-page-shows-what-the-agent-knows.
+"we are supposed to be telling the agent always at every eval reply what is different with main so as main moves they are aware they need to fix things. They can ignore it and work and then merge at the end, but there are never any surprises." Every eval answer carries main's difference from the branch, computed from the db at t, never stored. Stated: task seon.context/the-turn-shows-how-main-diverged.
 
 ### Context is structure first; ranking is judged by turns to green (owner, 2026-10-28)
 
-"I don't think the ranker was built right if it barely moved the needle at all. We should be seeing 90% relevance and then the agent actually using it and shorter number of turns to achieve a goal as proof something is working"; "sure let's start with structure first". What the task's plan cites (functions, their tests, users and uses, sections, proofs) is shown by structure; ranking only fills a small second tier, later; shown items are append-only for the session. Stated: task seon.context/the-agent-page-shows-what-the-agent-knows.
+"I don't think the ranker was built right if it barely moved the needle at all. We should be seeing 90% relevance and then the agent actually using it and shorter number of turns to achieve a goal as proof something is working"; "sure let's start with structure first". What the task's plan cites (functions, their tests, users and uses, sections, proofs) is shown by structure; ranking only fills a small second tier, later; shown items are append-only for the session. Stated in: [ctx](ctx.md#what-the-scorer-reads-from-a-pulled-node).
 
 ### The cron stays, written well (owner, 2026-10-28)
 

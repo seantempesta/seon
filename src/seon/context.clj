@@ -625,6 +625,8 @@
         (and src (seq others)) (assoc :helpers (vec (sort (map symbol (filter #(calls? src %) names)))))
         src (assoc :example src)))))
 
+(declare first-delivered)
+
 (defn status
   "How the agent of record rec (its ctx: its :db/id and its task) works on its task stands on its branch db, as data (task
   seon.context/the-context-is-the-agents-evals-and-seons, R2b-1): each proof by the verdict its var
@@ -698,7 +700,17 @@
                    (task/unjudged db t (vec ds)))
         reds (vec (for [[p {:keys [failures]}] vs f failures] (assoc f :test p)))
         blockers (refused reasons reds #(doc/source-of db %) #(callees db %)
-                          #(or (nil? base) (not= (doc/source-of db %) (doc/source-of base %))))]
+                          #(or (nil? base) (not= (doc/source-of db %) (doc/source-of base %))))
+        ;; the next step, from the task's own data and never its kind (docs/agent.md#working-for-a-person): none of these blocks a merge
+        te (when tid (pdb/eid db :seon.task/id tid))
+        plan-tx (when te (some-> (first (d/datoms db :eavt te :seon.task/plan)) :tx))
+        me (:seon.agent/key ag)
+        asked (when plan-tx
+                (some (fn [[e m]] (let [from (:seon.message/from m)]
+                                    (when (and (not (#{"root" me} from)) (> (first-delivered [db a e]) plan-tx)) from)))
+                      (:messages rec)))
+        next (cond-> []
+               asked (conj {:step :fold-message :from asked}))]
     (cond-> {:reasons reasons
              ;; each proof as :proved holds its var: its verdict (green :pass, red and flaky :fail, as `verdicts`), its source
              :proofs (vec (for [p (sort-by str proofs)
@@ -718,6 +730,7 @@
                               (seq fs) (assoc :failures (failures fs))
                               (seq calls) (assoc :calls calls))))}
       (seq blockers) (assoc :refused blockers)
+      (seq next) (assoc :next next)
       (seq also-on-main) (assoc :also-red-on-main also-on-main)
       ;; a real field, on every page from the first, not only the line an eval's answer carries: its base is behind main
       (and main base (= :agent (:mode @agent/state))) (assoc :main-moved (agent/main-line base db (d/commit-as-db (pdb/store-of db) main)))

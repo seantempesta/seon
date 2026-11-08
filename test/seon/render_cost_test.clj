@@ -255,7 +255,7 @@
      ;; print cache and the task's list drawn alone: 8,708 / 21,668 / 67,028 and 16.6 / 33.2 / 92.7 MB); what grows is
      ;; the page's html, an entry a message, and the cold draw's ctx (seon.ctx/build), each about a third
      ;; measured 2026-11-06, a debug read's cold request, no print handed to it: 5,040 / 11.4k / 33.6k calls and 8.77 / 14.4 / 34.3 MB at
-     ;; 10 / 30 / 100 evals. Follow-up on seon.context/the-context-is-records: pass it an earlier :printed, as a turn does
+     ;; 10 / 30 / 100 evals.
      :per-n {:calls 317 :bytes 280000}
      :fixed {:calls 1900 :bytes 6600000}
      :sizes [10 30 100]}))
