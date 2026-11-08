@@ -2519,9 +2519,10 @@
         units (:seon.render/units page)
         in (fn [sel] (filterv #(= sel (:container %)) units))
         w (a3-walk branch)
-        shown (try (r/placed-hiccup w ["#p-task" "#p-rules"]) (finally (r/dispose-walk! w)))]
+        shown (try (r/placed-hiccup w ["#p-task"]) (finally (r/dispose-walk! w)))]
     (is (seq model) "the model reads parts")
-    (is (= (keys model) (remove #(= % "agent-state") (map :id (concat (in "#p-task") (in "#p-rules"))))) "the page's task list and its rules are the model's parts, by id and in order (and the person's own state beside them)")
+    (is (= (keys model) (remove #(= % "agent-state") (map :id (in "#p-task")))) "the page's task list is the model's parts, by id and in order; its rules are the page's alone (docs/render.md#style)")
+    (is (seq (in "#p-rules")) "the page draws its rules")
     (is (= model shown) "each part's hiccup the model reads is the hiccup the page's unit of that id is written from")
     (doseq [u (in "#p-task")] (is (str/includes? (:html u) (str "id=\"" (:id u) "\"")) "and the unit is that part"))
     (let [conv (apply str (map :html (in "#c-rows")))]
