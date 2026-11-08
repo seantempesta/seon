@@ -1196,7 +1196,8 @@
     (if (and held (= l (first (:root held))))
       held
       (let [w (cond-> (render/walker {:ref ctx/ctx :changes ctx/changes
-                              :forms-between (fn [p0 p1 forms0] (wire/forms-between (agent/db) (:db/id @ctx/ctx) p0 p1 forms0))}
+                              :points (fn [] (wire/points-of (agent/db) (:db/id @ctx/ctx) (:branch @agent/state)))
+                              :diffs-through (fn [chain] (wire/diffs-through (agent/db) (:db/id @ctx/ctx) chain))}
                              agent/db [l {}])
                 (or (nil? held) (:model-only held)) (assoc :model-only true))]
         (some-> held render/dispose-walk!)

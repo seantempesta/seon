@@ -290,7 +290,7 @@
   one diff, seon.ctx/changes), the db its db renders read (db-fn, called when one runs) and its
   root call. Holds, in this process, the one cache: each component's reaction, args, output and
   db reads ({key entry}), an index from read key to the components that read it, the marker of each form drawn, its render queue (the keys a change reached), what a flush's runs let go of (:gone), who left out a page's piece (:skipped, a walk :model-only), mount counter and ledger
-  (calls, hits, misses and allocation by render var), what the model was last shown of it (:shown, `page-value`), the edits between pairs of points it answered (:diffs) and the page it kept of the last (:held, `changes-of`), and the render vars it watches: each it drew, once,
+  (calls, hits, misses and allocation by render var), what the model was last shown of it (:shown, `page-value`), the edits between pairs of points it answered (:diffs, `changes-of`), and the render vars it watches: each it drew, once,
   whose redefinition (a defn at the REPL: Clojure's watch on a var's root) queues that var's components
   for the next flush!, found in the cache when it fires. A cold walk (root drawing a branch) is a
   walker drawn once."
@@ -298,7 +298,7 @@
   [src db-fn root]
   {:src src :db db-fn :root root :cache (volatile! {}) :queue (volatile! #{}) :mounts (volatile! 0)
    :ledger (volatile! {}) :out (volatile! nil) :db-keys (volatile! #{}) :readers (volatile! {}) :forms (volatile! {}) :drawn (ratom/atom {}) :watched (volatile! #{}) :inputs (volatile! {}) :gone (volatile! #{}) :skipped (volatile! #{}) :defects (volatile! []) :shown (volatile! nil)
-   :diffs (volatile! {}) :held (volatile! nil)})
+   :diffs (volatile! {})})
 
 (defn- led!
   "Count k (:hit, :miss, :same) for render var f in w's ledger, with the ticks and bytes a run took."
@@ -836,21 +836,32 @@
         (keep (fn [[id f]] (when-not (contains? after id) [id f nil])))
         before))
 
+(defn- chain-to
+  "The points to walk to answer the pair p0, p1 (p0 nil: nothing before p1) among points, the agent's turns in order: the turns from the first (nil before it) to p1 when the pair is two neighbours of them, so one walk fills every pair on the way; else the two alone."
+  {:malli/schema [:=> [:cat [:vector :map] [:maybe :map] :map] [:vector [:maybe :map]]]}
+  [points p0 p1]
+  (let [all (into [nil] points) i1 (.indexOf ^java.util.List all p1)]
+    (if (and (pos? i1) (= p0 (nth all (dec i1))))
+      (subvec all 0 (inc i1))
+      [p0 p1])))
+
 (defn changes-of
-  "The :seon.render/changes input of walk w (rule 6 of seon.render/one-walk-per-view): a function of two points p0 and p1, {:branch :commit :t}, answering the edits that take the page as it stood at p0 to the page at p1 (`page-edits` over `forms-moved` of the two pages, {id form}), computed once per pair of points, whoever asks (the walk's :diffs). The pages come from the walk's source (:forms-between, called with p0, p1 and the page the walk kept of p0, nil when it kept none; answers [page-at-p0 page-at-p1]); the walk keeps p1's page for the pair that starts there (:held), a cache of one, evicted by the next pair and never relied on. A walk whose source has no :forms-between gets no input. The same function an agent calls as my.render/diff. See docs/render.md#a-change-is-edits-by-name."
-  {:malli/schema [:=> [:cat :map] [:maybe :seon.host/fn]]}
+  "The :seon.render/changes input of walk w (rule 6 of seon.render/one-walk-per-view): a function of two points p0 and p1, {:branch :commit :t}, answering the edits that take the page as it stood at p0 to the page at p1 (`page-edits` over `forms-moved` of the two pages), computed once per pair of points, whoever asks (the walk's :diffs, the one cache, never relied on: a pair it lacks is drawn again). A pair the walk does not hold is drawn with every missing pair before it in one pass along the agent's turns (the source's :points, called for them, and :diffs-through, called with the chain from the first missing pair: `seon.ctx.wire/diffs-through`), never a draw a pair. A walk whose source cannot draw a point answers the typed error :seon.render/no-diffs-through, not nothing. The same function an agent calls as my.render/diff. See docs/render.md#a-change-is-edits-by-name."
+  {:malli/schema [:=> [:cat :map] :seon.host/fn]}
   [w]
-  (when-let [between (:forms-between (:src w))]
-    (fn [p0 p1]
-      (let [k [p0 p1] memo @(:diffs w)]
-        (if (contains? memo k)
-          (get memo k)
-          (let [[held-point held] @(:held w)
-                [f0 f1] (between p0 p1 (when (= held-point p0) held))
-                edits (page-edits (forms-moved f0 f1))]
-            (vswap! (:diffs w) assoc k edits)
-            (vreset! (:held w) [p1 f1])
-            edits))))))
+  (fn [p0 p1]
+    (let [k [p0 p1] memo @(:diffs w)]
+      (if (contains? memo k)
+        (get memo k)
+        (if-let [through (:diffs-through (:src w))]
+          (let [chain (chain-to (if-let [pf (:points (:src w))] (pf) []) p0 p1)
+                pairs (partition 2 1 chain)
+                from (or (first (keep-indexed (fn [i pr] (when-not (contains? memo pr) i)) pairs)) 0)
+                chain (vec (drop from chain))
+                edits (through chain)]
+            (vswap! (:diffs w) into (zipmap (partition 2 1 chain) edits))
+            (get @(:diffs w) k))
+          (contract/error :seon.render/no-diffs-through #'changes-of "this walk's source has no way to draw a page at a point (:diffs-through): the edits between two points cannot be answered here" {:from p0 :to p1}))))))
 
 (defn moved
   "The components of walk w placed in the lists sels whose form is not the one it last showed (:shown, `page-value`), [[id was now]] in placed order and then those that left (now nil); a walk that has shown nothing: every component, was nil. A component's form is made only when its revision moved (the walk compared its output once, `render!`), so nothing moved, nothing made; a revision that moved what the model does not read moves nothing here. See docs/render.md#the-render-is-an-eval."
@@ -1073,7 +1084,6 @@
   (vreset! (:watched w) #{})
   (vreset! (:inputs w) {})
   (vreset! (:diffs w) {})
-  (vreset! (:held w) nil)
   nil)
 
 ;; ---- entity schemas and patterns (docs/ctx.md#the-pattern) ----

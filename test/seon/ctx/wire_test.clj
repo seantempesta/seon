@@ -480,15 +480,15 @@
       (d/transact conn (program-facts '[[demo/f "(defn f \"Doubles.\" [x] (* 2 x))" []]]))
       (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "Make ```demo/f``` triple."
                                                :seon.task/proofs #{'demo-test/f-test}}]))
-      (d/transact conn [{:seon.task/id "demo/f" :seon.task/agent {:seon.agent/key "b/a1" :seon.agent/task {:seon.task/id "demo/f"}}}])
-      (let [a (pdb/eid @conn :seon.agent/key "b/a1")
+      (d/transact conn [{:seon.task/id "demo/f" :seon.task/agent {:seon.agent/key "a1" :seon.agent/task {:seon.task/id "demo/f"}}}])
+      (let [a (pdb/eid @conn :seon.agent/key "a1")
             plain (fn [x] (clojure.walk/postwalk #(if (and (map? %) (contains? % :seon.print/plain)) (:seon.print/plain %) %) x))
             seen (atom nil)
             point (fn [] (let [db @conn] {:branch :b :commit (d/commit-id db) :t (:max-tx db)}))
-            w (render/walker {:ref (seon.ratom/atom {}) :changes ctx/changes
-                              :forms-between (fn [p0 p1 forms0] (wire/forms-between @conn a p0 p1 forms0))}
-                             (constantly nil) [#'identity {}])
-            diff (render/changes-of w)
+            chains (atom [])
+            ;; the source: the agent's turns' points, and one walk across a chain of them (recorded: a call is a pass)
+            src (fn [pts] {:ref (seon.ratom/atom {}) :changes ctx/changes :points (fn [] pts)
+                           :diffs-through (fn [chain] (swap! chains conj chain) (wire/diffs-through @conn a chain))})
             stored (fn [id] (when-let [e (d/pull @conn '[*] [:seon.eval/id id])]
                               (when (:seon.eval/id e) (plain (:value (pdb/response-of @conn e))))))
             turn! (fn [n] (let [p (point)] (page! conn seen (str "p" n) (dec n)) p))
@@ -497,20 +497,31 @@
             p2 (turn! 2)
             _ (d/transact conn [[:db/add [:seon.task/id "demo/f"] :seon.task/plan "Make ```demo/f``` quadruple."]])
             p3 (turn! 3)
-            p4 (turn! 4)]
+            _ (d/transact conn [{:seon.root/id :root :seon.root/boot "b1"}])
+            p4 (turn! 4)
+            w (render/walker (src [p1 p2 p3 p4]) (constantly nil) [#'identity {}])
+            diff (render/changes-of w)]
+        ;; a restart: nothing kept, the last turn's pair asked first. It fills every pair before it in one pass, one chain
+        ;; [nil p1 p2 p3 p4]: one walk drawn once at p1 and advanced through p2, p3 and p4 (a count of the source's calls, not time)
+        (is (= [] (diff p3 p4)) "turn 4 moved nothing")
+        (is (= [[nil p1 p2 p3 p4]] @chains) "one pass across the turns' points answered all four pairs")
+        (is (= 4 (count (keys @(:diffs w)))) "each pair computed once")
         (is (= (vec (for [[id f] (:components (stored "p1"))] [[id] :+ f])) (plain (diff nil p1))) "the first turn: the page whole, as edits from nothing")
         (is (= (:edits (stored "p2")) (plain (diff p1 p2))) "turn 2: the cited var's edit")
         (is (= (:edits (stored "p3")) (plain (diff p2 p3))) "turn 3: the plan's edit")
-        (is (and (nil? (stored "p4")) (= [] (diff p3 p4))) "turn 4 moved nothing: no eval stored, no edits")
-        (is (= 4 (count (keys @(:diffs w)))) "each pair computed once")
+        (is (nil? (stored "p4")) "turn 4 stored no eval")
+        (is (= [[nil p1 p2 p3 p4]] @chains) "and none of them drew again")
         (is (and (seq (:components (stored "p1"))) (seq (:edits (stored "p2"))) (seq (:edits (stored "p3")))) "and each is a change worth comparing")
-        ;; a walk that kept no page (a restart): each pair draws its first point cold and advances it to the second, to the same edits
-        (let [w2 (render/walker {:ref (seon.ratom/atom {}) :changes ctx/changes
-                                 :forms-between (fn [p0 p1 forms0] (wire/forms-between @conn a p0 p1 forms0))} (constantly nil) [#'identity {}])
-              cold (fn [p0 p1] (vreset! (:held w2) nil) ((render/changes-of w2) p0 p1))]
-          (is (= (:edits (stored "p2")) (plain (cold p1 p2))) "advanced from p1 to p2")
-          (is (= (:edits (stored "p3")) (plain (cold p2 p3))) "advanced from p2 to p3")
-          (render/dispose-walk! w2))
+        ;; the pass equals the pairs computed one by one, each a walk drawn cold at its first point and advanced to its second
+        (doseq [[p0 p1'] [[nil p1] [p1 p2] [p2 p3] [p3 p4]]]
+          (let [w3 (render/walker (src []) (constantly nil) [#'identity {}])]
+            (is (= ((render/changes-of w3) p0 p1') (diff p0 p1')) "the pair alone equals the pair filled in the pass")
+            (render/dispose-walk! w3)))
+        (is (= 5 (count @chains)) "the four alone were four chains of their own, the pass one")
+        (let [w4 (render/walker {:ref (seon.ratom/atom {}) :changes ctx/changes} (constantly nil) [#'identity {}])
+              e ((render/changes-of w4) p1 p2)]
+          (is (= :seon.render/no-diffs-through (:seon.error/type e)) "a source that cannot draw a point answers a typed error, not nothing")
+          (render/dispose-walk! w4))
         (render/dispose-walk! w)))))
 
 (deftest each-section-is-told-once-on-the-page

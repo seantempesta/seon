@@ -117,29 +117,40 @@
   {:malli/schema [:=> [:cat :seon.host/db :map] :seon.host/db]}
   [db p] (or (d/commit-as-db (pdb/store-of db) (:commit p)) (d/as-of db (:t p))))
 
-(defn forms-between
-  "Agent a's page (seon.render/placed-hiccup, {id form}) at points p0 and p1 ({:branch :commit :t}, p1 later on one branch) of db's store, [at-p0 at-p1], drawn with today's renders. forms0, the page already known at p0 (the walk kept it, seon.render/changes-of), is not drawn again: p1 is drawn cold alone, as it is for a p0 of nil (the first turn has no point before it: its page at p0 is nothing, {}). With none, p0 is drawn cold and advanced to p1 (seon.ctx/advance's patch of the datoms between, the moved components flushed), so the second page costs what moved. Pure in its arguments, and the one place a page is drawn at a point. See docs/render.md#a-change-is-edits-by-name."
-  {:malli/schema [:=> [:cat :seon.host/db :int [:maybe :map] :map [:maybe :map]] [:tuple :map :map]]}
-  [db a p0 p1 forms0]
-  (let [db1 (db-at db p1) branch (:branch p1)
-        layout (render/layout-of (assoc (:tree (ctx/build db1 a branch)) :seon.agent/key (:seon.agent/key (d/entity db1 a))))]
-    (if (or forms0 (nil? p0))
-      (let [w (render/draw (:tree (ctx/build db1 a branch)) ctx/changes db1 layout {:model-only true :once true})]
-        [(or forms0 {}) (try (page-forms w) (finally (render/dispose-walk! w)))])
-      (let [db0 (db-at db p0)
-            c0 (ctx/build db0 a branch)
-            at (volatile! db0) r (ratom/atom (:tree c0))
-            w (assoc (render/walker {:ref r :changes ctx/changes} (fn [] @at) [layout {}]) :model-only true)]
-        (try
-          (render/flush! w nil)
-          (let [f0 (page-forms w)
-                moved (ctx/moved db0 db1 nil)
-                c1 (ctx/patch c0 db1 moved branch)]
-            (vreset! at db1)
-            (reset! r (:tree c1))
-            (render/flush! w moved)
-            [f0 (page-forms w)])
-          (finally (render/dispose-walk! w)))))))
+(defn diffs-through
+  "The edits between each consecutive pair of chain, a vector of points ({:branch :commit :t}, in order on one branch; a first of nil: nothing before the second) of agent a, one per pair, [(p0 to p1) (p1 to p2) ...], of db's store, with today's renders (`seon.render/page-edits` over `seon.render/forms-moved` of the page at each). One walk across them: drawn once at the first point the chain names, then advanced through each later one (seon.ctx/moved, seon.ctx/patch, the moved components flushed, as a kept walk moves, docs/render.md#a-page-is-a-kept-walk), so the chain costs one draw and what moved between the points, never a draw a pair. Pure in its arguments, and the one place a page is drawn at a point. See docs/render.md#a-change-is-edits-by-name."
+  {:malli/schema [:=> [:cat :seon.host/db :int [:vector [:maybe :map]]] [:vector :any]]}
+  [db a chain]
+  (let [nothing? (nil? (first chain)) pts (vec (remove nil? chain))
+        start (first pts) branch (:branch start)
+        db0 (db-at db start)
+        c0 (ctx/build db0 a branch)
+        layout (render/layout-of (assoc (:tree c0) :seon.agent/key (:seon.agent/key (d/entity db0 a))))
+        at (volatile! db0) r (ratom/atom (:tree c0))
+        w (assoc (render/walker {:ref r :changes ctx/changes} (fn [] @at) [layout {}]) :model-only true)]
+    (try
+      (render/flush! w nil)
+      (let [f0 (page-forms w)]
+        (loop [c c0 prev f0 ps (rest pts) out (if nothing? [(render/page-edits (render/forms-moved {} f0))] [])]
+          (if-let [p (first ps)]
+            (let [db1 (db-at db p)
+                  moved (ctx/moved @at db1 nil)
+                  c1 (ctx/patch c db1 moved (:branch p))]
+              (vreset! at db1)
+              (reset! r (:tree c1))
+              (render/flush! w moved)
+              (let [f1 (page-forms w)]
+                (recur c1 f1 (rest ps) (conj out (render/page-edits (render/forms-moved prev f1))))))
+            out)))
+      (finally (render/dispose-walk! w)))))
+
+(defn points-of
+  "The points of agent a's turns on db, [{:branch :commit :t}] in turn order: each model call's basis (:seon.model-call/basis, its :commit and :t, the t read from the commit when the basis holds none) with the branch. What `seon.render/changes-of` chains its pairs along. See docs/render.md#a-change-is-edits-by-name."
+  {:malli/schema [:=> [:cat :seon.host/db :int :any] [:vector :map]]}
+  [db a branch]
+  (->> (d/q '[:find ?n ?b :in $ ?a :where [?c :seon.model-call/agent ?a] [?c :seon.model-call/n ?n] [?c :seon.model-call/basis ?b]] db a)
+       (sort-by first)
+       (mapv (fn [[_ b]] {:branch branch :commit (:commit b) :t (or (:t b) (:max-tx (d/commit-as-db (pdb/store-of db) (:commit b))))}))))
 
 (defn request
   "The agent's request, a reading of walk w, the one tree its page draws (docs/render.md#the-models-context-a-cached-prefix-then-the-turn): its conversation's list through the one generic conversion
