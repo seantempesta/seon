@@ -1951,7 +1951,8 @@
   what it works on in words and how it stands (standing), then what it last told whoever started it, a few lines of it (the
   task's reason, which root's message to them carries: seon.reconcile/tell-tx), so a person can tell which to open. See
   docs/users.md#whats-on-screen."
-  {:seon.render/style ".session-card > a { display: flex; flex-direction: column; gap: 0.5rem; height: 100%; min-height: 7rem; border: 1px solid var(--color-base-800); border-radius: 0.5rem; background: var(--color-base-900); padding: 0.75rem 0.875rem; color: inherit; text-decoration: none; } .session-card > a:hover { border-color: var(--color-base-600); } .session-card .said { max-height: 7.5rem; overflow: hidden; font-size: 0.8125rem; line-height: 1.25rem; color: var(--color-text-300); -webkit-mask-image: linear-gradient(to bottom, black 70%, transparent); mask-image: linear-gradient(to bottom, black 70%, transparent); } .session-card .said p { margin: 0 0 0.375rem; }"
+  {:seon.render/for "page"
+   :seon.render/style ".session-card > a { display: flex; flex-direction: column; gap: 0.5rem; height: 100%; min-height: 7rem; border: 1px solid var(--color-base-800); border-radius: 0.5rem; background: var(--color-base-900); padding: 0.75rem 0.875rem; color: inherit; text-decoration: none; } .session-card > a:hover { border-color: var(--color-base-600); } .session-card .said { max-height: 7.5rem; overflow: hidden; font-size: 0.8125rem; line-height: 1.25rem; color: var(--color-text-300); -webkit-mask-image: linear-gradient(to bottom, black 70%, transparent); mask-image: linear-gradient(to bottom, black 70%, transparent); } .session-card .said p { margin: 0 0 0.375rem; }"
    :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :string] :any]}
   [{db :seon.db/db} k]
   (let [a (d/pull db session-attrs [:seon.agent/key k])
