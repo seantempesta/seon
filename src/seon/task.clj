@@ -338,7 +338,7 @@
   [k n] {:seon.model-call/id (lib/call-id k n) :seon.model-call/agent {:seon.agent/key k} :seon.model-call/n n})
 
 (defn message-tx
-  "Message mid from from to the agents with keys tos, its body, sent at sent-ms: the one message entity (its id is a content id), `to` naming each
+  "Message mid from from to the agents with keys tos, its body, sent at sent-ms: the one message entity (mid in seon.lib/id's form: a fresh unique id for a message sent, seon.lib/unique-id, or a content id where the same facts must make the one message, as the reconciler's ask of a task at a t), `to` naming each
   recipient's agent entity by key. Written by root's writer on main at the send, and by the recipient on its branch, with its own ref only,
   when its next act delivers it (seon.agent/deliver!). See docs/users.md#messages."
   {:malli/schema [:=> [:cat :string :string [:sequential :string] :any :int] [:vector :map]]}
