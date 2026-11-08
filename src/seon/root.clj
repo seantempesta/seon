@@ -1068,6 +1068,21 @@
                    (lib/digest (sedn/encode (get contract/forms :seon.doc/fact))) "\n"
                    (str/join "\n" (for [dir (cfg/value :seon.config.root/wiki-dirs) [p t] (doc/pages checkout dir)] (str p "\n" t))))))
 
+(def ^:private root-session-plan
+  "What root's session is for, its task's plan: what educates it, beside the docs it cites. See docs/users.md#roots-session."
+  "You are root's session: the person talks to Seon through you. Your page lists every session on main and how each stands. Answer the person yourself when you can. When they want work done, look for a session already on it and tell them its address; otherwise start one with (my.task/launch! \"what they want\") and tell them it started. More: docs/users.md#roots-session")
+
+(defn root-session-tx
+  "Root's session at boot, the ordinary way (seon.template/request-tx of the chat template): the task request/root, its agent root's own
+  entity (key \"root\", by the tempid \"root\" seon.task/boot-tx names it by in the same transaction), parked until a message wakes it, so a
+  boot makes no model call. See docs/users.md#roots-session."
+  {:malli/schema [:=> [:cat :seon.host/db] [:vector :any]]}
+  [db]
+  (let [tx (tpl/request-tx db (tpl/from (tpl/templates :user) {:seon.task/ns 'request :seon.task/name "root" :seon.task/plan root-session-plan}))]
+    (if (contract/error? tx)
+      (throw (ex-info (str "root's session task was refused: " (:seon.error/message tx)) tx))
+      (conj (vec tx) {:seon.task/id "request/root" :seon.task/agent "root" :seon.task/outcome :parked}))))
+
 (defn wiki-boot-tx
   "The wiki's part of the boot fact's commit: wiki-tx, with the digest of what it read (wiki-digest) on root's
   fact, or [] when main already holds that digest (the load is a function of that input, so it would write
@@ -1292,7 +1307,7 @@
     ;; with it, how the root before it on main ended (its stop fact, or :unclean)
     (let [prev (previous-end db)
           r @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (cond-> (-> (task/boot-tx boot max-running (person)) (into (task/earlier-agents-tx db)) (into (cfg/facts config in-force-sources))
-                                                                                  (into (wiki-boot-tx db (cfg/checkout) #(wiki-baseline sys (cfg/checkout) "docs"))))
+                                                                                  (into (wiki-boot-tx db (cfg/checkout) #(wiki-baseline sys (cfg/checkout) "docs"))) (into (root-session-tx db)))
                                                                          prev (conj {:seon.root/id :root :seon.root/previous-end prev})
                                                                          ;; the test that started this boot (a test's main is its own: no other boot resumes it)
                                                                          started-by (conj {:seon.root/id :root :seon.root/started-by started-by}))}})]
