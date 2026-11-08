@@ -954,32 +954,28 @@
   ;; first search finds the index held for its db and builds none, and its FTS5 table, an in-memory SQLite database,
   ;; answers in the forked child. The bytes of the first search's section reads are leaf decoding in the child,
   ;; which depends on the store's layout, so they are not this test's claim.
-  (let [held (last (in-agent [(str "(def held (fn [] (let [d (:db @seon.agent/state) [at ix] @@#'seon.doc/indexes] {:current (= at [(:hash d) (:max-tx d)]) :ix ix})))")
+  ;; and, after that first search, an agent's merge of main keeps the index current (a-merge-of-main-keeps-the-search-index-current):
+  ;; docs/vector.md#search: an agent's writes carry the text index (seon.doc/carry-index!), so a search after one rebuilds nothing; the merge's own record of its base was a write that skipped it, so the next search after any merge rebuilt the index, about 20 MB, seen as a flake
+  (let [current "(let [d (:db @seon.agent/state) [was _] @@#'seon.doc/indexes] (= was [(:hash d) (:max-tx d)]))"
+        results (in-agent [(str "(def held (fn [] (let [d (:db @seon.agent/state) [at ix] @@#'seon.doc/indexes] {:current (= at [(:hash d) (:max-tx d)]) :ix ix})))")
                             "(def before (held))"
                             "(def rows (count (my.agent/grep \"accumulated\")))"
                             "(def after (held))"
-                            "{:rows rows :current-before (:current before) :current-after (:current after) :same-index (identical? (:ix before) (:ix after)) :held? (some? (:ix before))}"]
+                            "{:rows rows :current-before (:current before) :current-after (:current after) :same-index (identical? (:ix before) (:ix after)) :held? (some? (:ix before))}"
+                            {:op :eval :agent "root" :code "@(seon.root/transact-main! sys (vec ((my.test/code 'app.idx \"(ns app.idx (:refer-clojure :exclude [defn defn-]) (:require [seon.contract :refer [defn defn-]]))\\n(defn f \\\"A var.\\\" {:malli/schema [:=> [:cat] :int]} [] 1)\\n\") @(:conn sys))))"}
+                            "(seon.agent/merge-main! #{})"
+                            current]
                            ;; a root of its own: the slot is one per process, and a shard's shared root has searched before
-                           {:group :pristine}))
+                           {:group :pristine})
+        held (nth results 4) merged (nth results 6) after-merge (nth results 7)
         {:keys [rows current-before current-after same-index held?]} (:value held)]
     (is held? "the agent inherited an index")
     (is current-before "the index it inherited is the one held for its db")
     (is same-index "its first search built no index: the slot holds the same one after it")
     (is current-after "and still the one held for its db")
-    (is (pos? rows) "the query of the index it inherited answers in the forked child")))
-
-(deftest a-merge-of-main-keeps-the-search-index-current
-  ;; docs/vector.md#search: an agent's writes carry the text index (seon.doc/carry-index!), so a search after one rebuilds nothing; the merge's own record of its base was a write that skipped it, so the next search after any merge rebuilt the index, about 20 MB, seen as a flake
-  (let [current "(let [d (:db @seon.agent/state) [was _] @@#'seon.doc/indexes] (= was [(:hash d) (:max-tx d)]))"
-        [_ before _ merged after] (in-agent [(str "(do (my.agent/grep \"accumulated\") nil)")
-                                             current
-                                             {:op :eval :agent "root" :code "@(seon.root/transact-main! sys (vec ((my.test/code 'app.idx \"(ns app.idx (:refer-clojure :exclude [defn defn-]) (:require [seon.contract :refer [defn defn-]]))\\n(defn f \\\"A var.\\\" {:malli/schema [:=> [:cat] :int]} [] 1)\\n\") @(:conn sys))))"}
-                                             "(seon.agent/merge-main! #{})"
-                                             current]
-                                            {:group :pristine})]
-    (is (true? (:value before)) (pr-str before))
+    (is (pos? rows) "the query of the index it inherited answers in the forked child")
     (is (seq (:applied (:value merged))) (str "the merge brought something: " (pr-str merged)))
-    (is (true? (:value after)) "the index is at the db the merge left")))
+    (is (true? (:value after-merge)) (str "the index is at the db the merge left: " (pr-str after-merge)))))
 
 (deftest a-resumed-branchs-agent-is-this-boots
   ;; one kept branch, one spawn, three claims about an agent resumed onto it.
