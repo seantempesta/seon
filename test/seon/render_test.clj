@@ -3123,6 +3123,14 @@
           banner (:html (second (filter #(= "#p-tiles" (:container %)) (:seon.render/units (#'p/page-value st :root)))))]
       (is (= 4 (count-of (seon.problems/health main1 fold))) "root counts the signature four times")
       (is (str/includes? banner "eval ×4") (str "the banner names root's count: " banner))
+      ;; the audit of baaa7e10a8: the same main asked again after three more repeats, which only the fold holds, answers the new count
+      (let [fold2 (reduce seon.error/fold fold (map occ (range 4 7)))
+            [_ asked2] (#'seon.root/api-proc (assoc api :seon.root/errors fold2) :ext {:op :health :db main1 :p (promise)})
+            [st2 out] (reduce (fn [[st _] m] (#'p/render-proc st :from-web m)) [st nil] (get asked2 [:render :from-web]))
+            answered (some #(when (= :health-answer (:op %)) (:r %)) (get out :to-api))
+            banner2 (:html (second (filter #(= "#p-tiles" (:container %)) (:seon.render/units (#'p/page-value st2 :root)))))]
+        (is (= 7 (count-of answered)) (str "the api's answer counts all seven: " (pr-str (count-of answered))))
+        (is (str/includes? banner2 "eval ×7") (str "and so does the banner: " banner2)))
       (r/dispose-walk! (get-in st [:root-walk :w]))))))
 
 (clojure.test/deftest the-config-panel-names-each-source

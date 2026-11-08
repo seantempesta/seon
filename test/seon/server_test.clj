@@ -247,7 +247,7 @@
     (is (clojure.string/includes? (:next attach) "message-md") "and the shape of a reply")
     (is (= [2 4] (filterv number? (map :value (:responses called)))) "each eval answers, in order")
     (let [exs (keep #(:seon.error/type (:ex %)) (:responses stopped))]
-      (is (= [:seon.turn/invalid-call :seon.turn/not-run] exs) "what follows one that failed is answered not-run"))
+      (is (= [:seon.turn/invalid-call] exs) "a call with no intent is answered invalid, and what follows it runs (owner, 2026-11-08)"))
     (is (= :seon.root/refused (:seon.error/type old)) (pr-str old))
     (is (clojure.string/includes? (:seon.error/message old) "message-md") "the old shape is told the new one, nothing run")
     (is (= 2 (:value turn-of)) "each reply is a turn: no one growing turn 0")

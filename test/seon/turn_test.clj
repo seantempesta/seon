@@ -1,6 +1,6 @@
 (ns seon.turn-test
   "seon.turn's pure parts, on the world (docs/testing.md#testing-in-the-world). Run: bin/test seon.turn-test"
-  (:require [clojure.test :refer [deftest is]] [my.test :as t] [seon.turn :as turn] [seon.agent-test :as at] [seon.config :as config] [seon.agent :as agent] [datahike.api :as d]))
+  (:require [clojure.test :refer [deftest is]] [my.test :as t] [seon.turn :as turn] [seon.agent-test :as at]))
 
 (deftest an-agents-tokens-are-its-model-calls-sum
   ;; seon.turn/agent-usage: an agent's model calls and tokens are what its calls recorded, every turn's, a turn that
@@ -18,11 +18,10 @@
     (is (= {:model-calls 1} (turn/agent-usage (t/with (t/world) (call-of "b1/a3" 1 nil)) "b1/a3"))
         "no call reported: its tokens unknown, never 0")))
 
-(clojure.test/deftest
- an-outside-context-names-only-the-branchs-own-gaps
- (let [[_ bases max-turns] (at/in-agent (fn [{:keys [agent]}]
-                                          [{:op :context :agent agent}
-                                           "(mapv (fn [m] (:seon.model-call/basis (datahike.api/pull (seon.agent/db) [:seon.model-call/basis] m))) (map first (datahike.api/q '[:find ?m :where [?m :seon.model-call/origin :outside]] (seon.agent/db))))"
-                                           "(seon.config/value :seon.config.agent/max-turns)"]))]
-   (is (= [(:value max-turns)] (mapv :max-turns (:value bases)))
-       (str "the read's basis names the run's max-turns, not 1: " (pr-str (:value bases))))))
+(deftest an-outside-context-names-only-the-branchs-own-gaps
+  ;; docs/turn.md#the-cap: an outside agent's read of its context is the turn the loop would take, at the run's own max-turns: here 7, apart from the config's, which the read once passed as 1
+  (let [[_ _ bases] (at/in-agent (fn [{:keys [agent]}]
+                                   ["(seon.agent/transact! [{:seon.agent/key (:key @seon.agent/state) :seon.agent/max-turns 7}])"
+                                    {:op :context :agent agent}
+                                    "(mapv (fn [m] (:max-turns (:seon.model-call/basis (datahike.api/pull (seon.agent/db) [:seon.model-call/basis] m)))) (map first (datahike.api/q '[:find ?m :where [?m :seon.model-call/origin :outside]] (seon.agent/db))))"]))]
+    (is (= [7] (:value bases)) (str "the read's basis names the run's max-turns: " (pr-str bases)))))

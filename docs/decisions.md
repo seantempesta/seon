@@ -2,6 +2,14 @@
 
 This file holds the owner's standing rulings, one entry each: the rule, the owner's words and date, and where the rule is stated now; current truth and mechanism live in `AGENTS.md` and the wiki (`docs/`), and superseded or done rulings are kept verbatim in git history.
 
+## 2026-11-08 rulings
+
+The owner's rulings of 2026-11-08, on how a reply's evals run.
+
+### Every eval of a reply runs (owner, 2026-11-08)
+
+Owner, 2026-11-08: "I want us to run every eval. Turns are precious and one fuckup shouldn't punish the other evals. Yes I understand this could cause issues if the next eval is dependent on the previous. I still want to try turning this on". Stated in: ```seon.repl/run-calls```, [the prompt](prompt.md).
+
 ## 2026-11-07 rulings
 
 The owner's rulings of 2026-11-07, on the disk and the db, on what an agent starts from, on what a merge does by itself, on how proofs grow, on state and data structures, and on users.

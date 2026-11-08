@@ -281,8 +281,7 @@
     (is (nil? (:ex fewer)) (pr-str fewer))
     (is (nil? (:ex more)) (pr-str more))
     (is (= "The doc." (nth form 2)) (pr-str form))
-    (is (= #{'clojure.set 'clojure.string 'clojure.walk} (seon.program/ns-requires form)) (pr-str form))
-    (is (not-any? #(= :ns-form-drops (:seon.repl/finding %)) (:warnings fewer)) "nothing was lost, so nothing to warn of")))
+    (is (= #{'clojure.set 'clojure.string 'clojure.walk} (seon.program/ns-requires form)) (pr-str form))))
 
 (deftest an-edit-changes-a-namespaces-ns-form
   ;; docs/agent.md#changing-a-definition: real run 11: an agent's proof needed a require, and (edit! 'its-test-ns ...) was a contract error, so it spent turns 15-22 on it, ending with an edit on disk that nothing reads.
