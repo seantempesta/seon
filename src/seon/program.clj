@@ -1392,8 +1392,9 @@
   does not make a test read the tree. A reader not named here counts as reading the tree
   (conservative: a missed name reruns more, never reuses a stale green). Measured: with
   seon.config/baked-schema-forms (a macro every contracted form expands) counted, 327 of 368
-  tests took the tree, so any edit anywhere reran them."
-  (conj (set (keys env-class-readers)) 'seon.config/baked-schema-forms))
+  tests took the tree, so any edit anywhere reran them; with seon.test-store/output (a run's own
+  log or a child's mark) uncounted, 7 of the 10 slow process tests took it, so a wiki edit reran them."
+  (conj (set (keys env-class-readers)) 'seon.config/baked-schema-forms 'seon.test-store/output))
 
 (def config-resolvers
   "seon.config's resolvers, which read the key they are passed (seon.config/value, resolve and
@@ -1441,11 +1442,15 @@
                        (update :listed into (keep #(when (and (vector? %) (config-key? (first %))) (first %))) (when (and (vector? f) (= :map (first f))) f))))))
              {:keys #{} :listed #{}} schemas))
 
+(defn- env-reader-form?
+  "Does form f define only env-readers (its file reads are of a class held apart from the tree, or of no checkout file)?"
+  {:malli/schema [:=> [:cat :map] :boolean]}
+  [f] (boolean (and (seq (:defines f)) (every? (fn [[k s]] (and (= :var k) (env-readers s))) (:defines f)))))
+
 (defn- tree-reading?
   "Does form f read the tree (a tree-reader referenced, by a form defining no env-reader)?"
   {:malli/schema [:=> [:cat :map] :boolean]}
-  [f] (boolean (and (some tree-readers (:refs f))
-                    (not (and (seq (:defines f)) (every? (fn [[k s]] (and (= :var k) (env-readers s))) (:defines f)))))))
+  [f] (boolean (and (some tree-readers (:refs f)) (not (env-reader-form? f)))))
 
 (defn- uses?
   "Does form f use one of vars (:seon.config.source/process-vars or -binary-vars)? A form uses
@@ -1665,7 +1670,7 @@
         ;; a test namespace's form reading the checkout's files itself (file-readers) judges those files:
         ;; the tests reaching it take the tree (one-printer-and-no-cut-before-it
         ;; was reused over edits to what it read, and read as flaky)
-        scans (flag :scans #(and (test-nss (:ns %)) (some file-readers (:refs %))))
+        scans (flag :scans #(and (test-nss (:ns %)) (some file-readers (:refs %)) (not (env-reader-form? %))))
         adj (into (apply dissoc (:adj g) gone-ids) (for [id dirty] [id (edges (rows id))]))
         rev (if bulk?
               (indexed (for [id dirty t (adj id)] [t id]) true)

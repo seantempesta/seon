@@ -451,21 +451,19 @@
                    'x.reloaded-support/k)
         "the alias the changed ns form adds resolves in the form after it")))
 
-(deftest a-restart-catches-up-and-a-new-generation-resumes
-  ;; BUILD plan P5 (task seon.source/the-next-generation-runs-from-the-merges-commit),
+(deftest a-restart-catches-up
   ;; through the path the owner uses: bin/root starts a root on a clone of this checkout
   ;; (Seon's own source as main's program, its store under this test's directory); through
   ;; its server two loop turns merge seon.generation/generation 1 -> 2 and a new
   ;; seon.generation/generations, each live in place. Root is SIGKILLed and the same binary,
   ;; older than both merges, started on the same store and main: it catches up at boot
-  ;; (seon.program/load-all!). Then the cold-start path: my.root/build! builds main's last
-  ;; merges commit (seon.fx/build, bin/build seon in the generation's worktree) and
-  ;; `bin/root next` starts it on the same store and main. The root imports the owner's
+  ;; (seon.program/load-all!). (Until 2026-11-08 it then built the next generation, a whole
+  ;; bin/build of about 55 s in a test; the next generation is checked where it is used, bin/root
+  ;; next.) The root imports the owner's
   ;; standing root's dirs (src, test and the schemas: the main tree's config/local.edn, not
   ;; the default), so a restart re-imports test/ after load-all! has run main's test
   ;; namespaces, as the owner's does (2026-10-22: the import skipped seon.program-test's ns
-  ;; form and the root died on `No such namespace: ts`). Declared long, bound 300 s: two
-  ;; turns (~14 s each), three boots (~3-9 s each with the import) and one build (~25-60 s).
+  ;; form and the root died on `No such namespace: ts`). Two turns (~14 s each) and two boots.
   (let [dir (scratch-dir "nextgen")
         tree (str dir "/tree")
         ;; its root's own store and main, named (seon.test-store/start-root!: an inherited
@@ -492,7 +490,7 @@
     (binding [clojure.test/report (fn [m] (when (#{:fail :error} (:type m)) (vreset! red true)) (report m))]
     (try
       (is (zero? (:exit cloned)) (:err cloned))
-      (is (some? (:port @root)) (str "the root started: " (slurp (str dir "/runs/root.log"))))
+      (is (some? (:port @root)) (str "the root started: " (ts/output (str dir "/runs/root.log"))))
       ;; root evaluates no test namespace (task seon.root/root-holds-no-test-code); its REPL loads the
       ;; driver it is about to call, as any REPL would
       (let [loaded (ask "(do (seon.program/load-all! @(:conn sys)) (boolean (resolve 'seon.e2e/loop-turn!)))")
@@ -516,18 +514,11 @@
           (spit f (str (str/replace-first (slurp f) "(:require " "(:require [clojure.set :as restart-set] ")
                        "\n(defn restart-probe [] (restart-set/union #{1} #{2}))\n")))
         (let [restarted (reset! root (ts/start-root! (assoc root0 :args args)))]
-          (is (some? (:port restarted)) (str "restarted: " (slurp (str dir "/runs/root.log"))))
+          (is (some? (:port restarted)) (str "restarted: " (ts/output (str dir "/runs/root.log"))))
           (is (true? (ask "(some? (seon.db/eid @(:conn sys) :var/name 'seon.program-test/restart-probe))"))
               "the changed ns form's alias analyzed: the form using it is main's program")
           (is (= [2 [1 2]] (ask "[(seon.generation/generation) (seon.generation/generations)]"))
-              "the binary older than both merges runs both, caught up at boot on the same main"))
-        (let [g (ask "(my.root/build! sys)")
-              _ (keep-boot!)
-              nxt (reset! root (ts/next-root! @root))]
-          (is (nil? (:error g)) (str "the generation built: " (pr-str g)))
-          (is (some? (:port nxt)) (str "the next generation started: " (slurp (str dir "/runs/root.log"))))
-          (is (= [2 [1 2] (:commit g)] (ask "[(seon.generation/generation) (seon.generation/generations) (:commit (my.root/generation sys))]"))
-              "the new generation runs both, resumed on main holding its generation")))
+              "the binary older than both merges runs both, caught up at boot on the same main")))
       (finally
         (ts/stop-root! @root)
         (keep-boot!)
@@ -541,13 +532,7 @@
             (doseq [l (.listFiles (java.io.File. (str dir "/runs/merge-tests")))
                     :when (str/ends-with? (.getName l) ".log")]
               (sh/sh "cp" (.getPath l) kept))
-            ;; and each generation's build log (bin/worktree --at, bin/build), which the generation's error names
-            (doseq [l (.listFiles (java.io.File. (str dir "/runs/generations")))
-                    :when (str/ends-with? (.getName l) ".build.log")]
-              (sh/sh "cp" (.getPath l) kept))
             (println "the restart test's boot logs kept in" kept)))
-        (doseq [g (.listFiles (java.io.File. (str dir "/runs/generations")))]
-          (sh/sh (str here "/bin/worktree") "--remove-at" (.getPath g)))
         (sh/sh "rm" "-rf" dir))))))
 
 (deftest a-schema-file-round-trips-through-the-program
@@ -1150,7 +1135,7 @@
       (is (zero? (:exit (sh/sh "ln" "-s" (str here "/target") (str main "/target")))))
       (git main "worktree" "add" "-q" "-b" "write-back" wb)
       (reset! root (ts/start-root! (assoc root0 :args args)))
-      (is (some? (:port @root)) (str "the root started: " (slurp (str dir "/runs/root.log"))))
+      (is (some? (:port @root)) (str "the root started: " (ts/output (str dir "/runs/root.log"))))
       (is (false? (has-var? 1)) "before the commit main's program lacks the probe")
       (let [c1 (probe! main 1) r (ask import)]
         (is (= c1 (git wb "rev-parse" "HEAD")) "the write-back branch was fast-forwarded to main by the read")
@@ -1159,7 +1144,7 @@
       (ts/kill-root! @root)
       (let [c2 (probe! main 2)]
         (reset! root (ts/start-root! (assoc root0 :args args)))
-        (is (some? (:port @root)) (str "restarted: " (slurp (str dir "/runs/root.log"))))
+        (is (some? (:port @root)) (str "restarted: " (ts/output (str dir "/runs/root.log"))))
         (is (= c2 (git wb "rev-parse" "HEAD")) "the boot's import fast-forwarded it")
         (is (true? (has-var? 2)) "and main's program holds the var committed while root was down"))
       (let [theirs (probe! wb 3) ours (probe! main 4) r (ask import)]

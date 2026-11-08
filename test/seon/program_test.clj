@@ -1217,6 +1217,8 @@
       (is (contains? moved 'seon.doc-test/every-section-of-the-wiki-has-a-lead) "a test loading the wiki takes the tree")
       (is (contains? moved 'seon.repl-test/the-help-page-runs) "a test reading the wiki through seon.doc/pages takes the tree (it was reused over edits to the help page)")
       (is (contains? moved 'seon.task-files-test/no-shipped-task-is-merged-work) "and one reading the task files through my.root/task-files")
+      ;; 2026-11-08: a process test reading its root's log by slurp took the tree, so a wiki edit reran all of them
+      (is (not (contains? moved 'seon.agent-test/an-agent-ends-when-its-root-is-gone)) "a test reading only its own outputs (seon.test-store/output, its root's log) takes no tree")
       (is (< (* 4 (count moved)) (count a)) (str (count moved) " of " (count a) " tests read the checkout's files from their own namespace: a few, not the 286 whose reach reads one"))
       (is (not-any? #(= "seon.root-test" (namespace %)) moved) "a test running the binary takes no tree"))
     (is (not= (step "t1") (step "t2")) "a step reaching a tree reader still takes the tree")))
