@@ -363,6 +363,21 @@
     (put "README.md" "# README\n\nStart with [AGENTS](AGENTS.md#agents).\n")
     (try (f dir) (finally (clojure.java.shell/sh "rm" "-rf" dir)))))
 
+(deftest a-dead-link-in-the-wiki-is-a-problem-and-the-boot-goes-on
+  ;; root's boot loads the wiki through seon.root/wiki-tx in its boot fact's commit; one link to no
+  ;; section in any page used to end the boot, then refused the whole wiki. Now the boot's load answers
+  ;; every page, and the link is a dead citation my.root/problems shows. On the world with a checkout of a
+  ;; few pages and one broken page (it was a root booted on a checkout of links to this one, 36 s)
+  (with-checkout
+    (fn [co]
+      (spit (str co "/docs/zz-broken.md") "# Broken\n\nIt links to [nowhere](agent.md#nowhere).\n")
+      (let [db0 (mt/world)
+            db (d/db-with db0 (seon.root/wiki-tx db0 co))]
+        (is (every? (set (seon.doc/page-paths db)) ["docs/zz-broken.md" "docs/agent.md" "AGENTS.md"]) "the rest loads, the broken page with it")
+        (is (= [["docs/zz-broken.md#broken" "docs/zz-broken.md#broken links to docs/agent.md#nowhere, which is no section"]]
+               (mapv (juxt :section :message) (problems/dead-citations db {})))
+            "and the link is one dead citation, naming page, section and target")))))
+
 (deftest the-wiki-holds-the-top-level-pages-beside-docs
   ;; one-index step 6: AGENTS.md, BAGGAGE.md and README.md are sections beside docs/'s, so one search and
   ;; one view reach them (:seon.config.root/wiki-dirs). A checkout of a few pages (with-checkout) on the world: the
