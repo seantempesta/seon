@@ -217,7 +217,8 @@
  :seon.agent/task :seon.db/ref
  ;; the turns it may take, agent-wide: its :seon.agent/turn against it. Set at spawn from the config its task's environment names
  ;; (seon.reconcile/desired-env); raised, and the task released again (my.root/run!), it goes on (docs/turn.md#the-cap)
- :seon.agent/max-turns :int
+ ;; at least one turn: the environment it is read into (:seon.task/env) takes a positive count, one definition of it
+ :seon.agent/max-turns pos-int?
  ;; the agent's turn number (docs/turn.md#the-turn-is-a-number): moved by the model turn that starts (seon.turn/act!) in the
  ;; transaction of its model call's first facts, agent-wide and never restarting across wakes; every record takes the number in force
  :seon.agent/turn :int
