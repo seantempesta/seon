@@ -290,15 +290,19 @@
 
 (defn- with-id
   "Hiccup hc with its root element's attributes merged with attrs: a component's key as its id and
-  its render's name as its one class, in place of any class the render gave its root (its style is
-  its var's :seon.render/style: `styled`). A render that drew nothing (nil) stays nothing: no element
-  to hold it, so no part is placed for it (docs/render.md#a-component-answers-hiccup)."
+  its render's name as its first class, then any class the render gave its root (a root's classes were
+  once replaced, so a layout written on a root silently did nothing: a page's messages touched; the model
+  reads no class, seon.render's strip-attrs). Its var's :seon.render/style is added when its html is
+  written (`styled`). A render that drew nothing (nil) stays nothing: no element to hold it, so no part
+  is placed for it (docs/render.md#a-component-answers-hiccup)."
   {:malli/schema [:=> [:cat :any :map] :any]}
   [hc attrs]
   (cond
     (nil? hc) nil
     (and (vector? hc) (keyword? (first hc)))
-    (let [[tag & more] hc]
+    (let [[tag & more] hc
+          own (when (map? (first more)) (:class (first more)))
+          attrs (cond-> attrs (and (:class attrs) (string? own) (not (str/blank? own))) (update :class str " " own))]
       (if (map? (first more)) (into [tag (merge (first more) attrs)] (rest more)) (into [tag attrs] more)))
     :else [:div attrs hc]))
 
