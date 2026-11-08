@@ -8,7 +8,7 @@
 #      imports its source tree (docs/source.md), first fast-forwarding it to main (seon.fx/read-source).
 # ARGS go to the restarted root (bin/root start ARGS): the standing root's profile is one of them
 #   (bin/update --profile deepseek), as it is on every root's command line (docs/config.md#layers).
-# Worktree sessions merge first (root merges their branches into main, docs/merging.md); then bin/update.
+# bin/land runs it after it moves main (docs/merging.md#a-branch-lands-with-binland); the owner runs it by hand too.
 # Every step's exit status counts; the last line is UPDATE OK or UPDATE FAILED.
 setopt pipefail
 MAIN=$(cd "$(dirname "$0")/.." && pwd)
@@ -21,6 +21,10 @@ src=$(sed -nE 's|^[[:space:]]*:seon\.config\.source/root[[:space:]]+(#seon/check
 MERGES=${src:A}; [[ $src == /* ]] || MERGES=$MAIN/$src; MERGES=${MERGES:A}
 [[ -d $MERGES ]] || fail "the write-back tree $MERGES (:seon.config.source/root) does not exist: make it with bin/worktree merges, or fix config/local.edn"
 [[ $(git branch --show-current) == main ]] || fail "the main tree is not on main"
+# bin/land moves main by its ref alone (no checkout): the main tree's index and files follow it here, a two-tree
+# merge from what the index holds to main, which refuses a file someone changed in the main tree
+idx=$(git write-tree) || fail "the main tree's index has unmerged entries"
+[[ $idx == $(git rev-parse 'HEAD^{tree}') ]] || git read-tree -m -u "$idx" HEAD || fail "bringing the main tree's files to main (a file changed there: the main tree stays clean)"
 # submodules are left out: a merge that bumps a pin leaves the checkout behind it, and the
 # submodule step below moves every submodule to main's pins
 git diff --quiet --ignore-submodules && git diff --cached --quiet --ignore-submodules || fail "the main tree has uncommitted changes"
