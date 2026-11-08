@@ -2253,6 +2253,27 @@
     ;; being "root" too (seen live on a demo root, 2026-11-08)
     (is (map? (seon.ctx.status/status db (seon.ctx/agent-ctx db (:db/id (d/entity db [:seon.agent/key "root"]))) {})) "and how its work stands")))
 
+(deftest roots-session-sees-sessions-started-after-it-forked
+  ;; docs/users.md#roots-session: a branch takes main's program, not its data, so a session started on main after root's session forked is
+  ;; on main alone; root's session reads main as its last turn heard it (:seon.agent/main-commit), and so lists it (Context's review; seen
+  ;; on a demo root: \"no new one has appeared yet\")
+  (ts/test-branch!
+    (fn [_ conn]
+      (d/transact conn (seon.task/boot-tx "b1" 1 "sean"))
+      (d/transact conn (seon.root/root-session-tx @conn))
+      (let [fork (d/commit-id @conn)
+            _ (d/transact conn [{:seon.task/id "request/later" :seon.task/ns 'request :seon.task/name "later" :seon.task/plan "Asked after root's session forked."
+                                 :seon.task/kind :user :seon.task/branch :task-request-later :seon.task/outcome :parked}
+                                {:seon.agent/key "b1/a7" :seon.agent/id :a7 :seon.agent/task [:seon.task/id "request/later"]}])
+            main (d/commit-id @conn)
+            ;; the session's branch: main as it forked, and the main its last turn heard
+            ours (d/db-with (d/commit-as-db conn fork) [{:seon.agent/key "root" :seon.agent/main-commit main}])
+            c (seon.ctx/agent-ctx ours (seon.db/eid ours :seon.agent/key "root"))
+            w (r/draw c seon.ctx/changes ours (r/layout-of c) {:model-only true})
+            text (try (pr-str (r/placed-hiccup w (r/page-lists w))) (finally (r/dispose-walk! w)))]
+        (is (nil? (seon.db/eid ours :seon.agent/key "b1/a7")) "the later session is not on the branch")
+        (is (str/includes? text "/agent/b1/a7") "and root's session lists it, from main as it last heard it")))))
+
 (deftest a-users-page-moves-with-main
   ;; docs/render.md#a-page-is-a-kept-walk: a user's page is a kept walk, as root's is: a move of main draws what it reached, so an agent it starts appears on a page already open
   (let [db0 (sessions-db "b2" [["b2/a1" :a1 :running "seon.print/a-long-string" :running :task-a]])
