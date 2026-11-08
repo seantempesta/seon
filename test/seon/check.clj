@@ -540,7 +540,7 @@
                 (and (= :seon.repl/ticks-spent (get-in (first r11) [:ex :seon.error/type]))
                      (<= 100000000 (get-in (first r11) [:ex :ticks])) (= "8" (printed (second r11))))
                 "printed output comes back as :out; a busy thread blocks the test fork instead of breaking it"
-                (and (= "hello from :a3\n" (:seon.print/code (:out r10))) (= :seon.test/fork-refused (:seon.error/type t10)) (re-find #"Chez threads active" (:seon.error/message t10)))
+                (and (= (str "hello from " x "\n") (:seon.print/code (:out r10))) (= :seon.test/fork-refused (:seon.error/type t10)) (re-find #"Chez threads active" (:seon.error/message t10)))
                 "the fork server dies: agents keep working, a new server forks the next agent (whose tick budget works)"
                 (and (= "7" (printed r7)) (= "360" (printed (first r8)))
                      (= :seon.repl/ticks-spent (get-in (second r8) [:ex :seon.error/type])) (= ":after" (printed (nth r8 2))))}}))))
@@ -621,7 +621,8 @@
         th-ready (thread-diff (declared-threads sys) (threads))
         _ (out! "ready in " (lib/r2 t-ready) " ms: " (frequencies (map #(get-in (c/state sys) [:agents % :status]) ids)))
         work (fn [id]
-               (let [k (subs (name id) 1)
+               (let [;; a number for its code (the multiplier, its namespace): its place among the agents, since an id is a digest
+                     k (inc (.indexOf ids id))
                      t1 (profile/now-ns)
                      r @(c/submit! sys id (str "(ns app.s" k " (:require [clojure.test :refer [deftest is]] [my.db :refer [q transact!]])) (defn f {:malli/schema [:=> [:cat :int] :int]} [x] (* x " k "))
                                                 (deftest f-test (is (= (* 2 " k ") (f 2))))
@@ -816,7 +817,8 @@
           timed (fn [id form] (let [t (profile/now-ns) r @(c/submit! sys id form)] [r (/ (- (profile/now-ns) t) 1e6)]))
           _ (reset! phase :eval)
           evals (vec (pmap (fn [id]
-                             (let [k (subs (name id) 1)
+                             (let [;; a number for its code: its place among the agents, since an id is a digest
+                                   k (inc (.indexOf ids id))
                                    forms [(str "(ns app.w" k " (:require [clojure.test :refer [deftest is]] [my.db :refer [q transact!]])) (defn f {:malli/schema [:=> [:cat :int] :int]} [x] (* x " k "))
                                                 (deftest f-test (is (= (* 2 " k ") (f 2)))) (f 21)")
                                         "(count (my.db/q '[:find ?e :where [?e :var/name]]))"
