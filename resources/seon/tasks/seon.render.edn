@@ -241,7 +241,9 @@ The change, in those functions only:
 3. seon.render.ui: the reply's steps (reply-hiccup's :ol of eval-items, and the turn's evals of other hands) are a component, seon.render.ui/turn-steps, carrying :seon.render/list true, keyed by the turn's call.
 The model's reading is unchanged: placed-hiccup walks the same lists and reads each member as before, in order (proof below).
 
-Cost (Optimization's minimum, rule 4): one new eval reruns its component and its list's append, the commit under 5 KB, the patch one append of that eval's html (bytes <= 1.2x its html). STOP: e=100 > 2x e=10.
+Cost (Optimization, 2026-11-08): one new eval in a turn of e evals renders that eval's hiccup once (O(its size)), hashes it for its unit's :rev, and sends one append of its html plus a frame of about 100 B; nothing of the other e evals is read, rendered or hashed, and the turn's unit does not redraw. Measured cold, no render cache helping. STOP, three lines: ticks at e=100 > 2x e=10; bytes sent > 2x the new eval's own html (frame included); the turn's unit :rev moved by an added eval.
+
+Readers of a unit's :rev to keep right (Optimization): seon.render.proc's debug view d-parts unit hashes the units of seon.render/page-lists' containers, so a turn's steps list must be among page-lists or @ctx's parts view goes stale; the side units by #c-side, which turn steps never join; seon.render.ui's unit :input {:rev}, the morph key, right when each member is its own unit.
 
 Proofs, red first: a new eval in a turn of 10 and of 100 evals is one append of its own html, the turn not resent (cost proof, bytes flat); the model's messages for a turn are the same before and after (the wire, each eval in order); a page opened cold shows each turn with its evals in order; a turn's list member that changes (an eval opened) is one frag of that eval."
   :seon.task/proofs #{seon.render-cost-test/a-new-eval-sends-one-append-and-one-edit
