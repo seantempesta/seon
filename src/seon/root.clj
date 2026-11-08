@@ -1074,14 +1074,15 @@
 
 (defn root-session-tx
   "Root's session at boot, the ordinary way (seon.template/request-tx of the chat template): the task request/root, its agent root's own
-  entity (key \"root\", by the tempid \"root\" seon.task/boot-tx names it by in the same transaction), parked until a message wakes it, so a
-  boot makes no model call. See docs/users.md#roots-session."
+  entity by its key, which the boot fact wrote (seon.task/boot-tx), so it is written after it; parked until a message wakes it, so a
+  boot makes no model call. No tempid names root: its entity may be one an earlier boot made, and a tempid's issued id is not it. See
+  docs/users.md#roots-session."
   {:malli/schema [:=> [:cat :seon.host/db] [:vector :any]]}
   [db]
   (let [tx (tpl/request-tx db (tpl/from (tpl/templates :user) {:seon.task/ns 'request :seon.task/name "root" :seon.task/plan root-session-plan}))]
     (if (contract/error? tx)
       (throw (ex-info (str "root's session task was refused: " (:seon.error/message tx)) tx))
-      (conj (vec tx) {:seon.task/id "request/root" :seon.task/agent "root" :seon.task/outcome :parked}))))
+      (conj (vec tx) {:seon.task/id "request/root" :seon.task/agent [:seon.agent/key "root"] :seon.task/outcome :parked}))))
 
 (defn wiki-boot-tx
   "The wiki's part of the boot fact's commit: wiki-tx, with the digest of what it read (wiki-digest) on root's
@@ -1307,11 +1308,14 @@
     ;; with it, how the root before it on main ended (its stop fact, or :unclean)
     (let [prev (previous-end db)
           r @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (cond-> (-> (task/boot-tx boot max-running (person)) (into (task/earlier-agents-tx db)) (into (cfg/facts config in-force-sources))
-                                                                                  (into (wiki-boot-tx db (cfg/checkout) #(wiki-baseline sys (cfg/checkout) "docs"))) (into (root-session-tx db)))
+                                                                                  (into (wiki-boot-tx db (cfg/checkout) #(wiki-baseline sys (cfg/checkout) "docs"))))
                                                                          prev (conj {:seon.root/id :root :seon.root/previous-end prev})
                                                                          ;; the test that started this boot (a test's main is its own: no other boot resumes it)
                                                                          started-by (conj {:seon.root/id :root :seon.root/started-by started-by}))}})]
-      (when (contract/error? r) (throw (ex-info (str "root's boot fact was refused: " (:seon.error/message r)) r))))
+      (when (contract/error? r) (throw (ex-info (str "root's boot fact was refused: " (:seon.error/message r)) r)))
+      ;; root's session's task names root by the key the boot fact wrote (docs/users.md#roots-session)
+      (let [r @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (root-session-tx db)}})]
+        (when (contract/error? r) (throw (ex-info (str "root's session task was refused: " (:seon.error/message r)) r)))))
     (when source (import-source! sys source))
     ;; what the first agent's fork would wait for is done now, as main stands (seon.fork-server/preload); nothing waits on its answer
     (call! sys {:op :fs :req {:op :preload :t (:max-tx @conn)}})
