@@ -2231,11 +2231,11 @@
   (let [db0 (booted)
         db (d/db-with db0 [{:seon.task/id "request/greet" :seon.task/ns 'request :seon.task/name "greet" :seon.task/plan "Say hi.\nOne line." :seon.task/kind :user
                             :seon.task/branch :task-request-greet :seon.task/outcome :parked}
-                           {:seon.agent/key "b1/a2" :seon.agent/id :a2 :seon.agent/root [:seon.root/id :root] :seon.agent/task [:seon.task/id "request/greet"]}
+                           {:seon.agent/key "b1/a2" :seon.agent/root [:seon.root/id :root] :seon.agent/task [:seon.task/id "request/greet"]}
                            ;; a session of an earlier boot: a new boot unlinks it from root (seon.task/earlier-agents-tx), and root's session still sees it
                            {:seon.task/id "request/older" :seon.task/ns 'request :seon.task/name "older" :seon.task/plan "An older ask." :seon.task/kind :user
                             :seon.task/branch :task-request-older :seon.task/outcome :parked}
-                           {:seon.agent/key "b0/a9" :seon.agent/id :a9 :seon.agent/task [:seon.task/id "request/older"]}
+                           {:seon.agent/key "b0/a9" :seon.agent/task [:seon.task/id "request/older"]}
                            ;; the person asks root's session something, as the home box will
                            {:seon.message/from "sean" :seon.message/to [[:seon.agent/key "root"]] :seon.message/body "What is running?" :seon.message/sent-ms 1}])
         db (d/db-with db [{:seon.agent/key "root" :seon.agent/task [:seon.task/id "request/root"]}])
@@ -2264,7 +2264,7 @@
       (let [fork (d/commit-id @conn)
             _ (d/transact conn [{:seon.task/id "request/later" :seon.task/ns 'request :seon.task/name "later" :seon.task/plan "Asked after root's session forked."
                                  :seon.task/kind :user :seon.task/branch :task-request-later :seon.task/outcome :parked}
-                                {:seon.agent/key "b1/a7" :seon.agent/id :a7 :seon.agent/task [:seon.task/id "request/later"]}])
+                                {:seon.agent/key "b1/a7" :seon.agent/task [:seon.task/id "request/later"]}])
             main (d/commit-id @conn)
             ;; the session's branch: main as it forked, and the main its last turn heard
             ours (d/db-with (d/commit-as-db conn fork) [{:seon.agent/key "root" :seon.agent/main-commit main}])
