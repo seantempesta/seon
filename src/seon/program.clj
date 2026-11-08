@@ -1393,8 +1393,10 @@
   (conservative: a missed name reruns more, never reuses a stale green). Measured: with
   seon.config/baked-schema-forms (a macro every contracted form expands) counted, 327 of 368
   tests took the tree, so any edit anywhere reran them; with seon.test-store/output (a run's own
-  log or a child's mark) uncounted, 7 of the 10 slow process tests took it, so a wiki edit reran them."
-  (conj (set (keys env-class-readers)) 'seon.config/baked-schema-forms 'seon.test-store/output))
+  log or a child's mark) uncounted, 7 of the 10 slow process tests took it, so a wiki edit reran them;
+  with seon.config/baked-shipped-text (the shipped config file, whose values a test takes key by key) counted,
+  1,506 of 1,552 tests took every file class, so a bin/ or schema-resource edit reran 1,517 (2026-11-08)."
+  (conj (set (keys env-class-readers)) 'seon.config/baked-schema-forms 'seon.config/baked-shipped-text 'seon.test-store/output))
 
 (def config-resolvers
   "seon.config's resolvers, which read the key they are passed (seon.config/value, resolve and
@@ -1846,10 +1848,13 @@
       (let [cs (distinct (map comp-of (into (vec ids) (mapcat #(get plain (:ns (rows %)))) ids)))
             ;; the config keys its reach reads (config-reads) that the config holds
             ks (into #{} (comp (mapcat #(:config (flags %))) (filter line)) cs)
-            ;; a reader of files or a process (the tree, a root, the binary) can read any class of
-            ;; files (:seon.env/*); a pin it takes by its reach, as any test does: Jolt's runtime
-            ;; core and Chez, which every process runs on, are the forks' suites' and the daily full run's
-            ks (if (some #(let [f (flags %)] (or (:reads f) (:proc f) (:bin f))) cs) (into ks env-keys) ks)
+            ;; a process (a root, an agent, the binary) can read any class of files (:seon.env/*): it runs
+            ;; bin/ scripts and loads system.edn, web/ and the schema resources. A form reading files takes
+            ;; only the classes whose readers it reaches (env-class-readers): taking every class for a read
+            ;; of a port file or a wiki anchor made a bin/ edit rerun 882 of 1,566 tests (2026-11-08).
+            ;; A pin it takes by its reach, as any test does: Jolt's runtime core and Chez, which every
+            ;; process runs on, are the forks' suites' and the daily full run's
+            ks (if (some #(let [f (flags %)] (or (:proc f) (:bin f))) cs) (into ks env-keys) ks)
             ;; a step's src is :code; the src class is test/'s too, which a step does not run (every step reaches seon.contract/uncontracted)
             src? (and roots? (some #(contains? (:config (flags %)) :seon.env/src) cs))
             ks (if roots? (disj ks :seon.env/src) ks)]
