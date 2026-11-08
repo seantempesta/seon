@@ -390,8 +390,8 @@
 
 (defn- agent-view
   "View's page when it names an agent (entity eid on main db): its components as its process drew
-  them (ask-parts, seon.repl/render-ctx: the units of its walk), else, with no process to ask or none
-  that answered, as root draws them from its branch (seon.ctx/build, drawn once by the same walk
+  them (ask-parts, seon.repl/render-ctx: the units of its walk) at the branch root read or later, else, with no process
+  to ask, none that answered or one still busy with its run, as root draws them from its branch (seon.ctx/build, drawn once by the same walk
   and layout: seon.render/draw) with main's renders, the page saying so. Everything the page shows
   of the agent is its ctx: its run's status and verdict reach its branch by take!, never read here
   on main. Root's agents (the sidebar) are root's chrome; its input (seon.render.ui/agent-input)."
@@ -401,8 +401,11 @@
         chat? (vector? view)
         [e id] (agent-of db (if chat? (second view) view))
         held (get-in st [:parts id])
-        own? (and chat? (live? st id) (vector? (:units held)))
         berr (get-in st [:branches view :error])
+        ;; its process's drawing, when it drew at the branch root read or later: a process works its whole run as one
+        ;; request, so until it answers root draws what its branch holds now (a person's message, each eval as it lands)
+        own? (and chat? (live? st id) (vector? (:units held))
+                  (<= (or (some-> (get-in st [:branches view :db]) :max-tx) 0) (or (:t held) 0)))
         ;; an agent with no branch (the user's, an example) is read from main, its reads tracked as the page's own
         branchless? (nil? (:seon.agent/branch e))
         bdb (if branchless? db (get-in st [:branches view :db]))
@@ -938,7 +941,7 @@
     (and (vector? kind) (= :parts (first kind)))
     (let [id (second kind)
           views (filter #(and (= :chat (first-of %)) (= id (second (agent-of (:main-db st) %)))) (into (:watch st #{}) (concat (vals (:waiting st)) (:kf-wanted st))))]
-      (pass (-> (update-in st [:parts id] #(if (seon.contract/error? r) (-> % (dissoc :units) (assoc :error r)) (-> % (dissoc :error) (assoc :units (:units r)))))
+      (pass (-> (update-in st [:parts id] #(if (seon.contract/error? r) (-> % (dissoc :units :t) (assoc :error r)) (-> % (dissoc :error) (assoc :units (:units r) :t (:t r)))))
                 (update :dirty (fnil into #{}) views))
             o))
     ;; an agent's branch db, the one read of it every view of the agent shows; a branch that is gone
