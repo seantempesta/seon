@@ -543,6 +543,16 @@
       (is (= (:classes (seon.problems/health main2)) (:classes (:health @(get-in st2 [:root-walk :a])))) "the held health is health of the new main")
       (r/dispose-walk! (get-in st2 [:root-walk :w])))))))
 
+(deftest the-problems-tile-counts-what-still-holds
+  ;; Optimization, 2026-11-08: 7888's tile said "effect 4" for a :seon.vector/helper-died row whose cause had passed (:open? false,
+  ;; seon.problems/closed?), as health does not: the tile draws and counts a class's open rows, and a class with none is not drawn
+  (let [h {:t 9 :classes {:effect {:n 4 :rows [(row {:type :seon.vector/helper-died :count 4 :message "helper died" :open? false})]}
+                          :eval {:n 1 :rows [(row {:type :seon.instrument/arity-error :count 1 :message "arity"})]}}}
+        html (h/html (ui/problems-tile {:seon.ctx/ctx {:health h}}))]
+    (is (not (str/includes? html "helper died")) "a row whose cause passed is not drawn")
+    (is (not (str/includes? html "effect")) "nor its class, which holds no open row")
+    (is (str/includes? html "arity") "an open row is")))
+
 (deftest an-agents-page-draws-the-problems-of-its-own-task
   ;; task seon.problems/health-in-context: its task's open problems, by the report's render, beside the
   ;; task; none when none is open; another task's and main's classes are not drawn
@@ -1772,6 +1782,16 @@
         html (get-in st [:views [:chat :a3] :units "conversation-turn-1" :html])
         tag (re-find #"<details[^>]*id=\"eval-e3\"[^>]*>" html)]
     (is (re-find #" open" tag) (str "drawn open: " tag))))
+
+(deftest an-agents-chat-places-what-its-model-reads-beside-it
+  ;; owner, 2026-11-08: "What happened to the sidebar on the right with all the rendered context parts? Docs that get pulled in,
+  ;; the task, etc?": the task's list (seon.render.ui/task-list), which the model reads as parts, has its place on the chat page,
+  ;; the same components, so a person sees what the agent was told
+  (let [[main branch _] (paged-dbs)
+        [st _] (#'p/pass-view (proc-state main branch) [:chat :a3])
+        skel (get-in st [:views [:chat :a3] :skeleton])]
+    (is (str/includes? skel "id=\"p-task\"") "the page has the task's list's place")
+    (is (str/includes? skel "<!--s:task-->") "and the task's component in it")))
 
 (deftest a-new-member-is-an-append
   ;; a keyed component new in its list, its parent's output otherwise unchanged, is sent as an append
