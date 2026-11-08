@@ -1936,6 +1936,12 @@
       (let [r (run "(do (print \"quiet\") 2)" {:origin :outside} nil)]
         (is (= "quiet" (:seon.print/code (:out r))))
         (is (empty? (filter #(= :stream (:op %)) (frames)))))
+      ;; every one-argument write a Writer takes: a char[], a char and an int each reach the record and the stream as their text
+      (let [r (run "(do (.write *out* (char-array \"ab\")) (.write *out* (int \\c)) (print \\d) 4)" call nil)
+            outs (streamed (frames) "out")]
+        (is (= 4 (:value r)) "a char[] write does not throw")
+        (is (= "abcd" (:seon.print/code (:out r))))
+        (is (= "abcd" (apply str (map :text (remove :end outs))))))
       ;; a write from another OS thread is recorded and never sent (frames can interleave across threads)
       (let [r (run "(do (print \"a\") @(future (print \"b\")) (print \"c\") 3)" call nil)
             outs (streamed (frames) "out")]

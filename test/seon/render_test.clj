@@ -1521,7 +1521,7 @@
                                   {:seon.agent/key k :seon.agent/turn 2}
                                   {:seon.model-call/id (seon.lib/call-id k 2) :seon.model-call/agent {:seon.agent/key k} :seon.model-call/n 2 :seon.model-call/origin :model
                                    ;; answered with nothing to say (a call with only its basis is one in flight)
-                                   :seon.model-call/reply "" :seon.model-call/finish "stop"
+                                   :seon.model-call/reply "" :seon.model-call/finish "stop" :seon.model-call/forms 0
                                    :seon.model-call/basis {:commit #uuid "00000000-0000-0000-0000-000000000000" :task "demo/f" :turn 2 :max-turns 8 :origin :model}}
                                   ;; the proof's verdict, as the test run recorded it on the proof's var entity
                                   {:var/name 'demo/f-test :seon.test/status :red
@@ -1764,8 +1764,9 @@
     (r/dispose-walk! w)))
 
 (deftest a-key-is-its-id-one-to-one
-  ;; an element id names one component: two keys never write one id
-  (is (= "x-a.b_2Fc" (r/key-id ['x 'a.b/c])))
+  ;; an element id names one component: two keys never write one id; none holds a . (a #id selector reads it as a class)
+  (is (= "x-a_2Eb_2Fc" (r/key-id ['x 'a.b/c])))
+  (is (not (str/includes? (r/key-id ['cited 'seon.render.ui/status "a.b"]) ".")))
   (is (not= (r/key-id ['x 'a.b/c]) (r/key-id ['x 'a_b/c]) (r/key-id ['x "a.b/c"]))))
 
 (deftest a-dead-agents-eval-opens
@@ -2123,7 +2124,7 @@
         db (d/db-with db [{:seon.agent/key "sean" :seon.user/name "sean" :seon.agent/agents started}])
         sean (d/entity db [:seon.user/name "sean"])
         c {:started (into {} (for [e started] [e {:db/id e}]))}
-        cards (nth (ui/started-cards {:seon.ctx/ctx c :seon.db/db db}) 2)
+        cards (filter #(and (vector? %) (var? (first %))) (tree-seq coll? seq (ui/started-cards {:seon.ctx/ctx c :seon.db/db db})))
         hrefs-in-order (fn [html] (map second (re-seq #"href=\"([^\"]+)\"" html)))]
     (is (= (:db/id sean) (#'p/session-of db "sean")) "its name finds it, as an address")
     (is (= [#'ui/session-card] (distinct (map first cards))) "each drawn by the one card's render")
@@ -2702,7 +2703,7 @@
   (let [[db aid] (cited-world)
         k (:seon.agent/key (d/pull db [:seon.agent/key] aid))
         db (d/db-with db [{:db/id aid :seon.agent/turn 1}
-                          {:seon.model-call/id (seon.lib/call-id k 1) :seon.model-call/agent aid :seon.model-call/n 1 :seon.model-call/origin :model :seon.model-call/reply "Found **it**."}
+                          {:seon.model-call/id (seon.lib/call-id k 1) :seon.model-call/agent aid :seon.model-call/n 1 :seon.model-call/origin :model :seon.model-call/reply "Found **it**." :seon.model-call/forms 1}
                           {:seon.eval/id "e2" :seon.eval/agent aid :seon.eval/by "seon" :seon.eval/call (seon.task/call-ref k 1) :seon.eval/code "(my.render/render-ctx)" :seon.eval/response {:handle 'result/e2 :value 1}}
                           {:seon.eval/id "e3" :seon.eval/agent aid :seon.eval/by "a1" :seon.eval/call (seon.task/call-ref k 1) :seon.eval/call-id "c1" :seon.eval/intent "Run the proofs." :seon.eval/code "(prove-it)"
                            :seon.eval/schema :seon.test/proved :seon.eval/response {:handle 'result/e3 :value {:proofs {'a/b :green}}}}
@@ -3160,32 +3161,37 @@
       (is (= "--set" (:seon.config.agent/max-running sources)))
       (is (str/includes? html "from --set") "the panel draws the layer main records")))))
 
-(deftest a-call-in-flight-draws-its-stream-element-until-its-reply
-  ;; docs/render.md#in-flight-output-streams: while the model answers, the turn draws one busy element, its id the call's,
-  ;; for the page alone; the committed reply, or its error, draws in its place, and an outside call never has one
+(deftest a-call-in-flight-draws-its-stream-element-until-its-evals-ran
+  ;; docs/render.md#in-flight-output-streams: from the call's commit until :seon.model-call/forms (its evals all ran) or its
+  ;; error, the turn draws one element, its id the call's, busy, kept through redraws (data-ignore-morph), for the page alone;
+  ;; the committed reply and evals draw beside it; an outside call never has one
   (let [[db aid] (cited-world)
         k (:seon.agent/key (d/pull db [:seon.agent/key] aid))
         cid (seon.lib/call-id k 1)
-        at (fn [db] (h/html (ui/conversation-turn {:seon.ctx/ctx (:tree (seon.ctx/build db aid :b)) :seon.db/db db :key 1})))
+        turn (fn [db] (ui/conversation-turn {:seon.ctx/ctx (:tree (seon.ctx/build db aid :b)) :seon.db/db db :key 1}))
+        at (fn [db] (h/html (turn db)))
         open (d/db-with db [{:db/id aid :seon.agent/turn 1}
                             {:seon.model-call/id cid :seon.model-call/agent aid :seon.model-call/n 1 :seon.model-call/origin :model}])
         busy (at open)
         sel (seon.render/key-id [cid])]
     (is (str/includes? busy (str "id=\"" sel "\"")) (str "the in-flight element, its id the call's: " busy))
     (is (str/includes? busy "aria-busy=\"true\"") "busy while the model answers")
-    (is (empty? (mapcat second (seon.render/hiccup-wire (ui/conversation-turn {:seon.ctx/ctx (:tree (seon.ctx/build open aid :b)) :seon.db/db open :key 1}))))
-        "the model reads nothing of it")
-    (let [done (at (d/db-with open [{:seon.model-call/id cid :seon.model-call/reply "Found it."}]))]
-      (is (str/includes? done "Found it.") "the committed reply")
-      (is (not (str/includes? done "aria-busy")) "in its place"))
+    (is (str/includes? busy "data-ignore-morph") "kept as it is through the turn's redraws")
+    (is (empty? (mapcat second (seon.render/hiccup-wire (turn open)))) "the model reads nothing of it")
+    (let [replied (d/db-with open [{:seon.model-call/id cid :seon.model-call/reply "Found it."}])]
+      (is (str/includes? (at replied) "Found it.") "the committed reply draws while its evals run")
+      (is (str/includes? (at replied) "aria-busy") "beside the element, until its evals have run")
+      (is (not (str/includes? (at (d/db-with replied [{:seon.model-call/id cid :seon.model-call/forms 1}])) "aria-busy"))
+          ":forms ends it"))
     (is (not (str/includes? (str (at (d/db-with open [{:seon.model-call/id cid :seon.model-call/error {:seon.error/type :seon.model/transport :seon.error/message "gone"}}]))) "aria-busy"))
         "an error committed ends it too")
     (is (not (str/includes? (str (at (d/db-with open [{:seon.model-call/id cid :seon.model-call/origin :outside}]))) "aria-busy"))
         "an outside agent's call streams nothing")))
 
-(deftest a-reply-of-only-tool-calls-is-not-in-flight
-  ;; docs/render.md#in-flight-output-streams: a call answered with tool calls alone commits evals and no reply text;
-  ;; its turn draws those evals, never the in-flight element (found by Optimization: they vanished from the page and the wire)
+(deftest a-call-in-flight-keeps-its-committed-evals
+  ;; docs/render.md#in-flight-output-streams: a call answered with tool calls alone commits evals and no reply text; while
+  ;; it is in flight its turn draws those evals, and the in-flight element beside them, never in their place (found by
+  ;; Optimization: they vanished from the page and the wire)
   (let [[db aid] (cited-world)
         k (:seon.agent/key (d/pull db [:seon.agent/key] aid))
         db (d/db-with db [{:db/id aid :seon.agent/turn 1}
@@ -3194,5 +3200,34 @@
                            :seon.eval/intent "Run the proofs." :seon.eval/code "(prove-it)" :seon.eval/response {:handle 'result/e3 :value 1}}])
         turn (ui/conversation-turn {:seon.ctx/ctx (:tree (seon.ctx/build db aid :b)) :seon.db/db db :key 1})
         reply (some #(when (= :section (first %)) %) (drop 2 turn))]
-    (is (= ["e3"] (map (comp :key second) (last (last reply)))) (str "its eval is the reply's step: " (pr-str reply)))
-    (is (not (str/includes? (pr-str turn) "aria-busy")) "and it is not in flight")))
+    (is (some #(and (vector? %) (= :ol (first %)) (= ["e3"] (map (comp :key second) (second (rest %))))) reply)
+        (str "its eval is the reply's step: " (pr-str reply)))
+    (is (str/includes? (pr-str turn) "aria-busy") "beside the in-flight element")
+    (is (some #(and (vector? %) (map? (second %)) (= "seon-stream" (:class (second %))) (= "page" (:wire/for (second %)))) (tree-seq coll? seq turn))
+        "the element is the page's alone")))
+
+(deftest a-components-root-keeps-its-classes
+  ;; owner, 2026-11-08: the home page's messages touched; a root's own classes (its layout, seon-stack's gap) were replaced
+  ;; by the render's name, so a class written on a component's root did nothing. Kept after the name; the model reads none.
+  (is (= [:section {:class "user-messages seon-stack" :id "k"} "x"] (#'r/with-id [:section {:class "seon-stack"} "x"] {:class "user-messages" :id "k"})))
+  (is (= [:section {:class "chat-message" :id "k"} "x"] (#'r/with-id [:section {} "x"] {:class "chat-message" :id "k"})) "no class of its own: the name alone")
+  (is (nil? (:class (#'r/strip-attrs {:class "user-messages seon-stack" :id "k"}))) "the model's reading carries no class"))
+
+(deftest a-users-home-is-tiles-by-what-needs-them
+  ;; owner, 2026-11-08: the home page is a tile per session, those that need the person first, each saying what its agent last told
+  ;; them, not a feed of every message
+  (let [db (sessions-db "b2" [["b2/a1" :a1 :running "seon.print/a-long-string" :running :task-a] ["b2/a2" :a2 :idle "x/asks" :parked :task-b]])
+        started (mapv #(:db/id (d/entity db [:seon.agent/key %])) ["b2/a1" "b2/a2"])
+        db (d/db-with db [{:seon.agent/key "sean" :seon.user/name "sean" :seon.agent/agents started}
+                          {:seon.task/id "x/asks" :seon.task/reason "Which of the two names should the function take?"}])
+        c {:started (into {} (for [e started] [e {:db/id e}]))}
+        hc (ui/started-cards {:seon.ctx/ctx c :seon.db/db db})
+        text (pr-str hc)
+        tiles (keep #(when (and (vector? %) (= #'ui/session-card (first %))) (nth % 2)) (tree-seq coll? seq hc))]
+    (is (< (str/index-of text "Needs you") (str/index-of text "Working")) "what needs the person comes first")
+    (is (= ["b2/a2" "b2/a1"] tiles) "its tile first")
+    (let [tile (h/html (ui/session-card {:seon.db/db db} "b2/a2"))]
+      (is (str/includes? tile "Which of the two names should the function take?") (str "the tile says what its agent asked, while it waits: " tile))
+      (is (str/includes? tile "class=\"said\"") "in the tile's own text"))
+    (is (not-any? #(= "user-messages" %) (map #(when (var? %) (name (symbol %))) (tree-seq coll? seq (ui/user-ctx {:seon.ctx/ctx {}}))))
+        "and the page has no feed of every message")))

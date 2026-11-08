@@ -4,25 +4,30 @@
   (:require [clojure.test :refer [deftest]] [clojure.core.async :as a] [seon.cost :as cost] [seon.web :as w]))
 
 (defn stream-input
-  "The proof's input at n: the web proc with one tab of the agent's chat, its stream already n characters long and
-  seen by that tab (its channel drops what it can't hold, so every measured call offers as the first did), and the
-  next message of 20 characters: [st m]."
+  "The proof's input at n: n hundred characters of text (so each size's work is well above a tick quantum), the web proc with one tab of the agent's chat whose page has the call's in-flight element (its
+  channel drops what it can't hold, so every measured call offers as the first did), and the next message of the part:
+  all its n characters so far. [st m]."
   [n]
   (let [st (#'w/web-proc {:port 0})
         [st _] (#'w/web-proc st :from-render {:op :index :agents {:a1 {:pid 1 :branch :agent-1 :status :busy :key "b1/a1"}}})
         [st _] (#'w/web-proc st :http {:op :open :view [:chat :a1] :ch (a/chan (a/dropping-buffer 1))})
-        st (first (#'w/web-proc st :from-render {:op :keyframe :view [:chat :a1] :html "<div id=\"app\"></div>"}))
+        st (first (#'w/web-proc st :from-render {:op :keyframe :view [:chat :a1]
+                                                  :html "<div id=\"app\"><div id=\"b1_2Fa1_2F3\" class=\"seon-stream\" data-stream-in=\"b1/a1/3\"></div></div>"}))
         m {:stream "b1/a1/3/0/message" :in "b1/a1/3" :part "message" :agent "b1/a1"}
-        st (#'w/stream-in st (assoc m :offset 0 :text (apply str (repeat n "x"))))]
-    [st (assoc m :offset n :text "Reading the task now")]))
+        st (#'w/stream-in st (assoc m :text "x"))]
+    ;; text as a reply has it: words, a tag and quotes now and then, which the escape copies
+    [st (assoc m :text (apply str (take (* 100 n) (cycle "Reading the <task> now, as \"asked\". "))))]))
 
-(deftest a-stream-message-costs-its-bytes-at-300
-  ;; Optimization's minimum (2026-11-08): an offset check and map update, one Datastar append frame O(text), an offer per
-  ;; watching tab; nothing that grows with what the stream already sent (an append that resent the text so far would)
+(deftest a-stream-message-costs-its-text
+  ;; owner, 2026-11-08: "the simpler for us option that is always right", the feed compressed: each message draws the
+  ;; call's element whole with the text so far, so its work is linear in that text and flat in everything else
   (cost/proof {:of 'seon.web/stream-in :input 'seon.web-cost-test/stream-input
-               :n "characters the stream already sent, one tab watching"
-               :work "per message: the stream's held offset read and moved, the part's selector made from its id, the text escaped and framed once (one Datastar append), one offer to the one tab and its seen set; none per character already sent"
-               :growth :constant
-               ;; measured 2026-11-08: 3,390 ticks, 21,328 B and 6 calls at 10, 100, 300 and 1,000 characters already sent
-               :fixed {:ticks 3400 :bytes 21500 :calls 6}
-               :sizes [10 100 300 1000]}))
+               :n "hundreds of characters of the part so far, one tab watching"
+               :work "the part's latest text held; the call's element drawn once (seon.render.ui/stream-container: the text escaped and written into one element), framed as one Datastar event, offered to the one tab; per character: the escape, the write and the frame"
+               :growth :linear
+               ;; measured 2026-11-08 (one-pass escape): 10,235 / 16,133 / 32,590 / 84,944 ticks and 63 / 105 / 223 / 637 KB at
+               ;; 300 / 1,000 / 3,000 / 10,000 characters, 76 calls each (the container's draw); before the escape was one pass, 54
+               ;; ticks and 96 B a character
+               :per-n {:ticks 800 :bytes 6000}
+               :fixed {:ticks 8000 :bytes 45500 :calls 76}
+               :sizes [3 10 30 100]}))

@@ -369,7 +369,7 @@
   (when (#{"intent" "code"} field) [(str call "/" k "/eval-0/" field) field]))
 
 (defn- say
-  "st with a stream message appended to msgs for id, part part of call (:in, :part, as data, so no reader splits an id): text (offset the chars sent before it), :open (id starts, empty) or
+  "st with a stream message appended to msgs for id, part part of call (:in, :part, as data, so no reader splits an id): text (sent as the part's whole text so far, the vector of its pieces), :open (id starts, empty) or
   :end. Answers [st' msgs'] (st, msgs when the state streams nothing). See docs/flow.md#effects-one-owner-and-its-workers-per-kind."
   {:malli/schema [:=> [:cat [:tuple :map [:vector :map]] :string :string [:or :string [:enum :open :end]]] [:tuple :map [:vector :map]]]}
   [[st msgs] id part what]

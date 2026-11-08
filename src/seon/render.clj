@@ -238,10 +238,11 @@
     (into [(symbol f)] (map child-key) children)))
 
 (defn- id-safe
-  "Text s as part of an element id, one to one: letters, digits, . and - as themselves, every other
-  character _ and its code in hex (a.b/c -> a.b_2Fc, a_b -> a_5Fb)."
+  "Text s as part of an element id, one to one: letters, digits and - as themselves, every other
+  character _ and its code in hex (a.b/c -> a_2Eb_2Fc, a_b -> a_5Fb). A . is escaped too: #id selectors read it as a
+  class (Datastar's patches select by #id). See docs/render.md#in-flight-output-streams."
   {:malli/schema [:=> [:cat :string] :string]}
-  [s] (apply str (map #(if (or (Character/isLetterOrDigit ^char %) (= \. %) (= \- %)) % (format "_%02X" (int %))) s)))
+  [s] (apply str (map #(if (or (Character/isLetterOrDigit ^char %) (= \- %)) % (format "_%02X" (int %))) s)))
 
 (defn key-id
   "Key k as its component's root element id, one to one: its render's name and the name of what it shows (seon.render.ui/eval-item of eval e12 ->
@@ -289,15 +290,19 @@
 
 (defn- with-id
   "Hiccup hc with its root element's attributes merged with attrs: a component's key as its id and
-  its render's name as its one class, in place of any class the render gave its root (its style is
-  its var's :seon.render/style: `styled`). A render that drew nothing (nil) stays nothing: no element
-  to hold it, so no part is placed for it (docs/render.md#a-component-answers-hiccup)."
+  its render's name as its first class, then any class the render gave its root (a root's classes were
+  once replaced, so a layout written on a root silently did nothing: a page's messages touched; the model
+  reads no class, seon.render's strip-attrs). Its var's :seon.render/style is added when its html is
+  written (`styled`). A render that drew nothing (nil) stays nothing: no element to hold it, so no part
+  is placed for it (docs/render.md#a-component-answers-hiccup)."
   {:malli/schema [:=> [:cat :any :map] :any]}
   [hc attrs]
   (cond
     (nil? hc) nil
     (and (vector? hc) (keyword? (first hc)))
-    (let [[tag & more] hc]
+    (let [[tag & more] hc
+          own (when (map? (first more)) (:class (first more)))
+          attrs (cond-> attrs (and (:class attrs) (string? own) (not (str/blank? own))) (update :class str " " own))]
       (if (map? (first more)) (into [tag (merge (first more) attrs)] (rest more)) (into [tag attrs] more)))
     :else [:div attrs hc]))
 

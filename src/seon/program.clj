@@ -345,12 +345,15 @@
 (defn- def-meta
   "A defined var's own Clojure metadata keys (:var/meta in resources/seon/schemas/seon.facts.edn): from the live var when it is
   bound, merged over the compiler's account of its definition, with :macro when the compiler says the
-  form is a macro. Location keys and :doc are left out (the doc is :var/doc)."
+  form is a macro. Location keys and :doc are left out (the doc is :var/doc), and so are the keys
+  instrumentation adds as a process runs (seon.contract/instrument-keys): with them, a definition's facts
+  depended on whether the importing process had armed its contracts (491 of 2,431 contracted vars differed)."
   {:malli/schema [:=> [:cat [:maybe :seon.host/var] :map] [:set :keyword]]}
   [v d]
   (let [m (merge (:meta d) (some-> v meta))]
     (-> (set (keys (cond-> m (:macro? d) (assoc :macro true))))
-        (disj :ns :name :file :line :column :end-line :end-column :doc))))
+        (disj :ns :name :file :line :column :end-line :end-column :doc)
+        (#(apply disj % contract/instrument-keys)))))
 
 (defn- macro-uses
   "The macros form (as read) calls in namespace nsx: each list in it whose head resolves
@@ -1185,10 +1188,11 @@
   test namespaces: 12.2 s evaluated form by form, 0.70 s loaded warm, 16.1 s cold: the commit that
   made this), its contracted vars armed. A namespace whose require throws is left to load-forms!, which names the
   form that fails. Answers [the namespaces loaded, the errors]. See docs/source.md#a-process-holds-the-tests-only-when-it-runs-them."
-  {:malli/schema [:=> [:cat :seon.host/db [:sequential :map]] [:tuple [:set :symbol] [:vector :seon.program/error]]]}
-  [db forms]
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :map] [:sequential :map]] [:tuple [:set :symbol] [:vector :seon.program/error]]]}
+  [db forms lf]
   (let [tnss (test-nss db)
-        live (group-by :ns (live-forms db))
+        ;; lf: db's live forms, which load-all! has read (a second read was 0.6-1.1 s of a fork server's start)
+        live (group-by :ns lf)
         root (get cfg/config :seon.config.source/root)
         ;; the file require reads is the one a source dir holds at the namespace's path, and it holds every
         ;; form main has of it, as main has it: a file edited since its import, or one on no source dir (a
@@ -1225,8 +1229,9 @@
                   [:=> [:cat :seon.host/db [:map [:tests? {:optional true} :boolean]]] :seon.program/load-report]]}
   ([db] (load-all! db {}))
   ([db {:keys [tests?] :or {tests? true}}]
-   (let [forms (loadable db (filterv #(not (held? db %)) (live-forms db)) tests?)
-         [required errs] (if tests? (required! db forms) [#{} []])]
+   (let [lf (live-forms db)
+         forms (loadable db (filterv #(not (held? db %)) lf) tests?)
+         [required errs] (if tests? (required! db forms lf) [#{} []])]
      {:loaded (count forms)
       :errors (into errs (load! db (filterv #(not (required (:ns %))) forms) (set (keys (schema-changes db))) tests?))})))
 
