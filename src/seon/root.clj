@@ -24,7 +24,7 @@
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.query.execute] [clojure.main] [clojure.string :as str] [seon.db :as pdb] [seon.ctx.wire :as wire] [seon.lib :as lib]
             [seon.sock :as sock] [jolt.async.remote :as remote] [konserve.jolt.fasl :as codec] [seon.fx :as fx] [seon.fork-server :as fs] [seon.agent-proc :as ap]
             [seon.writer :as writer] [seon.problems :as problems] [seon.prove] [seon.cron] [seon.vector :as vector] [seon.source :as source] [seon.reconcile :as reconcile] [seon.system :as system] [seon.program :as program] [seon.step :as step]
-            [seon.config :as cfg] [seon.contract :as contract] [seon.print :as print] [seon.task :as task] [seon.template :as tpl] [seon.doc :as doc] [seon.error :as err] [seon.agent :as agent] [konserve.jolt.lmdb :as klmdb] [clojure.java.shell]
+            [seon.config :as cfg] [seon.contract :as contract] [seon.print :as print] [seon.task :as task] [seon.template :as tpl] [seon.render :as render] [seon.doc :as doc] [seon.error :as err] [seon.agent :as agent] [konserve.jolt.lmdb :as klmdb] [clojure.java.shell]
             [clojure.core.async :as a]
             ;; the agent side, loaded here so the fork server and every agent inherit it compiled
             [seon.turn] [my.fx] [my.task] [my.turn] [my.render] [my.branch] [my.doc] [clojure.core.async.flow :as flow] [clojure.test]
@@ -1073,16 +1073,22 @@
   "You are root's session: the person talks to Seon through you. Your page lists every session on main and how each stands. Answer the person yourself when you can. When they want work done, look for a session already on it and tell them its address; otherwise start one with (my.task/launch! \"what they want\") and tell them it started. More: docs/users.md#roots-session")
 
 (defn root-session-tx
-  "Root's session at boot, the ordinary way (seon.template/request-tx of the chat template): the task request/root, its agent root's own
-  entity by its key, which the boot fact wrote (seon.task/boot-tx), so it is written after it; parked until a message wakes it, so a
-  boot makes no model call. No tempid names root: its entity may be one an earlier boot made, and a tempid's issued id is not it. See
+  "Root's session at boot, an ordinary agent made the ordinary way: an agent entity keyed \"root\" (a reserved key, as the user's is
+  its name), linked to root by :seon.agent/root, its pattern the agent's plus root's sessions (seon.render.ui/sessions reads them), and
+  the task request/root of the chat template (seon.template/request-tx), parked, its agent that entity, so a message wakes it and a boot
+  makes no model call. Root's own entity is untouched: an entity's id derives from its identity, so it cannot take a key too. See
   docs/users.md#roots-session."
   {:malli/schema [:=> [:cat :seon.host/db] [:vector :any]]}
   [db]
-  (let [tx (tpl/request-tx db (tpl/from (tpl/templates :user) {:seon.task/ns 'request :seon.task/name "root" :seon.task/plan root-session-plan}))]
+  (let [tx (tpl/request-tx db (tpl/from (tpl/templates :user) {:seon.task/ns 'request :seon.task/name "root" :seon.task/plan root-session-plan}))
+        pattern (conj (render/schema-property :seon.db/agent-fact :seon.ctx/pattern)
+                      {[:seon.agent/root :as :root] [{[:seon.agent/_root :as :agents :limit :seon.config.ctx/window :reverse true]
+                                                      [:seon.agent/key :seon.agent/id :seon.agent/status
+                                                       {[:seon.agent/task :as :task] [:seon.task/id :seon.task/outcome :seon.task/reason :seon.task/plan]}]}]})]
     (if (contract/error? tx)
       (throw (ex-info (str "root's session task was refused: " (:seon.error/message tx)) tx))
-      (conj (vec tx) {:seon.task/id "request/root" :seon.task/agent [:seon.agent/key "root"] :seon.task/outcome :parked}))))
+      (into [{:db/id "root-session" :seon.agent/key "root" :seon.agent/root [:seon.root/id :root] :seon.ctx/pattern pattern}]
+            (conj (vec tx) {:seon.task/id "request/root" :seon.task/agent "root-session" :seon.task/outcome :parked})))))
 
 (defn wiki-boot-tx
   "The wiki's part of the boot fact's commit: wiki-tx, with the digest of what it read (wiki-digest) on root's

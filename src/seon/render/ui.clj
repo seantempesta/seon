@@ -1605,6 +1605,8 @@
   [:div {:id "render-ctx"} [#'task-list {}] [#'conversation-list {}]
    [#'rules-list {}]])
 
+(declare sessions)
+
 (defn task-list
   "The task's list of an agent's page (p-task, read by the model as parts: seon.render/page-lists), in the order
   they are placed here: the task, its proofs, what it cites, each search, the references its agent cites, its added keys, and
@@ -1612,6 +1614,8 @@
   {:seon.render/list "p-task" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
   [{c :seon.ctx/ctx}]
   [:div {:id "p-task"}
+   ;; root's sessions, when this record's pull holds root (root's session's pattern does: docs/users.md#roots-session)
+   (when (:root c) [#'sessions {:at [:root :agents]}])
    (when (:task c)
      (list [#'task {:at [:task]}] [#'status {:at [:task :proved]}] [#'citations {:at [:task :cites]}]
            (seq (cite-parts c))
@@ -1813,6 +1817,21 @@
   so a link to it is a bookmark. An agent without a key (a map the page is shown) is its id. See docs/render.md#a-sessions-address-and-the-agents-list."
   {:malli/schema [:=> [:cat :map] :string]}
   [a] (or (:seon.agent/key a) (kname (:seon.agent/id a))))
+
+(defn sessions
+  "Root's sessions as its session reads them (a component over ctx, the :root join its pattern holds): each, newest first, by its
+  address, what it works on and how it stands, so root's session knows what is already being done before it starts more. Each
+  session's page holds the rest. See docs/users.md#roots-session."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+  [{c :seon.ctx/ctx}]
+  (let [as (map val (sort-by (comp - key) (get-in c [:root :agents])))]
+    [:section
+     [:h2 "Sessions"]
+     (if (seq as)
+       (into [:ul] (for [a as :let [a (ratom/realize a) t (:task a) stands (standing a t)] :when (:seon.agent/key a)]
+                     [:li {:key (:seon.agent/key a)} [:code (str "/agent/" (session-address a))] " "
+                      (or (some-> (:seon.task/plan t) str/split-lines first) (task-name a t) "no task") ": " (:text stands)]))
+       [:p "None yet."])]))
 
 (defn agent-side
   "A session of main in the agents list (a component over the db, its agent's entity id: every agent on main, of any boot, a

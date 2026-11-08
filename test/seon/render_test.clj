@@ -2202,6 +2202,43 @@
     (is (= #'ui/render-ctx (walk-layout (:db/id (d/entity db [:seon.agent/key "b2/a1"])) :main {:seon.agent/key "b2/a1"})))
     (is (= #'ui/render-ctx (walk-layout nil :task-a {:seon.agent/key "b2/a1"})) "a branch that holds no entity yet: the agent's key names it")))
 
+(defn- booted
+  "The test world as a root's boot leaves it: the boot fact, then root's session (seon.root/root-session-tx), as seon.root/start! writes them."
+  []
+  (let [db (d/db-with (my.test/world) (seon.task/boot-tx "b1" 1 "sean"))]
+    (d/db-with db (seon.root/root-session-tx db))))
+
+(deftest roots-session-is-an-agent-of-its-own
+  ;; docs/users.md#roots-session: root's session is an ordinary agent keyed "root", linked to root, working request/root, parked until a message
+  ;; wakes it; root's own entity takes no key (an entity's id derives from its identity, so it cannot hold a second)
+  (let [db (booted)
+        s (d/entity db [:seon.agent/key "root"])
+        t (d/entity db [:seon.task/id "request/root"])]
+    (is (some? s) "an agent keyed root")
+    (is (= (:db/id (d/entity db [:seon.root/id :root])) (:db/id (:seon.agent/root s))) "linked to root")
+    (is (not= (:db/id s) (:db/id (d/entity db [:seon.root/id :root]))) "and not root's entity")
+    (is (= :parked (:seon.task/outcome t)) "its task waits for a message")
+    (is (= "root" (seon.task/session-key db "request/root")) "and the ordinary spawn continues it by its key")
+    (is (= :seon.db/agent-fact (r/entity-schema (d/pull db '[*] (:db/id s)) nil)) "an agent like any other")
+    (is (= #'ui/render-ctx (r/layout-of (d/pull db '[*] (:db/id s)))) "drawn by the agent's layout")
+    (is (some? (d/db-with db (seon.root/root-session-tx db))) "and a second boot writes it again")))
+
+(deftest roots-session-reads-its-sessions
+  ;; docs/users.md#roots-session: root's session's record holds root's sessions (its pattern's :root join), and its task list shows each
+  ;; by its address and how it stands; another agent's record holds none
+  (let [db0 (booted)
+        db (d/db-with db0 [{:seon.task/id "request/greet" :seon.task/ns 'request :seon.task/name "greet" :seon.task/plan "Say hi.\nOne line." :seon.task/kind :user
+                            :seon.task/branch :task-request-greet :seon.task/outcome :parked}
+                           {:seon.agent/key "b1/a2" :seon.agent/id :a2 :seon.agent/root [:seon.root/id :root] :seon.agent/task [:seon.task/id "request/greet"]}])
+        part (fn [k] (let [c (seon.ctx/agent-ctx db (:db/id (d/entity db [:seon.agent/key k])))
+                           w (r/draw c seon.ctx/changes db (r/layout-of c) {:model-only true})]
+                       (try (pr-str (r/placed-hiccup w (r/page-lists w))) (finally (r/dispose-walk! w)))))
+        root-text (part "root")]
+    (is (str/includes? root-text "/agent/b1/a2") "root's session reads the other session by its address")
+    (is (str/includes? root-text "Say hi.") "what it works on")
+    (is (not (str/includes? root-text ":seon.config.")) "and none of root's config")
+    (is (not (str/includes? (part "b1/a2") "Sessions")) "another agent reads no sessions")))
+
 (deftest a-users-page-moves-with-main
   ;; docs/render.md#a-page-is-a-kept-walk: a user's page is a kept walk, as root's is: a move of main draws what it reached, so an agent it starts appears on a page already open
   (let [db0 (sessions-db "b2" [["b2/a1" :a1 :running "seon.print/a-long-string" :running :task-a]])

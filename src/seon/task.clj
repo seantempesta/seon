@@ -338,7 +338,7 @@
   {:malli/schema [:=> [:cat :string pos-int? :string] [:vector :any]]}
   [boot max-running name]
   (into [{:db/id "user" :seon.agent/key name :seon.user/name name}
-         {:seon.root/id :root :seon.agent/key "root" :seon.root/boot boot :seon.config.agent/max-running max-running :seon.root/signed-in "user"}]
+         {:seon.root/id :root :seon.root/boot boot :seon.config.agent/max-running max-running :seon.root/signed-in "user"}]
         (agent-tx boot :user {} name)))
 
 (defn call-ref
