@@ -5,13 +5,14 @@
 
 (defn stream-input
   "The proof's input at n: the web proc with one tab of the agent's chat, its stream already n characters long and
-  seen by that tab (its channel drops what it can't hold, so every measured call offers as the first did), and the
+  held and seen by that tab, whose page has the call's in-flight element (its channel drops what it can't hold, so every measured call offers as the first did), and the
   next message of 20 characters: [st m]."
   [n]
   (let [st (#'w/web-proc {:port 0})
         [st _] (#'w/web-proc st :from-render {:op :index :agents {:a1 {:pid 1 :branch :agent-1 :status :busy :key "b1/a1"}}})
         [st _] (#'w/web-proc st :http {:op :open :view [:chat :a1] :ch (a/chan (a/dropping-buffer 1))})
-        st (first (#'w/web-proc st :from-render {:op :keyframe :view [:chat :a1] :html "<div id=\"app\"></div>"}))
+        st (first (#'w/web-proc st :from-render {:op :keyframe :view [:chat :a1]
+                                                  :html "<div id=\"app\"><div id=\"b1_2Fa1_2F3\" class=\"seon-stream\" data-stream-in=\"b1/a1/3\"></div></div>"}))
         m {:stream "b1/a1/3/0/message" :in "b1/a1/3" :part "message" :agent "b1/a1"}
         st (#'w/stream-in st (assoc m :offset 0 :text (apply str (repeat n "x"))))]
     [st (assoc m :offset n :text "Reading the task now")]))

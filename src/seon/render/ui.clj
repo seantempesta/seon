@@ -353,7 +353,7 @@
     [:script {:type "module" :src "/datastar.js"}]]
    [:body
     body
-    [:div {:style "display:none" :data-init (str "@get('" feed "', {retryMaxCount: Infinity, openWhenHidden: true})")}]]])
+    [:div {:style "display:none" :data-init (str "@get('" feed "', {retry: 'always', retryMaxCount: Infinity, openWhenHidden: true})")}]]])
 
 ;;; --- values' own renders: a task, a verdict, a cost report ---------------------------------
 
@@ -1437,7 +1437,7 @@
           [:div {:wire/field (when sent? "reasoning")} [#'markdown reasoning {:inline? true}]]])
        (when spoke? [:div {:class "seon-message max-w-[85%] self-start rounded-2xl rounded-tl-sm bg-base-900 px-4 py-2.5 text-text-100" :wire/field (when sent? "content")} [#'markdown reply {:inline? true}]])
        (when (seq children) [:ol {:class "seon-turn flex flex-col"} (seq children)])]
-        (::in-flight call) (conj [:div {:id (render/key-id [id]) :class "seon-stream" :aria-busy "true" :data-ignore-morph "" :wire/for "page"}])))))
+        (::in-flight call) (conj [:div {:id (render/key-id [id]) :class "seon-stream" :aria-busy "true" :data-ignore-morph "" :data-stream-in id :wire/for "page"}])))))
 
 
 (defn stream-part
