@@ -492,6 +492,16 @@
     (is (= stale (select-keys (task/task db "demo/a") (keys stale))) "the earlier end's facts are on the task before")
     (is (not-any? #(contains? tk %) (keys stale)) "and gone after a judging that set none of them")))
 
+(deftest a-woken-task-whose-agent-never-started-is-spawned-under-its-key
+  ;; docs/users.md#roots-session: a parked task names an agent no root has started (a key and no boot, as root's session is at boot); a
+  ;; message to that key makes the task ready, and its action is a spawn, which takes the session's key (seon.task/session-key). The
+  ;; woken check reads the task's agent key itself, so what an agent is in the index does not change (Optimization, 2026-11-08)
+  (let [db (db-of [(decl "a")] :extra [{:db/id "ag" :seon.agent/key "never-started"}
+                                        {:seon.task/id "demo/a" :seon.task/agent "ag" :seon.task/outcome :parked}])]
+    (is (= [] (actions-for db)) "parked, it waits")
+    (is (= [(spawn "a")] (actions-for db :woken ["never-started"])) "woken, it is spawned")
+    (is (= "never-started" (task/session-key db "demo/a")) "under its own key")))
+
 (deftest a-wake-whose-parked-process-is-gone-is-lost-and-the-next-start-a-spawn
   ;; flow-lab's hazard 6 (design agent-loop section 4): the parked process died before the wake's
   ;; work! reached it, so root answers that agent ended; the task took nothing, so it is :lost, not a
