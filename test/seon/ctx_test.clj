@@ -244,7 +244,10 @@
         keys-in (fn keys-in [x] (cond (map? x) (concat (keys x) (mapcat keys-in (vals x))) (coll? x) (mapcat keys-in x)))]
     (is (= ["I will check f0."] (map :seon.model-call/reply (vals (:calls t)))) "the model call is in the record, with its reply")
     (is (empty? (remove #{:seon.model-call/id :seon.model-call/n :seon.model-call/origin :seon.model-call/reply :seon.model-call/reasoning
-                          :seon.model-call/finish :seon.model-call/truncated :seon.model-call/error}
+                          :seon.model-call/finish :seon.model-call/truncated :seon.model-call/error
+                          ;; how many forms its reply ran, written when the last has run: the call's end as a fact, which the turn's
+                          ;; in-flight element waits on (docs/render.md#in-flight-output-streams), as :finish is how it stopped
+                          :seon.model-call/forms}
                         (filter #(and (keyword? %) (= "seon.model-call" (namespace %))) (keys-in t))))
         "no telemetry of a model call anywhere in the record: no tokens, sent, cost or model")
     (is (empty? (filter #(and (keyword? %) (or (= "seon.process" (namespace %)) (#{:seon.agent/pid :seon.agent/mem-mb} %))) (keys-in t)))
