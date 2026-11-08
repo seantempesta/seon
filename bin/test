@@ -42,12 +42,13 @@ case ${1:-} in
   *) WHAT=tests OWN=1 OUT=$ROOT/target/prove/$(date +%Y%m%dT%H%M%S)-$$; echo "test: run ${OUT:t}, logs in $OUT" ;;
 esac
 mkdir -p "$OUT"; rm -f $OUT/shard-*(N)
-# this run's share of the machine (:seon.config.proofs/jobs): its free cores (cores less the 1-minute load), a shard
-# and the roots its process tests boot taking about two, at least 1, at most the config's 4: runs at once share the
-# cores instead of each starting four shards. A measure read once at the plan, deciding how many shards, never when
+# this run's shards (:seon.config.proofs/jobs): one, two only when 12 cores are free. A measure read once at the plan, deciding how many shards, never when
 if [[ -z ${SEON_PROOF_JOBS:-} ]]; then
   ncpu=$(sysctl -n hw.ncpu); load=$(sysctl -n vm.loadavg | awk '{print int($2)}')
-  free=$(( ncpu - load )); jobs=$(( free / 2 )); (( jobs < 1 )) && jobs=1; (( jobs > 4 )) && jobs=4
+  # one shard: a shard is a process of its own that loads every test namespace and boots a shared root per test
+  # group, so a second one doubles the roots and memory for the same tests; it pays only on an idle machine, never
+  # beside other sessions' runs (owner, 2026-11-08: "Why are we doing so much sharding?")
+  free=$(( ncpu - load )); jobs=1; (( free >= 12 )) && jobs=2
   export SEON_PROOF_JOBS=$jobs
 fi
 runner --plan $WHAT "$OUT" "$@" || { echo "TEST FAILED (the plan)"; exit 1 }
