@@ -1441,11 +1441,11 @@
 
 
 (defn stream-part
-  "One part of an effect's in-flight text, part one of reasoning, content, message, intent, code or out: the element the
+  "One part of an effect's in-flight text, part one of reasoning, content, message, intent, code, out or err: the element the
   web proc appends into its call's (or eval's) in-flight element the first time a tab sees that part, and then its text
   into (its id the stream's, seon.render/key-id of [id]). See docs/render.md#in-flight-output-streams."
   {:seon.render/for "page"
-   :seon.render/style ".stream-part { white-space: pre-wrap; overflow-wrap: anywhere; } .stream-part[data-stream-part=\"reasoning\"] { color: var(--color-text-500); font-size: 0.75rem; } .stream-part[data-stream-part=\"intent\"] { color: var(--color-text-400); } .stream-part:is([data-stream-part=\"code\"], [data-stream-part=\"out\"]) { font-family: var(--font-mono); font-size: 0.75rem; background: var(--color-base-900); border-radius: 0.375rem; padding: 0.25rem 0.5rem; } section:has(> .seon-message, > details) > .seon-stream > .stream-part:is([data-stream-part=\"message\"], [data-stream-part=\"content\"], [data-stream-part=\"reasoning\"]) { display: none; } .seon-stream[aria-busy=\"true\"]::after { content: \"▍\"; animation: seon-stream-cursor 1s steps(2) infinite; } @keyframes seon-stream-cursor { 50% { opacity: 0; } }"
+   :seon.render/style ".stream-part { white-space: pre-wrap; overflow-wrap: anywhere; } .stream-part[data-stream-part=\"reasoning\"] { color: var(--color-text-500); font-size: 0.75rem; } .stream-part[data-stream-part=\"intent\"] { color: var(--color-text-400); } .stream-part:is([data-stream-part=\"code\"], [data-stream-part=\"out\"], [data-stream-part=\"err\"]) { font-family: var(--font-mono); font-size: 0.75rem; background: var(--color-base-900); border-radius: 0.375rem; padding: 0.25rem 0.5rem; } section:has(> .seon-message, > details) > .seon-stream > .stream-part:is([data-stream-part=\"message\"], [data-stream-part=\"content\"], [data-stream-part=\"reasoning\"]) { display: none; } .stream-part[data-stream-part=\"err\"] { color: var(--color-error); } .seon-stream[aria-busy=\"true\"]::after { content: \"▍\"; animation: seon-stream-cursor 1s steps(2) infinite; } @keyframes seon-stream-cursor { 50% { opacity: 0; } }"
    :malli/schema [:=> [:cat :string :string] :any]}
   [id part]
   [:div {:id (render/key-id [id]) :class "stream-part" :data-stream-part part}])
