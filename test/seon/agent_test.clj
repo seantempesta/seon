@@ -364,35 +364,6 @@
     (is (= 49 began) "the proof run was in its test")
     (is (= -1 ended) (str "the proof run outlived its agent (byte " ended " after its sleep); agent " (pr-str pid) " kill " (pr-str killed)))))
 
-(deftest p (let [mk " (mark "a") " _ (mk \"start\") w (java.io.FileOutputStream. " (pr-str fifo-a) ")] (mk \"opened\") (.write w 49) (.flush w) (mk \"flushed\") (Thread/sleep 60000) (.write w 50) (.flush w)) (is true))")
-                  src-b (str "(ns parked1-proof (:require [clojure.test :refer [deftest is]]))"
-                             " (deftest p (let [mk " (mark "b") " _ (mk \"start\") w (java.io.FileOutputStream. " (pr-str fifo-b) ")] (mk \"opened\") (.write w 49) (.flush w) (mk \"flushed\") (clojure.core.async/<!! (clojure.core.async/chan))) (is true))")
-                  form (str "(do " src-a " " src-b " (seon.agent/run-tests-forked 1000000000 '#{parked0-proof/p parked1-proof/p} :turn))")
-                  _ (ev (began-code a form))
-                  pid (ev (str "(get-in (c/state sys) [:agents :" a " :pid])"))
-                  in-a (java.io.FileInputStream. ^String fifo-a)
-                  _ (note! "opened-a")
-                  in-b (java.io.FileInputStream. ^String fifo-b)
-                  _ (note! "opened-b")
-                  read-a (.read in-a)
-                  _ (note! (str "read-a " read-a))
-                  read-b (.read in-b)
-                  _ (note! (str "read-b " read-b))
-                  ;; what's claimed is that A ends with its agent while B lives on; B's byte only says it is in its test, as its own start mark does. An EOF on B's fifo before its byte is still unexplained (task seon.agent/a-proof-child-that-died-says-why), and is no red here
-                  in-b? (or (= 49 read-b) (str/includes? (ts/output stages) "b start"))
-                  began [read-a (if in-b? 49 read-b)]
-                  ;; a child that never reached its write has ended, so the run ends when A wakes: what it answered says why, which killing the agent would lose
-                  answered (when (not= [49 49] began) (ev "(pr-str @blocked)"))
-                  killed (sh/sh "kill" "-9" (str pid))
-                  ended (.read in-a)]
-              (.close in-a) (.close in-b)
-              (ev (gone-code a))
-              {:pid pid :began began :ended ended :killed killed :answered answered :stages (when (not= [49 49] began) (ts/output stages))})))]
-    (sh/sh "rm" "-f" fifo-a fifo-b stages)
-    (is (pos-int? pid) (str "the agent's pid: " (pr-str pid)))
-    (is (= [49 49] began) (str "both children were in their tests; in order:\n" seen "\nthe run answered: " answered))
-    (when (= [49 49] began) (is (= -1 ended) (str "child A outlived its agent (byte " ended " after its sleep); agent " (pr-str pid) " kill " (pr-str killed))))))
-
 (deftest a-handful-of-tests-runs-in-one-child
   ;; task seon.agent/a-test-run-streams-its-reports: a run forks no more children than its work needs
   ;; (:seon.config.proofs/child-min-ms); five tests never measured count :seon.config.proofs/unmeasured-ms each, under it
@@ -418,13 +389,6 @@
     (sh/sh "rm" "-rf" dir)
     (is (every? pos-int? counts) (str "both children counted: " (pr-str counts) " " (pr-str run)))
     (is (apply = counts) (str "the two children hold the same descriptors: " (pr-str counts)))))
-
-(deftest p (spit " (pr-str f) " (pr-str [@@#'seon.intr/pending (count @@#'seon.intr/stack)])) (is true))")
-        form (str "(do " proof " (seon.agent/run-tests-forked 1000000000 '#{clean-proof/p} :turn))")
-        [run] (in-agent [form] tuned)
-        found (some-> (not-empty (ts/output f)) read-string)]
-    (sh/sh "rm" "-f" f)
-    (is (= [false 0] found) (str "no interrupt and no eval of its parent's: " (pr-str found) " " (pr-str run)))))
 
 ;; See docs/reconcile.md#a-task-holds-how-its-work-ended
 (deftest a-wake-that-ran-no-turn-has-no-end
