@@ -304,7 +304,11 @@
   ;; program (seon.source/replace-tx), and imports nothing when it reads the same. Three
   ;; boots on a main of their own on the test store (deleted at the end), the tree a scratch
   ;; repository under target/: commit A, then commit B with one function changed and one
-  ;; removed, then B again.
+  ;; removed, then B again. B's ns form also gains an alias that a new function uses (2026-10-22:
+  ;; an import that ran a form before its namespace's new alias killed the root, `No such namespace`),
+  ;; and the second boot runs that function: the binary, older than main's program, catches up at boot.
+  ;; (seon.source-test/a-restart-catches-up held these two claims on a clone of the whole checkout,
+  ;; with two model turns, about 120 s; folded here 2026-11-08.)
   (let [checkout (seon.config/checkout)
         tree (str checkout "/target/tmp/root-test-follow-" (random-uuid))
         tasks (str tree "-tasks")
@@ -314,7 +318,7 @@
                   (git "add" "-A") (git "commit" "-q" "-m" "tree")
                   (str/trim (:out (git "rev-parse" "HEAD"))))
         a "(ns follow.tree)\n\n(defn kept [] 1)\n\n(defn changed [] 1)\n\n(defn removed [] 1)\n"
-        b "(ns follow.tree)\n\n(defn kept [] 1)\n\n(defn changed [] 2)\n"
+        b "(ns follow.tree\n  (:require [clojure.set :as follow-set]))\n\n(defn kept [] 1)\n\n(defn changed [] 2)\n\n(defn uses-alias [] (follow-set/union #{1} #{2}))\n"
         path (test-store)
         main (str "root-test-" (random-uuid))
         args ["--set" (str ":seon.config.source/root=" (pr-str tree)) "--set" ":seon.config.source/dirs=[\"src\"]"]
@@ -323,6 +327,7 @@
                           " :text (seon.source/file-text db 'follow.tree)"
                           " :removed-forms (count (filter #(clojure.string/includes? % \"removed\") (map :v (datahike.api/datoms db :aevt :form/src))))"
                           " :removed-var (count (datahike.api/datoms db :avet :var/name 'follow.tree/removed))"
+                          " :alias (some-> (resolve 'follow.tree/uses-alias) deref (apply []))"
                           " :tasks (count (seon.task/tasks db))})")}
         boot! (fn [requests]
                 (let [out (root-answers path main requests {:args args})]
@@ -345,7 +350,8 @@
         (is (= b (:text two)) "main holds B's text, byte for byte")
         (is (= [0 0] [(:removed-forms two) (:removed-var two)]) "no form or var of the removed function")
         (is (= 1 (:tasks two)) "the task is intact")
-        (is (= 3 (:retracted (:fact two))) "retracted: the changed function's old form, the removed function's form and its var")
+        (is (= 4 (:retracted (:fact two))) "retracted: the old ns form, the changed function's old form, the removed function's form and its var")
+        (is (= #{1 2} (:alias two)) "the new alias applied before the form using it, and the boot loaded main's program: the function runs")
         (is (= (dissoc (:fact two) :boot) (dissoc (:fact three) :boot)) "the same commit imports nothing: the fact is the second boot's, but for whose boot it is")
         (is (not= (:boot (:fact two)) (:boot (:fact three))) "one source fact per boot")
         (is (and (nil? (:inputs (:fact two))) (re-find #"binary was built from" (str (:unshared (:fact two)))))
