@@ -480,12 +480,12 @@
       (let [behind (contract/error :seon.merge/behind 'seon.writer/merge-refused "main changed 2 key(s)" {:behind 2})
             db2 (:db-after (d/with db [(ended "t/m" {:seon.task/kind :merge :seon.task/agent {:seon.agent/key "b/a2" :seon.agent/id :a2 :seon.agent/ended-ms 9}
                                                      :seon.task/outcome :behind :seon.task/unmerged #{"[:var app/g]"}
-                                                     :seon.task/conflicts [{:key [:var 'app/f] :kind :both-modified}]
+                                                     :seon.task/conflicts [{:key [:var 'app/f]}]
                                                      :seon.task/error behind})]))
             [m] (get-in (problems/report db2) [:classes :merge :rows])]
         (is (= ["t/m" :behind 1 ["[:var app/g]"] 'seon.writer/merge-refused]
                [(:task m) (:status m) (:conflicts m) (:unmerged m) (:producer m)]))
-        (is (= [{:key [:var 'app/f] :kind :both-modified}] (get-in m [:evidence :conflicts])))
+        (is (= [{:key [:var 'app/f]}] (get-in m [:evidence :conflicts])))
         (is (= :seon.merge/behind (get-in m [:error :seon.error/type])))))
     (testing "a task whose evidence names a problem answers it: mining files no duplicate"
       (ts/test-branch! (fn [_ c] (let [_ (d/transact c (vec (d/datoms db :eavt)))

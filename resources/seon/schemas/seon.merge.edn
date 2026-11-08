@@ -26,16 +26,15 @@
  :seon.merge/moved [:sequential :seon.host/datom]
  ;; whether a branch can merge into main now (seon.merge/readiness)
  :seon.merge/readiness [:map [:main-moved [:vector :seon.merge/program-key]] [:conflicts [:vector :seon.merge/program-key]]]
- :seon.merge/conflict-kind [:enum :both-modified :both-added :deleted-by-us :deleted-by-them]
- :seon.merge/conflict [:map [:key :seon.merge/program-key] [:kind :seon.merge/conflict-kind]
+ :seon.merge/conflict [:map [:key :seon.merge/program-key]
                         [:base {:optional true} :any] [:ours {:optional true} :any] [:theirs {:optional true} :any]]
  ;; a merge entry's :seon.merge/* members as conflict-value reads them (a pulled entry or an
- ;; run's evidence): the stored facts (seon.facts' :seon.merge/entry-fact) with key and kind
+ ;; run's evidence): the stored facts (seon.facts' :seon.merge/entry-fact) with key
  ;; at the conflict's own schemas
- :seon.merge/entry-members [:map [:seon.merge/key :seon.merge/program-key] [:seon.merge/kind :seon.merge/conflict-kind]
+ :seon.merge/entry-members [:map [:seon.merge/key :seon.merge/program-key]
                              [:seon.merge/base {:optional true} :any] [:seon.merge/ours {:optional true} :any]
                              [:seon.merge/theirs {:optional true} :any]]
- :seon.merge/entry-value [:map [:key :seon.merge/program-key] [:kind :seon.merge/conflict-kind]
+ :seon.merge/entry-value [:map [:key :seon.merge/program-key]
                             [:base {:optional true} :any] [:ours {:optional true} :any] [:theirs {:optional true} :any]
                             [:main-t :int] [:resolved? :boolean]]
  :seon.merge/result [:map [:ours :seon.merge/changes] [:theirs :seon.merge/changes]

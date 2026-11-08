@@ -161,15 +161,11 @@
     (vec (sort-by str (for [[[k sym] [_ ov]] ours :when (and (= :var k) (= :fn (:kind ov)) (nil? (:contract ov)))] sym)))
     []))
 
-(defn- conflict-kind
-  {:malli/schema [:=> [:cat :any :any :any] :seon.merge/conflict-kind]}
-  [b o t]
-  (cond (nil? b) :both-added (nil? o) :deleted-by-us (nil? t) :deleted-by-them :else :both-modified))
-
 (defn three-way
   "git's three-way merge of program maps: :ours and :theirs (each side's changes since
   base), :apply (keys to set to theirs on ours) and :conflicts (both sides changed a key
-  differently). Keys are sorted, so the answer is a value."
+  differently), each with the sides that hold the key (:base, :ours, :theirs; one absent is a side
+  that never had it or deleted it, which is all a conflict's name would say). Keys are sorted, so the answer is a value."
   {:malli/schema [:=> [:cat :seon.merge/program :seon.merge/program :seon.merge/program] :seon.merge/result]}
   [base ours theirs]
   (let [oc (changes base ours)
@@ -181,7 +177,7 @@
      :conflicts (vec (for [k ks
                            :let [b (get base k) o (get ours k) t (get theirs k)]
                            :when (and (not (same? k o t)) (not (same? k o b)))]
-                       (cond-> {:key k :kind (conflict-kind b o t)}
+                       (cond-> {:key k}
                          b (assoc :base b) o (assoc :ours o) t (assoc :theirs t))))}))
 
 ;; ---- the program where it changed: cost follows the change, not the program ------------
@@ -478,7 +474,7 @@
   `conflict-tx`): one decoder for a branch's entries and a run's evidence."
   {:malli/schema [:=> [:cat :seon.merge/entry-members] :seon.merge/conflict]}
   [m]
-  (cond-> {:key (:seon.merge/key m) :kind (:seon.merge/kind m)}
+  (cond-> {:key (:seon.merge/key m)}
     (:seon.merge/base m) (assoc :base (:seon.merge/base m))
     (:seon.merge/ours m) (assoc :ours (:seon.merge/ours m))
     (:seon.merge/theirs m) (assoc :theirs (:seon.merge/theirs m))))
@@ -496,8 +492,8 @@
   "A conflict as the members of one merge entity (no :db/id): for the branch's entries
   and a run's evidence alike."
   {:malli/schema [:=> [:cat :seon.merge/conflict] :map]}
-  [{:keys [key kind base ours theirs]}]
-  (cond-> {:seon.merge/key key :seon.merge/kind kind}
+  [{:keys [key base ours theirs]}]
+  (cond-> {:seon.merge/key key}
     base (assoc :seon.merge/base base)
     ours (assoc :seon.merge/ours ours)
     theirs (assoc :seon.merge/theirs theirs)))

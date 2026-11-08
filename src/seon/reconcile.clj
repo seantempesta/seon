@@ -88,13 +88,14 @@
   the config key. Answers {:rule :reason} or nil. The merge agent stops early on it; the
   reconciler decides from the run's facts alone, never re-reading the plan's text with a parser
   the agent may have changed (docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map)."
-  {:malli/schema [:=> [:cat [:map [:conflicts [:sequential [:map [:key :any] [:kind :keyword]]]]
+  {:malli/schema [:=> [:cat [:map [:conflicts [:sequential [:map [:key :any]]]]
                              [:refs [:set :qualified-symbol]]
                              [:merge-turns :int] [:max-conflicts :int] [:max-merge-turns :int]]]
                   [:maybe [:map [:rule [:enum :too-many-conflicts :deleted-by-them-referenced :merge-turns]] [:reason :string]]]]}
   [{:keys [conflicts refs merge-turns max-conflicts max-merge-turns]}]
-  (let [deleted (for [{:keys [key kind]} conflicts
-                      :when (and (= kind :deleted-by-them) (= :var (first key)) (refs (second key)))]
+  ;; main deleted it: the base and the branch hold the key and main does not
+  (let [deleted (for [{:keys [key base ours theirs]} conflicts
+                      :when (and base ours (nil? theirs) (= :var (first key)) (refs (second key)))]
                   (second key))]
     (cond
       (> (count conflicts) max-conflicts)
