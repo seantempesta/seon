@@ -385,7 +385,7 @@
   {:malli/schema [:=> [:cat [:maybe :string] [:maybe :string]] :map]}
   [call agent]
   {:call call :agent agent :content [] :reasoning [] :calls (sorted-map) :finish nil :usage nil :model nil :data? false :raw []
-   :offsets {} :open [] :parts {}})
+   :texts {} :open [] :parts {}})
 
 (defn- stream-id
   "The stream id of a string in a tool call's arguments at path and the part it is, [id part], or nil for a string no one shows live. See docs/flow.md#effects-one-owner-and-its-workers-per-kind."
@@ -403,13 +403,13 @@
   [[st msgs] id part what]
   (if-not (:call st)
     [st msgs]
-    (let [off (get-in st [:offsets id] 0)
+    (let [text (get-in st [:texts id] [])
           open? (some #{id} (:open st))
           st (cond-> st (not open?) (-> (update :open conj id) (assoc-in [:parts id] part)))
           base {:stream id :in (:call st) :part part :agent (:agent st)}]
       (cond (= :end what) [(update st :open #(filterv (complement #{id}) %)) (conj msgs (assoc base :end true))]
             (= :open what) [st msgs]
-            :else [(assoc-in st [:offsets id] (+ off (count what))) (conj msgs (assoc base :offset off :text what))]))))
+            :else (let [text (conj text what)] [(assoc-in st [:texts id] text) (conj msgs (assoc base :text text))])))))
 
 (defn- add-delta
   "st with a chunk's delta folded in: its content, reasoning and each tool call's pieces (id and name kept, arguments appended
@@ -437,7 +437,7 @@
 
 (defn sse-step
   "One line of a streamed reply (server-sent events: data: lines, each a chat-completion chunk, ending data: [DONE]) folded
-  into st (`sse-init`): [st' messages], the stream messages that line made ({:stream id :in call :part p :agent a :offset n :text s}, then
+  into st (`sse-init`): [st' messages], the stream messages that line made ({:stream id :in call :part p :agent a :text pieces}, pieces the part's whole text so far as the vector of its pieces, shared, so a message costs O(1) and a dropped one loses nothing, then
   the same with :end true and no text when a tool call's string closes), none for a state with no call. Blank lines, comments
   and other fields are skipped; a line that is none of them is kept, for a reply that is one JSON document. The one parser of
   `sse-reply` and of the streamed call (`complete`). See docs/flow.md#effects-one-owner-and-its-workers-per-kind."

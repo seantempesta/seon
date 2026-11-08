@@ -436,11 +436,11 @@
     (when (:call st)
       (let [[st1 o1] (fx/worker-proc st :lines (a/<!! (:lines st)))]
         (is (not (realized? gate)) "the first line was folded and sent while the second piece is still being read")
-        (is (= [{:stream "c1/reasoning" :in "c1" :part "reasoning" :agent "boot/1" :offset 0 :text "Think"}] (get o1 [:web :streams])))
+        (is (= [{:stream "c1/reasoning" :in "c1" :part "reasoning" :agent "boot/1" :text ["Think"]}] (get o1 [:web :streams])))
         (is (nil? (get o1 [:fx/t :done])))
         (deliver gate true)
         (let [[fin streams done] (drain st1)]
-          (is (= [{:stream "c1/content" :in "c1" :part "content" :agent "boot/1" :offset 0 :text "Done"} {:stream "c1/reasoning" :in "c1" :part "reasoning" :agent "boot/1" :end true} {:stream "c1/content" :in "c1" :part "content" :agent "boot/1" :end true}]
+          (is (= [{:stream "c1/content" :in "c1" :part "content" :agent "boot/1" :text ["Done"]} {:stream "c1/reasoning" :in "c1" :part "reasoning" :agent "boot/1" :end true} {:stream "c1/content" :in "c1" :part "content" :agent "boot/1" :end true}]
                  streams))
           (is (= 1 (count done)) "the owner is given :done once, with every id still open ended")
           (is (= "Done" (get-in (first done) [:outcome :value :text])))
@@ -469,7 +469,7 @@
         [st _] (fx/worker-proc st0 :work (assoc (req 1) :in-ns 0 :taken-ns 0))
         [fin streams done] (drain st)]
     (is (= :seon.model/transport (get-in (first done) [:outcome :seon.error/type])) "the asker is answered the transport error")
-    (is (= [{:stream "c1/reasoning" :in "c1" :part "reasoning" :agent "boot/1" :offset 0 :text "Thin"} {:stream "c1/reasoning" :in "c1" :part "reasoning" :agent "boot/1" :end true}] streams))
+    (is (= [{:stream "c1/reasoning" :in "c1" :part "reasoning" :agent "boot/1" :text ["Thin"]} {:stream "c1/reasoning" :in "c1" :part "reasoning" :agent "boot/1" :end true}] streams))
     (is (true? ((::flow/input-filter fin) :work)))))
 
 (deftest a-reader-whose-lines-are-closed-lets-go-of-its-connection
