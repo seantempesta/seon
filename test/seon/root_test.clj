@@ -316,3 +316,55 @@
             "the running binary is not built from this tree: no inputs to key agents' results by, and why")
         (is (= b (:text three))))
       (finally (sh/sh "rm" "-rf" tree tasks path (str path "-agents") (str path "-in") (str path ".log"))))))
+
+(deftest a-root-restart-names-the-same-agent-by-the-same-name
+  ;; docs/decisions.md#an-id-is-the-content-of-the-facts-that-make-it-owner-2026-11-08: an agent's id is the keyword of its
+  ;; :seon.agent/key, minted once (seon.root/start-agent) and kept by the session's next agent
+  ;; (seon.task/session-key), so a root's restart leaves every interface naming the agent as before:
+  ;; root's view, the task's agent, the server's agents list and the page's address. One agent on one
+  ;; task; root stopped cleanly and started again on the same store, main and runs, and the task
+  ;; attached again (the session continues); no id of a counter's form (:a1) appears before or after.
+  (let [checkout (config/checkout)
+        tns (seon.lib/unique-id)
+        task (str tns "/t")
+        tasks (str checkout "/target/runs/" tns "-tasks")
+        main (str "restart-names-" (random-uuid))
+        runs (str checkout "/target/runs/" main "-runs")
+        root0 {:store (ts/process-store checkout) :main main :runs runs
+               :args ["--set" (str ":seon.config.source/root=" (pr-str checkout))]}
+        ;; every name the interfaces give the task's agent, read on the running root
+        names-of (fn [root]
+                   (let [ask #(ts/ask root %)
+                         ev #(let [r (ask {:op :eval :agent "root" :code %})] (if (:error r) r (ts/value-of (:response r))))
+                         attach (ask {:op :attach :task task})
+                         ag (:agent attach)]
+                     {:attached ag
+                      :view (ev "(vec (sort (keys (:agents (seon.root/state sys)))))")
+                      :task (get-in (ask {:op :agents}) [:tasks task :agent])
+                      :listed (vec (keys (:agents (ask {:op :agents}))))
+                      :address (ev (str "(seon.render.ui/session-address (datahike.api/pull @(:conn sys) '[:seon.agent/key] [:seon.agent/key " (pr-str (name ag)) "]))"))}))]
+    (.mkdirs (java.io.File. tasks))
+    (spit (str tasks "/" tns ".edn") (pr-str [{:seon.task/name "t" :seon.task/plan "Work." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]))
+    (try
+      (let [boot! (fn [] (let [root (ts/start-root! root0)]
+                           (when-not (:port root) (throw (ex-info (str "the root did not listen: " (:log root)) {})))
+                           root))
+            r1 (boot!)
+            _ (ts/ask r1 {:op :eval :agent "root" :code (str "(my.root/load-tasks! sys " (pr-str tasks) ")")})
+            before (names-of r1)
+            _ (ts/stop-root! r1)
+            r2 (boot!)
+            after (try (names-of r2) (finally (ts/stop-root! r2)))
+            key-of #(some-> % name)
+            all-names (fn [m] (map pr-str (concat [(:attached m) (:task m) (:address m)] (:view m) (:listed m))))]
+        (is (some? (:attached before)) (pr-str before))
+        (is (= (key-of (:attached before)) (:address before)) "the page's address is the agent's key, its id's name")
+        (is (= (key-of (:attached before)) (key-of (:attached after))) "the same agent after the restart")
+        (is (= (key-of (:attached after)) (:address after)) "and its page address")
+        (is (= (:attached after) (:task after)) "and the task's agent")
+        (is (some #{(:attached after)} (:view after)) "and root's view")
+        (is (some #{(:attached after)} (:listed after)) "and the server's agents list")
+        (is (not-any? #(re-find #"^:?a\d+$" %) (map #(str/replace % "\"" "") (concat (all-names before) (all-names after))))
+            "no id of a counter's form"))
+      (finally (sh/sh "rm" "-rf" tasks runs)
+               (ts/drop-main! (:store root0) main)))))

@@ -297,7 +297,7 @@
       (is (= #{} (agents (d/db-with none (task/start-tx none "demo/a" "b1" :a1 {:branch :task-demo-a :model nil :max-turns 40} 1000)))) "a task nobody started links nothing"))))
 
 
-;; task seon.root/an-agent-is-named-by-its-key (docs/decisions.md#an-id-is-the-content-of-the-facts-that-make-it-owner-2026-11-08)
+;; docs/decisions.md#an-id-is-the-content-of-the-facts-that-make-it-owner-2026-11-08 (docs/decisions.md#an-id-is-the-content-of-the-facts-that-make-it-owner-2026-11-08)
 (deftest an-agent-is-named-by-a-unique-id-and-a-call-by-its-content
   (let [ids (repeatedly 100 seon.lib/unique-id)
         db (d/db-with (db-with-program) (task/create-tx (db-with-program) [(decl "Do.")]))
