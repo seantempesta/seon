@@ -241,8 +241,9 @@
         body (clojure.data.json/read-str (:context wire))
         msgs (get body "messages")
         call (first (filter #(some-> (get-in % ["tool_calls" 0 "function" "arguments"]) (clojure.string/includes? "(+ 1 1)")) msgs))
-        cid (get-in call ["tool_calls" 0 "id"])
-        args (clojure.data.json/read-str (get-in call ["tool_calls" 0 "function" "arguments"]))]
+        [ecall ecall2] (get call "tool_calls")
+        args (clojure.data.json/read-str (get-in ecall ["function" "arguments"]))
+        result-of (fn [c] (get (first (filter #(and (= "tool" (get % "role")) (= (get c "id") (get % "tool_call_id"))) msgs)) "content"))]
     (is (clojure.string/includes? (:next attach) "seon_context") "an attach names the next step")
     (is (clojure.string/includes? (:next attach) "message-md") "and the shape of a reply")
     (is (= [2 4] (filterv number? (map :value (:responses called)))) "each eval answers, in order")
@@ -255,9 +256,10 @@
     (is (= ["eval"] (mapv #(get-in % ["function" "name"]) (get body "tools"))) "the body holds the tool a model is given")
     (is (= (clojure.data.json/read-str (clojure.data.json/write-str seon.model/eval-tool)) (first (get body "tools"))) "that very tool")
     (is (= "system" (get (first msgs) "role")))
-    (is (= {"message-md" "Adding, then adding again." "evals" [{"intent" "add one and one" "code" "(+ 1 1)"} {"intent" "then two and two" "code" "(+ 2 2)"}]} args) "one call, as a model's, its message on it")
-    (let [tool (first (filter #(and (= "tool" (get % "role")) (= cid (get % "tool_call_id"))) msgs))]
-      (is (re-find #"(?s):value 2.*:value 4" (get tool "content")) "one tool message holds its results in order"))
+    (is (= "Adding, then adding again." (get call "content")) "the message is the reply's text, as a model's")
+    (is (= {"intent" "add one and one" "code" "(+ 1 1)"} args) "the first eval is a call of its own")
+    (is (= {"intent" "then two and two" "code" "(+ 2 2)"} (clojure.data.json/read-str (get-in ecall2 ["function" "arguments"]))) "and the second")
+    (is (= [true true] [(boolean (re-find #":value 2" (result-of ecall))) (boolean (re-find #":value 4" (result-of ecall2)))]) "each call answered by a tool message of its own")
     (is (not-any? #(clojure.string/includes? (str (get % "content")) "old-shape-ran") msgs) "the old shape ran nothing")
     (is (clojure.string/includes? (:context text) "(+ 1 1)") "the text read holds the conversation too")))
 
