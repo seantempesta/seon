@@ -86,7 +86,7 @@
   its t moves."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map :any]]}
   [n]
-  [{} (d/db-with (ts/test-db) (into [{:db/id "a" :seon.agent/id :a1}]
+  [{} (d/db-with (ts/test-db) (into [{:db/id "a"}]
                                     (for [i (range (* 20 n))] {:seon.eval/id (str "a1-1-1/" i) :seon.eval/agent "a"
                                                         :seon.eval/code "(+ 1 2)" :seon.eval/response {:value 3}})))])
 
@@ -110,8 +110,8 @@
   "The input of size n: the agents list's opts over a db holding n sessions of another boot and one of boot \"b\", and that boot."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map :string]]}
   [n]
-  [{:seon.db/db (d/db-with (ts/test-db) (into [{:seon.agent/key "b/a1" :seon.agent/id :a1}]
-                                              (for [i (range n)] {:seon.agent/key (str "other/a" i) :seon.agent/id (keyword (str "o" i))})))}
+  [{:seon.db/db (d/db-with (ts/test-db) (into [{:seon.agent/key "b/a1"}]
+                                              (for [i (range n)] {:seon.agent/key (str "other/a" i)})))}
    "b"])
 
 (deftest a-boots-sessions-cost-no-other-boots
@@ -131,9 +131,9 @@
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map :any :any]]}
   [n]
   (let [db0 (d/db-with (ts/test-db) (seon.task/create-tx (ts/test-db) (vec (for [i (range n)] {:seon.task/ns 't :seon.task/name (str "k" i) :seon.task/plan (str "Make " i ".") :seon.task/proofs #{}}))))
-        db0 (-> db0 (d/db-with [{:seon.root/id :root :seon.root/boot "b1" :seon.config.agent/max-running 4}]) (d/db-with (seon.task/agent-tx "b1" :a1 {:status :idle})))
+        db0 (-> db0 (d/db-with [{:seon.root/id :root :seon.root/boot "b1" :seon.config.agent/max-running 4}]) (d/db-with (seon.task/agent-tx :a1 {:status :idle})))
         st (#'seon.render.proc/main-info {} db0)
-        db1 (d/db-with db0 (seon.task/agent-tx "b1" :a1 {:status :busy}))]
+        db1 (d/db-with db0 (seon.task/agent-tx :a1 {:status :busy}))]
     [st db1 (vec (apply concat (d/datoms-diff db0 db1 :eavt [])))]))
 
 (deftest a-move-of-main-costs-what-moved
@@ -159,8 +159,8 @@
   [n]
   (let [db (reduce d/db-with (ts/test-db)
                    [[{:seon.root/id :root :seon.root/boot "b1"}]
-                    (seon.task/agent-tx "b1" :a1 {:status :idle})
-                    (into [] (mapcat #(seon.repl/record-tx {:seon.agent/key "b1/a1" :seon.agent/id :a1} (str "e" %) "a1"
+                    (seon.task/agent-tx :a1 {:status :idle})
+                    (into [] (mapcat #(seon.repl/record-tx {:seon.agent/key "b1/a1"} (str "e" %) "a1"
                                                            {:seon.eval/code "(+ 1 2)" :seon.eval/response {:handle 'result/e1 :value 3}}))
                           (range n))])]
     [[db] (:db/id (d/entity db [:seon.agent/key "b1/a1"]))]))
@@ -171,7 +171,7 @@
   {:malli/schema [:=> [:cat pos-int?] [:tuple [:vector :any] pos-int?]]}
   [n]
   (let [[[branch] eid] (agent-of n)
-        main (reduce d/db-with (ts/test-db) [[{:seon.root/id :root :seon.root/boot "b1"}] (seon.task/agent-tx "b1" :a1 {:status :busy :branch :b})])]
+        main (reduce d/db-with (ts/test-db) [[{:seon.root/id :root :seon.root/boot "b1"}] (seon.task/agent-tx :a1 {:status :busy :branch :b})])]
     [[main branch] eid]))
 
 (defn- watching
@@ -217,11 +217,11 @@
   more on the branch since: what the next pass draws (the turn to come's request, made at the head); and the view."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map :any]]}
   [n]
-  (let [k (seon.task/agent-key "b1" :a1)
-        ev (fn [id turn] (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a1} id "a1" {:seon.eval/code "(+ 1 2)" :seon.eval/response {:handle (symbol "result" id) :value 3} :seon.eval/call (seon.task/call-ref k turn) :seon.eval/call-id (str "c-" id)}))
+  (let [k "a1"
+        ev (fn [id turn] (seon.repl/record-tx {:seon.agent/key k} id "a1" {:seon.eval/code "(+ 1 2)" :seon.eval/response {:handle (symbol "result" id) :value 3} :seon.eval/call (seon.task/call-ref k turn) :seon.eval/call-id (str "c-" id)}))
         db0 (reduce d/db-with (ts/test-db)
                     [[{:seon.root/id :root :seon.root/boot "b1"}]
-                     (seon.task/agent-tx "b1" :a1 {:status :busy :branch :task-x})])
+                     (seon.task/agent-tx :a1 {:status :busy :branch :task-x})])
         db0 (reduce d/db-with db0
                     [(seon.doc/load-tx db0 "docs" {seon.ctx.wire/system-page "# You are a Seon agent\n\nThe help page."})
                      (seon.task/create-tx db0 [{:seon.task/ns 't :seon.task/name "x" :seon.task/plan "Make x." :seon.task/proofs #{'t-test/x-test}}])
@@ -268,7 +268,7 @@
           st {:rid 1 :pending {} :watch #{:a1} :waiting {} :kf-wanted #{} :views {} :main-db main
               :branches {:a1 {:db branch :read [:b]}} :view {:agents {}}}
           [st1 _] (#'seon.render.proc/pass-view st :a1)
-          r (d/with main (seon.task/agent-tx "b1" :a1 {:status :idle}))
+          r (d/with main (seon.task/agent-tx :a1 {:status :idle}))
           [st2 _] (#'seon.render.proc/pass-view (assoc st1 :main-db (:db-after r)) :a1)]
       (clojure.test/is (= 1 (- (get-in st2 [:counts :rendered]) (get-in st1 [:counts :rendered]))) (str n " rows: the agent's head rendered, nothing else")))))
 
@@ -293,13 +293,13 @@
                         [{:seon.agent/key k :seon.agent/turn (inc i)}
                          {:seon.model-call/id (str k "/" (inc i)) :seon.model-call/agent {:seon.agent/key k} :seon.model-call/n (inc i) :seon.model-call/origin :model
                           :seon.model-call/reply (str "Checking step " i ".") :seon.model-call/ms 1}]
-                        (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a1} id "a1"
+                        (seon.repl/record-tx {:seon.agent/key k} id "a1"
                                              {:seon.eval/call-id (str "c-" id) :seon.eval/call (seon.task/call-ref k (inc i)) :seon.eval/code (str "(inc " i ")")
                                               :seon.eval/response {:handle (symbol "result" id) :value {:step i}}})
                         (when (zero? (mod i 3))
                           (update (seon.task/message-tx (str "mm-" i) "owner" [k] (str "How is step " i "?") 1000) 0 assoc
                                   :seon.message/call (seon.task/call-ref k (inc i)))))))
-        base (reduce d/db-with (ts/test-db) [[{:seon.root/id :root :seon.root/boot "b1"}] (seon.task/agent-tx "b1" :a1 {:status :busy :branch :b})])
+        base (reduce d/db-with (ts/test-db) [[{:seon.root/id :root :seon.root/boot "b1"}] (seon.task/agent-tx :a1 {:status :busy :branch :b})])
         db (reduce (fn [db i] (d/db-with db (vec (turn i)))) base (range (dec n)))
         c (seon.ctx/build db (seon.db/eid db :seon.agent/key k) :b)
         at (volatile! db)
@@ -541,3 +541,73 @@
                        :per-n {:calls 200 :bytes 120000}
                        :fixed {:calls 700 :bytes 1300000}
                        :sizes [10 40 80]}))))))
+
+(defn turns-of
+  "The input at n: the arguments of seon.ctx.wire/diffs-through for agent b/t<n> on a branch where it holds a task and works n turns, each a commit with an eval (a record as the REPL writes it) and the agent's turn number moved: the db, the agent, and the chain [nil p1 ... pn] of the turns' points."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :int [:vector [:maybe :map]]]]}
+  [n]
+  (let [conn *conn* k (str "b/t" n) tid (str "demo/t" n)
+        point (fn [] (let [db @conn] {:branch :b :commit (d/commit-id db) :t (:max-tx db)}))]
+    (d/transact conn (seon.doc/load-tx @conn "docs" {seon.ctx.wire/system-page (str "# You are a Seon agent " n "\n\nRules.")}))
+    (d/transact conn (seon.task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name (str "t" n) :seon.task/plan "Make t." :seon.task/proofs #{'demo-test/t-test}}]))
+    (d/transact conn [{:seon.agent/key k :seon.agent/turn 0 :seon.agent/task {:seon.task/id tid}}])
+    [@conn (:db/id (d/entity @conn [:seon.agent/key k]))
+     (into [nil] (for [i (range n)]
+                   (do (d/transact conn [{:seon.agent/key k :seon.agent/turn (inc i)}
+                                         {:seon.eval/id (str "t" n "e" i) :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key k}
+                                          :seon.eval/call (assoc (seon.task/call-ref k (inc i)) :seon.model-call/origin :model :seon.model-call/reply (str "Trying " i "."))
+                                          :seon.eval/code (str "(f " i ")") :seon.eval/response {:handle (symbol "result" (str "t" n "e" i)) :value (vec (range 5)) :ns 'user} :seon.eval/call-id (str "c" i) :seon.eval/intent (str "Step " i ".")}])
+                       (point))))]))
+
+(deftest a-restart-draws-its-turns-in-one-walk
+  ;; rule 6 of seon.render/one-walk-per-view: every pair of an agent's turns filled in one pass (seon.ctx.wire/diffs-through), a draw at the
+  ;; first point then what moved at each later one, so a restart of T turns costs the first draw and a part a turn, not a draw a pair.
+  ;; Measured on the test world, whose store is :memory, where a commit's diff (seon.ctx/moved) walks the whole index; LMDB, where it costs
+  ;; what changed, is what counts and is measured on a lab root.
+  (ts/test-branch!
+    (fn [_ conn]
+      (binding [*conn* conn]
+        (cost/proof
+          {:of 'seon.ctx.wire/diffs-through :input 'seon.render-cost-test/turns-of
+           :n "turns of the agent, each a commit holding an eval and the turn number moved"
+           :work "the page drawn once at the first point, then at each later point the datoms between it and the one before read, the ctx patched by them and the components they reached drawn again, their edits made"
+           :growth :linear
+           ;; measured 2026-11-08 on the :memory test store (a commit's diff walks the whole index there, so the bytes creep up; LMDB's costs what changed):
+           ;; 20.0 MB / 3,362 calls / 7.1M ticks at 4 turns, 41.7 MB / 5,714 / 15.8M at 8, 84.6 MB / 10,418 / 33.0M at 16
+           :per-n {:calls 600 :bytes 5400000}
+           :fixed {:calls 1000 :bytes 1000000}
+           :sizes [4 8 16]})))))
+
+;; See docs/render.md#a-change-is-edits-by-name
+(defn asks-changes
+  "A component that asks the walk for what changed between the points in its opts (the :seon.render/changes input), and draws the edits."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:from :map] [:to :map] [:seon.render/changes :seon.host/fn]]]] :any]}
+  [{:keys [from to] changes :seon.render/changes}]
+  [:p (pr-str (changes from to))])
+
+(defn two-askers
+  "A page whose two components, each its own key, ask for the same pair (two views of one point)."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:from :map] [:to :map]]]] :any]}
+  [{:keys [from to]}]
+  [:div [#'asks-changes {:key :a :from from :to to}] [#'asks-changes {:key :b :from from :to to}]])
+
+(deftest a-pair-of-points-is-computed-once
+  ;; rule 6: the input is one function of two points, memoized on the walk: two components and a second ask cost one pass; a pair
+  ;; asked cold fills every pair before it from the agent's points in the same pass, and a pair that is not between two turns is drawn alone
+  (let [passes (atom []) p0 {:branch :b :commit #uuid "00000000-0000-0000-0000-000000000000" :t 1}
+        p1 (assoc p0 :commit #uuid "00000000-0000-0000-0000-000000000001" :t 2) p2 (assoc p0 :commit #uuid "00000000-0000-0000-0000-000000000002" :t 3)
+        pages {nil {} p0 {"status" '[f {} "was"]} p1 {"status" '[f {} "now"]} p2 {"status" '[f {} "later"]}}
+        through (fn [chain] (swap! passes conj chain)
+                  (mapv (fn [[a b]] (seon.render/page-edits (seon.render/forms-moved (pages a) (pages b)))) (partition 2 1 chain)))
+        w (seon.render/walker {:ref (seon.ratom/atom {}) :changes seon.ctx/changes :points (fn [] [p0 p1 p2]) :diffs-through through} (constantly nil)
+                              [#'two-askers {:from p1 :to p2}])]
+    (seon.render/flush! w nil)
+    (clojure.test/is (= [[nil p0 p1 p2]] @passes) "two components, one pair, cold: one pass from nothing through p2, filling the pairs before it")
+    (let [again ((seon.render/changes-of w) p0 p1)]
+      (clojure.test/is (= [[nil p0 p1 p2]] @passes) "an earlier pair of the pass: held")
+      (clojure.test/is (= (seon.render/page-edits (seon.render/forms-moved (pages p0) (pages p1))) again) "the edits of the two pages"))
+    ((seon.render/changes-of w) p0 p2)
+    (clojure.test/is (= [[nil p0 p1 p2] [p0 p2]] @passes) "a pair that is not between neighbours is drawn alone")
+    (seon.render/dispose-walk! w)
+    (let [no-source (seon.render/walker {:ref (seon.ratom/atom {}) :changes seon.ctx/changes} (constantly nil) [#'identity {}])]
+      (clojure.test/is (= :seon.render/no-diffs-through (:seon.error/type ((seon.render/changes-of no-source) p0 p1))) "no way to draw a point: a typed error, not nothing"))))

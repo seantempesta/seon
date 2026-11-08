@@ -86,10 +86,10 @@
   grows by that, not by what main writes (its static: seon.fork-server/static-due?). Nothing is written.
   See docs/machine.md#an-agents-first-write."
   {:malli/schema [:=> [:cat :map :map] :map]}
-  [st {:keys [task key agent branch]}]
+  [st {:keys [task key branch]}]
   (let [db (:db st) t (:max-tx db)]
     (when (and task key (d/entity db [:seon.task/id task]))
-      (let [db1 (:db-after (pdb/speculate db (agent/begin-run-tx db task key agent)))
+      (let [db1 (:db-after (pdb/speculate db (agent/begin-run-tx db task key)))
             db2 (:db-after (pdb/speculate db1 (task/agent-cites-tx db1 [:seon.agent/key key] key)))]
         (ctx/build db2 (pdb/eid db2 :seon.agent/key key) branch)))
     (if (= t (:warm-t st))

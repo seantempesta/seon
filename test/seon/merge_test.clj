@@ -208,7 +208,7 @@
 (deftest scratch-and-observations-never-merge
   (let [ours (with (base) [{:note/text "scratch" :note/agent :a1}
                          {:seon.eval/id "e1" :seon.eval/by "a1" :seon.eval/code "(+ 1 2)" :seon.eval/response {:handle 'result/e1 :value 3}}
-                         {:seon.agent/id :a1 :seon.process/pid 7}
+                         {:seon.agent/key "a1" :seon.process/pid 7}
                          {:task/name :x/y :task/status :done}])]
     (is (= (pm/program (base) #{}) (pm/program ours #{})))
     (is (empty? (:ours (tw ours (base)))))))
@@ -247,7 +247,7 @@
           (str "mg/check: every input its contract generates states a conflict; seed " seed)))))
 
 (deftest behind-means-main-program-moved
-  (let [observed (with (base) [{:seon.agent/id :root :seon.process/pid 9} {:note/text "run facts" :note/agent :t}])]
+  (let [observed (with (base) [{:seon.agent/key "root" :seon.process/pid 9} {:note/text "run facts" :note/agent :t}])]
     (is (empty? (:theirs (tw (base) observed))))
     (is (seq (:theirs (tw (base) (with (base) (var-tx "f" "(dec x)"))))))))
 

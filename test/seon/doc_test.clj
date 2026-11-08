@@ -345,8 +345,10 @@
     (is (= [] (seon.doc/tokens db "nowhere" all 2.0)) "no word of it in any text")
     (is (= [] (seon.doc/tokens db "" all 2.0)))
     (is (= ["datoms" "diff" "seon" "task" "outcome" "nearof" "ab"] (seon.doc/words "datoms-diff seon.task/outcome nearOf aB x")) "an identifier is its parts at separators, as the index tokenizes a text; a one-letter part is no word")
-    (testing "the first line holding a word, and its number"
-      (is (= {:line "(fusing 1))" :at 2} (select-keys (first (filter #(= 'app/g (:name %)) (seon.doc/tokens db "fusing" all 2.0))) [:line :at]))))))
+    (testing "the first line holding a word, and its number: read for a hit shown, by where its text is"
+      (let [g (first (filter #(= 'app/g (:name %)) (seon.doc/tokens db "fusing" all 2.0)))]
+        (is (not (contains? g :line)) "a ranked hit carries no line: ranking reads no text")
+        (is (= {:line "(fusing 1))" :at 2} (seon.doc/line-of db "fusing" (:in g))))))))
 
 (defn- with-checkout
   "(f dir) where dir is a checkout of a few pages, as the files the wiki loads are read (docs/ and the top level, the
@@ -360,6 +362,21 @@
     (put "BAGGAGE.md" "# BAGGAGE\n\nWhat was left out, see [turns](docs/agent.md#turns).\n")
     (put "README.md" "# README\n\nStart with [AGENTS](AGENTS.md#agents).\n")
     (try (f dir) (finally (clojure.java.shell/sh "rm" "-rf" dir)))))
+
+(deftest a-dead-link-in-the-wiki-is-a-problem-and-the-boot-goes-on
+  ;; root's boot loads the wiki through seon.root/wiki-tx in its boot fact's commit; one link to no
+  ;; section in any page used to end the boot, then refused the whole wiki. Now the boot's load answers
+  ;; every page, and the link is a dead citation my.root/problems shows. On the world with a checkout of a
+  ;; few pages and one broken page (it was a root booted on a checkout of links to this one, 36 s)
+  (with-checkout
+    (fn [co]
+      (spit (str co "/docs/zz-broken.md") "# Broken\n\nIt links to [nowhere](agent.md#nowhere).\n")
+      (let [db0 (mt/world)
+            db (d/db-with db0 (seon.root/wiki-tx db0 co))]
+        (is (every? (set (seon.doc/page-paths db)) ["docs/zz-broken.md" "docs/agent.md" "AGENTS.md"]) "the rest loads, the broken page with it")
+        (is (= [["docs/zz-broken.md#broken" "docs/zz-broken.md#broken links to docs/agent.md#nowhere, which is no section"]]
+               (mapv (juxt :section :message) (problems/dead-citations db {})))
+            "and the link is one dead citation, naming page, section and target")))))
 
 (deftest the-wiki-holds-the-top-level-pages-beside-docs
   ;; one-index step 6: AGENTS.md, BAGGAGE.md and README.md are sections beside docs/'s, so one search and

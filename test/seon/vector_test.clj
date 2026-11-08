@@ -101,7 +101,7 @@
           db (d/db-with db (vector/tx-data [s] [t] (vectors 4 1 1 768) "m"))]
       (is (= [s] (map first (filter (comp #{s} first) (vector/due db "m")))) "a vector of the text before is no vector of the text now"))
     (is (= #{f s} (set (filter #{f s} (map first (vector/due db "m2"))))) "another model's vectors are due again")
-    (let [db (d/db-with db [{:db/id "a" :seon.agent/key "demo/a1" :seon.agent/id :a1}
+    (let [db (d/db-with db [{:db/id "a" :seon.agent/key "demo/a1"}
                             {:seon.eval/id "e1" :seon.eval/agent "a" :seon.eval/by "a1" :seon.eval/code "(f)" :seon.eval/response {}}])
           ev (:e (first (d/datoms db :avet :seon.eval/id "e1")))]
       (is (empty? (filterv (comp #{ev} first) (vector/due db "m")))
@@ -362,7 +362,7 @@
         e (plan-of main)
         main (d/db-with main (vector/tx-data [e] [(:tx (first (d/datoms main :eavt e :seon.task/plan)))] (vectors 1 1 1 768) "m"))
         ;; the branch wrote facts, none of them a text: a turn's and an eval's records
-        branch (d/db-with main [{:seon.model-call/id "b/a1/1" :seon.model-call/n 1}])
+        branch (d/db-with main [{:seon.model-call/id (seon.lib/call-id "b/a1" 1) :seon.model-call/n 1}])
         [n _ asked] (on-branch main branch answered #(agent/embed-written! 64 "m"))]
     (is (= 0 n))
     (is (empty? asked) "nothing written is due and the plan's vector is current: no request")

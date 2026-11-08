@@ -33,7 +33,8 @@
   ;; root boots on its main carrier, before any thread, and forks its fork server there while it
   ;; is the one thread (seon.root/boot!); its threads (Jolt's carriers, timer, poller) outlive
   ;; stop!, so a second start! in that process would fork beside them. It is refused by name
-  ;; instead, and nothing is forked
+  ;; instead, and nothing is forked. The carriers a go block starts stand for the first boot's
+  ;; (seon.check/boot-twice): the refusal is the same, and the test pays no first boot (21 s -> the process's start)
   (let [main (str "root-test-" (random-uuid))
         {:keys [exit out err]} (ts/binary-sh "env" "SEON_WEB_PORT=0" (str "SEON_STORE=" (test-store)) (str "SEON_MAIN=" main)
                                       "./seon" "boot-twice" "--profile" (name (config/profile)) :dir "target")
@@ -154,18 +155,29 @@
   ;; first loaded and the run it started are still there. A store of this test's own, the
   ;; last resort: what is proved is the default main of a store, which a shared test store's
   ;; other users would also resume; removed at the end.
+  ;; And every end of a root is a fact, on the same two boots (it was a test of its own,
+  ;; two more boots on a clone, 70 s): a clean stop is a fact naming its cause (:seon.root/stopped; here
+  ;; its stdin closes, as bin/root stop closes it), the next boot records it as :seon.root/previous-end, and
+  ;; a boot that left no stop fact (SIGKILL, a crash) is found :unclean. Who started a boot is that boot's
+  ;; (:seon.root/started-by): the test running start-root!, or the last --started-by its arguments name
   (let [checkout (seon.config/checkout)
         path (str checkout "/target/runs/root-test-main-" (random-uuid))
         tasks (str path "-tasks")
         _ (.mkdirs (java.io.File. tasks))
         _ (spit (str tasks "/demo.edn") (pr-str [{:seon.task/name "t" :seon.task/plan "Work." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]))
-        main {:op :eval :agent "root" :code "(name (seon.db/conn-main (:conn sys)))"}
+        ev (fn [code] {:op :eval :agent "root" :code code})
+        main (ev "(name (seon.db/conn-main (:conn sys)))")
         ;; and root's watch fact: a task count off names the batch that loaded the task files (:last-load)
-        held {:op :eval :agent "root" :code "[(count (seon.task/tasks @(:conn sys))) (set (keys (seon.task/agents @(:conn sys)))) (dissoc (:seon.root/watch (d/pull @(:conn sys) [:seon.root/watch] [:seon.root/id :root])) :roots :boot)]"}
-        first-boot (str/split-lines (root-answers path "main" [main {:op :eval :agent "root" :code (str "(my.root/load-tasks! sys " (pr-str tasks) ")")}
-                                                           {:op :attach :task "demo/t"} held]
+        held (ev "[(count (seon.task/tasks @(:conn sys))) (set (keys (seon.task/agents @(:conn sys)))) (dissoc (:seon.root/watch (d/pull @(:conn sys) [:seon.root/watch] [:seon.root/id :root])) :roots :boot)]")
+        by (ev "(:started-by (seon.task/root @(:conn sys)))")
+        first-boot (str/split-lines (root-answers path "main" [main (ev (str "(my.root/load-tasks! sys " (pr-str tasks) ")"))
+                                                           {:op :attach :task "demo/t"} held (ev "(:boot sys)") by]
                                                   {:args bare}))
-        second-boot (str/split-lines (root-answers path "main" [main held] {:args bare}))
+        second-boot (str/split-lines (root-answers path "main" [main held
+                                                                (ev "(:seon.root/previous-end (d/pull @(:conn sys) [:seon.root/previous-end] [:seon.root/id :root]))")
+                                                                (ev "(#'seon.root/previous-end (d/db-with @(:conn sys) [{:seon.root/id :root :seon.root/boot \"killed-boot\"}]))")
+                                                                by (ev "(= [\"--started-by\" \"seon.root-test/another\"] (vec (take-last 2 (my.root/resume-args sys))))")]
+                                                   {:args (into bare ["--started-by" "seon.root-test/another"])}))
         printed (fn [l] (ts/value-of (:response (try (edn/read-string {:default tagged-literal} l) (catch Exception _ nil)))))]
     (try
       (is (= "main" (printed (first first-boot))) "a boot with no main named works on the config's main")
@@ -175,6 +187,16 @@
         (is (= [1 1] [tasks-1 (count agents-1)]) (str "the first boot holds the one task it loaded (a file task is one whole task) and the agent it started; its watcher: " (pr-str watch-1)))
         (is (= 1 tasks-2) (str "the second boot still holds the task; its watcher: " (pr-str watch-2)))
         (is (every? agents-2 agents-1) "and the first boot's agent (its task is reaped, and started again by the next agent of the session)"))
+      (let [b1 (printed (nth first-boot 4))
+            [prev killed by2 resume] (map printed (drop 2 second-boot))]
+        (is (string? b1))
+        (is (= "seon.root-test/a-second-boot-resumes-the-same-main" (printed (nth first-boot 5))) "the test that started the boot is its fact")
+        (is (= "seon.root-test/another" by2) "and the next boot's is its own")
+        (is (true? resume) "and the generation after it carries it")
+        (is (= {:boot b1 :cause :stdin-eof} (select-keys prev [:boot :cause]))
+            "the second boot found the first's clean end: its stdin closed")
+        (is (= {:boot "killed-boot" :cause :unclean} (select-keys killed [:boot :cause]))
+            "a boot that left no stop fact is found :unclean"))
       (finally (sh/sh "rm" "-rf" path tasks (str path "-in") (str path ".log") (str path "-agents"))))))
 
 (deftest a-test-roots-task-files-are-its-own
@@ -219,63 +241,6 @@
           "the boot read's outcome, and a read that finds it so writes nothing")
       (finally (ts/stop-root! root) (ts/drop-main! path main) (clojure.java.shell/sh "rm" "-rf" runs)))))
 
-(deftest a-dead-link-in-the-wiki-is-a-problem-and-the-boot-goes-on
-  ;; root's boot loads the wiki (seon.root/wiki-tx) in its boot fact's commit; one link to no
-  ;; section in any page used to end the boot (bin/root start and next with it), then refused
-  ;; the whole wiki. Now the rest loads, the link is a dead citation my.root/problems shows,
-  ;; and the root boots. A
-  ;; checkout of this test's own: this one's files, its docs/ with one broken page more
-  (let [checkout (seon.config/checkout)
-        tmp (str checkout "/target/runs/root-test-wiki-" (random-uuid))
-        path (test-store)
-        main (str "root-test-wiki-" (random-uuid))
-        _ (.mkdirs (java.io.File. (str tmp "/docs")))
-        _ (doseq [f (.listFiles (java.io.File. checkout)) :let [n (.getName f)] :when (not (#{"docs" ".git" "target"} n))]
-            (sh/sh "ln" "-s" (.getPath f) (str tmp "/" n)))
-        ;; target/ is this fixture's own directory of links to the checkout's target/ entries but runs/ (where
-        ;; this fixture lives): a link to the whole of target/ is a cycle (docs/failure-points.md, a directory walk)
-        _ (.mkdirs (java.io.File. (str tmp "/target")))
-        _ (doseq [f (.listFiles (java.io.File. checkout "target")) :when (not= "runs" (.getName f))]
-            (sh/sh "ln" "-s" (.getPath f) (str tmp "/target/" (.getName f))))
-        _ (doseq [f (.listFiles (java.io.File. checkout "docs"))] (sh/sh "cp" (.getPath f) (str tmp "/docs/")))
-        _ (spit (str tmp "/docs/zz-broken.md") "# Broken\n\nIt links to [nowhere](agent.md#nowhere).\n")
-        out (root-answers path main [{:op :eval :agent "root" :code "(boolean (re-find #\"links to docs/agent.md#nowhere\" (pr-str (my.root/problems sys))))"}]
-                          {:env {"SEON_RUN_CHECKOUT" tmp}})
-        printed (ts/value-of (:response (try (edn/read-string {:default tagged-literal} (first (str/split-lines out))) (catch Exception _ nil))))]
-    (try
-      (is (str/includes? out "ROOT LISTENING") (str "the root boots: " out))
-      (is (true? printed) "and the dead link is an open problem")
-      (finally (ts/drop-main! path main) (sh/sh "rm" "-rf" tmp (str path "-in") (str path ".log"))))))
-
-(deftest every-end-of-a-root-is-a-fact
-  ;; task seon.root/every-end-of-a-root-is-a-fact: a clean stop is a fact naming its cause
-  ;; (:seon.root/stopped; here its stdin closes, as bin/root stop closes it), the next boot
-  ;; records it as :seon.root/previous-end, and a boot that left no stop fact (SIGKILL, a
-  ;; crash) is found :unclean. Who started a boot is that boot's (:seon.root/started-by): the
-  ;; test running start-root!, or the last --started-by its arguments name. A store of this test's
-  ;; own, as a-second-boot-resumes-the-same-main's (root-answers names its fifo and log after the
-  ;; store); removed at the end.
-  (let [path (ts/clone-process-store! (str (seon.config/checkout) "/target/runs/root-test-ends-" (random-uuid)))
-        ev (fn [code] {:op :eval :agent "root" :code code})
-        printed (fn [l] (ts/value-of (:response (try (edn/read-string {:default tagged-literal} l) (catch Exception _ nil)))))
-        by (ev "(:started-by (seon.task/root @(:conn sys)))")
-        [b1 by1] (str/split-lines (root-answers path "main" [(ev "(:boot sys)") by]))
-        [prev killed by2 resume] (str/split-lines
-                           (root-answers path "main" [(ev "(:seon.root/previous-end (d/pull @(:conn sys) [:seon.root/previous-end] [:seon.root/id :root]))")
-                                                  (ev "(#'seon.root/previous-end (d/db-with @(:conn sys) [{:seon.root/id :root :seon.root/boot \"killed-boot\"}]))")
-                                                  by (ev "(= [\"--started-by\" \"seon.root-test/another\"] (vec (take-last 2 (my.root/resume-args sys))))")]
-                                         {:args ["--started-by" "seon.root-test/another"]}))]
-    (try
-      (is (string? (printed b1)))
-      (is (= "seon.root-test/every-end-of-a-root-is-a-fact" (printed by1)) "the test that started the boot is its fact")
-      (is (= "seon.root-test/another" (printed by2)) "and the next boot's is its own")
-      (is (true? (printed resume)) "and the generation after it carries it")
-      (is (= {:boot (printed b1) :cause :stdin-eof} (select-keys (printed prev) [:boot :cause]))
-          "the second boot found the first's clean end: its stdin closed")
-      (is (= {:boot "killed-boot" :cause :unclean} (select-keys (printed killed) [:boot :cause]))
-          "a boot that left no stop fact is found :unclean")
-      (finally (sh/sh "rm" "-rf" path (str path "-in") (str path ".log") (str path "-agents"))))))
-
 (deftest a-build-without-whole-program-inference-reads-with-tools-reader
   ;; with
   ;; JOLT_NO_WP_INFER=1, `jolt build` of an app requiring clojure.tools.reader fails to analyze
@@ -293,13 +258,15 @@
   ;; task seon.root/main-follows-its-source-tree: a root resuming its main imports its source
   ;; tree again when the tree reads otherwise than main's last import, replacing main's
   ;; program (seon.source/replace-tx), and imports nothing when it reads the same. Three
-  ;; boots on a main of their own on the test store (deleted at the end), the tree a scratch
+  ;; boots on one store of its own (removed at the end), the tree a scratch
   ;; repository under target/: commit A, then commit B with one function changed and one
   ;; removed, then B again. B's ns form also gains an alias that a new function uses (2026-10-22:
   ;; an import that ran a form before its namespace's new alias killed the root, `No such namespace`),
   ;; and the second boot runs that function: the binary, older than main's program, catches up at boot.
   ;; (seon.source-test/a-restart-catches-up held these two claims on a clone of the whole checkout,
-  ;; with two model turns, about 120 s; folded here 2026-11-08.)
+  ;; with two model turns, about 120 s; folded here 2026-11-08.) A store of its own, empty, with no wiki: on a
+  ;; branch of the seeded process store each boot's import of the one-file tree retracted the checkout's
+  ;; program first (docs/testing.md#a-root-costs-what-it-boots), 74 s for three boots
   (let [checkout (seon.config/checkout)
         tree (str checkout "/target/tmp/root-test-follow-" (random-uuid))
         tasks (str tree "-tasks")
@@ -310,9 +277,9 @@
                   (str/trim (:out (git "rev-parse" "HEAD"))))
         a "(ns follow.tree)\n\n(defn kept [] 1)\n\n(defn changed [] 1)\n\n(defn removed [] 1)\n"
         b "(ns follow.tree\n  (:require [clojure.set :as follow-set]))\n\n(defn kept [] 1)\n\n(defn changed [] 2)\n\n(defn uses-alias [] (follow-set/union #{1} #{2}))\n"
-        path (test-store)
-        main (str "root-test-" (random-uuid))
-        args ["--set" (str ":seon.config.source/root=" (pr-str tree)) "--set" ":seon.config.source/dirs=[\"src\"]"]
+        path (str tree "-store")
+        main "main"
+        args ["--set" (str ":seon.config.source/root=" (pr-str tree)) "--set" ":seon.config.source/dirs=[\"src\"]" "--set" ":seon.config.root/wiki-dirs=[]"]
         probe {:op :eval :agent "root"
                :code (str "(let [db @(:conn sys)] {:fact (:seon.root/source (datahike.api/pull db [:seon.root/source] [:seon.root/id :root]))"
                           " :text (seon.source/file-text db 'follow.tree)"
@@ -348,4 +315,56 @@
         (is (and (nil? (:inputs (:fact two))) (re-find #"binary was built from" (str (:unshared (:fact two)))))
             "the running binary is not built from this tree: no inputs to key agents' results by, and why")
         (is (= b (:text three))))
-      (finally (ts/drop-main! (test-store) main) (sh/sh "rm" "-rf" tree tasks (str path "-in") (str path ".log"))))))
+      (finally (sh/sh "rm" "-rf" tree tasks path (str path "-agents") (str path "-in") (str path ".log"))))))
+
+(deftest a-root-restart-names-the-same-agent-by-the-same-name
+  ;; docs/decisions.md#an-id-is-the-content-of-the-facts-that-make-it-owner-2026-11-08: an agent's id is the keyword of its
+  ;; :seon.agent/key, minted once (seon.root/start-agent) and kept by the session's next agent
+  ;; (seon.task/session-key), so a root's restart leaves every interface naming the agent as before:
+  ;; root's view, the task's agent, the server's agents list and the page's address. One agent on one
+  ;; task; root stopped cleanly and started again on the same store, main and runs, and the task
+  ;; attached again (the session continues); no id of a counter's form (:a1) appears before or after.
+  (let [checkout (config/checkout)
+        tns (seon.lib/unique-id)
+        task (str tns "/t")
+        tasks (str checkout "/target/runs/" tns "-tasks")
+        main (str "restart-names-" (random-uuid))
+        runs (str checkout "/target/runs/" main "-runs")
+        root0 {:store (ts/process-store checkout) :main main :runs runs
+               :args ["--set" (str ":seon.config.source/root=" (pr-str checkout))]}
+        ;; every name the interfaces give the task's agent, read on the running root
+        names-of (fn [root]
+                   (let [ask #(ts/ask root %)
+                         ev #(let [r (ask {:op :eval :agent "root" :code %})] (if (:error r) r (ts/value-of (:response r))))
+                         attach (ask {:op :attach :task task})
+                         ag (:agent attach)]
+                     {:attached ag
+                      :view (ev "(vec (sort (keys (:agents (seon.root/state sys)))))")
+                      :task (get-in (ask {:op :agents}) [:tasks task :agent])
+                      :listed (vec (keys (:agents (ask {:op :agents}))))
+                      :address (ev (str "(seon.render.ui/session-address (datahike.api/pull @(:conn sys) '[:seon.agent/key] [:seon.agent/key " (pr-str (name ag)) "]))"))}))]
+    (.mkdirs (java.io.File. tasks))
+    (spit (str tasks "/" tns ".edn") (pr-str [{:seon.task/name "t" :seon.task/plan "Work." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]))
+    (try
+      (let [boot! (fn [] (let [root (ts/start-root! root0)]
+                           (when-not (:port root) (throw (ex-info (str "the root did not listen: " (:log root)) {})))
+                           root))
+            r1 (boot!)
+            _ (ts/ask r1 {:op :eval :agent "root" :code (str "(my.root/load-tasks! sys " (pr-str tasks) ")")})
+            before (names-of r1)
+            _ (ts/stop-root! r1)
+            r2 (boot!)
+            after (try (names-of r2) (finally (ts/stop-root! r2)))
+            key-of #(some-> % name)
+            all-names (fn [m] (map pr-str (concat [(:attached m) (:task m) (:address m)] (:view m) (:listed m))))]
+        (is (some? (:attached before)) (pr-str before))
+        (is (= (key-of (:attached before)) (:address before)) "the page's address is the agent's key, its id's name")
+        (is (= (key-of (:attached before)) (key-of (:attached after))) "the same agent after the restart")
+        (is (= (key-of (:attached after)) (:address after)) "and its page address")
+        (is (= (:attached after) (:task after)) "and the task's agent")
+        (is (some #{(:attached after)} (:view after)) "and root's view")
+        (is (some #{(:attached after)} (:listed after)) "and the server's agents list")
+        (is (not-any? #(re-find #"^:?a\d+$" %) (map #(str/replace % "\"" "") (concat (all-names before) (all-names after))))
+            "no id of a counter's form"))
+      (finally (sh/sh "rm" "-rf" tasks runs)
+               (ts/drop-main! (:store root0) main)))))

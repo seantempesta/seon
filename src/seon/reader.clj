@@ -282,7 +282,13 @@
   {:malli/schema [:=> [:cat :string] [:map [:words :string] [:forms :string]]]}
   [input]
   (let [{:keys [text repairs]} (forgive input)
-        word-at (into #{} (keep (fn [{:keys [at inserted]}] (when (= ";; " inserted) at))) repairs)
+        ;; the repairs are an edit log, each :at where it went when it was made: a later one at or before it (a closer put back at the
+        ;; end of the code before a line) moves it, so each text line's place in the answered text is found by replaying what came after
+        word-at (into #{} (keep-indexed (fn [i {:keys [at inserted]}]
+                                          (when (= ";; " inserted)
+                                            (reduce (fn [p {a :at ins :inserted drop :dropped}] (if (<= a p) (+ p (- (count ins) (count drop))) p))
+                                                    at (subvec repairs (inc i))))))
+                      repairs)
         [words forms] (reduce (fn [[ws fs at] line]
                                 (let [next-at (+ at (count line) 1)]
                                   (if (word-at at) [(conj ws (subs line 3)) fs next-at] [ws (conj fs line) next-at])))

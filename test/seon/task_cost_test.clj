@@ -38,14 +38,15 @@
   ["e1" "(rows)" {:value (vec (for [i (range n)] {:id i :name (str "row " i) :tags [:a :b] :text "some text of a plain answer"}))} {:origin :model}])
 
 (deftest a-handle-costs-its-answer
-  ;; docs/agent.md#your-turn; 10 calls by the owner's yes, 2026-11-07: an eval's split into its result (seon.db/with-response) is one more
+  ;; docs/agent.md#your-turn; 10 calls by the owner's yes, 2026-11-07: an eval's split into its result (seon.db/with-response) is one more;
+  ;; 11 by the owner's yes, 2026-11-08: the handle's name is seon.lib/id's form, one call more
   (cost/proof
     {:of 'seon.repl/handled :input 'seon.task-cost-test/answer-of
      :n "rows in the answer"
      :work "one walk of the answer to record it and one to hash it, a row at a time"
      :growth :linear
      :per-n {:calls 0 :bytes 50000}
-     :fixed {:calls 10 :bytes 50000}
+     :fixed {:calls 11 :bytes 50000}
      :sizes [10 40 160]}))
 
 (deftest finding-a-task-by-its-id-is-one-index-seek
@@ -92,7 +93,7 @@
         tk (task/task db "demo/t1")]
     (is (= [:dead "c0ffee" "the model failed"] ((juxt :seon.task/outcome :seon.task/commit :seon.task/reason) tk)))
     (is (every? #(contains? tk %) [:seon.task/error :seon.task/failures :seon.task/costs :seon.task/waste]) "the wildcard brings the problem members")
-    (is (= "boot-1/a1" (:seon.task/agent tk)) "and names its agent by key")))
+    (is (= "a1" (:seon.task/agent tk)) "and names its agent by key")))
 
 (deftest reading-every-task-costs-what-its-datoms-cost
   (cost/proof

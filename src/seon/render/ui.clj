@@ -1006,8 +1006,8 @@
   db by seon.ctx.search/search (exact words, meaning once its query has a vector, and the names it holds;
   functions, wiki sections and schema keys, no relevance cut), its :seon.search/k hits (else
   :seon.config.render/search's), each a line: its name (its first sentence added nothing a model used, at
-  ~90 tokens a hit against ~10: docs/vector.md#search); the hits left out are one last line, how many and the call
-  that answers them; a query with no vector yet says it was searched without meaning. A change of its query (a swap! on ctx)
+  ~90 tokens a hit against ~10: docs/vector.md#search); the hits left out are not drawn (my.agent/search answers them);
+  nothing until its query has a vector, since words alone match as weakly when nothing is to be found. A change of its query (a swap! on ctx)
   redraws this part alone, and the model is sent what changed of it
   (docs/render.md#the-render-is-an-eval). What it finds for a request is measured in
   docs/vector.md#what-the-work-is-likely-to-need-as-an-eval."
@@ -1016,18 +1016,17 @@
   (when-let [s (some-> (get-in c at) ratom/realize)]
     (let [q (:seon.search/query s)
           ;; the search fact's own vector, once the pipeline has embedded its query (seon.vector's due texts)
-          e (pdb/eid db :seon.search/id (:seon.search/id s))
-          qv (when (and e (vector/vector-of db e)) e)
-          ;; its own count when it names one, else :seon.config.render/search's; the hits it leaves out are
-          ;; said by search's last entry ({:kind :more :left n :more \"the call that answers them\"}), drawn as such
-          hits (search/search db q (cond-> {:kinds #{:var :section :schema} :min 0.0} (:seon.search/k s) (assoc :k (:seon.search/k s))) qv)]
-      ;; the task's own request is on the page already: the heading names it rather than repeating it
-      [:section [:h3 (str (if (= q (get-in c [:task :seon.task/plan])) "search: this task's request" (str "search: " q))
-                          (when-not qv " (by its words: its query has no vector yet)"))]
-       (into [:ol] (for [{:keys [kind name left more]} hits]
-                     (if (= :more kind)
-                       [:li (str left " more: ") [:code more]]
-                       [:li [:code (str name)]])))])))
+          e (pdb/eid db :seon.search/id (:seon.search/id s))]
+      ;; drawn once its query has a vector, never by words alone: words alone found the same weak matches for a
+      ;; request with nothing to find as for one with something (owner, 2026-11-08: wait for its vector)
+      (when (and e (vector/vector-of db e))
+        (let [;; its own count when it names one, else :seon.config.render/search's; the hits left out are not
+              ;; drawn: a count that moves each turn would resend the line (my.agent/search answers them)
+              hits (remove #(= :more (:kind %))
+                           (search/search db q (cond-> {:kinds #{:var :section :schema} :min 0.0} (:seon.search/k s) (assoc :k (:seon.search/k s))) e))]
+          ;; the task's own request is on the page already: the heading names it rather than repeating it
+          [:section [:h3 (if (= q (get-in c [:task :seon.task/plan])) "search: this task's request" (str "search: " q))]
+           (into [:ol] (for [{:keys [name]} hits] [:li [:code (str name)]]))])))))
 
 (defn- held-whole
   "Where ctx c holds whole each entity the cites at paths ps joined, {e path}: the agent's task and its needs, the
@@ -1274,7 +1273,7 @@
         said? (not (str/blank? intent))
         called? (or call-id said?)]
     [:li (cond-> (if called?
-                   {:wire/role "assistant" :wire/call-id (wire/wire-id id) :wire/result mark}
+                   {:wire/role "assistant" :wire/call-id id :wire/result mark}
                    {:wire/role "user" :wire/result (assoc mark :with (array-map :by by :code code))})
            true (assoc :wire/ref [:eval id])
            seon? (assoc :wire/for "model"))
@@ -1510,7 +1509,7 @@
               (when (pos? turns) (str (if (= :green outcome) " in " " after ") turns (if (= 1 turns) " turn" " turns")))
               (when (and reason (not (#{:green :waiting} outcome))) (str " · " reason)))])
       (when-let [status (ratom/realize (:seon.agent/status c))]
-        [:p {:class "muted"} (case status :busy "working…" :idle "waiting for you" (kname status))]))))
+        [:p {:class "muted"} (case status :busy "working…" (kname status))]))))
 
 (defn story-rows
   "Each turn's reading of a proof, [n status failures first-failure] in order (status nil: not run yet; :gone: its commit was swept), as the runs of equal readings: {:from :to :status :failures :first}, so a change is a row and a stretch of the same is one. See docs/render.md#the-page."
@@ -1605,6 +1604,8 @@
   [:div {:id "render-ctx"} [#'task-list {}] [#'conversation-list {}]
    [#'rules-list {}]])
 
+(declare sessions)
+
 (defn task-list
   "The task's list of an agent's page (p-task, read by the model as parts: seon.render/page-lists), in the order
   they are placed here: the task, its proofs, what it cites, each search, the references its agent cites, its added keys, and
@@ -1612,6 +1613,8 @@
   {:seon.render/list "p-task" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
   [{c :seon.ctx/ctx}]
   [:div {:id "p-task"}
+   ;; root's sessions, when this record's pull holds root (root's session's pattern does: docs/users.md#roots-session)
+   (when (:root c) [#'sessions {:at [:root]}])
    (when (:task c)
      (list [#'task {:at [:task]}] [#'status {:at [:task :proved]}] [#'citations {:at [:task :cites]}]
            (seq (cite-parts c))
@@ -1634,7 +1637,7 @@
     (let [{:keys [messages evals]} (ctx/turn-members db c cid)
           model? (let [plain (ratom/untracked c)] (fn [e] (get-in plain [:evals e :seon.eval/call-id])))
           ;; who posts that it was opened, read here once and not by each eval
-          agent-key (ratom/realize (:seon.agent/key c)) agent-id (ratom/realize (:seon.agent/id c))
+          agent-key (ratom/realize (:seon.agent/key c)) agent-id (some-> agent-key keyword)
           item (fn [[e id]] [#'eval-item {:key id :at [:evals e] :agent-key agent-key :agent-id agent-id}])
           call (get-in c [:calls cid])
           ours (filter (comp model? first) evals)]
@@ -1675,13 +1678,13 @@
 (def ^:private task-stands
   "How a task's :seon.task/outcome reads to a person: [words tone]. :parked and :told are woken by a message (seon.reconcile/park-outcomes);
   :cap is not: it waits for its agent's turns to be raised and the task released."
-  {:running ["working" :live] :parked ["waiting for you" :ask] :told ["waiting for you" :ask] :cap ["stopped at its cap" :stopped]
+  {:running ["working" :live] :parked ["parked" :ask] :told ["told" :ask] :cap ["stopped at its cap" :stopped]
    :done ["done" :done] :merged ["merged" :done] :ready ["ready to merge" :quiet] :gate ["at the merge gate" :quiet] :behind ["behind main" :stopped]
    :dead ["died" :failed] :lost ["stopped by a restart" :quiet] :killed ["killed" :failed] :refused ["refused" :failed] :closed ["closed" :quiet]})
 
 (def ^:private end-stands
   "How the agent's own end (:seon.agent/outcome) reads where its task holds none: [words tone]."
-  {:green ["done" :done] :waiting ["waiting for you" :ask] :cap ["stopped at its cap" :stopped] :red ["ended red" :failed]
+  {:green ["done" :done] :waiting ["parked" :ask] :cap ["stopped at its cap" :stopped] :red ["ended red" :failed]
    :failed ["failed" :failed] :merge-failed ["merge failed" :failed] :error ["ended in error" :failed]})
 
 (def ^:private status-stands
@@ -1730,7 +1733,8 @@
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
   [opts v]
   ;; what it evaluates now (its process's :seon.process/running) is its conversation's newest part
-  (let [{:seon.agent/keys [id status branch description]} v
+  (let [{:seon.agent/keys [status branch description]} v
+        id (:seon.agent/key v)
         ;; how its work stands: the task's outcome (a ctx's pull names the task :task), the agent's own end, else its status
         stands (standing v (ratom/realize (or (:task v) (:seon.agent/task v))))
         ;; its current process's pid while it runs: an ended process's pid names nothing live
@@ -1805,14 +1809,37 @@
 
 (def ^:private session-attrs
   "What an entry of the agents list reads of an agent on main: its identity, its process's status, its branch and turns, and its task."
-  [:seon.agent/key :seon.agent/id :seon.agent/status :seon.agent/branch :seon.agent/max-turns
+  [:seon.agent/key :seon.agent/started-ms :seon.agent/status :seon.agent/branch :seon.agent/max-turns
    {:seon.agent/task [:seon.task/id :seon.task/outcome :seon.task/reason :seon.task/failure :seon.task/plan {:seon.task/started-by [:seon.user/name]}]}])
 
 (defn session-address
-  "The name of an agent's page: its key (:seon.agent/key, boot/id), the one name of a session that survives a root's restart,
-  so a link to it is a bookmark. An agent without a key (a map the page is shown) is its id. See docs/render.md#a-sessions-address-and-the-agents-list."
+  "The name of an agent's page: its key (:seon.agent/key, its id's name), the one name of a session that survives a root's restart,
+  so a link to it is a bookmark. An agent without a key (a map the page is shown) is nothing to link. See docs/render.md#a-sessions-address-and-the-agents-list."
   {:malli/schema [:=> [:cat :map] :string]}
-  [a] (or (:seon.agent/key a) (kname (:seon.agent/id a))))
+  [a] (:seon.agent/key a))
+
+(defn sessions
+  "Root's sessions as its session reads them (a component over the db, drawn when its record holds root, :root, as root's
+  session's pattern does): every session on main with a task, as of the main its last turn heard (:seon.agent/main-commit), newest first, as root's own work list reads them (`work-list`), each
+  by its address, what it works on and how it stands, so root's session knows what is already being done before it starts more;
+  itself left out. The newest :seon.config.ctx/window of them; the heading says once how to read the rest, with no count, which
+  would move at every new session. Reads every :seon.agent/task datom and sorts them at each draw, O(the agents ever started):
+  fine at today's sizes, and grouping the agents list by who started each is where it gets a seek. See docs/users.md#roots-session."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
+  [{c :seon.ctx/ctx db0 :seon.db/db}]
+  ;; main as the session's turn last heard it (:seon.agent/main-commit, seon.turn), not its branch: a branch takes main's program, not
+  ;; its data, so a session started on main after this one forked is on main alone (Context's review, seen on a demo root)
+  (let [db (or (when (:store db0) (some->> (ratom/realize (:seon.agent/main-commit c)) (d/commit-as-db (:store db0)))) db0)
+        me (ratom/realize (:seon.agent/key c))
+        ks (->> (d/datoms db :aevt :seon.agent/task) (sort-by (comp - :tx)) (keep #(:seon.agent/key (d/entity db (:e %)))) (remove #{me}) distinct)
+        n (config/value :seon.config.ctx/window)]
+    [:section
+     [:h2 "Sessions, newest first (all of them: (sort-by :tx > (d/datoms (my.db/db) :aevt :seon.agent/task)), each datom's :e an agent)"]
+     (if (seq ks)
+       (into [:ul] (for [k (take n ks) :let [a (d/pull db session-attrs [:seon.agent/key k]) t (:seon.agent/task a) stands (standing a t)]]
+                     [:li {:key k} [:code (str "/agent/" (session-address a))] " "
+                      (or (some-> (:seon.task/plan t) str/split-lines first) (task-name a t)) ": " (:text stands)]))
+       [:p "None yet."])]))
 
 (defn agent-side
   "A session of main in the agents list (a component over the db, its agent's entity id: every agent on main, of any boot, a
@@ -1822,11 +1849,11 @@
   [{db :seon.db/db} eid]
   (let [a (d/pull db session-attrs eid)
         t (:seon.agent/task a)
-        id (:seon.agent/id a)
+        id (:seon.agent/key a)
         stands (standing a t)
         what (task-name a t)]
     [:li [:a {:href (str "/agent/" (session-address a)) :class pill-link
-              :title (str/join " · " (remove nil? [(kname id) (:text stands) (:detail stands) what (:seon.task/id t)]))}
+              :title (str/join " · " (remove nil? [id (:text stands) (:detail stands) what (:seon.task/id t)]))}
           [:span {:class "flex items-baseline gap-2"}
            [:span {:class (if (:lit? stands) "text-signal" "muted")} (if (:lit? stands) "●" "○")]
            [:span {:class "font-semibold text-text-100"} (kname id)]
@@ -1834,17 +1861,9 @@
           (when what [:span {:class "truncate text-2xs text-text-400"} what])]]))
 
 (defn- session-order
-  "How a boot's sessions sort in the list: the numbered ids in their numbers (a2 before a10), a person's (user) after them."
-  {:malli/schema [:=> [:cat :string] [:tuple :int :string :int :string]]}
-  [k]
-  (let [id (or (second (str/split k #"/" 2)) k)
-        [_ p n] (re-matches #"(\D+)(\d+)" id)]
-    [(if n 0 1) (or p "") (if n (parse-long n) 0) id]))
-
-(defn boot-short
-  "A boot's id, or a key (boot/id), as a person reads the boot: its first group of characters. See docs/render.md#a-sessions-address-and-the-agents-list."
-  {:malli/schema [:=> [:cat :string] :string]}
-  [boot-or-key] (first (str/split boot-or-key #"[-/]")))
+  "How a boot's sessions sort in the list: by when they started (oldest first)."
+  {:malli/schema [:=> [:cat :seon.host/db :int] [:tuple :int :int]]}
+  [db eid] [(or (:seon.agent/started-ms (d/entity db eid)) 0) eid])
 
 (defn- shown-session?
   "Whether the agents list holds agent eid: one with a task, or a process running. A restart's person's session, with neither, is nothing to open. See docs/render.md#a-sessions-address-and-the-agents-list."
@@ -1857,25 +1876,25 @@
   "One boot's sessions in the agents list (a component over the db, the boot's id: its agents oldest first, so a new session redraws its boot's
   unit alone, whose element id is the boot's): the
   current boot's in the list itself, an earlier boot's inside `earlier-sessions`'s one fold, so a list of
-  every session on main stays short to read. It reads its boot's keys alone, by their index range, whatever other boots hold. See docs/render.md#a-sessions-address-and-the-agents-list."
+  every session on main stays short to read. It reads its boot's agents alone, by the index of :seon.agent/boot, whatever other boots hold. See docs/render.md#a-sessions-address-and-the-agents-list."
   {:seon.render/style ".boot-side { display: contents; }" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :string] :any]}
   [{db :seon.db/db} boot]
-  (let [eids (->> (d/index-range db {:attrid :seon.agent/key :start (str boot "/") :end (str boot "/\uffff")}) (sort-by #(session-order (:v %))) (mapv :e) (filterv #(shown-session? db %)))
+  (let [eids (->> (d/datoms db :avet :seon.agent/boot boot) (map :e) (sort-by #(session-order db %)) (filterv #(shown-session? db %)))
         pills (for [eid eids] [#'agent-side {} eid])]
     [:li {:class "contents"} [:ul {:class "contents"} pills]]))
 
 (defn- sessions-by-boot
-  "Every agent on main db grouped by the boot that started it (the front of its key): [[boot [eid ...]] ...], the current boot's first,
-  then the others newest first (by the transaction that wrote their newest agent: transaction ids only grow, where entity ids are not an order), each boot's agents by id number. See docs/render.md#a-sessions-address-and-the-agents-list."
+  "Every agent on main db grouped by the boot that started it (:seon.agent/boot): [[boot [eid ...]] ...], the current boot's first,
+  then the others newest first (by the transaction that wrote their newest agent: transaction ids only grow, where entity ids are not an order), each boot's agents by start. See docs/render.md#a-sessions-address-and-the-agents-list."
   {:malli/schema [:=> [:cat :seon.host/db] [:sequential [:tuple :string [:sequential :int]]]]}
   [db]
   (let [now (task/boot-of db)
-        by (group-by #(first (str/split (:v %) #"/" 2)) (d/datoms db :avet :seon.agent/key))]
+        by (group-by :v (d/datoms db :avet :seon.agent/boot))]
     (->> by
-         (map (fn [[boot dts]] [boot (mapv :e (sort-by #(session-order (:v %)) dts)) (apply max (map :tx dts))]))
+         (keep (fn [[boot dts]] (when-let [dts (seq (filter #(shown-session? db (:e %)) dts))]
+                                  [boot (mapv :e (sort-by #(session-order db (:e %)) dts)) (apply max (map :tx dts))])))
          (sort-by (fn [[boot _ t]] [(if (= boot now) 0 1) (- t)]))
-         (mapv (fn [[boot eids _]] [boot eids]))
-         (filterv (fn [[_ eids]] (some #(shown-session? db %) eids))))))
+         (mapv (fn [[boot eids _]] [boot eids])))))
 
 (defn root-head
   "Root's head (a component over its ctx and the db): what is going on in a sentence, by the tasks' states, and, when it last went quiet,
@@ -1885,11 +1904,13 @@
   ;; what an agent is doing is its task's outcome; :seon.task/execution stays :running once it has finished
   (let [held (count (d/datoms db :avet :seon.task/execution :held))
         running (count (d/datoms db :avet :seon.task/outcome :running))
-        needs (count (d/datoms db :avet :seon.task/outcome :parked))]
+        parked (count (d/datoms db :avet :seon.task/outcome :parked))]
     [:section
+     ;; the tasks by their state, in plain words (owner, 2026-11-08: "Just show the status as parked"): a parked one wakes on a message
      [:h1 {:class "text-base font-semibold text-text-50"}
-      (str/join " " (remove nil? [(if (pos? running) (str running " running.") "Nothing running.")
-                                  (if (pos? needs) (str needs " " (if (= 1 needs) "needs" "need") " you.") "Nothing needs you.")]))]
+      (if (pos? (+ running parked))
+        (str (str/join ", " (remove nil? [(when (pos? parked) (str parked " parked")) (when (pos? running) (str running " running"))])) ".")
+        "Nothing running.")]
      (when (pos? held) [:p {:class "seon-note"} (str held (if (= 1 held) " task" " tasks") " not released yet.")])
      (render/hiccup {:schema :seon.root/root-fact} (relevant :seon.root/root-fact c))]))
 
@@ -1975,7 +1996,7 @@
         reply (or reply (when-not asked (:reason stands)))]
     [:section
      [:a {:href (str "/agent/" (session-address a))
-          :title (str/join " · " (remove nil? [(kname (:seon.agent/id a)) (:seon.task/id t)]))}
+          :title (str/join " · " (remove nil? [(:seon.agent/key a) (:seon.task/id t)]))}
       [:span {:class "flex items-baseline gap-2"}
        [:span {:class (if (:lit? stands) "text-signal" "muted")} (if (:lit? stands) "●" "○")]
        ;; what a person asked, its first line as they typed it, else the task's name in words
@@ -1988,17 +2009,17 @@
        (when reply [#'markdown reply {:inline? true}])]]]))
 
 (defn- sessions-by-standing
-  "Sessions ks (agent keys, newest first) as tiles grouped by how each stands: what needs a person, what is working, then what
-  finished, folded; empty as none. Root's work and a user's page both draw this. See docs/users.md#whats-on-screen."
+  "Sessions ks (agent keys, newest first) as tiles grouped by how each stands, in its state's plain word: parked (a message wakes it),
+  working, then finished, folded; empty as none. Root's work and a user's page both draw this. See docs/users.md#whats-on-screen."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :string]] :any]}
   [db ks]
   (let [sessions (for [k ks :let [a (d/pull db session-attrs [:seon.agent/key k])]] [k (standing a (:seon.agent/task a))])
-        where (fn [[_ {:keys [state lit?]}]] (cond (#{:task/parked :task/told :status/idle} state) :needs lit? :working :else :finished))
-        {:keys [needs working finished]} (group-by where sessions)
+        where (fn [[_ {:keys [state lit?]}]] (cond (#{:task/parked :task/told :status/idle} state) :parked lit? :working :else :finished))
+        {:keys [parked working finished]} (group-by where sessions)
         tiles (fn [ss] (into [:div {:class "session-tiles"}] (for [[k _] ss] [#'session-card {} k])))
         heading (fn [text] [:h2 {:class "kicker"} text])]
     [:div {:class "seon-stack-2"}
-     (when (seq needs) (list (heading "Needs you") (tiles needs)))
+     (when (seq parked) (list (heading "Parked") (tiles parked)))
      (when (seq working) (list (heading "Working") (tiles working)))
      (when (seq finished)
        [:details {:data-preserve-attr "open"}
@@ -2052,9 +2073,9 @@
   {:seon.render/style ".users-side { display: contents; }" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]]] :any]}
   [{db :seon.db/db}]
   (when-let [names (seq (map :v (d/datoms db :aevt :seon.user/name)))]
-    (let [now (str (task/boot-of db) "/")
+    (let [now (task/boot-of db)
           earlier (fn [n] (->> (:seon.agent/agents (d/entity db [:seon.user/name n]))
-                               (remove #(str/starts-with? (str (:seon.agent/key %)) now))
+                               (remove #(= now (:seon.agent/boot %)))
                                (sort-by (fn [a] (- (or (:seon.agent/started-ms a) 0))))
                                (map :seon.agent/key)))]
       [:li {:class "contents"} [:ul {:class "contents"}

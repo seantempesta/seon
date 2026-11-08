@@ -24,7 +24,7 @@
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.query.execute] [clojure.main] [clojure.string :as str] [seon.db :as pdb] [seon.ctx.wire :as wire] [seon.lib :as lib]
             [seon.sock :as sock] [jolt.async.remote :as remote] [konserve.jolt.fasl :as codec] [seon.fx :as fx] [seon.fork-server :as fs] [seon.agent-proc :as ap]
             [seon.writer :as writer] [seon.problems :as problems] [seon.prove] [seon.cron] [seon.vector :as vector] [seon.source :as source] [seon.reconcile :as reconcile] [seon.system :as system] [seon.program :as program] [seon.step :as step]
-            [seon.config :as cfg] [seon.contract :as contract] [seon.print :as print] [seon.task :as task] [seon.template :as tpl] [seon.doc :as doc] [seon.error :as err] [seon.agent :as agent] [konserve.jolt.lmdb :as klmdb] [clojure.java.shell]
+            [seon.config :as cfg] [seon.contract :as contract] [seon.print :as print] [seon.task :as task] [seon.template :as tpl] [seon.render :as render] [seon.doc :as doc] [seon.error :as err] [seon.agent :as agent] [konserve.jolt.lmdb :as klmdb] [clojure.java.shell]
             [clojure.core.async :as a]
             ;; the agent side, loaded here so the fork server and every agent inherit it compiled
             [seon.turn] [my.fx] [my.task] [my.turn] [my.render] [my.branch] [my.doc] [clojure.core.async.flow :as flow] [clojure.test]
@@ -111,7 +111,7 @@
                   id)]
     (if (and (seq changed) (not (:writer-closed st)))
       (do
-        (step/out! o :to-writer {:op :tx :branch :db :tx-data (into [] (mapcat #(task/agent-tx (:boot st) % (observed (get now %)) (:key (get now %)))) changed)
+        (step/out! o :to-writer {:op :tx :branch :db :tx-data (into [] (mapcat #(task/agent-tx % (observed (get now %)))) changed)
                                  :dest {:agent-facts (vec changed)}})
         st)
       st)))
@@ -130,7 +130,7 @@
 
 (declare deliver-rid answer-taken)
 
-(declare answer-spawn insert-evals)
+(declare answer-spawn insert-evals start-spawn no-room)
 
 (defn- record-death
   "Agent aid's death, folded, and answered to the requests it died in (inflight): its died
@@ -281,19 +281,14 @@
   {:malli/schema [:=> [:cat] :string]}
   [] (System/getProperty "user.name"))
 
+(declare root-session-message-tx)
+
 (defn- agent-key-of
-  "The key of agent id, whom messages are to: a live agent's, else the newest agent of that id in this boot that main records
-  (seon.task/this-boots): its process is not needed. nil when neither names one. See docs/users.md#messages."
+  "The key of agent id, whom messages are to: its name when a live agent has it or main records it (its process is not
+  needed), else nil. See docs/users.md#messages."
   {:malli/schema [:=> [:cat :seon.root/api-state :seon.agent/id] [:maybe :string]]}
   [st id]
-  (or (when (get-in st [:agents id]) (or (get-in st [:view :agents id :key]) (task/agent-key (:boot st) id)))
-      ;; its key, the name a page holds for it, of any boot
-      (let [k (subs (str id) 1)] (when (pdb/eid @(:conn st) :seon.agent/key k) k))
-      (let [db @(:conn st)]
-        (->> (d/datoms db :avet :seon.agent/id id)
-             (map #(d/entity db (:e %)))
-             (filter #(task/this-boots db %))
-             (sort-by :db/id) last :seon.agent/key))))
+  (when (or (get-in st [:agents id]) (pdb/eid @(:conn st) :seon.agent/key (name id))) (name id)))
 
 (defn- message-write
   "The writer's request for one message: from `from` (a keyword or string) to the agents with keys tos, its body: the one message entity
@@ -302,7 +297,7 @@
   {:malli/schema [:=> [:cat :seon.root/api-state :any [:sequential :string] :any :map] :map]}
   [st from tos body dest]
   {:op :tx :branch :db :flush? true :dest (assoc dest :wake (vec tos))
-   :tx-data (task/message-tx (str "m-" (random-uuid)) (name from) tos body (System/currentTimeMillis))})
+   :tx-data (task/message-tx (lib/unique-id) (name from) tos body (System/currentTimeMillis))})
 
 (defn- deliver-message
   "An agent's send m ({:from :to [id ...] :body}) written as one message entity on main to every agent it names, live or not
@@ -329,11 +324,6 @@
   "One launcher for every agent's proc (its step is the Var #'agent-proc)."
   (flow/process #'ap/agent-proc))
 
-(defn- next-agent-id
-  "The id the next agent started on st takes (`start-agent`)."
-  {:malli/schema [:=> [:cat :seon.root/api-state] :seon.agent/id]}
-  [st] (keyword (str "a" (inc (:next-id st)))))
-
 (defn- start-agent
   "Register a new agent: its socket (root keeps one end; the other goes to whoever forks
   it), its proc definition (added to the graph by update! at the end of the step). Root's
@@ -341,24 +331,22 @@
   agent's port is an ordinary channel. Answers [st id agent-end-fd]."
   {:malli/schema [:=> [:cat :seon.root/api-state :map] [:tuple :seon.root/api-state :seon.agent/id :seon.lib/fd]]}
   [st {:keys [branch task cloned-from key]}]
-  (let [n (inc (:next-id st))
-        id (next-agent-id st)
+  (let [;; a new agent is a fresh unique id (seon.lib/unique-id); a session's agent that continues keeps its own, its key's
+        id (keyword (or key (lib/unique-id)))
         ;; named under root's main, so roots sharing a store never share a branch (seon.db/on-main)
-        branch (pdb/on-main (pdb/conn-main (:conn st)) (or branch (keyword (str "agent-" n))))
+        branch (pdb/on-main (pdb/conn-main (:conn st)) (or branch (keyword (str "agent-" (name id)))))
         [r a] (sock/socketpair)
         ;; fiber pumps: an end costs no thread of its own (root may run a thousand agents)
         end (remote/open r {:codec {:encode codec/encode :decode codec/decode} :pump :fiber :buf (cfg/value :seon.config.agent/inbox-size)})]
-    [(-> st (assoc :next-id n ::update true)
+    [(-> st (assoc ::update true)
          (assoc-in [:agents id] {:branch branch})
          (assoc-in [:agent-procs id] {:proc agent-launcher
                                       :args {:id id :end end :branch branch
                                              :to-writer (:to-writer st) :back (:back st) :events (:events st)
                                              :fx-kinds (system/fx-owners (get-in st [:system :procs]))}
                                       :chan-opts {:in {:buf-or-n (cfg/value :seon.config.agent/inbox-size)}}})
-         (assoc-in [:view :agents id] (cond-> {:branch branch :status :spawning :task task :pid nil
+         (assoc-in [:view :agents id] (cond-> {:branch branch :status :spawning :task task :pid nil :boot (:boot st)
                                                :forked-ms nil :mem-mb nil :evals [] :tests nil}
-                                        ;; the session's agent this process continues (seon.task/session-key)
-                                        key (assoc :key key)
                                         cloned-from (assoc :cloned-from cloned-from))))
      id a]))
 
@@ -393,8 +381,14 @@
                ;; answered then, with the status that names the death
                :else (assoc-in st [::dying (or pid (:pid v))] [agent died inflight]))
           st (cond-> st rid (deliver-rid o rid {:stopped true :agent agent}))]
-      (-> st (update :agents dissoc agent) (update :agent-procs dissoc agent) (update ::inserting dissoc agent) (assoc ::update true)
-          (set-agent o agent {:status (or stop :dead) :ended-ms (System/currentTimeMillis) :running nil})))))
+      (let [st (-> st (update :agents dissoc agent) (update :agent-procs dissoc agent) (update ::inserting dissoc agent) (assoc ::update true)
+                   (set-agent o agent {:status (or stop :dead) :ended-ms (System/currentTimeMillis) :running nil}))
+            {:keys [p opts]} (get-in st [::respawn agent])
+            st (update st ::respawn dissoc agent)]
+        ;; a Back's old process is gone: the same agent's new one is forked now (its entry replaces the ended one's)
+        (cond (nil? opts) st
+              (no-room st (count (:agents st))) (reply! st o p (no-room st (count (:agents st))))
+              :else (start-spawn st o p opts))))))
 
 (defn- pend
   "st with caller p awaiting the answer to a new request id (seon.step/pend), and the id."
@@ -409,7 +403,7 @@
       branch (get-in st [:agents aid :branch])]
   ;; the agent's key named here, in root's boot: the child reads none from main
   (step/out! o :to-writer {:op :spawn :agent aid :branch branch :task (:task opts) :ns (profile/now-ns) :fd fd :dest {:spawn aid}
-                           :key (or (:key opts) (task/agent-key (:boot st) aid))})
+                           :key (name aid)})
   ;; answered at its hello (set-agent's :ready), or the end it meets first
   (cond-> (assoc-in st [::spawning aid] p)
     (seq (:evals opts)) (assoc-in [::inserting aid] (:evals opts)))))
@@ -427,11 +421,13 @@
   {:malli/schema [:=> [:cat :seon.root/api-state :seon.host/volatile [:maybe [:or :seon.host/promise :map]] [:maybe :map]] :seon.root/api-state]}
   [st o p opts]
   (let [opts (cond-> opts (:branch opts) (update :branch #(pdb/on-main (pdb/conn-main (:conn st)) %)))
-      holder (and (:branch opts)
+      ;; one live process per agent: the session's agent (its key is its id) is not started again while one holds it
+      holder (or (and (:key opts) (get-in st [:agents (keyword (:key opts))]) (keyword (:key opts)))
+                 (and (:branch opts)
                   (some (fn [[aid a]] (when (and (= (:branch opts) (:branch a)) (not (:ended-ms a))
                                                  (not (gone-statuses (:status a))))
                                         aid))
-                        (get-in st [:view :agents])))]
+                        (get-in st [:view :agents]))))]
   (cond
     holder (let [{:keys [task]} (get-in st [:view :agents holder])]
              (reply! st o p (refused 'seon.root/spawn! (str "branch " (:branch opts) " is held by live agent " holder
@@ -530,9 +526,16 @@
       ;; (seon.task/message-tx), synced before it is answered, so what follows (the turn that delivers it) finds it in the
       ;; store; the agent's turn reads it from main and writes the same entity on its branch (seon.turn/deliver!,
       ;; seon.agent/undelivered). No frame carries it: delivery is the fact. Its writer's answer wakes the agent (back-op)
-      :message (if-let [k (agent-key-of st id)]
-                 (let [[st rid] (pend st p :tx nil)]
-                   (step/out! o :to-writer (message-write st (:from m) [k] (:body m) {:rid rid}))
+      :message (if-let [k (or (agent-key-of st id)
+                              ;; the first message to root makes root's session, in the same write (docs/users.md#roots-session)
+                              (when (= :root id) ::root-session))]
+                 (let [[st rid] (pend st p :tx nil)
+                       w (if (= ::root-session k)
+                           ;; the message names the session by its tempid: a lookup ref cannot reach an entity its own transaction makes
+                           (-> (message-write st (:from m) ["root"] (:body m) {:rid rid})
+                               (update :tx-data #(root-session-message-tx @(:conn st) %)))
+                           (message-write st (:from m) [k] (:body m) {:rid rid}))]
+                   (step/out! o :to-writer w)
                    (update st :writes (fnil conj #{}) rid))
                  (reply! st o p (gone id (str "no agent " id " on main"))))
       ;; requests for the writer: answered by rid; a collection only while no agent is live,
@@ -611,19 +614,20 @@
                          (not= :idle status) (reply! st o p (refused 'seon.root/back! (str id " is " (name status) ": it did not go back") {:agent id :status status}))
                          (no-room st (count (:agents st))) (reply! st o p (no-room st (count (:agents st))))
                          :else
-                         (let [k (or key (task/agent-key (:boot st) id))
+                         (let [k (name id)
                                e (d/entity @(:conn st) [:seon.agent/key k])
-                               ;; what a start records of a session's agent (seon.task/start-tx): this boot holds it under a key that isn't its id's (seon.task/this-boots)
+                               ;; what a start records of a session's agent (seon.task/start-tx): this boot now holds it
                                ;; named in main's facts as a start names it; an agent on a task has its branch from its start alone (`observed`), so this is that write
                                named (pdb/off-main (pdb/conn-main (:conn st)) branch)
-                               started (cond-> {:seon.agent/key k :seon.agent/id (next-agent-id st) :seon.agent/boot (:boot st) :seon.agent/started-ms (System/currentTimeMillis)
+                               started (cond-> {:seon.agent/key k :seon.agent/boot (:boot st) :seon.agent/started-ms (System/currentTimeMillis)
                                                 :seon.agent/max-turns (or (:seon.agent/max-turns e) (cfg/value :seon.config.agent/max-turns))}
                                          task (assoc :seon.agent/branch named))]
                            (step/out! o :to-writer {:op :tx :branch :db :tx-data (cond-> [started] task (into (cons {:seon.task/id task :seon.task/branch named} (task/move-tx task (:seon.task/outcome (d/entity @(:conn st) [:seon.task/id task])) :parked {}))))
                                                     :dest {:agent-facts [id]}})
-                           ;; started before the old one is counted out of root's agents: no-room above asked for that one
+                           ;; one live process per agent: the old one is stopped first, and the new one forked once its end is seen
+                           ;; (end-agent), under the same id, so no message can reach either of two
                            (-> st (set-agent o id {:status :killed :replaced true}) (to-agent o id {:op :kill})
-                               (start-spawn o p (cond-> {:branch branch :key k} task (assoc :task task)))))))
+                               (assoc-in [::respawn id] {:p p :opts (cond-> {:branch branch :key k} task (assoc :task task))})))))
         ;; a merge gate's candidate is read (the :gate request): refused, or a changed namespace with no file on the branch
         ;; (made at the REPL, never written; it cannot be put over the checkout), is its answer, and no test runs: no files
         ;; would test main as it is and vouch for nothing; else its tests run with its files, answered by rid
@@ -831,7 +835,7 @@
                               :pending (into (sorted-map) (for [[r {:keys [kind agent]}] (:pending st)] [r [kind agent]]))})})
   ;; :system is the root graph's declared procs and conns as built (seon.system), changed by
   ;; seon.root/apply!; agents' procs join them at each update!
-  ([args] (assoc (dissoc args :system) :agents {} :agent-procs {} :pending {} :rid 0 :next-id 0
+  ([args] (assoc (dissoc args :system) :agents {} :agent-procs {} :pending {} :rid 0
                  :system @(:system args)
                  ;; what this step took, kept across Flow's catch (which keeps the state from
                  ;; before the step): a host object of this proc's own
@@ -1074,6 +1078,43 @@
                    (lib/digest (sedn/encode (get contract/forms :seon.doc/fact))) "\n"
                    (str/join "\n" (for [dir (cfg/value :seon.config.root/wiki-dirs) [p t] (doc/pages checkout dir)] (str p "\n" t))))))
 
+(def ^:private root-session-plan
+  "What root's session is for, its task's plan: what educates it, beside the docs it cites. See docs/users.md#roots-session."
+  "You are root's session: the person talks to Seon through you. Your page lists every session on main and how each stands. Answer the person yourself when you can. When they want work done, look for a session already on it and tell them its address; otherwise start one with (my.task/launch! \"what they want\") and tell them it started. More: docs/users.md#roots-session")
+
+(defn root-session-pattern
+  "What root's session's record pulls: the agent's pattern (:seon.db/agent-fact's), and root, which makes its task list draw root's sessions
+  (seon.render.ui/sessions). See docs/users.md#roots-session."
+  {:malli/schema [:=> [:cat] [:vector :any]]}
+  [] (conj (render/schema-property :seon.db/agent-fact :seon.ctx/pattern) {[:seon.agent/root :as :root] [:seon.root/id]}))
+
+(defn root-session-tx
+  "Root's session, made by the first message to root (the api's :message), an ordinary agent made the ordinary way: an agent entity keyed
+  \"root\" (a reserved key, as the user's is its name; its tempid \"root-session\", which that message names it by), linked to root by
+  :seon.agent/root, its pattern `root-session-pattern`, and the task request/root of the chat template (seon.template/request-tx),
+  parked, its agent that entity, so the same write's wake spawns it. A root no one messages has none. Root's own entity is untouched: an
+  entity's id derives from its identity, so it cannot take a key too. See docs/users.md#roots-session."
+  {:malli/schema [:=> [:cat :seon.host/db] [:vector :any]]}
+  [db]
+  (let [tx (tpl/request-tx db (tpl/from (tpl/templates :user) {:seon.task/ns 'request :seon.task/name "root" :seon.task/plan root-session-plan}))]
+    (if (contract/error? tx)
+      (throw (ex-info (str "root's session task was refused: " (:seon.error/message tx)) tx))
+      (into [{:db/id "root-session" :seon.agent/key "root" :seon.agent/root [:seon.root/id :root] :seon.ctx/pattern (root-session-pattern)}]
+            (conj (vec tx) {:seon.task/id "request/root" :seon.task/agent "root-session" :seon.task/outcome :parked})))))
+
+(defn root-session-message-tx
+  "The first message to root (its message-tx) as the write that also makes root's session (`root-session-tx`): the message names the
+  session by its tempid, since a lookup ref cannot reach an entity its own transaction makes. See docs/users.md#roots-session."
+  {:malli/schema [:=> [:cat :seon.host/db [:vector :map]] [:vector :any]]}
+  [db message-tx]
+  (into (root-session-tx db) (map (fn [e] (cond-> e (:seon.message/to e) (assoc :seon.message/to ["root-session"])))) message-tx))
+
+(defn root-session-refresh-tx
+  "At boot, root's session's pattern written again when it has one (`root-session-pattern`), so an edit of the agent's pattern reaches it
+  at the next boot; its task and conversation untouched; nothing when no one has messaged root. See docs/users.md#roots-session."
+  {:malli/schema [:=> [:cat :seon.host/db] [:vector :any]]}
+  [db] (if (pdb/eid db :seon.agent/key "root") [{:seon.agent/key "root" :seon.ctx/pattern (root-session-pattern)}] []))
+
 (defn wiki-boot-tx
   "The wiki's part of the boot fact's commit: wiki-tx, with the digest of what it read (wiki-digest) on root's
   fact, or [] when main already holds that digest (the load is a function of that input, so it would write
@@ -1229,7 +1270,7 @@
         recovered (if recovered? (pdb/of-main main (d/branches conn)) [])
         ;; this root's boot id (runs of an earlier boot are reaped); its fact is written
         ;; through the writer once the graph runs, and that commit is the reconciler's first pass
-        boot (str (random-uuid))
+        boot (lib/unique-id)
         source (or source (when-let [r (get cfg/config :seon.config.source/root)]
                             {:root r :dirs (cfg/value :seon.config.source/dirs) :branch (cfg/value :seon.config.source/branch)}))
         {in-force :config} (cfg/in-force)
@@ -1298,7 +1339,7 @@
     ;; with it, how the root before it on main ended (its stop fact, or :unclean)
     (let [prev (previous-end db)
           r @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (cond-> (-> (task/boot-tx boot max-running (person)) (into (task/earlier-agents-tx db)) (into (cfg/facts config in-force-sources))
-                                                                                  (into (wiki-boot-tx db (cfg/checkout) #(wiki-baseline sys (cfg/checkout) "docs"))))
+                                                                                  (into (wiki-boot-tx db (cfg/checkout) #(wiki-baseline sys (cfg/checkout) "docs"))) (into (root-session-refresh-tx db)))
                                                                          prev (conj {:seon.root/id :root :seon.root/previous-end prev})
                                                                          ;; the test that started this boot (a test's main is its own: no other boot resumes it)
                                                                          started-by (conj {:seon.root/id :root :seon.root/started-by started-by}))}})]
@@ -1474,7 +1515,7 @@
   ([sys pred] (await-db sys nil pred))
   ([sys what pred]
   (let [stopped (gone nil "root stopped")
-        k (keyword "seon.root" (str "await-" (random-uuid)))
+        k (keyword "seon.root" (str "await-" (lib/unique-id)))
         a (:wrapped-atom (:conn sys))
         p (promise)
         ;; the watch first, then the value: a commit between reading main and adding the watch

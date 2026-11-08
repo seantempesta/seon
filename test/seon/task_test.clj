@@ -18,6 +18,17 @@
   "What transaction tx makes its entities cite: each cite entity it writes, {target depth}."
   [tx] (into {} (for [m tx :when (and (map? m) (:seon.cite/id m))] [(or (:seon.cite/address m) (:seon.cite/name m)) (:seon.cite/depth m)])))
 
+;; docs/references.md#task-references: a plan naming its own task's id names what the task makes (a function of that name), never
+;; the task, whose page already shows it (a lab, 2026-11-08: app.greet/greet's page showed its own plan again as "Another task your plan names")
+(deftest a-task-never-cites-itself-as-a-task
+  (let [db (d/db-with (db-with-program) (task/create-tx (db-with-program) [(decl "Make `demo/t` and `demo/f`.")]))
+        db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "other" :seon.task/plan "p"}]))
+        tx (task/rederive-tx db {:seon.task/id "demo/t" :seon.task/plan "Make `demo/t` work, after `demo/other`."})
+        by-name (into {} (for [m tx :when (and (map? m) (:seon.cite/name m))] [(:seon.cite/name m) m]))]
+    (is (contains? by-name 'demo/t) "its own id is still cited, as the name of what it makes")
+    (is (nil? (:seon.cite/task (by-name 'demo/t))) "but never joined as a task: it is this one")
+    (is (= "demo/other" (:seon.cite/task (by-name 'demo/other))) "another task it names is joined as a task")))
+
 ;; docs/references.md#task-references: a task's text is parsed once at its write, and each target it cites is a cite entity
 (deftest the-writer-writes-a-tasks-cites
   (let [plan "Make `demo/f` pass; ``demo/later`` is only mentioned; `(demo/f 1)` is code. Read [vectors](docs/vector.md#the-pyramid), then ```demo/f``` whole."
@@ -55,11 +66,11 @@
                                          {:seon.doc/address "docs/data-modeling.md" :seon.doc/heading "Data modeling"}
                                          {:seon.doc/address "docs/references.md#an-entity-cites" :seon.doc/heading "An entity cites"}])
         db (d/db-with db (task/create-tx db [(decl "Do.")]))
-        tx (into (task/start-tx db "demo/t" "b1" :a1 {:branch :b :model nil :max-turns 4} 0) (task/agent-cites-tx db "b1/a1" "b1/a1"))
+        tx (into (task/start-tx db "demo/t" "b1" :a1 {:branch :b :model nil :max-turns 4} 0) (task/agent-cites-tx db "a1" "a1"))
         db (d/db-with db tx)]
     (is (= (count (seon.config/value :seon.config.agent/cites)) (count (filter :seon.cite/id tx))) "one per address the config names")
     (is (= (mapv (fn [a] [a :doc]) (seon.config/value :seon.config.agent/cites))
-           (mapv (juxt :seon.cite/address :seon.cite/depth) (task/cites-of db (pdb/eid db :seon.agent/key "b1/a1"))))
+           (mapv (juxt :seon.cite/address :seon.cite/depth) (task/cites-of db (pdb/eid db :seon.agent/key "a1"))))
         "on the agent's record, in the config's order (the references it is told it can read, not pulled into its context whole)")))
 
 (deftest the-writer-cites-what-names-something
@@ -154,7 +165,7 @@
         te #(:db/id (d/entity db [:seon.task/id %]))]
     (is (= #{:done :merged} task/finished) "the schema's finished set")
     (is (= ["demo/a"] (mapv :task (task/running db))) "only the running task, one seek of the outcome")
-    (is (= [:a1 "boot-1/a1"] ((juxt :agent :key) (first (task/running db)))) "with its agent's id and key")
+    (is (= [:a1 "a1"] ((juxt :agent :key) (first (task/running db)))) "with its agent's id and key")
     (is (false? (task/done? db (te "demo/a"))) "a running task is not done")
     (is (true? (task/done? db (te "demo/b"))) "a merged one is")))
 
@@ -167,10 +178,10 @@
   (ts/test-branch!
    (fn [cfg conn]
      (let [main (:branch cfg) b (keyword (str (name main) "-a3"))
-           k (task/agent-key "b1" :a3)]
+           k "a3"]
        (d/transact conn [{:seon.root/id :root :seon.root/boot "b1" :seon.config.agent/max-running 2}])
        (d/transact conn [{:seon.task/id "demo/f" :seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "p" :seon.task/execution :running :seon.task/branch :task-demo-f :seon.task/kind :work}])
-       (d/transact conn (task/agent-tx "b1" :a3 {:status :idle :pid 77 :running {:form "(f 2)"}}))
+       (d/transact conn (task/agent-tx :a3 {:status :idle :pid 77 :running {:form "(f 2)"}}))
        (d/branch! conn main b)
        (let [bc (pdb/connect (assoc cfg :branch b))]
          (try
@@ -179,11 +190,11 @@
            ;; on the branch, which forked before main held the task's start or the message
            (d/transact bc (ts/turn-tx k 1 {}))
            (d/transact bc (task/message-tx "m-1" "owner" [k] "check g" 1000))
-           (d/transact bc (repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e1" "a3" {:seon.eval/code "(f 2)" :seon.eval/response {:handle 'result/e1 :value 4}}))
+           (d/transact bc (repl/record-tx {:seon.agent/key k} "e1" "a3" {:seon.eval/code "(f 2)" :seon.eval/response {:handle 'result/e1 :value 4}}))
            (testing "from root on main: its agents, each agent's task"
-             (is (= [{:seon.agent/id :a3 :seon.agent/status :idle :seon.process/_agent [{:seon.process/pid 77 :seon.process/running "(f 2)"}]
+             (is (= [{:seon.agent/key "a3" :seon.agent/status :idle :seon.process/_agent [{:seon.process/pid 77 :seon.process/running "(f 2)"}]
                       :seon.task/_agent [{:seon.task/id "demo/f"}]}]
-                    (:seon.agent/_root (d/pull @conn '[{:seon.agent/_root [:seon.agent/id :seon.agent/status
+                    (:seon.agent/_root (d/pull @conn '[{:seon.agent/_root [:seon.agent/key :seon.agent/status
                                                                            {:seon.process/_agent [:seon.process/pid :seon.process/running]}
                                                                            {:seon.task/_agent [:seon.task/id]}]}]
                                                [:seon.root/id :root])))))
@@ -191,7 +202,7 @@
              (is (= ["check g"] (d/q (quote [:find [?b ...] :in $ ?k :where [?a :seon.agent/key ?k] [?m :seon.message/to ?a] [?m :seon.message/body ?b]]) @conn k))))
            (testing "on the branch: the agent's model calls and the message it took, the agent's evaluations"
              (let [agent (d/pull @bc '[{:seon.model-call/_agent [:seon.model-call/id]} ] [:seon.agent/key k])]
-               (is (= [{:seon.model-call/id (str k "/1")}] (:seon.model-call/_agent agent)))
+               (is (= [{:seon.model-call/id (seon.lib/call-id k 1)}] (:seon.model-call/_agent agent)))
                (is (= ["m-1"] (d/q (quote [:find [?id ...] :in $ ?k :where [?a :seon.agent/key ?k] [?m :seon.message/to ?a] [?m :seon.message/id ?id]]) @bc k))))
              (is (= ["e1"] (mapv :seon.eval/id (:seon.eval/_agent (d/pull @bc '[{:seon.eval/_agent [:seon.eval/id]}] [:seon.agent/key k]))))))
            (testing "the message and the agent are one entity on the branch and on main (content ids)"
@@ -203,32 +214,31 @@
 
 (deftest an-agents-live-state-is-facts-on-its-entity
   ;; what root observes of an agent is recorded on the agent's entity: a member no longer true
-  ;; is retracted, and an id that starts again in a later boot is another agent
+  ;; is retracted, and an agent is named by its key, whatever boot
   (let [db0 (d/db-with (ts/test-db) [{:seon.root/id :root :seon.root/boot "b1" :seon.config.agent/max-running 2}])
-        db1 (d/db-with db0 (task/agent-tx "b1" :a3 {:status :running :pid 77 :running {:form "(f 2)" :since-ms 5} :mem-mb 120.5}))
-        db2 (d/db-with db1 (task/agent-tx "b1" :a3 {:status :idle :pid 77 :running nil}))
-        db3 (d/db-with db2 (task/agent-tx "b2" :a3 {:status :spawning}))
-        pull (fn [db boot] (d/pull db [:seon.agent/status {:seon.agent/root [:seon.root/id]}
+        db1 (d/db-with db0 (task/agent-tx :a3 {:status :running :pid 77 :running {:form "(f 2)" :since-ms 5} :mem-mb 120.5}))
+        db2 (d/db-with db1 (task/agent-tx :a3 {:status :idle :pid 77 :running nil}))
+        db3 (d/db-with db2 (task/agent-tx :a3 {:status :spawning}))
+        pull (fn [db] (d/pull db [:seon.agent/status {:seon.agent/root [:seon.root/id]}
                                    {:seon.process/_agent [:seon.process/pid :seon.process/running]}]
-                                   [:seon.agent/key (task/agent-key boot :a3)]))
+                                   [:seon.agent/key "a3"]))
         proc (fn [m] {:seon.agent/status (:seon.agent/status m) :seon.agent/root (:seon.agent/root m) :p (first (:seon.process/_agent m))})]
-    (is (= {:seon.agent/status :running :seon.agent/root {:seon.root/id :root} :p {:seon.process/pid 77 :seon.process/running "(f 2)"}} (proc (pull db1 "b1"))))
-    (is (= {:seon.agent/status :idle :seon.agent/root {:seon.root/id :root} :p {:seon.process/pid 77}} (proc (pull db2 "b1")))
+    (is (= {:seon.agent/status :running :seon.agent/root {:seon.root/id :root} :p {:seon.process/pid 77 :seon.process/running "(f 2)"}} (proc (pull db1))))
+    (is (= {:seon.agent/status :idle :seon.agent/root {:seon.root/id :root} :p {:seon.process/pid 77}} (proc (pull db2)))
         "the form returned: no longer running")
-    (is (= :spawning (:seon.agent/status (pull db3 "b2"))) "the next boot's a3")
-    (is (= :idle (:seon.agent/status (pull db3 "b1"))) "is not the earlier boot's")))
+    (is (= :spawning (:seon.agent/status (pull db3))) "a later fact of the same agent")))
 
 (deftest a-new-boot-leaves-the-earlier-boots-agents
   ;; root's agents are this boot's: a boot retracts the earlier boots' agents' link to root
-  (let [db (d/db-with (ts/test-db) (into [{:seon.root/id :root :seon.root/boot "b1" :seon.config.agent/max-running 2}] (task/agent-tx "b1" :a1 {:status :idle})))
+  (let [db (d/db-with (ts/test-db) (into [{:seon.root/id :root :seon.root/boot "b1" :seon.config.agent/max-running 2}] (task/agent-tx :a1 {:status :idle})))
         db2 (d/db-with db (into (task/boot-tx "b2" 4 "sean") (task/earlier-agents-tx db)))
-        db3 (d/db-with db2 (task/agent-tx "b2" :a1 {:status :spawning}))
+        db3 (d/db-with db2 (task/agent-tx :a1 {:status :spawning}))
         agents (fn [db] (set (map :seon.agent/key (:seon.agent/_root (d/pull db '[{:seon.agent/_root [:seon.agent/key]}] [:seon.root/id :root]))))) ]
-    (is (= #{"b1/a1"} (agents db)))
+    (is (= #{"a1"} (agents db)))
     (is (= #{"sean"} (agents db2)) "the new boot holds none of the earlier boot's: only its user, an agent with no process")
-    (is (= #{"sean" "b2/a1"} (agents db3)) "and its own as they start")
+    (is (= #{"sean" "a1"} (agents db3)) "and its own as they start")
     (is (= #{"sean"} (agents (d/db-with db3 (into (task/boot-tx "b3" 4 "sean") (task/earlier-agents-tx db3))))) "a later boot keeps the one user, and unlinks the rest")
-    (is (some? (d/entity db3 [:seon.agent/key "b1/a1"])) "the earlier agent is kept, not deleted")))
+    (is (some? (d/entity db3 [:seon.agent/key "a1"])) "the earlier agent is kept, not deleted")))
 
 (deftest a-design-adds-a-proof-with-update
   ;; owner, 2026-10-25 (Dogfood rulings): my.task/update! takes :seon.task/proofs, so a design
@@ -268,7 +278,7 @@
   ;; docs/users.md#messages: a message sent before its agent's branch forked is on the branch with no turn holding it: it still arrives; one a turn holds, removed or not, doesn't again
   (let [main (d/db-with (ts/test-db) (into [{:seon.agent/key "a"}] (task/message-tx "m1" "sean" ["a"] "first" 1)))
         forked main
-        placed (d/db-with forked [{:seon.message/id "m1" :seon.message/call {:seon.model-call/id "a/1"}}])
+        placed (d/db-with forked [{:seon.message/id "m1" :seon.message/call {:seon.model-call/id (seon.lib/call-id "a" 1)}}])
         removed (d/db-with placed [[:db/retract (:db/id (d/entity placed [:seon.message/id "m1"])) :seon.message/to (:db/id (d/entity placed [:seon.agent/key "a"]))]])]
     (is (= ["m1"] (map :id (task/undelivered main forked "a"))) "inherited, and no turn has it")
     (is (= [] (task/undelivered main placed "a")) "a turn has it")
@@ -282,7 +292,31 @@
         started (d/db-with db (task/start-tx db "demo/a" "b1" :a1 {:branch :task-demo-a :model nil :max-turns 40} 1000))
         agents (fn [db] (set (map :seon.agent/key (:seon.agent/agents (d/entity db [:seon.user/name "sean"])))))]
     (is (= #{} (agents db)) "no agent yet")
-    (is (= #{"b1/a1"} (agents started)) "its agent, once it starts")
+    (is (= #{"a1"} (agents started)) "its agent, once it starts")
     (let [none (d/db-with db [[:db/retract [:seon.task/id "demo/a"] :seon.task/started-by [:seon.agent/key "sean"]]])]
       (is (= #{} (agents (d/db-with none (task/start-tx none "demo/a" "b1" :a1 {:branch :task-demo-a :model nil :max-turns 40} 1000)))) "a task nobody started links nothing"))))
 
+
+;; docs/decisions.md#an-id-is-the-content-of-the-facts-that-make-it-owner-2026-11-08 (docs/decisions.md#an-id-is-the-content-of-the-facts-that-make-it-owner-2026-11-08)
+(deftest an-agent-is-named-by-a-unique-id-and-a-call-by-its-content
+  (let [ids (repeatedly 100 seon.lib/unique-id)
+        db (d/db-with (db-with-program) (task/create-tx (db-with-program) [(decl "Do.")]))
+        a (keyword (first ids))
+        tx (task/start-tx db "demo/t" "b1" a {:branch :b :model nil :max-turns 4} 0)]
+    (is (= 100 (count (set ids))) "every spawn mints its own: two spawns of one task are two agents")
+    (is (every? #(re-matches #"[a-p][0-9a-f]{15}" %) ids) "in the one id form (seon.lib/id of a digest): a name every Clojure reader reads")
+    (is (some #(= (name a) (:seon.agent/key %)) tx) "the agent's key is its id's name")
+    (is (not-any? :seon.agent/id (tree-seq coll? seq tx)) "and :seon.agent/id is not written")
+    (is (= (seon.lib/call-id "k" 3) (seon.lib/call-id "k" 3) (:seon.model-call/id (task/call-ref "k" 3))) "the same agent and turn, the same call id")
+    (is (= (seon.lib/id (seon.lib/digest "k/3")) (seon.lib/call-id "k" 3)) "a model call's id is its agent and turn digested, in seon.lib/id's form")
+    (is (= 3 (count (distinct [(seon.lib/call-id "k" 3) (seon.lib/call-id "k" 4) (seon.lib/call-id "j" 3)]))) "another turn or agent, another id")))
+
+(deftest an-agents-id-is-no-stored-attribute
+  ;; docs/decisions.md#an-id-is-the-content-of-the-facts-that-make-it-owner-2026-11-08: an agent is named by its key alone; its id in
+  ;; root's process is the keyword of that key and is never stored, and nothing indexes the boot (the list is by who started an agent)
+  (let [schema (d/schema (ts/test-db))]
+    (is (contains? schema :seon.agent/key) "the key is the stored name")
+    (is (not (contains? schema :seon.agent/id)) "no attribute for the id")
+    (is (:db/index (get schema :seon.agent/boot)) "the boot is indexed: a boot's sessions are read by it")
+    (is (= "b9" (:seon.agent/boot (first (task/agent-tx :c0ffee00c0ffee00 {:boot "b9" :status :spawning}))))
+        "every agent root starts records its boot (its view's :boot), a bare spawn! too, so the agents list holds it")))

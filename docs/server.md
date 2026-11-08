@@ -44,13 +44,13 @@ A Claude agent works a task as a Seon agent does, on its own root and branch, an
 bin/worktree NAME; cd "$(bin/worktree --path NAME)"   # or, in a worktree made by something else: bin/worktree --setup
 nice -n 15 bin/build seon                             # only when this tree's root must run this tree's code
 bin/root start                                        # about 25 s; its own ports and store, no provider, no paid call
-bin/mcp call attach task=ns/name                      # its agent's id, a1, on the task's branch
-bin/mcp call context agent=a1                         # what the model reads now; wire=true: the request body
-bin/mcp call eval agent=a1 message-md='Reading how it stands.' intent='what and why' code=- <<'EOF'   # one reply, one eval (evals=[...] for several); code=- reads stdin
+bin/mcp call attach task=ns/name                      # its agent's id (16 hex digits, a digest of a fresh UUID: the same in every interface and across a root's restart) on the task's branch
+bin/mcp call context agent=ID                         # what the model reads now; wire=true: the request body
+bin/mcp call eval agent=ID message-md='Reading how it stands.' intent='what and why' code=- <<'EOF'   # one reply, one eval (evals=[...] for several); code=- reads stdin
 (my.task/status)
 EOF
-bin/mcp call eval agent=a1 message-md='Running my proofs.' intent='run my proofs' code='(my.agent/prove)'
-bin/mcp call done agent=a1                            # judged, and merged into this root's main when green
+bin/mcp call eval agent=ID message-md='Running my proofs.' intent='run my proofs' code='(my.agent/prove)'
+bin/mcp call done agent=ID                            # judged, and merged into this root's main when green
 bin/root stop                                         # leave nothing running
 ```
 

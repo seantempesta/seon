@@ -66,7 +66,7 @@
  ;; an agent as the reconciler's index holds it: what root decides on of its process and environment (the entity's attributes,
  ;; seon.task/agent-value)
  :seon.reconcile/agent [:map [:seon.agent/key :string] [:seon.agent/boot {:optional true} :string]
-                        [:seon.agent/env {:optional true} :seon.task/env] [:seon.agent/id {:optional true} :keyword]]
+                        [:seon.agent/env {:optional true} :seon.task/env]]
  ;; ---- the done rule and the reconciler's answer ----
  :seon.reconcile/merge-limits [:map [:max-conflicts nat-int?] [:max-merge-turns nat-int?]]
  ;; a released task not done at quiescence: a root cause (held for root with its failure, a

@@ -34,7 +34,7 @@
     (ts/work-tx id outcome {:boot boot :agent (keyword (str "a-" nm)) :branch br :model model :members members
                             :max-turns (cfg/value :seon.config.agent/max-turns)})))
 
-(defn- akey "The key of task nm's agent in boot-1." [nm] (str "boot-1/a-" nm))
+(defn- akey "The key of task nm's agent in boot-1." [nm] (str "a-" nm))
 
 (defn- st-of
   "A reconciler proc state over main db: its index, no flight (or flights, by task id)."
@@ -121,10 +121,10 @@
   (let [db (ts/test-db)
         id "demo/child"
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "child" :seon.task/kind :whole :seon.task/plan "p"}]))
-        asked (d/db-with db [{:seon.agent/key "boot-1/p" :seon.agent/id :p :seon.agent/branch :task-parent}
-                             {:seon.task/id id :seon.task/started-by [:seon.agent/key "boot-1/p"]}])
+        asked (d/db-with db [{:seon.agent/key "p" :seon.agent/branch :task-parent}
+                             {:seon.task/id id :seon.task/started-by [:seon.agent/key "p"]}])
         told (fn [db to & more] (r/tell-tx db id (into [[:db/cas [:seon.task/id id] :seon.task/outcome :running to]] more) 1000))]
-    (is (= [[:seon.agent/key "boot-1/p"]] (:seon.message/to (first (told asked :merged)))) "the message goes to the agent that launched it")
+    (is (= [[:seon.agent/key "p"]] (:seon.message/to (first (told asked :merged)))) "the message goes to the agent that launched it")
     (is (re-find #"merged to main" (:seon.message/body (first (told asked :merged)))))
     (is (re-find #"its proof went red" (:seon.message/body (first (told asked :closed {:seon.task/failure {:reason "its proof went red"}})))) "a stop says why")
     (is (re-find #"waiting" (:seon.message/body (first (told asked :parked {:seon.task/reason "which colour?"})))))
@@ -492,6 +492,16 @@
     (is (= stale (select-keys (task/task db "demo/a") (keys stale))) "the earlier end's facts are on the task before")
     (is (not-any? #(contains? tk %) (keys stale)) "and gone after a judging that set none of them")))
 
+(deftest a-woken-task-whose-agent-never-started-is-spawned-under-its-key
+  ;; docs/users.md#roots-session: a parked task names an agent no root has started (a key and no boot, as root's session is at boot); a
+  ;; message to that key makes the task ready, and its action is a spawn, which takes the session's key (seon.task/session-key). The
+  ;; woken check reads the task's agent key itself, so what an agent is in the index does not change (Optimization, 2026-11-08)
+  (let [db (db-of [(decl "a")] :extra [{:db/id "ag" :seon.agent/key "never-started"}
+                                        {:seon.task/id "demo/a" :seon.task/agent "ag" :seon.task/outcome :parked}])]
+    (is (= [] (actions-for db)) "parked, it waits")
+    (is (= [(spawn "a")] (actions-for db :woken ["never-started"])) "woken, it is spawned")
+    (is (= "never-started" (task/session-key db "demo/a")) "under its own key")))
+
 (deftest a-wake-whose-parked-process-is-gone-is-lost-and-the-next-start-a-spawn
   ;; flow-lab's hazard 6 (design agent-loop section 4): the parked process died before the wake's
   ;; work! reached it, so root answers that agent ended; the task took nothing, so it is :lost, not a
@@ -630,7 +640,7 @@
         stage (fn [outcome] (-> (db-of [(decl "d") (decl "i")])
                                 (d/db-with (ts/work-tx "demo/d" outcome {:agent :a1 :branch br}))
                                 (d/db-with (ts/work-tx "demo/i" outcome {:agent :a1 :branch br}))))
-        k "boot-1/a1"]
+        k "a1"]
     (is (= k (:seon.task/agent (task/task (stage :running) "demo/d")) (:seon.task/agent (task/task (stage :running) "demo/i"))) "one agent holds both")
     (testing "the boot: both are live in this one's, both are reaped once it is an earlier boot's"
       (let [[_ _ [after]] (observed-steps (stage :running) [["the agent's boot moved" [{:seon.agent/key k :seon.agent/boot "boot-0"}]]])]
@@ -661,6 +671,19 @@
       (is (= [] (actions-for (db-of [(decl "a")] :extra (concat (work "a" :closed :members {:seon.task/reasons [{:reason :proof-red :symbol (t "a")}]})
                                                                 (task/execution-tx ["demo/a"] :held)))))))))
 
+(deftest every-message-a-reconciler-write-holds-wakes-its-recipient
+  ;; docs/users.md#messages: a write the reconciler builds (seon.reconcile/write) holds a wake for every :seon.message/to its transaction
+  ;; carries, not only for the one tell-tx adds, so a verdict the judge writes to the agent itself (:told) wakes it as a person's message
+  ;; does (a refused green waited for a restart: an audit, 2026-11-08)
+  (let [db (db-of [(decl "a")] :extra (work "a" :running))
+        verdict (task/message-tx "m-verdict" "root" [(akey "a")] "The done rule refused it: make the proof green." 1)
+        [st _] (#'r/write (st-of db) "demo/a" :done verdict)]
+    (is (contains? (get-in st [:idx :late]) (akey "a")) "the agent the verdict is to is held for waking")
+    (let [e (:db/id (d/entity db [:seon.agent/key (akey "a")]))
+          by-id [(assoc (first verdict) :seon.message/to [e "a-tempid"])]
+          [st _] (#'r/write (st-of db) "demo/a" :done by-id)]
+      (is (= #{(akey "a")} (get-in st [:idx :late])) "a recipient named by its entity id too; a tempid, an entity the write makes, is owed nothing"))))
+
 (deftest a-parked-task-is-woken-only-by-a-wake
   ;; idx-ready?: parked, told or at its cap, a task is ready again only when its agent is woken (r/wake: a message reached it, over the
   ;; reconciler's :wake port); a wake for a running agent starts nothing and is held until it waits (docs/users.md#messages)
@@ -671,7 +694,7 @@
     (is (= [] (acts :parked)) "no wake")
     (is (= [wake] (acts :parked (akey "a"))) "woken")
     (is (= [wake] (acts :cap (akey "a"))) "at its cap a wake runs it again too: its allowance of turns is the cap's way out")
-    (is (= [] (acts :parked "boot-1/other")) "another agent's wake is none of it")
+    (is (= [] (acts :parked "other")) "another agent's wake is none of it")
     (testing "a wake for a running agent: nothing starts, the wake is held for when it waits"
       (let [db (db-of [(decl "a")] :extra (work "a" :running))
             idx (r/wake (r/index db) db (akey "a"))]
@@ -1171,7 +1194,7 @@
         (is (some? asked) "the ready merge is asked of the writer")
         (is (= (set (keys (task/tasks db))) (set (keys (task/tasks db')))) "no new task")
         (is (= :held (:seon.task/execution tk)))
-        (is (= {:reason "merge refused: conflicts with main at app/f" :agent "boot-1/a-add-merge"} (:seon.task/failure tk)))
+        (is (= {:reason "merge refused: conflicts with main at app/f" :agent "a-add-merge"} (:seon.task/failure tk)))
         (is (= :closed (:seon.task/outcome tk)))
         (is (= reason (:seon.task/error tk)) "the writer's reason, on the task")))))
 ))
@@ -1262,13 +1285,13 @@
         [sp & more] (actions-for released)]
     (is (nil? more))
     (is (= (mspawn "add") sp) "a new agent's start, on the task's own branch")
-    (is (= (:seon.agent/branch (d/entity db [:seon.agent/key "boot-1/a-add"])) (get-in sp [:env :branch])))
+    (is (= (:seon.agent/branch (d/entity db [:seon.agent/key "a-add"])) (get-in sp [:env :branch])))
     (testing "the resumed branch takes the task as main holds it: its failure and evidence"
       (let [on-branch (d/db-with db (task/onto-tx released db "demo/add"))
             tk (task/task on-branch "demo/add")]
         (is (= problem (:problem (:seon.task/evidence tk))))
         (is (= [(t "add")] (:red (:seon.task/evidence tk))))
-        (is (= "boot-1/a-add" (:agent (:seon.task/failure tk))))))
+        (is (= "a-add" (:agent (:seon.task/failure tk))))))
     (is (not= :failed (r/task-state (r/index released) "demo/add")) "released, it is no longer failed")))
 
 (deftest an-idle-system-does-nothing-after-a-reason
@@ -1284,7 +1307,7 @@
         [st outs] (main (r/reconciler-proc {:boot "boot-1" :conn conn}) db [])
         quiet (some #(get-in % [:req :req :tx-data 0 :seon.root/quiescent]) (reqs outs))]
     (is (= :held (:seon.task/execution (task/task db "demo/add"))))
-    (is (= [{:task "demo/add" :cause "the same verdict again: proof-red demo-test/add-test" :agent "boot-1/a-add"
+    (is (= [{:task "demo/add" :cause "the same verdict again: proof-red demo-test/add-test" :agent "a-add"
              :blocks ["demo/add-merge" "demo/twice" "demo/twice-merge"]}]
            (:root-causes quiet)) "quiet, naming the held task and what it blocks")
     (is (not-any? #(= :spawn (get-in % [:req :op])) (reqs outs)) "nothing starts")
@@ -1497,7 +1520,7 @@
       (is (= [{:op :kill :task "demo/a" :reason :held}]
              (actions-for (db-of [(decl "a")] :extra (into (parked :parked) (task/execution-tx ["demo/a"] :held)))))))
     (testing "parked in an earlier boot: its process is gone, so the next start is a spawn (a load of the session)"
-      (is (= [(spawn "a")] (actions-for (db-of [(decl "a")] :extra (work "a" :parked :boot "boot-0")) :woken ["boot-0/a-a"]))))
+      (is (= [(spawn "a")] (actions-for (db-of [(decl "a")] :extra (work "a" :parked :boot "boot-0")) :woken ["a-a"]))))
     (testing "it waited with its proofs green: done, never parked (start stops its kept process)"
       (is (= {:outcome :done :reasons []} (judgment-of db0 "a" {:end {:outcome :waiting} :results {(t "a") :pass}}))))
     (testing "its task moved to another branch: the parked process (forked on the old one) is stopped, and the next start is a spawn"

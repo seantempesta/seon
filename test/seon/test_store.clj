@@ -157,19 +157,19 @@
   {:malli/schema [:=> [:cat :string pos-int? :map] [:vector :map]]}
   [k n more]
   [{:seon.agent/key k :seon.agent/turn n}
-   (merge {:seon.model-call/id (str k "/" n) :seon.model-call/agent {:seon.agent/key k} :seon.model-call/n n :seon.model-call/origin :model}
+   (merge {:seon.model-call/id (seon.lib/call-id k n) :seon.model-call/agent {:seon.agent/key k} :seon.model-call/n n :seon.model-call/origin :model}
           more)])
 
 (defn work-tx
   "Task id's agent and how its work stands (outcome), as a root records them: what seon.task/start-tx writes (the task's
-  outcome and agent; the agent's key <boot>/<agent>, task, branch, boot, start and turn budget), with the members of
+  outcome and agent; the agent's key (its id's name), task, branch, boot, start and turn budget), with the members of
   :members (:seon.task/* of its judging) beside. Options: :boot (\"boot-1\"), :agent (:a1), :branch (its task's default), :model, :holder,
   :max-turns (8), :start-ms (1000), :members."
   {:malli/schema [:=> [:cat :seon.task/id :seon.task/outcome :map] [:vector :map]]}
   [id outcome {:keys [boot agent branch model holder max-turns start-ms members] :or {boot "boot-1" agent :a1 max-turns 8 start-ms 1000}}]
-  (let [k (task/agent-key boot agent)]
+  (let [k (name agent)]
     [(merge {:seon.task/id id :seon.task/outcome outcome :seon.task/agent k} members)
-     (cond-> {:db/id k :seon.agent/key k :seon.agent/id agent :seon.agent/task [:seon.task/id id]
+     (cond-> {:db/id k :seon.agent/key k :seon.agent/task [:seon.task/id id]
               :seon.agent/branch (or branch (task/default-branch id)) :seon.agent/boot boot :seon.agent/started-ms start-ms
               :seon.agent/max-turns max-turns}
        model (assoc :seon.agent/model model)
