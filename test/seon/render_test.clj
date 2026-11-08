@@ -2229,7 +2229,10 @@
   (let [db0 (booted)
         db (d/db-with db0 [{:seon.task/id "request/greet" :seon.task/ns 'request :seon.task/name "greet" :seon.task/plan "Say hi.\nOne line." :seon.task/kind :user
                             :seon.task/branch :task-request-greet :seon.task/outcome :parked}
-                           {:seon.agent/key "b1/a2" :seon.agent/id :a2 :seon.agent/root [:seon.root/id :root] :seon.agent/task [:seon.task/id "request/greet"]}])
+                           {:seon.agent/key "b1/a2" :seon.agent/id :a2 :seon.agent/root [:seon.root/id :root] :seon.agent/task [:seon.task/id "request/greet"]}
+                           ;; the person asks root's session something, as the home box will
+                           {:seon.message/from "sean" :seon.message/to [[:seon.agent/key "root"]] :seon.message/body "What is running?" :seon.message/sent-ms 1}])
+        db (d/db-with db [{:seon.agent/key "root" :seon.agent/task [:seon.task/id "request/root"]}])
         part (fn [k] (let [c (seon.ctx/agent-ctx db (:db/id (d/entity db [:seon.agent/key k])))
                            w (r/draw c seon.ctx/changes db (r/layout-of c) {:model-only true})]
                        (try (pr-str (r/placed-hiccup w (r/page-lists w))) (finally (r/dispose-walk! w)))))
@@ -2237,7 +2240,10 @@
     (is (str/includes? root-text "/agent/b1/a2") "root's session reads the other session by its address")
     (is (str/includes? root-text "Say hi.") "what it works on")
     (is (not (str/includes? root-text ":seon.config.")) "and none of root's config")
-    (is (not (str/includes? (part "b1/a2") "Sessions")) "another agent reads no sessions")))
+    (is (not (str/includes? (part "b1/a2") "Sessions")) "another agent reads no sessions")
+    ;; its status answers: it threw "Duplicate key: root" when a set literal held "root" and the agent's own key, root's session's
+    ;; being "root" too (seen live on a demo root, 2026-11-08)
+    (is (map? (seon.ctx.status/status db (seon.ctx/agent-ctx db (:db/id (d/entity db [:seon.agent/key "root"]))) {})) "and how its work stands")))
 
 (deftest a-users-page-moves-with-main
   ;; docs/render.md#a-page-is-a-kept-walk: a user's page is a kept walk, as root's is: a move of main draws what it reached, so an agent it starts appears on a page already open
