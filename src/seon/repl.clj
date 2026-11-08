@@ -141,7 +141,8 @@
                   (agent/send! {:op :stream :stream id :in (get-in req [:stream :call]) :part part :agent (:key @agent/state) :text s})
                   (vswap! sent + (count s))))]
       (proxy [java.io.Writer] []
-        (write ([x] (put (if (string? x) x (str (char x)))))
+        ;; Writer's one-argument write is an int (a char), a String or a char[]: each to its text
+        (write ([x] (put (cond (string? x) x (char? x) (str x) (integer? x) (str (char x)) :else (String. ^chars x))))
                ([b o n] (put (if (string? b) (subs b o (+ o n)) (String. ^chars b (int o) (int n))))))
         (flush [])
         (close [])))

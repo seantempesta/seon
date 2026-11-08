@@ -70,6 +70,9 @@
       (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable (fn [] (end! :signal))))
       ;; the key's three values, read here only: -1 the kernel assigns a port (0 to bind), >0 that
       ;; port (0, none, refused above); the port bound is the fact, printed for bin/root to record
+      ;; a test's root ends with its test process (:seon.config.root/end-with), armed now that the boot has forked
+      ;; the fork server (a thread before it would refuse the fork); the fork server and agents end with root
+      (let [p (seon.config/value :seon.config.root/end-with)] (when (pos? p) (lib/end-with! p false)))
       (let [bound (.getLocalPort ^java.net.ServerSocket (seon.server/serve! sys (if (= -1 port) 0 port)))]
         ;; the watcher ends with this process (target/watch exits on its parent's exit)
         (let [w (my.root/watch! sys)]

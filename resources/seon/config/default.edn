@@ -566,7 +566,10 @@
  ;; responsive beside a standing root and other worktree sessions (measured in docs/merging.md#a-merge-runs-what-the-change-reaches).
  ;; At the bound: a run never has more shards; fewer when fewer namespaces are selected. bin/check
  ;; runs this many steps at once too, and mg-check in this many shards (pure-tests 2026-10-23).
- :seon.config.proofs/jobs 4
+ ;; bin/test sets SEON_PROOF_JOBS: one shard, two when 12 cores are free (owner, 2026-11-08: "Why are we doing so
+ ;; much sharding?"): each shard loads every test namespace and boots a shared root per test group, so three sessions'
+ ;; four-shard runs at once took load to 40 on 18 cores.
+ :seon.config.proofs/jobs #long #or [#env SEON_PROOF_JOBS 4]
  ;; Unit: ms. The least work a shard of an incremental run is worth (seon.proofs/worth-shards). Provenance: a shard's start
  ;; costs about 5 s, and 8 s more for its process tests' root (docs/testing.md#a-root-costs-what-it-boots), so it saves its cost past
  ;; about twice that on each side. At the bound: a run of less work than this runs in one shard, as the owner ruled 2026-10-30.
@@ -1020,6 +1023,10 @@
  ;; #env honours where bin/root names it (until a built binary's top-level code sees its argv,
  ;; so --set can say it).
  :seon.config.root/server-port #long #or [#env SEON_SERVER_PORT 0]
+ ;; Unit: pid. The process this root ends with (seon.lib/end-with!, armed once its boot has forked the fork server):
+ ;; a test's root names its test process (seon.test-store/start-root! sets SEON_END_WITH), so however that process
+ ;; ends, -9 included, its roots and their agents end too (2026-11-08: 12 process groups outlived a stopped prove). 0: none.
+ :seon.config.root/end-with #long #or [#env SEON_END_WITH 0]
  ;; datastar.js, read once.
  :seon.config.web/public-dir #seon/checkout "resources/public"
  ;; The page's stylesheet, bin/build's css step's output (Tailwind over
@@ -1031,6 +1038,15 @@
  ;; dropped, never the producer made to wait, and the drop shows in the tab as … in that
  ;; stream until its committed value replaces it. 64: the model reader's own in-port's size.
  :seon.config.web/streams-buf 64
+ ;; Unit: encoding. How each tab's feed (the SSE stream of patches and in-flight text,
+ ;; docs/render.md#in-flight-output-streams) is compressed: :auto deflates it when the browser's
+ ;; Accept-Encoding takes deflate (every current browser does), :deflate always, :none sends it
+ ;; plain, to read a stream as it is when debugging (owner, 2026-11-08: "a config option if we
+ ;; need to ever debug the streams").
+ :seon.config.web/feed-encoding :auto
+ ;; Unit: zlib level, 1-9. The feed's deflate level: each update's work grows with it and the
+ ;; bytes shrink; 6 is zlib's default.
+ :seon.config.web/feed-deflate-level 6
 
  ;; Contracts and their recording (session G1): :on, :contracts (wrappers, no recording
  ;; transaction: the two measured apart), :off (no wrapper, no recording: the same binary
