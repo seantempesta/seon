@@ -1525,6 +1525,8 @@
         branch (d/db-with branch [{:ns/name 'seon.render :ns/file "src/seon/render.clj"}
                                   {:seon.agent/key k :seon.agent/turn 2}
                                   {:seon.model-call/id (str k "/2") :seon.model-call/agent {:seon.agent/key k} :seon.model-call/n 2 :seon.model-call/origin :model
+                                   ;; answered with nothing to say (a call with only its basis is one in flight)
+                                   :seon.model-call/reply "" :seon.model-call/finish "stop"
                                    :seon.model-call/basis {:commit #uuid "00000000-0000-0000-0000-000000000000" :task "demo/f" :turn 2 :max-turns 8 :origin :model}}
                                   ;; the proof's verdict, as the test run recorded it on the proof's var entity
                                   {:var/name 'demo/f-test :seon.test/status :red
@@ -3185,3 +3187,17 @@
         "an error committed ends it too")
     (is (not (str/includes? (str (at (d/db-with open [{:seon.model-call/id cid :seon.model-call/origin :outside}]))) "aria-busy"))
         "an outside agent's call streams nothing")))
+
+(deftest a-reply-of-only-tool-calls-is-not-in-flight
+  ;; docs/render.md#in-flight-output-streams: a call answered with tool calls alone commits evals and no reply text;
+  ;; its turn draws those evals, never the in-flight element (found by Optimization: they vanished from the page and the wire)
+  (let [[db aid] (cited-world)
+        k (:seon.agent/key (d/pull db [:seon.agent/key] aid))
+        db (d/db-with db [{:db/id aid :seon.agent/turn 1}
+                          {:seon.model-call/id (str k "/1") :seon.model-call/agent aid :seon.model-call/n 1 :seon.model-call/origin :model}
+                          {:seon.eval/id "e3" :seon.eval/agent aid :seon.eval/by "a1" :seon.eval/call (seon.task/call-ref k 1) :seon.eval/call-id "c1"
+                           :seon.eval/intent "Run the proofs." :seon.eval/code "(prove-it)" :seon.eval/response {:handle 'result/e3 :value 1}}])
+        turn (ui/conversation-turn {:seon.ctx/ctx (:tree (seon.ctx/build db aid :b)) :seon.db/db db :key 1})
+        reply (some #(when (= :section (first %)) %) (drop 2 turn))]
+    (is (= ["e3"] (map (comp :key second) (last (last reply)))) (str "its eval is the reply's step: " (pr-str reply)))
+    (is (not (str/includes? (pr-str turn) "aria-busy")) "and it is not in flight")))

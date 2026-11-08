@@ -1443,10 +1443,10 @@
   web proc appends into its call's (or eval's) in-flight element the first time a tab sees that part, and then its text
   into (its id the stream's, seon.render/key-id of [id]). See docs/render.md#in-flight-output-streams."
   {:seon.render/for "page"
-   :seon.render/style ".stream-part { white-space: pre-wrap; overflow-wrap: anywhere; } .stream-part[data-part=\"reasoning\"] { color: var(--color-text-500); font-size: 0.75rem; } .stream-part[data-part=\"intent\"] { color: var(--color-text-400); } .stream-part:is([data-part=\"code\"], [data-part=\"out\"]) { font-family: var(--font-mono); font-size: 0.75rem; background: var(--color-base-900); border-radius: 0.375rem; padding: 0.25rem 0.5rem; } .seon-stream[aria-busy=\"true\"]::after { content: \"▍\"; animation: seon-stream-cursor 1s steps(2) infinite; } @keyframes seon-stream-cursor { 50% { opacity: 0; } }"
+   :seon.render/style ".stream-part { white-space: pre-wrap; overflow-wrap: anywhere; } .stream-part[data-stream-part=\"reasoning\"] { color: var(--color-text-500); font-size: 0.75rem; } .stream-part[data-stream-part=\"intent\"] { color: var(--color-text-400); } .stream-part:is([data-stream-part=\"code\"], [data-stream-part=\"out\"]) { font-family: var(--font-mono); font-size: 0.75rem; background: var(--color-base-900); border-radius: 0.375rem; padding: 0.25rem 0.5rem; } .seon-stream[aria-busy=\"true\"]::after { content: \"▍\"; animation: seon-stream-cursor 1s steps(2) infinite; } @keyframes seon-stream-cursor { 50% { opacity: 0; } }"
    :malli/schema [:=> [:cat :string :string] :any]}
   [id part]
-  [:div {:id (render/key-id [id]) :class "stream-part" :data-part part}])
+  [:div {:id (render/key-id [id]) :class "stream-part" :data-stream-part part}])
 
 (defn chat-ask
   "What was asked, the chat's first message, a person's on the right (a component over ctx): the
@@ -1631,9 +1631,12 @@
         (when-let [kids (seq (remove nil? (concat (for [[m id] messages] [#'chat-message {:key id :at [:messages m]}])
                                                   [(reply-hiccup (cond-> (into {} (for [k [:seon.model-call/id :seon.model-call/n :seon.model-call/origin :seon.model-call/reply :seon.model-call/reasoning :seon.model-call/truncated]
                                                                                         :let [v (ratom/realize (get call k))] :when (some? v)] [k v]))
-                                                                   ;; in flight: the model's call, with neither its reply nor its error committed, of an agent whose process lives
+                                                                   ;; in flight: the model's call with nothing of its answer committed (no reply, no finish, no error, no eval
+                                                                   ;; of its own: a reply that was only tool calls has its evals and no reply text), of an agent whose process lives
                                                                    (and (= :model (ratom/realize (:seon.model-call/origin call)))
+                                                                        (empty? ours)
                                                                         (nil? (ratom/realize (:seon.model-call/reply call)))
+                                                                        (nil? (ratom/realize (:seon.model-call/finish call)))
                                                                         (nil? (ratom/realize (:seon.model-call/error call)))
                                                                         (not (gone (ratom/realize (:seon.agent/status c)))))
                                                                    (assoc ::in-flight true))

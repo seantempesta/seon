@@ -243,7 +243,7 @@
         m {:stream "b1/a1/3/0/eval-0/code" :in "b1/a1/3" :part "code" :agent "b1/a1"}
         [st _] (#'w/web-proc st :streams (assoc m :offset 0 :text "(+ 1"))
         first-chunk (a/poll! a1)]
-    (is (str/includes? first-chunk "data: selector #b1_2Fa1_2F3\ndata: mode append\ndata: elements <div class=\"stream-part\" data-part=\"code\" id=\"b1_2Fa1_2F3_2F0_2Feval-0_2Fcode\"></div>")
+    (is (str/includes? first-chunk "data: selector #b1_2Fa1_2F3\ndata: mode append\ndata: elements <div class=\"stream-part\" data-stream-part=\"code\" id=\"b1_2Fa1_2F3_2F0_2Feval-0_2Fcode\"></div>")
         (str "the part's element into the call's: " first-chunk))
     (is (str/includes? first-chunk "data: selector #b1_2Fa1_2F3_2F0_2Feval-0_2Fcode\ndata: mode append\ndata: elements (+ 1\n") "then its text")
     (let [[_ _] (#'w/web-proc st :streams (assoc m :offset 4 :text " 2)"))
