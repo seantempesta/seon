@@ -501,7 +501,7 @@
   "a3's page's units as its process draws them (seon.repl/render-ctx), drawn here from branch: what the
   render proc's {:op :render} ask is answered with."
   [branch]
-  (let [w (a3-walk branch)] (try {:units (r/placed-units w)} (finally (r/dispose-walk! w)))))
+  (let [w (a3-walk branch)] (try {:t (:max-tx branch) :units (r/placed-units w)} (finally (r/dispose-walk! w)))))
 
 (defn- component-html
   "The html of the component whose element id is id in a3's page drawn from branch, however deep it sits (an eval is a
@@ -1772,6 +1772,22 @@
         html (get-in st [:views [:chat :a3] :units "conversation-turn-1" :html])
         tag (re-find #"<details[^>]*id=\"eval-e3\"[^>]*>" html)]
     (is (re-find #" open" tag) (str "drawn open: " tag))))
+
+(deftest a-working-agents-page-follows-its-branch
+  ;; owner, 2026-11-08: "the user message doesn't show up until the agent has finished their turn". A live agent draws its own
+  ;; page (seon.render.proc/ask-parts), but its process is busy for the whole run, so its answer comes at the run's end: until
+  ;; then root draws the page from the branch it already read, and the agent's parts count only when drawn at that t or later
+  (let [[main branch _] (paged-dbs)
+        k (seon.task/agent-key "b1" :a3)
+        o (volatile! {})
+        st (#'p/answered (first (#'p/pass-view (proc-state main branch) [:chat :a3])) o [:parts :a3] (drawn-parts branch))
+        branch2 (d/db-with branch (turn-2-eval-tx k "(f 4)"))
+        ;; root read the branch again (seon.render.proc/ask-branches); the agent has not answered since
+        st2 (-> st (assoc-in [:branches [:chat :a3] :db] branch2) (assoc-in [:branch-reads :task-demo-f :db] branch2))
+        [st3 _] (#'p/pass-view st2 [:chat :a3])]
+    (is (contains? (get-in st3 [:views [:chat :a3] :units]) "conversation-turn-2") "the turn written since its process drew is on the page")
+    (let [[st4 _] (#'p/pass-view (#'p/answered st3 (volatile! {}) [:parts :a3] (drawn-parts branch2)) [:chat :a3])]
+      (is (get-in st4 [:views [:chat :a3] :units "conversation-turn-2" :input :own?]) "and its process's drawing takes over once it answers at that t"))))
 
 (deftest a-new-member-is-an-append
   ;; a keyed component new in its list, its parent's output otherwise unchanged, is sent as an append
