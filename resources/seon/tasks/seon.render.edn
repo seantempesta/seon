@@ -254,4 +254,37 @@ Proofs, red first: a new eval in a turn of 10 and of 100 evals is one append of 
 
 Proofs, red first: a home page with no agents, patched by the first agent's arrival, shows it (the patch places it in a container the page holds)."
   :seon.task/proofs #{seon.render-test/a-home-pages-first-agent-is-patched-in}}
+ {:seon.task/name "a-layout-is-its-entitys"
+  :seon.task/plan "Step 6 of docs/users.md#the-steps, layouts as data: the first piece of root as a session (owner, 2026-11-08: \"fork and treat it just like every other agent. I just want different render functions, a differnt pull pattern and different data\"; \"The layout does come from the entity\").
+
+What exists (checked on 7888's root, 2026-11-08): each entity schema names its own pattern (:seon.ctx/pattern) and its own render (:seon.render/hiccup: root-fact seon.render.ui/root, agent-fact seon.render.ui/agent), but not its layout. The layout is chosen in three places by code instead: seon.repl/layout always declares :seon.render/render-ctx (an agent process draws render-ctx whatever its entity); seon.render.proc's agent-view picks (if (:seon.user/name e) :seon.render/user-ctx :seon.render/render-ctx); root's walk hard-codes :seon.render/root-ctx.
+
+Change: each entity schema declares its layout's render key beside :seon.render/hiccup (agent-fact :seon.render/render-ctx, root-fact :seon.render/root-ctx; the user is an agent-fact and keeps user-ctx only until its own layout key decides it). seon.repl/layout and the render proc read it from the entity through render/declared-var, so a branch still overrides the var. Deletes the user-name branch in agent-view and root-walk's literal. Split with Context: Context takes seon.repl/layout and the schema keys, Web the render proc.
+
+Proofs, red first: an agent process whose entity's schema declares another layout draws that layout; root's, a user's and an agent's pages draw what they draw today (the unit ids and html of each, before and after)."
+  :seon.task/proofs #{seon.render-test/an-entitys-schema-names-its-layout
+                      seon.render-test/each-page-draws-its-entitys-layout}}
+ {:seon.task/name "the-home-box-talks-to-root"
+  :seon.task/needs #{"seon.root/root-is-a-session"}
+  :seon.task/plan "Web's part of root as a session (owner, 2026-11-08: \"it should switch to that agent\"; \"make it work properly for chatting and launching new sessions and moving the user to the right UI view\"; \"the tiles are way too small\").
+
+What exists: the home box calls seon.root/ask!, which makes a task and starts a new agent each time; the page never moves; the person waited 26 s for \"hi\" with nothing shown; a tile's title is the first message and its body the last reply (an atom tile showed a paragraph on agents, the reply to a later follow-up).
+
+Change: the home box sends a message to [:seon.agent/key \"root\"] (seon.root/message!, as a chat's box does); the home page draws root's session's chat beside the person's session tiles (sessions-by-standing); a tile shows the person's last message to it and its reply; tiles at most two across, about twelve lines. The view move is seon.render/a-tab-follows-its-view.
+
+Proofs, red first: a line typed in the home box is a message to root's session (no task made); the home page holds root's chat and the person's tiles; a tile shows the last message and its reply."
+  :seon.task/proofs #{seon.render-test/the-home-box-messages-root
+                      seon.render-test/the-home-page-is-roots-chat-and-your-sessions
+                      seon.render-test/a-tile-shows-the-last-exchange}}
+ {:seon.task/name "a-tab-follows-its-view"
+  :seon.task/needs #{"seon.root/root-is-a-session"}
+  :seon.task/plan "Moving the person to the right view (owner, 2026-11-08: \"Can root control the users view?\"), as step 6 of docs/users.md#the-steps names it, tabs as entities (Context, 2026-11-08: a fact root's session writes like any agent's eval, not a root-only call).
+
+What exists: each browser tab is a channel in the web proc's state keyed by the proc's own counter; a /call carries no tab, so nothing can be sent back to the tab that asked.
+
+Change, to be shaped at the REPL first: a tab is an entity whose view is a fact (:seon.tab/view); the feed opens with the tab's id and a /call carries it; an agent (root's session first) moves a tab by writing its view; the web proc follows the fact and sends the tab a Datastar navigation. Open question for the owner: a tab entity costs a commit at each open and move (about 24 ms of CPU across root's processes, docs/users.md#whats-on-screen).
+
+Proofs, red first: a tab whose view fact changes is sent to that view; a /call names its tab."
+  :seon.task/proofs #{seon.web-test/a-tab-follows-its-view-fact
+                      seon.web-test/a-call-names-its-tab}}
 ]
