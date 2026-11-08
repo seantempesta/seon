@@ -1806,7 +1806,7 @@
 (def ^:private session-attrs
   "What an entry of the agents list reads of an agent on main: its identity, its process's status, its branch and turns, and its task."
   [:seon.agent/key :seon.agent/id :seon.agent/status :seon.agent/branch :seon.agent/max-turns
-   {:seon.agent/task [:seon.task/id :seon.task/outcome :seon.task/reason :seon.task/failure]}])
+   {:seon.agent/task [:seon.task/id :seon.task/outcome :seon.task/reason :seon.task/failure :seon.task/plan {:seon.task/started-by [:seon.user/name]}]}])
 
 (defn session-address
   "The name of an agent's page: its key (:seon.agent/key, boot/id), the one name of a session that survives a root's restart,
@@ -1944,26 +1944,48 @@
                                    [:span {:class "text-text-400 shrink-0"} (some-> (:agent ev) kname)]
                                    [:span {:class "min-w-0 break-all text-text-300"} (event-detail ev)]])]])]))
 
+(defn- last-exchange
+  "The newest message a person sent agent e (a seek of :seon.message/to, the newest by eid, from a :seon.user/name) and its task
+  t's reason when root wrote it after that message (by transaction), the agent's answer to it: {:asked :reply}, either nil. See
+  docs/users.md#whats-on-screen."
+  {:malli/schema [:=> [:cat :seon.host/db [:maybe pos-int?] [:maybe :map]] [:map [:asked [:maybe :string]] [:reply [:maybe :string]]]]}
+  [db e t]
+  (let [m (when e (->> (d/datoms db :avet :seon.message/to e) (map :e)
+                       (filter #(some->> (:seon.message/from (d/entity db %)) (vector :seon.user/name) (d/entity db)))
+                       (reduce max -1)))
+        m (when (and m (pos? m)) m)
+        tx-of (fn [eid a] (some-> (first (d/datoms db :eavt eid a)) :tx))
+        r (:seon.task/reason t)
+        rid (:db/id (d/entity db [:seon.task/id (:seon.task/id t)]))]
+    {:asked (some-> m (#(d/entity db %)) :seon.message/body)
+     :reply (when (and (not (str/blank? r)) (or (nil? m) (< (tx-of m :seon.message/body) (or (some-> rid (tx-of :seon.task/reason)) 0)))) r)}))
+
 (defn session-card
   "A session as a tile (a component over the db, by its agent's key), the whole tile one link to its page by its stable address:
   what it works on in words and how it stands (standing), then what it last told whoever started it, a few lines of it (the
   task's reason, which root's message to them carries: seon.reconcile/tell-tx), so a person can tell which to open. See
   docs/users.md#whats-on-screen."
-  {:seon.render/style ".session-card > a { display: flex; flex-direction: column; gap: 0.5rem; height: 100%; min-height: 7rem; border: 1px solid var(--color-base-800); border-radius: 0.5rem; background: var(--color-base-900); padding: 0.75rem 0.875rem; color: inherit; text-decoration: none; } .session-card > a:hover { border-color: var(--color-base-600); } .session-card .said { max-height: 7.5rem; overflow: hidden; font-size: 0.8125rem; line-height: 1.25rem; color: var(--color-text-300); -webkit-mask-image: linear-gradient(to bottom, black 70%, transparent); mask-image: linear-gradient(to bottom, black 70%, transparent); } .session-card .said p { margin: 0 0 0.375rem; }"
+  {:seon.render/style ".session-card > a { display: flex; flex-direction: column; gap: 0.5rem; height: 100%; min-height: 12rem; border: 1px solid var(--color-base-800); border-radius: 0.5rem; background: var(--color-base-900); padding: 0.75rem 0.875rem; color: inherit; text-decoration: none; } .session-card > a:hover { border-color: var(--color-base-600); } .session-card .said { max-height: 16rem; overflow: hidden; font-size: 0.875rem; line-height: 1.375rem; color: var(--color-text-300); -webkit-mask-image: linear-gradient(to bottom, black 70%, transparent); mask-image: linear-gradient(to bottom, black 70%, transparent); } .session-card .said p { margin: 0 0 0.375rem; } .session-card .said .asked { color: var(--color-text-400); border-left: 2px solid var(--color-base-700); padding-left: 0.5rem; }"
    :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :string] :any]}
   [{db :seon.db/db} k]
   (let [a (d/pull db session-attrs [:seon.agent/key k])
         t (:seon.agent/task a)
-        stands (standing a t)]
+        stands (standing a t)
+        {:keys [asked reply]} (last-exchange db (:db/id (d/entity db [:seon.agent/key k])) t)
+        reply (or reply (when-not asked (:reason stands)))]
     [:section
      [:a {:href (str "/agent/" (session-address a))
           :title (str/join " · " (remove nil? [(kname (:seon.agent/id a)) (:seon.task/id t)]))}
       [:span {:class "flex items-baseline gap-2"}
        [:span {:class (if (:lit? stands) "text-signal" "muted")} (if (:lit? stands) "●" "○")]
-       [:span {:class "min-w-0 flex-1 truncate font-semibold text-text-100"} (task-name a t)]
+       ;; what a person asked, its first line as they typed it, else the task's name in words
+       [:span {:class "min-w-0 flex-1 truncate font-semibold text-text-100"}
+        (or (when (get-in t [:seon.task/started-by :seon.user/name]) (some-> (:seon.task/plan t) str/split-lines first str/trim not-empty)) (task-name a t))]
        [:span {:class (str "shrink-0 text-2xs " (tone-class (:tone stands)))} (:text stands)]]
-      ;; the task's reason even while it waits (standing leaves it out then, for the agents list): what the agent asked is the point
-      (when-let [r (or (when-not (str/blank? (:seon.task/reason t)) (:seon.task/reason t)) (:reason stands))] [:div {:class "said"} [#'markdown r {:inline? true}]])]]))
+      ;; the person's newest message, then the agent's answer to it: what was asked and what came of it is the point
+      [:div {:class "said"}
+       (when asked [:p {:class "asked"} [#'markdown asked {:inline? true}]])
+       (when reply [#'markdown reply {:inline? true}])]]]))
 
 (defn- sessions-by-standing
   "Sessions ks (agent keys, newest first) as tiles grouped by how each stands: what needs a person, what is working, then what
@@ -2050,7 +2072,7 @@
 (defn started-cards
   "A tile for each agent this user started, grouped by what needs them (sessions-by-standing: `session-card` by each one's key), the
   home page's one list: an agent's latest words to them are on its tile, its whole conversation in its chat. See docs/users.md#whats-on-screen."
-  {:seon.render/style ".started-cards .session-tiles, .work-list .session-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(18rem, 100%), 1fr)); gap: 0.75rem; }"
+  {:seon.render/style ".started-cards .session-tiles, .work-list .session-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, max(24rem, calc(50% - 0.5rem))), 1fr)); gap: 1rem; }"
    :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
   [{c :seon.ctx/ctx db :seon.db/db}]
   (if-let [ks (seq (keep #(:seon.agent/key (d/entity db %)) (newest-started db c)))]

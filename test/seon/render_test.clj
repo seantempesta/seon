@@ -2141,6 +2141,24 @@
       (is (empty? (filter #(and (vector? %) (= #'ui/agent-side (first %))) (tree-seq coll? seq (ui/users-side {:seon.db/db db})))) "this boot's are in the list already"))
     (is (nil? (ui/users-side {:seon.db/db (d/db-with db [[:db/retract (:db/id sean) :seon.user/name "sean"]])})) "no name, no user")))
 
+(deftest a-tile-shows-the-last-exchange
+  ;; docs/users.md#whats-on-screen: a tile is titled by what the person typed and shows their newest message and its answer, never
+  ;; an answer to an earlier one under a later question (owner, 2026-11-08: an atom tile showed a paragraph on agents)
+  (let [db0 (sessions-db "b2" [["b2/a2" :a2 :idle "x/asks" :parked :task-b]])
+        a (:db/id (d/entity db0 [:seon.agent/key "b2/a2"]))
+        db1 (d/db-with db0 [{:db/id "u" :seon.agent/key "sean" :seon.user/name "sean"}
+                            {:seon.task/id "x/asks" :seon.task/plan "What is (+ 2 3)?\nOne line." :seon.task/started-by "u" :seon.task/reason "It is five."}])
+        db2 (d/db-with db1 [{:seon.message/from "sean" :seon.message/to [a] :seon.message/body "And times three?" :seon.message/sent-ms 1}])
+        db3 (d/db-with db2 [{:seon.task/id "x/asks" :seon.task/reason "It is six."}])
+        tile (fn [db] (h/html (ui/session-card {:seon.db/db db} "b2/a2")))]
+    (is (str/includes? (tile db1) "What is (+ 2 3)?") "titled by the first line the person typed")
+    (is (not (str/includes? (tile db1) "x/asks</span>")) "not the task's id")
+    (is (str/includes? (tile db1) "It is five.") "its answer, with nothing asked since")
+    (is (str/includes? (tile db2) "And times three?") "the person's newest message")
+    (is (not (str/includes? (tile db2) "It is five.")) "and not the answer to the earlier question")
+    (is (str/includes? (tile db3) "It is six.") "its answer once root writes it")
+    (is (str/includes? (tile db3) "And times three?"))))
+
 (deftest a-users-page-moves-with-main
   ;; docs/render.md#a-page-is-a-kept-walk: a user's page is a kept walk, as root's is: a move of main draws what it reached, so an agent it starts appears on a page already open
   (let [db0 (sessions-db "b2" [["b2/a1" :a1 :running "seon.print/a-long-string" :running :task-a]])
@@ -2149,10 +2167,15 @@
         kw (#'p/user-walk st db1 (d/entity db1 [:seon.user/name "sean"]))
         side (fn [w] (apply str (map :html (filter #(= "#c-side" (:container %)) (r/placed-units w)))))
         before (side (:w kw))
+        rows (fn [w] (apply str (map :html (filter #(= "#c-rows" (:container %)) (r/placed-units w)))))
+        ;; read now: the walk is advanced in place
+        rows-before (rows (:w kw))
         db2 (d/db-with db1 [{:seon.agent/key "sean" :seon.agent/agents [(:db/id (d/entity db1 [:seon.agent/key "b2/a1"]))]}])
         st' (#'p/user-walks st db2)]
     (is (not (str/includes? before "/agent/b2/a1")) "nothing started yet")
     (is (str/includes? (side (:w (get @(:user-walks st') "sean"))) "/agent/b2/a1") "the agent it started is on the page, with no new draw")
+    (is (not (str/includes? rows-before "/agent/b2/a1")) "no tile while nothing is started")
+    (is (str/includes? (rows (:w (get @(:user-walks st') "sean"))) "/agent/b2/a1") "the first agent's tile too, in the list the page holds")
     (is (contains? (:dirty st') [:chat :sean]) "and its view is dirty")
     (is (not (contains? (:dirty st') [:chat :a1])) "another's isn't")))
 
