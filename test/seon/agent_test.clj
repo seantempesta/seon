@@ -2271,6 +2271,9 @@
   ;; candidate running nothing, since the same owner holds its verdict (seon.fx/run-tests). On the shard's root, whose merges branch is its own
   ;; (seon.test-store/shared-root!): a candidate is its branch's head, so no other shard's merge makes it another candidate between the two asks
   (let [t 'seon.repl-test/a-really-gated-proof
+        ;; an edge each (seon.program/reach-step): the gate runs in root across the agent's :gate message, which no reference shows, so a
+        ;; change to it (run-held no longer reusing a held verdict) moved no digest here and its red was never run
+        _ '[seon.agent/judge! seon.agent/ask-gate seon.root/ext-op seon.fx/run-tests seon.fx/run-held seon.fx/run-on-checkout]
         prove "(let [r (my.agent/prove)] {:proofs (:proofs r) :deferred (:deferred r)})"
         [_ green judge-gate]
         (in-agent (fn [{:keys [task]}]
