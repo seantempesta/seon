@@ -586,7 +586,7 @@
   docs/references.md#an-entity-cites."
   {:malli/schema [:=> [:cat :seon.host/db [:or :symbol :qualified-keyword]] :any]}
   [db n]
-  (let [r (pdb/with db [{:db/id "of" :seon.agent/key (str "help " n)} {:seon.cite/id (str "help " n) :seon.cite/of "of" :seon.cite/name n :seon.cite/depth :doc :seon.cite/order 0}])
+  (let [r (pdb/speculate db [{:db/id "of" :seon.agent/key (str "help " n)} {:seon.cite/id (str "help " n) :seon.cite/of "of" :seon.cite/name n :seon.cite/depth :doc :seon.cite/order 0}])
         db' (:db-after r)]
     (ui/cite-hiccup db' (:tree (seon.ctx/build db' (pdb/eid db' :seon.cite/id (str "help " n)) nil)))))
 

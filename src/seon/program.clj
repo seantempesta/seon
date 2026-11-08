@@ -1294,7 +1294,7 @@
                      (and (= :db/retractEntity (first %)) (:config/key (d/entity db (second %))))))
               tx-data)
     ;; no entries left is nothing stated, as a tree with no config file states nothing (hold!)
-    (let [after (pdb/db-with db tx-data)]
+    (let [after (pdb/speculate-db db tx-data)]
       (when-let [es (cfg/entries after)]
         (let [r (cfg/of-entries es (schema-changes after))]
           (when (:seon.error/type r) r))))))

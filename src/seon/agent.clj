@@ -328,7 +328,7 @@
   See docs/references.md#task-references."
   {:malli/schema [:=> [:cat :seon.host/db :seon.db/tx-data] :seon.db/tx-data]}
   [db tx-data]
-  (let [r (pdb/with db tx-data) db' (:db-after r)
+  (let [r (pdb/speculate db tx-data) db' (:db-after r)
         ids (into [] (comp (filter #(#{:seon.task/plan :seon.task/instructions} (:a %))) (keep #(:seon.task/id (d/entity db' (:e %)))) (distinct)) (:tx-data r))]
     (into (vec tx-data) (mapcat #(task/rederive-tx db' (task/task db' %))) ids)))
 

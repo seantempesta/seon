@@ -205,6 +205,19 @@
   ([db tx-data] (with db tx-data nil))
   ([db tx-data schemas] (checked db tx-data schemas #(d/with db %))))
 
+(defn speculate
+  "tx-data on db as a hypothetical (Datahike's `d/with`), unchecked: nothing of it is stored, so it is not data entering
+  the system; the write that may follow (the same transaction through a connection's `'transact!`) is checked there, once
+  (owner, 2026-11-08: validation at transaction time, never the same data checked again). A state the system shows or
+  relies on is written, never only speculated. Each caller is named in docs/storage.md (bin/laws transactions). Answers the report."
+  {:malli/schema [:=> [:cat :any :any] :map]}
+  [db tx-data] (d/with db tx-data))
+
+(defn speculate-db
+  "The db after the hypothetical tx-data (`speculate`'s :db-after)."
+  {:malli/schema [:=> [:cat :any :any] :any]}
+  [db tx-data] (:db-after (d/with db tx-data)))
+
 (defn db-with
   "The db after tx-data (`with`'s :db-after)."
   {:malli/schema [:function [:=> [:cat :any :any] :any] [:=> [:cat :any :any [:maybe :map]] :any]]}

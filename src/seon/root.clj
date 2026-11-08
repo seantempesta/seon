@@ -886,7 +886,7 @@
   {:malli/schema [:=> [:cat :seon.host/conn] :any]}
   [conn]
   ;; a definition and a task of warm!'s own, on a value never committed: boot needs no seed
-  (let [db (pdb/db-with @conn [{:db/id "ns" :ns/name 'seon.warm :ns/doc "warm"}
+  (let [db (pdb/speculate-db @conn [{:db/id "ns" :ns/name 'seon.warm :ns/doc "warm"}
                               {:db/id "f" :form/id "seon.warm/f" :form/src "(defn f [x] x)" :form/ns "ns" :form/order 0 :form/defines ["v"]}
                               {:db/id "v" :var/name 'seon.warm/f :var/ns "ns" :var/doc "warm" :var/form "f"}
                               {:task/name :seon.warm/tidy :task/plan "warm" :task/status :held :task/refs ["v"]}])]
@@ -896,8 +896,8 @@
       (d/q '[:find [?n ...] :where [?e :ns/name ?n]] db)
       (d/pull db '[*] [:var/name 'seon.warm/f])
       (d/pull db '[:task/name {:task/refs [:var/name]}] [:task/name :seon.warm/tidy])
-      (pdb/db-with db [{:note/text "warm" :note/agent :warm}])
-      (pdb/with db [{:note/text "warm" :note/agent :warm}])
+      (pdb/speculate-db db [{:note/text "warm" :note/agent :warm}])
+      (pdb/speculate db [{:note/text "warm" :note/agent :warm}])
       (sock/frame {:op :reply :response {:handle 'result/e1 :text "x" :ms 0.1}})
       ;; the one value printer, its text and hiccup paths and a cut
       (print/print-value {:a [1 2 3] :b "x" :c (vec (range 300))} {:handle 'result/e0 :budget 200 :outputs #{:text :hiccup}}))
@@ -1109,7 +1109,7 @@
                 (if (contract/error? tx)
                   tx
                   (let [db2 (:db-after (d/transact conn {:tx-data (conj (vec tx) {:seon.root/id :root
-                                                                                  :seon.root/source (cond-> {:root root :files (count files) :forms (count (d/datoms (pdb/db-with db1 tx) :aevt :form/id))
+                                                                                  :seon.root/source (cond-> {:root root :files (count files) :forms (count (d/datoms (pdb/speculate-db db1 tx) :aevt :form/id))
                                                                                                              :digest digest :ms (lib/r2 (profile/ms-since t0))}
                                                                                                       (:commit r) (assoc :commit (:commit r))
                                                                                                       ;; the tree it read: a boot taking this fact as its last import reads only what differs from it, and what main merged stays main's

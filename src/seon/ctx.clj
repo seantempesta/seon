@@ -537,7 +537,7 @@
                       (do (vreset! pending c) true))
         (seq invalid) (throw (ex-info "ctx: refused by the schemas, nothing written" (contract/error :seon.ctx/invalid #'write! "refused by the schemas, nothing written: each path and why" {:invalid invalid})))
         :else
-        (let [rep (pdb/with db tx)
+        (let [rep (pdb/speculate db tx)
               held' (:tree (patch c (:db-after rep) (:tx-data rep) branch))
               holds? (fn [w h] (cond (and (map? w) (map? h)) (= (strip w) (strip (select-keys h (keys w))))
                                      ;; cardinality many: held as a set, whatever collection the swap! wrote

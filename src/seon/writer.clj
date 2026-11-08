@@ -158,7 +158,7 @@
                                    (contract/error :seon.merge/behind #'seon.writer/judged-members
                                                    "another member of the octopus merge changes the same definitions: merge main into the branch first"
                                                    {:tx (:max-tx main) :behind (count (filter taken (keys (:ours r))))})))
-                     db' (when-not why-not (pdb/db-with db (pm/merge-tx main base head (keys (:ours r)) data-attrs)))
+                     db' (when-not why-not (pdb/speculate-db db (pm/merge-tx main base head (keys (:ours r)) data-attrs)))
                      why-not (or why-not (dangling-refused main db' (boolean (seq taken))))]
                  (-> acc (update :members conj {:branch b :r r :head head :base base :refused why-not})
                      (cond-> (nil? why-not) (-> (update :taken into (keys (:ours r))) (assoc :db db'))))))
@@ -285,7 +285,7 @@
       :merge-candidate (reply st (if (exists? (:branch m))
                                    (let [data-attrs (:data-attrs m #{})
                                          [head r base] (branch-merge st (:branch m) data-attrs)
-                                         db (pdb/db-with @conn (pm/merge-tx @conn base head (keys (:ours r)) data-attrs))
+                                         db (pdb/speculate-db @conn (pm/merge-tx @conn base head (keys (:ours r)) data-attrs))
                                          w (written db (:ours r))
                                          text (doc/files db (:files w))]
                                      (or (dangling-refused @conn db false) (unanalyzable db text)
