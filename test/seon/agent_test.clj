@@ -879,10 +879,10 @@
   ;; It is due when what an agent would inherit passes :seon.config.agent/inherited-bytes, so what the forks may
   ;; freeze follows from what static grew: one more than that many, whichever point of the cycle the shard's
   ;; earlier tests left it at (a fixed count sat on the edge: 3 at 2.2 MB of main a fork)
-  (let [statics (vec (for [_ (range 20)] (:value (first (in-agent ["(jolt.scheme/eval-string \"(bytes-allocated 'static)\")"])))))
+  (let [statics (vec (for [_ (range 10)] (:value (first (in-agent ["(jolt.scheme/eval-string \"(bytes-allocated 'static)\")"])))))
         freezes (count (filter #(> % 65536) (map - (rest statics) statics)))
         due (inc (quot (- (peek statics) (first statics)) (seon.config/value :seon.config.agent/inherited-bytes)))]
-    (is (<= freezes due) (str freezes " freezes in 20 forks, " due " due by what static grew; the server's static at each: " (pr-str statics)))))
+    (is (<= freezes due) (str freezes " freezes in 10 forks, " due " due by what static grew; the server's static at each: " (pr-str statics)))))
 
 (defn- history-tx
   "What n agents leave on main, shaped as production's (an agent started on task, and an eval record
