@@ -346,6 +346,7 @@ Uses of take, subs and the like in display code that choose what to find or read
 - `seon.repl/edit!`, `seon.repl/place`: the offsets of the old text in a place's recorded text (`subs` rebuilds the source around the change, `line-of` counts the lines before an offset): text rearranged, nothing left out; a refused edit names every line that could be meant.
 - `my.root/task-files`: a task file's owning namespace from its file name (`subs` off the `.edn`).
 - `seon.repl/file-name`: a path relative to a root it is under (`subs` off the root).
+- `seon.repl/streaming`: a Writer's `write(str, off, len)` slice (`subs` takes exactly the characters the caller writes; the record and the stream keep every one).
 - `seon.web/handler`, `seon.web/view-of`, `seon.server/mcp-reply`: parsing a request's path and a tool's name.
 - `seon.ctx.search/near`: the whole line a repaired delimiter is on, the printer budgets it.
 - `seon.render.proc/pass`: root's process keeps the newest `:seon.config.render.list/stream` events, and its tile (`seon.render.ui/process-tile`) draws the newest `:seon.config.render.list/history` of them: a window of data, as ctx's are.
