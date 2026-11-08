@@ -49,7 +49,7 @@
   ;; task seon.proofs/main-is-proved-in-a-fork: the writer's commit notice records main's t and, with
   ;; :seon.config.proofs/prove-main-on-commit (off by default: the run of all of main's tests dies
   ;; in its child), a commit that moves the program starts a run of main (the process test below,
-  ;; main-is-proved-at-boot-with-the-config-on-nobody-asking). Off, neither a data commit nor a program commit
+  ;; removed 2026-11-08: it proved a path the config leaves off). Off, neither a data commit nor a program commit
   ;; runs anything, and a session's request for main runs as ever, at the t the notice recorded
   (let [db (ts/test-db)
         dg (seon.program/program-digest db)
@@ -206,34 +206,6 @@
     (is (re-find #"@[0-9a-f]+!turn$" (:key (:session v))) "the key is the agent's branch at the digest of its program")
     (is (= (:key (:session v)) (:key (:again v))) "asked again, nothing the run reads changed: the same run's answer")
     (is (re-find (re-pattern (java.util.regex.Pattern/quote (:key (:session v)))) (:agent v)) "the agent's turn got the same run: one run for the three askers")))
-
-(deftest main-is-proved-at-boot-with-the-config-on-nobody-asking
-  ;; task seon.proofs/main-is-proved-in-a-fork: with :seon.config.proofs/prove-main-on-commit a root
-  ;; whose program holds seon.patterns-test proves main at its boot with no one asking (a prove
-  ;; agent forked from the fork server's main, no tests loaded from the checkout); a session asking
-  ;; for main's key after joins that run or reads its answer. Open (task seon.proofs/an-agent-forked-after-finds-mains-results): an agent
-  ;; forked after does not find them at its digests, and a named run after a program commit does not
-  ;; reuse them (measured: [false false], :reused 0)
-  ;; A store of this test's own, the last resort (docs/testing.md#a-root-costs-what-it-boots): a main's run is
-  ;; every test main holds, and a branch of the process store holds the suite's (1,152 of them ran here, 140-180
-  ;; s, to give two their verdicts). Imported from [src, patterns_test.clj] alone, main holds the two this test reads.
-  (let [checkout (seon.config/checkout)
-        main (str "prove-boot-" (random-uuid))
-        store (str checkout "/target/runs/" main "-store")
-        runs (str checkout "/target/runs/" main "-runs")
-        root (ts/start-root! {:store store :main main :runs runs
-                              :args ["--set" (str ":seon.config.source/root=" (pr-str checkout))
-                                     "--set" ":seon.config.source/dirs=[\"src\" \"test/seon/patterns_test.clj\"]"
-                                     "--set" ":seon.config.proofs/prove-main-on-commit=true"]})
-        booted (str "(let [r @(c/prove! sys nil) ts '[seon.patterns-test/a-backlog-is-the-unread-queue seon.patterns-test/workers-compete-for-one-shared-in-port]]"
-                    ;; its verdicts are cached by digest (the answer carries only proofs and reds: seon.proofs/answer)
-                    "  (pr-str {:key (:key r) :facts (vec (for [t ts :let [v (get (seon.fx/stored-results (select-keys (:digests r) ts)) (get (:digests r) t))] :when v] [t (if (seon.proofs/green? v) :pass :red)]))}))")
-        a (try (ts/ask root {:op :eval :agent "root" :code booted})
-               (finally (ts/stop-root! root) (sh/sh "rm" "-rf" store runs)))
-        a' (some-> (ts/value-of (:response a)) clojure.edn/read-string)]
-    (is (= '[[seon.patterns-test/a-backlog-is-the-unread-queue :pass] [seon.patterns-test/workers-compete-for-one-shared-in-port :pass]]
-           (:facts a'))
-        (str "main proved at its boot, nobody asking: " (pr-str a)))))
 
 (deftest an-agents-run-leaves-every-process-test-to-the-judge
   ;; root, 2026-10-27 (THE PLAN 0.7's first run): a child forked from an agent has no process

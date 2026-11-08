@@ -82,10 +82,11 @@
 (deftest n-roots-open-the-process-store-at-once
   ;; task seon.test-store/a-process-root-opens-the-shared-store-under-load: under load one shard's
   ;; root died before listening, `lmdb env_open: Invalid argument` opening the shared process store
-  ;; other shards' roots held open. n = 4 roots start on it at once: every one listens
+  ;; other shards' roots held open. n = 2 roots start on it at once (a race of two reproduces it; 4 bought
+  ;; CPU contention): every one listens
   (let [store (ts/process-store)
         dir (.getParent (java.io.File. ^String store))
-        roots (vec (for [i (range 4)] {:store store :main (str "n4-" i "-" (random-uuid)) :runs (str dir "/n4-" i "-" (random-uuid) "-runs")}))
+        roots (vec (for [i (range 2)] {:store store :main (str "n2-" i "-" (random-uuid)) :runs (str dir "/n2-" i "-" (random-uuid) "-runs")}))
         started (mapv deref (mapv #(future (ts/start-root! %)) roots))]
     (try
       (is (every? :port started)

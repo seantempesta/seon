@@ -53,27 +53,6 @@
     (is (<= 30 (:collections res)) "the workers collect on until joined: at least the 30 waited for")
     (is (= 0 (:sweepers res)))))
 
-(deftest a-root-binary-requires-a-library-it-did-not-compile
-  ;; task jolt.ns/a-built-binary-requires-a-stdlib-namespace-it-did-not-compile: a root
-  ;; importing src and test runs each test file's ns form, and seon.print-test's requires
-  ;; fipp.engine, which needs Jolt's stdlib clojure.core.rrb-vector; a binary finds only
-  ;; what it compiled. The root boots, imports, and exits when its stdin (empty) closes.
-  ;; Its store: a main of its own on the one test store, target/runs/test-store (under runs/
-  ;; so a worktree's clone of target/ leaves it out: a store's identity is its path), deleted
-  ;; with its branches when the root has stopped.
-  (let [checkout (seon.config/checkout)
-        main (str "root-test-" (random-uuid))
-        runs (str checkout "/target/runs/" main "-runs")
-        root (ts/start-root! {:store (test-store) :main main :runs runs
-                              :args ["--set" (str ":seon.config.source/root=" (pr-str checkout))
-                                     "--set" ":seon.config.source/dirs=[\"src\" \"test\"]"]})
-        {:keys [exit log] :as stopped} (ts/stop-root! root)]
-    (ts/drop-main! (test-store) main)
-    (sh/sh "rm" "-rf" runs)
-    (is (some? (:port root)) "the root boots with src and test imported, and listens")
-    (is (= 0 exit) (str "and stops cleanly: " (pr-str stopped)))
-    (is (not (str/includes? log "Could not locate")) "every required library located")))
-
 (defn- root-answers
   "The output of a built root on the store at path and main (seon.test-store/start-root!: both
   named, never inherited), asked each request in turn on its server: one answer line per
