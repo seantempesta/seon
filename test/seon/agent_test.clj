@@ -1475,9 +1475,9 @@
     (is (= 1 (:value whole)) "the page whole once, across both wakes")
     (is (= [] (:value again)) "no eval Seon ran says it was repeated")))
 
-(deftest a-call-after-one-that-threw-is-not-run
-  ;; docs/prompt.md: a reply's calls run in order; a call after one that threw is not run, and
-  ;; its result says so, so every call has its tool message (the provider refuses a call with none)
+(deftest a-call-after-one-that-threw-still-runs
+  ;; docs/prompt.md: a reply's calls run in order, each whatever came before it (owner, 2026-11-08: "I want us to run every eval. Turns are precious
+  ;; and one fuckup shouldn't punish the other evals"); every call has its tool message (the provider refuses a call with none)
   (let [[_ msgs] (in-agent (fn [{:keys [task ns]}]
                              (let [run (str ns "/t#throws")]
                                [(str "(seon.turn/work! {:task " (pr-str task) " :max-turns 1})")
@@ -1489,14 +1489,10 @@
         [r0 r1 r2 :as rs] (:value msgs)]
     (is (= 3 (count (distinct (mapv :tool-call-id rs)))) (str "every call has its result, by its id: " (pr-str msgs)))
     (is (str/includes? (:content r1) "boom") "the second call's error")
-    (is (str/includes? (:content r2) "not-run") "the third call was not run, and its result says so")
-    (is (str/includes? (:content r2) (:tool-call-id r1)) "naming the call that threw")
-    (is (not (str/includes? (:content r2) ":value 2")) "(inc a) never ran")))
+    (is (str/includes? (:content r2) ":value 2") (str "(inc a) ran after the call that threw: " (:content r2)))))
 
-(deftest an-error-answer-stops-the-replys-later-calls
-  ;; task seon.turn/an-agent-that-breaks-its-own-render-is-told-and-goes-on: a call answering an error value (a
-  ;; refused edit!) stops the reply's later calls as a throw does, so none builds on a change that never happened
-  ;; (a replay's refused edit of seon.ctx/members-map, then an applied edit of join calling it, broke its page)
+(deftest a-call-after-an-error-answer-still-runs
+  ;; docs/prompt.md: a call answering an error value (a refused edit!) is one result; the reply's later calls run, as after a throw (owner, 2026-11-08)
   (let [[_ msgs] (in-agent (fn [{:keys [task ns]}]
                              (let [run (str ns "/t#refused")]
                                [(str "(seon.turn/work! {:task " (pr-str task) " :max-turns 1})")
@@ -1508,8 +1504,7 @@
         [_ r1 r2 :as rs] (:value msgs)]
     (is (= 3 (count (distinct (mapv :tool-call-id rs)))) (str "every call has its result, by its id: " (pr-str msgs)))
     (is (str/includes? (:content r1) "edit-refused") "the second call's error value")
-    (is (str/includes? (:content r2) "not-run") "the third call was not run, and its result says so")
-    (is (not (str/includes? (:content r2) ":value 2")) "(inc a) never ran")))
+    (is (str/includes? (:content r2) ":value 2") (str "(inc a) ran after the refused edit: " (:content r2)))))
 
 (deftest a-call-is-text-and-its-forms
   ;; owner, 2026-10-29: a call is text and one or more forms, run in order; one with no text or
