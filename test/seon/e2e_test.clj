@@ -74,7 +74,7 @@
               (let [tid (str "demo/" id) branch (task/default-branch (str "demo/" (first (str/split id #"-"))))
                     agent (keyword (str "a-" id))]
                 (concat (ts/work-tx tid outcome {:agent agent :branch branch :max-turns 4})
-                        (when (pos? turns) [{:seon.agent/key (task/agent-key "boot-1" agent) :seon.agent/turn turns}]))))
+                        (when (pos? turns) [{:seon.agent/key (name agent) :seon.agent/turn turns}]))))
         db (d/db-with db (concat (att "a" :done 5) (att "a-merge" :merged 0)
                                  (att "b" :done 1) (att "b-merge" :merged 0)
                                  (att "c" :cap 4) (att "c-merge" :closed 0)))]

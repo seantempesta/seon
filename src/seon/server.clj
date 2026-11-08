@@ -32,7 +32,7 @@
     (into (sorted-map)
           (for [[id t] (:tasks idx)
                 :let [blocked (r/blocked-by idx id)
-                      agent (get-in idx [:agents (:seon.task/agent t) :seon.agent/id])]]
+                      agent (some-> (get-in idx [:agents (:seon.task/agent t) :seon.agent/key]) keyword)]]
             [id (cond-> {:execution (:seon.task/execution t)}
                   (r/done? idx id) (assoc :done true)
                   (seq blocked) (assoc :blocked-by blocked)
@@ -145,7 +145,7 @@
           (let [replaced (when fresh? (:agent (first (live-run sys db id))))]
             @(c/transact-main! sys (vec (concat (task/execution-tx [id] :running)
                                                 (when fresh? [{:seon.task/id id :seon.task/branch (:branch env)}])
-                                                (task/start-tx db id (:boot sys) ag env (System/currentTimeMillis) k))))
+                                                (task/start-tx db id (:boot sys) ag env (System/currentTimeMillis)))))
             (when replaced (c/kill! sys replaced))
             {:agent ag :task id})))))))
 

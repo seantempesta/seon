@@ -91,7 +91,7 @@
   {:malli/schema [:function [:=> [:cat nat-int?] :seon.host/db] [:=> [:cat nat-int? [:maybe [:vector :any]]] :seon.host/db]]}
   ([n] (seeded n session-pattern))
   ([n pattern]
-  (let [db (:db-after (d/with (ts/test-db) (into [(cond-> {:seon.agent/key k :seon.agent/id :a1 :seon.agent/task {:seon.task/id "lab/ctx"} :seon.agent/turn n}
+  (let [db (:db-after (d/with (ts/test-db) (into [(cond-> {:seon.agent/key k :seon.agent/task {:seon.task/id "lab/ctx"} :seon.agent/turn n}
                                                      pattern (assoc :seon.ctx/pattern pattern))
                                                    {:db/id "lab/ctx" :seon.task/id "lab/ctx" :seon.task/ns 'app.x :seon.task/name "ctx" :seon.task/plan "Make app.x/f0 pass."
                                                     :seon.task/kind :work :seon.task/proofs #{'app.x-test/t0}
@@ -187,7 +187,7 @@
 (deftest an-entitys-own-reads-what-a-pull-reads
   (let [own @#'seon.ctx/own
         db (my.test/with (my.test/world) [{:seon.task/id "demo/own" :seon.task/plan "p" :seon.task/proofs '#{a.b/c a.b/d}}
-                              {:seon.agent/key "b/own" :seon.agent/id :own :seon.agent/task [:seon.task/id "demo/own"]}])
+                              {:seon.agent/key "b/own" :seon.agent/task [:seon.task/id "demo/own"]}])
         pulled (fn [e] (let [many (get (:rschema db) :db.cardinality/many #{})
                              m (d/pull db '[*] e)]
                          (reduce-kv (fn [m a v] (if (and (contains? many a) (sequential? v)) (assoc m a (set v)) m)) m m)))
@@ -206,7 +206,7 @@
   (let [pattern (:seon.ctx/pattern (seon.contract/properties :seon.db/agent-fact))
         joins (into {} (keep #(when (map? %) (first %))) pattern)
         db (:db-after (d/with (ts/test-db)
-                              (into [{:seon.agent/key k :seon.agent/id :a1 :seon.agent/task {:seon.task/id "lab/ctx"}}
+                              (into [{:seon.agent/key k :seon.agent/task {:seon.task/id "lab/ctx"}}
                                      {:seon.task/id "lab/ctx" :seon.task/ns 'app.x :seon.task/name "ctx" :seon.task/plan "Make app.x/f0 pass."
                                       :seon.task/kind :work :seon.task/proofs #{} :seon.task/execution :running :seon.task/branch :main/lab-ctx}]
                                     (concat (mapcat eval-tx (range 1 6))
@@ -229,7 +229,7 @@
   ;; move 2: an agent's process (pid, memory) is its process entity, pointing at the agent.
   ;; move 3: an embedding is its own vector entity pointing at what it embeds (docs/vector.md#a-vector-is-its-own-entity).
   (let [db (:db-after (d/with (ts/test-db)
-                              [{:seon.agent/key k :seon.agent/id :a1 :seon.agent/task {:seon.task/id "lab/ctx"}}
+                              [{:seon.agent/key k :seon.agent/task {:seon.task/id "lab/ctx"}}
                                {:seon.task/id "lab/ctx" :seon.task/ns 'app.x :seon.task/name "ctx" :seon.task/plan "Make app.x/f0 pass."
                                 :seon.task/kind :work :seon.task/proofs #{} :seon.task/execution :running :seon.task/branch :main/lab-ctx}
                                {:seon.model-call/id "lab/ctx#1/0" :seon.model-call/agent [:seon.agent/key k] :seon.model-call/n 0 :seon.model-call/reply "I will check f0."
@@ -490,7 +490,7 @@
   ;; says so beside each key
   (let [w (fn [db branch more tx] (:db-after (d/with db tx (pdb/tx-meta branch more))))
         db (-> (ts/test-db)
-               (w :main {} [{:seon.agent/key k :seon.agent/id :a1}])
+               (w :main {} [{:seon.agent/key k}])
                (w :main/a1 {:seon.tx/eval "e5"} [{:db/id [:seon.agent/key k] :seon.agent/description "Works the screen."}])
                (w :main/a1 {:seon.tx/merged :main} [{:db/id [:seon.agent/key k] :seon.agent/max-turns 3}]))
         e (:db/id (d/entity db [:seon.agent/key k]))

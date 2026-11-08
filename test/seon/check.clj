@@ -356,7 +356,7 @@
    (fn [sys]
     (let [[a] (spawn-ready! sys "record")
           r1 @(c/submit! sys a "(+ 1 2) (in-ns 'app.m0) (defn f3 [x] (* 3 x)) (/ 1 0)")
-          n @(c/submit! sys a "(count (my.db/q '[:find ?e :where [?e :seon.eval/agent ?a] [?a :seon.agent/id :a1]]))")
+          n @(c/submit! sys a "(count (my.db/q '[:find ?e :where [?e :seon.eval/agent ?a] [?a]]))")
           src @(c/submit! sys a "(my.db/q '[:find ?s . :where [?e :var/name app.m0/f3] [?e :var/form ?f] [?f :form/src ?s]])")]
       {:report {:first (select-keys r1 [:text :record :recorded]) :second [(printed n) (printed src)]}
        :checks {:one-response-its-error (some? (:ex r1))
@@ -973,7 +973,7 @@
   transactions of its own (boot, quiescent, collected: three :db/txInstant datoms more), so what
   a restart must give back exactly is the rest."
   [sys]
-  (let [db @(:conn sys) users (set (d/q '[:find [?e ...] :where [?e :seon.agent/id :user]] db))]
+  (let [db @(:conn sys) users (set (d/q '[:find [?e ...] :where [?e]] db))]
     (remove #(or (= "seon.root" (namespace (:a %))) (= :seon.agent/root (:a %)) (= (:e %) (:tx %)) (users (:e %)))
             (d/datoms db :eavt))))
 

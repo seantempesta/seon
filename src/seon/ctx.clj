@@ -17,7 +17,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.render :as render] [seon.agent :as agent]
             [seon.config :as cfg] [seon.db :as pdb] [datahike.api :as d] [datahike.db.interface :as dbi] [clojure.string :as str] [malli.core :as m] [malli.error :as me] [malli.registry :as mr]
-            [seon.print :as print] [seon.ref :as ref] [seon.doc :as doc] [seon.ratom :as ratom]))
+            [seon.lib :as lib] [seon.print :as print] [seon.ref :as ref] [seon.doc :as doc] [seon.ratom :as ratom]))
 
 ;; ---- the pattern: what ctx holds (docs/ctx.md#the-pattern) ---------------------------------
 
@@ -801,7 +801,7 @@
 (defn call-of
   "The model call of turn n of the agent with key k on db, or nil: one seek by its id. See docs/turn.md#the-turn-is-a-number."
   {:malli/schema [:=> [:cat :seon.host/db nat-int? :string] [:maybe :int]]}
-  [db n k] (pdb/eid db :seon.model-call/id (str k "/" n)))
+  [db n k] (pdb/eid db :seon.model-call/id (lib/call-id k n)))
 
 (defn turns
   "The model calls of agent record c that are its turns, in order: [n eid]; a context read (origin :outside) is no turn. See docs/turn.md#the-turn-is-a-number."

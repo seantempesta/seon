@@ -324,3 +324,14 @@
   (let [b (.digest (java.security.MessageDigest/getInstance "SHA-256") (.getBytes ^String s))
         h (Long/toHexString (.getLong (java.nio.ByteBuffer/wrap b)))]
     (str (subs "0000000000000000" (count h)) h)))
+
+(defn unique-id
+  "A fresh id that must never repeat (an agent, a root's boot): the digest of a random UUID, the one id form (docs/decisions.md#an-id-is-the-content-of-the-facts-that-make-it-owner-2026-11-08: always unique, a UUID's hash; the same content, its digest). Minted once, where its entity is made."
+  {:malli/schema [:=> [:cat] [:string {:min 16 :max 16}]]}
+  [] (digest (str (random-uuid))))
+
+(defn call-id
+  "The id of turn n's model call of the agent with key k: the digest of the two (same agent and turn, same id), never the characters
+  of either. See docs/turn.md#the-turn-is-a-number."
+  {:malli/schema [:=> [:cat :string [:or nat-int? :string]] :string]}
+  [k n] (digest (str k "/" n)))

@@ -86,7 +86,7 @@
   its t moves."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map :any]]}
   [n]
-  [{} (d/db-with (ts/test-db) (into [{:db/id "a" :seon.agent/id :a1}]
+  [{} (d/db-with (ts/test-db) (into [{:db/id "a"}]
                                     (for [i (range (* 20 n))] {:seon.eval/id (str "a1-1-1/" i) :seon.eval/agent "a"
                                                         :seon.eval/code "(+ 1 2)" :seon.eval/response {:value 3}})))])
 
@@ -110,7 +110,7 @@
   "The input of size n: the agents list's opts over a db holding n sessions of another boot and one of boot \"b\", and that boot."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map :string]]}
   [n]
-  [{:seon.db/db (d/db-with (ts/test-db) (into [{:seon.agent/key "b/a1" :seon.agent/id :a1}]
+  [{:seon.db/db (d/db-with (ts/test-db) (into [{:seon.agent/key "b/a1"}]
                                               (for [i (range n)] {:seon.agent/key (str "other/a" i) :seon.agent/id (keyword (str "o" i))})))}
    "b"])
 
@@ -131,9 +131,9 @@
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map :any :any]]}
   [n]
   (let [db0 (d/db-with (ts/test-db) (seon.task/create-tx (ts/test-db) (vec (for [i (range n)] {:seon.task/ns 't :seon.task/name (str "k" i) :seon.task/plan (str "Make " i ".") :seon.task/proofs #{}}))))
-        db0 (-> db0 (d/db-with [{:seon.root/id :root :seon.root/boot "b1" :seon.config.agent/max-running 4}]) (d/db-with (seon.task/agent-tx "b1" :a1 {:status :idle})))
+        db0 (-> db0 (d/db-with [{:seon.root/id :root :seon.root/boot "b1" :seon.config.agent/max-running 4}]) (d/db-with (seon.task/agent-tx :a1 {:status :idle})))
         st (#'seon.render.proc/main-info {} db0)
-        db1 (d/db-with db0 (seon.task/agent-tx "b1" :a1 {:status :busy}))]
+        db1 (d/db-with db0 (seon.task/agent-tx :a1 {:status :busy}))]
     [st db1 (vec (apply concat (d/datoms-diff db0 db1 :eavt [])))]))
 
 (deftest a-move-of-main-costs-what-moved
@@ -159,8 +159,8 @@
   [n]
   (let [db (reduce d/db-with (ts/test-db)
                    [[{:seon.root/id :root :seon.root/boot "b1"}]
-                    (seon.task/agent-tx "b1" :a1 {:status :idle})
-                    (into [] (mapcat #(seon.repl/record-tx {:seon.agent/key "b1/a1" :seon.agent/id :a1} (str "e" %) "a1"
+                    (seon.task/agent-tx :a1 {:status :idle})
+                    (into [] (mapcat #(seon.repl/record-tx {:seon.agent/key "b1/a1"} (str "e" %) "a1"
                                                            {:seon.eval/code "(+ 1 2)" :seon.eval/response {:handle 'result/e1 :value 3}}))
                           (range n))])]
     [[db] (:db/id (d/entity db [:seon.agent/key "b1/a1"]))]))
@@ -171,7 +171,7 @@
   {:malli/schema [:=> [:cat pos-int?] [:tuple [:vector :any] pos-int?]]}
   [n]
   (let [[[branch] eid] (agent-of n)
-        main (reduce d/db-with (ts/test-db) [[{:seon.root/id :root :seon.root/boot "b1"}] (seon.task/agent-tx "b1" :a1 {:status :busy :branch :b})])]
+        main (reduce d/db-with (ts/test-db) [[{:seon.root/id :root :seon.root/boot "b1"}] (seon.task/agent-tx :a1 {:status :busy :branch :b})])]
     [[main branch] eid]))
 
 (defn- watching
@@ -217,11 +217,11 @@
   more on the branch since: what the next pass draws (the turn to come's request, made at the head); and the view."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map :any]]}
   [n]
-  (let [k (seon.task/agent-key "b1" :a1)
-        ev (fn [id turn] (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a1} id "a1" {:seon.eval/code "(+ 1 2)" :seon.eval/response {:handle (symbol "result" id) :value 3} :seon.eval/call (seon.task/call-ref k turn) :seon.eval/call-id (str "c-" id)}))
+  (let [k "a1"
+        ev (fn [id turn] (seon.repl/record-tx {:seon.agent/key k} id "a1" {:seon.eval/code "(+ 1 2)" :seon.eval/response {:handle (symbol "result" id) :value 3} :seon.eval/call (seon.task/call-ref k turn) :seon.eval/call-id (str "c-" id)}))
         db0 (reduce d/db-with (ts/test-db)
                     [[{:seon.root/id :root :seon.root/boot "b1"}]
-                     (seon.task/agent-tx "b1" :a1 {:status :busy :branch :task-x})])
+                     (seon.task/agent-tx :a1 {:status :busy :branch :task-x})])
         db0 (reduce d/db-with db0
                     [(seon.doc/load-tx db0 "docs" {seon.ctx.wire/system-page "# You are a Seon agent\n\nThe help page."})
                      (seon.task/create-tx db0 [{:seon.task/ns 't :seon.task/name "x" :seon.task/plan "Make x." :seon.task/proofs #{'t-test/x-test}}])
@@ -268,7 +268,7 @@
           st {:rid 1 :pending {} :watch #{:a1} :waiting {} :kf-wanted #{} :views {} :main-db main
               :branches {:a1 {:db branch :read [:b]}} :view {:agents {}}}
           [st1 _] (#'seon.render.proc/pass-view st :a1)
-          r (d/with main (seon.task/agent-tx "b1" :a1 {:status :idle}))
+          r (d/with main (seon.task/agent-tx :a1 {:status :idle}))
           [st2 _] (#'seon.render.proc/pass-view (assoc st1 :main-db (:db-after r)) :a1)]
       (clojure.test/is (= 1 (- (get-in st2 [:counts :rendered]) (get-in st1 [:counts :rendered]))) (str n " rows: the agent's head rendered, nothing else")))))
 
@@ -293,13 +293,13 @@
                         [{:seon.agent/key k :seon.agent/turn (inc i)}
                          {:seon.model-call/id (str k "/" (inc i)) :seon.model-call/agent {:seon.agent/key k} :seon.model-call/n (inc i) :seon.model-call/origin :model
                           :seon.model-call/reply (str "Checking step " i ".") :seon.model-call/ms 1}]
-                        (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a1} id "a1"
+                        (seon.repl/record-tx {:seon.agent/key k} id "a1"
                                              {:seon.eval/call-id (str "c-" id) :seon.eval/call (seon.task/call-ref k (inc i)) :seon.eval/code (str "(inc " i ")")
                                               :seon.eval/response {:handle (symbol "result" id) :value {:step i}}})
                         (when (zero? (mod i 3))
                           (update (seon.task/message-tx (str "mm-" i) "owner" [k] (str "How is step " i "?") 1000) 0 assoc
                                   :seon.message/call (seon.task/call-ref k (inc i)))))))
-        base (reduce d/db-with (ts/test-db) [[{:seon.root/id :root :seon.root/boot "b1"}] (seon.task/agent-tx "b1" :a1 {:status :busy :branch :b})])
+        base (reduce d/db-with (ts/test-db) [[{:seon.root/id :root :seon.root/boot "b1"}] (seon.task/agent-tx :a1 {:status :busy :branch :b})])
         db (reduce (fn [db i] (d/db-with db (vec (turn i)))) base (range (dec n)))
         c (seon.ctx/build db (seon.db/eid db :seon.agent/key k) :b)
         at (volatile! db)

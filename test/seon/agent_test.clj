@@ -884,7 +884,7 @@
   grows main by between its agents."
   {:malli/schema [:=> [:cat :string nat-int? pos-int?] :seon.db/tx-data]}
   [task i n]
-  (vec (mapcat (fn [k] [{:seon.agent/key (str "hist-" k) :seon.agent/id (keyword (str "hist" k)) :seon.agent/boot "hist" :seon.agent/task {:seon.task/id task}}
+  (vec (mapcat (fn [k] [{:seon.agent/key (str "hist-" k) :seon.agent/boot "hist" :seon.agent/task {:seon.task/id task}}
                         {:seon.eval/id (str "e" (+ 1000000 k)) :seon.eval/by "root" :seon.eval/agent {:seon.root/id :root} :seon.eval/code "(+ 1 1)"}])
                (range i (+ i n)))))
 
@@ -1478,9 +1478,9 @@
   ;; (the session's key) in a new process, and begin-run! must make the record this process's, or the agent is
   ;; no session's and every turn draws no status
   (let [[_ _ mine] (in-agent (fn [{:keys [task]}]
-                               [(str "(seon.agent/transact! [{:seon.agent/key (:key @seon.agent/state) :seon.agent/id :a9 :seon.agent/task {:seon.task/id " (pr-str task) "}}])")
+                               [(str "(seon.agent/transact! [{:seon.agent/key (:key @seon.agent/state) :seon.agent/task {:seon.task/id " (pr-str task) "}}])")
                                 (str "(seon.agent/begin-run! " (pr-str task) ")")
-                                "(= (:id @seon.agent/state) (:seon.agent/id (datahike.api/entity (seon.agent/db) [:seon.agent/key (:key @seon.agent/state)])))"]))]
+                                "(= (name (:id @seon.agent/state)) (:seon.agent/key (datahike.api/entity (seon.agent/db) [:seon.agent/key (:key @seon.agent/state)])))"]))]
     (is (true? (:value mine)) (str "the record names this process: " (pr-str mine)))))
 
 (deftest a-step-that-throws-answers-its-error-and-the-agent-goes-on
@@ -1667,7 +1667,7 @@
      (let [_ (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "w" :seon.task/plan "Wait." :seon.task/proofs #{}}
                                                      {:seon.task/ns 'demo :seon.task/name "x" :seon.task/plan "Wait." :seon.task/proofs #{}}]))
            ba (pdb/on-main (:branch cfg) :msg-a) bb (pdb/on-main (:branch cfg) :msg-b)
-           ka (task/agent-key "boot-1" :a1) kb (task/agent-key "boot-1" :a2)
+           ka "a1" kb "a2"
            _ (d/transact conn (into (ts/work-tx "demo/w" :parked {:agent :a1 :branch :msg-a}) (ts/work-tx "demo/x" :parked {:agent :a2 :branch :msg-b})))
            _ (d/branch! conn (:branch cfg) ba)
            _ (d/branch! conn (:branch cfg) bb)
@@ -1789,13 +1789,13 @@
    (fn [cfg conn]
      (let [_ (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "w" :seon.task/plan "Wait." :seon.task/proofs #{}}]))
            ab (pdb/on-main (:branch cfg) :agent-taken)
-           k (task/agent-key "boot-1" :a1)
+           k "a1"
            ;; as in production: the branch is made, the agent starts on main, and the branch holds
            ;; the agent as its turns record it (its key, id and task)
            _ (d/branch! conn (:branch cfg) ab)
            _ (d/transact conn (ts/work-tx "demo/w" :parked {:agent :a1 :branch :agent-taken}))
            store-conn (d/connect (assoc cfg :branch ab))
-           _ (d/transact store-conn [{:db/id k :seon.agent/key k :seon.agent/id :a1}
+           _ (d/transact store-conn [{:db/id k :seon.agent/key k}
                                      {:seon.eval/id "e1" :seon.eval/agent [:seon.agent/key k] :seon.eval/by "a1" :seon.eval/code "1" :seon.eval/response {}}])
            ;; on main: the page's open
            _ (d/transact conn [{:seon.agent/key k :seon.agent/opened #{"e1" "e9"}}])
@@ -1821,7 +1821,7 @@
   ;; with its evidence and decides it is no bug, through my.task/update!
   (ts/test-branch!
    (fn [cfg conn]
-     (let [k (task/agent-key "boot-1" :a1)
+     (let [k "a1"
            stall (tpl/stall :a1 "demo/t" {:quiet-ms 4000 :pid 77})
            _ (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "t" :seon.task/plan "Work." :seon.task/proofs #{}} stall]))
            _ (d/transact conn (ts/work-tx "demo/t" :running {:agent :a1 :branch :task-demo-t}))
@@ -2072,7 +2072,7 @@
   {:malli/schema [:=> [:cat :seon.task/id :seon.task/outcome pos-int?] :string]}
   [w o n]
   (str "(seon.root/await-db sys \"the agent stood at " o ", or its task stood otherwise\""
-       " #(let [t (datahike.api/pull % '[:seon.task/outcome {:seon.task/agent [:seon.agent/key :seon.agent/id]}] [:seon.task/id " (pr-str w) "])"
+       " #(let [t (datahike.api/pull % '[:seon.task/outcome {:seon.task/agent [:seon.agent/key]}] [:seon.task/id " (pr-str w) "])"
        "       n (or (datahike.api/q '[:find (count ?tx) . :in $ ?id :where [?t :seon.task/id ?id] [?t :seon.task/outcome " o " ?tx true]] (datahike.api/history %) " (pr-str w) ") 0)]"
        "    (or (and (= " o " (:seon.task/outcome t)) (>= n " n "))"
        "        (not (contains? #{nil :running " o "} (:seon.task/outcome t))))))"))
@@ -2083,10 +2083,10 @@
   [w n] (settled-code w :parked n))
 
 (defn- agent-code
-  "Root-REPL code answering task w's agent on main: {:seon.agent/key :seon.agent/id}."
+  "Root-REPL code answering task w's agent on main: {:seon.agent/key}."
   {:malli/schema [:=> [:cat :seon.task/id] :string]}
   [w]
-  (str "(:seon.task/agent (datahike.api/pull @(:conn sys) '[{:seon.task/agent [:seon.agent/key :seon.agent/id]}] [:seon.task/id " (pr-str w) "]))"))
+  (str "(:seon.task/agent (datahike.api/pull @(:conn sys) '[{:seon.task/agent [:seon.agent/key]}] [:seon.task/id " (pr-str w) "]))"))
 
 (def ^:private branch-of-code
   "Root-REPL function source: the db of task w's branch."
@@ -2099,7 +2099,7 @@
   {:body :b :bkey :found :sender}: the body, B's id, B's key, and the [recipient key, from] of every message on main with that body."
   {:malli/schema [:=> [:cat :string :string :boolean] :string]}
   [w a before-send?]
-  (str "(let [bid (:seon.agent/id " (agent-code w) ")"
+  (str "(let [bid (keyword (:seon.agent/key " (agent-code w) "))"
        "      bkey " (str "(:seon.agent/key " (agent-code w) ")")
        "      body (str \"msg-\" (random-uuid))"
        "      end! (fn [] (c/kill! sys bid) (loop [] (let [e (clojure.core.async/<!! ready-ev)] (if (and (#{:ended :dead :killed} (:type e)) (= bid (:agent e))) :gone (recur)))))"
@@ -2444,7 +2444,7 @@
                              {:op :eval :agent "root"
                               :code (str "(let [branch-of " branch-of-code "]"
                                          " (my.root/run! sys [" (pr-str w) "]) " (parked-code w 1)
-                                         " (let [a " (agent-code w) " ag (:seon.agent/id a) k (:seon.agent/key a)"
+                                         " (let [a " (agent-code w) " k (:seon.agent/key a) ag (keyword k)"
                                          " pid1 (get-in (c/state sys) [:agents ag :pid])"
                                          " b1 (branch-of " (pr-str w) ")"
                                          " turn1 (:seon.agent/turn (datahike.api/entity b1 [:seon.agent/key k]))]"
@@ -2475,7 +2475,7 @@
                             [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")}
                              {:op :eval :agent "root"
                               :code (str "(do (my.root/run! sys [" (pr-str w) "]) " (parked-code w 1)
-                                         " (let [ag (:seon.agent/id " (agent-code w) ")]"
+                                         " (let [ag (keyword (:seon.agent/key " (agent-code w) "))]"
                                          "   @(seon.root/message! sys ag \"carry on\") " (parked-code w 2)
                                          "   (let [db (:db @(seon.root/call! sys {:op :write :req {:op :branch-db :branch (seon.task/default-branch " (pr-str w) ")}}))]"
                                          "     {:intent (sort (datahike.api/q '[:find [?p ...] :where [?e :seon.eval/intent ?p] (not [?e :seon.eval/by \"seon\"])] db))})))")}]))
@@ -2494,7 +2494,7 @@
                              {:op :eval :agent "root"
                               :code (str "(let [branch-of " branch-of-code "]"
                                          " (my.root/run! sys [" (pr-str w) "]) " (settled-code w :cap 1)
-                                         " (let [a " (agent-code w) " ag (:seon.agent/id a) k (:seon.agent/key a)"
+                                         " (let [a " (agent-code w) " k (:seon.agent/key a) ag (keyword k)"
                                          "       turn-of (fn [] (:seon.agent/turn (datahike.api/entity (branch-of " (pr-str w) ") [:seon.agent/key k])))"
                                          "       max-of (fn [] (:seon.agent/max-turns (datahike.api/entity @(:conn sys) [:seon.agent/key k])))"
                                          "       t1 (turn-of) m1 (max-of)]"
@@ -2515,7 +2515,7 @@
                              {:op :eval :agent "root"
                               :code (str "(let [branch-of " branch-of-code "]"
                                          " (my.root/run! sys [" (pr-str w) "]) " (parked-code w 1)
-                                         " (let [a " (agent-code w) " ag (:seon.agent/id a) k (:seon.agent/key a)"
+                                         " (let [a " (agent-code w) " k (:seon.agent/key a) ag (keyword k)"
                                          "       turn-of (fn [] (:seon.agent/turn (datahike.api/entity (branch-of " (pr-str w) ") [:seon.agent/key k])))]"
                                          "   @(seon.root/message! sys ag \"carry on\") " (parked-code w 2)
                                          "   (let [t2 (turn-of) m2 (:db (deref (seon.root/call! sys {:op :write :req {:op :branch-db :branch :db}})))"
@@ -2551,7 +2551,7 @@
                             [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")}
                              {:op :eval :agent "root"
                               :code (str "(do (my.root/run! sys [" (pr-str w) "]) " (parked-code w 1)
-                                         " (let [a " (agent-code w) " ag (:seon.agent/id a) k (:seon.agent/key a)]"
+                                         " (let [a " (agent-code w) " k (:seon.agent/key a) ag (keyword k)]"
                                          "   @(seon.root/message! sys ag \"carry on\") " (parked-code w 2)
                                          "   (let [db (:db @(seon.root/call! sys {:op :write :req {:op :branch-db :branch (seon.task/default-branch " (pr-str w) ")}}))]"
                                          "     {:evals (mapv #(datahike.api/pull db '[:seon.eval/id :seon.eval/by :seon.eval/code] %) (datahike.api/q '[:find [?e ...] :in $ ?k :where [?a :seon.agent/key ?k] [?e :seon.eval/agent ?a]] db k))"
@@ -2664,14 +2664,14 @@
                                              "   :intent (mapv #(datahike.api/q '[:find ?r . :in $ ?i :where [?e :seon.eval/id ?i] [?e :seon.eval/intent ?r]] db %) (map first evals))})")
                                         {:op :eval :agent "root"
                                          :code (str "(datahike.api/q '[:find ?id ?f ?to ?b :where [?m :seon.message/id ?id] [?m :seon.message/from ?f]"
-                                                    " [?m :seon.message/to ?a] [?a :seon.agent/id ?to] [?m :seon.message/body ?b]] @(:conn sys))")}])
+                                                    " [?m :seon.message/to ?a] [?a :seon.agent/key ?to] [?m :seon.message/body ?b]] @(:conn sys))")}])
                                        {:config {:seon.config.ai/script 'seon.fixtures/thinking-call}})
         end (:value end)
         {:keys [calls on-branch committed intent reply agent-key basis-keys] :as probed} (:value turn)
         ;; the shared root's main holds every earlier test's messages: this agent's are the ones to its id
-        [[mid from to body] :as facts] (filterv #(= (keyword (:agent @names)) (nth % 2)) (:value on-main))]
+        [[mid from to body] :as facts] (filterv #(= (name (:agent @names)) (nth % 2)) (:value on-main))]
     (is (= 1 (:model-calls end)) (pr-str end))
-    (is (= [[(System/getProperty "user.name") (keyword (:agent @names)) "use demo/g"]] (mapv #(subvec % 1) facts)) "one entity on main: from the user, to the agent")
+    (is (= [[(System/getProperty "user.name") (name (:agent @names)) "use demo/g"]] (mapv #(subvec % 1) facts)) "one entity on main: from the user, to the agent")
     (is (= [[mid (System/getProperty "user.name") "use demo/g" agent-key]] on-branch) "the turn wrote the entity root wrote, by its id, with the agent's ref")
     (is (= on-branch committed) "and it is in the commit the turn read")
     (is (not-any? #{:observed :taken} basis-keys) "the basis names no message: the fact is the record")

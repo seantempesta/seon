@@ -4,7 +4,7 @@
   (:require [seon.contract :as contract :refer [defn defn-]]
             [clojure.string :as str]
             [datahike.api :as d]
-            [seon.task :as task]
+            [seon.task :as task] [seon.lib :as lib]
             [seon.db :as pdb]
             [seon.ratom :as ratom]
             [seon.ctx :as ctx]))
@@ -76,7 +76,7 @@
   (-> (apply dissoc m :turn (filter #(= "db" (namespace %)) (keys m)))
       (cond-> call-k (assoc call-k (task/call-ref ek (:turn m 0))))
       ;; a model call is `<agent key>/<n>` (docs/turn.md#the-turn-is-a-number), the example's too: the page finds it by that
-      (as-> m (if-let [n (:seon.model-call/n m)] (assoc m id-k (str ek "/" n)) (update m id-k #(str ek "/" %))))
+      (as-> m (if-let [n (:seon.model-call/n m)] (assoc m id-k (lib/call-id ek n)) (update m id-k #(str ek "/" %))))
       (assoc agent-k (cond-> [:seon.agent/key ek] (= :seon.message/to agent-k) vector))
       (cond-> (:seon.eval/code m) (->> (example-record ek pre)))))
 
@@ -134,7 +134,7 @@
           (nil? request) (refuse (str "agent \"" key "\" has no request to show: its task has no plan and it has no description"))
           unknown (refuse (str "agent \"" key "\" holds a record of kind " (second unknown) ", which an example does not"))
           ;; its turn is the last its records carry (docs/turn.md#the-turn-is-a-number): the page draws a component for each
-          :else (into [[{:seon.agent/key ek :seon.agent/id (keyword (str "example-" id)) :seon.agent/status :ended :seon.agent/description request
+          :else (into [[{:seon.agent/key ek :seon.agent/status :ended :seon.agent/description request
                          :seon.agent/turn (reduce max 0 (map (fn [[v]] (or (:turn v) (:seon.model-call/n v) 0)) rs))}]]
                       (for [[v k] rs]
                         [(example-rekey ek (str (str/replace ek "/" "-") "-") v (session-kinds k))])))))

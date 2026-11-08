@@ -569,12 +569,18 @@
 
 ;; ---- a request's response and its record: one per eval request (a tool call, a typed form) ----
 
+(defn- eval-id
+  "The id eval req goes by, the digest of the facts that make it: a model's eval, its call and its place in the reply (:stream, seon.model/at [k i]); any other, its agent and its own number n, the eid issued for it. See docs/decisions.md#an-id-is-the-content-of-the-facts-that-make-it-owner-2026-11-08."
+  {:malli/schema [:=> [:cat :map :int] :string]}
+  [req n]
+  (lib/digest (if-let [{:keys [call k i]} (:stream req)] (str call "/" k "/" i) (str (:key @agent/state) "/eval/" n))))
+
 (defn- issued
-  "Req with the id a new eval goes by: :issued, the eid its record will have, from the store its branch is on, and :eval-id, that eid as the id; in a process with no branch, nothing records it and a gensym names it. A run again (:id) has its own. See docs/users.md#what-each-thing-is."
+  "Req with the id a new eval goes by (`eval-id`): :issued, the eid its record will have, from the store its branch is on; in a process with no branch, nothing records it and a gensym names it. A run again (:id) has its own. See docs/users.md#what-each-thing-is."
   {:malli/schema [:=> [:cat :map] :map]}
   [req]
   (cond (:id req) (assoc req :eval-id (:id req))
-        (:db @agent/state) (let [n (pdb/take-eid (:db @agent/state))] (assoc req :issued n :eval-id (str "e" n)))
+        (:db @agent/state) (let [n (pdb/take-eid (:db @agent/state))] (assoc req :issued n :eval-id (eval-id req n)))
         :else (assoc req :eval-id (str (gensym "e")))))
 
 (defn response
@@ -656,7 +662,7 @@
 (defn record-tx
   "The recording transaction of one eval: its entity, on the agent's, who evaluated it (:seon.eval/by), and its
   details, each its own attribute (`record-details`). Who is the one upsert, by its identity: an
-  agent's key ({:seon.agent/key k}, seon.task/agent-key) or root's ({:seon.root/id :root}); an agent's holds the
+  agent's key ({:seon.agent/key k}, its id's name) or root's ({:seon.root/id :root}); an agent's holds the
   namespace the eval left its REPL in (:seon.agent/ns), a datom only when it moved (an unchanged value adds none),
   which seon.ctx/current-ns reads. See docs/render.md#a-component-answers-hiccup."
   {:malli/schema [:=> [:cat :map :string :string :map] :seon.db/tx-data]}
@@ -744,7 +750,7 @@
     (if (and contract/record? (= :agent (:mode @agent/state)) (not (:within req)))
       ;; the write is the edge: a branch that refuses it answers the eval :unrecorded with the writer's message, so the
       ;; turn that asked goes on (a refused write thrown from here ended the whole turn: its reply and evals lost, the turn run again)
-      (try (agent/transact! (into defs (record-tx {:seon.agent/key (:key @agent/state) :seon.agent/id (:id @agent/state)} id (by req)
+      (try (agent/transact! (into defs (record-tx {:seon.agent/key (:key @agent/state)} id (by req)
                                                   (let [working? (some? (:turn @agent/state))]
                                                     (cond-> rec
                                                       ;; the turn loop's own eval (the agent working a task, no model call, made by the agent) and a context read are no conversation record: they name no call

@@ -224,7 +224,7 @@
   "Send body to the agents tos (ids): root writes it as a message fact on main, to each one's branch, whether or not its
   process lives (seon.root/deliver-message). A body that is not text is its text by the one printer, whole, as the message
   is. nil. See docs/users.md#messages."
-  {:malli/schema [:=> [:cat [:sequential :seon.agent/id] :any] :nil]}
+  {:malli/schema [:=> [:cat [:sequential :keyword] :any] :nil]}
   [tos body]
   (send! {:op :send :to (vec tos)
           :body (if (string? body) body (print/text (cond-> body (instance? clojure.lang.IObj body) (vary-meta assoc :seon.print/full true))))})
@@ -1435,7 +1435,7 @@
     (or (find-ns sym) (binding [*ns* (create-ns sym)] (refer-clojure) *ns*))
     nsx))
 
-(defn- make-ns! {:malli/schema [:=> [:cat :seon.agent/id] :seon.host/namespace]}
+(defn- make-ns! {:malli/schema [:=> [:cat :keyword] :seon.host/namespace]}
   [id]
   (let [sym (symbol (str "agent." (name id)))
         nsx (create-ns sym)]
@@ -1465,14 +1465,6 @@
           [k (cond (or (nil? v) (boolean? v) (number? v) (string? v) (keyword? v) (symbol? v)) v
                    (coll? v) {:count (count v) :read read}
                    :else {:host (str (type v)) :read read})])))
-
-(defn- key-of
-  "Agent id's key (seon.task/agent-key) in the boot of the root that forked it: main's
-  :seon.root/boot, read from main (db: main as the agent forked, or main's head), never from the
-  agent's branch, whose root fact is as old as the branch (a resumed branch's names an earlier
-  boot, and its agent's records went to that boot's agent)."
-  {:malli/schema [:=> [:cat :seon.host/db :keyword] :string]}
-  [db id] (task/agent-key (:seon.root/boot (d/pull db [:seon.root/boot] [:seon.root/id :root])) id))
 
 (declare clone!)
 
@@ -1577,7 +1569,7 @@
                       (let [store-conn (d/connect (assoc (:cfg r) :branch (:branch m)))]
                         ;; the task it was cloned for (a fork's sibling task, seon.server's), else its parent's
                         (reset! link {:fd fd :conn (sock/conn fd)})
-                        (swap! state assoc :task (or (:task m) (:task @state)) :id (:agent m) :key (key-of (pdb/head store-conn (pdb/main-branch (:cfg r))) (:agent m)) :branch (:branch m) :mode :agent :tx-seq 0
+                        (swap! state assoc :task (or (:task m) (:task @state)) :id (:agent m) :key (name (:agent m)) :branch (:branch m) :mode :agent :tx-seq 0
                                :fx-pending {} :waits {}
                                :store-conn store-conn :db @store-conn)
                         ;; it starts where its task is, as a new agent does
@@ -1619,12 +1611,12 @@
 (defn begin-run-tx
   "The write that makes task this agent's on db, its branch (begin-run-tx!'s second, and what
   the fork server applies to warm what an agent's start reads: seon.fork-server/warm-start): the task
-  running, naming the agent (key k, id) and its task."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id :string :any] :seon.db/tx-data]}
-  [db task k id]
+  running, naming the agent (key k) and its task."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id :string] :seon.db/tx-data]}
+  [db task k]
   [{:seon.task/id task :seon.task/execution :running}
    ;; the agent's task, which its record pulls (the agent is the unit, docs/ctx.md#the-pattern)
-   {:db/id k :seon.agent/key k :seon.agent/id id :seon.agent/task {:seon.task/id task}}])
+   {:db/id k :seon.agent/key k :seon.agent/task {:seon.task/id task}}])
 
 (defn- begin-run-tx!
   "Task written on this agent's branch (begin-run!'s write): the task as main declares it when the
@@ -1636,7 +1628,7 @@
       (transact! (task/create-tx (db) [(-> (select-keys t [:seon.task/ns :seon.task/name :seon.task/plan :seon.task/instructions :seon.task/proofs
                                                            :seon.task/needs :seon.task/branch :seon.task/model :seon.task/kind])
                                            (update :seon.task/ns symbol))]))))
-  (transact! (begin-run-tx (db) task (:key @state) (:id @state))))
+  (transact! (begin-run-tx (db) task (:key @state))))
 
 (defn init!
   "Make this process the agent: its socket (fd), its namespace, its state map, its
@@ -1716,10 +1708,6 @@
      ;; agent with no task (a fresh one on a kept branch) takes none
      (when-let [tx (when (and resumed task) (not-empty (task/onto-tx db0 @store-conn task)))]
        (transact! tx))
-     ;; a process continuing a session under an id its branch doesn't hold (seon.root/back!): what its page's buttons and root reach it by
-     (when (and resumed session (not= id (:seon.agent/id (d/entity @store-conn [:seon.agent/key session]))))
-       (transact! [{:seon.agent/key session :seon.agent/id id}])
-       (commit!))
      ;; forked for a task: it is this session's on the branch from the start. A label that names no task of main's (a check's
      ;; agent works "lc 0") begins none
      (when (and task (d/entity (heard-main) [:seon.task/id task])) (begin-run! task))))))

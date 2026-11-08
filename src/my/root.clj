@@ -277,10 +277,6 @@
           (not (and (vector? x) (seq x) (every? #(and (vector? %) (seq %) (every? map? %)) x) (every? (fn [m] (some #(contains? m %) example-identities)) (mapcat identity x))
                     (string? (:seon.agent/key (ffirst x))) (str/starts-with? (:seon.agent/key (ffirst x)) "example/")))
           (refuse "not a non-empty vector of transactions whose first writes an agent keyed \"example/<id>\" (seon.ctx.session/session-tx)")
-          ;; its page is found by the agent's id (seon.render.proc/location): one written before session-tx gave it one
-          ;; loaded and could not be opened
-          (not (keyword? (:seon.agent/id (ffirst x))))
-          (refuse "its agent has no :seon.agent/id, so its page cannot be found: write it again with seon.ctx.session/session-tx")
           :else x)))
 
 (defn load-example!

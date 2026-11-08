@@ -138,12 +138,11 @@
         ;; on a branch of its own, and needing design, whose task has an agent: still not design's session
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "other" :seon.task/plan "x" :seon.task/proofs #{'demo-test/other}
                                               :seon.task/needs #{"demo/workouts"}}]))]
-    (is (= "boot-1/a1" (task/session-key db "demo/workouts-implement")) "implement continues design's agent")
-    (is (= "boot-1/a1" (task/session-key db "demo/workouts-merge")) "merge too, through implement")
+    (is (= "a1" (task/session-key db "demo/workouts-implement")) "implement continues design's agent")
+    (is (= "a1" (task/session-key db "demo/workouts-merge")) "merge too, through implement")
     (is (nil? (task/session-key db "demo/other")) "a task on another branch is not the session of a task it needs")
-    (let [db (d/db-with db (task/start-tx db "demo/workouts-implement" "boot-2" :a4 {:branch (task/default-branch "demo/workouts") :model nil :max-turns 4} 2
-                                          (task/session-key db "demo/workouts-implement")))]
-      (is (= "boot-1/a1" (:seon.agent/key (:seon.task/agent (d/entity db [:seon.task/id "demo/workouts-implement"]))))
+    (let [db (d/db-with db (task/start-tx db "demo/workouts-implement" "boot-2" (keyword (task/session-key db "demo/workouts-implement")) {:branch (task/default-branch "demo/workouts") :model nil :max-turns 4} 2))]
+      (is (= "a1" (:seon.agent/key (:seon.task/agent (d/entity db [:seon.task/id "demo/workouts-implement"]))))
           "a process of a later boot, on the session's agent"))))
 
 (deftest a-long-form-becomes-a-task-that-names-its-size-tests-and-ticks

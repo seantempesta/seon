@@ -92,7 +92,7 @@
         tk (task/task db "demo/t1")]
     (is (= [:dead "c0ffee" "the model failed"] ((juxt :seon.task/outcome :seon.task/commit :seon.task/reason) tk)))
     (is (every? #(contains? tk %) [:seon.task/error :seon.task/failures :seon.task/costs :seon.task/waste]) "the wildcard brings the problem members")
-    (is (= "boot-1/a1" (:seon.task/agent tk)) "and names its agent by key")))
+    (is (= "a1" (:seon.task/agent tk)) "and names its agent by key")))
 
 (deftest reading-every-task-costs-what-its-datoms-cost
   (cost/proof

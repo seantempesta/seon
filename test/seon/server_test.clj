@@ -198,7 +198,7 @@
     (is (clojure.string/includes? (:text taken) (str ":from " (pr-str (System/getProperty "user.name")))) (:text taken))
     (is (re-find #":body \"use demo/g\"" (:text taken)))
     (is (re-find #":sent-ms \d+" (:text taken)) "when root's writer recorded it")
-    (is (re-find #":id \"m-" (:text taken)) "the entity's id, which the agent writes on its branch")
+    (is (re-find #":id \"[0-9a-f]{16}\"" (:text taken)) "the entity's id, which the agent writes on its branch")
     (is (contract/error? none) "no live agent a0: refused, as root refuses")))
 
 (deftest the-context-op-answers-what-a-model-is-sent
@@ -221,7 +221,7 @@
     (is (contains? (:value status) :proofs) "status answers as the turn measured it")
     (is (seq (:ns (:value sent))) "and the read records the hash of what it sent, as a model turn does (the debug page compares its redraw with it)")
     ;; docs/turn.md#the-turn-is-a-number: a read is a model call with its own count, and moves no turn
-    (is (= [(str (:key (:value sent)) "/read-1")] (:ids (:value sent))) "the read's model call is <agent key>/read-<k>")
+    (is (= [(seon.lib/call-id (:key (:value sent)) "read-1")] (:ids (:value sent))) "the read's model call is its agent and read number digested")
     (is (empty? (:turns (:value sent))) "a read moves no turn number: no agent holds one")))
 
 (deftest an-outside-agent-plays-the-model
@@ -473,7 +473,7 @@
     (is (= [(:agent attached) (:task attached)] [(:agent again) (:task again)]) "attaching again answers the same agent and task")
     (is (contract/error? other) "v's branch is t's, which t's agent holds: refused, as an answer, never a server defect")
     (is (= :seon.root/refused (:seon.error/type other)) (pr-str other))
-    (is (re-find #"held by live agent :a\d+ working t[0-9a-f]+/t: its seon_done" (str (:seon.error/message other))) (pr-str other))))
+    (is (re-find #"held by live agent :[0-9a-f]{16} working t[0-9a-f]+/t: its seon_done" (str (:seon.error/message other))) (pr-str other))))
 
 (deftest a-prove-never-ends-the-agent-it-proves
   ;; THE PLAN 0.7 (root, 2026-10-27): after seon_prove, the outside agent had ended ("agent a7

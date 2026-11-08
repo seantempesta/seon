@@ -9,7 +9,7 @@
   and M1's proto.agents.task; the attributes are derived from resources/seon/schemas (session D1)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [datahike.db.utils :as dbu] [clojure.string :as str] [clojure.edn :as edn] [seon.merge :as pm] [seon.db :as pdb] [seon.edn :as sedn]
-            [seon.print :as print] [seon.ref :as ref] [seon.program :as program] [seon.config :as cfg]))
+            [seon.print :as print] [seon.ref :as ref] [seon.program :as program] [seon.config :as cfg] [seon.lib :as lib]))
 
 ;; ---- identity --------------------------------------------------------------------
 
@@ -239,28 +239,20 @@
              (into (for [{p :e} (d/datoms db :aevt :seon.process/running)] [:db.fn/retractAttribute p :seon.process/running]))
              (into (for [{p :e} (d/datoms db :aevt :seon.process/stall)] [:db.fn/retractAttribute p :seon.process/stall])))))
 
-(defn agent-key
-  "Agent id's key in root's boot: its entity's identity (:seon.agent/key), one per agent per
-  boot, since an id like :a3 starts again each boot."
-  {:malli/schema [:=> [:cat :string :keyword] :string]}
-  [boot id] (str boot "/" (name id)))
-
 (defn boot-of
   "Root's boot on main db, as its entity records it (:seon.root/boot), or nil before root's boot fact."
   {:malli/schema [:=> [:cat :seon.host/db] [:maybe :string]]}
   [db] (:seon.root/boot (d/entity db [:seon.root/id :root])))
 
 (defn this-boots
-  "Agent entity e's id when it is an agent of root's boot on main db, else nil: an id like :a3
-  starts again each boot, so only this boot's names a process root holds. Its key is that
-  boot's, or it is a session's agent a process of this boot continues (it was started in this boot:
-  its :seon.agent/boot, seon.task/start-tx)."
+  "Agent entity e's id when it is an agent of root's boot on main db, else nil: an agent's id is its key
+  (a content id, unique forever), so what this boot tells is whether a process of this boot holds it (its
+  :seon.agent/boot, seon.task/start-tx)."
   {:malli/schema [:=> [:cat :seon.host/db :any] [:maybe :keyword]]}
   [db e]
   ;; e an entity of main (its key: a walk shows only an agent's relevant attributes)
-  (let [id (:seon.agent/id e) boot (boot-of db)]
-    (when (and id boot (or (= (:seon.agent/key e) (agent-key boot id)) (= boot (:seon.agent/boot e))))
-      id)))
+  (let [k (:seon.agent/key e) boot (boot-of db)]
+    (when (and k boot (= boot (:seon.agent/boot e))) (keyword k))))
 
 (def ^:private agent-attrs
   "Each member of root's view of an agent and the attribute recording it on the agent (agent-tx)."
@@ -304,22 +296,18 @@
     (:seon.agent/key newest)))
 
 (defn agent-tx
-  "What root observes of agent id in its boot, as facts: on the agent's entity the root that
+  "What root observes of agent id, as facts: on the agent's entity (its key is its id's name) the root that
   started it and its status, task's id or description and branch; on its process's entity
   (:seon.process/*, one per spawn, pointing at the agent) its pid, memory, the form running, when it
   forked and ended and a stall it shows: each member of root's view m, written when set and retracted
   when m holds it as nil (the form running, once it returned). Root writes it when its
   view of the agent changes (seon.root/record-agents)."
-  {:malli/schema [:function [:=> [:cat :string :keyword :map] [:vector :any]]
-                  [:=> [:cat :string :keyword :map [:maybe :string]] [:vector :any]]]}
-  ;; key: the session's agent this process continues (seon.task/session-key), whose entity
-  ;; then holds this process's facts; nil, the process's own key in this boot
-  ([boot id m] (agent-tx boot id m nil))
-  ([boot id m key]
-  (let [k (or key (agent-key boot id))
+  {:malli/schema [:=> [:cat :keyword :map] [:vector :any]]}
+  [id m]
+  (let [k (name id)
         v (fn [member x] (case member :running (:form x) :forked-ms (double x) x))
         pk (some->> (:pid m) (str k "/"))]
-    (-> [(into {:seon.agent/key k :seon.agent/id id :seon.agent/root [:seon.root/id :root]}
+    (-> [(into {:seon.agent/key k :seon.agent/root [:seon.root/id :root]}
                (for [[member a] agent-attrs :let [x (some->> (get m member) (v member))] :when (some? x)] [a x]))]
         (into (for [[member a] agent-attrs :when (and (contains? m member) (nil? (get m member)))]
                 [:db.fn/retractAttribute [:seon.agent/key k] a]))
@@ -328,7 +316,7 @@
                 (cons (into {:seon.process/id pk :seon.process/agent [:seon.agent/key k]}
                             (for [[member a] process-attrs :let [x (some->> (get m member) (v member))] :when (some? x)] [a x]))
                       (for [[member a] process-attrs :when (and (contains? m member) (nil? (get m member)))]
-                        [:db.fn/retractAttribute [:seon.process/id pk] a]))))))))
+                        [:db.fn/retractAttribute [:seon.process/id pk] a])))))))
 
 (defn boot-tx
   "Root's boot: its id for this process lifetime and its max-running config key (merges at once,
@@ -339,13 +327,13 @@
   [boot max-running name]
   (into [{:db/id "user" :seon.agent/key name :seon.user/name name}
          {:seon.root/id :root :seon.root/boot boot :seon.config.agent/max-running max-running :seon.root/signed-in "user"}]
-        (agent-tx boot :user {} name)))
+        (agent-tx (keyword name) {})))
 
 (defn call-ref
   "The model call of turn n of the agent with key k, as a ref in a transaction: a record of that turn (an eval, a message) names it, which
   makes it when the turn has not begun, so agent -> call -> its records is one pull. See docs/turn.md#the-turn-is-a-number."
   {:malli/schema [:=> [:cat :string nat-int?] :map]}
-  [k n] {:seon.model-call/id (str k "/" n) :seon.model-call/agent {:seon.agent/key k} :seon.model-call/n n})
+  [k n] {:seon.model-call/id (lib/call-id k n) :seon.model-call/agent {:seon.agent/key k} :seon.model-call/n n})
 
 (defn message-tx
   "Message mid from from to the agents with keys tos, its body, sent at sent-ms: the one message entity (its id is a content id), `to` naming each
@@ -404,24 +392,21 @@
 
 (defn start-tx
   "Agent `agent` (its id; nil: root refused the spawn, and no agent exists) begins task id in root's boot, its turn budget raised by raise (a wake's allowance) turns: the task's
-  outcome :running from what it was, naming the agent (key: the session's agent it continues, seon.task/session-key; nil, its own in
-  this boot), the judged attributes cleared; the agent's entity (key, id, task, branch and the rest of its environment,
+  outcome :running from what it was, naming the agent (its id's name is its key, so a session's agent that continues keeps it, seon.task/session-key), the judged attributes cleared; the agent's entity (key, task, branch and the rest of its environment,
   its boot and when it started, and who started the task now holding it, :seon.agent/agents), its turn budget set when it is new (a raised budget stays, docs/turn.md#the-cap) and raised by raise in the same write.
   A refused spawn is the task's outcome :refused with root's reason and error, and no agent."
   {:malli/schema [:function [:=> [:cat :seon.host/db :seon.task/id :string [:maybe :keyword] :seon.task/env :int] [:vector :any]]
-                  [:=> [:cat :seon.host/db :seon.task/id :string [:maybe :keyword] :seon.task/env :int [:maybe :string]] [:vector :any]]
-                  [:=> [:cat :seon.host/db :seon.task/id :string [:maybe :keyword] :seon.task/env :int [:maybe :string] nat-int?] [:vector :any]]]}
-  ([db id boot agent env start-ms] (start-tx db id boot agent env start-ms nil 0))
-  ([db id boot agent env start-ms key] (start-tx db id boot agent env start-ms key 0))
-  ([db id boot agent {:keys [branch model max-turns holder]} start-ms key raise]
-   (let [k (when agent (or key (agent-key boot agent)))
+                  [:=> [:cat :seon.host/db :seon.task/id :string [:maybe :keyword] :seon.task/env :int nat-int?] [:vector :any]]]}
+  ([db id boot agent env start-ms] (start-tx db id boot agent env start-ms 0))
+  ([db id boot agent {:keys [branch model max-turns holder]} start-ms raise]
+   (let [k (when agent (name agent))
          ae (when k (d/entity db [:seon.agent/key k]))
          from (:seon.task/outcome (d/entity db [:seon.task/id id]))]
      (into (outcome-tx db id from :running {})
            (filterv some?
                     [(when k {:seon.task/id id :seon.task/agent k})
                      (when-let [by (when k (:db/id (:seon.task/started-by (d/entity db [:seon.task/id id]))))] [:db/add by :seon.agent/agents k])
-                     (when k (cond-> {:db/id k :seon.agent/key k :seon.agent/id agent :seon.agent/task [:seon.task/id id]
+                     (when k (cond-> {:db/id k :seon.agent/key k :seon.agent/task [:seon.task/id id]
                                       :seon.agent/branch branch :seon.agent/boot boot :seon.agent/started-ms start-ms}
                                model (assoc :seon.agent/model model)
                                holder (assoc :seon.agent/holder holder)
@@ -590,7 +575,7 @@
     (some-> (own id) (assoc :seon.task/accumulated (accumulate own id)) (vary-meta assoc :seon.render/schema :seon.task/task))))
 
 (def ^:private agent-pull "The attributes of an agent the reconciler's index reads. See docs/reconcile.md#a-task-holds-how-its-work-ended."
-  '[:seon.agent/key :seon.agent/id :seon.agent/branch :seon.agent/model :seon.agent/holder :seon.agent/max-turns
+  '[:seon.agent/key :seon.agent/branch :seon.agent/model :seon.agent/holder :seon.agent/max-turns
                            :seon.agent/boot :seon.agent/started-ms])
 
 (defn- agent-value
@@ -601,7 +586,7 @@
                    :seon.reconcile/agent]}
   [a]
   (let [{:seon.agent/keys [branch model max-turns holder]} a]
-    (-> (select-keys a [:seon.agent/key :seon.agent/id :seon.agent/boot])
+    (-> (select-keys a [:seon.agent/key :seon.agent/boot])
         (assoc :seon.agent/env (cond-> {:branch branch :model model :max-turns max-turns} holder (assoc :holder holder))))))
 
 (defn agents
@@ -637,7 +622,7 @@
              :let [t (d/pull db [:seon.task/id {:seon.task/agent agent-pull}] e)
                    a (some-> (:seon.task/agent t) agent-value)]]
          (cond-> {:task (:seon.task/id t)}
-           a (assoc :agent (:seon.agent/id a) :key (:seon.agent/key a) :env (:seon.agent/env a))))))
+           a (assoc :agent (keyword (:seon.agent/key a)) :key (:seon.agent/key a) :env (:seon.agent/env a))))))
 
 (defn root
   "Root's boot and config keys on db: {:boot :max-running :max-merging :gate-checkout :started-by}, nil

@@ -472,11 +472,11 @@
         w (first (:to-writer outs))]
     (is (= {:op :tx :branch :db :dest {:agent-facts [:a3]}} (dissoc w :tx-data)))
     (is (= [:busy "(f 2)" 77] (let [p (first (filter :seon.process/id (:tx-data w)))] [(:seon.agent/status (first (:tx-data w))) (:seon.process/running p) (:seon.process/pid p)])))
-    (is (= "b1/a3" (:seon.agent/key (first (:tx-data w)))) "its key in root's boot")
+    (is (= "a3" (:seon.agent/key (first (:tx-data w)))) "its key is its id's name, whatever boot")
     (let [[st outs] (step #'root/api-proc st :back {:op :status :agent :a3 :set {:t 42}})]
       (is (empty? (:to-writer outs)) "nothing it records changed: nothing written")
       (let [[_ outs] (step #'root/api-proc st :back {:op :status :agent :a3 :set {:status :idle :running nil}})]
-        (is (some #{[:db.fn/retractAttribute [:seon.process/id "b1/a3/77"] :seon.process/running]} (:tx-data (first (:to-writer outs))))
+        (is (some #{[:db.fn/retractAttribute [:seon.process/id "a3/77"] :seon.process/running]} (:tx-data (first (:to-writer outs))))
             "the form returned: no longer running")))))
 
 (deftest root-view-of-an-agents-evals-holds-handles-not-values
@@ -719,12 +719,13 @@
   ;; :spawning, but at its hello, so what is sent to it next reaches a ready agent
   (spawning-api (fn [st]
     (let [p (promise)
-          [st _] (step #'root/api-proc st :ext {:op :spawn :opts {} :p p})]
+          [st _] (step #'root/api-proc st :ext {:op :spawn :opts {} :p p})
+          a1 (first (keys (:agents st)))]
       (is (= :unanswered (answer p)) "spawning: not answered")
-      (let [[st _] (step #'root/api-proc st :back {:op :status :agent :a1 :set {:forked-ms 1.0 :mem-mb 1.0 :t 1}})]
+      (let [[st _] (step #'root/api-proc st :back {:op :status :agent a1 :set {:forked-ms 1.0 :mem-mb 1.0 :t 1}})]
         (is (= :unanswered (answer p)) "a status that is not its hello: still not")
-        (step #'root/api-proc st :back {:op :status :agent :a1 :set {:ready true}})
-        (is (= {:id :a1} (answer p)) "its hello answers it"))))))
+        (step #'root/api-proc st :back {:op :status :agent a1 :set {:ready true}})
+        (is (= {:id a1} (answer p)) "its hello answers it"))))))
 
 (deftest a-spawn-whose-agent-dies-first-answers-the-death
   ;; the end the agent met before its hello is the answer: died, with the exit status the fork
@@ -732,24 +733,26 @@
   (spawning-api (fn [st]
     (let [p (promise)
           [st _] (step #'root/api-proc st :ext {:op :spawn :opts {} :p p})
-          [st _] (step #'root/api-proc st :from-fs {:ev :forked :agent :a1 :pid 4242 :fork-ms 1.0})
-          [st _] (step #'root/api-proc st :back {:op :ended :agent :a1 :pid 4242 :inflight []})]
+          a1 (first (keys (:agents st)))
+          [st _] (step #'root/api-proc st :from-fs {:ev :forked :agent a1 :pid 4242 :fork-ms 1.0})
+          [st _] (step #'root/api-proc st :back {:op :ended :agent a1 :pid 4242 :inflight []})]
       (is (= :unanswered (answer p)) "its death waits for the exit status")
       (let [[st _] (step #'root/api-proc st :from-fs {:ev :exit :pid 4242 :status {:exit 3}})
             first-answer (answer p)]
         (is (= :seon.agent/died (:seon.error/type first-answer)))
         (is (= {:exit 3} (:exit first-answer)) "with the status it exited with")
-        (is (= :a1 (:agent first-answer)))
+        (is (= a1 (:agent first-answer)))
         ;; exactly one answer: the spawn's entry is gone once answered, so a later hello or end
         ;; has no caller to answer (a promise ignores a second delivery, so the entry is the proof)
-        (is (not (contains? (:seon.root/spawning st) :a1)) "answered: no spawn is held for the agent")
-        (let [[st _] (step #'root/api-proc st :back {:op :status :agent :a1 :set {:ready true}})]
-          (is (not (contains? (:seon.root/spawning st) :a1)))
+        (is (not (contains? (:seon.root/spawning st) a1)) "answered: no spawn is held for the agent")
+        (let [[st _] (step #'root/api-proc st :back {:op :status :agent a1 :set {:ready true}})]
+          (is (not (contains? (:seon.root/spawning st) a1)))
           (is (= first-answer (answer p))))))))
   (spawning-api (fn [st]
     (let [p (promise)
-          [st _] (step #'root/api-proc st :ext {:op :spawn :opts {} :p p})]
-      (step #'root/api-proc st :back {:op :ended :agent :a1 :pid nil :inflight []})
+          [st _] (step #'root/api-proc st :ext {:op :spawn :opts {} :p p})
+          a1 (first (keys (:agents st)))]
+      (step #'root/api-proc st :back {:op :ended :agent a1 :pid nil :inflight []})
       (is (= :seon.agent/died (:seon.error/type (answer p))) "never forked: its death at once, no status to wait for")))))
 
 (defn- answering-sys
@@ -950,3 +953,23 @@
     (let [[w] (rec (update-in st [:view :agents :a1] assoc :status :idle :mem-mb 152.42) (get-in st [:view :agents]))]
       (is (some #(= :idle (:seon.agent/status %)) (:tx-data w)) "another change writes that change")
       (is (not-any? #(contains? % :seon.process/mem-mb) (:tx-data w)) "and no memory: nothing reads it as a fact"))))
+
+;; task seon.root/an-agent-is-named-by-its-key: one live process per agent (docs/decisions.md#an-id-is-the-content-of-the-facts-that-make-it-owner-2026-11-08)
+(deftest back-leaves-one-live-process-for-the-agent
+  (spawning-api
+   (fn [st]
+     (let [live (fn [st] (vec (sort (keys (:agents st)))))
+           [st _] (step #'root/api-proc st :ext {:op :spawn :opts {:key "a3"} :p (promise)})
+           b (get-in st [:agents :a3 :branch])
+           st (-> st (assoc-in [:view :agents :a3 :status] :idle) (assoc-in [:seon.root/backing :a3] {:p (promise) :branch b}))
+           [st1 outs1] (step #'root/api-proc st :from-writer {:dest {:back :a3} :r {:ok true}})]
+       (is (= [:a3] (live st)) "an agent started under a session's key is named by it")
+       (is (= [:a3] (live st1)) "the old process is the one live process at the Back")
+       (is (= [{:op :kill}] (get outs1 [:a3 :in])) "and it is told to stop")
+       (is (empty? (filter #(= :spawn (:op %)) (:to-writer outs1))) "nothing is forked while it lives")
+       (let [[st2 outs2] (step #'root/api-proc st1 :back {:op :ended :agent :a3 :inflight []})
+             spawns (filter #(= :spawn (:op %)) (:to-writer outs2))]
+         (is (= [:a3] (live st2)) "its end seen, the new process takes its place: one live process")
+         (is (= [[:a3 "a3"]] (mapv (juxt :agent :key) spawns)) "forked once, as the same agent, its id's name its key")
+         (is (empty? (:seon.root/respawn st2)) "nothing waits to be forked")
+         (is (= :spawning (get-in st2 [:view :agents :a3 :status])) "and the view holds the new process, not the old"))))))

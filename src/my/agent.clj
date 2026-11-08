@@ -45,7 +45,7 @@
 
 (defn $ "An earlier eval's response (its live value under :value), by handle (:a3f9c1d2)." {:malli/schema [:=> [:cat :keyword] :any]}
   [h] (get-in @agent/state [:results h]))
-(defn whoami "This agent: {:id :branch :pid}." {:malli/schema [:=> [:cat] [:map [:id :seon.agent/id] [:branch :seon.db/branch] [:pid :seon.lib/pid]]]}
+(defn whoami "This agent: {:id :branch :pid}." {:malli/schema [:=> [:cat] [:map [:id :keyword] [:branch :seon.db/branch] [:pid :seon.lib/pid]]]}
   [] {:id (:id @agent/state) :branch (:branch @agent/state) :pid (lib/c-getpid)})
 (defn messages "The messages to this agent not yet delivered, delivered ({:id :from :body :sent-ms}: the entities on main that name this agent, another agent's send among them, however it was sent); they stay in @ctx, and its model reads them, until you remove one with (swap! seon.ctx/ctx update :messages dissoc e). Then effect outcomes ({:from :fx :k :kind :body}). See docs/users.md#messages." {:malli/schema [:=> [:cat] [:vector :map]]}
   [] (agent/messages))
@@ -97,7 +97,7 @@
     (when aid
       (some #(when (= signature (:signature %)) %) (mapcat :rows (vals (:classes (problems/own db aid))))))))
 
-(defn send-message "Send body to the agents tos (ids): root writes it as a message fact on main to each one's branch, whether or not its process lives; text, or a value printed whole. nil. See docs/users.md#messages." {:malli/schema [:=> [:cat [:sequential :seon.agent/id] :any] :nil]}
+(defn send-message "Send body to the agents tos (ids): root writes it as a message fact on main to each one's branch, whether or not its process lives; text, or a value printed whole. nil. See docs/users.md#messages." {:malli/schema [:=> [:cat [:sequential :keyword] :any] :nil]}
   [tos body] (agent/send-message tos body))
 
 (defn named

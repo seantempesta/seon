@@ -91,7 +91,7 @@
   (testing "the response carries the map as :ex, and the stored eval record holds it as data"
     (let [em (agent/error-map (ArithmeticException. "Divide by zero"))
           r (repl/response [{"status" ["eval-error"] :tag :err :err em :id 0 :form "(/ 1 0)"}])
-          rec (some :seon.eval/response (repl/record-tx {:seon.agent/key "b/a1" :seon.agent/id :a1} "e1" "a1"
+          rec (some :seon.eval/response (repl/record-tx {:seon.agent/key "b/a1"} "e1" "a1"
                                                           {:seon.eval/code "(/ 1 0)" :seon.eval/response r}))]
       (is (= em (:ex r)))
       (is (= em (:ex rec)) "grouped by type and producer without parsing text")))
@@ -280,19 +280,19 @@
     (is (= :a1 (get-in cause [:stall :agent])) "beside the stall it was captured for")))
 
 (deftest a-stalled-agent-is-an-open-problem-while-the-fact-holds
-  (let [db (d/db-with (world) [{:seon.agent/key "b1/a1" :seon.agent/id :a1}
-                                    {:seon.process/id "b1/a1/77" :seon.process/agent [:seon.agent/key "b1/a1"] :seon.process/pid 77 :seon.process/forked-ms 10.0
+  (let [db (d/db-with (world) [{:seon.agent/key "a1"}
+                                    {:seon.process/id "a1/77" :seon.process/agent [:seon.agent/key "a1"] :seon.process/pid 77 :seon.process/forked-ms 10.0
                                      :seon.process/stall {:quiet-ms 4000 :last-op {:kind :tests :form "#'app.t/hangs"}}}
-                                    {:seon.agent/key "b1/a2" :seon.agent/id :a2}])
+                                    {:seon.agent/key "a2"}])
         rows (get-in (problems/health db) [:classes :stalled :rows])]
     (is (= [[:a1 77 "#'app.t/hangs"]] (mapv (juxt :agent (comp :pid :evidence) (comp :form :waits-on :evidence)) rows)) "one row, the stalled agent's")
     (is (re-find #"a1 sent nothing for 4000 ms.*tests #'app.t/hangs" (:message (first rows))) "saying what it waits on")
-    (is (empty? (get-in (problems/health (d/db-with db [[:db.fn/retractAttribute [:seon.process/id "b1/a1/77"] :seon.process/stall]])) [:classes :stalled :rows]))
+    (is (empty? (get-in (problems/health (d/db-with db [[:db.fn/retractAttribute [:seon.process/id "a1/77"] :seon.process/stall]])) [:classes :stalled :rows]))
         "closed once the fact is retracted")
     (is (empty? (get-in (problems/health (d/db-with db (seon.task/earlier-agents-tx db))) [:classes :stalled :rows]))
         "and by a new boot: an earlier boot's stall ended with its process")
     ;; a stall left on an earlier process of the agent is no row: only its current process's counts
-    (is (empty? (get-in (problems/health (d/db-with db [{:seon.process/id "b1/a1/78" :seon.process/agent [:seon.agent/key "b1/a1"] :seon.process/pid 78 :seon.process/forked-ms 20.0}]))
+    (is (empty? (get-in (problems/health (d/db-with db [{:seon.process/id "a1/78" :seon.process/agent [:seon.agent/key "a1"] :seon.process/pid 78 :seon.process/forked-ms 20.0}]))
                         [:classes :stalled :rows]))
         "a respawned agent's old process's stall is no row")))
 
@@ -345,7 +345,7 @@
 (deftest a-new-boot-ends-an-earlier-boots-live-agents
   ;; task seon.root/a-gone-agent-stays-gone-and-every-request-is-answered, path C
   (testing "C: a new boot writes :dead for an earlier boot's agent still shown live"
-    (let [db (d/db-with (world) [{:db/id "r" :seon.root/id :root} {:seon.agent/key "b0/a1" :seon.agent/id :a1 :seon.agent/root "r"
+    (let [db (d/db-with (world) [{:db/id "r" :seon.root/id :root} {:seon.agent/key "b0/a1" :seon.agent/root "r"
                                                             :seon.agent/status :busy}
                                                             {:seon.process/id "b0/a1/5" :seon.process/agent [:seon.agent/key "b0/a1"] :seon.process/running "(work!)"}])
           db (d/db-with db (seon.task/earlier-agents-tx db))]
@@ -409,7 +409,7 @@
   [tid m]
   (merge {:seon.task/id tid :seon.task/ns 't :seon.task/name (subs tid 2) :seon.task/plan "p" :seon.task/execution :running
           :seon.task/branch :b :seon.task/kind :work
-          :seon.task/agent {:seon.agent/key "b/a1" :seon.agent/id :a1 :seon.agent/ended-ms 2}}
+          :seon.task/agent {:seon.agent/key "b/a1" :seon.agent/ended-ms 2}}
          m))
 
 (defn- seeded
@@ -478,7 +478,7 @@
       (is (some? s)))
     (testing "a merge: its conflicts, unmerged keys and the writer's refused answer, as evidence"
       (let [behind (contract/error :seon.merge/behind 'seon.writer/merge-refused "main changed 2 key(s)" {:behind 2})
-            db2 (:db-after (d/with db [(ended "t/m" {:seon.task/kind :merge :seon.task/agent {:seon.agent/key "b/a2" :seon.agent/id :a2 :seon.agent/ended-ms 9}
+            db2 (:db-after (d/with db [(ended "t/m" {:seon.task/kind :merge :seon.task/agent {:seon.agent/key "b/a2" :seon.agent/ended-ms 9}
                                                      :seon.task/outcome :behind :seon.task/unmerged #{"[:var app/g]"}
                                                      :seon.task/conflicts [{:key [:var 'app/f]}]
                                                      :seon.task/error behind})]))
@@ -538,7 +538,7 @@
   "The proof's input at k: a db with k finished tasks beside the agent of one: [db agent-entity]."
   [k] (let [[_ base] (history-input k)
             ;; one agent working a task, as production has beside the others' ended ones
-            db (d/db-with base [{:seon.agent/key "b/own" :seon.agent/id :own :seon.agent/boot "b" :seon.agent/started-ms 1 :seon.agent/branch :b
+            db (d/db-with base [{:seon.agent/key "b/own" :seon.agent/boot "b" :seon.agent/started-ms 1 :seon.agent/branch :b
                                  :seon.agent/max-turns 2 :seon.agent/task [:seon.task/id "t/h0"]}])]
         [db (pdb/eid db :seon.agent/key "b/own")]))
 
@@ -638,7 +638,7 @@
   ;; declared set (:seon.status/failed), not a literal in the reader
   (let [db (:db-after (d/with (seeded 1 5)
                               [(ended "t/l" {:seon.task/branch :l :seon.task/outcome :lost
-                                             :seon.task/agent {:seon.agent/key "b/a9" :seon.agent/id :a9 :seon.agent/ended-ms 9}})]))
+                                             :seon.task/agent {:seon.agent/key "b/a9" :seon.agent/ended-ms 9}})]))
         rows (get-in (problems/report db) [:classes :dead :rows])]
     (is (= :lost (:status (first (filter #(= "t/l" (:task %)) rows)))))
     (is (not-any? #(= "t/l" (:task %)) (get-in (problems/report db) [:classes :error :rows])))))
@@ -649,7 +649,7 @@
   ;; passing (my.root/gate! runs them): one passing of two, or a red, keeps it open
   (let [att (fn [extra] (:db-after (d/with (seeded 1 5)
                                            [(ended "t/u" (merge {:seon.task/branch :u :seon.task/kind :merge :seon.task/outcome :merged
-                                                                 :seon.task/agent {:seon.agent/key "b/a9" :seon.agent/id :a9 :seon.agent/ended-ms 9}
+                                                                 :seon.task/agent {:seon.agent/key "b/a9" :seon.agent/ended-ms 9}
                                                                  :seon.task/deferred #{'seon.root-test/boots 'seon.check-test/clean}}
                                                                 extra))])))
         rows #(get-in (problems/report %) [:classes :unrun :rows])]
