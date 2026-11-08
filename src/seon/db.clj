@@ -156,13 +156,17 @@
   {:malli/schema [:=> [:cat :map] :nil]}
   [e] (throw (ex-info (:seon.error/message e) e)))
 
-(defn- checked
+(defmacro ^:private checked
   "Transaction tx-data applied to db by apply-fn (Datahike's, given the tx-data: its report), held to both checks: each
   datom's value (`invalid-datom`, with schemas {:forms :registry}, a branch's own) before, each entity it touched
   (`invalid-entity`) after; an entity retracted whole takes the entities named by it with it. A refusal
-  throws its typed error, and the value is as it was."
-  {:malli/schema [:=> [:cat :any :any [:maybe :map] ifn?] :map]}
+  throws its typed error, and the value is as it was. A macro, its body inlined at each transaction entry (each
+  contracted): a transaction pays the two checks and no call of scaffolding (contracted calls are a cost dimension:
+  seon.ctx-test/a-swap-costs-what-it-changed)."
   [db tx-data schemas apply-fn]
+  ;; built with list and a quoted body: it expands only here, in seon.db, where the body's names resolve
+  (list 'let ['db db 'tx-data tx-data 'schemas schemas 'apply-fn apply-fn]
+        (quote
   ;; ends-with: tx-data with each entity retracted whole followed by the entities whose identity is a ref to it (a vector,
   ;; :seon.vector/of): such an entity is named by its target and has no identity without it, so it ends with it, as
   ;; Datahike ends a component with its parent; derived from the schema (an identity attribute that is a ref), so no
@@ -185,7 +189,7 @@
     (when-let [e (invalid-datom db tx-data schemas)] (refuse! e))
     (let [r (apply-fn tx-data)]
       (when-let [e (invalid-entity r)] (refuse! e))
-      r)))
+      r)))))
 
 (defn transact-checked
   "The writer's transact (`datahike.writing/transact!`) through both checks (`checked`): the connection's 'transact!
@@ -208,7 +212,7 @@
 (defn speculate
   "tx-data on db as a hypothetical (Datahike's `d/with`), unchecked: nothing of it is stored, so it is not data entering
   the system; the write that may follow (the same transaction through a connection's `'transact!`) is checked there, once
-  (owner, 2026-11-08: validation at transaction time, never the same data checked again). A state the system shows or
+  (validation at transaction time, never the same data checked again). A state the system shows or
   relies on is written, never only speculated. Each caller is named in docs/storage.md (bin/laws transactions). Answers the report."
   {:malli/schema [:=> [:cat :any :any] :map]}
   [db tx-data] (d/with db tx-data))
