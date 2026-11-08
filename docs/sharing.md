@@ -12,7 +12,7 @@ One question decides it: can two branches legitimately hold different values of 
 
 - **Yes: on a branch, moved by a merge.** Forms, vars, files, config, tasks, a user's data, evals and their results. Isolated until merged.
 - **No: on main, as a platform record, and no merge carries it.** Any `seon.*` attribute but the task content an agent may improve (```seon.merge/carried-platform-attrs```): messages, what root records of an agent, UI facts. Messages: a message is one entity on main with `:seon.message/to`, from, body and sent-ms; an agent's next act writes the ones to it onto its own branch in its own transaction, and it removes one with `swap!` on `ctx` ([users](users.md#messages)).
-- **Each attribute has one writer.** An agent's entity is written by root and by its own process today; giving each attribute one is the agent-entity step of [users](users.md).
+- **Each attribute of an entity is set on one branch.** A branch has one writer, Datahike's commit log, so a conflict is never two writers on a branch: it is two branches setting the same attribute of one entity since their base, which a merge must then settle. An agent's entity is set on main by root (its status and process) and on the agent's branch by its process (its turn, its namespace), so a merge up can meet both sides; setting each of its attributes on one branch is the agent-entity step of [users](users.md).
 
 A db value reads only its own branch's datoms: a ref to an entity only another branch holds is valid, but `d/pull` through it answers nothing. A prototype overlay (one db value over two branches, each read routed by attribute) matched a reference db on 25 of 25 reads; it is not built, since every reader, basis and notice would have to know about two branches.
 
@@ -34,7 +34,7 @@ Options a person can ask of a merge (a choice of keys, `-X theirs`) are task ``s
 Node keys are random ids today (Seon does not set Datahike's `:crypto-hash?`), so a node a branch rewrites is its own even when another branch holds the same datoms. What keeps a branch small is writing little:
 
 - A test's facts are kept on a branch only where something reads them (```seon.proofs/facts-worth-keeping```), and a form's place no longer renumbers its file. On a real store of 3 agent branches, EAVT is 3 to 10 percent private by address, where an earlier real store's was as much as 27, and `seon.test` datoms 30 to 484 where they were 5,416.
-- For a long-lived branch, a user's taking hundreds of merges, random keys drift: 66 to 81 percent private after 100 merges in a lab, against 6 to 9 with content-hashed keys and a SHA-256 of each leaf's stored bytes, with all tests green on such stores. That needs a Datahike fork change and a new store, the owner's to approve (task ``seon.db/a-branch-is-main-plus-its-own-changes``).
+- For a long-lived branch, a user's taking hundreds of merges, random keys drift: 66 to 81 percent private after 100 merges in a lab, against 6 to 9 with content-hashed keys and a SHA-256 of each leaf's stored bytes, with all tests green on such stores. That needs a Datahike fork change and a new store, approved by the owner on 2026-11-08 and next to build (task ``seon.db/a-branch-is-main-plus-its-own-changes``).
 
 ## What each operation should cost
 
@@ -48,13 +48,13 @@ A number far off its line is a defect to find. n is what the operation is about,
 | Merge of k carried datoms | O(k) | 7.3 k ticks a datom in `merge-tx` |
 | An insert in a file | O(1) places | 1 place |
 | Analyzing a merged tree, one file | O(that file) | under 0.1 s a file |
-| Selection after a body edit | O(changed forms) | 165 M ticks, 1.5 s |
-| Selection after an edit to `seon/source.clj` or `seon/program.clj` | O(changed forms) | 5,271 M, every form: **off** (task ``seon.program/a-kept-tree-is-keyed-by-the-text-of-two-files``) |
-| `d/schema` | O(1) once per db value | 241 k ticks a call, rebuilt each time: **off**, 14 calls in `src` (task ``seon.db/the-schema-map-is-read-once-a-value``) |
+| `bin/prove` deciding which deftests to run, after a body edit | O(changed forms) | 165 M ticks, 1.5 s |
+| The same, after an edit to `seon/source.clj` or `seon/program.clj` | O(changed forms) | 5,271 M: the kept analyzed form tree is dropped and every form read again, **off** (task ``seon.program/a-kept-tree-is-keyed-by-the-text-of-two-files``) |
+| `d/schema` | O(1) once per db value | 241 k ticks a call, rebuilt each time: **off**, 14 calls in `src`; the fork change is approved (owner, 2026-11-08; task ``seon.db/the-schema-map-is-read-once-a-value``) |
 
 ## A result stands until what it read changes
 
-Planned (task ``seon.program/a-tests-digest-reads-what-it-ran``). Today a test's result is keyed by its static reach ([source](source.md#tests-run-by-reach)). A process test's reach goes through its process entry, so an agent's code is reached by all 232 process tests and a var of `seon.reconcile`, `seon.writer` or `seon.root` by a median of 2 or 3. The daily full run is the net (owner, 2026-10-27), and a red it finds is a `:platform` problem naming each test (```seon.prove/full-answered```). A full run on main with nothing reused was 1,523 of 1,523 green (2026-11-07). The plan: a test's key is a fixed seed and what its run read, recorded by every process it ran in.
+A defect today (owner, 2026-11-08: not knowing what a test executed is a bug; task ``seon.program/a-tests-digest-reads-what-it-ran``). A test's verdict is keyed by its static reach, the vars its forms refer to ([source](source.md#tests-run-by-reach)). A process test forks an agent, which reaches root's code by messages to the server, not by var references, so an agent's code is reached by all 232 process tests and a var of `seon.reconcile`, `seon.writer` or `seon.root` by a median of 2 or 3: a change there can keep a stale green. The daily `bin/test --all` on main is the net (owner, 2026-10-27), and a red it finds is a `:platform` problem naming each test (```seon.prove/full-answered```); one task per red deftest, keyed by its name, is task ``seon.prove/a-red-in-the-daily-full-test-is-a-task``. On 2026-11-07, `bin/test --all` on main with nothing reused was 1,523 of 1,523 green. The fix: a test's key is a fixed seed and the vars it called, recorded by every process it executed in.
 
 ## Catching up to a db value
 
