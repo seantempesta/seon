@@ -63,7 +63,7 @@
   ;; docs/merging.md#verdicts-are-a-cache: a test takes each key's value, so what a branch states of one key moves the tests reading it, and leaves the rest and the place keys alone
   (let [form (fn [nm k]
                (fn [db] (program/record-tx db {:id (str "app.k-test/" nm) :src (str "(deftest " nm " (seon.config/value " k "))") :ns 'app.k-test :ns-form? false
-                                               :defs [{:var (symbol "app.k-test" nm) :kind :test}] :keywords #{k}
+                                               :defs [{:var (symbol "app.k-test" nm) :meta #{:test}}] :keywords #{k}
                                                :declares #{} :methods [] :impls [] :refs '#{seon.config/value} :requires #{} :banned #{} :inline-defs #{}})))
         db (mt/with (mt/world)
              (form "reads-a" :seon.config.root/view-window)
@@ -1186,7 +1186,7 @@
                                       (reply agent)
                                       {:op :eval :agent "root"
                                        :code (str "(let [db @(:conn sys)] @(seon.root/transact-main! sys (seon.program/record-tx db {:id \"app.moved-on-main/(defn f [] 1)\" :src \"(defn f [] 1)\" :ns 'app.moved-on-main :ns-form? false"
-                                                  " :defs [{:var 'app.moved-on-main/f :kind :fn :contract nil}] :declares #{} :methods [] :impls [] :refs #{} :requires #{} :banned #{} :inline-defs #{}})))")}
+                                                  " :defs [{:var 'app.moved-on-main/f :meta #{:arglists} :contract nil}] :declares #{} :methods [] :impls [] :refs #{} :requires #{} :banned #{} :inline-defs #{}})))")}
                                       (reply agent)])
                                    (merging))]
     (is (false? (last-value before)) (pr-str before))

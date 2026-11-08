@@ -294,7 +294,7 @@
   contract c or none."
   [db nm c]
   (program/record-tx db {:id (str "app.gaps/" nm (when c "-contracted")) :src (str "(defn " nm (when c (str " {:malli/schema " c "}")) " [x] x)")
-                         :ns 'app.gaps :ns-form? false :defs [(cond-> {:var (symbol "app.gaps" nm) :kind :fn} c (assoc :contract c))]
+                         :ns 'app.gaps :ns-form? false :defs [(cond-> {:var (symbol "app.gaps" nm) :meta #{:arglists}} c (assoc :contract c))]
                          :declares #{} :methods [] :impls [] :refs #{} :requires #{} :banned #{} :inline-defs #{}}))
 
 (deftest the-judge-and-the-merge-gate-agree-on-contract-gaps

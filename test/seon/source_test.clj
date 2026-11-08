@@ -91,16 +91,16 @@
         (is (= (count read) (count (forms-of nsym))) path)
         (is (= (frequencies (map :src read)) (frequencies (map second (forms-of nsym)))) path)))
     (testing "definitions from the compiler, pointing to their forms"
-      (let [row (fn [sym] (d/pull db '[:var/kind :var/contract {:var/form [:form/src :form/refs]}] [:var/name sym]))]
+      (let [row (fn [sym] (d/pull db '[:var/meta :var/contract {:var/form [:form/src :form/refs]}] [:var/name sym]))]
         (is (str/starts-with? (get-in (row 'app.imp/load-order) [:var/form :form/src]) "(defn load-order\n"))
-        (is (= :fn (:var/kind (row 'app.imp/load-order))))
+        (is (contains? (set (:var/meta (row 'app.imp/load-order))) :arglists))
         (is (= "[:=> [:cat [:sequential :int]] [:vector :int]]" (:var/contract (row 'app.imp/load-order))))
         (is (contains? (set (get-in (row 'app.imp/load-order) [:var/form :form/refs])) 'app.imp/topo)
             "a reference resolved by the compiler")
-        (is (= :macro (:var/kind (row 'app.imp/twice))))
-        (is (= :value (:var/kind (row 'app.imp/banned))))
+        (is (contains? (set (:var/meta (row 'app.imp/twice))) :macro))
+        (is (not-any? (set (:var/meta (row 'app.imp/banned))) [:arglists :macro :test]))
         (is (= "[:=> [:cat :any] :string]" (:var/contract (row 'seon.edn/encode))) "a real file's contract")
-        (is (= '[:fn :fn] (mapv #(:var/kind (row %)) '[seon.edn/decode my.fx/call])))))
+        (is (every? #(contains? (set (:var/meta (row %))) :arglists) '[seon.edn/decode my.fx/call]))))
     (testing "the platform's own namespaces are not loaded from main: the binary is the running generation"
       (let [db (imported (dissoc files "src/app/imp.clj"))]
         (is (= {:loaded (count (program/live-forms (empty-db))) :errors []} (program/load-all! db))

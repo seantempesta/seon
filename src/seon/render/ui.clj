@@ -883,22 +883,22 @@
         m (when-not v (some-> (find-ns (symbol (namespace sym))) ns-interns (get (symbol (name sym))) meta))
         forms (vals (:callers v))
         defs-of (fn [f] (for [d (or (vals (:defines f)) (:form/defines f)) :when (and (:var/name d) (not= sym (:var/name d)))] d))
-        test? (fn [f] (some #(= :test (:var/kind %)) (defs-of f)))
-        tests (sort-by str (distinct (for [f forms :when (test? f) d (defs-of f) :when (= :test (:var/kind d))] (:var/name d))))
+        test? (fn [f] (some #(contains? (set (:var/meta %)) :test) (defs-of f)))
+        tests (sort-by str (distinct (for [f forms :when (test? f) d (defs-of f) :when (contains? (set (:var/meta d)) :test)] (:var/name d))))
         call (some #(call-in (:form/src %) sym) (concat (filter test? forms) (remove test? forms)))
         doc (or (:var/doc v) (:doc m))]
     [:section
      [:h3 (str sym)]
      (if changing?
-       (list [:p (if (= :test (:var/kind v)) "A test your plan names." "A function your plan names.")]
+       (list [:p (if (contains? (set (:var/meta v)) :test) "A test your plan names." "A function your plan names.")]
              (if src (source-block src) (list (when m [:p (str (:arglists m))]) (when doc [:p doc]) [:p "Read it: " [:code (str "(source " sym ")")]]))
              (when (seq tests) [:p {:key "tests that reach it"} (str (count tests) " tests reach it: " "(callers '" sym ") lists them.")]))
-       (list [:p (if (= :test (:var/kind v)) "A test your plan names." "A function your plan names.")]
+       (list [:p (if (contains? (set (:var/meta v)) :test) "A test your plan names." "A function your plan names.")]
              (when src [:p [:code (str (reader/arglists src (symbol (namespace sym))))]])
              (when m [:p [:code (str (:arglists m))]])
              (when doc [:p doc])
              (when call [:p "A real call: " [:code call]])
-             (when (and (:var/kind v) (= :test (:var/kind v)) src) (source-block src))))]))
+             (when (and (contains? (set (:var/meta v)) :test) src) (source-block src))))]))
 
 (defn- key-hiccup
   "A cited attribute or setting by its schema entry. A setting: what it is for (its :description) and its value now. An

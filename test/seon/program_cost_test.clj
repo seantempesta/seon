@@ -11,7 +11,7 @@
   {:malli/schema [:=> [:cat :int :string] :map]}
   [i body]
   {:id (str "app.pc/f" i "-" body) :src (str "(defn f" i " [x] " body ")") :ns 'app.pc :ns-form? false
-   :defs [{:var (symbol "app.pc" (str "f" i)) :kind :fn}] :declares #{} :methods [] :impls []
+   :defs [{:var (symbol "app.pc" (str "f" i)) :meta #{:arglists}}] :declares #{} :methods [] :impls []
    :refs (if (pos? i) #{(symbol "app.pc" (str "f" (dec i)))} #{}) :requires #{} :banned #{} :inline-defs #{}})
 
 (defn branch-of
@@ -312,7 +312,7 @@
   [n]
   (let [[db] (branch-of n)
         test-acct (fn [i] {:id (str "app.pc-test/t" i) :src (str "(deftest t" i " (f" i " 1))") :ns 'app.pc-test :ns-form? false
-                           :defs [{:var (symbol "app.pc-test" (str "t" i)) :kind :test}] :declares #{} :methods [] :impls []
+                           :defs [{:var (symbol "app.pc-test" (str "t" i)) :meta #{:test}}] :declares #{} :methods [] :impls []
                            :refs #{(symbol "app.pc" (str "f" i))} :requires #{} :banned #{} :inline-defs #{}})
         db (d/db-with db (vec (mapcat (fn [i k] (program/account-tx db (test-acct i) (+ n k))) (conj (vec (range 0 n 10)) (dec n)) (range))))
         g (program/reach-indexed (program/reach-graph db nil) {:env "e" :tree "t" :config {}})]

@@ -205,14 +205,14 @@
                                         (seq refs) (assoc :form/refs refs))
                                       {:db/id (str "ns " (namespace v)) :ns/name (symbol (namespace v))}])
                                    '[[ctx-calc/square "(defn square \"Squares x.\" {:malli/schema [:=> [:cat :int] :int]} [x] (* 2 x))" [clojure.core/*]
-                                      {:var/kind :fn :var/contract "[:=> [:cat :int] :int]" :var/doc "Squares x."}]
+                                      {:var/meta #{:arglists} :var/contract "[:=> [:cat :int] :int]" :var/doc "Squares x."}]
                                      ;; a branch's function in a namespace this process never loaded
                                      [ctx-ghost/half "(defn half {:malli/schema [:=> [:cat :int] :int]} [x] (quot x 2))" [clojure.core/quot]
-                                      {:var/kind :fn :var/contract "[:=> [:cat :int] :int]"}]
+                                      {:var/meta #{:arglists} :var/contract "[:=> [:cat :int] :int]"}]
                                      [ctx-calc-test/square-test "(deftest square-test (is (= 9 (square 3))))" [clojure.test/is ctx-calc/square ctx-ghost/half]
-                                      {:var/kind :test}]
-                                     [ctx-calc-test/empty-test "(deftest empty-test (square 3))" [ctx-calc/square] {:var/kind :test}]
-                                     [ctx-calc-test/stray-test "(deftest stray-test (is (= 2 (square 1))))" [clojure.test/is ctx-calc/square] {:var/kind :test}]])))
+                                      {:var/meta #{:test}}]
+                                     [ctx-calc-test/empty-test "(deftest empty-test (square 3))" [ctx-calc/square] {:var/meta #{:test}}]
+                                     [ctx-calc-test/stray-test "(deftest stray-test (is (= 2 (square 1))))" [clojure.test/is ctx-calc/square] {:var/meta #{:test}}]])))
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'ctx :seon.task/name "sq" :seon.task/plan "p"
                                                :seon.task/proofs #{'ctx-calc-test/square-test 'ctx-calc-test/cube-test 'ctx-calc-test/empty-test}}]))
         ;; the test child's report of the failing assertion, as clojure.test makes it
@@ -357,7 +357,7 @@
       (d/transact conn [{:seon.agent/key "b/a1" :seon.agent/task [:seon.task/id "demo/f"] :seon.agent/base-commit (d/commit-id @conn)}
                         {:var/name 'demo-test/f-test :seon.test/status :green}])
       (d/transact conn (program-facts '[[demo/helper "(defn helper [x] x)" []]]))
-      (d/transact conn [{:var/name 'demo/helper :var/kind :fn}])
+      (d/transact conn [{:var/name 'demo/helper :var/meta #{:arglists}}])
       (let [db @conn st (context/status db (:tree (seon.ctx/build db (pdb/eid db :seon.agent/key "b/a1") :b)) {})]
         (is (= ['demo/helper] (:without-a-contract st)))
         (is (= [{:reason :contract-gap :vars ['demo/helper]}] (:refused st)))))))
@@ -1892,8 +1892,8 @@
   ;; test of it to copy (vars-history spent turns 10-14 finding these)
   (let [db (d/db-with (db-with-program)
                       (into (program-facts '[[demo-test/shared-world "(defn- shared-world [] 1)" []]])
-                            [{:var/name 'demo-test/f-test :var/kind :test} {:var/name 'demo-test/g-test :var/kind :test}
-                             {:var/name 'demo-test/shared-world :var/kind :fn}]))
+                            [{:var/name 'demo-test/f-test :var/meta #{:test}} {:var/name 'demo-test/g-test :var/meta #{:test}}
+                             {:var/name 'demo-test/shared-world :var/meta #{:arglists}}]))
         shape (context/test-shape db 'demo-test/new-test)]
     (is (= 'demo-test (:ns shape)) "the namespace it goes in")
     (is (empty? (:helpers shape)) "only the helpers its example calls (it calls none)")
