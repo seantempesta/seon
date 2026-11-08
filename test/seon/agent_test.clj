@@ -9,7 +9,7 @@
   (:require [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [clojure.edn :as edn]
             [clojure.string :as str] [seon.agent :as agent] [seon.proofs :as proofs] [seon.contract :as contract]
             [datahike.api :as d] [seon.db :as pdb] [seon.test-store :as ts] [seon.program-test] [seon.lib :as lib] [seon.program :as program] [seon.sock :as sock]
-            [seon.fx :as fx] [seon.cost :as cost] [seon.config :as cfg] [seon.merge :as pm] [seon.profile :as profile] [seon.task :as task] [seon.writer :as writer] [seon.repl :as repl] [seon.ctx] [seon.render] [seon.turn] [my.test :as mt] [test-runner :as runner] [seon.ctx.wire-test] [my.task] [my.agent] [seon.template :as tpl] [seon.stall-proofs] [clojure.core.async]))
+            [seon.fx :as fx] [seon.cost :as cost] [seon.config :as cfg] [seon.merge :as pm] [seon.profile :as profile] [seon.task :as task] [seon.writer :as writer] [seon.repl :as repl] [seon.agent-proc] [seon.ctx] [seon.render] [seon.turn] [my.test :as mt] [test-runner :as runner] [seon.ctx.wire-test] [my.task] [my.agent] [seon.template :as tpl] [seon.stall-proofs] [clojure.core.async]))
 
 (def ^:private await-file
   "seon.await, which a root (importing src only) loads by this path."
@@ -1989,6 +1989,82 @@
                "its record's transaction names it"))
          (finally (reset! agent/state old) (reset! agent/link old-link) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
 
+
+(def ^:dynamic *peek*
+  "The test's hook for a form that looks at its own agent while it runs (`an-evals-output-streams-as-it-is-written`)."
+  nil)
+
+(defn peek!
+  "Call the hook the test bound: what the agent's socket and branch hold while the form that called this still runs."
+  []
+  (*peek*))
+
+(deftest an-evals-output-streams-as-it-is-written
+  ;; task seon.fx/an-effect-streams-what-it-reads, docs/render.md#in-flight-output-streams: an eval's start is committed before
+  ;; its form runs and its *out* is sent to root as it is written, in one stream "<eval id>/out", ended once however the eval
+  ;; ends; the record keeps the text whole, as it did. In process (a socketpair to read the frames root would get), on a branch of the
+  ;; test store because the start and the record are commits.
+  (ts/test-branch!
+   (fn [cfg conn]
+     (let [ab (pdb/on-main (:branch cfg) :eval-out)
+           _ (d/branch! conn (:branch cfg) ab)
+           store-conn (d/connect (assoc cfg :branch ab))
+           [a b] (sock/socketpair)
+           rd (sock/conn b)
+           old @agent/state old-link @agent/link
+           frames (fn [] (loop [acc []] (let [m (sock/next-frame! rd)] (if (#{:none :eof} m) acc (recur (conj acc m))))))
+           streamed (fn [fs part] (filterv #(and (= :stream (:op %)) (= part (:part %))) fs))
+           run (fn [code hook] (binding [*peek* hook] (repl/eval-string code {"ns" "user" :origin :outside})))]
+       (try
+         (reset! agent/link {:fd a})
+         (reset! agent/state {:store-conn store-conn :cfg cfg :branch ab :db @store-conn :mode :agent :key "test/a1" :id :a1 :n 0})
+         (let [code "(do (print \"one \") (print \"two\") (seon.agent-test/peek!) (println \"three\") :v)"
+               mid (volatile! nil) started (volatile! nil)
+               r (run code
+                      #(do (vreset! mid (frames))
+                           (vreset! started (:seon.eval/code (d/entity @store-conn [:seon.eval/id (:eval @agent/state)])))))
+               fs (into @mid (frames))
+               id (:record r)
+               outs (streamed fs "out")
+               texts (remove :end outs)
+               joined (apply str (map :text texts))]
+           (is (= ["one " "two"] (map :text (streamed @mid "out"))) "the first writes were out while the form still ran")
+           (is (= code @started) "and the eval's start was committed before it ran")
+           (is (= (:seon.print/code (:out r)) joined) "the streamed text joined is the record's :out")
+           (is (= "one twothree\n" joined))
+           (is (= (butlast (reductions + 0 (map (comp count :text) texts))) (map :offset texts)) "offsets are contiguous")
+           (is (= 1 (count (filter :end outs))) "one end")
+           (is (:end (last outs)) "and it is last")
+           (is (every? #(and (= (str id "/out") (:stream %)) (= id (:in %)) (= "test/a1" (:agent %))) outs) "each names its stream, eval and agent's key")
+           ;; the record is the eval's, the same entity the start opened, with what it was
+           (agent/commit!)
+           (let [e (d/pull @store-conn '[:seon.eval/code :seon.eval/by :seon.eval/response :seon.eval/result] [:seon.eval/id id])
+                 resp (pdb/response-of @store-conn e)]
+             (is (= code (:seon.eval/code e)))
+             (is (= "outside" (:seon.eval/by e)))
+             (is (= :v (:value resp)))
+             (is (= (:out r) (:out resp)) "its :out as it was")))
+         ;; an eval that throws ends its stream once, and the text before the error is streamed
+         (let [r (run "(do (print \"before\") (throw (ex-info \"boom\" {})))" nil)
+               outs (streamed (frames) "out")]
+           (is (:ex r))
+           (is (= "before" (apply str (map :text (remove :end outs)))))
+           (is (= [true 1] [(boolean (:end (last outs))) (count (filter :end outs))])))
+         ;; an eval that prints nothing still ends its stream (its container was drawn at the start); *err* is its own stream
+         (let [r (run "(do (binding [*out* *err*] (print \"e\")) 1)" nil)
+               fs (frames)]
+           (is (= 1 (:value r)))
+           (is (= [{:offset 0 :text "e"} {:end true}] (mapv #(select-keys % [:offset :text :end]) (streamed fs "err"))))
+           (is (= [{:end true}] (mapv #(select-keys % [:offset :text :end]) (streamed fs "out")))))
+         (finally (reset! agent/state old) (reset! agent/link old-link) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
+
+(deftest an-agents-stream-frame-goes-to-the-web-procs-streams
+  ;; task seon.fx/an-effect-streams-what-it-reads: root's agent proc puts an eval's in-flight text on the web proc's :streams in-port
+  ;; (Flow's dynamic route) as it came, without its :op, and holds nothing of it
+  (let [o (volatile! {}) st {:id :a1}
+        m {:stream "e1/out" :in "e1" :part "out" :agent "test/a1" :offset 3 :text "x"}]
+    (is (= st (#'seon.agent-proc/agent-frame st o (assoc m :op :stream))))
+    (is (= {[:web :streams] [m]} @o))))
 
 (deftest an-eval-run-again-replaces-itself
   ;; docs/turn.md#an-eval-can-be-run-again: through a real agent's REPL, the same record under its own id, its author and call kept,

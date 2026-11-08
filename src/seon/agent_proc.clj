@@ -170,6 +170,9 @@
                    bad (or (:noise-bad st) (when-not ok [(:i m) (:noise st)]))]
                (step/out! o :to-api {:op :stat :k :noise :v (inc (:noise st)) :ordered ordered :bad bad})
                (assoc st :noise (inc (:noise st)) :noise-ordered ordered :noise-bad bad))
+      ;; an eval's in-flight output (seon.repl/streaming): to the web proc's :streams in-port (Flow's dynamic route), which
+      ;; keeps the newest and never makes this proc wait; display only, so nothing of it is held here
+      :stream (do (step/out! o [:web :streams] (dissoc m :op)) st)
       :send (do (step/out! o :to-api {:op :message :from id :to (:to m) :body (:body m)}) st)
       ;; the agent began request rid's eval, or forked rid's test child: root's events say so
       :started (do (step/out! o :events (step/event (cond-> {:type :started :agent id :rid (:id m)}

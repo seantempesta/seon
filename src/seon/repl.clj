@@ -117,6 +117,28 @@
                   end (pos)]
               (recur end (dec k) (conj acc [(subs src (reader/lead-end src prev end) end) (reader/lead src prev end)])))))))))
 
+(defn- streaming
+  "Writer kept, or when at (the stream's offset, a volatile of the characters sent so far) is given, a java.io.Writer
+  that writes to kept (the StringWriter the eval's record reads, so the record is what it was) and also sends
+  each write to root as {:op :stream :stream \"<eval id>/<part>\" :in <eval id> :part part :agent <key> :offset n :text s}
+  (seon.agent-proc/agent-frame puts it on the web proc's :streams). Display only: the record holds the text.
+  See docs/render.md#in-flight-output-streams."
+  {:malli/schema [:=> [:cat :seon.host/writer [:maybe :string] :string [:maybe :seon.host/volatile]] :seon.host/writer]}
+  [kept eval-id part at]
+  (if-not at
+    kept
+    (let [put (fn [^String s]
+                (.write ^java.io.Writer kept s)
+                (when (pos? (count s))
+                  (agent/send! {:op :stream :stream (str eval-id "/" part) :in eval-id :part part :agent (:key @agent/state)
+                                :offset @at :text s})
+                  (vswap! at + (count s))))]
+      (proxy [java.io.Writer] []
+        (write ([x] (put (if (string? x) x (str (char x)))))
+               ([b o n] (put (if (string? b) (subs b o (+ o n)) (String. ^chars b (int o) (int n))))))
+        (flush [])
+        (close [])))))
+
 (defn- eval-code
   "Read the request's code once, form by form, and evaluate each with (:repl/eval-fn req)
   under seon.intr/run, in the request's \"ns\", else the agent's own. Answers each form,
@@ -162,10 +184,14 @@
                  (let [n (dec (:n (swap! agent/state update :n (fnil inc 0))))
                        out (java.io.StringWriter.)
                        err (java.io.StringWriter.)
+                       ;; what the eval prints is kept in these for its record and, when its start is recorded, also
+                       ;; streamed to the page as it is written (`streaming`)
+                       sout (streaming out (:eval-id req) "out" (get-in req [:stream/offsets "out"]))
+                       serr (streaming err (:eval-id req) "err" (get-in req [:stream/offsets "err"]))
                        ;; *1 *2 *3 *e as clojure.main/repl keeps them; clojure.test reports to
                        ;; *test-out*, bound to the form's output as nREPL does
                        {v1 :v1 v2 :v2 v3 :v3 e1 :e} (:repl-vars @agent/state)
-                       [tag v ns'] (try (binding [*ns* ns *out* out *err* err clojure.test/*test-out* out *1 v1 *2 v2 *3 v3 *e e1
+                       [tag v ns'] (try (binding [*ns* ns *out* sout *err* serr clojure.test/*test-out* sout *1 v1 *2 v2 *3 v3 *e e1
                                                          ;; the REPL's names in every namespace (seon.agent/repl-name), but for a
                                                          ;; definition of the program, which resolves as written
                                                          jolt.host/*resolve-unresolved* (when-not (defines-program? form ns) agent/repl-name)]
@@ -648,6 +674,15 @@
   (let [drawn (when (:seon.render/schema (meta v)) (some-> (render/model v) :value (contract/plainly (cfg/value :seon.config.store/max-value-chars))))]
     (if (some? drawn) drawn (first (kept v)))))
 
+(defn- asked
+  "What the request itself adds to its eval's entity: the eid its record takes (:issued), the intent and the provider's call id."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [req]
+  (cond-> {}
+    (:issued req) (assoc :db/id (:issued req))
+    (:intent req) (assoc :seon.eval/intent (:intent req))
+    (:call-id req) (assoc :seon.eval/call-id (:call-id req))))
+
 (defn record-details
   "What an eval records, each its own attribute of its entity (:seon.eval/code, :response, :schema, :basis, :intent,
 :call-id, :fns; each only when present): the code; the response whole with its
@@ -684,34 +719,65 @@
       schema (assoc :seon.eval/schema schema)
       basis (assoc :seon.eval/basis basis)
       (:seon.render/page (meta v)) (assoc :seon.eval/page (:seon.render/page (meta v)))
-      (:issued req) (assoc :db/id (:issued req))
-      (:intent req) (assoc :seon.eval/intent (:intent req))
-      (:call-id req) (assoc :seon.eval/call-id (:call-id req))
+      true (merge (asked req))
       (seq (:fns r)) (assoc :seon.eval/fns (:fns r)))))
 
+(defn- recorded?
+  "Is the eval of req recorded on this agent's branch: an agent's own request, not one within another eval's?"
+  {:malli/schema [:=> [:cat :map] :boolean]}
+  [req] (boolean (and contract/record? (= :agent (:mode @agent/state)) (not (:within req)))))
+
+(defn- write-record!
+  "Write eval id's entity, details (`record-details`, or `start!`'s part of it) with the defs its forms recorded, on this branch through
+  the agent's write path, under the turn in force (its model call, :seon.eval/call: seon.agent/turn-now, seon.task/call-ref).
+  Answers nil, or the :seon.agent/unrecorded error when the branch refused it. The write is the edge: a branch that refuses it
+  answers the eval :unrecorded with the writer's message, so the turn that asked goes on (a refused write thrown from here ended
+  the whole turn: its reply and evals lost, the turn run again)."
+  {:malli/schema [:=> [:cat :string :map :map [:vector :any]] [:maybe :seon.error/base]]}
+  [id details req defs]
+  (try (agent/transact! (into defs (record-tx {:seon.agent/key (:key @agent/state) :seon.agent/id (:id @agent/state)} id (by req)
+                                              (let [working? (some? (:turn @agent/state))]
+                                                (cond-> details
+                                                  ;; the turn loop's own eval (the agent working a task, no model call, made by the agent) and a context read are no conversation record: they name no call
+                                                  (not (or (= :context (:origin req)) (:id req) (and working? (not (:call-id req)) (not (#{:ui :outside :insert} (:origin req))))))
+                                                  (assoc :seon.eval/call (task/call-ref (:key @agent/state) (agent/turn-now))))))))
+       nil
+       (catch Throwable e
+         (contract/error :seon.agent/unrecorded #'write-record!(str "the branch refused this eval's record: " (ex-message e)) {}))))
+
 (defn- record!
-  "Record response r of code, eval fact rec (`record-details`), on this branch through the agent's write path (an agent's
-  only), under the turn in force (its model call, :seon.eval/call: seon.agent/turn-now, seon.task/call-ref), with the defs its forms recorded.
-  Answers r, with the id of its record (:record) when recorded."
+  "Record response r of code, eval fact rec (`record-details`), on this branch (`write-record!`, an agent's only), with the defs
+  its forms recorded. Answers r, with the id of its record (:record) when recorded."
   {:malli/schema [:=> [:cat :map :map :string :map] :map]}
   [r rec code req]
   (let [defs (into [] (mapcat val) (:defs @agent/state))
         id (:seon.eval/id rec)]
     (swap! agent/state dissoc :defs)
     ;; an eval within another (seon.repl/edit!'s) is that eval's: its definitions are program, its record the outer one
-    (if (and contract/record? (= :agent (:mode @agent/state)) (not (:within req)))
-      ;; the write is the edge: a branch that refuses it answers the eval :unrecorded with the writer's message, so the
-      ;; turn that asked goes on (a refused write thrown from here ended the whole turn: its reply and evals lost, the turn run again)
-      (try (agent/transact! (into defs (record-tx {:seon.agent/key (:key @agent/state) :seon.agent/id (:id @agent/state)} id (by req)
-                                                  (let [working? (some? (:turn @agent/state))]
-                                                    (cond-> rec
-                                                      ;; the turn loop's own eval (the agent working a task, no model call, made by the agent) and a context read are no conversation record: they name no call
-                                                      (not (or (= :context (:origin req)) (:id req) (and working? (not (:call-id req)) (not (#{:ui :outside :insert} (:origin req))))))
-                                                      (assoc :seon.eval/call (task/call-ref (:key @agent/state) (agent/turn-now))))))))
-           (assoc r :record id)
-           (catch Throwable e
-             (assoc r :unrecorded (contract/error :seon.agent/unrecorded #'record! (str "the branch refused this eval's record: " (ex-message e)) {}))))
+    (if (recorded? req)
+      (if-let [e (write-record! id rec req defs)] (assoc r :unrecorded e) (assoc r :record id))
       r)))
+
+(defn- started
+  "Req, and when its eval is recorded, its start first: the eval's entity (id, code, intent, its call, who) written and committed
+  before the form runs, so its id is a fact the page draws a container for while the eval runs, and req carries
+  :stream/offsets, the characters sent so far of each of its output streams (`streaming`). The record at its end is the same
+  entity (an upsert by :seon.eval/id). A refused start is the final record's to report. See docs/render.md#in-flight-output-streams."
+  {:malli/schema [:=> [:cat :string :map] :map]}
+  [code req]
+  (if (recorded? req)
+    (do (write-record! (:eval-id req) (into {:seon.eval/code code} (asked req)) req [])
+        (agent/commit!)
+        (assoc req :stream/offsets {"out" (volatile! 0) "err" (volatile! 0)}))
+    req))
+
+(defn- ended
+  "The end of each output stream req's eval opened, sent to root: \"out\" always (its container was drawn at the start), \"err\"
+  when anything was written to it. One {:op :stream ... :end true} a stream. See docs/render.md#in-flight-output-streams."
+  {:malli/schema [:=> [:cat :map] :nil]}
+  [req]
+  (doseq [[part at] (:stream/offsets req) :when (or (= "out" part) (pos? @at))]
+    (agent/send! {:op :stream :stream (str (:eval-id req) "/" part) :in (:eval-id req) :part part :agent (:key @agent/state) :end true})))
 
 (defn- text-of
   "The text of eval fact rec as every reader reads it: the one function the model's message prints with
@@ -748,8 +814,9 @@
          ;; the writes its forms make and its record name it (seon.agent/transact!'s tx-meta); an
          ;; eval inside it (a context read's) names its own, then this one's again
          outer (:eval @agent/state)
-         before @agent/state]
-     (swap! agent/state assoc :eval id)
+         before @agent/state
+         _ (swap! agent/state assoc :eval id)
+         req (started code req)]
      (try (let [;; with the namespace the REPL is in after it (:ns, as every nREPL response carries): the prompt
                 ;; an eval makes data: its value made plain here, inside the boundary, so a value that throws as it is
                 ;; realized is the error; text only for a reader who is not a model (whose message is printed at its request)
@@ -776,7 +843,8 @@
                                code req)
                   m (when (= :agent (:mode @agent/state)) (agent/main-difference))]
               (cond-> res m (assoc :main m))))
-          (finally (swap! agent/state assoc :eval outer))))))
+          ;; every way it ends: its value, its error, an interrupt
+          (finally (ended req) (swap! agent/state assoc :eval outer))))))
 
 (defn- numbered
   "Lines from to (1-based, inclusive, clamped to text) of text, as [line text] each: a refused edit's error names its candidates by them (docs/agent.md#changing-a-definition)."
