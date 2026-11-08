@@ -9,7 +9,7 @@
             [seon.reconcile :as r] [my.root]
             [seon.template :as tpl] [seon.problems :as problems] [seon.merge :as pm] [seon.sock :as sock] [clojure.edn] [seon.contract :as contract]
             [clojure.string :as str] [clojure.set] [seon.config :as cfg] [seon.edn :as sedn]
-            [seon.program :as program] [seon.writer :as writer] [clojure.java.shell :as sh] [seon.turn :as turn] [clojure.core.async :as a] [seon.cost :as cost]))
+            [seon.program :as program] [seon.writer :as writer] [seon.source :as source] [clojure.java.shell :as sh] [seon.turn :as turn] [clojure.core.async :as a] [seon.cost :as cost]))
 
 (defn- empty-db [] (ts/test-db))
 
@@ -326,6 +326,47 @@
            (is (= [{:reason :contract-gap :symbol 'app.gaps/u}] (:reasons judged)) "root's judge: g is main's gap, fixed on main")
            (is (= :seon.merge/behind (:seon.error/type gate)) "the gate: behind first, its gaps judged once main merges in"))
          (finally (d/release bc)))))))
+
+;; docs/merging.md#a-merge-leaves-no-name-unbound: a merge is judged against what it merges into, so a removed definition another form
+;; still calls is seen whichever side the call is on: (1) an octopus merge's members, one removing f and one calling it, each pass
+;; alone (disjoint keys) and must not merge together; (2) one branch removing f that main's unchanged g calls must not merge at all.
+;; Read from the forms' recorded references (seon.merge/dangling): Jolt compiles x/f with no var as a lookup at each call, so a load would not see it
+(deftest a-merge-leaves-no-name-unbound
+  (ts/test-branch!
+   (fn [cfg conn]
+     (let [x "src/app/oct/x.clj" y "src/app/oct/y.clj"
+           s "{:malli/schema [:=> [:cat] :int]}"
+           x-with-f (str "(ns app.oct.x)\n(defn f " s " [] 1)\n(defn h " s " [] 2)\n")
+           x-without-f (str "(ns app.oct.x)\n(defn h " s " [] 2)\n")
+           y-calls-f (str "(ns app.oct.y (:require [app.oct.x :as x]))\n(defn g " s " [] (x/f))\n")
+           on (fn [c files] (d/transact c (source/refresh-tx @c files)))
+           branch (fn [nm] (let [b (pdb/on-main (:branch cfg) nm)] (d/branch! conn (:branch cfg) b) [b (d/connect (assoc cfg :branch b))]))
+           writer (fn [] (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer (a/chan 4) :events (a/chan 4)}))
+           ask (fn [w req] (:r (first (:to-api (second (#'writer/writer-proc w :in (assoc req :dest {:rid 1})))))))
+           conns (atom [])]
+       (try
+         (on conn {x x-with-f})
+         (let [[a ac] (branch :oct-a) [b bc] (branch :oct-b)]
+           (swap! conns into [ac bc])
+           (on ac {x x-without-f})
+           (on bc {y y-calls-f})
+           (let [[ra rb] (:results (ask (writer) {:op :octopus-merge :branches [a b]}))]
+             (is (:merged? ra) (pr-str ra))
+             (is (= :seon.merge/behind (:seon.error/type rb)) (pr-str rb))
+             (is (re-find #"app.oct.y/.* calls app.oct.x/f, which the merge removes" (str (:seon.error/message rb))) "the second is behind, told why")
+             (is (nil? (d/entity @conn [:var/name 'app.oct.y/g])) "and main never held the call")))
+         ;; main has f again, and g calling it; a branch removes f
+         (on conn {x x-with-f y y-calls-f})
+         (let [[c cc] (branch :oct-c)]
+           (swap! conns conj cc)
+           (on cc {x x-without-f})
+           (let [w (writer)
+                 gate (ask w {:op :merge-candidate :branch c})
+                 [rc] (:results (ask w {:op :octopus-merge :branches [c]}))]
+             (is (= :seon.merge/dangling (:seon.error/type gate)) (pr-str gate))
+             (is (= :seon.merge/dangling (:seon.error/type rc)) (pr-str rc))
+             (is (= ['app.oct.x/f] (mapv :ref (:dangling rc))) "naming what main's g still calls")))
+         (finally (run! d/release @conns)))))))
 
 (deftest an-agent-without-an-end-reads-nil
   ;; no end written (a silent death) is nothing to read, not an empty end; an end of an earlier wake is none of this one's

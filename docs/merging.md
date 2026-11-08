@@ -108,6 +108,12 @@ A db's program is a map from keys (``[:form id]``, ``[:var sym]``, ``[:schema k]
 
 Main took 301 first-parent merges from 2026-10-20 to 2026-10-27, all by git (worktree merges and `bin/prove --merge`); Seon's own merge (octopus merge, write-back) made 14, all only on `jolt/seon-merges`. The one-merge design is task `seon.merge/one-merge-system`.
 
+## A merge leaves no name unbound
+
+A merge into main is judged against what it merges into: main, with the members of the same octopus merge taken before it (```seon.writer/judged-members```), and a merge that would leave a live form calling a definition it removes is refused, read from the forms' recorded references (```seon.merge/dangling```: the diff of main and the merged value, then one `:form/refs` seek a removed var). Each member alone is judged against main, so two members with disjoint keys, one removing `f` and one calling it, each passed and merged in one commit; now the second is behind and told why, and merges main first. One branch removing `f` that main's unchanged `g` calls is refused as `:seon.merge/dangling`, by the octopus merge and by the gate's candidate alike (``seon.reconcile-test/a-merge-leaves-no-name-unbound``).
+
+It reads facts, never loads code: Jolt compiles a name under an alias with no var (`x/f`) as a lookup at each call, so a process loading the merged program from main's raises nothing for it (tried, 2026-11-08); an unqualified one fails at load. Not covered: a removed namespace another form still requires (`:form/requires` has no index to seek), and a changed macro's callers. The analysis of the candidate's files still runs in root's own image (```seon.writer/unanalyzable```); moving it out is task ``seon.writer/a-merged-tree-is-analyzed-in-a-fork``.
+
 ## Root repairs a failed merge from its REPL
 
 Root's REPL (`seon_eval` as root, or `printf '{:op :eval :agent "root" :code "..."}\n' | nc -w 30 127.0.0.1 PORT`, newlines in the code escaped as `\n`, one request per line) repairs the four failures with the tools that exist; staged and repaired once on a worktree root (2026-10-27, the staging recipe and each reply in git history).

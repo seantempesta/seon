@@ -530,3 +530,15 @@
   (vec (for [e (entry-eids db)
              :when (= k (:seon.merge/key (d/entity db e)))]
          [:db/add e :seon.merge/resolved? true])))
+
+(defn dangling
+  "The references db-to's program leaves naming nothing: each live form of db-to whose recorded references (:form/refs, the
+  compiler's) name a var db-from defines and db-to does not, as {:ref :form}, sorted. What a merge that removes a definition
+  another form still calls would leave on main; read from the facts, never by loading. Costs the diff (seon.program/diff-plan)
+  and one seek a removed var. See docs/merging.md#a-merge-leaves-no-name-unbound."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:vector [:map [:ref :qualified-symbol] [:form :string]]]]}
+  [db-from db-to]
+  (vec (sort-by (juxt (comp str :ref) :form)
+                (for [[kind v] (:remove (program/diff-plan db-from db-to)) :when (= :var kind)
+                      dt (d/datoms db-to :avet :form/refs v) :when (program/live? db-to (:e dt))]
+                  {:ref v :form (:form/id (d/entity db-to (:e dt)))}))))
