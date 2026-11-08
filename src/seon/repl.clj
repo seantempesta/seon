@@ -1061,9 +1061,10 @@
 (defn run-calls
   "Eval calls ({:id :intent :code}, a reply's or an insert's: docs/turn.md#an-eval-can-be-inserted) through the one REPL
   path in order, each answered as its own result: {:id :code :intent :not-run :response}. req-of is a call's id to its
-  request (its origin, and its call id when a model made it); eval! runs code under a request and answers its response. A call with no
-  intent or no form, or after one that threw or answered an error (a refused edit), is not run: `unrun` records
-  its one result, which says why, so none builds on a change that never happened and every call has its result."
+  request (its origin, and its call id when a model made it); eval! runs code under a request and answers its response. Every call
+  runs, whatever came before it (owner, 2026-11-08: "Turns are precious and one fuckup shouldn't punish the other evals"); its result is
+  in order after the one before, so a call that failed is read there. A call with no intent or no form is not run: `unrun` records its
+  one result, which says why, so every call has its result. See docs/decisions.md#every-eval-of-a-reply-runs-owner-2026-11-08."
   {:malli/schema [:=> [:cat [:sequential :map] ifn? ifn?] [:vector :map]]}
   [calls req-of eval!]
   (reduce (fn [acc {:keys [id code intent problem]}]
@@ -1073,21 +1074,18 @@
                   req (cond-> (req-of id)
                         (not (clojure.string/blank? intent)) (assoc :intent intent)
                         (seq repairs) (assoc :repaired (context/repaired src repairs)))
-                  failed (some #(when (or (:ex (:response %)) (contract/error? (:value (:response %)))) (let [a (:response %)] (if (:record a) (context/wire-id (:record a)) (name (:handle a))))) acc)
-                  why (if failed
-                        (contract/error :seon.turn/not-run #'run-calls (str "not run: eval " failed " of this reply failed before it (its result says why)") {:after failed})
-                        (if problem
-                          (contract/error :seon.turn/invalid-call #'run-calls problem {:problem :arguments})
-                          (call-problem intent src)))]
+                  why (if problem
+                        (contract/error :seon.turn/invalid-call #'run-calls problem {:problem :arguments})
+                        (call-problem intent src))]
               (conj acc (if why
-                          {:id id :code code :intent intent :not-run (some? failed)
+                          {:id id :code code :intent intent :not-run false
                            :response (let [r (unrun src req why)] (agent/commit!) r)}
                           {:id id :code code :intent intent :response (eval! src req)}))))
           [] calls))
 
 (defn insert!
   "Evals, pairs of intent and code, run now on this agent's REPL queue as calls of nobody's (`run-calls`), each recorded
-  as an eval like any other (origin :insert, :seon.eval/by who asked), under the turn in force; one that fails stops the rest.
+  as an eval like any other (origin :insert, :seon.eval/by who asked), under the turn in force; each runs, as a reply's calls do.
   Answers the responses. See docs/turn.md#an-eval-can-be-inserted."
   {:malli/schema [:=> [:cat :string [:sequential [:tuple :string :string]]] [:vector :map]]}
   [who evals]
