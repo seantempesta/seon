@@ -88,7 +88,7 @@ Deletes: the stored hiccup evals and seon.turn/show-page!'s insert; my.render/re
 Proofs, red first: a restart with nothing moved sends nothing new, the request after it the one before plus the new eval; removing a turn changes only the diff that spans it; a render changed between two turns re-renders the history with the new code; the request built this way equals today's on a history with no render change; a cold build's cost at 10, 100 and 1,000 turns (seon.cost/proof)."
   :seon.task/proofs #{}}
  {:seon.task/name "one-walk-per-view"
-  :seon.task/plan "Owner, 2026-11-08: \"do not split the rendering! … the agent is seeing what the user is seeing\"; \"I want this all done by defining render functions\"; \"Don't invent a new system\"; \"everyone can render their own views and we are reusing them even across processes\"; \"Resolve the problems don't just accept them right away … carry information to them as part of your pull and rendering\"; \"Render functions have access to the current db and can do any queries they need … inject any internal change data … optionally … Confirm that the wire function is also just a render function in the same chain\"; \"optimization … with estimates that if we exceed them we stop and fix them\"; \"account for efficient translation into datastar updates too\"; \"We shouldn't be saving rendered data if we can re-render it from a specific point in time.\"
+  :seon.task/plan "Owner, 2026-11-08: \"do not split the rendering! … the agent is seeing what the user is seeing\"; \"I want this all done by defining render functions\"; \"Don't invent a new system\"; \"everyone can render their own views and we are reusing them even across processes\"; \"Resolve the problems don't just accept them right away … carry information to them as part of your pull and rendering\"; \"Render functions have access to the current db and can do any queries they need … inject any internal change data … optionally … Confirm that the wire function is also just a render function in the same chain\"; \"optimization … with estimates that if we exceed them we stop and fix them\"; \"account for efficient translation into datastar updates too\"; \"We shouldn't be saving rendered data if we can re-render it from a specific point in time\"; \"The cache isn't to be relied upon to save us if we are doing shit inefficently. I can see caching datastar patches or however we are serving them as it's commonly better for browsers to have multiple tabs open with the same thing being shown and we know when something has changed so it's easy to update.\"
 
 What exists (independent audit, 2026-11-08; docs/render.md):
 - One walker (seon.render/walker, flush!), but up to five walks of one agent's tree.
@@ -138,6 +138,7 @@ The rules:
    - never a whole container for a change inside it.
 
    The patch is built from the walk's changed components (rule 4's c), so its bytes are those components' HTML. A tab behind its commit gets the patch for diff(its commit, current), and a tab with no view yet gets one whole page.
+   - The one cache the owner names: the patch for a view at a commit, built once and shared by every tab showing that view, keyed by (view, commit) and dropped when the walk says the view moved. seon.web already serializes a patch once and offers it to every tab; this keeps that, keyed by the commit. No other step relies on a cache: every stop line is met cold, with Optimization's minimum work as the target.
 10. **In-flight output is the owner's choice** (priced by Optimization). Committing each chunk is rejected: about 0.3 M ticks a chunk, and every chunk a moved datom in every later diff (100 chunks, 30 M ticks and 100 commits). Two options:
    - (a) the eval's start as one fact: the page shows \"running since…\", and the output is committed once when the eval ends. Pure db.
    - (b) the same, plus live chunks streamed to watchers on a Flow channel, never committed: live output, but the page shows what the db doesn't hold until the eval ends.
@@ -149,6 +150,7 @@ Cost proofs: the minimum each step should take, and a stop line at 2× it (Optim
   - Waste to remove: today's measured turn (flush plus read, 333-499 k, docs/render.md) is 3-5× this. Find which components rerun beyond the touched c. That is a task now, owned by Web (the walker).
 - **One new eval:** reruns its component and its turn list's append; the commit carries under 5 KB. STOP: e=100 > 2× e=10.
 - **The Datastar patch for one new eval:** one SSE event of one append, its bytes ≤ 1.2× that eval's HTML (expect about 1.05×). STOP: e=100 > 2× e=10, or any event carrying a whole container for a change inside it. seon.web/patch-event names the smallest changed element's id.
+- **Shared patches:** N tabs on one view cost one patch build plus N sends. STOP: a patch built more than once per (view, commit).
 - **The browser's morph** (idiomorph is O(nodes of its target)). STOP: patch-to-paint per eval > 16 ms at e=100 in the built-in browser, or > 2× e=10.
 - **The push against root's branch-walk!:** measured per eval commit on one real agent. STOP: the push ≥ 25% of branch-walk!, then keep branch-walk!.
 - **A cold advance by one turn** (a past point, a lagging tab, the changes input): the diff of two commits over the attributes the walk reads, at 1-2 k a moved datom with decoded nodes cached and candidates from the leaf merge (about 0.1 M), plus a live turn's work. Minimum about 0.2-0.3 M. STOP 0.6 M a turn and 2 k a moved datom (today 10.7 k: decode and candidate waste, Optimization's).
@@ -156,7 +158,7 @@ Cost proofs: the minimum each step should take, and a stop line at 2× it (Optim
 - **A tab k commits behind:** one diff over the read attributes between its point and the head (O(unshared nodes in the range)), never k diffs, then a live turn's work. Expect under 1 M at k=10 and under 5 M at k=100. STOP 2× that.
 - **A restart** (rebuild the next request):
   - Draw point T cold once. The request is printed anyway, so this is the floor, growing with the conversation at about 0.1 M a turn's component.
-  - Run one diff from point 1 to point T over the attributes the turn components read. It tells which earlier turns' content changed after they were sent; 40 of 42 of Context's per-turn diffs were empty.
+  - Read the history datoms (d/history) on the attributes the turn components read, with tx in (t1, tT], and map each by its tx to the turn whose basis covers it. Same O(datoms moved) as a diff, and exact. A net diff from 1 to T would miss a value changed at one turn and changed back at a later one, which the model was shown both times. 40 of 42 of Context's per-turn diffs were empty, so few turns are touched.
   - Draw only those turns at their own points (about 0.15 M each).
   - Expect 12-15 M at T=100 and 120-150 M at T=1,000. STOP: above 2× one cold draw at point T, or any turn advanced whose read datoms didn't move.
   - Advancing one walk through every turn (about 54 M at T=100 today, 34 M after fixes) is the waste this avoids. No stored copy, ever (rule 8).
@@ -168,6 +170,7 @@ Cost proofs: the minimum each step should take, and a stop line at 2× it (Optim
 - Plus correctness proofs, red first:
   - a dropped push still shows the branch's commit;
   - a restart with nothing moved sends the model nothing;
+  - a value changed at one turn and changed back at a later one, then a restart, gives the same request bytes as the turns sent;
   - compaction changes only the diff spanning a removed turn;
   - a user's page holding an agent's view draws that agent's components once;
   - a branch that changed a render is drawn with its renders.
@@ -197,4 +200,6 @@ Retires seon.render/a-users-walk-is-a-branch-walk (a user's kept walk beside bra
                       seon.render-cost-test/a-cold-derive-costs-what-it-diffs
                       seon.render-test/a-helpers-change-re-renders-only-the-turns-it-reaches
                       seon.render-cost-test/the-openai-render-assembles-what-changed
-                      seon.render-test/a-users-page-draws-an-agents-view-once}}]
+                      seon.render-test/a-users-page-draws-an-agents-view-once
+                      seon.render-test/a-restart-sends-the-bytes-the-turns-sent
+                      seon.render-cost-test/a-patch-is-built-once-per-view-and-commit}}]
