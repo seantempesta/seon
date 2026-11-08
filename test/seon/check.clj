@@ -263,6 +263,7 @@
     [seon.db-test/a-commit-costs-what-it-writes seon.profile/ms-since] "printed ms per turn; the verdict is on bytes"
     [seon.model-test/a-streamed-reply-ends-when-the-server-ends-it Thread/sleep] "the stream's pacing is the subject: a deadline can only turn it red (FINDINGS #13)"
     [seon.model-test/a-streamed-reply-ends-when-the-server-ends-it clojure.core/rand-int] "a port: a collision can only turn it red (FINDINGS #14)"
+    [seon.model-test/a-call-that-names-itself-is-answered-as-a-stream-over-the-socket clojure.core/rand-int] "a port: a collision can only turn it red (FINDINGS #14)"
     [seon.problems-test/an-agent-death-is-recorded-with-its-cause seon.profile/now-ns] "a fresh directory's name"
     [seon.procs-test/notice seon.profile/now-ns] "a message's :ns stamp, data the verdict does not read (the one helper the procs and reconcile tests build their notices with)"
     [seon.step-test/timer-threads clojure.core.async/timeout] "the timers' threads are the subject; the verdict counts threads, never time"

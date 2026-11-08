@@ -164,7 +164,7 @@ Measured 2026-10-29 on this checkout, an idle-ish machine (load 5-7; at load 13 
 | wiki loaded onto main (`wiki-tx`, in the boot fact's commit) | 1,250-2,400 | 1,420-2,200 M |
 | source import: read the tree, digest equal or not | 650 | 0.5 M |
 | source import: analyse and write 3,900 forms (a main with no program) | 5,600-12,600 | 5,900-6,000 M |
-| fork server: main's test namespaces compiled (`program/load-all!`, as root's boot ends, ```seon.fork-server/preload```; a fork that comes in the meantime waits behind it) | | |
+| fork server: main's test namespaces compiled (`program/load-all!`, at the boot server's start, ```seon.fork-server/main```, while root writes its boot fact and imports; what the import changes loads as changes; a fork that comes in the meantime waits behind it) | | |
 
 The import and the wiki are the two phases that grow with the program, and a main made from `:db` repeated both for every root. `seon.root/seed-program!` (`bin/root seed STORE`, which `bin/test` runs once after it builds the binary, on the process store its plan made, `seon.test-store/process-store`) brings `:db` up to the tree: the wiki, the program and the `:seon.root/source` fact with the tree's digest, the wiki loaded again until it states nothing more (once the program exists its citations resolve to it, and a root's second boot reached that by itself). A root whose main is a branch of that `:db` finds the digest equal and imports nothing. The seed costs 22 s a tree (the whole tree is analysed; an edit to one file is not yet incremental: 9.6 s) and saves 7.3 s a first boot, so it pays from the fourth root a run boots; a test with a store of its own (`seon.root-test/root-answers` and the restart tests) does not take it. With the wiki baseline on (a standing root's, `SEON_WIKI_BASELINE` unset) a store's second boot also spent 41 s and 8.6 GB in `seon.fx/wiki-history` (`git blame` of every page, `git show` of every old file the sections cite, parsed by `seon.source/defining-ids`), once per store; the seed pays it once in the process store when it is on.
 
@@ -176,7 +176,6 @@ The tests whose subject is a restart or a resume keep a store of their own, and 
 
 | test | before | after | what moved |
 |---|---|---|---|
-| `seon.source-test/a-restart-catches-up-and-a-new-generation-resumes` | 197 s solo (236 median) | 123 s | its first loop merge's gate ran 48 tests for 1 deferred one (`seon.program-test/a-test-that-starts-a-process-reaches-the-program-it-runs`; the test itself is left out): ~85 s (worktree 9, plan 9, binary build 30, seed 22, shards 42), now the one test named (`seon.fx/test-command`, [merging](merging.md#a-merge-runs-what-the-change-reaches)); its own store is a clone of the process store (-8 s, one first boot that imports nothing) |
 | `seon.source-test/main-s-program-follows-the-checkout-while-root-runs-and-across-a-restart` | 72 s | 39 s | its store is a clone of the process store: the first boot imports nothing |
 | `seon.root-test/every-end-of-a-root-is-a-fact` | 84 s | 48 s (shard) | the same |
 | `seon.root-test/a-second-boot-resumes-the-same-main` | 80 s | not changed | a clone gave 67 s `:ms` against 81-94 s, inside the noise, so it keeps its empty store: its attach forks an agent, which waits behind the fork server's compile of the program the clone now holds |

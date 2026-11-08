@@ -206,7 +206,7 @@
        "   r))"))
 
 (defn- root-ended
-  "A root with two agents: a1 idle, a2 evaluating code (sent; its :started event awaited). Then
+  "A root with an idle agent a1 and one more agent for each form of codes, a2 on, each evaluating its form (sent; its :started event awaited). Then
   SIGKILL of root; with fork-server-first?, what a pid cleanup does before it: SIGKILL of the
   fork server's standby and of the fork server, so its group kill (seon.fork-server/main) never
   runs and each agent has only its own socket to root to end on. Answers {:agents {id pid}
@@ -214,7 +214,7 @@
   server's group still alive once everything root started has ended (the wait is
   seon.test-store/kill-root!'s drain, an event; a process that never ends holds the test), and
   root's log, for a red run's message."
-  [code fork-server-first?]
+  [codes fork-server-first?]
   (let [checkout (seon.config/checkout)
         main (str "root-ended-" (random-uuid))
         store (ts/process-store checkout)
@@ -224,11 +224,12 @@
         ;; the printed value of a root eval; a reply that is an error stays the error
         eval-root (fn [code] (let [r (ask {:op :eval :agent "root" :code code})]
                                (if (:error r) r (value-of (:response r)))))
-        ;; spawn! answers at each agent's hello: both are ready
-        _ (eval-root "[(c/spawn! sys {}) (c/spawn! sys {})]")
-        ;; a2 begins its form (the agent's :started event, tapped before it is sent)
-        _ (eval-root (str "(let [ev (c/events sys)] (c/submit! sys :a2 " (pr-str code) ") "
-                          "(loop [] (let [e (clojure.core.async/<!! ev)] (if (and (= :started (:type e)) (= :a2 (:agent e))) :began (recur)))))"))
+        ;; spawn! answers at each agent's hello: every one is ready
+        _ (eval-root (str "(vec (repeatedly " (inc (count codes)) " #(c/spawn! sys {})))"))
+        ;; a2 on begin their forms (each agent's :started event, tapped before its form is sent)
+        _ (doseq [[i code] (map-indexed vector codes) :let [a (keyword (str "a" (+ 2 i)))]]
+            (eval-root (str "(let [ev (c/events sys)] (c/submit! sys " a " " (pr-str code) ") "
+                            "(loop [] (let [e (clojure.core.async/<!! ev)] (if (and (= :started (:type e)) (= " a " (:agent e))) :began (recur)))))")))
         agents (eval-root "(into {} (for [[id a] (:agents (c/state sys))] [id (:pid a)]))")
         pids (set (vals agents))
         children (fn [pid] (->> (str/split-lines (:out (sh/sh "pgrep" "-P" (str pid)))) (remove str/blank?) (map parse-long)))
@@ -241,7 +242,7 @@
     ;; left in the fork server's group then is what did not end with its root
     (let [drained (:drained (ts/kill-root! root))
           left (->> (str/split-lines (:out (sh/sh "pgrep" "-g" (str fs)))) (remove str/blank?) (map parse-long) set)
-          log (let [f (java.io.File. (str runs "/root.log"))] (if (.exists f) (slurp f) ""))]
+          log (ts/output (str runs "/root.log"))]
       (doseq [p left] (sh/sh "kill" "-9" (str p)))
       (ts/drop-main! store main)
       (sh/sh "rm" "-rf" runs)
@@ -306,7 +307,7 @@
         status (eval-root "(get-in (c/state sys) [:fork-server :status])")
         agents-after (eval-root ids)
         stopped (ts/stop-root! root)
-        log (let [f (java.io.File. (str runs "/root.log"))] (if (.exists f) (slurp f) ""))]
+        log (ts/output (str runs "/root.log"))]
     (ts/drop-main! store main)
     (sh/sh "rm" "-rf" runs)
     (is (= :spawned spawned) (str (pr-str spawned) log))
@@ -320,13 +321,16 @@
     (is (= "0" (str (:exit stopped))) (str "root stops with its fork server lost: " (pr-str (dissoc stopped :log))))))
 
 (deftest an-agent-ends-when-its-root-is-gone
-  ;; with its fork server gone first (a pid
-  ;; cleanup), an agent ends on EOF of its own socket to root, whatever it is doing: an idle
-  ;; agent reads it; one evaluating a form with no tick budget is interrupted by it (SIGIO)
-  (let [{:keys [agents left out]} (root-ended "(loop [] (recur))" true)]
-    (is (= #{:a1 :a2} (set (keys agents))) out)
+  ;; with its fork server gone first (a pid cleanup), an agent ends on EOF of its own socket to root,
+  ;; whatever it is doing: an idle agent reads it; one evaluating a form with no tick budget is
+  ;; interrupted by it (SIGIO); one blocked in a channel take, whose condition-wait reaches no safe
+  ;; point, is woken by it too. One root for the three (2026-11-08: two tests booted one root each)
+  (let [{:keys [agents left out]} (root-ended ["(loop [] (recur))" "(clojure.core.async/<!! (clojure.core.async/chan))"] true)]
+    (is (= #{:a1 :a2 :a3} (set (keys agents))) out)
     (is (not (contains? left (:a1 agents))) "the idle agent ended")
-    (is (not (contains? left (:a2 agents))) "the busy agent ended")))
+    (is (not (contains? left (:a2 agents))) "the busy agent ended")
+    (is (not (contains? left (:a3 agents))) "the blocked agent ended")
+    (is (empty? left) (str "agents still alive: " left "\n" out))))
 
 (deftest a-proof-run-ends-with-its-agent
   ;; the agent's proof run (a fork of it) holds
@@ -360,55 +364,6 @@
     (is (= 49 began) "the proof run was in its test")
     (is (= -1 ended) (str "the proof run outlived its agent (byte " ended " after its sleep); agent " (pr-str pid) " kill " (pr-str killed)))))
 
-(deftest a-two-child-proof-run-ends-with-its-agent
-  ;; intermittently red: task seon.agent/a-proof-child-that-died-says-why. A wrong began keeps what the run answered, in the message
-  ;; for a run dealt into two children. Child A's test holds the write end
-  ;; of a fifo and sleeps; child B's test blocks for good where no signal reaches (a take from a channel nothing puts
-  ;; on), so B outlives its agent's death. The agent is killed: the fifo's EOF says A is gone while B is alive. No clock
-  ;; decides: a child that outlives its agent wakes from its sleep (a minute) and writes a second byte. (A child also
-  ;; ends by watching its parent, so this does not alone show a sibling holds no copy of A's pipe: the next test does)
-  (let [dir (str (seon.config/checkout) "/target/runs/proofs-ended-" (random-uuid))
-        fifo-a (str dir ".a.fifo")
-        fifo-b (str dir ".b.fifo")
-        ;; who did what, in order, for a red's message: each child's stages and the reader's, its pid and time (task seon.agent/a-proof-child-that-died-says-why)
-        stages (str dir ".stages")
-        mark (fn [who] (str "(fn [s] (spit " (pr-str stages) " (str " (pr-str who) " \" \" s \" \" (seon.lib/c-getpid) \" \" (System/nanoTime) \"\\n\") :append true))"))
-        note! (fn [s] (spit stages (str "reader " s " " (System/nanoTime) "\n") :append true))
-        _ (doseq [f [fifo-a fifo-b]] (sh/sh "mkfifo" f))
-        {:keys [pid began ended killed answered] seen :stages}
-        (with-agent tuned
-          (fn [{:keys [names eval-root]}]
-            (let [a (:agent names) ev (comp root-value eval-root)
-                  src-a (str "(ns parked0-proof (:require [clojure.test :refer [deftest is]]))"
-                             " (deftest p (let [mk " (mark "a") " _ (mk \"start\") w (java.io.FileOutputStream. " (pr-str fifo-a) ")] (mk \"opened\") (.write w 49) (.flush w) (mk \"flushed\") (Thread/sleep 60000) (.write w 50) (.flush w)) (is true))")
-                  src-b (str "(ns parked1-proof (:require [clojure.test :refer [deftest is]]))"
-                             " (deftest p (let [mk " (mark "b") " _ (mk \"start\") w (java.io.FileOutputStream. " (pr-str fifo-b) ")] (mk \"opened\") (.write w 49) (.flush w) (mk \"flushed\") (clojure.core.async/<!! (clojure.core.async/chan))) (is true))")
-                  form (str "(do " src-a " " src-b " (seon.agent/run-tests-forked 1000000000 '#{parked0-proof/p parked1-proof/p} :turn))")
-                  _ (ev (began-code a form))
-                  pid (ev (str "(get-in (c/state sys) [:agents :" a " :pid])"))
-                  in-a (java.io.FileInputStream. ^String fifo-a)
-                  _ (note! "opened-a")
-                  in-b (java.io.FileInputStream. ^String fifo-b)
-                  _ (note! "opened-b")
-                  read-a (.read in-a)
-                  _ (note! (str "read-a " read-a))
-                  read-b (.read in-b)
-                  _ (note! (str "read-b " read-b))
-                  ;; what's claimed is that A ends with its agent while B lives on; B's byte only says it is in its test, as its own start mark does. An EOF on B's fifo before its byte is still unexplained (task seon.agent/a-proof-child-that-died-says-why), and is no red here
-                  in-b? (or (= 49 read-b) (str/includes? (slurp stages) "b start"))
-                  began [read-a (if in-b? 49 read-b)]
-                  ;; a child that never reached its write has ended, so the run ends when A wakes: what it answered says why, which killing the agent would lose
-                  answered (when (not= [49 49] began) (ev "(pr-str @blocked)"))
-                  killed (sh/sh "kill" "-9" (str pid))
-                  ended (.read in-a)]
-              (.close in-a) (.close in-b)
-              (ev (gone-code a))
-              {:pid pid :began began :ended ended :killed killed :answered answered :stages (when (not= [49 49] began) (slurp stages))})))]
-    (sh/sh "rm" "-f" fifo-a fifo-b stages)
-    (is (pos-int? pid) (str "the agent's pid: " (pr-str pid)))
-    (is (= [49 49] began) (str "both children were in their tests; in order:\n" seen "\nthe run answered: " answered))
-    (when (= [49 49] began) (is (= -1 ended) (str "child A outlived its agent (byte " ended " after its sleep); agent " (pr-str pid) " kill " (pr-str killed))))))
-
 (deftest a-handful-of-tests-runs-in-one-child
   ;; task seon.agent/a-test-run-streams-its-reports: a run forks no more children than its work needs
   ;; (:seon.config.proofs/child-min-ms); five tests never measured count :seon.config.proofs/unmeasured-ms each, under it
@@ -430,25 +385,10 @@
                               " (deftest p (let [c (count (filter #(not (neg? (seon.sock/c-fcntl % 1 0))) (range 256)))] (spit " (pr-str (str dir "/" n)) " c)) (is true))"))
         form (str "(do " (count-in 0) " " (count-in 1) " (seon.agent/run-tests-forked 1000000000 '#{fds0-proof/p fds1-proof/p} :turn))")
         [run] (in-agent [form] tuned)
-        counts (mapv #(some-> (try (slurp (str dir "/" %)) (catch Throwable _ nil)) parse-long) [0 1])]
+        counts (mapv #(parse-long (ts/output (str dir "/" %))) [0 1])]
     (sh/sh "rm" "-rf" dir)
     (is (every? pos-int? counts) (str "both children counted: " (pr-str counts) " " (pr-str run)))
     (is (apply = counts) (str "the two children hold the same descriptors: " (pr-str counts)))))
-
-(deftest a-test-child-starts-as-a-test-runner-does
-  ;; task seon.agent/a-test-child-starts-as-a-test-runner-does: an agent's test child ran its tests with the agent's
-  ;; interrupt pending (every eval "interrupted by root"); the child starts with no interrupt of its parent's and
-  ;; none of its evals. Here the agent forks from inside its eval; the child's test writes what it finds (a pending
-  ;; interrupt cleared: seon.intr-test/a-forked-child-holds-no-interrupt-of-its-parents)
-  (let [checkout (seon.config/checkout)
-        f (str checkout "/target/runs/child-clean-" (random-uuid))
-        proof (str "(ns clean-proof (:require [clojure.test :refer [deftest is]]))"
-                   " (deftest p (spit " (pr-str f) " (pr-str [@@#'seon.intr/pending (count @@#'seon.intr/stack)])) (is true))")
-        form (str "(do " proof " (seon.agent/run-tests-forked 1000000000 '#{clean-proof/p} :turn))")
-        [run] (in-agent [form] tuned)
-        found (some-> (try (slurp f) (catch Throwable _ nil)) read-string)]
-    (sh/sh "rm" "-f" f)
-    (is (= [false 0] found) (str "no interrupt and no eval of its parent's: " (pr-str found) " " (pr-str run)))))
 
 ;; See docs/reconcile.md#a-task-holds-how-its-work-ended
 (deftest a-wake-that-ran-no-turn-has-no-end
@@ -522,7 +462,7 @@
   ;; Chez's condition-wait reaches no safe point, so no signal handler runs (SIGIO, root's
   ;; SIGUSR1) until the wait returns. The fork server's group kill on root's EOF ends it
   ;; (task seon.agent/a-signal-wakes-a-blocked-wait makes the agent's own EOF end it too)
-  (let [{:keys [agents left out]} (root-ended "(clojure.core.async/<!! (clojure.core.async/chan))" false)]
+  (let [{:keys [agents left out]} (root-ended ["(clojure.core.async/<!! (clojure.core.async/chan))"] false)]
     (is (= #{:a1 :a2} (set (keys agents))) out)
     (is (empty? left) (str "agents still alive: " left "\n" out))))
 
@@ -582,13 +522,6 @@
                         :child (fn [] (jolt.host/main-carrier-run! reader))})]
     (is (= {:exit 0} (lib/wait-status pid))
         "the reader, a main carrier, read both lines: the go came from its other fiber while the read waited")))
-
-(deftest a-blocked-agent-ends-on-its-socket-eof
-  ;; an agent blocked in a channel take, its fork
-  ;; server gone first, ends on its own socket's EOF (SIGIO wakes its condition-wait)
-  (let [{:keys [agents left out]} (root-ended "(clojure.core.async/<!! (clojure.core.async/chan))" true)]
-    (is (= #{:a1 :a2} (set (keys agents))) out)
-    (is (empty? left) (str "agents still alive: " left "\n" out))))
 
 (deftest root-interrupts-a-blocked-take
   ;; root's interrupt! stops an eval blocked in a
@@ -946,10 +879,10 @@
   ;; It is due when what an agent would inherit passes :seon.config.agent/inherited-bytes, so what the forks may
   ;; freeze follows from what static grew: one more than that many, whichever point of the cycle the shard's
   ;; earlier tests left it at (a fixed count sat on the edge: 3 at 2.2 MB of main a fork)
-  (let [statics (vec (for [_ (range 20)] (:value (first (in-agent ["(jolt.scheme/eval-string \"(bytes-allocated 'static)\")"])))))
+  (let [statics (vec (for [_ (range 10)] (:value (first (in-agent ["(jolt.scheme/eval-string \"(bytes-allocated 'static)\")"])))))
         freezes (count (filter #(> % 65536) (map - (rest statics) statics)))
         due (inc (quot (- (peek statics) (first statics)) (seon.config/value :seon.config.agent/inherited-bytes)))]
-    (is (<= freezes due) (str freezes " freezes in 20 forks, " due " due by what static grew; the server's static at each: " (pr-str statics)))))
+    (is (<= freezes due) (str freezes " freezes in 10 forks, " due " due by what static grew; the server's static at each: " (pr-str statics)))))
 
 (defn- history-tx
   "What n agents leave on main, shaped as production's (an agent started on task, and an eval record

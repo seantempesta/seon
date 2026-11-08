@@ -6,6 +6,10 @@ This file holds the owner's standing rulings, one entry each: the rule, the owne
 
 The owner's rulings of 2026-11-08, on what the model knows, erasing the store, and how a reply's evals run.
 
+### The main tree stays on main; each session works in its own worktree (owner, 2026-11-08)
+
+Owner, 2026-11-08: "Wait what? I thought we were using worktrees?"; "Yeah update the agents file. That's just wrong", of AGENTS §3 telling a session to work its topic branch in the main tree (written 2026-10-28 for one session: "Stop doing separate worktrees for small updates. It's overkill", now superseded). With several sessions sharing the main tree, one's branch checked out there took main from the others: their merges stopped and `bin/update` (which runs only from the main tree on main) could not restart root. Stated in: AGENTS.md §2 (helpers) and §3 (one task at a time).
+
 ### In-flight output is one general stream, keyed by an id in the db, and may be lost (owner, 2026-11-08)
 
 Owner, 2026-11-08: "I don't want a specialized system for this in case we want to stream other things. How do we do this properly with effects that are writing to channels without complicating the exisitng database pull and render work? Can we get a stable ID for the streaming point to append to and then we can just fire message update data to a channel?"; "in flight streaming data can be lost without any serious consequences even if we restart the system or are restoring to apoint in time. The db is the source of truth"; approving the plan: "Approve, land it". Any effect writes its in-flight text to one Flow channel, keyed by the id of an entity already in the db; the page appends it to the element the render drew for that id; only the final value is written, and the commit's render replaces the element. The pull, ctx and renders are unchanged; nothing in flight is held or rebuilt. Stated in: task seon.render/one-walk-per-view, rule 10.
