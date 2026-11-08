@@ -75,7 +75,7 @@ Each v1 capability for building and printing the model's context, and where it s
 | v1 | next | Status |
 |---|---|---|
 | generated task context; one reference rule (`seon.ref`); forgiving reader | `seon.ctx`, `seon.ref`, `seon.reader/forgive` | present |
-| `(help)` checked against the program | [agent](agent.md), the system message; `my.agent/help`; every form on it run in an agent by `seon.repl-test/the-help-page-runs` | present |
+| `(help)` checked against the program | [agent](agent.md), the system message; `my.agent/help`; every form on it run in an agent by `seon.repl-test/the-template-instructions-and-the-help-page-run` | present |
 | context: stable session sections, cached; small turn sections; must-reads capped | ```seon.ctx.wire/request``` (the help, the session's records, the page among them as evals Seon ran: whole, then what moved); vars at their citation's depth, cut only by the printer at the context's budget; cache hits on each turn | present |
 | one printer with a budget and runnable continuations; renders on schemas | `seon.print`, `seon.render` | present |
 | wiki sections in the context | `seon.doc` | new |
