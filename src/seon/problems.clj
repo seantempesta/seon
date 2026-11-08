@@ -127,8 +127,9 @@
   (vec (for [{e :e st :v} (d/datoms db :aevt :seon.process/stall)
              :let [p (d/entity db e)]
              :when (= e (:db/id (task/newest-process (seq (:seon.process/_agent (:seon.process/agent p))))))
-             :let [{pid :seon.process/pid {id :seon.agent/id} :seon.process/agent} (d/pull db [:seon.process/pid {:seon.process/agent [:seon.agent/id]}] e)
+             :let [{pid :seon.process/pid {key :seon.agent/key} :seon.process/agent} (d/pull db [:seon.process/pid {:seon.process/agent [:seon.agent/key]}] e)
                    {:keys [kind form]} (:last-op st)
+                   id (some-> key keyword)
                    s (str "stalled " (some-> id name))]]
          (derived-row ans s 'seon.agent-proc
                       (str "agent " (some-> id name) " sent nothing for " (:quiet-ms st) " ms with a request in flight"
@@ -567,7 +568,7 @@
   [:db/id :seon.task/id :seon.task/ns :seon.task/proofs :seon.task/execution :seon.task/outcome :seon.task/reason
    :seon.task/unmerged :seon.task/failures :seon.task/costs :seon.task/error :seon.task/waste :seon.task/task-conflicts
    :seon.task/deferred :seon.task/gate-unread :seon.task/deferred-results :seon.task/conflicts
-   {:seon.task/agent [:seon.agent/id :seon.agent/ended-ms]}])
+   {:seon.task/agent [:seon.agent/key :seon.agent/ended-ms]}])
 
 (defn- task-ready?
   "Is task te one not done whose needs are all done? Here ready deliberately means only that: the
@@ -645,7 +646,7 @@
         conflicts (vec (:seon.task/conflicts p))
         unmerged (vec (sort (:seon.task/unmerged p)))
         end-ms (get-in p [:seon.task/agent :seon.agent/ended-ms])
-        base {:task id :judged id :agent (get-in p [:seon.task/agent :seon.agent/id]) :status status
+        base {:task id :judged id :agent (some-> (get-in p [:seon.task/agent :seon.agent/key]) keyword) :status status
               :outcome status :reason (:seon.task/reason p) :end-ms end-ms
               :open? (and (not= :cancelled (:seon.task/execution p)) (not (task/done? db e))) :owner-ns (:seon.task/ns p) :producer nil :proofs []
               :answered-by (get-in ans [:from id] []) :at-ms end-ms}

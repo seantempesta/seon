@@ -373,7 +373,7 @@
 ;; in its task's namespace, made when the program has none, where the REPL's names resolve
 (deftest an-agent-starts-in-its-tasks-namespace
   (let [[here helper] (at/in-agent ["(str *ns*)" "(fn? source-fn)"])]
-    (is (re-matches #"t[0-9a-f]{8}" (str (:value here))) (str "the task's namespace, t<id>: " (pr-str here)))
+    (is (re-matches #"[a-p][0-9a-f]{15}" (str (:value here))) (str "the task's namespace, its id: " (pr-str here)))
     (is (true? (:value helper)) (pr-str helper))))
 
 (deftest a-move-into-a-namespace-that-hides-a-helper-says-so
@@ -640,7 +640,7 @@
         use (fn [h] (str "(inc (:value " h "))"))
         whole (ev ["(+ 1 1)" "(+ 2 3)" (use (:handle five))])
         cut (ev ["(+ 2 3)" (use (:handle five))])]
-    (is (re-matches #"result/[0-9a-f]{8}" (str (:handle five))) "eight hex digits")
+    (is (re-matches #"result/[a-p][0-9a-f]{7}" (str (:handle five))) "eight characters, the first a letter (seon.lib/id)")
     (is (= (mapv :handle (ev ["(+ 1 1)" "(+ 2 3)" (use (:handle five))])) (mapv :handle whole)) "a replay gives the same handles")
     (is (= [6 6] [(:value (peek whole)) (:value (peek cut))]) "a later eval's code naming it reads it, with the first eval cut")
     (is (= (:handle (first cut)) (:handle five)) "and the cut leaves its handle where it was")
@@ -1272,7 +1272,7 @@
     (is (= (get-in a [:seon.eval/result :db/id]) (get-in b [:seon.eval/result :db/id])) "of one result entity")
     (is (= (get-in a [:seon.eval/result :seon.result/hash]) (get-in b [:seon.eval/result :seon.result/hash])))
     (is (= 36 (count (get-in a [:seon.eval/result :seon.result/hash]))) "its identity is the full hash, not the handle's eight digits")
-    (is (str/starts-with? (get-in a [:seon.eval/result :seon.result/hash]) (subs (str (get-in a [:seon.eval/response :handle])) (count "result/"))) "and the handle is its short form")
+    (is (= (str "result/" (seon.lib/id (subs (get-in a [:seon.eval/result :seon.result/hash]) 0 8))) (str (get-in a [:seon.eval/response :handle]))) "and the handle is its short form, in seon.lib/id's form")
     (is (= (vec (map inc (range 50))) (get-in a [:seon.eval/result :seon.result/value])) "the value lives on the result")
     (is (every? #(number? (get-in % [:seon.eval/response :ms])) [a b]) "each eval keeps its own cost")
     (is (every? #(and (not (contains? (:seon.eval/response %) :value)) (contains? (:seon.eval/response %) :handle)) [a b]) "and no copy of the value")
@@ -1306,16 +1306,16 @@
   "(fn [code] (let [id (:record (seon.repl/eval-string code {:origin :model})) db (seon.agent/db) e (seon.db/eid db :seon.eval/id id)] {:id id :e e :datoms (vec (for [d (datahike.api/datoms db :eavt e) :when (not= :seon.eval/call (:a d))] [:db/add (:e d) (:a d) (:v d)]))}))")
 
 (deftest two-sessions-evals-merge-whole
-  ;; docs/users.md#what-each-thing-is: an eval's id is its eid, which the store issues once across forks, so two agents forked from one main
-  ;; never name two evals alike, and one's eval written onto the other's branch is one more eval. One value is one result.
+  ;; docs/users.md#what-each-thing-is: an eval's id is the digest of its agent's key and the eid the store issues once across forks, so two agents forked
+  ;; from one main never name two evals alike, and one's eval written onto the other's branch is one more eval. One value is one result.
   (let [a (:value (first (at/in-agent [(str "(" eval-facts " \"(+ 40 2)\")")])))
         [b both] (at/in-agent [(str "(do (def mine (" eval-facts " \"(+ 40 2)\")) mine)")
                                (str "(do (seon.agent/transact! (quote " (pr-str (:datoms a)) ")) "
                                     "(mapv #(datahike.api/pull (seon.agent/db) '[:db/id :seon.eval/id :seon.eval/code {:seon.eval/result [:db/id :seon.result/value]}] [:seon.eval/id %]) [" (pr-str (:id a)) " (:id mine)]))")])
         b (:value b)
         [x y :as evals] (:value both)]
-    (is (= (str "e" (:e a)) (:id a)) "an eval's id is its eid")
-    (is (= (str "e" (:e b)) (:id b)))
+    (is (re-matches #"[a-p][0-9a-f]{15}" (:id a)) "an eval's id is a digest")
+    (is (re-matches #"[a-p][0-9a-f]{15}" (:id b)))
     (is (not= (:id a) (:id b)) "two agents forked from one main issue two ids")
     (is (= [(:e a) (:e b)] (mapv :db/id evals)) (pr-str both))
     (is (= ["(+ 40 2)" "(+ 40 2)"] (mapv :seon.eval/code evals)))
@@ -1330,7 +1330,8 @@
                                "(mapv #(seon.db/eid (seon.agent/db) :seon.eval/id %) [running inner])"])
         [o i] (:value eids)]
     (is (= (:record (first answers)) id) "the id its forms read is the id it is recorded by")
-    (is (= (str "e" e) id) "and it is its eid")
+    (is (re-matches #"[a-p][0-9a-f]{15}" id) "and it is a digest of its agent and the eid issued for it")
+    (is (some? e) "found by it: the record is the one the id names")
     (is (< o i) "the eval that started first has the lower eid, though the one inside it recorded first")))
 
 (deftest an-eval-evaluated-again-keeps-its-eid
@@ -1351,7 +1352,7 @@
         [id before] (:value one)
         [after code] (:value two)
         [was still old-code] (:value old)]
-    (is (= (str "e" before) id) "its id is its eid")
+    (is (re-matches #"[a-p][0-9a-f]{15}" id) "its id is a digest")
     (is (= before after) "the same entity")
     (is (= "(swap! tick + 10)" code))
     (is (= was still) (pr-str old))
