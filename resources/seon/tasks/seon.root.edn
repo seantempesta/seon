@@ -141,6 +141,12 @@ Settled with Context (2026-11-08, read from main's code):
 - root-ctx draws the system message and conversation list components render-ctx draws (the same vars, never copies), plus its own sessions component in its task list; root's page stays root's (owner: \"I just want different render functions\").
 - Check on a demo root that seon.ctx.status answers sanely for a task that never merges. Build nothing that parses ids (Context's content-ids: seon.lib/id's form).
 
+Progress (2026-11-08, on jolt/rootchat):
+- Done: boot writes root's :seon.agent/key \"root\" and request/root, parked (seon.root/root-session-tx, by the tempid \"root\" seon.task/boot-tx names root by).
+- Done, to review (Context's option 1, for every agent): one path per eval. agent-fact's pattern drops its top-level :evals join, every agent eval records the call of the turn in force (seon.repl/record!), and root's REPL evals keep none. A first cut kept both joins and measured 1.56x calls on seon.render-cost-test/a-step-costs-what-changed (2127 against 1367 at n=10): an eval reached by two paths relocates at each step.
+- Open: seon.repl-test's test roots refuse the boot fact (\"Conflicting upsert: root resolves both to 1200 and 521409750887613863\"): an entity other than root's holds :seon.agent/key \"root\" before boot. Its maker isn't found yet.
+- Left: root-fact extends agent-fact with a pattern of its own reads; root-ctx draws render-ctx's system message and conversation list plus a sessions component; docs/users.md#roots-session; seon.render.proc/with-context and :seon.config.render/root-context-budget deleted; checked live on a demo root.
+
 Proofs, red first: a message to root's key starts its session on its standing task and its reply is on its page; root's request holds its agents' standing and no :seon.config.* attribute, and a system message from its task's :system sections; a launch from root's session makes a task whose agent tells root how it ends."
   :seon.task/proofs #{seon.root-test/a-message-to-root-wakes-its-session
                       seon.ctx.wire-test/roots-request-is-its-sessions-not-its-config
