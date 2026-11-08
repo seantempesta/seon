@@ -266,7 +266,6 @@ Proofs, red first: a new eval in a turn of 10 and of 100 evals is one append of 
                       seon.render-test/a-turns-evals-are-its-list
                       seon.ctx.wire-test/a-turn-as-a-list-reads-the-same}}
  {:seon.task/name "the-home-box-talks-to-root"
-  :seon.task/needs #{"seon.root/root-is-a-session"}
   :seon.task/plan "Web's part of root as a session (owner, 2026-11-08: \"it should switch to that agent\"; \"make it work properly for chatting and launching new sessions and moving the user to the right UI view\"; \"the tiles are way too small\").
 
 What exists: the home box calls seon.root/ask!, which makes a task and starts a new agent each time; the page never moves; the person waited 26 s for \"hi\" with nothing shown; a tile's title is the first message and its body the last reply (an atom tile showed a paragraph on agents, the reply to a later follow-up).
