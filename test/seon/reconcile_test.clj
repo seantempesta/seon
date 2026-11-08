@@ -678,7 +678,11 @@
   (let [db (db-of [(decl "a")] :extra (work "a" :running))
         verdict (task/message-tx "m-verdict" "root" [(akey "a")] "The done rule refused it: make the proof green." 1)
         [st _] (#'r/write (st-of db) "demo/a" :done verdict)]
-    (is (contains? (get-in st [:idx :late]) (akey "a")) "the agent the verdict is to is held for waking")))
+    (is (contains? (get-in st [:idx :late]) (akey "a")) "the agent the verdict is to is held for waking")
+    (let [e (:db/id (d/entity db [:seon.agent/key (akey "a")]))
+          by-id [(assoc (first verdict) :seon.message/to [e "a-tempid"])]
+          [st _] (#'r/write (st-of db) "demo/a" :done by-id)]
+      (is (= #{(akey "a")} (get-in st [:idx :late])) "a recipient named by its entity id too; a tempid, an entity the write makes, is owed nothing"))))
 
 (deftest a-parked-task-is-woken-only-by-a-wake
   ;; idx-ready?: parked, told or at its cap, a task is ready again only when its agent is woken (r/wake: a message reached it, over the

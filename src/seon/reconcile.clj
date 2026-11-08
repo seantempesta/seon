@@ -725,7 +725,10 @@
         ;; every message the write carries wakes its recipient (as the api's message-write does with its :wake), held until it
         ;; waits (settle-late): tell-tx's to whoever started the task, and any other, as a verdict the judge writes to the agent itself;
         ;; a user with no branch reads main: nothing is owed to a branch
-        ks (into #{} (comp (filter map?) (mapcat :seon.message/to) (map second)
+        ;; a recipient is a lookup ref (seon.task/message-tx's) or an entity id; a tempid names an entity this write makes, which has
+        ;; no branch yet, so nothing is owed it
+        key-of (fn [r] (cond (vector? r) (second r) (int? r) (:seon.agent/key (d/entity (:db st) r))))
+        ks (into #{} (comp (filter map?) (mapcat :seon.message/to) (keep key-of)
                            (filter #(:seon.agent/branch (d/entity (:db st) [:seon.agent/key %]))))
                  tx)]
     (request (update-in st [:idx :late] (fnil into #{}) ks) id step {:op :write :req {:op :tx :branch :db :tx-data tx}})))
