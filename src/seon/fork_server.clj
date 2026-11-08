@@ -152,18 +152,19 @@
                  ;; persistent indexes), never its datoms replayed here: replaying a 42,942-datom
                  ;; import took 3.5 s, and the first fork waited behind it
                  db' (d/commit-as-db (:store st) (:commit m))
-                 ;; what moved since the value this server last applied, however many commits that was
-                 ops (pdb/ops-between (:db st) db')
-                 ;; the search's text index held for main carried to it, the texts that moved replaced
-                 _ (doc/carry-index! (:db st) db' (map (fn [op] [(nth op 1) (nth op 2)]) ops))
+                 ;; the search's text index held for main carried to it, the texts the commit wrote replaced: only
+                 ;; from its parent (a commit between them, unseen here, could have written one; the next read
+                 ;; then builds it)
+                 _ (when (contains? (set (get-in db' [:meta :datahike/parents])) (d/commit-id (:db st)))
+                     (doc/carry-index! (:db st) db' (map (fn [op] [(nth op 1) (nth op 2)]) (:tx-data m))))
                  st (cond-> (assoc st :db db')
                       ;; a commit not the one the writer said
                       (not= (:max-tx db') (:t m)) (update :mismatch inc)
                       ;; the program moved: the reach graph is brought to it at the next fork
-                      (program/moves-program? ops) (assoc :graph-moved true :static-due true))
+                      (program/moves-program? (:tx-data m)) (assoc :graph-moved true :static-due true))
                  ;; main's program changed: load it here, so agents forked from now on inherit it compiled; while
                  ;; the tests' load is still due it loads them all at the first fork, as main has them then
-                 errs (seq (program/load-changes! db' ops {:tests? (not (:tests-due st))}))
+                 errs (seq (program/load-changes! db' (:tx-data m) {:tests? (not (:tests-due st))}))
                  ;; the commit a :preload was waiting to see
                  [st load-errs] (if (and (:preload-t st) (>= (:max-tx db') (:preload-t st))) (preload st) [st nil])
                  errs (seq (concat errs load-errs))]

@@ -307,7 +307,7 @@
       (is (= #{:t :prev :ops :commit :ns} (set (keys n))))
       (is (= t0 (:prev n)))
       (is (= (:max-tx @conn) (:t n)))
-      (is (= {:op :tx :t (:t n) :commit (:commit n)} (dissoc (first (:to-fork-server outs)) :ns)) "the fork server is told the commit, and takes what moved from its own value (seon.db/ops-between)")
+      (is (= (:tx-data (first (:to-fork-server outs))) (:ops n)) "its ops are every report's ops, in order: the stored commit's")
       (is (= #{"b" "c"} (set (keep (fn [[_ _ a v]] (when (= :note/text a) v)) (:ops n)))) "the batch's two transactions are both in it")
       (is (= (d/commit-id @conn) (:commit n)))
       (is (= (:max-tx @conn) (:max-tx (d/commit-as-db conn (:commit n)))) "the consumer makes the db from it")))))

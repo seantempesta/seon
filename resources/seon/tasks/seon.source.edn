@@ -64,4 +64,8 @@ Won't do: worktrees, isolated trees, refused writes, a virtual filesystem, a dir
   :seon.task/plan "Measured 2026-11-07: seon.source/schema-file-text costs 17.7 M ticks and 181 MB a call (377 calls), rewrite-clj parsing a whole schema resource to edit one entry, against an estimate of 0.5 M and 2 MB. Find the entry's form by its key and replace that span. Proof: a cost proof at a file's size, and every other byte of the file kept."
   :seon.task/kind :work
   :seon.task/proofs #{}}
+ {:seon.task/name "a-worktree-name-taken-by-an-old-branch-is-refused"
+  :seon.task/plan "Found 2026-11-08: bin/worktree NAME on a name whose branch jolt/NAME already exists, from an older session, checks that branch out and merges main into it, so the new worktree carries the old branch's commits and a session believes it started from main. Seen when an audit's fixes started on jolt/audit-fixes, an old branch whose work was already on main: a revert then conflicted with code main no longer held, and an evals-max line looked like a live bug on main that was not. Correct: refuse a name whose branch exists unless asked to continue it, saying which commit it holds and whether main already has it. Proof: a branch made, then bin/worktree on its name refused, naming it."
+  :seon.task/kind :work
+  :seon.task/proofs #{}}
 ]
