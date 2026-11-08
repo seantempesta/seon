@@ -96,9 +96,11 @@ Checks (Context, 2026-11-08):
 
 Owners: seon.root's boot is Optimization's (storage, merges) and Context's (config); Web found it with its merge and can build it if they agree.
 
-Proofs, red first: a root booted on a store whose main lacks a config key the binary reads at start (the merged tree adds it) starts, holds that key's value from the merged entries, and its import after start writes nothing; a boot with nothing merged since the last import writes nothing at boot; a boot whose import refuses one file still starts and names the file; a boot whose source tree does not hold main's commit imports nothing and says why."
+Proofs, red first: a root booted on a store whose main lacks a config key the binary reads at start (the merged tree adds it) starts, holds that key's value from the merged entries, and its import after start writes nothing; a boot with nothing merged since the last import writes nothing at boot; a boot whose import refuses one file still starts and names the file; a boot whose source tree does not hold main's commit imports nothing and says why.
+
+Built (jolt/boot-order): seon.root/import-tree! in seon.root/boot!, before load-all!, hold-config! and the fork (docs/source.md#a-boot-imports-main-first); the seed imports through it. The boot with nothing merged is the third boot of a-boot-after-a-merge-reads-the-merged-config. Not yet written: a-boot-imports-no-tree-behind-main (it needs a source tree of the checkout's own repository behind or beside main: a clone, seconds of git per boot)."
   :seon.task/proofs #{seon.root-test/a-boot-after-a-merge-reads-the-merged-config
-                      seon.root-test/a-boot-with-nothing-merged-imports-nothing
+                      seon.root-test/a-boot-forks-with-the-merged-schema-registry
                       seon.root-test/a-boot-whose-import-refuses-a-file-still-starts
                       seon.root-test/a-boot-imports-no-tree-behind-main}}
 ]

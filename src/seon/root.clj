@@ -1126,12 +1126,53 @@
       []
       (conj (vec (wiki-tx db checkout (baseline))) {:seon.root/id :root :seon.root/wiki digest}))))
 
+(defn import-tree!
+  "Main's program on conn brought to the source tree {:root :dirs}, while this is the store's only process (a boot before
+  it reads anything of main, a seed): only what the tree changed since the import root's :seon.root/source fact records
+  (seon.fx/read-source's :since; seon.source/tx-of), written on conn with the fact, which then holds the tree's digest, in
+  one transaction. A tree whose digest main holds reads git's ids and writes nothing. With :follow (the main checkout)
+  the tree is first brought to main, and imports only when it holds main's commit. When the read fails, the tree lacks
+  main's commit or a file does not import (seon.root/unimportable), nothing is written and :error says why; main stays as
+  imported. t0: when the caller's phase began, the fact's :ms. Answers {:imported? :digest :error}. See
+  docs/source.md#a-boot-imports-main-first."
+  {:malli/schema [:=> [:cat :seon.host/conn [:map [:root :string] [:dirs [:sequential :string]] [:follow {:optional true} :string]] :int] :map]}
+  [conn {:keys [root dirs follow]} t0]
+  (let [held (:seon.root/source (d/pull @conn [:seon.root/source] [:seon.root/id :root]))
+        r (fx/read-source {:req (cond-> {:root root :dirs dirs}
+                                  follow (assoc :follow follow)
+                                  ;; only what the tree changed since its last import: what main merged and the tree never held stays main's
+                                  (and (:digest held) (:tree held)) (assoc :since (:tree held) :since-dirs (:dirs held [])))})
+        files (:value r)
+        digest (when files (source-digest r dirs))]
+    (cond
+      ;; a failed read, or a tree that main is not behind (a gap of commits main holds, or a refused fast-forward)
+      ;; the error without the read it may carry: a boot keeps this answer in its view
+      (and (contract/error? r) (not (and files (= 0 (:behind r))))) {:imported? false :error (select-keys r [:seon.error/type :seon.error/operation :seon.error/message])}
+      (= digest (:digest held)) {:imported? false :digest digest}
+      :else
+      (let [changed? (boolean (:paths r))
+            tx (source/tx-of @conn files changed?)
+            bad (if (contract/error? tx) tx (unimportable @conn files tx (:commit held)))]
+        (if bad
+          {:imported? false :error bad}
+          (let [tx (into (vec tx) (source/modes-tx @conn (:modes r)))
+                after (pdb/speculate-db @conn tx)
+                fact (cond-> {:root root :digest digest :dirs (vec dirs) :ms (lib/r2 (profile/ms-since t0))
+                              :files (if changed? (+ (count (d/datoms after :aevt :ns/file)) (count (d/datoms after :aevt :schema/file))) (count files))
+                              :forms (count (d/datoms after :aevt :form/id))
+                              :retracted (count (filter #(and (vector? %) (= :db/retractEntity (first %))) tx))}
+                       (:commit r) (assoc :commit (:commit r))
+                       ;; the tree it read: the next import reads only what differs from it
+                       (:tree r) (assoc :tree (:tree r))
+                       (seq (:pins r)) (assoc :pins (:pins r)))]
+            (d/transact conn {:tx-data (conj tx {:seon.root/id :root :seon.root/source fact})})
+            {:imported? true :digest digest}))))))
+
 (defn seed-program!
   "Bring the program and the wiki on :db of the store at path (made when missing) up to the tree
   root would import (source-root and dirs from the config, as import-source! reads them): the
-  tree's files analysed (seon.source/tx-of), the wiki loaded with its baseline (wiki-tx), and the
-  :seon.root/source fact written with the tree's digest, so a root whose main is made from :db
-  finds its program, its wiki and a digest equal to the tree's, and imports and loads nothing: a
+  program as a boot imports it (import-tree!), then the wiki loaded with its baseline (wiki-tx) until it states nothing more,
+  so a root whose main is made from :db finds its program, its wiki and a digest equal to the tree's, and imports and loads nothing: a
   boot once per root cost 5-12 s of analysis and 2 s of wiki per fresh main (docs/machine.md#a-root-boots-from-a-seeded-store).
   A :db whose fact already holds the tree's digest is left as it is. Answers {:digest :forms :ms :imported?}
   or the error that stopped it (a source the image cannot analyze, a read that failed)."
@@ -1139,35 +1180,17 @@
   [path]
   (let [t0 (profile/now-ns)
         {:keys [cfg conn]} (pdb/open! :lmdb path 0 :db)
-        root (get cfg/config :seon.config.source/root)
-        r (fx/read-source {:req {:root root :dirs (cfg/value :seon.config.source/dirs) :binary-tree (str (cfg/checkout) "/target/seon.tree")}})
-        files (:value r)
-        digest (when files (source-digest r (cfg/value :seon.config.source/dirs)))
-        held (:seon.root/source (d/pull @conn [:seon.root/source] [:seon.root/id :root]))
+        r (import-tree! conn {:root (get cfg/config :seon.config.source/root) :dirs (cfg/value :seon.config.source/dirs)} t0)
         out (cond
-              (nil? files) (assoc (if (contract/error? r) r (contract/error :seon.root/seed-unread #'seon.root/seed-program! "the source could not be read" {:path root})) :imported? false)
-              (= digest (:digest held)) {:digest digest :imported? false}
+              (:error r) (assoc (:error r) :imported? false)
+              (not (:imported? r)) r
               :else
-              ;; in root's own order: the wiki first (the boot fact's), the program after (import-source!)
-              (let [db0 @conn
-                    wiki (wiki-tx db0 (cfg/checkout) (baseline-of db0 #(fx/wiki-history {:req %}) (cfg/checkout) "docs"))
-                    db1 (:db-after (d/transact conn {:tx-data wiki}))
-                    tx (source/tx-of db1 files false)]
-                (if (contract/error? tx)
-                  tx
-                  (let [db2 (:db-after (d/transact conn {:tx-data (conj (vec tx) {:seon.root/id :root
-                                                                                  :seon.root/source (cond-> {:root root :files (count files) :forms (count (d/datoms (pdb/speculate-db db1 tx) :aevt :form/id))
-                                                                                                             :digest digest :ms (lib/r2 (profile/ms-since t0))}
-                                                                                                      (:commit r) (assoc :commit (:commit r))
-                                                                                                      ;; the tree it read: a boot taking this fact as its last import reads only what differs from it, and what main merged stays main's
-                                                                                                      (:tree r) (assoc :tree (:tree r))
-                                                                                                      (seq (:pins r)) (assoc :pins (:pins r)))})}))
-                        ;; the wiki's citations now resolve to the program: loaded again until it states nothing more (its fixpoint,
-                        ;; which a root's second boot reached by itself, 41 s of git history at the first)
-                        db3 (loop [db db2]
-                              (let [w (wiki-tx db (cfg/checkout) (baseline-of db #(fx/wiki-history {:req %}) (cfg/checkout) "docs"))]
-                                (if (empty? w) db (recur (:db-after (d/transact conn {:tx-data w}))))))]
-                    {:digest digest :forms (count (d/datoms db3 :aevt :form/id)) :imported? true}))))]
+              ;; the wiki's citations resolve to the program: loaded until it states nothing more (its fixpoint,
+              ;; which a root's second boot reached by itself, 41 s of git history at the first)
+              (let [db (loop [db @conn]
+                         (let [w (wiki-tx db (cfg/checkout) (baseline-of db #(fx/wiki-history {:req %}) (cfg/checkout) "docs"))]
+                           (if (empty? w) db (recur (:db-after (d/transact conn {:tx-data w}))))))]
+                (assoc r :forms (count (d/datoms db :aevt :form/id)))))]
     (pdb/sync! cfg)
     (d/release conn)
     (assoc out :ms (lib/r2 (profile/ms-since t0)))))
@@ -1185,14 +1208,16 @@
 (defn- boot!
   "Root's boot up to its first thread, on the main carrier (jolt.host/main-carrier-run!: one OS
   thread drives every fiber, so a go block or future a library starts is a fiber and nothing
-  else runs): main opened on the store at path, its program loaded and instrumented, the warm
+  else runs): main opened on the store at path, brought to the source tree first (import-tree!, before anything
+  reads main's program, config or schema entries: docs/source.md#a-boot-imports-main-first), its program loaded and instrumented, the warm
   paths run and the heap made static, then the fork server forked from it (which preloads main's
   indexes for its agents: seon.fork-server/main), sharing all of that copy-on-write while this is the one thread there is
   (docs/failure-points.md, physics). Its return starts the process's threads (Jolt's carriers,
   timer and poller; main-carrier-run! returns into an ordinary process), and root's follow.
-  open!'s answer with main's :db as forked, the fork server's :pid and :fd and each phase's ms."
-  {:malli/schema [:=> [:cat [:enum :lmdb :file] :string :int :seon.db/branch :int] :map]}
-  [backend path datoms main t0]
+  source: start!'s (its :root and :dirs are place keys, read from the built config before main's is held), or nil.
+  open!'s answer with main's :db as forked, the fork server's :pid and :fd, the import's answer and each phase's ms."
+  {:malli/schema [:=> [:cat [:enum :lmdb :file] :string :int :seon.db/branch [:maybe :map] :int] :map]}
+  [backend path datoms main source t0]
   (jolt.host/main-carrier-run!
     (fn []
       (let [;; first of all: no process holds the store yet (docs/storage.md#collection)
@@ -1211,6 +1236,9 @@
             open-ms (profile/ms-since t0)
             load-ms (profile/ms-since t0)
             t1 (profile/now-ns)
+            ;; main's program, config and schema entries made the merged tree's before anything below reads them
+            ;; (the fork server forks with them): import-source! after start then finds the digest equal
+            import (when source (import-tree! conn (assoc (select-keys source [:root :dirs]) :follow (cfg/checkout)) t1))
             program (program/load-all! @conn {:tests? false})
             ;; main's own config, before anything below reads one and before the fork server inherits it
             program (update program :errors into (program/hold-config! @conn))
@@ -1222,7 +1250,7 @@
         (let [db @conn]
           (merge opened (fs/fork-server db store-cfg)
                  {:db db :agents-dir agents-dir :open-ms open-ms :load-ms load-ms :compacted compacted :retained retained
-                  :program program :program-ms program-ms :contracts contracts}))))))
+                  :import import :program program :program-ms program-ms :contracts contracts}))))))
 
 (defn- flow-error
   "Flow's error-channel value e as the api's :error message: the proc, the throw's message and
@@ -1265,14 +1293,14 @@
         main (or main (keyword (cfg/value :seon.config.root/main)))
         backend (or backend (cfg/value :seon.config.store/backend))
         max-running (or max-running (cfg/value :seon.config.agent/max-running))
-        {store-cfg :cfg conn :conn recovered? :recovered? :keys [db agents-dir open-ms load-ms program program-ms contracts pid fd compacted retained]}
-        (boot! backend path datoms main t0)
+        source (or source (when-let [r (get cfg/config :seon.config.source/root)]
+                            {:root r :dirs (cfg/value :seon.config.source/dirs) :branch (cfg/value :seon.config.source/branch)}))
+        {store-cfg :cfg conn :conn recovered? :recovered? :keys [db agents-dir open-ms load-ms import program program-ms contracts pid fd compacted retained]}
+        (boot! backend path datoms main source t0)
         recovered (if recovered? (pdb/of-main main (d/branches conn)) [])
         ;; this root's boot id (runs of an earlier boot are reaped); its fact is written
         ;; through the writer once the graph runs, and that commit is the reconciler's first pass
         boot (lib/unique-id)
-        source (or source (when-let [r (get cfg/config :seon.config.source/root)]
-                            {:root r :dirs (cfg/value :seon.config.source/dirs) :branch (cfg/value :seon.config.source/branch)}))
         {in-force :config} (cfg/in-force)
         in-force-sources (cfg/boot-sources)
         provider (or provider (cfg/provider in-force))
@@ -1299,7 +1327,7 @@
               :fork-server {:agents-forked 0 :pid pid :status :up :restarts 0}
               :store {:backend backend :path path :main main :agents-dir agents-dir :recovered? (boolean recovered?)
                       :recovered-branches recovered :open-ms (lib/r2 open-ms)}
-              :boot {:gc-sweepers sweepers :compacted compacted :retained retained :load-ms (lib/r2 load-ms) :program (assoc program :ms (lib/r2 program-ms))
+              :boot {:gc-sweepers sweepers :compacted compacted :retained retained :load-ms (lib/r2 load-ms) :import import :program (assoc program :ms (lib/r2 program-ms))
                      :contracts (select-keys contracts [:armed :unchanged :invalid :ms]) :instrument (if contract/on? :on :off)}}
         graph-p (promise)
         root-procs-p (promise)
