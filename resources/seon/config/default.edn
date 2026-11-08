@@ -566,7 +566,10 @@
  ;; responsive beside a standing root and other worktree sessions (measured in docs/merging.md#a-merge-runs-what-the-change-reaches).
  ;; At the bound: a run never has more shards; fewer when fewer namespaces are selected. bin/check
  ;; runs this many steps at once too, and mg-check in this many shards (pure-tests 2026-10-23).
- :seon.config.proofs/jobs 4
+ ;; bin/test sets SEON_PROOF_JOBS to this run's share of the machine (its free cores at the plan, a shard and
+ ;; the roots its process tests boot taking about two), never above 4: three sessions proving at once share the
+ ;; cores instead of each taking four shards (load 40 on 18 cores, 2026-11-08: \"don't hose my machine\").
+ :seon.config.proofs/jobs #long #or [#env SEON_PROOF_JOBS 4]
  ;; Unit: ms. The least work a shard of an incremental run is worth (seon.proofs/worth-shards). Provenance: a shard's start
  ;; costs about 5 s, and 8 s more for its process tests' root (docs/testing.md#a-root-costs-what-it-boots), so it saves its cost past
  ;; about twice that on each side. At the bound: a run of less work than this runs in one shard, as the owner ruled 2026-10-30.
