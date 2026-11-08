@@ -12,7 +12,8 @@
             [seon.config :as cfg]
             [seon.model :as model]
             [seon.agent :as agent]
-            [seon.ctx :as ctx]))
+            [seon.ctx :as ctx]
+            [seon.ratom :as ratom]))
 
 (declare render)
 
@@ -93,7 +94,7 @@
   [e] (boolean (some #(= (:seon.eval/code e) (second %)) (vals render-calls))))
 
 (defn at-t
-  "Branch db as of t, as a page is drawn: the earliest commit of its line that holds t, a real db value, found by walking the line back from db at the cost of the commits since; past what collection kept, the same datoms as of t, which is all a status can't do a diff of (docs/storage.md#collection). See docs/render.md#a-redo-is-an-explicit-bust."
+  "Branch db as of t, as a page is drawn: the earliest commit of its line that holds t, a real db value, found by walking the line back from db at the cost of the commits since; past what collection kept, the same datoms as of t, which is all a status can't do a diff of (docs/storage.md#collection). See docs/storage.md#collection."
   {:malli/schema [:=> [:cat :seon.host/db :int] :seon.host/db]}
   [db t]
   (loop [at db]
@@ -106,32 +107,50 @@
             (>= (:max-tx p) t) (recur p)
             :else at))))))
 
-(defn page-at
-  "Agent a's page as of t on branch db, {id form} in placed order, drawn cold with today's renders: what `redo-tx` compares. See docs/render.md#a-redo-is-an-explicit-bust."
-  {:malli/schema [:=> [:cat :seon.host/db :int :int] :map]}
-  [db a t]
-  (let [at (at-t db t)
-        w (let [t (ctx/agent-ctx at a)] (render/draw t ctx/changes at (render/layout-of (merge {:seon.agent/key (:seon.agent/key (d/entity at a))} t)) {:model-only true :once true}))]
-    (try (render/placed-hiccup w (render/page-lists w)) (finally (render/dispose-walk! w)))))
+(defn- page-forms
+  "The page walk w draws, {id form} in placed order (seon.render/placed-hiccup over its page-lists)."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [w] (render/placed-hiccup w (render/page-lists w)))
 
-(defn redo-tx
-  "The transaction that makes the page's evals of agent a's ctx c true again, in their order, on db: each is read against what the one before it showed (its :seon.eval/page :t), and one whose :since is not that is made anew from the page as of each t (`page-at`): edits (seon.render/page-edits), from nothing when none came before. Nothing broken, nothing. See docs/render.md#a-redo-is-an-explicit-bust."
-  {:malli/schema [:=> [:cat :seon.host/db :int :map] [:vector :map]]}
-  [db a c]
-  (let [evs (filter render-eval? (map (fn [e] (get-in c [:evals e])) (sort (keys (:evals c)))))]
-    (first
-     (reduce (fn [[tx t0] e]
-               (let [{t1 :t since :since} (:seon.eval/page e) r (pdb/response-of db e)]
-                 (cond
-                   ;; an eval with no t (one that threw) shows nothing the next can stand on
-                   (nil? t1) [tx t0]
-                   (or (:components (:value r)) (= t0 since)) [tx t1]
-                   :else
-                   (let [edits (render/page-edits (render/forms-moved (when t0 (page-at db a t0)) (page-at db a t1)))]
-                     [(conj tx (assoc (select-keys (ctx/revalued db e {:edits edits}) [:seon.eval/response :seon.eval/result]) :seon.eval/id (:seon.eval/id e)
-                                :seon.eval/page (cond-> {:t t1} t0 (assoc :since t0))))
-                      t1]))))
-             [[] nil] evs))))
+(defn- db-at
+  "The db of point p ({:branch :commit :t}) on db's store: its commit, else (a commit past what collection kept, docs/storage.md#collection) db as of its t."
+  {:malli/schema [:=> [:cat :seon.host/db :map] :seon.host/db]}
+  [db p] (or (d/commit-as-db (pdb/store-of db) (:commit p)) (d/as-of db (:t p))))
+
+(defn diffs-through
+  "The edits between each consecutive pair of chain, a vector of points ({:branch :commit :t}, in order on one branch; a first of nil: nothing before the second) of agent a, one per pair, [(p0 to p1) (p1 to p2) ...], of db's store, with today's renders (`seon.render/page-edits` over `seon.render/forms-moved` of the page at each). One walk across them: drawn once at the first point the chain names, then advanced through each later one (seon.ctx/moved, seon.ctx/patch, the moved components flushed, as a kept walk moves, docs/render.md#a-page-is-a-kept-walk), so the chain costs one draw and what moved between the points, never a draw a pair. Pure in its arguments, and the one place a page is drawn at a point. See docs/render.md#a-change-is-edits-by-name."
+  {:malli/schema [:=> [:cat :seon.host/db :int [:vector [:maybe :map]]] [:vector :any]]}
+  [db a chain]
+  (let [nothing? (nil? (first chain)) pts (vec (remove nil? chain))
+        start (first pts) branch (:branch start)
+        db0 (db-at db start)
+        c0 (ctx/build db0 a branch)
+        layout (render/layout-of (assoc (:tree c0) :seon.agent/key (:seon.agent/key (d/entity db0 a))))
+        at (volatile! db0) r (ratom/atom (:tree c0))
+        w (assoc (render/walker {:ref r :changes ctx/changes} (fn [] @at) [layout {}]) :model-only true)]
+    (try
+      (render/flush! w nil)
+      (let [f0 (page-forms w)]
+        (loop [c c0 prev f0 ps (rest pts) out (if nothing? [(render/page-edits (render/forms-moved {} f0))] [])]
+          (if-let [p (first ps)]
+            (let [db1 (db-at db p)
+                  moved (ctx/moved @at db1 nil)
+                  c1 (ctx/patch c db1 moved (:branch p))]
+              (vreset! at db1)
+              (reset! r (:tree c1))
+              (render/flush! w moved)
+              (let [f1 (page-forms w)]
+                (recur c1 f1 (rest ps) (conj out (render/page-edits (render/forms-moved prev f1))))))
+            out)))
+      (finally (render/dispose-walk! w)))))
+
+(defn points-of
+  "The points of agent a's turns on db, [{:branch :commit :t}] in turn order: each model call's basis (:seon.model-call/basis, its :commit and :t, the t read from the commit when the basis holds none) with the branch. What `seon.render/changes-of` chains its pairs along. See docs/render.md#a-change-is-edits-by-name."
+  {:malli/schema [:=> [:cat :seon.host/db :int :any] [:vector :map]]}
+  [db a branch]
+  (->> (d/q '[:find ?n ?b :in $ ?a :where [?c :seon.model-call/agent ?a] [?c :seon.model-call/n ?n] [?c :seon.model-call/basis ?b]] db a)
+       (sort-by first)
+       (mapv (fn [[_ b]] {:branch branch :commit (:commit b) :t (or (:t b) (:max-tx (d/commit-as-db (pdb/store-of db) (:commit b))))}))))
 
 (defn request
   "The agent's request, a reading of walk w, the one tree its page draws (docs/render.md#the-models-context-a-cached-prefix-then-the-turn): its conversation's list through the one generic conversion
