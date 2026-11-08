@@ -295,7 +295,9 @@
   its results, greens and reds, recorded at their digests in the results store in one commit (seon.fx/write-verdicts!:
   their failures and each test's contracted functions' cost with them), unless the tree is not the
   plan's before and after the run (an edit during the run: what ran is not what the digests name, so
-  nothing is kept, and the run stays as reported). A shard that dies midway stores nothing.
+  nothing is kept, and the run stays as reported). A shard stopped midway (TERM: a red check step
+  stopped the run, or the run itself was stopped) stores the greens of the tests that ended, by a
+  shutdown hook, so the next run never repeats them; its reds and unfinished tests are not stored.
   Then SHARD n green m red. Answers the exit status."
   [file]
   (let [{:keys [tests digests tree mg]} (edn/read-string (slurp file))
@@ -303,7 +305,13 @@
     (doseq [n (distinct (map (comp symbol namespace) tests))] (require n))
     ;; armed as root arms them at boot, so a proof counts the same contracted calls here as in an agent's test child (docs/cost.md#counting-calls)
     (contract/instrument! contract/boot-nss)
-    (let [;; each test under the one bound an agent's run has (seon.proofs/run-tests!): one verdict wherever it runs
+    (let [;; the greens of the tests that ended, kept by a stop (the hook below) when the shard ends early
+          greens (volatile! {})
+          stored (volatile! false)
+          _ (.addShutdownHook (Runtime/getRuntime)
+                              (Thread. ^Runnable (fn [] (when (and (not @stored) (seq @greens) (= tree (fx/tree-id (seon.config/checkout))))
+                                                          (record-run! {:id (str "bin/test " tree " " (random-uuid)) :tree tree} @greens {})))))
+          ;; each test under the one bound an agent's run has (seon.proofs/run-tests!): one verdict wherever it runs
           reports (volatile! [])
           ran (proofs/run-tests! tests digests
                                  (fn [x] (cond (:seon.test/started x) (println "started" (:seon.test/started x))
@@ -320,6 +328,7 @@
                                                ;; a test's end, so bin/stalls never names one that finished
                                                ;; and its cost, the work it did (a green test's is read nowhere else)
                                                :else (do (println "ended" (:test x) (str (:ticks x) " ticks"))
+                                                         (when (proofs/green? x) (vswap! greens assoc (:test x) x))
                                                          (when-not (proofs/green? x) (println "RED" (:test x) (pr-str (select-keys x [:pass :fail :error :message]))))))
                                    (flush))
                                  (config/value :seon.config.agent/test-ticks)
@@ -328,6 +337,7 @@
           ;; reading files reads it) is not what the digests name. The plan's tree is the before (one
           ;; tree-id per shard, not two)
           same? (= tree (fx/tree-id (seon.config/checkout)))
+          _ (vreset! stored true)
           ;; the shard's verdicts, their failures and each test's function costs, cached
           unstored (when same?
                      (let [cost-of (proofs/costs {:reports @reports})]
