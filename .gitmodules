@@ -53,3 +53,6 @@
 [submodule "reference-code/clojure-mcp"]
 	path = reference-code/clojure-mcp
 	url = https://github.com/bhauman/clojure-mcp
+[submodule "reference-code/datastar"]
+	path = reference-code/datastar
+	url = https://github.com/starfederation/datastar

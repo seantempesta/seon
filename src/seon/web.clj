@@ -20,7 +20,7 @@
   runs in the agent as an eval of (seon.web/ui-call 'fn args), origin :ui, refused as data
   unless the var is marked ^:seon/callable."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn]
+  (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :refer [defn defn-]] [clojure.string :as str] [clojure.set] [clojure.edn :as edn]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [ring-chez.adapter :as adapter]
             [seon.lib :as lib] [seon.contract :as contract] [seon.config :as config] [seon.render :as render] [seon.render.ui :as ui] [seon.web.html :as h] [seon.step :as step] [seon.root :as c] [seon.reader :as reader]))
 
@@ -58,7 +58,7 @@
        (apply str (for [[sel html] prepends] (patch-event html sel "prepend")))
        ;; after their siblings, once those are placed (in layout order)
        (apply str (for [[sel html] afters] (patch-event html sel "after")))
-       (apply str (for [id removes] (patch-event "" (str "#" id) "remove")))))
+       (apply str (for [id removes] (patch-event "" (str "[id=\"" id "\"]") "remove")))))
 
 ;;; --- UI calls ------------------------------------------------------------------------------
 
@@ -166,6 +166,37 @@
          (or (nil? origin)
              (= origin (str "http://127.0.0.1:" (config/value :seon.config.web/port)))))))
 
+(defn feed-encoding
+  "The Content-Encoding a tab's feed is sent with, for a request whose Accept-Encoding header is accept:
+  :seon.config.web/feed-encoding's choice, :auto being deflate when the browser takes it; nil sends it plain. See
+  docs/render.md#in-flight-output-streams."
+  {:malli/schema [:=> [:cat [:maybe :string]] [:maybe [:enum "deflate"]]]}
+  [accept]
+  (case (config/value :seon.config.web/feed-encoding)
+    :none nil
+    :deflate "deflate"
+    :auto (when (and accept (re-find #"(?i)(^|[\s,])deflate([\s;,]|$)" accept)) "deflate")))
+
+(defn deflate-chunks
+  "A transducer of a tab's feed: each chunk (a string) as the next bytes of one zlib stream (Content-Encoding deflate),
+  flushed with Z_SYNC_FLUSH so the browser has every event as it is sent, its window (32 KB) shared across chunks, so text
+  a chunk repeats from an earlier one costs a back-reference. Its Deflater is the tab's, ended with its channel. See
+  docs/render.md#in-flight-output-streams."
+  {:malli/schema [:=> [:cat] :any]}
+  []
+  (fn [rf]
+    (let [d (java.util.zip.Deflater. (int (config/value :seon.config.web/feed-deflate-level)))
+          buf (byte-array 65536)]
+      (fn ([] (rf))
+          ([r] (.end d) (rf r))
+          ([r chunk]
+           (.setInput d (.getBytes ^String chunk "UTF-8"))
+           (let [out (java.io.ByteArrayOutputStream.)]
+             (loop [] (let [n (.deflate d buf 0 (alength buf) java.util.zip.Deflater/SYNC_FLUSH)]
+                        (when (pos? n) (.write out buf 0 n))
+                        (when (= n (alength buf)) (recur))))
+             (rf r (.toByteArray out))))))))
+
 (defn handler
   "The routes, as an edge in front of the proc's :http in-port."
   {:malli/schema [:=> [:cat :seon.host/chan] :seon.host/fn]}
@@ -200,9 +231,12 @@
               (do (a/>!! ch {:op :at :view (view-of (get q "view")) :turn turn}) {:status 204 :headers {}})
               {:status 400 :headers {"Content-Type" "text/plain"} :body (str "a step names a model call's id or latest: " t)}))
           (and (= m :get) (= uri "/feed"))
-          (let [out (a/chan 64)]
+          ;; compressed when the browser takes it (feed-encoding): each tab's stream its own, so text an update repeats is
+          ;; a back-reference on the wire
+          (let [enc (feed-encoding (get-in req [:headers "accept-encoding"]))
+                out (if enc (a/chan 64 (deflate-chunks)) (a/chan 64))]
             (a/>!! ch {:op :open :view (view-of (get q "view")) :ch out})
-            {:status 200 :headers {"Content-Type" "text/event-stream" "Cache-Control" "no-cache"} :body out})
+            {:status 200 :headers (cond-> {"Content-Type" "text/event-stream" "Cache-Control" "no-cache"} enc (assoc "Content-Encoding" enc)) :body out})
           (and (= m :get) (js uri)) {:status 200 :headers {"Content-Type" "text/javascript" "Cache-Control" "max-age=3600"} :body @(js uri)}
           (and (= m :get) (= uri "/app.css"))
           (if (.exists (java.io.File. ^String stylesheet))
@@ -233,6 +267,14 @@
 (defn- views-msg {:malli/schema [:=> [:cat :map] :map]}
   [st] {:op :views :views (into #{} (map :view (vals (:tabs st)))) :tabs (count (:tabs st))})
 
+(declare drawn)
+
+(defn- id-sel
+  "The CSS selector of the element whose id is (seon.render/key-id [x]): by attribute, since such an id may start with a
+  digit (a boot's UUID) or hold a '.', which a #id selector misreads. See docs/render.md#in-flight-output-streams."
+  {:malli/schema [:=> [:cat :string] :string]}
+  [x] (str "[id=\"" (render/key-id [x]) "\"]"))
+
 (defn- offer-all
   "Offer chunk to every fresh tab of view; full tabs turn stale, closed ones leave.
   Answers [st' bytes-sent]."
@@ -242,7 +284,8 @@
                (if (or (not= view (:view tab)) (contains? (:stale st) k) (str/blank? chunk))
                  [st sent]
                  (let [ok (a/offer! ch chunk)]
-                   (cond (true? ok) [st (+ sent (count chunk))]
+                   ;; a patch that draws a stream's in-flight element catches the tab up on it (drawn)
+                   (cond (true? ok) [(drawn st k chunk false) (+ sent (count chunk))]
                          (false? ok) [(update st :tabs dissoc k) sent]
                          :else [(update st :stale conj k) sent]))))
              [st 0] (:tabs st)))
@@ -256,44 +299,76 @@
     (let [v (second view)]
       (some (fn [[id a]] (when (or (= v id) (= v (:branch a)) (= (ui/kname v) (:key a))) (:key a))) index))))
 
+(defn- offer-tab
+  "St after offering chunk to tab t: its bytes counted when taken, the tab gone when closed, stale when full."
+  {:malli/schema [:=> [:cat :map :any :string] :map]}
+  [st t chunk]
+  (let [ok (a/offer! (get-in st [:tabs t :ch]) chunk)]
+    (cond (true? ok) (update st :bytes + (count chunk))
+          (false? ok) (update st :tabs dissoc t)
+          :else (update st :stale conj t))))
+
+(defn- container-frame
+  "Entity in's in-flight element drawn whole with each open part's text so far (seon.render.ui/stream-container, parts in
+  the order they began), as one Datastar event that replaces the element: replaced, not morphed, since the element is
+  data-ignore-morph. See docs/render.md#in-flight-output-streams."
+  {:malli/schema [:=> [:cat :map :string] :string]}
+  [st in]
+  (let [parts (sort-by :n (for [[[_ stream] e] (:streams st) :when (= in (:in e))] (assoc e :stream stream)))]
+    (patch-event (h/html (ui/stream-container in (vec (for [{:keys [stream part text]} parts] [stream (or part "content") (if (string? text) text (apply str text))]))))
+                 (id-sel in) "replace")))
+
+(defn- drawn
+  "St after chunk reached tab t: the in-flight elements chunk draws (data-stream-in) are the tab's from now (a keyframe's
+  are all it has), and each one chunk first draws, or a keyframe draws again, is drawn whole at once with the text held
+  (container-frame), so text that came before the page had the element is shown. Costs one search of chunk when it draws
+  none. See docs/render.md#in-flight-output-streams."
+  {:malli/schema [:=> [:cat :map :any :string :boolean] :map]}
+  [st t chunk keyframe?]
+  (if (or (not (get-in st [:tabs t])) (and (not keyframe?) (not (str/includes? chunk "data-stream-in="))))
+    st
+    (let [found (into #{} (map second) (re-seq #"data-stream-in=\"([^\"]*)\"" chunk))
+          had (get-in st [:tabs t :has] #{})
+          fresh (if keyframe? found (clojure.set/difference found had))
+          st (assoc-in st [:tabs t :has] (if keyframe? found (into had found)))
+          open (into #{} (map :in) (vals (:streams st)))]
+      (reduce (fn [st in] (if (and (contains? open in) (get-in st [:tabs t])) (offer-tab st t (container-frame st in)) st))
+              st fresh))))
+
 (defn- stream-in
-  "An effect's in-flight text, {:stream :in :part :agent :offset :text} (:agent its stable key, :in the entity whose
-  in-flight element the render drew, :part what kind of text), appended in each tab of the agent's chat: a tab's first
-  message of a part first appends the part's element (seon.render.ui/stream-part) into #in, then each message appends its
-  text into the part; a gap in :offset, and a tab's missed start, is marked with …. {:stream :agent :end true} forgets the
-  stream. See docs/render.md#in-flight-output-streams."
+  "An effect's in-flight text, {:stream :in :part :agent :text} (:text all of that part so far, a string or its pieces in
+  order, a vector the producer shares, joined only when a tab is sent it; :agent its stable key, :in
+  the entity whose in-flight element the render drew): the part's latest text is held (memory only, gone at its end:
+  in-flight text may be lost), and each tab of the agent's chat whose page has the element gets it drawn whole in its
+  place (container-frame). A message that never arrived costs nothing, since the next carries all of it; a tab that
+  cannot take one is stale and its keyframe brings the latest (drawn). {:stream :agent :end true} forgets the part.
+  See docs/render.md#in-flight-output-streams."
   {:malli/schema [:=> [:cat :map [:map [:stream :string] [:agent :string]]] :map]}
-  [st {:keys [stream in part agent offset text end]}]
+  [st {:keys [stream in part agent text end]}]
   (let [k [agent stream]]
     (if end
-      (-> st (update :streams dissoc k) (update :tabs update-vals #(update % :seen disj k)))
-      (let [held (get-in st [:streams k] 0)
-            ev (fn [t] (patch-event (h/escape t) (str "#" (render/key-id [stream])) "append"))
-            ;; a gap: text dropped before this proc (its sliding in-port); a tab's first message past 0: a start it missed
-            gap? (> offset held)
-            plain (ev (cond->> text gap? (str "…")))
-            ;; a tab's first sight of the part: its element into the in-flight one (drawn empty by its keyframe), then the text
-            first-sight (delay (str (when in (patch-event (h/html (ui/stream-part stream (or part "content"))) (str "#" (render/key-id [in])) "append"))
-                                    (ev (cond->> text (pos? offset) (str "…")))))
-            st (reduce-kv (fn [st t {:keys [ch view seen]}]
-                            (if (or (contains? (:stale st) t) (not= agent (chat-agent (:index st) view)))
-                              st
-                              (let [chunk (if (contains? seen k) plain @first-sight)
-                                    ok (a/offer! ch chunk)]
-                                (cond (true? ok) (-> st (update-in [:tabs t :seen] (fnil conj #{}) k) (update :bytes + (count chunk)))
-                                      (false? ok) (update st :tabs dissoc t)
-                                      :else (update st :stale conj t)))))
-                          st (:tabs st))]
-        (assoc-in st [:streams k] (max held (+ offset (count text))))))))
+      (let [in (get-in st [:streams k :in])
+            st (update st :streams dissoc k)]
+        (cond-> st (not-any? #(= in (:in %)) (vals (:streams st))) (update :tabs update-vals #(update % :has disj in))))
+      (let [e (get-in st [:streams k])
+            in (or in (:in e))
+            st (-> st (assoc-in [:streams k] {:in in :part (or part (:part e)) :text (or text "") :n (or (:n e) (:stream-n st 0))})
+                   (cond-> (nil? e) (update :stream-n (fnil inc 0))))
+            frame (delay (container-frame st in))]
+        (reduce-kv (fn [st t {:keys [view has]}]
+                     (if (or (contains? (:stale st) t) (not= agent (chat-agent (:index st) view)) (not (contains? has in)))
+                       st
+                       (offer-tab st t @frame)))
+                   st (:tabs st))))))
 
 (defn- streams-of-live
-  "St keeping only the streams, and what tabs saw of them, of agents whose process lives in root's index."
+  "St keeping only the streams, and the in-flight elements tabs hold, of agents whose process lives in root's index."
   {:malli/schema [:=> [:cat :map] :map]}
   [st]
   (let [live (into #{} (keep (fn [a] (when-not (c/gone-statuses (:status a)) (:key a)))) (vals (:index st)))
-        live? (fn [[agent]] (contains? live agent))]
-    (-> st (update :streams #(into {} (filter (comp live? key)) %))
-        (update :tabs update-vals #(update % :seen (fn [s] (into #{} (filter live?) s)))))))
+        st (update st :streams #(into {} (filter (fn [[[agent]]] (contains? live agent))) %))
+        ins (into #{} (map :in) (vals (:streams st)))]
+    (update st :tabs update-vals #(update % :has (fn [s] (into #{} (filter ins) s))))))
 
 (defn- keyframe!
   "The view's keyframe (its composed body, morphed by id) to every stale tab of it; with all?, to every tab of
@@ -309,7 +384,8 @@
                    (if (and (= view (:view tab)) (or all? (contains? (:stale st) k)))
                      (let [ok (a/offer! ch chunk)]
                        ;; the keyframe draws every stream's element empty: the tab has seen none of them
-                       (cond (true? ok) (-> st (update :stale disj k) (update :bytes + (count chunk)) (assoc-in [:tabs k :seen] #{}))
+                       ;; the keyframe redraws the view: a stream's in-flight element it draws is caught up (drawn)
+                       (cond (true? ok) (-> st (update :stale disj k) (update :bytes + (count chunk)) (drawn k chunk true))
                              ;; closed, or still full since it fell behind: the tab is gone (a
                              ;; live one's Datastar reconnects and gets a fresh keyframe)
                              :else (do (a/close! ch) (-> st (update :tabs dissoc k) (update :stale disj k)))))
@@ -413,7 +489,7 @@
        :ins {:from-render "patches, keyframes, pages, the agents' index"
              ;; any effect's in-flight text, addressed [:web :streams] (Flow's dynamic route, no conn): a sliding
              ;; buffer, so a put never waits (docs/render.md#in-flight-output-streams)
-             :streams "in-flight text {:stream :agent :offset :text}, then {:stream :agent :end true}"}
+             :streams "in-flight text {:stream :in :part :agent :text}, :text all of the part so far, then {:stream :agent :end true}"}
        :outs {:to-render "views open, page and keyframe requests" :to-api "UI calls as root's requests"}
        ;; socket writes and offers only; rendering is the render proc's
        :workload :io
