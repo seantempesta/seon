@@ -258,13 +258,15 @@
   ;; task seon.root/main-follows-its-source-tree: a root resuming its main imports its source
   ;; tree again when the tree reads otherwise than main's last import, replacing main's
   ;; program (seon.source/replace-tx), and imports nothing when it reads the same. Three
-  ;; boots on a main of their own on the test store (deleted at the end), the tree a scratch
+  ;; boots on one store of its own (removed at the end), the tree a scratch
   ;; repository under target/: commit A, then commit B with one function changed and one
   ;; removed, then B again. B's ns form also gains an alias that a new function uses (2026-10-22:
   ;; an import that ran a form before its namespace's new alias killed the root, `No such namespace`),
   ;; and the second boot runs that function: the binary, older than main's program, catches up at boot.
   ;; (seon.source-test/a-restart-catches-up held these two claims on a clone of the whole checkout,
-  ;; with two model turns, about 120 s; folded here 2026-11-08.)
+  ;; with two model turns, about 120 s; folded here 2026-11-08.) A store of its own, empty, with no wiki: on a
+  ;; branch of the seeded process store each boot's import of the one-file tree retracted the checkout's
+  ;; program first (docs/testing.md#a-root-costs-what-it-boots), 74 s for three boots
   (let [checkout (seon.config/checkout)
         tree (str checkout "/target/tmp/root-test-follow-" (random-uuid))
         tasks (str tree "-tasks")
@@ -275,9 +277,9 @@
                   (str/trim (:out (git "rev-parse" "HEAD"))))
         a "(ns follow.tree)\n\n(defn kept [] 1)\n\n(defn changed [] 1)\n\n(defn removed [] 1)\n"
         b "(ns follow.tree\n  (:require [clojure.set :as follow-set]))\n\n(defn kept [] 1)\n\n(defn changed [] 2)\n\n(defn uses-alias [] (follow-set/union #{1} #{2}))\n"
-        path (test-store)
-        main (str "root-test-" (random-uuid))
-        args ["--set" (str ":seon.config.source/root=" (pr-str tree)) "--set" ":seon.config.source/dirs=[\"src\"]"]
+        path (str tree "-store")
+        main "main"
+        args ["--set" (str ":seon.config.source/root=" (pr-str tree)) "--set" ":seon.config.source/dirs=[\"src\"]" "--set" ":seon.config.root/wiki-dirs=[]"]
         probe {:op :eval :agent "root"
                :code (str "(let [db @(:conn sys)] {:fact (:seon.root/source (datahike.api/pull db [:seon.root/source] [:seon.root/id :root]))"
                           " :text (seon.source/file-text db 'follow.tree)"
@@ -313,4 +315,4 @@
         (is (and (nil? (:inputs (:fact two))) (re-find #"binary was built from" (str (:unshared (:fact two)))))
             "the running binary is not built from this tree: no inputs to key agents' results by, and why")
         (is (= b (:text three))))
-      (finally (ts/drop-main! (test-store) main) (sh/sh "rm" "-rf" tree tasks (str path "-in") (str path ".log"))))))
+      (finally (sh/sh "rm" "-rf" tree tasks path (str path "-in") (str path ".log"))))))
