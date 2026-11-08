@@ -48,8 +48,19 @@ cd "$HERE"
 OLD=$(git rev-parse main)
 git merge --no-edit -q main || fail "merging main into $B conflicts: resolve, commit, run bin/land again"
 "$MAIN/bin/worktree" --sync "$HERE" >/dev/null || fail "syncing $HERE's submodules to the pins its branch records"
+# a message that says Completes: ns/name lands only with that task's entry gone from the tree it lands, read before
+# the proof (seon.task-files-test/no-shipped-task-is-merged-work reads main's messages, so it went red only after
+# a landing whose branch kept its entry, 2026-11-08)
+[[ -n $MSG ]] && for k in ${(f)"$(sed -nE 's/^Completes: ([^[:space:]]+)[[:space:]]*$/\1/p' "$MSG")"}; do
+  f=resources/seon/tasks/${k%/*}.edn
+  ! git grep -qF ":seon.task/name \"${k#*/}\"" HEAD -- "$f" || fail "the message says Completes: $k, but $f still holds its entry: remove it in this branch"
+done
 LOG=$HERE/target/land-$(date +%Y%m%dT%H%M%S).log
-nice -n 15 "$HERE/bin/prove" --merge > "$LOG" 2>&1; st=$?
+# the proof is a job, its own process group (bin/prove): a stop of the landing ends all of it, never leaving its
+# shards and check steps running (2026-11-08); waited as a job so the trap runs at once
+nice -n 15 "$HERE/bin/prove" --merge > "$LOG" 2>&1 & PJ=$!
+trap 'kill -TERM -$PJ 2>/dev/null || kill -TERM $PJ 2>/dev/null; fail "stopped: its proof was ended with it"' TERM INT HUP
+wait $PJ; st=$?; trap - TERM INT HUP
 grep -q "proved green already" "$LOG" && print "proved by an earlier prove of this very tree: merging, nothing run"
 grep -E '^RED |^FAILED ' "$LOG" | cut -c1-200 | head -12
 LINE=$(grep -E ' bin/prove --merge .*: MERGE (OK|FAILED)' "$LOG" | tail -1)
