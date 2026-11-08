@@ -1074,7 +1074,7 @@
 
 (defn root-session-tx
   "Root's session at boot, an ordinary agent made the ordinary way: an agent entity keyed \"root\" (a reserved key, as the user's is
-  its name), linked to root by :seon.agent/root, its pattern the agent's plus root's sessions (seon.render.ui/sessions reads them), and
+  its name), linked to root by :seon.agent/root, its pattern the agent's plus root (so its task list draws root's sessions, seon.render.ui/sessions), and
   the task request/root of the chat template (seon.template/request-tx), parked, its agent that entity, so a message wakes it and a boot
   makes no model call. Root's own entity is untouched: an entity's id derives from its identity, so it cannot take a key too. See
   docs/users.md#roots-session."
@@ -1082,9 +1082,8 @@
   [db]
   (let [tx (tpl/request-tx db (tpl/from (tpl/templates :user) {:seon.task/ns 'request :seon.task/name "root" :seon.task/plan root-session-plan}))
         pattern (conj (render/schema-property :seon.db/agent-fact :seon.ctx/pattern)
-                      {[:seon.agent/root :as :root] [{[:seon.agent/_root :as :agents :limit :seon.config.ctx/window :reverse true]
-                                                      [:seon.agent/key :seon.agent/id :seon.agent/status
-                                                       {[:seon.agent/task :as :task] [:seon.task/id :seon.task/outcome :seon.task/reason :seon.task/plan]}]}]})]
+                      ;; root, whose sessions its task list draws from the db (seon.render.ui/sessions)
+                      {[:seon.agent/root :as :root] [:seon.root/id]})]
     (if (contract/error? tx)
       (throw (ex-info (str "root's session task was refused: " (:seon.error/message tx)) tx))
       (into [{:db/id "root-session" :seon.agent/key "root" :seon.agent/root [:seon.root/id :root] :seon.ctx/pattern pattern}]

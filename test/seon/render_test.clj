@@ -2230,6 +2230,10 @@
         db (d/db-with db0 [{:seon.task/id "request/greet" :seon.task/ns 'request :seon.task/name "greet" :seon.task/plan "Say hi.\nOne line." :seon.task/kind :user
                             :seon.task/branch :task-request-greet :seon.task/outcome :parked}
                            {:seon.agent/key "b1/a2" :seon.agent/id :a2 :seon.agent/root [:seon.root/id :root] :seon.agent/task [:seon.task/id "request/greet"]}
+                           ;; a session of an earlier boot: a new boot unlinks it from root (seon.task/earlier-agents-tx), and root's session still sees it
+                           {:seon.task/id "request/older" :seon.task/ns 'request :seon.task/name "older" :seon.task/plan "An older ask." :seon.task/kind :user
+                            :seon.task/branch :task-request-older :seon.task/outcome :parked}
+                           {:seon.agent/key "b0/a9" :seon.agent/id :a9 :seon.agent/task [:seon.task/id "request/older"]}
                            ;; the person asks root's session something, as the home box will
                            {:seon.message/from "sean" :seon.message/to [[:seon.agent/key "root"]] :seon.message/body "What is running?" :seon.message/sent-ms 1}])
         db (d/db-with db [{:seon.agent/key "root" :seon.agent/task [:seon.task/id "request/root"]}])
@@ -2239,6 +2243,8 @@
         root-text (part "root")]
     (is (str/includes? root-text "/agent/b1/a2") "root's session reads the other session by its address")
     (is (str/includes? root-text "Say hi.") "what it works on")
+    (is (str/includes? root-text "/agent/b0/a9") "and a session of an earlier boot, which root no longer links")
+    (is (not (str/includes? root-text "/agent/root")) "but not itself")
     (is (not (str/includes? root-text ":seon.config.")) "and none of root's config")
     (is (not (str/includes? (part "b1/a2") "Sessions")) "another agent reads no sessions")
     ;; its status answers: it threw "Duplicate key: root" when a set literal held "root" and the agent's own key, root's session's
