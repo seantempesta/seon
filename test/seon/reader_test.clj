@@ -108,3 +108,12 @@
   (is (nil? (reader/definition-head "(def x [1 2 3])" 'user)) "a def holding a vector is no function: no head")
   (is (nil? (reader/definition-head "(defmulti m \"Dispatch.\" [:kind])" 'user)) "nor is a defmulti"))
 
+
+(deftest words-and-forms-replays-the-repairs-to-find-each-line
+  ;; docs/users.md#four-interfaces: the repairs are an edit log, each :at where it went when made, and a closer put back at the end of the
+  ;; code before a text line moves that line; words-and-forms finds each line by replaying what came after (an audit, 2026-11-08:
+  ;; "(foo\nhello there" sent its words to the REPL as a comment)
+  (is (= "(foo)\n;; hello there" (:text (reader/forgive "(foo\nhello there"))))
+  (is (= {:words "hello there" :forms "(foo)"} (reader/words-and-forms "(foo\nhello there")) "the words go as words, the form as a form")
+  (is (= {:words "" :forms "(+ 1 2)"} (reader/words-and-forms "(+ 1 2)")) "a form alone")
+  (is (= {:words "hi there" :forms ""} (reader/words-and-forms "hi there")) "words alone"))
