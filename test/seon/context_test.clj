@@ -1985,7 +1985,7 @@
           d (d/db-with d [{:seon.message/id "m1" :seon.message/from "sean" :seon.message/body "Make it take a name." :seon.message/to [[:seon.agent/key "b/a1"]]}])
           st (status-at d "demo/n" {})]
       (is (contains? (steps st) :fold-message) "a message from the person after the plan last changed")
-      (is (str/includes? (h/html (ui/status-hiccup {} st)) "came after your plan last changed") "and the status says it, as the page and the model read it")
+      (is (str/includes? (seon.web.html/html (seon.render.ui/status-hiccup {} st)) "came after your plan last changed") "and the status says it, as the page and the model read it")
       (let [d2 (d/db-with d [{:seon.task/id "demo/n" :seon.task/plan "Make demo/f double, by name."}])]
         (is (not (contains? (steps (status-at d2 "demo/n" {})) :fold-message)) "the plan changed since: not that step")))))
 
