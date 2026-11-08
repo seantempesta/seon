@@ -132,10 +132,10 @@ Change (Context's read, 2026-11-08):
 - Root's session works a task of its own on a branch of its own (never writing main: root's writer is main's one writer). The task educates it, the same data every agent's does (owner, 2026-11-08: \"Of course root needs it's own special task we need to educate it and it needs to have different docs pulled in too\"): its plan says what root's session is for, and the docs it reads are its plan's citations and its :seon.agent/system sections (seon.ctx.wire/agent-system-text). A message wakes it as any waiting agent's does (seon.agent/every-message-root-writes-wakes), and a reply with no call parks it.
 - root-fact's pattern names what root's chat reads (its agents' window with each one's task and standing, its calls, messages and evals) instead of *; the page keeps its own reads.
 - root-ctx draws, for the model, the system message and conversation list render-ctx draws, with its own page lists (seon.ctx.wire/request refuses a tree with no system message).
-- It launches with my.task/launch! and talks through messages, as any agent does.
+- What it changes on main goes through root's writer as any agent's does, and by no other path: a session it starts by my.task/launch!, a message by seon.root/message!.
 - Deletes seon.render.proc/with-context and :seon.config.render/root-context-budget (a cut of root's text): its model text is the wire's reading of its tree.
 
-Proofs, red first: a message to root's key starts its session on its standing task and its reply is on its page; root's request holds its agents' standing and no :seon.config.* attribute; a launch from root's session makes a task whose agent tells root how it ends."
+Proofs, red first: a message to root's key starts its session on its standing task and its reply is on its page; root's request holds its agents' standing and no :seon.config.* attribute, and a system message from its task's :system sections; a launch from root's session makes a task whose agent tells root how it ends."
   :seon.task/proofs #{seon.root-test/a-message-to-root-wakes-its-session
                       seon.ctx.wire-test/roots-request-is-its-sessions-not-its-config
                       seon.root-test/roots-session-launches-a-session}}
