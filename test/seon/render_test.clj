@@ -501,7 +501,7 @@
   "a3's page's units as its process draws them (seon.repl/render-ctx), drawn here from branch: what the
   render proc's {:op :render} ask is answered with."
   [branch]
-  (let [w (a3-walk branch)] (try {:units (r/placed-units w)} (finally (r/dispose-walk! w)))))
+  (let [w (a3-walk branch)] (try {:t (:max-tx branch) :units (r/placed-units w)} (finally (r/dispose-walk! w)))))
 
 (defn- component-html
   "The html of the component whose element id is id in a3's page drawn from branch, however deep it sits (an eval is a
@@ -1792,6 +1792,22 @@
         skel (get-in st [:views [:chat :a3] :skeleton])]
     (is (str/includes? skel "id=\"p-task\"") "the page has the task's list's place")
     (is (str/includes? skel "<!--s:task-->") "and the task's component in it")))
+
+(deftest a-working-agents-page-follows-its-branch
+  ;; owner, 2026-11-08: "the user message doesn't show up until the agent has finished their turn". A live agent draws its own
+  ;; page (seon.render.proc/ask-parts), but its process is busy for the whole run, so its answer comes at the run's end: until
+  ;; then root draws the page from the branch it already read, and the agent's parts count only when drawn at that t or later
+  (let [[main branch _] (paged-dbs)
+        k (seon.task/agent-key "b1" :a3)
+        o (volatile! {})
+        st (#'p/answered (first (#'p/pass-view (proc-state main branch) [:chat :a3])) o [:parts :a3] (drawn-parts branch))
+        branch2 (d/db-with branch (turn-2-eval-tx k "(f 4)"))
+        ;; root read the branch again (seon.render.proc/ask-branches); the agent has not answered since
+        st2 (-> st (assoc-in [:branches [:chat :a3] :db] branch2) (assoc-in [:branch-reads :task-demo-f :db] branch2))
+        [st3 _] (#'p/pass-view st2 [:chat :a3])]
+    (is (contains? (get-in st3 [:views [:chat :a3] :units]) "conversation-turn-2") "the turn written since its process drew is on the page")
+    (let [[st4 _] (#'p/pass-view (#'p/answered st3 (volatile! {}) [:parts :a3] (drawn-parts branch2)) [:chat :a3])]
+      (is (get-in st4 [:views [:chat :a3] :units "conversation-turn-2" :input :own?]) "and its process's drawing takes over once it answers at that t"))))
 
 (deftest a-new-member-is-an-append
   ;; a keyed component new in its list, its parent's output otherwise unchanged, is sent as an append
@@ -3127,6 +3143,14 @@
           banner (:html (second (filter #(= "#p-tiles" (:container %)) (:seon.render/units (#'p/page-value st :root)))))]
       (is (= 4 (count-of (seon.problems/health main1 fold))) "root counts the signature four times")
       (is (str/includes? banner "eval ×4") (str "the banner names root's count: " banner))
+      ;; the audit of baaa7e10a8: the same main asked again after three more repeats, which only the fold holds, answers the new count
+      (let [fold2 (reduce seon.error/fold fold (map occ (range 4 7)))
+            [_ asked2] (#'seon.root/api-proc (assoc api :seon.root/errors fold2) :ext {:op :health :db main1 :p (promise)})
+            [st2 out] (reduce (fn [[st _] m] (#'p/render-proc st :from-web m)) [st nil] (get asked2 [:render :from-web]))
+            answered (some #(when (= :health-answer (:op %)) (:r %)) (get out :to-api))
+            banner2 (:html (second (filter #(= "#p-tiles" (:container %)) (:seon.render/units (#'p/page-value st2 :root)))))]
+        (is (= 7 (count-of answered)) (str "the api's answer counts all seven: " (pr-str (count-of answered))))
+        (is (str/includes? banner2 "eval ×7") (str "and so does the banner: " banner2)))
       (r/dispose-walk! (get-in st [:root-walk :w]))))))
 
 (clojure.test/deftest the-config-panel-names-each-source
