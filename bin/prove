@@ -25,6 +25,13 @@
 # for the merge commit's message: the sha, the plan's counts, the verdicts, the reds, the src delta of
 # HEAD against its first parent and the keys left out against main's last merge message.
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
+# a run is a process group of its own, and a stop (TERM, INT, HUP: a timeout, a ^C, bin/land stopped) ends the
+# whole group, so nothing it started outlives it (2026-11-08: a stopped landing left its prove, shards and check
+# steps running). A prove started inside a run (a test's nested gate) stays in that run's group.
+if [[ -z ${SEON_RUN_GROUP:-} ]]; then
+  export SEON_RUN_GROUP=$$; exec perl -e 'setpgrp(0,0); exec @ARGV or die "exec: $!"' -- "$0" "$@"
+fi
+[[ $SEON_RUN_GROUP == $$ ]] && trap 'trap - TERM INT HUP; kill -TERM -$$ 2>/dev/null; exit 143' TERM INT HUP
 # merge_verdict OUT ST: the merge's one verdict from prove's exit status alone (its steps include
 # contracts and smoke), with the reds named from its log in OUT; its line printed for the merge
 # commit's message (git keeps every merge's numbers). Exits 0 for MERGE OK. (bin/prove --merge-verdict OUT ST runs it alone.)
@@ -103,9 +110,11 @@ if (( st == 0 )) && [[ -s $OUT/slow ]]; then
   nice -n 15 "$ROOT/bin/test" ${=$(<$OUT/slow)} || st=1
 fi
 if (( st == 0 )); then echo "PROVE OK"; else echo "PROVE FAILED"; fi
-exit $st
-) 2>&1 | tee "$OUT/prove.log"
-st=${pipestatus[1]}
+print $st > "$OUT/prove.st"; exit $st
+) 2>&1 | tee "$OUT/prove.log" &
+# waited as a job, not in the foreground: a trap runs at once only while the shell waits on a job (a foreground
+# pipeline holds it until it ends); a run that ended without its status (stopped) is red
+wait; st=$(<"$OUT/prove.st" 2>/dev/null) || st=1
 # the marker: this tree, this kind of run, green (a red, or a tree edited during the run, writes none)
 if (( st == 0 )) && [[ -n $KEY && $("$ROOT/bin/tree" "$ROOT") == $TREE ]]; then
   mkdir -p "${MARK:h}" && print -r -- "$(date '+%Y-%m-%d %H:%M') ${OUT:t}" > "$MARK.$$" && mv "$MARK.$$" "$MARK"
