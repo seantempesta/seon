@@ -525,7 +525,7 @@
                                        "(clojure.test/deftest t (clojure.test/is true))"
                                        {:op :eval :agent "root" :code (str "(let [db @(:conn sys)] @(c/transact-main! sys ((my.test/code '" ns ".behind \"(ns " ns ".behind) (defn f \\\"One.\\\" {:malli/schema [:=> [:cat] :int]} [] 1)\") db)))")}
                                        {:op :done :agent agent}])
-                                    {:own-root? true})]
+                                    (at/merging))]
     (is (not (clojure.string/includes? (str (:line done)) "behind")) (pr-str done))
     (is (clojure.string/includes? (str (:line done)) ":merged") (pr-str done))))
 

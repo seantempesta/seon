@@ -181,7 +181,7 @@
   "The verdict cache directory of the root the merging tests share (a delay: one per test process)."
   (delay (str (seon.config/checkout) "/target/tmp/verdicts-merge-" (random-uuid))))
 
-(defn- merging
+(defn merging
   "in-agent's options for a test whose agent merges into main (which moves the program every later test runs):
   a root for the tests that merge, all alike, each on test names of its own, and a verdict cache the tests may
   read and write (merge-cache)."
@@ -372,23 +372,6 @@
                  " (pr-str {:children (count @pids) :pass (:pass r)}))")
         [_ _ _ _ _ r] (in-agent (conj (mapv form (range 5)) run))]
     (is (= {:children 1 :pass 5} (some-> (:value r) clojure.edn/read-string)))))
-
-(deftest a-test-child-holds-only-its-own-pipe
-  ;; a child forked after a sibling holds no copy of the sibling's pipe,
-  ;; whose end a child must never keep (the agent's death would not reach the sibling by SIGIO while any copy is open). Each
-  ;; of two children counts the descriptors open in it (fcntl F_GETFD) in its test and writes the count to a file: a child
-  ;; holding a sibling's pipe end has one more than the child forked before it
-  (let [checkout (seon.config/checkout)
-        dir (str checkout "/target/runs/fds-" (random-uuid))
-        _ (.mkdirs (java.io.File. ^String dir))
-        count-in (fn [n] (str "(ns fds" n "-proof (:require [clojure.test :refer [deftest is]]))"
-                              " (deftest p (let [c (count (filter #(not (neg? (seon.sock/c-fcntl % 1 0))) (range 256)))] (spit " (pr-str (str dir "/" n)) " c)) (is true))"))
-        form (str "(do " (count-in 0) " " (count-in 1) " (seon.agent/run-tests-forked 1000000000 '#{fds0-proof/p fds1-proof/p} :turn))")
-        [run] (in-agent [form] tuned)
-        counts (mapv #(parse-long (ts/output (str dir "/" %))) [0 1])]
-    (sh/sh "rm" "-rf" dir)
-    (is (every? pos-int? counts) (str "both children counted: " (pr-str counts) " " (pr-str run)))
-    (is (apply = counts) (str "the two children hold the same descriptors: " (pr-str counts)))))
 
 ;; See docs/reconcile.md#a-task-holds-how-its-work-ended
 (deftest a-wake-that-ran-no-turn-has-no-end
@@ -621,15 +604,26 @@
 (deftest a-test-run-is-dealt-across-children-and-loses-none
   ;; task seon.agent/a-test-run-streams-its-reports (the deal): the selected tests are dealt by seon.proofs/shards into
   ;; :seon.config.proofs/jobs test children, each its own fork; every test reports once, and a death in one child costs
-  ;; only the test it ran. Eight tests of four namespaces and one that dies, jobs 2
-  (let [ns-form (fn [n] (str "(ns app.par" n "-test (:require [clojure.test :refer [deftest is]])) (deftest a (is (= 1 1))) (deftest b (is (= 2 2)))"
+  ;; only the test it ran. Eight tests of four namespaces and one that dies, jobs 2.
+  ;; And a child forked after a sibling holds no copy of the sibling's pipe,
+  ;; whose end a child must never keep (the agent's death would not reach the sibling by SIGIO while any copy is open). Each
+  ;; namespace's first test counts the descriptors open in its child (fcntl F_GETFD) and writes the count to a file: a child
+  ;; holding a sibling's pipe end has one more than the child forked before it
+  (let [dir (str (seon.config/checkout) "/target/runs/fds-" (random-uuid))
+        _ (.mkdirs (java.io.File. ^String dir))
+        ns-form (fn [n] (str "(ns app.par" n "-test (:require [clojure.test :refer [deftest is]])) (deftest a (spit " (pr-str (str dir "/" n))
+                             " (count (filter #(not (neg? (seon.sock/c-fcntl % 1 0))) (range 256)))) (is (= 1 1))) (deftest b (is (= 2 2)))"
                              (when (= n 3) " (deftest dies (seon.lib/c-exit 7))")))
         run #(str "(let [pids (atom []) r (seon.agent/run-tests-forked 100000000 #{} :main (fn [p] (swap! pids conj p)) '#{app.par0-test app.par1-test app.par2-test app.par3-test})]"
                   " (pr-str {:children (count (distinct @pids)) :pass (:pass r) :error (:error r) :died (vec (map :var (filter :exit (:reports r))))"
                   "          :ran (vec (sort (map :var (filter #(= :pass (:type %)) (:reports r)))))}))")
         [_ _ _ _ two] (in-agent (conj (mapv ns-form (range 4)) (run))
                                       tuned)
-        v #(some-> (:value %) clojure.edn/read-string)]
+        v #(some-> (:value %) clojure.edn/read-string)
+        counts (mapv #(parse-long (ts/output (str dir "/" %))) (range 4))]
+    (sh/sh "rm" "-rf" dir)
+    (is (every? pos-int? counts) (str "every child counted: " (pr-str counts) " " (pr-str two)))
+    (is (apply = counts) (str "the children hold the same descriptors: " (pr-str counts)))
     (is (<= 2 (:children (v two))) "at least two children forked (a death forks a new one for what its child had left)")
     (is (= [8 1 ["#'app.par3-test/dies"]] ((juxt (comp count :ran) :error :died) (v two))) "all eight passed once, and the death cost only the test it ran")))
 
@@ -960,64 +954,38 @@
   ;; first search finds the index held for its db and builds none, and its FTS5 table, an in-memory SQLite database,
   ;; answers in the forked child. The bytes of the first search's section reads are leaf decoding in the child,
   ;; which depends on the store's layout, so they are not this test's claim.
-  (let [held (last (in-agent [(str "(def held (fn [] (let [d (:db @seon.agent/state) [at ix] @@#'seon.doc/indexes] {:current (= at [(:hash d) (:max-tx d)]) :ix ix})))")
+  ;; and, after that first search, an agent's merge of main keeps the index current (a-merge-of-main-keeps-the-search-index-current):
+  ;; docs/vector.md#search: an agent's writes carry the text index (seon.doc/carry-index!), so a search after one rebuilds nothing; the merge's own record of its base was a write that skipped it, so the next search after any merge rebuilt the index, about 20 MB, seen as a flake
+  (let [current "(let [d (:db @seon.agent/state) [was _] @@#'seon.doc/indexes] (= was [(:hash d) (:max-tx d)]))"
+        results (in-agent [(str "(def held (fn [] (let [d (:db @seon.agent/state) [at ix] @@#'seon.doc/indexes] {:current (= at [(:hash d) (:max-tx d)]) :ix ix})))")
                             "(def before (held))"
                             "(def rows (count (my.agent/grep \"accumulated\")))"
                             "(def after (held))"
-                            "{:rows rows :current-before (:current before) :current-after (:current after) :same-index (identical? (:ix before) (:ix after)) :held? (some? (:ix before))}"]
+                            "{:rows rows :current-before (:current before) :current-after (:current after) :same-index (identical? (:ix before) (:ix after)) :held? (some? (:ix before))}"
+                            {:op :eval :agent "root" :code "@(seon.root/transact-main! sys (vec ((my.test/code 'app.idx \"(ns app.idx (:refer-clojure :exclude [defn defn-]) (:require [seon.contract :refer [defn defn-]]))\\n(defn f \\\"A var.\\\" {:malli/schema [:=> [:cat] :int]} [] 1)\\n\") @(:conn sys))))"}
+                            "(seon.agent/merge-main! #{})"
+                            current]
                            ;; a root of its own: the slot is one per process, and a shard's shared root has searched before
-                           {:group :pristine}))
+                           {:group :pristine})
+        held (nth results 4) merged (nth results 6) after-merge (nth results 7)
         {:keys [rows current-before current-after same-index held?]} (:value held)]
     (is held? "the agent inherited an index")
     (is current-before "the index it inherited is the one held for its db")
     (is same-index "its first search built no index: the slot holds the same one after it")
     (is current-after "and still the one held for its db")
-    (is (pos? rows) "the query of the index it inherited answers in the forked child")))
-
-(deftest a-merge-of-main-keeps-the-search-index-current
-  ;; docs/vector.md#search: an agent's writes carry the text index (seon.doc/carry-index!), so a search after one rebuilds nothing; the merge's own record of its base was a write that skipped it, so the next search after any merge rebuilt the index, about 20 MB, seen as a flake
-  (let [current "(let [d (:db @seon.agent/state) [was _] @@#'seon.doc/indexes] (= was [(:hash d) (:max-tx d)]))"
-        [_ before _ merged after] (in-agent [(str "(do (my.agent/grep \"accumulated\") nil)")
-                                             current
-                                             {:op :eval :agent "root" :code "@(seon.root/transact-main! sys (vec ((my.test/code 'app.idx \"(ns app.idx (:refer-clojure :exclude [defn defn-]) (:require [seon.contract :refer [defn defn-]]))\\n(defn f \\\"A var.\\\" {:malli/schema [:=> [:cat] :int]} [] 1)\\n\") @(:conn sys))))"}
-                                             "(seon.agent/merge-main! #{})"
-                                             current]
-                                            {:group :pristine})]
-    (is (true? (:value before)) (pr-str before))
+    (is (pos? rows) "the query of the index it inherited answers in the forked child")
     (is (seq (:applied (:value merged))) (str "the merge brought something: " (pr-str merged)))
-    (is (true? (:value after)) "the index is at the db the merge left")))
+    (is (true? (:value after-merge)) (str "the index is at the db the merge left: " (pr-str after-merge)))))
 
-(deftest an-agent-with-no-task-resumes-a-kept-branch
+(deftest a-resumed-branchs-agent-is-this-boots
+  ;; one kept branch, one spawn, three claims about an agent resumed onto it.
   ;; found by session global-ids, 2026-10-23: an agent spawned with no task onto a branch the
   ;; store already holds (a kept branch; e2e's fresh agent on a store an earlier run left)
   ;; died in its init, giving seon.task/onto-tx a nil task, and a wait for its :ready never
-  ;; ended. A kept branch takes its task from main only when the agent has one
-  (let [[r] (in-agent (fn [{:keys [ns]}]
-                        (let [kept (str ":task-" ns "-kept")]
-                          [{:op :eval :agent "root"
-                            :code (spawn-kept-code kept (str "(datahike.api/branch! (:conn sys) m b)") ":ready")}]))
-                      (merging))]
-    (is (= :ready (:value r)) (pr-str r))))
-
-(deftest a-resumed-branchs-agent-is-this-boots
+  ;; ended. A kept branch takes its task from main only when the agent has one.
   ;; page's browser round, 2026-10-23: an agent on a kept branch recorded its evaluations under an
   ;; earlier boot's agent (its key read root's boot from the branch, whose root fact is as old as
-  ;; the branch). Its key is root's boot as main holds it
-  (let [[r] (in-agent (fn [{:keys [ns]}]
-                        (let [kept (str ":task-" ns "-kept")]
-                          [{:op :eval :agent "root"
-                            :code (spawn-kept-code kept
-                                                   (str "(datahike.api/branch! (:conn sys) m b)"
-                                                        " (let [bc (datahike.api/connect (assoc (:cfg sys) :branch b))]"
-                                                        "   (datahike.api/transact bc [{:seon.root/id :root :seon.root/boot \"an-earlier-boot\"}]) (datahike.api/release bc))")
-                                                   ;; the agent's own key, asked while it is up
-                                                   "[:ready (:boot sys) (:text @(seon.root/submit! sys ag \"(:key @seon.agent/state)\"))]")}]))
-                      (merging))
-        [status boot text] (:value r)]
-    (is (= :ready status) (pr-str r))
-    (is (str/includes? (str text) (str "\"" boot "/")) (str "its key names this boot: " text))))
-
-(deftest a-resumed-branch-holds-what-main-gained
+  ;; the branch). Its key is root's boot as main holds it.
   ;; step E run #11 (2026-10-23): a kept branch made before main imported test/ was resumed,
   ;; and its agent held seon.ctx.wire-test with no vars (seon.agent/init! unmapped every
   ;; definition main had that the branch did not), so the design never reached its proof's
@@ -1031,11 +999,17 @@
                             :code (spawn-kept-code kept
                                                    (str (src k "(defn h [] 1)")
                                                         " (datahike.api/branch! (:conn sys) m b)"
+                                                        " (let [bc (datahike.api/connect (assoc (:cfg sys) :branch b))]"
+                                                        "   (datahike.api/transact bc [{:seon.root/id :root :seon.root/boot \"an-earlier-boot\"}]) (datahike.api/release bc))"
                                                         " " (src g "(defn g [] 7)")
                                                         " " (src k "(defn h [] 2)"))
-                                                   (str "(:text @(seon.root/submit! sys ag \"[(" g "/g) (" k "/h)]\"))"))}]))
-                      (merging))]
-    (is (str/includes? (str (:value r)) ":value [7 2]") "a var main added, and main's redefinition of one the branch left alone")))
+                                                   (str "[:ready (:boot sys) (:text @(seon.root/submit! sys ag \"(:key @seon.agent/state)\"))"
+                                                        " (:text @(seon.root/submit! sys ag \"[(" g "/g) (" k "/h)]\"))]"))}]))
+                      (merging))
+        [status boot text gained] (:value r)]
+    (is (= :ready status) (pr-str r))
+    (is (str/includes? (str text) (str "\"" boot "/")) (str "its key names this boot: " text))
+    (is (str/includes? (str gained) ":value [7 2]") "a var main added, and main's redefinition of one the branch left alone")))
 
 (deftest a-failure-marked-through-the-server-holds-the-task
   ;; owner, 2026-10-22: a failure is task data and root reacts to it. The agent marks its
@@ -1129,7 +1103,9 @@
 
 (deftest an-outside-agent-with-a-green-proof-finishes
   ;; root (2026-10-23): an outside agent that writes its proof green and hands its task back is
-  ;; judged by the end it wrote, and its task finishes, not held
+  ;; judged by the end it wrote, and its task finishes, not held.
+  ;; task seon.reconcile/the-judge-asks-the-test-service: the judge at an agent's end asks the test
+  ;; service (seon.prove), so its verdicts are cached by digest like any test run's
   (let [[_ _ t _ done seen] (in-agent (fn [{:keys [agent task ns]}]
                                         [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")}
                                          (str "(ns " ns "-test (:require [clojure.test :refer [deftest is]]))")
@@ -1138,31 +1114,15 @@
                                          {:op :eval :agent "root"
                                           :code (str "(do (seon.await/await-quiet sys (inc t-before-done))"
                                                      " [(select-keys (seon.task/task @(:conn sys) " (pr-str task) ") [:seon.task/outcome :seon.task/reason])"
-                                                     "  (seon.reconcile/task-state (seon.reconcile/index @(:conn sys)) " (pr-str task) ")])")}])
+                                                     "  (seon.reconcile/task-state (seon.reconcile/index @(:conn sys)) " (pr-str task) ")"
+                                                     "  (some-> (java.io.File. (str (seon.config/value :seon.config.proofs/results-dir) \"/" ns "-test\")) .list vec)])")}])
                                       (assoc (merging) :proofs (fn [{:keys [ns]}] #{(symbol (str ns "-test") "t")})))
-        [t-end state] (:value seen)]
+        [t-end state cached] (:value seen)]
     (is (re-find #":value t[0-9a-f]+-test/t" (:text t)) (pr-str t))
     (is (re-find #":outcome :(ready|gate|done|merged)" (:line done)) (str "the answer is the verdict line: " (pr-str done)))
     (is (#{:done :merged} (:seon.task/outcome t-end)) (pr-str t-end))
-    (is (#{:done :merged} state) (str "the task finishes, never held for root: " state))))
-
-(deftest the-judge-asks-the-test-service
-  ;; task seon.reconcile/the-judge-asks-the-test-service: the judge at an agent's end asks the test
-  ;; service (seon.prove), so its verdicts are cached by digest like any test run's
-  (let [[_ _ _ _ _ seen] (in-agent (fn [{:keys [agent task ns]}]
-                                     [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")}
-                                      (str "(ns " ns "-test (:require [clojure.test :refer [deftest is]]))")
-                                      "(deftest t (is (= 2 (inc 1))))"
-                                      before-done {:op :done :agent agent}
-                                      {:op :eval :agent "root"
-                                       :code (str "(do (seon.await/await-quiet sys (inc t-before-done))"
-                                                  " (let [db @(:conn sys)]"
-                                                  "  [(some-> (java.io.File. (str (seon.config/value :seon.config.proofs/results-dir) \"/" ns "-test\")) .list vec)"
-                                                  "   (:seon.task/outcome (seon.task/task db " (pr-str task) "))]))")}])
-                                   (assoc (merging) :proofs (fn [{:keys [ns]}] #{(symbol (str ns "-test") "t")})))
-        [cached outcome] (:value seen)]
-    (is (= ["t"] cached) (str "the judge's verdict is cached at the test's digest: " (pr-str seen)))
-    (is (#{:done :merged} outcome))))
+    (is (#{:done :merged} state) (str "the task finishes, never held for root: " state))
+    (is (= ["t"] cached) (str "the judge's verdict is cached at the test's digest: " (pr-str seen)))))
 
 (deftest an-agent-finds-no-repository
   ;; owner, 2026-10-22: no git in agents, and no source-file editing as the way to develop

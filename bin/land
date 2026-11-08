@@ -31,6 +31,7 @@ for i in 1 2 3 4 5; do
   "$MAIN/bin/worktree" --sync "$HERE" >/dev/null || fail "syncing $HERE's submodules to the pins its branch records"
   LOG=$HERE/target/land-$(date +%Y%m%dT%H%M%S).log
   nice -n 15 "$HERE/bin/prove" --merge > "$LOG" 2>&1; st=$?
+  grep -q "proved green already" "$LOG" && print "proved by an earlier prove of this very tree: merging, nothing run"
   grep -E '^RED |^FAILED ' "$LOG" | cut -c1-200 | head -12
   LINE=$(grep -E ' bin/prove --merge .*: MERGE (OK|FAILED)' "$LOG" | tail -1)
   (( st == 0 )) && [[ $(tail -1 "$LOG") == "MERGE OK" ]] || fail "the proof is red: $LOG"

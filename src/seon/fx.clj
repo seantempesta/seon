@@ -284,7 +284,9 @@
   (cond (= p "resources/seon/system.edn") :seon.env/system
         (or (str/starts-with? p "resources/public/") (str/starts-with? p "web/")) :seon.env/web
         (= p "deps.edn") :seon.env/deps
-        (str/starts-with? p "bin/") :seon.env/bin
+        ;; .gitmodules: read by git and the bin/ scripts that sync submodules; each pin is its own input
+        ;; (pin-class), so in :env, which every test takes, a new submodule moved every test's digest
+        (or (str/starts-with? p "bin/") (= p ".gitmodules")) :seon.env/bin
         (str/starts-with? p "resources/seon/schemas/") :seon.env/schemas
         ;; the program's text, which a test reading the whole program (a docstring, a form's source) reads
         (and (str/ends-with? p ".clj") (or (str/starts-with? p "src/") (str/starts-with? p "test/"))) :seon.env/src))
