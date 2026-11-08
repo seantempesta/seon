@@ -3162,3 +3162,26 @@
           html (h/html (ui/config-panel {:seon.config/sources sources} (seon.config/from-db db)))]
       (is (= "--set" (:seon.config.agent/max-running sources)))
       (is (str/includes? html "from --set") "the panel draws the layer main records")))))
+
+(deftest a-call-in-flight-draws-its-stream-element-until-its-reply
+  ;; docs/render.md#in-flight-output-streams: while the model answers, the turn draws one busy element, its id the call's,
+  ;; for the page alone; the committed reply, or its error, draws in its place, and an outside call never has one
+  (let [[db aid] (cited-world)
+        k (:seon.agent/key (d/pull db [:seon.agent/key] aid))
+        cid (str k "/1")
+        at (fn [db] (h/html (ui/conversation-turn {:seon.ctx/ctx (:tree (seon.ctx/build db aid :b)) :seon.db/db db :key 1})))
+        open (d/db-with db [{:db/id aid :seon.agent/turn 1}
+                            {:seon.model-call/id cid :seon.model-call/agent aid :seon.model-call/n 1 :seon.model-call/origin :model}])
+        busy (at open)
+        sel (seon.render/key-id [cid])]
+    (is (str/includes? busy (str "id=\"" sel "\"")) (str "the in-flight element, its id the call's: " busy))
+    (is (str/includes? busy "aria-busy=\"true\"") "busy while the model answers")
+    (is (empty? (mapcat second (seon.render/hiccup-wire (ui/conversation-turn {:seon.ctx/ctx (:tree (seon.ctx/build open aid :b)) :seon.db/db open :key 1}))))
+        "the model reads nothing of it")
+    (let [done (at (d/db-with open [{:seon.model-call/id cid :seon.model-call/reply "Found it."}]))]
+      (is (str/includes? done "Found it.") "the committed reply")
+      (is (not (str/includes? done "aria-busy")) "in its place"))
+    (is (not (str/includes? (str (at (d/db-with open [{:seon.model-call/id cid :seon.model-call/error {:seon.error/type :seon.model/transport :seon.error/message "gone"}}]))) "aria-busy"))
+        "an error committed ends it too")
+    (is (not (str/includes? (str (at (d/db-with open [{:seon.model-call/id cid :seon.model-call/origin :outside}]))) "aria-busy"))
+        "an outside agent's call streams nothing")))

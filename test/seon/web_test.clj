@@ -235,3 +235,18 @@
       (is (= 1 (:streams (#'w/stats st))) "an agent whose process ended takes its open streams with it")
       (is (not-any? #(= "b1/a1" (first %)) (mapcat :seen (vals (:tabs st)))) "no tab keeps what it saw of them")
       (is (some #(= ["b1/a3" "a3/1/reasoning"] %) (mapcat :seen (vals (:tabs st)))) "a live agent's stream stays seen"))))
+
+(deftest a-tabs-first-message-of-a-part-adds-its-element
+  ;; docs/render.md#in-flight-output-streams: the part's element (seon.render.ui/stream-part) goes into the in-flight one
+  ;; the render drew, then its text; the next message is the text alone
+  (let [[st a1] (stream-tabs)
+        m {:stream "b1/a1/3/0/eval-0/code" :in "b1/a1/3" :part "code" :agent "b1/a1"}
+        [st _] (#'w/web-proc st :streams (assoc m :offset 0 :text "(+ 1"))
+        first-chunk (a/poll! a1)]
+    (is (str/includes? first-chunk "data: selector #b1_2Fa1_2F3\ndata: mode append\ndata: elements <div class=\"stream-part\" data-part=\"code\" id=\"b1_2Fa1_2F3_2F0_2Feval-0_2Fcode\"></div>")
+        (str "the part's element into the call's: " first-chunk))
+    (is (str/includes? first-chunk "data: selector #b1_2Fa1_2F3_2F0_2Feval-0_2Fcode\ndata: mode append\ndata: elements (+ 1\n") "then its text")
+    (let [[_ _] (#'w/web-proc st :streams (assoc m :offset 4 :text " 2)"))
+          next-chunk (a/poll! a1)]
+      (is (not (str/includes? next-chunk "stream-part")) "the element once")
+      (is (str/includes? next-chunk "data: elements  2)\n")))))
