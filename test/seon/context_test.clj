@@ -1975,17 +1975,17 @@
   ;; docs/agent.md#working-for-a-person: from a fresh chat to a merge, the status says the next step from the task's own data, never its kind.
   ;; Real runs (2026-11-08, nine on flash): with no such line no plan tracked the person's messages and no proof was ever seen red
   (let [db (db-with-program)
-        task-db (fn [plan proofs] (d/db-with db (task/create-tx db [(cond-> {:seon.task/ns 'demo :seon.task/name "n"}
-                                                                       plan (assoc :seon.task/plan plan)
+        task-db (fn [plan proofs] (d/db-with db (task/create-tx db [(cond-> {:seon.task/ns 'demo :seon.task/name "n" :seon.task/plan plan}
                                                                        (seq proofs) (assoc :seon.task/proofs proofs))])))
-        steps #(set (map :step (:next %)))]
-    (is (contains? (steps (status-at (task-db nil #{}) "demo/n" {})) :write-plan) "no plan: write one")
-    (is (not (contains? (steps (status-at (task-db "Make demo/f double." #{}) "demo/n" {})) :write-plan)) "a plan: not that step")
-    (is (contains? (steps (status-at (task-db "Make demo/f double." #{'demo-test/f-test}) "demo/n" {'demo-test/f-test [:green]})) :show-red)
+        steps #(set (map :step (:next %)))
+        written #(d/db-with % [{:seon.task/id "demo/n" :seon.task/plan "Make demo/f double, as the person asked."}])]
+    (is (contains? (steps (status-at (task-db "Say hello." #{}) "demo/n" {})) :write-plan) "the plan is still the request as made: write one")
+    (is (not (contains? (steps (status-at (written (task-db "Say hello." #{})) "demo/n" {})) :write-plan)) "a plan written since: not that step")
+    (is (contains? (steps (status-at (written (task-db "Make demo/f double." #{'demo-test/f-test})) "demo/n" {'demo-test/f-test [:green]})) :show-red)
         "a proof green that was never red: show it fails without the change")
-    (let [d (d/db-with (task-db "Make demo/f double." #{'demo-test/f-test}) [{:var/name 'demo-test/f-test :seon.test/status :red}])]
+    (let [d (d/db-with (written (task-db "Make demo/f double." #{'demo-test/f-test})) [{:var/name 'demo-test/f-test :seon.test/status :red}])]
       (is (not (contains? (steps (status-at d "demo/n" {'demo-test/f-test [:green]})) :show-red)) "red once, then green: not that step"))
-    (let [d (d/db-with (task-db "Make demo/f double." #{}) [{:seon.agent/key "b/a1" :seon.agent/task [:seon.task/id "demo/n"]}])
+    (let [d (d/db-with (written (task-db "Make demo/f double." #{})) [{:seon.agent/key "b/a1" :seon.agent/task [:seon.task/id "demo/n"]}])
           d (d/db-with d [{:seon.message/id "m1" :seon.message/from "sean" :seon.message/body "Make it take a name." :seon.message/to [[:seon.agent/key "b/a1"]]}])
           st (status-at d "demo/n" {})]
       (is (contains? (steps st) :fold-message) "a message from the person after the plan last changed")
