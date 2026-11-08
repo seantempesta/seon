@@ -3,7 +3,7 @@
   boots its fork server, so it runs in a process of its own rather than in the test
   runner's, whose threads and GC sweepers are the runner's."
   (:require [clojure.test :refer [deftest is]] [clojure.java.shell :as sh] [clojure.edn :as edn]
-            [clojure.string :as str] [seon.db :as pdb] [datahike.api :as d] [seon.test-store :as ts] [seon.config :as config]))
+            [clojure.string :as str] [seon.db :as pdb] [datahike.api :as d] [seon.test-store :as ts] [seon.config :as config] [seon.contract :as contract]))
 
 (defn- test-store "The one store these tests' roots take a branch of (seon.test-store/process-store)." []
   (ts/process-store))
@@ -333,8 +333,8 @@
 
 (defn- boots-on-a-tree
   "A store of its own (removed at the end) whose :db holds the program of a scratch repository under target/ holding the
-  one file path (dirs resources/seon, no wiki) as its first text, seeded (bin/root seed: seon.root/seed-program!, no root
-  boots on it); then boot-probe's answer at each boot of a root on that store, the file written with the next of texts and
+  one file path (dirs resources/seon, no wiki) as its first text, seeded (./seon seed-program: seon.root/seed-program!, no
+  root boots on it); then boot-probe's answer at each boot of a root on that store, the file written with the next of texts and
   committed before each (the same text again commits nothing: a boot with nothing merged). Answers [the seed's output
   answer ...]; a boot that never answered is its output (EXIT and the log). The shape of
   main-follows-its-source-tree-across-restarts: an empty store, one small file, a few seconds a boot. See
@@ -350,7 +350,7 @@
       (spit (str tree "/" path) seeded)
       (git "add" "-A")
       (git "commit" "-q" "-m" "seeded")
-      (into [(:out (apply ts/binary-sh "bin/root" "seed" store args))]
+      (into [(:out (apply ts/binary-sh (concat ["./seon" "seed-program" store] args ["--profile" (name (config/profile)) :dir "target"])))]
             (for [text texts]
              (let [_ (spit (str tree "/" path) text)
                    _ (git "add" "-A")
@@ -368,7 +368,8 @@
   ;; the merged config before it holds main's (2026-11-08 the standing root refused to start, "is set nowhere"); boot
   ;; three, with nothing merged, imports and writes nothing
   (let [file "resources/seon/config/default.edn"
-        merged (slurp (str (config/checkout) "/" file))
+        ;; the shipped file as the binary was built (a test reading the checkout's files takes the tree)
+        merged config/built-text
         before (str/join "\n" (remove #(str/includes? % ":seon.config.web/streams-buf ") (str/split-lines merged)))
         [seed two three] (boots-on-a-tree file [before merged merged])]
     (is (not= before merged))
@@ -388,9 +389,10 @@
   ;; the boot imports the merged entry before it forks: 2026-11-08 every model call of the first agent after a restart
   ;; failed on a registry of main's entries from before that boot's import
   (let [file "resources/seon/schemas/seon.config.web.edn"
-        merged (slurp (str (config/checkout) "/" file))
-        before (str/replace merged ":seon.config.web/streams-buf [:int {:seon.config/at-load true :min 1"
-                            ":seon.config.web/streams-buf [:int {:seon.config/at-load true :min 2")
+        ;; the entry as the binary was built, the resource's one entry (a test reading the checkout's files takes the tree)
+        form (get contract/forms :seon.config.web/streams-buf)
+        merged (pr-str {:seon.config.web/streams-buf form})
+        before (pr-str {:seon.config.web/streams-buf (update form 1 assoc :min 2)})
         [seed two] (boots-on-a-tree file [before merged])]
     (is (not= before merged))
     (is (str/includes? (str seed) "SEED OK") (str seed))
@@ -402,7 +404,7 @@
   ;; it). The boot imports nothing, says which file (seon.root/unimportable), and starts on main as it was: a dead root is
   ;; the outcome the boot's import exists to end (docs/source.md#a-file-that-does-not-load)
   (let [file "resources/seon/schemas/seon.config.web.edn"
-        merged (slurp (str (config/checkout) "/" file))
+        merged (pr-str {:seon.config.web/streams-buf (get contract/forms :seon.config.web/streams-buf)})
         [seed two] (boots-on-a-tree file [merged (str merged "\n{:unclosed")])]
     (is (str/includes? (str seed) "SEED OK") (str seed))
     (is (map? two) (str "the root started: " two))
