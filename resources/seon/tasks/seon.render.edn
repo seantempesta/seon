@@ -274,21 +274,10 @@ Proofs, red first: an entity holding root's and an agent's identity attributes i
 
 What exists: the home box calls seon.root/ask!, which makes a task and starts a new agent each time; the page never moves; the person waited 26 s for \"hi\" with nothing shown; a tile's title is the first message and its body the last reply (an atom tile showed a paragraph on agents, the reply to a later follow-up).
 
-Change: the home box sends a message to [:seon.agent/key \"root\"] (seon.root/message!, as a chat's box does); the home page draws root's session's chat beside the person's session tiles (sessions-by-standing); a tile shows the person's last message to it and its reply; tiles at most two across, about twelve lines; the agents list groups by who started each agent (root's spawns and what its session launches, then each user's), never by boot (agent keys no longer begin with the boot: Context's jolt/content-ids), so every agent has a place. The view move is seon.render/a-tab-follows-its-view.
+Change: the home box sends a message to [:seon.agent/key \"root\"] (seon.root/message!, as a chat's box does); the home page draws root's session's chat beside the person's session tiles (sessions-by-standing); a tile shows the person's last message to it and its reply; tiles at most two across, about twelve lines; the agents list groups by who started each agent (root's spawns and what its session launches, then each user's), never by boot (agent keys no longer begin with the boot: Context's jolt/content-ids), so every agent has a place. When root's session starts or names a session, every page showing root's chat is sent the same patch that moves it there (one Datastar patch to the pages of that view, as every update is sent; no per-tab state).
 
 Proofs, red first: a line typed in the home box is a message to root's session (no task made); the home page holds root's chat and the person's tiles; a tile shows the last message and its reply."
   :seon.task/proofs #{seon.render-test/the-home-box-messages-root
                       seon.render-test/the-home-page-is-roots-chat-and-your-sessions
                       seon.render-test/a-tile-shows-the-last-exchange}}
- {:seon.task/name "a-tab-follows-its-view"
-  :seon.task/needs #{"seon.root/root-is-a-session"}
-  :seon.task/plan "Moving the person to the right view (owner, 2026-11-08: \"Can root control the users view?\"), as step 6 of docs/users.md#the-steps names it, tabs as entities (Context, 2026-11-08: a fact root's session writes like any agent's eval, not a root-only call).
-
-What exists: each browser tab is a channel in the web proc's state keyed by the proc's own counter; a /call carries no tab, so nothing can be sent back to the tab that asked.
-
-Change, to be shaped at the REPL first: a tab is an entity whose view is a fact (:seon.tab/view); the feed opens with the tab's id and a /call carries it; an agent (root's session first) moves a tab by writing its view; the web proc follows the fact and sends the tab a Datastar navigation. Open question for the owner: a tab entity costs a commit at each open and move (about 24 ms of CPU across root's processes, docs/users.md#whats-on-screen).
-
-Proofs, red first: a tab whose view fact changes is sent to that view; a /call names its tab."
-  :seon.task/proofs #{seon.web-test/a-tab-follows-its-view-fact
-                      seon.web-test/a-call-names-its-tab}}
 ]
