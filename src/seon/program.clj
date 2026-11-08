@@ -1395,7 +1395,7 @@
   tests took the tree, so any edit anywhere reran them; with seon.test-store/output (a run's own
   log or a child's mark) uncounted, 7 of the 10 slow process tests took it, so a wiki edit reran them;
   with seon.config/baked-shipped-text (the shipped config file, whose values a test takes key by key) counted,
-  1,506 of 1,552 tests took every file class, so a bin/ or schema-resource edit reran 1,517 (2026-11-08)."
+  1,506 of 1,552 tests took every file class, so a bin/ or schema-resource edit reran 1,517."
   (conj (set (keys env-class-readers)) 'seon.config/baked-schema-forms 'seon.config/baked-shipped-text 'seon.test-store/output))
 
 (def config-resolvers
