@@ -345,12 +345,15 @@
 (defn- def-meta
   "A defined var's own Clojure metadata keys (:var/meta in resources/seon/schemas/seon.facts.edn): from the live var when it is
   bound, merged over the compiler's account of its definition, with :macro when the compiler says the
-  form is a macro. Location keys and :doc are left out (the doc is :var/doc)."
+  form is a macro. Location keys and :doc are left out (the doc is :var/doc), and so are the keys
+  instrumentation adds as a process runs (seon.contract/instrument-keys): with them, a definition's facts
+  depended on whether the importing process had armed its contracts (491 of 2,431 contracted vars differed)."
   {:malli/schema [:=> [:cat [:maybe :seon.host/var] :map] [:set :keyword]]}
   [v d]
   (let [m (merge (:meta d) (some-> v meta))]
     (-> (set (keys (cond-> m (:macro? d) (assoc :macro true))))
-        (disj :ns :name :file :line :column :end-line :end-column :doc))))
+        (disj :ns :name :file :line :column :end-line :end-column :doc)
+        (#(apply disj % contract/instrument-keys)))))
 
 (defn- macro-uses
   "The macros form (as read) calls in namespace nsx: each list in it whose head resolves

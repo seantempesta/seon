@@ -403,6 +403,12 @@
   {:malli/schema [:=> [:cat :seon.host/var] :any]}
   [v] (:malli/schema (meta v)))
 
+(def instrument-keys
+  "The metadata keys instrumentation adds to a var as it runs (::wrapper and ::checked-at at a contracted
+  definition with contracts on, ::wrapper and ::raw at instrument!): this process's bookkeeping, never what a
+  definition says, so seon.program/def-meta leaves them out of :var/meta."
+  #{::wrapper ::checked-at ::raw})
+
 (defn armed?
   "Does var v's root hold its own instrumented wrapper?"
   {:malli/schema [:=> [:cat :seon.host/var] :boolean]}
