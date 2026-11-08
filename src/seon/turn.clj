@@ -314,7 +314,9 @@
             ;; reasoning are the model call's own (below), never copied onto an eval
             ;; a call with no intent or no form, or after one that threw or answered an error, is not run: its one
             ;; result says why (seon.repl/unrun, docs/prompt.md)
-            calls (repl/run-calls (vec (:tool-calls c)) (fn [id] {:origin :model :call-id id}) evaluated!)
+            ;; a reply makes one tool call (k 0) whose evals are these, each streaming its output under the call's id (seon.repl/streaming)
+            idx (into {} (map-indexed (fn [i call] [(:id call) i])) (:tool-calls c))
+            calls (repl/run-calls (vec (:tool-calls c)) (fn [cid] {:origin :model :call-id cid :stream {:call id :k 0 :i (idx cid)}}) evaluated!)
             rs (mapv :response calls)
             eval-ms (long (profile/ms-since t2))
             _ (swap! agent/state assoc-in [:turn :evals] rs)]

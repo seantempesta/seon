@@ -1995,68 +1995,62 @@
   nil)
 
 (defn peek!
-  "Call the hook the test bound: what the agent's socket and branch hold while the form that called this still runs."
+  "Call the hook the test bound: what the agent's socket holds while the form that called this still runs."
   []
   (*peek*))
 
 (deftest an-evals-output-streams-as-it-is-written
-  ;; task seon.fx/an-effect-streams-what-it-reads, docs/render.md#in-flight-output-streams: an eval's start is committed before
-  ;; its form runs and its *out* is sent to root as it is written, in one stream "<eval id>/out", ended once however the eval
-  ;; ends; the record keeps the text whole, as it did. In process (a socketpair to read the frames root would get), on a branch of the
-  ;; test store because the start and the record are commits.
-  (ts/test-branch!
-   (fn [cfg conn]
-     (let [ab (pdb/on-main (:branch cfg) :eval-out)
-           _ (d/branch! conn (:branch cfg) ab)
-           store-conn (d/connect (assoc cfg :branch ab))
-           [a b] (sock/socketpair)
-           rd (sock/conn b)
-           old @agent/state old-link @agent/link
-           frames (fn [] (loop [acc []] (let [m (sock/next-frame! rd)] (if (#{:none :eof} m) acc (recur (conj acc m))))))
-           streamed (fn [fs part] (filterv #(and (= :stream (:op %)) (= part (:part %))) fs))
-           run (fn [code hook] (binding [*peek* hook] (repl/eval-string code {"ns" "user" :origin :outside})))]
-       (try
-         (reset! agent/link {:fd a})
-         (reset! agent/state {:store-conn store-conn :cfg cfg :branch ab :db @store-conn :mode :agent :key "test/a1" :id :a1 :n 0})
-         (let [code "(do (print \"one \") (print \"two\") (seon.agent-test/peek!) (println \"three\") :v)"
-               mid (volatile! nil) started (volatile! nil)
-               r (run code
-                      #(do (vreset! mid (frames))
-                           (vreset! started (:seon.eval/code (d/entity @store-conn [:seon.eval/id (:eval @agent/state)])))))
-               fs (into @mid (frames))
-               id (:record r)
-               outs (streamed fs "out")
-               texts (remove :end outs)
-               joined (apply str (map :text texts))]
-           (is (= ["one " "two"] (map :text (streamed @mid "out"))) "the first writes were out while the form still ran")
-           (is (= code @started) "and the eval's start was committed before it ran")
-           (is (= (:seon.print/code (:out r)) joined) "the streamed text joined is the record's :out")
-           (is (= "one twothree\n" joined))
-           (is (= (butlast (reductions + 0 (map (comp count :text) texts))) (map :offset texts)) "offsets are contiguous")
-           (is (= 1 (count (filter :end outs))) "one end")
-           (is (:end (last outs)) "and it is last")
-           (is (every? #(and (= (str id "/out") (:stream %)) (= id (:in %)) (= "test/a1" (:agent %))) outs) "each names its stream, eval and agent's key")
-           ;; the record is the eval's, the same entity the start opened, with what it was
-           (agent/commit!)
-           (let [e (d/pull @store-conn '[:seon.eval/code :seon.eval/by :seon.eval/response :seon.eval/result] [:seon.eval/id id])
-                 resp (pdb/response-of @store-conn e)]
-             (is (= code (:seon.eval/code e)))
-             (is (= "outside" (:seon.eval/by e)))
-             (is (= :v (:value resp)))
-             (is (= (:out r) (:out resp)) "its :out as it was")))
-         ;; an eval that throws ends its stream once, and the text before the error is streamed
-         (let [r (run "(do (print \"before\") (throw (ex-info \"boom\" {})))" nil)
-               outs (streamed (frames) "out")]
-           (is (:ex r))
-           (is (= "before" (apply str (map :text (remove :end outs)))))
-           (is (= [true 1] [(boolean (:end (last outs))) (count (filter :end outs))])))
-         ;; an eval that prints nothing still ends its stream (its container was drawn at the start); *err* is its own stream
-         (let [r (run "(do (binding [*out* *err*] (print \"e\")) 1)" nil)
-               fs (frames)]
-           (is (= 1 (:value r)))
-           (is (= [{:offset 0 :text "e"} {:end true}] (mapv #(select-keys % [:offset :text :end]) (streamed fs "err"))))
-           (is (= [{:end true}] (mapv #(select-keys % [:offset :text :end]) (streamed fs "out")))))
-         (finally (reset! agent/state old) (reset! agent/link old-link) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
+  ;; task seon.fx/an-effect-streams-what-it-reads, docs/render.md#in-flight-output-streams: a model's eval sends its *out* and *err* to
+  ;; root as they are written, in the parts "<call>/<k>/eval-<i>/out" and "/err" of its model call, each ended once however the eval
+  ;; ends; the record keeps the text whole, as it did. An eval of no model call sends nothing, and only the REPL's own thread sends.
+  ;; In process: a socketpair to read the frames root would get.
+  (let [[a b] (sock/socketpair)
+        rd (sock/conn b)
+        old @agent/state old-link @agent/link
+        frames (fn [] (loop [acc []] (let [m (sock/next-frame! rd)] (if (#{:none :eof} m) acc (recur (conj acc m))))))
+        streamed (fn [fs part] (filterv #(and (= :stream (:op %)) (= part (:part %))) fs))
+        brief (fn [fs] (mapv #(select-keys % [:offset :text :end]) fs))
+        run (fn [code req hook] (binding [*peek* hook] (repl/eval-string code (merge {"ns" "user" :origin :model} req))))
+        call {:stream {:call "k/call-3" :k 0 :i 1}}]
+    (try
+      (reset! agent/link {:fd a})
+      (reset! agent/state {:key "test/a1" :id :a1 :n 0})
+      (let [mid (volatile! nil)
+            r (run "(do (print \"one \") (print \"two\") (seon.agent-test/peek!) (println \"three\") :v)" call #(vreset! mid (frames)))
+            fs (into @mid (frames))
+            outs (streamed fs "out")
+            texts (remove :end outs)
+            joined (apply str (map :text texts))]
+        (is (= ["one " "two"] (map :text (streamed @mid "out"))) "the first writes were out while the form still ran")
+        (is (= (:seon.print/code (:out r)) joined) "the streamed text joined is the record's :out")
+        (is (= "one twothree\n" joined))
+        (is (= (butlast (reductions + 0 (map (comp count :text) texts))) (map :offset texts)) "offsets are contiguous")
+        (is (= [1 true] [(count (filter :end outs)) (boolean (:end (last outs)))]) "one end, last")
+        (is (every? #(and (= "k/call-3/0/eval-1/out" (:stream %)) (= "k/call-3" (:in %)) (= "test/a1" (:agent %))) outs) "each names the call's part, the call and the agent's key"))
+      ;; an eval that throws ends its streams once, and the text before the error is streamed
+      (let [r (run "(do (print \"before\") (throw (ex-info \"boom\" {})))" call nil)
+            outs (streamed (frames) "out")]
+        (is (:ex r))
+        (is (= "before" (apply str (map :text (remove :end outs)))))
+        (is (= [true 1] [(boolean (:end (last outs))) (count (filter :end outs))])))
+      ;; *err* is its own part, ended once; out with nothing written still ends
+      (let [r (run "(do (binding [*out* *err*] (print \"e\")) 1)" call nil)
+            fs (frames)]
+        (is (= 1 (:value r)))
+        (is (= [{:offset 0 :text "e"} {:end true}] (brief (streamed fs "err"))))
+        (is (= "k/call-3/0/eval-1/err" (:stream (first (streamed fs "err")))))
+        (is (= [{:end true}] (brief (streamed fs "out")))))
+      ;; an eval of no model call sends nothing, and its record is what it was
+      (let [r (run "(do (print \"quiet\") 2)" {:origin :outside} nil)]
+        (is (= "quiet" (:seon.print/code (:out r))))
+        (is (empty? (filter #(= :stream (:op %)) (frames)))))
+      ;; a write from another OS thread is recorded and never sent (frames can interleave across threads)
+      (let [r (run "(do (print \"a\") @(future (print \"b\")) (print \"c\") 3)" call nil)
+            outs (streamed (frames) "out")]
+        (is (= "abc" (:seon.print/code (:out r))) "the record holds all of it")
+        (is (= "ac" (apply str (map :text (remove :end outs)))) "the stream only what the REPL's thread wrote")
+        (is (= [0 1] (map :offset (remove :end outs))) "and its offsets count what was sent"))
+      (finally (reset! agent/state old) (reset! agent/link old-link) (lib/c-close a) (lib/c-close b)))))
 
 (deftest an-agents-stream-frame-goes-to-the-web-procs-streams
   ;; task seon.fx/an-effect-streams-what-it-reads: root's agent proc puts an eval's in-flight text on the web proc's :streams in-port

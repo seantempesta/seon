@@ -1303,11 +1303,7 @@
   {:seon.render/style ".eval-item > details > summary { display: flex; min-width: 0; align-items: baseline; column-gap: 0.5rem; }" :seon.render/for "page" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db] [:at [:vector :any]]]]] :any]}
   [{c :seon.ctx/ctx db :seon.db/db at :at :as opts}]
   (when-let [e (ratom/realize (get-in c at))]
-    ;; an eval still running (its start is committed before its form runs, seon.repl/started) has no answer yet, so neither the
-    ;; page nor the model's context has anything of it to draw until its record lands; its container is the stream task's
-    ;; (docs/render.md#in-flight-output-streams)
-    (when (or (:seon.eval/response e) (:seon.eval/result e))
-      (eval-hiccup {:at at :key (:agent-key opts) :agent (:agent-id opts) :db db} e))))
+    (eval-hiccup {:at at :key (:agent-key opts) :agent (:agent-id opts) :db db} e)))
 
 (defn- eval-shown
   "Of the eval at ctx path at, what the person's pieces read: not whether it is open, so opening it runs the line alone. Its response
