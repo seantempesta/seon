@@ -299,6 +299,12 @@
            (set (map :stream (filter :end out))))
         "each tool-call string ends as it closes")
     (is (= #{"c1/reasoning" "c1/content"} (set (map :stream (model/sse-close st)))) "the call's end closes what is still open")
+    ;; the container and the part are data on every message, so no reader splits an id (owner: "no hacky parsing")
+    (is (every? #(= "c1" (:in %)) (concat out (model/sse-close st))) "every message names its call")
+    (is (= {"c1/reasoning" "reasoning" "c1/content" "content" "c1/0/message" "message" "c1/0/eval-0/intent" "intent"
+            "c1/0/eval-0/code" "code" "c1/0/eval-1/intent" "intent" "c1/0/eval-1/code" "code" "c1/1/message" "message"}
+           (into {} (map (juxt :stream :part)) (concat out (model/sse-close st))))
+        "every message names its part")
     (is (= [] (second (reduce (fn [[st out] l] (let [[s m] (model/sse-step st l)] [s (into out m)]))
                               [(model/sse-init nil nil) []] (str/split-lines deepseek-stream))))
         "a state with no call streams nothing")))

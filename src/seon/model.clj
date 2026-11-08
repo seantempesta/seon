@@ -379,28 +379,29 @@
   {:malli/schema [:=> [:cat [:maybe :string] [:maybe :string]] :map]}
   [call agent]
   {:call call :agent agent :content [] :reasoning [] :calls (sorted-map) :finish nil :usage nil :model nil :data? false :raw []
-   :offsets {} :open []})
+   :offsets {} :open [] :parts {}})
 
 (defn- stream-id
-  "The stream id of a string in a tool call's arguments at path, or nil for a string no one shows live. See docs/flow.md#effects-one-owner-and-its-workers-per-kind."
+  "The stream id of a string in a tool call's arguments at path and the part it is, [id part], or nil for a string no one shows live. See docs/flow.md#effects-one-owner-and-its-workers-per-kind."
   [call k path]
   (case (count path)
-    1 (when (= "message-md" (first path)) (str call "/" k "/message"))
-    3 (when (and (= "evals" (first path)) (#{"intent" "code"} (nth path 2))) (str call "/" k "/eval-" (nth path 1) "/" (nth path 2)))
+    1 (when (= "message-md" (first path)) [(str call "/" k "/message") "message"])
+    3 (when (and (= "evals" (first path)) (#{"intent" "code"} (nth path 2))) [(str call "/" k "/eval-" (nth path 1) "/" (nth path 2)) (nth path 2)])
     nil))
 
 (defn- say
-  "st with a stream message appended to msgs for id: text (offset the chars sent before it), :open (id starts, empty) or
+  "st with a stream message appended to msgs for id, part part of call (:in, :part, as data, so no reader splits an id): text (offset the chars sent before it), :open (id starts, empty) or
   :end. Answers [st' msgs'] (st, msgs when the state streams nothing). See docs/flow.md#effects-one-owner-and-its-workers-per-kind."
-  [[st msgs] id what]
+  [[st msgs] id part what]
   (if-not (:call st)
     [st msgs]
     (let [off (get-in st [:offsets id] 0)
           open? (some #{id} (:open st))
-          st (cond-> st (not open?) (update :open conj id))]
-      (cond (= :end what) [(update st :open #(filterv (complement #{id}) %)) (conj msgs {:stream id :agent (:agent st) :end true})]
+          st (cond-> st (not open?) (-> (update :open conj id) (assoc-in [:parts id] part)))
+          base {:stream id :in (:call st) :part part :agent (:agent st)}]
+      (cond (= :end what) [(update st :open #(filterv (complement #{id}) %)) (conj msgs (assoc base :end true))]
             (= :open what) [st msgs]
-            :else [(assoc-in st [:offsets id] (+ off (count what))) (conj msgs {:stream id :agent (:agent st) :offset off :text what})]))))
+            :else [(assoc-in st [:offsets id] (+ off (count what))) (conj msgs (assoc base :offset off :text what))]))))
 
 (defn- add-delta
   "st with a chunk's delta folded in: its content, reasoning and each tool call's pieces (id and name kept, arguments appended
@@ -410,7 +411,7 @@
         piece (fn [acc k id]
                 (if-let [x (get delta k)]
                   (let [[st msgs] (update acc 0 update (if (= k :content) :content :reasoning) conj x)]
-                    (if (and call (seq x)) (say [st msgs] (str call "/" id) x) [st msgs]))
+                    (if (and call (seq x)) (say [st msgs] (str call "/" id) id x) [st msgs]))
                   acc))
         acc (-> [st []] (piece :content "content") (piece :reasoning_content "reasoning"))]
     (reduce (fn [[st msgs] {:keys [index id function]}]
@@ -421,14 +422,14 @@
                     c (cond-> (assoc c :json jst) frag (update-in [:function :arguments] conj frag))
                     st (assoc-in st [:calls index] c)]
                 (reduce (fn [acc [path what]]
-                          (if-let [sid (stream-id call index path)] (say acc sid what) acc))
+                          (if-let [[sid part] (stream-id call index path)] (say acc sid part what) acc))
                         [st msgs] evs)))
             acc (:tool_calls delta))))
 
 (defn sse-step
   "One line of a streamed reply (server-sent events: data: lines, each a chat-completion chunk, ending data: [DONE]) folded
-  into st (`sse-init`): [st' messages], the stream messages that line made ({:stream id :agent a :offset n :text s}, then
-  {:stream id :agent a :end true} when a tool call's string closes), none for a state with no call. Blank lines, comments
+  into st (`sse-init`): [st' messages], the stream messages that line made ({:stream id :in call :part p :agent a :offset n :text s}, then
+  the same with :end true and no text when a tool call's string closes), none for a state with no call. Blank lines, comments
   and other fields are skipped; a line that is none of them is kept, for a reply that is one JSON document. The one parser of
   `sse-reply` and of the streamed call (`complete`). See docs/flow.md#effects-one-owner-and-its-workers-per-kind."
   {:malli/schema [:=> [:cat :map :string] [:tuple :map [:vector :map]]]}
@@ -453,7 +454,7 @@
   "The stream messages that end every id st still has open: a call's end, normal or in error. See `sse-step`."
   {:malli/schema [:=> [:cat :map] [:vector :map]]}
   [st]
-  (mapv (fn [id] {:stream id :agent (:agent st) :end true}) (:open st)))
+  (mapv (fn [id] {:stream id :in (:call st) :part (get-in st [:parts id]) :agent (:agent st) :end true}) (:open st)))
 
 (defn- sse-json
   "The chat-completion JSON (as data) the lines folded into st make: what `sse-reply` answers."
