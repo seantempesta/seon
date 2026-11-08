@@ -36,7 +36,7 @@ Owner, 2026-11-08: "I do want a message in markdown but couldn't that just be th
 
 ### Every eval of a reply runs (owner, 2026-11-08)
 
-Owner, 2026-11-08: "I want us to run every eval. Turns are precious and one fuckup shouldn't punish the other evals. Yes I understand this could cause issues if the next eval is dependent on the previous. I still want to try turning this on". Stated in: ```seon.repl/run-calls```, [the prompt](prompt.md).
+Owner, 2026-11-08: "I want us to run every eval. Turns are precious and one fuckup shouldn't punish the other evals. Yes I understand this could cause issues if the next eval is dependent on the previous. I still want to try turning this on". And, of the eval tool's description still saying a throw ends the run: "yeah that's wrong update it. Agent turns are expensive. Still run the evals sequentially but execute all of them. Yes I understand that could lead to incorrect evals. It's okay". The calls run in order, every one; the rule is said once, in the system prompt, and the tool's description points there. Stated in: ```seon.repl/run-calls```, [the prompt](prompt.md).
 
 ## 2026-11-07 rulings
 
@@ -480,7 +480,7 @@ The owner's rulings of 2026-10-28, each with where it is now stated; they stand 
 
 ### The eval protocol: tool calls by id; one form per call; a top-level do is its forms, as in Clojure (owner, 2026-10-28; one form superseded 2026-10-29)
 
-A reply's text heads its block of evals; each eval is one tool call with `intent` and one form, its result a tool message matched by the provider's call id; calls run in order and stop at the first throw, each later call answered "not run"; a reply with no call is the message to the user. "Match Clojure: unroll a top-level do so its definitions are program, and tighten the system text to one definition per call." Stated in: docs/prompt.md, `seon.turn` (the calls), `seon.repl/eval-code`.
+A reply's text heads its block of evals; each eval is one tool call with `intent` and one form, its result a tool message matched by the provider's call id; calls run in order and stop at the first throw, each later call answered "not run" (superseded 2026-11-08: [every eval of a reply runs](#every-eval-of-a-reply-runs-owner-2026-11-08)); a reply with no call is the message to the user. "Match Clojure: unroll a top-level do so its definitions are program, and tighten the system text to one definition per call." Stated in: docs/prompt.md, `seon.turn` (the calls), `seon.repl/eval-code`.
 
 ### Nothing crashes and nothing hangs; failures are data to the agent (owner, 2026-10-28)
 
