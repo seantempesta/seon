@@ -1,7 +1,7 @@
 (ns seon.db-test
   "One store, many branches, as in production (owner, 2026-10-21): bin/test seeds one test
   store and each test takes a branch of it through one helper (seon.test-store/test-branch!)."
-  (:require [seon.test-store :as ts] [my.test :as mt] [seon.profile :as profile] [clojure.test :refer [deftest is testing]]
+  (:require [seon.task :as task] [seon.test-store :as ts] [my.test :as mt] [seon.profile :as profile] [clojure.test :refer [deftest is testing]]
             [clojure.java.shell] [clojure.java.io] [datahike.api :as d] [datahike.writer :as dw] [datahike.db.transaction :as dbt]
             [seon.db :as pdb] [seon.schema.datahike] [malli.core] [malli.registry] [seon.config :as cfg] [seon.contract :as contract] [seon.edn] [seon.repl] [seon.print] [datahike.schema]
             [konserve.jolt.lmdb :as klmdb] [konserve.jolt.lmdb-ffi :as lmdb] [konserve.jolt.lz4] [konserve.jolt.zstd] [clojure.string :as str] [konserve.core :as k] [hasch.core] [datahike.gc] [seon.cost :as cost] [seon.lib :as lib] [seon.intr :as intr]
@@ -1272,25 +1272,32 @@
     (is (= :seon.task/execution (:attribute (pdb/invalid-datom db [{:seon.task/id "t" :seon.task/execution :no-such}]))) "with no branch's forms, the binary's")))
 
 (deftest a-write-holds-each-entity-it-touches-to-the-schemas-its-keys-select
-  ;; docs/storage.md#the-write-checks-every-entity-it-touches: an entity holding any key an entity schema requires is that
-  ;; thing and holds them all; a boot written alone (a hand edit, 2026-11-08) was stored, and the reconciler's read of it
-  ;; failed later, on agent-value's own stricter copy of the agent's shape
+  ;; docs/storage.md#the-write-checks-every-entity-it-touches: an entity holding an attribute an entity schema owns holds that
+  ;; schema's required keys, and a write is refused for what it broke; a boot written alone (a hand edit, 2026-11-08) was
+  ;; stored, and the reconciler's read of it failed later, on agent-value's own stricter copy of the agent's shape
   (ts/test-branch!
     (fn [_ conn]
       (let [e (try (d/transact conn [{:seon.agent/key "half" :seon.agent/boot "b"}]) nil
                    (catch Exception x (ex-data x)))]
         (is (= :seon.db/invalid-entity (:seon.error/type e)) (pr-str e))
-        (is (= :seon.db/agent-start-fact (:schema e)) "it names the schema its keys selected")
-        (is (= "[:seon.agent/key \"half\"]" (:entity e)) "and the entity, by its identity")
-        (is (some #(= [:seon.agent/started-ms] (:in %)) (:seon.error/problems e)) (str "and what it lacks: " (pr-str (:seon.error/problems e))))
+        (is (= :seon.db/agent-start-fact (:schema e)) "it names the schema that owns what was written")
+        (is (= [:seon.agent/started-ms] (:missing e)) "and what the write left out")
         (is (nil? (pdb/eid @conn :seon.agent/key "half")) "nothing of the refused write is stored"))
       (is (map? (d/transact conn [{:seon.agent/key "whole" :seon.agent/boot "b" :seon.agent/started-ms 1}])) "written together, it is stored")
-      (testing "it asks only the entities the write touched"
-        (let [db (d/db-with @conn [{:seon.agent/key "half" :seon.agent/boot "b"}])]
+      (testing "the one path a value takes refuses as the writer does"
+        (is (thrown? clojure.lang.ExceptionInfo (pdb/with @conn [{:seon.agent/key "half" :seon.agent/boot "b"}]))))
+      (testing "it refuses only what the write broke"
+        (let [db (:db-after (d/with @conn [{:seon.agent/key "half" :seon.agent/boot "b"}]))]
           (is (nil? (pdb/invalid-entity (d/with db [{:seon.agent/key "whole" :seon.agent/agents [:seon.agent/key "half"]}])))
-              "a ref to an entity the schema refuses is a datom of the referrer only")
-          (is (true? (:before-refused (pdb/invalid-entity (d/with db [{:seon.agent/key "half" :seon.agent/status :idle}]))))
-              "touching an entity refused already says so"))))))
+              "a ref to an incomplete entity is a datom of the referrer only")
+          (is (nil? (pdb/invalid-entity (d/with db [{:seon.agent/key "half" :seon.agent/status :idle}])))
+              "an entity incomplete before is not refused for a write that broke nothing")
+          (is (= [:seon.agent/boot] (:missing (pdb/invalid-entity (d/with @conn [[:db/retract [:seon.agent/key "whole"] :seon.agent/boot "b"]]))))
+              "retracting a key the entity held and still needs is refused")
+          (is (nil? (pdb/invalid-entity (d/with @conn [[:db.fn/retractEntity [:seon.agent/key "whole"]]])))
+              "an entity retracted whole has stopped being that thing")))
+      (testing "an upsert of an unknown identity is no stub (seon.root's release! of a task id main does not hold)"
+        (is (= :seon.task/task-fact (:schema (pdb/invalid-entity (d/with @conn (task/execution-tx ["no/such"] :running))))))))))
 
 (deftest a-datom-its-attribute-refuses-is-invalid-and-names-it
   ;; docs/storage.md#the-write-checks-every-datom: the store checks a value's type, and a data attribute's only that it is

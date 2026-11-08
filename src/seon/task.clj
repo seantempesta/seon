@@ -205,7 +205,7 @@
                   ids decls)
             ;; what each text cites, read on the db the tasks make (a task this write declares is a task it may
             ;; cite), its cite entities naming the task by its tempid
-            db' (:db-after (d/with db tasks))]
+            db' (:db-after (pdb/with db tasks))]
         (into tasks (mapcat (fn [id decl] (cites-tx db' id id (text-citations db' decl))) ids decls))))))
 
 (defn execution-tx

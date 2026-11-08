@@ -20,7 +20,7 @@
   [db t]
   (let [id (:seon.task/id t)
         k (str id "/first-move")
-        db (:db-after (d/with db [{:seon.agent/key k :seon.agent/task [:seon.task/id id]}]))]
+        db (:db-after (pdb/with db [{:seon.agent/key k :seon.agent/task [:seon.task/id id]}]))]
     {:messages (:messages (wire/render db {:commit (d/commit-id db) :task id :turn 1
                                               :max-turns (config/value :seon.config.agent/max-turns) :origin :model :agent k}))
      :model (:value (config/resolve :seon.config.ai/model {:task t}))

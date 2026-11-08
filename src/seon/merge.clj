@@ -437,7 +437,7 @@
                    carried)
         tx (-> (attribute-declarations onto carried) (into carried) (into gone))]
     (if-let [own (seq (keep #(when (= :schema (first %)) (second %)) ks))]
-      (let [merged (d/db-with onto tx)
+      (let [merged (pdb/db-with onto tx)
             reg (program/schema-registry (program/schema-changes merged))]
         (-> tx (into (program/schema-declarations onto reg))
             (into (mapcat #(program/own-declaration onto % reg)) own)))

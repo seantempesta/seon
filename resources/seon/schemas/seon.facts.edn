@@ -273,7 +273,6 @@
                        [:seon.agent/description {:optional true} :seon.agent/description]
                        [:seon.agent/task {:optional true} :seon.agent/task] [:seon.agent/max-turns {:optional true} :seon.agent/max-turns] [:seon.agent/turn {:optional true} :seon.agent/turn]
                        [:seon.agent/model {:optional true} :seon.agent/model] [:seon.agent/holder {:optional true} :seon.agent/holder]
-                       [:seon.agent/boot {:optional true} :seon.agent/boot] [:seon.agent/started-ms {:optional true} :seon.agent/started-ms]
                        [:seon.agent/ended-ms {:optional true} :seon.agent/ended-ms]
                        [:seon.agent/test-error {:optional true} :seon.agent/test-error]
                        [:seon.agent/outcome {:optional true} :seon.agent/outcome] [:seon.agent/reason {:optional true} :seon.agent/reason]
@@ -284,11 +283,11 @@
                        [:seon.agent/ns {:optional true} :seon.agent/ns]]
  ;; a user: an agent with a person's name (docs/users.md#what-each-thing-is), its own schema by extending the agent's, so its
  ;; layout is its own and an entity holding both identities is a user whatever its keys' order (seon.render/entity-schema)
- ;; what every start of an agent writes together (seon.task/start-tx, seon.root's own spawn): an entity holding either is a
- ;; started agent and holds both (seon.db/invalid-entity). Its branch comes only with a task, and its turn budget it also
- ;; writes alone on its own branch (seon.turn), so neither is a member
- :seon.db/agent-start-fact [:map {:seon.db/attributes true :description "What every start of an agent writes together: the boot of the root that started it, and when."}
-                            [:seon.agent/boot :seon.agent/boot] [:seon.agent/started-ms :seon.agent/started-ms]]
+ ;; a started agent: an agent (it extends :seon.db/agent-fact, as a user does) with the boot of the root that started it and
+ ;; when, both written by every start (seon.task/start-tx, seon.root's own spawn). Its branch comes only with a task and its
+ ;; turn budget it also writes alone on its own branch (seon.turn), so they stay the agent's, optional
+ :seon.db/agent-start-fact [:and {:seon.db/attributes true :description "An agent a root started: the boot of that root, and when."}
+                            :seon.db/agent-fact [:map [:seon.agent/boot :seon.agent/boot] [:seon.agent/started-ms :seon.agent/started-ms]]]
  :seon.db/user-fact [:and {:seon.db/attributes true :seon.render/layout :seon.render/user-ctx} :seon.db/agent-fact [:map [:seon.user/name :seon.user/name]]]
  ;; ---- a citation: what an entity cites, an entity of its own (docs/references.md#an-entity-cites) ----
  ;; its content id, "<of> <target>": the citing entity's identity value (a task's :seon.task/id, an agent's

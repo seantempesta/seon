@@ -328,7 +328,7 @@
   See docs/references.md#task-references."
   {:malli/schema [:=> [:cat :seon.host/db :seon.db/tx-data] :seon.db/tx-data]}
   [db tx-data]
-  (let [r (d/with db tx-data) db' (:db-after r)
+  (let [r (pdb/with db tx-data) db' (:db-after r)
         ids (into [] (comp (filter #(#{:seon.task/plan :seon.task/instructions} (:a %))) (keep #(:seon.task/id (d/entity db' (:e %)))) (distinct)) (:tx-data r))]
     (into (vec tx-data) (mapcat #(task/rederive-tx db' (task/task db' %))) ids)))
 
@@ -366,17 +366,16 @@
         tx-data (if (some #(if (map? %) (some text? (keys %)) (and (vector? %) (text? (nth % 2 nil)))) tx-data)
                   (with-citations (db) tx-data)
                   tx-data)]
-    (when-let [e (pdb/invalid-datom (db) tx-data (let [{:keys [key registry]} (branch-schemas)] (when (seq key) {:forms key :registry registry})))] (throw (ex-info (:seon.error/message e) e)))
+    ;; the branch's own schema changes go with the write: the one transaction path checks it (seon.db/with, the writer's 'transact!)
+    (let [schemas (let [{:keys [key registry]} (branch-schemas)] (when (seq key) {:forms key :registry registry}))]
     (when-let [e (program/config-refused (db) tx-data)] (throw (ex-info (:seon.error/message e) e)))
     (if (= :test (:mode @state))
-      (let [r (d/with (db) tx-data) attrs (into #{} (map :a) (:tx-data r))]
-        ;; the fork applies without the writer, so it asks what the writer's transact asks (seon.db/transact-checked)
-        (when-let [e (pdb/invalid-entity r)] (throw (ex-info (:seon.error/message e) e)))
+      (let [r (pdb/with (db) tx-data schemas) attrs (into #{} (map :a) (:tx-data r))]
         (doc/carry-index! (:db-before r) (:db-after r) (map (juxt :e :a) (:tx-data r)))
         (swap! state #(-> % (assoc :db (:db-after r) :tx (select-keys r [:db-after :tx-data])) (schema-moved attrs)))
         (config-moved! (:db-after r) attrs)
         {:t (:max-tx (:db-after r)) :datoms (count (:tx-data r)) :local true})
-      (let [r (dw/apply! (:store-conn @state) {:tx-data tx-data :tx-meta (pdb/tx-meta (:branch @state) (cond-> {} (:eval @state) (assoc :seon.tx/eval (:eval @state))))})]
+      (let [r (dw/apply! (:store-conn @state) {:tx-data tx-data :seon.db/schemas schemas :tx-meta (pdb/tx-meta (:branch @state) (cond-> {} (:eval @state) (assoc :seon.tx/eval (:eval @state))))})]
         ;; a typed refusal (seon.db/invalid-entity) reaches the eval as itself; any other carries the writer's words
         (when-not (map? r) (throw (if (:seon.error/type (ex-data r)) r (ex-info (str "transact refused: " (ex-message r)) {:writer-error (ex-message r)}))))
         ;; :tx, the transaction that moved :db: what seon.ctx patches @ctx from; the search's text
@@ -387,7 +386,7 @@
           (swap! state #(-> % (assoc :db (:db-after r) :tx (select-keys r [:db-after :tx-data]) :dirty? true) (schema-moved attrs)))
           (config-moved! (:db-after r) attrs))
         (cond-> {:t (:max-tx (:db-after r)) :datoms (count (:tx-data r))}
-          (seq (:tempids r)) (assoc :tempids (into {} (filter (comp string? key)) (:tempids r))))))))
+          (seq (:tempids r)) (assoc :tempids (into {} (filter (comp string? key)) (:tempids r)))))))))
 
 ;; ---- effects (seon.fx, worktree session FX1): root's owner procs, through the agent's proc ---
 
