@@ -9,7 +9,7 @@
             [seon.reconcile :as r] [my.root]
             [seon.template :as tpl] [seon.problems :as problems] [seon.merge :as pm] [seon.sock :as sock] [clojure.edn] [seon.contract :as contract]
             [clojure.string :as str] [clojure.set] [seon.config :as cfg] [seon.edn :as sedn]
-            [seon.program :as program] [seon.writer :as writer] [clojure.java.shell :as sh] [seon.turn :as turn] [clojure.core.async :as a] [seon.cost :as cost]))
+            [seon.program :as program] [seon.writer :as writer] [seon.source :as source] [clojure.java.shell :as sh] [seon.turn :as turn] [clojure.core.async :as a] [seon.cost :as cost]))
 
 (defn- empty-db [] (ts/test-db))
 
@@ -326,6 +326,29 @@
            (is (= [{:reason :contract-gap :symbol 'app.gaps/u}] (:reasons judged)) "root's judge: g is main's gap, fixed on main")
            (is (= :seon.merge/behind (:seon.error/type gate)) "the gate: behind first, its gaps judged once main merges in"))
          (finally (d/release bc)))))))
+
+;; seon.writer/a-merged-tree-is-analyzed-in-a-fork: an octopus merge judges each member against the same main, so two members with
+;; disjoint keys, one removing f and one calling it, each analyze alone; their combined tree does not, and must not reach main
+(deftest an-octopus-merge-analyzes-its-combined-tree
+  (ts/test-branch!
+   (fn [cfg conn]
+     (let [x "src/app/oct/x.clj" y "src/app/oct/y.clj"
+           s "{:malli/schema [:=> [:cat] :int]}"
+           on (fn [c files] (d/transact c (source/refresh-tx @c files)))
+           _ (on conn {x (str "(ns app.oct.x)\n(defn f " s " [] 1)\n(defn h " s " [] 2)\n")})
+           a (pdb/on-main (:branch cfg) :oct-a) b (pdb/on-main (:branch cfg) :oct-b)
+           _ (d/branch! conn (:branch cfg) a) _ (d/branch! conn (:branch cfg) b)
+           ac (d/connect (assoc cfg :branch a)) bc (d/connect (assoc cfg :branch b))]
+       (try
+         (on ac {x (str "(ns app.oct.x)\n(defn h " s " [] 2)\n")})
+         (on bc {y (str "(ns app.oct.y (:require [app.oct.x :as x]))\n(defn g " s " [] (x/f))\n")})
+         (let [w (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer (a/chan 4) :events (a/chan 4)})
+               ask (fn [req] (:r (first (:to-api (second (#'writer/writer-proc w :in (assoc req :dest {:rid 1})))))))
+               alone (mapv #(ask {:op :merge-candidate :branch %}) [a b])
+               merged (:results (ask {:op :octopus-merge :branches [a b]}))]
+           (is (every? :ok alone) (str "each member analyzes alone: " (pr-str (map #(select-keys % [:ok :seon.error/message]) alone))))
+           (is (not (every? :merged? merged)) (str "both may not merge in one commit: " (pr-str merged))))
+         (finally (d/release ac) (d/release bc)))))))
 
 (deftest an-agent-without-an-end-reads-nil
   ;; no end written (a silent death) is nothing to read, not an empty end; an end of an earlier wake is none of this one's
