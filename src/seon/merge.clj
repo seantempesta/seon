@@ -9,7 +9,7 @@
     identical form on two branches is one key, and its place does not make two equal forms
     differ;
   - `[:var sym]`, `[:method multi dispatch]`, `[:impl protocol type]`, `[:ns nsym]` -> a
-    definition: the form that last made it ({:form id}), and a var's kind, contract and doc.
+    definition: the form that last made it ({:form id}), and a var's meta, contract and doc.
     Conflicts are per definition: two branches that redefine one var differently conflict
     there, whatever else their forms carry;
   - `[:schema k]` -> a schema entry of a resource ({:form text :file path}; seon.source
@@ -98,7 +98,7 @@
   (let [x (d/entity db e)
         c {:form (:id f) :src (:src f)}]
     (case (first k)
-      :var (cond-> (assoc c :kind (:var/kind x))
+      :var (cond-> (assoc c :meta (set (:var/meta x)))
              (:var/contract x) (assoc :contract (:var/contract x))
              (:var/doc x) (assoc :doc (:var/doc x)))
       :ns (cond-> c (:ns/file x) (assoc :file (:ns/file x)) (:ns/doc x) (assoc :doc (:ns/doc x)))
@@ -158,7 +158,7 @@
   {:malli/schema [:=> [:cat :seon.merge/changes] [:vector :qualified-symbol]]}
   [ours]
   (if contract/on?
-    (vec (sort-by str (for [[[k sym] [_ ov]] ours :when (and (= :var k) (= :fn (:kind ov)) (nil? (:contract ov)))] sym)))
+    (vec (sort-by str (for [[[k sym] [_ ov]] ours :when (and (= :var k) (let [m (:meta ov)] (and (contains? m :arglists) (not-any? m [:macro :protocol :test]))) (nil? (:contract ov)))] sym)))
     []))
 
 (defn three-way
@@ -344,7 +344,7 @@
   "What a branch's changes ch (delta-changes from its merge base, read once a turn:
   seon.agent/branch-changes) carry to main: the vars, methods and implementations it added, redefined and removed, and the
   schema keys it registered or changed and the scripts it changed; each sorted, an empty kind left out ({}: nothing). A var
-  is changed when its definition's content is (its form's text, kind, contract or doc: def-content),
+  is changed when its definition's content is (its form's text, meta, contract or doc: def-content),
   and removed when no live form defines it. A schema registered with no file (a scratch one, my.schema) is no key of the program and never
   merges, so it is none of these."
   {:malli/schema [:=> [:cat :seon.merge/changes] [:map-of [:enum :added :changed :removed :schemas :config :scripts] [:vector [:or :qualified-symbol :qualified-keyword :string [:vector :any]]]]]}

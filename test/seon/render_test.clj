@@ -1576,7 +1576,7 @@
                               (requiring-resolve (r/declared :seon.render/render-ctx)))]
                 (try (:html (unit-of (r/placed-units w) "status")) (finally (r/dispose-walk! w))))
         written (d/db-with branch [{:db/id "f" :form/id "demo/f-test-1" :form/src "(deftest f-test (is (= 4 (f 2))))"}
-                                   {:var/name 'demo/f-test :var/kind :test :var/form "f"}])
+                                   {:var/name 'demo/f-test :var/meta #{:test} :var/form "f"}])
         red (d/db-with written [{:var/name 'demo/f-test :seon.test/digest "digest-1" :seon.test/status :red
                                  :seon.test/failures [{:type :fail :message "it doubles" :expected "(= 4 (f 2))" :actual "(not (= 4 5))" :got "(= 4 5)"}]}])
         green (d/db-with red [[:db/retract [:var/name 'demo/f-test] :seon.test/failures [{:type :fail :message "it doubles" :expected "(= 4 (f 2))" :actual "(not (= 4 5))" :got "(= 4 5)"}]]
@@ -1923,7 +1923,7 @@
   (let [n (namespace v)]
     [{:db/id (str "ns " n) :ns/name (symbol n) :ns/file (str "src/" (str/replace n "-" "_") ".clj")}
      {:db/id (str "form " v) :form/id (str v " " src) :form/src src :form/ns (str "ns " n) :form/order 0 :form/defines [(str v)]}
-     {:db/id (str v) :var/name v :var/ns (str "ns " n) :var/form (str "form " v) :var/kind :fn}]))
+     {:db/id (str v) :var/name v :var/ns (str "ns " n) :var/form (str "form " v) :var/meta #{:arglists}}]))
 
 (deftest the-status-draws-what-the-merge-functions-answer
   ;; owner, 2026-10-27: what is derived for the reader is the hiccup's, drawn when what it reads
@@ -2648,9 +2648,9 @@
                        {:seon.doc/address "docs/references.md#an-entity-cites" :seon.doc/heading "An entity cites" :seon.doc/lead "A citation is an entity."}
                        {:db/id "g" :form/id "demo/g-1" :form/src "(defn g \"Gets it.\" [x] x)"} {:db/id "gv" :var/name 'demo/g :var/doc "Gets it." :var/form "g"}
                        {:db/id "t" :form/id "demo-test/g-test-1" :form/src "(deftest g-test (is (g 1)))" :form/refs #{'demo/g} :form/defines ["tv"]}
-                       {:db/id "tv" :var/name 'demo-test/g-test :var/kind :test :var/form "t"}
+                       {:db/id "tv" :var/name 'demo-test/g-test :var/meta #{:test} :var/form "t"}
                        {:db/id "h" :form/id "demo/h-1" :form/src "(defn h [] (g 2))" :form/refs #{'demo/g} :form/defines ["hv"]}
-                       {:db/id "hv" :var/name 'demo/h :var/kind :fn :var/form "h"}])
+                       {:db/id "hv" :var/name 'demo/h :var/meta #{:arglists} :var/form "h"}])
         db (d/db-with db (seon.task/create-tx db [{:seon.task/ns 'demo :seon.task/name "c" :seon.task/proofs #{'demo-test/g-test}
                                                    :seon.task/plan "Make `demo/g` pass `demo-test/g-test`; see [the x](docs/x.md#the-x)."}]))
         db (d/db-with db (into [{:db/id k :seon.agent/key k :seon.agent/id :a1 :seon.agent/task [:seon.task/id "demo/c"]}] (seon.task/agent-cites-tx db k k)))]

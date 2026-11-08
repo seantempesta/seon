@@ -422,7 +422,7 @@
     (vec (for [v (sort names)
                :let [e (pdb/eid db :var/name v) ent (when e (d/entity db e))
                      doc (:var/doc ent) nsym (some-> (namespace v) symbol)]
-               :when (and ent (not= :test (:var/kind ent)) (not (and doc (str/includes? doc "docs/")))
+               :when (and ent (not (contains? (set (:var/meta ent)) :test)) (not (and doc (str/includes? doc "docs/")))
                           (contains? @program nsym)
                           (contains? #{"defn" "defmacro" "def" "defmulti"} (some->> ent :var/form :form/src (source/first-head nsym))))
                :let [s (str "uncited-var " v)]]

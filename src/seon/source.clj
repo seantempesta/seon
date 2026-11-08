@@ -482,8 +482,8 @@
          (or (:ns/tail (d/entity db ne)) "\n"))))
 
 (defn- interface
-  "What a namespace's dependents read of it, from its forms ({:src :inline? :defs [[var kind]]}):
-  each definition's name and kind, and the text of each form whose expansion or inlining is the
+  "What a namespace's dependents read of it, from its forms ({:src :inline? :defs [[var meta]]}):
+  each definition's name and meta, and the text of each form whose expansion or inlining is the
   dependents' (a macro, protocol, type or inline function). A body edit leaves it as it was, and
   so does the ns form: a dependent resolves the names a namespace defines, never its requires."
   {:malli/schema [:=> [:cat [:sequential :map]] [:set :any]]}
@@ -500,14 +500,14 @@
   (let [ne (pdb/eid db :ns/name nsym)]
     (interface (for [dt (when ne (d/datoms db :avet :form/ns ne)) :let [e (:e dt) x (d/entity db e)] :when (program/live? db e)]
                  {:src (:form/src x) :inline? (seq (:form/inline-defs x))
-                  :defs (for [d (:form/defines x) :when (and (:var/name d) (= e (:db/id (:var/form d))))] [(:var/name d) (:var/kind d)])}))))
+                  :defs (for [d (:form/defines x) :when (and (:var/name d) (= e (:db/id (:var/form d))))] [(:var/name d) (set (:var/meta d))])}))))
 
 (defn- read-interface
   "A namespace's interface as read (read-nss's answer, or nil: its file is gone)."
   {:malli/schema [:=> [:cat [:maybe :map]] [:set :any]]}
   [r]
   (interface (for [a (:accounts r)]
-               {:src (:src a) :inline? (seq (:inline-defs a)) :defs (for [d (:defs a)] [(:var d) (:kind d)])})))
+               {:src (:src a) :inline? (seq (:inline-defs a)) :defs (for [d (:defs a)] [(:var d) (set (:meta d))])})))
 
 (defn required-by
   "The namespaces whose forms require nsym on db (their :form/requires)."
