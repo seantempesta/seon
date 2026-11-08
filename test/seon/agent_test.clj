@@ -1121,7 +1121,7 @@
                                                      "  (some-> (java.io.File. (str (seon.config/value :seon.config.proofs/results-dir) \"/" ns "-test\")) .list vec)])")}])
                                       (assoc (merging) :proofs (fn [{:keys [ns]}] #{(symbol (str ns "-test") "t")})))
         [t-end state cached] (:value seen)]
-    (is (re-find #":value t[0-9a-f]+-test/t" (:text t)) (pr-str t))
+    (is (re-find #":value [a-p][0-9a-f]{15}-test/t" (:text t)) (pr-str t))
     (is (re-find #":outcome :(ready|gate|done|merged)" (:line done)) (str "the answer is the verdict line: " (pr-str done)))
     (is (#{:done :merged} (:seon.task/outcome t-end)) (pr-str t-end))
     (is (#{:done :merged} state) (str "the task finishes, never held for root: " state))
