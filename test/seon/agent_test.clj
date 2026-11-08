@@ -181,7 +181,7 @@
   "The verdict cache directory of the root the merging tests share (a delay: one per test process)."
   (delay (str (seon.config/checkout) "/target/tmp/verdicts-merge-" (random-uuid))))
 
-(defn- merging
+(defn merging
   "in-agent's options for a test whose agent merges into main (which moves the program every later test runs):
   a root for the tests that merge, all alike, each on test names of its own, and a verdict cache the tests may
   read and write (merge-cache)."
