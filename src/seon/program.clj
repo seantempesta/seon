@@ -1185,10 +1185,11 @@
   test namespaces: 12.2 s evaluated form by form, 0.70 s loaded warm, 16.1 s cold: the commit that
   made this), its contracted vars armed. A namespace whose require throws is left to load-forms!, which names the
   form that fails. Answers [the namespaces loaded, the errors]. See docs/source.md#a-process-holds-the-tests-only-when-it-runs-them."
-  {:malli/schema [:=> [:cat :seon.host/db [:sequential :map]] [:tuple [:set :symbol] [:vector :seon.program/error]]]}
-  [db forms]
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :map] [:sequential :map]] [:tuple [:set :symbol] [:vector :seon.program/error]]]}
+  [db forms lf]
   (let [tnss (test-nss db)
-        live (group-by :ns (live-forms db))
+        ;; lf: db's live forms, which load-all! has read (a second read was 0.6-1.1 s of a fork server's start)
+        live (group-by :ns lf)
         root (get cfg/config :seon.config.source/root)
         ;; the file require reads is the one a source dir holds at the namespace's path, and it holds every
         ;; form main has of it, as main has it: a file edited since its import, or one on no source dir (a
@@ -1225,8 +1226,9 @@
                   [:=> [:cat :seon.host/db [:map [:tests? {:optional true} :boolean]]] :seon.program/load-report]]}
   ([db] (load-all! db {}))
   ([db {:keys [tests?] :or {tests? true}}]
-   (let [forms (loadable db (filterv #(not (held? db %)) (live-forms db)) tests?)
-         [required errs] (if tests? (required! db forms) [#{} []])]
+   (let [lf (live-forms db)
+         forms (loadable db (filterv #(not (held? db %)) lf) tests?)
+         [required errs] (if tests? (required! db forms lf) [#{} []])]
      {:loaded (count forms)
       :errors (into errs (load! db (filterv #(not (required (:ns %))) forms) (set (keys (schema-changes db))) tests?))})))
 
