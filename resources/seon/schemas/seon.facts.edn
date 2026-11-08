@@ -225,7 +225,7 @@
  :seon.agent/model :string
  :seon.agent/holder :string
  ;; root's boot it was started in, and when (ms): the agent is live in a root when the boot is that root's and its task is :running
- :seon.agent/boot :string
+ :seon.agent/boot [:and {:seon.db/index true} :string]
  :seon.agent/started-ms :int
  :seon.agent/ended-ms :int
  ;; a test run that failed as a whole (its fork refused, a namespace did not load): the error as data (its type, message and

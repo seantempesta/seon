@@ -1059,7 +1059,7 @@
                 :earlier-agents-are-not-this-roots (= [(System/getProperty "user.name")] linked)
                 ;; phase 1's root was SIGKILLed: it left no stop fact, so this boot found its end :unclean
                 ;; main-data-datoms leaves the user out: it is still main's
-                :phase-1s-user-recovered (= :user (:seon.agent/id (d/pull @(:conn sys) [:seon.agent/id] [:seon.agent/key (:user expect)])))
+                :phase-1s-user-recovered (some? (seon.db/eid @(:conn sys) :seon.agent/key (:user expect)))
                 :the-killed-root-ended-unclean (= :unclean (:cause (:seon.root/previous-end (d/pull @(:conn sys) [:seon.root/previous-end] [:seon.root/id :root]))))
                 :branches-recovered (= #{:dur-a :dur-b :dur-c :dur-clone} (set (get-in st [:store :recovered-branches])))
                 :main-runs-the-merged-f1 (= 20 (first r-n))
@@ -1650,7 +1650,7 @@
 
 (defn- eval-records
   "The eval records on db of whom the evals are on, by its identity (seon.repl/record-tx): an
-  agent's [:seon.agent/id id], or root's [:seon.root/id :root], each its code and who
+  agent's [:seon.agent/key key], or root's [:seon.root/id :root], each its code and who
   evaluated it (:by, :seon.eval/by): [{:code :by}]."
   [db [attr id]]
   (vec (for [[code by] (d/q '[:find ?c ?by :in $ ?attr ?id :where [?a ?attr ?id] [?e :seon.eval/agent ?a] [?e :seon.eval/code ?c] [?e :seon.eval/by ?by]] db attr id)]
@@ -1702,7 +1702,7 @@
         ;; the agent's record is on its branch at its commit (await-records); answers its one
         ;; eval when recorded, else waits on the next commit (the eval failed: its text check says so)
         mine (if (clojure.string/includes? (str (text 4)) "42")
-               (await-records ev a #(filter (fn [r] (= "outside" (:by r))) (eval-records (:db @(c/branch-db sys :mcp1)) [:seon.agent/id a])) #(= 1 (count %)))
+               (await-records ev a #(filter (fn [r] (= "outside" (:by r))) (eval-records (:db @(c/branch-db sys :mcp1)) [:seon.agent/key (name a)])) #(= 1 (count %)))
                [])
         _ (a/untap (:events-mult sys) ev)
         roots (filter #(= "outside" (:by %)) (eval-records @(:conn sys) [:seon.root/id :root]))

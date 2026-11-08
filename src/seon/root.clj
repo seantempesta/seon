@@ -343,7 +343,7 @@
                                              :to-writer (:to-writer st) :back (:back st) :events (:events st)
                                              :fx-kinds (system/fx-owners (get-in st [:system :procs]))}
                                       :chan-opts {:in {:buf-or-n (cfg/value :seon.config.agent/inbox-size)}}})
-         (assoc-in [:view :agents id] (cond-> {:branch branch :status :spawning :task task :pid nil
+         (assoc-in [:view :agents id] (cond-> {:branch branch :status :spawning :task task :pid nil :boot (:boot st)
                                                :forked-ms nil :mem-mb nil :evals [] :tests nil}
                                         cloned-from (assoc :cloned-from cloned-from))))
      id a]))

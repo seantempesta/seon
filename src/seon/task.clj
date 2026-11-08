@@ -256,7 +256,7 @@
 
 (def ^:private agent-attrs
   "Each member of root's view of an agent and the attribute recording it on the agent (agent-tx)."
-  {:status :seon.agent/status :task :seon.agent/description :branch :seon.agent/branch})
+  {:status :seon.agent/status :task :seon.agent/description :branch :seon.agent/branch :boot :seon.agent/boot})
 
 (def ^:private process-attrs
   "Each member of root's view of an agent's process and the attribute recording it on the process

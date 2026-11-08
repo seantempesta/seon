@@ -2277,11 +2277,7 @@
            ]
           ;; one transaction each, the last listed first: the list reads newest first, as the store's transaction ids order it
           (for [[k id status tid _ b] (reverse sessions)]
-            [(cond-> (case id
-                       :user {:seon.agent/key k}
-                       ;; a bare spawn!'s agent: recorded by seon.task/agent-tx alone, with no boot
-                       :bare {:seon.agent/key k :seon.agent/max-turns 40 :seon.agent/branch (or b :task-b)}
-                       {:seon.agent/key k :seon.agent/boot (first (str/split k #"/")) :seon.agent/max-turns 40 :seon.agent/branch (or b :task-b)})
+            [(cond-> (if (= :user id) {:seon.agent/key k} {:seon.agent/key k :seon.agent/boot (first (str/split k #"/")) :seon.agent/max-turns 40 :seon.agent/branch (or b :task-b)})
                status (assoc :seon.agent/status status) b (assoc :seon.agent/branch b)
                tid (assoc :seon.agent/task [:seon.task/id tid]))]))))
 
@@ -2337,7 +2333,6 @@
   ;; and the person (user), with no status and no task, made standing throw. The list is every agent on main, by boot
   (let [db (sessions-db "b2" [["b2/user" :user nil nil nil nil]
                               ["b2/a1" :a1 :busy "seon.x/now" :running :task-now]
-                              ["3f2a9c01e5d4b7a6" :bare :busy "seon.x/bare" :running :task-bare]
                               ["b1/a1" :a1 :dead "seon.x/old" :cap :task-old]
                               ["b1/a2" :a2 :ended "seon.x/older" :merged :task-older]
                               ["b0/a1" :a1 :dead "seon.x/oldest" :cap :task-oldest]])
@@ -2348,7 +2343,7 @@
         side (fn [st] (apply str (map :html (filter #(= "#c-side" (:container %)) (:seon.render/units (#'p/page-value st :root))))))
         html (side st)]
     (is (= ["b2" "b1" "b0"] (mapv first groups)) "this boot's first, then the others, newest first")
-    (is (= [#{"b2/a1" "3f2a9c01e5d4b7a6"} #{"b1/a1" "b1/a2"} #{"b0/a1"}] (mapv (comp keys-of second) groups)) "a boot with anything to open, every agent of it; one recorded with no boot (a bare spawn!) is this boot's")
+    (is (= [#{"b2/a1"} #{"b1/a1" "b1/a2"} #{"b0/a1"}] (mapv (comp keys-of second) groups)) "a boot with anything to open, every agent of it")
     (is (every? #(= (vec (sort %)) %) (map second groups)) "oldest first in its boot")
     (testing "an agent with no status and no task reads nothing, and draws"
       (is (= :status/none (:state (ui/standing {:seon.agent/id :user} nil))))
@@ -2356,7 +2351,6 @@
     (testing "this boot's sessions are in the list; earlier boots' under one fold, each linked by its key; a session with no task and no process is none"
       (is (not (str/includes? html "defect")) html)
       (is (str/includes? html "href=\"/agent/b2/a1\""))
-      (is (str/includes? html "href=\"/agent/3f2a9c01e5d4b7a6\"") "a bare spawn!'s agent, with no boot, is listed")
       (is (= 1 (count (re-seq #"<details" html))) "the earlier boots are one fold")
       (is (not (str/includes? html "href=\"/agent/b2/user\"")) "a person's session with nothing in it is not listed")
       (is (and (str/includes? html "href=\"/agent/b1/a1\"") (str/includes? html "href=\"/agent/b1/a2\"") (str/includes? html "href=\"/agent/b0/a1\"")))

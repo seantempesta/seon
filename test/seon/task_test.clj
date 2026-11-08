@@ -306,4 +306,6 @@
   (let [schema (d/schema (ts/test-db))]
     (is (contains? schema :seon.agent/key) "the key is the stored name")
     (is (not (contains? schema :seon.agent/id)) "no attribute for the id")
-    (is (not (:db/index (get schema :seon.agent/boot))) "the boot is not indexed")))
+    (is (:db/index (get schema :seon.agent/boot)) "the boot is indexed: a boot's sessions are read by it")
+    (is (= "b9" (:seon.agent/boot (first (task/agent-tx :c0ffee00c0ffee00 {:boot "b9" :status :spawning}))))
+        "every agent root starts records its boot (its view's :boot), a bare spawn! too, so the agents list holds it")))
