@@ -4,6 +4,8 @@ This file holds the owner's standing rulings, one entry each: the rule, the owne
 
 ## 2026-11-08 rulings
 
+The owner's rulings of 2026-11-08, on how a reply's evals run.
+
 ### Every eval of a reply runs (owner, 2026-11-08)
 
 Owner, 2026-11-08: "I want us to run every eval. Turns are precious and one fuckup shouldn't punish the other evals. Yes I understand this could cause issues if the next eval is dependent on the previous. I still want to try turning this on". Stated in: ```seon.repl/run-calls```, [the prompt](prompt.md).
