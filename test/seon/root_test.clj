@@ -33,7 +33,8 @@
   ;; root boots on its main carrier, before any thread, and forks its fork server there while it
   ;; is the one thread (seon.root/boot!); its threads (Jolt's carriers, timer, poller) outlive
   ;; stop!, so a second start! in that process would fork beside them. It is refused by name
-  ;; instead, and nothing is forked
+  ;; instead, and nothing is forked. The carriers a go block starts stand for the first boot's
+  ;; (seon.check/boot-twice): the refusal is the same, and the test pays no first boot (21 s -> the process's start)
   (let [main (str "root-test-" (random-uuid))
         {:keys [exit out err]} (ts/binary-sh "env" "SEON_WEB_PORT=0" (str "SEON_STORE=" (test-store)) (str "SEON_MAIN=" main)
                                       "./seon" "boot-twice" "--profile" (name (config/profile)) :dir "target")

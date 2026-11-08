@@ -1309,12 +1309,14 @@
   (lib/c-exit 0))
 
 (defn boot-twice
-  "start! -> stop! -> start! in this one process: the second boot's answer, the last line as EDN,
+  "A start! in a process whose carrier threads already run: its answer, the last line as EDN,
   {:second message}. A process boots root once (seon.root/boot!: on the main carrier, before any
-  thread), and its threads outlive stop!, so the second start! is refused by Jolt by name
-  (main-carrier-run!: fibers already run on carrier threads) and forks nothing beside them."
+  thread), and a first boot's threads (Jolt's carriers, timer, poller) outlive stop!, so a second
+  start! is refused by Jolt by name (main-carrier-run!: fibers already run on carrier threads) and
+  forks nothing beside them. A go block starts the same carriers a first boot leaves, so the refusal
+  is shown without paying for that first boot (about 20 s: docs/testing.md#a-root-costs-what-it-boots)."
   []
-  (c/stop! (c/start! {:datoms 2000}))
+  (a/<!! (a/go 1))
   (out! (sedn/encode {:second (try (c/stop! (c/start! {:datoms 2000})) :booted
                                    (catch Throwable e (ex-message e)))}))
   (lib/c-exit 0))
