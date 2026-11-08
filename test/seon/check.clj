@@ -174,7 +174,7 @@
                              (transact! [{:var/name 'app.m0/f1 :var/doc \"changed inside a test\"}])
                              (is (= \"changed inside a test\" (doc-of 'app.m0/f1))))
                            (transact! [{:note/text \"f1 adds one\" :note/agent :a3}
-                                       {:var/name 'app.m0/f1 :var/doc \"f1 adds 1 to x\" :note/agent :t}])
+                                       {:var/name 'app.m0/f1 :var/doc \"f1 adds 1 to x\"}])
                            (doc-of 'app.m0/f1)"}
         replies (into {} (pmap (fn [id] [id @(c/submit! sys id (programs id))]) ids))
         _ (doseq [id ids] (out! id " " (short-items (replies id))))

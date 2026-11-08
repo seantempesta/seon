@@ -308,7 +308,7 @@
   "A connection to the store and branch of cfg (Datahike's `d/connect`), its writer's transact the one path's
   (`transact-checked`), so every write through it is checked. The one way a connection is opened (bin/laws
   transactions): the hook is added here, never stored in cfg, which is plain data that travels (a fork's message, a
-  stored config): a Var in it could not be encoded, and the fork it rode never came (2026-11-08).
+  stored config): a Var in it could not be encoded, and the fork it rode never came.
   See docs/storage.md#the-write-checks-every-entity-it-touches."
   {:malli/schema [:=> [:cat :map] :any]}
   [cfg] (d/connect (assoc-in cfg [:writer :write-fn-map] {'transact! transact-checked})))
