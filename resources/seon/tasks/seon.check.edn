@@ -57,8 +57,5 @@
  {:seon.task/name "a-forked-test-child-died-stuck"
   :seon.task/plan "Seen once, 2026-11-07, on jolt/delivered at 3578ff8fe1, under load, in `bin/check agent-tests`, a sample of 100 forked from an agent: `seon.render-cost-test/a-transaction-costs-its-datoms-to-match` answered `test process died: {:exit 1}`, and the log began `jolt-main-carrier: stuck: the program waits, and nothing is queued, no timer is set and no descriptor is awaited`, with a trace in `seon.root/start!` under `seon.check/run-check`. Alone it's green, and the step's rerun was green. Not reproduced, and whether the branch caused it is unknown: it added a Flow port to the reconciler. Next time: keep the child's fiber dump (`kill -INFO`). Correct: a child waits on something that answers, or its wait says what it was. See docs/processes.md#what-a-fork-inherits."
   :seon.task/kind :work}
-{:seon.task/name "a-checks-waits-end-on-their-producers-end"
-  :seon.task/plan "Nothing hangs (AGENTS section 4). seon.check/idle waits on atoms only its tab's reader thread fills (the feed's first bytes, its settled mark), and await-ref has no end when that producer never answers: 2026-11-08 a land's idle step sat 30 minutes at 0% CPU while the render proc held a tab's settled mark until a second tab opened (Web's defect, theirs to fix). The waits end on their producer's end: the feed's EOF or the root's stop answers the wait with a typed reason (its last bytes, what it waited for), so a check that cannot finish says why at once. Sweep seon.check for every await-ref and await on an atom a thread fills. Proof: a check whose feed never settles ends red naming the wait, in seconds."
-  :seon.task/kind :work
-  :seon.task/proofs #{}}
+
 ]

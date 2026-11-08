@@ -451,3 +451,23 @@
       (is (false? (seon.check/remove-store-past! dir 9)) "a store not there is nothing to remove")
       (finally (seon.fx/remove-tree! dir)))))
 
+
+(deftest a-feed-that-ends-unsettled-ends-the-wait-that-names-it
+  ;; resources/seon/tasks/seon.check.edn's a-checks-waits-end-on-their-producers-end (AGENTS section 4:
+  ;; nothing hangs): seon.check/idle waits on a feed only its reader thread fills. A stream that
+  ;; sends bytes and then ends (or throws on read) without a settled mark answers the wait false, so
+  ;; the check's :tab-settled is red, at once; before, the wait had no end. A stream that does settle
+  ;; answers true, one that ends before any byte fails the first-bytes wait
+  (let [feed-of (fn [^String text] (#'seon.check/watch-feed! (java.io.ByteArrayInputStream. (.getBytes text "UTF-8"))))
+        await-feed #'seon.check/await-feed
+        unsettled (feed-of "event: datastar-patch-elements\ndata: x\n")
+        settled (feed-of "event: datastar-patch-elements\n: settled\n")
+        empty-feed (feed-of "")
+        throws (#'seon.check/watch-feed! (proxy [java.io.InputStream] [] (read ([] 0) ([b] (throw (java.io.IOException. "reset"))) ([b o l] (throw (java.io.IOException. "reset"))))))]
+    (is (true? (await-feed unsettled #(pos? (:bytes %)))) "its first bytes arrived")
+    (is (false? (await-feed unsettled :settled)) "ended without a settled mark: the wait answers false, not never")
+    (is (= "eof" (:ended @unsettled)) "and says why it ended")
+    (is (true? (await-feed settled :settled)))
+    (is (false? (await-feed empty-feed #(pos? (:bytes %)))) "ended before its first bytes")
+    (is (false? (await-feed throws :settled)))
+    (is (= "read threw: reset" (:ended @throws)))))

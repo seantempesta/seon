@@ -125,6 +125,39 @@
     (remove-watch r k)
     true))
 
+(defn- feed-see
+  "The feed state f after text s: its keyframe seen, then a settled mark after it (a mark split
+  across two reads is found in the carry of the last read's end)."
+  [{:keys [carry keyframe settled] :as f} s]
+  (let [t (str carry s)
+        k (when-not keyframe (clojure.string/index-of t "event: datastar-patch-elements"))
+        after (cond k (subs t k) keyframe t)]
+    (assoc f :keyframe (boolean (or keyframe k))
+           :settled (boolean (or settled (and after (clojure.string/index-of after ": settled"))))
+           :carry (let [r (or after t)] (subs r (max 0 (- (count r) 40)))))))
+
+(defn- watch-feed!
+  "An atom of the text an input stream sends ({:bytes :keyframe :settled :carry}), filled by an edge
+  reader thread (the one blocking read). When the stream ends (EOF, or the exception its read threw:
+  root stopped, the peer closed) the thread marks it in the same atom, :ended \"eof\" or the exception's
+  message, so every wait on it (await-feed) ends with its producer. See docs/checks.md#modes."
+  [^java.io.InputStream in]
+  (let [feed (atom {:bytes 0 :carry "" :keyframe false :settled false})]
+    (doto (Thread. (fn [] (let [buf (byte-array 8192)]
+                            (loop [] (let [n (try (.read in buf) (catch Exception e (str "read threw: " (ex-message e))))]
+                                       (cond (string? n) (swap! feed assoc :ended n)
+                                             (pos? n) (do (swap! feed #(-> % (feed-see (String. buf 0 (int n) "UTF-8")) (update :bytes + n))) (recur))
+                                             :else (swap! feed assoc :ended "eof")))))))
+      (.setDaemon true) (.start))
+    feed))
+
+(defn- await-feed
+  "true once (pred @feed) holds, false when the feed ended first (:ended, set by watch-feed!): the
+  wait ends with its producer, and the caller's check is red naming what it awaited. No deadline."
+  [feed pred]
+  (await-ref feed #(or (pred %) (:ended %)))
+  (boolean (pred @feed)))
+
 (defn- merge-in!
   "Agent id's branch into main as a merge task's is: the writer's octopus merge of one
   member (what seon.reconcile's :octopus-merge asks), answered as that member's result. The
@@ -1876,31 +1909,17 @@
     (let [;; the port its web proc bound
         port (:port web)
         _ (seon.await/await-quiet sys 0)
-        received (atom 0)
-        ;; what the wait needs of the feed's text: its keyframe seen, then a settled mark after it
-        ;; (a mark split across two reads is found in the carry of the last read's end)
-        feed (atom {:carry "" :keyframe false :settled false})
-        see (fn [{:keys [carry keyframe settled]} s]
-              (let [t (str carry s)
-                    k (when-not keyframe (clojure.string/index-of t "event: datastar-patch-elements"))
-                    after (cond k (subs t k) keyframe t)]
-                {:keyframe (boolean (or keyframe k))
-                 :settled (boolean (or settled (and after (clojure.string/index-of after ": settled"))))
-                 :carry (let [r (or after t)] (subs r (max 0 (- (count r) 40))))}))
         sock (java.net.Socket. "127.0.0.1" (int port))
         _ (doto (.getOutputStream sock)
             (.write (.getBytes (str "GET /feed?view=root HTTP/1.1\r\nHost: 127.0.0.1\r\nAccept: text/event-stream\r\n\r\n") "UTF-8"))
             (.flush))
         ;; the tab: an edge reader counting the bytes its feed sends, and watching its text
-        in (.getInputStream sock)
-        _ (doto (Thread. (fn [] (let [buf (byte-array 8192)]
-                                  (loop [] (let [n (try (.read in buf) (catch Exception _ -1))]
-                                             (when (pos? n) (swap! feed see (String. buf 0 (int n) "UTF-8")) (swap! received + n) (recur)))))))
-            (.setDaemon true) (.start))
-        opened (await-ref received pos?)
+        feed (watch-feed! (.getInputStream sock))
+        received (fn [] (:bytes @feed))
+        opened (await-feed feed #(pos? (:bytes %)))
         ;; the tab's opening ran its course: its keyframe (the feed's first patch: a new tab is
         ;; stale until it), then a settled mark (the render proc has nothing in flight)
-        settled (await-ref feed :settled)
+        settled (await-feed feed :settled)
         ;; main's last commit synced (the flusher's answer), then main's commits applied in the
         ;; fork server, each one's answers through its proc and the api
         flushed (writer-flushed sys)
@@ -1915,23 +1934,23 @@
         render-pending (:pending rs)
         ;; main as the render proc holds it against main now: behind is a commit notice in flight
         render-main {:t (:main-t rs) :main-t (:max-tx @(:conn sys))}
-        render-settled (or (zero? render-pending) (await-ref feed :settled))
+        render-settled (or (zero? render-pending) (await-feed feed :settled))
         ;; root's declared procs and its effect owners (their workers step only when given work)
         decl (seon.system/read-decl (seon.config/value :seon.config.root/system-path))
         pids (sort-by str (concat (keys (:procs decl)) (for [k (keys (:fx decl))] (keyword "fx" (name k)))))
         counts (fn [] (into (sorted-map) (for [pid pids :let [p (ping sys pid)]] [pid (if (:blocked p) :blocked (:count p))])))
-        b0 @received c0 (counts)
+        b0 (received) c0 (counts)
         _ (Thread/sleep window-ms)
-        c1 (counts) b1 @received
+        c1 (counts) b1 (received)
         moved (into (sorted-map) (for [[pid n] c1 :when (not= n (get c0 pid))] [pid [(get c0 pid) n]]))
-        n-spawn @received
+        n-spawn (received)
         a (c/spawn! sys {:task "idle check"})
-        spawned (await-ref received #(> % n-spawn))
-        n-commit @received
+        spawned (await-feed feed #(> (:bytes %) n-spawn))
+        n-commit (received)
         _ @(c/transact-main! sys [{:db/id "n" :ns/name 'idle.check}])
-        committed (await-ref received #(> % n-commit))]
+        committed (await-feed feed #(> (:bytes %) n-commit))]
       (.close sock)
-      {:report {:window-ms window-ms :procs (count pids) :steps-at-idle moved :bytes-at-idle (- b1 b0) :agent a :flushed flushed :fork-server fs :render-pending render-pending :render-main render-main}
+      {:report {:window-ms window-ms :procs (count pids) :steps-at-idle moved :bytes-at-idle (- b1 b0) :agent a :flushed flushed :fork-server fs :render-pending render-pending :render-main render-main :feed-ended (:ended @feed)}
        :checks {:tab-opened opened :tab-settled settled :flush-covered-main (:covered flushed) :fork-server-caught-up (:caught-up fs) :render-settled render-settled :no-step-at-idle (empty? moved) :no-byte-at-idle (= b0 b1)
                 :no-proc-blocked (not-any? #{:blocked} (concat (vals c0) (vals c1)))
                 :spawn-reached-tab spawned :commit-reached-tab committed}}))))))
