@@ -4,7 +4,7 @@
   (:require [seon.contract :as contract :refer [defn defn-]]
             [clojure.string :as str]
             [datahike.api :as d]
-            [seon.task :as task]
+            [seon.task :as task] [seon.lib :as lib]
             [seon.db :as pdb]
             [seon.ratom :as ratom]
             [seon.ctx :as ctx]))
@@ -59,26 +59,31 @@
    :seon.message/fact [:seon.message/id :seon.message/to :seon.message/call]
    :seon.model-call/fact [:seon.model-call/id :seon.model-call/agent nil]})
 
+(defn- in-example
+  "Id x of a record as example ek keeps it: the content id of the two (seon.lib/id), so two examples of one session keep
+  their ids apart and every id stays one any Clojure reader and any provider takes. See docs/tasks.md#a-task-names-example-sessions."
+  {:malli/schema [:=> [:cat :string :string] :string]}
+  [ek x] (lib/id (lib/digest (str ek "/" x))))
+
 (defn- example-record
-  "An eval m as example ek keeps it (pre: ek's prefix for ids): its call id and
-  prefixed with pre (a handle names its answer: it stays). See docs/tasks.md#a-task-names-example-sessions."
-  {:malli/schema [:=> [:cat :string :string :map] :map]}
-  [ek pre m]
+  "An eval m as example ek keeps it: its call id in the example's (`in-example`; a handle names its answer: it stays). See docs/tasks.md#a-task-names-example-sessions."
+  {:malli/schema [:=> [:cat :string :map] :map]}
+  [ek m]
   (cond-> m
-    (:seon.eval/call-id m) (update :seon.eval/call-id #(str pre %))))
+    (:seon.eval/call-id m) (update :seon.eval/call-id #(in-example ek %))))
 
 (defn- example-rekey
   "Record m of one of `session-kinds` (its id, agent and model call attributes id-k, agent-k and call-k) as example ek keeps it: its db
-  attributes dropped, its id under ek (a model call's is `<ek>/<n>`), its agent ek's, its model call ek's of its turn, an eval as `example-record` has it. See
+  attributes dropped, its id the example's (`in-example`; a model call's seon.lib/call-id of ek and its turn), its agent ek's, its model call ek's of its turn, an eval as `example-record` has it. See
   docs/tasks.md#a-task-names-example-sessions."
-  {:malli/schema [:=> [:cat :string :string :map [:tuple :qualified-keyword :qualified-keyword [:maybe :qualified-keyword]]] :map]}
-  [ek pre m [id-k agent-k call-k]]
+  {:malli/schema [:=> [:cat :string :map [:tuple :qualified-keyword :qualified-keyword [:maybe :qualified-keyword]]] :map]}
+  [ek m [id-k agent-k call-k]]
   (-> (apply dissoc m :turn (filter #(= "db" (namespace %)) (keys m)))
       (cond-> call-k (assoc call-k (task/call-ref ek (:turn m 0))))
       ;; a model call is `<agent key>/<n>` (docs/turn.md#the-turn-is-a-number), the example's too: the page finds it by that
-      (as-> m (if-let [n (:seon.model-call/n m)] (assoc m id-k (str ek "/" n)) (update m id-k #(str ek "/" %))))
+      (as-> m (if-let [n (:seon.model-call/n m)] (assoc m id-k (lib/call-id ek n)) (update m id-k #(in-example ek %))))
       (assoc agent-k (cond-> [:seon.agent/key ek] (= :seon.message/to agent-k) vector))
-      (cond-> (:seon.eval/code m) (->> (example-record ek pre)))))
+      (cond-> (:seon.eval/code m) (->> (example-record ek)))))
 
 (defn- session-records
   "The conversation of agent record c on db, [record kind] in its order (turn by turn: its messages, its reply, its evals). A record keeps the turn it names as :turn. See docs/tasks.md#a-task-names-example-sessions."
@@ -134,8 +139,8 @@
           (nil? request) (refuse (str "agent \"" key "\" has no request to show: its task has no plan and it has no description"))
           unknown (refuse (str "agent \"" key "\" holds a record of kind " (second unknown) ", which an example does not"))
           ;; its turn is the last its records carry (docs/turn.md#the-turn-is-a-number): the page draws a component for each
-          :else (into [[{:seon.agent/key ek :seon.agent/id (keyword (str "example-" id)) :seon.agent/status :ended :seon.agent/description request
+          :else (into [[{:seon.agent/key ek :seon.agent/status :ended :seon.agent/description request
                          :seon.agent/turn (reduce max 0 (map (fn [[v]] (or (:turn v) (:seon.model-call/n v) 0)) rs))}]]
                       (for [[v k] rs]
-                        [(example-rekey ek (str (str/replace ek "/" "-") "-") v (session-kinds k))])))))
+                        [(example-rekey ek v (session-kinds k))])))))
 

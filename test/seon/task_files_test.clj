@@ -180,22 +180,20 @@
   ;; does not read or is not that vector is the :seon.root/example-refused error and writes nothing
   ;; (on the process's shared root, with keys of its own: a root's boot was most of this test's time)
   (let [checkout (seon.config/checkout)
-        id (subs (str (random-uuid)) 0 8)
+        id (seon.lib/unique-id)
         runs (str checkout "/target/runs/load-example-" id)
         _ (.mkdirs (java.io.File. runs))
         file (str runs "/records.edn")
         key (str "example/" id)
-        _ (spit file (pr-str [[{:seon.agent/key key :seon.agent/id (keyword (str "example-" id)) :seon.agent/status :ended :seon.agent/description "Make h."}]
+        _ (spit file (pr-str [[{:seon.agent/key key :seon.agent/status :ended :seon.agent/description "Make h."}]
                               [{:seon.eval/id (str key "/s1") :seon.eval/by "src" :seon.eval/agent [:seon.agent/key key]
                                 :seon.eval/code "(+ 1 2)" :seon.eval/response {:handle (symbol (str "result/example-" id "-s1")) :value 3} :seon.eval/call-id (str "example-" id "-call_1")}]]))
         _ (spit (str runs "/bad.edn") "[[{:seon.agent/key \"someone\"}]]")
         _ (spit (str runs "/unreadable.edn") "[[{:seon.agent/key")
-        ;; written before session-tx gave the agent an id: it loaded, and its page was not found
-        _ (spit (str runs "/no-id.edn") (pr-str [[{:seon.agent/key (str key "-old") :seon.agent/status :ended}]]))
         missing (str runs "/nothing-here.edn")
         refused (fn [f] {:op :eval :agent "root" :code (str "(let [r (my.root/load-example! sys " (pr-str f) ")] [(:seon.error/type r) (:path r) (:seon.error/message r)])")})]
     (try
-      (let [[twice [type p message] unreadable bad no-id]
+      (let [[twice [type p message] unreadable bad]
             (map :value
                  (at/in-agent [{:op :eval :agent "root"
                                 :code (str "(let [f " (pr-str file) " a (my.root/load-example! sys f)
@@ -204,12 +202,11 @@
                           {:first (:batches a) :second (select-keys b [:ok :changed :batches]) :moved (not= t1 (:max-tx @(:conn sys)))
                            :evals (count (datahike.api/q '[:find [?e ...] :where [?e :seon.eval/id " (pr-str (str key "/s1")) "]] @(:conn sys)))
                            :agents (count (datahike.api/q '[:find [?e ...] :where [?e :seon.agent/key " (pr-str key) "]] @(:conn sys)))})")}
-                               (refused missing) (refused (str runs "/unreadable.edn")) (refused (str runs "/bad.edn")) (refused (str runs "/no-id.edn"))]))]
+                               (refused missing) (refused (str runs "/unreadable.edn")) (refused (str runs "/bad.edn"))]))]
         (is (= {:first 2 :second {:ok true :changed 0 :batches 0} :moved false :evals 1 :agents 1} twice)
             "the first load writes its two transactions; the second writes nothing")
         (is (= [:seon.root/example-refused missing] [type p]))
         (is (str/includes? message "not found"))
         (is (str/includes? (nth unreadable 2) "not readable EDN"))
-        (is (str/includes? (nth bad 2) "not a non-empty vector of transactions"))
-        (is (str/includes? (nth no-id 2) "no :seon.agent/id") "an agent with no id is refused, not loaded unfindable"))
+        (is (str/includes? (nth bad 2) "not a non-empty vector of transactions")))
       (finally (clojure.java.shell/sh "rm" "-rf" runs)))))

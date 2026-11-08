@@ -19,9 +19,9 @@
   "Task id's agent and how its work stands (outcome), as a root would have recorded them: what seon.task/start-tx writes
   and, beside the outcome, the members (the stored answer of its judging)."
   [id outcome members]
-  (let [k (task/agent-key boot :a0) e (env id)]
+  (let [k "a0" e (env id)]
     [(merge {:seon.task/id id :seon.task/outcome outcome :seon.task/agent k} members)
-     {:db/id k :seon.agent/key k :seon.agent/id :a0 :seon.agent/task [:seon.task/id id] :seon.agent/branch (:branch e)
+     {:db/id k :seon.agent/key k :seon.agent/task [:seon.task/id id] :seon.agent/branch (:branch e)
       :seon.agent/boot boot :seon.agent/started-ms 0 :seon.agent/max-turns (:max-turns e)}]))
 
 (defn runs-tx

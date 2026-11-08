@@ -324,3 +324,22 @@
   (let [b (.digest (java.security.MessageDigest/getInstance "SHA-256") (.getBytes ^String s))
         h (Long/toHexString (.getLong (java.nio.ByteBuffer/wrap b)))]
     (str (subs "0000000000000000" (count h)) h)))
+
+(defn id
+  "A name made of hex text h (a digest, a hash), safe in every Clojure reader: the same characters, its first hex
+  digit 0-f written as a letter a-p, so it reads as a symbol, a keyword, a namespace segment and a qualified name (a
+  name that starts with a digit is no symbol to Clojure's reader, which 65% of raw digests do). One-to-one, so it
+  names what the hex names. See docs/storage.md#ids."
+  {:malli/schema [:=> [:cat [:re "^[0-9a-f]+$"]] [:re "^[a-p][0-9a-f]*$"]]}
+  [h] (str (char (+ (int \a) (Character/digit (.charAt ^String h 0) 16))) (subs h 1)))
+
+(defn unique-id
+  "A fresh id that must never repeat (an agent, a root's boot): the digest of a random UUID, the one id form (docs/decisions.md, the ruling named An id is the content of the facts that make it: always unique, a UUID's hash; the same content, its digest). Minted once, where its entity is made."
+  {:malli/schema [:=> [:cat] [:re "^[a-p][0-9a-f]{15}$"]]}
+  [] (id (digest (str (random-uuid)))))
+
+(defn call-id
+  "The id of turn n's model call of the agent with key k: the digest of the two (same agent and turn, same id), never the characters
+  of either. See docs/turn.md#the-turn-is-a-number."
+  {:malli/schema [:=> [:cat :string [:or nat-int? :string]] [:re "^[a-p][0-9a-f]{15}$"]]}
+  [k n] (id (digest (str k "/" n))))

@@ -356,7 +356,7 @@
    (fn [sys]
     (let [[a] (spawn-ready! sys "record")
           r1 @(c/submit! sys a "(+ 1 2) (in-ns 'app.m0) (defn f3 [x] (* 3 x)) (/ 1 0)")
-          n @(c/submit! sys a "(count (my.db/q '[:find ?e :where [?e :seon.eval/agent ?a] [?a :seon.agent/id :a1]]))")
+          n @(c/submit! sys a "(count (my.db/q '[:find ?e :where [?e :seon.eval/agent ?a] [?a]]))")
           src @(c/submit! sys a "(my.db/q '[:find ?s . :where [?e :var/name app.m0/f3] [?e :var/form ?f] [?f :form/src ?s]])")]
       {:report {:first (select-keys r1 [:text :record :recorded]) :second [(printed n) (printed src)]}
        :checks {:one-response-its-error (some? (:ex r1))
@@ -540,7 +540,7 @@
                 (and (= :seon.repl/ticks-spent (get-in (first r11) [:ex :seon.error/type]))
                      (<= 100000000 (get-in (first r11) [:ex :ticks])) (= "8" (printed (second r11))))
                 "printed output comes back as :out; a busy thread blocks the test fork instead of breaking it"
-                (and (= "hello from :a3\n" (:seon.print/code (:out r10))) (= :seon.test/fork-refused (:seon.error/type t10)) (re-find #"Chez threads active" (:seon.error/message t10)))
+                (and (= (str "hello from " x "\n") (:seon.print/code (:out r10))) (= :seon.test/fork-refused (:seon.error/type t10)) (re-find #"Chez threads active" (:seon.error/message t10)))
                 "the fork server dies: agents keep working, a new server forks the next agent (whose tick budget works)"
                 (and (= "7" (printed r7)) (= "360" (printed (first r8)))
                      (= :seon.repl/ticks-spent (get-in (second r8) [:ex :seon.error/type])) (= ":after" (printed (nth r8 2))))}}))))
@@ -621,7 +621,8 @@
         th-ready (thread-diff (declared-threads sys) (threads))
         _ (out! "ready in " (lib/r2 t-ready) " ms: " (frequencies (map #(get-in (c/state sys) [:agents % :status]) ids)))
         work (fn [id]
-               (let [k (subs (name id) 1)
+               (let [;; a number for its code (the multiplier, its namespace): its place among the agents, since an id is a digest
+                     k (inc (.indexOf ids id))
                      t1 (profile/now-ns)
                      r @(c/submit! sys id (str "(ns app.s" k " (:require [clojure.test :refer [deftest is]] [my.db :refer [q transact!]])) (defn f {:malli/schema [:=> [:cat :int] :int]} [x] (* x " k "))
                                                 (deftest f-test (is (= (* 2 " k ") (f 2))))
@@ -816,7 +817,8 @@
           timed (fn [id form] (let [t (profile/now-ns) r @(c/submit! sys id form)] [r (/ (- (profile/now-ns) t) 1e6)]))
           _ (reset! phase :eval)
           evals (vec (pmap (fn [id]
-                             (let [k (subs (name id) 1)
+                             (let [;; a number for its code: its place among the agents, since an id is a digest
+                                   k (inc (.indexOf ids id))
                                    forms [(str "(ns app.w" k " (:require [clojure.test :refer [deftest is]] [my.db :refer [q transact!]])) (defn f {:malli/schema [:=> [:cat :int] :int]} [x] (* x " k "))
                                                 (deftest f-test (is (= (* 2 " k ") (f 2)))) (f 21)")
                                         "(count (my.db/q '[:find ?e :where [?e :var/name]]))"
@@ -973,7 +975,7 @@
   transactions of its own (boot, quiescent, collected: three :db/txInstant datoms more), so what
   a restart must give back exactly is the rest."
   [sys]
-  (let [db @(:conn sys) users (set (d/q '[:find [?e ...] :where [?e :seon.agent/id :user]] db))]
+  (let [db @(:conn sys) users (set (d/q '[:find [?e ...] :where [?e]] db))]
     (remove #(or (= "seon.root" (namespace (:a %))) (= :seon.agent/root (:a %)) (= (:e %) (:tx %)) (users (:e %)))
             (d/datoms db :eavt))))
 
@@ -1059,7 +1061,7 @@
                 :earlier-agents-are-not-this-roots (= [(System/getProperty "user.name")] linked)
                 ;; phase 1's root was SIGKILLed: it left no stop fact, so this boot found its end :unclean
                 ;; main-data-datoms leaves the user out: it is still main's
-                :phase-1s-user-recovered (= :user (:seon.agent/id (d/pull @(:conn sys) [:seon.agent/id] [:seon.agent/key (:user expect)])))
+                :phase-1s-user-recovered (some? (seon.db/eid @(:conn sys) :seon.agent/key (:user expect)))
                 :the-killed-root-ended-unclean (= :unclean (:cause (:seon.root/previous-end (d/pull @(:conn sys) [:seon.root/previous-end] [:seon.root/id :root]))))
                 :branches-recovered (= #{:dur-a :dur-b :dur-c :dur-clone} (set (get-in st [:store :recovered-branches])))
                 :main-runs-the-merged-f1 (= 20 (first r-n))
@@ -1650,7 +1652,7 @@
 
 (defn- eval-records
   "The eval records on db of whom the evals are on, by its identity (seon.repl/record-tx): an
-  agent's [:seon.agent/id id], or root's [:seon.root/id :root], each its code and who
+  agent's [:seon.agent/key key], or root's [:seon.root/id :root], each its code and who
   evaluated it (:by, :seon.eval/by): [{:code :by}]."
   [db [attr id]]
   (vec (for [[code by] (d/q '[:find ?c ?by :in $ ?attr ?id :where [?a ?attr ?id] [?e :seon.eval/agent ?a] [?e :seon.eval/code ?c] [?e :seon.eval/by ?by]] db attr id)]
@@ -1702,7 +1704,7 @@
         ;; the agent's record is on its branch at its commit (await-records); answers its one
         ;; eval when recorded, else waits on the next commit (the eval failed: its text check says so)
         mine (if (clojure.string/includes? (str (text 4)) "42")
-               (await-records ev a #(filter (fn [r] (= "outside" (:by r))) (eval-records (:db @(c/branch-db sys :mcp1)) [:seon.agent/id a])) #(= 1 (count %)))
+               (await-records ev a #(filter (fn [r] (= "outside" (:by r))) (eval-records (:db @(c/branch-db sys :mcp1)) [:seon.agent/key (name a)])) #(= 1 (count %)))
                [])
         _ (a/untap (:events-mult sys) ev)
         roots (filter #(= "outside" (:by %)) (eval-records @(:conn sys) [:seon.root/id :root]))

@@ -67,12 +67,6 @@
     (with-meta (assoc (:tree (binding [datahike.index.interface/*reads* nil] (ctx/build (d/as-of db t) a branch))) :t t)
       {:seon.render/schema (:seon.eval/schema e)})))
 
-(defn wire-id
-  "The id eval id goes by on the wire: made from its own id, so two evals never share one, whatever a provider called them (a provider
-  may reuse its ids across replies, which reads as one call answered twice). See docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
-  {:malli/schema [:=> [:cat :string] :string]}
-  [id] (str "eval-" (str/replace id "/" "-")))
-
 (defn result-mark
   "Eval e's mark as the tree carries it (:wire/result): the record itself, printed only when the model's reading reaches it (seon.render/result-text), and, for an eval that names its basis, how its value is rebuilt (`basis-value`). See
   docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
@@ -157,7 +151,7 @@
         lists (render/page-lists w)
         parts (when (and (not shown?) (seq lists)) (not-empty (render/placed-hiccup w lists)))
         ps (cond-> ps
-             parts (into (let [[_ code] (:whole render-calls) id (wire-id "render")
+             parts (into (let [[_ code] (:whole render-calls) id "render"
                                record {:seon.eval/schema :seon.render/parts :seon.eval/response {:value (render/parts-value parts)}}]
                            (render/hiccup-wire [:li {:wire/role "assistant" :wire/call-id id :wire/ref [:render] :wire/result {:record record}}
                                                 [:pre {:wire/field "code"} code]]))))]

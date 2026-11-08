@@ -509,7 +509,7 @@
       (on :db #(d/branch! % :db :turns))
       (on :turns (fn [c]
                    (d/transact c {:tx-data (turn-facts 0)})
-                   (d/transact c {:tx-data [{:seon.model-call/id "att/0" :seon.model-call/reply reply}]})
+                   (d/transact c {:tx-data [{:seon.model-call/id (seon.lib/call-id "att" 0) :seon.model-call/reply reply}]})
                    (pdb/sync! cfg)))
       (is (= reply (on :db #(k/get (:store @%) vk nil {:sync? true}))) "the value is stored under its content key")
       (testing "GC keeps a value a branch reaches, and a cold read swaps the reference back for it"
@@ -580,7 +580,7 @@
         (is (zero? (:swept r1)) "and sweeps nothing: a new main must not hold its first work behind a full sweep"))
       (is (:skipped (pdb/collect! conn true)) "the same branches: nothing to reclaim, nothing written")
       (d/branch! conn :db :gone)
-      (on :gone #(d/transact % {:tx-data [{:seon.model-call/id "att/0" :seon.model-call/reply reply}]}))
+      (on :gone #(d/transact % {:tx-data [{:seon.model-call/id (seon.lib/call-id "att" 0) :seon.model-call/reply reply}]}))
       (let [r (record! (pdb/collect! conn true))]
         (is (= {:swept 0 :gone 0 :branches #{:db :gone}} (select-keys r [:swept :gone :branches]))
             "a branch made since: recorded as seen, nothing swept"))
@@ -685,7 +685,7 @@
     (try
       (d/branch! conn :db :gone)
       (let [c (d/connect (assoc (:config @conn) :branch :gone))]
-        (try (d/transact c {:tx-data [{:seon.model-call/id "att/0" :seon.model-call/reply reply}]}) (finally (d/release c))))
+        (try (d/transact c {:tx-data [{:seon.model-call/id (seon.lib/call-id "att" 0) :seon.model-call/reply reply}]}) (finally (d/release c))))
       (d/delete-branch! conn :gone)
       (is (= {:skipped true :shared true} (pdb/collect! conn false)) "a shared store: nothing swept, nothing recorded")
       (is (k/exists? (:store @conn) vk {:sync? true}) "the gone branch's value out of line is kept")
