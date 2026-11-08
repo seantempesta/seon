@@ -2277,11 +2277,13 @@
 (deftest what-a-function-cost-is-a-fact-on-the-branch
   (let [stats "(:seon.fn/stats (datahike.api/pull (seon.agent/db) [:seon.fn/stats] [:seon.fn/var 'seon.lib/digest]))"
         called "(do (seon.lib/digest \"x\") (seon.lib/digest \"y\") (seon.agent/transact! [{:seon.eval/id \"probe\" :seon.eval/by \"probe\"}]) (seon.agent/commit!) :ok)"
-        [_ first-stats _ second-stats q]
-        (in-agent [called stats called stats
+        ended "(do (seon.agent/write-end! {:outcome :waiting}) :ok)"
+        [_ committed _ first-stats _ _ second-stats q]
+        (in-agent [called stats ended stats called ended stats
                    "(datahike.api/q '[:find ?v :where [?f :seon.fn/var ?v] [?f :seon.fn/stats ?s] [(get ?s :calls) ?c] [(>= ?c 2)]] (seon.agent/db))"])
         a (:value first-stats) b (:value second-stats)]
-    (is (<= 2 (:calls a)) (pr-str first-stats))
+    (is (nil? (:value committed)) "a commit writes no cost: the turn's datoms stay its own work")
+    (is (<= 2 (:calls a)) (str "the end writes them: " (pr-str first-stats)))
     (is (= 4 (- (:calls b) (- (:calls a) 2))) (pr-str [a b]))
     (is (pos? (:bytes b)) "bytes are counted")
     (is (pos? (reduce + (vals (:hist b)))) "calls by size")
