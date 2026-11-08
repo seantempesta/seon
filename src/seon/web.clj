@@ -248,19 +248,19 @@
              [st 0] (:tabs st)))
 
 (defn- chat-agent
-  "The agent whose chat view shows ([:chat v], v its id or its branch in root's agents index): its id, else nil.
-  See docs/render.md#in-flight-output-streams."
-  {:malli/schema [:=> [:cat :map :any] [:maybe :keyword]]}
+  "The stable key (:seon.agent/key) of the agent whose chat view shows ([:chat v], v its id, branch or key
+  in root's agents index), else nil. See docs/render.md#in-flight-output-streams."
+  {:malli/schema [:=> [:cat :map :any] [:maybe :string]]}
   [index view]
   (when (and (vector? view) (= :chat (first view)))
     (let [v (second view)]
-      (if (contains? index v) v (some (fn [[id a]] (when (= v (:branch a)) id)) index)))))
+      (some (fn [[id a]] (when (or (= v id) (= v (:branch a)) (= (ui/kname v) (:key a))) (:key a))) index))))
 
 (defn- stream-in
-  "An effect's in-flight text, {:stream :agent :offset :text}, appended to the element its render drew with that
+  "An effect's in-flight text, {:stream :agent :offset :text} (:agent its stable key), appended to the element its render drew with that
   id in each tab of the agent's chat, a gap in :offset and a tab's missed start marked with …; {:stream :agent :end
   true} forgets the stream. See docs/render.md#in-flight-output-streams."
-  {:malli/schema [:=> [:cat :map [:map [:stream :string] [:agent :keyword]]] :map]}
+  {:malli/schema [:=> [:cat :map [:map [:stream :string] [:agent :string]]] :map]}
   [st {:keys [stream agent offset text end]}]
   (let [k [agent stream]]
     (if end
@@ -287,7 +287,8 @@
   "St keeping only the streams, and what tabs saw of them, of agents whose process lives in root's index."
   {:malli/schema [:=> [:cat :map] :map]}
   [st]
-  (let [live? (fn [[agent]] (when-let [a (get (:index st) agent)] (not (c/gone-statuses (:status a)))))]
+  (let [live (into #{} (keep (fn [a] (when-not (c/gone-statuses (:status a)) (:key a)))) (vals (:index st)))
+        live? (fn [[agent]] (contains? live agent))]
     (-> st (update :streams #(into {} (filter (comp live? key)) %))
         (update :tabs update-vals #(update % :seen (fn [s] (into #{} (filter live?) s)))))))
 
