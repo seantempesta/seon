@@ -5,9 +5,13 @@
   The model edge as data: a provider's reply body read into the completion (task
   seon.model/budgets-are-data-and-spend-is-measured). Run: bin/test seon.model-test"
   (:require [clojure.test :refer [deftest is testing]] [clojure.core.async :as a] [clojure.data.json :as json]
-            [ring-chez.adapter :as adapter] [seon.model :as model] [seon.fx :as fx] [seon.turn :as turn] [seon.contract] [clojure.string :as str] [seon.ctx] [seon.error] [seon.cost] [seon.fixtures :as fixtures]))
+            [ring-chez.adapter :as adapter] [seon.model :as model] [seon.fx :as fx] [seon.turn :as turn] [seon.contract] [clojure.string :as str] [seon.ctx] [seon.error] [seon.cost :as cost] [seon.fixtures :as fixtures]))
 
-(defn- chunk-line [m] (str "data: " (json/write-str m) "\n\n"))
+(defn- stop-now!
+  "Stops a test's local HTTP server at once: no drain wait, so no time decides. See docs/clocks.md#time-decides-nothing-here-clock-reads-named-as-data."
+  [server] (adapter/stop-server server {:drain-timeout-ms 0}))
+
+(defn- chunk-line [m] (str "data: " (json/write-str m :escape-unicode false) "\n\n"))
 
 (def ^:private chunks
   "A DeepSeek-shaped stream: reasoning first, then the content in pieces, the finish
@@ -52,7 +56,7 @@
         (is (= "```clojure\n(defn square [x] (* x x))\n```" (:text r)) "every piece, in order, until the server ended it")
         (is (= "Square multiplies." (:reasoning r)))
         (is (= ["stop" "deepseek-flash" 120 30 64] ((juxt :finish-reason :model :prompt-tokens :completion-tokens :cache-hit-tokens) r))))
-      (finally (adapter/stop-server server {:drain-timeout-ms 0})))))
+      (finally (stop-now! server)))))
 
 (deftest a-dropped-connection-is-a-transport-failure
   (let [r (model/complete {:kind :openai-compat :base-url "http://127.0.0.1:1" :model "m" :api-key-env "HOME" :max-tokens 2048}
@@ -208,10 +212,152 @@
 (deftest a-transport-failure-is-answered-to-the-agent
   (let [failure (model/complete {:kind :openai-compat :base-url "http://127.0.0.1:1" :model "m" :api-key-env "HOME" :max-tokens 2048}
                                 {:messages [{:role "user" :content "x"}] :task "t/x" :turn 0})
-        dest {:agent :a1 :op :fx-reply :k 1}
+        dest {:agent "boot/1" :op :fx-reply :k 1}
         [st o] (fx/owner-proc (fx/owner-proc {:kind :t :workers 1 :work nil :back nil}) :done {:dest dest :outcome failure :request {:req {:k 1}}})]
     (is (= :seon.model/transport (:seon.error/type failure)))
     (is (= [failure] (map :r (filter #(= dest (:dest %)) (:out o)))) "the owner answers the asker with the failure, once; nothing re-queues it")
     (is (empty? (:queue st)))
     (is (not (re-find #"kept and retried|after a pause" (:doc (meta #'model/transport-error))))
         "the docstring states what happens: the failure is answered to the agent, not kept and retried")))
+
+;; ---- a reply read a line at a time (docs/flow.md#effects-one-owner-and-its-workers-per-kind) ----
+
+(def ^:private emoji "A character outside the BMP." (str (char 0x1F600)))
+
+(def ^:private call-args
+  "The first tool call's arguments as the model wrote them: a message with an escaped newline, and two evals, the first with a
+  quote, an escaped newline, a two-byte character escaped, and one of four bytes written raw."
+  (str "{\"message-md\":\"Reading **it**\\nnow\",\"evals\":[{\"intent\":\"look at \\u00e9\",\"code\":\"(str \\\"\u00e9\\\" 1)\\n(prn :" emoji ")\"},"
+       "{\"intent\":\"then\",\"code\":\"(inc 1)\"}]}"))
+
+(defn- pieces-of [s n] (mapv #(apply str %) (partition-all n s)))
+
+(def ^:private deepseek-stream
+  "A realistic DeepSeek stream: reasoning, content (a character of two bytes and one of four in it), a tool call whose arguments
+  arrive in 6-character fragments (cut inside escapes and inside a surrogate pair), a second call, the finish and the usage."
+  (str (str/join (concat
+                  (for [r ["Think" "ing, " "then act."]] (chunk-line {:model "deepseek-flash" :choices [{:index 0 :delta {:reasoning_content r}}]}))
+                  (for [c ["Caf\u00e9 " (str emoji " ok")]] (chunk-line {:choices [{:index 0 :delta {:content c}}]}))
+                  (map-indexed (fn [i f] (chunk-line {:choices [{:index 0 :delta {:tool_calls [(cond-> {:index 0 :function {:arguments f}}
+                                                                                                 (zero? i) (-> (assoc :id "call_0" :type "function") (assoc-in [:function :name] "eval")))]}}]}))
+                               (pieces-of call-args 6))
+                  [(chunk-line {:choices [{:index 0 :delta {:tool_calls [{:index 1 :id "call_1" :function {:name "eval" :arguments "{\"message-"}}]}}]})
+                   (chunk-line {:choices [{:index 0 :delta {:tool_calls [{:index 1 :function {:arguments "md\":\"hi\"}"}}]}}]})
+                   (chunk-line {:choices [{:index 0 :delta {} :finish_reason "tool_calls"}]})
+                   (chunk-line {:choices [] :usage {:prompt_tokens 120 :completion_tokens 30 :prompt_cache_hit_tokens 64}})]))
+       "data: [DONE]\n\n"))
+
+(defn- via-reader
+  "The lines the edge reader (seon.fx/read-lines!) puts on its channel for body's bytes pulled in the given pieces, up to its end."
+  [^bytes bs cuts]
+  (let [ps (atom (->> (concat [0] cuts [(alength bs)]) (partition 2 1) (map (fn [[a b]] (java.util.Arrays/copyOfRange bs (int a) (int b))))))
+        lines (a/chan)]
+    (#'fx/read-lines! (fn [] (let [p (first @ps)] (swap! ps rest) p)) lines nil)
+    (loop [acc []] (let [m (a/<!! lines)] (if (:line m) (recur (conj acc (:line m))) [acc m])))))
+
+(defn- fold [lines]
+  (reduce (fn [[st out] l] (let [[st' ms] (model/sse-step st l)] [st' (into out ms)])) [(model/sse-init "c1" "boot/1") []] lines))
+
+(deftest a-streamed-reply-cut-at-any-byte-is-the-whole-reply
+  ;; the lines are split on the newline byte and each decoded whole; the pieces are cut mid-line and inside a character
+  (let [bs (.getBytes ^String deepseek-stream "UTF-8")
+        whole (model/parse-reply deepseek-stream 1.0 2048)
+        around (fn [i] (some #(or (= 10 %) (neg? %)) (map #(aget bs %) (range (max 0 (- i 3)) (min (alength bs) (+ i 4))))))
+        cuts (filter #(or (zero? (mod % 17)) (around %)) (range 1 (alength bs)))]
+    (is (= ["eval" "eval"] (map #(get-in % [:function :name]) (get-in (model/sse-reply deepseek-stream) [:choices 0 :message :tool_calls]))))
+    (is (= 2 (count (:tool-calls whole))) (pr-str whole))
+    (is (= "tool_calls" (:finish-reason whole)))
+    (doseq [c cuts
+            :let [[lines end] (via-reader bs [c])
+                  [st _] (fold lines)]]
+      (is (= {:end true} end))
+      (when-not (= whole (model/stream-reply st 1.0 2048))
+        (is (= whole (model/stream-reply st 1.0 2048)) (str "cut at byte " c))))
+    (let [[lines _] (via-reader bs (range 1 (alength bs) 5))]
+      (is (= whole (model/stream-reply (first (fold lines)) 1.0 2048)) "and in pieces of five bytes"))))
+
+(deftest what-streams-is-what-is-committed
+  (let [[st out] (fold (str/split-lines deepseek-stream))
+        whole (model/parse-reply deepseek-stream 1.0 2048)
+        args (json/read-str call-args)
+        by-id (group-by :stream out)
+        text (fn [id] (apply str (map :text (sort-by :offset (filter :text (by-id id))))))]
+    (is (= (:reasoning whole) (text "c1/reasoning")))
+    (is (= (str "Caf\u00e9 " emoji " ok") (text "c1/content")))
+    (is (= (get args "message-md") (text "c1/0/message")))
+    (is (= "hi" (text "c1/1/message")))
+    (doseq [[i e] (map-indexed vector (get args "evals"))
+            k ["intent" "code"]]
+      (is (= (get e k) (text (str "c1/0/eval-" i "/" k))) (str "eval " i " " k)))
+    (is (= (get-in args ["evals" 0 "code"]) (:code (first (:tool-calls whole)))) "the committed code is the one streamed")
+    (doseq [[id ms] by-id]
+      (let [ts (filter :text ms)]
+        (is (= (reductions + 0 (map (comp count :text) (butlast ts))) (map :offset ts)) (str id ": offsets are the chars sent before"))
+        (is (every? #(= "boot/1" (:agent %)) ms))))
+    (is (every? #(<= (count (filter :end %)) 1) (vals by-id)) "an id ends once")
+    (is (= #{"c1/0/message" "c1/0/eval-0/intent" "c1/0/eval-0/code" "c1/0/eval-1/intent" "c1/0/eval-1/code" "c1/1/message"}
+           (set (map :stream (filter :end out))))
+        "each tool-call string ends as it closes")
+    (is (= #{"c1/reasoning" "c1/content"} (set (map :stream (model/sse-close st)))) "the call's end closes what is still open")
+    ;; the container and the part are data on every message, so no reader splits an id (owner: "no hacky parsing")
+    (is (every? #(= "c1" (:in %)) (concat out (model/sse-close st))) "every message names its call")
+    (is (= {"c1/reasoning" "reasoning" "c1/content" "content" "c1/0/message" "message" "c1/0/eval-0/intent" "intent"
+            "c1/0/eval-0/code" "code" "c1/0/eval-1/intent" "intent" "c1/0/eval-1/code" "code" "c1/1/message" "message"}
+           (into {} (map (juxt :stream :part)) (concat out (model/sse-close st))))
+        "every message names its part")
+    (is (= [] (second (reduce (fn [[st out] l] (let [[s m] (model/sse-step st l)] [s (into out m)]))
+                              [(model/sse-init nil nil) []] (str/split-lines deepseek-stream))))
+        "a state with no call streams nothing")))
+
+(deftest the-json-reader-keeps-its-place-between-fragments
+  (let [feed (fn [frags] (let [[_ evs] (reduce (fn [[st evs] f] (let [[st' e] (model/json-feed st f)] [st' (into evs e)])) [nil []] frags)]
+                           (->> evs (filter (comp string? second)) (group-by first) (map (fn [[p xs]] [p (apply str (map second xs))])) (into {}))))
+        doc "{\"a\":[\"x\\\"y\",{\"k\":\"\\u00e9\\ud83d\\ude00!\"}],\"b\\n\":\"z\"}"]
+    (is (= {["a" 0] "x\"y" ["a" 1 "k"] (str "\u00e9" emoji "!") ["b\n"] "z"} (feed [doc])))
+    (is (= (feed [doc]) (feed (map str doc))) "one character at a time: an escape, a \\uXXXX and a pair cut anywhere")
+    (is (= {["b\n"] "z"} (feed (pieces-of "{\"b\\n\":\"z\"}" 3))) "a key is not a value")))
+
+(defn fold-stream
+  "The cost proof's function: n tool-call fragment lines through the line step and the close."
+  {:malli/schema [:=> [:cat [:vector :string]] :int]}
+  [lines]
+  (let [[st out] (fold lines)] (+ (count out) (count (model/sse-close st)))))
+
+(defn fragment-lines
+  "The cost proof's input at n: [lines], a tool call's first line then n lines of 8 more characters of its first eval's code."
+  [n]
+  [(into [(str "data: " (json/write-str {:choices [{:delta {:tool_calls [{:index 0 :id "c" :function {:name "eval" :arguments "{\"message-md\":\"m\",\"evals\":[{\"intent\":\"i\",\"code\":\""}}]}}]}))]
+         (repeat n (str "data: " (json/write-str {:choices [{:delta {:tool_calls [{:index 0 :function {:arguments "(+ 1 2) "}}]}}]}))))])
+
+(deftest a-line-costs-its-bytes-not-the-lines-before-it
+  ;; the line step folds one line into a state that grows by pieces: no copy of what came before
+  (cost/proof
+    {:of 'seon.model-test/fold-stream :input 'seon.model-test/fragment-lines
+     :n "lines of a tool call's arguments, each 8 characters"
+     :work "per line: its JSON read, its fragment appended to the call's pieces, its 8 characters decoded by the string reader and sent as one message"
+     :growth :linear
+     :per-n {:calls 5 :ticks 8800 :bytes 28500}
+     :fixed {:calls 20 :ticks 20000 :bytes 70000}
+     :sizes [10 100 1000]}))
+
+(deftest a-call-that-names-itself-is-answered-as-a-stream-over-the-socket
+  ;; http-post's streaming answer, end to end on a local server: the pieces, the step and the final make the completion the whole read does
+  (let [port (+ 20000 (rand-int 20000))
+        server (adapter/run-server
+                (fn [_] (let [out (a/chan 16)]
+                          (a/thread (doseq [c chunks] (a/>!! out c)) (a/close! out))
+                          {:status 200 :headers {"Content-Type" "text/event-stream"} :body out}))
+                {:port port :host "127.0.0.1" :strategy :fibers})]
+    (try
+      (let [provider {:kind :openai-compat :base-url (str "http://127.0.0.1:" port) :model "deepseek-flash" :api-key-env "HOME" :max-tokens 2048}
+            req {:messages [{:role "user" :content "square?"}] :task "t/sq" :turn 0}
+            {:keys [pull shut init step final close] :as s} (:stream (model/complete provider (assoc req :call "c1" :agent "boot/1")))
+            lines (let [ls (a/chan)] (#'fx/read-lines! pull ls shut)
+                    (loop [acc []] (let [m (a/<!! ls)] (if (:line m) (recur (conj acc (:line m))) acc))))
+            [st out] (reduce (fn [[st out] l] (let [[st' ms] (step st l)] [st' (into out ms)])) [init []] lines)
+            r (final st)]
+        (is (some? s) "the call is answered at the start of its reply")
+        (is (= (:text (model/complete provider req)) (:text r)) "and its last state is the reply the whole read makes")
+        (is (= ["Square " "multiplies."] (map :text (filter (comp #{"c1/reasoning"} :stream) out))))
+        (is (nil? (shut)) "the connection is closed already, and closing again is nothing"))
+      (finally (stop-now! server)))))
