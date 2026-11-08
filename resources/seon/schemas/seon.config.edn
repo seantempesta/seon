@@ -187,6 +187,7 @@
   [:seon.config.root/server-port :seon.config.root/server-port]
   [:seon.config.web/public-dir :seon.config.web/public-dir]
   [:seon.config.web/stylesheet :seon.config.web/stylesheet]
+  [:seon.config.web/streams-buf :seon.config.web/streams-buf]
   [:seon.config.contract/instrument :seon.config.contract/instrument]
   [:seon.config.native/probe-lib :seon.config.native/probe-lib]
   [:seon.config.native/sqlite-lib :seon.config.native/sqlite-lib]]
