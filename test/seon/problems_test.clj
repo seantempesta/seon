@@ -526,7 +526,7 @@
   [k] (let [base (d/db-with (world)
                             (vec (for [i (range k)]
                                    (ended (str "t/h" i)
-                                          {:seon.task/agent {:seon.agent/key (str "b/h" i) :seon.agent/id (keyword (str "h" i)) :seon.agent/ended-ms 2}
+                                          {:seon.task/agent {:seon.agent/key (str "b/h" i) :seon.agent/ended-ms 2}
                                            :seon.task/outcome :merged
                                            :seon.task/costs {'app.t/cheap {:verdict {:ok? true :under []} :rows []}}
                                            :seon.task/waste {:turns 1}}))))

@@ -1306,16 +1306,16 @@
   "(fn [code] (let [id (:record (seon.repl/eval-string code {:origin :model})) db (seon.agent/db) e (seon.db/eid db :seon.eval/id id)] {:id id :e e :datoms (vec (for [d (datahike.api/datoms db :eavt e) :when (not= :seon.eval/call (:a d))] [:db/add (:e d) (:a d) (:v d)]))}))")
 
 (deftest two-sessions-evals-merge-whole
-  ;; docs/users.md#what-each-thing-is: an eval's id is its eid, which the store issues once across forks, so two agents forked from one main
-  ;; never name two evals alike, and one's eval written onto the other's branch is one more eval. One value is one result.
+  ;; docs/users.md#what-each-thing-is: an eval's id is the digest of its agent's key and the eid the store issues once across forks, so two agents forked
+  ;; from one main never name two evals alike, and one's eval written onto the other's branch is one more eval. One value is one result.
   (let [a (:value (first (at/in-agent [(str "(" eval-facts " \"(+ 40 2)\")")])))
         [b both] (at/in-agent [(str "(do (def mine (" eval-facts " \"(+ 40 2)\")) mine)")
                                (str "(do (seon.agent/transact! (quote " (pr-str (:datoms a)) ")) "
                                     "(mapv #(datahike.api/pull (seon.agent/db) '[:db/id :seon.eval/id :seon.eval/code {:seon.eval/result [:db/id :seon.result/value]}] [:seon.eval/id %]) [" (pr-str (:id a)) " (:id mine)]))")])
         b (:value b)
         [x y :as evals] (:value both)]
-    (is (= (str "e" (:e a)) (:id a)) "an eval's id is its eid")
-    (is (= (str "e" (:e b)) (:id b)))
+    (is (re-matches #"[0-9a-f]{16}" (:id a)) "an eval's id is a digest")
+    (is (re-matches #"[0-9a-f]{16}" (:id b)))
     (is (not= (:id a) (:id b)) "two agents forked from one main issue two ids")
     (is (= [(:e a) (:e b)] (mapv :db/id evals)) (pr-str both))
     (is (= ["(+ 40 2)" "(+ 40 2)"] (mapv :seon.eval/code evals)))
@@ -1330,7 +1330,8 @@
                                "(mapv #(seon.db/eid (seon.agent/db) :seon.eval/id %) [running inner])"])
         [o i] (:value eids)]
     (is (= (:record (first answers)) id) "the id its forms read is the id it is recorded by")
-    (is (= (str "e" e) id) "and it is its eid")
+    (is (re-matches #"[0-9a-f]{16}" id) "and it is a digest of its agent and the eid issued for it")
+    (is (some? e) "found by it: the record is the one the id names")
     (is (< o i) "the eval that started first has the lower eid, though the one inside it recorded first")))
 
 (deftest an-eval-evaluated-again-keeps-its-eid
@@ -1351,7 +1352,7 @@
         [id before] (:value one)
         [after code] (:value two)
         [was still old-code] (:value old)]
-    (is (= (str "e" before) id) "its id is its eid")
+    (is (re-matches #"[0-9a-f]{16}" id) "its id is a digest")
     (is (= before after) "the same entity")
     (is (= "(swap! tick + 10)" code))
     (is (= was still) (pr-str old))

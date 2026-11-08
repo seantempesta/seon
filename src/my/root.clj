@@ -262,7 +262,7 @@
   "The tx-data of the example session file at path (seon.ctx.session/session-tx's answer written with pr-str: a
   non-empty vector of transactions, the first writing the example agent keyed \"example/<id>\"), read as
   `task-files` reads a task file (seon.lib/dir-texts, so a file gone when read is a file not found), or the
-  :seon.root/example-refused error naming path: not found, not readable EDN, not that vector, or an agent with no id. The one edge
+  :seon.root/example-refused error naming path: not found, not readable EDN, or not that vector. The one edge
   of an example file (docs/failure-points.md); the read is of the directory's files named like path, the
   one by that name taken."
   {:malli/schema [:=> [:cat :string] [:or [:vector [:vector :map]] :seon.root/example-refused]]}

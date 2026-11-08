@@ -985,7 +985,7 @@
   ;; ended. A kept branch takes its task from main only when the agent has one.
   ;; page's browser round, 2026-10-23: an agent on a kept branch recorded its evaluations under an
   ;; earlier boot's agent (its key read root's boot from the branch, whose root fact is as old as
-  ;; the branch). Its key is root's boot as main holds it.
+  ;; the branch). Now a key names no boot: it is the id's name, whatever boot the branch is from.
   ;; step E run #11 (2026-10-23): a kept branch made before main imported test/ was resumed,
   ;; and its agent held seon.ctx.wire-test with no vars (seon.agent/init! unmapped every
   ;; definition main had that the branch did not), so the design never reached its proof's
@@ -1003,12 +1003,13 @@
                                                         "   (datahike.api/transact bc [{:seon.root/id :root :seon.root/boot \"an-earlier-boot\"}]) (datahike.api/release bc))"
                                                         " " (src g "(defn g [] 7)")
                                                         " " (src k "(defn h [] 2)"))
-                                                   (str "[:ready (:boot sys) (:text @(seon.root/submit! sys ag \"(:key @seon.agent/state)\"))"
+                                                   (str "[:ready (:boot sys) [(name ag) (:text @(seon.root/submit! sys ag \"(:key @seon.agent/state)\"))]"
                                                         " (:text @(seon.root/submit! sys ag \"[(" g "/g) (" k "/h)]\"))]"))}]))
                       (merging))
-        [status boot text gained] (:value r)]
+        [status boot [id text] gained] (:value r)]
     (is (= :ready status) (pr-str r))
-    (is (str/includes? (str text) (str "\"" boot "/")) (str "its key names this boot: " text))
+    (is (str/includes? (str text) (str "\"" id "\"")) (str "it records under its own key, the name of its id, whatever boot the branch is from: " text))
+    (is (not (str/includes? (str text) "an-earlier-boot")) "and no key of the earlier boot's")
     (is (str/includes? (str gained) ":value [7 2]") "a var main added, and main's redefinition of one the branch left alone")))
 
 (deftest a-failure-marked-through-the-server-holds-the-task

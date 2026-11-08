@@ -964,7 +964,7 @@
   (let [src "(deftest f-test\n  ;; a comment, a \"quoted\" word\n  (is (= 4 (f 2))))"
         c (print/code src)
         rec {:seon.eval/code "(my.task/status)" :seon.eval/response {:handle 'result/e4 :value {:source c}}}
-        db (d/db-with (ts/test-db) [(into {:seon.eval/id "e4" :seon.eval/agent {:seon.agent/id :a1}} rec)])
+        db (d/db-with (ts/test-db) [(into {:seon.eval/id "e4" :seon.eval/agent {:seon.agent/key "a1"}} rec)])
         back (d/pull db [:seon.eval/code :seon.eval/response] [:seon.eval/id "e4"])]
     (is (seon.contract/plain? c) "plain data")
     (is (= c (seon.edn/decode (seon.edn/encode c))) "its EDN reads back")

@@ -571,7 +571,7 @@
 ;; ---- a request's response and its record: one per eval request (a tool call, a typed form) ----
 
 (defn- eval-id
-  "The id eval req goes by, the digest of the facts that make it: a model's eval, its call and its place in the reply (:stream, seon.model/at [k i]); any other, its agent and its own number n, the eid issued for it. See docs/decisions.md#an-id-is-the-content-of-the-facts-that-make-it-owner-2026-11-08."
+  "The id eval req goes by, the digest of the facts that make it: a model's eval, its call and its place in the reply (:stream, seon.model/at [k i]); any other, its agent and its own number n, the eid issued for it. See docs/decisions.md, the ruling named An id is the content of the facts that make it."
   {:malli/schema [:=> [:cat :map :int] :string]}
   [req n]
   (lib/digest (if-let [{:keys [call k i]} (:stream req)] (str call "/" k "/" i) (str (:key @agent/state) "/eval/" n))))

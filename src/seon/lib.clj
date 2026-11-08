@@ -326,7 +326,7 @@
     (str (subs "0000000000000000" (count h)) h)))
 
 (defn unique-id
-  "A fresh id that must never repeat (an agent, a root's boot): the digest of a random UUID, the one id form (docs/decisions.md#an-id-is-the-content-of-the-facts-that-make-it-owner-2026-11-08: always unique, a UUID's hash; the same content, its digest). Minted once, where its entity is made."
+  "A fresh id that must never repeat (an agent, a root's boot): the digest of a random UUID, the one id form (docs/decisions.md, the ruling named An id is the content of the facts that make it: always unique, a UUID's hash; the same content, its digest). Minted once, where its entity is made."
   {:malli/schema [:=> [:cat] [:string {:min 16 :max 16}]]}
   [] (digest (str (random-uuid))))
 

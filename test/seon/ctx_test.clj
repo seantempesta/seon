@@ -109,7 +109,7 @@
                                                    (task/cites-tx (ts/test-db) "lab/ctx" "lab/ctx" (seon.ref/cited (:seon.ref/citations (seon.ref/parse nil "Make `app.x/f0` pass, then `app.x/f1`; see [the x](docs/x.md#the-x)."))))))))]
     (reduce (fn [db part]
               (:db-after (d/with db (vec (mapcat (fn [i] (cond-> (eval-tx i)
-                                                            (zero? (mod i 3)) (conj {:seon.model-call/id (str k "/" i) :seon.model-call/agent [:seon.agent/key k] :seon.model-call/n i})
+                                                            (zero? (mod i 3)) (conj (seon.task/call-ref k i))
                                                             (zero? (mod i 20)) (conj {:seon.message/id (str "m" i) :seon.message/from "user"
                                                                                       :seon.message/to [[:seon.agent/key k]] :seon.message/call (seon.task/call-ref k (max 3 (* 3 (quot i 3)))) :seon.message/body "How is it going?"})))
                                                  part)))))
@@ -499,13 +499,13 @@
         e (:db/id (d/entity db [:seon.agent/key k]))
         by (fn [a] (dissoc (ctx/made-by db e a) :t))]
     (is (= {:seon.tx/branch :main/a1 :seon.tx/eval "e5"} (by :seon.agent/description)) "written by an eval: that eval, on the agent's branch")
-    (is (= {:seon.tx/branch :main} (by :seon.agent/id)) "forked holding it: main's, by no eval")
+    (is (= {:seon.tx/branch :main} (by :seon.agent/key)) "forked holding it: main's, by no eval")
     (is (= {:seon.tx/branch :main/a1 :seon.tx/merged :main} (by :seon.agent/max-turns)) "caught up: merged from main")
     (is (nil? (ctx/made-by db e :seon.eval/by)) "an attribute it does not have: nobody made it")
     (let [h (render/hiccup {:db db} (with-meta (:tree (ctx/build db (aid db) :main/a1)) {:seon.render/schema :seon.ctx/ctx}))
           rows (into {} (for [x (tree-seq coll? seq h) :when (and (vector? x) (= :tr (first x)))] [(last (nth x 2)) (last (nth x 4))]))]
-      (is (= {":seon.agent/description" "e5" ":seon.agent/id" "from :main" ":seon.agent/max-turns" "merged from :main"}
-             (select-keys rows [":seon.agent/description" ":seon.agent/id" ":seon.agent/max-turns"]))
+      (is (= {":seon.agent/description" "e5" ":seon.agent/key" "from :main" ":seon.agent/max-turns" "merged from :main"}
+             (select-keys rows [":seon.agent/description" ":seon.agent/key" ":seon.agent/max-turns"]))
           "the page names who made each key"))))
 
 (defn- replay
@@ -1060,7 +1060,7 @@
   "The input of size n: a session of n evals and one attribute of its agent: [db e a], seon.ctx/made-by's."
   {:malli/schema [:=> [:cat pos-int?] [:vector :any]]}
   [n]
-  (let [db (seeded n)] [db (:db/id (d/entity db [:seon.agent/key k])) :seon.agent/id]))
+  (let [db (seeded n)] [db (:db/id (d/entity db [:seon.agent/key k])) :seon.agent/key]))
 
 (deftest who-made-a-fact-costs-two-seeks-not-the-record
   ;; the page asks it of each key of the block: its work is the attribute's datoms and its

@@ -111,7 +111,7 @@
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map :string]]}
   [n]
   [{:seon.db/db (d/db-with (ts/test-db) (into [{:seon.agent/key "b/a1"}]
-                                              (for [i (range n)] {:seon.agent/key (str "other/a" i) :seon.agent/id (keyword (str "o" i))})))}
+                                              (for [i (range n)] {:seon.agent/key (str "other/a" i)})))}
    "b"])
 
 (deftest a-boots-sessions-cost-no-other-boots
