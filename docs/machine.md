@@ -176,7 +176,6 @@ The tests whose subject is a restart or a resume keep a store of their own, and 
 
 | test | before | after | what moved |
 |---|---|---|---|
-| `seon.source-test/a-restart-catches-up-and-a-new-generation-resumes` | 197 s solo (236 median) | 123 s | its first loop merge's gate ran 48 tests for 1 deferred one (`seon.program-test/a-test-that-starts-a-process-reaches-the-program-it-runs`; the test itself is left out): ~85 s (worktree 9, plan 9, binary build 30, seed 22, shards 42), now the one test named (`seon.fx/test-command`, [merging](merging.md#a-merge-runs-what-the-change-reaches)); its own store is a clone of the process store (-8 s, one first boot that imports nothing) |
 | `seon.source-test/main-s-program-follows-the-checkout-while-root-runs-and-across-a-restart` | 72 s | 39 s | its store is a clone of the process store: the first boot imports nothing |
 | `seon.root-test/every-end-of-a-root-is-a-fact` | 84 s | 48 s (shard) | the same |
 | `seon.root-test/a-second-boot-resumes-the-same-main` | 80 s | not changed | a clone gave 67 s `:ms` against 81-94 s, inside the noise, so it keeps its empty store: its attach forks an agent, which waits behind the fork server's compile of the program the clone now holds |

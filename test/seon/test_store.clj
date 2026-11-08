@@ -280,6 +280,14 @@
               ["--started-by" (str (ns-name ns) "/" name)]))
       (into args)))
 
+(defn output
+  "The text of the file at path that this test or a process it started wrote (a root's runs/root.log, a
+  test child's mark), \"\" when there is none. It reads a run's own output, never the checkout, so it is
+  named in seon.program/env-readers: a test that reads its outputs through it is not keyed by the whole
+  tree, and an edit to the wiki or a task file reruns no process test. See docs/source.md#tests-run-by-reach."
+  {:malli/schema [:=> [:cat :string] :string]}
+  [path] (let [f (java.io.File. ^String path)] (if (.exists f) (slurp f) "")))
+
 (defn start-root!
   "A built root (bin/root start, this checkout's binary) on store and main, both named and never
   inherited (a caller's SEON_STORE or SEON_MAIN, a bin/check run's, opened a store another run
@@ -309,18 +317,10 @@
     (throw (ex-info (str "a root is already running in " runs ": a test's root takes a runs directory of its own")
                     {:seon.error/type :seon.test-store/runs-in-use :runs runs})))
   (root-sh root "start" (start-args root))
-  (let [port (fx/bound-port runs) log (java.io.File. (str runs "/root.log"))]
+  (let [port (fx/bound-port runs)]
     (cond-> (assoc root :port port)
       ;; it died before listening: its log says why, kept with it for the test's error (ask)
-      (nil? port) (assoc :log (if (.exists log) (slurp log) "")))))
-
-(defn next-root!
-  "bin/root next on root: the running root's next generation started on the same store and main.
-  Answers root with that one's :port."
-  {:malli/schema [:=> [:cat [:map [:runs :string]]] :map]}
-  [root]
-  (root-sh root "next" [])
-  (assoc root :port (fx/bound-port (:runs root))))
+      (nil? port) (assoc :log (output (str runs "/root.log"))))))
 
 (defn kill-root!
   "SIGKILL the root (bin/root kill), answered once the root and every process it started are
@@ -363,7 +363,7 @@
   {:malli/schema [:=> [:cat [:map [:runs :string]]] :map]}
   [{:keys [runs] :as root}]
   (let [{:keys [out]} (root-sh root "stop" [])
-        log (let [f (java.io.File. (str runs "/root.log"))] (if (.exists f) (slurp f) ""))
+        log (output (str runs "/root.log"))
         status (second (re-find #"\(exit (\d+)\)" out))]
     (if status {:exit (parse-long status) :log log} {:error :stopped-without-status :out out :log log})))
 
