@@ -206,10 +206,10 @@
        "   r))"))
 
 (defn- root-ended
-  "A root with an idle agent a1 and one more agent for each form of codes, a2 on, each evaluating its form (sent; its :started event awaited). Then
+  "A root with an idle agent and one more agent for each form of codes, each evaluating its form (sent; its :started event awaited). Then
   SIGKILL of root; with fork-server-first?, what a pid cleanup does before it: SIGKILL of the
   fork server's standby and of the fork server, so its group kill (seon.fork-server/main) never
-  runs and each agent has only its own socket to root to end on. Answers {:agents {id pid}
+  runs and each agent has only its own socket to root to end on. Answers {:ids [id ...] (the idle agent's first) :agents {id pid}
   :left #{pid} :out text}: the agents' pids as root reported them, the processes of the fork
   server's group still alive once everything root started has ended (the wait is
   seon.test-store/kill-root!'s drain, an event; a process that never ends holds the test), and
@@ -225,9 +225,10 @@
         eval-root (fn [code] (let [r (ask {:op :eval :agent "root" :code code})]
                                (if (:error r) r (value-of (:response r)))))
         ;; spawn! answers at each agent's hello: every one is ready
-        _ (eval-root (str "(vec (repeatedly " (inc (count codes)) " #(c/spawn! sys {})))"))
-        ;; a2 on begin their forms (each agent's :started event, tapped before its form is sent)
-        _ (doseq [[i code] (map-indexed vector codes) :let [a (keyword (str "a" (+ 2 i)))]]
+        ;; their ids, as spawn! answers them (an id is a digest: nothing here names an agent but by them)
+        ids (eval-root (str "(vec (repeatedly " (inc (count codes)) " #(c/spawn! sys {})))"))
+        ;; the second on begin their forms (each agent's :started event, tapped before its form is sent)
+        _ (doseq [[i code] (map-indexed vector codes) :let [a (nth ids (inc i))]]
             (eval-root (str "(let [ev (c/events sys)] (c/submit! sys " a " " (pr-str code) ") "
                             "(loop [] (let [e (clojure.core.async/<!! ev)] (if (and (= :started (:type e)) (= " a " (:agent e))) :began (recur)))))")))
         agents (eval-root "(into {} (for [[id a] (:agents (c/state sys))] [id (:pid a)]))")
@@ -246,7 +247,7 @@
       (doseq [p left] (sh/sh "kill" "-9" (str p)))
       (ts/drop-main! store main)
       (sh/sh "rm" "-rf" runs)
-      {:agents agents :out log :left (if drained left (conj left :not-drained))})))
+      {:ids ids :agents agents :out log :left (if drained left (conj left :not-drained))})))
 
 (deftest a-tests-request-is-answered-while-an-eval-blocks
   ;; task seon.agent/the-agent-is-a-flow-graph: root's :tests request goes to the agent's :tests proc,
@@ -325,11 +326,12 @@
   ;; whatever it is doing: an idle agent reads it; one evaluating a form with no tick budget is
   ;; interrupted by it (SIGIO); one blocked in a channel take, whose condition-wait reaches no safe
   ;; point, is woken by it too. One root for the three (2026-11-08: two tests booted one root each)
-  (let [{:keys [agents left out]} (root-ended ["(loop [] (recur))" "(clojure.core.async/<!! (clojure.core.async/chan))"] true)]
-    (is (= #{:a1 :a2 :a3} (set (keys agents))) out)
-    (is (not (contains? left (:a1 agents))) "the idle agent ended")
-    (is (not (contains? left (:a2 agents))) "the busy agent ended")
-    (is (not (contains? left (:a3 agents))) "the blocked agent ended")
+  (let [{:keys [ids agents left out]} (root-ended ["(loop [] (recur))" "(clojure.core.async/<!! (clojure.core.async/chan))"] true)
+        [idle busy blocked] ids]
+    (is (= (set ids) (set (keys agents))) out)
+    (is (not (contains? left (agents idle))) "the idle agent ended")
+    (is (not (contains? left (agents busy))) "the busy agent ended")
+    (is (not (contains? left (agents blocked))) "the blocked agent ended")
     (is (empty? left) (str "agents still alive: " left "\n" out))))
 
 (deftest a-proof-run-ends-with-its-agent
@@ -445,8 +447,8 @@
   ;; Chez's condition-wait reaches no safe point, so no signal handler runs (SIGIO, root's
   ;; SIGUSR1) until the wait returns. The fork server's group kill on root's EOF ends it
   ;; (task seon.agent/a-signal-wakes-a-blocked-wait makes the agent's own EOF end it too)
-  (let [{:keys [agents left out]} (root-ended ["(clojure.core.async/<!! (clojure.core.async/chan))"] false)]
-    (is (= #{:a1 :a2} (set (keys agents))) out)
+  (let [{:keys [ids agents left out]} (root-ended ["(clojure.core.async/<!! (clojure.core.async/chan))"] false)]
+    (is (= (set ids) (set (keys agents))) out)
     (is (empty? left) (str "agents still alive: " left "\n" out))))
 
 (deftest a-test-childs-run-ends-at-its-exit-though-a-grandchild-holds-its-pipe
