@@ -2167,13 +2167,15 @@
         kw (#'p/user-walk st db1 (d/entity db1 [:seon.user/name "sean"]))
         side (fn [w] (apply str (map :html (filter #(= "#c-side" (:container %)) (r/placed-units w)))))
         before (side (:w kw))
+        rows (fn [w] (apply str (map :html (filter #(= "#c-rows" (:container %)) (r/placed-units w)))))
+        ;; read now: the walk is advanced in place
+        rows-before (rows (:w kw))
         db2 (d/db-with db1 [{:seon.agent/key "sean" :seon.agent/agents [(:db/id (d/entity db1 [:seon.agent/key "b2/a1"]))]}])
         st' (#'p/user-walks st db2)]
     (is (not (str/includes? before "/agent/b2/a1")) "nothing started yet")
     (is (str/includes? (side (:w (get @(:user-walks st') "sean"))) "/agent/b2/a1") "the agent it started is on the page, with no new draw")
-    (let [rows (fn [w] (apply str (map :html (filter #(= "#c-rows" (:container %)) (r/placed-units w)))))]
-      (is (not (str/includes? (rows (:w kw)) "/agent/b2/a1")) "no tile while nothing is started")
-      (is (str/includes? (rows (:w (get @(:user-walks st') "sean"))) "/agent/b2/a1") "the first agent's tile too, in the list the page holds"))
+    (is (not (str/includes? rows-before "/agent/b2/a1")) "no tile while nothing is started")
+    (is (str/includes? (rows (:w (get @(:user-walks st') "sean"))) "/agent/b2/a1") "the first agent's tile too, in the list the page holds")
     (is (contains? (:dirty st') [:chat :sean]) "and its view is dirty")
     (is (not (contains? (:dirty st') [:chat :a1])) "another's isn't")))
 
