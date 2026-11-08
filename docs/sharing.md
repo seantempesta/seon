@@ -51,6 +51,8 @@ A number far off its line is a defect to find. n is what the operation is about,
 | `bin/prove` deciding which deftests to run, after a body edit | O(changed forms) | 165 M ticks, 1.5 s |
 | The same, after an edit to `seon/source.clj` or `seon/program.clj` | O(changed forms) | 5,271 M: the kept analyzed form tree is dropped and every form read again, **off** (task ``seon.program/a-kept-tree-is-keyed-by-the-text-of-two-files``) |
 | `d/schema` | O(1) once per db value | 241 k ticks a call, rebuilt each time: **off**, 14 calls in `src`; the fork change is approved (owner, 2026-11-08; task ``seon.db/the-schema-map-is-read-once-a-value``) |
+| A diff of two commits m datoms apart (`d/datoms-diff`) | O(m), flat in the store's size | 21 datoms: 3.5 M ticks at 2,500 entities, 14.7 M at 20,000, warm the same: **off**, O(the index), since child addresses read nil and nothing is skipped as shared (task ``seon.db/a-diff-costs-what-changed``) |
+| A small write (a few datoms, committed) | about 0.1 M ticks | 0.3 M: **off** about 3× (task ``seon.db/a-small-write-costs-its-minimum``) |
 
 ## A result stands until what it read changes
 
@@ -62,4 +64,4 @@ A process that holds what derives from a db value (its loaded vars, schema regis
 
 ## A function's cost is a fact
 
-Built for an agent's evals: ```seon.profile/accrue``` adds each eval's measured functions in memory, and ```seon.agent/commit!``` writes one no-history `:seon.fn/stats` value a function on a commit going out anyway, never making one. Sums add exactly across writers. The histogram is by each eval's average a call, since a call is counted, not timed. Not yet: tests, root and the fork server; a deleted branch takes it with it; no health class reads it (task ``seon.program/a-metric-accretes``).
+Built for an agent's evals: ```seon.profile/accrue``` adds each eval's measured functions in memory, and ```seon.agent/write-end!``` writes one no-history `:seon.fn/stats` value a function at the agent's end, once a run. Written at every commit it was most of what a turn moved on the branch (354 of about 410 datoms, a lab agent, 2026-11-08), read by every diff, patch and merge of it. Sums add exactly across writers. The histogram is by each eval's average a call, since a call is counted, not timed. Not yet: tests, root and the fork server; a deleted branch takes it with it; no health class reads it (task ``seon.program/a-metric-accretes``).

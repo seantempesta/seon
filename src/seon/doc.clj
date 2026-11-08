@@ -476,7 +476,7 @@
         in? (fn [t] (and t (has? (str t))))]
     (case a
       :form/src (vec (for [dv (d/datoms db :eavt e :form/defines)
-                           :let [v (d/entity db (:v dv)) n (:var/name v) kind (if (= :test (:var/kind v)) :test :var)]
+                           :let [v (d/entity db (:v dv)) n (:var/name v) kind (if (contains? (set (:var/meta v)) :test) :test :var)]
                            :when (and n (kinds kind))]
                        {:kind kind :name n :rank (cond (in? (name n)) 0 (in? (:var/doc v)) 1 :else 2)}))
       :seon.doc/text (when (kinds :section)

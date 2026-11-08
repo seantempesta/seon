@@ -29,7 +29,7 @@
   (let [[st] (spawned-of 10)
         db (:db st)
         acct {:id "app.pc/f5-(dec x)" :src "(defn f5 [x] (dec x))" :ns 'app.pc :ns-form? false
-              :defs [{:var 'app.pc/f5 :kind :fn}] :declares #{} :methods [] :impls []
+              :defs [{:var 'app.pc/f5 :meta #{:arglists}}] :declares #{} :methods [] :impls []
               :refs #{'app.pc/f4} :requires #{} :banned #{} :inline-defs #{}}
         {db2 :db-after txd :tx-data} (d/with db (program/record-tx db acct))
         ops (for [dt txd] [(if (:added dt) :db/add :db/retract) (:e dt) (:a dt) (:v dt)])

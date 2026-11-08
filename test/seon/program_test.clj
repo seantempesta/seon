@@ -47,7 +47,7 @@
   "The live forms of namespace nsym on db (the test store's example program is beside them)."
   [db nsym] (filterv #(= nsym (:ns %)) (program/live-forms db)))
 
-(defn- var-row [db sym] (d/pull db '[:var/kind :var/contract :var/doc {:var/form [:form/src :form/order]}] [:var/name sym]))
+(defn- var-row [db sym] (d/pull db '[:var/meta :var/contract :var/doc {:var/form [:form/src :form/order]}] [:var/name sym]))
 
 (deftest a-new-namespace-is-program-with-its-ns-form-as-written
   (let [src "(ns app.pt-new\n  (:require [clojure.string :as s :refer [join]]))"
@@ -56,9 +56,9 @@
     (is (= '#{clojure.string} (set (d/q '[:find [?r ...] :where [?f :form/src] [?f :form/requires ?r]] db))) "its requires, from the compiler")
     (testing "a def in it is recorded with its resolved references"
       (let [db (record db 'app.pt-new "(defn twice {:malli/schema [:=> [:cat :int] :int]} [x]  (s/join [(* 2 x)]))")]
-        (is (= {:var/kind :fn :var/contract "[:=> [:cat :int] :int]"
+        (is (= {:var/meta #{:arglists :malli/schema} :var/contract "[:=> [:cat :int] :int]"
                 :var/form {:form/src "(defn twice {:malli/schema [:=> [:cat :int] :int]} [x]  (s/join [(* 2 x)]))"}}
-               (update (var-row db 'app.pt-new/twice) :var/form dissoc :form/order)))
+               (-> (var-row db 'app.pt-new/twice) (update :var/form dissoc :form/order) (update :var/meta set))))
         (is (= '#{clojure.string/join clojure.core/* clojure.core/defn} (set (d/q '[:find [?r ...] :where [?v :var/name app.pt-new/twice] [?v :var/form ?f] [?f :form/refs ?r]] db)))
             "s/join resolved through the alias, * to clojure.core's, and the macro it expanded")))
     (testing "a contract holding a function is recorded as written, so it reads back as data"
@@ -84,19 +84,19 @@
 
 (deftest a-form-records-exactly-what-the-compiler-defined
   (let [a (fn [src] (eval-account 'app.pt-kinds src))
-        defs (fn [acct] (into {} (map (juxt :var :kind)) (:defs acct)))]
-    (is (= '{app.pt-kinds/a :value app.pt-kinds/g :fn} (defs (a "(do (def a 1) (defn g [] a))"))) "do-nested defs")
-    (is (= '{app.pt-kinds/m :multi} (defs (a "(defmulti m :k)"))))
+        defs (fn [acct] (into {} (map (juxt :var :meta)) (:defs acct)))]
+    (is (= '{app.pt-kinds/a #{} app.pt-kinds/g #{:arglists}} (defs (a "(do (def a 1) (defn g [] a))"))) "do-nested defs")
+    (is (= '{app.pt-kinds/m #{}} (defs (a "(defmulti m :k)"))))
     (is (= '[{:multi app.pt-kinds/m :dispatch ":a"}] (:methods (a "(defmethod m :a [x] (g))"))) "a method: [multi dispatch]")
-    (is (= '{app.pt-kinds/P :protocol app.pt-kinds/p1 :protocol-fn} (defs (a "(defprotocol P (p1 [x]))"))))
+    (is (= '{app.pt-kinds/P #{} app.pt-kinds/p1 #{:arglists :protocol}} (defs (a "(defprotocol P (p1 [x]))"))))
     (is (empty? (:banned (a "(defprotocol P2 (p2 [x]))"))) "defprotocol no longer expands to alter-var-root (jolt/def-tap)")
     (is (= '[{:type "String" :protocol app.pt-kinds/P}] (:impls (a "(extend-type String P (p1 [x] 1))"))) "an extension: [protocol type]")
-    (is (= '{app.pt-kinds/R :type app.pt-kinds/->R :ctor app.pt-kinds/map->R :ctor} (defs (a "(defrecord R [x] P (p1 [_] x))")))
-        "a record's constructors need no contract of their own")
-    (is (= '{app.pt-kinds/t :test} (defs (a "(clojure.test/deftest t (clojure.test/is (= 1 1)))"))))
-    (is (= '{app.pt-kinds/mm :macro} (defs (a "(defmacro mm [x] x)"))))
+    (is (= '{app.pt-kinds/R #{} app.pt-kinds/->R #{} app.pt-kinds/map->R #{}} (defs (a "(defrecord R [x] P (p1 [_] x))")))
+        "a record's constructors carry no arglists, so they need no contract of their own")
+    (is (= '{app.pt-kinds/t #{:test}} (defs (a "(clojure.test/deftest t (clojure.test/is (= 1 1)))"))))
+    (is (= '{app.pt-kinds/mm #{:arglists :macro}} (defs (a "(defmacro mm [x] x)"))))
     (is (= '#{app.pt-kinds/later} (:declares (a "(declare later)"))))
-    (is (= '{app.pt-kinds/once :value} (defs (a "(defonce once 1)"))))
+    (is (= '{app.pt-kinds/once #{}} (defs (a "(defonce once 1)"))))
     (is (nil? (a "(defonce once 2)")) "readback: a defonce that sets nothing records nothing")
     (is (nil? (a "(+ 1 2)")) "an expression is no program")
     (is (:env? (program/unit-account (jolt.analyzer/analyze (jolt.host/ctx-for-ns "app.pt-kinds") '(require '[clojure.set :as set])))))))
@@ -141,7 +141,7 @@
         ;; the schema as it was before :form/keywords, and a contracted form recorded then
         _ (d/transact conn (vec (remove #(= :form/keywords (:db/ident %)) pdb/schema)))
         _ (d/transact conn [{:db/id "n" :ns/name 'app.old} {:db/id "f" :form/id "app.old/f" :form/src "(defn f [m] (:app.old/thing m))" :form/ns "n" :form/order 0 :form/defines #{"v"}}
-                            {:db/id "v" :var/name 'app.old/f :var/form "f" :var/kind :fn :var/contract (seon.edn/encode [:=> [:cat [:map [:app.old/thing :int]]] :int])}])]
+                            {:db/id "v" :var/name 'app.old/f :var/form "f" :var/meta #{:arglists} :var/contract (seon.edn/encode [:=> [:cat [:map [:app.old/thing :int]]] :int])}])]
     (is (= [] (program/schema-dependents @conn #{:app.old/thing}))
         "cut before the attribute: it holds none of its datoms, so nothing depends on it (Datahike 7eea478b; before, the read threw and the agent died)")
     (is (= [] (program/gained-tx @conn)) "the attribute not yet installed: nothing to derive")
@@ -166,12 +166,12 @@
         conn (d/connect cfg)
         _ (d/transact conn (vec (remove #(= :form/ops (:db/ident %)) pdb/schema)))
         _ (d/transact conn [{:db/id "n" :ns/name 'app.old} {:db/id "f" :form/id "app.old/f" :form/src "(defn f [m] m)" :form/ns "n" :form/order 0 :form/defines #{"v"}}
-                            {:db/id "v" :var/name 'app.old/f :var/form "f" :var/kind :fn}])
+                            {:db/id "v" :var/name 'app.old/f :var/form "f" :var/meta #{:arglists}}])
         g (program/reach-graph @conn nil)]
     (is (= #{"app.old/f"} (set (map :id (vals (:rows g))))) "the base's graph holds its form")
     (is (= #{"app.old/f" "app.old/g"}
            (set (keys (:rows (program/reach-update g (d/db-with @conn [{:db/id "f" :form/id "app.old/g" :form/src "(defn g [m] m)" :form/ns [:ns/name 'app.old]
-                                                                       :form/order 1 :form/defines #{"v"}} {:db/id "v" :var/name 'app.old/g :var/form "f" :var/kind :fn}]))))))
+                                                                       :form/order 1 :form/defines #{"v"}} {:db/id "v" :var/name 'app.old/g :var/form "f" :var/meta #{:arglists}}]))))))
         "and a form added on it is read too, entity by entity")))
 
 (deftest catches-and-clocks-are-recorded
@@ -359,7 +359,7 @@
     (let [{:keys [accounts]} (source/accounts 'user text)
           by-src (into {} (map (juxt :src identity)) accounts)]
       (is (= 5 (count accounts)) "every form, the comment block a text form")
-      (is (= '[{:var app.pt-file/twice :kind :fn}] (:defs (by-src "(defn twice [x] (* 2 x))"))))
+      (is (= '[{:var app.pt-file/twice :meta #{:arglists}}] (:defs (by-src "(defn twice [x] (* 2 x))"))))
       (is (= '[{:multi app.pt-file/m :dispatch ":a"}] (:methods (by-src "(defmethod m :a [_] (s/join [\"a\"]))"))))
       (is (= '#{clojure.string/join clojure.core/defmethod-setup clojure.core/defmethod} (:refs (by-src "(defmethod m :a [_] (s/join [\"a\"]))"))))
       (is (= (select-keys (eval-account 'app.pt-file "(defn twice [x] (* 2 x))") [:id :defs :refs])
@@ -372,7 +372,7 @@
   (eval-account 'app.pt-doc "(defn told \"the image's doc, written later\" [x] x)")
   (let [{:keys [accounts]} (source/accounts 'app.pt-doc "(defn told \"the file's own doc\" [x] x)\n")]
     (is (= "the image's doc, written later" (:doc (meta (find-var 'app.pt-doc/told)))) "the image holds the later definition")
-    (is (= [{:var 'app.pt-doc/told :kind :fn :doc "the file's own doc"}] (:defs (first accounts)))
+    (is (= [{:var 'app.pt-doc/told :meta #{:arglists} :doc "the file's own doc"}] (:defs (first accounts)))
         "the account of the file's form holds the file's docstring")))
 
 (deftest a-namespace-holds-its-docstring
@@ -728,7 +728,7 @@
   ;; program's size (this took the checkout's whole kept graph, 321 M ticks)
   (let [form (fn [nsym nm kind refs]
                (fn [db] (program/record-tx db {:id (str nsym "/" nm) :src (str "(defn " nm ")") :ns nsym :ns-form? false
-                                               :defs [{:var (symbol (str nsym) nm) :kind kind}]
+                                               :defs [{:var (symbol (str nsym) nm) :meta (case kind :test #{:test} #{:arglists})}]
                                                :declares #{} :methods [] :impls [] :refs refs :requires #{} :banned #{} :inline-defs #{}})))
         db (mt/with (mt/world)
              (form 'app.fc-test "pure" :test #{})
@@ -1298,7 +1298,7 @@
   "Form i of a chain app.pc/f0..: f i calls f i-1; a test t names the one form it calls."
   [i body]
   {:id (str "app.pc/f" i "-" body) :src (str "(defn f" i " [x] " body ")") :ns 'app.pc :ns-form? false
-   :defs [{:var (symbol "app.pc" (str "f" i)) :kind :fn}] :declares #{} :methods [] :impls []
+   :defs [{:var (symbol "app.pc" (str "f" i)) :meta #{:arglists}}] :declares #{} :methods [] :impls []
    :refs (if (pos? i) #{(symbol "app.pc" (str "f" (dec i)))} #{}) :requires #{} :banned #{} :inline-defs #{}})
 
 (deftest the-tests-reaching-a-var-are-what-its-change-selects
@@ -1306,7 +1306,7 @@
   ;; the one reverse walk a change re-folds by (seon.program/reached-by), so its tests are exactly
   ;; those whose reach digest moves when v changes, the tests prove then runs; nearest first
   (let [test-acct (fn [t i] {:id (str "app.pc-test/" t) :src (str "(deftest " t " (f" i " 1))") :ns 'app.pc-test :ns-form? false
-                             :defs [{:var (symbol "app.pc-test" t) :kind :test}] :declares #{} :methods [] :impls []
+                             :defs [{:var (symbol "app.pc-test" t) :meta #{:test}}] :declares #{} :methods [] :impls []
                              :refs #{(symbol "app.pc" (str "f" i))} :requires #{} :banned #{} :inline-defs #{}})
         db (ts/test-db)
         db (d/db-with db (vec (concat (mapcat #(program/account-tx db (chain-account % "x") %) (range 10))
@@ -1402,7 +1402,7 @@
 (deftest a-step-is-keyed-by-the-code-not-the-whole-tree
   (let [db (d/db-with (ts/test-db) [{:ns/name 'app.k :ns/file "src/app/k.clj"}])
         db (d/db-with db (program/record-tx db {:id "app.k/f" :src "(defn f [] (slurp \"x\"))" :ns 'app.k :ns-form? false
-                                                :defs [{:var 'app.k/f :kind :fn}] :declares #{} :methods [] :impls [] :refs #{'clojure.core/slurp} :requires #{} :banned #{} :inline-defs #{}}))
+                                                :defs [{:var 'app.k/f :meta #{:arglists}}] :declares #{} :methods [] :impls [] :refs #{'clojure.core/slurp} :requires #{} :banned #{} :inline-defs #{}}))
         g (program/reach-graph db nil)
         key-at (fn [in] (:digest (get (program/graph-index g in {"s" ['app.k/f]}) "s")))
         in {:env "e" :tree "t" :code "c" :config {}}]

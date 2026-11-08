@@ -7,4 +7,9 @@
   :seon.task/kind :work}
  {:seon.task/name "a-tx-step-that-threw-on-a-map-says-which"
   :seon.task/plan "Seen once 2026-11-05 in the standing store's problems before its erase, not reproduced: the fork server's step threw on :tx, nth not supported on this type: PersistentArrayMap. The likely site, by reading only: seon.fork-server/serve's :tx arm takes (nth % 2 nil) of each of the message's :tx-data, which assumes a datom or a vector; an entry that is a map throws. The step's failure answers and the server serves on, so what is lost is that commit's application to this server's main until the next. Correct: find which writer sends a map in :tx-data, and make the message's shape a contract so the class is refused where it is made. Proof to write: the step given a commit whose tx-data the writer really sends."
-  :seon.task/kind :work}]
+  :seon.task/kind :work}
+{:seon.task/name "an-agent-inherits-the-section-leaves-it-searches"
+  :seon.task/plan "Measured 2026-11-08 (an agent's first search, seon.agent-test/an-agents-first-search-reads-the-index-it-inherited): its first grep allocated 8-15 MB more than its second, all cold decoding of the EAVT leaves holding the sections' :seon.doc/text, which every forked agent decodes for itself; the text index itself is inherited current. Candidate: read those leaves in seon.fork-server/warm-start, so each agent inherits them decoded (copy-on-write). Measure first: the fork server's resident memory with and without it (docs/machine.md's budget), against the bytes saved per agent times agents per hour; propose to the owner with the numbers. Not started."
+  :seon.task/kind :work
+  :seon.task/proofs #{}}
+]

@@ -80,7 +80,7 @@
   [db p]
   (vec (for [q (sort (disj (set (d/q '[:find [?r ...] :in $ ?s :where [?e :var/name ?s] [?e :var/form ?f] [?f :form/refs ?r]] db p)) p))
              :let [v (d/entity db [:var/name q])]
-             :when (and v (not= :test (:var/kind v)))]
+             :when (and v (not (contains? (set (:var/meta v)) :test)))]
          (cond-> {:var q}
            (= (namespace p) (namespace q)) (merge (some->> (doc/source-of db q) print/code (hash-map :source)))))))
 
@@ -369,7 +369,7 @@
   {:malli/schema [:=> [:cat :seon.host/db :int [:set :keyword]] [:vector [:tuple :keyword :any]]]}
   [db e kinds]
   (let [x (d/entity db e)]
-    (cond (:form/id x) (vec (for [v (:var/_form x) :let [kind (if (= :test (:var/kind v)) :test :var)] :when (kinds kind)] [kind (:var/name v)]))
+    (cond (:form/id x) (vec (for [v (:var/_form x) :let [kind (if (contains? (set (:var/meta v)) :test) :test :var)] :when (kinds kind)] [kind (:var/name v)]))
           (:seon.doc/address x) (if (kinds :section) [[:section (:seon.doc/address x)]] [])
           (:seon.task/id x) (if (kinds :task) [[:task (:seon.task/id x)]] [])
           (:schema/key x) (if (kinds :schema) [[:schema (:schema/key x)]] [])
@@ -379,7 +379,7 @@
 (defn- kind-of
   "Var v's search kind: :test for a test, else :var."
   {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] :keyword]}
-  [db v] (if (= :test (:var/kind (d/entity db [:var/name v]))) :test :var))
+  [db v] (if (contains? (set (:var/meta (d/entity db [:var/name v]))) :test) :test :var))
 
 (defn- entity-of
   "The entity that hit [kind name] is on db, or nil: the var, the section, the task or the schema entry."
@@ -607,7 +607,7 @@
   [db p]
   (when-let [n (d/entity db [:ns/name (symbol (namespace p))])]
     (let [vs (map #(d/entity db %) (d/q '[:find [?e ...] :in $ ?n :where [?e :var/ns ?n]] db (:db/id n)))
-          {tests true others false} (group-by #(= :test (:var/kind %)) vs)
+          {tests true others false} (group-by #(contains? (set (:var/meta %)) :test) vs)
           names (mapv #(name (:var/name %)) others)
           srcs (keep #(get-in % [:var/form :form/src]) tests)
           calls? (fn [s h] (re-find (re-pattern (str "\\(" (java.util.regex.Pattern/quote h) "[\\s)]")) s))
