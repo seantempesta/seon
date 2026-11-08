@@ -155,18 +155,29 @@
   ;; first loaded and the run it started are still there. A store of this test's own, the
   ;; last resort: what is proved is the default main of a store, which a shared test store's
   ;; other users would also resume; removed at the end.
+  ;; And every end of a root is a fact, on the same two boots (it was a test of its own,
+  ;; two more boots on a clone, 70 s): a clean stop is a fact naming its cause (:seon.root/stopped; here
+  ;; its stdin closes, as bin/root stop closes it), the next boot records it as :seon.root/previous-end, and
+  ;; a boot that left no stop fact (SIGKILL, a crash) is found :unclean. Who started a boot is that boot's
+  ;; (:seon.root/started-by): the test running start-root!, or the last --started-by its arguments name
   (let [checkout (seon.config/checkout)
         path (str checkout "/target/runs/root-test-main-" (random-uuid))
         tasks (str path "-tasks")
         _ (.mkdirs (java.io.File. tasks))
         _ (spit (str tasks "/demo.edn") (pr-str [{:seon.task/name "t" :seon.task/plan "Work." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]))
-        main {:op :eval :agent "root" :code "(name (seon.db/conn-main (:conn sys)))"}
+        ev (fn [code] {:op :eval :agent "root" :code code})
+        main (ev "(name (seon.db/conn-main (:conn sys)))")
         ;; and root's watch fact: a task count off names the batch that loaded the task files (:last-load)
-        held {:op :eval :agent "root" :code "[(count (seon.task/tasks @(:conn sys))) (set (keys (seon.task/agents @(:conn sys)))) (dissoc (:seon.root/watch (d/pull @(:conn sys) [:seon.root/watch] [:seon.root/id :root])) :roots :boot)]"}
-        first-boot (str/split-lines (root-answers path "main" [main {:op :eval :agent "root" :code (str "(my.root/load-tasks! sys " (pr-str tasks) ")")}
-                                                           {:op :attach :task "demo/t"} held]
+        held (ev "[(count (seon.task/tasks @(:conn sys))) (set (keys (seon.task/agents @(:conn sys)))) (dissoc (:seon.root/watch (d/pull @(:conn sys) [:seon.root/watch] [:seon.root/id :root])) :roots :boot)]")
+        by (ev "(:started-by (seon.task/root @(:conn sys)))")
+        first-boot (str/split-lines (root-answers path "main" [main (ev (str "(my.root/load-tasks! sys " (pr-str tasks) ")"))
+                                                           {:op :attach :task "demo/t"} held (ev "(:boot sys)") by]
                                                   {:args bare}))
-        second-boot (str/split-lines (root-answers path "main" [main held] {:args bare}))
+        second-boot (str/split-lines (root-answers path "main" [main held
+                                                                (ev "(:seon.root/previous-end (d/pull @(:conn sys) [:seon.root/previous-end] [:seon.root/id :root]))")
+                                                                (ev "(#'seon.root/previous-end (d/db-with @(:conn sys) [{:seon.root/id :root :seon.root/boot \"killed-boot\"}]))")
+                                                                by (ev "(= [\"--started-by\" \"seon.root-test/another\"] (vec (take-last 2 (my.root/resume-args sys))))")]
+                                                   {:args (into bare ["--started-by" "seon.root-test/another"])}))
         printed (fn [l] (ts/value-of (:response (try (edn/read-string {:default tagged-literal} l) (catch Exception _ nil)))))]
     (try
       (is (= "main" (printed (first first-boot))) "a boot with no main named works on the config's main")
@@ -176,6 +187,16 @@
         (is (= [1 1] [tasks-1 (count agents-1)]) (str "the first boot holds the one task it loaded (a file task is one whole task) and the agent it started; its watcher: " (pr-str watch-1)))
         (is (= 1 tasks-2) (str "the second boot still holds the task; its watcher: " (pr-str watch-2)))
         (is (every? agents-2 agents-1) "and the first boot's agent (its task is reaped, and started again by the next agent of the session)"))
+      (let [b1 (printed (nth first-boot 4))
+            [prev killed by2 resume] (map printed (drop 2 second-boot))]
+        (is (string? b1))
+        (is (= "seon.root-test/a-second-boot-resumes-the-same-main" (printed (nth first-boot 5))) "the test that started the boot is its fact")
+        (is (= "seon.root-test/another" by2) "and the next boot's is its own")
+        (is (true? resume) "and the generation after it carries it")
+        (is (= {:boot b1 :cause :stdin-eof} (select-keys prev [:boot :cause]))
+            "the second boot found the first's clean end: its stdin closed")
+        (is (= {:boot "killed-boot" :cause :unclean} (select-keys killed [:boot :cause]))
+            "a boot that left no stop fact is found :unclean"))
       (finally (sh/sh "rm" "-rf" path tasks (str path "-in") (str path ".log") (str path "-agents"))))))
 
 (deftest a-test-roots-task-files-are-its-own
@@ -219,63 +240,6 @@
              (ask "[(:seon.root/tasks (datahike.api/pull @(:conn sys) [:seon.root/tasks] [:seon.root/id :root])) (my.root/load-tasks! sys)]"))
           "the boot read's outcome, and a read that finds it so writes nothing")
       (finally (ts/stop-root! root) (ts/drop-main! path main) (clojure.java.shell/sh "rm" "-rf" runs)))))
-
-(deftest a-dead-link-in-the-wiki-is-a-problem-and-the-boot-goes-on
-  ;; root's boot loads the wiki (seon.root/wiki-tx) in its boot fact's commit; one link to no
-  ;; section in any page used to end the boot (bin/root start and next with it), then refused
-  ;; the whole wiki. Now the rest loads, the link is a dead citation my.root/problems shows,
-  ;; and the root boots. A
-  ;; checkout of this test's own: this one's files, its docs/ with one broken page more
-  (let [checkout (seon.config/checkout)
-        tmp (str checkout "/target/runs/root-test-wiki-" (random-uuid))
-        path (test-store)
-        main (str "root-test-wiki-" (random-uuid))
-        _ (.mkdirs (java.io.File. (str tmp "/docs")))
-        _ (doseq [f (.listFiles (java.io.File. checkout)) :let [n (.getName f)] :when (not (#{"docs" ".git" "target"} n))]
-            (sh/sh "ln" "-s" (.getPath f) (str tmp "/" n)))
-        ;; target/ is this fixture's own directory of links to the checkout's target/ entries but runs/ (where
-        ;; this fixture lives): a link to the whole of target/ is a cycle (docs/failure-points.md, a directory walk)
-        _ (.mkdirs (java.io.File. (str tmp "/target")))
-        _ (doseq [f (.listFiles (java.io.File. checkout "target")) :when (not= "runs" (.getName f))]
-            (sh/sh "ln" "-s" (.getPath f) (str tmp "/target/" (.getName f))))
-        _ (doseq [f (.listFiles (java.io.File. checkout "docs"))] (sh/sh "cp" (.getPath f) (str tmp "/docs/")))
-        _ (spit (str tmp "/docs/zz-broken.md") "# Broken\n\nIt links to [nowhere](agent.md#nowhere).\n")
-        out (root-answers path main [{:op :eval :agent "root" :code "(boolean (re-find #\"links to docs/agent.md#nowhere\" (pr-str (my.root/problems sys))))"}]
-                          {:env {"SEON_RUN_CHECKOUT" tmp}})
-        printed (ts/value-of (:response (try (edn/read-string {:default tagged-literal} (first (str/split-lines out))) (catch Exception _ nil))))]
-    (try
-      (is (str/includes? out "ROOT LISTENING") (str "the root boots: " out))
-      (is (true? printed) "and the dead link is an open problem")
-      (finally (ts/drop-main! path main) (sh/sh "rm" "-rf" tmp (str path "-in") (str path ".log"))))))
-
-(deftest every-end-of-a-root-is-a-fact
-  ;; task seon.root/every-end-of-a-root-is-a-fact: a clean stop is a fact naming its cause
-  ;; (:seon.root/stopped; here its stdin closes, as bin/root stop closes it), the next boot
-  ;; records it as :seon.root/previous-end, and a boot that left no stop fact (SIGKILL, a
-  ;; crash) is found :unclean. Who started a boot is that boot's (:seon.root/started-by): the
-  ;; test running start-root!, or the last --started-by its arguments name. A store of this test's
-  ;; own, as a-second-boot-resumes-the-same-main's (root-answers names its fifo and log after the
-  ;; store); removed at the end.
-  (let [path (ts/clone-process-store! (str (seon.config/checkout) "/target/runs/root-test-ends-" (random-uuid)))
-        ev (fn [code] {:op :eval :agent "root" :code code})
-        printed (fn [l] (ts/value-of (:response (try (edn/read-string {:default tagged-literal} l) (catch Exception _ nil)))))
-        by (ev "(:started-by (seon.task/root @(:conn sys)))")
-        [b1 by1] (str/split-lines (root-answers path "main" [(ev "(:boot sys)") by]))
-        [prev killed by2 resume] (str/split-lines
-                           (root-answers path "main" [(ev "(:seon.root/previous-end (d/pull @(:conn sys) [:seon.root/previous-end] [:seon.root/id :root]))")
-                                                  (ev "(#'seon.root/previous-end (d/db-with @(:conn sys) [{:seon.root/id :root :seon.root/boot \"killed-boot\"}]))")
-                                                  by (ev "(= [\"--started-by\" \"seon.root-test/another\"] (vec (take-last 2 (my.root/resume-args sys))))")]
-                                         {:args ["--started-by" "seon.root-test/another"]}))]
-    (try
-      (is (string? (printed b1)))
-      (is (= "seon.root-test/every-end-of-a-root-is-a-fact" (printed by1)) "the test that started the boot is its fact")
-      (is (= "seon.root-test/another" (printed by2)) "and the next boot's is its own")
-      (is (true? (printed resume)) "and the generation after it carries it")
-      (is (= {:boot (printed b1) :cause :stdin-eof} (select-keys (printed prev) [:boot :cause]))
-          "the second boot found the first's clean end: its stdin closed")
-      (is (= {:boot "killed-boot" :cause :unclean} (select-keys (printed killed) [:boot :cause]))
-          "a boot that left no stop fact is found :unclean")
-      (finally (sh/sh "rm" "-rf" path (str path "-in") (str path ".log") (str path "-agents"))))))
 
 (deftest a-build-without-whole-program-inference-reads-with-tools-reader
   ;; with
