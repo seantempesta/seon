@@ -710,15 +710,9 @@
                 (some (fn [[e m]] (let [from (:seon.message/from m)]
                                     (when (and (not (#{"root" me} from)) (> (first-delivered [db a e]) plan-tx)) from)))
                       (:messages rec)))
-        h (when (seq proofs) (d/history db))
-        never-red (vec (sort-by str (for [p proofs :when (= :pass (get results p))
-                                          :let [e (pdb/eid db :var/name p)]
-                                          :when (and e (not-any? #(= :red (:v %)) (d/datoms h :eavt e :seon.test/status)))]
-                                      p)))
         next (cond-> []
                (and plan-tx made-tx (= plan-tx made-tx)) (conj {:step :write-plan})
-               asked (conj {:step :fold-message :from asked})
-               (seq never-red) (conj {:step :show-red :tests never-red}))]
+               asked (conj {:step :fold-message :from asked}))]
     (cond-> {:reasons reasons
              ;; each proof as :proved holds its var: its verdict (green :pass, red and flaky :fail, as `verdicts`), its source
              :proofs (vec (for [p (sort-by str proofs)

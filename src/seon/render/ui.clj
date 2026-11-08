@@ -1172,9 +1172,7 @@
        (case step
          :write-plan [:p {:key :write-plan} "Your plan is still the request as it was given. Write what's wanted into it as you learn it, citing what it touches: "
                       [:code "(my.task/update! :seon.task/plan (constantly \"...\"))"] ". How: " [:code "(doc \"docs/agent.md#working-for-a-person\")"]]
-         :fold-message [:p {:key :fold-message} "A message from " from " came after your plan last changed. If it changes what's wanted, write that into the plan and its proofs; if it's a question or a remark, answer it."]
-         :show-red [:p {:key :show-red} "These proofs have passed without ever failing here, so they don't show your change is what makes them pass: "
-                    (str/join ", " (map str tests)) ". Show each fails without it. How: " [:code "(doc \"docs/testing.md#a-proof-is-focused\")"]]))
+         :fold-message [:p {:key :fold-message} "A message from " from " came after your plan last changed. If it changes what's wanted, write that into the plan and its proofs; if it's a question or a remark, answer it."]))
      (cond
        (and green? (empty? blocks) (empty? unmerged))
        [:p {:key :merging} "Every proof passes and nothing blocks merging."]
