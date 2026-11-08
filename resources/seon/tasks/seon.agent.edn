@@ -82,4 +82,7 @@
   :seon.task/kind :work}
  {:seon.task/name "two-agents-answering-each-other-are-bounded"
   :seon.task/plan "Each wake adds `:seon.config.agent/wake-turns`, so two agents answering each other run until one stops sending: `seon.reconcile-test/two-agents-answering-each-other-end` states it, and nothing bounds it. A runaway on a real model was seen 2026-11-07 from a different cause, and spent 6 turns before a person stopped it. The owner chose the allowance as the main control, and a total limit is undecided: one budget under a user that every turn draws from, by turns or money. Decide first; check whether anything enforces a spend limit today. See docs/users.md#messages."
+  :seon.task/kind :work}
+ {:seon.task/name "every-message-root-writes-wakes"
+  :seon.task/plan "From an independent audit, 2026-11-08, read not run: `seon.reconcile/judgment` answers `:told` with a verdict that `judge-tx` writes to the agent through `seon.reconcile/write`, which puts only `tell-tx`'s recipient on `:late`; `idx-ready?` needs `:woken` for `:told`, so a refused green waits for a later message or a restart (`boot-wakes`). The class: a message written without a wake. Correct: every `:seon.message/to` a write holds wakes its agent, by one rule wherever the write comes from. Proof first: an agent ends green, the done rule refuses it, it runs again with no other message. See docs/users.md#known-gaps-from-an-independent-audit-2026-11-08."
   :seon.task/kind :work}]

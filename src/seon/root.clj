@@ -1430,10 +1430,7 @@
   ([sys agent-id forms-string opts] (request! sys 'submit! agent-id (assoc opts :forms forms-string))))
 
 (defn message!
-  "Send the owner's message body (a string) to the agent: root's one delivery, into the
-  agent's inbox, which its next turn takes into the block it reads (:messages), and a fact on
-  main (:seon.message/*). A promise of the writer's answer for that fact's transaction, or
-  refused when no live agent has the id."
+  "Send the signed-in user's message body (a string) to the agent: one message fact on main through root's writer (`message-write`), which wakes it, whether or not its process lives; the agent's next act delivers it. A promise of the writer's answer for that fact's transaction, or refused when main holds no agent of that id or key. See docs/users.md#messages."
   {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id :string] :seon.host/promise]}
   [sys agent-id body] (request! sys 'message! agent-id {:body body}))
 

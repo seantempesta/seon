@@ -77,4 +77,7 @@ Replaces: the schema-declared render as the only way to choose one. Scoping: a r
   :seon.task/kind :work}
  {:seon.task/name "a-person-removes-a-message-from-their-page"
   :seon.task/plan "An agent removes a message with `swap!` on `ctx`, but a user with no process has no REPL to do it, so `seon.render.ui/user-messages` only grows. Correct: the message's render on a user's page carries a remove control, a call that retracts this user's own `:seon.message/to` on main through root's writer, by the existing `/call` path with no new route. Also: a message's `from` is a per-boot id like a1, so it should link to the agent by its key. Proof: removing one leaves another recipient's, and the page redraws. See docs/users.md#messages."
+  :seon.task/kind :work}
+ {:seon.task/name "a-users-walk-is-a-branch-walk"
+  :seon.task/plan "From an independent audit, 2026-11-08: `seon.render.proc/user-walk` and `user-walks` keep a third kind of kept walk, in a cell `agent-view` mutates, never disposed and advanced on every move of main whether watched or not; `branch-walk!` already keeps one per branch. Correct: a user's page is `branch-walk!` on `:main` with its declared layout, and the user-specific cell and checks go. Also from the audit, the user's other special cases (`earlier-agents-tx`, `write`, `tell-tx`, `agent-view`'s input, `users-side`'s boot-prefix parse, which shows a continued session twice): collapse each, or say why the user differs. See docs/users.md#known-gaps-from-an-independent-audit-2026-11-08."
   :seon.task/kind :work}]

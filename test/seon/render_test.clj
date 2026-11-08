@@ -586,7 +586,7 @@
     (testing "root's agents list is the same on every page: root first, then its agents"
       (is (= 2 (count (in root "#c-side")) (count (in agent "#c-side"))))
       (is (= (map :html (in root "#c-side")) (map :html (in agent "#c-side"))))
-      (is (str/includes? (:html (first (in root "#c-side"))) "href=\"/\"") "root's line links to its page")
+      (is (str/includes? (:html (first (in root "#c-side"))) "href=\"/root\"") "root's line links to its page")
       (is (str/includes? (:html (second (in root "#c-side"))) "href=\"/agent/b1/a3\"") "a link to its page, by its key"))
     (testing "root's focus: its process and main's open problems by their own renders, its input spawns"
       (is (= 2 (count (in root "#p-tiles"))))
@@ -890,7 +890,7 @@
         [st1 _] (#'p/pass-view st [:chat :a3])
         side (fn [st] (filter #(= "#c-side" (:container %)) (vals (get-in st [:views [:chat :a3] :units]))))]
     (is (= 2 (count (side st1))) "root, and the boot's sessions, one component")
-    (is (str/includes? (p/view-html st1 [:chat :a3]) "href=\"/\"") "root's line links to its page")
+    (is (str/includes? (p/view-html st1 [:chat :a3]) "href=\"/root\"") "root's line links to its page")
     (is (str/includes? (p/view-html st1 [:chat :a3]) "href=\"/agent/b1/a3\"") "a link to its page, by its key: the name that survives a restart")
     (testing "a new agent of root's is a new line in the sidebar, its component; the others stay"
       (let [main' (d/db-with (:main-db st1) (seon.task/agent-tx "b1" :a4 {:status :busy}))
@@ -2130,6 +2130,18 @@
       (is (= "Try this.\nand tell me." (:body (first mixed))))
       (is (= "(+ 1 2)" (str/trim (:forms (second mixed))))))))
 
+(deftest home-is-whoever-is-signed-in
+  ;; docs/users.md#whats-on-screen: / is the signed-in user's page, whoever root's :seon.root/signed-in names; with no one, a sign-in page; root's own page is /root
+  (let [db0 (sessions-db "b2" [["b2/a1" :a1 :running "seon.print/a-long-string" :running :task-a]])
+        db (d/db-with db0 [{:db/id "u" :seon.agent/key "sean" :seon.user/name "sean" :seon.agent/agents [(:db/id (d/entity db0 [:seon.agent/key "b2/a1"]))]}
+                           {:seon.root/id :root :seon.root/signed-in "u"}])
+        sean (:db/id (d/entity db [:seon.user/name "sean"]))]
+    (is (= sean (#'p/location db [:chat :home])) "home is the user signed in")
+    (is (= [:chat :home] (#'seon.web/view-of (ui/view-param [:chat :home]))) "and its feed names it again")
+    (is (nil? (#'p/location db0 [:chat :home])) "no one signed in: no home")
+    (is (str/includes? (apply str (map :html (:seon.render/units (#'p/page-value {:main-db db0} [:chat :home])))) "sign in") "but a page saying so")
+    (is (str/includes? (h/html (ui/root-side {:seon.ctx/ctx {}})) "href=\"/root\"") "root's own page is /root")))
+
 (deftest a-record-that-no-longer-fits-its-schema-is-its-data
   ;; docs/render.md#the-page: a stored value outlives the schema it was written under; the page and the model read its data
   (let [old {:t 1 :classes {:a-class-since-removed {:n 1 :rows []}}}]
@@ -2255,7 +2267,7 @@
     (testing "root's entry and the board's card are one link too"
       (let [root (h/html (ui/root-side {:seon.ctx/ctx c}))
             card (h/html (ui/session-card {:seon.db/db db} "b2/a6"))]
-        (is (str/includes? (second (re-find #"<a [^>]*href=\"/\"[^>]*>(.*)</a>" root)) "main"))
+        (is (str/includes? (second (re-find #"<a [^>]*href=\"/root\"[^>]*>(.*)</a>" root)) "main"))
         (is (str/includes? (second (re-find #"<a [^>]*href=\"/agent/b2/a6\"[^>]*>(.*)</a>" card)) "stopped at its cap"))))))
 
 (deftest every-session-on-main-is-listed-across-boots
@@ -2330,7 +2342,7 @@
             _ (#'p/pass st o)
             pages (into {} (for [m (:to-web @o) :when (= :page (:op m))] [(:k m) m]))]
         (is (= 404 (:status (get pages 9))))
-        (is (str/includes? (:html (get pages 9)) "href=\"/\"") "a link home")
+        (is (str/includes? (:html (get pages 9)) "href=\"/root\"") "a link to every session")
         (is (str/includes? (:html (get pages 9)) "b9/a1") "the message names the address")
         (is (nil? (:status (get pages 10))) "a session's page has no status: 200")))))
 

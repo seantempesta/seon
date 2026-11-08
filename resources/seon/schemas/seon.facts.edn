@@ -442,6 +442,8 @@
  ;; ---- root's boot and config keys (main) ----
  :seon.root/id [:and {:seon.db/identity true} :keyword]
  :seon.root/boot :string
+ ;; who is signed in: the user / is the page of (docs/users.md#whats-on-screen); until there is a login, boot signs in the OS account running root
+ :seon.root/signed-in :seon.db/ref
  ;; the digest of what the wiki load read (seon.root/wiki-digest): a boot that computes the same writes no wiki
  :seon.root/wiki [:string {:description "The digest of what the wiki load of the boot that wrote it read: the pages of the wiki dirs, the program and the task ids of main before the boot. A boot that computes the same loads nothing (seon.root/wiki-digest, docs/root.md#boot)."}]
  :seon.root/started-by [:string {:description "The test whose process started this boot (ns/name, seon.test-store/start-root! from clojure.test/*testing-vars*, given to the root as --started-by): the merge gate leaves it out of a merge's deferred process tests, since a test cannot be its own gate. Absent: no test started it, and every deferred test is gated. See docs/merging.md#a-merge-runs-what-the-change-reaches."}]
@@ -499,7 +501,7 @@
  ;; what this boot found of the root before it on this main: its stop fact, or :unclean
  :seon.root/previous-end :seon.root/end
  :seon.root/root-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.root/id :seon.root/boot :seon.root/generation :seon.root/quiescent] :seon.ctx/pattern [* {[:seon.agent/_root :as :agents :limit :seon.config.ctx/window :reverse true] [* {[:seon.agent/task :as :task] [:seon.task/id :seon.task/outcome :seon.task/reason]} {[:seon.process/_agent :as :processes] [*]} {[:seon.eval/_agent :as :evals :limit :seon.config.ctx/window :reverse true] [*]}]} {[:seon.eval/_agent :as :evals :limit :seon.config.ctx/window :reverse true] [*]}] :seon.render/html seon.render.ui/root}
-                          [:seon.root/id :seon.root/id] [:seon.root/boot :seon.root/boot]
+                          [:seon.root/id :seon.root/id] [:seon.root/boot :seon.root/boot] [:seon.root/signed-in {:optional true} :seon.root/signed-in]
                           [:seon.root/started-by {:optional true} :seon.root/started-by]
                           [:seon.root/wiki {:optional true} :seon.root/wiki]
                           [:seon.root/stopped {:optional true} :seon.root/stopped]

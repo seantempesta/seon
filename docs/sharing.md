@@ -1,6 +1,6 @@
 # Sharing
 
-A branch is main plus its own changes: an index is a tree of immutable nodes, so branches that hold the same datoms point at the same nodes, and a result stands until something it read changes. Most of what this page describes is planned or prototyped, and each part says which. The plans are on tasks ``seon.db/a-branch-is-main-plus-its-own-changes``, ``seon.program/a-tests-digest-reads-what-it-ran`` and ``seon.agent/a-message-is-a-durable-mailbox-and-a-channel-only-wakes``.
+A branch is main plus its own changes: an index is a tree of immutable nodes, so branches that hold the same datoms point at the same nodes, and a result stands until something it read changes. Most of what this page describes is planned or prototyped, and each part says which. The plans are on tasks ``seon.db/a-branch-is-main-plus-its-own-changes`` and ``seon.program/a-tests-digest-reads-what-it-ran``.
 
 ## One tree, everything linked
 
@@ -32,7 +32,7 @@ Each attribute has one home, stated on its schema, so it has one writer and a me
 
 **Reading.** A db value reads only its own datoms: `d/pull` through a ref to an entity it does not hold answers `[]`, and `d/datoms` lists the ref itself. A reader that wants both reads each from its own db value, or a `d/q` over `$branch $shared`. A shared entity that never changes reads the same at any later point, so a past request still rebuilds as it was sent. What changes on `:shared` needs the point it was read at.
 
-**A message.** An entity on `:shared` with `:seon.message/from`, `:seon.message/to`, `:seon.message/body` and `:seon.message/sent-ms`. At its next act an agent does a `git pull` from `:shared`: the `:seon.message/to` datoms addressed to it since its merge base with `:shared` come onto its branch. That is what it holds. Removing one is one plain retract on its own branch, and the merge base has moved past it, so it never returns: no read state and no stored `t`. A dropped wake costs delay only, since the commit graph says what is new. A Flow channel wakes the process.
+**A message.** Built, as a fact on main rather than on `:shared`: an entity with `:seon.message/from`, `:seon.message/to`, `:seon.message/body` and `:seon.message/sent-ms`. At its next act an agent has the messages main holds to it written onto its branch (```seon.agent/deliver!```, found by a seek of `:seon.message/to`: [users](users.md#messages)). That is what it holds. Removing one is one plain retract on its own branch, and it is not delivered again: no read state and no stored `t`. A dropped wake costs delay only, since main says what is owed. A Flow channel wakes the process.
 
 **What was tested,** on one scratch store with content-hashed nodes, one experiment each. 3 agents, 120 turns, a message to each and 5 evals on each branch every turn: EAVT 9.3 percent private against 21.5 with messages carried onto every branch, AEVT 10.0 against 18.4, AVET 3.1 against 3.0; a branch holds no other agent's message; main does not move. A ref followed costs 12 k ticks. Pull, with no state of its own: an unlinked message stayed gone through a later pull, a merge of main and a restart; a fork and its parent each kept their own; both merge bases held. A pull costs under 1 M ticks plus `d/merge-base`, which walks the commit graph, 15 k ticks a commit: 29.7 M at 2,000 commits. Datahike's docstring says it may be cached forever, and after a pull the base is the head just merged, so a process holds it in memory and walks only after a restart. That cache is not yet tried.
 
@@ -79,15 +79,15 @@ Why a merge costs sharing at all: konserve is a key to a value and knows nothing
 
 No choice of boundary helps writes that land everywhere: 150 entities placed by hash touch about 23 percent of leaves under every scheme. Only sort order helps, or holding writes back as Datomic's live index and a hitchhiker tree's node buffers do.
 
-What may not be adopted: main's platform records. A message a branch holds reads as delivered (```seon.agent/undelivered```), and root and a branch both write an agent's facts. The mailbox removes the first.
+What may not be adopted: main's platform records. A message a branch holds reads as delivered (```seon.agent/undelivered```), and root and a branch both write an agent's facts.
 
 ## A result stands until what it read changes
 
 A test's result is keyed by what its run read: a fixed seed, the functions it called (```seon.profile/reads```, in each verdict since 2026-11-07), what those reach through data, and the config and files it read. Same reads, nobody reruns it, on any branch. A changed read runs once, and that run serves everyone holding the same reads. A branch that redefined a function gets its own result. Selection does not work this way yet: it is static reach ([tests run by reach](source.md#tests-run-by-reach)). The same question is meant to serve check steps and the gate's keys, compared with the render cache's recorded reads ([render](render.md)). A cached model reply is not on this list: 0 of 251 calls repeated on a real run.
 
-## A message waits in a mailbox
+## A message stays until its agent removes it
 
-Planned. A message is a fact on main, whoever sends it. It reaches the agent's entity and stays until the agent removes it ([users](users.md#messages)). Its commit wakes the agent. A channel only wakes: a dropped wake costs delay, never the message.
+Built. A message is a fact on main, whoever sends it (a person or an agent: ```seon.root/message-write```). A turn or a REPL's `(messages)` writes it onto the agent's branch, where it stays until the agent removes it ([users](users.md#messages)). A Flow channel wakes the agent when the write is answered. A channel only wakes: a dropped wake costs delay, never the message.
 
 ## A metric accretes
 
@@ -97,7 +97,7 @@ Built for what an agent's evals cost (```seon.profile/accrue```, written by ```s
 
 Each of these has a measured alternative and a real cost, and none is final:
 
-- **Tree merge or rebase.** A tree merge rewrites no history and moves no head, but it is a change to the Datahike fork. Rebase needs no fork change, but it takes main's platform records and moves a live branch's head. Both wait on the mailbox for messages.
+- **Tree merge or rebase.** A tree merge rewrites no history and moves no head, but it is a change to the Datahike fork. Rebase needs no fork change, but it takes main's platform records and moves a live branch's head. Both wait on a decision about how a message's presence on a branch reads (above).
 - **Reads or reach for a result's key.** Reads reran about a tenth as many tests in a replay, as an estimate. They miss what a run could not record: an addition to a registry, a process test's children, a definition with no record. So they stand only with a regular fresh full run, and reach stays for what they cannot see.
 - **What keys a kept derivation.** Text is always safe and throws away too much: one comment in `src/seon/program.clj` costs a plan 5,271 M ticks against 165 M. Keying by the forms that derive the facts is cheap but rests on that reach being right (task ``seon.program/a-kept-tree-is-keyed-by-the-text-of-two-files``).
 - **History.** Kept everywhere by ruling, and about 3 times the write and 12 times the store on an updated value. Regenerable stores and metrics are the candidates to go without; records stay.
