@@ -69,7 +69,7 @@
         st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
         b (pdb/on-main (:branch cfg) :a1)
         _ (d/branch! conn (:branch cfg) b)
-        bc (d/connect (assoc cfg :branch b))
+        bc (pdb/connect (assoc cfg :branch b))
         [v nsx] (d/q '[:find [?v ?n] :where [?v :var/name app.m0/f2] [?v :var/form ?f] [?f :form/ns ?n]] @bc)
         _ (d/transact bc [{:db/id "f2'" :form/id "app.m0/f2-redefined" :form/ns nsx :form/order 100 :form/defines [v]
                            :form/src "(defn f2 {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 200))"}
@@ -89,7 +89,7 @@
         st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
         b (pdb/on-main (:branch cfg) :a1)
         _ (d/branch! conn (:branch cfg) b)
-        bc (d/connect (assoc cfg :branch b))
+        bc (pdb/connect (assoc cfg :branch b))
         [v nsx] (d/q '[:find [?v ?n] :where [?v :var/name app.m0/f2] [?v :var/form ?f] [?f :form/ns ?n]] @bc)
         _ (d/transact bc [{:db/id "f2'" :form/id "app.m0/f2-redefined" :form/ns nsx :form/order 100 :form/defines [v]
                            :form/src "(defn f2 {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 200))"}
@@ -817,7 +817,7 @@
             (testing "and an agent observes its branch from it, read through its own connection"
               (let [ab (pdb/on-main (:branch cfg) :held-index)
                     _ (d/branch! conn (:branch cfg) ab)
-                    bc (d/connect (assoc cfg :branch ab))]
+                    bc (pdb/connect (assoc cfg :branch ab))]
                 (try
                   (d/transact bc (seon.task/create-tx @bc [{:seon.task/ns 'demo :seon.task/name "branched" :seon.task/plan "Make branched true."}]))
                   (let [{idx :index db :db} (server/index-for-agent held) observed (reconcile/index idx db @bc)]
@@ -876,7 +876,7 @@
     (let [[st r] (union-of st)
           _ (is (true? (:ok r)))
           [st _] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:seon.message/id "m1" :seon.message/from "root" :seon.message/body "from main"}] :dest {:rid 1}})
-          bc (d/connect (assoc cfg :branch ab))
+          bc (pdb/connect (assoc cfg :branch ab))
           _ (d/transact bc {:tx-data [{:seon.message/id "r1" :seon.message/from "a1" :seon.message/body "from a1"}] :tx-meta (pdb/tx-meta ab)})
           _ (d/release bc)
           [st _] (step #'writer/writer-proc st :in {:op :agent-commit :branch :a1})

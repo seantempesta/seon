@@ -590,7 +590,7 @@
                                           {:rows rows :usd spent :error r})
                   (contract/error? sc) {:rows rows :usd spent :error sc}
                   :else
-                  (let [f (judge/fact dg id version calls sc usage usd)]
+                  (let [f (judge/fact dg id version calls sc usd)]
                     @(root/transact-main! sys [f])
                     ;; a cost the provider's usage cannot price is unknown, never 0: the bound
                     ;; cannot hold over it, so the pass ends there, recorded

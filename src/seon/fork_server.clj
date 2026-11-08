@@ -300,7 +300,7 @@
   ;; (seon.db/after-fork!): the parent's handles are not used across fork
   (pdb/after-fork! cfg)
   (let [conn (sock/conn fd)
-        store (d/connect (assoc cfg :branch (pdb/main-branch cfg)))
+        store (pdb/connect (assoc cfg :branch (pdb/main-branch cfg)))
         ;; db0 at its commit, read through this process's own store; the boot server reads all
         ;; of it once, so agents forked from here inherit it decoded (root does not hold it:
         ;; docs/machine.md#what-a-process-owns-in-memory)

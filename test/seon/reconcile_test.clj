@@ -312,7 +312,7 @@
            _ (d/branch! conn (:branch cfg) ab)
            base @conn
            _ (d/transact conn (fn-tx @conn "g" c))
-           bc (d/connect (assoc cfg :branch ab))]
+           bc (pdb/connect (assoc cfg :branch ab))]
        (try
          (d/transact bc (fn-tx @bc "u" nil))
          (let [w (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer (a/chan 4) :events (a/chan 4)})
@@ -340,7 +340,7 @@
            x-without-f (str "(ns app.oct.x)\n(defn h " s " [] 2)\n")
            y-calls-f (str "(ns app.oct.y (:require [app.oct.x :as x]))\n(defn g " s " [] (x/f))\n")
            on (fn [c files] (d/transact c (source/refresh-tx @c files)))
-           branch (fn [nm] (let [b (pdb/on-main (:branch cfg) nm)] (d/branch! conn (:branch cfg) b) [b (d/connect (assoc cfg :branch b))]))
+           branch (fn [nm] (let [b (pdb/on-main (:branch cfg) nm)] (d/branch! conn (:branch cfg) b) [b (pdb/connect (assoc cfg :branch b))]))
            writer (fn [] (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer (a/chan 4) :events (a/chan 4)}))
            ask (fn [w req] (:r (first (:to-api (second (#'writer/writer-proc w :in (assoc req :dest {:rid 1})))))))
            conns (atom [])]
@@ -718,7 +718,7 @@
            (is (= [#{k} #{}] [(get-in st [:idx :woken]) (get-in st [:idx :late])]))
            (is (= ["demo/a"] (mapv :task (r/actions (:idx st)))))))
        (testing "parked with the message on its branch (kept there, or removed): not woken, nothing starts"
-         (let [bc (d/connect (assoc cfg :branch sb))]
+         (let [bc (pdb/connect (assoc cfg :branch sb))]
            (try (d/transact bc (update (task/message-tx "m1" "owner" [k] "carry on" 1000) 0 assoc :seon.message/call {:seon.model-call/id (str k "/1")}))
                 (let [st (#'r/settle-late (at #{k}))]
                   (is (= [#{} #{}] [(get-in st [:idx :woken]) (get-in st [:idx :late])]))

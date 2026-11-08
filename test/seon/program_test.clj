@@ -144,7 +144,7 @@
   ;; store does when a root opens it) and its forms the facts they were recorded without (gained-tx)
   (let [cfg {:store {:backend :memory :id (random-uuid)} :schema-flexibility :write :keep-history? false}
         _ (d/create-database cfg)
-        conn (d/connect cfg)
+        conn (pdb/connect cfg)
         ;; the schema as it was before :form/keywords, and a contracted form recorded then
         _ (d/transact conn (vec (remove #(= :form/keywords (:db/ident %)) pdb/schema)))
         _ (d/transact conn [{:db/id "n" :ns/name 'app.old} {:db/id "f" :form/id "app.old/f" :form/src "(defn f [m] (:app.old/thing m))" :form/ns "n" :form/order 0 :form/defines #{"v"}}
@@ -170,7 +170,7 @@
   ;; (docs/source.md#tests-run-by-reach)
   (let [cfg {:store {:backend :memory :id (random-uuid)} :schema-flexibility :write :keep-history? false}
         _ (d/create-database cfg)
-        conn (d/connect cfg)
+        conn (pdb/connect cfg)
         _ (d/transact conn (vec (remove #(= :form/ops (:db/ident %)) pdb/schema)))
         _ (d/transact conn [{:db/id "n" :ns/name 'app.old} {:db/id "f" :form/id "app.old/f" :form/src "(defn f [m] m)" :form/ns "n" :form/order 0 :form/defines #{"v"}}
                             {:db/id "v" :var/name 'app.old/f :var/form "f" :var/meta #{:arglists}}])

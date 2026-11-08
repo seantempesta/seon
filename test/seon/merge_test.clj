@@ -422,7 +422,7 @@
      (let [b (keyword (str (name (:branch cfg)) "-v"))
            _ (d/transact conn ((var-tx "f" "x") @conn))
            _ (d/branch! conn (:branch cfg) b)
-           bc (d/connect (assoc cfg :branch b))]
+           bc (pdb/connect (assoc cfg :branch b))]
        (try
          (d/transact bc ((var-tx "n" "1") @bc))
          (d/transact bc ((var-tx "f" "(inc x)") @bc))
@@ -462,7 +462,7 @@
      (let [b (keyword (str (name (:branch cfg)) "-ns"))
            _ (d/transact conn ((var-tx "f" "x") @conn))
            _ (d/branch! conn (:branch cfg) b)
-           bc (d/connect (assoc cfg :branch b))
+           bc (pdb/connect (assoc cfg :branch b))
            newns (fn [db] (program/record-tx db {:id "app.z/(defn z [x] x)" :src "(defn z [x] x)" :ns 'app.z :ns-form? false
                                                   :defs [{:var 'app.z/z :meta #{:arglists} :contract "[:=> [:cat :int] :int]"}]
                                                   :declares #{} :methods [] :impls [] :refs #{} :requires #{} :banned #{} :inline-defs #{}}))]

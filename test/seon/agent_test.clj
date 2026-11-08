@@ -999,7 +999,7 @@
                             :code (spawn-kept-code kept
                                                    (str (src k "(defn h [] 1)")
                                                         " (datahike.api/branch! (:conn sys) m b)"
-                                                        " (let [bc (datahike.api/connect (assoc (:cfg sys) :branch b))]"
+                                                        " (let [bc (pdb/connect (assoc (:cfg sys) :branch b))]"
                                                         "   (datahike.api/transact bc [{:seon.root/id :root :seon.root/boot \"an-earlier-boot\"}]) (datahike.api/release bc))"
                                                         " " (src g "(defn g [] 7)")
                                                         " " (src k "(defn h [] 2)"))
@@ -1534,7 +1534,7 @@
            _ (d/transact conn [{:db/id "f1'" :form/id "app.m0/f1-redefined" :form/ns nsx :form/order 100 :form/defines [v]
                                 :form/src "(defn f1 {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 100))"}
                                [:db/add v :var/form "f1'"]])
-           store-conn (d/connect (assoc cfg :branch ab))
+           store-conn (pdb/connect (assoc cfg :branch ab))
            [a b] (sock/socketpair)
            old @agent/state old-link @agent/link]
        (try
@@ -1567,7 +1567,7 @@
                                                     :form/src (str "(defn f1 {:malli/schema [:=> [:cat :int] :int]} [x] " body ")")}
                                                    [:db/add v :var/form "f"]]))
            src (fn [db] (:form/src (:var/form (d/entity db [:var/name 'app.m0/f1]))))
-           store-conn (d/connect (assoc cfg :branch ab))
+           store-conn (pdb/connect (assoc cfg :branch ab))
            [a b] (sock/socketpair)
            old @agent/state old-link @agent/link]
        (try
@@ -1598,7 +1598,7 @@
      (let [ab (pdb/on-main (:branch cfg) :agent-refs)
            _ (d/branch! conn (:branch cfg) ab)
            forked @conn
-           store-conn (d/connect (assoc cfg :branch ab))
+           store-conn (pdb/connect (assoc cfg :branch ab))
            [a b] (sock/socketpair)
            old @agent/state old-link @agent/link
            note (fn [i] (agent/transact! [{:note/text (str "n" i) :note/agent :t}]))
@@ -1644,7 +1644,7 @@
                                {:db/id "f1'" :form/id "app.m0/f1-carried" :form/ns nsx :form/order 100 :form/defines [v]
                                 :form/src "(defn f1 {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 100))"}
                                [:db/add v :var/form "f1'"]])
-           store-conn (d/connect (assoc cfg :branch ab))
+           store-conn (pdb/connect (assoc cfg :branch ab))
            [a b] (sock/socketpair)
            old @agent/state old-link @agent/link]
        (try
@@ -1671,7 +1671,7 @@
            _ (d/transact conn (into (ts/work-tx "demo/w" :parked {:agent :a1 :branch :msg-a}) (ts/work-tx "demo/x" :parked {:agent :a2 :branch :msg-b})))
            _ (d/branch! conn (:branch cfg) ba)
            _ (d/branch! conn (:branch cfg) bb)
-           conns {ka (d/connect (assoc cfg :branch ba)) kb (d/connect (assoc cfg :branch bb))}
+           conns {ka (pdb/connect (assoc cfg :branch ba)) kb (pdb/connect (assoc cfg :branch bb))}
            branches {ka ba kb bb}
            [a b] (sock/socketpair)
            old @agent/state old-link @agent/link
@@ -1794,7 +1794,7 @@
            ;; the agent as its turns record it (its key, id and task)
            _ (d/branch! conn (:branch cfg) ab)
            _ (d/transact conn (ts/work-tx "demo/w" :parked {:agent :a1 :branch :agent-taken}))
-           store-conn (d/connect (assoc cfg :branch ab))
+           store-conn (pdb/connect (assoc cfg :branch ab))
            _ (d/transact store-conn [{:db/id k :seon.agent/key k :seon.agent/id :a1}
                                      {:seon.eval/id "e1" :seon.eval/agent [:seon.agent/key k] :seon.eval/by "a1" :seon.eval/code "1" :seon.eval/response {}}])
            ;; on main: the page's open
@@ -1828,7 +1828,7 @@
            _ (d/transact conn [{:seon.agent/key k} {:seon.process/id (str k "/77") :seon.process/agent [:seon.agent/key k] :seon.process/stall {:quiet-ms 4000}}])
            ab (pdb/on-main (:branch cfg) :stall-task)
            _ (d/branch! conn (:branch cfg) ab)
-           store-conn (d/connect (assoc cfg :branch ab))
+           store-conn (pdb/connect (assoc cfg :branch ab))
            [a b] (sock/socketpair)
            old @agent/state old-link @agent/link
            proofs (fn [] (let [reps (atom [])]
@@ -1851,7 +1851,7 @@
    (fn [cfg conn]
      (let [ab (pdb/on-main (:branch cfg) :agent-tx)
            _ (d/branch! conn (:branch cfg) ab)
-           store-conn (d/connect (assoc cfg :branch ab))
+           store-conn (pdb/connect (assoc cfg :branch ab))
            [a b] (sock/socketpair)
            old @agent/state old-link @agent/link]
        (try

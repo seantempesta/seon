@@ -113,7 +113,7 @@
         _ (d/transact conn {:tx-data (vec (mapcat #(program/account-tx @conn (acct % "x") %) (range n)))})
         base @conn
         _ (d/branch! conn :db :branch)
-        bc (d/connect (assoc cfg :branch :branch))]
+        bc (pdb/connect (assoc cfg :branch :branch))]
     (d/transact bc {:tx-data (program/record-tx @bc (acct (quot n 2) "(inc x)"))})
     [base @bc]))
 
@@ -123,7 +123,7 @@
   []
   (swap! seon.agent/state dissoc :branch-changes)
   (doseq [n divergence-sizes :let [path (on-disk-path n)] :when (pdb/store? path)]
-    (doseq [b [:db :branch]] (d/release (d/connect (assoc (pdb/store-cfg :lmdb path) :branch b)) true))
+    (doseq [b [:db :branch]] (d/release (pdb/connect (assoc (pdb/store-cfg :lmdb path) :branch b)) true))
     (sh/sh "rm" "-rf" path)))
 
 (defn on-disk-changes-of

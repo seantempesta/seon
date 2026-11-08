@@ -1231,7 +1231,7 @@
        :timeout (in-child-bounded (fn [] (= :t (a/alt!! (a/timeout 10) :t))))
        :store (in-child-bounded (fn [] (let [cfg {:store {:backend :memory :id (random-uuid)}}]
                                       (d/create-database cfg)
-                                      (let [c (d/connect cfg)] (d/transact c [{:db/ident :x}]) (d/release c) true))))})
+                                      (let [c (seon.db/connect cfg)] (d/transact c [{:db/ident :x}]) (d/release c) true))))})
    "ends-with-its-starter"
    ;; a process ends with the pid it watches (seon.lib/end-with!), and so does what it forks: mid
    ;; watches itself, so its child inherits the watch of mid; the child parks in a read that never
@@ -1429,7 +1429,7 @@
         mr (mapv answer mains)
         ok-main (count (filter :ok mr))
         refused-main (count (filter #(= "root stopped" (:seon.error/message %)) mr))
-        conn (d/connect (:cfg sys))
+        conn (seon.db/connect (:cfg sys))
         main-notes (d/q '[:find (count ?e) . :where [?e :note/agent :root]] @conn)
         left (filter alive? (cons fs-pid pids))]
       (d/release conn)
@@ -1968,7 +1968,7 @@
   (let [path (seon.config/value :seon.config.root/store-path)]
     (if (seon.db/store? path)
       (let [cfg (seon.db/store-cfg :lmdb path)
-            conn (d/connect cfg)
+            conn (seon.db/connect cfg)
             gone (vec (mapcat #(seon.db/delete-main! conn (keyword %)) mains))]
         (seon.db/sync! cfg)
         (d/release conn)
@@ -1990,7 +1990,7 @@
      "drop" (fn [n more] (drop-mains (remove nil? (cons n more))))
      ;; the store bin/check is given, its size and branch count: "PATH KB BRANCHES"
      "store" (fn [n more] (let [path (seon.config/value :seon.config.root/store-path)
-                  c (d/connect (seon.db/store-cfg :lmdb path))]
+                  c (seon.db/connect (seon.db/store-cfg :lmdb path))]
               (println path (quot (dir-bytes path) 1024) (count (d/branches c))) (d/release c) (lib/c-exit 0)))
      "durable-write" (fn [n more] (durable-write n))
      "durable-read" (fn [n more] (durable-read n))

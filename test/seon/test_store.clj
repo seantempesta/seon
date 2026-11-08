@@ -11,7 +11,7 @@
   (delay (let [cfg {:store {:backend :memory :id (random-uuid)} :schema-flexibility :write
                         :writer pdb/writer-cfg}]
            (d/create-database (pdb/made-cfg cfg))
-           (let [conn (d/connect cfg)] (pdb/ids! conn) (pdb/seed! conn 2000) (d/release conn))
+           (let [conn (pdb/connect cfg)] (pdb/ids! conn) (pdb/seed! conn 2000) (d/release conn))
            cfg)))
 
 (defn program-schema-digest
@@ -136,7 +136,7 @@
   program), for a test that only reads or uses d/db-with: no branch is made."
   {:malli/schema [:=> [:cat] :seon.host/db]}
   []
-  (let [c (d/connect @store)] (try @c (finally (d/release c)))))
+  (let [c (pdb/connect @store)] (try @c (finally (d/release c)))))
 
 (defn test-branch!
   "(f cfg conn) on a fresh branch of the test store (its seed: the schema and about 2,000
@@ -146,7 +146,7 @@
   [f]
   (let [b (keyword (str "test-" (random-uuid)))
         [conn _] (pdb/open-main! @store b)
-        seed (d/connect @store)]
+        seed (pdb/connect @store)]
     (try (f (assoc @store :branch b) conn)
          (finally (d/release conn) (pdb/delete-main! seed b) (d/release seed)))))
 
@@ -267,7 +267,7 @@
   {:malli/schema [:=> [:cat :string :string] :map]}
   [store main]
   (let [cfg (pdb/store-cfg :lmdb store)
-        conn (d/connect cfg)
+        conn (pdb/connect cfg)
         gone (try (pdb/delete-main! conn (keyword main))
                   (finally (pdb/sync! cfg) (d/release conn)))]
     (fx/remove-tree! (pdb/agents-dir (assoc cfg :branch (keyword main))))

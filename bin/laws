@@ -64,7 +64,7 @@ for k in $kinds; do
     clocks) sites clocks '[Ss]leep|[Tt]imeout([^s]|$)|deadline|[A-Z]-MS' docs/clocks.md "## Time decides" ;;
     measures) sites measures 'currentTimeMillis|nanoTime|now-ns|now-ms' docs/clocks.md ;;
     resolution) sites resolution "[(](requiring-resolve|ns-resolve|resolve '|intern|alter-var-root|with-redefs)[ )]" docs/resolution.md ;;
-    transactions) sites transactions '[(](d|datahike[.]api|datahike[.]core|dc|dw|datahike[.]writer|datahike[.]writing|w)/(with|db-with|transact!?|transact-batch!|apply!)[ )]' docs/storage.md "## The write checks every entity it touches" ;;
+    transactions) sites transactions '[(](d|datahike[.]api|datahike[.]core|dc|dw|datahike[.]writer|datahike[.]writing|w)/(with|db-with|transact!?|transact-batch!|apply!|connect)[ )]' docs/storage.md "## The write checks every entity it touches" ;;
     *) echo "laws: no kind $k"; bad=1 ;;
   esac
 done

@@ -781,7 +781,8 @@
   "st with the caller of x, a message proc pid's throwing step took, answered the defect e: the answer its :dest names
   (`seon.root/back-op`), its promise or reply route when it came in at the api or as a
   proc's request, the request pending under its :rid, or, for an answer the proc took
-  ({:tag :r}), that answer again on the proc's :answers route. An answer that was already an
+  ({:tag :r}), that answer again on the proc's :answers route; a fork it lost ends its agent's spawn as a refused fork
+  does. An answer that was already an
   error is not answered again: the proc had its one answer, and a step that throws on an
   error would throw on the next."
   {:malli/schema [:=> [:cat :seon.root/api-state :seon.host/volatile :keyword :any :seon.error/base] :seon.root/api-state]}
@@ -794,6 +795,11 @@
     (int? (:rid x)) (deliver-rid st o (:rid x) e)
     (and (contains? x :tag) (contains? x :r) (not (contract/error? (:r x))))
     (reply! st o {:route [pid :answers] :tag (:tag x)} e)
+    ;; a fork the step lost (it threw sending or taking it): its agent's spawn waits on the fork's own answer, which never
+    ;; comes, so it ends as a refused fork does (:fork-failed), with why (2026-11-08: a fork whose message could not be
+    ;; encoded left its spawn waiting with no error)
+    (and (= :fork (:op x)) (:agent x))
+    (cond-> st (get-in st [::spawning (:agent x)]) (spawn-failed o (:agent x) (:seon.error/message e) nil))
     :else st))
 
 (defn- api-one {:malli/schema [:=> [:cat :seon.root/api-state :seon.host/volatile :keyword [:maybe :map]] :seon.root/api-state]}

@@ -193,7 +193,7 @@
 
 (defn transact-checked
   "The writer's transact (`datahike.writing/transact!`) through both checks (`checked`): the connection's 'transact!
-  (`writer-cfg`), so root's batch and an agent's run-ahead apply pass it with no call of their own. arg-map's
+  (`connect` adds it to every connection), so root's batch and an agent's run-ahead apply pass it with no call of their own. arg-map's
   :seon.db/schemas (a branch's own schema changes, {:forms :registry}) are the per-datom check's. See
   docs/storage.md#the-write-checks-every-entity-it-touches."
   {:malli/schema [:=> [:cat :any :map] :map]}
@@ -302,8 +302,16 @@
 ;; caller of transact, so it is THE serial writer; Datahike runs no queue, commit loop or
 ;; go block of its own (memory: commit p50 0.49 -> 0.39 ms, 639 -> 446 KB/tx, 2 threads
 ;; fewer per connection; src/proto/f1_bench.clj).
-;; and its 'transact! checks every entity a transaction touched (transact-checked)
-(def writer-cfg {:backend :sync :write-fn-map {'transact! #'transact-checked}})
+(def writer-cfg {:backend :sync})
+
+(defn connect
+  "A connection to the store and branch of cfg (Datahike's `d/connect`), its writer's transact the one path's
+  (`transact-checked`), so every write through it is checked. The one way a connection is opened (bin/laws
+  transactions): the hook is added here, never stored in cfg, which is plain data that travels (a fork's message, a
+  stored config): a Var in it could not be encoded, and the fork it rode never came (2026-11-08).
+  See docs/storage.md#the-write-checks-every-entity-it-touches."
+  {:malli/schema [:=> [:cat :map] :any]}
+  [cfg] (d/connect (assoc-in cfg [:writer :write-fn-map] {'transact! transact-checked})))
 
 ;; ---- the durable store ----------------------------------------------------------
 ;; konserve on Jolt (libs/konserve): LMDB (konserve.jolt.lmdb) or the POSIX filestore,
@@ -490,12 +498,12 @@
   such branch (one pointer write). Answers [conn existed?]."
   {:malli/schema [:=> [:cat :seon.db/cfg :seon.db/branch] [:tuple :seon.host/conn :boolean]]}
   [cfg main]
-  (let [seed-conn (d/connect cfg)
+  (let [seed-conn (connect cfg)
         existed? (or (= :db main) (branch? seed-conn main))]
     (when-not existed? (d/branch! seed-conn :db main))
     (if (= :db main)
       [seed-conn existed?]
-      (let [conn (d/connect (assoc cfg :branch main))] (d/release seed-conn) [conn existed?]))))
+      (let [conn (connect (assoc cfg :branch main))] (d/release seed-conn) [conn existed?]))))
 
 (defn agents-dir
   "Where the agents of the root holding cfg keep their stderr (seon.agent/stderr-path):
@@ -580,7 +588,7 @@
         placed (volatile! false)]
     (try
       (d/create-database (made-cfg tcfg))
-      (let [conn (d/connect tcfg)] (try (seed! conn n) (sync! tcfg) (finally (d/release conn))))
+      (let [conn (connect tcfg)] (try (seed! conn n) (sync! tcfg) (finally (d/release conn))))
       (let [[rc errno] (posix/c-rename tmp path)]
         (vreset! placed (zero? rc))
         (when-not (or @placed (posix/exists? (if (= backend :lmdb) (str path "/data.mdb") path)))

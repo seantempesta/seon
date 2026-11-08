@@ -64,7 +64,7 @@
       ;; a store made under another schema's digest (what it holds is not read: its name says it)
       (let [cfg (pdb/store-cfg :lmdb old)]
         (d/create-database cfg)
-        (let [c (d/connect cfg)]
+        (let [c (pdb/connect cfg)]
           (d/transact c {:tx-data [{:db/ident :task/name :db/valueType :db.type/long :db/cardinality :db.cardinality/one}]})
           (d/release c)))
       (.mkdirs (java.io.File. base))

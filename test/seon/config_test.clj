@@ -238,7 +238,7 @@
     (is (= {:boot "boot-1" :max-running 6 :max-merging (config/value :seon.config.merge/max-running)} (task/root @conn)))
     ;; a branch made from main holds them too (what an agent forked onto it reads)
     (d/branch! conn (:branch cfg) child)
-    (is (= c (config/from-db @(d/connect (assoc cfg :branch child)))))))))
+    (is (= c (config/from-db @(pdb/connect (assoc cfg :branch child)))))))))
 
 ;; owner, 2026-10-28: "Fix the model provider not reading the config. A config can override at any point even
 ;; between turns." The provider was copied once at boot (seon.root/start!); it is resolved at the call now

@@ -1576,7 +1576,7 @@
                       ;; the clone opens the store itself, on its own branch
                       (pdb/after-fork! (:cfg r))
                       (stderr-to-file! (stderr-path (pdb/agents-dir (:cfg r)) (:agent m)))
-                      (let [store-conn (d/connect (assoc (:cfg r) :branch (:branch m)))]
+                      (let [store-conn (pdb/connect (assoc (:cfg r) :branch (:branch m)))]
                         ;; the task it was cloned for (a fork's sibling task, seon.server's), else its parent's
                         (reset! link {:fd fd :conn (sock/conn fd)})
                         (swap! state assoc :task (or (:task m) (:task @state)) :id (:agent m) :key (key-of (pdb/head store-conn (pdb/main-branch (:cfg r))) (:agent m)) :branch (:branch m) :mode :agent :tx-seq 0
@@ -1668,7 +1668,7 @@
         intr-ok (interrupt-self-test)
         _ (mark! :interrupt-test)
         c (sock/conn fd)
-        store-conn (d/connect (assoc cfg :branch branch))
+        store-conn (pdb/connect (assoc cfg :branch branch))
         _ (mark! :connected)]
     (intr/install!)
     ;; root gone, this process ends, busy or not (the fork server's group kill may be gone too)

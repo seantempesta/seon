@@ -120,11 +120,11 @@
         cfg (pdb/store-cfg :lmdb (get-in @conn [:config :store :path]))
         b (keyword (str "r" n "-" (random-uuid)))
         _ (d/branch! conn :db b)
-        bc (d/connect (assoc cfg :branch b))
+        bc (pdb/connect (assoc cfg :branch b))
         _ (d/transact bc {:tx-data (vec (mapcat form-tx (range n)))})
         s (keyword (str (name b) "-next"))
         _ (d/branch! conn b s)
-        c (d/connect (assoc cfg :branch s))
+        c (pdb/connect (assoc cfg :branch s))
         _ (d/transact c {:tx-data [{:form/id "vnew" :form/ns {:ns/name (quote app.t)} :form/order 0 :form/src "(defn vnew [])"}]})
         ;; the previous round read the clean commit's db (it asked for what was due there), so root's node cache
         ;; holds its nodes when this round diffs from it: read them here, as that round did
