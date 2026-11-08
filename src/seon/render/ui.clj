@@ -774,7 +774,7 @@
     (into [:div] (for [[r css] rs] [:style {:key r} css]))))
 
 (defn rules-list
-  "The page's rules as a list of their own (p-rules), so a change of a rule draws nothing else: on the page, never in the model's request (owner, 2026-11-08). See docs/render.md#a-layout-places-its-lists."
+  "The page's rules as a list of their own (p-rules), so a change of a rule draws nothing else: on the page, never in the model's request. See docs/render.md#style."
   {:seon.render/list "p-rules" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
   [_] [:div {:id "p-rules"} [#'page-rules {:wire/for "page"}]])
 
