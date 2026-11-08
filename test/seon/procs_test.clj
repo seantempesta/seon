@@ -954,7 +954,7 @@
       (is (some #(= :idle (:seon.agent/status %)) (:tx-data w)) "another change writes that change")
       (is (not-any? #(contains? % :seon.process/mem-mb) (:tx-data w)) "and no memory: nothing reads it as a fact"))))
 
-;; task seon.root/an-agent-is-named-by-its-key: one live process per agent (docs/decisions.md#an-id-is-the-content-of-the-facts-that-make-it-owner-2026-11-08)
+;; docs/decisions.md#an-id-is-the-content-of-the-facts-that-make-it-owner-2026-11-08: one live process per agent (docs/decisions.md#an-id-is-the-content-of-the-facts-that-make-it-owner-2026-11-08)
 (deftest back-leaves-one-live-process-for-the-agent
   (spawning-api
    (fn [st]

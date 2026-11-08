@@ -318,7 +318,7 @@
       (finally (sh/sh "rm" "-rf" tree tasks path (str path "-agents") (str path "-in") (str path ".log"))))))
 
 (deftest a-root-restart-names-the-same-agent-by-the-same-name
-  ;; task seon.root/an-agent-is-named-by-its-key: an agent's id is the keyword of its
+  ;; docs/decisions.md#an-id-is-the-content-of-the-facts-that-make-it-owner-2026-11-08: an agent's id is the keyword of its
   ;; :seon.agent/key, minted once (seon.root/start-agent) and kept by the session's next agent
   ;; (seon.task/session-key), so a root's restart leaves every interface naming the agent as before:
   ;; root's view, the task's agent, the server's agents list and the page's address. One agent on one
