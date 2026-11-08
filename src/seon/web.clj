@@ -281,7 +281,7 @@
   {:malli/schema [:=> [:cat :map :string] :string]}
   [st in]
   (let [parts (sort-by :n (for [[[_ stream] e] (:streams st) :when (= in (:in e))] (assoc e :stream stream)))]
-    (patch-event (h/html (ui/stream-container in (vec (for [{:keys [stream part text]} parts] [stream (or part "content") text]))))
+    (patch-event (h/html (ui/stream-container in (vec (for [{:keys [stream part text]} parts] [stream (or part "content") (if (string? text) text (apply str text))]))))
                  (id-sel in) "replace")))
 
 (defn- drawn
@@ -302,7 +302,8 @@
               st fresh))))
 
 (defn- stream-in
-  "An effect's in-flight text, {:stream :in :part :agent :text} (:text all of that part so far, :agent its stable key, :in
+  "An effect's in-flight text, {:stream :in :part :agent :text} (:text all of that part so far, a string or its pieces in
+  order, a vector the producer shares, joined only when a tab is sent it; :agent its stable key, :in
   the entity whose in-flight element the render drew): the part's latest text is held (memory only, gone at its end:
   in-flight text may be lost), and each tab of the agent's chat whose page has the element gets it drawn whole in its
   place (container-frame). A message that never arrived costs nothing, since the next carries all of it; a tab that

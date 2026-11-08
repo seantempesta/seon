@@ -274,3 +274,10 @@
     (let [[st _] (#'w/web-proc st :from-render {:op :index :agents (assoc-in keyed [:a1 :status] :killed)})]
       (is (= 1 (:streams (#'w/stats st))) "an agent whose process ended takes its open streams with it")
       (is (not-any? #{"b1/a1/3"} (mapcat :has (vals (:tabs st)))) "and no tab keeps its in-flight element"))))
+
+(deftest a-streams-text-may-come-as-its-pieces
+  ;; Context's producers send the part's whole text so far as the vector of its pieces (shared, O(1) a message); the
+  ;; web proc joins it only when it sends
+  (let [[st a1] (stream-tabs)
+        [_ _] (#'w/web-proc st :streams (assoc msg :text ["Read" "ing <the>" " task"]))]
+    (is (str/includes? (a/poll! a1) ">Reading &lt;the&gt; task</div>"))))
