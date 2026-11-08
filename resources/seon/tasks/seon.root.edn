@@ -104,9 +104,16 @@ The class: anything root reads before the import (a config key, a schema entry, 
 
 Correct: the boot imports main's source before it reads anything from main. At boot root is the store's only process (seon.root's boot opens the store before the fork server forks), and seon.root/seed-program! already imports the source straight into the store, with no graph and no writer (fx/read-source, then source/tx-of, then d/transact). The boot runs the same import (the changed files only, seon.source/refresh-tx, against the :seon.root/source fact's tree) before load-all! and hold-config!, so main's program and config at boot are the merged tree's. import-source! after start then finds the digest equal and imports nothing (its own rule), so nothing is imported twice. Replaces: the gap, and the --set workaround. Deletes nothing else. Cost: the import moves earlier, it does not grow (a refresh of what the merge changed; a boot after no merge reads the tree's digest and writes nothing).
 
+Checks (Context, 2026-11-08):
+- What it imports from: bin/update fast-forwards the merges tree (:seon.config.source/root) to main before starting root, but a plain bin/root start or bin/root next does not, so that tree can be behind main or hold Seon's write-back commits not yet on main. The boot imports only when the tree's HEAD is main's commit or holds it; otherwise it imports nothing and records why, as data, never writing an older tree over main.
+- A bad file never stops the boot: a merged file that does not analyze, or a config entry the schema refuses (seon.root/unimportable, seon.program/config-refused), is a problem fact naming the file, and root boots on what main's store held. A dead root is the outcome this task exists to end.
+- The import reads :seon.config.source/root, dirs and branch before any config is held; they are :seon.config/place keys, read from the built text (docs/config.md#a-process-holds-its-branchs-config), and the boot's docstring says so.
+
 Owners: seon.root's boot is Optimization's (storage, merges) and Context's (config); Web found it with its merge and can build it if they agree.
 
-Proofs, red first: a root booted on a store whose main lacks a config key the binary reads at start (the merged tree adds it) starts, holds that key's value from the merged entries, and its import after start writes nothing; a boot with nothing merged since the last import writes nothing at boot."
+Proofs, red first: a root booted on a store whose main lacks a config key the binary reads at start (the merged tree adds it) starts, holds that key's value from the merged entries, and its import after start writes nothing; a boot with nothing merged since the last import writes nothing at boot; a boot whose import refuses one file still starts and names the file; a boot whose source tree does not hold main's commit imports nothing and says why."
   :seon.task/proofs #{seon.root-test/a-boot-after-a-merge-reads-the-merged-config
-                      seon.root-test/a-boot-with-nothing-merged-imports-nothing}}
+                      seon.root-test/a-boot-with-nothing-merged-imports-nothing
+                      seon.root-test/a-boot-whose-import-refuses-a-file-still-starts
+                      seon.root-test/a-boot-imports-no-tree-behind-main}}
 ]
