@@ -74,9 +74,6 @@ Replaces: the schema-declared render as the only way to choose one. Scoping: a r
  {:seon.task/name "a-person-removes-a-message-from-their-page"
   :seon.task/plan "An agent removes a message with `swap!` on `ctx`, but a user with no process has no REPL to do it, so `seon.render.ui/user-messages` only grows. Correct: the message's render on a user's page carries a remove control, a call that retracts this user's own `:seon.message/to` on main through root's writer, by the existing `/call` path with no new route. Also: a message's `from` is a per-boot id like a1, so it should link to the agent by its key. Proof: removing one leaves another recipient's, and the page redraws. See docs/users.md#messages."
   :seon.task/kind :work}
- {:seon.task/name "a-users-walk-is-a-branch-walk"
-  :seon.task/plan "From an independent audit, 2026-11-08: `seon.render.proc/user-walk` and `user-walks` keep a third kind of kept walk, in a cell `agent-view` mutates, never disposed and advanced on every move of main whether watched or not; `branch-walk!` already keeps one per branch. Correct: a user's page is `branch-walk!` on `:main` with its declared layout, and the user-specific cell and checks go. Also from the audit, the user's other special cases (`earlier-agents-tx`, `write`, `tell-tx`, `agent-view`'s input, `users-side`'s boot-prefix parse, which shows a continued session twice): collapse each, or say why the user differs. See docs/users.md#known-gaps-from-an-independent-audit-2026-11-08."
-  :seon.task/kind :work}
  {:seon.task/name "what-the-model-knows-is-its-record"
   :seon.task/plan "Owner, 2026-11-08 (docs/decisions.md#what-the-model-knows-is-its-record-owner-2026-11-08): compact an agent by removing data on its record and the diffs recalculate; no turn 0 that is whole by rule; no new system; a pure function with arguments, not magic; the hiccup's diffs are a detail of the wire, not evals saved on the agent; correct without the cache; a render that changes re-renders the data; time travel shows a point's data with that point's renders. Words from the libraries: a point {:branch :commit :t} (Datahike's commit and t; seon.db/point, seon.db/at-commit), hiccup (what a component answers), diff (editscript's). Waits on Web's rename of :seon.render/html.
 
@@ -89,4 +86,57 @@ Measured: the diffs derived from consecutive basis commits equal the stored eval
 Deletes: the stored hiccup evals and seon.turn/show-page!'s insert; my.render/render-ctx, render-changes, redo-changes; seon.context/redo-tx, page-at, render-calls, render-eval?; seon.render/forms-moved where only redo used it, page-call, page-value, the walk's :shown; :seon.eval/page (dropped, no erase needed); the word page in these names; docs/render.md#a-redo-is-an-explicit-bust, and docs/render.md#the-render-is-an-eval rewritten; seon.agent-test/a-redo-is-drawn-from-the-page-as-of-each-t. seon.context/at-t stays (seon.root uses it).
 
 Proofs, red first: a restart with nothing moved sends nothing new, the request after it the one before plus the new eval; removing a turn changes only the diff that spans it; a render changed between two turns re-renders the history with the new code; the request built this way equals today's on a history with no render change; a cold build's cost at 10, 100 and 1,000 turns (seon.cost/proof)."
-  :seon.task/proofs #{}}]
+  :seon.task/proofs #{}}
+ {:seon.task/name "one-walk-per-view"
+  :seon.task/plan "Owner, 2026-11-08: \"do not split the rendering! … the agent is seeing what the user is seeing\"; \"I want this all done by defining render functions\"; \"We already know if ratom components need to be re-rendered … Don't invent a new system\"; \"everyone can render their own views and we are reusing them even across processes … The user pull includes the agent so we shouldn't redo work\"; \"Did you work with the context agent and agree on a plan for efficiently generating context, hiccup, diffs\".
+
+What exists (an independent audit of the code, 2026-11-08; docs/render.md):
+- One walker (seon.render/walker, flush!) reruns a component only when a ctx path or db datom it read moved.
+- Around it, up to five walks of one agent's tree: the agent's own (seon.repl/page-walk); root's kept seon.render.proc/branch-walk!, used when the process is busy or gone (2f6cae57d2); and cold draws for the debug page, seon_context and re-runs.
+- Four per-component change records (:unit-rev, step-units' :rev, :wire-at, :shown) plus a second read index in the render proc.
+- What the model was shown, kept in process memory: a restart resent the page, 14,269 to 18,608 chars on one small task.
+- A turn is one placed unit, so each eval resends the whole turn: 36,308 bytes sent for 24,821 chars of growth, one sample.
+
+The plan:
+1. **A view is the render of one entity's pull: an agent's, a user's, root's.** It is drawn by one walk, kept by one process:
+   - for a live agent, its own process, which already draws its page (seon.render.proc/ask-parts → seon.repl/render-ctx);
+   - for a user, root and an ended agent, root.
+   - A live agent's process works its run as one request, so it cannot answer an ask while it works (the 16 s lag fixed today by drawing from root's walk). So the agent's walk PUSHES: each commit it makes carries its walk's changed components with the :committed event the render proc already receives. The page is patched from that, and root's branch-walk! for a live agent goes.
+   - Pushed components are a cache keyed by the commit they were drawn at, never the truth (owner: \"correct always, the cache is only an optimization\"). A tab whose view lacks its branch's current commit (a push lost or late, the agent dead mid-push, a tab opened after) has that commit drawn cold by root, once, as seon.context/render does now; root keeps no second walk.
+   - An agent no tab watches pushes nothing, unless a user's own pull holds it; the agent draws page-only parts only while watched (measured 303 MB unwatched against 475 MB watched over 12 turns, docs/render.md#a-layout-places-its-lists).
+2. **A user's view holds its agents' views as components** keyed by render and entity. For a live agent, its components come from that agent's walk, through the same pushed changes, and are not drawn again. Reuse across processes is the push, not a store cache. A cache of rendered components in the store is NOT proposed: it would need a key over the render code, the entity and the datoms read, which is the per-component digest the owner rejected as a second system. Measure first how often root redraws what an agent's walk already drew; if rarely, drop it.
+3. **What the model reads is task seon.render/what-the-model-knows-is-its-record (Context, on main, 3a613208be):**
+   - diff(point k-1, point k), points from :seon.model-call/basis;
+   - pure in the points, so it is correct after a restart, a compaction or time travel;
+   - the live walk answers it in O(changed) as a cache keyed by the point; a miss derives the same bytes from the two commits;
+   - a render change re-renders the model's history from turn 1 on purpose;
+   - a past point is drawn with that point's render code, by any process running that commit's program. To verify: a process on that branch runs that commit's renders.
+4. **One change record per walk:** the component's revision. It is a counter local to its process, so it is the walk's cache and the page's patch key (a tab is live state), never the model's truth. `:unit-rev`, step-units' `{:rev}`, `:wire-at` and `:shown` go; the render proc's second read index goes for views whose walk is elsewhere.
+5. **Small structural fixes in the same walk:** a turn is a list, so an eval is an append; the duplicate renders fold to one per schema; `:seon.render/model` folds into hiccup; the debug page's latest reads the kept walk, and past turns are derived by point 3.
+
+Proofs, each red first:
+- **one new eval:** reruns its own component and its turn's, and sends one HTML append and one model edit, flat at 10 and 100 evals (seon.render-cost-test);
+- **a live agent's page while it works:** patched within its next commit, with no second walk of its branch in root;
+- **one push dropped:** the page still shows the branch's commit correctly;
+- **the push's cost:** bytes and ticks per commit flat at 10 and 100 evals; an unwatched agent pushes nothing;
+- **a restart with nothing moved:** sends the model nothing; compaction changes only the diff spanning a removed turn;
+- **a render var's form changing:** the page redraws that render's components; the model's history re-renders from turn 1;
+- **a cold derive's cost:** at 10, 100 and 1,000 turns (to beat: 296.6 M ticks for 42 turns, 229.3 M of it diffing commits; Optimization is landing jolt/fn-stats-at-end and a diff over given attributes, the attribute set taken from the walk's read index);
+- **a user's page holding an agent's view:** draws that agent's components once.
+
+Owners:
+- Context: 3, and the model printer;
+- Web: 1 (the push and the page side), 2, 4's page half, 5;
+- Optimization: the commit diff's cost.
+- Order: the hiccup rename (landing), Context's seon.context split into seon.ctx and its sub-namespaces, Web's model-render fold, then this.
+
+For the owner, one choice. Recommended by Web and Context: the agent's walk as the one walk, with a push (above). The alternative, root's walk as the one page walk and the agent keeping only the model's cache, is simpler to build but keeps two walks of one tree, the redone work the owner asked us to remove; with the cold-draw rule the push adds no correctness risk.
+
+Retires seon.render/a-users-walk-is-a-branch-walk (a user's kept walk beside branch walks), which point 1 and 2 replace."
+  :seon.task/proofs #{seon.render-cost-test/a-new-eval-sends-one-append-and-one-edit
+                      seon.render-test/a-working-agents-page-is-patched-by-its-push
+                      seon.render-test/a-dropped-push-still-shows-the-branchs-commit
+                      seon.render-cost-test/a-push-costs-what-changed
+                      seon.render-test/a-render-change-redraws-its-components
+                      seon.render-cost-test/a-cold-derive-costs-what-it-diffs
+                      seon.render-test/a-users-page-draws-an-agents-view-once}}]
