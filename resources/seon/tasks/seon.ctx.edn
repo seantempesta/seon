@@ -1,2 +1,19 @@
 [
+ {:seon.task/name "a-context-is-ordered-by-a-sort-key"
+  :seon.task/plan "Agreed by Context and Web, 2026-11-08, from the owner's rulings that day (\"is the entity id incremental? that seems like a terrible thing to rely on\"; \"lets see how far we can get with just keywords\"; \"We control what data is stored and where it is stored\"; the names are his). Not started: it waits on his go and his store erase.
+
+What's wrong: the order within an agent's turn rests on Datahike issuing ids and transactions in order on one branch: evals by eid (`seon.context/turn-members`), messages by the transaction that delivered them (`seon.context/first-delivered`), uncalled evals by eid between turns, and a window (`:limit` with `:reverse`) takes the newest n by eid. Nothing states it, so a merge, a copy or content-hashed ids break it silently. Neither Datahike nor Datomic orders a many-ref result (Web's reading of our fork's pull_api and Datomic's grammar).
+
+The change:
+1. Every item a context holds (a model call, a delivered message's copy on the branch, an eval of any origin) carries `:seon.ctx/of`, a ref to whose context holds it, and `:seon.ctx/sort-key`, issued by that context's process when it writes the item, from `seon.program/stable-places` (the mechanism `:form/order` uses): an insert moves no other, a re-run keeps its key, append takes the next gap. A message gets its key when the next turn takes it, so the model never meets it out of order. Keys are scoped by `:seon.ctx/of`, so two contexts' items on one branch are never compared.
+2. `:seon.eval/agent` and `:seon.model-call/agent` are replaced by `:seon.ctx/of`, not kept beside it: about 14 sites in src (seon.context, seon.turn, seon.repl, seon.render.ui, seon.task), the reverse joins in seon.facts.edn's agent, task and root patterns, about 100 test lines; a renamed stored attribute takes the store erase (the owner's go). `:seon.message/to` stays on main.
+3. A tuple `:seon.ctx/of+sort-key` (`:db/tupleAttrs`, `:db/index true`): a window is an rseek on it, newest first, then a pull of those members. Optimization measured in memory, newest 10 per owner: 4.1-5.4 k ticks, against 3.5-4.2 k for today's eid seek and 37-53 k for today's pull window, flat from 70 to 1,000 members and 1 to 50 owners; cold reads from LMDB not measured.
+4. The pattern states the order as data, a keyword only, never a function: `{[:seon.ctx/_of :as :items :sort-by :seon.ctx/sort-key] [*]}`, read by `seon.ctx`'s comparator for the ordered map it keeps and by the window seek. `:by` (a symbol's entity) is a different option and stays as is.
+5. One key, three uses: sort on read, window by seek, and Back and a past request cut at a key.
+
+Open, the owner's: whether the default order is declared on the member's schema (`:seon.ctx/sort-by` as a property, read by the comparator, the seek and a malli transformer for cold reads) or on each join, as above.
+
+Proofs, each red before the change: a reply's evals in sort-key order with their eids scrambled; a message sent mid-turn placed after that turn's evals; two contexts' items on one branch, each in its own order; a window of 10 over 1,000 items by sort key, its cost flat (seon.cost/proof); the request bytes unchanged on run 13's store copy once its items carry keys."
+  :seon.task/kind :work
+  :seon.task/proofs #{}}
 ]
