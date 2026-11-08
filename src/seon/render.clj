@@ -788,7 +788,7 @@
   [mv] (printable (into [] (mapcat (fn [[id was now]] (component-edits id was now))) mv)))
 
 (defn forms-moved
-  "What moved between two pages, {id form} before and after (`placed-hiccup`), as `moved` answers it: each component of after that differs, in its order, then each that left. See docs/render.md#a-redo-is-an-explicit-bust."
+  "What moved between two pages, {id form} before and after (`placed-hiccup`), as `moved` answers it: each component of after that differs, in its order, then each that left. See docs/render.md#a-change-is-edits-by-name."
   {:malli/schema [:=> [:cat [:maybe :map] :map] [:vector :any]]}
   [before after]
   (into (into [] (keep (fn [[id f]] (when (not= f (get before id)) [id (get before id) f]))) after)

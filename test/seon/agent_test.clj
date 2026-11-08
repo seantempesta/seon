@@ -1311,45 +1311,13 @@
     (is (= 42 (second (:value after))) "the run goes on: the next eval records")
     (is (nil? (:ex still)) "and Seon's own var is as it was")))
 
-;; docs/render.md#a-redo-is-an-explicit-bust: collection may have swept the commit a redo needs: the same datoms as of t, never a later page
+;; docs/storage.md#collection: collection may have swept the commit a page is drawn at: the same datoms as of t, never a later page
 (deftest a-page-whose-commit-is-gone-is-drawn-as-of-its-t
   (let [[at] (in-agent ["(let [db (seon.agent/db) gone (assoc-in db [:meta :datahike/parents] #{(random-uuid)}) t (:max-tx db)]
                            [(:max-tx (#'seon.ctx.wire/at-t gone t)) t (some? (:origin-db (#'seon.ctx.wire/at-t gone (dec t))))])"])
         [was t as-of?] (:value at)]
     (is (= t was) "the commit at t itself needs no walk")
     (is (true? as-of?) "past what collection kept, a db as of t")))
-
-;; docs/render.md#a-redo-is-an-explicit-bust: a diff removed leaves the next one standing on a page its reader was never shown; the redo
-;; draws what moved from the page as of each t, in place, and what still stands on what came before it is left byte for byte
-(deftest a-redo-is-drawn-from-the-page-as-of-each-t
-  (let [page-evals "(let [db (seon.agent/db)] (vec (sort-by #(parse-long (re-find #\"\\d+$\" (first %))) (for [e (datahike.api/q '[:find [?e ...] :where [?e :seon.eval/by \"seon\"]] db) :let [m (datahike.api/pull db '[:seon.eval/id :seon.eval/code :seon.eval/page :seon.eval/response :seon.eval/result] e)]] [(:seon.eval/id m) (:seon.eval/page m) (:value (seon.db/response-of db m))]))))"
-        move #(str "(do (swap! ctx assoc-in [:task :seon.task/plan] \"" % "\") (#'seon.turn/show-page!))")
-        rs (in-agent ["(#'seon.turn/show-page!)" (move "A plan that moved.") (move "A plan that moved again.") (move "A plan that moved a third time.")
-                      page-evals
-                      "(my.render/redo-changes)"
-                      ;; the second diff taken out of what the agent reads, as an agent does it
-                      "(let [es @ctx ids (sort (keys (:evals es))) by (fn [e] (get-in es [:evals e :seon.eval/by])) mine (filterv #(= \"seon\" (by %)) ids)] (swap! ctx update :evals dissoc (nth mine 2)) (get-in es [:evals (nth mine 2) :seon.eval/id]))"
-                      "(my.render/redo-changes)"
-                      "(my.render/redo-changes)"
-                      page-evals])
-        [_ _ _ _ before none removed redone again after] (mapv :value (vec rs))
-        page-of (into {} (map (juxt first second)) after)
-        by-id (into {} (map (juxt first last)) after)
-        [whole first-diff] (map last before)
-        [p0 p1 p2 p3] (map second before)
-        new-third (get by-id (first (nth before 3)))
-        new-p3 (get page-of (first (nth before 3)))]
-    (is (= [:components] (keys whole)) "the page whole first")
-    (is (= (:t p0) (:since p1)) "each diff stands on the one before")
-    (is (= (:t p1) (:since p2)))
-    (is (= [] none) "nothing broken: nothing redone")
-    (is (= (first (nth before 2)) removed) "the second diff is what was taken out")
-    (is (= [(first (nth before 3))] redone) "the one standing on it is redone, and only that")
-    (is (= [] again) "and then nothing is broken")
-    (is (= (:t p1) (:since new-p3)) "it stands on what its reader was shown")
-    (is (= (:t p3) (:t new-p3)) "and says the same page")
-    (is (str/includes? (pr-str (:edits new-third)) "a third time") "drawn from the page as of its t")
-    (is (= first-diff (get by-id (first (nth before 1)))) "what stood stays byte for byte")))
 
 ;; docs/render.md#the-render-is-an-eval: a wake is told what moved since the page it last showed, never the page again: a second whole page
 ;; costs about 4k tokens a wake
