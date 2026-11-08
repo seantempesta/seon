@@ -55,6 +55,15 @@
   every render reads is a page of it."
   [conn] (d/transact conn (doc/load-tx @conn "docs" (doc/pages (seon.config/checkout) "docs"))))
 
+(defn- un-example
+  "Text s with each id example ek made of an id of db (seon.ctx.session's in-example: seon.lib/id of the digest of ek and it)
+  written back as the id it was made of: how an example's records compare with the session's they copy."
+  [db ek s]
+  (reduce (fn [s x] (str/replace s (seon.lib/id (seon.lib/digest (str ek "/" x))) x)) s
+          (into [] (comp cat (filter string?)) [(d/q '[:find [?v ...] :where [_ :seon.eval/id ?v]] db)
+                                                (d/q '[:find [?v ...] :where [_ :seon.eval/call-id ?v]] db)
+                                                (d/q '[:find [?v ...] :where [_ :seon.message/id ?v]] db)])))
+
 (deftest each-thing-is-said-once
   (let [db (db-with-program)
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "Make `demo/f` double."
@@ -292,13 +301,13 @@
   (let [ev (fn [id value] {:seon.eval/id id :seon.eval/by "a1" :seon.eval/code (str "(" id ")") :seon.eval/response {:handle (symbol "result" id) :value value} :seon.eval/call-id (str "c-" id) :turn 1})
         ms (into [] (mapcat #(seon.fixtures/eval-messages {} %)) [(ev "e1" "E1") (ev "e2" "E2") (ev "e3" "E3")])]
     (is (= ["assistant" "tool" "assistant" "tool" "assistant" "tool"] (mapv :role ms)) "each eval its call and its response")
-    (is (= {:role "assistant" :content "" :tool-calls [{:id "eval-e1" :code "(e1)"}] :reply 1} (first ms)) "the call alone, naming its reply")
-    (is (= {:role "tool" :tool-call-id "eval-e1" :content "{:handle result/e1, :value \"E1\"}"} (second ms)))
+    (is (= {:role "assistant" :content "" :tool-calls [{:id "e1" :code "(e1)"}] :reply 1} (first ms)) "the call alone, naming its reply")
+    (is (= {:role "tool" :tool-call-id "e1" :content "{:handle result/e1, :value \"E1\"}"} (second ms)))
     (let [wire (seon.model/wire-messages true ms)]
       (is (= ["assistant" "tool" "tool" "tool"] (mapv :role wire)) "a reply's three evals are one assistant message, and each result a tool message")
-      (is (= ["eval-e1" "eval-e2" "eval-e3"] (mapv :id (:tool_calls (nth wire 0)))))
+      (is (= ["e1" "e2" "e3"] (mapv :id (:tool_calls (nth wire 0)))))
       (is (= ["(e1)" "(e2)" "(e3)"] (mapv #(get (clojure.data.json/read-str (get-in % [:function :arguments])) "code") (:tool_calls (nth wire 0)))))
-      (is (= ["eval-e1" "eval-e2" "eval-e3"] (mapv :tool_call_id (rest wire))) "each answers its own call")
+      (is (= ["e1" "e2" "e3"] (mapv :tool_call_id (rest wire))) "each answers its own call")
       (is (every? some? (map #(re-find (re-pattern (str "result/e" %)) (:content %2)) [1 2 3] (rest wire))) "each with its handle, in order")
       (is (not-any? #(contains? % :reply) wire) "the reply's number never reaches the wire")))
   (testing "a user's form is one user message carrying its response"
@@ -312,8 +321,8 @@
   (let [ev (fn [id by turn] {:seon.eval/id id :seon.eval/by by :seon.eval/intent "Read the pattern." :seon.eval/code "(:seon.ctx/pattern @ctx)"
                              :seon.eval/response {:handle (symbol "result" id) :value [:a]} :turn turn})
         ms (seon.fixtures/eval-messages {} (ev "e1" "root" 0))]
-    (is (= [{:role "assistant" :content "" :tool-calls [{:id "eval-e1" :code "(:seon.ctx/pattern @ctx)" :intent "Read the pattern."}]}
-            {:role "tool" :tool-call-id "eval-e1" :content "{:handle result/e1, :value [:a]}"}]
+    (is (= [{:role "assistant" :content "" :tool-calls [{:id "e1" :code "(:seon.ctx/pattern @ctx)" :intent "Read the pattern."}]}
+            {:role "tool" :tool-call-id "e1" :content "{:handle result/e1, :value [:a]}"}]
            ms)
         "a call made from the eval's own intent and code, answered by its response; turn 0 has no reply to name")
     (is (= ms (seon.fixtures/eval-messages {} (ev "e1" "anyone at all" 0))) "who asked is read by no one")
@@ -324,8 +333,8 @@
             wire (seon.model/wire-messages true conv)]
         (is (not-any? :reply (seon.fixtures/eval-messages {} (ev "e5" "root" 2))) "it names no reply")
         (is (= ["assistant" "tool" "assistant" "tool"] (mapv :role wire)) "two calls of two messages, not one folded into the other")
-        (is (= ["eval-e4"] (mapv :id (:tool_calls (nth wire 0)))) "the reply's message holds only its own call")
-        (is (= ["eval-e5"] (mapv :id (:tool_calls (nth wire 2)))))))
+        (is (= ["e4"] (mapv :id (:tool_calls (nth wire 0)))) "the reply's message holds only its own call")
+        (is (= ["e5"] (mapv :id (:tool_calls (nth wire 2)))))))
     (testing "an eval with no text is still one user message, as an outside agent's always was"
       (is (= 1 (count (seon.fixtures/eval-messages {} (dissoc (ev "e6" "outside" 3) :seon.eval/intent))))))))
 
@@ -580,7 +589,7 @@
     (is (not-any? :reasoning evals))
     (is (= ["assistant" "tool"] (mapv :role (seon.model/wire-messages true ms))) "one assistant message, its call in it")
     (is (= "Square it first." (:reasoning_content (first (seon.model/wire-messages true ms)))))
-    (is (= ["eval-e1"] (mapv :id (:tool_calls (first (seon.model/wire-messages true ms))))))
+    (is (= ["e1"] (mapv :id (:tool_calls (first (seon.model/wire-messages true ms))))))
     (is (not (contains? (first (seon.model/wire-messages false ms)) :reasoning_content)) "replay false leaves it out")
     (is (= [] (seon.fixtures/turn-messages {} {:seon.model-call/n 2 :seon.model-call/reply ""})) "a reply with neither text nor reasoning makes no message")))
 
@@ -622,7 +631,7 @@
     (let [wire (wire-without [])]
       (is (= [["I look." "think" ["(f 1)" "(f 2)" "(f 3)"]] ["Then." "more" ["(f 4)" "(f 5)"]] ["" "quiet" ["(f 6)"]]] (reply-shape wire)))
       (is (= ["assistant" "tool" "tool" "tool" "assistant" "tool" "tool" "assistant" "tool"] (mapv :role wire)))
-      (is (= ["eval-e1" "eval-e2" "eval-e3" "eval-e4" "eval-e5" "eval-e6"] (keep :tool_call_id wire)) "each call answered by a message of its own")))
+      (is (= ["e1" "e2" "e3" "e4" "e5" "e6"] (keep :tool_call_id wire)) "each call answered by a message of its own")))
   (testing "a reply's first call cut: its other calls stay on it, with its text and reasoning"
     (is (= [["I look." "think" ["(f 2)" "(f 3)"]] ["Then." "more" ["(f 4)" "(f 5)"]] ["" "quiet" ["(f 6)"]]] (reply-shape (wire-without ["e1"])))))
   (testing "a middle call cut"
@@ -813,9 +822,9 @@
         (is (= ["system" "user" "assistant" "tool"] (mapv :role r0)) "turn 0: the system prompt, what opens the session, then the page whole as an eval")
         (is (= ["system" "user" "assistant" "tool" "assistant" "assistant" "tool" "assistant" "tool"] (mapv :role r1)) (pr-str (mapv :role r1)))
         (is (= {:role "assistant" :content "I call f." :reasoning "why" :reply 1} (nth r1 4)) "the reply: its text and the reasoning as returned")
-        (is (= {:role "assistant" :content "" :tool-calls [{:id "eval-e2" :code "(f 1)"}] :reply 1} (nth r1 5)) "then its call")
-        (is (= [{:role "assistant" :content "I call f." :reasoning_content "why" :tool_calls [{:id "eval-e2" :type "function" :function {:name "eval" :arguments "{\"code\":\"(f 1)\"}"}}]}
-                {:role "tool" :content "{:handle result/e2, :value 1}" :tool_call_id "eval-e2"}]
+        (is (= {:role "assistant" :content "" :tool-calls [{:id "e2" :code "(f 1)"}] :reply 1} (nth r1 5)) "then its call")
+        (is (= [{:role "assistant" :content "I call f." :reasoning_content "why" :tool_calls [{:id "e2" :type "function" :function {:name "eval" :arguments "{\"code\":\"(f 1)\"}"}}]}
+                {:role "tool" :content "{:handle result/e2, :value 1}" :tool_call_id "e2"}]
                (subvec (seon.model/wire-messages true r1) 4 6)) "one assistant message on the wire")
         (is (= "{:handle result/e2, :value 1}" (:content (nth r1 6))) "the call's response, its recorded value printed as it is sent")
         (is (= r0 (subvec r1 0 4)) "the whole earlier request is the prefix: its page stays, appended")
@@ -1533,12 +1542,12 @@
             example (subvec (vec more) 0 close-at)
             db @conn
             original (mapcat second (seon.fixtures/tree-parts (:tree (seon.ctx/build db (pdb/eid db :seon.agent/key "b/src") :b)) db))
-            prefix #(str/replace (pr-str %) "example-abc-" "")]
+            prefix #(un-example db "example/abc" (pr-str %))]
         (is (= "system" (:role sys)))
         (is (= {:role "user" :content "<session id=\"example/abc\" kind=\"example\" from=\"seon\">\nA finished session of another task, shown for how its work was done; not yours. Its request:\nMake h."} open) "the example's opening and its request")
-        (is (= (prefix (vec original)) (prefix (vec example))) "its records, printed as the agent's own are, call ids prefixed")
+        (is (= (prefix (vec original)) (prefix (vec example))) "its records, printed as the agent's own are, each id the example's")
         (is (= ["assistant" "tool" "user" "assistant"] (mapv :role example)) "an eval's pair, a message, a reply")
-        (is (= "eval-example-abc-s1" (get-in example [0 :tool-calls 0 :id]) (:tool-call-id (second example))) "every call is followed by its tool message")
+        (is (= (seon.lib/id (seon.lib/digest "example/abc/s1")) (get-in example [0 :tool-calls 0 :id]) (:tool-call-id (second example))) "every call is followed by its tool message")
         (is (= {:role "user" :content "</session>"} (nth more close-at)))
         (is (= {:role "user" :content "<session id=\"a1\" from=\"seon\">\nYour own session: the work you are asked to do."} (nth more (inc close-at))) "then the agent's own session")
         (is (str/includes? (:content (peek (:messages r0))) "Make g.") "then the page, as the call Seon made and its answer")
@@ -1593,9 +1602,9 @@
         (ts/test-branch!
           (fn [_ fresh]
             (doseq [t (clojure.edn/read-string (pr-str tx))] (d/transact fresh t))
-            (is (= (str/replace (pr-str (names @conn "b/src")) "example-abc-" "") (str/replace (pr-str (names @fresh "example/abc")) "example-abc-" ""))
+            (is (= (pr-str (names @conn "b/src")) (un-example @conn "example/abc" (pr-str (names @fresh "example/abc"))))
                 "the example draws the same messages as the original's records")
-            (is (= ["example/abc/s1" "example/abc/m1" (seon.lib/call-id "example/abc" 2)] (mapv (comp second first) (seon.fixtures/tree-parts (:tree (seon.ctx/build @fresh (pdb/eid @fresh :seon.agent/key "example/abc") :b)) @fresh)))
+            (is (= [(seon.lib/id (seon.lib/digest "example/abc/s1")) (seon.lib/id (seon.lib/digest "example/abc/m1")) (seon.lib/call-id "example/abc" 2)] (mapv (comp second first) (seon.fixtures/tree-parts (:tree (seon.ctx/build @fresh (pdb/eid @fresh :seon.agent/key "example/abc") :b)) @fresh)))
                 "ids re-keyed under the example, in the order they ran, a model call's `<key>/<n>` as any agent's")))))))
 
 (deftest the-page-draws-its-tasks-examples-in-the-conversation
@@ -1642,8 +1651,8 @@
       (let [{:keys [r0 r1]} (no-example-requests! conn)
             ms (:messages r1)]
         (is (= (:messages r0) (subvec ms 0 (count (:messages r0)))) "the first request is the prefix of the next")
-        (is (= [{:role "assistant" :content "" :tool-calls [{:id "eval-e0" :code "(+ 5 1)" :intent "Add."}] :reply 1}
-                {:role "tool" :tool-call-id "eval-e0" :content "{:handle result/e0, :value 6}"}
+        (is (= [{:role "assistant" :content "" :tool-calls [{:id "e0" :code "(+ 5 1)" :intent "Add."}] :reply 1}
+                {:role "tool" :tool-call-id "e0" :content "{:handle result/e0, :value 6}"}
                 {:role "user" :content "{:from \"owner\", :body \"Go on.\"}"}
                 {:role "assistant" :content "Thinking." :reply 2}]
                (subvec ms (count (:messages r0)) (+ 4 (count (:messages r0)))))
@@ -1726,10 +1735,10 @@
             ms (:messages r0)
             calls (keep #(get-in % [:tool-calls 0 :id]) ms)
             tool-text (fn [id] (:content (first (filter #(= id (:tool-call-id %)) ms))))]
-        (is (= ["eval-example-abc-s1" "eval-example-def-s1" "eval-p100"] (vec calls)) "no call id is another's: each example's own, then the page's")
+        (is (= [(seon.lib/id (seon.lib/digest "example/abc/s1")) (seon.lib/id (seon.lib/digest "example/def/s1")) "p100"] (vec calls)) "no call id is another's: each example's own, then the page's")
         (is (= (vec calls) (vec (keep :tool-call-id ms))) "every call is followed by its tool message")
-        (is (string? (tool-text "eval-example-abc-s1")))
-        (is (string? (tool-text "eval-example-def-s1")))))))
+        (is (string? (tool-text (seon.lib/id (seon.lib/digest "example/abc/s1")))))
+        (is (string? (tool-text (seon.lib/id (seon.lib/digest "example/def/s1")))))))))
 
 (defn- recorded-form
   "A request's messages as the recording holds them: the wire's messages (seon.model/wire-messages, what the provider is sent),
@@ -1833,15 +1842,15 @@
   ;; a new eval reusing a call id read as one call answered twice: the wire id is the eval's own
   (let [[db] (tree-world {:id "e1" :call-id "call_1"} {:id "e2" :call-id "call_1"})
         ms (wire-of-world db)]
-    (is (= ["eval-e1" "eval-e2"] (keep #(get-in % [:tool-calls 0 :id]) ms)))
-    (is (= ["eval-e1" "eval-e2"] (keep :tool-call-id ms)))))
+    (is (= ["e1" "e2"] (keep #(get-in % [:tool-calls 0 :id]) ms)))
+    (is (= ["e1" "e2"] (keep :tool-call-id ms)))))
 
 (deftest an-eval-of-another-hand-comes-after-the-replys-calls
   ;; a reply node holds its evals, so one of another hand made between them cannot split the reply on the wire
   (let [[db] (tree-world {:id "e1" :call-id "c1"} {:id "e2" :by "outside"} {:id "e3" :call-id "c3"})
         wire (seon.model/wire-messages true (wire-of-world db))
         reply (first (filter #(seq (:tool_calls %)) wire))]
-    (is (= ["eval-e1" "eval-e3"] (mapv :id (:tool_calls reply))) "both its evals in the one assistant message, a call each")
+    (is (= ["e1" "e3"] (mapv :id (:tool_calls reply))) "both its evals in the one assistant message, a call each")
     (is (= ["(e1)" "(e3)"] (mapv #(get (clojure.data.json/read-str (:arguments (:function %))) "code") (:tool_calls reply))))
     (is (str/includes? (:content reply) "I look."))
     (is (str/includes? (:content (last wire)) "{:by \"outside\" :code \"(e2)\"") "the other hand's after it")))
@@ -1853,7 +1862,7 @@
         after (wire-of-world (d/db-with db [{:seon.eval/id "e1" :seon.eval/response {:handle 'result/e1 :value 42}}]))
         at (first (keep-indexed (fn [i [a b]] (when (not= a b) i)) (map vector before after)))]
     (is (= (count before) (count after)) "no message more")
-    (is (= [:same-prefix "tool" "eval-e1"] [(when (= (subvec before 0 at) (subvec after 0 at)) :same-prefix) (:role (nth after at)) (:tool-call-id (nth after at))]) "its own result moved")
+    (is (= [:same-prefix "tool" "e1"] [(when (= (subvec before 0 at) (subvec after 0 at)) :same-prefix) (:role (nth after at)) (:tool-call-id (nth after at))]) "its own result moved")
     (is (str/includes? (:content (nth after at)) "42"))
     (is (= (subvec before (inc at)) (subvec after (inc at))) "and nothing after it")))
 
@@ -1968,7 +1977,7 @@
             (is (not-any? #(contains? (:seon.eval/response e) %) [:value :ex :out :err :forms]) "and not the response's")
             (is (= (expected id) sent) (str id " reads as it always did"))
             (is (= sent (print/response-text r)) (str id " as its live response prints"))
-            (is (= {:role "tool" :tool-call-id (str "eval-" id) :content sent}
+            (is (= {:role "tool" :tool-call-id id :content sent}
                    (second (seon.fixtures/eval-messages {:db db} (assoc e :turn 1)))) (str id " and its tool message is that text"))))))))
 
 (deftest the-status-says-the-next-step-from-the-tasks-data
