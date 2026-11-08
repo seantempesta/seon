@@ -1001,7 +1001,7 @@
                             :code (spawn-kept-code kept
                                                    (str (src k "(defn h [] 1)")
                                                         " (datahike.api/branch! (:conn sys) m b)"
-                                                        " (let [bc (pdb/connect (assoc (:cfg sys) :branch b))]"
+                                                        " (let [bc (seon.db/connect (assoc (:cfg sys) :branch b))]"
                                                         "   (datahike.api/transact bc [{:seon.root/id :root :seon.root/boot \"an-earlier-boot\"}]) (datahike.api/release bc))"
                                                         " " (src g "(defn g [] 7)")
                                                         " " (src k "(defn h [] 2)"))
