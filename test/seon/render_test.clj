@@ -2932,7 +2932,8 @@
 (deftest a-request-draws-its-search-and-a-new-query-redraws-it
   ;; the owner, 2026-11-01: context is data the agent's ctx holds, drawn by the walk's renders (hiccup for the page,
   ;; data for the model); a search is such data (its swap! on ctx: seon.ctx-test/a-search-is-a-member-a-swap-adds-and-changes).
-  ;; measured 2026-11-01: a request's search ranked a changed item first in 41% of 49 tasks from Seon's history
+  ;; measured 2026-11-01: a request's search ranked a changed item first in 41% of 49 tasks from Seon's history;
+  ;; drawn once its query has a vector (owner, 2026-11-08)
   (ts/test-branch!
     (fn [_ conn]
       (d/transact conn ((my.test/code 'app.srch (str "(ns app.srch)\n"
@@ -2944,13 +2945,18 @@
       (let [a (:db/id (d/entity @conn [:seon.agent/key "b/find"]))
             draw #(seon.fixtures/drawn-parts @conn (seon.ctx/build @conn a (:seon.agent/branch (d/entity @conn a))))
             search-part (fn [parts] (some (fn [[id v]] (when (str/includes? (str id) "searched") v)) parts))
+            s (:db/id (d/entity @conn [:seon.search/id "demo/find/request"]))
+            unembedded (search-part (draw))
+            ;; its query's vector, as main's vectors proc writes it (seon.vector/tx-data)
+            _ (d/transact conn (seon.vector/tx-data [s] [(:tx (first (d/datoms @conn :eavt s :seon.search/query)))] [(vec (repeat 768 0.036))] "m"))
             before (search-part (draw))]
-        (is (some? before) "the request's search is a part of the page")
+        (is (nil? unembedded) "a query with no vector yet draws nothing: words alone are no search the page shows")
+        (is (some? before) "the request's search is a part of the page once its query has a vector")
         (is (str/includes? (pr-str before) "app.srch/untaken-entries") (str "it finds what the request's words name: " (pr-str before)))
         (is (= :h3 (first (nth before 2))) "one compact hiccup, headed, the page's and the model's alike")
         (is (not (str/includes? (pr-str before) "has not taken")) "a hit is its name: no first sentence of its doc")
-        (is (str/includes? (pr-str before) "no vector yet") "a query not yet embedded says it was searched by its words")
-        (let [s (:db/id (d/entity @conn [:seon.search/id "demo/find/request"]))]
+        (is (not (str/includes? (pr-str before) "more:")) "no line of the hits left out, whose count would move each turn")
+        (do
           (d/transact conn [{:db/id s :seon.search/query "a tile of the dashboard"}])
           (is (str/includes? (pr-str (search-part (draw))) "app.srch/render-tile") "a new query: the part draws its hits"))))))
 
