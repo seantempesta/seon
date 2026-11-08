@@ -12,6 +12,9 @@
 # With bin/prove (both or checks), the check steps to run go beside the shards (bin/check --steps).
 # bin/test --plan|--shard|--store-steps|--health ... are test/test_runner.clj's parts (bin/prove's; --health is bin/check's health step).
 # On the runtime bin/build made (target/jolt/jolt), with dependencies cached in target/home.
+# background jobs (shards, the check steps) keep the run's own nice: zsh's BG_NICE renices each, which a niced run
+# may not do ("nice(5) failed: operation not permitted" on every job)
+setopt NO_BG_NICE
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 "$ROOT/bin/ports" --write   # the port keys under their current names (bin/ports)
 JOLT=$ROOT/target/jolt/jolt
