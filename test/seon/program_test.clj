@@ -795,7 +795,7 @@
     (is (= (before 'app.pt-sk-test/names-test) (other-entry 'app.pt-sk-test/names-test)) "and an edit to another entry moves neither")))
 
 (deftest a-render-a-schema-entry-declares-is-in-its-tests-reach
-  ;; a schema entry's properties name its renders (:seon.render/html): a test reaching the entry reaches
+  ;; a schema entry's properties name its renders (:seon.render/hiccup): a test reaching the entry reaches
   ;; them, so a render's body edited moves the test (it kept its digest, and a red recorded while the render
   ;; was unfinished was later marked flaky at the same digest)
   (let [schema (fn [db k form] (d/db-with db [{:schema/key k :schema/form form}]))
@@ -803,7 +803,7 @@
                        'user "(ns app.pt-sr-test (:require [clojure.test :refer [deftest is]]))"
                        'app.pt-sr-test "(deftest names-test (is (= 1 (count [:app.sr/k]))))"
                        'app.pt-sr-test "(deftest other-test (is (= 1 1)))")
-               (schema :app.sr/k "[:map {:seon.render/html app.pt-sr/show}]"))
+               (schema :app.sr/k "[:map {:seon.render/hiccup app.pt-sr/show}]"))
         dg (fn [db] (ts/reach-digests db {:env "e" :tree "t" :config {}}))
         before (dg db)
         edited (dg (record db 'app.pt-sr "(defn show [x] (str \"<\" x \">\"))"))]

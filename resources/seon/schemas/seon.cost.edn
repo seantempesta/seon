@@ -56,7 +56,7 @@
  :seon.cost/over [:map {:closed true} [:dim :seon.cost/dim] [:n pos-int?] [:ratio [:double {:min 0.0}]]]
  ;; how a measured dimension grew over the sizes, against what the estimate's growth allows
  :seon.cost/fit [:map {:closed true} [:dim :seon.cost/dim] [:exponent :double] [:allowed :double]]
- :seon.cost/verdict [:map {:closed true :seon.render/html seon.render.ui/verdict-box}
+ :seon.cost/verdict [:map {:closed true :seon.render/hiccup seon.render.ui/verdict-box}
                      [:ok? :boolean]
                      ;; a size whose measure exceeds its slack times the estimate
                      [:over [:vector {:gen/max 3} :seon.cost/over]]

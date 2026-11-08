@@ -57,7 +57,7 @@
                  [:seon.task/gate-unread {:optional true} :seon.task/gate-unread] [:seon.task/changed {:optional true} :seon.task/changed]
                  [:seon.task/conflicts {:optional true} [:vector :seon.merge/conflict]] [:seon.task/unmerged {:optional true} [:set :string]]]
  ;; its plan and proofs accumulated along :needs (derived by the reader)
- :seon.task/task [:and {:seon.render/html seon.render.ui/task-box} :seon.task/own [:map [:seon.task/accumulated [:map [:plan :string] [:proofs :seon.task/proofs]]]]]
+ :seon.task/task [:and {:seon.render/hiccup seon.render.ui/task-box} :seon.task/own [:map [:seon.task/accumulated [:map [:plan :string] [:proofs :seon.task/proofs]]]]]
  ;; the environment an agent works in; desired (the task's) = observed (the agent's), or restart
  :seon.task/env [:map {:closed true} [:branch :keyword] [:model [:maybe :string]] [:max-turns pos-int?]
                  ;; an outside run's: the client that attached it (seon.server/held)

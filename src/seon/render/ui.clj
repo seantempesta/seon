@@ -208,7 +208,7 @@
            (let [src (get sources k)]
              [:div {:title (str (prop k :description))}
               [:dt (name k)]
-              [:dd (render/html {:budget (part)} v)
+              [:dd (render/hiccup {:budget (part)} v)
                (when-let [u (prop k :seon.config/unit)] [:span {:class "muted"} " " u])
                (when src [:span {:class "cfg-source muted"} (str " from " src)])]]))])]]))
 
@@ -379,7 +379,7 @@
                            (cond (nil? b) n (contains? b n) [:span {:class "warn"} (str n " (not done)")] :else (str n " (done)"))))])
       [:p {:class "muted"} (str (count proofs) (if (= 1 (count proofs)) " proof: " " proofs: ")) (str/join " " (map str (sort-by str proofs)))]
       (when-let [ev (:seon.task/evidence t)]
-        [:div {:class "muted"} "evidence " (render/print-html {:budget (config/value :seon.config.render/part-budget)} ev)])]))
+        [:div {:class "muted"} "evidence " (render/print-hiccup {:budget (config/value :seon.config.render/part-budget)} ev)])]))
 
 (defn verdict-box
   "A cost verdict (seon.cost/verdict-lines, the agent's words too): red when a size is over
@@ -402,7 +402,7 @@
                   (for [d dims :let [m (get measured d) x (get expected d)]]
                     [:td {:class (when (and m x (pos? x) (> (/ m x) 3)) "bad")}
                      (str (group3 m) " / " (group3 x) (when (and m x (pos? x)) (str " (" (fmt2 (/ m x)) "×)")))])])]]
-      (render/html (assoc opts :schema :seon.cost/verdict) verdict)]))
+      (render/hiccup (assoc opts :schema :seon.cost/verdict) verdict)]))
 
 (defn agent-input
   "The input at the top of an agent's page, each through root's requests (the server's ops send
@@ -499,7 +499,7 @@
        (when-not (str/blank? (:intent r)) [:p {:class "whitespace-pre-wrap text-text-300 italic"} (plain (:intent r) (form-budget))])
        (when (:code r) (code (:code r) (form-budget)))
        (if (map? (:ex r))
-         (render/html (cond-> {} (:handle r) (assoc :handle (list :ex (:handle r)))) (:ex r))
+         (render/hiccup (cond-> {} (:handle r) (assoc :handle (list :ex (:handle r)))) (:ex r))
          (if data?
            ;; a value stored as data renders as structure, the printer's hiccup under its handle
            ;; a value of a schema with its own render is that value; any other, the response less what the row shows beside it
@@ -507,7 +507,7 @@
              [:div {:class "flex flex-col gap-1 text-text-200"}
               ;; drawn by the html render of the schema the record kept (the value's metadata does not survive the store),
               ;; as the live response is: a prove's run by seon.render.ui/proved, not as a map
-              [:div {:class "seon-row"} [:span {:class "muted"} "⇒"] (render/html (cond-> {:handle (:handle r)} (:seon.eval/schema e) (assoc :schema (:seon.eval/schema e))) v)]
+              [:div {:class "seon-row"} [:span {:class "muted"} "⇒"] (render/hiccup (cond-> {:handle (:handle r)} (:seon.eval/schema e) (assoc :schema (:seon.eval/schema e))) v)]
               ;; each cut opened: what its form reads, from the record, under that form (seon.web/open-form read it)
               (for [f (:opened opts) :let [form (edn/read-string f)]]
                 [:div {:class "seon-row"}
@@ -515,11 +515,11 @@
                  [:button {:type "button" :class "text-text-500 font-mono text-left" :data-seon-form f :title "close"
                            (keyword "data-on:click") (str "@post('/open?view=' + el.closest('[data-view]').dataset.view + '&unit=' + "
                                                           "encodeURIComponent(el.closest('li[id]').id + '/' + el.dataset.seonForm) + '&open=false')")} f]
-                 (render/html {:handle form} (print/read-rest form (:handle r) v))])])
+                 (render/hiccup {:handle form} (print/read-rest form (:handle r) v))])])
            (if-let [v (when (and basis (:db opts)) (context/basis-value (:db opts) e))]
              ;; a value recorded as its basis (@ctx): rendered from what the branch holds at it
              [:div {:class "flex gap-2 text-text-200"} [:span {:class "muted"} "⇒"]
-              (render/html {:as :block :schema (:seon.eval/schema e) :handle (:handle r) :db (:db opts)} v)]
+              (render/hiccup {:as :block :schema (:seon.eval/schema e) :handle (:handle r) :db (:db opts)} v)]
              [:pre {:class "text-text-200"} [:span {:class "muted"} "⇒ "] (plain (or (:text r) "") (part))])))
        [:div {:class "flex flex-wrap gap-3 text-2xs text-text-500"}
         (cost-line r)
@@ -625,7 +625,7 @@
        (for [[c n rows] cs :let [id (str "pc-" (name c)) shown? (or (nil? open) (contains? open id))]]
          [:details (cond-> (toggle id) (and open shown?) (assoc :open true))
           [:summary {:class "cursor-pointer"} (str (kname c) " " n)]
-          (when shown? (for [r (sort-by #(if (false? (:open? %)) 1 0) rows)] (render/html {:schema :seon.problems/row} (assoc r :class c))))]))]))
+          (when shown? (for [r (sort-by #(if (false? (:open? %)) 1 0) rows)] (render/hiccup {:schema :seon.problems/row} (assoc r :class c))))]))]))
 
 (defn problems-model
   "The problems report as the model is sent it (the declared model render of :seon.problems/report):
@@ -663,7 +663,7 @@
 (defn ctx
   "The agent's record, @ctx (the declared html render of :seon.ctx/ctx), as one block: its
   environment on a line, then a row per key, each value by the render its key's schema declares
-  (render/html with :schema the key), else the one printer's structure. Drawn where its renders
+  (render/hiccup with :schema the key), else the one printer's structure. Drawn where its renders
   are: in the agent, under its branch's schemas, so a render the branch defines draws its key
   (seon.repl/render-ctx); anywhere else, by main's. Beside each attribute, who made it as of t
   (seon.ctx/made-by): the eval whose code wrote it, else the branch it came from when not this one,
@@ -678,7 +678,7 @@
                        (when-let [{:seon.tx/keys [eval merged] b :seon.tx/branch} (binding [datahike.index.interface/*reads* nil] (seon.ctx/made-by at (:db/id c) k))]
                          (str/join " · " (remove nil? [eval (when (and b (not= b branch)) (str "from " b)) (when merged (str "merged from " merged))])))))
         handle (:handle opts)
-        cell (fn [k v] (render/html (cond-> {:schema (when (qualified-keyword? k) k)} handle (assoc :handle (list k handle))) v))]
+        cell (fn [k v] (render/hiccup (cond-> {:schema (when (qualified-keyword? k) k)} handle (assoc :handle (list k handle))) v))]
     (if (= :inline (:as opts))
       [:span {:class "font-mono"} (str "ctx " branch " t " t ", " (count ks) " keys")]
       [:div {:class "flex flex-col gap-1 border border-base-700 rounded p-2 text-xs"}
@@ -1237,7 +1237,7 @@
   [{c :seon.ctx/ctx} k]
   [:section
    [:h2 {:class "kicker"} (kname k)]
-   (render/html {:schema k} (ratom/realize (get c k)))])
+   (render/hiccup {:schema k} (ratom/realize (get c k)))])
 
 (defn- added-keys
   "The keys the agent added to ctx c: any qualified key outside its own :seon.agent/* attributes,
@@ -1312,7 +1312,7 @@
       (-> e (assoc :seon.eval/response (pdb/response-of db e)) (dissoc :seon.eval/result)))))
 
 (defn eval-glance
-  "What came of an eval, in the chat with no click (a component over ctx and the db, for the page alone): its value through the one render (render/html: the render it has, else the value printer), whole once its step is opened; or, closed, what went wrong on a line, the opened step having the rest. See docs/render.md#a-value-draws-itself."
+  "What came of an eval, in the chat with no click (a component over ctx and the db, for the page alone): its value through the one render (render/hiccup: the render it has, else the value printer), whole once its step is opened; or, closed, what went wrong on a line, the opened step having the rest. See docs/render.md#a-value-draws-itself."
   {:seon.render/style ".eval-glance { margin: 0.25rem 0 0.25rem 1rem; min-width: 0; overflow-x: auto; font-size: 0.75rem; }\n.eval-item:has(> details[open]) .eval-glance-line { display: none; }" :seon.render/for "page" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db] [:at [:vector :any]]]]] :any]}
   [{c :seon.ctx/ctx db :seon.db/db at :at}]
   (when-let [e (eval-shown c db at)]
@@ -1328,7 +1328,7 @@
         failed [:div [:span {:class "eval-glance-line text-error"} (print/line (or (:seon.error/message failed) failed) (config/value :seon.config.render/line-budget) nil)]]
         ;; a nil beside output is the output's whole answer (clojure.repl/source prints and answers nil)
         (and (contains? r :value) (not (and (nil? v) (or (ratom/realize out) (ratom/realize err) (seq (ratom/realize warnings))))))
-        [:div (render/html (cond-> {:budget budget :handle handle :db db} k (assoc :as :block :schema k)) whole)]))))
+        [:div (render/hiccup (cond-> {:budget budget :handle handle :db db} k (assoc :as :block :schema k)) whole)]))))
 
 (defn- step-tools
   "An opened step's buttons, for a live agent (the page's stylesheet shows them only beside its REPL's input, so no step is drawn again as its status moves): run it again in its place,
@@ -1382,10 +1382,10 @@
        ;; each by the one render under the value's budget; a cut reads the rest through its key of the handle
        (for [[label k s] printed]
          [:div {:class "seon-row"} [:span {:class (if (#{:err :warnings} k) "text-warning" "muted")} label]
-          (render/html {:budget (budget s) :handle (when handle (list k handle))} (whole s))])
+          (render/hiccup {:budget (budget s) :handle (when handle (list k handle))} (whole s))])
        (when err
          [:div {:class "text-error"} "✗ " (:seon.error/message err)
-          (render/html {:budget (budget err) :handle handle} (whole (dissoc err :seon.error/message)))])])))
+          (render/hiccup {:budget (budget err) :handle handle} (whole (dissoc err :seon.error/message)))])])))
 
 (defn proved
   "A prove's run as its eval's tile draws it (the declared html render of :seon.test/proved, from
@@ -1399,11 +1399,11 @@
         died (into (sorted-set-by #(compare (str %1) (str %2))) (some-> run proofs/died))]
     [:section [:h2 "prove"]
      ;; its one line, by the one printer's hiccup: a marked text is drawn as itself, never its map
-     (render/html {} (:value (render/model (with-meta r {:seon.render/schema :seon.test/proved}))))
+     (render/hiccup {} (:value (render/model (with-meta r {:seon.render/schema :seon.test/proved}))))
      (when (seq (:proofs r))
        [:ul (for [[p s] (sort-by (comp str key) (:proofs r))] [:li [:code (str p)] " " (name s)])])
      (for [[t fs] (sort-by (comp str key) failures) :when (not (died t))]
-       [:div [:p [:code (str t)]] (render/html {} (first fs))])
+       [:div [:p [:code (str t)]] (render/hiccup {} (first fs))])
      (when (seq died) [:p "died: " (for [t died] [:code (str t) " "])])]))
 
 (defn- id-set
@@ -1518,7 +1518,7 @@
                  [:li
                   (if first
                     [:details [:summary {:class "cursor-pointer text-text-400"} line " " [:code (print/line (or (:actual first) (:message first)) (config/value :seon.config.render/line-budget) nil)]]
-                     (render/html {} first)]
+                     (render/hiccup {} first)]
                     [:span {:class "text-text-400"} line])]))]])]))))
 
 (defn system-message
@@ -1852,7 +1852,7 @@
       (str/join " " (remove nil? [(if (pos? running) (str running " running.") "Nothing running.")
                                   (if (pos? needs) (str needs " " (if (= 1 needs) "needs" "need") " you.") "Nothing needs you.")]))]
      (when (pos? held) [:p {:class "seon-note"} (str held (if (= 1 held) " task" " tasks") " not released yet.")])
-     (render/html {:schema :seon.root/root-fact} (relevant :seon.root/root-fact c))]))
+     (render/hiccup {:schema :seon.root/root-fact} (relevant :seon.root/root-fact c))]))
 
 (defn problems-tile
   "Main's open problems (a component over root's ctx, its :health: the report the render proc keeps
@@ -1871,11 +1871,11 @@
         total (fn [r] (reduce + 0 (map :n (vals (:classes r)))))]
     [:section [:h2 "problems"]
      (when h
-       (list (render/html {:schema :seon.problems/report} (of (complement upkeep)))
+       (list (render/hiccup {:schema :seon.problems/report} (of (complement upkeep)))
              (when (pos? (total (of upkeep)))
                [:details {:data-preserve-attr "open"}
                 [:summary {:class "seon-note cursor-pointer"} (str "Upkeep · " (total (of upkeep)))]
-                (render/html {:schema :seon.problems/report} (of upkeep))])))]))
+                (render/hiccup {:schema :seon.problems/report} (of upkeep))])))]))
 
 (defn process-tile
   "Root's process (a component over root's ctx, its :process: the render proc's numbers of the
@@ -2055,12 +2055,12 @@
   revision, so the render proc sends one only when its output changed, and a new one into its list
   where its walk placed it (an append). opts {:units :view :input :caption :tab}; id, the page's
   focus; tab, which of its tabs it is (top-bar)."
-  {:malli/schema [:=> [:cat :map :any] [:map [:seon.render/html :any] [:seon.render/units [:vector :map]]]]}
+  {:malli/schema [:=> [:cat :map :any] [:map [:seon.render/hiccup :any] [:seon.render/units [:vector :map]]]]}
   [{:keys [units view input caption tab]} id]
   (let [in (fn [sel] (filterv #(= sel (:container %)) units))
         unit (fn [u] {:id (:id u) :input (cond-> {:rev (:rev u)} (:own? u) (assoc :own? true)) :html (:html u) :container (:container u)})
         side? (and (not= :debug tab) (boolean (some #(#{"#p-task" "#p-tiles"} (:container %)) units)))]
-    {:seon.render/html
+    {:seon.render/hiccup
      [:div {:id "app" :class "seon-page" :data-view view}
       (top-bar id tab)
       ;; the agents on the left, the chat large in the middle, what is rendered in blocks on the right, each scrolling on
@@ -2127,7 +2127,7 @@
   :origin}] :at e-or-:latest :to-come? b :gone e-chosen-but-no-request-of-the-branch}), previous, next and latest moving the view (/at), and the one
   request shown (turn: a unit, :seon.render/debug-turn); for root, which has no model turn, the context it
   reads now (context: a unit, :seon.render/root-context). See docs/render.md#the-debug-page-is-the-wire-request."
-  {:malli/schema [:=> [:cat :any [:maybe :map] [:maybe :map] [:maybe :map]] [:map [:seon.render/html :any] [:seon.render/units [:vector :map]]]]}
+  {:malli/schema [:=> [:cat :any [:maybe :map] [:maybe :map] [:maybe :map]] [:map [:seon.render/hiccup :any] [:seon.render/units [:vector :map]]]]}
   [focus strip turn context]
   (let [{:keys [label] :as id} (focus-of focus)
         view (view-param (if (= :root focus) [:debug :root] [:debug (:view id)]))
@@ -2139,7 +2139,7 @@
         btn (fn [on? to label] [:button {:type "button" (keyword "data-on:click") (go to)
                                          :class (str "rounded px-2 py-0.5 tabular-nums " (if on? "bg-signal text-base-950" "bg-base-800 text-text-300 hover:text-text-50"))
                                          :aria-current (when on? "step")} label])]
-    {:seon.render/html
+    {:seon.render/hiccup
      [:div {:id "app" :class "mx-auto flex max-w-screen-xl flex-col gap-3 p-3 sm:p-4"}
       (top-bar focus :context)
       [:header {:class "seon-stack"}
@@ -2308,7 +2308,7 @@
          (for [{:keys [role band n]} shares]
            [:span {:class "inline-flex items-center gap-1.5 tabular-nums"} [:span {:class (str "inline-block h-2.5 w-2.5 " band)}]
             (str role " " (long (Math/round (/ (* 100.0 n) (max 1 est)))) "% " (print/tokens-text n))])]])
-     (when error [:div {:class "rounded border border-error p-2"} (render/html {} error)])
+     (when error [:div {:class "rounded border border-error p-2"} (render/hiccup {} error)])
      (when swept?
        [:p {:class "text-warning"} "This turn's commit is gone from the store (seon.db/retain!), so this is drawn from the branch as it is now, not as it was sent."])
      (when (and differs? (not swept?))

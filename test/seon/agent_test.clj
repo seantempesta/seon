@@ -2767,7 +2767,7 @@
   ;; once, so its page is drawn by root from its branch and never waits
   (let [n "(count (datahike.api/datoms (seon.agent/db) :aevt :seon.eval/id))"
         [_ _ swapped before drawn after gone]
-        (in-agent #(vector "(my.schema/register! :lab.ctx/steps '[:vector {:seon.render/html lab.ui/steps} :string])"
+        (in-agent #(vector "(my.schema/register! :lab.ctx/steps '[:vector {:seon.render/hiccup lab.ui/steps} :string])"
                    "(ns lab.ui) (defn steps \"The steps, numbered.\" {:malli/schema [:=> [:cat :map [:vector :string]] :any]} [_ v] [:ol (for [s v] [:li s])])"
                    "(swap! seon.ctx/ctx assoc :lab.ctx/steps [\"read the plan\" \"write the test\"])"
                    n

@@ -243,9 +243,9 @@
                                                   :orphan-page "docs/health.md#an-orphan-page" :leadless-section "docs/health.md#a-section-with-no-lead" :uncited-task "docs/health.md#a-task-that-cites-nothing" :uncited-var "docs/health.md#a-function-that-cites-no-section" :long-form "docs/health.md#a-form-too-long" :problem-unlinked "docs/health.md#a-problem-with-no-page"}}
                        :stalled :platform :eval :agent :effect :red :cost :merge :dead :error :waste :failed :task-conflict :dead-citation :unnamed-site :stale-pin :unrun
                        :stale-section :orphan-page :leadless-section :uncited-task :uncited-var :problem-unlinked :long-form]
- :seon.problems/row [:map {:seon.render/html seon.render.ui/problem-row}
+ :seon.problems/row [:map {:seon.render/hiccup seon.render.ui/problem-row}
                      [:producer [:maybe :qualified-symbol]] [:owner-ns [:maybe :symbol]]
                      [:evidence :map] [:proofs [:vector :qualified-symbol]] [:answered-by [:vector :string]]
                      [:at-ms [:maybe :int]]]
- :seon.problems/report [:map {:seon.render/html seon.render.ui/problems :seon.render/model seon.render.ui/problems-model} [:t :int]
+ :seon.problems/report [:map {:seon.render/hiccup seon.render.ui/problems :seon.render/model seon.render.ui/problems-model} [:t :int]
                         [:classes [:map-of :seon.problems/class [:map [:n nat-int?] [:rows [:vector :seon.problems/row]]]]]]}

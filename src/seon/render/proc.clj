@@ -116,7 +116,7 @@
   [{:keys [id input schema html hiccup draw]} kept]
   (cond html [hiccup html nil]
         draw (let [[hc k] (draw kept)] [hc (h/html hc) k])
-        :else (let [hc (render/html {:schema schema :unit id} input)] [hc (h/html hc) nil])))
+        :else (let [hc (render/hiccup {:schema schema :unit id} input)] [hc (h/html hc) nil])))
 
 (defn- step-units
   "Run a layout's units, in the order the layout shows them, against what the view retained: a
@@ -444,14 +444,14 @@
                                              (try (quiet #(pairs w)) (finally (render/dispose-walk! w)))))]
                            [part-unit
                             {:id "d-ctx" :container "#c-rows" :rev (:t t)
-                             :html (h/html [:li {:id "d-ctx"} (quiet #(render/html {:db bdb} (with-meta t {:seon.render/schema :seon.ctx/ctx})))])}]))
+                             :html (h/html [:li {:id "d-ctx"} (quiet #(render/hiccup {:db bdb} (with-meta t {:seon.render/schema :seon.ctx/ctx})))])}]))
         ;; its process's draw and root's each count revisions of their own: a unit says whose it is, so its process's answer replaces root's first draw at the same number
         units (if own?
                 (mapv #(assoc % :own? true) (:units held))
                 (cond (and bdb (not chat?)) (ctx-units)
                       bdb (branch-units)
                       ;; a branch that could not be read: its error, by the error's render
-                      berr [{:id "p-branch-error" :container "#p-task" :rev 0 :html (h/html [:section {:id "p-branch-error"} (render/html {} berr)])}]))
+                      berr [{:id "p-branch-error" :container "#p-task" :rev 0 :html (h/html [:section {:id "p-branch-error"} (render/hiccup {} berr)])}]))
         ;; root's agents list, as root's walk drew it, and the agent's head from its facts on main
         sides (when-not (some #(= "#c-side" (:container %)) units) (filterv #(= "#c-side" (:container %)) (some-> (:root-walk st) :w render/placed-units)))
         head (cond-> (d/pull db [:seon.user/name :seon.agent/id :seon.agent/status :seon.agent/branch :seon.agent/description :seon.agent/max-turns {:seon.agent/task [:seon.task/id :seon.task/outcome :seon.task/reason :seon.task/failure]} {[:seon.process/_agent :as :processes] [:seon.process/pid :seon.process/forked-ms]}] eid)
@@ -680,7 +680,7 @@
   whole later replaces the tab's #app, so a page without it could never become its view's page."
   {:malli/schema [:=> [:cat :map] :any]}
   [e] [:div {:id "app" :class "mx-auto flex max-w-screen-xl flex-col gap-3 p-3 sm:p-4"}
-       (render/html {} e)
+       (render/hiccup {} e)
        ;; the nearest way to look: every session, from the home page
        (when (= :seon.render/no-location (:seon.error/type e)) [:p [:a {:href "/root"} "◆ seon: every session on main"]])])
 
@@ -710,8 +710,8 @@
     (let [units (:seon.render/units out)
           [view patch n] (step-units held units)
           [view patch] (finish-patch view patch (set (map :id units)))
-          skel (h/html (:seon.render/html out))
-          view (assoc view :skeleton skel :layout (:seon.render/html out))]
+          skel (h/html (:seon.render/hiccup out))
+          view (assoc view :skeleton skel :layout (:seon.render/hiccup out))]
       [(-> (hold st view) (update-in [:counts :rendered] (fnil + 0) (:rendered n)) (update-in [:counts :same] (fnil + 0) (:same n)))
        (cond
          ;; a patch replaces only elements the tab holds: a unit new to it in no container (its slot in the layout,

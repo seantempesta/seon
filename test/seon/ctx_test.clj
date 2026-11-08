@@ -475,13 +475,13 @@
   (let [proofs {'app.x-test/t0 {:status :pass}}
         c (with-meta {:t 7 :branch :main/a1 :commit (random-uuid) :seon.render/proofs proofs :evals {"e1" {:seon.eval/id "e1"}}}
             {:seon.render/schema :seon.ctx/ctx})
-        h (render/html {} c)
+        h (render/hiccup {} c)
         rows (into {} (for [x (tree-seq coll? seq h) :when (and (vector? x) (= :tr (first x)))]
                         [(last (nth x 2)) (last (nth x 3))]))]
     (is (= 'seon.render.ui/ctx (render/declared (render/schema-of c nil))) "@ctx's value names its block")
     (is (= [":evals" ":seon.render/proofs"] (sort (keys rows))) "a row per key, its environment above them")
-    (is (= (render/html {:schema :seon.render/proofs} proofs) (rows ":seon.render/proofs")) "a key whose schema declares a render draws by it")
-    (is (= (render/html {:schema nil} {"e1" {:seon.eval/id "e1"}}) (rows ":evals")) "a key with none draws as the printer's structure")))
+    (is (= (render/hiccup {:schema :seon.render/proofs} proofs) (rows ":seon.render/proofs")) "a key whose schema declares a render draws by it")
+    (is (= (render/hiccup {:schema nil} {"e1" {:seon.eval/id "e1"}}) (rows ":evals")) "a key with none draws as the printer's structure")))
 
 (deftest a-change-names-its-eval
   ;; task seon.ctx/a-change-names-its-eval: who made each fact is a query on the tx-meta of its
@@ -499,7 +499,7 @@
     (is (= {:seon.tx/branch :main} (by :seon.agent/id)) "forked holding it: main's, by no eval")
     (is (= {:seon.tx/branch :main/a1 :seon.tx/merged :main} (by :seon.agent/max-turns)) "caught up: merged from main")
     (is (nil? (ctx/made-by db e :seon.eval/by)) "an attribute it does not have: nobody made it")
-    (let [h (render/html {:db db} (with-meta (:tree (ctx/build db (aid db) :main/a1)) {:seon.render/schema :seon.ctx/ctx}))
+    (let [h (render/hiccup {:db db} (with-meta (:tree (ctx/build db (aid db) :main/a1)) {:seon.render/schema :seon.ctx/ctx}))
           rows (into {} (for [x (tree-seq coll? seq h) :when (and (vector? x) (= :tr (first x)))] [(last (nth x 2)) (last (nth x 4))]))]
       (is (= {":seon.agent/description" "e5" ":seon.agent/id" "from :main" ":seon.agent/max-turns" "merged from :main"}
              (select-keys rows [":seon.agent/description" ":seon.agent/id" ":seon.agent/max-turns"]))
@@ -710,7 +710,7 @@
   ;; render is an attribute at once; @ctx's eval is recorded as its basis, never a copy; the page
   ;; renders it from the branch, and a key whose render the branch defines is drawn by its agent as
   ;; a part of its page (seon.repl/render-ctx; root, 2026-10-25: "nothing is stored")
-  (let [form '[:vector {:seon.render/html seon.ctx-test/steps} :string]
+  (let [form '[:vector {:seon.render/hiccup seon.ctx-test/steps} :string]
         db (seeded 3)
         reg (my.schema/registration db :lab.ctx/steps form false)]
     (is (some #{{:db/ident :lab.ctx/steps :db/valueType :db.type/data :db/cardinality :db.cardinality/one}} (:tx reg))
@@ -758,7 +758,7 @@
             (is (= (text db) (text later)) "the same bytes read cold after the branch moved as live: the cached prefix depends on it"))
           (is (re-find #":lab.ctx/steps" h))))
       (testing "a render that throws in the agent is answered as its error, and the agent goes on"
-        (let [db (:db-after (d/with db (:tx (my.schema/registration db :lab.ctx/boom '[:vector {:seon.render/html seon.ctx-test/boom} :any] false))))
+        (let [db (:db-after (d/with db (:tx (my.schema/registration db :lab.ctx/boom '[:vector {:seon.render/hiccup seon.ctx-test/boom} :any] false))))
               db (:db-after (d/with db [{:seon.agent/key k :lab.ctx/boom []}]))
               r (try (enter-agent! {:db db :key k :branch :b}) (seon.repl/render-ctx) (finally (end-agent!)))
               keys-html (:html (some #(when (= "ctx-keys" (:id %)) %) (:units r)))]
@@ -1212,7 +1212,7 @@
   ;; task seon.render/one-way-to-make-what-an-agent-is-sent, step 2; docs/ctx.md, "the page is the agent's to change": the
   ;; walk held the layout of its first draw, so one registered later drew nothing
   (let [db (seeded 3)
-        db2 (:db-after (d/with db (:tx (my.schema/registration db :seon.render/render-ctx '[:map {:seon.render/html seon.ctx-test/other-layout}] false))))]
+        db2 (:db-after (d/with db (:tx (my.schema/registration db :seon.render/render-ctx '[:map {:seon.render/hiccup seon.ctx-test/other-layout}] false))))]
     (try (enter-agent! {:db db :key k :branch :b})
          (let [before (pr-str (seon.repl/render-ctx-hiccup))]
            (is (not (str/includes? before "the other layout")) "the declared layout first")

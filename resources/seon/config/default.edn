@@ -976,7 +976,7 @@
  ;; Unit: tokens. The same for a whole request. Provenance: the commit adding these keys.
  :seon.config.render/request-tokens-warn 50000
  :seon.config.render/request-tokens-over 150000
- ;; Unit: tokens a rendered value spends when its env names no budget (seon.render/print-html,
+ ;; Unit: tokens a rendered value spends when its env names no budget (seon.render/print-hiccup,
  ;; an agent's history row). Provenance: the literal 600 render.clj and
  ;; render.ui carried (2026-10-22), kept as it was.
  :seon.config.render/value-budget 600

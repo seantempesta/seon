@@ -351,6 +351,6 @@
     (is (sorted? (:evals v)) "a sorted collection stays sorted")
     (is (= 10 (key (first (rseq (:evals v))))))
     (is (= [1] (map (comp :v val) (subseq (:evals v) <= 10))))
-    (is (nil? (get v :seon.render/html)) "an absent key answers nil")
+    (is (nil? (get v :seon.render/hiccup)) "an absent key answers nil")
     (is (identical? (:task @a) (rv/unwrap (:task v))) "unwrap: the real value")
     (is (= {:t (:task @a)} (rv/realize {:t (:task v)})) "realize: every view in it")))

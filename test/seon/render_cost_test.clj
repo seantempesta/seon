@@ -63,7 +63,7 @@
   ;; the printer's auto-render: each nested value with a render is named in one lookup per key
   ;; (seon.render/schema-of, no validation) and rendered once, in the printer's one pass
   (cost/proof
-    {:of 'seon.render/html :input 'seon.render-cost-test/messages
+    {:of 'seon.render/hiccup :input 'seon.render-cost-test/messages
      :n "messages in a vector, each shown by its own render in the printer's hiccup"
      :work (str "one pass: per message, the printer classifies it once and asks its render once: one "
                 "identity lookup over its keys, a call of its render (seon.render.ui/message) inline, "

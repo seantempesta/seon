@@ -39,19 +39,19 @@
 
 (deftest selection
   (testing "the value's own override key wins: data as is"
-    (is (= [:b "mine"] (r/html {:schema :seon.task/task} {:a 1 :seon.render/html [:b "mine"]}))))
+    (is (= [:b "mine"] (r/hiccup {:schema :seon.task/task} {:a 1 :seon.render/hiccup [:b "mine"]}))))
   (testing "the schema's declared render, named by the producer"
     (is (= 'seon.render.ui/task-box (r/declared :seon.task/task)))
-    (is (str/includes? (h/html (r/html {:schema :seon.task/task} task)) "task · calc/add")))
+    (is (str/includes? (h/html (r/hiccup {:schema :seon.task/task} task)) "task · calc/add")))
   (testing "a pulled entity's schema is the one its identity attribute names"
     (is (= :seon.message/fact (r/schema-of {:seon.message/id "m1"} nil)))
-    (is (str/includes? (h/html (r/html {} {:seon.message/id "m1" :seon.message/from "owner" :seon.message/body "Looks right."}))
+    (is (str/includes? (h/html (r/hiccup {} {:seon.message/id "m1" :seon.message/from "owner" :seon.message/body "Looks right."}))
                        "message from owner")))
   (testing "no declaration: the one value printer's hiccup"
-    (let [out (r/html {} {:k [1 2 3]})]
+    (let [out (r/hiccup {} {:k [1 2 3]})]
       (is (= "seon-data-panel" (get-in out [1 :class])))))
   (testing "one face: the page and the model read the same hiccup; no :ai face is left"
-    (is (vector? (r/html {} {:k 1})))
+    (is (vector? (r/hiccup {} {:k 1})))
     (is (nil? (resolve 'seon.render/ai)))
     (is (not-any? #(contains? (seon.contract/properties %) :seon.render/ai) (keys seon.contract/forms)) "no schema declares one")))
 
@@ -70,11 +70,11 @@
       (is (= [] (vec (remove #(let [a (first-arg %)] (or (= :seon.render/opts a) (and (vector? a) (= [:and :seon.render/opts] (subvec a 0 2))))) declared)))
           "none takes its value first")))
   (testing "a nested value's render is a call [f opts v], which the writer expands"
-    (let [out (r/print-html {} {:k {:seon.model-call/id "b1/a1/1" :seon.model-call/n 1}})
+    (let [out (r/print-hiccup {} {:k {:seon.model-call/id "b1/a1/1" :seon.model-call/n 1}})
           call (some #(when (and (vector? %) (not (keyword? (first %))) (fn? (first %))) %) (tree-seq coll? seq out))]
       (is (= {:as :inline} (second call)) "opts second")
       (is (= "b1/a1/1" (:seon.model-call/id (nth call 2))) "the value its child"))
-    (is (str/includes? (h/html [:div [r/html {:schema :seon.task/task} task]]) "task · calc/add") "[f opts v] in hiccup")))
+    (is (str/includes? (h/html [:div [r/hiccup {:schema :seon.task/task} task]]) "task · calc/add") "[f opts v] in hiccup")))
 
 (deftest compose-fills-slots-recursively
   (is (= "<a><b>x</b></a>" (p/compose "<a><!--s:b--></a>" {"b" {:html "<b><!--s:c--></b>"} "c" {:html "x"}}))))
@@ -141,7 +141,7 @@
       (is (str/includes? text ":seon.merge/behind"))
       (is (str/includes? text ":behind 3"))))
   (testing "the page shows the same facts"
-    (let [html (h/html (r/html {} behind))]
+    (let [html (h/html (r/hiccup {} behind))]
       (is (str/includes? html "main changed 3 key(s)"))
       (is (str/includes? html "fix: A merge task merges main"))
       (is (str/includes? html "seon.merge/behind in seon.writer/merge-refused"))))
@@ -152,7 +152,7 @@
     (testing "a map holding an error's type but not the rest of an error is no error, and draws as data"
       (is (not= :seon.error/base (r/schema-of picked nil)))
       (is (not= :seon.agent/load-failed (r/schema-of picked nil)))
-      (is (str/includes? (h/html (r/html {} [picked])) "the branch program did not load")))))
+      (is (str/includes? (h/html (r/hiccup {} [picked])) "the branch program did not load")))))
 
 (def ^:private failed-task
   (assoc task :seon.task/execution :held :seon.task/needs #{"calc/sub"}
@@ -163,7 +163,7 @@
 
 (deftest a-task-reads-its-state-plan-proofs-and-failure
   (testing "the page's task box shows the failure too"
-    (let [html (h/html (r/html {:schema :seon.task/task} failed-task))]
+    (let [html (h/html (r/hiccup {:schema :seon.task/task} failed-task))]
       (is (str/includes? html "failed in boot-1/a2: add cannot be total over longs")))))
 
 (defn- row
@@ -176,7 +176,7 @@
                                         :merge {:n 1 :rows [(row {:task "calc/sub" :error behind :open? false})]}
                                         :red {:n 0 :rows []}}}
               {:seon.render/schema :seon.problems/report})
-        html (h/html (r/html {} rep))]
+        html (h/html (r/hiccup {} rep))]
     (is (str/includes? html "not total"))
     (is (str/includes? html "calc/sub"))))
 
@@ -383,16 +383,16 @@
   ;; its own render again
   (let [a {:seon.message/id "m1" :seon.message/from "owner" :seon.message/body "Looks right."}
         v {:newest a :count 3}]
-    (let [html (h/html (r/html {} v))]
+    (let [html (h/html (r/hiccup {} v))]
       (is (str/includes? html "owner: ") "the hiccup: the message's own render, inline")
       (is (str/includes? html "seon-print-keyword\">:count") "around it, the printer's map"))
-    (is (str/includes? (h/html (r/html {} a)) "message from owner") "the value itself by its render, as before")))
+    (is (str/includes? (h/html (r/hiccup {} a)) "message from owner") "the value itself by its render, as before")))
 
 ;; ---- the pages: a page is its parts (task seon.render/every-page-is-its-parts) ----
 
 (def ^:private walked-plan
   "A plan citing a var (one backtick: its doc), a namespace and a wiki section (a link)."
-  "Make `seon.render/html` answer the tree; its printer is `seon.print`, and see [no clipping](docs/render.md#no-clipping).")
+  "Make `seon.render/hiccup` answer the tree; its printer is `seon.print`, and see [no clipping](docs/render.md#no-clipping).")
 
 (defn- eid-of [db ref] (:db/id (d/entity db ref)))
 
@@ -1143,8 +1143,8 @@
   ;; the owner, 2026-10-23, on the default html: a fold and its "map 12 items, depth 0" header on
   ;; every collection was noise. The value printed and a collection of scalars are inline; a
   ;; nested collection that holds collections folds, saying what it holds
-  (let [flat (h/html (r/html {} {:demo/id "f" :demo/proofs ['demo-test/f-test]}))
-        nested (h/html (r/html {} {:demo/id "f" :rows [{:a 1} {:a 2}]}))]
+  (let [flat (h/html (r/hiccup {} {:demo/id "f" :demo/proofs ['demo-test/f-test]}))
+        nested (h/html (r/hiccup {} {:demo/id "f" :rows [{:a 1} {:a 2}]}))]
     (is (not (str/includes? flat "<details")) "a map of scalars and a vector of one symbol: no fold")
     (is (not (str/includes? flat "items, depth")))
     (is (str/includes? flat "demo-test/f-test") "the value is all there")
@@ -1222,8 +1222,8 @@
   (let [l (#'p/debug-value {:context {:text "{:seon-root \"the whole system\"}" :tokens 7}} [:debug :root])
         u (some #(when (= "d-context" (:id %)) %) (:seon.render/units l))]
     (is (= :seon.render/root-context (:schema u)))
-    (is (str/includes? (h/html (r/html {:schema (:schema u) :unit "d-context"} (:input u))) "the whole system"))
-    (is (str/includes? (h/html (:seon.render/html l)) "href=\"/\"") "the toggle back to its conversation")
+    (is (str/includes? (h/html (r/hiccup {:schema (:schema u) :unit "d-context"} (:input u))) "the whole system"))
+    (is (str/includes? (h/html (:seon.render/hiccup l)) "href=\"/\"") "the toggle back to its conversation")
     (is (nil? (#'p/debug-value {} [:debug :root])) "nothing held yet: no page")))
 
 (deftest roots-page-reads-in-words
@@ -1274,21 +1274,21 @@
       (finally (r/dispose-walk! w)))))
 
 (deftest a-page-an-agent-built-renders-nested
-  ;; owner, 2026-10-25: an agent's hiccup renders as HTML. It is the value's own :seon.render/html
+  ;; owner, 2026-10-25: an agent's hiccup renders as HTML. It is the value's own :seon.render/hiccup
   ;; key (a render already made), wherever the value sits
   (let [page [:section [:h2 "agents"] [:ol [:li "a1 busy"]]]
-        html (h/html (r/html {} {:screen {:seon.render/html page} :n 1}))]
+        html (h/html (r/hiccup {} {:screen {:seon.render/hiccup page} :n 1}))]
     (is (str/includes? html "<section><h2>agents</h2><ol><li>a1 busy</li></ol></section>") html)
-    (is (str/includes? (:text (seon.print/print-value {:screen {:seon.render/html page} :n 1} {:render @#'r/nested-html}))
+    (is (str/includes? (:text (seon.print/print-value {:screen {:seon.render/hiccup page} :n 1} {:render @#'r/nested-hiccup}))
                        "[:section [:h2 \"agents\"]")
         "a value's text names its hiccup as the data it is")))
 
 (deftest a-schema-form-prints-as-data-and-a-call-that-throws-is-written-in-its-place
   ;; docs/failure-points.md (a component's render): an agent registered :lab.ctx/steps, and the page printed
-  ;; its form, whose properties map {:seon.render/html lab.ui/steps} was taken for a value asking for that
+  ;; its form, whose properties map {:seon.render/hiccup lab.ui/steps} was taken for a value asking for that
   ;; render: steps was called with it, threw while the HTML was written (after render!), and the agent died
-  (let [form '[:vector {:seon.render/html seon.render.ui/debug-turn} :string]
-        html (h/html (r/html {} {:seon.schema/key :lab.ctx/steps :seon.schema/definition form}))]
+  (let [form '[:vector {:seon.render/hiccup seon.render.ui/debug-turn} :string]
+        html (h/html (r/hiccup {} {:seon.schema/key :lab.ctx/steps :seon.schema/definition form}))]
     (is (str/includes? html "seon.render.ui/debug-turn") "the properties print as the data they are")
     (is (not (str/includes? html "threw")) "and no render is called with them"))
   (let [html (h/html [:div [:p "before"] [#'ui/debug-turn {} {:body 1}] [:p "after"]])]
@@ -1384,7 +1384,7 @@
     (is (= eid (#'p/location db [:chat :main/example-abc])))
     (is (nil? (#'p/location db :main/example-none)) "an id no agent has")
     (is (str/includes? (html [:chat :main/example-abc]) "(+ 1 2)") "its chat page lists its evals")
-    (is (str/includes? (h/html (:seon.render/html (#'p/page-value st [:chat :main/example-abc]))) "href=\"/agent/example/abc/debug") "its tabs name it by its key")
+    (is (str/includes? (h/html (:seon.render/hiccup (#'p/page-value st [:chat :main/example-abc]))) "href=\"/agent/example/abc/debug") "its tabs name it by its key")
     (is (seq (units :main/example-abc)) "its record page reads main")))
 
 (deftest a-debug-page-of-an-agent-with-no-branch-answers
@@ -1394,8 +1394,8 @@
   (let [db (reduce d/db-with (ts/test-db) [[{:seon.root/id :root :seon.root/boot "b1"}] (seon.task/agent-tx "b1" :user {:status :idle})])
         st {:main-db db :branches {}}]
     (is (nil? (:seon.agent/branch (d/entity db (#'p/location db :user)))) "the fixture: no branch")
-    (is (some? (:seon.render/html (#'p/debug-value st [:debug :user]))) "its page, with no turn")
-    (is (some? (:seon.render/html (#'p/debug-value (assoc-in st [:branches [:debug :user] :error] {:seon.error/message "x"}) [:debug :user])))
+    (is (some? (:seon.render/hiccup (#'p/debug-value st [:debug :user]))) "its page, with no turn")
+    (is (some? (:seon.render/hiccup (#'p/debug-value (assoc-in st [:branches [:debug :user] :error] {:seon.error/message "x"}) [:debug :user])))
         "a branch that could not be read: its page too")))
 
 (deftest an-outside-read-is-no-model-call
@@ -1884,9 +1884,9 @@
     (is (seq evals) "the agent's evals")
     (is (sorted? evals) "a collection, sorted by id")
     (is (every? int? (keys evals)))
-    (is (nil? (get evals :seon.render/html)) "a keyword lookup answers nil")
-    (is (vector? (r/print-html {} {:seon.task/id "t/x" :evals evals})) "nested in a value")
-    (is (vector? (r/html {} evals)) "as the value itself")
+    (is (nil? (get evals :seon.render/hiccup)) "a keyword lookup answers nil")
+    (is (vector? (r/print-hiccup {} {:seon.task/id "t/x" :evals evals})) "nested in a value")
+    (is (vector? (r/hiccup {} evals)) "as the value itself")
     (is (nil? (r/schema-of evals nil)))))
 
 (defn diff-view
@@ -2060,7 +2060,7 @@
     ;; :reports: every tile of a1's page threw on proofs/failures' contract (2026-10-28)
     (let [picked (select-keys (with-meta run {:seon.render/schema :seon.test/proved}) [:pass :fail :proofs])]
       (is (= :seon.test/proved (r/schema-of picked nil)))
-      (is (str/includes? (h/html (r/html {} picked)) "app.okt/bad-test") "a picked prove draws what it holds"))))
+      (is (str/includes? (h/html (r/hiccup {} picked)) "app.okt/bad-test") "a picked prove draws what it holds"))))
 
 (deftest markdown-draws-each-block
   ;; docs/render.md#text-and-the-one-string-cutter: a plan or a reply drawn by its blocks, none dropped,
@@ -2183,8 +2183,8 @@
   (let [old {:t 1 :classes {:a-class-since-removed {:n 1 :rows []}}}]
     (is (false? (seon.contract/fits? :seon.problems/report old)))
     (is (nil? (r/stored-model (with-meta old {:seon.render/schema :seon.problems/report}))) "the model reads it by the printer")
-    (is (str/includes? (h/html (r/html {:schema :seon.problems/report} old)) "a-class-since-removed") "the page draws it as data")
-    (is (not (str/includes? (h/html (r/html {:schema :seon.problems/report} old)) "threw")))))
+    (is (str/includes? (h/html (r/hiccup {:schema :seon.problems/report} old)) "a-class-since-removed") "the page draws it as data")
+    (is (not (str/includes? (h/html (r/hiccup {:schema :seon.problems/report} old)) "threw")))))
 
 (deftest root-reads-what-is-going-on
   ;; docs/render.md#the-page: root's head and its work say what is going on, in words
@@ -2362,7 +2362,7 @@
       (let [st {:rid 1 :pending {} :watch #{} :waiting {} :views {} :branches {} :main-db db :view {:agents {}}}
             chat (#'p/page-value st [:chat (keyword "b1/a4")])
             ctx (#'p/page-value st (keyword "b1/a4"))
-            html (apply str (h/html (:seon.render/html chat)) (map :html (:seon.render/units chat)))]
+            html (apply str (h/html (:seon.render/hiccup chat)) (map :html (:seon.render/units chat)))]
         (is (not (:seon.error/type chat)) (pr-str (:seon.error/message chat)))
         (is (not (:seon.error/type ctx)))
         (is (str/includes? html "href=\"/agent/b1/a4/debug\"") "its @ctx tab, by its key")
@@ -3033,7 +3033,7 @@
         ev (fn [id value] (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} id "a3"
                                                {:seon.eval/call (seon.task/call-ref k 5) :seon.eval/code "(page)" :seon.eval/response {:handle (symbol "result" id) :value value}}))
         db (d/db-with branch (vec (concat [{:seon.agent/key k :seon.agent/turn 6}]
-                                          (ev "g1" {:points [1 2] :seon.render/html [:svg {:width 10} [:circle {:r 3}]]})
+                                          (ev "g1" {:points [1 2] :seon.render/hiccup [:svg {:width 10} [:circle {:r 3}]]})
                                           (ev "g2" {:plain-value 41}))))
         w (a3-walk db)]
     (try
@@ -3047,9 +3047,9 @@
         (is (not (str/includes? wire "eval-glance")) "the model reads no glance"))
       (finally (r/dispose-walk! w))))
   (testing "a render no process here holds: the data, never a throw"
-    (let [v {:n 1 :seon.render/html 'agent.nobody/chart}]
+    (let [v {:n 1 :seon.render/hiccup 'agent.nobody/chart}]
       (is (nil? (r/render-of v nil)))
-      (is (str/includes? (pr-str (r/html {} v)) ":n")))))
+      (is (str/includes? (pr-str (r/hiccup {} v)) ":n")))))
 
 (deftest an-agents-own-draw-replaces-roots-at-the-same-revision
   ;; docs/render.md#a-value-draws-itself: root draws a live agent's page first, from its branch, and root holds no render the agent defined; the agent's answer must reach the page though each process counts revisions of its own
