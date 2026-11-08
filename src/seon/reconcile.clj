@@ -183,9 +183,11 @@
                   ;; not live: working in this boot's root
                   (not (and (= :running o) (= (:boot (:root idx)) (:seon.agent/boot (get-in idx [:agents (:seon.task/agent t)])))))
                   (not (judged-outcomes o))
-                  ;; parked, told or at its cap: ready again only when woken, a wake being a message that reached its agent (`wake`)
+                  ;; parked, told or at its cap: ready again only when woken, a wake being a message that reached its agent (`wake`);
+                  ;; the task's agent is its key (task-pull), so an agent no root has started yet (root's session at boot) wakes too
+                  ;; and is spawned under that key (docs/users.md#roots-session)
                   (or (not (#{:parked :told :cap} o))
-                      (contains? (:woken idx) (:seon.agent/key (get-in idx [:agents (:seon.task/agent t)]))))))))
+                      (contains? (:woken idx) (:seon.task/agent t)))))))
 
 (defn- refresh-done
   "Re-derive task id's done state from its outcome; answers [idx flipped?]."

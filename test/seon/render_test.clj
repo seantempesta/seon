@@ -2197,6 +2197,83 @@
     (is (= #'ui/render-ctx (walk-layout (:db/id (d/entity db [:seon.agent/key "b2/a1"])) :main {:seon.agent/key "b2/a1"})))
     (is (= #'ui/render-ctx (walk-layout nil :task-a {:seon.agent/key "b2/a1"})) "a branch that holds no entity yet: the agent's key names it")))
 
+(defn- booted
+  "The test world after a root's boot and the person's first message to root, which makes root's session (seon.root/root-session-message-tx,
+  as root's api writes it)."
+  []
+  (let [db (d/db-with (my.test/world) (seon.task/boot-tx "b1" 1 "sean"))]
+    (d/db-with db (seon.root/root-session-message-tx db (seon.task/message-tx "m-first" "sean" ["root"] "Hi root." 1)))))
+
+(deftest roots-session-is-an-agent-of-its-own
+  ;; docs/users.md#roots-session: root's session is an ordinary agent keyed "root", linked to root, working request/root, parked until a message
+  ;; wakes it; root's own entity takes no key (an entity's id derives from its identity, so it cannot hold a second)
+  (let [db (booted)
+        s (d/entity db [:seon.agent/key "root"])
+        t (d/entity db [:seon.task/id "request/root"])]
+    (is (some? s) "an agent keyed root")
+    (is (= (:db/id (d/entity db [:seon.root/id :root])) (:db/id (:seon.agent/root s))) "linked to root")
+    (is (not= (:db/id s) (:db/id (d/entity db [:seon.root/id :root]))) "and not root's entity")
+    (is (= :parked (:seon.task/outcome t)) "its task waits for a message")
+    (is (= "root" (seon.task/session-key db "request/root")) "and the ordinary spawn continues it by its key")
+    (is (= :seon.db/agent-fact (r/entity-schema (d/pull db '[*] (:db/id s)) nil)) "an agent like any other")
+    (is (= #'ui/render-ctx (r/layout-of (d/pull db '[*] (:db/id s)))) "drawn by the agent's layout")
+    (is (= ["Hi root."] (mapv #(:seon.message/body (d/entity db (:e %))) (d/datoms db :avet :seon.message/to (:db/id s)))) "made by the first message, which it holds")
+    (let [db2 (d/db-with db (seon.root/root-session-refresh-tx db))
+          same (fn [d] [(dissoc (d/pull d '[*] [:seon.agent/key "root"]) :db/id) (dissoc (d/pull d '[*] [:seon.task/id "request/root"]) :db/id)])]
+      (is (= (same db) (same db2)) "a boot after writes its pattern again and nothing else"))
+    (let [fresh (d/db-with (my.test/world) (seon.task/boot-tx "b1" 1 "sean"))]
+      (is (nil? (d/entity fresh [:seon.agent/key "root"])) "a root no one has messaged has no session")
+      (is (= [] (seon.root/root-session-refresh-tx fresh)) "and its boot writes none"))))
+
+(deftest roots-session-reads-its-sessions
+  ;; docs/users.md#roots-session: root's session's record holds root's sessions (its pattern's :root join), and its task list shows each
+  ;; by its address and how it stands; another agent's record holds none
+  (let [db0 (booted)
+        db (d/db-with db0 [{:seon.task/id "request/greet" :seon.task/ns 'request :seon.task/name "greet" :seon.task/plan "Say hi.\nOne line." :seon.task/kind :user
+                            :seon.task/branch :task-request-greet :seon.task/outcome :parked}
+                           {:seon.agent/key "b1/a2" :seon.agent/root [:seon.root/id :root] :seon.agent/task [:seon.task/id "request/greet"]}
+                           ;; a session of an earlier boot: a new boot unlinks it from root (seon.task/earlier-agents-tx), and root's session still sees it
+                           {:seon.task/id "request/older" :seon.task/ns 'request :seon.task/name "older" :seon.task/plan "An older ask." :seon.task/kind :user
+                            :seon.task/branch :task-request-older :seon.task/outcome :parked}
+                           {:seon.agent/key "b0/a9" :seon.agent/task [:seon.task/id "request/older"]}
+                           ;; the person asks root's session something, as the home box will
+                           {:seon.message/from "sean" :seon.message/to [[:seon.agent/key "root"]] :seon.message/body "What is running?" :seon.message/sent-ms 1}])
+        db (d/db-with db [{:seon.agent/key "root" :seon.agent/task [:seon.task/id "request/root"]}])
+        part (fn [k] (let [c (seon.ctx/agent-ctx db (:db/id (d/entity db [:seon.agent/key k])))
+                           w (r/draw c seon.ctx/changes db (r/layout-of c) {:model-only true})]
+                       (try (pr-str (r/placed-hiccup w (r/page-lists w))) (finally (r/dispose-walk! w)))))
+        root-text (part "root")]
+    (is (str/includes? root-text "/agent/b1/a2") "root's session reads the other session by its address")
+    (is (str/includes? root-text "Say hi.") "what it works on")
+    (is (str/includes? root-text "/agent/b0/a9") "and a session of an earlier boot, which root no longer links")
+    (is (not (str/includes? root-text "/agent/root")) "but not itself")
+    (is (not (str/includes? root-text ":seon.config.")) "and none of root's config")
+    (is (not (str/includes? (part "b1/a2") "Sessions")) "another agent reads no sessions")
+    ;; its status answers: it threw "Duplicate key: root" when a set literal held "root" and the agent's own key, root's session's
+    ;; being "root" too (seen live on a demo root, 2026-11-08)
+    (is (map? (seon.ctx.status/status db (seon.ctx/agent-ctx db (:db/id (d/entity db [:seon.agent/key "root"]))) {})) "and how its work stands")))
+
+(deftest roots-session-sees-sessions-started-after-it-forked
+  ;; docs/users.md#roots-session: a branch takes main's program, not its data, so a session started on main after root's session forked is
+  ;; on main alone; root's session reads main as its last turn heard it (:seon.agent/main-commit), and so lists it (Context's review; seen
+  ;; on a demo root: \"no new one has appeared yet\")
+  (ts/test-branch!
+    (fn [_ conn]
+      (d/transact conn (seon.task/boot-tx "b1" 1 "sean"))
+      (d/transact conn (seon.root/root-session-message-tx @conn (seon.task/message-tx "m-first" "sean" ["root"] "Hi root." 1)))
+      (let [fork (d/commit-id @conn)
+            _ (d/transact conn [{:seon.task/id "request/later" :seon.task/ns 'request :seon.task/name "later" :seon.task/plan "Asked after root's session forked."
+                                 :seon.task/kind :user :seon.task/branch :task-request-later :seon.task/outcome :parked}
+                                {:seon.agent/key "b1/a7" :seon.agent/task [:seon.task/id "request/later"]}])
+            main (d/commit-id @conn)
+            ;; the session's branch: main as it forked, and the main its last turn heard
+            ours (d/db-with (d/commit-as-db conn fork) [{:seon.agent/key "root" :seon.agent/main-commit main}])
+            c (seon.ctx/agent-ctx ours (seon.db/eid ours :seon.agent/key "root"))
+            w (r/draw c seon.ctx/changes ours (r/layout-of c) {:model-only true})
+            text (try (pr-str (r/placed-hiccup w (r/page-lists w))) (finally (r/dispose-walk! w)))]
+        (is (nil? (seon.db/eid ours :seon.agent/key "b1/a7")) "the later session is not on the branch")
+        (is (str/includes? text "/agent/b1/a7") "and root's session lists it, from main as it last heard it")))))
+
 (deftest a-users-page-moves-with-main
   ;; docs/render.md#a-page-is-a-kept-walk: a user's page is a kept walk, as root's is: a move of main draws what it reached, so an agent it starts appears on a page already open
   (let [db0 (sessions-db "b2" [["b2/a1" :a1 :running "seon.print/a-long-string" :running :task-a]])

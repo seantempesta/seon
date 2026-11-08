@@ -285,7 +285,7 @@
         me (:seon.agent/key ag)
         asked (when plan-tx
                 (some (fn [[e m]] (let [from (:seon.message/from m)]
-                                    (when (and (not (#{"root" me} from)) (> (ctx/first-delivered [db a e]) plan-tx)) from)))
+                                    (when (and (not (or (= "root" from) (= me from))) (> (ctx/first-delivered [db a e]) plan-tx)) from)))
                       (:messages rec)))
         next (cond-> []
                asked (conj {:step :fold-message :from asked}))]

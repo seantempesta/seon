@@ -24,7 +24,7 @@
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.query.execute] [clojure.main] [clojure.string :as str] [seon.db :as pdb] [seon.ctx.wire :as wire] [seon.lib :as lib]
             [seon.sock :as sock] [jolt.async.remote :as remote] [konserve.jolt.fasl :as codec] [seon.fx :as fx] [seon.fork-server :as fs] [seon.agent-proc :as ap]
             [seon.writer :as writer] [seon.problems :as problems] [seon.prove] [seon.cron] [seon.vector :as vector] [seon.source :as source] [seon.reconcile :as reconcile] [seon.system :as system] [seon.program :as program] [seon.step :as step]
-            [seon.config :as cfg] [seon.contract :as contract] [seon.print :as print] [seon.task :as task] [seon.template :as tpl] [seon.doc :as doc] [seon.error :as err] [seon.agent :as agent] [konserve.jolt.lmdb :as klmdb] [clojure.java.shell]
+            [seon.config :as cfg] [seon.contract :as contract] [seon.print :as print] [seon.task :as task] [seon.template :as tpl] [seon.render :as render] [seon.doc :as doc] [seon.error :as err] [seon.agent :as agent] [konserve.jolt.lmdb :as klmdb] [clojure.java.shell]
             [clojure.core.async :as a]
             ;; the agent side, loaded here so the fork server and every agent inherit it compiled
             [seon.turn] [my.fx] [my.task] [my.turn] [my.render] [my.branch] [my.doc] [clojure.core.async.flow :as flow] [clojure.test]
@@ -281,6 +281,8 @@
   {:malli/schema [:=> [:cat] :string]}
   [] (System/getProperty "user.name"))
 
+(declare root-session-message-tx)
+
 (defn- agent-key-of
   "The key of agent id, whom messages are to: its name when a live agent has it or main records it (its process is not
   needed), else nil. See docs/users.md#messages."
@@ -524,9 +526,16 @@
       ;; (seon.task/message-tx), synced before it is answered, so what follows (the turn that delivers it) finds it in the
       ;; store; the agent's turn reads it from main and writes the same entity on its branch (seon.turn/deliver!,
       ;; seon.agent/undelivered). No frame carries it: delivery is the fact. Its writer's answer wakes the agent (back-op)
-      :message (if-let [k (agent-key-of st id)]
-                 (let [[st rid] (pend st p :tx nil)]
-                   (step/out! o :to-writer (message-write st (:from m) [k] (:body m) {:rid rid}))
+      :message (if-let [k (or (agent-key-of st id)
+                              ;; the first message to root makes root's session, in the same write (docs/users.md#roots-session)
+                              (when (= :root id) ::root-session))]
+                 (let [[st rid] (pend st p :tx nil)
+                       w (if (= ::root-session k)
+                           ;; the message names the session by its tempid: a lookup ref cannot reach an entity its own transaction makes
+                           (-> (message-write st (:from m) ["root"] (:body m) {:rid rid})
+                               (update :tx-data #(root-session-message-tx @(:conn st) %)))
+                           (message-write st (:from m) [k] (:body m) {:rid rid}))]
+                   (step/out! o :to-writer w)
                    (update st :writes (fnil conj #{}) rid))
                  (reply! st o p (gone id (str "no agent " id " on main"))))
       ;; requests for the writer: answered by rid; a collection only while no agent is live,
@@ -1063,6 +1072,43 @@
                    (lib/digest (sedn/encode (get contract/forms :seon.doc/fact))) "\n"
                    (str/join "\n" (for [dir (cfg/value :seon.config.root/wiki-dirs) [p t] (doc/pages checkout dir)] (str p "\n" t))))))
 
+(def ^:private root-session-plan
+  "What root's session is for, its task's plan: what educates it, beside the docs it cites. See docs/users.md#roots-session."
+  "You are root's session: the person talks to Seon through you. Your page lists every session on main and how each stands. Answer the person yourself when you can. When they want work done, look for a session already on it and tell them its address; otherwise start one with (my.task/launch! \"what they want\") and tell them it started. More: docs/users.md#roots-session")
+
+(defn root-session-pattern
+  "What root's session's record pulls: the agent's pattern (:seon.db/agent-fact's), and root, which makes its task list draw root's sessions
+  (seon.render.ui/sessions). See docs/users.md#roots-session."
+  {:malli/schema [:=> [:cat] [:vector :any]]}
+  [] (conj (render/schema-property :seon.db/agent-fact :seon.ctx/pattern) {[:seon.agent/root :as :root] [:seon.root/id]}))
+
+(defn root-session-tx
+  "Root's session, made by the first message to root (the api's :message), an ordinary agent made the ordinary way: an agent entity keyed
+  \"root\" (a reserved key, as the user's is its name; its tempid \"root-session\", which that message names it by), linked to root by
+  :seon.agent/root, its pattern `root-session-pattern`, and the task request/root of the chat template (seon.template/request-tx),
+  parked, its agent that entity, so the same write's wake spawns it. A root no one messages has none. Root's own entity is untouched: an
+  entity's id derives from its identity, so it cannot take a key too. See docs/users.md#roots-session."
+  {:malli/schema [:=> [:cat :seon.host/db] [:vector :any]]}
+  [db]
+  (let [tx (tpl/request-tx db (tpl/from (tpl/templates :user) {:seon.task/ns 'request :seon.task/name "root" :seon.task/plan root-session-plan}))]
+    (if (contract/error? tx)
+      (throw (ex-info (str "root's session task was refused: " (:seon.error/message tx)) tx))
+      (into [{:db/id "root-session" :seon.agent/key "root" :seon.agent/root [:seon.root/id :root] :seon.ctx/pattern (root-session-pattern)}]
+            (conj (vec tx) {:seon.task/id "request/root" :seon.task/agent "root-session" :seon.task/outcome :parked})))))
+
+(defn root-session-message-tx
+  "The first message to root (its message-tx) as the write that also makes root's session (`root-session-tx`): the message names the
+  session by its tempid, since a lookup ref cannot reach an entity its own transaction makes. See docs/users.md#roots-session."
+  {:malli/schema [:=> [:cat :seon.host/db [:vector :map]] [:vector :any]]}
+  [db message-tx]
+  (into (root-session-tx db) (map (fn [e] (cond-> e (:seon.message/to e) (assoc :seon.message/to ["root-session"])))) message-tx))
+
+(defn root-session-refresh-tx
+  "At boot, root's session's pattern written again when it has one (`root-session-pattern`), so an edit of the agent's pattern reaches it
+  at the next boot; its task and conversation untouched; nothing when no one has messaged root. See docs/users.md#roots-session."
+  {:malli/schema [:=> [:cat :seon.host/db] [:vector :any]]}
+  [db] (if (pdb/eid db :seon.agent/key "root") [{:seon.agent/key "root" :seon.ctx/pattern (root-session-pattern)}] []))
+
 (defn wiki-boot-tx
   "The wiki's part of the boot fact's commit: wiki-tx, with the digest of what it read (wiki-digest) on root's
   fact, or [] when main already holds that digest (the load is a function of that input, so it would write
@@ -1287,7 +1333,7 @@
     ;; with it, how the root before it on main ended (its stop fact, or :unclean)
     (let [prev (previous-end db)
           r @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (cond-> (-> (task/boot-tx boot max-running (person)) (into (task/earlier-agents-tx db)) (into (cfg/facts config in-force-sources))
-                                                                                  (into (wiki-boot-tx db (cfg/checkout) #(wiki-baseline sys (cfg/checkout) "docs"))))
+                                                                                  (into (wiki-boot-tx db (cfg/checkout) #(wiki-baseline sys (cfg/checkout) "docs"))) (into (root-session-refresh-tx db)))
                                                                          prev (conj {:seon.root/id :root :seon.root/previous-end prev})
                                                                          ;; the test that started this boot (a test's main is its own: no other boot resumes it)
                                                                          started-by (conj {:seon.root/id :root :seon.root/started-by started-by}))}})]

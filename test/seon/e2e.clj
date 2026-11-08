@@ -42,10 +42,11 @@
 
 (defn- branch-db-of
   "A function from an agent key to the db of its branch on sys: an agent's turns and model calls are written there (main holds its
-  start and its end, as the task's outcome), d being main."
+  start and its end, as the task's outcome), d being main; an agent no root has started yet (root's session at boot,
+  docs/users.md#roots-session) has no branch and has written nothing, so its records are main's."
   {:malli/schema [:=> [:cat :seon.root/sys :seon.host/db] fn?]}
   [sys d]
-  (fn [k] (:db @(c/branch-db sys (:seon.agent/branch (d/entity d [:seon.agent/key k]))))))
+  (fn [k] (if-let [b (:seon.agent/branch (d/entity d [:seon.agent/key k]))] (:db @(c/branch-db sys b)) d)))
 
 (defn- agent-usages
   "What the model calls of the agents of tasks ts spent: [{:model-calls n :tokens t}], one per distinct agent, read on the db that
