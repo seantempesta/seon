@@ -1424,26 +1424,28 @@
   [{:seon.model-call/keys [id n origin reply reasoning truncated] :as call} called? children]
   (let [spoke? (not (str/blank? reply))
         sent? (and (= :model origin) (or called? (and (not truncated) spoke?)) (or spoke? (some? reasoning)))]
-    (if (::in-flight call)
-      ;; the model is still answering: the element its stream's parts are appended into, busy until the reply or its error
-      ;; is committed and this draws them in its place (docs/render.md#in-flight-output-streams); the model never reads it
-      [:section {:class "flex w-full flex-col gap-1" :wire/for "page"}
-       [:div {:id (render/key-id [id]) :class "seon-stream" :aria-busy "true"}]]
-    (when (or spoke? (not (str/blank? reasoning)) (seq children))
+    ;; in flight (the model's call until its evals have all run: :seon.model-call/forms or its error), one element its stream's
+    ;; parts are appended into, kept as it is through the turn's redraws (data-ignore-morph: the reply's commit leaves an eval
+    ;; still running its intent, code and output) and gone at the redraw that no longer draws it; the model never reads it
+    ;; (docs/render.md#in-flight-output-streams)
+    (when (or spoke? (not (str/blank? reasoning)) (seq children) (::in-flight call))
+      (cond->
       [:section (cond-> {:class "flex w-full flex-col gap-1" :wire/role "assistant" :wire/ref [:reply id]} (pos? (or n 0)) (assoc :wire/reply n))
        (if (str/blank? reasoning)
          (when (and sent? (some? reasoning)) [:span {:wire/for "model" :wire/field "reasoning"} reasoning])
          [:details [:summary {:class "text-xs text-text-500" :wire/for "page"} "thinking"]
           [:div {:wire/field (when sent? "reasoning")} [#'markdown reasoning {:inline? true}]]])
        (when spoke? [:div {:class "seon-message max-w-[85%] self-start rounded-2xl rounded-tl-sm bg-base-900 px-4 py-2.5 text-text-100" :wire/field (when sent? "content")} [#'markdown reply {:inline? true}]])
-       (when (seq children) [:ol {:class "seon-turn flex flex-col"} (seq children)])]))))
+       (when (seq children) [:ol {:class "seon-turn flex flex-col"} (seq children)])]
+        (::in-flight call) (conj [:div {:id (render/key-id [id]) :class "seon-stream" :aria-busy "true" :data-ignore-morph "" :wire/for "page"}])))))
+
 
 (defn stream-part
   "One part of an effect's in-flight text, part one of reasoning, content, message, intent, code or out: the element the
   web proc appends into its call's (or eval's) in-flight element the first time a tab sees that part, and then its text
   into (its id the stream's, seon.render/key-id of [id]). See docs/render.md#in-flight-output-streams."
   {:seon.render/for "page"
-   :seon.render/style ".stream-part { white-space: pre-wrap; overflow-wrap: anywhere; } .stream-part[data-stream-part=\"reasoning\"] { color: var(--color-text-500); font-size: 0.75rem; } .stream-part[data-stream-part=\"intent\"] { color: var(--color-text-400); } .stream-part:is([data-stream-part=\"code\"], [data-stream-part=\"out\"]) { font-family: var(--font-mono); font-size: 0.75rem; background: var(--color-base-900); border-radius: 0.375rem; padding: 0.25rem 0.5rem; } .seon-stream[aria-busy=\"true\"]::after { content: \"▍\"; animation: seon-stream-cursor 1s steps(2) infinite; } @keyframes seon-stream-cursor { 50% { opacity: 0; } }"
+   :seon.render/style ".stream-part { white-space: pre-wrap; overflow-wrap: anywhere; } .stream-part[data-stream-part=\"reasoning\"] { color: var(--color-text-500); font-size: 0.75rem; } .stream-part[data-stream-part=\"intent\"] { color: var(--color-text-400); } .stream-part:is([data-stream-part=\"code\"], [data-stream-part=\"out\"]) { font-family: var(--font-mono); font-size: 0.75rem; background: var(--color-base-900); border-radius: 0.375rem; padding: 0.25rem 0.5rem; } section:has(> .seon-message, > details) > .seon-stream > .stream-part:is([data-stream-part=\"message\"], [data-stream-part=\"content\"], [data-stream-part=\"reasoning\"]) { display: none; } .seon-stream[aria-busy=\"true\"]::after { content: \"▍\"; animation: seon-stream-cursor 1s steps(2) infinite; } @keyframes seon-stream-cursor { 50% { opacity: 0; } }"
    :malli/schema [:=> [:cat :string :string] :any]}
   [id part]
   [:div {:id (render/key-id [id]) :class "stream-part" :data-stream-part part}])
@@ -1631,12 +1633,11 @@
         (when-let [kids (seq (remove nil? (concat (for [[m id] messages] [#'chat-message {:key id :at [:messages m]}])
                                                   [(reply-hiccup (cond-> (into {} (for [k [:seon.model-call/id :seon.model-call/n :seon.model-call/origin :seon.model-call/reply :seon.model-call/reasoning :seon.model-call/truncated]
                                                                                         :let [v (ratom/realize (get call k))] :when (some? v)] [k v]))
-                                                                   ;; in flight: the model's call with nothing of its answer committed (no reply, no finish, no error, no eval
-                                                                   ;; of its own: a reply that was only tool calls has its evals and no reply text), of an agent whose process lives
+                                                                   ;; in flight: the model's call until its evals have all run (:seon.model-call/forms, written by seon.turn after
+                                                                   ;; the last) or it failed (:seon.model-call/error), of an agent whose process lives; its committed reply and
+                                                                   ;; evals draw beside it all the while
                                                                    (and (= :model (ratom/realize (:seon.model-call/origin call)))
-                                                                        (empty? ours)
-                                                                        (nil? (ratom/realize (:seon.model-call/reply call)))
-                                                                        (nil? (ratom/realize (:seon.model-call/finish call)))
+                                                                        (nil? (ratom/realize (:seon.model-call/forms call)))
                                                                         (nil? (ratom/realize (:seon.model-call/error call)))
                                                                         (not (gone (ratom/realize (:seon.agent/status c)))))
                                                                    (assoc ::in-flight true))
