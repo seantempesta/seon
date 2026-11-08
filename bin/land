@@ -6,8 +6,9 @@
 #   2. bin/prove --merge on that tip, niced, beside any other run (results are shared by digest across
 #      every checkout, and each run writes under its own target/prove/<id>: no run waits on another);
 #   3. main moves to a merge commit whose tree is the proved tip's (git commit-tree, then
-#      git update-ref with main's old value: no checkout of main is needed, and a main that moved
-#      in between is refused, never overwritten: back to 1, which proves only what the new main moved);
+#      git update-ref with main's old value: no checkout of main is needed); a main that moved during
+#      the proof is merged in and landed without proving again (what it gained was proved when it
+#      landed), a conflict stops it;
 #   4. the main tree's files follow main (bin/update does it first) and bin/update restarts the
 #      standing root on main.
 # MSGFILE is the merge message (what it completes, its numbers: AGENTS §3); bin/prove's line is added.
@@ -25,18 +26,28 @@ B=$(git -C "$HERE" branch --show-current)
 [[ -n $B && $B != main ]] || fail "the worktree is on no branch, or on main"
 git -C "$HERE" diff --quiet --ignore-submodules && git -C "$HERE" diff --cached --quiet --ignore-submodules || fail "$HERE has uncommitted changes: commit them first"
 cd "$HERE"
-for i in 1 2 3 4 5; do
-  OLD=$(git rev-parse main)
-  git merge --no-edit -q main || fail "merging main into $B conflicts: resolve, commit, run bin/land again"
-  "$MAIN/bin/worktree" --sync "$HERE" >/dev/null || fail "syncing $HERE's submodules to the pins its branch records"
-  LOG=$HERE/target/land-$(date +%Y%m%dT%H%M%S).log
-  nice -n 15 "$HERE/bin/prove" --merge > "$LOG" 2>&1; st=$?
-  grep -q "proved green already" "$LOG" && print "proved by an earlier prove of this very tree: merging, nothing run"
-  grep -E '^RED |^FAILED ' "$LOG" | cut -c1-200 | head -12
-  LINE=$(grep -E ' bin/prove --merge .*: MERGE (OK|FAILED)' "$LOG" | tail -1)
-  (( st == 0 )) && [[ $(tail -1 "$LOG") == "MERGE OK" ]] || fail "the proof is red: $LOG"
-  [[ $(git rev-parse HEAD) == $(git rev-parse "$B") ]] && git merge-base --is-ancestor "$OLD" HEAD || fail "the branch moved during its proof"
-  { if [[ -n $MSG ]]; then cat "$MSG"; else print "Merge $B"; fi; print; print "$LINE"; } > "$HERE/target/land-msg"
+OLD=$(git rev-parse main)
+git merge --no-edit -q main || fail "merging main into $B conflicts: resolve, commit, run bin/land again"
+"$MAIN/bin/worktree" --sync "$HERE" >/dev/null || fail "syncing $HERE's submodules to the pins its branch records"
+LOG=$HERE/target/land-$(date +%Y%m%dT%H%M%S).log
+nice -n 15 "$HERE/bin/prove" --merge > "$LOG" 2>&1; st=$?
+grep -q "proved green already" "$LOG" && print "proved by an earlier prove of this very tree: merging, nothing run"
+grep -E '^RED |^FAILED ' "$LOG" | cut -c1-200 | head -12
+LINE=$(grep -E ' bin/prove --merge .*: MERGE (OK|FAILED)' "$LOG" | tail -1)
+(( st == 0 )) && [[ $(tail -1 "$LOG") == "MERGE OK" ]] || fail "the proof is red: $LOG"
+[[ $(git rev-parse HEAD) == $(git rev-parse "$B") ]] && git merge-base --is-ancestor "$OLD" HEAD || fail "the branch moved during its proof"
+{ if [[ -n $MSG ]]; then cat "$MSG"; else print "Merge $B"; fi; print; print "$LINE"; } > "$HERE/target/land-msg"
+# main moves to the proved tree; when another landing moved main during the proof, main is merged in and landed
+# without proving again: what main gained was proved when it landed, and chasing main under load could prove
+# forever (owner, 2026-11-08: "that's fucked"); the combination is the daily full run's to catch. Only a
+# conflict stops it.
+for i in 1 2 3 4 5 6 7 8 9 10; do
+  if (( i > 1 )); then
+    OLD=$(git rev-parse main)
+    git merge --no-edit -q main || fail "main moved during the proof and merging it conflicts: resolve, commit, run bin/land again"
+    print "main moved during the proof: merged it, landing without proving again"
+    print "(main moved during the proof; merged $OLD in unproved)" >> "$HERE/target/land-msg"
+  fi
   NEW=$(git commit-tree "HEAD^{tree}" -p "$OLD" -p HEAD -F "$HERE/target/land-msg") || fail "commit-tree"
   if git update-ref -m "bin/land $B" refs/heads/main "$NEW" "$OLD" 2>/dev/null; then
     print "main $(git log --oneline -1 "$NEW" | cut -c1-100)"
@@ -44,6 +55,5 @@ for i in 1 2 3 4 5; do
     nice -n 15 "$MAIN/bin/update" $UARGS | tail -1
     print LANDED; exit 0
   fi
-  print "main moved during the proof ($i): merging it again"
 done
-fail "main moved under five proofs in a row"
+fail "main moved under ten merges in a row"
