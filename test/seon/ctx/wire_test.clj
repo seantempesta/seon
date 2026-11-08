@@ -1137,7 +1137,7 @@
 (deftest a-cited-section-main-changed-is-its-part-alone
   (let [[db _] (sections-near "Make ```demo/g``` say one thing; see [the model](docs/vector.md#the-model).")
         [w _ cell _ rid :as walk] (walked db)
-        part "cited-docs_2Fvector.md_23the-model"
+        part "cited-docs_2Fvector_2Emd_23the-model"
         html (fn [w] (into {} (map (juxt :id :html)) (render/placed-units w)))]
     (is (some? ((html w) part)) "the cited section, a part of its own")
     (let [changed (step! walk [[:db/add [:seon.doc/address "docs/vector.md#the-model"] :seon.doc/lead "The model, as main now says it."]])

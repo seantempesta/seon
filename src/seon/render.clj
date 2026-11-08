@@ -238,10 +238,11 @@
     (into [(symbol f)] (map child-key) children)))
 
 (defn- id-safe
-  "Text s as part of an element id, one to one: letters, digits, . and - as themselves, every other
-  character _ and its code in hex (a.b/c -> a.b_2Fc, a_b -> a_5Fb)."
+  "Text s as part of an element id, one to one: letters, digits and - as themselves, every other
+  character _ and its code in hex (a.b/c -> a_2Eb_2Fc, a_b -> a_5Fb). A . is escaped too: #id selectors read it as a
+  class (Datastar's patches select by #id; review of 2026-11-08). See docs/render.md#in-flight-output-streams."
   {:malli/schema [:=> [:cat :string] :string]}
-  [s] (apply str (map #(if (or (Character/isLetterOrDigit ^char %) (= \. %) (= \- %)) % (format "_%02X" (int %))) s)))
+  [s] (apply str (map #(if (or (Character/isLetterOrDigit ^char %) (= \- %)) % (format "_%02X" (int %))) s)))
 
 (defn key-id
   "Key k as its component's root element id, one to one: its render's name and the name of what it shows (seon.render.ui/eval-item of eval e12 ->

@@ -1769,8 +1769,9 @@
     (r/dispose-walk! w)))
 
 (deftest a-key-is-its-id-one-to-one
-  ;; an element id names one component: two keys never write one id
-  (is (= "x-a.b_2Fc" (r/key-id ['x 'a.b/c])))
+  ;; an element id names one component: two keys never write one id; none holds a . (a #id selector reads it as a class)
+  (is (= "x-a_2Eb_2Fc" (r/key-id ['x 'a.b/c])))
+  (is (not (str/includes? (r/key-id ['cited 'seon.render.ui/status "a.b"]) ".")))
   (is (not= (r/key-id ['x 'a.b/c]) (r/key-id ['x 'a_b/c]) (r/key-id ['x "a.b/c"]))))
 
 (deftest a-dead-agents-eval-opens
