@@ -1006,8 +1006,8 @@
   db by seon.ctx.search/search (exact words, meaning once its query has a vector, and the names it holds;
   functions, wiki sections and schema keys, no relevance cut), its :seon.search/k hits (else
   :seon.config.render/search's), each a line: its name (its first sentence added nothing a model used, at
-  ~90 tokens a hit against ~10: docs/vector.md#search); the hits left out are one last line, how many and the call
-  that answers them; a query with no vector yet says it was searched without meaning. A change of its query (a swap! on ctx)
+  ~90 tokens a hit against ~10: docs/vector.md#search); the hits left out are not drawn (my.agent/search answers them);
+  nothing until its query has a vector, since words alone match as weakly when nothing is to be found. A change of its query (a swap! on ctx)
   redraws this part alone, and the model is sent what changed of it
   (docs/render.md#the-render-is-an-eval). What it finds for a request is measured in
   docs/vector.md#what-the-work-is-likely-to-need-as-an-eval."
@@ -1016,18 +1016,17 @@
   (when-let [s (some-> (get-in c at) ratom/realize)]
     (let [q (:seon.search/query s)
           ;; the search fact's own vector, once the pipeline has embedded its query (seon.vector's due texts)
-          e (pdb/eid db :seon.search/id (:seon.search/id s))
-          qv (when (and e (vector/vector-of db e)) e)
-          ;; its own count when it names one, else :seon.config.render/search's; the hits it leaves out are
-          ;; said by search's last entry ({:kind :more :left n :more \"the call that answers them\"}), drawn as such
-          hits (search/search db q (cond-> {:kinds #{:var :section :schema} :min 0.0} (:seon.search/k s) (assoc :k (:seon.search/k s))) qv)]
-      ;; the task's own request is on the page already: the heading names it rather than repeating it
-      [:section [:h3 (str (if (= q (get-in c [:task :seon.task/plan])) "search: this task's request" (str "search: " q))
-                          (when-not qv " (by its words: its query has no vector yet)"))]
-       (into [:ol] (for [{:keys [kind name left more]} hits]
-                     (if (= :more kind)
-                       [:li (str left " more: ") [:code more]]
-                       [:li [:code (str name)]])))])))
+          e (pdb/eid db :seon.search/id (:seon.search/id s))]
+      ;; drawn once its query has a vector, never by words alone: words alone found the same weak matches for a
+      ;; request with nothing to find as for one with something (owner, 2026-11-08: wait for its vector)
+      (when (and e (vector/vector-of db e))
+        (let [;; its own count when it names one, else :seon.config.render/search's; the hits left out are not
+              ;; drawn: a count that moves each turn would resend the line (my.agent/search answers them)
+              hits (remove #(= :more (:kind %))
+                           (search/search db q (cond-> {:kinds #{:var :section :schema} :min 0.0} (:seon.search/k s) (assoc :k (:seon.search/k s))) e))]
+          ;; the task's own request is on the page already: the heading names it rather than repeating it
+          [:section [:h3 (if (= q (get-in c [:task :seon.task/plan])) "search: this task's request" (str "search: " q))]
+           (into [:ol] (for [{:keys [name]} hits] [:li [:code (str name)]]))])))))
 
 (defn- held-whole
   "Where ctx c holds whole each entity the cites at paths ps joined, {e path}: the agent's task and its needs, the
