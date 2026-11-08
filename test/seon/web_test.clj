@@ -169,3 +169,65 @@
     (doseq [headers [{} {"origin" own} {"sec-fetch-site" "same-origin"}]]
       (clojure.test/is (= 204 (:status (post headers))) (str "served: " (pr-str headers)))
       (clojure.test/is (= :call (:op (a/poll! ch))) (str "the call reached the proc: " (pr-str headers))))))
+
+;; In-flight output (task seon.render/one-walk-per-view, rule 10; docs/render.md#in-flight-output-streams): an effect's
+;; text appended by id to the tabs of its agent's chat, a gap and a missed start marked with …, nothing kept past :end
+(defn- stream-tabs
+  "The web proc with a1's chat open in two tabs (one by its id, one by its branch) and a2's in a third, and the agents' index."
+  []
+  (let [st (#'w/web-proc {:port 0})
+        [st _] (#'w/web-proc st :from-render {:op :index :agents index})
+        a1 (a/chan 64) a1b (a/chan 64) a2 (a/chan 64)
+        [st _] (#'w/web-proc st :http {:op :open :view [:chat :a1] :ch a1})
+        [st _] (#'w/web-proc st :http {:op :open :view [:chat :agent-1] :ch a1b})
+        [st _] (#'w/web-proc st :http {:op :open :view [:chat :a3] :ch a2})
+        ;; a tab opens stale until its keyframe: give each one
+        st (reduce (fn [st v] (first (#'w/web-proc st :from-render {:op :keyframe :view v :html "<div id=\"app\"></div>"})))
+                   st [[:chat :a1] [:chat :agent-1] [:chat :a3]])]
+    (doseq [c [a1 a1b a2]] (a/poll! c))
+    [st a1 a1b a2]))
+
+(deftest a-stream-appends-to-its-agents-chat
+  (let [[st a1 a1b a2] (stream-tabs)
+        [st _] (#'w/web-proc st :streams {:stream "a1/3/0/message" :agent :a1 :offset 0 :text "Reading <the> task"})
+        sel "#a1_2F3_2F0_2Fmessage"]
+    (doseq [c [a1 a1b]]
+      (is (= (str "event: datastar-patch-elements\ndata: selector " sel "\ndata: mode append\ndata: elements Reading &lt;the&gt; task\n\n") (a/poll! c))
+          "the text, escaped, appended to the element with the stream's id, in a1's chat by its id and by its branch"))
+    (is (nil? (a/poll! a2)) "another agent's chat gets nothing")
+    (let [[_ _] (#'w/web-proc st :streams {:stream "a1/3/0/message" :agent :a1 :offset 18 :text " now"})]
+      (is (str/includes? (a/poll! a1) "data: elements  now\n") "the next text follows with no mark"))))
+
+(deftest a-stream-gap-appends-an-ellipsis
+  (let [[st a1] (stream-tabs)
+        [st _] (#'w/web-proc st :streams {:stream "a1/3/0/message" :agent :a1 :offset 0 :text "abc"})
+        _ (a/poll! a1)
+        ;; offsets 3-9 were dropped before this proc (the sliding in-port): the text says so
+        [st _] (#'w/web-proc st :streams {:stream "a1/3/0/message" :agent :a1 :offset 10 :text "xyz"})]
+    (is (str/includes? (a/poll! a1) "data: elements …xyz\n"))
+    (let [[_ _] (#'w/web-proc st :streams {:stream "a1/3/0/message" :agent :a1 :offset 13 :text "!"})]
+      (is (str/includes? (a/poll! a1) "data: elements !\n") "and carries on from the new offset"))))
+
+(deftest a-tab-that-missed-a-streams-start-sees-an-ellipsis
+  (let [[st a1] (stream-tabs)
+        [st _] (#'w/web-proc st :streams {:stream "a1/3/reasoning" :agent :a1 :offset 0 :text "Thinking"})
+        _ (a/poll! a1)
+        late (a/chan 64)
+        [st _] (#'w/web-proc st :http {:op :open :view [:chat :a1] :ch late})
+        [st _] (#'w/web-proc st :from-render {:op :keyframe :view [:chat :a1] :html "<div id=\"app\"></div>"})
+        _ (a/poll! late)
+        [_ _] (#'w/web-proc st :streams {:stream "a1/3/reasoning" :agent :a1 :offset 8 :text " more"})]
+    (is (str/includes? (a/poll! late) "data: elements … more\n") "a tab opened mid-stream: its first append says what it missed")
+    (is (str/includes? (a/poll! a1) "data: elements  more\n") "a tab that saw the start: no mark")))
+
+(deftest an-end-and-an-ended-agent-leave-no-stream-entries
+  (let [[st] (stream-tabs)
+        [st _] (#'w/web-proc st :streams {:stream "a1/3/0/message" :agent :a1 :offset 0 :text "a"})
+        [st _] (#'w/web-proc st :streams {:stream "a1/3/reasoning" :agent :a1 :offset 0 :text "b"})
+        [st _] (#'w/web-proc st :streams {:stream "a3/1/reasoning" :agent :a3 :offset 0 :text "c"})
+        [st _] (#'w/web-proc st :streams {:stream "a1/3/0/message" :agent :a1 :end true})]
+    (is (= 2 (:streams (#'w/stats st))) "the ended stream's entry is gone")
+    (let [[st _] (#'w/web-proc st :from-render {:op :index :agents (assoc-in index [:a1 :status] :killed)})]
+      (is (= 1 (:streams (#'w/stats st))) "an agent whose process ended takes its open streams with it")
+      (is (not-any? #(= :a1 (first %)) (mapcat :seen (vals (:tabs st)))) "no tab keeps what it saw of them")
+      (is (some #(= [:a3 "a3/1/reasoning"] %) (mapcat :seen (vals (:tabs st)))) "a live agent's stream stays seen"))))
