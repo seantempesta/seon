@@ -1297,27 +1297,27 @@
       (finally (end-agent!)))))
 
 (deftest the-rules-move-only-when-a-rule-does
-  ;; docs/render.md#style: the model reads the CSS as the page does. A person's page asking for what only it draws moves no rule; a rule edited moves them
+  ;; docs/render.md#style: the page draws the CSS and the model's request holds none (owner, 2026-11-08); a rule edited moves the page's rules, never the model's page
   (let [db (seeded 3 nil)
         v #'seon.render.ui/task
         was-style (:seon.render/style (meta v))
-        was-f (var-get v)]
+        was-f (var-get v)
+        rules-of (fn [page] (some #(when (str/starts-with? (:id %) "page-rules") (:html %)) (:units page)))]
     (try
       (enter-agent! {:db db :key k :branch :b})
       (let [all (my.render/render-ctx)
-            rules (some (fn [[id f]] (when (= "page-rules" id) f)) (:components all))
             page (seon.repl/render-ctx)
-            after-person (my.render/render-changes)
             _ (alter-meta! v assoc :seon.render/style ".task { color: red; }")
             _ (alter-var-root v (fn [f] (fn [& args] (apply f args))))
-            edited (my.render/render-changes)]
-        (is (str/includes? (pr-str rules) ".task") "the first page holds the rules")
-        (is (not (str/includes? (pr-str rules) ".chat-ask")) "the model reads no rule of a render for the page alone")
-        (is (some #(and (str/starts-with? (:id %) "page-rules") (str/includes? (:html %) ".chat-ask")) (:units page)) "the page does")
-        (is (some #(and (vector? %) (= :style (first %)) (= 'seon.render.ui/task (:key (second %)))) rules) "one a render, by its name")
-        (is (not-any? #(= "page-rules" (first (first %))) (:edits after-person)) "a person's page moved no rule")
-        (is (some #(= "page-rules" (first (first %))) (:edits edited)) "a rule edited did")
-        (is (str/includes? (pr-str (:edits edited)) "color: red") "and says the rule"))
+            edited (my.render/render-changes)
+            page' (seon.repl/render-ctx)]
+        (is (seq (:components all)) "the model reads its page")
+        (is (not-any? (fn [[id _]] (= "page-rules" id)) (:components all)) "and no rule of it")
+        (is (not (str/includes? (pr-str all) ".task >")) "no CSS anywhere in what it reads")
+        (is (str/includes? (rules-of page) ".task") "the page holds the rules")
+        (is (str/includes? (rules-of page) ".chat-ask") "a page-only render's too")
+        (is (not-any? #(= "page-rules" (first (first %))) (:edits edited)) "a rule edited moves nothing the model reads")
+        (is (str/includes? (rules-of page') "color: red") "and moves the page's rules"))
       (finally
         (alter-var-root v (constantly was-f))
         (alter-meta! v assoc :seon.render/style was-style)

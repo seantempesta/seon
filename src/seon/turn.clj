@@ -313,7 +313,7 @@
             _ (intr/clear-pending!)
             ;; each eval call through the one REPL path, in order; its response is the call's result. The reply's text and
             ;; reasoning are the model call's own (below), never copied onto an eval
-            ;; a call with no intent or no form, or after one that threw or answered an error, is not run: its one
+            ;; every call runs, whatever the one before it did; a call with no intent or no form is not run, and its one
             ;; result says why (seon.repl/unrun, docs/prompt.md)
             ;; each eval streams its output under its place in the reply (seon.model/reply-of's :seon.model/at [k i]), as its code is
             ;; named: <call>/<k>/eval-<i>/... (seon.repl/streaming)

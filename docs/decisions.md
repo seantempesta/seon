@@ -34,9 +34,13 @@ Owner, 2026-11-08: "Don't we have an ID generator that's better than a UUID and 
 
 Owner, 2026-11-08: "I do want a message in markdown but couldn't that just be the agents normal response and the tool calls are separate tool calls each with an intent and the forms? Is that easier to parse?"; "agreed A/B test and see if we can do the simpler version if not fix the format so it's not so hard to parse"; on the A/B (arm 1 kept a message on 10 of 22 replies, each good, against 118 of 120 for one call with message-md required): "If the messages are good with the simpler version we don't have to have a message for every batch of evals. If the agent knows what it's doing and just wants to update less frequntly that's fine." Each eval is its own call `{intent, code}`; the reply's text is its message, optional. Stated in: [one tool](model.md#one-tool-eval), [the prompt](prompt.md).
 
+### The model's request holds no CSS; an agent reads it where it lives (owner, 2026-11-08)
+
+Owner, 2026-11-08: "ONly the RELEVANT CSS is supposed to be pulled in. Ugh I guess if we don't have agents actively working on the CSS we can leave it out if that's easier"; "We need to make sure we are telling agents about their CSS and how they can search it, view it, update it whatever is the most intuitiveway tto do this from the REPL and it needs to be in the system prompt or in the docs that are pulled into all agents." The page draws every render's rules; the request holds none (it had been about 400 tokens of a small task's 1,900-token first page). A render's CSS is its var's `:seon.render/style`, found, read and changed at the REPL with Clojure's own `meta`, `source` and `edit!`, as the system prompt says. Only the rules of the renders an agent's work changes, in the request, waits until agents work on CSS. Stated in: [style](render.md#style), [the prompt](prompt.md).
+
 ### Every eval of a reply runs (owner, 2026-11-08)
 
-Owner, 2026-11-08: "I want us to run every eval. Turns are precious and one fuckup shouldn't punish the other evals. Yes I understand this could cause issues if the next eval is dependent on the previous. I still want to try turning this on". Stated in: ```seon.repl/run-calls```, [the prompt](prompt.md).
+Owner, 2026-11-08: "I want us to run every eval. Turns are precious and one fuckup shouldn't punish the other evals. Yes I understand this could cause issues if the next eval is dependent on the previous. I still want to try turning this on". And, of the eval tool's description still saying a throw ends the run: "yeah that's wrong update it. Agent turns are expensive. Still run the evals sequentially but execute all of them. Yes I understand that could lead to incorrect evals. It's okay". The calls run in order, every one; the rule is said once, in the system prompt, and the tool's description points there. Stated in: ```seon.repl/run-calls```, [the prompt](prompt.md).
 
 ## 2026-11-07 rulings
 
@@ -480,7 +484,7 @@ The owner's rulings of 2026-10-28, each with where it is now stated; they stand 
 
 ### The eval protocol: tool calls by id; one form per call; a top-level do is its forms, as in Clojure (owner, 2026-10-28; one form superseded 2026-10-29)
 
-A reply's text heads its block of evals; each eval is one tool call with `intent` and one form, its result a tool message matched by the provider's call id; calls run in order and stop at the first throw, each later call answered "not run"; a reply with no call is the message to the user. "Match Clojure: unroll a top-level do so its definitions are program, and tighten the system text to one definition per call." Stated in: docs/prompt.md, `seon.turn` (the calls), `seon.repl/eval-code`.
+A reply's text heads its block of evals; each eval is one tool call with `intent` and one form, its result a tool message matched by the provider's call id; calls run in order and stop at the first throw, each later call answered "not run" (superseded 2026-11-08: [every eval of a reply runs](#every-eval-of-a-reply-runs-owner-2026-11-08)); a reply with no call is the message to the user. "Match Clojure: unroll a top-level do so its definitions are program, and tighten the system text to one definition per call." Stated in: docs/prompt.md, `seon.turn` (the calls), `seon.repl/eval-code`.
 
 ### Nothing crashes and nothing hangs; failures are data to the agent (owner, 2026-10-28)
 
