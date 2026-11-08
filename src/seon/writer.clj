@@ -158,7 +158,7 @@
                                    (contract/error :seon.merge/behind #'seon.writer/judged-members
                                                    "another member of the octopus merge changes the same definitions: merge main into the branch first"
                                                    {:tx (:max-tx main) :behind (count (filter taken (keys (:ours r))))})))
-                     db' (when-not why-not (d/db-with db (pm/merge-tx main base head (keys (:ours r)) data-attrs)))
+                     db' (when-not why-not (pdb/speculate-db db (pm/merge-tx main base head (keys (:ours r)) data-attrs)))
                      why-not (or why-not (dangling-refused main db' (boolean (seq taken))))]
                  (-> acc (update :members conj {:branch b :r r :head head :base base :refused why-not})
                      (cond-> (nil? why-not) (-> (update :taken into (keys (:ours r))) (assoc :db db'))))))
@@ -219,7 +219,8 @@
           ;; one stored commit, one notice: the last report's t, every report's ops in order
           (let [st (reduce (fn [st [m rep]]
                              (if-not (map? rep)
-                               (do (answer o (:dest m) (refused (step/error-msg rep) {})) st)
+                               ;; a typed refusal (seon.db/invalid-entity) is answered as itself
+                               (do (answer o (:dest m) (or (when (:seon.error/type (ex-data rep)) (ex-data rep)) (refused (step/error-msg rep) {}))) st)
                                (let [t (:max-tx (:db-after rep)) ops (pdb/report->tx rep)]
                                  (answer o (:dest m) {:ok true :t t :datoms (count ops)})
                                  st)))
@@ -284,7 +285,7 @@
       :merge-candidate (reply st (if (exists? (:branch m))
                                    (let [data-attrs (:data-attrs m #{})
                                          [head r base] (branch-merge st (:branch m) data-attrs)
-                                         db (d/db-with @conn (pm/merge-tx @conn base head (keys (:ours r)) data-attrs))
+                                         db (pdb/speculate-db @conn (pm/merge-tx @conn base head (keys (:ours r)) data-attrs))
                                          w (written db (:ours r))
                                          text (doc/files db (:files w))]
                                      (or (dangling-refused @conn db false) (unanalyzable db text)
@@ -326,10 +327,8 @@
   [st o {:keys [op] :as m}]
   (try
     (if (= op :tx)
-      ;; what its attribute refuses is answered here, its requester's own, and never joins the batch
-      (if-let [e (pdb/invalid-datom @(:conn st) (:tx-data m))]
-        (do (answer o (:dest m) e) st)
-        (update st :pend (fnil conj []) m))
+      ;; the batch's transact checks it (seon.db/transact-checked): a refusal is answered to its requester alone
+      (update st :pend (fnil conj []) m)
       (other-op (commit-batch st o) o m))
     (catch Throwable e
       ;; an interop edge (Datahike) refused: the request's answer is the error, as data

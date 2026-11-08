@@ -18,7 +18,7 @@
      (let [main (:branch cfg)
            b (keyword (str (name main) "-a1"))
            _ (d/branch! conn main b)
-           bc (d/connect (assoc cfg :branch b))]
+           bc (pdb/connect (assoc cfg :branch b))]
        (try
          ;; root writes on main after the agent forked: the agent's branch never holds it
          (d/transact conn {:tx-data [{:seon.message/id "m1" :seon.message/from "root" :seon.message/body "main moved, merge main"}]

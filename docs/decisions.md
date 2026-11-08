@@ -6,6 +6,10 @@ This file holds the owner's standing rulings, one entry each: the rule, the owne
 
 The owner's rulings of 2026-11-08, on what the model knows, erasing the store, and how a reply's evals run.
 
+### Entity schemas are sets of keys written together, checked on write; one definition each (owner, 2026-11-08)
+
+"All sets of keys that match schemas are validated?"; "we want accretion"; "But yeah get rid of the duplicate definitions for sure"; "Validate the ones that are there"; "Just have the individual ones or if there are configs that must be together just do those"; "The goal of this is to see what shakes out so don't just patch things look for deeper issues"; "One good definition should catch problems". An entity holding any key a schema requires holds them all; maps are open; a function's contract and any whole map cite each key's one schema; a refusal is fixed where the disagreement is, the code, the schema or the fixture. Stated in: docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together; docs/storage.md#the-write-checks-every-entity-it-touches. Work: task seon.db/one-definition-of-each-entity.
+
 ### The main tree stays on main; each session works in its own worktree (owner, 2026-11-08)
 
 Owner, 2026-11-08: "Wait what? I thought we were using worktrees?"; "Yeah update the agents file. That's just wrong", of AGENTS §3 telling a session to work its topic branch in the main tree (written 2026-10-28 for one session: "Stop doing separate worktrees for small updates. It's overkill", now superseded). With several sessions sharing the main tree, one's branch checked out there took main from the others: their merges stopped and `bin/update` (which runs only from the main tree on main) could not restart root. Stated in: AGENTS.md §2 (helpers) and §3 (one task at a time).

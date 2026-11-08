@@ -194,10 +194,12 @@
     (is (= #{:seon.config.root/max-agents :seon.config.store/backend} (set (map :key (:seon.config/problems r)))))
     (is (every? #(= :invalid (:problem %)) (:seon.config/problems r)))))
 
-(deftest a-missing-required-key-refuses-and-nil-is-absent
-  (let [r (refused #(config/resolved (assoc config/config :seon.config.store/branching-factor nil)))]
-    (is (= [{:key :seon.config.store/branching-factor :problem :missing-key :value "nil"}] (:seon.config/problems r))))
-  ;; an optional key resolving nil is absent, not a stored nil
+(deftest a-key-resolving-nil-is-absent-and-reading-it-is-refused
+  ;; every key is optional (a task holds single keys as overrides; owner, 2026-11-08: "validate the ones that are
+  ;; there"); the shipped file states each one (the-shipped-file-validates-under-every-profile)
+  (let [c (config/resolved (assoc config/config :seon.config.store/branching-factor nil))]
+    (is (not (contains? c :seon.config.store/branching-factor)) "absent, never a stored nil"))
+  ;; a key resolving nil is absent, not a stored nil
   (is (not (contains? (config/resolved (assoc config/config :seon.config.ai/thinking nil)) :seon.config.ai/thinking)))
   (is (= :disabled (:seon.config.ai/thinking (config/resolved (assoc config/config :seon.config.ai/thinking :disabled))))))
 
@@ -236,7 +238,7 @@
     (is (= {:boot "boot-1" :max-running 6 :max-merging (config/value :seon.config.merge/max-running)} (task/root @conn)))
     ;; a branch made from main holds them too (what an agent forked onto it reads)
     (d/branch! conn (:branch cfg) child)
-    (is (= c (config/from-db @(d/connect (assoc cfg :branch child)))))))))
+    (is (= c (config/from-db @(pdb/connect (assoc cfg :branch child)))))))))
 
 ;; owner, 2026-10-28: "Fix the model provider not reading the config. A config can override at any point even
 ;; between turns." The provider was copied once at boot (seon.root/start!); it is resolved at the call now
@@ -249,7 +251,7 @@
       (testing "a change to main's config applies at the next call, with no restart"
         (tick! {:seon.config.ai/provider :scripted :seon.config.ai/script 'seon.fixtures/reply})
         (is (= {:kind :scripted :script 'seon.fixtures/reply} (config/provider-at @conn @conn nil))))
-      (d/transact conn {:tx-data [{:seon.task/id "a/own" :seon.config.ai/provider :none} {:seon.task/id "a/other"}]})
+      (d/transact conn {:tx-data [{:seon.task/id "a/own" :seon.task/ns (quote a) :seon.task/name "own" :seon.task/plan "p" :seon.task/execution :held :seon.task/branch :task-a-own :seon.task/kind :work :seon.config.ai/provider :none} {:seon.task/id "a/other" :seon.task/ns (quote a) :seon.task/name "other" :seon.task/plan "p" :seon.task/execution :held :seon.task/branch :task-a-other :seon.task/kind :work}]})
       (testing "a task's own setting wins over main's, from its next turn"
         (is (= {:kind :none} (config/provider-at @conn @conn "a/own")))
         (is (= {:kind :scripted :script 'seon.fixtures/reply} (config/provider-at @conn @conn "a/other"))

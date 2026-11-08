@@ -2005,7 +2005,7 @@
             (swap! a assoc :seon.agent/description "an unrelated change")
             (r/flush! w nil)
             (is (= r0 (ran)) "an unrelated change redraws none of them")
-            (d/transact conn [{:seon.task/id "demo/g" :seon.task/ns 'demo :seon.task/name "g" :seon.task/plan "Make demo/g." :seon.task/kind :work :seon.task/proofs #{}}])
+            (d/transact conn [{:seon.task/id "demo/g" :seon.task/ns 'demo :seon.task/name "g" :seon.task/plan "Make demo/g." :seon.task/execution :held :seon.task/branch :task-demo-g :seon.task/kind :work :seon.task/proofs #{}}])
             (swap! a assoc :seon.agent/main-commit (d/commit-id @conn))
             (r/flush! w nil)
             (is (= r0 (ran)) "main's commit moving alone redraws none of them: root notes an agent's status on main at each eval")
@@ -2178,8 +2178,8 @@
   (is (= :seon.db/user-fact (r/schema-of (array-map :seon.agent/key "sean" :seon.user/name "sean") nil)) "and a value's schema the same way")
   (is (= (r/schema-property :seon.db/agent-fact :seon.ctx/pattern) (r/schema-property :seon.db/user-fact :seon.ctx/pattern))
       "a user's pattern is the agent's it extends")
-  (is (= :seon.agent/key (some #{:seon.agent/key} (keys r/entity-schemas))) "an attribute an extended schema names")
-  (is (= :seon.db/agent-fact (r/entity-schemas :seon.agent/key)) "is named by that schema alone"))
+  (is (= :seon.agent/key (some #{:seon.agent/key} (keys seon.db/entity-schemas))) "an attribute an extended schema names")
+  (is (= :seon.db/agent-fact (seon.db/entity-schemas :seon.agent/key)) "is named by that schema alone"))
 
 (deftest two-unrelated-identity-schemas-are-an-error
   ;; docs/ctx.md#the-pattern: a record whose identities name schemas neither extends is no one thing: an error naming them, never the
@@ -2278,7 +2278,7 @@
       (d/transact conn (seon.root/root-session-message-tx @conn (seon.task/message-tx "m-first" "sean" ["root"] "Hi root." 1)))
       (let [fork (d/commit-id @conn)
             _ (d/transact conn [{:seon.task/id "request/later" :seon.task/ns 'request :seon.task/name "later" :seon.task/plan "Asked after root's session forked."
-                                 :seon.task/kind :user :seon.task/branch :task-request-later :seon.task/outcome :parked}
+                                 :seon.task/kind :user :seon.task/branch :task-request-later :seon.task/execution :running :seon.task/outcome :parked}
                                 {:seon.agent/key "b1/a7" :seon.agent/task [:seon.task/id "request/later"]}])
             main (d/commit-id @conn)
             ;; the session's branch: main as it forked, and the main its last turn heard

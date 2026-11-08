@@ -37,7 +37,7 @@
         (is (= (d/commit-id @(:conn seed)) (d/merge-base (:conn a) :smoke-1 :db) (d/merge-base (:conn b) :drain-1 :db)))
         (is (= (count (d/datoms @(:conn seed) :eavt)) (count (d/datoms @(:conn a) :eavt)))))
       (testing "a step's writes stay on its main"
-        (d/transact (:conn a) [{:note/text "smoke's"}])
+        (d/transact (:conn a) [{:note/text "smoke's" :note/agent :t}])
         (is (= #{"smoke's"} (notes @(:conn a))))
         (is (= #{} (notes @(:conn b))))
         (is (= #{} (notes @(:conn seed)))))
@@ -74,7 +74,7 @@
   (let [dir (seon.config/checkout)
         path (str dir "/target/runs/check-test-given-" (random-uuid))
         _ (d/release (:conn (pdb/open! :lmdb path 300 :db)))
-        branches #(let [c (d/connect (pdb/store-cfg :lmdb path))] (try (d/branches c) (finally (d/release c))))
+        branches #(let [c (pdb/connect (pdb/store-cfg :lmdb path))] (try (d/branches c) (finally (d/release c))))
         before (branches)
         ;; the step's own runs directory: other tests (bin/test's shards run at once) make theirs
         ;; under target/runs while this one runs, so only a directory of its own shows what it made

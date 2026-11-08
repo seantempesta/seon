@@ -12,6 +12,9 @@
 #   measures    a clock read (currentTimeMillis, nanoTime, now-ns) docs/clocks.md
 #   resolution  requiring-resolve, ns-resolve, (resolve '..),
 #               intern, alter-var-root, with-redefs               docs/resolution.md
+#   transactions a Datahike transaction: d/with, d/db-with, d/transact,
+#               the writer's apply!/transact-batch!: every one passes the
+#               one path (seon.db/with, the writer's checked 'transact!)    docs/storage.md "## The write checks every entity it touches"
 # bin/laws growth [BASE]: not a gate; net src lines since BASE (default main) and the
 # top-level definitions on its added lines (ns/name; a moved one counts).
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -51,7 +54,7 @@ sites() { # KIND PATTERN DOC [SECTION]
 }
 # catch is the health step's :unnamed-site (bin/check health), run by name only: a default run
 # here would run the whole health a second time beside the step that runs it
-kinds=${*:-clocks measures resolution}
+kinds=${*:-clocks measures resolution transactions}
 for k in $kinds; do
   [ "$k" = catch ] || echo "== $k"
   case $k in
@@ -61,6 +64,7 @@ for k in $kinds; do
     clocks) sites clocks '[Ss]leep|[Tt]imeout([^s]|$)|deadline|[A-Z]-MS' docs/clocks.md "## Time decides" ;;
     measures) sites measures 'currentTimeMillis|nanoTime|now-ns|now-ms' docs/clocks.md ;;
     resolution) sites resolution "[(](requiring-resolve|ns-resolve|resolve '|intern|alter-var-root|with-redefs)[ )]" docs/resolution.md ;;
+    transactions) sites transactions '[(](d|datahike[.]api|datahike[.]core|dc|dw|datahike[.]writer|datahike[.]writing|w)/(with|db-with|transact!?|transact-batch!|apply!|connect)[ )]' docs/storage.md "## The write checks every entity it touches" ;;
     *) echo "laws: no kind $k"; bad=1 ;;
   esac
 done

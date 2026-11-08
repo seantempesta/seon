@@ -1233,7 +1233,7 @@
        :timeout (in-child-bounded (fn [] (= :t (a/alt!! (a/timeout 10) :t))))
        :store (in-child-bounded (fn [] (let [cfg {:store {:backend :memory :id (random-uuid)}}]
                                       (d/create-database cfg)
-                                      (let [c (d/connect cfg)] (d/transact c [{:db/ident :x}]) (d/release c) true))))})
+                                      (let [c (seon.db/connect cfg)] (d/transact c [{:db/ident :x}]) (d/release c) true))))})
    "ends-with-its-starter"
    ;; a process ends with the pid it watches (seon.lib/end-with!), and so does what it forks: mid
    ;; watches itself, so its child inherits the watch of mid; the child parks in a read that never
@@ -1433,7 +1433,7 @@
         mr (mapv answer mains)
         ok-main (count (filter :ok mr))
         refused-main (count (filter #(= "root stopped" (:seon.error/message %)) mr))
-        conn (d/connect (:cfg sys))
+        conn (seon.db/connect (:cfg sys))
         main-notes (d/q '[:find (count ?e) . :where [?e :note/agent :root]] @conn)
         left (filter alive? (cons fs-pid pids))]
       (d/release conn)
@@ -1523,10 +1523,10 @@
    (fn [sys]
     (let [hit (promise)
         old @#'seon.reconcile/reconciler-proc
-        _ @(c/transact-main! sys [{:note/text "before"}])
+        _ @(c/transact-main! sys [{:note/text "before" :note/agent :t}])
         _ (alter-var-root #'seon.reconcile/reconciler-proc
                           (fn [f] (fn ([] (f)) ([a] (f a)) ([st tr] (f st tr)) ([st in m] (deliver hit true) (f st in m)))))
-        _ (dotimes [i 3] @(c/transact-main! sys [{:note/text (str "after" i)}]))
+        _ (dotimes [i 3] @(c/transact-main! sys [{:note/text (str "after" i) :note/agent :t}]))
         ;; the redefined step delivers when it runs: no poll
         _ @hit
         health (ping sys :reconciler)
@@ -1563,7 +1563,7 @@
            :plain-us (per "(identity {:x i})" n)
            :echo-us (per "(my.fx/call :echo {:x i})" n)
            :floor-us (per "(my.fx/call :nope {})" n)
-           :transact-us (per "(transact! [{:note/text \"r\"}])" (quot n 4))
+           :transact-us (per "(transact! [{:note/text \"r\" :note/agent :t}])" (quot n 4))
            :spit-us (per (str "(spit \"" dir "/a.txt\" (str \"text \" i))") n)
            :file-us (per (str "(my.fx/call :file {:path \"" dir "/b.txt\" :text (str \"text \" i)})") n)
            :send-us (per "(my.fx/send :echo {:x i})" n)
@@ -1788,7 +1788,7 @@
   (run-check "IDS" {}
    (fn [sys]
     (let [[a b] (spawn-ready! sys "ids a" "ids b")
-        notes (fn [tag n] (str "(transact! (vec (for [i (range " n ")] {:note/text (str \"" tag "\" i)})))"))
+        notes (fn [tag n] (str "(transact! (vec (for [i (range " n ")] {:note/text (str \"" tag "\" i) :note/agent :t})))"))
         _ (doall (pmap #(deref (c/submit! sys %1 (notes %2 10))) [a b] ["a" "b"]))
         ids-of (fn [ag] (ts/value-of @(c/submit! sys ag "(vec (q '[:find ?n ?tx :where [?n :note/text _ ?tx]]))")))
         ia (ids-of a) ib (ids-of b)
@@ -1972,7 +1972,7 @@
   (let [path (seon.config/value :seon.config.root/store-path)]
     (if (seon.db/store? path)
       (let [cfg (seon.db/store-cfg :lmdb path)
-            conn (d/connect cfg)
+            conn (seon.db/connect cfg)
             gone (vec (mapcat #(seon.db/delete-main! conn (keyword %)) mains))]
         (seon.db/sync! cfg)
         (d/release conn)
@@ -1994,7 +1994,7 @@
      "drop" (fn [n more] (drop-mains (remove nil? (cons n more))))
      ;; the store bin/check is given, its size and branch count: "PATH KB BRANCHES"
      "store" (fn [n more] (let [path (seon.config/value :seon.config.root/store-path)
-                  c (d/connect (seon.db/store-cfg :lmdb path))]
+                  c (seon.db/connect (seon.db/store-cfg :lmdb path))]
               (println path (quot (dir-bytes path) 1024) (count (d/branches c))) (d/release c) (lib/c-exit 0)))
      "durable-write" (fn [n more] (durable-write n))
      "durable-read" (fn [n more] (durable-read n))

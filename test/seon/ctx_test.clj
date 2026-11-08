@@ -186,7 +186,8 @@
 ;; docs/ctx.md: an entity's own attributes read by its datoms are what a pull of them answers, and cost a seek, not the pull engine
 (deftest an-entitys-own-reads-what-a-pull-reads
   (let [own @#'seon.ctx/own
-        db (my.test/with (my.test/world) [{:seon.task/id "demo/own" :seon.task/plan "p" :seon.task/proofs '#{a.b/c a.b/d}}
+        db (my.test/with (my.test/world) [{:seon.task/id "demo/own" :seon.task/ns 'demo :seon.task/name "own" :seon.task/plan "p" :seon.task/execution :held
+                                :seon.task/branch :task-demo-own :seon.task/kind :work :seon.task/proofs '#{a.b/c a.b/d}}
                               {:seon.agent/key "b/own" :seon.agent/task [:seon.task/id "demo/own"]}])
         pulled (fn [e] (let [many (get (:rschema db) :db.cardinality/many #{})
                              m (d/pull db '[*] e)]
@@ -1053,7 +1054,10 @@
      :growth :constant
      ;; +1: a task's plan and instructions are parsed apart, each its own text (seon.task/cited-texts, md-scan bench-b17);
      ;; +1: seon.doc/carry-index! keeps the search's text index across the transaction (the owner accepted it, 2026-11-01)
-     :fixed {:calls 113}
+     ;; +3: the swap's transaction is checked once, where it becomes data (seon.db/with, seon.db/invalid-datom,
+     ;; seon.db/invalid-entity; docs/storage.md#the-write-checks-every-entity-it-touches); the owner accepted validation at
+     ;; transaction time, 2026-11-08 ("a small price to pay. Make sure that implementation is efficient")
+     :fixed {:calls 116}
      :sizes [100 300 1000 3000]})
   ;; no record left behind: an empty state builds none (as-agent!'s callers leave theirs too)
   (end-agent!))

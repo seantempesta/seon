@@ -21,11 +21,6 @@
 
 ;; ---- the pattern: what ctx holds (docs/ctx.md#the-pattern) ---------------------------------
 
-(def ^:private identities
-  "{entity-schema identity}: the upsert key each entity schema names: whether its ids are issued in
-  time order (in-time-order?), and the attribute a new member's value names it by (edits)."
-  (into {} (for [[a s] render/entity-schemas :when (:seon.db/identity (contract/properties a))] [s a])))
-
 (defn- pattern-of
   "The pattern ctx holds of entity m (pulled, on db): its own :seon.ctx/pattern (the agent's
   edit), else the one its entity schema declares or a schema it extends does (render/schema-property), else its own attributes."
@@ -76,7 +71,7 @@
   not derived from their content (:seon.db/content-id on their identity)? Then their ids' order is
   the order they were written."
   {:malli/schema [:=> [:cat :map] :boolean]}
-  [j] (not (some-> (identities (render/entity-schemas (:attr j))) contract/properties :seon.db/content-id)))
+  [j] (not (some-> (pdb/schema-identities (pdb/entity-schemas (:attr j))) contract/properties :seon.db/content-id)))
 
 (defn- members
   "The entities join j holds of entity e (m, its own attributes), in the order ctx holds them: a
@@ -489,8 +484,8 @@
                                   (or (stub? o) (stub? m)) (refuse acc (conj path k) "held at another path: change it there")
                                   ;; a new member, under any key a swap! names it by: written from its value,
                                                   ;; which holds its own identity, under a tempid unique in the transaction
-                                  (and (nil? o) (some-> (identities (render/entity-schemas attr)) (#(nil? (get m %)))))
-                                  (refuse acc (conj path k) (str "a new member names its identity: " (identities (render/entity-schemas attr))))
+                                  (and (nil? o) (some-> (pdb/schema-identities (pdb/entity-schemas attr)) (#(nil? (get m %)))))
+                                  (refuse acc (conj path k) (str "a new member names its identity: " (pdb/schema-identities (pdb/entity-schemas attr))))
                                   (nil? o) (let [t (str "ctx" (count (:tx acc)))]
                                              (-> (edits db sub {} m t (conj path k) acc)
                                                  (update :tx conj [:db/add t attr e])
@@ -542,7 +537,7 @@
                       (do (vreset! pending c) true))
         (seq invalid) (throw (ex-info "ctx: refused by the schemas, nothing written" (contract/error :seon.ctx/invalid #'write! "refused by the schemas, nothing written: each path and why" {:invalid invalid})))
         :else
-        (let [rep (d/with db tx)
+        (let [rep (pdb/speculate db tx)
               held' (:tree (patch c (:db-after rep) (:tx-data rep) branch))
               holds? (fn [w h] (cond (and (map? w) (map? h)) (= (strip w) (strip (select-keys h (keys w))))
                                      ;; cardinality many: held as a set, whatever collection the swap! wrote

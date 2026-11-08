@@ -418,10 +418,10 @@
         b (runner/tree-branch tree)]
    (try
     (runner/keep-tree! conn cfg d tree b (d/branches conn))
-    (let [first-facts (count (d/datoms @(d/connect (assoc cfg :branch b)) :eavt))]
+    (let [first-facts (count (d/datoms @(pdb/connect (assoc cfg :branch b)) :eavt))]
       (runner/keep-tree! conn cfg d tree b #{:db})
       (is (= #{:db b} (set (d/branches conn))) "one branch for the tree, no staging branch left")
-      (is (= first-facts (count (d/datoms @(d/connect (assoc cfg :branch b)) :eavt))) "the second import added nothing to it"))
+      (is (= first-facts (count (d/datoms @(pdb/connect (assoc cfg :branch b)) :eavt))) "the second import added nothing to it"))
     (is (contains? (:digests (runner/plan-of d "tests" false nil store)) 'app.tr-calc-test/adds) "a plan reads it")
     (finally (d/release conn) (close-stores! store)))))
 

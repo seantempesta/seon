@@ -20,7 +20,7 @@
   Example: (my.test/with (my.test/world) (my.test/page \"docs/y.md\" \"# Y\\n\\nSee app.calc/add.\")) See docs/testing.md#testing-in-the-world."
   {:malli/schema [:=> [:cat :seon.host/db [:* :any]] :seon.host/db]}
   [db & fixtures]
-  (reduce (fn [db fx] (datahike.core/db-with db (if (fn? fx) (fx db) fx))) db fixtures))
+  (reduce (fn [db fx] (pdb/db-with db (if (fn? fx) (fx db) fx))) db fixtures))
 
 (defn code
   "A fixture: namespace nsym's source text as program facts (forms, vars, their contracts and

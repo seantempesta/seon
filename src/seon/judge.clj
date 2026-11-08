@@ -20,7 +20,7 @@
   [db t]
   (let [id (:seon.task/id t)
         k (str id "/first-move")
-        db (:db-after (d/with db [{:seon.agent/key k :seon.agent/task [:seon.task/id id]}]))]
+        db (:db-after (pdb/speculate db [{:seon.agent/key k :seon.agent/task [:seon.task/id id]}]))]
     {:messages (:messages (wire/render db {:commit (d/commit-id db) :task id :turn 1
                                               :max-turns (config/value :seon.config.agent/max-turns) :origin :model :agent k}))
      :model (:value (config/resolve :seon.config.ai/model {:task t}))
@@ -113,9 +113,10 @@
 
 (defn fact
   "The :seon.judge fact of task id's first move: its request's digest, the version that
-  served the context, the reply's calls, the score and the usage as the provider reported it."
-  {:malli/schema [:=> [:cat :string :seon.task/id :map [:vector :string] :map :map [:maybe number?]] :map]}
-  [dg id version calls sc usage usd]
-  (merge usage
-         {:seon.judge/digest dg :seon.judge/task id
-          :seon.judge/score (cond-> (assoc sc :version version :calls calls) usd (assoc :usd usd))}))
+  served the context, the reply's calls and the score with what it cost (:usd). The provider's token counts are the model
+  call's own attributes, on its entity: copied here they made this record read as a model call with no id, which the
+  write refuses (docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together)."
+  {:malli/schema [:=> [:cat :string :seon.task/id :map [:vector :string] :map [:maybe number?]] :map]}
+  [dg id version calls sc usd]
+  {:seon.judge/digest dg :seon.judge/task id
+   :seon.judge/score (cond-> (assoc sc :version version :calls calls) usd (assoc :usd usd))})

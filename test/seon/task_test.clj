@@ -180,10 +180,10 @@
      (let [main (:branch cfg) b (keyword (str (name main) "-a3"))
            k "a3"]
        (d/transact conn [{:seon.root/id :root :seon.root/boot "b1" :seon.config.agent/max-running 2}])
-       (d/transact conn [{:seon.task/id "demo/f" :seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "p" :seon.task/execution :running :seon.task/branch :task-demo-f}])
+       (d/transact conn [{:seon.task/id "demo/f" :seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "p" :seon.task/execution :running :seon.task/branch :task-demo-f :seon.task/kind :work}])
        (d/transact conn (task/agent-tx :a3 {:status :idle :pid 77 :running {:form "(f 2)"}}))
        (d/branch! conn main b)
-       (let [bc (d/connect (assoc cfg :branch b))]
+       (let [bc (pdb/connect (assoc cfg :branch b))]
          (try
            (d/transact conn (task/start-tx @conn "demo/f" "b1" :a3 {:branch b :model "m" :max-turns 8} 0))
            (d/transact conn (task/message-tx "m-1" "owner" [k] "check g" 1000))

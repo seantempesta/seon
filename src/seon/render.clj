@@ -23,17 +23,8 @@
     3. the one value printer (seon.print/print-value), the default render.
   A nested value renders by a call ([render opts v] in hiccup, or render's result)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.print :as print] [seon.print.select :as select] [seon.config :as config]
+  (:require [seon.contract :as contract :refer [defn defn-]] [seon.db :as pdb :refer [parents own-keys entity-schemas identity-schemas extends? most-specific]] [seon.print :as print] [seon.print.select :as select] [seon.config :as config]
             [clojure.string :as str] [clojure.walk] [datahike.api :as d] [datahike.reads :as reads] [datahike.db.utils :as dbu] [seon.web.html :as h] [seon.ratom :as ratom] [seon.profile :as profile] [editscript.core :as ed]))
-
-(defn parents
-  "The named schemas k's form extends ([:and p ...] or [:merge p ...])."
-  {:malli/schema [:=> [:cat [:maybe :qualified-keyword]] [:vector :qualified-keyword]]}
-  [k]
-  (let [form (get contract/forms k)]
-    (if (and (vector? form) (#{:and :merge} (first form)))
-      (filterv #(and (qualified-keyword? %) (contains? contract/forms %)) (rest form))
-      [])))
 
 (defn declared
   "The render symbol schema k (or its nearest parent) declares, or nil."
@@ -75,11 +66,6 @@
   {:malli/schema [:=> [:cat :any] [:maybe [:map [:value :any]]]]}
   [v] (when (some-> (:seon.render/schema (meta v)) (contract/fits? v)) (model v)))
 
-(defn- identity-attr?
-  "Is attribute a an upsert key ([:and {:seon.db/identity true} ...])?"
-  {:malli/schema [:=> [:cat :any] :boolean]}
-  [a] (boolean (:seon.db/identity (contract/properties a))))
-
 (defn map-keys
   "The keys a schema's [:map ...] form names (inline, or in its [:and ...] members)."
   {:malli/schema [:=> [:cat :any] [:vector :any]]}
@@ -88,42 +74,9 @@
         (and (vector? form) (#{:and :merge} (first form))) (vec (mapcat #(map-keys (if (keyword? %) (get contract/forms %) %)) (rest form)))
         :else []))
 
-(defn own-keys
-  "The keys a schema's form names itself: its [:map ...] members, inline or in an [:and ...] arm, never those of a schema it
-  extends ([:and parent [:map ...]], `parents`), so an attribute is named by one entity schema."
-  {:malli/schema [:=> [:cat :any] [:vector :any]]}
-  [form]
-  (cond (and (vector? form) (= :map (first form))) (vec (keep #(when (vector? %) (first %)) (rest form)))
-        (and (vector? form) (#{:and :merge} (first form))) (vec (mapcat #(when-not (keyword? %) (own-keys %)) (rest form)))
-        :else []))
-
-(def entity-schemas
-  "{attribute schema}: each attribute an entity schema ({:seon.db/attributes true}) names itself (own-keys), to that
-  schema. Derived once from the registry; an identity or ref attribute is named by one entity schema
-  (seon.render-test/a-walk-is-its-entity-and-its-units)."
-  (into {} (for [[k form] contract/forms :when (:seon.db/attributes (contract/properties k)) a (own-keys form)] [a k])))
-
-(def ^:private identity-schemas
-  "{identity-attribute schema}: the entity schemas by the upsert keys they name."
-  (into {} (filter (comp identity-attr? key)) entity-schemas))
-
 (def ^:private drawn-schemas
   "The entity schemas a render draws (declared, theirs or a parent's): what schema-of names a pulled entity by. Derived once."
   (into #{} (filter declared) (vals identity-schemas)))
-
-(defn- extends?
-  "Does schema a extend schema b, itself or through the schemas it extends (`parents`)?"
-  {:malli/schema [:=> [:cat :qualified-keyword :qualified-keyword] :boolean]}
-  [a b] (boolean (or (= a b) (some #(extends? % b) (parents a)))))
-
-(defn- most-specific
-  "The entity schemas the identity attributes of map e name, as one: the one that extends all the others, nil for none,
-  or {:ambiguous [s ...]} when none does. The order of e's keys never decides. See docs/ctx.md#the-pattern."
-  {:malli/schema [:=> [:cat :map] :any]}
-  [e]
-  (let [ss (distinct (keep identity-schemas (keys e)))]
-    (when (seq ss)
-      (or (some (fn [s] (when (every? #(extends? s %) ss) s)) ss) {:ambiguous (vec ss)}))))
 
 (def ^:private error-keys
   "The keys :seon.error/base requires, read once from its form at load: what schema-of asks of a

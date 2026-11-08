@@ -89,8 +89,8 @@
   [st {:keys [task key branch]}]
   (let [db (:db st) t (:max-tx db)]
     (when (and task key (d/entity db [:seon.task/id task]))
-      (let [db1 (:db-after (d/with db (agent/begin-run-tx db task key)))
-            db2 (:db-after (d/with db1 (task/agent-cites-tx db1 [:seon.agent/key key] key)))]
+      (let [db1 (:db-after (pdb/speculate db (agent/begin-run-tx db task key)))
+            db2 (:db-after (pdb/speculate db1 (task/agent-cites-tx db1 [:seon.agent/key key] key)))]
         (ctx/build db2 (pdb/eid db2 :seon.agent/key key) branch)))
     (if (= t (:warm-t st))
       st
@@ -300,7 +300,7 @@
   ;; (seon.db/after-fork!): the parent's handles are not used across fork
   (pdb/after-fork! cfg)
   (let [conn (sock/conn fd)
-        store (d/connect (assoc cfg :branch (pdb/main-branch cfg)))
+        store (pdb/connect (assoc cfg :branch (pdb/main-branch cfg)))
         ;; db0 at its commit, read through this process's own store; the boot server reads all
         ;; of it once, so agents forked from here inherit it decoded (root does not hold it:
         ;; docs/machine.md#what-a-process-owns-in-memory)

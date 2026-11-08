@@ -104,7 +104,7 @@
                            (sort-by (comp count second))
                            first)
         ;; the parent's db, a value (the store's own connection's for :db)
-        parent (if from (let [p (d/connect (assoc cfg :branch from))] (try @p (finally (d/release p)))) @conn)
+        parent (if from (let [p (pdb/connect (assoc cfg :branch from))] (try @p (finally (d/release p)))) @conn)
         ;; a namespace the kept tree holds whose file the checkout lacks (another tree's, e.g. one since
         ;; renamed) is read again from this tree with the change, so a changed file requiring it finds it
         ;; analyzed in this process (seon.source's read-nss marks it loaded), never a load from disk that cannot
@@ -119,7 +119,7 @@
              (source/import-tx parent (tree-files root tree nil)))
         stage (keyword (str "stage-" (random-uuid)))]
     (d/branch! conn (or from :db) stage)
-    (try (let [c (d/connect (assoc cfg :branch stage))]
+    (try (let [c (pdb/connect (assoc cfg :branch stage))]
            (try (d/transact c {:tx-data tx}) (finally (d/release c))))
          (try (d/branch! conn stage b)
               (catch Throwable t (when-not (= :branch-already-exists (:type (ex-data t))) (throw t))))
@@ -151,7 +151,7 @@
     (when-not (contains? (set branches) b)
       (keep-tree! conn cfg root tree b branches))
     (d/release conn)
-    @(d/connect (assoc cfg :branch b)))))
+    @(pdb/connect (assoc cfg :branch b)))))
 
 (defn- builder-id
   "The id of the code that builds a reach graph on db: the digest of the :form/id of every var of

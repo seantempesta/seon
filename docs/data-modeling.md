@@ -18,6 +18,16 @@ Say what a value is by its attribute's schema in `resources/seon/schemas/`, or a
 | A value you will look things up by | `{:seon.db/index true}` | `:seon.message/from` |
 | A value that is a whole map or vector | `:seon.db/plain` ([plain data](storage.md#plain-data)) | `:seon.eval/response`, `:seon.result/value` |
 
+## A schema is a set of keys written together
+
+An entity schema says which keys go together, and an entity holding any key it requires is that thing and must hold them all; every one it matches is asked of it, so an entity is as many things as its keys say (owner, 2026-11-08: "All sets of keys that match schemas are validated"; "we want accretion"). The write holds every entity it touches to them ([the write checks every entity it touches](storage.md#the-write-checks-every-entity-it-touches)), so one good definition catches the code and the data that disagree with it.
+- **Open maps.** Malli's maps are open: a key a schema does not list is any other thing's business, so adding an attribute never breaks an entity.
+- **Required only for keys always written together.** A key a writer ever writes alone is optional: a task's single config overrides, an agent's own turn budget on its branch, the branch a start writes only with a task. Making a key required is the one change that can break stored data, and the write shows which.
+- **A membership ref is never required.** Which record an entity belongs to (an eval's agent, a message's recipient) is a link that is retracted and made again while the entity stays ([link, do not partition](#things-relate-by-refs)).
+- **What exists before its file is not required to have one.** A schema registered at the REPL lives in the db before any sync writes it to disk.
+- **One definition.** A function's contract cites the attribute's schema (`:seon.agent/branch`), never restates its type (`[:seon.agent/branch :keyword]`); a second copy disagreed with the first and failed later, silently, in the reconciler (2026-11-08). The same holds for a whole map that lists other things' keys: each config key is its own schema, and a set of keys exists only where they must go together.
+- **Validate what is there.** A value is held to its attribute's schema at the write ([every datom](storage.md#the-write-checks-every-datom)); an entity schema adds only which keys come together.
+
 ## Things relate by refs
 
 A relationship is one ref, written on the many side, and read from either end. An eval names its agent (`:seon.eval/agent`), and the agent's evals are that ref read in reverse, `{[:seon.eval/_agent :as :evals] [*]}` in a pull, so nothing on the agent needs updating when an eval is added. A many-to-many relationship is a set of refs on one side.

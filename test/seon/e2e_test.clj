@@ -17,7 +17,7 @@
         waiting (future (await/await-quiet sys t))]
     (d/transact c {:tx-data [{:seon.error/signature "0123456789abcdef" :seon.error/class :eval :seon.error/count 1 :seon.error/agents 1
                               :seon.error/first-ms start :seon.error/last-ms start}]})
-    (is (not (realized? (do (d/transact c {:tx-data [{:note/text "work goes on"}]}) waiting))) "an agent's eval error is no defect of the scenario")
+    (is (not (realized? (do (d/transact c {:tx-data [{:note/text "work goes on" :note/agent :t}]}) waiting))) "an agent's eval error is no defect of the scenario")
     (d/transact c {:tx-data [{:seon.error/signature "fedcba9876543210" :seon.error/class :platform :seon.error/count 1 :seon.error/agents 0
                               :seon.error/first-ms start :seon.error/last-ms start :seon.error/message "seon.reconcile/reconciler-proc: boom"}]})
     (let [r (deref waiting)]

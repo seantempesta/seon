@@ -198,14 +198,16 @@
       (let [tasks (mapv (fn [id {:seon.task/keys [config needs evidence] :as decl}]
                     (cond-> (-> decl (dissoc :seon.task/config :seon.task/needs :seon.task/evidence)
                                 (assoc :db/id id :seon.task/id id :seon.task/execution :held)
-                                (update :seon.task/branch #(or % (default-branch id))))
+                                (update :seon.task/branch #(or % (default-branch id)))
+                                ;; a declaration that names no kind is work: the task holds it (:seon.task/task-fact requires it)
+                                (update :seon.task/kind #(or % :work)))
                       (seq needs) (assoc :seon.task/needs (mapv #(if (graph %) % [:seon.task/id %]) needs))
                       evidence (assoc :seon.task/evidence evidence)
                       (seq config) (merge config)))
                   ids decls)
             ;; what each text cites, read on the db the tasks make (a task this write declares is a task it may
             ;; cite), its cite entities naming the task by its tempid
-            db' (:db-after (d/with db tasks))]
+            db' (:db-after (pdb/speculate db tasks))]
         (into tasks (mapcat (fn [id decl] (cites-tx db' id id (text-citations db' decl))) ids decls))))))
 
 (defn execution-tx
@@ -583,13 +585,12 @@
 (defn- agent-value
   "A pulled agent as :seon.reconcile/agent: what root decides on of it, its environment (the one desired-env compares)
   beside its boot."
-  {:malli/schema [:=> [:cat [:map [:seon.agent/key :string] [:seon.agent/branch :keyword] [:seon.agent/model {:optional true} [:maybe :string]]
-                               [:seon.agent/max-turns pos-int?] [:seon.agent/holder {:optional true} :string]]]
-                   :seon.reconcile/agent]}
+  {:malli/schema [:=> [:cat :seon.db/agent-fact] :seon.reconcile/agent]}
   [a]
   (let [{:seon.agent/keys [branch model max-turns holder]} a]
-    (-> (select-keys a [:seon.agent/key :seon.agent/boot])
-        (assoc :seon.agent/env (cond-> {:branch branch :model model :max-turns max-turns} holder (assoc :holder holder))))))
+    ;; an environment only with a branch: a task's start always writes one, an agent root starts with no task has none
+    (cond-> (select-keys a [:seon.agent/key :seon.agent/boot])
+      (and branch max-turns) (assoc :seon.agent/env (cond-> {:branch branch :model model :max-turns max-turns} holder (assoc :holder holder))))))
 
 (defn agents
   "Every agent root started on db, by key: the entities a start recorded (start-tx: :seon.agent/boot among them). See docs/reconcile.md#a-task-holds-how-its-work-ended."

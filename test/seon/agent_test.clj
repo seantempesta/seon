@@ -886,7 +886,7 @@
   grows main by between its agents."
   {:malli/schema [:=> [:cat :string nat-int? pos-int?] :seon.db/tx-data]}
   [task i n]
-  (vec (mapcat (fn [k] [{:seon.agent/key (str "hist-" k) :seon.agent/boot "hist" :seon.agent/task {:seon.task/id task}}
+  (vec (mapcat (fn [k] [{:seon.agent/key (str "hist-" k) :seon.agent/boot "hist" :seon.agent/started-ms k :seon.agent/task {:seon.task/id task}}
                         {:seon.eval/id (str "e" (+ 1000000 k)) :seon.eval/by "root" :seon.eval/agent {:seon.root/id :root} :seon.eval/code "(+ 1 1)"}])
                (range i (+ i n)))))
 
@@ -1001,7 +1001,7 @@
                             :code (spawn-kept-code kept
                                                    (str (src k "(defn h [] 1)")
                                                         " (datahike.api/branch! (:conn sys) m b)"
-                                                        " (let [bc (datahike.api/connect (assoc (:cfg sys) :branch b))]"
+                                                        " (let [bc (seon.db/connect (assoc (:cfg sys) :branch b))]"
                                                         "   (datahike.api/transact bc [{:seon.root/id :root :seon.root/boot \"an-earlier-boot\"}]) (datahike.api/release bc))"
                                                         " " (src g "(defn g [] 7)")
                                                         " " (src k "(defn h [] 2)"))
@@ -1505,7 +1505,7 @@
            _ (d/transact conn [{:db/id "f1'" :form/id "app.m0/f1-redefined" :form/ns nsx :form/order 100 :form/defines [v]
                                 :form/src "(defn f1 {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 100))"}
                                [:db/add v :var/form "f1'"]])
-           store-conn (d/connect (assoc cfg :branch ab))
+           store-conn (pdb/connect (assoc cfg :branch ab))
            [a b] (sock/socketpair)
            old @agent/state old-link @agent/link]
        (try
@@ -1538,7 +1538,7 @@
                                                     :form/src (str "(defn f1 {:malli/schema [:=> [:cat :int] :int]} [x] " body ")")}
                                                    [:db/add v :var/form "f"]]))
            src (fn [db] (:form/src (:var/form (d/entity db [:var/name 'app.m0/f1]))))
-           store-conn (d/connect (assoc cfg :branch ab))
+           store-conn (pdb/connect (assoc cfg :branch ab))
            [a b] (sock/socketpair)
            old @agent/state old-link @agent/link]
        (try
@@ -1569,10 +1569,10 @@
      (let [ab (pdb/on-main (:branch cfg) :agent-refs)
            _ (d/branch! conn (:branch cfg) ab)
            forked @conn
-           store-conn (d/connect (assoc cfg :branch ab))
+           store-conn (pdb/connect (assoc cfg :branch ab))
            [a b] (sock/socketpair)
            old @agent/state old-link @agent/link
-           note (fn [i] (agent/transact! [{:note/text (str "n" i)}]))
+           note (fn [i] (agent/transact! [{:note/text (str "n" i) :note/agent :t}]))
            stale #(for [[path t] (ts/stale-dbs (apply dissoc @agent/state %) (:max-tx (agent/db)))] [path t])]
        (try
          (reset! agent/link {:fd a}) (reset! agent/state {:store-conn store-conn :cfg cfg :branch ab :key "test/a1" :db @store-conn :base forked :main forked})
@@ -1615,7 +1615,7 @@
                                {:db/id "f1'" :form/id "app.m0/f1-carried" :form/ns nsx :form/order 100 :form/defines [v]
                                 :form/src "(defn f1 {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 100))"}
                                [:db/add v :var/form "f1'"]])
-           store-conn (d/connect (assoc cfg :branch ab))
+           store-conn (pdb/connect (assoc cfg :branch ab))
            [a b] (sock/socketpair)
            old @agent/state old-link @agent/link]
        (try
@@ -1642,7 +1642,7 @@
            _ (d/transact conn (into (ts/work-tx "demo/w" :parked {:agent :a1 :branch :msg-a}) (ts/work-tx "demo/x" :parked {:agent :a2 :branch :msg-b})))
            _ (d/branch! conn (:branch cfg) ba)
            _ (d/branch! conn (:branch cfg) bb)
-           conns {ka (d/connect (assoc cfg :branch ba)) kb (d/connect (assoc cfg :branch bb))}
+           conns {ka (pdb/connect (assoc cfg :branch ba)) kb (pdb/connect (assoc cfg :branch bb))}
            branches {ka ba kb bb}
            [a b] (sock/socketpair)
            old @agent/state old-link @agent/link
@@ -1765,7 +1765,7 @@
            ;; the agent as its turns record it (its key, id and task)
            _ (d/branch! conn (:branch cfg) ab)
            _ (d/transact conn (ts/work-tx "demo/w" :parked {:agent :a1 :branch :agent-taken}))
-           store-conn (d/connect (assoc cfg :branch ab))
+           store-conn (pdb/connect (assoc cfg :branch ab))
            _ (d/transact store-conn [{:db/id k :seon.agent/key k}
                                      {:seon.eval/id "e1" :seon.eval/agent [:seon.agent/key k] :seon.eval/by "a1" :seon.eval/code "1" :seon.eval/response {}}])
            ;; on main: the page's open
@@ -1799,7 +1799,7 @@
            _ (d/transact conn [{:seon.agent/key k} {:seon.process/id (str k "/77") :seon.process/agent [:seon.agent/key k] :seon.process/stall {:quiet-ms 4000}}])
            ab (pdb/on-main (:branch cfg) :stall-task)
            _ (d/branch! conn (:branch cfg) ab)
-           store-conn (d/connect (assoc cfg :branch ab))
+           store-conn (pdb/connect (assoc cfg :branch ab))
            [a b] (sock/socketpair)
            old @agent/state old-link @agent/link
            proofs (fn [] (let [reps (atom [])]
@@ -1822,17 +1822,17 @@
    (fn [cfg conn]
      (let [ab (pdb/on-main (:branch cfg) :agent-tx)
            _ (d/branch! conn (:branch cfg) ab)
-           store-conn (d/connect (assoc cfg :branch ab))
+           store-conn (pdb/connect (assoc cfg :branch ab))
            [a b] (sock/socketpair)
            old @agent/state old-link @agent/link]
        (try
          (reset! agent/link {:fd a}) (reset! agent/state {:store-conn store-conn :cfg cfg :branch ab :db @store-conn})
-         (let [{:keys [t]} (agent/transact! [{:note/text "the agent's"}])]
+         (let [{:keys [t]} (agent/transact! [{:note/text "the agent's" :note/agent :t}])]
            (agent/commit!)
            (is (= (jolt.host/runtime-fingerprint) (:seon.tx/runtime (d/entity @store-conn t))))
            (is (nil? (:seon.tx/eval (d/entity @store-conn t))) "written outside any eval: it names none"))
          ;; task seon.ctx/a-change-names-its-eval: a write an eval's code makes names that eval
-         (let [r (repl/eval-string "(assoc (seon.agent/transact! [{:note/text \"an eval's\"}]) :running (:eval @seon.agent/state))" {"ns" "user" :origin :outside})
+         (let [r (repl/eval-string "(assoc (seon.agent/transact! [{:note/text \"an eval's\" :note/agent :t}]) :running (:eval @seon.agent/state))" {"ns" "user" :origin :outside})
                t (:t (:value r))]
            (agent/commit!)
            (is (= ab (:seon.tx/branch (d/entity @store-conn t))) (str "the eval that wrote it: " (:ex r)))
@@ -2802,7 +2802,7 @@
   (ts/test-branch!
     (fn [_ conn]
       (let [base @conn
-            _ (d/transact conn {:tx-data [{:note/text "main moved"}]})
+            _ (d/transact conn {:tx-data [{:note/text "main moved" :note/agent :t}]})
             main @conn]
         (is (false? (agent/main-moved? base base)) "main at the merge base: nothing to merge")
         (is (true? (agent/main-moved? base main)) "main moved: the turn merges it")
@@ -2866,11 +2866,11 @@
   ;; the note "poison", as a value hasch or the codec cannot take does (seon.db-test/a-large-value-holding-ratios-commits-and-reads-back
   ;; is the real one; a datom the schema refuses is refused at the write, so no plain value is left that only a commit refuses)
   (let [[r1 r2 r3 r4 r5 r6]
-        (in-agent ["(seon.agent/transact! [{:note/text \"kept before\"}])"
+        (in-agent ["(seon.agent/transact! [{:note/text \"kept before\" :note/agent :t}])"
                    "(alter-var-root #'datahike.writer/commit-pending! (fn [f] (fn [c] (if (some #(= \"poison\" (:v %)) (datahike.api/datoms (:db @(:pending (:writer @(:wrapped-atom c)))) :aevt :note/text)) (throw (ex-info \"no encoding for this value\" {})) (f c)))))"
-                   "(do (seon.agent/transact! [{:note/text \"poison\"}]) :written)"
+                   "(do (seon.agent/transact! [{:note/text \"poison\" :note/agent :t}]) :written)"
                    "(+ 1 1)"
-                   "(do (seon.agent/transact! [{:note/text \"after\"}]) (my.db/q '[:find [?t ...] :where [_ :note/text ?t]]))"
+                   "(do (seon.agent/transact! [{:note/text \"after\" :note/agent :t}]) (my.db/q '[:find [?t ...] :where [_ :note/text ?t]]))"
                    "(let [db (my.db/db)] {:ctx-t (:t @seon.ctx/ctx) :t (:max-tx db) :notes (sort (my.db/q '[:find [?t ...] :where [_ :note/text ?t]]))})"])
         u (:unrecorded r3)]
     (is (nil? (:ex r1)) (pr-str r1))

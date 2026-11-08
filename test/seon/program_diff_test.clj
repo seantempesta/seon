@@ -81,5 +81,5 @@
        :sizes diff-sizes})
     (finally
       (doseq [n diff-sizes :let [path (#'pc/on-disk-path n)] :when (pdb/store? path)]
-        (doseq [b [:db :branch]] (d/release (d/connect (assoc (pdb/store-cfg :lmdb path) :branch b)) true))
+        (doseq [b [:db :branch]] (d/release (pdb/connect (assoc (pdb/store-cfg :lmdb path) :branch b)) true))
         (sh/sh "rm" "-rf" path)))))

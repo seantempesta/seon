@@ -1,7 +1,7 @@
 (ns seon.db-test
   "One store, many branches, as in production (owner, 2026-10-21): bin/test seeds one test
   store and each test takes a branch of it through one helper (seon.test-store/test-branch!)."
-  (:require [seon.test-store :as ts] [my.test :as mt] [seon.profile :as profile] [clojure.test :refer [deftest is testing]]
+  (:require [seon.task :as task] [seon.vector] [seon.test-store :as ts] [my.test :as mt] [seon.profile :as profile] [clojure.test :refer [deftest is testing]]
             [clojure.java.shell] [clojure.java.io] [datahike.api :as d] [datahike.writer :as dw] [datahike.db.transaction :as dbt]
             [seon.db :as pdb] [seon.schema.datahike] [malli.core] [malli.registry] [seon.config :as cfg] [seon.contract :as contract] [seon.edn] [seon.repl] [seon.print] [datahike.schema]
             [konserve.jolt.lmdb :as klmdb] [konserve.jolt.lmdb-ffi :as lmdb] [konserve.jolt.lz4] [konserve.jolt.zstd] [clojure.string :as str] [konserve.core :as k] [hasch.core] [datahike.gc] [seon.cost :as cost] [seon.lib :as lib] [seon.intr :as intr]
@@ -22,7 +22,7 @@
       (is (nil? (d/pull db [:seon.root/boot] [:seon.root/id :root]))))))
 
 (deftest a-test-takes-a-branch-of-the-test-store
-  (ts/test-branch! (fn [cfg-a a] (ts/test-branch! (fn [cfg-b b] (let [seed (d/connect (dissoc cfg-a :branch))]
+  (ts/test-branch! (fn [cfg-a a] (ts/test-branch! (fn [cfg-b b] (let [seed (pdb/connect (dissoc cfg-a :branch))]
     (testing "both are branches of one store, each named apart"
       (is (= (get-in cfg-a [:store :id]) (get-in cfg-b [:store :id])))
       (is (not= (:branch cfg-a) (:branch cfg-b)))
@@ -33,8 +33,8 @@
       (is (= (count (d/datoms @seed :eavt)) (count (d/datoms @a :eavt)) (count (d/datoms @b :eavt))))
       (is (= "f1 of module 0" (d/q '[:find ?d . :where [?e :var/name app.m0/f1] [?e :var/doc ?d]] @a))))
     (testing "what a test writes stays on its branch"
-      (d/transact a [{:note/text "a's"}])
-      (d/transact b [{:note/text "b's"}])
+      (d/transact a [{:note/text "a's" :note/agent :t}])
+      (d/transact b [{:note/text "b's" :note/agent :t}])
       (is (= #{"a's"} (notes @a)))
       (is (= #{"b's"} (notes @b)))
       (is (= #{} (notes @seed))))
@@ -50,8 +50,8 @@
    (fn [cfg conn]
      (let [b (keyword (str (name (:branch cfg)) "-ids"))
            _ (d/branch! conn (:branch cfg) b)
-           bc (d/connect (assoc cfg :branch b))
-           write (fn [c tag] (let [r (d/transact c [{:db/id "n" :note/text tag}])]
+           bc (pdb/connect (assoc cfg :branch b))
+           write (fn [c tag] (let [r (d/transact c [{:db/id "n" :note/text tag :note/agent :t}])]
                                [(get-in r [:tempids "n"]) (get-in r [:tempids :db/current-tx])]))]
        (try
          (let [[ea ta] (write conn "a") [eb tb] (write bc "b")]
@@ -62,7 +62,7 @@
              (is (< ta tb) "issued in order across branches"))
            (testing "an explicit id is never issued again"
              (let [far (+ 1000 (max ea eb))]
-               (d/transact bc [[:db/add far :note/text "carried"]])
+               (d/transact bc [{:db/id far :note/text "carried" :note/agent :t}])
                (is (< far (first (write conn "after")))))))
          (finally (d/release bc) (d/delete-branch! conn b)))))))
 
@@ -72,11 +72,11 @@
   (let [path (str (seon.config/checkout) "/target/db-test-" (random-uuid))
         {:keys [conn]} (pdb/open! :lmdb path 0 :db)]
     (try
-      (let [r (d/transact conn [{:db/id "n" :note/text "before"}])
+      (let [r (d/transact conn [{:db/id "n" :note/text "before" :note/agent :t}])
             e (get-in r [:tempids "n"]) t (:max-tx (:db-after r))]
         (clojure.java.shell/sh "rm" (str path "/ids"))
         (pdb/ids! conn)
-        (let [r2 (d/transact conn [{:db/id "n" :note/text "after"}])]
+        (let [r2 (d/transact conn [{:db/id "n" :note/text "after" :note/agent :t}])]
           (is (< e (get-in r2 [:tempids "n"])))
           (is (< t (:max-tx (:db-after r2))))))
       (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))
@@ -90,7 +90,7 @@
       (let [{:keys [used-bytes map-bytes]} (pdb/map-use cfg)]
         (is (= (cfg/value :seon.config.store/lmdb-map-bytes) map-bytes))
         (is (< 0 used-bytes map-bytes))
-        (d/transact conn [{:note/text (apply str (repeat 100000 "x"))}])
+        (d/transact conn [{:note/text (apply str (repeat 100000 "x")) :note/agent :t}])
         (pdb/sync! cfg)
         (is (< used-bytes (:used-bytes (pdb/map-use cfg))) "it grows as the store does"))
       (is (nil? (pdb/map-use (ts/test-branch! (fn [c _] c)))) "an in-memory store has no map")
@@ -129,11 +129,11 @@
         cfg (pdb/store-cfg :lmdb path)
         lacking (:db/ident (last pdb/schema))
         _ (d/create-database cfg)
-        c0 (d/connect cfg)
+        c0 (pdb/connect cfg)
         ;; and one attribute installed before it was indexed
         _ (d/transact c0 {:tx-data (mapv #(if (= :seon.vector/text-t (:db/ident %)) (dissoc % :db/index) %) (butlast pdb/schema))})
         ;; a datom written before the index: an AVET read of an unindexed attribute answers empty, with no error
-        _ (d/transact c0 {:tx-data [{:seon.vector/text-t 42}]})
+        _ (d/transact c0 {:tx-data [{:db/id "f" :form/id "v/1" :form/src "(def v 1)" :form/ns {:ns/name (quote v)} :form/order 0} (seon.vector/fact "f" 42 [0.5 0.25] "m")]})
         _ (is (empty? (d/datoms @c0 :avet :seon.vector/text-t)) "unindexed, an AVET read finds nothing")
         _ (d/release c0)
         {:keys [conn]} (pdb/open! :lmdb path 0 :db)]
@@ -155,9 +155,9 @@
   (let [path (str (seon.config/checkout) "/target/db-test-" (random-uuid))
         cfg (pdb/store-cfg :lmdb path)
         _ (d/create-database (pdb/made-cfg cfg))
-        c0 (d/connect cfg)
+        c0 (pdb/connect cfg)
         _ (d/transact c0 {:tx-data (mapv #(dissoc % :db/contentId) pdb/schema)})
-        old (get-in (d/transact c0 [{:db/id "f" :form/id "app.k/old" :form/src "(def old 1)" :form/ns "n"} {:db/id "n" :ns/name 'app.k}]) [:tempids "f"])
+        old (get-in (d/transact c0 [{:db/id "f" :form/id "app.k/old" :form/src "(def old 1)" :form/ns "n" :form/order 0} {:db/id "n" :ns/name 'app.k}]) [:tempids "f"])
         old-ns (pdb/eid @c0 :ns/name 'app.k)
         _ (d/release c0)
         {:keys [conn]} (pdb/open! :lmdb path 0 :db)]
@@ -165,7 +165,7 @@
       (is (< old datahike.constants/tx0) "minted before: a counter id")
       (is (true? (get-in (d/schema @conn) [:form/id :db/contentId])) "the identity gained its content id")
       (is (= old (pdb/eid @conn :form/id "app.k/old")) "the entity it held keeps its id")
-      (let [r (d/transact conn [{:db/id "f" :form/id "app.k/new" :form/src "(def new 1)" :form/ns "n"} {:db/id "n" :ns/name 'app.k}])
+      (let [r (d/transact conn [{:db/id "f" :form/id "app.k/new" :form/src "(def new 1)" :form/ns "n" :form/order 1} {:db/id "n" :ns/name 'app.k}])
             new (get-in r [:tempids "f"])]
         (is (= (datahike.db.transaction/content-eid :form/id "app.k/new") new) "a new identity takes its content id")
         (is (= old-ns (get-in r [:tempids "n"]) (:db/id (:form/ns (d/entity @conn new))))
@@ -179,7 +179,7 @@
   (let [path (str (seon.config/checkout) "/target/db-test-" (random-uuid))]
     (try
       (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)]
-        (is (map? (dw/apply! conn {:tx-data [{:note/text "applied, not committed"}] :tx-meta (pdb/tx-meta :db)})))
+        (is (map? (dw/apply! conn {:tx-data [{:note/text "applied, not committed" :note/agent :t}] :tx-meta (pdb/tx-meta :db)})))
         (is (dw/pending? conn))
         (d/release conn true))
       (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)]
@@ -210,7 +210,7 @@
   (let [path (str (seon.config/checkout) "/target/db-test-" (random-uuid))]
     (try
       (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)]
-        (d/transact conn {:tx-data [{:note/text "the first store's"}] :tx-meta (pdb/tx-meta :db)})
+        (d/transact conn {:tx-data [{:note/text "the first store's" :note/agent :t}] :tx-meta (pdb/tx-meta :db)})
         (d/release conn true))
       (clojure.java.shell/sh "rm" "-rf" path)
       (let [{:keys [conn seeded?]} (pdb/open! :lmdb path 0 :db)]
@@ -229,7 +229,7 @@
   (let [path (str (seon.config/checkout) "/target/db-test-" (random-uuid))]
     (try
       (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)
-            _ (d/transact conn {:tx-data [{:note/text "kept"}] :tx-meta (pdb/tx-meta :db)})
+            _ (d/transact conn {:tx-data [{:note/text "kept" :note/agent :t}] :tx-meta (pdb/tx-meta :db)})
             db @conn]
         (d/release conn true)
         (is (= {:type :lmdb-env-closed :path path}
@@ -275,10 +275,10 @@
         made (pdb/made-cfg (pdb/store-cfg :lmdb path))]
     (try
       (d/create-database made)
-      (let [c0 (d/connect made)] (d/transact c0 {:tx-data (vec (remove #(= :seon.tx/runtime (:db/ident %)) pdb/schema))}) (d/release c0))
+      (let [c0 (pdb/connect made)] (d/transact c0 {:tx-data (vec (remove #(= :seon.tx/runtime (:db/ident %)) pdb/schema))}) (d/release c0))
       (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)]
         (is (= :seon.tx/runtime (:db/ident (get (d/schema @conn) :seon.tx/runtime))) "the attribute is installed")
-        (let [r (d/transact conn {:tx-data [{:note/text "after"}] :tx-meta (pdb/tx-meta :db)})]
+        (let [r (d/transact conn {:tx-data [{:note/text "after" :note/agent :t}] :tx-meta (pdb/tx-meta :db)})]
           (is (string? (:seon.tx/runtime (d/entity @conn (:db/current-tx (:tempids r))))) "and the next transaction names its runtime"))
         (d/release conn))
       (finally (clojure.java.shell/sh "rm" "-rf" path)))))
@@ -319,7 +319,7 @@
         old (mapv #(if (= :seon.model-call/basis (:db/ident %)) (assoc % :db/valueType :db.type/string) %) pdb/schema)]
     (try
       (d/create-database made)
-      (let [c0 (d/connect made)] (d/transact c0 {:tx-data old}) (d/release c0))
+      (let [c0 (pdb/connect made)] (d/transact c0 {:tx-data old}) (d/release c0))
       (let [r (try (pdb/open! :lmdb path 0 :db) (catch Exception e (ex-data e)))]
         (is (= :seon.db/types-differ (:seon.error/type r)) (pr-str r))
         (is (= {:seon.model-call/basis {:stored :db.type/string :declared :db.type/data}} (:seon.db/attributes r))))
@@ -334,7 +334,7 @@
         old (conj (vec pdb/schema) {:db/ident :schema.file/path :db/valueType :db.type/string :db/cardinality :db.cardinality/one :db/unique :db.unique/identity})]
     (try
       (d/create-database made)
-      (let [c0 (d/connect made)] (d/transact c0 {:tx-data old}) (d/release c0))
+      (let [c0 (pdb/connect made)] (d/transact c0 {:tx-data old}) (d/release c0))
       (let [r (try (pdb/open! :lmdb path 0 :db) (catch Exception e (ex-data e)))]
         (is (= :seon.db/name-retired (:seon.error/type r)) (pr-str r))
         (is (= {:schema.file/path :file/path} (:seon.db/retired r))))
@@ -394,7 +394,7 @@
   ;; (Datahike applies a transaction's tx-meta only with history: off, it was silently dropped)
   (ts/test-branch!
    (fn [_ conn]
-     (let [{tx :tempids} (d/transact conn [{:db/id "n" :note/text "kept"}])
+     (let [{tx :tempids} (d/transact conn [{:db/id "n" :note/text "kept" :note/agent :t}])
            e (get tx "n")
            r (d/transact conn [[:db/retractEntity e]])
            tx-e (:db/current-tx (:tempids r))]
@@ -414,7 +414,7 @@
           made (assoc (pdb/store-cfg :lmdb path) :keep-history? kept?)]
       (try
         (d/create-database made)
-        (let [c0 (d/connect made)] (d/transact c0 {:tx-data pdb/schema}) (d/release c0))
+        (let [c0 (pdb/connect made)] (d/transact c0 {:tx-data pdb/schema}) (d/release c0))
         (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)]
           (is (= kept? (:keep-history? (:config @conn))) (str "a store made with :keep-history? " kept? " opens keeping it"))
           (d/release conn))
@@ -462,7 +462,7 @@
   writer (datahike.writer/apply!), committed every `every` turns."
   [conn cfg path b n every]
   (d/branch! conn :db b)
-  (let [c (d/connect (assoc cfg :branch b))
+  (let [c (pdb/connect (assoc cfg :branch b))
         before (stored-bytes path)]
     (doseq [k (range n)]
       (dw/apply! c {:tx-data (turn-facts k)})
@@ -500,7 +500,7 @@
         _ (d/release conn)
         reply (slice @text 7 3000)
         vk (hasch.core/uuid reply)
-        on (fn [b f] (let [c (d/connect (assoc cfg :branch b))] (try (f c) (finally (d/release c)))))
+        on (fn [b f] (let [c (pdb/connect (assoc cfg :branch b))] (try (f c) (finally (d/release c)))))
         cold-read (fn [] (on :turns (fn [c] [(d/q '[:find ?r . :where [_ :seon.model-call/reply ?r]] @c)
                                              (:reads @(:stats (:storage (:store @c))))])))
         stored? (fn [] (on :db #(k/exists? (:store @%) vk {:sync? true})))
@@ -532,10 +532,10 @@
         {:keys [cfg conn]} (pdb/open! :lmdb path 0 :db)
         v {:value (mapv #(/ % 3) (range 1 3000)) :small (/ 1 3) :kinds [1.5 2N 3M 'a :b "c" \d (java.util.UUID. 0 1) (java.util.Date. 0)]}]
     (try
-      (d/transact conn {:tx-data [{:seon.eval/response v}]})
+      (d/transact conn {:tx-data [{:seon.eval/id "ratios" :seon.eval/code "(f)" :seon.eval/response v}]})
       (pdb/sync! cfg)
       (d/release conn)
-      (let [c (d/connect cfg)]
+      (let [c (pdb/connect cfg)]
         (try (is (= [v] (d/q '[:find [?r ...] :where [_ :seon.eval/response ?r]] @c)) "the value reads back equal, ratios and all")
              (finally (d/release c))))
       (finally (clojure.java.shell/sh "rm" "-rf" path)))))
@@ -549,7 +549,7 @@
   (let [path (str (seon.config/checkout) "/target/db-test-gc-" (random-uuid))
         {:keys [conn]} (pdb/open! :lmdb path 0 :db)]
     (try
-      (d/transact conn [{:note/text "kept"}])
+      (d/transact conn [{:note/text "kept" :note/agent :t}])
       (let [r @(d/gc-storage conn (java.util.Date. 0))]
         (is (set? r) (pr-str r))
         (is (= #{"kept"} (notes @conn)) "the branch reads as before"))
@@ -567,10 +567,10 @@
         {:keys [conn]} (pdb/open! :lmdb path 0 :db)
         reply (slice @text 11 3000)
         vk (hasch.core/uuid reply)
-        on (fn [b f] (let [c (d/connect (assoc (:config @conn) :branch b))] (try (f c) (finally (d/release c)))))
+        on (fn [b f] (let [c (pdb/connect (assoc (:config @conn) :branch b))] (try (f c) (finally (d/release c)))))
         record! (fn [r] (when-not (:skipped r) (d/transact conn [{:seon.root/id :root :seon.root/collected r}])) r)]
     (try
-      (d/transact conn [{:note/text "main's"}])
+      (d/transact conn [{:note/text "main's" :note/agent :t}])
       ;; garbage before the first collection: a branch made and deleted
       (d/branch! conn :db :early)
       (on :early #(d/transact % {:tx-data [{:seon.model-call/id "att/e" :seon.model-call/reply (slice @text 3 3000)}]}))
@@ -604,8 +604,8 @@
       (is (nil? (pdb/compact-if-due! path)) "nothing swept: no compaction")
       (d/transact conn [{:seon.root/id :root :seon.root/collected (pdb/collect! conn true)}])
       (d/branch! conn :db :gone)
-      (let [c (d/connect (assoc (:config @conn) :branch :gone))]
-        (d/transact c {:tx-data (vec (for [i (range 3000)] {:note/text (str "note " i (apply str (repeat 400 "x")))}))})
+      (let [c (pdb/connect (assoc (:config @conn) :branch :gone))]
+        (d/transact c {:tx-data (vec (for [i (range 3000)] {:note/text (str "note " i (apply str (repeat 400 "x"))) :note/agent :t}))})
         (d/release c))
       (d/transact conn [{:seon.root/id :root :seon.root/collected (pdb/collect! conn true)}])
       (d/delete-branch! conn :gone)
@@ -622,7 +622,7 @@
         (is (nil? (pdb/compact-if-due! path)) "and it is done once, until another sweep")
         (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)]
           (is (= before (head conn)) "and main's head reads the same")
-          (d/transact conn [{:note/text "after"}])
+          (d/transact conn [{:note/text "after" :note/agent :t}])
           (is (some #(= "after" (:v %)) (d/datoms @conn :aevt :note/text)) "and it takes a write")
           (d/release conn)))
       (finally (clojure.java.shell/sh "rm" "-rf" path (str path ".compact"))))))
@@ -631,14 +631,14 @@
 (deftest a-store-keeps-what-is-read-and-sweeps-old-snapshots
   (let [path (str (seon.config/checkout) "/target/tmp/retain-" (random-uuid))
         {:keys [conn]} (pdb/open! :lmdb path 0 :db)
-        note! (fn [c s] (d/transact c [{:note/text s}]) (d/commit-id @c))
+        note! (fn [c s] (d/transact c [{:note/text s :note/agent :t}]) (d/commit-id @c))
         notes-of (fn [db] (sort (map :v (d/datoms db :aevt :note/text))))
         hist (fn [db] (count (d/datoms (d/history db) :eavt)))]
     (try
       (is (nil? (pdb/retain! conn 3)) "too few commits: none due")
       (note! conn "a")
       (d/branch! conn :db :b)
-      (let [b (d/connect (assoc (:config @conn) :branch :b))
+      (let [b (pdb/connect (assoc (:config @conn) :branch :b))
             _ (note! b "on b")
             base (d/merge-base conn :b :db)
             named (note! conn "named")
@@ -646,7 +646,7 @@
             old (note! conn "old")
             _ (doseq [i (range 5)] (note! conn (str "n" i)))
             _ (d/branch! conn :db :c)
-            c (d/connect (assoc (:config @conn) :branch :c))
+            c (pdb/connect (assoc (:config @conn) :branch :c))
             _ (note! c "on c")
             base-c (d/merge-base conn :c :db)
             _ (doseq [i (range 5)] (note! conn (str "m" i)))
@@ -684,7 +684,7 @@
         vk (hasch.core/uuid reply)]
     (try
       (d/branch! conn :db :gone)
-      (let [c (d/connect (assoc (:config @conn) :branch :gone))]
+      (let [c (pdb/connect (assoc (:config @conn) :branch :gone))]
         (try (d/transact c {:tx-data [{:seon.model-call/id (seon.lib/call-id "att" 0) :seon.model-call/reply reply}]}) (finally (d/release c))))
       (d/delete-branch! conn :gone)
       (is (= {:skipped true :shared true} (pdb/collect! conn false)) "a shared store: nothing swept, nothing recorded")
@@ -728,10 +728,10 @@
      (let [fork @conn
            b (keyword (str (name (:branch cfg)) "-b"))
            _ (d/branch! conn (:branch cfg) b)
-           bc (d/connect (assoc cfg :branch b))]
+           bc (pdb/connect (assoc cfg :branch b))]
        (try
-         (d/transact bc [{:note/text "b's 1"} {:note/text "b's 2"}])
-         (d/transact conn [{:note/text "main's"}])
+         (d/transact bc [{:note/text "b's 1" :note/agent :t} {:note/text "b's 2" :note/agent :t}])
+         (d/transact conn [{:note/text "main's" :note/agent :t}])
          (let [[only-fork only-b] (d/datoms-diff fork @bc :eavt [])
                [only-b' only-main] (d/datoms-diff @bc @conn :eavt [])]
            (is (empty? only-fork) "the branch only added")
@@ -745,7 +745,7 @@
   ;; (datahike.query.execute/history-versions!); every version of a replaced value answers
   (ts/test-branch!
    (fn [_ conn]
-     (let [e (get-in (d/transact conn [{:db/id "f" :form/id "h/f" :form/src "(defn f [] 0)" :form/order 1}]) [:tempids "f"])]
+     (let [e (get-in (d/transact conn [{:db/id "f" :form/id "h/f" :form/src "(defn f [] 0)" :form/ns {:ns/name (quote h)} :form/order 1}]) [:tempids "f"])]
        (d/transact conn [[:db/add e :form/order 2]])
        (d/transact conn [[:db/add e :form/order 3]])
        (is (= #{[1 true] [1 false] [2 true] [2 false] [3 true]}
@@ -761,8 +761,8 @@
    (fn [cfg conn]
      (let [b (keyword (str (name (:branch cfg)) "-ce"))
            _ (d/branch! conn (:branch cfg) b)
-           bc (d/connect (assoc cfg :branch b))
-           mint (fn [c] (let [r (d/transact c [{:db/id "f" :form/id "app.ce/f" :form/src "(defn f [])" :form/ns "n" :form/defines ["v"]}
+           bc (pdb/connect (assoc cfg :branch b))
+           mint (fn [c] (let [r (d/transact c [{:db/id "f" :form/id "app.ce/f" :form/src "(defn f [])" :form/ns "n" :form/order 0 :form/defines ["v"]}
                                                {:db/id "v" :var/name 'app.ce/f :var/form "f"}
                                                {:db/id "n" :ns/name 'app.ce}])]
                           (mapv #(get-in r [:tempids %]) ["f" "v" "n"])))]
@@ -775,7 +775,7 @@
            (testing "the ref named the tempid before its map: it holds the content id"
              (is (= va (:db/id (first (:form/defines (d/entity @conn fa)))))))
            (testing "a counter entity is no content entity"
-             (is (< (get-in (d/transact conn [{:db/id "x" :note/text "counter"}]) [:tempids "x"]) datahike.constants/tx0)))
+             (is (< (get-in (d/transact conn [{:db/id "x" :note/text "counter" :note/agent :t}]) [:tempids "x"]) datahike.constants/tx0)))
            (testing "an identity is never replaced on its entity: a rename is refused"
              (is (= :entity-id/collision
                     (try (d/transact conn [[:db/add fa :form/id "app.ce/g"]]) nil
@@ -793,7 +793,7 @@
                 (let [path (str (seon.config/checkout) "/target/db-test-" (random-uuid))
                       cfg (pdb/made-cfg (pdb/store-cfg :lmdb path))
                       _ (d/create-database cfg)
-                      conn (d/connect (dissoc cfg :keep-history?))
+                      conn (pdb/connect (dissoc cfg :keep-history?))
                       ent (fn [k] (into {:w/id (str "entity " k)} (for [i (range 10)] [(keyword "w" (str "a" i)) (str "value " i " of " k)])))]
                   (try
                     (pdb/ids! conn)
@@ -926,11 +926,11 @@
   [n]
   (let [cfg {:store {:backend :memory :id (random-uuid)} :schema-flexibility :write :writer pdb/writer-cfg}
         _ (d/create-database (pdb/made-cfg cfg))
-        conn (d/connect cfg)]
+        conn (pdb/connect cfg)]
     (pdb/ids! conn)
     (pdb/install-missing! conn)
     (doseq [part (partition-all 1000 (range n))]
-      (d/transact conn {:tx-data (mapv #(hash-map :note/text (str "note " %)) part) :tx-meta (pdb/tx-meta :db)}))
+      (d/transact conn {:tx-data (mapv #(hash-map :note/text (str "note " %) :note/agent :t) part) :tx-meta (pdb/tx-meta :db)}))
     [cfg conn]))
 
 (defn branch-round-trip
@@ -963,7 +963,7 @@
   [refs? ^java.util.Random rnd]
   (let [cfg {:store {:backend :memory :id (random-uuid)} :schema-flexibility :write :keep-history? false :attribute-refs? refs?}
         _ (d/create-database cfg)
-        conn (d/connect cfg)
+        conn (pdb/connect cfg)
         attrs (mapv #(keyword "t" (str "a" %)) (range 8))]
     (d/transact conn (mapv #(hash-map :db/ident % :db/valueType :db.type/long :db/cardinality :db.cardinality/one) attrs))
     (d/transact conn (vec (for [i (range 200)] {:db/id (str "e" (.nextInt rnd 60)) (nth attrs (.nextInt rnd 8)) (long i)})))
@@ -1062,7 +1062,7 @@
   (let [path (str (seon.config/checkout) "/target/db-test-" (random-uuid))]
     (try
       (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)
-            _ (d/transact conn {:tx-data (vec (for [i (range 200)] {:note/text (str "note " i)})) :tx-meta (pdb/tx-meta :db)})
+            _ (d/transact conn {:tx-data (vec (for [i (range 200)] {:note/text (str "note " i) :note/agent :t})) :tx-meta (pdb/tx-meta :db)})
             store (:store @conn)
             ser ((:compressor store) (get (:serializers store) (:default-serializer store)))
             stream (fn [v] (let [bos (java.io.ByteArrayOutputStream.)] (konserve.protocols/-serialize ser bos (:write-handlers store) v) (vec (.toByteArray bos))))
@@ -1094,7 +1094,7 @@
       (is (every? datahike.schema/plain-data? samples) "and Datahike's own test on a data value passes it")
       (is (every? #(malli.core/validate :seon.db/plain % {:registry contract/registry}) samples) "and the schema says the same")
       (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)]
-        (d/transact conn (vec (map-indexed (fn [i v] {:seon.eval/id (str "p" i) :seon.eval/response {:value v}}) samples)))
+        (d/transact conn (vec (map-indexed (fn [i v] {:seon.eval/id (str "p" i) :seon.eval/code "(f)" :seon.eval/response {:value v}}) samples)))
         (d/release conn))
       (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)
             back (fn [i] (get-in (d/pull @conn [:seon.eval/response] [:seon.eval/id (str "p" i)]) [:seon.eval/response :value]))]
@@ -1179,7 +1179,7 @@
         old-form (:db/id (:var/form (d/entity db1 [:var/name 'app.h/f])))
         db2 (mt/with db1 (mt/code 'app.h "(ns app.h)\n(defn f [x] (+ x 2))\n"))
         ;; the old form's text changes after the fact: a pull as of now would show this
-        db3 (mt/with db2 [[:db/add old-form :form/src "(defn f [x] :changed-later)"]])
+        db3 (mt/with db2 [{:db/id old-form :form/id (:form/id (d/entity db1 old-form)) :form/ns (:db/id (:form/ns (d/entity db1 old-form))) :form/order (:form/order (d/entity db1 old-form)) :form/src "(defn f [x] :changed-later)"}])
         rows (pdb/history db3 [:var/name 'app.h/f] {:attrs #{:var/form} :pull [:form/src]})
         added (filter :added? rows)]
     (is (= 2 (count added)))
@@ -1270,6 +1270,55 @@
     (is (nil? (check [{:seon.task/id "t" :seon.task/execution :held}])))
     (is (nil? (check [{:app.other/thing 1}])) "a key no schema names is still the store's to judge")
     (is (= :seon.task/execution (:attribute (pdb/invalid-datom db [{:seon.task/id "t" :seon.task/execution :no-such}]))) "with no branch's forms, the binary's")))
+
+(deftest a-write-holds-each-entity-it-touches-to-the-schemas-its-keys-select
+  ;; docs/storage.md#the-write-checks-every-entity-it-touches: an entity holding an attribute an entity schema owns holds that
+  ;; schema's required keys, and a write is refused for what it broke; a boot written alone (a hand edit, 2026-11-08) was
+  ;; stored, and the reconciler's read of it failed later, on agent-value's own stricter copy of the agent's shape
+  (ts/test-branch!
+    (fn [_ conn]
+      (let [e (try (d/transact conn [{:seon.agent/key "half" :seon.agent/boot "b"}]) nil
+                   (catch Exception x (ex-data x)))]
+        (is (= :seon.db/invalid-entity (:seon.error/type e)) (pr-str e))
+        (is (= :seon.db/agent-start-fact (:schema e)) "it names the schema that owns what was written")
+        (is (= [:seon.agent/started-ms] (:missing e)) "and what the write left out")
+        (is (nil? (pdb/eid @conn :seon.agent/key "half")) "nothing of the refused write is stored"))
+      (is (map? (d/transact conn [{:seon.agent/key "whole" :seon.agent/boot "b" :seon.agent/started-ms 1}])) "written together, it is stored")
+      (testing "the one path a value takes refuses as the writer does"
+        (is (thrown? clojure.lang.ExceptionInfo (pdb/with @conn [{:seon.agent/key "half" :seon.agent/boot "b"}]))))
+      (testing "it refuses only what the write broke"
+        (let [db (:db-after (d/with @conn [{:seon.agent/key "half" :seon.agent/boot "b"}]))]
+          (is (nil? (pdb/invalid-entity (d/with db [{:seon.agent/key "whole" :seon.agent/agents [:seon.agent/key "half"]}])))
+              "a ref to an incomplete entity is a datom of the referrer only")
+          (is (nil? (pdb/invalid-entity (d/with db [{:seon.agent/key "half" :seon.agent/status :idle}])))
+              "an entity incomplete before is not refused for a write that broke nothing")
+          (is (= [:seon.agent/boot] (:missing (pdb/invalid-entity (d/with @conn [[:db/retract [:seon.agent/key "whole"] :seon.agent/boot "b"]]))))
+              "retracting a key the entity held and still needs is refused")
+          (is (nil? (pdb/invalid-entity (d/with @conn [[:db.fn/retractEntity [:seon.agent/key "whole"]]])))
+              "an entity retracted whole has stopped being that thing")))
+      (testing "an upsert of an unknown identity is no stub (seon.root's release! of a task id main does not hold)"
+        (is (= :seon.task/task-fact (:schema (pdb/invalid-entity (d/with @conn (task/execution-tx ["no/such"] :running))))))))))
+
+(deftest an-entity-named-by-a-ref-ends-with-its-target
+  ;; docs/storage.md#the-write-checks-every-entity-it-touches: a vector's identity is a ref to the entity it embeds
+  ;; (:seon.vector/of), so retracting that entity used to drop the ref and leave the rest of the vector behind, an
+  ;; orphan swept a round later; the one path ends it with its target, so no writer retracts it by hand
+  (ts/test-branch!
+    (fn [_ conn]
+      (d/transact conn [{:form/id "f/1" :form/src "(defn f [])" :form/ns [:ns/name 'app.m0] :form/order 0}])
+      (d/transact conn [(seon.vector/fact [:form/id "f/1"] 1 [0.5 0.25 0.125] "m")])
+      (let [ve (pdb/eid @conn :seon.vector/of (pdb/eid @conn :form/id "f/1"))]
+        (is (some? ve) "the form has its vector")
+        (is (map? (d/transact conn [[:db.fn/retractEntity [:form/id "f/1"]]])) "retracting the form is not refused")
+        (is (empty? (d/datoms @conn :eavt ve)) "and its vector is gone with it, nothing of it left")))))
+
+(deftest each-attribute-is-named-by-one-entity-schema
+  ;; docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together: what an entity is comes from the attributes it holds
+  ;; (seon.db/entity-schemas), so an attribute two schemas name has two definitions and one of them decides by accident
+  ;; (2026-11-08: the task's and root's schemas listed config keys, so root's config read as a task missing its keys)
+  (let [named (for [[k f] seon.contract/forms :when (:seon.db/attributes (seon.contract/properties k)) a (pdb/own-keys f)] [a k])
+        twice (into (sorted-map) (keep (fn [[a ks]] (when (next ks) [a (mapv second ks)]))) (group-by first named))]
+    (is (= {} twice) "each attribute's one entity schema")))
 
 (deftest a-datom-its-attribute-refuses-is-invalid-and-names-it
   ;; docs/storage.md#the-write-checks-every-datom: the store checks a value's type, and a data attribute's only that it is

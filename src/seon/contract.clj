@@ -209,7 +209,7 @@
           ;; `:value "seon.print.select"` for a symbol, and the agent sent the same call again)
           :value (print/code (print/text value (:part print/budgets)))})))
 
-(clojure.core/defn- first-problem
+(clojure.core/defn first-problem
   "The first reason v does not satisfy s, in one line for an error's message: where (its :in path),
   what it got, and what was expected (its schema's form), each printed at the printer's :part budget, malli's kind for a
   missing or refused key; then the map or vector that holds it (the value at its path's parent: what a
