@@ -258,12 +258,18 @@
                            ["bin/root" command] args)))
 
 (defn drop-main!
-  "Delete main and every branch under it from the store at store (seon.check/drop-mains, through
-  the binary), once the root that made them has stopped: what a test's root made leaves the one
-  store with the test."
+  "Delete main and every branch under it from the store at store (seon.db/delete-main!), with its
+  agents' directory, once the root that made them has stopped: what a test's root made leaves the
+  one store with the test. In this process: through the binary (seon.check/drop-mains) it compiled
+  the check driver each time, 1-1.8 s a process test. Answers {:deleted [branch ...]}."
   {:malli/schema [:=> [:cat :string :string] :map]}
   [store main]
-  (binary-sh "./seon" "drop" main "--profile" root-profile "--set" (str ":seon.config.root/store-path=" (pr-str store)) :dir "target"))
+  (let [cfg (pdb/store-cfg :lmdb store)
+        conn (d/connect cfg)
+        gone (try (pdb/delete-main! conn (keyword main))
+                  (finally (pdb/sync! cfg) (d/release conn)))]
+    (fx/remove-tree! (pdb/agents-dir (assoc cfg :branch (keyword main))))
+    {:deleted gone}))
 
 (defn start-args
   "bin/root start's arguments for a test's root in runs (start-root!): root-profile, its task files
