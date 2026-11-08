@@ -248,7 +248,7 @@
   [^bytes bs cuts]
   (let [ps (atom (->> (concat [0] cuts [(alength bs)]) (partition 2 1) (map (fn [[a b]] (java.util.Arrays/copyOfRange bs (int a) (int b))))))
         lines (a/chan)]
-    (#'fx/read-lines! (fn [] (let [p (first @ps)] (swap! ps rest) p)) lines)
+    (#'fx/read-lines! (fn [] (let [p (first @ps)] (swap! ps rest) p)) lines nil)
     (loop [acc []] (let [m (a/<!! lines)] (if (:line m) (recur (conj acc (:line m))) [acc m])))))
 
 (defn- fold [lines]
@@ -329,3 +329,25 @@
      :per-n {:calls 2 :ticks 8800 :bytes 28500}
      :fixed {:calls 4 :ticks 20000 :bytes 70000}
      :sizes [10 100 1000]}))
+
+(deftest a-call-that-names-itself-is-answered-as-a-stream-over-the-socket
+  ;; http-post's streaming answer, end to end on a local server: the pieces, the step and the final make the completion the whole read does
+  (let [port (+ 20000 (rand-int 20000))
+        server (adapter/run-server
+                (fn [_] (let [out (a/chan 16)]
+                          (a/thread (doseq [c chunks] (a/>!! out c)) (a/close! out))
+                          {:status 200 :headers {"Content-Type" "text/event-stream"} :body out}))
+                {:port port :host "127.0.0.1" :strategy :fibers})]
+    (try
+      (let [provider {:kind :openai-compat :base-url (str "http://127.0.0.1:" port) :model "deepseek-flash" :api-key-env "HOME" :max-tokens 2048}
+            req {:messages [{:role "user" :content "square?"}] :task "t/sq" :turn 0}
+            {:keys [pull shut init step final close] :as s} (:stream (model/complete provider (assoc req :call "c1" :agent "boot/1")))
+            lines (let [ls (a/chan)] (#'fx/read-lines! pull ls shut)
+                    (loop [acc []] (let [m (a/<!! ls)] (if (:line m) (recur (conj acc (:line m))) acc))))
+            [st out] (reduce (fn [[st out] l] (let [[st' ms] (step st l)] [st' (into out ms)])) [init []] lines)
+            r (final st)]
+        (is (some? s) "the call is answered at the start of its reply")
+        (is (= (:text (model/complete provider req)) (:text r)) "and its last state is the reply the whole read makes")
+        (is (= ["Square " "multiplies."] (map :text (filter (comp #{"c1/reasoning"} :stream) out))))
+        (is (nil? (shut)) "the connection is closed already, and closing again is nothing"))
+      (finally (adapter/stop-server server {:drain-timeout-ms 0})))))

@@ -86,7 +86,7 @@
   connect failure or the socket's death ends it. The interop edge, the named failure point
   seon.model/http-post: a connect or socket failure is :seon.model/transport."
   {:malli/schema [:=> [:cat :string [:vector [:tuple :string :string]] :string :boolean]
-                  [:or [:map [:status :int] [:body :string] [:headers :any]] [:map [:status :int] [:pull :any] [:headers :any]] :seon.model/failure]]}
+                  [:or [:map [:status :int] [:body :string] [:headers :any]] [:map [:status :int] [:pull :any] [:close :any] [:headers :any]] :seon.model/failure]]}
   [url headers body stream?]
   (let [u (try (http/parse-url url) (catch Throwable e e))]
     (if (instance? Throwable u)
@@ -97,11 +97,14 @@
                        (http/read-response s nil "POST" nil true true)
                        (catch Throwable e (http/s-close s) (throw e)))]
             (if (and stream? (= 200 (:status r)))
-              (let [pull (or (:body-pull r) (let [b (volatile! (:body r))] (fn [] (let [x @b] (vreset! b nil) x))))]
-                {:status 200 :headers (:header-pairs r)
+              (let [pull (or (:body-pull r) (let [b (volatile! (:body r))] (fn [] (let [x @b] (vreset! b nil) x))))
+                    open (volatile! true)
+                    ;; once, whoever ends the stream: the reader at its end, an error, or when nobody reads on
+                    close (fn [] (when @open (vreset! open false) (http/s-close s)))]
+                {:status 200 :headers (:header-pairs r) :close close
                  :pull (fn []
                          (let [x (try (pull) (catch Throwable e (transport-error (step/error-msg e) {:url url})))]
-                           (when (or (nil? x) (contract/error? x)) (http/s-close s))
+                           (when (or (nil? x) (contract/error? x)) (close))
                            x))})
               (try {:status (:status r) :headers (:header-pairs r) :body (body-text r)}
                    (finally (http/s-close s))))))
@@ -499,7 +502,7 @@
 (defn- openai-compat
   {:malli/schema [:=> [:cat :seon.model/provider :seon.model/request]
                   [:or :seon.model/completion :seon.model/failure
-                   [:map [:stream [:map [:pull :any] [:init :map] [:step :any] [:final :any] [:close :any]]]]]]}
+                   [:map [:stream [:map [:pull :any] [:shut :any] [:init :map] [:step :any] [:final :any] [:close :any]]]]]]}
   [{:keys [base-url api-key-env max-tokens] :as provider} request]
   (let [key (config/secret api-key-env)]
     (if (str/blank? key)
@@ -517,19 +520,19 @@
           (not= 200 (:status r)) (provider-error (str "HTTP " (:status r)) (:status r)
                                                  (cond-> {:body (:body r)}
                                                    (retry-after-ms (:headers r)) (assoc :retry-after-ms (retry-after-ms (:headers r)))))
-          (:pull r) {:stream {:pull (:pull r) :init (sse-init (:call request) (:agent request)) :step sse-step :close sse-close
+          (:pull r) {:stream {:pull (:pull r) :shut (:close r) :init (sse-init (:call request) (:agent request)) :step sse-step :close sse-close
                               :final (fn [st] (stream-reply st (profile/ms-since t0) max-tokens))}}
           :else (parse-reply (:body r) ms max-tokens))))))
 
 (defn complete
   "The model's reply to request under provider. A request that names its model call (:call, with the
-  asking :agent) is answered at the start of its reply, as {:stream {:pull :init :step :close :final}}: the
+  asking :agent) is answered at the start of its reply, as {:stream {:pull :shut :init :step :close :final}} (:shut closes the connection, once): the
   reply's body is the caller's to read (seon.fx/worker-proc), :step folding each line into the state (and
   answering the stream messages it made), :final the completion of the last state, :close the messages that
   end the ids still open."
   {:malli/schema [:=> [:cat :seon.model/provider :seon.model/request]
                   [:or :seon.model/completion :seon.model/failure
-                   [:map [:stream [:map [:pull :any] [:init :map] [:step :any] [:final :any] [:close :any]]]]]]}
+                   [:map [:stream [:map [:pull :any] [:shut :any] [:init :map] [:step :any] [:final :any] [:close :any]]]]]]}
   [provider request]
   (case (:kind provider)
     :none (contract/error :seon.model/no-provider #'seon.model/complete

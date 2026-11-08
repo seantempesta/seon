@@ -471,3 +471,27 @@
     (is (= :seon.model/transport (get-in (first done) [:outcome :seon.error/type])) "the asker is answered the transport error")
     (is (= [{:stream "c1/reasoning" :agent "boot/1" :offset 0 :text "Thin"} {:stream "c1/reasoning" :agent "boot/1" :end true}] streams))
     (is (true? ((::flow/input-filter fin) :work)))))
+
+(deftest a-reader-whose-lines-are-closed-lets-go-of-its-connection
+  ;; the worker stopped reading (its chan closed mid-stream): the reader ends and the connection is closed, not left to the OS
+  (let [shut (promise)
+        lines (a/chan)
+        ps (atom [(piece (str (delta :content "a") (delta :content "b"))) (piece (delta :content "c")) (piece (delta :content "d"))])
+        t (#'fx/read-lines! (fn [] (let [p (first @ps)] (swap! ps rest) p)) lines #(deliver shut :closed))]
+    (is (:line (a/<!! lines)) "one line was taken")
+    (a/close! lines)
+    (a/<!! lines) ; a put pending when a chan closes is still taken (core.async): the one after it finds it closed
+    (is (= :closed @shut) "the reader stopped and closed the connection")
+    (.join ^Thread t)
+    (is (< (count @ps) 3) "and the rest of the body was not all read" )))
+
+(deftest a-worker-stopped-mid-call-closes-its-connection
+  (let [shut (promise)
+        pull (let [ps (atom [(piece (str (delta :content "a") (delta :content "b")))])]
+               (fn [] (if-let [p (first @ps)] (do (swap! ps rest) p) (do @shut (contract/error :seon.model/transport 'x "closed" {})))))
+        perform (fn [_] (assoc-in ((streaming-perform pull) nil) [:stream :shut] #(deliver shut :closed)))
+        [st _] (fx/worker-proc (fx/worker-proc {:kind :t :owner :fx/t :perform perform}) :work (assoc (req 1) :in-ns 0 :taken-ns 0))]
+    (is (:call st))
+    (fx/worker-proc st ::flow/stop)
+    (is (= :closed @shut) "stopping the worker closes the call's connection, which ends the reader")
+    (let [idle (fx/worker-proc {:kind :t :owner :fx/t :perform identity})] (is (= idle (fx/worker-proc idle ::flow/stop)) "a worker with no call stops as before"))))

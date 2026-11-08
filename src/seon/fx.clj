@@ -1284,18 +1284,21 @@
   "The edge reader of a streaming perform (the one thread AGENTS section 4 allows outside procs, for a blocking read, as
   seon.fork-server's socket reader): pulls the body's pieces (pull answers the next byte array, nil at the end, or an error
   map when the socket failed) and puts each whole line on lines, then {:end true}, or {:error e} for the failure. Ends
-  at either, or when lines is closed. See docs/flow.md#effects-one-owner-and-its-workers-per-kind."
-  {:malli/schema [:=> [:cat :seon.host/fn :seon.host/chan] :seon.host/thread]}
-  [pull lines]
+  at either, or when lines is closed; shut (the stream's :shut, nil: none) is called whenever it ends, so the
+  connection is let go however the reading stops. See docs/flow.md#effects-one-owner-and-its-workers-per-kind."
+  {:malli/schema [:=> [:cat :seon.host/fn :seon.host/chan [:maybe :seon.host/fn]] :seon.host/thread]}
+  [pull lines shut]
   (doto (Thread. ^Runnable
                  (fn []
                    (let [tail (java.io.ByteArrayOutputStream.)]
-                     (loop []
-                       (let [b (pull)]
-                         (cond (nil? b) (when (or (zero? (.size tail)) (a/>!! lines {:line (String. (.toByteArray tail) "UTF-8")}))
-                                          (a/>!! lines {:end true}))
-                               (contract/error? b) (a/>!! lines {:error b})
-                               (put-lines! b tail lines) (recur))))))
+                     (try
+                       (loop []
+                         (let [b (pull)]
+                           (cond (nil? b) (when (or (zero? (.size tail)) (a/>!! lines {:line (String. (.toByteArray tail) "UTF-8")}))
+                                            (a/>!! lines {:end true}))
+                                 (contract/error? b) (a/>!! lines {:error b})
+                                 (put-lines! b tail lines) (recur))))
+                       (finally (when shut (shut))))))
                  "seon-fx-stream")
     (.setDaemon true) (.start)))
 
@@ -1340,7 +1343,7 @@
   outcome): (close handle) lets go of what the handle holds outside the process and answers its
   facts (docs/vector.md#the-model), kept in the ping as :closed; the handle stays and a later item
   uses it again. A perform may answer {:stream {:pull :init :step :final :close}} in place of its
-  outcome (a model call that streams): see `read-lines!` and `stream-step`; the worker keeps its slot until the stream ends. The entrant boundary for a defect in the perform Var: the defect is the
+  outcome (a model call that streams): see `read-lines!` and `stream-step`; the worker keeps its slot until the stream ends (a worker stopped mid-call closes its connection). The entrant boundary for a defect in the perform Var: the defect is the
   outcome, as an error map, so its asker is always answered."
   {:malli/schema :seon.step/step-fn}
   ([] {:params {:perform "the kind's perform Var" :open "the Var that makes the kind's host object from :ctx (nil: none)"
@@ -1357,7 +1360,11 @@
   ([args] (let [lines (a/chan)]
             {:perform (:perform args) :open (:open args) :close (:close args) :kind (:kind args) :ctx (:ctx args) :n 0
              :owner (:owner args) :lines lines ::flow/in-ports {:work (:work args) :lines lines}}))
-  ([st _] st)
+  ;; stopped mid-call: the connection is closed, which ends the reader's pull, and the line it may be holding is taken
+  ([st t] (when-let [shut (and (= ::flow/stop t) (get-in st [:call :shut]))]
+            (shut)
+            (loop [] (when (a/poll! (:lines st)) (recur))))
+          st)
   ([st in m]
    (cond
      (nil? m) [st nil]
@@ -1382,8 +1389,8 @@
            done (mapv #(done-of %1 %2 t0 t1) ms rs)]
        (if-let [sm (and (not (:batch m)) (:stream (first rs)))]
          ;; a streaming perform: the call is read a line at a time on :lines until it ends, and the worker reads nothing else meanwhile
-         (do (read-lines! (:pull sm) (:lines st))
-             [(assoc st :call (assoc (select-keys sm [:step :final :close]) :m m :s (:init sm) :t0 t0)
+         (do (read-lines! (:pull sm) (:lines st) (:shut sm))
+             [(assoc st :call (assoc (select-keys sm [:step :final :close :shut]) :m m :s (:init sm) :t0 t0)
                      ::flow/input-filter #(= % :lines))
               nil])
          [(update st :n + (count ms)) {[(:owner st) :done] [(if (:batch m) {:batch done} (first done))]}])))))
