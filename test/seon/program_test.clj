@@ -56,9 +56,9 @@
     (is (= '#{clojure.string} (set (d/q '[:find [?r ...] :where [?f :form/src] [?f :form/requires ?r]] db))) "its requires, from the compiler")
     (testing "a def in it is recorded with its resolved references"
       (let [db (record db 'app.pt-new "(defn twice {:malli/schema [:=> [:cat :int] :int]} [x]  (s/join [(* 2 x)]))")]
-        (is (= {:var/meta #{:arglists} :var/contract "[:=> [:cat :int] :int]"
+        (is (= {:var/meta #{:arglists :malli/schema} :var/contract "[:=> [:cat :int] :int]"
                 :var/form {:form/src "(defn twice {:malli/schema [:=> [:cat :int] :int]} [x]  (s/join [(* 2 x)]))"}}
-               (update (var-row db 'app.pt-new/twice) :var/form dissoc :form/order)))
+               (-> (var-row db 'app.pt-new/twice) (update :var/form dissoc :form/order) (update :var/meta set))))
         (is (= '#{clojure.string/join clojure.core/* clojure.core/defn} (set (d/q '[:find [?r ...] :where [?v :var/name app.pt-new/twice] [?v :var/form ?f] [?f :form/refs ?r]] db)))
             "s/join resolved through the alias, * to clojure.core's, and the macro it expanded")))
     (testing "a contract holding a function is recorded as written, so it reads back as data"
@@ -84,19 +84,19 @@
 
 (deftest a-form-records-exactly-what-the-compiler-defined
   (let [a (fn [src] (eval-account 'app.pt-kinds src))
-        defs (fn [acct] (into {} (map (juxt :var :kind)) (:defs acct)))]
-    (is (= '{app.pt-kinds/a :value app.pt-kinds/g :fn} (defs (a "(do (def a 1) (defn g [] a))"))) "do-nested defs")
-    (is (= '{app.pt-kinds/m :multi} (defs (a "(defmulti m :k)"))))
+        defs (fn [acct] (into {} (map (juxt :var :meta)) (:defs acct)))]
+    (is (= '{app.pt-kinds/a #{} app.pt-kinds/g #{:arglists}} (defs (a "(do (def a 1) (defn g [] a))"))) "do-nested defs")
+    (is (= '{app.pt-kinds/m #{}} (defs (a "(defmulti m :k)"))))
     (is (= '[{:multi app.pt-kinds/m :dispatch ":a"}] (:methods (a "(defmethod m :a [x] (g))"))) "a method: [multi dispatch]")
-    (is (= '{app.pt-kinds/P :protocol app.pt-kinds/p1 :protocol-fn} (defs (a "(defprotocol P (p1 [x]))"))))
+    (is (= '{app.pt-kinds/P #{} app.pt-kinds/p1 #{:arglists :protocol}} (defs (a "(defprotocol P (p1 [x]))"))))
     (is (empty? (:banned (a "(defprotocol P2 (p2 [x]))"))) "defprotocol no longer expands to alter-var-root (jolt/def-tap)")
     (is (= '[{:type "String" :protocol app.pt-kinds/P}] (:impls (a "(extend-type String P (p1 [x] 1))"))) "an extension: [protocol type]")
-    (is (= '{app.pt-kinds/R :type app.pt-kinds/->R :ctor app.pt-kinds/map->R :ctor} (defs (a "(defrecord R [x] P (p1 [_] x))")))
-        "a record's constructors need no contract of their own")
-    (is (= '{app.pt-kinds/t :test} (defs (a "(clojure.test/deftest t (clojure.test/is (= 1 1)))"))))
-    (is (= '{app.pt-kinds/mm :macro} (defs (a "(defmacro mm [x] x)"))))
+    (is (= '{app.pt-kinds/R #{} app.pt-kinds/->R #{} app.pt-kinds/map->R #{}} (defs (a "(defrecord R [x] P (p1 [_] x))")))
+        "a record's constructors carry no arglists, so they need no contract of their own")
+    (is (= '{app.pt-kinds/t #{:test}} (defs (a "(clojure.test/deftest t (clojure.test/is (= 1 1)))"))))
+    (is (= '{app.pt-kinds/mm #{:arglists :macro}} (defs (a "(defmacro mm [x] x)"))))
     (is (= '#{app.pt-kinds/later} (:declares (a "(declare later)"))))
-    (is (= '{app.pt-kinds/once :value} (defs (a "(defonce once 1)"))))
+    (is (= '{app.pt-kinds/once #{}} (defs (a "(defonce once 1)"))))
     (is (nil? (a "(defonce once 2)")) "readback: a defonce that sets nothing records nothing")
     (is (nil? (a "(+ 1 2)")) "an expression is no program")
     (is (:env? (program/unit-account (jolt.analyzer/analyze (jolt.host/ctx-for-ns "app.pt-kinds") '(require '[clojure.set :as set])))))))
@@ -728,7 +728,7 @@
   ;; program's size (this took the checkout's whole kept graph, 321 M ticks)
   (let [form (fn [nsym nm kind refs]
                (fn [db] (program/record-tx db {:id (str nsym "/" nm) :src (str "(defn " nm ")") :ns nsym :ns-form? false
-                                               :defs [{:var (symbol (str nsym) nm) :kind kind}]
+                                               :defs [{:var (symbol (str nsym) nm) :meta (case kind :test #{:test} #{:arglists})}]
                                                :declares #{} :methods [] :impls [] :refs refs :requires #{} :banned #{} :inline-defs #{}})))
         db (mt/with (mt/world)
              (form 'app.fc-test "pure" :test #{})
