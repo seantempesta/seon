@@ -25,16 +25,16 @@
    "data: [DONE]\n\n"])
 
 (deftest each-eval-carries-its-place-in-the-reply
-  ;; task seon.fx/an-effect-streams-what-it-reads: the stream reader files an eval's code under <call>/<k>/eval-<i> (k the tool call's :index,
-  ;; i its position among that call's evals), so its output must file under the same: reply-of puts [k i] on each eval, as data, and the
-  ;; stream id is made from it, never from the eval's id
-  (let [tc (fn [index id evals] {:index index :id id :function {:name "eval" :arguments (json/write-str {"evals" (mapv (fn [c] {"intent" "i" "code" c}) evals)})}})
+  ;; task seon.fx/an-effect-streams-what-it-reads: the stream reader files an eval's code under <call>/<k>/eval-0 (k the tool call's :index),
+  ;; so its output must file under the same: reply-of puts [k 0] on each eval, as data, and the stream id is made from it, never from the eval's id
+  (let [tc (fn [index id code] {:index index :id id :function {:name "eval" :arguments (json/write-str {"intent" "i" "code" code})}})
         r (model/reply-of {:usage {:prompt_tokens 1 :completion_tokens 1}
-                           :choices [{:finish_reason "tool_calls" :message {:content "" :tool_calls [(tc 0 "ta" ["(+ 1 1)" "(+ 2 2)"]) (tc 1 "tb" ["(+ 3 3)"])]}}]} 1 100)
+                           :choices [{:finish_reason "tool_calls" :message {:content "" :tool_calls [(tc 0 "ta" "(+ 1 1)") (tc 1 "tb" "(+ 2 2)") (tc 2 "tc" "(+ 3 3)")]}}]} 1 100)
         calls (:tool-calls r)
         ids (mapv #(#'repl/stream-id {:stream {:call "c" :k (first (:seon.model/at %)) :i (second (:seon.model/at %))}} "out") calls)]
-    (is (= [[0 0] [0 1] [1 0]] (mapv :seon.model/at calls)))
-    (is (= ["c/0/eval-0/out" "c/0/eval-1/out" "c/1/eval-0/out"] ids) "two tool calls: each eval's output under its own call and position")))
+    (is (= [[0 0] [1 0] [2 0]] (mapv :seon.model/at calls)))
+    (is (= ["ta" "tb" "tc"] (mapv :id calls)) "each call its own id")
+    (is (= ["c/0/eval-0/out" "c/1/eval-0/out" "c/2/eval-0/out"] ids) "three tool calls: each eval's output under its own call")))
 
 (deftest a-call-that-came-back-as-text-is-answered-not-parked
   ;; deepseek-run4, 2026-11-07: v4-pro's reply was text ending in its own closing tag, finish stop, no call and no opening tag to read one
@@ -94,75 +94,77 @@
                                             {:role "tool" :tool-call-id "c1" :content "3"}]
                                  :task "t/x" :turn 1})]
       (is (= ["eval"] (mapv #(get-in % [:function :name]) (:tools b))))
-      (is (= [{:id "c1" :type "function" :function {:name "eval" :arguments "{\"message-md\":\"\",\"evals\":[{\"code\":\"(+ 1 2)\"}]}"}}]
+      (is (= [{:id "c1" :type "function" :function {:name "eval" :arguments "{\"code\":\"(+ 1 2)\"}"}}]
              (:tool_calls (second (:messages b)))))
       (is (= {:role "tool" :content "3" :tool_call_id "c1"} (nth (:messages b) 2)))))
-  (testing "a streamed reply's call pieces join by index into its call, and its evals are in order, each with its intent"
+  (testing "a streamed reply's call pieces join by index into its calls, each an eval with its intent, in order; the content is the message"
     (let [c (model/parse-reply
              (apply str (map chunk-line
-                             [{:choices [{:delta {:content ""}}]}
-                              {:choices [{:delta {:tool_calls [{:index 0 :id "c1" :function {:name "eval" :arguments "{\"message-md\":\"Two steps.\",\"evals\":[{\"intent\":\"i\",\"code\":"}}]}}]}
-                              {:choices [{:delta {:tool_calls [{:index 0 :function {:arguments "\"(def x 41)\"},{\"intent\":\"j\",\"code\":\"(inc x)\"}]}"}}]}}]}
+                             [{:choices [{:delta {:content "Two steps."}}]}
+                              {:choices [{:delta {:tool_calls [{:index 0 :id "c1" :function {:name "eval" :arguments "{\"intent\":\"i\",\"code\":"}}]}}]}
+                              {:choices [{:delta {:tool_calls [{:index 0 :function {:arguments "\"(def x 41)\"}"}}]}}]}
+                              {:choices [{:delta {:tool_calls [{:index 1 :id "c2" :function {:name "eval" :arguments "{\"intent\":\"j\",\"code\":\"(inc x)\"}"}}]}}]}
                               {:choices [{:delta {} :finish_reason "tool_calls"}] :usage {:prompt_tokens 9 :completion_tokens 4}}]))
              5.0 64)]
-      (is (= [{:id "c1" :code "(def x 41)" :intent "i" :seon.model/at [0 0]} {:id "c1#1" :code "(inc x)" :intent "j" :seon.model/at [0 1]}] (:tool-calls c)))
+      (is (= [{:id "c1" :code "(def x 41)" :intent "i" :seon.model/at [0 0]} {:id "c2" :code "(inc x)" :intent "j" :seon.model/at [1 0]}] (:tool-calls c)))
       (is (= ["Two steps." "tool_calls"] [(:text c) (:finish-reason c)]))))
   (testing "a call with no content beside it, and a call cut mid-arguments: its arguments as they came"
-    (let [c (model/parse-reply "{\"choices\":[{\"message\":{\"content\":null,\"tool_calls\":[{\"id\":\"c\",\"function\":{\"name\":\"eval\",\"arguments\":\"{\\\"evals\\\":[{\\\"code\\\":\\\"(+ 1\"}}]},\"finish_reason\":\"length\"}]}" 1.0 64)]
+    (let [c (model/parse-reply "{\"choices\":[{\"message\":{\"content\":null,\"tool_calls\":[{\"id\":\"c\",\"function\":{\"name\":\"eval\",\"arguments\":\"{\\\"code\\\":\\\"(+ 1\"}}]},\"finish_reason\":\"length\"}]}" 1.0 64)]
       (is (= "" (:text c)))
-      (is (= ["c" "{\"evals\":[{\"code\":\"(+ 1"] ((juxt :id :code) (first (:tool-calls c)))) "its arguments as they came")
+      (is (= ["c" "{\"code\":\"(+ 1"] ((juxt :id :code) (first (:tool-calls c)))) "its arguments as they came")
       (is (re-find #"not run: the arguments are cut off" (:problem (first (:tool-calls c)))) "and nothing runs: the agent is told why"))))
 
-(deftest a-reply-is-one-call-and-its-results-one-message
-  ;; docs/model.md#one-tool-eval: owner, 2026-11-06: "It's one message-md for ALL the tool calls. each tool call has an intent."
+(deftest a-reply-is-its-text-and-a-call-for-each-eval
+  ;; docs/model.md#one-tool-eval: the message is the reply's text; each eval is a call of its own, with an intent, answered by a tool message of its own
   (let [provider {:kind :openai-compat :base-url "" :model "m" :api-key-env "" :max-tokens 10}
-        reply (fn [args & [text]] (model/parse-reply (json/write-str {:choices [{:message {:content (or text "") :tool_calls [{:id "c" :function {:name "eval" :arguments (json/write-str args)}}]} :finish_reason "tool_calls"}]}) 1.0 64))
-        args {:message-md "Doing f, then g." :evals [{:intent "f" :code "(f)"} {:intent "g" :code "(g)"}]}
-        c (reply args)]
-    (testing "stored shape: each eval its own, the message the reply's text"
+        call (fn [id args] {:id id :function {:name "eval" :arguments (json/write-str args)}})
+        reply (fn [text calls] (model/parse-reply (json/write-str {:choices [{:message {:content text :tool_calls calls} :finish_reason "tool_calls"}]}) 1.0 64))
+        c (reply "Doing f, then g." [(call "ca" {:intent "f" :code "(f)"}) (call "cb" {:intent "g" :code "(g)"})])]
+    (testing "stored shape: each eval its own call, the message the reply's text"
       (is (= "Doing f, then g." (:text c)))
-      (is (= [{:id "c" :code "(f)" :intent "f" :seon.model/at [0 0]} {:id "c#1" :code "(g)" :intent "g" :seon.model/at [0 1]}] (:tool-calls c))))
-    (testing "the wire: one assistant call, its arguments as the model sent them; one tool message, its results in order"
-      (let [neutral [{:role "assistant" :content "Doing f, then g." :reply 1 :tool-calls [{:id "eval-e1" :code "(f)" :intent "f"}]}
-                     {:role "tool" :tool-call-id "eval-e1" :content "{:handle result/e1, :value 1}"}
-                     {:role "assistant" :content "" :reply 1 :tool-calls [{:id "eval-e2" :code "(g)" :intent "g"}]}
-                     {:role "tool" :tool-call-id "eval-e2" :content "{:handle result/e2, :value 2}"}
+      (is (= [{:id "ca" :code "(f)" :intent "f" :seon.model/at [0 0]} {:id "cb" :code "(g)" :intent "g" :seon.model/at [1 0]}] (:tool-calls c))))
+    (testing "the wire: the text, one call per eval, one tool message per call; a recorded reply round-trips"
+      (let [neutral [{:role "assistant" :content "Doing f, then g." :reply 1}
+                     {:role "assistant" :content "" :reply 1 :tool-calls [{:id "ca" :code "(f)" :intent "f"}]}
+                     {:role "tool" :tool-call-id "ca" :content "{:handle result/e1, :value 1}"}
+                     {:role "assistant" :content "" :reply 1 :tool-calls [{:id "cb" :code "(g)" :intent "g"}]}
+                     {:role "tool" :tool-call-id "cb" :content "{:handle result/e2, :value 2}"}
                      {:role "assistant" :content "" :tool-calls [{:id "eval-p3" :code "(my.render/render-changes)"}]}
                      {:role "tool" :tool-call-id "eval-p3" :content "{:handle result/p3, :value {:edits []}}"}]
             sent (:messages (model/request-body provider {:messages neutral :task "t/x" :turn 1}))]
-        (is (= 4 (count sent)) "a reply and its results, Seon's insert and its result")
-        (is (= (json/write-str {:message-md "Doing f, then g." :evals [{:intent "f" :code "(f)"} {:intent "g" :code "(g)"}]})
-               (get-in sent [0 :tool_calls 0 :function :arguments])))
-        (is (= "" (get-in sent [0 :content])) "no text beside the call")
-        (is (= 1 (count (get-in sent [0 :tool_calls]))))
-        (is (= {:role "tool" :tool_call_id "eval-e1" :content "{:handle result/e1, :value 1}\n\n{:handle result/e2, :value 2}"} (nth sent 1)) "each with its handle")
-        (is (= "{\"message-md\":\"\",\"evals\":[{\"code\":\"(my.render\\/render-changes)\"}]}" (get-in sent [2 :tool_calls 0 :function :arguments])) "Seon's own: no message, code and no intent")))
-    (testing "a reply's text is its message when it writes text instead, and no word it wrote is lost"
-      (is (= "I wrote text." (:text (reply {:evals [{:intent "f" :code "(f)"}]} "I wrote text."))))
-      (is (= "Text.\n\nMessage." (:text (reply {:message-md "Message." :evals [{:intent "f" :code "(f)"}]} "Text.")))))
+        (is (= ["assistant" "tool" "tool" "assistant" "tool"] (mapv :role sent)) "a reply, its two results, Seon's insert and its result")
+        (is (= "Doing f, then g." (get-in sent [0 :content])) "the text beside the calls")
+        (is (= [{:id "ca" :type "function" :function {:name "eval" :arguments (json/write-str {:intent "f" :code "(f)"})}}
+                {:id "cb" :type "function" :function {:name "eval" :arguments (json/write-str {:intent "g" :code "(g)"})}}]
+               (get-in sent [0 :tool_calls])))
+        (is (= [{:role "tool" :tool_call_id "ca" :content "{:handle result/e1, :value 1}"} {:role "tool" :tool_call_id "cb" :content "{:handle result/e2, :value 2}"}] (subvec sent 1 3)) "each with its handle")
+        (is (= "{\"code\":\"(my.render\\/render-changes)\"}" (get-in sent [3 :tool_calls 0 :function :arguments])) "Seon's own: code and no intent")
+        (is (= (mapv #(dissoc % :seon.model/at) (:tool-calls c)) (mapv (fn [tc] (#'model/eval-of "eval" (get-in tc [:function :arguments]) (:id tc))) (get-in sent [0 :tool_calls])))
+            "what went out reads back as the reply it was")))
+    (testing "a reply with text and no call is a message alone"
+      (is (nil? (:tool-calls (reply "Hi" nil))))
+      (is (= "Hi" (:text (reply "Hi" nil)))))
     (testing "a call that is not this shape is a typed answer to that reply, nothing run"
-      (is (re-find #"evals is missing, and the call names code, intent beside message-md" (:problem (first (:tool-calls (reply {:message-md "Hi" :intent "old" :code "(f)"}))))) "an old shape's code is not run, nor taken for a message alone")
-      (is (nil? (:tool-calls (reply {:message-md "Hi" :evals []}))) "no evals is a reply of its message alone: no call")
-      (is (= "Hi" (:text (reply {:message-md "Hi" :evals []}))))
-      (is (re-find #"its code is missing" (:problem (second (:tool-calls (reply {:message-md "Hi" :evals [{:intent "f" :code "(f)"} {:intent "g"}]})))))))))
+      (is (re-find #"code is missing" (:problem (first (:tool-calls (reply "" [(call "c" {:message-md "Hi" :evals [{:intent "f" :code "(f)"}]})]))))) "the old shape's call runs nothing")
+      (is (re-find #"code is missing" (:problem (second (:tool-calls (reply "Hi" [(call "ca" {:intent "f" :code "(f)"}) (call "cb" {:intent "g"})]))))) "an eval with no code, beside one that reads")
+      (is (re-find #"there is one tool, eval; message is not a tool" (:problem (first (:tool-calls (reply "" [{:id "c" :function {:name "message" :arguments "{\"message-md\":\"Hi\"}"}}])))))))))
 
 (deftest a-request-lets-the-model-reply-with-no-call
   ;; docs/render.md (step 0 measured it live: four DeepSeek turns,
   ;; thinking on, all 200, cache hits 87-96% from turn 2): tool_choice auto (DeepSeek refuses
-  ;; `required` with thinking on), so a reply may be a message with no call; the eval tool takes its intent and code, and optionally a message; the reasoning goes back as it was returned; no ;; reaches the model
+  ;; `required` with thinking on), so a reply may be a message with no call; the eval tool takes its intent and code; the reasoning goes back as it was returned; no ;; reaches the model
   (let [b (model/request-body {:kind :openai-compat :base-url "" :model "m" :api-key-env "" :max-tokens 10 :thinking :enabled}
                               {:messages [{:role "assistant" :content "I read f." :reasoning "r" :tool-calls [{:id "c1" :code "(f)"}]}
                                           {:role "tool" :tool-call-id "c1" :content "{:handle result/e1, :value 1}"}]
                                :task "t/x" :turn 1})]
     (is (= "auto" (:tool_choice b)))
-    (is (= [:message-md :evals] (keys (get-in b [:tools 0 :function :parameters :properties]))) "the message, then the evals: it talks and thinks before the code")
-    (is (= [:intent :code] (keys (get-in b [:tools 0 :function :parameters :properties :evals :items :properties]))))
-    (is (= ["message-md"] (get-in b [:tools 0 :function :parameters :required])) "only the message: the evals may be none")
+    (is (= [:intent :code] (keys (get-in b [:tools 0 :function :parameters :properties]))) "the intent, then the code: it thinks before the code")
+    (is (= ["intent" "code"] (get-in b [:tools 0 :function :parameters :required])) "both required")
     (is (not (str/includes? (pr-str (:tools b)) ";;")) "no ;; in the tool")
     (is (not (contains? b :temperature)) "absent: the provider's default")
     (is (= 0.5 (:temperature (model/request-body {:kind :openai-compat :base-url "" :model "m" :api-key-env "" :max-tokens 10 :temperature 0.5} {:messages [] :task "t/x" :turn 1}))) "set: as configured")
-    (is (= {:role "assistant" :content "" :reasoning_content "r"
-            :tool_calls [{:id "c1" :type "function" :function {:name "eval" :arguments "{\"message-md\":\"I read f.\",\"evals\":[{\"code\":\"(f)\"}]}"}}]}
+    (is (= {:role "assistant" :content "I read f." :reasoning_content "r"
+            :tool_calls [{:id "c1" :type "function" :function {:name "eval" :arguments "{\"code\":\"(f)\"}"}}]}
            (first (:messages b))) "reply text, reasoning and the call, as returned")
     (is (= "c1" (:tool_call_id (second (:messages b)))) "the response answers its call by the provider's id")))
 
@@ -237,10 +239,9 @@
 (def ^:private emoji "A character outside the BMP." (str (char 0x1F600)))
 
 (def ^:private call-args
-  "The first tool call's arguments as the model wrote them: a message with an escaped newline, and two evals, the first with a
-  quote, an escaped newline, a two-byte character escaped, and one of four bytes written raw."
-  (str "{\"message-md\":\"Reading **it**\\nnow\",\"evals\":[{\"intent\":\"look at \\u00e9\",\"code\":\"(str \\\"\u00e9\\\" 1)\\n(prn :" emoji ")\"},"
-       "{\"intent\":\"then\",\"code\":\"(inc 1)\"}]}"))
+  "The first tool call's arguments as the model wrote them: one eval, its intent with a two-byte character escaped and its code with a
+  quote, an escaped newline, a two-byte character and one of four bytes written raw."
+  (str "{\"intent\":\"look at \\u00e9\",\"code\":\"(str \\\"\u00e9\\\" 1)\\n(prn :" emoji ")\"}"))
 
 (defn- pieces-of [s n] (mapv #(apply str %) (partition-all n s)))
 
@@ -253,8 +254,8 @@
                   (map-indexed (fn [i f] (chunk-line {:choices [{:index 0 :delta {:tool_calls [(cond-> {:index 0 :function {:arguments f}}
                                                                                                  (zero? i) (-> (assoc :id "call_0" :type "function") (assoc-in [:function :name] "eval")))]}}]}))
                                (pieces-of call-args 6))
-                  [(chunk-line {:choices [{:index 0 :delta {:tool_calls [{:index 1 :id "call_1" :function {:name "eval" :arguments "{\"message-"}}]}}]})
-                   (chunk-line {:choices [{:index 0 :delta {:tool_calls [{:index 1 :function {:arguments "md\":\"hi\"}"}}]}}]})
+                  [(chunk-line {:choices [{:index 0 :delta {:tool_calls [{:index 1 :id "call_1" :function {:name "eval" :arguments "{\"intent\":\"th"}}]}}]})
+                   (chunk-line {:choices [{:index 0 :delta {:tool_calls [{:index 1 :function {:arguments "en\",\"code\":\"(inc 1)\"}"}}]}}]})
                    (chunk-line {:choices [{:index 0 :delta {} :finish_reason "tool_calls"}]})
                    (chunk-line {:choices [] :usage {:prompt_tokens 120 :completion_tokens 30 :prompt_cache_hit_tokens 64}})]))
        "data: [DONE]\n\n"))
@@ -296,25 +297,24 @@
         text (fn [id] (apply str (map :text (sort-by :offset (filter :text (by-id id))))))]
     (is (= (:reasoning whole) (text "c1/reasoning")))
     (is (= (str "Caf\u00e9 " emoji " ok") (text "c1/content")))
-    (is (= (get args "message-md") (text "c1/0/message")))
-    (is (= "hi" (text "c1/1/message")))
-    (doseq [[i e] (map-indexed vector (get args "evals"))
-            k ["intent" "code"]]
-      (is (= (get e k) (text (str "c1/0/eval-" i "/" k))) (str "eval " i " " k)))
-    (is (= (get-in args ["evals" 0 "code"]) (:code (first (:tool-calls whole)))) "the committed code is the one streamed")
+    (is (= "then" (text "c1/1/eval-0/intent")))
+    (is (= "(inc 1)" (text "c1/1/eval-0/code")))
+    (doseq [k ["intent" "code"]]
+      (is (= (get args k) (text (str "c1/0/eval-0/" k))) (str "eval " k)))
+    (is (= (get args "code") (:code (first (:tool-calls whole)))) "the committed code is the one streamed")
     (doseq [[id ms] by-id]
       (let [ts (filter :text ms)]
         (is (= (reductions + 0 (map (comp count :text) (butlast ts))) (map :offset ts)) (str id ": offsets are the chars sent before"))
         (is (every? #(= "boot/1" (:agent %)) ms))))
     (is (every? #(<= (count (filter :end %)) 1) (vals by-id)) "an id ends once")
-    (is (= #{"c1/0/message" "c1/0/eval-0/intent" "c1/0/eval-0/code" "c1/0/eval-1/intent" "c1/0/eval-1/code" "c1/1/message"}
+    (is (= #{"c1/0/eval-0/intent" "c1/0/eval-0/code" "c1/1/eval-0/intent" "c1/1/eval-0/code"}
            (set (map :stream (filter :end out))))
         "each tool-call string ends as it closes")
     (is (= #{"c1/reasoning" "c1/content"} (set (map :stream (model/sse-close st)))) "the call's end closes what is still open")
     ;; the container and the part are data on every message, so no reader splits an id (owner: "no hacky parsing")
     (is (every? #(= "c1" (:in %)) (concat out (model/sse-close st))) "every message names its call")
-    (is (= {"c1/reasoning" "reasoning" "c1/content" "content" "c1/0/message" "message" "c1/0/eval-0/intent" "intent"
-            "c1/0/eval-0/code" "code" "c1/0/eval-1/intent" "intent" "c1/0/eval-1/code" "code" "c1/1/message" "message"}
+    (is (= {"c1/reasoning" "reasoning" "c1/content" "content" "c1/0/eval-0/intent" "intent"
+            "c1/0/eval-0/code" "code" "c1/1/eval-0/intent" "intent" "c1/1/eval-0/code" "code"}
            (into {} (map (juxt :stream :part)) (concat out (model/sse-close st))))
         "every message names its part")
     (is (= [] (second (reduce (fn [[st out] l] (let [[s m] (model/sse-step st l)] [s (into out m)]))
@@ -324,10 +324,10 @@
 (deftest the-json-reader-keeps-its-place-between-fragments
   (let [feed (fn [frags] (let [[_ evs] (reduce (fn [[st evs] f] (let [[st' e] (model/json-feed st f)] [st' (into evs e)])) [nil []] frags)]
                            (->> evs (filter (comp string? second)) (group-by first) (map (fn [[p xs]] [p (apply str (map second xs))])) (into {}))))
-        doc "{\"a\":[\"x\\\"y\",{\"k\":\"\\u00e9\\ud83d\\ude00!\"}],\"b\\n\":\"z\"}"]
-    (is (= {["a" 0] "x\"y" ["a" 1 "k"] (str "\u00e9" emoji "!") ["b\n"] "z"} (feed [doc])))
+        doc "{\"a\":\"x\\\"y\",\"k\":\"\\u00e9\\ud83d\\ude00!\",\"b\\n\":\"z\"}"]
+    (is (= {"a" "x\"y" "k" (str "\u00e9" emoji "!") "b\n" "z"} (feed [doc])))
     (is (= (feed [doc]) (feed (map str doc))) "one character at a time: an escape, a \\uXXXX and a pair cut anywhere")
-    (is (= {["b\n"] "z"} (feed (pieces-of "{\"b\\n\":\"z\"}" 3))) "a key is not a value")))
+    (is (= {"b\n" "z"} (feed (pieces-of "{\"b\\n\":\"z\"}" 3))) "a key is not a value")))
 
 (defn fold-stream
   "The cost proof's function: n tool-call fragment lines through the line step and the close."
@@ -336,9 +336,9 @@
   (let [[st out] (fold lines)] (+ (count out) (count (model/sse-close st)))))
 
 (defn fragment-lines
-  "The cost proof's input at n: [lines], a tool call's first line then n lines of 8 more characters of its first eval's code."
+  "The cost proof's input at n: [lines], a tool call's first line then n lines of 8 more characters of its eval's code."
   [n]
-  [(into [(str "data: " (json/write-str {:choices [{:delta {:tool_calls [{:index 0 :id "c" :function {:name "eval" :arguments "{\"message-md\":\"m\",\"evals\":[{\"intent\":\"i\",\"code\":\""}}]}}]}))]
+  [(into [(str "data: " (json/write-str {:choices [{:delta {:tool_calls [{:index 0 :id "c" :function {:name "eval" :arguments "{\"intent\":\"i\",\"code\":\""}}]}}]}))]
          (repeat n (str "data: " (json/write-str {:choices [{:delta {:tool_calls [{:index 0 :function {:arguments "(+ 1 2) "}}]}}]}))))])
 
 (deftest a-line-costs-its-bytes-not-the-lines-before-it
