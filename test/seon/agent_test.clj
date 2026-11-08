@@ -2266,26 +2266,6 @@
                                      (str "(:proofs (my.agent/prove '" t "))")]))]
     (is (= :pass (get (:value named) t)) (pr-str named))))
 
-(deftest a-real-gate-judges-a-candidate-once
-  ;; the one real gate: a process test run on a checkout of the candidate, its verdict reaching the branch, and the judge's gate of the same
-  ;; candidate running nothing, since the same owner holds its verdict (seon.fx/run-tests). A root of its own on a merges branch of its own: a candidate is its branch's
-  ;; head, and the other shards' roots commit their merges on the checkout's one branch, so between the two asks it was another candidate
-  (let [t 'seon.repl-test/a-really-gated-proof
-        branch (str "jolt/seon-merges-gate-test-" (random-uuid))
-        prove "(let [r (my.agent/prove)] {:proofs (:proofs r) :deferred (:deferred r)})"
-        [_ green judge-gate]
-        (try
-          (in-agent (fn [{:keys [task]}]
-                    [(process-proof "a-really-gated-proof" 2) prove
-                     {:op :eval :agent "root"
-                      :code (str "(select-keys (:value @(seon.root/call! sys {:op :gate :branch (seon.task/default-branch " (pr-str task) ") :tests ['" t "]})) [:results :log])")}])
-                  {:proofs #{t} :own-root? true :sets [(str ":seon.config.source/branch=" (pr-str branch))]})
-          (finally (clojure.java.shell/sh "git" "-C" (str (seon.config/checkout)) "branch" "-q" "-D" branch)))]
-    (is (= {t :pass} (:proofs (:value green))) (pr-str green))
-    (is (= [] (:deferred (:value green))) "nothing left unjudged")
-    (is (= {t :pass} (:results (:value judge-gate))) (pr-str judge-gate))
-    (is (nil? (:log (:value judge-gate))) "the judge's gate of the same candidate runs nothing")))
-
 (deftest a-test-that-waits-for-good-is-told-and-the-next-agent-goes-on
   ;; deepseek-run3 (2026-11-06): an agent's own test deref'd a promise nobody delivers. Its test child parked for good at 0% CPU, tick budgets count no sleep,
   ;; and it held the test service's one slot: 5 of 5 agents idle in observe for 9 minutes. A signal the child waited on (SIGIO, for its
@@ -2302,7 +2282,7 @@
 
 (deftest a-hand-back-with-a-red-process-test-is-no-green-end
   ;; the same class through seon_done: an outside agent that hands back an unjudged process test ends on its verdict. The hand-back itself, in the agent, the gate
-  ;; answered at its seam: :done goes on to the judge, whose own gate is a real one (a-real-gate-judges-a-candidate-once)
+  ;; answered at its seam: :done goes on to the judge, whose own gate reuses a held green (seon.fx-test/a-gates-red-runs-again-and-its-green-does-not)
   (let [t 'seon.repl-test/a-handed-back-proof-of-the-gate
         [_ _ end] (in-agent (fn [_] [(answers-gate t) (process-proof "a-handed-back-proof-of-the-gate" 2)
                                      "(select-keys (seon.turn/hand-back! (:task @seon.agent/state)) [:outcome :reason])"])
