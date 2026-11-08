@@ -156,7 +156,7 @@
             [[] nil] (map-indexed vector msgs))))
 
 (defn wire-messages
-  "The provider-neutral messages (seon.context/request) in the OpenAI-compatible shape
+  "The provider-neutral messages (seon.ctx.wire/request) in the OpenAI-compatible shape
   (DeepSeek's), the one provider format function: each wire message from its group (`wire-groups`), a
   reply as one assistant message whose one call holds its message and its evals as the model sent them, then one tool message
   holding their results in order, each with its handle; reasoning as

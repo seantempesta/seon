@@ -3,7 +3,7 @@
   Writes go to the agent's own branch; root sees them when the branch merges, and a
   failure at the run's end (root's judge reads the branch)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.print :as print] [seon.task :as task] [seon.proofs :as proofs] [seon.turn :as turn] [seon.context :as context] [seon.ctx] [seon.contract :as contract] [seon.db :as pdb] [datahike.api :as d]))
+  (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.print :as print] [seon.task :as task] [seon.proofs :as proofs] [seon.turn :as turn] [seon.ctx.status :as status] [seon.ctx] [seon.contract :as contract] [seon.db :as pdb] [datahike.api :as d]))
 
 (defn current
   "The task this agent works, as data (:seon.task/task)."
@@ -11,11 +11,11 @@
   [] (some->> (turn/current-task) (task/task (agent/db))))
 
 (defn data
-  "This agent's task as data (seon.context/task-data): its task and plan, its write set (each
+  "This agent's task as data (seon.ctx.status/task-data): its task and plan, its write set (each
   var the plan cites, its source and callers), how to run each proof, the sections it cites; what
   each turn of its run is sent after the help page, the form a cut of it reads its rest through."
   {:malli/schema [:=> [:cat] [:maybe :map]]}
-  [] (when-let [t (current)] (context/task-data (agent/db) t (task/task-cites (agent/db) (:seon.task/id t)))))
+  [] (when-let [t (current)] (status/task-data (agent/db) t (task/task-cites (agent/db) (:seon.task/id t)))))
 
 (defn update!
   "clojure.core/update on a content member of this agent's task (:seon.task/plan,
@@ -56,7 +56,7 @@
 
 (defn status
   "How this agent's work on its task stands now, as its page and its model read it
-  (seon.context/status, drawn by seon.render.ui/status): each proof by the verdict its branch holds (a red one
+  (seon.ctx.status/status, drawn by seon.render.ui/status): each proof by the verdict its branch holds (a red one
   with its failures), what else the done rule refuses with the form that does
   it, the functions without a contract, the problems to clear, what its merge carries, its
   unmerged entries, a test run that failed as a whole. A verdict is what the branch's last run
@@ -66,7 +66,7 @@
   ;; from the agent's record (@seon.ctx/ctx: its run, its task's proofs), as the page's status part reads it; never
   ;; the walk from inside an eval (drawing the page within an eval spun the agent: seon.server-test's my.task/status)
   (let [slim (fn [x] (cond-> (dissoc x :calls :shape) (:source x) (dissoc :source)))
-        st (dissoc (context/status (agent/db) @seon.ctx/ctx {}) :reasons)]
+        st (dissoc (status/status (agent/db) @seon.ctx/ctx {}) :reasons)]
     ;; what an agent reads as data: its proofs and what blocks, not the sources of the helpers they call
     (cond-> (update st :proofs #(mapv slim %)) (:refused st) (update :refused #(mapv slim %)))))
 

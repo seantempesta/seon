@@ -6,13 +6,13 @@
   unchanged context is never asked twice. my.root/first-moves! runs a pass; the reply is
   analyzed in a disposable agent (first-move), since analysis runs a reply's ns form."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.lib :as lib] [seon.context :as context] [seon.source :as source]
+  (:require [seon.contract :as contract :refer [defn defn-]] [seon.lib :as lib] [seon.ctx.wire :as wire] [seon.source :as source]
             [seon.reader :as reader] [seon.doc :as doc] [seon.step :as step] [seon.ref :as ref] [seon.edn :as sedn] [seon.config :as config]
             [seon.task :as task] [seon.program :as program] [seon.db :as pdb] [datahike.api :as d]))
 
 (defn request
   "Task t's first-turn model request on db, as seon.turn/act! sends it at turn 1: the
-  messages seon.context/render makes for a fresh agent whose proofs have no result yet
+  messages seon.ctx.wire/render makes for a fresh agent whose proofs have no result yet
   (the agent written on a speculative db, d/with: nothing stored), and the model
   and thinking mode the task resolves to. A fresh agent's status has no verdicts yet: a proof
   not written reads :undefined, so the judge's tasks are ones whose proofs are not written."
@@ -21,7 +21,7 @@
   (let [id (:seon.task/id t)
         k (str id "/first-move")
         db (:db-after (d/with db [{:seon.agent/key k :seon.agent/task [:seon.task/id id]}]))]
-    {:messages (:messages (context/render db {:commit (d/commit-id db) :task id :turn 1
+    {:messages (:messages (wire/render db {:commit (d/commit-id db) :task id :turn 1
                                               :max-turns (config/value :seon.config.agent/max-turns) :origin :model :agent k}))
      :model (:value (config/resolve :seon.config.ai/model {:task t}))
      :thinking (:value (config/resolve :seon.config.ai/thinking {:task t}))}))

@@ -56,7 +56,7 @@
   ;; the capped runs of 2026-10-26: four of ten requests were already done on main and nothing on
   ;; the page said so; each request now carries the one form that reproduces it, run on main first
   ;; (eight: the-related-list-says-what-each-lead-left went with the related part, task
-  ;; seon.context/the-page-is-the-render-of-what-ctx-pulls, and a-mixed-collection-shows-no-empty-members is done)
+  ;; seon.ctx/the-page-is-the-render-of-what-ctx-pulls, and a-mixed-collection-shows-no-empty-members is done)
   (is (= 8 (count fx/requests)))
   (is (apply distinct? (map :seon.task/name fx/requests)) "different requests")
   (doseq [d fx/requests]

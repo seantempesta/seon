@@ -1,8 +1,8 @@
-(ns seon.context-cost-test
-  "The conversation's cost proofs: a request costs its records (seon.context/request), each a function of that record alone
-  (docs/render.md#the-models-context-a-cached-prefix-then-the-turn), and what reads them. Run: bin/test seon.context-cost-test"
+(ns seon.ctx.wire-cost-test
+  "The conversation's cost proofs: a request costs its records (seon.ctx.wire/request), each a function of that record alone
+  (docs/render.md#the-models-context-a-cached-prefix-then-the-turn), and what reads them. Run: bin/test seon.ctx.wire-cost-test"
   (:refer-clojure :exclude [defn defn-])
-  (:require [clojure.test :refer [deftest]] [seon.contract :refer [defn defn-]] [seon.cost :as cost] [seon.context] [seon.ctx] [seon.doc] [seon.fixtures] [seon.render]
+  (:require [clojure.test :refer [deftest]] [seon.contract :refer [defn defn-]] [seon.cost :as cost] [seon.ctx] [seon.ctx] [seon.doc] [seon.fixtures] [seon.render]
             [datahike.api :as d] [seon.test-store :as ts] [my.test :as t] [seon.db :as pdb] [seon.task :as task] [seon.vector :as vector]))
 
 (defn- item
@@ -23,7 +23,7 @@
   and the agent's entity id."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :int]]}
   [n]
-  (let [db (d/db-with (ts/test-db) (seon.doc/load-tx (ts/test-db) "docs" {seon.context/system-page "# You are a Seon agent\n\nThe rules."}))
+  (let [db (d/db-with (ts/test-db) (seon.doc/load-tx (ts/test-db) "docs" {seon.ctx.wire/system-page "# You are a Seon agent\n\nThe rules."}))
         db (d/db-with db
                       (into [{:seon.agent/key "b/a1" :seon.agent/turn n}]
                             (for [i (range n) :let [[_ v] (item i)]]
@@ -39,7 +39,7 @@
       (even? i) (conj {:seon.message/id (str "m" i) :seon.message/to [{:seon.agent/key "b/a1"}] :seon.message/call (call) :seon.message/from "owner" :seon.message/body (str "How is part " i "?")}))))
 
 (defn records-of
-  "The input at n of seon.context/request: the agent's ctx value over session-of's db, as a request reads it, each turn production-shaped (`turn-tx`)."
+  "The input at n of seon.ctx.wire/request: the agent's ctx value over session-of's db, as a request reads it, each turn production-shaped (`turn-tx`)."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map :seon.host/db]]}
   [n] (let [[db e] (session-of n)
             db (reduce (fn [db i] (d/db-with db (turn-tx i))) db (range n))]
@@ -54,7 +54,7 @@
     (clojure.test/is (= 5 (count (evals (update c :evals dissoc (first (keys (:evals c))))))) "what the pattern does not reach is no record")))
 
 (defn ring-of
-  "seon.context/pushed's arguments at n forms in a ring, each calling the next: every node two
+  "seon.ctx.search/pushed's arguments at n forms in a ring, each calling the next: every node two
   neighbours, so the push's reach is bounded by its threshold, not by n. Seeded at the first."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :map [:set :int] number?]]}
   [n]
@@ -65,7 +65,7 @@
     [db {} #{(pdb/eid db :form/id "demo/r0")} 0.001]))
 
 (deftest a-push-reads-what-its-threshold-reaches
-  (cost/proof {:of 'seon.context/pushed :input 'seon.context-cost-test/ring-of
+  (cost/proof {:of 'seon.ctx.search/pushed :input 'seon.ctx.wire-cost-test/ring-of
                :n "forms in the reference graph"
                :work (str "a local push (Andersen, Chung and Lang 2006): each push keeps at least alpha eps of the "
                           "one unit of mass, so at most 1/(alpha eps) pushes, each node's neighbours read once: "
@@ -78,7 +78,7 @@
                :sizes [30 100 300]}))
 
 (defn hub-of
-  "seon.context/pushed's arguments at n forms each naming hub var demo/h, seeded at a form that calls
+  "seon.ctx.search/pushed's arguments at n forms each naming hub var demo/h, seeded at a form that calls
   h (as a function calls seon.contract/checked): the push's mass reaches h's form, whose callers are
   read to :hub (seon.config.render/relevance-features), so it is never read whole."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :map [:set :int] number?]]}
@@ -89,7 +89,7 @@
     [db {} #{(pdb/eid db :form/id "demo/s")} 0.001]))
 
 (deftest a-push-counts-a-hub-and-reads-it-not
-  (cost/proof {:of 'seon.context/pushed :input 'seon.context-cost-test/hub-of
+  (cost/proof {:of 'seon.ctx.search/pushed :input 'seon.ctx.wire-cost-test/hub-of
                :n "forms naming the hub its seed calls"
                :work (str "the seed pushed, the hub read to :hub (64 datoms a read) and found past it, so it "
                           "is not pushed and the rest of its callers are never read: flat in them")
@@ -111,7 +111,7 @@
     [(d/db-with db (vector/tx-data es (repeat (count es) 1) (mapv unit (range (count es))) "m")) te]))
 
 (defn task-data-of
-  "seon.context/task-data's arguments at n wiki sections with vectors: the task demo/r as of the db and
+  "seon.ctx.status/task-data's arguments at n wiki sections with vectors: the task demo/r as of the db and
   its cites, as my.task/data answers it at the REPL."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :map [:vector :map]]]}
   [n] (let [[db _] (sections-of n)] [db (seon.task/task db "demo/r") (seon.task/task-cites db "demo/r")]))
@@ -119,7 +119,7 @@
 (deftest task-data-costs-what-the-plan-names
   ;; the task's data (task-data over the task as of t), as my.task/data answers it at the REPL: what the plan
   ;; cites read and resolved, its write set among it, flat in the wiki's size
-  (cost/proof {:of 'seon.context/task-data :input 'seon.context-cost-test/task-data-of
+  (cost/proof {:of 'seon.ctx.status/task-data :input 'seon.ctx.wire-cost-test/task-data-of
                :n "wiki sections with vectors"
                :work "the task read with its accumulated plan, its references parsed and each resolved, its proofs' forms, the cited sections viewed, similar off: eighteen contracted calls, flat in the wiki"
                :growth :constant
@@ -138,7 +138,7 @@
         src (seon.ratom/atom (:tree c))
         w (assoc (seon.render/walker {:ref src :changes seon.ctx/changes} #(deref cell) [(seon.render/declared-var :seon.render/render-ctx) {}]) :model-only true)]
     (seon.render/flush! w nil)
-    (seon.context/request w)
+    (seon.ctx.wire/request w)
     (let [r (d/with db (conj (turn-tx n) {:seon.agent/key "b/a1" :seon.agent/turn (inc n)}))]
       (vreset! cell (:db-after r))
       (reset! src (:tree (seon.ctx/patch c (:db-after r) (:tx-data r) :b)))
@@ -148,7 +148,7 @@
 (deftest a-requests-cost-is-its-records
   ;; docs/render.md#the-models-context-a-cached-prefix-then-the-turn: a request is a reading of the tree, each component's messages kept on it by its
   ;; revision, so a turn reads what moved and walks the rest. Linear, not flat: the wire body holds n messages anyway
-  (cost/proof {:of 'seon.context/request :input 'seon.context-cost-test/request-of
+  (cost/proof {:of 'seon.ctx.wire/request :input 'seon.ctx.wire-cost-test/request-of
                :n "evals of the session before the turn"
                :work "the new turn's messages read, each earlier component's as they were kept, the tree walked once; the page at the end, its forms made once"
                :growth :linear

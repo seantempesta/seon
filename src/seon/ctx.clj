@@ -16,7 +16,8 @@
   transaction, or refused with why (write!)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.render :as render] [seon.agent :as agent]
-            [seon.config :as cfg] [seon.db :as pdb] [datahike.api :as d] [datahike.db.interface :as dbi] [clojure.string :as str] [malli.core :as m] [malli.error :as me] [malli.registry :as mr]))
+            [seon.config :as cfg] [seon.db :as pdb] [datahike.api :as d] [datahike.db.interface :as dbi] [clojure.string :as str] [malli.core :as m] [malli.error :as me] [malli.registry :as mr]
+            [seon.print :as print] [seon.ref :as ref] [seon.doc :as doc] [seon.ratom :as ratom]))
 
 ;; ---- the pattern: what ctx holds (docs/ctx.md#the-pattern) ---------------------------------
 
@@ -746,3 +747,79 @@
 (set-validator! ctx (fn [nv] (or *installing* (and (nil? nv) (nil? @held)) (write! nv))))
 ;; a swap! written: the record as the db holds it (its new entities' ids) replaces the swap!'s map
 (add-watch ctx ::written (fn [_ _ _ _] (when-let [c @pending] (vreset! pending nil) (install! c))))
+
+;; ---- reads of the record --------------------------------------------------------------
+
+(defn callees
+  "The program functions proof p calls directly (one level: its recorded form's :form/refs,
+  the compiler's resolved references), each by its name, and for a helper of p's own namespace
+  its source too (what the proof means, which an agent reads first); a var is program when db holds it (a branch's callee this process never loaded
+  included). A callee's doc and contract are its source's or `doc`'s to show: a docstring
+  each was a large share of the first request. See docs/agent.md#what-you-read."
+  {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:vector :map]]}
+  [db p]
+  (vec (for [q (sort (disj (set (d/q '[:find [?r ...] :in $ ?s :where [?e :var/name ?s] [?e :var/form ?f] [?f :form/refs ?r]] db p)) p))
+             :let [v (d/entity db [:var/name q])]
+             :when (and v (not (contains? (set (:var/meta v)) :test)))]
+         (cond-> {:var q}
+           (= (namespace p) (namespace q)) (merge (some->> (doc/source-of db q) print/code (hash-map :source)))))))
+
+(defn current-ns
+  "The namespace the REPL of agent record c (its ctx) is in: its :seon.agent/ns, which its eval's record writes when the REPL
+  moved (seon.repl/record-tx; one key, so what reads it redraws on a move alone, never on an eval); before its first turn, where it starts,
+  its task's :seon.task/ns (seon.agent/start-ns); nil for a task that names none. Where its next eval runs
+  (docs/render.md#a-component-answers-hiccup)."
+  {:malli/schema [:=> [:cat :map] [:maybe :symbol]]}
+  [c] (or (:seon.agent/ns c) (:seon.task/ns (:task c))))
+
+(defn cited
+  "Var v as the task's page shows it: its source and its callers (doc/callers), or that it
+  resolves to nothing."
+  {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] :map]}
+  [db v]
+  (let [r (doc/resolve-ref db v :code)]
+    (if (:unresolved r) {:unresolved v :problem (:unresolved ref/problem-messages)} (let [secs (doc/citing-sections db v)]
+                                                (cond-> (assoc r :callers (doc/callers db v)) (seq secs) (assoc :sections secs))))))
+
+(defn first-delivered
+  "A message's order in its turn, [db a e]: the transaction that put agent a's ref on message e, one seek (its tx on the branch, when it was delivered). See docs/ctx.md#the-pattern."
+  {:malli/schema [:=> [:cat [:tuple :seon.host/db :int :int]] :int]}
+  [[db a e]] (or (:tx (first (d/datoms db :eavt e :seon.message/to a))) 0))
+
+(defn turn-members
+  "What model call cid of agent record c holds that c holds too, in the order of the turn: {:messages [[m id]] :evals [[e id]]}: its messages as they were taken, its evals as they ran, each with its own id; one unlinked from c (a swap! on
+  @ctx) is none. Reads each member's id alone. See docs/turn.md#the-turn-is-a-number."
+  {:malli/schema [:=> [:cat :seon.host/db :map :int] [:map [:messages [:sequential [:tuple :int :string]]] [:evals [:sequential [:tuple :int :string]]]]]}
+  [db c cid]
+  ;; the turn's reads: its member set, and a member its ctx does not hold yet. A member's id is written once, so an outside agent's one growing turn reads no more for each it holds
+  (let [plain (ratom/untracked c)
+        at (fn [k attr] (keep (fn [e] (when-let [id (or (get-in plain [k e attr]) (get-in c [k e attr]))] [e id]))
+                              (when (seq (get-in c [:calls cid k])) (keys (get-in plain [:calls cid k])))))]
+    {:messages (let [ms (at :messages :seon.message/id)] (if (next ms) (sort-by (fn [[e]] (first-delivered [db (:db/id c) e])) ms) ms))
+     :evals (sort-by first (at :evals :seon.eval/id))}))
+
+(defn call-of
+  "The model call of turn n of the agent with key k on db, or nil: one seek by its id. See docs/turn.md#the-turn-is-a-number."
+  {:malli/schema [:=> [:cat :seon.host/db nat-int? :string] [:maybe :int]]}
+  [db n k] (pdb/eid db :seon.model-call/id (str k "/" n)))
+
+(defn turns
+  "The model calls of agent record c that are its turns, in order: [n eid]; a context read (origin :outside) is no turn. See docs/turn.md#the-turn-is-a-number."
+  {:malli/schema [:=> [:cat :map] [:sequential [:tuple :int :int]]]}
+  [c]
+  (sort (for [e (keys (:calls c)) :when (not= :outside (get-in c [:calls e :seon.model-call/origin]))]
+          [(or (get-in c [:calls e :seon.model-call/n]) 0) e])))
+
+(defn agent-ctx
+  "Agent a's ctx value as db holds it, drawn cold (seon.ctx/build): a read of a session with no live @ctx. See
+  docs/ctx.md#the-pattern."
+  {:malli/schema [:=> [:cat :seon.host/db :int] :map]}
+  [db a] (:tree (build db a (:seon.agent/branch (d/pull db [:seon.agent/branch] a)))))
+
+(defn revalued
+  "Eval record e on db with value as its value: its result another entity, the content hash of what it now answers, the rest of its response as it was. See docs/users.md#what-each-thing-is."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] :map :any] :map]}
+  [db e value]
+  (let [r (assoc (pdb/response-of db e) :value value)]
+    (pdb/with-response (dissoc e :seon.eval/result) r)))
+

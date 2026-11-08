@@ -39,7 +39,7 @@
     clojure.repl as at any Clojure REPL (source, doc, dir, apropos, find-doc, pst), with *1 *2 *3 *e:
     source reads this branch's own definitions first, then a library's file"
   (:refer-clojure :exclude [defn defn-])
-  (:require [clojure.walk] [datahike.core] [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.lib :as lib] [seon.context :as context] [seon.ref :as ref] [seon.doc :as doc] [seon.source :as source]
+  (:require [clojure.walk] [datahike.core] [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.lib :as lib] [seon.ctx.search :as search] [seon.ctx.wire :as wire] [seon.ref :as ref] [seon.doc :as doc] [seon.source :as source]
             [seon.config :as cfg] [seon.proofs :as proofs] [seon.fx :as fx] [seon.program :as program] [seon.task :as task] [seon.vector :as vector] [seon.contract :as contract] [seon.ctx]
             [seon.db :as pdb] [seon.print :as print] [seon.print.select :as select] [seon.render :as render] [seon.problems :as problems] [seon.render.ui :as ui] [my.schema :as schema] [jolt.analyzer] [clojure.java.io :as io] [clojure.string :as str] [clojure.main] [datahike.api :as d]))
 
@@ -270,7 +270,7 @@
 
 (defn search
   "The best matches on this branch for q, a text, a var's name or a schema key, over code and wiki
-  sections, and tests, tasks and schema keys when :kinds asks for them: [{:kind :name :score :by :line} ...] best first (seon.context/search), so a
+  sections, and tests, tasks and schema keys when :kinds asks for them: [{:kind :name :score :by :line} ...] best first (seon.ctx.search/search), so a
   caller filters it with plain Clojure, e.g. (filter #(= :section (:kind %)) (search \"rrf\")). :kind is
   one of :var :test :section :task :schema, :name its var, section address, task id or schema key, :by
   the rankings it came from (:text its exact words, :meaning its embedding, :refs the call graph and the
@@ -289,7 +289,7 @@
   ([q opts]
    (let [db (agent/db)
          qv (when (contains? (or (:by opts) #{:meaning}) :meaning) (query-of db q))]
-     (if (contract/error? qv) qv (context/search db q opts qv)))))
+     (if (contract/error? qv) qv (search/search db q opts qv)))))
 
 (defn similar
   "What on this branch is nearest x by meaning, [[name score] ...] best first, k of them
@@ -570,7 +570,7 @@
   addresses, never the page ((doc \"docs/agent.md\") lists its sections). See docs/references.md#a-section-read-at-a-depth-with-its-edges."
   {:malli/schema [:=> [:cat :seon.host/db :string] [:vector :string]]}
   [db address]
-  (let [sections (doc/page db context/help-page :summary)
+  (let [sections (doc/page db wire/help-page :summary)
         addresses (mapv :seon.ref/address sections)
         pages (doc/page-paths db)
         words (re-seq #"[a-z0-9]{4,}" (str/lower-case address))
@@ -623,7 +623,7 @@
                    (cited db name)))
       (symbol? x) (cited db x)
       (keyword? x) (let [f (schema/forms x)] (if (contract/error? f) f (cited db x)))
-      :else (let [a (if (str/includes? x "#") x (str context/help-page "#" x))]
+      :else (let [a (if (str/includes? x "#") x (str wire/help-page "#" x))]
               (or (some-> (doc/view db a :code) doc-view)
                   (some-> (doc/page db x :summary) doc-view)
                   {:no-section x
@@ -656,10 +656,10 @@
            :else (println (#'my.agent/none n#)))))
 
 (defn help
-  "The system prompt as an agent is sent it (seon.context/system-text), then this namespace's forms: the map of what
+  "The system prompt as an agent is sent it (seon.ctx.wire/system-text), then this namespace's forms: the map of what
   is here. A wiki section, a page, a schema key or a name is `doc`'s (docs/agent.md#finding-your-way)."
   {:malli/schema [:=> [:cat] :string]}
-  [] (str (context/system-text (agent/db)) "\n\n" (:doc (meta (the-ns 'my.agent)))))
+  [] (str (wire/system-text (agent/db)) "\n\n" (:doc (meta (the-ns 'my.agent)))))
 
 ;; The REPL's tools in Jolt's clojure.repl: the one place a process gets them, so `clojure.repl/doc` and the bare `doc`
 ;; are Seon's in every namespace of root, a test child and an agent alike (`seon.agent/repl-name` resolves the bare
