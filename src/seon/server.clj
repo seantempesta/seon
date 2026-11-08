@@ -223,9 +223,9 @@
             :args {}
             ;; the form that answers it again at root's REPL (seon_eval root): its reply's cuts read through it
             :again '(seon.server/agents-answer sys)}
-   :eval {:doc "Evaluate Clojure in an agent's process as one reply, as a model's is: its message-md and its evals, run in order, stopping at the first that throws; each is recorded on its branch and my.agent/*, my.db/*, my.task/*, my.branch/* and (my.agent/prove) are its API. For an agent you attached the reply is its turn, its message on its call. Or as \"root\" in root's process with plain code (root.repl: `sys` is root, main is @(:conn sys), my.root/* its API; root has no conversation). Answers each eval under its handle (result/e12), which later forms read."
+   :eval {:doc "Evaluate Clojure in an agent's process as one reply, as a model's is: its message-md (optional) and its evals, every one run in order whatever the one before it did (docs/decisions.md#every-eval-of-a-reply-runs-owner-2026-11-08); each is recorded on its branch and my.agent/*, my.db/*, my.task/*, my.branch/* and (my.agent/prove) are its API. For an agent you attached the reply is its turn, its message on its call. Or as \"root\" in root's process with plain code (root.repl: `sys` is root, main is @(:conn sys), my.root/* its API; root has no conversation). Answers each eval under its handle (result/e12), which later forms read."
           :args {:agent {:type "string" :description "an agent id (a3) or root"}
-                 :message-md {:type "string" :description "This reply's one message to whoever started the agent, in Markdown, covering all of its evals. An agent's own model drives: empty, since a message to it is seon_message."}
+                 :message-md {:type "string" :description "This reply's message to whoever started the agent, in Markdown, when it has something to say; a reply of calls alone needs none. An agent's own model drives: empty, since a message to it is seon_message."}
                  :evals {:type "array" :description "The evals this reply runs, in order."
                          :items {:type "object" :properties (array-map :intent {:type "string" :description "What this eval is about to do. A sentence is fine."} :code {:type "string" :description "Clojure to evaluate."})
                                  :required ["intent" "code"]}}
