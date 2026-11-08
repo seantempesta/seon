@@ -315,4 +315,4 @@
         (is (and (nil? (:inputs (:fact two))) (re-find #"binary was built from" (str (:unshared (:fact two)))))
             "the running binary is not built from this tree: no inputs to key agents' results by, and why")
         (is (= b (:text three))))
-      (finally (sh/sh "rm" "-rf" tree tasks path (str path "-in") (str path ".log"))))))
+      (finally (sh/sh "rm" "-rf" tree tasks path (str path "-agents") (str path "-in") (str path ".log"))))))
