@@ -510,6 +510,12 @@
         (is (= (:edits (stored "p2")) (plain (diff p1 p2))) "turn 2: the cited var's edit")
         (is (= (:edits (stored "p3")) (plain (diff p2 p3))) "turn 3: the plan's edit")
         (is (nil? (stored "p4")) "turn 4 stored no eval")
+        ;; a request asks in turn order, turn 1's pair first: still one pass, to the last turn, and every later ask is held
+        (let [_ (reset! chains [])
+              w2 (render/walker (src [p1 p2 p3 p4]) (constantly nil) [#'identity {}])
+              diff2 (render/changes-of w2)]
+          (doseq [[p0 p] [[nil p1] [p1 p2] [p2 p3] [p3 p4]]] (diff2 p0 p))
+          (is (= [[nil p1 p2 p3 p4]] @chains) "asked in turn order, one pass answered every pair"))
         (is (= [[nil p1 p2 p3 p4]] @chains) "and none of them drew again")
         (is (and (seq (:components (stored "p1"))) (seq (:edits (stored "p2"))) (seq (:edits (stored "p3")))) "and each is a change worth comparing")
         ;; the pass equals the pairs computed one by one, each a walk drawn cold at its first point and advanced to its second

@@ -837,12 +837,12 @@
         before))
 
 (defn- chain-to
-  "The points to walk to answer the pair p0, p1 (p0 nil: nothing before p1) among points, the agent's turns in order: the turns from the first (nil before it) to p1 when the pair is two neighbours of them, so one walk fills every pair on the way; else the two alone."
+  "The points to walk to answer the pair p0, p1 (p0 nil: nothing before p1) among points, the agent's turns in order: every turn, from the first (nil before it) to the last, when the pair is two neighbours of them, so the first ask fills every pair in one walk and every later one is held (a request asks turn 1's pair first: walking only to the pair asked drew again for each); else the two alone."
   {:malli/schema [:=> [:cat [:vector :map] [:maybe :map] :map] [:vector [:maybe :map]]]}
   [points p0 p1]
   (let [all (into [nil] points) i1 (.indexOf ^java.util.List all p1)]
     (if (and (pos? i1) (= p0 (nth all (dec i1))))
-      (subvec all 0 (inc i1))
+      all
       [p0 p1])))
 
 (defn changes-of
