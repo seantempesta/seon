@@ -507,7 +507,7 @@
   {:malli/schema [:=> [:cat [:maybe :map]] [:set :any]]}
   [r]
   (interface (for [a (:accounts r)]
-               {:src (:src a) :inline? (seq (:inline-defs a)) :defs (for [d (:defs a)] [(:var d) (:kind d)])})))
+               {:src (:src a) :inline? (seq (:inline-defs a)) :defs (for [d (:defs a)] [(:var d) (set (:meta d))])})))
 
 (defn required-by
   "The namespaces whose forms require nsym on db (their :form/requires)."
