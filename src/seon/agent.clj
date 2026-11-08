@@ -287,7 +287,7 @@
     (:result (await-reply k {:op :launch :k k :text text :template template}))))
 
 (defn note-costs!
-  "fns (seon.profile/touched of an eval) added to what this agent has measured since its last commit; nothing in a process that is no agent's. See docs/sharing.md#a-functions-cost-is-a-fact."
+  "fns (seon.profile/touched of an eval) added to what this agent has measured since its last end (write-end! writes it); nothing in a process that is no agent's. See docs/sharing.md#a-functions-cost-is-a-fact."
   {:malli/schema [:=> [:cat [:vector :seon.profile/fn-cost]] :any]}
   [fns]
   (when (:store-conn @state)
@@ -296,7 +296,7 @@
 (declare transact!)
 
 (defn- costs-tx
-  "held ({var stats}) added to each function's :seon.fn/stats as db holds it: one value a function that moved, written on what is being committed anyway. Costs held."
+  "held ({var stats}) added to each function's :seon.fn/stats as db holds it: one value a function that moved, written with the agent's end. Costs held."
   {:malli/schema [:=> [:cat :seon.host/db :map] :seon.db/tx-data]}
   [db held]
   (vec (for [[v st] held]
@@ -310,11 +310,7 @@
   {:malli/schema [:=> [:cat] :any]}
   []
   (let [conn (or (:store-conn @state) (no-branch!))
-        ;; what was measured rides on a commit going out anyway, and never makes one; a write the store refuses is this
-        ;; commit's refusal (refused!), as any other write in it
-        held (when (and (:dirty? @state) (contains? (:schema (:db @state)) :seon.fn/stats)) (not-empty (:fn-costs @state)))
-        _ (when held (swap! state dissoc :fn-costs))
-        c (try (when held (transact! (costs-tx (:db @state) held))) (dw/commit-pending! conn) (catch Throwable e e))]
+        c (try (dw/commit-pending! conn) (catch Throwable e e))]
     (cond
       (instance? Throwable c) (refused! conn c)
       c (do
@@ -663,8 +659,12 @@
         now (cond-> {:seon.agent/outcome outcome :seon.agent/ended-turn (turn-now)}
               reason (assoc :seon.agent/reason reason)
               error (assoc :seon.agent/error error)
-              (seq waste) (assoc :seon.agent/waste waste))]
-    (transact! (into [(assoc now :seon.agent/key k)]
+              (seq waste) (assoc :seon.agent/waste waste))
+        ;; what its functions cost since its last end, once a run: written every commit it was most of what a turn moved on the branch
+        ;; (354 of about 410 datoms, Context's lab, 2026-11-08), which every diff, patch and merge of the branch then read
+        held (when (contains? (:schema (db)) :seon.fn/stats) (not-empty (:fn-costs @state)))
+        _ (when held (swap! state dissoc :fn-costs))]
+    (transact! (into (cond-> [(assoc now :seon.agent/key k)] held (into (costs-tx (db) held)))
                      (for [a [:seon.agent/reason :seon.agent/error :seon.agent/waste] :when (and (not (contains? now a)) (get e a))]
                        [:db.fn/retractAttribute [:seon.agent/key k] a])))
     (commit!)))
