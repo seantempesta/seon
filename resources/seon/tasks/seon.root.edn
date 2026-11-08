@@ -97,4 +97,16 @@ The change: the key is an agent's one name in every interface: root's view keyed
 
 Proofs, red first: a root restart leaves every live interface naming the same agents by the same names (an MCP eval addressed before a restart reaches the same agent's record after it); no src form reads :seon.agent/id (a check over the program's refs); next-agent-id is gone."
   :seon.task/proofs #{}}
+ {:seon.task/name "a-boot-imports-main-before-it-reads-config"
+  :seon.task/plan "What happened (2026-11-08, found by Context): after 191e4b56ba merged a new key read at root's start (:seon.config.web/streams-buf, a :bind/ buffer), bin/update's root refused to start: \":seon.config.web/streams-buf is set nowhere\". The cause: seon.root's boot loads main's stored program (seon.program/load-all!) and holds main's stored config entries (seon.program/hold-config!) before anything else reads config, and only after the graph starts does seon.root/import-source! bring main's program up to the merged source, through the :source effect and the writer. So between a merge and that import, the binary (built from the merged tree) and main's stored entries disagree, and any key the merge added that root reads at start is missing. The prove could not see it: tests run on the world (docs/testing.md#testing-in-the-world), never on a store a merge has not yet been imported into. Context booted once with --set to get past it.
+
+The class: anything root reads before the import (a config key, a schema entry, a var root's start calls) can be newer in the binary than in main's store. A per-key guard, or making the new key optional, fixes one key and leaves the class.
+
+Correct: the boot imports main's source before it reads anything from main. At boot root is the store's only process (seon.root's boot opens the store before the fork server forks), and seon.root/seed-program! already imports the source straight into the store, with no graph and no writer (fx/read-source, then source/tx-of, then d/transact). The boot runs the same import (the changed files only, seon.source/refresh-tx, against the :seon.root/source fact's tree) before load-all! and hold-config!, so main's program and config at boot are the merged tree's. import-source! after start then finds the digest equal and imports nothing (its own rule), so nothing is imported twice. Replaces: the gap, and the --set workaround. Deletes nothing else. Cost: the import moves earlier, it does not grow (a refresh of what the merge changed; a boot after no merge reads the tree's digest and writes nothing).
+
+Owners: seon.root's boot is Optimization's (storage, merges) and Context's (config); Web found it with its merge and can build it if they agree.
+
+Proofs, red first: a root booted on a store whose main lacks a config key the binary reads at start (the merged tree adds it) starts, holds that key's value from the merged entries, and its import after start writes nothing; a boot with nothing merged since the last import writes nothing at boot."
+  :seon.task/proofs #{seon.root-test/a-boot-after-a-merge-reads-the-merged-config
+                      seon.root-test/a-boot-with-nothing-merged-imports-nothing}}
 ]
