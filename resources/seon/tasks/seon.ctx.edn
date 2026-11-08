@@ -22,4 +22,13 @@ Who does what: Optimization the schema entry first (a small merge the writers bu
 Proofs, each red before the change: a reply's evals in key order with their eids scrambled; a message sent mid-turn placed after that turn's evals; two agents' items on one branch, each in its own order; a window of 10 over 1,000 items by key, its cost flat (seon.cost/proof); the request bytes unchanged on run 13's store copy once its items carry keys."
   :seon.task/kind :work
   :seon.task/proofs #{}}
+ {:seon.task/name "one-namespace-for-the-record"
+  :seon.task/plan "Owner, 2026-11-08: \"I want to get rid of the seon.context namespace in favor of just the seon.ctx namespace.\" Two names for one thing kept reading as two systems: seon.ctx is the record (the pull into @ctx and its patch), and seon.context grew into a bucket of what reads the record (the request through seon.render/wire, the status and task data the renders draw, search and relevance, example sessions, the page's redo). On main 48d67313e1: seon/context.clj 1,091 lines, 61 fns; about 304 mentions in 76 files (src 22, test 18, docs 16, tasks 15, schemas 4, config 1).
+
+The change, one mechanical merge, no behaviour change: every def of seon.context moves into seon.ctx, in sections by what it serves, and src/seon/context.clj is deleted; callers' context/ becomes ctx/; test/seon/context_test.clj folds into ctx_test.clj; every citation seon.context/x becomes seon.ctx/x (docs, tasks, schemas, config, docstrings); the tasks of seon.context.edn move here, and every citation of them follows. Checked: no require cycle (nothing seon.context requires reaches seon.ctx) and no name the two share. Waits on Optimization's jolt/task-merges and jolt/var-meta and Web's jolt/hiccup-rename, which edit these files.
+
+What goes rather than moves is the record task's (seon.render/what-the-model-knows-is-its-record): request's appended call, redo-tx, page-at, render-calls, render-eval?; request itself folds into seon.render/wire there.
+
+Proofs: the existing byte tests hold unchanged (seon.context-test/the-prefix-stays-byte-identical-across-turns and the wire-turn test, renamed with the namespace); no symbol seon.context remains in src, test, resources or docs; bin/prove --merge green."
+  :seon.task/proofs #{}}
 ]
