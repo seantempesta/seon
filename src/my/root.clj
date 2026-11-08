@@ -259,7 +259,7 @@
   [:seon.agent/key :seon.eval/id :seon.message/id :seon.model-call/id])
 
 (defn example-txs
-  "The tx-data of the example session file at path (seon.context/session-tx's answer written with pr-str: a
+  "The tx-data of the example session file at path (seon.ctx.session/session-tx's answer written with pr-str: a
   non-empty vector of transactions, the first writing the example agent keyed \"example/<id>\"), read as
   `task-files` reads a task file (seon.lib/dir-texts, so a file gone when read is a file not found), or the
   :seon.root/example-refused error naming path: not found, not readable EDN, not that vector, or an agent with no id. The one edge
@@ -276,15 +276,15 @@
           (= :unreadable ok) (refuse (str "not readable EDN: " x))
           (not (and (vector? x) (seq x) (every? #(and (vector? %) (seq %) (every? map? %)) x) (every? (fn [m] (some #(contains? m %) example-identities)) (mapcat identity x))
                     (string? (:seon.agent/key (ffirst x))) (str/starts-with? (:seon.agent/key (ffirst x)) "example/")))
-          (refuse "not a non-empty vector of transactions whose first writes an agent keyed \"example/<id>\" (seon.context/session-tx)")
+          (refuse "not a non-empty vector of transactions whose first writes an agent keyed \"example/<id>\" (seon.ctx.session/session-tx)")
           ;; its page is found by the agent's id (seon.render.proc/location): one written before session-tx gave it one
           ;; loaded and could not be opened
           (not (keyword? (:seon.agent/id (ffirst x))))
-          (refuse "its agent has no :seon.agent/id, so its page cannot be found: write it again with seon.context/session-tx")
+          (refuse "its agent has no :seon.agent/id, so its page cannot be found: write it again with seon.ctx.session/session-tx")
           :else x)))
 
 (defn load-example!
-  "Transact the example session in the EDN file at path (`example-txs`: seon.context/session-tx's answer, written
+  "Transact the example session in the EDN file at path (`example-txs`: seon.ctx.session/session-tx's answer, written
   with pr-str) onto main, one transaction each in order, so its records keep the order they ran in; the error
   `example-txs` answers when the file is not one. A task names it by `[:seon.agent/key \"example/<id>\"]` in
   :seon.task/examples. Loading is idempotent: a session whose agent and every record main already holds

@@ -5,7 +5,7 @@
   root: a cost proof for the recursion). Run: bin/test seon.render-cost-test"
   (:refer-clojure :exclude [defn defn-])
   (:require [clojure.test :refer [deftest]] [seon.contract :refer [defn defn-]] [seon.cost :as cost] [seon.web.html] [seon.db]
-            [seon.test-store :as ts] [datahike.api :as d] [seon.render.proc] [seon.render] [seon.render.ui] [seon.config] [seon.task] [seon.repl] [seon.doc] [seon.context] [seon.ctx] [seon.ratom]))
+            [seon.test-store :as ts] [datahike.api :as d] [seon.render.proc] [seon.render] [seon.render.ui] [seon.config] [seon.task] [seon.repl] [seon.doc] [seon.ctx] [seon.ctx] [seon.ratom]))
 
 (def ^:private fan "Children per node: a tree as deep as log3 n (10,000 nodes: 9 levels)." 3)
 
@@ -223,7 +223,7 @@
                     [[{:seon.root/id :root :seon.root/boot "b1"}]
                      (seon.task/agent-tx "b1" :a1 {:status :busy :branch :task-x})])
         db0 (reduce d/db-with db0
-                    [(seon.doc/load-tx db0 "docs" {seon.context/system-page "# You are a Seon agent\n\nThe help page."})
+                    [(seon.doc/load-tx db0 "docs" {seon.ctx.wire/system-page "# You are a Seon agent\n\nThe help page."})
                      (seon.task/create-tx db0 [{:seon.task/ns 't :seon.task/name "x" :seon.task/plan "Make x." :seon.task/proofs #{'t-test/x-test}}])
                      ;; the agent has no :seon.agent/task: its page draws no task part, as this input has always been (the run it
                      ;; stood for held the task); linked, the draw costs 4,135 calls at 10 against these 3,920
@@ -240,12 +240,12 @@
 
 (deftest drawing-latest-costs-one-request
   ;; task seon.render/the-debug-page-is-the-wire-request: a pass of the debug page on latest after the branch
-  ;; moved draws the one request the next turn would send (seon.context/wire-turn at the head), nothing per
+  ;; moved draws the one request the next turn would send (seon.ctx.wire/wire-turn at the head), nothing per
   ;; earlier turn; the request holds the session, so it grows with the session's evals, as the turn's own does
   (cost/proof
     {:of 'seon.render.proc/pass-view :input 'seon.render-cost-test/latest-of
      :n "earlier evals in the agent's session"
-     :work (str "one request made at the branch's head (seon.context/render: the system prompt, the session's records each "
+     :work (str "one request made at the branch's head (seon.ctx.wire/render: the system prompt, the session's records each "
                 "printed by its own render, the page drawn cold at the head as the call Seon made when the records hold none) "
                 "under its provider, put in the wire shape "
                 "(seon.model/request-body) and drawn once (seon.render.ui/debug-turn: an entry a message), and the timeline's "
@@ -491,7 +491,7 @@
 (deftest printing-a-result-is-the-models-reading-of-it
   ;; docs/render.md#the-models-context-a-cached-prefix-then-the-turn: an eval's printed result is computed the first time the model reads that eval and is a lookup after: a person's walk prints no model text at all
   (let [k "b/a1" n 5
-        db (d/db-with (ts/test-db) (seon.doc/load-tx (ts/test-db) "docs" {seon.context/system-page "# You are\n\nRules."}))
+        db (d/db-with (ts/test-db) (seon.doc/load-tx (ts/test-db) "docs" {seon.ctx.wire/system-page "# You are\n\nRules."}))
         db (reduce (fn [db i] (d/db-with db [{:seon.agent/key k :seon.agent/turn (inc i)}
                                              {:seon.eval/id (str "e" i) :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key k} :seon.eval/call (seon.task/call-ref k (inc i))
                                               :seon.eval/code (str "(f " i ")") :seon.eval/call-id (str "c" i) :seon.eval/response {:handle (symbol "result" (str "e" i)) :value i}}]))
@@ -537,7 +537,7 @@
                        :work "the task's list drawn once, a component for each turn, message and eval, each eval's response printed once"
                        :growth :linear
                        ;; set by this proof's first measure, for the owner's word: the old proof's flat 1,050 calls drew one list, and this draws the conversation. An eval's response is printed
-                       ;; here once, under the armed printer, 197 calls: seon.context/request's old cold cost was 546 a record
+                       ;; here once, under the armed printer, 197 calls: seon.ctx.wire/request's old cold cost was 546 a record
                        :per-n {:calls 200 :bytes 120000}
                        :fixed {:calls 700 :bytes 1300000}
                        :sizes [10 40 80]}))))))

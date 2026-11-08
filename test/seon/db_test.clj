@@ -444,7 +444,7 @@
 
 (defn- turn-facts
   "Turn k of an agent as seon.turn/act! records it: the basis its context was built from
-  (the commit, its red assertion; the text is made again from it, seon.context/render), its
+  (the commit, its red assertion; the text is made again from it, seon.ctx.wire/render), its
   reply (1,500 bytes) and its eval call, whose eval's record holds what it evaluated to as the
   next turn shows it (2,000). The reply is real text and the evaluated value real source, each turn its own
   (a real turn's reply is the model's message and code; its evals are mostly source and

@@ -285,7 +285,7 @@
   session is id and the tasks on its branch it needs, transitively (a request's stages, a work
   task and its merge: design agent-loop section 1a), and its agent is the newest started among
   the chain's tasks' agents (:seon.task/agent). Work started for the session continues it, so its
-  conversation and messages go on (seon.context/turn-members). One process at a time holds it: a session is one
+  conversation and messages go on (seon.ctx/turn-members). One process at a time holds it: a session is one
   branch, and root refuses a spawn on a branch a live agent holds. Reads the chain's tasks."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/id] [:maybe :string]]}
   [db id]
@@ -537,7 +537,7 @@
     (:seon.task/unmerged t) (update :seon.task/unmerged set)))
 
 (def placeholder-assertion
-  "The assertion seon.context writes into a proof's test that does not exist yet (its :proof-unknown
+  "The assertion seon.ctx writes into a proof's test that does not exist yet (its :proof-unknown
   `do`); seon.problems/uncited-tasks reads a proof still holding it as a placeholder."
   "write the assertion: the behaviour, on data")
 

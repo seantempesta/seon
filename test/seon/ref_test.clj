@@ -131,8 +131,8 @@
 (deftest a-var-quoted-name-is-cited
   ;; audit item 2b: a reproduction calls a private var through its var, #'ns/name; the form is
   ;; the var's name as written, so it cites the var
-  (is (= '[seon.context/printed-run] (ref/names "Reproduce: (#'seon.context/printed-run db run) answers one.")))
-  (is (= [['seon.context/printed-run nil nil nil :summary]] (kinds nil "Reproduce: (#'seon.context/printed-run db run)."))))
+  (is (= '[seon.ctx/printed-run] (ref/names "Reproduce: (#'seon.ctx/printed-run db run) answers one.")))
+  (is (= [['seon.ctx/printed-run nil nil nil :summary]] (kinds nil "Reproduce: (#'seon.ctx/printed-run db run)."))))
 
 (deftest a-string-literal-in-text-cites-nothing
   ;; audit item 2c: a reproduction's string literals are its data, as quoted output is: a path or a

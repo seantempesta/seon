@@ -4,7 +4,7 @@
   facts once."
   (:refer-clojure :exclude [defn defn-])
   (:require [clojure.test :refer [deftest]] [clojure.java.shell] [seon.contract :refer [defn defn-]] [seon.cost :as cost]
-            [datahike.api :as d] [my.test :as mt] [seon.db :as pdb] [seon.vector :as vector] [seon.context :as context]))
+            [datahike.api :as d] [my.test :as mt] [seon.db :as pdb] [seon.vector :as vector]))
 
 (def ^:private decay
   "The dims' weights, falling off as a Matryoshka model's do."

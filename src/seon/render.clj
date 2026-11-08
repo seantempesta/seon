@@ -809,7 +809,7 @@
     (into mv (keep (fn [[id f]] (when-not (contains? now id) [id f nil]))) forms)))
 
 (defn page-call
-  "Which of Seon's evals of the page walk w owes the model, a key of seon.context/render-calls: :whole when it has shown it nothing, :changes when a component moved since, nil when nothing did. See docs/render.md#the-render-is-an-eval."
+  "Which of Seon's evals of the page walk w owes the model, a key of seon.ctx.wire/render-calls: :whole when it has shown it nothing, :changes when a component moved since, nil when nothing did. See docs/render.md#the-render-is-an-eval."
   {:malli/schema [:=> [:cat :map [:sequential :string]] [:maybe [:enum :whole :changes]]]}
   [w sels] (when (seq (moved w sels)) (if @(:shown w) :changes :whole)))
 

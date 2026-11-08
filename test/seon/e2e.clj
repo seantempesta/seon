@@ -10,7 +10,7 @@
   Each run ends on what the system observes (the reconciler's quiescence report, an event,
   or a fact on main), never on a deadline. Prints one EDN line per phase; the last line is
   the run's numbers and its verdict."
-  (:require [seon.await :as await] [seon.root :as c] [my.root :as root] [seon.task :as task] [seon.turn :as turn] [seon.context :as context] [seon.reconcile :as r]
+  (:require [seon.await :as await] [seon.root :as c] [my.root :as root] [seon.task :as task] [seon.turn :as turn] [seon.ctx.wire :as wire] [seon.reconcile :as r]
             [seon.fixtures :as fx] [datahike.api :as d] [seon.lib :as lib] [clojure.string :as str] [seon.config] [clojure.java.shell :as sh]
             [clojure.core.async :as a] [seon.server :as server] [seon.contract :as contract] [seon.test-store :as ts]))
 
@@ -253,7 +253,7 @@
   promise nothing delivers: seon.fixtures/calc-cancel), the rest merges. square's branch records what its model read each turn
   and where the time went: its second turn read its first answer's failure as the
   assertion and what it got (square was (twice x), and twice is still its stub on square's
-  branch: 0); each turn's text is every message it sent, made again from its records (seon.context/render)."
+  branch: 0); each turn's text is every message it sent, made again from its records (seon.ctx.wire/render)."
   [path]
   {:boot (cond-> {:max-running 2 :provider {:kind :scripted :script 'seon.fixtures/calc-cancel}} path (assoc :path path)) :specs fx/calc :tns 'calc
    :during (fn [sys ev]
@@ -268,7 +268,7 @@
                done? (every? #(r/done? idx %) ["calc/add-merge" "calc/twice-merge" "calc/square-merge" "calc/sum-sq-merge"])
                blocked (r/blocked-by idx "calc/abs")
                sq-db (:db @(c/branch-db sys (task/default-branch "calc/square")))
-               sq-turns (sort-by first (map (fn [[n e]] [n (str/join "\n\n" (keep :content (:messages (context/render sq-db (:seon.model-call/basis (d/pull sq-db [:seon.model-call/basis] e))))))])
+               sq-turns (sort-by first (map (fn [[n e]] [n (str/join "\n\n" (keep :content (:messages (wire/render sq-db (:seon.model-call/basis (d/pull sq-db [:seon.model-call/basis] e))))))])
                                             (d/q '[:find ?n ?e :where [?e :seon.model-call/n ?n] [?e :seon.model-call/origin :model]
                                                    [?e :seon.model-call/basis _]] sq-db)))
                read-failure? (and (= 2 (count sq-turns))

@@ -21,7 +21,7 @@
   Agents transact facts on their own branch; root reacts: the writer applies them, and
   only a merge task's octopus merge (the reconciler's, seon.writer) advances main."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.query.execute] [clojure.main] [clojure.string :as str] [seon.db :as pdb] [seon.context :as context] [seon.lib :as lib]
+  (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.query.execute] [clojure.main] [clojure.string :as str] [seon.db :as pdb] [seon.ctx.wire :as wire] [seon.lib :as lib]
             [seon.sock :as sock] [jolt.async.remote :as remote] [konserve.jolt.fasl :as codec] [seon.fx :as fx] [seon.fork-server :as fs] [seon.agent-proc :as ap]
             [seon.writer :as writer] [seon.problems :as problems] [seon.prove] [seon.cron] [seon.vector :as vector] [seon.source :as source] [seon.reconcile :as reconcile] [seon.system :as system] [seon.program :as program] [seon.step :as step]
             [seon.config :as cfg] [seon.contract :as contract] [seon.print :as print] [seon.task :as task] [seon.template :as tpl] [seon.doc :as doc] [seon.error :as err] [seon.agent :as agent] [konserve.jolt.lmdb :as klmdb] [clojure.java.shell]
@@ -442,13 +442,13 @@
     :else (start-spawn st o p opts))))
 
 (defn- back-point
-  "Where eval id of agent a's branch stands, {:commit :branch :t}, or why it can't be gone back to: the earliest commit of the branch holding its code's and response's last write, a run again's included and a reader's opening of it not (seon.context/at-t), and a new branch's name for it, which no earlier back to it holds, as the head has moved since. See docs/turn.md#an-agent-goes-back-to-an-eval."
+  "Where eval id of agent a's branch stands, {:commit :branch :t}, or why it can't be gone back to: the earliest commit of the branch holding its code's and response's last write, a run again's included and a reader's opening of it not (seon.ctx.wire/at-t), and a new branch's name for it, which no earlier back to it holds, as the head has moved since. See docs/turn.md#an-agent-goes-back-to-an-eval."
   {:malli/schema [:=> [:cat :seon.root/api-state :map :string] :map]}
   [st a id]
   (let [db (pdb/head (:conn st) (:branch a))
         e (pdb/eid db :seon.eval/id id)
         t (when e (apply max (map :tx (mapcat #(d/datoms db :eavt e %) [:seon.eval/code :seon.eval/response :seon.eval/result]))))
-        at (when t (context/at-t db t))
+        at (when t (wire/at-t db t))
         commit (when (and at (= t (:max-tx at))) (d/commit-id at))]
     (cond
       (nil? e) (refused 'seon.root/back! (str "no eval " id " on this agent's branch") {:eval id})
@@ -1047,7 +1047,7 @@
 (defn wiki-tx
   "The wiki (the checkout's :seon.config.root/wiki-dirs: docs/ and the top-level pages) onto main db, written in the boot fact's own commit so main
   holds it before any agent forks: the system prompt every agent reads first is one of its pages
-  (seon.context/system-text), and the help page another (seon.context/help-text). An unchanged wiki writes nothing. A link to no section is kept on
+  (seon.ctx.wire/system-text), and the help page another (seon.ctx.wire/help-text). An unchanged wiki writes nothing. A link to no section is kept on
   its section and shows as a dead citation (seon.problems/health), never refuses the load.
   baseline: what the sections with no record were last written against (wiki-baseline)."
   {:malli/schema [:function [:=> [:cat :seon.host/db :string] [:vector :any]]
