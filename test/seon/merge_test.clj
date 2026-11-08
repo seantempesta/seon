@@ -504,7 +504,7 @@
       (let [held @conn
             c0 (d/commit-id held)]
         (is (= c0 (pm/content-commit nil held)) "none held: main's own")
-        (d/transact conn [{:seon.agent/key "b1/a1" :seon.agent/status :running}])
+        (d/transact conn [{:seon.agent/key "b1/a1" :seon.agent/status :busy}])
         (is (not= c0 (d/commit-id @conn)) "the record moved main's commit")
         (is (= c0 (pm/content-commit held @conn)) "and no content, so the commit held stands")
         (d/transact conn ((var-tx "g" "x") @conn))

@@ -251,7 +251,7 @@
       (testing "a change to main's config applies at the next call, with no restart"
         (tick! {:seon.config.ai/provider :scripted :seon.config.ai/script 'seon.fixtures/reply})
         (is (= {:kind :scripted :script 'seon.fixtures/reply} (config/provider-at @conn @conn nil))))
-      (d/transact conn {:tx-data [{:seon.task/id "a/own" :seon.config.ai/provider :none} {:seon.task/id "a/other"}]})
+      (d/transact conn {:tx-data [{:seon.task/id "a/own" :seon.task/ns (quote a) :seon.task/name "own" :seon.task/plan "p" :seon.task/execution :held :seon.task/branch :task-a-own :seon.task/kind :work :seon.config.ai/provider :none} {:seon.task/id "a/other" :seon.task/ns (quote a) :seon.task/name "other" :seon.task/plan "p" :seon.task/execution :held :seon.task/branch :task-a-other :seon.task/kind :work}]})
       (testing "a task's own setting wins over main's, from its next turn"
         (is (= {:kind :none} (config/provider-at @conn @conn "a/own")))
         (is (= {:kind :scripted :script 'seon.fixtures/reply} (config/provider-at @conn @conn "a/other"))

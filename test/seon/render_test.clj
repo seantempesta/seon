@@ -1995,7 +1995,7 @@
             (swap! a assoc :seon.agent/description "an unrelated change")
             (r/flush! w nil)
             (is (= r0 (ran)) "an unrelated change redraws none of them")
-            (d/transact conn [{:seon.task/id "demo/g" :seon.task/ns 'demo :seon.task/name "g" :seon.task/plan "Make demo/g." :seon.task/kind :work :seon.task/proofs #{}}])
+            (d/transact conn [{:seon.task/id "demo/g" :seon.task/ns 'demo :seon.task/name "g" :seon.task/plan "Make demo/g." :seon.task/execution :held :seon.task/branch :task-demo-g :seon.task/kind :work :seon.task/proofs #{}}])
             (swap! a assoc :seon.agent/main-commit (d/commit-id @conn))
             (r/flush! w nil)
             (is (= r0 (ran)) "main's commit moving alone redraws none of them: root notes an agent's status on main at each eval")

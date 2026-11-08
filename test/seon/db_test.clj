@@ -51,7 +51,7 @@
      (let [b (keyword (str (name (:branch cfg)) "-ids"))
            _ (d/branch! conn (:branch cfg) b)
            bc (d/connect (assoc cfg :branch b))
-           write (fn [c tag] (let [r (d/transact c [{:db/id "n" :note/text tag}])]
+           write (fn [c tag] (let [r (d/transact c [{:db/id "n" :note/text tag :note/agent :t}])]
                                [(get-in r [:tempids "n"]) (get-in r [:tempids :db/current-tx])]))]
        (try
          (let [[ea ta] (write conn "a") [eb tb] (write bc "b")]
@@ -62,7 +62,7 @@
              (is (< ta tb) "issued in order across branches"))
            (testing "an explicit id is never issued again"
              (let [far (+ 1000 (max ea eb))]
-               (d/transact bc [[:db/add far :note/text "carried"]])
+               (d/transact bc [{:db/id far :note/text "carried" :note/agent :t}])
                (is (< far (first (write conn "after")))))))
          (finally (d/release bc) (d/delete-branch! conn b)))))))
 
@@ -72,11 +72,11 @@
   (let [path (str (seon.config/checkout) "/target/db-test-" (random-uuid))
         {:keys [conn]} (pdb/open! :lmdb path 0 :db)]
     (try
-      (let [r (d/transact conn [{:db/id "n" :note/text "before"}])
+      (let [r (d/transact conn [{:db/id "n" :note/text "before" :note/agent :t}])
             e (get-in r [:tempids "n"]) t (:max-tx (:db-after r))]
         (clojure.java.shell/sh "rm" (str path "/ids"))
         (pdb/ids! conn)
-        (let [r2 (d/transact conn [{:db/id "n" :note/text "after"}])]
+        (let [r2 (d/transact conn [{:db/id "n" :note/text "after" :note/agent :t}])]
           (is (< e (get-in r2 [:tempids "n"])))
           (is (< t (:max-tx (:db-after r2))))))
       (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))
@@ -133,7 +133,7 @@
         ;; and one attribute installed before it was indexed
         _ (d/transact c0 {:tx-data (mapv #(if (= :seon.vector/text-t (:db/ident %)) (dissoc % :db/index) %) (butlast pdb/schema))})
         ;; a datom written before the index: an AVET read of an unindexed attribute answers empty, with no error
-        _ (d/transact c0 {:tx-data [{:seon.vector/text-t 42}]})
+        _ (d/transact c0 {:tx-data [{:db/id "f" :form/id "v/1" :form/src "(def v 1)" :form/ns {:ns/name (quote v)} :form/order 0} (seon.vector/fact "f" 42 [0.5 0.25] "m")]})
         _ (is (empty? (d/datoms @c0 :avet :seon.vector/text-t)) "unindexed, an AVET read finds nothing")
         _ (d/release c0)
         {:keys [conn]} (pdb/open! :lmdb path 0 :db)]
@@ -157,7 +157,7 @@
         _ (d/create-database (pdb/made-cfg cfg))
         c0 (d/connect cfg)
         _ (d/transact c0 {:tx-data (mapv #(dissoc % :db/contentId) pdb/schema)})
-        old (get-in (d/transact c0 [{:db/id "f" :form/id "app.k/old" :form/src "(def old 1)" :form/ns "n"} {:db/id "n" :ns/name 'app.k}]) [:tempids "f"])
+        old (get-in (d/transact c0 [{:db/id "f" :form/id "app.k/old" :form/src "(def old 1)" :form/ns "n" :form/order 0} {:db/id "n" :ns/name 'app.k}]) [:tempids "f"])
         old-ns (pdb/eid @c0 :ns/name 'app.k)
         _ (d/release c0)
         {:keys [conn]} (pdb/open! :lmdb path 0 :db)]
@@ -165,7 +165,7 @@
       (is (< old datahike.constants/tx0) "minted before: a counter id")
       (is (true? (get-in (d/schema @conn) [:form/id :db/contentId])) "the identity gained its content id")
       (is (= old (pdb/eid @conn :form/id "app.k/old")) "the entity it held keeps its id")
-      (let [r (d/transact conn [{:db/id "f" :form/id "app.k/new" :form/src "(def new 1)" :form/ns "n"} {:db/id "n" :ns/name 'app.k}])
+      (let [r (d/transact conn [{:db/id "f" :form/id "app.k/new" :form/src "(def new 1)" :form/ns "n" :form/order 1} {:db/id "n" :ns/name 'app.k}])
             new (get-in r [:tempids "f"])]
         (is (= (datahike.db.transaction/content-eid :form/id "app.k/new") new) "a new identity takes its content id")
         (is (= old-ns (get-in r [:tempids "n"]) (:db/id (:form/ns (d/entity @conn new))))
@@ -394,7 +394,7 @@
   ;; (Datahike applies a transaction's tx-meta only with history: off, it was silently dropped)
   (ts/test-branch!
    (fn [_ conn]
-     (let [{tx :tempids} (d/transact conn [{:db/id "n" :note/text "kept"}])
+     (let [{tx :tempids} (d/transact conn [{:db/id "n" :note/text "kept" :note/agent :t}])
            e (get tx "n")
            r (d/transact conn [[:db/retractEntity e]])
            tx-e (:db/current-tx (:tempids r))]
@@ -532,7 +532,7 @@
         {:keys [cfg conn]} (pdb/open! :lmdb path 0 :db)
         v {:value (mapv #(/ % 3) (range 1 3000)) :small (/ 1 3) :kinds [1.5 2N 3M 'a :b "c" \d (java.util.UUID. 0 1) (java.util.Date. 0)]}]
     (try
-      (d/transact conn {:tx-data [{:seon.eval/response v}]})
+      (d/transact conn {:tx-data [{:seon.eval/id "ratios" :seon.eval/code "(f)" :seon.eval/response v}]})
       (pdb/sync! cfg)
       (d/release conn)
       (let [c (d/connect cfg)]
@@ -745,7 +745,7 @@
   ;; (datahike.query.execute/history-versions!); every version of a replaced value answers
   (ts/test-branch!
    (fn [_ conn]
-     (let [e (get-in (d/transact conn [{:db/id "f" :form/id "h/f" :form/src "(defn f [] 0)" :form/order 1}]) [:tempids "f"])]
+     (let [e (get-in (d/transact conn [{:db/id "f" :form/id "h/f" :form/src "(defn f [] 0)" :form/ns {:ns/name (quote h)} :form/order 1}]) [:tempids "f"])]
        (d/transact conn [[:db/add e :form/order 2]])
        (d/transact conn [[:db/add e :form/order 3]])
        (is (= #{[1 true] [1 false] [2 true] [2 false] [3 true]}
@@ -762,7 +762,7 @@
      (let [b (keyword (str (name (:branch cfg)) "-ce"))
            _ (d/branch! conn (:branch cfg) b)
            bc (d/connect (assoc cfg :branch b))
-           mint (fn [c] (let [r (d/transact c [{:db/id "f" :form/id "app.ce/f" :form/src "(defn f [])" :form/ns "n" :form/defines ["v"]}
+           mint (fn [c] (let [r (d/transact c [{:db/id "f" :form/id "app.ce/f" :form/src "(defn f [])" :form/ns "n" :form/order 0 :form/defines ["v"]}
                                                {:db/id "v" :var/name 'app.ce/f :var/form "f"}
                                                {:db/id "n" :ns/name 'app.ce}])]
                           (mapv #(get-in r [:tempids %]) ["f" "v" "n"])))]
@@ -775,7 +775,7 @@
            (testing "the ref named the tempid before its map: it holds the content id"
              (is (= va (:db/id (first (:form/defines (d/entity @conn fa)))))))
            (testing "a counter entity is no content entity"
-             (is (< (get-in (d/transact conn [{:db/id "x" :note/text "counter"}]) [:tempids "x"]) datahike.constants/tx0)))
+             (is (< (get-in (d/transact conn [{:db/id "x" :note/text "counter" :note/agent :t}]) [:tempids "x"]) datahike.constants/tx0)))
            (testing "an identity is never replaced on its entity: a rename is refused"
              (is (= :entity-id/collision
                     (try (d/transact conn [[:db/add fa :form/id "app.ce/g"]]) nil
@@ -930,7 +930,7 @@
     (pdb/ids! conn)
     (pdb/install-missing! conn)
     (doseq [part (partition-all 1000 (range n))]
-      (d/transact conn {:tx-data (mapv #(hash-map :note/text (str "note " %)) part) :tx-meta (pdb/tx-meta :db)}))
+      (d/transact conn {:tx-data (mapv #(hash-map :note/text (str "note " %) :note/agent :t) part) :tx-meta (pdb/tx-meta :db)}))
     [cfg conn]))
 
 (defn branch-round-trip
@@ -1094,7 +1094,7 @@
       (is (every? datahike.schema/plain-data? samples) "and Datahike's own test on a data value passes it")
       (is (every? #(malli.core/validate :seon.db/plain % {:registry contract/registry}) samples) "and the schema says the same")
       (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)]
-        (d/transact conn (vec (map-indexed (fn [i v] {:seon.eval/id (str "p" i) :seon.eval/response {:value v}}) samples)))
+        (d/transact conn (vec (map-indexed (fn [i v] {:seon.eval/id (str "p" i) :seon.eval/code "(f)" :seon.eval/response {:value v}}) samples)))
         (d/release conn))
       (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)
             back (fn [i] (get-in (d/pull @conn [:seon.eval/response] [:seon.eval/id (str "p" i)]) [:seon.eval/response :value]))]
@@ -1179,7 +1179,7 @@
         old-form (:db/id (:var/form (d/entity db1 [:var/name 'app.h/f])))
         db2 (mt/with db1 (mt/code 'app.h "(ns app.h)\n(defn f [x] (+ x 2))\n"))
         ;; the old form's text changes after the fact: a pull as of now would show this
-        db3 (mt/with db2 [[:db/add old-form :form/src "(defn f [x] :changed-later)"]])
+        db3 (mt/with db2 [{:db/id old-form :form/id (:form/id (d/entity db1 old-form)) :form/ns (:db/id (:form/ns (d/entity db1 old-form))) :form/order (:form/order (d/entity db1 old-form)) :form/src "(defn f [x] :changed-later)"}])
         rows (pdb/history db3 [:var/name 'app.h/f] {:attrs #{:var/form} :pull [:form/src]})
         added (filter :added? rows)]
     (is (= 2 (count added)))

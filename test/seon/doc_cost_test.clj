@@ -82,7 +82,7 @@
         db (d/db-with (seon.doc-test/grep-db (for [i (range n)] [(str "f" i) nil (str "(defn f" i " []\n  " (if (hit? i) "(fused 1)" "(inc 1)") ")")]))
                       (vec (concat (for [i (range (quot n 2))] {:seon.doc/address (str "p.md#s" i) :seon.doc/heading (str "S" i)
                                                                 :seon.doc/text (str "Text of section " i (when (hit? i) ", fused.") "\nMore text.")})
-                                   (for [i (range (quot n 4))] {:seon.task/id (str "app/t" i) :seon.task/plan (str "Plan " i (when (hit? i) " fused") ".")})
+                                   (for [i (range (quot n 4))] {:seon.task/id (str "app/t" i) :seon.task/ns (quote app) :seon.task/name (str "t" i) :seon.task/execution :held :seon.task/branch (keyword (str "task-app-t" i)) :seon.task/kind :work :seon.task/plan (str "Plan " i (when (hit? i) " fused") ".")})
                                    (for [i (range (quot n 8))] {:schema/key (keyword "app" (str "k" i)) :schema/form (str "[:map " (when (hit? i) "fused ") i "]")}))))]
     ;; the postings are derived data, built once for a value of the store (docs/vector.md#search): the query is what is measured
     (doc/text-index db)
@@ -98,8 +98,7 @@
         db (mt/with (mt/world)
                     (vec (concat (for [i (range h)] {:seon.doc/address (str "p.md#s" i) :seon.doc/heading "S"
                                                      :seon.doc/text (if (< i 5) "Text of a section, fused.\nMore text." "Text of a section.\nMore text.")})
-                                 (for [i (range h)] {:seon.task/id (str "app/t" i)
-                                                     :seon.task/plan (if (< i 5) "Plan of a task fused." "Plan of a task.")}))))]
+                                 (for [i (range h)] {:seon.task/id (str "app/t" i) :seon.task/ns (quote app) :seon.task/name (str "t" i) :seon.task/execution :held :seon.task/branch (keyword (str "task-app-t" i)) :seon.task/kind :work                                                     :seon.task/plan (if (< i 5) "Plan of a task fused." "Plan of a task.")}))))]
     ;; the postings are derived data, built once for a value of the store (docs/vector.md#search): the query is what is measured
     (doc/text-index db)
     [db "fused" #{:section :task} 0.5]))

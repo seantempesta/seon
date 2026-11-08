@@ -31,7 +31,7 @@
   "Form i's transaction data (the form and its vector's fact), made once: the sizes of a proof, and
   the proofs, share their forms, and packing a 768-dim vector is the dearest part of making one."
   (memoize
-    (fn [i] [{:db/id (str "f" i) :form/id (str "vf" i) :form/src (str "(defn vf" i " [])")}
+    (fn [i] [{:db/id (str "f" i) :form/id (str "vf" i) :form/ns {:ns/name (quote app.t)} :form/order 0 :form/src (str "(defn vf" i " [])")}
              (vector/fact (str "f" i) 0 (unit-vector i) "m")])))
 
 (def ^:private grown
@@ -125,7 +125,7 @@
         s (keyword (str (name b) "-next"))
         _ (d/branch! conn b s)
         c (d/connect (assoc cfg :branch s))
-        _ (d/transact c {:tx-data [{:form/id "vnew" :form/src "(defn vnew [])"}]})
+        _ (d/transact c {:tx-data [{:form/id "vnew" :form/ns {:ns/name (quote app.t)} :form/order 0 :form/src "(defn vnew [])"}]})
         ;; the previous round read the clean commit's db (it asked for what was due there), so root's node cache
         ;; holds its nodes when this round diffs from it: read them here, as that round did
         _ (vector/due (d/commit-as-db c (d/commit-id (pdb/head conn b))) "m")

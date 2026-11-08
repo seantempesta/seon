@@ -83,7 +83,7 @@
 (deftest a-text-is-embedded-once
   ;; each document titled as the model was trained (docs/vector.md#relevance): a form by its var's
   ;; name, a section by its heading
-  (let [db (d/db-with (ts/test-db) [{:db/id "f" :form/id "x/1" :form/src "(defn g [])"} {:var/name 'x/g :var/form "f"}
+  (let [db (d/db-with (ts/test-db) [{:db/id "f" :form/id "x/1" :form/ns {:ns/name (quote app.t)} :form/order 0 :form/src "(defn g [])"} {:var/name 'x/g :var/form "f"}
                                      {:db/id "s" :seon.doc/address "p.md#a" :seon.doc/heading "a" :seon.doc/text "old"}])
         due (vector/due db "m")
         mine (filterv #(#{"title: x/g | text: (defn g [])" "title: a | text: old"} (second %)) due)
@@ -123,7 +123,7 @@
   (let [db @conn
         seeded (vector/due db "m")
         db (with! conn db (embedded seeded (take (count seeded) (cycle (vectors 2 8 8 768))) "m"))]
-    (with! conn db [{:db/id "f" :form/id "x/1" :form/src "(defn g [])"}])))
+    (with! conn db [{:db/id "f" :form/id "x/1" :form/ns {:ns/name (quote app.t)} :form/order 0 :form/src "(defn g [])"}])))
 
 (deftest the-proc-asks-for-what-is-due-and-writes-it
   (ts/test-branch! (fn [_ conn]
@@ -178,14 +178,14 @@
   (testing "a commit's new text alone"
     (ts/test-branch! (fn [_ conn]
       (let [[st db1 _] (caught-up conn)
-            db2 (with! conn db1 [{:db/id "g" :form/id "x/2" :form/src "(defn h [])"}])
+            db2 (with! conn db1 [{:db/id "g" :form/id "x/2" :form/ns {:ns/name (quote app.t)} :form/order 0 :form/src "(defn h [])"}])
             [_ db3 asked] (round conn st db2 12)]
         (is (= ["title: none | text: (defn h [])"] asked))
         (is (= [] (map first (vector/due db3 "m"))) "and nothing is due after it")))))
   (testing "a backlog larger than a round leaves the proc not caught up: the rest is asked next"
     (ts/test-branch! (fn [_ conn]
       (let [[st db1 _] (caught-up conn)
-            db2 (with! conn db1 [{:db/id "g" :form/id "x/2" :form/src "(defn h [])"} {:db/id "k" :form/id "x/3" :form/src "(defn k [])"}])
+            db2 (with! conn db1 [{:db/id "g" :form/id "x/2" :form/ns {:ns/name (quote app.t)} :form/order 0 :form/src "(defn h [])"} {:db/id "k" :form/id "x/3" :form/ns {:ns/name (quote app.t)} :form/order 0 :form/src "(defn k [])"}])
             [st2 db3 asked1] (round conn (assoc st :texts 1) db2 12)
             [_ _ asked2] (round conn st2 db3 14)]
         (is (= 1 (count asked1)))
@@ -194,7 +194,7 @@
   (testing "a text changed while its round was out is asked again"
     (ts/test-branch! (fn [_ conn]
       (let [[st db1 _] (caught-up conn)
-            db2 (with! conn db1 [{:db/id "g" :form/id "x/2" :form/src "(defn h [])"}])
+            db2 (with! conn db1 [{:db/id "g" :form/id "x/2" :form/ns {:ns/name (quote app.t)} :form/order 0 :form/src "(defn h [])"}])
             [st o] (vector/vectors-proc st :main (assoc (note db2) :t 12))
             ask (first (:to-api o))
             x2 (:e (first (d/datoms db2 :avet :form/id "x/2")))
@@ -211,7 +211,7 @@
   ;; is the event that lets it close (docs/vector.md#the-model)
   (letfn [(more-round [conn]
             (let [[st db1 _] (caught-up conn)
-                  db2 (with! conn db1 [{:db/id "g" :form/id "x/2" :form/src "(defn h [])"} {:db/id "k" :form/id "x/3" :form/src "(defn k [])"}])
+                  db2 (with! conn db1 [{:db/id "g" :form/id "x/2" :form/ns {:ns/name (quote app.t)} :form/order 0 :form/src "(defn h [])"} {:db/id "k" :form/id "x/3" :form/ns {:ns/name (quote app.t)} :form/order 0 :form/src "(defn k [])"}])
                   [st o] (vector/vectors-proc (assoc st :texts 1) :main (assoc (note db2) :t 12))
                   ask (first (:to-api o))]
               (is (true? (get-in ask [:req :req :more])) "a round that leaves texts due says more are coming")
@@ -288,10 +288,10 @@
       (is (= 1 (count asked)) "the first round reads the store")
       (is (= #{:t :commit} (set (keys (:clean st)))) "caught up: :clean is a commit reference, not a db")
       (is (not-any? db-value? (vals st)) "the state holds no db value")
-      (let [db2 (with! conn db1 [{:db/id "g" :form/id "x/2" :form/src "(defn h [])"}])
+      (let [db2 (with! conn db1 [{:db/id "g" :form/id "x/2" :form/ns {:ns/name (quote app.t)} :form/order 0 :form/src "(defn h [])"}])
             [st2 o] (vector/vectors-proc st :main (assoc (note db2) :t 12))
             ask (first (:to-api o))
-            db3 (with! conn db2 [{:db/id "k" :form/id "x/3" :form/src "(defn k [])"}])
+            db3 (with! conn db2 [{:db/id "k" :form/id "x/3" :form/ns {:ns/name (quote app.t)} :form/order 0 :form/src "(defn k [])"}])
             [st3 o3] (vector/vectors-proc st2 :main (assoc (note db3) :t 13))]
         (is (= ["title: none | text: (defn h [])"] (get-in ask [:req :req :texts]))
             "the round diffs from the clean commit: only the new text is asked")
@@ -324,7 +324,7 @@
   (let [main (d/db-with (ts/test-db) [{:seon.task/id "t/x" :seon.task/plan "first plan"}])
         e (plan-of main)
         main (d/db-with main (vector/tx-data [e] [(:tx (first (d/datoms main :eavt e :seon.task/plan)))] (vectors 1 1 1 768) "m"))
-        branch (d/db-with main [[:db/add e :seon.task/plan "the plan rewritten"] {:form/id "y/1" :form/src "(defn h [])"}])
+        branch (d/db-with main [[:db/add e :seon.task/plan "the plan rewritten"] {:form/id "y/1" :form/ns {:ns/name (quote app.t)} :form/order 0 :form/src "(defn h [])"}])
         [n db asked] (on-branch main branch answered #(agent/embed-written! 64 "m"))]
     (is (= [[:embed ["task: search result | query: the plan rewritten" "title: none | text: (defn h [])"]]] asked)
         "one request for what the branch wrote: the rewritten plan, as a search asks, and its new form")
@@ -366,14 +366,14 @@
         [n _ asked] (on-branch main branch answered #(agent/embed-written! 64 "m"))]
     (is (= 0 n))
     (is (empty? asked) "nothing written is due and the plan's vector is current: no request")
-    (let [[n _ asked] (on-branch main (d/db-with main [{:form/id "z/1" :form/src "(defn z [])"}]) answered #(agent/embed-written! 0 "m"))]
+    (let [[n _ asked] (on-branch main (d/db-with main [{:form/id "z/1" :form/ns {:ns/name (quote app.t)} :form/order 0 :form/src "(defn z [])"}]) answered #(agent/embed-written! 0 "m"))]
       (is (= [0 []] [n asked]) "0 texts a request asks nothing, as on bin/test's roots"))))
 
 (deftest more-due-than-one-request-takes-waits-for-the-next
   (let [main (d/db-with (ts/test-db) [{:seon.task/id "t/x" :seon.task/plan "a plan"}])
         e (plan-of main)
         main (d/db-with main (vector/tx-data [e] [(:tx (first (d/datoms main :eavt e :seon.task/plan)))] (vectors 1 1 1 768) "m"))
-        branch (d/db-with main [{:form/id "y/1" :form/src "(defn a [])"} {:form/id "y/2" :form/src "(defn b [])"} {:form/id "y/3" :form/src "(defn c [])"}])
+        branch (d/db-with main [{:form/id "y/1" :form/ns {:ns/name (quote app.t)} :form/order 0 :form/src "(defn a [])"} {:form/id "y/2" :form/ns {:ns/name (quote app.t)} :form/order 0 :form/src "(defn b [])"} {:form/id "y/3" :form/ns {:ns/name (quote app.t)} :form/order 0 :form/src "(defn c [])"}])
         old @agent/state asked (atom [])]
     (reset! agent/state {:n 0 :mode :test :db branch :base main :task "t/x"})
     (try
@@ -414,7 +414,7 @@
 ;; vector; the round retracts the vector too, in the write of the embeddings or alone
 (deftest a-retracted-entitys-vector-ends-with-it
   ;; docs/storage.md#the-write-checks-every-entity-it-touches: a vector's identity is a ref to the entity it embeds, so the
-  ;; one transaction path retracts it with that entity (seon.db/ends-with); the round once swept it later, an orphan between
+  ;; one transaction path retracts it with that entity; the round once swept it later, an orphan between
   (ts/test-branch! (fn [_ conn]
     (let [[st db1 _] (caught-up conn)
           x1 (:e (first (d/datoms db1 :avet :form/id "x/1")))
