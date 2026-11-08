@@ -3210,3 +3210,10 @@
     (is (str/includes? (pr-str turn) "aria-busy") "beside the in-flight element")
     (is (some #(and (vector? %) (map? (second %)) (= "seon-stream" (:class (second %))) (= "page" (:wire/for (second %)))) (tree-seq coll? seq turn))
         "the element is the page's alone")))
+
+(deftest a-components-root-keeps-its-classes
+  ;; owner, 2026-11-08: the home page's messages touched; a root's own classes (its layout, seon-stack's gap) were replaced
+  ;; by the render's name, so a class written on a component's root did nothing. Kept after the name; the model reads none.
+  (is (= [:section {:class "user-messages seon-stack" :id "k"} "x"] (#'r/with-id [:section {:class "seon-stack"} "x"] {:class "user-messages" :id "k"})))
+  (is (= [:section {:class "chat-message" :id "k"} "x"] (#'r/with-id [:section {} "x"] {:class "chat-message" :id "k"})) "no class of its own: the name alone")
+  (is (nil? (:class (#'r/strip-attrs {:class "user-messages seon-stack" :id "k"}))) "the model's reading carries no class"))
