@@ -5,7 +5,7 @@
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]] [datahike.api :as d]
             [seon.db :as pdb] [seon.vector :as vector] [seon.task :as task] [seon.ctx.search :as search] [seon.ctx.session :as session] [seon.ctx.status :as status] [seon.ctx.wire :as wire] [seon.print :as print]
             [seon.doc-test] [seon.reader :as reader] [seon.proofs :as proofs] [seon.agent :as agent] [seon.doc :as doc] [seon.judge] [seon.ctx :as ctx] [seon.fixtures] [seon.render :as render] [seon.render.ui] [seon.web.html] [my.test :as t]
-            [seon.print.select :as select] [clojure.string :as str] [seon.lib] [seon.edn] [seon.print-test :as print-test] [seon.repl :as repl] [seon.model] [seon.config] [clojure.data.json]))
+            [seon.print.select :as select] [seon.ratom] [clojure.walk] [clojure.string :as str] [seon.lib] [seon.edn] [seon.print-test :as print-test] [seon.repl :as repl] [seon.model] [seon.config] [clojure.data.json]))
 
 (defn- ns-fact
   "Var v's namespace with its file, as a store records it: a program namespace's under src/, a
@@ -459,6 +459,50 @@
           ;; a read that held only the system prompt and the page hid the conversation a model reads (docs/turn.md#an-outside-agent)
           (is (= (at :model) (at :outside)) "an outside agent's read is the request a model's turn is sent, its conversation in it")
           (is (str/includes? (:content (peek r2)) "quadruple")))))))
+
+(deftest a-turns-diff-derived-from-its-two-points-is-the-page-eval-it-stored
+  ;; rule 6 of seon.render/one-walk-per-view, step 3: with no render change, the edits between a turn's point and the one before it
+  ;; (seon.render/changes-of, the function my.render/diff calls) are the page eval that turn stored today (page!, seon.turn/show-page!'s):
+  ;; the first turn's the whole page as edits from nothing, [[id] :+ form]; a turn that moved nothing, none and no eval. The printer's
+  ;; {:seon.print/plain s} wrapper is the stored form of a string with a line break: both sides read through it
+  (ts/test-branch!
+    (fn [_ conn]
+      (wiki! conn)
+      (d/transact conn (program-facts '[[demo/f "(defn f \"Doubles.\" [x] (* 2 x))" []]]))
+      (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "Make ```demo/f``` triple."
+                                               :seon.task/proofs #{'demo-test/f-test}}]))
+      (d/transact conn [{:seon.task/id "demo/f" :seon.task/agent {:seon.agent/key "b/a1" :seon.agent/task {:seon.task/id "demo/f"}}}])
+      (let [a (pdb/eid @conn :seon.agent/key "b/a1")
+            plain (fn [x] (clojure.walk/postwalk #(if (and (map? %) (contains? % :seon.print/plain)) (:seon.print/plain %) %) x))
+            seen (atom nil)
+            point (fn [] (let [db @conn] {:branch :b :commit (d/commit-id db) :t (:max-tx db)}))
+            w (render/walker {:ref (seon.ratom/atom {}) :changes ctx/changes
+                              :forms-between (fn [p0 p1 forms0] (wire/forms-between @conn a p0 p1 forms0))}
+                             (constantly nil) [#'identity {}])
+            diff (render/changes-of w)
+            stored (fn [id] (when-let [e (d/pull @conn '[*] [:seon.eval/id id])]
+                              (when (:seon.eval/id e) (plain (:value (pdb/response-of @conn e))))))
+            turn! (fn [n] (let [p (point)] (page! conn seen (str "p" n) (dec n)) p))
+            p1 (turn! 1)
+            _ (d/transact conn (program-facts '[[demo/f "(defn f \"Triples.\" [x] (* 3 x))" []]]))
+            p2 (turn! 2)
+            _ (d/transact conn [[:db/add [:seon.task/id "demo/f"] :seon.task/plan "Make ```demo/f``` quadruple."]])
+            p3 (turn! 3)
+            p4 (turn! 4)]
+        (is (= (vec (for [[id f] (:components (stored "p1"))] [[id] :+ f])) (plain (diff nil p1))) "the first turn: the page whole, as edits from nothing")
+        (is (= (:edits (stored "p2")) (plain (diff p1 p2))) "turn 2: the cited var's edit")
+        (is (= (:edits (stored "p3")) (plain (diff p2 p3))) "turn 3: the plan's edit")
+        (is (and (nil? (stored "p4")) (= [] (diff p3 p4))) "turn 4 moved nothing: no eval stored, no edits")
+        (is (= 4 (count (keys @(:diffs w)))) "each pair computed once")
+        (is (and (seq (:components (stored "p1"))) (seq (:edits (stored "p2"))) (seq (:edits (stored "p3")))) "and each is a change worth comparing")
+        ;; a walk that kept no page (a restart): each pair draws its first point cold and advances it to the second, to the same edits
+        (let [w2 (render/walker {:ref (seon.ratom/atom {}) :changes ctx/changes
+                                 :forms-between (fn [p0 p1 forms0] (wire/forms-between @conn a p0 p1 forms0))} (constantly nil) [#'identity {}])
+              cold (fn [p0 p1] (vreset! (:held w2) nil) ((render/changes-of w2) p0 p1))]
+          (is (= (:edits (stored "p2")) (plain (cold p1 p2))) "advanced from p1 to p2")
+          (is (= (:edits (stored "p3")) (plain (cold p2 p3))) "advanced from p2 to p3")
+          (render/dispose-walk! w2))
+        (render/dispose-walk! w)))))
 
 (deftest each-section-is-told-once-on-the-page
   ;; the old request sent the task, its references and its sections in the first turn's context

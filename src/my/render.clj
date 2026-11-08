@@ -2,7 +2,8 @@
   "The agent's view of what draws its page. Referred as my.render/..., loaded in every agent.
     (my.render/tree)            what draws what in this agent's live walk, from its root: {:render :args :id :tokens :reads? :children}
     (my.render/render-ctx)      the whole render of your ctx, every component as the hiccup your request holds, whole
-    (my.render/render-changes)  what moved since you last asked, as edits; nothing when nothing did"
+    (my.render/render-changes)  what moved since you last asked, as edits; nothing when nothing did
+    (my.render/diff p0 p1)      what moved between two points of your branch, as edits: the page at p0 taken to the page at p1"
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [seon.render :as render] [seon.repl :as repl] [seon.agent :as agent] [datahike.api :as d]))
 
@@ -32,3 +33,8 @@
   "What moved on your page since you were last shown it (by `render-ctx` or by this), {:edits [[path op value] ...]}: each path starting with the component's id and going on in names, or the page whole if this process has shown you none. Nothing moved since you were shown it: {:edits [] :shown-by handle}, the eval that showed it. Seon runs it as an eval of its own when something did. See docs/render.md#a-change-is-edits-by-name."
   {:malli/schema [:=> [:cat] :seon.render/parts]}
   [] (page false))
+
+(defn diff
+  "What moved of your page between point p0 and point p1 of your branch ({:branch :commit :t}; p0 nil: nothing before it, so each part whole, [[id] :+ form]), as edits [[path op value] ...], each path starting with the part's id: the page drawn at each point with today's renders and the edits `seon.render/page-edits` makes of the two. Pure in the points: the same points and renders give the same edits, which the model reads for each turn between the points of its two requests (:seon.model-call/basis). Computed once per pair on your walk. See docs/render.md#a-change-is-edits-by-name."
+  {:malli/schema [:=> [:cat [:maybe [:map [:branch :any] [:commit :uuid] [:t :int]]] [:map [:branch :any] [:commit :uuid] [:t :int]]] [:vector :any]]}
+  [p0 p1] ((render/changes-of (repl/page-walk)) p0 p1))

@@ -124,14 +124,14 @@
   [db p] (or (d/commit-as-db (pdb/store-of db) (:commit p)) (d/as-of db (:t p))))
 
 (defn forms-between
-  "Agent a's page (seon.render/placed-hiccup, {id form}) at points p0 and p1 ({:branch :commit :t}, p1 later on one branch) of db's store, [at-p0 at-p1], drawn with today's renders. forms0, the page already known at p0 (the walk kept it, seon.render/changes-of), is not drawn again: p1 is drawn cold alone. With none, p0 is drawn cold and advanced to p1 (seon.ctx/advance's patch of the datoms between, the moved components flushed), so the second page costs what moved. Pure in its arguments, and the one place a page is drawn at a point. See docs/render.md#a-change-is-edits-by-name."
-  {:malli/schema [:=> [:cat :seon.host/db :int :map :map [:maybe :map]] [:tuple :map :map]]}
+  "Agent a's page (seon.render/placed-hiccup, {id form}) at points p0 and p1 ({:branch :commit :t}, p1 later on one branch) of db's store, [at-p0 at-p1], drawn with today's renders. forms0, the page already known at p0 (the walk kept it, seon.render/changes-of), is not drawn again: p1 is drawn cold alone, as it is for a p0 of nil (the first turn has no point before it: its page at p0 is nothing, {}). With none, p0 is drawn cold and advanced to p1 (seon.ctx/advance's patch of the datoms between, the moved components flushed), so the second page costs what moved. Pure in its arguments, and the one place a page is drawn at a point. See docs/render.md#a-change-is-edits-by-name."
+  {:malli/schema [:=> [:cat :seon.host/db :int [:maybe :map] :map [:maybe :map]] [:tuple :map :map]]}
   [db a p0 p1 forms0]
   (let [layout (render/declared-var :seon.render/render-ctx)
         db1 (db-at db p1) branch (:branch p1)]
-    (if forms0
+    (if (or forms0 (nil? p0))
       (let [w (render/draw (:tree (ctx/build db1 a branch)) ctx/changes db1 layout {:model-only true :once true})]
-        [forms0 (try (page-forms w) (finally (render/dispose-walk! w)))])
+        [(or forms0 {}) (try (page-forms w) (finally (render/dispose-walk! w)))])
       (let [db0 (db-at db p0)
             c0 (ctx/build db0 a branch)
             at (volatile! db0) r (ratom/atom (:tree c0))
