@@ -1416,6 +1416,8 @@
   {:malli/schema [:=> [:cat [:maybe :map]] [:set :any]]}
   [m] (cond (nil? m) #{} (instance? java.util.Map m) (set (.keySet ^java.util.Map m)) :else (set (keys m))))
 
+(declare stream-container)
+
 (defn reply-hiccup
   "A model turn's reply and the steps it holds (children) as the chat shows it and the model reads it, one hiccup: what the agent said, in Markdown, its thinking folded, then each eval it ran. What the
   model is sent of it is what it said and its reasoning as returned (a reply cut at the token limit is no message unless its calls were kept: called?). Nothing to say and nothing run, nothing. See
@@ -1437,18 +1439,28 @@
           [:div {:wire/field (when sent? "reasoning")} [#'markdown reasoning {:inline? true}]]])
        (when spoke? [:div {:class "seon-message max-w-[85%] self-start rounded-2xl rounded-tl-sm bg-base-900 px-4 py-2.5 text-text-100" :wire/field (when sent? "content")} [#'markdown reply {:inline? true}]])
        (when (seq children) [:ol {:class "seon-turn flex flex-col"} (seq children)])]
-        (::in-flight call) (conj [:div {:id (render/key-id [id]) :class "seon-stream" :aria-busy "true" :data-ignore-morph "" :data-stream-in id :wire/for "page"}])))))
+        (::in-flight call) (conj (stream-container id []))))))
 
 
 (defn stream-part
   "One part of an effect's in-flight text, part one of reasoning, content, message, intent, code, out or err: the element the
-  web proc appends into its call's (or eval's) in-flight element the first time a tab sees that part, and then its text
-  into (its id the stream's, seon.render/key-id of [id]). See docs/render.md#in-flight-output-streams."
+  web proc draws in its call's (or eval's) in-flight element (stream-container) with all its text so far (its id the
+  stream's, seon.render/key-id of [id]). See docs/render.md#in-flight-output-streams."
   {:seon.render/for "page"
    :seon.render/style ".stream-part { white-space: pre-wrap; overflow-wrap: anywhere; } .stream-part[data-stream-part=\"reasoning\"] { color: var(--color-text-500); font-size: 0.75rem; } .stream-part[data-stream-part=\"intent\"] { color: var(--color-text-400); } .stream-part:is([data-stream-part=\"code\"], [data-stream-part=\"out\"], [data-stream-part=\"err\"]) { font-family: var(--font-mono); font-size: 0.75rem; background: var(--color-base-900); border-radius: 0.375rem; padding: 0.25rem 0.5rem; } section:has(> .seon-message, > details) > .seon-stream > .stream-part:is([data-stream-part=\"message\"], [data-stream-part=\"content\"], [data-stream-part=\"reasoning\"]) { display: none; } .stream-part[data-stream-part=\"err\"] { color: var(--color-error); } .seon-stream[aria-busy=\"true\"]::after { content: \"▍\"; animation: seon-stream-cursor 1s steps(2) infinite; } @keyframes seon-stream-cursor { 50% { opacity: 0; } }"
-   :malli/schema [:=> [:cat :string :string] :any]}
-  [id part]
-  [:div {:id (render/key-id [id]) :class "stream-part" :data-stream-part part}])
+   :malli/schema [:=> [:cat :string :string :string] :any]}
+  [id part text]
+  [:div {:id (render/key-id [id]) :class "stream-part" :data-stream-part part} text])
+
+(defn stream-container
+  "Entity in's in-flight element with its parts, [[id part text] ...] (stream-part each): busy, kept as it is through the
+  page's redraws (data-ignore-morph) and found by the web proc (data-stream-in), for the page alone. The turn draws it
+  empty while its call is in flight (reply-hiccup); the web proc draws it whole, the text so far, in its place at each
+  message. See docs/render.md#in-flight-output-streams."
+  {:seon.render/for "page" :malli/schema [:=> [:cat :string [:sequential [:tuple :string :string :string]]] :any]}
+  [in parts]
+  (into [:div {:id (render/key-id [in]) :class "seon-stream" :aria-busy "true" :data-ignore-morph "" :data-stream-in in :wire/for "page"}]
+        (for [[id part text] parts] (stream-part id part text))))
 
 (defn chat-ask
   "What was asked, the chat's first message, a person's on the right (a component over ctx): the

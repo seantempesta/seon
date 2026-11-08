@@ -198,101 +198,79 @@
      [st a1 a1b a3])))
 
 (def ^:private msg {:stream "b1/a1/3/0/message" :in "b1/a1/3" :part "message" :agent "b1/a1"})
-(def ^:private part-sel "[id=\"b1_2Fa1_2F3_2F0_2Fmessage\"]")
+(def ^:private call-sel "[id=\"b1_2Fa1_2F3\"]")
 
-(deftest a-stream-appends-to-its-agents-chat
+(deftest a-stream-draws-its-element-whole-with-the-text-so-far
   (let [[st a1 a1b a3] (stream-tabs)
-        [st _] (#'w/web-proc st :streams (assoc msg :offset 0 :text "Reading <the> task"))]
+        [st _] (#'w/web-proc st :streams (assoc msg :text "Reading <the> task"))]
     (doseq [c [a1 a1b]]
-      (let [first-chunk (a/poll! c)]
-        (is (str/includes? first-chunk "data: selector [id=\"b1_2Fa1_2F3\"]\ndata: mode append\n")
-            (str "the part goes into the call's element, in a1's chat by its id and by its branch: " first-chunk))
-        (is (str/includes? first-chunk "data-stream-part=\"message\" id=\"b1_2Fa1_2F3_2F0_2Fmessage\">Reading &lt;the&gt; task</div>")
-            "with its text, escaped")))
+      (let [f (a/poll! c)]
+        (is (str/includes? f (str "data: selector " call-sel "\ndata: mode replace\n")) (str "the call's element replaced, in a1's chat by id and by branch: " f))
+        (is (str/includes? f "data-stream-part=\"message\" id=\"b1_2Fa1_2F3_2F0_2Fmessage\">Reading &lt;the&gt; task</div>") "holding the part's text, escaped")))
     (is (nil? (a/poll! a3)) "another agent's chat gets nothing")
-    (let [[_ _] (#'w/web-proc st :streams (assoc msg :offset 18 :text " now"))]
-      (is (= (str "event: datastar-patch-elements\ndata: selector " part-sel "\ndata: mode append\ndata: elements  now\n\n") (a/poll! a1))
-          "then each message is its text alone, appended to the part"))))
+    (let [[st _] (#'w/web-proc st :streams {:stream "b1/a1/3/0/eval-0/code" :in "b1/a1/3" :part "code" :agent "b1/a1" :text "(+ 1"})
+          f (a/poll! a1)]
+      (is (re-find #"(?s)Reading &lt;the&gt; task</div>.*data-stream-part=\"code\"[^>]*>\(\+ 1</div>" f) (str "every part of the call, in the order they began: " f))
+      (let [[_ _] (#'w/web-proc st :streams (assoc msg :text "Reading <the> task now."))]
+        (is (str/includes? (a/poll! a1) "Reading &lt;the&gt; task now.</div>") "each message carries all of the part")))))
 
-(deftest a-stream-gap-appends-an-ellipsis
+(deftest a-lost-message-costs-nothing
+  ;; a message the sliding in-port dropped: the next carries all the part's text, so the page is right again at once
   (let [[st a1] (stream-tabs)
-        [st _] (#'w/web-proc st :streams (assoc msg :offset 0 :text "abc"))
+        [st _] (#'w/web-proc st :streams (assoc msg :text "abc"))
         _ (a/poll! a1)
-        ;; offsets 3-9 were dropped before this proc (the sliding in-port): the text says so
-        [st _] (#'w/web-proc st :streams (assoc msg :offset 10 :text "xyz"))]
-    (is (str/includes? (a/poll! a1) "data: elements …xyz\n"))
-    (let [[_ _] (#'w/web-proc st :streams (assoc msg :offset 13 :text "!"))]
-      (is (str/includes? (a/poll! a1) "data: elements !\n") "and carries on from the new offset"))))
+        [_ _] (#'w/web-proc st :streams (assoc msg :text "abcdefghi"))]
+    (is (str/includes? (a/poll! a1) ">abcdefghi</div>"))))
 
 (deftest a-stream-that-starts-before-its-element-is-drawn-reaches-the-tab-when-it-is
   ;; found live on 7888 (2026-11-08): the model streams as soon as its call is committed, and the page draws the call's
-  ;; element only after root reads that commit, so a part given to a tab before then was appended to nothing and lost
+  ;; element only after root reads that commit, so text sent before then was appended to nothing
   (let [[st a1] (stream-tabs "<div id=\"app\"></div>")
-        [st _] (#'w/web-proc st :streams (assoc msg :offset 0 :text "Reading "))
-        [st _] (#'w/web-proc st :streams (assoc msg :offset 8 :text "the task"))]
+        [st _] (#'w/web-proc st :streams (assoc msg :text "Reading the task"))]
     (is (nil? (a/poll! a1)) "nothing while the tab has no element to hold it")
     (let [[st _] (#'w/web-proc st :from-render {:op :patch :view [:chat :a1] :frags [["app" call-el]] :appends [] :removes []})
-          patch (a/poll! a1) caught (a/poll! a1)]
-      (is (str/includes? patch "b1_2Fa1_2F3") "the patch that draws the element")
-      (is (str/includes? caught ">Reading the task</div>") (str "then the part with all the text so far: " caught))
-      (let [[st _] (#'w/web-proc st :from-render {:op :patch :view [:chat :a1] :frags [["app" call-el]] :appends [] :removes []})]
+          _ (a/poll! a1) drawn (a/poll! a1)]
+      (is (str/includes? drawn ">Reading the task</div>") (str "the patch that draws it is followed by the text so far: " drawn))
+      (let [[_ _] (#'w/web-proc st :from-render {:op :patch :view [:chat :a1] :frags [["app" call-el]] :appends [] :removes []})]
         (a/poll! a1)
-        (is (nil? (a/poll! a1)) "a later patch that keeps the element catches nothing up again")
-        (let [[_ _] (#'w/web-proc st :streams (assoc msg :offset 16 :text "."))]
-          (is (str/includes? (a/poll! a1) (str "data: selector " part-sel "\ndata: mode append\ndata: elements .\n")) "and appends go on"))))))
+        (is (nil? (a/poll! a1)) "a later patch that keeps the element sends nothing more")))))
 
 (deftest a-tab-opened-mid-stream-gets-the-text-so-far
   (let [[st a1] (stream-tabs)
-        [st _] (#'w/web-proc st :streams (assoc msg :offset 0 :text "Thinking"))
+        [st _] (#'w/web-proc st :streams (assoc msg :text "Thinking"))
         _ (a/poll! a1)
         late (a/chan 64)
         [st _] (#'w/web-proc st :http {:op :open :view [:chat :a1] :ch late})
-        [st _] (#'w/web-proc st :from-render {:op :keyframe :view [:chat :a1] :html call-el})
-        _ (a/poll! late)
-        caught (a/poll! late)]
-    (is (str/includes? caught ">Thinking</div>") (str "its keyframe draws the element, and the part follows with all the text: " caught))
-    (let [[_ _] (#'w/web-proc st :streams (assoc msg :offset 8 :text " more"))]
-      (is (str/includes? (a/poll! late) "data: elements  more\n") "then appends")
-      (is (str/includes? (a/poll! a1) "data: elements  more\n") "as for a tab that saw the start"))))
+        [_ _] (#'w/web-proc st :from-render {:op :keyframe :view [:chat :a1] :html call-el})
+        _ (a/poll! late)]
+    (is (str/includes? (a/poll! late) ">Thinking</div>") "its keyframe draws the element, and the text so far follows")))
 
 (deftest a-stale-tab-is-caught-up-by-its-keyframe
-  ;; a part sits in an element Datastar does not morph (data-ignore-morph), so a keyframe keeps the part as the tab had it;
-  ;; what it missed while stale comes as the part replaced with all the text held
   (let [[st a1] (stream-tabs)
-        [st _] (#'w/web-proc st :streams (assoc msg :offset 0 :text "abc"))
+        [st _] (#'w/web-proc st :streams (assoc msg :text "abc"))
         _ (a/poll! a1)
         t (some (fn [[t tab]] (when (= a1 (:ch tab)) t)) (:tabs st))
         st (update st :stale conj t)
-        [st _] (#'w/web-proc st :streams (assoc msg :offset 3 :text "def"))
+        [st _] (#'w/web-proc st :streams (assoc msg :text "abcdef"))
         _ (is (nil? (a/poll! a1)) "a stale tab is sent nothing")
         [_ _] (#'w/web-proc st :from-render {:op :keyframe :view [:chat :a1] :html call-el})
-        _ (a/poll! a1)
-        caught (a/poll! a1)]
-    (is (str/includes? caught (str "data: selector " part-sel "\ndata: mode replace\n")) (str "the part replaced: " caught))
-    (is (str/includes? caught ">abcdef</div>") "with all the text held")))
+        _ (a/poll! a1)]
+    (is (str/includes? (a/poll! a1) ">abcdef</div>") "its keyframe brings the latest text")))
+
+(deftest a-streams-blank-text-and-newlines-reach-the-page
+  (let [[st a1] (stream-tabs)
+        [_ _] (#'w/web-proc st :streams (assoc msg :text "a\n  \n"))
+        f (a/poll! a1)]
+    (is (str/includes? f "data-stream-part=\"message\" id=\"b1_2Fa1_2F3_2F0_2Fmessage\">a\ndata: elements   \ndata: elements </div>")
+        (str "every line of the text, a blank one and the trailing newline too: " (pr-str f)))))
 
 (deftest an-end-and-an-ended-agent-leave-no-stream-entries
   (let [[st] (stream-tabs)
-        [st _] (#'w/web-proc st :streams (assoc msg :offset 0 :text "a"))
-        [st _] (#'w/web-proc st :streams {:stream "b1/a1/3/reasoning" :in "b1/a1/3" :part "reasoning" :agent "b1/a1" :offset 0 :text "b"})
-        [st _] (#'w/web-proc st :streams {:stream "b1/a3/1/reasoning" :in "b1/a3/1" :part "reasoning" :agent "b1/a3" :offset 0 :text "c"})
+        [st _] (#'w/web-proc st :streams (assoc msg :text "a"))
+        [st _] (#'w/web-proc st :streams {:stream "b1/a1/3/reasoning" :in "b1/a1/3" :part "reasoning" :agent "b1/a1" :text "b"})
+        [st _] (#'w/web-proc st :streams {:stream "b1/a3/1/reasoning" :in "b1/a3/1" :part "reasoning" :agent "b1/a3" :text "c"})
         [st _] (#'w/web-proc st :streams (assoc msg :end true))]
-    (is (= 2 (:streams (#'w/stats st))) "the ended stream's entry is gone")
-    (is (not-any? #(= [ "b1/a1" "b1/a1/3/0/message"] %) (mapcat :parts (vals (:tabs st)))) "no tab holds its part")
+    (is (= 2 (:streams (#'w/stats st))) "the ended part's entry is gone")
     (let [[st _] (#'w/web-proc st :from-render {:op :index :agents (assoc-in keyed [:a1 :status] :killed)})]
       (is (= 1 (:streams (#'w/stats st))) "an agent whose process ended takes its open streams with it")
-      (is (not-any? #(= "b1/a1" (first %)) (mapcat :parts (vals (:tabs st)))) "no tab keeps what it held of them")
-      (is (not-any? #{"b1/a1/3"} (mapcat :has (vals (:tabs st)))) "nor its in-flight element"))))
-
-(deftest a-streams-blank-text-and-newlines-reach-the-page
-  ;; found by review (2026-11-08): patch-event drops a blank element and split-lines drops a trailing newline, so a
-  ;; message of a newline or spaces vanished from the streamed text
-  (let [[st a1] (stream-tabs)
-        [st _] (#'w/web-proc st :streams (assoc msg :offset 0 :text "a"))
-        _ (a/poll! a1)
-        [st _] (#'w/web-proc st :streams (assoc msg :offset 1 :text "\n"))
-        nl (a/poll! a1)
-        [_ _] (#'w/web-proc st :streams (assoc msg :offset 2 :text "  "))
-        sp (a/poll! a1)]
-    (is (str/includes? nl "data: mode append\ndata: elements \ndata: elements \n\n") (str "a newline is two lines Datastar joins with one: " (pr-str nl)))
-    (is (str/includes? sp "data: elements   \n") (str "spaces are kept: " (pr-str sp)))))
+      (is (not-any? #{"b1/a1/3"} (mapcat :has (vals (:tabs st)))) "and no tab keeps its in-flight element"))))
