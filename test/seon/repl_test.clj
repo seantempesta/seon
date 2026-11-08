@@ -373,7 +373,7 @@
 ;; in its task's namespace, made when the program has none, where the REPL's names resolve
 (deftest an-agent-starts-in-its-tasks-namespace
   (let [[here helper] (at/in-agent ["(str *ns*)" "(fn? source-fn)"])]
-    (is (re-matches #"t[0-9a-f]{8}" (str (:value here))) (str "the task's namespace, t<id>: " (pr-str here)))
+    (is (re-matches #"[a-p][0-9a-f]{15}" (str (:value here))) (str "the task's namespace, its id: " (pr-str here)))
     (is (true? (:value helper)) (pr-str helper))))
 
 (deftest a-move-into-a-namespace-that-hides-a-helper-says-so
@@ -640,7 +640,7 @@
         use (fn [h] (str "(inc (:value " h "))"))
         whole (ev ["(+ 1 1)" "(+ 2 3)" (use (:handle five))])
         cut (ev ["(+ 2 3)" (use (:handle five))])]
-    (is (re-matches #"result/[0-9a-f]{8}" (str (:handle five))) "eight hex digits")
+    (is (re-matches #"result/[a-p][0-9a-f]{7}" (str (:handle five))) "eight characters, the first a letter (seon.lib/id)")
     (is (= (mapv :handle (ev ["(+ 1 1)" "(+ 2 3)" (use (:handle five))])) (mapv :handle whole)) "a replay gives the same handles")
     (is (= [6 6] [(:value (peek whole)) (:value (peek cut))]) "a later eval's code naming it reads it, with the first eval cut")
     (is (= (:handle (first cut)) (:handle five)) "and the cut leaves its handle where it was")
@@ -1314,8 +1314,8 @@
                                     "(mapv #(datahike.api/pull (seon.agent/db) '[:db/id :seon.eval/id :seon.eval/code {:seon.eval/result [:db/id :seon.result/value]}] [:seon.eval/id %]) [" (pr-str (:id a)) " (:id mine)]))")])
         b (:value b)
         [x y :as evals] (:value both)]
-    (is (re-matches #"[0-9a-f]{16}" (:id a)) "an eval's id is a digest")
-    (is (re-matches #"[0-9a-f]{16}" (:id b)))
+    (is (re-matches #"[a-p][0-9a-f]{15}" (:id a)) "an eval's id is a digest")
+    (is (re-matches #"[a-p][0-9a-f]{15}" (:id b)))
     (is (not= (:id a) (:id b)) "two agents forked from one main issue two ids")
     (is (= [(:e a) (:e b)] (mapv :db/id evals)) (pr-str both))
     (is (= ["(+ 40 2)" "(+ 40 2)"] (mapv :seon.eval/code evals)))
@@ -1330,7 +1330,7 @@
                                "(mapv #(seon.db/eid (seon.agent/db) :seon.eval/id %) [running inner])"])
         [o i] (:value eids)]
     (is (= (:record (first answers)) id) "the id its forms read is the id it is recorded by")
-    (is (re-matches #"[0-9a-f]{16}" id) "and it is a digest of its agent and the eid issued for it")
+    (is (re-matches #"[a-p][0-9a-f]{15}" id) "and it is a digest of its agent and the eid issued for it")
     (is (some? e) "found by it: the record is the one the id names")
     (is (< o i) "the eval that started first has the lower eid, though the one inside it recorded first")))
 
@@ -1352,7 +1352,7 @@
         [id before] (:value one)
         [after code] (:value two)
         [was still old-code] (:value old)]
-    (is (re-matches #"[0-9a-f]{16}" id) "its id is a digest")
+    (is (re-matches #"[a-p][0-9a-f]{15}" id) "its id is a digest")
     (is (= before after) "the same entity")
     (is (= "(swap! tick + 10)" code))
     (is (= was still) (pr-str old))

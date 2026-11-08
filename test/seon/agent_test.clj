@@ -85,7 +85,7 @@
   the tests that name it: :pristine, for tests that need a main nothing merged into, :merge, for tests whose agent merges)."
   [{:keys [dirs proofs sets config decls own-root? client group] :or {proofs '#{demo-test/t}}} f]
   (let [checkout (seon.config/checkout)
-        tns (str "t" (subs (str (random-uuid)) 0 8))
+        tns (seon.lib/unique-id)
         names {:ns tns :task (str tns "/t")}
         proofs (if (set? proofs) proofs (proofs names))
         dirs (or dirs (when group (seon.config/value :seon.config.source/dirs)))
@@ -1189,7 +1189,7 @@
     (is (= 2 (count (filter seon? (:value msgs)))) "and the page Seon ran, whole, its call answered; nothing it shows moved after")
     (is (= ["assistant" "tool" "assistant" "tool"] (mapv :role ms)) "each reply followed by its call's answer")
     (is (= [{:id (:tool-call-id r0) :code "(+ 20 21)" :intent "Add twenty and twenty-one."}] (:tool-calls a0)))
-    (is (re-matches #"eval-[0-9a-f]{16}" (:tool-call-id r0)) "the answer names its call, by the eval's own id")
+    (is (re-matches #"[a-p][0-9a-f]{15}" (:tool-call-id r0)) "the answer names its call, by the eval's own id")
     (is (str/includes? (:content r0) "41") "the first call's answer")
     (is (= [{:id (:tool-call-id r1) :code "(+ 1 41)" :intent "Add one to the value the last call showed."}] (:tool-calls a1)) "the second call was made after the first call's answer, from it")
     (is (str/includes? (:content r1) "42") "and both answers are in the conversation")))
@@ -1873,12 +1873,12 @@
            (is (:ex r) "an eval that throws")
            (is (nil? (:eval @agent/state)) "leaves no eval named"))
          (let [r (repl/eval-string "(do (seon.repl/eval-string \"1\" {\"ns\" \"user\" :origin :screen}) (:eval @seon.agent/state))" {"ns" "user" :origin :outside})]
-           (is (re-matches #"[0-9a-f]{16}" (:value r)) "an eval inside one names its own, then the outer one's again"))
+           (is (re-matches #"[a-p][0-9a-f]{15}" (:value r)) "an eval inside one names its own, then the outer one's again"))
          ;; recorded as an agent records: the eval's own record names it too
          (swap! agent/state assoc :mode :agent :key "test/a1" :id :a1)
          (let [r (repl/eval-string "(+ 1 2)" {"ns" "user" :origin :outside})]
            (agent/commit!)
-           (is (re-matches #"[0-9a-f]{16}" (:record r)) "recorded, by its id")
+           (is (re-matches #"[a-p][0-9a-f]{15}" (:record r)) "recorded, by its id")
            (is (= (:record r) (:seon.tx/eval (d/entity @store-conn (:tx (first (d/datoms @store-conn :avet :seon.eval/id (:record r)))))))
                "its record's transaction names it"))
          (finally (reset! agent/state old) (reset! agent/link old-link) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))

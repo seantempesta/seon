@@ -571,10 +571,10 @@
 ;; ---- a request's response and its record: one per eval request (a tool call, a typed form) ----
 
 (defn- eval-id
-  "The id eval req goes by, the digest of the facts that make it: a model's eval, its call and its place in the reply (:stream, seon.model/at [k i]); any other, its agent and its own number n, the eid issued for it. See docs/decisions.md, the ruling named An id is the content of the facts that make it."
+  "The id eval req goes by, the digest of the facts that make it: a model's eval, its call and its place in the reply (:stream, seon.model/at [k i]); any other, a fresh unique id (seon.lib/unique-id: an eval outside a reply is always a new one, and n, the eid issued for it, names its record, never its id). See docs/decisions.md, the ruling named An id is the content of the facts that make it."
   {:malli/schema [:=> [:cat :map :int] :string]}
   [req n]
-  (lib/digest (if-let [{:keys [call k i]} (:stream req)] (str call "/" k "/" i) (str (:key @agent/state) "/eval/" n))))
+  (if-let [{:keys [call k i]} (:stream req)] (lib/id (lib/digest (str call "/" k "/" i))) (lib/unique-id)))
 
 (defn- issued
   "Req with the id a new eval goes by (`eval-id`): :issued, the eid its record will have, from the store its branch is on; in a process with no branch, nothing records it and a gensym names it. A run again (:id) has its own. See docs/users.md#what-each-thing-is."
@@ -729,7 +729,7 @@
                   ;; the handle names what the agent can read back: its own for an answer not kept as it is, whose stored marker other evals may share
                   h (str (or (some-> own hasch/uuid) (get-in d [:seon.eval/result :seon.result/hash]) (hasch/uuid [nil nil nil nil nil])))]
               (cond-> d
-                id (update :seon.eval/response #(into {:handle (symbol "result" (first (clojure.string/split h #"-")))} %))))
+                id (update :seon.eval/response #(into {:handle (symbol "result" (lib/id (first (clojure.string/split h #"-"))))} %))))
       schema (assoc :seon.eval/schema schema)
       basis (assoc :seon.eval/basis basis)
       (:seon.render/page (meta v)) (assoc :seon.eval/page (:seon.render/page (meta v)))

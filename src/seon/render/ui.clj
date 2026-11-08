@@ -1274,7 +1274,7 @@
         said? (not (str/blank? intent))
         called? (or call-id said?)]
     [:li (cond-> (if called?
-                   {:wire/role "assistant" :wire/call-id (wire/wire-id id) :wire/result mark}
+                   {:wire/role "assistant" :wire/call-id id :wire/result mark}
                    {:wire/role "user" :wire/result (assoc mark :with (array-map :by by :code code))})
            true (assoc :wire/ref [:eval id])
            seon? (assoc :wire/for "model"))

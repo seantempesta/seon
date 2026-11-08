@@ -118,7 +118,7 @@
     (is (= pid-a pid-b) "one root answered both tests")
     (is (= (seon.config/checkout) source) "it runs the checkout's source")
     (is (not= (:task @first-names) (:value task)) "each test has a task of its own")
-    (is (re-find #"^t[0-9a-f]{8}/t$" (str (:value task))) (pr-str task))
+    (is (re-find #"^[a-p][0-9a-f]{15}/t$" (str (:value task))) (pr-str task))
     (is (not (contains? agents (:agent @first-names))) (str "the first test's agent has ended (live: " agents ")"))
     (is (not-any? #(re-find (re-pattern (str "task-" (:ns @first-names) "-")) %) branches)
         (str "the first test's branches are gone: " branches))))

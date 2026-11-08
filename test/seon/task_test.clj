@@ -293,11 +293,11 @@
         a (keyword (first ids))
         tx (task/start-tx db "demo/t" "b1" a {:branch :b :model nil :max-turns 4} 0)]
     (is (= 100 (count (set ids))) "every spawn mints its own: two spawns of one task are two agents")
-    (is (every? #(re-matches #"[0-9a-f]{16}" %) ids) "in the one id form (a digest)")
+    (is (every? #(re-matches #"[a-p][0-9a-f]{15}" %) ids) "in the one id form (seon.lib/id of a digest): a name every Clojure reader reads")
     (is (some #(= (name a) (:seon.agent/key %)) tx) "the agent's key is its id's name")
     (is (not-any? :seon.agent/id (tree-seq coll? seq tx)) "and :seon.agent/id is not written")
     (is (= (seon.lib/call-id "k" 3) (seon.lib/call-id "k" 3) (:seon.model-call/id (task/call-ref "k" 3))) "the same agent and turn, the same call id")
-    (is (= (seon.lib/digest "k/3") (seon.lib/call-id "k" 3)) "a model call's id is its agent and turn digested")
+    (is (= (seon.lib/id (seon.lib/digest "k/3")) (seon.lib/call-id "k" 3)) "a model call's id is its agent and turn digested, in seon.lib/id's form")
     (is (= 3 (count (distinct [(seon.lib/call-id "k" 3) (seon.lib/call-id "k" 4) (seon.lib/call-id "j" 3)]))) "another turn or agent, another id")))
 
 (deftest an-agents-id-is-no-stored-attribute

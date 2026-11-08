@@ -180,7 +180,7 @@
   ;; does not read or is not that vector is the :seon.root/example-refused error and writes nothing
   ;; (on the process's shared root, with keys of its own: a root's boot was most of this test's time)
   (let [checkout (seon.config/checkout)
-        id (subs (str (random-uuid)) 0 8)
+        id (seon.lib/unique-id)
         runs (str checkout "/target/runs/load-example-" id)
         _ (.mkdirs (java.io.File. runs))
         file (str runs "/records.edn")
