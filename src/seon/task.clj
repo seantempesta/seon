@@ -71,10 +71,12 @@
   "Citation c's target as its cite entity holds it on db, {:seon.cite/address a} or {:seon.cite/name n}: a
   section's path#anchor; a page cited whole its top section's address (seon.ref/page-top: its sections
   are joined below it), a page or file db holds no section of, its path as written; a name as itself, and a
-  name of a task (seon.ref/task?) its id beside it (:seon.cite/task, which the pattern joins the task by)."
-  {:malli/schema [:=> [:cat :seon.host/db :map] :map]}
-  [db {:seon.ref/keys [name path anchor]}]
-  (cond (and (qualified-symbol? name) (ref/task? db name)) {:seon.cite/name name :seon.cite/task (str name)}
+  name of a task (seon.ref/task?) its id beside it (:seon.cite/task, which the pattern joins the task by), unless it is the
+  citing entity's own identity self: a text naming its own task's id names what the task makes (a function of that name),
+  never the task itself, which its page already shows."
+  {:malli/schema [:=> [:cat :seon.host/db :map :string] :map]}
+  [db {:seon.ref/keys [name path anchor]} self]
+  (cond (and (qualified-symbol? name) (not= self (str name)) (ref/task? db name)) {:seon.cite/name name :seon.cite/task (str name)}
         name {:seon.cite/name name}
         anchor {:seon.cite/address (str path "#" anchor)}
         :else {:seon.cite/address (or (some->> (ref/page-top db path) (d/pull db [:seon.doc/address]) :seon.doc/address) path)}))
@@ -85,7 +87,7 @@
   \"<of-id> <target>\", upserted by it. See docs/references.md#an-entity-cites."
   {:malli/schema [:=> [:cat :seon.host/db :any :string [:map [:seon.ref/depth :seon.ref/depth]] :int] :map]}
   [db of of-id c order]
-  (let [t (cite-target db c)]
+  (let [t (cite-target db c of-id)]
     (merge t {:seon.cite/id (str of-id " " (or (:seon.cite/address t) (:seon.cite/name t)))
               :seon.cite/of of :seon.cite/depth (:seon.ref/depth c) :seon.cite/order order})))
 

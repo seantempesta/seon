@@ -18,6 +18,17 @@
   "What transaction tx makes its entities cite: each cite entity it writes, {target depth}."
   [tx] (into {} (for [m tx :when (and (map? m) (:seon.cite/id m))] [(or (:seon.cite/address m) (:seon.cite/name m)) (:seon.cite/depth m)])))
 
+;; docs/references.md#task-references: a plan naming its own task's id names what the task makes (a function of that name), never
+;; the task, whose page already shows it (a lab, 2026-11-08: app.greet/greet's page showed its own plan again as "Another task your plan names")
+(deftest a-task-never-cites-itself-as-a-task
+  (let [db (d/db-with (db-with-program) (task/create-tx (db-with-program) [(decl "Make `demo/t` and `demo/f`.")]))
+        db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "other" :seon.task/plan "p"}]))
+        tx (task/rederive-tx db {:seon.task/id "demo/t" :seon.task/plan "Make `demo/t` work, after `demo/other`."})
+        by-name (into {} (for [m tx :when (and (map? m) (:seon.cite/name m))] [(:seon.cite/name m) m]))]
+    (is (contains? by-name 'demo/t) "its own id is still cited, as the name of what it makes")
+    (is (nil? (:seon.cite/task (by-name 'demo/t))) "but never joined as a task: it is this one")
+    (is (= "demo/other" (:seon.cite/task (by-name 'demo/other))) "another task it names is joined as a task")))
+
 ;; docs/references.md#task-references: a task's text is parsed once at its write, and each target it cites is a cite entity
 (deftest the-writer-writes-a-tasks-cites
   (let [plan "Make `demo/f` pass; ``demo/later`` is only mentioned; `(demo/f 1)` is code. Read [vectors](docs/vector.md#the-pyramid), then ```demo/f``` whole."
