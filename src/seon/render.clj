@@ -10,10 +10,10 @@
   as Reagent does), and the page and the model read the same hiccup (docs/render.md
   rev42.md §2). Selection, first match wins, and nothing else (DECISIONS, Renders attach to
   schemas; the UI and the context are renders, ported not reinvented):
-    1. the value's own override key (:seon.render/html, in the map or its metadata): a render
+    1. the value's own override key (:seon.render/hiccup, in the map or its metadata): a render
        symbol (the value rendered itself, never one nested in another: there it is a schema's
        properties, data), or already-rendered hiccup;
-    2. the render its schema declares: a schema's property {:seon.render/html sym} in
+    2. the render its schema declares: a schema's property {:seon.render/hiccup sym} in
        resources/seon/schemas/*.edn (seon.contract/forms), the
        schema then its parents ([:and p ...], [:merge p ...]). The value's schema is never
        guessed: the producer names it (opts :schema, or the value's metadata
@@ -40,7 +40,7 @@
   {:malli/schema [:=> [:cat [:maybe :qualified-keyword]] [:maybe :symbol]]}
   [k]
   (when k
-    (or (:seon.render/html (contract/properties k))
+    (or (:seon.render/hiccup (contract/properties k))
         (some declared (parents k)))))
 
 (defn model-declared
@@ -120,22 +120,22 @@
   "The printer's :render: a nested value whose schema declares a render, as a call of that render
   inline ({:text, the value in one line; :html, the call}), else nil. Its render is looked up by
   render-of (seon.render/schema-of: one metadata read or one map lookup per key, never a
-  validation). A nested map holding a render symbol under :seon.render/html is data, printed as it
+  validation). A nested map holding a render symbol under :seon.render/hiccup is data, printed as it
   is: it is what a schema's properties look like inside a printed schema form, and drawing it by
   that render called the render with the properties (an agent's registered :lab.ctx/steps form,
-  its lab.ui/steps called with {:seon.render/html lab.ui/steps}, killed the agent drawing it)."
+  its lab.ui/steps called with {:seon.render/hiccup lab.ui/steps}, killed the agent drawing it)."
   {:malli/schema [:=> [:cat :any] [:maybe [:map [:text :string] [:html :any]]]]}
   [v]
-  (when-let [h (when-not (symbol? (own-key v :seon.render/html)) (render-of v nil))]
+  (when-let [h (when-not (symbol? (own-key v :seon.render/hiccup)) (render-of v nil))]
     {:text (print/line v (config/value :seon.config.render/line-budget)) :html [h {:as :inline} v]}))
 
-(defn- nested-html
-  "The HTML printer's :render: nested's, and a value whose own :seon.render/html key holds hiccup
+(defn- nested-hiccup
+  "The hiccup printer's :render: nested's, and a value whose own :seon.render/hiccup key holds hiccup
   (a page an agent built) as that hiccup, its text the hiccup as data in one line: one selection
   serves the page and the model, and the model reads the hiccup as the data it is."
   {:malli/schema [:=> [:cat :any] [:maybe [:map [:text :string] [:html :any]]]]}
   [v]
-  (let [own (own-key v :seon.render/html)]
+  (let [own (own-key v :seon.render/hiccup)]
     (if (and (some? own) (not (symbol? own)))
       {:text (print/line own (config/value :seon.config.render/line-budget)) :html own}
       (nested v))))
@@ -146,14 +146,14 @@
   {:malli/schema [:=> [:cat :seon.render/opts] :map]}
   [opts] {:budget (or (:budget opts) (config/value :seon.config.render/value-budget)) :handle (:handle opts) :render nested})
 
-(defn print-html
-  "The one value printer as the default :html render: v's structural hiccup under opts' budget,
+(defn print-hiccup
+  "The one value printer as the default hiccup render: v's structural hiccup under opts' budget,
   or one line (seon.print/line) when shown :inline."
   {:malli/schema [:=> [:cat :seon.render/opts :any] :any]}
   [opts v]
   (if (= :inline (:as opts))
     [:code {:class "seon-inline"} (print/line v (or (:budget opts) (config/value :seon.config.render/line-budget)) (:handle opts))]
-    (let [r (print/print-value v (assoc (printer-opts opts) :outputs #{:hiccup} :render nested-html))]
+    (let [r (print/print-value v (assoc (printer-opts opts) :outputs #{:hiccup} :render nested-hiccup))]
       (or (:html r) [:span {:class "seon-print-refused"} (str (:seon.error/message r))]))))
 
 (defn- own-key
@@ -167,7 +167,7 @@
   already rendered result."
   {:malli/schema [:=> [:cat :any [:maybe :qualified-keyword]] [:maybe :seon.host/fn]]}
   [v hint]
-  (let [own (own-key v :seon.render/html)]
+  (let [own (own-key v :seon.render/hiccup)]
     (if (symbol? own)
       ;; a value's own says what it was drawn by where it was made: an agent's definition no other process holds, drawn as the data it is there (nil, the printer)
       (some-> (when-let [n (some-> (namespace own) symbol find-ns)] (ns-resolve n (symbol (name own)))) deref)
@@ -180,16 +180,16 @@
   {:malli/schema [:=> [:cat :qualified-keyword] :any]}
   [k] (some-> (declared k) requiring-resolve))
 
-(defn html
+(defn hiccup
   "v rendered: (render-fn opts v), the function its override or schema names, else the printer's
-  (print-html); a value's own key holding hiccup answers that hiccup."
+  (print-hiccup); a value's own key holding hiccup answers that hiccup."
   {:malli/schema [:=> [:cat :seon.render/opts :any] :any]}
   [opts v]
-  (let [own (own-key v :seon.render/html)]
+  (let [own (own-key v :seon.render/hiccup)]
     (if (and (some? own) (not (symbol? own)))
       own
       ;; a producer's schema a stored value no longer fits: it is drawn as the data it is
-      ((or (when (or (nil? (:schema opts)) (contract/fits? (:schema opts) v)) (render-of v (:schema opts))) print-html) opts v))))
+      ((or (when (or (nil? (:schema opts)) (contract/fits? (:schema opts) v)) (render-of v (:schema opts))) print-hiccup) opts v))))
 
 ;;; --- the walk: a render of components (docs/render.md#components) -------------------------------
 
@@ -359,7 +359,7 @@
                           (vreset! kept nil)
                           ;; health sees it (`take-defects!`)
                           (vswap! (:defects w) conj defect)
-                          (with-id [#'html {:schema :seon.render/component-defect :as :block} defect]
+                          (with-id [#'hiccup {:schema :seon.render/component-defect :as :block} defect]
                                    {:id id :class "err" :wire/role "user"}))))
             draw #(if (and db? (not (:once w))) (let [[out rs] (d/with-reads one)] (vreset! reads rs) out) (one))
             a0 (profile/alloc-bytes)
@@ -465,7 +465,7 @@
            :else (ratom/realize x)))
        (seq? x) (doall (map #(go % env) x))
        (h/raw? x) x
-       (ratom/view? x) (html {} (ratom/unwrap x))
+       (ratom/view? x) (hiccup {} (ratom/unwrap x))
        :else (ratom/realize x)))
    x0 env0))
 

@@ -2,7 +2,7 @@
  ;; the agent's record as one map, @ctx (seon.ctx): its environment, its own attributes and its
  ;; pattern's joins by their keys; the page draws it as a block (seon.render.ui/ctx), the model reads it
  ;; through the one printer (no :ai render)
- :seon.ctx/ctx [:map {:seon.render/html seon.render.ui/ctx} [:t :int] [:branch :seon.db/branch] [:commit {:optional true} :uuid]]
+ :seon.ctx/ctx [:map {:seon.render/hiccup seon.render.ui/ctx} [:t :int] [:branch :seon.db/branch] [:commit {:optional true} :uuid]]
  ;; a swap! of @ctx refused, nothing written (seon.ctx/write!): a value its schema refuses, or a key
  ;; with no schema, each with where it is and why
  :seon.ctx/invalid [:and :seon.error/base [:map [:seon.error/type [:= :seon.ctx/invalid]]

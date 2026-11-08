@@ -1,6 +1,6 @@
 ;; Renders (seon.render, session W2; W1's render contract, the session design papers in git history): a
 ;; render is a function of a value and its opts (props) answering its hiccup. A schema declares its
-;; render in its own properties ({:seon.render/html sym}); selection is
+;; render in its own properties ({:seon.render/hiccup sym}); selection is
 ;; the value's own override key, else the declared render (the schema, then its parents),
 ;; else the one value printer (seon.print). The values below are what root's web renders.
 {;; a value shown by its model render: its schema declares {:seon.render/model sym}, a function of opts and
@@ -15,7 +15,7 @@
  ;; a prove's run (my.agent/prove): its verdict, each proof's status, the reds with their first
  ;; failing assertion and the deaths, and counts (my.agent/prove-summary); the lists are the value
  :seon.branch/merged [:map {:seon.render/model my.branch/merged-summary}]
- :seon.test/proved [:map {:seon.render/model my.agent/prove-summary :seon.render/html seon.render.ui/proved}]
+ :seon.test/proved [:map {:seon.render/model my.agent/prove-summary :seon.render/hiccup seon.render.ui/proved}]
  ;; what draws what in a walk (seon.render/tree, my.render/tree): a component and those it drew, each with its own output's
  ;; tokens
  ;; an agent's page as an eval answers it: every component, [id form] in placed order, as the hiccup its request holds it, whole, (my.render/render-ctx), or what moved as edits (my.render/render-changes, docs/render.md#a-change-is-edits-by-name): a value that is a page prints whole, the stored one too
@@ -53,7 +53,7 @@
  :seon.render/schema :qualified-keyword
  ;; an agent's proofs as its newest turn observed them (test -> {:status :failure}), its [:proofs]
  ;; part (seon.render/render-ctx)
- :seon.render/proofs [:map-of {:seon.render/html seon.render.ui/proofs} :symbol [:map [:status :keyword] [:failure {:optional true} [:map [:assert :any] [:got :any]]]]]
+ :seon.render/proofs [:map-of {:seon.render/hiccup seon.render.ui/proofs} :symbol [:map [:status :keyword] [:failure {:optional true} [:map [:assert :any] [:got :any]]]]]
  ;; hiccup marking a role or a field the tree's reading has no message for (seon.render/wire-parts): a typo is an error, not a silent drop
  :seon.render/unknown-mark [:and :seon.error/base [:map [:seon.error/type [:= :seon.render/unknown-mark]] [:mark :string]]]
  ;; a page's location that main names no entity for (seon.render.proc/page-value): an agent's id of no agent in root's boot
@@ -76,28 +76,28 @@
  ;; the entity a page is of, its main pane
  ;; one request of the debug timeline as it went on the wire (seon.render.ui/debug-input, seon.render.proc/debug-value):
  ;; the body made again from its turn's basis, each message's records, which are new since the request before
- :seon.render/debug-turn [:map {:seon.render/html seon.render.ui/debug-turn} [:at [:or pos-int? [:= :latest]]] [:to-come? :boolean]
+ :seon.render/debug-turn [:map {:seon.render/hiccup seon.render.ui/debug-turn} [:at [:or pos-int? [:= :latest]]] [:to-come? :boolean]
                           [:turn :int] [:agent :string] [:origin :seon.model-call/origin] [:raw? :boolean] [:swept? {:optional true} :boolean] [:view {:optional true} :string] [:opened {:optional true} [:set :string]]
                           [:body :map] [:sources [:vector [:vector :any]]] [:new [:vector :boolean]]
                           [:usage [:map [:seon.model-call/tokens {:optional true} :int] [:seon.model-call/cache-hit-tokens {:optional true} :int]
                                    [:seon.model-call/cache-miss-tokens {:optional true} :int]]]
                           [:error {:optional true} [:maybe :map]]]
- :seon.render/render-ctx [:map {:seon.render/html seon.render.ui/render-ctx}]
+ :seon.render/render-ctx [:map {:seon.render/hiccup seon.render.ui/render-ctx}]
  ;; root's page: its ctx as components (seon.render.ui/root-ctx, drawn by root's walk), which a branch may override
- :seon.render/root-ctx [:map {:seon.render/html seon.render.ui/root-ctx}]
+ :seon.render/root-ctx [:map {:seon.render/hiccup seon.render.ui/root-ctx}]
  ;; a user's page: its ctx as components (seon.render.ui/user-ctx), which a branch may override
- :seon.render/user-ctx [:map {:seon.render/html seon.render.ui/user-ctx}]
+ :seon.render/user-ctx [:map {:seon.render/hiccup seon.render.ui/user-ctx}]
  ;; its list's end: the older rows, counted and unrendered, and the view that asks for them
- :seon.render/page-more [:map {:seon.render/html seon.render.ui/more} [:older nat-int?] [:view :string] [:click? {:optional true} :boolean]]
+ :seon.render/page-more [:map {:seon.render/hiccup seon.render.ui/more} [:older nat-int?] [:view :string] [:click? {:optional true} :boolean]]
  ;; the input at the top of root's page
- :seon.render/root-input [:map {:seon.render/html seon.render.ui/root-input}]
+ :seon.render/root-input [:map {:seon.render/hiccup seon.render.ui/root-input}]
  ;; what root reads (seon.render.proc/debug-value): the system's value printed, as the render proc holds it
- :seon.render/root-context [:map {:seon.render/html seon.render.ui/root-context} [:text :string] [:tokens nat-int?]]
+ :seon.render/root-context [:map {:seon.render/hiccup seon.render.ui/root-context} [:text :string] [:tokens nat-int?]]
  ;; the input at the top of an agent's page: its REPL, its messages, its held task's release
- :seon.render/agent-input [:map {:seon.render/html seon.render.ui/agent-input} [:id :keyword] [:address {:optional true} :keyword] [:live? :boolean]]
+ :seon.render/agent-input [:map {:seon.render/hiccup seon.render.ui/agent-input} [:id :keyword] [:address {:optional true} :keyword] [:live? :boolean]]
  ;; a cost proof's report as the agent's test run holds it: the estimate's function, the
  ;; rows measured and the verdict (seon.cost/proof's :actual)
- :seon.render/cost-report [:map {:seon.render/html seon.render.ui/cost-report}
+ :seon.render/cost-report [:map {:seon.render/hiccup seon.render.ui/cost-report}
                            [:rows [:vector :seon.cost/row]] [:verdict :seon.cost/verdict]]
 
  ;; a UI call naming a var not marked ^:seon/callable (seon.web/ui-call)

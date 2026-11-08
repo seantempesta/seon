@@ -7,7 +7,7 @@
 ;; :seon.config/config is the whole resolved config: a closed map, so an unknown key refuses boot,
 ;; and its entries declare the attributes root writes on main's root entity (seon.config/facts).
 {:seon.config/config
- [:map {:closed true :seon.db/attributes true :seon.render/html seon.render.ui/config-panel
+ [:map {:closed true :seon.db/attributes true :seon.render/hiccup seon.render.ui/config-panel
         :description "The resolved config: every limit, bound and default of the platform, one key each."}
   ;; root and its procs
   [:seon.config.root/profile {:optional true} :seon.config.root/profile]

@@ -61,7 +61,7 @@ A key whose schema the branch registered or changed is drawn by the agent, since
 An agent adds to its record, and to what it sees of it, with four evals (`seon.ctx-test/an-agent-adds-a-datum-and-its-render`):
 
 ```clojure
-(my.schema/register! :lab.ctx/steps '[:vector {:seon.render/html lab.ui/steps} :string])
+(my.schema/register! :lab.ctx/steps '[:vector {:seon.render/hiccup lab.ui/steps} :string])
 (ns lab.ui) (defn steps "The plan's steps, numbered." {:malli/schema [:=> [:cat :map [:vector :string]] :any]} [_ v] [:ol (for [s v] [:li s])]) (in-ns 'agent.a1)
 (my.db/transact! [{:seon.agent/key (:seon.agent/key @ctx) :lab.ctx/steps ["read the plan" "write the test"]}])
 @ctx

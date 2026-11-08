@@ -1735,7 +1735,7 @@
 (defn- schema-row
   "The reach row of schema entry k (its text): its id, its own digest, every entry its form names, held
   whether or not the entry exists (reach-step's edges keep those rows holds), so one added later is an edge,
-  and every var its form names (a render its properties declare, :seon.render/html, :seon.render/model): a
+  and every var its form names (a render its properties declare, :seon.render/hiccup, :seon.render/model): a
   test reaching the entry reaches the render, so a change to the render's body moves it (a red recorded
   while a render was unfinished was marked flaky at the same digest: step (c) of
   seon.context/the-page-is-the-render-of-what-ctx-pulls). A config map's fields (less-config-fields) are
