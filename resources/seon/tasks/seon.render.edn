@@ -229,4 +229,22 @@ Retires seon.render/a-users-walk-is-a-branch-walk (a user's kept walk beside bra
                       seon.model-test/a-split-escape-across-fragments-streams-whole
                       seon.render-test/a-streamed-part-and-its-committed-part-share-an-id
                       seon.web-test/an-ended-agent-leaves-no-stream-entries
-                      seon.repl-test/an-evals-output-streams-before-it-ends}}]
+                      seon.repl-test/an-evals-output-streams-before-it-ends}}
+ {:seon.task/name "a-turn-is-a-list"
+  :seon.task/plan "Build order step 2 of seon.render/one-walk-per-view (rule 4, the cost proof \"One new eval\"). What's wrong (the audit, 2026-11-08): a turn is one unit of the page, so a new eval reruns its turn and the patch resends the whole turn's html; one eval sent 36,308 bytes for 24,821 chars of turn.
+
+What exists, reused, nothing beside it: a page is units placed in the layout's lists (seon.render/placed walks through a component whose var carries :seon.render/list to its members, each a unit {:id :container :rev :html}, seon.render/placed-units); seon.render.proc/step-units turns a new unit with a container into an append, after or prepend, and a changed one into a frag. Lists today have fixed ids (\"c-rows\", \"p-task\"), and a unit's html and revision include all its children (seon.render/tree-rev, seon.render/resolved).
+
+The change, in those functions only:
+1. A list component may take its own key as its list id: :seon.render/list true on its var means its container id is its element id (seon.render/key-id), so each turn's steps get one list of their own. seon.render/placed and the list-ids of the model's reading (seon.render's list selectors) read that id.
+2. A unit's html and revision stop at a member placed as a unit itself: resolved draws a placed member's place as its element with no content beyond its id (as the layout's lists are drawn empty and filled by their units), and tree-rev leaves out a placed member's revision. So an eval added to a turn changes the eval's own unit (a new unit in the turn's list: one append) and not the turn's.
+3. seon.render.ui: the reply's steps (reply-hiccup's :ol of eval-items, and the turn's evals of other hands) are a component, seon.render.ui/turn-steps, carrying :seon.render/list true, keyed by the turn's call.
+The model's reading is unchanged: placed-hiccup walks the same lists and reads each member as before, in order (proof below).
+
+Cost (Optimization's minimum, rule 4): one new eval reruns its component and its list's append, the commit under 5 KB, the patch one append of that eval's html (bytes <= 1.2x its html). STOP: e=100 > 2x e=10.
+
+Proofs, red first: a new eval in a turn of 10 and of 100 evals is one append of its own html, the turn not resent (cost proof, bytes flat); the model's messages for a turn are the same before and after (the wire, each eval in order); a page opened cold shows each turn with its evals in order; a turn's list member that changes (an eval opened) is one frag of that eval."
+  :seon.task/proofs #{seon.render-cost-test/a-new-eval-sends-one-append-and-one-edit
+                      seon.render-test/a-turns-evals-are-its-list
+                      seon.ctx.wire-test/a-turn-as-a-list-reads-the-same}}
+]
