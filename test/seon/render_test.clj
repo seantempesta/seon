@@ -2221,7 +2221,9 @@
     (is (= "root" (seon.task/session-key db "request/root")) "and the ordinary spawn continues it by its key")
     (is (= :seon.db/agent-fact (r/entity-schema (d/pull db '[*] (:db/id s)) nil)) "an agent like any other")
     (is (= #'ui/render-ctx (r/layout-of (d/pull db '[*] (:db/id s)))) "drawn by the agent's layout")
-    (is (some? (d/db-with db (seon.root/root-session-tx db))) "and a second boot writes it again")))
+    (let [db2 (d/db-with db (seon.root/root-session-tx db))
+          same (fn [d] [(dissoc (d/pull d '[*] [:seon.agent/key "root"]) :db/id) (dissoc (d/pull d '[*] [:seon.task/id "request/root"]) :db/id)])]
+      (is (= (same db) (same db2)) "a second boot writes the same facts: the session, its pattern and its task"))))
 
 (deftest roots-session-reads-its-sessions
   ;; docs/users.md#roots-session: root's session's record holds root's sessions (its pattern's :root join), and its task list shows each

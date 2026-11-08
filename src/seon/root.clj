@@ -1076,7 +1076,8 @@
   "Root's session at boot, an ordinary agent made the ordinary way: an agent entity keyed \"root\" (a reserved key, as the user's is
   its name), linked to root by :seon.agent/root, its pattern the agent's plus root (so its task list draws root's sessions, seon.render.ui/sessions), and
   the task request/root of the chat template (seon.template/request-tx), parked, its agent that entity, so a message wakes it and a boot
-  makes no model call. Root's own entity is untouched: an entity's id derives from its identity, so it cannot take a key too. See
+  makes no model call. Every boot writes all of it again (the pattern too, so an edit of agent-fact's pattern reaches it at the next
+  boot), and a second write is the same facts (seon.render-test/roots-session-is-an-agent-of-its-own). Root's own entity is untouched: an entity's id derives from its identity, so it cannot take a key too. See
   docs/users.md#roots-session."
   {:malli/schema [:=> [:cat :seon.host/db] [:vector :any]]}
   [db]

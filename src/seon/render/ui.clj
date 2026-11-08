@@ -1822,20 +1822,20 @@
   "Root's sessions as its session reads them (a component over the db, drawn when its record holds root, :root, as root's
   session's pattern does): every session on main with a task, newest first, as root's own work list reads them (`work-list`), each
   by its address, what it works on and how it stands, so root's session knows what is already being done before it starts more;
-  itself left out. The newest :seon.config.ctx/window of them, saying how many more there are. See docs/users.md#roots-session."
+  itself left out. The newest :seon.config.ctx/window of them; the heading says once how to read the rest, with no count, which
+  would move at every new session. Reads every :seon.agent/task datom and sorts them at each draw, O(the agents ever started):
+  fine at today's sizes, and grouping the agents list by who started each is where it gets a seek. See docs/users.md#roots-session."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
   [{c :seon.ctx/ctx db :seon.db/db}]
   (let [me (ratom/realize (:seon.agent/key c))
         ks (->> (d/datoms db :aevt :seon.agent/task) (sort-by (comp - :tx)) (keep #(:seon.agent/key (d/entity db (:e %)))) (remove #{me}) distinct)
         n (config/value :seon.config.ctx/window)]
     [:section
-     [:h2 "Sessions"]
+     [:h2 "Sessions, newest first (older ones: (d/datoms (my.db/db) :aevt :seon.agent/task))"]
      (if (seq ks)
-       (into [:ul] (concat
-                    (for [k (take n ks) :let [a (d/pull db session-attrs [:seon.agent/key k]) t (:seon.agent/task a) stands (standing a t)]]
-                      [:li {:key k} [:code (str "/agent/" (session-address a))] " "
-                       (or (some-> (:seon.task/plan t) str/split-lines first) (task-name a t)) ": " (:text stands)])
-                    (when (> (count ks) n) [[:li {:key "more"} (str (- (count ks) n) " older: (d/datoms (my.db/db) :aevt :seon.agent/task)")]])))
+       (into [:ul] (for [k (take n ks) :let [a (d/pull db session-attrs [:seon.agent/key k]) t (:seon.agent/task a) stands (standing a t)]]
+                     [:li {:key k} [:code (str "/agent/" (session-address a))] " "
+                      (or (some-> (:seon.task/plan t) str/split-lines first) (task-name a t)) ": " (:text stands)]))
        [:p "None yet."])]))
 
 (defn agent-side
