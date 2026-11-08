@@ -127,8 +127,8 @@
   "Agent a's page (seon.render/placed-hiccup, {id form}) at points p0 and p1 ({:branch :commit :t}, p1 later on one branch) of db's store, [at-p0 at-p1], drawn with today's renders. forms0, the page already known at p0 (the walk kept it, seon.render/changes-of), is not drawn again: p1 is drawn cold alone, as it is for a p0 of nil (the first turn has no point before it: its page at p0 is nothing, {}). With none, p0 is drawn cold and advanced to p1 (seon.ctx/advance's patch of the datoms between, the moved components flushed), so the second page costs what moved. Pure in its arguments, and the one place a page is drawn at a point. See docs/render.md#a-change-is-edits-by-name."
   {:malli/schema [:=> [:cat :seon.host/db :int [:maybe :map] :map [:maybe :map]] [:tuple :map :map]]}
   [db a p0 p1 forms0]
-  (let [layout (render/declared-var :seon.render/render-ctx)
-        db1 (db-at db p1) branch (:branch p1)]
+  (let [db1 (db-at db p1) branch (:branch p1)
+        layout (render/layout-of (assoc (:tree (ctx/build db1 a branch)) :seon.agent/key (:seon.agent/key (d/entity db1 a))))]
     (if (or forms0 (nil? p0))
       (let [w (render/draw (:tree (ctx/build db1 a branch)) ctx/changes db1 layout {:model-only true :once true})]
         [(or forms0 {}) (try (page-forms w) (finally (render/dispose-walk! w)))])
@@ -190,7 +190,7 @@
    (if walk
      (request walk)
      (let [t (or ctx (ctx/agent-ctx db (pdb/eid db :seon.agent/key agent)))
-           w (render/draw t ctx/changes db (render/declared-var :seon.render/render-ctx) {:model-only true :once true})]
+           w (render/draw t ctx/changes db (render/layout-of (merge {:seon.agent/key agent} t)) {:model-only true :once true})]
        (try (request w) (finally (render/dispose-walk! w)))))))
 
 (defn provider-of

@@ -2141,6 +2141,67 @@
       (is (empty? (filter #(and (vector? %) (= #'ui/agent-side (first %))) (tree-seq coll? seq (ui/users-side {:seon.db/db db})))) "this boot's are in the list already"))
     (is (nil? (ui/users-side {:seon.db/db (d/db-with db [[:db/retract (:db/id sean) :seon.user/name "sean"]])})) "no name, no user")))
 
+(deftest a-tile-shows-the-last-exchange
+  ;; docs/users.md#whats-on-screen: a tile is titled by what the person typed and shows their newest message and its answer, never
+  ;; an answer to an earlier one under a later question (owner, 2026-11-08: an atom tile showed a paragraph on agents)
+  (let [db0 (sessions-db "b2" [["b2/a2" :a2 :idle "x/asks" :parked :task-b]])
+        a (:db/id (d/entity db0 [:seon.agent/key "b2/a2"]))
+        db1 (d/db-with db0 [{:db/id "u" :seon.agent/key "sean" :seon.user/name "sean"}
+                            {:seon.task/id "x/asks" :seon.task/plan "What is (+ 2 3)?\nOne line." :seon.task/started-by "u" :seon.task/reason "It is five."}])
+        db2 (d/db-with db1 [{:seon.message/from "sean" :seon.message/to [a] :seon.message/body "And times three?" :seon.message/sent-ms 1}])
+        db3 (d/db-with db2 [{:seon.task/id "x/asks" :seon.task/reason "It is six."}])
+        tile (fn [db] (h/html (ui/session-card {:seon.db/db db} "b2/a2")))]
+    (is (str/includes? (tile db1) "What is (+ 2 3)?") "titled by the first line the person typed")
+    (is (not (str/includes? (tile db1) "x/asks</span>")) "not the task's id")
+    (is (str/includes? (tile db1) "It is five.") "its answer, with nothing asked since")
+    (is (str/includes? (tile db2) "And times three?") "the person's newest message")
+    (is (not (str/includes? (tile db2) "It is five.")) "and not the answer to the earlier question")
+    (is (str/includes? (tile db3) "It is six.") "its answer once root writes it")
+    (is (str/includes? (tile db3) "And times three?"))))
+
+(deftest the-most-specific-schema-names-an-entity
+  ;; docs/ctx.md#the-pattern: an entity holding a user's and an agent's identity is a user whatever its keys' order (Context,
+  ;; 2026-11-08: the first key named the schema, so a map's order decided its pattern, render and layout)
+  (is (= :seon.db/user-fact (r/entity-schema (array-map :seon.agent/key "sean" :seon.user/name "sean") nil)))
+  (is (= :seon.db/user-fact (r/entity-schema (array-map :seon.user/name "sean" :seon.agent/key "sean") nil)) "in either order")
+  (is (= :seon.db/agent-fact (r/entity-schema {:seon.agent/key "b2/a1"} nil)))
+  (is (= :seon.db/user-fact (r/schema-of (array-map :seon.agent/key "sean" :seon.user/name "sean") nil)) "and a value's schema the same way")
+  (is (= (r/schema-property :seon.db/agent-fact :seon.ctx/pattern) (r/schema-property :seon.db/user-fact :seon.ctx/pattern))
+      "a user's pattern is the agent's it extends")
+  (is (= :seon.agent/key (some #{:seon.agent/key} (keys r/entity-schemas))) "an attribute an extended schema names")
+  (is (= :seon.db/agent-fact (r/entity-schemas :seon.agent/key)) "is named by that schema alone"))
+
+(deftest two-unrelated-identity-schemas-are-an-error
+  ;; docs/ctx.md#the-pattern: a record whose identities name schemas neither extends is no one thing: an error naming them, never the
+  ;; first key's; a value an agent made of such keys is drawn as the data it is
+  (let [m (array-map :seon.task/id "x/y" :seon.agent/key "k")
+        e (is (thrown? clojure.lang.ExceptionInfo (r/entity-schema m nil)))]
+    (is (= :seon.render/no-one-schema (:seon.error/type (ex-data e))))
+    (is (= #{:seon.task/task-fact :seon.db/agent-fact} (set (:schemas (ex-data e))))))
+  (is (nil? (r/schema-of (array-map :seon.task/id "x/y" :seon.agent/key "k") nil)) "no schema is guessed for a value"))
+
+(deftest an-entitys-schema-names-its-layout
+  ;; docs/render.md#the-page: the layout that draws a record is the one its entity schema names, or the one it extends names
+  (is (= #'ui/render-ctx (r/layout-of {:seon.agent/key "b2/a1"})))
+  (is (= #'ui/user-ctx (r/layout-of (array-map :seon.user/name "sean" :seon.agent/key "sean"))))
+  (is (= #'ui/root-ctx (r/layout-of {:seon.root/id :root})))
+  (let [e (is (thrown? clojure.lang.ExceptionInfo (r/layout-of {:seon.eval/id "e1" :seon.eval/code "x"})) "a record no layout draws is an error, never a nil walk")]
+    (is (= :seon.render/no-layout (:seon.error/type (ex-data e))))
+    (is (= [:seon.eval/id] (:identity (ex-data e))) "naming what it is"))
+  (is (= :seon.render/no-layout (:seon.error/type (ex-data (is (thrown? clojure.lang.ExceptionInfo (r/layout-of {})))))) "and one with no identity at all"))
+
+(deftest each-page-draws-its-entitys-layout
+  ;; docs/render.md#a-page-is-a-kept-walk: root's, a user's and an agent's kept walks each draw the layout their entity names, no
+  ;; caller choosing it
+  (let [db0 (sessions-db "b2" [["b2/a1" :a1 :running "seon.print/a-long-string" :running :task-a]])
+        db (d/db-with db0 [{:seon.agent/key "sean" :seon.user/name "sean"}])
+        walk-layout (fn [eid branch ident] (let [kw (#'p/kept-walk db eid branch ident identity)]
+                                              (try (first (:root (:w kw))) (finally (r/dispose-walk! (:w kw))))))]
+    (is (= #'ui/user-ctx (walk-layout (:db/id (d/entity db [:seon.user/name "sean"])) :main {})))
+    (is (= #'ui/root-ctx (walk-layout (:db/id (d/entity db [:seon.root/id :root])) :main {})))
+    (is (= #'ui/render-ctx (walk-layout (:db/id (d/entity db [:seon.agent/key "b2/a1"])) :main {:seon.agent/key "b2/a1"})))
+    (is (= #'ui/render-ctx (walk-layout nil :task-a {:seon.agent/key "b2/a1"})) "a branch that holds no entity yet: the agent's key names it")))
+
 (deftest a-users-page-moves-with-main
   ;; docs/render.md#a-page-is-a-kept-walk: a user's page is a kept walk, as root's is: a move of main draws what it reached, so an agent it starts appears on a page already open
   (let [db0 (sessions-db "b2" [["b2/a1" :a1 :running "seon.print/a-long-string" :running :task-a]])
@@ -2149,10 +2210,15 @@
         kw (#'p/user-walk st db1 (d/entity db1 [:seon.user/name "sean"]))
         side (fn [w] (apply str (map :html (filter #(= "#c-side" (:container %)) (r/placed-units w)))))
         before (side (:w kw))
+        rows (fn [w] (apply str (map :html (filter #(= "#c-rows" (:container %)) (r/placed-units w)))))
+        ;; read now: the walk is advanced in place
+        rows-before (rows (:w kw))
         db2 (d/db-with db1 [{:seon.agent/key "sean" :seon.agent/agents [(:db/id (d/entity db1 [:seon.agent/key "b2/a1"]))]}])
         st' (#'p/user-walks st db2)]
     (is (not (str/includes? before "/agent/b2/a1")) "nothing started yet")
     (is (str/includes? (side (:w (get @(:user-walks st') "sean"))) "/agent/b2/a1") "the agent it started is on the page, with no new draw")
+    (is (not (str/includes? rows-before "/agent/b2/a1")) "no tile while nothing is started")
+    (is (str/includes? (rows (:w (get @(:user-walks st') "sean"))) "/agent/b2/a1") "the first agent's tile too, in the list the page holds")
     (is (contains? (:dirty st') [:chat :sean]) "and its view is dirty")
     (is (not (contains? (:dirty st') [:chat :a1])) "another's isn't")))
 
@@ -2453,9 +2519,10 @@
         units (:seon.render/units page)
         in (fn [sel] (filterv #(= sel (:container %)) units))
         w (a3-walk branch)
-        shown (try (r/placed-hiccup w ["#p-task" "#p-rules"]) (finally (r/dispose-walk! w)))]
+        shown (try (r/placed-hiccup w ["#p-task"]) (finally (r/dispose-walk! w)))]
     (is (seq model) "the model reads parts")
-    (is (= (keys model) (remove #(= % "agent-state") (map :id (concat (in "#p-task") (in "#p-rules"))))) "the page's task list and its rules are the model's parts, by id and in order (and the person's own state beside them)")
+    (is (= (keys model) (remove #(= % "agent-state") (map :id (in "#p-task")))) "the page's task list is the model's parts, by id and in order; its rules are the page's alone (docs/render.md#style)")
+    (is (seq (in "#p-rules")) "the page draws its rules")
     (is (= model shown) "each part's hiccup the model reads is the hiccup the page's unit of that id is written from")
     (doseq [u (in "#p-task")] (is (str/includes? (:html u) (str "id=\"" (:id u) "\"")) "and the unit is that part"))
     (let [conv (apply str (map :html (in "#c-rows")))]

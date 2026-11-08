@@ -297,13 +297,14 @@
 
 (defn- kept-walk
   "A walk kept across moves: entity e's ctx on db (seon.ctx/build, its tree as mark makes it) in a reactive
-  atom, drawn once by layout var root-var over the db it holds: {:w :a :c :at}, :at a volatile of that db.
+  atom, drawn once by the layout its entity names (seon.render/layout-of: its tree, with ident, the identity the caller
+  holds of it, for a branch that holds no entity yet) over the db it holds: {:w :a :c :at}, :at a volatile of that db.
   Root's own page (root-walk), each user's (`user-walk`) and each watched agent's branch (`branch-walk!`) keep one; `advance-walk!`
   moves it. See docs/render.md#a-page-is-a-kept-walk."
-  {:malli/schema [:=> [:cat :seon.host/db [:maybe pos-int?] :any :any :seon.host/fn] :map]}
-  [db e branch root-var mark]
+  {:malli/schema [:=> [:cat :seon.host/db [:maybe pos-int?] :any :map :seon.host/fn] :map]}
+  [db e branch ident mark]
   (let [c (ctx/build db e branch) at (volatile! db) a (ratom/atom (mark (:tree c)))
-        w (render/walker {:ref a :changes ctx/changes} (fn [] @at) [root-var {}])]
+        w (render/walker {:ref a :changes ctx/changes} (fn [] @at) [(render/layout-of (merge ident (:tree c))) {}])]
     (render/flush! w nil)
     {:w w :a a :c c :at at}))
 
@@ -342,7 +343,7 @@
         ;; branch; another, a branch made again) is made again: a patch reaches only what its ctx holds
         (or (nil? kw) (not= eid (get-in kw [:c :tree :db/id])))
         (do (some-> kw :w render/dispose-walk!)
-            (vreset! cell (assoc (kept-walk bdb eid branch (render/declared-var :seon.render/render-ctx) mark) :opened opened)))
+            (vreset! cell (assoc (kept-walk bdb eid branch {:seon.agent/key (:seon.agent/key e)} mark) :opened opened)))
         (and (identical? @(:at kw) bdb) (= opened (:opened kw))) kw
         :else (vreset! cell (assoc (advance-walk! kw bdb branch mark) :opened opened)))))))
 
@@ -373,7 +374,7 @@
   (when-let [cell (when (:seon.user/name e) (:user-walks st))]
     (let [n (:seon.user/name e)]
       (or (get @cell n)
-          (let [kw (kept-walk db (:db/id e) :main (render/declared-var :seon.render/user-ctx) identity)]
+          (let [kw (kept-walk db (:db/id e) :main {} identity)]
             (vswap! cell assoc n kw)
             kw)))))
 
@@ -422,7 +423,7 @@
         branch-units (fn [] (if-let [kw (or (walked) (user-walk st db e))]
                               (quiet #(render/placed-units (:w kw)))
                               (let [t (cond-> (cold-tree) (seq opened) (update :evals #(reduce-kv (fn [m k ev] (if (opened (:seon.eval/id ev)) (assoc m k (assoc ev :seon.eval/opened true)) m)) % %)))
-                                    w (quiet #(render/draw t ctx/changes bdb (render/declared-var (if (:seon.user/name e) :seon.render/user-ctx :seon.render/render-ctx))))]
+                                    w (quiet #(render/draw t ctx/changes bdb (render/layout-of (merge {:seon.agent/key (:seon.agent/key e)} t))))]
                                 (try (render/placed-units w) (finally (render/dispose-walk! w))))))
         ;; @ctx's part pairs (seon.render.ui/ctx-parts): what the model reads of each part of the task's list, beside
         ;; its unit as the page draws it, from one walk of the page
@@ -440,7 +441,7 @@
                                t (if kw (:tree (:c kw)) (cold-tree))
                                part-unit (if kw
                                            (quiet #(pairs (:w kw)))
-                                           (let [w (quiet #(render/draw t ctx/changes bdb (render/declared-var :seon.render/render-ctx)))]
+                                           (let [w (quiet #(render/draw t ctx/changes bdb (render/layout-of (merge {:seon.agent/key (:seon.agent/key e)} t))))]
                                              (try (quiet #(pairs w)) (finally (render/dispose-walk! w)))))]
                            [part-unit
                             {:id "d-ctx" :container "#c-rows" :rev (:t t)
@@ -474,7 +475,7 @@
 
 (defn- root-walk
   "St with root's walk current as of main db: root's ctx (seon.ctx/build of root's entity on main)
-  held in a reactive atom its walk draws by root's layout (:seon.render/root-ctx), built at main's
+  held in a reactive atom its walk draws by the layout root's entity names (:seon.render/root-ctx), built at main's
   first read, then advanced by what each move of main changed (seon.ctx/advance, its datoms
   flushed): the walk draws the components their change reached, nothing else. Every page whose
   agents list it shows (root's, each agent's) is dirty when one of its units moved."
@@ -486,7 +487,7 @@
     (cond
       (nil? root) st
       (nil? rw)
-      (-> (assoc st :root-walk (kept-walk db root :main (render/declared-var :seon.render/root-ctx) identity))
+      (-> (assoc st :root-walk (kept-walk db root :main {} identity))
           (update :dirty (fnil into #{}) (keys (:views st))))
       (nil? held) st
       :else

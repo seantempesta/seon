@@ -88,14 +88,42 @@
         (and (vector? form) (#{:and :merge} (first form))) (vec (mapcat #(map-keys (if (keyword? %) (get contract/forms %) %)) (rest form)))
         :else []))
 
-(def by-identity
-  "{identity-attribute schema}: for each schema with a declared render, the upsert keys its
-  map names: a pulled entity holding that key is a value of that schema. Derived once from
-  the registry."
-  (into {} (for [[k form] contract/forms
-                 :when (declared k)
-                 a (map-keys form) :when (identity-attr? a)]
-             [a k])))
+(defn own-keys
+  "The keys a schema's form names itself: its [:map ...] members, inline or in an [:and ...] arm, never those of a schema it
+  extends ([:and parent [:map ...]], `parents`), so an attribute is named by one entity schema."
+  {:malli/schema [:=> [:cat :any] [:vector :any]]}
+  [form]
+  (cond (and (vector? form) (= :map (first form))) (vec (keep #(when (vector? %) (first %)) (rest form)))
+        (and (vector? form) (#{:and :merge} (first form))) (vec (mapcat #(when-not (keyword? %) (own-keys %)) (rest form)))
+        :else []))
+
+(def entity-schemas
+  "{attribute schema}: each attribute an entity schema ({:seon.db/attributes true}) names itself (own-keys), to that
+  schema. Derived once from the registry; an identity or ref attribute is named by one entity schema
+  (seon.render-test/a-walk-is-its-entity-and-its-units)."
+  (into {} (for [[k form] contract/forms :when (:seon.db/attributes (contract/properties k)) a (own-keys form)] [a k])))
+
+(def ^:private identity-schemas
+  "{identity-attribute schema}: the entity schemas by the upsert keys they name."
+  (into {} (filter (comp identity-attr? key)) entity-schemas))
+
+(def ^:private drawn-schemas
+  "The entity schemas a render draws (declared, theirs or a parent's): what schema-of names a pulled entity by. Derived once."
+  (into #{} (filter declared) (vals identity-schemas)))
+
+(defn- extends?
+  "Does schema a extend schema b, itself or through the schemas it extends (`parents`)?"
+  {:malli/schema [:=> [:cat :qualified-keyword :qualified-keyword] :boolean]}
+  [a b] (boolean (or (= a b) (some #(extends? % b) (parents a)))))
+
+(defn- most-specific
+  "The entity schemas the identity attributes of map e name, as one: the one that extends all the others, nil for none,
+  or {:ambiguous [s ...]} when none does. The order of e's keys never decides. See docs/ctx.md#the-pattern."
+  {:malli/schema [:=> [:cat :map] :any]}
+  [e]
+  (let [ss (distinct (keep identity-schemas (keys e)))]
+    (when (seq ss)
+      (or (some (fn [s] (when (every? #(extends? s %) ss) s)) ss) {:ambiguous (vec ss)}))))
 
 (def ^:private error-keys
   "The keys :seon.error/base requires, read once from its form at load: what schema-of asks of a
@@ -112,7 +140,11 @@
       (when (map? v)
         (if-let [t (when (every? #(contains? v %) error-keys) (:seon.error/type v))]
           (if (contains? contract/forms t) t :seon.error/base)
-          (some by-identity (keys v))))))
+          ;; a map whose identity attributes name no one schema is drawn as the data it is; one identity, the common
+          ;; case, is a lookup and no call
+          (let [ss (into #{} (keep identity-schemas) (keys v))
+                s (if (next ss) (most-specific v) (first ss))]
+            (when (contains? drawn-schemas s) s))))))
 
 (declare render-of own-key)
 
@@ -1046,22 +1078,40 @@
 
 ;; ---- entity schemas and patterns (docs/ctx.md#the-pattern) ----
 
-(def entity-schemas
-  "{attribute schema}: each attribute an entity schema ({:seon.db/attributes true}) names, to that
-  schema. Derived once from the registry (as by-identity); an identity or ref attribute is named
-  by one entity schema (seon.render-test/a-walk-is-its-entity-and-its-units)."
-  (into {} (for [[k form] contract/forms :when (:seon.db/attributes (contract/properties k)) a (map-keys form)] [a k])))
-
-(def ^:private identity-schemas
-  "{identity-attribute schema}: the entity schemas by the upsert keys they name."
-  (into {} (filter (comp identity-attr? key)) entity-schemas))
-
 (defn entity-schema
-  "The schema of pulled entity e: the entity schema naming one of its identity attributes, else
-  the one naming via (the attribute it was reached by, read forward), else nil: no entity schema
-  names it, and the one printer shows it."
+  "The schema of pulled entity e: the most specific entity schema its identity attributes name (one extending another,
+  [:and parent [:map ...]], so the order of e's keys never decides), else the one naming via (the attribute it was
+  reached by, read forward), else nil: no entity schema names it, and the one printer shows it. A record whose identity
+  attributes name schemas that extend none of each other throws :seon.render/no-one-schema naming them. See
+  docs/ctx.md#the-pattern."
   {:malli/schema [:=> [:cat :map [:maybe :keyword]] [:maybe :qualified-keyword]]}
-  [e via] (or (some identity-schemas (keys e)) (get entity-schemas via)))
+  [e via]
+  (let [s (most-specific e)]
+    (cond (nil? s) (get entity-schemas via)
+          (keyword? s) s
+          :else (throw (ex-info (str "no one entity schema names this entity: " (:ambiguous s) " extend none of each other")
+                                (contract/error :seon.render/no-one-schema #'entity-schema "its identity attributes name entity schemas that extend none of each other"
+                                                {:schemas (:ambiguous s)}))))))
+
+(defn schema-property
+  "Property p of schema k, else of the nearest schema it extends (`parents`), else nil. See docs/ctx.md#the-pattern."
+  {:malli/schema [:=> [:cat [:maybe :qualified-keyword] :keyword] :any]}
+  [k p]
+  (when k (or (get (contract/properties k) p) (some #(schema-property % p) (parents k)))))
+
+(defn layout-of
+  "The layout var that draws record e (a ctx's tree, an entity pulled by its pattern): the render schema its entity schema
+  names as :seon.render/layout, or the one a schema it extends names (an agent's :seon.render/render-ctx, a user's
+  :seon.render/user-ctx, root's :seon.render/root-ctx), through declared-var, so a branch that redefines that var draws its
+  own. A record no schema names a layout for throws :seon.render/no-layout naming its identity attributes, since every
+  walk draws from it. See docs/render.md#the-page."
+  {:malli/schema [:=> [:cat :map] :any]}
+  [e]
+  (let [s (entity-schema e nil)]
+    (or (some-> s (schema-property :seon.render/layout) declared-var)
+        (throw (ex-info (str "no layout draws this record: its schema " s " names none")
+                        (contract/error :seon.render/no-layout #'layout-of "no entity schema of this record names a layout (:seon.render/layout)"
+                                        {:schema s :identity (vec (filter identity-schemas (keys e)))}))))))
 
 (defn forward
   "Attribute a read forward: a reverse ref (:ns/_name, pull's syntax) as its own attribute (:ns/name)."
@@ -1107,7 +1157,7 @@
                                       ;; an entity schema's name: the pattern it declares
                                       (qualified-keyword? sub)
                                       (cond (seen sub) (bad (str sub "'s pattern reaches itself") clause)
-                                            :else (pattern (or (some-> sub contract/properties :seon.ctx/pattern) (bad (str sub " declares no pattern") clause))
+                                            :else (pattern (or (schema-property sub :seon.ctx/pattern) (bad (str sub " declares no pattern") clause))
                                                            (conj seen sub)))
                                       :else (bad "a join's pattern is a vector, or an entity schema's name" clause))})))]
        {:star? (boolean (some #{'*} p))

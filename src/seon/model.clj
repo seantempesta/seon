@@ -117,7 +117,7 @@
    ;; (the id of the kept record) and :fns (the costliest functions, drawn on the page) are in :seon.eval/response and are not
    ;; shown to the agent, so they are left out here and in docs/prompt.md
    :function {:name "eval"
-              :description "Run Clojure code at your REPL: one eval, one call. Write your message to your user as the text of your reply, then make a call for each eval you want run. The calls run in order, each one or more top-level forms; the first that throws or answers an error ends the run, so the calls after it are not run. Your system message says what comes back."
+              :description "Run Clojure code at your REPL: one eval, one call. Write your message to your user as the text of your reply, then make a call for each eval you want run. Your system message says how the calls run and what comes back."
               ;; in the order a model fills them: it thinks before the code
               :parameters {:type "object"
                            :properties (array-map :intent {:type "string" :description "What this eval is about to do. A sentence is fine."}

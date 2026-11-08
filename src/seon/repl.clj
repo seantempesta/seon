@@ -1173,10 +1173,11 @@
       [])))
 
 (defn- layout
-  "The layout this branch renders its ctx with: the var :seon.render/render-ctx declares, an agent's own
-  when its branch defines one."
+  "The layout this branch renders its ctx with: the one its entity names (seon.render/layout-of: an agent's
+  :seon.render/render-ctx, root's :seon.render/root-ctx), its own var when its branch defines one; its key names it
+  before its branch holds its entity. See docs/render.md#the-page."
   {:malli/schema [:=> [:cat] :any]}
-  [] (render/declared-var :seon.render/render-ctx))
+  [] (render/layout-of (merge {:seon.agent/key (:key @agent/state)} @ctx/ctx)))
 
 (defn- the-walk
   "This agent's walk of its render of ctx (seon.render/walker over @ctx, its diff seon.ctx/changes, and the
