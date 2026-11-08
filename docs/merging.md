@@ -1,6 +1,6 @@
 # Merging
 
-How a branch is merged into main: what it runs, how batches are proven, and how conflicts are resolved. Who merges and why is [AGENTS.md §3](../AGENTS.md) ("Integrate small and often", "Testing: compute only what is needed"); the machine the proofs run on is [machine](machine.md).
+How a branch is merged into main: what it runs, how batches are proven, and how conflicts are resolved. Whoever proves a branch lands it ([below](#a-branch-lands-with-binland)); why is [AGENTS.md §3](../AGENTS.md) ("Integrate small and often", "Testing: compute only what is needed"); the machine the proofs run on is [machine](machine.md).
 
 ## A worktree session works in a checkout of its own
 
@@ -10,21 +10,21 @@ A worktree session is a separate instance of the whole system: `bin/worktree NAM
 - after each merge into main: `git merge main` in the worktree, then `bin/worktree --sync NAME` (it moves only this worktree's submodule checkouts to the pins its branch records; never `git submodule` in a worktree);
 - a submodule the session adds (``reference-code/X``) is written as a `.gitmodules` entry and a gitlink, with its checkout cloned from a local copy; root initializes it in the main tree when it merges (`git submodule update --init reference-code/X`), so later worktrees get it.
 
-`bin/worktree-check` (run from the main tree) proves this whole workflow end to end with a throwaway worktree session and removes it; run it after a change to `bin/worktree`, `bin/root`, `bin/mcp` or the build. Leave nothing running: `bin/root stop` before you report. Root removes the worktree after the merge (`bin/worktree --remove NAME`).
+`bin/worktree-check` (run from the main tree) proves this whole workflow end to end with a throwaway worktree session and removes it; run it after a change to `bin/worktree`, `bin/root`, `bin/mcp` or the build. Leave nothing running: `bin/root stop` before you land. Remove the worktree once its branch has landed and you are done with it (`bin/worktree --remove NAME`).
 
-## A worktree session's part
+## A branch lands with bin/land
 
-A worktree session merges main into its branch, proves the merged result with `bin/prove`, and reports. Branches live hours: merge main into yours after every merge into main. Iterate at the REPL first, then with `bin/prove` (or `bin/test NS`), never a full run per edit. Long runs only when the work is done: the full `bin/test --all` and `bin/check 100` run once per session, when it believes its task is finished and its review findings are fixed. To be merged, report the commits, proofs red → green, numbers against estimates, what you deleted, `bin/prove`'s last lines (and the check's ``target/check/<time>/`` path when steps ran), and that nothing of yours is running.
+Every session, Claude's or Seon's, works its branch in a worktree of its own (`bin/worktree NAME`) and lands it itself with `bin/land [-F MSGFILE]` run in that worktree; the main tree (`~/src/seon-next`) stays on main and clean, and nobody works or checks out a branch there (owner, 2026-11-08: a branch checked out there had stopped every other session's merge and `bin/update`). `bin/land`:
+1. merges main into the branch (a conflict stops it: resolve, commit, run it again);
+2. runs `bin/prove --merge` on that tip, niced, beside any other run: no run waits on another, since each writes under its own `target/prove/<id>` and every verdict goes to the one cache all checkouts share (`target/results` of the main tree, [verdicts are a cache](#verdicts-are-a-cache)), so a test green at its digest in any worktree is reused in every other and only what this branch and the new main moved runs;
+3. moves main to a merge commit whose tree is the proved tip's (`git commit-tree`, then `git update-ref` with main's old value): no checkout of main, and a main that moved during the proof is refused, never overwritten, so it goes back to 1 and proves only what the new main moved;
+4. runs `bin/update`, which first brings the main tree's files to main, then restarts the standing root on it.
 
-## Every branch is reviewed before it merges
+It ends on `LANDED` or `LAND FAILED`. The message file says what the merge completes and its numbers (AGENTS §3, [a merge says what it completes](#a-merge-says-what-it-completes)); `bin/prove`'s line is added. Branches live hours: land small and often. Iterate at the REPL and with `bin/prove` (or `bin/test NS`); `bin/land` is the merge proof, run once the work is done.
 
-A reviewer reads the branch's diff against main for AGENTS §9's mistakes (a guard, a fake default, a clock deciding, a second mechanism, a fix at the reader instead of the producer, a test that cannot fail, an ignored answer), each finding with its file:line and its right fix. The worktree session fixes them before its branch merges; the proof it reports is the run after the fixes.
+## A branch that grows src or adds a mechanism is reviewed
 
-## Root merges, and reads the verdict
-
-Root merges the branch, never copying files over newer changes, and reads the merged tree's proof to its last line before main moves.
-- Every stage's exit status decides the next: no pipe hides a failure (`setopt pipefail`, output to a log), and a check counts only if the build before it succeeded and the binary was built from the tree it proves (`bin/test` builds `target/seon` whenever anything runs).
-- Root rebuilds main as part of every merge, so a worktree made from main never reads config with a stale binary.
+When `src` grows or a mechanism is new (AGENTS §3), a reviewer reads the branch's diff against main for AGENTS §9's mistakes (a guard, a fake default, a clock deciding, a second mechanism, a fix at the reader instead of the producer, a test that cannot fail, an ignored answer), each finding with its file:line and its right fix. The worktree session fixes them before its branch merges; the proof it reports is the run after the fixes.
 
 ## Main goes first
 
@@ -69,7 +69,7 @@ One proc, `:prove` (```seon.prove/prove-proc```, declared in `resources/seon/sys
   - **An agent's** digest is its branch's program digest, its tests included; the root's inputs it also reads are fixed for the boot, as the service's state is. Its merge base is not in it: a merge of main that leaves the branch's program as it was keeps the answer, which then covers more tests than the new selection, not fewer. An agent's turn commits, then asks with the digest of its head (```seon.agent/prove!```); a session asks with the digest ```seon.root/prove!``` takes of the same head, so both ask for one key.
 - **Admission.** One run at a time per checkout. A request whose key is running, or is the next to run, joins its waiters. A request for another key while a run is in flight replaces the next run of its branch (the latest wins, and the askers it replaced follow the newer run). Branches take turns in name order, so a burst on one branch never starves another. A key whose run ended is answered at once from that answer, until the key moves. Every waiter is answered exactly once (```seon.prove-test```).
 - **A run is a chain of requests the proc sends the api.** The agent that holds the branch forks itself and runs the plan (```seon.agent/run-tests-forked```), on root's `:tests` request, which its `:tests` proc serves on its own fiber whatever its REPL runs, a prove of its own that waits for root's answer included (```seon.repl/tests-step```: a `:tests` never waits behind a wait that holds the agent's one loop, [processes](processes.md#the-agent-process)); main has no such agent, so a prove agent is forked from the fork server's main onto the `tests` branch, holding main's program and its tests (`:seon.config.source/dirs` takes `test/`), runs them, and is killed.
-- **Main is proved at each program commit, nobody asking, when `:seon.config.proofs/prove-main-on-commit` says so (off by default: the run of all of main's tests in one child dies, task seon.agent/a-test-run-streams-its-reports).** The writer's commit notice (`:main`, a sliding buffer of one) is a request when its ops move the program (```seon.program/moves-program?```, what moves the fork server's reach graph too): a run of main keyed by its program digest, with no waiter, which a session asking for the same key joins. A burst of commits is one run, the latest. Its verdicts are cached by digest, so every agent forked after finds main's tests at their digests and runs none of them again (`seon.prove-test/main-is-proved-at-boot-with-the-config-on-nobody-asking`); process tests are left to the merge's `bin/prove --merge`.
+- **Main is proved at each program commit, nobody asking, when `:seon.config.proofs/prove-main-on-commit` says so (off by default: the run of all of main's tests in one child dies, task seon.agent/a-test-run-streams-its-reports).** The writer's commit notice (`:main`, a sliding buffer of one) is a request when its ops move the program (```seon.program/moves-program?```, what moves the fork server's reach graph too): a run of main keyed by its program digest, with no waiter, which a session asking for the same key joins. A burst of commits is one run, the latest. Its verdicts are cached by digest, so every agent forked after finds main's tests at their digests and runs none of them again (its boot test (removed 2026-11-08: the config leaves it off)); process tests are left to the merge's `bin/prove --merge`.
 - **Verdicts are cached by digest by the agent that ran them** ([verdicts](#verdicts-are-a-cache)), before the waiters are answered; nothing is written to the store. ```seon.agent/test-plan``` finds a verdict by digest (```seon.fx/stored-results```), green or red, so a digest that holds one is not run again. A red is reused as a green is, reported with the failures its run recorded and marked `:reused`, since a test's verdict is a function of its digest (one per-test tick bound everywhere).
 - **The writer's commit notice** (`:main`, a sliding buffer of one beside the reconciler's) tells the proc main's latest tx. A process test (```seon.program/process-tests```) is left out of a run that names nothing, unless it is a proof (```seon.agent/run-selection```): the answer lists it as deferred.
 
@@ -125,7 +125,7 @@ Root's REPL (`seon_eval` as root, or `printf '{:op :eval :agent "root" :code "..
 
 ## Not built: a merge queue on root
 
-Root's merges of worktree branches are git merges, batched by hand as above. Seon's own merges are merge tasks judged by the reconciler, one at a time: an octopus merge of several merge tasks is built and off (`:seon.config.merge/max-running` 1, until one combined test run of all its members is proven). No queue on root merges main into each candidate, proves the merged result and batches the disjoint ones, and builds, tests and checks are not tasks on root (task ``seon.reconcile/a-check-step-is-a-task``).
+A session's branch is landed by the session itself (`bin/land`, [above](#a-branch-lands-with-binland)): a git merge, no queue. Seon's own merges are merge tasks judged by the reconciler, one at a time: an octopus merge of several merge tasks is built and off (`:seon.config.merge/max-running` 1, until one combined test run of all its members is proven). No queue on root merges main into each candidate, proves the merged result and batches the disjoint ones, and builds, tests and checks are not tasks on root (task ``seon.reconcile/a-check-step-is-a-task``).
 
 ## Main moved is said at every eval
 

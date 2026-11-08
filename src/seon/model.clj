@@ -78,23 +78,36 @@
 
 (defn- http-post
   "POST body (a JSON string) to url with headers and read the reply until the server ends
-  it: {:status :body :headers} (body text). No clock bounds the connect or the reply (a
-  reasoning model streams for minutes): the OS's own connect failure or the socket's death
-  ends it. The interop edge, the named failure point seon.model/http-post: a connect or socket
-  failure is :seon.model/transport."
-  {:malli/schema [:=> [:cat :string [:vector [:tuple :string :string]] :string]
-                  [:or [:map [:status :int] [:body :string] [:headers :any]] :seon.model/failure]]}
-  [url headers body]
+  it: {:status :body :headers} (body text). With stream? and a 200, the reply is not read:
+  {:status :headers :pull}, pull answering the body's next piece of bytes, nil at its end, or the
+  :seon.model/transport error when the socket died (the connection closed at either), for the
+  worker's edge reader (docs/flow.md#effects-one-owner-and-its-workers-per-kind). No clock
+  bounds the connect or the reply (a reasoning model streams for minutes): the OS's own
+  connect failure or the socket's death ends it. The interop edge, the named failure point
+  seon.model/http-post: a connect or socket failure is :seon.model/transport."
+  {:malli/schema [:=> [:cat :string [:vector [:tuple :string :string]] :string :boolean]
+                  [:or [:map [:status :int] [:body :string] [:headers :any]] [:map [:status :int] [:pull :any] [:close :any] [:headers :any]] :seon.model/failure]]}
+  [url headers body stream?]
   (let [u (try (http/parse-url url) (catch Throwable e e))]
     (if (instance? Throwable u)
       (provider-error (str "the provider's URL does not parse: " url) nil {})
       (try
         (let [s (http/connect-stream (http/tget u :host) (http/effective-port u) (= "https" (http/tget u :protocol)) false nil nil)]
-          (try
-            (http/s-write s (http/build-request "POST" u headers body))
-            (let [r (http/read-response s nil "POST" nil true true)]
-              {:status (:status r) :headers (:header-pairs r) :body (body-text r)})
-            (finally (http/s-close s))))
+          (let [r (try (http/s-write s (http/build-request "POST" u headers body))
+                       (http/read-response s nil "POST" nil true true)
+                       (catch Throwable e (http/s-close s) (throw e)))]
+            (if (and stream? (= 200 (:status r)))
+              (let [pull (or (:body-pull r) (let [b (volatile! (:body r))] (fn [] (let [x @b] (vreset! b nil) x))))
+                    open (volatile! true)
+                    ;; once, whoever ends the stream: the reader at its end, an error, or when nobody reads on
+                    close (fn [] (when @open (vreset! open false) (http/s-close s)))]
+                {:status 200 :headers (:header-pairs r) :close close
+                 :pull (fn []
+                         (let [x (try (pull) (catch Throwable e (transport-error (step/error-msg e) {:url url})))]
+                           (when (or (nil? x) (contract/error? x)) (close))
+                           x))})
+              (try {:status (:status r) :headers (:header-pairs r) :body (body-text r)}
+                   (finally (http/s-close s))))))
         (catch Throwable e (transport-error (step/error-msg e) {:url url}))))))
 
 (def eval-tool
@@ -308,32 +321,180 @@
         cut? (assoc :truncated? true))
       :else (provider-error "the reply carries no message content" 200 {}))))
 
+(defn json-feed
+  "A JSON document's next fragment fed to a reader that keeps its place between fragments (the stack of open
+  objects and arrays, whether it is inside a string, an escape or a unicode escape cut short): answers [state' events],
+  an event [path :open] when a string value starts, [path text] for the decoded text it holds so far in this fragment
+  (never a key's), and [path :end] when it closes; a path is the keys and indexes down to the string. The state
+  starts as nil. What streams is display only: the committed reply is read from the whole arguments (`evals-of`).
+  See docs/flow.md#effects-one-owner-and-its-workers-per-kind."
+  {:malli/schema [:=> [:cat [:maybe :map] :string] [:tuple :map [:vector :any]]]}
+  [st frag]
+  (let [n (count frag)
+        {:keys [stack mode path kbuf esc hi] :or {stack [] mode :out kbuf [] hi nil}} st
+        esc-char {\n "\n" \t "\t" \r "\r" \b "\b" \f "\f"}]
+    (loop [i 0 stack stack mode mode path path kbuf kbuf esc esc hi hi sb [] ev []]
+      (if (= i n)
+        [{:stack stack :mode mode :path path :kbuf kbuf :esc esc :hi hi}
+         (if (and (= mode :val) (seq sb)) (conj ev [path (apply str sb)]) ev)]
+        (let [c (nth frag i)
+              i' (inc i)]
+          (if (= mode :out)
+            (case c
+              \" (let [top (peek stack)]
+                   (if (and (= :obj (:t top)) (nil? (:k top)))
+                     (recur i' stack :key path [] nil nil sb ev)
+                     (let [p (mapv #(if (= :obj (:t %)) (:k %) (:i %)) stack)]
+                       (recur i' stack :val p kbuf nil nil [] (conj ev [p :open])))))
+              \{ (recur i' (conj stack {:t :obj :k nil}) mode path kbuf esc hi sb ev)
+              \[ (recur i' (conj stack {:t :arr :i 0}) mode path kbuf esc hi sb ev)
+              \} (recur i' (cond-> stack (seq stack) pop) mode path kbuf esc hi sb ev)
+              \] (recur i' (cond-> stack (seq stack) pop) mode path kbuf esc hi sb ev)
+              \, (recur i' (let [top (peek stack)]
+                             (cond (= :obj (:t top)) (conj (pop stack) (assoc top :k nil))
+                                   (= :arr (:t top)) (conj (pop stack) (update top :i inc))
+                                   :else stack))
+                        mode path kbuf esc hi sb ev)
+              (recur i' stack mode path kbuf esc hi sb ev))
+            ;; inside a string, a key or a value: one decoded piece or none
+            (let [[done? piece esc' hi']
+                  (cond
+                    (string? esc) (let [e (str esc c)]
+                                    (if (< (count e) 4)
+                                      [false nil e hi]
+                                      (let [cp (Integer/parseInt e 16)]
+                                        (cond (<= 0xD800 cp 0xDBFF) [false nil nil cp]
+                                              (and hi (<= 0xDC00 cp 0xDFFF)) [false (str (char (+ 0x10000 (bit-shift-left (- hi 0xD800) 10) (- cp 0xDC00)))) nil nil]
+                                              (<= 0xD800 cp 0xDFFF) [false "�" nil nil]
+                                              :else [false (str (char cp)) nil nil]))))
+                    (= esc :bs) (if (= (str c) "u") [false nil "" hi] [false (get esc-char c (str c)) nil hi])
+                    (= c \\) [false nil :bs hi]
+                    (= c \") [true nil nil hi]
+                    :else [false (str c) nil hi])]
+              (cond
+                done? (if (= mode :key)
+                        (recur i' (conj (pop stack) (assoc (peek stack) :k (apply str kbuf))) :out path [] nil nil sb ev)
+                        (recur i' stack :out path kbuf nil nil [] (cond-> ev (seq sb) (conj [path (apply str sb)]) true (conj [path :end]))))
+                (= mode :key) (recur i' stack mode path (cond-> kbuf piece (conj piece)) esc' hi' sb ev)
+                :else (recur i' stack mode path kbuf esc' hi' (cond-> sb piece (conj piece)) ev)))))))))
+
+(defn sse-init
+  "The state a streamed reply's lines fold into (`sse-step`): the reply's pieces so far, and, when call (the model call's id)
+  is given, what has been sent as stream messages for agent (offsets by id, ids still open). See
+  docs/flow.md#effects-one-owner-and-its-workers-per-kind."
+  {:malli/schema [:=> [:cat [:maybe :string] [:maybe :string]] :map]}
+  [call agent]
+  {:call call :agent agent :content [] :reasoning [] :calls (sorted-map) :finish nil :usage nil :model nil :data? false :raw []
+   :offsets {} :open [] :parts {}})
+
+(defn- stream-id
+  "The stream id of a string in a tool call's arguments at path and the part it is, [id part], or nil for a string no one shows live. See docs/flow.md#effects-one-owner-and-its-workers-per-kind."
+  {:malli/schema [:=> [:cat :string :int [:vector :any]] [:maybe [:tuple :string :string]]]}
+  [call k path]
+  (case (count path)
+    1 (when (= "message-md" (first path)) [(str call "/" k "/message") "message"])
+    3 (when (and (= "evals" (first path)) (#{"intent" "code"} (nth path 2))) [(str call "/" k "/eval-" (nth path 1) "/" (nth path 2)) (nth path 2)])
+    nil))
+
+(defn- say
+  "st with a stream message appended to msgs for id, part part of call (:in, :part, as data, so no reader splits an id): text (offset the chars sent before it), :open (id starts, empty) or
+  :end. Answers [st' msgs'] (st, msgs when the state streams nothing). See docs/flow.md#effects-one-owner-and-its-workers-per-kind."
+  {:malli/schema [:=> [:cat [:tuple :map [:vector :map]] :string :string [:or :string [:enum :open :end]]] [:tuple :map [:vector :map]]]}
+  [[st msgs] id part what]
+  (if-not (:call st)
+    [st msgs]
+    (let [off (get-in st [:offsets id] 0)
+          open? (some #{id} (:open st))
+          st (cond-> st (not open?) (-> (update :open conj id) (assoc-in [:parts id] part)))
+          base {:stream id :in (:call st) :part part :agent (:agent st)}]
+      (cond (= :end what) [(update st :open #(filterv (complement #{id}) %)) (conj msgs (assoc base :end true))]
+            (= :open what) [st msgs]
+            :else [(assoc-in st [:offsets id] (+ off (count what))) (conj msgs (assoc base :offset off :text what))]))))
+
+(defn- add-delta
+  "st with a chunk's delta folded in: its content, reasoning and each tool call's pieces (id and name kept, arguments appended
+  and read by `json-feed`), the messages those made. Answers [st' msgs]. See docs/flow.md#effects-one-owner-and-its-workers-per-kind."
+  {:malli/schema [:=> [:cat :map :map] [:tuple :map [:vector :map]]]}
+  [st delta]
+  (let [call (:call st)
+        piece (fn [acc k id]
+                (if-let [x (get delta k)]
+                  (let [[st msgs] (update acc 0 update (if (= k :content) :content :reasoning) conj x)]
+                    (if (and call (seq x)) (say [st msgs] (str call "/" id) id x) [st msgs]))
+                  acc))
+        acc (-> [st []] (piece :content "content") (piece :reasoning_content "reasoning"))]
+    (reduce (fn [[st msgs] {:keys [index id function]}]
+              (let [c (get-in st [:calls index] {:function {:arguments []}})
+                    c (cond-> c id (assoc :id id) (:name function) (assoc-in [:function :name] (:name function)))
+                    frag (:arguments function)
+                    [jst evs] (if (and frag call) (json-feed (:json c) frag) [(:json c) []])
+                    c (cond-> (assoc c :json jst) frag (update-in [:function :arguments] conj frag))
+                    st (assoc-in st [:calls index] c)]
+                (reduce (fn [acc [path what]]
+                          (if-let [[sid part] (stream-id call index path)] (say acc sid part what) acc))
+                        [st msgs] evs)))
+            acc (:tool_calls delta))))
+
+(defn sse-step
+  "One line of a streamed reply (server-sent events: data: lines, each a chat-completion chunk, ending data: [DONE]) folded
+  into st (`sse-init`): [st' messages], the stream messages that line made ({:stream id :in call :part p :agent a :offset n :text s}, then
+  the same with :end true and no text when a tool call's string closes), none for a state with no call. Blank lines, comments
+  and other fields are skipped; a line that is none of them is kept, for a reply that is one JSON document. The one parser of
+  `sse-reply` and of the streamed call (`complete`). See docs/flow.md#effects-one-owner-and-its-workers-per-kind."
+  {:malli/schema [:=> [:cat :map :string] [:tuple :map [:vector :map]]]}
+  [st line]
+  (let [l (str/trim line)]
+    (cond
+      (or (str/blank? l) (str/starts-with? l ":") (re-find #"^(event|id|retry):" l)) [st []]
+      (str/starts-with? l "data:")
+      (let [d (str/trim (subs l 5))]
+        (if (= "[DONE]" d)
+          [st []]
+          (let [j (json/read-str d :key-fn keyword)
+                [st msgs] (add-delta (assoc st :data? true) (or (get-in j [:choices 0 :delta]) {}))]
+            [(cond-> st
+               (get-in j [:choices 0 :finish_reason]) (assoc :finish (get-in j [:choices 0 :finish_reason]))
+               (:usage j) (assoc :usage (:usage j))
+               (and (:model j) (nil? (:model st))) (assoc :model (:model j)))
+             msgs])))
+      :else [(update st :raw conj line) []])))
+
+(defn sse-close
+  "The stream messages that end every id st still has open: a call's end, normal or in error. See `sse-step`."
+  {:malli/schema [:=> [:cat :map] [:vector :map]]}
+  [st]
+  (mapv (fn [id] {:stream id :in (:call st) :part (get-in st [:parts id]) :agent (:agent st) :end true}) (:open st)))
+
+(defn- sse-json
+  "The chat-completion JSON (as data) the lines folded into st make: what `sse-reply` answers."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [st]
+  (let [msg (let [calls (:calls st)]
+              (cond-> {}
+                (seq calls) (assoc :tool_calls (mapv #(-> % (dissoc :json) (update-in [:function :arguments] (fn [fs] (apply str fs)))) (vals calls)))
+                (seq (:content st)) (assoc :content (apply str (:content st)))
+                (seq (:reasoning st)) (assoc :reasoning_content (apply str (:reasoning st)))))]
+    (cond-> {:choices [{:message msg :finish_reason (:finish st)}]}
+      (:usage st) (assoc :usage (:usage st))
+      (:model st) (assoc :model (:model st)))))
+
 (defn sse-reply
-  "A streamed reply's text (server-sent events: data: lines, each a chat-completion chunk,
-  ending data: [DONE]) folded into the one reply it streams: the content and reasoning
+  "A streamed reply's text (server-sent events) folded into the one reply it streams: the content and reasoning
   concatenated in order, each tool call's pieces joined by its index (its id and name kept,
-  its arguments appended), the last finish_reason, the usage the final chunk carries."
+  its arguments appended), the last finish_reason, the usage the final chunk carries. Its lines go through `sse-step`."
   {:malli/schema [:=> [:cat :string] :map]}
   [text]
-  (let [chunks (for [line (str/split-lines text)
-                     :let [l (str/trim line)]
-                     :when (and (str/starts-with? l "data:") (not= "[DONE]" (str/trim (subs l 5))))]
-                 (json/read-str (str/trim (subs l 5)) :key-fn keyword))
-        deltas (keep #(get-in % [:choices 0 :delta]) chunks)
-        joined (fn [k] (let [xs (keep k deltas)] (when (seq xs) (apply str xs))))
-        calls (reduce (fn [acc {:keys [index id function]}]
-                        (update acc index (fn [c] (cond-> (or c {:function {:arguments ""}})
-                                                    id (assoc :id id)
-                                                    (:name function) (assoc-in [:function :name] (:name function))
-                                                    (:arguments function) (update-in [:function :arguments] str (:arguments function))))))
-                      (sorted-map) (mapcat :tool_calls deltas))]
-    (cond-> {:choices [{:message (cond-> {}
-                                   (seq calls) (assoc :tool_calls (vec (vals calls)))
-                                   (joined :content) (assoc :content (joined :content))
-                                   (joined :reasoning_content) (assoc :reasoning_content (joined :reasoning_content)))
-                        :finish_reason (last (keep #(get-in % [:choices 0 :finish_reason]) chunks))}]}
-      (some :usage chunks) (assoc :usage (last (keep :usage chunks)))
-      (some :model chunks) (assoc :model (some :model chunks)))))
+  (sse-json (reduce (fn [st line] (first (sse-step st line))) (sse-init nil nil) (str/split-lines text))))
+
+(defn stream-reply
+  "The completion (or the declared failure) a streamed call's folded state makes, in ms, as `parse-reply` makes it of the
+  whole body: its data lines read as `sse-reply` does, or, when the server sent none, its lines as the one JSON document."
+  {:malli/schema [:=> [:cat :map number? [:maybe :int]] [:or :seon.model/completion :seon.model/failure]]}
+  [st ms max-tokens]
+  (reply-of (if (and (not (:data? st)) (seq (:raw st)))
+              (json/read-str (str/join "\n" (:raw st)) :key-fn keyword)
+              (sse-json st))
+            ms max-tokens))
 
 (defn parse-reply
   "A 200 reply's body text as the completion: a stream of server-sent events, or one
@@ -351,27 +512,38 @@
 
 (defn- openai-compat
   {:malli/schema [:=> [:cat :seon.model/provider :seon.model/request]
-                  [:or :seon.model/completion :seon.model/failure]]}
+                  [:or :seon.model/completion :seon.model/failure
+                   [:map [:stream [:map [:pull :any] [:shut :any] [:init :map] [:step :any] [:final :any] [:close :any]]]]]]}
   [{:keys [base-url api-key-env max-tokens] :as provider} request]
   (let [key (config/secret api-key-env)]
     (if (str/blank? key)
       (provider-error (str "the environment variable " api-key-env " is not set") nil {})
       (let [t0 (profile/now-ns)
+            ;; a request that names its model call (:call) is read as it arrives: the reply is not read here, its pieces are the
+            ;; caller's (docs/flow.md#effects-one-owner-and-its-workers-per-kind)
             r (http-post (str (str/replace base-url #"/+$" "") "/chat/completions")
                          [["Authorization" (str "Bearer " key)] ["Content-Type" "application/json"] ["Accept" "text/event-stream"]]
-                         (json/write-str (request-body provider request)))
+                         (json/write-str (request-body provider request))
+                         (some? (:call request)))
             ms (profile/ms-since t0)]
         (cond
           (contract/error? r) r
           (not= 200 (:status r)) (provider-error (str "HTTP " (:status r)) (:status r)
                                                  (cond-> {:body (:body r)}
                                                    (retry-after-ms (:headers r)) (assoc :retry-after-ms (retry-after-ms (:headers r)))))
+          (:pull r) {:stream {:pull (:pull r) :shut (:close r) :init (sse-init (:call request) (:agent request)) :step sse-step :close sse-close
+                              :final (fn [st] (stream-reply st (profile/ms-since t0) max-tokens))}}
           :else (parse-reply (:body r) ms max-tokens))))))
 
 (defn complete
-  "The model's reply to request under provider."
+  "The model's reply to request under provider. A request that names its model call (:call, with the
+  asking :agent) is answered at the start of its reply, as {:stream {:pull :shut :init :step :close :final}} (:shut closes the connection, once): the
+  reply's body is the caller's to read (seon.fx/worker-proc), :step folding each line into the state (and
+  answering the stream messages it made), :final the completion of the last state, :close the messages that
+  end the ids still open."
   {:malli/schema [:=> [:cat :seon.model/provider :seon.model/request]
-                  [:or :seon.model/completion :seon.model/failure]]}
+                  [:or :seon.model/completion :seon.model/failure
+                   [:map [:stream [:map [:pull :any] [:shut :any] [:init :map] [:step :any] [:final :any] [:close :any]]]]]]}
   [provider request]
   (case (:kind provider)
     :none (contract/error :seon.model/no-provider #'seon.model/complete

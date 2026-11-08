@@ -166,7 +166,9 @@
                                         [:reasoning-effort {:optional true} [:enum :low :medium :high]]
                                         ;; earlier reasoning sent back (:seon.config.ai/replay-reasoning)
                                         [:replay-reasoning {:optional true} :boolean]]]]
- :seon.model/request [:map {:closed true} [:messages [:vector :seon.model/message]] [:task :seon.task/id] [:turn :int]]
+ :seon.model/request [:map {:closed true} [:messages [:vector :seon.model/message]] [:task :seon.task/id] [:turn :int]
+                      ;; the model call asking (:seon.model-call/id) and its agent's :seon.agent/key: a request that names its call is read as it streams (seon.fx/worker-proc)
+                      [:call {:optional true} :string] [:agent {:optional true} :string]]
  ;; what a scripted model (a test fixture, seon.model's :scripted provider) answers: a reply as the
  ;; provider's reply is read (docs/prompt.md), its text and its eval calls; no :calls is a message
  :seon.model/script-reply [:map {:closed true} [:text {:optional true} :string] [:calls {:optional true} [:vector [:map {:closed true} [:intent :string] [:code :string]]]]]

@@ -1392,8 +1392,11 @@
   does not make a test read the tree. A reader not named here counts as reading the tree
   (conservative: a missed name reruns more, never reuses a stale green). Measured: with
   seon.config/baked-schema-forms (a macro every contracted form expands) counted, 327 of 368
-  tests took the tree, so any edit anywhere reran them."
-  (conj (set (keys env-class-readers)) 'seon.config/baked-schema-forms))
+  tests took the tree, so any edit anywhere reran them; with seon.test-store/output (a run's own
+  log or a child's mark) uncounted, 7 of the 10 slow process tests took it, so a wiki edit reran them;
+  with seon.config/baked-shipped-text (the shipped config file, whose values a test takes key by key) counted,
+  1,506 of 1,552 tests took every file class, so a bin/ or schema-resource edit reran 1,517."
+  (conj (set (keys env-class-readers)) 'seon.config/baked-schema-forms 'seon.config/baked-shipped-text 'seon.test-store/output))
 
 (def config-resolvers
   "seon.config's resolvers, which read the key they are passed (seon.config/value, resolve and
@@ -1441,11 +1444,15 @@
                        (update :listed into (keep #(when (and (vector? %) (config-key? (first %))) (first %))) (when (and (vector? f) (= :map (first f))) f))))))
              {:keys #{} :listed #{}} schemas))
 
+(defn- env-reader-form?
+  "Does form f define only env-readers (its file reads are of a class held apart from the tree, or of no checkout file)?"
+  {:malli/schema [:=> [:cat :map] :boolean]}
+  [f] (boolean (and (seq (:defines f)) (every? (fn [[k s]] (and (= :var k) (env-readers s))) (:defines f)))))
+
 (defn- tree-reading?
   "Does form f read the tree (a tree-reader referenced, by a form defining no env-reader)?"
   {:malli/schema [:=> [:cat :map] :boolean]}
-  [f] (boolean (and (some tree-readers (:refs f))
-                    (not (and (seq (:defines f)) (every? (fn [[k s]] (and (= :var k) (env-readers s))) (:defines f)))))))
+  [f] (boolean (and (some tree-readers (:refs f)) (not (env-reader-form? f)))))
 
 (defn- uses?
   "Does form f use one of vars (:seon.config.source/process-vars or -binary-vars)? A form uses
@@ -1665,7 +1672,7 @@
         ;; a test namespace's form reading the checkout's files itself (file-readers) judges those files:
         ;; the tests reaching it take the tree (one-printer-and-no-cut-before-it
         ;; was reused over edits to what it read, and read as flaky)
-        scans (flag :scans #(and (test-nss (:ns %)) (some file-readers (:refs %))))
+        scans (flag :scans #(and (test-nss (:ns %)) (some file-readers (:refs %)) (not (env-reader-form? %))))
         adj (into (apply dissoc (:adj g) gone-ids) (for [id dirty] [id (edges (rows id))]))
         rev (if bulk?
               (indexed (for [id dirty t (adj id)] [t id]) true)
@@ -1841,10 +1848,13 @@
       (let [cs (distinct (map comp-of (into (vec ids) (mapcat #(get plain (:ns (rows %)))) ids)))
             ;; the config keys its reach reads (config-reads) that the config holds
             ks (into #{} (comp (mapcat #(:config (flags %))) (filter line)) cs)
-            ;; a reader of files or a process (the tree, a root, the binary) can read any class of
-            ;; files (:seon.env/*); a pin it takes by its reach, as any test does: Jolt's runtime
-            ;; core and Chez, which every process runs on, are the forks' suites' and the daily full run's
-            ks (if (some #(let [f (flags %)] (or (:reads f) (:proc f) (:bin f))) cs) (into ks env-keys) ks)
+            ;; a process (a root, an agent, the binary) can read any class of files (:seon.env/*): it runs
+            ;; bin/ scripts and loads system.edn, web/ and the schema resources. A form reading files takes
+            ;; only the classes whose readers it reaches (env-class-readers): taking every class for a read
+            ;; of a port file or a wiki anchor made a bin/ edit rerun 882 of 1,566 tests (2026-11-08).
+            ;; A pin it takes by its reach, as any test does: Jolt's runtime core and Chez, which every
+            ;; process runs on, are the forks' suites' and the daily full run's
+            ks (if (some #(let [f (flags %)] (or (:proc f) (:bin f))) cs) (into ks env-keys) ks)
             ;; a step's src is :code; the src class is test/'s too, which a step does not run (every step reaches seon.contract/uncontracted)
             src? (and roots? (some #(contains? (:config (flags %)) :seon.env/src) cs))
             ks (if roots? (disj ks :seon.env/src) ks)]

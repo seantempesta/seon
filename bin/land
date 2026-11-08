@@ -1,0 +1,48 @@
+#!/bin/zsh
+# bin/land [-F MSGFILE] — land this worktree's branch on main: the one way any session, Claude's or
+# Seon's, merges (docs/merging.md#a-branch-lands-with-binland). Run in the branch's worktree
+# (bin/worktree NAME), never the main tree, which stays on main and clean.
+#   1. merge main into the branch (a conflict stops it: resolve, commit, run it again);
+#   2. bin/prove --merge on that tip, niced, beside any other run (results are shared by digest across
+#      every checkout, and each run writes under its own target/prove/<id>: no run waits on another);
+#   3. main moves to a merge commit whose tree is the proved tip's (git commit-tree, then
+#      git update-ref with main's old value: no checkout of main is needed, and a main that moved
+#      in between is refused, never overwritten: back to 1, which proves only what the new main moved);
+#   4. the main tree's files follow main (bin/update does it first) and bin/update restarts the
+#      standing root on main.
+# MSGFILE is the merge message (what it completes, its numbers: AGENTS §3); bin/prove's line is added.
+# SEON_UPDATE_ARGS: bin/update's arguments, the standing root's (default --profile deepseek).
+# The last line is LANDED or LAND FAILED, and the exit status says the same.
+setopt pipefail
+fail() { print -u2 "land: $*"; print "LAND FAILED"; exit 1 }
+MSG=
+[[ ${1:-} == -F ]] && { MSG=${2:A}; [[ -f $MSG ]] || fail "no message file $2"; shift 2 }
+(( $# == 0 )) || fail "unknown arguments: $*"
+HERE=$(git rev-parse --show-toplevel) || fail "not in a git checkout"
+MAIN=$(git rev-parse --path-format=absolute --git-common-dir)/..; MAIN=${MAIN:A}
+[[ $HERE != $MAIN ]] || fail "run it in the branch's worktree (bin/worktree NAME), not the main tree"
+B=$(git -C "$HERE" branch --show-current)
+[[ -n $B && $B != main ]] || fail "the worktree is on no branch, or on main"
+git -C "$HERE" diff --quiet --ignore-submodules && git -C "$HERE" diff --cached --quiet --ignore-submodules || fail "$HERE has uncommitted changes: commit them first"
+cd "$HERE"
+for i in 1 2 3 4 5; do
+  OLD=$(git rev-parse main)
+  git merge --no-edit -q main || fail "merging main into $B conflicts: resolve, commit, run bin/land again"
+  "$MAIN/bin/worktree" --sync "$HERE" >/dev/null || fail "syncing $HERE's submodules to the pins its branch records"
+  LOG=$HERE/target/land-$(date +%Y%m%dT%H%M%S).log
+  nice -n 15 "$HERE/bin/prove" --merge > "$LOG" 2>&1; st=$?
+  grep -E '^RED |^FAILED ' "$LOG" | cut -c1-200 | head -12
+  LINE=$(grep -E ' bin/prove --merge .*: MERGE (OK|FAILED)' "$LOG" | tail -1)
+  (( st == 0 )) && [[ $(tail -1 "$LOG") == "MERGE OK" ]] || fail "the proof is red: $LOG"
+  [[ $(git rev-parse HEAD) == $(git rev-parse "$B") ]] && git merge-base --is-ancestor "$OLD" HEAD || fail "the branch moved during its proof"
+  { if [[ -n $MSG ]]; then cat "$MSG"; else print "Merge $B"; fi; print; print "$LINE"; } > "$HERE/target/land-msg"
+  NEW=$(git commit-tree "HEAD^{tree}" -p "$OLD" -p HEAD -F "$HERE/target/land-msg") || fail "commit-tree"
+  if git update-ref -m "bin/land $B" refs/heads/main "$NEW" "$OLD" 2>/dev/null; then
+    print "main $(git log --oneline -1 "$NEW" | cut -c1-100)"
+    UARGS=(${=SEON_UPDATE_ARGS:---profile deepseek})
+    nice -n 15 "$MAIN/bin/update" $UARGS | tail -1
+    print LANDED; exit 0
+  fi
+  print "main moved during the proof ($i): merging it again"
+done
+fail "main moved under five proofs in a row"

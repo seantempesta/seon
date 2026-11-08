@@ -25,4 +25,25 @@
   :seon.task/kind :work}
  {:seon.task/name "the-commit-notice-commits-are-reviewed"
   :seon.task/plan "Left from seon.fx/the-standing-root-follows-main-not-the-checkouts-head (merged c5e44b3138): three commits of the commit notice reached main unreviewed (c0a9fdde89, 46c1d2929f, 10c98b1e7d), with +30 MB in `e2e calc` unexplained. The review's fixes are on main (the render proc's stale-notice skip, the conn's exception in docs/machine.md). Left: measure root at `e2e calc` now and before c0a9fdde89, find the +30 MB if it is still there, and cut what costs memory for nothing (owner, 2026-10-29: review, fix, measure)."
-  :seon.task/kind :work}]
+  :seon.task/kind :work} {:seon.task/name "an-effect-streams-what-it-reads"
+  :seon.task/plan "Owner, 2026-11-08: \"Can we get model response streaming too?\"; \"I want live updates to be cheap enough we can live stream them\"; \"Approve, land it\" (seon.render/one-walk-per-view rule 10, the stream plan Web and Context agreed). Context's side: the model reader and an eval's output. Web's: the :streams conn, the web proc's appends, the render targets.
+
+What's wrong: the provider streams (seon.model/request-body sends :stream true) and seon.http's :body-pull hands the reply's pieces as the socket gives them (Web's lab: pieces 1, 304 and 608 ms apart, cut mid-line and inside a UTF-8 character), but seon.fx/worker-proc runs seon.fx/model -> seon.model/complete -> http-post inside one step, and body-text pulls the whole body before seon.model/sse-reply parses it. A Flow step's outputs leave only when it returns, so nothing can stream.
+
+The change, in seon.fx and seon.model, general to any effect kind:
+1. A perform may answer {:stream {:pull f :step g :init s :final h}} in place of its outcome: f the next piece of bytes or nil at the end, g one line's fold (state, line) -> [state' messages], h the final state -> the outcome.
+2. The worker then starts an edge reader (the one blocking read AGENTS section 4 allows, the pattern of seon.fork-server's socket reader and seon.watch): one thread for the call, splitting pieces on the newline byte and decoding whole lines (a newline byte never occurs inside a multi-byte character), each line put on the worker's own :lines in-port, then {:end true} at the end of the body or {:error e} on a socket failure.
+3. The worker's step folds one line per step and outputs that line's messages to its :streams out-port. While a call is in flight its input filter reads :lines only, so the worker keeps its slot and the owner's admission is unchanged (a worker's count bounds the calls in flight). At the end it computes (h state) and gives the owner :done once, as today, after :end for every stream id still open.
+4. seon.model: sse-reply becomes the line step plus the final, so one parser serves both; complete's streamed path answers {:stream ...} with the request's :call and :agent (seon.turn/act! adds both, :seon.model-call/id and the agent key). The line step sends {:stream id :agent a :offset n :text s}: \"<call>/reasoning\", \"<call>/content\", and from each tool call k's arguments, read by a small incremental JSON string reader (key path, inside-string, escapes and \\uXXXX split across fragments), \"<call>/<k>/message\", \"<call>/<k>/eval-<i>/intent\", \"<call>/<k>/eval-<i>/code\". An id ends with {:stream id :agent a :end true} when its string closes, and every open id at the call's end, normal or error. The committed reply is today's, from the whole arguments through the forgiving reader: what streams is display only.
+5. An eval's output (seon.repl, its *out*): the eval's start is committed before it runs, so its id is stable, and *out* is a writer that keeps the text for the record and also sends each write as {:stream \"<eval id>/out\" ...} over the agent's frames to root, onto :streams. An agent that dies mid-eval stops its stream: no heroics (owner, 2026-11-08).
+
+Proofs, red first:
+- the line fold over a recorded DeepSeek stream, cut into pieces at every byte offset (mid-line, mid-character), answers the same completion as today's parse-reply of the whole body;
+- the streamed text of each id, joined in offset order, equals the committed reply's field (content, reasoning, each tool call's message, each eval's intent and code), with offsets contiguous and one :end per id;
+- a streaming perform's first message leaves the worker before its second piece is read (a pull that waits on a promise);
+- a streaming worker takes no new work until its :done, and the owner's admission counts are unchanged;
+- a socket failure mid-stream answers :seon.model/transport and ends every open id;
+- cost: per line O(line bytes), contracted calls flat at 10 and 1,000 lines (seon.cost/proof);
+- an eval's output streams before the eval returns, and the record's output is unchanged."
+  :seon.task/proofs #{}}
+]

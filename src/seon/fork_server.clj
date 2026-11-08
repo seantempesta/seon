@@ -123,8 +123,8 @@
   :db, what every agent's start reads warmed, and the heap made static when due. Answers [st' load errors]. A fork after it costs a fork. See docs/machine.md#an-agents-first-write."
   {:malli/schema [:=> [:cat :map] [:tuple :map [:maybe [:sequential :any]]]]}
   [st]
-  (let [errs (when (:tests-due st) (seq (:errors (program/load-all! (:db st)))))
-        st (-> st (dissoc :tests-due :preload-t) graph-at-fork index-at-fork (warm-start {}))]
+  (let [errs (seq (concat (:load-errors st) (when (:tests-due st) (:errors (program/load-all! (:db st))))))
+        st (-> st (dissoc :tests-due :preload-t :load-errors) graph-at-fork index-at-fork (warm-start {}))]
     (when (static-due? st) (lib/static!))
     [(dissoc st :static-due) errs]))
 
@@ -176,8 +176,8 @@
                  ;; main's tests, loaded once, before the first fork, so every agent and test child forked from here
                  ;; inherits them compiled, as read-only pages (docs/source.md#a-process-holds-the-tests-only-when-it-runs-them);
                  ;; their errors go to root as a tx's load errors do
-                 load-errs (when (:tests-due st) (seq (:errors (program/load-all! (:db st)))))
-                 st (dissoc st :tests-due)
+                 load-errs (seq (concat (:load-errors st) (when (:tests-due st) (:errors (program/load-all! (:db st))))))
+                 st (dissoc st :tests-due :load-errors)
                  st (graph-at-fork st)
                  tg (profile/now-ns)
                  st (-> st index-at-fork (warm-start m))
@@ -238,8 +238,10 @@
   ;; observed forward the same way (index-at-fork) and handed to every agent forked (seon.agent/reconcile-index starts from it)
   ;; the reach graph is built here when the server starts (a standby inherits its server's), so no
   ;; spawn waits for it (the first fork built it: 0.8-3.8 s measured)
-  ([{:keys [db cfg store conn graph index exits tests-due]}]
+  ([{:keys [db cfg store conn graph index exits tests-due load-errors]}]
    {:db db :cfg cfg :store store :mismatch 0 :conn conn :exits exits :status-buf (ffi/alloc 4) :children #{} :tests-due (boolean tests-due)
+    ;; the errors of the boot server's load of main's tests at its start (main), sent with the first :preload or fork
+    :load-errors load-errors
     ;; the first fork freezes the heap: nothing is static yet (seon.fork-server/static-due?)
     :static-due true
     :graph (or graph (program/reach-indexed (program/reach-graph db (fx/declared-refs (cfg/value :seon.config.root/system-path)))
@@ -304,6 +306,10 @@
         ;; docs/machine.md#what-a-process-owns-in-memory)
         db0 (d/commit-as-db store (d/commit-id db0))
         _ (when boot? (pdb/preload! db0))
+        ;; main's tests compiled now, at the boot server's start, while root writes its boot fact and imports
+        ;; its source (about 1.3 s of a fresh root's first spawn, measured 2026-11-08): a commit the import
+        ;; writes after this loads as changes (:tx), as a merge's does
+        loaded (when boot? (program/load-all! db0))
         ;; one wait on its two dependencies, root's socket and a child's exit (no timeout): alts! over
         ;; the exits channel and the socket's readiness, which stays pending until the socket is read
         exits (a/chan 64)
@@ -317,10 +323,10 @@
                                (do (vreset! ready nil) (recur))
                                [:cmd {:op :exit :pid v}]))
                            (case m :eof nil [:cmd m])))))]
-    ;; root evaluates no test namespace (program/load-all! {:tests? false}); the boot server does, once, when root's boot asks (:preload) or at
-    ;; a fork that comes first (:tests-due), and its socket is read
+    ;; root evaluates no test namespace (program/load-all! {:tests? false}); the boot server does, once, at its start (above), and its socket is read
     ;; from boot: a stop that came while 2,020 forms were evaluated one by one waited 12-21 s for them
-    (step/run-loop #'server-step {:db db0 :cfg cfg :store store :conn conn :exits exits :graph graph :index index :tests-due (or boot? tests-due)}
+    (step/run-loop #'server-step {:db db0 :cfg cfg :store store :conn conn :exits exits :graph graph :index index
+                                  :tests-due (and (not boot?) tests-due) :load-errors (seq (:errors loaded))}
                    recv! (fn [_ m] (sock/send! fd m)))
     (lib/kill! 0 9)
     (lib/c-exit 0))))
