@@ -54,7 +54,7 @@ FAST=(); if [[ ${WHAT:-} != tests && -s $OUT/steps ]]; then
   if (( ${#FAST} )); then
     mkdir -p "$OUT/fast"; print -r -- "$FAST" > "$OUT/fast/steps"; : > "$OUT/fast/steps-binary"
     REST=(${${=ALL}:|FAST}); print -r -- "$REST" > "$OUT/steps"
-    ( "$ROOT/bin/check" --steps "$OUT/fast" > "$OUT/fast.log" 2>&1 || { : > "$OUT/stopped"; [[ -s $OUT/shards.pid ]] && kill -9 $(<$OUT/shards.pid) 2>/dev/null; [[ -s $OUT/check.pid ]] && kill $(<$OUT/check.pid) 2>/dev/null } ) & A=$!
+    ( "$ROOT/bin/check" --steps "$OUT/fast" > "$OUT/fast.log" 2>&1 || { : > "$OUT/stopped"; [[ -s $OUT/shards.pid ]] && kill $(<$OUT/shards.pid) 2>/dev/null; [[ -s $OUT/check.pid ]] && kill $(<$OUT/check.pid) 2>/dev/null } ) & A=$!
   fi
 fi
 if [[ -s $OUT/binary ]]; then
@@ -69,11 +69,11 @@ st=0 P=()
 [[ -e $OUT/stopped ]] && { F=(); : > "$OUT/steps" }
 # told to stop (a timeout's TERM), its shards end with it, unheard: a shard left running reads a root the stop ended, and stores those reds, which
 # turn flaky beside the next run's greens at the same digests. A shard that dies stores nothing
-trap 'kill -9 $P 2>/dev/null; exit 143' TERM INT HUP
+trap 'kill $P 2>/dev/null; exit 143' TERM INT HUP
 # each shard a process of its own; its tests' ms are in their cached verdicts (:ms, seon.fx/typical-ms)
 # (exec: the pid is the shard's, so a kill reaches it, not a shell that leaves it running)
 for f in $F; do ( HOME=$ROOT/target/home JOLT_PWD=$ROOT exec "$JOLT" -A:test run -m test-runner --shard "$f" --profile scripted ) > "${f%.edn}.log" 2>&1 & P+=($!); done
-print -r -- "$P" > "$OUT/shards.pid"; [[ -e $OUT/stopped && -n $P ]] && kill -9 $P 2>/dev/null
+print -r -- "$P" > "$OUT/shards.pid"; [[ -e $OUT/stopped && -n $P ]] && kill $P 2>/dev/null
 # bin/prove's check steps (the plan's out/steps) run beside the shards, not after them: they share no
 # store, port or checkout state with a test's roots (each step takes an APFS clone of the one seeded store,
 # bin/check), so the run takes as long as the longer of the two, not their sum (docs/merging.md). Their
