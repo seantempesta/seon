@@ -128,12 +128,12 @@
                        :seon.error/fix "Declare each function's contract ({:malli/schema [:=> [:cat ...] ...]}) and merge again."}))))
 
 (defn- dangling-refused
-  "The refusal of a merge whose program, merged into main, leaves a reference naming nothing (seon.program/dangling: a removed
+  "The refusal of a merge whose program, merged into main, leaves a reference naming nothing (seon.merge/dangling: a removed
   definition another form calls), or nil. behind? when an earlier member of the octopus merge was taken: merged main first, the
   branch's own candidate says whose it is."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :boolean] [:maybe :map]]}
   [main merged behind?]
-  (when-let [ds (seq (program/dangling main merged))]
+  (when-let [ds (seq (pm/dangling main merged))]
     (let [said (str/join "; " (for [{:keys [ref form]} ds] (str form " calls " ref ", which the merge removes")))]
       (if behind?
         (contract/error :seon.merge/behind #'seon.writer/dangling-refused

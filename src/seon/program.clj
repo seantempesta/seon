@@ -1280,18 +1280,6 @@
      :load (vec (for [e forms :when (and (live-in? db-to e) (not (live-in? db-from e)))] (form-row db-to e)))
      :schemas (into #{} (for [e schema-es :let [v (schema-value db-to e)] :when (and (some? v) (not= v (schema-value db-from e)))] (key-of e)))}))
 
-(defn dangling
-  "The references db-to's program leaves naming nothing: each live form of db-to whose recorded references (:form/refs, the
-  compiler's) name a var db-from defines and db-to does not, as {:ref :form}, sorted. What a merge that removes a definition
-  another form still calls would leave on main; read from the facts, never by loading. Costs the diff (diff-plan) and one
-  seek a removed var. See docs/merging.md#a-merge-leaves-no-name-unbound."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:vector [:map [:ref :qualified-symbol] [:form :string]]]]}
-  [db-from db-to]
-  (vec (sort-by (juxt (comp str :ref) :form)
-                (for [[kind v] (:remove (diff-plan db-from db-to)) :when (= :var kind)
-                      dt (d/datoms db-to :avet :form/refs v) :when (live-in? db-to (:e dt))]
-                  {:ref v :form (:form/id (d/entity db-to (:e dt)))}))))
-
 (defn hold-config!
   "Make this process hold the config db states (seon.config/hold!: db is its own branch, what it stands on), against db's schema entries beyond the binary's. Answers the refusal, as a load error's list (empty when held), so a config that doesn't hold says so where a form that doesn't load does, and the process goes on with what it held. See docs/config.md#a-process-holds-its-branchs-config."
   {:malli/schema [:=> [:cat :seon.host/db] [:vector :seon.program/error]]}

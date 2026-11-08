@@ -47,7 +47,7 @@
  :seon.merge/behind [:and :seon.error/base [:map [:seon.error/type [:enum :seon.merge/behind]]
                                              [:behind pos-int?]]]
  ;; a merge whose program, merged into main, leaves a reference naming nothing: each live form calling a definition it removes
- ;; (seon.program/dangling, docs/merging.md#a-merge-leaves-no-name-unbound)
+ ;; (seon.merge/dangling, docs/merging.md#a-merge-leaves-no-name-unbound)
  :seon.merge/dangling [:and :seon.error/base [:map [:seon.error/type [:= :seon.merge/dangling]] [:dangling [:vector [:map [:ref :qualified-symbol] [:form :string]]]]]]
  :seon.merge/unmerged [:and :seon.error/base [:map [:seon.error/type [:enum :seon.merge/unmerged]]
                                                [:unmerged [:vector :any]]]]}

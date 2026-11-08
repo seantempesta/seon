@@ -330,7 +330,7 @@
 ;; docs/merging.md#a-merge-leaves-no-name-unbound: a merge is judged against what it merges into, so a removed definition another form
 ;; still calls is seen whichever side the call is on: (1) an octopus merge's members, one removing f and one calling it, each pass
 ;; alone (disjoint keys) and must not merge together; (2) one branch removing f that main's unchanged g calls must not merge at all.
-;; Read from the forms' recorded references (seon.program/dangling): Jolt compiles x/f with no var as a lookup at each call, so a load would not see it
+;; Read from the forms' recorded references (seon.merge/dangling): Jolt compiles x/f with no var as a lookup at each call, so a load would not see it
 (deftest a-merge-leaves-no-name-unbound
   (ts/test-branch!
    (fn [cfg conn]
