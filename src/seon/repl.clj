@@ -1062,7 +1062,7 @@
   "Eval calls ({:id :intent :code}, a reply's or an insert's: docs/turn.md#an-eval-can-be-inserted) through the one REPL
   path in order, each answered as its own result: {:id :code :intent :not-run :response}. req-of is a call's id to its
   request (its origin, and its call id when a model made it); eval! runs code under a request and answers its response. Every call
-  runs, whatever came before it (owner, 2026-11-08: one failure doesn't cost the reply's other evals); its result is
+  runs, whatever came before it, so one failure doesn't cost the reply's other evals; its result is
   in order after the one before, so a call that failed is read there. A call with no intent or no form is not run: `unrun` records its
   one result, which says why, so every call has its result. See docs/decisions.md#every-eval-of-a-reply-runs-owner-2026-11-08."
   {:malli/schema [:=> [:cat [:sequential :map] ifn? ifn?] [:vector :map]]}
