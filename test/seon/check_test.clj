@@ -37,7 +37,7 @@
         (is (= (d/commit-id @(:conn seed)) (d/merge-base (:conn a) :smoke-1 :db) (d/merge-base (:conn b) :drain-1 :db)))
         (is (= (count (d/datoms @(:conn seed) :eavt)) (count (d/datoms @(:conn a) :eavt)))))
       (testing "a step's writes stay on its main"
-        (d/transact (:conn a) [{:note/text "smoke's"}])
+        (d/transact (:conn a) [{:note/text "smoke's" :note/agent :t}])
         (is (= #{"smoke's"} (notes @(:conn a))))
         (is (= #{} (notes @(:conn b))))
         (is (= #{} (notes @(:conn seed)))))

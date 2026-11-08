@@ -31,16 +31,16 @@
         st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
         t0 (:max-tx @conn)]
     (testing "a main transaction: committed once, its report to the reconciler, its commit to the fork server, its answer by dest"
-      (let [[st outs] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:note/text "a"}] :dest {:rid 1}})]
+      (let [[st outs] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:note/text "a" :note/agent :t}] :dest {:rid 1}})]
         (is (< t0 (:max-tx @conn)) "main's t moves past its last")
         (is (= [:tx] (map :op (:to-fork-server outs))))
         (is (= [(:max-tx @conn)] (map :t (:main outs))))
         (is (= {:rid 1} (:dest (first (:to-api outs)))))
         (is (true? (:ok (:r (first (:to-api outs))))))
         (testing "group commit: three queued transactions, one step, one commit"
-          (a/>!! in {:op :tx :branch :db :tx-data [{:note/text "c"}] :dest {:rid 3}})
+          (a/>!! in {:op :tx :branch :db :tx-data [{:note/text "c" :note/agent :t}] :dest {:rid 3}})
           (a/>!! in {:op :tx :branch :db :tx-data [{:no/such 1}] :dest {:rid 4}})
-          (let [[st2 outs] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:note/text "b"}] :dest {:rid 2}})
+          (let [[st2 outs] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:note/text "b" :note/agent :t}] :dest {:rid 2}})
                 answers (into {} (keep (fn [x] (when-let [r (get-in x [:dest :rid])] [r (:r x)]))) (:to-api outs))]
             (is (= 1 (- (:commits st2) (:commits st))))
             (is (every? :ok (map answers [2 3])))
@@ -56,7 +56,7 @@
   ;; commit carry the runtime that made them, and so does the stored commit the fork server's replica reads
   (ts/test-branch! (fn [cfg conn] (let [in (a/chan 16)
         st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
-        [_ outs] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:note/text "a"}] :dest {:rid 1}})
+        [_ outs] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:note/text "a" :note/agent :t}] :dest {:rid 1}})
         fp (jolt.host/runtime-fingerprint)]
     (is (= fp (:seon.tx/runtime (d/entity @conn (:max-tx @conn)))) "main's transaction names it")
     (let [m (first (:to-fork-server outs))]
@@ -115,7 +115,7 @@
     (let [in (a/chan 16)
           wst (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
           before @conn
-          [_ outs] (step #'writer/writer-proc wst :in {:op :tx :branch :db :tx-data (vec (for [i (range 2000)] {:note/text (str "n" i)})) :dest {:rid 1}})
+          [_ outs] (step #'writer/writer-proc wst :in {:op :tx :branch :db :tx-data (vec (for [i (range 2000)] {:note/text (str "n" i) :note/agent :t})) :dest {:rid 1}})
           m (first (filter #(= :tx (:op %)) (:to-fork-server outs)))
           fst (#'server/server-step {:db before :cfg cfg :store conn :conn nil})
           [fst' fouts] (step #'server/server-step fst :cmd m)
@@ -133,7 +133,7 @@
   ;; records it as the agent's problem, :seon.agent/fork-misaligned
   (ts/test-branch! (fn [cfg conn]
     (let [at (d/commit-id @conn) t (:max-tx @conn)
-          _ (d/transact conn [{:note/text "main moved on"}])]
+          _ (d/transact conn [{:note/text "main moved on" :note/agent :t}])]
       (is (nil? (agent/misaligned (d/commit-id @conn) (:max-tx @conn) @conn @conn)) "aligned: nothing to say")
       (let [x (agent/misaligned at t @conn @conn)
             [r a'] (sock/socketpair)
@@ -167,7 +167,7 @@
   ;; :fork names that commit and t, so the agent checks both (seon.agent/init!)
   (ts/test-branch! (fn [cfg conn] (let [in (a/chan 16)
         st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
-        [st _] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:note/text "a"}] :dest {:rid 1}})
+        [st _] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:note/text "a" :note/agent :t}] :dest {:rid 1}})
         b (pdb/on-main (:branch cfg) :a1)
         [_ outs] (step #'writer/writer-proc st :in {:op :spawn :agent :a1 :branch b :ns 0 :fd 0 :dest {:rid 2}})
         fork (first (filter #(= :fork (:op %)) (:to-fork-server outs)))]
@@ -186,7 +186,7 @@
    (try (let [in (a/chan 16)
         st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
         source (fn [pins] {:seon.root/id :root :seon.root/source {:root "tree" :files 0 :forms 0 :ms 0.0 :pins pins}})]
-    (a/>!! in {:op :tx :branch :db :tx-data [{:note/text "after"}] :dest {:rid 2}})
+    (a/>!! in {:op :tx :branch :db :tx-data [{:note/text "after" :note/agent :t}] :dest {:rid 2}})
     (let [[st outs] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [(source (into (sorted-map) (for [i (range 40)] [(str "reference-code/m" i) (apply str (repeat 40 "a"))])))] :dest {:rid 1}})
           answers (into {} (keep (fn [x] (when-let [r (get-in x [:dest :rid])] [r (:r x)]))) (:to-api outs))]
       (is (= :seon.writer/refused (:seon.error/type (answers 1))) (pr-str (answers 1)))
@@ -253,7 +253,7 @@
         (is (= {:to-writer [{:op :flushed :commits 3}]} outs))
         (is (= 1 (:flushes fl)))))
     (testing "a write is answered unflushed, and the writer tells the flusher what it committed"
-      (let [[st outs] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:note/text "a"}] :dest {:rid 1}})
+      (let [[st outs] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:note/text "a" :note/agent :t}] :dest {:rid 1}})
             notice (first (:to-flusher outs))]
         (is (true? (:ok (:r (first (:to-api outs))))))
         (is (= {:op :dirty :commits (:commits st)} (select-keys notice [:op :commits])))
@@ -262,7 +262,7 @@
             (is (false? (:dirty st2)))
             (is (= 1 (- (:flushes st2 0) (:flushes st 0))))))
         (testing "a commit after the flush began: still dirty, and the flusher is told again"
-          (let [[st3 _] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:note/text "b"}] :dest {:rid 2}})
+          (let [[st3 _] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:note/text "b" :note/agent :t}] :dest {:rid 2}})
                 [st4 outs] (step #'writer/writer-proc st3 :in {:op :flushed :commits (:commits st)})]
             (is (true? (:dirty st4)))
             (is (= [{:op :dirty :commits (:commits st3)}] (mapv #(select-keys % [:op :commits]) (:to-flusher outs))))))))))))
@@ -273,7 +273,7 @@
   ;; to the api; a clean store answers at once
   (ts/test-branch! (fn [cfg conn] (let [in (a/chan 16)
         st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? true :to-writer in :events (a/chan 16)})
-        [st _] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:note/text "a"}] :dest {:rid 1}})
+        [st _] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:note/text "a" :note/agent :t}] :dest {:rid 1}})
         [st outs] (step #'writer/writer-proc st :in {:op :clean :dest {:rid 2}})]
     (is (not-any? #(= {:rid 2} (:dest %)) (:to-api outs)) "dirty: held")
     (let [[st2 outs] (step #'writer/writer-proc st :in {:op :flushed :commits (:commits st)})
@@ -299,8 +299,8 @@
     (let [in (a/chan 16)
           st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
           t0 (:max-tx @conn)
-          _ (a/>!! in {:op :tx :branch :db :tx-data [{:note/text "c"}] :dest {:rid 3}})
-          [_ outs] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:note/text "b"}] :dest {:rid 2}})
+          _ (a/>!! in {:op :tx :branch :db :tx-data [{:note/text "c" :note/agent :t}] :dest {:rid 3}})
+          [_ outs] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:note/text "b" :note/agent :t}] :dest {:rid 2}})
           n (first (:main outs))]
       (is (= 1 (count (:main outs))) "a group commit is one stored commit: one notice")
       (is (not-any? #(some? (:max-tx %)) (vals n)) "no db value in the notice")
@@ -790,14 +790,14 @@
   (ts/test-branch! (fn [cfg conn] (let [st (#'server/server-step {:db @conn :cfg cfg :store conn :conn nil})
         stored (fn [rep] {:op :tx :t (:max-tx @conn) :commit (d/commit-id @conn) :ns 0 :tx-data (pdb/report->tx rep)})]
     (testing "a main commit is read into its replica from the store"
-      (let [m (stored (d/transact conn [{:note/text "z"}]))
+      (let [m (stored (d/transact conn [{:note/text "z" :note/agent :t}]))
             [st outs] (step #'server/server-step st :cmd m)]
         (is (= (:max-tx @conn) (:max-tx (:db st))))
         (is (= [:applied] (map :ev (:ev outs))))
         (testing "and a commit it already holds is skipped"
           (is (= [st nil] (#'server/server-step st :cmd m))))
         (testing "the replica's transaction holds main's transaction facts (its instant, its tx-meta), as stored"
-          (let [m2 (stored (d/transact conn {:tx-data [{:note/text "w"}] :tx-meta {:note/text "the commit's own fact"}}))
+          (let [m2 (stored (d/transact conn {:tx-data [{:note/text "w" :note/agent :t}] :tx-meta {:note/text "the commit's own fact" :note/agent :t}}))
                 t (:t m2)
                 [st2 _] (step #'server/server-step st :cmd m2)
                 instant (fn [d] (:db/txInstant (d/entity d t)))]

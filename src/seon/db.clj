@@ -53,6 +53,65 @@
                     (and (vector? op) (= :db/add (first op)) (known? (nth op 2 nil))) (value (nth op 2) (nth op 3 nil))))
             tx-data)))))
 
+(def entity-schemas
+  "Every entity schema of the registry (a map that says `{:seon.db/attributes true}`) with the attributes it requires:
+  {schema-key [attribute ...]}. Its required keys are the ones written together, so an entity holding any of them is
+  that thing and holds them all (`invalid-entity`). See docs/storage.md#the-write-checks-every-entity-it-touches."
+  (into (sorted-map)
+        (for [[k f] contract/forms
+              :when (and (vector? f) (= :map (first f)) (map? (second f)) (:seon.db/attributes (second f)))
+              :let [req (vec (for [e (drop 2 f) :when (vector? e) :let [p (second e)]
+                                   :when (not (and (map? p) (:optional p)))]
+                               (first e)))]
+              :when (seq req)]
+          [k req])))
+
+(def ^:private requiring
+  "Each attribute an entity schema requires -> the entity schemas that require it: what a written entity is, from its keys."
+  (reduce (fn [m [k req]] (reduce #(update %1 %2 (fnil conj (sorted-set)) k) m req)) {} entity-schemas))
+
+(defn- entity-map
+  "Entity e of db as one map, from its datoms (one EAVT seek): a cardinality-many attribute's values as a set, a ref as its id."
+  {:malli/schema [:=> [:cat :seon.host/db :int] :map]}
+  [db e]
+  (let [sch (:schema db)]
+    (reduce (fn [m {:keys [a v]}]
+              (if (= :db.cardinality/many (get-in sch [a :db/cardinality])) (update m a (fnil conj #{}) v) (assoc m a v)))
+            {} (d/datoms db :eavt e))))
+
+(defn invalid-entity
+  "The first entity a transaction's report touched (a datom of it names the entity) that an entity schema its keys select
+  refuses on the db after, as the error :seon.db/invalid-entity, or nil. An entity holding any key a schema requires is
+  that thing (`requiring`), and every such schema is asked of it, open: an entity is as many things as its keys say. An
+  entity it only refers to is not touched, so not asked. Costs the touched entities' datoms, never the store's. See
+  docs/storage.md#the-write-checks-every-entity-it-touches."
+  {:malli/schema [:=> [:cat :map] [:maybe :seon.error/base]]}
+  [{:keys [db-before db-after tx-data]}]
+  (some (fn [e]
+          (let [v (entity-map db-after e)]
+            (some (fn [k]
+                    (let [s (contract/schema k)]
+                      (when-not (m/validate s v)
+                        (let [sch (:schema db-after)
+                              ident (or (some (fn [[a x]] (when (= :db.unique/identity (get-in sch [a :db/unique])) [a x])) (sort-by key v)) e)
+                              before (entity-map db-before e)
+                              older? (boolean (and (seq before) (not (m/validate s before))))]
+                          (contract/error :seon.db/invalid-entity #'invalid-entity
+                                          (str (pr-str ident) " holds keys of " k ", which refuses it" (contract/first-problem s v)
+                                               (when older? " (it was already refused before this write)"))
+                                          {:entity (pr-str ident) :schema k :before-refused older? :seon.error/problems (contract/problems s v)})))))
+                  (into (sorted-set) (mapcat requiring) (keys v)))))
+        (into (sorted-set) (keep (fn [{:keys [e tx]}] (when (not= e tx) e))) tx-data)))
+
+(defn transact-checked
+  "The writer's transact (`datahike.writing/transact!`), then `invalid-entity` of its report: a report it refuses throws
+  its error, which both write paths (seon.writer's batch, an agent's run-ahead apply) answer as a refused transaction,
+  leaving the value as it was. The connection's 'transact! (`writer-cfg`)."
+  {:malli/schema [:=> [:cat :any :map] :map]}
+  [db arg-map]
+  (let [r (datahike.writing/transact! db arg-map)]
+    (if-let [e (invalid-entity r)] (throw (ex-info (:seon.error/message e) e)) r)))
+
 (defn eid
   "The entity id of the entity whose unique attribute a has value v on db, or nil: one seek
   in a's AVET index, never a query (a Datalog query here cost ~95 us and 100 KB at 100
@@ -127,7 +186,8 @@
 ;; caller of transact, so it is THE serial writer; Datahike runs no queue, commit loop or
 ;; go block of its own (memory: commit p50 0.49 -> 0.39 ms, 639 -> 446 KB/tx, 2 threads
 ;; fewer per connection; src/proto/f1_bench.clj).
-(def writer-cfg {:backend :sync})
+;; and its 'transact! checks every entity a transaction touched (transact-checked)
+(def writer-cfg {:backend :sync :write-fn-map {'transact! #'transact-checked}})
 
 ;; ---- the durable store ----------------------------------------------------------
 ;; konserve on Jolt (libs/konserve): LMDB (konserve.jolt.lmdb) or the POSIX filestore,

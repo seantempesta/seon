@@ -370,12 +370,15 @@
     (when-let [e (program/config-refused (db) tx-data)] (throw (ex-info (:seon.error/message e) e)))
     (if (= :test (:mode @state))
       (let [r (d/with (db) tx-data) attrs (into #{} (map :a) (:tx-data r))]
+        ;; the fork applies without the writer, so it asks what the writer's transact asks (seon.db/transact-checked)
+        (when-let [e (pdb/invalid-entity r)] (throw (ex-info (:seon.error/message e) e)))
         (doc/carry-index! (:db-before r) (:db-after r) (map (juxt :e :a) (:tx-data r)))
         (swap! state #(-> % (assoc :db (:db-after r) :tx (select-keys r [:db-after :tx-data])) (schema-moved attrs)))
         (config-moved! (:db-after r) attrs)
         {:t (:max-tx (:db-after r)) :datoms (count (:tx-data r)) :local true})
       (let [r (dw/apply! (:store-conn @state) {:tx-data tx-data :tx-meta (pdb/tx-meta (:branch @state) (cond-> {} (:eval @state) (assoc :seon.tx/eval (:eval @state))))})]
-        (when-not (map? r) (throw (ex-info (str "transact refused: " (ex-message r)) {:writer-error (ex-message r)})))
+        ;; a typed refusal (seon.db/invalid-entity) reaches the eval as itself; any other carries the writer's words
+        (when-not (map? r) (throw (if (:seon.error/type (ex-data r)) r (ex-info (str "transact refused: " (ex-message r)) {:writer-error (ex-message r)}))))
         ;; :tx, the transaction that moved :db: what seon.ctx patches @ctx from; the search's text
         ;; indexes and the schema registry carried past it when it wrote none of their attributes
         (let [attrs (into #{} (map :a) (:tx-data r))]

@@ -194,10 +194,12 @@
     (is (= #{:seon.config.root/max-agents :seon.config.store/backend} (set (map :key (:seon.config/problems r)))))
     (is (every? #(= :invalid (:problem %)) (:seon.config/problems r)))))
 
-(deftest a-missing-required-key-refuses-and-nil-is-absent
-  (let [r (refused #(config/resolved (assoc config/config :seon.config.store/branching-factor nil)))]
-    (is (= [{:key :seon.config.store/branching-factor :problem :missing-key :value "nil"}] (:seon.config/problems r))))
-  ;; an optional key resolving nil is absent, not a stored nil
+(deftest a-key-resolving-nil-is-absent-and-reading-it-is-refused
+  ;; every key is optional (a task holds single keys as overrides; owner, 2026-11-08: "validate the ones that are
+  ;; there"); the shipped file states each one (the-shipped-file-validates-under-every-profile)
+  (let [c (config/resolved (assoc config/config :seon.config.store/branching-factor nil))]
+    (is (not (contains? c :seon.config.store/branching-factor)) "absent, never a stored nil"))
+  ;; a key resolving nil is absent, not a stored nil
   (is (not (contains? (config/resolved (assoc config/config :seon.config.ai/thinking nil)) :seon.config.ai/thinking)))
   (is (= :disabled (:seon.config.ai/thinking (config/resolved (assoc config/config :seon.config.ai/thinking :disabled))))))
 

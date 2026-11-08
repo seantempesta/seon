@@ -174,7 +174,7 @@
                              (transact! [{:var/name 'app.m0/f1 :var/doc \"changed inside a test\"}])
                              (is (= \"changed inside a test\" (doc-of 'app.m0/f1))))
                            (transact! [{:note/text \"f1 adds one\" :note/agent :a3}
-                                       {:var/name 'app.m0/f1 :var/doc \"f1 adds 1 to x\"}])
+                                       {:var/name 'app.m0/f1 :var/doc \"f1 adds 1 to x\" :note/agent :t}])
                            (doc-of 'app.m0/f1)"}
         replies (into {} (pmap (fn [id] [id @(c/submit! sys id (programs id))]) ids))
         _ (doseq [id ids] (out! id " " (short-items (replies id))))
@@ -1519,10 +1519,10 @@
    (fn [sys]
     (let [hit (promise)
         old @#'seon.reconcile/reconciler-proc
-        _ @(c/transact-main! sys [{:note/text "before"}])
+        _ @(c/transact-main! sys [{:note/text "before" :note/agent :t}])
         _ (alter-var-root #'seon.reconcile/reconciler-proc
                           (fn [f] (fn ([] (f)) ([a] (f a)) ([st tr] (f st tr)) ([st in m] (deliver hit true) (f st in m)))))
-        _ (dotimes [i 3] @(c/transact-main! sys [{:note/text (str "after" i)}]))
+        _ (dotimes [i 3] @(c/transact-main! sys [{:note/text (str "after" i) :note/agent :t}]))
         ;; the redefined step delivers when it runs: no poll
         _ @hit
         health (ping sys :reconciler)
@@ -1559,7 +1559,7 @@
            :plain-us (per "(identity {:x i})" n)
            :echo-us (per "(my.fx/call :echo {:x i})" n)
            :floor-us (per "(my.fx/call :nope {})" n)
-           :transact-us (per "(transact! [{:note/text \"r\"}])" (quot n 4))
+           :transact-us (per "(transact! [{:note/text \"r\" :note/agent :t}])" (quot n 4))
            :spit-us (per (str "(spit \"" dir "/a.txt\" (str \"text \" i))") n)
            :file-us (per (str "(my.fx/call :file {:path \"" dir "/b.txt\" :text (str \"text \" i)})") n)
            :send-us (per "(my.fx/send :echo {:x i})" n)
@@ -1784,7 +1784,7 @@
   (run-check "IDS" {}
    (fn [sys]
     (let [[a b] (spawn-ready! sys "ids a" "ids b")
-        notes (fn [tag n] (str "(transact! (vec (for [i (range " n ")] {:note/text (str \"" tag "\" i)})))"))
+        notes (fn [tag n] (str "(transact! (vec (for [i (range " n ")] {:note/text (str \"" tag "\" i) :note/agent :t})))"))
         _ (doall (pmap #(deref (c/submit! sys %1 (notes %2 10))) [a b] ["a" "b"]))
         ids-of (fn [ag] (ts/value-of @(c/submit! sys ag "(vec (q '[:find ?n ?tx :where [?n :note/text _ ?tx]]))")))
         ia (ids-of a) ib (ids-of b)

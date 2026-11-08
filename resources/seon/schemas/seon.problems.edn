@@ -100,6 +100,9 @@
  :seon.server/defect [:and :seon.error/base [:map [:seon.error/type [:= :seon.server/defect]] [:line :string] [:data {:optional true} :seon.db/plain]]]
  ;; a value its attribute's declared schema refuses, at the write (seon.db/invalid-datom)
  :seon.db/invalid-datom [:and :seon.error/base [:map [:seon.error/type [:= :seon.db/invalid-datom]] [:attribute :qualified-keyword]]]
+ ;; an entity a write touched that an entity schema its keys select refuses, at the write (seon.db/invalid-entity)
+ :seon.db/invalid-entity [:and :seon.error/base [:map [:seon.error/type [:= :seon.db/invalid-entity]] [:entity :string] [:schema :qualified-keyword]
+                          [:before-refused :boolean]]]
  :seon.writer/refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.writer/refused]]]]
  :seon.merge/uncontracted [:and :seon.error/base [:map [:seon.error/type [:= :seon.merge/uncontracted]]
                                                   [:uncontracted [:vector :qualified-symbol]]]]

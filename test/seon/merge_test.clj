@@ -96,7 +96,7 @@
 (deftest identical-defs-on-two-branches-merge-clean
   ;; one side makes an unrelated entity first; app/n is still one entity on both, at its
   ;; content id (docs/storage.md#ids)
-  (let [o (with (base) [{:note/text "scratch"}] (var-tx "n" "(* 2 x)"))
+  (let [o (with (base) [{:note/text "scratch" :note/agent :t}] (var-tx "n" "(* 2 x)"))
         t (with (base) (var-tx "n" "(* 2 x)"))]
     (is (= (d/q '[:find ?e . :where [?e :var/name app/n]] o) (d/q '[:find ?e . :where [?e :var/name app/n]] t)))
     (is (= {:apply [] :conflicts []} (select-keys (tw o t) [:apply :conflicts])))))
@@ -199,7 +199,7 @@
         "only the last form is live: each redefinition superseded the one before")))
 
 (deftest a-form-s-place-does-not-make-it-another
-  (let [o (with (base) [{:note/text "first"}] (var-tx "n" "(* 2 x)"))
+  (let [o (with (base) [{:note/text "first" :note/agent :t}] (var-tx "n" "(* 2 x)"))
         t (with (base) (var-tx "n" "(* 2 x)"))]
     (is (not= (get-in (pm/program o #{}) [[:form (fid "n" "(* 2 x)")] :order])
               (get-in (pm/program t #{}) [[:form (fid "n" "(* 2 x)")] :order])))
@@ -247,7 +247,7 @@
           (str "mg/check: every input its contract generates states a conflict; seed " seed)))))
 
 (deftest behind-means-main-program-moved
-  (let [observed (with (base) [{:seon.agent/id :root :seon.process/pid 9} {:note/text "run facts"}])]
+  (let [observed (with (base) [{:seon.agent/id :root :seon.process/pid 9} {:note/text "run facts" :note/agent :t}])]
     (is (empty? (:theirs (tw (base) observed))))
     (is (seq (:theirs (tw (base) (with (base) (var-tx "f" "(dec x)"))))))))
 
@@ -379,7 +379,7 @@
   (let [b (with (empty-db) (var-tx "f" "x") (var-tx "g" "x") (var-tx "h" "x")) ; the test db holds the task :app.m0/tidy and its refs
         task (d/q '[:find ?e . :where [?e :task/name :app.m0/tidy]] b)
         ref (:db/id (first (:task/refs (d/entity b task))))
-        o (with b [{:note/text "ours"} [:db/add task :task/status :done]]
+        o (with b [{:note/text "ours" :note/agent :t} [:db/add task :task/status :done]]
                 [{:schema/key :x/y :schema/form "[:int]" :schema/file "x.edn"}])
         t (with b [[:db/retract task :task/refs ref] [:db/add task :task/plan "theirs"]] (var-tx "g" "(dec x)"))]
     (doseq [da [#{} :all #{:task/status :task/refs}]]
@@ -426,7 +426,7 @@
        (try
          (d/transact bc ((var-tx "n" "1") @bc))
          (d/transact bc ((var-tx "f" "(inc x)") @bc))
-         (d/transact bc [{:note/text "a platform-free scratch note"}])
+         (d/transact bc [{:note/text "a platform-free scratch note" :note/agent :t}])
          (let [base (pdb/branch-base conn (:branch cfg) b) head @bc main @conn
                r (pm/delta-three-way base head main #{})
                ks (keys (:ours r))

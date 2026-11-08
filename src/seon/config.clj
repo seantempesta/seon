@@ -21,15 +21,16 @@
   loads with moves only at a rebuild and no file on disk can stop it starting. A process then holds
   the config of its own branch's db (`hold!`, docs/config.md#a-process-holds-its-branchs-config):
   every read takes that map, and a fork inherits it. A value resolving to nil (an unset `#env`) is
-  absent; the result must satisfy `:seon.config/config` (a closed map: an unknown key, an
-  invalid value or a missing required key refuses with `:seon.config/refused`). Root
+  absent; the result must satisfy `:seon.config/config` closed at its top (`closed`: an unknown key or an
+  invalid value refuses with `:seon.config/refused`; every key is optional, the shipped file states each one,
+  and reading a key the config lacks is refused, never nil). Root
   writes the resolved config as facts on main's root entity (`facts`), platform records a
   merge never carries, where agents, the dashboard and the context read it.
 
   A foundational namespace, below seon.contract (which reads the instrument config key here): its
   functions carry contracts in their metadata and are armed at boot."
   (:refer-clojure :exclude [resolve])
-  (:require [seon.edn :as sedn] [aero.core :as aero] [malli.core :as m] [malli.registry :as mr] [clojure.edn :as edn]
+  (:require [seon.edn :as sedn] [aero.core :as aero] [malli.core :as m] [malli.registry :as mr] [malli.util :as mu] [clojure.edn :as edn]
             [clojure.java.io :as io] [clojure.string :as str] [datahike.api :as d] [datahike.db.utils :as dbu]))
 
 ;; ---- where: the checkout (the loader's bootstrap environment read) ----------
@@ -93,7 +94,14 @@
 (def ^:private registry
   (mr/composite-registry (m/default-schemas) (mr/simple-registry schema-forms)))
 
-(def config-schema "The compiled `:seon.config/config`." (m/deref (m/schema :seon.config/config {:registry registry})))
+(defn- closed
+  "The compiled config map s closed at its top, as a config is read: an unknown key refuses it. The schema itself is open,
+  as every entity schema is (root's entity holds the config and root's own facts); nested values keep their own shape.
+  See docs/config.md#a-process-holds-its-branchs-config."
+  {:malli/schema [:=> [:cat :any] :any]}
+  [s] (mu/update-properties s assoc :closed true))
+
+(def config-schema "The compiled `:seon.config/config`, closed at its top (`closed`)." (closed (m/deref (m/schema :seon.config/config {:registry registry}))))
 
 (defn keys-declared
   "Every key the config may hold, in declaration order."
@@ -334,7 +342,7 @@
   [changes]
   (if (empty? changes)
     config-schema
-    (m/deref (m/schema :seon.config/config {:registry (mr/composite-registry (m/default-schemas) (mr/simple-registry (merge schema-forms changes)))}))))
+    (closed (m/deref (m/schema :seon.config/config {:registry (mr/composite-registry (m/default-schemas) (mr/simple-registry (merge schema-forms changes)))})))))
 
 (defn- entries-text
   "The file's text of entries {k form}: a map, one entry a line, each form as stated. See docs/config.md#a-process-holds-its-branchs-config."

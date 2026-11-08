@@ -284,6 +284,11 @@
                        [:seon.agent/ns {:optional true} :seon.agent/ns]]
  ;; a user: an agent with a person's name (docs/users.md#what-each-thing-is), its own schema by extending the agent's, so its
  ;; layout is its own and an entity holding both identities is a user whatever its keys' order (seon.render/entity-schema)
+ ;; what every start of an agent writes together (seon.task/start-tx, seon.root's own spawn): an entity holding either is a
+ ;; started agent and holds both (seon.db/invalid-entity). Its branch comes only with a task, and its turn budget it also
+ ;; writes alone on its own branch (seon.turn), so neither is a member
+ :seon.db/agent-start-fact [:map {:seon.db/attributes true :description "What every start of an agent writes together: the boot of the root that started it, and when."}
+                            [:seon.agent/boot :seon.agent/boot] [:seon.agent/started-ms :seon.agent/started-ms]]
  :seon.db/user-fact [:and {:seon.db/attributes true :seon.render/layout :seon.render/user-ctx} :seon.db/agent-fact [:map [:seon.user/name :seon.user/name]]]
  ;; ---- a citation: what an entity cites, an entity of its own (docs/references.md#an-entity-cites) ----
  ;; its content id, "<of> <target>": the citing entity's identity value (a task's :seon.task/id, an agent's
@@ -505,7 +510,9 @@
  ;; what this boot found of the root before it on this main: its stop fact, or :unclean
  :seon.root/previous-end :seon.root/end
  :seon.root/root-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.root/id :seon.root/boot :seon.root/generation :seon.root/quiescent] :seon.ctx/pattern [* {[:seon.agent/_root :as :agents :limit :seon.config.ctx/window :reverse true] [* {[:seon.agent/task :as :task] [:seon.task/id :seon.task/outcome :seon.task/reason]} {[:seon.process/_agent :as :processes] [*]} {[:seon.eval/_agent :as :evals :limit :seon.config.ctx/window :reverse true] [*]}]} {[:seon.eval/_agent :as :evals :limit :seon.config.ctx/window :reverse true] [*]}] :seon.render/hiccup seon.render.ui/root :seon.render/layout :seon.render/root-ctx}
-                          [:seon.root/id :seon.root/id] [:seon.root/boot :seon.root/boot] [:seon.root/signed-in {:optional true} :seon.root/signed-in]
+                          [:seon.root/id :seon.root/id]
+                          ;; a seeded store's root holds no boot until a root first boots on it (seon.task/entity-value reads it so)
+                          [:seon.root/boot {:optional true} :seon.root/boot] [:seon.root/signed-in {:optional true} :seon.root/signed-in]
                           [:seon.root/started-by {:optional true} :seon.root/started-by]
                           [:seon.root/wiki {:optional true} :seon.root/wiki]
                           [:seon.root/stopped {:optional true} :seon.root/stopped]

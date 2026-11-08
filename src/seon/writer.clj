@@ -219,7 +219,8 @@
           ;; one stored commit, one notice: the last report's t, every report's ops in order
           (let [st (reduce (fn [st [m rep]]
                              (if-not (map? rep)
-                               (do (answer o (:dest m) (refused (step/error-msg rep) {})) st)
+                               ;; a typed refusal (seon.db/invalid-entity) is answered as itself
+                               (do (answer o (:dest m) (or (when (:seon.error/type (ex-data rep)) (ex-data rep)) (refused (step/error-msg rep) {}))) st)
                                (let [t (:max-tx (:db-after rep)) ops (pdb/report->tx rep)]
                                  (answer o (:dest m) {:ok true :t t :datoms (count ops)})
                                  st)))
