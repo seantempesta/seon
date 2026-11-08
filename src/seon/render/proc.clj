@@ -782,10 +782,15 @@
     (cond-> st (and b (not-any? #(= b (:branch %)) (vals (:branches st)))) (drop-read b))))
 
 (defn- index-of
-  "What the web proc needs to turn a UI call into root's request: each agent's pid, branch
-  and status."
-  {:malli/schema [:=> [:cat :map] :map]}
-  [agents] (into {} (for [[id a] agents] [id (select-keys a [:pid :branch :status])])))
+  "What the web proc needs to turn a UI call into root's request (each agent's pid, branch
+  and status) and to find an agent's tabs by its stable key (:key, seon.task/agent-key in root's
+  boot, or the session's it continues: an id like :a1 starts again each boot). See
+  docs/render.md#in-flight-output-streams."
+  {:malli/schema [:=> [:cat :map [:maybe :string]] :map]}
+  [agents boot]
+  (into {} (for [[id a] agents]
+             [id (cond-> (select-keys a [:pid :branch :status])
+                   (or (:key a) boot) (assoc :key (or (:key a) (task/agent-key boot id))))])))
 
 (defn- pass
   "Render every view a tab watches (or a page or keyframe waits for), and answer the
@@ -813,7 +818,7 @@
                                  (let [[st p] (view-pass st o v)]
                                    [st (cond-> ps p (conj p))]))
                                [st []] (filter #(walk? st %) (sort-by str views)))
-          idx (index-of (get-in st [:view :agents] {}))
+          idx (index-of (get-in st [:view :agents] {}) (some-> (:main-db st) task/boot-of))
           ms (profile/ms-since t0)]
       (doseq [p patches] (step/out! o :to-web p))
       (when (not= idx (:index st)) (step/out! o :to-web {:op :index :agents idx}))
