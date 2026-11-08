@@ -166,6 +166,37 @@
          (or (nil? origin)
              (= origin (str "http://127.0.0.1:" (config/value :seon.config.web/port)))))))
 
+(defn feed-encoding
+  "The Content-Encoding a tab's feed is sent with, for a request whose Accept-Encoding header is accept:
+  :seon.config.web/feed-encoding's choice, :auto being deflate when the browser takes it; nil sends it plain. See
+  docs/render.md#in-flight-output-streams."
+  {:malli/schema [:=> [:cat [:maybe :string]] [:maybe [:enum "deflate"]]]}
+  [accept]
+  (case (config/value :seon.config.web/feed-encoding)
+    :none nil
+    :deflate "deflate"
+    :auto (when (and accept (re-find #"(?i)(^|[\s,])deflate([\s;,]|$)" accept)) "deflate")))
+
+(defn deflate-chunks
+  "A transducer of a tab's feed: each chunk (a string) as the next bytes of one zlib stream (Content-Encoding deflate),
+  flushed with Z_SYNC_FLUSH so the browser has every event as it is sent, its window (32 KB) shared across chunks, so text
+  a chunk repeats from an earlier one costs a back-reference. Its Deflater is the tab's, ended with its channel. See
+  docs/render.md#in-flight-output-streams."
+  {:malli/schema [:=> [:cat] :any]}
+  []
+  (fn [rf]
+    (let [d (java.util.zip.Deflater. (int (config/value :seon.config.web/feed-deflate-level)))
+          buf (byte-array 65536)]
+      (fn ([] (rf))
+          ([r] (.end d) (rf r))
+          ([r chunk]
+           (.setInput d (.getBytes ^String chunk "UTF-8"))
+           (let [out (java.io.ByteArrayOutputStream.)]
+             (loop [] (let [n (.deflate d buf 0 (alength buf) java.util.zip.Deflater/SYNC_FLUSH)]
+                        (when (pos? n) (.write out buf 0 n))
+                        (when (= n (alength buf)) (recur))))
+             (rf r (.toByteArray out))))))))
+
 (defn handler
   "The routes, as an edge in front of the proc's :http in-port."
   {:malli/schema [:=> [:cat :seon.host/chan] :seon.host/fn]}
@@ -200,9 +231,12 @@
               (do (a/>!! ch {:op :at :view (view-of (get q "view")) :turn turn}) {:status 204 :headers {}})
               {:status 400 :headers {"Content-Type" "text/plain"} :body (str "a step names a model call's id or latest: " t)}))
           (and (= m :get) (= uri "/feed"))
-          (let [out (a/chan 64)]
+          ;; compressed when the browser takes it (feed-encoding): each tab's stream its own, so text an update repeats is
+          ;; a back-reference on the wire
+          (let [enc (feed-encoding (get-in req [:headers "accept-encoding"]))
+                out (if enc (a/chan 64 (deflate-chunks)) (a/chan 64))]
             (a/>!! ch {:op :open :view (view-of (get q "view")) :ch out})
-            {:status 200 :headers {"Content-Type" "text/event-stream" "Cache-Control" "no-cache"} :body out})
+            {:status 200 :headers (cond-> {"Content-Type" "text/event-stream" "Cache-Control" "no-cache"} enc (assoc "Content-Encoding" enc)) :body out})
           (and (= m :get) (js uri)) {:status 200 :headers {"Content-Type" "text/javascript" "Cache-Control" "max-age=3600"} :body @(js uri)}
           (and (= m :get) (= uri "/app.css"))
           (if (.exists (java.io.File. ^String stylesheet))

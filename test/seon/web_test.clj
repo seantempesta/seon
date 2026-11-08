@@ -281,3 +281,21 @@
   (let [[st a1] (stream-tabs)
         [_ _] (#'w/web-proc st :streams (assoc msg :text ["Read" "ing <the>" " task"]))]
     (is (str/includes? (a/poll! a1) ">Reading &lt;the&gt; task</div>"))))
+
+(deftest a-feed-is-one-deflate-stream-that-a-browser-reads-as-it-comes
+  ;; owner, 2026-11-08: "enable the proper compression"; a tab's feed is one zlib stream flushed at each chunk, so each
+  ;; event inflates as it arrives, and text a chunk repeats from an earlier one is a back-reference
+  (is (= "deflate" (w/feed-encoding "gzip, deflate, br, zstd")) "a browser that takes deflate gets it")
+  (is (nil? (w/feed-encoding "identity")) "one that does not gets the feed plain")
+  (let [ch (a/chan 8 (w/deflate-chunks))
+        text (apply str (repeat 40 "Reading the <task> now. "))
+        c1 (str "event: datastar-patch-elements\ndata: elements <div>" text "</div>\n\n")
+        c2 (str "event: datastar-patch-elements\ndata: elements <div>" text " And more.</div>\n\n")
+        _ (a/>!! ch c1) _ (a/>!! ch c2)
+        b1 (a/poll! ch) b2 (a/poll! ch)
+        inf (java.util.zip.Inflater.)
+        out (byte-array 65536)
+        inflate (fn [^bytes b] (.setInput inf b) (let [n (.inflate inf out)] (String. out 0 n "UTF-8")))]
+    (is (= c1 (inflate b1)) "the first chunk inflates whole as it arrives")
+    (is (= c2 (inflate b2)) "and so does the next, in the same stream")
+    (is (< (alength ^bytes b2) (/ (count c2) 10)) (str "a chunk repeating earlier text costs a fraction of it: " (alength ^bytes b2) " bytes for " (count c2) " chars"))))
