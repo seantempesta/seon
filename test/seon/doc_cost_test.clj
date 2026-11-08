@@ -161,7 +161,7 @@
                :sizes [60 180 600]}))
 
 (deftest search-costs-its-texts
-  (cost/proof {:of 'seon.context/search :input 'seon.doc-cost-test/search-input
+  (cost/proof {:of 'seon.ctx.search/search :input 'seon.doc-cost-test/search-input
                :n "texts the branch holds (forms, sections, task plans and schema entries), ten of each kind holding the word"
                :work "one FTS5 query of the index (built once for the value), BM25 and a z-score of its rows, then per hit its names and its line; the references of the names in the query; relevance over the first k x related-near hits (a bounded pool)"
                :growth :linear

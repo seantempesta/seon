@@ -5,7 +5,7 @@
     (my.render/render-changes)  what moved since you last asked, as edits; nothing when nothing did
     (my.render/redo-changes)    your page's evals made true again after you removed or re-ran one"
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [seon.render :as render] [seon.repl :as repl] [seon.agent :as agent] [seon.context :as context] [seon.ctx :as ctx] [datahike.api :as d]))
+  (:require [seon.contract :refer [defn defn-]] [seon.render :as render] [seon.repl :as repl] [seon.agent :as agent] [seon.ctx.wire :as wire] [seon.ctx :as ctx] [datahike.api :as d]))
 
 (defn tree
   "What draws what in this agent's live walk (the one its model's page and its person's page are drawn from, brought up to
@@ -38,6 +38,6 @@
   "Your page's evals made true again after you removed or re-ran one: each whose :since is no longer what the eval before it showed answers anew, in place, what moved between them, drawn from the page as of each t. An explicit bust of your model's cache from the first it changes. Answers the ids it changed. See docs/render.md#a-redo-is-an-explicit-bust."
   {:malli/schema [:=> [:cat] [:vector :string]]}
   []
-  (let [db (agent/db) tx (context/redo-tx db (:db/id @ctx/ctx) @ctx/ctx)]
+  (let [db (agent/db) tx (wire/redo-tx db (:db/id @ctx/ctx) @ctx/ctx)]
     (when (seq tx) (agent/transact! tx) (agent/commit!))
     (mapv :seon.eval/id tx)))

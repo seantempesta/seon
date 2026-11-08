@@ -583,7 +583,7 @@
   "Each ready :implement task, which holds its design step's plan along :needs (seon.task/accumulate),
   whose accumulated plan cites no program var (no cite of one along its needs, seon.task/cites-of: the
   context pulls no var for it), that names no proof, or one of whose proofs is still the placeholder
-  seon.context writes, as an :uncited-task row with its reason (:no-references, :no-proofs,
+  seon.ctx writes, as an :uncited-task row with its reason (:no-references, :no-proofs,
   :placeholder-proof). A design step's plan is text, its input: design writes the cited plan,
   so only the implement step is judged. Closed when the design step's plan cites a name, the
   proofs are named and written. Cost: the task, kind, reference and proof datoms once, then a

@@ -175,7 +175,7 @@
       (is (empty? (ghosts db0))))))
 
 (deftest loading-an-example-twice-changes-nothing-and-a-missing-file-is-an-error
-  ;; my.root/load-example!: an example session's file (seon.context/session-tx's transactions, written with pr-str)
+  ;; my.root/load-example!: an example session's file (seon.ctx.session/session-tx's transactions, written with pr-str)
   ;; is transacted once; a second load of it writes nothing (main's t does not move); a file that is not there,
   ;; does not read or is not that vector is the :seon.root/example-refused error and writes nothing
   ;; (on the process's shared root, with keys of its own: a root's boot was most of this test's time)

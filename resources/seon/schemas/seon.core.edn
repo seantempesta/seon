@@ -102,7 +102,7 @@
                       [:ns {:optional true} :symbol]
                       ;; code of several top-level forms: how many ran, its :value each one's in order (seon.repl/response)
                       [:forms {:optional true} [:int {:min 2}]]
-                      ;; what the forgiving reader changed of the call's code before it ran (seon.context/repaired)
+                      ;; what the forgiving reader changed of the call's code before it ran (seon.ctx.search/repaired)
                       [:repaired {:optional true} :seon.eval/repairs]
                       ;; each existing var whose contract or docstring this eval changed, its before and
                       ;; after and the wiki sections citing it (seon.program/meaning-changes); absent when none

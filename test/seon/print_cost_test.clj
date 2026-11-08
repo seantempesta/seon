@@ -103,7 +103,7 @@
          ;; root's node and sizing, tree, emit-both, node-ops, layout and their helpers): 79 calls
          ;; (71 until an entry of two leaves was charged its flat width, 2026-10-25: the least form,
          ;; seon.print.select/minimal, then checks one more member whole, seven calls; and estimate
-         ;; became chars-tokens over a text's length, its rule shared with seon.context/messages-tokens:
+         ;; became chars-tokens over a text's length, its rule shared with seon.ctx.wire/messages-tokens:
          ;; one call more; 80 with seon.print.select/lifted-namespace, the one decision of a map's
          ;; #:ns{ lift, made once per map over its keys with no call per key)
          :fixed (dissoc (armed fixed 86 170) :ns)

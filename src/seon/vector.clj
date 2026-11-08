@@ -98,7 +98,7 @@
 (defn scores
   "The cosine of vector q with the vector of each entity of es on db, in es's order (the fine level,
   c-fine, over their first fd dims, each prefix renormalized: all of q's unless given), nil for an
-  entity with no vector: `near`'s ranking of its shortlist, and seon.context/relevance's of a pool.
+  entity with no vector: `near`'s ranking of its shortlist, and seon.ctx.search/relevance's of a pool.
   Cost: two seeks an entity (its vector entity by :seon.vector/of, inlined: `vector-e` is a contracted call an entity, then the vector)."
   {:malli/schema [:function [:=> [:cat :seon.host/db [:vector {:min 1} number?] [:sequential :int]] [:vector [:maybe number?]]]
                   [:=> [:cat :seon.host/db [:vector {:min 1} number?] [:sequential :int] pos-int?] [:vector [:maybe number?]]]]}

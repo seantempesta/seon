@@ -230,7 +230,7 @@
  :seon.agent/ended-ms :int
  ;; a test run that failed as a whole (its fork refused, a namespace did not load): the error as data (its type, message and
  ;; data keys), written on the agent's branch by its turn (seon.turn/observe) and retracted when a run answers;
- ;; present only while it is so (seon.context/status)
+ ;; present only while it is so (seon.ctx.status/status)
  :seon.agent/test-error :seon.error/base
  ;; how its work ended, as the agent writes it on its branch (seon.agent/write-end!), naming its turn: root reads it at judging
  ;; (seon.reconcile/pull-end), and an end whose turn is not past the wake's is none (:no-end)
@@ -250,12 +250,12 @@
  ;; main's head and its branch's merge base as it last heard them (seon.agent's state :main, :base), the commits the
  ;; page's branch views read, written by its turn, so a cold build draws what the live page does
  :seon.agent/main-commit :uuid
- ;; of those mains, the newest whose content (seon.merge/content-datoms) moved: what seon.context/status reads, as a commit that moved
+ ;; of those mains, the newest whose content (seon.merge/content-datoms) moved: what seon.ctx.status/status reads, as a commit that moved
  ;; none of it, root's note of an agent's status on each eval, changes no answer it gives (docs/render.md#how-the-work-stands)
  :seon.agent/main-program :uuid
  :seon.agent/base-commit :uuid
  ;; the namespace its REPL is in, as its newest eval left it (seon.repl/record-tx: a datom when it moved), so a cold
- ;; build draws what the live page does; before any, where the REPL starts (seon.context/current-ns)
+ ;; build draws what the live page does; before any, where the REPL starts (seon.ctx/current-ns)
  :seon.agent/ns :symbol
  :seon.db/eval-fact [:map {:seon.db/attributes true :seon.render/hiccup seon.render.ui/evaluation}
                      [:seon.eval/id :seon.eval/id] [:seon.eval/agent :seon.eval/agent] [:seon.eval/by {:optional true} :seon.eval/by]
@@ -303,12 +303,12 @@
  ;; the cite as ctx holds it: what it names joined (a section with its sections below; a var with its
  ;; form and newest callers, each caller with the vars it defines; a task; a schema key's entry; a
  ;; namespace), drawn by its two renders (docs/render.md#a-component-answers-hiccup)
- ;; a search an agent's context holds: what it asks, drawn at each page draw by seon.context/search on the
+ ;; a search an agent's context holds: what it asks, drawn at each page draw by seon.ctx.search/search on the
  ;; branch's db (seon.render.ui/searched), so a change of its query (a swap! on ctx) redraws that part alone
  :seon.search/id [:and {:seon.db/identity true :seon.db/content-id true} :string]
  ;; the entity whose context holds it: a task (its request's, written with the task) or an agent
  :seon.search/of :seon.db/ref
- ;; the words searched: matched as words, by meaning and by the names they hold (seon.context/search)
+ ;; the words searched: matched as words, by meaning and by the names they hold (seon.ctx.search/search)
  :seon.search/query :string
  ;; how many hits are shown, when the search asks other than :seon.config.render/search
  :seon.search/k pos-int?
@@ -338,9 +338,9 @@
  :seon.task/instructions [:string]
  :seon.task/proofs [:set :qualified-symbol]
  :seon.task/needs [:set :seon.db/ref]
- ;; the example sessions its agent reads before its own (seon.context/request): agents keyed "example/<id>"
- ;; (seon.context/session-tx), drawn by the renders that draw its own session
- :seon.task/examples [:set {:description "The example sessions its agent reads before its own: refs to agents keyed \"example/<id>\", finished sessions of other tasks, which the model reads as messages (seon.context/request) and the page draws with seon.render.ui/examples. See docs/tasks.md#a-task-names-example-sessions."} :seon.db/ref]
+ ;; the example sessions its agent reads before its own (seon.ctx.wire/request): agents keyed "example/<id>"
+ ;; (seon.ctx.session/session-tx), drawn by the renders that draw its own session
+ :seon.task/examples [:set {:description "The example sessions its agent reads before its own: refs to agents keyed \"example/<id>\", finished sessions of other tasks, which the model reads as messages (seon.ctx.wire/request) and the page draws with seon.render.ui/examples. See docs/tasks.md#a-task-names-example-sessions."} :seon.db/ref]
  :seon.task/branch :keyword
  :seon.task/model :string
  :seon.task/execution [:and {:seon.db/index true} [:enum :held :running :cancelled]]
@@ -618,7 +618,7 @@
  ;; not its prompt): the commit it read, its task, run and turn, the observations no db
  ;; holds (the proofs' results, red assertions, reasons, the run's errors), whether the
  ;; branch's unmerged entries show, and the last evaluations' transcript while no earlier turn
- ;; shows them. seon.context/render makes the exact user message from it on that commit.
+ ;; shows them. seon.ctx.wire/render makes the exact user message from it on that commit.
  :seon.model-call/basis [:map [:commit :uuid] [:t {:optional true} :int] [:task :seon.task/id]
                    [:turn :int] [:max-turns :int] [:origin :seon.model-call/origin]
                    [:merge? {:optional true} :boolean]
