@@ -13,7 +13,7 @@
   [thunk] (profile/begin!) (thunk) (into {} (map (juxt :var :calls)) (profile/touched)))
 
 ;; docs/cost.md#counting-calls: what a test read is what its verdict's digest will be made of, so a nested measure (an eval, a cost proof) must not lose it
-;; docs/sharing.md#a-metric-accretes: stats add exactly, however they were split
+;; docs/sharing.md#a-functions-cost-is-a-fact: stats add exactly, however they were split
 (deftest stats-add-the-same-however-they-were-split
   (let [f (fn [c t] {:var 'a/f :calls c :ticks t :self-ticks t :bytes t :self-bytes t})
         once (profile/accrue {} [(f 2 100) (f 1 1000)] "e1")

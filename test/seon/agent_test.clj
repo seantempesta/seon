@@ -847,7 +847,7 @@
     (is (true? (:value again)) "a run that changes nothing writes no datoms")))
 
 (deftest a-green-that-is-no-proof-writes-no-fact
-  ;; docs/sharing.md#what-a-real-branch-spends-its-nodes-on: a green that is no proof of the task is read by nothing
+  ;; docs/sharing.md#what-a-branchs-nodes-are: a green that is no proof of the task is read by nothing
   ;; on this branch (seon.reconcile/done-explain reads proofs and reds), and its facts on its var rewrite a leaf
   ;; among the program's. A red is held, and stays held when it goes green, so it never reads as still red
   (let [facts "(into {} (for [t '[green-test/proof green-test/other green-test/turned]] [t (:seon.test/status (datahike.api/pull (seon.agent/db) [:seon.test/status] [:var/name t]))]))"
@@ -2248,8 +2248,8 @@
     (is (not= (:value before) (:value after)) "a schema the branch registers moves a process test's digest")
     (is (not= (:value after) (:value after-script)) "and so does a script the branch writes")))
 
-;; docs/sharing.md#what-a-real-branch-spends-its-nodes-on: a process test that is no proof keeps its :deferred fact and takes the gate's green over it,
-;; docs/sharing.md#a-metric-accretes: what a function cost is queryable on the branch, and adds up across commits, written only with a commit going out anyway
+;; docs/sharing.md#what-a-branchs-nodes-are: a process test that is no proof keeps its :deferred fact and takes the gate's green over it,
+;; docs/sharing.md#a-functions-cost-is-a-fact: what a function cost is queryable on the branch, and adds up across commits, written only with a commit going out anyway
 (deftest what-a-function-cost-is-a-fact-on-the-branch
   (let [stats "(:seon.fn/stats (datahike.api/pull (seon.agent/db) [:seon.fn/stats] [:seon.fn/var 'seon.lib/digest]))"
         called "(do (seon.lib/digest \"x\") (seon.lib/digest \"y\") (seon.agent/transact! [{:seon.eval/id \"probe\" :seon.eval/by \"probe\"}]) (seon.agent/commit!) :ok)"

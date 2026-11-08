@@ -287,7 +287,7 @@
     (:result (await-reply k {:op :launch :k k :text text :template template}))))
 
 (defn note-costs!
-  "fns (seon.profile/touched of an eval) added to what this agent has measured since its last commit; nothing in a process that is no agent's. See docs/sharing.md#a-metric-accretes."
+  "fns (seon.profile/touched of an eval) added to what this agent has measured since its last commit; nothing in a process that is no agent's. See docs/sharing.md#a-functions-cost-is-a-fact."
   {:malli/schema [:=> [:cat [:vector :seon.profile/fn-cost]] :any]}
   [fns]
   (when (:store-conn @state)
