@@ -2159,6 +2159,49 @@
     (is (str/includes? (tile db3) "It is six.") "its answer once root writes it")
     (is (str/includes? (tile db3) "And times three?"))))
 
+(deftest the-most-specific-schema-names-an-entity
+  ;; docs/ctx.md#the-pattern: an entity holding a user's and an agent's identity is a user whatever its keys' order (Context,
+  ;; 2026-11-08: the first key named the schema, so a map's order decided its pattern, render and layout)
+  (is (= :seon.db/user-fact (r/entity-schema (array-map :seon.agent/key "sean" :seon.user/name "sean") nil)))
+  (is (= :seon.db/user-fact (r/entity-schema (array-map :seon.user/name "sean" :seon.agent/key "sean") nil)) "in either order")
+  (is (= :seon.db/agent-fact (r/entity-schema {:seon.agent/key "b2/a1"} nil)))
+  (is (= :seon.db/user-fact (r/schema-of (array-map :seon.agent/key "sean" :seon.user/name "sean") nil)) "and a value's schema the same way")
+  (is (= (r/schema-property :seon.db/agent-fact :seon.ctx/pattern) (r/schema-property :seon.db/user-fact :seon.ctx/pattern))
+      "a user's pattern is the agent's it extends")
+  (is (= :seon.agent/key (some #{:seon.agent/key} (keys r/entity-schemas))) "an attribute an extended schema names")
+  (is (= :seon.db/agent-fact (r/entity-schemas :seon.agent/key)) "is named by that schema alone"))
+
+(deftest two-unrelated-identity-schemas-are-an-error
+  ;; docs/ctx.md#the-pattern: a record whose identities name schemas neither extends is no one thing: an error naming them, never the
+  ;; first key's; a value an agent made of such keys is drawn as the data it is
+  (let [m (array-map :seon.task/id "x/y" :seon.agent/key "k")
+        e (is (thrown? clojure.lang.ExceptionInfo (r/entity-schema m nil)))]
+    (is (= :seon.render/no-one-schema (:seon.error/type (ex-data e))))
+    (is (= #{:seon.task/task-fact :seon.db/agent-fact} (set (:schemas (ex-data e))))))
+  (is (nil? (r/schema-of (array-map :seon.task/id "x/y" :seon.agent/key "k") nil)) "no schema is guessed for a value"))
+
+(deftest an-entitys-schema-names-its-layout
+  ;; docs/render.md#the-page: the layout that draws a record is the one its entity schema names, or the one it extends names
+  (is (= #'ui/render-ctx (r/layout-of {:seon.agent/key "b2/a1"})))
+  (is (= #'ui/user-ctx (r/layout-of (array-map :seon.user/name "sean" :seon.agent/key "sean"))))
+  (is (= #'ui/root-ctx (r/layout-of {:seon.root/id :root})))
+  (let [e (is (thrown? clojure.lang.ExceptionInfo (r/layout-of {:seon.eval/id "e1" :seon.eval/code "x"})) "a record no layout draws is an error, never a nil walk")]
+    (is (= :seon.render/no-layout (:seon.error/type (ex-data e))))
+    (is (= [:seon.eval/id] (:identity (ex-data e))) "naming what it is"))
+  (is (= :seon.render/no-layout (:seon.error/type (ex-data (is (thrown? clojure.lang.ExceptionInfo (r/layout-of {})))))) "and one with no identity at all"))
+
+(deftest each-page-draws-its-entitys-layout
+  ;; docs/render.md#a-page-is-a-kept-walk: root's, a user's and an agent's kept walks each draw the layout their entity names, no
+  ;; caller choosing it
+  (let [db0 (sessions-db "b2" [["b2/a1" :a1 :running "seon.print/a-long-string" :running :task-a]])
+        db (d/db-with db0 [{:seon.agent/key "sean" :seon.user/name "sean"}])
+        walk-layout (fn [eid branch ident] (let [kw (#'p/kept-walk db eid branch ident identity)]
+                                              (try (first (:root (:w kw))) (finally (r/dispose-walk! (:w kw))))))]
+    (is (= #'ui/user-ctx (walk-layout (:db/id (d/entity db [:seon.user/name "sean"])) :main {})))
+    (is (= #'ui/root-ctx (walk-layout (:db/id (d/entity db [:seon.root/id :root])) :main {})))
+    (is (= #'ui/render-ctx (walk-layout (:db/id (d/entity db [:seon.agent/key "b2/a1"])) :main {:seon.agent/key "b2/a1"})))
+    (is (= #'ui/render-ctx (walk-layout nil :task-a {:seon.agent/key "b2/a1"})) "a branch that holds no entity yet: the agent's key names it")))
+
 (deftest a-users-page-moves-with-main
   ;; docs/render.md#a-page-is-a-kept-walk: a user's page is a kept walk, as root's is: a move of main draws what it reached, so an agent it starts appears on a page already open
   (let [db0 (sessions-db "b2" [["b2/a1" :a1 :running "seon.print/a-long-string" :running :task-a]])

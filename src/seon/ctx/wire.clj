@@ -117,7 +117,7 @@
   {:malli/schema [:=> [:cat :seon.host/db :int :int] :map]}
   [db a t]
   (let [at (at-t db t)
-        w (render/draw (ctx/agent-ctx at a) ctx/changes at (render/declared-var :seon.render/render-ctx) {:model-only true :once true})]
+        w (let [t (ctx/agent-ctx at a)] (render/draw t ctx/changes at (render/layout-of (merge {:seon.agent/key (:seon.agent/key (d/entity at a))} t)) {:model-only true :once true}))]
     (try (render/placed-hiccup w (render/page-lists w)) (finally (render/dispose-walk! w)))))
 
 (defn redo-tx
@@ -182,7 +182,7 @@
    (if walk
      (request walk)
      (let [t (or ctx (ctx/agent-ctx db (pdb/eid db :seon.agent/key agent)))
-           w (render/draw t ctx/changes db (render/declared-var :seon.render/render-ctx) {:model-only true :once true})]
+           w (render/draw t ctx/changes db (render/layout-of (merge {:seon.agent/key agent} t)) {:model-only true :once true})]
        (try (request w) (finally (render/dispose-walk! w)))))))
 
 (defn provider-of
