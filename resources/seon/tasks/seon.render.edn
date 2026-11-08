@@ -146,11 +146,8 @@ The rules:
 
    The patch is built from the walk's changed components (rule 4's c), so its bytes are those components' HTML. A tab behind its commit gets the patch for diff(its commit, current), and a tab with no view yet gets one whole page.
    - The one cache the owner names: the patch for a view at a commit, built once and shared by every tab showing that view, keyed by (view, commit) and dropped when the walk says the view moved. seon.web already serializes a patch once and offers it to every tab; this keeps that, keyed by the commit. No other step relies on a cache: every stop line is met cold, with Optimization's minimum work as the target.
-10. **In-flight output is the owner's choice** (priced by Optimization). Committing each chunk is rejected: about 0.3 M ticks a chunk, and every chunk a moved datom in every later diff (100 chunks, 30 M ticks and 100 commits). Two options:
-   - (a) the eval's start as one fact: the page shows \"running since…\", and the output is committed once when the eval ends. Pure db.
-   - (b) the same, plus live chunks streamed to watchers on a Flow channel, never committed: live output, but the page shows what the db doesn't hold until the eval ends.
-
-   STOP for either: an eval's committed datoms > its final output's plus O(1).
+10. **In-flight output streams live** (owner's choice, 2026-11-08: \"stream live\"). The eval's start is one fact. Its output chunks go to the tabs watching that agent on a Flow channel as they come, never committed. The output is committed once, when the eval ends. Committing each chunk was rejected: about 0.3 M ticks a chunk, and every chunk a moved datom in every later diff.
+   - STOP: an eval's committed datoms > its final output's plus O(1); a chunk sent to a tab not watching that agent.
 
 Cost proofs: the minimum each step should take, and a stop line at 2× it (Optimization, 2026-11-08; about 40 k ticks a ms; per turn m ≈ 56 moved datoms once jolt/fn-stats-at-end lands, c ≈ 2 touched components, b a few KB). Our Datahike fork keeps no transaction log, so a cold read diffs commits, made cheap by Optimization's fork work.
 - **A live turn:** the transaction's own report holds its m datoms, so there is no diff. Match them against the walk's read index (O(m log r), about 10 k), rerun c components (30-50 k each), diff their forms (about 20 k) and print b bytes. Minimum about 0.1 M a turn. STOP 0.3 M.
