@@ -112,6 +112,7 @@ The rules:
    - The delta covers what the branch changed and what main changed since. Never take each render's reach downward (seon.render/render-reach measured 559 MB for seon.print/text, docs/render.md#reactive-renders).
    - Verified by Context: a branch's registered schemas are data on the branch (seon.repl/branch-registry, seon.merge/divergence), so my.schema/register! layouts count.
    - Cost (Optimization, for per-var form reads): about 0.5 M ticks for 50 render vars; the walk-up is O(callers of what changed). STOP > 2 M per draw (then compare one content id over the render namespaces). 31% of last week's 261 merges to main touched render, ctx or context, all our sessions' branches; a Seon agent's task branch rarely does. A fork only for an ended agent's branch whose renders differ, spawned on a view and ended when the last viewer leaves; STOP: more than 2 alive at once, and count how often real views need one before building more for it.
+   - The load, once built: about 14 M ticks and 120 MB, once per (branch, commit's program), and a second view of the same commit reuses it. STOP: more than one load per key, more than 2 alive at once, or one started for a commit whose render vars root can draw.
    - Not built: a process on a branch holds main's program plus what it evaluated itself. Drawing c by c's program needs the program-diff load (fork, load the diff from main's image to c, about 0.35 s and 120 MB while viewed; docs/turn.md#the-turn-is-a-number, task seon.reconcile/root-work-is-tasks). That is its own build step, owned there. Until it lands, root drawing a branch whose renders differ is a known gap the page states, not hides.
 3. **What each reader needs is data in the pull.**
    - Who views an agent is a fact on the user entity, written on open and close only, never per eval. A page's position (scroll, the turn chosen) is data there too.
@@ -143,19 +144,27 @@ The rules:
 
    STOP for either: an eval's committed datoms > its final output's plus O(1).
 
-Cost proofs, each a stop line: exceeded, the work stops and is fixed (Optimization's review; ~40 k ticks a ms):
-- **A turn's own work:** datoms a turn moves that aren't the turn's own work: ≤ 5% of the turn (the fn-stats class; jolt/fn-stats-at-end takes a turn from 410 datoms to about 56).
-- **One new eval, at e=10 and e=100:** reruns its component and its turn list's append, and pushes under 0.2 M ticks and 5 KB, flat. STOP: e=100 > 2× e=10.
-- **The Datastar patch for one new eval:** one SSE event of one append, its bytes ≤ 1.2× that eval's HTML, flat in e. STOP: e=100 > 2× e=10, or any patch replacing a container for a change inside it.
+Cost proofs: the minimum each step should take, and a stop line at 2× it (Optimization, 2026-11-08; about 40 k ticks a ms; per turn m ≈ 56 moved datoms once jolt/fn-stats-at-end lands, c ≈ 2 touched components, b a few KB). Our Datahike fork keeps no transaction log, so a cold read diffs commits, made cheap by Optimization's fork work.
+- **A live turn:** the transaction's own report holds its m datoms, so there is no diff. Match them against the walk's read index (O(m log r), about 10 k), rerun c components (30-50 k each), diff their forms (about 20 k) and print b bytes. Minimum about 0.1 M a turn. STOP 0.3 M.
+  - Waste to remove: today's measured turn (flush plus read, 333-499 k, docs/render.md) is 3-5× this. Find which components rerun beyond the touched c. That is a task now, owned by Web (the walker).
+- **One new eval:** reruns its component and its turn list's append; the commit carries under 5 KB. STOP: e=100 > 2× e=10.
+- **The Datastar patch for one new eval:** one SSE event of one append, its bytes ≤ 1.2× that eval's HTML (expect about 1.05×). STOP: e=100 > 2× e=10, or any event carrying a whole container for a change inside it. seon.web/patch-event names the smallest changed element's id.
+- **The browser's morph** (idiomorph is O(nodes of its target)). STOP: patch-to-paint per eval > 16 ms at e=100 in the built-in browser, or > 2× e=10.
 - **The push against root's branch-walk!:** measured per eval commit on one real agent. STOP: the push ≥ 25% of branch-walk!, then keep branch-walk!.
-- **A cold draw at 1,000 evals:** ≤ 1.5× the same at 100, window fixed.
-- **The diff:** ≤ 2 k ticks per moved datom after both fixes, under 10 M at 100 commits behind (today 10.7 k a datom: 60 M at k=100).
-- **A restart's rebuild of the request:** ≤ 50 M ticks at T=100 (0.5 M a turn), met by the diff fixes. If missed, the fallback is a store cache keyed by its inputs (the points plus the render code reached), which the cache law allows, put to the owner with numbers. Never stored request bytes.
+- **A cold advance by one turn** (a past point, a lagging tab, the changes input): the diff of two commits over the attributes the walk reads, at 1-2 k a moved datom with decoded nodes cached and candidates from the leaf merge (about 0.1 M), plus a live turn's work. Minimum about 0.2-0.3 M. STOP 0.6 M a turn and 2 k a moved datom (today 10.7 k: decode and candidate waste, Optimization's).
+- **The changes input:** one diff per pair of points, about 0.1 M. STOP 0.3 M, and never computed twice for one pair.
+- **A tab k commits behind:** one diff over the read attributes between its point and the head (O(unshared nodes in the range)), never k diffs, then a live turn's work. Expect under 1 M at k=10 and under 5 M at k=100. STOP 2× that.
+- **A restart** (rebuild the next request):
+  - Draw point T cold once. The request is printed anyway, so this is the floor, growing with the conversation at about 0.1 M a turn's component.
+  - Run one diff from point 1 to point T over the attributes the turn components read. It tells which earlier turns' content changed after they were sent; 40 of 42 of Context's per-turn diffs were empty.
+  - Draw only those turns at their own points (about 0.15 M each).
+  - Expect 12-15 M at T=100 and 120-150 M at T=1,000. STOP: above 2× one cold draw at point T, or any turn advanced whose read datoms didn't move.
+  - Advancing one walk through every turn (about 54 M at T=100 today, 34 M after fixes) is the waste this avoids. No stored copy, ever (rule 8).
+- **The openai render per eval:** O(changed components) plus O(turns) assembly of cached outputs, run only at a model call. STOP: at T=100 > 2× at T=10, more than today's wire-parts on the same agent (measure both before deleting it), or a rerun at an eval no model call reads.
 - **A code edit:** re-renders no turn it doesn't reach. Proof, red first: change a helper two calls below a render, and only the turns it drew re-render.
-- **The openai render per eval:** O(changed components) plus O(turns) assembly, run only at a model call; under 0.3 M ticks at T=100. STOP: at T=100 > 2× at T=10, more than today's wire-parts on the same agent (measure both before deleting wire-parts), or the render rerunning at an eval no model call reads.
-- **The changes input:** computed once per pair of points, ≤ 1 M ticks a turn after the diff fixes (about 0.6 M today).
-- **Request bytes:** per turn, growing no faster than the turn's new content.
-- **A cold derive:** ≤ 2 M ticks a turn, and growth from T=10 to T=100 ≤ 11× (today 296.6 M at 42 turns; about 70 M expected after the stats and diff fixes).
+- **A cold page draw at 1,000 evals:** ≤ 1.5× the same at 100, window fixed.
+- **A turn's own work:** datoms a turn moves that aren't the turn's own: ≤ 5% (the fn-stats class).
+- **Request bytes per turn:** growing no faster than the turn's new content.
 - Plus correctness proofs, red first:
   - a dropped push still shows the branch's commit;
   - a restart with nothing moved sends the model nothing;
@@ -167,7 +176,8 @@ Owners:
 - Web: rules 1 (the openai and html renders as walk components, with Context), 2's check, 3's viewer facts, 4, 5, 7, 9, and the turn as a list first.
 - reconcile's task (seon.reconcile/root-work-is-tasks): the program-diff load that rule 2 needs.
 - Context: rule 6's model side and attribute set, the openai render's content (with Web), the rewrite of seon.render/what-the-model-knows-is-its-record to rule 1's shape, and B's proposal to the owner.
-- Optimization: the diff in the forks, and the cost proofs' numbers.
+- Optimization: the diff in the forks and seon.db (decode, candidates, attribute restriction), and the cost proofs' numbers.
+- Web also: the walker's 3-5× flush waste (components rerun beyond those touched).
 
 Order:
 1. Context's seon.context split (into seon.ctx, seon.ctx.search, .status, .wire, .session), next as agreed.
