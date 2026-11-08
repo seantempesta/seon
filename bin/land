@@ -10,12 +10,31 @@
 #      the proof is merged in and landed without proving again (what it gained was proved when it
 #      landed), a conflict stops it;
 #   4. the main tree's files follow main (bin/update does it first) and bin/update restarts the
-#      standing root on main.
+#      standing root on main;
+#   5. the worktree, once landed, is removed with its merged branch (bin/worktree --remove; owner,
+#      2026-11-08: "Why are we always having to do cleanup?"), unless something in it is uncommitted
+#      or untracked, or a process other than this landing's own works there: then it is kept, and
+#      the line says why. The next change starts in a new worktree (bin/worktree NAME).
 # MSGFILE is the merge message (what it completes, its numbers: AGENTS §3); bin/prove's line is added.
 # SEON_UPDATE_ARGS: bin/update's arguments, the standing root's (default --profile deepseek).
 # The last line is LANDED or LAND FAILED, and the exit status says the same.
 setopt pipefail
 fail() { print -u2 "land: $*"; print "LAND FAILED"; exit 1 }
+# tidy: remove the landed worktree $HERE and its branch $B, or say what keeps it. A process works there when its
+# working directory is in it; this landing's own ancestors (the shell that ran it) are not counted.
+tidy() {
+  cd "$MAIN"  # out of $HERE first, so the scan's own children are not counted as working there
+  local d=$(git -C "$HERE" status --porcelain --ignore-submodules | head -3) p q mine=" $$ " others=()
+  q=$$; while (( q > 1 )); do q=$(ps -o ppid= -p $q | tr -d ' '); [[ -n $q ]] || break; mine+="$q "; done
+  lsof -d cwd -Fpn 2>/dev/null | while read -r l; do
+    case $l in p*) p=${l#p} ;; n$HERE|n$HERE/*) [[ $mine == *" $p "* ]] || others+=$p ;; esac; done
+  if [[ $HERE != $MAIN/.worktrees/* ]]; then print "worktree kept: $HERE is not one bin/worktree made"
+  elif [[ -n $d ]]; then print "worktree kept: uncommitted or untracked in $HERE: ${d//$'\n'/, }"
+  elif (( $#others )); then print "worktree kept: processes work in $HERE: ${others[1,5]}"
+  else "$MAIN/bin/worktree" --remove "${HERE:t}" >/dev/null && git branch -q -d "$B" &&
+    print "removed worktree $HERE and its branch $B" || print "worktree kept: removing $HERE failed"
+  fi
+}
 MSG=
 [[ ${1:-} == -F ]] && { MSG=${2:A}; [[ -f $MSG ]] || fail "no message file $2"; shift 2 }
 (( $# == 0 )) || fail "unknown arguments: $*"
@@ -53,7 +72,7 @@ for i in 1 2 3 4 5 6 7 8 9 10; do
     print "main $(git log --oneline -1 "$NEW" | cut -c1-100)"
     UARGS=(${=SEON_UPDATE_ARGS:---profile deepseek})
     nice -n 15 "$MAIN/bin/update" $UARGS | tail -1
-    print LANDED; exit 0
+    tidy; print LANDED; exit 0
   fi
 done
 fail "main moved under ten merges in a row"
