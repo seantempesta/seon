@@ -1404,9 +1404,10 @@
             _ (d/transact conn [{:seon.message/id "mid" :seon.message/to [[:seon.agent/key "b/a1"]] :seon.message/call (seon.task/call-ref "b/a1" 1) :seon.message/from "owner" :seon.message/body "note taken in turn 1"}])
             r1 (ask! 1)]
         (is (= (:messages r0) (subvec (:messages r1) 0 (count (:messages r0)))) "request 2 starts with request 1 whole, its page the first request's")
-        (is (= ["system" "user" "assistant" "tool" "user" "assistant" "tool"] (mapv :role (:messages r1)))
-            "then the message of turn 1 (before turn 1's eval, though written after it), the eval and its result")
-        (is (str/includes? (:content (nth (:messages r1) 4)) "note taken in turn 1"))))))
+        (is (= ["system" "user" "assistant" "tool" "user" "assistant" "tool" "assistant" "tool"] (mapv :role (:messages r1)))
+            "then the message of turn 1 (before turn 1's eval, though written after it), the eval and its result, then the page's change: the status says a message came after the plan")
+        (is (str/includes? (:content (nth (:messages r1) 4)) "note taken in turn 1"))
+        (is (str/includes? (:content (last (:messages r1))) "came after your plan last changed") "the change is that one step")))))
 
 (deftest a-record-takes-the-agents-turn-in-force
   ;; docs/turn.md#the-turn-is-a-number: agent/turn-now is the agent's :seon.agent/turn on its branch (0 before its first turn),
@@ -1970,3 +1971,21 @@
             (is (= sent (print/response-text r)) (str id " as its live response prints"))
             (is (= {:role "tool" :tool-call-id (str "eval-" id) :content sent}
                    (second (seon.fixtures/eval-messages {:db db} (assoc e :turn 1)))) (str id " and its tool message is that text"))))))))
+
+(deftest the-status-says-the-next-step-from-the-tasks-data
+  ;; docs/agent.md#working-for-a-person: from a fresh chat to a merge, the status says the next step from the task's own data, never its kind.
+  ;; Real runs (2026-11-08, nine on flash): with no such line no plan tracked the person's messages and no proof was ever seen red
+  (let [db (db-with-program)
+        task-db (fn [plan proofs] (d/db-with db (task/create-tx db [(cond-> {:seon.task/ns 'demo :seon.task/name "n" :seon.task/plan plan}
+                                                                       (seq proofs) (assoc :seon.task/proofs proofs))])))
+        steps #(set (map :step (:next %)))
+        written #(d/db-with % [{:seon.task/id "demo/n" :seon.task/plan "Make demo/f double, as the person asked."}])]
+    (is (empty? (steps (status-at (task-db "Say hello." #{}) "demo/n" {}))) "a task with nothing new says no step: a plan as given may be the person's words or a designed plan, and nothing in its data tells them apart")
+    (let [d (d/db-with (written (task-db "Make demo/f double." #{})) [{:seon.agent/key "b/a1" :seon.agent/task [:seon.task/id "demo/n"]}])
+          d (d/db-with d [{:seon.message/id "m1" :seon.message/from "sean" :seon.message/body "Make it take a name." :seon.message/to [[:seon.agent/key "b/a1"]]}])
+          st (status-at d "demo/n" {})]
+      (is (contains? (steps st) :fold-message) "a message from the person after the plan last changed")
+      (is (str/includes? (seon.web.html/html (seon.render.ui/status-hiccup {} st)) "came after your plan last changed") "and the status says it, as the page and the model read it")
+      (let [d2 (d/db-with d [{:seon.task/id "demo/n" :seon.task/plan "Make demo/f double, by name."}])]
+        (is (not (contains? (steps (status-at d2 "demo/n" {})) :fold-message)) "the plan changed since: not that step")))))
+
