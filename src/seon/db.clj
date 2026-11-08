@@ -56,12 +56,12 @@
 ;; ---- one definition of each entity (docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together) ----------
 
 (defn identity-attr?
-  "Is attribute a an upsert key ([:and {:seon.db/identity true} ...])?"
+  "Is attribute a an upsert key ([:and {:seon.db/identity true} ...])? See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
   {:malli/schema [:=> [:cat :any] :boolean]}
   [a] (boolean (:seon.db/identity (contract/properties a))))
 
 (defn parents
-  "The named schemas k's form extends ([:and p ...] or [:merge p ...])."
+  "The named schemas k's form extends ([:and p ...] or [:merge p ...]). See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
   {:malli/schema [:=> [:cat [:maybe :qualified-keyword]] [:vector :qualified-keyword]]}
   [k]
   (let [form (get contract/forms k)]
@@ -79,26 +79,26 @@
         :else []))
 
 (defn own-keys
-  "The keys a schema's form names itself (`own-entries`)."
+  "The keys a schema's form names itself (`own-entries`). See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
   {:malli/schema [:=> [:cat :any] [:vector :any]]}
   [form] (mapv first (own-entries form)))
 
 (def entity-schemas
   "{attribute schema}: each attribute an entity schema ({:seon.db/attributes true}) names itself (`own-keys`), to that
   schema: what an entity is, from the attributes it holds. Derived once from the registry; the one map the write
-  (`invalid-entity`) and the renders (seon.render's most-specific) read (seon.render-test/a-walk-is-its-entity-and-its-units)."
+  (`invalid-entity`) and the renders (seon.render's most-specific) read (seon.render-test/a-walk-is-its-entity-and-its-units). See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
   (into {} (for [[k form] contract/forms :when (:seon.db/attributes (contract/properties k)) a (own-keys form)] [a k])))
 
 (def identity-schemas
-  "{identity-attribute schema}: the entity schemas by the upsert keys they name."
+  "{identity-attribute schema}: the entity schemas by the upsert keys they name. See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
   (into {} (filter (comp identity-attr? key)) entity-schemas))
 
 (def schema-identities
-  "{schema identity-attribute}: each entity schema's own upsert key, `identity-schemas` turned around."
+  "{schema identity-attribute}: each entity schema's own upsert key, `identity-schemas` turned around. See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
   (into {} (map (fn [[a k]] [k a])) identity-schemas))
 
 (defn extends?
-  "Does schema a extend schema b, itself or through the schemas it extends (`parents`)?"
+  "Does schema a extend schema b, itself or through the schemas it extends (`parents`)? See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
   {:malli/schema [:=> [:cat :qualified-keyword :qualified-keyword] :boolean]}
   [a b] (boolean (or (= a b) (some #(extends? % b) (parents a)))))
 
@@ -113,7 +113,7 @@
 
 (def ^:private required-keys
   "{schema [attribute ...]}: the keys an entity schema requires, its own and those of the schemas it extends: what an
-  entity holding any attribute it owns holds whole."
+  entity holding any attribute it owns holds whole. See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
   (into {} (for [k (distinct (vals entity-schemas))]
              [k (vec (distinct (mapcat (fn [s] (for [[a p] (map (fn [e] [(first e) (second e)]) (own-entries (get contract/forms s)))
                                                      :when (not (and (map? p) (:optional p)))]
@@ -162,7 +162,7 @@
   (`invalid-entity`) after; an entity retracted whole takes the entities named by it with it. A refusal
   throws its typed error, and the value is as it was. A macro, its body inlined at each transaction entry (each
   contracted): a transaction pays the two checks and no call of scaffolding (contracted calls are a cost dimension:
-  seon.ctx-test/a-swap-costs-what-it-changed)."
+  seon.ctx-test/a-swap-costs-what-it-changed). See docs/storage.md#the-write-checks-every-entity-it-touches."
   [db tx-data schemas apply-fn]
   ;; built with list and a quoted body: it expands only here, in seon.db, where the body's names resolve
   (list 'let ['db db 'tx-data tx-data 'schemas schemas 'apply-fn apply-fn]
@@ -218,12 +218,12 @@
   [db tx-data] (d/with db tx-data))
 
 (defn speculate-db
-  "The db after the hypothetical tx-data (`speculate`'s :db-after)."
+  "The db after the hypothetical tx-data (`speculate`'s :db-after). See docs/storage.md#the-write-checks-every-entity-it-touches."
   {:malli/schema [:=> [:cat :any :any] :any]}
   [db tx-data] (:db-after (d/with db tx-data)))
 
 (defn db-with
-  "The db after tx-data (`with`'s :db-after)."
+  "The db after tx-data (`with`'s :db-after). See docs/storage.md#the-write-checks-every-entity-it-touches."
   {:malli/schema [:function [:=> [:cat :any :any] :any] [:=> [:cat :any :any [:maybe :map]] :any]]}
   ([db tx-data] (:db-after (with db tx-data)))
   ([db tx-data schemas] (:db-after (with db tx-data schemas))))
