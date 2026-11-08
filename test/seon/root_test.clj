@@ -3,7 +3,7 @@
   boots its fork server, so it runs in a process of its own rather than in the test
   runner's, whose threads and GC sweepers are the runner's."
   (:require [clojure.test :refer [deftest is]] [clojure.java.shell :as sh] [clojure.edn :as edn]
-            [clojure.string :as str] [seon.db :as pdb] [datahike.api :as d] [seon.test-store :as ts] [seon.config :as config]))
+            [clojure.string :as str] [seon.db :as pdb] [datahike.api :as d] [seon.test-store :as ts] [seon.config :as config] [seon.contract :as contract]))
 
 (defn- test-store "The one store these tests' roots take a branch of (seon.test-store/process-store)." []
   (ts/process-store))
@@ -316,6 +316,102 @@
             "the running binary is not built from this tree: no inputs to key agents' results by, and why")
         (is (= b (:text three))))
       (finally (sh/sh "rm" "-rf" tree tasks path (str path "-agents") (str path "-in") (str path ".log"))))))
+
+(def ^:private boot-probe
+  "What a boot of `boots-on-a-tree` answers: the config key and the schema entry the trees change, as root holds them; the
+  t of this boot's fact (:seon.root/boot, written once the graph runs, after the fork server forked) and of main's
+  newest program fact (config and schema entries); the boot's import (seon.root/import-tree!) and the source fact."
+  {:op :eval :agent "root"
+   :code (str "(let [db @(:conn sys) root (:db/id (datahike.api/entity db [:seon.root/id :root]))"
+              " t-of (fn [a] (reduce max 0 (map :tx (datahike.api/datoms db :aevt a))))]"
+              " {:streams-buf (seon.config/value :seon.config.web/streams-buf)"
+              " :schema-changed? (contains? (seon.program/schema-changes db) :seon.config.web/streams-buf)"
+              " :boot-t (:tx (first (datahike.api/datoms db :eavt root :seon.root/boot)))"
+              " :program-t (max (t-of :config/form) (t-of :schema/form))"
+              " :import (get-in sys [:bindings :view :boot :import])"
+              " :fact (dissoc (:seon.root/source (datahike.api/pull db [:seon.root/source] root)) :boot :inputs :unshared :ms)})")})
+
+(defn- boots-on-a-tree
+  "A store of its own (removed at the end) whose :db holds the program of a scratch repository under target/ holding the
+  one file path (dirs resources/seon, no wiki) as its first text, seeded (./seon seed-program: seon.root/seed-program!, no
+  root boots on it); then boot-probe's answer at each boot of a root on that store, the file written with the next of texts and
+  committed before each (the same text again commits nothing: a boot with nothing merged). Answers [the seed's output
+  answer ...]; a boot that never answered is its output (EXIT and the log). The shape of
+  main-follows-its-source-tree-across-restarts: an empty store, one small file, a few seconds a boot. See
+  docs/source.md#a-boot-imports-main-first."
+  [path [seeded & texts]]
+  (let [tree (str (config/checkout) "/target/tmp/root-test-boot-" (random-uuid))
+        store (str tree "-store")
+        git (fn [& args] (apply sh/sh "git" "-C" tree "-c" "user.name=t" "-c" "user.email=t@localhost" args))
+        args ["--set" (str ":seon.config.source/root=" (pr-str tree)) "--set" ":seon.config.source/dirs=[\"resources/seon\"]" "--set" ":seon.config.root/wiki-dirs=[]"]]
+    (.mkdirs (.getParentFile (java.io.File. (str tree "/" path))))
+    (sh/sh "git" "init" "-q" tree)
+    (try
+      (spit (str tree "/" path) seeded)
+      (git "add" "-A")
+      (git "commit" "-q" "-m" "seeded")
+      (into [(:out (apply ts/binary-sh (concat ["./seon" "seed-program" store] args ["--profile" (name (config/profile)) :dir "target"])))]
+            (for [text texts]
+             (let [_ (spit (str tree "/" path) text)
+                   _ (git "add" "-A")
+                   _ (git "commit" "-q" "-m" "tree")
+                   out (root-answers store "main" [boot-probe] {:args args})
+                   l (first (str/split-lines out))]
+               (sh/sh "rm" "-f" (str store "-in"))
+               (or (ts/value-of (:response (try (edn/read-string {:default tagged-literal} l) (catch Exception _ nil)))) out))))
+      (finally (sh/sh "rm" "-rf" tree store (str store "-agents") (str store "-in") (str store ".log"))))))
+
+(deftest a-boot-after-a-merge-reads-the-merged-config
+  ;; task seon.root/a-boot-imports-main-before-it-reads-config: a merge adds a config key root reads at start
+  ;; (:seon.config.web/streams-buf, read for a :bind/ buffer), as 191e4b56ba did. Main holds the tree before it (the
+  ;; shipped config without the key); boot two runs the binary, whose tree has the key, on that main: the boot imports
+  ;; the merged config before it holds main's (2026-11-08 the standing root refused to start, "is set nowhere"); boot
+  ;; three, with nothing merged, imports and writes nothing
+  (let [file "resources/seon/config/default.edn"
+        ;; the shipped file as the binary was built (a test reading the checkout's files takes the tree)
+        merged config/built-text
+        before (str/join "\n" (remove #(str/includes? % ":seon.config.web/streams-buf ") (str/split-lines merged)))
+        [seed two three] (boots-on-a-tree file [before merged merged])]
+    (is (not= before merged))
+    (is (str/includes? (str seed) "SEED OK") (str seed))
+    (is (map? two) (str "the root booted on a main older than its binary: " two))
+    (is (= (config/value :seon.config.web/streams-buf) (:streams-buf two)) "it holds the merged key's value")
+    (is (< (:program-t two) (:boot-t two)) "main's config became the merged one before the boot's fact: before root read it, and before the fork")
+    (is (true? (:imported? (:import two))) (pr-str (:import two)))
+    (is (= (:program-t two) (:program-t three)) "nothing merged: no program fact written")
+    (is (false? (:imported? (:import three))) (pr-str (:import three)))
+    (is (= (:fact two) (:fact three)) "and the source fact is the same import's")))
+
+(deftest a-boot-forks-with-the-merged-schema-registry
+  ;; task seon.root/a-boot-imports-main-before-it-reads-config: main holds a schema entry older than the binary's (here
+  ;; :seon.config.web/streams-buf with another bound, seeded), and the merge brings the binary's. The fork server forks from main
+  ;; as the boot left it and builds the registry each agent holds from main's schema changes (seon.fork-server/warm), so
+  ;; the boot imports the merged entry before it forks: 2026-11-08 every model call of the first agent after a restart
+  ;; failed on a registry of main's entries from before that boot's import
+  (let [file "resources/seon/schemas/seon.config.web.edn"
+        ;; the entry as the binary was built, the resource's one entry (a test reading the checkout's files takes the tree)
+        form (get contract/forms :seon.config.web/streams-buf)
+        merged (pr-str {:seon.config.web/streams-buf form})
+        before (pr-str {:seon.config.web/streams-buf (update form 1 assoc :min 2)})
+        [seed two] (boots-on-a-tree file [before merged])]
+    (is (not= before merged))
+    (is (str/includes? (str seed) "SEED OK") (str seed))
+    (is (false? (:schema-changed? two)) (str two))
+    (is (< (:program-t two) (:boot-t two)) "main's entry became the merged one before the boot's fact, which is written after the fork")))
+
+(deftest a-boot-whose-import-refuses-a-file-still-starts
+  ;; task seon.root/a-boot-imports-main-before-it-reads-config: the tree's schema resource no longer reads (a merge broke
+  ;; it). The boot imports nothing, says which file (seon.root/unimportable), and starts on main as it was: a dead root is
+  ;; the outcome the boot's import exists to end (docs/source.md#a-file-that-does-not-load)
+  (let [file "resources/seon/schemas/seon.config.web.edn"
+        merged (pr-str {:seon.config.web/streams-buf (get contract/forms :seon.config.web/streams-buf)})
+        [seed two] (boots-on-a-tree file [merged (str merged "\n{:unclosed")])]
+    (is (str/includes? (str seed) "SEED OK") (str seed))
+    (is (map? two) (str "the root started: " two))
+    (is (false? (:imported? (:import two))) (pr-str (:import two)))
+    (is (str/includes? (str (:seon.error/message (:error (:import two)))) file) "the refusal names the file")
+    (is (< (:program-t two) (:boot-t two)) "nothing of it was written, at boot or after")
+    (is (= (config/value :seon.config.web/streams-buf) (:streams-buf two)) "main's entries as they were")))
 
 (deftest a-root-restart-names-the-same-agent-by-the-same-name
   ;; docs/decisions.md#an-id-is-the-content-of-the-facts-that-make-it-owner-2026-11-08: an agent's id is the keyword of its
