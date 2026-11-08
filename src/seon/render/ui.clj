@@ -1170,8 +1170,6 @@
      ;; the next step, from the task's data (seon.context/status :next): none blocks merging
      (for [{:keys [step from]} steps]
        (case step
-         :write-plan [:p {:key :write-plan} "Your plan is still the request as it was given. Write what's wanted into it as you learn it, citing what it touches: "
-                      [:code "(my.task/update! :seon.task/plan (constantly \"...\"))"] ". How: " [:code "(doc \"docs/agent.md#working-for-a-person\")"]]
          :fold-message [:p {:key :fold-message} "A message from " from " came after your plan last changed. If it changes what's wanted, write that into the plan and its proofs; if it's a question or a remark, answer it."]))
      (cond
        (and green? (empty? blocks) (empty? unmerged))

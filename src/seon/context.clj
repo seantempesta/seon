@@ -704,14 +704,12 @@
         ;; the next step, from the task's own data and never its kind (docs/agent.md#working-for-a-person): none of these blocks a merge
         te (when tid (pdb/eid db :seon.task/id tid))
         plan-tx (when te (some-> (first (d/datoms db :eavt te :seon.task/plan)) :tx))
-        made-tx (when te (some-> (first (d/datoms db :eavt te :seon.task/id)) :tx))
         me (:seon.agent/key ag)
         asked (when plan-tx
                 (some (fn [[e m]] (let [from (:seon.message/from m)]
                                     (when (and (not (#{"root" me} from)) (> (first-delivered [db a e]) plan-tx)) from)))
                       (:messages rec)))
         next (cond-> []
-               (and plan-tx made-tx (= plan-tx made-tx)) (conj {:step :write-plan})
                asked (conj {:step :fold-message :from asked}))]
     (cond-> {:reasons reasons
              ;; each proof as :proved holds its var: its verdict (green :pass, red and flaky :fail, as `verdicts`), its source

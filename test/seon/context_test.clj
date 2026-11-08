@@ -1979,8 +1979,7 @@
                                                                        (seq proofs) (assoc :seon.task/proofs proofs))])))
         steps #(set (map :step (:next %)))
         written #(d/db-with % [{:seon.task/id "demo/n" :seon.task/plan "Make demo/f double, as the person asked."}])]
-    (is (contains? (steps (status-at (task-db "Say hello." #{}) "demo/n" {})) :write-plan) "the plan is still the request as made: write one")
-    (is (not (contains? (steps (status-at (written (task-db "Say hello." #{})) "demo/n" {})) :write-plan)) "a plan written since: not that step")
+    (is (empty? (steps (status-at (task-db "Say hello." #{}) "demo/n" {}))) "a task with nothing new says no step: a plan as given may be the person's words or a designed plan, and nothing in its data tells them apart")
     (let [d (d/db-with (written (task-db "Make demo/f double." #{})) [{:seon.agent/key "b/a1" :seon.agent/task [:seon.task/id "demo/n"]}])
           d (d/db-with d [{:seon.message/id "m1" :seon.message/from "sean" :seon.message/body "Make it take a name." :seon.message/to [[:seon.agent/key "b/a1"]]}])
           st (status-at d "demo/n" {})]
