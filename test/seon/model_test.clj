@@ -7,6 +7,10 @@
   (:require [clojure.test :refer [deftest is testing]] [clojure.core.async :as a] [clojure.data.json :as json]
             [ring-chez.adapter :as adapter] [seon.model :as model] [seon.fx :as fx] [seon.turn :as turn] [seon.contract] [clojure.string :as str] [seon.ctx] [seon.error] [seon.cost :as cost] [seon.fixtures :as fixtures]))
 
+(defn- stop-now!
+  "Stops a test's local HTTP server at once: no drain wait, so no time decides. See docs/clocks.md#time-decides-nothing-here-clock-reads-named-as-data."
+  [server] (adapter/stop-server server {:drain-timeout-ms 0}))
+
 (defn- chunk-line [m] (str "data: " (json/write-str m :escape-unicode false) "\n\n"))
 
 (def ^:private chunks
@@ -52,7 +56,7 @@
         (is (= "```clojure\n(defn square [x] (* x x))\n```" (:text r)) "every piece, in order, until the server ended it")
         (is (= "Square multiplies." (:reasoning r)))
         (is (= ["stop" "deepseek-flash" 120 30 64] ((juxt :finish-reason :model :prompt-tokens :completion-tokens :cache-hit-tokens) r))))
-      (finally (adapter/stop-server server {:drain-timeout-ms 0})))))
+      (finally (stop-now! server)))))
 
 (deftest a-dropped-connection-is-a-transport-failure
   (let [r (model/complete {:kind :openai-compat :base-url "http://127.0.0.1:1" :model "m" :api-key-env "HOME" :max-tokens 2048}
@@ -350,4 +354,4 @@
         (is (= (:text (model/complete provider req)) (:text r)) "and its last state is the reply the whole read makes")
         (is (= ["Square " "multiplies."] (map :text (filter (comp #{"c1/reasoning"} :stream) out))))
         (is (nil? (shut)) "the connection is closed already, and closing again is nothing"))
-      (finally (adapter/stop-server server {:drain-timeout-ms 0})))))
+      (finally (stop-now! server)))))
