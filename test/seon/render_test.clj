@@ -681,6 +681,21 @@
         (is (not (some (fn [[_ vs]] (contains? vs [:chat :a3])) (:read-index st'))))))
     (r/dispose-walk! (get-in st [:root-walk :w]))))))
 
+(deftest a-wanted-keyframe-is-answered-when-its-read-fails
+  ;; docs/render.md#the-page: every wait ends, with its value or a typed error (AGENTS 4): a keyframe a tab asked for while the view could not
+  ;; be drawn yet is answered when the read it waits on answers an error, by that error drawn, so the tab turns fresh and a later
+  ;; read redraws it (task seon.web/a-tabs-first-keyframe-settles-on-its-own: bin/check idle waited ~30 min for a keyframe)
+  (let [[main branch _] (paged-dbs)
+        o (volatile! {})
+        st (-> (proc-state main branch) (assoc :main-db nil :kf-wanted #{:root} :pending {9 :state}))
+        err (seon.contract/error :seon.root/refused #'seon.render.proc/answered "root's view could not be read" {})
+        st' (#'p/answered st o :state err)
+        kfs (filter #(= :keyframe (:op %)) (:to-web @o))]
+    (is (= [:root] (map :view kfs)) "the wanted keyframe is answered")
+    (is (str/includes? (str (:html (first kfs))) "root's view could not be read") "by the error, drawn")
+    (is (empty? (:kf-wanted st')) "and is no longer waited on")
+    (is (#'p/walk? st' :root) "its view walks again at every pass until a read draws it")))
+
 (deftest a-branch-commit-touches-its-page-by-its-datoms-diff
   ;; an agent's commit: its branch read again, and what moved is the datoms-diff of the held and
   ;; the new branch db; the page walks only when the diff touches its reads

@@ -923,9 +923,15 @@
   {:malli/schema [:=> [:cat :map :seon.host/volatile :any :any] :map]}
   [st o kind r]
   (cond
-    ;; the view's request answered an error (a defect, for a request a step lost): taken,
-    ;; and the view stays as it was; the next event asks again
-    (and (= :state kind) (seon.contract/error? r)) st
+    ;; root's view or main's read answered an error (a defect, for a request a step lost): every page and keyframe waiting on it is
+    ;; answered by that error drawn (every wait ends, with its value or a typed error), held as its view's page with an :extra no
+    ;; pass matches (walk?), so every pass walks it until a read draws it; a view already drawn stays as it was; the next event asks again
+    (and (#{:state :main} kind) (seon.contract/error? r))
+    (let [vs (distinct (concat (vals (:waiting st)) (:kf-wanted st)))
+          hc (error-page r)]
+      (pass (-> (reduce (fn [st v] (cond-> st (nil? (get-in st [:views v])) (assoc-in [:views v] {:skeleton (h/html hc) :layout hc :units {} :status 503 :extra ::read-failed})))
+                        st vs))
+            o))
     (= :state kind)
     ;; an agent whose process ended keeps no parts (a later process of its id draws its own)
     (let [st (-> (assoc st :view r)
@@ -934,7 +940,7 @@
           st (if (and (nil? (:main-db st)) (not (some #{:main} (vals (:pending st))))) (ask st o :main {:op :write :req {:op :branch-db :branch :db}}) st)]
       ;; a watched agent's branch moved: read its branch db (its turns, evaluations and task)
       (pass (ask-branches st o) o))
-    (= :main kind) (if (seon.contract/error? r) st (pass (ask-branches (advance-main st (:db r)) o) o))
+    (= :main kind) (pass (ask-branches (advance-main st (:db r)) o) o)
     ;; an agent drew its page's parts (or did not: gone, refused): held for its view, which renders again
     (and (vector? kind) (= :parts (first kind)))
     (let [id (second kind)
