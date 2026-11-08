@@ -2053,7 +2053,7 @@
 (defn started-cards
   "A tile for each agent this user started, grouped by what needs them (sessions-by-standing: `session-card` by each one's key), the
   home page's one list: an agent's latest words to them are on its tile, its whole conversation in its chat. See docs/users.md#whats-on-screen."
-  {:seon.render/style ".started-cards .session-tiles, .work-list .session-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(18rem, 1fr)); gap: 0.75rem; }"
+  {:seon.render/style ".started-cards .session-tiles, .work-list .session-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(18rem, 100%), 1fr)); gap: 0.75rem; }"
    :seon.render/for "page" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
   [{c :seon.ctx/ctx db :seon.db/db}]
   (if-let [ks (seq (keep #(:seon.agent/key (d/entity db %)) (newest-started db c)))]
@@ -2318,13 +2318,9 @@
                     (map-indexed (fn [j {:keys [id function] :as c}]
                                    (field (str "tool_calls[" j "] · " (:name function) " · " id)
                                           (into [:div {:class "flex flex-col gap-1"}]
-                                                ;; a reply's evals, each's own fields by their wire names
-                                                (mapcat (fn [[k v]]
-                                                          (if (= "evals" k)
-                                                            (for [[i e] (map-indexed vector v) [ek ev] e]
-                                                              (field (str "arguments.evals[" i "]." ek) (if (= "code" ek) (highlighted (str ev)) (verbatim (str ev)))))
-                                                            [(field (str "arguments." k) (if (= "code" k) (highlighted (str v)) (verbatim (str v))))]))
-                                                        (args c)))))
+                                                ;; the call's own fields by their wire names
+                                                (map (fn [[k v]] (field (str "arguments." k) (if (= "code" k) (highlighted (str v)) (verbatim (str v)))))
+                                                     (args c)))))
                                  tool_calls)])]))
         shares (for [[r [_ band]] role-looks
                      :let [n (reduce + 0 (keep-indexed (fn [i m] (when (= r (:role m)) (get sizes i))) ms))]

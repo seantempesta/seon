@@ -1936,6 +1936,12 @@
       (let [r (run "(do (print \"quiet\") 2)" {:origin :outside} nil)]
         (is (= "quiet" (:seon.print/code (:out r))))
         (is (empty? (filter #(= :stream (:op %)) (frames)))))
+      ;; every one-argument write a Writer takes: a char[], a char and an int each reach the record and the stream as their text
+      (let [r (run "(do (.write *out* (char-array \"ab\")) (.write *out* (int \\c)) (print \\d) 4)" call nil)
+            outs (streamed (frames) "out")]
+        (is (= 4 (:value r)) "a char[] write does not throw")
+        (is (= "abcd" (:seon.print/code (:out r))))
+        (is (= "abcd" (apply str (map :text (remove :end outs))))))
       ;; a write from another OS thread is recorded and never sent (frames can interleave across threads)
       (let [r (run "(do (print \"a\") @(future (print \"b\")) (print \"c\") 3)" call nil)
             outs (streamed (frames) "out")]
@@ -2529,18 +2535,18 @@
     (is (apply = turns) (str "no more turns while nothing arrives: " (pr-str turns)))))
 
 (deftest a-reply-with-no-evals-stops-with-turns-left
-  ;; docs/model.md#one-tool-eval: a call whose evals are empty is a reply of its message alone, as text with no call is: nothing runs and the
+  ;; docs/model.md#one-tool-eval: a reply with text and no call is its message alone: nothing runs and the
   ;; agent waits, with turns left
-  (let [call (fn [args] {:usage {:prompt_tokens 10 :completion_tokens 2}
-                         :choices [{:finish_reason "tool_calls" :message {:content nil :tool_calls [{:id "c1" :function {:name "eval" :arguments args}}]}}]})
-        empty-evals (seon.model/reply-of (call "{\"message-md\":\"Nothing to run; I wait for you.\",\"evals\":[]}") 1 100)
-        no-evals (seon.model/reply-of (call "{\"message-md\":\"Done.\"}") 1 100)
-        one-eval (seon.model/reply-of (call "{\"message-md\":\"Reading.\",\"evals\":[{\"intent\":\"read\",\"code\":\"(+ 1 2)\"}]}") 1 100)
+  (let [reply (fn [text calls] {:usage {:prompt_tokens 10 :completion_tokens 2}
+                                :choices [{:finish_reason "stop" :message (cond-> {:content text} calls (assoc :tool_calls calls))}]})
+        text-only (seon.model/reply-of (reply "Nothing to run; I wait for you." nil) 1 100)
+        one-eval (seon.model/reply-of (reply "Reading." [{:id "c1" :function {:name "eval" :arguments "{\"intent\":\"read\",\"code\":\"(+ 1 2)\"}"}}]) 1 100)
+        no-text (seon.model/reply-of (reply nil [{:id "c1" :function {:name "eval" :arguments "{\"intent\":\"read\",\"code\":\"(+ 1 2)\"}"}}]) 1 100)
         [end] (in-agent #(vector (str "(seon.turn/work! {:task " (pr-str (:task %)) " :max-turns 5})"))
                           {:config {:seon.config.ai/script 'seon.fixtures/text-reply}})]
-    (is (= ["Nothing to run; I wait for you." nil] [(:text empty-evals) (:tool-calls empty-evals)]) "evals empty: its message, no call")
-    (is (= ["Done." nil] [(:text no-evals) (:tool-calls no-evals)]) "evals missing: the same")
-    (is (= ["Reading." ["c1"]] [(:text one-eval) (mapv :id (:tool-calls one-eval))]) "an eval is a call as before")
+    (is (= ["Nothing to run; I wait for you." nil] [(:text text-only) (:tool-calls text-only)]) "text and no call: its message, no call")
+    (is (= ["Reading." ["c1"]] [(:text one-eval) (mapv :id (:tool-calls one-eval))]) "an eval is a call beside its text")
+    (is (= ["" ["c1"]] [(:text no-text) (mapv :id (:tool-calls no-text))]) "a call with no text: the call runs, the message is empty")
     (is (= [:waiting 1] ((juxt :outcome :model-calls) (:value end))) (str "the agent waits after one turn of five: " (pr-str end)))))
 
 (deftest a-woken-agent-is-not-sent-its-own-loop
