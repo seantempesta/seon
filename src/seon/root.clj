@@ -1127,14 +1127,10 @@
       (conj (vec (wiki-tx db checkout (baseline))) {:seon.root/id :root :seon.root/wiki digest}))))
 
 (defn import-tree!
-  "Main's program on conn brought to the source tree {:root :dirs}, while this is the store's only process (a boot before
-  it reads anything of main, a seed): only what the tree changed since the import root's :seon.root/source fact records
-  (seon.fx/read-source's :since; seon.source/tx-of), written on conn with the fact, which then holds the tree's digest, in
-  one transaction. A tree whose digest main holds reads git's ids and writes nothing. With :follow (the main checkout)
-  the tree is first brought to main, and imports only when it holds main's commit. When the read fails, the tree lacks
-  main's commit or a file does not import (seon.root/unimportable), nothing is written and :error says why; main stays as
-  imported. t0: when the caller's phase began, the fact's :ms. Answers {:imported? :digest :error}. See
-  docs/source.md#a-boot-imports-main-first."
+  "Main's program on conn brought to the source tree {:root :dirs :follow}, only what it changed since root's
+  :seon.root/source fact, written with the fact in one transaction while this is the store's only process (a boot, a
+  seed); nothing when main holds its digest, and :error saying why when it can't import. t0: the caller's phase start,
+  the fact's :ms. Answers {:imported? :digest :error}. See docs/source.md#a-boot-imports-main-first."
   {:malli/schema [:=> [:cat :seon.host/conn [:map [:root :string] [:dirs [:sequential :string]] [:follow {:optional true} :string]] :int] :map]}
   [conn {:keys [root dirs follow]} t0]
   (let [held (:seon.root/source (d/pull @conn [:seon.root/source] [:seon.root/id :root]))
@@ -1208,13 +1204,11 @@
 (defn- boot!
   "Root's boot up to its first thread, on the main carrier (jolt.host/main-carrier-run!: one OS
   thread drives every fiber, so a go block or future a library starts is a fiber and nothing
-  else runs): main opened on the store at path, brought to the source tree first (import-tree!, before anything
-  reads main's program, config or schema entries: docs/source.md#a-boot-imports-main-first), its program loaded and instrumented, the warm
+  else runs): main opened on the store at path and brought to the source tree (import-tree!, docs/source.md#a-boot-imports-main-first), its program loaded and instrumented, the warm
   paths run and the heap made static, then the fork server forked from it (which preloads main's
   indexes for its agents: seon.fork-server/main), sharing all of that copy-on-write while this is the one thread there is
   (docs/failure-points.md, physics). Its return starts the process's threads (Jolt's carriers,
   timer and poller; main-carrier-run! returns into an ordinary process), and root's follow.
-  source: start!'s (its :root and :dirs are place keys, read from the built config before main's is held), or nil.
   open!'s answer with main's :db as forked, the fork server's :pid and :fd, the import's answer and each phase's ms."
   {:malli/schema [:=> [:cat [:enum :lmdb :file] :string :int :seon.db/branch [:maybe :map] :int] :map]}
   [backend path datoms main source t0]
@@ -1236,9 +1230,7 @@
             open-ms (profile/ms-since t0)
             load-ms (profile/ms-since t0)
             t1 (profile/now-ns)
-            ;; main's program, config and schema entries made the merged tree's before anything below reads them
-            ;; (the fork server forks with them): import-source! after start then finds the digest equal
-            import (when source (import-tree! conn (assoc (select-keys source [:root :dirs]) :follow (cfg/checkout)) t1))
+            import (when source (import-tree! conn (assoc source :follow (cfg/checkout)) t1))
             program (program/load-all! @conn {:tests? false})
             ;; main's own config, before anything below reads one and before the fork server inherits it
             program (update program :errors into (program/hold-config! @conn))
