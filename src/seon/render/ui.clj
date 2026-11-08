@@ -1110,7 +1110,7 @@
   Main's side only when something conflicts: both sides and the form that settles each. No table beside the same words: a list of
   the proofs' states only when there are several. See docs/render.md#how-the-work-stands."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
-  [_opts {:keys [proofs refused test-run unmerged without-a-contract caused attention merge unjudged also-red-on-main main-moved next]}]
+  [_opts {:keys [proofs refused test-run unmerged without-a-contract caused attention merge unjudged also-red-on-main main-moved] steps :next}]
   (let [state #(:status %)
         unwritten (filter #(= :undefined (state %)) proofs)
         red (filter #(#{:fail :error} (state %)) proofs)
@@ -1168,7 +1168,7 @@
           [:div {:key key} [:p [:code (str key)] ". Yours:"] [:pre [:code (as-text ours)]] [:p "Main's:"] [:pre [:code (as-text theirs)]]
            [:p "Keep yours: " [:code (str "(my.branch/resolve! '" key ")")] ". Take main's: " [:code (str "(my.branch/resolve! '" key " :theirs)")] "."]])])
      ;; the next step, from the task's data (seon.context/status :next): none blocks merging
-     (for [{:keys [step from tests]} next]
+     (for [{:keys [step from]} steps]
        (case step
          :write-plan [:p {:key :write-plan} "Your plan is still the request as it was given. Write what's wanted into it as you learn it, citing what it touches: "
                       [:code "(my.task/update! :seon.task/plan (constantly \"...\"))"] ". How: " [:code "(doc \"docs/agent.md#working-for-a-person\")"]]
