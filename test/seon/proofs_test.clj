@@ -619,7 +619,7 @@
           "not judged by this run and its digest moved: every fact retracted, its status unknown")
       (is (= [] (proofs/result-tx {'app.f-test/t held1} {} {} {} at)) "not judged, its digest unchanged: its verdict stands"))))
 
-;; docs/sharing.md#what-a-real-branch-spends-its-nodes-on: a branch keeps a test's facts only where something reads them
+;; docs/sharing.md#what-a-branchs-nodes-are: a branch keeps a test's facts only where something reads them
 (deftest a-test-worth-a-fact-is-a-proof-a-red-or-one-held
   (let [green {:digest "d" :pass 1 :fail 0 :error 0} red {:digest "d" :pass 0 :fail 1 :error 0}]
     (is (= '{a/proof {:digest "d" :pass 1 :fail 0 :error 0}}

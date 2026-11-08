@@ -100,7 +100,7 @@
  :config/key [:and {:seon.db/identity true :seon.db/content-id true} :qualified-keyword]
  :config/form :string
  :config/file [:and {:seon.db/index true} :string]
- ;; what a function cost on this branch, one entity a function, sorted together by an issued id: docs/sharing.md#a-metric-accretes
+ ;; what a function cost on this branch, one entity a function, sorted together by an issued id: docs/sharing.md#a-functions-cost-is-a-fact
  :seon.fn/var [:and {:seon.db/identity true} :qualified-symbol]
  :seon.fn/stats [:and {:seon.db/no-history? true} [:map [:calls :int] [:ticks :int] [:self-ticks :int] [:bytes :int] [:self-bytes :int] [:hist [:map-of :int :int]] [:worst [:map [:self-ticks :int] [:eval [:maybe :string]]]]]]
  :seon.db/fn-fact [:map {:seon.db/attributes true} [:seon.fn/var :seon.fn/var] [:seon.fn/stats {:optional true} :seon.fn/stats]]

@@ -348,7 +348,7 @@
 (defn facts-worth-keeping
   "Of results ({test result}), those a branch keeps as facts: a proof of its task, one that is not green, and one it already
   holds a fact of (old, {test entity}), so a red gone green never reads as red. Nothing reads another green's facts, and each
-  would rewrite a leaf among the program's. See docs/sharing.md#what-a-real-branch-spends-its-nodes-on."
+  would rewrite a leaf among the program's. See docs/sharing.md#what-a-branchs-nodes-are."
   {:malli/schema [:=> [:cat [:map-of :qualified-symbol [:maybe :map]] [:set :symbol] [:map-of :qualified-symbol :map]] [:map-of :qualified-symbol :map]]}
   [old proofs results]
   (into {} (filter (fn [[t r]] (or (contains? proofs t) (not (green? r)) (:seon.test/status (old t))))) results))
