@@ -210,7 +210,7 @@
 (defn accrue
   "held ({var stats}) with fns (touched's) added, each function's stats {:calls :ticks :self-ticks :bytes :self-bytes :hist :worst}: sums, which any
   two add exactly; :hist, calls by the log2 of the self-ticks a call of the eval they ran in (an eval's average, not each call's: 999 cheap calls and one costly one in an eval fall in one bucket); :worst, the eval whose self-ticks
-  were the most, {:self-ticks :eval}. Costs fns. See docs/sharing.md#a-metric-accretes."
+  were the most, {:self-ticks :eval}. Costs fns. See docs/sharing.md#a-functions-cost-is-a-fact."
   {:malli/schema [:=> [:cat :map [:vector :seon.profile/fn-cost] [:maybe :string]] :map]}
   [held fns eval-id]
   (reduce (fn [m {:keys [var calls ticks self-ticks bytes self-bytes]}]
@@ -224,7 +224,7 @@
           held fns))
 
 (defn stats-sum
-  "Stats a and b as one, as accrue would have made them: what two flushes of a function, or two writers, come to. See docs/sharing.md#a-metric-accretes."
+  "Stats a and b as one, as accrue would have made them: what two flushes of a function, or two writers, come to. See docs/sharing.md#a-functions-cost-is-a-fact."
   {:malli/schema [:=> [:cat [:maybe :map] :map] :map]}
   [a b]
   (if-not a

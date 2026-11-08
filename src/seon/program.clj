@@ -801,7 +801,7 @@
 (defn stable-places
   "The places of a file's forms, in file order, from held, each form's place on the db or nil for one it lacks: the most forms keep
   theirs, and each other takes one between its kept neighbours, so an inserted form writes one place and moves none. When a gap has
-  no room, every form is placed anew, place-gap apart. See docs/sharing.md#a-branch-and-a-merge."
+  no room, every form is placed anew, place-gap apart. See docs/sharing.md#a-merge."
   {:malli/schema [:=> [:cat [:vector [:maybe :int]]] [:vector :int]]}
   [held]
   (let [n (count held) kept (kept-places held) anew (mapv #(* place-gap %) (range n))]
