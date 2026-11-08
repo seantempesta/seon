@@ -224,7 +224,7 @@
   "Send body to the agents tos (ids): root writes it as a message fact on main, to each one's branch, whether or not its
   process lives (seon.root/deliver-message). A body that is not text is its text by the one printer, whole, as the message
   is. nil. See docs/users.md#messages."
-  {:malli/schema [:=> [:cat [:sequential :keyword] :any] :nil]}
+  {:malli/schema [:=> [:cat [:sequential :seon.agent/id] :any] :nil]}
   [tos body]
   (send! {:op :send :to (vec tos)
           :body (if (string? body) body (print/text (cond-> body (instance? clojure.lang.IObj body) (vary-meta assoc :seon.print/full true))))})
@@ -1435,7 +1435,7 @@
     (or (find-ns sym) (binding [*ns* (create-ns sym)] (refer-clojure) *ns*))
     nsx))
 
-(defn- make-ns! {:malli/schema [:=> [:cat :keyword] :seon.host/namespace]}
+(defn- make-ns! {:malli/schema [:=> [:cat :seon.agent/id] :seon.host/namespace]}
   [id]
   (let [sym (symbol (str "agent." (name id)))
         nsx (create-ns sym)]

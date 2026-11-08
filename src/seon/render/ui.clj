@@ -1848,14 +1848,24 @@
   (boolean (or (seq (d/datoms db :eavt eid :seon.agent/task))
                (when-let [dt (first (d/datoms db :eavt eid :seon.agent/status))] (not (contains? gone (:v dt)))))))
 
+(defn- sessions-of-boots
+  "Every agent on main db by the boot that started it (:seon.agent/boot), {boot [eid ...]}: an agent recorded with no boot
+  (a bare spawn!, seon.task/agent-tx alone) is the current boot's, so every agent is listed. It reads every agent's key
+  and boot, O(agents): grouping by who started each agent replaces it (seon.render/the-home-box-talks-to-root). See docs/render.md#a-sessions-address-and-the-agents-list."
+  {:malli/schema [:=> [:cat :seon.host/db] [:map-of :string [:vector :int]]]}
+  [db]
+  (let [boot (into {} (map (juxt :e :v)) (d/datoms db :aevt :seon.agent/boot))
+        now (task/boot-of db)]
+    (reduce (fn [m {e :e}] (if-let [b (or (boot e) now)] (update m b (fnil conj []) e) m)) {} (d/datoms db :aevt :seon.agent/key))))
+
 (defn boot-side
   "One boot's sessions in the agents list (a component over the db, the boot's id: its agents oldest first, so a new session redraws its boot's
   unit alone, whose element id is the boot's): the
   current boot's in the list itself, an earlier boot's inside `earlier-sessions`'s one fold, so a list of
-  every session on main stays short to read. It reads its boot's agents alone, by the index of :seon.agent/boot, whatever other boots hold. See docs/render.md#a-sessions-address-and-the-agents-list."
+  every session on main stays short to read (`sessions-of-boots`). See docs/render.md#a-sessions-address-and-the-agents-list."
   {:seon.render/style ".boot-side { display: contents; }" :seon.render/for "page" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :string] :any]}
   [{db :seon.db/db} boot]
-  (let [eids (->> (d/datoms db :avet :seon.agent/boot boot) (map :e) (sort-by #(session-order db %)) (filterv #(shown-session? db %)))
+  (let [eids (->> (get (sessions-of-boots db) boot) (sort-by #(session-order db %)) (filterv #(shown-session? db %)))
         pills (for [eid eids] [#'agent-side {} eid])]
     [:li {:class "contents"} [:ul {:class "contents"} pills]]))
 
@@ -1865,12 +1875,12 @@
   {:malli/schema [:=> [:cat :seon.host/db] [:sequential [:tuple :string [:sequential :int]]]]}
   [db]
   (let [now (task/boot-of db)
-        by (group-by :v (d/datoms db :avet :seon.agent/boot))]
-    (->> by
-         (map (fn [[boot dts]] [boot (mapv :e (sort-by #(session-order db (:e %)) dts)) (apply max (map :tx dts))]))
+        last-tx (fn [e] (apply max (map :tx (d/datoms db :eavt e))))]
+    (->> (sessions-of-boots db)
+         (keep (fn [[boot es]] (when-let [es (seq (filter #(shown-session? db %) es))]
+                                 [boot (vec (sort-by #(session-order db %) es)) (apply max (map last-tx es))])))
          (sort-by (fn [[boot _ t]] [(if (= boot now) 0 1) (- t)]))
-         (mapv (fn [[boot eids _]] [boot eids]))
-         (filterv (fn [[_ eids]] (some #(shown-session? db %) eids))))))
+         (mapv (fn [[boot eids _]] [boot eids])))))
 
 (defn root-head
   "Root's head (a component over its ctx and the db): what is going on in a sentence, by the tasks' states, and, when it last went quiet,

@@ -302,7 +302,7 @@
   forked and ended and a stall it shows: each member of root's view m, written when set and retracted
   when m holds it as nil (the form running, once it returned). Root writes it when its
   view of the agent changes (seon.root/record-agents)."
-  {:malli/schema [:=> [:cat :keyword :map] [:vector :any]]}
+  {:malli/schema [:=> [:cat :seon.agent/id :map] [:vector :any]]}
   [id m]
   (let [k (name id)
         v (fn [member x] (case member :running (:form x) :forked-ms (double x) x))

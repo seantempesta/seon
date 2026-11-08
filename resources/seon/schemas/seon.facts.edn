@@ -201,14 +201,13 @@
  :seon.eval/fns [:vector :map]
  :seon.eval/schema :qualified-keyword
  :seon.eval/basis [:map [:t :int] [:branch :seon.db/branch]]
- ;; an agent: one entity per agent, named by its key (a content id of a fresh UUID, seon.lib/unique-id),
- ;; (an id's name is its key), a content id so root's entity on main
- ;; and the one its branch's records name are one; it refs the root that started it. What root
+ ;; an agent: one entity per agent, named by its key (seon.lib/unique-id: the digest of a fresh UUID),
+ ;; a content id so root's entity on main and the one its branch's records name are one; it refs the root that started it. What root
  ;; observes of it (status, pid, memory, the form running, its task's description) is recorded
  ;; on it when root's view of it changes (seon.task/agent-tx)
  :seon.agent/key [:and {:seon.db/identity true :seon.db/content-id true} :string]
- ;; legacy: an agent's name is its key (a content id); stored datoms stay readable, nothing writes or reads this
- :seon.agent/id [:and {:seon.db/index true} :keyword]
+ ;; an agent's id in root's process and its procs: the keyword whose name is its key; never stored
+ :seon.agent/id :keyword
  :seon.agent/root :seon.db/ref
  :seon.agent/branch :keyword
  ;; the task it works (the agent's record pulls it, docs/ctx.md#the-pattern) and the turns it may take: raised to extend the agent
@@ -226,7 +225,7 @@
  :seon.agent/model :string
  :seon.agent/holder :string
  ;; root's boot it was started in, and when (ms): the agent is live in a root when the boot is that root's and its task is :running
- :seon.agent/boot [:and {:seon.db/index true} :string]
+ :seon.agent/boot :string
  :seon.agent/started-ms :int
  :seon.agent/ended-ms :int
  ;; a test run that failed as a whole (its fork refused, a namespace did not load): the error as data (its type, message and
@@ -268,7 +267,7 @@
  ;; an entity's record (seon.ctx, :seon.ctx/pattern: Datahike's pull syntax as data, docs/ctx.md#the-pattern;
  ;; its joins are the page walk's units, seon.render/units), each member rendered by its own schema's render
  :seon.db/agent-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.agent/key :seon.agent/status :seon.agent/branch :seon.agent/description] :seon.ctx/pattern [* {[:seon.agent/agents :as :started] [:db/id]} {[:seon.agent/task :as :task] :seon.task/task-fact} {[:seon.agent/system :as :system] [:db/id]} {[:seon.model-call/_agent :as :calls] [:seon.model-call/id :seon.model-call/n :seon.model-call/origin :seon.model-call/reply :seon.model-call/reasoning :seon.model-call/finish :seon.model-call/truncated :seon.model-call/error :seon.model-call/forms {[:seon.eval/_call :as :evals] [:db/id]} {[:seon.message/_call :as :messages] [:db/id]}]} {[:seon.eval/_agent :as :evals] [*]} {[:seon.message/_to :as :messages] [*]} {[:seon.cite/_of :as :cites] :seon.cite/cite-fact} {[:seon.search/_of :as :searches] :seon.search/search-fact}] :seon.render/hiccup seon.render.ui/agent}
-                       [:seon.agent/key :seon.agent/key] [:seon.user/name {:optional true} :seon.user/name] [:seon.agent/agents {:optional true} :seon.agent/agents] [:seon.agent/id {:optional true} :seon.agent/id] [:seon.agent/system {:optional true} :seon.agent/system]
+                       [:seon.agent/key :seon.agent/key] [:seon.user/name {:optional true} :seon.user/name] [:seon.agent/agents {:optional true} :seon.agent/agents] [:seon.agent/system {:optional true} :seon.agent/system]
                        [:seon.agent/root {:optional true} :seon.agent/root] [:seon.agent/branch {:optional true} :seon.agent/branch]
                        [:seon.agent/status {:optional true} :seon.agent/status]
                        [:seon.agent/description {:optional true} :seon.agent/description]

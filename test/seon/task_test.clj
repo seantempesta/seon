@@ -300,13 +300,10 @@
     (is (= (seon.lib/digest "k/3") (seon.lib/call-id "k" 3)) "a model call's id is its agent and turn digested")
     (is (= 3 (count (distinct [(seon.lib/call-id "k" 3) (seon.lib/call-id "k" 4) (seon.lib/call-id "j" 3)]))) "another turn or agent, another id")))
 
-(deftest no-src-form-reads-the-attribute-or-mints-an-agents-name
-  ;; the code forms of src, comments out: the attribute :seon.agent/id, the per-boot minting and the boot-prefixed key are gone
-  (let [code (fn [text] (->> (str/split-lines text) (remove #(str/starts-with? (str/triml %) ";;")) (str/join "\n")))
-        files (->> (file-seq (java.io.File. "src")) (filter #(str/ends-with? (str %) ".clj")))
-        texts (for [f files] [(str f) (code (slurp f))])]
-    (is (seq texts))
-    (is (= [] (for [[f t] texts :when (re-find #":seon\.agent/id(?![\w\-])|next-agent-id|task/agent-key|\(defn agent-key" t)] f))
-        "no src form reads :seon.agent/id, counts agents per boot or prefixes a key with the boot")
-    (is (= [] (for [[f t] texts :when (and (re-find #"random-uuid" t) (#{"src/seon/root.clj" "src/seon/task.clj" "src/seon/reconcile.clj"} f))] f))
-        "root, task and the reconciler mint every id through seon.lib/unique-id")))
+(deftest an-agents-id-is-no-stored-attribute
+  ;; docs/decisions.md#an-id-is-the-content-of-the-facts-that-make-it-owner-2026-11-08: an agent is named by its key alone; its id in
+  ;; root's process is the keyword of that key and is never stored, and nothing indexes the boot (the list is by who started an agent)
+  (let [schema (d/schema (ts/test-db))]
+    (is (contains? schema :seon.agent/key) "the key is the stored name")
+    (is (not (contains? schema :seon.agent/id)) "no attribute for the id")
+    (is (not (:db/index (get schema :seon.agent/boot))) "the boot is not indexed")))

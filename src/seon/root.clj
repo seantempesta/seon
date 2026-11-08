@@ -157,7 +157,7 @@
 (defn- answer-spawn
   "Answer the caller of agent id's spawn (held under ::spawning since its :spawn) with r: {:id}
   at its hello, or the end it met first. Answers st."
-  {:malli/schema [:=> [:cat :seon.root/api-state :seon.host/volatile :keyword :any] :seon.root/api-state]}
+  {:malli/schema [:=> [:cat :seon.root/api-state :seon.host/volatile :seon.agent/id :any] :seon.root/api-state]}
   [st o id r]
   (if-let [p (get-in st [::spawning id])]
     (-> (reply! st o p r) (update ::spawning dissoc id))
@@ -180,7 +180,7 @@
   "What went wrong in agent id's view change m (a its entry before), as the one error map,
   or nil: a spawn or fork refused (:error, its error map); a red test run of an agent
   with no task (a task's run records its own at its end, seon.problems/report)."
-  {:malli/schema [:=> [:cat :keyword :map :map] [:maybe :seon.error/base]]}
+  {:malli/schema [:=> [:cat :seon.agent/id :map :map] [:maybe :seon.error/base]]}
   [id a m]
   (let [{:keys [fail error reports]} (:tests m)]
     (cond
@@ -203,7 +203,7 @@
 (defn- set-agent
   "Merge m into agent id's view entry, recording what went wrong in it (`failed`). A stopped
   agent stays stopped: :killed (a kill) or :ended (root stopped it because its run ended)."
-  {:malli/schema [:=> [:cat :seon.root/api-state :seon.host/volatile :keyword :map] :seon.root/api-state]}
+  {:malli/schema [:=> [:cat :seon.root/api-state :seon.host/volatile :seon.agent/id :map] :seon.root/api-state]}
   [st o id m]
   (if-let [a (get-in st [:view :agents id])]
     (let [a' (cond-> (merge a (dissoc m :ready :evals-add))
@@ -234,7 +234,7 @@
   the :evidence effect: sample, lsof, ps and its fiber dump, files under the runs directory's stalls/),
   whose answer is written into the task's cause (back-op). A refused write is the agent's problem, as
   its facts' are."
-  {:malli/schema [:=> [:cat :seon.root/api-state :seon.host/volatile :keyword :map] :seon.root/api-state]}
+  {:malli/schema [:=> [:cat :seon.root/api-state :seon.host/volatile :seon.agent/id :map] :seon.root/api-state]}
   [st o id s]
   (let [{:keys [task pid]} (get-in st [:view :agents id])
         db (some-> (:conn st) deref)]
@@ -262,7 +262,7 @@
   "Send m to agent id's proc: an output of this step to [id :in] (seon.step/out! on o; the
   resolver routes it, the agent is a proc of this graph). Flow sends a step's outputs once its
   transform returns, so after any update! in it that added the agent."
-  {:malli/schema [:=> [:cat :seon.root/api-state :seon.host/volatile :keyword :map] :seon.root/api-state]}
+  {:malli/schema [:=> [:cat :seon.root/api-state :seon.host/volatile :seon.agent/id :map] :seon.root/api-state]}
   [st o id m]
   (when (get-in st [:agents id]) (step/out! o [id :in] m))
   st)
@@ -270,7 +270,7 @@
 (defn- insert-evals
   "Agent id's :evals (spawn!'s opts, held under ::inserting since its :spawn) sent to it as one write, which its REPL runs in order
   before any request the spawn's answer makes (docs/turn.md#an-eval-can-be-inserted). Answers st."
-  {:malli/schema [:=> [:cat :seon.root/api-state :seon.host/volatile :keyword] :seon.root/api-state]}
+  {:malli/schema [:=> [:cat :seon.root/api-state :seon.host/volatile :seon.agent/id] :seon.root/api-state]}
   [st o id]
   (if-let [es (get-in st [::inserting id])]
     (-> st (to-agent o id {:op :write :msg {:op :evals :by "root" :evals es}}) (update ::inserting dissoc id))
@@ -284,7 +284,7 @@
 (defn- agent-key-of
   "The key of agent id, whom messages are to: its name when a live agent has it or main records it (its process is not
   needed), else nil. See docs/users.md#messages."
-  {:malli/schema [:=> [:cat :seon.root/api-state :keyword] [:maybe :string]]}
+  {:malli/schema [:=> [:cat :seon.root/api-state :seon.agent/id] [:maybe :string]]}
   [st id]
   (when (or (get-in st [:agents id]) (pdb/eid @(:conn st) :seon.agent/key (name id))) (name id)))
 
@@ -313,7 +313,7 @@
 (defn- spawn-failed
   "Agent id's spawn or fork refused (why, and its cause when another proc refused it): the
   one error map in its view and sent to its proc, which hangs up."
-  {:malli/schema [:=> [:cat :seon.root/api-state :seon.host/volatile :keyword :string [:maybe :seon.error/base]] :seon.root/api-state]}
+  {:malli/schema [:=> [:cat :seon.root/api-state :seon.host/volatile :seon.agent/id :string [:maybe :seon.error/base]] :seon.root/api-state]}
   [st o id why cause]
   (let [e (contract/error :seon.agent/failed #'seon.root/spawn-failed why (cond-> {:agent id} cause (assoc :cause cause)))]
     (-> st (set-agent o id {:error e}) (answer-spawn o id e) (to-agent o id {:op :failed :error e}))))
@@ -327,7 +327,7 @@
   it), its proc definition (added to the graph by update! at the end of the step). Root's
   end is a jolt.async.remote end (session RC1): its :in is the agent proc's :from, so the
   agent's port is an ordinary channel. Answers [st id agent-end-fd]."
-  {:malli/schema [:=> [:cat :seon.root/api-state :map] [:tuple :seon.root/api-state :keyword :seon.lib/fd]]}
+  {:malli/schema [:=> [:cat :seon.root/api-state :map] [:tuple :seon.root/api-state :seon.agent/id :seon.lib/fd]]}
   [st {:keys [branch task cloned-from key]}]
   (let [;; a new agent is a fresh unique id (seon.lib/unique-id); a session's agent that continues keeps its own, its key's
         id (keyword (or key (lib/unique-id)))
@@ -390,7 +390,7 @@
 
 (defn- pend
   "st with caller p awaiting the answer to a new request id (seon.step/pend), and the id."
-  {:malli/schema [:=> [:cat :seon.root/api-state [:maybe [:or :seon.host/promise :map]] :keyword [:maybe :keyword]] [:tuple :seon.root/api-state :int]]}
+  {:malli/schema [:=> [:cat :seon.root/api-state [:maybe [:or :seon.host/promise :map]] :keyword [:maybe :seon.agent/id]] [:tuple :seon.root/api-state :int]]}
   [st p kind agent] (step/pend st (when p {:p p :kind kind :agent agent})))
 
 (defn- start-spawn
@@ -1358,7 +1358,7 @@
   and the dashboard's calls (seon.web). a: the agent's entry in root's view, which
   merge-main! reads; an op the agent cannot take answers its error. A branch reaches main
   only through a merge task (seon.reconcile's octopus merge)."
-  {:malli/schema [:=> [:cat :symbol [:maybe :keyword] [:maybe :map] [:maybe :map]] :map]}
+  {:malli/schema [:=> [:cat :symbol [:maybe :seon.agent/id] [:maybe :map] [:maybe :map]] :map]}
   [op id args a]
   (let [live? (boolean (and a (not (gone-statuses (:status a)))))
         data-attrs (:data-attrs args :all)]
@@ -1387,13 +1387,13 @@
                     (absent a id))
       (refused 'seon.root/request (str op " is not one of root's requests") {}))))
 
-(defn- agent-entry {:malli/schema [:=> [:cat :seon.root/sys :keyword] [:maybe :map]]}
+(defn- agent-entry {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id] [:maybe :map]]}
   [sys id] (get-in @(call! sys {:op :state}) [:agents id]))
 
 (defn- request!
   "Call root's op on agent id with args (request): a promise of its answer, or of its
   error."
-  {:malli/schema [:=> [:cat :seon.root/sys :symbol [:maybe :keyword] [:maybe :map]] :seon.host/promise]}
+  {:malli/schema [:=> [:cat :seon.root/sys :symbol [:maybe :seon.agent/id] [:maybe :map]] :seon.host/promise]}
   [sys op id args]
   (let [r (request op id args (when (= 'merge-main! op) (agent-entry sys id)))]
     (if (contract/error? r) (doto (promise) (deliver r)) (call! sys r))))
@@ -1403,7 +1403,7 @@
   ready (its hello), so what is sent to it next reaches a live agent; an agent that ends first
   (refused, stopped, or died, with its exit status) throws that end. opts {:branch kw :task
   string}; an existing :branch is resumed."
-  {:malli/schema [:=> [:cat :seon.root/sys :seon.root/spawn-opts] :keyword]}
+  {:malli/schema [:=> [:cat :seon.root/sys :seon.root/spawn-opts] :seon.agent/id]}
   [sys opts]
   (let [r @(request! sys 'spawn! nil opts)]
     (if (:id r) (:id r) (throw (ex-info (:seon.error/message r) r)))))
@@ -1411,7 +1411,7 @@
 (defn clone!
   "Fork a live agent into a new agent on a branch of its branch. A promise of
   {:ok true :id new-id}, or its refused answer (the one error map)."
-  {:malli/schema [:function [:=> [:cat :seon.root/sys :keyword] :seon.host/promise] [:=> [:cat :seon.root/sys :keyword :map] :seon.host/promise]]}
+  {:malli/schema [:function [:=> [:cat :seon.root/sys :seon.agent/id] :seon.host/promise] [:=> [:cat :seon.root/sys :seon.agent/id :map] :seon.host/promise]]}
   ([sys agent-id] (clone! sys agent-id {}))
   ([sys agent-id opts] (request! sys 'clone! agent-id opts)))
 
@@ -1420,13 +1420,13 @@
   opts {:ticks n}: each form stops after n engine ticks of work (an outside or ui origin
   takes :seon.config.agent/form-ticks by default); {:origin :outside|:ui}: who asked, recorded
   with each evaluation."
-  {:malli/schema [:function [:=> [:cat :seon.root/sys :keyword :string] :seon.host/promise] [:=> [:cat :seon.root/sys :keyword :string [:maybe :map]] :seon.host/promise]]}
+  {:malli/schema [:function [:=> [:cat :seon.root/sys :seon.agent/id :string] :seon.host/promise] [:=> [:cat :seon.root/sys :seon.agent/id :string [:maybe :map]] :seon.host/promise]]}
   ([sys agent-id forms-string] (submit! sys agent-id forms-string nil))
   ([sys agent-id forms-string opts] (request! sys 'submit! agent-id (assoc opts :forms forms-string))))
 
 (defn message!
   "Send the signed-in user's message body (a string) to the agent: one message fact on main through root's writer (`message-write`), which wakes it, whether or not its process lives; the agent's next act delivers it. A promise of the writer's answer for that fact's transaction, or refused when main holds no agent of that id or key. See docs/users.md#messages."
-  {:malli/schema [:=> [:cat :seon.root/sys :keyword :string] :seon.host/promise]}
+  {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id :string] :seon.host/promise]}
   [sys agent-id body] (request! sys 'message! agent-id {:body body}))
 
 (defn release!
@@ -1508,9 +1508,9 @@
   so a session's request and the turn's are one run, and a request for main and the run main's
   own program commit started (seon.prove) are one. A promise of the run's answer ({:key :ran
   :reused :pass :fail :error :red :reports ...}), the same run for every asker of that key."
-  {:malli/schema [:function [:=> [:cat :seon.root/sys [:maybe :keyword]] :seon.host/promise]
-                  [:=> [:cat :seon.root/sys [:maybe :keyword] [:set :symbol]] :seon.host/promise]
-                  [:=> [:cat :seon.root/sys [:maybe :keyword] [:set :symbol] [:enum :turn :judge :main]] :seon.host/promise]]}
+  {:malli/schema [:function [:=> [:cat :seon.root/sys [:maybe :seon.agent/id]] :seon.host/promise]
+                  [:=> [:cat :seon.root/sys [:maybe :seon.agent/id] [:set :symbol]] :seon.host/promise]
+                  [:=> [:cat :seon.root/sys [:maybe :seon.agent/id] [:set :symbol] [:enum :turn :judge :main]] :seon.host/promise]]}
   ([sys agent-id] (prove! sys agent-id #{}))
   ([sys agent-id names] (prove! sys agent-id names (if agent-id :turn :main)))
   ([sys agent-id names mode]
@@ -1526,7 +1526,7 @@
   :judge: the run is recorded on main and is one run with any other asker's of its head); a
   promise of the run's answer {:pass :fail :error :reports [...]} (each test bounded by its
   work: :seon.config.agent/test-ticks)."
-  {:malli/schema [:=> [:cat :seon.root/sys :keyword] :seon.host/promise]}
+  {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id] :seon.host/promise]}
   [sys agent-id] (prove! sys agent-id #{} :judge))
 
 (defn- write! {:malli/schema [:=> [:cat :seon.root/sys :seon.writer/request] :seon.host/promise]}
@@ -1552,8 +1552,8 @@
   come into the branch and the agent's db; each conflict stays on the branch as an unmerged
   entry. A promise of {:ok true :applied [key] :conflicts [...] :t}, or :seon.root/no-agent. opts {:data-attrs}
   (default :all)."
-  {:malli/schema [:function [:=> [:cat :seon.root/sys :keyword] :seon.host/promise]
-                  [:=> [:cat :seon.root/sys :keyword :map] :seon.host/promise]]}
+  {:malli/schema [:function [:=> [:cat :seon.root/sys :seon.agent/id] :seon.host/promise]
+                  [:=> [:cat :seon.root/sys :seon.agent/id :map] :seon.host/promise]]}
   ;; the agent owns its branch's writes: it merges main itself
   ([sys agent-id] (merge-main! sys agent-id {}))
   ([sys agent-id opts] (request! sys 'merge-main! agent-id opts)))
@@ -1571,7 +1571,7 @@
   {:malli/schema [:=> [:cat :seon.root/sys] :seon.host/promise]}
   [sys] (write! sys {:op :union}))
 
-(defn branch-diff "The agent's branch versus main. A promise." {:malli/schema [:=> [:cat :seon.root/sys :keyword] :seon.host/promise]}
+(defn branch-diff "The agent's branch versus main. A promise." {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id] :seon.host/promise]}
   [sys agent-id]
   (if-let [b (:branch (agent-entry sys agent-id))]
     (write! sys {:op :branch-diff :branch b})
@@ -1602,7 +1602,7 @@
   "Interrupt the agent's evaluation in progress: SIGUSR1, run by Chez at the agent's next
   safe point, which also ends a blocking host call (preemption is physics: no message
   reaches a running native loop). nil."
-  {:malli/schema [:=> [:cat :seon.root/sys :keyword] :nil]}
+  {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id] :nil]}
   [sys agent-id]
   (some-> (:pid (agent-entry sys agent-id)) (lib/kill! lib/SIGUSR1))
   nil)
@@ -1614,11 +1614,11 @@
 
 (defn back!
   "Take agent id's session back to just after its eval (args {:eval id}): a new branch from that eval's commit, the old branch kept as it is, this process ended and one started on the new branch under the same key, its task parked on it. Answers the new agent's id, or the refusal. See docs/turn.md#an-agent-goes-back-to-an-eval."
-  {:malli/schema [:=> [:cat :seon.root/sys :keyword [:map [:eval :string]]] :any]}
+  {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id [:map [:eval :string]]] :any]}
   [sys agent-id args]
   (let [r @(request! sys 'back! agent-id args)] (if (contract/error? r) r (:id r))))
 
-(defn kill! "SIGKILL the agent's process (through its agent proc). nil." {:malli/schema [:=> [:cat :seon.root/sys :keyword] :nil]}
+(defn kill! "SIGKILL the agent's process (through its agent proc). nil." {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id] :nil]}
   [sys agent-id] (request! sys 'kill! agent-id nil) nil)
 
 (defn stop!
