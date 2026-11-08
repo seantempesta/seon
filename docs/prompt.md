@@ -12,7 +12,7 @@ Each eval's `intent` is a sentence on what that eval is about to do, so you thin
 
 Each eval's `code` is the Clojure to run.
 
-A reply with no call stops you until someone answers, so while work remains, every reply makes its call. Its evals run in order and stop at the first that throws; the rest answer that they were not run. All of a reply's results come back together, in order, in one tool message. A reply can be cut off at its length limit; if your code comes back changed, `:repaired` says what the reader did.
+A reply with no call stops you until someone answers, so while work remains, every reply makes its call. Its evals run in order, every one, whatever the one before it did: if a later eval depends on one that failed, its own result says so. All of a reply's results come back together, in order, in one tool message. A reply can be cut off at its length limit; if your code comes back changed, `:repaired` says what the reader did.
 
 ## What comes back
 

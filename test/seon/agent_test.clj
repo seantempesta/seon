@@ -1475,9 +1475,9 @@
     (is (= 1 (:value whole)) "the page whole once, across both wakes")
     (is (= [] (:value again)) "no eval Seon ran says it was repeated")))
 
-(deftest a-call-after-one-that-threw-is-not-run
-  ;; docs/prompt.md: a reply's calls run in order; a call after one that threw is not run, and
-  ;; its result says so, so every call has its tool message (the provider refuses a call with none)
+(deftest a-call-after-one-that-threw-still-runs
+  ;; docs/prompt.md: a reply's calls run in order, each whatever came before it (owner, 2026-11-08: "I want us to run every eval. Turns are precious
+  ;; and one fuckup shouldn't punish the other evals"); every call has its tool message (the provider refuses a call with none)
   (let [[_ msgs] (in-agent (fn [{:keys [task ns]}]
                              (let [run (str ns "/t#throws")]
                                [(str "(seon.turn/work! {:task " (pr-str task) " :max-turns 1})")
@@ -1489,14 +1489,10 @@
         [r0 r1 r2 :as rs] (:value msgs)]
     (is (= 3 (count (distinct (mapv :tool-call-id rs)))) (str "every call has its result, by its id: " (pr-str msgs)))
     (is (str/includes? (:content r1) "boom") "the second call's error")
-    (is (str/includes? (:content r2) "not-run") "the third call was not run, and its result says so")
-    (is (str/includes? (:content r2) (:tool-call-id r1)) "naming the call that threw")
-    (is (not (str/includes? (:content r2) ":value 2")) "(inc a) never ran")))
+    (is (str/includes? (:content r2) ":value 2") (str "(inc a) ran after the call that threw: " (:content r2)))))
 
-(deftest an-error-answer-stops-the-replys-later-calls
-  ;; task seon.turn/an-agent-that-breaks-its-own-render-is-told-and-goes-on: a call answering an error value (a
-  ;; refused edit!) stops the reply's later calls as a throw does, so none builds on a change that never happened
-  ;; (a replay's refused edit of seon.ctx/members-map, then an applied edit of join calling it, broke its page)
+(deftest a-call-after-an-error-answer-still-runs
+  ;; docs/prompt.md: a call answering an error value (a refused edit!) is one result; the reply's later calls run, as after a throw (owner, 2026-11-08)
   (let [[_ msgs] (in-agent (fn [{:keys [task ns]}]
                              (let [run (str ns "/t#refused")]
                                [(str "(seon.turn/work! {:task " (pr-str task) " :max-turns 1})")
@@ -1508,8 +1504,7 @@
         [_ r1 r2 :as rs] (:value msgs)]
     (is (= 3 (count (distinct (mapv :tool-call-id rs)))) (str "every call has its result, by its id: " (pr-str msgs)))
     (is (str/includes? (:content r1) "edit-refused") "the second call's error value")
-    (is (str/includes? (:content r2) "not-run") "the third call was not run, and its result says so")
-    (is (not (str/includes? (:content r2) ":value 2")) "(inc a) never ran")))
+    (is (str/includes? (:content r2) ":value 2") (str "(inc a) ran after the refused edit: " (:content r2)))))
 
 (deftest a-call-is-text-and-its-forms
   ;; owner, 2026-10-29: a call is text and one or more forms, run in order; one with no text or
@@ -2977,7 +2972,7 @@
 (deftest evals-given-at-spawn-run-first-as-ordinary-evals
   ;; docs/turn.md#an-eval-can-be-inserted: an agent spawned with :evals (pairs of text and code) runs them on its one REPL
   ;; queue before anything else, each recorded as any eval is, by whoever asked, at turn 0 and with no call id. One that
-  ;; throws is recorded with its error and the rest are not run, as the calls of a reply are not. A reader of the
+  ;; throws is recorded with its error and the rest run, as a reply's calls do (owner, 2026-11-08). A reader of the
   ;; conversation then sees them in order and, in the request, as calls of their own.
   (let [read (str "(let [c @seon.ctx/ctx db (seon.agent/db) es (map #(get-in c [:evals (first %)]) (:evals (seon.context/turn-members db c (second (first (seon.context/turns c))))))] "
                   "{:turn (seon.agent/turn-now) "
@@ -2991,7 +2986,7 @@
     (is (= 0 (:turn v)) (pr-str r))
     (is (= [["root" "Add." nil false 3]
             ["root" "Throw." nil true nil]
-            ["root" "Never." nil true nil]]
+            ["root" "Never." nil false 7]]
            (:records v))
-        "three ordinary evals at turn 0 in order, by whoever asked, none a model's call; the throw recorded, the next not run")
+        "three ordinary evals at turn 0 in order, by whoever asked, none a model's call; the throw recorded, and the next still runs")
     (is (= ["assistant" "tool" "assistant" "tool" "assistant" "tool"] (take 6 (:roles v))) "each reaches the request as a call and its result")))
