@@ -1024,20 +1024,22 @@
 (deftest an-agents-first-search-reads-the-index-it-inherited
   ;; docs/vector.md#search: an agent's first grep built the search's text index from nothing (seon.doc/text-index).
   ;; The fork server builds main's once and each move carries it (seon.doc/carry-index!): the
-  ;; first search allocates what a second does, not a build more, and its FTS5 table, an in-memory SQLite database,
-  ;; answers in the forked child.
-  (let [m "(fn [f] (let [b (seon.profile/alloc-bytes)] (f) (- (seon.profile/alloc-bytes) b)))"
-        [_ costs] (in-agent [(str "(def meas " m ")")
-                             "[(meas #(my.agent/grep \"accumulated\")) (meas #(my.agent/grep \"accumulated\")) (meas #(#'seon.doc/build-index (:db @seon.agent/state))) (count (my.agent/grep \"accumulated\"))]"]
-                            ;; a root of its own: on a shard's shared root the first grep allocates more after enough earlier tests,
-                            ;; with the inherited index still current (the control of 2026-11-05; what allocates it is open), so the verdict
-                            ;; was a function of what ran before it, here and on the merge gate
-                            {:group :pristine})
-        [first-search second-search build rows] (:value costs)]
-    (is (pos? rows) "the query of the index it inherited answers in the forked child")
-    ;; that a move writing text has its rows replaced: seon.doc-test/a-carried-index-answers-as-a-built-one
-    (is (< (- first-search second-search) (quot build 2))
-        (str "an agent's first grep allocated " first-search " bytes, a second " second-search "; building the index " build))))
+  ;; first search finds the index held for its db and builds none, and its FTS5 table, an in-memory SQLite database,
+  ;; answers in the forked child. The bytes of the first search's section reads are leaf decoding in the child,
+  ;; which depends on the store's layout, so they are not this test's claim.
+  (let [held (last (in-agent [(str "(def held (fn [] (let [d (:db @seon.agent/state) [at ix] @@#'seon.doc/indexes] {:current (= at [(:hash d) (:max-tx d)]) :ix ix})))")
+                            "(def before (held))"
+                            "(def rows (count (my.agent/grep \"accumulated\")))"
+                            "(def after (held))"
+                            "{:rows rows :current-before (:current before) :current-after (:current after) :same-index (identical? (:ix before) (:ix after)) :held? (some? (:ix before))}"]
+                           ;; a root of its own: the slot is one per process, and a shard's shared root has searched before
+                           {:group :pristine}))
+        {:keys [rows current-before current-after same-index held?]} (:value held)]
+    (is held? "the agent inherited an index")
+    (is current-before "the index it inherited is the one held for its db")
+    (is same-index "its first search built no index: the slot holds the same one after it")
+    (is current-after "and still the one held for its db")
+    (is (pos? rows) "the query of the index it inherited answers in the forked child")))
 
 (deftest a-merge-of-main-keeps-the-search-index-current
   ;; docs/vector.md#search: an agent's writes carry the text index (seon.doc/carry-index!), so a search after one rebuilds nothing; the merge's own record of its base was a write that skipped it, so the next search after any merge rebuilt the index, about 20 MB, seen as a flake
