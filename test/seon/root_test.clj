@@ -182,7 +182,11 @@
   ;; rewrote the checkout's task files, FSEvents delivered those writes to its new watcher, and
   ;; a task file's event loads every file of the task dir. A test root's task dir is its own
   ;; (seon.test-store/start-root!), so its loads read its own files and never the checkout's.
-  ;; Asserted through the root's own reads, with no watcher event and no write to the checkout
+  ;; Asserted through the root's own reads, with no watcher event and no write to the checkout.
+  ;; And the built root reads a line citation (task jolt.ns/whole-program-inference-keeps-nil-checks):
+  ;; compiled, `[from to]` destructured from `(if dash [a b] [suffix])` typed `to` a string, so
+  ;; `(nil? to)` folded false and `src/a.clj:50` reached parse-long as nil; my.root/load-tasks!
+  ;; failed on every task file citing `path:N`
   (let [checkout (seon.config/checkout)
         path (test-store)
         main (str "root-test-own-tasks-" (random-uuid))
@@ -199,6 +203,7 @@
       ;; watcher event, and this assertion was red (0 tasks), so no event for demo.edn's write
       ;; loaded it; the count is the boot's load
       (is (= 1 (ask "(count (seon.task/tasks @(:conn sys)))")) "its own task file's one whole task, loaded at boot")
+      (is (= "src/a.clj" (ask "((resolve 'seon.ref/line-citation) \"src/a.clj:50\")")) "the built root reads a path:line citation")
       ;; its watcher's roots are what its watched loaders read, never the checkout, whose builds,
       ;; stores and (in the main tree) worktrees no loader reads: the whole checkout kept fseventsd
       ;; saturated (task seon.watch/root-watches-what-its-loaders-read)
@@ -270,20 +275,6 @@
       (is (= {:boot "killed-boot" :cause :unclean} (select-keys (printed killed) [:boot :cause]))
           "a boot that left no stop fact is found :unclean")
       (finally (sh/sh "rm" "-rf" path (str path "-in") (str path ".log") (str path "-agents"))))))
-
-(deftest a-built-root-reads-a-line-citation
-  ;; task jolt.ns/whole-program-inference-keeps-nil-checks: compiled, `[from to]` destructured
-  ;; from `(if dash [a b] [suffix])` typed `to` a string, so `(nil? to)` folded false and
-  ;; `src/a.clj:50` reached parse-long as nil; my.root/load-tasks! failed on every task file
-  ;; citing `path:N`. On a main of its own on the test store, deleted at the end.
-  (let [path (test-store)
-        main (str "root-test-" (random-uuid))
-        out (root-answers path main
-                          [{:op :eval :agent "root" :code "((resolve 'seon.ref/line-citation) \"src/a.clj:50\")"}])
-        answer (try (edn/read-string {:default tagged-literal} (first (str/split-lines out))) (catch Exception _ nil))]
-    (try
-      (is (= "src/a.clj" (ts/value-of (:response answer))) out)
-      (finally (ts/drop-main! (test-store) main) (sh/sh "rm" "-f" (str path "-in") (str path ".log"))))))
 
 (deftest a-build-without-whole-program-inference-reads-with-tools-reader
   ;; with

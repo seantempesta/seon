@@ -5,9 +5,9 @@
 # tree runs nothing. Tests run in :seon.config.proofs/jobs shards at once (bin/test); the steps to run go
 # through bin/check's own bodies (bin/check --steps target/prove, started by bin/test beside the shards), on target/seon built from this tree first
 # (bin/test builds it only when a selected test or step reaches the binary: the plan's out/binary).
-# With no namespace named, the tests and steps that reach a process of their own (a root, an
-# agent, a fork, the binary: seon.program/graph-index's :process?) are left out; they run when
-# named (bin/test NS, bin/check MODE) or in the full run (docs/merging.md).
+# With no namespace named it leaves nothing out, as --merge does: the tests and steps that reach a
+# process of their own (a root, an agent, a fork, the binary: seon.program/graph-index's :process?)
+# run too, and the slow tests last, once all else is green (owner, 2026-11-08: "Yes, run them early").
 # Ends on PROVE OK / PROVE FAILED and its exit status. The full runs are explicit:
 # bin/test --all, bin/check 100.
 #
@@ -64,11 +64,18 @@ WHAT=both
 # (seon.prove-test/two-runs-on-one-checkout-each-end-with-their-own-result named its tests, was answered
 # from a marker an earlier green run of them left, said no run directory, and went red in full proves)
 TREE=$( (( $# )) || "$ROOT/bin/tree" "$ROOT") || TREE=
-KEY=${TREE:+$WHAT-$MERGE-$TREE}
+# a bare run and a --merge run run the same keys (below), so one marker answers both: a tree a session
+# proved with bin/prove is answered at once when bin/land proves it again with --merge
+KEY=${TREE:+$WHAT-$TREE}
 MARK=$SEON_RESULTS_DIR/proved/$KEY
 if [[ -n $KEY && -f $MARK ]]; then
   echo "prove: tree $TREE proved green already ($(cat "$MARK")): nothing to run"
-  echo "PROVE OK"
+  if (( MERGE )); then
+    echo "$(git -C "$ROOT" rev-parse --short HEAD) bin/prove --merge $(date '+%Y-%m-%d %H:%M'): MERGE OK; tree $TREE proved green already ($(cat "$MARK"))"
+    echo "MERGE OK"
+  else
+    echo "PROVE OK"
+  fi
   exit 0
 fi
 OWN=0
@@ -78,7 +85,10 @@ fi
 mkdir -p "$OUT"
 echo "prove: run ${OUT:t}, logs in $OUT"
 st=0
-PLAN=(); (( MERGE )) && PLAN=(--merge)
+# a bare run leaves nothing out, as a merge's does (owner, 2026-11-08: "Yes, run them early"): the process
+# tests its change reaches run in every session's prove, so a red shows before landing and the landing
+# reuses the greens; a run that names its tests runs those
+PLAN=(); (( MERGE )) || [[ $# == 0 && $WHAT == both ]] && PLAN=(--merge)
 # a subshell: the pipeline's first part, its status the run's (tee keeps the log the merge reads)
 (
 nice -n 15 "$ROOT/bin/test" --prove $WHAT "$OUT" $PLAN "$@" || st=1
@@ -87,8 +97,8 @@ if [[ $WHAT != tests && -s $OUT/steps && ! -e $OUT/stopped ]]; then
   # a step's result is keyed by the source it reaches
   nice -n 15 "$ROOT/bin/test" --store-steps "$OUT" || st=1
 fi
-# a merge's last tier: the slow tests with no green at their digest (the plan's out/slow), only once all else is green, so a fast red answers first and no red waits unseen behind a merge
-if (( MERGE && st == 0 )) && [[ -s $OUT/slow ]]; then
+# the last tier: the slow tests with no green at their digest (the plan's out/slow), only once all else is green, so a fast red answers first and no red waits unseen behind a merge
+if (( st == 0 )) && [[ -s $OUT/slow ]]; then
   echo "prove: the slow tests, last: $(<$OUT/slow)"
   nice -n 15 "$ROOT/bin/test" ${=$(<$OUT/slow)} || st=1
 fi
