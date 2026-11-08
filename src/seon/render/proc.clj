@@ -520,25 +520,25 @@
   `seon.db/at-commit`) and this one (`seon.problems/health-moved`, which reads the runs and sections
   they touched and not the closed history, however many commits the gap holds), or read whole when
   none is held or the held one was read from a db ahead of its commit. Its counts are the ones the
-  fold it holds puts it at (`seon.problems/with-fold`): a repeat of a written signature, which main
-  does not hold yet, is counted there, so the banner, root's context and the api's answer are one
-  count. When no class changed, the held report stays and nothing is flushed.
+  fold it was last asked with puts it at (`seon.problems/with-fold`): a repeat of a written signature,
+  which main does not hold yet, is counted there, so the banner, root's context and the api's answer are
+  one count, and a fold that moved with main still counts it again. When no class changed, the held
+  report stays and nothing is flushed.
   See docs/render.md#health-is-what-flows."
   {:malli/schema [:=> [:cat :map] :map]}
   [st]
   (if-let [{:keys [w a]} (:root-walk st)]
     (let [db (:main-db st) pt (seon.db/point db) from (:health-at st) prev (:health @a) fold (:fold st)]
-      (if (= pt from)
+      ;; the held report stands while both what it was read from and the counts it was put at do
+      (if (and (= pt from) (= fold (:health-fold st)))
         st
-        (let [base (when (and prev from) (seon.db/at-commit (:conn st) (first from)))
+        (let [base (when (and prev from (not= pt from)) (seon.db/at-commit (:conn st) (first from)))
               ;; the commit's own value, as the held health was read from it; a db ahead of its commit is read whole
-              ;; (`base` nil: what main holds now was never written before the held health was read, so the move from it
-              ;; answers nothing about the fold's repeats, and the read is whole)
-              h (if base
-                  (problems/health-moved prev base db (apply concat (d/datoms-diff base db :eavt [])))
-                  (problems/health db))
+              h (cond (and prev (= pt from)) prev
+                      (and base (= (:max-tx base) (second from))) (problems/health-moved prev base db (apply concat (d/datoms-diff base db :eavt [])))
+                      :else (problems/health db))
               h (if (seq fold) (problems/with-fold h db fold) h)
-              st (assoc st :health-at pt)]
+              st (assoc st :health-at pt :health-fold fold)]
           (if (= (:classes h) (:classes prev))
             st
             (do (reset! a (assoc @a :health h))
