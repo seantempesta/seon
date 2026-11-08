@@ -1205,7 +1205,7 @@
                        (step/out! o :to-workers (if (:batch st) {:batch (mapv #(assoc % :taken-ns t) ms)} (assoc (first ms) :taken-ns t)))
                        (recur (cond-> (update st :busy inc)
                                 (:bucket st) (update :bucket #(update (refill % now) :tokens - (transduce (map (fn [r] (or (:est r) 0))) + ms))))))
-          :else (do (reply! o (:dest m) (assoc d :seon.fx/kind (:kind st)))
+          :else (do (reply! o (:dest m) d)
                     (recur (update st :queue dissoc qk)))))
       st)))
 
@@ -1303,7 +1303,7 @@
            t1 (profile/now-ns)
            done (mapv (fn [m r]
                         (cond-> {:dest (:dest m) :request m :budget-key (:budget-key m) :est (:est m 0)
-                                 :outcome (cond-> (assoc r :seon.fx/kind (:kind st) :seon.fx/queue-us (quot (- (:taken-ns m) (:in-ns m)) 1000)
+                                 :outcome (cond-> (assoc r :seon.fx/queue-us (quot (- (:taken-ns m) (:in-ns m)) 1000)
                                                          :seon.fx/us (quot (- t1 t0) 1000))
                                             ;; when it failed, as its asker records it (seon.error/asked-tx)
                                             (contract/error? r) (assoc :seon.fx/at-ms (System/currentTimeMillis)))}

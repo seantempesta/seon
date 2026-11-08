@@ -367,9 +367,7 @@
          basis (assoc (basis! task turn max-turns :outside true) :agent k)
          walk (repl/page-walk)
          db (agent/db)
-         ;; how the work stands, as a turn's own: the done rule's reasons over the branch's gaps since its merge base
-         s (context/status db @ctx/ctx {})
-         {:keys [messages]} (context/render db basis {:walk walk :status s})
+         {:keys [messages]} (context/render db basis {:walk walk})
          ;; as a person reads it: the system prompt, then each record as the call made and its result
          text (context/read-text db basis messages wire?)]
      ;; the read is a model call of this agent, as a model turn's is: what it was built from and what it cost

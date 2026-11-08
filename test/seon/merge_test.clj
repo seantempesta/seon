@@ -65,12 +65,13 @@
   (testing "t = b: ours kept, nothing applied, and it is an ours-change"
     (let [r (tw (with (base) (var-tx "f" "(dec x)")) (base))]
       (is (empty? (:apply r))) (is (empty? (:conflicts r))) (is (= [(vk "f")] (defs-of (keys (:ours r)))))))
-  (testing "conflicts carry their kind, base, ours and theirs"
-    (are [o t kind] (= [kind] (map :kind (filter #(= :var (first (:key %))) (:conflicts (tw o t)))))
-      (with (base) (var-tx "f" "(inc x)")) (with (base) (var-tx "f" "(dec x)")) :both-modified
-      (with (base) (var-tx "n" "1")) (with (base) (var-tx "n" "2")) :both-added
-      (with (base) (unmap "f")) (with (base) (var-tx "f" "(dec x)")) :deleted-by-us
-      (with (base) (var-tx "f" "(inc x)")) (with (base) (unmap "f")) :deleted-by-them)
+  (testing "a conflict holds the sides that have the key, and an absent side is one that never had it or deleted it"
+    (are [o t sides] (= [sides] (map (fn [c] (set (filter #(contains? c %) [:base :ours :theirs])))
+                                     (filter #(= :var (first (:key %))) (:conflicts (tw o t)))))
+      (with (base) (var-tx "f" "(inc x)")) (with (base) (var-tx "f" "(dec x)")) #{:base :ours :theirs}
+      (with (base) (var-tx "n" "1")) (with (base) (var-tx "n" "2")) #{:ours :theirs}
+      (with (base) (unmap "f")) (with (base) (var-tx "f" "(dec x)")) #{:base :theirs}
+      (with (base) (var-tx "f" "(inc x)")) (with (base) (unmap "f")) #{:base :ours})
     (let [c (first (:conflicts (tw (with (base) (var-tx "f" "(inc x)")) (with (base) (var-tx "f" "(dec x)")))))]
       (is (= (vk "f") (:key c)))
       (is (= (fid "f" "x") (:form (:base c))))
@@ -146,7 +147,7 @@
     (is (= [[:config :x/b]] (:apply r)))
     (is (empty? (:conflicts r)))
     (is (= {:config [:x/a]} (pm/divergence (:ours r))))
-    (is (= [[:config :x/a] :both-modified] ((juxt :key :kind) (first (:conflicts (pm/delta-three-way main ours (set-k main :x/a "7") #{}))))))
+    (is (= [[:config :x/a] #{:base :ours :theirs}] ((fn [c] [(:key c) (set (filter #(contains? c %) [:base :ours :theirs]))]) (first (:conflicts (pm/delta-three-way main ours (set-k main :x/a "7") #{}))))))
     (let [merged (d/db-with main (pm/merge-tx main main ours (keys (:ours r)) #{}))
           paths (seon.source/changed-files merged (:ours r))]
       (is (= [p] paths))
@@ -163,7 +164,7 @@
         r (pm/delta-three-way main ours main #{})]
     (is (= {[:script "bin/x"] [{:file "bin/x" :text text :mode "100755"} {:file "bin/x" :text "#!/bin/sh\necho 2\n" :mode "100755"}]} (:ours r)) (pr-str r))
     (is (= {:scripts ["bin/x"]} (pm/divergence (:ours r))))
-    (is (= [[:script "bin/x"] :both-modified] ((juxt :key :kind) (first (:conflicts (pm/delta-three-way main ours theirs #{}))))) "both sides changing it is an unmerged entry")
+    (is (= [[:script "bin/x"] #{:base :ours :theirs}] ((fn [c] [(:key c) (set (filter #(contains? c %) [:base :ours :theirs]))]) (first (:conflicts (pm/delta-three-way main ours theirs #{}))))) "both sides changing it is an unmerged entry")
     (is (= "" (:seon.script/says (d/entity (d/db-with main (pm/merge-tx main main ours (keys (:ours r)) #{})) [:file/path "bin/x"]))) "what it derives rides with it")
     (let [p "resources/seon/schemas/x.edn"
           db (let [db (empty-db)] (d/db-with db (seon.source/import-tx db {p "{:x/a :int}\n"})))
@@ -177,7 +178,7 @@
     (is (= #{(vk "g") [:form (fid "g" "x")]} (set (keys (:ours r)))) "the definition, and the form it leaves dead")
     (is (nil? (seon.doc/source-of main' 'app/g)))
     (is (not (program/live? main' (pdb/eid main' :form/id (fid "g" "x")))) "the form is dead on main, as on the branch")
-    (is (= [:deleted-by-us] (map :kind (filter #(= :var (first (:key %))) (:conflicts (tw ours (with (base) (var-tx "g" "(dec x)"))))))))))
+    (is (= [#{:base :theirs}] (map (fn [c] (set (filter #(contains? c %) [:base :ours :theirs]))) (filter #(= :var (first (:key %))) (:conflicts (tw ours (with (base) (var-tx "g" "(dec x)"))))))))))
 
 ;; docs/merging.md#a-branch-merges-main-in: md-scan 29's branch held the results of a test main deleted,
 ;; on an entity with no :var/name, and its next test run threw on the nil test key
@@ -364,7 +365,7 @@
     (is (= [] (:conflicts r)) "different keys of one resource do not conflict")
     (testing "one key changed two ways conflicts at its key"
       (let [r2 (pm/three-way (prog main) (prog ours) (prog (registered main :seon.task/reason [:string {:max 5}])))]
-        (is (= [[:schema :seon.task/reason] :both-modified] ((juxt :key :kind) (first (:conflicts r2)))))))
+        (is (= [[:schema :seon.task/reason] #{:base :ours :theirs}] ((fn [c] [(:key c) (set (filter #(contains? c %) [:base :ours :theirs]))]) (first (:conflicts r2)))))))
     (testing "merged into main: the entry is main's, no longer the binary's, and write-back changes only its bytes"
       (let [main2 (d/db-with main (pm/merge-tx main main ours (keys (:ours r)) #{}))]
         (is (= #{:seon.task/reason} (set (keys (program/schema-changes main2)))))

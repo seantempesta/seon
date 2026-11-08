@@ -737,7 +737,7 @@
       ;; what no gate will run stays unjudged, said here because it ends no run (seon.task/unjudged)
       unjudged (assoc :unjudged unjudged)
       test-error (assoc :test-run {:failed [(:seon.error/message test-error)]})
-      (seq unmerged) (assoc :unmerged (mapv #(select-keys % [:key :kind :base :ours :theirs]) unmerged))
+      (seq unmerged) (assoc :unmerged (mapv #(select-keys % [:key :base :ours :theirs]) unmerged))
       (seq gaps) (assoc :without-a-contract gaps)
       (seq (:caused split)) (assoc :caused (:caused split))
       (seq (:attention split)) (assoc :attention (:attention split))
