@@ -64,7 +64,7 @@
             (cond-> {:text (or text "")
                      :prompt-tokens (reduce + (map (comp select/estimate :content) (:messages request)))
                      :completion-tokens (select/estimate (apply str text (map :code calls))) :estimated true :ms (profile/ms-since t0)}
-              (seq calls) (assoc :tool-calls (vec (map-indexed (fn [i c] (assoc c :id (str "call-" (:turn request) "-" i))) calls))))))))))
+              (seq calls) (assoc :tool-calls (vec (map-indexed (fn [i c] (assoc c :id (str "call-" (:turn request) "-" i) :seon.model/at [0 i])) calls))))))))))
 
 (defn- body-text
   "A read response's whole body as text: its buffered bytes, or every piece its pull yields
@@ -267,7 +267,13 @@
   {:malli/schema [:=> [:cat :map number? [:maybe :int]] [:or :seon.model/completion :seon.model/failure]]}
   [j ms max-tokens]
   (let [msg (get-in j [:choices 0 :message])
-        parsed (mapv (fn [c] (evals-of (get-in c [:function :name]) (get-in c [:function :arguments]) (str (:id c)))) (:tool_calls msg))
+        ;; each eval carries its place in the reply, [k i]: its tool call's index (the provider's :index, else its position) and its own
+        ;; position within that call's evals, which names its parts of the stream (<call>/<k>/eval-<i>/...)
+        parsed (vec (map-indexed (fn [pos c]
+                                   (let [[es said] (evals-of (get-in c [:function :name]) (get-in c [:function :arguments]) (str (:id c)))
+                                         k (or (:index c) pos)]
+                                     [(vec (map-indexed (fn [i e] (assoc e :seon.model/at [k i])) es)) said]))
+                                 (:tool_calls msg)))
         [text calls] (spoken (or (:content msg) (when (seq (:tool_calls msg)) ""))
                              (into [] (mapcat first) parsed) (keep second parsed))
         calls (text-as-call text calls)
