@@ -519,12 +519,15 @@
         main-b (pdb/main-branch (:cfg @state))
         main (heard-main)
         head @conn
-        r (pm/delta-three-way (:base @state) head main data-attrs)]
+        ;; git's merge base: the main last merged, unless main has since merged a commit of this branch (its own merge up), which
+        ;; is then the base; read from the commit graph only when main moved, over the commits since (docs/sharing.md#a-merge)
+        base (if (= (d/commit-id main) (d/commit-id (:base @state))) (:base @state) (pdb/branch-base conn main-b (:branch @state)))
+        r (pm/delta-three-way base head main data-attrs)]
     (if (empty? (:theirs r))
       {:ok true :applied [] :conflicts [] :t (:max-tx head)}
-      (let [carried (task/carry-tx (:base @state) main head)
+      (let [carried (task/carry-tx base main head)
             ;; the parent is the commit merged: a branch name would name main's head when this commits, which can be newer than what was merged
-            rep (d/merge-db conn #{(d/commit-id main)} (-> (pm/merge-tx head (:base @state) main (:apply r) data-attrs)
+            rep (d/merge-db conn #{(d/commit-id main)} (-> (pm/merge-tx head base main (:apply r) data-attrs)
                                                (into (pm/unmerged-tx head (:conflicts r) (:max-tx main)))
                                                (into (:tx carried)))
                              (pdb/tx-meta (:branch @state) {:seon.tx/merged main-b}))

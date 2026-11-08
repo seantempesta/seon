@@ -9,7 +9,7 @@
   (:require [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [clojure.edn :as edn]
             [clojure.string :as str] [seon.agent :as agent] [seon.proofs :as proofs] [seon.contract :as contract]
             [datahike.api :as d] [seon.db :as pdb] [seon.test-store :as ts] [seon.program-test] [seon.lib :as lib] [seon.program :as program] [seon.sock :as sock]
-            [seon.fx :as fx] [seon.cost :as cost] [seon.config :as cfg] [seon.merge :as pm] [seon.profile :as profile] [seon.task :as task] [seon.repl :as repl] [seon.ctx] [seon.render] [seon.turn] [my.test :as mt] [test-runner :as runner] [seon.context-test] [my.task] [my.agent] [seon.template :as tpl] [seon.stall-proofs] [clojure.core.async]))
+            [seon.fx :as fx] [seon.cost :as cost] [seon.config :as cfg] [seon.merge :as pm] [seon.profile :as profile] [seon.task :as task] [seon.writer :as writer] [seon.repl :as repl] [seon.ctx] [seon.render] [seon.turn] [my.test :as mt] [test-runner :as runner] [seon.context-test] [my.task] [my.agent] [seon.template :as tpl] [seon.stall-proofs] [clojure.core.async]))
 
 (def ^:private await-file
   "seon.await, which a root (importing src only) loads by this path."
@@ -1659,6 +1659,39 @@
              "and is main's, not the agent's: its base is the merge base")
          (is (= {} (pm/divergence (agent/branch-changes (:base @agent/state) (agent/db))))
              "so the agent's divergence carries none of main's changes")
+         (finally (reset! agent/state old) (reset! agent/link old-link) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
+
+(deftest a-pull-after-its-own-merge-starts-from-what-it-merged
+  ;; seon.agent/a-pull-after-its-own-merge-starts-from-what-it-merged: git's merge base after main merged this branch's commit C is C.
+  ;; An agent whose task merged goes on (a chat's next message) and edits f1 again; its next pull of main meets its own first edit as
+  ;; main's change. Judged from the main it last pulled, that is f1 changed on both sides, differently: a conflict with itself.
+  ;; In this process, on a branch of the test store, with a socketpair standing for root and the real writer merging up.
+  (ts/test-branch!
+   (fn [cfg conn]
+     (let [ab (pdb/on-main (:branch cfg) :agent-own-merge)
+           _ (d/branch! conn (:branch cfg) ab)
+           forked @conn
+           [v nsx] (d/q '[:find [?v ?n] :where [?v :var/name app.m0/f1] [?v :var/form ?f] [?f :form/ns ?n]] forked)
+           redefine (fn [id body] (agent/transact! [{:db/id "f" :form/id id :form/ns nsx :form/order 100 :form/defines [v]
+                                                    :form/src (str "(defn f1 {:malli/schema [:=> [:cat :int] :int]} [x] " body ")")}
+                                                   [:db/add v :var/form "f"]]))
+           src (fn [db] (:form/src (:var/form (d/entity db [:var/name 'app.m0/f1]))))
+           store-conn (d/connect (assoc cfg :branch ab))
+           [a b] (sock/socketpair)
+           old @agent/state old-link @agent/link]
+       (try
+         (reset! agent/link {:fd a}) (reset! agent/state {:store-conn store-conn :cfg cfg :branch ab :key "test/a1" :db @store-conn :base forked :main forked})
+         (redefine "app.m0/f1-first" "(+ x 1)")
+         (agent/commit!)
+         (let [w (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false
+                                        :to-writer (clojure.core.async/chan 4) :events (clojure.core.async/chan 4)})
+               up (first (:results (:r (first (:to-api (second (#'writer/writer-proc w :in {:op :octopus-merge :branches [ab] :dest {:rid 1}})))))))]
+           (is (:merged? up) (str "root merges the agent's branch up: " (pr-str up))))
+         (redefine "app.m0/f1-second" "(+ x 2)")
+         (agent/heard-main)
+         (let [r (agent/merge-main! #{})]
+           (is (= [] (:conflicts r)) "its own merged edit is no change of main's")
+           (is (= "(defn f1 {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 2))" (src (agent/db))) "and its second edit stands"))
          (finally (reset! agent/state old) (reset! agent/link old-link) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
 
 (deftest an-agent-keeps-no-db-older-than-its-branchs-current
