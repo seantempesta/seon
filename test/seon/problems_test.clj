@@ -1223,9 +1223,9 @@
   (let [ns-e (:db/id (:var/ns (d/entity db0 [:var/name 'app.calc/inc2])))
         nsym (:ns/name (d/entity db0 ns-e))]
     (d/db-with db0 (into [[:db/add ns-e :ns/file "src/app/cite.clj"]]
-                         (mapcat (fn [i] (let [{:keys [src doc kind]} (spec i)]
+                         (mapcat (fn [i] (let [{:keys [src doc meta]} (spec i)]
                                            [{:db/id (- (inc (* 2 i))) :form/id (str "cite-form-" i) :form/ns ns-e :form/order i :form/src src :form/defines [(- (* 2 i))]}
-                                            (cond-> {:db/id (- (* 2 i)) :var/name (symbol (str nsym) (str "v" i)) :var/ns ns-e :var/form (- (inc (* 2 i))) :var/kind (or kind :fn)}
+                                            (cond-> {:db/id (- (* 2 i)) :var/name (symbol (str nsym) (str "v" i)) :var/ns ns-e :var/form (- (inc (* 2 i))) :var/meta (or meta #{:arglists})}
                                               doc (assoc :var/doc doc))]))
                                  (range 1 (inc n)))))))
 
@@ -1246,7 +1246,7 @@
                                 2 {:src "(defn g [])" :doc "Does a thing. See docs/health.md#a-dead-citation."}
                                 3 {:src "(defn- h [])" :doc "A private thing."}
                                 4 {:src "(defn k [])"}
-                                5 {:src "(deftest t [])" :doc "A test." :kind :test}
+                                5 {:src "(deftest t [])" :doc "A test." :meta #{:test}}
                                 6 {:src "(defn m [])" :doc "See docs/errors.md#problems."})))
         v #(symbol (cite-ns db) (str "v" %))
         rows #(mapv (comp :var :evidence) (problems/uncited-vars db {} (into #{} (map v) %)))]
@@ -1287,7 +1287,7 @@
   (let [bound (seon.config/value :seon.config.shrink/form-tokens)
         pad #(str "(defn f [] \"" (apply str (repeat % \x)) "\")")
         long-src (pad (* 4 bound)) short-src (pad 10)
-        db (var-forms (world) 3 (fn [i] (case (int i) 1 {:src long-src} 2 {:src short-src} 3 {:src long-src :kind :test})))
+        db (var-forms (world) 3 (fn [i] (case (int i) 1 {:src long-src} 2 {:src short-src} 3 {:src long-src :meta #{:test}})))
         v #(symbol (cite-ns db) (str "v" %))
         rows #(mapv :evidence (problems/long-forms % {} (into #{} (map (partial symbol (cite-ns %))) ["v1" "v2" "v3"])))]
     (is (= [{:kind :long-form :var (v 1) :tokens (seon.print.emit/chars-tokens (count long-src)) :bound bound} {:kind :long-form :var (v 3) :tokens (seon.print.emit/chars-tokens (count long-src)) :bound bound}]

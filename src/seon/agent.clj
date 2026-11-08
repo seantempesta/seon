@@ -869,7 +869,7 @@
                                     nsym (symbol (namespace v))
                                     head (when-not (find-ns nsym)
                                            (some->> (pdb/eid base :ns/name nsym) (d/entity base) :ns/form :form/src))]
-                              :when (= :test (:var/kind e))]
+                              :when (contains? (set (:var/meta e)) :test)]
                           [v (str (when head (str head "\n")) (:form/src (:var/form e)))])))
         removed-process (program/process-tests (select-keys (:index b) (keys removed)))]
     ;; the verdicts cached at the digests (every run's, whoever ran it: seon.fx/stored-results); a
@@ -1066,7 +1066,7 @@
               :else {:line line :held? true :status @status}))))))
 
 (defn named-tests
-  "The test vars names names on db (each a deftest's var, :var/kind :test): a qualified name, that test; a
+  "The test vars names names on db (each a deftest's var, :var/meta holds :test): a qualified name, that test; a
   namespace's, its tests. What a request naming them runs, beside the task's proofs, whether or not the
   branch changed what they reach (a prove naming tests on a branch that changed nothing
   would otherwise answer ran 0, reused 0, each test :none); a named test
@@ -1079,9 +1079,9 @@
                       (some-> (d/entity db [:var/name n]) vector)
                       (when-let [ne (:db/id (d/entity db [:ns/name n]))]
                         (for [dt (d/datoms db :avet :form/ns ne) v (:form/defines (d/entity db (:e dt)))
-                              :when (and (= :test (:var/kind v)) (= (str n) (some-> (:var/name v) namespace)))]
+                              :when (and (contains? (set (:var/meta v)) :test) (= (str n) (some-> (:var/name v) namespace)))]
                           v)))
-                  :when (= :test (:var/kind v))]
+                  :when (contains? (set (:var/meta v)) :test)]
               (:var/name v))))
 
 (defn run-selection

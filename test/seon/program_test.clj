@@ -47,7 +47,7 @@
   "The live forms of namespace nsym on db (the test store's example program is beside them)."
   [db nsym] (filterv #(= nsym (:ns %)) (program/live-forms db)))
 
-(defn- var-row [db sym] (d/pull db '[:var/kind :var/contract :var/doc {:var/form [:form/src :form/order]}] [:var/name sym]))
+(defn- var-row [db sym] (d/pull db '[:var/meta :var/contract :var/doc {:var/form [:form/src :form/order]}] [:var/name sym]))
 
 (deftest a-new-namespace-is-program-with-its-ns-form-as-written
   (let [src "(ns app.pt-new\n  (:require [clojure.string :as s :refer [join]]))"
@@ -56,7 +56,7 @@
     (is (= '#{clojure.string} (set (d/q '[:find [?r ...] :where [?f :form/src] [?f :form/requires ?r]] db))) "its requires, from the compiler")
     (testing "a def in it is recorded with its resolved references"
       (let [db (record db 'app.pt-new "(defn twice {:malli/schema [:=> [:cat :int] :int]} [x]  (s/join [(* 2 x)]))")]
-        (is (= {:var/kind :fn :var/contract "[:=> [:cat :int] :int]"
+        (is (= {:var/meta #{:arglists} :var/contract "[:=> [:cat :int] :int]"
                 :var/form {:form/src "(defn twice {:malli/schema [:=> [:cat :int] :int]} [x]  (s/join [(* 2 x)]))"}}
                (update (var-row db 'app.pt-new/twice) :var/form dissoc :form/order)))
         (is (= '#{clojure.string/join clojure.core/* clojure.core/defn} (set (d/q '[:find [?r ...] :where [?v :var/name app.pt-new/twice] [?v :var/form ?f] [?f :form/refs ?r]] db)))
@@ -141,7 +141,7 @@
         ;; the schema as it was before :form/keywords, and a contracted form recorded then
         _ (d/transact conn (vec (remove #(= :form/keywords (:db/ident %)) pdb/schema)))
         _ (d/transact conn [{:db/id "n" :ns/name 'app.old} {:db/id "f" :form/id "app.old/f" :form/src "(defn f [m] (:app.old/thing m))" :form/ns "n" :form/order 0 :form/defines #{"v"}}
-                            {:db/id "v" :var/name 'app.old/f :var/form "f" :var/kind :fn :var/contract (seon.edn/encode [:=> [:cat [:map [:app.old/thing :int]]] :int])}])]
+                            {:db/id "v" :var/name 'app.old/f :var/form "f" :var/meta #{:arglists} :var/contract (seon.edn/encode [:=> [:cat [:map [:app.old/thing :int]]] :int])}])]
     (is (= [] (program/schema-dependents @conn #{:app.old/thing}))
         "cut before the attribute: it holds none of its datoms, so nothing depends on it (Datahike 7eea478b; before, the read threw and the agent died)")
     (is (= [] (program/gained-tx @conn)) "the attribute not yet installed: nothing to derive")
@@ -166,12 +166,12 @@
         conn (d/connect cfg)
         _ (d/transact conn (vec (remove #(= :form/ops (:db/ident %)) pdb/schema)))
         _ (d/transact conn [{:db/id "n" :ns/name 'app.old} {:db/id "f" :form/id "app.old/f" :form/src "(defn f [m] m)" :form/ns "n" :form/order 0 :form/defines #{"v"}}
-                            {:db/id "v" :var/name 'app.old/f :var/form "f" :var/kind :fn}])
+                            {:db/id "v" :var/name 'app.old/f :var/form "f" :var/meta #{:arglists}}])
         g (program/reach-graph @conn nil)]
     (is (= #{"app.old/f"} (set (map :id (vals (:rows g))))) "the base's graph holds its form")
     (is (= #{"app.old/f" "app.old/g"}
            (set (keys (:rows (program/reach-update g (d/db-with @conn [{:db/id "f" :form/id "app.old/g" :form/src "(defn g [m] m)" :form/ns [:ns/name 'app.old]
-                                                                       :form/order 1 :form/defines #{"v"}} {:db/id "v" :var/name 'app.old/g :var/form "f" :var/kind :fn}]))))))
+                                                                       :form/order 1 :form/defines #{"v"}} {:db/id "v" :var/name 'app.old/g :var/form "f" :var/meta #{:arglists}}]))))))
         "and a form added on it is read too, entity by entity")))
 
 (deftest catches-and-clocks-are-recorded
@@ -359,7 +359,7 @@
     (let [{:keys [accounts]} (source/accounts 'user text)
           by-src (into {} (map (juxt :src identity)) accounts)]
       (is (= 5 (count accounts)) "every form, the comment block a text form")
-      (is (= '[{:var app.pt-file/twice :kind :fn}] (:defs (by-src "(defn twice [x] (* 2 x))"))))
+      (is (= '[{:var app.pt-file/twice :meta #{:arglists}}] (:defs (by-src "(defn twice [x] (* 2 x))"))))
       (is (= '[{:multi app.pt-file/m :dispatch ":a"}] (:methods (by-src "(defmethod m :a [_] (s/join [\"a\"]))"))))
       (is (= '#{clojure.string/join clojure.core/defmethod-setup clojure.core/defmethod} (:refs (by-src "(defmethod m :a [_] (s/join [\"a\"]))"))))
       (is (= (select-keys (eval-account 'app.pt-file "(defn twice [x] (* 2 x))") [:id :defs :refs])
@@ -372,7 +372,7 @@
   (eval-account 'app.pt-doc "(defn told \"the image's doc, written later\" [x] x)")
   (let [{:keys [accounts]} (source/accounts 'app.pt-doc "(defn told \"the file's own doc\" [x] x)\n")]
     (is (= "the image's doc, written later" (:doc (meta (find-var 'app.pt-doc/told)))) "the image holds the later definition")
-    (is (= [{:var 'app.pt-doc/told :kind :fn :doc "the file's own doc"}] (:defs (first accounts)))
+    (is (= [{:var 'app.pt-doc/told :meta #{:arglists} :doc "the file's own doc"}] (:defs (first accounts)))
         "the account of the file's form holds the file's docstring")))
 
 (deftest a-namespace-holds-its-docstring
@@ -1298,7 +1298,7 @@
   "Form i of a chain app.pc/f0..: f i calls f i-1; a test t names the one form it calls."
   [i body]
   {:id (str "app.pc/f" i "-" body) :src (str "(defn f" i " [x] " body ")") :ns 'app.pc :ns-form? false
-   :defs [{:var (symbol "app.pc" (str "f" i)) :kind :fn}] :declares #{} :methods [] :impls []
+   :defs [{:var (symbol "app.pc" (str "f" i)) :meta #{:arglists}}] :declares #{} :methods [] :impls []
    :refs (if (pos? i) #{(symbol "app.pc" (str "f" (dec i)))} #{}) :requires #{} :banned #{} :inline-defs #{}})
 
 (deftest the-tests-reaching-a-var-are-what-its-change-selects
@@ -1306,7 +1306,7 @@
   ;; the one reverse walk a change re-folds by (seon.program/reached-by), so its tests are exactly
   ;; those whose reach digest moves when v changes, the tests prove then runs; nearest first
   (let [test-acct (fn [t i] {:id (str "app.pc-test/" t) :src (str "(deftest " t " (f" i " 1))") :ns 'app.pc-test :ns-form? false
-                             :defs [{:var (symbol "app.pc-test" t) :kind :test}] :declares #{} :methods [] :impls []
+                             :defs [{:var (symbol "app.pc-test" t) :meta #{:test}}] :declares #{} :methods [] :impls []
                              :refs #{(symbol "app.pc" (str "f" i))} :requires #{} :banned #{} :inline-defs #{}})
         db (ts/test-db)
         db (d/db-with db (vec (concat (mapcat #(program/account-tx db (chain-account % "x") %) (range 10))
@@ -1402,7 +1402,7 @@
 (deftest a-step-is-keyed-by-the-code-not-the-whole-tree
   (let [db (d/db-with (ts/test-db) [{:ns/name 'app.k :ns/file "src/app/k.clj"}])
         db (d/db-with db (program/record-tx db {:id "app.k/f" :src "(defn f [] (slurp \"x\"))" :ns 'app.k :ns-form? false
-                                                :defs [{:var 'app.k/f :kind :fn}] :declares #{} :methods [] :impls [] :refs #{'clojure.core/slurp} :requires #{} :banned #{} :inline-defs #{}}))
+                                                :defs [{:var 'app.k/f :meta #{:arglists}}] :declares #{} :methods [] :impls [] :refs #{'clojure.core/slurp} :requires #{} :banned #{} :inline-defs #{}}))
         g (program/reach-graph db nil)
         key-at (fn [in] (:digest (get (program/graph-index g in {"s" ['app.k/f]}) "s")))
         in {:env "e" :tree "t" :code "c" :config {}}]

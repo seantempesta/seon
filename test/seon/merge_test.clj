@@ -26,7 +26,7 @@
   [nm body]
   (fn [db]
     (program/record-tx db {:id (fid nm body) :src (defn-src nm body) :ns 'app :ns-form? false
-                           :defs [{:var (symbol "app" nm) :kind :fn :contract "[:=> [:cat :int] :int]"}]
+                           :defs [{:var (symbol "app" nm) :meta #{:arglists} :contract "[:=> [:cat :int] :int]"}]
                            :declares #{} :methods [] :impls [] :refs #{} :requires #{} :banned #{} :inline-defs #{}})))
 
 (defn- with [db & txs] (reduce (fn [db t] (d/db-with db (if (fn? t) (t db) t))) db txs))
@@ -81,15 +81,15 @@
 (deftest uncontracted-is-what-the-branch-changed
   ;; one question for the writer's merge gate and root's judge: which functions the branch's
   ;; own changes (a three-way's :ours) define without a contract
-  (let [ours {[:var 'app/f] [nil {:kind :fn}]
-              [:var 'app/g] [nil {:kind :fn :contract "[:=> [:cat] :int]"}]
+  (let [ours {[:var 'app/f] [nil {:meta #{:arglists}}]
+              [:var 'app/g] [nil {:meta #{:arglists} :contract "[:=> [:cat] :int]"}]
               [:var 'app/v] [nil {:kind :def}]
-              [:var 'app/e] [{:kind :fn} {:kind :fn}]}]
+              [:var 'app/e] [{:meta #{:arglists}} {:meta #{:arglists}}]}]
     (is (= '[app/e app/f] (pm/uncontracted ours)))
     (is (= [] (pm/uncontracted {}))))
   (testing "over recorded programs: a branch that adds an uncontracted fn and edits a contracted one"
     (let [u (fn [db] (program/record-tx db {:id "app/(defn u [x] x)" :src "(defn u [x] x)" :ns 'app :ns-form? false
-                                            :defs [{:var 'app/u :kind :fn}]
+                                            :defs [{:var 'app/u :meta #{:arglists}}]
                                             :declares #{} :methods [] :impls [] :refs #{} :requires #{} :banned #{} :inline-defs #{}}))]
       (is (= '[app/u] (pm/uncontracted (:ours (tw (with (base) u (var-tx "f" "(inc x)")) (base)))))))))
 
@@ -450,7 +450,7 @@
 (deftest changed-vars-are-the-var-keys-of-a-change
   ;; found red on main (2026-10-27): it read each key [kind x] one level too deep, so any branch
   ;; that changed something threw "nth not supported on this type: Keyword" in every turn's test plan
-  (is (= #{'app/f 'app/g} (pm/changed-vars {[:var 'app/f] [nil {:kind :fn}] [:var 'app/g] [{:kind :fn} nil] [:schema :app/k] [nil {}]})))
+  (is (= #{'app/f 'app/g} (pm/changed-vars {[:var 'app/f] [nil {:meta #{:arglists}}] [:var 'app/g] [{:meta #{:arglists}} nil] [:schema :app/k] [nil {}]})))
   (is (= #{} (pm/changed-vars {}))))
 (deftest a-merge-carries-the-namespace-of-a-form-it-carries
   ;; task seon.root/a-behind-merge-is-bounded-and-merges-main-first (gap 3): a form in a namespace the
@@ -464,7 +464,7 @@
            _ (d/branch! conn (:branch cfg) b)
            bc (d/connect (assoc cfg :branch b))
            newns (fn [db] (program/record-tx db {:id "app.z/(defn z [x] x)" :src "(defn z [x] x)" :ns 'app.z :ns-form? false
-                                                  :defs [{:var 'app.z/z :kind :fn :contract "[:=> [:cat :int] :int]"}]
+                                                  :defs [{:var 'app.z/z :meta #{:arglists} :contract "[:=> [:cat :int] :int]"}]
                                                   :declares #{} :methods [] :impls [] :refs #{} :requires #{} :banned #{} :inline-defs #{}}))]
        (try
          (d/transact bc (newns @bc))
@@ -486,7 +486,7 @@
 (deftest a-namespace-both-sides-made-is-one-entity-after-the-merge
   ;; docs/storage.md#history: the branch and main each made app.z without an (ns) form, main after making another namespace, which moves its next id past the branch's: a namespace's id is its name's content, so the merge leaves one entity and the carried form reads it
   (let [rec (fn [nm] (fn [db] (program/record-tx db {:id (str "app.z/(defn " nm " [x] x)") :src (str "(defn " nm " [x] x)") :ns 'app.z :ns-form? false
-                                                     :defs [{:var (symbol "app.z" nm) :kind :fn :contract "[:=> [:cat :int] :int]"}]
+                                                     :defs [{:var (symbol "app.z" nm) :meta #{:arglists} :contract "[:=> [:cat :int] :int]"}]
                                                      :declares #{} :methods [] :impls [] :refs #{} :requires #{} :banned #{} :inline-defs #{}})))
         b (with (mt/world) (var-tx "f" "x"))
         main (with b [{:ns/name 'app.other}] (rec "m"))

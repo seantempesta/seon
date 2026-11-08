@@ -22,7 +22,7 @@
                                   (= "app.st-stage" (or (some-> (:var/name x) namespace) (some-> (:method/multi x) namespace))))
                                tx))]
     (testing "a runtime that matches the branch stages nothing, a deftype's type included (Jolt interns no var for it)"
-      (is (= :type (:var/kind (d/entity db (pdb/eid db :var/name 'app.st-stage/Pt)))))
+      (is (some? (pdb/eid db :var/name 'app.st-stage/Pt)) "the type is recorded as a var, though Jolt interns none")
       (is (= [] (mine (stage/stage-tx db)))))
     (ns-unmap 'app.st-stage 'dropped)
     (remove-method @(find-var 'app.st-stage/area) :circle)
@@ -38,7 +38,7 @@
   {:malli/schema [:=> [:cat :int] :map]}
   [i]
   {:id (str "app.stage-cost/f" i) :src (str "(defn f" i " [x] x)") :ns 'app.stage-cost :ns-form? false
-   :defs [{:var (symbol "app.stage-cost" (str "f" i)) :kind :fn}] :declares #{} :methods [] :impls [] :refs #{} :requires #{} :banned #{} :inline-defs #{}})
+   :defs [{:var (symbol "app.stage-cost" (str "f" i)) :meta #{:arglists}}] :declares #{} :methods [] :impls [] :refs #{} :requires #{} :banned #{} :inline-defs #{}})
 
 (defn vars-of
   "stage-tx's argument: the world holding n more recorded forms (app.stage-cost/f0..fn-1; a db in memory:

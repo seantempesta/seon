@@ -103,7 +103,7 @@
                                                    {:form/id "app.x/c-1" :form/src "(defn c [] (f0 1))" :form/refs #{'app.x/f0}}
                                                    {:seon.doc/address "docs/x.md#the-x" :seon.doc/heading "The x" :seon.doc/lead "What x does." :seon.doc/text "What x does."}
                                                    {:db/id "t0" :form/id "app.x-test/t0-1" :form/src "(deftest t0 (is (= 1 (f0 1))))" :form/refs #{'app.x/f0 'clojure.test/is} :form/defines ["t0v"]}
-                                                   {:db/id "t0v" :var/name 'app.x-test/t0 :var/kind :test :var/form "t0"}]
+                                                   {:db/id "t0v" :var/name 'app.x-test/t0 :var/meta #{:test} :var/form "t0"}]
                                                   (concat
                                                    ;; what its plan cites, as the task writer writes it (seon.task/cites-tx): the page draws one part each
                                                    (task/cites-tx (ts/test-db) "lab/ctx" "lab/ctx" (seon.ref/cited (:seon.ref/citations (seon.ref/parse nil "Make `app.x/f0` pass, then `app.x/f1`; see [the x](docs/x.md#the-x)."))))))))]
@@ -635,9 +635,9 @@
   ;; alphabetically with no result, and a section only as an address. Each is drawn from ctx
   (let [db (d/db-with (seeded 3 nil) [;; a second test, and a caller that is no test
                                   {:db/id "t1" :form/id "app.x-test/t1-1" :form/src "(deftest t1 (is (= 2 (f0 2))))" :form/refs #{'app.x/f0} :form/defines ["t1v"]}
-                                  {:db/id "t1v" :var/name 'app.x-test/t1 :var/kind :test :var/form "t1"}
+                                  {:db/id "t1v" :var/name 'app.x-test/t1 :var/meta #{:test} :var/form "t1"}
                                   {:db/id "g" :form/id "app.x/g-1" :form/src "(defn g [] (f0 2))" :form/refs #{'app.x/f0} :form/defines ["gv"]}
-                                  {:db/id "gv" :var/name 'app.x/g :var/kind :fn :var/form "g"}])
+                                  {:db/id "gv" :var/name 'app.x/g :var/meta #{:arglists} :var/form "g"}])
         page (try (enter-agent! {:db db :key k :branch :b}) (seon.repl/render-ctx-hiccup) (finally (end-agent!)))
         ;; every cite is a part of its own inside the one citations part: found by what its text holds
         cites (filter #(and (vector? %) (= 'seon.render.ui/cited (first %))) (tree-seq coll? seq page))
@@ -653,7 +653,7 @@
   ;; A form that is also another cited var's caller (f1's is f0's) shows its source in its own part, and
   ;; is among f0's callers, never blank (ctx holds an entity whole at its first path, {:db/id e} at the others)
   (let [db (d/db-with (seeded 3 nil) [{:db/id "f1" :form/id "app.x/f1-1" :form/src "(defn f1 [] (f0 1))" :form/refs #{'app.x/f0} :form/defines ["f1v"]}
-                                  {:db/id "f1v" :var/name 'app.x/f1 :var/kind :fn :var/form "f1"}])
+                                  {:db/id "f1v" :var/name 'app.x/f1 :var/meta #{:arglists} :var/form "f1"}])
         page (try (enter-agent! {:db db :key k :branch :b}) (seon.repl/render-ctx-hiccup) (finally (end-agent!)))
         cites (filter #(and (vector? %) (= 'seon.render.ui/cited (first %))) (tree-seq coll? seq page))
         part (fn [x] (some #(let [t (seon.render/part-text %)] (when (str/includes? t x) t)) cites))
@@ -689,14 +689,14 @@
   (let [n (seon.config/value :seon.config.ctx/callers)
         db (reduce d/db-with (seeded 3 nil)
                    [(vec (mapcat (fn [i] [{:db/id (str "t" i) :form/id (str "app.x-test/w" i "-1") :form/src (str "(deftest w" i " (is (f0 1)))") :form/refs #{'app.x/f0} :form/defines [(str "tv" i)]}
-                                          {:db/id (str "tv" i) :var/name (symbol "app.x-test" (str "w" i)) :var/kind :test :var/form (str "t" i)}])
+                                          {:db/id (str "tv" i) :var/name (symbol "app.x-test" (str "w" i)) :var/meta #{:test} :var/form (str "t" i)}])
                                  (range 3)))])
         part #(let [page (try (enter-agent! {:db % :key k :branch :b}) (seon.repl/render-ctx-hiccup) (finally (end-agent!)))]
                 (some (fn [f] (let [t (seon.render/part-text f)] (when (str/includes? t "(defn f0 [x] x)") t)))
                       (filter #(and (vector? %) (= 'seon.render.ui/cited (first %))) (tree-seq coll? seq page))))]
     (is (str/includes? (str (part db)) "4 tests reach it") (str "every test among its pulled callers: " (part db)))
     (let [db (d/db-with db (vec (mapcat (fn [i] [{:db/id (str "c" i) :form/id (str "app.y/c" i "-1") :form/src (str "(defn c" i " [] (f0 1))") :form/refs #{'app.x/f0} :form/defines [(str "cv" i)]}
-                                                 {:db/id (str "cv" i) :var/name (symbol "app.y" (str "c" i)) :var/kind :fn :var/form (str "c" i)}])
+                                                 {:db/id (str "cv" i) :var/name (symbol "app.y" (str "c" i)) :var/meta #{:arglists} :var/form (str "c" i)}])
                                         (range (inc n)))))
           p (part db)]
       (is (not (str/includes? p "app.y/c")) "callers that are no test are not told")

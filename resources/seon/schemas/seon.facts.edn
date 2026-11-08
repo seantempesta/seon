@@ -60,9 +60,10 @@
  :var/ns :seon.db/ref
  :var/form :seon.db/ref
  :var/doc :string
- ;; what a defined var holds (:fn :test :macro :value :multi :protocol :protocol-fn :type
- ;; :ctor) and its declared contract, as text
- :var/kind :keyword
+ ;; the var's own Clojure metadata keys (location keys and :doc left out: the doc is :var/doc), recorded
+ ;; by the analyzer (seon.program/def-meta): a test is a var whose meta holds :test, a macro :macro, a
+ ;; function a defn made :arglists (docs/source.md#a-program-file). And its declared contract, as text
+ :var/meta [:set {:seon.db/index true} :keyword]
  :var/contract :string
  ;; A TEST'S LAST RESULT, on its var entity on the branch whose agent ran it (seon.proofs/result-tx,
  ;; written by seon.agent/run-tests-forked when a run ends; task seon.proofs/test-results-are-a-few-facts,
@@ -128,7 +129,7 @@
  :seon.db/var-fact [:map {:seon.db/attributes true :seon.ctx/pattern [* {[:var/form :as :form] [*]}]}
                      [:var/name :var/name] [:var/ns {:optional true} :var/ns] [:var/form {:optional true} :var/form]
                      [:var/doc {:optional true} :var/doc]
-                     [:var/kind {:optional true} :var/kind] [:var/contract {:optional true} :var/contract]
+                     [:var/meta {:optional true} :var/meta] [:var/contract {:optional true} :var/contract]
                      [:seon.test/digest {:optional true} :seon.test/digest] [:seon.test/status {:optional true} :seon.test/status]
                      [:seon.test/failures {:optional true} :seon.test/failures] 
                      [:seon.test/ticks {:optional true} :seon.test/ticks]
@@ -321,7 +322,7 @@
                                                 {[:seon.cite/name :by :var/name :as :var]
                                                  [* {[:var/form :as :form] [*]}
                                                   {[:form/_refs :by :var/name :as :callers :limit :seon.config.ctx/callers :reverse true]
-                                                   [* {[:form/defines :as :defines] [:var/name :var/kind]}]}]}
+                                                   [* {[:form/defines :as :defines] [:var/name :var/meta]}]}]}
                                                 {[:seon.cite/task :by :seon.task/id :as :task] [:seon.task/id :seon.task/plan :seon.task/kind]}
                                                 {[:seon.cite/name :by :schema/key :as :schema] [*]}
                                                 {[:seon.cite/name :by :ns/name :as :ns] [:ns/name :ns/doc]}]

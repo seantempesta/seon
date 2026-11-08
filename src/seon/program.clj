@@ -342,25 +342,15 @@
       (sedn/encode c)
       (some-> (get (:meta d) :malli/schema) unquote-form sedn/encode))))
 
-(defn- def-kind
-  "A defined var's kind: from the live var when it is bound, else from the compiler's
-  account of its definition. A function a form defines beside a type is that type's
-  constructor (:ctor), and needs no contract of its own."
-  {:malli/schema [:=> [:cat [:maybe :seon.host/var] :map :boolean :boolean] :keyword]}
-  [v d multi? types?]
+(defn- def-meta
+  "A defined var's own Clojure metadata keys (:var/meta in resources/seon/schemas/seon.facts.edn): from the live var when it is
+  bound, merged over the compiler's account of its definition, with :macro when the compiler says the
+  form is a macro. Location keys and :doc are left out (the doc is :var/doc)."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/var] :map] [:set :keyword]]}
+  [v d]
   (let [m (merge (:meta d) (some-> v meta))]
-    (cond (or (:macro? d) (:macro m)) :macro
-          (contains? m :test) :test
-          (or multi? (and v (bound? v) (instance? clojure.lang.MultiFn @v))) :multi
-          (contains? m :protocol) :protocol-fn
-          (= 'clojure.core/make-protocol (:init d)) :protocol
-          (= 'clojure.core/make-deftype-ctor (:init d)) :type
-          (and v (bound? v)) (cond (not (fn? @v)) :value
-                                   types? :ctor
-                                   (:dynamic m) :value
-                                   :else :fn)
-          (#{:fn 'seon.contract/checked} (:init d)) (if types? :ctor :fn)
-          :else :value)))
+    (-> (set (keys (cond-> m (:macro? d) (assoc :macro true))))
+        (disj :ns :name :file :line :column :end-line :end-column :doc))))
 
 (defn- macro-uses
   "The macros form (as read) calls in namespace nsx: each list in it whose head resolves
@@ -455,13 +445,12 @@
         nsx (find-ns nsym)
         ids (form-ids nsym src k form)
         a (merge-accounts units)
-        types? (boolean (some #(= 'clojure.core/make-deftype-ctor (:init %)) (:defs a)))
         set? (fn [{v :var :as d}] (or (nil? before) (not (identical? (get before v) (root-of v))) (:macro? d)))
         defs (vec (for [d (:defs a)
                         :let [v (find-var (:var d))
                               multi? (contains? (:multis a) (:var d))]
                         :when (and (not (and (:declare? d) (not multi?))) (set? d))]
-                    (cond-> {:var (:var d) :kind (def-kind v d multi? types?)}
+                    (cond-> {:var (:var d) :meta (def-meta v d)}
                       (contract-text v d) (assoc :contract (contract-text v d))
                       ;; the form's own docstring first: a file read without running (another tree's) holds its
                       ;; text's, whatever the image's var says (seon.program-test/a-file-analyzed-keeps-its-own-docstring)
@@ -579,22 +568,25 @@
         (for [[a k] form-sets :let [v (get row k)] :when (seq v)] [a (vec v)])))
 
 (defn def-tx
-  "tx-data making definition k point at the form content names (content {:form :kind
+  "tx-data making definition k point at the form content names (content {:form :meta
   :contract :doc :file}), retracting what it held that content does not, or, for nil
   content, retracting what it held. e: its entity on db (def-eid), or nil."
   {:malli/schema [:=> [:cat :seon.host/db :any [:maybe :int] [:maybe :map]] :seon.db/tx-data]}
   [db k e content]
   (let [x (when e (d/entity db e))
-        attrs (case (first k) :var [:var/form :var/kind :var/contract :var/doc] :ns [:ns/form :ns/file :ns/doc] [(pointer (first k))])
+        attrs (case (first k) :var [:var/form :var/contract :var/doc] :ns [:ns/form :ns/file :ns/doc] [(pointer (first k))])
         now (when content
               (cond-> {(pointer (first k)) (form-tid (:form content))}
-                (:kind content) (assoc :var/kind (:kind content))
+                (seq (:meta content)) (assoc :var/meta (set (:meta content)))
                 (:contract content) (assoc :var/contract (:contract content))
                 (:doc content) (assoc (if (= :ns (first k)) :ns/doc :var/doc) (:doc content))
                 (:file content) (assoc :ns/file (:file content))))]
     (into (if content [(merge (def-ref k e) now) {:db/id (form-tid (:form content)) :form/id (:form content)}] [])
-          (for [a attrs :let [old (get x a)] :when (and (some? old) (not (contains? now a)))]
-            [:db/retract e a (if ((set (vals pointer)) a) (:db/id old) old)]))))
+          (concat
+            (for [a attrs :let [old (get x a)] :when (and (some? old) (not (contains? now a)))]
+              [:db/retract e a (if ((set (vals pointer)) a) (:db/id old) old)])
+            (for [m (:var/meta x) :when (not (contains? (:var/meta now) m))]
+              [:db/retract e :var/meta m])))))
 
 (def meaning
   "What a definition says of itself that text describing it relies on, so what a wiki section
@@ -664,7 +656,7 @@
            (for [n (into #{ns} (map #(symbol (namespace (:var %)))) defs)] {:db/id (ns-tid n) :ns/name n})
            [(form-tx id (assoc acct :order order :lead lead :defines dkeys) eids)]
            (map #(def-ref [:var %] (eids [:var %])) declares)
-           (mapcat (fn [{v :var :keys [kind contract doc]}] (def-tx db [:var v] (eids [:var v]) {:form id :kind kind :contract contract :doc doc})) defs)
+           (mapcat (fn [{v :var :keys [meta contract doc]}] (def-tx db [:var v] (eids [:var v]) {:form id :meta meta :contract contract :doc doc})) defs)
            (mapcat #(def-tx db % (eids %) {:form id}) (filter (comp #{:method :impl} first) dkeys))
            (when ns-form? [(cond-> {:db/id (ns-tid ns) :ns/form (form-tid id)} (:ns-doc acct) (assoc :ns/doc (:ns-doc acct)))])
            ;; an ns form that no longer holds one: the docstring goes with it
@@ -820,7 +812,7 @@
 (defn account-diff-tx
   "account-tx of acct at its own order and lead (a file's), less what db holds already:
   nothing for a form db holds with the same facts (its text, what it defines, declares and
-  names, each definition pointing to it with the same kind, contract and doc), only its
+  names, each definition pointing to it with the same meta, contract and doc), only its
   order and lead for one that only moved, and otherwise account-tx with the form's facts
   the account no longer names retracted. A file read again writes what changed in it, not
   the file (task seon.source/an-import-reads-only-changed-files)."
@@ -835,9 +827,9 @@
                    (every? #(= fe (some->> (def-eid db %) (form-of db))) dkeys)
                    ;; so a store made before a namespace held its docstring gains it
                    (or (not (:ns-form? acct)) (= (:ns-doc acct) (:ns/doc (d/entity db [:ns/name (:ns acct)]))))
-                   (every? (fn [{v :var :keys [kind contract doc]}]
+                   (every? (fn [{v :var :keys [meta contract doc]}]
                              (let [x (d/entity db (def-eid db [:var v]))]
-                               (and (= kind (:var/kind x)) (= contract (:var/contract x)) (= doc (:var/doc x)))))
+                               (and (= (set meta) (set (:var/meta x))) (= contract (:var/contract x)) (= doc (:var/doc x)))))
                            defs))]
     (cond
       (and held? (= order (:order row)) (= lead (:lead row))) []
@@ -953,12 +945,11 @@
 
 (defn process-var
   "The var this process holds for recorded name s, given the ns-interns of its namespace, or
-  nil. A deftype's type (:var/kind :type) is found by its name: Jolt binds its var without
+  nil. A deftype's type is found by its name (find-var): Jolt binds its var without
   interning it (ns-interns, as Clojure's, lists no type)."
   {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol :map] [:maybe :any]]}
   [db s interns]
-  (or (get interns (symbol (name s)))
-      (when (= :type (:var/kind (d/entity db [:var/name s]))) (find-var s))))
+  (or (get interns (symbol (name s))) (find-var s)))
 
 (defn- held?
   "Does this process already hold form row f compiled: imported from the source tree, in a
@@ -996,7 +987,7 @@
         row #(or (rows %) (form-row db %))]
     (mapv row (closure (map :e changed)
                        (fn [e] (for [[k s] (:defines (row e))
-                                     :when (and (= :var k) (= :macro (:var/kind (d/entity db [:var/name s]))))
+                                     :when (and (= :var k) (contains? (set (:var/meta (d/entity db [:var/name s]))) :macro))
                                      e' (requiring db (symbol (namespace s)))
                                      :when (live? db e')]
                                  e'))))))
@@ -1609,16 +1600,17 @@
         methods (if bulk? (indexed (for [f added a (defined f :method)] [a (:id f)]) false) (by (:methods g) :method))
         impls (if bulk? (indexed (for [f added a (defined f :impl)] [a (:id f)]) false) (by (:impls g) :impl))
         var-form #(peek (get defs %))
-        ;; a var's contract text and kind: one pass over the three indexes for a whole build, else a seek per var
+        ;; a var's contract text and meta: one pass over the three indexes for a whole build, else a seek per var
         facts (if bulk?
                 (let [scan (fn [a] (into {} (map (juxt :e :v)) (d/datoms db :aevt a)))
-                      contract (scan :var/contract) kind (scan :var/kind)]
-                  (into {} (for [{e :e v :v} (d/datoms db :aevt :var/name) :when (V v)] [v {:contract (contract e) :kind (kind e)}])))
+                      contract (scan :var/contract)
+                      mta (reduce (fn [m {e :e k :v}] (update m e (fnil conj #{}) k)) {} (d/datoms db :aevt :var/meta))]
+                  (into {} (for [{e :e v :v} (d/datoms db :aevt :var/name) :when (V v)] [v {:contract (contract e) :meta (mta e)}])))
                 (into {} (for [v V :let [e (:e (first (d/datoms db :avet :var/name v)))]]
-                           [v (when e {:contract (:v (first (d/datoms db :eavt e :var/contract))) :kind (:v (first (d/datoms db :eavt e :var/kind)))})])))
+                           [v (when e {:contract (:v (first (d/datoms db :eavt e :var/contract))) :meta (into #{} (map :v) (d/datoms db :eavt e :var/meta))})])))
         sids (fn [text] (into [] (map #(str "schema " %)) (names (sedn/decode text))))
         contract (reduce (fn [m [v e]] (if-let [t (:contract e)] (assoc m v (sids t)) (dissoc m v))) (:contract g) facts)
-        tests (reduce (fn [s [v e]] (if (= :test (:kind e)) (conj s v) (disj s v))) (:tests g) facts)
+        tests (reduce (fn [s [v e]] (if (contains? (:meta e) :test) (conj s v) (disj s v))) (:tests g) facts)
         ;; a name quoted in a test's namespace is one the test hands to what runs it by name
         ;; ((cost/proof {:of 'ns/f}), resolve, an agent's eval): a reach edge there, as a
         ;; reference is (a quoted name in src is data: schema-forms' renders, tree-readers)
