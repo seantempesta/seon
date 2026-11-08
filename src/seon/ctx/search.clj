@@ -306,7 +306,7 @@
         text (str q)
         in-ns? (fn [[kind n]] (or (not (#{:var :test} kind)) (nil? prefix) (doc/named-under? (str n) prefix)))
         toks (if (by :text) (filterv #(in-ns? [(:kind %) (:name %)]) (doc/tokens db text kinds (cfg/value :seon.config.render/search-token-z))) [])
-        known (into {} (map (fn [h] [[(:kind h) (:name h)] (select-keys h [:line :at :z])])) toks)
+        known (into {} (map (fn [h] [[(:kind h) (:name h)] (select-keys h [:in :z])])) toks)
         n (* k (cfg/value :seon.config.render/related-near))
         ;; each kind's nearest, scanned once (near takes one attribute) to the larger of the n this ranking reads and
         ;; the pool relevance reads, which it is handed
@@ -366,7 +366,8 @@
     (cond-> (mapv (fn [[h s]] (let [l (first-line h) r (rel h)]
                                 (merge (cond-> {:kind (first h) :name (second h) :e (entity-of db h) :score s :by (in h)}
                                          (seq l) (assoc :line l) r (assoc :relevance r))
-                                       (select-keys (known h) [:line :at]))))
+                                       ;; the line of its text holding a word of q, read for a hit shown alone (seon.doc/line-of)
+                                       (some->> (:in (known h)) (doc/line-of db text)))))
                   shown)
       (seq left) (conj {:kind :more :left (count left) :counts (frequencies (map (comp first key) left))
                         :more (str "(my.agent/search " (pr-str q) " " (pr-str (assoc opts :k (+ k (count left)) :min 0.0)) ") returns them; a narrower :kinds or :ns finds fewer")}))))
