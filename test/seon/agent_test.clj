@@ -861,27 +861,23 @@
     (is (= '{green-test/proof :green green-test/other nil green-test/turned :green} (:value second-facts)) (pr-str second-facts))))
 
 (deftest an-agents-greens-and-a-checkouts-are-one-store
-  ;; owner, 2026-10-23: a test that is the same is not run again once green, "especially when
-  ;; freshly branched": an agent's greens and a checkout's (bin/test's) are one cache, keyed by
-  ;; the same digests. The checkout caches p1 green there; an agent on the same tree reuses it and
-  ;; runs p2, which is then cached too, so the checkout's plan reuses the agent's p2
-  (let [here (seon.config/checkout)
-        p1 'seon.reader-test/text-without-a-fence-is-a-comment
-        p2 'seon.reader-test/a-fenced-reply-reads-only-its-code
-        ;; the digests of the kept reach graph, brought to date, as bin/test's plan reads them
-        inputs (fx/inputs here)
-        digests (update-vals (seon.program/graph-index (seon.program-test/kept-graph here) inputs nil) :digest)
-        dir @merge-cache
-        ;; the checkout's green for p1, as bin/test caches one
-        recorded (fx/write-verdicts! dir {:id "agent-test"} {p1 {:test p1 :digest (digests p1) :pass 1 :fail 0 :error 0}} {})
-        [_ r]
-        (in-agent ["nil" "(select-keys (prove) [:results :ran :reused])"]
-                  ;; root imports the dirs bin/test does (:seon.config.source/dirs): one program, one digest
-                  (assoc (merging) :proofs #{p1 p2}))
-        checkout (proofs/plan nil (select-keys digests [p2]) (fx/stored-results dir (select-keys digests [p2])) #{})]
-    (is (= {:recorded 1} recorded) (str "the checkout cached its green for p1: " (pr-str recorded)))
-    (is (= {:results {p1 :pass p2 :pass} :ran 1 :reused 1} (:value r)) "the agent reuses the checkout's p1 and runs p2")
-    (is (= [] (:run checkout)) "the checkout reuses the agent's p2")))
+  ;; owner, 2026-10-23: a test green at its digest is not run again, "especially when freshly branched": an agent's greens and a
+  ;; checkout's (bin/test's) are one verdict cache, so an agent's plan must key each test by the digest bin/test's plan does.
+  ;; bin/test's is seon.program/graph-index over the program's reach graph; an agent's is its base's graph brought to its branch
+  ;; (seon.agent/test-plan: branch-graph, reach-indexed). On a small program under one boot's inputs the two agree, freshly
+  ;; branched and after the branch changes a form. That a verdict stored at a digest is then reused is the cache's
+  ;; (seon.program-test/a-result-recorded-in-one-checkout-is-reused-in-another).
+  (let [in {:env "e" :tree "t" :config {} :data-refs {}}
+        tests @#'seon.program-test/calc-tests
+        base (d/db-with (#'seon.program-test/calc-db)
+                        [{:seon.root/id :root :seon.root/boot "b1" :seon.root/source {:root "/r" :files 0 :forms 0 :ms 0 :boot "b1" :inputs in}}])
+        branch (seon.program-test/record base 'app.pt-calc "(defn add [a b] (+ b a))")
+        checkout (fn [db] (select-keys (ts/reach-digests db in) tests))
+        agent (fn [db] (select-keys (:digests (agent/test-plan db base tests)) tests))]
+    (is (= tests (set (keys (checkout base)))) "every test has a digest")
+    (is (= (checkout base) (agent base)) "freshly branched: the agent keys each test as bin/test does")
+    (is (= (checkout branch) (agent branch)) "and after its branch changes a form")
+    (is (not= (checkout base) (checkout branch)) "which moved a digest")))
 
 (deftest a-previous-roots-inputs-are-not-shared
   ;; re-review 2026-10-22: the :root entity outlives its root, so a restart (or a root with no
