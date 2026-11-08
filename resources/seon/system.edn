@@ -54,6 +54,9 @@
            :chan-opts {:main {:buf-or-n :bind/render-main-buf}}
            :args {:events-mult :bind/events-mult :graph :bind/graph :system :bind/system :conn :bind/conn}}
   :web {:proc seon.web/web-proc
+        ;; any effect's in-flight text (docs/render.md#in-flight-output-streams): a sliding buffer, so a
+        ;; producer never waits on the web; what it drops shows as a gap in that stream
+        :chan-opts {:streams {:buf-or-n :bind/web-streams-buf}}
         :args {:port :bind/web-port}}}
  :fx
  {:echo {:perform seon.fx/echo :workers 1}
