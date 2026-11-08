@@ -66,6 +66,14 @@
   }
 }
 
+/* Moving between pages is animated by the browser's View Transitions (owner, 2026-11-08: "Can we show movement with CSS"): a
+   same-origin navigation cross-fades, and the bar stays put; still for a person who asks for less motion. */
+@view-transition { navigation: auto; }
+.seon-bar { view-transition-name: seon-bar; }
+@media (prefers-reduced-motion: reduce) {
+  @view-transition { navigation: none; }
+}
+
 @layer base {
   html, body { background: var(--color-base-950); color: var(--color-text-200); }
   body { font: 12.5px/1.5 var(--font-mono); min-height: 100vh; -webkit-font-smoothing: antialiased; }
