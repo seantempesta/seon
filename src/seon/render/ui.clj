@@ -1834,7 +1834,7 @@
         ks (->> (d/datoms db :aevt :seon.agent/task) (sort-by (comp - :tx)) (keep #(:seon.agent/key (d/entity db (:e %)))) (remove #{me}) distinct)
         n (config/value :seon.config.ctx/window)]
     [:section
-     [:h2 "Sessions, newest first (older ones: (d/datoms (my.db/db) :aevt :seon.agent/task))"]
+     [:h2 "Sessions, newest first (all of them: (sort-by :tx > (d/datoms (my.db/db) :aevt :seon.agent/task)), each datom's :e an agent)"]
      (if (seq ks)
        (into [:ul] (for [k (take n ks) :let [a (d/pull db session-attrs [:seon.agent/key k]) t (:seon.agent/task a) stands (standing a t)]]
                      [:li {:key k} [:code (str "/agent/" (session-address a))] " "
