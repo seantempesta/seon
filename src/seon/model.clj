@@ -383,6 +383,7 @@
 
 (defn- stream-id
   "The stream id of a string in a tool call's arguments at path and the part it is, [id part], or nil for a string no one shows live. See docs/flow.md#effects-one-owner-and-its-workers-per-kind."
+  {:malli/schema [:=> [:cat :string :int [:vector :any]] [:maybe [:tuple :string :string]]]}
   [call k path]
   (case (count path)
     1 (when (= "message-md" (first path)) [(str call "/" k "/message") "message"])
@@ -392,6 +393,7 @@
 (defn- say
   "st with a stream message appended to msgs for id, part part of call (:in, :part, as data, so no reader splits an id): text (offset the chars sent before it), :open (id starts, empty) or
   :end. Answers [st' msgs'] (st, msgs when the state streams nothing). See docs/flow.md#effects-one-owner-and-its-workers-per-kind."
+  {:malli/schema [:=> [:cat [:tuple :map [:vector :map]] :string :string [:or :string [:enum :open :end]]] [:tuple :map [:vector :map]]]}
   [[st msgs] id part what]
   (if-not (:call st)
     [st msgs]
@@ -406,6 +408,7 @@
 (defn- add-delta
   "st with a chunk's delta folded in: its content, reasoning and each tool call's pieces (id and name kept, arguments appended
   and read by `json-feed`), the messages those made. Answers [st' msgs]. See docs/flow.md#effects-one-owner-and-its-workers-per-kind."
+  {:malli/schema [:=> [:cat :map :map] [:tuple :map [:vector :map]]]}
   [st delta]
   (let [call (:call st)
         piece (fn [acc k id]
@@ -458,6 +461,7 @@
 
 (defn- sse-json
   "The chat-completion JSON (as data) the lines folded into st make: what `sse-reply` answers."
+  {:malli/schema [:=> [:cat :map] :map]}
   [st]
   (let [msg (let [calls (:calls st)]
               (cond-> {}

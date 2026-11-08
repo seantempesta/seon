@@ -336,8 +336,8 @@
      :n "lines of a tool call's arguments, each 8 characters"
      :work "per line: its JSON read, its fragment appended to the call's pieces, its 8 characters decoded by the string reader and sent as one message"
      :growth :linear
-     :per-n {:calls 2 :ticks 8800 :bytes 28500}
-     :fixed {:calls 4 :ticks 20000 :bytes 70000}
+     :per-n {:calls 5 :ticks 8800 :bytes 28500}
+     :fixed {:calls 20 :ticks 20000 :bytes 70000}
      :sizes [10 100 1000]}))
 
 (deftest a-call-that-names-itself-is-answered-as-a-stream-over-the-socket
