@@ -718,14 +718,17 @@
       [])))
 
 (defn- write
-  "A write on main through the writer, as step of task id's flight, with what it tells who launched the task (`tell-tx`), whom it wakes (`wake`: a message root writes itself needs no channel). Answers [st request]."
+  "A write on main through the writer, as step of task id's flight, with what it tells who launched the task (`tell-tx`); every message it carries wakes its recipient (held on :late until it waits, `settle-late`), one rule wherever the write comes from. Answers [st request]."
   {:malli/schema [:=> [:cat :seon.reconcile/state :seon.task/id :seon.reconcile/step [:sequential :any]] [:tuple :seon.reconcile/state :map]]}
   [st id step tx]
-  (let [tell (tell-tx (:db st) id tx (System/currentTimeMillis))
-        to (some-> (first tell) :seon.message/to first second)
+  (let [tx (into (vec tx) (tell-tx (:db st) id tx (System/currentTimeMillis)))
+        ;; every message the write carries wakes its recipient (as the api's message-write does with its :wake), held until it
+        ;; waits (settle-late): tell-tx's to whoever started the task, and any other, as a verdict the judge writes to the agent itself;
         ;; a user with no branch reads main: nothing is owed to a branch
-        k (when (and to (:seon.agent/branch (d/entity (:db st) [:seon.agent/key to]))) to)]
-    (request (cond-> st k (update-in [:idx :late] (fnil conj #{}) k)) id step {:op :write :req {:op :tx :branch :db :tx-data (into (vec tx) tell)}})))
+        ks (into #{} (comp (filter map?) (mapcat :seon.message/to) (map second)
+                           (filter #(:seon.agent/branch (d/entity (:db st) [:seon.agent/key %]))))
+                 tx)]
+    (request (update-in st [:idx :late] (fnil into #{}) ks) id step {:op :write :req {:op :tx :branch :db :tx-data tx}})))
 
 (defn- agent-of
   "Task id's agent on db: {:key :id :branch}, or nil before one started it."

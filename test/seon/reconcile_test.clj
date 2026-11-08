@@ -671,6 +671,15 @@
       (is (= [] (actions-for (db-of [(decl "a")] :extra (concat (work "a" :closed :members {:seon.task/reasons [{:reason :proof-red :symbol (t "a")}]})
                                                                 (task/execution-tx ["demo/a"] :held)))))))))
 
+(deftest every-message-a-reconciler-write-holds-wakes-its-recipient
+  ;; docs/users.md#messages: a write the reconciler builds (seon.reconcile/write) holds a wake for every :seon.message/to its transaction
+  ;; carries, not only for the one tell-tx adds, so a verdict the judge writes to the agent itself (:told) wakes it as a person's message
+  ;; does (task seon.agent/every-message-root-writes-wakes: a refused green waited for a restart)
+  (let [db (db-of [(decl "a")] :extra (work "a" :running))
+        verdict (task/message-tx "m-verdict" "root" [(akey "a")] "The done rule refused it: make the proof green." 1)
+        [st _] (#'r/write (st-of db) "demo/a" :done verdict)]
+    (is (contains? (get-in st [:idx :late]) (akey "a")) "the agent the verdict is to is held for waking")))
+
 (deftest a-parked-task-is-woken-only-by-a-wake
   ;; idx-ready?: parked, told or at its cap, a task is ready again only when its agent is woken (r/wake: a message reached it, over the
   ;; reconciler's :wake port); a wake for a running agent starts nothing and is held until it waits (docs/users.md#messages)
