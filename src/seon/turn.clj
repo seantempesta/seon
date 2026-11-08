@@ -253,7 +253,7 @@
   (seon.ctx.wire/wire-turn makes them again there). A model's turn and an outside agent's reply open alike. Answers [its model call's id, its basis, the page eval it ran]. See docs/turn.md#the-turn-is-a-number."
   {:malli/schema [:=> [:cat :seon.task/id :int [:maybe :int] :boolean [:maybe :string]] [:tuple :string :map [:vector :map]]]}
   [task n max-turns merge? model-name]
-  (let [k (:key @agent/state) id (str k "/" n)]
+  (let [k (:key @agent/state) id (lib/call-id k n)]
     (deliver! true n)
     (let [shown (show-page!)]
       (agent/transact! (into [{:seon.agent/key k :seon.agent/turn n}
@@ -376,7 +376,7 @@
          ;; as a person reads it: the system prompt, then each record as the call made and its result
          text (wire/read-text db basis messages wire?)]
      ;; the read is a model call of this agent, as a model turn's is: what it was built from and what it cost
-     (agent/transact! [(cond-> {:seon.model-call/id (str k "/read-" n) :seon.model-call/agent {:seon.agent/key k} :seon.model-call/n n
+     (agent/transact! [(cond-> {:seon.model-call/id (lib/call-id k (str "read-" n)) :seon.model-call/agent {:seon.agent/key k} :seon.model-call/n n
                                 :seon.model-call/origin :outside :seon.model-call/basis basis}
                          true (assoc :seon.model-call/sent-hash (lib/digest (sedn/encode messages))))])
      text)))
