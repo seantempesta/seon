@@ -1254,6 +1254,81 @@
                  [st @o])
          :tick [(bound (dispatch (dissoc st :tick-due) o)) @o])))))
 
+(defn- done-of
+  "The owner's :done item for request m answered r, taken at t0 and answered at t1 (ns): the outcome with its
+  timing, a failure with the time it failed (seon.error/asked-tx), and its cost. See docs/flow.md#effects-one-owner-and-its-workers-per-kind."
+  {:malli/schema [:=> [:cat :map :map :int :int] :map]}
+  [m r t0 t1]
+  (cond-> {:dest (:dest m) :request m :budget-key (:budget-key m) :est (:est m 0)
+           :outcome (cond-> (assoc r :seon.fx/queue-us (quot (- (:taken-ns m) (:in-ns m)) 1000)
+                                   :seon.fx/us (quot (- t1 t0) 1000))
+                      ;; when it failed, as its asker records it (seon.error/asked-tx)
+                      (contract/error? r) (assoc :seon.fx/at-ms (System/currentTimeMillis)))}
+    (:cost r) (assoc :cost (:cost r))))
+
+(defn- put-lines!
+  "The lines of the bytes b, a piece cut anywhere: every newline byte (never inside a multi-byte character) ends the line
+  tail holds so far, decoded whole and put on lines as {:line s}; the rest stays in tail. False when lines is closed."
+  {:malli/schema [:=> [:cat :any :any :seon.host/chan] :boolean]}
+  [^bytes b ^java.io.ByteArrayOutputStream tail lines]
+  (let [n (alength b)]
+    (loop [from 0 i 0]
+      (cond (= i n) (do (.write tail b from (- n from)) true)
+            (= 10 (aget b i)) (do (.write tail b from (- i from))
+                                  (let [line (String. (.toByteArray tail) "UTF-8")]
+                                    (.reset tail)
+                                    (if (a/>!! lines {:line line}) (recur (inc i) (inc i)) false)))
+            :else (recur from (inc i))))))
+
+(defn- read-lines!
+  "The edge reader of a streaming perform (the one thread AGENTS section 4 allows outside procs, for a blocking read, as
+  seon.fork-server's socket reader): pulls the body's pieces (pull answers the next byte array, nil at the end, or an error
+  map when the socket failed) and puts each whole line on lines, then {:end true}, or {:error e} for the failure. Ends
+  at either, or when lines is closed. See docs/flow.md#effects-one-owner-and-its-workers-per-kind."
+  {:malli/schema [:=> [:cat :seon.host/fn :seon.host/chan] :seon.host/thread]}
+  [pull lines]
+  (doto (Thread. ^Runnable
+                 (fn []
+                   (let [tail (java.io.ByteArrayOutputStream.)]
+                     (loop []
+                       (let [b (pull)]
+                         (cond (nil? b) (when (or (zero? (.size tail)) (a/>!! lines {:line (String. (.toByteArray tail) "UTF-8")}))
+                                          (a/>!! lines {:end true}))
+                               (contract/error? b) (a/>!! lines {:error b})
+                               (put-lines! b tail lines) (recur))))))
+                 "seon-fx-stream")
+    (.setDaemon true) (.start)))
+
+(defn- stream-out
+  "The step's outputs for stream messages ms: each to web's :streams in-port (Flow's dynamic route [pid in]; the web proc
+  declares the port, and a graph without it drops them, reported as undeliverable), none when ms is empty."
+  {:malli/schema [:=> [:cat [:sequential :map]] [:maybe :map]]}
+  [ms]
+  (when (seq ms) {[:web :streams] (vec ms)}))
+
+(defn stream-step
+  "A streaming worker's step on one item of :lines. {:line s}: the kind's step folds it into the call's state, and the
+  messages it answers leave at once. {:end true} or {:error e}: the call's outcome (its final of the state, or the error),
+  the messages that end every id still open, and the owner's :done, once, as a perform's outcome is given. A defect in the
+  step or the final is that outcome (the entrant boundary of `worker-proc`), and the lines after it are read and dropped
+  until the end, so the reader never waits on a worker that stopped reading. See docs/flow.md#effects-one-owner-and-its-workers-per-kind."
+  {:malli/schema [:=> [:cat :map :map] [:tuple :map [:maybe :map]]]}
+  [st m]
+  (let [{:keys [s step final close dead]} (:call st)
+        defect (fn [e] (error #'seon.fx/stream-step :seon.fx/defect (step/error-msg e) {}))]
+    (if (:line m)
+      (if dead
+        [st nil]
+        (try (let [[s' ms] (step s (:line m))] [(assoc-in st [:call :s] s') (stream-out ms)])
+             (catch Throwable e [(assoc-in st [:call :dead] (defect e)) nil])))
+      (let [r (cond dead dead
+                    (:error m) (:error m)
+                    :else (try (final s) (catch Throwable e (defect e))))
+            ends (try (close s) (catch Throwable e (defect e)))
+            done (done-of (get-in st [:call :m]) r (get-in st [:call :t0]) (profile/now-ns))]
+        [(-> st (dissoc :call) (assoc ::flow/input-filter (constantly true)) (update :n inc))
+         (merge {[(:owner st) :done] [done]} (stream-out (when (sequential? ends) ends)))]))))
+
 (defn worker-proc
   "One performer of an effect kind: takes a work item from its owner's shared channel,
   performs it with the kind's Var, and gives the owner the outcome (with its timing). A batch
@@ -1264,7 +1339,8 @@
   item opens again. A kind with :close is told when its owner's queue has emptied ({:idle true}, no
   outcome): (close handle) lets go of what the handle holds outside the process and answers its
   facts (docs/vector.md#the-model), kept in the ping as :closed; the handle stays and a later item
-  uses it again. The entrant boundary for a defect in the perform Var: the defect is the
+  uses it again. A perform may answer {:stream {:pull :init :step :final :close}} in place of its
+  outcome (a model call that streams): see `read-lines!` and `stream-step`; the worker keeps its slot until the stream ends. The entrant boundary for a defect in the perform Var: the defect is the
   outcome, as an error map, so its asker is always answered."
   {:malli/schema :seon.step/step-fn}
   ([] {:params {:perform "the kind's perform Var" :open "the Var that makes the kind's host object from :ctx (nil: none)"
@@ -1278,12 +1354,14 @@
        ;; :open?: it holds its kind's host object (a model's foreign threads run while it does)
        :ping-map-fn (fn [st] (-> (select-keys st [:n :closed]) (assoc :open? (some? (:handle st)))
                                    (cond-> (:facts (:handle st)) (assoc :host @(:facts (:handle st))))))})
-  ([args] {:perform (:perform args) :open (:open args) :close (:close args) :kind (:kind args) :ctx (:ctx args) :n 0
-           :owner (:owner args) ::flow/in-ports {:work (:work args)}})
+  ([args] (let [lines (a/chan)]
+            {:perform (:perform args) :open (:open args) :close (:close args) :kind (:kind args) :ctx (:ctx args) :n 0
+             :owner (:owner args) :lines lines ::flow/in-ports {:work (:work args) :lines lines}}))
   ([st _] st)
-  ([st _ m]
+  ([st in m]
    (cond
      (nil? m) [st nil]
+     (= :lines in) (stream-step st m)
      (:idle m) [(cond-> st (and (:close st) (:handle st)) (assoc :closed ((:close st) (:handle st)))) nil]
      :else
      (let [ms (or (:batch m) [m])
@@ -1301,28 +1379,29 @@
                   (repeat (count ms) (error #'seon.fx/worker-proc :seon.fx/defect (str "the batch perform answered " (count rs) " outcomes for " (count ms) " requests") {})))
            st (cond-> st @hv (assoc :handle @hv))
            t1 (profile/now-ns)
-           done (mapv (fn [m r]
-                        (cond-> {:dest (:dest m) :request m :budget-key (:budget-key m) :est (:est m 0)
-                                 :outcome (cond-> (assoc r :seon.fx/queue-us (quot (- (:taken-ns m) (:in-ns m)) 1000)
-                                                         :seon.fx/us (quot (- t1 t0) 1000))
-                                            ;; when it failed, as its asker records it (seon.error/asked-tx)
-                                            (contract/error? r) (assoc :seon.fx/at-ms (System/currentTimeMillis)))}
-                          (:cost r) (assoc :cost (:cost r))))
-                      ms rs)]
-       [(update st :n + (count ms)) {[(:owner st) :done] [(if (:batch m) {:batch done} (first done))]}]))))
+           done (mapv #(done-of %1 %2 t0 t1) ms rs)]
+       (if-let [sm (and (not (:batch m)) (:stream (first rs)))]
+         ;; a streaming perform: the call is read a line at a time on :lines until it ends, and the worker reads nothing else meanwhile
+         (do (read-lines! (:pull sm) (:lines st))
+             [(assoc st :call (assoc (select-keys sm [:step :final :close]) :m m :s (:init sm) :t0 t0)
+                     ::flow/input-filter #(= % :lines))
+              nil])
+         [(update st :n + (count ms)) {[(:owner st) :done] [(if (:batch m) {:batch done} (first done))]}])))))
 
 (defn model
   "The model call (seon.model/complete) under the request's provider (the agent resolves it at its
   turn, seon.config/provider-at: it names the API key's environment variable, never the key; root
   alone reads it, with the run's model), else root's boot provider (:ctx). Answers
-  {:value completion :cost tokens} or the provider error."
+  {:value completion :cost tokens} or the provider error; for a request naming its model call (:call), {:stream ...} (seon.model/complete), whose final answers that."
   {:malli/schema [:=> [:cat :map] :map]}
   [{:keys [req ctx]}]
   (let [p (or (:provider req) (:provider ctx))
-        c (model/complete p (dissoc req :provider))]
-    (cond (contract/error? c) c
-          (and (:prompt-tokens c) (:completion-tokens c)) {:value c :cost (+ (:prompt-tokens c) (:completion-tokens c))}
-          :else {:value c})))
+        c (model/complete p (dissoc req :provider))
+        outcome (fn [c] (cond (contract/error? c) c
+                              (and (:prompt-tokens c) (:completion-tokens c)) {:value c :cost (+ (:prompt-tokens c) (:completion-tokens c))}
+                              :else {:value c}))]
+    ;; a stream's completion is shaped when it ends, as a whole reply's is
+    (if (:stream c) (update-in c [:stream :final] #(comp outcome %)) (outcome c))))
 
 (defn procs
   "The owner and worker procs of every kind, for the root graph. Any proc reaches an owner
