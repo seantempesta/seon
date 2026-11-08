@@ -249,4 +249,9 @@ Proofs, red first: a new eval in a turn of 10 and of 100 evals is one append of 
   :seon.task/proofs #{seon.render-cost-test/a-new-eval-sends-one-append-and-one-edit
                       seon.render-test/a-turns-evals-are-its-list
                       seon.ctx.wire-test/a-turn-as-a-list-reads-the-same}}
+ {:seon.task/name "a-pages-first-agent-shows-live"
+  :seon.task/plan "Seen twice on demo roots (2026-11-08, once with the feed plain on 13391, once deflated on 13461): on a fresh root, the home page a person sends their first message from does not show the agent it starts until the page is reloaded; a second message's agent and reply show live (5 patch events applied, no reload). So the feed works and the first agent's arrival is not patched onto a page that had no agents: likely the home view's agents list is drawn as 'No agents yet' text, not as an empty list a new agent's unit is appended into (seon.render.proc/step-units appends only into a container the page has). What correct looks like: the first agent appears live like every later one. Find the cause before fixing: read the home view's units before and after the first agent (seon.render.proc), and whether an append targets a container the page lacks.
+
+Proofs, red first: a home page with no agents, patched by the first agent's arrival, shows it (the patch places it in a container the page holds)."
+  :seon.task/proofs #{seon.render-test/a-home-pages-first-agent-is-patched-in}}
 ]
