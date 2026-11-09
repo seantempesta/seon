@@ -497,25 +497,29 @@
             [_ _] (step #'root/api-proc st :from-writer {:dest {:rid rid} :r {:ok true}})]
         (is (= {:ok true} @p))))))
 
-(deftest an-end-closed-on-a-live-pid-is-a-stall-that-answers-its-waiters
-  ;; an agent whose end closed with its pid not yet reaped waits under ::dying for the exit; when no
-  ;; exit comes the stall check (the same bound as an eval's) records it as the agent's problem and
-  ;; answers every request it held, instead of parking them for good
-  (let [p (promise)
+(deftest an-end-closed-on-a-live-pid-ends-the-agent-and-answers-its-waiter
+  ;; an agent whose end closed can never answer root again: root ends it at once (the kill its :kill
+  ;; makes), and its exit, which comes, answers the requests it held through ::dying. No bound is
+  ;; reached and no stall timer is armed. The pid is a real child, alive for 20 s unless killed.
+  (let [pid (seon.lib/fork! {:refused (fn [n] {:refused n}) :parent identity
+                        :child (fn [] (Thread/sleep 20000) (seon.lib/c-exit 0))})
+        p (promise)
         st (#'root/api-proc {:boot "b1" :ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
-                             :view {:agents {:a1 {:status :busy :pid 4242 :branch :b1}}} :graph (promise)
+                             :view {:agents {:a1 {:status :busy :pid pid :branch :b1}}} :graph (promise)
                              :system (doto (promise) (deliver {:procs {} :conns []}))})
-        st (-> st (assoc :stall-ms 1000) (assoc-in [:agents :a1] {:branch :b1}))
+        st (-> st (assoc-in [:agents :a1] {:branch :b1}) (assoc :writer-closed true))
         [st rid] (#'root/pend st p :eval :a1)
-        st (#'root/end-agent st (volatile! {}) {:agent :a1 :pid 4242 :inflight [rid]})
-        quiet (if (realized? p) :answered :waiting)
-        st (assoc-in st [:seon.root/dying 4242 3] 0)
-        st' (#'root/back-op st (volatile! {}) {:op :stall-check})
-        answer (if (realized? p) @p :waiting)]
-    (is (= :waiting quiet) "while its exit is awaited the asker waits")
-    (is (= [:seon.agent/died :a1] ((juxt :seon.error/type :agent) answer)) (pr-str answer))
-    (is (re-find #"has not exited" (:seon.error/message answer)))
-    (is (empty? (:seon.root/dying st')) "and nothing is parked")))
+        st (#'root/end-agent st (volatile! {}) {:agent :a1 :pid pid :inflight [rid]})
+        status (seon.lib/wait-status pid)]
+    (is (not= {:exit 0} status) (str "ended by root, not left to run out: " (pr-str status)))
+    (is (not (realized? p)) "its waiter is answered at its exit, not before")
+    (let [st' (#'root/back-op st (volatile! {}) {:ev :exit :pid pid :status status})]
+      (is (realized? p))
+      (when (realized? p)
+        (is (= [:seon.agent/died :a1] ((juxt :seon.error/type :agent) @p)) (pr-str @p))
+        (is (re-find #"ended by root" (:seon.error/message @p))))
+      (is (empty? (:seon.root/dying st')) "nothing is parked")
+      (is (nil? (:seon.root/stall-due st')) "and no stall timer was armed"))))
 
 (deftest root-records-what-it-observes-of-its-agents
   ;; what root observes of an agent is facts on the
