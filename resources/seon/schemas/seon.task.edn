@@ -18,6 +18,8 @@
                     ;; the model that answers its turns: a test's scripted reply or no provider (docs/config.md#the-resolver), read by seon.config/provider-at
                     [:seon.config.ai/provider {:optional true} :seon.config.ai/provider]
                     [:seon.config.ai/script {:optional true} :seon.config.ai/script]
+                    ;; what a first-move pass may spend before it scores this task (my.root/first-moves!)
+                    [:seon.config.ai/judge-pass-usd {:optional true} :seon.config.ai/judge-pass-usd]
                     [:seon.config.merge/max-conflicts {:optional true} nat-int?]
                     [:seon.config.merge/max-merge-turns {:optional true} nat-int?]
                     ;; the relevance at which a search shows an item (seon.ctx.search/search)

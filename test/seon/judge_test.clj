@@ -76,17 +76,18 @@
     (is (= [:seon.judge/cost-unknown [false] true [true] 0.0 1] (:value r)) (pr-str r))))
 
 (deftest a-pass-stops-at-its-bound
-  ;; at :seon.config.ai/judge-pass-usd the pass makes no further call and writes what it left.
-  ;; The bound is 0.0 in the shared root's process for this pass alone: it holds main's config with that
-  ;; entry changed (seon.program/hold-config! of a db-with, docs/config.md#a-process-holds-its-branchs-config),
-  ;; and main's again after; a root of its own (--set) was a boot a shard for this one test
+  ;; at :seon.config.ai/judge-pass-usd the pass makes no further call and writes what it left. The bound is
+  ;; the task's own setting (its :seon.task/config, which the pass resolves first: seon.config/resolve-in), 0.0, so
+  ;; the shard's shared root and its config are untouched (docs/config.md#the-resolver)
   (let [names (volatile! nil)
+        ;; the pass runs in root, named only in the code sent there: its reach edge, so a change to it reruns this
+        ;; (a stopgap until a test's digest reads what it ran: task seon.program/a-tests-digest-reads-what-it-ran)
+        _ 'my.root/first-moves!
         [r] (at/in-agent (fn [{:keys [task] :as n}]
                            (vreset! names n)
                            [{:op :eval :agent "root"
                              :code (str "(let [n0 (count (datahike.api/datoms @(:conn sys) :aevt :seon.judge/stopped))"
-                                        " _ (seon.program/hold-config! (datahike.api/db-with @(:conn sys) [{:config/key :seon.config.ai/judge-pass-usd :config/form \"0.0\"}]))"
-                                        " a (try (my.root/first-moves! sys [" (pr-str task) "]) (finally (seon.program/hold-config! @(:conn sys))))]"
-                                        " [(:rows a) (:stopped a) (- (count (datahike.api/datoms @(:conn sys) :aevt :seon.judge/stopped)) n0) (seon.config/value :seon.config.ai/judge-pass-usd)])")}]))]
-    (is (= [[] {:usd 0.0 :bound 0.0 :left [(:task @names)]} 1] (pop (:value r))) (pr-str r))
-    (is (not= 0.0 (peek (:value r))) "and root holds main's bound again")))
+                                        " a (my.root/first-moves! sys [" (pr-str task) "])]"
+                                        " [(:rows a) (:stopped a) (- (count (datahike.api/datoms @(:conn sys) :aevt :seon.judge/stopped)) n0)])")}])
+                         {:config {:seon.config.ai/judge-pass-usd 0.0}})]
+    (is (= [[] {:usd 0.0 :bound 0.0 :left [(:task @names)]} 1] (:value r)) (pr-str r))))
